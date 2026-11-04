@@ -1117,6 +1117,21 @@ async fn 等接回來的夥伴最多先留_20_封_超過的退回() {
 }
 
 #[tokio::test]
+async fn 轉交失敗通知分清楚兩種_沒轉交_對方收到了但回覆被內容過濾擋下() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    h.core.on_fail(&uid(1), "Your previous response was blocked by content safety filters").await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("收到信了，但它的回覆被內容過濾擋下") && !b.contains("失敗") && !b.contains("處理了")), "只能確定收到，不說處理了：{notes:?}");
+    let mut g = harness(&[("T-乙", "idle")]).await;
+    g.fr.put(mail(2, json!({})));
+    g.core.pull("test", T0).await;
+    g.core.on_fail(&uid(2), "找不到收件人").await;
+    assert!(notice_bodies(&g).iter().any(|b| b.contains("轉交給 T-乙 失敗：找不到收件人")), "一般失敗照舊");
+}
+
+#[tokio::test]
 async fn 延後期間對方回覆了_不寄通知() {
     let mut h = harness(&[("T-乙", "busy")]).await;
     h.forward(mail(1, json!({})), T0).await;

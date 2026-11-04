@@ -14,11 +14,32 @@ const WORKER_FAIL_WARN_AT: u32 = 3;
 const WORKER_FAIL_WARN_EVERY: u32 = 10;
 
 /// 不寫 @：不點名任何人，通知不會指定叫醒誰。逾時只知道沒等到回報，信可能已經到了，說法不能講死
-fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool) -> String {
+fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool) -> String {
     let name = target.replace('@', "");
-    let what = if timed_out { format!("可能沒有轉交給 {name}。") } else { format!("沒有轉交給 {name}，對方還沒看到。") };
+    let what = if reply_blocked {
+        format!("{name} 收到了，但它的回覆被內容過濾擋下，沒有回到群組。")
+    } else if timed_out {
+        format!("可能沒有轉交給 {name}。")
+    } else {
+        format!("沒有轉交給 {name}，對方還沒看到。")
+    };
     let more = if skipped > 0 { format!("這段時間另有 {skipped} 則情況相同。") } else { String::new() };
     format!("{ROOM_NOTICE_HEAD}{seq} {what}{more}需要對方處理請重新點名，或請對方讀群組。")
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+
+    #[test]
+    fn 群組失敗通知三種說法_沒轉交_可能沒轉交_收到了但回覆被擋下() {
+        let a = room_notice_text(5, "@甲", 0, false, false);
+        assert!(a.contains("沒有轉交給 甲，對方還沒看到") && !a.contains('@'), "{a}");
+        assert!(room_notice_text(5, "甲", 0, true, false).contains("可能沒有轉交給 甲"));
+        let c = room_notice_text(5, "甲", 2, false, true);
+        assert!(c.contains("甲 收到了，但它的回覆被內容過濾擋下，沒有回到群組") && !c.contains("對方還沒看到") && !c.contains("沒有轉交"), "{c}");
+        assert!(c.contains("另有 2 則情況相同"));
+    }
 }
 
 impl Core {
@@ -44,7 +65,7 @@ impl Core {
     }
 
     /// 群組訊息轉交失敗或逾時：貼一則說明到群組，不經收發室。通知本身失敗就不再通知；同一個收件視窗有冷卻
-    pub(super) async fn room_forward_failed(&mut self, id: &str, kind: &str, timed_out: bool) {
+    pub(super) async fn room_forward_failed(&mut self, id: &str, kind: &str, timed_out: bool, why: &str) {
         let Some(p) = self.idx(id).map(|i| self.pending[i].clone()) else { return };
         let Some(room) = p.room else { return };
         self.count_forward_fail(kind, id, &p.target);
@@ -64,7 +85,7 @@ impl Core {
             Some((_, n)) => *n,
             None => 0,
         };
-        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out)).await;
+        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why))).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
             self.room_fail_notices.insert(key, (now, 0));
