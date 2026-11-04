@@ -37,6 +37,7 @@ export const transport = {
   termEnvNotice: () => invoke('term_env_notice'),            // 共用終端服務開著、而且使用者環境變數裡有看起來像金鑰的變數時回一句話（只含變數名字），否則 null（只在電腦版）
   partnerPermissionPrompt: name => invoke('partner_permission_prompt', { name }),   // { name, text, hash, complete }
   partnerPermissionAnswer: (name, hash, allow) => invoke('partner_permission_answer', { name, hash, allow }),
+  autoResumeStatus: () => invoke('auto_resume_status'),      // 電腦重開後自動接回的結果（#767）；沒有就是 null
   partnerNotices: () => invoke('partner_notices'),           // 夥伴卡住的提醒：[{ name, code }]（只有視窗名與固定代號）
   termList: () => invoke('term_list'),                       // 這次由 ASN 開啟的終端：[{ id, profile, pid, started_ms, cwd }]（只在電腦版）
   termStatus: req => invoke('term_status', { req }),         // { id } → { state, prompt? }；等你回答時帶 prompt

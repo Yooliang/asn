@@ -50,6 +50,8 @@ pub struct BridgeSettings {
     pub allow_remote_launch: bool,
     /// 沒指定收件視窗的信交給哪個視窗；空＝交給本人（ASN 視窗）。那個視窗不在線時退回交給本人
     pub unaddressed_to: String,
+    /// 使用者關掉了「電腦重開後自動接回夥伴」（#767）。預設是開的，所以記「關」
+    pub auto_resume_off: bool,
 }
 
 pub fn settings_path(data_dir: &Path) -> PathBuf {
@@ -63,10 +65,10 @@ fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string() }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off") }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -316,6 +318,8 @@ pub struct Status {
     pub takeover_allowed: bool,
     /// 設定：允許我的其他設備替這台開新視窗
     pub remote_launch: bool,
+    /// 設定：電腦重開後自動接回夥伴
+    pub auto_resume: bool,
     /// 設定：沒指定收件人的信交給哪個視窗（空＝交給本人）
     pub unaddressed_to: String,
     pub error: Option<String>,
@@ -359,7 +363,7 @@ impl Manager {
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -409,6 +413,14 @@ impl Manager {
     pub fn set_remote_launch(&self, on: bool) -> Result<Status, String> {
         let mut s = read_settings(&self.data_dir);
         s.allow_remote_launch = on;
+        write_settings(&self.data_dir, s)?;
+        Ok(self.status())
+    }
+
+    /// 打開／關閉「電腦重開後自動接回夥伴」（#767）。下次開機才用到
+    pub fn set_auto_resume(&self, on: bool) -> Result<Status, String> {
+        let mut s = read_settings(&self.data_dir);
+        s.auto_resume_off = !on;
         write_settings(&self.data_dir, s)?;
         Ok(self.status())
     }

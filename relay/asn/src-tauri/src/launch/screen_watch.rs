@@ -30,7 +30,7 @@ const MINUTE_MS: u64 = 60_000;
 /// 讀失敗的退避上限
 const MAX_BACKOFF_MS: u64 = 300_000;
 /// 空記憶體低於這個值就暫停
-const PAUSE_BELOW_BYTES: u64 = 3 * 1024 * 1024 * 1024;
+pub(super) const PAUSE_BELOW_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 /// 多久寫一行開銷紀錄
 const REPORT_EVERY_MS: u64 = 600_000;
 /// 還沒有 session 檔的視窗，第一次看到後多久內還讀畫面：信任提示、略過權限警告、登入都出現在這段時間，之後就不再花這個開銷
