@@ -24,6 +24,8 @@ const BACKOFF_MAX_MS: i64 = 6 * 60 * 60_000;
 const KEEP_MS: i64 = 60 * 60_000;
 const HTTP_TIMEOUT_SECS: u64 = 20;
 const AGY_TIMEOUT_SECS: u64 = 90;
+/// 空記憶體低於這個就不開 agy（跟其他會開程序的背景工作同一條線，見 launch/screen_watch.rs 的 PAUSE_BELOW_BYTES）
+const AGY_PAUSE_BELOW_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 /// MiniMax 帳號最多幾個（回報總筆數有上限）
 pub const MAX_MINIMAX: usize = 2;
 const GROK_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
@@ -259,23 +261,52 @@ async fn read_minimax(key: &str, now_ms: i64) -> Result<Vec<Value>, Failure> {
 async fn read_agy(home: &Path, email: &str, now_ms: i64) -> Result<(), Failure> {
     let bin = crate::agent_tools::resolve_binary("agy").ok_or(Failure::Other("找不到 agy".into()))?;
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let run = tokio::process::Command::new(bin)
-        .args(["-p", "/quota", "--output-format", "json", "--log-file", null])
-        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .no_window()
-        .output();
-    let out = tokio::time::timeout(std::time::Duration::from_secs(AGY_TIMEOUT_SECS), run)
-        .await
-        .map_err(|_| Failure::Other("逾時".into()))?
-        .map_err(|_| Failure::Other("無法執行".into()))?;
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(["-p", "/quota", "--output-format", "json", "--log-file", null]).env("AGY_CLI_DISABLE_AUTO_UPDATE", "true");
+    let out = run_with_timeout(cmd, std::time::Duration::from_secs(AGY_TIMEOUT_SECS)).await?;
     if !out.status.success() {
         return Err(Failure::Other("結束碼不是 0".into()));
     }
     let line = agy_statusline(&String::from_utf8_lossy(&out.stdout), email).ok_or(Failure::Other("沒有回傳額度資料".into()))?;
     let reading = crate::gemini_quota::parse_statusline(&line, now_ms).ok_or(Failure::Other("沒有回傳額度資料".into()))?;
     crate::gemini_quota::record(home, &reading, now_ms).map(|_| ()).map_err(|_| Failure::Other("寫入失敗".into()))
+}
+
+/// 跑外部程式，逾時就收掉自己開的這一棵。`kill_on_drop` 只收得到直接的程序，
+/// `resolve_binary` 可能回包裝腳本（npm 的 `.cmd`），底下還有子程序，所以要趁它還在時用 taskkill /T。
+async fn run_with_timeout(mut cmd: tokio::process::Command, limit: std::time::Duration) -> Result<std::process::Output, Failure> {
+    let child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .no_window()
+        .spawn()
+        .map_err(|_| Failure::Other("無法執行".into()))?;
+    let pid = child.id();
+    let wait = child.wait_with_output();
+    tokio::pin!(wait);
+    match tokio::time::timeout(limit, &mut wait).await {
+        Ok(r) => r.map_err(|_| Failure::Other("無法執行".into())),
+        Err(_) => {
+            kill_tree(pid).await;
+            Err(Failure::Other("逾時".into()))
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn kill_tree(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    let pid = pid.to_string();
+    let _ = tokio::process::Command::new("taskkill").no_window().args(["/PID", &pid, "/T", "/F"]).output().await;
+}
+#[cfg(not(windows))]
+async fn kill_tree(_pid: Option<u32>) {}
+
+/// 這一輪要不要因為空記憶體不夠跳過 agy。讀不到就照跑，跟其他背景工作一樣。
+fn agy_paused(free_bytes: Option<u64>) -> bool {
+    free_bytes.is_some_and(|b| b < AGY_PAUSE_BELOW_BYTES)
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -381,7 +412,7 @@ fn note(log: &(impl Fn(String) + Sync), gate: &mut Gate, who: &str, f: &Failure,
     }
 }
 
-async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, log: &(impl Fn(String) + Sync)) {
+async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, free_bytes: Option<u64>, log: &(impl Fn(String) + Sync)) {
     let s = load_settings(home);
     store(|st| st.retain(&s));
     if s.grok {
@@ -417,7 +448,8 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, log
             },
         }
     }
-    if s.agy && gates.agy.due(now_ms, None) {
+    // 空記憶體不夠：跳過這一輪，不算失敗，下一分鐘再看
+    if s.agy && !agy_paused(free_bytes) && gates.agy.due(now_ms, None) {
         match agy_email(home) {
             // 還沒開過 agy 視窗，不知道是哪個帳號：不算失敗，下一輪再看
             None => gates.agy.success(now_ms),
@@ -430,10 +462,10 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, log
 }
 
 /// 背景迴圈：每分鐘看一次設定與時間，全關時不連網、不執行任何程式。
-pub async fn run_loop(home: PathBuf, grok_home: PathBuf, log: impl Fn(String) + Sync) {
+pub async fn run_loop(home: PathBuf, grok_home: PathBuf, free_bytes: impl Fn() -> Option<u64>, log: impl Fn(String) + Sync) {
     let mut gates = Gates::default();
     loop {
-        tick(&home, &grok_home, &mut gates, crate::heartbeat::now_ms() as i64, &log).await;
+        tick(&home, &grok_home, &mut gates, crate::heartbeat::now_ms() as i64, free_bytes(), &log).await;
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     }
 }
