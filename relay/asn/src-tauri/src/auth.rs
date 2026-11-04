@@ -517,9 +517,14 @@ pub fn default_store(data_dir: &Path) -> Box<dyn TokenStore> {
 
 // ---------- 登入狀態 ----------
 
+/// 進行中的憑證輪替：背景工作回傳「用哪一把換的」和結果
+type RefreshTask = tokio::task::JoinHandle<(String, Result<Session, AuthFail>)>;
+
 pub struct AuthState {
-    pub store: Box<dyn TokenStore>,
+    pub store: Arc<dyn TokenStore>,
     mem: Mutex<Option<Session>>,
+    /// 同時只換一次：後台會輪替更新憑證，同時換或換到一半放棄，舊憑證都會作廢
+    refresh_task: tokio::sync::Mutex<Option<RefreshTask>>,
     pub cancel: Arc<AtomicBool>,
     busy: AtomicBool,
     /// 因更新憑證被拒絕而清掉登入時呼叫（參數只有狀態碼與錯誤代碼）：正式版接到 ui.log，安裝版的 stderr 看不到
@@ -542,7 +547,7 @@ impl Drop for BusyGuard<'_> {
 
 impl AuthState {
     pub fn new(store: Box<dyn TokenStore>) -> Self {
-        Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
+        Self { store: Arc::from(store), mem: Mutex::new(None), refresh_task: tokio::sync::Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
     }
 
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
@@ -587,30 +592,76 @@ impl AuthState {
 
     /// 取一把可用的存取憑證；快過期就用更新憑證換（後台會輪替更新憑證，換到的新值馬上存回去）
     pub async fn access_token(&self, client: &reqwest::Client, auth_base: &str, anon: &str) -> Result<String, String> {
-        if let Some(s) = self.mem.lock().ok().and_then(|g| g.clone()) {
-            if s.fresh(now_ms(), 60_000) {
-                return Ok(s.access_token);
+        for _ in 0..2 {
+            if let Some(t) = self.fresh_token() {
+                return Ok(t);
+            }
+            let mut slot = self.refresh_task.lock().await;
+            if let Some(t) = self.fresh_token() {
+                return Ok(t); // 等鎖時別人已經換好
+            }
+            if slot.is_none() {
+                let stored = self.store.load()?.ok_or("還沒有登入")?;
+                *slot = Some(self.spawn_refresh(client, auth_base, anon, stored));
+            }
+            // 呼叫端逾時走掉時，手把留在 slot、背景工作繼續，下一個呼叫端接手結果
+            let Some(task) = slot.as_mut() else { continue };
+            let joined = task.await;
+            *slot = None;
+            let (used, res) = joined.map_err(|e| format!("背景工作失敗：{e}"))?;
+            let current = self.store.load()?;
+            match res {
+                Ok(s) => {
+                    match current {
+                        None => return Err("還沒有登入".into()), // 換到一半登出了：不復活
+                        Some(l) if l.refresh_token != s.refresh_token => continue, // 換到一半重新登入：用新的
+                        Some(_) => {}
+                    }
+                    let fresh = s.fresh(now_ms(), 60_000);
+                    let t = s.access_token.clone();
+                    self.set_session(s)?;
+                    if fresh {
+                        return Ok(t);
+                    }
+                }
+                Err(AuthFail::Rejected(_, detail)) => {
+                    // 被拒的是舊憑證、登入已經換過：這次拒絕不算數
+                    if current.is_some_and(|l| l.refresh_token == used) {
+                        if let Some(note) = &self.on_signout {
+                            note(&detail);
+                        }
+                        let _ = self.sign_out();
+                        return Err("登入已過期，請重新登入".into());
+                    }
+                }
+                Err(AuthFail::Transient(m)) => return Err(m),
             }
         }
-        let stored = self.store.load()?.ok_or("還沒有登入")?;
-        match refresh(client, auth_base, anon, &stored.refresh_token).await {
-            Ok(mut s) => {
+        Err("登入狀態剛變更，請再試一次".into())
+    }
+
+    fn fresh_token(&self) -> Option<String> {
+        let s = self.mem.lock().ok().and_then(|g| g.clone())?;
+        s.fresh(now_ms(), 60_000).then_some(s.access_token)
+    }
+
+    /// 在背景換憑證：新憑證一拿到就存檔，呼叫端走掉或程式接著結束都不會弄丟
+    fn spawn_refresh(&self, client: &reqwest::Client, auth_base: &str, anon: &str, stored: StoredLogin) -> RefreshTask {
+        let (client, auth_base, anon, store) = (client.clone(), auth_base.to_string(), anon.to_string(), self.store.clone());
+        tokio::spawn(async move {
+            let used = stored.refresh_token;
+            let mut res = refresh(&client, &auth_base, &anon, &used).await;
+            if let Ok(s) = &mut res {
                 if s.email.is_none() {
-                    s.email = stored.email.clone();
+                    s.email = stored.email;
                 }
-                let t = s.access_token.clone();
-                self.set_session(s)?;
-                Ok(t)
-            }
-            Err(AuthFail::Rejected(_, detail)) => {
-                if let Some(note) = &self.on_signout {
-                    note(&detail);
+                // 登入狀態已經變了（登出、重新登入）就不蓋
+                if matches!(store.load(), Ok(Some(l)) if l.refresh_token == used) {
+                    let _ = store.save(&StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() });
                 }
-                let _ = self.sign_out();
-                Err("登入已過期，請重新登入".into())
             }
-            Err(AuthFail::Transient(m)) => Err(m),
-        }
+            (used, res)
+        })
     }
 
     /// 完整登入流程。open＝開系統瀏覽器（失敗就連同網址一起回報，讓人自己貼）。
@@ -855,6 +906,11 @@ mod tests {
 
     /// 假的登入服務：回固定的 HTTP 回應（只連 127.0.0.1），並把請求內容記下來
     fn fake_auth_server(status: &str, body: &'static str) -> (u16, std::thread::JoinHandle<String>) {
+        fake_auth_server_after(0, status, body)
+    }
+
+    /// 收到請求後等 delay_ms 才回：測呼叫端中途走掉
+    fn fake_auth_server_after(delay_ms: u64, status: &str, body: &'static str) -> (u16, std::thread::JoinHandle<String>) {
         let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = l.local_addr().unwrap().port();
         let status = status.to_string();
@@ -880,6 +936,7 @@ mod tests {
                     }
                 }
             }
+            std::thread::sleep(Duration::from_millis(delay_ms));
             write!(s, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             String::from_utf8_lossy(&buf[..n]).into_owned()
         });
@@ -937,6 +994,76 @@ mod tests {
         let _ = h.join();
         assert!(e.contains("重新登入"));
         assert!(!a.status().signed_in, "被拒絕就清掉");
+    }
+
+    const RENEWED: &str = r#"{"access_token":"AT2","refresh_token":"RT2","expires_in":3600}"#;
+
+    fn signed_in_with(rt: &str) -> AuthState {
+        let store = MemStore::default();
+        store.save(&StoredLogin { refresh_token: rt.into(), email: None }).unwrap();
+        AuthState::new(Box::new(store))
+    }
+
+    /// 呼叫一次、50 毫秒就放棄（像 signing_token 的逾時）
+    async fn give_up_early(a: &AuthState, port: u16) {
+        let c = reqwest::Client::new();
+        let base = format!("http://127.0.0.1:{port}");
+        assert!(tokio::time::timeout(Duration::from_millis(50), a.access_token(&c, &base, "A")).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn 同時要憑證_只換一次() {
+        let a = signed_in_with("RT");
+        let (p, h) = fake_auth_server_after(100, "200 OK", RENEWED); // 只收一個請求：第二個會等到逾時而失敗
+        let (c, base) = (reqwest::Client::new(), format!("http://127.0.0.1:{p}"));
+        let got = tokio::join!(a.access_token(&c, &base, "A"), a.access_token(&c, &base, "A"), a.access_token(&c, &base, "A"));
+        assert_eq!((got.0.unwrap(), got.1.unwrap(), got.2.unwrap()), ("AT2".to_string(), "AT2".to_string(), "AT2".to_string()));
+        assert!(h.join().unwrap().contains("\"refresh_token\":\"RT\""));
+    }
+
+    #[tokio::test]
+    async fn 呼叫端逾時走掉_新憑證不會弄丟() {
+        let a = signed_in_with("RT");
+        let (p, h) = fake_auth_server_after(200, "200 OK", RENEWED);
+        give_up_early(&a, p).await;
+        h.join().unwrap();
+        for _ in 0..100 {
+            if a.store.load().unwrap().unwrap().refresh_token == "RT2" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(a.store.load().unwrap().unwrap().refresh_token, "RT2", "沒有人再呼叫也已存檔");
+        // 伺服器只收一個請求：下一次呼叫接手結果，不再送
+        let t = a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap();
+        assert_eq!(t, "AT2");
+    }
+
+    #[tokio::test]
+    async fn 換到一半登出_不會復活() {
+        let a = signed_in_with("RT");
+        let (p, h) = fake_auth_server_after(200, "200 OK", RENEWED);
+        give_up_early(&a, p).await;
+        a.sign_out().unwrap();
+        h.join().unwrap();
+        let e = a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap_err();
+        assert_eq!(e, "還沒有登入");
+        assert!(a.store.load().unwrap().is_none());
+        assert!(!a.status().signed_in);
+    }
+
+    #[tokio::test]
+    async fn 換到一半重新登入_舊憑證被拒不登出() {
+        let a = signed_in_with("OLD");
+        let (p, h) = fake_auth_server_after(200, "400 Bad Request", r#"{"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token"}"#);
+        give_up_early(&a, p).await;
+        a.store.save(&StoredLogin { refresh_token: "NEW".into(), email: None }).unwrap();
+        h.join().unwrap();
+        let (p2, h2) = fake_auth_server("200 OK", RENEWED);
+        let t = a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p2}"), "A").await.unwrap();
+        assert_eq!(t, "AT2");
+        assert!(h2.join().unwrap().contains("\"refresh_token\":\"NEW\""));
+        assert_eq!(a.store.load().unwrap().unwrap().refresh_token, "RT2");
     }
 
     #[tokio::test]
