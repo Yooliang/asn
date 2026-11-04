@@ -284,6 +284,15 @@ enum Awaited {
 }
 
 /// 外掛狀態檔對「控制用途」的判斷（不同於名單顯示的 30 分鐘新鮮度）
+/// 讀一次狀態檔的結果
+enum StatusRead {
+    Live(ModLive),
+    /// 檔案在，但讀不到或內容不是完整的 JSON：外掛可能正在寫
+    Torn,
+    /// 沒有外掛：沒檔案、內容不對、外掛已結束，或過期且程序不在
+    Gone,
+}
+
 struct ModLive {
     status: Value,
     /// 狀態檔 `at` 在 30 分鐘內
@@ -959,26 +968,43 @@ impl PartnerOps {
     /// 控制用途的外掛判斷：狀態檔存在、完整、sessionId 相符、沒標結束；新鮮度不設限，
     /// 但過期的必須該視窗的程序還活著（pid 為 0 或已死＝不算）。
     fn mod_live(&self, sid: &str, pid: u32) -> Option<ModLive> {
+        match self.read_status(sid, pid) {
+            StatusRead::Live(l) => Some(l),
+            StatusRead::Torn | StatusRead::Gone => None,
+        }
+    }
+
+    /// 讀一次狀態檔就判斷完。「外掛在不在」和「是不是寫到一半」不能分兩次讀：
+    /// 第一次讀到半份、第二次讀到已寫完的完整內容時，會把正常的外掛誤判成沒了（#735）
+    fn read_status(&self, sid: &str, pid: u32) -> StatusRead {
         if !roster::valid_sid(sid) {
-            return None;
+            return StatusRead::Gone;
         }
         let path = self.dirs.status.join(format!("{sid}.json"));
-        if std::fs::metadata(&path).ok()?.len() > 16 * 1024 {
-            return None;
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => return if path.exists() { StatusRead::Torn } else { StatusRead::Gone }, // Windows 上寫入中可能讀不到
+        };
+        if text.len() > 16 * 1024 {
+            return StatusRead::Gone;
         }
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+        let Ok(v) = serde_json::from_str::<Value>(&text) else {
+            return StatusRead::Torn;
+        };
         if v.get("sessionId").and_then(Value::as_str) != Some(sid) {
-            return None;
+            return StatusRead::Gone;
         }
-        let at = v.get("at").and_then(Value::as_u64)?;
+        let Some(at) = v.get("at").and_then(Value::as_u64) else {
+            return StatusRead::Gone;
+        };
         if v.get("detail").and_then(Value::as_str).map(str::trim) == Some(roster::MOD_ENDED_DETAIL) {
-            return None;
+            return StatusRead::Gone;
         }
         let fresh = self.env.now_ms().abs_diff(at) <= roster::MOD_STATUS_MAX_AGE_MS;
         if !fresh && (pid == 0 || !self.env.os().alive(pid)) {
-            return None;
+            return StatusRead::Gone;
         }
-        Some(ModLive { status: v, fresh })
+        StatusRead::Live(ModLive { status: v, fresh })
     }
 
     /// 寫好控制檔後等外掛回報。視窗忙碌時外掛會排隊到閒置才執行，所以最多等 `mod_wait_ms`（預設 10 分鐘）。
@@ -996,12 +1022,13 @@ impl PartnerOps {
         // 一直是半份超過 TORN_READ_GRACE_MS 才算外掛沒了（#472：全套平行跑時這個時間差被放大，誤判成 Lost）
         let mut torn_since: Option<std::time::Instant> = None;
         switch::wait_until(self.env.os(), self.env.mod_wait_ms(), 500, || {
-            let Some(live) = self.mod_live(sid, pid) else {
-                if self.status_torn(sid) && torn_since.get_or_insert_with(std::time::Instant::now).elapsed() < std::time::Duration::from_millis(TORN_READ_GRACE_MS) {
-                    return false;
+            let live = match self.read_status(sid, pid) {
+                StatusRead::Live(l) => l,
+                StatusRead::Torn if torn_since.get_or_insert_with(std::time::Instant::now).elapsed() < std::time::Duration::from_millis(TORN_READ_GRACE_MS) => return false,
+                StatusRead::Torn | StatusRead::Gone => {
+                    res = Some(Awaited::Lost);
+                    return true;
                 }
-                res = Some(Awaited::Lost);
-                return true;
             };
             torn_since = None;
             let st = live.status;
@@ -1027,18 +1054,6 @@ impl PartnerOps {
         // 不論結果都收掉控制檔：之後新視窗的外掛不能再執行一次舊指令
         let _ = std::fs::remove_file(&file);
         res.unwrap_or(Awaited::Timeout)
-    }
-
-    /// 狀態檔看起來是「寫到一半」：檔案在，但內容是空的或不是完整的 JSON（讀檔失敗也算，Windows 上外掛正在寫時可能被鎖住）
-    fn status_torn(&self, sid: &str) -> bool {
-        if !roster::valid_sid(sid) {
-            return false;
-        }
-        let path = self.dirs.status.join(format!("{sid}.json"));
-        match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str::<Value>(&s).is_err(),
-            Err(_) => path.exists(),
-        }
     }
 
     fn write_control(&self, sid: &str, body: &Value) -> bool {
