@@ -32,8 +32,9 @@ export const CLOUD_TEXT = {
   waiting: '等待中…代理照說明做完、連上來後，這裡會顯示已加入。',
   joined: name => `「${name}」已加入。`,
   done: '完成（關掉後看不到金鑰）',
-  clipNote: '複製金鑰後 60 秒會自動清掉剪貼簿：貼完請回到這裡，才清得掉；清掉的是剪貼簿裡當時的內容，中間複製了別的也會被清。',
+  clipNote: '複製金鑰後 60 秒會嘗試自動清掉剪貼簿（不保證清得掉）：貼完請回到這裡，才清得掉；清掉的是剪貼簿裡當時的內容，中間複製了別的也會被清。',
   clipCleared: '已清掉剪貼簿。',
+  clipFail: '沒能清掉剪貼簿，金鑰可能還在裡面。請複製別的內容蓋掉。',
   empty: '還沒有邀請過雲端代理。',
   revoke: '撤銷', revokeSure: '確認撤銷',
   revokeNote: '撤銷後，這個代理的金鑰立刻失效，好友名單上也會消失。',
@@ -74,19 +75,20 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     confirmId: '',
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
+  let loadMsg = ''   // 最近一次讀取失敗留在畫面上的提示（輪詢成功後要消掉，不能一直掛著）
   let epoch = 0   // 離開這一頁就加一：建立途中離開，回來的金鑰不保留（見 create）
 
   const stopClearTimer = () => { if (clearTimerId != null) { timer.clear(clearTimerId); clearTimerId = null } }
 
-  // 清剪貼簿：不讀（讀會跳權限詢問），直接寫成空白；清不掉就算了，畫面上已寫明要留在這個畫面
+  // 清剪貼簿：不讀（讀會跳權限詢問），直接寫成空白。清不掉不能沒聲音：畫面提醒用別的內容蓋掉，並保留狀態，下次回到前景再試一次（計時器觸發的寫入不是使用者手勢，WebView 可能拒絕）
   async function clearClipboard() {
     stopClearTimer()
     if (!copiedKeyText) return
-    copiedKeyText = ''; copiedAt = 0
     try {
       await clip.write('')
+      copiedKeyText = ''; copiedAt = 0
       s.clipNote = CLOUD_TEXT.clipCleared
-    } catch { /* 略過 */ }
+    } catch { s.clipNote = CLOUD_TEXT.clipFail }
   }
 
   async function load() {
@@ -95,7 +97,9 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
       const st = await status()
       s.signedIn = st?.signed_in === true
       s.rows = s.signedIn ? rowsFromList(await api.list(), now()) : []
-    } catch (e) { s.msg = errText(e) } finally { s.loading = false }
+      if (loadMsg && s.msg === loadMsg) s.msg = ''   // 上一輪讀取失敗的提示，這一輪讀成功了就消掉
+      loadMsg = ''
+    } catch (e) { s.msg = loadMsg = errText(e) } finally { s.loading = false }
   }
 
   const openForm = () => { s.msg = ''; s.stage = 'form'; s.name = DEFAULT_NAME }

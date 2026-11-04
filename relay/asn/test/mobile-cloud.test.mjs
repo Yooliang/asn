@@ -80,6 +80,38 @@ test('第一次讀取就失敗：畫面看得到原因，不是一直「讀取�
   assert.match(read('ui/m.html'), /cloudSt\.signedIn === null">\{\{ cloudSt\.msg \|\| CLOUD_TEXT\.loading \}\}/)
 })
 
+test('清剪貼簿失敗不能沒聲音：畫面提醒用別的內容蓋掉，狀態留著，回到前景再試', async () => {
+  let fail = true
+  const written = []
+  let now = 1_000_000
+  const ui = createMobileCloud({
+    api: { list: async () => ({ nodes: [] }), create: async name => ({ id: 't5-new', name, key: KEY, invite: 'x' }) },
+    status: async () => ({ signed_in: true }),
+    clip: { write: async t => { if (t === '' && fail) throw new Error('denied'); written.push(t) } },
+    now: () => now, timer: { set: () => 1, clear: () => {} },
+  })
+  await ui.load(); ui.openForm(); ui.state.name = '小真'; await ui.create(); await ui.copyKey()
+  now += CLIP_CLEAR_MS + 1
+  await ui.clearClipboard()
+  assert.equal(ui.state.clipNote, CLOUD_TEXT.clipFail, '清不掉要講')
+  assert.match(CLOUD_TEXT.clipFail, /金鑰可能還在裡面/)
+  assert.match(CLOUD_TEXT.clipNote, /嘗試/, '說明不保證')
+  fail = false
+  await ui.onVisible()   // 回到前景再試
+  assert.deepEqual(written.filter(t => t === ''), [''], '回到前景又試了一次而且清掉了')
+  assert.equal(ui.state.clipNote, CLOUD_TEXT.clipCleared)
+})
+
+test('輪詢讀取失敗的提示：下一輪讀成功就消掉，不一直掛著', async () => {
+  let bad = true
+  const ui = createMobileCloud({ api: { list: async () => { if (bad) throw new Error('暫時連不上'); return { nodes: [] } } }, status: async () => ({ signed_in: true }), clip: { write: async () => {} } })
+  await ui.load()
+  assert.match(ui.state.msg, /暫時連不上/)
+  bad = false
+  await ui.load()
+  assert.equal(ui.state.msg, '')
+})
+
 test('代理連上來就顯示已加入', async () => {
   const m = make()
   await m.ui.load(); m.ui.openForm(); m.s.name = '小真'
