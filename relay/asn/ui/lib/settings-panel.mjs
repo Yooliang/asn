@@ -367,7 +367,7 @@ export const SettingsPanel = {
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <label class="chk"><input type="checkbox" :checked="st.bridge.autoResume" :disabled="st.bridge.busy" @change="act('bridge-auto-resume', $event.target.checked)" aria-label="電腦重開後自動接回夥伴" /><span>電腦重開後自動接回夥伴</span></label>
-          <small>重開前還開著、由 ASN 開的夥伴，登入 Windows 後會接回原本的對話。它們會照原本的權限重新開始工作，也會開始用額度。關掉就要自己按「喚醒」。</small>
+          <small>重開前還開著、由 ASN 開的夥伴，登入 Windows 後會接回原本的對話。權限和原本相同，收到信就會繼續工作，也會用到額度。關掉就要自己按「喚醒」。</small>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>

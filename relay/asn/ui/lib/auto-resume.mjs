@@ -27,7 +27,7 @@ export function autoResumeNotice(s) {
     case 'done': {
       if (!resumed && !failed.length) return null
       const title = resumed ? `已自動接回 ${resumed} 位夥伴` : '夥伴沒有接回來'
-      const lead = resumed ? ['它們照原本的權限重新開始工作，會開始用額度。', resumedLine(s.resumed)].filter(Boolean).join(NL) : ''
+      const lead = resumed ? ['權限和原本相同，收到信就會繼續工作，也會用到額度。', resumedLine(s.resumed)].filter(Boolean).join(NL) : ''
       const rest = failed.length ? `沒有接回 ${failed.length} 位，給它們的信會先留著，最多 12 小時：\n${failedLines(failed)}` : ''
       return { key: `done:${resumed}:${failed.length}`, title, body: [lead, rest].filter(Boolean).join('\n') }
     }
