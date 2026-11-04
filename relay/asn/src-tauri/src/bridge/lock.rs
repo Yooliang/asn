@@ -23,6 +23,8 @@ const BRIDGE_IMAGES: [&str; 3] = ["node", "asn-bridge", "asn"];
 /// 測試的假舊橋是自己開的 cmd／sleep（名單以外的情況另有測試：測試程序本身、NVIDIA 的路徑都不算）
 #[cfg(test)]
 const BRIDGE_IMAGES: [&str; 5] = ["node", "asn-bridge", "asn", "cmd", "sleep"];
+/// 名稱和該有的對不上時，隔多久重讀一次再下結論（#752）
+const IMAGE_RECHECK_MS: u64 = 50;
 /// mailbox.pid 可能的主人：收發室 worker
 const MAILBOX_IMAGES: [&str; 2] = ["claude", "node"];
 
@@ -47,6 +49,15 @@ impl Holder<'_> {
         let stem = file.strip_suffix(".exe").unwrap_or(&file);
         Some(self.images.contains(&stem))
     }
+    /// 程序剛開、還沒換成自己的名稱時（Linux 的 /proc/<pid>/comm 在執行檔替換的瞬間還是父程序執行緒的名字，#752），
+    /// 名稱會暫時對不上。對不上就重讀一次再下結論：真的是別的程序（編號被回收）重讀後還是對不上，判斷不變；
+    /// 只有「剛開」這種暫時的對不上會被修正。程序已經不在、或一開始就對得上，不重讀。
+    fn rechecked(mut self, reread: impl FnOnce() -> Option<String>) -> Self {
+        if self.alive && self.image_matches() == Some(false) {
+            self.image = reread();
+        }
+        self
+    }
     /// 算不算有人在收信：有反證才不算。查不到就維持「算」，寧可不接手也不搶別人的
     pub fn counts(&self) -> bool {
         self.alive && !self.started_late() && self.image_matches() != Some(false)
@@ -63,7 +74,11 @@ fn holder_of(work_dir: &Path, pid: u32) -> Holder<'static> {
     } else {
         (pid_file(work_dir), &BRIDGE_IMAGES)
     };
-    Holder { alive: crate::heartbeat::pid_alive(pid), started_ms: crate::heartbeat::process_started_ms(pid), written_ms: modified_ms(&file), image: crate::heartbeat::process_image(pid), images }
+    let h = Holder { alive: crate::heartbeat::pid_alive(pid), started_ms: crate::heartbeat::process_started_ms(pid), written_ms: modified_ms(&file), image: crate::heartbeat::process_image(pid), images };
+    h.rechecked(|| {
+        std::thread::sleep(std::time::Duration::from_millis(IMAGE_RECHECK_MS));
+        crate::heartbeat::process_image(pid)
+    })
 }
 
 /// 正式用的存活判斷（拿鎖、顯示狀態）：見 [`Holder::counts`]
@@ -236,6 +251,52 @@ mod tests {
             let _ = c.wait();
         }
         assert!(bad.is_empty(), "{} 次判錯：{:?}", bad.len(), bad.iter().take(5).collect::<Vec<_>>());
+    }
+
+    fn holder(alive: bool, img: Option<&str>) -> Holder<'static> {
+        Holder { alive, started_ms: Some(1_000), written_ms: Some(2_000), image: img.map(String::from), images: &BRIDGE_IMAGES }
+    }
+
+    #[test]
+    fn 名稱剛開還是父程序的_重讀換成對的名稱就算有人在收信() {
+        let first = holder(true, Some("bridge::lock::t"));
+        assert!(!first.counts(), "沒重讀前會誤判成沒人");
+        let calls = std::cell::Cell::new(0);
+        let r = first.rechecked(|| {
+            calls.set(calls.get() + 1);
+            Some("sleep".into())
+        });
+        assert!(r.counts() && r.may_kill());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn 真的是別的程序_重讀還是別的名稱_仍然不算有人在收信_也不能結束() {
+        let r = holder(true, Some("chrome")).rechecked(|| Some("chrome".into()));
+        assert!(!r.counts());
+        assert!(!r.may_kill());
+        // 重讀時換成另一個不相干的名稱，一樣不算
+        let r = holder(true, Some("bridge::lock::t")).rechecked(|| Some("code".into()));
+        assert!(!r.counts() && !r.may_kill());
+    }
+
+    #[test]
+    fn 一開始就對得上或程序已不在_不重讀() {
+        let calls = std::cell::Cell::new(0);
+        let f = || {
+            calls.set(calls.get() + 1);
+            Some("sleep".to_string())
+        };
+        assert!(holder(true, Some("node")).rechecked(f).counts());
+        assert!(!holder(false, Some("chrome")).rechecked(f).counts());
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn 重讀時查不到名稱_維持原本的保守做法_算有人在收信但不能結束() {
+        let r = holder(true, Some("chrome")).rechecked(|| None);
+        assert!(r.counts(), "查不到就維持算，寧可不接手也不搶別人的");
+        assert!(!r.may_kill(), "查不到絕不動手");
     }
 
     #[test]
