@@ -23,6 +23,7 @@ import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 import { sentMarkName } from './sent-mark.mjs'
 import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
+import { createAckRetry } from './ack-retry.mjs'
 import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from './self-update.mjs'
 import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
@@ -184,10 +185,8 @@ async function sendBack(p, body, fromAgent, expectsReply) {
     return true
   } catch (e) { log(`send back failed id=${p.mail.id}: ${e.message}`); return false }
 }
-async function ackIds(ids) {
-  if (!ids.length) return
-  try { await api('ack', { method: 'POST', body: { ids } }); ids.forEach(i => seen.add(i)) } catch (e) { log(`ack failed: ${e.message}`) }
-}
+const ackRetry = createAckRetry({ post: ids => api('ack', { method: 'POST', body: { ids } }), file: path.join(WORK_DIR, 'ack-retry.json'), log, seen, firstMs: Number(process.env.ASN_ACK_RETRY_MS) || undefined })
+const ackIds = ids => ackRetry.ack(ids)
 
 async function onSent(id) {
   const p = pending.get(id)
@@ -516,7 +515,13 @@ async function pull(why) {
       const dup = []
       for (const m of messages) {
         if (seen.has(m.id)) { dup.push(m.id); continue }
-        if (pending.has(m.id)) continue
+        if (ackRetry.has(m.id)) continue   // ack 失敗等著補：信處理完了，不再轉交
+        if (pending.has(m.id)) {
+          // 已經轉交完、該 ack 了卻還在信箱（待補清單不見了）：補 ack
+          const p = pending.get(m.id)
+          if ((p.state === 'waiting' || p.state === 'notified') && !p.room) dup.push(m.id)
+          continue
+        }
         // 還沒拿到第一份名單：收件視窗在空名單裡一定找不到，不能回「找不到」還 ack；先留在 inbox，名單到了下一輪再處理（和群組一樣）
         if (!rosterOk) continue
         await handleMail(m)
@@ -589,6 +594,7 @@ for (let wait = 2000;;) {
 }
 void pull('startup')
 setInterval(() => void pull('poll'), POLL_MS)
+setInterval(() => void ackRetry.tick(), ackRetry.tickMs)
 
 // ---- 自己更新、自己重啟 ----------------------------------------------------------------------------
 async function selfUpdate() {

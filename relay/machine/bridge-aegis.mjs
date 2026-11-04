@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createCore } from './relay-core.mjs'
+import { createAckRetry } from './ack-retry.mjs'
 import { createLog } from './safe-log.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
 import { splitNudgeAnswer } from './nudge.mjs'
@@ -102,10 +103,8 @@ async function sendBack(m, body, fromAgent) {
     return true
   } catch (e) { log(`send back failed id=${m.id}: ${e.message}`); return false }
 }
-async function ackIds(ids) {
-  if (!ids.length) return
-  try { await api('ack', { method: 'POST', body: { ids } }); ids.forEach(i => seen.add(i)) } catch (e) { log(`ack failed: ${e.message}`) }
-}
+const ackRetry = createAckRetry({ post: ids => api('ack', { method: 'POST', body: { ids } }), file: path.join(WORK_DIR, 'ack-retry.json'), log, seen, firstMs: Number(process.env.ASN_ACK_RETRY_MS) || undefined })
+const ackIds = ids => ackRetry.ack(ids)
 // 回覆寄出成功才 ack；寄失敗就留在 inbox，下次補拉再來
 async function replyAndAck(m, body, fromAgent) {
   if (await sendBack(m, body, fromAgent)) await ackIds([m.id])
@@ -200,6 +199,7 @@ async function pull(why) {
       const dup = []
       for (const m of messages) {
         if (seen.has(m.id)) { dup.push(m.id); continue }
+        if (ackRetry.has(m.id)) continue   // ack 失敗等著補：已經回過了，不再問一次
         if (inflight.has(m.id)) continue
         inflight.add(m.id)
         void handleMail(m).catch(e => log(`handle failed id=${m.id}: ${e.stack ?? e}`)).finally(() => inflight.delete(m.id))
@@ -225,3 +225,4 @@ for (let wait = 2000;;) {
 }
 void pull('startup')
 setInterval(() => void pull('poll'), POLL_MS)
+setInterval(() => void ackRetry.tick(), ackRetry.tickMs)

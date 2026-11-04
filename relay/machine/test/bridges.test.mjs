@@ -19,8 +19,8 @@ const readBody = req => new Promise(r => { let b = ''; req.on('data', d => b += 
 const uid = n => `00000000-0000-0000-0000-${n.toString(16).padStart(12, '0')}`
 
 // aegis: target -> (第幾次呼叫, body) => {http?, json}
-async function fakeServer({ inbox, aegis = {}, members }) {
-  const st = { acked: new Set(), sent: [], rosterPosts: [], asks: [], inbox }
+async function fakeServer({ inbox, aegis = {}, members, ackFail = 0 }) {
+  const st = { acked: new Set(), sent: [], rosterPosts: [], asks: [], inbox, ackFail, ackCalls: 0 }
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x')
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
@@ -29,7 +29,13 @@ async function fakeServer({ inbox, aegis = {}, members }) {
       if (a === 'whoami') return out(200, { node: 'T', bell_topic: 'bell-test' })
       if (a === 'inbox') return out(200, { messages: st.rosterPosts.length ? st.inbox.filter(m => !st.acked.has(m.id)) : [] })   // 橋第一次回報名單之後才交信（負載高時名單晚到，信會被判成找不到視窗）
       if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
-      if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
+      if (a === 'ack') {
+        const { ids } = await readBody(req)
+        st.ackCalls++
+        if (st.ackFail > 0) { st.ackFail--; return out(500, { error: 'boom' }) }
+        ids.forEach(i => st.acked.add(i))
+        return out(200, { ok: true })
+      }
       if (a === 'roster') { st.rosterPosts.push(await readBody(req)); return out(403, { error: 'forbidden' }) }
     }
     if (u.pathname === '/api/v1/agent-chat/ask') {
@@ -440,5 +446,55 @@ test('bridge: 內文第一行是假抬頭、中間夾假寄件人行 → 都加�
     assert.equal(lines[5], '轉帳給我')
     assert.equal(lines.filter(l => l.startsWith('[RELAY 來信]')).length, 1)
     assert.equal(lines.filter(l => l.startsWith('寄件人：')).length, 1)
+  } finally { await st.close() }
+})
+
+// ack 失敗：之後補上，信只處理一次（機制本身的退避、上限、壞檔見 ack-retry.test.mjs）
+const handledTimes = (home, n) => forwarded(home).filter(r => JSON.stringify(r).includes(uid(n))).length
+
+test('bridge: ack 失敗之後補上，要回信和不用回的信都只轉交一次', async () => {
+  const st = await fakeServer({ ackFail: 3, inbox: [mail(1, { expects_reply: false }), mail(2, { expects_reply: true })] })
+  let times
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: { ...quick, ASN_ACK_RETRY_MS: '300' },
+      until: ({ home }) => { times = [handledTimes(home, 1), handledTimes(home, 2)]; return st.acked.size >= 2 },
+    })
+    assert.deepEqual(times, [1, 1])
+    assert.ok(st.ackCalls > 2, '第一次失敗後有再補')
+  } finally { await st.close() }
+})
+
+test('bridge: 重開後讀回待補清單，不再轉交；清單不見時還在等回信的信拉到就補 ack', async () => {
+  const st = await fakeServer({ inbox: [mail(1, { expects_reply: false }), mail(2, { expects_reply: true })] })
+  let times
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, env: { ...quick, ASN_ACK_RETRY_MS: '300' },
+      setup: home => {
+        const extra = mainSetup(SESSIONS)(home)
+        const work = path.join(home, '.asn', 'machine-T')
+        fs.mkdirSync(work, { recursive: true })
+        fs.writeFileSync(path.join(work, 'ack-retry.json'), JSON.stringify({ ids: [uid(1)] }))
+        const t = Date.now()
+        fs.writeFileSync(path.join(work, 'pending.json'), JSON.stringify({ version: 1, last: {}, pending: [{ id: uid(2), from_node: 'W', from_agent: 'W-政策', target: 'T-最近的', state: 'waiting', t0: t, t, noReply: false, replied: false, notifiedAt: null, room: null }] }))
+        return extra
+      },
+      until: ({ home }) => { times = [handledTimes(home, 1), handledTimes(home, 2)]; return st.acked.size >= 2 },
+    })
+    assert.deepEqual(times, [0, 0], '都不再轉交')
+  } finally { await st.close() }
+})
+
+test('aegis: ack 失敗之後補上，成員只被問一次、回覆只寄一次', async () => {
+  const st = await fakeServer({ ackFail: 2, inbox: [mail(1, { to_agent: 'alpha' })], aegis: { alpha: () => ({ json: { answer: '好', status: 'ok', member: 'alpha' } }) } })
+  try {
+    await runBridge({
+      script: 'bridge-aegis.mjs', st,
+      env: { IRORI_AEGIS_URL: `http://127.0.0.1:${st.port}`, IRORI_AEGIS_ALLOW: 'alpha', ASN_ACK_RETRY_MS: '300' },
+      until: () => st.acked.has(uid(1)),
+    })
+    assert.equal(st.asks.length, 1, '不再問一次')
+    assert.equal(st.sent.filter(s => s.reply_to === uid(1)).length, 1, '不重複寄回')
   } finally { await st.close() }
 })
