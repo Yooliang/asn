@@ -223,7 +223,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut bad = vec![];
         for i in 0..300 {
-            let mut c = std::process::Command::new("sleep").arg("5").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+            use crate::nowin::NoWindow;
+            let mut c = std::process::Command::new("sleep").no_window().arg("5").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
             std::fs::write(pid_file(d.path()), c.id().to_string()).unwrap();
             let ok = holder_alive(d.path())(c.id());
             if !ok {
