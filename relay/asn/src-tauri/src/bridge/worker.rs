@@ -96,6 +96,19 @@ pub enum WorkerEvent {
     Quota { resets_at: Option<u64>, kind: String },
     /// 收發室 worker 自己的 Claude 登入失效（result 是錯誤、文字是認證失敗）。這一輪沒有交出任何信：交辦中的信馬上回報失敗，並說明是登入失效
     AuthFailed,
+    /// SendMessage 回成功，但信沒進去（CLI 串流的 system／informational）：kind 是 held（等確認）、denied（按了拒絕）、refused（對方不收）。只有收件人名字，沒有信件編號
+    DeliveryProblem { kind: &'static str, recipient: String },
+}
+
+/// CLI 回報跨視窗訊息狀況的那一行：回（種類, 收件人）；開頭是 `Cross-session message ` 但不認得的，種類是 None（CLI 改字時留紀錄）
+fn cross_session_notice(content: &str) -> Option<(Option<&'static str>, Option<String>)> {
+    let rest = content.strip_prefix("Cross-session message ")?;
+    let kind = [("held by the receiving session", "held"), ("released after approval", "released"), ("denied", "denied"), ("refused", "refused")]
+        .into_iter()
+        .find(|(prefix, _)| rest.strip_prefix(prefix).is_some_and(|r| r.starts_with(" (recipient: @")))
+        .map(|(_, kind)| kind);
+    let recipient = rest.split_once("(recipient: @").and_then(|(_, r)| r.find(").").or_else(|| r.find(')')).map(|end| r[..end].to_string()));
+    Some((kind, recipient))
 }
 
 /// resetsAt（秒）只在「現在之後、8 天之內」才採信，其餘當作不明（假額度最壞只是一小時後再試）
@@ -388,6 +401,20 @@ impl Parser {
         let mut out = Parsed::default();
         let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) else { return out };
         let ty = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if ty == "system" && ev.get("subtype").and_then(|v| v.as_str()) == Some("informational") {
+            let content = ev.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            match cross_session_notice(content) {
+                Some((Some(kind), Some(recipient))) => {
+                    out.logs.push(format!("cross-session {kind} recipient={}", recipient.chars().take(80).collect::<String>()));
+                    if kind != "released" {
+                        out.events.push(WorkerEvent::DeliveryProblem { kind, recipient });
+                    }
+                }
+                Some(_) => out.logs.push(format!("cross-session notice unrecognized: {}", content.chars().take(80).collect::<String>())),
+                None => {}
+            }
+            return out;
+        }
         // 額度用完的三種說法。欄位位置兩種都讀（頂層，或包在 message 裡）；信件內文裡的同樣字樣不算
         if ty == "rate_limit_event" {
             if let Some(q) = ev.get("rate_limit_info").and_then(|i| quota_of_info(i, now_ms)) {
@@ -1004,6 +1031,33 @@ mod tests {
         assert_ne!(v["message"]["content"][0]["input"]["content"], v["message"]["content"][0]["input"]["message"], "content 只是預覽");
         p.feed(&c);
         assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+    }
+
+    #[test]
+    fn 對方視窗扣住信的那一行_解析收件人_其他狀況只記_log() {
+        let line = |content: &str| json!({"type":"system","subtype":"informational","content":content,"level":"warning"}).to_string();
+        let mut p = Parser::new(N);
+        let r = p.feed(&line("Cross-session message held by the receiving session (recipient: @T-甲 乙). Claude in that session hasn't seen it."));
+        assert_eq!(r.events, vec![WorkerEvent::DeliveryProblem { kind: "held", recipient: "T-甲 乙".into() }], "中文和空白的名字都要抓到");
+        assert_eq!(r.logs, vec!["cross-session held recipient=T-甲 乙".to_string()]);
+        // 下面三段文字取自 Claude 2.1.318 實測的串流
+        let r = p.feed(&line("Cross-session message released after approval (recipient: @T-甲). It was approved and released to that session (final delivery is up to their queue)."));
+        assert!(r.events.is_empty(), "放行只記 log");
+        assert_eq!(r.logs, vec!["cross-session released recipient=T-甲".to_string()]);
+        for (content, kind) in [
+            ("Cross-session message denied (recipient: @T-甲). The recipient's user declined it; it was not delivered.", "denied"),
+            ("Cross-session message refused (recipient: @T-甲). That session is not accepting cross-session messages; it was not delivered.", "refused"),
+        ] {
+            let r = p.feed(&line(content));
+            assert_eq!(r.events, vec![WorkerEvent::DeliveryProblem { kind, recipient: "T-甲".into() }]);
+            assert_eq!(r.logs, vec![format!("cross-session {kind} recipient=T-甲")]);
+        }
+        // CLI 改字：不當成任何狀況，但留紀錄
+        let r = p.feed(&line("Cross-session message parked somewhere (recipient: @T-甲)."));
+        assert!(r.events.is_empty() && r.logs[0].starts_with("cross-session notice unrecognized"), "{:?}", r.logs);
+        // 別的 informational 不理；這幾行不算轉交成功
+        let r = p.feed(&line("Something else"));
+        assert!(r.events.is_empty() && r.logs.is_empty());
     }
 
     #[test]
