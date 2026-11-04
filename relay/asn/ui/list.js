@@ -1736,6 +1736,7 @@ const app = createApp({
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
         case 'quota-source': await quotaReaders.setSource(value?.source, value?.on); break
+        case 'quota-refresh': await quotaReaders.setRefresh(value); break
         case 'quota-mm-add': await quotaReaders.addMinimax(value); break
         case 'quota-mm-remove': await quotaReaders.removeMinimax(value); break
         case 'quota-share': await quotaReaders.share(value); break
