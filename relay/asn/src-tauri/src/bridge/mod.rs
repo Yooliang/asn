@@ -8,6 +8,7 @@ pub mod dup_session;
 pub mod engines;
 pub mod forward_gate;
 pub mod handoff;
+pub mod known;
 pub mod launcher;
 pub mod lock;
 pub mod mail;

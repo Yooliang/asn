@@ -1174,3 +1174,27 @@ async fn 群組_一輪只交一封_同一視窗連來兩則_第一則做完才�
     assert_eq!(f.len(), 2);
     assert!(f[1].2.contains("群組內文-3"), "{}", f[1].2);
 }
+
+#[tokio::test]
+async fn 群組_重開後被點名的夥伴還沒接回來_游標不前進_接回來才轉交() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(vec![rmsg(2, json!({"forMe": {"T-丙": true}}))], json!([{"member": "T~T-丙", "read_seq": 1}]))],
+    );
+    h.core.pull("test", T0 + 1_000).await;
+    assert!(fwd(&h.said()).is_empty(), "它還沒回來：不轉交");
+    assert_eq!(cursor_file(&h)["R1|T~T-丙"].as_u64().unwrap_or(1), 1, "游標沒有前進，這則不會被略過：{}", cursor_file(&h));
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.core.pull("test", T0 + 601_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "接回來就轉交");
+    assert!(f[0].2.contains("群組內文-2"), "{}", f[0].2);
+}

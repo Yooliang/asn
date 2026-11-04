@@ -25,6 +25,10 @@ mod misroute;
 mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
+/// 重開後等夥伴接回來最多等多久（毫秒）：實測重開機後約 10～20 分鐘才陸續接回
+const AWAIT_GRACE_MS: u64 = 30 * 60_000;
+/// 等接回來的夥伴，最多先留這麼多封信（超過的照原本的做法退回並講明）
+const AWAIT_MAIL_MAX: usize = 20;
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;
@@ -378,6 +382,14 @@ pub struct Core {
     probe_prev_until: u64,
     /// 扣住過的信第一次收到的時間（信件編號 → 毫秒；ack 才清）：信被重新拉回、再扣住或之後才轉交時，延遲抬頭仍寫第一次收到的時間
     held_first: HashMap<String, u64>,
+    /// 認得的夥伴（#766）：存檔的視窗名單；重開後還沒接回來的夥伴，寄給它的信先留著、群組點名游標不前進
+    known: super::known::Known,
+    /// 這一次收發室跑著的期間看過的視窗名（從名單消失＝本人關掉了，立刻從 known 拿掉）
+    seen_run: HashSet<String>,
+    /// 收發室這次起來的時間（毫秒）：等夥伴接回來的寬限期從這裡算
+    started_at: u64,
+    /// 正在等接回的夥伴：名字 → 先留著的信編號（每個夥伴最多 AWAIT_MAIL_MAX 封）
+    awaiting: HashMap<String, HashSet<String>>,
     probing: bool,
 }
 
@@ -427,9 +439,11 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), started_at: 0, awaiting: HashMap::new(), probing: false,
         };
         c.restore();
+        c.started_at = now;
+        c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
         c
     }
 
@@ -553,6 +567,52 @@ impl Core {
     fn online_names(&self) -> HashSet<&str> {
         self.roster.iter().map(|w| w.name.as_str()).filter(|n| *n != self.cfg.mailbox_name).collect()
     }
+    /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的＝本人關掉了，立刻忘記（寄給它的信照原本的做法退回）
+    fn note_known_windows(&mut self, now: u64) {
+        let names: Vec<(String, String)> = self.roster.iter().filter(|w| w.name != self.cfg.mailbox_name).map(|w| (w.name.clone(), w.engine.clone())).collect();
+        let present: HashSet<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+        let gone: Vec<String> = self.seen_run.iter().filter(|n| !present.contains(n.as_str())).cloned().collect();
+        for n in gone {
+            self.seen_run.remove(&n);
+            self.known.forget(&n);
+            self.awaiting.remove(&n);
+        }
+        for (n, e) in &names {
+            self.seen_run.insert(n.clone());
+            self.known.touch(n, e, now);
+            self.awaiting.remove(n); // 接回來了：先留著的信下一輪拉信就會照順序送
+        }
+        if let Err(e) = self.known.save_if_dirty(&self.cfg.work_dir.join(super::known::KNOWN_FILE), now) {
+            self.log.line(&format!("known-windows.json save failed: {e}"));
+        }
+    }
+
+    /// 這個名字現在名單上沒有，但重開前有在線、而且還在寬限期內：等它接回來（信不退回）
+    fn awaiting_return(&self, name: &str) -> bool {
+        !self.seen_run.contains(name) && self.known.contains(name) && self.now.saturating_sub(self.started_at) < AWAIT_GRACE_MS
+    }
+
+    /// 先留著這封信（留在後台信箱，不 ack）。回 false＝這個夥伴已經留了太多封，這封照原本的做法退回
+    fn hold_for_return(&mut self, name: &str, id: &str) -> bool {
+        let n = self.awaiting.entry(name.to_string()).or_default();
+        if !n.contains(id) && n.len() >= AWAIT_MAIL_MAX {
+            return false;
+        }
+        if n.insert(id.to_string()) {
+            self.log.line(&format!("id={id} to={name}: window not back yet after restart, kept in inbox (waiting up to {} min)", AWAIT_GRACE_MS / 60_000));
+        }
+        true
+    }
+
+    /// 退回時的說明：重開前有在線、等過寬限期還沒回來的，講明等了多久
+    fn unreachable_note(&self, name: &str) -> String {
+        if self.known.contains(name) && !self.seen_run.contains(name) && self.now.saturating_sub(self.started_at) >= AWAIT_GRACE_MS {
+            format!("（它在收發室重開前有在線，等了 {} 分鐘沒有回來）", AWAIT_GRACE_MS / 60_000)
+        } else {
+            String::new()
+        }
+    }
+
     fn forwardable(&self, name: &str) -> bool {
         self.roster.iter().any(|w| w.name == name) || (self.cfg.extra_allow.iter().any(|n| n == name) && self.online_names().contains(name))
     }
@@ -693,6 +753,7 @@ impl Core {
         }
         self.roster = list;
         self.roster_ok = true;
+        self.note_known_windows(now);
         let asn = self.cfg.report_asn_window.then(|| self.relay.window_name());
         // 摘要要讀設定檔、偵測 CLI（會開外部程序），放到背景執行緒，不卡住收信的主迴圈
         let launcher = match self.launcher.clone() {
@@ -1056,13 +1117,17 @@ impl Core {
         let no_reply = (!wants_reply(m.expects_reply, &m.body) && !self.defers_ack(&target)) || Self::is_mailbox_sender(&from_agent);
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
         p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
+        // 重開後夥伴視窗還沒接回來：信留在後台信箱（不退回、不 ack），等它接回來再照順序送；等太久或留太多才退回
+        if !self.forwardable(&target) && self.awaiting_return(&target) && self.hold_for_return(&target, &m.id) {
+            return Some(target);
+        }
         if !self.forwardable(&target) {
             let names = if self.roster.is_empty() { "(無)".to_string() } else { self.roster.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join("、") };
             p.state = State::Done;
             if Self::is_mailbox_sender(&from_agent) {
                 self.log.line(&format!("id={} target {target} not found; notice to mailbox sender not sent", m.id));
             } else {
-                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）"));
+                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
                 self.send_back(&Origin::of(&p), &text, None, None).await;
             }
             self.ack_ids(&[m.id.clone()]).await;
@@ -1724,7 +1789,14 @@ impl Core {
             target = w;
         } else {
             if !self.forwardable(&window) {
-                self.log.line(&format!("room={room_id} #{seq} window {window} not forwardable: skipped"));
+                // 重開後夥伴視窗還沒接回來：游標不前進，下一次拉信再來（等太久才略過）
+                if self.awaiting_return(&window) {
+                    if self.unrouted.insert(format!("room-wait:{room_id}:{seq}:{member}")) {
+                        self.log.line(&format!("room={room_id} #{seq} window {window} not back yet after restart: kept (cursor not advanced)"));
+                    }
+                    return false;
+                }
+                self.log.line(&format!("room={room_id} #{seq} window {window} not forwardable: skipped{}", self.unreachable_note(&window)));
                 return true;
             }
             target = window.clone();
