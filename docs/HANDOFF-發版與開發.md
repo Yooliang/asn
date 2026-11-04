@@ -21,6 +21,7 @@
 
 踩過的坑：
 - `release` 會依 `package.json` 升版；如果合併後又要補東西，先 `git checkout -- relay site/public` 還原版本檔再重跑，不然會跳版。
+- **用 `cargo build` 編測試版（沒走 `npm run build`）要先在 `relay/asn` 跑 `npm install` 與 `node scripts/prep.mjs`**：`ui/vendor/`（Vue、DiceBear 的打包檔）在 `.gitignore`，新的 checkout／工作樹沒有它，只有 `tauri build` 的 `beforeBuildCommand` 會自動跑 prep。沒跑的話畫面沒有 Vue，整頁會是沒編譯的 `{{ … }}`（2026-11-05 在 30家用 踩到）。編完先看 `ui/vendor/vue.global.prod.js` 在不在；改了 `ui/` 之後 cargo 會不會重新打包畫面我沒驗證過；保險做法是先 `touch src-tauri/src/lib.rs` 再編（我每次都這樣做，沒有比較過不做的結果）。
 - 測試用 `CARGO_TARGET_DIR=<共用的 target 資料夾>`（共用編譯快取，快很多）。
 - 新增 `Command::new` 一定要 `.no_window()`（有守門測試），電腦版專用模組要掛 `#[cfg(desktop)]`（安卓建置會壞，我犯過）。
 - 樣板用到的名字要從 `setup()` return（`test/template-ctx.test.mjs` 會檢查）。
