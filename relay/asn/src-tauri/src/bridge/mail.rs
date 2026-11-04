@@ -230,9 +230,14 @@ pub fn preamble(m: &Mail, engine_id: &str) -> String {
 
 /// 同 preamble；late＝這封因額度用完延遲、原本收到的時間（毫秒）時，在「寄件人：」那行（含語音說明）之後加一行延遲說明（收發室寫的）
 pub fn preamble_late(m: &Mail, engine_id: &str, late: Option<u64>) -> String {
+    preamble_late_kind(m, engine_id, late, false)
+}
+
+/// 同 preamble_late；auth＝延遲的原因是收發室登入失效（不是額度用完），延遲說明改寫登入失效
+pub fn preamble_late_kind(m: &Mail, engine_id: &str, late: Option<u64>, auth: bool) -> String {
     let mut out = format!("{}{}\n", sender_line(m), if m.voice { VOICE_NOTE } else { "" });
     if let Some(t) = late {
-        out += &quota_late_line(t);
+        out += &hold_late_line(t, auth);
         out.push('\n');
     }
     if sends_own_mail(engine_id) {
@@ -249,6 +254,9 @@ pub fn preamble_late(m: &Mail, engine_id: &str, late: Option<u64>) -> String {
 /// 因收發室 worker 額度用完而延遲轉交的抬頭開頭（收發室寫的；內文行首出現同樣字樣要跳脫，見 BODY_ESCAPE_HEADS）
 pub const QUOTA_LATE_HEAD: &str = "這封因額度用完延遲，原本";
 
+/// 因收發室 worker 的 Claude 登入失效而延遲轉交的抬頭開頭（同上，內文行首出現同樣字樣要跳脫）
+pub const AUTH_LATE_HEAD: &str = "這封因收發室登入失效延遲，原本";
+
 /// 台北時間（UTC+8）的 HH:MM
 pub fn taipei_hm(ms: u64) -> String {
     let m = (ms / 60_000 + 8 * 60) % 1440;
@@ -257,12 +265,17 @@ pub fn taipei_hm(ms: u64) -> String {
 
 /// 延遲抬頭整行：「這封因額度用完延遲，原本 HH:MM 收到」（台北時間）
 pub fn quota_late_line(received_ms: u64) -> String {
-    format!("{QUOTA_LATE_HEAD} {} 收到", taipei_hm(received_ms))
+    hold_late_line(received_ms, false)
+}
+
+/// 延遲抬頭整行：額度用完（auth＝false）或收發室登入失效（auth＝true），後面都是「原本 HH:MM 收到」
+pub fn hold_late_line(received_ms: u64, auth: bool) -> String {
+    format!("{} {} 收到", if auth { AUTH_LATE_HEAD } else { QUOTA_LATE_HEAD }, taipei_hm(received_ms))
 }
 
 pub const BODY_ESCAPE_PREFIX: &str = "（內文）";
 /// 內文中行首出現就要跳脫的開頭（與 mail-format.mjs 的 escapeBody 逐字一致）
-const BODY_ESCAPE_HEADS: [&str; 14] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
+const BODY_ESCAPE_HEADS: [&str; 15] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, AUTH_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
 
 /// 內文跳脫（對應 mail-format.mjs 的 escapeBody，兩邊逐字一致）：內文中行首（可有空白）以
 /// `[RELAY 來信]`、`[RELAY 寄信]`、`[RELAY 回信]`（parse_send_head 認得的同義詞）、`寄件人：`、`【要回信】`、`你與收發室的往來記錄在：`、`（語音通話：`、`你是 ASN 的聊天對象：`、

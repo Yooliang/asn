@@ -2,7 +2,7 @@
 //! 時間都從 TQ 起算（避開別的測試對 login_watch 逾時記錄的寫入），不用真的等待。
 use super::*;
 use super::rooms_launch::{room, rmsg, set_rooms};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use crate::bridge::mail::{quota_late_line, taipei_hm};
 
 const TQ: u64 = T0 + 400 * 86_400_000;
@@ -743,4 +743,111 @@ async fn 自動回信模式不參與扣住_額度事件略過_照原流程() {
     assert!(core.pending.iter().all(|p| p.state != State::Held));
     core.tick(TQ + HOUR).await;
     assert_eq!(core.inbox_hold_until(), None);
+}
+
+// ================================================================================================
+// 收發室 worker 的 Claude 登入失效（todo-next-197）：照額度用完的做法扣住，不退信
+// ================================================================================================
+
+fn auth_line() -> WorkerLine {
+    WorkerLine::Line(json!({"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","duration_ms":101,"total_cost_usd":0}).to_string())
+}
+fn auth_notices_to(h: &H, node: &str, agent: &str) -> usize {
+    h.fr.sent().iter().filter(|s| s["to_node"] == node && s["to_agent"] == agent && s["body"].as_str().unwrap_or("").contains("登入失效了，信已收到、先留著，重新登入後會送出")).count()
+}
+
+#[tokio::test]
+async fn 登入失效_信留著不退_不連續失敗_寄件人同一段只通知一次_不寄逾時() {
+    const TQ: u64 = T0 + 210 * 86_400_000;
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    assert_eq!(h.said().len(), 1);
+    // worker 第一輪就回登入失效：這封扣住（Held），不 ack、不寄「失敗」「逾時」
+    h.core.on_worker_line(auth_line(), TQ + 1000).await;
+    assert_eq!(held_ids(&h), vec![uid(1)]);
+    assert!(h.fr.acked().is_empty(), "不 ack，信還在後台");
+    assert_eq!(auth_notices_to(&h, "W", "W-政策"), 1, "通知一次：登入失效、信留著、重新登入後送出");
+    assert!(h.core.inbox_hold_until().is_some(), "和額度一樣，名單回報帶暫停時間");
+    // 這一輪結束後 #726 會馬上再拉：後面來的信直接扣住，不再一封一封試
+    h.fr.put(mail(2, json!({})));
+    h.fr.put(mail(3, json!({"from_agent": "W-別人"})));
+    h.fr.put(mail(4, json!({})));
+    h.core.pull("test", TQ + 2000).await;
+    assert_eq!(h.said().len(), 1, "不再送 worker（不連續失敗）");
+    assert_eq!(held_ids(&h).len(), 4);
+    assert!(h.fr.acked().is_empty());
+    assert_eq!(auth_notices_to(&h, "W", "W-政策"), 1, "同寄件人同一段失效期間不重複");
+    assert_eq!(auth_notices_to(&h, "W", "W-別人"), 1, "另一位寄件人各通知一次");
+    assert!(bodies(&h).iter().all(|b| !b.contains("逾時") && !b.contains("失敗")), "{:?}", bodies(&h));
+    h.core.tick(TQ + 130_000).await;
+    assert!(bodies(&h).iter().all(|b| !b.contains("逾時") && !b.contains("失敗")), "扣住期間不寄轉交逾時");
+    assert_eq!(h.said().len(), 1);
+}
+
+#[tokio::test]
+async fn 登入失效_每小時試送_又失效就繼續留著_好了就依原順序一封一封重送_延遲抬頭寫登入失效() {
+    const TQ: u64 = T0 + 211 * 86_400_000;
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(auth_line(), TQ + 1000).await;
+    h.fr.put(mail(2, json!({})));
+    h.fr.put(mail(3, json!({})));
+    h.core.pull("test", TQ + 2000).await;
+    let probe = TQ + 1000 + HOUR;
+    h.core.tick(probe - 1).await;
+    assert_eq!(h.said().len(), 1, "還沒到試送時間");
+    // 試送：只送最舊的一封；又登入失效 → 繼續留著，不重複通知，不丟
+    h.core.tick(probe).await;
+    assert_eq!(h.said().len(), 2, "只試送一封");
+    h.core.on_worker_line(auth_line(), probe + 1000).await;
+    assert_eq!(held_ids(&h).len(), 3, "試送又失敗：三封都還留著");
+    assert!(h.fr.acked().is_empty());
+    assert_eq!(auth_notices_to(&h, "W", "W-政策"), 1, "不重複通知");
+    // 下一個整點再試送；這次成功（worker 回報 SENT）＝登入好了：依原收到順序重送其餘，照 one_per_turn 一封一封來
+    let probe2 = probe + 1000 + HOUR;
+    h.core.tick(probe2).await;
+    assert_eq!(h.said().len(), 3);
+    worker_ok(&mut h.core, &uid(1), probe2 + 1000).await;
+    assert_eq!(h.core.inbox_hold_until(), None, "恢復");
+    h.core.tick(probe2 + 5000).await;
+    let ids = |h: &H| -> Vec<String> { h.said().iter().filter_map(|t| t.split("id=").nth(1).map(|x| x.split(' ').next().unwrap_or("").to_string())).collect() };
+    assert_eq!(ids(&h).last().cloned(), Some(uid(2)), "第二封先送");
+    let said = h.said();
+    let late = said.last().unwrap().lines().find(|l| l.starts_with("這封因收發室登入失效延遲，原本")).map(String::from);
+    assert!(late.is_some(), "延遲抬頭寫登入失效（不是額度用完）：{}", said.last().unwrap());
+    assert!(!said.last().unwrap().contains("這封因額度用完延遲"));
+    // 第二封做完（一輪結束）才輪到第三封，不重複送第一、二封
+    worker_ok(&mut h.core, &uid(2), probe2 + 6000).await;
+    h.core.pull("test", probe2 + 7000).await;
+    assert_eq!(ids(&h).last().cloned(), Some(uid(3)), "第三封最後送");
+    worker_ok(&mut h.core, &uid(3), probe2 + 8000).await;
+    let sent: Vec<String> = ids(&h);
+    assert_eq!(sent, vec![uid(1), uid(1), uid(1), uid(2), uid(3)], "第一封＝原本一次＋兩次試送；第二、三封各一次，不重複：{sent:?}");
+}
+
+#[tokio::test]
+async fn 登入失效_偵測到重新登入就提早試送_不等整點() {
+    const TQ: u64 = T0 + 212 * 86_400_000;
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    // 登入檔的修改時間（0＝還沒重新登入）；偵測是「登入檔比扣住開始新」，和真的一樣
+    let cred_mtime = Arc::new(AtomicU64::new(0));
+    let m2 = cred_mtime.clone();
+    h.core.relogin_since = Some(Arc::new(move |since| m2.load(Ordering::SeqCst) > since));
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(auth_line(), TQ + 1000).await;
+    h.core.tick(TQ + 60_000).await;
+    assert_eq!(h.said().len(), 1, "還沒重新登入、也沒到整點：不試送");
+    cred_mtime.store(TQ + 100_000, Ordering::SeqCst);
+    h.core.tick(TQ + 120_000).await;
+    assert_eq!(h.said().len(), 2, "登入檔更新了：馬上試送最舊的一封");
+    // 試送又失敗：下一個 tick 不會因為同一次重新登入又試送（試送後重新起算）
+    h.core.on_worker_line(auth_line(), TQ + 121_000).await;
+    h.core.tick(TQ + 130_000).await;
+    h.core.tick(TQ + 140_000).await;
+    assert_eq!(h.said().len(), 2, "不每個 tick 都試");
 }

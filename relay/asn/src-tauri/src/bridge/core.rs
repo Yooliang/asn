@@ -25,8 +25,6 @@ mod misroute;
 mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
-/// 收發室 worker 的 Claude 登入失效時，寫在失敗通知裡的原因（給寄件人看：說發生什麼、怎麼辦）
-pub const AUTH_FAIL_REASON: &str = "這台電腦上收發室用的 Claude 登入失效了，信沒有交出去。請這台電腦的本人重新登入 Claude，登入後再重寄一次";
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;
@@ -253,6 +251,8 @@ enum RelOutcome {
 /// 一次額度用完期間已經通知過哪些寄件人（同一次只通知一次；worker 證明恢復後清掉）
 #[derive(Default)]
 struct QuotaEpisode {
+    /// 扣住的原因是收發室登入失效（不是額度用完）：通知寄件人的字不同
+    auth: bool,
     /// 扣住的信超過上限（名單回報帶給後台，由後台通知主人）
     capped: bool,
     senders: HashSet<String>,
@@ -340,6 +340,14 @@ pub struct Core {
     dup_held: HashMap<String, u64>,
     /// 收發室 worker 的 Claude 額度用完，到這個時間（毫秒）前不送信給 worker；0＝沒有
     quota_until: u64,
+    /// 扣住的原因是收發室登入失效（最近一次扣住的原因；全部送完才清）：群組訊息重送的延遲說明用
+    hold_auth: bool,
+    /// 因登入失效而扣住的個人信編號：重送時延遲說明寫登入失效；信處理完（ack）就清
+    held_auth: HashSet<String>,
+    /// 這一段扣住從什麼時候算起（毫秒）；偵測到重新登入（登入檔比它新）就提早試送，試送後重新起算
+    hold_since: u64,
+    /// 偵測重新登入：給「扣住開始時間」，回登入檔是否比它新；測試預設沒有（絕不讀真實家目錄）
+    pub relogin_since: Option<Arc<dyn Fn(u64) -> bool + Send + Sync>>,
     quota_ep: Option<QuotaEpisode>,
     /// 扣住的個人信（信件編號 → 內文）
     held_items: HashMap<String, HeldItem>,
@@ -429,7 +437,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
+            quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
         };
         c.restore();
         c
@@ -642,6 +650,7 @@ impl Core {
             Ok(_) => ids.iter().for_each(|i| {
                 self.seen.insert(i.clone());
                 self.held_first.remove(i);
+                self.held_auth.remove(i);
             }),
             Err(e) => self.log.line(&format!("ack failed: {e}")),
         }
@@ -1119,7 +1128,7 @@ impl Core {
         let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
         // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
-        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble_late(&m, &pre_engine, late),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble_late_kind(&m, &pre_engine, late, self.held_auth.contains(&m.id)),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
@@ -1305,28 +1314,6 @@ impl Core {
     }
 
     /// 失敗原因給人看：認得的錯誤（額度用完）換成白話，其他原樣
-    /// 寄給寄件人的轉交失敗通知內文。三種要分清楚：沒轉交（一般失敗）、收發室登入失效（原因已寫在 why）、
-    /// 對方收到並處理了但最後的回覆被內容過濾擋下（不是沒轉交，不要讓人以為信沒送到）
-    fn fail_notice_text(target: &str, why: &str) -> String {
-        let l = why.to_lowercase();
-        if l.contains("blocked by content safety") || l.contains("content safety filter") {
-            return format!("[收發室] {target} 收到信並處理了，但它最後的回覆被內容過濾擋下，沒有回到你這裡。可以請它再回一次。");
-        }
-        format!("[收發室] 轉交給 {target} 失敗：{}", Self::short_fail_reason(why))
-    }
-
-    /// 收發室 worker 自己的 Claude 登入失效（todo-next-197）：這一輪沒有交出任何信。交辦中的信馬上回報失敗並說明原因，
-    /// 不再等到轉交逾時才說一句沒有說明原因的「逾時」；同時記進登入失效偵測，讓本人收到通知
-    async fn on_worker_auth_failed(&mut self) {
-        self.log.line("worker reported an authentication failure: mail being forwarded fails now");
-        #[cfg(feature = "gui")]
-        crate::login_watch::record_worker_login_error(self.now as i64);
-        let ids: Vec<String> = self.pending.iter().filter(|p| p.state == State::Forwarding).map(|p| p.id.clone()).collect();
-        for id in ids {
-            self.on_fail(&id, AUTH_FAIL_REASON).await;
-        }
-    }
-
     fn short_fail_reason(why: &str) -> String {
         if Self::is_payment_error(why) {
             return "額度用完了（API 402）".into();
@@ -1340,6 +1327,21 @@ impl Core {
         ["payment required", "balance exhausted", "http 402", "http/1.1 402", "http/2 402", "status 402", "status: 402", "status code 402", "api 402", "error 402", "error: 402", "code 402", "(402)", "402 {"].iter().any(|k| w.contains(k))
     }
 
+    /// 失敗原因是不是「對方收到了、但它的回覆被內容過濾擋下」（不是沒轉交）
+    pub(super) fn reply_blocked(why: &str) -> bool {
+        let l = why.to_lowercase();
+        l.contains("blocked by content safety") || l.contains("content safety filter")
+    }
+
+    /// 寄給寄件人的轉交失敗通知內文。兩種要分清楚：沒轉交（一般失敗）、對方收到了但回覆被內容過濾擋下
+    /// （不是沒轉交，不要讓人以為信沒送到；只能確定收到，不能確定做完）。收發室登入失效不走這裡：信會扣住，見 quota.rs 的 on_worker_auth_failed
+    fn fail_notice_text(target: &str, why: &str) -> String {
+        if Self::reply_blocked(why) {
+            return format!("[收發室] {target} 收到信了，但它的回覆被內容過濾擋下，沒有回到你這裡。可以請它再回一次。");
+        }
+        format!("[收發室] 轉交給 {target} 失敗：{}", Self::short_fail_reason(why))
+    }
+
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
         let Some(i) = self.idx(id) else { return };
         if self.pending[i].state == State::Done {
@@ -1349,7 +1351,7 @@ impl Core {
         let (o, target, from_agent) = (Origin::of(&self.pending[i]), self.pending[i].target.clone(), self.pending[i].from_agent.clone());
         self.log.line(&format!("forward failed id={id}: {reason}"));
         if self.pending[i].room.is_some() {
-            self.room_forward_failed(id, "room", false).await;
+            self.room_forward_failed(id, "room", false, reason).await;
             self.remove(id);
             return;
         }
@@ -1776,7 +1778,7 @@ impl Core {
             }
         );
         let text = match late {
-            Some(t) => Self::with_late_line(text, t),
+            Some(t) => Self::with_late_line(text, t, self.hold_auth),
             None => text,
         };
         let text = self.with_path_line(text, &target);
@@ -1960,7 +1962,7 @@ impl Core {
                 self.write_inflight();
                 if p.room.is_some() {
                     self.log.line(&format!("room forward timeout id={id} -> {}", p.target));
-                    self.room_forward_failed(&id, "room-timeout", true).await;
+                    self.room_forward_failed(&id, "room-timeout", true, "").await;
                     self.remove(&id);
                     continue;
                 }

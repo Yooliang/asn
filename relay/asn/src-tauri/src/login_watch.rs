@@ -400,6 +400,11 @@ impl Monitor {
 static STATE: Mutex<Option<Monitor>> = Mutex::new(None);
 /// 橋的收發室 worker 報告它的 Claude 登入失效時記一筆（只有時間，沒有內容）；下一次 [`tick_real`] 併進判定，和對話紀錄裡的登入錯誤同等看待
 static WORKER_ERRORS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+/// Claude 登入檔（任一個真實設定資料夾）的修改時間比 `since_ms` 新＝這之後重新登入過（只看修改時間，不讀內容）
+pub fn credentials_updated_since(since_ms: u64) -> bool {
+    crate::usage::real_roots().iter().any(|r| std::fs::metadata(r.join(CRED_FILE)).ok().is_some_and(|m| crate::usage::mtime_ms(&m) > since_ms as i64))
+}
+
 pub fn record_worker_login_error(now_ms: i64) {
     let mut v = WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner());
     v.push(now_ms);
