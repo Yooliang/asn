@@ -33,7 +33,7 @@ import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withC
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
-import { createPartnerNoticePoller, permissionView } from './lib/partner-notice.mjs'
+import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
@@ -1302,7 +1302,12 @@ async function answerPermission(allow) {
     permissionDlg.open = false
   } catch (e) { permissionDlg.error = String(e?.message ?? e) } finally { permissionDlg.busy = false }
 }
-if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg }).start()
+// 夥伴已經回答了：開著的提醒收掉。權限確認框正在送出時不動，結果由送出那邊處理
+function closeGoneNotice(item) {
+  if (launchNotice.open && noticeStillFor(item, launchNotice.body)) closeLaunchNotice()
+  if (item.code === 'permission' && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
+}
+if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({

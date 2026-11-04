@@ -29,8 +29,16 @@ export function nextNotices(list, seen = new Set()) {
     if (item.code === 'permission') freshItems.push(item)
     else fresh.push(text)
   }
-  return { fresh, freshItems, seen: now }
+  // 上一輪有、這一輪沒有的：夥伴已經回答了，開著的提醒要收掉
+  const gone = [...seen].filter(k => !now.has(k)).map(k => {
+    const i = k.indexOf('\n')
+    return { code: k.slice(0, i), name: k.slice(i + 1) }
+  })
+  return { fresh, freshItems, seen: now, gone }
 }
+
+/** 這個提醒畫面該不該收：提醒的文字就是那一項的文字（別的提醒、別的夥伴不動） */
+export const noticeStillFor = (item, body) => noticeText(item)?.body === body
 
 /** 權限確認框要顯示什麼：不完整就不給「允許」 */
 export function permissionView(p) {
@@ -39,7 +47,7 @@ export function permissionView(p) {
 }
 
 /** 定時查；查失敗（舊版後端沒有這個命令）就略過這一輪 */
-export function createPartnerNoticePoller({ fetch, show, onItem = null, intervalMs = NOTICE_POLL_MS, setTimer = setInterval }) {
+export function createPartnerNoticePoller({ fetch, show, onItem = null, onGone = null, intervalMs = NOTICE_POLL_MS, setTimer = setInterval }) {
   let seen = new Set()
   async function tick() {
     try {
@@ -47,6 +55,7 @@ export function createPartnerNoticePoller({ fetch, show, onItem = null, interval
       seen = r.seen
       r.fresh.forEach(show)
       r.freshItems.forEach(i => onItem?.(i))
+      r.gone.forEach(i => onGone?.(i))
     } catch { /* 下一輪再查 */ }
   }
   return { tick, start: () => setTimer(tick, intervalMs) }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createPartnerNoticePoller, nextNotices, noticeText, permissionView } from '../ui/lib/partner-notice.mjs'
+import { createPartnerNoticePoller, nextNotices, noticeStillFor, noticeText, permissionView } from '../ui/lib/partner-notice.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -82,4 +82,24 @@ test('守門：命令只接在本機畫面，截圖模式不輪詢', () => {
   assert.match(list, /if \(!info\.shot\) createPartnerNoticePoller/)
   const mobile = fs.readFileSync(path.join(here, '..', 'ui', 'm.js'), 'utf8')
   assert.ok(!mobile.includes('partner-notice') && !mobile.includes('partnerNotices'))
+})
+
+test('夥伴回答了：開著的提醒要收掉，別的提醒不動', async () => {
+  const a = { code: 'attention', name: '甲' }, b = { code: 'attention', name: '乙' }
+  let r = nextNotices([a, b])
+  assert.deepEqual(r.gone, [])
+  r = nextNotices([b], r.seen)
+  assert.deepEqual(r.gone, [a])
+  assert.equal(noticeStillFor(a, noticeText(a).body), true)
+  assert.equal(noticeStillFor(a, noticeText(b).body), false, '別的夥伴的提醒不動')
+  assert.equal(noticeStillFor(a, '開不了終端畫面'), false, '別種提醒不動')
+  let list = [a]
+  const gone = []
+  const p = createPartnerNoticePoller({ fetch: async () => list, show: () => {}, onGone: i => gone.push(i), setTimer: () => 0 })
+  await p.tick()
+  list = []
+  await p.tick()
+  assert.deepEqual(gone, [a])
+  await p.tick()
+  assert.equal(gone.length, 1, '只通知一次')
 })
