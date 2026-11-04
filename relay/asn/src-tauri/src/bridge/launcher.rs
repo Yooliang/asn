@@ -50,6 +50,11 @@ pub trait LaunchEnv: Send + Sync {
     fn config(&self, fresh: bool) -> Result<LaunchConfig, String>;
     /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過；pi_args＝經 pi 的 --provider／--model（已驗過，沒帶就是空）
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String>;
+    /// 這台電腦上有沒有同名而且還活著的夥伴視窗（#654）：名單快取之外再即時查一次（程序編號、啟動時間都核對），
+    /// 擋住「名單還沒更新、視窗還沒上線」時遠端又開出第二個同名視窗。預設沒有（測試用的環境不用查）
+    fn live_window(&self, _engine: &str, _name: &str) -> bool {
+        false
+    }
     /// 這台 pi 列得出這個提供者／模型嗎（遠端開 pi 帶模型，D2 #422）。預設列不出來＝拒絕
     fn pi_listed(&self, _provider: &str, _model: &str) -> bool {
         false
@@ -190,6 +195,9 @@ impl LaunchEnv for SystemEnv {
     }
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
         crate::launch::local::start_remote_window(config, profile, name, cwd, false, pi_args)
+    }
+    fn live_window(&self, engine: &str, name: &str) -> bool {
+        crate::launch::console::live_partner_pid(engine, name).is_some()
     }
     fn pi_listed(&self, provider: &str, model: &str) -> bool {
         crate::launch::pi_models::models_real(false).iter().any(|m| m.provider == provider && m.model == model)
@@ -357,6 +365,14 @@ impl Launcher {
         };
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let (profile, name) = (s("profile"), s("name"));
+        // 名單快取之外再即時查一次有沒有同名而且還活著的視窗（#654）；背景夥伴走引擎佇列，不在這裡查。查程序要開外部資料，放背景執行緒
+        let (engine, bg) = cfg.profiles.get(&profile).map(|p| (if p.engine.is_empty() { "claude".to_string() } else { p.engine.clone() }, p.mode == LaunchMode::Background)).unwrap_or(("claude".to_string(), false));
+        if !bg {
+            let (env1, name1) = (self.env.clone(), name.clone());
+            if tokio::task::spawn_blocking(move || env1.live_window(&engine, &name1)).await.unwrap_or(false) {
+                return self.report(&l, "failed", &format!("已經有叫「{name}」的視窗在跑")).await;
+            }
+        }
         let (is_bg, is_pi) = cfg.profiles.get(&profile).map(|p| (p.mode == LaunchMode::Background, p.engine == "pi")).unwrap_or((false, false));
         // 查這台 pi 的模型清單會開外部程序（有快取），放背景執行緒
         let me0 = self.clone();
