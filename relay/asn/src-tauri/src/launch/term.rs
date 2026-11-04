@@ -750,6 +750,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
         let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
+        // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
+        if matches!(&ran, Err(e) if !e.starts_with(wezterm::CANNOT_RUN)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
+            m.note_spawn_unsure();
+        }
         drop(open_guard);
         let out = ran.map_err(|e| if e.starts_with(wezterm::CANNOT_RUN) { NotStarted(e) } else { Started(e) })?;
         if !out.success {
@@ -2373,6 +2377,15 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
+    let (inside, limit) = super::mux::own_job();
+    let (mux, why_not) = super::mux::mux_after_job(mux, inside, limit);
+    if let Some(why) = why_not {
+        elog!("終端服務：{why}");
+        if let Some(Ok(paths)) = svc.mux_base.as_ref().map(|b| super::mux::paths(b)) {
+            super::mux::note(&paths.dir, &why);
+        }
+        let _ = MUX_OFF_REASON.set(why);
+    }
     svc.set_use_mux(mux);
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
@@ -2649,10 +2662,17 @@ pub(crate) fn stop_mux_partner(id: &str) -> Result<(), String> {
     }
 }
 
+/// 想開 mux 但因工作群組關掉的原因（夥伴清單上講一次）
+#[cfg(feature = "gui")]
+static MUX_OFF_REASON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// B2c：夥伴清單上「使用者環境變數裡有金鑰類變數」的一句話（只有開了 mux 模式、而且真的有才回）。只讀名字，不改登錄檔
 pub(crate) fn mux_env_notice() -> Option<String> {
     #[cfg(all(feature = "gui", not(test)))]
     {
+        if let Some(why) = MUX_OFF_REASON.get() {
+            return Some(why.clone());
+        }
         GLOBAL.get().filter(|t| t.use_mux)?;
         super::mux::secret_notice(&super::mux::user_env_names())
     }
