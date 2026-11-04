@@ -32,7 +32,9 @@ fn lock(home: &Path, tries: u32) -> Option<Lock> {
     for _ in 0..tries {
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
             Ok(_) => return Some(Lock(p)),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Windows：鎖檔剛被刪、還在刪除中時，建檔回「拒絕存取」不是「已存在」。當成別人拿著，等一下再試；
+            // 回 None 的話 take 會不拿鎖照樣寫，互相蓋掉就少算（#752，平行測試約 10% 會紅）
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied) => {
                 let stale = std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_millis() > LOCK_STALE_MS).unwrap_or(false);
                 if stale {
                     let _ = std::fs::remove_file(&p);
