@@ -1023,6 +1023,28 @@ async fn restart_with_known(h: &mut H, known_names: &[&str], now: u64) {
 }
 
 #[tokio::test]
+async fn 名單更新時記下接回要用的資料_同一個程序不重查() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    put_session_with_id(h.sessions.path(), 5000, "T-乙", "sess-1");
+    // harness 已經更新過一次名單（那時沒有查的函式）：換一個核心從頭算
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = calls.clone();
+    h.core.window_probe = Some(Arc::new(move |_pid| {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (true, vec!["--permission-mode".to_string(), "auto".to_string()])
+    }));
+    h.core.refresh_roster(T0).await;
+    h.core.refresh_roster(T0 + 1000).await;
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "程序編號沒變不重查");
+    let saved = super::known::Known::load(&h.work.path().join(super::known::KNOWN_FILE), T0 + 1000);
+    let e = saved.entries().into_iter().find(|e| e.name == "T-乙").expect("存檔要有這個視窗");
+    assert!(e.facts.asn_opened);
+    assert_eq!(e.facts.perm, ["--permission-mode", "auto"]);
+    assert_eq!(e.facts.session, "sess-1", "對話編號要記下來");
+}
+
+#[tokio::test]
 async fn 重開後夥伴視窗還沒接回來_信留著不退回不_ack_接回來就依順序送() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;

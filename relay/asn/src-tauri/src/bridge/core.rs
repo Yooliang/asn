@@ -122,6 +122,11 @@ pub struct Config {
     pub respond: Option<String>,
 }
 
+/// Claude 記工作階段的資料夾：橋與重開自動接回（launch::auto_resume）共用這一個來源，兩邊永遠看同一個地方
+pub fn claude_sessions_dir() -> PathBuf {
+    crate::identity::home_dir().join(".claude").join("sessions")
+}
+
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
         let test_handoff = work_dir.join("handoff");
@@ -143,7 +148,7 @@ impl Config {
             data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
             work_dir,
-            sessions_dir: home.join(".claude").join("sessions"),
+            sessions_dir: claude_sessions_dir(),
             status_dir: home.join(".asn").join("status"),
             poll_ms: env_u64("ASN_RELAY_POLL_MS", 120_000),
             roster_ms: env_u64("ASN_ROSTER_MS", 60_000),
@@ -434,6 +439,9 @@ pub struct Core {
     wait_fields_warned: bool,
     /// 認得的夥伴（#766）：存檔的視窗名單；重開後還沒接回來的夥伴，寄給它的信先留著、群組點名游標不前進
     known: super::known::Known,
+    /// #767：查一個視窗程序是不是 ASN 開的、原本的權限（測試沒有這個）。查過的編號不重查
+    pub window_probe: Option<Arc<dyn Fn(u32) -> (bool, Vec<String>) + Send + Sync>>,
+    probed: HashMap<String, (u32, bool, Vec<String>)>,
     /// 這一次收發室跑著的期間看過的視窗名
     seen_run: HashSet<String>,
     /// 從名單消失的視窗：名字 → 第一次發現不見的時間；消失超過 FORGET_AFTER_MS 才從 known 拿掉（見該常數）
@@ -506,7 +514,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -515,6 +523,8 @@ impl Core {
         if c.cfg.forward_exact && c.cfg.forward_exact_unverified {
             c.log.line("forward-exact forced on: 未驗證（沒有通過自我測試，只給開發機用）");
         }
+        #[cfg(all(feature = "gui", not(test)))]
+        c.known.set_boot(crate::launch::boot_ms(now));
         c
     }
 
@@ -706,6 +716,37 @@ impl Core {
     fn online_names(&self) -> HashSet<&str> {
         self.roster.iter().map(|w| w.name.as_str()).filter(|n| *n != self.cfg.mailbox_name).collect()
     }
+    /// #767：查一個視窗程序是不是 ASN 開的、用了哪些權限旗標（正式版接真的程序表，測試與沒有桌面時為空）
+    fn default_window_probe() -> Option<Arc<dyn Fn(u32) -> (bool, Vec<String>) + Send + Sync>> {
+        #[cfg(all(feature = "gui", not(test)))]
+        return Some(Arc::new(crate::launch::probe_window));
+        #[allow(unreachable_code)]
+        None
+    }
+
+    /// #767：把 Claude 視窗接回要用的資料記進存檔。程序編號沒變就不重查（查程序表有開銷）
+    fn note_window_facts(&mut self) {
+        let windows: Vec<(String, u32, String, String, bool)> = self
+            .roster
+            .iter()
+            .filter(|w| w.name != self.cfg.mailbox_name && w.engine == "claude")
+            .map(|w| (w.name.clone(), w.pid, w.session_id.clone().unwrap_or_default(), w.cwd.clone(), w.hidden == Some(true)))
+            .collect();
+        self.probed.retain(|n, _| windows.iter().any(|w| w.0 == *n));
+        for (name, pid, session, cwd, hidden) in windows {
+            let cached = self.probed.get(&name).filter(|p| p.0 == pid).map(|p| (p.1, p.2.clone()));
+            let (asn_opened, perm) = match cached {
+                Some(c) => c,
+                None => {
+                    let got = self.window_probe.as_ref().map_or((false, Vec::new()), |f| f(pid));
+                    self.probed.insert(name.clone(), (pid, got.0, got.1.clone()));
+                    got
+                }
+            };
+            self.known.set_facts(&name, super::known::WindowFacts { session, cwd, asn_opened, perm, hidden });
+        }
+    }
+
     /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的，先記下不見的時間（寄給它的信照原本的做法立刻退回），
     /// 收發室繼續跑過 FORGET_AFTER_MS 它都沒回來，才當成本人關掉、從存檔拿掉。關機時視窗比收發室早結束，收發室活不到那時候，名字會留著
     fn note_known_windows(&mut self, now: u64) {
@@ -727,6 +768,7 @@ impl Core {
             self.known.touch(n, e, now);
             self.awaiting.remove(n); // 接回來了：先留著的信下一輪拉信就會照順序送
         }
+        self.note_window_facts();
         if let Err(e) = self.known.save_if_dirty(&self.cfg.work_dir.join(super::known::KNOWN_FILE), now) {
             self.log.line(&format!("known-windows.json save failed: {e}"));
         }

@@ -221,6 +221,33 @@ pub(crate) fn live_partner_pid(engine: &str, name: &str) -> Option<u32> {
     }
 }
 
+/// 自動接回用（#767）：把剛開出來、還沒上線（沒有 session 檔，名單裡沒有它）的隱藏視窗顯示出來。
+/// 有開出來的程序編號就用它找（找視窗前一定會再和本機的程序掃描結果比對）；回有沒有顯示成功
+pub(crate) fn show_partner_window(engine: &str, name: &str, pid: Option<u32>) -> bool {
+    // 先走和名單「前台」同一條（共用終端服務的窗格、已經上線的視窗）；還沒上線的視窗名單找不到它，再用開窗時的程序編號直接找它的主控台視窗
+    let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: Some(true), kind: None, pid: None };
+    if set_console_visible(&req, true).ok().and_then(|v| v.get("ok").and_then(Value::as_bool)).unwrap_or(false) {
+        return true;
+    }
+    pid.is_some_and(show_console_of_pid)
+}
+
+/// 用程序編號找它的（或它上面的殼擁有的）主控台視窗，顯示出來；回現在看不看得到。找不到視窗就是 false
+fn show_console_of_pid(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        match super::console_resolve::find_for(pid, &RealConsoleOs) {
+            Ok((_, w)) => win::set_visible(w.hwnd, true).is_ok() && win::is_visible(w.hwnd),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 /// 把已在跑的同名夥伴切到前景（和夥伴清單的「前台」同一條：mux 開畫面、傳統主控台顯示視窗）。回傳 `{ok, reason?}`
 pub(crate) fn bring_partner_to_front(engine: &str, name: &str) -> Value {
     let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: Some(true), kind: None, pid: None };

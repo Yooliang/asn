@@ -182,6 +182,22 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     start_window(name, &command, &args, &cwd, hidden)
 }
 
+/// 重開機後自動接回一位 Claude 夥伴（#767）：用本機的 Claude 視窗 profile，換上它原本的權限旗標，指定對話編號接回。
+/// 資料夾要在允許清單內；不走開新夥伴的每小時上限（這是本機的開機流程，不是遠端要求，一次要接回的可能超過上限）。回視窗 PID
+pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cwd: &str, session: &str, perm: &[String], hidden: bool) -> Result<u32, String> {
+    // canonical_launch_cwd 遇到不存在的路徑會原樣交回（不報錯），所以要另外確認資料夾還在
+    let canon = super::config::canonical_launch_cwd(cwd).ok().filter(|p| p.is_dir()).ok_or_else(|| format!("原本的工作資料夾（{cwd}）已經不存在或不能用"))?;
+    if !config.cwd_allow.contains(&canon) {
+        return Err(format!("原本的工作資料夾（{cwd}）不在允許清單內"));
+    }
+    let profile = super::auto_resume::claude_profile(config).ok_or("這台電腦沒有可用的 Claude 啟動設定")?;
+    let req = LaunchReq { profile: &profile, name, cwd: strip_verbatim_prefix(&canon.to_string_lossy()) };
+    let (command, args, spawn_cwd) = build_spawn_spec(config, &req)?;
+    let args = super::auto_resume::resumed_args(&command, &args, session, perm)?;
+    maybe_trust_claude_cwd("claude", &req.cwd);
+    start_window(name, &command, &args, &spawn_cwd, hidden)
+}
+
 /// 接手使用者自己開的 pi（0.2 A5）：用本機 pi 的啟動設定、載入收信擴充、帶名字，在原本的資料夾用 --session 接回同一段對話。
 /// 驗證（名字、白名單、上限）由呼叫端做完；指令只來自本機的 pi profile。回外層視窗的 PID
 pub fn start_pi_session(config: &super::config::LaunchConfig, name: &str, cwd: &str, session_file: &str) -> Result<u32, String> {

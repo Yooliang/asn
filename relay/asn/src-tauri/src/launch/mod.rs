@@ -14,6 +14,9 @@ mod claude_screen;
 #[cfg(desktop)]
 mod screen_watch;
 mod resume;
+pub mod auto_resume;
+#[cfg(all(feature = "gui", not(test)))]
+pub use auto_resume::{boot_ms, probe_window};
 mod subagents;
 mod tasks;
 pub(crate) mod switch;

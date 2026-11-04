@@ -34,6 +34,7 @@ import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
+import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
@@ -160,9 +161,9 @@ try {
   if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
-  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
@@ -1308,6 +1309,7 @@ function closeGoneNotice(item) {
   if (item.code === 'permission' && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
 }
 if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()
+if (!info.shot && transport.autoResumeStatus) createAutoResumePoller({ fetch: () => transport.autoResumeStatus(), show: showLaunchNotice }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({
@@ -1397,6 +1399,7 @@ const app = createApp({
       try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = String(e?.message ?? e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
     }
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
+    const setBridgeAutoResume = on => runBridge(() => invoke('bridge_set_auto_resume', { on }))
     const setBridgeUnaddressed = name => runBridge(() => invoke('bridge_set_unaddressed_to', { name: String(name ?? '') }))
     const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
@@ -1686,6 +1689,7 @@ const app = createApp({
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
+        case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
         case 'bridge-unaddressed': await setBridgeUnaddressed(value); break
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
