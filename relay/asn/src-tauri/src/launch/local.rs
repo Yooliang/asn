@@ -424,6 +424,28 @@ pub(crate) fn mux_cmdline(argv: &[String]) -> String {
     if argv.len() > 1 { win_cmdline(&argv[1..]) } else { String::new() }
 }
 
+/// 交給包裝殼之前先把指令解析好：ProcessStartInfo 不像 `&` 會找 PATHEXT，也不能直接跑 .ps1。
+/// 裸名（沒有路徑、沒有副檔名）照 `path`（窗格的 PATH）與 .exe／.cmd／.bat／.ps1 的順序找；找不到就原樣交出去，由包裝殼明確回無法啟動。
+/// .ps1 改由 PowerShell 跑。其他照舊
+pub(crate) fn resolve_for_wrap(argv: &[String], path: Option<&str>, is_file: &dyn Fn(&Path) -> bool) -> Vec<String> {
+    let Some(first) = argv.first() else { return Vec::new() };
+    let bare = !first.contains(['\\', '/']) && Path::new(first).extension().is_none();
+    let mut prog = first.clone();
+    if bare {
+        let hit = path.unwrap_or("").split(';').filter(|d| !d.is_empty()).find_map(|d| {
+            ["exe", "cmd", "bat", "ps1"].iter().map(|e| Path::new(d.trim_matches('"')).join(format!("{first}.{e}"))).find(|p| is_file(p))
+        });
+        if let Some(p) = hit {
+            prog = p.to_string_lossy().into_owned();
+        }
+    }
+    let rest = argv[1..].iter().cloned();
+    if prog.to_ascii_lowercase().ends_with(".ps1") {
+        return ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"].iter().map(|s| s.to_string()).chain(std::iter::once(prog)).chain(rest).collect();
+    }
+    std::iter::once(prog).chain(rest).collect()
+}
+
 /// 開在 mux 窗格裡的夥伴：外面包一層 PowerShell，跑完原指令後印 [`exit_marker`]。
 /// 全部走 -EncodedCommand（UTF-16LE Base64），中文路徑與引號不必跳脫。
 /// 原指令不用 `&` 呼叫：PowerShell 5.1 傳原生參數會壞（雙引號、空字串、結尾反斜線，順序也亂）。
@@ -462,7 +484,8 @@ pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str, ps_module_path: Opt
          try {{ if ($null -ne $p -and $p.HasExited) {{ $code = $p.ExitCode }} }} catch {{}}\n\
          {reset}\n\
          Write-Host ''\n\
-         Write-Host ('[asn-exit {nonce} ' + $code + ']')\n\
+         Write-Host ('[ASN] 程式已結束（結束碼 ' + $code + '）') -ForegroundColor DarkGray\n\
+         Write-Host ('[asn-exit {nonce} ' + $code + ']') -ForegroundColor Black -BackgroundColor Black\n\
          }}\n",
         prog = ps_quote(prog),
         rest = ps_quote(&rest),
@@ -630,6 +653,38 @@ fn pick_linux_terminal() -> Option<Term> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sv_wrap(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    // 路徑寫法只有 Windows 對得上（Linux 的 join 用 /）；這段也只有 Windows 開窗用得到
+    #[cfg(windows)]
+    #[test]
+    fn 包裝前解析_裸名照順序找_ps1_交給_powershell_其他不動() {
+        let only = |names: &'static [&'static str]| move |p: &Path| names.iter().any(|n| p.to_string_lossy().ends_with(n));
+        let path = Some(r"C:\a;C:\b b");
+        assert_eq!(resolve_for_wrap(&sv_wrap(&["claude", "-n"]), path, &only(&[r"C:\b b\claude.cmd"])), sv_wrap(&[r"C:\b b\claude.cmd", "-n"]));
+        assert_eq!(resolve_for_wrap(&sv_wrap(&["claude"]), path, &only(&[r"C:\a\claude.exe", r"C:\a\claude.cmd"]))[0], r"C:\a\claude.exe", "exe 優先");
+        assert_eq!(resolve_for_wrap(&sv_wrap(&["找不到", "x"]), path, &only(&[])), sv_wrap(&["找不到", "x"]), "找不到就原樣，由包裝殼回無法啟動");
+        assert_eq!(resolve_for_wrap(&sv_wrap(&[r"C:\x y\a.cmd", "q"]), path, &only(&[])), sv_wrap(&[r"C:\x y\a.cmd", "q"]), "有路徑不找");
+        assert_eq!(resolve_for_wrap(&sv_wrap(&["powershell.exe", "-c"]), path, &only(&[r"C:\a\powershell.exe.exe"])), sv_wrap(&["powershell.exe", "-c"]), "有副檔名不找");
+        let ps = resolve_for_wrap(&sv_wrap(&["claude", "中文 參數"]), path, &only(&[r"C:\a\claude.ps1"]));
+        assert_eq!(ps[0], "powershell.exe");
+        assert_eq!(&ps[5..], sv_wrap(&["-File", r"C:\a\claude.ps1", "中文 參數"]).as_slice());
+        assert!(resolve_for_wrap(&[], path, &only(&[])).is_empty());
+    }
+
+    #[test]
+    fn 包裝殼的結束畫面_有中文_標記藏起來但內容還在() {
+        let argv = mux_wrapped_argv(&sv_wrap(&["a.exe"]), "abc", None);
+        let enc = argv.last().unwrap();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, enc).unwrap();
+        let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let script = String::from_utf16(&wide).unwrap();
+        assert!(script.contains("程式已結束"), "{script}");
+        assert!(script.contains("[asn-exit abc ' + $code + ']') -ForegroundColor Black -BackgroundColor Black"), "{script}");
+    }
 
     fn sv(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
