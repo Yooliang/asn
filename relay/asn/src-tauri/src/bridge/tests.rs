@@ -1522,6 +1522,16 @@ fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責() {
     .spawn()
     .unwrap();
     let other = old.id();
+    // Linux：spawn 回來時 /proc/<pid>/comm 可能還是父程序的執行緒名（#752，CI 上讀到 "bridge::tests::"），名稱對不上就不算舊橋。
+    // 真的舊橋是自己啟動後才寫 pid 檔，不會有這個空窗；這裡先等名稱換好再寫檔
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < std::time::Duration::from_secs(5) {
+        let name = crate::heartbeat::process_image(other).unwrap_or_default().to_ascii_lowercase();
+        if name.is_empty() || name.contains("cmd") || name.contains("sleep") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     if crate::heartbeat::pid_alive(other) && other != std::process::id() {
         std::fs::write(super::lock::pid_file(work.path()), other.to_string()).unwrap();
         super::write_settings(data.path(), super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
