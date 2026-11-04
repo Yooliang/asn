@@ -235,13 +235,13 @@ fn store_turned_off_stops_immediately() {
 #[test]
 fn report_rows_unchanged_when_nothing_read() {
     let a = vec![json!({"accounts": [{"vendor": "grok", "email": "g@x.test", "plan": "", "current": true}]})];
-    assert_eq!(with_reader_rows(a.clone(), &HashMap::new(), &[]), a);
+    assert_eq!(with_reader_rows(a.clone(), &ReaderExtras::default()), a);
 }
 
 #[test]
 fn report_grok_windows_go_to_matching_row() {
     let a = vec![json!({"accounts": [{"vendor": "grok", "email": "g@x.test"}, {"vendor": "grok", "email": "h@x.test"}, {"vendor": "claude", "email": "g@x.test"}]})];
-    let got = with_reader_rows(a, &with_windows().grok_windows(NOW), &[]);
+    let got = with_reader_rows(a, &ReaderExtras { grok: with_windows().grok_windows(NOW), ..Default::default() });
     assert_eq!(got.len(), 1, "只有 Grok 窗不多一份：舊後台本來就丟掉");
     let rows = got[0]["accounts"].as_array().unwrap();
     assert!(rows[0].get("windows").is_some());
@@ -251,7 +251,7 @@ fn report_grok_windows_go_to_matching_row() {
 #[test]
 fn report_minimax_goes_first_with_fallback() {
     let a = vec![json!({"accounts": [{"vendor": "claude", "email": "a@x.test", "current": true}]}), json!({"accounts": []})];
-    let got = with_reader_rows(a.clone(), &HashMap::new(), &with_windows().minimax_rows(NOW));
+    let got = with_reader_rows(a.clone(), &ReaderExtras { minimax: with_windows().minimax_rows(NOW), ..Default::default() });
     assert_eq!(got.len(), 3);
     assert_eq!(got[0]["accounts"][1]["vendor"], "minimax");
     assert_eq!(got[1..], a[..], "舊後台退回後照原本的順序送");
@@ -262,7 +262,7 @@ fn report_stays_within_twenty_rows() {
     let mut rows: Vec<Value> = (0..20).map(|i| json!({"vendor": "claude", "email": format!("u{i}@x.test"), "current": i == 19})).collect();
     rows[0]["vendor"] = json!("grok");
     let m = vec![json!({"vendor": "minimax"}), json!({"vendor": "minimax"})];
-    let got = with_reader_rows(vec![json!({ "accounts": rows })], &HashMap::new(), &m);
+    let got = with_reader_rows(vec![json!({ "accounts": rows })], &ReaderExtras { minimax: m, ..Default::default() });
     let first = got[0]["accounts"].as_array().unwrap();
     assert_eq!(first.len(), 20);
     assert!(first.iter().any(|r| r["current"] == true), "使用中的留著");
@@ -360,4 +360,52 @@ fn minimax_limit_and_bad_input() {
     assert!(add_minimax(d.path(), "壞", "k").is_err());
     assert!(add_minimax(d.path(), "a@x.test", "").is_err());
     assert_eq!(load_settings(d.path()).minimax.len(), 2);
+}
+
+fn extras_claude(email: &str) -> ReaderExtras {
+    ReaderExtras { extra_claude: HashMap::from([(email.to_string(), vec![json!({ "name": "weekly", "left_pct": 40 })])]), ..Default::default() }
+}
+
+#[test]
+fn extra_claude_new_account_goes_first_and_is_marked() {
+    let a = vec![json!({"accounts": [{"vendor": "claude", "email": "a@x.test", "current": true}]})];
+    let got = with_reader_rows(a.clone(), &extras_claude("q@x.test"));
+    assert_eq!(got.len(), 2, "原本那份留著當退路");
+    let row = &got[0]["accounts"][1];
+    assert_eq!((row["vendor"].as_str(), row["email"].as_str(), row["extra"].as_bool(), row["current"].as_bool()), (Some("claude"), Some("q@x.test"), Some(true), Some(false)));
+    assert_eq!(got[1..], a[..]);
+}
+
+#[test]
+fn extra_claude_known_account_only_fills_missing_windows() {
+    let has = json!({"vendor": "claude", "email": "a@x.test", "current": true, "windows": [{"name": "weekly", "left_pct": 90}]});
+    let got = with_reader_rows(vec![json!({ "accounts": [has.clone()] })], &extras_claude("a@x.test"));
+    assert_eq!(got, vec![json!({ "accounts": [has] })], "本機已有數字就不蓋");
+    let none = json!({"vendor": "claude", "email": "a@x.test", "current": true});
+    let got = with_reader_rows(vec![json!({ "accounts": [none] })], &extras_claude("a@x.test"));
+    assert_eq!(got.len(), 1, "帳號庫裡有的不多加一列");
+    assert_eq!(got[0]["accounts"][0]["windows"][0]["left_pct"], 40);
+    assert!(got[0]["accounts"][0].get("extra").is_none());
+}
+
+#[test]
+fn extra_claude_refresh_needs_read_on() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(set_source(d.path(), "extra_claude_refresh", true).is_err());
+    assert!(!load_settings(d.path()).extra_claude_refresh);
+    set_source(d.path(), "extra_claude", true).unwrap();
+    set_source(d.path(), "extra_claude_refresh", true).unwrap();
+    assert!(load_settings(d.path()).extra_claude_refresh);
+    set_source(d.path(), "extra_claude", false).unwrap();
+    assert!(!load_settings(d.path()).extra_claude_refresh, "關讀取就連換新一起關");
+    write_settings(d.path(), r#"{"extra_claude_refresh":true}"#);
+    assert!(!load_settings(d.path()).extra_claude_refresh, "手改檔案也不能只開換新");
+}
+
+#[test]
+fn extra_claude_default_off_in_view() {
+    let d = tempfile::tempdir().unwrap();
+    let v = view_with(d.path(), true, |_| true);
+    assert_eq!((v["extra_claude"].as_bool(), v["extra_claude_refresh"].as_bool()), (Some(false), Some(false)));
+    assert_eq!(v["extra_claude_dirs"], json!([]));
 }

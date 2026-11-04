@@ -44,7 +44,7 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; login_failed?: true; login_incomplete?: true; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; extra?: true; login_failed?: true; login_incomplete?: true; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // five_reset_at／week_reset_at（#374，選填）：兩條各自的重置時間（reset_at 是舊的、兩條共用一個，照收）。
@@ -132,7 +132,8 @@ export function parseReport(b: Json): ReportedAccount[] | null {
     const allowed = VENDOR_WINDOWS[a.vendor];
     const cleaned = allowed ? parsed.filter((w) => allowed.has(w.name)) : parsed;
     const windows = cleaned.length ? { windows: cleaned } : {};
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
+    // 額外帳號（只有 Claude）：不在這台的帳號庫，不能切換，所以不進舊表，只進帳號列表
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.extra === true && a.vendor === "claude" ? { extra: true as const } : {}), ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;
 }
@@ -191,7 +192,7 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");
     // 舊的 asn_relay_acct_report 照舊（不帶 windows、拿掉 gemini，交給它的內容跟以前一模一樣）；gemini 只寫帳號列表
-    const legacy = accounts.filter((a) => LEGACY_VENDORS.has(a.vendor)).map(({ windows: _w, ...rest }) => rest);
+    const legacy = accounts.filter((a) => LEGACY_VENDORS.has(a.vendor) && !a.extra).map(({ windows: _w, ...rest }) => rest);
     const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: legacy });
     if (isReply(r)) return r;
     await rosterReport(deps, me.id, accounts);

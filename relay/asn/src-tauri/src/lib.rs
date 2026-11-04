@@ -104,6 +104,7 @@ mod codex_quota;
 mod gemini_quota;
 #[cfg(desktop)]
 mod quota_readers;
+mod claude_extra;
 #[cfg(desktop)]
 mod gemini_session;
 #[cfg(desktop)]

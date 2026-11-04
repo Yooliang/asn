@@ -11,6 +11,16 @@ export const QUOTA_TEXT = {
   agyNote: '不用開 Gemini 視窗也能更新。帳號依上次開視窗判斷；在別處切換帳號後，請開一次 Gemini 視窗。',
   agyAccount: a => `目前算在 ${a} 名下。`,
   agyNoAccount: '還沒開過 Gemini 視窗，開一次才知道是哪個帳號。',
+  extra: '讀 Claude 額外帳號',
+  extraNote: '讀你另外登入在專用資料夾的帳號，平常使用的登入不會動到。',
+  extraDirs: n => `找到 ${n} 個帳號。`,
+  refreshOn: '打開自動換新',
+  refreshConfirm: '確認打開',
+  refreshOff: '關閉自動換新',
+  refreshActive: '自動換新已打開。',
+  refreshNote: '額外帳號的登入約 8 小時到期。打開後，快到期時會自動換新。',
+  refreshWarn: '同一個帳號只能有一個程式在換新，否則會被登出。如果還有其他程式在換，請先停掉再打開。',
+  refreshStopped: '換新失敗就不會再試，請重新登入該帳號，或關閉後再打開。',
   minimax: 'MiniMax',
   minimaxNote: 'key 只存在這台電腦，存好後不會再顯示。最多 2 個帳號。',
   minimaxUnsupported: 'MiniMax 目前只有 Windows 電腦能設定。',
@@ -43,7 +53,7 @@ export const QUOTA_TEXT = {
   failLogin: '要先登入才能變更查詢代碼。',
 }
 
-const EMPTY = { grok: false, agy: false, agyAccount: '', minimax: [], minimaxSupported: false, status: { grok: '', agy: '' } }
+const EMPTY = { grok: false, agy: false, agyAccount: '', minimax: [], minimaxSupported: false, status: { grok: '', agy: '' }, extra: false, extraRefresh: false, extraDirs: [] }
 
 /** Rust 回的設定 → 畫面資料。形狀不對就當全關，不會顯示成已開。 */
 export function normalizeReaders(v) {
@@ -60,6 +70,9 @@ export function normalizeReaders(v) {
       .filter(m => m && typeof m.email === 'string')
       .map(m => ({ email: m.email, hasKey: m.has_key === true, status: failOf(m.email) })),
     status: { grok: text(failures.grok), agy: text(failures.agy) },
+    extra: v.extra_claude === true,
+    extraRefresh: v.extra_claude === true && v.extra_claude_refresh === true,
+    extraDirs: (Array.isArray(v.extra_claude_dirs) ? v.extra_claude_dirs : []).filter(d => d && typeof d.name === 'string').map(d => ({ name: d.name, status: text(d.status) })),
   }
 }
 
@@ -93,6 +106,12 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     if (ok) s.msg = QUOTA_TEXT.removed
     return ok
   }
+  // 打開自動換新要按兩次；關閉不用
+  const setRefresh = async on => {
+    if (on === true && !confirmed('refresh')) return false
+    s.confirm = ''
+    return setSource('extra_claude_refresh', on === true)
+  }
   const shareFail = e => (/尚未登入/.test(typeof e === 'string' ? e : e?.message ?? '') ? QUOTA_TEXT.failLogin : QUOTA_TEXT.failShare)
   const share = async ({ vendor, account, shared } = {}) => {
     if (shared && !confirmed(`again\n${shareKey(vendor, account)}`)) return false
@@ -123,13 +142,14 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     try { await clipboard(s.code.value); s.copied = true } catch (e) { fail(QUOTA_TEXT.copyFail, e) }
   }
   const closeCode = () => { s.code = null; s.copied = false }
-  return { state: s, load, setSource, addMinimax, removeMinimax, share, unshare, copyCode, closeCode }
+  return { state: s, load, setSource, setRefresh, addMinimax, removeMinimax, share, unshare, copyCode, closeCode }
 }
 
 /** 設定頁快照：沒有 key，只有帳號與有沒有存。 */
 export function quotaReadersView(s) {
   return {
     grok: s.grok, agy: s.agy, agyAccount: s.agyAccount, minimax: s.minimax, minimaxSupported: s.minimaxSupported, status: s.status,
+    extra: s.extra, extraRefresh: s.extraRefresh, extraDirs: s.extraDirs,
     busy: s.busy, msg: s.msg, code: s.code, copied: s.copied, confirm: s.confirm,
   }
 }
