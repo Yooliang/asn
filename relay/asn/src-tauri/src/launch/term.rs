@@ -2451,7 +2451,7 @@ pub fn partner_notices() -> Vec<PartnerNotice> {
 
 /// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。預設關；只標狀態與提醒本人，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
-pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
+pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
     use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
     if !super::screen_watch::enabled(std::env::var(ENV_SCREEN_WATCH).ok().as_deref()) || std::env::args().any(|a| a == "--shot") {
         return;
@@ -2459,7 +2459,8 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
     let sessions_dir = crate::identity::home_dir().join(".claude").join("sessions");
     let asn_dir = crate::identity::home_dir().join(".asn");
     let (status_dir, screen_dir) = (asn_dir.join("status"), asn_dir.join(crate::bridge::roster::SCREEN_DIR));
-    let log_dir = data_dir.to_path_buf();
+    // 統計行寫進機器資料夾的 ui.log，和前端的紀錄同一份（ui_log::append 的另一個呼叫端也是 work_dir）
+    let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-screen-watch".into()).spawn(move || {
         let mut schedule = Schedule::default();
         // 編號 → 目前的提醒
@@ -5724,6 +5725,15 @@ mod tests {
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             assert!(sent(&rig).is_empty());
+        }
+
+        #[test]
+        fn 讀畫面的統計行_寫進機器資料夾的_ui_log_不是資料資料夾() {
+            let lib = include_str!("../lib.rs").replace("\r\n", "\n");
+            assert!(lib.contains("start_screen_watch(terms.clone(), &work_dir)"), "接線要傳 work_dir");
+            assert!(lib.contains("ui_log::append(&app.work_dir, &lines)"), "前端的紀錄也寫在 work_dir，兩邊要同一份");
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            assert!(src.contains("pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path)"));
         }
 
         #[test]
