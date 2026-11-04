@@ -6,6 +6,13 @@ use super::*;
 const ACK_RETRY_MAX: usize = 500;
 const ACK_RETRY_FIRST_MS: u64 = 30_000;
 const ACK_RETRY_MAX_GAP_MS: u64 = 600_000;
+/// 後台一次最多收 100 筆，而且每筆都要是 UUID，否則整批回 400
+const ACK_BATCH_MAX: usize = 100;
+
+fn is_uuid(s: &str) -> bool {
+    let groups: Vec<&str> = s.split('-').collect();
+    groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12]) && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_hexdigit()))
+}
 
 impl Core {
     pub(super) fn is_ack_retry(&self, id: &str) -> bool {
@@ -50,6 +57,11 @@ impl Core {
 
     /// 重開後讀回的清單：下一個 tick 就補
     pub(super) fn restore_ack_retry(&mut self, ids: Vec<String>) {
+        let all = ids.len();
+        let ids: Vec<String> = ids.into_iter().filter(|i| is_uuid(i)).collect();
+        if ids.len() < all {
+            self.log.line(&format!("ack retry restored: dropped {} invalid ids", all - ids.len()));
+        }
         if !ids.is_empty() {
             self.log.line(&format!("ack retry restored: {}", ids.len()));
             self.ack_retry = ids;
@@ -64,16 +76,16 @@ impl Core {
             return;
         }
         let ids = self.ack_retry.clone();
-        match self.relay.api("ack", Some(json!({ "ids": ids }))).await {
-            Ok(_) => {
-                self.log.line(&format!("ack retry ok: {}", ids.len()));
-                self.note_acked(&ids);
-            }
-            Err(e) => {
+        // 分批送；某批失敗就停，已送成功的不用再送
+        for batch in ids.chunks(ACK_BATCH_MAX) {
+            if let Err(e) = self.relay.api("ack", Some(json!({ "ids": batch }))).await {
                 self.ack_retry_gap = (self.ack_retry_gap * 2).clamp(ACK_RETRY_FIRST_MS, ACK_RETRY_MAX_GAP_MS);
                 self.ack_retry_at = now + self.ack_retry_gap;
-                self.log.line(&format!("ack retry failed: {} waiting, next in {}s: {e}", ids.len(), self.ack_retry_gap / 1000));
+                self.log.line(&format!("ack retry failed: {} waiting, next in {}s: {e}", self.ack_retry.len(), self.ack_retry_gap / 1000));
+                return;
             }
+            self.note_acked(batch);
         }
+        self.log.line(&format!("ack retry ok: {}", ids.len()));
     }
 }

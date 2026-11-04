@@ -130,3 +130,31 @@ async fn 清單不見時_要回信的信拉到就補_ack_不用回的信再轉�
     h.core.pull("test", T0 + 10).await;
     assert_eq!(forwards(&h, &uid(2)), 2, "不在 pending：多一封，不會漏");
 }
+
+#[tokio::test]
+async fn 累積超過_100_筆_每批最多_100_筆_恢復後全部補完() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    set_ack(&h, 500);
+    let ids: Vec<String> = (1..=250).map(uid).collect();
+    h.core.test_note_ack_failed(&ids);
+    h.core.tick(T0 + 30_000).await;
+    assert_eq!(h.core.test_ack_retry().len(), 250, "後台還沒好，全部留著");
+    set_ack(&h, 0);
+    let before = ack_calls(&h);
+    h.core.tick(T0 + 90_000).await;
+    assert!(h.core.test_ack_retry().is_empty(), "恢復後全部補完");
+    assert_eq!(h.fr.acked().len(), 250);
+    assert_eq!(ack_calls(&h) - before, 3, "分三批");
+}
+
+#[tokio::test]
+async fn 存檔混一筆壞的_濾掉並記_log_其他照補() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    std::fs::write(h.work.path().join("pending.json"), json!({ "version": 1, "pending": [], "ackRetry": ["not-a-uuid", uid(1)] }).to_string()).unwrap();
+    let now = T0 + 1000;
+    restart_with_known(&mut h, &[], now).await;
+    assert_eq!(h.core.test_ack_retry(), [uid(1)]);
+    assert!(h.core.log.has("dropped 1 invalid"));
+    h.core.tick(now + 1).await;
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+}
