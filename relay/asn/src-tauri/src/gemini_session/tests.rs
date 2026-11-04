@@ -150,6 +150,52 @@ fn asn_cli_路徑含引號_百分比_控制字元就不接_什麼都不寫() {
     assert!(snapshot(asn.path()).is_empty(), "拒絕時什麼都不寫");
 }
 
+#[test]
+fn cmd_裡的路徑開頭換成環境變數_取最長的_對不上用原路徑() {
+    let vars = [("LOCALAPPDATA", r"C:\Users\牧陽\AppData\Local".to_string()), ("USERPROFILE", r"C:\Users\牧陽\".to_string())];
+    assert_eq!(cmd_cli_expr(r"C:\Users\牧陽\AppData\Local\ASN\asn-cli.exe", &vars), r"%LOCALAPPDATA%\ASN\asn-cli.exe");
+    assert_eq!(cmd_cli_expr(r"c:\users\牧陽\.asn\asn-cli.exe", &vars), r"%USERPROFILE%\.asn\asn-cli.exe", "磁碟與資料夾大小寫不同也算對得上");
+    // 對不上：別的位置、只有前綴字相同但不是同一層資料夾
+    assert_eq!(cmd_cli_expr(r"C:\Program Files\ASN\asn-cli.exe", &vars), r"C:\Program Files\ASN\asn-cli.exe");
+    assert_eq!(cmd_cli_expr(r"C:\Users\牧陽2\asn-cli.exe", &vars), r"C:\Users\牧陽2\asn-cli.exe");
+    // 變數值不能用：空的、含 %（cmd 會再展開）
+    assert_eq!(cmd_cli_expr(r"C:\asn-cli.exe", &[("USERPROFILE", String::new())]), r"C:\asn-cli.exe");
+    assert_eq!(cmd_cli_expr(r"C:\a%b\asn-cli.exe", &[("USERPROFILE", r"C:\a%b".to_string())]), r"C:\a%b\asn-cli.exe");
+}
+
+/// 中文帳號（#762）：真的用 cmd 跑寫出來的 .cmd，CP950、CP65001 都要找得到 asn-cli；找不到才印 Gemini。不佔桌面、不開視窗
+#[cfg(windows)]
+#[test]
+fn 真_cmd_中文路徑的_asn_cli_在_cp950_與_cp65001_都找得到() {
+    use crate::nowin::NoWindow;
+    let t = tempfile::tempdir().unwrap();
+    let local = t.path().join("中文帳號");
+    let asn_dir = local.join("ASN");
+    std::fs::create_dir_all(&asn_dir).unwrap();
+    let cli = asn_dir.join("asn-cli.exe");
+    let sys = std::env::var("SystemRoot").unwrap();
+    std::fs::copy(Path::new(&sys).join("System32").join("hostname.exe"), &cli).unwrap();
+    let home = t.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let vars = [("LOCALAPPDATA", local.display().to_string())];
+    prepare_env(&home, &cli, true, |p| Some(p.display().to_string()), &vars).unwrap_or_default();
+    let script = home.join("gemini-statusline.cmd");
+    assert!(std::fs::read_to_string(&script).unwrap().contains(r"%LOCALAPPDATA%\ASN\asn-cli.exe"));
+    let run = |cp: u32, local_env: &Path| {
+        use std::os::windows::process::CommandExt;
+        // raw_arg：一般 arg 會把引號跳脫成 \"，cmd 就不會真的跑到腳本
+        let o = std::process::Command::new("cmd").no_window().arg("/C").raw_arg(format!("\"chcp {cp} >nul & \"{}\"\"", script.display())).env("LOCALAPPDATA", local_env).stdin(std::process::Stdio::null()).output().unwrap();
+        let mut all = o.stdout;
+        all.extend_from_slice(&o.stderr);
+        String::from_utf8_lossy(&all).trim().to_string()
+    };
+    for cp in [950, 65001] {
+        // 同一支腳本：asn-cli 不在時印 Gemini（證明腳本真的跑了），在的時候不走退路（假的 asn-cli 是 hostname.exe，輸出不固定，不比內容）
+        assert_eq!(run(cp, &t.path().join("沒有這裡")), "Gemini", "CP{cp} 真的不在才退回");
+        assert_ne!(run(cp, &local), "Gemini", "CP{cp} 要找得到 asn-cli");
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn 真的短路徑_存在的檔轉得出來_不存在的轉不出來() {

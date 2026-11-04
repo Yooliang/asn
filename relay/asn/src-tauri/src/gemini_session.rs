@@ -38,6 +38,26 @@ pub fn cmd_script(asn_cli: &str) -> String {
     .join("\r\n")
 }
 
+/// .cmd 裡 asn-cli 路徑的寫法（#762）：.cmd 是 UTF-8，cmd 卻照主控台字碼頁讀（繁中 CP950），寫死的中文路徑會讀壞、永遠走「找不到」。
+/// 環境變數展開時不經過字碼頁，所以路徑開頭對得上變數值就換成 `%變數%`；取最長的；對不上才用原路徑（不加 chcp，會改到 agy 主控台的字碼頁）。
+/// 只有開頭會換，後面還有中文的路徑仍然讀不對，只會退回印 Gemini。執行時變數不見也是一樣退回。
+fn cmd_cli_expr(asn_cli: &str, vars: &[(&str, String)]) -> String {
+    let matched = vars
+        .iter()
+        .map(|(name, value)| (*name, value.trim_end_matches(['\\', '/'])))
+        .filter(|(_, v)| !v.is_empty() && path_ok(v, true))
+        .filter(|(_, v)| asn_cli.get(..v.len()).is_some_and(|head| head.eq_ignore_ascii_case(v)) && matches!(asn_cli.as_bytes().get(v.len()), Some(b'\\' | b'/')))
+        .max_by_key(|(_, v)| v.len());
+    match matched {
+        Some((name, v)) => format!("%{name}%{}", &asn_cli[v.len()..]),
+        None => asn_cli.to_string(),
+    }
+}
+
+fn cmd_env_vars() -> Vec<(&'static str, String)> {
+    ["LOCALAPPDATA", "USERPROFILE"].into_iter().filter_map(|n| std::env::var(n).ok().map(|v| (n, v))).collect()
+}
+
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -92,14 +112,18 @@ pub fn short_path(_p: &Path) -> Option<String> {
 
 /// 準備這次 session 的設定檔，回 agy 要多帶的參數（`--settings <檔>`）。只寫 ASN 自己的資料夾（.cmd 與設定檔）。
 pub fn prepare(asn_home: &Path, asn_cli: &Path, windows: bool) -> Result<Vec<String>, String> {
-    prepare_with(asn_home, asn_cli, windows, short_path)
+    prepare_env(asn_home, asn_cli, windows, short_path, &cmd_env_vars())
 }
 
-/// 同 [`prepare`]，短路徑的轉法由呼叫端給（測試用）。
+/// 同 [`prepare`]，短路徑的轉法由呼叫端給、不換環境變數（測試用）。
+pub fn prepare_with(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>) -> Result<Vec<String>, String> {
+    prepare_env(asn_home, asn_cli, windows, shorten, &[])
+}
+
 /// 走「不帶 --settings」的退路時，順手刪掉 ASN 資料夾裡上一次留下的設定檔（#539，調查員 #1574、asn真 #1576）：
 /// 舊檔裡是上次的指令，不該留著讓人以為還在用。刪不掉（不是「本來就沒有」）只把原因接在錯誤說明後面，照樣走退路。
-pub fn prepare_with(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>) -> Result<Vec<String>, String> {
-    prepare_inner(asn_home, asn_cli, windows, shorten).map_err(|e| match discard_settings(asn_home) {
+fn prepare_env(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>, vars: &[(&str, String)]) -> Result<Vec<String>, String> {
+    prepare_inner(asn_home, asn_cli, windows, shorten, vars).map_err(|e| match discard_settings(asn_home) {
         Ok(()) => e,
         Err(why) => format!("{e}（舊設定檔刪不掉：{why}）"),
     })
@@ -112,14 +136,14 @@ fn discard_settings(asn_home: &Path) -> Result<(), String> {
     }
 }
 
-fn prepare_inner(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>) -> Result<Vec<String>, String> {
+fn prepare_inner(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>, vars: &[(&str, String)]) -> Result<Vec<String>, String> {
     let cli = asn_cli.to_string_lossy().into_owned();
     if !path_ok(&cli, windows) {
         return Err("asn-cli 的路徑含有不能放進指令的字元，這次不接 Gemini 狀態列".into());
     }
     let command = if windows {
         let cmd_path = asn_home.join(CMD_FILE);
-        write_if_changed(&cmd_path, &cmd_script(&cli))?;
+        write_if_changed(&cmd_path, &cmd_script(&cmd_cli_expr(&cli, vars)))?;
         let Some(short) = shorten(&cmd_path) else {
             return Err("轉不出 .cmd 的短路徑，這次不接 Gemini 狀態列".into());
         };
