@@ -28,6 +28,9 @@ const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 const BETA: &str = "oauth-2025-04-20";
 const LOCK: &str = ".asn-refresh.lock";
+/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入
+const RENAME_TRIES: u32 = 5;
+const RENAME_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 /// 鎖檔放這麼久就當作上一個程式當掉留下的（一次換新最多幾十秒）
 const LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -154,6 +157,18 @@ pub fn merged(raw: &Value, got: &Value, now_ms: i64) -> Option<Value> {
     Some(out)
 }
 
+/// 試到成功或次數用完，回傳最後的結果。只重試改名，不會重新向對方換新。
+fn retry_rename(tries: u32, wait: std::time::Duration, mut rename: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut left = tries.max(1);
+    loop {
+        left -= 1;
+        match rename() {
+            Err(_) if left > 0 => std::thread::sleep(wait),
+            done => return done,
+        }
+    }
+}
+
 /// 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。
 pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
     use std::io::Write;
@@ -168,7 +183,7 @@ pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
         f.write_all(value.to_string().as_bytes())?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)
+        retry_rename(RENAME_TRIES, RENAME_WAIT, || std::fs::rename(&tmp, path))
     })();
     if done.is_err() {
         let _ = std::fs::remove_file(&tmp);
