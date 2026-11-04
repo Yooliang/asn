@@ -79,9 +79,9 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
   let shuttingDown = false
   let handlers = { onSent() {}, onFail() {}, onReply() {} }
 
-  // 轉交中的信（id → 目標視窗）與收發室的 SendMessage 呼叫（tool_use_id → 信件 id）。
+  // 轉交中的信（id → 目標視窗與內文第一行）與收發室的 SendMessage 呼叫（tool_use_id → 信件 id）。
   // 收發室一輪收到好幾封時偶爾漏寫 SENT 行（10/04 兩封同時到只寫了一行，另一封被誤報轉交逾時），
-  // 所以直接看它真的呼叫成功的 SendMessage：目標相同、信文帶這封的標頭 id，就當作已轉交。
+  // 所以直接看它真的呼叫成功的 SendMessage：目標相同、信文帶這封的第一行，就當作已轉交。
   const inflight = new Map()
   const sendCalls = new Map()
   const INFLIGHT_MAX = 200
@@ -91,7 +91,11 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
     for (const c of content) {
       if (ev.type === 'assistant' && c.type === 'tool_use' && c.name === 'SendMessage') {
         const to = String(c.input?.to ?? ''), msg = String(c.input?.message ?? '')
-        for (const [id, target] of inflight) if (target === to && msg.includes(`id=${id} `)) { sendCalls.set(c.id, id); break }
+        // 私信第一行帶編號；群組訊息不帶，第一行是群組和序號。同一則群組訊息可能同時轉給好幾扇視窗，所以先找收件人也對的
+        const same = [...inflight].filter(([, x]) => msg.includes(x.head))
+        const hit = same.find(([, x]) => x.to === to)
+        if (hit) sendCalls.set(c.id, hit[0])
+        else for (const [id, x] of same) log(`forward target mismatch id=${id}: expected ${x.to}, worker sent to ${to}`)
       } else if (ev.type === 'user' && c.type === 'tool_result' && sendCalls.has(c.tool_use_id)) {
         const id = sendCalls.get(c.tool_use_id); sendCalls.delete(c.tool_use_id)
         if (!c.is_error) sentOnce(id)
@@ -108,7 +112,10 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
     const delta = cost - lastCost; lastCost = cost
     const txt = String(ev.result ?? '')
     log(`worker turn dur=${ev.duration_ms}ms cost=$${delta.toFixed(4)} is_error=${!!ev.is_error} :: ${txt.replace(/\s+/g, ' ').slice(0, 160)}`)
-    for (const m of txt.matchAll(/^SENT\s+([0-9a-f-]{36})/gim)) { inflight.delete(m[1]); void handlers.onSent(m[1]) }
+    // SENT 文字只當確認：轉交成功以 SendMessage 真的成功為準（onToolEvents）。只有文字、對不上的，照轉交逾時處理
+    for (const m of txt.matchAll(/^SENT\s+([0-9a-f-]{36})/gim)) {
+      if (inflight.has(m[1])) log(`worker said SENT without a matching send id=${m[1]}: not counted`)
+    }
     for (const m of txt.matchAll(/^FAIL\s+([0-9a-f-]{36})\s*(.*)$/gim)) { inflight.delete(m[1]); void handlers.onFail(m[1], m[2]) }
     for (const m of txt.matchAll(REPLY_RE)) void handlers.onReply(m[1].trim(), m[2])
     // 收發室若沿用了訊息內文裡的假編號（被內文帶壞），它之後的輸出都會對不上：記錄並重啟收發室（fail-closed，內文無法借此冒名）
@@ -171,7 +178,7 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
     // 收發室沒起來時 throw（橋把信留在 inbox 不 ack）
     deliver({ id, to, text }) {
       if (inflight.size >= INFLIGHT_MAX) inflight.delete(inflight.keys().next().value)
-      inflight.set(id, to)
+      inflight.set(id, { to, head: text.split('\n', 1)[0] })
       workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${id} to=${to}]\n<<<MAIL\n${text}\nMAIL>>>`)
     },
     // 開新視窗用的零件（launcher.mjs 依本機 launcher.json 組好 command/args/cwd/env 後呼叫 openWindow）

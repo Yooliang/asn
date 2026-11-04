@@ -19,13 +19,14 @@ rl.on('line', line => {
   fs.appendFileSync(process.env.FAKE_RECORD, JSON.stringify({ id: m[1], to: m[2], text }) + '\n')
   // FAKE_FORWARD=tool：真的「呼叫」SendMessage（輸出 tool_use／tool_result 事件）但結果文字漏寫 SENT 行；
   // FAKE_FORWARD=silent：什麼都不輸出（模擬收發室完全沒回報）
+  // FAKE_FORWARD=text：沒有呼叫 SendMessage，卻寫了 SENT 行；FAKE_FORWARD=wrong：呼叫了但收件人不對，還是寫 SENT 行
   if (process.env.FAKE_FORWARD === 'silent') return
-  if (process.env.FAKE_FORWARD === 'tool') {
+  if (process.env.FAKE_FORWARD !== 'text') {
     const mailText = text.slice(text.indexOf('<<<MAIL\n') + 8, text.lastIndexOf('\nMAIL>>>'))
     const tid = `toolu_${m[1].slice(-6)}`
-    process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name: 'SendMessage', input: { to: m[2], message: mailText, summary: '轉交 relay 來信' } }] } }) + '\n')
+    process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name: 'SendMessage', input: { to: process.env.FAKE_FORWARD === 'wrong' ? 'T-別人' : m[2], message: mailText, summary: '轉交 relay 來信' } }] } }) + '\n')
     process.stdout.write(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: tid, content: '{"success":true}' }] } }) + '\n')
-    return emit('')
+    if (process.env.FAKE_FORWARD === 'tool') return emit('')
   }
   emit(`SENT ${m[1]}` + (process.env.FAKE_REPLY ? '\n' + block(m[2], process.env.FAKE_REPLY) : ''))
 })

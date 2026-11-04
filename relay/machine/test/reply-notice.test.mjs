@@ -200,6 +200,21 @@ test('收發室有成功呼叫 SendMessage 但漏寫 SENT 行 → 照樣算已�
   } finally { await st.close() }
 })
 
+test('收發室只寫了 SENT、沒有真的轉交成功 → 不算已轉交，不 ack，走轉交逾時（#671）', async () => {
+  for (const [how, why] of [['text', /said SENT without a matching send/], ['wrong', /forward target mismatch .*worker sent to T-別人/]]) {
+    const st = await fakeServer([mail(1)])
+    try {
+      const { log } = await go({
+        st, env: { FAKE_FORWARD: how, IRORI_FORWARD_TIMEOUT_MS: '500', IRORI_REPLY_TIMEOUT_MS: '60000' },
+        step: c => forwardTimeouts(c.st).length >= 1,
+      })
+      assert.match(log, why, how)
+      assert.doesNotMatch(log, new RegExp(`forwarded id=${uid(1)}`), how)
+      assert.equal(forwardTimeouts(st)[0].reply_to, uid(1), how)
+    } finally { await st.close() }
+  }
+})
+
 test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 不寄「轉交逾時」；沒回的那封照常寄', async () => {
   const st = await fakeServer([mail(1), mail(2)])
   try {
