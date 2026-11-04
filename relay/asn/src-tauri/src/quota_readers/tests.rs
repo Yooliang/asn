@@ -246,6 +246,8 @@ fn source_never_touches_claude_home() {
 fn cred_round_trip() {
     let target = format!("ASN/quota-minimax-test/{}", std::process::id());
     assert_eq!(cred::read(&target), None);
+    cred::write(&target, "").unwrap();
+    assert_eq!(cred::read(&target), None, "空的憑證當成沒有");
     cred::write(&target, "test-value").unwrap();
     let got = cred::read(&target);
     cred::delete(&target);

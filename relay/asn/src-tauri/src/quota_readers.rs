@@ -306,7 +306,8 @@ pub mod cred {
                 return None;
             }
             let c = &*p;
-            let bytes = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize).to_vec();
+            // 空的憑證 CredentialBlob 可能是 null，不能拿去建 slice
+            let bytes = if c.CredentialBlob.is_null() || c.CredentialBlobSize == 0 { vec![] } else { std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize).to_vec() };
             CredFree(p as *const _);
             String::from_utf8(bytes).ok().filter(|s| !s.is_empty())
         }
