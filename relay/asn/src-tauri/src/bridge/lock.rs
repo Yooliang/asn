@@ -66,6 +66,13 @@ fn holder_of(work_dir: &Path, pid: u32) -> Holder<'static> {
     Holder { alive: crate::heartbeat::pid_alive(pid), started_ms: crate::heartbeat::process_started_ms(pid), written_ms: modified_ms(&file), image: crate::heartbeat::process_image(pid), images }
 }
 
+/// 測試失敗時印當下查到的東西用
+#[cfg(test)]
+pub fn holder_debug(work_dir: &Path, pid: u32) -> String {
+    let h = holder_of(work_dir, pid);
+    format!("{h:?} counts={} pid_file={:?}", h.counts(), read_pid(&pid_file(work_dir)))
+}
+
 /// 正式用的存活判斷（拿鎖、顯示狀態）：見 [`Holder::counts`]
 pub fn holder_alive(work_dir: &Path) -> impl Fn(u32) -> bool + '_ {
     move |pid| holder_of(work_dir, pid).counts()
@@ -207,6 +214,25 @@ mod tests {
         let l = BridgeLock::acquire(d.path(), 7, holder_alive(d.path())).expect("內建橋可以接手");
         assert_eq!(read_pid(&pid_file(d.path())), Some(7));
         drop(l);
+    }
+
+    /// #739 的 CI 偶發：剛開的假舊橋沒被當成舊橋。重複開很多次，看查到的是什麼（只在 Linux 有 /proc）
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn 剛開的程序馬上查_每次都算有人在收信() {
+        let d = tempfile::tempdir().unwrap();
+        let mut bad = vec![];
+        for i in 0..300 {
+            let mut c = std::process::Command::new("sleep").arg("5").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+            std::fs::write(pid_file(d.path()), c.id().to_string()).unwrap();
+            let ok = holder_alive(d.path())(c.id());
+            if !ok {
+                bad.push(format!("第 {i} 次：{}", holder_debug(d.path(), c.id())));
+            }
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        assert!(bad.is_empty(), "{} 次判錯：{:?}", bad.len(), bad.iter().take(5).collect::<Vec<_>>());
     }
 
     #[test]
