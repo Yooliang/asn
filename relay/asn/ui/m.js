@@ -37,7 +37,8 @@ import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
-import { authApi, invoke, listen, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
+import { CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
@@ -437,6 +438,24 @@ const app = createApp({
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
+    // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
+    const cloud = createMobileCloud({
+      api: cloudApi, status: authApi.status, reactive,
+      clip: { write: t => navigator.clipboard.writeText(t) },
+      timer: { set: (f, ms) => setTimeout(f, ms), clear: id => clearTimeout(id) },
+    })
+    const cloudSt = cloud.state
+    let cloudTimer = null
+    watch(settingCat, (c, old) => {
+      if (c === 'cloud') {
+        void cloud.load()
+        clearInterval(cloudTimer); cloudTimer = setInterval(() => void cloud.load(), CLOUD_POLL_MS)
+      } else if (old === 'cloud') {
+        clearInterval(cloudTimer); cloudTimer = null
+        void cloud.leave()
+      }
+    })
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) cloud.onVisible() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
@@ -1005,6 +1024,7 @@ const app = createApp({
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
+      cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
       settingRows, settingCat, settingTitle, openSetting, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },

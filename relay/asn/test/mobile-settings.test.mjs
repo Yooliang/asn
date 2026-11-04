@@ -8,14 +8,14 @@ import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { normalizeNav, pageNav, tabNav } from '../ui/lib/mobile.mjs'
 
 test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦版的分類定義', () => {
-  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'accounts', 'notify', 'update', 'about'])   // #268、#650：設備與帳號拆成兩列，順序與電腦版一致
-  assert.deepEqual(SETTING_SHEET_KEYS, ['me', 'notify', 'update', 'about'])
+  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'notify', 'update', 'about'])   // #268、#650：設備與帳號拆成兩列，順序與電腦版一致；#756：雲端代理獨立一列
+  assert.deepEqual(SETTING_SHEET_KEYS, ['me', 'cloud', 'notify', 'update', 'about'])
   const rows = mobileSettingRows({})
   assert.deepEqual(rows.map(r => r.key), MOBILE_SETTING_KEYS)
   for (const r of rows) {
     const c = SETTING_CATS.find(x => x.key === r.key)
-    assert.ok(c, `${r.key} 不在電腦版分類裡`)
-    assert.equal(r.title, c.title); assert.equal(r.icon, c.icon)
+    if (r.key === 'cloud') { assert.equal(c, undefined, '雲端代理在電腦版是帳號分類的一部分，手機自己獨立一列'); assert.equal(r.title, '雲端代理') }
+    else { assert.ok(c, `${r.key} 不在電腦版分類裡`); assert.equal(r.title, c.title); assert.equal(r.icon, c.icon) }
     assert.ok(r.icon.length > 0)
   }
   assert.equal(mobileSettingTitle('notify'), '通知')

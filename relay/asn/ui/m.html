@@ -401,6 +401,66 @@
                         <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
                       </div>
                 </template>
+                <template v-else-if="settingCat === 'cloud'">
+                  <!-- 雲端代理（#756）：邀請雲端代理、金鑰只顯示一次、清單與撤銷、核准無畫面主機。沒登入不能用 -->
+                  <div class="m-card m-form m-cloud" :aria-label="CLOUD_TEXT.title">
+                    <p class="m-note" v-if="cloudSt.signedIn === false">{{ CLOUD_TEXT.needLogin }}</p>
+                    <p class="m-note" v-else-if="cloudSt.signedIn === null">{{ cloudSt.msg || CLOUD_TEXT.loading }}</p>
+                    <template v-else>
+                      <div class="m-cloud-created" v-if="cloudSt.stage === 'created' && cloudSt.created">
+                        <b>{{ CLOUD_TEXT.created(cloudSt.created.name) }}</b>
+                        <p class="m-cloud-step">{{ CLOUD_TEXT.step1 }}</p>
+                        <input class="set-input m-cloud-key" readonly :type="cloudSt.reveal ? 'text' : 'password'" :value="cloudSt.created.key" aria-label="金鑰" autocomplete="off" autocapitalize="off" spellcheck="false">
+                        <div class="m-cloud-btns">
+                          <button class="m-btn" type="button" @click="cloudSt.reveal = !cloudSt.reveal">{{ cloudSt.reveal ? CLOUD_TEXT.hide : CLOUD_TEXT.show }}</button>
+                          <button class="m-btn" type="button" @click="cloud.copyKey">{{ cloudSt.copiedKey ? CLOUD_TEXT.copiedKey : CLOUD_TEXT.copyKey }}</button>
+                        </div>
+                        <p class="m-fine">{{ CLOUD_COPY_NOTE }}</p>
+                        <p class="m-fine">{{ CLOUD_TEXT.clipNote }}</p>
+                        <p class="m-fine" v-if="cloudSt.clipNote" role="status">{{ cloudSt.clipNote }}</p>
+                        <p class="m-cloud-step">{{ CLOUD_TEXT.step2 }}</p>
+                        <div class="m-cloud-btns"><button class="m-btn" type="button" @click="cloud.copyInvite">{{ cloudSt.copiedInvite ? CLOUD_TEXT.copiedInvite : CLOUD_TEXT.copyInvite }}</button></div>
+                        <p class="m-fine">{{ CLOUD_INVITE_NOTE }}</p>
+                        <p class="m-cloud-step">{{ CLOUD_TEXT.step3 }}</p>
+                        <p class="m-fine" role="status">{{ cloud.justJoined() ? CLOUD_TEXT.joined(cloudSt.created.name) : CLOUD_TEXT.waiting }}</p>
+                        <div class="m-cloud-btns"><button class="m-btn" type="button" @click="cloud.done">{{ CLOUD_TEXT.done }}</button></div>
+                      </div>
+                      <div class="m-cloud-form" v-else-if="cloudSt.stage === 'form'">
+                        <label>{{ CLOUD_TEXT.nameLabel }}<input class="set-input" v-model="cloudSt.name" maxlength="40" enterkeyhint="done" :aria-label="CLOUD_TEXT.nameLabel" @keydown.enter.prevent="cloud.create"></label>
+                        <p class="m-fine">{{ CLOUD_TEXT.nameHint }}</p>
+                        <div class="m-cloud-btns">
+                          <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.create">{{ CLOUD_TEXT.create }}</button>
+                          <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelForm">{{ CLOUD_TEXT.cancel }}</button>
+                        </div>
+                      </div>
+                      <template v-else>
+                        <div class="m-cloud-btns"><button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openForm()">{{ CLOUD_TEXT.invite }}</button></div>
+                        <div class="m-cloud-form" v-if="cloudSt.approveForm">
+                          <b>{{ CLOUD_TEXT.approveTitle }}</b>
+                          <label>{{ CLOUD_TEXT.approveCode }}<input class="set-input" v-model="cloudSt.code" maxlength="12" placeholder="ABCD-2345" autocomplete="off" autocapitalize="characters" spellcheck="false" :aria-label="CLOUD_TEXT.approveCode"></label>
+                          <label>{{ CLOUD_TEXT.approveName }}<input class="set-input" v-model="cloudSt.hostName" maxlength="40" :aria-label="CLOUD_TEXT.approveName"></label>
+                          <label>{{ CLOUD_TEXT.approveId }}<input class="set-input" v-model="cloudSt.hostId" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" :aria-label="CLOUD_TEXT.approveId"></label>
+                          <div class="m-cloud-btns">
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.approve">{{ CLOUD_TEXT.approveGo }}</button>
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelApprove">{{ CLOUD_TEXT.cancel }}</button>
+                          </div>
+                        </div>
+                        <div class="m-cloud-btns" v-else><button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openApprove">{{ CLOUD_TEXT.approveBtn }}</button></div>
+                        <p class="m-fine" v-if="cloudSt.approved" role="status">{{ cloudSt.approved }}</p>
+                        <ul class="m-cloud-list" v-if="cloudSt.rows.length" :aria-label="CLOUD_TEXT.title">
+                          <li v-for="r in cloudSt.rows" :key="r.id">
+                            <span class="m-cloud-tx"><b>{{ r.name }}<em v-if="r.state === 'online'">在線</em></b><small :title="r.title">{{ r.status }}</small></span>
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.revoke(r.id)">{{ cloudSt.confirmId === r.id ? CLOUD_TEXT.revokeSure : CLOUD_TEXT.revoke }}</button>
+                          </li>
+                        </ul>
+                        <p class="m-fine" v-else>{{ CLOUD_TEXT.empty }}</p>
+                        <p class="m-fine" v-if="cloudSt.confirmId">{{ CLOUD_TEXT.revokeNote }}</p>
+                        <p class="m-fine">{{ CLOUD_TEXT.lostKey }}</p>
+                      </template>
+                    </template>
+                    <p class="m-err" v-if="cloudSt.msg" role="status">{{ cloudSt.msg }}</p>
+                  </div>
+                </template>
                 <template v-else-if="settingCat === 'notify'">
                       <div class="m-card m-form">
                         <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
