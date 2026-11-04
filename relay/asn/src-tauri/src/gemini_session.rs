@@ -41,7 +41,11 @@ pub fn cmd_script(asn_cli: &str) -> String {
 /// .cmd 裡 asn-cli 路徑的寫法（#762）：.cmd 是 UTF-8，cmd 卻照主控台字碼頁讀（繁中 CP950），寫死的中文路徑會讀壞、永遠走「找不到」。
 /// 環境變數展開時不經過字碼頁，所以路徑開頭對得上變數值就換成 `%變數%`；取最長的；對不上才用原路徑（不加 chcp，會改到 agy 主控台的字碼頁）。
 /// 只有開頭會換，後面還有中文的路徑仍然讀不對，只會退回印 Gemini。執行時變數不見也是一樣退回。
+/// 路徑全是 ASCII 就不換：字碼頁讀得對，不必多依賴執行時的環境變數（真的 agy 還沒驗過這條路）。
 fn cmd_cli_expr(asn_cli: &str, vars: &[(&str, String)]) -> String {
+    if asn_cli.is_ascii() {
+        return asn_cli.to_string();
+    }
     let matched = vars
         .iter()
         .map(|(name, value)| (*name, value.trim_end_matches(['\\', '/'])))

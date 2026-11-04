@@ -163,6 +163,17 @@ fn cmd_裡的路徑開頭換成環境變數_取最長的_對不上用原路徑()
     assert_eq!(cmd_cli_expr(r"C:\a%b\asn-cli.exe", &[("USERPROFILE", r"C:\a%b".to_string())]), r"C:\a%b\asn-cli.exe");
 }
 
+#[test]
+fn cmd_路徑全是_ascii_就不換環境變數() {
+    let vars = [("LOCALAPPDATA", r"C:\Users\amy\AppData\Local".to_string()), ("USERPROFILE", r"C:\Users\amy".to_string())];
+    let cli = r"C:\Users\amy\AppData\Local\ASN\asn-cli.exe";
+    assert_eq!(cmd_cli_expr(cli, &vars), cli, "英文帳號維持寫死的絕對路徑");
+    // prepare_env 整條路走一次：寫出來的 .cmd 也是原路徑
+    let asn = tempfile::tempdir().unwrap();
+    prepare_env(asn.path(), Path::new(cli), true, |_| Some(SHORT.to_string()), &vars).unwrap();
+    assert_eq!(std::fs::read_to_string(asn.path().join("gemini-statusline.cmd")).unwrap(), cmd_script(cli));
+}
+
 /// 中文帳號（#762）：真的用 cmd 跑寫出來的 .cmd，CP950、CP65001 都要找得到 asn-cli；找不到才印 Gemini。不佔桌面、不開視窗
 #[cfg(windows)]
 #[test]
