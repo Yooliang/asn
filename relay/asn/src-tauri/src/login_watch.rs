@@ -422,7 +422,7 @@ pub fn worker_errors_since(since_ms: i64) -> usize {
 pub fn record_worker_login_error(now_ms: i64) {
     let mut v = WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner());
     v.push(now_ms);
-    v.retain(|&t| t >= now_ms - LOOKBACK_MS);
+    // 不依呼叫端傳來的時間清舊的（測試的假時間會互相清掉）：只限筆數；太舊的由判定那邊的回看範圍忽略
     if v.len() > 20 {
         let extra = v.len() - 20;
         v.drain(..extra);
