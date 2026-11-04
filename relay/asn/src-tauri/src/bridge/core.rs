@@ -4,6 +4,7 @@
 use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
 use super::engines::{EngineEvent, EngineSet};
+use super::forward_selftest;
 use super::launcher::{Launched, Launcher};
 use super::partner_ops::{CommandJob, PartnerOps};
 use super::slash;
@@ -24,6 +25,7 @@ mod fail_notice;
 mod held_notice;
 mod misroute;
 mod quota;
+mod selftest;
 mod wait_notice;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
@@ -441,8 +443,13 @@ pub struct Core {
     await_first: HashMap<String, u64>,
     /// 走原文替換的編號 → 全文雜湊（收到 Sent 時核對已套用紀錄）
     exact_ids: HashMap<String, String>,
-    /// 啟動自我測試通過了（還沒有自我測試，永遠是 false）
+    /// 啟動自我測試通過了（見 core/selftest.rs；沒開旗標、沒通過、測不了都是 false）
     exact_verified: bool,
+    /// 自我測試：背景執行緒交回的結果（取走就清空）、有沒有正在跑、下次最早什麼時候再跑、做法（測試時換成假的）
+    selftest_slot: Arc<std::sync::Mutex<Option<(Option<String>, forward_selftest::Outcome)>>>,
+    selftest_busy: bool,
+    selftest_next_at: u64,
+    selftest_src: selftest::SelftestFn,
     /// 已經因為「內文沒套用」重送過一次的編號
     not_applied_once: HashSet<String>,
     probing: bool,
@@ -494,7 +501,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, not_applied_once: HashSet::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -504,6 +511,24 @@ impl Core {
             c.log.line("forward-exact forced on: 未驗證（沒有通過自我測試，只給開發機用）");
         }
         c
+    }
+
+    /// 測試用：換掉自我測試的做法
+    #[cfg(test)]
+    pub fn test_set_selftest(&mut self, f: impl Fn(&str, &std::path::Path) -> (Option<String>, forward_selftest::Outcome) + Send + Sync + 'static) {
+        self.selftest_src = Arc::new(f);
+    }
+
+    /// 測試用：原文替換現在生效嗎
+    #[cfg(test)]
+    pub fn test_exact_active(&self) -> bool {
+        self.exact_active()
+    }
+
+    /// 測試用：自我測試的背景工作做完了沒
+    #[cfg(test)]
+    pub fn test_selftest_busy(&self) -> bool {
+        self.selftest_busy
     }
 
     /// 測試用：原文替換的編號是不是空的
@@ -2187,6 +2212,7 @@ impl Core {
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
         self.wait_notice_tick(now).await;
+        self.selftest_tick(now).await;
         // 收信暫停的時間變了（開始扣住、或恢復）：馬上重報名單把值帶給後台（還沒報過第一次的交給啟動時的名單）
         if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until() || self.hold_cap_due()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {
             self.hold_try_at = now;
