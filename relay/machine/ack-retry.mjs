@@ -8,11 +8,17 @@ export const ACK_RETRY_MAX = 500
 export const ACK_RETRY_FIRST_MS = 30_000
 export const ACK_RETRY_MAX_GAP_MS = 600_000
 export const ACK_RETRY_TICK_MS = 5_000
+// 後台一次最多收 100 筆，而且每筆都要是 UUID，否則整批回 400
+export const ACK_BATCH_MAX = 100
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function loadIds(file, log) {
   try {
     const ids = JSON.parse(fs.readFileSync(file, 'utf8')).ids
-    return Array.isArray(ids) ? ids.filter(i => typeof i === 'string').slice(0, ACK_RETRY_MAX) : []
+    if (!Array.isArray(ids)) return []
+    const good = ids.filter(i => typeof i === 'string' && UUID.test(i))
+    if (good.length < ids.length) log(`ack retry file: dropped ${ids.length - good.length} invalid ids`)
+    return good.slice(0, ACK_RETRY_MAX)
   } catch (e) {
     if (e.code !== 'ENOENT') log(`ack retry file unreadable, ignored: ${e.message}`)
     return []
@@ -64,13 +70,17 @@ export function createAckRetry({ post, file, log, seen, firstMs = ACK_RETRY_FIRS
       running = true
       const list = [...ids]
       try {
-        await post(list)
+        // 分批送；某批失敗就停，已送成功的不用再送
+        for (let i = 0; i < list.length; i += ACK_BATCH_MAX) {
+          const batch = list.slice(i, i + ACK_BATCH_MAX)
+          await post(batch)
+          acked(batch)
+        }
         log(`ack retry ok: ${list.length}`)
-        acked(list)
       } catch (e) {
         gap = Math.min(gap * 2, ACK_RETRY_MAX_GAP_MS)
         at = now() + gap
-        log(`ack retry failed: ${list.length} waiting, next in ${Math.round(gap / 1000)}s: ${e.message}`)
+        log(`ack retry failed: ${ids.length} waiting, next in ${Math.round(gap / 1000)}s: ${e.message}`)
       } finally {
         running = false
       }

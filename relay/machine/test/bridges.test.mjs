@@ -32,6 +32,8 @@ async function fakeServer({ inbox, aegis = {}, members, ackFail = 0 }) {
       if (a === 'ack') {
         const { ids } = await readBody(req)
         st.ackCalls++
+        // 和真的後台同樣的規則：超過 100 筆或不是 UUID，整批 400
+        if (!Array.isArray(ids) || ids.length > 100 || !ids.every(i => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i))) return out(400, { error: 'bad_ids' })
         if (st.ackFail > 0) { st.ackFail--; return out(500, { error: 'boom' }) }
         ids.forEach(i => st.acked.add(i))
         return out(200, { ok: true })
@@ -475,7 +477,7 @@ test('bridge: 重開後讀回待補清單，不再轉交；清單不見時還在
         const extra = mainSetup(SESSIONS)(home)
         const work = path.join(home, '.asn', 'machine-T')
         fs.mkdirSync(work, { recursive: true })
-        fs.writeFileSync(path.join(work, 'ack-retry.json'), JSON.stringify({ ids: [uid(1)] }))
+        fs.writeFileSync(path.join(work, 'ack-retry.json'), JSON.stringify({ ids: ['not-a-uuid', uid(1)] }))   // 混一筆壞的：其他照補
         const t = Date.now()
         fs.writeFileSync(path.join(work, 'pending.json'), JSON.stringify({ version: 1, last: {}, pending: [{ id: uid(2), from_node: 'W', from_agent: 'W-政策', target: 'T-最近的', state: 'waiting', t0: t, t, noReply: false, replied: false, notifiedAt: null, room: null }] }))
         return extra
