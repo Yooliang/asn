@@ -124,12 +124,15 @@ try {
   await new Promise((r, j) => { server.once('error', j); server.listen(0, '127.0.0.1', r) })
   const base = `http://127.0.0.1:${server.address().port}`
   profile = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-smoke-'))
-  child = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'], { stdio: 'ignore', windowsHide: true })
+  child = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+  let browserErr = ''
+  child.stderr?.on('data', d => { browserErr = (browserErr + d).slice(-2000) })
   child.on('error', e => fatal(`瀏覽器啟動失敗：${e.message}`))
   console.log(`冒煙測試：瀏覽器 ${browserPath}（PID ${child.pid}），伺服器 ${base}`)
   const portFile = path.join(profile, 'DevToolsActivePort')
-  for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await sleep(150)
-  if (!fs.existsSync(portFile)) throw new Error('瀏覽器沒有開出偵錯連線（無頭模式啟動失敗）')
+  // 機器忙時（CI）15 秒不夠；瀏覽器提早結束就不用等滿，並把結束碼和最後的錯誤訊息印出來（#752）
+  for (let i = 0; i < 400 && !fs.existsSync(portFile) && child.exitCode === null && child.signalCode === null; i++) await sleep(150)
+  if (!fs.existsSync(portFile)) throw new Error(`瀏覽器沒有開出偵錯連線（無頭模式啟動失敗；結束碼 ${child.exitCode}、訊號 ${child.signalCode}）${browserErr ? `：${browserErr.slice(-500)}` : ''}`)
   const [port, wsPath] = fs.readFileSync(portFile, 'utf8').trim().split(/\r?\n/)
   const cdp = await connect(`ws://127.0.0.1:${port}${wsPath}`)
   for (const sc of scenarios) {
