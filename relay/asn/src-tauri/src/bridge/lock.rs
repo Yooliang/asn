@@ -66,16 +66,18 @@ fn holder_of(work_dir: &Path, pid: u32) -> Holder<'static> {
     Holder { alive: crate::heartbeat::pid_alive(pid), started_ms: crate::heartbeat::process_started_ms(pid), written_ms: modified_ms(&file), image: crate::heartbeat::process_image(pid), images }
 }
 
-/// 測試失敗時印當下查到的東西用
-#[cfg(test)]
-pub fn holder_debug(work_dir: &Path, pid: u32) -> String {
-    let h = holder_of(work_dir, pid);
-    format!("{h:?} counts={} pid_file={:?}", h.counts(), read_pid(&pid_file(work_dir)))
-}
-
 /// 正式用的存活判斷（拿鎖、顯示狀態）：見 [`Holder::counts`]
 pub fn holder_alive(work_dir: &Path) -> impl Fn(u32) -> bool + '_ {
-    move |pid| holder_of(work_dir, pid).counts()
+    move |pid| {
+        let h = holder_of(work_dir, pid);
+        let counts = h.counts();
+        // 測試偶發判錯時要當下的值：事後再查，bridge.pid 已經被接手的人改掉了
+        #[cfg(test)]
+        if !counts {
+            elog!("[holder] 不算有人在收信：pid={pid} {h:?}");
+        }
+        counts
+    }
 }
 
 /// 要結束這個程序之前的核對：見 [`Holder::may_kill`]
@@ -228,7 +230,7 @@ mod tests {
             std::fs::write(pid_file(d.path()), c.id().to_string()).unwrap();
             let ok = holder_alive(d.path())(c.id());
             if !ok {
-                bad.push(format!("第 {i} 次：{}", holder_debug(d.path(), c.id())));
+                bad.push(format!("第 {i} 次（詳情見 [holder] 那行）"));
             }
             let _ = c.kill();
             let _ = c.wait();

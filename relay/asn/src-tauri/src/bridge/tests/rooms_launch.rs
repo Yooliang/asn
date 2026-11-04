@@ -1111,8 +1111,7 @@ fn 管理器_舊橋退出後自動接手_設定關著或舊橋還在就不動() 
             // 設定關著：什麼都不做，連輪詢接手也不動
             m.start_if_enabled();
             m.poll_handoff();
-            let pid = super::super::lock::read_pid(&super::super::lock::pid_file(work.path()));
-            assert!(!m.status().running, "假舊橋沒被當成舊橋：{:?} {:?} old={:?}", m.status(), pid.map(|p| super::super::lock::holder_debug(work.path(), p)), old.lock().unwrap().as_ref().map(|c| c.id()));
+            assert!(!m.status().running, "假舊橋（{:?}）沒被當成舊橋，判斷當下的值見 [holder] 那行：{:?}", old.lock().unwrap().as_ref().map(|c| c.id()), m.status());
             super::super::write_settings(data.path(), super::super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
             m.start_if_enabled();
             let st = m.status();
