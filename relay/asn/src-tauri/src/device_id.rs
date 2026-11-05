@@ -302,6 +302,17 @@ pub mod live {
         for id in done {
             let _ = relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await;
         }
+        // 後台已經沒有的（對方 7 天內沒確認、這台太久沒開）：不留著假裝還在等，告訴本人一次
+        let on_server: Vec<&str> = v.get("outgoing").and_then(Value::as_array).unwrap_or(&empty).iter().filter_map(|r| r.get("id").and_then(Value::as_str)).collect();
+        let gone = update(dir, |t| {
+            let gone: Vec<Outgoing> = t.outgoing.iter().filter(|o| !on_server.contains(&o.id.as_str())).cloned().collect();
+            t.outgoing.retain(|o| on_server.contains(&o.id.as_str()));
+            Ok(gone)
+        })?;
+        for o in gone {
+            let fp = fingerprint(me_node, &me_pub, &o.to_node, &o.to_pub);
+            outgoing.push(json!({ "id": o.id, "to_node": o.to_node, "to_name": o.to_name, "fingerprint": fp, "status": "expired" }));
+        }
         let trust = read(dir)?;
         let incoming: Vec<Value> = v
             .get("incoming")
@@ -373,7 +384,10 @@ pub mod live {
             t.outgoing.retain(|o| o.id != id);
             Ok(())
         })?;
-        relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await.map(|_| ())
+        match relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await {
+            Err(e) if !e.contains("not_found") => Err(e),
+            _ => Ok(()), // 後台已經沒有這筆，就是收掉了
+        }
     }
 
     /// 撤銷一台：只動本機。信任只看本機記的，所以這裡撤了就生效

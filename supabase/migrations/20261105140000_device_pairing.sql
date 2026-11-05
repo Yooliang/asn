@@ -3,7 +3,8 @@
 --   * 後台只轉交公鑰，**信任只看各台本機記的**：後台被控制也變不出配對（對方會用本機記的公鑰驗簽章）。
 --   * 配對請求留 7 天：本人在 D 按，回到 T 比對指紋再按確認，不必同時在場。T 確認前什麼都不生效。
 --   * 全部動作都要本人簽章，而且兩台都是這個人的（asn_user_owns_node）。只有公鑰上傳用節點金鑰。
---   * 同一對設備同時只有一筆進行中；每個節點每小時最多發 20 筆。結案一天後刪除。
+--   * 同一對設備同時只有一筆進行中；每個節點每小時最多發 20 筆。
+--   * 已確認的列留到 D 收掉，最多 7 天：T 確認時 D 可能沒開機，要等它來領簽章。其他結案的一天後刪除。
 -- 先不用：舊版不會呼叫這幾個動作，什麼都不會變。這張還沒有任何東西會看畫面。
 -- 回復：drop 這些函式與 relay.device_keys、relay.device_pairs。
 begin;
@@ -15,8 +16,8 @@ create table if not exists relay.device_keys (
   updated_at timestamptz not null default now(),
   constraint device_keys_pkey primary key (node),
   constraint device_keys_pub_check check (sign_pub ~ '^[A-Za-z0-9_-]{43}$'),
-  constraint device_keys_node_fkey foreign key (node) references relay.nodes(id),
-  constraint device_keys_node_same_tenant foreign key (tenant_id, node) references relay.nodes(tenant_id, id)
+  constraint device_keys_node_fkey foreign key (node) references relay.nodes(id) on delete cascade,
+  constraint device_keys_node_same_tenant foreign key (tenant_id, node) references relay.nodes(tenant_id, id) on delete cascade
 );
 alter table relay.device_keys enable row level security;
 revoke all on relay.device_keys from public, anon, authenticated;
@@ -38,8 +39,8 @@ create table if not exists relay.device_pairs (
   constraint device_pairs_to_pub_check check (to_pub ~ '^[A-Za-z0-9_-]{43}$'),
   constraint device_pairs_sig_check check (confirm_sig is null or confirm_sig ~ '^[A-Za-z0-9_-]{86}$'),
   constraint device_pairs_status_check check (status = any (array['pending','confirmed','rejected','cancelled','expired'])),
-  constraint device_pairs_from_fkey foreign key (from_node) references relay.nodes(id),
-  constraint device_pairs_to_fkey foreign key (to_node) references relay.nodes(id)
+  constraint device_pairs_from_fkey foreign key (from_node) references relay.nodes(id) on delete cascade,
+  constraint device_pairs_to_fkey foreign key (to_node) references relay.nodes(id) on delete cascade
 );
 create index if not exists device_pairs_from_idx on relay.device_pairs (from_node, created_at);
 create index if not exists device_pairs_to_idx on relay.device_pairs (to_node, status);
@@ -51,7 +52,9 @@ create or replace function public.asn_relay_device_pair_expire()
 as $function$
 begin
   update relay.device_pairs set status = 'expired', decided_at = now() where status = 'pending' and expires_at <= now();
-  delete from relay.device_pairs where status <> 'pending' and decided_at < now() - interval '1 day';
+  delete from relay.device_pairs
+    where (status = 'confirmed' and decided_at < now() - interval '7 days')
+       or (status not in ('pending', 'confirmed') and decided_at < now() - interval '1 day');
 end;
 $function$;
 

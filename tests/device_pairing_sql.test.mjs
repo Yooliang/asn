@@ -134,6 +134,30 @@ test('7 天過期；發起方撤回；一天後清掉', { skip }, async () => {
   assert.equal((await db.query(`select count(*)::int n from relay.device_pairs`)).rows[0].n, 0)
 })
 
+test('已確認的列等 D 來領，最多 7 天；其他結案的一天後清掉', { skip }, async () => {
+  const db = await ready()
+  const s = await start(db)
+  await decide(db, s.id)
+  await db.query(`update relay.device_pairs set decided_at = now() - interval '6 days' where id = $1`, [s.id])
+  const o = await list(db, D)
+  assert.equal(o.outgoing[0].status, 'confirmed', 'D 隔幾天才開機也領得到')
+  assert.equal(o.outgoing[0].confirm_sig, SIG)
+  await db.query(`update relay.device_pairs set decided_at = now() - interval '8 days' where id = $1`, [s.id])
+  assert.equal((await list(db, D)).outgoing.length, 0, '最多 7 天')
+  const r = await start(db)
+  await decide(db, r.id, { p_decision: 'reject', p_sig: null })
+  await db.query(`update relay.device_pairs set decided_at = now() - interval '2 days' where id = $1`, [r.id])
+  assert.equal((await list(db, D)).outgoing.length, 0, '拒絕的一天後清掉')
+})
+
+test('刪節點會連帶清掉，不會被擋住', { skip }, async () => {
+  const db = await ready()
+  await start(db)
+  await db.exec(`delete from relay.nodes where id = '${Z}'`)
+  assert.equal((await db.query(`select count(*)::int n from relay.device_pairs`)).rows[0].n, 0)
+  assert.equal((await db.query(`select count(*)::int n from relay.device_keys where node = '${Z}'`)).rows[0].n, 0)
+})
+
 test('頻率上限；公鑰格式；重裝可以換公鑰', { skip }, async () => {
   const db = await ready()
   await db.exec(`insert into relay.device_pairs (from_node, to_node, from_pub, to_pub, status, decided_at)
