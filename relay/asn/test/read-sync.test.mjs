@@ -203,3 +203,11 @@ test('守門：兩端 transport、Rust 指令（電腦與手機清單都有）�
   const idx = read('..', '..', 'supabase', 'functions', 'relay', 'index.ts')
   assert.match(idx, /action === "read_sync"\) \{[\s\S]*?signedUserId\(accountDeps\.verifyJwt, req\.headers\.get\(SIGN_HEADER\)\)[\s\S]*?requestReadSync\(/)
 })
+
+test('手機開著畫面：定時取回別台的已讀，只在前景問；回前景馬上問一次（#856）', async () => {
+  const { READ_VISIBLE_POLL_MS } = await import('../ui/lib/read-sync.mjs')
+  assert.ok(READ_VISIBLE_POLL_MS >= 10_000 && READ_VISIBLE_POLL_MS <= 30_000, '不用等 60 秒，也不要太頻繁')
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(js, /setInterval\(\(\) => \{ if \(document\.visibilityState === 'visible'\) void core\.syncReads\(\) \}, READ_VISIBLE_POLL_MS\)/)
+  assert.match(js, /core\.refreshRosterSoon\(\); void core\.syncReads\(\); void roomsHook\.refresh\?\.\(\)/)
+})
