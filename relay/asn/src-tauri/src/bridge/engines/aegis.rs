@@ -318,6 +318,10 @@ impl Engine for AegisEngine {
         true
     }
 
+    fn always_replies(&self) -> bool {
+        true
+    }
+
     /// to_agent 寫成員代號（slug）也行：換成名單上的名字
     fn canonical_name(&self, name: &str) -> Option<String> {
         let c = &self.i.cfg;

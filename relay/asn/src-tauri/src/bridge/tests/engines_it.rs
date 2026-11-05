@@ -1207,7 +1207,7 @@ async fn acp_遠端管理_正在處理信件時不重開_不換手_程序沒被�
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
     let admin = h.set.acp_admin().unwrap();
     h.put_pull(to_agent(1, "Gemini", "@@SLEEP")).await;
-    h.wait("已轉交", |h| h.fr.acked().len() == 1).await;
+    h.wait("已轉交", |h| bridge_log(h).contains("ack when the turn ends")).await;
     let pid = wait_pid(&admin, "Gemini", |_| true).await;
     for _ in 0..100 {
         if admin.info("Gemini").unwrap()["status"] == "busy" {
@@ -1858,4 +1858,117 @@ async fn acp_改名後再接手同一段對話_回已經接過了_不重複開()
     assert_eq!((again["already"].clone(), again["name"].as_str()), (json!(true), Some("小葛")));
     assert!(!admin.has_worker(&old), "沒有用原本的名字再開一個");
     assert_eq!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json")).len(), 1);
+}
+
+// =============================================================================================
+// 內建通道：重開 ASN 時沒做完的信（#828）
+// =============================================================================================
+
+const RESEND_WORDS: &str = "上一輪可能做到一半";
+
+fn bridge_log(h: &EH) -> String {
+    h.core.log.recent().join("\n")
+}
+
+fn gate_of(h: &EH) -> std::path::PathBuf {
+    h.work.path().join("gate-828")
+}
+
+async fn wait_started(h: &mut EH, n: u32) {
+    let (work, id) = (h.work.path().to_path_buf(), uid(n));
+    h.wait("這封開始了", move |_| crate::bridge::channel_turns::started(&work, &id)).await;
+}
+
+async fn channel_h() -> EH {
+    eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await
+}
+
+#[tokio::test]
+async fn 通道信_這一輪結束才_ack_寄回後記號清掉() {
+    let mut h = channel_h().await;
+    let gate = gate_of(&h);
+    h.put_pull(to_agent(1, "Gemini", &format!("一\n@@GATE {}", gate.display()))).await;
+    wait_started(&mut h, 1).await;
+    h.wait("轉交完", |h| bridge_log(h).contains("ack when the turn ends")).await;
+    assert!(h.fr.acked().is_empty(), "還在處理不能 ack");
+    std::fs::write(&gate, "go").unwrap();
+    h.wait("回覆", |h| h.fr.sent().len() == 1).await;
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(!crate::bridge::channel_turns::started(h.work.path(), &uid(1)), "結束就清掉記號");
+}
+
+#[tokio::test]
+async fn 通道信_不用回的_也是做完才_ack_不寄回() {
+    let mut h = channel_h().await;
+    let gate = gate_of(&h);
+    h.put_pull(mail(1, json!({"to_agent": "Gemini", "body": format!("一\n@@GATE {}", gate.display()), "expects_reply": false}))).await;
+    wait_started(&mut h, 1).await;
+    h.wait("轉交完", |h| bridge_log(h).contains("ack when the turn ends")).await;
+    assert!(h.fr.acked().is_empty(), "還在處理不能 ack");
+    std::fs::write(&gate, "go").unwrap();
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(h.fr.sent().is_empty(), "不用回的不寄回");
+    h.restart().await;
+    h.core.pull("test", now()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(bridge_log(&h).matches("resent after restart").count(), 0, "做完的不重送");
+}
+
+#[tokio::test]
+async fn 通道信_處理中重開_重送一次_內文提示可能做到一半() {
+    let mut h = channel_h().await;
+    let gate = gate_of(&h);
+    h.put_pull(to_agent(1, "Gemini", &format!("@@ECHO_ALL 一\n@@GATE {}", gate.display()))).await;
+    wait_started(&mut h, 1).await;
+    h.wait("轉交完", |h| bridge_log(h).contains("ack when the turn ends")).await;
+    h.restart().await;
+    assert!(h.fr.acked().is_empty(), "重開前沒做完，信還在信箱");
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull("test", now()).await;
+    h.wait("回覆", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains(RESEND_WORDS), "{}", h.bodies()[0]);
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(!crate::bridge::channel_turns::started(h.work.path(), &uid(1)));
+    assert!(!crate::bridge::channel_turns::resent(h.work.path(), &uid(1)), "結束就清掉重送記號");
+}
+
+#[tokio::test]
+async fn 通道信_排隊還沒開始的_重開後重送_不加提示() {
+    let mut h = channel_h().await;
+    let gate = gate_of(&h);
+    h.put_pull(to_agent(1, "Gemini", &format!("@@ECHO_ALL 第一封\n@@GATE {}", gate.display()))).await;
+    wait_started(&mut h, 1).await;
+    h.put_pull(to_agent(2, "Gemini", "@@ECHO_ALL 第二封")).await;
+    let second = uid(2);
+    h.wait("第二封排進去", move |h| bridge_log(h).contains(&format!("forwarded id={second}"))).await;
+    h.restart().await;
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull("test", now()).await;
+    h.wait("兩封都回", |h| h.fr.sent().len() == 2).await;
+    let bodies = h.bodies();
+    let first = bodies.iter().find(|b| b.contains("第一封")).unwrap();
+    let queued = bodies.iter().find(|b| b.contains("第二封")).unwrap();
+    assert!(first.contains(RESEND_WORDS), "{first}");
+    assert!(!queued.contains(RESEND_WORDS), "{queued}");
+}
+
+#[tokio::test]
+async fn 通道信_重送一次還沒做完_通知寄件人_不再重送() {
+    let mut h = channel_h().await;
+    h.put_pull(to_agent(1, "Gemini", "@@SLEEP")).await;
+    wait_started(&mut h, 1).await;
+    h.wait("轉交完", |h| bridge_log(h).contains("ack when the turn ends")).await;
+    h.restart().await;
+    h.core.pull("test", now()).await;
+    h.wait("重送", |h| bridge_log(h).contains("resent after restart")).await;
+    wait_started(&mut h, 1).await;
+    h.wait("再轉交完", |h| bridge_log(h).contains("ack when the turn ends")).await;
+    h.restart().await;
+    h.core.pull("test", now()).await;
+    h.wait("通知寄件人", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("沒有處理完"), "{}", h.bodies()[0]);
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(!crate::bridge::channel_turns::resent(h.work.path(), &uid(1)));
+    let log = bridge_log(&h);
+    assert!(!log.contains("resent after restart"), "第二次重開不再重送：{log}");
 }

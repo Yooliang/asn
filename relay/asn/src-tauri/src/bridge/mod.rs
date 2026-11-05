@@ -2,6 +2,7 @@
 //! 預設關閉：設定「讓 ASN 負責這台的收發室」打開才啟動；關閉時 ASN 的行為與以前完全一樣。
 //! 舊 Node 橋在跑（bridge.pid 的 pid 活著）時內建橋不啟動，設定頁顯示由舊版負責。
 pub mod attach;
+pub mod channel_turns;
 pub mod core;
 pub mod corrlog;
 pub mod dup_session;

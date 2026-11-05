@@ -282,6 +282,8 @@ pub struct WorkerInit {
     pub pids: Arc<PidBook>,
     /// 往來記錄資料夾：換班接手時把名下的往來記錄當前情帶進新對話；None＝不帶
     pub handoff_dir: Option<std::path::PathBuf>,
+    /// 機器工作資料夾：「這封開始處理了」的記號放這裡（channel_turns，#828）
+    pub work_dir: std::path::PathBuf,
 }
 
 pub struct Worker {
@@ -816,6 +818,11 @@ impl Worker {
         let ev = |e: EngineEvent| {
             let _ = self.i.events.send(e);
         };
+        // 真的開始之前先記：程序被直接結束也留得下，重開後才知道這封可能做到一半（#828）
+        if let Err(e) = crate::bridge::channel_turns::mark_started(&self.i.work_dir, &job.id) {
+            self.log(format!("記不下這封開始了 id={}：{e}", job.id));
+        }
+        let mut keep_mark = false;
         match self.run_turn(&job).await {
             Ok(res) => {
                 if self.st.lock().unwrap().health != Health::Ok {
@@ -824,18 +831,24 @@ impl Worker {
                 let text = res.text.trim().to_string();
                 if job.no_reply {
                     self.log(format!("不需回覆的信 {} 處理完（{} 字，不寄回）", job.id, text.chars().count()));
+                    ev(EngineEvent::Replied(job.id.clone()));
                 } else if text.is_empty() {
                     let why = if res.denied.is_empty() { String::new() } else { format!("（它想做的事被政策拒絕了：{}）", res.denied.iter().take(3).map(|d| d.summary.clone()).collect::<Vec<_>>().join("；")) };
                     ev(EngineEvent::Fail(job.id.clone(), format!("{name} 沒有產出回覆文字{why}")));
                 } else {
                     let body = if text.chars().count() > MAX_REPLY_CHARS { format!("{}\n…（太長，已截斷）", text.chars().take(MAX_REPLY_CHARS).collect::<String>()) } else { text };
                     ev(EngineEvent::Reply { from: name.clone(), text: format!("{body}{}", self.note_denied(&res.denied)), mail_id: Some(job.id.clone()) });
+                    ev(EngineEvent::Replied(job.id.clone()));
                 }
             }
             Err(e) => {
                 let err = self.apply_failure(e, Some(&job));
                 self.log(format!("這一輪失敗 id={} code={}：{}", job.id, err.code, err.message));
-                if !job.no_reply {
+                // 工作者被停止：重開 ASN 時事件沒人收，記號要留給重開後判斷；ASN 還開著的話核心收到事件會清掉
+                keep_mark = err.code == "stopped";
+                if job.no_reply {
+                    ev(EngineEvent::Replied(job.id.clone()));
+                } else {
                     ev(EngineEvent::Fail(job.id.clone(), self.explain(&err)));
                 }
                 // 登入／額度失敗後也換一個新的驅動：agy 這時多半已經結束；使用者登入好之後，新啟動的才讀得到新的登入狀態
@@ -846,6 +859,9 @@ impl Worker {
                     }
                 }
             }
+        }
+        if !keep_mark {
+            crate::bridge::channel_turns::clear_started(&self.i.work_dir, &job.id);
         }
         let more = {
             let mut s = self.st.lock().unwrap();
@@ -896,8 +912,10 @@ impl Worker {
             (s.queue.drain(..).collect::<Vec<_>>(), s.driver.take())
         };
         self.i.approvals.cancel_all(&self.i.cfg.name);
-        for j in queued.into_iter().filter(|j| !j.no_reply) {
-            let _ = self.i.events.send(EngineEvent::Fail(j.id, format!("{} 工作者正在關閉，這封信沒有處理", self.i.cfg.name)));
+        // 重開 ASN 時這些事件沒人收，信還在後台信箱，重開後照常收；ASN 還開著（改名、移除）才會走到通知與 ack
+        for j in queued {
+            let ev = if j.no_reply { EngineEvent::Replied(j.id) } else { EngineEvent::Fail(j.id, format!("{} 工作者正在關閉，這封信沒有處理", self.i.cfg.name)) };
+            let _ = self.i.events.send(ev);
         }
         if let Some(d) = d {
             d.stop();
