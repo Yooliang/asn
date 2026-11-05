@@ -534,6 +534,7 @@ impl Core {
         c.restore();
         c.started_at = now;
         c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
+        c.wait_alerts = super::wait_alert::WaitAlerts::load(&c.cfg.work_dir.join(super::wait_alert::WAIT_FILE), now);
         super::forward_gate::prune_files(&c.cfg.work_dir, None);   // 上次留下的內文檔與已套用紀錄不再有用
         if c.cfg.forward_exact && c.cfg.forward_exact_unverified {
             c.log.line("forward-exact forced on: 未驗證（沒有通過自我測試，只給開發機用）");

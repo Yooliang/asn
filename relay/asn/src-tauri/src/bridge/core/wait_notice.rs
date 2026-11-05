@@ -34,9 +34,9 @@ impl Core {
                     let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
                     self.log.line(&format!("wait-alert window={} kind={kind} notify={notify}", w.name));
                     match notify {
-                        "sent" => self.wait_alerts.mark_sent(&w, now),
+                        "sent" => self.note_wait_sent(&w, now),
                         // 後台查不到擁有者：再試也寄不到，這次等待到此為止
-                        "skipped" => self.wait_alerts.mark_sent(&w, now),
+                        "skipped" => self.note_wait_sent(&w, now),
                         // 沒寄到（寄送失敗、到上限、看不懂的回答）不算通知過：隔一分鐘再試
                         _ => {
                             self.wait_retry_at = now + RETRY_MS;
@@ -50,6 +50,13 @@ impl Core {
                     return;
                 }
             }
+        }
+    }
+
+    fn note_wait_sent(&mut self, w: &Waiting, now: u64) {
+        self.wait_alerts.mark_sent(w, now);
+        if let Err(e) = self.wait_alerts.save(&self.cfg.work_dir.join(super::super::wait_alert::WAIT_FILE)) {
+            self.log.line(&format!("wait-alert: save failed: {e}"));
         }
     }
 

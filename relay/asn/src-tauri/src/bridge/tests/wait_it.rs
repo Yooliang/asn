@@ -38,6 +38,21 @@ async fn hook_確認框等滿兩分鐘_只帶視窗名和種類_不帶內容_只
 }
 
 #[tokio::test]
+async fn asn_重開後同一次等待不再寄一封() {
+    let mut h = rig(true).await;
+    put_waiting(h.sessions.path(), 5100, "T-丙", "sid-c", "permission prompt", T0);
+    tick_at(&mut h, T0 + W).await;
+    assert_eq!(h.fr.wait_notices().len(), 1);
+    // 同一個機器資料夾重新起一個核心（等於 ASN 重開）
+    let later = T0 + W + 60_000;
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), later);
+    h.core.cfg.wait_alert = true;
+    tick_at(&mut h, later).await;
+    tick_at(&mut h, later + W).await;
+    assert_eq!(h.fr.wait_notices().len(), 1, "重開後不重複：{:?}", h.fr.wait_notices());
+}
+
+#[tokio::test]
 async fn 權限框有外掛回報就帶工具名_不合格的不帶() {
     let mut h = rig(true).await;
     let dir = h.core.cfg.status_dir.clone();
