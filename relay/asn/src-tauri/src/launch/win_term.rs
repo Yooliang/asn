@@ -13,22 +13,31 @@ pub(crate) const WIN_TERM_FALLBACK: &str = "內建終端開不起來，改用一
 /// 這次 ASN 執行期間有沒有講過「改用一般視窗」（只提示一次）
 static FALLBACK_NOTED: AtomicBool = AtomicBool::new(false);
 
-/// 0.2.0 第 1 階段的總開關（#611）：預設關。關著＝Windows 開窗與 0.1.113 一樣（claude／codex 視窗開在原生主控台，
+/// 0.2.0 第 1 階段的總開關（#611）：預設開（todo-next-15q）。關著＝Windows 開窗與 0.1.113 一樣（claude／codex 視窗開在原生主控台，
 /// 經 pi 只有前景開在自帶終端、背景開走原生主控台，關閉看承載 PowerShell）；開了才走自帶 WezTerm（本檔其餘部分）。
 /// 啟動時由 term::live() 讀一次環境變數後設定（同 ASN_TERM_MUX 的讀法），執行中不再變。
 static WEZTERM_WINDOWS: AtomicBool = AtomicBool::new(false);
 
-/// 開關環境變數名：`ASN_TERM_WEZTERM=1` 才讓 ASN 開的夥伴視窗走自帶 WezTerm
+/// 開關環境變數名：預設走自帶 WezTerm，`ASN_TERM_WEZTERM=0` 才退回原生主控台
 pub(crate) const ENV_WEZTERM: &str = "ASN_TERM_WEZTERM";
-/// B2b 的開關環境變數名（#607）：`ASN_TERM_MUX=1` 才開在共用 mux。它建立在 WezTerm 之上，見 [`switches_from`]
+/// B2b 的開關環境變數名（#607）：預設開在共用 mux（伺服器終端，0.2.4），`ASN_TERM_MUX=0` 才關。它建立在 WezTerm 之上，見 [`switches_from`]
 pub(crate) const ENV_MUX: &str = "ASN_TERM_MUX";
 
 /// 兩個開關的關係（唯一定義處）：回（WezTerm 開窗, mux 模式）。
-/// - WezTerm 開窗：ASN_TERM_WEZTERM=1 才開，預設關。
-/// - mux 模式：ASN_TERM_MUX=1 **而且** WezTerm 開窗也開才算；WezTerm 關著時 ASN_TERM_MUX=1 無效（mux 只是 WezTerm 窗格的放法，沒有 WezTerm 就沒有東西可放）。
+/// - WezTerm 開窗：Windows 預設開，ASN_TERM_WEZTERM=0 才關（其他值都算開，打錯字不會悄悄退回舊路）。
+/// - mux 模式：Windows 預設開，ASN_TERM_MUX=0 才關；WezTerm 開窗關著時一定關（mux 只是 WezTerm 窗格的放法）。
+/// 預設開只限 Windows（自帶終端目前只打包 Windows）；其他平台照舊，要明講 `=1` 才開
 pub(crate) fn switches_from(wezterm: Option<&str>, mux: Option<&str>) -> (bool, bool) {
-    let wez = wezterm == Some("1");
-    (wez, wez && mux == Some("1"))
+    switches_on(cfg!(windows), wezterm, mux)
+}
+
+fn switches_on(windows: bool, wezterm: Option<&str>, mux: Option<&str>) -> (bool, bool) {
+    if !windows {
+        let wez = wezterm == Some("1");
+        return (wez, wez && mux == Some("1"));
+    }
+    let wez = wezterm != Some("0");
+    (wez, wez && mux != Some("0"))
 }
 
 /// 啟動時設定一次（term::live() 呼叫）
@@ -36,7 +45,7 @@ pub(crate) fn set_wezterm_windows(on: bool) {
     WEZTERM_WINDOWS.store(on, Ordering::SeqCst);
 }
 
-/// 現在開著嗎（預設 false）
+/// 現在開著嗎（程序剛啟動、live() 設定之前是 false）
 pub(crate) fn wezterm_windows() -> bool {
     WEZTERM_WINDOWS.load(Ordering::SeqCst)
 }
@@ -322,12 +331,19 @@ mod tests {
 
     #[test]
     fn 兩個開關的關係_mux_要_wezterm_也開才算() {
-        assert_eq!(switches_from(None, None), (false, false), "預設全關");
-        assert_eq!(switches_from(None, Some("1")), (false, false), "WezTerm 關著時 ASN_TERM_MUX=1 無效");
-        assert_eq!(switches_from(Some("0"), Some("1")), (false, false));
-        assert_eq!(switches_from(Some("1"), None), (true, false), "只開 WezTerm 不開 mux");
-        assert_eq!(switches_from(Some("1"), Some("1")), (true, true));
-        assert_eq!(switches_from(Some("true"), Some("1")), (false, false), "只認 1");
+        let win = |w, m| switches_on(true, w, m);
+        assert_eq!(win(None, None), (true, true), "Windows 預設：WezTerm 與 mux 都開");
+        assert_eq!(win(None, Some("0")), (true, false), "mux=0 只關 mux，夥伴開在各自的 WezTerm 視窗");
+        assert_eq!(win(Some("0"), None), (false, false), "WezTerm=0 退回原生主控台，mux 也跟著關");
+        assert_eq!(win(Some("0"), Some("1")), (false, false), "WezTerm 關著時 ASN_TERM_MUX=1 無效");
+        assert_eq!(win(Some("1"), None), (true, true));
+        assert_eq!(win(Some("1"), Some("1")), (true, true));
+        assert_eq!(win(Some("true"), Some("true")), (true, true), "只有 0 算關，打錯字不會悄悄退回舊路");
+        let other = |w, m| switches_on(false, w, m);
+        assert_eq!(other(None, None), (false, false), "其他平台照舊：預設關");
+        assert_eq!(other(None, Some("1")), (false, false));
+        assert_eq!(other(Some("1"), None), (true, false));
+        assert_eq!(other(Some("1"), Some("1")), (true, true));
     }
 
     #[test]

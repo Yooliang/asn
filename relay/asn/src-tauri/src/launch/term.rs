@@ -350,7 +350,7 @@ pub struct TermService<R, F> {
     /// 開 agy 時另外帶的參數（#374：`--settings <檔>` 接上 Gemini 狀態列，見 gemini_session.rs）。
     /// 正式由 live() 設定；沒設（測試、沒有畫面的建置）就照舊只跑執行檔。回空的＝這次不帶。
     agy_args: Option<AgyArgs>,
-    /// B2b 開關（預設關＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 讀 ASN_TERM_MUX 設定
+    /// B2b 開關（關著＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 依 win_term::switches_from 設定，Windows 預設開
     use_mux: bool,
     /// 隔離設定檔要不要帶 exit_behavior = "Hold"（0.2.0 第 1 階段的做法）。預設 false＝跟 0.1.113 一樣只寫空設定；
     /// 正式由 live() 在 ASN_TERM_WEZTERM=1 時設 true（#611）
@@ -2556,8 +2556,8 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
 pub fn live(data_dir: &Path) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
-    // B2b 開關：只在 ASN_TERM_MUX=1 才開在共用的 mux 裡，預設關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
-    // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 沒開時 ASN_TERM_MUX=1 無效（關係定義在 win_term::switches_from）
+    // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
+    // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
     let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
