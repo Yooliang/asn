@@ -232,7 +232,8 @@ impl Runner for RealRunner {
     }
 
     fn kill_tree(&self, pid: u32) {
-        let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let r = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        super::term::view_log(&format!("mux-view taskkill pid={pid} result={:?}", r.map(|s| s.code()).map_err(|e| e.to_string())));
     }
 
     fn sleep(&self, d: Duration) {

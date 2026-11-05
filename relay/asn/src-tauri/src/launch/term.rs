@@ -124,6 +124,11 @@ pub fn set_ui_log_dir(dir: &Path) {
     let _ = UI_LOG_DIR.set(dir.to_path_buf());
 }
 
+/// 前後景切換的紀錄（非必現的問題要靠它查，見 #596）。只有視窗名、編號、程序編號和時間，沒有畫面內容
+pub(crate) fn view_log(line: &str) {
+    env_log(line);
+}
+
 /// 只寫變數名字，不寫值
 fn env_log(line: &str) {
     elog!("{line}");
@@ -1040,6 +1045,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 「有沒有在看」與「登記正在開」在同一次持鎖裡做完：兩個請求同時進來時，只有一個會去開 GUI（#615 審查）
         let front = {
             let mut g = self.inner.lock().unwrap();
+            view_log(&format!("mux-view view id={id} viewers={:?}", viewer_rows(&g.viewers)));
             let front = match g.viewers.iter().find(|v| v.id == id).cloned() {
                 Some(v) if v.starting => return Ok(()),
                 Some(v) if self.runner.started_ms(v.pid) == Some(v.started_ms) => Some(v.pid),
@@ -1060,6 +1066,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Ok(());
         }
         let r = self.start_viewer(id);
+        view_log(&format!("mux-view start id={id} result={r:?}"));
         let mut g = self.inner.lock().unwrap();
         g.viewers.retain(|v| v.id != id);
         match r {
@@ -1114,10 +1121,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn unview(&self, id: &str) -> Result<(), String> {
         let v = {
             let mut g = self.inner.lock().unwrap();
+            view_log(&format!("mux-view unview id={id} viewers={:?}", viewer_rows(&g.viewers)));
             let Some(i) = g.viewers.iter().position(|v| v.id == id && !v.starting) else { return Ok(()) };
             g.viewers.remove(i)
         };
-        if self.runner.started_ms(v.pid) == Some(v.started_ms) {
+        let now_at = self.runner.started_ms(v.pid);
+        view_log(&format!("mux-view unview pid={} recorded={} now={now_at:?}", v.pid, v.started_ms));
+        if now_at == Some(v.started_ms) {
             self.runner.kill_tree(v.pid);
         }
         Ok(())
@@ -1908,6 +1918,10 @@ fn view_args(config: &Path, workspace: &str) -> Vec<String> {
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
 fn partner_label<'a>(id: &str, title: &'a str) -> Option<&'a str> {
     title.strip_prefix("ASN:")?.strip_prefix(id)?.strip_prefix(' ').filter(|l| !l.is_empty())
+}
+
+fn viewer_rows(viewers: &[Viewer]) -> Vec<(String, u32, u64, bool)> {
+    viewers.iter().map(|v| (v.id.clone(), v.pid, v.started_ms, v.starting)).collect()
 }
 
 /// 已經開著的看畫面 GUI：叫到最前面（找不到視窗就算了）

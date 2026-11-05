@@ -289,8 +289,12 @@ fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, 
     // B2c：開在共用終端服務裡的夥伴沒有自己的視窗：前台＝開看畫面的 GUI、背景＝收掉它（窗格照常跑）
     #[cfg(windows)]
     if !req.name.is_empty() {
-        if let Some((_, id)) = mux_target(req) {
-            return Ok(super::term::mux_console_set(&id, visible));
+        let target = mux_target(req);
+        super::term::view_log(&format!("mux-view set name={} visible={visible} target={target:?}", req.name));
+        if let Some((_, id)) = target {
+            let r = super::term::mux_console_set(&id, visible);
+            super::term::view_log(&format!("mux-view set result={r}"));
+            return Ok(r);
         }
     }
     let q = query_console(req)?;
