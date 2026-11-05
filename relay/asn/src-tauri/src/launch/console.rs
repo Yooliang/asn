@@ -385,7 +385,7 @@ pub(crate) fn window_snapshot() -> WindowSnapshot {
 pub(crate) mod win {
     use std::sync::Mutex;
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM};
-    use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleWindow};
+    use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleWindow, GetStdHandle, SetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_HIDE, SW_SHOW};
 
@@ -466,6 +466,11 @@ pub(crate) mod win {
 
     /// 方法二：暫時接上該程序的主控台，問 GetConsoleWindow。整個程序同一時間只能接一個主控台，所以上鎖；
     /// 自己已經有主控台（例如開發時從終端機啟動）就不做，免得把自己的主控台卸掉。
+    ///
+    /// **接上之前要先存標準代號，卸掉之後還原**（#596，30家用 11-05 實測）：原本沒有主控台的程式（ASN 是 GUI 程式）`AttachConsole` 之後，
+    /// Windows 會把標準輸入／輸出／錯誤換成那個主控台的代號；`FreeConsole` 之後代號還留在程序裡，卻已經失效。
+    /// 之後所有沒指定 stdin 的子程序（`taskkill`…）都會因為複製到失效的代號而啟動失敗（錯誤 6「控制代碼無效」），
+    /// 直到 ASN 重開：看畫面的 GUI 收不掉、空的 mux 結束不了。
     fn via_attach(pid: u32) -> Option<HWND> {
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().ok()?;
@@ -473,11 +478,22 @@ pub(crate) mod win {
             if !GetConsoleWindow().is_null() {
                 return None;
             }
+            let saved = (GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE));
             if AttachConsole(pid) == 0 {
                 return None;
             }
+            // 只記有走過這條路的（不記一般查詢）：實機驗證要先在 ui.log 看到這行，才算走過 AttachConsole／FreeConsole；沒看到＝這次沒走過，通過不算數（#596）
             let h = GetConsoleWindow();
             FreeConsole();
+            // 還原：原本沒有（NULL 或 INVALID）就設回 NULL，不留下 Attach 換進來的失效代號
+            SetStdHandle(STD_INPUT_HANDLE, saved.0);
+            SetStdHandle(STD_OUTPUT_HANDLE, saved.1);
+            SetStdHandle(STD_ERROR_HANDLE, saved.2);
+            crate::launch::term::view_log(&format!(
+                "console-attach pid={pid} 已接上並卸掉；標準代號 接上前={:?} 還原後={:?}",
+                saved,
+                (GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE))
+            ));
             if h.is_null() || !class_is_console(h) {
                 None
             } else {

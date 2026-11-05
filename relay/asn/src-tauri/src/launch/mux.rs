@@ -32,6 +32,8 @@ pub const START_WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(200);
 /// 剛起的 mux 查建立時間的重試次數
 const BIRTH_RETRIES: u32 = 5;
+/// 結束程序之後，等它真的消失的次數（每次隔 `POLL`）。Windows 結束程序是非同步的，立刻查可能還在
+const GONE_RETRIES: u32 = 10;
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 /// 啟動鎖的內容還沒寫好（空的或看不懂）超過這麼久，才當作寫鎖的程序起到一半當掉了
 const LOCK_STALE: Duration = Duration::from_secs(60);
@@ -213,7 +215,16 @@ impl Mux<'_> {
         let line = format!("終端服務：沒有夥伴了，停掉空的終端服務（程序 {pid}，{reason}）");
         elog!("{line}");
         note(&self.paths.dir, &line);
-        self.stop().is_ok()
+        match self.stop() {
+            Ok(()) => true,
+            Err(e) => {
+                // 上一行只說「要停」；沒停成要接著記一行，不然 mux.log 讀起來像是停了（#596）
+                let fail = format!("終端服務：沒有停掉（程序 {pid}）：{e}");
+                elog!("{fail}");
+                note(&self.paths.dir, &fail);
+                false
+            }
+        }
     }
 
     /// pid 檔記的 mux 還活著（建立時間對得上，防程式編號被回收）
@@ -289,9 +300,18 @@ impl Mux<'_> {
         let Some(pid) = self.recorded_alive() else { return Err("沒有 ASN 起的終端服務在跑".into()) };
         // 先留記號再結束：監看在結束之後的下一輪看到 mux 不見，要查得到這是我們收的
         let _ = std::fs::write(self.paths.dir.join(STOPPED_FILE), format!("{pid} {}", crate::heartbeat::now_ms()));
+        let at = read_pid(&self.paths.pid).map(|(_, at)| at);
         self.runner.kill_tree(pid);
-        let _ = std::fs::remove_file(&self.paths.pid);
-        Ok(())
+        // 結束失敗不能當成功（#596）：`taskkill` 啟動失敗時程序還活著，這裡卻刪了 pid 檔，之後 ASN 找不到它、重開也收不掉。
+        // 建立時間還對得上＝還是同一個 mux 活著：留著 pid 檔（下次還找得到、可以重試），回錯
+        for _ in 0..GONE_RETRIES {
+            if self.runner.started_ms(pid) != at {
+                let _ = std::fs::remove_file(&self.paths.pid);
+                return Ok(());
+            }
+            self.runner.sleep(POLL);
+        }
+        Err(format!("終端服務（程序 {pid}）沒有結束，保留記錄，之後可以再試"))
     }
 }
 

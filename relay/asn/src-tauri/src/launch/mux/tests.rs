@@ -20,10 +20,12 @@ struct Fake {
     exe: RefCell<BTreeMap<u32, PathBuf>>,
     /// 拿鎖時（鎖會查 ASN 自己的建立時間）才出現的檔：開窗的一方剛好在這之前逾時
     appears_at_lock: RefCell<Option<PathBuf>>,
+    /// 真＝kill_tree 之後程序還活著（模擬 taskkill 啟動失敗，#596）；預設假＝結束之後查不到建立時間
+    survive_kill: Cell<bool>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -51,6 +53,9 @@ impl Runner for Fake {
     }
     fn kill_tree(&self, pid: u32) {
         self.killed.borrow_mut().push(pid);
+        if !self.survive_kill.get() {
+            self.birth.borrow_mut().remove(&pid);
+        }
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
         if pid == std::process::id() {
@@ -668,4 +673,40 @@ fn 收空_mux_開窗的一方在拿鎖前才逾時也不停() {
     *r.appears_at_lock.borrow_mut() = Some(m.paths.dir.join("spawn-unsure"));
     assert!(!m.stop_if_empty("測試"), "鎖放掉之前記號已經寫好，拿到鎖就看得到");
     assert!(r.killed.borrow().is_empty());
+}
+
+#[test]
+fn 停_結束失敗不當成功_保留_pid_檔_回錯_之後還找得到可以重試() {
+    // #596：taskkill 啟動失敗時程序還活著；原本照樣刪 pid 檔，之後 ASN 找不到它、重開也收不掉
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"}]"#);
+    let m = mux(&r, d.path());
+    r.survive_kill.set(true);
+    let err = m.stop().unwrap_err();
+    assert!(err.contains("沒有結束"), "{err}");
+    assert_eq!(*r.killed.borrow(), vec![MUX_PID], "有試著結束");
+    assert!(m.paths.pid.exists(), "沒結束就不能刪 pid 檔");
+    assert!(m.recorded_alive().is_some(), "之後還找得到它");
+    assert!(stopped_mark(&m.paths.dir).is_some(), "我們確實要收它：記號照寫，監看才不把它當成當機");
+    // 重試：這次結束成功
+    r.survive_kill.set(false);
+    m.stop().unwrap();
+    assert!(!m.paths.pid.exists());
+}
+
+#[test]
+fn 收空_mux_結束失敗_回_false_pid_檔還在_下次還會再試() {
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"}]"#);
+    let m = mux(&r, d.path());
+    r.survive_kill.set(true);
+    assert!(!m.stop_if_empty("測試"), "沒結束不能說成功");
+    assert!(m.paths.pid.exists());
+    // mux.log 不能只留「要停」那一行，讀起來像是停了：沒停成要接著記一行
+    let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
+    assert!(log.contains("沒有夥伴了，停掉空的終端服務"), "{log}");
+    assert!(log.contains("沒有停掉（程序") && log.contains("沒有結束"), "結束失敗要留一行：{log}");
+    r.survive_kill.set(false);
+    assert!(m.stop_if_empty("測試"), "下次再試就收掉了");
+    assert!(!m.paths.pid.exists());
+    let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
+    assert_eq!(log.matches("沒有停掉（程序").count(), 1, "只有失敗那次有，成功的不再多記：{log}");
 }
