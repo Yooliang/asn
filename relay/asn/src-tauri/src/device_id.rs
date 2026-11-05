@@ -217,6 +217,13 @@ pub fn outgoing_confirmed(o: &Outgoing, me_node: &str, me_pub: &str, row_to_pub:
     row_to_pub == o.to_pub && verify(&o.to_pub, &confirm_message(&o.id, me_node, &o.to_node, me_pub, &o.to_pub), sig)
 }
 
+/// 後台回的配對清單：（等我確認的, 我發起的）。**缺欄位或不是陣列就是錯誤：** 不能當成空的，
+/// 否則本機等待中的配對會被當成已結束收掉
+pub fn pair_lists(v: &serde_json::Value) -> Result<(&Vec<serde_json::Value>, &Vec<serde_json::Value>), String> {
+    let list = |k: &str| v.get(k).and_then(serde_json::Value::as_array).ok_or_else(|| "後台回的資料不對".to_string());
+    Ok((list("incoming")?, list("outgoing")?))
+}
+
 #[cfg(feature = "gui")]
 pub mod live {
     //! 和後台的往來。讀寫本機檔案都在這把鎖裡，不跨 await
@@ -269,10 +276,10 @@ pub mod live {
         let k = key(dir)?;
         let me_pub = k.public_b64();
         let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
-        let empty = Vec::new();
+        let (rows_in, rows_out) = pair_lists(&v)?;
         let mut outgoing = Vec::new();
         let mut done: Vec<String> = Vec::new();
-        for row in v.get("outgoing").and_then(Value::as_array).unwrap_or(&empty) {
+        for row in rows_out {
             let (Some(id), Some(status)) = (row.get("id").and_then(Value::as_str), row.get("status").and_then(Value::as_str)) else { continue };
             let Some(o) = read(dir)?.outgoing.iter().find(|o| o.id == id).cloned() else {
                 done.push(id.to_string()); // 這台沒有記錄（重裝前發的）：不算數
@@ -303,7 +310,7 @@ pub mod live {
             let _ = relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await;
         }
         // 後台已經沒有的（對方 7 天內沒確認、這台太久沒開）：不留著假裝還在等，告訴本人一次
-        let on_server: Vec<&str> = v.get("outgoing").and_then(Value::as_array).unwrap_or(&empty).iter().filter_map(|r| r.get("id").and_then(Value::as_str)).collect();
+        let on_server: Vec<&str> = rows_out.iter().filter_map(|r| r.get("id").and_then(Value::as_str)).collect();
         let gone = update(dir, |t| {
             let gone: Vec<Outgoing> = t.outgoing.iter().filter(|o| !on_server.contains(&o.id.as_str())).cloned().collect();
             t.outgoing.retain(|o| on_server.contains(&o.id.as_str()));
@@ -314,10 +321,7 @@ pub mod live {
             outgoing.push(json!({ "id": o.id, "to_node": o.to_node, "to_name": o.to_name, "fingerprint": fp, "status": "expired" }));
         }
         let trust = read(dir)?;
-        let incoming: Vec<Value> = v
-            .get("incoming")
-            .and_then(Value::as_array)
-            .unwrap_or(&empty)
+        let incoming: Vec<Value> = rows_in
             .iter()
             .filter_map(|row| {
                 let (id, from_node, from_pub, to_pub) = (row.get("id")?.as_str()?, row.get("from_node")?.as_str()?, row.get("from_pub")?.as_str()?, row.get("to_pub")?.as_str()?);
@@ -512,6 +516,15 @@ mod tests {
         assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, ""), "沒有簽章");
         let other = kt.sign_b64(&confirm_message("r2", "d", "t", "dpub", &o.to_pub));
         assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &other), "別筆的簽章");
+    }
+
+    #[test]
+    fn 後台清單_缺欄位或型別不對就是錯誤_不當成空的() {
+        use serde_json::json;
+        assert!(pair_lists(&json!({ "incoming": [], "outgoing": [] })).is_ok());
+        for bad in [json!({}), json!({ "incoming": [] }), json!({ "outgoing": [] }), json!({ "incoming": [], "outgoing": null }), json!({ "incoming": {}, "outgoing": [] }), json!(null)] {
+            assert!(pair_lists(&bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
