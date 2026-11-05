@@ -1,6 +1,14 @@
 //! 夥伴卡在要人處理的框上太久（todo-next-162）：什麼時候該通知本人。只有判斷，不碰檔案、不連後台。
+//! 通知過的紀錄存檔（WAIT_FILE）：ASN 重開後同一次等待不再寄一封。檔案壞了就當沒有，頂多多寄一封。
 //! 訊號是 Claude session 檔的 status（見 roster::read_session_wait），不靠讀畫面、不分終端機。
+use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::Path;
+
+/// 通知紀錄的檔名（在機器資料夾）。只有視窗名和時間
+pub const WAIT_FILE: &str = "wait-alerts.json";
+/// 重開後這段時間內視窗可能還沒回到名單：紀錄先留著，不當成沒在等了
+const RELOAD_KEEP_MS: u64 = 5 * 60_000;
 
 /// 等了這麼久才通知
 pub const WAIT_AFTER_MS: u64 = 120_000;
@@ -34,14 +42,33 @@ pub struct WaitAlerts {
     told: HashMap<String, u64>,
     /// 名字 → 上次通知的時間
     last_sent: HashMap<String, u64>,
+    /// 讀檔後到這個時間之前，`told` 不因為視窗不在名單上就拿掉
+    keep_until: u64,
 }
 
 impl WaitAlerts {
+    /// 讀上次存的紀錄。沒有檔案或壞了就是空的
+    pub fn load(file: &Path, now: u64) -> WaitAlerts {
+        let mut a = WaitAlerts { keep_until: now + RELOAD_KEEP_MS, ..Default::default() };
+        let Some(v) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return a };
+        let map = |k: &str| -> HashMap<String, u64> { v.get(k).and_then(Value::as_object).into_iter().flatten().filter_map(|(n, x)| Some((n.clone(), x.as_u64()?))).collect() };
+        a.told = map("told");
+        a.last_sent = map("last_sent");
+        a.last_sent.retain(|_, t| now.saturating_sub(*t) < SAME_WINDOW_GAP_MS);
+        a
+    }
+
+    pub fn save(&self, file: &Path) -> Result<(), String> {
+        crate::write_atomic(file, &json!({ "told": self.told, "last_sent": self.last_sent }).to_string()).map_err(|e| e.to_string())
+    }
+
     /// `waiting`＝這一輪正在等的視窗（不在裡面＝沒在等了）。回傳該通知的
     pub fn due(&mut self, now: u64, waiting: &[Waiting]) -> Vec<Waiting> {
         let here = |n: &String| waiting.iter().any(|w| w.name == *n);
         self.seen.retain(|n, _| here(n));
-        self.told.retain(|n, _| here(n));
+        if now >= self.keep_until {
+            self.told.retain(|n, _| here(n));
+        }
         self.last_sent.retain(|_, t| now.saturating_sub(*t) < SAME_WINDOW_GAP_MS);
         let mut out = Vec::new();
         for w in waiting {
@@ -83,6 +110,37 @@ mod tests {
         let d = a.due(now, ws);
         d.iter().for_each(|x| a.mark_sent(x, now));
         d.into_iter().map(|x| x.name).collect()
+    }
+
+    #[test]
+    fn 重開後同一次等待不再通知_答完又卡才算新的_壞檔當沒有() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(WAIT_FILE);
+        let mut a = WaitAlerts::load(&f, T);
+        let now = T + WAIT_AFTER_MS;
+        assert_eq!(due(&mut a, now, &[w("甲", T)]), ["甲"]);
+        a.save(&f).unwrap();
+        // 重開：剛好已過同視窗間隔，也不因為同一次等待再寄
+        let later = T + SAME_WINDOW_GAP_MS + WAIT_AFTER_MS;
+        let mut b = WaitAlerts::load(&f, later);
+        assert!(due(&mut b, later, &[w("甲", T)]).is_empty(), "同一次等待");
+        // 重開後第一輪視窗還沒回名單：紀錄不能掉
+        let mut c = WaitAlerts::load(&f, later);
+        assert!(due(&mut c, later, &[]).is_empty());
+        assert!(due(&mut c, later + 1000, &[w("甲", T)]).is_empty(), "視窗晚一點才回來");
+        // 答完又卡：新的一次，會通知
+        let s2 = later + 10_000;
+        let mut e = WaitAlerts::load(&f, s2);
+        assert_eq!(due(&mut e, s2 + WAIT_AFTER_MS, &[w("甲", s2)]), ["甲"]);
+        // 重開後間隔還沒過、又是新的等待：照間隔不通知
+        let mut g = WaitAlerts::default();
+        assert_eq!(due(&mut g, now, &[w("乙", T)]), ["乙"]);
+        g.save(&f).unwrap();
+        let s3 = now + 1000;
+        let mut h = WaitAlerts::load(&f, s3);
+        assert!(due(&mut h, s3 + WAIT_AFTER_MS, &[w("乙", s3)]).is_empty());
+        std::fs::write(&f, "壞").unwrap();
+        assert_eq!(due(&mut WaitAlerts::load(&f, now), now, &[w("丙", T)]), ["丙"]);
     }
 
     #[test]
