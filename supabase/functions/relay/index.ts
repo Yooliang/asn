@@ -17,6 +17,7 @@ import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeInboxHold, sanitizeInboxHoldExtra } from "../_shared/inbox_hold.ts";
 import { parseMisrouteNotice } from "../_shared/misroute_notice.ts";
 import { parseWaitingNotice } from "../_shared/waiting_notice.ts";
+import { parseMuxDownNotice } from "../_shared/mux_down_notice.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -378,6 +379,17 @@ Deno.serve(async (req) => {
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
     if (data?.notify === "failed" || data?.notify === "rate_limited") console.warn("waiting_notice notify", me.id, data.notify);
+    for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
+    return json(200, { ok: true, notify: data?.notify ?? "skipped" });
+  }
+  if (action === "mux_down_notice" && req.method === "POST") {
+    const p = parseMuxDownNotice(await req.json().catch(() => null));
+    if (!p) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("asn_relay_mux_down_notice", { p_node: me.id, p_count: p.count, p_resumed: p.resumed });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error) return json(400, { error: data.error });
+    if (data?.notify === "failed" || data?.notify === "rate_limited") console.warn("mux_down_notice notify", me.id, data.notify);
     for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
     return json(200, { ok: true, notify: data?.notify ?? "skipped" });
   }
