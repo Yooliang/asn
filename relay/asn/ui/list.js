@@ -19,6 +19,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { TEXT as PAIR_TEXT, errorText as pairError, newIncoming, normalizeView as pairView, pairTargets } from './lib/device-pair.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
@@ -368,6 +369,24 @@ function showLaunchNotice(notice) {
   Object.assign(launchNotice, { open: true, logPath: launchLogPaths.bridgeLog || '', title: notice.title, body: notice.body })
 }
 function closeLaunchNotice() { launchNotice.open = false }
+// 設定頁「配對的電腦」（#597）：判斷都在 Rust，這裡只同步狀態。對方的請求可能隔幾天才看到，所以定時查、有新的就提醒一次
+const PAIR_POLL_MS = 60_000
+const pair = reactive({ peers: [], incoming: [], outgoing: [], busy: false, error: '', shown: false })
+const pairSeen = new Set()
+async function refreshPair() {
+  try {
+    const v = pairView(await invoke('device_pair_view'))
+    Object.assign(pair, v, { shown: true })
+    for (const r of newIncoming(v, pairSeen)) {
+      pairSeen.add(r.id)
+      showLaunchNotice({ title: PAIR_TEXT.title, body: PAIR_TEXT.pendingIn(r.name) + ' 請到設定頁比對。' })
+    }
+  } catch (e) { console.info('[ASN] 配對狀態讀不到', String(e?.message ?? e)) }   // 沒登入或後台還沒部署：畫面不顯示這一區
+}
+async function runPair(fn) {
+  pair.busy = true
+  try { await fn(); pair.error = ''; await refreshPair() } catch (e) { console.info('[ASN] 配對操作失敗', String(e?.message ?? e)); pair.error = pairError(e) } finally { pair.busy = false }
+}
 async function openLaunchLogFolder() {
   try { await invoke('open_machine_log_dir') } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
 }
@@ -1334,6 +1353,7 @@ function closeGoneNotice(item) {
   if (launchNotice.open && noticeStillFor(item, launchNotice.body)) closeLaunchNotice()
   if (item.code === 'permission' && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
 }
+if (!info.shot) { void refreshPair(); setInterval(() => void refreshPair(), PAIR_POLL_MS) }
 if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()
 if (!info.shot && transport.autoResumeStatus) createAutoResumePoller({ fetch: () => transport.autoResumeStatus(), show: showLaunchNotice }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
@@ -1675,6 +1695,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
+      pair: pair.shown ? { peers: pair.peers, incoming: pair.incoming, outgoing: pair.outgoing, busy: pair.busy, error: pair.error, targets: pairTargets(friends.value, info.node, pair) } : null,
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerActive: bridge.termServerActive, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
@@ -1719,6 +1740,10 @@ const app = createApp({
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
+        case 'pair-start': if (value) await runPair(() => invoke('device_pair_start', { toNode: value })); break
+        case 'pair-decide': await runPair(() => invoke('device_pair_decide', { id: value.id, confirm: value.confirm === true })); break
+        case 'pair-close': await runPair(() => invoke('device_pair_close', { id: value })); break
+        case 'pair-revoke': await runPair(() => invoke('device_peer_revoke', { node: value })); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
         case 'bridge-term-server': await setBridgeTermServer(value === true); break
         case 'bridge-screen-watch': await setBridgeScreenWatch(value === true); break

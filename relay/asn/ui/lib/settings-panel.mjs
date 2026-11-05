@@ -2,6 +2,7 @@
 // 元件只顯示「狀態快照」（st）並用 act 事件下指令；狀態與所有動作都在名單視窗的樞紐（list.js）——
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
+import { TEXT as PAIR } from './device-pair.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
@@ -23,7 +24,7 @@ import { termServerNote } from './term-server-setting.mjs'
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'bridge-term-server', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'pair-start', 'pair-decide', 'pair-close', 'pair-revoke', 'bridge-term-server', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -99,7 +100,7 @@ export const SettingsPanel = {
     }
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return {
+    return { PAIR,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -365,6 +366,37 @@ export const SettingsPanel = {
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy || (!!st.autostart.blocked && !st.autostart.on)" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
         <small v-if="st.autostart.supported && st.autostart.blocked" class="autostart-blocked">{{ st.autostart.blocked }}</small>
+        <section class="set-card" aria-label="配對的電腦" v-if="st.pair">
+          <h3 class="set-h">{{ PAIR.title }}</h3>
+          <small>{{ PAIR.lead }}</small>
+          <div class="pair-row" v-for="r in st.pair.incoming" :key="r.id">
+            <template v-if="r.stale"><p class="pair-warn" role="alert">{{ PAIR.stale }}</p></template>
+            <template v-else-if="r.keyChanged"><p class="pair-warn" role="alert">{{ PAIR.keyChanged }}</p></template>
+            <template v-else><p>{{ PAIR.pendingIn(r.name) }}</p><code class="pair-fp">{{ r.fingerprint }}</code></template>
+            <span class="pair-btns">
+              <button class="aero-btn" type="button" v-if="!r.keyChanged && !r.stale" :disabled="st.pair.busy" @click="act('pair-decide', { id: r.id, confirm: true })">{{ PAIR.confirm }}</button>
+              <button class="aero-btn" type="button" :disabled="st.pair.busy" @click="act('pair-decide', { id: r.id, confirm: false })">{{ PAIR.reject }}</button>
+            </span>
+          </div>
+          <div class="pair-row" v-for="o in st.pair.outgoing" :key="o.id">
+            <template v-if="o.status === 'pending'"><p>{{ PAIR.pendingOut(o.name) }}</p><code class="pair-fp">{{ o.fingerprint }}</code></template>
+            <p v-else :class="{ 'pair-warn': o.status !== 'paired' }" role="status">{{ o.name }}：{{ PAIR.status[o.status] || o.status }}<template v-if="o.status === 'paired'"> {{ PAIR.pinWarn }}</template></p>
+            <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.pair.busy" @click="act('pair-close', o.id)">{{ o.status === 'pending' ? PAIR.cancel : PAIR.dismiss }}</button></span>
+          </div>
+          <small v-if="!st.pair.peers.length && !st.pair.incoming.length && !st.pair.outgoing.length">{{ PAIR.noPeers }}</small>
+          <div class="pair-row" v-for="p in st.pair.peers" :key="p.node">
+            <p><b>{{ p.name }}</b> <span v-if="p.peerCanViewMe">{{ PAIR.peerCanView }}</span> <span v-if="p.iCanViewPeer">{{ PAIR.iCanView }}</span></p>
+            <code class="pair-fp">{{ p.fingerprint }}</code>
+            <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.pair.busy" @click="act('pair-revoke', p.node)">{{ PAIR.revoke }}</button></span>
+          </div>
+          <label v-if="st.pair.targets.length">{{ PAIR.startLabel }}
+            <select class="set-sel" :disabled="st.pair.busy" @change="act('pair-start', $event.target.value); $event.target.value = ''">
+              <option value="">{{ PAIR.start }}</option>
+              <option v-for="t in st.pair.targets" :key="t.node" :value="t.node">{{ t.name }}</option>
+            </select>
+          </label>
+          <p class="pair-warn" v-if="st.pair.error" role="alert">{{ st.pair.error }}</p>
+        </section>
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <label class="chk"><input type="checkbox" :checked="st.bridge.autoResume" :disabled="st.bridge.busy" @change="act('bridge-auto-resume', $event.target.checked)" aria-label="電腦重開後自動接回夥伴" /><span>電腦重開後自動接回夥伴</span></label>

@@ -915,3 +915,9 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-view-paste .aero-btn{margin-left:8px}
 .term-view-lost .aero-btn{margin-left:8px}
 .term-view-ask{margin:4px 8px;padding:4px 8px;font-size:13px;font-weight:600;background:#fff4ce;color:#5c4400;border-radius:3px}
+.set-h{margin:0;font-size:13px}
+.pair-row{display:flex;flex-direction:column;gap:6px;padding:8px 0;border-top:1px solid var(--line,#c8d4e0)}
+.pair-row p{margin:0}
+.pair-fp{font-family:Consolas,monospace;font-size:15px;letter-spacing:.5px}
+.pair-btns{display:flex;gap:8px;flex-wrap:wrap}
+.pair-warn{margin:0;color:var(--danger,#b3261e)}
