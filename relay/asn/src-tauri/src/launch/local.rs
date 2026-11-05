@@ -8,6 +8,8 @@ use std::path::Path;
 use crate::nowin::NoWindow;
 use std::process::{Command, Stdio};
 
+const NO_WORK_DIR: &str = "這台電腦還沒登入，不能開背景夥伴；請先登入";
+
 pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: LocalLaunchReq) -> Result<Value, String> {
     if req.profile.is_empty() || req.name.is_empty() || req.cwd.is_empty() {
         return Err("請填寫模型、名字與工作資料夾".into());
@@ -44,6 +46,10 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
+        // 還沒有節點金鑰時工作資料夾是空路徑：佇列檔會寫到目前目錄，而且沒有橋會去讀（#859）
+        if work_dir.as_os_str().is_empty() {
+            return Err(NO_WORK_DIR.to_string());
+        }
         // 選了型號：先記進 acp-models.json，工作者建起來時就套用（重開 ASN 也照這個型號）
         if let ModelPlan::Record(m) = &model_plan {
             crate::bridge::engines::acp_models::set(&work_dir.join(crate::bridge::engines::acp_models::MODELS_FILE), &req.name, m)?;
@@ -669,6 +675,14 @@ fn pick_linux_terminal() -> Option<Term> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 沒有工作資料夾_背景夥伴先擋下_再寫佇列或型號() {
+        let src = include_str!("local.rs").replace("\r\n", "\n");
+        let bg = src.find("if prof.mode == LaunchMode::Background {").unwrap();
+        let (guard, set, queue) = (src[bg..].find("return Err(NO_WORK_DIR").unwrap(), src[bg..].find("acp_models::set(").unwrap(), src[bg..].find("enqueue_background(work_dir").unwrap());
+        assert!(guard < set && guard < queue);
+    }
 
     fn sv_wrap(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()

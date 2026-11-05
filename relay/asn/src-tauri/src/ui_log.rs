@@ -35,6 +35,10 @@ pub fn clean_line(s: &str) -> Option<String> {
 /// 附加一批記錄。回實際寫進去的行數
 pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     use std::io::Write;
+    // 還沒有節點金鑰時工作資料夾是空路徑：寫下去會在目前目錄留 ui.log（#859）
+    if dir.as_os_str().is_empty() {
+        return Ok(0);
+    }
     let rows: Vec<String> = lines.iter().take(LINES_MAX).filter_map(|l| clean_line(l)).collect();
     if rows.is_empty() {
         return Ok(0);
@@ -200,6 +204,14 @@ pub fn relaunch_self() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 沒有工作資料夾_不寫_也不在目前目錄留檔() {
+        let stray = std::env::current_dir().unwrap().join(path(Path::new("")));
+        let before = stray.exists();
+        assert_eq!(append(Path::new(""), &["一行".to_string()]), Ok(0));
+        assert_eq!(stray.exists(), before);
+    }
 
     #[test]
     fn panic_那一行_有執行緒_檔案行號_訊息() {
