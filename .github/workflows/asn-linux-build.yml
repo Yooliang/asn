@@ -65,6 +65,39 @@ jobs:
       - name: 檢查無視窗橋能編譯
         run: cargo check --locked --no-default-features --bin asn-bridge
 
+  # 手機版：`launch` 這類只有電腦版才編的模組，手機版用到就編不過（0.2.3 發版時才發現，#788）。
+  # 其他工作都編 Linux 目標，抓不到；這裡只檢查 Rust 能不能編，不打包、不簽章。目標和 release-play.mjs 相同（arm64），API 版本和 minSdk 相同（26）。
+  android-check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay/asn/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: android-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: 設定 NDK 編譯器（ring 要用）
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$bin/aarch64-linux-android26-clang"
+          {
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: 檢查手機版能編譯
+        run: cargo check --locked --target aarch64-linux-android --lib
+
   build:
     runs-on: ubuntu-24.04
     defaults:
