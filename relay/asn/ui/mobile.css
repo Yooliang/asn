@@ -163,6 +163,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-line{font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
 .m-dv-acct>.m-dv-used{grid-column:1 / -1;font-size:12px;color:var(--muted)}
 .m-dv-acct>.m-dv-sws{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.m-dv-swt{width:100%;display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
 .m-dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}

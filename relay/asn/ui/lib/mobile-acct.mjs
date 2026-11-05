@@ -160,22 +160,36 @@ export async function runAcctSwitch(transport, node, email, { onUpdate = () => {
 export const ACCT_TABS = Object.freeze([{ key: 'devices', label: '設備' }, { key: 'accounts', label: '帳號' }])
 export const acctTabOf = v => (v === 'accounts' ? 'accounts' : 'devices')
 
+/** 帳號分頁「切換到某台」不能按時顯示的原因 */
+export const ACCT_SWITCH_REASON = Object.freeze({
+  notSaved: '這台沒有存這個帳號',
+  incomplete: '這台的登入不完整',
+  offline: '這台的 ASN 沒有在線',
+  unavailable: '這台目前不能切換',
+})
+
 /**
- * 帳號分頁：這個帳號可以切到哪幾台（手機只有 Claude 能切換；手機自己沒有帳號）。
+ * 帳號分頁：這個帳號在每一台電腦的「切換到某台」按鈕（手機只有 Claude 能切換；手機自己沒有帳號）。
  * devices：acctDevs（設備樹）；account：我的帳號那一列（{ account: email }）。
- * 別台設備回報裡有這個帳號、對方 ASN 在線且可切換、而它還沒在用的；已隱藏／已永久移除的、帳號登入不完整的不給。
+ * 回傳 { node, label, enabled, reason }：不能按的也列出來並寫原因，和設備頁一樣看得到按鈕。
+ * 不列：正在用這個帳號的那台、沒有 Claude 的、已隱藏／已永久移除的、手機。
  */
 export function acctSwitchTargets(devices, vendor, account) {
   if (vendor !== 'claude') return []
   const mail = String(account?.account ?? '').trim().toLowerCase()
+  if (!mail) return []
   const out = []
   for (const d of Array.isArray(devices) ? devices : []) {
     if (d.self || d.hidden || d.removed || d.kind === '手機') continue
     const v = (d.vendors ?? []).find(x => x.key === 'claude')
-    if (!v?.switchable) continue
+    if (!v) continue
     const has = (v.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
-    if (!has || has.current || has.incomplete) continue
-    out.push({ node: d.key, label: d.label })
+    if (has?.current) continue
+    const reason = !has ? ACCT_SWITCH_REASON.notSaved
+      : has.incomplete ? ACCT_SWITCH_REASON.incomplete
+        : v.switchable ? ''
+          : v.switchHint ? ACCT_SWITCH_REASON.offline : ACCT_SWITCH_REASON.unavailable
+    out.push({ node: d.key, label: d.label, enabled: !reason, reason })
   }
   return out
 }
