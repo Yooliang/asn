@@ -476,12 +476,18 @@ pub(crate) fn resolve_for_wrap(argv: &[String], path: Option<&str>, is_file: &dy
 /// 擴充 PSModulePath，子程序會繼承到。PSExecutionPolicyPreference 一律移除；PSModulePath 還原成窗格開窗時給的值
 /// （`ps_module_path`，沒給就移除），夥伴看到的環境跟沒包裝時一樣。
 pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str, ps_module_path: Option<&str>) -> Vec<String> {
+    mux_wrapped_argv_env(argv, nonce, ps_module_path, &[])
+}
+
+/// 同上，另外從夥伴的環境移除 `remove` 這些名字（WezTerm 從使用者環境變數帶進窗格、原生主控台不會給的，見 mux::wrapper_removals）。只用名字，不碰值
+pub(crate) fn mux_wrapped_argv_env(argv: &[String], nonce: &str, ps_module_path: Option<&str>, remove: &[String]) -> Vec<String> {
     let prog = argv.first().map(String::as_str).unwrap_or("");
     let rest = mux_cmdline(argv);
     let module_line = match ps_module_path {
         Some(v) => format!("$psi.EnvironmentVariables['PSModulePath'] = {}", ps_quote(v)),
         None => "$psi.EnvironmentVariables.Remove('PSModulePath')".to_string(),
     };
+    let remove_lines: String = remove.iter().map(|n| format!("$psi.EnvironmentVariables.Remove({})\n", ps_quote(n))).collect();
     let script = format!(
         "$code = -1073741510\n\
          $p = $null\n\
@@ -490,6 +496,7 @@ pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str, ps_module_path: Opt
          $psi.UseShellExecute = $false\n\
          $psi.EnvironmentVariables.Remove('PSExecutionPolicyPreference')\n\
          {module_line}\n\
+         {remove_lines}\
          $p = [Diagnostics.Process]::Start($psi)\n\
          $p.WaitForExit()\n\
          $code = $p.ExitCode\n\
@@ -891,6 +898,17 @@ mod tests {
         assert!(s.contains(r"$psi.EnvironmentVariables['PSModulePath'] = 'C:\mods;D:\m’’x'"), "還原成開窗時給的值（彎引號加倍）：{s}");
         let s = decode_script(&mux_wrapped_argv(&["claude.exe".to_string()], "abc", None));
         assert!(s.contains("$psi.EnvironmentVariables.Remove('PSModulePath')"), "沒給就移除：{s}");
+    }
+
+    #[test]
+    fn 包裝腳本_移除指定的名字_在啟動夥伴之前_名字裡的引號不會斷開字串() {
+        let remove = ["CLAUDE_X".to_string(), "a'b".to_string()];
+        let s = decode_script(&mux_wrapped_argv_env(&["claude.exe".to_string()], "abc", None, &remove));
+        let at = s.find("$psi.EnvironmentVariables.Remove('CLAUDE_X')").expect("要移除");
+        assert!(at < s.find("[Diagnostics.Process]::Start($psi)").unwrap(), "{s}");
+        assert!(s.contains("$psi.EnvironmentVariables.Remove('a''b')"), "{s}");
+        let none = decode_script(&mux_wrapped_argv(&["claude.exe".to_string()], "abc", None));
+        assert!(!none.contains("CLAUDE_X"), "沒給就不多移除");
     }
 
     /// cmd /c 對後面字串的去引號規則（`cmd /?`）：第一個字元是引號時，同時符合四點才原樣（剛好兩個引號、中間沒有特殊字元、有空白、是執行檔名），

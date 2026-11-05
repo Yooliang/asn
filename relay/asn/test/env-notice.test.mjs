@@ -10,7 +10,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const read = p => fs.readFileSync(path.join(here, '..', p), 'utf8')
 
 test('後端回一句話就原樣顯示（去掉頭尾空白）', async () => {
-  const s = '使用者環境變數裡有看起來像金鑰的變數（ASN_RELAY_KEY），會被帶進每個夥伴的終端；建議移到別處'
+  const s = '使用者環境變數裡有 ASN 不傳給夥伴的變數（ASN_RELAY_KEY）。Claude 夥伴不會收到；建議移到別處'
   assert.equal(await loadEnvNotice({ termEnvNotice: async () => `  ${s}\n` }), s)
 })
 

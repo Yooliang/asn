@@ -1544,6 +1544,8 @@ pub fn run() {
     launch::term::set_global(terms.clone());
     #[cfg(desktop)]
     launch::term::start_screen_watch(terms.clone(), &work_dir);
+    #[cfg(desktop)]
+    launch::term::set_ui_log_dir(&work_dir);
     // 電腦重開後自動接回夥伴（#767）：要在內建橋更新開機時間之前看存檔，所以放在橋啟動之前
     #[cfg(desktop)]
     if !is_shot && relay_obj.is_some() {

@@ -505,7 +505,7 @@ pub fn user_env_names() -> Vec<String> {
 /// 登錄檔變數名 vs 這個窗格要給的環境（名字比對一律不分大小寫）：
 /// - `collide`：窗格環境也要設的名字。登錄檔的值會蓋過我們給的，夥伴自己的值就沒了；
 /// - `secret_like`：`child_env` 會濾掉的名字（`CLAUDE*`、`NO_COLOR`、金鑰類）。登錄檔裡有的話 WezTerm 仍會帶進窗格。
-/// 只回名字。這裡不改登錄檔；提示在 `secret_notice`；撞名時的包裝指令是 TODO(B2c-wrapper)，目前撞名一律不在 mux 裡開（見 `pane_collisions`）
+/// 只回名字。這裡不改登錄檔；提示在 `secret_notice`；撞名一律不在 mux 裡開（見 `pane_collisions`）
 pub fn registry_conflicts(names: &[String], pane_env: &BTreeMap<String, String>) -> (Vec<String>, Vec<String>) {
     let ours: std::collections::HashSet<String> = pane_env.keys().map(|k| k.to_ascii_uppercase()).collect();
     let collide = names.iter().filter(|n| ours.contains(&n.to_ascii_uppercase())).cloned().collect();
@@ -526,7 +526,14 @@ pub fn pane_collisions(names: &[String], pane_env: &BTreeMap<String, String>, ba
     names.iter().filter(|n| own.contains(&n.to_ascii_uppercase())).cloned().collect()
 }
 
-/// 夥伴清單上的提示（規格 11.2-6）：登錄檔使用者變數裡有 `child_env` 會濾掉的名字（看起來像金鑰的），WezTerm 會把它們帶進每個夥伴的終端。
+/// 包裝殼要從夥伴環境移除的名字：登錄檔裡有、`child_env` 會濾掉的，夥伴拿到的環境才和原生主控台相同。
+/// 這個窗格自己要給的不動（走 `pane_collisions`）。名字比對不分大小寫，只用名字，不讀值
+pub fn wrapper_removals(names: &[String], pane_env: &BTreeMap<String, String>) -> Vec<String> {
+    let ours: std::collections::HashSet<String> = pane_env.keys().map(|k| k.to_ascii_uppercase()).collect();
+    names.iter().filter(|n| super::config::env_filtered_out(n) && !ours.contains(&n.to_ascii_uppercase())).cloned().collect()
+}
+
+/// 夥伴清單上的提示（規格 11.2-6）：登錄檔使用者變數裡有 `child_env` 會濾掉的名字。有包裝殼的夥伴不會收到（`wrapper_removals`），pi 窗格沒有包裝殼，還會收到。
 /// 只列名字（最多 5 個，每個最多 40 字），沒有就回 None。不改使用者的登錄檔
 pub fn secret_notice(names: &[String]) -> Option<String> {
     let (_, secret_like) = registry_conflicts(names, &BTreeMap::new());
@@ -537,7 +544,7 @@ pub fn secret_notice(names: &[String]) -> Option<String> {
     if secret_like.len() > 5 {
         shown.push("…".into());
     }
-    Some(format!("使用者環境變數裡有看起來像金鑰的變數（{}），會被帶進每個夥伴的終端；建議移到別處", shown.join("、")))
+    Some(format!("使用者環境變數裡有 ASN 不傳給夥伴的變數（{}）。Claude 夥伴不會收到；經 pi 開的夥伴目前還會收到，建議移到別處", shown.join("、")))
 }
 
 /// 更新留下的舊執行檔（安裝程式把占用中的檔改名成 `.old`、`.old1`…）：ASN 啟動時試著刪，舊 mux 還在用的刪不掉就留到下次。
@@ -555,6 +562,26 @@ pub fn clean_old(wezterm_dir: &Path, known: &[&str]) -> usize {
         }
     }
     n
+}
+
+#[cfg(test)]
+mod env_removal_tests {
+    use super::*;
+
+    #[test]
+    fn 只移除原生主控台也不給的名字_其他照舊_不分大小寫() {
+        let names: Vec<String> = ["claude_x", "NO_COLOR", "ASN_RELAY_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CONFIG_DIR", "Path"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapper_removals(&names, &BTreeMap::new()), ["claude_x", "NO_COLOR", "ASN_RELAY_KEY"]);
+        let own: BTreeMap<String, String> = [("CLAUDE_X".to_string(), "v".to_string())].into();
+        assert_eq!(wrapper_removals(&names, &own), ["NO_COLOR", "ASN_RELAY_KEY"], "窗格自己要給的不動");
+    }
+
+    #[test]
+    fn 提示照實寫_claude_不會收到_pi_還會收到_只有名字() {
+        let t = secret_notice(&["CLAUDE_X".to_string()]).unwrap();
+        assert!(t.contains("CLAUDE_X") && t.contains("Claude 夥伴不會收到") && t.contains("pi"), "{t}");
+        assert_eq!(secret_notice(&["ANTHROPIC_API_KEY".to_string()]), None, "原生也會傳的不提示");
+    }
 }
 
 #[cfg(test)]

@@ -420,7 +420,7 @@ fn 金鑰類變數的提示_只列名字_最多五個() {
     assert_eq!(secret_notice(&[]), None);
     assert_eq!(secret_notice(&["Path".to_string(), "Temp".to_string()]), None, "一般變數不提示");
     let one = secret_notice(&["Path".to_string(), "ASN_RELAY_KEY".to_string()]).unwrap();
-    assert_eq!(one, "使用者環境變數裡有看起來像金鑰的變數（ASN_RELAY_KEY），會被帶進每個夥伴的終端；建議移到別處");
+    assert_eq!(one, "使用者環境變數裡有 ASN 不傳給夥伴的變數（ASN_RELAY_KEY）。Claude 夥伴不會收到；經 pi 開的夥伴目前還會收到，建議移到別處");
     assert!(!one.contains("Path"));
     let two = secret_notice(&["ASN_RELAY_KEY".to_string(), "claude_code_x".to_string()]).unwrap();
     assert!(two.contains("（ASN_RELAY_KEY、claude_code_x）"), "{two}");

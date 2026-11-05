@@ -106,7 +106,31 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
 fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>) -> Vec<String> {
     let get = |name: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
     let resolved = super::local::resolve_for_wrap(command, get("PATH"), &|p| p.is_file());
-    super::local::mux_wrapped_argv(&resolved, nonce, get("PSModulePath"))
+    // WezTerm 會把使用者環境變數帶進窗格（B0 實測，11-05 再驗）：包裝殼移除原生主控台不會給的，夥伴拿到的環境才相同
+    let remove = super::mux::wrapper_removals(&registry_env_names(), env);
+    if !remove.is_empty() {
+        env_log(&format!("終端：使用者環境變數的 {} 不傳給這個夥伴", remove.join("、")));
+    }
+    super::local::mux_wrapped_argv_env(&resolved, nonce, get("PSModulePath"), &remove)
+}
+
+/// 機器資料夾（ui.log 所在）：環境變數的處理要留紀錄，stderr 正式版看不到
+#[cfg(feature = "gui")]
+static UI_LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 啟動時設定一次
+#[cfg(feature = "gui")]
+pub fn set_ui_log_dir(dir: &Path) {
+    let _ = UI_LOG_DIR.set(dir.to_path_buf());
+}
+
+/// 只寫變數名字，不寫值
+fn env_log(line: &str) {
+    elog!("{line}");
+    #[cfg(feature = "gui")]
+    if let Some(dir) = UI_LOG_DIR.get() {
+        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+    }
 }
 
 fn early_exit_text(code: i32) -> String {
@@ -752,16 +776,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let pane_env = env.cloned().unwrap_or_else(|| base_env.clone());
         // 登錄檔使用者變數（11.2-6）：只看名字。登錄檔的值會蓋過下 cli 時給的（B0 實測），所以這個窗格自己的變數（跟共用白名單不同的）
         // 若同名，夥伴會拿到錯的值：寧可不在 mux 裡開（NotStarted，呼叫端可退到原生主控台），也不悄悄給錯的。
-        // TODO(B2c-wrapper)：改用包裝指令在窗格裡設定，撞名也能開；先不做（asn真 建議撞名才用包裝指令，我們決定延後）
+        // 目前只有 pi 窗格有自己的變數，而 pi 窗格沒有包裝殼（kind 是空的），所以撞名維持不開在 mux；要改得先讓 pi 也有包裝殼
         let reg = registry_env_names();
         let (_, secret_like) = mux::registry_conflicts(&reg, &pane_env);
         if let Some(n) = mux::pane_collisions(&reg, &pane_env, &base_env).first() {
-            elog!("終端服務：使用者環境變數裡有「{n}」，會蓋過這個窗格自己的設定，不在共用終端裡開");
+            env_log(&format!("終端服務：使用者環境變數裡有 {n}，會蓋過這個窗格自己的設定，不在共用終端裡開"));
             return Err(NotStarted(format!("使用者環境變數裡已經有「{n}」，會蓋過這個夥伴自己的設定，所以沒有在共用終端裡開；請把它從使用者環境變數移除")));
         }
-        // 金鑰類的名字：只提示（夥伴清單上的一句話，見 mux::secret_notice），不改使用者的登錄檔
-        for n in &secret_like {
-            elog!("終端服務：使用者環境變數裡有「{n}」（金鑰類或會被濾掉的名字），WezTerm 會把它帶進窗格");
+        // 有包裝殼的夥伴由 wrap_partner 移除；沒有包裝殼的窗格（pi、終端面板）WezTerm 會帶進去，只留紀錄（夥伴清單上也有一句話，見 mux::secret_notice）。不改使用者的登錄檔
+        if extra.kind.is_empty() && !secret_like.is_empty() {
+            env_log(&format!("終端服務：使用者環境變數的 {} 會被帶進這個窗格（它沒有包裝殼）", secret_like.join("、")));
         }
         let cwd_s = cwd.to_string_lossy().into_owned();
         // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
@@ -5896,6 +5920,20 @@ mod tests {
             TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = vec!["OTHER_VAR".into()]);
             rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &env).unwrap();
             assert_eq!(count_sub(&rig.runner, "spawn"), 1);
+        }
+
+        #[test]
+        fn 夥伴窗格的包裝殼移除使用者環境變數裡濾掉的名字_原生也會傳的留著() {
+            use base64::Engine;
+            TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = vec!["CLAUDE_X".into(), "ANTHROPIC_API_KEY".into(), "Path".into()]);
+            let w = wrap_partner(&["claude.exe".to_string()], "abc", &BTreeMap::new());
+            TEST_REGISTRY_NAMES.with(|n| n.borrow_mut().clear());
+            let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
+            let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+            let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let s = String::from_utf16(&u).unwrap();
+            assert!(s.contains("Remove('CLAUDE_X')"), "{s}");
+            assert!(!s.contains("ANTHROPIC_API_KEY") && !s.contains("Remove('Path')"), "{s}");
         }
 
         #[test]
