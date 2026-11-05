@@ -30,6 +30,7 @@ import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partne
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
+import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
@@ -666,6 +667,14 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPerm = PERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handlePermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPerm);
+    return json(r.status, r.body);
+  }
+  // 設備配對（見 _shared/device_pair.ts）：上傳公鑰用節點金鑰，其他都要本人簽章
+  if (action && DEVICE_PAIR_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedPair = DEVICE_PAIR_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleDevicePairAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPair);
     return json(r.status, r.body);
   }
   // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：
