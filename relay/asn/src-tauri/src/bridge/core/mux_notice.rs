@@ -9,7 +9,18 @@ const RETRY_MS: u64 = 60_000;
 const GIVE_UP_MS: u64 = 600_000;
 
 impl Core {
+    /// 讀共用終端服務監看的名單（至多每 5 秒一次）：中斷後還沒接回來的、和最近還看得到的夥伴名字
+    fn refresh_mux_pending(&mut self, now: u64) {
+        if now.saturating_sub(self.mux_pending_at) < 5_000 {
+            return;
+        }
+        self.mux_pending_at = now;
+        let file = self.cfg.work_dir.join(mux_watch::STATE_FILE);
+        self.mux_pending = mux_watch::pending_names(&file, crate::heartbeat::now_ms()).into_iter().collect();
+    }
+
     pub async fn mux_notice_tick(&mut self, now: u64) {
+        self.refresh_mux_pending(now);
         if self.cfg.respond.is_some() || now < self.mux_notice_retry_at {
             return;
         }

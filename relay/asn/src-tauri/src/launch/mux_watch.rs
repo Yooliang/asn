@@ -19,6 +19,10 @@ pub const RESUME_GAP_MS: u64 = 600_000;
 /// 狀態檔（機器資料夾）：最後看到的 mux 與夥伴、上次接回的時間、當時的開機時間
 pub const STATE_FILE: &str = "mux-resume.json";
 /// 畫面與紀錄用的原因（一個字都不要改，測試比對）
+/// 事故後「還沒接回來」的夥伴，寄給它們的信先留著的最久時間（和重開機後等接回一樣 12 小時）
+pub const LOST_KEEP_MS: u64 = 12 * 3_600_000;
+/// 狀態檔超過這麼久沒更新，就當監看沒在跑，不拿「還看得到的夥伴」當依據
+pub const STATE_FRESH_MS: u64 = 120_000;
 pub const CAUSE: &str = "共用的終端服務中斷了";
 /// 十分鐘內又中斷時，每位夥伴的失敗原因
 pub const COOLDOWN_REASON: &str = "終端服務十分鐘內又中斷了，這次沒有自動接回，請手動喚醒";
@@ -57,6 +61,11 @@ pub struct Watch {
     /// 存檔時的開機時間：開機時間變了＝重開機，夥伴不見了是 #788 的事，不重複接
     #[serde(default)]
     boot: Option<u64>,
+    /// 事故後還沒接回來的夥伴名字：寄給它們的信先留著、不退回（橋接核心讀這份）。回來了或過 12 小時就拿掉
+    #[serde(default)]
+    lost: Vec<String>,
+    #[serde(default)]
+    lost_at: u64,
     /// 上一輪就看不到 mux（還沒下結論）
     #[serde(skip)]
     suspect: bool,
@@ -69,6 +78,7 @@ impl Watch {
         if let (Some(a), Some(b)) = (w.boot, boot_now) {
             if !crate::bridge::known::same_boot(a, b) {
                 w.seen = None;
+                w.lost.clear();
             }
         }
         w.boot = boot_now;
@@ -83,6 +93,11 @@ impl Watch {
 
     /// 看一輪。有事故就回（同一次事故只回一次）
     pub fn tick(&mut self, o: &Observed, now: u64) -> Option<Incident> {
+        // 已經回來的（又出現在 mux 裡）、或等太久的，不再算還沒接回
+        self.lost.retain(|n| !o.partners.iter().any(|p| p == n));
+        if self.lost_at > 0 && now.saturating_sub(self.lost_at) > LOST_KEEP_MS {
+            self.lost.clear();
+        }
         let prev = self.seen.clone();
         // 這一輪看到的：mux 活著而且裡面有夥伴才值得記（沒有夥伴，不見了也沒有誰要通知）
         let current = o.live.filter(|_| !o.partners.is_empty()).map(|mux| Seen { mux, partners: o.partners.clone(), at: now });
@@ -117,8 +132,35 @@ impl Watch {
         if resume {
             self.last_resume_at = Some(now);
         }
+        for n in &p.partners {
+            if !self.lost.contains(n) {
+                self.lost.push(n.clone());
+            }
+        }
+        self.lost_at = now;
         Some(Incident { partners: p.partners, resume })
     }
+}
+
+/// 橋接核心要知道的名字：這些夥伴現在名單上沒有，但很可能只是共用的終端服務掛了、正在（或等著）接回，
+/// 寄給它們的信先留著、不退回，也先別當成本人關掉而忘掉。
+/// 包含：①事故後還沒接回來的（最久 12 小時）；②監看最近一輪還看到、現在可能剛掛的（狀態檔很新才算；
+/// 本人剛關掉的下一輪監看就會拿掉，最多多留一輪）
+pub fn pending_names(file: &Path, now_ms: u64) -> Vec<String> {
+    let Some(w) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Watch>(&t).ok()) else { return Vec::new() };
+    let mut names: Vec<String> = Vec::new();
+    if w.lost_at > 0 && now_ms.saturating_sub(w.lost_at) <= LOST_KEEP_MS {
+        names.extend(w.lost.iter().cloned());
+    }
+    let fresh = std::fs::metadata(file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|e| e.as_millis() as u64 <= STATE_FRESH_MS);
+    if fresh {
+        if let Some(s) = &w.seen {
+            names.extend(s.partners.iter().cloned());
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// 要請後台通知本人的事故檔：偵測到中斷就寫，橋接核心下一輪讀走、呼叫後台成功（或確定不用再試）就刪
@@ -375,5 +417,55 @@ mod tests {
         let mut w2 = Watch::load(&f, None);
         assert_eq!(w2.tick(&obs(None, &[]), TICK_MS), None);
         assert_eq!(w2.tick(&obs(None, &[]), 2 * TICK_MS), None);
+    }
+
+    #[test]
+    fn 事故後還沒接回來的夥伴記著_回來了或過十二小時就拿掉() {
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000);
+        // 換成新 mux、夥伴都不在
+        let inc = w.tick(&obs(Some(M2), &[]), 1_000 + TICK_MS).expect("事故");
+        assert_eq!(inc.partners, ["甲", "乙"]);
+        assert_eq!(w.lost, ["甲", "乙"]);
+        // 甲接回來了
+        w.tick(&obs(Some(M2), &["甲"]), 1_000 + 2 * TICK_MS);
+        assert_eq!(w.lost, ["乙"]);
+        // 乙一直沒回來，過 12 小時就不留了
+        w.tick(&obs(Some(M2), &["甲"]), 1_000 + TICK_MS + LOST_KEEP_MS + 1);
+        assert!(w.lost.is_empty());
+    }
+
+    #[test]
+    fn 重開機後不留還沒接回來的_交給_788() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::load(&f, Some(1_000_000));
+        w.tick(&obs(Some(M1), &["甲"]), 1_000);
+        w.tick(&obs(Some(M2), &[]), 1_000 + TICK_MS);
+        w.save(&f);
+        assert_eq!(Watch::load(&f, Some(1_000_000)).lost, ["甲"]);
+        assert!(Watch::load(&f, Some(1_000_000 + 10 * 3_600_000)).lost.is_empty());
+    }
+
+    #[test]
+    fn 橋接核心讀的名單_事故後的加上最近還看得到的_狀態檔太舊就只看事故後的() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        assert!(pending_names(&f, 5_000).is_empty());
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000);
+        w.save(&f);
+        assert_eq!(pending_names(&f, 2_000), ["乙", "甲"], "最近還看得到的（可能剛掛）");
+        w.tick(&obs(Some(M2), &[]), 1_000 + TICK_MS);
+        w.save(&f);
+        assert_eq!(pending_names(&f, 1_000 + TICK_MS), ["乙", "甲"], "事故後還沒接回來的");
+        assert!(pending_names(&f, 1_000 + TICK_MS + LOST_KEEP_MS + 1).is_empty(), "過 12 小時不留");
+        // 狀態檔很久沒更新：監看沒在跑，不拿「還看得到的夥伴」當依據
+        let mut w2 = Watch::default();
+        w2.tick(&obs(Some(M1), &["丙"]), 1_000);
+        w2.save(&f);
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(old).unwrap();
+        assert!(pending_names(&f, 2_000).is_empty());
     }
 }
