@@ -261,7 +261,7 @@ async fn 群組_橋重啟後還在等的群組訊息回覆仍貼得回_群組項
     let id = fwd(&h.said())[0].0.clone();
     worker_ok(&mut h.core, &id, T0 + 1).await;
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("pending.json")).unwrap()).unwrap();
-    assert_eq!(saved["pending"][0]["room"], json!({"id": "R1", "seq": 2, "window": "T-視窗甲"}), "與 Node 橋同格式");
+    assert_eq!(saved["pending"][0]["room"], json!({"id": "R1", "seq": 2, "window": "T-視窗甲", "member": "T~T-視窗甲"}), "與 Node 橋同格式，多一個成員欄位（舊程式讀取時忽略）");
     restart(&mut h, T0 + 5000).await;
     assert_eq!(h.core.pending.len(), 1);
     h.core.on_worker_line(res(&reply_block("T-視窗甲", "重啟後才回")), T0 + 6000).await;
