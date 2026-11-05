@@ -3,6 +3,7 @@
 //! 對後端只透過 [`Relay`]（HTTP），對 worker 只透過 [`WorkerSink`]，所以測試可用本機假後端與假 worker。
 use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
+use super::channel_turns;
 use super::engines::{EngineEvent, EngineSet};
 use super::forward_selftest;
 use super::launcher::{Launched, Launcher};
@@ -258,6 +259,10 @@ const QUOTA_MARGIN_MS: u64 = 60_000;
 const QUOTA_RETRY_MS: u64 = 3_600_000;
 /// 收發室登入失效時第一次試送提早到這麼久之後（之後才每小時一次）：能很快發現已經好了，也讓登入失效偵測看得到第二筆
 const AUTH_FIRST_PROBE_MS: u64 = 300_000;
+/// 重開前已開始處理的通道信，重送時附在內文前（「（收發室）」開頭：內文行首的同樣字樣會被跳脫）
+const CHANNEL_RESEND_NOTE: &str = "（收發室）這封因收發室重開重送，上一輪可能做到一半，先確認現況再動手。";
+/// 重送一次還是沒做完
+const CHANNEL_GIVE_UP: &str = "收發室重開時這封信沒有處理完，已重送一次仍沒做完。上一輪可能做到一半，請確認現況後再寄";
 
 /// 額度用完而扣住的個人信（內文只在記憶體；重啟後靠重新拉到的同一封補回）
 struct HeldItem {
@@ -327,6 +332,10 @@ pub struct Core {
     self_handled: HashSet<String>,
     /// 「寄回成功才 ack」的引擎（Aegis）：還在等回覆的信編號
     ack_wait: HashSet<String>,
+    /// 內建通道的信（ack_wait 的子集）：寄回失敗也 ack，不然每次拉信都重跑一輪（#828）
+    channel_wait: HashSet<String>,
+    /// 重開前交給內建通道、還沒結束的信：重新拉到時決定重送或放棄（#828）
+    channel_back: HashSet<String>,
     /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
     reply_fail: HashSet<String>,
     unrouted: HashSet<String>,
@@ -511,7 +520,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
@@ -603,7 +612,15 @@ impl Core {
             EngineEvent::Reply { from, text, mail_id } => self.on_reply(&from, &text, mail_id).await,
             EngineEvent::RosterChanged => self.refresh_roster(now).await,
             EngineEvent::Replied(id) => {
-                if self.ack_wait.remove(&id) && !self.reply_fail.remove(&id) {
+                channel_turns::clear(&self.cfg.work_dir, &id);
+                let channel = self.channel_wait.remove(&id);
+                let failed = self.reply_fail.remove(&id);
+                if channel {
+                    // 這一輪做完了：寄回失敗就照舊只記 log，不留在信箱（留著每次拉信都會再跑一輪）
+                    self.remove(&id);
+                    self.ack_wait.remove(&id);
+                    self.ack_ids(&[id]).await;
+                } else if self.ack_wait.remove(&id) && !failed {
                     self.ack_ids(&[id]).await;
                 }
             }
@@ -648,7 +665,14 @@ impl Core {
         if !st.pending.is_empty() || !st.last.is_empty() || st.dropped > 0 {
             self.log.line(&format!("pending restored: {} (waiting {}, notified {}), lastRequester {}, expired/invalid dropped {}", st.pending.len(), st.pending.len() - n, n, st.last.len(), st.dropped));
         }
-        self.pending = st.pending;
+        // 重開前交給內建通道、還沒結束的信：工作者的佇列已經沒了。放掉紀錄，信還在信箱，重新拉到時處理（#828）
+        let (back, keep): (Vec<Pending>, Vec<Pending>) = st.pending.into_iter().partition(|p| p.channel && p.room.is_none() && p.state != State::Done);
+        if !back.is_empty() {
+            self.log.line(&format!("channel mail unfinished before restart: {} (will be pulled again)", back.len()));
+        }
+        self.channel_back = back.into_iter().map(|p| p.id).collect();
+        channel_turns::prune(&self.cfg.work_dir);
+        self.pending = keep;
         self.last_requester = st.last;
         self.restore_ack_retry(st.ack_retry);
         // 存下來的額度重置時間再驗一次範圍：已過去或超過 8 天就當作沒有
@@ -1400,7 +1424,8 @@ impl Core {
             },
         };
         // 「寄回成功才 ack」的引擎（Aegis）：寄件人說不需回覆也照問、照回（和 Node 版一樣）；其他引擎維持原行為
-        let no_reply = (!wants_reply(m.expects_reply, &m.body) && !self.defers_ack(&target)) || Self::is_mailbox_sender(&from_agent);
+        let always = { let eng = self.engine_of(&target); self.engines.as_ref().is_some_and(|e| e.always_replies(&eng)) };
+        let no_reply = (!wants_reply(m.expects_reply, &m.body) && !always) || Self::is_mailbox_sender(&from_agent);
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
         p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
         // 重開後夥伴視窗還沒接回來：信留在後台信箱（不退回、不 ack），等它接回來再照順序送；等太久或留太多才退回
@@ -1462,6 +1487,23 @@ impl Core {
         let await_at = self.await_first.remove(&m.id).map(|t| m.sent_ms.unwrap_or(t));
         let origin = Origin::of(&p);
         self.pending.push(p);
+        // 重開前沒做完的通道信：同一封最多重送一次，再沒做完就通知寄件人（#828）
+        let mut resend_note = "";
+        if self.channel_back.remove(&m.id) {
+            if channel_turns::resent(&self.cfg.work_dir, &m.id) {
+                self.log.line(&format!("id={} channel mail unfinished after one resend: giving up", m.id));
+                self.on_fail(&m.id, CHANNEL_GIVE_UP).await;
+                return None;
+            }
+            if channel_turns::started(&self.cfg.work_dir, &m.id) {
+                resend_note = CHANNEL_RESEND_NOTE;
+            }
+            self.log.line(&format!("id={} channel mail resent after restart (started before: {})", m.id, !resend_note.is_empty()));
+            channel_turns::clear_started(&self.cfg.work_dir, &m.id);
+            if let Err(e) = channel_turns::mark_resent(&self.cfg.work_dir, &m.id) {
+                self.log.line(&format!("id={} cannot record the resend: {e}", m.id));
+            }
+        }
         self.refund_owner_mail(&m, &target);
         if !no_reply {
             self.last_requester.insert(target.clone(), LastReq { from_node: m.from_node.clone(), from_agent: from_agent.clone(), mail_id: m.id.clone(), t: self.now });
@@ -1471,7 +1513,7 @@ impl Core {
         let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
         // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
-        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::insert_await_line(mail::preamble_late_kind(&m, &pre_engine, late, self.held_auth.contains(&m.id)), await_at),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = format!("{}\n{}{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::insert_await_line(mail::preamble_late_kind(&m, &pre_engine, late, self.held_auth.contains(&m.id)), await_at), if resend_note.is_empty() { String::new() } else { format!("{resend_note}\n") }, if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
@@ -1632,12 +1674,22 @@ impl Core {
         if self.quota_until == 0 && !self.is_respond(&self.pending[i].target) {
             self.quota_ep = None; // 收發室 worker 真的完成了轉交＝額度恢復，下次用完再通知
         }
+        let channel = self.pending[i].room.is_none() && self.engine_of(&self.pending[i].target) == "acp";
+        self.pending[i].channel = channel;
         self.persist();
         let (target, t0, no_reply) = (self.pending[i].target.clone(), self.pending[i].t0, self.pending[i].no_reply);
         if let Some(r) = self.pending[i].room.clone() {
             // 群組訊息：只記 log、開始等回覆；不 ack（群組沒有信箱）
             self.log.line(&format!("forwarded room={} #{} -> {target}", r.id, r.seq));
             self.pending[i].t = self.now;
+            return;
+        }
+        if channel {
+            // 內建通道：這一輪結束（Replied 或 Fail）才 ack，重開時沒做完的信還在信箱（#828）
+            self.log.line(&format!("forwarded id={id} -> {target} ({}ms, ack when the turn ends)", self.now.saturating_sub(t0)));
+            self.pending[i].t = self.now;
+            self.ack_wait.insert(id.to_string());
+            self.channel_wait.insert(id.to_string());
             return;
         }
         if no_reply {
@@ -1699,6 +1751,10 @@ impl Core {
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
         self.exact_ids.remove(id);
+        channel_turns::clear(&self.cfg.work_dir, id);
+        self.channel_wait.remove(id);
+        self.ack_wait.remove(id);
+        self.reply_fail.remove(id);
         let Some(i) = self.idx(id) else { return };
         if self.pending[i].state == State::Done {
             return;

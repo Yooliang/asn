@@ -448,12 +448,18 @@ fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &M
         events: ctx.events.clone(),
         pids: ctx.pids.clone(),
         handoff_dir: ctx.handoff_dir.clone(),
+        work_dir: ctx.work_dir.clone(),
     })
 }
 
 impl Engine for AcpEngine {
     fn id(&self) -> &'static str {
         "acp"
+    }
+
+    /// 佇列只在記憶體：這一輪結束才 ack，重開 ASN 時沒做完的信還在後台信箱拉得回來（#828）
+    fn ack_after_reply(&self) -> bool {
+        true
     }
 
     fn start(&self) {
@@ -611,6 +617,7 @@ impl Engine for AcpEngine {
             if let Some(note) = r.note {
                 let _ = self.ctx.events.send(EngineEvent::Reply { from: to.to_string(), text: note, mail_id: Some(id.to_string()) });
             }
+            let _ = self.ctx.events.send(EngineEvent::Replied(id.to_string()));
             return Ok(());
         }
         // 要不要把回覆寄回：和橋同一條規則——抬頭的 reply=yes|no 是寄件人明說的，有就只看它；

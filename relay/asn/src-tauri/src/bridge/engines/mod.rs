@@ -83,6 +83,10 @@ pub trait Engine: Send + Sync {
     fn ack_after_reply(&self) -> bool {
         false
     }
+    /// true＝寄件人說不需回覆也照問、照回（Aegis）。其他引擎照寄件人說的
+    fn always_replies(&self) -> bool {
+        false
+    }
     /// 信上的收件名（例如成員代號）換成名單上的名字；不認得回 None
     fn canonical_name(&self, _name: &str) -> Option<String> {
         None
@@ -269,6 +273,9 @@ impl EngineSet {
     /// 這個引擎代號的信是不是「寄回成功才 ack」
     pub fn ack_after_reply(&self, engine: &str) -> bool {
         self.engines.iter().any(|e| e.id() == engine && e.ack_after_reply())
+    }
+    pub fn always_replies(&self, engine: &str) -> bool {
+        self.engines.iter().any(|e| e.id() == engine && e.always_replies())
     }
     pub fn canonical_name(&self, name: &str) -> String {
         self.engines.iter().find_map(|e| e.canonical_name(name)).unwrap_or_else(|| name.to_string())
