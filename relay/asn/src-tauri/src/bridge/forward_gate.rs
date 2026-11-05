@@ -287,13 +287,18 @@ pub fn check(input: &Value, inflight: Option<&HashMap<String, InflightItem>>) ->
 
 /// hook 的整個流程：stdin 文字 → （要印出的 JSON，要記的 log 行）。印出 None＝放行（什麼都不說）
 pub fn run_hook(dir: &Path, stdin: &str) -> (Option<String>, String) {
+    run_hook_with(dir, stdin, || std::thread::sleep(std::time::Duration::from_millis(100)))
+}
+
+/// `pause`：第一次讀不到時，再讀之前要做的事（正式版是等一下，測試用它把檔案放進去，不靠時間）
+fn run_hook_with(dir: &Path, stdin: &str, pause: impl FnOnce()) -> (Option<String>, String) {
     let Ok(input) = serde_json::from_str::<Value>(stdin) else {
         return (None, "allow: unreadable hook input".into());
     };
     let mut inflight = read_inflight(dir);
     if inflight.is_none() && input.get("tool_name").and_then(Value::as_str) == Some("SendMessage") {
         // 橋正好在換檔、或暫時讀不到：短暫等一下再讀一次，還是讀不到才擋
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        pause();
         inflight = read_inflight(dir);
     }
     let (v, log) = check(&input, inflight.as_ref());
@@ -529,14 +534,12 @@ mod tests {
         // 一直讀不到：擋，理由是暫時讀不到
         let (out, log) = run_hook(d.path(), &input);
         assert!(out.unwrap().contains("轉交紀錄暫時讀不到") && log.contains("unreadable"));
-        // 重試期間檔案出現：放行
-        let dir = d.path().to_path_buf();
-        let h = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(30));
-            write_inflight(&dir, &[(A.to_string(), "T-甲".to_string(), None)]).unwrap();
-        });
-        let (out, log) = run_hook(d.path(), &input);
-        h.join().unwrap();
+        // 不是轉交就不用等
+        let other = json!({ "tool_name": "Bash", "tool_input": {} }).to_string();
+        let (out, _) = run_hook_with(d.path(), &other, || panic!("不是 SendMessage 不用再讀一次"));
+        assert_eq!(out, None);
+        // 再讀之前檔案出現：放行
+        let (out, log) = run_hook_with(d.path(), &input, || write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), None)]).unwrap());
         assert_eq!(out, None, "{log}");
     }
 
