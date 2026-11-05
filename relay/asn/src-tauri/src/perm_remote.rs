@@ -1,7 +1,9 @@
 //! 手機回答 Claude 夥伴的權限框（#853，0.2.6）。電腦發現權限框就建請求，手機（本人簽章）按一個選項，
 //! 電腦領到後全部重查（`partner_phone_answer`），才送那個數字鍵。後台見 supabase/functions/_shared/perm_request.ts。
 //!
-//! 夥伴畫面原本不離開電腦，這裡是唯一的例外：只有權限框的文字和選項，只有 Claude 夥伴，只有這一個入口。
+//! 也涵蓋 AI 用選項框問的問題（AskUserQuestion）：單選能按，多選和一次多題看得到但不能按。
+//!
+//! 夥伴畫面原本不離開電腦，這裡是唯一的例外：只有權限框和選項框的文字與選項，只有 Claude 夥伴，只有這一個入口。
 //! `term_remote` 拒絕夥伴視窗的規則不動。內容經後台、只給本人，沒有端對端加密（小良哥定，設備金鑰放 0.2.7）。
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -117,8 +119,7 @@ mod live {
         if USER_OFF.load(Ordering::SeqCst) {
             return Vec::new();
         }
-        let code = crate::launch::claude_screen::status_code(crate::launch::claude_screen::ClaudeScreenKind::Permission);
-        let names: Vec<String> = term::partner_notices().into_iter().filter(|n| n.code == code).map(|n| n.name).collect();
+        let names: Vec<String> = term::partner_notices().into_iter().filter(|n| crate::launch::claude_screen::goes_to_phone(n.code)).map(|n| n.name).collect();
         if names.is_empty() {
             return Vec::new();
         }

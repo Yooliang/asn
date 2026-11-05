@@ -23,12 +23,16 @@ Deno.test("建立：只留認得的欄位，多餘的丟掉", () => {
 Deno.test("建立：壞參數一律拒絕", () => {
   for (const bad of [
     null, [], { ...ok, window_name: "" }, { ...ok, window_name: "x".repeat(65) }, { ...ok, prompt_text: " " }, { ...ok, prompt_text: "x".repeat(TEXT_MAX + 1) },
-    { ...ok, complete: "yes" }, { ...ok, hash: "abc" }, { ...ok, options: [] }, { ...ok, options: "1" }, { ...ok, options: [{ n: 0, label: "x" }] },
+    { ...ok, complete: "yes" }, { ...ok, hash: "abc" }, { ...ok, options: "1" }, { ...ok, options: [{ n: 0, label: "x" }] },
     { ...ok, options: [{ n: 10, label: "x" }] }, { ...ok, options: [{ n: 1.5, label: "x" }] }, { ...ok, options: [{ n: 1, label: " " }] },
     { ...ok, options: Array.from({ length: 10 }, (_, i) => ({ n: 1 + i % 9, label: "x" })) },
   ]) {
     assertEquals(parseCreate(bad as never), null, JSON.stringify(bad)?.slice(0, 80));
   }
+});
+
+Deno.test("建立：選項可以是空的（多選看得到不能按）", () => {
+  assertEquals(parseCreate({ ...ok, options: [] })?.options, []);
 });
 
 Deno.test("建立：敲本人其他設備的門鈴，回應不帶內容", async () => {

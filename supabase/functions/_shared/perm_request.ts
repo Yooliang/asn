@@ -26,7 +26,7 @@ export function parseCreate(b: Json): PermCreate | null {
   if (typeof text !== "string" || text.trim().length === 0 || text.length > TEXT_MAX) return null;
   if (typeof complete !== "boolean") return null;
   if (typeof hash !== "string" || !HASH_RE.test(hash)) return null;
-  if (!Array.isArray(options) || options.length < 1 || options.length > OPTIONS_MAX) return null;
+  if (!Array.isArray(options) || options.length > OPTIONS_MAX) return null;
   const opts: { n: number; label: string }[] = [];
   for (const o of options) {
     if (!o || typeof o !== "object" || !Number.isInteger(o.n) || o.n < 1 || o.n > 9 || typeof o.label !== "string" || o.label.trim().length === 0) return null;

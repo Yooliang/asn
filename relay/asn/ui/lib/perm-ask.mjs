@@ -26,7 +26,7 @@ export function normalizeList(raw, nameOf = () => '', nowMs = Date.now()) {
     const options = Array.isArray(r.options)
       ? r.options.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200) }))
       : []
-    if (!options.length || typeof r.prompt_text !== 'string') continue
+    if (typeof r.prompt_text !== 'string') continue   // 選項可以是空的：多選、一次多題看得到但不能按
     out.push({
       id: r.id, hash: r.body_hash, deviceName: clean(nameOf(r.node), 60) || '某台電腦', window: clean(r.window_name, 64),
       text: clean(r.prompt_text, TEXT_MAX), complete: r.complete === true, options,
@@ -60,8 +60,10 @@ export const TEXT = {
   lead: '按一個選項就會送到那台電腦，送出後收不回。',
   deviceLabel: '哪台電腦',
   windowLabel: '哪個夥伴',
-  textLabel: '它要做的事',
+  textLabel: '內容',
   incomplete: '內容太長，這裡只看得到一部分，所以只能拒絕。要允許請到電腦上看完整內容。',
+  viewOnly: '這題要到電腦上回答（多選、一次多題，或要自己打字）。',
+  noType: '要自己打字，請到電腦上回答。',
   optionLabel: '選項',
   later: '先不處理',
   waiting: '已送出，等電腦確認…',

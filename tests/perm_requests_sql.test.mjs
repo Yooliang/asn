@@ -124,7 +124,7 @@ test('雜湊綁死、數字要在選項裡、第一個決定為準', { skip }, a
 
 test('建立的參數：壞的拒絕；不能在同一扇視窗開第二筆；別扇可以', { skip }, async () => {
   const db = await boot()
-  for (const o of [{ p_window_name: '' }, { p_window_name: 'a\nb' }, { p_prompt_text: '  ' }, { p_prompt_text: 'x'.repeat(16001) }, { p_hash: 'x' }, { p_options: '[]' },
+  for (const o of [{ p_window_name: '' }, { p_window_name: 'a\nb' }, { p_prompt_text: '  ' }, { p_prompt_text: 'x'.repeat(16001) }, { p_hash: 'x' }, { p_options: JSON.stringify(Array.from({ length: 10 }, () => ({ n: 1, label: 'x' }))) },
     { p_options: JSON.stringify([{ n: 0, label: 'x' }]) }, { p_options: JSON.stringify([{ n: 10, label: 'x' }]) }, { p_options: JSON.stringify([{ n: 1, label: ' ' }]) }]) {
     assert.equal((await create(db, o)).error, 'bad_request', JSON.stringify(o).slice(0, 60))
   }
@@ -132,6 +132,14 @@ test('建立的參數：壞的拒絕；不能在同一扇視窗開第二筆；�
   assert.ok((await create(db)).id)
   assert.equal((await create(db)).error, 'busy')
   assert.ok((await create(db, { p_window_name: '小丙' })).id)
+})
+
+test('沒有選項：看得到，但什麼數字都按不了', { skip }, async () => {
+  const db = await boot()
+  const c = await create(db, { p_options: '[]' })
+  assert.ok(c.id)
+  assert.deepEqual((await rpc(db, 'asn_relay_perm_req_list', { p_actor: P1, p_signed_user: U1 })).requests[0].options, [])
+  assert.equal((await decide(db, c.id)).error, 'bad_choice')
 })
 
 test('過期：清全文、手機按不了、電腦看得到；到期前可以再開一筆', { skip }, async () => {

@@ -1727,7 +1727,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 按鈕前的全部核對，回（畫面文字, 判斷結果, 窗格資訊）。任何一項不符都回錯，不給按鈕也不送字：
     /// 視窗名只對到一扇 Claude 夥伴、session 程序活著（由呼叫端查）而且在這扇視窗的程序樹內、有結束暗號且畫面上沒有標記、標題非空、判定是權限詢問
-    fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+    fn partner_screen_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, String), String> {
         let Some(session_pid) = session_pid else { return Err("確認不了這個夥伴還在跑".into()) };
         let ids: Vec<String> = self.watched_partners().into_iter().filter(|(_, n)| n == name).map(|(id, _)| id).collect();
         let [id] = ids.as_slice() else { return Err("找不到這個夥伴視窗".into()) };
@@ -1753,8 +1753,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !panes.iter().any(|p| p.pane_id == snap.pane_id && !p.title.trim().is_empty()) {
             return Err("確認不了這扇視窗還是 Claude".into());
         }
+        Ok((snap, text))
+    }
+
+    fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+        let (snap, text) = self.partner_screen_checked(name, session_pid)?;
         let screen = super::claude_screen::classify(&text).filter(|s| s.kind == super::claude_screen::ClaudeScreenKind::Permission).ok_or("這個提示已經不在畫面上")?;
         let prompt = super::claude_screen::permission_text(&text).ok_or("這個提示已經不在畫面上")?;
+        Ok((snap, screen, prompt))
+    }
+
+    /// 手機要看的框：權限框或選項框（#853）。其他畫面一律拿不到文字
+    fn phone_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+        let (snap, text) = self.partner_screen_checked(name, session_pid)?;
+        let screen = super::claude_screen::classify(&text).filter(|s| super::claude_screen::goes_to_phone(super::claude_screen::status_code(s.kind))).ok_or("這個提示已經不在畫面上")?;
+        let prompt = super::claude_screen::phone_text(&text).ok_or("這個提示已經不在畫面上")?;
         Ok((snap, screen, prompt))
     }
 
@@ -1764,15 +1777,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete })
     }
 
-    /// 傳到手機的權限框：只有文字和選項（#853）。全套檢查和本機相同
+    /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
     fn phone_offer_with(&self, name: &str, session_pid: Option<u32>) -> Result<PhoneOffer, String> {
-        let (_, screen, p) = self.permission_checked(name, session_pid)?;
+        let (_, screen, p) = self.phone_checked(name, session_pid)?;
         Ok(phone_offer(name, &screen, p))
     }
 
     /// 手機按了一個選項。送之前全部重查：框還在、內容和選項沒變、這個數字還在選項裡。只送一個數字鍵，不帶 Enter
     fn phone_answer_with(&self, name: &str, hash: &str, n: u32, session_pid: Option<u32>) -> Result<(), String> {
-        let (snap, screen, p) = self.permission_checked(name, session_pid)?;
+        let (snap, screen, p) = self.phone_checked(name, session_pid)?;
         let offer = phone_offer(name, &screen, p);
         if offer.hash != hash {
             return Err("提示內容變了，沒有送出".into());
@@ -6525,6 +6538,26 @@ mod tests {
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
             rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["2"]);
+        }
+
+        #[test]
+        fn 手機_選項框單選_按了送那個數字_多選不能按() {
+            let rig = permission_rig();
+            let rule = "─".repeat(60);
+            let foot = "Enter to select · ↑/↓ to navigate · Esc to cancel";
+            *rig.runner.inner.screen.borrow_mut() = format!("{rule}\n ☐ 色\n\n哪個？\n\n❯ 1. 紅\n  2. 綠\n  3. Type something.\n{rule}\n  4. Chat about this\n\n{foot}\n");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(o.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![1, 2]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 3, Some(SESSION_PID)).is_err(), "自由輸入那一列不能按");
+            assert!(sent(&rig).is_empty());
+            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2"]);
+            *rig.runner.inner.screen.borrow_mut() = format!("{rule}\n←  ☐ 果  ✔ Submit  →\n\n哪些？\n\n❯ 1. [ ] 紅\n  2. [ ] Type something\n     Submit\n{rule}\n  3. Chat about this\n\n{foot}\n");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(o.options.is_empty());
+            assert!(o.text.contains("哪些"));
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).is_err());
+            assert_eq!(sent(&rig), vec!["2"], "多選沒有多送");
         }
 
         #[test]

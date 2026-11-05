@@ -7,6 +7,8 @@ const NOTICES = {
   bypass_warning: name => ({ title: '夥伴在等你確認', body: `「${name}」第一次開啟，要你同意它的權限設定，請到它的視窗確認。` }),
   login: name => ({ title: '夥伴需要登入', body: `「${name}」需要登入才能繼續，請到它的視窗登入。` }),
   usage_limit: name => ({ title: '夥伴的額度用完了', body: `「${name}」的額度用完了，要等額度恢復才能繼續。` }),
+  question: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選一個答案，請到它的視窗回答。` }),
+  question_view: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選答案，請到它的視窗回答。` }),
   attention: name => ({ title: '夥伴需要你看一下', body: `「${name}」停在一個選單，請到它的視窗確認。` }),
 }
 

@@ -1,5 +1,5 @@
--- 手機回答 Claude 夥伴的權限框（#853，0.2.6）：電腦的讀畫面發現權限框，建一筆請求；手機（本人簽章）看到全文和選項，
--- 按一個；電腦領到後全部重查，才送那個選項的數字鍵。
+-- 手機回答 Claude 夥伴的權限框和選項框（#853，0.2.6）：電腦的讀畫面發現框，建一筆請求；手機（本人簽章）看到全文和選項，
+-- 按一個；電腦領到後全部重查，才送那個選項的數字鍵。選項可以是空的：多選、一次多題看得到但不能按。
 -- 設計（流程和 term_requests 相同，另開一張表，舊版手機不會列出看不懂的東西）：
 --   * 只有電腦（節點金鑰）能建立；手機只能選，不能改內容、不能自己建立。
 --   * 只存權限框的文字和選項，不是畫面。沒有任何欄位能放要送的文字：手機只回選項數字，後台比對要在選項裡。
@@ -73,7 +73,7 @@ begin
   if p_window_name is null or char_length(p_window_name) not between 1 and 64 or p_window_name ~ '[[:cntrl:]]'
      or p_hash is null or p_hash !~ '^[0-9a-f]{64}$'
      or p_prompt_text is null or char_length(btrim(p_prompt_text)) = 0 or char_length(p_prompt_text) > 16000
-     or p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) not between 1 and 9 then
+     or p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) > 9 then
     return jsonb_build_object('error', 'bad_request');
   end if;
   for v_o in select * from jsonb_array_elements(p_options) loop

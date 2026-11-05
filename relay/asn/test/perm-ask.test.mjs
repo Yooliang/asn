@@ -21,9 +21,11 @@ test('清單：留換行、拿掉控制字元和雙向控制', () => {
 })
 
 test('清單：壞的、過期的丟掉', () => {
-  for (const b of [{ id: 'x' }, { body_hash: 'x' }, { expires_at: '2026-11-04T00:00:00Z' }, { expires_at: 'x' }, { options: [] }, { options: [{ n: 0, label: 'x' }] }, { options: [{ n: 10, label: 'x' }] }, { prompt_text: null }]) {
+  for (const b of [{ id: 'x' }, { body_hash: 'x' }, { expires_at: '2026-11-04T00:00:00Z' }, { expires_at: 'x' }, { prompt_text: null }]) {
     assert.deepEqual(list(row(b)), [], JSON.stringify(b))
   }
+  assert.deepEqual(list(row({ options: [{ n: 0, label: 'x' }, { n: 10, label: 'y' }] }))[0].options, [], '編號不對的選項不給按')
+  assert.deepEqual(list(row({ options: [] }))[0].options, [], '沒有選項：看得到不能按')
   assert.deepEqual(normalizeList(null), [])
 })
 
