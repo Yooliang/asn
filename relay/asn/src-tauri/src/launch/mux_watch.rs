@@ -121,6 +121,40 @@ impl Watch {
     }
 }
 
+/// 要請後台通知本人的事故檔：偵測到中斷就寫，橋接核心下一輪讀走、呼叫後台成功（或確定不用再試）就刪
+pub const NOTICE_FILE: &str = "mux-notice.json";
+/// 後台一次最多收幾位（超過會被擋，所以自己夾住）
+pub const NOTICE_MAX_COUNT: usize = 100;
+
+/// 排一則通知：只存人數與有沒有接回，不存夥伴名字（後台文字固定）
+pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
+    let body = serde_json::json!({ "count": count.clamp(1, NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
+    let tmp = work_dir.join(format!("{NOTICE_FILE}.tmp"));
+    if std::fs::write(&tmp, body.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, work_dir.join(NOTICE_FILE));
+    }
+}
+
+/// 讀排著的通知：（人數, 有沒有接回, 事故時間）；沒有或壞掉的檔回 None（壞檔順手刪掉）
+pub fn read_notice(work_dir: &Path) -> Option<(usize, bool, u64)> {
+    let f = work_dir.join(NOTICE_FILE);
+    let text = std::fs::read_to_string(&f).ok()?;
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = std::fs::remove_file(&f);
+            return None;
+        }
+    };
+    let count = v.get("count").and_then(serde_json::Value::as_u64)? as usize;
+    let resumed = v.get("resumed").and_then(serde_json::Value::as_bool)?;
+    Some((count.clamp(1, NOTICE_MAX_COUNT), resumed, v.get("at").and_then(serde_json::Value::as_u64).unwrap_or(0)))
+}
+
+pub fn clear_notice(work_dir: &Path) {
+    let _ = std::fs::remove_file(work_dir.join(NOTICE_FILE));
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -143,6 +177,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
                 if let Some(base) = std::env::var_os("LOCALAPPDATA") {
                     super::mux::note(&std::path::PathBuf::from(base).join("ASN").join("m"), &line);
                 }
+                queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
                 super::auto_resume::after_mux_crash(&work_dir, &data_dir, &inc.partners, inc.resume);
             }
         }
@@ -274,5 +309,20 @@ mod tests {
         // 壞檔當空的
         std::fs::write(&f, "壞掉").unwrap();
         assert_eq!(Watch::load(&f, None).tick(&obs(None, &[]), 0), None);
+    }
+
+    #[test]
+    fn 通知檔_寫了讀得到_人數夾在一到一百_刪了就沒有() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(read_notice(d.path()), None);
+        queue_notice(d.path(), 250, false, 42);
+        assert_eq!(read_notice(d.path()), Some((100, false, 42)));
+        queue_notice(d.path(), 0, true, 43);
+        assert_eq!(read_notice(d.path()), Some((1, true, 43)));
+        clear_notice(d.path());
+        assert_eq!(read_notice(d.path()), None);
+        std::fs::write(d.path().join(NOTICE_FILE), "壞掉").unwrap();
+        assert_eq!(read_notice(d.path()), None);
+        assert!(!d.path().join(NOTICE_FILE).exists(), "壞檔要刪掉，不然每輪都讀");
     }
 }

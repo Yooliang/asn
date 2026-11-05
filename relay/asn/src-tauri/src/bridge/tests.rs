@@ -54,6 +54,10 @@ struct FState {
     /// 夥伴卡在框上的通知（waiting_notice）收到的請求；wait_notice_status 不為 0 就回這個
     wait_notices: Vec<Value>,
     wait_notice_status: u16,
+    /// 終端服務中斷的通知（mux_down_notice）收到的請求；mux_notice_status 不為 0 就回這個狀態碼；mux_notice_notify 空字串＝sent
+    mux_notices: Vec<Value>,
+    mux_notice_status: u16,
+    mux_notice_notify: String,
     /// 不為 0：ack 回這個狀態碼，信不算 ack
     ack_status: u16,
     /// 假後台回的 notify（空字串＝sent）
@@ -194,6 +198,15 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
             s.sent.push(body);
             (200, json!({"id": uid(900 + s.sent.len() as u32)}))
         }
+        "mux_down_notice" if s.mux_notice_status != 0 => {
+            s.mux_notices.push(body);
+            (s.mux_notice_status, json!({"error": "x"}))
+        }
+        "mux_down_notice" => {
+            s.mux_notices.push(body);
+            let notify = if s.mux_notice_notify.is_empty() { "sent".to_string() } else { s.mux_notice_notify.clone() };
+            (200, json!({"ok": true, "notify": notify}))
+        }
         "waiting_notice" if s.wait_notice_status != 0 => (s.wait_notice_status, json!({"error": "boom"})),
         "waiting_notice" => {
             s.wait_notices.push(body);
@@ -250,6 +263,9 @@ impl FakeRelay {
     }
     fn acked(&self) -> Vec<String> {
         self.st.lock().unwrap().acked.clone()
+    }
+    fn mux_notices(&self) -> Vec<Value> {
+        self.st.lock().unwrap().mux_notices.clone()
     }
     fn wait_notices(&self) -> Vec<Value> {
         self.st.lock().unwrap().wait_notices.clone()
@@ -1932,6 +1948,7 @@ mod quota_it;
 mod exact_it;
 mod e2e_real;
 mod gate_it;
+mod mux_it;
 mod wait_it;
 mod respond_it;
 mod rooms_launch;
