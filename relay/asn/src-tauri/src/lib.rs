@@ -860,6 +860,9 @@ struct LiveTPort {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 impl view_stream::TPort for LiveTPort {
+    fn window_ok(&mut self) -> bool {
+        self.terms.partner_term_id(&self.window).and_then(|id| self.terms.view_meta(&id)).is_ok()
+    }
     fn notify(&mut self) -> Result<(), String> {
         let v = tauri::async_runtime::block_on(self.relay.api("term_view_notice", Some(serde_json::json!({ "id": self.id }))))?;
         match v.get("notify").and_then(Value::as_str) {

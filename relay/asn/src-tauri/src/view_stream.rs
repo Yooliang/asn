@@ -1,6 +1,6 @@
 //! 別台看畫面的傳輸邏輯（#597 工作包 F）。只有判斷和加解密，網路和窗格都經 `TPort`，測試接假的。
 //!
-//! - **T 一定先通知本人的其他設備，送不出去就不傳第一幅。** 通知由 T 送，D 上的程式沒有機會不送。
+//! - **T 先確認視窗認得，再通知本人的其他設備，送不出去就不傳第一幅。** 通知由 T 送，D 上的程式沒有機會不送。
 //! - **T 查不到就當停：** 控制面的列不見了、查詢連續失敗超過 90 秒、D 太久沒回報、超過本機算的到期時間。
 //! - **沒有反向通道：** 這裡只有 T 到 D 的幀，AAD 綁方向。D 的暫停和結束只走控制面的固定狀態值。
 //! - **紀錄不能有畫面：** 只記長度和次數，有守門測試。
@@ -112,6 +112,8 @@ impl End {
 
 /// T 這邊要的外部動作
 pub trait TPort {
+    /// 這個視窗認不認得（不讀畫面內容）。認不得就不通知，免得告訴本人有人在看一個看不到的東西
+    fn window_ok(&mut self) -> bool;
     /// 通知本人的其他設備，固定文字。**成功才會傳第一幅**
     fn notify(&mut self) -> Result<(), String>;
     /// 顯示或收掉「正在被看」。開始傳之前就要顯示
@@ -129,6 +131,10 @@ pub trait TPort {
 
 /// T 傳畫面，跑到該停為止。金鑰在這裡被消耗，回來就沒了。一定會收掉「正在被看」
 pub fn run_t(s: &Session, key: SessionKey, port: &mut impl TPort) -> End {
+    if !port.window_ok() {
+        port.log(&format!("view {}: unknown window", s.id));
+        return End::Failed;
+    }
     if let Err(e) = port.notify() {
         port.log(&format!("view {}: notify failed: {}", s.id, e.chars().count()));
         return End::Failed;
@@ -320,6 +326,7 @@ mod tests {
     struct Fake {
         calls: Vec<String>,
         notify_err: bool,
+        unknown_window: bool,
         now: u64,
         frames: Vec<Result<Frame, String>>,
         ctl: Vec<Result<Ctl, String>>,
@@ -335,6 +342,10 @@ mod tests {
     }
 
     impl TPort for Fake {
+        fn window_ok(&mut self) -> bool {
+            self.calls.push("window_ok".into());
+            !self.unknown_window
+        }
         fn notify(&mut self) -> Result<(), String> {
             self.calls.push("notify".into());
             if self.notify_err {
@@ -415,7 +426,16 @@ mod tests {
         let (a, _) = pair();
         let mut f = Fake { notify_err: true, ..fake() };
         assert_eq!(run_t(&session(), a, &mut f), End::Failed);
-        assert_eq!(f.calls, vec!["notify"]);
+        assert_eq!(f.calls, vec!["window_ok", "notify"]);
+        assert_eq!(f.reads, 0);
+    }
+
+    #[test]
+    fn 視窗認不得_不通知_不顯示_不傳() {
+        let (a, _) = pair();
+        let mut f = Fake { unknown_window: true, ..fake() };
+        assert_eq!(run_t(&session(), a, &mut f), End::Failed);
+        assert_eq!(f.calls, vec!["window_ok"], "本人不會收到有人在看的通知");
         assert_eq!(f.reads, 0);
     }
 
@@ -424,9 +444,10 @@ mod tests {
         let (a, _) = pair();
         let mut f = Fake { stop_at_ms: Some(START_MS + 1), ..fake() };
         assert_eq!(run_t(&session(), a, &mut f), End::TargetEnded);
-        assert_eq!(f.calls[0], "notify");
-        assert_eq!(f.calls[1], "watching=true");
-        assert_eq!(f.calls[2], "send");
+        assert_eq!(f.calls[0], "window_ok");
+        assert_eq!(f.calls[1], "notify");
+        assert_eq!(f.calls[2], "watching=true");
+        assert_eq!(f.calls[3], "send");
         assert_eq!(f.calls.last().unwrap(), "watching=false");
     }
 
