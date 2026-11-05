@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createTermViewSession, frameToWrite, xtermOptions } from '../ui/lib/term-view.mjs'
+import { createFollow, createTermViewSession, followTarget, frameToWrite, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
@@ -131,4 +131,38 @@ test('守門：xterm 釘版本、打包進 ui/vendor、不走 CDN', () => {
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(src.includes("'vendor/xterm.js'") && src.includes("'vendor/xterm.css'"))
   assert.ok(!/https?:\/\//.test(src), '不連外')
+})
+
+test('跟著游標：游標在下面就捲下去，多留一列；不超過範圍', () => {
+  const g = { rowHeight: 10, clientHeight: 80, scrollHeight: 400 }
+  assert.equal(followTarget({ ...g, cursorRow: 2 }), 0, '已經看得到就不捲')
+  assert.equal(followTarget({ ...g, cursorRow: 30 }), 240)
+  assert.equal(followTarget({ ...g, cursorRow: 39 }), 320, '最多到底')
+  assert.equal(followTarget({ rowHeight: 10, clientHeight: 500, scrollHeight: 400, cursorRow: 39 }), 0, '整個放得下')
+})
+
+test('跟著游標：往上捲就不跟，捲回游標或底部再跟；自己捲的不算', () => {
+  const f = createFollow()
+  assert.equal(f.following(), true)
+  f.place(240)
+  f.onScroll(240, 240)
+  assert.equal(f.following(), true, '程式自己捲的')
+  f.onScroll(100, 240)
+  assert.equal(f.following(), false, '使用者往上捲')
+  f.onScroll(150, 240)
+  assert.equal(f.following(), false, '還沒捲回去')
+  f.onScroll(240, 240)
+  assert.equal(f.following(), true, '捲回游標，再跟（就算和上次程式設定的位置相同）')
+  f.onScroll(100, 240)
+  f.onScroll(320, 240)
+  assert.equal(f.following(), true, '捲到底，再跟')
+})
+
+test('矮視窗收起訊息區時有切回按鈕', () => {
+  const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  assert.ok(chat.includes(':can-back="true"') && chat.includes('@back="termViewOn = false"'))
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(view.includes('回到訊息'))
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.match(css, /max-height:620px\)\{[^\n]*\.term-view \+ \.conv\{display:none\}[^\n]*\.term-view-back\{display:inline-block\}/, '收起訊息區和顯示按鈕要同一個條件')
 })

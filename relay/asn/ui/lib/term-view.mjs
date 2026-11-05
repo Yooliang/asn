@@ -18,10 +18,34 @@ export function frameToWrite(frame) {
   return `\x1b[0m\x1b[H\x1b[2J${body}\x1b[0m\x1b[${y + 1};${x + 1}H`
 }
 
+/** 要讓游標那一列看得到（下面多留一列），捲動位置該在哪 */
+export function followTarget({ cursorRow, rowHeight, clientHeight, scrollHeight }) {
+  const max = Math.max(0, scrollHeight - clientHeight)
+  return Math.min(max, Math.max(0, (cursorRow + 2) * rowHeight - clientHeight))
+}
+
+/**
+ * 要不要跟著游標捲。使用者往上捲就先不跟，捲回游標或底部再跟。
+ * 自己設定捲動位置也會觸發 scroll 事件：和剛設的位置一樣的就不算使用者捲的。
+ */
+export function createFollow() {
+  let following = true, lastSet = null
+  const SLACK = 2
+  return {
+    following: () => following,
+    place: top => { lastSet = top },
+    onScroll: (scrollTop, target) => {
+      const mine = lastSet !== null && Math.abs(scrollTop - lastSet) <= SLACK
+      lastSet = null   // 只算一次：使用者之後捲回同一個位置，要算他捲的
+      if (!mine) following = scrollTop >= target - SLACK
+    },
+  }
+}
+
 /**
  * 一次觀看：開、收畫面、關。deps：
  *   open() → 觀看編號；close(編號)；listen(事件, fn) → 取消函式；
- *   createTerm({ cols, rows }) → { resize, write, dispose }（可以是 Promise）；onLost(原因)
+ *   createTerm({ cols, rows }) → { resize, write, dispose }（可以是 Promise）；onLost(原因)；onPainted(一幅，選填)
  */
 export function createTermViewSession(deps) {
   let viewId = null, term = null, stopped = false, lastSeq = 0, size = null, chain = Promise.resolve()
@@ -39,6 +63,7 @@ export function createTermViewSession(deps) {
     }
     if (size.cols !== cols || size.rows !== rows) { term.resize(cols, rows); size = { cols, rows } }
     term.write(frameToWrite(frame))
+    deps.onPainted?.(frame)
   }
   // 一幅一幅照順序畫；xterm 載入中到的畫面排在後面
   const enqueue = frame => {
@@ -126,14 +151,32 @@ export const TermView = {
     id: { type: String, default: '' },        // 終端編號（ASN 開的 grok、agy）
     name: { type: String, default: '' },      // 夥伴視窗名（Claude）
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
+    canBack: { type: Boolean, default: false },   // 視窗矮時訊息區會收起來：對話窗要有切回去的按鈕
   },
+  emits: ['back'],
   setup(props) {
     const host = ref(null), lostText = ref('')
-    let session = null
+    let session = null, follow = createFollow(), lastRow = 0, lastRows = DEFAULT_ROWS
+    // 窗格比區塊高時，游標（輸入框、權限框）常在下面：跟著捲，使用者往上看時不打擾
+    const target = () => {
+      const el = host.value, screen = el?.querySelector('.xterm-screen')
+      if (!screen) return 0
+      return followTarget({ cursorRow: lastRow, rowHeight: screen.clientHeight / lastRows, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight })
+    }
+    const followCursor = frame => {
+      lastRow = Math.max(0, Number(frame?.meta?.cursor_y) || 0)
+      lastRows = Number(frame?.meta?.rows) || DEFAULT_ROWS
+      if (!follow.following()) return
+      const t = target()
+      follow.place(t)
+      host.value.scrollTop = t
+    }
+    const onScroll = () => follow.onScroll(host.value.scrollTop, target())
     const stop = () => { if (session) { session.stop(); session = null } }
     const start = () => {
       stop()
       lostText.value = ''
+      follow = createFollow()
       const target = props.id ? { id: props.id } : { name: props.name }
       session = createTermViewSession({
         open: () => props.api.open(target),
@@ -147,18 +190,20 @@ export const TermView = {
           return t
         },
         onLost: () => { session = null; lostText.value = TERM_VIEW_LOST },
+        onPainted: followCursor,
       })
       void session.start()
     }
     watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
     onMounted(() => { if (props.active) start() })
     onBeforeUnmount(stop)
-    return { host, lostText, retry: start, note: TERM_VIEW_NOTE }
+    return { host, lostText, onScroll, retry: start, note: TERM_VIEW_NOTE }
   },
   template: `
 <div class="term-view">
   <p class="term-view-note">{{ note }}</p>
-  <div class="term-view-screen" ref="host" aria-label="終端畫面"></div>
+  <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
+  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll"></div>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>
 </div>`,
 }

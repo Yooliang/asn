@@ -370,7 +370,7 @@ export const ChatPane = {
   <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termViewOn && canTermView" :api="termViewApi" :name="termViewName" :active="active"></term-view>
+  <term-view v-if="termViewOn && canTermView" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
   <div class="conv">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
