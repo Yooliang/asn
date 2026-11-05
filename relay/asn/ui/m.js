@@ -4,6 +4,7 @@
 import { AsnCore } from './lib/core.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
+import { READ_VISIBLE_POLL_MS } from './lib/read-sync.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
@@ -227,10 +228,11 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
+  setInterval(() => { if (document.visibilityState === 'visible') void core.syncReads() }, READ_VISIBLE_POLL_MS)   // 別台讀過的紅點不用等 60 秒才消（#856）
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); core.refreshRosterSoon(); void roomsHook.refresh?.()
+    void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）

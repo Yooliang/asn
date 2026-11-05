@@ -7,6 +7,8 @@ const ROOM_ID = /^[A-Za-z0-9_-]{1,64}$/
 export const READ_KEY_MIN = 3
 export const READ_KEY_MAX = 140
 export const READ_BATCH = 100        // 一次最多送幾筆（後台上限同為 100）
+// 手機開著畫面時多久取回一次別台的已讀（#856）。名單刷新順便取回要等 60 秒，看起來像紅點不會消；只在前景才問
+export const READ_VISIBLE_POLL_MS = 15_000
 export const READ_DEBOUNCE_MS = 3000 // 讀過之後等多久才回寫（短時間連讀多位只打一次）
 
 // 對話鍵。好友（夥伴／人／設備）→ 夥伴 ID 或 n:節點/名字；群組 { room } → g:代號。算不出來回 null（不同步）
