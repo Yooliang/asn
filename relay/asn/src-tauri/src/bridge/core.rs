@@ -664,6 +664,34 @@ impl Core {
         self.launcher = Some(l);
     }
 
+    fn room_redo_file(&self) -> PathBuf {
+        self.cfg.work_dir.join("rooms-redo.json")
+    }
+    /// 補轉交清單跟游標一起存檔：補完之前再重開，已處理過的點名才不會重複（#845）
+    fn load_room_redo(&self) -> HashMap<String, (u64, HashSet<String>)> {
+        let Ok(text) = std::fs::read_to_string(self.room_redo_file()) else { return HashMap::new() };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { return HashMap::new() };
+        let Some(o) = v.as_object() else { return HashMap::new() };
+        o.iter()
+            .filter_map(|(k, e)| {
+                let hi = json_u64(e.get("hi"));
+                let ids: HashSet<String> = e.get("ids")?.as_array()?.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                Some((k.clone(), (hi, ids)))
+            })
+            .collect()
+    }
+    fn save_room_redo(&self) {
+        let f = self.room_redo_file();
+        if self.room_redo.is_empty() {
+            let _ = std::fs::remove_file(&f);
+            return;
+        }
+        let m: serde_json::Map<String, Value> = self.room_redo.iter().map(|(k, (hi, ids))| { let mut v: Vec<&String> = ids.iter().collect(); v.sort(); (k.clone(), json!({"hi": hi, "ids": v})) }).collect();
+        if let Err(e) = crate::write_atomic(&f, &Value::Object(m).to_string()) {
+            self.log.line(&format!("rooms redo save failed: {e}"));
+        }
+    }
+
     fn pending_file(&self) -> PathBuf {
         self.cfg.work_dir.join("pending.json")
     }
@@ -684,25 +712,36 @@ impl Core {
         self.channel_back = back.into_iter().map(|p| p.id).collect();
         // 重開前交給內建通道、還沒結束的群組點名（已經回過的不算，退回會讓群組收到第二則）：群組沒有信箱，游標早就過了它，不退回去就永遠不會再轉交也沒人回（#845）
         let (rback, keep): (Vec<Pending>, Vec<Pending>) = keep.into_iter().partition(|p| p.channel && !p.replied && p.state != State::Done && p.room.as_ref().is_some_and(|r| !r.member.is_empty()));
+        self.room_redo = self.load_room_redo();
+        let mut low: HashMap<String, u64> = HashMap::new();
         for p in rback {
             let Some(r) = p.room.clone() else { continue };
+            let ck = Cursors::key(&r.id, &r.member);
             if channel_turns::resent(&self.cfg.work_dir, &p.id) {
                 self.log.line(&format!("room={} #{} channel turn unfinished after one resend: giving up", r.id, r.seq));
+                if let Some(e) = self.room_redo.get_mut(&ck) {
+                    e.1.remove(&p.id);
+                }
                 continue;
-            }
-            let ck = Cursors::key(&r.id, &r.member);
-            let back_to = r.seq.saturating_sub(1);
-            if let Some(c) = self.cursors.get(&ck).filter(|c| *c > back_to) {
-                let e = self.room_redo.entry(ck.clone()).or_insert((c, HashSet::new()));
-                e.0 = e.0.max(c);
-                e.1.insert(p.id.clone());
-                self.save_cursor(&ck, back_to);
             }
             if let Err(e) = channel_turns::mark_resent(&self.cfg.work_dir, &p.id) {
                 self.log.line(&format!("room={} #{} cannot record the resend: {e}", r.id, r.seq));
             }
+            // 每一則都記進補轉交清單（不管游標這時已退到哪），游標最後一起退到最小那則前面
+            let cur = self.cursors.get(&ck).unwrap_or(0);
+            let e = self.room_redo.entry(ck.clone()).or_insert((cur, HashSet::new()));
+            e.0 = e.0.max(cur);
+            e.1.insert(p.id.clone());
+            let l = low.entry(ck).or_insert(u64::MAX);
+            *l = (*l).min(r.seq.saturating_sub(1));
             self.log.line(&format!("room={} #{} channel turn unfinished before restart: cursor moved back, will be handed again once", r.id, r.seq));
         }
+        for (ck, l) in low {
+            if self.cursors.get(&ck).is_some_and(|c| c > l) {
+                self.save_cursor(&ck, l);
+            }
+        }
+        self.save_room_redo();
         channel_turns::prune(&self.cfg.work_dir);
         self.pending = keep;
         self.last_requester = st.last;
@@ -719,6 +758,9 @@ impl Core {
             let first = if st.quota_auth { AUTH_FIRST_PROBE_MS } else { QUOTA_RETRY_MS };
             self.next_probe_at = (self.now + first).min(st.quota_until);
             self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
+        }
+        if !self.room_redo.is_empty() {
+            self.persist(); // 退回去的群組點名從存檔拿掉：補轉交之前再重開，不會被當成「已重送過」而放棄
         }
     }
     fn persist(&mut self) {
@@ -2041,6 +2083,7 @@ impl Core {
                 }
                 if self.room_redo.get(&ck).is_some_and(|(hi, _)| cur >= *hi) {
                     self.room_redo.remove(&ck);
+                    self.save_room_redo();
                 }
                 let tail = json_u64(res.get("last_seq"));
                 if done && tail > cur {
