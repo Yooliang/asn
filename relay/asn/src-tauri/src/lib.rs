@@ -1387,6 +1387,7 @@ fn voice_cfg_set(app: State<'_, App>, cfg: voicecfg::VoiceCfg) -> Result<(), Str
 fn quit_app(app: AppHandle) {
     #[cfg(desktop)] // 自動接回只有電腦版有；launch 模組手機版沒編進去
     launch::auto_resume::note_user_quit(&app.state::<App>().work_dir);
+    launch::mux_watch::note_user_quit(&app.state::<App>().work_dir);
     cleanup(&app);
     app.exit(0);
 }

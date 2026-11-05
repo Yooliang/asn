@@ -155,6 +155,20 @@ pub fn clear_notice(work_dir: &Path) {
     let _ = std::fs::remove_file(work_dir.join(NOTICE_FILE));
 }
 
+/// 使用者自己結束 ASN（比照 #788「自己關的不接」）：忘掉記著的 mux，之後 ASN 不在時 mux 才掛掉，下次啟動不補報、不接回
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn note_user_quit(work_dir: &Path) {
+    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = std::fs::remove_file(work_dir.join(STATE_FILE));
+}
+
+/// 把工作丟到另一條執行緒，馬上回來（接回要等登入、等記憶體，最久 12 小時；監看不能跟著停住，
+/// 不然這段時間第二次中斷沒人知道）。同時只有一條在接回由 `auto_resume` 的鎖保證
+pub fn dispatch<F: FnOnce() + Send + 'static>(name: &str, f: F) -> bool {
+    std::thread::Builder::new().name(name.into()).spawn(f).is_ok()
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -167,6 +181,9 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut w = Watch::load(&file, super::auto_resume::boot_ms(crate::heartbeat::now_ms()));
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
             let Some(o) = terms.mux_snapshot() else { continue };
             let now = crate::heartbeat::now_ms();
             let incident = w.tick(&o, now);
@@ -178,7 +195,10 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
                     super::mux::note(&std::path::PathBuf::from(base).join("ASN").join("m"), &line);
                 }
                 queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
-                super::auto_resume::after_mux_crash(&work_dir, &data_dir, &inc.partners, inc.resume);
+                let (wd, dd, partners, resume) = (work_dir.clone(), data_dir.clone(), inc.partners, inc.resume);
+                if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
+                    elog!("接回夥伴的背景工作開不了（不影響監看）");
+                }
             }
         }
     });
@@ -324,5 +344,36 @@ mod tests {
         std::fs::write(d.path().join(NOTICE_FILE), "壞掉").unwrap();
         assert_eq!(read_notice(d.path()), None);
         assert!(!d.path().join(NOTICE_FILE).exists(), "壞檔要刪掉，不然每輪都讀");
+    }
+
+    #[test]
+    fn 接回丟到另一條執行緒_呼叫馬上回來_監看不會被等登入卡住() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<&'static str>();
+        let t = std::time::Instant::now();
+        assert!(dispatch("asn-mux-resume-test", move || {
+            release_rx.recv().unwrap(); // 模擬卡在等登入
+            done_tx.send("done").unwrap();
+        }));
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "dispatch 不能等工作做完");
+        assert!(done_rx.try_recv().is_err(), "工作還在等，沒有完成");
+        release_tx.send(()).unwrap();
+        assert_eq!(done_rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("done"));
+    }
+
+    #[test]
+    fn 使用者自己結束_忘掉記著的_mux_之後不補報() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲"]), 0);
+        w.save(&f);
+        assert!(f.exists());
+        note_user_quit(d.path());
+        assert!(!f.exists());
+        // 下次啟動：沒有記著的 mux，mux 不在也不算事故
+        let mut w2 = Watch::load(&f, None);
+        assert_eq!(w2.tick(&obs(None, &[]), TICK_MS), None);
+        assert_eq!(w2.tick(&obs(None, &[]), 2 * TICK_MS), None);
     }
 }
