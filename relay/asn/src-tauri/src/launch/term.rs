@@ -1140,7 +1140,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let live = m.live_pid();
         let partners: Vec<String> = {
             let g = self.inner.lock().unwrap();
-            g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty()).filter_map(|s| partner_label(&s.id, &s.title).map(String::from)).collect()
+            // 現行的 mux 還活著時只算屬於它的夥伴（換掉的舊 mux 留下的列不算）；同名只留一位
+            let mut seen = std::collections::BTreeSet::new();
+            g.sessions
+                .iter()
+                .filter(|s| s.window.mux && !s.kind.is_empty())
+                .filter(|s| live.map_or(true, |(p, b)| s.window.gui_pid == p && s.window.started_ms == Some(b)))
+                .filter_map(|s| partner_label(&s.id, &s.title).map(String::from))
+                .filter(|n| seen.insert(n.clone()))
+                .collect()
         };
         Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
     }
