@@ -16,4 +16,9 @@ buildSync({
   outfile: path.join(vendor, 'dicebear.mjs'),
   bundle: true, format: 'esm', minify: true, platform: 'browser', target: 'es2020', legalComments: 'none', logLevel: 'warning',
 })
+// xterm.js：在畫面裡看終端（#597）。這版只有 UMD，直接複製，要看時才載入
+const xterm = path.join(root, 'node_modules', '@xterm', 'xterm')
+if (!fs.existsSync(path.join(xterm, 'lib', 'xterm.js'))) { console.error('找不到 node_modules/@xterm/xterm：先執行 npm install'); process.exit(1) }
+fs.copyFileSync(path.join(xterm, 'lib', 'xterm.js'), path.join(vendor, 'xterm.js'))
+fs.copyFileSync(path.join(xterm, 'css', 'xterm.css'), path.join(vendor, 'xterm.css'))
 // 版本更新記錄不再打包：畫面從後台的 asn_site_releases 讀（#462）；CHANGELOG.md 只給發版腳本產更新說明用

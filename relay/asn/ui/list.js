@@ -19,6 +19,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { TermView } from './lib/term-view.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -36,7 +37,7 @@ import { composerView, entryLabel, screenText, termFriendId, termFriends, termId
 import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
-import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS, RELOGIN_BAR_HINT, RELOGIN_BAR_TEXT, showReloginBar } from './lib/login.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
@@ -1205,6 +1206,7 @@ watch(activeTermId, id => {
   if (termSend.id && termSend.id !== id) { termSendWithdraw(); termSend.id = ''; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
   if (!id) return
   termSend.id = id
+  if (!termPaneRow.value?.adopted) return   // 自己開的窗格用 xterm 看（term-view）；接手來的才讀文字
   void termScreenTick(id)
   termScreenTimer = setInterval(() => void termScreenTick(id), 3000)
 }, { immediate: true })
@@ -1755,7 +1757,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
-      termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
+      termViewApi, termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
       dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
@@ -1769,6 +1771,7 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('term-view', TermView)
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)

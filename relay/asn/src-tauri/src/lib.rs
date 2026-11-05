@@ -790,11 +790,23 @@ impl launch::term_view::ViewPort for WindowViewPort {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermViews>>, terms: State<'_, Arc<launch::term::LiveTerms>>, id: String) -> Result<u64, String> {
+async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermViews>>, terms: State<'_, Arc<launch::term::LiveTerms>>, id: Option<String>, name: Option<String>) -> Result<u64, String> {
     use std::sync::atomic::Ordering;
     let label = window.label().to_string();
-    // 開之前先確認窗格認得，錯誤馬上回給畫面
-    terms.view_meta(&id)?;
+    // 給編號（自己開的終端）或夥伴名字（Claude 視窗）。開之前先確認窗格認得，錯誤馬上回給畫面
+    let id = {
+        let terms = terms.inner().clone();
+        launch::blocking_timeout(move || {
+            let id = match (id, name) {
+                (Some(id), None) => id,
+                (None, Some(name)) => terms.partner_term_id(&name)?,
+                _ => return Err("要指定一個窗格".to_string()),
+            };
+            terms.view_meta(&id)?;
+            Ok(id)
+        })
+        .await?
+    };
     let state = Arc::new(launch::term_view::ViewState::default());
     let view_id = views.next.fetch_add(1, Ordering::SeqCst) + 1;
     {

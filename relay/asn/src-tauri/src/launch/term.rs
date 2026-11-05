@@ -943,6 +943,25 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows })
     }
 
+    /// 夥伴視窗的名字換成終端編號，給本機畫面看畫面用。已結束的窗格不算；同名不只一個就拒絕，不猜
+    pub fn partner_term_id(&self, name: &str) -> Result<String, String> {
+        let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| !s.kind.is_empty() && partner_label(&s.id, &s.title) == Some(name)).map(|s| (s.id.clone(), s.pane_id, s.window.sock.clone(), s.exit_nonce.clone())).collect()
+        };
+        if hits.is_empty() {
+            return Err("這位夥伴不是 ASN 開的視窗，這裡看不到畫面".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let mut live: Vec<String> = hits.into_iter().filter(|(_, pane, sock, nonce)| w.pane_exit(sock, *pane, nonce.as_deref()).is_none()).map(|h| h.0).collect();
+        match live.len() {
+            0 => Err("這位夥伴的視窗已經結束了".into()),
+            1 => Ok(live.remove(0)),
+            _ => Err("有兩個同名的夥伴視窗，先關掉其中一個".into()),
+        }
+    }
+
     fn view_snapshot(&self, id: &str) -> Result<SessionSnap, String> {
         let snap = self.snapshot_p(id, true)?;
         if snap.adopted.is_some() {
@@ -5222,6 +5241,15 @@ mod tests {
             let before = rig.runner.args().len();
             assert!(rig.svc.view_text(&id).is_err(), "mux 換過");
             assert!(rig.runner.args().iter().skip(before).all(|a| !a.iter().any(|x| x == "get-text")), "不對新的 mux 讀畫面");
+        }
+
+        #[test]
+        fn 看畫面_夥伴名字換成編號_不認得就拒絕() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.partner_term_id("小乙").is_err());
+            let id = open_partner(&rig);
+            assert_eq!(rig.svc.partner_term_id("小乙").unwrap(), id);
+            assert!(rig.svc.partner_term_id("別人").is_err());
         }
 
         #[test]
