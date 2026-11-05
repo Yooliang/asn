@@ -828,6 +828,56 @@ async fn 群組點名交給通道_第二則沒做完_第三則已回完_重開�
     assert_eq!(room_cursor(&h), 3, "補完後游標回到原位");
 }
 
+/// 兩則點名都交出去、游標到 3，再把存檔改成指定的狀態；回傳閘門檔（放行用）
+async fn two_room_msgs(h: &mut EH, tag: &str, done3: bool) -> std::path::PathBuf {
+    let gate = h.work.path().join(format!("gate-{tag}"));
+    room_for(h, vec![(2, &format!("第二則
+@@GATE {}", gate.display())), (3, "第三則")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("兩則都交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #3"))).await;
+    assert_eq!(room_cursor(h), 3);
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let items = v["pending"].as_array_mut().unwrap();
+    if done3 {
+        let before = items.len();
+        items.retain(|p| p["room"]["seq"] != json!(3));
+        assert_eq!(before - items.len(), 1, "前提：存檔裡有第三則，而且只拿掉它");
+    }
+    for seq in if done3 { vec![2] } else { vec![2, 3] } {
+        assert!(items.iter().any(|p| p["room"]["seq"] == json!(seq) && p["channel"] == json!(true)), "前提：第 {seq} 則還在、是通道項目");
+    }
+    std::fs::write(&f, v.to_string()).unwrap();
+    gate
+}
+
+fn handed(h: &EH, seq: u64) -> usize {
+    h.core.log.recent().iter().filter(|l| l.contains(&format!("handed room=R1 #{seq} "))).count()
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_第二則第三則都沒做完_重開後兩則都補() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = two_room_msgs(&mut h, "both", false).await;
+    h.restart().await;
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    assert_eq!((handed(&h, 2), handed(&h, 3)), (1, 1), "兩則都沒做完：兩則都要補，不能丟第三則");
+    assert_eq!(room_cursor(&h), 3);
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_補轉交之前又重開一次_已回完的第三則仍不重複() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = two_room_msgs(&mut h, "twice", true).await;
+    h.restart().await;
+    h.restart().await; // 補轉交之前再重開：補的清單要跟著游標存檔，不能只在記憶體
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    assert_eq!((handed(&h, 2), handed(&h, 3)), (1, 0), "第二則補一次；已回完的第三則不能因為再重開一次又被轉交");
+    assert_eq!(room_cursor(&h), 3);
+}
+
 #[tokio::test]
 async fn 群組點名交給通道_重開後再轉交仍沒做完_再重開不再補轉交() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
