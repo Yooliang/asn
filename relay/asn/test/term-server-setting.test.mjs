@@ -79,3 +79,35 @@ test('守門：改設定只存檔，不動執行中的終端服務（已開著�
   const cmd = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8').split('fn bridge_set_term_server(')[1].split('}')[0]
   assert.ok(!/set_use_mux|kill_tree|stop\(/.test(cmd), '命令只存檔')
 })
+
+test('背景還有夥伴：關著、重開過、服務裡還有人，要明說人數和怎麼管理；數不出人數也要提示', () => {
+  const st = (o = {}) => ({ termServer: false, termServerActive: false, termServerLocked: false, termServerBackground: 0, ...o })
+  assert.ok(termServerNote(st({ termServerBackground: 3 })).includes('還有 3 位夥伴在背景跑'), '寫人數')
+  assert.ok(termServerNote(st({ termServerBackground: 3 })).includes('請打開這個開關並重開 ASN'), '寫怎麼管理')
+  const unknown = termServerNote(st({ termServerBackground: -1 }))
+  assert.ok(unknown.includes('還有夥伴在背景跑') && !/\d 位/.test(unknown.replace(/重開 ASN/g, '')), '數不出人數：提示在、不寫數字：' + unknown)
+  assert.ok(!termServerNote(st({ termServerBackground: 0 })).includes('沒有在管它們'), '沒有夥伴：不提示')
+  assert.ok(!termServerNote(st({ termServerBackground: null })).includes('沒有在管它們'), '沒有這個欄位（舊後端）：不提示')
+  // 剛關掉、還沒重開：這次還在管它們，不算背景
+  assert.ok(!termServerNote(st({ termServerActive: true, termServerBackground: 3 })).includes('沒有在管它們'))
+  // 開著而且這次有在用：一定看得到，不提示
+  assert.ok(!termServerNote(st({ termServer: true, termServerActive: true, termServerBackground: 3 })).includes('沒有在管它們'))
+  // 固定關著：開關開不了，不能叫人去打開；只說有幾位
+  const locked = termServerNote(st({ termServerLocked: true, termServerBackground: 2 }))
+  assert.ok(locked.includes('還有 2 位夥伴在背景跑') && !locked.includes('請打開這個開關'), locked)
+  for (const bad of ['mux', 'WezTerm', '環境變數', 'ASN_TERM']) assert.ok(!locked.includes(bad) && !unknown.includes(bad))
+})
+
+test('守門：背景夥伴人數真的有人去查、真的帶進狀態、畫面真的用它（否則提示永遠不出現，其他測試還是綠）', () => {
+  const rust = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
+  assert.ok(rust.includes('launch::term::start_background_partner_watch(terms.clone())'), '啟動時要開背景查詢')
+  const bridge = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
+  assert.ok(bridge.includes('term_server_background: crate::launch::term::background_partners_cached()'), 'Status 要帶出人數')
+  const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.ok(list.includes('termServerBackground: Number.isInteger(s.term_server_background)'), '前端要收這個欄位')
+  const term = fs.readFileSync(new URL('../src-tauri/src/launch/term.rs', import.meta.url), 'utf8')
+  const watch = term.split('pub fn start_background_partner_watch(')[1].split(/\r?\n\}\r?\n/)[0]
+  assert.ok(watch.includes('terms.use_mux') && watch.includes('background_partners()'), '這次有在管服務就不查；否則查')
+  // 起背景執行緒本身會用到 spawn，其餘不能有動服務與夥伴的操作
+  assert.ok(!/kill_tree|kill-pane|\.stop\(|stop_if_empty/.test(watch), '只讀，不動服務與夥伴')
+})

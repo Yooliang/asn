@@ -331,6 +331,8 @@ pub struct Status {
     pub term_server_active: bool,
     /// 被系統設定固定關著（環境變數），設定頁不能改
     pub term_server_locked: bool,
+    /// 共用終端服務還在跑、裡面還有夥伴，但這次 ASN 沒在管它們（設定關掉後重開）：人數；0＝沒有；-1＝服務在跑但數不出人數
+    pub term_server_background: i64,
     /// 設定：沒指定收件人的信交給哪個視窗（空＝交給本人）
     pub unaddressed_to: String,
     pub error: Option<String>,
@@ -374,7 +376,7 @@ impl Manager {
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, term_server: !s.term_server_off, term_server_supported: cfg!(windows), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, term_server: !s.term_server_off, term_server_supported: cfg!(windows), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {

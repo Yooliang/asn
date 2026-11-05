@@ -1708,6 +1708,8 @@ pub fn run() {
     #[cfg(desktop)]
     launch::term::set_global(terms.clone());
     #[cfg(desktop)]
+    launch::term::start_background_partner_watch(terms.clone());
+    #[cfg(desktop)]
     launch::term::start_screen_watch(terms.clone(), &work_dir);
     #[cfg(desktop)]
     launch::term::set_ui_log_dir(&work_dir);

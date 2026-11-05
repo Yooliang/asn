@@ -484,6 +484,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.hold_config = on;
     }
 
+    #[cfg(test)]
+    pub(crate) fn use_mux_for_test(&self) -> bool {
+        self.use_mux
+    }
+
     pub fn set_use_mux(&mut self, on: bool) {
         self.use_mux = on;
     }
@@ -747,6 +752,24 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err(Started(format!("終端已啟動但對照表寫入失敗，已嘗試結束視窗：{e}")));
         }
         Ok((id, win.gui_pid))
+    }
+
+    /// 設定頁關掉共用的終端服務、重開 ASN 之後：服務還在跑、裡面的夥伴也還在，但 ASN 這次不管它們（#868）。
+    /// 回這種「在背景跑、使用者看不到也關不掉」的夥伴人數：`NONE` 沒有服務或沒有夥伴；`n` 人；`UNKNOWN` 服務在跑但數不出人數。
+    /// ASN 這次有在用服務（use_mux）＝它們都看得到，不算背景，回 NONE。只讀，不動任何東西
+    pub fn background_partners(&self) -> i64 {
+        if self.use_mux {
+            return BG_NONE;
+        }
+        let Ok(dir) = self.dir() else { return BG_NONE };
+        let Ok(m) = self.mux_handle(&dir, BTreeMap::new()) else { return BG_NONE };
+        if m.live_pid().is_none() {
+            return BG_NONE;
+        }
+        match m.pane_count() {
+            Ok(n) => n as i64,
+            Err(_) => BG_UNKNOWN,
+        }
     }
 
     /// 這個使用者的 mux（wezterm.exe 與 wezterm-mux-server.exe 放在同一個資料夾；檔案放在 mux_base\ASN\m）
@@ -2574,6 +2597,45 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
 
 #[cfg(feature = "gui")]
 pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
+
+/// `background_partners` 的特殊值：沒有服務或沒有夥伴／服務在跑但數不出人數
+pub const BG_NONE: i64 = 0;
+pub const BG_UNKNOWN: i64 = -1;
+
+/// 啟動後背景查到的結果（Status 只讀這個，不在每次狀態查詢時開 wezterm 程序）。沒查過＝BG_NONE
+static BACKGROUND_PARTNERS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(BG_NONE);
+
+pub fn background_partners_cached() -> i64 {
+    BACKGROUND_PARTNERS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub fn set_background_partners_for_test(n: i64) {
+    BACKGROUND_PARTNERS.store(n, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// ASN 這次不用共用終端服務時，背景查一次（之後每分鐘再查，使用者自己關掉夥伴時人數會減少）。沒在用就不查、不開執行緒。
+/// 只讀（`wezterm cli list`），不起 mux、不動夥伴；截圖模式不做
+#[cfg(feature = "gui")]
+pub fn start_background_partner_watch(terms: std::sync::Arc<LiveTerms>) {
+    if std::env::args().any(|a| a == "--shot") || terms.use_mux {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("asn-bg-partners".into()).spawn(move || loop {
+        let n = terms.background_partners();
+        let before = BACKGROUND_PARTNERS.swap(n, std::sync::atomic::Ordering::SeqCst);
+        if before != n {
+            elog!("共用終端服務裡有 {} 位夥伴在背景跑（這次 ASN 沒有在管它們）", if n == BG_UNKNOWN { "數不出幾".to_string() } else { n.to_string() });
+        }
+        if n == BG_NONE {
+            return; // 沒有服務或沒有夥伴：這次 ASN 不會再開新的，不用再查
+        }
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    });
+    if let Err(e) = spawned {
+        elog!("背景夥伴人數的查詢開不了（不影響啟動）：{e}");
+    }
+}
 
 /// 空記憶體（位元組）；讀不到回 None
 #[cfg(all(feature = "gui", windows))]
@@ -5272,6 +5334,43 @@ mod tests {
             *rig.runner.inner.spawn_out.borrow_mut() = "9\n".into();
             *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 9, 0);
             (rig, paths)
+        }
+
+        /// #868：設定頁關掉共用的終端服務、重開 ASN 之後，服務和夥伴還在，但 ASN 這次不管它們。數出這種「背景夥伴」，設定頁才能告訴使用者
+        #[test]
+        fn 背景夥伴人數_這次有在管服務就不算背景() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.use_mux_for_test());
+            assert_eq!(rig.svc.background_partners(), BG_NONE, "ASN 有在用服務：夥伴都看得到，不算背景");
+        }
+
+        #[test]
+        fn 背景夥伴人數_這次沒在用服務_服務還在跑_數出夥伴窗格() {
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_use_mux(false);
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":0,"workspace":"default"},{"pane_id":1,"workspace":"asn-1"},{"pane_id":2,"workspace":"asn-2"},{"pane_id":3,"workspace":"asn-3"}]"#.into();
+            assert_eq!(rig.svc.background_partners(), 3, "窗格 0（workspace default）不是夥伴，不算");
+            assert!(rig.runner.killed().is_empty(), "只讀，不動任何東西");
+            assert!(rig.runner.args().iter().all(|a| !a.iter().any(|x| x == "kill-pane" || x == "spawn")), "只讀：沒有開也沒有關窗格");
+        }
+
+        #[test]
+        fn 背景夥伴人數_服務在跑但清單看不懂_回數不出_提示仍要在() {
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_use_mux(false);
+            *rig.runner.inner.list_json.borrow_mut() = "不是 json".into();
+            assert_eq!(rig.svc.background_partners(), BG_UNKNOWN, "服務在跑卻數不出：不能當成沒有夥伴");
+        }
+
+        #[test]
+        fn 背景夥伴人數_沒有服務或服務已經不在_回沒有() {
+            let (mut rig, paths) = mux_rig();
+            rig.svc.set_use_mux(false);
+            // pid 檔記的建立時間對不上（服務已經換掉或不在了）
+            std::fs::write(&paths.pid, format!("{MUX_PID} 9999")).unwrap();
+            assert_eq!(rig.svc.background_partners(), BG_NONE);
+            std::fs::remove_file(&paths.pid).unwrap();
+            assert_eq!(rig.svc.background_partners(), BG_NONE, "沒有 pid 檔：沒有服務");
         }
 
         #[test]
