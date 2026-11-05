@@ -186,6 +186,8 @@ export const TermView = {
           const Terminal = await loadXterm()
           await nextTick()
           const t = new Terminal(xtermOptions(size))
+          // 沒有捲動記錄時，xterm 會把滾輪換成方向鍵送給程式、還攔下事件，外層就捲不動。滾輪一律交給外層
+          t.attachCustomWheelEventHandler(() => false)
           t.open(host.value)
           return t
         },

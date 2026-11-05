@@ -166,3 +166,8 @@ test('矮視窗收起訊息區時有切回按鈕', () => {
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
   assert.match(css, /max-height:620px\)\{[^\n]*\.term-view \+ \.conv\{display:none\}[^\n]*\.term-view-back\{display:inline-block\}/, '收起訊息區和顯示按鈕要同一個條件')
 })
+
+test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(src.includes('attachCustomWheelEventHandler(() => false)'))
+})
