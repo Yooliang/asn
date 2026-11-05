@@ -44,6 +44,8 @@ mod acct_remote;
 mod statusline_hook;
 #[cfg(desktop)]
 mod term_remote;
+#[cfg(desktop)]
+mod perm_remote;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -1612,6 +1614,16 @@ fn bridge_set_auto_resume(m: State<'_, bridge::Manager>, on: bool) -> Result<bri
     m.set_auto_resume(on)
 }
 
+/// 打開／關閉「權限框傳到手機」（#853）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn bridge_set_perm_phone(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    let s = m.set_perm_phone(on)?;
+    perm_remote::set_user_off(!on);
+    Ok(s)
+}
+
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -1741,6 +1753,8 @@ pub fn run() {
     #[cfg(desktop)]
     launch::term::screen_watch_set_user_off(bridge::read_settings(&data_dir).screen_watch_off);
     #[cfg(desktop)]
+    perm_remote::set_user_off(bridge::read_settings(&data_dir).perm_phone_off);
+    #[cfg(desktop)]
     launch::term::start_screen_watch(terms.clone(), &work_dir);
     #[cfg(desktop)]
     launch::term::set_ui_log_dir(&work_dir);
@@ -1807,7 +1821,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -1827,7 +1841,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {
@@ -2059,6 +2073,7 @@ pub fn run() {
                 #[cfg(desktop)]
                 let term_wake = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
+                    perm_remote::start(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
                     start_term_remote_poller(
                         handle.clone(),
                         r.clone(),

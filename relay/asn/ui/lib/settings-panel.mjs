@@ -23,7 +23,7 @@ import { termServerNote } from './term-server-setting.mjs'
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'bridge-term-server', 'bridge-screen-watch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'bridge-term-server', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -374,7 +374,9 @@ export const SettingsPanel = {
             <small>{{ termServerNote(st.bridge) }}</small>
           </template>
           <label class="chk"><input type="checkbox" :checked="st.bridge.screenWatch" :disabled="st.bridge.busy" @change="act('bridge-screen-watch', $event.target.checked)" aria-label="夥伴卡住時跳提示" /><span>夥伴卡住時跳提示</span></label>
-          <small>ASN 會定時看夥伴視窗的畫面，停在要你回答的地方時，在這台電腦跳提示；權限詢問可以直接按允許或拒絕。畫面內容不會離開這台電腦，其他設備只看得到「等你回答：權限」這類固定字。目前只支援 Windows 上由 ASN 開的 Claude 夥伴。</small>
+          <small>ASN 會定時看夥伴視窗的畫面，停在要你回答的地方時，在這台電腦跳提示；權限詢問可以直接按允許或拒絕。其他提示在別的設備只看得到「等你回答：權限」這類固定字。目前只支援 Windows 上由 ASN 開的 Claude 夥伴。</small>
+          <label class="chk"><input type="checkbox" :checked="st.bridge.permPhone" :disabled="st.bridge.busy" @change="act('bridge-perm-phone', $event.target.checked)" aria-label="權限框傳到手機" /><span>權限框傳到手機</span></label>
+          <small>手機開著 ASN 時會跳出權限框，可以直接在手機上回答。權限框的內容和選項會經過 ASN 的伺服器、只傳給你登入的設備，回答或過期後就清掉；裡面可能有指令或路徑。關掉就只在這台電腦上問你。</small>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>

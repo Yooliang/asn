@@ -103,6 +103,13 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     Some(PromptText { text: kept.join("\n"), complete })
 }
 
+/// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
+/// 目前只給「只有這一次」和拒絕：其他選項（例如以後都允許）影響的不只這一次，留在電腦上決定。
+/// 內容不完整時本人看不到全部，只能拒絕。
+pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption> {
+    screen.options.iter().filter(|o| Some(o.n) == screen.deny || (complete && Some(o.n) == screen.allow_once)).cloned().collect()
+}
+
 /// 判斷畫面。回 None 代表沒有偵測到提示（包含閒置、執行中，以及認不出來的畫面）
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
@@ -483,5 +490,34 @@ mod tests {
     fn 信任提示缺上下文_不算信任資料夾() {
         let s = classify(" ❯ No, exit\n   Yes, I trust this folder\n").unwrap();
         assert_eq!((s.kind, s.allow_once), (K::Attention, None));
+    }
+}
+
+#[cfg(test)]
+mod phone_option_tests {
+    use super::*;
+
+    fn screen() -> ClaudeScreen {
+        let opt = |n, l: &str| ClaudeOption { n, label: l.to_string() };
+        ClaudeScreen {
+            kind: ClaudeScreenKind::Permission,
+            question: "Do you want to proceed?".into(),
+            options: vec![opt(1, "Yes"), opt(2, "Yes, and don't ask again"), opt(3, "No")],
+            cursor: 0,
+            allow_once: Some(1),
+            deny: Some(3),
+        }
+    }
+
+    #[test]
+    fn 手機只給這一次和拒絕() {
+        let n: Vec<u32> = phone_options(&screen(), true).iter().map(|o| o.n).collect();
+        assert_eq!(n, vec![1, 3]);
+    }
+
+    #[test]
+    fn 內容不完整只能拒絕() {
+        let n: Vec<u32> = phone_options(&screen(), false).iter().map(|o| o.n).collect();
+        assert_eq!(n, vec![3]);
     }
 }

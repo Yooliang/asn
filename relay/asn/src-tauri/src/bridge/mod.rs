@@ -57,6 +57,8 @@ pub struct BridgeSettings {
     pub term_server_off: bool,
     /// 使用者關掉了「夥伴卡住時跳提示」（todo-next-162）。預設是開的，所以記「關」
     pub screen_watch_off: bool,
+    /// 使用者關掉了「權限框傳到手機」（#853）。預設是開的，所以記「關」
+    pub perm_phone_off: bool,
 }
 
 pub fn settings_path(data_dir: &Path) -> PathBuf {
@@ -70,10 +72,10 @@ fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), screen_watch_off: flag("screen_watch_off") }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off") }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "screen_watch_off": s.screen_watch_off }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -337,6 +339,7 @@ pub struct Status {
     pub term_server_background: i64,
     /// 設定：夥伴卡住時跳提示（設定頁的開關現在的值）
     pub screen_watch: bool,
+    pub perm_phone: bool,
     /// 設定：沒指定收件人的信交給哪個視窗（空＝交給本人）
     pub unaddressed_to: String,
     pub error: Option<String>,
@@ -380,7 +383,7 @@ impl Manager {
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, term_server: !s.term_server_off, term_server_supported: cfg!(windows), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, term_server: !s.term_server_off, term_server_supported: cfg!(windows), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -455,6 +458,14 @@ impl Manager {
     }
 
     /// 打開／關閉「夥伴卡住時跳提示」（todo-next-162）。這裡只存檔，馬上生效由呼叫端通知背景工作
+    /// 打開／關閉「權限框傳到手機」（#853）。這裡只存檔，馬上生效由呼叫端通知背景工作
+    pub fn set_perm_phone(&self, on: bool) -> Result<Status, String> {
+        let mut s = read_settings(&self.data_dir);
+        s.perm_phone_off = !on;
+        write_settings(&self.data_dir, s)?;
+        Ok(self.status())
+    }
+
     pub fn set_screen_watch(&self, on: bool) -> Result<Status, String> {
         let mut s = read_settings(&self.data_dir);
         s.screen_watch_off = !on;
