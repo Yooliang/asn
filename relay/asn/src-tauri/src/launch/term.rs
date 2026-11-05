@@ -2756,6 +2756,13 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
     // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
     let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
+    // #868：設定頁的「伺服器終端」開關。環境變數 0 優先；使用者關掉了就不用。啟動時讀一次，執行中不變（改了要重開 ASN 才生效，已開著的夥伴不會被搬）
+    let (wanted, locked) = super::win_term::term_server_wanted(std::env::var(super::win_term::ENV_MUX).ok().as_deref(), crate::bridge::read_settings(data_dir).term_server_off);
+    let mux = mux && wanted;
+    // 畫面只寫「已由系統設定固定」；細節（是哪個環境變數）放這裡，給想查的人看（#868）
+    if locked {
+        elog!("夥伴共用終端服務：環境變數 {}=0 固定關閉，設定頁的開關不會生效", super::win_term::ENV_MUX);
+    }
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
     let (inside, limit) = super::mux::own_job();
@@ -2769,6 +2776,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
         let _ = MUX_OFF_REASON.set(why);
     }
     svc.set_use_mux(mux);
+    super::win_term::set_term_server_state(mux, locked);   // 設定頁用：這次實際有沒有在用、是不是被系統設定固定關
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }

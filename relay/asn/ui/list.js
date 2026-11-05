@@ -162,9 +162,9 @@ try {
   if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, termServer: true, termServerSupported: false, termServerActive: true, termServerLocked: false, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
-  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerActive: s.term_server_active !== false, termServerLocked: s.term_server_locked === true, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
@@ -1403,6 +1403,7 @@ const app = createApp({
     }
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
     const setBridgeAutoResume = on => runBridge(() => invoke('bridge_set_auto_resume', { on }))
+    const setBridgeTermServer = on => runBridge(() => invoke('bridge_set_term_server', { on }))
     const setBridgeUnaddressed = name => runBridge(() => invoke('bridge_set_unaddressed_to', { name: String(name ?? '') }))
     const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
@@ -1693,6 +1694,7 @@ const app = createApp({
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
+        case 'bridge-term-server': await setBridgeTermServer(value === true); break
         case 'bridge-unaddressed': await setBridgeUnaddressed(value); break
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break

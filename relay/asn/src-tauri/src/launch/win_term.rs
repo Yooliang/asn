@@ -40,6 +40,35 @@ fn switches_on(windows: bool, wezterm: Option<&str>, mux: Option<&str>) -> (bool
     (wez, wez && mux != Some("0"))
 }
 
+/// 伺服器終端（共用 mux）這次啟動的結果，給設定頁顯示（#868）：啟動時由 term::live() 設一次，執行中不再變
+static TERM_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static TERM_SERVER_LOCKED: AtomicBool = AtomicBool::new(false);
+
+/// 使用者在設定頁關掉伺服器終端，加上環境變數的結果：回（要不要用, 被環境變數固定關）。
+/// - 環境變數 `ASN_TERM_MUX=0` 優先，設定頁打開也不會開（跟 #854 同一套）；畫面上顯示「已由系統設定固定」。
+/// - 否則看設定頁：使用者關掉了就不用。
+/// 只管「使用者想不想用」；WezTerm 開窗關著時 mux 一定關，由呼叫端（`switches_from` 的結果）決定，不在這裡
+pub(crate) fn term_server_wanted(env_mux: Option<&str>, user_off: bool) -> (bool, bool) {
+    let locked = env_mux == Some("0");
+    (!locked && !user_off, locked)
+}
+
+/// 啟動時記下這次實際有沒有用伺服器終端（`active`）與是不是被環境變數固定關（`locked`）
+pub(crate) fn set_term_server_state(active: bool, locked: bool) {
+    TERM_SERVER_ACTIVE.store(active, Ordering::SeqCst);
+    TERM_SERVER_LOCKED.store(locked, Ordering::SeqCst);
+}
+
+/// 這次啟動有沒有在用伺服器終端（設定頁用來判斷「改了還沒生效」）
+pub(crate) fn term_server_active() -> bool {
+    TERM_SERVER_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// 被環境變數固定關著（設定頁反灰、寫「已由系統設定固定」）
+pub(crate) fn term_server_locked() -> bool {
+    TERM_SERVER_LOCKED.load(Ordering::SeqCst)
+}
+
 /// 啟動時設定一次（term::live() 呼叫）
 pub(crate) fn set_wezterm_windows(on: bool) {
     WEZTERM_WINDOWS.store(on, Ordering::SeqCst);
@@ -388,5 +417,63 @@ mod tests {
         // 除了開窗點的退路與 pi 的退路入口，local.rs 沒有別的地方直接開原生主控台（測試不算）
         let body = local.split("#[cfg(test)]").next().unwrap();
         assert_eq!(body.matches("start_console_window_windows(").count(), 3, "定義、開窗點的退路、pi 的退路入口；不能有其他人直接開主控台");
+    }
+
+    // ---- #868：設定頁的「夥伴共用同一個終端服務」開關
+
+    #[test]
+    fn 伺服器終端_設定頁與環境變數的判斷表() {
+        // （環境變數, 使用者關掉了）→（要不要用, 被環境變數固定關）
+        assert_eq!(term_server_wanted(None, false), (true, false), "預設開");
+        assert_eq!(term_server_wanted(None, true), (false, false), "使用者在設定頁關掉");
+        assert_eq!(term_server_wanted(Some("0"), false), (false, true), "環境變數 0 優先：設定頁打開也不會開，畫面顯示已固定");
+        assert_eq!(term_server_wanted(Some("0"), true), (false, true), "兩者都關：仍是固定");
+        // 其他值都算開（打錯字不會悄悄關掉，跟 switches_from 同一套）；設定頁關掉照樣生效
+        for v in ["1", "", "off", "false", "00"] {
+            assert_eq!(term_server_wanted(Some(v), false), (true, false), "{v:?} 不算關");
+            assert_eq!(term_server_wanted(Some(v), true), (false, false), "{v:?}＋設定頁關掉");
+        }
+    }
+
+    #[test]
+    fn 伺服器終端_設定頁只能再關不能強制開_wezterm_關著時一定關() {
+        // 設定頁「開」不會把環境變數關著的 WezTerm 開窗打開：mux 只是 WezTerm 窗格的放法（switches_from 的規則不變）
+        let (wez, mux) = switches_on(true, Some("0"), None);
+        assert_eq!((wez, mux), (false, false));
+        let (wanted, _) = term_server_wanted(None, false);
+        assert!(!(mux && wanted), "WezTerm 關著：就算設定頁開著，這次也不用伺服器終端");
+        // 非 Windows：照舊要明講 =1；設定頁關掉仍可再關
+        let (wez, mux) = switches_on(false, Some("1"), Some("1"));
+        assert_eq!((wez, mux), (true, true));
+        assert!(!(mux && term_server_wanted(Some("1"), true).0));
+    }
+
+    /// 判斷表只證明純函式對；設定頁的開關要真的影響 live()：使用者設定與環境變數的結果要進 mux，這次啟動的結果要記下來給畫面用。
+    /// 拿掉其中一行，開關就悄悄失效（判斷表測試仍綠），所以直接守原始碼
+    #[test]
+    fn 守門_live_真的把設定頁的開關套進去_並記下這次啟動的結果() {
+        let term = include_str!("term.rs");
+        let live = term.split("pub fn live(").nth(1).expect("有 live()").split("
+}
+").next().unwrap();
+        assert!(live.contains("term_server_wanted(") && live.contains("read_settings(data_dir).term_server_off"), "要讀設定頁的值並和環境變數一起判斷");
+        assert!(live.contains("let mux = mux && wanted;"), "設定頁關掉＝這次不用伺服器終端（要在 mux_after_job 之前，認領 mux 的列要看它）");
+        let apply = live.find("let mux = mux && wanted;").unwrap();
+        let after_job = live.find("mux_after_job(").expect("mux_after_job");
+        assert!(apply < after_job, "設定要在 mux_after_job 之前套用");
+        assert!(live.contains("set_term_server_state(mux, locked)"), "記下最後實際有沒有在用（含被工作群組旗標拿掉的情況），畫面據此提示重開");
+        let state = live.find("set_term_server_state(mux, locked)").unwrap();
+        let set_use = live.find("svc.set_use_mux(mux)").expect("set_use_mux");
+        assert!(set_use < state, "要記最後一個 mux（set_use_mux 用的那個），不是中間值");
+    }
+
+    #[test]
+    fn 伺服器終端_這次啟動的結果記得住_給設定頁判斷改了還沒生效() {
+        let keep = (term_server_active(), term_server_locked());
+        set_term_server_state(true, false);
+        assert_eq!((term_server_active(), term_server_locked()), (true, false));
+        set_term_server_state(false, true);
+        assert_eq!((term_server_active(), term_server_locked()), (false, true));
+        set_term_server_state(keep.0, keep.1);
     }
 }
