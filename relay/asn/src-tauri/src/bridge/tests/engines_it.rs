@@ -802,6 +802,33 @@ async fn 群組點名交給通道_回覆已貼出但這一輪的結束還沒處�
 }
 
 #[tokio::test]
+async fn 群組點名交給通道_第二則沒做完_第三則已回完_重開後只補第二則() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room5");
+    room_for(&h, vec![(2, &format!("第二則
+@@GATE {}", gate.display())), (3, "第三則")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("兩則都交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #3"))).await;
+    assert_eq!(room_cursor(&h), 3);
+    // 手動改存檔：第三則已經回完（紀錄清掉），第二則還沒做完
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let items = v["pending"].as_array_mut().unwrap();
+    let before = items.len();
+    items.retain(|p| p["room"]["seq"] != json!(3));
+    assert_eq!(before - items.len(), 1, "前提：存檔裡有第三則，而且只拿掉它");
+    assert!(items.iter().any(|p| p["room"]["seq"] == json!(2) && p["channel"] == json!(true)), "前提：第二則還在、是通道項目");
+    std::fs::write(&f, v.to_string()).unwrap();
+    h.restart().await;
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    let log = h.core.log.recent();
+    assert_eq!(log.iter().filter(|l| l.contains("handed room=R1 #2")).count(), 1, "沒做完的第二則補轉交一次");
+    assert_eq!(log.iter().filter(|l| l.contains("handed room=R1 #3")).count(), 0, "已回完的第三則不能再轉交（否則群組收到第二次回覆）");
+    assert_eq!(room_cursor(&h), 3, "補完後游標回到原位");
+}
+
+#[tokio::test]
 async fn 群組點名交給通道_重開後再轉交仍沒做完_再重開不再補轉交() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let gate = h.work.path().join("gate-room2");
