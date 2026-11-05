@@ -13,6 +13,12 @@ use tokio::sync::{mpsc, oneshot, Notify};
 
 pub type Log = Arc<dyn Fn(String) + Send + Sync>;
 
+/// 行程結束之後，等 stdout／stderr 讀完的上限（#752）。行程結束的處理不能比「最後一行輸出」和 stderr 尾巴更早：
+/// agy 登入失效時是「先寫 status=ERROR 的結果、再結束」，兩個讀取任務與等行程的任務各自排程，負載高時行程結束先被處理，
+/// 結果被忽略、stderr 尾巴也還沒讀進來，登入失效就被判成 crash（不通知本人、不引導登入、不自動重開）。
+/// 子程序自己結束了、卻把管線留給還活著的孫行程時，管線不會 EOF：只等到上限，逾時照舊往下走，不卡住
+const DRAIN_MAX: std::time::Duration = std::time::Duration::from_millis(1500);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RpcError {
     pub message: String,
@@ -97,8 +103,12 @@ impl Rpc {
             }
             drop(stdin); // 通道關了＝乾淨結束：關 stdin 讓對方自己收尾
         });
+        // 讀取任務讀到檔尾（或讀不下去）就通知一聲，等行程的任務靠它知道「輸出讀完了」（#752）
+        let mut drains: Vec<oneshot::Receiver<()>> = Vec::new();
         if let Some(out) = stdout {
             let (r, inc, raw) = (rpc.clone(), o.on_incoming.clone(), o.on_json_line.clone());
+            let (done_tx, done_rx) = oneshot::channel::<()>();
+            drains.push(done_rx);
             crate::rt::spawn(async move {
                 let mut lines = BufReader::new(out).lines();
                 while let Ok(Some(l)) = lines.next_line().await {
@@ -115,10 +125,13 @@ impl Rpc {
                         None => r.on_line(l, &inc),
                     }
                 }
+                let _ = done_tx.send(());
             });
         }
         if let Some(err) = stderr {
             let (r, log) = (rpc.clone(), o.log.clone());
+            let (done_tx, done_rx) = oneshot::channel::<()>();
+            drains.push(done_rx);
             crate::rt::spawn(async move {
                 let mut lines = BufReader::new(err).lines();
                 let mut n = 0;
@@ -138,6 +151,7 @@ impl Rpc {
                     }
                     n += 1;
                 }
+                let _ = done_tx.send(());
             });
         }
         let (r, on_exit, on_end) = (rpc.clone(), o.on_exit.clone(), o.on_end.clone());
@@ -155,13 +169,19 @@ impl Rpc {
                     "被停止了".to_string()
                 }
             };
+            // 行程已經結束：「還活著嗎」和 PID 帳本都跟輸出無關，馬上處理，不等讀取
+            // （別人要判斷「這個驅動還能不能用」、帳本要劃掉，不該因為我們在等輸出而晚知道）
             r.0.alive.store(false, Ordering::SeqCst);
-            r.0.tx.lock().unwrap().take();
-            let stopped = r.0.stopped.load(Ordering::SeqCst);
-            r.fail_all(RpcError { message: if stopped { "被停止了".into() } else { why.clone() }, code: None });
             if let Some(f) = on_end {
                 f();
             }
+            // 再等 stdout／stderr 讀完（有上限）：最後一行輸出與 stderr 尾巴要在下面的 fail_all／on_exit 之前處理完（#752）
+            for d in drains {
+                let _ = tokio::time::timeout(DRAIN_MAX, d).await;   // 逾時或對方已丟掉都照舊往下走
+            }
+            r.0.tx.lock().unwrap().take();
+            let stopped = r.0.stopped.load(Ordering::SeqCst);
+            r.fail_all(RpcError { message: if stopped { "被停止了".into() } else { why.clone() }, code: None });
             if !stopped {
                 on_exit(why);
             }
@@ -274,5 +294,156 @@ impl Rpc {
     pub fn kill_now(&self) {
         self.0.stopped.store(true, Ordering::SeqCst);
         self.0.kill.notify_one();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::{Duration, Instant};
+
+    /// 一支 node 假程式：把 `script` 當成程式跑。測試環境沒有 node 就略過（CI 與開發機都有）。
+    /// 只在 PATH 裡找檔案、不開子行程：engines 底下每個子程序都要先 env_clear（守門測試掃字串），測試探測也不為此開例外
+    fn node() -> Option<String> {
+        let exts: &[&str] = if cfg!(windows) { &["exe", "cmd", "bat"] } else { &[""] };
+        let found = std::env::var_os("PATH").is_some_and(|p| {
+            std::env::split_paths(&p).any(|d| exts.iter().any(|e| d.join(if e.is_empty() { "node".to_string() } else { format!("node.{e}") }).is_file()))
+        });
+        found.then(|| "node".to_string())
+    }
+
+    fn opts(script: &str, on_json: Arc<dyn Fn(Value) + Send + Sync>, on_exit: Arc<dyn Fn(String) + Send + Sync>) -> SpawnOpts {
+        SpawnOpts {
+            command: "node".into(),
+            args: vec!["-e".into(), script.into()],
+            cwd: std::env::temp_dir(),
+            env: std::env::vars().collect(),
+            jsonrpc: false,
+            log: Arc::new(|_| {}),
+            on_incoming: Arc::new(|_, _| {}),
+            on_exit,
+            on_json_line: Some(on_json),
+            on_end: None,
+        }
+    }
+
+    /// #752：行程結束的處理不能比「最後一行輸出」更早。agy 登入失效時是「先寫 status=ERROR 的結果、再結束」，
+    /// 任務排程反過來（負載高）就會先判成 crash，登入失效被吞掉。這裡人為讓 stdout 的處理變慢，on_exit 被呼叫時最後一行與 stderr 尾巴都要已經處理完
+    #[tokio::test]
+    async fn 行程結束時_最後一行輸出與_stderr_尾巴都已處理完_就算讀取很慢() {
+        if node().is_none() {
+            return;
+        }
+        let handled = Arc::new(AtomicUsize::new(0));
+        let at_exit = Arc::new(Mutex::new(None::<(usize, String)>));
+        let (h_line, h_exit, ex2) = (handled.clone(), handled.clone(), at_exit.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let rpc_cell: Arc<Mutex<Option<Rpc>>> = Arc::new(Mutex::new(None));
+        let rc = rpc_cell.clone();
+        let o = opts(
+            // 先往 stderr 寫登入失效的字、再往 stdout 寫結果，馬上結束（結束碼 1）
+            "process.stderr.write('authentication required\\n'); console.log(JSON.stringify({event:'result',result:{status:'ERROR'}})); process.exit(1)",
+            Arc::new(move |_| {
+                // 人為讓 stdout 的處理變慢：行程的結束任務通常會先到
+                std::thread::sleep(Duration::from_millis(400));
+                h_line.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move |_why| {
+                let tail = rc.lock().unwrap().as_ref().map(|r| r.stderr_tail().join(" | ")).unwrap_or_default();
+                *ex2.lock().unwrap() = Some((h_exit.load(Ordering::SeqCst), tail));
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        let rpc = Rpc::spawn(o).unwrap();
+        *rpc_cell.lock().unwrap() = Some(rpc);
+        tokio::time::timeout(Duration::from_secs(10), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        let (lines, tail) = at_exit.lock().unwrap().clone().unwrap();
+        assert_eq!(lines, 1, "on_exit 之前最後一行輸出要已經處理完（否則結果被忽略、判成 crash）");
+        assert!(tail.contains("authentication required"), "on_exit 之前 stderr 尾巴要已經讀進來（分類要靠它）：{tail:?}");
+    }
+
+    /// 子行程自己結束了，卻把管線留給一個還活著的孫行程：stdout 不會 EOF。on_exit 不能因此卡住，等了上限就照舊往下走
+    #[tokio::test]
+    async fn 孫行程佔著管線_管線不會結束_on_exit_仍在上限內被呼叫() {
+        if node().is_none() {
+            return;
+        }
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let o = opts(
+            // 起一個孫行程（繼承 stdout／stderr）睡 30 秒，自己馬上結束
+            "const {spawn}=require('child_process'); const c=spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:['ignore','inherit','inherit'],detached:true}); c.unref(); console.log('{\"event\":\"x\"}'); process.exit(0)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        let started = Instant::now();
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(8), done_rx).await.expect("管線被佔住也不能卡死 on_exit").unwrap();
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(500), "要真的有等（等管線讀完的上限）：{took:?}");
+        assert!(took < Duration::from_secs(6), "但不能等到孫行程結束（30 秒）：{took:?}");
+    }
+
+    /// 等讀取只延後「結案這一輪」（fail_all／on_exit）；行程一結束，「還活著嗎」和 PID 帳本（on_end）要馬上處理，
+    /// 不能因為管線被佔住就跟著晚到（驅動能不能再用、帳本有沒有劃掉都靠它，#752 修的過程中曾經因此讓 PID 帳本測試失敗）
+    #[tokio::test]
+    async fn 管線被佔住時_alive_與_on_end_仍在行程結束時馬上處理() {
+        if node().is_none() {
+            return;
+        }
+        let ended_at = Arc::new(Mutex::new(None::<Instant>));
+        let exit_at = Arc::new(Mutex::new(None::<Instant>));
+        let (e2, x2) = (ended_at.clone(), exit_at.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "const {spawn}=require('child_process'); const c=spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:['ignore','inherit','inherit'],detached:true}); c.unref(); process.exit(0)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                *x2.lock().unwrap() = Some(Instant::now());
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.on_end = Some(Arc::new(move || {
+            *e2.lock().unwrap() = Some(Instant::now());
+        }));
+        let rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(8), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert!(!rpc.alive(), "行程結束了：alive 要是 false");
+        let (end, exit) = (ended_at.lock().unwrap().unwrap(), exit_at.lock().unwrap().unwrap());
+        assert!(exit.duration_since(end) >= Duration::from_millis(500), "on_exit 要等管線（有上限），on_end 不等：on_end 比 on_exit 早 {:?}", exit.duration_since(end));
+    }
+
+    /// 正常結束（沒有被佔住的管線）不多等
+    #[tokio::test]
+    async fn 正常結束不多等() {
+        if node().is_none() {
+            return;
+        }
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let o = opts(
+            "console.log('{\"event\":\"x\"}'); process.exit(0)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        let started = Instant::now();
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(8), done_rx).await.unwrap().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3), "正常結束管線很快 EOF，不該等滿上限：{:?}", started.elapsed());
     }
 }

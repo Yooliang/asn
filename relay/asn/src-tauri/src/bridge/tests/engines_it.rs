@@ -439,7 +439,7 @@ async fn agy_舊對話壞了改開新對話_名下的往來記錄當前情帶進
 
 #[tokio::test]
 async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_還是斷才回暫時連不上_不當成登入問題() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
     let dir = tempfile::tempdir().unwrap();
     let m1 = dir.path().join("net1").display().to_string();
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
@@ -472,7 +472,7 @@ async fn agy_網路重試的等待期間工作者被停掉_不重開驅動_不�
 
 #[tokio::test]
 async fn agy_網路斷線前這一輪已經動過手_不整封重送_回可能做了一半_檔案只寫一次() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let mark = h.work.path().join("workers").join("Gemini").join("steps.txt");
     // 先有工具步驟（寫了一行）才斷線：不能重送，否則會寫第二次
@@ -528,7 +528,7 @@ async fn agy_丟掉舊對話後開不起新驅動_暫時的錯不能讓對話丟
 
 #[tokio::test]
 async fn acp_通用驅動網路斷線_不知道這一輪有沒有動過手_不自動重送_回可能做了一半() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@NET")).await;
     h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("網路斷線，這一輪可能做了一半"))).await;
