@@ -464,6 +464,26 @@ pub(crate) mod win {
         1
     }
 
+    type Handles = (isize, isize, isize);
+
+    /// `console-attach` 那行紀錄要不要寫。列名單每次都可能走到 `via_attach`，每次都寫會灌滿 ui.log：
+    /// 同一次執行只記第一次（讓實機驗證看得到「走過」），之後只有接上前與還原後的標準代號不同（＝還原沒成功）才再記
+    pub(crate) fn attach_log_line(pid: u32, before: Handles, after: Handles) -> Option<String> {
+        static SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        attach_log_decide(&SEEN, pid, before, after)
+    }
+
+    pub(crate) fn attach_log_decide(seen: &std::sync::atomic::AtomicBool, pid: u32, before: Handles, after: Handles) -> Option<String> {
+        let first = !seen.swap(true, std::sync::atomic::Ordering::SeqCst);
+        if !first && before == after {
+            return None;
+        }
+        Some(format!(
+            "console-attach pid={pid} 已接上並卸掉；標準代號 接上前={before:?} 還原後={after:?}{}",
+            if before == after { "" } else { "（不相同：還原沒成功）" }
+        ))
+    }
+
     /// 方法二：暫時接上該程序的主控台，問 GetConsoleWindow。整個程序同一時間只能接一個主控台，所以上鎖；
     /// 自己已經有主控台（例如開發時從終端機啟動）就不做，免得把自己的主控台卸掉。
     ///
@@ -489,11 +509,11 @@ pub(crate) mod win {
             SetStdHandle(STD_INPUT_HANDLE, saved.0);
             SetStdHandle(STD_OUTPUT_HANDLE, saved.1);
             SetStdHandle(STD_ERROR_HANDLE, saved.2);
-            crate::launch::term::view_log(&format!(
-                "console-attach pid={pid} 已接上並卸掉；標準代號 接上前={:?} 還原後={:?}",
-                saved,
-                (GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE))
-            ));
+            let after = (GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE));
+            let as_n = |h: (*mut core::ffi::c_void, *mut core::ffi::c_void, *mut core::ffi::c_void)| (h.0 as isize, h.1 as isize, h.2 as isize);
+            if let Some(line) = attach_log_line(pid, as_n(saved), as_n(after)) {
+                crate::launch::term::view_log(&line);
+            }
             if h.is_null() || !class_is_console(h) {
                 None
             } else {
@@ -605,6 +625,23 @@ pub(crate) mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #596：列名單每次都可能走到 via_attach，`console-attach` 紀錄同一次執行只記第一次，之後只有前後代號不同才再記，不灌滿 ui.log
+    #[cfg(windows)]
+    #[test]
+    fn console_attach_紀錄_只記第一次_之後只有前後代號不同才再記() {
+        use std::sync::atomic::AtomicBool;
+        let seen = AtomicBool::new(false);
+        let same = (0isize, 0isize, 0isize);
+        let first = win::attach_log_decide(&seen, 100, same, same).expect("第一次要記（實機驗證要看到走過）");
+        assert!(first.contains("console-attach pid=100") && !first.contains("不相同"), "{first}");
+        for pid in [101, 102, 103] {
+            assert!(win::attach_log_decide(&seen, pid, same, same).is_none(), "之後前後相同就不再記，免得每次列名單都寫");
+        }
+        // 還原沒成功（前後不同）才再記，而且要講清楚
+        let bad = win::attach_log_decide(&seen, 104, same, (168, 172, 200)).expect("前後不同要記");
+        assert!(bad.contains("不相同：還原沒成功") && bad.contains("168"), "{bad}");
+    }
 
     /// 真機手動驗收（#476）：走 ASN 開夥伴的同一條路（明確用 conhost.exe），在 Windows Terminal 開著別的視窗時，
     /// 開出來的是一個程序一扇的原生主控台視窗，現有的切換找得到它、能隱藏、能叫回來。只結束自己開的那一個（記下的 PID）。
