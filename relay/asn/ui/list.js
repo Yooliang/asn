@@ -2,7 +2,7 @@
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, groupsUnread, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -1344,6 +1344,7 @@ const app = createApp({
     const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、指引、設定
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
+    const groupsUnreadN = computed(() => groupsUnread(roomRows.value))
     // 選到的頁籤不在現在的清單（改了維度、設備消失…）時退回第一個（設備維度的第一個就是本機）
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
@@ -1745,7 +1746,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, groupsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
