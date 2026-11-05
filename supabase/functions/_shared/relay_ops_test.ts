@@ -53,9 +53,9 @@ Deno.test("list／whoami 用租戶；inbox／ack／sent_status 用節點；ids �
   assertEquals((await nodeAction(none.deps, WHO, "whoami")).status, 401);
 });
 
-Deno.test("invite／reissue／update：碼只以雜湊進資料庫；forbidden／not_found 對應 403／404", async () => {
+Deno.test("invite／reissue：碼只以雜湊進資料庫；forbidden／not_found 對應 403／404", async () => {
   const f = fake({
-    asn_relay_invite: () => ({ expires_at: "2030", prefix: "t2-" }), asn_relay_reissue: () => ({ expires_at: "2030" }), asn_relay_update: () => ({ ok: true }),
+    asn_relay_invite: () => ({ expires_at: "2030", prefix: "t2-" }), asn_relay_reissue: () => ({ expires_at: "2030" }),
   });
   const inv = await nodeAction(f.deps, WHO, "invite", { note: "x" });
   assertEquals(inv.status, 200);
@@ -64,9 +64,8 @@ Deno.test("invite／reissue／update：碼只以雜湊進資料庫；forbidden�
   const re = await nodeAction(f.deps, WHO, "reissue", { id: "H" });
   assertEquals(f.calls[1].args.p_code_hash, await sha256Hex(re.body.code));
   assertEquals((await nodeAction(f.deps, WHO, "reissue", { id: "bad id!" })).status, 400);
-  assertEquals((await nodeAction(f.deps, WHO, "update", { id: "H", machine: "書房" })).body, { ok: true });
-  const nf = fake({ asn_relay_update: () => ({ error: "not_found" }), asn_relay_invite: () => ({ error: "forbidden" }) });
-  assertEquals((await nodeAction(nf.deps, WHO, "update", { id: "H", name: "x" })).status, 404);
+  assertEquals((await nodeAction(f.deps, WHO, "update", { id: "H", machine: "書房" })).status, 404, "update 已移除");
+  const nf = fake({ asn_relay_invite: () => ({ error: "forbidden" }) });
   assertEquals((await nodeAction(nf.deps, WHO, "invite", {})).status, 403);
 });
 
