@@ -1129,6 +1129,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         v.is_some_and(|v| self.runner.started_ms(v.pid) == Some(v.started_ms))
     }
 
+    /// 共用 mux 的現況，給掛掉監看用（`mux_watch`）：mux 現在活不活（程序編號＋建立時間）、裡面有哪些夥伴（名字）、
+    /// ASN 自己停 mux 的記號。沒開 mux 模式、或找不到 WezTerm 就回 None（不監看）
+    pub fn mux_snapshot(&self) -> Option<super::mux_watch::Observed> {
+        if !self.use_mux {
+            return None;
+        }
+        let dir = self.dir().ok()?;
+        let m = self.mux_handle(&dir, BTreeMap::new()).ok()?;
+        let live = m.live_pid();
+        let partners: Vec<String> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty()).filter_map(|s| partner_label(&s.id, &s.title).map(String::from)).collect()
+        };
+        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
+    }
     /// 這個 mux（程序編號＋建立時間）裡、名字是 `name` 的夥伴視窗（claude／window）的終端編號。同名不只一個就不猜；
     /// mux 的編號與建立時間要跟開窗格時記的一樣（防止舊的列對到新的 mux）。沒開 mux 模式＝None
     pub fn partner_in_mux(&self, mux: (u32, u64), name: &str) -> Option<String> {

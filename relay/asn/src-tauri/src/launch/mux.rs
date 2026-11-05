@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const MUX_EXE: &str = "wezterm-mux-server.exe";
+/// ASN 自己停 mux 時留的記號（`<程序編號> <毫秒>`）：之後 mux 不見了，監看（`mux_watch`）才知道是我們收的，不是掛掉
+pub const STOPPED_FILE: &str = "stopped";
 /// socket 路徑上限：WezTerm 在 Windows 上也走 AF_UNIX，`sun_path` 是 108 位元組（含結尾）。實測 126 字元起不來
 pub const SOCK_MAX: usize = 100;
 /// 等新起的 mux 開始接受連線
@@ -285,10 +287,17 @@ impl Mux<'_> {
     /// 停 mux：只停 pid 檔記的那一個、建立時間對得上才動。底下所有夥伴窗格會一起結束；呼叫前要先用 `pane_count` 講清楚
     pub fn stop(&self) -> Result<(), String> {
         let Some(pid) = self.recorded_alive() else { return Err("沒有 ASN 起的終端服務在跑".into()) };
+        // 先留記號再結束：監看在結束之後的下一輪看到 mux 不見，要查得到這是我們收的
+        let _ = std::fs::write(self.paths.dir.join(STOPPED_FILE), format!("{pid} {}", crate::heartbeat::now_ms()));
         self.runner.kill_tree(pid);
         let _ = std::fs::remove_file(&self.paths.pid);
         Ok(())
     }
+}
+
+/// ASN 上一次自己停 mux 的記號：（程序編號, 毫秒）。沒有或看不懂就是 None
+pub fn stopped_mark(dir: &Path) -> Option<(u32, u64)> {
+    read_pid(&dir.join(STOPPED_FILE))
 }
 
 /// 記一行到 `<資料夾>\\mux.log`，事後查得到（視窗程式的 stderr 沒人收）。超過上限就只留後半，寫不進去就算了

@@ -54,3 +54,18 @@ test('接回的名字也列出來（最多 10 位，其餘寫還有幾位）；�
   const odd = autoResumeNotice({ state: 'done', resumed: ['甲', 7, '', null], failed: [] })
   assert.match(odd.body, /接回的是：「甲」/)
 })
+
+test('終端服務中斷：原因寫在最前面；重開機沒有原因欄位時和以前一樣', () => {
+  const crash = autoResumeNotice({ state: 'done', cause: '共用的終端服務中斷了', resumed: ['甲'], failed: [{ name: '乙', reason: '沒有記到原本的對話編號，請手動喚醒' }] })
+  assert.equal(crash.title, '已自動接回 1 位夥伴')
+  assert.ok(crash.body.startsWith('原因：共用的終端服務中斷了。'), crash.body)
+  assert.match(crash.body, /「乙」：沒有記到/)
+  // 十分鐘內又中斷：沒有接回的，原因也在最前面
+  const none = autoResumeNotice({ state: 'done', cause: '共用的終端服務中斷了', resumed: [], failed: [{ name: '甲', reason: '終端服務十分鐘內又中斷了，這次沒有自動接回，請手動喚醒' }] })
+  assert.equal(none.title, '夥伴沒有接回來')
+  assert.ok(none.body.startsWith('原因：共用的終端服務中斷了。'), none.body)
+  // 沒有原因欄位（重開機、舊後端）：不出現「原因」，鍵也不同於有原因的
+  const boot = autoResumeNotice({ state: 'done', resumed: ['甲'], failed: [] })
+  assert.ok(!boot.body.includes('原因：'))
+  assert.notEqual(boot.key, autoResumeNotice({ state: 'done', cause: 'x', resumed: ['甲'], failed: [] }).key)
+})

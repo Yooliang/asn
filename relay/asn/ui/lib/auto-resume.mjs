@@ -27,9 +27,11 @@ export function autoResumeNotice(s) {
     case 'done': {
       if (!resumed && !failed.length) return null
       const title = resumed ? `已自動接回 ${resumed} 位夥伴` : '夥伴沒有接回來'
+      // 重開機以外的原因（例如共用的終端服務中斷）：寫在最前面，本人才知道為什麼夥伴會不見
+      const cause = typeof s.cause === 'string' && s.cause ? `原因：${s.cause}。` : ''
       const lead = resumed ? ['權限和原本相同，收到信就會繼續工作，也會用到額度。', resumedLine(s.resumed)].filter(Boolean).join(NL) : ''
       const rest = failed.length ? `沒有接回 ${failed.length} 位，給它們的信會先留著，最多 12 小時：\n${failedLines(failed)}` : ''
-      return { key: `done:${resumed}:${failed.length}`, title, body: [lead, rest].filter(Boolean).join('\n') }
+      return { key: `done:${s.cause ?? ''}:${resumed}:${failed.length}`, title, body: [cause, lead, rest].filter(Boolean).join('\n') }
     }
     default: return null
   }

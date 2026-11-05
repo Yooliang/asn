@@ -15,6 +15,7 @@ mod claude_screen;
 mod screen_watch;
 mod resume;
 pub mod auto_resume;
+pub mod mux_watch;
 #[cfg(all(feature = "gui", not(test)))]
 pub use auto_resume::{boot_ms, probe_window};
 mod subagents;
