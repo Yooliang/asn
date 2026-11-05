@@ -728,6 +728,58 @@ async fn agy_登入失效_自動重開一次把同一封信再試_成功就不�
     h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
 }
 
+// ---- #845：重開 ASN 時，交給內建通道的群組點名會丟（#828 的群組這條）
+
+/// 一個群組、我（成員 Gemini，通道）被點名的訊息們。`forMe` 只有被點名的才有
+fn room_for(h: &EH, msgs: Vec<(u64, &str)>) {
+    let messages: Vec<Value> = msgs
+        .iter()
+        .map(|(seq, body)| json!({"seq": seq, "from": "W~W-政策", "from_name": "政策", "trust": "member", "body": body, "mentions": [], "at": "t", "forMe": {"Gemini": true}}))
+        .collect();
+    let last = msgs.last().map(|m| m.0).unwrap_or(0);
+    let room = json!({"id": "R1", "name": "專案群", "last_seq": last, "mine": [{"member": "W~Gemini", "read_seq": 1}], "messages": messages});
+    h.fr.st.lock().unwrap().rooms = vec![room];
+}
+
+fn room_cursor(h: &EH) -> u64 {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("rooms-cursor.json")).unwrap_or_else(|_| "{}".into())).unwrap();
+    v.as_object().and_then(|o| o.values().next()).and_then(Value::as_u64).unwrap_or(0)
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_這一輪沒做完就重開_游標退回_重開後再轉交一次() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    assert_eq!(room_cursor(&h), 2, "前提：轉交後游標已前進，重開前才會丟");
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 1, "重開時沒做完的通道點名：游標退回它前面");
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    let n = h.core.log.recent().iter().filter(|l| l.contains("handed room=R1 #2")).count();
+    assert_eq!(n, 1, "新核心把它再轉交一次");
+    assert_eq!(room_cursor(&h), 2);
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_重開後再轉交仍沒做完_再重開不再補轉交() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room2");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    h.restart().await;
+    h.core.pull_rooms(now()).await; // 第二次轉交，閘門仍關著
+    h.wait("再交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 2, "已重送過一次還沒做完：不再退回游標，避免每次重開都重跑");
+    assert!(h.core.log.recent().iter().any(|l| l.contains("giving up")));
+}
+
 #[tokio::test]
 async fn agy_太久沒動靜_中止並回報_行程崩潰_回報_之後仍可用() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"turn_timeout_ms": 1500}))])), &[], "acp", &[]).await;

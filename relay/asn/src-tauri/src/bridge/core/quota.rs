@@ -423,7 +423,7 @@ impl Core {
         }
         self.log.line(&format!("sent room={} #{} arrived after the quota event: already forwarded, not resending", h.room_id, h.seq));
         let mut p = Pending::new(id, "", "", &target, self.now, false);
-        p.room = Some(RoomRef { id: h.room_id.clone(), seq: h.seq, window });
+        p.room = Some(RoomRef { id: h.room_id.clone(), seq: h.seq, window, member: h.member.clone() });
         p.state = State::Waiting;
         self.pending.push(p);
         self.persist();

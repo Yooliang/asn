@@ -33,6 +33,8 @@ pub struct RoomRef {
     pub id: String,
     pub seq: u64,
     pub window: String,
+    /// 被點名的成員代號（游標的 key 用；舊紀錄沒有就是空字串）
+    pub member: String,
 }
 
 #[derive(Clone, Debug)]
@@ -79,7 +81,7 @@ pub fn to_record(p: &Pending) -> Value {
         "id": p.id, "from_node": p.from_node, "from_agent": p.from_agent, "target": p.target,
         "state": p.state.name(), "t0": p.t0, "t": p.t, "noReply": p.no_reply, "replied": p.replied,
         "notifiedAt": p.notified_at, "nudged": p.nudged, "channel": p.channel,
-        "room": p.room.as_ref().map(|r| json!({ "id": r.id, "seq": r.seq, "window": if r.window.is_empty() { Value::Null } else { json!(r.window) } })),
+        "room": p.room.as_ref().map(|r| json!({ "id": r.id, "seq": r.seq, "window": if r.window.is_empty() { Value::Null } else { json!(r.window) }, "member": if r.member.is_empty() { Value::Null } else { json!(r.member) } })),
     })
 }
 
@@ -115,7 +117,7 @@ fn from_record(r: &Value) -> Option<Pending> {
     let room = r.get("room").filter(|x| x.is_object()).and_then(|x| {
         let id = x.get("id")?.as_str()?;
         let seq = num(x.get("seq")?)?;
-        Some(RoomRef { id: id.into(), seq, window: x.get("window").and_then(Value::as_str).unwrap_or("").into() })
+        Some(RoomRef { id: id.into(), seq, window: x.get("window").and_then(Value::as_str).unwrap_or("").into(), member: x.get("member").and_then(Value::as_str).unwrap_or("").into() })
     });
     Some(Pending {
         id: id.into(), from_node: s("from_node").unwrap_or("").into(), from_agent: s("from_agent").unwrap_or("").into(), target: target.into(),
@@ -239,18 +241,18 @@ mod tests {
     #[test]
     fn 群組項目存檔再載回_視窗名與節點本身都對得上() {
         let mut a = p("room-a", State::Waiting, 10);
-        a.room = Some(RoomRef { id: "R1".into(), seq: 4, window: "T-視窗甲".into() });
+        a.room = Some(RoomRef { id: "R1".into(), seq: 4, window: "T-視窗甲".into(), member: "T~T-視窗甲".into() });
         let mut b = p("room-b", State::Waiting, 10);
-        b.room = Some(RoomRef { id: "R1".into(), seq: 5, window: String::new() });
+        b.room = Some(RoomRef { id: "R1".into(), seq: 5, window: String::new(), member: String::new() });
         let snap = snapshot(&[a, b], &BTreeMap::new());
-        assert_eq!(snap["pending"][0]["room"], json!({"id": "R1", "seq": 4, "window": "T-視窗甲"}));
+        assert_eq!(snap["pending"][0]["room"], json!({"id": "R1", "seq": 4, "window": "T-視窗甲", "member": "T~T-視窗甲"}));
         assert_eq!(snap["pending"][1]["room"]["window"], Value::Null, "與 Node 橋相同：節點本身存 null");
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("pending.json");
         save_atomic(&f, &snap).unwrap();
         let l = load_state(&f, 100, 1000);
         assert_eq!(l.pending[0].room.as_ref().unwrap().window, "T-視窗甲");
-        assert_eq!(l.pending[1].room, Some(RoomRef { id: "R1".into(), seq: 5, window: String::new() }));
+        assert_eq!(l.pending[1].room, Some(RoomRef { id: "R1".into(), seq: 5, window: String::new(), member: String::new() }));
     }
 
     #[test]
@@ -260,7 +262,7 @@ mod tests {
         std::fs::write(&f, r#"{"version":1,"pending":[{"id":"old","target":"x","state":"waiting","t0":1,"t":1},{"id":"bad","state":"waiting"},{"id":"n","target":"x","state":"notified","t0":5,"t":5},{"id":"room1","target":"x","state":"waiting","t0":900,"t":900,"room":{"id":"r","seq":1}}],"lastRequester":{"x":{"from_node":"W","mail_id":"m","t":1},"y":{"from_node":"W","mail_id":"m","t":950}}}"#).unwrap();
         let l = load_state(&f, 1000, 500);
         assert_eq!(l.pending.len(), 1, "過期的、欄位不全的、notified 沒有 notifiedAt 的都不載入");
-        assert_eq!(l.pending[0].room, Some(RoomRef { id: "r".into(), seq: 1, window: String::new() }), "群組項目載回來（第二段）");
+        assert_eq!(l.pending[0].room, Some(RoomRef { id: "r".into(), seq: 1, window: String::new(), member: String::new() }), "群組項目載回來（第二段）");
         assert_eq!(l.last.keys().collect::<Vec<_>>(), vec!["y"]);
         assert_eq!(l.dropped, 4);
         std::fs::write(&f, "{壞掉").unwrap();

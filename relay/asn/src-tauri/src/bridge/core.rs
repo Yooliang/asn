@@ -680,6 +680,24 @@ impl Core {
             self.log.line(&format!("channel mail unfinished before restart: {} (will be pulled again)", back.len()));
         }
         self.channel_back = back.into_iter().map(|p| p.id).collect();
+        // 重開前交給內建通道、還沒結束的群組點名：群組沒有信箱，游標早就過了它，不退回去就永遠不會再轉交也沒人回（#845）
+        let (rback, keep): (Vec<Pending>, Vec<Pending>) = keep.into_iter().partition(|p| p.channel && p.state != State::Done && p.room.as_ref().is_some_and(|r| !r.member.is_empty()));
+        for p in rback {
+            let Some(r) = p.room.clone() else { continue };
+            if channel_turns::resent(&self.cfg.work_dir, &p.id) {
+                self.log.line(&format!("room={} #{} channel turn unfinished after one resend: giving up", r.id, r.seq));
+                continue;
+            }
+            let ck = Cursors::key(&r.id, &r.member);
+            let back_to = r.seq.saturating_sub(1);
+            if self.cursors.get(&ck).is_some_and(|c| c > back_to) {
+                self.save_cursor(&ck, back_to);
+            }
+            if let Err(e) = channel_turns::mark_resent(&self.cfg.work_dir, &p.id) {
+                self.log.line(&format!("room={} #{} cannot record the resend: {e}", r.id, r.seq));
+            }
+            self.log.line(&format!("room={} #{} channel turn unfinished before restart: cursor moved back, will be handed again once", r.id, r.seq));
+        }
         channel_turns::prune(&self.cfg.work_dir);
         self.pending = keep;
         self.last_requester = st.last;
@@ -1692,7 +1710,7 @@ impl Core {
         if self.quota_until == 0 && !self.is_respond(&self.pending[i].target) {
             self.quota_ep = None; // 收發室 worker 真的完成了轉交＝額度恢復，下次用完再通知
         }
-        let channel = self.pending[i].room.is_none() && self.engine_of(&self.pending[i].target) == "acp";
+        let channel = self.engine_of(&self.pending[i].target) == "acp"; // 群組點名也算：重開時要補轉交（#845）
         self.pending[i].channel = channel;
         self.persist();
         let (target, t0, no_reply) = (self.pending[i].target.clone(), self.pending[i].t0, self.pending[i].no_reply);
@@ -2197,7 +2215,7 @@ impl Core {
             return true;
         }
         let mut p = Pending::new(&id, "", "", &target, self.now, false);
-        p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone() });
+        p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone(), member: member.to_string() });
         self.pending.push(p);
         self.persist();
         let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）
