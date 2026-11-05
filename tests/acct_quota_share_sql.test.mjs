@@ -1,4 +1,4 @@
-// 額度查詢的後台（20261105100000_acct_quota_share.sql，todo-next-193）：
+// 額度查詢的後台（20261106100000_acct_quota_share.sql，todo-next-193）：
 // 1. 靜態：三支既有函式除了明列的片段，與現行本體逐字相同；只授權 service_role；回復檔換回現行本體。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    舊用戶端回報與 roster 不變；grok 只收每週、minimax 只收 5 小時與每週；舊的 asn_relay_acct_report 不收 minimax；
@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const FILE = '20261105100000_acct_quota_share.sql'
+const FILE = '20261106100000_acct_quota_share.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(FILE)
@@ -29,7 +29,7 @@ const SIGS = {
 
 test('靜態：既有函式只改明列的片段；只授權 service_role；回復檔換回現行本體', () => {
   const files = fs.readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort()
-  assert.ok(files.indexOf(FILE) > files.indexOf('20261104190000_owner_mail_phone.sql'))
+  assert.ok(files.indexOf(FILE) > files.indexOf('20261105110000_mux_down_notice.sql'))
   assert.equal(swap(body(mig, 'asn_relay_acct_window_judge'), "p_vendor in ('gemini', 'minimax') and p_old", "p_vendor = 'gemini' and p_old"), body(gem, 'asn_relay_acct_window_judge'))
   assert.equal(body(down, 'asn_relay_acct_window_judge'), body(gem, 'asn_relay_acct_window_judge'))
   let c = swap(body(mig, 'asn_relay_acct_windows_clean'), "'gemini', 'grok', 'minimax') or", "'gemini') or")
