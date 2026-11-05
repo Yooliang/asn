@@ -31,6 +31,7 @@ import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
+import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
@@ -675,6 +676,14 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPair = DEVICE_PAIR_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleDevicePairAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPair);
+    return json(r.status, r.body);
+  }
+  // 別台看畫面的控制面（見 _shared/term_view_ctl.ts）：看的那台要本人簽章，被看的那台用節點金鑰
+  if (action && TERM_VIEW_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedView = TERM_VIEW_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleTermViewAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedView);
     return json(r.status, r.body);
   }
   // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：
