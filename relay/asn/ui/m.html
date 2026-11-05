@@ -253,7 +253,7 @@
                         <span class="m-dv-qmeta" v-if="a.quota.resetLine || a.quota.oldText || a.quota.meta"><span v-if="a.quota.resetLine">{{ a.quota.resetLine }}</span><span class="m-dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                       </span>
                       <span class="m-dv-used" v-if="a.usedOn && a.usedOn.length">{{ ROSTER_TEXT.usedOn }}：{{ usedOnText(a) }}</span>
-                      <span class="m-dv-sws" v-if="acctSwitchTargets(v.key, a).length"><button type="button" class="m-dv-sw" v-for="t in acctSwitchTargets(v.key, a)" :key="t.node" @click="acctSwitchOn(t.node, a.account)">切換到{{ t.label }}</button></span>
+                      <span class="m-dv-sws" v-if="acctSwitchTargets(v.key, a).length"><span class="m-dv-swt" v-for="t in acctSwitchTargets(v.key, a)" :key="t.node"><small class="m-fine" v-if="t.reason">{{ t.reason }}</small><button type="button" class="m-dv-sw" :disabled="!t.enabled" @click="acctSwitchOn(t.node, a.account)">切換到{{ t.label }}</button></span></span>
                     </li>
                   </ul>
                 </div>

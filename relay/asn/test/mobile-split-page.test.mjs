@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ACCT_SETTING_KEYS, MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows } from '../ui/lib/mobile-settings.mjs'
-import { ACCT_TABS, acctSwitchTargets, acctTabOf } from '../ui/lib/mobile-acct.mjs'
+import { ACCT_SWITCH_REASON, ACCT_TABS, acctSwitchTargets, acctTabOf } from '../ui/lib/mobile-acct.mjs'
 import { settingPage, normalizePage, acctPage } from '../ui/lib/mobile-fourth.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -40,7 +40,7 @@ const dev = (key, label, vendors, over = {}) => ({ key, label, self: false, hidd
 const claude = (accounts, switchable = true) => ({ key: 'claude', switchable, accounts })
 const acc = (email, current = false, extra = {}) => ({ email, current, ...extra })
 
-test('帳號分頁的「切換到…」：只給對方 ASN 在線且可切換、有這個帳號而且沒在用、沒有不完整的別台電腦', () => {
+test('帳號分頁的「切換到…」：能切的可以按；不能切的反灰並寫原因；正在用的、隱藏、移除、手機不列', () => {
   const a = { account: 'Z@Example.test' }
   const devs = [
     dev('W', '工作機', [claude([acc('w@example.test', true), acc('z@example.test')])]),
@@ -53,7 +53,16 @@ test('帳號分頁的「切換到…」：只給對方 ASN 在線且可切換、
     dev('S', '這支手機', [claude([acc('z@example.test')])], { self: true }),
     dev('N', '沒這個帳號', [claude([acc('other@example.test')])]),
   ]
-  assert.deepEqual(acctSwitchTargets(devs, 'claude', a), [{ node: 'W', label: '工作機' }], '帳號比對不分大小寫')
+  assert.deepEqual(acctSwitchTargets(devs, 'claude', a), [
+    { node: 'W', label: '工作機', enabled: true, reason: '' },
+    { node: 'Y', label: '新電腦', enabled: false, reason: ACCT_SWITCH_REASON.unavailable },
+    { node: 'I', label: '不完整', enabled: false, reason: ACCT_SWITCH_REASON.incomplete },
+    { node: 'N', label: '沒這個帳號', enabled: false, reason: ACCT_SWITCH_REASON.notSaved },
+  ], '帳號比對不分大小寫；不能按的也列出來，正在用的、隱藏、移除、手機不列')
+  const off = dev('O', '離線的', [{ ...claude([acc('z@example.test'), acc('w@example.test')], false), switchHint: '對方電腦的 ASN 沒有在線，無法切換' }])
+  assert.deepEqual(acctSwitchTargets([off], 'claude', a), [{ node: 'O', label: '離線的', enabled: false, reason: ACCT_SWITCH_REASON.offline }])
+  assert.deepEqual(acctSwitchTargets([dev('Q', '沒 Claude', [])], 'claude', a), [], '沒有 Claude 的不列')
+  assert.deepEqual(acctSwitchTargets([dev('A', '離線沒存', [{ ...claude([acc('w@example.test')], false), switchHint: 'x' }])], 'claude', a)[0].reason, ACCT_SWITCH_REASON.notSaved, '沒存過就先講沒存過')
   assert.deepEqual(acctSwitchTargets(devs, 'codex', a), [], '手機只有 Claude 能切換')
   assert.deepEqual(acctSwitchTargets([], 'claude', a), [])
   assert.deepEqual(acctSwitchTargets(null, 'claude', a), [])
@@ -73,7 +82,9 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.match(html, /class="m-dv-line" v-if="d\.stateLine"/)
   assert.match(html, /acctSwitchTargets\(v\.key, a\)/)
   assert.match(html, /@click="acctSwitchOn\(t\.node, a\.account\)"/)
-  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-used', 'm-dv-sws']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
+  assert.match(html, /:disabled="!t\.enabled" @click="acctSwitchOn\(t\.node, a\.account\)"/, '不能按的要反灰')
+  assert.match(html, /v-if="t\.reason">\{\{ t\.reason \}\}/, '不能按要寫原因')
+  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-used', 'm-dv-sws', 'm-dv-swt']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
   // 畫面上沒有「設備與帳號」當作設置列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))
 })
