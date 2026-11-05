@@ -51,7 +51,7 @@ export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\
 
 // 「保持能回應」的固定提醒（#494）：轉交給 Claude 視窗的每封信，說明行最後（要回信指示之後）都帶這一行。
 // 內文行首以「你是 ASN 的聊天對象：」開頭的行，escapeBody 也會跳脫。與 Rust 內建橋 mail.rs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致。
-export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
+export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。要問人時用寄信，不要用會跳選項框的工具（AskUserQuestion）；框沒人按時你會卡住，信也收不到。'
 
 // 群組發言達 AI 互相叫醒上限時要印的提示（room_post 的回應帶 wake_limited）；沒達上限回空字串。與 Rust cli/send.rs 的 wake_note 逐字一致
 export const wakeNote = r => (r?.wake_limited === true ? `（這次點名沒有叫醒${Number.isInteger(r.not_woken) ? ` ${r.not_woken} 位` : '人'}：已達 AI 互相叫醒上限，對方只留未讀。要對方馬上看到請改用私信；真人發言後會重新計算）` : '')
