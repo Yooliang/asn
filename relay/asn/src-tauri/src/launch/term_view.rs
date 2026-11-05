@@ -101,6 +101,15 @@ pub fn check_input(data: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 貼上的字只留文字：拿掉 ESC 和其他控制字元（只留 Tab、換行），也拿掉 8 位元控制字元。
+/// 貼上是文字，不是按鍵：貼上的內容裡如果有 ESC（例如 `ESC[201~`，bracketed paste 的結尾），就可能讓窗格跳出貼上模式、
+/// 後面的字被當成按鍵執行。打字不一樣（xterm 送來的方向鍵、Ctrl 組合本來就要有 ESC 和控制字元），不經過這裡
+pub fn sanitize_paste(text: &str) -> String {
+    text.chars()
+        .filter(|&c| matches!(c, '\t' | '\n' | '\r') || !((c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32))))
+        .collect()
+}
+
 /// 把字切成不超過 `max` 位元組的幾段，不從字中間切開，順序不變
 pub fn split_chunks(text: &str, max: usize) -> Vec<&str> {
     let mut out = Vec::new();
@@ -551,5 +560,15 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         q.push("hi", false).unwrap();
         assert_eq!(t.join().unwrap(), Some((false, "hi".to_string())));
+    }
+
+    #[test]
+    fn 貼上_拿掉_esc_和控制字元_只留文字_tab_換行() {
+        assert_eq!(sanitize_paste("ls\tdir\r\n第二行"), "ls\tdir\r\n第二行");
+        assert_eq!(sanitize_paste("a\x1b[201~rm -rf /\x1b[200~b"), "a[201~rm -rf /[200~b", "bracketed paste 的結尾符號拿掉 ESC 就只是文字");
+        assert_eq!(sanitize_paste("a\x1b]52;c;aGk=\x07b\x03c\x7fd\u{9b}e"), "a]52;c;aGk=bcde");
+        assert_eq!(sanitize_paste("\x1b\x03\x7f"), "", "只有控制字元就是空的");
+        // 貼上清過之後，檢查打字用的 check_input 不會再碰到 ESC
+        assert!(!sanitize_paste("\x1b[A\x1bOP").contains('\x1b'));
     }
 }

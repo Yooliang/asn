@@ -906,6 +906,8 @@ impl<'a> WezTerm<'a> {
         if !paste {
             args.push("--no-paste".into());
         }
+        // 字開頭是 - 時 `wezterm cli send-text` 會當成參數（-h／--help 印說明、-x 報錯，字沒送進去）：前面一律加 --
+        args.push("--".into());
         args.push(text.to_string());
         self.cli(sock, &args).map(|_| ())
     }

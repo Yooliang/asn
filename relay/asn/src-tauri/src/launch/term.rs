@@ -948,6 +948,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 只接本機畫面的命令，不接後台，也沒有任何 relay 動作會呼叫它
     pub fn view_input(&self, id: &str, data: &str, paste: bool) -> Result<(), String> {
         super::term_view::check_input(data)?;
+        // 貼上是文字不是按鍵：ESC 等控制字元拿掉，才不會跳出貼上模式變成按鍵（打字不經過這裡）
+        let cleaned;
+        let data = if paste {
+            cleaned = super::term_view::sanitize_paste(data);
+            if cleaned.is_empty() {
+                return Err("貼上的內容沒有可以送的字".into());
+            }
+            cleaned.as_str()
+        } else {
+            data
+        };
         let snap = self.view_snapshot(id)?;
         if !snap.send_granted || snap.cwd.trim().is_empty() {
             return Err("這個工作資料夾還沒有使用者的授權，不能打字".into());
@@ -5324,6 +5335,36 @@ mod tests {
             assert!(parts.len() >= 4, "1 萬字（3 萬位元組）要分成好幾段：{}", parts.len());
             assert!(parts.iter().all(|(np, t)| !np && t.len() <= crate::launch::term_view::INPUT_CHUNK_BYTES));
             assert_eq!(parts.iter().map(|(_, t)| t.as_str()).collect::<String>(), long, "順序不變、一個字不少");
+        }
+
+        #[test]
+        fn 畫面裡打字_字開頭是減號_前面加雙減號_不會被當成參數() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            for (data, paste) in [("-h", false), ("--help", false), ("-x", true)] {
+                rig.svc.view_input(&id, data, paste).unwrap();
+                let last = rig.runner.args().into_iter().rev().find(|a| a.iter().any(|x| x == "send-text")).unwrap();
+                let n = last.len();
+                assert_eq!((last[n - 2].as_str(), last[n - 1].as_str()), ("--", data), "字前面要有 --：{last:?}");
+                assert_eq!(last.iter().any(|x| x == "--no-paste"), !paste);
+            }
+        }
+
+        #[test]
+        fn 畫面裡打字_貼上拿掉_esc_等控制字元_打字不動() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "a\x1b[201~rm -rf /\x03b\n第二行", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "a[201~rm -rf /b\n第二行".to_string())), "貼上：ESC、Ctrl 都拿掉");
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b\x03", true).is_err(), "清完是空的就不送");
+            assert_eq!(typed(&rig).len(), before);
+            // 打字：方向鍵和 Ctrl＋C 本來就要有 ESC／控制字元，原樣送
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "\x03", false).unwrap();
+            let t = typed(&rig);
+            assert_eq!(t[t.len() - 2], (true, "\x1b[A".to_string()));
+            assert_eq!(t[t.len() - 1], (true, "\x03".to_string()));
         }
 
         #[test]
