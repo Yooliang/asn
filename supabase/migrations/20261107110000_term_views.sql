@@ -27,6 +27,7 @@ create table if not exists relay.term_views (
   created_at timestamptz not null default now(),
   expires_at timestamptz not null,
   ended_at timestamptz,
+  notified_at timestamptz,
   constraint term_views_pkey primary key (id),
   constraint term_views_distinct check (from_node <> to_node),
   constraint term_views_window_check check (char_length(window_name) between 1 and 64),
@@ -192,6 +193,58 @@ begin
 end;
 $function$;
 
+-- T 通知本人（節點金鑰）：有人正在看這台。收件人、寄件名、文字都在這裡決定，T 只能指定是哪一筆。
+-- notify 不是 sent 的話，T 不傳第一幅。寄件名以「收發室」結尾，橋不會回覆它。同一筆只寄一次
+create or replace function public.asn_relay_term_view_notice(p_node text, p_id uuid)
+ returns jsonb language plpgsql security definer set search_path to ''
+as $function$
+declare
+  r relay.term_views%rowtype;
+  v_owner uuid;
+  v_computer text;
+  v_viewer text;
+  v_body text;
+  v_recent int;
+  v_res jsonb;
+  v_topics jsonb := '[]'::jsonb;
+  v_agent constant text := '看畫面收發室';
+begin
+  select * into r from relay.term_views where id = p_id and to_node = p_node and status in ('accepted', 'watching', 'paused') for update;
+  if not found then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  if r.notified_at is not null then
+    return jsonb_build_object('ok', true, 'notify', 'sent', 'bell_topics', '[]'::jsonb);
+  end if;
+  select owner_user, left(btrim(regexp_replace(coalesce(name, ''), '[[:cntrl:]]', '', 'g')), 40) into v_owner, v_computer
+    from relay.nodes where id = p_node and status = 'active';
+  if not found or v_owner is null or not public.asn_user_owns_node(v_owner, p_node) then
+    return jsonb_build_object('ok', true, 'notify', 'skipped', 'bell_topics', '[]'::jsonb);
+  end if;
+  select left(btrim(regexp_replace(coalesce(name, ''), '[[:cntrl:]]', '', 'g')), 40) into v_viewer from relay.nodes where id = r.from_node;
+  perform pg_advisory_xact_lock(hashtext('term_view_notice:' || p_node));
+  select count(distinct coalesce(fanout_id, id)) into v_recent from relay.messages
+    where from_node = p_node and from_agent = v_agent and created_at > now() - interval '1 hour';
+  if v_recent >= 30 then
+    return jsonb_build_object('ok', true, 'notify', 'rate_limited', 'bell_topics', '[]'::jsonb);
+  end if;
+  v_body := '「' || coalesce(v_viewer, '另一台電腦') || '」正在看這台（' || v_computer || '）夥伴「'
+    || left(regexp_replace(r.window_name, '[[:cntrl:]]', '', 'g'), 64) || '」的畫面。如果不是你，請到這台按結束，並撤銷配對。';
+  v_res := public.asn_relay_send(p_node, v_agent, public.asn_person_alias(v_owner), null, v_body, null, false, null, false);
+  if v_res is null or v_res ? 'error' then
+    return jsonb_build_object('ok', true, 'notify', 'failed', 'bell_topics', '[]'::jsonb);
+  end if;
+  update relay.term_views set notified_at = now() where id = r.id;
+  v_topics := case
+    when jsonb_typeof(v_res->'bell_topics') = 'array' then v_res->'bell_topics'
+    when jsonb_typeof(v_res->'bell_topic') = 'string' then jsonb_build_array(v_res->'bell_topic')
+    else '[]'::jsonb end;
+  return jsonb_build_object('ok', true, 'notify', 'sent', 'bell_topics', v_topics);
+end;
+$function$;
+
+revoke all on function public.asn_relay_term_view_notice(text, uuid) from public, anon, authenticated;
+grant execute on function public.asn_relay_term_view_notice(text, uuid) to service_role;
 revoke all on function public.asn_relay_term_view_expire() from public, anon, authenticated;
 revoke all on function public.asn_relay_term_view_start(text, uuid, uuid, text, text, text, text, timestamptz) from public, anon, authenticated;
 revoke all on function public.asn_relay_term_view_pending(text) from public, anon, authenticated;

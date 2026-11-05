@@ -73,6 +73,16 @@ Deno.test("回報：狀態只能是固定值；沒有帶內容的路", async () 
   }
 });
 
+Deno.test("通知：T 只能指定哪一筆，文字在後台；敲門鈴；回 notify 給 T 判斷", async () => {
+  const m = mk({ ok: true, notify: "sent", bell_topics: ["p1", 5] });
+  const r = await handleTermViewAction(m.deps, me, "term_view_notice", { id: ID, body: "假的文字" }, null);
+  assertEquals(r.body, { notify: "sent" });
+  assertEquals(m.rung, ["p1"]);
+  assertEquals(m.calls[0].args, { p_node: me.id, p_id: ID });
+  assertEquals((await handleTermViewAction(mk({ notify: "failed" }).deps, me, "term_view_notice", { id: ID }, null)).body, { notify: "failed" });
+  assertEquals((await handleTermViewAction(mk().deps, me, "term_view_notice", { id: "x" }, null)).status, 400);
+});
+
 Deno.test("領取、錯誤、不認得的動作", async () => {
   assertEquals((await handleTermViewAction(mk({ requests: [1], active: [2] }).deps, me, "term_view_pending", {}, null)).body, { requests: [1], active: [2] });
   assertEquals((await handleTermViewAction(mk({ error: "busy" }).deps, me, "term_view_start", start, USER)).status, 409);

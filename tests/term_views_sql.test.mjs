@@ -21,7 +21,7 @@ test('靜態：沒有放內容的欄位、函式只給 service_role、表開 RLS
   const table = code.slice(code.indexOf('create table if not exists relay.term_views'), code.indexOf('create index'))
   for (const banned of ['frame', 'screen', 'payload', 'jsonb']) assert.ok(!table.includes(banned), banned)
   const cols = [...table.matchAll(/^ {2}([a-z_]+) (text|uuid|timestamptz)/gm)].map(m => m[1])
-  assert.deepEqual(cols, ['id', 'from_node', 'to_node', 'window_name', 'topic', 'd_eph_pub', 'd_sig', 't_eph_pub', 't_sig', 'status', 'end_reason', 'viewer_seen_at', 'created_at', 'expires_at', 'ended_at'], '欄位有變要重審：不能多放內容')
+  assert.deepEqual(cols, ['id', 'from_node', 'to_node', 'window_name', 'topic', 'd_eph_pub', 'd_sig', 't_eph_pub', 't_sig', 'status', 'end_reason', 'viewer_seen_at', 'created_at', 'expires_at', 'ended_at', 'notified_at'], '欄位有變要重審：不能多放內容')
   assert.ok(!code.includes('asn_relay_term_view_expire() to service_role'))
 })
 
@@ -190,6 +190,30 @@ test('D 回報：狀態只收固定值；還沒接受不能回報成看著', { s
   const s = await start(db)
   assert.equal((await report(db, s.id, 'requested')).error, 'bad_request')
   assert.equal((await report(db, s.id, 'watching')).status, 'requested', 'T 還沒接受')
+})
+
+test('通知：只有被看的那台、接受之後；文字固定；同一筆只寄一次；上限到了回 rate_limited', { skip }, async () => {
+  const db = await boot()
+  const notice = (id, node = Z) => rpc(db, 'asn_relay_term_view_notice', { p_node: node, p_id: id })
+  const s = await start(db)
+  assert.equal((await notice(s.id)).error, 'not_found', '還沒接受')
+  await accept(db, s.id)
+  assert.equal((await notice(s.id, D)).error, 'not_found', 'D 不能替 T 送')
+  assert.equal((await notice(s.id, Q)).error, 'not_found')
+  const n = await notice(s.id)
+  assert.equal(n.notify, 'sent')
+  assert.ok(n.bell_topics.length > 0, '敲本人的門鈴')
+  const box = (await db.query(`select body, from_agent from relay.messages where from_node = '${Z}' order by created_at desc limit 1`)).rows[0]
+  assert.equal(box.from_agent, '看畫面收發室')
+  assert.ok(box.body.includes('工作機') && box.body.includes('小乙') && box.body.includes('如果不是你'))
+  const count = async () => (await db.query(`select count(distinct coalesce(fanout_id, id))::int n from relay.messages where from_agent = '看畫面收發室'`)).rows[0].n
+  const before = await count()
+  assert.equal((await notice(s.id)).notify, 'sent')
+  assert.equal(await count(), before, '同一筆只寄一次')
+  await db.exec(`insert into relay.messages (from_node, from_agent, to_node, to_agent, body, tenant_id) select '${Z}', '看畫面收發室', '${D}', 'x', 'x', '${T1}' from generate_series(1, 30)`)
+  const t = await start(db, { p_window_name: '小丙' })
+  await accept(db, t.id)
+  assert.equal((await notice(t.id)).notify, 'rate_limited')
 })
 
 test('權限與連帶刪除：anon、authenticated 碰不到；刪節點連帶清掉', { skip }, async () => {

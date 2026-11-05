@@ -1,6 +1,6 @@
 // 別台看畫面的控制面（#597 工作包 E）。資料庫函式見 migrations/20261107110000_term_views.sql。這支只做參數檢查與轉送：
 //   本人簽章（看的那台 D）：term_view_start、term_view_report
-//   節點金鑰（被看的那台 T，可能沒人在）：term_view_pending、term_view_accept、term_view_stop
+//   節點金鑰（被看的那台 T，可能沒人在）：term_view_pending、term_view_accept、term_view_notice、term_view_stop
 // 沒有畫面內容，也沒有自由欄位：多餘的欄位一律丟掉。信任由兩端用本機記的公鑰判斷，後台不驗簽章。
 import { fail, type Json, type Reply, UUID_RE } from "./term_request.ts";
 
@@ -39,6 +39,14 @@ export async function handleTermViewAction(deps: TermViewDeps, me: { id: string 
     const r = await call(deps, "asn_relay_term_view_accept", { p_node: me.id, p_id: b.id, p_t_eph_pub: b.t_eph_pub, p_t_sig: b.t_sig });
     return isReply(r) ? r : { status: 200, body: { ok: true } };
   }
+  if (action === "term_view_notice") {
+    if (typeof b.id !== "string" || !UUID_RE.test(b.id)) return fail("bad_request");
+    const r = await call(deps, "asn_relay_term_view_notice", { p_node: me.id, p_id: b.id });
+    if (isReply(r)) return r;
+    const topics = Array.isArray(r.data.bell_topics) ? r.data.bell_topics.filter((t: unknown) => typeof t === "string") : [];
+    await Promise.all(topics.map((t: string) => deps.ring(t)));
+    return { status: 200, body: { notify: r.data.notify } };   // 不是 sent，T 就不傳第一幅
+  }
   if (action === "term_view_stop") {
     if (typeof b.id !== "string" || !UUID_RE.test(b.id) || !STOP_REASONS.includes(b.reason)) return fail("bad_request");
     const r = await call(deps, "asn_relay_term_view_stop", { p_node: me.id, p_id: b.id, p_reason: b.reason });
@@ -64,5 +72,5 @@ export async function handleTermViewAction(deps: TermViewDeps, me: { id: string 
   return { status: 404, body: { error: "not_found" } };
 }
 
-export const TERM_VIEW_ACTIONS = new Set(["term_view_start", "term_view_report", "term_view_pending", "term_view_accept", "term_view_stop"]);
+export const TERM_VIEW_ACTIONS = new Set(["term_view_start", "term_view_report", "term_view_pending", "term_view_accept", "term_view_notice", "term_view_stop"]);
 export const TERM_VIEW_SIGNED_ACTIONS = new Set(["term_view_start", "term_view_report"]);
