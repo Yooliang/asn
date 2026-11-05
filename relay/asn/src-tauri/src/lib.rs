@@ -1063,6 +1063,21 @@ fn term_remote_pending() -> Vec<term_remote::PendingView> {
     term_remote::pending_views()
 }
 
+/// 手機回答權限框（#853）的背景工作
+#[cfg(all(desktop, feature = "gui"))]
+fn start_perm_remote_poller(app: tauri::AppHandle, relay: std::sync::Arc<Relay>, terms: std::sync::Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf) {
+    use tauri::Manager;
+    tauri::async_runtime::spawn(async move {
+        let mut tracker = perm_remote::Tracker::default();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(perm_remote::TICK_SECS)).await;
+            if app.state::<auth::AuthState>().status().signed_in {
+                perm_remote::tick(relay.as_ref(), &terms, &data_dir, &mut tracker).await;
+            }
+        }
+    });
+}
+
 #[cfg(all(desktop, feature = "gui"))]
 fn start_term_remote_poller(
     app: tauri::AppHandle,
@@ -2073,7 +2088,7 @@ pub fn run() {
                 #[cfg(desktop)]
                 let term_wake = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
-                    perm_remote::start(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
+                    start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
                     start_term_remote_poller(
                         handle.clone(),
                         r.clone(),

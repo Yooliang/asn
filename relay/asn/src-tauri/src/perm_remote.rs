@@ -12,7 +12,7 @@ const REQ_TTL_MS: u64 = 600_000;
 const MAX_SENDS: u32 = 6;
 /// 建立失敗後隔多久再試（後台還沒部署、連不上、這扇視窗還有舊的一筆）
 const RETRY_MS: u64 = 60_000;
-const TICK_SECS: u64 = 3;
+pub const TICK_SECS: u64 = 3;
 
 /// 使用者關掉了「權限框傳到手機」（存在 bridge.json 的 perm_phone_off）
 static USER_OFF: AtomicBool = AtomicBool::new(false);
@@ -154,7 +154,7 @@ mod live {
         }
     }
 
-    async fn tick(relay: &Relay, terms: &Arc<LiveTerms>, data_dir: &Path, tracker: &mut Tracker) {
+    pub async fn tick(relay: &Relay, terms: &Arc<LiveTerms>, data_dir: &Path, tracker: &mut Tracker) {
         let offers = current_offers(terms).await;
         let keys: Vec<(String, String)> = offers.iter().map(|o| (o.name.clone(), o.hash.clone())).collect();
         let now = crate::auth::now_ms();
@@ -184,22 +184,10 @@ mod live {
         }
     }
 
-    pub fn start(app: tauri::AppHandle, relay: Arc<Relay>, terms: Arc<LiveTerms>, data_dir: std::path::PathBuf) {
-        use tauri::Manager;
-        tauri::async_runtime::spawn(async move {
-            let mut tracker = Tracker::default();
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
-                if app.state::<crate::auth::AuthState>().status().signed_in {
-                    tick(relay.as_ref(), &terms, &data_dir, &mut tracker).await;
-                }
-            }
-        });
-    }
 }
 
 #[cfg(feature = "gui")]
-pub use live::start;
+pub use live::tick;
 
 #[cfg(test)]
 mod tests {

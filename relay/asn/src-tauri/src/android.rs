@@ -147,7 +147,7 @@ pub async fn android_term_req_decide(app: State<'_, App>, auth: State<'_, crate:
 
 /// 名下電腦的權限框（全文、選項）和最近的結果。一定要本人簽章
 #[tauri::command]
-pub async fn android_perm_req_list(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>) -> Result<Value, String> {
+pub async fn android_perm_req_list(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>) -> Result<serde_json::Value, String> {
     let r = relay_of(&app)?;
     let token = crate::account::signing_token(&auth).await;
     let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能回答權限提示".into()) };
@@ -156,7 +156,7 @@ pub async fn android_perm_req_list(app: State<'_, App>, auth: State<'_, crate::a
 
 /// 本人按了一個選項：只有編號、數字、雜湊，沒有文字欄位
 #[tauri::command]
-pub async fn android_perm_req_decide(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String, choice_n: i64, hash: String) -> Result<Value, String> {
+pub async fn android_perm_req_decide(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String, choice_n: i64, hash: String) -> Result<serde_json::Value, String> {
     let body = crate::relay::build_perm_decide_body(&id, choice_n, &hash)?;
     let r = relay_of(&app)?;
     let token = crate::account::signing_token(&auth).await;
