@@ -5663,7 +5663,7 @@ mod tests {
             rig.svc.view(&id).unwrap();
             let spawns = view_spawns(&rig.runner);
             assert_eq!(spawns.len(), 1);
-            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
+            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
             assert_eq!(spawns[0].0, want);
             let want_env: BTreeMap<String, String> = crate::launch::config::child_env().into_iter().collect();
             assert_eq!(spawns[0].1, want_env, "只給白名單環境");
