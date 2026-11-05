@@ -20,6 +20,8 @@
     </span>
   </header>
   <div class="shell" :class="{ merged: ui.mode === 'merged' }">
+  <!-- 別台正在看這台（#597）：不能關，只能結束 -->
+  <div class="viewed-bar" v-for="v in beingViewed" :key="v.id" role="alert"><span>「{{ v.who }}」正在看夥伴「{{ v.window }}」的畫面。如果不是你，請按結束。</span><button class="aero-btn" type="button" @click="stopBeingViewed(v.id)">結束</button></div>
   <div class="pane list-pane">
     <div class="me">
       <div class="me-av">

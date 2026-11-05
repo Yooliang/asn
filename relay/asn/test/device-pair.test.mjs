@@ -62,3 +62,12 @@ test('守門：操作都接得住；命令只在電腦；手機和 CLI 接不到
   assert.ok(panel.includes('fingerprint'), '要顯示號碼')
   assert.ok(!/v-html/.test(panel.slice(panel.indexOf('配對的電腦'), panel.indexOf('配對的電腦') + 2500)), '名字不走 v-html')
 })
+
+test('守門：正在被看不能關，只能結束；名字不走 v-html', () => {
+  const html = read('../ui/list.html'), list = read('../ui/list.js')
+  const bar = html.slice(html.indexOf('class="viewed-bar"'), html.indexOf('class="pane list-pane"'))
+  assert.ok(bar.includes('stopBeingViewed(v.id)') && bar.includes('正在看'))
+  assert.ok(!/v-if|v-show|v-html|關閉|dismiss/.test(bar), '不能被藏起來')
+  assert.match(list, /listen\('term-being-viewed'/)
+  assert.ok(!list.includes('beingViewed.value = []'), '畫面不能自己清掉，要等 Rust 說結束')
+})

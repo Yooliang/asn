@@ -5,6 +5,7 @@
 //! - T 可能沒人在，用設備金鑰簽（`device_id`）。
 //! - 兩邊都用本機記的公鑰驗，後台只轉交。權限要對方向：T 查「對方可以看我」，D 查「我可以看對方」。
 //! - 簽章涵蓋雙方一次性公鑰、session id、雙方節點、視窗名、範圍、到期時間；T 的簽章包含 D 的一次性公鑰，防重放。
+#![cfg_attr(not(test), allow(dead_code))]
 use crate::device_id::{self, DeviceKey, Direction, Trust, Verdict, SCOPE_VIEW};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
@@ -81,10 +82,16 @@ impl ViewVerifier for HelloNotReady {
 pub struct SessionKey(Zeroizing<[u8; 32]>);
 
 impl SessionKey {
-    #[cfg(test)]
-    fn bytes(&self) -> &[u8; 32] {
+    /// 只給同一包的加解密用
+    pub(crate) fn raw(&self) -> &[u8; 32] {
         &self.0
     }
+}
+
+/// 測試用的金鑰
+#[cfg(test)]
+pub(crate) fn test_key(b: u8) -> SessionKey {
+    SessionKey(Zeroizing::new([b; 32]))
 }
 
 /// 一次性金鑰。私鑰是 ring 的臨時型別，導出金鑰時就被消耗掉
@@ -235,7 +242,7 @@ mod tests {
         let d_eph = eph.public_b64().to_string();
         let (t_eph, t_sig, t_key) = t_accept(&r.t_trust, &FakeVerifier, &r.t_key, &s, &d_eph, &d_sig, NOW).unwrap();
         let d_key = d_finish(&r.d_trust, eph, &s, &t_eph, &t_sig, NOW).unwrap();
-        assert_eq!(d_key.bytes(), t_key.bytes());
+        assert_eq!(d_key.raw(), t_key.raw());
     }
 
     #[test]

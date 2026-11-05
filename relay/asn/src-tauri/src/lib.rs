@@ -52,6 +52,8 @@ mod perm_remote;
 mod device_id;
 #[cfg(desktop)]
 mod view_handshake;
+#[cfg(desktop)]
+mod view_stream;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -815,6 +817,144 @@ fn start_device_key_publish(relay: std::sync::Arc<Relay>, data_dir: std::path::P
             tokio::time::sleep(std::time::Duration::from_secs(600)).await;
         }
     });
+}
+
+/// 別台正在看這台的觀看（#597）：編號 → （哪台、哪個夥伴、要不要停）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[derive(Default)]
+struct BeingViewed {
+    open: std::sync::Mutex<std::collections::HashMap<String, (String, String, Arc<std::sync::atomic::AtomicBool>)>>,
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+impl BeingViewed {
+    /// 通知畫面，並把視窗叫出來：「正在被看」不能被藏住
+    fn publish(&self, app: &AppHandle) {
+        let list: Vec<Value> = self.open.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(id, (who, win, _))| serde_json::json!({ "id": id, "who": who, "window": win })).collect();
+        let _ = app.emit("term-being-viewed", &list);
+        if !list.is_empty() {
+            if let Some(w) = app.get_webview_window("list") {
+                let _ = w.unminimize();
+                let _ = w.show();
+            }
+        }
+    }
+}
+
+/// T 傳畫面時的外部動作。傳輸還沒接上（要動 bell.rs），送不出去，T 超過時限會自己停
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+struct LiveTPort {
+    app: AppHandle,
+    relay: Arc<Relay>,
+    terms: Arc<launch::term::LiveTerms>,
+    data_dir: std::path::PathBuf,
+    id: String,
+    who: String,
+    window: String,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+impl view_stream::TPort for LiveTPort {
+    fn notify(&mut self) -> Result<(), String> {
+        let v = tauri::async_runtime::block_on(self.relay.api("term_view_notice", Some(serde_json::json!({ "id": self.id }))))?;
+        match v.get("notify").and_then(Value::as_str) {
+            Some("sent") => Ok(()),
+            _ => Err("通知沒有送出".into()),
+        }
+    }
+    fn set_watching(&mut self, on: bool) {
+        let views = self.app.state::<Arc<BeingViewed>>();
+        {
+            let mut open = views.open.lock().unwrap_or_else(|e| e.into_inner());
+            if on {
+                open.insert(self.id.clone(), (self.who.clone(), self.window.clone(), self.stop.clone()));
+            } else {
+                open.remove(&self.id);
+            }
+        }
+        views.publish(&self.app);
+    }
+    fn frame(&mut self) -> Result<view_stream::Frame, String> {
+        let id = self.terms.partner_term_id(&self.window)?;
+        let text = self.terms.view_text(&id)?;
+        let m = self.terms.view_meta(&id)?;
+        Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows })
+    }
+    fn ctl(&mut self) -> Result<view_stream::Ctl, String> {
+        let v = tauri::async_runtime::block_on(self.relay.api("term_view_pending", Some(serde_json::json!({}))))?;
+        let active = v.get("active").and_then(Value::as_array).ok_or("後台回的資料不對")?;
+        Ok(view_stream::ctl_from_active(active, &self.id))
+    }
+    fn send(&mut self, wire: &str) -> Result<(), String> {
+        view_stream::NoTransport.send(wire)
+    }
+    fn stop_requested(&mut self) -> bool {
+        self.stop.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn now_ms(&mut self) -> u64 {
+        auth::now_ms()
+    }
+    fn sleep_ms(&mut self, ms: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+    fn log(&mut self, line: &str) {
+        let _ = ui_log::append(&self.data_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+    }
+}
+
+/// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
+#[cfg(all(desktop, feature = "gui"))]
+fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let Ok(trust) = device_id::live::read(&data_dir) else { continue };
+            if !trust.peers.iter().any(|p| p.grants.iter().any(|g| g.direction == device_id::Direction::PeerToMe && g.scope == device_id::SCOPE_VIEW)) {
+                continue;
+            }
+            let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { continue };
+            let Ok(key) = device_id::live::key(&data_dir) else { continue };
+            for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else { continue };
+                let now_s = (auth::now_ms() / 1000) as i64;
+                match view_stream::accept_request(&row, &me_node, &trust, &view_handshake::HelloNotReady, &key, now_s) {
+                    Err(_) => {
+                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                    }
+                    Ok((session, t_eph, t_sig, session_key)) => {
+                        if relay.api("term_view_accept", Some(serde_json::json!({ "id": id, "t_eph_pub": t_eph, "t_sig": t_sig }))).await.is_err() {
+                            continue;
+                        }
+                        let who = row.get("from_name").and_then(Value::as_str).unwrap_or("").to_string();
+                        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop };
+                        let relay2 = relay.clone();
+                        std::thread::spawn(move || {
+                            let end = view_stream::run_t(&session, session_key, &mut port);
+                            if let Some(reason) = end.reason() {
+                                let _ = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))));
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// 本人在被看的這台按「結束」
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn term_viewed_stop(views: State<'_, Arc<BeingViewed>>, id: String) {
+    if let Some((_, _, stop)) = views.open.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// 開著的觀看（#597）：編號 → 狀態。全部只在本機
@@ -1901,6 +2041,7 @@ pub fn run() {
     let builder = builder
         .manage(wins::Slots::default())
         .manage(Arc::new(TermViews::default()))
+        .manage(Arc::new(BeingViewed::default()))
         .manage(wins::Frame::default())
         .manage(tray::CloseToTray::default())
         .manage(tray::TrayFailed::default())
@@ -1918,7 +2059,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_pair_view, device_pair_start, device_pair_decide, device_pair_close, device_peer_revoke, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_pair_view, device_pair_start, device_pair_decide, device_pair_close, device_peer_revoke, term_viewed_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -2172,6 +2313,7 @@ pub fn run() {
                     let w = Arc::new(tokio::sync::Notify::new());
                     start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
                     start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
+                    start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone());
                     start_term_remote_poller(
                         handle.clone(),
                         r.clone(),

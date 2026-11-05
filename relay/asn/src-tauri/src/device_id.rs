@@ -245,7 +245,7 @@ pub mod live {
 
     static LOCK: Mutex<()> = Mutex::new(());
 
-    fn key(dir: &Path) -> Result<DeviceKey, String> {
+    pub fn key(dir: &Path) -> Result<DeviceKey, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         load_or_create(dir, protector().as_ref())
     }
@@ -258,7 +258,7 @@ pub mod live {
         Ok(out)
     }
 
-    fn read(dir: &Path) -> Result<Trust, String> {
+    pub fn read(dir: &Path) -> Result<Trust, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         Trust::load(dir)
     }
