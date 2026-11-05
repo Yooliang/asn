@@ -907,4 +907,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-view-note{margin:4px 8px;font-size:12px;color:var(--muted,#667)}
 .term-view-screen{flex:1;min-height:0;overflow:auto;background:#000;padding:4px}
 .term-view-lost{margin:6px 8px;font-size:12px}
+.term-view-paste{margin:6px 8px;font-size:12px;padding:6px 8px;border:1px solid var(--line,#c8d4e0);background:#fff8dc}
+.term-view-paste .aero-btn{margin-left:8px}
 .term-view-lost .aero-btn{margin-left:8px}

@@ -943,6 +943,23 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows })
     }
 
+    /// 本機畫面裡打字（#597 D）：只有 ASN 開的窗格（接手來的不給），mux 換過、視窗不在就回錯，不對別的窗格下指令；
+    /// 工作資料夾的授權和 `confirm_send` 一樣。字的內容先過 `check_input`（不是按鍵的序列不送）；太長的分段送，順序不變。
+    /// 只接本機畫面的命令，不接後台，也沒有任何 relay 動作會呼叫它
+    pub fn view_input(&self, id: &str, data: &str, paste: bool) -> Result<(), String> {
+        super::term_view::check_input(data)?;
+        let snap = self.view_snapshot(id)?;
+        if !snap.send_granted || snap.cwd.trim().is_empty() {
+            return Err("這個工作資料夾還沒有使用者的授權，不能打字".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        for part in super::term_view::split_chunks(data, super::term_view::INPUT_CHUNK_BYTES) {
+            w.send_input(&snap.window.sock, snap.pane_id, part, paste)?;
+        }
+        Ok(())
+    }
+
     /// 夥伴視窗的名字換成終端編號，給本機畫面看畫面用。已結束的窗格不算；同名不只一個就拒絕，不猜
     pub fn partner_term_id(&self, name: &str) -> Result<String, String> {
         let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
@@ -5257,6 +5274,59 @@ mod tests {
             let (rig, _) = mux_rig();
             assert!(rig.svc.view_text("nope").is_err());
             assert!(rig.svc.view_meta("nope").is_err());
+        }
+
+        /// 送進窗格的字（`send-text` 呼叫）：[是不是 --no-paste, 字]
+        fn typed(rig: &Rig) -> Vec<(bool, String)> {
+            rig.runner
+                .args()
+                .into_iter()
+                .filter(|a| a.iter().any(|x| x == "send-text"))
+                .map(|a| (a.iter().any(|x| x == "--no-paste"), a.last().cloned().unwrap_or_default()))
+                .collect()
+        }
+
+        #[test]
+        fn 畫面裡打字_打字原樣送_貼上不帶_no_paste_太長分段_順序不變() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "你好", false).unwrap();
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "第一行\n第二行", true).unwrap();
+            assert_eq!(typed(&rig), vec![(true, "你好".to_string()), (true, "\x1b[A".to_string()), (false, "第一行\n第二行".to_string())]);
+            let long = "字".repeat(10_000);
+            let before = typed(&rig).len();
+            rig.svc.view_input(&id, &long, true).unwrap();
+            let parts: Vec<(bool, String)> = typed(&rig).into_iter().skip(before).collect();
+            assert!(parts.len() >= 4, "1 萬字（3 萬位元組）要分成好幾段：{}", parts.len());
+            assert!(parts.iter().all(|(np, t)| !np && t.len() <= crate::launch::term_view::INPUT_CHUNK_BYTES));
+            assert_eq!(parts.iter().map(|(_, t)| t.as_str()).collect::<String>(), long, "順序不變、一個字不少");
+        }
+
+        #[test]
+        fn 畫面裡打字_不是按鍵的序列_不認得的編號_mux_換過_都不送() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b]52;c;aGVsbG8=\x07", false).is_err(), "剪貼簿序列不是按鍵");
+            assert!(rig.svc.view_input(&id, "", false).is_err());
+            assert!(rig.svc.view_input("nope", "a", false).is_err());
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            assert!(rig.svc.view_input(&id, "a", false).is_err(), "mux 換過，不對新的 mux 下指令");
+            assert_eq!(typed(&rig).len(), before, "一個字都沒送");
+        }
+
+        #[test]
+        fn 畫面裡打字_夥伴視窗也可以打_接手來的和沒授權的不給() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view_input(&id, "好", false).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(true, "好".to_string())));
+            // 只給 ASN 開的窗格：原始碼層面確認沒有放寬接手窗格與授權檢查
+            let src = include_str!("term.rs");
+            let f = src.split("pub fn view_input(").nth(1).expect("有 view_input").split("pub fn partner_term_id").next().unwrap();
+            assert!(f.contains("view_snapshot(") && f.contains("send_granted"), "接手窗格由 view_snapshot 擋、授權沿用 send_granted");
+            assert!(!f.contains("send_bytes") && !f.contains("flatten_line"), "不走方向鍵路徑，也不壓行");
         }
 
         fn pi_argv() -> Vec<String> {

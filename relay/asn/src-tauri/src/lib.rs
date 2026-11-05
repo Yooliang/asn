@@ -822,11 +822,39 @@ async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermV
     }
     let app = window.app_handle().clone();
     let (terms, views) = (terms.inner().clone(), views.inner().clone());
+    // 打字（#597 D）：一支專門送字的執行緒，一次一支、積壓合併。送不出去（窗格換了、授權沒了）就停下，並告訴畫面沒送出幾位元組
+    {
+        let (st, terms, app, label, id) = (state.clone(), terms.clone(), app.clone(), label.clone(), id.clone());
+        std::thread::Builder::new()
+            .name("asn-term-input".into())
+            .spawn(move || {
+                while !st.stop.load(Ordering::SeqCst) {
+                    let Some((paste, text)) = st.input.next_batch(launch::term_view::INPUT_CHUNK_BYTES, std::time::Duration::from_millis(200)) else { continue };
+                    match terms.view_input(&id, &text, paste) {
+                        Ok(()) => {
+                            st.sent_chars.fetch_add(text.chars().count() as u64, Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            let lost = st.input.close() + text.len();
+                            let _ = app.emit_to(label.as_str(), "term-view-input-error", serde_json::json!({ "view_id": view_id, "message": e, "lost_bytes": lost }));
+                            break;
+                        }
+                    }
+                }
+                let n = st.sent_chars.load(Ordering::SeqCst);
+                if n > 0 {
+                    elog!("終端畫面輸入結束：共 {n} 字（內容不記）");
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
     std::thread::Builder::new()
         .name("asn-term-view".into())
         .spawn(move || {
             let mut port = WindowViewPort { app: app.clone(), label: label.clone(), id, terms };
             let reason = launch::term_view::run_view(view_id, &state, &mut port);
+            state.input.close();
+            state.stop.store(true, Ordering::SeqCst);
             views.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&view_id);
             if let Some(r) = reason {
                 let _ = app.emit_to(label.as_str(), "term-view-closed", serde_json::json!({ "view_id": view_id, "reason": r }));
@@ -843,7 +871,32 @@ async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermV
 fn term_view_close(views: State<'_, Arc<TermViews>>, view_id: u64) {
     if let Some((_, _, st)) = views.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&view_id) {
         st.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        st.input.close();
     }
+}
+
+/// 在畫面裡打字（#597 D）：只有開著的畫面、而且是開它的那個視窗、而且視窗在前景才收；字先過 `check_input`，
+/// 排進佇列由送字的執行緒一次一支送出（積壓太多回錯，不丟字）。`paste` 為真＝貼上（讓終端依程式的模式處理）。
+/// 只有這個 Tauri 命令一個入口：不接後台、不接 CLI，沒有任何 relay 動作碰得到（守門測試）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn term_view_input(window: tauri::WebviewWindow, views: State<'_, Arc<TermViews>>, view_id: u64, data: String, paste: Option<bool>) -> Result<(), String> {
+    let label = window.label().to_string();
+    let state = {
+        let open = views.open.lock().unwrap_or_else(|e| e.into_inner());
+        match open.get(&view_id) {
+            Some((l, _, st)) if *l == label => st.clone(),
+            _ => return Err("這個畫面沒有開著，不送".into()),
+        }
+    };
+    if !window.is_focused().unwrap_or(false) {
+        return Err("視窗不在前景，不送".into());
+    }
+    launch::term_view::check_input(&data)?;
+    state.input.push(&data, paste.unwrap_or(false))?;
+    state.last_input_ms.store(auth::now_ms(), std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// 重開自動接回的結果（#767）：已接回幾位、接不回來的名字與原因，不含對話內容，只給本機畫面
@@ -1713,7 +1766,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,

@@ -1,15 +1,17 @@
-// 在畫面裡看終端（#597）：畫面內容怎麼寫給 xterm、開關的順序；守門：只看不打字、打包不連外
+// 在畫面裡看終端、打字（#597）：畫面內容怎麼寫給 xterm、開關的順序、打字的順序與守門；守門：打包不連外
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createFollow, createTermViewSession, followTarget, frameToWrite, xtermOptions } from '../ui/lib/term-view.mjs'
+import { createFollow, createTermViewSession, followTarget, frameToWrite, pasteNeedsConfirm, pasteSummary, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
 
-function rig({ open } = {}) {
-  const handlers = {}, calls = { closed: [], written: [], resized: [], disposed: 0, created: [], unlistened: 0, lost: [] }
+function rig({ open, sendInput } = {}) {
+  const handlers = {}, calls = { closed: [], written: [], resized: [], disposed: 0, created: [], unlistened: 0, lost: [], sent: [], inputErrors: [] }
   const session = createTermViewSession({
+    sendInput: sendInput ?? (async (id, data, paste) => { calls.sent.push([id, data, paste]) }),
+    onInputError: e => calls.inputErrors.push(e),
     open: open ?? (async () => 7),
     close: async id => { calls.closed.push(id) },
     listen: async (evt, fn) => { handlers[evt] = fn; return () => { calls.unlistened++ } },
@@ -79,7 +81,7 @@ test('關掉：通知後台停讀、取消監聽、收掉 xterm，之後的畫�
   r.session.stop()
   r.session.stop()
   assert.deepEqual(r.calls.closed, [7], '只關一次')
-  assert.equal(r.calls.unlistened, 2)
+  assert.equal(r.calls.unlistened, 3, "畫面、結束、輸入錯誤三個監聽都取消")
   assert.equal(r.calls.disposed, 1)
   r.handlers['term-view-frame'](frame(7, 2))
   await r.session.flushed()
@@ -115,12 +117,84 @@ test('開不了：回報讀不到', async () => {
   assert.deepEqual(r.calls.closed, [])
 })
 
-test('守門：xterm 不收輸入，也沒有接輸入事件', () => {
+test('守門：xterm 收輸入、沒有捲動記錄；輸入只接 onData，不走舊的 term_send／term_answer', () => {
   const o = xtermOptions({ cols: 1, rows: 1 })
-  assert.equal(o.disableStdin, true)
+  assert.equal(o.disableStdin, false)
   assert.equal(o.scrollback, 0)
+  assert.equal(o.allowProposedApi, false)
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
-  assert.ok(!/\.onData|\.onBinary|\.onKey|term_send|term_view_input/.test(src), '這一版只看不打字')
+  assert.ok(src.includes('t.onData('), '按鍵從 onData 來')
+  assert.ok(!/\.onBinary|\.onKey\b|term_send|term_answer/.test(src), '不接二進位輸入，也不走舊的送字命令')
+  const tauri = fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8')
+  assert.ok(tauri.includes("invoke('term_view_input'"), '只有一個入口命令')
+})
+
+test('打字：開好之後一支一支照順序送，編號是這次觀看的', async () => {
+  const r = rig()
+  await r.session.start()
+  assert.equal(r.session.input('a'), true)
+  r.session.input('b')
+  r.session.input('c', true)
+  await r.session.inputFlushed()
+  assert.deepEqual(r.calls.sent, [[7, 'a', false], [7, 'b', false], [7, 'c', true]])
+})
+
+test('打字：前一支還沒回來，後面的等著，順序不亂', async () => {
+  const order = []
+  let release
+  const gate = new Promise(res => { release = res })
+  const r = rig({ sendInput: async (id, data) => { order.push(`start:${data}`); if (data === 'a') await gate; order.push(`end:${data}`) } })
+  await r.session.start()
+  r.session.input('a'); r.session.input('b'); r.session.input('c')
+  await Promise.resolve(); await Promise.resolve()
+  assert.deepEqual(order, ['start:a'], 'a 還沒回來，b、c 不先送')
+  release()
+  await r.session.inputFlushed()
+  assert.deepEqual(order, ['start:a', 'end:a', 'start:b', 'end:b', 'start:c', 'end:c'])
+})
+
+test('打字：還沒開好、已經關掉、空字、沒有送字的依賴，都不送', async () => {
+  const r = rig({ open: () => new Promise(() => {}) })
+  void r.session.start()
+  await Promise.resolve()
+  assert.equal(r.session.input('x'), false, '還沒開好')
+  const r2 = rig()
+  await r2.session.start()
+  assert.equal(r2.session.input(''), false, '空字')
+  r2.session.stop()
+  assert.equal(r2.session.input('x'), false, '關掉之後')
+  await r2.session.inputFlushed()
+  assert.deepEqual(r2.calls.sent, [])
+  const only = createTermViewSession({ open: async () => 1, close: async () => {}, listen: async () => () => {}, createTerm: async () => ({ write() {}, resize() {}, dispose() {} }), onLost() {} })
+  await only.start()
+  assert.equal(only.input('x'), false, '沒有送字的依賴＝只看')
+})
+
+test('打字：送不出去會回報，不假裝成功；後台說停了也回報（含沒送出的位元組數）', async () => {
+  const r = rig({ sendInput: async () => { throw new Error('視窗不在前景，不送') } })
+  await r.session.start()
+  r.session.input('x')
+  await r.session.inputFlushed()
+  assert.equal(r.calls.inputErrors[0].message, '視窗不在前景，不送')
+  const r2 = rig()
+  await r2.session.start()
+  r2.handlers['term-view-input-error']({ view_id: 7, message: '這個窗格已經不在了', lost_bytes: 12 })
+  r2.handlers['term-view-input-error']({ view_id: 99, message: '別的畫面', lost_bytes: 1 })
+  assert.deepEqual(r2.calls.inputErrors, [{ message: '這個窗格已經不在了', lost_bytes: 12 }], '只收自己這個觀看的')
+})
+
+test('貼上：單行直接送、多行要先問；摘要寫行數與字數', () => {
+  assert.equal(pasteNeedsConfirm('ls -la'), false)
+  assert.equal(pasteNeedsConfirm('ls -la\n'), false, '只有結尾換行還算單行')
+  assert.equal(pasteNeedsConfirm('a\nb'), true)
+  assert.equal(pasteNeedsConfirm('a\r\nb'), true)
+  assert.equal(pasteSummary('一\n二\n三'), '要貼上 3 行、5 個字，送進這位夥伴的終端？')
+})
+
+test('守門：貼上由元件自己接手（多行確認），不讓 xterm 自己處理', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(src.includes('@paste.capture="onPaste"') && src.includes('ev.preventDefault()') && src.includes('ev.stopPropagation()'))
+  assert.ok(src.includes('pasteNeedsConfirm(text)') && src.includes('confirmPaste') && src.includes('cancelPaste'))
 })
 
 test('守門：xterm 釘版本、打包進 ui/vendor、不走 CDN', () => {
@@ -167,7 +241,23 @@ test('矮視窗收起訊息區時有切回按鈕', () => {
   assert.match(css, /max-height:620px\)\{[^\n]*\.term-view \+ \.conv\{display:none\}[^\n]*\.term-view-back\{display:inline-block\}/, '收起訊息區和顯示按鈕要同一個條件')
 })
 
-test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）', () => {
+test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）；接上輸入之後更不能拿掉', () => {
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(src.includes('attachCustomWheelEventHandler(() => false)'))
+  // 滾輪要先交給外層，才輪到接輸入：順序反了，捲畫面就會變成對夥伴按上下鍵
+  assert.ok(src.indexOf('attachCustomWheelEventHandler') < src.indexOf('t.onData('))
+  // 沒有任何地方把滾輪事件轉成送字
+  assert.ok(!/onWheel|'wheel'/.test(src.replace(/attachCustomWheelEventHandler/g, '')), '滾輪不會變成送字')
+})
+
+test('守門：後台、relay、CLI 碰不到 term_view_input（只有本機畫面這一個入口）', () => {
+  const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
+  const uses = lib.split('term_view_input').length - 1
+  assert.equal(uses, 2, '只有定義與註冊，沒有別的地方呼叫：' + uses)
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(d + '/' + e.name) : [d + '/' + e.name])
+  for (const f of walk(new URL('../src-tauri/src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')).filter(f => f.endsWith('.rs') && !f.endsWith('lib.rs'))) {
+    assert.ok(!fs.readFileSync(f, 'utf8').includes('term_view_input'), f + ' 不能碰 term_view_input')
+  }
+  const cli = walk(new URL('../src-tauri/src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')).filter(f => /[\\/](cli|bridge)[\\/]/.test(f) && f.endsWith('.rs'))
+  for (const f of cli) assert.ok(!/view_input/.test(fs.readFileSync(f, 'utf8')), f + ' 不能呼叫 view_input')
 })

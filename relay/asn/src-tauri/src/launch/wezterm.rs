@@ -896,6 +896,20 @@ impl<'a> WezTerm<'a> {
         self.send_raw(sock, pane_id, text)
     }
 
+    /// 畫面裡打字（#597 D）：打字原樣送（`--no-paste`）；貼上不帶 `--no-paste`，讓 WezTerm 依窗格程式的模式決定要不要包 bracketed paste。
+    /// 一次的字數由呼叫的人先切段（命令列有長度上限）；字的內容檢查在 `term_view::check_input`
+    pub fn send_input(&self, sock: &Path, pane_id: u64, text: &str, paste: bool) -> Result<(), String> {
+        if text.is_empty() {
+            return Err("沒有要送的字".to_string());
+        }
+        let mut args = vec!["send-text".to_string(), "--pane-id".into(), pane_id.to_string()];
+        if !paste {
+            args.push("--no-paste".into());
+        }
+        args.push(text.to_string());
+        self.cli(sock, &args).map(|_| ())
+    }
+
     fn send_raw(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {
         let args = vec!["send-text".to_string(), "--pane-id".into(), pane_id.to_string(), "--no-paste".into(), text.to_string()];
         self.cli(sock, &args).map(|_| ())
