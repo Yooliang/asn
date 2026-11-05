@@ -736,12 +736,13 @@ impl Core {
             *l = (*l).min(r.seq.saturating_sub(1));
             self.log.line(&format!("room={} #{} channel turn unfinished before restart: cursor moved back, will be handed again once", r.id, r.seq));
         }
+        // 先存補轉交清單、再退游標：中間掛掉，最壞是清單在而游標沒退（下次重開再退），不會游標退了清單卻沒了（那樣已處理過的會重複）
+        self.save_room_redo();
         for (ck, l) in low {
             if self.cursors.get(&ck).is_some_and(|c| c > l) {
                 self.save_cursor(&ck, l);
             }
         }
-        self.save_room_redo();
         channel_turns::prune(&self.cfg.work_dir);
         self.pending = keep;
         self.last_requester = st.last;
