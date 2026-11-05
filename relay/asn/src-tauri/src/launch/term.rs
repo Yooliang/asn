@@ -2022,9 +2022,22 @@ fn profile_reclaimable(profile: &str, kind: &str) -> bool {
     }
 }
 
-/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> connect asn --workspace asn-{編號}`（設定檔裡有 asn 這個 unix domain）
+/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> --config initial_cols=120 --config initial_rows=40 connect asn --workspace asn-{編號}`
+/// （設定檔裡有 asn 這個 unix domain）。窗格的大小以終端視窗為準，xterm.js 照窗格實際大小畫；GUI 開窗時帶 120x40，
+/// 避免一連上就把 120x40 的窗格縮回 80x24（asn真 11-05 定）；使用者自己把視窗拖小就照他的
 fn view_args(config: &Path, workspace: &str) -> Vec<String> {
-    vec!["--config-file".into(), config.to_string_lossy().into_owned(), "connect".into(), "asn".into(), "--workspace".into(), workspace.to_string()]
+    vec![
+        "--config-file".into(),
+        config.to_string_lossy().into_owned(),
+        "--config".into(),
+        format!("initial_cols={}", super::mux::PANE_COLS),
+        "--config".into(),
+        format!("initial_rows={}", super::mux::PANE_ROWS),
+        "connect".into(),
+        "asn".into(),
+        "--workspace".into(),
+        workspace.to_string(),
+    ]
 }
 
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
@@ -5267,6 +5280,16 @@ mod tests {
             let id = open_partner(&rig);
             assert_eq!(rig.svc.partner_term_id("小乙").unwrap(), id);
             assert!(rig.svc.partner_term_id("別人").is_err());
+        }
+
+        #[test]
+        fn 看畫面的_gui_開窗帶_120x40_設定在子命令前面() {
+            let args = super::super::view_args(Path::new("C:/m/mux.lua"), "asn-3");
+            assert_eq!(
+                args,
+                vec!["--config-file", "C:/m/mux.lua", "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", "asn-3"],
+                "--config 要放在 connect 前面（WezTerm 的全域選項），不然會被當成子命令的參數"
+            );
         }
 
         #[test]
