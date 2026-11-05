@@ -245,6 +245,56 @@ fn 真_claude_留給外面操作() {
 }
 
 /// 各種指令寫法在兩種模式下開不開得起來（不花額度）：只印結果表，由人判斷。會開幾扇視窗再自己關
+/// #596 第 11 項：開成功但馬上以非 0 結束：回失敗和原因、窗格收掉、不擋之後的同名夥伴
+#[test]
+#[ignore]
+fn early_一開就結束_回原因_窗格收掉_不擋同名() {
+    let rig = Rig::new();
+    let s = rig.svc();
+    let env: BTreeMap<String, String> = crate::launch::win_term::term_env(crate::launch::config::child_env(), &[]);
+    let bad = vec!["-NoProfile".to_string(), "-Command".to_string(), "exit 7".to_string()];
+    let spec = crate::launch::win_term::spec_for("測試同名", "powershell.exe", &bad, false, env.clone());
+    let e = s.start_window(rig.tmp.path(), &spec).expect_err("要回失敗");
+    let m = match e {
+        crate::launch::win_term::WinOpenError::NotStarted(m) | crate::launch::win_term::WinOpenError::Started(m) => m,
+    };
+    elog!("RESULT 失敗原因：{m}");
+    assert!(m.contains("一開就結束") && m.contains('7'), "{m}");
+    assert!(rows(&s).is_empty(), "表上不留：{:?}", rows(&s));
+    let good = vec!["-NoProfile".to_string(), "-Command".to_string(), format!("[IO.File]::AppendAllText('{}','x'); Start-Sleep -Seconds 60", rig.hb(1).display())];
+    let spec = crate::launch::win_term::spec_for("測試同名", "powershell.exe", &good, false, env);
+    let (id, _) = s.start_window(rig.tmp.path(), &spec).expect("同名夥伴要開得起來");
+    elog!("RESULT 同名再開：id={id} 表上={:?}", rows(&s));
+    let _ = s.stop(&id);
+}
+
+/// 環境變數（#596 第 6 項）。要先在使用者環境變數放假值：CLAUDE_ASN_TEST、NO_COLOR、ANTHROPIC_ASN_TEST，跑完要還原
+#[test]
+#[ignore]
+fn env_使用者環境變數_夥伴和原生主控台拿到的一樣() {
+    let rig = Rig::new();
+    let s = rig.svc();
+    TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = crate::launch::mux::user_env_names());
+    let out = rig.tmp.path().join("names.txt");
+    let script = format!("(Get-ChildItem env:).Name | Set-Content -Encoding UTF8 '{}'; Start-Sleep -Seconds 60", out.display());
+    let args = vec!["-NoProfile".to_string(), "-Command".to_string(), script];
+    let env: BTreeMap<String, String> = crate::launch::win_term::term_env(crate::launch::config::child_env(), &[]);
+    let spec = crate::launch::win_term::spec_for("測試環境", "powershell.exe", &args, false, env);
+    let (id, _) = s.start_window(rig.tmp.path(), &spec).expect("開夥伴");
+    let t = Instant::now();
+    while !out.exists() {
+        assert!(t.elapsed() < Duration::from_secs(20), "20 秒內沒有結果");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let text = std::fs::read_to_string(&out).unwrap();
+    let has = |n: &str| text.lines().any(|l| l.trim_start_matches('\u{feff}').trim().eq_ignore_ascii_case(n));
+    elog!("RESULT CLAUDE={} NO_COLOR={} ANTHROPIC={}", has("CLAUDE_ASN_TEST"), has("NO_COLOR"), has("ANTHROPIC_ASN_TEST"));
+    let _ = s.stop(&id);
+    assert!(has("ANTHROPIC_ASN_TEST"), "證明假值真的從登錄檔進了窗格，不然這則測試沒有意義");
+    assert!(!has("CLAUDE_ASN_TEST") && !has("NO_COLOR"), "原生主控台不給的，夥伴也不該拿到");
+}
+
 #[test]
 #[ignore]
 fn 指令寫法_裸名_cmd_ps1_exe_不存在() {

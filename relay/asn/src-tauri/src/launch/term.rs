@@ -106,7 +106,31 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
 fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>) -> Vec<String> {
     let get = |name: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
     let resolved = super::local::resolve_for_wrap(command, get("PATH"), &|p| p.is_file());
-    super::local::mux_wrapped_argv(&resolved, nonce, get("PSModulePath"))
+    // WezTerm 會把使用者環境變數帶進窗格（B0 實測，11-05 再驗）：包裝殼移除原生主控台不會給的，夥伴拿到的環境才相同
+    let remove = super::mux::wrapper_removals(&registry_env_names(), env);
+    if !remove.is_empty() {
+        env_log(&format!("終端：使用者環境變數的 {} 不傳給這個夥伴", remove.join("、")));
+    }
+    super::local::mux_wrapped_argv_env(&resolved, nonce, get("PSModulePath"), &remove)
+}
+
+/// 機器資料夾（ui.log 所在）：環境變數的處理要留紀錄，stderr 正式版看不到
+#[cfg(feature = "gui")]
+static UI_LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 啟動時設定一次
+#[cfg(feature = "gui")]
+pub fn set_ui_log_dir(dir: &Path) {
+    let _ = UI_LOG_DIR.set(dir.to_path_buf());
+}
+
+/// 只寫變數名字，不寫值
+fn env_log(line: &str) {
+    elog!("{line}");
+    #[cfg(feature = "gui")]
+    if let Some(dir) = UI_LOG_DIR.get() {
+        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+    }
 }
 
 fn early_exit_text(code: i32) -> String {
@@ -350,7 +374,7 @@ pub struct TermService<R, F> {
     /// 開 agy 時另外帶的參數（#374：`--settings <檔>` 接上 Gemini 狀態列，見 gemini_session.rs）。
     /// 正式由 live() 設定；沒設（測試、沒有畫面的建置）就照舊只跑執行檔。回空的＝這次不帶。
     agy_args: Option<AgyArgs>,
-    /// B2b 開關（預設關＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 讀 ASN_TERM_MUX 設定
+    /// B2b 開關（關著＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 依 win_term::switches_from 設定，Windows 預設開
     use_mux: bool,
     /// 隔離設定檔要不要帶 exit_behavior = "Hold"（0.2.0 第 1 階段的做法）。預設 false＝跟 0.1.113 一樣只寫空設定；
     /// 正式由 live() 在 ASN_TERM_WEZTERM=1 時設 true（#611）
@@ -752,16 +776,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let pane_env = env.cloned().unwrap_or_else(|| base_env.clone());
         // 登錄檔使用者變數（11.2-6）：只看名字。登錄檔的值會蓋過下 cli 時給的（B0 實測），所以這個窗格自己的變數（跟共用白名單不同的）
         // 若同名，夥伴會拿到錯的值：寧可不在 mux 裡開（NotStarted，呼叫端可退到原生主控台），也不悄悄給錯的。
-        // TODO(B2c-wrapper)：改用包裝指令在窗格裡設定，撞名也能開；先不做（asn真 建議撞名才用包裝指令，我們決定延後）
+        // 目前只有 pi 窗格有自己的變數，而 pi 窗格沒有包裝殼（kind 是空的），所以撞名維持不開在 mux；要改得先讓 pi 也有包裝殼
         let reg = registry_env_names();
         let (_, secret_like) = mux::registry_conflicts(&reg, &pane_env);
         if let Some(n) = mux::pane_collisions(&reg, &pane_env, &base_env).first() {
-            elog!("終端服務：使用者環境變數裡有「{n}」，會蓋過這個窗格自己的設定，不在共用終端裡開");
+            env_log(&format!("終端服務：使用者環境變數裡有 {n}，會蓋過這個窗格自己的設定，不在共用終端裡開"));
             return Err(NotStarted(format!("使用者環境變數裡已經有「{n}」，會蓋過這個夥伴自己的設定，所以沒有在共用終端裡開；請把它從使用者環境變數移除")));
         }
-        // 金鑰類的名字：只提示（夥伴清單上的一句話，見 mux::secret_notice），不改使用者的登錄檔
-        for n in &secret_like {
-            elog!("終端服務：使用者環境變數裡有「{n}」（金鑰類或會被濾掉的名字），WezTerm 會把它帶進窗格");
+        // 有包裝殼的夥伴由 wrap_partner 移除；沒有包裝殼的窗格（pi、終端面板）WezTerm 會帶進去，只留紀錄（夥伴清單上也有一句話，見 mux::secret_notice）。不改使用者的登錄檔
+        if extra.kind.is_empty() && !secret_like.is_empty() {
+            env_log(&format!("終端服務：使用者環境變數的 {} 會被帶進這個窗格（它沒有包裝殼）", secret_like.join("、")));
         }
         let cwd_s = cwd.to_string_lossy().into_owned();
         // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
@@ -1105,6 +1129,29 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         v.is_some_and(|v| self.runner.started_ms(v.pid) == Some(v.started_ms))
     }
 
+    /// 共用 mux 的現況，給掛掉監看用（`mux_watch`）：mux 現在活不活（程序編號＋建立時間）、裡面有哪些夥伴（名字）、
+    /// ASN 自己停 mux 的記號。沒開 mux 模式、或找不到 WezTerm 就回 None（不監看）
+    pub fn mux_snapshot(&self) -> Option<super::mux_watch::Observed> {
+        if !self.use_mux {
+            return None;
+        }
+        let dir = self.dir().ok()?;
+        let m = self.mux_handle(&dir, BTreeMap::new()).ok()?;
+        let live = m.live_pid();
+        let partners: Vec<String> = {
+            let g = self.inner.lock().unwrap();
+            // 現行的 mux 還活著時只算屬於它的夥伴（換掉的舊 mux 留下的列不算）；同名只留一位
+            let mut seen = std::collections::BTreeSet::new();
+            g.sessions
+                .iter()
+                .filter(|s| s.window.mux && !s.kind.is_empty())
+                .filter(|s| live.map_or(true, |(p, b)| s.window.gui_pid == p && s.window.started_ms == Some(b)))
+                .filter_map(|s| partner_label(&s.id, &s.title).map(String::from))
+                .filter(|n| seen.insert(n.clone()))
+                .collect()
+        };
+        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
+    }
     /// 這個 mux（程序編號＋建立時間）裡、名字是 `name` 的夥伴視窗（claude／window）的終端編號。同名不只一個就不猜；
     /// mux 的編號與建立時間要跟開窗格時記的一樣（防止舊的列對到新的 mux）。沒開 mux 模式＝None
     pub fn partner_in_mux(&self, mux: (u32, u64), name: &str) -> Option<String> {
@@ -2556,8 +2603,8 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
 pub fn live(data_dir: &Path) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
-    // B2b 開關：只在 ASN_TERM_MUX=1 才開在共用的 mux 裡，預設關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
-    // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 沒開時 ASN_TERM_MUX=1 無效（關係定義在 win_term::switches_from）
+    // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
+    // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
     let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
@@ -5896,6 +5943,20 @@ mod tests {
             TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = vec!["OTHER_VAR".into()]);
             rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &env).unwrap();
             assert_eq!(count_sub(&rig.runner, "spawn"), 1);
+        }
+
+        #[test]
+        fn 夥伴窗格的包裝殼移除使用者環境變數裡濾掉的名字_原生也會傳的留著() {
+            use base64::Engine;
+            TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = vec!["CLAUDE_X".into(), "ANTHROPIC_API_KEY".into(), "Path".into()]);
+            let w = wrap_partner(&["claude.exe".to_string()], "abc", &BTreeMap::new());
+            TEST_REGISTRY_NAMES.with(|n| n.borrow_mut().clear());
+            let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
+            let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+            let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let s = String::from_utf16(&u).unwrap();
+            assert!(s.contains("Remove('CLAUDE_X')"), "{s}");
+            assert!(!s.contains("ANTHROPIC_API_KEY") && !s.contains("Remove('Path')"), "{s}");
         }
 
         #[test]

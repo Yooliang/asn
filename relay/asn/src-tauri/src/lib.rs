@@ -1387,6 +1387,8 @@ fn voice_cfg_set(app: State<'_, App>, cfg: voicecfg::VoiceCfg) -> Result<(), Str
 fn quit_app(app: AppHandle) {
     #[cfg(desktop)] // 自動接回只有電腦版有；launch 模組手機版沒編進去
     launch::auto_resume::note_user_quit(&app.state::<App>().work_dir);
+    #[cfg(desktop)] // 同上：只有電腦版有 launch
+    launch::mux_watch::note_user_quit(&app.state::<App>().work_dir);
     cleanup(&app);
     app.exit(0);
 }
@@ -1544,6 +1546,11 @@ pub fn run() {
     launch::term::set_global(terms.clone());
     #[cfg(desktop)]
     launch::term::start_screen_watch(terms.clone(), &work_dir);
+    #[cfg(desktop)]
+    launch::term::set_ui_log_dir(&work_dir);
+    // 共用終端服務（mux）掛掉要有人知道：偵測、通知、接回（#596 第 4 項）。沒開 mux 模式時什麼都不做
+    #[cfg(desktop)]
+    launch::mux_watch::start(terms.clone(), &work_dir, &term_data_dir);
     // 電腦重開後自動接回夥伴（#767）：要在內建橋更新開機時間之前看存檔，所以放在橋啟動之前
     #[cfg(desktop)]
     if !is_shot && relay_obj.is_some() {

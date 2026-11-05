@@ -56,6 +56,9 @@ pub struct Status {
     pub resumed: Vec<String>,
     pub failed: Vec<Failed>,
     pub at: u64,
+    /// 為什麼要接回：空＝重開機（原本的行為）；終端服務中斷（`mux_watch`）會寫原因，畫面跟著顯示
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub cause: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +80,10 @@ pub trait Deps {
     fn launch(&self, entry: &KnownEntry) -> Result<(), String>;
     /// 開出來的視窗上線了（有活著的同名 session 檔）
     fn appeared(&self, name: &str) -> bool;
+    /// 這一輪接回的原因（寫進結果給畫面顯示）。預設空＝重開機
+    fn cause(&self) -> &'static str {
+        ""
+    }
     /// 接回失敗、視窗又是隱藏的：把它顯示出來讓本人看得到（回有沒有成功）。只有隱藏的視窗才會被呼叫
     fn reveal(&self, entry: &KnownEntry) -> bool;
     fn report(&self, status: &Status);
@@ -95,7 +102,7 @@ pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>
 pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
     let started = deps.now();
     let deadline = started + LIMIT_MS;
-    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started };
+    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started, cause: deps.cause() };
     let push = |st: &Status, state: &'static str| {
         let mut s = st.clone();
         s.state = state;
@@ -182,6 +189,47 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
     st.at = deps.now();
     deps.report(&st);
     st
+}
+
+/// 同一時間只讓一條接回在跑（重開機的 #788 與終端服務中斷各有一條）：後面的等前面的做完，再看到視窗已經開著就不重開，不會開出重複視窗
+#[cfg(feature = "gui")]
+static RESUME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 終端服務中斷時要接回的名單：存檔（known-windows.json）裡有這位的對話編號與資料夾就照它接；
+/// 沒有記到（或不是 Claude 視窗）就放一列沒有對話編號的，讓 `run` 把它列進「沒有接回」並寫原因，不無聲略過。
+/// 這條路的對象是 ASN 自己開在共用 mux 裡的夥伴，不看存檔裡「ASN 開的」那一欄
+pub fn crash_entries(names: &[String], known: Vec<KnownEntry>) -> Vec<KnownEntry> {
+    names
+        .iter()
+        .map(|n| {
+            known.iter().find(|e| &e.name == n && e.engine == "claude").cloned().unwrap_or_else(|| KnownEntry {
+                name: n.clone(),
+                engine: "claude".into(),
+                facts: crate::bridge::known::WindowFacts { session: String::new(), cwd: String::new(), asn_opened: true, perm: Vec::new(), hidden: false },
+            })
+        })
+        .collect()
+}
+
+/// 終端服務中斷之後（`mux_watch` 呼叫）：`resume` 為真就照 #788 的做法把這些夥伴接回；
+/// 為假（十分鐘內又中斷）只把名字與原因寫進結果給畫面，不接回
+#[cfg(feature = "gui")]
+pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool) {
+    let now = crate::heartbeat::now_ms();
+    let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
+    let entries = crash_entries(names, known.entries());
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE };
+    if !resume {
+        let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
+        deps.report(&Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE });
+        return;
+    }
+    let st = {
+        let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        run(entries, &deps)
+    };
+    let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
+    let _ = crate::ui_log::append(work_dir, &[line]);
 }
 
 /// 從啟動參數取出權限旗標，只留認得的。接回時照這份，不看現在的 profile
@@ -295,6 +343,8 @@ struct RealDeps {
     sessions: std::path::PathBuf,
     /// 開出來的視窗的程序編號（名字 → pid），隱藏視窗沒上線時要靠它把視窗顯示出來
     opened: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    /// 接回的原因（重開機是空；終端服務中斷見 `mux_watch::CAUSE`）
+    cause: &'static str,
 }
 
 #[cfg(feature = "gui")]
@@ -338,6 +388,9 @@ impl Deps for RealDeps {
         }
         Ok(())
     }
+    fn cause(&self) -> &'static str {
+        self.cause
+    }
     fn reveal(&self, e: &KnownEntry) -> bool {
         let pid = self.opened.lock().ok().and_then(|m| m.get(&e.name).copied());
         super::console::show_partner_window("claude", &e.name, pid)
@@ -367,11 +420,14 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default() };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "" };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
-        let st = run(entries, &deps);
+        let st = {
+            let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            run(entries, &deps)
+        };
         let line = format!("{} info [ASN] auto-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
         let _ = crate::ui_log::append(&log_dir, &[line]);
     });
@@ -382,6 +438,35 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 終端服務中斷_存檔有的照存檔接_沒有記到的列進沒有接回_不無聲略過() {
+        let known = vec![entry("甲"), {
+            let mut e = entry("乙");
+            e.engine = "pi".into();
+            e
+        }];
+        let es = crash_entries(&sv(&["甲", "乙", "丙"]), known);
+        assert_eq!(es.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲", "乙", "丙"], "順序照名單");
+        assert!(crate::bridge::roster::valid_sid(&es[0].facts.session), "存檔有的帶原本的對話編號");
+        // pi 視窗與沒記到的：不帶對話編號、引擎改成 claude 讓 run 走「沒有記到原本的對話編號」那條
+        assert!(es[1].facts.session.is_empty() && es[2].facts.session.is_empty());
+        let f = Fake::new();
+        let st = run(es, &f);
+        assert_eq!(st.resumed, ["甲"]);
+        assert_eq!(st.failed.iter().map(|x| (x.name.as_str(), x.reason.as_str())).collect::<Vec<_>>(), [("乙", NO_SESSION), ("丙", NO_SESSION)]);
+    }
+
+    #[test]
+    fn 結果帶原因_重開機是空的不寫出來_終端服務中斷才寫() {
+        let boot = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: 1, cause: "" };
+        assert!(!serde_json::to_string(&boot).unwrap().contains("cause"), "重開機的結果檔和以前一樣");
+        let mux = Status { cause: super::super::mux_watch::CAUSE, ..boot };
+        let v: serde_json::Value = serde_json::to_value(&mux).unwrap();
+        assert_eq!(v["cause"], "共用的終端服務中斷了");
+        let f = Fake::new();
+        assert_eq!(run(vec![entry("甲")], &f).cause, "", "預設原因是空的");
+    }
+
     #[test]
     fn 守門_自動接回開窗前併入本機同意過的資料夾() {
         let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
