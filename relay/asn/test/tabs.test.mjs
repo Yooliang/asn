@@ -1,4 +1,5 @@
 // 頁籤、群組列、廣告輪播的純邏輯。
+import { groupsUnread } from '../ui/lib/tabs.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -301,4 +302,16 @@ test('守門：廣告不用任何 AdSense／外部廣告程式碼；點廣告一
   assert.equal(html.split('@click="openAd(a)"').length - 1, 3, '各處點廣告都走 openAd')
   assert.ok(!/open_url/.test(html), '畫面模板不直接呼叫 open_url')
   assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
+})
+
+test('群組頁籤的紅點：所有群組未讀加總；沒有未讀、壞資料都是 0；畫面接到這個值', () => {
+  assert.equal(groupsUnread([{ unread: 2 }, { unread: 0 }, { unread: 3 }]), 5)
+  assert.equal(groupsUnread([{ unread: 0 }, {}]), 0)
+  assert.equal(groupsUnread([null, { unread: 'x' }]), 0)
+  assert.equal(groupsUnread(null), 0)
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.match(html, /<span class="red" v-if="t\.key === 'groups' && groupsUnreadN"><\/span>/)
+  assert.match(js, /const groupsUnreadN = computed\(\(\) => groupsUnread\(roomRows\.value\)\)/)
+  assert.match(js, /FIXED_TABS, groupsUnreadN,/, '要交給畫面')
 })

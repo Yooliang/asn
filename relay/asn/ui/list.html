@@ -82,6 +82,7 @@
             <g v-else-if="t.key === 'guide'"><path d="M4.5 4.5c2.6-.9 5.2-.7 7.5 1v14c-2.3-1.7-4.9-1.9-7.5-1z" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M19.5 4.5c-2.6-.9-5.2-.7-7.5 1v14c2.3-1.7 4.9-1.9 7.5-1z" fill="#e8f3fd" stroke="#1f5d9e"/><path d="M6.5 8.2c1.4-.2 2.7 0 3.6.6M6.5 11.2c1.4-.2 2.7 0 3.6.6M14 8.8c.9-.6 2.2-.8 3.6-.6M14 11.8c.9-.6 2.2-.8 3.6-.6" stroke="#1f5d9e" stroke-width="1" stroke-linecap="round" fill="none"/></g>
             <g v-else><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="#4a5d73" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="5.6" fill="#dfe8f2" stroke="#4a5d73" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="#fff" stroke="#4a5d73"/></g>
           </svg>
+          <span class="red" v-if="t.key === 'groups' && groupsUnreadN"></span>
         </button>
       </nav>
       <div class="content" role="tabpanel">
