@@ -503,6 +503,17 @@ pub struct PaneInfo {
     pub cursor_y: i64,
     #[serde(default)]
     pub is_active: bool,
+    #[serde(default)]
+    pub size: PaneSize,
+}
+
+/// `wezterm cli list` 的窗格大小
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct PaneSize {
+    #[serde(default)]
+    pub cols: u32,
+    #[serde(default)]
+    pub rows: u32,
 }
 
 /// 判斷窗格結束用：往回讀畫面底部幾行。
@@ -841,6 +852,11 @@ impl<'a> WezTerm<'a> {
     /// 關掉共用 mux 裡的一個窗格（只結束那個窗格，不動 mux 與其他夥伴）
     pub fn kill_pane(&self, sock: &Path, pane_id: u64) -> Result<(), String> {
         self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ())
+    }
+
+    /// 整幅畫面，帶顏色。這是 WezTerm 重新產生的，不是程式的原始輸出；內容還是外部資料，用之前要過濾（`term_view::filter_frame`）
+    pub fn get_text_escapes(&self, sock: &Path, pane_id: u64) -> Result<String, String> {
+        self.cli(sock, &["get-text".to_string(), "--escapes".into(), "--pane-id".into(), pane_id.to_string()])
     }
 
     pub fn get_text(&self, sock: &Path, pane_id: u64, start_line: Option<i32>) -> Result<String, String> {

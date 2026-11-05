@@ -806,7 +806,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         sub.extend(wrapped.iter().map(String::as_str));
         // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
-        let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
+        let ran = self.runner.run_clean(&dir.cli, &mux::spawn_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
         // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
         if matches!(&ran, Err(e) if !e.starts_with(wezterm::CANNOT_RUN)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
             m.note_spawn_unsure();
@@ -924,6 +924,32 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-lines))?;
         Ok(cap_output(&text))
+    }
+
+    /// 給畫面裡的 xterm.js 看的快照（#597）：只有 ASN 開的窗格，接手來的不給。mux 換過、視窗不在就回錯，不對別的窗格下指令。
+    /// 夥伴視窗也可以看，這是本人在這台電腦上看自己的夥伴；只接本機畫面的命令，不接後台
+    pub fn view_text(&self, id: &str) -> Result<String, String> {
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        self.wez(&dir).get_text_escapes(&snap.window.sock, snap.pane_id)
+    }
+
+    /// 看畫面用的游標與大小。查不到這個窗格就回錯
+    pub fn view_meta(&self, id: &str) -> Result<super::term_view::ViewMeta, String> {
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        let panes = self.wez(&dir).list(&snap.window.sock)?;
+        let p = panes.iter().find(|p| p.pane_id == snap.pane_id).ok_or("這個窗格已經不在了")?;
+        Ok(super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows })
+    }
+
+    fn view_snapshot(&self, id: &str) -> Result<SessionSnap, String> {
+        let snap = self.snapshot_p(id, true)?;
+        if snap.adopted.is_some() {
+            return Err("接手來的窗格還不能在這裡看".into());
+        }
+        self.verify_window(&snap)?;
+        Ok(snap)
     }
 
     pub fn list(&self) -> Vec<TermListed> {
@@ -3144,6 +3170,11 @@ mod tests {
     }
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, _timeout: Duration) -> Result<wezterm::RunOutput, String> {
+            // 開窗大小的 --config 在 "cli" 前面：比對子命令時先拿掉，整串參數看 clean_calls
+            let args: &[String] = match args.iter().position(|a| a == "cli") {
+                Some(i) if args.first().map(String::as_str) == Some("--config") => &args[i..],
+                _ => args,
+            };
             self.inner.calls.borrow_mut().push((args.to_vec(), env.clone()));
             // mux 模式的 cli 在 "cli" 後面多一個 --no-auto-start：比對子命令時先拿掉
             let sub: Vec<String> = args.iter().filter(|a| a.as_str() != "--no-auto-start").cloned().collect();
@@ -5175,6 +5206,31 @@ mod tests {
             (rig, paths)
         }
 
+        #[test]
+        fn 看畫面_帶顏色讀_回大小和游標_mux_換過就拒絕() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.screen.borrow_mut() = "\x1b[31m紅".into();
+            assert_eq!(rig.svc.view_text(&id).unwrap(), "\x1b[31m紅");
+            let gets: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "--escapes")).collect();
+            assert_eq!(gets[0], vec!["cli", "--no-auto-start", "get-text", "--escapes", "--pane-id", "9"]);
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":3,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            assert_eq!(rig.svc.view_meta(&id).unwrap(), crate::launch::term_view::ViewMeta { cursor_x: 3, cursor_y: 4, cols: 120, rows: 40 });
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            assert!(rig.svc.view_meta(&id).unwrap_err().contains("不在"));
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            let before = rig.runner.args().len();
+            assert!(rig.svc.view_text(&id).is_err(), "mux 換過");
+            assert!(rig.runner.args().iter().skip(before).all(|a| !a.iter().any(|x| x == "get-text")), "不對新的 mux 讀畫面");
+        }
+
+        #[test]
+        fn 看畫面_不認得的編號拒絕() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.view_text("nope").is_err());
+            assert!(rig.svc.view_meta("nope").is_err());
+        }
+
         fn pi_argv() -> Vec<String> {
             ["pi", "-e", "ext.ts", "--model", "M"].iter().map(|s| s.to_string()).collect()
         }
@@ -5200,7 +5256,7 @@ mod tests {
             assert_eq!((id.as_str(), pid), ("1", MUX_PID), "回的是 mux 的編號");
             let clean = rig.runner.inner.clean_calls.borrow();
             assert_eq!(clean.len(), 1, "開窗格只有一條 cli（spawn），而且走 run_clean");
-            let mut want: Vec<String> = ["cli", "--no-auto-start", "spawn", "--new-window", "--workspace", "asn-1", "--cwd"].iter().map(|s| s.to_string()).collect();
+            let mut want: Vec<String> = ["--config", "initial_cols=120", "--config", "initial_rows=40", "cli", "--no-auto-start", "spawn", "--new-window", "--workspace", "asn-1", "--cwd"].iter().map(|s| s.to_string()).collect();
             want.push(rig.cwd.clone());
             want.push("--".into());
             want.extend(pi_argv());

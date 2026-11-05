@@ -32,6 +32,9 @@ pub(crate) mod mux;
 mod term_adopt;
 #[cfg(desktop)]
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) mod term_view;
+#[cfg(desktop)]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub(crate) mod term;
 
 use crate::relay::Relay;

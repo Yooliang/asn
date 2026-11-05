@@ -710,3 +710,9 @@ fn 收空_mux_結束失敗_回_false_pid_檔還在_下次還會再試() {
     let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
     assert_eq!(log.matches("沒有停掉（程序").count(), 1, "只有失敗那次有，成功的不再多記：{log}");
 }
+
+#[test]
+fn 開窗格的參數_大小放在_cli_前面() {
+    let a = spawn_args(&["spawn", "--new-window"]);
+    assert_eq!(a, vec!["--config", "initial_cols=120", "--config", "initial_rows=40", "cli", "--no-auto-start", "spawn", "--new-window"]);
+}
