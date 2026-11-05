@@ -680,8 +680,8 @@ impl Core {
             self.log.line(&format!("channel mail unfinished before restart: {} (will be pulled again)", back.len()));
         }
         self.channel_back = back.into_iter().map(|p| p.id).collect();
-        // 重開前交給內建通道、還沒結束的群組點名：群組沒有信箱，游標早就過了它，不退回去就永遠不會再轉交也沒人回（#845）
-        let (rback, keep): (Vec<Pending>, Vec<Pending>) = keep.into_iter().partition(|p| p.channel && p.state != State::Done && p.room.as_ref().is_some_and(|r| !r.member.is_empty()));
+        // 重開前交給內建通道、還沒結束的群組點名（已經回過的不算，退回會讓群組收到第二則）：群組沒有信箱，游標早就過了它，不退回去就永遠不會再轉交也沒人回（#845）
+        let (rback, keep): (Vec<Pending>, Vec<Pending>) = keep.into_iter().partition(|p| p.channel && !p.replied && p.state != State::Done && p.room.as_ref().is_some_and(|r| !r.member.is_empty()));
         for p in rback {
             let Some(r) = p.room.clone() else { continue };
             if channel_turns::resent(&self.cfg.work_dir, &p.id) {

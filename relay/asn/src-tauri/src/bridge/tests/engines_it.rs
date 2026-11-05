@@ -765,6 +765,43 @@ async fn 群組點名交給通道_這一輪沒做完就重開_游標退回_重�
 }
 
 #[tokio::test]
+async fn 群組點名交給通道_上一輪其實已經回了_重開後不退回游標_群組只收到一則回覆() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room3");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    std::fs::write(&gate, "go").unwrap();
+    h.wait("回覆貼進群組", |h| !h.fr.st.lock().unwrap().room_posts.is_empty()).await;
+    assert_eq!(h.fr.st.lock().unwrap().room_posts.len(), 1, "前提：重開前群組已經收到一則回覆");
+    h.restart().await;
+    h.core.pull_rooms(now()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    assert_eq!(h.fr.st.lock().unwrap().room_posts.len(), 1, "重開後群組不會再收到第二則");
+    assert_eq!(room_cursor(&h), 2, "已經回過的不退回游標");
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_回覆已貼出但這一輪的結束還沒處理就重開_不退回游標() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room4");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    // 手動改存檔：把這則標成「已經回過」（回覆貼出了、結束記號還沒處理）
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let item = v["pending"].as_array_mut().unwrap().iter_mut().find(|p| p["room"].is_object()).expect("前提：存檔裡有這則群組項目");
+    assert_eq!(item["channel"], json!(true), "前提：它被標成通道項目");
+    item["replied"] = json!(true);
+    std::fs::write(&f, v.to_string()).unwrap();
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 2, "已經回過的不退回游標，群組不會收到第二則");
+}
+
+#[tokio::test]
 async fn 群組點名交給通道_重開後再轉交仍沒做完_再重開不再補轉交() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let gate = h.work.path().join("gate-room2");
