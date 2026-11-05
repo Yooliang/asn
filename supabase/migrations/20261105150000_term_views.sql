@@ -3,6 +3,7 @@
 -- 設計：
 --   * 發起要本人簽章，兩台都是本人的。T 可能沒人在，所以 T 用節點金鑰。
 --   * 後台不判斷信任：簽章由兩端用本機記的公鑰驗，後台只轉交。session id 和到期時間由 D 決定並簽進去，後台只檢查範圍。
+--     到期時間回整數秒（expires_s）：簽章要逐字相同，不能靠時間字串。
 --   * **沒有自由欄位：** D 只能回報固定狀態（watching、paused、ended），T 只能結束。所以沒有 D 傳內容給 T 的路。
 --   * 同時最多 3 個；同一對加同一視窗一筆；到期最多 10 分鐘；D 太久沒回報，T 看得到 viewer_stale，自己停。
 --   * 結束就清掉一次性公鑰、簽章、topic，只留誰、哪台、哪個視窗、起訖。一天後刪除。
@@ -107,7 +108,7 @@ declare
 begin
   perform public.asn_relay_term_view_expire();
   select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'from_node', v.from_node, 'from_name', n.name, 'window_name', v.window_name, 'topic', v.topic,
-      'd_eph_pub', v.d_eph_pub, 'd_sig', v.d_sig, 'expires_at', v.expires_at) order by v.created_at), '[]'::jsonb)
+      'd_eph_pub', v.d_eph_pub, 'd_sig', v.d_sig, 'expires_s', extract(epoch from v.expires_at)::bigint) order by v.created_at), '[]'::jsonb)
     into v_req
     from relay.term_views v join relay.nodes n on n.id = v.from_node
     where v.to_node = p_node and v.status = 'requested';
@@ -186,7 +187,7 @@ begin
   elsif r.status in ('accepted', 'watching', 'paused') and p_state is null then
     update relay.term_views set viewer_seen_at = now() where id = r.id returning * into r;
   end if;
-  return jsonb_build_object('status', r.status, 'end_reason', r.end_reason, 't_eph_pub', r.t_eph_pub, 't_sig', r.t_sig, 'expires_at', r.expires_at);
+  return jsonb_build_object('status', r.status, 'end_reason', r.end_reason, 't_eph_pub', r.t_eph_pub, 't_sig', r.t_sig, 'expires_s', extract(epoch from r.expires_at)::bigint);
 end;
 $function$;
 

@@ -119,6 +119,9 @@ pub struct Peer {
     pub node: String,
     pub name: String,
     pub sign_pub: String,
+    /// 對方發起觀看用的 Hello 公鑰。Hello 接上之前都是空的，所以 T 不會接受任何觀看
+    #[serde(default)]
+    pub view_pub: Option<String>,
     #[serde(default)]
     pub grants: Vec<Grant>,
 }
@@ -192,7 +195,7 @@ impl Trust {
             return Err(KEY_CHANGED.to_string());
         }
         if self.peer(node).is_none() {
-            self.peers.push(Peer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), grants: Vec::new() });
+            self.peers.push(Peer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), view_pub: None, grants: Vec::new() });
         }
         let g = Grant { direction, scope: scope.to_string() };
         if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
@@ -202,6 +205,14 @@ impl Trust {
             }
         }
         Ok(())
+    }
+
+    /// 記下對方的 Hello 公鑰。配對接上 Hello 時才會用到
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn set_view_pub(&mut self, node: &str, view_pub: &str) {
+        if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
+            p.view_pub = Some(view_pub.to_string());
+        }
     }
 
     /// 撤銷：整台忘掉，兩個方向都沒了。回有沒有這台

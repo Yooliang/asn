@@ -50,6 +50,8 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+#[cfg(desktop)]
+mod view_handshake;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;

@@ -61,9 +61,9 @@ Deno.test("結束：原因只能是固定值，自由文字進不去", async () 
 });
 
 Deno.test("回報：狀態只能是固定值；沒有帶內容的路", async () => {
-  const m = mk({ status: "watching", t_eph_pub: PUB, t_sig: T_SIG, expires_at: "t" });
+  const m = mk({ status: "watching", t_eph_pub: PUB, t_sig: T_SIG, expires_s: 5 });
   const r = await handleTermViewAction(m.deps, me, "term_view_report", { id: ID, state: "watching", text: "悄悄話", frame: "x" }, USER);
-  assertEquals(r.body, { status: "watching", end_reason: null, t_eph_pub: PUB, t_sig: T_SIG, expires_at: "t" });
+  assertEquals(r.body, { status: "watching", end_reason: null, t_eph_pub: PUB, t_sig: T_SIG, expires_s: 5 });
   assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_state: "watching" });
   const q = mk({ status: "accepted" });
   await handleTermViewAction(q.deps, me, "term_view_report", { id: ID }, USER);

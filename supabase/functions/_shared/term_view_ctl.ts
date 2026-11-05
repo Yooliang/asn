@@ -59,7 +59,7 @@ export async function handleTermViewAction(deps: TermViewDeps, me: { id: string 
   if (action === "term_view_report") {
     if (typeof b.id !== "string" || !UUID_RE.test(b.id) || (b.state != null && !REPORT_STATES.includes(b.state))) return fail("bad_request");
     const r = await call(deps, "asn_relay_term_view_report", { p_actor: me.id, p_signed_user: signedUser, p_id: b.id, p_state: b.state ?? null });
-    return isReply(r) ? r : { status: 200, body: { status: r.data.status, end_reason: r.data.end_reason ?? null, t_eph_pub: r.data.t_eph_pub ?? null, t_sig: r.data.t_sig ?? null, expires_at: r.data.expires_at ?? null } };
+    return isReply(r) ? r : { status: 200, body: { status: r.data.status, end_reason: r.data.end_reason ?? null, t_eph_pub: r.data.t_eph_pub ?? null, t_sig: r.data.t_sig ?? null, expires_s: r.data.expires_s ?? null } };
   }
   return { status: 404, body: { error: "not_found" } };
 }
