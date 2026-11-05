@@ -134,10 +134,16 @@ test('參數：到期最多 10 分鐘、過去的不行；session id 不能重�
   assert.equal((await accept(db, s.id, { p_t_sig: DSIG })).error, 'bad_request')
 })
 
-test('上限：同一對同一視窗一筆；被看的那台同時 3 個；每小時 30 次', { skip }, async () => {
+test('上限：同一對同一視窗只留最新；被看的那台同時 3 個；每小時 30 次', { skip }, async () => {
   const db = await boot()
+  const old = await start(db)
   const s = await start(db)
-  assert.equal((await start(db)).error, 'busy')
+  assert.notEqual(s.id, old.id, 'D 重開後再發起同一視窗：開新的')
+  const was = await row(db, old.id)
+  assert.equal(was.status, 'ended', '舊的結束')
+  assert.equal(was.end_reason, 'viewer_ended')
+  assert.equal(was.d_sig, null)
+  assert.equal((await pending(db)).requests.length, 1, 'T 只看到新的')
   assert.ok((await start(db, { p_window_name: '小丙' })).id)
   assert.ok((await start(db, { p_actor: X, p_window_name: '小丁' })).id)
   assert.equal((await start(db, { p_window_name: '小戊' })).error, 'busy', '第 4 個')

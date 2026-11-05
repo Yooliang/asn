@@ -5,7 +5,7 @@
 --   * 後台不判斷信任：簽章由兩端用本機記的公鑰驗，後台只轉交。session id 和到期時間由 D 決定並簽進去，後台只檢查範圍。
 --     到期時間回整數秒（expires_s）：簽章要逐字相同，不能靠時間字串。
 --   * **沒有自由欄位：** D 只能回報固定狀態（watching、paused、ended），T 只能結束。所以沒有 D 傳內容給 T 的路。
---   * 同時最多 3 個；同一對加同一視窗一筆；到期最多 10 分鐘；D 太久沒回報，T 看得到 viewer_stale，自己停。
+--   * 同時最多 3 個；同一對加同一視窗只留最新一筆（再發起就結束舊的）；到期最多 10 分鐘；D 太久沒回報，T 看得到 viewer_stale，自己停。
 --   * 結束就清掉一次性公鑰、簽章、topic，只留誰、哪台、哪個視窗、起訖。一天後刪除。
 -- 先不用：舊版不會呼叫這幾個動作。Hello 接上之前，電腦端不會真的發起。
 -- 回復：drop 這些函式與 relay.term_views。
@@ -78,9 +78,10 @@ begin
   if exists (select 1 from relay.term_views where id = p_id) then
     return jsonb_build_object('error', 'bad_request');   -- session id 不能重用
   end if;
-  if exists (select 1 from relay.term_views where from_node = p_actor and to_node = p_to_node and window_name = p_window_name and status <> 'ended') then
-    return jsonb_build_object('error', 'busy');
-  end if;
+  -- D 重開後再發起同一個視窗：舊的那筆已經沒有人在看，結束它再開新的。T 領取時會發現舊的不在了，自己停
+  update relay.term_views
+    set status = 'ended', end_reason = 'viewer_ended', ended_at = now(), topic = null, d_eph_pub = null, d_sig = null, t_eph_pub = null, t_sig = null
+    where from_node = p_actor and to_node = p_to_node and window_name = p_window_name and status <> 'ended';
   if (select count(*) from relay.term_views where to_node = p_to_node and status <> 'ended') >= 3 then
     return jsonb_build_object('error', 'busy');
   end if;
