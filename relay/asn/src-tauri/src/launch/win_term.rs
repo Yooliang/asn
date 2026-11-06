@@ -152,6 +152,13 @@ pub(crate) fn term_env(base: HashMap<String, String>, extra: &[(String, String)]
     super::pi_term::pi_term_env(base, extra)
 }
 
+/// 重開／接回的視窗要不要放背景（#906）：回（開在自帶終端時, 退回原生主控台時）。
+/// 在用共用終端服務＝背景，畫面從 ASN 裡看；沒有服務就沒辦法在 ASN 裡看，開前台。退回原生主控台一律前台
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn relaunch_hidden(service_active: bool) -> (bool, bool) {
+    (service_active, false)
+}
+
 /// 組一扇視窗：Claude 本體記 kind "claude"，其餘記 "window"
 pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool, env: BTreeMap<String, String>) -> WinSpec {
     let argv: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
@@ -390,7 +397,9 @@ mod tests {
         assert!(stop.contains("!super::win_term::wezterm_windows()"), "關著時不收 GUI");
         let local = include_str!("local.rs");
         let win = local.split("fn start_window_windows").nth(1).unwrap().split("fn start_console_window_windows").next().unwrap();
-        assert!(win.contains("start_console_window_windows(title, command, args, cwd, hidden, &[])"), "退路＝0.1.113 的開法，參數原樣");
+        assert!(win.contains("start_console_window_windows(title, command, args, cwd, console_hidden, &[])"), "退路＝0.1.113 的開法，參數原樣（顯示方式由呼叫端指定）");
+        let noted = local.split("pub(super) fn start_window_noted").nth(1).unwrap().split("fn start_window_windows").next().unwrap();
+        assert!(noted.contains("start_window_windows(title, command, args, cwd, hidden, hidden)"), "一般開新夥伴：自帶終端與退路主控台用同一個顯示方式（和 0.1.113 一樣）");
         let pi = include_str!("pi_term.rs");
         assert!(pi.contains("open_pi_gated(super::win_term::wezterm_windows(),"), "經 pi 的正式入口用開關");
     }
@@ -408,8 +417,11 @@ mod tests {
         assert!(remote_fn.contains("start_window(name, &command, &args, &cwd, hidden)"), "遠端開新夥伴走開窗點");
         // 換模型重開、接回對話、改名退路、接班換手都進 switch::real_launch → local::start_window
         let real = switch.split("pub(crate) fn real_launch").nth(1).unwrap().split("pub(crate) struct RealOs").next().unwrap();
-        assert!(real.contains("local::start_window("), "real_launch 走開窗點");
+        assert!(real.contains("local::start_window_relaunch("), "real_launch 走重開專用的開窗點");
         assert!(launch_rs.contains("switch::real_launch"), "遠端管理夥伴視窗的重開走 real_launch");
+        let relaunch = local.split("pub(super) fn start_window_relaunch").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(relaunch.contains("start_window_windows(title, command, args, cwd, in_term, in_console)"), "重開也走同一個 Windows 開窗點，只是顯示方式不同");
+        assert!(relaunch.contains("relaunch_hidden(super::win_term::term_server_active())"), "背景與否看這次執行有沒有在用共用終端服務");
         // 開窗點的 Windows 底層：先開自帶終端，退路才是原生主控台
         let win = local.split("fn start_window_windows").nth(1).unwrap().split("fn start_console_window_windows").next().unwrap();
         assert!(win.contains("win_term::open_window_real("), "Windows 開窗走 WezTerm");
@@ -417,6 +429,34 @@ mod tests {
         // 除了開窗點的退路與 pi 的退路入口，local.rs 沒有別的地方直接開原生主控台（測試不算）
         let body = local.split("#[cfg(test)]").next().unwrap();
         assert_eq!(body.matches("start_console_window_windows(").count(), 3, "定義、開窗點的退路、pi 的退路入口；不能有其他人直接開主控台");
+    }
+
+    #[test]
+    fn 重開的視窗_在服務裡放背景_沒有服務或退回主控台開前台() {
+        assert_eq!(relaunch_hidden(true), (true, false), "在用共用終端服務：開在背景；萬一退回原生主控台仍開前台");
+        assert_eq!(relaunch_hidden(false), (false, false), "沒有共用終端服務：看不到 ASN 裡的畫面，開前台");
+    }
+
+    /// #906：喚醒、換模型重開、改名的退路、換班接手四條，都經 switch::real_launch 開窗（所以都套用上面的背景規則）
+    #[test]
+    fn 守門_重開的四條路都經_real_launch() {
+        let ops = include_str!("../bridge/partner_ops.rs");
+        let switch = include_str!("switch.rs");
+        let body = |name: &str| -> String {
+            let start = ops.find(&format!("    fn {name}(")).unwrap_or_else(|| panic!("找不到 {name}"));
+            let rest = &ops[start..];
+            let end = rest[5..].find("\n    fn ").map(|i| i + 5).unwrap_or(rest.len());
+            rest[..end].to_string()
+        };
+        // 正式環境的 launch 就是 real_launch
+        let real_env = ops.split("    fn launch(&self, plan: &Plan) -> Result<(), String> {").nth(1).expect("正式環境的 launch").split("\n    }").next().unwrap();
+        assert!(real_env.contains("switch::real_launch(plan)"), "正式環境的 launch 交給 real_launch");
+        assert!(body("resume").contains("self.env.launch(&plan)"), "喚醒");
+        assert!(body("model").contains("env.launch(plan)"), "換模型重開（遠端管理）");
+        assert!(body("reopen").contains("self.env.launch(&plan)"), "改名的退路與換班接手共用的重開");
+        assert!(body("rename").contains("self.reopen("), "改名的退路走 reopen");
+        assert!(body("handover").contains("self.reopen("), "換班接手走 reopen");
+        assert!(switch.contains("run_with(&RealOs, &dir, &req, &real_launch,"), "本機換模型重開也用 real_launch");
     }
 
     // ---- #868：設定頁的「夥伴共用同一個終端服務」開關

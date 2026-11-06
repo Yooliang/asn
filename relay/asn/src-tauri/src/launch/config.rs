@@ -318,7 +318,7 @@ mod child_env_tests {
         let unix = fn_body(body, "fn start_window_unix(", "struct Term");
         assert_eq!(unix.matches(".env_clear().envs(super::config::child_env())").count(), 2, "Linux 的兩個開視窗路徑都要 env_clear＋child_env");
         // 4. 換模型重開走開窗點（環境清理在那裡），不交給 Windows Terminal
-        assert!(switch.contains("local::start_window("), "換模型重開走 local::start_window（環境清理在那裡）");
+        assert!(switch.contains("local::start_window_relaunch("), "換模型重開走 local::start_window_relaunch（同一個 Windows 開窗點，環境清理在那裡）");
         assert!(!local.contains("wt.exe") && !local.contains("spawn_wt"), "開夥伴不再交給 Windows Terminal（#476）");
     }
 
