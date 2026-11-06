@@ -28,25 +28,12 @@ pub fn orphans_of(table: &HashMap<u32, u32>, last_pid: u32, self_pid: u32) -> Ve
 /// 程序 pid 的啟動時間不晚於檔案修改時間（容許 5 秒誤差）。查不到就是 false（寧可不殺）。
 /// 只有 Linux 查得到（/proc）；Windows 的孤兒仍掛在已死父程序的 pid 下，走 `orphans_of` 就夠
 pub fn started_before_file(pid: u32, file: &Path) -> bool {
-    let Some(start) = process_start_secs(pid) else { return false };
+    let Some(start) = crate::heartbeat::process_start_secs(pid) else { return false };
     let Ok(mtime) = std::fs::metadata(file).and_then(|m| m.modified()) else { return false };
     let Ok(mt) = mtime.duration_since(std::time::UNIX_EPOCH) else { return false };
     start <= mt.as_secs() + 5
 }
 
-#[cfg(target_os = "linux")]
-fn process_start_secs(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // starttime 是 ")" 之後的第 20 個欄位（整行第 22 欄），單位是時鐘刻度（USER_HZ，Linux 上固定 100）
-    let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
-    let btime: u64 = std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
-    Some(btime + ticks / 100)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn process_start_secs(_pid: u32) -> Option<u64> {
-    None
-}
 
 /// 所有程序的 pid → 父 pid（Windows 用 Toolhelp 快照，其他系統讀 /proc/<pid>/stat）
 pub fn process_table() -> HashMap<u32, u32> {
