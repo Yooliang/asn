@@ -1240,7 +1240,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 至少活過 VIEW_MIN_ALIVE（期間每次都核對建立時間）；之後看到視窗就算成功，看不到就等到 VIEW_FAIL_WINDOW 為止還活著也算
         let min_polls = VIEW_MIN_ALIVE.as_millis() / VIEW_POLL.as_millis();
         for i in 0..(VIEW_FAIL_WINDOW.as_millis() / VIEW_POLL.as_millis()) {
-            if i >= min_polls && self.runner.window_up(pid) {
+            // 查不到視窗的平台（Linux）：活過最短時間就算開好，不必等滿
+            if i >= min_polls && (!self.runner.can_see_windows() || self.runner.window_up(pid)) {
                 break;
             }
             self.runner.sleep(VIEW_POLL);
@@ -3300,6 +3301,20 @@ impl super::win_term::WinTermHost for LiveTerms {
 }
 
 /// B2c：共用 mux 裡、名字是 `name` 的夥伴視窗的終端編號（mux＝名單上那個程序往上找到的 mux 的編號與建立時間）；沒有畫面的建置、測試＝None
+/// Linux：這個名字的夥伴在共用終端服務裡的終端編號（Windows 是先找程序、再找它底下的 mux，見 console 的 mux_target）
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) fn mux_partner_named(name: &str) -> Option<String> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().filter(|t| t.partner_in_service(name)).and_then(|t| t.partner_term_id(name).ok())
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        let _ = name;
+        None
+    }
+}
+
 pub(crate) fn mux_partner_in(mux: (u32, u64), name: &str) -> Option<String> {
     #[cfg(all(feature = "gui", not(test)))]
     {

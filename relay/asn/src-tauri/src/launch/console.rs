@@ -258,9 +258,17 @@ fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
     if req.name.is_empty() {
         return Ok(ConsoleQuery { ok: false, can_toggle: None, visible: None, reason: Some("缺少名字".into()), pid: None, hwnd: None });
     }
+    // Linux：只有共用終端服務裡的夥伴能切：前台＝開看畫面的視窗、背景＝收掉它（夥伴照常跑）
     #[cfg(not(windows))]
     {
-        return Ok(ConsoleQuery::no("僅 Windows 可切換主控台視窗", None));
+        if let Some(id) = super::term::mux_partner_named(&req.name) {
+            let q = super::term::mux_console_query(&id);
+            return Ok(match q.get("visible").and_then(Value::as_bool) {
+                Some(v) => ConsoleQuery { ok: true, can_toggle: Some(true), visible: Some(v), reason: None, pid: None, hwnd: None },
+                None => ConsoleQuery::no(q.get("reason").and_then(Value::as_str).unwrap_or("無法切換"), None),
+            });
+        }
+        return Ok(ConsoleQuery::no(NOT_IN_SERVICE, None));
     }
     #[cfg(windows)]
     {
@@ -285,7 +293,19 @@ fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
     }
 }
 
+/// Linux：不在共用終端服務裡的夥伴（各自開的終端視窗）不能從這裡切
+#[cfg_attr(windows, allow(dead_code))]
+const NOT_IN_SERVICE: &str = "這個夥伴不在共用終端服務裡，不能從這裡切換";
+
 fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, String> {
+    #[cfg(not(windows))]
+    if !req.name.is_empty() {
+        if let Some(id) = super::term::mux_partner_named(&req.name) {
+            let r = super::term::mux_console_set(&id, visible);
+            super::term::view_log(&format!("mux-view set name={} visible={visible} result={r}", req.name));
+            return Ok(r);
+        }
+    }
     // B2c：開在共用終端服務裡的夥伴沒有自己的視窗：前台＝開看畫面的 GUI、背景＝收掉它（窗格照常跑）
     #[cfg(windows)]
     if !req.name.is_empty() {
@@ -304,7 +324,7 @@ fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, 
     #[cfg(not(windows))]
     {
         let _ = visible;
-        return Ok(json!({ "ok": false, "reason": "僅 Windows 可切換主控台視窗" }));
+        return Ok(json!({ "ok": false, "reason": NOT_IN_SERVICE }));
     }
     #[cfg(windows)]
     {

@@ -54,7 +54,8 @@ pub(crate) fn unix_switches(wezterm: Option<&str>, mux: Option<&str>, user_on: b
         Some("1") => true,
         _ => user_on && found,
     };
-    (wez, mux)
+    // Linux 只支援 mux：不在 mux 裡的 WezTerm 開窗要等 gui-sock，路徑和 Windows 不同，那條路不開
+    (mux, mux)
 }
 
 /// 伺服器終端（共用 mux）這次啟動的結果，給設定頁顯示（#868）：啟動時由 term::live() 設一次，執行中不再變
@@ -539,7 +540,7 @@ mod tests {
         assert_eq!(unix_switches(None, None, true, false), (false, false), "打開了但沒裝 wezterm：不開");
         assert_eq!(unix_switches(None, None, true, true), (true, true));
         assert_eq!(unix_switches(Some("0"), None, true, true), (false, false));
-        assert_eq!(unix_switches(None, Some("0"), true, true), (true, false), "只關 mux");
+        assert_eq!(unix_switches(None, Some("0"), true, true), (false, false), "關掉 mux 時 WezTerm 開窗也關：Linux 只支援 mux");
         assert_eq!(unix_switches(Some("1"), Some("1"), false, false), (true, true), "開發用：環境變數 1 照舊");
         assert_eq!(term_server_wanted(None, true), (false, false), "使用者在設定頁關掉");
         assert_eq!(term_server_wanted(Some("0"), false), (false, true), "環境變數 0 優先：設定頁打開也不會開，畫面顯示已固定");
