@@ -147,6 +147,15 @@ pub fn goes_to_phone(code: &str) -> bool {
     code == status_code(ClaudeScreenKind::Permission) || code == status_code(ClaudeScreenKind::Question) || code == status_code(ClaudeScreenKind::QuestionView)
 }
 
+/// 選項列開頭的游標符號換成空格：游標在哪一列不算內容。**雜湊就是從這份文字算的**，建請求和送字前重查
+/// 都走 `phone_text`，所以只有這一處決定游標算不算（#921）。列的寬度不變，內容其餘部分一個字不動
+fn hide_cursor(line: &str) -> String {
+    match line.strip_prefix(CURSOR) {
+        Some(rest) => format!(" {rest}"),
+        None => line.to_string(),
+    }
+}
+
 /// 傳到手機的文字：權限框或選項框本身，不含上方的對話
 pub fn phone_text(screen: &str) -> Option<PromptText> {
     match classify(screen)?.kind {
@@ -156,7 +165,7 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
             let q = question_box(&lines[..end])?;
             // 自由輸入那一行（「N. Type something.」）手機沒有按鈕，內容也不放（#914）
-            let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| clean_prompt_line(l)).collect();
+            let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| hide_cursor(&clean_prompt_line(l))).collect();
             let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
             Some(PromptText { text: kept.join("\n").trim().to_string(), complete })
         }
@@ -825,6 +834,29 @@ mod question_box_tests {
         assert!(p.text.contains("你喜歡哪種顏色") && p.text.contains("紅色"));
         assert!(!p.text.contains("rm -rf"), "{}", p.text);
         assert!(!p.text.contains("Chat about this"));
+    }
+
+    #[test]
+    fn 游標位置不同_其餘相同_手機文字相同() {
+        let at1 = single();
+        let at2 = at1.replace("❯ 1. 紅", "  1. 紅").replace("  2. 綠", "❯ 2. 綠");
+        let at3 = at1.replace("❯ 1. 紅", "  1. 紅").replace("  3. 藍", "❯ 3. 藍");
+        assert_ne!(at1, at2, "前提：兩個畫面真的不一樣");
+        for t in [&at2, &at3] {
+            assert_eq!(classify(t).unwrap().kind, ClaudeScreenKind::Question, "前提：游標移動後還是單選");
+        }
+        let base = phone_text(&at1).unwrap();
+        assert!(!base.text.contains(CURSOR), "文字裡不留游標：{}", base.text);
+        assert!(base.text.contains("1. 紅") && base.text.contains("2. 綠"));
+        assert_eq!(phone_text(&at2).unwrap(), base);
+        assert_eq!(phone_text(&at3).unwrap(), base);
+    }
+
+    #[test]
+    fn 選項不同_手機文字不同() {
+        let base = phone_text(&single()).unwrap();
+        assert_ne!(phone_text(&single().replace("2. 綠", "2. 黃")).unwrap().text, base.text, "選項改字");
+        assert_ne!(phone_text(&single().replace("你喜歡哪種顏色", "你討厭哪種顏色")).unwrap().text, base.text, "題目改字");
     }
 
     #[test]

@@ -17,7 +17,7 @@ import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
-import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult } from './lib/perm-ask.mjs'
+import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
@@ -848,8 +848,9 @@ const app = createApp({
     // 全文只給本人看（不寫儲存、不進紀錄、不放系統通知）；沒登入或後台還沒部署就靜默略過；門鈴沒有內容
     const pq = reactive({ cur: null, armed: false, busy: false, error: '', waiting: false, result: null })
     const pqDismissed = new Set()
-    let pqArmTimer = 0, pqResultTimer = 0
-    const pqClose = () => { clearTimeout(pqArmTimer); clearInterval(pqResultTimer); Object.assign(pq, { cur: null, armed: false, busy: false, error: '', waiting: false, result: null }) }
+    let pqArmTimer = 0, pqResultTimer = 0, pqWatchTimer = 0
+    const pqWatchStop = () => { clearInterval(pqWatchTimer); pqWatchTimer = 0 }
+    const pqClose = () => { pqWatchStop(); clearTimeout(pqArmTimer); clearInterval(pqResultTimer); Object.assign(pq, { cur: null, armed: false, busy: false, error: '', waiting: false, result: null }) }
     const pqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
     async function checkPermReqs() {
       if (pq.busy || pq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
@@ -861,6 +862,20 @@ const app = createApp({
       clearTimeout(pqArmTimer)
       pqArmTimer = setTimeout(() => { pq.armed = true }, PQ_ARM_MS)
       go(permReqNav())
+      pqWatchStart()
+    }
+    // 框開著時每 5 秒看一次這筆還在不在：電腦撤回不會通知手機，不查的話按鈕會一直留著（#921）。
+    // 只在框開著而且畫面在前景時查；關框或切到背景就停；查不到（失敗）不當成結束
+    async function pqWatchTick() {
+      const cur = pq.cur
+      if (!cur || pq.busy || pq.waiting || pq.result || document.visibilityState !== 'visible') return
+      let alive = null
+      try { alive = pqStill(await invoke('android_perm_req_list'), cur.id) } catch { return }
+      if (alive === false && pq.cur === cur && !pq.busy && !pq.waiting && !pq.result) { pqWatchStop(); pq.result = { ok: false, text: PERMREQ_TEXT.gone } }
+    }
+    function pqWatchStart() {
+      pqWatchStop()
+      if (pq.cur && !pq.result && document.visibilityState === 'visible') pqWatchTimer = setInterval(() => { void pqWatchTick() }, PQ_WATCH_MS)
     }
     function pqWaitResult(id) {
       let tries = 0
@@ -886,7 +901,7 @@ const app = createApp({
     }
     const laterPermReq = () => { if (pq.cur) pqDismissed.add(pq.cur.id); history.back() }
     watch(() => nav.sheet, s => { if (s !== 'permreq' && pq.cur) pqClose() })
-    document.addEventListener('visibilitychange', () => { void checkPermReqs() })
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pqWatchStart(); else pqWatchStop(); void checkPermReqs() })
     setInterval(() => { void checkPermReqs() }, PQ_POLL_MS)
     void listen('relay-bell', () => { void checkPermReqs() })
     // ---------- 電腦要往終端送字／代答提問（#285、#296）：跳出確認面板，本人按確認或拒絕；桌面才能建立請求，手機只能決定 ----------

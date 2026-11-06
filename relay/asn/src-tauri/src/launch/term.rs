@@ -6717,6 +6717,40 @@ mod tests {
         }
 
         #[test]
+        fn 手機_撤回寬限期間框已不在_回答不送() {
+            // 手機的請求在寬限期間（約 9 秒）還留著；這時電腦上的框已經沒了，手機按下去要被擋在送字之前（#921）
+            let rig = permission_rig();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            let n = claude_allow(&rig).unwrap();
+            // 畫面變成一般畫面：讀不到框
+            *rig.runner.inner.screen.borrow_mut() = "一般的畫面\n".into();
+            let e = rig.svc.phone_answer_with("小乙", &o.hash, n, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("不在畫面"), "{e}");
+            // 畫面變成另一個框：雜湊對不上
+            *rig.runner.inner.screen.borrow_mut() = " ls\n Do you want to run ls?\n ❯ 1. Yes\n   2. No\n".into();
+            let e = rig.svc.phone_answer_with("小乙", &o.hash, n, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("變了"), "{e}");
+            assert!(sent(&rig).is_empty(), "兩種情況都沒有呼叫送字");
+        }
+
+        #[test]
+        fn 手機_游標移動不改雜湊_按了照送_內容變了才擋() {
+            let rig = permission_rig();
+            let rule = "─".repeat(60);
+            let foot = "Enter to select · ↑/↓ to navigate · Esc to cancel";
+            let page = |a: &str, b: &str, q: &str| format!("{rule}\n ☐ 色\n\n{q}\n\n{a} 1. 紅\n{b} 2. 綠\n  3. Type something.\n{rule}\n  4. Chat about this\n\n{foot}\n");
+            *rig.runner.inner.screen.borrow_mut() = page("❯", " ", "哪個？");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            *rig.runner.inner.screen.borrow_mut() = page(" ", "❯", "哪個？");
+            assert_eq!(rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap().hash, o.hash, "游標移動不改雜湊");
+            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2"], "建立與重查用同一個雜湊，游標在別列照樣送得出去");
+            *rig.runner.inner.screen.borrow_mut() = page(" ", "❯", "換了一題？");
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert_eq!(sent(&rig), vec!["2"], "題目換了不送");
+        }
+
+        #[test]
         fn 手機_內容不完整只能拒絕() {
             let rig = permission_rig();
             *rig.runner.inner.screen.borrow_mut() = " rm -rf a\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n".into();
