@@ -9,6 +9,7 @@ import {
   findBackgroundTimeouts,
   hasTrustNotice,
   launchFailedNoticeText,
+  shouldRestoreForeground,
 } from '../ui/lib/partner-launch-notify.mjs'
 
 test('背景逾時通知文案', () => {
@@ -72,12 +73,22 @@ test('#884 hasTrustNotice：後端說這位在信任框才算；別的代號、�
   assert.equal(hasTrustNotice([{ name: '', code: 'trust' }], ''), false)
 })
 
-test('#884 守門：逾時後切前台之前一定先問後端的信任框代號，不另寫文字比對', () => {
+test('#884 shouldRestoreForeground：讀畫面關著照舊切；開著只有信任框代號才切', () => {
+  const trust = [{ name: '墊底夥伴', code: 'trust' }]
+  assert.equal(shouldRestoreForeground({ watching: false, notices: [], name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: undefined, notices: [], name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: true, notices: trust, name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: true, notices: [], name: '墊底夥伴' }), false)
+  assert.equal(shouldRestoreForeground({ watching: true, notices: [{ name: '墊底夥伴', code: 'permission' }], name: '墊底夥伴' }), false)
+  assert.equal(shouldRestoreForeground({ watching: true, notices: trust, name: '別人' }), false)
+})
+
+test('#884 守門：逾時切前台之前一定經過 shouldRestoreForeground，用設定頁的 screenWatch，不另寫文字比對', () => {
   const src = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const at = src.indexOf('findBackgroundTimeouts(launchPending.value')
   assert.ok(at > 0, '找不到逾時處理')
-  const seg = src.slice(at, at + 1400)
-  const iNotice = seg.indexOf('transport.partnerNotices()'), iCheck = seg.indexOf('hasTrustNotice(notices'), iSet = seg.indexOf('transport.partnerConsoleSet')
-  assert.ok(iNotice > 0 && iCheck > iNotice && iSet > iCheck, '切前台之前要先 partnerNotices 再 hasTrustNotice')
-  assert.ok(!/trust this folder|信任此資料夾\/|do you trust/i.test(seg.replace(/'\[ASN\][^']*'/g, '')), '不要在前端寫信任框文字比對')
+  const seg = src.slice(at, at + 1800)
+  const iW = seg.indexOf('bridge.screenWatch'), iN = seg.indexOf('transport.partnerNotices()'), iCheck = seg.indexOf('shouldRestoreForeground({'), iSet = seg.indexOf('transport.partnerConsoleSet')
+  assert.ok(iW > 0 && iN > iW && iCheck > iN && iSet > iCheck, '順序：screenWatch → partnerNotices → shouldRestoreForeground → 切前台')
+  assert.ok(!/do you trust|trust this folder/i.test(seg), '不要在前端寫信任框文字比對')
 })

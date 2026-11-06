@@ -54,7 +54,7 @@ import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launc
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, hasTrustNotice, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -878,9 +878,11 @@ async function pollLaunchResults() {
   for (const p of findBackgroundTimeouts(launchPending.value, still, now, info.node)) {
     p.trustRestored = true   // 每一列只查一次；#884：逾時只是候選，後端讀畫面的監看說這位在信任框（trust）才切前台
     void (async () => {
+      const watching = bridge.screenWatch   // 設定頁「夥伴卡住時跳提示」現在的值（後端讀畫面的監看開著才有 trust 代號）
       let notices = []
-      try { notices = await transport.partnerNotices() } catch { /* 查不到就不判卡住 */ }
-      if (!hasTrustNotice(notices, p.agent)) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
+      if (watching === true) { try { notices = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
+      if (!shouldRestoreForeground({ watching, notices, name: p.agent })) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
+      if (watching !== true) console.info('[ASN] 讀畫面關著，背景啟動逾時照舊切前台', p.agent)
       const eng = engineForProfile(p.launchProfile || 'claude')
       await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })
       console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
