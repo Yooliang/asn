@@ -880,9 +880,9 @@ async function pollLaunchResults() {
     void (async () => {
       let watching = false   // 讀畫面這次實際有沒有在跑（不看設定頁的值：非 Windows 沒設環境變數時，設定頁開著也沒在讀）
       try { watching = (await transport.partnerNoticesActive()) === true } catch { /* 查不到當成沒在跑，照舊切前台 */ }
-      let notices = []
-      if (watching) { try { notices = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
-      if (!shouldRestoreForeground({ watching, notices, name: p.agent })) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
+      let alerts = []   // 讀畫面監看目前的判斷結果（名字＋代號）
+      if (watching) { try { alerts = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
+      if (!shouldRestoreForeground({ watching, alerts, name: p.agent })) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
       if (!watching) console.info('[ASN] 讀畫面這次沒在跑，照舊切前台', p.agent)
       const eng = engineForProfile(p.launchProfile || 'claude')
       await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })

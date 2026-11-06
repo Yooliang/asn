@@ -63,7 +63,7 @@ export function hasTrustNotice(notices, name) {
 
 /** #884：逾時後要不要把背景夥伴切到前台。讀畫面的監看（設定頁「夥伴卡住時跳提示」）關著時後端不讀畫面、notices 永遠是空的，
  *  真卡在信任框也沒人知道，所以照舊切前台；開著時只有後端說這位在信任框（trust）才切 */
-export function shouldRestoreForeground({ watching, notices, name }) {
+export function shouldRestoreForeground({ watching, alerts, name }) {
   if (watching !== true) return true
-  return hasTrustNotice(notices, name)
+  return hasTrustNotice(alerts, name)
 }

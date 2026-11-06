@@ -75,26 +75,26 @@ test('#884 hasTrustNotice：後端說這位在信任框才算；別的代號、�
 
 test('#884 shouldRestoreForeground：讀畫面關著照舊切；開著只有信任框代號才切', () => {
   const trust = [{ name: '墊底夥伴', code: 'trust' }]
-  assert.equal(shouldRestoreForeground({ watching: false, notices: [], name: '墊底夥伴' }), true)
-  assert.equal(shouldRestoreForeground({ watching: undefined, notices: [], name: '墊底夥伴' }), true)
-  assert.equal(shouldRestoreForeground({ watching: true, notices: trust, name: '墊底夥伴' }), true)
-  assert.equal(shouldRestoreForeground({ watching: true, notices: [], name: '墊底夥伴' }), false)
-  assert.equal(shouldRestoreForeground({ watching: true, notices: [{ name: '墊底夥伴', code: 'permission' }], name: '墊底夥伴' }), false)
-  assert.equal(shouldRestoreForeground({ watching: true, notices: trust, name: '別人' }), false)
+  assert.equal(shouldRestoreForeground({ watching: false, alerts: [], name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: undefined, alerts: [], name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: trust, name: '墊底夥伴' }), true)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [], name: '墊底夥伴' }), false)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '墊底夥伴', code: 'permission' }], name: '墊底夥伴' }), false)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: trust, name: '別人' }), false)
 })
 
 test('#884 表格：非 Windows 設定頁開著但讀畫面沒在跑（partnerNoticesActive 為 false 或查不到）→ 照舊切前台', () => {
   // list.js 把 partnerNoticesActive 的結果當 watching；不是 true 一律 false，也不會去查 notices
   const asWatching = r => r === true
   const cases = [
-    { name: '非 Windows 沒設環境變數（設定頁顯示開）', active: false, notices: [], want: true },
-    { name: '查詢丟錯', active: undefined, notices: [], want: true },
-    { name: 'Windows 預設跑著、沒看到信任框', active: true, notices: [], want: false },
-    { name: 'Windows 預設跑著、看到信任框', active: true, notices: [{ name: '墊底夥伴', code: 'trust' }], want: true },
-    { name: '使用者在設定頁關掉', active: false, notices: [], want: true },
+    { name: '非 Windows 沒設環境變數（設定頁顯示開）', active: false, alerts: [], want: true },
+    { name: '查詢丟錯', active: undefined, alerts: [], want: true },
+    { name: 'Windows 預設跑著、沒看到信任框', active: true, alerts: [], want: false },
+    { name: 'Windows 預設跑著、看到信任框', active: true, alerts: [{ name: '墊底夥伴', code: 'trust' }], want: true },
+    { name: '使用者在設定頁關掉', active: false, alerts: [], want: true },
   ]
   for (const c of cases) {
-    assert.equal(shouldRestoreForeground({ watching: asWatching(c.active), notices: c.notices, name: '墊底夥伴' }), c.want, c.name)
+    assert.equal(shouldRestoreForeground({ watching: asWatching(c.active), alerts: c.alerts, name: '墊底夥伴' }), c.want, c.name)
   }
 })
 
