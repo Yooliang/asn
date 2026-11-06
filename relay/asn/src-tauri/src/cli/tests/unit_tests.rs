@@ -73,6 +73,36 @@ fn 身分解析_主要位置缺金鑰與門鈴時回頭找後備位置_遷移搬
     assert_eq!(id.work_dir, primary.join("machine-T"), "工作資料夾仍放主要位置");
 }
 
+// session 檔留著，但那個 pid 已經是別的程序（建立時間晚於 session 開始）：這份不算，往上找或拒絕
+#[test]
+fn 呼叫者_session_檔的程序已經不是同一個_不算() {
+    use super::super::caller::{find_caller, inspect};
+    let f = fx("http://127.0.0.1:1", Some("舊視窗"));
+    let sessions = f.env.sessions_dir.clone();
+    let started_at: u64 = 1_700_000_000_000;
+    std::fs::write(sessions.join(format!("{CLAUDE_PID}.json")), json!({"pid": CLAUDE_PID, "kind": "interactive", "name": "舊視窗", "startedAt": started_at}).to_string()).unwrap();
+    let mut env = f.env.clone();
+    // 同一個程序（建立時間在 session 開始之前）：照常認得
+    env.started = Arc::new(move |p| (p == CLAUDE_PID).then_some(started_at - 5_000));
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
+    // 查不到建立時間：照舊認得（和名單同一條規則）
+    env.started = Arc::new(|_| None);
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
+    // pid 被別的程序用走了（建立時間在 session 開始很久之後）：不算，找不到就拒絕
+    env.started = Arc::new(move |p| (p == CLAUDE_PID).then_some(started_at + 3_600_000));
+    let err = find_caller(&env, "寄信").unwrap_err();
+    assert!(err.msg.contains("找不到呼叫者所屬的 Claude 視窗"), "{}", err.msg);
+    let ev = inspect(&env);
+    assert!(ev.chain.iter().any(|c| c.pid == CLAUDE_PID && c.session.as_deref().is_some_and(|s| s.contains("不算"))), "--whoami 看得出原因：{:?}", ev.chain);
+    // 環境變數那條也一樣
+    std::fs::write(sessions.join(format!("{CLAUDE_PID}.json")), json!({"pid": CLAUDE_PID, "kind": "interactive", "name": "舊視窗", "startedAt": started_at, "messagingSocketPath": "sock-1"}).to_string()).unwrap();
+    env.procs = Arc::new(|| Ok(ProcTable::new()));
+    env.socket = Some("sock-1".into());
+    assert!(find_caller(&env, "寄信").is_err(), "pid 被用走時，環境變數也對不上");
+    env.started = Arc::new(|_| None);
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
+}
+
 // pi 從別的 Claude 視窗底下開出來時，寄件人要是 pi 自己的視窗，不能算成上面那個 Claude 視窗
 #[test]
 fn 呼叫者_pi_視窗登記的_pid_在父行程鏈上_優先於更上層的_claude_視窗() {

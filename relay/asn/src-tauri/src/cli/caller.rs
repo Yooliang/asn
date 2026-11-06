@@ -38,6 +38,13 @@ pub fn read_session(dir: &Path, pid: u32) -> Option<Value> {
     (v.get("pid").and_then(Value::as_u64) == Some(pid as u64)).then_some(v)
 }
 
+/// session 檔記的程序就是現在這個 pid 的程序：程序是在 session 開始之後才建立的，就是 pid 被別的程序用走了，
+/// 這份 session 檔不算（和名單同一條規則，見 bridge::roster::same_process）。查不到建立時間、檔裡沒有 startedAt 照舊算
+fn session_is_current(env: &Env, pid: u32, s: &Value) -> bool {
+    let started_at = s.get("startedAt").and_then(Value::as_u64).unwrap_or(0);
+    crate::bridge::roster::same_process(started_at, (env.started)(pid))
+}
+
 fn session_name(s: &Value) -> String {
     s.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default()
 }
@@ -81,11 +88,17 @@ pub fn inspect(env: &Env) -> Evidence {
                 ev.via_chain = Some(Caller { pid, name });
                 break;
             }
-            let s = read_session(&env.sessions_dir, pid);
+            let raw = read_session(&env.sessions_dir, pid);
+            let stale = raw.as_ref().is_some_and(|s| !session_is_current(env, pid, s));
+            let s = raw.filter(|_| !stale);
             ev.chain.push(ChainItem {
                 pid,
                 name: table.get(&pid).map(|x| x.1.clone()).unwrap_or_else(|| "(已結束)".into()),
-                session: s.as_ref().map(|s| Some(session_name(s)).filter(|n| !n.is_empty()).unwrap_or_else(|| "(無名)".into())),
+                session: if stale {
+                    Some("(舊的登記，程序已不是它，不算)".into())
+                } else {
+                    s.as_ref().map(|s| Some(session_name(s)).filter(|n| !n.is_empty()).unwrap_or_else(|| "(無名)".into()))
+                },
             });
             if let Some(s) = s {
                 ev.via_chain = Some(Caller { pid, name: session_name(&s) });
@@ -107,7 +120,7 @@ pub fn inspect(env: &Env) -> Evidence {
             pids.sort_unstable();
             for pid in pids {
                 if let Some(s) = read_session(&env.sessions_dir, pid) {
-                    if s.get("messagingSocketPath").and_then(Value::as_str) == Some(ev.env_socket.as_str()) && (env.alive)(pid) {
+                    if s.get("messagingSocketPath").and_then(Value::as_str) == Some(ev.env_socket.as_str()) && (env.alive)(pid) && session_is_current(env, pid, &s) {
                         ev.via_env = Some(Caller { pid, name: session_name(&s) });
                         break;
                     }

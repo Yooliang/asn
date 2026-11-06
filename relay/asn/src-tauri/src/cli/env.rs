@@ -32,6 +32,8 @@ pub struct Env {
     pub procs: Arc<dyn Fn() -> Result<ProcTable, String> + Send + Sync>,
     /// pid 是否還活著
     pub alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// 程序建立時間（毫秒）；查不到＝None。用來分辨 session 檔記的程序和現在這個 pid 是不是同一個
+    pub started: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>,
     /// recv --watch 的輪詢間隔（ASN_RECV_POLL_MS）
     pub poll_ms: u64,
     /// asn secret request 等本人確認時的輪詢間隔（正式固定 2 秒，測試縮短）
@@ -91,6 +93,7 @@ impl Env {
             send_per_hour: num("ASN_SEND_PER_HOUR", 30) as usize,
             procs: Arc::new(super::caller::process_table),
             alive: Arc::new(crate::heartbeat::pid_alive),
+            started: Arc::new(crate::heartbeat::process_started_ms),
             poll_ms: num("ASN_RECV_POLL_MS", 120_000),
             secret_poll_ms: 2_000,
             heartbeat_ms: crate::heartbeat::heartbeat_ms(),
