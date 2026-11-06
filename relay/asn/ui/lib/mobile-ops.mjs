@@ -34,6 +34,26 @@ export const phoneModels = (engine = 'claude') => switchModelsFor(engine).map(m 
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串
 export const renamedChatId = (friend, op, input, view) => (op === 'rename' && view?.phase === 'done' ? friendId(friend.node, String(input?.newName ?? '').trim()) : '')
 
+// 對話頁頂端的進度要綁在下指令的那位夥伴（#928）：runs＝{ [夥伴位址]: { op, view } }，位址是 friend.id（節點/視窗名），
+// 兩台電腦的同名夥伴不會互蓋；同時有好幾位在跑時各自保留。全部回新物件，不改原本的。
+const runKey = id => (typeof id === 'string' && id.length > 0 ? id : '')
+export const runFor = (runs, id) => (runKey(id) && runs && Object.prototype.hasOwnProperty.call(runs, id) ? runs[id] : null)
+export function setRun(runs, id, run) {
+  if (!runKey(id)) return runs ?? {}
+  return { ...(runs ?? {}), [id]: run }
+}
+export function clearRun(runs, id) {
+  if (!runFor(runs, id)) return runs ?? {}
+  const { [id]: _gone, ...rest } = runs
+  return rest
+}
+// 改名完成後對話跳到新位址：進度跟著搬過去，舊位址清掉不殘留；from／to 相同或沒有進度就不動
+export function moveRun(runs, from, to) {
+  const run = runFor(runs, from)
+  if (!run || !runKey(to) || from === to) return runs ?? {}
+  return setRun(clearRun(runs, from), to, run)
+}
+
 // 對話頁頂端的進度條：run＝{ op, name, view }；回 null＝不顯示。steps 是換班接手的分段，extra 是補充（交接檔位置）
 export const STEP_MARK = { done: '✓', active: '…', todo: '○' }
 export function runBanner(run) {
