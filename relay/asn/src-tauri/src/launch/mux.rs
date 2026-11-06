@@ -64,6 +64,10 @@ pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
     Ok(MuxPaths { config: dir.join("mux.lua"), pid: dir.join("mux.pid"), lock: dir.join("start.lock"), open_lock: dir.join("open.lock"), sock, dir })
 }
 
+/// 每個窗格的捲動紀錄上限。3500 就是 WezTerm 的預設值，不改變現有行為，只是明寫出來：服務可以連跑好幾天，上限要有固定的數字。
+/// 之後要調就改這裡。已經在跑的終端服務不會重讀設定，新值要等服務下次重起才生效。
+pub const SCROLLBACK_LINES: u32 = 3500;
+
 /// 只設 socket 位置與「程式結束後窗格留著」的設定檔（exit_behavior 跟第 1 階段的隔離設定一樣，當掉的窗格還看得到最後的畫面）。exit_behavior_messaging = "None"：結束時不要讓 WezTerm 把整串包裝指令（-EncodedCommand base64，長指令數百行）印進畫面，會擠掉結束標記。用 Lua 長字串放路徑（不需要跳脫）；路徑裡若剛好有收尾記號就加等號層級避開
 pub fn config_text(sock: &Path) -> String {
     let s = sock.to_string_lossy();
@@ -73,7 +77,7 @@ pub fn config_text(sock: &Path) -> String {
     }
     // no_serve_automatically：`wezterm connect` 不吃 --no-auto-start，連不上時預設會自己起一個 mux；
     // 看畫面的 GUI 若這樣起出第二個 mux，unview 結束 GUI 時還會連它的窗格一起砍掉（#615 審查）
-    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}], no_serve_automatically = true }} }} }}\n")
+    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", scrollback_lines = {SCROLLBACK_LINES}, unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}], no_serve_automatically = true }} }} }}\n")
 }
 
 /// 下 cli 的程序的環境：只有白名單（`child_env` 的結果）加上 socket 位置
