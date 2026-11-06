@@ -6,7 +6,7 @@ import { ACCOUNT_ACTIONS, type AccountDeps, handleAccountAction } from "./accoun
 const UID = "3f2b7c1e-9a41-4c1b-8d52-0a6f6c7e1b10";
 const JWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXNpZ25hdHVyZQ";
 const bearer = `Bearer ${JWT}`;
-const ACTIONS = ["cloud_node_create", "cloud_node_list", "cloud_node_revoke"];
+const ACTIONS = ["cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename"];
 
 type Call = { fn: string; args: Record<string, unknown> };
 
@@ -114,6 +114,24 @@ Deno.test("cloud_node_revoke：憑證決定使用者；別人的／不是雲端�
   }
   const boom = fake({ rpc: async () => ({ data: null, error: { message: "db secret" } }) });
   const b = await handleAccountAction(boom.deps, "cloud_node_revoke", bearer, null, { node: "w02" });
+  assertEquals(b.status, 500);
+  assertEquals(JSON.stringify(b.body).includes("secret"), false);
+});
+
+Deno.test("cloud_node_rename：憑證決定使用者；不是自己的雲端代理一律 404；節點與名字格式要合格", async () => {
+  const f = fake({}, () => ({ ok: true, name: "雲端", changed: true }));
+  const r = await handleAccountAction(f.deps, "cloud_node_rename", bearer, null, { node: "t5-abcd1234", name: " 雲端 ", user: "evil", p_user: "evil" });
+  assertEquals(r, { status: 200, body: { ok: true, name: "雲端" } });
+  assertEquals(f.calls, [{ fn: "asn_cloud_node_rename", args: { p_user: UID, p_node: "t5-abcd1234", p_name: "雲端" } }]);
+  const nf = fake({}, () => ({ error: "not_found" }));
+  assertEquals(await handleAccountAction(nf.deps, "cloud_node_rename", bearer, null, { node: "someone-elses", name: "x" }), { status: 404, body: { error: "not_found" } });
+  for (const bad of [null, [], {}, { node: "t5-a" }, { name: "x" }, { node: "a b", name: "x" }, { node: "t5-a", name: "" }, { node: "t5-a", name: 5 }]) {
+    const g = fake();
+    assertEquals((await handleAccountAction(g.deps, "cloud_node_rename", bearer, null, bad)).status, 400, JSON.stringify(bad));
+    assertEquals(g.calls.length, 0);
+  }
+  const boom = fake({ rpc: async () => ({ data: null, error: { message: "db secret" } }) });
+  const b = await handleAccountAction(boom.deps, "cloud_node_rename", bearer, null, { node: "w02", name: "x" });
   assertEquals(b.status, 500);
   assertEquals(JSON.stringify(b.body).includes("secret"), false);
 });

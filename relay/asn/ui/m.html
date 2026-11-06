@@ -450,10 +450,19 @@
                         <ul class="m-cloud-list" v-if="cloudSt.rows.length" :aria-label="CLOUD_TEXT.title">
                           <li v-for="r in cloudSt.rows" :key="r.id">
                             <span class="m-cloud-tx"><b>{{ r.name }}<em v-if="r.state === 'online'">在線</em></b><small :title="r.title">{{ r.status }}</small></span>
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openRename(r.id)">{{ CLOUD_TEXT.rename }}</button>
                             <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.revoke(r.id)">{{ cloudSt.confirmId === r.id ? CLOUD_TEXT.revokeSure : CLOUD_TEXT.revoke }}</button>
                           </li>
                         </ul>
                         <p class="m-fine" v-else>{{ CLOUD_TEXT.empty }}</p>
+                        <div class="m-cloud-form" v-if="cloudSt.renameId">
+                          <label>{{ CLOUD_TEXT.rename }}<input class="set-input" v-model="cloudSt.renameName" maxlength="40" enterkeyhint="done" :aria-label="CLOUD_TEXT.rename" @keydown.enter.prevent="cloud.rename"></label>
+                          <p class="m-fine">{{ CLOUD_TEXT.renameNote }}</p>
+                          <div class="m-cloud-btns">
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.rename">{{ CLOUD_TEXT.renameSave }}</button>
+                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelRename">{{ CLOUD_TEXT.cancel }}</button>
+                          </div>
+                        </div>
                         <p class="m-fine" v-if="cloudSt.confirmId">{{ CLOUD_TEXT.revokeNote }}</p>
                         <p class="m-fine">{{ CLOUD_TEXT.lostKey }}</p>
                       </template>

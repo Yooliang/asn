@@ -17,6 +17,7 @@ function make({ signedIn = true, nodes = [], createErr = null } = {}) {
     list: async () => { calls.push(['list']); return { nodes } },
     create: async name => { calls.push(['create', name]); if (createErr) throw new Error(createErr); return { id: 't5-new', name, key: KEY, invite: `請閱讀並照著做：https://x.test/skill.md\n你的節點代號：t5-new\n名字：${name}` } },
     revoke: async id => { calls.push(['revoke', id]) },
+    rename: async (id, name) => { calls.push(['rename', id, name]); return name },
     approve: async (code, name, nodeId) => { calls.push(['approve', code, name, nodeId]); return { id: 't5-host', name } },
   }
   const clip = { write: async t => { written.push(t) } }   // 刻意沒有 read：不讀剪貼簿
@@ -244,6 +245,22 @@ test('回到前景：複製金鑰後已經過了 60 秒（計時器在背景沒�
   assert.equal(m.written.at(-1), KEY, '才過 30 秒不清')
   m.tick(31_000); m.ui.onVisible(); await new Promise(r => setTimeout(r, 0))
   assert.equal(m.written.at(-1), '', '過了 60 秒清')
+})
+
+test('改名：名字不合格不送；成功後收起輸入、提示、清單重讀', async () => {
+  const m = make({ nodes: [{ id: 't5-a', name: '小真', last_seen_at: null, online: false }] })
+  await m.ui.load()
+  m.ui.openRename('t5-a')
+  assert.equal(m.s.renameName, '小真')
+  m.s.renameName = '   '
+  await m.ui.rename()
+  assert.ok(!m.calls.some(c => c[0] === 'rename'))
+  assert.equal(m.s.msg, CLOUD_TEXT.renameNeed)
+  m.s.renameName = ' 小美 '
+  await m.ui.rename()
+  assert.deepEqual(m.calls.filter(c => c[0] === 'rename'), [['rename', 't5-a', '小美']])
+  assert.equal(m.s.msg, CLOUD_TEXT.renamed)
+  assert.equal(m.s.renameId, '')
 })
 
 test('撤銷：第一次點只是確認、第二次才送；成功後清單重讀', async () => {

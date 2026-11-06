@@ -4,7 +4,7 @@
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name", "account_settings", "account_device_prefs"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs"]);
 
 export interface AuthUser {
   id: string;
@@ -268,6 +268,18 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { ok: true } };
+  }
+
+  // 本人替雲端設備改名（#837，migration 20261106120000_cloud_node_rename.sql）：只改設備名，bot 名由代理自己回報
+  if (action === "cloud_node_rename") {
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+    const name = cleanDisplayName(b.name);
+    if (typeof b.node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(b.node) || name === null) return { status: 400, body: { error: "bad_request" } };
+    const { data, error } = await deps.rpc("asn_cloud_node_rename", { p_user: user.id, p_node: b.node, p_name: name });
+    if (error) { console.error("cloud_node_rename", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { ok: true, name: d.name } };
   }
 
   return { status: 404, body: { error: "not_found" } };

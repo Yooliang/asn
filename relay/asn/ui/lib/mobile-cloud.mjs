@@ -45,6 +45,9 @@ export const CLOUD_TEXT = {
   revoke: '撤銷', revokeSure: '確認撤銷',
   revokeNote: '撤銷後，這個代理的金鑰立刻失效，好友名單上也會消失。',
   revoked: '已撤銷，這個代理的金鑰立刻失效。',
+  rename: '改名', renameSave: '儲存', renamed: '已改名。',
+  renameNote: '只改設備名，代理底下 bot 的名字不會變。',
+  renameNeed: '請輸入設備名（1 到 40 個字）',
   lostKey: '金鑰弄丟了：把這個代理撤銷，再重新邀請一次。',
   approveBtn: '輸入短碼核准主機',
   approveTitle: '核准無畫面主機',
@@ -62,7 +65,7 @@ const errText = e => String(e?.message ?? e ?? '').trim() || '沒有成功，請
 
 /**
  * deps：
- *   api       { list, create, revoke, approve }（cloudApi）
+ *   api       { list, create, revoke, rename, approve }（cloudApi）
  *   status    () → { signed_in }（authApi.status）
  *   clip      { write(text) }（navigator.clipboard 的包裝；不讀剪貼簿）
  *   now       () → 毫秒
@@ -79,6 +82,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     created: null,         // { id, name, key, invite } —— 只在記憶體，按「完成」就丟
     reveal: false, copiedKey: false, copiedInvite: false, clipNote: '',
     confirmId: '',
+    renameId: '', renameName: '',
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
   let loadMsg = ''   // 最近一次讀取失敗留在畫面上的提示（輪詢成功後要消掉，不能一直掛著）
@@ -158,7 +162,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     epoch++
     const hadKey = !!s.created
     s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
-    s.confirmId = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
+    s.confirmId = ''; s.renameId = ''; s.renameName = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
     const expired = expireNext, confirmed = confirmedNext
     expireNext = false; confirmedNext = false
     await clearClipboard()
@@ -181,6 +185,19 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
       await load()
     } catch (e) { s.msg = errText(e) } finally { s.busy = false }
   }
+  const openRename = id => { const r = s.rows.find(x => x.id === id); s.msg = ''; s.renameId = id; s.renameName = r?.name ?? '' }
+  const cancelRename = () => { s.renameId = ''; s.renameName = '' }
+  async function rename() {
+    if (s.busy || !s.renameId) return
+    const n = cleanName(s.renameName)
+    if (!n) { s.msg = CLOUD_TEXT.renameNeed; return }
+    s.busy = true; s.msg = ''
+    try {
+      await api.rename(s.renameId, n)
+      s.renameId = ''; s.renameName = ''; s.msg = CLOUD_TEXT.renamed
+      await load()
+    } catch (e) { s.msg = errText(e) } finally { s.busy = false }
+  }
   // 核准無畫面主機：主機上跑 asn-bridge login 會印出短碼；這裡輸入短碼、替主機取名。金鑰不經過這裡（主機自己輪詢拿）
   async function approve() {
     if (s.busy) return
@@ -198,5 +215,5 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   const cancelApprove = () => { s.approveForm = false }
 
   const justJoined = () => !!s.created && joined(s.rows, s.created.id)
-  return { state: s, markExpired, confirmLeave, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
+  return { state: s, markExpired, confirmLeave, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, openRename, cancelRename, rename, approve, openApprove, cancelApprove, justJoined, clearClipboard }
 }
