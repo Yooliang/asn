@@ -2772,6 +2772,13 @@ pub fn partner_notices() -> Vec<PartnerNotice> {
     PARTNER_NOTICES.lock().map(|g| g.clone()).unwrap_or_default()
 }
 
+/// 讀畫面這次實際有沒有在跑：環境/平台預設開，且使用者沒在設定頁關掉。
+/// 非 Windows 沒設 ASN_SCREEN_WATCH=1 就是沒跑，就算設定頁的開關顯示開著
+#[cfg(feature = "gui")]
+pub fn screen_watch_active() -> bool {
+    super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref()).is_ok()
+}
+
 /// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。Windows 預設開；只標狀態與提醒本人，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {

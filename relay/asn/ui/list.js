@@ -54,7 +54,7 @@ import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launc
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -876,13 +876,19 @@ async function pollLaunchResults() {
   const still = resolvePending(launchPending.value, friends.value)
   const now = Date.now()
   for (const p of findBackgroundTimeouts(launchPending.value, still, now, info.node)) {
-    p.trustRestored = true
-    const eng = engineForProfile(p.launchProfile || 'claude')
-    const notice = backgroundRestoreNoticeText(p.agent)
-    void transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true }).then(() => {
-      console.info('[ASN] 背景啟動可能卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
-      showLaunchNotice(notice)
-    }).catch(() => {})
+    p.trustRestored = true   // 每一列只查一次；#884：逾時只是候選，後端讀畫面的監看說這位在信任框（trust）才切前台
+    void (async () => {
+      let watching = false   // 讀畫面這次實際有沒有在跑（不看設定頁的值：非 Windows 沒設環境變數時，設定頁開著也沒在讀）
+      try { watching = (await transport.partnerNoticesActive()) === true } catch { /* 查不到當成沒在跑，照舊切前台 */ }
+      let alerts = []   // 讀畫面監看目前的判斷結果（名字＋代號）
+      if (watching) { try { alerts = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
+      if (!shouldRestoreForeground({ watching, alerts, name: p.agent })) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
+      if (!watching) console.info('[ASN] 讀畫面這次沒在跑，照舊切前台', p.agent)
+      const eng = engineForProfile(p.launchProfile || 'claude')
+      await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })
+      console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
+      showLaunchNotice(backgroundRestoreNoticeText(p.agent))
+    })().catch(() => {})
   }
   launchPending.value = still
 }

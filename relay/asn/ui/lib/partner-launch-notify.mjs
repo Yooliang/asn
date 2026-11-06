@@ -55,3 +55,15 @@ export function collectLaunchFailures(launches, track) {
   }
   return out
 }
+
+/** #884：逾時後只在夥伴真的停在信任框時才切前台。判斷用後端讀畫面監看給的狀態代號（partner_notices 的 trust），前端不另寫文字比對 */
+export function hasTrustNotice(notices, name) {
+  return (Array.isArray(notices) ? notices : []).some(i => i?.code === 'trust' && typeof name === 'string' && name !== '' && i?.name === name)
+}
+
+/** #884：逾時後要不要把背景夥伴切到前台。讀畫面的監看（設定頁「夥伴卡住時跳提示」）關著時後端不讀畫面、notices 永遠是空的，
+ *  真卡在信任框也沒人知道，所以照舊切前台；開著時只有後端說這位在信任框（trust）才切 */
+export function shouldRestoreForeground({ watching, alerts, name }) {
+  if (watching !== true) return true
+  return hasTrustNotice(alerts, name)
+}
