@@ -6,6 +6,8 @@
 //! 這個資料夾跟 ~/.claude/sessions 一樣，同一個使用者的程序都寫得到；ASN 只在本人按下時寫。
 //! 認名字靠的是三件事都要對上：名字是本人在 ASN 上定的（ASN 預設、本人可改，不能和名單上活著的視窗或夥伴紀錄撞名，呼叫端核對）、
 //! pid、程序建立時間。程序結束、或 pid 被別的程序用走（建立時間對不上），這筆登記就不算，給它的信回到一般流程。
+// 無視窗的橋（沒有 gui）只用到讀登記的部分，登記與預設名字給畫面用
+#![cfg_attr(not(feature = "gui"), allow(dead_code))]
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -121,21 +123,32 @@ pub fn remove(dir: &Path, pid: u32, started_ms: u64) {
     let _ = std::fs::remove_file(file_of(dir, pid, started_ms));
 }
 
+/// 清掉已經失效的登記（程序結束、或 pid 被別的程序用走）。ASN 啟動時跑一次；回清掉幾筆。
+/// 只刪這個資料夾裡、ASN 自己認得格式的登記檔（檔名就是 pid-建立時間）
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn prune(dir: &Path, started: &dyn Fn(u32) -> Option<u64>) -> usize {
+    let stale: Vec<Entry> = read_all(dir).into_iter().filter(|e| !e.is_current(started(e.pid))).collect();
+    for e in &stale {
+        remove(dir, e.pid, e.started_ms);
+    }
+    stale.len()
+}
+
 /// 本機活著的 Claude 視窗名（撞名檢查用；pi 視窗與夥伴紀錄的名字由畫面一起給）
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 fn live_claude_names() -> Vec<String> {
     let Some(dir) = crate::launch::console::sessions_dir() else { return Vec::new() };
     crate::bridge::roster::read_sessions(&dir, crate::heartbeat::pid_alive, 0, "").unwrap_or_default().into_iter().map(|w| w.name).collect()
 }
 
 /// 這個 pid 是不是這台電腦上、使用者自己在前景開的 agy（程序掃描看得到的那一列）
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 fn is_local_foreground_agy(pid: u32) -> bool {
     crate::bridge::procscan::scan_system().into_iter().any(|a| a.pid == pid && ENGINES.contains(&a.engine.as_str()) && !a.background)
 }
 
 /// 畫面「接進收發室」對話框的預設名字。taken＝畫面名單上這台電腦的名字（視窗、pi、夥伴紀錄）
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 #[tauri::command]
 pub async fn self_window_default(taken: Vec<String>) -> Result<String, String> {
     crate::launch::blocking_timeout(move || {
@@ -147,7 +160,7 @@ pub async fn self_window_default(taken: Vec<String>) -> Result<String, String> {
 
 /// 本人按「接進收發室」：核對這個 pid 是這台的前景 agy、查得到建立時間、名字合法且不撞名，才寫登記。
 /// 回 { name }；不過就回原因（給人看的一句話）
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 #[tauri::command]
 pub async fn self_window_register(pid: u32, name: String, taken: Vec<String>) -> Result<Value, String> {
     crate::launch::blocking_timeout(move || {
@@ -203,6 +216,17 @@ mod tests {
         assert!(find_pid(d.path(), 41, &same).is_none(), "別的 pid");
         assert_eq!(live(d.path(), &same).len(), 1);
         assert!(live(d.path(), &reused).is_empty());
+    }
+
+    #[test]
+    fn 啟動時清掉失效的登記_還有效的留著() {
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), &entry("agy-1", 40)).unwrap();
+        write(d.path(), &entry("agy-2", 41)).unwrap();
+        let only_40 = |p: u32| (p == 40).then_some(T0 + 100);
+        assert_eq!(prune(d.path(), &only_40), 1);
+        assert_eq!(read_all(d.path()).iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["agy-1"]);
+        assert_eq!(prune(d.path(), &only_40), 0, "再跑一次沒有可清的");
     }
 
     #[test]

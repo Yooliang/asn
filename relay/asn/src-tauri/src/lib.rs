@@ -23,6 +23,8 @@ mod datadir;
 mod device_login;
 mod envc;
 mod heartbeat;
+// 本人接進收發室的視窗（只有電腦版有：手機沒有終端程序與本機 session 資料夾）
+#[cfg(desktop)]
 mod self_windows;
 mod home;
 mod identity;
@@ -1766,6 +1768,8 @@ pub fn run() {
     launch::term::set_global(terms.clone());
     #[cfg(desktop)]
     launch::term::start_background_partner_watch(terms.clone());
+    #[cfg(desktop)]
+    self_windows::prune(&self_windows::dir_in(&identity::relay_home()), &heartbeat::process_started_ms);
     #[cfg(desktop)]
     launch::term::screen_watch_set_user_off(bridge::read_settings(&data_dir).screen_watch_off);
     #[cfg(desktop)]
