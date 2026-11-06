@@ -337,6 +337,8 @@ pub struct Core {
     channel_wait: HashSet<String>,
     /// 重開前交給內建通道、還沒結束的信：重新拉到時決定重送或放棄（#828）
     channel_back: HashSet<String>,
+    /// 重開後要補轉交的群組點名：游標鍵 → (重開前游標, 要補的項目編號)。游標退回後，這之前已處理過的其他點名不再轉交（#845）
+    room_redo: HashMap<String, (u64, HashSet<String>)>,
     /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
     reply_fail: HashSet<String>,
     unrouted: HashSet<String>,
@@ -528,7 +530,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
@@ -662,6 +664,34 @@ impl Core {
         self.launcher = Some(l);
     }
 
+    fn room_redo_file(&self) -> PathBuf {
+        self.cfg.work_dir.join("rooms-redo.json")
+    }
+    /// 補轉交清單跟游標一起存檔：補完之前再重開，已處理過的點名才不會重複（#845）
+    fn load_room_redo(&self) -> HashMap<String, (u64, HashSet<String>)> {
+        let Ok(text) = std::fs::read_to_string(self.room_redo_file()) else { return HashMap::new() };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { return HashMap::new() };
+        let Some(o) = v.as_object() else { return HashMap::new() };
+        o.iter()
+            .filter_map(|(k, e)| {
+                let hi = json_u64(e.get("hi"));
+                let ids: HashSet<String> = e.get("ids")?.as_array()?.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                Some((k.clone(), (hi, ids)))
+            })
+            .collect()
+    }
+    fn save_room_redo(&self) {
+        let f = self.room_redo_file();
+        if self.room_redo.is_empty() {
+            let _ = std::fs::remove_file(&f);
+            return;
+        }
+        let m: serde_json::Map<String, Value> = self.room_redo.iter().map(|(k, (hi, ids))| { let mut v: Vec<&String> = ids.iter().collect(); v.sort(); (k.clone(), json!({"hi": hi, "ids": v})) }).collect();
+        if let Err(e) = crate::write_atomic(&f, &Value::Object(m).to_string()) {
+            self.log.line(&format!("rooms redo save failed: {e}"));
+        }
+    }
+
     fn pending_file(&self) -> PathBuf {
         self.cfg.work_dir.join("pending.json")
     }
@@ -680,6 +710,39 @@ impl Core {
             self.log.line(&format!("channel mail unfinished before restart: {} (will be pulled again)", back.len()));
         }
         self.channel_back = back.into_iter().map(|p| p.id).collect();
+        // 重開前交給內建通道、還沒結束的群組點名（已經回過的不算，退回會讓群組收到第二則）：群組沒有信箱，游標早就過了它，不退回去就永遠不會再轉交也沒人回（#845）
+        let (rback, keep): (Vec<Pending>, Vec<Pending>) = keep.into_iter().partition(|p| p.channel && !p.replied && p.state != State::Done && p.room.as_ref().is_some_and(|r| !r.member.is_empty()));
+        self.room_redo = self.load_room_redo();
+        let mut low: HashMap<String, u64> = HashMap::new();
+        for p in rback {
+            let Some(r) = p.room.clone() else { continue };
+            let ck = Cursors::key(&r.id, &r.member);
+            if channel_turns::resent(&self.cfg.work_dir, &p.id) {
+                self.log.line(&format!("room={} #{} channel turn unfinished after one resend: giving up", r.id, r.seq));
+                if let Some(e) = self.room_redo.get_mut(&ck) {
+                    e.1.remove(&p.id);
+                }
+                continue;
+            }
+            if let Err(e) = channel_turns::mark_resent(&self.cfg.work_dir, &p.id) {
+                self.log.line(&format!("room={} #{} cannot record the resend: {e}", r.id, r.seq));
+            }
+            // 每一則都記進補轉交清單（不管游標這時已退到哪），游標最後一起退到最小那則前面
+            let cur = self.cursors.get(&ck).unwrap_or(0);
+            let e = self.room_redo.entry(ck.clone()).or_insert((cur, HashSet::new()));
+            e.0 = e.0.max(cur);
+            e.1.insert(p.id.clone());
+            let l = low.entry(ck).or_insert(u64::MAX);
+            *l = (*l).min(r.seq.saturating_sub(1));
+            self.log.line(&format!("room={} #{} channel turn unfinished before restart: cursor moved back, will be handed again once", r.id, r.seq));
+        }
+        // 先存補轉交清單、再退游標：中間掛掉，最壞是清單在而游標沒退（下次重開再退），不會游標退了清單卻沒了（那樣已處理過的會重複）
+        self.save_room_redo();
+        for (ck, l) in low {
+            if self.cursors.get(&ck).is_some_and(|c| c > l) {
+                self.save_cursor(&ck, l);
+            }
+        }
         channel_turns::prune(&self.cfg.work_dir);
         self.pending = keep;
         self.last_requester = st.last;
@@ -696,6 +759,9 @@ impl Core {
             let first = if st.quota_auth { AUTH_FIRST_PROBE_MS } else { QUOTA_RETRY_MS };
             self.next_probe_at = (self.now + first).min(st.quota_until);
             self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
+        }
+        if !self.room_redo.is_empty() {
+            self.persist(); // 退回去的群組點名從存檔拿掉：補轉交之前再重開，不會被當成「已重送過」而放棄
         }
     }
     fn persist(&mut self) {
@@ -1692,7 +1758,7 @@ impl Core {
         if self.quota_until == 0 && !self.is_respond(&self.pending[i].target) {
             self.quota_ep = None; // 收發室 worker 真的完成了轉交＝額度恢復，下次用完再通知
         }
-        let channel = self.pending[i].room.is_none() && self.engine_of(&self.pending[i].target) == "acp";
+        let channel = self.engine_of(&self.pending[i].target) == "acp"; // 群組點名也算：重開時要補轉交（#845）
         self.pending[i].channel = channel;
         self.persist();
         let (target, t0, no_reply) = (self.pending[i].target.clone(), self.pending[i].t0, self.pending[i].no_reply);
@@ -2007,12 +2073,18 @@ impl Core {
                     if seq <= cur {
                         continue;
                     }
-                    if msg.get("for_me").and_then(Value::as_bool) == Some(true) && !self.handle_room_msg(&room, &member, &msg).await {
+                    // 重開後游標退回過：退回範圍裡不是「要補的」那幾則，重開前就處理過了，不再轉交（否則群組會收到第二次回覆）
+                    let skip = self.room_redo.get(&ck).is_some_and(|(hi, ids)| seq <= *hi && !ids.contains(&rooms::room_uuid(&room_id, seq, &member)));
+                    if msg.get("for_me").and_then(Value::as_bool) == Some(true) && !skip && !self.handle_room_msg(&room, &member, &msg).await {
                         done = false;
                         break;
                     }
                     cur = seq;
                     self.save_cursor(&ck, cur);
+                }
+                if self.room_redo.get(&ck).is_some_and(|(hi, _)| cur >= *hi) {
+                    self.room_redo.remove(&ck);
+                    self.save_room_redo();
                 }
                 let tail = json_u64(res.get("last_seq"));
                 if done && tail > cur {
@@ -2197,7 +2269,7 @@ impl Core {
             return true;
         }
         let mut p = Pending::new(&id, "", "", &target, self.now, false);
-        p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone() });
+        p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone(), member: member.to_string() });
         self.pending.push(p);
         self.persist();
         let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）

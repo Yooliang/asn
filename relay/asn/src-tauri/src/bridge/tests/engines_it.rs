@@ -728,6 +728,172 @@ async fn agy_登入失效_自動重開一次把同一封信再試_成功就不�
     h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
 }
 
+// ---- #845：重開 ASN 時，交給內建通道的群組點名會丟（#828 的群組這條）
+
+/// 一個群組、我（成員 Gemini，通道）被點名的訊息們。`forMe` 只有被點名的才有
+fn room_for(h: &EH, msgs: Vec<(u64, &str)>) {
+    let messages: Vec<Value> = msgs
+        .iter()
+        .map(|(seq, body)| json!({"seq": seq, "from": "W~W-政策", "from_name": "政策", "trust": "member", "body": body, "mentions": [], "at": "t", "forMe": {"Gemini": true}}))
+        .collect();
+    let last = msgs.last().map(|m| m.0).unwrap_or(0);
+    let room = json!({"id": "R1", "name": "專案群", "last_seq": last, "mine": [{"member": "W~Gemini", "read_seq": 1}], "messages": messages});
+    h.fr.st.lock().unwrap().rooms = vec![room];
+}
+
+fn room_cursor(h: &EH) -> u64 {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("rooms-cursor.json")).unwrap_or_else(|_| "{}".into())).unwrap();
+    v.as_object().and_then(|o| o.values().next()).and_then(Value::as_u64).unwrap_or(0)
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_這一輪沒做完就重開_游標退回_重開後再轉交一次() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    assert_eq!(room_cursor(&h), 2, "前提：轉交後游標已前進，重開前才會丟");
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 1, "重開時沒做完的通道點名：游標退回它前面");
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    let n = h.core.log.recent().iter().filter(|l| l.contains("handed room=R1 #2")).count();
+    assert_eq!(n, 1, "新核心把它再轉交一次");
+    assert_eq!(room_cursor(&h), 2);
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_上一輪其實已經回了_重開後不退回游標_群組只收到一則回覆() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room3");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    std::fs::write(&gate, "go").unwrap();
+    h.wait("回覆貼進群組", |h| !h.fr.st.lock().unwrap().room_posts.is_empty()).await;
+    assert_eq!(h.fr.st.lock().unwrap().room_posts.len(), 1, "前提：重開前群組已經收到一則回覆");
+    h.restart().await;
+    h.core.pull_rooms(now()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    assert_eq!(h.fr.st.lock().unwrap().room_posts.len(), 1, "重開後群組不會再收到第二則");
+    assert_eq!(room_cursor(&h), 2, "已經回過的不退回游標");
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_回覆已貼出但這一輪的結束還沒處理就重開_不退回游標() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room4");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    // 手動改存檔：把這則標成「已經回過」（回覆貼出了、結束記號還沒處理）
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let item = v["pending"].as_array_mut().unwrap().iter_mut().find(|p| p["room"].is_object()).expect("前提：存檔裡有這則群組項目");
+    assert_eq!(item["channel"], json!(true), "前提：它被標成通道項目");
+    item["replied"] = json!(true);
+    std::fs::write(&f, v.to_string()).unwrap();
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 2, "已經回過的不退回游標，群組不會收到第二則");
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_第二則沒做完_第三則已回完_重開後只補第二則() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room5");
+    room_for(&h, vec![(2, &format!("第二則
+@@GATE {}", gate.display())), (3, "第三則")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("兩則都交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #3"))).await;
+    assert_eq!(room_cursor(&h), 3);
+    // 手動改存檔：第三則已經回完（紀錄清掉），第二則還沒做完
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let items = v["pending"].as_array_mut().unwrap();
+    let before = items.len();
+    items.retain(|p| p["room"]["seq"] != json!(3));
+    assert_eq!(before - items.len(), 1, "前提：存檔裡有第三則，而且只拿掉它");
+    assert!(items.iter().any(|p| p["room"]["seq"] == json!(2) && p["channel"] == json!(true)), "前提：第二則還在、是通道項目");
+    std::fs::write(&f, v.to_string()).unwrap();
+    h.restart().await;
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    let log = h.core.log.recent();
+    assert_eq!(log.iter().filter(|l| l.contains("handed room=R1 #2")).count(), 1, "沒做完的第二則補轉交一次");
+    assert_eq!(log.iter().filter(|l| l.contains("handed room=R1 #3")).count(), 0, "已回完的第三則不能再轉交（否則群組收到第二次回覆）");
+    assert_eq!(room_cursor(&h), 3, "補完後游標回到原位");
+}
+
+/// 兩則點名都交出去、游標到 3，再把存檔改成指定的狀態；回傳閘門檔（放行用）
+async fn two_room_msgs(h: &mut EH, tag: &str, done3: bool) -> std::path::PathBuf {
+    let gate = h.work.path().join(format!("gate-{tag}"));
+    room_for(h, vec![(2, &format!("第二則
+@@GATE {}", gate.display())), (3, "第三則")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("兩則都交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #3"))).await;
+    assert_eq!(room_cursor(h), 3);
+    let f = h.work.path().join("pending.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    let items = v["pending"].as_array_mut().unwrap();
+    if done3 {
+        let before = items.len();
+        items.retain(|p| p["room"]["seq"] != json!(3));
+        assert_eq!(before - items.len(), 1, "前提：存檔裡有第三則，而且只拿掉它");
+    }
+    for seq in if done3 { vec![2] } else { vec![2, 3] } {
+        assert!(items.iter().any(|p| p["room"]["seq"] == json!(seq) && p["channel"] == json!(true)), "前提：第 {seq} 則還在、是通道項目");
+    }
+    std::fs::write(&f, v.to_string()).unwrap();
+    gate
+}
+
+fn handed(h: &EH, seq: u64) -> usize {
+    h.core.log.recent().iter().filter(|l| l.contains(&format!("handed room=R1 #{seq} "))).count()
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_第二則第三則都沒做完_重開後兩則都補() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = two_room_msgs(&mut h, "both", false).await;
+    h.restart().await;
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    assert_eq!((handed(&h, 2), handed(&h, 3)), (1, 1), "兩則都沒做完：兩則都要補，不能丟第三則");
+    assert_eq!(room_cursor(&h), 3);
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_補轉交之前又重開一次_已回完的第三則仍不重複() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = two_room_msgs(&mut h, "twice", true).await;
+    h.restart().await;
+    h.restart().await; // 補轉交之前再重開：補的清單要跟著游標存檔，不能只在記憶體
+    std::fs::write(&gate, "go").unwrap();
+    h.core.pull_rooms(now()).await;
+    assert_eq!((handed(&h, 2), handed(&h, 3)), (1, 0), "第二則補一次；已回完的第三則不能因為再重開一次又被轉交");
+    assert_eq!(room_cursor(&h), 3);
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_重開後再轉交仍沒做完_再重開不再補轉交() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let gate = h.work.path().join("gate-room2");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@GATE {}", gate.display()))]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    h.restart().await;
+    h.core.pull_rooms(now()).await; // 第二次轉交，閘門仍關著
+    h.wait("再交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    h.restart().await;
+    assert_eq!(room_cursor(&h), 2, "已重送過一次還沒做完：不再退回游標，避免每次重開都重跑");
+    assert!(h.core.log.recent().iter().any(|l| l.contains("giving up")));
+}
+
 #[tokio::test]
 async fn agy_太久沒動靜_中止並回報_行程崩潰_回報_之後仍可用() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"turn_timeout_ms": 1500}))])), &[], "acp", &[]).await;
