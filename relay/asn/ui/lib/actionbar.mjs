@@ -11,7 +11,7 @@ import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-swit
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
 import { taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
-import { REASON, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
+import { REASON, WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
@@ -87,7 +87,6 @@ export function canOfferCall(friend, opts = {}) {
  * 喚醒（離線的 AI 夥伴）：#539 收尾起放在大按鈕第 2 格（離線時取代前台／後台），走 p:resume；「管理」選單不再列，名單右鍵照舊列。
  * 只有離線的 Claude 視窗與 pi 視窗才算（兩者都能喚醒，#468）；不能按的原因照 menuItems。回 { show, ok, reason }。
  */
-const WAKE_ENGINES = ['claude', 'pi']
 export function wakeButtonView(friend, ctx = {}) {
   if (!friend || friend.pending || friend.room === true || friend.status !== 'offline' || !WAKE_ENGINES.includes(partnerEngine(friend))) return { show: false, ok: false, reason: '' }
   const it = menuItems(friend, ctx).find(i => i.key === 'resume')

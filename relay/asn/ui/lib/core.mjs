@@ -6,6 +6,7 @@
 import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
+import { WAKE_ENGINES, partnerEngine } from './partner-ops.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
@@ -62,6 +63,10 @@ export const savedFriendOf = f => ({
 })
 // 讀回存檔的一筆：這三欄只收非空字串（存檔是本機檔，壞掉或被改過的值不帶進畫面）；沒有就不補，畫面照舊退回
 export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
+
+// 不在名單上也留一列離線的夥伴：有夥伴紀錄（後台記著它的對話，按得到「喚醒」）、引擎能喚醒、沒封存。
+// 本人沒跟它聊過也一樣（只跟其他 AI 往來的夥伴，以前一結束就整列不見，沒有喚醒可按）。只留在這次執行的名單，不寫進存檔
+export const keepsOfflineForWake = f => Boolean(f?.partnerId) && f.archived !== true && WAKE_ENGINES.includes(partnerEngine(f))
 
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
@@ -145,7 +150,7 @@ export class AsnCore {
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
-    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known) && !(f.entryKind === 'process' || isProcessName(f.agent)))   // 程序條目（「pi #pid」這類）不當離線好友記住，有沒有對話記錄都一樣（#447）；對話記錄本身不刪
+    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known || keepsOfflineForWake(f)) && !(f.entryKind === 'process' || isProcessName(f.agent)))   // 程序條目（「pi #pid」這類）不當離線好友記住，有沒有對話記錄都一樣（#447）；對話記錄本身不刪
     const merged = mergeFriends(known, live, archivedKeysOf(members))
     const next = new Map()
     for (const m of merged) {

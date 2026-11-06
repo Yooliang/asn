@@ -149,6 +149,9 @@ export function sharedWhy(items) {
   return { notes, rows }
 }
 
+/** 能喚醒的引擎（#468）：大按鈕的「喚醒」與名單保留離線列共用 */
+export const WAKE_ENGINES = Object.freeze(['claude', 'pi'])
+
 // 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud、pi，其他（Codex 等）回 other
 export function partnerEngine(friend) {
   const engine = String(friend?.engine ?? '').trim().toLowerCase()

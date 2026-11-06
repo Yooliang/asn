@@ -159,6 +159,31 @@ test('上線提示：第一次名單不提示；之後有人新上線才提示�
   await core.stop(); await relay.close()
 })
 
+test('沒聊過但有夥伴紀錄、能喚醒的夥伴：掉線後留一列離線（按得到喚醒）；不能喚醒、沒有夥伴紀錄、已封存的照舊消失', async () => {
+  const pid = (n) => `p_${String(n).repeat(20)}`
+  const extra = [
+    { name: 'W-claude夥伴', status: 'idle', cwd_label: 'a', partner_id: pid(1) },
+    { name: 'W-pi夥伴', status: 'idle', cwd_label: 'b', engine: 'pi', partner_id: pid(2) },
+    { name: 'W-gemini夥伴', status: 'idle', cwd_label: 'c', engine: 'gemini', partner_id: pid(3) },
+    { name: 'W-封存夥伴', status: 'idle', cwd_label: 'd', partner_id: pid(4), archived: true },
+    { name: 'W-沒紀錄', status: 'idle', cwd_label: 'e' },
+  ]
+  const { relay, core } = await setup({ members: roster(extra) })
+  await core.start()
+  relay.members = roster()
+  await core.refreshRoster()
+  const byId = new Map(core.snapshot().friends.map(f => [f.id, f]))
+  assert.equal(byId.get('W/W-claude夥伴')?.status, 'offline', 'Claude 夥伴留一列離線')
+  assert.equal(byId.get('W/W-pi夥伴')?.status, 'offline', 'pi 夥伴也能喚醒，留著')
+  assert.ok(!byId.has('W/W-gemini夥伴'), '不能喚醒的引擎照舊消失')
+  assert.ok(!byId.has('W/W-封存夥伴'), '封存的不留')
+  assert.ok(!byId.has('W/W-沒紀錄'), '沒有夥伴紀錄的照舊消失')
+  relay.members = roster([extra[0]])
+  await core.refreshRoster()
+  assert.equal(core.snapshot().friends.find(f => f.id === 'W/W-claude夥伴')?.status, 'online', '回到名單就是線上')
+  await core.stop(); await relay.close()
+})
+
 test('程序條目（「pi #pid」）關掉後不留在名單上，就算本機有對話記錄也一樣；對話記錄本身不刪（#447）', async () => {
   const { relay, core } = await setup()
   relay.mail(1, { from_node: 'W', from_agent: 'pi #30784', to_node: 'T', to_agent: NAME, body: '我是程序掃描出來的' })
