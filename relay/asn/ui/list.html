@@ -209,7 +209,8 @@
         :room-cards="hub.st.cards[t.id.slice(5)] || []" :group-menu="true" @group-menu="op => openGroupMenu(t.id, op)" @group-decide="(cid, ok) => decideCard(t.id, cid, ok)"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
-      <div class="pane term-pane" v-if="view === 'chat' && termPaneActive">
+      <div class="pane term-pane" :class="{ 'term-pane-live': !termPaneRow.adopted }" v-if="view === 'chat' && termPaneActive">
+        <action-bar v-if="termPaneFriend" :friend="termPaneFriend" :self-node="selfNode" :api="termBarApi" :blocked="termBarBlocked" :active="view === 'chat'"></action-bar>
         <div class="tp-head"><b>{{ termPaneRow.title }}</b><span class="term-state" :class="'tone-' + termPaneRow.tone">{{ termPaneRow.stateLabel }}</span><span class="term-folder" v-if="termPaneRow.folder">{{ termPaneRow.folder }}</span><span class="term-adopted" v-if="termPaneRow.adopted">已接手・預設只能看</span></div>
         <div class="tp-body">
           <ul class="tp-log" v-if="(termTimeline[termPaneRow.id] || []).length" aria-label="送字記錄">
@@ -226,7 +227,7 @@
           <term-view v-if="!termPaneRow.adopted" :key="termPaneRow.id" :api="termViewApi" :id="termPaneRow.id" :active="view === 'chat'"></term-view>
           <details class="tp-screen" v-else open><summary>終端最近畫面（只讀）</summary><pre class="term-prompt-text">{{ termPane.screen || '（目前讀不到畫面）' }}</pre></details>
         </div>
-        <div class="tp-compose">
+        <div class="tp-compose" v-if="termPaneRow.adopted">
           <div class="tp-confirm" v-if="termSendConfirmView" role="group" aria-label="確認送字">
             <p class="tp-confirm-text">要送進終端：<b>{{ termSendConfirmView.text.slice(0, 60) }}{{ termSendConfirmView.text.length > 60 ? '…' : '' }}</b></p>
             <p class="partner-hint">{{ termSendConfirmView.target }}。{{ termSendConfirmView.note }}</p>
