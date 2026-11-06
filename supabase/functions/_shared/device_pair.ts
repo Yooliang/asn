@@ -1,4 +1,4 @@
-// 設備配對（#597 工作包 E）。資料庫函式見 migrations/20261107100000_device_pairing.sql。這支只做參數檢查與轉送：
+// 設備配對（#597 工作包 E）。資料庫函式見 migrations/20261107100000_device_pairing.sql、20261107120000_device_pair_view_pub.sql。這支只做參數檢查與轉送：
 //   節點金鑰：device_key_publish（上傳自己的設備公鑰）
 //   本人簽章：device_pair_start、device_pair_list、device_pair_decide、device_pair_close；沒簽章一律 403
 // 後台只轉交公鑰和簽章，不判斷信任：信任只看各台本機記的。通知只敲門鈴，不帶內容。
@@ -12,6 +12,8 @@ export type DevicePairDeps = {
 const PUB_RE = /^[A-Za-z0-9_-]{43}$/;
 const SIG_RE = /^[A-Za-z0-9_-]{86}$/;
 const NODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// D 的 Hello 公鑰（RSA，PKCS#1 DER 的 base64url）。這裡只看格式和長度，是不是夠長的 RSA 由 T 本機驗
+const VIEW_PUB_RE = /^[A-Za-z0-9_-]{200,1400}$/;
 
 const EXTRA_STATUS: Record<string, Reply> = {
   no_key: { status: 409, body: { error: "no_key", detail: "那台電腦的 ASN 版本太舊，還不能配對" } },
@@ -40,7 +42,9 @@ export async function handleDevicePairAction(deps: DevicePairDeps, me: { id: str
   if (!signedUser) return fail("forbidden");
   if (action === "device_pair_start") {
     if (typeof b.to_node !== "string" || !NODE_RE.test(b.to_node) || typeof b.from_pub !== "string" || !PUB_RE.test(b.from_pub)) return fail("bad_request");
-    const r = await call(deps, "asn_relay_device_pair_start", { p_actor: me.id, p_signed_user: signedUser, p_to_node: b.to_node, p_from_pub: b.from_pub });
+    const viewPub = b.from_view_pub ?? null;
+    if (viewPub !== null && (typeof viewPub !== "string" || !VIEW_PUB_RE.test(viewPub))) return fail("bad_request");
+    const r = await call(deps, "asn_relay_device_pair_start", { p_actor: me.id, p_signed_user: signedUser, p_to_node: b.to_node, p_from_pub: b.from_pub, p_from_view_pub: viewPub });
     if (isReply(r)) return r;
     if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic);
     return { status: 200, body: { id: r.data.id, to_pub: r.data.to_pub, to_name: r.data.to_name, expires_at: r.data.expires_at } };

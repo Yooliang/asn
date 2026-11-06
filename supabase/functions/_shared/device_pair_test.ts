@@ -38,7 +38,19 @@ Deno.test("發起：敲對方門鈴，回應不帶門鈴主題", async () => {
   const r = await handleDevicePairAction(m.deps, me, "device_pair_start", { to_node: "phn7a1", from_pub: PUB }, USER);
   assertEquals(r.body, { id: ID, to_pub: PUB, to_name: "家用機", expires_at: "t" });
   assertEquals(m.rung, ["bell-x"]);
-  assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_to_node: "phn7a1", p_from_pub: PUB });
+  assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_to_node: "phn7a1", p_from_pub: PUB, p_from_view_pub: null });
+});
+
+Deno.test("發起：帶 Hello 公鑰就一起轉送；格式或長度不對不碰資料庫", async () => {
+  const VIEW = "A".repeat(360);
+  const m = mk({ id: ID, to_pub: PUB, to_name: "家用機", expires_at: "t", bell_topic: "bell-x" });
+  assertEquals((await handleDevicePairAction(m.deps, me, "device_pair_start", { to_node: "phn7a1", from_pub: PUB, from_view_pub: VIEW }, USER)).status, 200);
+  assertEquals(m.calls[0].args.p_from_view_pub, VIEW);
+  for (const v of ["A".repeat(199), "A".repeat(1401), "A".repeat(359) + "=", 42, ""]) {
+    const bad = mk({ id: ID });
+    assertEquals((await handleDevicePairAction(bad.deps, me, "device_pair_start", { to_node: "phn7a1", from_pub: PUB, from_view_pub: v }, USER)).status, 400, String(v).slice(0, 8));
+    assertEquals(bad.calls.length, 0);
+  }
 });
 
 Deno.test("發起：壞參數不碰資料庫；對方沒有金鑰說得清楚", async () => {

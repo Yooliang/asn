@@ -50,6 +50,9 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+mod hello_key;
+#[cfg(windows)]
+mod hello_win;
 #[cfg(desktop)]
 mod view_handshake;
 #[cfg(desktop)]
@@ -778,7 +781,15 @@ async fn device_pair_view(app: State<'_, App>, auth: State<'_, auth::AuthState>)
 #[tauri::command]
 async fn device_pair_start(app: State<'_, App>, auth: State<'_, auth::AuthState>, to_node: String) -> Result<(), String> {
     let token = pair_token(&auth).await?;
-    device_id::live::start(relay_of(&app)?.as_ref(), &token, &app.data_dir, &to_node).await
+    // 本人按「配對這台」：有 Windows Hello 就取得（第一次會建立，Windows 會要本人輸入 PIN）看畫面用的公鑰，一起交給對方。
+    // 這是建立 Hello 金鑰的唯一入口（守門測試在 hello_key）；沒有 Hello 就不帶：配對照樣成立，只是這台不能發起觀看
+    #[cfg(windows)]
+    let view_pub = tauri::async_runtime::spawn_blocking(|| if hello_win::supported() { hello_win::pairing_public_key().map(Some) } else { Ok(None) })
+        .await
+        .map_err(|e| e.to_string())??;
+    #[cfg(not(windows))]
+    let view_pub = None;
+    device_id::live::start(relay_of(&app)?.as_ref(), &token, &app.data_dir, &to_node, view_pub).await
 }
 
 /// 本人在這台比對號碼後按確認或拒絕
@@ -929,7 +940,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                 let now_s = (auth::now_ms() / 1000) as i64;
                 // 同一筆只能接受一次：驗章前先查，驗過、回覆接受前先記下；記不下來就拒絕（見 view_seen）
                 let verified = view_seen::check_unseen(&data_dir, &id, now_s)
-                    .and_then(|()| view_stream::accept_request(&row, &me_node, &trust, &view_handshake::HelloNotReady, &key, now_s))
+                    .and_then(|()| view_stream::accept_request(&row, &me_node, &trust, &hello_key::HelloVerifier, &key, now_s))
                     .and_then(|ok| view_seen::record(&data_dir, &id, ok.0.expires_s, now_s).map(|()| ok));
                 match verified {
                     Err(_) => {

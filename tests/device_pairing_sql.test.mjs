@@ -185,3 +185,37 @@ test('還原驗證：拿掉「只有對方能確認」要變紅', { skip }, asyn
   const s = await start(db)
   assert.equal((await decide(db, s.id, { p_actor: D })).status, 'confirmed')
 })
+
+// PR 4：配對一併交換 D 的 Hello 公鑰（migration 20261107120000_device_pair_view_pub.sql）
+const MIG_VIEW = '20261107120000_device_pair_view_pub.sql'
+const VIEW = 'v'.repeat(360)
+
+test('靜態（Hello 公鑰）：交易內、只給 service_role、舊的四參數版本移除、不動資料', () => {
+  const code = read(MIG_VIEW).split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
+  assert.match(code, /^begin;$/m); assert.match(code, /^commit;$/m)
+  assert.doesNotMatch(code, /drop table|drop column|truncate|delete from|update relay/i)
+  assert.doesNotMatch(code, /grant execute[^;]*to (anon|authenticated|public)/i)
+  assert.deepEqual(code.match(/drop function[^;]*;/g), ['drop function if exists public.asn_relay_device_pair_start(text, uuid, text, text);'], '只移除舊的 pair_start')
+  assert.match(code, /grant execute on function public\.asn_relay_device_pair_start\(text, uuid, text, text, text\) to service_role/)
+})
+
+test('Hello 公鑰：帶了就留給對方看到；沒帶也能配；格式或長度不對拒絕', { skip }, async () => {
+  const db = await ready()
+  const s = await start(db, { p_from_view_pub: VIEW })
+  assert.ok(s.id)
+  assert.equal((await list(db)).incoming[0].from_view_pub, VIEW)
+  assert.equal((await list(db, D)).outgoing[0].from_view_pub, undefined, '發起方的清單不用回自己的')
+  const db2 = await ready()
+  await start(db2)
+  assert.equal((await list(db2)).incoming[0].from_view_pub, null, '沒有 Hello 也能配')
+  for (const v of ['v'.repeat(199), 'v'.repeat(1401), 'v'.repeat(359) + '=', '']) {
+    assert.equal((await start(await ready(), { p_from_view_pub: v })).error, 'bad_request', v.slice(0, 4) + v.length)
+  }
+  await assert.rejects(db.exec(`update relay.device_pairs set from_view_pub = 'x'`), '表上也擋')
+})
+
+test('Hello 公鑰：舊的四參數 pair_start 不在了，只剩一個版本', { skip }, async () => {
+  const db = await boot()
+  const r = await db.query(`select pg_get_function_identity_arguments(p.oid) a from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'asn_relay_device_pair_start'`)
+  assert.deepEqual(r.rows.map(x => x.a), ['p_actor text, p_signed_user uuid, p_to_node text, p_from_pub text, p_from_view_pub text'])
+})

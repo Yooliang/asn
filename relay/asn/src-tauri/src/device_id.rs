@@ -1,7 +1,7 @@
 //! 設備金鑰與配對（#597 工作包 E）。別台看畫面、之後的電腦互按、別台打字都用這一份。
 //!
 //! - 每台一把 Ed25519，私鑰經 DPAPI 存在機器資料夾，只在 Rust。被看的那台可能沒人在，所以這把不要求本人。
-//!   發起觀看另外用 Windows Hello 的金鑰，不在這張。
+//!   發起觀看另外用 Windows Hello 的金鑰（`hello_win`），配對時一併交給對方（`view_pub`），T 用 `hello_key` 驗。
 //! - 後台只轉交公鑰和簽章，**信任只看本機記的**（`Trust`）。公鑰變了就警告並停止，要本人在那台撤銷才能重新配對。
 //! - 權限分方向：D 可以看 T，不代表 T 可以看 D。
 //!
@@ -20,6 +20,7 @@ const TRUST_FILE: &str = "device_trust.json";
 const FINGERPRINT_BYTES: usize = 10;
 pub const SCOPE_VIEW: &str = "view";
 pub const KEY_CHANGED: &str = "這台電腦的金鑰變了，可能是重裝過。請先在這裡撤銷，再重新配對";
+pub const VIEW_KEY_CHANGED: &str = "那台電腦看畫面用的 Windows Hello 金鑰變了。如果不是你重設的，不要確認。要重新配對，請先在這裡撤銷";
 
 pub struct DeviceKey {
     pair: Ed25519KeyPair,
@@ -93,9 +94,16 @@ pub fn fingerprint(node_a: &str, pub_a: &str, node_b: &str, pub_b: &str) -> Stri
     h[..FINGERPRINT_BYTES].chunks(2).map(|c| format!("{:02x}{:02x}", c[0], c[1])).collect::<Vec<_>>().join("-")
 }
 
-/// T 確認配對時簽的內容：綁請求、雙方節點、雙方公鑰
-pub fn confirm_message(id: &str, from_node: &str, to_node: &str, from_pub: &str, to_pub: &str) -> Vec<u8> {
-    format!("asn-pair-confirm-v1\n{id}\n{from_node}\n{to_node}\n{from_pub}\n{to_pub}").into_bytes()
+/// 配對中兩邊比對的指紋：除了兩台的節點和設備公鑰，也涵蓋 D 發起觀看用的 Hello 公鑰（沒有就空字串）。
+/// 角色固定（from＝發起的 D），兩邊算出來相同；後台換掉任何一把，號碼就對不上
+pub fn pair_fingerprint(from_node: &str, from_pub: &str, from_view: &str, to_node: &str, to_pub: &str) -> String {
+    let h = Sha256::digest(format!("asn-pair-fp-v2\n{from_node}\n{from_pub}\n{from_view}\n{to_node}\n{to_pub}").as_bytes());
+    h[..FINGERPRINT_BYTES].chunks(2).map(|c| format!("{:02x}{:02x}", c[0], c[1])).collect::<Vec<_>>().join("-")
+}
+
+/// T 確認配對時簽的內容：綁請求、雙方節點、雙方設備公鑰、D 的 Hello 公鑰（沒有就空字串）
+pub fn confirm_message(id: &str, from_node: &str, to_node: &str, from_pub: &str, to_pub: &str, from_view: &str) -> Vec<u8> {
+    format!("asn-pair-confirm-v2\n{id}\n{from_node}\n{to_node}\n{from_pub}\n{to_pub}\n{from_view}").into_bytes()
 }
 
 /// 權限的方向
@@ -133,6 +141,9 @@ pub struct Outgoing {
     pub to_node: String,
     pub to_name: String,
     pub to_pub: String,
+    /// 這台送出的 Hello 公鑰（沒有 Hello 就是空的）。對方的確認簽章要涵蓋它
+    #[serde(default)]
+    pub view_pub: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,12 +218,34 @@ impl Trust {
         Ok(())
     }
 
-    /// 記下對方的 Hello 公鑰。配對接上 Hello 時才會用到
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 記下對方的 Hello 公鑰
     pub fn set_view_pub(&mut self, node: &str, view_pub: &str) {
         if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
             p.view_pub = Some(view_pub.to_string());
         }
+    }
+
+    /// 已經記過對方的 Hello 公鑰，這次送來的不一樣（包含這次沒送）：要本人先撤銷
+    pub fn view_key_changed(&self, node: &str, view_pub: Option<&str>) -> bool {
+        self.peer(node).and_then(|p| p.view_pub.as_deref()).is_some_and(|old| Some(old) != view_pub)
+    }
+
+    /// T 確認配對：先查兩把公鑰有沒有換，換了就停、什麼都不記；沒問題才記「對方可以看我」和 Hello 公鑰。
+    /// 在副本上做完才換上，失敗就原樣不動；存檔也是整份（見 `live::update`）：不會留下有權限、沒 Hello 公鑰的狀態
+    pub fn accept_pair(&mut self, from_node: &str, from_name: &str, from_pub: &str, view_pub: Option<&str>) -> Result<(), String> {
+        if self.key_changed(from_node, from_pub) {
+            return Err(KEY_CHANGED.to_string());
+        }
+        if self.view_key_changed(from_node, view_pub) {
+            return Err(VIEW_KEY_CHANGED.to_string());
+        }
+        let mut next = self.clone();
+        next.grant(from_node, from_name, from_pub, Direction::PeerToMe, SCOPE_VIEW)?;
+        if let Some(v) = view_pub {
+            next.set_view_pub(from_node, v);
+        }
+        *self = next;
+        Ok(())
     }
 
     /// 撤銷：整台忘掉，兩個方向都沒了。回有沒有這台
@@ -225,7 +258,8 @@ impl Trust {
 
 /// 我發起的配對收到確認：公鑰要和發起時記的相同，簽章也要對。對得上才算配對成功
 pub fn outgoing_confirmed(o: &Outgoing, me_node: &str, me_pub: &str, row_to_pub: &str, sig: &str) -> bool {
-    row_to_pub == o.to_pub && verify(&o.to_pub, &confirm_message(&o.id, me_node, &o.to_node, me_pub, &o.to_pub), sig)
+    let view = o.view_pub.as_deref().unwrap_or("");
+    row_to_pub == o.to_pub && verify(&o.to_pub, &confirm_message(&o.id, me_node, &o.to_node, me_pub, &o.to_pub, view), sig)
 }
 
 /// 後台回的配對清單：（等我確認的, 我發起的）。**缺欄位或不是陣列就是錯誤：** 不能當成空的，
@@ -296,7 +330,7 @@ pub mod live {
                 done.push(id.to_string()); // 這台沒有記錄（重裝前發的）：不算數
                 continue;
             };
-            let fp = fingerprint(me_node, &me_pub, &o.to_node, &o.to_pub);
+            let fp = pair_fingerprint(me_node, &me_pub, o.view_pub.as_deref().unwrap_or(""), &o.to_node, &o.to_pub);
             let mut shown = status.to_string();
             if status == "confirmed" {
                 let sig = row.get("confirm_sig").and_then(Value::as_str).unwrap_or("");
@@ -328,7 +362,7 @@ pub mod live {
             Ok(gone)
         })?;
         for o in gone {
-            let fp = fingerprint(me_node, &me_pub, &o.to_node, &o.to_pub);
+            let fp = pair_fingerprint(me_node, &me_pub, o.view_pub.as_deref().unwrap_or(""), &o.to_node, &o.to_pub);
             outgoing.push(json!({ "id": o.id, "to_node": o.to_node, "to_name": o.to_name, "fingerprint": fp, "status": "expired" }));
         }
         let trust = read(dir)?;
@@ -336,10 +370,12 @@ pub mod live {
             .iter()
             .filter_map(|row| {
                 let (id, from_node, from_pub, to_pub) = (row.get("id")?.as_str()?, row.get("from_node")?.as_str()?, row.get("from_pub")?.as_str()?, row.get("to_pub")?.as_str()?);
+                let view = row_view_pub(row);
+                let bad_view = view.is_some_and(|v| !crate::hello_key::valid_view_pub(v));
                 Some(json!({
                     "id": id, "from_node": from_node, "from_name": row.get("from_name").and_then(Value::as_str).unwrap_or(""),
-                    "fingerprint": fingerprint(from_node, from_pub, me_node, &me_pub),
-                    "key_changed": trust.key_changed(from_node, from_pub),
+                    "fingerprint": pair_fingerprint(from_node, from_pub, view.unwrap_or(""), me_node, &me_pub),
+                    "key_changed": trust.key_changed(from_node, from_pub) || trust.view_key_changed(from_node, view) || bad_view,
                     "stale": to_pub != me_pub,
                     "expires_at": row.get("expires_at"),
                 }))
@@ -348,16 +384,20 @@ pub mod live {
         Ok(json!({ "peers": peers_view(&trust, me_node, &me_pub), "incoming": incoming, "outgoing": outgoing }))
     }
 
-    /// 在 D 發起配對。對方公鑰記下來，之後要對得上
-    pub async fn start(relay: &Relay, token: &str, dir: &Path, to_node: &str) -> Result<(), String> {
+    /// 在 D 發起配對。對方公鑰記下來，之後要對得上。view_pub＝這台的 Hello 公鑰（沒有 Hello 就 None：配對照樣成立，只是這台不能發起觀看）
+    pub async fn start(relay: &Relay, token: &str, dir: &Path, to_node: &str, view_pub: Option<String>) -> Result<(), String> {
         let k = key(dir)?;
         publish(relay, dir).await?;
-        let v = relay.api_signed("device_pair_start", Some(json!({ "to_node": to_node, "from_pub": k.public_b64() })), Some(token)).await?;
+        let mut body = json!({ "to_node": to_node, "from_pub": k.public_b64() });
+        if let Some(v) = &view_pub {
+            body["from_view_pub"] = json!(v);
+        }
+        let v = relay.api_signed("device_pair_start", Some(body), Some(token)).await?;
         let (Some(id), Some(to_pub)) = (v.get("id").and_then(Value::as_str), v.get("to_pub").and_then(Value::as_str)) else {
             return Err("後台回的資料不對".into());
         };
         let to_name = v.get("to_name").and_then(Value::as_str).unwrap_or("").to_string();
-        let row = Outgoing { id: id.to_string(), to_node: to_node.to_string(), to_name, to_pub: to_pub.to_string() };
+        let row = Outgoing { id: id.to_string(), to_node: to_node.to_string(), to_name, to_pub: to_pub.to_string(), view_pub };
         update(dir, |t| {
             if t.key_changed(to_node, to_pub) {
                 return Err(KEY_CHANGED.to_string());
@@ -385,12 +425,26 @@ pub mod live {
         if to_pub != me_pub {
             return Err("這筆配對是用這台舊的金鑰發起的，請對方重新發起".into());
         }
-        if read(dir)?.key_changed(from_node, from_pub) {
+        let view = row_view_pub(&row);
+        if view.is_some_and(|v| !crate::hello_key::valid_view_pub(v)) {
+            return Err(crate::hello_key::BAD_VIEW_PUB.to_string());
+        }
+        // 先查兩把公鑰有沒有換，換了就停：後台不會被告知確認，本機也什麼都不記
+        let trust = read(dir)?;
+        if trust.key_changed(from_node, from_pub) {
             return Err(KEY_CHANGED.to_string());
         }
-        let sig = k.sign_b64(&confirm_message(id, from_node, me_node, from_pub, &me_pub));
+        if trust.view_key_changed(from_node, view) {
+            return Err(VIEW_KEY_CHANGED.to_string());
+        }
+        let sig = k.sign_b64(&confirm_message(id, from_node, me_node, from_pub, &me_pub, view.unwrap_or("")));
         relay.api_signed("device_pair_decide", Some(json!({ "id": id, "decision": "confirm", "sig": sig })), Some(token)).await?;
-        update(dir, |t| t.grant(from_node, from_name, from_pub, Direction::PeerToMe, SCOPE_VIEW))
+        update(dir, |t| t.accept_pair(from_node, from_name, from_pub, view))
+    }
+
+    /// 後台列的 D Hello 公鑰：沒有、null、空字串都當沒有
+    fn row_view_pub(row: &Value) -> Option<&str> {
+        row.get("from_view_pub").and_then(Value::as_str).filter(|v| !v.is_empty())
     }
 
     /// 在 D 撤回或收掉結果
@@ -518,15 +572,61 @@ mod tests {
     fn 確認_公鑰和發起時相同_簽章對_才算() {
         let dt = tempfile::tempdir().unwrap();
         let kt = load_or_create(dt.path(), &Flip).unwrap();
-        let o = Outgoing { id: "r1".into(), to_node: "t".into(), to_name: "家用機".into(), to_pub: kt.public_b64() };
-        let good = kt.sign_b64(&confirm_message("r1", "d", "t", "dpub", &o.to_pub));
+        let o = Outgoing { id: "r1".into(), to_node: "t".into(), to_name: "家用機".into(), to_pub: kt.public_b64(), view_pub: Some("hello".into()) };
+        let good = kt.sign_b64(&confirm_message("r1", "d", "t", "dpub", &o.to_pub, "hello"));
         assert!(outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &good));
         assert!(!outgoing_confirmed(&o, "d", "dpub", "別的公鑰", &good), "後台換了公鑰");
         assert!(!outgoing_confirmed(&o, "d", "別的", &o.to_pub, &good), "簽的是別把公鑰");
         assert!(!outgoing_confirmed(&o, "x", "dpub", &o.to_pub, &good), "簽的是別台");
         assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, ""), "沒有簽章");
-        let other = kt.sign_b64(&confirm_message("r2", "d", "t", "dpub", &o.to_pub));
+        let other = kt.sign_b64(&confirm_message("r2", "d", "t", "dpub", &o.to_pub, "hello"));
         assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &other), "別筆的簽章");
+        let no_view = kt.sign_b64(&confirm_message("r1", "d", "t", "dpub", &o.to_pub, ""));
+        assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &no_view), "T 簽的不含這台送出的 Hello 公鑰");
+        let swapped = kt.sign_b64(&confirm_message("r1", "d", "t", "dpub", &o.to_pub, "別把"));
+        assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &swapped), "後台換了 Hello 公鑰");
+    }
+
+    #[test]
+    fn 配對指紋_兩邊相同_涵蓋_hello_公鑰_換任何一把就不同() {
+        let f = pair_fingerprint("d", "dp", "dv", "t", "tp");
+        assert_eq!(f.len(), 24, "{f}");
+        assert_ne!(f, pair_fingerprint("d", "dp", "別把", "t", "tp"), "Hello 公鑰不同");
+        assert_ne!(f, pair_fingerprint("d", "dp", "", "t", "tp"), "沒有 Hello");
+        assert_ne!(f, pair_fingerprint("d", "dp9", "dv", "t", "tp"));
+        assert_ne!(f, pair_fingerprint("d", "dp", "dv", "t", "tp9"));
+        assert_ne!(f, pair_fingerprint("t", "tp", "dv", "d", "dp"), "角色對調");
+    }
+
+    #[test]
+    fn 確認配對_hello_公鑰換了就停_什麼都不記() {
+        let mut t = Trust::default();
+        t.accept_pair("d", "工作機", "dp", Some("v1")).unwrap();
+        assert_eq!(t.check("d", "dp", Direction::PeerToMe, SCOPE_VIEW), Verdict::Allowed);
+        assert_eq!(t.peer("d").unwrap().view_pub.as_deref(), Some("v1"));
+        let before = t.clone();
+        assert_eq!(t.accept_pair("d", "工作機", "dp", Some("v2")).unwrap_err(), VIEW_KEY_CHANGED);
+        assert_eq!(t.accept_pair("d", "工作機", "dp", None).unwrap_err(), VIEW_KEY_CHANGED, "這次沒送也算換了");
+        assert_eq!(t.accept_pair("d", "工作機", "新", Some("v1")).unwrap_err(), KEY_CHANGED);
+        assert_eq!(t, before, "失敗時原樣不動");
+        t.accept_pair("d", "工作機", "dp", Some("v1")).unwrap();
+        assert_eq!(t, before, "同一把再確認一次不變");
+    }
+
+    #[test]
+    fn 確認配對_沒有_hello_也記權限_但不能發起觀看() {
+        let mut t = Trust::default();
+        t.accept_pair("d", "工作機", "dp", None).unwrap();
+        assert_eq!(t.check("d", "dp", Direction::PeerToMe, SCOPE_VIEW), Verdict::Allowed);
+        assert_eq!(t.peer("d").unwrap().view_pub, None);
+        t.accept_pair("d", "工作機", "dp", Some("v1")).unwrap();
+        assert_eq!(t.peer("d").unwrap().view_pub.as_deref(), Some("v1"), "之前沒有，這次有：記下來");
+    }
+
+    #[test]
+    fn 舊的配對紀錄沒有_view_pub_欄位_讀得回來() {
+        let o: Outgoing = serde_json::from_str(r#"{"id":"r","to_node":"t","to_name":"x","to_pub":"p"}"#).unwrap();
+        assert_eq!(o.view_pub, None);
     }
 
     #[test]
