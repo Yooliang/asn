@@ -73,7 +73,8 @@ test('捲動位置：關掉終端回到原本看的那裡；原本在底部就�
 test('聊天頁接線：輸入框旁沒有終端圖示，入口只在上面那排', () => {
   const pane = read('ui', 'lib', 'chatpane.mjs')
   assert.ok(!pane.includes('看終端畫面'), '輸入框旁的終端圖示拿掉了')
-  assert.match(pane, /<action-bar [^>]*:term="\{ ready: canTermView, on: termShown \}"[^>]*@term="toggleTerm"/)
+  assert.match(pane, /<action-bar [^>]*:term="termBar"[^>]*@term="toggleTerm"/)
+  assert.match(pane, /: \{ ready: canTermView\.value, on: termShown\.value \}\)\)/, '本機的夥伴：第 2 格照舊是「終端」（別台電腦的夥伴才換成「看畫面」）')
   assert.match(pane, /<term-view v-if="termShown" /)
   assert.match(pane, /const canTermView = computed\(\(\) => termEntryView\.value\.term\)/, '入口看「在不在服務裡」')
   assert.match(pane, /askTermService\(props\.termViewApi, termViewName\.value\)/)

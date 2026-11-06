@@ -179,7 +179,7 @@ export function createTermViewSession(deps) {
 
 let xtermLoad = null
 /** 第一次要看才載入 xterm.js 和它的樣式 */
-function loadXterm() {
+export function loadXterm() {
   if (globalThis.Terminal) return Promise.resolve(globalThis.Terminal)
   xtermLoad ??= new Promise((resolve, reject) => {
     const css = document.createElement('link')

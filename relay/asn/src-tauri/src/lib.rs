@@ -57,6 +57,8 @@ mod view_handshake;
 mod view_stream;
 #[cfg(desktop)]
 mod view_seen;
+#[cfg(desktop)]
+mod view_remote;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -831,6 +833,8 @@ struct LiveTPort {
     who: String,
     window: String,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// 送畫面的頻道（要回條）。丟掉它頻道就收掉；沒有即時頻道時是 None，一律送不出去
+    out: Option<tokio::sync::mpsc::Sender<bell::Outbound>>,
 }
 
 #[cfg(feature = "gui")]
@@ -870,7 +874,8 @@ impl view_stream::TPort for LiveTPort {
         Ok(view_stream::ctl_from_active(active, &self.id))
     }
     fn send(&mut self, wire: &str) -> Result<(), String> {
-        view_stream::NoTransport.send(wire)
+        let Some(tx) = &self.out else { return view_stream::NoTransport.send(wire) };
+        tauri::async_runtime::block_on(bell::send_via(tx, "frame", serde_json::json!({ "w": wire })))
     }
     fn stop_requested(&mut self) -> bool {
         self.stop.load(std::sync::atomic::Ordering::SeqCst)
@@ -938,7 +943,16 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         }
                         let who = row.get("from_name").and_then(Value::as_str).unwrap_or("").to_string();
                         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop };
+                        // 送畫面的頻道：只送不收（收到的一律丟掉），每幅等伺服器回條；這次觀看結束、port 丟掉時一起收掉
+                        let out = match (app.state::<ViewNet>().0.clone(), row.get("topic").and_then(Value::as_str)) {
+                            (Some(url), Some(topic)) => {
+                                let (tx, rx) = tokio::sync::mpsc::channel(4);
+                                tauri::async_runtime::spawn(bell::run_channel(url, topic.to_string(), true, Some(rx), std::future::pending::<()>(), |_| {}));
+                                Some(tx)
+                            }
+                            _ => None,
+                        };
+                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out };
                         let relay2 = relay.clone();
                         std::thread::spawn(move || {
                             let end = view_stream::run_t(&session, session_key, &mut port);
@@ -961,6 +975,170 @@ fn term_viewed_stop(views: State<'_, Arc<BeingViewed>>, id: String) {
     if let Some((_, _, stop)) = views.open.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// 別台看畫面用的即時頻道網址（含 anon 金鑰，只在 Rust）。沒有 anon 金鑰就沒有，看畫面也不能用
+#[cfg(desktop)]
+struct ViewNet(Option<String>);
+
+/// 這台能不能看那台的畫面：已配對而且我可以看對方、這台有 Windows Hello、有即時頻道。不跳提示
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>, node: String) -> Result<bool, String> {
+    if net.0.is_none() {
+        return Ok(false);
+    }
+    let trust = device_id::live::read(&app.data_dir)?;
+    let Some(peer) = trust.peer(&node) else { return Ok(false) };
+    if trust.check(&node, &peer.sign_pub, device_id::Direction::MeToPeer, device_id::SCOPE_VIEW) != device_id::Verdict::Allowed {
+        return Ok(false);
+    }
+    #[cfg(windows)]
+    return tauri::async_runtime::spawn_blocking(hello_win::supported).await.map_err(|e| e.to_string());
+    #[cfg(not(windows))]
+    Ok(false)
+}
+
+/// 本人按「看畫面」：Windows 會要本人輸入 PIN（除了配對以外唯一能叫 Hello 簽章的入口，守門測試在 hello_key）。
+/// 簽好就向後台發起，背景開始回報；回（觀看編號, 到期時間秒）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, net: State<'_, ViewNet>, to_node: String, partner: String) -> Result<Value, String> {
+    let url = net.0.clone().ok_or("這台現在連不上即時頻道，不能看畫面")?;
+    let token = pair_token(&auth).await?;
+    let trust = device_id::live::read(&app.data_dir)?;
+    let id = view_remote::new_session_id()?;
+    let now_s = (auth::now_ms() / 1000) as i64;
+    let s = view_remote::session(&id, &app.node, &to_node, &partner, now_s);
+    views.add(&id)?;
+    #[cfg(windows)]
+    let signed = {
+        let (t, s2) = (trust.clone(), s.clone());
+        tauri::async_runtime::spawn_blocking(move || view_handshake::d_start(&t, &hello_win::WinHello, &s2, now_s)).await.map_err(|e| e.to_string()).and_then(|r| r)
+    };
+    #[cfg(not(windows))]
+    let signed: Result<(view_handshake::Eph, String), String> = Err(view_handshake::HELLO_NOT_READY.to_string());
+    let (eph, d_sig) = match signed {
+        Ok(v) => v,
+        Err(e) => {
+            views.remove(&id);
+            return Err(e);
+        }
+    };
+    let body = serde_json::json!({ "id": id, "to_node": to_node, "window_name": partner, "d_eph_pub": eph.public_b64(), "d_sig": d_sig, "expires_at": claude_quota::iso_secs(s.expires_s * 1000) });
+    let started = relay_of(&app)?.api_signed("term_view_start", Some(body), Some(&token)).await;
+    let Some(topic) = started.ok().and_then(|v| v.get("topic").and_then(Value::as_str).map(str::to_string)) else {
+        views.remove(&id);
+        return Err("沒有發起成功，請稍後再試".into());
+    };
+    start_remote_view(window.app_handle().clone(), window.label().to_string(), relay_of(&app)?, app.data_dir.clone(), views.inner().clone(), url, topic, s.clone(), eph);
+    Ok(serde_json::json!({ "id": id, "expires_s": s.expires_s }))
+}
+
+/// 本人把觀看畫面藏起來（暫停）或叫出來（繼續）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn term_view_remote_set(views: State<'_, Arc<view_remote::RemoteViews>>, id: String, paused: bool) {
+    views.set(&id, if paused { view_remote::Want::Paused } else { view_remote::Want::Watching });
+}
+
+/// 本人按「結束」
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn term_view_remote_stop(views: State<'_, Arc<view_remote::RemoteViews>>, id: String) {
+    views.set(&id, view_remote::Want::Ended);
+}
+
+/// 看的那台的背景：每 15 秒回報一次（不簽章、不碰 Hello）；拿到對方的公鑰就導出金鑰、開接收頻道；結束就收掉、告訴畫面。
+/// 接收頻道只收不送，收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面
+#[cfg(all(desktop, feature = "gui"))]
+#[allow(clippy::too_many_arguments)]
+fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir: std::path::PathBuf, views: Arc<view_remote::RemoteViews>, url: String, topic: String, s: view_handshake::Session, eph: view_handshake::Eph) {
+    tauri::async_runtime::spawn(async move {
+        let id = s.id.clone();
+        let mut eph = Some(eph);
+        let mut stop_rx: Option<tokio::sync::oneshot::Sender<()>> = None;
+        let frames_seen = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut failed_since: Option<u64> = None;
+        let reason = loop {
+            let want = views.want(&id);
+            let token = pair_token(app.state::<auth::AuthState>().inner()).await;
+            let rep = match &token {
+                Ok(t) => relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": want.report_state() })), Some(t)).await,
+                Err(e) => Err(e.clone()),
+            };
+            if want == view_remote::Want::Ended {
+                break "viewer_ended".to_string();
+            }
+            let now_ms = auth::now_ms();
+            match rep {
+                Ok(v) => {
+                    failed_since = None;
+                    match view_remote::step_of(&v) {
+                        view_remote::Step::Ended(r) => break r,
+                        view_remote::Step::Accepted { t_eph, t_sig } if eph.is_some() => {
+                            let Ok(trust) = device_id::live::read(&data_dir) else { break "failed".to_string() };
+                            let Some(e) = eph.take() else { break "failed".to_string() };
+                            let mut rx = match view_remote::finish(&trust, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
+                                Ok(rx) => rx,
+                                Err(_) => break "rejected".to_string(),
+                            };
+                            let (tx, stop) = tokio::sync::oneshot::channel::<()>();
+                            stop_rx = Some(tx);
+                            let (app2, label2, views2, id2, seen) = (app.clone(), label.clone(), views.clone(), id.clone(), frames_seen.clone());
+                            tauri::async_runtime::spawn(bell::run_channel(url.clone(), topic.clone(), false, None, async move { let _ = stop.await; }, move |e| {
+                                let bell::Event::Broadcast { event, payload } = e else { return };
+                                let Some(w) = view_remote::frame_wire(event, payload) else { return };
+                                match view_remote::receive(&mut rx, &w) {
+                                    view_remote::Show::Frame(f) => {
+                                        seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        if views2.want(&id2) == view_remote::Want::Watching {
+                                            let _ = app2.emit_to(label2.as_str(), "term-view-remote-frame", serde_json::json!({ "id": id2, "text": f.text, "meta": { "cursor_x": f.cursor_x, "cursor_y": f.cursor_y, "cols": f.cols, "rows": f.rows } }));
+                                        }
+                                    }
+                                    view_remote::Show::Skip => {}
+                                    view_remote::Show::End => views2.set(&id2, view_remote::Want::Ended),
+                                }
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+                Err(_) => {
+                    let since = *failed_since.get_or_insert(now_ms);
+                    if now_ms.saturating_sub(since) > view_stream::LOST_AFTER_MS {
+                        break "failed".to_string();
+                    }
+                }
+            }
+            if (now_ms / 1000) as i64 >= s.expires_s {
+                break "expired".to_string();
+            }
+            // 等下一次回報；本人按結束或藏起來時早一點回報
+            let before = views.want(&id);
+            for _ in 0..view_remote::REPORT_EVERY_S {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if views.want(&id) != before {
+                    break;
+                }
+            }
+        };
+        if reason != "viewer_ended" {
+            // 對方先結束、到期或出錯：照樣告訴後台這邊結束了（失敗也沒關係，後台到期會清）
+            if let Ok(t) = pair_token(app.state::<auth::AuthState>().inner()).await {
+                let _ = relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": "ended" })), Some(&t)).await;
+            }
+        }
+        drop(stop_rx.take());
+        let frames = frames_seen.load(std::sync::atomic::Ordering::Relaxed);
+        views.remove(&id);
+        let _ = app.emit_to(label.as_str(), "term-view-remote-end", serde_json::json!({ "id": id, "text": view_remote::end_text(&reason) }));
+        let _ = ui_log::append(&data_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+    });
 }
 
 /// 開著的觀看（#597）：編號 → 狀態。全部只在本機
@@ -2059,6 +2237,8 @@ pub fn run() {
         .manage(wins::Slots::default())
         .manage(Arc::new(TermViews::default()))
         .manage(Arc::new(BeingViewed::default()))
+        .manage(Arc::new(view_remote::RemoteViews::default()))
+        .manage(ViewNet(anon_url.clone()))
         .manage(wins::Frame::default())
         .manage(tray::CloseToTray::default())
         .manage(tray::TrayFailed::default())
@@ -2076,7 +2256,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_known_list, device_known_forget, term_viewed_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_known_list, device_known_forget, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
