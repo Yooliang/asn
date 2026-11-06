@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { changelogFirstSection } from './release-lib.mjs'
+import { checkAboveMax } from './play-version.mjs'
 
 export const PACKAGE_NAME = 'tw.yooliang.asn'
 export const SCOPE = 'https://www.googleapis.com/auth/androidpublisher'
@@ -88,7 +89,16 @@ export const releaseNotes = (changelog, version) => {
   return end > 0 ? `${t.slice(0, end).trimEnd()}\n…` : `${t.slice(0, NOTES_LIMIT - 1)}…`
 }
 
-export const publishAab = async ({ aabFile, sa, notes, version = '', packageName = PACKAGE_NAME, track = 'internal', apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {
+// 編輯裡列出 App 目前所有的 AAB（edits.bundles.list），回最大的 versionCode；一個都沒有回 null
+const maxInEdit = async (call, app, id, auth) => {
+  const r = await call('查詢現有版本', 'GET', `${app}/edits/${id}/bundles`, { headers: auth })
+  const codes = (Array.isArray(r.bundles) ? r.bundles : []).map(b => Number(b.versionCode)).filter(Number.isFinite)
+  return codes.length ? Math.max(...codes) : null
+}
+
+// expectCode：這次 AAB 應該是的 versionCode（release-play.mjs 依 play-version.mjs 算的）。有給就先查 Play 上的最大值，
+// 不比它大就不上傳；上傳後 Play 回的 versionCode 也要等於它，不然就不提交（AAB 和預期的不是同一份）
+export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode = null, packageName = PACKAGE_NAME, track = 'internal', apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {
   const token = await getAccessToken(sa, request, tokenUri || sa.token_uri)
   const auth = { authorization: `Bearer ${token}` }
   const json = { ...auth, 'content-type': 'application/json' }
@@ -103,11 +113,18 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', packageName
   const id = edit.id
   if (!id) throw new Error('建立編輯失敗（回應沒有編輯代號）')
   try {
+    if (expectCode != null) {
+      const max = await maxInEdit(call, app, id, auth)
+      const bad = checkAboveMax(expectCode, max)
+      if (bad) throw new Error(bad)
+      log(`Play 上目前最大的 versionCode：${max ?? '（沒有）'}，這次是 ${expectCode}`)
+    }
     const data = fs.readFileSync(aabFile)
     log(`上傳 AAB（${(data.length / 1048576).toFixed(1)} MB）…`)
     const up = await call('上傳 AAB', 'POST', `${apiBase}/upload/androidpublisher/v3/applications/${packageName}/edits/${id}/bundles?uploadType=media`, { headers: { ...auth, 'content-type': 'application/octet-stream' }, body: data })
     const versionCode = up.versionCode
     if (versionCode == null) throw new Error('上傳 AAB 失敗（回應沒有 versionCode）')
+    if (expectCode != null && Number(versionCode) !== expectCode) throw new Error(`上傳的 AAB 是 versionCode ${versionCode}，不是預期的 ${expectCode}，不提交`)
     log(`設定 ${track} 軌道（versionCode ${versionCode}）…`)
     await call('設定測試軌道', 'PUT', `${app}/edits/${id}/tracks/${track}`, { headers: json, body: JSON.stringify({ track, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] }) })
     log('提交 …')
@@ -119,16 +136,45 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', packageName
   }
 }
 
+// 只查不傳：建一個編輯、列出現有 AAB、刪掉編輯，回最大的 versionCode（release-play.mjs 建置前先檢查用）
+export const maxPlayCode = async ({ sa, packageName = PACKAGE_NAME, apiBase = DEFAULT_BASE, tokenUri, request = makeRequester() }) => {
+  const token = await getAccessToken(sa, request, tokenUri || sa.token_uri)
+  const auth = { authorization: `Bearer ${token}` }
+  const app = `${apiBase}/androidpublisher/v3/applications/${packageName}`
+  const call = async (what, method, url, opt) => {
+    const r = await request(method, url, opt)
+    if (r.status < 200 || r.status >= 300) throw new Error(`${what}失敗（HTTP ${r.status}，${errCode(r.text)}）`)
+    return r.text ? JSON.parse(r.text) : {}
+  }
+  const edit = await call('建立編輯', 'POST', `${app}/edits`, { headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })
+  if (!edit.id) throw new Error('建立編輯失敗（回應沒有編輯代號）')
+  try { return await maxInEdit(call, app, edit.id, auth) } finally {
+    try { await request('DELETE', `${app}/edits/${edit.id}`, { headers: auth }) } catch { /* 編輯會自己過期 */ }
+  }
+}
+
 const main = async () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
   const arg = process.argv.find(a => a.startsWith('--aab='))
   const aab = arg ? arg.slice(6) : path.join(root, 'src-tauri', 'target', 'play', `ASN_${version}_play.aab`)
+  const codeArg = process.argv.find(a => a.startsWith('--expect-code='))
+  const expectCode = codeArg ? Number(codeArg.slice('--expect-code='.length)) : null
+  const checkOnly = process.argv.includes('--check-only')
   try {
+    if (codeArg && !Number.isInteger(expectCode)) throw new Error('--expect-code 要是整數')
+    if (checkOnly) {
+      if (expectCode == null) throw new Error('--check-only 要搭配 --expect-code')
+      const max = await maxPlayCode({ sa: loadServiceAccount(defaultKeyFile()) })
+      const bad = checkAboveMax(expectCode, max)
+      if (bad) throw new Error(bad)
+      console.log(`Play 上目前最大的 versionCode：${max ?? '（沒有）'}，這次 ${expectCode} 可以用`)
+      return
+    }
     if (!fs.existsSync(aab)) throw new Error(`找不到要上傳的 AAB：${aab}\n請先執行 npm run release:play 建置。`)
     const sa = loadServiceAccount(defaultKeyFile())
     const notes = releaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version)
-    const r = await publishAab({ aabFile: aab, sa, notes, version, log: m => console.log(m) })
+    const r = await publishAab({ aabFile: aab, sa, notes, version, expectCode, log: m => console.log(m) })
     console.log(`已發布到 Play 內部測試：版本 ${version}（versionCode ${r.versionCode}）`)
   } catch (e) {
     console.error(`上傳中止：${e.message}`)

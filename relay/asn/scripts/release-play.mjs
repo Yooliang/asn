@@ -3,6 +3,8 @@
 // 上傳金鑰（upload key）放在 %USERPROFILE%\.asn\play\（upload.jks、upload.jks.password），不進 repo、不印出；
 // 第一次執行時自動產生（RSA 4096、效期 10000 天）並把資料夾權限限縮成只有本人。遺失可以向 Play 申請重設上傳金鑰（正式簽章金鑰由 Play 保管）。
 // 版本號沿用 package.json（先發電腦版 npm run release，再跑這個）。用法：npm run release:play
+// versionCode 由 play-version.mjs 算（版號×10＋尾數：正式 1、--test 測試 0、--reissue=N 重出 2～9），用 --config 帶給 tauri，不改 tauri.conf.json；
+// 要上傳（--upload）時，建置前先查 Play 上最大的 versionCode，不比它大就不建。
 // 需要：JAVA_HOME（Android Studio 的 jbr）、ANDROID_HOME、NDK_HOME（同 release-android.mjs）。
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -11,6 +13,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
+import { playVersionCode, suffixFromArgs } from './play-version.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
@@ -18,6 +21,9 @@ const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
 const conf = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
 if (conf.version !== version) fail(`package.json（${version}）與 tauri.conf.json（${conf.version}）版本不一致`)
+let versionCode
+try { versionCode = playVersionCode(version, suffixFromArgs(process.argv.slice(2))) } catch (e) { fail(e.message) }
+console.log(`這次的 versionCode：${versionCode}`)
 
 // 打包（含產生上傳金鑰）之前先過啟動冒煙測試；沒過就中止
 if (!smokeGate({ root, skip: splitSkipFlag(process.argv.slice(2)).skip }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
@@ -49,22 +55,27 @@ if (!fs.existsSync(keystore)) {
 }
 if (!fs.existsSync(passFile)) fail(`找不到上傳金鑰的密碼檔：${passFile}`)
 
+// 要上傳就先確認這個 versionCode 比 Play 上的都大，免得建了半天才被 Play 擋
+if (process.argv.includes('--upload')) run(process.execPath, ['scripts/play-upload.mjs', '--check-only', `--expect-code=${versionCode}`])
+
 run(process.execPath, ['scripts/prep.mjs'])
-run(process.execPath, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'android', 'build', '--aab', '--target', 'aarch64', '--ci'])
+const out = path.join(root, 'src-tauri', 'target', 'play')
+fs.mkdirSync(out, { recursive: true })
+const codeConf = path.join(out, 'play-version-code.json')
+fs.writeFileSync(codeConf, JSON.stringify({ bundle: { android: { versionCode } } }))
+run(process.execPath, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'android', 'build', '--aab', '--target', 'aarch64', '--ci', '--config', codeConf])
 
 const bundleDir = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'build', 'outputs', 'bundle')
 const found = fs.existsSync(bundleDir) ? fs.readdirSync(bundleDir, { recursive: true }).filter(f => String(f).endsWith('.aab')).map(f => path.join(bundleDir, String(f))) : []
 const unsigned = found.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]
 if (!unsigned) fail(`沒產出 AAB（${bundleDir}）`)
-const out = path.join(root, 'src-tauri', 'target', 'play')
-fs.mkdirSync(out, { recursive: true })
 const signed = path.join(out, `ASN_${version}_play.aab`)
 run(jdk('jarsigner'), ['-keystore', keystore, '-storepass:file', passFile, '-keypass:file', passFile, '-sigalg', 'SHA256withRSA', '-digestalg', 'SHA-256', '-signedjar', signed, unsigned, 'upload'])
 run(jdk('jarsigner'), ['-verify', signed])
 console.log(`已產生：${signed}（${(fs.statSync(signed).size / 1048576).toFixed(1)} MB）`)
 if (process.argv.includes('--upload')) {
   // 接著自動上傳到 Play 內部測試並發布（設定見 docs/design/ANDROID.md「自動上傳 Play」）
-  run(process.execPath, ['scripts/play-upload.mjs', `--aab=${signed}`])
+  run(process.execPath, ['scripts/play-upload.mjs', `--aab=${signed}`, `--expect-code=${versionCode}`])
 } else {
   console.log('下一步：在 Play Console 的測試版本上傳這個檔，或執行 npm run publish:play 自動上傳。')
 }

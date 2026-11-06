@@ -169,3 +169,39 @@ test('金鑰檔：缺檔給純中文設定說明、結束碼非 0；格式不對
   assert.match(r.stderr, /上傳中止：找不到 Play 服務帳戶金鑰/)
   assert.ok(!(r.stdout + r.stderr).includes(keyBody))
 })
+
+// versionCode 規則（play-version.mjs）：有給 expectCode 就先查 Play 上最大值，不比它大不上傳；上傳回的值不同就不提交
+const withBundles = (max, uploaded) => c => {
+  if (c.method === 'GET' && c.url.endsWith('/edits/E1/bundles')) return [200, max == null ? {} : { bundles: [{ versionCode: 2005 }, { versionCode: max }] }]
+  if (c.url.includes('/upload/') && c.url.includes('/bundles')) return [200, { versionCode: uploaded }]
+  return happy(c)
+}
+
+test('expectCode：比 Play 上最大值大才上傳，流程多一步查詢，其餘照舊', async () => {
+  const f = await fake(withBundles(2006, 20061))
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', version: '0.2.6', expectCode: 20061, apiBase: f.base, tokenUri: `${f.base}/token`, request: req })
+    assert.equal(r.versionCode, 20061)
+    const seq = f.calls.map(c => `${c.method} ${c.url.split('?')[0]}`)
+    assert.deepEqual(seq.slice(1, 4), [
+      'POST /androidpublisher/v3/applications/tw.yooliang.asn/edits',
+      'GET /androidpublisher/v3/applications/tw.yooliang.asn/edits/E1/bundles',
+      'POST /upload/androidpublisher/v3/applications/tw.yooliang.asn/edits/E1/bundles',
+    ])
+    assert.ok(f.calls.some(c => c.url.endsWith(':commit')))
+  } finally { await f.close() }
+})
+
+test('expectCode：沒比 Play 上最大值大就不上傳、清掉編輯；上傳回的值不同也不提交', async () => {
+  const f = await fake(withBundles(20061, 20061))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', expectCode: 20061, apiBase: f.base, tokenUri: `${f.base}/token`, request: req }), /沒有比 Play 上最大的 20061 大/)
+    assert.ok(!f.calls.some(c => c.url.includes('/upload/')), '不上傳')
+    assert.equal(f.calls.at(-1).method, 'DELETE')
+  } finally { await f.close() }
+  const g = await fake(withBundles(2006, 20060))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', expectCode: 20061, apiBase: g.base, tokenUri: `${g.base}/token`, request: req }), /不是預期的 20061/)
+    assert.ok(!g.calls.some(c => c.url.endsWith(':commit')), '不提交')
+  } finally { await g.close() }
+})
