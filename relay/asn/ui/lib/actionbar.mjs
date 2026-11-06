@@ -514,7 +514,7 @@ export const ActionBar = {
       </ul>
     </div>
   </template>
-  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :pi-models="piModels" @close="opDlg.open = false"></partner-op-dialog>
+  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false"></partner-op-dialog>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>

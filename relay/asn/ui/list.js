@@ -659,14 +659,14 @@ async function refreshOpsCtx() {
 // 右鍵沒有大按鈕列，所以第 2 格不換成喚醒（wake:false），喚醒留在右鍵選單裡；對話頁的「管理」則拿掉喚醒（在第 2 格）
 const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
 const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value, info.node).map(i => ({ ...i, key: i.key.slice(2) })))
-const opDlg = reactive({ open: false, op: '', friend: null, item: null })
+const opDlg = reactive({ open: false, op: '', friend: null, item: null, taken: [] })
 function openPartnerOp(it) {
   const f = buddyMenuFriend.value
   if (!f || !it?.ok) return   // 反灰的項目：點了不送出任何動作，選單也不收起（可以接著讀說明）
   closeBuddyMenu()
   if (it.key === 'adopt') { void adoptLoad(); return }   // 「把這台電腦上開著的終端納入管理…」：和對話上方「管理」同一個接手清單
   if (it.key === 'archive' || it.key === 'unarchive') { void setArchived(f, it.key === 'archive'); return }
-  Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
+  Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it, taken: friends.value.filter(x => x && x.node === f.node && x.agent).map(x => String(x.agent)) })
 }
 // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明
 // 使用者環境變數裡有看起來像金鑰的變數時的提醒（共用終端服務開著才有；只含變數名字）。查不到、舊版後端沒有這個命令都當沒有

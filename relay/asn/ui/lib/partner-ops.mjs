@@ -134,10 +134,15 @@ export const ADOPT_ACK = '我已了解：接手後我會先關掉終端機那個
 export const isGrokAdoptable = f => isProcessEntry(f) && /^grok\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
 // 接手使用者自己開的 pi（0.2 A5）：前景的 pi 程序條目。ASN 會先關掉原本的 pi（終端機留著），再用同一段對話開一個由 ASN 管理的 pi
 export const isPiAdoptable = f => isProcessEntry(f) && /^pi\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
-export const isAdoptable = f => isGrokAdoptable(f) || isPiAdoptable(f)
+// 接進收發室（各家轉接層第 2 步）：使用者自己在終端機開的 agy（程序掃描名 gemini、前景）。ASN 給名字、記下這個程序，
+// 之後它能用 asn-cli 寄信、自己收信；收發室不會把信推進去。只在那台電腦的 ASN 上做（電腦端核對程序）
+export const SELF_PULL_LABEL = '接進收發室'
+export const isSelfPullable = f => isProcessEntry(f) && /^gemini\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
+export const selfPullPid = f => Number(/#(\d+)（前景）\s*$/.exec(String(f?.agent ?? f?.nick ?? ''))?.[1] ?? 0) || 0
+export const isAdoptable = f => isGrokAdoptable(f) || isPiAdoptable(f) || isSelfPullable(f)
 export const PI_ADOPT_ACK = '我已了解：會先關掉原本的 pi（終端機留著）；它如果正在回覆，這一輪會中斷'
 // 對話框文字用的種類：可接手的 grok 程序條目是 'adopt'、pi 是 'pi_adopt'，其餘照原本的種類
-export const dialogEngine = f => (isGrokAdoptable(f) ? 'adopt' : isPiAdoptable(f) ? 'pi_adopt' : partnerEngine(f))
+export const dialogEngine = f => (isSelfPullable(f) ? 'self_pull' : isGrokAdoptable(f) ? 'adopt' : isPiAdoptable(f) ? 'pi_adopt' : partnerEngine(f))
 
 // 同一個原因影響多個項目時只寫一次：回 { notes（共用說明，每個原因一行）, rows（項目加 why：只剩各自獨有的原因）}
 export function sharedWhy(items) {
@@ -194,7 +199,7 @@ export function menuItems(friend, ctx = {}) {
   return MENU_KEYS.map(key => {
     const reason = itemReason(key, friend, engine, offline, ctx)
     const adopt = key === 'handover' && isAdoptable(friend)
-    const label = adopt ? ADOPT_LABEL : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : key === 'handover' && engine === 'acp' ? ACP_NEWCONV_LABEL : OP_LABEL[key]
+    const label = adopt ? (isSelfPullable(friend) ? SELF_PULL_LABEL : ADOPT_LABEL) : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : key === 'handover' && engine === 'acp' ? ACP_NEWCONV_LABEL : OP_LABEL[key]
     return { key, label, ok: !reason, reason }
   })
 }

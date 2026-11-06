@@ -4,7 +4,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
+import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
 
@@ -84,7 +84,11 @@ export function opDialogText(op, name, device = '', engine = 'claude', { hasList
       points: ['會結束它的程序，從名單和 ASN 的名冊刪掉，重開 ASN 也不會回來', '它的對話會清掉，記下的模型也一起刪掉', '工作資料夾裡的檔案留著，不會刪', '寫在這台電腦 agents.json 裡的工作者不能從這裡移除，要到電腦上改設定檔'],
     }
     case 'restart': return { title, lead: `要重開「${name}」${where}內建通道的工作者嗎？會先結束它的程序，再由 ASN 重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
-    case 'handover': if (engine === 'pi_adopt') return {
+    case 'handover': if (engine === 'self_pull') return {
+      title: SELF_PULL_LABEL, lead: `要把${where}「${name}」這個 agy 接進收發室嗎？請給它一個名字。`, ok: SELF_PULL_LABEL, auto: false,
+      points: ['接進來後，在這個 agy 裡跑 asn-cli 就能用這個名字寄信、收信', '別人寄給它的信不會自動送進去，要它自己收；寄件人會收到「對方要自己收信，可能比較晚看到」', '關掉這個 agy 就不算了，下次開要再接一次'],
+    }
+    if (engine === 'pi_adopt') return {
       title: '接手', lead: `要讓 ASN 接手${where}「${name}」這個 pi 的對話嗎？之後可以從名單收信、改名、切換模型。`, ok: '接手', auto: false, ack: PI_ADOPT_ACK, danger: true,
       points: ['會先關掉原本的 pi（終端機留著），再用同一段對話開一個由 ASN 管理的 pi。原本的 pi 如果正在回覆，這一輪會中斷', 'ASN 會找出這個 pi 正在用的那一段對話；找不到或不只一段就不會接手，什麼都不關', '剛開還沒講過話的 pi 找不到對話，請先在 pi 裡講一句再試', '新的 pi 名字是「pi-資料夾名」，接手後可以再改名', '如果新的沒開起來，對話檔還在，結果會附上手動接回的指令'],
     }
@@ -114,6 +118,8 @@ export const PartnerOpDialog = {
     item: { type: Object, default: null },   // menuItems 的那一項（反灰就不送出）
     // 這台電腦自己的 pi 模型清單（async () => pi_models 的回應）。只有這個 pi 視窗在本機時才給；沒給＝退回輸入框（#443）
     piModels: { type: Function, default: null },
+    selfNode: { type: String, default: '' },   // 這台電腦的節點：「接進收發室」只能接自己這台的視窗
+    taken: { type: Array, default: () => [] },  // 名單上這台電腦已經用掉的名字（視窗、pi、夥伴紀錄）：「接進收發室」撞名檢查
   },
   emits: ['close', 'done'],
   setup(props, { emit }) {
@@ -136,8 +142,26 @@ export const PartnerOpDialog = {
       pi.loading = false
     }
     let closed = false
+    const isSelfPull = props.op === 'handover' && dialogEngine(props.friend) === 'self_pull'
+    // 接進收發室：不走後台的管理動作，直接請這台電腦核對程序與名字、寫登記
+    async function submitSelfPull() {
+      if (props.selfNode && props.friend.node !== props.selfNode) { st.error = '只能在那台電腦的 ASN 上接進收發室'; return }
+      const pid = selfPullPid(props.friend)
+      const newName = String(form.newName ?? '').trim()
+      if (!pid) { st.error = '看不出這個 agy 是哪一個程序，請重新整理名單再試'; return }
+      if (!newName) { st.error = '請給它一個名字'; return }
+      st.error = ''; st.busy = true
+      try {
+        const r = await props.api.selfWindowRegister({ pid, name: newName, taken: props.taken.map(String) })
+        st.phase = 'progress'
+        st.view = { phase: 'done', done: true, text: `已接進收發室，名字是「${r?.name ?? newName}」。在那個 agy 裡跑 asn-cli 就能寄信、收信。` }
+        emit('done', { op: props.op, view: st.view })
+      } catch (e) { st.error = String(e?.message ?? e) || '接不進來，請稍後再試' }
+      st.busy = false
+    }
     async function submit() {
       if (st.busy) return
+      if (isSelfPull) { await submitSelfPull(); return }
       if (pi.groups && !pi.groups.some(g => g.options.some(o => o.value === form.model))) { st.error = PI_MODEL_PICK_ERR; return }
       if (acpModels.length && !acpModels.some(m => m.id === form.model)) { st.error = '請從清單選一個模型'; return }
       const err = opFormError(props.friend, props.op, form, props.item)
@@ -150,16 +174,23 @@ export const PartnerOpDialog = {
     }
     function close() { closed = true; emit('close') }
     onMounted(() => {
+      if (isSelfPull) {
+        form.newName = ''
+        Promise.resolve(props.api.selfWindowDefault?.(props.taken.map(String))).then(n => { if (typeof n === 'string' && !form.newName) form.newName = n }).catch(e => console.info('[ASN] 查預設名字失敗', e?.message ?? e))
+      }
       if (text.value.auto) void submit()
       if (pi.loading) void loadPiModels()
     })
     onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, name, pi, piNote, acpModels }
+    return { text, form, st, submit, close, name, pi, piNote, acpModels, isSelfPull }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
   <template v-if="st.phase === 'form'">
     <p class="launch-notice-body">{{ text.lead }}</p>
+    <label class="op-field" v-if="isSelfPull">名字
+      <input class="set-input" type="text" v-model="form.newName" maxlength="60" aria-label="接進收發室的名字" @keydown.enter.prevent="submit">
+    </label>
     <label class="op-field" v-if="op === 'rename'">新名字
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
@@ -180,7 +211,7 @@ export const PartnerOpDialog = {
     <small class="partner-hint" v-if="piNote">{{ piNote }}</small>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
-    <label class="op-field" v-if="op === 'handover' && !text.ack">補充的話（選填，會附在新夥伴的第一句話後面）
+    <label class="op-field" v-if="op === 'handover' && !text.ack && !isSelfPull">補充的話（選填，會附在新夥伴的第一句話後面）
       <textarea class="set-area" rows="3" v-model="form.note" maxlength="1000" aria-label="補充的話"></textarea>
     </label>
     <p class="partner-err" v-if="st.error" role="alert">{{ st.error }}</p>

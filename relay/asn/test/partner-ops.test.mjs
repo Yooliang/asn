@@ -366,3 +366,21 @@ test('需要登入：提醒條種類是 login、說明講清楚要到哪台電�
   assert.match(loginNote({ nick: '小葛', engine: 'grok' }), /它所在的那台電腦/)
   assert.ok(!/agy/.test(loginNote({ nick: '小葛', engine: 'grok' })), 'agy 只對 Gemini 這類')
 })
+
+test('接進收發室：只有前景的 agy 程序條目，選單項目叫「接進收發室」，對話框走本機', async () => {
+  const m = await import('../ui/lib/partner-ops.mjs')
+  const agy = { node: 'W', agent: 'gemini #4321（前景）', nick: 'gemini #4321（前景）', engine: 'gemini', kind: 'process', status: 'running' }
+  assert.equal(m.isSelfPullable(agy), true)
+  assert.equal(m.selfPullPid(agy), 4321)
+  assert.equal(m.dialogEngine(agy), 'self_pull')
+  assert.equal(m.isSelfPullable({ ...agy, agent: 'gemini #4321（背景）', nick: 'gemini #4321（背景）' }), false, '背景的不算')
+  assert.equal(m.isSelfPullable({ ...agy, engine: 'pi', agent: 'pi #4321（前景）', nick: 'pi #4321（前景）' }), false, 'pi 走原本的接手')
+  assert.equal(m.isSelfPullable({ ...agy, kind: '' , entryKind: '' }), false, '不是程序條目')
+  assert.equal(m.selfPullPid({ agent: 'gemini' }), 0)
+  const item = m.menuItems(agy, { loaded: true, signedIn: true, machines: { W: {} } }).find(i => i.key === 'handover')
+  assert.equal(item?.label, m.SELF_PULL_LABEL)
+  const ui = await import('../ui/lib/partner-ops-ui.mjs')
+  const t = ui.opDialogText('handover', agy.agent, '', 'self_pull')
+  assert.equal(t.title, '接進收發室')
+  assert.ok(t.points.some(x => x.includes('要它自己收')), '說明信不會自動送進去')
+})

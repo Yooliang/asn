@@ -121,6 +121,56 @@ pub fn remove(dir: &Path, pid: u32, started_ms: u64) {
     let _ = std::fs::remove_file(file_of(dir, pid, started_ms));
 }
 
+/// 本機活著的 Claude 視窗名（撞名檢查用；pi 視窗與夥伴紀錄的名字由畫面一起給）
+#[cfg(desktop)]
+fn live_claude_names() -> Vec<String> {
+    let Some(dir) = crate::launch::console::sessions_dir() else { return Vec::new() };
+    crate::bridge::roster::read_sessions(&dir, crate::heartbeat::pid_alive, 0, "").unwrap_or_default().into_iter().map(|w| w.name).collect()
+}
+
+/// 這個 pid 是不是這台電腦上、使用者自己在前景開的 agy（程序掃描看得到的那一列）
+#[cfg(desktop)]
+fn is_local_foreground_agy(pid: u32) -> bool {
+    crate::bridge::procscan::scan_system().into_iter().any(|a| a.pid == pid && ENGINES.contains(&a.engine.as_str()) && !a.background)
+}
+
+/// 畫面「接進收發室」對話框的預設名字。taken＝畫面名單上這台電腦的名字（視窗、pi、夥伴紀錄）
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn self_window_default(taken: Vec<String>) -> Result<String, String> {
+    crate::launch::blocking_timeout(move || {
+        let all: Vec<String> = taken.into_iter().chain(live_claude_names()).collect();
+        Ok(default_name(&dir_in(&crate::identity::relay_home()), &all, &crate::heartbeat::process_started_ms))
+    })
+    .await
+}
+
+/// 本人按「接進收發室」：核對這個 pid 是這台的前景 agy、查得到建立時間、名字合法且不撞名，才寫登記。
+/// 回 { name }；不過就回原因（給人看的一句話）
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn self_window_register(pid: u32, name: String, taken: Vec<String>) -> Result<Value, String> {
+    crate::launch::blocking_timeout(move || {
+        let name = name.trim().to_string();
+        if !is_local_foreground_agy(pid) {
+            return Err("找不到這個 agy 視窗（可能已經關了，或不是這台電腦上開的）".to_string());
+        }
+        let Some(started_ms) = crate::heartbeat::process_started_ms(pid) else {
+            return Err("查不到這個視窗的程序資訊，無法接進收發室".to_string());
+        };
+        let dir = dir_in(&crate::identity::relay_home());
+        let all: Vec<String> = taken.into_iter().chain(live_claude_names()).collect();
+        if let Some(why) = name_problem(&dir, &name, pid, &all, &crate::heartbeat::process_started_ms) {
+            return Err(why);
+        }
+        let at = crate::heartbeat::now_ms();
+        write(&dir, &Entry { name: name.clone(), engine: "gemini".into(), pid, started_ms, at })?;
+        elog!("接進收發室：pid {pid} → {name}");
+        Ok(json!({ "name": name }))
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
