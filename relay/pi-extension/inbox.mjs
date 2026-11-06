@@ -169,7 +169,7 @@ export function pruneDone(inboxDir, sessionId, now, maxAgeMs) {
  * 「保持能回應」的提醒（#494）：0.1.104 起的電腦版橋已寫在說明行裡；舊版橋給的信沒有，就在框的下一行補上（只補一次）。
  */
 // 與 Rust 內建橋 mail.rs、Linux 機器橋 mail-format.mjs 的 RESPONSIVE_NOTE 逐字一致（守門測試比對三邊原始檔）
-export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
+export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。要問人時用寄信，不要用會跳選項框的工具（AskUserQuestion）；框沒人按時你會卡住，信也收不到。'
 // 整行等於那句才算橋寫的：內文裡寫的同一句，橋轉交前已在行首加上「（內文）」，不會整行相等
 const hasResponsiveNote = text => text.split('\n').some(l => l === RESPONSIVE_NOTE || l === `${RESPONSIVE_NOTE}\r`)
 // 行首是【要回信】才算橋寫的要回信指示：內文（個人信與群組信，#499）裡手打的，橋已在行首加「（內文）」，不能因此省掉編號說明

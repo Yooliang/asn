@@ -475,19 +475,6 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { ok: true });
   }
-  if (action === "update" && req.method === "POST") {
-    const b = await req.json().catch(() => null);
-    if (!b || typeof b.id !== "string" || !ID_RE.test(b.id)) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("asn_relay_update", {
-      p_node: me.id, p_id: b.id, p_machine: typeof b.machine === "string" ? b.machine : null,
-      p_name: typeof b.name === "string" ? b.name : null,
-    });
-    if (error) { console.error(error); return json(500, { error: "internal" }); }
-    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
-    if (data?.error === "not_found") return json(404, { error: "not_found" });
-    if (data?.error) return json(400, { error: data.error });
-    return json(200, { ok: true });
-  }
   if (action === "invite" && req.method === "POST") {
     const b = await req.json().catch(() => ({}));
     const code = b64u(24);

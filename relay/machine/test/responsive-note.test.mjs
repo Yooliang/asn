@@ -8,7 +8,7 @@ import { BODY_ESCAPE_PREFIX, RESPONSIVE_NOTE, escapeBody, mailHead, mailPreamble
 
 const read = rel => fs.readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 const ID = '11111111-2222-3333-4444-555555555555'
-const WANT = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
+const WANT = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。要問人時用寄信，不要用會跳選項框的工具（AskUserQuestion）；框沒人按時你會卡住，信也收不到。'
 const mk = expects_reply => ({ id: ID, trust: 'member', from_node: 'H', from_agent: 'asn', to_agent: 'T-甲', expects_reply })
 
 test('固定文字逐字等於 issue #494 定的那句', () => {

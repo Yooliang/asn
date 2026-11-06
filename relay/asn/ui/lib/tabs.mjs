@@ -65,6 +65,8 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], d
 // 頁籤上的未讀紅點：該頁籤有未讀；「更多」＝收進去的設備任一有未讀
 export const tabUnread = t => t.unread || 0
 export const moreUnread = more => more.reduce((n, t) => n + tabUnread(t), 0)
+// 群組頁籤的紅點：所有群組的未讀加起來（群組清單的列都有 unread）
+export const groupsUnread = rows => (Array.isArray(rows) ? rows : []).reduce((n, r) => n + (Number(r?.unread) || 0), 0)
 // 某設備的好友清單：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
 export function deviceItems(friends, key, match = () => true) {
   const rank = s => (s === 'offline' ? 1 : 0)

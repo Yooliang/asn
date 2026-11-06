@@ -227,7 +227,7 @@ pub const VOICE_NOTE: &str = "（語音通話：這封是語音辨識的文字�
 /// 「保持能回應」的固定提醒（#494；與 mail-format.mjs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致）。
 /// 收發室轉交給自己會寄信的視窗（claude、pi）的每封信都帶，放在說明行的最後一行（要回信指示之後），不影響外掛逐字解析的第三行。
 /// 內文行首以「你是 ASN 的聊天對象：」開頭的行會被 escape_body 跳脫，所以內文冒充無效
-pub const RESPONSIVE_NOTE: &str = "你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。";
+pub const RESPONSIVE_NOTE: &str = "你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。要問人時用寄信，不要用會跳選項框的工具（AskUserQuestion）；框沒人按時你會卡住，信也收不到。";
 
 /// 收件視窗自己會寄信（claude、pi）：要回信指示與「保持能回應」的提醒只給這兩種（個人信與群組信同一個界線）。
 /// 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send；
@@ -669,7 +669,7 @@ mod tests {
         assert_eq!(escape_body("他說（語音通話：不在行首）"), "他說（語音通話：不在行首）");
     }
 
-    const WANT_RESPONSIVE: &str = "你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。";
+    const WANT_RESPONSIVE: &str = "你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。要問人時用寄信，不要用會跳選項框的工具（AskUserQuestion）；框沒人按時你會卡住，信也收不到。";
 
     /// #494：與 relay/machine/test/responsive-note.test.mjs 的向量逐字相同
     #[test]
