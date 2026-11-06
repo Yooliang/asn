@@ -5,9 +5,16 @@ import { confirmCards } from './groups.mjs'
 import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
+// 後台回的 unmatched：內文裡 @ 了但對不到任何群組成員的名字；舊後台沒有這個欄位＝空。回要顯示的一句話（沒有就空字串）
+export function unmatchedText(r) {
+  const names = (Array.isArray(r?.unmatched) ? r.unmatched : []).map(n => (typeof n === 'string' ? n.trim() : '')).filter(Boolean)
+  if (!names.length) return ''
+  return `${names.join('、')} 不在這個群組，這則沒有點到${names.length > 1 ? '他們' : '他'}。`
+}
+
 // visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x }) {
-  const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false })
+  const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   const rows = (opts = {}) => roomItems(st.rooms, opts)
   const rowOf = id => rows().find(r => r.id === id) ?? null
@@ -78,11 +85,23 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     if (err) { st.note = err; return false }
     try {
       const reply = Number.isInteger(opts?.replySeq) && opts.replySeq > 0 ? { reply_to: opts.replySeq } : {}   // 回覆某則訊息：後台記下引用並自動 @ 原作者
-      await invoke(postCmd, { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}), ...reply } })
+      const r = await invoke(postCmd, { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}), ...reply } })
       st.note = ''
+      const warn = unmatchedText(r)
+      if (warn) st.notices[id] = [...(st.notices[id] ?? []), { seq: Number.isInteger(r?.seq) ? r.seq : null, text: warn, t: now() }].slice(-20)   // 只留在本機畫面，不寄出去
       await refresh(); await read(id, { force: true })
       return true
     } catch (e) { st.note = roomErrorText(e?.message); return false }
+  }
+
+  // 畫面上看到的記錄：對話記錄加上本機提示（接在該則發言之後；沒有序號就放最後）
+  function view(id) {
+    const log = st.logs[id] ?? [], notes = st.notices[id]
+    if (!notes?.length) return log
+    const sys = n => ({ k: 'sys', text: n.text, t: n.t, id: `unmatched-${n.t}` })
+    const seqs = new Set(log.map(e => e.seq))
+    const tail = notes.filter(n => n.seq === null || !seqs.has(n.seq))
+    return [...log.flatMap(e => [e, ...notes.filter(n => n.seq === e.seq).map(sys)]), ...tail.map(sys)]
   }
 
   // 在群組傳照片或檔案：Rust 端上傳後以本人簽章發言（附件編號由 Rust 填，前端不能自填）
@@ -111,5 +130,5 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     } catch (e) { st.note = groupErrorText(e?.message); await loadCards(id); return false } finally { st.deciding = false }
   }
 
-  return { st, raw, rows, rowOf, identityOf, refresh, read, loadCards, open, post, postAttachment, decide }
+  return { st, raw, rows, rowOf, identityOf, refresh, read, loadCards, open, view, post, postAttachment, decide }
 }

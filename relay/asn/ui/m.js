@@ -297,7 +297,6 @@ const app = createApp({
     const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', photos: true, reactive, visible: rid => core.isChatVisible(roomChatId(rid)) })   // 跟 1 對 1 同一套：只有正在看的那個群組才標已讀
     const rooms = computed(() => hub.st.rooms)
     const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
-    const roomLogs = hub.st.logs   // 群組代號 → 對話記錄
     const roomNote = computed({ get: () => hub.st.note, set: v => { hub.st.note = v } })   // 對話頁上方的一行提示（讀不到、發言失敗）
     // 最近有活動：24 小時內有往來的夥伴與群組（名單最上面；同一位在設備分組照常出現）
     const recentTick = ref(Date.now())
@@ -371,7 +370,7 @@ const app = createApp({
     })
     const chatFriend = computed(() => chatState.value.friend)
     const chatEmptyText = computed(() => chatState.value.text)
-    const chatLog = computed(() => (isRoomChat(lastChat.value) ? roomLogs[roomIdOf(lastChat.value)] : logs[lastChat.value]) ?? [])
+    const chatLog = computed(() => (isRoomChat(lastChat.value) ? hub.view(roomIdOf(lastChat.value)) : logs[lastChat.value]) ?? [])
     // 點名單上的群組：成為「最後使用」並切到對話分頁
     function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; goTab('chats') }
 
