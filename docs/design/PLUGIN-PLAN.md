@@ -135,7 +135,7 @@ type RunKind = 'asn-term-native' | 'asn-term-pi' | 'acp-channel' | 'raw-cli-wind
 
 | 運行方式 | 介面方法 | 承接版本（依廠商） | 說明 |
 |---|---|---|---|
-| **asn終端（原生 cli）** | `launch_plan(AsnTermNative, …)` 描述啟動；`classify_screen`／`answer_keys` 描述畫面與答案；`run_avail` 宣告能不能用 | agy 0.2.19；Grok、Codex 0.2.20；Claude 0.2.22 | 現況是兩條不同路徑：Claude／Codex／pi 走 `win_term`＋mux，agy／grok 走 `TermService`，且 `resolve_command`（`term.rs:2010`）白名單只認 agy 與 grok。#931 要 Claude 也開進終端服務，**這是行為改變**，不屬於「行為不變」的搬遷版；由 #931 自己的版本（0.2.7）處理白名單擴充，本計畫的 0.2.22 只負責在 Claude 適配裡**宣告**這種運行方式的狀態並沿用屆時的白名單規則 |
+| **asn終端（原生 cli）** | `launch_plan(AsnTermNative, …)` 描述啟動；`classify_screen`／`answer_keys` 描述畫面與答案；`run_avail` 宣告能不能用 | agy 0.2.19；Grok、Codex 0.2.20；Claude 0.2.22 | 現況是兩條不同路徑：Claude／Codex／pi 走 `win_term`＋mux，agy／grok 走 `TermService`，且 `resolve_command`（`term.rs:2010`）白名單只認 agy 與 grok。Claude／Codex／pi 在終端服務開著時本來就經 `win_term` 開成 mux 窗格（#931 調查結論），`resolve_command` 只管 agy／grok 走的 `TermService` 路徑，**#931 不需要擴充這份白名單**。0.2.19～0.2.22 搬遷時要把兩條路徑的差異寫進各家適配的 `launch_plan`，核心檢查各自保留 |
 | **asn終端（pi shell）** | `pi_route()` 回傳「這家廠商經 pi 跑時對應哪個提供者與模型」（資料，寫在 manifest）；`launch_plan(AsnTermPi, …)` 描述啟動；`run_avail` 宣告可用與否 | 0.2.19 先在 agy 宣告「不支援」；pi 本身與各家的對應在 0.2.21 | 第一版介面沒有「廠商對應 pi 提供者」這個欄位，這次補上。與 #934（登入改經 pi）同一個資料來源 |
 | **acp通道（無介面）** | `acp_driver()` 回傳既有 `Driver`；`launch_plan(AcpChannel, …)` 描述啟動參數 | agy 0.2.19；Grok 0.2.20；Claude 不提供（manifest 宣告「不支援」） | 核心已有的 `Driver`／`Guard` 不動，適配只是登記它 |
 | **原始 cli 視窗** | **取決於 Q3 的定義（待決，見下）** | 見下表 | 定義尚待小良哥拍板 |
