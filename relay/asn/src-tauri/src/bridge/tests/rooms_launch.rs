@@ -557,6 +557,8 @@ struct FakeEnv {
     started: Mutex<Vec<(String, String, String)>>,
     /// start 時實際會執行的命令（取自本機設定，展開 {name} 後）
     commands: Mutex<Vec<(String, Vec<String>)>>,
+    /// 這台電腦上還活著、但名單快取裡沒有的同名視窗（#654）
+    live: Vec<String>,
     /// 這台 pi 列得出來的（提供者, 模型）（D2 #422）
     pi_list: Vec<(String, String)>,
     /// start 收到的 pi 參數
@@ -578,6 +580,7 @@ impl FakeEnv {
             enqueued: Mutex::new(vec![]),
             started: Mutex::new(vec![]),
             commands: Mutex::new(vec![]),
+            live: vec![],
             pi_list: vec![],
             pi_args: Mutex::new(vec![]),
         })
@@ -620,6 +623,9 @@ impl LaunchEnv for FakeEnv {
             });
         }
         Ok(())
+    }
+    fn live_window(&self, _engine: &str, name: &str) -> bool {
+        self.live.iter().any(|n| n == name)
     }
     fn pi_listed(&self, provider: &str, model: &str) -> bool {
         self.pi_list.iter().any(|(p, m)| p == provider && m == model)
@@ -802,6 +808,50 @@ async fn 遠端開視窗_每小時上限_存在_launch_history_json_重啟也算
     assert_eq!(l.env.started.lock().unwrap().len(), 1);
     let h2: Vec<u64> = serde_json::from_str(&std::fs::read_to_string(l.h.work.path().join("launch-history.json")).unwrap()).unwrap();
     assert_eq!(h2.len(), 2, "一小時前的被清掉，新開的記上去");
+}
+
+#[tokio::test]
+async fn 遠端開視窗_名單上沒有但本機還活著的同名視窗_回報已在跑_不開第二個_不佔每小時上限() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.live = vec!["T-活著".into()]; }), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    {
+        let mut st = l.h.fr.st.lock().unwrap();
+        st.launches.push(lreq(1, "T-活著", &cwd, json!({})));
+        st.launches.push(lreq(2, "T-新來的", &cwd, json!({})));
+    }
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| results(&l.h).len() == 2).await;
+    let r = results(&l.h);
+    let of = |n: u32| r.iter().find(|x| x["id"] == uid(n).as_str()).unwrap().clone();
+    assert_eq!(of(1), json!({"id": uid(1), "status": "failed", "detail": "已經有叫「T-活著」的視窗在跑"}));
+    assert_eq!(of(2)["status"], "ok", "別的名字照常開");
+    let started = l.env.started.lock().unwrap().clone();
+    assert_eq!(started.iter().map(|s| s.1.as_str()).collect::<Vec<_>>(), ["T-新來的"], "同名的不能開第二個");
+    // 擋下的不算開過：每小時上限只記實際開的那一個
+    let hist: Vec<u64> = serde_json::from_str(&std::fs::read_to_string(l.h.work.path().join("launch-history.json")).unwrap()).unwrap();
+    assert_eq!(hist.len(), 1);
+}
+
+#[tokio::test]
+async fn 遠端開視窗_背景夥伴不在這裡查同名活視窗_交給引擎佇列() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.live = vec!["小格".into()]; e.bg_outcome = Some(Ok(())); }), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    assert_eq!(l.env.enqueued.lock().unwrap().len(), 1, "背景夥伴照常排進佇列");
+    assert!(!results(&l.h)[0]["detail"].as_str().unwrap().contains("在跑"));
+    let _ = &mut l;
+}
+
+#[test]
+fn 守門_遠端開窗先即時查同名活視窗_用本機開窗同一套查法_在記開窗次數之前() {
+    let src = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap();
+    assert!(src.contains("crate::launch::console::live_partner_pid(engine, name).is_some()"), "要用 #653 本機開窗同一套 live_partner_pid（含程序編號重用核對）");
+    let begin = src.find("async fn begin(").unwrap();
+    let check = src[begin..].find("env1.live_window(").expect("遠端開窗前要查同名活視窗");
+    let hist = src[begin..].find("self.write_history(").unwrap();
+    assert!(check < hist, "要在記每小時開窗次數之前查，擋下的不算");
 }
 
 #[tokio::test]
