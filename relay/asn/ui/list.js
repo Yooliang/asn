@@ -60,9 +60,9 @@ import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { WINDOW_LABEL, barSlots, consoleBlock, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
-import { channelRows, launchModelChoices, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
+import { channelRows, customRunOptions, launchModelChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
-import { PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchRun, launchVendors } from './lib/mobile-launch.mjs'
+import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchRun, launchVendors } from './lib/mobile-launch.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -478,9 +478,8 @@ const piChoice = computed(() => (dlgRemote.value ? launchPiChoice(dlgRow.value, 
 // 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
 const PI_VIA_READY = true
 // 只能經 pi 的廠牌（#351）：這台的 pi 列得到它的模型才出現，運行只有「經 pi」能選；遠端開 pi 帶模型還沒做，所以只在選這台時加
-const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi: { status: 'ok', why: '只能經 pi 開' }, term: { status: 'no', why: '不走終端' } }
 const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
-  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '經 pi 開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
+  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '用 asn終端（pi shell）開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
   : []))
 const dlgVendors = computed(() => (dlgRemote.value ? launchVendors(dlgRemoteLauncher.value) : PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
 const partnerRun = computed(() => {
@@ -492,12 +491,9 @@ const partnerRun = computed(() => {
   const r = row?.channels
     ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliInstalled(cliTools.value, 'pi'), piReady: PI_VIA_READY && piChoice.value.ok })
     : null
-  if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode，開成視窗或內建通道
-    const bg = row?.mode === 'background'
-    return { options: [
-      { key: 'acp', label: '內建通道（背景運行）', ok: bg, why: bg ? '' : '這個設定不是背景運行', note: '' },
-      { key: 'term', label: '開成視窗', ok: !bg, why: bg ? '這個設定是背景運行' : '', note: '' },
-    ], selected: bg ? 'acp' : 'term', recommended: bg ? 'acp' : 'term' }
+  if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode（手機同一份）
+    const c = customRunOptions(row)
+    return { ...c, recommended: c.selected }
   }
   const rec = r.options.find(o => o.ok && o.key !== 'self')?.key ?? ''
   // 經 pi 不能選時，原因用 pi 自己回答的（沒登入、這版 pi 沒有、沒列出模型），比目錄的通用說明準確

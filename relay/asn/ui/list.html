@@ -417,7 +417,7 @@
         <label v-for="c in partnerRun.options" :key="c.key" class="partner-run-opt" :class="{ off: !c.ok || c.self }">
           <input type="radio" name="partner-run" :value="c.key" v-model="partnerRunModel" :disabled="!c.ok || c.self" :aria-label="c.label"> {{ c.label }}
           <em class="ch-rec" v-if="c.key === partnerRun.recommended">（建議）</em>
-          <small class="partner-run-why" v-if="c.self">{{ c.note }}（這個只是說明，不能在這裡選）</small>
+          <small class="partner-run-why" v-if="c.self">{{ c.note }}（{{ c.why }}）</small>
           <small class="partner-run-why" v-else-if="!c.ok">{{ c.why }}</small>
           <small class="partner-run-why" v-else-if="c.note">{{ c.note }}</small>
         </label>
@@ -457,7 +457,7 @@
           <input type="radio" name="partner-display" :value="m.key" v-model="partnerDlg.display" :aria-label="m.label"> {{ m.label }}
         </label>
       </fieldset>
-      <p class="partner-hint partner-fgonly" v-if="partnerFgOnly">pi 是互動式，只能開在前台視窗；視窗開好後約一分鐘內會出現在名單上，可收信、回信。</p>
+      <p class="partner-hint partner-fgonly" v-if="partnerFgOnly">pi 只能開在前台；開好後約一分鐘內會出現在名單上，可以收信、回信。</p>
       <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
       </div>
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>

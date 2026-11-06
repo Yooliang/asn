@@ -4,38 +4,23 @@
 /** @typedef {'window'|'background'} LaunchMode */
 
 export const MODEL_CATALOG = [
-  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Claude 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗（不是 ASN 自帶終端），靠 asn 外掛收發信' }, acp: { status: 'no', why: '刻意不做（帳務風險，#273）' }, pi: { status: 'untested', why: 'pi 可以用 Claude 訂閱登入，ASN 裡還沒有實際用過' } } },
-  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Codex 還沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗，還沒有真機實測' }, acp: { status: 'no', why: '還沒有內建通道' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者，ASN 裡還沒有實際用過' } } },
-  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.86 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'no', why: 'pi 已拿掉 Gemini 訂閱登入，不建議' } } },
-  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.84 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'untested', why: 'pi 有 xai 提供者，ASN 裡還沒有實際用過' } } },
-  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, channelOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: 'pi 自己就是互動視窗，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 沒有內建通道' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
+  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '開在 ASN 終端，可以收發信', channels: { term: { status: 'window', why: '開在 ASN 終端，靠 ASN 外掛收發信' }, acp: { status: 'no', why: 'Claude 不支援' }, pi: { status: 'untested', why: 'pi 可以用 Claude 訂閱登入' } } },
+  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '開在 ASN 終端', channels: { term: { status: 'window', why: '開在 ASN 終端' }, acp: { status: 'no', why: 'Codex 不支援' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者' } } },
+  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '沒有畫面，收到信才起來', channels: { term: { status: 'noinbox', why: '可以開在 ASN 終端，但收不到信' }, acp: { status: 'ok', why: '沒有畫面，可以收發信' }, pi: { status: 'no', why: 'pi 不支援 Gemini 訂閱登入' } } },
+  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '沒有畫面，收到信才起來', channels: { term: { status: 'noinbox', why: '可以開在 ASN 終端，但收不到信' }, acp: { status: 'ok', why: '沒有畫面，可以收發信' }, pi: { status: 'untested', why: 'pi 有 xai 提供者' } } },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '開在 ASN 終端，只能開在前台', foregroundOnly: true, channelOnly: true, channels: { term: { status: 'window', why: '開在 ASN 終端，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 不支援' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
 ]
 
 /**
- * 開新夥伴的「運行」二選一：CLI（開終端機視窗）／內建通道（ACP，背景運行，沒有視窗、要先安裝對應 CLI）。
- * 模型一選，哪種運行方式可用就由目錄決定（mode: window＝CLI、background＝內建通道）；不支援的那個反灰並寫原因（cliWhy／acpWhy）。
- * 目錄上沒有的項目（自訂設定）：只認那台回報的 mode，不支援的那個用通用原因。電腦版對話框與手機第 2 頁共用。
- * 回傳 { choices: [{ key: 'cli'|'acp', label, ok, why }], selected: 'cli'|'acp' }
- */
-export const RUN_LABEL = { cli: 'CLI（開終端機視窗）', acp: '內建通道（背景運行）' }
-const RUN_GENERIC_WHY = '這個模型的啟動設定不支援這種運行方式'
-export function runChoices(row) {
-  const acp = row?.mode === 'background'
-  const choices = [
-    { key: 'cli', label: RUN_LABEL.cli, ok: !acp, why: acp ? (row?.cliWhy || RUN_GENERIC_WHY) : '' },
-    { key: 'acp', label: RUN_LABEL.acp, ok: acp, why: acp ? '' : (row?.acpWhy || RUN_GENERIC_WHY) },
-  ]
-  return { choices, selected: acp ? 'acp' : 'cli' }
-}
-
-/**
- * 每個模型的三條通道（#351 第 1 步，只是資料與文字）：term＝終端機（ASN 自帶終端或自己的視窗）、acp＝內建通道、pi＝經 pi 跑。
- * status：ok 可用／window 開成自己的視窗／noinbox 開得起來但收不到信／untested 理論可行但沒實測／no 不支援或刻意不做。
+ * 每個模型的三條通道（#351 第 1 步，只是資料與文字）：term＝asn終端（原生 cli）、acp＝acp通道（無介面）、pi＝asn終端（pi shell）。
+ * status：ok 可用／window 開在 ASN 終端（終端服務沒開時退回原生主控台）／noinbox 開得起來但收不到信／untested 理論可行但沒實測／no 不支援或刻意不做。
+ * channels.*.why 會直接顯示在畫面上：只寫使用者能據以行動的話，議題編號、版本、內部原因寫在註解（#931）。
+ * 給開發者的背景：Claude 的 acp 是刻意不做（帳務風險，#273）；Gemini／Grok 的終端 0.1.84／0.1.86 起可開、acp 0.1.70 起有真機。
  * 回 [{ key, label, status, statusText, why }]；目錄上沒有 channels 的（自訂設定）回空陣列。
  */
-// 排列順序＝優先序（小良哥 10/27 決定）：內建通道（ACP）＞經 pi＞終端機（ASN 開的）；使用者自己開的 CLI 加外掛排最後、不在這裡
-export const CHANNEL_LABEL = { acp: '內建通道', pi: '經 pi', term: '終端機' }
-export const CHANNEL_STATUS_TEXT = { ok: '可用', window: '開成視窗', noinbox: '收不到信', untested: '沒實測', no: '不支援' }
+// 排列順序＝優先序（小良哥 10/27 決定）：acp通道＞asn終端（pi shell）＞asn終端（原生 cli）；使用者自己開的 CLI 加外掛排最後、不在這裡
+export const CHANNEL_LABEL = { acp: 'acp通道', pi: 'asn終端（pi shell）', term: 'asn終端（原生 cli）' }
+export const CHANNEL_STATUS_TEXT = { ok: '可用', window: '開在 ASN 終端', noinbox: '收不到信', untested: '可以試試看', no: '不支援' }
 export function channelRows(row) {
   const ch = row?.channels
   if (!ch || typeof ch !== 'object') return []
@@ -46,18 +31,21 @@ export function channelRows(row) {
 }
 
 /**
- * 開新夥伴的「運行」四選一（#351，小良哥 10/27：開終端不是獨立功能，是開新夥伴的一個選項）。順序＝優先序：
- *   acp 內建通道 ＞ pi 經 pi ＞ term ASN 開的終端（進階）＞ self 自己開的 CLI（始終不能選，只顯示說明與接手入口）。
- * row：目錄列（有 channels 與 toolId）；local：選的是這台電腦；piInstalled：這台偵測到 pi；piReady：ASN 已能帶提供者／模型開 pi（0.1.90 起）。
- * 回 { options: [{ key, label, ok, why, note }], selected }；selected＝依序第一個 ok 的（沒有就 null）。
- */
-/**
  * 開新夥伴的「模型」清單只列廠家（小良哥 10/27：pi 是通道，不是廠家）。目錄上 channelOnly 的（pi）不列進廠家清單，只在「運行」的「經 pi」出現。
  * 目錄裡仍留著 pi 這一列，因為後端啟動設定的 profile 叫 pi，經 pi 開的時候要用它。
  */
 export const vendorRows = rows => (Array.isArray(rows) ? rows : []).filter(r => r && !r.channelOnly)
 
-export const RUN_OPTION_LABEL ={ acp: '內建通道（背景運行）', pi: '經 pi', term: 'ASN 開的終端（進階）', self: '原生 CLI（手動開啟）' }
+/**
+ * 開新夥伴的「運行」四選一（#351，小良哥 10/27：開終端不是獨立功能，是開新夥伴的一個選項；名稱 #931 小良哥 11/06 定案，手機與電腦版共用）。
+ * 順序＝優先序（#931 小良哥 11/07 定：asn終端優先，Claude 在 pi 已登入時也不再預設經 pi）：
+ *   term asn終端（原生 cli）＞ acp acp通道（無介面）＞ pi asn終端（pi shell）＞ self 原始 cli 視窗（始終不能選，只顯示說明與接手入口）。
+ *   例外：term 收不到信時（Grok／Gemini 開在 ASN 終端）不當預設，改用下一個能選的；都不行才用它。
+ * row：目錄列（有 channels 與 toolId）；local：選的是這台電腦；piInstalled：這台偵測到 pi；piReady：ASN 已能帶提供者／模型開 pi（0.1.90 起）。
+ * 回 { options: [{ key, label, ok, why, note }], selected }；selected＝依序第一個 ok 的（收不到信的 term 排到最後；沒有就 null）。
+ * why／note 會直接顯示在畫面上（#931 文案規則：給使用者能據以行動的話，不寫議題編號、版本、內部原因）。
+ */
+export const RUN_OPTION_LABEL = { acp: 'acp通道（無介面）', pi: 'asn終端（pi shell）', term: 'asn終端（原生 cli）', self: '原始 cli 視窗' }
 const TERM_PROFILES = ['grok', 'agy']   // 後端 term_start 只收這兩個（launch/term.rs resolve_command）
 export function runOptions(row, { local = false, piInstalled = false, piReady = false } = {}) {
   const ch = row?.channels ?? {}
@@ -67,23 +55,40 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
   const opt = (key, ok, reason, note = '') => ({ key, label: RUN_OPTION_LABEL[key], ok, why: ok ? '' : reason, note })
   const acpOk = st('acp') === 'ok'
   const piOk = st('pi') !== undefined && st('pi') !== 'no' && piInstalled && (isPiItself || piReady)
-  const piWhy = st('pi') === 'no' || st('pi') === undefined ? (why('pi') || '這個模型不能經 pi 開') : !piInstalled ? '這台電腦沒偵測到 pi（PATH 和 npm、pnpm、scoop 的安裝資料夾都找過）；剛裝好的話，把 ASN 關掉重開再試' : '0.1.90 起才能帶提供者和模型開 pi'
-  // 終端：Claude、Codex、pi 是 ASN 開成它自己的終端機視窗（原本的開法，別台設備也能遠端開）；Grok、Gemini 是 ASN 內建的 WezTerm，只能在這台開
+  // piReady 為 false＝這台的 ASN 還不能帶提供者和模型開 pi（0.1.90 以前）
+  const piWhy = st('pi') === 'no' || st('pi') === undefined ? (why('pi') || '這個模型不支援') : !piInstalled ? '這台電腦沒偵測到 pi（PATH 和 npm、pnpm、scoop 的安裝資料夾都找過）；剛裝好的話，把 ASN 關掉重開再試' : '這台的 ASN 版本太舊，更新後才能用'
+  // 終端：Claude、Codex、pi 走開窗點（終端服務開著就開進 ASN 終端，沒開退回原生主控台；別台設備也能遠端開）；Grok、Gemini 走 term_start，只能在這台開
   const termWindow = st('term') === 'window'
   const termWez = ['ok', 'noinbox'].includes(st('term')) && TERM_PROFILES.includes(row?.toolId)
   const termOk = termWindow || (termWez && local)
   const termWhy = termWez ? '只能在那台電腦上開' : (why('term') || '不支援')
-  const termNote = termWindow ? '開成它自己的終端機視窗' : termWez && st('term') === 'noinbox' ? '收不到信，只能看畫面、送字' : ''
-  const selfNote = row?.id === 'claude' ? '自己開 claude，裝了 ASN 外掛會出現在名單上' : isPiItself ? '自己開 pi，裝了 ASN 擴充會出現在名單上' : '已開著的可以用「接手已開著的終端視窗」接進來'
+  const termNote = termWindow ? '開在 ASN 終端，可以看畫面、喚醒' : termWez && st('term') === 'noinbox' ? '收不到信，只能看畫面、送字；也只能在這台電腦上開' : ''
+  const selfNote = row?.id === 'claude' ? '自己開 claude，裝了 ASN 外掛就會出現在名單上' : isPiItself ? '自己開 pi，裝了 ASN 擴充就會出現在名單上' : '已開著的可以用「接手已開著的終端視窗」接進來'
   const options = [
-    opt('acp', acpOk, why('acp') || '這個模型沒有內建通道'),
-    opt('pi', piOk, piWhy),
     opt('term', termOk, termWhy, termOk ? termNote : ''),
-    opt('self', false, 'ASN 只負責接手，不能從這裡開', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
+    opt('acp', acpOk, why('acp') || '這個模型不支援'),
+    opt('pi', piOk, piWhy),
+    opt('self', false, '要自己開，不能從這裡開', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
   ]
-  // 預設：優先序第一個能選的；三條都不行就沒有預設（null），開啟按鈕要反灰
-  const first = options.find(o => o.ok)
+  // 預設：優先序第一個能選的，但收不到信的 term 不搶預設（排到最後）；三條都不行就沒有預設（null），開啟按鈕要反灰
+  const mailless = o => o.key === 'term' && st('term') === 'noinbox'
+  const first = options.find(o => o.ok && !mailless(o)) ?? options.find(o => o.ok)
   return { options, selected: first ? first.key : null }
+}
+
+/**
+ * 目錄上沒有的項目（自訂設定）的「運行」：只看那台回報的 mode，背景＝acp通道、其餘＝asn終端（原生 cli）。
+ * 手機（mobile-launch.mjs launchRun）與電腦版（list.js partnerRun）共用這一份（#931）。回 { options, selected }
+ */
+export function customRunOptions(row) {
+  const bg = row?.mode === 'background'
+  return {
+    options: [
+      { key: 'acp', label: RUN_OPTION_LABEL.acp, ok: bg, why: bg ? '' : '這個設定不支援', note: '' },
+      { key: 'term', label: RUN_OPTION_LABEL.term, ok: !bg, why: bg ? '這個設定只能用 acp通道' : '', note: '' },
+    ],
+    selected: bg ? 'acp' : 'term',
+  }
 }
 
 /**

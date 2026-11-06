@@ -161,11 +161,35 @@ pub(crate) fn with_model_arg(args: &[String], model: &str) -> Vec<String> {
     out
 }
 
+/// 遠端開窗怎麼開（#931）：把「放不放背景」跟「接不接續真實的對話」拆開。
+/// 以前一個 hidden 兩件事一起管（背景＝測試用＝不查對話檔），正式路徑要背景開又要接續對話，所以分成三個欄位。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RemoteShow {
+    /// 開在共用終端服務（自帶終端）時放背景
+    pub in_term: bool,
+    /// 退回原生主控台時放背景
+    pub in_console: bool,
+    /// 接續同名夥伴上一段對話（會查真實的對話檔）；只有測試用的隱藏視窗是 false
+    pub real_resume: bool,
+}
+
+impl RemoteShow {
+    /// 正式：背景與否由呼叫端照這台的設定決定（[`super::win_term::remote_hidden`]）；退回原生主控台一律前台（免得開了看不到）；一律接續對話
+    pub fn real(background: bool) -> RemoteShow {
+        RemoteShow { in_term: background, in_console: false, real_resume: true }
+    }
+    /// 測試用：整個藏起來、不查真實的對話檔
+    #[allow(dead_code)]
+    pub fn test_hidden() -> RemoteShow {
+        RemoteShow { in_term: true, in_console: true, real_resume: false }
+    }
+}
+
 /// 遠端開視窗（內建收發室橋）用：驗證（profile、名字、白名單、上限）都已在呼叫端做完，
 /// 這裡只做「自動信任資料夾 → 依本機設定組命令 → 開視窗」。指令只來自本機的 profile，遠端只決定 profile 名、名字與資料夾。
-/// hidden＝背景開（測試用，正式一律 false）。回傳視窗的 PID（自帶終端＝GUI；退路主控台＝承載的 PowerShell）。
+/// show＝顯示方式與要不要接續對話（見 [`RemoteShow`]）。回傳視窗的 PID（自帶終端＝GUI；退路主控台＝承載的 PowerShell）。
 /// pi_args＝經 pi 的 --provider／--model（呼叫端已驗過格式與這台 pi 列得出來；只有 pi 的 profile 收）
-pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, hidden: bool, pi_args: &[String]) -> Result<u32, String> {
+pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, show: RemoteShow, pi_args: &[String]) -> Result<u32, String> {
     let prof = config.profiles.get(profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
     if !pi_args.is_empty() && prof.engine != "pi" {
         return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
@@ -181,11 +205,11 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
         let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
         return super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid);
     }
-    // 同本機開窗：預設接續同名夥伴上一段對話；hidden（測試用）不查真實的對話檔
-    if !hidden {
+    // 同本機開窗：預設接續同名夥伴上一段對話（背景開也一樣）；只有測試用的隱藏視窗不查真實的對話檔
+    if show.real_resume {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy());
     }
-    start_window(name, &command, &args, &cwd, hidden)
+    start_window_split(name, &command, &args, &cwd, show.in_term, show.in_console)
 }
 
 /// 重開機後自動接回一位 Claude 夥伴（#767）：用本機的 Claude 視窗 profile，換上它原本的權限旗標，指定對話編號接回。
@@ -274,6 +298,19 @@ pub(super) fn start_window_noted(title: &str, command: &str, args: &[String], cw
     {
         let _ = title;
         start_window_unix(command, args, cwd, &[]).map(|pid| super::win_term::Opened { pid, note: None })
+    }
+}
+
+/// 同 [`start_window`]，但自帶終端與退路主控台的顯示方式分開給（遠端開新夥伴用，見 [`RemoteShow`]）
+pub(super) fn start_window_split(title: &str, command: &str, args: &[String], cwd: &Path, in_term: bool, in_console: bool) -> Result<u32, String> {
+    #[cfg(windows)]
+    {
+        start_window_windows(title, command, args, cwd, in_term, in_console).map(|o| o.pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (title, in_term, in_console);
+        start_window_unix(command, args, cwd, &[])
     }
 }
 

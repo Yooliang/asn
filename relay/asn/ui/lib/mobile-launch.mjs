@@ -2,7 +2,7 @@
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 import { closedReasonOf, remoteModelRows } from './partner-launch-ui.mjs'
 import { isDeviceRemoved } from './device-order.mjs'
-import { runOptions, vendorRows } from './model-catalog.mjs'
+import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
 
 export const REASON = {
@@ -62,7 +62,7 @@ export function launchFormError(f, elig, { run = 'term', piOk = true } = {}) {
   if (!elig?.ok) return elig?.reason || REASON.unknown
   if (!f.profile) return '請選一個模型'
   if (!run) return '這個模型在那台電腦沒有能用的開法'
-  if (run === 'pi' && !piOk) return '請選一個經 pi 的模型'
+  if (run === 'pi' && !piOk) return '請選一個 pi 的模型'
   if (!f.cwd) return '請選工作資料夾'
   if (!NAME_RE.test(f.name.trim())) return '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭'
   if (f.first.trim().length > FIRST_MAX) return `第一句話最多 ${FIRST_MAX} 字`
@@ -70,12 +70,12 @@ export function launchFormError(f, elig, { run = 'term', piOk = true } = {}) {
 }
 
 // ---- 運行四選一與經 pi（D1 #421、D2 #422）：跟電腦版開新夥伴同一套規則，資料都用那台電腦回報的啟動設定 ----
-// 那台要開放遠端管理，名單回報才會帶它的 pi 模型清單（launcher.pi_models）
-export const PI_REMOTE_NO_LIST = '那台要開放遠端管理才會回報可用的模型'
+// 那台要開放遠端管理（設定頁「允許我的其他設備替這台開新視窗」），名單回報才會帶它的 pi 模型清單（launcher.pi_models）
+export const PI_REMOTE_NO_LIST = '查不到那台的 pi 模型清單，請到那台電腦的設定打開「允許我的其他設備替這台開新視窗」'
 export const PI_REMOTE_NO_PI = '那台電腦沒有偵測到 pi'
 // 0.1.101 以前的電腦會略過選的模型、用 pi 自己的預設開（asn真 決定不加能力旗標，改成提醒＋開好時寫出實際模型）
-export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 要 0.1.101 以上，才會照選的模型開'
-const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi: { status: 'ok', why: '只能經 pi 開' }, term: { status: 'no', why: '不走終端' } }
+export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 版本較舊時，會改用 pi 的預設模型開；開好後會寫出實際用的模型'
+export const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '不支援' }, pi: { status: 'ok', why: '只能用 asn終端（pi shell）開' }, term: { status: 'no', why: '只能用 asn終端（pi shell）開' } }
 
 // 那台的 pi：有沒有 pi 的啟動設定、回報了哪些模型
 export function remotePi(launcher) {
@@ -87,7 +87,7 @@ export function remotePi(launcher) {
 export function launchVendors(launcher) {
   const pi = remotePi(launcher)
   const own = vendorRows(remoteModelRows(launcher))
-  const piOnly = pi.models.length ? piOnlyVendorRows(pi.models).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', label: v.label, mode: 'window', modeLabel: '經 pi 開', channels: PI_ONLY_CHANNELS })) : []
+  const piOnly = pi.models.length ? piOnlyVendorRows(pi.models).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', label: v.label, mode: 'window', modeLabel: '用 asn終端（pi shell）開', channels: PI_ONLY_CHANNELS })) : []
   return [...own, ...piOnly]
 }
 
@@ -99,16 +99,10 @@ export function launchPiChoice(row, launcher) {
   return piChoiceFor(row?.id, pi.models)
 }
 
-// 「運行」四選一：內建通道 ＞ 經 pi ＞ ASN 開的終端 ＞ 原生 CLI（只作說明）。遠端開，Grok／Gemini 的自帶終端反灰（只能在那台開）
+// 「運行」四選一：acp通道 ＞ asn終端（pi shell）＞ asn終端（原生 cli）＞ 原始 cli 視窗（只作說明）。遠端開，Grok／Gemini 的自帶終端反灰（只能在那台開）
 export function launchRun(row, launcher) {
   if (!row) return { options: [], selected: null }
-  if (!row.channels) {   // 目錄上沒有的（自訂設定）：只看 mode
-    const bg = row.mode === 'background'
-    return { options: [
-      { key: 'acp', label: '內建通道（背景運行）', ok: bg, why: bg ? '' : '這個設定不是背景運行', note: '' },
-      { key: 'term', label: '開成視窗', ok: !bg, why: bg ? '這個設定是背景運行' : '', note: '' },
-    ], selected: bg ? 'acp' : 'term' }
-  }
+  if (!row.channels) return customRunOptions(row)   // 目錄上沒有的（自訂設定）：只看 mode（電腦版同一份）
   const pc = launchPiChoice(row, launcher)
   const r = runOptions(row, { local: false, piInstalled: remotePi(launcher).installed, piReady: pc.ok })
   // 經 pi 不能選時，原因用那台回報的（沒有 pi、沒開放遠端管理、沒登入那一家），比目錄的通用說明準確
@@ -141,9 +135,9 @@ const CODE_TEXT = {
   bad_profile: '這台電腦沒有這個模型（可能剛換過設定），請重新整理後再選',
   bad_cwd: '工作資料夾不在這台電腦允許的清單裡',
   bad_first_message: `第一句話最多 ${FIRST_MAX} 字`,
-  bad_pi_model: '經 pi 的模型不對，請重新選一次',
+  bad_pi_model: 'pi 的模型不對，請重新選一次',
   name_taken: '這台電腦已經有同名的夥伴，換個名字',
-  rate_limited: '這台電腦這個小時開太多視窗了，稍後再試',
+  rate_limited: '這台電腦這個小時開太多夥伴了，稍後再試',
   bad_request: '送出的內容不合格',
   internal: 'ASN 暫時有問題，稍後再試',
 }
@@ -164,9 +158,9 @@ export function progressView(row, appeared, name = '', model = '') {
   if (appeared) return { phase: 'done', text: m ? `「${name}」已經開好了（模型：${m}），可以直接對話。` : `「${name}」已經開好了，可以直接對話。` }
   switch (row?.status) {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
-    case 'ok': return { phase: 'waiting', text: '視窗已經開好，等它出現在名單上…' }
-    case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認視窗出現；等一下看看名單。' }
-    case 'taken': return { phase: 'opening', text: '正在開視窗…' }
+    case 'ok': return { phase: 'waiting', text: '那台已經開好，等它出現在名單上…' }
+    case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認開好；等一下看看名單。' }
+    case 'taken': return { phase: 'opening', text: '那台正在開…' }
     default: return { phase: 'sending', text: '正在發送指令…' }
   }
 }

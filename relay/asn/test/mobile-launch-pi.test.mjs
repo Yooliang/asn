@@ -20,10 +20,10 @@ test('廠牌清單：pi 不列成廠牌；那台 pi 列得到模型的「只能�
 test('運行四選一：順序固定、原生 CLI 永遠不能選；經 pi 沒有清單或沒有 pi 時反灰並寫原因', () => {
   const claude = launchVendors(L).find(v => v.id === 'claude')
   const r = launchRun(claude, L)
-  assert.deepEqual(r.options.map(o => o.key), ['acp', 'pi', 'term', 'self'])
+  assert.deepEqual(r.options.map(o => o.key), ['term', 'acp', 'pi', 'self'])
   assert.equal(r.options.find(o => o.key === 'self').ok, false)
   assert.equal(r.options.find(o => o.key === 'pi').ok, true)
-  assert.equal(r.selected, 'pi', '依優先序第一個能選的')
+  assert.equal(r.selected, 'term', 'asn終端優先：那台 pi 有清單也不預設經 pi（#931）')
   const noList = launchRun(launchVendors(NO_LIST)[0], NO_LIST).options.find(o => o.key === 'pi')
   assert.deepEqual([noList.ok, noList.why], [false, PI_REMOTE_NO_LIST])
   const noPi = launchRun(launchVendors(NO_PI)[0], NO_PI).options.find(o => o.key === 'pi')
@@ -32,7 +32,8 @@ test('運行四選一：順序固定、原生 CLI 永遠不能選；經 pi 沒�
   const grokTerm = launchRun(launchVendors(L).find(v => v.id === 'grok'), L).options.find(o => o.key === 'term')
   assert.deepEqual([grokTerm.ok, grokTerm.why], [false, '只能在那台電腦上開'], 'ASN 自帶終端只能在那台開')
   assert.equal(pickedRun(r, 'term'), 'term')
-  assert.equal(pickedRun(r, 'self'), 'pi', '不能選的不採用')
+  assert.equal(pickedRun(r, 'pi'), 'pi', '使用者選經 pi 仍照選的')
+  assert.equal(pickedRun(r, 'self'), 'term', '不能選的不採用')
   assert.deepEqual(launchRun(null, L), { options: [], selected: null })
 })
 
@@ -52,13 +53,14 @@ test('送出內容：經 pi 帶清單裡的提供者與模型，profile 一律 p
 test('送出前檢查：沒有能用的開法、經 pi 沒選到清單裡的模型都擋下', () => {
   assert.equal(launchFormError(f(), elig, { run: 'pi', piOk: true }), '')
   assert.match(launchFormError(f(), elig, { run: null }), /沒有能用的開法/)
-  assert.match(launchFormError(f(), elig, { run: 'pi', piOk: false }), /經 pi 的模型/)
+  assert.match(launchFormError(f(), elig, { run: 'pi', piOk: false }), /pi 的模型/)
   assert.equal(launchFormError(f(), elig), '', '舊的呼叫方式照常')
 })
 
 test('舊版電腦提醒與開好時寫出實際模型（asn真 審 #471）', async () => {
   const { PI_REMOTE_VERSION_NOTE, appearedModel, progressView } = await import('../ui/lib/mobile-launch.mjs')
-  assert.match(PI_REMOTE_VERSION_NOTE, /0\.1\.101 以上/)
+  assert.match(PI_REMOTE_VERSION_NOTE, /預設模型/)
+  assert.doesNotMatch(PI_REMOTE_VERSION_NOTE, /\d+\.\d+\.\d+/, '畫面上不寫版本號')
   const friends = [{ node: 'H', agent: '小皮', status: 'online', model: 'minimax/MiniMax-M3' }, { node: 'H', agent: '舊的', status: 'offline', model: 'x' }]
   assert.equal(appearedModel(friends, 'H', '小皮'), 'minimax/MiniMax-M3')
   assert.equal(appearedModel(friends, 'H', '舊的'), '', '離線的不算')

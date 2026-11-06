@@ -43,7 +43,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "claude".into(),
             Profile {
-                label: "Claude（互動視窗）".into(),
+                label: "Claude".into(),
                 mode: LaunchMode::Window,
                 engine: "claude".into(),
                 command: c,
@@ -90,7 +90,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "codex".into(),
             Profile {
-                label: "Codex（互動視窗）".into(),
+                label: "Codex".into(),
                 mode: LaunchMode::Window,
                 engine: "codex".into(),
                 command,
@@ -105,7 +105,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "gemini".into(),
             Profile {
-                label: "Gemini（背景運行、內建通道）".into(),
+                label: "Gemini".into(),
                 mode: LaunchMode::Background,
                 engine: "acp".into(),
                 command: c,
@@ -120,7 +120,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "grok".into(),
             Profile {
-                label: "Grok（背景運行、內建通道）".into(),
+                label: "Grok".into(),
                 mode: LaunchMode::Background,
                 engine: "acp".into(),
                 command: c,
@@ -144,7 +144,7 @@ fn grok_home_binary(home: &Path) -> Option<std::path::PathBuf> {
 /// pi 互動視窗：直接執行 pi；載入收信擴充、名字、第一句話由 launch/pi.rs 在開窗前補上（找不到擴充會報錯）
 pub(crate) fn pi_profile(cmd: &str) -> Profile {
     Profile {
-        label: "pi（互動視窗）".into(),
+        label: "pi".into(),
         mode: LaunchMode::Window,
         engine: "pi".into(),
         command: cmd.to_string(),
