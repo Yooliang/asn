@@ -2743,6 +2743,11 @@ static PARTNER_NOTICES: Mutex<Vec<PartnerNotice>> = Mutex::new(Vec::new());
 
 /// 權限命令要開關開著才能用
 #[cfg(feature = "gui")]
+pub fn screen_watch_set_user_off(off: bool) {
+    super::screen_watch::set_user_off(off);
+}
+
+#[cfg(feature = "gui")]
 fn screen_watch_required() -> Result<(), String> {
     super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref())
 }
@@ -2767,7 +2772,7 @@ pub fn partner_notices() -> Vec<PartnerNotice> {
     PARTNER_NOTICES.lock().map(|g| g.clone()).unwrap_or_default()
 }
 
-/// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。預設關；只標狀態與提醒本人，沒有按鈕，也不送字
+/// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。Windows 預設開；只標狀態與提醒本人，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
     use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
@@ -2785,6 +2790,14 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            // 設定頁關掉：不讀畫面，已顯示的提醒也收掉；名單上的固定字過期（2 分鐘）就不再顯示。打開就接著讀
+            if super::screen_watch::user_off() {
+                notices.clear();
+                if let Ok(mut g) = PARTNER_NOTICES.lock() {
+                    g.clear();
+                }
+                continue;
+            }
             let now = crate::heartbeat::now_ms();
             // 活著的 session（程序還在、建立時間相符）。還沒有檔案的視窗這一輪不讀，名單也沒有那一列可標
             let live = crate::bridge::roster::read_sessions_with(&sessions_dir, crate::heartbeat::session_alive, 0, "").unwrap_or_default();

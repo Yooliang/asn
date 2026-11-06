@@ -1,21 +1,43 @@
 //! 讀夥伴畫面判斷卡在哪（todo-next-162 第 2 段）的排程。只決定「這一輪讀哪幾扇」，不碰檔案與程序，好測。
-//! 開關預設關（ASN_SCREEN_WATCH=1 才開）。讀畫面本身有開銷，所以有三道限制：每分鐘總量上限、讀失敗就退避、空記憶體低就整個暫停。
+//! Windows 預設開（ASN_SCREEN_WATCH=0 或設定頁關掉），其他平台要 =1。讀畫面本身有開銷，所以有三道限制：每分鐘總量上限、讀失敗就退避、空記憶體低就整個暫停。
 #![cfg_attr(not(test), allow(dead_code))]
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const ENV_SCREEN_WATCH: &str = "ASN_SCREEN_WATCH";
-/// 開關的值怎麼算開：只有 1
-pub fn enabled(value: Option<&str>) -> bool {
-    value == Some("1")
+/// 使用者在設定頁關掉了（存在 bridge.json 的 screen_watch_off；啟動時和改設定時更新）
+static USER_OFF: AtomicBool = AtomicBool::new(false);
+
+pub fn set_user_off(off: bool) {
+    USER_OFF.store(off, Ordering::SeqCst);
+}
+pub fn user_off() -> bool {
+    USER_OFF.load(Ordering::SeqCst)
 }
 
-/// 開關關著就不准用權限命令：預設關的功能不能經這條路讀畫面或送字
-pub fn require_enabled(value: Option<&str>) -> Result<(), String> {
-    if enabled(value) {
+/// 環境變數怎麼算開（和 win_term 的開關同一套）：Windows 預設開，`0` 才關，其他值都算開；
+/// 其他平台要明講 `1`（讀畫面要 WezTerm 窗格，自帶終端目前只打包 Windows）
+pub fn enabled_on(windows: bool, value: Option<&str>) -> bool {
+    if windows {
+        value != Some("0")
+    } else {
+        value == Some("1")
+    }
+}
+pub fn enabled(value: Option<&str>) -> bool {
+    enabled_on(cfg!(windows), value)
+}
+
+/// 開關關著就不准用權限命令：不能經這條路讀畫面或送字
+pub fn check_allowed(env_on: bool, user_off: bool) -> Result<(), String> {
+    if env_on && !user_off {
         Ok(())
     } else {
-        Err("這個功能沒有開啟".to_string())
+        Err("這個功能沒有開啟".into())
     }
+}
+pub fn require_enabled(value: Option<&str>) -> Result<(), String> {
+    check_allowed(enabled(value), user_off())
 }
 
 /// 一輪的間隔
@@ -185,13 +207,27 @@ mod tests {
     }
 
     #[test]
-    fn 開關只有_1_才算開_關著權限命令回錯() {
-        assert!(enabled(Some("1")));
-        for v in [None, Some(""), Some("0"), Some("true"), Some("11")] {
-            assert!(!enabled(v), "{v:?}");
-            assert!(require_enabled(v).is_err(), "{v:?}");
+    fn windows_預設開_只有_0_才關_打錯字不會悄悄關掉() {
+        for v in [None, Some(""), Some("1"), Some("true"), Some("11")] {
+            assert!(enabled_on(true, v), "{v:?}");
         }
-        assert!(require_enabled(Some("1")).is_ok());
+        assert!(!enabled_on(true, Some("0")));
+    }
+
+    #[test]
+    fn 其他平台_要明講_1_才開() {
+        assert!(enabled_on(false, Some("1")));
+        for v in [None, Some(""), Some("0"), Some("true"), Some("11")] {
+            assert!(!enabled_on(false, v), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn 環境變數關或設定頁關_權限命令都回錯() {
+        assert!(check_allowed(true, false).is_ok());
+        assert!(check_allowed(false, false).is_err());
+        assert!(check_allowed(true, true).is_err());
+        assert!(check_allowed(false, true).is_err());
     }
 
     #[test]
