@@ -70,6 +70,21 @@ fn pi_window_name(dir: &Path, pid: u32) -> Option<String> {
     None
 }
 
+/// 這個名字現在是不是某個活著的 Claude 視窗或 pi 視窗在用（和名單那邊「同名不列」一致：既有的視窗優先）
+fn name_in_use_by_live_window(env: &Env, name: &str) -> bool {
+    let claude = std::fs::read_dir(&env.sessions_dir).into_iter().flatten().flatten().any(|e| {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.strip_suffix(".json")).and_then(|s| s.parse::<u32>().ok()) else { return false };
+        read_session(&env.sessions_dir, pid).is_some_and(|s| session_name(&s) == name && (env.alive)(pid) && session_is_current(env, pid, &s))
+    });
+    claude
+        || std::fs::read_dir(env.relay_home.join("pi-windows")).into_iter().flatten().flatten().any(|e| {
+            let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) else { return false };
+            v.get("engine").and_then(Value::as_str) == Some("pi")
+                && v.get("name").and_then(Value::as_str).map(str::trim) == Some(name)
+                && v.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).is_some_and(|p| (env.alive)(p))
+        })
+}
+
 pub fn inspect(env: &Env) -> Evidence {
     let mut ev = Evidence { env_socket: env.socket.clone().unwrap_or_default(), ..Default::default() };
     let table: Option<ProcTable> = match (env.procs)() {
@@ -86,7 +101,7 @@ pub fn inspect(env: &Env) -> Evidence {
         let started = env.started.clone();
         while pid != 0 && hops < 40 {
             // 本人接進收發室的視窗（各家轉接層第 2 步）：pid 和程序建立時間都對上登記才算
-            if let Some(e) = crate::self_windows::find_pid(&self_dir, pid, &|p| started(p)) {
+            if let Some(e) = crate::self_windows::find_pid(&self_dir, pid, &|p| started(p)).filter(|e| !name_in_use_by_live_window(env, &e.name)) {
                 ev.chain.push(ChainItem { pid, name: table.get(&pid).map(|x| x.1.clone()).unwrap_or_else(|| "(已結束)".into()), session: Some(format!("{}（接進收發室的視窗）", e.name)) });
                 ev.via_chain = Some(Caller { pid, name: e.name });
                 break;

@@ -134,6 +134,36 @@ fn 呼叫者_接進收發室的視窗_pid_和建立時間都對上才算() {
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
 }
 
+// 登記的名字跟活著的 Claude 視窗或 pi 視窗同名：這筆登記不算（和名單那邊一致）
+#[test]
+fn 呼叫者_接進收發室的名字跟活著的視窗同名_不算() {
+    use super::super::caller::find_caller;
+    let f = fx("http://127.0.0.1:1", Some("上層Claude"));
+    let agy_pid = 9600u32;
+    let started_at: u64 = 1_762_400_000_000;
+    let table: ProcTable = [(SELF_PID, (BASH_PID, "asn-cli.exe".to_string())), (BASH_PID, (agy_pid, "bash.exe".to_string())), (agy_pid, (1, "agy.exe".to_string()))].into_iter().collect();
+    let mut env = f.env.clone();
+    env.procs = Arc::new(move || Ok(table.clone()));
+    env.started = Arc::new(move |p| (p == agy_pid).then_some(started_at + 200));
+    let dir = crate::self_windows::dir_in(&f.rh());
+    // 跟活著的 Claude 視窗同名：不算，鏈上又沒有別的視窗，就拒絕
+    crate::self_windows::write(&dir, &crate::self_windows::Entry { name: "上層Claude".into(), engine: "gemini".into(), pid: agy_pid, started_ms: started_at, at: started_at }).unwrap();
+    assert!(find_caller(&env, "寄信").is_err(), "跟活著的 Claude 視窗同名");
+    // 那個 Claude 視窗結束了：同名不再撞，登記算數
+    f.window_alive.store(false, Ordering::SeqCst);
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+    f.window_alive.store(true, Ordering::SeqCst);
+    // 跟活著的 pi 視窗同名：不算
+    crate::self_windows::write(&dir, &crate::self_windows::Entry { name: "pi-alice".into(), engine: "gemini".into(), pid: agy_pid, started_ms: started_at, at: started_at }).unwrap();
+    let pd = f.rh().join("pi-windows");
+    std::fs::create_dir_all(&pd).unwrap();
+    std::fs::write(pd.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "pi-alice", "pid": 9500, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
+    assert!(find_caller(&env, "寄信").is_err(), "跟活著的 pi 視窗同名");
+    // 不同名：照常
+    crate::self_windows::write(&dir, &crate::self_windows::Entry { name: "agy-1".into(), engine: "gemini".into(), pid: agy_pid, started_ms: started_at, at: started_at }).unwrap();
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "agy-1");
+}
+
 // pi 從別的 Claude 視窗底下開出來時，寄件人要是 pi 自己的視窗，不能算成上面那個 Claude 視窗
 #[test]
 fn 呼叫者_pi_視窗登記的_pid_在父行程鏈上_優先於更上層的_claude_視窗() {
