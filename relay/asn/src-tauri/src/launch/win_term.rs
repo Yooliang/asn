@@ -397,7 +397,9 @@ mod tests {
         assert!(stop.contains("!super::win_term::wezterm_windows()"), "關著時不收 GUI");
         let local = include_str!("local.rs");
         let win = local.split("fn start_window_windows").nth(1).unwrap().split("fn start_console_window_windows").next().unwrap();
-        assert!(win.contains("start_console_window_windows(title, command, args, cwd, hidden, &[])"), "退路＝0.1.113 的開法，參數原樣");
+        assert!(win.contains("start_console_window_windows(title, command, args, cwd, console_hidden, &[])"), "退路＝0.1.113 的開法，參數原樣（顯示方式由呼叫端指定）");
+        let noted = local.split("pub(super) fn start_window_noted").nth(1).unwrap().split("fn start_window_windows").next().unwrap();
+        assert!(noted.contains("start_window_windows(title, command, args, cwd, hidden, hidden)"), "一般開新夥伴：自帶終端與退路主控台用同一個顯示方式（和 0.1.113 一樣）");
         let pi = include_str!("pi_term.rs");
         assert!(pi.contains("open_pi_gated(super::win_term::wezterm_windows(),"), "經 pi 的正式入口用開關");
     }
