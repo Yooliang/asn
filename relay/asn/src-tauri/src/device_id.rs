@@ -51,23 +51,36 @@ pub fn load_or_create(dir: &Path, prot: &dyn crate::auth::Protector) -> Result<D
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "產生設備金鑰失敗".to_string())?;
             let sealed = prot.protect(doc.as_ref())?;
-            crate::write_atomic(&path, &B64.encode(sealed)).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
-            restrict(&path);
+            write_private(&path, &B64.encode(sealed)).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
             DeviceKey::from_pkcs8(doc.as_ref())
         }
         Err(e) => Err(format!("讀設備金鑰失敗：{e}")),
     }
 }
 
-#[cfg(unix)]
-fn restrict(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        elog!("設備金鑰權限設定失敗：{e}");
+/// 寫金鑰檔：非 Windows 先用 0600 建暫存檔、寫完再換名，從頭到尾都只有本人讀得到（和登入憑證的寫法相同）。
+/// 不能先寫好再改權限：中間那一刻是預設權限（通常 0644），同一台的其他使用者讀得到
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p)?;
     }
+    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    {
+        use std::io::Write;
+        let mut f = opts.open(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
-#[cfg(not(unix))]
-fn restrict(_path: &Path) {}
 
 /// 這個系統用哪種方式保護金鑰（和登入憑證相同）
 pub fn protector() -> Box<dyn crate::auth::Protector> {
@@ -444,6 +457,24 @@ mod tests {
         assert_eq!(a.public_b64(), b.public_b64());
         let raw = B64.decode(std::fs::read_to_string(d.path().join(KEY_FILE)).unwrap()).unwrap();
         assert!(Ed25519KeyPair::from_pkcs8(&raw).is_err(), "存的是包過的");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 金鑰檔_建立後只有本人讀得到_暫存檔建立時就是_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        load_or_create(d.path(), &Flip).unwrap();
+        let mode = std::fs::metadata(d.path().join(KEY_FILE)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{mode:o}");
+        // 暫存檔本身就用 0600 建（不是寫完才改）：照同樣的寫法建一個不換名的檔來查
+        let p = d.path().join("x");
+        write_private(&p, "secret").unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let src = include_str!("device_id.rs");
+        let f = src.split("fn write_private(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(f.find("opts.mode(0o600)").unwrap() < f.find("opts.open(&tmp)").unwrap(), "先定權限再建檔");
+        assert!(!f.contains("set_permissions"), "不是事後改權限");
     }
 
     #[test]
