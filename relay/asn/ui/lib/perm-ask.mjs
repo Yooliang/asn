@@ -71,12 +71,17 @@ export function resultOf(raw, id) {
   return null
 }
 
+/** 標題：〈電腦名〉的〈夥伴名〉正在詢問；沒有電腦名只寫夥伴名；兩個都沒有就「夥伴正在詢問」 */
+export function askTitle(deviceName, window) {
+  const d = typeof deviceName === 'string' ? deviceName.trim() : '', w = typeof window === 'string' ? window.trim() : ''
+  if (!w) return d ? `${d} ${TEXT.ofWord} 夥伴${TEXT.asking}` : TEXT.askingNoName
+  return d ? `${d} ${TEXT.ofWord} ${w} ${TEXT.asking}` : `${w} ${TEXT.asking}`
+}
+
 export const TEXT = {
-  title: '夥伴在問你',
-  lead: '按一個選項就會送到那台電腦，送出後收不回。',
-  deviceLabel: '哪台電腦',
-  windowLabel: '哪個夥伴',
-  textLabel: '內容',
+  askingNoName: '夥伴正在詢問',
+  asking: '正在詢問',
+  ofWord: '的',
   incomplete: '內容太長，這裡只看得到一部分，所以只能拒絕。要允許請到電腦上看完整內容。',
   viewOnly: '這題要到電腦上回答（多選、一次多題，或要自己打字）。',
   noType: '要自己打字，請到電腦上回答。',
