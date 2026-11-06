@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ARM_MS, AUTOCLOSE_MS, TEXT, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending, watchOutcome } from '../ui/lib/perm-ask.mjs'
+import { ARM_MS, AUTOCLOSE_MS, TEXT, askTitle, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending, watchOutcome } from '../ui/lib/perm-ask.mjs'
 import { normalizeNav, permReqNav } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -68,6 +68,14 @@ test('守門：全文不進儲存、網址、console；只有選項按鈕，沒�
   assert.ok(sheet.length > 200)
   assert.ok(!/<input|<textarea|contenteditable|v-html/.test(sheet), '沒有輸入框，全文不走 v-html')
   assert.match(sheet, /:disabled="pq\.busy \|\| !pq\.armed"/)
+  // 排版（#921b）：標題用 askTitle 組；沒有說明句、沒有「哪台電腦／哪個夥伴／內容」標籤列；內容緊接標題
+  assert.match(sheet, /<h2 class="m-ops-h">\{\{ permReqTitle \}\}<\/h2>/)
+  assert.match(sheet, /:aria-label="permReqTitle"/)
+  assert.match(js, /permReqTitle = computed\(\(\) => pqAskTitle\(pq\.cur\?\.deviceName, pq\.cur\?\.window\)\)/)
+  for (const gone of ['deviceLabel', 'windowLabel', 'textLabel', 'PERMREQ_TEXT.lead', 'PERMREQ_TEXT.title', 'm-ops-lead', '<dl', '<dt', '<dd']) assert.ok(!sheet.includes(gone), `不再有 ${gone}`)
+  assert.match(sheet, /<div class="m-term-preview m-perm-text">\{\{ pq\.cur\.text \}\}<\/div>/, '內容仍是文字節點、版型 class 不變')
+  assert.ok(sheet.indexOf('m-perm-text') < sheet.indexOf('m-term-opts'), '內容在選項按鈕之前')
+  for (const k of ['title', 'lead', 'deviceLabel', 'windowLabel', 'textLabel']) assert.ok(!(k in TEXT), `TEXT.${k} 已刪`)
   assert.ok(ARM_MS >= 500)
 })
 
@@ -157,4 +165,17 @@ test('守門：自動收框只在 5 秒輪詢那條、計時器會清、確認�
   assert.match(block, /const pqClose = \(\) => \{ pqWatchStop\(\); clearTimeout\(pqAutoTimer\);/, '關框會清計時器')
   assert.match(block, /else \{ pqWatchStop\(\); clearTimeout\(pqAutoTimer\)/, '切背景會清計時器')
   assert.match(block, /const laterPermReq = \(\) => \{ if \(pq\.cur\) pqDismissed\.add\(pq\.cur\.id\); history\.back\(\) \}/)
+})
+
+test('標題：〈電腦名〉的〈夥伴名〉正在詢問；缺哪個就省哪個', () => {
+  for (const [dev, win, want] of [
+    ['30家用', '墊底夥伴', '30家用 的 墊底夥伴 正在詢問'],
+    ['', '墊底夥伴', '墊底夥伴 正在詢問'],
+    [undefined, '墊底夥伴', '墊底夥伴 正在詢問'],
+    ['', '', '夥伴正在詢問'],
+    [null, undefined, '夥伴正在詢問'],
+    ['  ', ' ', '夥伴正在詢問'],
+    ['30家用', '', '30家用 的 夥伴正在詢問'],
+  ]) assert.equal(askTitle(dev, win), want, JSON.stringify([dev, win]))
+  assert.ok(!/[A-Za-z]/.test(`${TEXT.asking}${TEXT.askingNoName}${TEXT.ofWord}`), '固定字純中文')
 })
