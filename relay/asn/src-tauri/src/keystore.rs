@@ -228,6 +228,22 @@ pub mod linux {
 
     pub struct LinuxStore;
 
+    /// 這個程序第一次查到「沒有金鑰庫」就記住，之後不再每次去連（設定頁會常常問）
+    static UNAVAILABLE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+    /// 在一條新的執行緒上做：zbus 的同步呼叫在 tokio 的執行緒上會 panic（不能在 runtime 裡再起 runtime），
+    /// 而呼叫端（設定頁狀態、配對、啟動）常在 async 裡
+    fn off_runtime<T: Send>(f: impl FnOnce() -> Result<T, StoreErr> + Send) -> Result<T, StoreErr> {
+        if UNAVAILABLE.get().is_some() {
+            return Err(StoreErr::Unavailable);
+        }
+        let r = std::thread::scope(|sc| sc.spawn(f).join()).unwrap_or_else(|_| Err(StoreErr::Other("金鑰庫查詢中斷".into())));
+        if r.as_ref().err() == Some(&StoreErr::Unavailable) {
+            let _ = UNAVAILABLE.set(());
+        }
+        r
+    }
+
     fn map(e: Error) -> StoreErr {
         match e {
             Error::Unavailable => StoreErr::Unavailable,
@@ -249,6 +265,15 @@ pub mod linux {
 
     impl SecretStore for LinuxStore {
         fn get(&self, attrs: &[(String, String)]) -> Result<Option<Zeroizing<Vec<u8>>>, StoreErr> {
+            off_runtime(|| get_now(attrs))
+        }
+        fn create(&self, attrs: &[(String, String)], secret: &[u8]) -> Result<(), StoreErr> {
+            off_runtime(|| create_now(attrs, secret))
+        }
+    }
+
+    fn get_now(attrs: &[(String, String)]) -> Result<Option<Zeroizing<Vec<u8>>>, StoreErr> {
+        {
             let ss = connect()?;
             let q: HashMap<&str, &str> = attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
             let r = ss.search_items(q).map_err(map)?;
@@ -263,7 +288,10 @@ pub mod linux {
             }
             Ok(None)
         }
-        fn create(&self, attrs: &[(String, String)], secret: &[u8]) -> Result<(), StoreErr> {
+    }
+
+    fn create_now(attrs: &[(String, String)], secret: &[u8]) -> Result<(), StoreErr> {
+        {
             let ss = connect()?;
             let c = ss.get_default_collection().map_err(map)?;
             // 鎖著的集合建立時會跳解鎖提示：先查，鎖著就不建
@@ -272,6 +300,15 @@ pub mod linux {
             }
             let a: HashMap<&str, &str> = attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
             c.create_item(LABEL, a, secret, false, "application/octet-stream").map(|_| ()).map_err(map)
+        }
+    }
+
+    #[cfg(test)]
+    mod runtime_tests {
+        /// 呼叫端在 tokio 的執行緒上也不能 panic（CI 實際踩到過：bridge 的狀態在 async 裡問保護方式）
+        #[tokio::test(flavor = "multi_thread")]
+        async fn 在_tokio_裡呼叫也不會_panic() {
+            let _ = super::super::protection_label(std::path::Path::new("/tmp/asn-ks-test"));
         }
     }
 
