@@ -8,6 +8,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 整支 workflow 只讀（#947）：所有 job 只跑測試、建置與上傳成品，都不需要寫入 repo。
+# 快取（setup-node、rust-cache）與上傳成品走 Actions 自己的權杖，不受這裡限制。
+permissions:
+  contents: read
+
 jobs:
   edge-functions:
     runs-on: ubuntu-24.04

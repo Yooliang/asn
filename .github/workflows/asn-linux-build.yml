@@ -20,6 +20,11 @@ on:
       - '.github/workflows/asn-linux-build.yml'
   workflow_dispatch:
 
+# 整支 workflow 只讀（#947）：所有 job 只跑測試、建置與上傳成品，都不需要寫入 repo。
+# 快取（setup-node、rust-cache）與上傳成品走 Actions 自己的權杖，不受這裡限制。
+permissions:
+  contents: read
+
 jobs:
   # 根目錄 SQL 測試（tests/*_sql.test.mjs）：裝 pglite（記憶體內 Postgres）真的套用 migration 實跑。
   # 版本固定 0.5.13（本機實際跑過的版本）；--no-save --no-package-lock：不產生、不改任何 package 檔。
