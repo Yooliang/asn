@@ -37,6 +37,9 @@ const INBOX_PAGE: usize = 50;
 const INBOX_ROUNDS: usize = 5;
 /// 重開後等夥伴接回來最多等多久（毫秒）：半夜重開、沒人登入時要等到天亮，所以定 12 小時（信送出時會註明原本收到的時間）
 const AWAIT_GRACE_MS: u64 = 12 * 3_600_000;
+/// 收發室剛開好的這段時間，信照樣先留著，但先不跟寄件人說「還沒接回來」：
+/// 終端監看要跑完第一輪、收發室再讀到，才知道哪些夥伴是自己結束的（那種要退回「找不到」，不能先說會等它）
+const TELL_SETTLE_MS: u64 = 30_000;
 /// 等接回來的夥伴，最多先留這麼多封信（超過的照原本的做法退回，並講明是留滿了）
 const AWAIT_MAIL_MAX: usize = 20;
 /// 所有等接回的夥伴加起來，最多先留這麼多封
@@ -918,6 +921,11 @@ impl Core {
         }
         if self.mux_pending.contains(target) && !self.mux_lost.contains(target) {
             // 還沒確定：可能服務剛掛，也可能夥伴自己結束了（下一輪監看就知道，接著送出或退回）。不先說服務中斷
+            self.awaiting_told.remove(&format!("{}/{}->{target}", m.from_node, from_agent));
+            return;
+        }
+        if !self.mux_lost.contains(target) && self.now.saturating_sub(self.started_at) < TELL_SETTLE_MS {
+            // 剛開好：還不知道它是不是自己結束了。信先留著，下一輪拉信再決定說「先留著」還是退回
             self.awaiting_told.remove(&format!("{}/{}->{target}", m.from_node, from_agent));
             return;
         }

@@ -159,6 +159,28 @@ async fn 收發室重開前在線_但它是自己結束的_信馬上退回找不
 }
 
 #[tokio::test]
+async fn 收發室剛開好就有信_那時還不知道它自己結束了_不先說先留著_之後只退回找不到() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    // 收發室剛開好 2 秒，信就到了：監看還沒寫出「自己結束的」名單
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 2_000).await;
+    assert!(h.fr.acked().is_empty(), "還不確定：信先留著");
+    assert!(notice_bodies(&h).is_empty(), "也先不通知寄件人：{:?}", notice_bodies(&h));
+    // 幾秒後監看寫出名單、收發室讀到
+    let mut w = Watch::default();
+    w.note_exited(&["T-丙".to_string()], now());
+    w.save(&h.core.cfg.work_dir.join(STATE_FILE));
+    h.core.mux_notice_tick(T0 + 6_000).await;
+    h.core.pull("test", T0 + 8_000).await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("T-丙") && b.contains("找不到")), "{notes:?}");
+    assert!(notes.iter().all(|b| !b.contains("先留著") && !b.contains("還沒接回")), "寄件人只收到一種說法：{notes:?}");
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+}
+
+#[tokio::test]
 async fn 收發室重開前在線_還沒接回的_照舊先留著() {
     let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
     std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
