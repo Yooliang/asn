@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ARM_MS, TEXT, decideArgs, nextToAsk, normalizeList, resultOf } from '../ui/lib/perm-ask.mjs'
+import { ARM_MS, TEXT, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending } from '../ui/lib/perm-ask.mjs'
 import { normalizeNav, permReqNav } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -91,4 +91,38 @@ test('設定：獨立開關，預設開；說明要講內容會經後台', () =>
   assert.match(lib, /perm_remote::set_user_off\(bridge::read_settings\(&data_dir\)\.perm_phone_off\)/)
   assert.match(panel, /權限框的內容和選項[^<]*經過 ASN 的伺服器/)
   assert.ok(!panel.includes('畫面內容不會離開這台電腦'), '舊說法已經不對')
+})
+
+test('還在不在：在清單裡 true、不在 false、查不到 null（不能當成結束）', () => {
+  assert.equal(stillPending({ requests: [row()] }, ID), true)
+  assert.equal(stillPending({ requests: [row({ id: '99999999-2222-3333-4444-555555555555' })] }, ID), false)
+  assert.equal(stillPending({ requests: [] }, ID), false, '清單是空的：這筆已經結束')
+  for (const bad of [null, undefined, {}, { requests: null }, { requests: 'x' }, 'x', 7]) assert.equal(stillPending(bad, ID), null, JSON.stringify(bad))
+  assert.equal(stillPending({ requests: [row()] }, undefined), null)
+  assert.equal(stillPending({ requests: [null, 3, row()] }, ID), true, '清單裡有壞列也不影響')
+})
+
+test('守門：框開著時才輪詢、只在前景、關框或切背景就停', () => {
+  const js = read('../ui/m.js')
+  const from = js.indexOf('手機回答權限框（#853）'), block = js.slice(from, js.indexOf('電腦要往終端送字／代答提問'))
+  const body = (head, to) => { const i = block.indexOf(head); assert.ok(i > 0, head); return block.slice(i, block.indexOf(to, i)) }
+  assert.ok(WATCH_MS >= 3000 && WATCH_MS <= 10000)
+  // 輪詢本體：沒有開著的框、正在送／等結果、已經有結果、不在前景，一律不查
+  const tick = body('async function pqWatchTick()', 'function pqWatchStart()')
+  assert.match(tick, /const cur = pq\.cur/)
+  assert.match(tick, /!cur \|\| pq\.busy \|\| pq\.waiting \|\| pq\.result \|\| document\.visibilityState !== 'visible'\) return/)
+  assert.match(tick, /pqStill\(await invoke\('android_perm_req_list'\), cur\.id\)/)
+  assert.match(tick, /alive === false/, '只有確定已結束（false）才收；null 不收')
+  assert.match(tick, /pq\.result = \{ ok: false, text: PERMREQ_TEXT\.gone \}/, '和 not_found 同樣的「已經結束」處理')
+  // 計時器：只有一處建立，建立前先清掉；框開著而且在前景才建
+  assert.equal((block.match(/setInterval\(\(\) => \{ void pqWatchTick\(\)/g) ?? []).length, 1, '只有一處建立輪詢')
+  const start = body('function pqWatchStart()', '\n    }\n')
+  assert.ok(start.indexOf('pqWatchStop()') < start.indexOf('setInterval'), '建立前先停掉舊的，不會疊')
+  assert.match(start, /if \(pq\.cur && !pq\.result && document\.visibilityState === 'visible'\) pqWatchTimer/)
+  // 開框時才啟動（在 checkPermReqs 原本的提早 return 之後，不另開一條）；關框會停；切到背景會停
+  assert.equal((block.match(/pqWatchStart\(\)/g) ?? []).length, 3, '定義＋開框＋回前景，三處')
+  const check = body('async function checkPermReqs()', 'async function pqWatchTick()')
+  assert.ok(check.indexOf('pqWatchStart()') > check.indexOf('go(permReqNav())'), '開框之後才啟動')
+  assert.match(block, /const pqClose = \(\) => \{ pqWatchStop\(\);/, '關框會停')
+  assert.match(block, /visibilityState === 'visible'\) pqWatchStart\(\); else pqWatchStop\(\)/, '切到背景會停')
 })

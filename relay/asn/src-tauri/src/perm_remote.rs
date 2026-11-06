@@ -15,6 +15,10 @@ const MAX_SENDS: u32 = 6;
 /// 建立失敗後隔多久再試（後台還沒部署、連不上、這扇視窗還有舊的一筆）
 const RETRY_MS: u64 = 60_000;
 pub const TICK_SECS: u64 = 3;
+/// 連續幾輪（每輪 3 秒）都看不到框才撤回：游標移開再移回、畫面重畫的空檔不算框不見了（#921）
+const ABSENT_GRACE: u32 = 3;
+/// 同一扇視窗出現新的內容，要連續幾輪都是同一個才算換了一個框：換題的過渡畫面每輪都在變，湊不滿（#921）
+const SWITCH_STABLE: u32 = 2;
 
 /// 使用者關掉了「權限框傳到手機」（存在 bridge.json 的 perm_phone_off）
 static USER_OFF: AtomicBool = AtomicBool::new(false);
@@ -35,11 +39,15 @@ struct Track {
     id: Option<String>,
     sends: u32,
     next_try_ms: u64,
+    /// 連續幾輪沒有看到這個框
+    absent: u32,
+    /// 換題的候選：（新內容的雜湊, 連續看到幾輪）
+    cand: Option<(String, u32)>,
 }
 
 impl Track {
     fn new(hash: &str) -> Self {
-        Track { hash: hash.to_string(), id: None, sends: 0, next_try_ms: 0 }
+        Track { hash: hash.to_string(), id: None, sends: 0, next_try_ms: 0, absent: 0, cand: None }
     }
 }
 
@@ -53,16 +61,34 @@ impl Tracker {
     /// offers＝現在畫面上的權限框（視窗名, 雜湊）。回這一輪要做的事
     pub fn plan(&mut self, offers: &[(String, String)], now_ms: u64) -> Vec<Action> {
         let mut out = Vec::new();
-        let gone: Vec<String> = self.tracks.keys().filter(|k| !offers.iter().any(|(n, _)| n == *k)).cloned().collect();
-        for name in gone {
-            if let Some(id) = self.tracks.remove(&name).and_then(|t| t.id) {
-                out.push(Action::Cancel { id });
+        let missing: Vec<String> = self.tracks.keys().filter(|k| !offers.iter().any(|(n, _)| n == *k)).cloned().collect();
+        for name in missing {
+            // 撤回寬限：連續 ABSENT_GRACE 輪都沒有框才撤回；寬限期間視同請求還在
+            let Some(track) = self.tracks.get_mut(&name) else { continue };
+            track.absent += 1;
+            track.cand = None;
+            if track.absent >= ABSENT_GRACE {
+                if let Some(id) = self.tracks.remove(&name).and_then(|t| t.id) {
+                    out.push(Action::Cancel { id });
+                }
             }
         }
         for (name, hash) in offers {
             let track = self.tracks.entry(name.clone()).or_insert_with(|| Track::new(hash));
-            if track.hash != *hash {
-                // 同一扇視窗換了一個框：舊的那筆不能再用
+            track.absent = 0;
+            if track.hash == *hash {
+                track.cand = None;
+            } else {
+                // 同一扇視窗出現不一樣的內容：新內容連續 SWITCH_STABLE 輪都一樣才算換了一個框
+                let seen = match &track.cand {
+                    Some((h, n)) if h == hash => n + 1,
+                    _ => 1,
+                };
+                if seen < SWITCH_STABLE {
+                    track.cand = Some((hash.clone(), seen));
+                    continue; // 還在過渡：舊的那筆照舊，也不建新的
+                }
+                // 換定了：舊的那筆不能再用
                 if let Some(id) = track.id.take() {
                     out.push(Action::Cancel { id });
                 }
@@ -213,21 +239,69 @@ mod tests {
     }
 
     #[test]
-    fn 框不見了就撤回() {
+    fn 連續三輪沒有框才撤回() {
         let mut t = Tracker::default();
         t.plan(&[offer("甲", "h1")], NOW);
         t.created("甲", "r1", NOW);
-        assert_eq!(t.plan(&[], NOW + 3000), vec![Action::Cancel { id: "r1".into() }]);
+        assert_eq!(t.plan(&[], NOW + 3000), vec![], "第 1 輪沒有框：寬限");
+        assert_eq!(t.plan(&[], NOW + 6000), vec![], "第 2 輪沒有框：寬限");
+        assert!(t.has_active(), "寬限期間視同請求還在");
+        assert_eq!(t.plan(&[], NOW + 9000), vec![Action::Cancel { id: "r1".into() }], "第 3 輪才撤回");
         assert!(!t.has_active());
-        assert_eq!(t.plan(&[], NOW + 6000), vec![]);
+        assert_eq!(t.plan(&[], NOW + 12000), vec![]);
     }
 
     #[test]
-    fn 換了一個框_撤回舊的_建新的() {
+    fn 框消失一兩輪又回來_不撤回也不重建() {
+        let mut t = Tracker::default();
+        let o = [offer("甲", "h1")];
+        t.plan(&o, NOW);
+        t.created("甲", "r1", NOW);
+        // 消失一輪又回來
+        assert_eq!(t.plan(&[], NOW + 3000), vec![]);
+        assert_eq!(t.plan(&o, NOW + 6000), vec![]);
+        // 消失兩輪又回來
+        assert_eq!(t.plan(&[], NOW + 9000), vec![]);
+        assert_eq!(t.plan(&[], NOW + 12000), vec![]);
+        assert_eq!(t.plan(&o, NOW + 15000), vec![]);
+        // 回來之後計數歸零：再空兩輪還是不撤回
+        assert_eq!(t.plan(&[], NOW + 18000), vec![]);
+        assert_eq!(t.plan(&[], NOW + 21000), vec![]);
+        assert!(t.has_active());
+        assert_eq!(t.take("r1"), Some(("甲".to_string(), "h1".to_string())), "還是原來那一筆");
+    }
+
+    #[test]
+    fn 換題中間畫面每輪都變_不建() {
         let mut t = Tracker::default();
         t.plan(&[offer("甲", "h1")], NOW);
         t.created("甲", "r1", NOW);
-        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 3000), vec![Action::Cancel { id: "r1".into() }, create("甲", "h2")]);
+        for (i, h) in ["x1", "x2", "x3", "x4"].iter().enumerate() {
+            assert_eq!(t.plan(&[offer("甲", h)], NOW + 3000 * (i as u64 + 1)), vec![], "過渡畫面 {h}");
+        }
+        assert!(t.has_active(), "舊的那筆沒動");
+        // 中間夾回原來的框：候選作廢，之後要重新數
+        assert_eq!(t.plan(&[offer("甲", "h1")], NOW + 20000), vec![]);
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 23000), vec![]);
+    }
+
+    #[test]
+    fn 換了一個框_穩定兩輪才撤舊建新() {
+        let mut t = Tracker::default();
+        t.plan(&[offer("甲", "h1")], NOW);
+        t.created("甲", "r1", NOW);
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 3000), vec![], "第 1 輪：候選");
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 6000), vec![Action::Cancel { id: "r1".into() }, create("甲", "h2")], "第 2 輪：換定了");
+    }
+
+    #[test]
+    fn 候選在過渡中改變就重數() {
+        let mut t = Tracker::default();
+        t.plan(&[offer("甲", "h1")], NOW);
+        t.created("甲", "r1", NOW);
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 3000), vec![]);
+        assert_eq!(t.plan(&[offer("甲", "h3")], NOW + 6000), vec![], "候選改了，從 1 重數");
+        assert_eq!(t.plan(&[offer("甲", "h3")], NOW + 9000), vec![Action::Cancel { id: "r1".into() }, create("甲", "h3")]);
     }
 
     #[test]
@@ -244,8 +318,10 @@ mod tests {
         assert_eq!(t.plan(&o, now), vec![], "六次之後不再發");
         assert!(!t.has_active());
         // 框結束後再出現同樣的內容，是新的一個框
-        assert_eq!(t.plan(&[], now), vec![]);
-        assert_eq!(t.plan(&o, now), vec![create("甲", "h1")]);
+        for i in 0..ABSENT_GRACE {
+            assert_eq!(t.plan(&[], now + 1000 * u64::from(i)), vec![]);
+        }
+        assert_eq!(t.plan(&o, now + 5000), vec![create("甲", "h1")]);
     }
 
     #[test]
@@ -268,7 +344,8 @@ mod tests {
         assert_eq!(t.take("r1"), Some(("甲".to_string(), "h1".to_string())));
         assert_eq!(t.take("r1"), None, "重放");
         assert_eq!(t.plan(&o, NOW + 3000), vec![], "框還沒消失也不再跳");
-        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 6000), vec![create("甲", "h2")]);
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 6000), vec![], "新內容要穩定才建");
+        assert_eq!(t.plan(&[offer("甲", "h2")], NOW + 9000), vec![create("甲", "h2")]);
     }
 
     #[test]
@@ -278,6 +355,8 @@ mod tests {
         assert_eq!(t.plan(&o, NOW).len(), 2);
         t.created("甲", "r1", NOW);
         t.created("乙", "r2", NOW);
-        assert_eq!(t.plan(&[offer("乙", "h1")], NOW + 3000), vec![Action::Cancel { id: "r1".into() }]);
+        assert_eq!(t.plan(&[offer("乙", "h1")], NOW + 3000), vec![]);
+        assert_eq!(t.plan(&[offer("乙", "h1")], NOW + 6000), vec![]);
+        assert_eq!(t.plan(&[offer("乙", "h1")], NOW + 9000), vec![Action::Cancel { id: "r1".into() }]);
     }
 }

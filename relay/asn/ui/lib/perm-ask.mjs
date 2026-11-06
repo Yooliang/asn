@@ -4,6 +4,8 @@
 import { clean, errorText as baseError } from './term-ask.mjs'
 
 export const POLL_MS = 30_000
+/** 框開著時多久查一次這筆還在不在（電腦撤回不會通知手機，#921） */
+export const WATCH_MS = 5_000
 /** 框跳出來後多久才能按，免得正在點別的東西時按到 */
 export const ARM_MS = 700
 /** 按了之後等電腦回報多久（電腦每 3 秒領一次，重查要一點時間） */
@@ -42,6 +44,12 @@ export const nextToAsk = (list, dismissed) => list.find(r => !dismissed.has(r.id
 export function decideArgs(cur, n) {
   if (!cur || !cur.options.some(o => o.n === n)) return null
   return { id: cur.id, choiceN: n, hash: cur.hash }
+}
+
+/** 這筆請求還在不在清單裡。回 true＝還在、false＝已經結束（撤回、過期、被處理）、null＝這次查不到（失敗或格式不對），不能當成結束 */
+export function stillPending(raw, id) {
+  if (!raw || !Array.isArray(raw.requests) || typeof id !== 'string') return null
+  return raw.requests.some(x => x?.id === id)
 }
 
 /** 按了之後的結果。還沒有最終結果回 null，繼續等 */
