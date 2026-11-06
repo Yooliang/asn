@@ -298,6 +298,10 @@ struct Inner {
     parked: Vec<StoreTerm>,
     /// 確定自己結束、已經收掉的夥伴名字，等監看拿走交給收發室（寄給它們的信馬上退回）
     exited: Vec<String>,
+    /// 上一輪讀服務的窗格清單時，屬於現行 mux、但清單裡沒有窗格的列（終端編號）。連續兩輪都沒有才收（#923）
+    missing_once: std::collections::BTreeSet<String>,
+    /// 上一輪 mux_snapshot 看到的現行 mux（程序編號＋建立時間）；找同名夥伴時用它分辨舊 mux 的列，不另外下 cli（#923）
+    last_live: Option<(u32, u64)>,
     /// B2c：看 mux 窗格的 GUI（只存記憶體；ASN 重啟後不認，使用者要看再開一個）
     viewers: Vec<Viewer>,
 }
@@ -415,6 +419,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 sessions: Vec::new(),
                 adopted: Vec::new(),
                 exited: Vec::new(),
+                missing_once: Default::default(),
+                last_live: None,
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -441,6 +447,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 sessions: Vec::new(),
                 adopted: Vec::new(),
                 exited: Vec::new(),
+                missing_once: Default::default(),
+                last_live: None,
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -468,6 +476,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 sessions: Vec::new(),
                 adopted: Vec::new(),
                 exited: Vec::new(),
+                missing_once: Default::default(),
+                last_live: None,
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -1269,6 +1279,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let m = self.mux_handle(&dir, BTreeMap::new()).ok()?;
         let live = m.live_pid();
+        // 窗格被 ASN 以外收掉、或服務換成新的 mux：對照表裡對不上的列收掉，免得同名夥伴對到兩筆（#923）
+        self.sweep_missing(&dir, live);
         let partners: Vec<String> = {
             let g = self.inner.lock().unwrap();
             // 現行的 mux 還活著時只算屬於它的夥伴（換掉的舊 mux 留下的列不算）；同名只留一位
@@ -1312,6 +1324,77 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             let _ = self.persist();
         }
         dead.len()
+    }
+
+    /// 對照表裡已經對不上服務的夥伴列（#923），回收掉幾筆。只在現行 mux 活著（live 有值）時才收：
+    /// - 屬於舊 mux 的列（pid＋建立時間跟現行 mux 對不上）：服務換過了，窗格已經跟著舊的沒了，直接收；
+    /// - 屬於現行 mux、但服務的窗格清單裡沒有它：**連續兩輪**都沒有才收（剛開的窗格一輪可能還沒出現、清單可能剛好讀到一半）。
+    /// 服務沒在跑（還沒接回）、讀清單失敗都不收；不關任何窗格，只拿掉對照表的列。收掉的不算「自己結束」（不進 exited）
+    fn sweep_missing(&self, dir: &WezTermDir, live: Option<(u32, u64)>) -> usize {
+        self.inner.lock().unwrap().last_live = live;
+        let Some((lp, lb)) = live else {
+            self.inner.lock().unwrap().missing_once.clear();
+            return 0;
+        };
+        let rows: Vec<(String, u64, PathBuf, bool)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty()).map(|s| (s.id.clone(), s.pane_id, s.window.sock.clone(), s.window.gui_pid == lp && s.window.started_ms == Some(lb))).collect()
+        };
+        let w = self.wez(dir);
+        let mut lists: BTreeMap<PathBuf, Option<std::collections::BTreeSet<u64>>> = BTreeMap::new();
+        let mut gone: Vec<String> = Vec::new();
+        let mut missing_now = std::collections::BTreeSet::new();
+        let prev = self.inner.lock().unwrap().missing_once.clone();
+        for (id, pane, sock, current) in rows {
+            if !current {
+                gone.push(id);
+                continue;
+            }
+            let panes = lists.entry(sock.clone()).or_insert_with(|| w.list(&sock).ok().map(|v| v.into_iter().map(|p| p.pane_id).collect()));
+            let Some(panes) = panes else { continue };
+            if !panes.contains(&pane) {
+                if prev.contains(&id) {
+                    gone.push(id);
+                } else {
+                    missing_now.insert(id);
+                }
+            }
+        }
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.missing_once = missing_now;
+            if !gone.is_empty() {
+                g.sessions.retain(|s| !gone.contains(&s.id));
+            }
+        }
+        if !gone.is_empty() {
+            for id in &gone {
+                elog!("終端：服務裡已經沒有這個窗格，拿掉對照表的列（編號 {id}）");
+            }
+            let _ = self.persist();
+        }
+        gone.len()
+    }
+
+    /// 名字是 name 的 Claude 夥伴列裡，還對得上服務的那幾筆（#923）。用上一輪 mux_snapshot 的結果，不另外下 cli：
+    /// 屬於舊 mux 的（跟上一輪看到的現行 mux 對不上）不算；上一輪服務的窗格清單裡就沒有窗格的不算。
+    /// 剛開、還沒經過一輪的窗格照常算；上一輪沒看到 mux（服務沒起來、沒開 mux 模式）就不濾；不是 mux 的視窗照舊算
+    fn current_partner_ids(&self, name: &str) -> Vec<String> {
+        let g = self.inner.lock().unwrap();
+        g.sessions
+            .iter()
+            .filter(|s| s.kind == super::win_term::KIND_CLAUDE && partner_label(&s.id, &s.title) == Some(name))
+            .filter(|s| {
+                if !s.window.mux {
+                    return true;
+                }
+                if g.missing_once.contains(&s.id) {
+                    return false;
+                }
+                g.last_live.map_or(true, |(lp, lb)| s.window.gui_pid == lp && s.window.started_ms == Some(lb))
+            })
+            .map(|s| s.id.clone())
+            .collect()
     }
 
     /// 拿走確定自己結束的夥伴名字（給監看寫進狀態檔，收發室讀）
@@ -1729,7 +1812,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 視窗名只對到一扇 Claude 夥伴、session 程序活著（由呼叫端查）而且在這扇視窗的程序樹內、有結束暗號且畫面上沒有標記、標題非空、判定是權限詢問
     fn partner_screen_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, String), String> {
         let Some(session_pid) = session_pid else { return Err("確認不了這個夥伴還在跑".into()) };
-        let ids: Vec<String> = self.watched_partners().into_iter().filter(|(_, n)| n == name).map(|(id, _)| id).collect();
+        // 同名只算還對得上服務的那筆（舊 mux 的、窗格已經不在的不算，#923）
+        let ids = self.current_partner_ids(name);
         let [id] = ids.as_slice() else { return Err("找不到這個夥伴視窗".into()) };
         let snap = self.snapshot_p(id, true)?;
         self.verify_window(&snap)?;
@@ -6249,6 +6333,111 @@ mod tests {
             *rig.runner.inner.fail_substr.borrow_mut() = Some("get-text".into());
             assert_eq!(rig.svc.mux_snapshot().unwrap().partners.len(), 1, "讀不到畫面當作還活著");
             assert_eq!(kill_panes(&rig.runner), 0);
+        }
+
+        fn stored_terms(rig: &Rig) -> usize {
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            v["terms"].as_array().map_or(0, |a| a.len())
+        }
+
+        #[test]
+        fn 窗格被服務以外收掉_連續兩輪清單都沒有才拿掉列_不關窗格_不算自己結束() {
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            assert_eq!(stored_terms(&rig), 1);
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            rig.svc.mux_snapshot();
+            assert_eq!(stored_terms(&rig), 1, "只缺一輪不收（剛開的窗格可能還沒出現、清單可能讀到一半）");
+            rig.svc.mux_snapshot();
+            assert_eq!(stored_terms(&rig), 0, "連續兩輪都沒有：拿掉列");
+            assert_eq!(kill_panes(&rig.runner), 0, "不關任何窗格");
+            assert!(rig.svc.take_exited().is_empty(), "不算自己結束");
+        }
+
+        #[test]
+        fn 窗格只缺一輪_下一輪又出現_重新算() {
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            rig.svc.mux_snapshot();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 9, 0);
+            rig.svc.mux_snapshot();
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            rig.svc.mux_snapshot();
+            assert_eq!(stored_terms(&rig), 1, "中間有出現過：重新算一輪");
+        }
+
+        #[test]
+        fn 讀不到窗格清單_不收() {
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.fail_substr.borrow_mut() = Some("list".into());
+            for _ in 0..3 {
+                rig.svc.mux_snapshot();
+            }
+            assert_eq!(stored_terms(&rig), 1);
+        }
+
+        #[test]
+        fn 服務換成新的_mux_舊_mux_的列收掉_服務還沒起來時不收() {
+            let (rig, paths) = mux_rig();
+            open_partner(&rig);
+            // 服務當掉、還沒有新的 mux：不收（等自動接回）
+            std::fs::remove_file(&paths.pid).unwrap();
+            rig.svc.mux_snapshot();
+            assert_eq!(stored_terms(&rig), 1, "服務沒在跑時不動");
+            // 新的 mux 起來了：舊 mux 的列收掉
+            std::fs::write(&paths.pid, "4001 1000").unwrap();
+            rig.svc.mux_snapshot();
+            assert_eq!(stored_terms(&rig), 0, "窗格已經跟著舊的服務沒了");
+            assert_eq!(kill_panes(&rig.runner), 0, "不對新的 mux 下 kill-pane");
+        }
+
+        #[test]
+        fn 同名夥伴_只算服務裡還找得到窗格的那筆_用上一輪的結果_不另外下指令() {
+            let (rig, _) = mux_rig();
+            let old = open_partner(&rig);
+            *rig.runner.inner.spawn_out.borrow_mut() = "10\n".into();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-2", "ASN:2", 10, 0);
+            let (new, _) = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-2"))).unwrap();
+            assert_ne!(old, new);
+            // 還沒經過一輪：兩筆都算（剛開的窗格不能因為還沒看過就不算）
+            assert_eq!(rig.svc.current_partner_ids("小乙").len(), 2);
+            // 跑一輪：服務裡只剩新的那個窗格（舊的被外面收掉）→ 同名只算新的
+            rig.svc.mux_snapshot();
+            let before = cli_calls(&rig.runner).len();
+            assert_eq!(rig.svc.current_partner_ids("小乙"), vec![new.clone()]);
+            assert_eq!(cli_calls(&rig.runner).len(), before, "找夥伴時不另外下 wezterm cli");
+        }
+
+        #[test]
+        fn 同名夥伴_上一輪讀不到清單就不濾() {
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.spawn_out.borrow_mut() = "10\n".into();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-2", "ASN:2", 10, 0);
+            rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-2"))).unwrap();
+            *rig.runner.inner.fail_substr.borrow_mut() = Some("list".into());
+            rig.svc.mux_snapshot();
+            assert_eq!(rig.svc.current_partner_ids("小乙").len(), 2, "照舊交給後面的核對");
+        }
+
+        #[test]
+        fn 服務換成新的_mux_舊列收掉_自動接回的名單照樣有它() {
+            // 自動接回（auto_resume::after_mux_crash）用的是監看記下的名字和收發室的認得名單，不讀對照表的列：
+            // 舊 mux 的列被 sweep_missing 收掉，事故名單照樣有這位夥伴
+            let (rig, paths) = mux_rig();
+            open_partner(&rig);
+            let mut w = crate::launch::mux_watch::Watch::default();
+            assert!(w.tick(&rig.svc.mux_snapshot().unwrap(), 1_000).is_none());
+            std::fs::write(&paths.pid, "4001 1000").unwrap();
+            let o = rig.svc.mux_snapshot().unwrap();
+            assert_eq!(stored_terms(&rig), 0, "舊 mux 的列收掉了");
+            let inc = w.tick(&o, 31_000).expect("換了 mux、夥伴不見：算一次事故");
+            assert_eq!(inc.partners, vec!["小乙".to_string()], "事故名單照樣有它，會被自動接回");
+            let src = include_str!("auto_resume.rs");
+            let f = src.split("pub fn after_mux_crash").nth(1).unwrap().split("pub fn ").next().unwrap();
+            assert!(!f.contains("LiveTerms") && !f.contains("term::"), "自動接回不讀終端對照表的列");
         }
 
         #[test]
