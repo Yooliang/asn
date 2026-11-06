@@ -1162,6 +1162,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return None;
         }
         let dir = self.dir().ok()?;
+        // 夥伴自己 /exit 之後窗格因為 Hold 留著：先收掉，才不會被當成還在（服務不收、中斷時又被接回）
+        if self.sweep_exited(&dir) > 0 {
+            self.collect_empty_mux(&dir, "夥伴自己結束了");
+        }
         let m = self.mux_handle(&dir, BTreeMap::new()).ok()?;
         let live = m.live_pid();
         let partners: Vec<String> = {
@@ -1178,6 +1182,36 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
     }
+    /// 已經結束的夥伴窗格（看得到帶暗號的結束標記）：收掉窗格、從對照表拿掉。回收掉幾個。
+    /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收
+    fn sweep_exited(&self, dir: &WezTermDir) -> usize {
+        let rows: Vec<(String, u64, PathBuf, String)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions
+                .iter()
+                .filter(|s| s.window.mux && !s.kind.is_empty())
+                .filter_map(|s| s.exit_nonce.clone().map(|n| (s.id.clone(), s.pane_id, s.window.sock.clone(), n)))
+                .collect()
+        };
+        if rows.is_empty() {
+            return 0;
+        }
+        let w = self.wez(dir);
+        let dead: Vec<(String, u64, PathBuf)> = rows.into_iter().filter(|(_, pane, sock, nonce)| w.pane_exit(sock, *pane, Some(nonce)).is_some()).map(|(id, pane, sock, _)| (id, pane, sock)).collect();
+        for (id, pane, sock) in &dead {
+            let _ = w.kill_pane(sock, *pane);
+            elog!("終端：夥伴自己結束了，收掉它的窗格（編號 {id}）");
+        }
+        if !dead.is_empty() {
+            {
+                let mut g = self.inner.lock().unwrap();
+                g.sessions.retain(|s| !dead.iter().any(|(id, _, _)| *id == s.id));
+            }
+            let _ = self.persist();
+        }
+        dead.len()
+    }
+
     /// 這個 mux（程序編號＋建立時間）裡、名字是 `name` 的夥伴視窗（claude／window）的終端編號。同名不只一個就不猜；
     /// mux 的編號與建立時間要跟開窗格時記的一樣（防止舊的列對到新的 mux）。沒開 mux 模式＝None
     pub fn partner_in_mux(&self, mux: (u32, u64), name: &str) -> Option<String> {
@@ -5704,6 +5738,36 @@ mod tests {
             }
             assert_eq!(kill_panes(&rig.runner), 1, "死窗格要收掉");
             assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "沒有留下對照表的列");
+        }
+
+        #[test]
+        fn 夥伴自己結束_監看時收掉窗格_拿掉對照表_不再算成夥伴() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            assert_eq!(rig.svc.mux_snapshot().unwrap().partners, vec!["小乙".to_string()], "還活著時照常算");
+            assert_eq!(kill_panes(&rig.runner), 0);
+            *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            let o = rig.svc.mux_snapshot().unwrap();
+            assert!(o.partners.is_empty(), "已結束的不算夥伴：中斷時不會被接回");
+            assert_eq!(kill_panes(&rig.runner), 1, "收掉 Hold 留著的窗格");
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None);
+            let stored = std::fs::read_to_string(&rig.store).unwrap();
+            assert!(!stored.contains(NONCE), "對照表存檔也拿掉了（編號 {id}）：{stored}");
+            assert!(rig.svc.mux_snapshot().unwrap().partners.is_empty());
+            assert_eq!(kill_panes(&rig.runner), 1, "收過的不再收");
+        }
+
+        #[test]
+        fn 夥伴自己結束_監看只看暗號_畫面讀不到或暗號不對都不收() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.screen.borrow_mut() = "[asn-exit guess 0]\n".into();
+            assert_eq!(rig.svc.mux_snapshot().unwrap().partners.len(), 1);
+            *rig.runner.inner.fail_substr.borrow_mut() = Some("get-text".into());
+            assert_eq!(rig.svc.mux_snapshot().unwrap().partners.len(), 1, "讀不到畫面當作還活著");
+            assert_eq!(kill_panes(&rig.runner), 0);
         }
 
         #[test]
