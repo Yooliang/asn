@@ -1,11 +1,11 @@
 {
-  "version": "0.2.4",
-  "notes": "- 要注意：手機 App 完全關著時還是不會響，要開著 App 才會即時收到。\n- 新功能：Windows 上，由 ASN 開的夥伴改在背景的終端服務裡跑，不用另外設定。關掉或重開 ASN，夥伴還在，重開後接得回來。從舊版更新上來時，已經開著的夥伴要重開一次才會移到背景服務。Linux、macOS 維持原樣。\n- 新功能：終端服務意外中斷時，ASN 會偵測、通知你，並自動接回一次；十分鐘內又中斷只通知，不再接回。中斷期間寄給這些夥伴的信會先留著。\n- 修正：更新或重開 ASN 時，內建通道夥伴（Gemini 等）正在處理或排隊的信不再遺失，會重送一次；已經開始處理的會提醒它先確認現況。重送還沒做完才通知寄件人。上一輪如果已經動過手，有可能重做。\n- 修正：按「後台隱藏」收不掉畫面、再按「前台顯示」多開一個的問題；關掉最後一位夥伴後，背景留下空的終端服務。\n- 修正：夥伴自己結束（例如打 `/exit`）後，約 1 分鐘內收掉它的畫面；寄給它的信會退回「找不到」，不再說成服務中斷。\n- 已知問題：夥伴在 ASN 關著時結束，或結束後幾分鐘內就重開 ASN，寄給它的信可能被留著最多 12 小時，並告訴寄件人「還沒接回來」。下一版修正。\n- 已知問題：背景開的夥伴剛開、還沒有任何輸出時，有時會被誤當成卡在確認畫面，自動切到前台。關掉那個視窗就好，夥伴不受影響。\n- 改善：電腦版群組分頁也會顯示未讀紅點。\n- 改善：手機開著時，別台讀過的信，紅點會很快消失。\n- 改善：提醒夥伴要問人時用寄信，不要跳選項框，以免卡住沒人知道。",
-  "pub_date": "2026-11-06T04:47:15.497Z",
+  "version": "0.2.5",
+  "notes": "- 新功能：Windows 上，可以在 ASN 裡直接看這台電腦夥伴的終端畫面，也能在畫面裡打字、貼上。從別台電腦看畫面排在之後的版本。注音等輸入法選字還沒在實機上驗過。\n- 新功能：設定頁加上「夥伴共用同一個終端服務」開關，重開 ASN 後生效；關掉時，已在背景跑的夥伴不會被搬動或關掉，設定頁會提示還有幾位在背景。\n- 改善：終端畫面開著時，夥伴停在權限確認不再另外跳出確認框，改在畫面上方提示，直接在畫面裡按數字回答；關掉畫面後才照常跳框。\n- 修正：重開 ASN 前已經自己結束的夥伴，重開後寄給它的信會馬上退回「找不到」，不再留 12 小時。\n- 修正：重開 ASN 時，內建通道夥伴（Gemini 等）在群組裡被點名、還沒做完的那一則，會補轉交一次，不重複。測試驗過、未實機。\n- 修正：Gemini 夥伴登入失效時，不再被當成意外結束，會提示要重新登入。測試驗過、未實機。\n- 修正：設定頁的「電腦重開後自動接回夥伴」一直顯示沒勾的問題（實際上是開著的）。\n- 新功能：電腦版設定頁的雲端代理清單、手機的雲端設備頁，可以替雲端設備改名。未實機。\n- 已知問題：背景的終端服務偶爾會意外中斷；ASN 會在約 1 分鐘內偵測到，並自動接回夥伴，信不會丟。\n- 已知問題：從舊版更新上來時，更新前就被留著、寄給已結束夥伴的信，每重開一次 ASN 就會再通知一次，最多到 12 小時為止。\n- 已知問題：背景開的夥伴剛開、還沒有任何輸出時，有時會被誤當成卡在確認畫面，自動切到前台。關掉那個視窗就好，夥伴不受影響。\n- 已知問題：夥伴剛結束就重開 ASN、又馬上寄信給它時，寄件人可能先收到一封「先留著」，幾秒後才收到「找不到」。",
+  "pub_date": "2026-11-06T07:09:13.318Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjdnckt2aTJYTDBvdkNMRG9iMWZGTitZYncvdGMxVG9xOW1ibTA2TXoxcE50b2szeXh6TE0waFh0RU1Gek95b2VScmRIeVlwWURLRkQvNFcySzJ2T2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQwNDM1CWZpbGU6QVNOXzAuMi40X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuNApBMTFoOXNxT21LcG9hZ1BVQ05FWVFZYkVWcjlhQ25scUhZd09FUnNKNFl0Q0V2TFY1Zy91cmFtM2JpbWdnZ0lla1p2VW1tZ3pQZlNJclNncThmNTRCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitjQ3FiU0J3WVg2T3BlS01KTFpsbFNXNHcvcHZaMWNBSjZYa3VQQzZaK3lqVUI3T2xYMmNyWlZqZ0VqM2V5NUpaVUM2QkNjV0tiMWNOK2tySkVQR3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ4OTUzCWZpbGU6QVNOXzAuMi41X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuNQpvSUwwb0pBbUxzcWlzVi9qdXJIdjBFM1hnSGs1a1RobzRLM0hJL1ViaWgvd2NZQ09LTGdGNnpqbjlrOUs1SnNteUZIbVhjMDZDckx5d1BmekIzQWRBdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.5_x64-setup.exe"
     }
   }
 }
