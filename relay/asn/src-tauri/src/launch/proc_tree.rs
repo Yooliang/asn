@@ -167,7 +167,8 @@ mod tests {
         assert!(KILL_PATHS.iter().all(|p| p.starts_with('/')), "不走 PATH");
         let src = include_str!("proc_tree.rs");
         let code = src.split("\nmod tests {").next().unwrap();
-        assert!(!code.contains("Command::new(\"kill\")"), "不能用 PATH 上的 kill");
+        // 用 concat! 拆開，免得「每個子程序都要 no_window」的守門把這個字串當成一個子程序
+        assert!(!code.contains(concat!("Command::", "new(\"kill\")")), "不能用 PATH 上的 kill");
     }
 
     #[test]
@@ -225,9 +226,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_真的行程樹_先_term_不理的補_kill_不是終端的不動() {
+        use crate::nowin::NoWindow;
         let d = tempfile::tempdir().unwrap();
         // 執行檔不是 WezTerm：規則 1 擋下，不動
-        let mut other = std::process::Command::new("sh").args(["-c", "sleep 30"]).spawn().unwrap();
+        let mut other = std::process::Command::new("sh").no_window().args(["-c", "sleep 30"]).spawn().unwrap();
         std::thread::sleep(Duration::from_millis(200));
         assert!(!live::kill_tree(other.id()), "執行檔不是 WezTerm 就不結束");
         assert!(crate::heartbeat::pid_alive(other.id()));
@@ -236,7 +238,7 @@ mod tests {
         // 把 sh 複製成叫 wezterm 的執行檔當根：底下開一個不理 TERM 的子行程和一個普通的孫行程
         let fake = d.path().join("wezterm");
         std::fs::copy("/bin/sh", &fake).unwrap();
-        let mut root = std::process::Command::new(&fake).args(["-c", "sh -c 'trap \"\" TERM; sleep 30' & sleep 30"]).spawn().unwrap();
+        let mut root = std::process::Command::new(&fake).no_window().args(["-c", "sh -c 'trap \"\" TERM; sleep 30' & sleep 30"]).spawn().unwrap();
         std::thread::sleep(Duration::from_millis(400));
         let pid = root.id();
         let kids: Vec<u32> = live::table().iter().filter(|r| r.ppid == pid).map(|r| r.pid).collect();
