@@ -63,7 +63,8 @@ pub fn plan(rows: &[Row], root: u32, my_uid: u32, me: u32) -> Result<Vec<(u32, u
     let mut frontier = vec![root];
     let mut seen = vec![root];
     while let Some(p) = frontier.pop() {
-        for c in rows.iter().filter(|c| c.ppid == p && !seen.contains(&c.pid)) {
+        let kids: Vec<&Row> = rows.iter().filter(|c| c.ppid == p && !seen.contains(&c.pid)).collect();
+        for c in kids {
             seen.push(c.pid);
             if c.uid != my_uid || protected(c, me) || c.start < r.start {
                 continue;
