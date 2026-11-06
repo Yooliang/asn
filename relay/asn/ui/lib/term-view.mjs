@@ -27,6 +27,25 @@ export function frameToWrite(frame) {
   return `\x1b[0m\x1b[H\x1b[2J${body}\x1b[0m\x1b[${y + 1};${x + 1}H`
 }
 
+/** 組完字之後多久內送出的那一筆還算輸入法組字的結果（毫秒） */
+export const IME_RECENT_MS = 150
+
+/**
+ * 追蹤輸入法組字（#956 只用來記紀錄）。attach(textarea) 掛上 composition 事件；recent()＝組字中或剛組完。
+ * now 可注入（測試）
+ */
+export function imeTracker(now = () => Date.now()) {
+  let composing = false, endedAt = -Infinity
+  return {
+    attach(el) {
+      if (!el?.addEventListener) return
+      el.addEventListener('compositionstart', () => { composing = true })
+      el.addEventListener('compositionend', () => { composing = false; endedAt = now() })
+    },
+    recent: () => composing || now() - endedAt <= IME_RECENT_MS,
+  }
+}
+
 /** 貼上的字要不要先問：多行才問（一般終端的慣例），單行直接送 */
 export function pasteNeedsConfirm(text) {
   return /[\r\n]/.test(String(text ?? '').replace(/[\r\n]+$/, ''))
@@ -108,11 +127,11 @@ export function createTermViewSession(deps) {
   // 打字：開好之前、關掉之後都不送。字一支一支照順序送；送不出去就回報，不假裝成功。
   // 排隊在這裡（一個接一個等前一個回來），順序不會亂；Rust 端還有自己的佇列與上限
   let inputChain = Promise.resolve()
-  const input = (data, paste = false) => {
+  const input = (data, paste = false, ime = false) => {
     if (stopped || viewId === null || !deps.sendInput || !data) return false
     const id = viewId
     inputChain = inputChain
-      .then(() => (stopped ? null : deps.sendInput(id, data, !!paste)))
+      .then(() => (stopped ? null : deps.sendInput(id, data, !!paste, !!ime)))
       .catch(e => deps.onInputError?.({ message: String(e?.message ?? e), lost_bytes: 0 }))
     return true
   }
@@ -227,11 +246,13 @@ export const TermView = {
     }
     const onScroll = () => follow.onScroll(host.value.scrollTop, target())
     const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; pendingPaste.value = '' }
-    const typed = (data, paste = false) => {
+    const typed = (data, paste = false, ime = false) => {
       if (!session || !data) return
       inputError.value = ''
-      session.input(data, paste)
+      session.input(data, paste, ime)
     }
+    // 輸入法組字（#956）：組字中、或剛組完的那一筆標成 ime，只用來記紀錄（Rust 端只記數量，不記內容）
+    const ime = imeTracker()
     // 貼上一律由這裡接手（不讓 xterm 自己處理，它不知道窗格裡的程式有沒有開 bracketed paste）：
     // 單行直接送，多行先問；太長請分段
     const onPaste = ev => {
@@ -255,7 +276,7 @@ export const TermView = {
         open: () => props.api.open(target),
         close: viewId => props.api.close(viewId),
         listen: props.api.listen,
-        sendInput: props.api.input ? (viewId, data, paste) => props.api.input(viewId, data, paste) : undefined,
+        sendInput: props.api.input ? (viewId, data, paste, imeFlag) => props.api.input(viewId, data, paste, imeFlag) : undefined,
         onInputError: e => { inputError.value = e.lost_bytes ? `${e.message}（有 ${e.lost_bytes} 位元組沒送出）` : e.message },
         createTerm: async size => {
           const Terminal = await loadXterm()
@@ -267,7 +288,8 @@ export const TermView = {
           t.attachCustomKeyEventHandler(termKeyHandler)
           t.open(host.value)
           // 打字：xterm 給的按鍵序列原樣送；Rust 端再檢查一次（不是按鍵的序列、不在前景、沒開著都不送）
-          t.onData(d => typed(d, false))
+          ime.attach(t.textarea)
+          t.onData(d => typed(d, false, ime.recent()))
           xtermRef = t
           return t
         },
