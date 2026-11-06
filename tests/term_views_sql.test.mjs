@@ -1,4 +1,4 @@
-// 別台看畫面的控制面（migration 20261105150000_term_views.sql）。
+// 別台看畫面的控制面（migration 20261107110000_term_views.sql）。
 // 靜態：沒有畫面欄位、函式只給 service_role、表開 RLS。實跑（要 pglite）：本人、兩台都是本人的、只有被看的能接受、
 // 上限、到期、固定狀態、結束就清金鑰材料、D 不見了 T 看得到。還原驗證：拿掉保護要變紅。
 import test from 'node:test'
@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import { randomUUID as uuid } from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
-const MIG = '20261105150000_term_views.sql'
+const MIG = '20261107110000_term_views.sql'
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 

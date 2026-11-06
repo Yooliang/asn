@@ -1,4 +1,4 @@
-// 別台看畫面的控制面（#597 工作包 E）。資料庫函式見 migrations/20261105150000_term_views.sql。這支只做參數檢查與轉送：
+// 別台看畫面的控制面（#597 工作包 E）。資料庫函式見 migrations/20261107110000_term_views.sql。這支只做參數檢查與轉送：
 //   本人簽章（看的那台 D）：term_view_start、term_view_report
 //   節點金鑰（被看的那台 T，可能沒人在）：term_view_pending、term_view_accept、term_view_stop
 // 沒有畫面內容，也沒有自由欄位：多餘的欄位一律丟掉。信任由兩端用本機記的公鑰判斷，後台不驗簽章。
