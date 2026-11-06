@@ -40,6 +40,23 @@ fn switches_on(windows: bool, wezterm: Option<&str>, mux: Option<&str>) -> (bool
     (wez, wez && mux != Some("0"))
 }
 
+/// 其他平台（Linux）的兩個開關：回（WezTerm 開窗, mux 模式）。ASN 不附 WezTerm，而且前景觀看窗還沒做，所以**預設關**：
+/// - 環境變數 `ASN_TERM_WEZTERM`／`ASN_TERM_MUX` 是 `0` 就關、`1` 就開（照舊，開發用）。
+/// - 沒設時看本人有沒有在設定頁打開（user_on），而且找得到 wezterm（found）。找不到就算打開也不開
+pub(crate) fn unix_switches(wezterm: Option<&str>, mux: Option<&str>, user_on: bool, found: bool) -> (bool, bool) {
+    let wez = match wezterm {
+        Some("0") => false,
+        Some("1") => true,
+        _ => user_on && found,
+    };
+    let mux = wez && match mux {
+        Some("0") => false,
+        Some("1") => true,
+        _ => user_on && found,
+    };
+    (wez, mux)
+}
+
 /// 伺服器終端（共用 mux）這次啟動的結果，給設定頁顯示（#868）：啟動時由 term::live() 設一次，執行中不再變
 static TERM_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TERM_SERVER_LOCKED: AtomicBool = AtomicBool::new(false);
@@ -517,6 +534,13 @@ mod tests {
     fn 伺服器終端_設定頁與環境變數的判斷表() {
         // （環境變數, 使用者關掉了）→（要不要用, 被環境變數固定關）
         assert_eq!(term_server_wanted(None, false), (true, false), "預設開");
+        // Linux：預設關；本人打開而且找得到 wezterm 才開；環境變數 0／1 優先
+        assert_eq!(unix_switches(None, None, false, true), (false, false), "Linux 預設關");
+        assert_eq!(unix_switches(None, None, true, false), (false, false), "打開了但沒裝 wezterm：不開");
+        assert_eq!(unix_switches(None, None, true, true), (true, true));
+        assert_eq!(unix_switches(Some("0"), None, true, true), (false, false));
+        assert_eq!(unix_switches(None, Some("0"), true, true), (true, false), "只關 mux");
+        assert_eq!(unix_switches(Some("1"), Some("1"), false, false), (true, true), "開發用：環境變數 1 照舊");
         assert_eq!(term_server_wanted(None, true), (false, false), "使用者在設定頁關掉");
         assert_eq!(term_server_wanted(Some("0"), false), (false, true), "環境變數 0 優先：設定頁打開也不會開，畫面顯示已固定");
         assert_eq!(term_server_wanted(Some("0"), true), (false, true), "兩者都關：仍是固定");

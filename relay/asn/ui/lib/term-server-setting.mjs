@@ -4,6 +4,8 @@
 export const TERM_SERVER_ON_NOTE = '開著：夥伴共用同一個在背景跑的終端服務，關掉畫面或關掉 ASN，夥伴都會繼續跑。'
 export const TERM_SERVER_OFF_NOTE = '關掉：新開的夥伴各自開一扇視窗，ASN 重開時夥伴不會繼續留著。'
 export const TERM_SERVER_RESTART_NOTE = '重開 ASN 後生效。已開著的夥伴不會被搬動，也不會被關掉。'
+/** Linux：沒裝 WezTerm 就沒有這個開關，改說一句怎麼裝 */
+export const TERM_SERVER_MISSING_NOTE = '要讓夥伴共用同一個在背景跑的終端服務，請先用套件管理員安裝 wezterm（例如 sudo apt install wezterm），再重開 ASN。'
 export const TERM_SERVER_LOCKED_NOTE = '已由系統設定固定，這裡不能改。'
 /** 設定關掉、重開之後，原本的夥伴還在背景跑，ASN 這次不管它們：人數數得出來就寫人數，數不出來也要提示 */
 export const termServerBackgroundNote = n => (n > 0

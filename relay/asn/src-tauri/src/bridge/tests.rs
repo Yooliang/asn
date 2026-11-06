@@ -2486,15 +2486,18 @@ fn 伺服器終端設定_只存檔_狀態帶出這次啟動實際有沒有在用
     let m = super::Manager::new(None, None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
     crate::launch::win_term::set_term_server_state(true, false);
     let s = m.status();
-    assert!(s.term_server && s.term_server_active && !s.term_server_locked);
-    assert_eq!(s.term_server_supported, cfg!(windows));
+    // 設定頁的值：Windows 預設開；Linux 預設關（要本人打開）
+    assert_eq!(s.term_server, cfg!(windows), "預設值依平台");
+    assert!(s.term_server_active && !s.term_server_locked);
+    assert_eq!(s.term_server_supported, super::term_server_supported());
+    assert_eq!(s.term_server_missing, !s.term_server_supported, "Linux 沒裝 wezterm 才要說怎麼裝");
     // 關掉：存檔、設定頁的值變了，但這次啟動還在用（改了要重開才生效；執行中的服務沒被動）
     let s = m.set_term_server(false).unwrap();
     assert!(!s.term_server && s.term_server_active, "設定是關，這次仍在用：畫面據此提示重開");
-    assert!(super::read_settings(data.path()).term_server_off);
-    // 再打開
+    assert!(super::read_settings(data.path()).term_server_off && !super::read_settings(data.path()).term_server_on);
+    // 再打開：兩個平台都是開
     let s = m.set_term_server(true).unwrap();
-    assert!(s.term_server && !super::read_settings(data.path()).term_server_off);
+    assert!(s.term_server && !super::read_settings(data.path()).term_server_off && super::read_settings(data.path()).term_server_on);
     crate::launch::win_term::set_term_server_state(keep.0, keep.1);
 }
 

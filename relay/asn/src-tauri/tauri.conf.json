@@ -35,6 +35,7 @@
     "publisher": "irori",
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "deb", "appimage"],
+    "linux": { "deb": { "recommends": ["wezterm"] } },
     "resources": {
       "../../claude-mod/.claude-plugin/marketplace.json": "claude-mod/.claude-plugin/marketplace.json",
       "../../claude-mod/.claude-plugin/plugin.json": "claude-mod/.claude-plugin/plugin.json",

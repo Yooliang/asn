@@ -401,9 +401,40 @@ pub fn bundled_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("wezterm"))
 }
 
-/// 先看環境變數 ASN_WEZTERM_DIR（開發或測試指到別的副本；設了就只認它），沒設就用安裝檔附帶的；不自動下載
+/// Linux 等其他平台：ASN 不附 WezTerm，要本人先裝（#0.2.9）
+pub const NOT_FOUND_UNIX: &str = "找不到 WezTerm。要用夥伴共用終端服務，請先用套件管理員安裝 wezterm（例如 sudo apt install wezterm），再重開 ASN";
+const UNIX_GUI: &str = "wezterm-gui";
+const UNIX_CLI: &str = "wezterm";
+
+/// 先看環境變數 ASN_WEZTERM_DIR（開發或測試指到別的副本；設了就只認它）。沒設時：Windows 用安裝檔附帶的；
+/// 其他平台從 PATH 找本人裝的。不自動下載
 pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
-    locate_with(std::env::var_os(DIR_ENV).map(PathBuf::from), bundled_dir(), fs)
+    let env = std::env::var_os(DIR_ENV).map(PathBuf::from);
+    if cfg!(windows) {
+        locate_with(env, bundled_dir(), fs)
+    } else {
+        locate_unix(env, std::env::var("PATH").ok().as_deref(), fs)
+    }
+}
+
+/// 其他平台：env 有設就只看它；沒設就照 PATH 的順序找 wezterm-gui 和 wezterm 都在的資料夾。
+/// **只認絕對路徑的 PATH 項目：** 空字串、「.」、其他相對路徑一律跳過，免得目前資料夾被放一支同名的就被拿去用。
+/// 回的路徑都是絕對路徑
+pub fn locate_unix(env: Option<PathBuf>, path_var: Option<&str>, fs: &dyn Fs) -> Result<WezTermDir, String> {
+    let usable = |p: &Path| fs.file_len(p).is_some_and(|n| n > 0);
+    let pick = |dir: &Path| {
+        let (gui, cli) = (dir.join(UNIX_GUI), dir.join(UNIX_CLI));
+        (usable(&gui) && usable(&cli)).then_some(WezTermDir { gui, cli })
+    };
+    if let Some(dir) = env.filter(|d| !d.as_os_str().is_empty()) {
+        return pick(&dir).ok_or_else(|| NOT_FOUND_UNIX.to_string());
+    }
+    path_var
+        .unwrap_or("")
+        .split(':')
+        .filter(|d| d.starts_with('/'))
+        .find_map(|d| pick(Path::new(d)))
+        .ok_or_else(|| NOT_FOUND_UNIX.to_string())
 }
 
 pub fn locate_from(dir: Option<PathBuf>, fs: &dyn Fs) -> Result<WezTermDir, String> {
@@ -1360,6 +1391,24 @@ mod tests {
         assert_eq!(locate_with(Some("E".into()), Some("B".into()), &fs).unwrap().cli, PathBuf::from("E/wezterm.exe"));
         assert!(locate_with(None, None, &fs).is_err());
         assert!(bundled_dir().is_some_and(|d| d.ends_with("wezterm")), "附帶的在安裝資料夾的 wezterm 底下");
+    }
+
+    #[test]
+    fn locate_其他平台從_path_找_只認絕對路徑() {
+        let fs = FakeFs::default();
+        for f in ["/opt/w/wezterm", "/opt/w/wezterm-gui", "./wezterm", "./wezterm-gui", "rel/wezterm", "rel/wezterm-gui", "/usr/bin/wezterm"] {
+            fs.files.borrow_mut().insert(f.into());
+        }
+        let d = locate_unix(None, Some(".::rel:/usr/bin:/opt/w"), &fs).unwrap();
+        assert_eq!((d.gui, d.cli), (PathBuf::from("/opt/w/wezterm-gui"), PathBuf::from("/opt/w/wezterm")), "跳過 .、空字串、相對路徑，也跳過只有其中一支的");
+        assert_eq!(locate_unix(None, Some(".:rel:"), &fs).unwrap_err(), NOT_FOUND_UNIX, "只有相對路徑：找不到");
+        assert_eq!(locate_unix(None, None, &fs).unwrap_err(), NOT_FOUND_UNIX);
+        assert!(locate_unix(Some("/opt/w".into()), Some(""), &fs).is_ok(), "環境變數有設就只認它");
+        assert!(locate_unix(Some("/nope".into()), Some("/opt/w"), &fs).is_err(), "環境變數指到沒有的地方不能悄悄改用 PATH 的");
+        fs.empty.borrow_mut().insert("/opt/e/wezterm".into());
+        fs.files.borrow_mut().insert("/opt/e/wezterm-gui".into());
+        assert_eq!(locate_unix(None, Some("/opt/e:/opt/w"), &fs).unwrap().cli, PathBuf::from("/opt/w/wezterm"), "空檔當找不到");
+        assert!(NOT_FOUND_UNIX.contains("安裝 wezterm"));
     }
 
     #[test]

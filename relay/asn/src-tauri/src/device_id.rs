@@ -19,6 +19,14 @@ const TRUST_FILE: &str = "device_trust.json";
 /// 指紋長度（位元組）
 const FINGERPRINT_BYTES: usize = 10;
 pub const SCOPE_VIEW: &str = "view";
+/// 這台還不能讓別台看畫面（Linux：設備私鑰還沒有系統金鑰庫保護，0.2.9 接上 Secret Service 前不開）
+pub const NOT_VIEWABLE_HERE: &str = "這台目前不能讓別台看畫面";
+
+/// 這台能不能被別台看：只有 Windows（設備私鑰經 DPAPI 保護）。其他平台在接上系統金鑰庫之前一律不行
+pub fn can_be_viewed_here() -> bool {
+    cfg!(windows)
+}
+
 pub const KEY_CHANGED: &str = "這台電腦的金鑰變了，可能是重裝過。請先在這裡撤銷，再重新配對";
 
 pub struct DeviceKey {
@@ -51,23 +59,36 @@ pub fn load_or_create(dir: &Path, prot: &dyn crate::auth::Protector) -> Result<D
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "產生設備金鑰失敗".to_string())?;
             let sealed = prot.protect(doc.as_ref())?;
-            crate::write_atomic(&path, &B64.encode(sealed)).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
-            restrict(&path);
+            write_private(&path, &B64.encode(sealed)).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
             DeviceKey::from_pkcs8(doc.as_ref())
         }
         Err(e) => Err(format!("讀設備金鑰失敗：{e}")),
     }
 }
 
-#[cfg(unix)]
-fn restrict(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        elog!("設備金鑰權限設定失敗：{e}");
+/// 寫金鑰檔：非 Windows 先用 0600 建暫存檔、寫完再換名，從頭到尾都只有本人讀得到（和登入憑證的寫法相同）。
+/// 不能先寫好再改權限：中間那一刻是預設權限（通常 0644），同一台的其他使用者讀得到
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p)?;
     }
+    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    {
+        use std::io::Write;
+        let mut f = opts.open(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
-#[cfg(not(unix))]
-fn restrict(_path: &Path) {}
 
 /// 這個系統用哪種方式保護金鑰（和登入憑證相同）
 pub fn protector() -> Box<dyn crate::auth::Protector> {
@@ -374,6 +395,10 @@ pub mod live {
             relay.api_signed("device_pair_decide", Some(json!({ "id": id, "decision": "reject" })), Some(token)).await?;
             return Ok(());
         }
+        // 確認＝記下「對方可以看我」：這台還不能被看就不確認（後台和本機都不動）
+        if !can_be_viewed_here() {
+            return Err(NOT_VIEWABLE_HERE.to_string());
+        }
         let k = key(dir)?;
         let me_pub = k.public_b64();
         let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
@@ -444,6 +469,39 @@ mod tests {
         assert_eq!(a.public_b64(), b.public_b64());
         let raw = B64.decode(std::fs::read_to_string(d.path().join(KEY_FILE)).unwrap()).unwrap();
         assert!(Ed25519KeyPair::from_pkcs8(&raw).is_err(), "存的是包過的");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 金鑰檔_建立後只有本人讀得到_暫存檔建立時就是_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        load_or_create(d.path(), &Flip).unwrap();
+        let mode = std::fs::metadata(d.path().join(KEY_FILE)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{mode:o}");
+        // 暫存檔本身就用 0600 建（不是寫完才改）：照同樣的寫法建一個不換名的檔來查
+        let p = d.path().join("x");
+        write_private(&p, "secret").unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let src = include_str!("device_id.rs");
+        let f = src.split("fn write_private(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(f.find("opts.mode(0o600)").unwrap() < f.find("opts.open(&tmp)").unwrap(), "先定權限再建檔");
+        assert!(!f.contains("set_permissions"), "不是事後改權限");
+    }
+
+    #[test]
+    fn 守門_還不能被看的平台_確認配對前就拒絕_被看的背景也不啟動() {
+        assert_eq!(can_be_viewed_here(), cfg!(windows), "只有 Windows");
+        let src = include_str!("device_id.rs");
+        let decide = src.split("pub async fn decide(").nth(1).unwrap();
+        let guard = decide.find("if !can_be_viewed_here()").expect("確認前要先查");
+        assert!(guard < decide.find("device_pair_decide\", Some(json!({ \"id\": id, \"decision\": \"confirm\"").unwrap(), "後台收到確認之前就擋");
+        assert!(guard < decide.find(".grant(").unwrap(), "本機記下權限之前就擋");
+        let lib = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+        let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller");
+        // 核心模組不能寫出 tauri 的路徑（headless 守門），只比對後半
+        let first = poller.split("async_runtime::spawn").next().unwrap();
+        assert!(first.contains("if !device_id::can_be_viewed_here()"), "被看的背景在還不能被看的平台不啟動");
     }
 
     #[test]

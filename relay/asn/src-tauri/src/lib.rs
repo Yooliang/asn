@@ -915,6 +915,10 @@ impl view_stream::TPort for LiveTPort {
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
 #[cfg(all(desktop, feature = "gui"))]
 fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
+    // 這台還不能被看（Linux：設備私鑰還沒有系統金鑰庫保護）就不查別台的觀看請求
+    if !device_id::can_be_viewed_here() {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
