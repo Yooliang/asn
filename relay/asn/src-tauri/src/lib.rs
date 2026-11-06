@@ -1156,7 +1156,7 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         let frames = frames_seen.load(std::sync::atomic::Ordering::Relaxed);
         views.remove(&id);
         let _ = app.emit_to(label.as_str(), "term-view-remote-end", serde_json::json!({ "id": id, "text": view_remote::end_text(&reason) }));
-        let _ = ui_log::append(&data_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
     });
 }
 
