@@ -188,6 +188,61 @@ fn is_sealed_text(b: &[u8]) -> bool {
     std::str::from_utf8(b).ok().and_then(|t| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(t.trim()).ok()).is_some_and(|d| is_sealed(&d))
 }
 
+/// 呼叫系統金鑰庫的時間上限：服務卡住時不能把呼叫端卡死（逾時＝回錯，不降級）
+pub const STORE_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+pub const STORE_TIMEOUT: &str = "系統金鑰庫沒有回應";
+
+/// 在一條新的執行緒上做 f，最多等 limit。逾時就回 Other（那條執行緒等它自己結束，不卡住呼叫端）。
+/// 新執行緒也避開「在 tokio 的執行緒上呼叫 zbus 的同步 API 會 panic」
+pub fn run_limited<T: Send + 'static>(limit: std::time::Duration, f: impl FnOnce() -> Result<T, StoreErr> + Send + 'static) -> Result<T, StoreErr> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(r) => r,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StoreErr::Other(STORE_TIMEOUT.to_string())),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StoreErr::Other("金鑰庫查詢中斷".to_string())),
+    }
+}
+
+/// 設定頁要的保護方式：**不等。** 有算過（60 秒內）就回那個值；沒有或太舊就在背景重算，這次回上一次的值（第一次回空字串＝畫面先不顯示）
+pub fn protection_label_cached(data_dir: &Path) -> &'static str {
+    cached_label(data_dir, protection_label)
+}
+
+fn cached_label(data_dir: &Path, compute: fn(&Path) -> &'static str) -> &'static str {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    struct Cache {
+        dir: std::path::PathBuf,
+        value: &'static str,
+        at: Option<Instant>,
+        busy: bool,
+    }
+    static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+    let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if g.as_ref().is_none_or(|c| c.dir != data_dir) {
+        *g = Some(Cache { dir: data_dir.to_path_buf(), value: "", at: None, busy: false });
+    }
+    let c = g.as_mut().unwrap();
+    let stale = c.at.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
+    if stale && !c.busy {
+        c.busy = true;
+        let dir = data_dir.to_path_buf();
+        std::thread::spawn(move || {
+            let v = compute(&dir);
+            let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = g.as_mut().filter(|c| c.dir == dir) {
+                c.value = v;
+                c.at = Some(Instant::now());
+                c.busy = false;
+            }
+        });
+    }
+    c.value
+}
+
 /// 這台登入資料和設備金鑰的保護方式（給設定頁）：windows／keyring／file_only
 pub fn protection_label(data_dir: &Path) -> &'static str {
     if cfg!(windows) {
@@ -231,13 +286,13 @@ pub mod linux {
     /// 這個程序第一次查到「沒有金鑰庫」就記住，之後不再每次去連（設定頁會常常問）
     static UNAVAILABLE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
-    /// 在一條新的執行緒上做：zbus 的同步呼叫在 tokio 的執行緒上會 panic（不能在 runtime 裡再起 runtime），
-    /// 而呼叫端（設定頁狀態、配對、啟動）常在 async 裡
-    fn off_runtime<T: Send>(f: impl FnOnce() -> Result<T, StoreErr> + Send) -> Result<T, StoreErr> {
+    /// 在新的執行緒上做、最多等 [`super::STORE_LIMIT`]（見 [`super::run_limited`]）。
+    /// 「沒有金鑰庫」只記在這次執行的記憶體裡，不寫檔：ASN 重開會重新查，那時查得到就照升級規則把明文升級
+    fn off_runtime<T: Send + 'static>(f: impl FnOnce() -> Result<T, StoreErr> + Send + 'static) -> Result<T, StoreErr> {
         if UNAVAILABLE.get().is_some() {
             return Err(StoreErr::Unavailable);
         }
-        let r = std::thread::scope(|sc| sc.spawn(f).join()).unwrap_or_else(|_| Err(StoreErr::Other("金鑰庫查詢中斷".into())));
+        let r = super::run_limited(super::STORE_LIMIT, f);
         if r.as_ref().err() == Some(&StoreErr::Unavailable) {
             let _ = UNAVAILABLE.set(());
         }
@@ -265,10 +320,12 @@ pub mod linux {
 
     impl SecretStore for LinuxStore {
         fn get(&self, attrs: &[(String, String)]) -> Result<Option<Zeroizing<Vec<u8>>>, StoreErr> {
-            off_runtime(|| get_now(attrs))
+            let a = attrs.to_vec();
+            off_runtime(move || get_now(&a))
         }
         fn create(&self, attrs: &[(String, String)], secret: &[u8]) -> Result<(), StoreErr> {
-            off_runtime(|| create_now(attrs, secret))
+            let (a, s) = (attrs.to_vec(), Zeroizing::new(secret.to_vec()));
+            off_runtime(move || create_now(&a, &s))
         }
     }
 
@@ -436,6 +493,33 @@ mod tests {
         let t = wrap(&s, "/d", Purpose::AuthToken, "login.bin");
         assert_eq!(t.unprotect(b"{\"refresh_token\":\"x\"}").unwrap(), b"{\"refresh_token\":\"x\"}");
         assert_eq!(*s.creates.lock().unwrap(), 0, "只讀不建");
+    }
+
+    #[test]
+    fn 金鑰庫卡住_最多等上限就回錯_不卡死呼叫端() {
+        let t = std::time::Instant::now();
+        let r: Result<(), StoreErr> = run_limited(std::time::Duration::from_millis(100), || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            Ok(())
+        });
+        assert_eq!(r, Err(StoreErr::Other(STORE_TIMEOUT.to_string())), "逾時＝回錯（不是 Unavailable，不會因此降級成明文）");
+        assert!(t.elapsed() < std::time::Duration::from_secs(1), "{:?}", t.elapsed());
+        assert_eq!(run_limited(STORE_LIMIT, || Ok(7)), Ok(7));
+        assert!(STORE_LIMIT <= std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn 設定頁的保護方式不等_背景算好再更新() {
+        fn slow(_: &Path) -> &'static str {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            "keyring"
+        }
+        let dir = Path::new("/tmp/asn-cache-test");
+        let t = std::time::Instant::now();
+        assert_eq!(cached_label(dir, slow), "", "第一次：不等，先回空的");
+        assert!(t.elapsed() < std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert_eq!(cached_label(dir, slow), "keyring", "背景算好之後就有");
     }
 
     #[test]

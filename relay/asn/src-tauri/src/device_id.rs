@@ -280,6 +280,12 @@ pub mod live {
 
     static LOCK: Mutex<()> = Mutex::new(());
 
+    /// async 裡用這個：取金鑰可能要問系統金鑰庫（最多等幾秒），不佔用 async 的執行緒
+    pub async fn key_async(dir: &Path) -> Result<DeviceKey, String> {
+        let d = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || key(&d)).await.map_err(|e| e.to_string())?
+    }
+
     pub fn key(dir: &Path) -> Result<DeviceKey, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         load_or_create(dir, protector(dir).as_ref())
@@ -300,7 +306,7 @@ pub mod live {
 
     /// 上傳這台的公鑰（沒有金鑰就先建）
     pub async fn publish(relay: &Relay, dir: &Path) -> Result<(), String> {
-        let k = key(dir)?;
+        let k = key_async(dir).await?;
         relay.api("device_key_publish", Some(json!({ "sign_pub": k.public_b64() }))).await.map(|_| ())
     }
 
@@ -319,7 +325,7 @@ pub mod live {
 
     /// 同步配對狀態，回給畫面。收到對方確認就在這裡驗簽章、記下來
     pub async fn sync(relay: &Relay, token: &str, dir: &Path, me_node: &str) -> Result<Value, String> {
-        let k = key(dir)?;
+        let k = key_async(dir).await?;
         let me_pub = k.public_b64();
         let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
         let (rows_in, rows_out) = pair_lists(&v)?;
@@ -385,7 +391,7 @@ pub mod live {
 
     /// 在 D 發起配對。對方公鑰記下來，之後要對得上
     pub async fn start(relay: &Relay, token: &str, dir: &Path, to_node: &str) -> Result<(), String> {
-        let k = key(dir)?;
+        let k = key_async(dir).await?;
         publish(relay, dir).await?;
         let v = relay.api_signed("device_pair_start", Some(json!({ "to_node": to_node, "from_pub": k.public_b64() })), Some(token)).await?;
         let (Some(id), Some(to_pub)) = (v.get("id").and_then(Value::as_str), v.get("to_pub").and_then(Value::as_str)) else {
@@ -413,7 +419,7 @@ pub mod live {
         if !can_be_viewed_here(dir) {
             return Err(NOT_VIEWABLE_HERE.to_string());
         }
-        let k = key(dir)?;
+        let k = key_async(dir).await?;
         let me_pub = k.public_b64();
         let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
         let row = v.get("incoming").and_then(Value::as_array).and_then(|a| a.iter().find(|r| r.get("id").and_then(Value::as_str) == Some(id)).cloned()).ok_or("這筆配對已經結束了")?;

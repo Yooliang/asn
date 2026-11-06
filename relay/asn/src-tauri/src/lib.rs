@@ -928,7 +928,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                 continue;
             }
             let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { continue };
-            let Ok(key) = device_id::live::key(&data_dir) else { continue };
+            let Ok(key) = device_id::live::key_async(&data_dir).await else { continue };
             for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
                 let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else { continue };
                 let now_s = (auth::now_ms() / 1000) as i64;
