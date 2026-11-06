@@ -1,13 +1,18 @@
-// 在畫面裡看夥伴的終端（#597）。只看不打字：不接 xterm 的輸入，畫面內容由 Rust 端過濾過才送來（launch/term_view.rs）。
+// 在畫面裡看夥伴的終端、打字（#597）。畫面內容由 Rust 端過濾過才送來；打字走 term_view_input（只有本機畫面這一個入口，
+// Rust 端再檢查一次：開著的畫面、視窗在前景、窗格是 ASN 開的、授權），字一次一支送進窗格、不丟字。
 // xterm.js 打包在 ui/vendor，要看時才載入。全程在本機，不連外。
 const { ref, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 const FRAME_EVENT = 'term-view-frame'
 const CLOSED_EVENT = 'term-view-closed'
+const INPUT_ERROR_EVENT = 'term-view-input-error'
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 40
 
-export const TERM_VIEW_NOTE = '這裡只能看。終端視窗如果開著，那邊也是同一個畫面。'
+export const TERM_VIEW_NOTE = '點一下畫面就能打字。終端視窗如果開著，那邊也是同一個畫面。'
+export const TERM_VIEW_NOTE_READONLY = '這裡只能看。終端視窗如果開著，那邊也是同一個畫面。'
+/** 一次貼上最多幾個字（再多請分段）：Rust 端上限是 256 KB，中文一字最多 3 位元組 */
+export const PASTE_MAX_CHARS = 80000
 export const TERM_VIEW_LOST = '暫時讀不到這個畫面，視窗可能已經關了。'
 
 /** 一幅畫面要寫給 xterm 的內容：清掉重畫，最後把游標放回窗格的位置。一次寫完，xterm 只會畫一次，不會閃 */
@@ -16,6 +21,27 @@ export function frameToWrite(frame) {
   const x = Math.max(0, Number(frame?.meta?.cursor_x) || 0)
   const y = Math.max(0, Number(frame?.meta?.cursor_y) || 0)
   return `\x1b[0m\x1b[H\x1b[2J${body}\x1b[0m\x1b[${y + 1};${x + 1}H`
+}
+
+/** 貼上的字要不要先問：多行才問（一般終端的慣例），單行直接送 */
+export function pasteNeedsConfirm(text) {
+  return /[\r\n]/.test(String(text ?? '').replace(/[\r\n]+$/, ''))
+}
+
+/** 貼上確認列的文字：幾行、幾個字 */
+export function pasteSummary(text) {
+  const t = String(text ?? '')
+  const lines = t.replace(/[\r\n]+$/, '').split(/\r\n|\r|\n/).length
+  return `要貼上 ${lines} 行、${[...t].length} 個字，送進這位夥伴的終端？`
+}
+
+// 貼上的按鍵：回 false 就是 xterm 不處理，瀏覽器照常貼上（走原本的貼上確認）；否則 xterm 會把 Ctrl+V 送成控制字元並擋掉貼上
+export function termKeyHandler(e) {
+  if (e.type !== 'keydown') return true
+  const k = String(e.key || '').toLowerCase()
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && k === 'v') return false
+  if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && k === 'insert') return false
+  return true
 }
 
 /** 要讓游標那一列看得到（下面多留一列），捲動位置該在哪 */
@@ -45,7 +71,8 @@ export function createFollow() {
 /**
  * 一次觀看：開、收畫面、關。deps：
  *   open() → 觀看編號；close(編號)；listen(事件, fn) → 取消函式；
- *   createTerm({ cols, rows }) → { resize, write, dispose }（可以是 Promise）；onLost(原因)；onPainted(一幅，選填)
+ *   createTerm({ cols, rows }) → { resize, write, dispose }（可以是 Promise）；onLost(原因)；onPainted(一幅，選填)；
+ *   sendInput(編號, 字, 是不是貼上)（選填，沒給就只看）；onInputError({ message, lost_bytes })（選填）
  */
 export function createTermViewSession(deps) {
   let viewId = null, term = null, stopped = false, lastSeq = 0, size = null, chain = Promise.resolve()
@@ -74,6 +101,17 @@ export function createTermViewSession(deps) {
     stop()
     deps.onLost?.(reason)
   }
+  // 打字：開好之前、關掉之後都不送。字一支一支照順序送；送不出去就回報，不假裝成功。
+  // 排隊在這裡（一個接一個等前一個回來），順序不會亂；Rust 端還有自己的佇列與上限
+  let inputChain = Promise.resolve()
+  const input = (data, paste = false) => {
+    if (stopped || viewId === null || !deps.sendInput || !data) return false
+    const id = viewId
+    inputChain = inputChain
+      .then(() => (stopped ? null : deps.sendInput(id, data, !!paste)))
+      .catch(e => deps.onInputError?.({ message: String(e?.message ?? e), lost_bytes: 0 }))
+    return true
+  }
   const stop = () => {
     if (stopped) return
     stopped = true
@@ -93,6 +131,9 @@ export function createTermViewSession(deps) {
         if (viewId === null) early.set(f.view_id, f)
         else if (f.view_id === viewId) enqueue(f)
       })
+      await add(INPUT_ERROR_EVENT, e => {
+        if (viewId !== null && e.view_id === viewId) deps.onInputError?.({ message: String(e.message ?? ''), lost_bytes: Number(e.lost_bytes) || 0 })
+      })
       await add(CLOSED_EVENT, c => {
         if (viewId === null) early.set(c.view_id, { closed: c.reason })
         else if (c.view_id === viewId) { console.info('[ASN] 終端畫面結束', c.reason); lost(c.reason) }
@@ -110,7 +151,7 @@ export function createTermViewSession(deps) {
       lost(String(e?.message ?? e))
     }
   }
-  return { start, stop, flushed: () => chain, viewId: () => viewId }
+  return { start, stop, input, flushed: () => chain, inputFlushed: () => inputChain, viewId: () => viewId }
 }
 
 let xtermLoad = null
@@ -131,13 +172,13 @@ function loadXterm() {
   return xtermLoad
 }
 
-/** 給 xterm 的設定：不收輸入、沒有捲動記錄（每幅都是整個畫面） */
+/** 給 xterm 的設定：收輸入（送去哪由 Rust 端檢查）、沒有捲動記錄（每幅都是整個畫面） */
 export const xtermOptions = ({ cols, rows }) => ({
   cols, rows,
-  disableStdin: true,
+  disableStdin: false,
   scrollback: 0,
   cursorBlink: false,
-  cursorInactiveStyle: 'block',   // 這個 xterm 不拿焦點，不設就看不清楚游標在哪
+  cursorInactiveStyle: 'block',   // 沒點進去的時候，不設就看不清楚游標在哪
   allowProposedApi: false,
   logLevel: 'off',
   fontSize: 13,
@@ -155,7 +196,8 @@ export const TermView = {
   },
   emits: ['back'],
   setup(props) {
-    const host = ref(null), lostText = ref('')
+    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref('')
+    let xtermRef = null
     let session = null, follow = createFollow(), lastRow = 0, lastRows = DEFAULT_ROWS
     // 窗格比區塊高時，游標（輸入框、權限框）常在下面：跟著捲，使用者往上看時不打擾
     const target = () => {
@@ -172,7 +214,26 @@ export const TermView = {
       host.value.scrollTop = t
     }
     const onScroll = () => follow.onScroll(host.value.scrollTop, target())
-    const stop = () => { if (session) { session.stop(); session = null } }
+    const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; pendingPaste.value = '' }
+    const typed = (data, paste = false) => {
+      if (!session || !data) return
+      inputError.value = ''
+      session.input(data, paste)
+    }
+    // 貼上一律由這裡接手（不讓 xterm 自己處理，它不知道窗格裡的程式有沒有開 bracketed paste）：
+    // 單行直接送，多行先問；太長請分段
+    const onPaste = ev => {
+      const text = ev.clipboardData?.getData('text') ?? ''
+      ev.preventDefault()
+      ev.stopPropagation()
+      if (!text) return
+      if ([...text].length > PASTE_MAX_CHARS) { inputError.value = '一次貼太多了，請分段貼上。'; return }
+      if (pasteNeedsConfirm(text)) { pendingPaste.value = text; pasteNote.value = pasteSummary(text); return }
+      typed(text, true)
+    }
+    const confirmPaste = () => { const t = pendingPaste.value; pendingPaste.value = ''; typed(t, true); xtermRef?.focus() }
+    const cancelPaste = () => { pendingPaste.value = ''; xtermRef?.focus() }
+    const focusTerm = () => xtermRef?.focus()
     const start = () => {
       stop()
       lostText.value = ''
@@ -182,13 +243,20 @@ export const TermView = {
         open: () => props.api.open(target),
         close: viewId => props.api.close(viewId),
         listen: props.api.listen,
+        sendInput: props.api.input ? (viewId, data, paste) => props.api.input(viewId, data, paste) : undefined,
+        onInputError: e => { inputError.value = e.lost_bytes ? `${e.message}（有 ${e.lost_bytes} 位元組沒送出）` : e.message },
         createTerm: async size => {
           const Terminal = await loadXterm()
           await nextTick()
           const t = new Terminal(xtermOptions(size))
           // 沒有捲動記錄時，xterm 會把滾輪換成方向鍵送給程式、還攔下事件，外層就捲不動。滾輪一律交給外層
           t.attachCustomWheelEventHandler(() => false)
+          // 貼上鍵不讓 xterm 吃掉，交給瀏覽器貼上
+          t.attachCustomKeyEventHandler(termKeyHandler)
           t.open(host.value)
+          // 打字：xterm 給的按鍵序列原樣送；Rust 端再檢查一次（不是按鍵的序列、不在前景、沒開著都不送）
+          t.onData(d => typed(d, false))
+          xtermRef = t
           return t
         },
         onLost: () => { session = null; lostText.value = TERM_VIEW_LOST },
@@ -199,13 +267,15 @@ export const TermView = {
     watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
     onMounted(() => { if (props.active) start() })
     onBeforeUnmount(stop)
-    return { host, lostText, onScroll, retry: start, note: TERM_VIEW_NOTE }
+    return { host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, note: props.api.input ? TERM_VIEW_NOTE : TERM_VIEW_NOTE_READONLY }
   },
   template: `
 <div class="term-view">
   <p class="term-view-note">{{ note }}</p>
   <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
-  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll"></div>
+  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
+  <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
+  <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>
 </div>`,
 }

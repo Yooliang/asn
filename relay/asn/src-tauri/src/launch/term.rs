@@ -943,6 +943,34 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows })
     }
 
+    /// 本機畫面裡打字（#597 D）：只有 ASN 開的窗格（接手來的不給），mux 換過、視窗不在就回錯，不對別的窗格下指令；
+    /// 工作資料夾的授權和 `confirm_send` 一樣。字的內容先過 `check_input`（不是按鍵的序列不送）；太長的分段送，順序不變。
+    /// 只接本機畫面的命令，不接後台，也沒有任何 relay 動作會呼叫它
+    pub fn view_input(&self, id: &str, data: &str, paste: bool) -> Result<(), String> {
+        super::term_view::check_input(data)?;
+        // 貼上是文字不是按鍵：ESC 等控制字元拿掉，才不會跳出貼上模式變成按鍵（打字不經過這裡）
+        let cleaned;
+        let data = if paste {
+            cleaned = super::term_view::sanitize_paste(data);
+            if cleaned.is_empty() {
+                return Err("貼上的內容沒有可以送的字".into());
+            }
+            cleaned.as_str()
+        } else {
+            data
+        };
+        let snap = self.view_snapshot(id)?;
+        if !snap.send_granted || snap.cwd.trim().is_empty() {
+            return Err("這個工作資料夾還沒有使用者的授權，不能打字".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        for part in super::term_view::split_chunks(data, super::term_view::INPUT_CHUNK_BYTES) {
+            w.send_input(&snap.window.sock, snap.pane_id, part, paste)?;
+        }
+        Ok(())
+    }
+
     /// 夥伴視窗的名字換成終端編號，給本機畫面看畫面用。已結束的窗格不算；同名不只一個就拒絕，不猜
     pub fn partner_term_id(&self, name: &str) -> Result<String, String> {
         let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
@@ -2005,9 +2033,22 @@ fn profile_reclaimable(profile: &str, kind: &str) -> bool {
     }
 }
 
-/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> connect asn --workspace asn-{編號}`（設定檔裡有 asn 這個 unix domain）
+/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> --config initial_cols=120 --config initial_rows=40 connect asn --workspace asn-{編號}`
+/// （設定檔裡有 asn 這個 unix domain）。窗格的大小以終端視窗為準，xterm.js 照窗格實際大小畫；GUI 開窗時帶 120x40，
+/// 避免一連上就把 120x40 的窗格縮回 80x24（asn真 11-05 定）；使用者自己把視窗拖小就照他的
 fn view_args(config: &Path, workspace: &str) -> Vec<String> {
-    vec!["--config-file".into(), config.to_string_lossy().into_owned(), "connect".into(), "asn".into(), "--workspace".into(), workspace.to_string()]
+    vec![
+        "--config-file".into(),
+        config.to_string_lossy().into_owned(),
+        "--config".into(),
+        format!("initial_cols={}", super::mux::PANE_COLS),
+        "--config".into(),
+        format!("initial_rows={}", super::mux::PANE_ROWS),
+        "connect".into(),
+        "asn".into(),
+        "--workspace".into(),
+        workspace.to_string(),
+    ]
 }
 
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
@@ -5253,10 +5294,103 @@ mod tests {
         }
 
         #[test]
+        fn 看畫面的_gui_開窗帶_120x40_設定在子命令前面() {
+            let args = super::super::view_args(Path::new("C:/m/mux.lua"), "asn-3");
+            assert_eq!(
+                args,
+                vec!["--config-file", "C:/m/mux.lua", "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", "asn-3"],
+                "--config 要放在 connect 前面（WezTerm 的全域選項），不然會被當成子命令的參數"
+            );
+        }
+
+        #[test]
         fn 看畫面_不認得的編號拒絕() {
             let (rig, _) = mux_rig();
             assert!(rig.svc.view_text("nope").is_err());
             assert!(rig.svc.view_meta("nope").is_err());
+        }
+
+        /// 送進窗格的字（`send-text` 呼叫）：[是不是 --no-paste, 字]
+        fn typed(rig: &Rig) -> Vec<(bool, String)> {
+            rig.runner
+                .args()
+                .into_iter()
+                .filter(|a| a.iter().any(|x| x == "send-text"))
+                .map(|a| (a.iter().any(|x| x == "--no-paste"), a.last().cloned().unwrap_or_default()))
+                .collect()
+        }
+
+        #[test]
+        fn 畫面裡打字_打字原樣送_貼上不帶_no_paste_太長分段_順序不變() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "你好", false).unwrap();
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "第一行\n第二行", true).unwrap();
+            assert_eq!(typed(&rig), vec![(true, "你好".to_string()), (true, "\x1b[A".to_string()), (false, "第一行\n第二行".to_string())]);
+            let long = "字".repeat(10_000);
+            let before = typed(&rig).len();
+            rig.svc.view_input(&id, &long, true).unwrap();
+            let parts: Vec<(bool, String)> = typed(&rig).into_iter().skip(before).collect();
+            assert!(parts.len() >= 4, "1 萬字（3 萬位元組）要分成好幾段：{}", parts.len());
+            assert!(parts.iter().all(|(np, t)| !np && t.len() <= crate::launch::term_view::INPUT_CHUNK_BYTES));
+            assert_eq!(parts.iter().map(|(_, t)| t.as_str()).collect::<String>(), long, "順序不變、一個字不少");
+        }
+
+        #[test]
+        fn 畫面裡打字_字開頭是減號_前面加雙減號_不會被當成參數() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            for (data, paste) in [("-h", false), ("--help", false), ("-x", true)] {
+                rig.svc.view_input(&id, data, paste).unwrap();
+                let last = rig.runner.args().into_iter().rev().find(|a| a.iter().any(|x| x == "send-text")).unwrap();
+                let n = last.len();
+                assert_eq!((last[n - 2].as_str(), last[n - 1].as_str()), ("--", data), "字前面要有 --：{last:?}");
+                assert_eq!(last.iter().any(|x| x == "--no-paste"), !paste);
+            }
+        }
+
+        #[test]
+        fn 畫面裡打字_貼上拿掉_esc_等控制字元_打字不動() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "a\x1b[201~rm -rf /\x03b\n第二行", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "a[201~rm -rf /b\n第二行".to_string())), "貼上：ESC、Ctrl 都拿掉");
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b\x03", true).is_err(), "清完是空的就不送");
+            assert_eq!(typed(&rig).len(), before);
+            // 打字：方向鍵和 Ctrl＋C 本來就要有 ESC／控制字元，原樣送
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "\x03", false).unwrap();
+            let t = typed(&rig);
+            assert_eq!(t[t.len() - 2], (true, "\x1b[A".to_string()));
+            assert_eq!(t[t.len() - 1], (true, "\x03".to_string()));
+        }
+
+        #[test]
+        fn 畫面裡打字_不是按鍵的序列_不認得的編號_mux_換過_都不送() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b]52;c;aGVsbG8=\x07", false).is_err(), "剪貼簿序列不是按鍵");
+            assert!(rig.svc.view_input(&id, "", false).is_err());
+            assert!(rig.svc.view_input("nope", "a", false).is_err());
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            assert!(rig.svc.view_input(&id, "a", false).is_err(), "mux 換過，不對新的 mux 下指令");
+            assert_eq!(typed(&rig).len(), before, "一個字都沒送");
+        }
+
+        #[test]
+        fn 畫面裡打字_夥伴視窗也可以打_接手來的和沒授權的不給() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view_input(&id, "好", false).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(true, "好".to_string())));
+            // 只給 ASN 開的窗格：原始碼層面確認沒有放寬接手窗格與授權檢查
+            let src = include_str!("term.rs");
+            let f = src.split("pub fn view_input(").nth(1).expect("有 view_input").split("pub fn partner_term_id").next().unwrap();
+            assert!(f.contains("view_snapshot(") && f.contains("send_granted"), "接手窗格由 view_snapshot 擋、授權沿用 send_granted");
+            assert!(!f.contains("send_bytes") && !f.contains("flatten_line"), "不走方向鍵路徑，也不壓行");
         }
 
         fn pi_argv() -> Vec<String> {
@@ -5570,7 +5704,7 @@ mod tests {
             rig.svc.view(&id).unwrap();
             let spawns = view_spawns(&rig.runner);
             assert_eq!(spawns.len(), 1);
-            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
+            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
             assert_eq!(spawns[0].0, want);
             let want_env: BTreeMap<String, String> = crate::launch::config::child_env().into_iter().collect();
             assert_eq!(spawns[0].1, want_env, "只給白名單環境");
