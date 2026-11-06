@@ -13,6 +13,7 @@ import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
+import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
 import { askTermService, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
@@ -36,7 +37,7 @@ const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView },
+  components: { Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView, RemoteView },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -53,7 +54,8 @@ export const ChatPane = {
     shotApi: { type: Object, default: null },      // 截圖（lib/tauri.mjs 的 shotApi）；沒給或這個系統不支援就沒有截圖鈕
     noBar: { type: Boolean, default: false },      // 手機對話頁：上方不放功能列（管理項目在手機頁自己的「⋯」），個人訊息也不拿掉「背景工作 N 件」
     agentApi: { type: Object, default: null },     // 上方功能列用（lib/tauri.mjs 的 transport）；沒給就沒有功能列
-    termViewApi: { type: Object, default: null },   // 在畫面裡看終端（lib/tauri.mjs 的 termViewApi）；只有電腦版會給
+    termViewApi: { type: Object, default: null },
+    remoteViewApi: { type: Object, default: null },   // 看別台電腦上夥伴的畫面（lib/tauri.mjs 的 remoteViewApi）；只有電腦版會給   // 在畫面裡看終端（lib/tauri.mjs 的 termViewApi）；只有電腦版會給
     selfNode: { type: String, default: '' },       // 這台設備的節點代號（只拿來判斷是不是本機的視窗，不顯示）
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
     hideBusyWarn: { type: Boolean, default: false },  // 手機版：對方忙碌時不顯示黃色說明條（標題列已改黃底）
@@ -92,7 +94,25 @@ export const ChatPane = {
       const r = await askTermService(props.termViewApi, termViewName.value)
       if (sameFriend(props.friend, f)) termInService.value = r
     }
-    const toggleTerm = () => { if (canTermView.value) termViewOn.value = !termViewOn.value }
+    // 看別台電腦上的夥伴（#597）：那台已配對、這台能看（有 Windows Hello）才有入口，同樣放在第 2 格
+    const remoteAvail = ref(null)
+    const canRemote = computed(() => !canTermView.value && remoteEntry({ api: props.remoteViewApi, friend: props.friend, selfNode: props.selfNode, avail: remoteAvail.value }))
+    const remoteOn = ref(false)
+    const remoteShown = computed(() => remoteOn.value && canRemote.value)
+    async function probeRemote() {
+      const f = props.friend
+      if (!props.remoteViewApi || !f?.node || f.node === props.selfNode || !props.active) return
+      const r = await askRemote(props.remoteViewApi, f.node)
+      if (sameFriend(props.friend, f)) remoteAvail.value = r
+    }
+    const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value }))
+    const toggleTerm = () => {
+      if (canRemote.value) { remoteOn.value = !remoteOn.value; return }
+      if (canTermView.value) termViewOn.value = !termViewOn.value
+    }
+    watch(() => props.friend?.id, () => { remoteOn.value = false; remoteAvail.value = null; void probeRemote() })
+    watch(() => props.active, a => { if (a) void probeRemote() })
+    onMounted(() => { void probeRemote() })
     watch(() => props.friend?.id, () => { termViewOn.value = false; termInService.value = null })
     watch(() => [props.friend?.id, props.friend?.status, termViewName.value, termBase.value, props.active].join('\n'), () => void probeTerm(), { immediate: true })
     // 訊息列表收起再回來，停在原本看的位置（原本在底部就回到底部，新訊息看得到）
@@ -387,15 +407,16 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="{ ready: canTermView, on: termShown }" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
+  <remote-view v-if="remoteShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active" @back="remoteOn = false"></remote-view>
   <div class="conv" v-show="!termShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>

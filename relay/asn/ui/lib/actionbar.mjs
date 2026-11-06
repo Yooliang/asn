@@ -119,7 +119,7 @@ function windowSlot(f, engine, ctx) {
   if (wake?.show) return { ...slot('window', WAKE_LABEL, wake.ok ? '' : (wake.reason || '現在不能喚醒')), wake: true }
   if (ctx.phone) return slot('window', WINDOW_LABEL.idle, PHONE_WHY.window)
   // 在共用終端服務裡的夥伴：這一格改成「終端」（#902，按下在 ASN 裡看終端）；名單右鍵、手機不傳 term，照舊
-  if (ctx.term === true) return { ...slot('window', TERM_LABEL, ''), term: true }
+  if (ctx.term === true) return { ...slot('window', ctx.termLabel || TERM_LABEL, ''), term: true }
   const c = ctx.console ?? {}
   const why = consoleBlock(f, ctx.selfNode) || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.api ? '' : '這個畫面不能切換視窗') || consoleStateWhy(c)
   const label = why ? WINDOW_LABEL.idle : c.visible ? WINDOW_LABEL.hide : WINDOW_LABEL.show
@@ -331,7 +331,7 @@ export const ActionBar = {
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
-      term: !lite.value && props.term?.ready === true,
+      term: !lite.value && props.term?.ready === true, termLabel: props.term?.label || '',
     }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
@@ -341,7 +341,7 @@ export const ActionBar = {
     const showSubs = computed(() => slot.value.subs.ok)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const termOn = computed(() => props.term?.on === true)
-    const termTip = computed(() => (termOn.value ? TERM_BACK_TIP : TERM_TIP))
+    const termTip = computed(() => (termOn.value ? TERM_BACK_TIP : props.term?.tip || TERM_TIP))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
     // pi 的模型清單：本機的直接問 pi；別台的用名單視窗收到的回報（和名單右鍵同一份）

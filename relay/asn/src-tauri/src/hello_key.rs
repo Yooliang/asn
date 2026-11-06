@@ -204,8 +204,10 @@ mod tests {").next().unwrap()
 
     #[test]
     fn 守門_hello_只有本人按的入口能叫_背景流程叫不到() {
-        // 現在只有「配對這台」；PR 5 接上「開始觀看」時把它加進來
-        const ENTRIES: [&str; 1] = ["device_pair_start"];
+        // 本人按的兩個入口：「配對這台」（取得或建立公鑰）、「看畫面」（簽章）
+        const ENTRIES: [&str; 2] = ["device_pair_start", "term_view_remote_start"];
+        // 不建金鑰、不簽章的：問支不支援、辨認「沒設 PIN」的錯誤，哪裡都能用
+        const HARMLESS: [&str; 2] = ["hello_win::supported", "hello_win::NO_PIN"];
         for (path, src) in sources() {
             if path.ends_with("/hello_win.rs") {
                 continue;
@@ -216,6 +218,9 @@ mod tests {").next().unwrap()
                 continue;
             }
             for (i, _) in code.match_indices("hello_win::") {
+                if HARMLESS.iter().any(|h| code[i..].starts_with(h)) {
+                    continue;
+                }
                 let before = &code[..i];
                 let f = before.rfind("\nasync fn ").max(before.rfind("\nfn ")).expect("在函式裡");
                 let name: String = before[f..].trim_start_matches('\n').trim_start_matches("async ").trim_start_matches("fn ").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();

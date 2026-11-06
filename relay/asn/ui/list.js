@@ -19,7 +19,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
-import { TEXT as PAIR_TEXT, errorText as pairError, newIncoming, normalizeView as pairView, pairTargets } from './lib/device-pair.mjs'
+import { TEXT as PAIR_TEXT, errorText as pairError, helloNote as pairHelloNote, newIncoming, normalizeView as pairView, pairTargets } from './lib/device-pair.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
@@ -39,7 +39,7 @@ import { TERM_CLOSE_KEY, TERM_CLOSE_NOTE, closeTermRun, termBarBlocked, termClos
 import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
-import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS, RELOGIN_BAR_HINT, RELOGIN_BAR_TEXT, showReloginBar } from './lib/login.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
@@ -374,7 +374,7 @@ const beingViewed = ref([])
 const stopBeingViewed = id => invoke('term_viewed_stop', { id }).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「配對的電腦」（#597）：判斷都在 Rust，這裡只同步狀態。對方的請求可能隔幾天才看到，所以定時查、有新的就提醒一次
 const PAIR_POLL_MS = 60_000
-const pair = reactive({ peers: [], incoming: [], outgoing: [], busy: false, error: '', shown: false })
+const pair = reactive({ peers: [], incoming: [], outgoing: [], busy: false, error: '', note: '', shown: false })
 const pairSeen = new Set()
 async function refreshPair() {
   try {
@@ -1699,7 +1699,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
-      pair: pair.shown ? { peers: pair.peers, incoming: pair.incoming, outgoing: pair.outgoing, busy: pair.busy, error: pair.error, targets: pairTargets(friends.value, info.node, pair) } : null,
+      pair: pair.shown ? { peers: pair.peers, incoming: pair.incoming, outgoing: pair.outgoing, busy: pair.busy, error: pair.error, note: pair.note, targets: pairTargets(friends.value, info.node, pair) } : null,
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerActive: bridge.termServerActive, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
@@ -1744,7 +1744,7 @@ const app = createApp({
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
-        case 'pair-start': if (value) await runPair(() => invoke('device_pair_start', { toNode: value })); break
+        case 'pair-start': if (value) await runPair(async () => { pair.note = pairHelloNote(await invoke('device_pair_start', { toNode: value })) }); break
         case 'pair-decide': await runPair(() => invoke('device_pair_decide', { id: value.id, confirm: value.confirm === true })); break
         case 'pair-close': await runPair(() => invoke('device_pair_close', { id: value })); break
         case 'pair-revoke': await runPair(() => invoke('device_peer_revoke', { node: value })); break
@@ -1816,7 +1816,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
-      beingViewed, stopBeingViewed, termViewApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
+      beingViewed, stopBeingViewed, termViewApi, remoteViewApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
       dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,

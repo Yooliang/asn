@@ -87,6 +87,15 @@ export const termViewApi = {
   listen,
 }
 
+// 看別台電腦上夥伴的畫面（#597）：只能看，沒有打字的命令。只有電腦版的畫面傳這個給 chat-pane
+export const remoteViewApi = {
+  available: node => invoke('term_view_remote_available', { node }),   // 這台能不能看那台 → true／false（不跳提示）
+  start: (toNode, partner) => invoke('term_view_remote_start', { toNode, partner }),   // Windows 會要本人輸入 PIN → { id, expires_s }
+  pause: (id, paused) => invoke('term_view_remote_set', { id, paused: !!paused }),
+  stop: id => invoke('term_view_remote_stop', { id }),
+  listen,
+}
+
 export const shotApi = {
   supported: () => invoke('shot_supported').catch(() => false),
   capture: async () => {

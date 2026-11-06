@@ -624,6 +624,25 @@ mod tests {
     }
 
     #[test]
+    fn 守門_權限和_hello_公鑰只在本人按確認時寫入_同步時不會悄悄補() {
+        let src = include_str!("device_id.rs");
+        let code = src.split("\nmod tests {").next().unwrap();
+        let decide = code.split("pub async fn decide(").nth(1).expect("有 decide").split("\n    }\n").next().unwrap();
+        assert!(decide.contains("t.accept_pair("), "確認時才記");
+        let outside = code.replace(decide, "");
+        assert_eq!(outside.matches(".accept_pair(").count(), 0, "decide 以外不能呼叫 accept_pair");
+        assert_eq!(outside.matches(".set_view_pub(").count(), 1, "只有 accept_pair 裡面那一處");
+        let accept = code.split("pub fn accept_pair(").nth(1).unwrap().split("\n    }\n").next().unwrap();
+        assert!(accept.contains(".set_view_pub("), "set_view_pub 只在 accept_pair 裡");
+        for f in ["lib.rs", "view_stream.rs", "view_remote.rs", "view_handshake.rs"] {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(f);
+            let other = std::fs::read_to_string(p).unwrap();
+            let other = other.split("\nmod tests {").next().unwrap();
+            assert!(!other.contains("accept_pair(") && !other.contains("set_view_pub("), "{f} 不能直接寫信任紀錄");
+        }
+    }
+
+    #[test]
     fn 舊的配對紀錄沒有_view_pub_欄位_讀得回來() {
         let o: Outgoing = serde_json::from_str(r#"{"id":"r","to_node":"t","to_name":"x","to_pub":"p"}"#).unwrap();
         assert_eq!(o.view_pub, None);

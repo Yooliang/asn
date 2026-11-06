@@ -116,6 +116,16 @@ pub async fn run(url: String, topic: String, on_ring: impl Fn(&Ring) + Send + 's
     .await
 }
 
+/// 送一則 broadcast，等結果（要回條的頻道等伺服器回覆）。頻道已經收掉或等太久都算失敗
+pub async fn send_via(tx: &mpsc::Sender<Outbound>, event: &str, payload: Value) -> Result<(), String> {
+    let (done, res) = oneshot::channel();
+    tx.send(Outbound { event: event.to_string(), payload, done }).await.map_err(|_| NOT_CONNECTED.to_string())?;
+    match tokio::time::timeout(ACK_WAIT, res).await {
+        Ok(Ok(r)) => r,
+        _ => Err(NOT_CONNECTED.to_string()),
+    }
+}
+
 /// 等下一則要送的；沒有送出端（門鈴）就永遠等
 async fn next_outbound(out: &mut Option<mpsc::Receiver<Outbound>>) -> Option<Outbound> {
     match out {

@@ -19,6 +19,8 @@ use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
 pub const KEY_NAME: &str = "asn-view-v1";
 pub const NOT_SET_UP: &str = "這台還沒有設定看畫面用的 Windows Hello，請先重新配對";
+/// 沒設 PIN 或指紋。配對時遇到它就不帶 Hello 公鑰、照樣配（lib.rs 的 device_pair_start）
+pub const NO_PIN: &str = "這台要先設定 Windows Hello 的 PIN 或指紋";
 
 /// 等 Windows 的非同步結果需要 COM；每次呼叫都初始化一次（同一執行緒重複呼叫無害）
 fn init_com() {
@@ -30,7 +32,7 @@ fn init_com() {
 fn status_text(s: KeyCredentialStatus) -> String {
     match s {
         KeyCredentialStatus::UserCanceled => "已取消，沒有完成".into(),
-        KeyCredentialStatus::UserPrefersPassword => "這台要先設定 Windows Hello 的 PIN 或指紋".into(),
+        KeyCredentialStatus::UserPrefersPassword => NO_PIN.into(),
         KeyCredentialStatus::SecurityDeviceLocked => "Windows Hello 暫時被鎖住了，請稍後再試".into(),
         KeyCredentialStatus::NotFound => NOT_SET_UP.into(),
         _ => "Windows Hello 沒有完成".into(),

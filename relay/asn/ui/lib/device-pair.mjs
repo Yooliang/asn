@@ -18,6 +18,8 @@ export const TEXT = {
   iCanView: '這台可以看它',
   keyChanged: '這台電腦的金鑰變了，可能是重裝過。如果你沒有重裝它，不要確認。要重新配對，請先撤銷。',
   stale: '這筆是用這台舊的金鑰發起的，請對方重新發起。',
+  noPin: '這台配好了，但沒設 Windows Hello 的 PIN，不能從這台看別台的畫面。設好 PIN 後再配對一次就可以。',
+  noHello: '這台配好了，但沒有 Windows Hello，不能從這台看別台的畫面。',
   pinWarn: '之後從別台看畫面時要先按 PIN 或指紋。你沒按「看畫面」卻跳出 PIN 提示，不要按。',
   status: {
     paired: '配對好了。',
@@ -38,6 +40,12 @@ const ERR = [
   ['金鑰', null],
   ['尚未登入', '請先登入再配對。'],
 ]
+/** 發起配對的結果 → 要不要多一句話（hello：ok／no_pin／unsupported） */
+export function helloNote(r) {
+  const h = r?.hello
+  return h === 'no_pin' ? TEXT.noPin : h === 'unsupported' ? TEXT.noHello : ''
+}
+
 export function errorText(e) {
   const s = String(e?.message ?? e ?? '')
   for (const [k, t] of ERR) if (s.includes(k)) return t ?? s

@@ -396,6 +396,7 @@ export const SettingsPanel = {
             </select>
           </label>
           <p class="pair-warn" v-if="st.pair.error" role="alert">{{ st.pair.error }}</p>
+          <p v-if="st.pair.note" role="status">{{ st.pair.note }}</p>
         </section>
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
