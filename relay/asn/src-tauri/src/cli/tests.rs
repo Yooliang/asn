@@ -77,6 +77,7 @@ pub fn fx(url: &str, window: Option<&str>) -> Fx {
         send_per_hour: 30,
         procs: Arc::new(move || Ok(table.clone())),
         alive: Arc::new(move |p| if p == CLAUDE_PID { f2.load(Ordering::SeqCst) } else { p != 999_999 }),
+        started: Arc::new(|_| None),
         poll_ms: 120_000,
         secret_poll_ms: 20,
         heartbeat_ms: 30_000,
