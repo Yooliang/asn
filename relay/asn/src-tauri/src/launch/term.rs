@@ -5797,7 +5797,8 @@ mod tests {
             let (rig, _) = mux_rig();
             open_partner(&rig);
             *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
-            let svc2 = restarted(&rig, true);
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true); // 開關開著才認領夥伴視窗的列
             svc2.reclaim().unwrap();
             assert_eq!(svc2.take_exited(), vec!["小乙".to_string()]);
             assert!(svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_none(), "沒有認領");
@@ -5808,11 +5809,14 @@ mod tests {
             fix_nonce();
             let (rig, _) = mux_rig();
             open_partner(&rig);
-            let svc2 = restarted(&rig, true);
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
             svc2.reclaim().unwrap();
             assert!(svc2.take_exited().is_empty(), "還活著");
+            assert!(svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_some(), "有認領到，不是被擱著");
             *rig.runner.inner.list_json.borrow_mut() = "[]".into();
-            let svc3 = restarted(&rig, true);
+            let mut svc3 = restarted(&rig, true);
+            svc3.set_hold_config(true);
             svc3.reclaim().unwrap();
             assert!(svc3.take_exited().is_empty(), "窗格不見了不等於自己結束（可能是服務中斷）");
         }
