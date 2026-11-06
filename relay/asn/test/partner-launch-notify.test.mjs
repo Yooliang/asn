@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import test from 'node:test'
 import {
   BACKGROUND_LAUNCH_TIMEOUT_MS,
@@ -6,9 +7,8 @@ import {
   collectLaunchFailures,
   existingPartnerNoticeText,
   findBackgroundTimeouts,
+  hasTrustNotice,
   launchFailedNoticeText,
-  pickLaunchedTerm,
-  screenShowsTrustPrompt,
 } from '../ui/lib/partner-launch-notify.mjs'
 
 test('背景逾時通知文案', () => {
@@ -63,35 +63,21 @@ test('同名夥伴已在跑：填了開場訊息要說沒送出', () => {
   assert.doesNotMatch(existingPartnerNoticeText('B4正式').body, /開場訊息/)
 })
 
-test('#884 畫面真的有信任框文字：判卡住', () => {
-  const trust = [
-    ' Do you trust the files in this folder?',
-    ' D:\\work\\proj',
-    '',
-    ' ❯ 1. Yes, proceed',
-    '   2. No, exit',
-    '',
-    ' Enter to confirm · Esc to cancel',
-  ].join('\n')
-  assert.equal(screenShowsTrustPrompt(trust), true)
+test('#884 hasTrustNotice：後端說這位在信任框才算；別的代號、別的名字、空的都不算', () => {
+  assert.equal(hasTrustNotice([{ name: '墊底夥伴', code: 'trust' }], '墊底夥伴'), true)
+  assert.equal(hasTrustNotice([{ name: '墊底夥伴', code: 'permission' }], '墊底夥伴'), false)
+  assert.equal(hasTrustNotice([{ name: '別人', code: 'trust' }], '墊底夥伴'), false)
+  assert.equal(hasTrustNotice([], '墊底夥伴'), false)
+  assert.equal(hasTrustNotice(null, '墊底夥伴'), false)
+  assert.equal(hasTrustNotice([{ name: '', code: 'trust' }], ''), false)
 })
 
-test('#884 剛開畫面為空、只有輸入框、對話中提到信任字樣：都不判卡住', () => {
-  assert.equal(screenShowsTrustPrompt(''), false)
-  assert.equal(screenShowsTrustPrompt(undefined), false)
-  assert.equal(screenShowsTrustPrompt('\n\n   \n'), false)
-  const inputBox = ['╭──────────────────────╮', '│ >                    │', '╰──────────────────────╯', '  ? for shortcuts'].join('\n')
-  assert.equal(screenShowsTrustPrompt(inputBox), false)
-  assert.equal(screenShowsTrustPrompt('這是一段要求信任此資料夾的提示，我沒有回應它。'), false)
-})
-
-test('#884 pickLaunchedTerm：只挑同資料夾、開窗後才出現的終端，找不到回 null', () => {
-  const pend = { cwd: 'D:\\work\\proj', launchProfile: 'claude', launchSince: 100_000 }
-  const old = { id: 'a', profile: 'claude', cwd: 'D:\\work\\proj', started_ms: 50_000 }
-  const other = { id: 'b', profile: 'claude', cwd: 'D:\\other', started_ms: 100_500 }
-  const hit = { id: 'c', profile: 'claude', cwd: 'd:/work/proj/', started_ms: 100_500 }
-  assert.equal(pickLaunchedTerm([old, other, hit], pend)?.id, 'c')
-  assert.equal(pickLaunchedTerm([old, other], pend), null)
-  assert.equal(pickLaunchedTerm([], pend), null)
-  assert.equal(pickLaunchedTerm([hit], { ...pend, cwd: '' }), null)
+test('#884 守門：逾時後切前台之前一定先問後端的信任框代號，不另寫文字比對', () => {
+  const src = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const at = src.indexOf('findBackgroundTimeouts(launchPending.value')
+  assert.ok(at > 0, '找不到逾時處理')
+  const seg = src.slice(at, at + 1400)
+  const iNotice = seg.indexOf('transport.partnerNotices()'), iCheck = seg.indexOf('hasTrustNotice(notices'), iSet = seg.indexOf('transport.partnerConsoleSet')
+  assert.ok(iNotice > 0 && iCheck > iNotice && iSet > iCheck, '切前台之前要先 partnerNotices 再 hasTrustNotice')
+  assert.ok(!/trust this folder|信任此資料夾\/|do you trust/i.test(seg.replace(/'\[ASN\][^']*'/g, '')), '不要在前端寫信任框文字比對')
 })

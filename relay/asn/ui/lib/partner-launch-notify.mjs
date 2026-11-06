@@ -56,32 +56,7 @@ export function collectLaunchFailures(launches, track) {
   return out
 }
 
-// ---- #884：逾時只是候選，要看到畫面上真的有信任框才算卡住 ----
-
-const TRUST_ASK = [/do you trust (the )?(files|contents)/i, /trust this folder/i, /is this a project you (created|trust)/i, /是否信任/, /信任此資料夾/]
-const TRUST_MENU = [/\b1\.\s*yes\b/i, /yes,\s*(proceed|i trust)/i, /enter to confirm/i, /\(y\/n\)/i]
-
-/** 畫面文字裡有沒有信任資料夾的提問：要同時看到提問句和可選的回答（選單或確認提示）。空畫面、只有輸入框、對話裡提到字樣都不算 */
-export function screenShowsTrustPrompt(text) {
-  const t = String(text ?? '')
-  if (!t.trim()) return false
-  return TRUST_ASK.some(re => re.test(t)) && TRUST_MENU.some(re => re.test(t))
-}
-
-const normCwd = p => String(p ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-
-/** 從 term_list 的列挑出這次啟動的終端：同工作資料夾、同引擎（有給才比）、開窗之後才出現；多個取最新。找不到回 null，不猜 */
-export function pickLaunchedTerm(terms, pend) {
-  const cwd = normCwd(pend?.cwd)
-  if (!cwd) return null
-  const since = pend?.launchSince ?? 0
-  const prof = pend?.launchProfile
-  let best = null
-  for (const t of terms ?? []) {
-    if (!t || typeof t.id !== 'string' || normCwd(t.cwd) !== cwd) continue
-    if (prof && t.profile && t.profile !== prof) continue
-    if (typeof t.started_ms !== 'number' || t.started_ms < since - 2000) continue
-    if (!best || t.started_ms > best.started_ms) best = t
-  }
-  return best
+/** #884：逾時後只在夥伴真的停在信任框時才切前台。判斷用後端讀畫面監看給的狀態代號（partner_notices 的 trust），前端不另寫文字比對 */
+export function hasTrustNotice(notices, name) {
+  return (Array.isArray(notices) ? notices : []).some(i => i?.code === 'trust' && typeof name === 'string' && name !== '' && i?.name === name)
 }

@@ -54,7 +54,7 @@ import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launc
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, pickLaunchedTerm, screenShowsTrustPrompt } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, hasTrustNotice, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -812,7 +812,7 @@ async function submitPartnerDlg() {
   const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
   const foregroundOnly = foregroundOnlyProfile(partnerDlg.profile)
   const display = !foregroundOnly && partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
-  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display, cwd: partnerDlg.cwd })
+  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
   launchPending.value = [...launchPending.value, pend]
   let existingHit = false   // 同名夥伴已在跑（沒另外開新的）
   try {
@@ -876,14 +876,11 @@ async function pollLaunchResults() {
   const still = resolvePending(launchPending.value, friends.value)
   const now = Date.now()
   for (const p of findBackgroundTimeouts(launchPending.value, still, now, info.node)) {
-    p.trustRestored = true   // 每一列只查一次；#884：逾時只是候選，畫面上真的有信任框才切前台
+    p.trustRestored = true   // 每一列只查一次；#884：逾時只是候選，後端讀畫面的監看說這位在信任框（trust）才切前台
     void (async () => {
-      let screen = ''
-      try {
-        const t = pickLaunchedTerm(await transport.termList(), p)
-        if (t) screen = screenText(await transport.termRead({ id: t.id, lines: 40 }))
-      } catch { /* 讀不到就不判卡住 */ }
-      if (!screenShowsTrustPrompt(screen)) { console.info('[ASN] 背景啟動逾時但畫面沒有信任框，不切前台', p.agent); return }
+      let notices = []
+      try { notices = await transport.partnerNotices() } catch { /* 查不到就不判卡住 */ }
+      if (!hasTrustNotice(notices, p.agent)) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
       const eng = engineForProfile(p.launchProfile || 'claude')
       await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })
       console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
