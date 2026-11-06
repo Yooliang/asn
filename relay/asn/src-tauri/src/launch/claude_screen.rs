@@ -117,9 +117,26 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
 /// 目前只給「只有這一次」和拒絕：其他選項（例如以後都允許）影響的不只這一次，留在電腦上決定。
 /// 內容不完整時本人看不到全部，只能拒絕。
 /// 選項框的單選題全部給；多選、一次多題看得到但不能按；內容不完整也不給。
+/// 權限框的按鈕字在手機上用中文（Claude 原文是英文的 Yes／No）；選項框的選項是夥伴自己寫的，照原文
+pub const PHONE_ALLOW_ONCE: &str = "只有這一次";
+pub const PHONE_DENY: &str = "拒絕";
+
 pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption> {
     match screen.kind {
-        ClaudeScreenKind::Permission => screen.options.iter().filter(|o| Some(o.n) == screen.deny || (complete && Some(o.n) == screen.allow_once)).cloned().collect(),
+        ClaudeScreenKind::Permission => screen
+            .options
+            .iter()
+            .filter_map(|o| {
+                let label = if Some(o.n) == screen.deny {
+                    PHONE_DENY
+                } else if complete && Some(o.n) == screen.allow_once {
+                    PHONE_ALLOW_ONCE
+                } else {
+                    return None;
+                };
+                Some(ClaudeOption { n: o.n, label: label.to_string() })
+            })
+            .collect(),
         ClaudeScreenKind::Question if complete => screen.options.clone(),
         _ => Vec::new(),
     }
@@ -634,6 +651,15 @@ mod phone_option_tests {
     fn 手機只給這一次和拒絕() {
         let n: Vec<u32> = phone_options(&screen(), true).iter().map(|o| o.n).collect();
         assert_eq!(n, vec![1, 3]);
+    }
+
+    #[test]
+    fn 手機的權限按鈕用中文_編號照原本() {
+        let o = phone_options(&screen(), true);
+        let got: Vec<(u32, &str)> = o.iter().map(|o| (o.n, o.label.as_str())).collect();
+        assert_eq!(got, vec![(1, PHONE_ALLOW_ONCE), (3, PHONE_DENY)], "按鈕字不是 Claude 的英文原文");
+        let o = phone_options(&screen(), false);
+        assert_eq!(o.iter().map(|o| (o.n, o.label.as_str())).collect::<Vec<_>>(), vec![(3, PHONE_DENY)]);
     }
 
     #[test]
