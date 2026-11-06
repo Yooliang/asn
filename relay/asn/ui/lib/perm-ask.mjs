@@ -11,6 +11,8 @@ export const ARM_MS = 700
 /** 按了之後等電腦回報多久（電腦每 3 秒領一次，重查要一點時間） */
 export const RESULT_TRIES = 10
 export const RESULT_EVERY_MS = 2_000
+/** 輪詢發現電腦那邊已經處理掉之後，顯示一行字多久才自動收框 */
+export const AUTOCLOSE_MS = 2_000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH_RE = /^[0-9a-f]{64}$/
 const TEXT_MAX = 16000
@@ -52,6 +54,12 @@ export function stillPending(raw, id) {
   return raw.requests.some(x => x?.id === id)
 }
 
+/** 5 秒輪詢的結果怎麼呈現（只給輪詢用，本人沒按過選項）。已經結束（alive===false）→ 一行說明＋自動收框；其他（還在、查不到）→ null 不動。
+ *  本人按了選項之後才得到 cancelled，走 resultOf：紅字，不自動收 */
+export function watchOutcome(alive) {
+  return alive === false ? { ok: true, text: TEXT.handled, auto: true } : null
+}
+
 /** 按了之後的結果。還沒有最終結果回 null，繼續等 */
 export function resultOf(raw, id) {
   const r = Array.isArray(raw?.recent) ? raw.recent.find(x => x?.id === id) : null
@@ -63,12 +71,17 @@ export function resultOf(raw, id) {
   return null
 }
 
+/** 標題：〈電腦名〉的〈夥伴名〉正在詢問；沒有電腦名只寫夥伴名；兩個都沒有就「夥伴正在詢問」 */
+export function askTitle(deviceName, window) {
+  const d = typeof deviceName === 'string' ? deviceName.trim() : '', w = typeof window === 'string' ? window.trim() : ''
+  if (!w) return d ? `${d} ${TEXT.ofWord} 夥伴${TEXT.asking}` : TEXT.askingNoName
+  return d ? `${d} ${TEXT.ofWord} ${w} ${TEXT.asking}` : `${w} ${TEXT.asking}`
+}
+
 export const TEXT = {
-  title: '夥伴在問你',
-  lead: '按一個選項就會送到那台電腦，送出後收不回。',
-  deviceLabel: '哪台電腦',
-  windowLabel: '哪個夥伴',
-  textLabel: '內容',
+  askingNoName: '夥伴正在詢問',
+  asking: '正在詢問',
+  ofWord: '的',
   incomplete: '內容太長，這裡只看得到一部分，所以只能拒絕。要允許請到電腦上看完整內容。',
   viewOnly: '這題要到電腦上回答（多選、一次多題，或要自己打字）。',
   noType: '要自己打字，請到電腦上回答。',
@@ -78,6 +91,7 @@ export const TEXT = {
   done: '電腦已經送出你的選擇',
   failed: '沒有送出',
   gone: '電腦上已經沒有這個提示，沒有送出',
+  handled: '電腦上已經處理了這個提示',
   noReply: '電腦沒有回應，沒有送出',
   unknown: '電腦還沒有回報。請到電腦上確認',
   close: '關閉',
