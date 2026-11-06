@@ -160,17 +160,14 @@ pub(crate) fn relaunch_hidden(service_active: bool) -> (bool, bool) {
 }
 
 /// 遠端開新夥伴（手機、電腦版開到別台）要不要放背景（#931）：照這台的設定，不讓遠端選。
-/// pref＝這台「開新夥伴的顯示方式」偏好（launch-prefs.json 的 launchDisplay：foreground／background）；沒存過（None）或看不懂就跟重開同一套（[`relaunch_hidden`]）。
+/// pref＝這台「開新夥伴的顯示方式」偏好（launch-prefs.json 的 launchDisplay）。只有 background 算數：
+/// 電腦版存啟動設定時會順手寫入預設的 foreground，分不出「選了前台」和「從來沒選過」，所以 foreground、沒存過、看不懂都跟重開同一套（[`relaunch_hidden`]，服務在用就背景）。
 /// 共用終端服務沒在用時一律前台：沒有窗格可以藏，開在背景就看不到也找不回來
 pub(crate) fn remote_hidden(pref: Option<&str>, service_active: bool) -> bool {
     if !service_active {
         return false;
     }
-    match pref {
-        Some("foreground") => false,
-        Some("background") => true,
-        _ => relaunch_hidden(service_active).0,
-    }
+    pref == Some("background") || relaunch_hidden(service_active).0
 }
 
 /// 組一扇視窗：Claude 本體記 kind "claude"，其餘記 "window"
@@ -460,10 +457,12 @@ mod tests {
             assert!(!remote_hidden(pref, false), "沒有共用終端服務：{pref:?} 也開前台");
         }
         assert!(remote_hidden(Some("background"), true), "這台設成背景、服務在用：背景");
-        assert!(!remote_hidden(Some("foreground"), true), "這台設成前台：前台");
+        assert!(remote_hidden(Some("foreground"), true), "foreground 分不出是選的還是預設寫入的：不算數，服務在用就背景");
         assert!(remote_hidden(None, true), "沒存過：跟重開一樣，服務在用就背景");
         assert!(remote_hidden(Some("怪值"), true), "看不懂的值：當沒存過");
-        assert_eq!(remote_hidden(None, true), relaunch_hidden(true).0, "沒存過的規則就是重開的規則");
+        for pref in [None, Some("foreground"), Some("怪值")] {
+            assert_eq!(remote_hidden(pref, true), relaunch_hidden(true).0, "{pref:?}：照重開的規則");
+        }
     }
 
     /// #931：正式的遠端開一律接續對話（背景開也是）；只有測試用的隱藏視窗不查真實的對話檔；退回原生主控台一律前台
