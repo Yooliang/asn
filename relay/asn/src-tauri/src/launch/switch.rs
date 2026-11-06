@@ -768,7 +768,7 @@ pub fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
 
 /// 照計畫重開：走開窗點 local::start_window（0.2.0 起先開在 ASN 自帶的 WezTerm，找不到才用原生主控台；原本在 Windows Terminal 分頁裡的也一樣）
 pub(crate) fn real_launch(plan: &Plan) -> Result<(), String> {
-    local::start_window(&plan.name, &plan.argv[0], &plan.argv[1..], &plan.cwd, false).map(|_| ())
+    local::start_window_relaunch(&plan.name, &plan.argv[0], &plan.argv[1..], &plan.cwd).map(|_| ())
 }
 
 pub(crate) struct RealOs;

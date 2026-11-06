@@ -268,7 +268,7 @@ pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Pa
 pub(super) fn start_window_noted(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<super::win_term::Opened, String> {
     #[cfg(windows)]
     {
-        start_window_windows(title, command, args, cwd, hidden)
+        start_window_windows(title, command, args, cwd, hidden, hidden)
     }
     #[cfg(not(windows))]
     {
@@ -293,11 +293,26 @@ pub(super) fn start_console_window_env(title: &str, command: &str, args: &[Strin
 
 /// Windows 開窗點：環境先過 child_env（金鑰類變數、繼承來的 CLAUDE* 都不帶進視窗），交給自帶終端；退路開原生主控台（同樣 env_clear＋child_env）
 #[cfg(windows)]
-fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<super::win_term::Opened, String> {
+/// hidden＝開在自帶終端時要不要放背景；console_hidden＝退回原生主控台時要不要放背景（重開時兩者不同，見 [`start_window_relaunch`]）
+fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, console_hidden: bool) -> Result<super::win_term::Opened, String> {
     let env = super::win_term::term_env(super::config::child_env(), &[]);
     let spec = super::win_term::spec_for(title, command, args, hidden, env);
     let dir = std::path::PathBuf::from(strip_verbatim_prefix(&cwd.to_string_lossy()));
-    super::win_term::open_window_real(&dir, &spec, &|| start_console_window_windows(title, command, args, cwd, hidden, &[]))
+    super::win_term::open_window_real(&dir, &spec, &|| start_console_window_windows(title, command, args, cwd, console_hidden, &[]))
+}
+
+/// 收發室重開／接回的視窗（喚醒、換模型重開、改名的退路、換班接手都經 switch::real_launch 進來，#906）：
+/// 這次執行在用共用終端服務，就開在背景（要看畫面從 ASN 的終端圖示看）；沒有服務、或退回原生主控台，一律前台，免得開了看不到
+pub(super) fn start_window_relaunch(title: &str, command: &str, args: &[String], cwd: &Path) -> Result<u32, String> {
+    #[cfg(windows)]
+    {
+        let (in_term, in_console) = super::win_term::relaunch_hidden(super::win_term::term_server_active());
+        start_window_windows(title, command, args, cwd, in_term, in_console).map(|o| o.pid)
+    }
+    #[cfg(not(windows))]
+    {
+        start_window(title, command, args, cwd, false)
+    }
 }
 
 /// PowerShell 單引號字串（內部單引號加倍），整串都是字面值，不會展開 $ 或反引號。
