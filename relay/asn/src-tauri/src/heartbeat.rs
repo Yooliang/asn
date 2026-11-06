@@ -108,8 +108,35 @@ pub fn process_started_ms(pid: u32) -> Option<u64> {
         (ticks / 10_000).checked_sub(11_644_473_600_000)
     }
 }
+/// 非 Windows：Linux 讀 /proc 得到開始時間（只到秒）；其他平台查不到（None，呼叫端照舊當作同一個程序）
 #[cfg(not(windows))]
-pub fn process_started_ms(_pid: u32) -> Option<u64> {
+pub fn process_started_ms(pid: u32) -> Option<u64> {
+    process_start_secs(pid).map(|s| s * 1000)
+}
+
+/// /proc 的時鐘刻度（USER_HZ）。Linux 上對使用者程式固定是 100；libc 不是直接相依，不為了 sysconf 新加
+#[cfg_attr(windows, allow(dead_code))]
+const USER_HZ: u64 = 100;
+
+/// 從 /proc/<pid>/stat 和 /proc/stat 的內容算出開始時間（秒，從 1970 起）。
+/// starttime 是「)」之後的第 20 個欄位（整行第 22 欄，單位是時鐘刻度）；comm 可能含空白和括號，所以從最後一個「)」切。
+/// 開機時間是 /proc/stat 的 btime。任何一個讀不到就回 None
+#[cfg_attr(windows, allow(dead_code))]
+pub fn parse_start_secs(stat: &str, proc_stat: &str) -> Option<u64> {
+    let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
+    let btime: u64 = proc_stat.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
+    Some(btime + ticks / USER_HZ)
+}
+
+/// 行程開始時間（秒，從 1970 起）。Linux 讀 /proc；其他平台查不到。heartbeat 和 orphans 共用這一份
+#[cfg(target_os = "linux")]
+pub fn process_start_secs(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let proc_stat = fs::read_to_string("/proc/stat").ok()?;
+    parse_start_secs(&stat, &proc_stat)
+}
+#[cfg(not(target_os = "linux"))]
+pub fn process_start_secs(_pid: u32) -> Option<u64> {
     None
 }
 
@@ -218,6 +245,39 @@ pub fn other_instance_with(work_dir: &Path, name: &str, my_pid: u32, is_asn: imp
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 開始時間_從_proc_算_comm_含括號空白也切得對_讀不到回_none() {
+        let proc_stat = "cpu  1 2 3\nbtime 1800000000\nprocesses 9\n";
+        // 欄位：pid (comm) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice threads itrealvalue starttime …
+        let stat = "4242 (my (odd) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 12345 0 0";
+        assert_eq!(super::parse_start_secs(stat, proc_stat), Some(1_800_000_000 + 123));
+        assert_eq!(super::parse_start_secs("壞的", proc_stat), None);
+        assert_eq!(super::parse_start_secs(stat, "cpu 1\n"), None, "沒有 btime");
+        assert_eq!(super::parse_start_secs("1 (x) S 1", proc_stat), None, "欄位不夠");
+    }
+
+    #[test]
+    fn pid_重用_開始時間晚很多就是不同行程_讀不到維持保守() {
+        use crate::bridge::roster::{same_process, SAME_PROC_TOLERANCE_MS};
+        let session_started_ms = 1_800_000_000_000u64;
+        // 同一個行程：開始時間只到秒（往下取整），一定不晚於 ASN 記下的 session 開始時間
+        assert!(same_process(session_started_ms, Some((session_started_ms / 1000) * 1000)));
+        assert!(SAME_PROC_TOLERANCE_MS >= 2_000, "至少容得下 1 秒精度加開機時間的誤差");
+        // pid 被重用：新行程在 session 開始之後很久才建立
+        assert!(!same_process(session_started_ms, Some(session_started_ms + SAME_PROC_TOLERANCE_MS + 1_000)));
+        // 讀不到開始時間：照舊當作同一個（不因此把活著的視窗當成死掉）
+        assert!(same_process(session_started_ms, None));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_自己這個行程的開始時間讀得到_不晚於現在() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let s = super::process_start_secs(std::process::id()).expect("讀得到自己");
+        assert!(s <= now + 1 && s + 24 * 3600 > now, "{s} vs {now}");
+        assert_eq!(super::process_started_ms(std::process::id()), Some(s * 1000));
+    }
+
     use super::*;
     #[allow(unused_imports)]
     use crate::nowin::NoWindow;
