@@ -187,6 +187,12 @@ fn question_row(line: &str) -> Option<(u32, &str, bool)> {
 }
 
 fn question_box(lines: &[&str]) -> Option<QuestionBox> {
+    // 夥伴視窗有名字時，Claude 會在最底下再畫一條嵌著名字的分隔線（「─── 名字 ─」）：先略過，頁尾才是倒數那一行
+    let mut n = lines.len();
+    while n > 0 && (lines[n - 1].trim().is_empty() || is_rule(lines[n - 1])) {
+        n -= 1;
+    }
+    let lines = &lines[..n];
     let footer = lines.last()?.trim();
     if !footer.starts_with(QUESTION_FOOTER) || !footer.contains("Esc to cancel") {
         return None;
@@ -690,6 +696,17 @@ mod question_box_tests {
     }
     fn labels(s: &ClaudeScreen) -> Vec<(u32, String)> {
         s.options.iter().map(|o| (o.n, o.label.clone())).collect()
+    }
+
+    #[test]
+    fn 單選_最底下多一條嵌著視窗名字的分隔線也認得() {
+        // ASN 開的夥伴都有名字：Claude 在頁尾下面再畫一條「─── 名字 ─」（40家用 實機，#863 第 6 項）
+        let named = format!("{}────────── wake-test3 ─\n", single());
+        let s = classify(&named).expect("帶名字線的選項框");
+        assert_eq!(s.kind, ClaudeScreenKind::Question);
+        assert_eq!(labels(&s), vec![(1, "紅".to_string()), (2, "綠".to_string()), (3, "藍".to_string())]);
+        let t = phone_text(&named).expect("手機看得到題目");
+        assert!(t.text.contains("你喜歡哪種顏色？") && !t.text.contains("wake-test3"), "{}", t.text);
     }
 
     #[test]
