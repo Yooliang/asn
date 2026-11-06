@@ -55,6 +55,8 @@ pub struct BridgeSettings {
     pub auto_resume_off: bool,
     /// 使用者關掉了「夥伴共用同一個終端服務」（#868）。預設是開的，所以記「關」。啟動時讀一次，改了要重開 ASN 才生效
     pub term_server_off: bool,
+    /// Linux 等其他平台：本人打開了「夥伴共用同一個終端服務」。那邊預設關，所以記「開」（0.2.9）
+    pub term_server_on: bool,
     /// 使用者關掉了「夥伴卡住時跳提示」（todo-next-162）。預設是開的，所以記「關」
     pub screen_watch_off: bool,
     /// 使用者關掉了「權限框傳到手機」（#853）。預設是開的，所以記「關」
@@ -64,6 +66,11 @@ pub struct BridgeSettings {
 pub fn settings_path(data_dir: &Path) -> PathBuf {
     data_dir.join("bridge.json")
 }
+/// 這台有沒有「夥伴共用終端服務」可用：Windows 用安裝檔附帶的 WezTerm；其他平台看 PATH 上找不找得到 wezterm（不跳提示、只查檔案）
+pub fn term_server_supported() -> bool {
+    cfg!(windows) || crate::launch::wezterm::locate(&crate::launch::wezterm::RealFs).is_ok()
+}
+
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
     // 內建收發室固定開啟（小良哥 10-24：預設且不可關閉）；檔案缺少、損壞、寫 false 都一樣
     BridgeSettings { enabled: true, ..read_settings_raw(data_dir) }
@@ -72,10 +79,10 @@ fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off") }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off") }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -329,8 +336,10 @@ pub struct Status {
     pub auto_resume: bool,
     /// 設定：夥伴共用同一個終端服務（設定頁的開關現在的值）
     pub term_server: bool,
-    /// 這個平台有沒有「夥伴共用終端服務」（自帶終端目前只打包 Windows）；沒有就不顯示開關
+    /// 這個平台有沒有「夥伴共用終端服務」：Windows 用附帶的；Linux 要 PATH 上找得到 wezterm。沒有就不顯示開關
     pub term_server_supported: bool,
+    /// Linux 上找不到 wezterm：設定頁說一句怎麼裝（Windows 一律 false）
+    pub term_server_missing: bool,
     /// 這次啟動有沒有在用共用的終端服務。和 `term_server` 不同＝改了還沒生效，要重開 ASN
     pub term_server_active: bool,
     /// 被系統設定固定關著（環境變數），設定頁不能改
@@ -383,7 +392,7 @@ impl Manager {
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, term_server: !s.term_server_off, term_server_supported: cfg!(windows), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -445,6 +454,7 @@ impl Manager {
         Ok(self.status())
     }
 
+    /// （畫面用）
     /// 打開／關閉「夥伴共用同一個終端服務」（#868）。只存檔：開關啟動時讀一次，改了要重開 ASN 才生效，
     /// 已開著的夥伴不會被搬動、也不會被關掉（執行中的終端服務照舊管它們）
     pub fn set_term_server(&self, on: bool) -> Result<Status, String> {
@@ -453,6 +463,7 @@ impl Manager {
         }
         let mut s = read_settings(&self.data_dir);
         s.term_server_off = !on;
+        s.term_server_on = on;
         write_settings(&self.data_dir, s)?;
         Ok(self.status())
     }

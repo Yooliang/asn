@@ -3044,7 +3044,13 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
     // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
-    let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
+    let (env_wez, env_mux) = (std::env::var(super::win_term::ENV_WEZTERM).ok(), std::env::var(super::win_term::ENV_MUX).ok());
+    // Linux 等其他平台：預設關，本人在設定頁打開、而且 PATH 上找得到 wezterm 才開（0.2.9）
+    let (wez, mux) = if cfg!(windows) {
+        super::win_term::switches_from(env_wez.as_deref(), env_mux.as_deref())
+    } else {
+        super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), crate::bridge::read_settings(data_dir).term_server_on, wezterm::locate(&wezterm::RealFs).is_ok())
+    };
     // #868：設定頁的「伺服器終端」開關。環境變數 0 優先；使用者關掉了就不用。啟動時讀一次，執行中不變（改了要重開 ASN 才生效，已開著的夥伴不會被搬）
     let (wanted, locked) = super::win_term::term_server_wanted(std::env::var(super::win_term::ENV_MUX).ok().as_deref(), crate::bridge::read_settings(data_dir).term_server_off);
     let mux = mux && wanted;

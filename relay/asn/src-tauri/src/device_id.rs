@@ -19,6 +19,14 @@ const TRUST_FILE: &str = "device_trust.json";
 /// 指紋長度（位元組）
 const FINGERPRINT_BYTES: usize = 10;
 pub const SCOPE_VIEW: &str = "view";
+/// 這台還不能讓別台看畫面（Linux：設備私鑰還沒有系統金鑰庫保護，0.2.9 接上 Secret Service 前不開）
+pub const NOT_VIEWABLE_HERE: &str = "這台目前不能讓別台看畫面";
+
+/// 這台能不能被別台看：只有 Windows（設備私鑰經 DPAPI 保護）。其他平台在接上系統金鑰庫之前一律不行
+pub fn can_be_viewed_here() -> bool {
+    cfg!(windows)
+}
+
 pub const KEY_CHANGED: &str = "這台電腦的金鑰變了，可能是重裝過。請先在這裡撤銷，再重新配對";
 
 pub struct DeviceKey {
@@ -387,6 +395,10 @@ pub mod live {
             relay.api_signed("device_pair_decide", Some(json!({ "id": id, "decision": "reject" })), Some(token)).await?;
             return Ok(());
         }
+        // 確認＝記下「對方可以看我」：這台還不能被看就不確認（後台和本機都不動）
+        if !can_be_viewed_here() {
+            return Err(NOT_VIEWABLE_HERE.to_string());
+        }
         let k = key(dir)?;
         let me_pub = k.public_b64();
         let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
@@ -475,6 +487,20 @@ mod tests {
         let f = src.split("fn write_private(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(f.find("opts.mode(0o600)").unwrap() < f.find("opts.open(&tmp)").unwrap(), "先定權限再建檔");
         assert!(!f.contains("set_permissions"), "不是事後改權限");
+    }
+
+    #[test]
+    fn 守門_還不能被看的平台_確認配對前就拒絕_被看的背景也不啟動() {
+        assert_eq!(can_be_viewed_here(), cfg!(windows), "只有 Windows");
+        let src = include_str!("device_id.rs");
+        let decide = src.split("pub async fn decide(").nth(1).unwrap();
+        let guard = decide.find("if !can_be_viewed_here()").expect("確認前要先查");
+        assert!(guard < decide.find("device_pair_decide\", Some(json!({ \"id\": id, \"decision\": \"confirm\"").unwrap(), "後台收到確認之前就擋");
+        assert!(guard < decide.find(".grant(").unwrap(), "本機記下權限之前就擋");
+        let lib = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+        let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller");
+        let first = poller.split("tauri::async_runtime::spawn").next().unwrap();
+        assert!(first.contains("if !device_id::can_be_viewed_here()"), "被看的背景在還不能被看的平台不啟動");
     }
 
     #[test]

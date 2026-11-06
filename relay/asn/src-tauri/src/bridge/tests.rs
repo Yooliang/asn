@@ -2487,7 +2487,8 @@ fn 伺服器終端設定_只存檔_狀態帶出這次啟動實際有沒有在用
     crate::launch::win_term::set_term_server_state(true, false);
     let s = m.status();
     assert!(s.term_server && s.term_server_active && !s.term_server_locked);
-    assert_eq!(s.term_server_supported, cfg!(windows));
+    assert_eq!(s.term_server_supported, super::term_server_supported());
+    assert_eq!(s.term_server_missing, !s.term_server_supported, "Linux 沒裝 wezterm 才要說怎麼裝");
     // 關掉：存檔、設定頁的值變了，但這次啟動還在用（改了要重開才生效；執行中的服務沒被動）
     let s = m.set_term_server(false).unwrap();
     assert!(!s.term_server && s.term_server_active, "設定是關，這次仍在用：畫面據此提示重開");
