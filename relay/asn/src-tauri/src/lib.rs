@@ -54,6 +54,8 @@ mod device_id;
 mod view_handshake;
 #[cfg(desktop)]
 mod view_stream;
+#[cfg(desktop)]
+mod view_seen;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -925,7 +927,11 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
             for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
                 let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else { continue };
                 let now_s = (auth::now_ms() / 1000) as i64;
-                match view_stream::accept_request(&row, &me_node, &trust, &view_handshake::HelloNotReady, &key, now_s) {
+                // 同一筆只能接受一次：驗章前先查，驗過、回覆接受前先記下；記不下來就拒絕（見 view_seen）
+                let verified = view_seen::check_unseen(&data_dir, &id, now_s)
+                    .and_then(|()| view_stream::accept_request(&row, &me_node, &trust, &view_handshake::HelloNotReady, &key, now_s))
+                    .and_then(|ok| view_seen::record(&data_dir, &id, ok.0.expires_s, now_s).map(|()| ok));
+                match verified {
                     Err(_) => {
                         let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                     }
