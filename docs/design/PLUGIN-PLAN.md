@@ -1,13 +1,13 @@
-# 插件化完整實作計畫（0.2.18～0.2.24）
+# 插件化完整實作計畫（0.2.18～0.2.27）
 
-> **狀態：計畫文件，不改程式。** 交兩位審查者審；審過、待決問題拍板後，才依 #935 一版一版開工。
+> **狀態：計畫文件，不改程式。** 已依兩位審查者意見修訂（第二版）；待決問題拍板後，才依 #935 一版一版開工。版本號因拆版順延，新版本表見 §10。
 >
 > 依據：
 > - 設計討論 `docs/design/PLUGIN-ARCH-DISCUSSION.md`（PR #894，已定案採**方案 B：自建輕量插件邊界**，DeepSeek Harness 只當參考）。
 > - 版本切法：issue #935。
 > - 運行方式與登入：#931（開新夥伴「運行」四選項）、#933（0.2.16 裝原生 CLI）、#934（0.2.17 登入改經 pi）。
 >
-> 程式對照基準：`origin/main` 的 `812c982e`（2026-11-06）。**注意 main 當時還沒有 0.2.9 Linux 終端服務與 0.2.11 FCM 的程式**（`relay/asn/package.json` 版本字串仍是 0.2.6，Rust 端搜不到 FCM），所以 0.2.22、0.2.23 兩節裡對那兩塊的描述是「依排程推斷」，開工前要用屆時的 main 重對一次。
+> 程式對照基準：`origin/main` 的 `812c982e`（2026-11-06）。**注意 main 當時還沒有 0.2.9 Linux 終端服務與 0.2.11 FCM 的程式**（`relay/asn/package.json` 版本字串仍是 0.2.6，Rust 端搜不到 FCM），所以 0.2.25、0.2.26 兩節裡對那兩塊的描述是「依排程推斷」，開工前要用屆時的 main 重對一次。
 >
 > 出處格式：`檔案:行號`，路徑省略 `relay/asn/` 前綴者會寫明；行號都是上述基準的行號，之後會漂移。標「（推斷）」的是沒能在程式裡查實的地方。
 
@@ -26,7 +26,7 @@
 
 - 不做「使用者自己下載第三方插件」。這裡的「插件」指**編進 ASN 的內建模組＋穩定介面**，不是動態載入外部程式碼。要不要開放外部載入，列為待決問題（§9），本計畫不做。
 - 不採用 Harness／Cordis 當底層（#894 已決）。
-- 不重寫、不搬動寄信核心與終端服務核心。
+- 不重寫寄信核心與終端服務核心的**行為**。核心**行為**不動、核心**檔案**會被搬動：抽各家分支必然改到 `term.rs`（基準 6687 行）等核心檔案，不能說「核心不動」。每一次搬動都要有「行為不變」的證明（§5.0、§5.6）。
 - 不改後台（Supabase）協定，不改信件格式。
 - 不順手清理無關的舊程式（例如 `term.rs` 六千多行的拆檔），除非該版明確要搬的部分剛好在裡面。
 
@@ -41,6 +41,15 @@
 7. 每版附**守門測試**：插件介面拿不到金鑰、繞不過權限檢查（具體寫法見各版）。
 
 > 安全面在這份文件只寫原則；實作時的威脅分析走非公開管道，不寫進公開倉庫。
+
+### 1.4 安全原則（原則級；具體威脅分析不寫在這裡）
+
+1. 核心對適配回傳的內容**一律再驗證**，不因為它來自內建模組就信任。
+2. 按鍵型別**嚴格限縮**：只收白名單內的鍵，其餘一律丟棄並留記錄。
+3. 適配的結果**不能直接成為「允許」**：任何允許都要再經核心的檢查與（需要時）本人的回答。
+4. 適配出錯、逾時、回傳看不懂的東西，一律**退回「需要本人」**，不送鍵、不放行。
+5. 記錄**寫入前遮蔽敏感資訊**；適配提供的字串進記錄前同樣處理。
+6. **安裝與登入的遠端觸發**（手機替電腦裝 CLI、登入）要有本人的簽章，並取得目標電腦的許可，不能由信件單獨驅動。
 
 ---
 
@@ -120,10 +129,35 @@
 type RunKind = 'asn-term-native' | 'asn-term-pi' | 'acp-channel' | 'raw-cli-window'
 ```
 
+#### 2.3.1 四種運行方式各由哪個介面方法、哪一版承接
+
+審查指出第一版對其中三種寫得模糊，這裡逐一寫清楚。「承接」＝該運行方式在該廠商身上，由適配的哪個方法描述、在哪一版搬入。
+
+| 運行方式 | 介面方法 | 承接版本（依廠商） | 說明 |
+|---|---|---|---|
+| **asn終端（原生 cli）** | `launch_plan(AsnTermNative, …)` 描述啟動；`classify_screen`／`answer_keys` 描述畫面與答案；`run_avail` 宣告能不能用 | agy 0.2.19；Grok、Codex 0.2.20；Claude 0.2.22 | 現況是兩條不同路徑：Claude／Codex／pi 走 `win_term`＋mux，agy／grok 走 `TermService`，且 `resolve_command`（`term.rs:2010`）白名單只認 agy 與 grok。#931 要 Claude 也開進終端服務，**這是行為改變**，不屬於「行為不變」的搬遷版；由 #931 自己的版本（0.2.7）處理白名單擴充，本計畫的 0.2.22 只負責在 Claude 適配裡**宣告**這種運行方式的狀態並沿用屆時的白名單規則 |
+| **asn終端（pi shell）** | `pi_route()` 回傳「這家廠商經 pi 跑時對應哪個提供者與模型」（資料，寫在 manifest）；`launch_plan(AsnTermPi, …)` 描述啟動；`run_avail` 宣告可用與否 | 0.2.19 先在 agy 宣告「不支援」；pi 本身與各家的對應在 0.2.21 | 第一版介面沒有「廠商對應 pi 提供者」這個欄位，這次補上。與 #934（登入改經 pi）同一個資料來源 |
+| **acp通道（無介面）** | `acp_driver()` 回傳既有 `Driver`；`launch_plan(AcpChannel, …)` 描述啟動參數 | agy 0.2.19；Grok 0.2.20；Claude 不提供（manifest 宣告「不支援」） | 核心已有的 `Driver`／`Guard` 不動，適配只是登記它 |
+| **原始 cli 視窗** | **取決於 Q3 的定義（待決，見下）** | 見下表 | 定義尚待小良哥拍板 |
+
+**「原始 cli 視窗」的兩種解讀（待決，Q3）**
+
+| | 解讀 ①：只說明，使用者自己開 | 解讀 ②：ASN 開的普通視窗，不進終端服務 |
+|---|---|---|
+| 意思 | ASN 只顯示說明；使用者自己在任一視窗啟動 CLI，再用「接進收發室」（`selfWindowRegister`）接入。現行 `runOptions` 的 `self`（`model-catalog.mjs:82`）就是這個 | ASN 幫忙開視窗，但不交給終端服務託管，也就是現行 `win_term` 失敗後的退路（`WIN_TERM_FALLBACK`，`win_term.rs:11`、`local.rs:297` `start_window_windows`／`:640` `start_window_unix`）升級成一個使用者可選的獨立選項 |
+| 介面方法 | 不需要 `launch_plan`；用 `adopt_hint()` 辨認「這是不是我家程式」＋ manifest 的說明文字 | `launch_plan(RawCliWindow, …)` 回傳 argv，開窗仍由核心既有的 `start_window_*` 執行（0.2.26 起經 `PlatformHost::open_window`） |
+| 承接版本 | agy 0.2.19（只有說明）；Grok、Codex 0.2.20；pi 0.2.21；Claude 0.2.22（各家的 `adopt_hint`） | 各家隨自己的搬遷版接入 `launch_plan`；開窗統一到 0.2.26 |
+| 改動量 | **小**：每家約 50～100 行（說明文字、`adopt_hint`、測試），不碰開窗程式 | **中**：要把退路邏輯升為可選項；動 `local.rs` 開窗函式、`remote_allowed` 規則（手機遠端能不能開）、開新夥伴 UI 與手機版；每家另需啟動 argv 黃金測試 |
+| 能力限制 | 使用者自己開的視窗，能不能讀畫面、送字取決於「接進收發室」既有能力 | 不進終端服務，因此不能讀畫面、送字、也不能從手機答權限框（推斷，待 #931 定案） |
+| 兩審意見 | 西川：#931 留言已寫明是這個，直接採用 | Gemini：建議定義成這個；自己開而接管屬 `term_adopt` 範疇 |
+
+兩位審查者的解讀不同，所以**不由本文件擅自選定**；`RunKind::RawCliWindow` 先保留，承接方式依小良哥的決定。
+
 ### 2.4 測試現況（「行為不變」的證明要靠這些）
 
 - 前端：`relay/asn/scripts/run-tests.mjs` 跑 `test/*.test.mjs`（`npm test`）。與本計畫直接相關的有 `core.test.mjs`、`partner.test.mjs`（目錄一致性）、`partner-launch-ui.test.mjs`、`launch-*.test.mjs`、`mobile-launch*.test.mjs`、`partner-ops*.test.mjs`。
 - Rust：`npm run test:rust`（`cargo test`）。`launch/term.rs` 內建大量情境測試（`:3300` 起），畫面判斷有真實畫面樣本（例如 `tests/fixtures/term-screens/`，`term.rs:4409` 引用）。
+- **覆蓋缺口（審查指出，以 grep 估計，不是精確數）**：Rust `#[test]` 約 2300 個，其中 `term.rs` 約 152、`claude_screen.rs` 約 30、`perm_remote.rs` 約 7；`bridge/engines/acp_agy.rs`、`acp_worker.rs` 都是 **0**。畫面樣本只有 Claude 與 pi，**沒有 agy、grok、codex**。所以「樣本對照結果相同」這種證明在這三家身上等於空轉，必須先補，見 §5.0。
 - 另有 `launch/auto_resume.rs:489-499` 用 `include_str!` 掃原始碼的守門測試，這是現成的「靜態守門」寫法，本計畫的守門測試沿用。
 
 ---
@@ -135,9 +169,9 @@ type RunKind = 'asn-term-native' | 'asn-term-pi' | 'acp-channel' | 'raw-cli-wind
 | 介面 | 在哪一層 | 版本 | 一句話 |
 |---|---|---|---|
 | `mailTransport`／`desktopExtras` | 前端 JS | 0.2.18 | 把傳輸切成兩份，核心只吃第一份 |
-| `VendorAdapter` | Rust（＋JS 目錄資料） | 0.2.19～0.2.21 | 一家一份：啟動、判斷畫面、答什麼鍵、結束與登入、目錄與設定 |
-| `NotifyChannel` | Rust | 0.2.22 | 送一則通知給本人 |
-| `PlatformHost` | Rust | 0.2.23 | 開窗、程序生命週期、終端服務安裝與接回 |
+| `VendorAdapter` | Rust（＋JS 目錄資料） | 0.2.19～0.2.22 | 一家一份：啟動、判斷畫面、答什麼鍵、結束與登入、安裝與登入參數、目錄與設定 |
+| `NotifyChannel` | Rust | 0.2.25 | 送一則通知給本人 |
+| `PlatformHost` | Rust | 0.2.26 | 開窗、程序生命週期、終端服務安裝與接回 |
 
 打包方式：**全部編進主程式**，用一份 `Registry` 在啟動時登記。不做動態載入。每個插件是一個資料夾＋一份 manifest（JSON，`include_str!` 進 Rust、`import` 進前端，沿用 `agent_tools/catalog.rs:5` 的做法），讓「顯示用的資料」只有一份來源。
 
@@ -156,7 +190,7 @@ type RunKind = 'asn-term-native' | 'asn-term-pi' | 'acp-channel' | 'raw-cli-wind
 ### 4.1 要做的事
 
 1. `ui/lib/tauri.mjs` 的 `transport` 拆成 `mailTransport`（12 個）與 `desktopExtras`（46 個，依 §2.1 的子群分成 `ops/self/launch/term/screen/switch/quota/pi/site` 九個命名空間，扁平方法名保留別名）。
-2. 為了「只改匯入、行為不變」，**暫時保留** `export const transport = { ...mailTransport, ...desktopExtras }` 作為相容出口；各呼叫端分批改成只 import 自己要的那份。相容出口在 0.2.19 發版時刪除。
+2. 為了「只改匯入、行為不變」，**暫時保留** `export const transport = { ...mailTransport, ...desktopExtras }` 作為相容出口；各呼叫端分批改成只 import 自己要的那份。相容出口**在 0.2.18 內自己刪除**（最後一個 commit），不留到後面的版本。
 3. 寫一頁 `docs/design/ASNCORE-TRANSPORT.md`（傳輸契約）並凍結：12 個方法的輸入輸出、錯誤包法（一律 `Error(字串)`，見 `tauri.mjs:5`）、哪些選用（`localWindows`、`avatar` 三個、`sendAttachment`、`history`、`sentStatus`、`readSync`，見 `core.mjs:3` 註解與 `core.mjs:225,423,475,555,602` 的 `typeof` 判斷）、哪些有逾時包裝（`core.mjs:75`）。
 4. `core.mjs:74` 的 `{ ...transport }` 改成**只挑契約內的方法**（白名單），傳多的忽略。
 
@@ -175,7 +209,7 @@ export function pickMailTransport(t) { /* 回只含上面 12 個的新物件 */ 
 // ui/lib/tauri.mjs
 export const mailTransport    = { list, inbox, ack, send, history, /* … 共 12 */ }
 export const desktopExtras    = { ops: {…}, self: {…}, launch: {…}, term: {…}, screen: {…}, switch: {…}, quota: {…}, pi: {…}, site: {…} }
-export const transport        = flat({ mailTransport, desktopExtras })   // 相容出口，0.2.19 刪
+export const transport        = flat({ mailTransport, desktopExtras })   // 相容出口，0.2.18 最後一個 commit 刪
 ```
 
 ### 4.3 動到哪些檔
@@ -198,7 +232,7 @@ export const transport        = flat({ mailTransport, desktopExtras })   // 相�
 3. 逐檔把呼叫端改成明確匯入（先 `chat.js`，再 `list.js`，最後 `m.js`）。
 4. `core.mjs` 改白名單。
 5. 寫 `ASNCORE-TRANSPORT.md`。
-6. 刪相容出口（若審查者要求留一版，順延到 0.2.19）。
+6. 刪相容出口（0.2.18 內完成，不順延）。
 
 ### 4.5 測試與「行為不變」怎麼證明
 
@@ -225,6 +259,18 @@ export const transport        = flat({ mailTransport, desktopExtras })   // 相�
 ---
 
 ## 5. 0.2.19：廠商適配介面（先搬 agy 一家）
+
+### 5.0 0.2.19 之前的前置工作（進版條件）
+
+「行為不變」要能被證明，前提是改版前的行為已經被固定下來。下列工作**先做、先合**，沒做完不開 0.2.19 的搬遷：
+
+1. **補畫面樣本與特徵測試**：取得 agy、grok、codex 的真實畫面樣本（去識別後放進 `tests/fixtures/term-screens/`），為 `classify_prompt`、`argv_for`、`resolve_command`、`remote_allowed` 各寫一份「現況輸出」的黃金表。
+2. **補測試**：`bridge/engines/acp_agy.rs`、`acp_worker.rs` 現況為零測試，先補特徵測試（`agy_args`、授權詢問與逾時、401 自動重開等現行行為）。
+3. **手機答權限框整條鏈**：本文件第一版漏了 `perm_remote`（手機答權限框）。這條鏈（`perm_remote`、`phone_answer_with`、按鍵編碼）剛在 #925 改過，搬遷時最容易回歸，必須有端到端測試，並**納入黃金比對**。
+4. **錯誤與拒絕訊息格式也納入黃金比對**：失敗、拒絕、逾時時給前端與收發室的文字格式，改版前後逐位元組相同，避免相依的字串無聲漂移。
+5. **黃金檔獨立一個 PR、先合**，不與任何搬遷放同一個 PR。審查黃金檔時只看「是否忠實記錄現況」，不混入重構。
+
+> 這一包前置工作本身不改產品行為，可與 0.2.18 平行開發（檔案不重疊）。
 
 ### 5.1 為什麼先搬 agy
 
@@ -261,9 +307,18 @@ pub trait VendorAdapter: Send + Sync {
     fn classify_screen(&self, text: &str) -> ScreenState;
     fn answer_keys(&self, prompt: &PromptView, answer: &Answer) -> Result<Vec<KeyStroke>, String>;
 
-    // ---- 結束與登入 ----
+    // ---- 結束與登入狀態判斷（純函式）----
     fn judge_exit(&self, evidence: &ExitEvidence) -> ExitVerdict;
-    fn judge_login(&self, evidence: &LoginEvidence) -> LoginVerdict;
+    fn judge_login(&self, evidence: &LoginEvidence) -> LoginVerdict;      // 登入失效判定
+
+    // ---- 偵測、安裝、登入（承接 #933、#934；只回計畫與判斷，流程在核心）----
+    fn detect_spec(&self) -> DetectSpec;                                  // 要偵測什麼（資料，對應 agent-tools catalog）
+    fn install_plan(&self, facts: &PlatformFacts) -> Result<InstallPlan, String>;  // 官方來源、版本與完整性檢查要求、步驟描述
+    fn login_plan(&self, run: RunKind, facts: &PlatformFacts) -> Result<LoginPlan, String>;  // 登入引導的參數與預期訊號，不含憑證
+    fn login_verify(&self, evidence: &LoginEvidence) -> LoginVerdict;     // 引導完成後，這些事實算不算登入成功
+    fn pi_route(&self) -> Option<PiRoute> { None }                        // 經 pi 運行時對應的提供者與模型
+    fn run_avail(&self, run: RunKind, facts: &PlatformFacts, remote: bool) -> RunAvail;  // 運行方式×平台×遠端 可不可用
+    fn adopt_hint(&self) -> Option<AdoptHint> { None }                    // 辨認使用者自己開的 CLI（0.2.20 起各家填）
 
     // ---- 信件側（有就回，沒有回 None；不取代既有 Engine/Driver）----
     fn acp_driver(&self, _args: DriverArgs) -> Option<Box<dyn Driver>> { None }
@@ -283,7 +338,24 @@ pub struct KeyStroke(/* 只允許可見字元、數字、方向、Enter、Esc �
 - `ScreenState` 與現有 `ClaudeScreenKind`（`claude_screen.rs:10-27`）、`term.rs` 的 `ScreenPrompt`（`:2270`）、`TermStatus.state`（`:233`）對齊，**第一步是把三種既有回傳型別收成同一個**，不是發明新語意。
 - `answer_keys` 是純函式。現行 `term.rs:1802-1816` 的「重查文字雜湊、只送一個數字鍵不帶 Enter」這套核心檢查**原封不動留在核心**，適配只負責「這個選項號碼對應哪個鍵」（目前 `menu_keys`、`trust_keys`、`encode_key` 在 `term.rs:2293-2339`）。
 - `launch_plan` 回傳的 argv 仍要過核心的 `resolve_command` 同級檢查（執行檔檔名＝該廠商、不含控制字元，`term.rs:2023-2034`），以及 `child_env`／`acp_clean_env`／`codex_child_env`（`engines/mod.rs:163-176`）的環境過濾。**插件只能指名要哪些環境變數名稱，值由核心填；金鑰類一律被核心濾掉。**
-- `judge_exit`／`judge_login` 的 `evidence` 是核心整理好的**事實**（最後輸出、結束碼、錯誤文字），不是檔案或程序。
+- `judge_exit`／`judge_login`／`login_verify` 的 `evidence` 是核心整理好的**事實**（最後輸出、結束碼、錯誤文字），不是檔案或程序。
+
+### 5.2b 安裝、登入、驗證（承接 #933、#934）
+
+審查指出第一版只有 `judge_login`，沒有偵測／安裝／登入／驗證。補法分成兩層，**狀態判定與操作引導明確分開**：
+
+| 層 | 內容 | 放哪 |
+|---|---|---|
+| **適配（純函式與資料）** | `detect_spec`、`install_plan`、`login_plan`、`judge_login`、`login_verify`、`pi_route`、`run_avail` | `vendors/<id>.rs` ＋ manifest |
+| **核心平台層（動手的流程）** | 實際下載、校驗、安裝、開登入視窗、輪詢結果、遠端觸發的簽章與目標電腦許可 | 沿用既有 `agent_tools/{detect,install}.rs`、`agent_setup/{setup,login,claude_install,claude_login,remote,phone,authenticode,net}.rs`；**登入引導流程留在核心平台層** |
+
+與 0.2.16（#933 裝原生 CLI）、0.2.17（#934 登入改經 pi）已落地程式的關係：
+
+- **流程不搬**：`agent_setup/*` 的下載、簽章驗證、開視窗、遠端觸發都留在原地；已發的行為不動。
+- **搬的是判斷與參數**：「這家要裝哪個檔、版本怎麼比」→ `install_plan`／manifest 的 `toolId`（對齊 `shared/agent-tools.catalog.json`，`agent_tools/catalog.rs:5`）；「登入要走哪個子命令、看什麼訊號算成功」→ `login_plan`／`login_verify`；現在散在 `claude_login.rs`、`login_watch.rs`、`acp_policy.rs:449` 的「怎樣算登入失效」→ `judge_login`。
+- **各版接入**：0.2.19 先把方法定義在 trait 上，agy 實作並讓 `agent_tools` 經登記表查詢（agy 已在 catalog）；Grok、Codex 的安裝與登入判斷隨 0.2.20；pi 的 `pi_setup.rs` 與「登入改經 pi」（0.2.17）隨 0.2.21，`pi_route` 在這版有內容；Claude 的 `claude_install.rs`／`claude_login.rs` 判斷隨 0.2.22。
+- 前端 `ui/lib/connect-tools.mjs` 已預留的 `piLogin`（`:57`）在 0.2.21 改讀 manifest 產生的資料。
+- 遠端觸發（手機替電腦安裝、登入）遵守 §1.4 第 6 條：要本人簽章與目標電腦許可，適配不參與這個決定。
 
 ### 5.3 Manifest（資料）
 
@@ -299,10 +371,12 @@ pub struct KeyStroke(/* 只允許可見字元、數字、方向、Enter、Esc �
     "acp-channel":      { "status": "ok",      "why": "" },
     "asn-term-native":  { "status": "noinbox", "why": "可以開在 ASN 的終端裡，但收不到信，只能看畫面、送字" },
     "asn-term-pi":      { "status": "no",      "why": "pi 已不支援 Gemini 訂閱登入" },
-    "raw-cli-window":   { "status": "…" }
+    "raw-cli-window":   { "status": "…" }   // 依 Q3 定案填寫
   },
+  "piRoute": null,             // 經 pi 運行時的提供者與模型；agy 無
+  "install": { }, "login": { }, // 承接 #933／#934 的資料部分（見 §5.2b）
   "models": [ { "id": "gemini-4-argon-high", "label": "…", "runs": ["acp-channel"] } ],
-  "settings": []               // 0.2.21 才有內容
+  "settings": []               // 0.2.24 才有內容
 }
 ```
 
@@ -318,22 +392,24 @@ pub struct KeyStroke(/* 只允許可見字元、數字、方向、Enter、Esc �
 | `bridge/engines/acp_agy.rs`、`acp_models.rs`、`acp_policy.rs`（agy 相關函式） | 函式搬到 `vendors/agy.rs` 或由它轉呼叫；`AgyDriver` 仍實作既有 `Driver` |
 | `bridge/launcher.rs:70-77` | `remote_allowed` 的 gemini 判斷改查登記表 |
 | `ui/lib/model-catalog.mjs`、`shared/launcher-profiles.mjs` | agy（gemini）那一列改由 manifest 產生；其餘四家照舊。`MODEL_CATALOG` 兩份仍並存，一致性測試保留 |
-| `ui/lib/tauri.mjs` | 刪 0.2.18 的相容出口 |
 
 ### 5.5 搬遷步驟
 
 1. 建 `vendors/` 骨架＋空的登記表；`VendorAdapter` trait 與型別。**此時不接任何呼叫點。**
 2. 寫 agy manifest；加測試比對 manifest 衍生的目錄列＝現行 `MODEL_CATALOG` 的 gemini 列（逐欄位相同）。
-3. 把 `argv_for`／`resolve_command` 的 agy 分支改為「問適配，再過同一個核心檢查」；舊分支留到測試全綠後再刪。
+3. 把 `argv_for`／`resolve_command` 的 agy 分支改為「問適配，再過同一個核心檢查」；**不留舊分支並存**：同一個 commit 內把舊分支改為呼叫適配，退路是 revert 該 commit（見 §5.8）。
 4. 把 ACP 的 agy 專屬函式搬進適配檔，`acp.rs` 透過登記表取驅動。
 5. `classify_screen` 先**只實作現況等價物**（agy 終端沒有專屬規則，維持 `Unknown` 或通用提問判斷），不趁機加規則。
 6. 前端目錄那一列改讀 manifest。
-7. 刪舊分支與相容出口。
+7. （新舊並存的處理見 §5.8 與 §9.4 Q5：不用執行期旗標。）
 
 ### 5.6 測試與「行為不變」
 
 - **黃金測試（golden）**：改版前先用現有程式把下列輸出存成固定檔，改版後逐位元組比對——(a) agy 在三種運行方式下的 `launch_plan` argv（含 `--settings` 有／無兩種）；(b) `acp_agy::agy_args`（`:21`）在 `full_access` 真／假的輸出；(c) `parse_agy_models` 對既有樣本的輸出；(d) manifest 產生的目錄列。
-- **畫面樣本回歸**：`tests/fixtures/term-screens/` 內所有樣本，對 `classify_screen("agy", …)` 的結果必須與改版前的 `classify_prompt` 結果相同。
+- **畫面樣本回歸**：§5.0 補齊的 agy、grok、codex 樣本（加上原有 claude、pi 樣本），對 `classify_screen("agy", …)` 的結果必須與改版前的 `classify_prompt` 結果相同。（沒有 §5.0 的樣本，這一條形同空轉，所以前置工作是進版條件。）
+- **錯誤與拒絕訊息**：§5.0 第 4 點的黃金檔逐位元組比對。
+- **手機答權限框**：§5.0 第 3 點的端到端測試必須全綠，含 `perm_remote` 與 `phone_answer_with`。
+- **硬規定**：0.2.20 起每一版在調整 `VendorAdapter` 之前，agy 黃金測試必須先全綠；0.2.19 的 trait 之後**一定會改**（例如 `switch_model`、`adopt_hint` 排在後面版本），文件直接承認這一點，不假裝一次定案。
 - **守門測試（必寫）**：
   - 用 `include_str!` 掃 `vendors/*.rs`，斷言不 `use` 金鑰模組（relay 憑證）、不呼叫 inbox／ack 相關函式、不引入 `WezTerm`／`Pane` 型別。
   - 適配回傳含控制字元或非白名單鍵的 `KeyStroke`／`argv` 時，核心端拒絕並記錄（偽造一個壞適配做測試）。
@@ -349,7 +425,7 @@ pub struct KeyStroke(/* 只允許可見字元、數字、方向、Enter、Esc �
 
 ### 5.8 回退
 
-Rust 與資料都沒有格式變更：revert 即可。保留舊分支到下一版（0.2.20）才刪，作為緊急退路（以 feature flag 或保留函式二選一，見 §9 Q5）。
+Rust 與資料都沒有格式變更：revert 即可。**不使用執行期旗標**切換新舊路徑（旗標會留下沒有新檢查的舊路徑，見 §9.4 Q5）；改為**逐家一個可單獨 revert 的 commit**，0.2.19 就是 agy 這一個 commit 序列。
 
 ### 5.9 預估改動量（推斷）
 
@@ -357,72 +433,76 @@ Rust 與資料都沒有格式變更：revert 即可。保留舊分支到下一�
 
 ---
 
-## 6. 0.2.20：其餘廠商搬進同一介面（Claude、Codex、Grok、pi）
 
-### 6.1 建議順序（一家一個 PR，可個別發版前的內部合併）
+## 6. 0.2.20～0.2.22：其餘廠商搬進同一介面（拆三版）
 
-1. **Grok**：最像 agy（ACP＋自帶終端），規則已有（`term.rs:2227-2245`）。
-2. **Codex**：信件側引擎完整（`bridge/engines/codex*.rs`），畫面判斷幾乎沒有。
-3. **pi**：`classify_prompt_for` 的「→」特例（`term.rs:2397-2414`）、`pi_term.rs`、`pi_setup.rs`、`pi_models.rs`；與 0.2.17 的登入改版相鄰，**必須等 0.2.17 發完再動**，避免兩邊同時改 pi。
-4. **Claude 最後**：畫面判斷最完整（`claude_screen.rs` 842 行）、牽涉帳號切換、額度、登入失效偵測、換模型、子代理與背景工作查詢，是風險最大的一家。
+兩位審查者都指出第一版把四家放在 0.2.20 一版太大：文件自己估新增約 1500～2500 行、搬動約 3000 行，且動 `term.rs`（基準 6687 行）與 `claude_screen.rs`（842 行），出問題時很難定位。領隊已定：**拆成三版，Claude 最後**。
+
+### 6.1 三版切法與順序
+
+| 版本 | 內容 | 為什麼這個順序 |
+|---|---|---|
+| **0.2.20** | **Grok＋Codex** | Grok 最像 agy（ACP＋自帶終端），規則已有（`term.rs:2227-2245`）；Codex 信件側引擎完整（`bridge/engines/codex*.rs`），畫面判斷幾乎沒有。兩家都不依賴帳務與登入重構，風險最低 |
+| **0.2.21** | **pi** | `classify_prompt_for` 的「→」特例（`term.rs:2397-2414`）、`pi_term.rs`、`pi_setup.rs`、`pi_models.rs`；與 0.2.17 的登入改版相鄰，**必須等 0.2.17 發完再動**，避免兩邊同時改 pi。`pi_route` 與 #934 的承接在這版（§5.2b） |
+| **0.2.22** | **Claude（最後）** | 畫面判斷最完整（`claude_screen.rs` 842 行）、牽涉帳號切換、額度、登入失效偵測、換模型、子代理與背景工作查詢，風險最大、畫面判斷風險最高。放最後，前面兩版已把介面磨過 |
+
+每家一個 commit 序列，可單獨 revert。版本號不用 0.2.20.1，直接順延，#935 同步更新。
 
 ### 6.2 各家要處理的重點
 
 | 廠商 | 重點 |
 |---|---|
-| Grok | `grok_input_box`／`grok_processing`（閒置判斷）→ `classify_screen` 的 `Idle`／`Busy`；`grok_adopt.rs`（接手既有 grok 對話） |
-| Codex | 啟動參數（`launcher-profiles.mjs:44-56`、`profiles.rs`）；`codex_ops.rs` 的關閉與換模型目前標「未實機驗證」（`engines/mod.rs:17`），**搬遷時不補功能、不轉正**，維持現狀 |
-| pi | 啟動需帶擴充與提供者／模型（`LocalLaunchReq.pi_provider/pi_model`，`launch/mod.rs:73-77`）；「經 pi」同時是運行方式 `asn-term-pi` 與廠商 `pi` 本身，manifest 要能表達「channelOnly」（`model-catalog.mjs:58`） |
-| Claude | `claude_screen.rs` 整檔搬到 `vendors/claude/screen.rs`（它本來就是純函式，連測試一起搬）；`launch/switch.rs`、`subagents.rs`、`tasks.rs` 屬 Claude 專屬的視窗資訊，歸 `vendors/claude/`；登入失效的 `login_watch.rs` 屬核心偵測（讀紀錄檔），只把「哪種錯誤算失效」這份判斷交給適配的 `judge_login` |
+| Grok（0.2.20） | `grok_input_box`／`grok_processing`（閒置判斷）→ `classify_screen` 的 `Idle`／`Busy`；`grok_adopt.rs`（接手既有 grok 對話）→ `adopt_hint`；ACP 驅動登記；安裝與登入判斷 |
+| Codex（0.2.20） | 啟動參數（`launcher-profiles.mjs:44-56`、`profiles.rs`）；`codex_ops.rs` 的關閉與換模型目前標「未實機驗證」（`engines/mod.rs:17`），**搬遷時不補功能、不轉正**，維持現狀；安裝與登入判斷 |
+| pi（0.2.21） | 啟動需帶擴充與提供者／模型（`LocalLaunchReq.pi_provider/pi_model`，`launch/mod.rs:73-77`）；「經 pi」同時是運行方式 `asn-term-pi` 與廠商 `pi` 本身，manifest 要能表達「channelOnly」（`model-catalog.mjs:58`）；`pi_route` 有內容；`pi_setup.rs` 的判斷與參數、`connect-tools.mjs` 的 `piLogin`（§5.2b） |
+| Claude（0.2.22） | `claude_screen.rs` 整檔搬到 `vendors/claude/screen.rs`（它本來就是純函式，連測試一起搬）；`launch/switch.rs`、`subagents.rs`、`tasks.rs` 屬 Claude 專屬的視窗資訊，歸 `vendors/claude/`；登入失效的 `login_watch.rs` 屬核心偵測（讀紀錄檔），只把「哪種錯誤算失效」這份判斷交給適配的 `judge_login`；`claude_install.rs`／`claude_login.rs` 流程留核心、判斷與參數進適配。asn終端（原生 cli）的白名單擴充由 #931 處理（§2.3.1） |
 
 ### 6.3 要補進介面的東西（在 0.2.19 後才看得出缺什麼）
 
 - `ModelSwitch`：換模型的方式因家而異（Claude 關了重開、pi 走檔案管道 `pi_control.rs`、agy 原生切換 `Driver::set_model`，`acp_worker.rs:104`）。預計加 `fn switch_model(&self, …) -> SwitchPlan`，**同樣只回計畫，由核心執行**。
-- `AdoptHint`：接手使用者自己開的 CLI（`term_adopt.rs`、`grok_adopt.rs`、`pi_adopt.rs`）要辨認「這是不是我家的程式」。
-- 若 0.2.19 的 trait 要大改，**允許在 0.2.20 內調整**，但調整前先回頭確認 agy 的黃金測試仍全綠。
+- `AdoptHint` 的內容：接手使用者自己開的 CLI（`term_adopt.rs`、`grok_adopt.rs`、`pi_adopt.rs`）要辨認「這是不是我家的程式」（trait 上的方法簽名在 §5.2 已先放，0.2.20 起各家填實作）。
+- **0.2.19 的 trait 之後一定會改**。規定：**每次調整 trait 前，agy 黃金測試必須先全綠**（硬規定，同 §5.6），調整與搬遷分開 commit。
 
 ### 6.4 動到哪些檔
 
-`vendors/{claude,codex,grok,pi}.rs`（新）；`launch/term.rs`（刪各家分支，是最大改動；建議每家一個 commit）；`launch/claude_screen.rs`（搬走）；`launch/{switch,subagents,tasks}.rs`（Claude 專屬部分搬走）；`bridge/launcher.rs`、`bridge/partner_ops.rs`、`launch/console.rs:115-129`、`launch/local.rs`（`launch_model_plan`）、`launch/profiles.rs`（預設啟動設定改由適配提供）；`ui/lib/model-catalog.mjs`、`shared/launcher-profiles.mjs`（`MODEL_CATALOG` 全改由 manifest 產生，**兩份合併為一份來源**，`partner.test.mjs:9` 的比對測試改成比對 manifest）。
+`vendors/{grok,codex,pi,claude}.rs`（新，分三版）；`launch/term.rs`（刪各家分支，是最大改動；每家一個 commit）；`launch/claude_screen.rs`（搬走）；`launch/{switch,subagents,tasks}.rs`（Claude 專屬部分搬走）；`bridge/launcher.rs`、`bridge/partner_ops.rs`、`launch/console.rs:115-129`、`launch/local.rs`（`launch_model_plan`）、`launch/profiles.rs`（預設啟動設定改由適配提供）；`ui/lib/model-catalog.mjs`、`shared/launcher-profiles.mjs`（`MODEL_CATALOG` 逐家改由 manifest 產生；最後一家搬完時，**兩份合併為一份來源**，`partner.test.mjs:9` 的比對測試改成比對 manifest）。
 
 ### 6.5 測試與「行為不變」
 
-- 同 0.2.19 的黃金測試方法，每家各做一份：啟動 argv（各運行方式×有無型號）、畫面樣本→`ScreenState`、答案→鍵序列、目錄列。
+- 同 0.2.19 的黃金測試方法，每家各做一份：啟動 argv（各運行方式×有無型號）、畫面樣本→`ScreenState`、答案→鍵序列、目錄列、錯誤與拒絕訊息格式；§5.0 的前置工作對 grok、codex 已補，pi、claude 原有樣本沿用。
+- 手機答權限框鏈（`perm_remote`）的端到端測試每版都跑；Claude 版（0.2.22）尤其重要。
 - Claude 的 `claude_screen.rs` 既有單元測試**整批隨檔搬移、一個不刪**；搬完前後測試個數相同（用腳本比對 `#[test]` 數量）。
 - 守門測試擴充到所有 `vendors/*.rs`。
 - 全套 `cargo test` ＋ `npm test` ＋ `smoke:ui`。
 
 ### 6.6 實機驗收
 
-每家各一台實機走一遍：開（四種運行方式中該家支援的）→ 收發信 → 權限框／選項框回答（電腦與手機）→ 換模型 → 關閉 → 重開 ASN 認回。Claude 另外加：帳號切換、登入失效通知、額度回報、子代理與背景工作查詢、重開機後自動接回（`auto_resume.rs`）。
+每家各一台實機走一遍：開（四種運行方式中該家支援的）→ 收發信 → 權限框／選項框回答（電腦與手機）→ 換模型 → 關閉 → 重開 ASN 認回。0.2.22 的 Claude 另外加：帳號切換、登入失效通知、額度回報、子代理與背景工作查詢、重開機後自動接回（`auto_resume.rs`）。
 
 ### 6.7 回退
 
-每家一個 commit：可只 revert 出問題的那一家。整版若要退，回 0.2.19（agy 在適配上、其餘舊路徑）仍可運作，因為 0.2.19 的新舊並存設計；因此 0.2.20 發版**前**不得刪掉 0.2.19 的舊分支以外的共用函式（待決 Q5）。
+**不用執行期旗標**。每家一個 commit：可只 revert 出問題的那一家。每一版的新舊路徑不並存（避免舊路徑失去新檢查），所以退路就是 revert 與退回上一版安裝檔；各版不得在同一個 commit 裡同時搬兩家。
 
 ### 6.8 預估改動量（推斷）
 
-最大的一版：新增約 1500～2500 行，搬動約 3000 行（`term.rs` 與 `claude_screen.rs` 為主）。建議 2 位開發員分 Claude 與其他三家平行，約 2 週，驗收需四台以上實機環境。若審查者認為太大，**建議拆成 0.2.20（Grok、Codex）與 0.2.20.1（pi、Claude）**，但這會動 #935 的版本表（待決 Q4）。
+| 版本 | 新增 | 搬動 | 人力與時間 | 驗收 |
+|---|---|---|---|---|
+| 0.2.20 Grok＋Codex | 約 600～900 行 | 約 800～1000 行 | 1～2 人約 1 週 | 兩家實機各一 |
+| 0.2.21 pi | 約 400～700 行 | 約 500～700 行 | 1 人約 1 週 | pi 實機＋0.2.17 登入流程回歸 |
+| 0.2.22 Claude | 約 700～1200 行 | 約 1500 行（`claude_screen.rs` 842 行為主） | 1～2 人約 1.5 週 | Claude 帳號切換等多條支線 |
 
 ---
 
-## 7. 0.2.21：插件自帶設定＋權限框回答鏈（預設拒絕）
+## 7. 0.2.23～0.2.24：權限鏈與插件自帶設定（拆兩版）
 
-### 7.1 要做的事
+第一版把兩件事放同一版：設定 UI 與權限鏈（權限鏈又碰 ACP 守門與 `term.rs`）。西川指出權限鏈在現況下沒有使用者可見價值。領隊已定：**拆成獨立兩版，先權限鏈、後設定**。權限鏈不影響其他版，必要時可排後面。
 
-**A. 插件自帶設定欄位**
-
-1. manifest 的 `settings` 宣告欄位；設定頁（`ui/list.js` 的設定區，現有 `launchPrefsGet/Set` 在 `:437-448`、`launch/prefs.rs` 25 行）與「開新夥伴」第 2 頁**統一從 manifest 產生欄位**，不再為各家各寫一段 UI。
-2. 欄位型別限定：`bool`、`enum`、`string`（有長度與字元限制）、`path`（走既有的資料夾授權清單，不能自由輸入）、`number`（有範圍）。**不提供「密碼／金鑰／權杖」型別**，manifest 驗證器遇到就拒收；字串欄位的值若長得像金鑰也在寫入時被核心擋下（沿用 `acp_policy.rs:323` `redact` 的判斷詞表，細節實作時再定）。
-3. 儲存在各自命名空間下（`launch-prefs.json` 的 `vendors.<id>.*`），插件只讀得到自己那一塊。
-4. 目前散在各處的廠商專屬設定要收進來——例如 pi 的提供者／模型（`LocalLaunchReq`）、Gemini 型號（`launchModelChoices`）、agy 額外參數（`term.rs:571` 的 `AgyArgs`）。
-
-**B. 權限框回答者做成鏈，預設拒絕**
+### 7.1 0.2.23：權限框回答鏈（預設拒絕）
 
 現況（只列事實）：
 
 - ACP：`Guard::ask_permission`（`acp_worker.rs:71`）→ `decide`（`acp_policy.rs:207`，政策判定）→ 需要人時走 `Approvals`（`acp_approvals.rs:94`，等本人回信，逾時走拒絕，見 `:196` 附近 `finish(&id, Answer::Deny)`）。
-- 終端畫面：Claude 的權限框／選項框由本人在電腦（`partner_permission_answer`，`term.rs:2835`）或手機（`phone_answer_with`，`:1787`）按；沒人按就一直停在畫面上，**不會自動送任何鍵**。
+- 終端畫面：Claude 的權限框／選項框由本人在電腦（`partner_permission_answer`，`term.rs:2835`）或手機（`phone_answer_with`，`:1787`；`perm_remote`）按；沒人按就一直停在畫面上，**不會自動送任何鍵**。
 
 新增（行為先與現況等價，再談擴充）：
 
@@ -437,38 +517,36 @@ pub struct ApprovalChain { responders: Vec<Box<dyn ApprovalResponder>>, on_exhau
 
 - 鏈的順序由核心寫死（先政策、後本人）；插件**只能新增排在「本人」之後的觀察者或建議者，不能插到前面自動放行**（待決 Q6）。
 - 沒有任何回應者給出明確答案＝**拒絕**（ACP 路徑）；畫面路徑則維持「不送鍵、維持原提示」，兩者的語意差別在介面註解寫清楚。
-- `Allow` 仍須通過 §3.2 第 2 點的核心檢查才會變成按鍵。
+- `Allow` 仍須通過 §3.2 第 2 點與 §1.4 的核心檢查才會變成按鍵；適配的結果不能直接成為允許。
 
-### 7.2 動到哪些檔
+**動到哪些檔：** `bridge/engines/acp_policy.rs`、`acp_approvals.rs`、`acp_worker.rs`（`Guard` 實作改為走鏈）；`launch/term.rs:1759-1816`（權限檢查呼叫點）。
 
-`vendors/{mod,settings,registry}.rs`；`launch/prefs.rs`、`ui/lib/launch-prefs.mjs`（命名空間）；`ui/list.js` 設定區與開新夥伴對話框（`ui/lib/partner-launch-ui.mjs`、`mobile-launch.mjs`）改為由 manifest 渲染；`bridge/engines/acp_policy.rs`、`acp_approvals.rs`、`acp_worker.rs`（`Guard` 實作改為走鏈）；`launch/term.rs:1759-1816`（權限檢查呼叫點）。
+**測試與「行為不變」：** 把現有 ACP 授權相關測試（`bridge/tests/respond_it.rs`、`engines_it.rs` 內授權情境、`acp_approvals` 單元測試）**原樣跑一遍**；§5.0 的 `perm_remote` 端到端測試與錯誤／拒絕訊息黃金檔必須全綠；新增表格式測試——(政策判定, 本人回答, 逾時) 各種組合的最終結果＝改版前的結果。守門：回應者 panic／逾時＝拒絕；沒有回應者＝拒絕。
 
-### 7.3 測試與「行為不變」
+**實機驗收：** ACP 夥伴（Gemini）觸發一次需要授權的動作：本人手機回「允許」→ 執行；回「拒絕」→ 不執行；放著不回 → 逾時後不執行。Claude 視窗權限框：電腦按、手機按各一次。
 
-- 設定：每個既有設定項寫一筆「舊存檔→新讀法→值相同」的遷移測試（舊 `launch-prefs.json` 不需改格式即可讀，新增命名空間欄位向下相容）。
-- 權限鏈：把現有 ACP 授權相關測試（`bridge/tests/respond_it.rs`、`engines_it.rs` 內授權情境、`acp_approvals` 單元測試）**原樣跑一遍**；新增表格式測試——(政策判定, 本人回答, 逾時) 各種組合的最終結果＝改版前的結果。
-- 守門：manifest 驗證器對「金鑰型欄位」「未知型別」「路徑越出授權清單」各一條拒收測試；回應者 panic／逾時＝拒絕；沒有回應者＝拒絕。
-- 文案檢查：掃 manifest 的所有 `label/why/help`，不得含 `#數字`、`TDengine` 這類內部詞（寫一條簡單的 regex 測試，呼應頁面文案規則）。
+**回退：** revert 即回到直接呼叫舊函式。**預估：** 新增約 400～600 行，1 人約 1 週（推斷）。
 
-### 7.4 實機驗收
+### 7.2 0.2.24：插件自帶設定欄位
 
-- 設定頁每個廠商欄位：改、存、重開 ASN 仍在；手機開新夥伴看到同樣欄位。
-- ACP 夥伴（Gemini）觸發一次需要授權的動作：本人手機回「允許」→ 執行；回「拒絕」→ 不執行；放著不回 → 逾時後不執行。
-- Claude 視窗權限框：電腦按、手機按各一次。
+1. manifest 的 `settings` 宣告欄位；設定頁（`ui/list.js` 的設定區，現有 `launchPrefsGet/Set` 在 `:437-448`、`launch/prefs.rs` 25 行）與「開新夥伴」第 2 頁**統一從 manifest 產生欄位**，不再為各家各寫一段 UI。
+2. 欄位型別限定：`bool`、`enum`、`string`（有長度與字元限制）、`path`（走既有的資料夾授權清單，不能自由輸入）、`number`（有範圍）。**不提供「密碼／金鑰／權杖」型別**，manifest 驗證器遇到就拒收；字串欄位的值若長得像金鑰也在寫入時被核心擋下（沿用 `acp_policy.rs:323` `redact` 的判斷詞表，細節實作時再定）。
+3. 儲存在各自命名空間下（`launch-prefs.json` 的 `vendors.<id>.*`），插件只讀得到自己那一塊。
+4. 目前散在各處的廠商專屬設定要收進來——例如 pi 的提供者／模型（`LocalLaunchReq`）、Gemini 型號（`launchModelChoices`）、agy 額外參數（`term.rs:571` 的 `AgyArgs`）。
 
-### 7.5 回退
+**動到哪些檔：** `vendors/{mod,settings,registry}.rs`；`launch/prefs.rs`、`ui/lib/launch-prefs.mjs`（命名空間）；`ui/list.js` 設定區與開新夥伴對話框（`ui/lib/partner-launch-ui.mjs`、`mobile-launch.mjs`）改為由 manifest 渲染。
 
-設定是新增命名空間、舊欄位不刪：revert 後舊版仍能讀。權限鏈回退即回到直接呼叫舊函式。
+**測試與「行為不變」：** 每個既有設定項寫一筆「舊存檔→新讀法→值相同」的遷移測試（舊 `launch-prefs.json` 不需改格式即可讀，新增命名空間欄位向下相容）。守門：manifest 驗證器對「金鑰型欄位」「未知型別」「路徑越出授權清單」各一條拒收測試。文案檢查：掃 manifest 的所有 `label/why/help`，不得含 `#數字`、`TDengine` 這類內部詞（呼應頁面文案規則）。
 
-### 7.6 預估改動量（推斷）
+**實機驗收：** 設定頁每個廠商欄位：改、存、重開 ASN 仍在；手機開新夥伴看到同樣欄位。
 
-新增約 800～1200 行（設定框架、渲染、鏈、測試）；UI 改動約 300 行。1～2 位開發員約 1.5 週。
+**回退：** 設定是新增命名空間、舊欄位不刪：revert 後舊版仍能讀。**預估：** 新增約 500～700 行，UI 改動約 300 行，1 人約 1 週（推斷）。
 
 ---
 
-## 8. 0.2.22～0.2.24
+## 8. 0.2.25～0.2.27
 
-### 8.1 0.2.22：通知管道（FCM 搬入）
+### 8.1 0.2.25：通知管道（FCM 搬入）
 
 **要做的事：** 抽 `NotifyChannel`，把門鈴後的「通知本人」收進去：Firebase 推播（0.2.11）、系統通知、門鈴延伸。
 
@@ -491,19 +569,19 @@ pub struct Notification { pub kind: NoticeKind, pub title: String, pub deep_link
 
 - `Notification` **不含信件內文與發信者原文**（門鈴原則：只告知有事，不帶內容；內文仍由收件端用金鑰拉取）。
 - 通知管道**拿不到金鑰**；FCM 的伺服器端權杖不進這一層（待決 Q7：device token 的存放位置，要由核心代管）。
-- 設定欄位走 0.2.21 的 manifest（開關、靜音時段）。
+- 設定欄位走 0.2.24 的 manifest（開關、靜音時段）。
 
 動到的檔（預估）：`src-tauri/src/notify/{mod,fcm,system}.rs`（新）；0.2.11 的 FCM 實作搬入；呼叫點（目前散在 `bell.rs` 之後與 `bridge/core.rs` 的通知寄送，需開工時盤點）；Android 外殼（`src-tauri/gen/android/` 與 `android.rs`）。
 
 測試與行為不變：搬入前後對同一組事件（有新信、被叫醒、登入失效通知等）斷言送出的通知清單相同（用假管道記錄）；守門測試——`Notification` 型別不含內文欄位（編譯期保證），管道實作不引用金鑰模組。實機：手機 App 關著收到推播並點開到對的畫面；電腦收系統通知。回退：revert（FCM 回到 0.2.11 的位置）。預估：新增 300～500 行、搬動 400 行（推斷），1 位開發員約 1 週。
 
-### 8.2 0.2.23：平台介面（Linux 搬入）
+### 8.2 0.2.26：平台介面（Linux 搬入）
 
 **要做的事：** 抽 `PlatformHost`，統一 Windows／Linux（未來 macOS）的：開窗、程序生命週期、終端服務的安裝與接回。
 
 現況（基準 main）：
 
-- Windows 開窗：`launch/local.rs:297`（`start_window_windows`）、`:581`（`start_console_window_windows`）；`launch/win_term.rs`（`WinTermHost` trait `:114`）、`launch/pi_term.rs`（`PiTermHost` trait `:15`）：**兩個長得很像的 trait 並存**，0.2.23 合併成一個。
+- Windows 開窗：`launch/local.rs:297`（`start_window_windows`）、`:581`（`start_console_window_windows`）；`launch/win_term.rs`（`WinTermHost` trait `:114`）、`launch/pi_term.rs`（`PiTermHost` trait `:15`）：**兩個長得很像的 trait 並存**，0.2.26 合併成一個。
 - Unix 開窗：`local.rs:640`（`start_window_unix`）、`:674`（`pick_linux_terminal`）。
 - 終端服務（WezTerm mux）：`launch/mux.rs`、`wezterm.rs`、`mux_watch.rs`、`term_live_mux.rs`，整片用 `#[cfg(desktop)]` 圈起來（`launch/mod.rs:25-38`）。
 - Linux 終端服務（0.2.9）：main 上尚未見到完整實作；已有 `test/launch-linux.test.mjs`、`docs/design/LINUX-HEADLESS.md`、`.github/workflows/asn-linux-build.yml`。開工前以屆時 main 為準。
@@ -524,9 +602,9 @@ pub trait PlatformHost: Send + Sync {
 
 測試與行為不變：Windows 既有 `win_term.rs`／`pi_term.rs` 測試（含 `FakeHost`）合併後數量不減；新增 Linux 版對同一組 `WindowSpec` 的 argv 黃金測試；守門——`PlatformHost` 簽名不回傳窗格或程序控制代碼。實機：Windows 工作機、Linux 一台（有桌面）、Linux 無桌面（若 0.2.9 含）各走：開夥伴→關 ASN→重開認回→停止。回退：revert；Windows 路徑維持原函式至下一版再刪。預估：新增 400～700 行、搬動約 1200 行（推斷），1～2 位開發員約 1.5 週。
 
-> **衝突提醒**：0.2.23 與 0.2.19／0.2.20 都會動 `term.rs`（6687 行）與 `local.rs`。三版不可同時進行；見 §9.2。
+> **衝突提醒**：0.2.26 與 0.2.19～0.2.22 都會動 `term.rs`（6687 行）與 `local.rs`。這幾版不可同時進行；見 §9.2。
 
-### 8.3 0.2.24（視需要）：UI 套件
+### 8.3 0.2.27（視需要）：UI 套件
 
 **要做的事：** 把 ChatPane、Markdown、群組畫面變成有明確匯入出口的套件（現在是 `ui/lib/` 下約 131 個平鋪的 `.mjs`）。
 
@@ -543,56 +621,69 @@ pub trait PlatformHost: Send + Sync {
 
 ```
 0.2.16 (#933 裝原生 CLI) ─┐
-0.2.17 (#934 登入改經 pi) ─┼─► 之後的適配要涵蓋它們新增的 install/login 流程
+0.2.17 (#934 登入改經 pi) ─┼─► 適配介面的 install/login 方法承接它們（§5.2b）；0.2.21 的 pi 必須等 0.2.17 發完
                           │
-0.2.18 transport 拆分 ────┴──► 0.2.19 agy ──► 0.2.20 其餘廠商 ──► 0.2.21 設定＋權限鏈
-                                      │                               │
-                                      └──────────────► 0.2.22 通知 ◄──┘（要用 0.2.21 的設定欄位；FCM 本身獨立）
-                                      └──────────────► 0.2.23 平台（與 0.2.19/20 同動 term.rs）
-                                                                      └──► 0.2.24 UI 套件（視需要）
+前置工作（§5.0 黃金檔，獨立 PR，與 0.2.18 平行）──┐
+                                                  ▼
+0.2.18 transport 拆分 ──► 0.2.19 agy ──► 0.2.20 Grok＋Codex ──► 0.2.21 pi ──► 0.2.22 Claude
+                                                                                │
+                                          0.2.23 權限鏈 ◄───────────────────────┤（碰 ACP 守門與 term.rs，在廠商搬完後）
+                                          0.2.24 插件自帶設定 ◄─────────────────┘（manifest 全數就位後）
+                                                │
+                           0.2.25 通知 ◄────────┘（用 0.2.24 的設定欄位；FCM 本身獨立）
+                           0.2.26 平台（與 0.2.19～0.2.22 同動 term.rs，不可同時）
+                                └──► 0.2.27 UI 套件（視需要）
 ```
 
 ### 9.2 可平行與不可平行
 
 | 組合 | 能否平行 | 理由 |
 |---|---|---|
-| 0.2.18（前端）∥ 0.2.19 的 Rust 骨架與 manifest | **可以**（開發平行，發版仍依序） | 前者只動 `ui/lib/`，後者先動新目錄 `vendors/`，檔案不重疊 |
-| 0.2.19 ∥ #931 開新夥伴改版（分支 `feat/931-launch-copy-remote-bg` 已存在） | **有衝突**：都動 `model-catalog.mjs` 的 `runOptions`／`MODEL_CATALOG`、`mobile-launch*.mjs` | 建議 #931 先發，0.2.19 在其後 rebase |
-| 0.2.20 內四家 | **可以**，Claude 與其他三家分兩人 | 各自的 `vendors/<id>.rs` 不重疊；`term.rs` 刪分支的 commit 要排隊合併 |
-| 0.2.19／0.2.20 ∥ 0.2.23 | **不可以** | 同時大改 `term.rs` 與 `local.rs` |
-| 0.2.21 的設定框架 ∥ 0.2.22 | **部分可以** | 通知管道只依賴設定框架的「型別與儲存」，可在 0.2.21 內先合入框架、0.2.22 再用 |
-| 0.2.22 FCM ∥ 其他 | **可以** | 與廠商適配幾乎無交集 |
+| §5.0 前置工作（黃金檔）∥ 0.2.18 | **可以** | 前置工作只加測試與樣本；0.2.18 只動 `ui/lib/` |
+| 0.2.18（前端）∥ 0.2.19 的 Rust 骨架與 manifest | **可以**（開發平行，發版仍依序）；但 0.2.19 搬遷本身必須等 §5.0 的黃金檔先合 | 前者只動 `ui/lib/`，後者先動新目錄 `vendors/`，檔案不重疊 |
+| 0.2.19 ∥ #931 開新夥伴改版（分支 `feat/931-launch-copy-remote-bg` 已存在） | **有衝突**：都動 `model-catalog.mjs` 的 `runOptions`／`MODEL_CATALOG`、`mobile-launch*.mjs` | #931 先發（含 Q10 的文案修正），0.2.19 在其後 rebase |
+| 0.2.20、0.2.21、0.2.22 彼此 | **不平行發版**；開發上 Claude 與其他家可分兩人，但 `term.rs` 刪分支的 commit 要排隊合併 | 各自的 `vendors/<id>.rs` 不重疊；`term.rs` 同檔 |
+| 0.2.19～0.2.22 ∥ 0.2.26 | **不可以** | 同時大改 `term.rs` 與 `local.rs` |
+| 0.2.23（權限鏈） | 在 0.2.22 之後；與設定版無檔案相依，順序可對調 | 碰 ACP 守門與 `term.rs`；無使用者可見價值，必要時可延後 |
+| 0.2.24 的設定框架 ∥ 0.2.25 | **部分可以** | 通知管道只依賴設定框架的「型別與儲存」，可在 0.2.24 內先合入框架、0.2.25 再用 |
+| 0.2.25 FCM ∥ 其他 | **可以** | 與廠商適配幾乎無交集 |
 
 ### 9.3 風險與對策（一般工程風險）
 
 | # | 風險 | 對策 |
 |---|---|---|
-| 1 | 介面定太早，後面版本發現不夠用 | 0.2.19 只搬 agy，0.2.20 明文允許調整 trait；調整的條件是 agy 黃金測試仍全綠。trait 方法盡量回**資料／計畫**，少回行為，日後加欄位不破壞 |
-| 2 | 搬遷時悄悄改了行為（例如畫面判斷的邊界條件） | 每版先做黃金測試（先錄舊行為、再搬、再比對）；搬移與修正**分開 commit**；不順手修 bug（發現的記議題，下版再修） |
-| 3 | `term.rs`／`claude_screen.rs` 檔案巨大，合併衝突頻繁 | 0.2.19／0.2.20 期間凍結其他人對這兩檔的非緊急改動；每家一個小 commit、小 PR；先開 PR 描述宣告「正在搬哪一段」 |
+| 1 | 介面定太早，後面版本發現不夠用 | 0.2.19 只搬 agy；**文件承認 trait 之後一定會改**（`switch_model`、`adopt_hint` 等），規定調整前 agy 黃金測試必須先全綠（硬規定）。trait 方法盡量回**資料／計畫**，少回行為 |
+| 2 | 搬遷時悄悄改了行為（例如畫面判斷的邊界條件） | §5.0 前置工作先把現況固定成黃金檔、獨立 PR 先合；搬移與修正**分開 commit**；不順手修 bug（發現的記議題，下版再修） |
+| 3 | `term.rs`／`claude_screen.rs` 檔案巨大，合併衝突頻繁 | 0.2.19～0.2.22 期間凍結其他人對這兩檔的非緊急改動；每家一個小 commit、小 PR；先開 PR 描述宣告「正在搬哪一段」 |
 | 4 | 兩份目錄資料（JS 與 Rust、前端與 shared）漂移 | 0.2.19 起以 manifest 為唯一來源，兩邊都由它產生或比對；`partner.test.mjs:9` 的一致性測試保留並改為比對 manifest |
 | 5 | 守門測試只是形式，掃字串容易被繞過 | 守門以**型別簽名**為主（適配函式簽名裡根本沒有金鑰、窗格型別），字串掃描為輔；審查清單固定列「新增的適配方法簽名」一項 |
 | 6 | 實機回歸成本高（多廠商×多平台×手機電腦），拖慢發版 | 驗收清單文件化、可分工；每版只驗該版動到的廠商＋一組共通煙霧測試；`smoke:ui` 與 `cargo test` 在 CI 跑 |
 | 7 | 手機與電腦共用核心，改一邊另一邊壞 | 0.2.18 起契約測試同時載入 `m.js` 與 `list.js` 的傳輸物件；每版驗收含手機 |
 | 8 | 還有一批在途功能（#931、0.2.9、0.2.11、0.2.12）同時改這些檔 | §9.2 的排程；每版開工前重對 main，更新本文件的行號與推斷處 |
-| 9 | 版本表被打亂（某版超時、拆版） | 本計畫每版自成一件事、可獨立回退；0.2.20 預先備好拆版方案（§6.8） |
+| 9 | 版本表被打亂（某版超時、拆版） | 本計畫每版自成一件事、可獨立回退；0.2.20～0.2.22 已預先拆三版（§6） |
 | 10 | 畫面判斷規則會隨各家 CLI 版本變動（既有問題） | 不在這輪解決；搬進適配後單家改動範圍縮小，且樣本測試集中，是順帶改善 |
+| 11 | 特徵測試不足，「行為不變」變成空話（審查指出 agy／grok／codex 無畫面樣本、ACP 兩檔零測試、`perm_remote` 未涵蓋） | §5.0 前置工作列為進版條件；黃金檔獨立 PR 先合 |
+| 12 | 安裝與登入的遠端觸發被濫用 | §1.4 第 6 條：要本人簽章與目標電腦許可；適配不參與該決定；流程留核心平台層 |
 
 ### 9.4 待決問題（需要小良哥或領隊拍板）
 
-| # | 問題 | 建議 | 影響版本 |
-|---|---|---|---|
-| Q1 | **「插件」是否永遠只指內建模組？** 要不要保留日後載入外部插件的可能（那會改變安全模型，需另開一輪設計） | 本輪只做內建；介面不為外部載入預留任何動態載入機制，避免誤開後門 | 全部 |
-| Q2 | **0.2.18 要切兩份還是三份？** #935 寫兩份（`mailTransport`／`desktopExtras`）；但「遠端管理」那 7 個（`partnerOp`、`launch`、`launchers`…）既不是信、電腦與手機又都用（手機已另放 `opsTransport`，`m.js:83`） | 維持兩份，`desktopExtras.ops` 命名空間承接；手機的 `opsTransport` 日後與它對齊。若審查者要三份也只是多一個匯出 | 0.2.18 |
-| Q3 | **#931 的「原始 cli 視窗」確切指什麼？** 是「ASN 幫開、但開成一般視窗」（現行 `win_term` 退路），還是「使用者自己開、ASN 只接手」（現行 `runOptions` 的 `self`，`:82`） | 請領隊定義；`RunKind` 的第四個值依此命名與實作 | 0.2.19 起 |
-| Q4 | **0.2.20 是否拆版？** 四家一起（約 2 週、風險集中在 Claude）或拆成 0.2.20（Grok、Codex）＋0.2.20.1（pi、Claude）。這會改 #935 的版本表 | 建議拆；若不拆，至少要 Claude 單獨一個內部里程碑與回退點 | 0.2.20 |
-| Q5 | **新舊並存要留多久？** 每版搬完是否保留舊程式一版當緊急退路（用旗標切換）？代價是重複程式碼與測試 | 建議保留一版、且只在 0.2.19／0.2.20 這兩個動廠商核心路徑的版本；其他版本直接 revert 當退路 | 0.2.19、0.2.20 |
-| Q6 | **權限鏈能不能讓插件排在「本人」前面自動回答？** 例如某家廠商插件想對低風險動作自動允許 | 本輪**不允許**；只允許插件當「建議者」（在畫面上標示建議，最終仍由本人按）。要放寬需另案設計與審查 | 0.2.21 |
-| Q7 | **推播的裝置權杖（FCM token）由誰保管？** 建議核心代管、`NotifyChannel` 只拿「發送」能力 | 同左 | 0.2.22 |
-| Q8 | **0.2.24 做或不做？** 判準見 §8.3 | 先不排，0.2.23 發完再評估 | 0.2.24 |
-| Q9 | **manifest 放哪？** `relay/shared/vendors/*.json`（Node 舊橋 `relay/machine/launcher.mjs` 也能讀）或 `src-tauri` 內。舊橋是否還要維持（`shared/launcher-profiles.mjs` 目前兩邊都在用） | 放 `relay/shared/`；舊橋的存廢另案 | 0.2.19 |
-| Q10 | **manifest 裡 `why` 等畫面文字要不要在 0.2.19 一併改成使用者的話？** 會讓畫面文字有變，違反「行為不變」的字面 | 建議**要改**（#931 已把此列為缺陷），但單獨一個 commit、在發版說明中列明 | 0.2.19 |
-| Q11 | **每版實機驗收的最低配置**：哪幾台、誰操作（Windows 工作機、Linux、手機各一？） | 領隊排；本文件各版「實機驗收」節可直接當清單 | 全部 |
+「兩審意見」欄：**G**＝Gemini 審查（核可＋建議）；**西**＝西川（第二審，要改）。
+
+| # | 問題 | 建議（修訂後） | 兩審意見 | 影響版本 |
+|---|---|---|---|---|
+| Q1 | **「插件」是否永遠只指內建模組？** 要不要保留日後載入外部插件的可能（那會改變安全模型，需另開一輪設計） | 本輪只做內建；介面不為外部載入預留任何動態載入機制，避免誤開後門 | G：堅守內建，不預留動態載入。西：同意（只做內建） | 全部 |
+| Q2 | **0.2.18 要切兩份還是三份？** #935 寫兩份（`mailTransport`／`desktopExtras`）；遠端管理那 7 個既不是信、電腦與手機又都用（手機另放 `opsTransport`，`m.js:83`） | 維持兩份，`desktopExtras.ops` 命名空間承接；手機的 `opsTransport` 日後與它對齊 | G：維持兩份。西：同意兩份 | 0.2.18 |
+| Q3 | **#931 的「原始 cli 視窗」確切指什麼？** 見 §2.3.1 兩種解讀 | **待決（小良哥拍板）。** 兩種解讀各自的承接方式與改動量已寫在 §2.3.1：①只說明、使用者自己開（改動小）；②ASN 開的不進終端服務的普通視窗（改動中） | G：傾向②（ASN 幫開、未經 WezTerm 託管；自開接管屬 `term_adopt`）。西：傾向①（#931 留言已寫明，直接採用）。**兩審不一致** | 0.2.19 起 |
+| Q4 | **0.2.20 是否拆版？** | **已定：拆三版**——0.2.20 Grok＋Codex、0.2.21 pi、0.2.22 Claude（最後）；權限鏈（0.2.23）與設定（0.2.24）各自獨立；版本順延，#935 同步更新 | G：強烈建議拆（Grok/Codex 先行，pi/Claude 隨後）。西：拆三刀，Claude 單獨一版；0.2.21 權限鏈拆出或延後。採三刀 | 0.2.20～0.2.24 |
+| Q5 | **新舊並存要留多久？** | **不用執行期旗標，逐家一個可單獨 revert 的 commit。** 旗標會留下沒有新檢查的舊路徑；退路是 revert 該家的 commit | G：保留一版舊分支作緊急退路（僅 0.2.19、0.2.20）。西：不建議旗標，改逐家 commit。**採西的；G 的目的（緊急退路）由可 revert commit 達成** | 0.2.19～0.2.22 |
+| Q6 | **權限鏈能不能讓插件排在「本人」前面自動回答？** | 本輪**不允許**；只允許插件當「建議者」（在畫面上標示建議，最終仍由本人按）。要放寬需另案設計與審查 | G：絕對不允許，插件只當建議標籤的觀察者。西：同意（不許排在本人前自動放行） | 0.2.23 |
+| Q7 | **推播的裝置權杖（FCM token）由誰保管？** | 核心代管，`NotifyChannel` 只拿「發送」能力 | G：Rust 核心平台層代管。西：同意核心代管 | 0.2.25 |
+| Q8 | **0.2.27（UI 套件）做或不做？** 判準見 §8.3 | 先不排，0.2.26 發完再評估 | G：暫緩，0.2.26 後再評估。西：同意先不排 | 0.2.27 |
+| Q9 | **manifest 放哪？** | 放 `relay/shared/vendors/*.json`，但**manifest 驗證器只留一份**；舊橋存廢另案 | G：放 shared，前後端共享單一來源。西：同意放 shared，驗證器只留一份 | 0.2.19 |
+| Q10 | **manifest 裡 `why` 等畫面文字要不要在 0.2.19 一併改成使用者的話？** | **文案修正不放 0.2.19，跟 #931 走（0.2.7）。** 否則快照不乾淨，也與「行為不變」字面衝突；0.2.19 搬 manifest 時原樣搬 | G：同意在 0.2.19 以獨立 commit 改。西：不要放 0.2.19，交給 #931 先做。**採西的** | 0.2.19（#931 先） |
+| Q11 | **每版實機驗收的最低配置** | Windows 實機 1 台＋Android 手機 1 支；0.2.26 平台版再納入 Linux 實機 1 台（有桌面）；各版「實機驗收」節可直接當清單，領隊排人 | G：Windows 1＋Android 1，0.2.26 加 Linux 1。西：同意，再補最低配置表 | 全部 |
+
+**仍待小良哥拍板：** Q3（原始 cli 視窗的定義）。其餘問題已有審查共識或領隊已定。
 
 ---
 
@@ -600,12 +691,16 @@ pub trait PlatformHost: Send + Sync {
 
 | 版本 | 主要事項 | 新增介面 | 主要動到 | 改動量（推斷） | 回退 |
 |---|---|---|---|---|---|
-| 0.2.18 | 拆 transport、凍結 AsnCore 契約 | `mailTransport`／`desktopExtras` | `ui/lib/tauri.mjs`、`list.js`、`chat.js`、`core.mjs` | 小（約 300 行，1～2 天） | revert |
-| 0.2.19 | 廠商適配介面，先搬 agy | `VendorAdapter`、manifest | 新 `vendors/`、`term.rs`（agy 分支）、`acp_agy.rs` | 中（約 1000～1500 行，1 週） | revert／舊分支保留一版 |
-| 0.2.20 | Claude、Codex、Grok、pi 搬入 | 同上（可能微調） | `term.rs`、`claude_screen.rs`、`switch.rs`、`launcher.rs` | 大（約 2000～4000 行，2 週） | 逐家 revert |
-| 0.2.21 | 插件自帶設定＋權限鏈預設拒絕 | `settings` 欄位、`ApprovalResponder` | `launch/prefs.rs`、設定頁、`acp_policy/approvals` | 中（約 1100～1500 行，1.5 週） | revert（存檔向下相容） |
-| 0.2.22 | 通知管道（FCM 搬入） | `NotifyChannel` | 新 `notify/`、0.2.11 的 FCM | 小～中（約 700～900 行，1 週） | revert |
-| 0.2.23 | 平台介面（Linux 搬入） | `PlatformHost` | `local.rs`、`win_term.rs`、`pi_term.rs`、`mux*.rs` | 中（約 1600～1900 行，1.5 週） | revert |
-| 0.2.24 | （視需要）UI 套件 | 套件出口與依賴規則 | `ui/lib/` | 小（搬檔，3～5 天） | revert |
+| （前置） | 黃金檔與特徵測試（§5.0），獨立 PR 先合 | 無（只加測試與樣本） | `tests/fixtures/`、`term.rs`／`acp_*.rs`／`perm_remote.rs` 的測試 | 小～中（視樣本取得，約 1 週，可與 0.2.18 平行） | revert（不影響產品） |
+| 0.2.18 | 拆 transport、凍結 AsnCore 契約，相容出口版內刪除 | `mailTransport`／`desktopExtras` | `ui/lib/tauri.mjs`、`list.js`、`chat.js`、`core.mjs` | 小（約 300 行，1～2 天） | revert |
+| 0.2.19 | 廠商適配介面，先搬 agy（含安裝／登入方法定義） | `VendorAdapter`、manifest | 新 `vendors/`、`term.rs`（agy 分支）、`acp_agy.rs` | 中（約 1000～1500 行，1 週） | revert（逐家 commit，無旗標） |
+| 0.2.20 | Grok＋Codex 搬入 | 同上（可能微調） | `term.rs`、`grok_adopt.rs`、`codex*.rs`、`launcher.rs` | 中（新增約 600～900 行，1 週） | 逐家 revert |
+| 0.2.21 | pi 搬入（含 `pi_route`、#934 承接） | 同上 | `term.rs`、`pi_term.rs`、`pi_setup.rs`、`connect-tools.mjs` | 中（新增約 400～700 行，1 週） | revert |
+| 0.2.22 | Claude 搬入（最後） | 同上 | `claude_screen.rs`、`switch.rs`、`subagents.rs`、`tasks.rs` | 大（新增約 700～1200 行，搬約 1500 行，1.5 週） | revert |
+| 0.2.23 | 權限框回答鏈預設拒絕 | `ApprovalResponder` | `acp_policy/approvals/worker`、`term.rs` 權限呼叫點 | 小～中（約 400～600 行，1 週） | revert |
+| 0.2.24 | 插件自帶設定欄位 | `settings` 欄位 | `launch/prefs.rs`、設定頁、開新夥伴 | 中（約 800～1000 行，1 週） | revert（存檔向下相容） |
+| 0.2.25 | 通知管道（FCM 搬入） | `NotifyChannel` | 新 `notify/`、0.2.11 的 FCM | 小～中（約 700～900 行，1 週） | revert |
+| 0.2.26 | 平台介面（Linux 搬入） | `PlatformHost` | `local.rs`、`win_term.rs`、`pi_term.rs`、`mux*.rs` | 中（約 1600～1900 行，1.5 週） | revert |
+| 0.2.27 | （視需要）UI 套件 | 套件出口與依賴規則 | `ui/lib/` | 小（搬檔，3～5 天） | revert |
 
 （完）
