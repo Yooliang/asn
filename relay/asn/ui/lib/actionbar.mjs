@@ -301,6 +301,7 @@ export const ActionBar = {
     callable: { type: Boolean, default: false },   // 這個視窗有語音功能（由對話區決定）
     ops: { type: Array, default: () => [] },       // 一對一「管理」按鈕分隔線後的邀請（opsMenuItems）
     group: { type: Array, default: () => [] },     // 群組對話「群組」按鈕的項目（groupMenuItems）；有給才放這顆
+    blocked: { type: Object, default: null },     // 簡版（ASN 直接開的終端分頁，#904）：{ 格子 key: 反灰原因 }；有給就不向任何後端查詢，列出的格子一律反灰並顯示原因
     piModelsFor: { type: Function, default: null },   // 別台電腦的 pi 模型清單（名單視窗的 remotePiModelsFor）；沒給＝別台的 pi 退回輸入框
   },
   emits: ['call', 'ops'],
@@ -320,11 +321,12 @@ export const ActionBar = {
     const isRoom = computed(() => props.friend?.room === true)
     const subView = computed(() => subagentView(subs.q))
     const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count))
-    const opsAll = computed(() => (props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
+    const lite = computed(() => Boolean(props.blocked))
+    const opsAll = computed(() => (lite.value ? [] : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
-    }))
+    }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
     const showGroup = computed(() => isRoom.value && props.group.length > 0)
@@ -343,7 +345,7 @@ export const ActionBar = {
 
     async function loadConsole() {
       const f = props.friend
-      if (!props.api || !canOfferConsole(f, props.selfNode) || f.status === 'offline') { cons.state = 'none'; cons.reason = ''; return }
+      if (lite.value || !props.api || !canOfferConsole(f, props.selfNode) || f.status === 'offline') { cons.state = 'none'; cons.reason = ''; return }
       cons.state = 'checking'; cons.reason = ''
       const q = await withTimeout(props.api.partnerConsoleQuery(consoleReq(props.friend, engine.value)), CONSOLE_QUERY_TIMEOUT_MS)
       if (!sameFriend(props.friend, f)) return
@@ -374,7 +376,7 @@ export const ActionBar = {
     let opsRetry = null
     async function loadOps() {
       const f = props.friend
-      if (!props.api || !f || f.room === true) return
+      if (lite.value || !props.api || !f || f.room === true) return
       const ctx = await loadOpsContext(props.api)
       if (!sameFriend(props.friend, f)) return
       Object.assign(opsCtx, ctx)

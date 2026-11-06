@@ -20,6 +20,7 @@ import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from 
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { TermView } from './lib/term-view.mjs'
+import { ActionBar } from './lib/actionbar.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -33,7 +34,7 @@ import { normalizeSession, planRestore, sameSession, snapshotSession, trailingTh
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
-import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
+import { TERM_BAR_WHY, composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
@@ -1243,6 +1244,10 @@ async function submitTermViaDialog() {
     if (r?.id) await openTermTab(String(r.id))
   } catch (e) { partnerDlg.error = String(e?.message ?? e) } finally { partnerDlg.busy = false }
 }
+// 終端分頁上方的功能列（#904）：把終端列組成和夥伴一樣的物件；簡版功能列不向後端查詢，所以 api 給空物件即可
+const termPaneFriend = computed(() => termFriends(termPaneRow.value ? [termPaneRow.value] : [], { selfNode: info.node })[0] ?? null)
+const termBarApi = Object.freeze({})
+const termBarBlocked = TERM_BAR_WHY
 const termRoster =computed(() => termFriends(terms.rows, { selfNode: info.node, device: '' }))
 const termComposer = computed(() => composerView(termPaneRow.value))   // 比終端面板嚴：忙碌或等你回答時輸入區不開放
 const termTabItem = row => (row ? { id: termFriendId(row.id), panel: 'term', term: true, nick: row.title, status: row.tone === 'busy' ? 'busy' : row.tone === 'warn' ? 'away' : 'online', unread: row.state === 'waiting_user' ? 1 : 0 } : null)
@@ -1763,7 +1768,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
-      termViewApi, termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
+      termViewApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
       dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
@@ -1778,6 +1783,7 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.component('term-view', TermView)
+app.component('action-bar', ActionBar)
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)

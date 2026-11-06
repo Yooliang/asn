@@ -166,3 +166,16 @@ export function screenText(raw) {
   const tail = lines.slice(-SCREEN_LINES).join('\n')
   return tail.length > SCREEN_MAX ? tail.slice(tail.length - SCREEN_MAX) : tail
 }
+
+/**
+ * ASN 直接開的終端分頁上方的功能列（#904）：和夥伴對話頁同一排固定 6 格，目前都還沒接上，一律反灰並寫原因（滑過去看得到）。
+ * 之後哪一格接上了，就從這裡拿掉那一項。
+ */
+export const TERM_BAR_WHY = Object.freeze({
+  call: 'ASN 直接開的終端夥伴還不支援通話',
+  window: '直接開的終端還不能切換前台／後台',
+  model: '直接開的終端還不能在這裡切換模型',
+  subs: '直接開的終端還看不到子代理',
+  tasks: '直接開的終端還看不到工作項目',
+  manage: '直接開的終端還沒有管理項目',
+})
