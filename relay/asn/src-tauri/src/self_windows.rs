@@ -135,21 +135,21 @@ pub fn prune(dir: &Path, started: &dyn Fn(u32) -> Option<u64>) -> usize {
 }
 
 /// 本機活著的 Claude 視窗名（撞名檢查用；pi 視窗與夥伴紀錄的名字由畫面一起給）
-#[cfg(all(desktop, feature = "gui"))]
+#[cfg(desktop)]
 fn live_claude_names() -> Vec<String> {
     let Some(dir) = crate::launch::console::sessions_dir() else { return Vec::new() };
     crate::bridge::roster::read_sessions(&dir, crate::heartbeat::pid_alive, 0, "").unwrap_or_default().into_iter().map(|w| w.name).collect()
 }
 
 /// 這個 pid 是不是這台電腦上、使用者自己在前景開的 agy（程序掃描看得到的那一列）
-#[cfg(all(desktop, feature = "gui"))]
+#[cfg(desktop)]
 fn is_local_foreground_agy(pid: u32) -> bool {
     crate::bridge::procscan::scan_system().into_iter().any(|a| a.pid == pid && ENGINES.contains(&a.engine.as_str()) && !a.background)
 }
 
 /// 畫面「接進收發室」對話框的預設名字。taken＝畫面名單上這台電腦的名字（視窗、pi、夥伴紀錄）
-#[cfg(all(desktop, feature = "gui"))]
-#[tauri::command]
+#[cfg(desktop)]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn self_window_default(taken: Vec<String>) -> Result<String, String> {
     crate::launch::blocking_timeout(move || {
         let all: Vec<String> = taken.into_iter().chain(live_claude_names()).collect();
@@ -160,8 +160,8 @@ pub async fn self_window_default(taken: Vec<String>) -> Result<String, String> {
 
 /// 本人按「接進收發室」：核對這個 pid 是這台的前景 agy、查得到建立時間、名字合法且不撞名，才寫登記。
 /// 回 { name }；不過就回原因（給人看的一句話）
-#[cfg(all(desktop, feature = "gui"))]
-#[tauri::command]
+#[cfg(desktop)]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn self_window_register(pid: u32, name: String, taken: Vec<String>) -> Result<Value, String> {
     crate::launch::blocking_timeout(move || {
         let name = name.trim().to_string();
