@@ -35,7 +35,6 @@ export function pasteSummary(text) {
   return `要貼上 ${lines} 行、${[...t].length} 個字，送進這位夥伴的終端？`
 }
 
-/** 要讓游標那一列看得到（下面多留一列），捲動位置該在哪 */
 // 貼上的按鍵：回 false 就是 xterm 不處理，瀏覽器照常貼上（走原本的貼上確認）；否則 xterm 會把 Ctrl+V 送成控制字元並擋掉貼上
 export function termKeyHandler(e) {
   if (e.type !== 'keydown') return true
@@ -45,6 +44,7 @@ export function termKeyHandler(e) {
   return true
 }
 
+/** 要讓游標那一列看得到（下面多留一列），捲動位置該在哪 */
 export function followTarget({ cursorRow, rowHeight, clientHeight, scrollHeight }) {
   const max = Math.max(0, scrollHeight - clientHeight)
   return Math.min(max, Math.max(0, (cursorRow + 2) * rowHeight - clientHeight))
