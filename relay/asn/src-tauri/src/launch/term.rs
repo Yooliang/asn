@@ -5809,6 +5809,8 @@ mod tests {
             fix_nonce();
             let (rig, _) = mux_rig();
             open_partner(&rig);
+            // 實際的分頁標題會帶夥伴名字（認領後用它找夥伴）
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1 小乙", 9, 0);
             let mut svc2 = restarted(&rig, true);
             svc2.set_hold_config(true);
             svc2.reclaim().unwrap();
