@@ -949,6 +949,12 @@ impl Core {
         self.cfg.status_dir.with_file_name(crate::self_windows::DIR)
     }
 
+    /// 這個名字有一筆還有效的登記（程序在、建立時間對得上）
+    fn self_pull_registered(&self, name: &str) -> bool {
+        let created = self.created.clone();
+        crate::self_windows::live(&self.self_pull_dir(), &|p| created(p)).iter().any(|e| e.name == name)
+    }
+
     /// 寄給只能自己收信視窗的信：留在後台信箱（不推、不 ack），等它自己 asn-cli recv。
     /// 寄件人收到一次說明；從寄出（後台時間優先）算超過 AWAIT_GRACE_MS 還沒被收走，就退回並 ack。回 Some＝留在信箱
     async fn hold_for_self_pull(&mut self, m: &Mail, to: &str) -> Option<String> {
@@ -1549,6 +1555,15 @@ impl Core {
             // 只能自己收信的視窗（本人接進收發室的）：信留在信箱等它自己收；寄件人說一次；太久沒收就退回
             if self.self_pull.contains(&to) {
                 return self.hold_for_self_pull(&m, &to).await;
+            }
+            // 剛接進來、名單還沒重讀：名單上沒有這個名字，但登記已經有效 → 馬上重讀名單，這封照「只能自己收信」留著，不退回「找不到」。
+            // 名單上已有同名的活視窗時不走這條（既有的視窗優先，和名單那邊一致）
+            if !self.forwardable(&to) && self.self_pull_registered(&to) {
+                self.log.line(&format!("id={} to={to}: just added as self-pull window, refreshing roster", m.id));
+                self.refresh_roster(self.now).await;
+                if self.self_pull.contains(&to) {
+                    return self.hold_for_self_pull(&m, &to).await;
+                }
             }
         }
         let from_agent = m.from_agent.clone().unwrap_or_default();

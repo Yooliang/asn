@@ -49,6 +49,33 @@ async fn 寄給它的信留在信箱_不推不退回_寄件人只通知一次() 
 }
 
 #[tokio::test]
+async fn 剛接進來_名單還沒重讀就有信_馬上重讀名單並留著_不退回找不到() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    agy_alive(&mut h);
+    // 名單是接進來之前讀的（沒有 agy-1）；接著本人按了「接進收發室」
+    register(&h, "agy-1");
+    let before = h.fr.rosters().len();
+    h.fr.put(mail(1, json!({"to_agent": "agy-1"})));
+    h.core.pull("test", T0 + 2_000).await;
+    assert!(h.fr.acked().is_empty(), "不退回、不 ack：留著讓它自己收");
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("找不到")), "{:?}", notice_bodies(&h));
+    assert!(notice_bodies(&h).iter().any(|b| b.contains("agy-1") && b.contains("要自己收信")), "{:?}", notice_bodies(&h));
+    assert!(h.fr.rosters().len() > before, "馬上重讀並上傳名單");
+    let r = h.fr.rosters().last().cloned().unwrap();
+    assert!(r["agents"].as_array().unwrap().iter().any(|a| a["name"] == "agy-1" && a["kind"] == "selfpull"));
+}
+
+#[tokio::test]
+async fn 名單上有同名的活視窗時_不因為登記而留信() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    agy_alive(&mut h);
+    register(&h, "T-乙");
+    h.fr.put(mail(1, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0 + 2_000).await;
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("要自己收信")), "既有的視窗優先：{:?}", notice_bodies(&h));
+}
+
+#[tokio::test]
 async fn 放太久沒被收走就退回並說明() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     register(&h, "agy-1");
