@@ -16,6 +16,7 @@ import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
 import { placeMenu } from './menu-place.mjs'
+import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP } from './term-entry.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -117,6 +118,8 @@ function windowSlot(f, engine, ctx) {
   const wake = ctx.wake === false ? null : wakeButtonView(f, ctx.ops ?? {})
   if (wake?.show) return { ...slot('window', WAKE_LABEL, wake.ok ? '' : (wake.reason || '現在不能喚醒')), wake: true }
   if (ctx.phone) return slot('window', WINDOW_LABEL.idle, PHONE_WHY.window)
+  // 在共用終端服務裡的夥伴：這一格改成「終端」（#902，按下在 ASN 裡看終端）；名單右鍵、手機不傳 term，照舊
+  if (ctx.term === true) return { ...slot('window', TERM_LABEL, ''), term: true }
   const c = ctx.console ?? {}
   const why = consoleBlock(f, ctx.selfNode) || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.api ? '' : '這個畫面不能切換視窗') || consoleStateWhy(c)
   const label = why ? WINDOW_LABEL.idle : c.visible ? WINDOW_LABEL.hide : WINDOW_LABEL.show
@@ -162,7 +165,8 @@ function tasksSlot(f, ctx) {
  * ctx：{ selfNode, api（有沒有 transport）, callable（有沒有語音）, console（{ state, visible, reason }：查主控台的結果）,
  *        subagents（能不能查子代理）, tasks（能不能查背景工作列表）, subLabel, ops（夥伴管理要用的設定：loadOpsContext）, modelQuery（選填：切換模型的查詢結果）, manageCount（管理選單有幾項）,
  *        phone（手機：視窗在別台電腦上，前台／後台、子代理、工作項目列表都反灰並寫原因；切換模型走遠端夥伴管理）,
- *        wake（false＝第 2 格不換成喚醒；名單右鍵沒有大按鈕列，喚醒留在右鍵選單裡） }
+ *        wake（false＝第 2 格不換成喚醒；名單右鍵沒有大按鈕列，喚醒留在右鍵選單裡）,
+ *        term（true＝這位夥伴在共用終端服務裡：第 2 格放「終端」，slot 多帶 term:true） }
  * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；離線的 Claude／pi 是「喚醒」（slot 多帶 wake:true）；其他是前台顯示／後台隱藏。「工作項目」多帶 count（背景工作件數，沒有＝0）。
  */
 export function barSlots(friend, ctx = {}) {
@@ -303,8 +307,9 @@ export const ActionBar = {
     group: { type: Array, default: () => [] },     // 群組對話「群組」按鈕的項目（groupMenuItems）；有給才放這顆
     blocked: { type: Object, default: null },     // 簡版（ASN 直接開的終端分頁，#904）：{ 格子 key: 反灰原因 }；有給就不向任何後端查詢，列出的格子一律反灰並顯示原因
     piModelsFor: { type: Function, default: null },   // 別台電腦的 pi 模型清單（名單視窗的 remotePiModelsFor）；沒給＝別台的 pi 退回輸入框
+    term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops'],
+  emits: ['call', 'ops', 'term'],
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -326,6 +331,7 @@ export const ActionBar = {
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
+      term: !lite.value && props.term?.ready === true,
     }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
@@ -334,6 +340,8 @@ export const ActionBar = {
     const pickGroup = key => emit('ops', key)   // 開在名單視窗（openGroupMenu）；分開模式的對話視窗也是請名單視窗代開
     const showSubs = computed(() => slot.value.subs.ok)
     const consoleView = computed(() => consoleButtonView(cons.visible))
+    const termOn = computed(() => props.term?.on === true)
+    const termTip = computed(() => (termOn.value ? TERM_BACK_TIP : TERM_TIP))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
     // pi 的模型清單：本機的直接問 pi；別台的用名單視窗收到的回報（和名單右鍵同一份）
@@ -354,6 +362,7 @@ export const ActionBar = {
     // 第 2 格：離線時是喚醒（開夥伴管理的喚醒對話框，和名單右鍵同一條 p:resume），其他時候切前台／後台
     function onWindow() {
       if (slot.value.window.wake) { void pickOps('p:resume'); return }
+      if (slot.value.window.term) { emit('term'); return }
       void toggleConsole()
     }
     async function toggleConsole() {
@@ -463,7 +472,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, onWindow, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { root, onWindow, termOn, termTip, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -471,8 +480,8 @@ export const ActionBar = {
     <button class="abtn" type="button" data-slot="call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall">
       <img src="img/ab-call.svg" alt="" width="32" height="32"><span class="ab-name">通話</span>
     </button>
-    <button class="abtn" type="button" data-slot="window" :aria-disabled="slot.window.ok && (slot.window.wake || !cons.busy) ? null : 'true'" :aria-label="slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : consoleView.tip) : slot.window.reason" @click="onWindow">
-      <img :src="slot.window.wake ? 'img/ab-wake.svg' : 'img/ab-window.svg'" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.label }}</span>
+    <button class="abtn" type="button" data-slot="window" :class="{ on: slot.window.term && termOn }" :aria-pressed="slot.window.term ? String(termOn) : null" :aria-disabled="slot.window.ok && (slot.window.wake || slot.window.term || !cons.busy) ? null : 'true'" :aria-label="slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : slot.window.term ? termTip : consoleView.tip) : slot.window.reason" @click="onWindow">
+      <img :src="slot.window.wake ? 'img/ab-wake.svg' : slot.window.term ? 'img/ab-term.svg' : 'img/ab-window.svg'" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.label }}</span>
     </button>
     <div class="ab-wrap">
       <button class="abtn" type="button" data-slot="model" :class="{ on: model.open }" :aria-disabled="slot.model.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" :title="slot.model.ok ? MODEL_TIP : slot.model.reason" @click="onModel">

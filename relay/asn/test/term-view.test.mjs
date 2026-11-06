@@ -232,13 +232,16 @@ test('跟著游標：往上捲就不跟，捲回游標或底部再跟；自己�
   assert.equal(f.following(), true, '捲到底，再跟')
 })
 
-test('矮視窗收起訊息區時有切回按鈕', () => {
+test('打開終端時收起訊息區、有切回按鈕；視窗高矮一樣（#901）', () => {
   const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
   assert.ok(chat.includes(':can-back="true"') && chat.includes('@back="termViewOn = false"'))
+  assert.ok(chat.includes('<div class="conv" v-show="!termShown">'), '終端開著時訊息列表收起')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(view.includes('回到訊息'))
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
-  assert.match(css, /max-height:620px\)\{[^\n]*\.term-view \+ \.conv\{display:none\}[^\n]*\.term-view-back\{display:inline-block\}/, '收起訊息區和顯示按鈕要同一個條件')
+  assert.doesNotMatch(css, /max-height:620px/, '不再只有矮視窗才收起')
+  assert.match(css, /\.chatpane-main > \.term-view\{flex:1 1 0\}/, '終端占滿訊息區')
+  assert.doesNotMatch(css, /\.term-view-back\{display:none/, '切回按鈕不再藏起來')
 })
 
 test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）；接上輸入之後更不能拿掉', () => {
