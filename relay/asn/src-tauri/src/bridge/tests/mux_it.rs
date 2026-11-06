@@ -140,6 +140,38 @@ async fn 夥伴自己結束_下一輪監看就不在名單上_信馬上退回找
 }
 
 #[tokio::test]
+async fn 收發室重開前在線_但它是自己結束的_信馬上退回找不到_不說還沒接回來() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    // 重開前 T-丙 在線（記得它），重開時發現它自己結束了
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0 + 1_000).await;
+    let mut w = Watch::default();
+    w.note_exited(&["T-丙".to_string()], now());
+    w.save(&h.core.cfg.work_dir.join(STATE_FILE));
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.mux_notice_tick(T0 + 10_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 11_000).await;
+    assert!(notice_bodies(&h).iter().any(|b| b.contains("T-丙") && b.contains("找不到")), "{:?}", notice_bodies(&h));
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("還沒接回") && !b.contains("中斷")), "{:?}", notice_bodies(&h));
+    assert_eq!(h.fr.acked().len(), 1);
+    assert!(h.core.log.has("exited on its own"));
+}
+
+#[tokio::test]
+async fn 收發室重開前在線_還沒接回的_照舊先留著() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0 + 1_000).await;
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.mux_notice_tick(T0 + 10_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 11_000).await;
+    assert!(h.fr.acked().is_empty(), "沒有確定結束：照舊留著");
+    assert!(h.core.log.has("window not back yet after restart"));
+}
+
+#[tokio::test]
 async fn 事故後還沒接回來的夥伴_消失超過五分鐘也不會被忘掉_信照樣留著() {
     let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
     let mut w = Watch::default();

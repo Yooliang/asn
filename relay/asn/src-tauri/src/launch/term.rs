@@ -296,6 +296,8 @@ struct Inner {
     adopted: Vec<AdoptedSession>,
     /// 建立時間曾相符、但這次通訊檔不在（或 list 失敗），留在檔案裡下次再試。不放進可操作的對照表，也不對它們下 cli。
     parked: Vec<StoreTerm>,
+    /// 確定自己結束、已經收掉的夥伴名字，等監看拿走交給收發室（寄給它們的信馬上退回）
+    exited: Vec<String>,
     /// B2c：看 mux 窗格的 GUI（只存記憶體；ASN 重啟後不認，使用者要看再開一個）
     viewers: Vec<Viewer>,
 }
@@ -412,6 +414,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 next: 0,
                 sessions: Vec::new(),
                 adopted: Vec::new(),
+                exited: Vec::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -437,6 +440,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 next: 0,
                 sessions: Vec::new(),
                 adopted: Vec::new(),
+                exited: Vec::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -463,6 +467,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 next: 0,
                 sessions: Vec::new(),
                 adopted: Vec::new(),
+                exited: Vec::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -1185,31 +1190,37 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 已經結束的夥伴窗格（看得到帶暗號的結束標記）：收掉窗格、從對照表拿掉。回收掉幾個。
     /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收
     fn sweep_exited(&self, dir: &WezTermDir) -> usize {
-        let rows: Vec<(String, u64, PathBuf, String)> = {
+        let rows: Vec<(String, u64, PathBuf, String, Option<String>)> = {
             let g = self.inner.lock().unwrap();
             g.sessions
                 .iter()
                 .filter(|s| s.window.mux && !s.kind.is_empty())
-                .filter_map(|s| s.exit_nonce.clone().map(|n| (s.id.clone(), s.pane_id, s.window.sock.clone(), n)))
+                .filter_map(|s| s.exit_nonce.clone().map(|n| (s.id.clone(), s.pane_id, s.window.sock.clone(), n, partner_label(&s.id, &s.title).map(String::from))))
                 .collect()
         };
         if rows.is_empty() {
             return 0;
         }
         let w = self.wez(dir);
-        let dead: Vec<(String, u64, PathBuf)> = rows.into_iter().filter(|(_, pane, sock, nonce)| w.pane_exit(sock, *pane, Some(nonce)).is_some()).map(|(id, pane, sock, _)| (id, pane, sock)).collect();
-        for (id, pane, sock) in &dead {
+        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| w.pane_exit(sock, *pane, Some(nonce)).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
+        for (id, pane, sock, _) in &dead {
             let _ = w.kill_pane(sock, *pane);
             elog!("終端：夥伴自己結束了，收掉它的窗格（編號 {id}）");
         }
         if !dead.is_empty() {
             {
                 let mut g = self.inner.lock().unwrap();
-                g.sessions.retain(|s| !dead.iter().any(|(id, _, _)| *id == s.id));
+                g.sessions.retain(|s| !dead.iter().any(|(id, _, _, _)| *id == s.id));
+                g.exited.extend(dead.iter().filter_map(|d| d.3.clone()));
             }
             let _ = self.persist();
         }
         dead.len()
+    }
+
+    /// 拿走確定自己結束的夥伴名字（給監看寫進狀態檔，收發室讀）
+    pub fn take_exited(&self) -> Vec<String> {
+        std::mem::take(&mut self.inner.lock().unwrap().exited)
     }
 
     /// 這個 mux（程序編號＋建立時間）裡、名字是 `name` 的夥伴視窗（claude／window）的終端編號。同名不只一個就不猜；
@@ -1463,6 +1474,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let w = self.wez(&dir);
         let mut restored: Vec<Session> = Vec::new();
         let mut parked: Vec<StoreTerm> = Vec::new();
+        let mut exited_now: Vec<String> = Vec::new();
         for term in file.terms {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
@@ -1513,14 +1525,22 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 }
             };
             // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
+            let saw_dead = std::cell::Cell::new(false);
             let ended = |p: &wezterm::PaneInfo| {
                 let dead = w.pane_exit(&sock, p.pane_id, term.exit_nonce.as_deref()).is_some();
                 if dead && pane_is_ours(&term.id, p) {
                     let _ = w.kill_pane(&sock, p.pane_id);
+                    saw_dead.set(true);
                 }
                 dead
             };
             let Some(pane) = pick_pane(&panes, &term.id, term.pane_id, &ended) else {
+                // ASN 關著時夥伴自己結束了：記下名字，寄給它的信馬上退回，不當成還沒接回
+                if saw_dead.get() && !term.kind.is_empty() {
+                    if let Some(name) = partner_label(&term.id, &term.title) {
+                        exited_now.push(name.to_string());
+                    }
+                }
                 continue;
             };
             let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
@@ -1554,6 +1574,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             g.next = next;
             g.sessions = restored;
             g.parked = parked;
+            g.exited.extend(exited_now);
         }
         self.persist()?;
         Ok(())
@@ -5756,6 +5777,50 @@ mod tests {
             assert!(!stored.contains(NONCE), "對照表存檔也拿掉了（編號 {id}）：{stored}");
             assert!(rig.svc.mux_snapshot().unwrap().partners.is_empty());
             assert_eq!(kill_panes(&rig.runner), 1, "收過的不再收");
+        }
+
+        #[test]
+        fn 夥伴自己結束_監看和重開認領都會記下名字_拿一次就清空() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            assert!(rig.svc.take_exited().is_empty());
+            *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            rig.svc.mux_snapshot();
+            assert_eq!(rig.svc.take_exited(), vec!["小乙".to_string()]);
+            assert!(rig.svc.take_exited().is_empty(), "拿一次就清空");
+        }
+
+        #[test]
+        fn 夥伴在_asn_關著時結束_重開認領時收掉並記下名字() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true); // 開關開著才認領夥伴視窗的列
+            svc2.reclaim().unwrap();
+            assert_eq!(svc2.take_exited(), vec!["小乙".to_string()]);
+            assert!(svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_none(), "沒有認領");
+        }
+
+        #[test]
+        fn 重開認領_窗格還活著或只是找不到_不算自己結束() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            // 實際的分頁標題會帶夥伴名字（認領後用它找夥伴）
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1 小乙", 9, 0);
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
+            svc2.reclaim().unwrap();
+            assert!(svc2.take_exited().is_empty(), "還活著");
+            assert!(svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_some(), "有認領到，不是被擱著");
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            let mut svc3 = restarted(&rig, true);
+            svc3.set_hold_config(true);
+            svc3.reclaim().unwrap();
+            assert!(svc3.take_exited().is_empty(), "窗格不見了不等於自己結束（可能是服務中斷）");
         }
 
         #[test]
