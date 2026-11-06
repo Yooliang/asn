@@ -29,7 +29,7 @@ test('接線：電腦版只有本機的 pi 視窗才查清單；選單外的不�
   assert.match(ui, /v-else-if="op === 'model'">模型/, '查不到清單：輸入框')
   assert.match(fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8'), /:pi-models="opDlg\.friend\.node === selfNode \? transport\.piModels : remotePiModelsFor\(opDlg\.friend\.node\)"/)
   assert.match(fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8'), /<p class="m-note" v-if="opsPiNote">\{\{ opsPiNote \}\}<\/p>/)
-  assert.match(PI_MODEL_REMOTE_NOTE, /開放遠端管理/, '說明寫明：那台要開放遠端管理才會回報')
+  assert.match(PI_MODEL_REMOTE_NOTE, /允許我的其他設備替這台開新視窗/, '說明寫明：要打開哪個設定才會回報')
 })
 
 test('第 2 步：手機與別台電腦用那台啟動設定摘要的 pi_models 給下拉選單；沒有就退回輸入框', () => {

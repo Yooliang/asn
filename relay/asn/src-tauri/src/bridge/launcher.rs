@@ -194,7 +194,10 @@ impl LaunchEnv for SystemEnv {
         r
     }
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
-        crate::launch::local::start_remote_window(config, profile, name, cwd, false, pi_args)
+        // 背景與否照這台的設定（#931）：有存「開新夥伴的顯示方式」就照它，沒存過看有沒有在用共用終端服務；服務沒在用一律前台。遠端不能選
+        let pref = crate::launch::prefs::launch_display_pref(&self.data_dir);
+        let bg = crate::launch::win_term::remote_hidden(pref.as_deref(), crate::launch::win_term::term_server_active());
+        crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::real(bg), pi_args)
     }
     fn live_window(&self, engine: &str, name: &str) -> bool {
         crate::launch::console::live_partner_pid(engine, name).is_some()

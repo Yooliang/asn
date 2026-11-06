@@ -68,7 +68,7 @@ test('別台設備的模型列：用它回報的 profile 與標籤，不看本�
   const rows = remoteModelRows({ profiles: [{ id: 'claude', label: 'Claude（互動視窗）' }, { id: 'default', label: '一般（含 Chrome）' }, { id: '', label: 'x' }, null], cwd_allow: ['D:\a'], max_per_hour: 6 })
   assert.deepEqual(rows.map(r => [r.profileId, r.label, r.installed]), [['claude', 'Claude（互動視窗）', true], ['default', '一般（含 Chrome）', true]])
   assert.equal(rows[0].id, 'claude', '認得的 profile 沿用圖示代號')
-  assert.equal(rows[1].modeLabel, '會開一個視窗')
+  assert.equal(rows[1].modeLabel, '開在 ASN 終端')
   assert.deepEqual(remoteModelRows(null), [])
   assert.deepEqual(remoteModelRows({ profiles: 'x' }), [])
   assert.equal(remoteModelRows({ profiles: [{ id: 'gemini' }] })[0].label, 'Gemini', '沒給標籤用目錄上的名字')
@@ -132,7 +132,7 @@ test('開新夥伴對話框：選 pi 不動使用者的顯示方式偏好、第�
 test('別台回報的清單：目錄外的背景設定用回報的模式；Grok、pi 沿用目錄', () => {
   const rows = remoteModelRows({ profiles: [{ id: 'grok', label: 'Grok（背景運行、內建通道）', engine: 'acp', mode: 'background' }, { id: 'pi', label: 'pi（互動視窗）', engine: 'pi', mode: 'window' }, { id: 'mybg', label: '自訂', mode: 'background' }, { id: 'mywin', label: '舊版' }], cwd_allow: ['x'] })
   assert.deepEqual(rows.map(r => [r.profileId, r.mode]), [['grok', 'background'], ['pi', 'window'], ['mybg', 'background'], ['mywin', 'window']])
-  assert.equal(rows[2].modeLabel, '由 ASN 內建通道執行')
+  assert.equal(rows[2].modeLabel, '用 acp通道，沒有畫面')
   assert.equal(showDisplayModeChoice('grok'), false, '背景夥伴沒有前台／背景可選')
   assert.equal(foregroundOnlyProfile('pi'), true)
 })

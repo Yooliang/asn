@@ -1,4 +1,4 @@
-// #351 開新夥伴「運行」四選一（內建通道＞經 pi＞ASN 開的終端＞自己開的 CLI）與「pi 是通道不是廠家」。
+// #351 開新夥伴「運行」四選一（acp通道＞asn終端（pi shell）＞asn終端（原生 cli）＞原始 cli 視窗，名稱 #931 定案）與「pi 是通道不是廠家」。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MODEL_CATALOG, RUN_OPTION_LABEL, runOptions, vendorRows } from '../ui/lib/model-catalog.mjs'
@@ -11,7 +11,7 @@ test('四個選項照優先序排；自己開的 CLI 始終不能選（#723，�
     const r = runOptions(m, { local: true, piInstalled: true, piReady: true })
     assert.deepEqual(r.options.map(o => o.key), ['acp', 'pi', 'term', 'self'], m.id)
     assert.equal(r.options.find(o => o.key === 'self').ok, false, m.id)
-    assert.match(r.options.find(o => o.key === 'self').why, /ASN 只負責接手/, m.id)
+    assert.match(r.options.find(o => o.key === 'self').why, /不能從這裡開/, m.id)
     for (const o of r.options) { assert.equal(o.label, RUN_OPTION_LABEL[o.key]); if (!o.ok) assert.ok(o.why, `${m.id}.${o.key} 不能選要寫原因`) }
     assert.ok(r.options.find(o => o.key === r.selected).ok, `${m.id} 預設要能選`)
   }
@@ -26,17 +26,17 @@ test('Grok：這台、裝了 pi、pi 已能帶模型 → 預設內建通道；�
   assert.equal(remote.options[2].ok, false); assert.match(remote.options[2].why, /那台電腦/)
 })
 
-test('經 pi：沒裝 pi、或 0.1.90 前還不能帶模型，都反灰並寫原因', () => {
+test('經 pi：沒裝 pi、或 ASN 太舊（0.1.90 前）還不能帶模型，都反灰並寫原因', () => {
   assert.match(runOptions(row('grok'), { local: true, piInstalled: false }).options[1].why, /沒偵測到 pi/)
-  assert.match(runOptions(row('grok'), { local: true, piInstalled: true, piReady: false }).options[1].why, /0\.1\.90/)
+  assert.match(runOptions(row('grok'), { local: true, piInstalled: true, piReady: false }).options[1].why, /更新/)
   assert.equal(runOptions(row('gemini'), { local: true, piInstalled: true, piReady: true }).options[1].ok, false, 'Gemini 經 pi 不支援')
 })
 
-test('Claude：沒有內建通道；ASN 開成它自己的視窗（別台也能遠端開），所以預設是終端那一項', () => {
+test('Claude：不支援 acp通道；開在 ASN 終端（別台也能遠端開），所以預設是 asn終端（原生 cli）', () => {
   const r = runOptions(row('claude'), { local: false, piInstalled: false })
   assert.deepEqual(keys(r), ['acp:no', 'pi:no', 'term:ok', 'self:no'])
   assert.equal(r.selected, 'term')
-  assert.match(r.options[2].note, /自己的終端機視窗/)
+  assert.match(r.options[2].note, /ASN 終端/)
   assert.match(r.options[3].note, /外掛/)
 })
 

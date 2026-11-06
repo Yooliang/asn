@@ -1055,7 +1055,7 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
             Ok(self.cfg.clone())
         }
         fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
-            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, true, pi_args)?;
+            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::test_hidden(), pi_args)?;
             self.pids.lock().unwrap().push(pid);
             Ok(pid)
         }

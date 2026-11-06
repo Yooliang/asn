@@ -159,6 +159,20 @@ pub(crate) fn relaunch_hidden(service_active: bool) -> (bool, bool) {
     (service_active, false)
 }
 
+/// 遠端開新夥伴（手機、電腦版開到別台）要不要放背景（#931）：照這台的設定，不讓遠端選。
+/// pref＝這台「開新夥伴的顯示方式」偏好（launch-prefs.json 的 launchDisplay：foreground／background）；沒存過（None）或看不懂就跟重開同一套（[`relaunch_hidden`]）。
+/// 共用終端服務沒在用時一律前台：沒有窗格可以藏，開在背景就看不到也找不回來
+pub(crate) fn remote_hidden(pref: Option<&str>, service_active: bool) -> bool {
+    if !service_active {
+        return false;
+    }
+    match pref {
+        Some("foreground") => false,
+        Some("background") => true,
+        _ => relaunch_hidden(service_active).0,
+    }
+}
+
 /// 組一扇視窗：Claude 本體記 kind "claude"，其餘記 "window"
 pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool, env: BTreeMap<String, String>) -> WinSpec {
     let argv: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
@@ -414,7 +428,9 @@ mod tests {
         let local_fn = local.split("pub fn partner_launch_local").nth(1).unwrap().split("pub(crate) enum ModelPlan").next().unwrap();
         assert!(local_fn.contains("start_window_noted("), "本機開新夥伴走開窗點");
         let remote_fn = local.split("pub fn start_remote_window").nth(1).unwrap().split("pub fn start_pi_session").next().unwrap();
-        assert!(remote_fn.contains("start_window(name, &command, &args, &cwd, hidden)"), "遠端開新夥伴走開窗點");
+        assert!(remote_fn.contains("start_window_split(name, &command, &args, &cwd, show.in_term, show.in_console)"), "遠端開新夥伴走開窗點（自帶終端與退路主控台的顯示方式分開給）");
+        let split = local.split("pub(super) fn start_window_split").nth(1).unwrap().split("pub(super) fn start_console_window_env").next().unwrap();
+        assert!(split.contains("start_window_windows(title, command, args, cwd, in_term, in_console)"), "遠端開也走同一個 Windows 開窗點");
         // 換模型重開、接回對話、改名退路、接班換手都進 switch::real_launch → local::start_window
         let real = switch.split("pub(crate) fn real_launch").nth(1).unwrap().split("pub(crate) struct RealOs").next().unwrap();
         assert!(real.contains("local::start_window_relaunch("), "real_launch 走重開專用的開窗點");
@@ -435,6 +451,43 @@ mod tests {
     fn 重開的視窗_在服務裡放背景_沒有服務或退回主控台開前台() {
         assert_eq!(relaunch_hidden(true), (true, false), "在用共用終端服務：開在背景；萬一退回原生主控台仍開前台");
         assert_eq!(relaunch_hidden(false), (false, false), "沒有共用終端服務：看不到 ASN 裡的畫面，開前台");
+    }
+
+    /// #931：遠端開新夥伴照這台的設定決定背景與否；終端服務沒在用時不管偏好一律前台
+    #[test]
+    fn 遠端開新夥伴_照這台設定_沒有終端服務一律前台() {
+        for pref in [None, Some("foreground"), Some("background"), Some("怪值")] {
+            assert!(!remote_hidden(pref, false), "沒有共用終端服務：{pref:?} 也開前台");
+        }
+        assert!(remote_hidden(Some("background"), true), "這台設成背景、服務在用：背景");
+        assert!(!remote_hidden(Some("foreground"), true), "這台設成前台：前台");
+        assert!(remote_hidden(None, true), "沒存過：跟重開一樣，服務在用就背景");
+        assert!(remote_hidden(Some("怪值"), true), "看不懂的值：當沒存過");
+        assert_eq!(remote_hidden(None, true), relaunch_hidden(true).0, "沒存過的規則就是重開的規則");
+    }
+
+    /// #931：正式的遠端開一律接續對話（背景開也是）；只有測試用的隱藏視窗不查真實的對話檔；退回原生主控台一律前台
+    #[test]
+    fn 遠端開新夥伴_背景開仍接續對話() {
+        use super::super::local::RemoteShow;
+        for bg in [true, false] {
+            let s = RemoteShow::real(bg);
+            assert!(s.real_resume, "正式路徑（背景={bg}）要接續對話");
+            assert_eq!((s.in_term, s.in_console), (bg, false), "背景只放在自帶終端；退回原生主控台一律前台");
+        }
+        let t = RemoteShow::test_hidden();
+        assert!(!t.real_resume && t.in_term && t.in_console, "測試用：整個藏起來、不查真實的對話檔");
+        // 原始碼守門：接續是看 real_resume，不再跟背景綁在一起；正式呼叫端用 RemoteShow::real 並照這台設定
+        let local = include_str!("local.rs");
+        let remote_fn = local.split("pub fn start_remote_window").nth(1).unwrap().split("pub fn start_pi_session").next().unwrap();
+        let gate = remote_fn.find("if show.real_resume {").expect("接續看 real_resume");
+        assert!(remote_fn[gate..].trim_start_matches("if show.real_resume {").trim_start().starts_with("super::resume::apply_resume_real("), "real_resume 為真時查真實的對話檔");
+        assert!(!remote_fn.contains("if !hidden") && !remote_fn.contains("if !show.in_term"), "接續不能看背景與否");
+        let launcher = include_str!("../bridge/launcher.rs");
+        let start = launcher.split("impl LaunchEnv for SystemEnv").nth(1).unwrap().split("fn live_window").next().unwrap();
+        assert!(start.contains("RemoteShow::real("), "正式遠端開用 RemoteShow::real（接續對話）");
+        assert!(start.contains("remote_hidden(") && start.contains("term_server_active()"), "背景與否照這台設定與終端服務");
+        assert!(!start.contains("test_hidden"), "正式路徑不能用測試用的顯示方式");
     }
 
     /// #906：喚醒、換模型重開、改名的退路、換班接手四條，都經 switch::real_launch 開窗（所以都套用上面的背景規則）

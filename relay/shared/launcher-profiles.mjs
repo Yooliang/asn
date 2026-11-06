@@ -23,7 +23,7 @@ export function buildDefaultProfiles(tools, opts = {}) {
 function profileClaude(cmd, platform) {
   if (platform === 'win32') {
     return {
-      label: 'Claude（互動視窗）',
+      label: 'Claude',
       mode: 'window',
       engine: 'claude',
       model: 'claude',
@@ -32,7 +32,7 @@ function profileClaude(cmd, platform) {
     }
   }
   return {
-    label: 'Claude（互動視窗）',
+    label: 'Claude',
     mode: 'window',
     engine: 'claude',
     model: 'claude',
@@ -46,7 +46,7 @@ function profileCodex(cmd, platform) {
     ? ['/c', cmd, '-c', 'check_for_update_on_startup=false', '-s', 'workspace-write', '-a', 'on-request', 'resume', '{name}']
     : ['-lc', `${shellQuote(cmd)} -c check_for_update_on_startup=false -s workspace-write -a on-request resume {name}`]
   return {
-    label: 'Codex（互動視窗）',
+    label: 'Codex',
     mode: 'window',
     engine: 'codex',
     model: 'codex',
@@ -58,7 +58,7 @@ function profileCodex(cmd, platform) {
 function profileGemini(cmd, home) {
   const cwd = path.join(home, '.asn', 'workers', '{name}')
   return {
-    label: 'Gemini（背景運行、內建通道）',
+    label: 'Gemini',
     mode: 'background',
     engine: 'acp',
     model: 'gemini',
@@ -72,7 +72,7 @@ function profileGemini(cmd, home) {
 function profileGrok(cmd, home) {
   const cwd = path.join(home, '.asn', 'workers', '{name}')
   return {
-    label: 'Grok（背景運行、內建通道）',
+    label: 'Grok',
     mode: 'background',
     engine: 'acp',
     model: 'grok',
@@ -85,7 +85,7 @@ function profileGrok(cmd, home) {
 
 function profilePi(cmd, platform) {
   return {
-    label: 'pi（互動視窗，實驗）',
+    label: 'pi',
     mode: 'window',
     engine: 'pi',
     model: 'pi',
@@ -121,9 +121,9 @@ export function normalizePath(p) {
 
 /** UI 用：各模型的展示資訊 */
 export const MODEL_CATALOG = [
-  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Claude 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗（不是 ASN 自帶終端），靠 asn 外掛收發信' }, acp: { status: 'no', why: '刻意不做（帳務風險，#273）' }, pi: { status: 'untested', why: 'pi 可以用 Claude 訂閱登入，ASN 裡還沒有實際用過' } } },
-  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Codex 還沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗，還沒有真機實測' }, acp: { status: 'no', why: '還沒有內建通道' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者，ASN 裡還沒有實際用過' } } },
-  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.86 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'no', why: 'pi 已拿掉 Gemini 訂閱登入，不建議' } } },
-  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.84 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'untested', why: 'pi 有 xai 提供者，ASN 裡還沒有實際用過' } } },
-  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, channelOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: 'pi 自己就是互動視窗，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 沒有內建通道' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
+  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '開在 ASN 終端，可以收發信', channels: { term: { status: 'window', why: '開在 ASN 終端，靠 ASN 外掛收發信' }, acp: { status: 'no', why: 'Claude 不支援' }, pi: { status: 'untested', why: 'pi 可以用 Claude 訂閱登入' } } },
+  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '開在 ASN 終端', channels: { term: { status: 'window', why: '開在 ASN 終端' }, acp: { status: 'no', why: 'Codex 不支援' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者' } } },
+  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '沒有畫面，收到信才起來', channels: { term: { status: 'noinbox', why: '可以開在 ASN 終端，但收不到信' }, acp: { status: 'ok', why: '沒有畫面，可以收發信' }, pi: { status: 'no', why: 'pi 不支援 Gemini 訂閱登入' } } },
+  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '沒有畫面，收到信才起來', channels: { term: { status: 'noinbox', why: '可以開在 ASN 終端，但收不到信' }, acp: { status: 'ok', why: '沒有畫面，可以收發信' }, pi: { status: 'untested', why: 'pi 有 xai 提供者' } } },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '開在 ASN 終端，只能開在前台', foregroundOnly: true, channelOnly: true, channels: { term: { status: 'window', why: '開在 ASN 終端，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 不支援' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
 ]

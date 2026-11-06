@@ -717,7 +717,7 @@ const app = createApp({
       try {
         const name = lch.name.trim()
         const body = lchReq.value
-        if (!body) throw new Error('請選一個經 pi 的模型')
+        if (!body) throw new Error('請選一個 pi 的模型')
         const r = await invoke('android_launch', { body })
         if (!r?.id) throw new Error('送出失敗')
         Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })

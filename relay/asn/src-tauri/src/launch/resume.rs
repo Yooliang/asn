@@ -273,6 +273,6 @@ mod tests {
     fn 守門_兩條開視窗路徑都接上接續() {
         let local = include_str!("local.rs");
         assert!(local.matches("super::resume::apply_resume_real(").count() >= 2, "partner_launch_local 與 start_remote_window 都要接續");
-        assert!(local.contains("if !hidden"), "hidden（測試用）不可讀真實的對話檔");
+        assert!(local.contains("if show.real_resume {"), "測試用的隱藏視窗（real_resume＝false）不可讀真實的對話檔；正式路徑背景開也要接續（#931）");
     }
 }

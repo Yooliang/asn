@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MODEL_CATALOG as sharedCatalog } from '../../shared/launcher-profiles.mjs'
-import { MODEL_CATALOG as uiCatalog, RUN_LABEL, runChoices } from '../ui/lib/model-catalog.mjs'
+import { MODEL_CATALOG as uiCatalog, RUN_OPTION_LABEL, customRunOptions } from '../ui/lib/model-catalog.mjs'
 import { remoteModelRows } from '../ui/lib/partner-launch-ui.mjs'
 import { defaultPartnerName, injectPendingGroups, pendingFriend, resolvePending } from '../ui/lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from '../ui/lib/launch-prefs.mjs'
@@ -41,34 +41,14 @@ test('啟動設定記住顯示方式', () => {
   assert.equal(normalizeLaunchPrefs({ launchDisplay: 'weird' }).launchDisplay, 'foreground')
 })
 
-test('運行二選一：模型決定哪種可用，不支援的反灰並寫原因（Claude／Codex／pi 只有 CLI，Gemini／Grok 只有內建通道）', () => {
-  const by = id => uiCatalog.find(m => m.id === id)
-  for (const id of ['claude', 'codex', 'pi']) {
-    const r = runChoices(by(id))
-    assert.equal(r.selected, 'cli', id)
-    assert.deepEqual(r.choices.map(c => [c.key, c.ok]), [['cli', true], ['acp', false]], id)
-    assert.ok(r.choices[1].why.includes('內建通道') && r.choices[1].why.length > 6, `${id} 要寫原因：${r.choices[1].why}`)
-    assert.equal(r.choices[0].why, '')
-  }
-  for (const id of ['gemini', 'grok']) {
-    const r = runChoices(by(id))
-    assert.equal(r.selected, 'acp', id)
-    assert.deepEqual(r.choices.map(c => [c.key, c.ok]), [['cli', false], ['acp', true]], id)
-    assert.match(r.choices[0].why, /在這台開終端…/, id)   // 0.1.86 起終端開得起來，只是收不到信（#351 第 1 步改正舊說法）
-    assert.match(r.choices[0].why, /收不到/, id)
-  }
-  assert.deepEqual(runChoices(by('claude')).choices.map(c => c.label), [RUN_LABEL.cli, RUN_LABEL.acp])
-  assert.match(RUN_LABEL.acp, /背景運行/); assert.match(RUN_LABEL.cli, /終端機視窗/)
-})
-
-test('運行二選一：目錄上沒有的自訂設定只看那台回報的 mode，不支援的用通用原因；沒有資料不丟錯', () => {
-  const rows = remoteModelRows({ profiles: [{ id: 'mine', label: '自訂視窗', mode: 'window' }, { id: 'bg', label: '自訂背景', mode: 'background' }, { id: 'claude', label: 'Claude' }] })
-  const [w, b, c] = rows.map(runChoices)
-  assert.equal(w.selected, 'cli'); assert.equal(w.choices[1].ok, false); assert.match(w.choices[1].why, /不支援/)
-  assert.equal(b.selected, 'acp'); assert.equal(b.choices[0].ok, false)
-  assert.match(c.choices[1].why, /Claude/, '回報的 profile 在目錄上有：用目錄的原因')
-  assert.equal(runChoices(undefined).selected, 'cli')
-  assert.equal(runChoices(null).choices.length, 2)
+test('自訂設定的運行（#931）：只看那台回報的 mode，背景＝acp通道、其餘＝asn終端（原生 cli）；手機與電腦版同一份', () => {
+  const rows = remoteModelRows({ profiles: [{ id: 'mine', label: '自訂視窗', mode: 'window' }, { id: 'bg', label: '自訂背景', mode: 'background' }] })
+  const [w, b] = rows.map(customRunOptions)
+  assert.equal(w.selected, 'term'); assert.deepEqual(w.options.map(o => [o.key, o.ok]), [['acp', false], ['term', true]]); assert.match(w.options[0].why, /不支援/)
+  assert.equal(b.selected, 'acp'); assert.deepEqual(b.options.map(o => [o.key, o.ok]), [['acp', true], ['term', false]]); assert.match(b.options[1].why, /acp通道/)
+  assert.deepEqual(w.options.map(o => o.label), [RUN_OPTION_LABEL.acp, RUN_OPTION_LABEL.term], '名稱跟四選一同一份')
+  assert.equal(customRunOptions(undefined).selected, 'term')
+  assert.equal(customRunOptions(null).options.length, 2)
 })
 
 test('三條通道（#351 第 1 步）：每個模型都有 term／acp／pi 的狀態與原因；兩份目錄一致；只是說明不改運行選項', async () => {
@@ -82,7 +62,7 @@ test('三條通道（#351 第 1 步）：每個模型都有 term／acp／pi 的�
   const by = id => channelRows(uiCatalog.find(m => m.id === id))
   assert.equal(by('gemini').find(r => r.key === 'acp').status, 'ok')
   assert.equal(by('grok').find(r => r.key === 'term').status, 'noinbox', '終端開得起來但收不到信')
-  assert.equal(by('claude').find(r => r.key === 'acp').status, 'no', 'Claude 刻意不做內建通道')
+  assert.equal(by('claude').find(r => r.key === 'acp').status, 'no', 'Claude 不支援 acp通道')
   assert.deepEqual(channelRows({ id: 'custom' }), [], '自訂設定沒有 channels')
   assert.equal(by('grok').find(r => r.recommended).key, 'acp', 'Grok 建議內建通道')
   assert.equal(by('pi').find(r => r.recommended).key, 'pi', 'pi 本身建議經 pi')

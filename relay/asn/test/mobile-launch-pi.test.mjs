@@ -52,13 +52,14 @@ test('送出內容：經 pi 帶清單裡的提供者與模型，profile 一律 p
 test('送出前檢查：沒有能用的開法、經 pi 沒選到清單裡的模型都擋下', () => {
   assert.equal(launchFormError(f(), elig, { run: 'pi', piOk: true }), '')
   assert.match(launchFormError(f(), elig, { run: null }), /沒有能用的開法/)
-  assert.match(launchFormError(f(), elig, { run: 'pi', piOk: false }), /經 pi 的模型/)
+  assert.match(launchFormError(f(), elig, { run: 'pi', piOk: false }), /pi 的模型/)
   assert.equal(launchFormError(f(), elig), '', '舊的呼叫方式照常')
 })
 
 test('舊版電腦提醒與開好時寫出實際模型（asn真 審 #471）', async () => {
   const { PI_REMOTE_VERSION_NOTE, appearedModel, progressView } = await import('../ui/lib/mobile-launch.mjs')
-  assert.match(PI_REMOTE_VERSION_NOTE, /0\.1\.101 以上/)
+  assert.match(PI_REMOTE_VERSION_NOTE, /預設模型/)
+  assert.doesNotMatch(PI_REMOTE_VERSION_NOTE, /\d+\.\d+\.\d+/, '畫面上不寫版本號')
   const friends = [{ node: 'H', agent: '小皮', status: 'online', model: 'minimax/MiniMax-M3' }, { node: 'H', agent: '舊的', status: 'offline', model: 'x' }]
   assert.equal(appearedModel(friends, 'H', '小皮'), 'minimax/MiniMax-M3')
   assert.equal(appearedModel(friends, 'H', '舊的'), '', '離線的不算')
