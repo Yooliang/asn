@@ -83,12 +83,28 @@ test('#884 shouldRestoreForeground：讀畫面關著照舊切；開著只有信�
   assert.equal(shouldRestoreForeground({ watching: true, notices: trust, name: '別人' }), false)
 })
 
-test('#884 守門：逾時切前台之前一定經過 shouldRestoreForeground，用設定頁的 screenWatch，不另寫文字比對', () => {
+test('#884 表格：非 Windows 設定頁開著但讀畫面沒在跑（partnerNoticesActive 為 false 或查不到）→ 照舊切前台', () => {
+  // list.js 把 partnerNoticesActive 的結果當 watching；不是 true 一律 false，也不會去查 notices
+  const asWatching = r => r === true
+  const cases = [
+    { name: '非 Windows 沒設環境變數（設定頁顯示開）', active: false, notices: [], want: true },
+    { name: '查詢丟錯', active: undefined, notices: [], want: true },
+    { name: 'Windows 預設跑著、沒看到信任框', active: true, notices: [], want: false },
+    { name: 'Windows 預設跑著、看到信任框', active: true, notices: [{ name: '墊底夥伴', code: 'trust' }], want: true },
+    { name: '使用者在設定頁關掉', active: false, notices: [], want: true },
+  ]
+  for (const c of cases) {
+    assert.equal(shouldRestoreForeground({ watching: asWatching(c.active), notices: c.notices, name: '墊底夥伴' }), c.want, c.name)
+  }
+})
+
+test('#884 守門：逾時切前台之前一定經過 partnerNoticesActive 與 shouldRestoreForeground，不看設定頁的值，不另寫文字比對', () => {
   const src = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const at = src.indexOf('findBackgroundTimeouts(launchPending.value')
   assert.ok(at > 0, '找不到逾時處理')
   const seg = src.slice(at, at + 1800)
-  const iW = seg.indexOf('bridge.screenWatch'), iN = seg.indexOf('transport.partnerNotices()'), iCheck = seg.indexOf('shouldRestoreForeground({'), iSet = seg.indexOf('transport.partnerConsoleSet')
-  assert.ok(iW > 0 && iN > iW && iCheck > iN && iSet > iCheck, '順序：screenWatch → partnerNotices → shouldRestoreForeground → 切前台')
+  const iW = seg.indexOf('transport.partnerNoticesActive()'), iN = seg.indexOf('transport.partnerNotices()'), iCheck = seg.indexOf('shouldRestoreForeground({'), iSet = seg.indexOf('transport.partnerConsoleSet')
+  assert.ok(iW > 0 && iN > iW && iCheck > iN && iSet > iCheck, '順序：partnerNoticesActive → partnerNotices → shouldRestoreForeground → 切前台')
+  assert.ok(!seg.includes('bridge.screenWatch'), '不能再用設定頁的值當依據')
   assert.ok(!/do you trust|trust this folder/i.test(seg), '不要在前端寫信任框文字比對')
 })

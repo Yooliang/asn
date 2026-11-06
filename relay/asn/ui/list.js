@@ -878,11 +878,12 @@ async function pollLaunchResults() {
   for (const p of findBackgroundTimeouts(launchPending.value, still, now, info.node)) {
     p.trustRestored = true   // 每一列只查一次；#884：逾時只是候選，後端讀畫面的監看說這位在信任框（trust）才切前台
     void (async () => {
-      const watching = bridge.screenWatch   // 設定頁「夥伴卡住時跳提示」現在的值（後端讀畫面的監看開著才有 trust 代號）
+      let watching = false   // 讀畫面這次實際有沒有在跑（不看設定頁的值：非 Windows 沒設環境變數時，設定頁開著也沒在讀）
+      try { watching = (await transport.partnerNoticesActive()) === true } catch { /* 查不到當成沒在跑，照舊切前台 */ }
       let notices = []
-      if (watching === true) { try { notices = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
+      if (watching) { try { notices = await transport.partnerNotices() } catch { /* 查不到就不切前台 */ } }
       if (!shouldRestoreForeground({ watching, notices, name: p.agent })) { console.info('[ASN] 背景啟動逾時但後端沒看到信任框，不切前台', p.agent); return }
-      if (watching !== true) console.info('[ASN] 讀畫面關著，背景啟動逾時照舊切前台', p.agent)
+      if (!watching) console.info('[ASN] 讀畫面這次沒在跑，照舊切前台', p.agent)
       const eng = engineForProfile(p.launchProfile || 'claude')
       await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })
       console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')

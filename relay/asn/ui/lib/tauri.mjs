@@ -38,6 +38,7 @@ export const transport = {
   partnerPermissionPrompt: name => invoke('partner_permission_prompt', { name }),   // { name, text, hash, complete }
   partnerPermissionAnswer: (name, hash, allow) => invoke('partner_permission_answer', { name, hash, allow }),
   autoResumeStatus: () => invoke('auto_resume_status'),      // 電腦重開後自動接回的結果（#767）；沒有就是 null
+  partnerNoticesActive: () => invoke('partner_notices_active'),   // 讀畫面這次實際有沒有在跑（true/false）；查不到由呼叫端當成沒在跑
   partnerNotices: () => invoke('partner_notices'),           // 夥伴卡住的提醒：[{ name, code }]（只有視窗名與固定代號）
   termList: () => invoke('term_list'),                       // 這次由 ASN 開啟的終端：[{ id, profile, pid, started_ms, cwd }]（只在電腦版）
   termStatus: req => invoke('term_status', { req }),         // { id } → { state, prompt? }；等你回答時帶 prompt
