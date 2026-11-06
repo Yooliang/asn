@@ -1830,9 +1830,12 @@ pub fn run() {
                         deliver_invite(&h, code);
                     }
                 });
-                // 沒經過安裝程式（開發、綠色版）也讓 asn:// 指到這個程式；失敗不影響其他功能
+                // 沒經過安裝程式（開發、綠色版）也讓 asn:// 指到這個程式；失敗不影響其他功能。
+                // 截圖模式（--shot，測試、CI）不登記：它會改真實使用者的登錄檔，把 asn:// 指到測試用的執行檔
                 #[cfg(any(windows, target_os = "linux"))]
-                let _ = dl.register("asn");
+                if !is_shot {
+                    let _ = dl.register("asn");
+                }
             }
             #[cfg(desktop)]
             if handle.state::<App>().shot.is_none() {
@@ -2112,6 +2115,14 @@ pub fn run() {
 
 #[cfg(all(test, feature = "gui"))]
 mod tests {
+    #[test]
+    fn 守門_截圖模式不登記_asn_協定_不改使用者的登錄檔() {
+        let src = include_str!("lib.rs").split("mod tests {").next().unwrap();
+        let at = src.find("dl.register(\"asn\")").expect("有登記 asn:// 的地方");
+        let before = &src[at.saturating_sub(120)..at];
+        assert!(before.contains("if !is_shot"), "登記 asn:// 前要擋掉截圖模式：{before}");
+    }
+
     use super::*;
 
     #[test]
