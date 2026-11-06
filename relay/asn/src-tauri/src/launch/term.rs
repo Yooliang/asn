@@ -179,6 +179,8 @@ pub(crate) const VIEW_NO_DESKTOP: &str = "這台電腦的桌面目前沒有人�
 const VIEW_FAIL_WINDOW: Duration = Duration::from_secs(3);
 const VIEW_POLL: Duration = Duration::from_millis(200);
 const VIEW_BIRTH_RETRIES: u32 = 5;
+/// 收掉看畫面的 GUI 之後，等它真的消失的次數（每次隔 `VIEW_POLL`）。Windows 結束程序是非同步的，立刻查可能還在
+const VIEW_GONE_RETRIES: u32 = 10;
 /// 看畫面的 GUI 至少要活過這麼久才算開成功：桌面沒人登入時它會先冒出視窗、約 0.3 秒後才崩潰（B4 工作機實測）
 const VIEW_MIN_ALIVE: Duration = Duration::from_secs(1);
 const TRUNC_MARK: &str = "…（已截斷）";
@@ -1129,6 +1131,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         view_log(&format!("mux-view unview pid={} recorded={} now={now_at:?}", v.pid, v.started_ms));
         if now_at == Some(v.started_ms) {
             self.runner.kill_tree(v.pid);
+            // 結束失敗不能當成功（#596）：還活著就把紀錄放回去、回錯。清掉紀錄的話，畫面還在、按鈕卻翻回「前台顯示」，再按會多開一個
+            let mut gone = false;
+            for _ in 0..VIEW_GONE_RETRIES {
+                if self.runner.started_ms(v.pid) != Some(v.started_ms) {
+                    gone = true;
+                    break;
+                }
+                self.runner.sleep(VIEW_POLL);
+            }
+            if !gone {
+                view_log(&format!("mux-view unview pid={} 結束後還活著，保留紀錄", v.pid));
+                self.inner.lock().unwrap().viewers.push(v);
+                return Err("看畫面的視窗沒有關掉，請再按一次，或直接關掉那個視窗".into());
+            }
         }
         Ok(())
     }
@@ -3007,6 +3023,8 @@ mod tests {
         calls: RefCell<Vec<(Vec<String>, BTreeMap<String, String>)>>,
         started: RefCell<Vec<Option<u64>>>,
         tree_killed: RefCell<Vec<u32>>,
+        /// 真＝kill_tree 之後程序還活著（模擬 taskkill 啟動失敗，#596）；預設假＝結束之後 started_ms 就查不到
+        survive_kill: RefCell<bool>,
         descendants: RefCell<Vec<u32>>,
         list_json: RefCell<String>,
         screen: RefCell<String>,
@@ -3051,6 +3069,7 @@ mod tests {
             calls: RefCell::new(Vec::new()),
             started: RefCell::new(started),
             tree_killed: RefCell::new(Vec::new()),
+            survive_kill: RefCell::new(false),
             descendants: RefCell::new(Vec::new()),
             list_json: RefCell::new(list_json),
             screen: RefCell::new(screen),
@@ -3153,6 +3172,10 @@ mod tests {
         }
         fn kill_tree(&self, pid: u32) {
             self.inner.tree_killed.borrow_mut().push(pid);
+            if !*self.inner.survive_kill.borrow() {
+                // 真的程序結束之後就查不到建立時間
+                self.inner.pid_started.borrow_mut().entry(pid).or_default().insert(0, None);
+            }
         }
         fn window_up(&self, _pid: u32) -> bool {
             *self.inner.window_up.borrow()
@@ -5488,6 +5511,26 @@ mod tests {
             // 沒有畫面時的背景什麼都不做
             rig.svc.unview(&id).unwrap();
             assert_eq!(rig.runner.killed(), vec![42]);
+        }
+
+        #[test]
+        fn 背景_結束失敗不當成功_保留紀錄_回錯_再按前台不多開() {
+            // #596：taskkill 啟動失敗時看畫面的 GUI 還活著；原本照樣清紀錄，按鈕翻回「前台顯示」，再按就多開一個
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view(&id).unwrap();
+            let spawns = view_spawns(&rig.runner).len();
+            *rig.runner.inner.survive_kill.borrow_mut() = true;
+            let err = rig.svc.unview(&id).unwrap_err();
+            assert!(err.contains("沒有關掉"), "{err}");
+            assert!(rig.svc.viewing(&id), "還活著，紀錄要留著：按鈕才不會翻成『前台顯示』");
+            // 再按前台：只把既有的叫到前面，不再開一個
+            rig.svc.view(&id).unwrap();
+            assert_eq!(view_spawns(&rig.runner).len(), spawns, "沒有多開");
+            // 之後結束成功就能收掉
+            *rig.runner.inner.survive_kill.borrow_mut() = false;
+            rig.svc.unview(&id).unwrap();
+            assert!(!rig.svc.viewing(&id));
         }
 
         #[test]
