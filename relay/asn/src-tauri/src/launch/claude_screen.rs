@@ -488,6 +488,17 @@ mod tests {
     }
 
     #[test]
+    fn 權限詢問_最底下多一條嵌著視窗名字的分隔線也認得() {
+        // ASN 開的夥伴都有名字：Claude 在頁尾下面再畫一條「─── 名字 ─」（40家用 實機，#863）
+        let named = format!("{}\n────────── wake-test3 ─\n", fixture!("claude-permission-write").trim_end());
+        let s = classify(&named).expect("帶名字線的權限框");
+        assert_eq!(s.kind, K::Permission, "{}", s.question);
+        assert_eq!((s.allow_once, s.deny), (Some(1), Some(3)));
+        let t = phone_text(&named).expect("手機看得到內容");
+        assert!(!t.text.contains("wake-test3"), "{}", t.text);
+    }
+
+    #[test]
     fn 權限詢問_三種工具都認得_拒絕對到最後的_no() {
         for (text, deny) in [(fixture!("claude-permission-bash"), 4), (fixture!("claude-permission-write"), 3), (fixture!("claude-permission-webfetch"), 3)] {
             let s = classify(text).expect("要認得");
