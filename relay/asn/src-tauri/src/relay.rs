@@ -994,6 +994,20 @@ pub fn build_acct_status_body(ids: &[String]) -> Result<Value, String> {
     }
 }
 /// 手機決定終端請求（term_req_decide）的請求體：編號是 UUID、決定只有 approve／deny、雜湊是 64 位小寫十六進位（原樣帶回，後台比對）、選項 0..=99（拒絕時不帶）
+/// 手機回答權限框的內容（#853）：只有編號、選項數字、雜湊
+pub fn build_perm_decide_body(id: &str, choice_n: i64, hash: &str) -> Result<Value, String> {
+    if !is_uuid_str(id) {
+        return Err("請求編號不對".into());
+    }
+    if !(1..=9).contains(&choice_n) {
+        return Err("選項編號不對".into());
+    }
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("內容雜湊格式不對".into());
+    }
+    Ok(json!({ "id": id, "choice_n": choice_n, "hash": hash }))
+}
+
 pub fn build_term_decide_body(id: &str, decision: &str, choice_n: Option<i64>, hash: &str) -> Result<Value, String> {
     if !is_uuid_str(id) {
         return Err("請求編號不對".into());

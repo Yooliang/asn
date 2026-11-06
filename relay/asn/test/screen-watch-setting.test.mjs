@@ -16,10 +16,10 @@ test('設定頁有開關，改了會送到後端；後端沒回報時當作開',
   assert.match(list, /screenWatch: s\.screen_watch !== false/, '預設開：舊後端沒有這個欄位也顯示開著')
 })
 
-test('說明照實寫：看畫面、不離開這台、支援範圍', () => {
+test('說明照實寫：看畫面、其他設備看到什麼、支援範圍', () => {
   const panel = read('ui/lib/settings-panel.mjs')
   assert.match(panel, /定時看夥伴視窗的畫面/)
-  assert.match(panel, /畫面內容不會離開這台電腦/)
+  assert.match(panel, /其他提示在別的設備只看得到/)   // 權限框會傳到手機（#853），見 perm-ask.test.mjs
   assert.match(panel, /只支援 Windows/)
 })
 

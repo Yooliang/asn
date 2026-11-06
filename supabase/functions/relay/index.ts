@@ -29,6 +29,7 @@ import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_sh
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
+import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
@@ -657,6 +658,14 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedTerm = TERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleTermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedTerm);
+    return json(r.status, r.body);
+  }
+  // 手機回答權限框（見 _shared/perm_request.ts）：電腦用節點金鑰建立、領取、回報；手機用本人簽章列出、決定
+  if (action && PERM_REQ_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedPerm = PERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handlePermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPerm);
     return json(r.status, r.body);
   }
   // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：

@@ -686,6 +686,33 @@
         <button type="button" class="m-btn m-ops-cancel" :disabled="tq.busy" @click="laterTermReq">{{ TERMREQ_TEXT.later }}</button>
       </section>
     </div>
+    <!-- 手機回答權限框（#853）：全文用文字節點顯示，不走 v-html；只有電腦給的選項，按一個就送那個數字 -->
+    <div class="m-ops" v-if="nav.sheet === 'permreq' && pq.cur">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="PERMREQ_TEXT.title">
+        <h2 class="m-ops-h">{{ PERMREQ_TEXT.title }}</h2>
+        <p class="m-ops-lead" v-if="pq.cur.options.length">{{ PERMREQ_TEXT.lead }}</p>
+        <dl class="m-ops-rows">
+          <dt>{{ PERMREQ_TEXT.deviceLabel }}</dt><dd>{{ pq.cur.deviceName }}</dd>
+          <dt>{{ PERMREQ_TEXT.windowLabel }}</dt><dd>{{ pq.cur.window }}</dd>
+          <dt>{{ PERMREQ_TEXT.textLabel }}</dt><dd class="m-term-preview m-perm-text">{{ pq.cur.text }}</dd>
+        </dl>
+        <p class="m-note" v-if="!pq.cur.options.length">{{ PERMREQ_TEXT.viewOnly }}</p>
+        <p class="m-note" v-else-if="!pq.cur.complete">{{ PERMREQ_TEXT.incomplete }}</p>
+        <p class="m-note" v-else-if="pq.cur.text.includes('Type something')">{{ PERMREQ_TEXT.noType }}</p>
+        <p class="m-err" v-if="pq.error" role="alert">{{ pq.error }}</p>
+        <template v-if="pq.result">
+          <p :class="pq.result.ok ? 'm-note' : 'm-err'" role="status">{{ pq.result.text }}</p>
+          <button type="button" class="m-btn m-ops-cancel" @click="laterPermReq">{{ PERMREQ_TEXT.close }}</button>
+        </template>
+        <p class="m-note" v-else-if="pq.waiting" role="status">{{ PERMREQ_TEXT.waiting }}</p>
+        <template v-else>
+          <div class="m-term-opts" role="group" :aria-label="PERMREQ_TEXT.optionLabel">
+            <button type="button" class="m-btn m-term-opt" v-for="o in pq.cur.options" :key="o.n" :disabled="pq.busy || !pq.armed" @click="decidePermReq(o.n)">{{ o.label }}</button>
+          </div>
+          <button type="button" class="m-btn m-ops-cancel" :disabled="pq.busy" @click="laterPermReq">{{ PERMREQ_TEXT.later }}</button>
+        </template>
+      </section>
+    </div>
     <group-sheet :flow="groupFlow"></group-sheet>
   </template>
 </div>

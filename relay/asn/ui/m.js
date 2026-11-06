@@ -9,7 +9,7 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, tabLabel as tabLabelOf, secretNav, termReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -17,6 +17,7 @@ import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
+import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
@@ -843,6 +844,51 @@ const app = createApp({
     document.addEventListener('visibilitychange', () => { void checkSecrets() })
     setInterval(() => { void checkSecrets() }, SECRET_POLL_MS)
     void listen('relay-bell', () => { void checkSecrets() })
+    // ---------- 手機回答權限框（#853）：電腦上的夥伴在問權限，跳出全文和選項，按一個就送那個數字
+    // 全文只給本人看（不寫儲存、不進紀錄、不放系統通知）；沒登入或後台還沒部署就靜默略過；門鈴沒有內容
+    const pq = reactive({ cur: null, armed: false, busy: false, error: '', waiting: false, result: null })
+    const pqDismissed = new Set()
+    let pqArmTimer = 0, pqResultTimer = 0
+    const pqClose = () => { clearTimeout(pqArmTimer); clearInterval(pqResultTimer); Object.assign(pq, { cur: null, armed: false, busy: false, error: '', waiting: false, result: null }) }
+    const pqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
+    async function checkPermReqs() {
+      if (pq.busy || pq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
+      let list
+      try { list = pqList(await invoke('android_perm_req_list'), pqDeviceName) } catch { return }
+      const next = pqNext(list, pqDismissed)
+      if (!next || nav.sheet) return
+      Object.assign(pq, { cur: next, armed: false, busy: false, error: '', waiting: false, result: null })
+      clearTimeout(pqArmTimer)
+      pqArmTimer = setTimeout(() => { pq.armed = true }, PQ_ARM_MS)
+      go(permReqNav())
+    }
+    function pqWaitResult(id) {
+      let tries = 0
+      pq.waiting = true
+      clearInterval(pqResultTimer)
+      pqResultTimer = setInterval(async () => {
+        tries += 1
+        let r = null
+        try { r = pqResult(await invoke('android_perm_req_list'), id) } catch { /* 下一輪再查 */ }
+        if (!r && tries < PQ_RESULT_TRIES) return
+        clearInterval(pqResultTimer)
+        Object.assign(pq, { waiting: false, result: r ?? { ok: false, text: PERMREQ_TEXT.unknown } })
+      }, PQ_RESULT_MS)
+    }
+    async function decidePermReq(n) {
+      const cur = pq.cur
+      if (!cur || pq.busy || !pq.armed) return
+      const args = pqDecideArgs(cur, n)
+      if (!args) return
+      pq.busy = true; pq.error = ''
+      try { await invoke('android_perm_req_decide', { id: args.id, choiceN: args.choiceN, hash: args.hash }); pqDismissed.add(cur.id); pqWaitResult(cur.id) }
+      catch (e) { pq.error = pqError(e); pq.busy = false }
+    }
+    const laterPermReq = () => { if (pq.cur) pqDismissed.add(pq.cur.id); history.back() }
+    watch(() => nav.sheet, s => { if (s !== 'permreq' && pq.cur) pqClose() })
+    document.addEventListener('visibilitychange', () => { void checkPermReqs() })
+    setInterval(() => { void checkPermReqs() }, PQ_POLL_MS)
+    void listen('relay-bell', () => { void checkPermReqs() })
     // ---------- 電腦要往終端送字／代答提問（#285、#296）：跳出確認面板，本人按確認或拒絕；桌面才能建立請求，手機只能決定 ----------
     // 預覽文字只給本人看（不寫儲存、不進 console）；沒登入或後台還沒部署就靜默略過；通知只敲門鈴，不帶內容
     const tq = reactive({ cur: null, choice: null, error: '', busy: false, left: 0 })
@@ -1034,6 +1080,7 @@ const app = createApp({
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, pages, TAB_LABEL, tabLabel, fourthPage, fourthTitle, closePage, myName, meForChat, lastOf,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
+      pq, PERMREQ_TEXT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,

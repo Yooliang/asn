@@ -186,6 +186,7 @@ fn screen_label(code: &str) -> Option<&'static str> {
         "bypass_warning" => "卡在略過權限警告",
         "login" => "需要登入",
         "usage_limit" => "額度用完",
+        "question" | "question_view" => "等你回答：問題",
         "attention" => "需要人工確認",
         _ => return None,
     })

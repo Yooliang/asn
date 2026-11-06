@@ -1727,7 +1727,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 按鈕前的全部核對，回（畫面文字, 判斷結果, 窗格資訊）。任何一項不符都回錯，不給按鈕也不送字：
     /// 視窗名只對到一扇 Claude 夥伴、session 程序活著（由呼叫端查）而且在這扇視窗的程序樹內、有結束暗號且畫面上沒有標記、標題非空、判定是權限詢問
-    fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+    fn partner_screen_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, String), String> {
         let Some(session_pid) = session_pid else { return Err("確認不了這個夥伴還在跑".into()) };
         let ids: Vec<String> = self.watched_partners().into_iter().filter(|(_, n)| n == name).map(|(id, _)| id).collect();
         let [id] = ids.as_slice() else { return Err("找不到這個夥伴視窗".into()) };
@@ -1753,8 +1753,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !panes.iter().any(|p| p.pane_id == snap.pane_id && !p.title.trim().is_empty()) {
             return Err("確認不了這扇視窗還是 Claude".into());
         }
+        Ok((snap, text))
+    }
+
+    fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+        let (snap, text) = self.partner_screen_checked(name, session_pid)?;
         let screen = super::claude_screen::classify(&text).filter(|s| s.kind == super::claude_screen::ClaudeScreenKind::Permission).ok_or("這個提示已經不在畫面上")?;
         let prompt = super::claude_screen::permission_text(&text).ok_or("這個提示已經不在畫面上")?;
+        Ok((snap, screen, prompt))
+    }
+
+    /// 手機要看的框：權限框或選項框（#853）。其他畫面一律拿不到文字
+    fn phone_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+        let (snap, text) = self.partner_screen_checked(name, session_pid)?;
+        let screen = super::claude_screen::classify(&text).filter(|s| super::claude_screen::goes_to_phone(super::claude_screen::status_code(s.kind))).ok_or("這個提示已經不在畫面上")?;
+        let prompt = super::claude_screen::phone_text(&text).ok_or("這個提示已經不在畫面上")?;
         Ok((snap, screen, prompt))
     }
 
@@ -1762,6 +1775,26 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     fn permission_prompt_with(&self, name: &str, session_pid: Option<u32>) -> Result<PermissionPrompt, String> {
         let (_, _, p) = self.permission_checked(name, session_pid)?;
         Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete })
+    }
+
+    /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
+    fn phone_offer_with(&self, name: &str, session_pid: Option<u32>) -> Result<PhoneOffer, String> {
+        let (_, screen, p) = self.phone_checked(name, session_pid)?;
+        Ok(phone_offer(name, &screen, p))
+    }
+
+    /// 手機按了一個選項。送之前全部重查：框還在、內容和選項沒變、這個數字還在選項裡。只送一個數字鍵，不帶 Enter
+    fn phone_answer_with(&self, name: &str, hash: &str, n: u32, session_pid: Option<u32>) -> Result<(), String> {
+        let (snap, screen, p) = self.phone_checked(name, session_pid)?;
+        let offer = phone_offer(name, &screen, p);
+        if offer.hash != hash {
+            return Err("提示內容變了，沒有送出".into());
+        }
+        if !(1..=9).contains(&n) || !offer.options.iter().any(|o| o.n == n) {
+            return Err("這個提示沒有這個選項".into());
+        }
+        let dir = self.dir()?;
+        self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &n.to_string())
     }
 
     /// 本人在本機畫面按了「允許這一次」或「拒絕」。送之前全部重查，文字要和顯示給本人的相同；
@@ -2730,6 +2763,30 @@ fn live_session_named(name: &str) -> Option<u32> {
     hits.next().is_none().then_some(pid)
 }
 
+/// 傳到手機的全文上限，和後台相同（字元數）
+const PHONE_TEXT_MAX: usize = 16_000;
+
+/// 傳到手機的權限框
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhoneOffer {
+    pub name: String,
+    pub text: String,
+    pub complete: bool,
+    pub options: Vec<super::claude_screen::ClaudeOption>,
+    pub hash: String,
+}
+
+fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super::claude_screen::PromptText) -> PhoneOffer {
+    let too_long = p.text.chars().count() > PHONE_TEXT_MAX;
+    let text: String = p.text.chars().take(PHONE_TEXT_MAX).collect();
+    let complete = p.complete && !too_long;
+    let options = super::claude_screen::phone_options(screen, complete);
+    // 全文和選項都綁進雜湊：選項變了也算內容變了
+    let opts: Vec<String> = options.iter().map(|o| format!("{}:{}", o.n, o.label)).collect();
+    let hash = crate::term_remote::hash_hex(&format!("{text}\u{0}{}\u{0}{complete}", opts.join("\u{0}")));
+    PhoneOffer { name: name.to_string(), text, complete, options, hash }
+}
+
 /// 給本機畫面的提醒：只有視窗名與固定代號，沒有畫面內容
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PartnerNotice {
@@ -2750,6 +2807,20 @@ pub fn screen_watch_set_user_off(off: bool) {
 #[cfg(feature = "gui")]
 fn screen_watch_required() -> Result<(), String> {
     super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref())
+}
+
+/// 傳到手機的權限框。夥伴畫面不離開電腦的唯一例外（#853）：只有這個框的文字和選項，只給 `perm_remote` 用
+#[cfg(feature = "gui")]
+pub fn partner_phone_offer(terms: &LiveTerms, name: &str) -> Result<PhoneOffer, String> {
+    screen_watch_required()?;
+    terms.phone_offer_with(name, live_session_named(name))
+}
+
+/// 手機按了一個選項（只給 `perm_remote` 用）
+#[cfg(feature = "gui")]
+pub fn partner_phone_answer(terms: &LiveTerms, name: &str, hash: &str, n: u32) -> Result<(), String> {
+    screen_watch_required()?;
+    terms.phone_answer_with(name, hash, n, live_session_named(name))
 }
 
 /// 本機畫面的命令用：權限詢問的文字
@@ -6416,6 +6487,91 @@ mod tests {
                 let (gate, call) = (body.find("screen_watch_required()?").expect(head), body.find("terms.permission_").unwrap());
                 assert!(gate < call, "要先檢查開關：{head}");
             }
+        }
+
+        #[test]
+        fn 手機_看得到框和選項_按了送那個數字_不帶_enter() {
+            let rig = permission_rig();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(o.complete);
+            assert!(o.text.contains("Do you want"));
+            assert!(o.options.iter().any(|x| Some(x.n) == claude_allow(&rig)));
+            let n = claude_allow(&rig).unwrap();
+            rig.svc.phone_answer_with("小乙", &o.hash, n, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec![n.to_string()]);
+        }
+
+        #[test]
+        fn 手機_內容變了_選項不在_都不送() {
+            let rig = permission_rig();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            let n = claude_allow(&rig).unwrap();
+            assert!(rig.svc.phone_answer_with("小乙", &"0".repeat(64), n, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            for bad in [0, 8, 9, 10, 49] {
+                assert!(rig.svc.phone_answer_with("小乙", &o.hash, bad, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"), "{bad}");
+            }
+            assert!(sent(&rig).is_empty());
+        }
+
+        #[test]
+        fn 手機_框不見了_程序不對_都不送() {
+            let rig = permission_rig();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            let n = claude_allow(&rig).unwrap();
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, n, Some(SESSION_PID + 1)).is_err(), "別的程序");
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, n, None).is_err(), "沒有程序");
+            assert!(rig.svc.phone_answer_with("別人", &o.hash, n, Some(SESSION_PID)).is_err(), "別的視窗");
+            *rig.runner.inner.screen.borrow_mut() = "一般的畫面\n".into();
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, n, Some(SESSION_PID)).is_err(), "框不見了");
+            assert!(rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).is_err());
+            assert!(sent(&rig).is_empty());
+        }
+
+        #[test]
+        fn 手機_內容不完整只能拒絕() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = " rm -rf a\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n".into();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(!o.complete);
+            let ns: Vec<u32> = o.options.iter().map(|x| x.n).collect();
+            assert_eq!(ns, vec![2]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
+            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2"]);
+        }
+
+        #[test]
+        fn 手機_選項框單選_按了送那個數字_多選不能按() {
+            let rig = permission_rig();
+            let rule = "─".repeat(60);
+            let foot = "Enter to select · ↑/↓ to navigate · Esc to cancel";
+            *rig.runner.inner.screen.borrow_mut() = format!("{rule}\n ☐ 色\n\n哪個？\n\n❯ 1. 紅\n  2. 綠\n  3. Type something.\n{rule}\n  4. Chat about this\n\n{foot}\n");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(o.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![1, 2]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 3, Some(SESSION_PID)).is_err(), "自由輸入那一列不能按");
+            assert!(sent(&rig).is_empty());
+            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2"]);
+            *rig.runner.inner.screen.borrow_mut() = format!("{rule}\n←  ☐ 果  ✔ Submit  →\n\n哪些？\n\n❯ 1. [ ] 紅\n  2. [ ] Type something\n     Submit\n{rule}\n  3. Chat about this\n\n{foot}\n");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(o.options.is_empty());
+            assert!(o.text.contains("哪些"));
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).is_err());
+            assert_eq!(sent(&rig), vec!["2"], "多選沒有多送");
+        }
+
+        #[test]
+        fn 手機_入口只接_perm_remote_其他路都接不到() {
+            for src in [include_str!("../term_remote.rs"), include_str!("../bridge/launcher.rs"), include_str!("../cli/mod.rs"), include_str!("../lib.rs"), include_str!("../android.rs")] {
+                for name in ["partner_phone_offer", "partner_phone_answer", "phone_offer_with", "phone_answer_with"] {
+                    assert!(!src.contains(name), "{name}");
+                }
+            }
+            assert!(include_str!("../perm_remote.rs").contains("partner_phone_answer"));
+        }
+
+        fn claude_allow(rig: &Rig) -> Option<u32> {
+            crate::launch::claude_screen::classify(&rig.runner.inner.screen.borrow()).and_then(|s| s.allow_once)
         }
 
         #[test]

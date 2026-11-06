@@ -18,6 +18,10 @@ pub enum ClaudeScreenKind {
     Login,
     /// 額度用完。只標狀態
     UsageLimit,
+    /// AI 用選項框問的單選題（AskUserQuestion）：按數字鍵就送出
+    Question,
+    /// 選項框，但手機不能按：多選、一次多題，或正停在自由輸入那一列
+    QuestionView,
     /// 看起來停在某個選單，但不是認得的種類：需要人工確認
     Attention,
 }
@@ -50,6 +54,10 @@ const MAX_OPTIONS: usize = 9;
 const MIN_RULE_CHARS: usize = 10;
 const STATUS_LINE_MARKS: [&str; 6] = ["bypass permissions on", "auto mode on", "manual mode on", "accept edits on", "plan mode on", "? for shortcuts"];
 const FOOTER_PREFIXES: [&str; 4] = ["Esc to cancel", "Enter to confirm", "Enter to select", "Enter to continue"];
+const QUESTION_FOOTER: &str = "Enter to select";
+const QUESTION_CHAT: &str = "Chat about this";
+const QUESTION_TYPE: &str = "Type something";
+const QUESTION_TYPE_DOT: &str = "Type something.";
 const TRUST_NO: &str = "No, exit";
 const TRUST_YES: &str = "Yes, I trust this folder";
 const BYPASS_YES: &str = "Yes, I accept";
@@ -67,6 +75,8 @@ pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
         ClaudeScreenKind::BypassWarning => "bypass_warning",
         ClaudeScreenKind::Login => "login",
         ClaudeScreenKind::UsageLimit => "usage_limit",
+        ClaudeScreenKind::Question => "question",
+        ClaudeScreenKind::QuestionView => "question_view",
         ClaudeScreenKind::Attention => "attention",
     }
 }
@@ -103,11 +113,152 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     Some(PromptText { text: kept.join("\n"), complete })
 }
 
+/// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
+/// 目前只給「只有這一次」和拒絕：其他選項（例如以後都允許）影響的不只這一次，留在電腦上決定。
+/// 內容不完整時本人看不到全部，只能拒絕。
+/// 選項框的單選題全部給；多選、一次多題看得到但不能按；內容不完整也不給。
+/// 權限框的按鈕字在手機上用中文（Claude 原文是英文的 Yes／No）；選項框的選項是夥伴自己寫的，照原文
+pub const PHONE_ALLOW_ONCE: &str = "只有這一次";
+pub const PHONE_DENY: &str = "拒絕";
+
+pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption> {
+    match screen.kind {
+        ClaudeScreenKind::Permission => screen
+            .options
+            .iter()
+            .filter_map(|o| {
+                let label = if Some(o.n) == screen.deny {
+                    PHONE_DENY
+                } else if complete && Some(o.n) == screen.allow_once {
+                    PHONE_ALLOW_ONCE
+                } else {
+                    return None;
+                };
+                Some(ClaudeOption { n: o.n, label: label.to_string() })
+            })
+            .collect(),
+        ClaudeScreenKind::Question if complete => screen.options.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// 這個狀態代號的內容要不要傳到手機（`status_code` 的值）
+pub fn goes_to_phone(code: &str) -> bool {
+    code == status_code(ClaudeScreenKind::Permission) || code == status_code(ClaudeScreenKind::Question) || code == status_code(ClaudeScreenKind::QuestionView)
+}
+
+/// 傳到手機的文字：權限框或選項框本身，不含上方的對話
+pub fn phone_text(screen: &str) -> Option<PromptText> {
+    match classify(screen)?.kind {
+        ClaudeScreenKind::Permission => permission_text(screen),
+        ClaudeScreenKind::Question | ClaudeScreenKind::QuestionView => {
+            let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
+            let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
+            let q = question_box(&lines[..end])?;
+            let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().map(|l| clean_prompt_line(l)).collect();
+            let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
+            Some(PromptText { text: kept.join("\n").trim().to_string(), complete })
+        }
+        _ => None,
+    }
+}
+
+/// 選項框（AskUserQuestion）。樣本見 #853（Claude Code 2.1.318）。由下往上：頁尾、`N. Chat about this`、
+/// 分隔線、選項、問題、標題列、分隔線。條件全符合才算，對不上就回 None，交給一般的判斷（不給按鈕）。
+///
+/// **單選和多選只差 `[ ]`：** 多選按數字只是切換勾選，不會送出，所以只有確定是單選才給按鈕。
+struct QuestionBox {
+    screen: ClaudeScreen,
+    top: usize,
+    bottom: usize,
+}
+
+/// 選項列：`❯ 1. 文字` 或兩格縮排的 `  2. 文字`。說明行縮排更深，內文裡的 `1. x` 沒有縮排，都不算。回（編號, 文字, 有游標）
+fn question_row(line: &str) -> Option<(u32, &str, bool)> {
+    let (rest, cursor) = match line.strip_prefix(CURSOR) {
+        Some(r) => (r.strip_prefix(' ')?, true),
+        None => (line.strip_prefix("  ")?, false),
+    };
+    let (n, label) = rest.split_once(". ")?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((n.parse().ok()?, label.trim(), cursor))
+}
+
+fn question_box(lines: &[&str]) -> Option<QuestionBox> {
+    // 夥伴視窗有名字時，Claude 會在最底下再畫一條嵌著名字的分隔線（「─── 名字 ─」）：先略過，頁尾才是倒數那一行
+    let mut n = lines.len();
+    while n > 0 && (lines[n - 1].trim().is_empty() || is_rule(lines[n - 1])) {
+        n -= 1;
+    }
+    let lines = &lines[..n];
+    let footer = lines.last()?.trim();
+    if !footer.starts_with(QUESTION_FOOTER) || !footer.contains("Esc to cancel") {
+        return None;
+    }
+    let mut i = lines.len() - 1;
+    while i > 0 && (i == lines.len() - 1 || lines[i].trim().is_empty()) {
+        i -= 1;
+    }
+    let (chat_n, chat, chat_cursor) = question_row(lines[i])?;
+    if chat != QUESTION_CHAT || i == 0 || !is_rule(lines[i - 1]) {
+        return None;
+    }
+    let bottom = i - 1;
+    let top = lines[..bottom].iter().rposition(|l| is_rule(l))?;
+    let body = &lines[top + 1..bottom];
+    let tab_at = body.iter().position(|l| !l.trim().is_empty())?;
+    let tab = body[tab_at].trim();
+    if !tab.starts_with(['☐', '☒', '←']) {
+        return None;
+    }
+    let mut rows: Vec<(u32, &str, bool)> = Vec::new();
+    let mut question: Vec<&str> = Vec::new();
+    for line in &body[tab_at + 1..] {
+        if let Some(r) = question_row(line) {
+            rows.push(r);
+        } else if rows.is_empty() {
+            if !line.trim().is_empty() {
+                question.push(line.trim());
+            }
+        } else if !line.trim().is_empty() && !line.starts_with("   ") {
+            return None; // 選項之間冒出認不得的東西
+        }
+    }
+    let consecutive = rows.iter().enumerate().all(|(i, r)| r.0 == i as u32 + 1);
+    let cursors = rows.iter().filter(|r| r.2).count();
+    let (last_n, last_label, last_cursor) = *rows.last()?;
+    if rows.len() < 2 || !consecutive || cursors + usize::from(chat_cursor) != 1 || chat_n != last_n + 1 {
+        return None;
+    }
+    if !last_label.ends_with(QUESTION_TYPE) && !last_label.ends_with(QUESTION_TYPE_DOT) {
+        return None;
+    }
+    let checkbox = rows.iter().any(|r| r.1.starts_with('['));
+    let single = !checkbox
+        && last_label == QUESTION_TYPE_DOT
+        && !tab.contains("Submit")
+        && !tab.starts_with('←')
+        && footer.contains("↑/↓ to navigate")
+        && !footer.contains("ctrl+g")
+        && !last_cursor
+        && !chat_cursor
+        && last_n <= 9;
+    let options: Vec<ClaudeOption> = rows[..rows.len() - 1].iter().map(|r| ClaudeOption { n: r.0, label: r.1.to_string() }).collect();
+    let cursor = rows.iter().position(|r| r.2).unwrap_or(0);
+    let kind = if single { ClaudeScreenKind::Question } else { ClaudeScreenKind::QuestionView };
+    Some(QuestionBox { screen: screen(kind, &question.join(" "), options, cursor, None, None), top, bottom })
+}
+
 /// 判斷畫面。回 None 代表沒有偵測到提示（包含閒置、執行中，以及認不出來的畫面）
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
     let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
     let lines = &lines[..end];
+    if let Some(q) = question_box(lines) {
+        return Some(q.screen);
+    }
     if input_box_at_bottom(lines) {
         return notice_above_input(lines);
     }
@@ -337,6 +488,17 @@ mod tests {
     }
 
     #[test]
+    fn 權限詢問_最底下多一條嵌著視窗名字的分隔線也認得() {
+        // ASN 開的夥伴都有名字：Claude 在頁尾下面再畫一條「─── 名字 ─」（40家用 實機，#863）
+        let named = format!("{}\n────────── wake-test3 ─\n", fixture!("claude-permission-write").trim_end());
+        let s = classify(&named).expect("帶名字線的權限框");
+        assert_eq!(s.kind, K::Permission, "{}", s.question);
+        assert_eq!((s.allow_once, s.deny), (Some(1), Some(3)));
+        let t = phone_text(&named).expect("手機看得到內容");
+        assert!(!t.text.contains("wake-test3"), "{}", t.text);
+    }
+
+    #[test]
     fn 權限詢問_三種工具都認得_拒絕對到最後的_no() {
         for (text, deny) in [(fixture!("claude-permission-bash"), 4), (fixture!("claude-permission-write"), 3), (fixture!("claude-permission-webfetch"), 3)] {
             let s = classify(text).expect("要認得");
@@ -386,11 +548,26 @@ mod tests {
 
     #[test]
     fn 認不得的選單_需要人工確認_不給按鈕() {
-        for text in [fixture!("claude-ask-user-question"), fixture!("claude-plan-approval"), fixture!("claude-firstrun-theme")] {
+        for text in [fixture!("claude-plan-approval"), fixture!("claude-firstrun-theme")] {
             let s = classify(text).expect("要標人工確認");
             assert_eq!(s.kind, K::Attention, "{}", s.question);
             assert_eq!((s.allow_once, s.deny), (None, None));
         }
+    }
+
+    #[test]
+    fn 真實的選項框畫面_最底下有名字線_認得成單選() {
+        // 真實畫面（README：AskUserQuestion）。最底下那條分隔線以前讓它認不出來，只能標人工確認（#863）
+        let text = fixture!("claude-ask-user-question");
+        let s = classify(text).expect("真實的選項框");
+        assert_eq!(s.kind, K::Question, "{}", s.question);
+        assert_eq!(s.question, "你比較喜歡哪一個顏色？");
+        let got: Vec<(u32, &str)> = s.options.iter().map(|o| (o.n, o.label.as_str())).collect();
+        assert_eq!(got, vec![(1, "紅色"), (2, "藍色")], "不含 Type something 和 Chat about this");
+        assert_eq!((s.allow_once, s.deny), (None, None), "選項框沒有允許／拒絕");
+        let t = phone_text(text).expect("手機看得到題目");
+        assert!(t.text.contains("你比較喜歡哪一個顏色？") && t.text.contains("選擇紅色"), "{}", t.text);
+        assert!(!t.text.contains("Use the AskUserQuestion tool"), "題目上方的對話不傳：{}", t.text);
     }
 
     #[test]
@@ -483,5 +660,174 @@ mod tests {
     fn 信任提示缺上下文_不算信任資料夾() {
         let s = classify(" ❯ No, exit\n   Yes, I trust this folder\n").unwrap();
         assert_eq!((s.kind, s.allow_once), (K::Attention, None));
+    }
+}
+
+#[cfg(test)]
+mod phone_option_tests {
+    use super::*;
+
+    fn screen() -> ClaudeScreen {
+        let opt = |n, l: &str| ClaudeOption { n, label: l.to_string() };
+        ClaudeScreen {
+            kind: ClaudeScreenKind::Permission,
+            question: "Do you want to proceed?".into(),
+            options: vec![opt(1, "Yes"), opt(2, "Yes, and don't ask again"), opt(3, "No")],
+            cursor: 0,
+            allow_once: Some(1),
+            deny: Some(3),
+        }
+    }
+
+    #[test]
+    fn 手機只給這一次和拒絕() {
+        let n: Vec<u32> = phone_options(&screen(), true).iter().map(|o| o.n).collect();
+        assert_eq!(n, vec![1, 3]);
+    }
+
+    #[test]
+    fn 手機的權限按鈕用中文_編號照原本() {
+        let o = phone_options(&screen(), true);
+        let got: Vec<(u32, &str)> = o.iter().map(|o| (o.n, o.label.as_str())).collect();
+        assert_eq!(got, vec![(1, PHONE_ALLOW_ONCE), (3, PHONE_DENY)], "按鈕字不是 Claude 的英文原文");
+        let o = phone_options(&screen(), false);
+        assert_eq!(o.iter().map(|o| (o.n, o.label.as_str())).collect::<Vec<_>>(), vec![(3, PHONE_DENY)]);
+    }
+
+    #[test]
+    fn 內容不完整只能拒絕() {
+        let n: Vec<u32> = phone_options(&screen(), false).iter().map(|o| o.n).collect();
+        assert_eq!(n, vec![3]);
+    }
+}
+
+#[cfg(test)]
+mod question_box_tests {
+    use super::*;
+
+    const RULE: &str = "────────────────────────────────────────────────────────────";
+    const FOOT: &str = "Enter to select · ↑/↓ to navigate · Esc to cancel";
+
+    fn page(tab: &str, q: &str, rows: &str, chat: u32, foot: &str) -> String {
+        format!("● 上面的對話 rm -rf x\n{RULE}\n{tab}\n\n{q}\n\n{rows}\n{RULE}\n  {chat}. Chat about this\n\n{foot}\n")
+    }
+    fn single() -> String {
+        page(" ☐ 顏色", "你喜歡哪種顏色？", "❯ 1. 紅\n     紅色\n  2. 綠\n     綠色\n  3. 藍\n     藍色\n  4. Type something.", 5, FOOT)
+    }
+    fn multi() -> String {
+        page("←  ☐ 水果  ✔ Submit  →", "你想吃哪些水果？", "❯ 1. [ ] 蘋果\n         蘋果\n  2. [ ] 香蕉\n         香蕉\n  3. [ ] Type something\n     Submit", 4, FOOT)
+    }
+    fn two() -> String {
+        page("←  ☐ Q one  ☐ Q two  ✔ Submit  →", "Q one?", "❯ 1. Alpha\n     Alpha\n  2. Beta\n     Beta\n  3. Type something.", 4, "Enter to select · Tab/Arrow keys to navigate · Esc to cancel")
+    }
+    fn labels(s: &ClaudeScreen) -> Vec<(u32, String)> {
+        s.options.iter().map(|o| (o.n, o.label.clone())).collect()
+    }
+
+    #[test]
+    fn 單選_最底下多一條嵌著視窗名字的分隔線也認得() {
+        // ASN 開的夥伴都有名字：Claude 在頁尾下面再畫一條「─── 名字 ─」（40家用 實機，#863 第 6 項）
+        let named = format!("{}────────── wake-test3 ─\n", single());
+        let s = classify(&named).expect("帶名字線的選項框");
+        assert_eq!(s.kind, ClaudeScreenKind::Question);
+        assert_eq!(labels(&s), vec![(1, "紅".to_string()), (2, "綠".to_string()), (3, "藍".to_string())]);
+        let t = phone_text(&named).expect("手機看得到題目");
+        assert!(t.text.contains("你喜歡哪種顏色？") && !t.text.contains("wake-test3"), "{}", t.text);
+    }
+
+    #[test]
+    fn 單選_選項全部給_不含自由輸入和聊天列() {
+        let s = classify(&single()).unwrap();
+        assert_eq!(s.kind, ClaudeScreenKind::Question);
+        assert_eq!(s.question, "你喜歡哪種顏色？");
+        assert_eq!(labels(&s), vec![(1, "紅".to_string()), (2, "綠".to_string()), (3, "藍".to_string())]);
+        assert_eq!(phone_options(&s, true).len(), 3);
+    }
+
+    #[test]
+    fn 多選_看得到不能按() {
+        let s = classify(&multi()).unwrap();
+        assert_eq!(s.kind, ClaudeScreenKind::QuestionView);
+        assert!(phone_options(&s, true).is_empty());
+        assert!(goes_to_phone(status_code(s.kind)));
+    }
+
+    #[test]
+    fn 多選_沒有標題列的提交也算多選_靠勾選框判斷() {
+        let t = page(" ☐ 水果", "q", "❯ 1. [ ] 蘋果\n  2. [✔] 香蕉\n  3. Type something.", 4, FOOT);
+        assert_eq!(classify(&t).unwrap().kind, ClaudeScreenKind::QuestionView);
+    }
+
+    #[test]
+    fn 一次多題_看得到不能按() {
+        let s = classify(&two()).unwrap();
+        assert_eq!(s.kind, ClaudeScreenKind::QuestionView);
+        assert!(phone_options(&s, true).is_empty());
+    }
+
+    #[test]
+    fn 游標停在自由輸入或聊天列_不能按() {
+        let t = page(" ☐ 色", "q", "  1. 紅\n❯ 2. Type something.", 3, FOOT);
+        assert_eq!(classify(&t).unwrap().kind, ClaudeScreenKind::QuestionView);
+        let t = format!("x\n{RULE}\n ☐ 色\n\nq\n\n  1. 紅\n  2. Type something.\n{RULE}\n❯ 3. Chat about this\n\n{FOOT}\n");
+        assert_eq!(classify(&t).unwrap().kind, ClaudeScreenKind::QuestionView);
+        let t = page(" ☐ 色", "q", "❯ 1. 紅\n  2. Type something.", 3, "Enter to select · ↑/↓ to navigate · ctrl+g to edit in Notepad · Esc to cancel");
+        assert_ne!(classify(&t).unwrap().kind, ClaudeScreenKind::Question);
+    }
+
+    #[test]
+    fn 打字之後_確認頁_對不上的都不給按鈕() {
+        // 自由輸入打了字：最後一列不再是 Type something
+        let t = page(" ☐ 色", "q", "  1. 紅\n❯ 2. abc", 3, FOOT);
+        assert_eq!(classify(&t).unwrap().kind, ClaudeScreenKind::Attention);
+        // Review 頁：頁尾不同，也有編號
+        let t = format!("{RULE}\nReview your answers\n\n q → a\n\n❯ 1. Submit answers\n  2. Cancel\n");
+        assert_ne!(classify(&t).map(|s| s.kind), Some(ClaudeScreenKind::Question));
+        // 編號不連續、兩個游標、聊天列編號不對
+        for t in [
+            page(" ☐ 色", "q", "❯ 1. 紅\n  3. Type something.", 4, FOOT),
+            page(" ☐ 色", "q", "❯ 1. 紅\n❯ 2. 綠\n  3. Type something.", 4, FOOT),
+            page(" ☐ 色", "q", "❯ 1. 紅\n  2. Type something.", 9, FOOT),
+            page("不是標題列", "q", "❯ 1. 紅\n  2. Type something.", 3, FOOT),
+        ] {
+            assert_ne!(classify(&t).map(|s| s.kind), Some(ClaudeScreenKind::Question), "{t}");
+        }
+    }
+
+    #[test]
+    fn 模型照抄選項框_底下有輸入框_不算() {
+        let t = format!("{}\n{RULE}\n❯ \n{RULE}\n  ? for shortcuts\n", single().trim_end());
+        assert_ne!(classify(&t).map(|s| s.kind), Some(ClaudeScreenKind::Question));
+    }
+
+    #[test]
+    fn 問題裡有編號_選項文字像權限框_都不會弄錯() {
+        let t = page(" ☐ 色", "1. 第一點\n2. 第二點", "❯ 1. Yes\n  2. No\n  3. Type something.", 4, FOOT);
+        let s = classify(&t).unwrap();
+        assert_eq!(s.kind, ClaudeScreenKind::Question, "不是權限框");
+        assert_eq!(s.allow_once, None);
+        assert_eq!(labels(&s), vec![(1, "Yes".to_string()), (2, "No".to_string())]);
+    }
+
+    #[test]
+    fn 傳到手機的文字只有框_不含上方對話() {
+        let p = phone_text(&single()).unwrap();
+        assert!(p.complete);
+        assert!(p.text.contains("你喜歡哪種顏色") && p.text.contains("紅色"));
+        assert!(!p.text.contains("rm -rf"), "{}", p.text);
+        assert!(!p.text.contains("Chat about this"));
+    }
+
+    #[test]
+    fn 內容太長不給按鈕() {
+        let s = classify(&single()).unwrap();
+        assert!(phone_options(&s, false).is_empty());
+    }
+
+    #[test]
+    fn 只有認得的代號才傳到手機() {
+        for k in [ClaudeScreenKind::TrustFolder, ClaudeScreenKind::BypassWarning, ClaudeScreenKind::Login, ClaudeScreenKind::UsageLimit, ClaudeScreenKind::Attention] {
+            assert!(!goes_to_phone(status_code(k)), "{k:?}");
+        }
     }
 }

@@ -26,6 +26,7 @@ export const meNav = () => tabNav('me')
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
+export const permReqNav = () => ({ tab: 'chats', sheet: 'permreq' })
 // 第四頁籤上的一層：page＝內頁描述（lib/mobile-fourth.mjs）。每一層一筆瀏覽記錄，返回鍵一層一層退
 export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', page: normalizePage(page) })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
@@ -33,6 +34,7 @@ export function normalizeNav(raw) {
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
+  if (raw?.sheet === 'permreq') return permReqNav()
   if (raw?.tab === PAGE_TAB) { const p = normalizePage(raw?.page); return p ? pageNav(p) : initialNav() }
   // 舊版的滿版層（設備與帳號、設置的某一項、使用指引、開新夥伴）改成第四頁籤上的同一頁
   if (raw?.sheet === 'acct') return pageNav({ kind: 'acct' })
