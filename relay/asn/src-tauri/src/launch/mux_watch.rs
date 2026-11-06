@@ -170,6 +170,9 @@ pub const NOTICE_MAX_COUNT: usize = 100;
 
 /// 排一則通知：只存人數與有沒有接回，不存夥伴名字（後台文字固定）
 pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
+    if work_dir.as_os_str().is_empty() {
+        return;
+    }
     let body = serde_json::json!({ "count": count.clamp(1, NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
     let tmp = work_dir.join(format!("{NOTICE_FILE}.tmp"));
     if std::fs::write(&tmp, body.to_string()).is_ok() {
@@ -202,7 +205,14 @@ static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 pub fn note_user_quit(work_dir: &Path) {
     QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = std::fs::remove_file(work_dir.join(STATE_FILE));
+    if let Some(f) = state_file(work_dir) {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
+/// 狀態檔的路徑。還沒有節點金鑰時工作資料夾是空路徑：不能組成目前目錄的同名檔去讀寫、刪除（#859）
+fn state_file(work_dir: &Path) -> Option<std::path::PathBuf> {
+    (!work_dir.as_os_str().is_empty()).then(|| work_dir.join(STATE_FILE))
 }
 
 /// 把工作丟到另一條執行緒，馬上回來（接回要等登入、等記憶體，最久 12 小時；監看不能跟著停住，
@@ -214,7 +224,8 @@ pub fn dispatch<F: FnOnce() + Send + 'static>(name: &str, f: F) -> bool {
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
-    if std::env::args().any(|a| a == "--shot") {
+    // 沒有工作資料夾（還沒有節點金鑰）：沒有地方記，也沒有收發室能通知，不監看（#859）
+    if std::env::args().any(|a| a == "--shot") || state_file(work_dir).is_none() {
         return;
     }
     let (work_dir, data_dir) = (work_dir.to_path_buf(), data_dir.to_path_buf());
@@ -252,6 +263,20 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 沒有工作資料夾_不碰目前目錄() {
+        assert_eq!(state_file(Path::new("")), None, "不能組成目前目錄的路徑");
+        assert_eq!(state_file(Path::new("a")), Some(Path::new("a").join(STATE_FILE)));
+        let notice = std::env::current_dir().unwrap().join(NOTICE_FILE);
+        let before = notice.exists();
+        queue_notice(Path::new(""), 1, true, 0);
+        assert_eq!(notice.exists(), before, "通知檔不能寫到目前目錄");
+        let src = include_str!("mux_watch.rs").replace("\r\n", "\n");
+        let start = src.find("pub fn start(terms").unwrap();
+        let (guard, spawn) = (src[start..].find("state_file(work_dir).is_none()").unwrap(), src[start..].find("spawn(move").unwrap());
+        assert!(guard < spawn, "要在開監看之前擋下");
+    }
 
     const M1: (u32, u64) = (100, 1_000);
     const M2: (u32, u64) = (200, 2_000);
