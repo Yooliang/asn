@@ -11,6 +11,8 @@ export const ARM_MS = 700
 /** 按了之後等電腦回報多久（電腦每 3 秒領一次，重查要一點時間） */
 export const RESULT_TRIES = 10
 export const RESULT_EVERY_MS = 2_000
+/** 輪詢發現電腦那邊已經處理掉之後，顯示一行字多久才自動收框 */
+export const AUTOCLOSE_MS = 2_000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH_RE = /^[0-9a-f]{64}$/
 const TEXT_MAX = 16000
@@ -52,6 +54,12 @@ export function stillPending(raw, id) {
   return raw.requests.some(x => x?.id === id)
 }
 
+/** 5 秒輪詢的結果怎麼呈現（只給輪詢用，本人沒按過選項）。已經結束（alive===false）→ 一行說明＋自動收框；其他（還在、查不到）→ null 不動。
+ *  本人按了選項之後才得到 cancelled，走 resultOf：紅字，不自動收 */
+export function watchOutcome(alive) {
+  return alive === false ? { ok: true, text: TEXT.handled, auto: true } : null
+}
+
 /** 按了之後的結果。還沒有最終結果回 null，繼續等 */
 export function resultOf(raw, id) {
   const r = Array.isArray(raw?.recent) ? raw.recent.find(x => x?.id === id) : null
@@ -78,6 +86,7 @@ export const TEXT = {
   done: '電腦已經送出你的選擇',
   failed: '沒有送出',
   gone: '電腦上已經沒有這個提示，沒有送出',
+  handled: '電腦上已經處理了這個提示',
   noReply: '電腦沒有回應，沒有送出',
   unknown: '電腦還沒有回報。請到電腦上確認',
   close: '關閉',

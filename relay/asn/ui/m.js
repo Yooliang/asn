@@ -17,7 +17,7 @@ import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
-import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill } from './lib/perm-ask.mjs'
+import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
@@ -849,9 +849,9 @@ const app = createApp({
     // 全文只給本人看（不寫儲存、不進紀錄、不放系統通知）；沒登入或後台還沒部署就靜默略過；門鈴沒有內容
     const pq = reactive({ cur: null, armed: false, busy: false, error: '', waiting: false, result: null })
     const pqDismissed = new Set()
-    let pqArmTimer = 0, pqResultTimer = 0, pqWatchTimer = 0
+    let pqArmTimer = 0, pqResultTimer = 0, pqWatchTimer = 0, pqAutoTimer = 0
     const pqWatchStop = () => { clearInterval(pqWatchTimer); pqWatchTimer = 0 }
-    const pqClose = () => { pqWatchStop(); clearTimeout(pqArmTimer); clearInterval(pqResultTimer); Object.assign(pq, { cur: null, armed: false, busy: false, error: '', waiting: false, result: null }) }
+    const pqClose = () => { pqWatchStop(); clearTimeout(pqAutoTimer); clearTimeout(pqArmTimer); clearInterval(pqResultTimer); Object.assign(pq, { cur: null, armed: false, busy: false, error: '', waiting: false, result: null }) }
     const pqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
     async function checkPermReqs() {
       if (pq.busy || pq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
@@ -872,7 +872,16 @@ const app = createApp({
       if (!cur || pq.busy || pq.waiting || pq.result || document.visibilityState !== 'visible') return
       let alive = null
       try { alive = pqStill(await invoke('android_perm_req_list'), cur.id) } catch { return }
-      if (alive === false && pq.cur === cur && !pq.busy && !pq.waiting && !pq.result) { pqWatchStop(); pq.result = { ok: false, text: PERMREQ_TEXT.gone } }
+      const out = pqWatchOutcome(alive)
+      if (out && pq.cur === cur && !pq.busy && !pq.waiting && !pq.result) { pqWatchStop(); pq.result = out; pqAutoArm() }
+    }
+    // 電腦那邊已經處理掉、本人沒按過：顯示一行字，約 2 秒後自己收框（只有輪詢這條會走到；按了選項之後的 cancelled 不自動收）。
+    // 計時器到了要確認還是同一筆；切到背景會清掉，回前景再重排
+    function pqAutoArm() {
+      clearTimeout(pqAutoTimer); pqAutoTimer = 0
+      const cur = pq.cur
+      if (!cur || !pq.result?.auto || document.visibilityState !== 'visible') return
+      pqAutoTimer = setTimeout(() => { pqAutoTimer = 0; if (pq.cur === cur && pq.result?.auto) laterPermReq() }, PQ_AUTOCLOSE_MS)
     }
     function pqWatchStart() {
       pqWatchStop()
@@ -902,7 +911,7 @@ const app = createApp({
     }
     const laterPermReq = () => { if (pq.cur) pqDismissed.add(pq.cur.id); history.back() }
     watch(() => nav.sheet, s => { if (s !== 'permreq' && pq.cur) pqClose() })
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pqWatchStart(); else pqWatchStop(); void checkPermReqs() })
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pqWatchStart(); pqAutoArm() } else { pqWatchStop(); clearTimeout(pqAutoTimer); pqAutoTimer = 0 } void checkPermReqs() })
     setInterval(() => { void checkPermReqs() }, PQ_POLL_MS)
     void listen('relay-bell', () => { void checkPermReqs() })
     // ---------- 電腦要往終端送字／代答提問（#285、#296）：跳出確認面板，本人按確認或拒絕；桌面才能建立請求，手機只能決定 ----------
