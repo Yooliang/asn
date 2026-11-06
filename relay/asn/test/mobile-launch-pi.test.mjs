@@ -20,10 +20,10 @@ test('廠牌清單：pi 不列成廠牌；那台 pi 列得到模型的「只能�
 test('運行四選一：順序固定、原生 CLI 永遠不能選；經 pi 沒有清單或沒有 pi 時反灰並寫原因', () => {
   const claude = launchVendors(L).find(v => v.id === 'claude')
   const r = launchRun(claude, L)
-  assert.deepEqual(r.options.map(o => o.key), ['acp', 'pi', 'term', 'self'])
+  assert.deepEqual(r.options.map(o => o.key), ['term', 'acp', 'pi', 'self'])
   assert.equal(r.options.find(o => o.key === 'self').ok, false)
   assert.equal(r.options.find(o => o.key === 'pi').ok, true)
-  assert.equal(r.selected, 'pi', '依優先序第一個能選的')
+  assert.equal(r.selected, 'term', 'asn終端優先：那台 pi 有清單也不預設經 pi（#931）')
   const noList = launchRun(launchVendors(NO_LIST)[0], NO_LIST).options.find(o => o.key === 'pi')
   assert.deepEqual([noList.ok, noList.why], [false, PI_REMOTE_NO_LIST])
   const noPi = launchRun(launchVendors(NO_PI)[0], NO_PI).options.find(o => o.key === 'pi')
@@ -32,7 +32,8 @@ test('運行四選一：順序固定、原生 CLI 永遠不能選；經 pi 沒�
   const grokTerm = launchRun(launchVendors(L).find(v => v.id === 'grok'), L).options.find(o => o.key === 'term')
   assert.deepEqual([grokTerm.ok, grokTerm.why], [false, '只能在那台電腦上開'], 'ASN 自帶終端只能在那台開')
   assert.equal(pickedRun(r, 'term'), 'term')
-  assert.equal(pickedRun(r, 'self'), 'pi', '不能選的不採用')
+  assert.equal(pickedRun(r, 'pi'), 'pi', '使用者選經 pi 仍照選的')
+  assert.equal(pickedRun(r, 'self'), 'term', '不能選的不採用')
   assert.deepEqual(launchRun(null, L), { options: [], selected: null })
 })
 
