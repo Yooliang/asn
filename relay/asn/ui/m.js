@@ -21,7 +21,7 @@ import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESUL
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { groupMenuItems } from './lib/actionbar.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
@@ -753,8 +753,8 @@ const app = createApp({
       return piModelChoices(cleanPiModels(lchData.machines?.[f.node]?.launcher?.pi_models), f.model)
     })
     const opsPiNote = computed(() => (partnerEngine(chatFriend.value) === 'pi' && !opsPiChoices.value.groups.length ? PI_MODEL_REMOTE_NOTE : ''))
-    const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
-    const opsBanner = computed(() => runBanner(opsRun.value))
+    const opsRuns = ref({})   // 對話頁頂端的進度，依夥伴位址分開存（#928）：{ [friend.id]: { op, view } }
+    const opsBanner = computed(() => runBanner(runFor(opsRuns.value, chatFriend.value?.id)))
     let opsToken = 0
     function openOps() {
       if ((!opsItems.value.length && !groupItems.value.length) || nav.sheet) return
@@ -790,12 +790,13 @@ const app = createApp({
       const inSheet = showsInSheet(op)
       if (inSheet) ops.phase = 'info'
       else history.back()
-      const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRun.value = { op, view: v } }
+      const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRuns.value = setRun(opsRuns.value, f.id, { op, view: v }) }
       set({ phase: 'sent', done: false, text: '正在發送指令…' })
       const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
       if (!inSheet && v?.phase === 'done') {
         await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
         const next = renamedChatId(f, op, input, v)
+        if (next) opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
         if (next && core.friends.get(next)) lastChat.value = next
       }
     }
@@ -808,9 +809,9 @@ const app = createApp({
       archiveNote.value = r.text
       clearTimeout(archiveNoteTimer)
       archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
-      opsRun.value = { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } }
+      opsRuns.value = setRun(opsRuns.value, f.id, { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } })
     }
-    const dismissRun = () => { opsRun.value = null }
+    const dismissRun = () => { opsRuns.value = clearRun(opsRuns.value, chatFriend.value?.id) }
     // ---------- 別台電腦／雲端代理要密碼（#26 第二期）：跳出確認面板，本人輸入後在 Rust 端加密才送出 ----------
     // 查清單、取公鑰、加密、送回全在 Rust 端（android_secret_*）；這裡只顯示說明與收輸入。沒登入或後台還沒部署就靜默略過
     const sec = reactive({ cur: null, secret: '', error: '', busy: false, left: 0 })

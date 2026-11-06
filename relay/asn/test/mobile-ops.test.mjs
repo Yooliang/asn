@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { EMPTY_CHAT_TEXT, LOADING_CHAT_TEXT, MODEL_NOTE, OP_STEP, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from '../ui/lib/mobile-ops.mjs'
+import { EMPTY_CHAT_TEXT, LOADING_CHAT_TEXT, MODEL_NOTE, OP_STEP, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from '../ui/lib/mobile-ops.mjs'
 import { MODEL_RE, OPS, buildOpRequest, menuItems } from '../ui/lib/partner-ops.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -58,6 +58,56 @@ test('頂端進度條：主句、換班接手分段（✓／…／○）、交�
   assert.deepEqual(b.steps.map(s => s.mark), ['✓', '…', '○']); assert.equal(b.done, false)
   const d = runBanner({ op: 'handover', view: { phase: 'done', done: true, text: '換班接手完成，新視窗開好了。', extra: ['交接檔：x'] } })
   assert.equal(d.done, true); assert.deepEqual(d.extra, ['交接檔：x'])
+})
+
+// ---------- #928：進度綁在下指令的那位夥伴 ----------
+const handoverRun = step => ({ op: 'handover', view: { phase: 'working', done: false, text: `${step}中…`, steps: [{ key: 'handoff', text: '請前任寫交接', state: 'active' }] } })
+const modelRun = { op: 'model', view: { phase: 'working', done: false, text: '切換模型中…' } }
+
+test('#928 進度只在下指令那位的對話：換班接手（重啟）切到別位看不到，回來還在、步驟照常前進', () => {
+  let runs = setRun({}, 'w02/A', handoverRun('請前任寫交接'))
+  assert.equal(runBanner(runFor(runs, 'w02/B')), null, '別位的對話看不到 A 的進度')
+  assert.equal(runBanner(runFor(runs, 'w02/A')).text, '請前任寫交接中…')
+  runs = setRun(runs, 'w02/A', { op: 'handover', view: { phase: 'working', done: false, text: '開新視窗中…' } })
+  assert.equal(runBanner(runFor(runs, 'w02/A')).text, '開新視窗中…', '步驟前進只更新 A')
+  runs = clearRun(runs, 'w02/A')
+  assert.deepEqual(runs, {}, '按「知道了」只清 A，不殘留')
+})
+
+test('#928 切換模型與封存也各自綁在自己的夥伴；兩位同時在跑各自保留，互不覆蓋', () => {
+  let runs = setRun({}, 'w02/A', handoverRun('請前任寫交接'))
+  runs = setRun(runs, 'w02/B', modelRun)
+  assert.equal(runFor(runs, 'w02/A').op, 'handover'); assert.equal(runFor(runs, 'w02/B').op, 'model')
+  runs = setRun(runs, 'w02/C', { op: 'archive', view: { phase: 'done', done: true, text: '已封存' } })
+  assert.equal(Object.keys(runs).length, 3)
+  runs = clearRun(runs, 'w02/B')
+  assert.deepEqual(Object.keys(runs).sort(), ['w02/A', 'w02/C'], '清 B 不動 A、C')
+})
+
+test('#928 key 是完整位址（節點/視窗名）：兩台電腦的同名夥伴不互蓋', () => {
+  let runs = setRun({}, 'w02/asn40', handoverRun('請前任寫交接'))
+  runs = setRun(runs, 'n678feaac/asn40', modelRun)
+  assert.equal(runFor(runs, 'w02/asn40').op, 'handover'); assert.equal(runFor(runs, 'n678feaac/asn40').op, 'model')
+  assert.equal(runFor(runs, 'asn40'), null, '只有名字查不到')
+})
+
+test('#928 改名完成：進度搬到新位址，舊位址清掉；沒有進度或位址相同不動；原物件不被改', () => {
+  const before = setRun(setRun({}, 'w02/old', { op: 'rename', view: { phase: 'done', done: true, text: '改好了' } }), 'w02/B', modelRun)
+  const after = moveRun(before, 'w02/old', 'w02/new')
+  assert.equal(runFor(after, 'w02/old'), null); assert.equal(runFor(after, 'w02/new').op, 'rename'); assert.equal(runFor(after, 'w02/B').op, 'model')
+  assert.ok(runFor(before, 'w02/old'), '不改原本的物件')
+  assert.equal(moveRun(after, 'w02/none', 'w02/x'), after); assert.equal(moveRun(after, 'w02/new', 'w02/new'), after)
+  assert.deepEqual(setRun({}, '', modelRun), {}, '沒有位址不存'); assert.equal(runFor({}, undefined), null)
+})
+
+test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目前對話那位，送出、封存、知道了都帶夥伴位址', () => {
+  const js = read('ui', 'm.js')
+  assert.doesNotMatch(js, /\bopsRun\b/, '單一全域進度拿掉')
+  assert.match(js, /const opsBanner = computed\(\(\) => runBanner\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)
+  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op, view: v \}\)/, '指令進度存在下指令那位')
+  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op: 'archive'/, '封存也存在那位')
+  assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
+  assert.match(js, /const dismissRun = \(\) => \{ opsRuns\.value = clearRun\(opsRuns\.value, chatFriend\.value\?\.id\) \}/)
 })
 
 // ---------- 頁面接線 ----------
