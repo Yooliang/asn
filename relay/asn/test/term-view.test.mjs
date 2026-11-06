@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createFollow, createTermViewSession, followTarget, frameToWrite, pasteNeedsConfirm, pasteSummary, xtermOptions } from '../ui/lib/term-view.mjs'
+import { createFollow, createTermViewSession, followTarget, frameToWrite, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
@@ -260,4 +260,18 @@ test('守門：後台、relay、CLI 碰不到 term_view_input（只有本機畫�
   }
   const cli = walk(new URL('../src-tauri/src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')).filter(f => /[\\/](cli|bridge)[\\/]/.test(f) && f.endsWith('.rs'))
   for (const f of cli) assert.ok(!/view_input/.test(fs.readFileSync(f, 'utf8')), f + ' 不能呼叫 view_input')
+})
+
+test('守門：貼上鍵不被 xterm 吃掉（Ctrl+V、Ctrl+Shift+V、Shift+Insert 回 false）；其他鍵照舊', () => {
+  const k = (key, o = {}) => termKeyHandler({ type: 'keydown', key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...o })
+  assert.equal(k('v', { ctrlKey: true }), false)
+  assert.equal(k('V', { ctrlKey: true, shiftKey: true }), false)
+  assert.equal(k('Insert', { shiftKey: true }), false)
+  assert.equal(k('c', { ctrlKey: true }), true, 'Ctrl+C 仍要送出')
+  assert.equal(k('a'), true)
+  assert.equal(k('v'), true)
+  assert.equal(k('Insert'), true)
+  assert.equal(termKeyHandler({ type: 'keyup', key: 'v', ctrlKey: true }), true)
+  const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(src.includes('attachCustomKeyEventHandler(termKeyHandler)'), '要接上 xterm')
 })

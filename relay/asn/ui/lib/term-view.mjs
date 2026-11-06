@@ -36,6 +36,15 @@ export function pasteSummary(text) {
 }
 
 /** 要讓游標那一列看得到（下面多留一列），捲動位置該在哪 */
+// 貼上的按鍵：回 false 就是 xterm 不處理，瀏覽器照常貼上（走原本的貼上確認）；否則 xterm 會把 Ctrl+V 送成控制字元並擋掉貼上
+export function termKeyHandler(e) {
+  if (e.type !== 'keydown') return true
+  const k = String(e.key || '').toLowerCase()
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && k === 'v') return false
+  if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && k === 'insert') return false
+  return true
+}
+
 export function followTarget({ cursorRow, rowHeight, clientHeight, scrollHeight }) {
   const max = Math.max(0, scrollHeight - clientHeight)
   return Math.min(max, Math.max(0, (cursorRow + 2) * rowHeight - clientHeight))
@@ -242,6 +251,8 @@ export const TermView = {
           const t = new Terminal(xtermOptions(size))
           // 沒有捲動記錄時，xterm 會把滾輪換成方向鍵送給程式、還攔下事件，外層就捲不動。滾輪一律交給外層
           t.attachCustomWheelEventHandler(() => false)
+          // 貼上鍵不讓 xterm 吃掉，交給瀏覽器貼上
+          t.attachCustomKeyEventHandler(termKeyHandler)
           t.open(host.value)
           // 打字：xterm 給的按鍵序列原樣送；Rust 端再檢查一次（不是按鍵的序列、不在前景、沒開著都不送）
           t.onData(d => typed(d, false))
