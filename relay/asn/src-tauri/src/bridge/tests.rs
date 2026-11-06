@@ -1091,7 +1091,9 @@ async fn 重開後留著信時_寄件人收到一次先留著的通知_同一位
     h.fr.put(mail(2, json!({"to_agent": "T-丙"})));
     h.fr.put(mail(3, json!({"to_agent": "T-丙", "from_agent": "W-別人"})));
     h.core.pull("test", T0 + 1_000).await;
-    h.core.pull("test", T0 + 2_000).await;
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("先留著")), "剛開好還不知道它是不是自己結束了：先不說");
+    h.core.pull("test", T0 + 31_000).await;
+    h.core.pull("test", T0 + 32_000).await;
     let notes: Vec<String> = notice_bodies(&h).into_iter().filter(|b| b.contains("先留著") && b.contains("T-丙")).collect();
     assert_eq!(notes.len(), 2, "兩位寄件人各一次：{notes:?}");
     assert!(notes[0].contains("不用重寄") && notes[0].contains("12 小時"));
