@@ -548,11 +548,26 @@ mod tests {
 
     #[test]
     fn 認不得的選單_需要人工確認_不給按鈕() {
-        for text in [fixture!("claude-ask-user-question"), fixture!("claude-plan-approval"), fixture!("claude-firstrun-theme")] {
+        for text in [fixture!("claude-plan-approval"), fixture!("claude-firstrun-theme")] {
             let s = classify(text).expect("要標人工確認");
             assert_eq!(s.kind, K::Attention, "{}", s.question);
             assert_eq!((s.allow_once, s.deny), (None, None));
         }
+    }
+
+    #[test]
+    fn 真實的選項框畫面_最底下有名字線_認得成單選() {
+        // 真實畫面（README：AskUserQuestion）。最底下那條分隔線以前讓它認不出來，只能標人工確認（#863）
+        let text = fixture!("claude-ask-user-question");
+        let s = classify(text).expect("真實的選項框");
+        assert_eq!(s.kind, K::Question, "{}", s.question);
+        assert_eq!(s.question, "你比較喜歡哪一個顏色？");
+        let got: Vec<(u32, &str)> = s.options.iter().map(|o| (o.n, o.label.as_str())).collect();
+        assert_eq!(got, vec![(1, "紅色"), (2, "藍色")], "不含 Type something 和 Chat about this");
+        assert_eq!((s.allow_once, s.deny), (None, None), "選項框沒有允許／拒絕");
+        let t = phone_text(text).expect("手機看得到題目");
+        assert!(t.text.contains("你比較喜歡哪一個顏色？") && t.text.contains("選擇紅色"), "{}", t.text);
+        assert!(!t.text.contains("Use the AskUserQuestion tool"), "題目上方的對話不傳：{}", t.text);
     }
 
     #[test]
