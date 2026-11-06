@@ -57,6 +57,12 @@ pub fn attrs(data_dir: &Path) -> Vec<(String, String)> {
     vec![("app".into(), "asn".into()), ("purpose".into(), "wrap-v1".into()), ("user_dir".into(), user_dir)]
 }
 
+/// 金鑰庫裡那一筆是不是我們的：我們的屬性必須全部在而且值相同；多出來的只接受 `xdg:` 開頭的
+/// （Secret Service 規格保留給系統，例如 gnome-keyring 自動加的 xdg:schema）。有別的多餘屬性就當不是我們的
+pub fn attrs_match(found: &std::collections::HashMap<String, String>, want: &[(String, String)]) -> bool {
+    want.iter().all(|(k, v)| found.get(k) == Some(v)) && found.keys().all(|k| k.starts_with("xdg:") || want.iter().any(|(w, _)| w == k))
+}
+
 fn aad(purpose: Purpose, file: &str) -> Vec<u8> {
     format!("asn-wrap-v1|{}|{file}", purpose.label()).into_bytes()
 }
@@ -340,9 +346,8 @@ pub mod linux {
         SecretService::connect(EncryptionType::Dh).map_err(map)
     }
 
-    /// 屬性要完全相同（不只是包含查詢的那幾個）
     fn same(found: &HashMap<String, String>, want: &[(String, String)]) -> bool {
-        found.len() == want.len() && want.iter().all(|(k, v)| found.get(k) == Some(v))
+        super::attrs_match(found, want)
     }
 
     impl SecretStore for LinuxStore {
@@ -436,14 +441,18 @@ mod tests {
             if let Some(e) = self.state.lock().unwrap().clone() {
                 return Err(e);
             }
-            Ok(self.items.lock().unwrap().iter().find(|(a, _)| a.as_slice() == attrs).map(|(_, s)| Zeroizing::new(s.clone())))
+            let found = |a: &Vec<(String, String)>| attrs_match(&a.iter().cloned().collect(), attrs);
+            Ok(self.items.lock().unwrap().iter().find(|(a, _)| found(a)).map(|(_, s)| Zeroizing::new(s.clone())))
         }
         fn create(&self, attrs: &[(String, String)], secret: &[u8]) -> Result<(), StoreErr> {
             if let Some(e) = self.state.lock().unwrap().clone() {
                 return Err(e);
             }
             *self.creates.lock().unwrap() += 1;
-            self.items.lock().unwrap().push((attrs.to_vec(), secret.to_vec()));
+            // 像 gnome-keyring：建立時自動多加系統屬性
+            let mut a = attrs.to_vec();
+            a.push(("xdg:schema".into(), "org.freedesktop.Secret.Generic".into()));
+            self.items.lock().unwrap().push((a, secret.to_vec()));
             Ok(())
         }
     }
@@ -479,6 +488,23 @@ mod tests {
         d.protect(b"key").unwrap();
         assert_eq!(*s.creates.lock().unwrap(), 1, "兩個檔案共用一把");
         assert_eq!(t.unprotect(&sealed).unwrap(), b"token");
+    }
+
+    #[test]
+    fn 屬性比對_我們的都要相同_多的只接受_xdg_開頭() {
+        let want = attrs(Path::new("/home/a/.asn"));
+        let map = |extra: &[(&str, &str)]| -> std::collections::HashMap<String, String> {
+            want.iter().cloned().chain(extra.iter().map(|(k, v)| (k.to_string(), v.to_string()))).collect()
+        };
+        assert!(attrs_match(&map(&[]), &want));
+        assert!(attrs_match(&map(&[("xdg:schema", "org.freedesktop.Secret.Generic")]), &want), "gnome-keyring 自動加的系統屬性");
+        assert!(!attrs_match(&map(&[("owner", "別的程式")]), &want), "多了別的屬性：不是我們的");
+        let mut missing = map(&[]);
+        missing.remove("user_dir");
+        assert!(!attrs_match(&missing, &want), "少了我們的屬性");
+        let mut other = map(&[]);
+        other.insert("user_dir".into(), "別的資料夾".into());
+        assert!(!attrs_match(&other, &want), "值不同");
     }
 
     #[test]
