@@ -1,11 +1,11 @@
 {
-  "version": "0.2.5",
-  "notes": "- 新功能：Windows 上，可以在 ASN 裡直接看這台電腦夥伴的終端畫面，也能在畫面裡打字、貼上。從別台電腦看畫面排在之後的版本。注音等輸入法選字還沒在實機上驗過。\n- 新功能：設定頁加上「夥伴共用同一個終端服務」開關，重開 ASN 後生效；關掉時，已在背景跑的夥伴不會被搬動或關掉，設定頁會提示還有幾位在背景。\n- 改善：終端畫面開著時，夥伴停在權限確認不再另外跳出確認框，改在畫面上方提示，直接在畫面裡按數字回答；關掉畫面後才照常跳框。\n- 修正：重開 ASN 前已經自己結束的夥伴，重開後寄給它的信會馬上退回「找不到」，不再留 12 小時。\n- 修正：重開 ASN 時，內建通道夥伴（Gemini 等）在群組裡被點名、還沒做完的那一則，會補轉交一次，不重複。測試驗過、未實機。\n- 修正：Gemini 夥伴登入失效時，不再被當成意外結束，會提示要重新登入。測試驗過、未實機。\n- 修正：設定頁的「電腦重開後自動接回夥伴」一直顯示沒勾的問題（實際上是開著的）。\n- 新功能：電腦版設定頁的雲端代理清單、手機的雲端設備頁，可以替雲端設備改名。未實機。\n- 已知問題：背景的終端服務偶爾會意外中斷；ASN 會在約 1 分鐘內偵測到，並自動接回夥伴，信不會丟。\n- 已知問題：從舊版更新上來時，更新前就被留著、寄給已結束夥伴的信，每重開一次 ASN 就會再通知一次，最多到 12 小時為止。\n- 已知問題：背景開的夥伴剛開、還沒有任何輸出時，有時會被誤當成卡在確認畫面，自動切到前台。關掉那個視窗就好，夥伴不受影響。\n- 已知問題：夥伴剛結束就重開 ASN、又馬上寄信給它時，寄件人可能先收到一封「先留著」，幾秒後才收到「找不到」。",
-  "pub_date": "2026-11-06T07:09:13.318Z",
+  "version": "0.2.6",
+  "notes": "- 新功能：Windows 上，夥伴停在權限確認或選項題時，手機會跳出同樣的框，按一下就幫你在電腦上回答；多選或一次多題的只顯示內容、不給按鈕。\n- 新功能：Windows 上，夥伴卡住（例如停在確認畫面）時會跳提示，預設開，設定頁可以關。\n- 改善：ASN 直接開的終端分頁（agy、Grok 等）改成直接在畫面裡打字，上方也有和夥伴對話頁一樣的工具列；「管理 → 關閉視窗」可以用，其他這類夥伴還沒有的功能會反灰並說明原因。\n- 改善：喚醒、換模型重開等重新開的夥伴，在背景終端服務裡會直接開在背景，不再跳到前台。\n- 改善：能喚醒的夥伴掉線後，名單上會留一列，按得到「喚醒」。\n- 修正：群組裡點名不在這個群組的夥伴時，會提醒你沒點到，這則也不會交給別人。\n- 修正：收發室剛重開的頭幾秒，寄給已結束夥伴的信不再先回一封「先留著」。\n- 修正：背景剛開、還沒有輸出的夥伴，不再被誤當成卡在確認畫面而切到前台。\n- 已知問題：背景的終端服務偶爾會意外中斷；ASN 會在約 1 分鐘內偵測到並自動接回夥伴。正在修。",
+  "pub_date": "2026-11-06T13:12:09.742Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitjQ3FiU0J3WVg2T3BlS01KTFpsbFNXNHcvcHZaMWNBSjZYa3VQQzZaK3lqVUI3T2xYMmNyWlZqZ0VqM2V5NUpaVUM2QkNjV0tiMWNOK2tySkVQR3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ4OTUzCWZpbGU6QVNOXzAuMi41X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuNQpvSUwwb0pBbUxzcWlzVi9qdXJIdjBFM1hnSGs1a1RobzRLM0hJL1ViaWgvd2NZQ09LTGdGNnpqbjlrOUs1SnNteUZIbVhjMDZDckx5d1BmekIzQWRBdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitSN3VKRWtBL1pJRGpVd1lZTXhwVnV6M0R1b0RWaEIrOWNVSWF2VXdZZW5sdmFsV2xudjVySTk3Ym12OEpPaXdJSENIdjFCbTllZ3F2NHZONG8zY0FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTcwNzI5CWZpbGU6QVNOXzAuMi42X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuNgpQM1pXU3FmcUxYUE13YnBRaVlPQzRzTnFiSDZDM1gwU3NXM2YzakFNRXV6YUhzZmw0S1B2NStpMzhrWTR6eXJuMG04cnFVenI4ZlVMVnFGRlhzZmNDQT09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.6_x64-setup.exe"
     }
   }
 }
