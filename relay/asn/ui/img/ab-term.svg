@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 對話功能列：終端（在 ASN 裡看這位夥伴的終端） -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4756"/><stop offset="1" stop-color="#1c252f"/></linearGradient>
+  </defs>
+  <rect x="3.5" y="5.5" width="25" height="21" rx="3" fill="url(#g)" stroke="#4a5d73" stroke-width="1.4"/>
+  <path d="M8.5 12.5l4.2 3.4-4.2 3.4" fill="none" stroke="#9fe0a8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15 21h8" stroke="#dfeaf6" stroke-width="1.9" stroke-linecap="round"/>
+</svg>

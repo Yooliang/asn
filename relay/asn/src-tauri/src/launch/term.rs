@@ -1038,6 +1038,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
     }
 
+    /// 這位夥伴在不在共用終端服務裡（ASN 在服務裡開的夥伴視窗）：在才能在 ASN 裡看它的終端。
+    /// 只看對照表，不叫 wezterm（聊天頁一打開就問，要快），只回是或否（不回、不記窗格編號或路徑）；
+    /// 名字不合夥伴名規則、更新前開的（第 1 階段自己的視窗）、終端面板開的、沒開 mux 模式都回 false
+    pub fn partner_in_service(&self, name: &str) -> bool {
+        if !self.use_mux || !super::config::valid_partner_name(name) {
+            return false;
+        }
+        let g = self.inner.lock().unwrap();
+        g.sessions.iter().any(|s| s.window.mux && !s.kind.is_empty() && partner_label(&s.id, &s.title) == Some(name))
+    }
+
     fn view_snapshot(&self, id: &str) -> Result<SessionSnap, String> {
         let snap = self.snapshot_p(id, true)?;
         if snap.adopted.is_some() {
@@ -6875,6 +6886,30 @@ mod tests {
             }
             let v = serde_json::to_value(PartnerNotice { name: "甲".into(), code: "login" }).unwrap();
             assert_eq!(v, serde_json::json!({"name": "甲", "code": "login"}), "只有這兩欄");
+        }
+
+        #[test]
+        fn 在不在共用終端服務裡_只認服務裡開的夥伴視窗() {
+            let (rig, _) = mux_rig();
+            assert!(!rig.svc.partner_in_service("小乙"), "還沒開");
+            open_partner(&rig);
+            assert!(rig.svc.partner_in_service("小乙"));
+            assert!(!rig.svc.partner_in_service("小甲"), "別的名字");
+            assert!(!rig.svc.partner_in_service(""), "沒給名字");
+            let long = "乙".repeat(41);
+            for bad in ["小 乙", "-小乙", "小乙\n", "../小乙", long.as_str()] {
+                assert!(!rig.svc.partner_in_service(bad), "不合夥伴名規則：{bad:?}");
+            }
+            // 終端面板開的（沒有名字、沒有 kind）不算
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert!(!rig.svc.partner_in_service("agy"));
+        }
+
+        #[test]
+        fn 在不在共用終端服務裡_更新前開的視窗不算() {
+            let rig = make(default_profiles(), vec![]);
+            rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap();
+            assert!(!rig.svc.partner_in_service("小乙"), "第 1 階段自己的視窗不在共用終端服務裡");
         }
 
         #[test]

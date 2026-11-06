@@ -16,7 +16,8 @@ export const TERM_VIEW_NOTE = '點一下畫面就能打字。終端視窗如果�
 export const TERM_VIEW_NOTE_READONLY = '這裡只能看。終端視窗如果開著，那邊也是同一個畫面。'
 /** 一次貼上最多幾個字（再多請分段）：Rust 端上限是 256 KB，中文一字最多 3 位元組 */
 export const PASTE_MAX_CHARS = 80000
-export const TERM_VIEW_LOST = '暫時讀不到這個畫面，視窗可能已經關了。'
+// 只有在共用終端服務裡的夥伴才看得到這個畫面（#900），讀不到就是讀不到：不猜原因，真正的原因進 console
+export const TERM_VIEW_LOST = '暫時讀不到這個畫面。'
 
 /** 一幅畫面要寫給 xterm 的內容：清掉重畫，最後把游標放回窗格的位置。一次寫完，xterm 只會畫一次，不會閃 */
 export function frameToWrite(frame) {
@@ -195,7 +196,7 @@ export const TermView = {
     id: { type: String, default: '' },        // 終端編號（ASN 開的 grok、agy）
     name: { type: String, default: '' },      // 夥伴視窗名（Claude）
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
-    canBack: { type: Boolean, default: false },   // 視窗矮時訊息區會收起來：對話窗要有切回去的按鈕
+    canBack: { type: Boolean, default: false },   // 對話區裡打開時訊息區會收起來（#901）：要有切回去的按鈕
   },
   emits: ['back'],
   setup(props) {

@@ -11,8 +11,9 @@ import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQ
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
-import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems } from './actionbar.mjs'
+import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
+import { askTermService, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -75,10 +76,33 @@ export const ChatPane = {
     const groupItems = computed(() => (props.groupMenu ? groupMenuItems(props.friend) : []))   // 群組對話的「群組」按鈕選單
     const pickMenu = op => emit('group-menu', op)
     const isAsn = computed(() => isAsnWindow(props.friend))
-    // 這台電腦上的視窗才看得到畫面
-    const canTermView = computed(() => !!props.termViewApi && canOfferConsole(props.friend, props.selfNode) && props.friend?.status !== 'offline')
-    const termViewOn = ref(false)
+    // 終端（#900／#901／#902）：這台電腦上、在共用終端服務裡的夥伴才有入口（上面那排第 2 格「終端」）；
+    // 更新前開的舊夥伴照舊是前台／後台，下面常駐一行小字請本人重新開一次。打開時終端占滿訊息區，輸入框留著
+    const termBase = computed(() => !!props.termViewApi && canOfferConsole(props.friend, props.selfNode) && props.friend?.status !== 'offline')
     const termViewName = computed(() => props.friend?.agent || props.friend?.nick || '')
+    const termInService = ref(null)   // true／false／null（還沒查或查不到）
+    const termEntryView = computed(() => termEntry(termBase.value, termInService.value))
+    const canTermView = computed(() => termEntryView.value.term)
+    const termViewOn = ref(false)
+    const termShown = computed(() => termViewOn.value && canTermView.value)
+    async function probeTerm() {
+      const f = props.friend
+      if (!termBase.value) { termInService.value = null; return }
+      if (!props.active) return
+      const r = await askTermService(props.termViewApi, termViewName.value)
+      if (sameFriend(props.friend, f)) termInService.value = r
+    }
+    const toggleTerm = () => { if (canTermView.value) termViewOn.value = !termViewOn.value }
+    watch(() => props.friend?.id, () => { termViewOn.value = false; termInService.value = null })
+    watch(() => [props.friend?.id, props.friend?.status, termViewName.value, termBase.value, props.active].join('\n'), () => void probeTerm(), { immediate: true })
+    // 訊息列表收起再回來，停在原本看的位置（原本在底部就回到底部，新訊息看得到）
+    let termScroll = null
+    watch(termShown, on => {
+      if (on) { termScroll = scrollMemo(msgsEl.value); return }
+      const memo = termScroll
+      termScroll = null
+      nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = restoreTop(memo, el) })
+    })
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
     const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : composePlaceholder(props.winMode)))
@@ -363,15 +387,16 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { canTermView, termViewOn, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="{ ready: canTermView, on: termShown }" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm"></action-bar>
+  <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termViewOn && canTermView" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
-  <div class="conv">
+  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
+  <div class="conv" v-show="!termShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="toPsm" v-html="emo(toPsm)"></span>
@@ -452,9 +477,6 @@ export const ChatPane = {
         </button>
         <button class="tool icon" type="button" v-if="!isRoom" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <button class="tool icon" type="button" v-if="canTermView" :class="{ on: termViewOn }" :aria-pressed="termViewOn" @click="termViewOn = !termViewOn" aria-label="看終端畫面" title="看終端畫面">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5" fill="#26313d" stroke="#4a5d73" stroke-width="1.4"/><path d="M7 10l3 2.2L7 14.4M12 15h5" fill="none" stroke="#dfeaf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>

@@ -62,7 +62,7 @@ test('對話頁「管理」選單拿掉喚醒（已在第 2 格）；說明文�
 test('電腦版第 2 格樣板：喚醒時換圖示、點了開喚醒對話框（p:resume 那條路）；圖示檔存在', () => {
   const t = read('ui/lib/actionbar.mjs')
   assert.match(t, /data-slot="window"[^>]*@click="onWindow"/)
-  assert.match(t, /:src="slot\.window\.wake \? 'img\/ab-wake\.svg' : 'img\/ab-window\.svg'"/)
+  assert.match(t, /:src="slot\.window\.wake \? 'img\/ab-wake\.svg' : slot\.window\.term \? 'img\/ab-term\.svg' : 'img\/ab-window\.svg'"/)
   assert.match(t, /function onWindow\(\) \{[\s\S]{0,200}slot\.value\.window\.wake[\s\S]{0,200}pickOps\('p:resume'\)/)
   assert.ok(fs.existsSync(new URL('../ui/img/ab-wake.svg', import.meta.url)))
   assert.match(read('ui/img/ab-wake.svg'), /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32" width="32" height="32">/)
