@@ -147,20 +147,28 @@ impl Watch {
 /// 包含：①事故後還沒接回來的（最久 12 小時）；②監看最近一輪還看到、現在可能剛掛的（狀態檔很新才算；
 /// 本人剛關掉的下一輪監看就會拿掉，最多多留一輪）
 pub fn pending_names(file: &Path, now_ms: u64) -> Vec<String> {
-    let Some(w) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Watch>(&t).ok()) else { return Vec::new() };
+    let (lost, recent) = pending_split(file, now_ms);
+    let mut names: Vec<String> = lost.into_iter().chain(recent).collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// 同上，分成兩份：（確定中斷、還沒接回的, 最近還看得到、可能剛掛的）。
+/// 只有前者可以跟寄件人說「服務中斷」：後者也可能是夥伴自己結束了，下一輪監看就會知道
+pub fn pending_split(file: &Path, now_ms: u64) -> (Vec<String>, Vec<String>) {
+    let Some(w) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Watch>(&t).ok()) else { return (Vec::new(), Vec::new()) };
+    let lost: Vec<String> = if w.lost_at > 0 && now_ms.saturating_sub(w.lost_at) <= LOST_KEEP_MS { w.lost.clone() } else { Vec::new() };
     let mut names: Vec<String> = Vec::new();
-    if w.lost_at > 0 && now_ms.saturating_sub(w.lost_at) <= LOST_KEEP_MS {
-        names.extend(w.lost.iter().cloned());
-    }
     let fresh = std::fs::metadata(file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|e| e.as_millis() as u64 <= STATE_FRESH_MS);
     if fresh {
         if let Some(s) = &w.seen {
-            names.extend(s.partners.iter().cloned());
+            names.extend(s.partners.iter().filter(|n| !lost.contains(n)).cloned());
         }
     }
     names.sort();
     names.dedup();
-    names
+    (lost, names)
 }
 
 /// 要請後台通知本人的事故檔：偵測到中斷就寫，橋接核心下一輪讀走、呼叫後台成功（或確定不用再試）就刪
@@ -481,9 +489,12 @@ mod tests {
         w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000);
         w.save(&f);
         assert_eq!(pending_names(&f, 2_000), ["乙", "甲"], "最近還看得到的（可能剛掛）");
+        assert!(pending_split(&f, 2_000).0.is_empty(), "還沒確定中斷");
         w.tick(&obs(Some(M2), &[]), 1_000 + TICK_MS);
         w.save(&f);
         assert_eq!(pending_names(&f, 1_000 + TICK_MS), ["乙", "甲"], "事故後還沒接回來的");
+        let (lost, recent) = pending_split(&f, 1_000 + TICK_MS);
+        assert_eq!((lost.len(), recent.len()), (2, 0), "事故後的才算確定中斷");
         assert!(pending_names(&f, 1_000 + TICK_MS + LOST_KEEP_MS + 1).is_empty(), "過 12 小時不留");
         // 狀態檔很久沒更新：監看沒在跑，不拿「還看得到的夥伴」當依據
         let mut w2 = Watch::default();

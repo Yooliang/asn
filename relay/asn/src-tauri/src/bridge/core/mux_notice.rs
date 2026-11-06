@@ -16,7 +16,9 @@ impl Core {
         }
         self.mux_pending_at = now;
         let file = self.cfg.work_dir.join(mux_watch::STATE_FILE);
-        self.mux_pending = mux_watch::pending_names(&file, crate::heartbeat::now_ms()).into_iter().collect();
+        let (lost, recent) = mux_watch::pending_split(&file, crate::heartbeat::now_ms());
+        self.mux_lost = lost.iter().cloned().collect();
+        self.mux_pending = lost.into_iter().chain(recent).collect();
     }
 
     pub async fn mux_notice_tick(&mut self, now: u64) {

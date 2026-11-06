@@ -74,7 +74,7 @@ fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
 }
 
 #[tokio::test]
-async fn 共用終端服務剛掛_監看還沒下結論_信先留著不退回_夥伴接回來就依序送() {
+async fn 共用終端服務剛掛_監看還沒下結論_信先留著不退回_也不先說服務中斷_夥伴接回來就依序送() {
     let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
     // 監看最近一輪還看到 T-丙 在共用終端服務裡
     let mut w = Watch::default();
@@ -89,14 +89,54 @@ async fn 共用終端服務剛掛_監看還沒下結論_信先留著不退回_�
     assert!(h.said().is_empty(), "它不在：不送");
     assert!(h.fr.acked().is_empty(), "不 ack，信還在後台信箱");
     assert!(notice_bodies(&h).iter().all(|b| !b.contains("找不到")), "不退回：{:?}", notice_bodies(&h));
-    let note: Vec<String> = notice_bodies(&h).into_iter().filter(|b| b.contains("先留著") && b.contains("T-丙")).collect();
-    assert_eq!(note.len(), 1, "寄件人收到一次說明：{:?}", notice_bodies(&h));
-    assert!(note[0].contains("共用終端服務中斷了") && note[0].contains("12 小時"), "{}", note[0]);
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("中斷")), "還沒確定就不說服務中斷（也可能是夥伴自己結束了）：{:?}", notice_bodies(&h));
     // 接回來
     put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
     h.core.refresh_roster(T0 + 60_000).await;
     h.core.pull("test", T0 + 61_000).await;
     assert!(h.said().iter().any(|t| t.contains(&format!("id={}", uid(1)))), "接回來就送出：{:?}", h.said());
+}
+
+#[tokio::test]
+async fn 確定中斷了才跟寄件人說服務中斷() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    let mut w = Watch::default();
+    w.tick(&obs(Some(M1), &["T-丙"]), now());
+    assert!(w.tick(&obs(Some(M2), &[]), now() + 30_000).is_some());
+    w.save(&h.core.cfg.work_dir.join(STATE_FILE));
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.mux_notice_tick(T0 + 10_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 11_000).await;
+    let note: Vec<String> = notice_bodies(&h).into_iter().filter(|b| b.contains("先留著") && b.contains("T-丙")).collect();
+    assert_eq!(note.len(), 1, "寄件人收到一次說明：{:?}", notice_bodies(&h));
+    assert!(note[0].contains("共用終端服務中斷了") && note[0].contains("12 小時"), "{}", note[0]);
+}
+
+#[tokio::test]
+async fn 夥伴自己結束_下一輪監看就不在名單上_信馬上退回找不到_不說服務中斷() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    let file = h.core.cfg.work_dir.join(STATE_FILE);
+    let mut w = Watch::default();
+    w.tick(&obs(Some(M1), &["T-乙", "T-丙"]), now());
+    w.save(&file);
+    // T-丙 自己 /exit：視窗不見；寄來的信先留著，但不說服務中斷
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.mux_notice_tick(T0 + 10_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 11_000).await;
+    assert!(h.fr.acked().is_empty());
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("中斷")), "{:?}", notice_bodies(&h));
+    // 下一輪監看收掉已結束的窗格：同一個服務、名單上沒有 T-丙
+    assert!(w.tick(&obs(Some(M1), &["T-乙"]), now() + 30_000).is_none(), "不是事故");
+    w.save(&file);
+    h.core.mux_notice_tick(T0 + 40_000).await;
+    h.core.pull("test", T0 + 41_000).await;
+    assert!(notice_bodies(&h).iter().any(|b| b.contains("T-丙") && b.contains("找不到")), "退回找不到：{:?}", notice_bodies(&h));
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("中斷")));
+    assert_eq!(h.fr.acked().len(), 1, "退回後 ack");
 }
 
 #[tokio::test]

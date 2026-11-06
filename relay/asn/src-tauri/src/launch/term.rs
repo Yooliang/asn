@@ -5771,6 +5771,16 @@ mod tests {
         }
 
         #[test]
+        fn 夥伴停在信任框時自己結束_不算卡在信任框() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            let rule = "─".repeat(60);
+            *rig.runner.inner.screen.borrow_mut() = format!("{rule}\n Quick safety check: Is this a project you created or one you trust?\n\n ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n[asn-exit {NONCE} 0]\n");
+            assert_eq!(rig.svc.partner_screen_code(&id).unwrap(), None, "已結束：不是等你回答");
+        }
+
+        #[test]
         fn 夥伴畫面自己印出格式對但暗號不對的標記_不算結束() {
             fix_nonce();
             let (rig, _) = mux_rig();
