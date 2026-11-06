@@ -16,9 +16,21 @@ impl Core {
         }
         self.mux_pending_at = now;
         let file = self.cfg.work_dir.join(mux_watch::STATE_FILE);
-        let (lost, recent) = mux_watch::pending_split(&file, crate::heartbeat::now_ms());
+        let wall = crate::heartbeat::now_ms();
+        let (lost, recent) = mux_watch::pending_split(&file, wall);
         self.mux_lost = lost.iter().cloned().collect();
         self.mux_pending = lost.into_iter().chain(recent).collect();
+        // 確定自己結束的：忘掉它（不再等它接回），寄給它的信馬上退回「找不到」
+        // 同名的又開起來、已經在名單上的不算（監看下一輪也會拿掉）
+        self.mux_exited = mux_watch::exited_names(&file, wall).into_iter().filter(|n| !self.roster.iter().any(|w| w.name == *n)).collect();
+        for n in self.mux_exited.clone() {
+            if self.known.contains(&n) {
+                self.log.line(&format!("window {n} exited on its own: forgotten, mail to it is bounced"));
+                self.known.forget(&n);
+            }
+            self.seen_run.remove(&n);
+            self.missing.remove(&n);
+        }
     }
 
     pub async fn mux_notice_tick(&mut self, now: u64) {

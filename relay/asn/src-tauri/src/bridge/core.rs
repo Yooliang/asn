@@ -453,6 +453,8 @@ pub struct Core {
     mux_pending: HashSet<String>,
     /// 其中確定中斷、還沒接回的（只有這些可以跟寄件人說「服務中斷」）
     mux_lost: HashSet<String>,
+    /// 確定自己結束的夥伴（監看記的）：不等它接回
+    mux_exited: HashSet<String>,
     mux_pending_at: u64,
     /// session 檔缺欄位的紀錄已經寫過（每次啟動一次）
     wait_fields_warned: bool,
@@ -533,7 +535,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -875,6 +877,9 @@ impl Core {
 
     /// 這個名字現在名單上沒有，但重開前有在線、而且還在寬限期內：等它接回來（信不退回）
     fn awaiting_return(&self, name: &str) -> bool {
+        if self.mux_exited.contains(name) {
+            return false;
+        }
         self.mux_pending.contains(name) || (!self.seen_run.contains(name) && self.known.contains(name) && self.now.saturating_sub(self.started_at) < AWAIT_GRACE_MS)
     }
 
@@ -890,7 +895,14 @@ impl Core {
                 self.await_first.clear();
             }
             self.await_first.entry(id.to_string()).or_insert(self.now);
-            self.log.line(&format!("id={id} to={name}: window not back yet after restart, kept in inbox (waiting up to {} h)", AWAIT_GRACE_MS / 3_600_000));
+            let why = if self.mux_lost.contains(name) {
+                "terminal service went down, not back yet"
+            } else if self.mux_pending.contains(name) {
+                "window just disappeared (service may be down or it exited), checking"
+            } else {
+                "window not back yet after restart"
+            };
+            self.log.line(&format!("id={id} to={name}: {why}, kept in inbox (waiting up to {} h)", AWAIT_GRACE_MS / 3_600_000));
         }
         true
     }

@@ -66,6 +66,9 @@ pub struct Watch {
     lost: Vec<String>,
     #[serde(default)]
     lost_at: u64,
+    /// 確定自己結束的夥伴（名字, 記下的時間）。寄給它們的信馬上退回，不當成還沒接回
+    #[serde(default)]
+    exited: Vec<(String, u64)>,
     /// 上一輪就看不到 mux（還沒下結論）
     #[serde(skip)]
     suspect: bool,
@@ -92,7 +95,21 @@ impl Watch {
     }
 
     /// 看一輪。有事故就回（同一次事故只回一次）
+    /// 記下確定自己結束的夥伴。它們不再算還沒接回，也從這一輪記的名單拿掉
+    pub fn note_exited(&mut self, names: &[String], now: u64) {
+        for n in names {
+            self.exited.retain(|(e, _)| e != n);
+            self.exited.push((n.clone(), now));
+            self.lost.retain(|l| l != n);
+            if let Some(s) = self.seen.as_mut() {
+                s.partners.retain(|p| p != n);
+            }
+        }
+    }
+
     pub fn tick(&mut self, o: &Observed, now: u64) -> Option<Incident> {
+        // 同名的又開起來了：不再算已結束。記太久的也拿掉
+        self.exited.retain(|(n, at)| !o.partners.iter().any(|p| p == n) && now.saturating_sub(*at) <= LOST_KEEP_MS);
         // 已經回來的（又出現在 mux 裡）、或等太久的，不再算還沒接回
         self.lost.retain(|n| !o.partners.iter().any(|p| p == n));
         if self.lost_at > 0 && now.saturating_sub(self.lost_at) > LOST_KEEP_MS {
@@ -152,6 +169,12 @@ pub fn pending_names(file: &Path, now_ms: u64) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+/// 確定自己結束的夥伴名字（狀態檔沒有、看不懂、或記太久的都不算）
+pub fn exited_names(file: &Path, now_ms: u64) -> Vec<String> {
+    let Some(w) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Watch>(&t).ok()) else { return Vec::new() };
+    w.exited.into_iter().filter(|(_, at)| now_ms.saturating_sub(*at) <= LOST_KEEP_MS).map(|(n, _)| n).collect()
 }
 
 /// 同上，分成兩份：（確定中斷、還沒接回的, 最近還看得到、可能剛掛的）。
@@ -240,13 +263,19 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
     let spawned = std::thread::Builder::new().name("asn-mux-watch".into()).spawn(move || {
         let file = work_dir.join(STATE_FILE);
         let mut w = Watch::load(&file, super::auto_resume::boot_ms(crate::heartbeat::now_ms()));
+        let mut first = true;
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
+            if !first {
+                std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            }
+            first = false;
             if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
                 return;
             }
             let Some(o) = terms.mux_snapshot() else { continue };
             let now = crate::heartbeat::now_ms();
+            w.note_exited(&terms.take_exited(), now);
             let incident = w.tick(&o, now);
             w.save(&file);
             if let Some(inc) = incident {
@@ -478,6 +507,30 @@ mod tests {
         w.save(&f);
         assert_eq!(Watch::load(&f, Some(1_000_000)).lost, ["甲"]);
         assert!(Watch::load(&f, Some(1_000_000 + 10 * 3_600_000)).lost.is_empty());
+    }
+
+    #[test]
+    fn 自己結束的_不算還沒接回_也不算可能剛掛_同名又開起來就拿掉() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000);
+        w.note_exited(&["乙".to_string()], 1_500);
+        w.save(&f);
+        assert_eq!(pending_names(&f, 2_000), ["甲"], "乙確定結束了");
+        assert_eq!(exited_names(&f, 2_000), ["乙"]);
+        // 服務真的中斷：只接回甲
+        let inc = w.tick(&obs(Some(M2), &[]), 1_000 + TICK_MS).unwrap();
+        assert_eq!(inc.partners, ["甲"]);
+        // 同名的又開起來了
+        w.tick(&obs(Some(M2), &["乙"]), 1_000 + 2 * TICK_MS);
+        w.save(&f);
+        assert!(exited_names(&f, 1_000 + 2 * TICK_MS).is_empty());
+        // 記太久的不算
+        let mut w2 = Watch::default();
+        w2.note_exited(&["丙".to_string()], 1_000);
+        w2.save(&f);
+        assert!(exited_names(&f, 1_000 + LOST_KEEP_MS + 1).is_empty());
     }
 
     #[test]
