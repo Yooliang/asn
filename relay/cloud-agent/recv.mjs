@@ -207,7 +207,13 @@ export async function main(rawEnv = process.env) {
     try { w = await core.api('whoami'); log(`whoami node=${w.node}`) }
     catch (e) { log(`whoami failed: ${e.message}`); await core.sleep(wait); continue }   // 網路暫時不通／IP 剛變：退避重試
     const bad = nodeMismatch(cfg.node, w.node)
-    if (bad) { log(`stop: ${bad}`); console.error(bad); rx.destroy?.(); return NODE_CHECK_EXIT }
+    if (bad) {
+      log(`stop: ${bad}`); console.error(bad); rx.destroy?.()
+      // 停下來之前通知本人（文字由後台組；舊後台回 404 就只留紀錄）
+      try { const r = await core.api('node_mismatch_notice', { method: 'POST', body: { configured: cfg.node } }); log(`node_mismatch_notice notify=${r?.notify}`) }
+      catch (e) { log(`node_mismatch_notice failed: ${e.message}`) }
+      return NODE_CHECK_EXIT
+    }
     core.connectBell(w.bell_topic, why => void rx.pull(why))
     break
   }

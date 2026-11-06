@@ -38,4 +38,5 @@ test('recv.mjs：先檢查節點、通過後才回報名單與接門鈴；身分
   assert.ok(at('identityEnvConflict(compat)') < at('readKey(cfg, env)'))
   assert.ok(at('nodeMismatch(cfg.node, w.node)') < at('core.connectBell('))
   assert.ok(at('nodeMismatch(cfg.node, w.node)') < at('void rx.rosterOnce()'), '名單要在確認節點之後才回報')
+  assert.ok(at("api('node_mismatch_notice', { method: 'POST', body: { configured: cfg.node } })") < at('return NODE_CHECK_EXIT\n'), '停下來之前通知本人，只帶設定的節點代號')
 })
