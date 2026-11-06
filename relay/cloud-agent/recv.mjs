@@ -15,6 +15,7 @@ import { normalizeAttachments } from '../machine/attach-format.mjs'
 import { aliasCursors, detectRenames, readNames, writeNames } from './rename-track.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { applyEnvCompat } from './env-compat.mjs'
+import { NODE_CHECK_EXIT, identityEnvConflict, nodeMismatch } from './node-check.mjs'
 import { backendHostCode } from './env.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl, writeFileAtomic } from './lib.mjs'
@@ -188,6 +189,8 @@ export async function main(rawEnv = process.env) {
   const log = createLog(cfg.logFile, { stderr: null })   // 只寫 recv.log（20MB 輪替）；boot.sh 的 stdout/stderr 只收當機時的堆疊
   for (const n of compat.legacyNames) log(`使用舊環境變數名：${n}`)
   for (const n of compat.conflictNames) log(`環境變數 ${n} 與對應舊名同時存在且不同，以 ${n} 為準`)
+  const envBad = identityEnvConflict(compat)
+  if (envBad) { log(`stop: ${envBad}`); console.error(envBad); return NODE_CHECK_EXIT }
   const key = readKey(cfg, env)
   if (!key) { console.error(NO_KEY_MSG); return 2 }
   if (!acquirePidLock(cfg.pidFile, 'recv.mjs')) { console.error('另一個 recv 正在執行（pid 檔有活著的程序）'); return 3 }
@@ -198,12 +201,24 @@ export async function main(rawEnv = process.env) {
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: readAnonKey(cfg, env), log, workDir: cfg.mailDir })
   const rx = createReceiver({ api: core.api, cfg, log, usedLegacyEnv: compat.legacyNames })
   log(`recv starting node=${cfg.node} window=${cfg.name} backend=${backendHostCode(cfg.baseUrl)} inbox=${cfg.inboxFile}`)
+  // 先確認金鑰對到的節點就是設定的節點，才回報名單、收信（#832：金鑰被另一組設定蓋掉時，不能用別的節點身分做事）
+  for (let wait = 2000; ; wait = Math.min(wait * 2, 30_000)) {
+    let w
+    try { w = await core.api('whoami'); log(`whoami node=${w.node}`) }
+    catch (e) { log(`whoami failed: ${e.message}`); await core.sleep(wait); continue }   // 網路暫時不通／IP 剛變：退避重試
+    const bad = nodeMismatch(cfg.node, w.node)
+    if (bad) {
+      log(`stop: ${bad}`); console.error(bad); rx.destroy?.()
+      // 停下來之前通知本人（文字由後台組；舊後台回 404 就只留紀錄）
+      try { const r = await core.api('node_mismatch_notice', { method: 'POST', body: { configured: cfg.node } }); log(`node_mismatch_notice notify=${r?.notify}`) }
+      catch (e) { log(`node_mismatch_notice failed: ${e.message}`) }
+      return NODE_CHECK_EXIT
+    }
+    core.connectBell(w.bell_topic, why => void rx.pull(why))
+    break
+  }
   void rx.rosterOnce()
   setInterval(() => void rx.rosterOnce(), cfg.rosterMs)
-  for (let wait = 2000; ; wait = Math.min(wait * 2, 30_000)) {
-    try { const w = await core.api('whoami'); log(`whoami node=${w.node}`); core.connectBell(w.bell_topic, why => void rx.pull(why)); break }
-    catch (e) { log(`whoami failed: ${e.message}`); await core.sleep(wait) }   // 網路暫時不通／IP 剛變：退避重試
-  }
   void rx.pull('startup')
   // 保底收信：不全靠門鈴。每 pollMs 一定要求一次（上一輪還沒結束就合併；卡住的一輪有整體時限，逾時會放掉）
   setInterval(() => void rx.pull('poll'), cfg.pollMs)
