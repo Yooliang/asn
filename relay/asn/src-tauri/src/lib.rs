@@ -50,6 +50,7 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+mod keystore;
 #[cfg(desktop)]
 mod view_handshake;
 #[cfg(desktop)]
@@ -916,7 +917,7 @@ impl view_stream::TPort for LiveTPort {
 #[cfg(all(desktop, feature = "gui"))]
 fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
     // 這台還不能被看（Linux：設備私鑰還沒有系統金鑰庫保護）就不查別台的觀看請求
-    if !device_id::can_be_viewed_here() {
+    if !device_id::can_be_viewed_here(&data_dir) {
         return;
     }
     tauri::async_runtime::spawn(async move {

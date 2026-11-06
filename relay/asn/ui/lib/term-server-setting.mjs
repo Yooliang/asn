@@ -4,6 +4,13 @@
 export const TERM_SERVER_ON_NOTE = '開著：夥伴共用同一個在背景跑的終端服務，關掉畫面或關掉 ASN，夥伴都會繼續跑。'
 export const TERM_SERVER_OFF_NOTE = '關掉：新開的夥伴各自開一扇視窗，ASN 重開時夥伴不會繼續留著。'
 export const TERM_SERVER_RESTART_NOTE = '重開 ASN 後生效。已開著的夥伴不會被搬動，也不會被關掉。'
+/** 登入資料和設備金鑰怎麼保護（Windows 不顯示）：用「系統金鑰庫」這個說法，不寫技術名稱 */
+export const KEY_PROTECTION_NOTE = {
+  keyring: '這台的登入資料和設備金鑰由系統金鑰庫保護。',
+  file_only: '這台沒有系統金鑰庫，登入資料只靠檔案權限保護；別台電腦也不能看這台的畫面。',
+}
+export const keyProtectionNote = v => KEY_PROTECTION_NOTE[v] ?? ''
+
 /** Linux：沒裝 WezTerm 就沒有這個開關，改說一句怎麼裝 */
 export const TERM_SERVER_MISSING_NOTE = '要讓夥伴共用同一個在背景跑的終端服務，請先用套件管理員安裝 wezterm（例如 sudo apt install wezterm），再重開 ASN。'
 export const TERM_SERVER_LOCKED_NOTE = '已由系統設定固定，這裡不能改。'

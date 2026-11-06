@@ -77,6 +77,8 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 
 # Linux：一律用純 Rust 的 rustls（內建根憑證）。無視窗橋要在沒有 OpenSSL 的伺服器上跑、也要能編成靜態執行檔；做法同安卓版（已驗證）。Windows／macOS 仍用系統內建的加密連線
 [target.'cfg(target_os = "linux")'.dependencies]
+# 系統金鑰庫（Secret Service）：Linux 上保護登入資料和設備金鑰（0.2.9）。走 zbus 5（和 tauri 共用），純 Rust
+secret-service = { version = "5.2.0", default-features = false, features = ["rt-tokio-crypto-rust"] }
 tauri = { version = "2", features = ["tray-icon"], optional = true }
 tauri-plugin-updater = { version = "=2.14.0", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }

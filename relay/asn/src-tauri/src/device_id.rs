@@ -22,9 +22,9 @@ pub const SCOPE_VIEW: &str = "view";
 /// 這台還不能讓別台看畫面（Linux：設備私鑰還沒有系統金鑰庫保護，0.2.9 接上 Secret Service 前不開）
 pub const NOT_VIEWABLE_HERE: &str = "這台目前不能讓別台看畫面";
 
-/// 這台能不能被別台看：只有 Windows（設備私鑰經 DPAPI 保護）。其他平台在接上系統金鑰庫之前一律不行
-pub fn can_be_viewed_here() -> bool {
-    cfg!(windows)
+/// 這台能不能被別台看：Windows（設備私鑰經 DPAPI 保護），或設備私鑰已經由系統金鑰庫保護（Linux）。只靠檔案權限的一律不行
+pub fn can_be_viewed_here(dir: &Path) -> bool {
+    cfg!(windows) || crate::keystore::device_key_sealed(dir)
 }
 
 pub const KEY_CHANGED: &str = "這台電腦的金鑰變了，可能是重裝過。請先在這裡撤銷，再重新配對";
@@ -54,12 +54,19 @@ pub fn load_or_create(dir: &Path, prot: &dyn crate::auth::Protector) -> Result<D
         Ok(text) => {
             let sealed = B64.decode(text.trim()).map_err(|_| "設備金鑰壞了".to_string())?;
             let plain = zeroize::Zeroizing::new(prot.unprotect(&sealed)?);
-            DeviceKey::from_pkcs8(&plain)
+            let key = DeviceKey::from_pkcs8(&plain)?;
+            // 舊的明文檔、這次有系統金鑰庫：順手升級成包過的（失敗就維持原樣）
+            if prot.seals() && !crate::keystore::is_sealed(&sealed) {
+                if let Err(e) = prot.protect(&plain).and_then(|s| write_private(&path, B64.encode(s).as_bytes()).map_err(|e| e.to_string())) {
+                    elog!("設備金鑰升級失敗（照舊可用）：{e}");
+                }
+            }
+            Ok(key)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "產生設備金鑰失敗".to_string())?;
             let sealed = prot.protect(doc.as_ref())?;
-            write_private(&path, &B64.encode(sealed)).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
+            write_private(&path, B64.encode(sealed).as_bytes()).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
             DeviceKey::from_pkcs8(doc.as_ref())
         }
         Err(e) => Err(format!("讀設備金鑰失敗：{e}")),
@@ -68,7 +75,7 @@ pub fn load_or_create(dir: &Path, prot: &dyn crate::auth::Protector) -> Result<D
 
 /// 寫金鑰檔：非 Windows 先用 0600 建暫存檔、寫完再換名，從頭到尾都只有本人讀得到（和登入憑證的寫法相同）。
 /// 不能先寫好再改權限：中間那一刻是預設權限（通常 0644），同一台的其他使用者讀得到
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, text: &[u8]) -> std::io::Result<()> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p)?;
     }
@@ -84,20 +91,27 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     {
         use std::io::Write;
         let mut f = opts.open(&tmp)?;
-        f.write_all(text.as_bytes())?;
+        f.write_all(text)?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)
 }
 
 /// 這個系統用哪種方式保護金鑰（和登入憑證相同）
-pub fn protector() -> Box<dyn crate::auth::Protector> {
+pub fn protector(dir: &Path) -> Box<dyn crate::auth::Protector> {
     #[cfg(windows)]
     {
+        let _ = dir;
         Box::new(crate::auth::Dpapi)
     }
     #[cfg(not(windows))]
     {
+        // Linux：有系統金鑰庫（或用過）就用它包；完全沒有才只靠檔案權限（0.2.9）
+        #[cfg(target_os = "linux")]
+        if let Some(w) = crate::keystore::wrap_for(dir, crate::keystore::Purpose::DeviceKey, KEY_FILE) {
+            return Box::new(w);
+        }
+        let _ = dir;
         Box::new(crate::auth::PlainFile)
     }
 }
@@ -268,7 +282,7 @@ pub mod live {
 
     pub fn key(dir: &Path) -> Result<DeviceKey, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        load_or_create(dir, protector().as_ref())
+        load_or_create(dir, protector(dir).as_ref())
     }
 
     fn update<T>(dir: &Path, f: impl FnOnce(&mut Trust) -> Result<T, String>) -> Result<T, String> {
@@ -396,7 +410,7 @@ pub mod live {
             return Ok(());
         }
         // 確認＝記下「對方可以看我」：這台還不能被看就不確認（後台和本機都不動）
-        if !can_be_viewed_here() {
+        if !can_be_viewed_here(dir) {
             return Err(NOT_VIEWABLE_HERE.to_string());
         }
         let k = key(dir)?;
@@ -481,7 +495,7 @@ mod tests {
         assert_eq!(mode, 0o600, "{mode:o}");
         // 暫存檔本身就用 0600 建（不是寫完才改）：照同樣的寫法建一個不換名的檔來查
         let p = d.path().join("x");
-        write_private(&p, "secret").unwrap();
+        write_private(&p, b"secret").unwrap();
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         let src = include_str!("device_id.rs");
         let f = src.split("fn write_private(").nth(1).unwrap().split("\n}").next().unwrap();
@@ -491,17 +505,18 @@ mod tests {
 
     #[test]
     fn 守門_還不能被看的平台_確認配對前就拒絕_被看的背景也不啟動() {
-        assert_eq!(can_be_viewed_here(), cfg!(windows), "只有 Windows");
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(can_be_viewed_here(d.path()), cfg!(windows), "沒有金鑰庫保護的設備金鑰：只有 Windows");
         let src = include_str!("device_id.rs");
         let decide = src.split("pub async fn decide(").nth(1).unwrap();
-        let guard = decide.find("if !can_be_viewed_here()").expect("確認前要先查");
+        let guard = decide.find("if !can_be_viewed_here(dir)").expect("確認前要先查");
         assert!(guard < decide.find("device_pair_decide\", Some(json!({ \"id\": id, \"decision\": \"confirm\"").unwrap(), "後台收到確認之前就擋");
         assert!(guard < decide.find(".grant(").unwrap(), "本機記下權限之前就擋");
         let lib = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
         let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller");
         // 核心模組不能寫出 tauri 的路徑（headless 守門），只比對後半
         let first = poller.split("async_runtime::spawn").next().unwrap();
-        assert!(first.contains("if !device_id::can_be_viewed_here()"), "被看的背景在還不能被看的平台不啟動");
+        assert!(first.contains("if !device_id::can_be_viewed_here(&data_dir)"), "被看的背景在還不能被看的平台不啟動");
     }
 
     #[test]

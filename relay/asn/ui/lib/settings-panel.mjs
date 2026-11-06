@@ -18,7 +18,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
-import { TERM_SERVER_MISSING_NOTE, termServerNote } from './term-server-setting.mjs'
+import { TERM_SERVER_MISSING_NOTE, keyProtectionNote, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
@@ -101,7 +101,7 @@ export const SettingsPanel = {
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { PAIR,
-      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, TERM_SERVER_MISSING_NOTE,
+      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, TERM_SERVER_MISSING_NOTE, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
@@ -406,6 +406,7 @@ export const SettingsPanel = {
             <small>{{ termServerNote(st.bridge) }}</small>
           </template>
           <small v-else-if="st.bridge.termServerMissing">{{ TERM_SERVER_MISSING_NOTE }}</small>
+          <small v-if="keyProtectionNote(st.bridge.keyProtection)" role="note">{{ keyProtectionNote(st.bridge.keyProtection) }}</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.screenWatch" :disabled="st.bridge.busy" @change="act('bridge-screen-watch', $event.target.checked)" aria-label="夥伴卡住時跳提示" /><span>夥伴卡住時跳提示</span></label>
           <small>ASN 會定時看夥伴視窗的畫面，停在要你回答的地方時，在這台電腦跳提示；權限詢問可以直接按允許或拒絕。其他提示在別的設備只看得到「等你回答：權限」這類固定字。目前只支援 Windows 上由 ASN 開的 Claude 夥伴。</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.permPhone" :disabled="st.bridge.busy" @change="act('bridge-perm-phone', $event.target.checked)" aria-label="權限框傳到手機" /><span>權限框傳到手機</span></label>

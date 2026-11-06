@@ -164,6 +164,13 @@ jobs:
 
       - name: 單元測試（Rust）
         run: npm run test:rust
+      # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，金鑰圈用固定測試密碼解鎖。
+      # 平常是 ignored，只在這裡明確跑；不碰任何真的帳號或 secrets
+      - name: 系統金鑰庫整合測試（Linux）
+        working-directory: relay/asn/src-tauri
+        run: |
+          sudo apt-get install -y --no-install-recommends gnome-keyring dbus-daemon
+          dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
 
       - name: 建置 deb 與 AppImage
         run: npm run build

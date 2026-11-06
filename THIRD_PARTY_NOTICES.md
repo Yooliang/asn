@@ -10,6 +10,7 @@ ASN 自己的程式碼採用 **MIT** 授權（根目錄的 `LICENSE`，小良哥
 | [WezTerm](https://github.com/wez/wezterm) 20240203 | 隨電腦版安裝檔附帶（建置時放進 `src-tauri/resources/wezterm/`，不放進倉庫） | MIT | 安裝檔裡附上原授權文字 `LICENSE.md` 和來源說明 `SOURCE.txt`。 |
 | [xterm.js](https://xtermjs.org/) `@xterm/xterm` 5.5.0 | 在畫面裡看終端（建置時打包成 `ui/vendor/`） | MIT | |
 | [Vue](https://vuejs.org/) | 介面框架（建置時打包成 `ui/vendor/`） | MIT | |
+| [secret-service](https://github.com/hwchen/secret-service-rs) 5.2.0（Rust crate，連同相依的 aes、cbc、hkdf、hmac、sha2、num 等） | Linux 版用系統金鑰庫保護登入資料和設備金鑰（`src-tauri/src/keystore.rs`），只編進 Linux 版 | MIT OR Apache-2.0 | 編譯時連結，不放原始碼進倉庫。 |
 
 **從 Irori 移植的程式**（`relay/asn/ui/lib/stt-text.mjs`、`voice-activity.mjs` 等）：Irori 是同一位作者的專案，跟 ASN 用同一個授權，不另外列出。
 

@@ -412,6 +412,10 @@ fn decode_login(b: &[u8]) -> Option<StoredLogin> {
 pub trait Protector: Send + Sync {
     fn protect(&self, plain: &[u8]) -> Result<Vec<u8>, String>;
     fn unprotect(&self, sealed: &[u8]) -> Result<Vec<u8>, String>;
+    /// 會把內容包起來（系統金鑰庫）：讀到舊的明文檔時要順手升級
+    fn seals(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -478,21 +482,24 @@ impl<P: Protector> TokenStore for FileStore<P> {
             Err(e) => return Err(format!("讀不到登入存檔：{e}")),
         };
         // 解不開或格式壞掉＝當作沒登入（不丟內容）
-        Ok(self.prot.unprotect(&sealed).ok().and_then(|p| decode_login(&p)))
+        let login = self.prot.unprotect(&sealed).ok().and_then(|p| decode_login(&p));
+        // 舊的明文檔、這次有系統金鑰庫：讀到的同時升級成包過的（失敗就維持原樣，不影響使用）
+        if let Some(l) = &login {
+            if self.prot.seals() && !crate::keystore::is_sealed(&sealed) {
+                if let Err(e) = self.save(l) {
+                    elog!("[ASN] 登入存檔升級失敗（照舊可用）：{e}");
+                }
+            }
+        }
+        Ok(login)
     }
     fn save(&self, login: &StoredLogin) -> Result<(), String> {
         let sealed = self.prot.protect(&encode_login(login))?;
         if let Some(p) = self.path.parent() {
             std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
         }
-        let tmp = PathBuf::from(format!("{}.{}.tmp", self.path.display(), std::process::id()));
-        std::fs::write(&tmp, &sealed).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-        }
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
+        // 暫存檔建立時就是 0600、寫完再換名（和設備金鑰同一套，不是寫好才改權限）
+        crate::device_id::write_private(&self.path, &sealed).map_err(|e| e.to_string())
     }
     fn clear(&self) -> Result<(), String> {
         match std::fs::remove_file(&self.path) {
@@ -511,6 +518,11 @@ pub fn default_store(data_dir: &Path) -> Box<dyn TokenStore> {
     }
     #[cfg(not(windows))]
     {
+        // Linux：有系統金鑰庫（或用過）就用它包；完全沒有才只靠檔案權限（0.2.9）
+        #[cfg(target_os = "linux")]
+        if let Some(w) = crate::keystore::wrap_for(data_dir, crate::keystore::Purpose::AuthToken, "login.bin") {
+            return Box::new(FileStore { path, prot: w });
+        }
         Box::new(FileStore { path, prot: PlainFile })
     }
 }
