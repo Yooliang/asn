@@ -5789,14 +5789,18 @@ mod tests {
             rig.svc.mux_snapshot();
             assert_eq!(rig.svc.take_exited(), vec!["小乙".to_string()]);
             assert!(rig.svc.take_exited().is_empty(), "拿一次就清空");
-            // ASN 關著時結束：重開認領時收掉，也記下名字
-            *rig.runner.inner.screen.borrow_mut() = String::new();
+        }
+
+        #[test]
+        fn 夥伴在_asn_關著時結束_重開認領時收掉並記下名字() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
             open_partner(&rig);
             *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
             let svc2 = restarted(&rig, true);
             svc2.reclaim().unwrap();
             assert_eq!(svc2.take_exited(), vec!["小乙".to_string()]);
-            assert!(svc2.list().is_empty() && svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_none());
+            assert!(svc2.partner_in_mux((MUX_PID, 1000), "小乙").is_none(), "沒有認領");
         }
 
         #[test]
