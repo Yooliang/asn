@@ -179,3 +179,25 @@ export const TERM_BAR_WHY = Object.freeze({
   tasks: '直接開的終端還看不到工作項目',
   manage: '直接開的終端還沒有管理項目',
 })
+
+// #910：自己開的終端分頁「管理 → 關閉視窗」。接手來的窗格不能從這裡關別人的視窗（只能「解除接手」）。
+export const TERM_CLOSE_KEY = 'term:close'
+export const TERM_ADOPTED_MANAGE_WHY = '接手來的窗格請用「解除接手」'
+/** 功能列反灰表：自己開的分頁「管理」可用（拿掉那一項）；接手窗格的「管理」照舊反灰並改說明 */
+export function termBarBlocked(row) {
+  if (row?.adopted === true) return { ...TERM_BAR_WHY, manage: TERM_ADOPTED_MANAGE_WHY }
+  const { manage: _m, ...rest } = TERM_BAR_WHY
+  return Object.freeze(rest)
+}
+/** 「管理」選單的項目：只有自己開的分頁才有「關閉視窗」 */
+export const termManageItems = row => (row && row.adopted !== true ? [{ key: TERM_CLOSE_KEY, label: '關閉視窗' }] : [])
+export const termCloseTitle = row => `要關閉『${row?.title || '這個終端'}』嗎？`
+export const TERM_CLOSE_NOTE = '夥伴會結束，畫面也會關掉。'
+/** 確認後真的關閉：接手窗格一律不呼叫 termStop。回 { ok, error }；失敗細節進 console，畫面只給使用者看得懂的話 */
+export async function closeTermRun(transport, row) {
+  if (!row?.id || row.adopted === true) return { ok: false, error: row?.adopted === true ? TERM_ADOPTED_MANAGE_WHY : '找不到這個終端（可能已經關掉）' }
+  try { await transport.termStop({ id: row.id }); return { ok: true, error: '' } } catch (e) {
+    console.info('[終端] 關閉失敗：', e)
+    return { ok: false, error: '沒能關閉這個視窗，請稍後再試' }
+  }
+}

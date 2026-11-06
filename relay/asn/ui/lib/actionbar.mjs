@@ -322,7 +322,7 @@ export const ActionBar = {
     const subView = computed(() => subagentView(subs.q))
     const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count))
     const lite = computed(() => Boolean(props.blocked))
-    const opsAll = computed(() => (lite.value ? [] : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
+    const opsAll = computed(() => (lite.value ? props.ops.map(i => ({ ...i, ok: true, reason: '' })) : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,

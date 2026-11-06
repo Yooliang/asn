@@ -210,7 +210,7 @@
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
       <div class="pane term-pane" :class="{ 'term-pane-live': !termPaneRow.adopted }" v-if="view === 'chat' && termPaneActive">
-        <action-bar v-if="termPaneFriend" :friend="termPaneFriend" :self-node="selfNode" :api="termBarApi" :blocked="termBarBlocked" :active="view === 'chat'"></action-bar>
+        <action-bar v-if="termPaneFriend" :friend="termPaneFriend" :self-node="selfNode" :api="termBarApi" :blocked="termBarBlocked" :ops="termBarOps" @ops="onTermBarOp" :active="view === 'chat'"></action-bar>
         <div class="tp-head"><b>{{ termPaneRow.title }}</b><span class="term-state" :class="'tone-' + termPaneRow.tone">{{ termPaneRow.stateLabel }}</span><span class="term-folder" v-if="termPaneRow.folder">{{ termPaneRow.folder }}</span><span class="term-adopted" v-if="termPaneRow.adopted">已接手・預設只能看</span></div>
         <div class="tp-body">
           <ul class="tp-log" v-if="(termTimeline[termPaneRow.id] || []).length" aria-label="送字記錄">
@@ -302,6 +302,14 @@
     <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
   </ul>
   <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" :pi-models="opDlg.friend.node === selfNode ? transport.piModels : remotePiModelsFor(opDlg.friend.node)" @close="closeOpDlg"></partner-op-dialog>
+  <asn-dialog v-if="termClose.open" :title="termClose.title" @close="termCloseCancel">
+    <p class="launch-notice-body">{{ TERM_CLOSE_NOTE }}</p>
+    <p class="launch-notice-body model-err" v-if="termClose.error">{{ termClose.error }}</p>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" :disabled="termClose.busy" @click="termCloseCancel">取消</button>
+      <button class="aero-btn primary" type="button" :disabled="termClose.busy" @click="termCloseConfirm">{{ termClose.busy ? '關閉中…' : '關閉視窗' }}</button>
+    </div>
+  </asn-dialog>
   <asn-dialog v-if="modelDlg.open" :title="modelDlgText.title" @close="closeModelDlg">
     <p class="launch-notice-body" v-if="!modelDlg.done">{{ modelDlgText.lead }}</p>
     <ul class="model-points" v-if="!modelDlg.done && !modelDlg.error"><li v-for="p in modelDlgText.points" :key="p">{{ p }}</li></ul>
