@@ -1,4 +1,4 @@
-// 設備配對（#597 工作包 E）。資料庫函式見 migrations/20261105140000_device_pairing.sql。這支只做參數檢查與轉送：
+// 設備配對（#597 工作包 E）。資料庫函式見 migrations/20261107100000_device_pairing.sql。這支只做參數檢查與轉送：
 //   節點金鑰：device_key_publish（上傳自己的設備公鑰）
 //   本人簽章：device_pair_start、device_pair_list、device_pair_decide、device_pair_close；沒簽章一律 403
 // 後台只轉交公鑰和簽章，不判斷信任：信任只看各台本機記的。通知只敲門鈴，不帶內容。

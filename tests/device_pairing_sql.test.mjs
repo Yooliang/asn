@@ -1,4 +1,4 @@
-// 設備配對（migration 20261105140000_device_pairing.sql）。
+// 設備配對（migration 20261107100000_device_pairing.sql）。
 // 靜態：交易內、函式只給 service_role、表開 RLS。實跑（要 pglite）：簽章、兩台都是本人的、只有對方能確認、
 // 7 天過期、同一對一筆、頻率上限、撤回、別人碰不到。還原驗證：拿掉保護要變紅。
 import test from 'node:test'
@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
-const MIG = '20261105140000_device_pairing.sql'
+const MIG = '20261107100000_device_pairing.sql'
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
