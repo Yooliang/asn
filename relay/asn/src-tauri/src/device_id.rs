@@ -499,7 +499,8 @@ mod tests {
         assert!(guard < decide.find(".grant(").unwrap(), "本機記下權限之前就擋");
         let lib = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
         let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller");
-        let first = poller.split("tauri::async_runtime::spawn").next().unwrap();
+        // 核心模組不能寫出 tauri 的路徑（headless 守門），只比對後半
+        let first = poller.split("async_runtime::spawn").next().unwrap();
         assert!(first.contains("if !device_id::can_be_viewed_here()"), "被看的背景在還不能被看的平台不啟動");
     }
 
