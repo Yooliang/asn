@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
@@ -56,7 +56,9 @@ pub(crate) fn with_webgpu(cfg: &str) -> String {
 /// 舊版寫的空設定：升級時換成 ISOLATED_CONFIG（使用者改過的內容一律不動）
 const OLD_DEFAULT_CONFIG: &str = "return {}";
 
-/// 一次最多從畫面底部往回讀幾行（對應 `get-text --start-line=-N`）。超出就拒絕，避免整份捲動區進記憶體。
+/// 一次最多讀幾行（對應 `get-text --start-line=-N`）。超出就拒絕，避免整份捲動區進記憶體。
+/// N 是從畫面頂端往上進入捲動紀錄的行數（https://wezterm.org/cli/cli/get-text.html：0 是畫面第一行、負數往回，結束行預設是畫面底部），
+/// 所以實際讀到的是 N 行捲動紀錄加上整個畫面，不是「從畫面底部往回 N 行」。
 pub const MAX_READ_LINES: i32 = 500;
 /// 讀回文字的字數上限（超出截斷）。與送字的單行上限是兩件事。
 pub const MAX_READ_CHARS: usize = 64_000;
@@ -65,6 +67,9 @@ pub const MAX_READ_CHARS: usize = 64_000;
 const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
 /// 盯的間隔
 const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
+/// 重開認領（reclaim）剛讀過畫面、確認還活著的窗格，這段時間內監看（`sweep_exited`）不再重讀（#897：啟動時同一個窗格不要連讀兩次）。
+/// 已結束的窗格 reclaim 當場就收掉並記名字（#886），不受影響
+pub(crate) const RECENT_PROBE: Duration = Duration::from_secs(20);
 
 /// 工作階段記錄裡有沒有這個名字、`since_ms` 之後才啟動、程序還活著的 claude：有＝它已經起來了（比一開就結束的窗口更早的訊號）。
 /// 純邏輯，`alive` 由外面傳入。啟動時間比 `since_ms` 早的是舊的同名工作階段，不算。
@@ -302,6 +307,8 @@ struct Inner {
     missing_once: std::collections::BTreeSet<String>,
     /// 上一輪 mux_snapshot 看到的現行 mux（程序編號＋建立時間）；找同名夥伴時用它分辨舊 mux 的列，不另外下 cli（#923）
     last_live: Option<(u32, u64)>,
+    /// 重開認領剛讀過畫面、確認還活著的窗格：終端編號 → 讀的時刻。監看在 [`RECENT_PROBE`] 內不重讀它們（#897）
+    probed: BTreeMap<String, Instant>,
     /// B2c：看 mux 窗格的 GUI（只存記憶體；ASN 重啟後不認，使用者要看再開一個）
     viewers: Vec<Viewer>,
 }
@@ -421,6 +428,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 exited: Vec::new(),
                 missing_once: Default::default(),
                 last_live: None,
+                probed: BTreeMap::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -449,6 +457,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 exited: Vec::new(),
                 missing_once: Default::default(),
                 last_live: None,
+                probed: BTreeMap::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -478,6 +487,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 exited: Vec::new(),
                 missing_once: Default::default(),
                 last_live: None,
+                probed: BTreeMap::new(),
                 parked: Vec::new(),
                 viewers: Vec::new(),
             }),
@@ -949,7 +959,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
     }
 
-    /// `lines` 是從畫面底部往回讀的行數，範圍 1..=MAX_READ_LINES。回傳再截到字數上限。
+    /// `lines` 對應 `--start-line=-lines`（從畫面頂端往上 lines 行的捲動紀錄起，一直讀到畫面底部），範圍 1..=MAX_READ_LINES。回傳再截到字數上限。
     pub fn read(&self, id: &str, lines: i32) -> Result<String, String> {
         let snap = self.snapshot(id)?;
         if !(1..=MAX_READ_LINES).contains(&lines) {
@@ -1296,13 +1306,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
     }
     /// 已經結束的夥伴窗格（看得到帶暗號的結束標記）：收掉窗格、從對照表拿掉。回收掉幾個。
-    /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收
+    /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收。
+    /// 重開認領在 [`RECENT_PROBE`] 內剛讀過、確認還活著的窗格這一輪跳過（#897：啟動時不要連讀兩次）；過期的記錄順手丟掉
     fn sweep_exited(&self, dir: &WezTermDir) -> usize {
         let rows: Vec<(String, u64, PathBuf, String, Option<String>)> = {
-            let g = self.inner.lock().unwrap();
+            let mut g = self.inner.lock().unwrap();
+            g.probed.retain(|_, at| at.elapsed() < RECENT_PROBE);
+            let g = &*g;
             g.sessions
                 .iter()
                 .filter(|s| s.window.mux && !s.kind.is_empty())
+                .filter(|s| !g.probed.contains_key(&s.id))
                 .filter_map(|s| s.exit_nonce.clone().map(|n| (s.id.clone(), s.pane_id, s.window.sock.clone(), n, partner_label(&s.id, &s.title).map(String::from))))
                 .collect()
         };
@@ -1654,6 +1668,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let mut restored: Vec<Session> = Vec::new();
         let mut parked: Vec<StoreTerm> = Vec::new();
         let mut exited_now: Vec<String> = Vec::new();
+        let mut probed_now: BTreeMap<String, Instant> = BTreeMap::new();
         for term in file.terms {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
@@ -1722,6 +1737,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 }
                 continue;
             };
+            // pick_pane 只回 ended 判過「沒結束」的窗格，有暗號就表示剛讀過它的畫面：記下來，監看第一輪不重讀（#897）
+            if term.exit_nonce.is_some() {
+                probed_now.insert(term.id.clone(), Instant::now());
+            }
             let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
             restored.push(Session {
                 id: term.id.clone(),
@@ -1754,6 +1773,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             g.sessions = restored;
             g.parked = parked;
             g.exited.extend(exited_now);
+            g.probed = probed_now;
         }
         self.persist()?;
         Ok(())
@@ -6321,6 +6341,30 @@ mod tests {
             svc3.set_hold_config(true);
             svc3.reclaim().unwrap();
             assert!(svc3.take_exited().is_empty(), "窗格不見了不等於自己結束（可能是服務中斷）");
+        }
+
+        #[test]
+        fn 重開認領剛讀過的窗格_監看第一輪不重讀_過期後照讀() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1 小乙", 9, 0);
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
+            let before = count_sub(&rig.runner, "get-text");
+            svc2.reclaim().unwrap();
+            let after_reclaim = count_sub(&rig.runner, "get-text");
+            assert!(after_reclaim > before, "認領時讀過畫面");
+            assert_eq!(svc2.mux_snapshot().unwrap().partners, vec!["小乙".to_string()]);
+            assert_eq!(count_sub(&rig.runner, "get-text"), after_reclaim, "監看第一輪不重讀剛認領的窗格（#897）");
+            // 記錄過期：監看照常讀畫面，已結束的照 #886 收掉、記名字
+            let old = std::time::Instant::now().checked_sub(RECENT_PROBE + Duration::from_secs(1)).unwrap();
+            svc2.inner.lock().unwrap().probed.values_mut().for_each(|at| *at = old);
+            *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            assert!(svc2.mux_snapshot().unwrap().partners.is_empty(), "過期後照讀，看到結束標記");
+            assert!(count_sub(&rig.runner, "get-text") > after_reclaim);
+            assert_eq!(svc2.take_exited(), vec!["小乙".to_string()]);
+            assert!(svc2.inner.lock().unwrap().probed.is_empty(), "過期的記錄丟掉了");
         }
 
         #[test]

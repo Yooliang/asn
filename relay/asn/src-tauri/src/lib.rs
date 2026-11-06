@@ -740,7 +740,7 @@ async fn term_send(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveT
     term_remote::local_confirm_send(relay.as_ref(), &terms, &data_dir, &req).await
 }
 
-/// 讀自己開的終端。lines 是從畫面底部往回的行數，超過上限會被拒絕。
+/// 讀自己開的終端。lines 對應 `--start-line=-lines`：從畫面頂端再往上（捲動紀錄）lines 行起，一直讀到畫面底部；超過上限會被拒絕。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]

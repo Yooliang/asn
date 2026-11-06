@@ -516,10 +516,12 @@ pub struct PaneSize {
     pub rows: u32,
 }
 
-/// 判斷窗格結束用：往回讀畫面底部幾行。
+/// 判斷窗格結束用：`get-text --start-line=-N` 的 N。
+/// 語意（https://wezterm.org/cli/cli/get-text.html）：0 是終端畫面的第一行（最上面），負數往回進入捲動紀錄；結束行預設是畫面底部。
+/// 所以 -400 讀的是「畫面頂端往上 400 行的捲動紀錄＋整個畫面」，不是「從畫面底部往回 400 行」。
 /// 正在跑的舊 mux 還是用舊的 mux.lua 起的（沒有 exit_behavior_messaging = "None"），包裝殼結束時 WezTerm 的 Hold 訊息會把整串
 /// `-EncodedCommand <base64>` 印出來，6000 字的指令約 200 多行，會把標記擠出最後 20 行。這一列沒有記指令長度，
-/// 所以用固定的保守值 400（實測 6000 字夠用，仍在 term::MAX_READ_LINES 內）；新起的 mux 不印那段訊息，畫面很短，多讀無妨。
+/// 所以用固定的保守值 400（#897 評估後維持不改：舊 mux 可能還在跑，標記被擠到哪裡無法保證；實測 6000 字夠用，仍在 term::MAX_READ_LINES 內）；新起的 mux 不印那段訊息，畫面很短，多讀無妨。
 pub(crate) const PANE_PROBE_LINES: i32 = 400;
 
 /// 窗格畫面裡有沒有 ASN 自己留的結束標記 `[asn-exit <暗號> <結束碼>]`（見 `local::exit_marker`、`local::mux_wrapped_argv`）。
