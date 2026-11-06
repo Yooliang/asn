@@ -192,16 +192,43 @@ fn is_sealed_text(b: &[u8]) -> bool {
 pub const STORE_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const STORE_TIMEOUT: &str = "系統金鑰庫沒有回應";
 
+/// 逾時之後還沒結束的那條執行緒（最多一條）。還在的時候不再開新的，直接回逾時：
+/// 金鑰庫長時間沒回應時，不會每次查詢都多留一條執行緒
+static STUCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 在一條新的執行緒上做 f，最多等 limit。逾時就回 Other（那條執行緒等它自己結束，不卡住呼叫端）。
-/// 新執行緒也避開「在 tokio 的執行緒上呼叫 zbus 的同步 API 會 panic」
+/// 上一次逾時的還沒結束就不再開，直接回逾時。新執行緒也避開「在 tokio 的執行緒上呼叫 zbus 的同步 API 會 panic」
 pub fn run_limited<T: Send + 'static>(limit: std::time::Duration, f: impl FnOnce() -> Result<T, StoreErr> + Send + 'static) -> Result<T, StoreErr> {
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+    if STUCK.load(Ordering::SeqCst) {
+        return Err(StoreErr::Other(STORE_TIMEOUT.to_string()));
+    }
+    // 等的那邊放棄了（逾時）沒有：執行緒結束時看這個決定要不要清掉 STUCK；兩邊用同一把鎖，不會漏清或多清
+    let abandoned = Arc::new(Mutex::new(false));
     let (tx, rx) = std::sync::mpsc::channel();
+    let flag = abandoned.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(f());
+        let r = f();
+        let gone = flag.lock().unwrap_or_else(|e| e.into_inner());
+        if *gone {
+            STUCK.store(false, Ordering::SeqCst);
+        } else {
+            let _ = tx.send(r);
+        }
     });
     match rx.recv_timeout(limit) {
         Ok(r) => r,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StoreErr::Other(STORE_TIMEOUT.to_string())),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            let mut gone = abandoned.lock().unwrap_or_else(|e| e.into_inner());
+            // 鎖住後再收一次：剛好在逾時那一刻做完的，照樣拿結果
+            if let Ok(r) = rx.try_recv() {
+                return r;
+            }
+            *gone = true;
+            STUCK.store(true, Ordering::SeqCst);
+            Err(StoreErr::Other(STORE_TIMEOUT.to_string()))
+        }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StoreErr::Other("金鑰庫查詢中斷".to_string())),
     }
 }
@@ -495,22 +522,43 @@ mod tests {
         assert_eq!(*s.creates.lock().unwrap(), 0, "只讀不建");
     }
 
+    /// run_limited 共用一個 STUCK：碰到它的測試排隊跑
+    static LIMITED: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
-    fn 金鑰庫卡住_最多等上限就回錯_不卡死呼叫端() {
+    fn 金鑰庫卡住_最多等上限就回錯_卡著的那條結束前不再開新的() {
+        let _g = LIMITED.lock().unwrap_or_else(|e| e.into_inner());
+        let ms = std::time::Duration::from_millis;
+        let started = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let t = std::time::Instant::now();
-        let r: Result<(), StoreErr> = run_limited(std::time::Duration::from_millis(100), || {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+        let s1 = started.clone();
+        let r: Result<(), StoreErr> = run_limited(ms(100), move || {
+            s1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(ms(800));
             Ok(())
         });
         assert_eq!(r, Err(StoreErr::Other(STORE_TIMEOUT.to_string())), "逾時＝回錯（不是 Unavailable，不會因此降級成明文）");
-        assert!(t.elapsed() < std::time::Duration::from_secs(1), "{:?}", t.elapsed());
+        assert!(t.elapsed() < ms(500), "{:?}", t.elapsed());
+        // 卡著的還沒結束：不再開新的執行緒，直接回逾時
+        let s2 = started.clone();
+        let again: Result<(), StoreErr> = run_limited(ms(100), move || {
+            s2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!(again, Err(StoreErr::Other(STORE_TIMEOUT.to_string())));
+        assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), 1, "只開過一條");
+        // 卡著的那條結束後就恢復
+        std::thread::sleep(ms(1200));
         assert_eq!(run_limited(STORE_LIMIT, || Ok(7)), Ok(7));
         assert!(STORE_LIMIT <= std::time::Duration::from_secs(3));
     }
 
+    static SLOW_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
     #[test]
-    fn 設定頁的保護方式不等_背景算好再更新() {
+    fn 設定頁的保護方式不等_背景重算同時只有一個_算好再更新() {
         fn slow(_: &Path) -> &'static str {
+            SLOW_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(std::time::Duration::from_millis(300));
             "keyring"
         }
@@ -518,7 +566,11 @@ mod tests {
         let t = std::time::Instant::now();
         assert_eq!(cached_label(dir, slow), "", "第一次：不等，先回空的");
         assert!(t.elapsed() < std::time::Duration::from_millis(100));
+        for _ in 0..5 {
+            assert_eq!(cached_label(dir, slow), "", "還在算：照樣不等");
+        }
         std::thread::sleep(std::time::Duration::from_millis(600));
+        assert_eq!(SLOW_CALLS.load(std::sync::atomic::Ordering::SeqCst), 1, "還在算的時候不再開新的");
         assert_eq!(cached_label(dir, slow), "keyring", "背景算好之後就有");
     }
 
