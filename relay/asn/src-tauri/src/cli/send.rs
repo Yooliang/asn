@@ -26,6 +26,21 @@ pub(super) fn wake_note(r: &Value) -> Option<String> {
     let who = r.get("not_woken").and_then(Value::as_i64).map_or("人".to_string(), |n| format!(" {n} 位"));
     Some(format!("（這次點名沒有叫醒{who}：已達 AI 互相叫醒上限，對方只留未讀。要對方馬上看到請改用私信；真人發言後會重新計算）"))
 }
+/// 內文 @ 了但對不到任何群組成員時要印的提醒（room_post 的回應帶 unmatched: [名字]）。舊後台沒有這欄就不印；結束碼仍是 0
+pub(super) fn unmatched_note(r: &Value) -> Option<String> {
+    let names: Vec<&str> = r
+        .get("unmatched")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    Some(format!("提醒：{} 不在這個群組，這則沒有點到他，也不會交給別人。要找他請私訊，或請主持人把他加進群組。", names.join("、")))
+}
 fn usage() -> String {
     format!(
         "用法：
@@ -213,6 +228,9 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         let seq = r.get("seq").and_then(Value::as_i64).map(|s| format!(" seq={s}")).unwrap_or_default();
         io.outln(&format!("posted room={room}{seq} from={}/{}", id.node, me.name));
         if let Some(n) = wake_note(&r) {
+            io.outln(&n);
+        }
+        if let Some(n) = unmatched_note(&r) {
             io.outln(&n);
         }
     } else {

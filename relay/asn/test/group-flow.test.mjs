@@ -143,7 +143,7 @@ function hubSetup(over = {}) {
     calls.push([cmd, args])
     if (cmd === 'relay_rooms') return { rooms: [JSON.parse(JSON.stringify(ROOM))] }
     if (cmd === 'relay_room_read') return { messages: MSGS.filter(m => m.seq > args.since), last_seq: 3 }
-    if (cmd === 'relay_room_post') return { seq: 4 }
+    if (cmd === 'relay_room_post') return over.postReply ?? { seq: 4 }
     if (cmd === 'relay_group') {
       if (args.action === 'group_confirm_list') return { confirms: [{ id: CID, short: '0b9c8f3a', kind: 'spend', kind_label: '花錢或付款', summary: '付款 3 萬', status: 'pending', requester_name: '財務', requester_owner: '牧陽', is_host: true, created_at: '2026-10-23T10:02:00Z' }] }
       if (args.action === 'group_confirm_decide') { if (over.decideError) throw new Error(over.decideError); return { id: CID, status: args.body.approve ? 'approved' : 'denied' } }
@@ -171,6 +171,27 @@ test('群組發言：走 relay_room_post，內容只有群組、內文（真人�
   assert.equal(await hub.post('g1', '   '), false); assert.match(hub.st.note, /輸入內容/)
   assert.equal(await hub.post('g1', '收到，請繼續'), true)
   assert.deepEqual(calls.find(([c]) => c === 'relay_room_post')[1], { body: { room: 'g1', body: '收到，請繼續' } })
+})
+
+test('群組發言 @ 到不在群組的人：後台回 unmatched 就在對話裡多一則本機提示（不寄出）；沒有或舊後台不出', async () => {
+  const bad = hubSetup({ postReply: { seq: 4, unmatched: ['Test-Gemini（30家用）'] } })
+  await bad.hub.open('g1')
+  assert.equal(await bad.hub.post('g1', '@Test-Gemini（30家用） 幫忙看'), true)
+  const v = bad.hub.view('g1')
+  const i = v.findIndex(e => e.k === 'sys')
+  assert.ok(i > 0, '提示在對話裡')
+  assert.equal(v[i].text, 'Test-Gemini（30家用） 不在這個群組，這則沒有點到他。')
+  assert.equal(bad.calls.filter(([c]) => c === 'relay_room_post').length, 1, '提示不會再寄出任何東西')
+  assert.equal(bad.hub.st.logs.g1.some(e => e.k === 'sys' && /不在這個群組/.test(e.text)), false, '不污染真正的記錄')
+  const two = hubSetup({ postReply: { seq: 4, unmatched: ['甲', '乙', ''] } })
+  await two.hub.open('g1'); await two.hub.post('g1', '@甲 @乙')
+  assert.match(two.hub.view('g1').find(e => e.k === 'sys').text, /^甲、乙 不在這個群組，這則沒有點到他們。$/)
+  for (const postReply of [{ seq: 4 }, { seq: 4, unmatched: [] }, { seq: 4, unmatched: 'x' }, {}]) {
+    const ok = hubSetup({ postReply })
+    await ok.hub.open('g1'); assert.equal(await ok.hub.post('g1', '收到'), true)
+    assert.equal(ok.hub.view('g1').some(e => e.k === 'sys'), false)
+    assert.equal(ok.hub.view('g1'), ok.hub.st.logs.g1)
+  }
 })
 
 test('主持人按同意／拒絕：只經過 group_confirm_decide（本人簽章），按完重抓卡片；失敗顯示中文', async () => {

@@ -317,7 +317,7 @@ setInterval(refreshActivity, 30_000)
 const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
 const pushLog = id => {
   const room = isRoomChat(id)
-  const l = room ? (hub.st.logs[roomIdOf(id)] ?? []) : core.viewOf(id)
+  const l = room ? hub.view(roomIdOf(id)) : core.viewOf(id)
   logs[id] = l; emit('asn:log', { id, log: l })
   if (room) emit('asn:room', { id, cards: hub.st.cards[roomIdOf(id)] ?? [], note: hub.st.note })
 }

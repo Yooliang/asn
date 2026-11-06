@@ -65,6 +65,28 @@ export function parseMentions(body: string, members: RoomMember[], max = MAX_MEN
   return found.slice(0, max);
 }
 
+// #898：內文裡「@名字」對不到任何成員的那些名字（給發言者看「某某不在這個群組」）。
+// 只認開頭或空白、標點後面的 @（a@b.com 這種不算）；名字取到空白或句讀為止，最長 40 字；最多回 MAX_MENTIONS 個、不重複。
+const MENTION_START_OK = /[\s\p{P}\p{S}]/u;
+const MENTION_TAIL_PUNCT = /[，。、；：！？,.;:!?]+$/u;
+export function unmatchedMentions(body: string, members: RoomMember[], max = MAX_MENTIONS): string[] {
+  const out: string[] = [];
+  for (let i = body.indexOf("@"); i >= 0; i = body.indexOf("@", i + 1)) {
+    if (i > 0 && !MENTION_START_OK.test(body[i - 1])) continue;
+    const rest = body.slice(i + 1);
+    let end = rest.search(/[\s，。、；：！？,;!?]/u); // 名字到空白或句讀為止（全形括號照留，例如「名字（設備）」）
+    if (end < 0) end = rest.length;
+    const name = rest.slice(0, Math.min(end, 40)).replace(MENTION_TAIL_PUNCT, "");
+    if (!name) continue;
+    // 這個位置有對到成員就不算（用同一套規則判斷：拿到下一個 @ 之前的這一段去解析，名字可以含空白）
+    const nextAt = rest.indexOf("@");
+    if (parseMentions("@" + (nextAt < 0 ? rest : rest.slice(0, nextAt)), members, 1).length) continue;
+    if (!out.includes(name)) out.push(name);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 // 這則訊息該不該由 selfKey 這位成員回：有點名時只有被點名的回（owner 發的也一樣，點了誰就只有誰回）；
 // 沒點名時，trust=owner（帳號擁有者本人）發的大家都可回；自己發的不回
 // 第 1a 期補充：升級時複製的開頭紀錄（is_seed）與系統訊息一律不叫醒；被點名但超過額度或主人關掉「接受別人點名」（wake_ok=false）也不叫醒，只記未讀
@@ -154,8 +176,10 @@ export function wakeInfoOf(msg: WakeMsg, members: RoomMember[], selfKey: string,
 // 達輪數上限不打 Jev，wake_info 全部略過並標 lim；結果以第一次存下的 wake_info 為準。
 type StoredWake = { key: string; label?: string; rank: number; hold: boolean }[];
 /** 這則是不是「AI 發的、沒點名任何人」的訊息（開頭紀錄、系統訊息、真人訊息都不是） */
-export function isSilentAiMsg(msg: { from: string; mentions?: string[]; is_seed?: boolean; from_kind?: string }, members: RoomMember[]): boolean {
+export function isSilentAiMsg(msg: { from: string; body?: string; mentions?: string[]; is_seed?: boolean; from_kind?: string }, members: RoomMember[]): boolean {
   if ((msg.mentions ?? []).length || msg.is_seed || msg.from_kind === "system" || msg.from_kind === "human") return false;
+  // #898：有寫 @名字 卻對不到成員，是要找某一位、只是不在群組裡；不能當成沒點名去叫醒別人（交給別人等於送錯人）
+  if (typeof msg.body === "string" && unmatchedMentions(msg.body, members, 1).length) return false;
   if (msg.from_kind === "ai") return true;
   const s = members.find((m) => m.key === msg.from);
   return !!s && isAiMember(s);
@@ -238,7 +262,9 @@ export async function postMessage(
   await Promise.all((res.data.bell_topics ?? []).map((t: string) => deps.ring(t)));
   // 達 AI 互相叫醒上限：這次點名沒有叫醒人，回給發言者知道（人數就好，不回成員鍵）
   const notWoken = res.data.wake_limited === true && Array.isArray(res.data.suppressed) ? res.data.suppressed.length : 0;
-  return { status: 200, body: { seq: res.data.seq, mentions, ...(notWoken > 0 ? { wake_limited: true, not_woken: notWoken } : {}) } };
+  // #898：點名的名字不在這個群組，回給發言者（只回內文裡打的名字，不回成員鍵）
+  const unmatched = unmatchedMentions(body, mem.data.members ?? []);
+  return { status: 200, body: { seq: res.data.seq, mentions, ...(notWoken > 0 ? { wake_limited: true, not_woken: notWoken } : {}), ...(unmatched.length ? { unmatched } : {}) } };
 }
 
 // 無 @ 的 AI 訊息的叫醒結果。任何一步失敗都回「不叫醒」

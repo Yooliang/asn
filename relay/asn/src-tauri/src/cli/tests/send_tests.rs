@@ -162,6 +162,16 @@ fn 群組發言達叫醒上限會印提示_沒達上限不印() {
 }
 
 #[test]
+fn 群組點名對不到成員會印提醒_沒有或舊後台不印() {
+    use crate::cli::send::unmatched_note;
+    assert_eq!(unmatched_note(&json!({"seq": 1})), None);
+    assert_eq!(unmatched_note(&json!({"seq": 1, "unmatched": []})), None);
+    assert_eq!(unmatched_note(&json!({"seq": 1, "unmatched": "x"})), None);
+    let n = unmatched_note(&json!({"seq": 1, "unmatched": ["Test-Gemini（30家用）", " ", "小乙"]})).unwrap();
+    assert!(n.starts_with("提醒：Test-Gemini（30家用）、小乙 不在這個群組") && n.contains("私訊"), "{n}");
+}
+
+#[test]
 fn 群組_stdin_body_file_後端錯誤_節點自動判定() {
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));
