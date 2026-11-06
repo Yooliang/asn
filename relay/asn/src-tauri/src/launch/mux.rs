@@ -88,6 +88,23 @@ pub fn cli_args(sub: &[&str]) -> Vec<String> {
     ["cli", "--no-auto-start"].iter().chain(sub.iter()).map(|s| s.to_string()).collect()
 }
 
+/// 新窗格的大小（#597）。大小是下 `cli spawn` 那一方用自己的設定算的，mux 設定檔的 initial_cols 只作用在窗格 0；
+/// 開窗之後 CLI 改不了（`adjust-pane-size` 對單獨的窗格沒有作用）。沒帶就是 80x24，Claude 太窄
+pub const PANE_COLS: u16 = 120;
+pub const PANE_ROWS: u16 = 40;
+
+/// 開窗格的 cli 參數：`--config` 要放在 `cli` 前面
+pub fn spawn_args(sub: &[&str]) -> Vec<String> {
+    let size = [format!("initial_cols={PANE_COLS}"), format!("initial_rows={PANE_ROWS}")];
+    let mut args = Vec::new();
+    for v in size {
+        args.push("--config".to_string());
+        args.push(v);
+    }
+    args.extend(cli_args(sub));
+    args
+}
+
 /// 起 mux 的參數：指定只設 socket 的設定檔，窗格 0 跑立刻結束的程式
 pub fn server_args(config: &Path) -> Vec<String> {
     let mut a = vec!["--config-file".to_string(), config.to_string_lossy().into_owned(), "--".to_string()];

@@ -103,3 +103,33 @@ test('夥伴回答了：開著的提醒要收掉，別的提醒不動', async ()
   await p.tick()
   assert.equal(gone.length, 1, '只通知一次')
 })
+
+test('畫面開著時：同意框這次先不跳，下一輪再問；畫面關了才跳', async () => {
+  const { createPartnerNoticePoller } = await import('../ui/lib/partner-notice.mjs')
+  let open = true
+  const shown = []
+  const p = createPartnerNoticePoller({ fetch: async () => [{ code: 'permission', name: '甲' }], show: () => {}, onItem: async i => { if (open) return false; shown.push(i.name) }, setTimer: () => 0 })
+  await p.tick(); await p.tick()
+  assert.deepEqual(shown, [], '開著就不跳')
+  open = false
+  await p.tick()
+  assert.deepEqual(shown, ['甲'], '關了下一輪就跳')
+  await p.tick()
+  assert.deepEqual(shown, ['甲'], '跳過的不再跳')
+})
+
+test('畫面上的提示：只對這位夥伴、只有要回答的代號；沒有畫面內容', async () => {
+  const { viewHint } = await import('../ui/lib/partner-notice.mjs')
+  assert.match(viewHint([{ code: 'permission', name: '甲' }], '甲'), /直接在下面的畫面按數字鍵回答/)
+  assert.equal(viewHint([{ code: 'permission', name: '乙' }], '甲'), '')
+  assert.equal(viewHint([{ code: 'login', name: '甲' }], '甲'), '', '登入、額度不是在畫面回答的')
+  assert.equal(viewHint(null, '甲'), '')
+})
+
+test('守門：同意框跳之前先問畫面有沒有開著；畫面元件會顯示提示', () => {
+  const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const fn = list.slice(list.indexOf('async function openPermissionDlg'), list.indexOf('async function answerPermission'))
+  assert.match(fn, /invoke\('term_view_active', \{ name: item\.name \}\)\.catch\(\(\) => false\)\) return false/)
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(view.includes('term-view-ask') && view.includes('viewHint('))
+})

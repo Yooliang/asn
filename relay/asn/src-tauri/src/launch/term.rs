@@ -484,6 +484,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.hold_config = on;
     }
 
+    #[cfg(test)]
+    pub(crate) fn use_mux_for_test(&self) -> bool {
+        self.use_mux
+    }
+
     pub fn set_use_mux(&mut self, on: bool) {
         self.use_mux = on;
     }
@@ -749,6 +754,24 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok((id, win.gui_pid))
     }
 
+    /// 設定頁關掉共用的終端服務、重開 ASN 之後：服務還在跑、裡面的夥伴也還在，但 ASN 這次不管它們（#868）。
+    /// 回這種「在背景跑、使用者看不到也關不掉」的夥伴人數：`NONE` 沒有服務或沒有夥伴；`n` 人；`UNKNOWN` 服務在跑但數不出人數。
+    /// ASN 這次有在用服務（use_mux）＝它們都看得到，不算背景，回 NONE。只讀，不動任何東西
+    pub fn background_partners(&self) -> i64 {
+        if self.use_mux {
+            return BG_NONE;
+        }
+        let Ok(dir) = self.dir() else { return BG_NONE };
+        let Ok(m) = self.mux_handle(&dir, BTreeMap::new()) else { return BG_NONE };
+        if m.live_pid().is_none() {
+            return BG_NONE;
+        }
+        match m.pane_count() {
+            Ok(n) => n as i64,
+            Err(_) => BG_UNKNOWN,
+        }
+    }
+
     /// 這個使用者的 mux（wezterm.exe 與 wezterm-mux-server.exe 放在同一個資料夾；檔案放在 mux_base\ASN\m）
     fn mux_handle(&self, dir: &WezTermDir, base_env: BTreeMap<String, String>) -> Result<super::mux::Mux<'_>, String> {
         let base = self.mux_base.as_ref().ok_or_else(|| "找不到使用者的本機資料夾（LOCALAPPDATA），無法使用終端服務".to_string())?;
@@ -806,7 +829,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         sub.extend(wrapped.iter().map(String::as_str));
         // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
-        let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
+        let ran = self.runner.run_clean(&dir.cli, &mux::spawn_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
         // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
         if matches!(&ran, Err(e) if !e.starts_with(wezterm::CANNOT_RUN)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
             m.note_spawn_unsure();
@@ -924,6 +947,79 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-lines))?;
         Ok(cap_output(&text))
+    }
+
+    /// 給畫面裡的 xterm.js 看的快照（#597）：只有 ASN 開的窗格，接手來的不給。mux 換過、視窗不在就回錯，不對別的窗格下指令。
+    /// 夥伴視窗也可以看，這是本人在這台電腦上看自己的夥伴；只接本機畫面的命令，不接後台
+    pub fn view_text(&self, id: &str) -> Result<String, String> {
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        self.wez(&dir).get_text_escapes(&snap.window.sock, snap.pane_id)
+    }
+
+    /// 看畫面用的游標與大小。查不到這個窗格就回錯
+    pub fn view_meta(&self, id: &str) -> Result<super::term_view::ViewMeta, String> {
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        let panes = self.wez(&dir).list(&snap.window.sock)?;
+        let p = panes.iter().find(|p| p.pane_id == snap.pane_id).ok_or("這個窗格已經不在了")?;
+        Ok(super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows })
+    }
+
+    /// 本機畫面裡打字（#597 D）：只有 ASN 開的窗格（接手來的不給），mux 換過、視窗不在就回錯，不對別的窗格下指令；
+    /// 工作資料夾的授權和 `confirm_send` 一樣。字的內容先過 `check_input`（不是按鍵的序列不送）；太長的分段送，順序不變。
+    /// 只接本機畫面的命令，不接後台，也沒有任何 relay 動作會呼叫它
+    pub fn view_input(&self, id: &str, data: &str, paste: bool) -> Result<(), String> {
+        super::term_view::check_input(data)?;
+        // 貼上是文字不是按鍵：ESC 等控制字元拿掉，才不會跳出貼上模式變成按鍵（打字不經過這裡）
+        let cleaned;
+        let data = if paste {
+            cleaned = super::term_view::sanitize_paste(data);
+            if cleaned.is_empty() {
+                return Err("貼上的內容沒有可以送的字".into());
+            }
+            cleaned.as_str()
+        } else {
+            data
+        };
+        let snap = self.view_snapshot(id)?;
+        if !snap.send_granted || snap.cwd.trim().is_empty() {
+            return Err("這個工作資料夾還沒有使用者的授權，不能打字".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        for part in super::term_view::split_chunks(data, super::term_view::INPUT_CHUNK_BYTES) {
+            w.send_input(&snap.window.sock, snap.pane_id, part, paste)?;
+        }
+        Ok(())
+    }
+
+    /// 夥伴視窗的名字換成終端編號，給本機畫面看畫面用。已結束的窗格不算；同名不只一個就拒絕，不猜
+    pub fn partner_term_id(&self, name: &str) -> Result<String, String> {
+        let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| !s.kind.is_empty() && partner_label(&s.id, &s.title) == Some(name)).map(|s| (s.id.clone(), s.pane_id, s.window.sock.clone(), s.exit_nonce.clone())).collect()
+        };
+        if hits.is_empty() {
+            return Err("這位夥伴不是 ASN 開的視窗，這裡看不到畫面".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let mut live: Vec<String> = hits.into_iter().filter(|(_, pane, sock, nonce)| w.pane_exit(sock, *pane, nonce.as_deref()).is_none()).map(|h| h.0).collect();
+        match live.len() {
+            0 => Err("這位夥伴的視窗已經結束了".into()),
+            1 => Ok(live.remove(0)),
+            _ => Err("有兩個同名的夥伴視窗，先關掉其中一個".into()),
+        }
+    }
+
+    fn view_snapshot(&self, id: &str) -> Result<SessionSnap, String> {
+        let snap = self.snapshot_p(id, true)?;
+        if snap.adopted.is_some() {
+            return Err("接手來的窗格還不能在這裡看".into());
+        }
+        self.verify_window(&snap)?;
+        Ok(snap)
     }
 
     pub fn list(&self) -> Vec<TermListed> {
@@ -1960,9 +2056,22 @@ fn profile_reclaimable(profile: &str, kind: &str) -> bool {
     }
 }
 
-/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> connect asn --workspace asn-{編號}`（設定檔裡有 asn 這個 unix domain）
+/// 看 mux 窗格的 GUI 的參數：`--config-file <mux.lua> --config initial_cols=120 --config initial_rows=40 connect asn --workspace asn-{編號}`
+/// （設定檔裡有 asn 這個 unix domain）。窗格的大小以終端視窗為準，xterm.js 照窗格實際大小畫；GUI 開窗時帶 120x40，
+/// 避免一連上就把 120x40 的窗格縮回 80x24（asn真 11-05 定）；使用者自己把視窗拖小就照他的
 fn view_args(config: &Path, workspace: &str) -> Vec<String> {
-    vec!["--config-file".into(), config.to_string_lossy().into_owned(), "connect".into(), "asn".into(), "--workspace".into(), workspace.to_string()]
+    vec![
+        "--config-file".into(),
+        config.to_string_lossy().into_owned(),
+        "--config".into(),
+        format!("initial_cols={}", super::mux::PANE_COLS),
+        "--config".into(),
+        format!("initial_rows={}", super::mux::PANE_ROWS),
+        "connect".into(),
+        "asn".into(),
+        "--workspace".into(),
+        workspace.to_string(),
+    ]
 }
 
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
@@ -2489,6 +2598,45 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(feature = "gui")]
 pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
 
+/// `background_partners` 的特殊值：沒有服務或沒有夥伴／服務在跑但數不出人數
+pub const BG_NONE: i64 = 0;
+pub const BG_UNKNOWN: i64 = -1;
+
+/// 啟動後背景查到的結果（Status 只讀這個，不在每次狀態查詢時開 wezterm 程序）。沒查過＝BG_NONE
+static BACKGROUND_PARTNERS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(BG_NONE);
+
+pub fn background_partners_cached() -> i64 {
+    BACKGROUND_PARTNERS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub fn set_background_partners_for_test(n: i64) {
+    BACKGROUND_PARTNERS.store(n, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// ASN 這次不用共用終端服務時，背景查一次（之後每分鐘再查，使用者自己關掉夥伴時人數會減少）。沒在用就不查、不開執行緒。
+/// 只讀（`wezterm cli list`），不起 mux、不動夥伴；截圖模式不做
+#[cfg(feature = "gui")]
+pub fn start_background_partner_watch(terms: std::sync::Arc<LiveTerms>) {
+    if std::env::args().any(|a| a == "--shot") || terms.use_mux {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("asn-bg-partners".into()).spawn(move || loop {
+        let n = terms.background_partners();
+        let before = BACKGROUND_PARTNERS.swap(n, std::sync::atomic::Ordering::SeqCst);
+        if before != n {
+            elog!("共用終端服務裡有 {} 位夥伴在背景跑（這次 ASN 沒有在管它們）", if n == BG_UNKNOWN { "數不出幾".to_string() } else { n.to_string() });
+        }
+        if n == BG_NONE {
+            return; // 沒有服務或沒有夥伴：這次 ASN 不會再開新的，不用再查
+        }
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    });
+    if let Err(e) = spawned {
+        elog!("背景夥伴人數的查詢開不了（不影響啟動）：{e}");
+    }
+}
+
 /// 空記憶體（位元組）；讀不到回 None
 #[cfg(all(feature = "gui", windows))]
 pub(crate) fn free_memory_bytes() -> Option<u64> {
@@ -2670,6 +2818,13 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
     // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
     let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
+    // #868：設定頁的「伺服器終端」開關。環境變數 0 優先；使用者關掉了就不用。啟動時讀一次，執行中不變（改了要重開 ASN 才生效，已開著的夥伴不會被搬）
+    let (wanted, locked) = super::win_term::term_server_wanted(std::env::var(super::win_term::ENV_MUX).ok().as_deref(), crate::bridge::read_settings(data_dir).term_server_off);
+    let mux = mux && wanted;
+    // 畫面只寫「已由系統設定固定」；細節（是哪個環境變數）放這裡，給想查的人看（#868）
+    if locked {
+        elog!("夥伴共用終端服務：環境變數 {}=0 固定關閉，設定頁的開關不會生效", super::win_term::ENV_MUX);
+    }
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
     let (inside, limit) = super::mux::own_job();
@@ -2683,6 +2838,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
         let _ = MUX_OFF_REASON.set(why);
     }
     svc.set_use_mux(mux);
+    super::win_term::set_term_server_state(mux, locked);   // 設定頁用：這次實際有沒有在用、是不是被系統設定固定關
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
@@ -3144,6 +3300,11 @@ mod tests {
     }
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, _timeout: Duration) -> Result<wezterm::RunOutput, String> {
+            // 開窗大小的 --config 在 "cli" 前面：比對子命令時先拿掉，整串參數看 clean_calls
+            let args: &[String] = match args.iter().position(|a| a == "cli") {
+                Some(i) if args.first().map(String::as_str) == Some("--config") => &args[i..],
+                _ => args,
+            };
             self.inner.calls.borrow_mut().push((args.to_vec(), env.clone()));
             // mux 模式的 cli 在 "cli" 後面多一個 --no-auto-start：比對子命令時先拿掉
             let sub: Vec<String> = args.iter().filter(|a| a.as_str() != "--no-auto-start").cloned().collect();
@@ -5175,6 +5336,170 @@ mod tests {
             (rig, paths)
         }
 
+        /// #868：設定頁關掉共用的終端服務、重開 ASN 之後，服務和夥伴還在，但 ASN 這次不管它們。數出這種「背景夥伴」，設定頁才能告訴使用者
+        #[test]
+        fn 背景夥伴人數_這次有在管服務就不算背景() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.use_mux_for_test());
+            assert_eq!(rig.svc.background_partners(), BG_NONE, "ASN 有在用服務：夥伴都看得到，不算背景");
+        }
+
+        #[test]
+        fn 背景夥伴人數_這次沒在用服務_服務還在跑_數出夥伴窗格() {
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_use_mux(false);
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":0,"workspace":"default"},{"pane_id":1,"workspace":"asn-1"},{"pane_id":2,"workspace":"asn-2"},{"pane_id":3,"workspace":"asn-3"}]"#.into();
+            assert_eq!(rig.svc.background_partners(), 3, "窗格 0（workspace default）不是夥伴，不算");
+            assert!(rig.runner.killed().is_empty(), "只讀，不動任何東西");
+            assert!(rig.runner.args().iter().all(|a| !a.iter().any(|x| x == "kill-pane" || x == "spawn")), "只讀：沒有開也沒有關窗格");
+        }
+
+        #[test]
+        fn 背景夥伴人數_服務在跑但清單看不懂_回數不出_提示仍要在() {
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_use_mux(false);
+            *rig.runner.inner.list_json.borrow_mut() = "不是 json".into();
+            assert_eq!(rig.svc.background_partners(), BG_UNKNOWN, "服務在跑卻數不出：不能當成沒有夥伴");
+        }
+
+        #[test]
+        fn 背景夥伴人數_沒有服務或服務已經不在_回沒有() {
+            let (mut rig, paths) = mux_rig();
+            rig.svc.set_use_mux(false);
+            // pid 檔記的建立時間對不上（服務已經換掉或不在了）
+            std::fs::write(&paths.pid, format!("{MUX_PID} 9999")).unwrap();
+            assert_eq!(rig.svc.background_partners(), BG_NONE);
+            std::fs::remove_file(&paths.pid).unwrap();
+            assert_eq!(rig.svc.background_partners(), BG_NONE, "沒有 pid 檔：沒有服務");
+        }
+
+        #[test]
+        fn 看畫面_帶顏色讀_回大小和游標_mux_換過就拒絕() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.screen.borrow_mut() = "\x1b[31m紅".into();
+            assert_eq!(rig.svc.view_text(&id).unwrap(), "\x1b[31m紅");
+            let gets: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "--escapes")).collect();
+            assert_eq!(gets[0], vec!["cli", "--no-auto-start", "get-text", "--escapes", "--pane-id", "9"]);
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":3,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            assert_eq!(rig.svc.view_meta(&id).unwrap(), crate::launch::term_view::ViewMeta { cursor_x: 3, cursor_y: 4, cols: 120, rows: 40 });
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            assert!(rig.svc.view_meta(&id).unwrap_err().contains("不在"));
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            let before = rig.runner.args().len();
+            assert!(rig.svc.view_text(&id).is_err(), "mux 換過");
+            assert!(rig.runner.args().iter().skip(before).all(|a| !a.iter().any(|x| x == "get-text")), "不對新的 mux 讀畫面");
+        }
+
+        #[test]
+        fn 看畫面_夥伴名字換成編號_不認得就拒絕() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.partner_term_id("小乙").is_err());
+            let id = open_partner(&rig);
+            assert_eq!(rig.svc.partner_term_id("小乙").unwrap(), id);
+            assert!(rig.svc.partner_term_id("別人").is_err());
+        }
+
+        #[test]
+        fn 看畫面的_gui_開窗帶_120x40_設定在子命令前面() {
+            let args = super::super::view_args(Path::new("C:/m/mux.lua"), "asn-3");
+            assert_eq!(
+                args,
+                vec!["--config-file", "C:/m/mux.lua", "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", "asn-3"],
+                "--config 要放在 connect 前面（WezTerm 的全域選項），不然會被當成子命令的參數"
+            );
+        }
+
+        #[test]
+        fn 看畫面_不認得的編號拒絕() {
+            let (rig, _) = mux_rig();
+            assert!(rig.svc.view_text("nope").is_err());
+            assert!(rig.svc.view_meta("nope").is_err());
+        }
+
+        /// 送進窗格的字（`send-text` 呼叫）：[是不是 --no-paste, 字]
+        fn typed(rig: &Rig) -> Vec<(bool, String)> {
+            rig.runner
+                .args()
+                .into_iter()
+                .filter(|a| a.iter().any(|x| x == "send-text"))
+                .map(|a| (a.iter().any(|x| x == "--no-paste"), a.last().cloned().unwrap_or_default()))
+                .collect()
+        }
+
+        #[test]
+        fn 畫面裡打字_打字原樣送_貼上不帶_no_paste_太長分段_順序不變() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "你好", false).unwrap();
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "第一行\n第二行", true).unwrap();
+            assert_eq!(typed(&rig), vec![(true, "你好".to_string()), (true, "\x1b[A".to_string()), (false, "第一行\n第二行".to_string())]);
+            let long = "字".repeat(10_000);
+            let before = typed(&rig).len();
+            rig.svc.view_input(&id, &long, true).unwrap();
+            let parts: Vec<(bool, String)> = typed(&rig).into_iter().skip(before).collect();
+            assert!(parts.len() >= 4, "1 萬字（3 萬位元組）要分成好幾段：{}", parts.len());
+            assert!(parts.iter().all(|(np, t)| !np && t.len() <= crate::launch::term_view::INPUT_CHUNK_BYTES));
+            assert_eq!(parts.iter().map(|(_, t)| t.as_str()).collect::<String>(), long, "順序不變、一個字不少");
+        }
+
+        #[test]
+        fn 畫面裡打字_字開頭是減號_前面加雙減號_不會被當成參數() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            for (data, paste) in [("-h", false), ("--help", false), ("-x", true)] {
+                rig.svc.view_input(&id, data, paste).unwrap();
+                let last = rig.runner.args().into_iter().rev().find(|a| a.iter().any(|x| x == "send-text")).unwrap();
+                let n = last.len();
+                assert_eq!((last[n - 2].as_str(), last[n - 1].as_str()), ("--", data), "字前面要有 --：{last:?}");
+                assert_eq!(last.iter().any(|x| x == "--no-paste"), !paste);
+            }
+        }
+
+        #[test]
+        fn 畫面裡打字_貼上拿掉_esc_等控制字元_打字不動() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "a\x1b[201~rm -rf /\x03b\n第二行", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "a[201~rm -rf /b\n第二行".to_string())), "貼上：ESC、Ctrl 都拿掉");
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b\x03", true).is_err(), "清完是空的就不送");
+            assert_eq!(typed(&rig).len(), before);
+            // 打字：方向鍵和 Ctrl＋C 本來就要有 ESC／控制字元，原樣送
+            rig.svc.view_input(&id, "\x1b[A", false).unwrap();
+            rig.svc.view_input(&id, "\x03", false).unwrap();
+            let t = typed(&rig);
+            assert_eq!(t[t.len() - 2], (true, "\x1b[A".to_string()));
+            assert_eq!(t[t.len() - 1], (true, "\x03".to_string()));
+        }
+
+        #[test]
+        fn 畫面裡打字_不是按鍵的序列_不認得的編號_mux_換過_都不送() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\x1b]52;c;aGVsbG8=\x07", false).is_err(), "剪貼簿序列不是按鍵");
+            assert!(rig.svc.view_input(&id, "", false).is_err());
+            assert!(rig.svc.view_input("nope", "a", false).is_err());
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            assert!(rig.svc.view_input(&id, "a", false).is_err(), "mux 換過，不對新的 mux 下指令");
+            assert_eq!(typed(&rig).len(), before, "一個字都沒送");
+        }
+
+        #[test]
+        fn 畫面裡打字_夥伴視窗也可以打_接手來的和沒授權的不給() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view_input(&id, "好", false).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(true, "好".to_string())));
+            // 只給 ASN 開的窗格：原始碼層面確認沒有放寬接手窗格與授權檢查
+            let src = include_str!("term.rs");
+            let f = src.split("pub fn view_input(").nth(1).expect("有 view_input").split("pub fn partner_term_id").next().unwrap();
+            assert!(f.contains("view_snapshot(") && f.contains("send_granted"), "接手窗格由 view_snapshot 擋、授權沿用 send_granted");
+            assert!(!f.contains("send_bytes") && !f.contains("flatten_line"), "不走方向鍵路徑，也不壓行");
+        }
+
         fn pi_argv() -> Vec<String> {
             ["pi", "-e", "ext.ts", "--model", "M"].iter().map(|s| s.to_string()).collect()
         }
@@ -5200,7 +5525,7 @@ mod tests {
             assert_eq!((id.as_str(), pid), ("1", MUX_PID), "回的是 mux 的編號");
             let clean = rig.runner.inner.clean_calls.borrow();
             assert_eq!(clean.len(), 1, "開窗格只有一條 cli（spawn），而且走 run_clean");
-            let mut want: Vec<String> = ["cli", "--no-auto-start", "spawn", "--new-window", "--workspace", "asn-1", "--cwd"].iter().map(|s| s.to_string()).collect();
+            let mut want: Vec<String> = ["--config", "initial_cols=120", "--config", "initial_rows=40", "cli", "--no-auto-start", "spawn", "--new-window", "--workspace", "asn-1", "--cwd"].iter().map(|s| s.to_string()).collect();
             want.push(rig.cwd.clone());
             want.push("--".into());
             want.extend(pi_argv());
@@ -5486,7 +5811,7 @@ mod tests {
             rig.svc.view(&id).unwrap();
             let spawns = view_spawns(&rig.runner);
             assert_eq!(spawns.len(), 1);
-            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
+            let want: Vec<String> = ["--config-file", paths.config.to_string_lossy().as_ref(), "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", &format!("asn-{id}")].iter().map(|s| s.to_string()).collect();
             assert_eq!(spawns[0].0, want);
             let want_env: BTreeMap<String, String> = crate::launch::config::child_env().into_iter().collect();
             assert_eq!(spawns[0].1, want_env, "只給白名單環境");

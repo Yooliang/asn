@@ -205,7 +205,7 @@
       <li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
     </ul>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode" :pi-models-for="remotePiModelsFor"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode" :term-view-api="termViewApi" :pi-models-for="remotePiModelsFor"
         :room-cards="hub.st.cards[t.id.slice(5)] || []" :group-menu="true" @group-menu="op => openGroupMenu(t.id, op)" @group-decide="(cid, ok) => decideCard(t.id, cid, ok)"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
@@ -223,7 +223,8 @@
             <p class="partner-hint" v-else>這個提示看不出選項，請直接在終端視窗裡處理。</p>
             <p class="partner-err" v-if="terms.error" role="alert">{{ terms.error }}</p>
           </div>
-          <details class="tp-screen" open><summary>終端最近畫面（只讀）</summary><pre class="term-prompt-text">{{ termPane.screen || '（目前讀不到畫面）' }}</pre></details>
+          <term-view v-if="!termPaneRow.adopted" :key="termPaneRow.id" :api="termViewApi" :id="termPaneRow.id" :active="view === 'chat'"></term-view>
+          <details class="tp-screen" v-else open><summary>終端最近畫面（只讀）</summary><pre class="term-prompt-text">{{ termPane.screen || '（目前讀不到畫面）' }}</pre></details>
         </div>
         <div class="tp-compose">
           <div class="tp-confirm" v-if="termSendConfirmView" role="group" aria-label="確認送字">

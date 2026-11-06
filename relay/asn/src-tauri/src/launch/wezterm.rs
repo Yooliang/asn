@@ -503,6 +503,17 @@ pub struct PaneInfo {
     pub cursor_y: i64,
     #[serde(default)]
     pub is_active: bool,
+    #[serde(default)]
+    pub size: PaneSize,
+}
+
+/// `wezterm cli list` 的窗格大小
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct PaneSize {
+    #[serde(default)]
+    pub cols: u32,
+    #[serde(default)]
+    pub rows: u32,
 }
 
 /// 判斷窗格結束用：往回讀畫面底部幾行。
@@ -843,6 +854,11 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ())
     }
 
+    /// 整幅畫面，帶顏色。這是 WezTerm 重新產生的，不是程式的原始輸出；內容還是外部資料，用之前要過濾（`term_view::filter_frame`）
+    pub fn get_text_escapes(&self, sock: &Path, pane_id: u64) -> Result<String, String> {
+        self.cli(sock, &["get-text".to_string(), "--escapes".into(), "--pane-id".into(), pane_id.to_string()])
+    }
+
     pub fn get_text(&self, sock: &Path, pane_id: u64, start_line: Option<i32>) -> Result<String, String> {
         let mut args: Vec<String> = vec!["get-text".into(), "--pane-id".into(), pane_id.to_string()];
         if let Some(n) = start_line {
@@ -878,6 +894,22 @@ impl<'a> WezTerm<'a> {
             return Err("沒有要送的按鍵".to_string());
         }
         self.send_raw(sock, pane_id, text)
+    }
+
+    /// 畫面裡打字（#597 D）：打字原樣送（`--no-paste`）；貼上不帶 `--no-paste`，讓 WezTerm 依窗格程式的模式決定要不要包 bracketed paste。
+    /// 一次的字數由呼叫的人先切段（命令列有長度上限）；字的內容檢查在 `term_view::check_input`
+    pub fn send_input(&self, sock: &Path, pane_id: u64, text: &str, paste: bool) -> Result<(), String> {
+        if text.is_empty() {
+            return Err("沒有要送的字".to_string());
+        }
+        let mut args = vec!["send-text".to_string(), "--pane-id".into(), pane_id.to_string()];
+        if !paste {
+            args.push("--no-paste".into());
+        }
+        // 字開頭是 - 時 `wezterm cli send-text` 會當成參數（-h／--help 印說明、-x 報錯，字沒送進去）：前面一律加 --
+        args.push("--".into());
+        args.push(text.to_string());
+        self.cli(sock, &args).map(|_| ())
     }
 
     fn send_raw(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {

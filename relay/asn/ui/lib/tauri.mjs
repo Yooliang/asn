@@ -73,6 +73,16 @@ export const photoApi = {
   reveal: () => invoke('relay_attachment_reveal'),          // 開啟「剛存檔的那個資料夾」（路徑 Rust 記著，前端不帶參數）
 }
 // 截圖（Rust 端隱藏 ASN 視窗、擷取所有螢幕、開框選視窗）：capture 回 PNG 的 Blob，使用者取消回 null；Linux 版 supported 為 false（按鈕隱藏）
+// 在畫面裡看終端（#597）：只有電腦版的畫面傳這個給 chat-pane
+export const termViewApi = {
+  open: ({ id, name }) => invoke('term_view_open', { id: id ?? null, name: name ?? null }),   // → 觀看編號
+  close: viewId => invoke('term_view_close', { viewId }),
+  // 在畫面裡打字（#597 D）：只有這個本機命令，Rust 端檢查開著的畫面、視窗在前景、窗格是 ASN 開的、授權
+  input: (viewId, data, paste) => invoke('term_view_input', { viewId, data, paste: !!paste }),
+  notices: () => invoke('partner_notices'),   // 畫面上的一行提示用：只有視窗名與固定代號
+  listen,
+}
+
 export const shotApi = {
   supported: () => invoke('shot_supported').catch(() => false),
   capture: async () => {

@@ -2456,3 +2456,59 @@ fn 只有引擎模式_不啟動收發室_worker_但照常收信回報名單() {
         assert!(!super::lock::pid_file(work.path()).exists(), "bridge.pid 已清");
     });
 }
+
+// ---- #868：設定頁的「夥伴共用同一個終端服務」
+
+#[test]
+fn 伺服器終端設定_預設開_記的是關_舊設定檔沒有這個欄位也讀得起來() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(!super::read_settings(d.path()).term_server_off, "沒有檔：預設開");
+    // 舊版寫的 bridge.json 沒有 term_server_off
+    std::fs::write(super::settings_path(d.path()), r#"{"enabled":true,"auto_resume_off":true}"#).unwrap();
+    let s = super::read_settings(d.path());
+    assert!(!s.term_server_off && s.auto_resume_off, "沒有欄位＝開；其他欄位照讀");
+    super::write_settings(d.path(), super::BridgeSettings { term_server_off: true, ..s }).unwrap();
+    let back = super::read_settings(d.path());
+    assert!(back.term_server_off && back.auto_resume_off, "寫了讀得回來，沒有蓋掉別的欄位");
+    std::fs::write(super::settings_path(d.path()), "壞掉").unwrap();
+    assert!(!super::read_settings(d.path()).term_server_off, "壞檔：預設開");
+}
+
+#[test]
+fn 伺服器終端設定_只存檔_狀態帶出這次啟動實際有沒有在用() {
+    let _g = TERM_SERVER_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let keep = (crate::launch::win_term::term_server_active(), crate::launch::win_term::term_server_locked());
+    let data = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let m = super::Manager::new(None, None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
+    crate::launch::win_term::set_term_server_state(true, false);
+    let s = m.status();
+    assert!(s.term_server && s.term_server_active && !s.term_server_locked);
+    assert_eq!(s.term_server_supported, cfg!(windows));
+    // 關掉：存檔、設定頁的值變了，但這次啟動還在用（改了要重開才生效；執行中的服務沒被動）
+    let s = m.set_term_server(false).unwrap();
+    assert!(!s.term_server && s.term_server_active, "設定是關，這次仍在用：畫面據此提示重開");
+    assert!(super::read_settings(data.path()).term_server_off);
+    // 再打開
+    let s = m.set_term_server(true).unwrap();
+    assert!(s.term_server && !super::read_settings(data.path()).term_server_off);
+    crate::launch::win_term::set_term_server_state(keep.0, keep.1);
+}
+
+#[test]
+fn 伺服器終端設定_被系統設定固定時拒絕改_不寫檔() {
+    let _g = TERM_SERVER_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let keep = (crate::launch::win_term::term_server_active(), crate::launch::win_term::term_server_locked());
+    let data = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let m = super::Manager::new(None, None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
+    crate::launch::win_term::set_term_server_state(false, true);
+    let err = m.set_term_server(true).unwrap_err();
+    assert!(err.contains("已由系統設定固定"), "{err}");
+    assert!(!super::settings_path(data.path()).exists(), "被固定時不能寫檔");
+    assert!(m.status().term_server_locked);
+    crate::launch::win_term::set_term_server_state(keep.0, keep.1);
+}
+
+/// 全域的「這次啟動的結果」只有一份，改它的測試要排隊，不然平行時會互相看到對方設的值
+static TERM_SERVER_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
