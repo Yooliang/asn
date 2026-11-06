@@ -95,6 +95,21 @@ export const CloudInvitePanel = {
         await refresh()
       } catch (e) { msg.value = errText(e) } finally { busy.value = false }
     }
+    const renameId = ref(''), renameName = ref('')
+    const openRename = r => { msg.value = ''; renameId.value = r.id; renameName.value = r.name }
+    const cancelRename = () => { renameId.value = ''; renameName.value = '' }
+    const rename = async () => {
+      if (busy.value || !renameId.value) return
+      const n = cleanName(renameName.value)
+      if (!n) { msg.value = '請輸入設備名（1 到 40 個字）'; return }
+      busy.value = true; msg.value = ''
+      try {
+        await cloudApi.rename(renameId.value, n)
+        renameId.value = ''; renameName.value = ''
+        msg.value = '已改名。'
+        await refresh()
+      } catch (e) { msg.value = errText(e) } finally { busy.value = false }
+    }
     // 核准無畫面主機：主機上跑 asn-bridge login 會印出短碼；這裡輸入短碼、替主機取名。金鑰不經過這裡（主機自己輪詢拿）
     const approveForm = ref(false), code = ref(''), hostName = ref(''), hostId = ref(''), approved = ref('')
     const approve = async () => {
@@ -112,7 +127,7 @@ export const CloudInvitePanel = {
     const justJoined = computed(() => !!created.value && joined(rows.value, created.value.id))
     onMounted(() => { refresh(); timer = setInterval(refresh, POLL_MS) })
     onUnmounted(() => { clearInterval(timer); created.value = null })
-    return { signedIn, rows, busy, msg, form, name, created, reveal, copiedKey, copiedInvite, confirmId, justJoined, COPY_NOTE, INVITE_NOTE, create, copyKey, copyInvite, done, revoke, approveForm, code, hostName, hostId, approved, approve }
+    return { signedIn, rows, busy, msg, form, name, created, reveal, copiedKey, copiedInvite, confirmId, justJoined, COPY_NOTE, INVITE_NOTE, create, copyKey, copyInvite, done, revoke, renameId, renameName, openRename, cancelRename, rename, approveForm, code, hostName, hostId, approved, approve }
   },
   template: `<section class="set-card cloud-set" aria-label="雲端代理">
       <header class="vendor-h"><b>雲端代理</b><small>讓跑在雲端的 AI 代理加入 ASN</small></header>
@@ -165,10 +180,21 @@ export const CloudInvitePanel = {
         <ul class="acct-list" v-if="rows.length" aria-label="已加入的雲端代理">
           <li v-for="r in rows" :key="r.id">
             <span class="acct-txt"><span class="acct-name">{{ r.name }}<em v-if="r.state === 'online'">在線</em></span><small :title="r.title">{{ r.status }}</small></span>
+            <button class="aero-btn" type="button" :disabled="busy" @click="openRename(r)">改名</button>
             <button class="aero-btn" type="button" :disabled="busy" @click="revoke(r.id)">{{ confirmId === r.id ? '確認撤銷' : '撤銷' }}</button>
           </li>
         </ul>
         <small v-else-if="signedIn">還沒有邀請過雲端代理。</small>
+        <div v-if="renameId" class="cloud-form">
+          <label>設備名
+            <input class="set-sel" type="text" v-model="renameName" maxlength="40" aria-label="設備名" @keydown.enter.prevent="rename">
+          </label>
+          <small>只改設備名，代理底下 bot 的名字不會變。</small>
+          <div class="av-btns">
+            <button class="aero-btn" type="button" :disabled="busy" @click="rename">儲存</button>
+            <button class="aero-btn" type="button" :disabled="busy" @click="cancelRename">取消</button>
+          </div>
+        </div>
         <small v-if="confirmId">撤銷後，這個代理的金鑰立刻失效，好友名單上也會消失。</small>
         <small role="status">{{ msg }}</small>
       </template>

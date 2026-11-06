@@ -94,6 +94,17 @@ pub async fn revoke(client: &reqwest::Client, relay_url: &str, token: &str, node
     account::call(client, relay_url, token, "cloud_node_revoke", None, json!({ "node": node })).await.map(|_| ()).map_err(err)
 }
 
+/// 本人替雲端設備改名（只改設備名，代理底下 bot 的名字不會變）。回傳後台確認後的名字
+pub async fn rename(client: &reqwest::Client, relay_url: &str, token: &str, node: &str, raw_name: &str) -> Result<String, String> {
+    if node.is_empty() || node.len() > 32 || !node.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("代理資料不對".into());
+    }
+    let name = clean_name(raw_name).ok_or("請輸入設備名（1 到 40 個字）")?;
+    let v = account::call(client, relay_url, token, "cloud_node_rename", None, json!({ "node": node, "name": name })).await.map_err(err)?;
+    let shown = v.get("name").and_then(Value::as_str).unwrap_or("");
+    Ok(if shown.is_empty() { name } else { shown.to_string() })
+}
+
 /// 核准無畫面主機的短碼（主機上跑 asn-bridge login 會印出短碼）。用登入憑證呼叫 device_code_approve；
 /// 金鑰不經過這裡——主機自己輪詢拿，所以回傳只有節點代號與名字。
 pub async fn approve_device(client: &reqwest::Client, relay_url: &str, token: &str, code: &str, name: &str, node_id: &str) -> Result<Value, String> {
@@ -148,6 +159,15 @@ pub async fn cloud_agent_revoke(app: State<'_, App>, auth: State<'_, AuthState>,
     let c = account::ctx()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
     revoke(&c.client, &c.relay_url, &token, &node).await
+}
+
+/// 替雲端設備改名。→ 後台確認後的名字
+#[tauri::command]
+pub async fn cloud_agent_rename(app: State<'_, App>, auth: State<'_, AuthState>, node: String, name: String) -> Result<String, String> {
+    no_shot(&app)?;
+    let c = account::ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    rename(&c.client, &c.relay_url, &token, &node, &name).await
 }
 
 #[cfg(test)]
@@ -243,6 +263,22 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 1, "代號不合格就不送出");
         let (nf, _) = fake_server(404, r#"{"error":"not_found"}"#.into());
         assert!(revoke(&c, &nf, "tok", "t5-a").await.unwrap_err().contains("已經撤銷"));
+    }
+
+    #[tokio::test]
+    async fn 改名_送出節點與名字_格式不對不送_回後台確認的名字() {
+        let (url, seen) = fake_server(200, r#"{"ok":true,"name":"新名字"}"#.into());
+        let c = reqwest::Client::new();
+        let n = rename(&c, &url, "tok", "t5-a", "  新名字 ").await.unwrap();
+        assert_eq!(n, "新名字");
+        let reqs = seen.lock().unwrap().clone();
+        assert!(reqs[0].starts_with("POST /relay?action=cloud_node_rename"));
+        assert!(reqs[0].contains(r#""node":"t5-a""#) && reqs[0].contains(r#""name":"新名字""#));
+        assert!(rename(&c, &url, "tok", "t5-a", "   ").await.unwrap_err().contains("設備名"));
+        assert!(rename(&c, &url, "tok", "../x", "好").await.is_err());
+        assert_eq!(seen.lock().unwrap().len(), 1, "不合格就不送出");
+        let (nf, _) = fake_server(404, r#"{"error":"not_found"}"#.into());
+        assert!(rename(&c, &nf, "tok", "t5-a", "好").await.is_err());
     }
 
     #[test]

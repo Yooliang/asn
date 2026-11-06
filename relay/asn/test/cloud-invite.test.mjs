@@ -86,7 +86,7 @@ test('守門：金鑰只在元件記憶體——不寫 localStorage／檔案／�
 test('接線：前端三個指令都在 Rust 登錄；撤銷是兩段式（先「撤銷」再「確認撤銷」）', () => {
   const tauri = read('ui/lib/tauri.mjs')
   const lib = read('src-tauri/src/lib.rs')
-  for (const cmd of ['cloud_agent_create', 'cloud_agent_list', 'cloud_agent_revoke']) {
+  for (const cmd of ['cloud_agent_create', 'cloud_agent_list', 'cloud_agent_revoke', 'cloud_agent_rename']) {
     assert.ok(tauri.includes(`invoke('${cmd}'`), `${cmd} 前端有呼叫`)
     assert.ok(lib.includes(`cloud_invite::${cmd}`), `${cmd} 有登錄`)
     assert.match(read('src-tauri/src/cloud_invite.rs'), new RegExp(`pub async fn ${cmd}\\(`))
@@ -98,7 +98,7 @@ test('接線：前端三個指令都在 Rust 登錄；撤銷是兩段式（先�
 test('Rust 端：只用登入憑證（Authorization）呼叫後台三個動作，不帶節點金鑰；說明的網址是官網技能說明', () => {
   const rs = read('src-tauri/src/cloud_invite.rs')
   const prod = rs.slice(0, rs.indexOf('#[cfg(test)]'))
-  for (const a of ['cloud_node_create', 'cloud_node_list', 'cloud_node_revoke']) assert.ok(prod.includes(`"${a}"`), a)
+  for (const a of ['cloud_node_create', 'cloud_node_list', 'cloud_node_revoke', 'cloud_node_rename']) assert.ok(prod.includes(`"${a}"`), a)
   assert.ok(prod.includes('https://asnmessenger.web.app/skill/asn-cloud-agent.md'))
   assert.ok(!prod.includes('x-relay-key') && !prod.includes('Some(&id.key)'), '雲端代理邀請不碰節點金鑰')
 })
@@ -113,4 +113,13 @@ test('核准無畫面主機：前端指令有登錄、走登入憑證、畫面�
   assert.ok(js.includes('輸入短碼核准主機') && js.includes('cloudApi.approve('))
   const ap = js.slice(js.indexOf('const approve = async'), js.indexOf('const justJoined'))
   assert.ok(!/\.key\b/.test(ap), '核准流程不碰金鑰')
+})
+
+test('改名：電腦版有入口、走 cloudApi.rename、名字不合格不送、Rust 端有指令', () => {
+  const js = read('ui/lib/cloud-invite.mjs')
+  assert.ok(js.includes('cloudApi.rename(') && js.includes('@click="openRename(r)"'))
+  const rn = js.slice(js.indexOf('const rename = async'), js.indexOf('// 核准無畫面主機'))
+  assert.ok(rn.indexOf("if (!n)") < rn.indexOf('cloudApi.rename('), '先檢查名字才送')
+  assert.ok(!/\.key\b/.test(rn), '改名流程不碰金鑰')
+  assert.ok(read('ui/lib/tauri.mjs').includes("invoke('cloud_agent_rename'"))
 })

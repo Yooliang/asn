@@ -102,6 +102,7 @@ export const cloudApi = {
   create: name => invoke('cloud_agent_create', { name }),   // → { id, name, key, invite }
   list: () => invoke('cloud_agent_list'),                    // → { nodes: [{ id, name, last_seen_at, online }] }
   revoke: node => invoke('cloud_agent_revoke', { node }),
+  rename: (node, name) => invoke('cloud_agent_rename', { node, name }),   // → 後台確認後的名字（只改設備名）
   approve: (code, name, nodeId) => invoke('cloud_agent_approve', { code, name, nodeId: nodeId || null }),   // 核准無畫面主機的短碼 → { id, name }（金鑰不經過這裡）
 }
 export const store = name => ({
