@@ -33,6 +33,10 @@ pub fn drop_in_inbox(dir: &std::path::Path, code: &str) -> std::io::Result<()> {
 }
 /// 取走信箱裡的邀請碼（檔案一律刪掉，內容壞了也刪）
 pub fn take_from_inbox(dir: &std::path::Path) -> Option<String> {
+    // 還沒有節點金鑰時工作資料夾是空路徑：不能去讀、去刪目前目錄的同名檔（#859）
+    if dir.as_os_str().is_empty() {
+        return None;
+    }
     let p = dir.join(INBOX_FILE);
     let text = std::fs::read_to_string(&p).ok()?;
     let _ = std::fs::remove_file(&p);
@@ -63,6 +67,11 @@ mod tests {
         }
         assert_eq!(invite_code_from_args(&["asn.exe", "--x", "asn://invite/AbCdEf0123456789_-xyz"]).as_deref(), Some("AbCdEf0123456789_-xyz"));
         assert!(invite_code_from_args::<&str>(&[]).is_none());
+    }
+
+    #[test]
+    fn 沒有工作資料夾_不碰目前目錄() {
+        assert_eq!(take_from_inbox(std::path::Path::new("")), None);
     }
 
     #[test]

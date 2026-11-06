@@ -299,6 +299,11 @@ pub fn claude_profile(cfg: &super::config::LaunchConfig) -> Option<String> {
 
 /// 使用者自己結束 ASN：留記號
 pub fn note_user_quit(work_dir: &Path) {
+    // 還沒有節點金鑰時工作資料夾是空路徑（lib.rs 的 identity::resolve 失敗）：這時也沒有夥伴要接回，
+    // 寫下去只會在目前目錄留一個小檔（#859）
+    if work_dir.as_os_str().is_empty() {
+        return;
+    }
     let _ = crate::write_atomic(&work_dir.join(QUIT_MARK), "1");
 }
 
@@ -755,6 +760,14 @@ mod tests {
         assert!(resumed_args("cmd.exe", &[], "s1", &[]).is_err(), "包裝指令不猜");
         assert!(resumed_args("claude", &sv(&["--resume", "x"]), "s1", &[]).is_err());
         assert!(resumed_args("claude", &sv(&["--session-id=x"]), "s1", &[]).is_err());
+    }
+
+    #[test]
+    fn 沒有工作資料夾_結束時不在目前目錄留記號() {
+        let stray = std::env::current_dir().unwrap().join(QUIT_MARK);
+        let before = stray.exists();
+        note_user_quit(Path::new(""));
+        assert_eq!(stray.exists(), before, "不能寫到目前目錄");
     }
 
     #[test]
