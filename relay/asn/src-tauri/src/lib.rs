@@ -99,6 +99,7 @@ mod codex_accounts;
 mod codex_quota;
 #[cfg(desktop)]
 mod gemini_quota;
+#[cfg(desktop)]
 mod quota_readers;
 #[cfg(desktop)]
 mod gemini_session;
