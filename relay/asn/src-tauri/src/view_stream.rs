@@ -586,7 +586,7 @@ mod tests {
         let code = &src[..src.find("mod tests").unwrap()];
         assert!(code.contains("|t2d|"));
         assert!(!code.contains("d2t"), "不留反向");
-        assert!(!code.contains("send_text") && !code.contains("send_bytes") && !code.contains("term_view_input"), "這裡碰不到打字");
+        assert!(!code.contains("send_text") && !code.contains("send_bytes") && !code.contains("view_input"), "這裡碰不到打字（本機看畫面的打字走 view_input，別台看畫面不能呼叫）");
     }
 
     #[test]
