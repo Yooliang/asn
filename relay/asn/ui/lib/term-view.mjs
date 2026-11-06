@@ -1,6 +1,9 @@
 // 在畫面裡看夥伴的終端、打字（#597）。畫面內容由 Rust 端過濾過才送來；打字走 term_view_input（只有本機畫面這一個入口，
 // Rust 端再檢查一次：開著的畫面、視窗在前景、窗格是 ASN 開的、授權），字一次一支送進窗格、不丟字。
 // xterm.js 打包在 ui/vendor，要看時才載入。全程在本機，不連外。
+import { viewHint } from './partner-notice.mjs'
+/** 畫面上提示多久查一次 */
+export const HINT_POLL_MS = 3_000
 const { ref, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 const FRAME_EVENT = 'term-view-frame'
@@ -196,7 +199,15 @@ export const TermView = {
   },
   emits: ['back'],
   setup(props) {
-    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref('')
+    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref('')
+    // 夥伴停在要你回答的地方：本機的同意框這時不跳，改在畫面上方提示
+    let hintTimer = 0
+    const refreshHint = async () => {
+      if (!props.name || !props.api.notices || !props.active) { askHint.value = ''; return }
+      try { askHint.value = viewHint(await props.api.notices(), props.name) } catch { askHint.value = '' }
+    }
+    onMounted(() => { void refreshHint(); hintTimer = setInterval(() => void refreshHint(), HINT_POLL_MS) })
+    onBeforeUnmount(() => clearInterval(hintTimer))
     let xtermRef = null
     let session = null, follow = createFollow(), lastRow = 0, lastRows = DEFAULT_ROWS
     // 窗格比區塊高時，游標（輸入框、權限框）常在下面：跟著捲，使用者往上看時不打擾
@@ -267,11 +278,12 @@ export const TermView = {
     watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
     onMounted(() => { if (props.active) start() })
     onBeforeUnmount(stop)
-    return { host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, note: props.api.input ? TERM_VIEW_NOTE : TERM_VIEW_NOTE_READONLY }
+    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, note: props.api.input ? TERM_VIEW_NOTE : TERM_VIEW_NOTE_READONLY }
   },
   template: `
 <div class="term-view">
   <p class="term-view-note">{{ note }}</p>
+  <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
   <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
   <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>

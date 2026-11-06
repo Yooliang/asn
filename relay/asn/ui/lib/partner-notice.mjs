@@ -37,6 +37,18 @@ export function nextNotices(list, seen = new Set()) {
   return { fresh, freshItems, seen: now, gone }
 }
 
+/** 終端畫面上要顯示的一行提示（畫面開著時本機的同意框不跳）。只給本人看，不含畫面內容 */
+const VIEW_HINTS = {
+  permission: '它在等你同意一項操作：直接在下面的畫面按數字鍵回答。',
+  trust: '它在問要不要信任這個資料夾：直接在下面的畫面回答。',
+  bypass_warning: '它在等你確認權限設定：直接在下面的畫面回答。',
+  attention: '它停在一個選單：直接在下面的畫面回答。',
+}
+export function viewHint(list, name) {
+  const hit = (Array.isArray(list) ? list : []).find(i => i?.name === name && Object.hasOwn(VIEW_HINTS, i?.code))
+  return hit ? VIEW_HINTS[hit.code] : ''
+}
+
 /** 這個提醒畫面該不該收：提醒的文字就是那一項的文字（別的提醒、別的夥伴不動） */
 export const noticeStillFor = (item, body) => noticeText(item)?.body === body
 
@@ -54,7 +66,10 @@ export function createPartnerNoticePoller({ fetch, show, onItem = null, onGone =
       const r = nextNotices(await fetch(), seen)
       seen = r.seen
       r.fresh.forEach(show)
-      r.freshItems.forEach(i => onItem?.(i))
+      for (const i of r.freshItems) {
+        // 回 false：這次先不跳（例如本人正開著它的終端畫面），下一輪再問
+        if ((await onItem?.(i)) === false) seen.delete(`${i.code}\n${i.name}`)
+      }
       r.gone.forEach(i => onGone?.(i))
     } catch { /* 下一輪再查 */ }
   }
