@@ -79,6 +79,7 @@ export const termViewApi = {
   close: viewId => invoke('term_view_close', { viewId }),
   // 在畫面裡打字（#597 D）：只有這個本機命令，Rust 端檢查開著的畫面、視窗在前景、窗格是 ASN 開的、授權
   input: (viewId, data, paste) => invoke('term_view_input', { viewId, data, paste: !!paste }),
+  notices: () => invoke('partner_notices'),   // 畫面上的一行提示用：只有視窗名與固定代號
   listen,
 }
 

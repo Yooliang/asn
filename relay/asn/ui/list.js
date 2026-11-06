@@ -1291,6 +1291,8 @@ const permissionDlgView = computed(() => permissionView(permissionDlg.prompt))
 function closePermissionDlg() { permissionDlg.open = false }
 async function openPermissionDlg(item) {
   if (permissionDlg.open) return
+  // 本人正開著它的終端畫面：不跳框搶按鍵，畫面上會有一行提示。下一輪再問，畫面關了就照常跳
+  if (await invoke('term_view_active', { name: item.name }).catch(() => false)) return false
   try {
     const prompt = await transport.partnerPermissionPrompt(item.name)
     Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
