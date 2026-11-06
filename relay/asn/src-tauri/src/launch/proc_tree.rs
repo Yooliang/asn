@@ -13,6 +13,14 @@ use std::time::Duration;
 
 /// TERM 之後等多久才補 KILL
 pub const GRACE: Duration = Duration::from_secs(2);
+/// 送信號用的 kill：只認這兩個固定的絕對路徑，不走 PATH（免得被放在 PATH 前面的同名程式頂替）
+pub const KILL_PATHS: [&str; 2] = ["/bin/kill", "/usr/bin/kill"];
+
+/// 依順序找第一個存在的 kill；都沒有＝None（不送信號）
+pub fn kill_program(exists: impl Fn(&str) -> bool) -> Option<&'static str> {
+    KILL_PATHS.iter().copied().find(|p| exists(p))
+}
+
 /// 可以當根行程的執行檔（只有 ASN 開的 WezTerm）
 pub const ROOT_EXES: [&str; 3] = ["wezterm-gui", "wezterm", "wezterm-mux-server"];
 
@@ -103,11 +111,11 @@ pub mod live {
         !matches!(state, "Z" | "X") && crate::heartbeat::process_start_secs(pid) == Some(start)
     }
 
-    fn signal(sig: &str, pids: &[u32]) {
+    fn signal(kill: &str, sig: &str, pids: &[u32]) {
         if pids.is_empty() {
             return;
         }
-        let mut c = Command::new("kill");
+        let mut c = Command::new(kill);
         c.no_window().arg(sig);
         for p in pids {
             c.arg(p.to_string());
@@ -117,6 +125,10 @@ pub mod live {
 
     /// 結束 root 和它底下的行程樹。回有沒有收掉根行程
     pub fn kill_tree(root: u32) -> bool {
+        let Some(kill) = kill_program(|p| std::path::Path::new(p).is_file()) else {
+            elog!("[ASN] 找不到 /bin/kill 或 /usr/bin/kill，不結束行程 {root}");
+            return false;
+        };
         let Some(uid) = my_uid() else { return false };
         let me = std::process::id();
         let targets = match plan(&table(), root, uid, me) {
@@ -127,13 +139,13 @@ pub mod live {
             }
         };
         let term: Vec<u32> = targets.iter().filter(|(p, s)| still_same(*p, *s)).map(|(p, _)| *p).collect();
-        signal("-TERM", &term);
+        signal(kill, "-TERM", &term);
         let deadline = std::time::Instant::now() + GRACE;
         while std::time::Instant::now() < deadline && targets.iter().any(|(p, s)| still_same(*p, *s)) {
             std::thread::sleep(Duration::from_millis(100));
         }
-        let kill: Vec<u32> = targets.iter().filter(|(p, s)| still_same(*p, *s)).map(|(p, _)| *p).collect();
-        signal("-KILL", &kill);
+        let to_kill: Vec<u32> = targets.iter().filter(|(p, s)| still_same(*p, *s)).map(|(p, _)| *p).collect();
+        signal(kill, "-KILL", &to_kill);
         !still_same(root, targets.last().map(|t| t.1).unwrap_or(0))
     }
 }
@@ -144,6 +156,17 @@ mod tests {
 
     fn row(pid: u32, ppid: u32, uid: u32, start: u64, exe: &str) -> Row {
         Row { pid, ppid, uid, start, exe: exe.into() }
+    }
+
+    #[test]
+    fn kill_只用固定的絕對路徑_都沒有就不送() {
+        assert_eq!(kill_program(|p| p == "/usr/bin/kill"), Some("/usr/bin/kill"));
+        assert_eq!(kill_program(|_| true), Some("/bin/kill"), "依順序");
+        assert_eq!(kill_program(|_| false), None);
+        assert!(KILL_PATHS.iter().all(|p| p.starts_with('/')), "不走 PATH");
+        let src = include_str!("proc_tree.rs");
+        let code = src.split("\nmod tests {").next().unwrap();
+        assert!(!code.contains("Command::new(\"kill\")"), "不能用 PATH 上的 kill");
     }
 
     #[test]
