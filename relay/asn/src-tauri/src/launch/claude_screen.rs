@@ -155,7 +155,8 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
             let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
             let q = question_box(&lines[..end])?;
-            let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().map(|l| clean_prompt_line(l)).collect();
+            // 自由輸入那一行（「N. Type something.」）手機沒有按鈕，內容也不放（#914）
+            let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| clean_prompt_line(l)).collect();
             let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
             Some(PromptText { text: kept.join("\n").trim().to_string(), complete })
         }
@@ -184,6 +185,11 @@ fn question_row(line: &str) -> Option<(u32, &str, bool)> {
         return None;
     }
     Some((n.parse().ok()?, label.trim(), cursor))
+}
+
+/// 選項框裡的自由輸入那一行（單選「N. Type something.」、多選「N. [ ] Type something」）
+fn is_free_input_row(line: &str) -> bool {
+    question_row(line).is_some_and(|(_, label, _)| label.ends_with(QUESTION_TYPE) || label.ends_with(QUESTION_TYPE_DOT))
 }
 
 fn question_box(lines: &[&str]) -> Option<QuestionBox> {
@@ -567,6 +573,8 @@ mod tests {
         assert_eq!((s.allow_once, s.deny), (None, None), "選項框沒有允許／拒絕");
         let t = phone_text(text).expect("手機看得到題目");
         assert!(t.text.contains("你比較喜歡哪一個顏色？") && t.text.contains("選擇紅色"), "{}", t.text);
+        assert!(t.text.contains("2. 藍色") && t.text.contains("選擇藍色"), "其他選項和說明照留：{}", t.text);
+        assert!(!t.text.contains("Type something"), "自由輸入那一行手機沒有按鈕，內容也不放（#914）：{}", t.text);
         assert!(!t.text.contains("Use the AskUserQuestion tool"), "題目上方的對話不傳：{}", t.text);
     }
 
@@ -733,6 +741,7 @@ mod question_box_tests {
         assert_eq!(labels(&s), vec![(1, "紅".to_string()), (2, "綠".to_string()), (3, "藍".to_string())]);
         let t = phone_text(&named).expect("手機看得到題目");
         assert!(t.text.contains("你喜歡哪種顏色？") && !t.text.contains("wake-test3"), "{}", t.text);
+        assert!(!t.text.contains("Type something") && t.text.contains("藍色"), "自由輸入那一行不放、選項照留：{}", t.text);
     }
 
     #[test]
