@@ -95,6 +95,11 @@ pub trait Runner {
         true
     }
     fn sleep(&self, d: Duration);
+    /// 這個平台查得到「看畫面的 GUI 的視窗出現了沒」。查不到（Linux：X11／Wayland 沒有可靠的方法）就不等視窗，
+    /// 活過最短時間就算開好了。預設＝查得到（測試的假 runner 照舊）
+    fn can_see_windows(&self) -> bool {
+        true
+    }
     /// 這個程序（看畫面的 GUI）的視窗已經出現。預設＝false（測試、沒有畫面的建置）
     fn window_up(&self, _pid: u32) -> bool {
         false
@@ -194,6 +199,16 @@ impl Runner for RealRunner {
         crate::heartbeat::process_started_ms(pid)
     }
 
+    fn can_see_windows(&self) -> bool {
+        cfg!(windows)
+    }
+
+    /// Linux：/proc/<pid>/exe 指到的執行檔（結束不是剛起的程序前核對用）
+    #[cfg(target_os = "linux")]
+    fn exe_path(&self, pid: u32) -> Option<PathBuf> {
+        std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+    }
+
     #[cfg(windows)]
     fn exe_path(&self, pid: u32) -> Option<PathBuf> {
         use std::os::windows::ffi::OsStringExt;
@@ -232,8 +247,21 @@ impl Runner for RealRunner {
     }
 
     fn kill_tree(&self, pid: u32) {
-        let r = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-        super::term::view_log(&format!("mux-view taskkill pid={pid} result={:?}", r.map(|s| s.code()).map_err(|e| e.to_string())));
+        #[cfg(windows)]
+        {
+            let r = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            super::term::view_log(&format!("mux-view taskkill pid={pid} result={:?}", r.map(|s| s.code()).map_err(|e| e.to_string())));
+        }
+        // Linux：自己找整棵樹，只收 ASN 開的終端和同一個使用者的子孫，先 TERM 再 KILL（規則見 proc_tree）
+        #[cfg(target_os = "linux")]
+        {
+            let ok = super::proc_tree::live::kill_tree(pid);
+            super::term::view_log(&format!("mux-view kill-tree pid={pid} ok={ok}"));
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            elog!("[ASN] 這個平台還不能結束終端的行程樹（{pid}）");
+        }
     }
 
     fn sleep(&self, d: Duration) {
