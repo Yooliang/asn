@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ARM_MS, TEXT, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending } from '../ui/lib/perm-ask.mjs'
+import { ARM_MS, AUTOCLOSE_MS, TEXT, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending, watchOutcome } from '../ui/lib/perm-ask.mjs'
 import { normalizeNav, permReqNav } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -112,8 +112,10 @@ test('守門：框開著時才輪詢、只在前景、關框或切背景就停',
   assert.match(tick, /const cur = pq\.cur/)
   assert.match(tick, /!cur \|\| pq\.busy \|\| pq\.waiting \|\| pq\.result \|\| document\.visibilityState !== 'visible'\) return/)
   assert.match(tick, /pqStill\(await invoke\('android_perm_req_list'\), cur\.id\)/)
-  assert.match(tick, /alive === false/, '只有確定已結束（false）才收；null 不收')
-  assert.match(tick, /pq\.result = \{ ok: false, text: PERMREQ_TEXT\.gone \}/, '和 not_found 同樣的「已經結束」處理')
+  assert.match(tick, /if \(out && pq\.cur === cur && !pq\.busy && !pq\.waiting && !pq\.result\)/, '只有純函式說要收（alive===false）才收；null 不收')
+  assert.match(tick, /const out = pqWatchOutcome\(alive\)/, '呈現方式交給純函式')
+  assert.match(tick, /pq\.result = out; pqAutoArm\(\)/, '輪詢發現已處理：寫入結果並排自動收框')
+  assert.ok(!tick.includes('PERMREQ_TEXT.gone'), '輪詢不再用紅字那句')
   // 計時器：只有一處建立，建立前先清掉；框開著而且在前景才建
   assert.equal((block.match(/setInterval\(\(\) => \{ void pqWatchTick\(\)/g) ?? []).length, 1, '只有一處建立輪詢')
   const start = body('function pqWatchStart()', '\n    }\n')
@@ -124,5 +126,35 @@ test('守門：框開著時才輪詢、只在前景、關框或切背景就停',
   const check = body('async function checkPermReqs()', 'async function pqWatchTick()')
   assert.ok(check.indexOf('pqWatchStart()') > check.indexOf('go(permReqNav())'), '開框之後才啟動')
   assert.match(block, /const pqClose = \(\) => \{ pqWatchStop\(\);/, '關框會停')
-  assert.match(block, /visibilityState === 'visible'\) pqWatchStart\(\); else pqWatchStop\(\)/, '切到背景會停')
+  assert.match(block, /visibilityState === 'visible'\) \{ pqWatchStart\(\); pqAutoArm\(\) \} else \{ pqWatchStop\(\); clearTimeout\(pqAutoTimer\)/, '切到背景會停、也清掉自動收框的計時器')
+})
+
+test('撤回後框自己收：輪詢發現已處理（沒按過）→ handled＋auto；按了之後 cancelled → 仍是紅字 gone，兩句不同', () => {
+  const out = watchOutcome(false)
+  assert.deepEqual(out, { ok: true, text: TEXT.handled, auto: true })
+  assert.notEqual(TEXT.handled, TEXT.gone)
+  assert.ok(!/[A-Za-z]/.test(TEXT.handled), '純中文')
+  assert.equal(watchOutcome(true), null)
+  assert.equal(watchOutcome(null), null, '查不到不能當成結束')
+  const c = resultOf({ recent: [{ id: ID, status: 'cancelled' }] }, ID)
+  assert.deepEqual(c, { ok: false, text: TEXT.gone })
+  assert.ok(!c.auto, '按了之後的 cancelled 不自動收')
+  assert.ok(AUTOCLOSE_MS >= 1000 && AUTOCLOSE_MS <= 3000)
+})
+
+test('守門：自動收框只在 5 秒輪詢那條、計時器會清、確認同一筆才關', () => {
+  const js = read('../ui/m.js')
+  const from = js.indexOf('手機回答權限框（#853）'), block = js.slice(from, js.indexOf('電腦要往終端送字／代答提問'))
+  const body = (head, to) => { const i = block.indexOf(head); assert.ok(i > 0, head); return block.slice(i, block.indexOf(to, i)) }
+  // 排程只有 pqAutoArm 一處建立，只有輪詢本體呼叫它（回前景重排也是 auto 結果才會排）
+  assert.equal((block.match(/pqAutoTimer = setTimeout\(/g) ?? []).length, 1)
+  const wait = body('function pqWaitResult(id)', 'async function decidePermReq(')
+  assert.ok(!/pqAutoArm|laterPermReq|history\.back|pqClose|auto/.test(wait), '按了選項之後的等結果不自動收')
+  const arm = body('function pqAutoArm()', 'function pqWatchStart()')
+  assert.match(arm, /!pq\.result\?\.auto \|\| document\.visibilityState !== 'visible'\) return/, '只有 auto 結果、且在前景才排')
+  assert.match(arm, /if \(pq\.cur === cur && pq\.result\?\.auto\) laterPermReq\(\)/, '確認還是同一筆才關，且走 laterPermReq（先記不再問再 history.back）')
+  assert.match(arm, /clearTimeout\(pqAutoTimer\)/, '排之前先清舊的')
+  assert.match(block, /const pqClose = \(\) => \{ pqWatchStop\(\); clearTimeout\(pqAutoTimer\);/, '關框會清計時器')
+  assert.match(block, /else \{ pqWatchStop\(\); clearTimeout\(pqAutoTimer\)/, '切背景會清計時器')
+  assert.match(block, /const laterPermReq = \(\) => \{ if \(pq\.cur\) pqDismissed\.add\(pq\.cur\.id\); history\.back\(\) \}/)
 })
