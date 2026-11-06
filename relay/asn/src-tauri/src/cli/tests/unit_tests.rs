@@ -103,6 +103,37 @@ fn 呼叫者_session_檔的程序已經不是同一個_不算() {
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
 }
 
+// 本人接進收發室的 agy 視窗：父行程鏈上的 pid 和建立時間都對上登記，才用登記的名字（優先於更上層的 Claude 視窗）
+#[test]
+fn 呼叫者_接進收發室的視窗_pid_和建立時間都對上才算() {
+    use super::super::caller::find_caller;
+    let f = fx("http://127.0.0.1:1", Some("上層Claude"));
+    let agy_pid = 9600u32;
+    let started_at: u64 = 1_762_400_000_000;
+    let table: ProcTable = [(SELF_PID, (BASH_PID, "asn-cli.exe".to_string())), (BASH_PID, (agy_pid, "bash.exe".to_string())), (agy_pid, (CLAUDE_PID, "agy.exe".to_string())), (CLAUDE_PID, (1, "claude.exe".to_string()))].into_iter().collect();
+    let mut env = f.env.clone();
+    env.procs = Arc::new(move || Ok(table.clone()));
+    env.started = Arc::new(move |p| (p == agy_pid).then_some(started_at + 200));
+    // 還沒接進來：往上找到 Claude 視窗
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+    let dir = crate::self_windows::dir_in(&f.rh());
+    let e = crate::self_windows::Entry { name: "agy-1".into(), engine: "gemini".into(), pid: agy_pid, started_ms: started_at, at: started_at };
+    crate::self_windows::write(&dir, &e).unwrap();
+    let c = find_caller(&env, "收信").unwrap();
+    assert_eq!((c.name.as_str(), c.pid), ("agy-1", agy_pid));
+    // 同一個 pid 但建立時間對不上（被別的程序用走）：不算
+    env.started = Arc::new(move |p| (p == agy_pid).then_some(started_at + 3_600_000));
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+    // 查不到建立時間：不算
+    env.started = Arc::new(|_| None);
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+    // 登記的 pid 不在父行程鏈上：不算
+    env.started = Arc::new(move |p| (p == agy_pid || p == 7777).then_some(started_at + 200));
+    crate::self_windows::remove(&dir, agy_pid, started_at);
+    crate::self_windows::write(&dir, &crate::self_windows::Entry { pid: 7777, ..e }).unwrap();
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+}
+
 // pi 從別的 Claude 視窗底下開出來時，寄件人要是 pi 自己的視窗，不能算成上面那個 Claude 視窗
 #[test]
 fn 呼叫者_pi_視窗登記的_pid_在父行程鏈上_優先於更上層的_claude_視窗() {

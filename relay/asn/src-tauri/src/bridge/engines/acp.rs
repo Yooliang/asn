@@ -414,6 +414,7 @@ impl AcpEngine {
             mod_loaded: false,
             model: Some(w.effective_model()).filter(|m| !m.is_empty()),
             hidden: None,
+            kind: None,
         }
     }
 

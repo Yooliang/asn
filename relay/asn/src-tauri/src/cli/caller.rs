@@ -82,7 +82,15 @@ pub fn inspect(env: &Env) -> Evidence {
     if let Some(table) = &table {
         let mut pid = table.get(&env.self_pid).map(|x| x.0).unwrap_or(0);
         let mut hops = 0;
+        let self_dir = crate::self_windows::dir_in(&env.relay_home);
+        let started = env.started.clone();
         while pid != 0 && hops < 40 {
+            // 本人接進收發室的視窗（各家轉接層第 2 步）：pid 和程序建立時間都對上登記才算
+            if let Some(e) = crate::self_windows::find_pid(&self_dir, pid, &|p| started(p)) {
+                ev.chain.push(ChainItem { pid, name: table.get(&pid).map(|x| x.1.clone()).unwrap_or_else(|| "(已結束)".into()), session: Some(format!("{}（接進收發室的視窗）", e.name)) });
+                ev.via_chain = Some(Caller { pid, name: e.name });
+                break;
+            }
             if let Some(name) = pi_window_name(&env.relay_home.join("pi-windows"), pid) {
                 ev.chain.push(ChainItem { pid, name: table.get(&pid).map(|x| x.1.clone()).unwrap_or_else(|| "(已結束)".into()), session: Some(name.clone()) });
                 ev.via_chain = Some(Caller { pid, name });

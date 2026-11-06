@@ -490,6 +490,12 @@ pub struct Core {
     /// 已經因為「內文沒套用」重送過一次的編號
     not_applied_once: HashSet<String>,
     probing: bool,
+    /// 只能自己收信的視窗（名單上 kind=selfpull）：寄給它們的信留在信箱，不推、不 ack
+    self_pull: HashSet<String>,
+    /// 留給只能自己收信視窗的信：編號 → 第一次看到的時間（後台寄出時間優先），超過 AWAIT_GRACE_MS 就退回
+    self_pull_first: HashMap<String, u64>,
+    /// 已經告訴寄件人「對方要自己收信」的（寄件人／收件視窗）：每組只說一次
+    self_pull_told: HashSet<String>,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -538,7 +544,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
         c.started_at = now;
@@ -854,7 +860,8 @@ impl Core {
     /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的，先記下不見的時間（寄給它的信照原本的做法立刻退回），
     /// 收發室繼續跑過 FORGET_AFTER_MS 它都沒回來，才當成本人關掉、從存檔拿掉。關機時視窗比收發室早結束，收發室活不到那時候，名字會留著
     fn note_known_windows(&mut self, now: u64) {
-        let names: Vec<(String, String)> = self.roster.iter().filter(|w| w.name != self.cfg.mailbox_name).map(|w| (w.name.clone(), w.engine.clone())).collect();
+        // 只能自己收信的視窗不記進「認得的夥伴」：它結束後信照一般規則退回，重開收發室也不會當成「還沒接回來」留信
+        let names: Vec<(String, String)> = self.roster.iter().filter(|w| w.name != self.cfg.mailbox_name && !w.is_self_pull()).map(|w| (w.name.clone(), w.engine.clone())).collect();
         let present: HashSet<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
         let gone: Vec<String> = self.seen_run.iter().filter(|n| !present.contains(n.as_str())).cloned().collect();
         for n in gone {
@@ -936,6 +943,40 @@ impl Core {
         };
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;
+    }
+
+    fn self_pull_dir(&self) -> std::path::PathBuf {
+        self.cfg.status_dir.with_file_name(crate::self_windows::DIR)
+    }
+
+    /// 寄給只能自己收信視窗的信：留在後台信箱（不推、不 ack），等它自己 asn-cli recv。
+    /// 寄件人收到一次說明；從寄出（後台時間優先）算超過 AWAIT_GRACE_MS 還沒被收走，就退回並 ack。回 Some＝留在信箱
+    async fn hold_for_self_pull(&mut self, m: &Mail, to: &str) -> Option<String> {
+        let first = *self.self_pull_first.entry(m.id.clone()).or_insert(m.sent_ms.unwrap_or(self.now));
+        let from_agent = m.from_agent.clone().unwrap_or_default();
+        let quiet = Self::is_mailbox_sender(&from_agent) || m.body.trim_start().starts_with("[收發室]");
+        let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent: from_agent.clone() };
+        if self.now.saturating_sub(first) >= AWAIT_GRACE_MS {
+            self.log.line(&format!("id={} to={to}: self-pull window did not collect it in {} h, bounced", m.id, AWAIT_GRACE_MS / 3_600_000));
+            if !quiet {
+                let text = format!("[收發室] 「{to}」要自己收信，這封放了 {} 小時都沒有被收走，退回給你。要找它，請等它上線收信後再寄，或改用別的方式聯絡。", AWAIT_GRACE_MS / 3_600_000);
+                self.send_back(&o, &text, None, Some(false)).await;
+            }
+            self.ack_ids(&[m.id.clone()]).await;
+            self.self_pull_first.remove(&m.id);
+            return None;
+        }
+        if self.self_handled.insert(m.id.clone()) {
+            self.log.line(&format!("id={} to={to}: self-pull window, kept in inbox for it to collect (up to {} h)", m.id, AWAIT_GRACE_MS / 3_600_000));
+        }
+        if self.self_pull_first.len() > 2000 {
+            self.self_pull_first.retain(|k, _| *k == m.id);
+        }
+        if !quiet && self.self_pull_told.insert(format!("{}/{}->{to}", m.from_node, from_agent)) {
+            let text = format!("[收發室] 「{to}」要自己收信：信已經放進它的信箱，它來收時才會看到，可能比較晚。最多放 {} 小時，沒收走就退回給你。", AWAIT_GRACE_MS / 3_600_000);
+            self.send_back(&o, &text, None, Some(false)).await;
+        }
+        Some(to.to_string())
     }
 
     /// 退回時的說明：重開前有在線、等過寬限期還沒回來的，講明等了多久
@@ -1082,6 +1123,13 @@ impl Core {
         if let Some(e) = &self.engines {
             list.extend(e.windows().into_iter().filter(|w| w.name != self.cfg.mailbox_name));
         }
+        // 本人接進收發室的視窗（只能自己收信）：登記還有效（程序在、建立時間對得上）才列；和既有視窗同名的不列
+        let created = self.created.clone();
+        for e in crate::self_windows::live(&self.self_pull_dir(), &|p| created(p)) {
+            if !list.iter().any(|w| w.name == e.name) {
+                list.push(Window::self_pull(&e, now));
+            }
+        }
         // 自動回信：worker 自己當一個可收信的視窗（同名的別的視窗讓位，一個名字只能對應一個收件者）
         if let Some(me) = self.cfg.respond.clone() {
             list.retain(|w| w.name != me);
@@ -1093,6 +1141,7 @@ impl Core {
         if self.cfg.wait_alert {
             roster::mark_unknown_status(&mut list);
         }
+        self.self_pull = list.iter().filter(|w| w.is_self_pull()).map(|w| w.name.clone()).collect();
         self.roster = list;
         self.roster_ok = true;
         self.note_known_windows(now);
@@ -1104,7 +1153,8 @@ impl Core {
         };
         // 本機執行中的代理（claude -p／pi／codex／gemini…）：僅顯示、不可收信；讀程序放背景執行緒，開關見 procscan::enabled
         // 已登記成可收信視窗的 pi（擴充登記的 pid）不再重複列成僅顯示條目
-        let registered: Vec<u32> = self.roster.iter().filter(|w| w.engine == "pi").map(|w| w.pid).collect();
+        // 本人接進收發室的視窗也一樣：同一個程序不再列成僅顯示條目
+        let registered: Vec<u32> = self.roster.iter().filter(|w| w.engine == "pi" || w.is_self_pull()).map(|w| w.pid).collect();
         // 主控台視窗表一輪只列一次（EnumWindows，不接上別人的主控台），名單裡所有有視窗的條目共用
         let (mut procs, snap) = tokio::task::spawn_blocking(move || (super::procscan::scan_system_excluding(&registered), crate::launch::console::window_snapshot())).await.unwrap_or_default();
         roster::apply_hidden(&mut self.roster, &snap);
@@ -1495,6 +1545,10 @@ impl Core {
                     self.log.line(&format!("id={} to={to} window receives by itself (recv heartbeat): bridge skips", m.id));
                 }
                 return Some(to);
+            }
+            // 只能自己收信的視窗（本人接進收發室的）：信留在信箱等它自己收；寄件人說一次；太久沒收就退回
+            if self.self_pull.contains(&to) {
+                return self.hold_for_self_pull(&m, &to).await;
             }
         }
         let from_agent = m.from_agent.clone().unwrap_or_default();

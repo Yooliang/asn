@@ -33,16 +33,42 @@ pub struct Window {
     pub model: Option<String>,
     /// 這個 CLI 視窗的主控台視窗是否隱藏（Windows 才有）：只在確定找到那個程序自己的視窗時才有值；找不到、屬別人（Windows Terminal 分頁）、非 Windows、沒有視窗的引擎都是 None，名單不帶
     pub hidden: Option<bool>,
+    /// 名單上的種類：只有本人接進收發室、只能自己收信的視窗是 Some("selfpull")（見 crate::self_windows）；其他都是 None，名單不帶
+    pub kind: Option<String>,
 }
 
 impl Window {
+    /// 本人接進收發室的視窗（各家轉接層第 2 步）：可收信，但收發室不推，信留在信箱讓它自己用 asn-cli recv 拉
+    pub fn self_pull(e: &crate::self_windows::Entry, now: u64) -> Window {
+        Window {
+            name: e.name.clone(),
+            status: Some("idle".into()),
+            cwd: String::new(),
+            pid: e.pid,
+            updated_at: now,
+            session_id: None,
+            engine: "agy".into(),
+            engine_label: Some(e.engine.clone()),
+            no_fallback: true,
+            cwd_label_override: None,
+            detail: Some(SELF_PULL_DETAIL.into()),
+            context_pct: None,
+            mod_loaded: false,
+            model: None,
+            hidden: None,
+            kind: Some(crate::self_windows::KIND.into()),
+        }
+    }
+    pub fn is_self_pull(&self) -> bool {
+        self.kind.as_deref() == Some(crate::self_windows::KIND)
+    }
     /// 名單與夥伴同步回報的引擎名
     pub fn label(&self) -> &str {
         self.engine_label.as_deref().unwrap_or(&self.engine)
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None, hidden: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None, hidden: None, kind: None }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -54,6 +80,9 @@ impl Window {
         is_busy_status(self.status.as_deref())
     }
 }
+
+/// 名單上「只能自己收信」視窗的說明
+pub const SELF_PULL_DETAIL: &str = "只能自己收信";
 
 /// 忙碌狀態（Node 橋預設 `^(busy|working|running)$`，不分大小寫）
 pub fn is_busy_status(s: Option<&str>) -> bool {
@@ -413,6 +442,9 @@ pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, laun
             }
             if let Some(h) = w.hidden {
                 o["hidden"] = json!(h); // 可選欄位：主控台視窗是否隱藏；舊後台會丟掉，舊用戶端略過
+            }
+            if let Some(k) = &w.kind {
+                o["kind"] = json!(k); // 只能自己收信的視窗（selfpull）；後台收任意小寫種類，仍是可收信的條目
             }
             o
         })

@@ -23,6 +23,7 @@ mod datadir;
 mod device_login;
 mod envc;
 mod heartbeat;
+mod self_windows;
 mod home;
 mod identity;
 mod invite_link;
