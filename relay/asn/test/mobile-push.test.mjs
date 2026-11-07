@@ -1,17 +1,17 @@
 // 手機推播的前端流程（lib/mobile-push.mjs，#797 PR③）：外殼、註冊、計時都用假的。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPushSync, isPushToken, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS } from '../ui/lib/mobile-push.mjs'
+import { createPushSync, isPushToken, pushSettingView, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS, PUSH_TEXT } from '../ui/lib/mobile-push.mjs'
 import { androidBridge } from '../ui/lib/mobile.mjs'
 
 const TOK = 'f'.repeat(40) + ':APA91b_tok-1'
 
-function setup({ state = 'granted', registerImpl = async () => {} } = {}) {
+function setup({ state = 'granted', registerImpl = async () => {}, on = { v: true } } = {}) {
   let t = 1_000_000, seq = 0
   const timers = new Map()
   const calls = { ask: 0, request: 0, del: 0, register: [], unregister: 0 }
   const logs = []
-  let handler = null
+  let handler = null, changes = 0
   const native = {
     state: () => state,
     askPermission: () => { calls.ask++ },
@@ -21,10 +21,11 @@ function setup({ state = 'granted', registerImpl = async () => {} } = {}) {
   }
   const p = createPushSync({
     native, register: async tok => { calls.register.push(tok); return registerImpl(tok) }, unregister: async () => { calls.unregister++ },
+    enabled: () => on.v, onChange: () => { changes++ },
     now: () => t, setTimer: (f, ms) => { const id = ++seq; timers.set(id, { f, at: t + ms }); return id }, clearTimer: id => timers.delete(id), log: m => logs.push(m),
   }).start()
   return {
-    p, calls, logs, emit: e => handler?.(e),
+    p, calls, logs, on, changes: () => changes, emit: e => handler?.(e),
     advance(ms) { t += ms; for (const [id, x] of [...timers]) if (x.at <= t) { timers.delete(id); x.f() } },
     setState: s => { state = s }, timers, tick: () => new Promise(r => setImmediate(r)),
   }
@@ -110,4 +111,34 @@ test('外殼橋：push 只在外殼有這些方法時才有；state 認不得的
   win.__asnPushEvent('{"t":"refresh"}'); win.__asnPushEvent('不是 JSON')
   assert.deepEqual(seen, [{ t: 'refresh' }])
   off(); assert.equal(win.__asnPushEvent, null)
+})
+
+test('設定頁那一列：沒有 Firebase 不顯示；問過被拒時打勾仍留著並說明怎麼打開；文字是白話', () => {
+  assert.equal(pushSettingView('unavailable', true).show, false)
+  assert.equal(pushSettingView('weird', true).show, false)
+  const g = pushSettingView('granted', true)
+  assert.deepEqual([g.show, g.checked, g.denied], [true, true, ''])
+  assert.deepEqual([pushSettingView('ask', true).show, pushSettingView('ask', true).denied], [true, ''], '還沒問過：勾著就是第一次會問')
+  assert.equal(pushSettingView('denied', true).denied, PUSH_TEXT.denied)
+  assert.equal(pushSettingView('denied', false).denied, '', '自己關掉就不用再提醒權限')
+  assert.equal(pushSettingView('granted', false).checked, false)
+  assert.ok(PUSH_TEXT.note.includes('只告訴你「有新訊息」') && PUSH_TEXT.note.includes('要打開 App 才看得到'), '不洩漏內容的說明')
+  assert.ok(PUSH_TEXT.denied.includes('「設定」→「應用程式」→「ASN」→「通知」'))
+  for (const t of Object.values(PUSH_TEXT)) assert.doesNotMatch(t.replace(/App|ASN/g, ''), /[A-Za-z]{3,}/, '給人看的文字不要中英夾雜：' + t)
+})
+
+test('使用者關掉：不取權杖、不註冊、外殼推什麼進來都不理；關的當下先取消後台再刪權杖；再打開才同步（沒問過就在這時問）', async () => {
+  const on = { v: false }
+  const s = setup({ on, state: 'ask' })
+  s.p.sync(); s.emit({ t: 'perm', granted: true }); s.emit({ t: 'token', token: TOK }); s.emit({ t: 'refresh' }); await s.tick()
+  assert.deepEqual([s.calls.ask, s.calls.request, s.calls.register.length], [0, 0, 0])
+  on.v = true
+  s.p.enable()
+  assert.equal(s.calls.ask, 1, '打開時才問權限')
+  s.setState('granted'); s.emit({ t: 'perm', granted: true }); s.emit({ t: 'token', token: TOK }); await s.tick()
+  assert.deepEqual(s.calls.register, [TOK])
+  on.v = false
+  await s.p.disable()
+  assert.deepEqual([s.calls.unregister, s.calls.del], [1, 1])
+  assert.ok(s.changes() >= 2, '狀態有變就通知畫面重畫')
 })

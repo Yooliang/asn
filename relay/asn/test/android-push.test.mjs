@@ -121,3 +121,13 @@ test('前端接線：第一次收信之後與回到前景才同步；登出先�
   assert.match(js, /await push\?\.logout\(\); await authApi\.logout\(\)/)
   assert.match(js, /invoke\('android_push_register', \{ token \}\)/)
 })
+
+test('設定頁（PR④）：開關接到 prefs.push 與同步；預設開；沒有 Firebase 整列不顯示', () => {
+  const js = read('ui', 'm.js'), html = read('ui', 'm.html'), mob = read('ui', 'lib', 'mobile.mjs')
+  assert.match(mob, /DEFAULT_PREFS = \{[^}]*push: true/); assert.match(mob, /push: raw\?\.push !== false/)
+  assert.match(js, /enabled: \(\) => prefs\.push !== false/, '關掉就不註冊')
+  assert.match(js, /setPush: on => \{ prefs\.push = on === true; if \(on === true\) push\?\.enable\(\); else void push\?\.disable\(\) \}/)
+  assert.match(html, /<template v-if="pushView\.show">\s*<label class="m-check"><input type="checkbox" :checked="pushView\.checked" @change="setPush\(\$event\.target\.checked\)"> \{\{ PUSH_TEXT\.label \}\}<\/label>/)
+  assert.match(html, /v-if="pushView\.denied"/)
+  assert.match(js, /push\?\.sync\(\); refreshPushSt\(\)/, '回到前景重讀權限狀態（使用者可能剛在系統設定裡改過）')
+})
