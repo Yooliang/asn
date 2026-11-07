@@ -43,6 +43,9 @@ crate-type = ["cdylib", "rlib"]
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
+# 寄件名保留字檢查的正規化（bridge/notice.rs）用；兩個都已經在 Cargo.lock 裡（間接依賴），版本鎖在同一版
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
+regex = "=1.13.1"
 tauri = { version = "2", features = [], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

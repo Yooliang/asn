@@ -93,7 +93,7 @@ mod tests {
         assert!(validate_name(&"字".repeat(41)).is_err());
         assert!(validate_name("a\nb").is_err() && validate_name("a\u{7}b").is_err());
         assert!(validate_name("家用收發室").is_err());
-        for bad in ["ASN 通知", "asn通知", "ＡＳＮ通知", "ASN\u{200b}通知", "x收发室"] {
+        for bad in ["ASN 通知", "asn通知", "ＡＳＮ通知", "ASN\u{200b}通知", "x收发室", "АЅΝ通知", "登入通知収発室"] {
             assert!(validate_name(bad).is_err(), "{bad}");
         }
         assert!(validate_name("ASN 通知單").is_ok());

@@ -27,8 +27,11 @@ export function legacyApplies(mail, until = LEGACY_NOTICE_UNTIL) {
 }
 
 export const isNoticeKind = kind => typeof kind === 'string' && kind.startsWith(NOTICE_KIND_PREFIX)
-// 寄件名保留字檢查用的正規化（和後台、Rust 端同一套）：NFKC → 去掉控制／格式／空白字元 → 轉小寫 → 简體「发」換成「發」
-export const foldName = name => String(name ?? '').normalize('NFKC').replace(/[\p{Cc}\p{Cf}\p{Zs}\p{Zl}\p{Zp}\s]/gu, '').toLowerCase().replace(/发/g, '發')
+// 寄件名保留字檢查用的正規化（和後台、Rust 端同一套；共用案例在 supabase/functions/_shared/reserved_sender_cases.json）：
+// NFKD → 去掉控制／格式／空白／組合記號／標點／符號 → 轉小寫 → 長得像的外國字母與日文、簡體字形對照 → NFKC
+const IGNORED = /[\p{Cc}\p{Cf}\p{Zs}\p{Zl}\p{Zp}\p{M}\p{P}\p{S}\s]/gu
+const FOLD_MAP = { 'а': 'a', 'ɑ': 'a', 'α': 'a', 'ᴀ': 'a', 'ѕ': 's', 'ꜱ': 's', 'ν': 'n', 'ո': 'n', 'ɴ': 'n', 'ᴎ': 'n', '发': '發', '発': '發', '収': '收' }
+export const foldName = name => Array.from(String(name ?? '').normalize('NFKD').replace(IGNORED, '').toLowerCase(), c => FOLD_MAP[c] ?? c).join('').normalize('NFKC')
 // 是不是保留給系統通知的寄件名：正規化後等於「asn通知」或結尾是「收發室」
 export const isLegacyNoticeName = name => {
   const s = foldName(name)

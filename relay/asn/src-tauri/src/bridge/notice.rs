@@ -2,6 +2,10 @@
 //! 一律先看信件類別 kind（`notice:` 開頭）；沒有 kind 時才退回舊的寄件名規則（「ASN 通知」或結尾「收發室」）與內文開頭 `[收發室]`，
 //! 而且舊規則只對截止時間以前的信有效。
 
+use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
+use regex::Regex;
+use std::sync::OnceLock;
+
 pub const NOTICE_SENDER: &str = "ASN 通知";
 pub const NOTICE_KIND_PREFIX: &str = "notice:";
 pub const LEGACY_NOTICE_SUFFIX: &str = "收發室";
@@ -20,24 +24,27 @@ pub fn legacy_applies(sent_ms: Option<u64>, until: Option<u64>) -> bool {
     }
 }
 
-/// 寄件名保留字檢查用的正規化（和後台、UI 同一套）：全形轉半形（沒有 NFKC 函式庫，只處理全形英數與符號）→
-/// 去掉控制／格式／空白字元 → 轉小寫 → 简體「发」換成「發」
+/// 寄件名保留字檢查用的正規化（和後台、UI 同一套；共用案例在 supabase/functions/_shared/reserved_sender_cases.json）：
+/// NFKD → 去掉控制／格式／空白／組合記號／標點／符號 → 轉小寫 → 長得像的外國字母與日文、簡體字形對照 → NFKC
 pub fn fold_name(name: &str) -> String {
-    name.chars()
-        .map(|c| match c as u32 {
-            0xFF01..=0xFF5E => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
-            _ => c,
-        })
-        .filter(|c| !c.is_whitespace() && !is_invisible(*c))
-        .flat_map(|c| c.to_lowercase())
-        .map(|c| if c == '发' { '發' } else { c })
-        .collect()
+    static IGNORED: OnceLock<Regex> = OnceLock::new();
+    let re = IGNORED.get_or_init(|| Regex::new(r"[\p{Cc}\p{Cf}\p{Zs}\p{Zl}\p{Zp}\p{M}\p{P}\p{S}\s]").expect("固定的正規式"));
+    let decomposed = DecomposingNormalizerBorrowed::new_nfkd().normalize(name);
+    let kept = re.replace_all(&decomposed, "").to_lowercase();
+    let mapped: String = kept.chars().map(fold_char).collect();
+    ComposingNormalizerBorrowed::new_nfkc().normalize(&mapped).into_owned()
 }
 
-/// 控制字元與格式字元（零寬、方向控制等）
-fn is_invisible(c: char) -> bool {
-    c.is_control()
-        || matches!(c as u32, 0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB)
+/// 長得像的外國字母（小寫後的樣子）與日文、簡體字形的對照，不求全
+fn fold_char(c: char) -> char {
+    match c {
+        'а' | 'ɑ' | 'α' | 'ᴀ' => 'a',
+        'ѕ' | 'ꜱ' => 's',
+        'ν' | 'ո' | 'ɴ' | 'ᴎ' => 'n',
+        '发' | '発' => '發',
+        '収' => '收',
+        _ => c,
+    }
 }
 
 /// 這個名字是不是保留給系統通知的（不能當夥伴名／視窗名）：正規化後等於「asn通知」或結尾是「收發室」
@@ -110,13 +117,30 @@ mod tests {
         assert!(!has_legacy_body_prefix("你好", None));
     }
 
+    /// 共用案例檔（和後台、UI、Node 橋同一份）
+    fn cases() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../../supabase/functions/_shared/reserved_sender_cases.json")).expect("共用案例檔是合法 JSON")
+    }
+
     #[test]
-    fn 保留名字() {
-        for n in ["ASN 通知", "asn通知", "ＡＳＮ通知", "ASN\u{200b}通知", "x收发室", "甲收發室"] {
-            assert!(is_reserved_name(n), "{n}");
+    fn 保留名字_共用案例() {
+        let c = cases();
+        let reserved = c["reserved"].as_array().unwrap();
+        let ordinary = c["ordinary"].as_array().unwrap();
+        assert!(reserved.len() > 20 && ordinary.len() > 5);
+        for n in reserved {
+            assert!(is_reserved_name(n.as_str().unwrap()), "{n}");
         }
-        for n in ["小乙", "通知", "ASN 通知單"] {
-            assert!(!is_reserved_name(n), "{n}");
+        for n in ordinary {
+            assert!(!is_reserved_name(n.as_str().unwrap()), "{n}");
+        }
+    }
+
+    #[test]
+    fn 正規化_共用案例() {
+        for pair in cases()["fold"].as_array().unwrap() {
+            let (input, expected) = (pair[0].as_str().unwrap(), pair[1].as_str().unwrap());
+            assert_eq!(fold_name(input), expected, "{input}");
         }
     }
 }
