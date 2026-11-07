@@ -1,15 +1,15 @@
-// 通知集中（20261110100000_notice_center.sql，#848 PR-C 後台）：靜態檢查與 pglite 實跑。
+// 通知集中（20261111100000_notice_center.sql，#848 PR-C 後台）：靜態檢查與 pglite 實跑。
 // 涵蓋：kind 欄位與檢查式、asn_relay_send_notice 的驗證／權限／扇出標記／限流、九支通知函式的內文第一行與寄件名與 kind、
 // 讀信函式多回 kind 與 from_owner、回復檔逐字等於上一版定義。沒裝 @electric-sql/pglite 時只跑靜態部分。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const F = '20261110100000_notice_center.sql'
+const F = '20261111100000_notice_center.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const mig = rd(fs.readFileSync(new URL(F, DIR), 'utf8'))
-const rb = rd(fs.readFileSync(new URL('../supabase/sql/rollback/20261110100000_notice_center_revert.sql', import.meta.url), 'utf8'))
+const rb = rd(fs.readFileSync(new URL('../supabase/sql/rollback/20261111100000_notice_center_revert.sql', import.meta.url), 'utf8'))
 const NOTICE_SIG = 'asn_relay_send_notice(text, text, text, integer, interval)'
 
 test('靜態：kind 欄位可空、無預設值；檢查式 NOT VALID 與 VALIDATE 分開成兩個敘述、驗證在另一個交易', () => {
