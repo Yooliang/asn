@@ -145,7 +145,7 @@ if grep -q 'PROBE_HELLO_42' text1.log; then
 else
   note "get-text 讀出窗格內容" "✖" "沒讀到送進去的字；前 200 字：$(head -c 200 text1.log | tr '\n' ' ')"
 fi
-SHELLPID=$(pgrep -f 'bash --noprofile --norc -i' | head -1 || true)
+SHELLPID=$(pgrep -P "$MUXPID" -f 'bash --noprofile --norc -i' | head -1 || true)
 note "窗格裡的程序" "pid ${SHELLPID:-?}" "父程序 $(ps -o ppid= -p "${SHELLPID:-0}" 2>/dev/null | tr -d ' ')，mux-server $MUXPID"
 
 # ---- 5. 殺掉「啟動者」，窗格還在不在 ----
@@ -154,12 +154,12 @@ sleep 2
 if kill -0 "$MUXPID" 2>/dev/null; then alive=✔; else alive=✖; fi
 note "殺掉啟動者後 mux-server 還活著" "$alive" "pid $MUXPID"
 cli list > list1.log 2>&1
-if grep -qE "^\s*[0-9]+\s+[0-9]+\s+$PANE\b" list1.log || grep -q "$PANE" list1.log; then
+if grep -qE "^\s*[0-9]+\s+[0-9]+\s+$PANE\b" list1.log; then
   cli get-text --pane-id "$PANE" > text2.log 2>&1
   if grep -q 'PROBE_HELLO_42' text2.log; then
     note "殺掉啟動者後窗格還在、內容還讀得到" "✔" "窗格 $PANE 仍列在 cli list，內容沒變"
   else
-    note "殺掉啟動者後窗格" "△ 窗格還在但內容不對" "$(head -c 200 text2.log | tr '\n' ' ')"
+    note "殺掉啟動者後窗格" "✖ 窗格還在但內容不對" "$(head -c 200 text2.log | tr '\n' ' ')"
   fi
   # 還能再送字、再讀
   cli send-text --pane-id "$PANE" --no-paste $'echo PROBE_AFTER_KILL\n' > /dev/null 2>&1
@@ -175,9 +175,10 @@ sleep 2
 if cli list > list2.log 2>&1; then
   note "對照：殺掉 mux-server 本身" "△ 還連得上" "$(head -c 200 list2.log | tr '\n' ' ')"
 else
-  note "對照：殺掉 mux-server 本身" "✔ 連不上了（預期）" "窗格裡的 bash 還活著嗎：$(pgrep -f 'bash --noprofile --norc -i' >/dev/null && echo 活著 || echo 已結束)"
+  note "對照：殺掉 mux-server 本身" "✔ 連不上了（預期）" "窗格裡的 bash 還活著嗎：$(kill -0 "${SHELLPID:-0}" 2>/dev/null && echo 活著 || echo 已結束)"
 fi
 
 # 收尾：只關自己起的程序
-pkill -f "bash --noprofile --norc -i" 2>/dev/null || true
+# 只關自己記下的那一個，不用名稱比對（別人拿去自己機器跑時才不會關到別的 bash）
+[ -n "${SHELLPID:-}" ] && kill "$SHELLPID" 2>/dev/null || true
 exit 0
