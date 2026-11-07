@@ -70,6 +70,38 @@ jobs:
       - name: 檢查無視窗橋能編譯
         run: cargo check --locked --no-default-features --bin asn-bridge
 
+  # 無畫面（不含視窗介面）的程式第一次真的跑測試：不裝 gtk／webkit，和 asn-bridge 在無畫面 Linux 上的編法相同（--no-default-features）。
+  # 跑不過的測試不用 cfg 關掉（那樣看起來綠、其實沒測），一律列在 scripts/headless-test-skip.txt 逐條 --skip，log 會印出略過了哪幾條
+  headless-test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay/asn/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: headless-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: 無畫面跑單元測試
+        shell: bash
+        run: |
+          mapfile -t skips < <(grep -v '^[[:space:]]*#' ../scripts/headless-test-skip.txt | sed '/^[[:space:]]*$/d')
+          echo "略過 ${#skips[@]} 條（清單：relay/asn/scripts/headless-test-skip.txt）"
+          for t in "${skips[@]}"; do echo "  - $t"; done
+          args=()
+          for t in "${skips[@]}"; do args+=(--skip "$t"); done
+          cargo test --locked --no-default-features --lib -- "${args[@]}"
+
+      - name: 沒有金鑰庫時設備金鑰照用、但不能讓別台看
+        shell: bash
+        run: env -u DBUS_SESSION_BUS_ADDRESS cargo test --locked --no-default-features --lib keystore::linux::no_store_tests -- --ignored --test-threads=1
+
   # 手機版：`launch` 這類只有電腦版才編的模組，手機版用到就編不過（0.2.3 發版時才發現，#788）。
   # 其他工作都編 Linux 目標，抓不到；這裡只檢查 Rust 能不能編，不打包、不簽章。目標和 release-play.mjs 相同（arm64），API 版本和 minSdk 相同（26）。
   android-check:

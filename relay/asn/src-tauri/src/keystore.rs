@@ -401,6 +401,34 @@ pub mod linux {
         }
     }
 
+    /// 沒有 Secret Service 的機器（無畫面 Linux）：設備金鑰照用（只靠 0600 檔），但**不能讓別台看這台**。
+    /// 小良哥定過「無畫面機器要本機明確打開才允許被看」；那個開關之後才做，這條先鎖住「沒打開、又沒金鑰庫 → 不能被看」。
+    /// CI 的 headless-test 在 dbus 之外、清掉 DBUS_SESSION_BUS_ADDRESS 跑；平常略過（開發機多半有金鑰庫）
+    #[cfg(test)]
+    mod no_store_tests {
+        use super::super::*;
+        use super::LinuxStore;
+        use std::os::unix::fs::PermissionsExt;
+
+        #[test]
+        #[ignore = "要在沒有 Secret Service 的環境跑：CI 的 headless-test 清掉 DBUS_SESSION_BUS_ADDRESS 跑"]
+        fn 沒有金鑰庫_設備金鑰照用_但不能讓別台看() {
+            assert!(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none(), "這條要在沒有 session bus 的環境跑");
+            let dir = tempfile::tempdir().unwrap();
+            assert_eq!(probe(&LinuxStore, dir.path()), Protection::FileOnly, "沒有金鑰庫＝只靠檔案權限");
+            let prot = crate::device_id::protector(dir.path());
+            let key = crate::device_id::load_or_create(dir.path(), &*prot).expect("沒有金鑰庫時設備金鑰照用");
+            assert!(!key.public_b64().is_empty());
+            let mode = std::fs::metadata(dir.path().join("device_key.bin")).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "金鑰檔只有本人讀得到");
+            assert!(!device_key_sealed(dir.path()), "沒有金鑰庫就不是包過的");
+            assert!(!crate::device_id::can_be_viewed_here(dir.path()), "沒打開、又沒金鑰庫：不能讓別台看");
+            // 再讀一次還是同一把（不會因為沒有金鑰庫就每次換身分）
+            let again = crate::device_id::load_or_create(dir.path(), &*prot).unwrap();
+            assert_eq!(again.public_b64(), key.public_b64());
+        }
+    }
+
     /// 真的 Secret Service（CI 用 dbus-run-session＋gnome-keyring-daemon 跑；平常略過）
     #[cfg(test)]
     mod tests {
