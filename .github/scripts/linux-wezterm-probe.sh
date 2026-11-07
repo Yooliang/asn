@@ -72,7 +72,8 @@ return {
   enable_wayland = false,
 }
 LUA
-cli() { "$WEZ" --config-file "$OUT/mux.lua" cli --no-auto-start --prefer-mux "$@"; }
+# cli 要連到我們指定的 socket：用環境變數 WEZTERM_UNIX_SOCKET（只靠 --config-file 時，這個版本的 cli 會去連預設的 $XDG_RUNTIME_DIR/wezterm/sock）
+cli() { WEZTERM_UNIX_SOCKET="$SOCK" "$WEZ" --config-file "$OUT/mux.lua" cli --no-auto-start --prefer-mux "$@"; }
 
 # 「啟動者」：模擬 ASN——它用 setsid 讓 mux-server 脫離自己再啟動，之後自己繼續活著（我們會殺它）
 (
@@ -89,8 +90,13 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 if [ "$up" != yes ]; then
-  note "起 mux-server（沒有 DISPLAY）" "✖ 起不來" "$(tail -3 mux.log | tr '\n' ' ' | cut -c1-300)"
-  note "mux.log" "見上傳的成品" "$(head -c 600 mux.log | tr '\n' ' ')"
+  note "起 mux-server（沒有 DISPLAY）" "✖ 連不上" "cli：$(head -c 300 list0.log | tr '
+' ' ')"
+  note "mux-server 程序在嗎" "$(pgrep -a wezterm-mux-server >/dev/null && echo 在 || echo 不在)" "pid $MUXPID；mux.log：$(head -c 300 mux.log | tr '
+' ' ')"
+  note "socket 檔" "$(ls -la "$SOCK" 2>&1 | head -1 | cut -c1-120)" "預設位置：$(ls -la /run/user/*/wezterm 2>&1 | tr '
+' ' ' | cut -c1-200)"
+  { pgrep -a wezterm; ls -laR "$OUT" /run/user 2>/dev/null | head -60; } > diag.log 2>&1
   exit 0
 fi
 note "起 mux-server（沒有 DISPLAY）" "✔" "pid $MUXPID，啟動者 pid $STARTER"
