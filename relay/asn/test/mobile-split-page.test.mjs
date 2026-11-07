@@ -3,7 +3,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ACCT_SETTING_KEYS, MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows } from '../ui/lib/mobile-settings.mjs'
-import { ACCT_SWITCH_REASON, ACCT_TABS, acctSwitchTargets, acctTabOf } from '../ui/lib/mobile-acct.mjs'
+import { ACCT_SWITCH_REASON, ACCT_TABS, acctSwitchTargets as targetsOf, acctTabOf, isListedSwitchTarget, isSwitchTarget } from '../ui/lib/mobile-acct.mjs'
+const SELF = 'PHONE'
+// 手機上一定知道自己是哪一台；原本的測試都在「認得出本機」的情況下
+const acctSwitchTargets = (devs, vendor, a, self = SELF) => targetsOf(devs, vendor, a, self)
 import { settingPage, normalizePage, acctPage } from '../ui/lib/mobile-fourth.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -73,7 +76,7 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   const js = read('ui/m.js'), html = read('ui/m.html'), css = read('ui/mobile.css')
   assert.match(js, /ACCT_SETTING_KEYS\.includes\(key\)\) void openAcct\(\{ tab: key \}\)/)
   assert.match(js, /tab: acctTabOf\(g\?\.tab\)/, '開頁時設分頁；從夥伴列表設備旁「選項」進來是設備')
-  assert.match(js, /const acctSwitchOn = async \(node, email\) => \{ await openAcctDevice\(node\); startAcctSwitch\(email\) \}/, '先開那台、等帳號讀回來，再進確認畫面（不另做一套切換）')
+  assert.match(js, /const acctSwitchOn = async \(node, email\) => \{ if \(!acctCanSwitchTo\(node\)\) return; await openAcctDevice\(node\); startAcctSwitch\(email\) \}/, '先開那台、等帳號讀回來，再進確認畫面（不另做一套切換；不能切到這支手機自己，#930）')
   assert.match(js, /return loadAcct\(key\)/, 'openAcctDevice 要把讀取的 promise 交出來，acctSwitchOn 才等得到')
   assert.match(html, /class="m-dv-seg"[^>]*role="tablist"/)
   assert.match(html, /v-for="t in ACCT_TABS"/)
@@ -87,4 +90,43 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-used', 'm-dv-sws', 'm-dv-swt']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
   // 畫面上沒有「設備與帳號」當作設置列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))
+})
+
+test('#930 帳號永遠不能切到這支手機自己：平台還沒讀到被當成電腦、帳號回報說它有這個帳號，都不列', () => {
+  const mine = { account: 'w@example.test' }
+  const claudeOn = (accounts) => ({ key: 'claude', switchable: true, switchHint: '', accounts })
+  const self = { key: SELF, label: '這支手機', kind: '電腦', self: false, vendors: [claudeOn([{ email: 'w@example.test', current: false }])] }
+  const other = { key: 'PC', label: '工作機', kind: '電腦', vendors: [claudeOn([{ email: 'w@example.test', current: false }])] }
+  assert.deepEqual(acctSwitchTargets([self, other], 'claude', mine).map(t => t.node), ['PC'], '節點代號等於本機就不列，不看 kind')
+  assert.deepEqual(acctSwitchTargets([{ ...self, self: true }, other], 'claude', mine).map(t => t.node), ['PC'])
+  assert.deepEqual(targetsOf([self, other], 'claude', mine, ''), [], '還認不出這支手機是哪一台：一律不給切換')
+  assert.equal(isSwitchTarget(other, SELF), true, '別台電腦照常能切')
+  assert.equal(isSwitchTarget(self, SELF), false)
+  assert.equal(isSwitchTarget({ key: 'OLD', kind: '手機' }, SELF), false, '別支手機也不行')
+  assert.equal(isSwitchTarget(other, ''), false)
+  assert.equal(isSwitchTarget(null, SELF), false)
+})
+
+test('#930 判斷分兩層：已隱藏的電腦細部頁照樣能切；帳號頁的「切換到…」才排掉已隱藏、已移除的', () => {
+  const hidden = { key: 'H', label: '藏起來的', kind: '電腦', hidden: true }
+  const removed = { key: 'X', label: '移除的', kind: '電腦', removed: true }
+  assert.equal(isSwitchTarget(hidden, SELF), true, '已隱藏的電腦一樣點得進細部頁，細部頁照樣能切')
+  assert.equal(isSwitchTarget(removed, SELF), true)
+  assert.equal(isListedSwitchTarget(hidden, SELF), false, '帳號頁不列已隱藏的')
+  assert.equal(isListedSwitchTarget(removed, SELF), false, '帳號頁不列已移除的')
+  assert.equal(isListedSwitchTarget({ key: 'PC', kind: '電腦' }, SELF), true)
+  assert.equal(isListedSwitchTarget({ key: SELF, kind: '電腦' }, SELF), false, '本機兩層都不行')
+  const claudeOn = { key: 'claude', switchable: true, switchHint: '', accounts: [{ email: 'w@example.test', current: false }] }
+  assert.deepEqual(acctSwitchTargets([{ ...hidden, vendors: [claudeOn] }, { ...removed, vendors: [claudeOn] }], 'claude', { account: 'w@example.test' }), [], '帳號頁不列已隱藏、已移除的')
+})
+
+test('#930 細部頁與送出也走同一個判斷：本機的細部頁不出現「切換」，送出前再擋一次', () => {
+  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  assert.match(html, /\(v\.switchable \|\| v\.switchHint\) && acctCanSwitchTo\(acctCur\.key\)/)
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(js, /const acctCanSwitchTo = node => isSwitchTarget\(/)
+  assert.match(js, /acctSwitchTargetsOf\(acctDevs\.value, vendor, a, info\.node\)/)
+  assert.match(js, /const acctSwitchOn = async \(node, email\) => \{ if \(!acctCanSwitchTo\(node\)\) return;/)
+  assert.match(js, /function startAcctSwitch\(email\) \{\s*if \(acctSw\.phase !== 'pick' \|\| !acctCanSwitchTo\(acctCur\.value\?\.key\)\) return/)
+  assert.match(js, /acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail \|\| !acctCanSwitchTo\(acctCur\.value\?\.key\)/)
 })
