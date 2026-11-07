@@ -4,6 +4,7 @@
 --   * **後台不決定 T 同不同意：** 同意只在 T 本機（每次跳 ASN 的系統對話框，或本人在 T 的 ASN 畫面對某台設「不用每次同意」）。
 --     後台只存 scope、原樣交給 T（pending 帶 scope），T 依本機設定決定接受或拒絕。scope 由兩端簽進握手，後台只轉交。
 --   * 上限分開算：看畫面每台 T 同時 3 個（照舊）；打字每台 T 同時 1 個。D 每小時發起 30 次（兩種合計，照舊）。
+--     同一台 T 的發起用 advisory lock 排隊，上限檢查才不會被同時發起繞過。
 --   * 到期兩種都最多 10 分鐘（照舊）。打字「閒置 2 分鐘就結束」看的是有沒有打字，後台看不到內容，由 T 本機判斷。
 --   * D 重開後再發起：只結束「同一對、同一個視窗、同一種」的舊那筆（開打字不會把正在看的那筆關掉）。
 --   * 通知本人的文字依 scope 寫清楚：打字＝可以在這台打任何字，包括回答權限框。
@@ -46,6 +47,8 @@ begin
     return jsonb_build_object('error', 'forbidden');
   end if;
   perform public.asn_relay_term_view_expire();
+  -- 同一台 T 的發起排隊做：不鎖的話，兩台 D 同時發起都會通過下面的上限檢查（打字每台 T 只能 1 個就沒用了）
+  perform pg_advisory_xact_lock(hashtext('term_view_start:' || p_to_node));
   if exists (select 1 from relay.term_views where id = p_id) then
     return jsonb_build_object('error', 'bad_request');   -- session id 不能重用
   end if;

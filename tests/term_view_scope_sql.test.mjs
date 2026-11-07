@@ -158,3 +158,15 @@ test('還原驗證：拿掉保護要變紅', { skip }, async () => {
   await start(b, 'input')
   assert.equal((await row(b, v.id)).status, 'ended', '沒看 scope，開打字會把看畫面那筆關掉')
 })
+
+test('發起：同一台 T 的發起先上鎖，再查上限（同時發起不能繞過「打字只能 1 個」）', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const sql = await readFile(new URL('../supabase/migrations/20261108100000_term_view_scope.sql', import.meta.url), 'utf8')
+  const body = sql.slice(sql.indexOf('p_expires_at timestamptz, p_scope text)'), sql.indexOf('-- 舊版（八個參數'))
+  const lock = body.indexOf("pg_advisory_xact_lock(hashtext('term_view_start:' || p_to_node))")
+  assert.ok(lock > 0, '九參數 start 要上鎖')
+  assert.ok(lock > body.indexOf('perform public.asn_relay_term_view_expire()'), '鎖在 expire 之後')
+  assert.ok(lock < body.indexOf('update relay.term_views'), '鎖在結束舊那筆之前')
+  assert.ok(lock < body.indexOf("'busy'"), '鎖在上限檢查之前')
+})
+
