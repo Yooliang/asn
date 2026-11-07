@@ -73,14 +73,14 @@ begin
     return jsonb_build_object('ok', true, 'notify', 'failed', 'bell_topics', '[]'::jsonb, 'send', v_res);
   end if;
   -- 同一次寄出的每一列（含分送給各設備的列）都標上種類；kind 只在這裡寫入
-  v_id := nullif(v_res ->> 'id', '')::uuid;
-  if v_id is not null then
-    update relay.messages set kind = v_kind
-      where from_node = p_node and kind is null and (id = v_id or fanout_id = v_id);
-  else
-    update relay.messages set kind = v_kind
-      where from_node = p_node and from_agent = v_agent and kind is null and created_at = now();
+  -- 用寄信結果的 id 精確定位：分送給各設備時 id 是第一列、其餘列的 fanout_id 等於它。
+  -- asn_relay_send_core 成功時一定回 id；萬一沒有，就丟例外讓整筆寄送跟著回滾，不留下沒有 kind 的通知
+  v_id := nullif(coalesce(v_res ->> 'id', v_res ->> 'fanout_id'), '')::uuid;
+  if v_id is null then
+    raise exception 'asn_relay_send_notice: send result has no id';
   end if;
+  update relay.messages set kind = v_kind
+    where from_node = p_node and kind is null and (id = v_id or fanout_id = v_id);
   v_topics := case
     when jsonb_typeof(v_res -> 'bell_topics') = 'array' then v_res -> 'bell_topics'
     when jsonb_typeof(v_res -> 'bell_topic') = 'string' then jsonb_build_array(v_res -> 'bell_topic')
