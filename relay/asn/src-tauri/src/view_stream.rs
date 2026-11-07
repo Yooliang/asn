@@ -545,10 +545,8 @@ mod tests {
     #[test]
     fn 守門_被看的那台每次查控制面都看本機還允不允許() {
         let lib = include_str!("lib.rs");
-        let port = lib.split("impl view_stream::TPort for LiveTPort {").nth(1).expect("有 LiveTPort").split("
-}").next().unwrap();
-        let allowed = port.split("fn allowed(").nth(1).expect("有 allowed").split("
-    }").next().unwrap();
+        let port = lib.split("impl view_stream::TPort for LiveTPort {").nth(1).expect("有 LiveTPort").split("\n}").next().unwrap();
+        let allowed = port.split("fn allowed(").nth(1).expect("有 allowed").split("\n    }").next().unwrap();
         assert!(allowed.contains("bridge::read_settings(") && allowed.contains(".allow_remote_launch"), "每次都重讀設定，不用快取");
     }
 

@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 pub const ASK_SECS: u64 = 60;
 pub const CANCELED: &str = "已取消，沒有開始";
 pub const TIMED_OUT: &str = "太久沒有確認，沒有開始";
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const FAILED: &str = "沒辦法確認是你本人，沒有開始";
 
 /// Hello 確認的結果：None＝這台沒有可用的 Hello，改用確認框

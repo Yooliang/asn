@@ -417,7 +417,7 @@ mod tests {
     fn 核心模組不得直接用_tauri() {
         // 視窗版專屬（lib.rs 用 cfg(feature = "gui") 掛上的模組與檔案）與兩個本來就要提到 tauri 的檔案
         const GUI_ONLY: &[&str] = &[
-            "lib.rs", "main.rs", "rt.rs", "headless.rs", "account.rs", "ads.rs", "tray.rs", "updater.rs", "wins.rs", "shot.rs", "tts.rs", "stt.rs", "usage.rs", "cloud_invite.rs", "android.rs", "android_update.rs",
+            "presence.rs", "lib.rs", "main.rs", "rt.rs", "headless.rs", "account.rs", "ads.rs", "tray.rs", "updater.rs", "wins.rs", "shot.rs", "tts.rs", "stt.rs", "usage.rs", "cloud_invite.rs", "android.rs", "android_update.rs",
             "claude_mod.rs", "claude_accounts.rs", "codex_accounts.rs", "dialog.rs", "desktop.rs", "tests.rs",
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
