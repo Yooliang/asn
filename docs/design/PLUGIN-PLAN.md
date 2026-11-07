@@ -7,7 +7,9 @@
 > - 版本切法：issue #935。
 > - 運行方式與登入：#931（開新夥伴「運行」四選項）、#933（0.2.16 裝原生 CLI）、#934（0.2.17 登入改經 pi）。
 >
-> 程式對照基準：`origin/main` 的 `812c982e`（2026-11-06）。**注意 main 當時還沒有 0.2.9 Linux 終端服務與 0.2.11 FCM 的程式**（`relay/asn/package.json` 版本字串仍是 0.2.6，Rust 端搜不到 FCM），所以 0.2.25、0.2.26 兩節裡對那兩塊的描述是「依排程推斷」，開工前要用屆時的 main 重對一次。
+> 版號註（11-08）：撰寫時 Linux 排在 0.2.9，之後別台打字提前成 0.2.9、Linux 改成 0.2.10，本文已照改（見 `TERMINAL-PLAN-0.2.md` 版號表）。
+>
+> 程式對照基準：`origin/main` 的 `812c982e`（2026-11-06）。**注意 main 當時還沒有 0.2.10 Linux 終端服務與 0.2.11 FCM 的程式**（`relay/asn/package.json` 版本字串仍是 0.2.6，Rust 端搜不到 FCM），所以 0.2.25、0.2.26 兩節裡對那兩塊的描述是「依排程推斷」，開工前要用屆時的 main 重對一次。
 >
 > 出處格式：`檔案:行號`，路徑省略 `relay/asn/` 前綴者會寫明；行號都是上述基準的行號，之後會漂移。標「（推斷）」的是沒能在程式裡查實的地方。
 
@@ -19,7 +21,7 @@
 
 1. 把「各家 AI 廠商的差異」從散落在十幾個檔案的 `if profile == "grok"` 收攏成**一家一份適配**，新增或修改一家廠商只動它自己的檔案。
 2. 把「前端傳輸」切乾淨，讓收發信核心（AsnCore）能用一頁契約說清楚它到底依賴什麼，之後不再被周邊功能拖著長。
-3. 通知管道、平台差異（開窗、程序、終端服務）也各有一個介面，讓 0.2.9 Linux、0.2.11 FCM 搬進去之後不再寫死在主流程。
+3. 通知管道、平台差異（開窗、程序、終端服務）也各有一個介面，讓 0.2.10 Linux、0.2.11 FCM 搬進去之後不再寫死在主流程。
 4. **每一版行為不變、驗完就發**；使用者在這七版之間不應察覺任何差別（除了本來就排好的新功能）。
 
 ### 1.2 非目標
@@ -584,7 +586,7 @@ pub struct Notification { pub kind: NoticeKind, pub title: String, pub deep_link
 - Windows 開窗：`launch/local.rs:297`（`start_window_windows`）、`:581`（`start_console_window_windows`）；`launch/win_term.rs`（`WinTermHost` trait `:114`）、`launch/pi_term.rs`（`PiTermHost` trait `:15`）：**兩個長得很像的 trait 並存**，0.2.26 合併成一個。
 - Unix 開窗：`local.rs:640`（`start_window_unix`）、`:674`（`pick_linux_terminal`）。
 - 終端服務（WezTerm mux）：`launch/mux.rs`、`wezterm.rs`、`mux_watch.rs`、`term_live_mux.rs`，整片用 `#[cfg(desktop)]` 圈起來（`launch/mod.rs:25-38`）。
-- Linux 終端服務（0.2.9）：main 上尚未見到完整實作；已有 `test/launch-linux.test.mjs`、`docs/design/LINUX-HEADLESS.md`、`.github/workflows/asn-linux-build.yml`。開工前以屆時 main 為準。
+- Linux 終端服務（0.2.10）：main 上尚未見到完整實作；已有 `test/launch-linux.test.mjs`、`docs/design/LINUX-HEADLESS.md`、`.github/workflows/asn-linux-build.yml`。開工前以屆時 main 為準。
 
 介面草案：
 
@@ -600,7 +602,7 @@ pub trait PlatformHost: Send + Sync {
 - 終端服務**核心**（mux 生命週期、窗格對照表、權限檢查）不搬；搬的是「在這個作業系統上怎麼把它裝起來、接回來」。
 - `kill_owned` 只認 ASN 自己記錄過的程序（沿用現行 pid 帳本規則）。
 
-測試與行為不變：Windows 既有 `win_term.rs`／`pi_term.rs` 測試（含 `FakeHost`）合併後數量不減；新增 Linux 版對同一組 `WindowSpec` 的 argv 黃金測試；守門——`PlatformHost` 簽名不回傳窗格或程序控制代碼。實機：Windows 工作機、Linux 一台（有桌面）、Linux 無桌面（若 0.2.9 含）各走：開夥伴→關 ASN→重開認回→停止。回退：revert；Windows 路徑維持原函式至下一版再刪。預估：新增 400～700 行、搬動約 1200 行（推斷），1～2 位開發員約 1.5 週。
+測試與行為不變：Windows 既有 `win_term.rs`／`pi_term.rs` 測試（含 `FakeHost`）合併後數量不減；新增 Linux 版對同一組 `WindowSpec` 的 argv 黃金測試；守門——`PlatformHost` 簽名不回傳窗格或程序控制代碼。實機：Windows 工作機、Linux 一台（有桌面）、Linux 無桌面（若 0.2.10 含）各走：開夥伴→關 ASN→重開認回→停止。回退：revert；Windows 路徑維持原函式至下一版再刪。預估：新增 400～700 行、搬動約 1200 行（推斷），1～2 位開發員約 1.5 週。
 
 > **衝突提醒**：0.2.26 與 0.2.19～0.2.22 都會動 `term.rs`（6687 行）與 `local.rs`。這幾版不可同時進行；見 §9.2。
 
@@ -659,7 +661,7 @@ pub trait PlatformHost: Send + Sync {
 | 5 | 守門測試只是形式，掃字串容易被繞過 | 守門以**型別簽名**為主（適配函式簽名裡根本沒有金鑰、窗格型別），字串掃描為輔；審查清單固定列「新增的適配方法簽名」一項 |
 | 6 | 實機回歸成本高（多廠商×多平台×手機電腦），拖慢發版 | 驗收清單文件化、可分工；每版只驗該版動到的廠商＋一組共通煙霧測試；`smoke:ui` 與 `cargo test` 在 CI 跑 |
 | 7 | 手機與電腦共用核心，改一邊另一邊壞 | 0.2.18 起契約測試同時載入 `m.js` 與 `list.js` 的傳輸物件；每版驗收含手機 |
-| 8 | 還有一批在途功能（#931、0.2.9、0.2.11、0.2.12）同時改這些檔 | §9.2 的排程；每版開工前重對 main，更新本文件的行號與推斷處 |
+| 8 | 還有一批在途功能（#931、0.2.10、0.2.11、0.2.12）同時改這些檔 | §9.2 的排程；每版開工前重對 main，更新本文件的行號與推斷處 |
 | 9 | 版本表被打亂（某版超時、拆版） | 本計畫每版自成一件事、可獨立回退；0.2.20～0.2.22 已預先拆三版（§6） |
 | 10 | 畫面判斷規則會隨各家 CLI 版本變動（既有問題） | 不在這輪解決；搬進適配後單家改動範圍縮小，且樣本測試集中，是順帶改善 |
 | 11 | 特徵測試不足，「行為不變」變成空話（審查指出 agy／grok／codex 無畫面樣本、ACP 兩檔零測試、`perm_remote` 未涵蓋） | §5.0 前置工作列為進版條件；黃金檔獨立 PR 先合 |
