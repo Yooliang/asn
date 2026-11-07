@@ -219,8 +219,10 @@ export function createReportPrefetch({ read, max = REPORT_PREFETCH_MAX, gapMs = 
   return async function run(nodes, onResult) {
     const t = now()
     if (t - lastAt < gapMs) return false
-    lastAt = t
     const queue = [...new Set((Array.isArray(nodes) ? nodes : []).filter(n => typeof n === 'string' && n))]
+    // 沒有要讀的節點（例如名單還沒載入）就不記時間：不然剛開 App 就進設備頁，接下來一分鐘都不會再讀、雲端標示一分鐘出不來
+    if (!queue.length) return true
+    lastAt = t
     const worker = async () => {
       while (queue.length) {
         const node = queue.shift()

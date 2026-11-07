@@ -63,3 +63,16 @@ test('守門：手機進設備頁時呼叫預讀（只在 openAcctNow，一次�
   assert.equal(src.split('prefetchReports()').length - 1, 2, '定義一次、呼叫一次')
   assert.match(src, /if \(epoch === acctEpoch && !acctSw\.reports\[node\]\) acctSw\.reports\[node\] = r/)
 })
+
+test('第一次進設備頁時沒有可讀的節點（名單還沒載入）→ 不記時間；一分鐘內名單載入後再進會讀', async () => {
+  let t = 5_000_000, reads = 0
+  const run = createReportPrefetch({ read: async () => { reads++; return {} }, now: () => t, log: () => {} })
+  assert.equal(await run([], () => {}), true, '沒有可讀的：沒發任何讀取')
+  assert.equal(reads, 0)
+  t += 5_000
+  assert.equal(await run(['A', 'J'], () => {}), true, '一分鐘內，但上次沒讀到任何一台：照讀')
+  assert.equal(reads, 2)
+  t += 5_000
+  assert.equal(await run(['A', 'J'], () => {}), false, '這次真的讀過了：一分鐘內不重讀')
+  assert.equal(reads, 2)
+})
