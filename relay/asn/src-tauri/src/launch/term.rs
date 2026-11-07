@@ -982,6 +982,19 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.wez(&dir).get_text_escapes(&snap.window.sock, snap.pane_id)
     }
 
+    /// 讀歷史（B3）：帶顏色、往上 `lines` 行的捲動紀錄，連同同一時刻的游標與大小。一次性呼叫，不碰每幅輪詢用的狀態。
+    /// 回的文字還沒過濾、沒截斷（由 `term_view::finish_history` 做）。行數夾在 1..=MAX_READ_LINES
+    pub fn view_history(&self, id: &str, lines: u32) -> Result<(String, super::term_view::ViewMeta), String> {
+        let lines = super::term_view::clamp_history_lines(Some(lines)) as i32;
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let text = w.get_text_escapes_history(&snap.window.sock, snap.pane_id, lines)?;
+        let panes = w.list(&snap.window.sock)?;
+        let p = panes.iter().find(|p| p.pane_id == snap.pane_id).ok_or("這個窗格已經不在了")?;
+        Ok((text, super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows }))
+    }
+
     /// 看畫面用的游標與大小。查不到這個窗格就回錯
     pub fn view_meta(&self, id: &str) -> Result<super::term_view::ViewMeta, String> {
         let snap = self.view_snapshot(id)?;
@@ -5637,6 +5650,37 @@ mod tests {
             let before = rig.runner.args().len();
             assert!(rig.svc.view_text(&id).is_err(), "mux 換過");
             assert!(rig.runner.args().iter().skip(before).all(|a| !a.iter().any(|x| x == "get-text")), "不對新的 mux 讀畫面");
+        }
+
+        #[test]
+        fn 讀歷史_帶顏色和起始行_回文字和同一時刻的大小游標() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.screen.borrow_mut() = "舊\n\x1b[31m新".into();
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":3,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            let (text, meta) = rig.svc.view_history(&id, 200).unwrap();
+            assert_eq!(text, "舊\n\x1b[31m新");
+            assert_eq!(meta, crate::launch::term_view::ViewMeta { cursor_x: 3, cursor_y: 4, cols: 120, rows: 40 });
+            let gets: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "--start-line=-200")).collect();
+            assert_eq!(gets[0], vec!["cli", "--no-auto-start", "get-text", "--escapes", "--pane-id", "9", "--start-line=-200"]);
+        }
+
+        #[test]
+        fn 讀歷史_行數夾在範圍內_不認得的編號和換過的_mux_拒絕() {
+            let (rig, paths) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":0,"cursor_y":0,"size":{"rows":40,"cols":120}}]"#.into();
+            for (given, sent) in [(0u32, 200), (1, 1), (500, 500), (501, 500), (u32::MAX, 500)] {
+                rig.svc.view_history(&id, given).unwrap();
+                let want = format!("--start-line=-{sent}");
+                let last = rig.runner.args().into_iter().rev().find(|a| a.iter().any(|x| x == "get-text")).unwrap();
+                assert!(last.iter().any(|x| x == &want), "{given} 應送 {want}，實際 {last:?}");
+            }
+            assert!(rig.svc.view_history("nope", 200).is_err());
+            std::fs::write(&paths.pid, format!("{} 2000", MUX_PID + 1)).unwrap();
+            let before = rig.runner.args().len();
+            assert!(rig.svc.view_history(&id, 200).is_err(), "mux 換過");
+            assert!(rig.runner.args().iter().skip(before).all(|a| !a.iter().any(|x| x == "get-text")));
         }
 
         #[test]

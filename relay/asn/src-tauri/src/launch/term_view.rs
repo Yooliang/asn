@@ -136,6 +136,63 @@ pub fn split_chunks(text: &str, max: usize) -> Vec<&str> {
     out
 }
 
+/// 讀歷史預設行數
+pub const HISTORY_DEFAULT_LINES: u32 = 200;
+/// 讀歷史回傳文字的位元組上限（超過就留最後的整行）
+pub const HISTORY_MAX_BYTES: usize = 1024 * 1024;
+
+/// 讀歷史的行數：沒給或小於 1 取預設 200，大於 `MAX_READ_LINES`（500）取 500
+pub fn clamp_history_lines(lines: Option<u32>) -> u32 {
+    match lines {
+        None | Some(0) => HISTORY_DEFAULT_LINES,
+        Some(n) => n.min(super::term::MAX_READ_LINES as u32),
+    }
+}
+
+/// 這個觀看編號是不是「開著、而且是這個視窗開的」。是就回它看的窗格編號；否則回錯。
+/// `open` 的值是（視窗標籤、窗格編號、其他）。讀歷史與打字用同一個判斷
+pub fn view_pane_for_window<T>(open: &std::collections::HashMap<u64, (String, String, T)>, view_id: u64, label: &str) -> Result<String, String> {
+    match open.get(&view_id) {
+        Some((l, id, _)) if l == label => Ok(id.clone()),
+        _ => Err("這個畫面沒有開著".into()),
+    }
+}
+
+/// 歷史讀取的結果（B3）：`text` 最後 `meta.rows` 行是目前畫面，之前是歷史；`lines` 是實際請求的行數；
+/// `truncated` 為真＝太大，只留了最後的整行
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ViewHistory {
+    pub text: String,
+    pub lines: u32,
+    pub truncated: bool,
+    pub meta: ViewMeta,
+}
+
+/// 超過 `max_bytes` 就留最後的整行（不從行中間切）。回（文字，有沒有截）
+pub fn truncate_tail_lines(text: &str, max_bytes: usize) -> (String, bool) {
+    if text.len() <= max_bytes {
+        return (text.to_string(), false);
+    }
+    let mut start = text.len() - max_bytes;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    // 切點剛好在行首（前一個字元是換行）就不用再丟；否則丟掉被切到的那半行
+    if !text[..start].ends_with('\n') {
+        start = match text[start..].find('\n') {
+            Some(i) => start + i + 1,
+            None => text.len(),
+        };
+    }
+    (text[start..].to_string(), true)
+}
+
+/// 把讀到的歷史變成回給畫面的樣子：一定先過 `filter_frame`（歷史同樣是外部資料），再截到上限
+pub fn finish_history(raw: &str, lines: u32, meta: ViewMeta) -> ViewHistory {
+    let (text, truncated) = truncate_tail_lines(&filter_frame(raw), HISTORY_MAX_BYTES);
+    ViewHistory { text, lines, truncated, meta }
+}
+
 /// 等著送進窗格的字：先進先出、一次一支。積壓時把相鄰的同類（都是打字、或都是貼上）合併成一支，
 /// 打字和貼上不混在一起（貼上要讓 WezTerm 依程式的模式處理）。積壓太多就擋住新的，**不丟舊的字**
 #[derive(Default)]
@@ -359,6 +416,68 @@ mod tally_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 歷史行數_夾在_1_到_500_沒給或_0_取預設() {
+        assert_eq!(clamp_history_lines(None), 200);
+        assert_eq!(clamp_history_lines(Some(0)), 200);
+        assert_eq!(clamp_history_lines(Some(1)), 1);
+        assert_eq!(clamp_history_lines(Some(200)), 200);
+        assert_eq!(clamp_history_lines(Some(500)), 500);
+        assert_eq!(clamp_history_lines(Some(501)), 500);
+        assert_eq!(clamp_history_lines(Some(i32::MAX as u32)), 500);
+        assert_eq!(clamp_history_lines(Some(u32::MAX)), 500);
+    }
+
+    #[test]
+    fn 歷史_沒開的編號和別的視窗的編號被拒() {
+        let mut open: std::collections::HashMap<u64, (String, String, ())> = Default::default();
+        open.insert(7, ("main".into(), "pane-a".into(), ()));
+        assert_eq!(view_pane_for_window(&open, 7, "main").unwrap(), "pane-a");
+        assert!(view_pane_for_window(&open, 8, "main").is_err(), "沒開的編號");
+        assert!(view_pane_for_window(&open, 7, "other").is_err(), "別的視窗的編號");
+    }
+
+    #[test]
+    fn 歷史_文字一定過濾_危險序列拿掉_顏色留下_帶大小游標() {
+        let raw = "舊\n\x1b[31m紅\x1b[0m\x1b]52;c;QUJD\x07\x1b[6n\x1b[10;10H\x1b]0;標題\x07尾";
+        let h = finish_history(raw, 200, meta());
+        assert_eq!(h.text, filter_frame(raw));
+        assert!(h.text.contains("\x1b[31m紅"));
+        for bad in ["\x1b]52", "\x1b[6n", "\x1b[10;10H", "\x1b]0;", "\x07"] {
+            assert!(!h.text.contains(bad), "{bad:?} 沒濾掉：{:?}", h.text);
+        }
+        assert_eq!(h.lines, 200);
+        assert_eq!(h.meta, meta());
+        assert!(!h.truncated);
+    }
+
+    #[test]
+    fn 歷史_太大只留最後的整行並標記截斷() {
+        let text = "一二三\n四五六\n七八九\n";
+        assert_eq!(truncate_tail_lines(text, text.len()), (text.to_string(), false));
+        // 上限剛好落在行中間：丟掉被切到的那行
+        let (t, cut) = truncate_tail_lines(text, "七八九\n".len() + 2);
+        assert!(cut);
+        assert_eq!(t, "七八九\n");
+        // 上限剛好落在行首：整行都留
+        let (t, cut) = truncate_tail_lines(text, "四五六\n七八九\n".len());
+        assert!(cut);
+        assert_eq!(t, "四五六\n七八九\n");
+        // 切在中文字中間也不能壞字元
+        let (t, _) = truncate_tail_lines(text, "七八九\n".len() + 1);
+        assert_eq!(t, "七八九\n");
+        // 一行就超過上限：整行丟掉
+        assert_eq!(truncate_tail_lines("甲乙丙丁戊", 4), (String::new(), true));
+        // 經過 finish_history：超過 1 MiB 要截、標記為真、留的是尾端
+        let big = "x".repeat(99) + "\n";
+        let raw = big.repeat(HISTORY_MAX_BYTES / 100 + 50) + "最後一行\n";
+        let h = finish_history(&raw, 500, meta());
+        assert!(h.truncated);
+        assert!(h.text.len() <= HISTORY_MAX_BYTES);
+        assert!(h.text.ends_with("最後一行\n"));
+        assert!(h.text.lines().all(|l| l.len() == 99 || l == "最後一行"));
+    }
 
     #[test]
     fn 放行顏色_字元集_換行_中文() {

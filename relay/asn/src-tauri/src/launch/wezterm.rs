@@ -920,6 +920,12 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &["get-text".to_string(), "--escapes".into(), "--pane-id".into(), pane_id.to_string()])
     }
 
+    /// 帶顏色、連同往上 `lines` 行的捲動紀錄（`--start-line=-lines`）。只給「讀歷史」一次性用，每幅輪詢不走這支。
+    /// 回的文字最後 rows 行是目前畫面，之前是歷史；內容同樣是外部資料，用之前要過濾
+    pub fn get_text_escapes_history(&self, sock: &Path, pane_id: u64, lines: i32) -> Result<String, String> {
+        self.cli(sock, &["get-text".to_string(), "--escapes".into(), "--pane-id".into(), pane_id.to_string(), format!("--start-line=-{lines}")])
+    }
+
     pub fn get_text(&self, sock: &Path, pane_id: u64, start_line: Option<i32>) -> Result<String, String> {
         let mut args: Vec<String> = vec!["get-text".into(), "--pane-id".into(), pane_id.to_string()];
         if let Some(n) = start_line {
