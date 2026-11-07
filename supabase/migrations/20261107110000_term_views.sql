@@ -7,7 +7,9 @@
 --   * **沒有自由欄位：** D 只能回報固定狀態（watching、paused、ended），T 只能結束。所以沒有 D 傳內容給 T 的路。
 --   * 同時最多 3 個；同一對加同一視窗只留最新一筆（再發起就結束舊的）；到期最多 10 分鐘；D 太久沒回報，T 看得到 viewer_stale，自己停。
 --   * 結束就清掉一次性公鑰、簽章、topic，只留誰、哪台、哪個視窗、起訖。一天後刪除。
--- 先不用：舊版不會呼叫這幾個動作。Hello 接上之前，電腦端不會真的發起。
+--   * 0.2.8 改版：不再手動配對。start 回 T 的設備公鑰（to_pub）、pending 帶 D 的設備公鑰（from_pub），都從 device_keys 查、不存兩份；
+--     兩台各自第一次記住對方的公鑰（TOFU），之後對不上就拒絕。沒上傳過公鑰的一方不能發起、也不會被領到。
+-- 先不用：舊版不會呼叫這幾個動作。
 -- 回復：drop 這些函式與 relay.term_views。
 begin;
 
@@ -61,6 +63,7 @@ as $function$
 declare
   v_topic text;
   v_bell text;
+  v_to_pub text;
 begin
   if p_signed_user is null or not public.asn_user_owns_node(p_signed_user, p_actor) then
     return jsonb_build_object('error', 'forbidden');
@@ -93,10 +96,15 @@ begin
   if not found then
     return jsonb_build_object('error', 'not_found');
   end if;
+  -- T 的設備公鑰（D 第一次連就記住，之後要對得上）；舊版還沒上傳就不能看
+  select sign_pub into v_to_pub from relay.device_keys where node = p_to_node;
+  if not found then
+    return jsonb_build_object('error', 'no_key');
+  end if;
   v_topic := 'tv_' || replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
   insert into relay.term_views (id, from_node, to_node, window_name, topic, d_eph_pub, d_sig, expires_at)
     values (p_id, p_actor, p_to_node, p_window_name, v_topic, p_d_eph_pub, p_d_sig, p_expires_at);
-  return jsonb_build_object('id', p_id, 'topic', v_topic, 'bell_topic', v_bell);
+  return jsonb_build_object('id', p_id, 'topic', v_topic, 'bell_topic', v_bell, 'to_pub', v_to_pub);
 end;
 $function$;
 
@@ -109,10 +117,11 @@ declare
   v_act jsonb;
 begin
   perform public.asn_relay_term_view_expire();
-  select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'from_node', v.from_node, 'from_name', n.name, 'window_name', v.window_name, 'topic', v.topic,
+  -- 帶上 D 的設備公鑰（T 第一次連就記住，之後要對得上）；D 沒上傳過公鑰的請求不給（T 也驗不了）
+  select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'from_node', v.from_node, 'from_name', n.name, 'from_pub', k.sign_pub, 'window_name', v.window_name, 'topic', v.topic,
       'd_eph_pub', v.d_eph_pub, 'd_sig', v.d_sig, 'expires_s', extract(epoch from v.expires_at)::bigint) order by v.created_at), '[]'::jsonb)
     into v_req
-    from relay.term_views v join relay.nodes n on n.id = v.from_node
+    from relay.term_views v join relay.nodes n on n.id = v.from_node join relay.device_keys k on k.node = v.from_node
     where v.to_node = p_node and v.status = 'requested';
   select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'status', v.status, 'viewer_stale', v.viewer_seen_at < now() - interval '90 seconds')), '[]'::jsonb)
     into v_act

@@ -34,7 +34,9 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001', T2 = 'bbbbbbbb-0000-0000-0000
 const D = 'wrk9b2', Z = 'hom7a1', Q = 'qqq3c4', X = 'lap5d6'
 const PUB = 'a'.repeat(43), TSIG = 'b'.repeat(86), DSIG = 'c'.repeat(342)
 
-async function boot({ mutate } = {}) {
+const KEYS = { [D]: 'D'.repeat(43), [Z]: 'Z'.repeat(43), [X]: 'X'.repeat(43), [Q]: 'Q'.repeat(43) }
+
+async function boot({ mutate, noKeys = [] } = {}) {
   const db = new PGlite()
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
@@ -58,6 +60,10 @@ async function boot({ mutate } = {}) {
       ('${Z}', '家用機', 'k2', 'bell-z', 'member', '${T1}', '${U1}', 'active', '電腦'),
       ('${X}', '筆電', 'k4', 'bell-x', 'member', '${T1}', '${U1}', 'active', '電腦'),
       ('${Q}', '財務室', 'k3', 'bell-q', 'member', '${T2}', '${U2}', 'active', '電腦');`)
+  // 0.2.8 改版：設備公鑰從 device_keys 查（TOFU），預設四台都上傳過；noKeys 指定不上傳的
+  for (const n of [D, Z, X, Q].filter(n => !noKeys.includes(n))) {
+    await db.query('select public.asn_relay_device_key_publish($1, $2)', [n, KEYS[n]])
+  }
   return db
 }
 async function rpc(db, fn, args = {}) {
@@ -236,4 +242,19 @@ test('還原驗證：拿掉保護要變紅', { skip }, async () => {
   const b = await boot({ mutate: { [MIG]: s => s.replace(`p_state not in ('watching', 'paused', 'ended')`, `false`) } })
   const c = await start(b)
   assert.equal((await report(b, c.id, '隨便寫')).status, 'requested', '沒有檢查時，不認得的狀態會直接過')
+})
+
+test('TOFU：start 回 T 的設備公鑰；pending 帶 D 的設備公鑰；沒上傳過公鑰的不能發起、也不會被領到', { skip }, async () => {
+  const db = await boot()
+  const s = await start(db)
+  assert.equal(s.to_pub, KEYS[Z], 'D 拿到 T 的公鑰（第一次記住）')
+  const p = await pending(db)
+  assert.equal(p.requests[0].from_pub, KEYS[D], 'T 拿到 D 的公鑰')
+  const noT = await boot({ noKeys: [Z] })
+  assert.equal((await start(noT)).error, 'no_key', 'T 還沒上傳公鑰（舊版）就不能看')
+  const noD = await boot({ noKeys: [D] })
+  assert.ok((await start(noD)).id, '後台允許 D 發起')
+  assert.equal((await pending(noD)).requests.length, 0, 'D 沒有公鑰：T 驗不了，請求不給 T')
+  const t = await db.query(`select count(*)::int c from information_schema.columns where table_schema = 'relay' and table_name = 'term_views' and column_name like '%sign_pub%'`)
+  assert.equal(t.rows[0].c, 0, '公鑰不存兩份，都從 device_keys 查')
 })
