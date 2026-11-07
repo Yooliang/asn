@@ -278,3 +278,14 @@ test('守門：貼上鍵不被 xterm 吃掉（Ctrl+V、Ctrl+Shift+V、Shift+Inse
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(src.includes('attachCustomKeyEventHandler(termKeyHandler)'), '要接上 xterm')
 })
+
+test('守門 901b-noscroll：終端畫面直捲軸隱藏、回到訊息按鈕在 stage 容器內', () => {
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.match(css, /\.term-view-screen::-webkit-scrollbar\{width:0;/, '直捲軸寬度為 0')
+  assert.match(css, /\.term-view-screen\{[^}]*overflow:auto/, '仍可捲動')
+  assert.doesNotMatch(css, /\.term-view-back\{[^}]*right:20px/, '按鈕不再為閃捲軸留 20px')
+  assert.match(css, /\.term-view-stage\{position:relative;/)
+  const m = view.match(/<div class="term-view-stage">([\s\S]*?)\n  <\/div>/)
+  assert.ok(m && m[1].includes('term-view-back') && m[1].includes('term-view-screen'), '按鈕與畫面都在 stage 內')
+})
