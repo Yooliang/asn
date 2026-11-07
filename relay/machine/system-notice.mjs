@@ -54,7 +54,7 @@ export function isSystemNotice(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount 
 
 // 內文開頭的 [收發室] 標記（舊版橋寄的通知）：同樣只對截止時間以前的信有效
 export function hasLegacyBodyPrefix(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount = true } = {}) {
-  if (!mail || typeof mail !== 'object' || sameAccountOf(mail, sameAccount) === false || !legacyApplies(mail, until)) return false
+  if (!mail || typeof mail !== 'object' || sameAccount === false || !legacyApplies(mail, until)) return false
   return String(mail.body ?? '').trimStart().startsWith(LEGACY_BODY_PREFIX)
 }
 
