@@ -32,6 +32,8 @@ import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
+import { handlePushAction, notifyPush, PUSH_ACTIONS } from "../_shared/push_ctl.ts";
+import { createFcm } from "../_shared/push_fcm.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
@@ -57,6 +59,9 @@ async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// 手機推播（#797）：沒設秘密 FCM_SERVICE_ACCOUNT 就是 null，一律安靜不送（也不影響寄信）。見 _shared/push_ctl.ts
+const fcm = createFcm({ get: (k) => Deno.env.get(k) });
 
 // Doorbell: broadcast carries no mail content.
 // Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
@@ -384,6 +389,8 @@ Deno.serve(async (req) => {
     if (data?.error) return json(400, { error: data.error });
     if (data?.notify === "failed" || data?.notify === "rate_limited") console.warn("waiting_notice notify", me.id, data.notify);
     for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
+    // 夥伴在等你：通知真的寄出了才推；收件人＝金鑰所屬節點的擁有者（伺服器端查）
+    if (data?.notify === "sent") signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "waiting", me.id, null));
     return json(200, { ok: true, notify: data?.notify ?? "skipped" });
   }
   // 雲端代理啟動時金鑰對到的節點和設定的不同（#832）：停下來之前通知本人。節點一律取自金鑰，代理只帶設定的節點代號
@@ -592,6 +599,8 @@ Deno.serve(async (req) => {
     await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
     for (const t of bellTopicsOf(sent)) await ring(t);
+    // 寄給本人（回傳有 fanout 的那條路）：手機 App 關著時推一則固定文字。收件人由伺服器端用這封信查，背景跑，失敗不影響寄信
+    if (typeof (sent as { fanout?: unknown }).fanout === "number") signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, sent.id));
     await touchActive(rpc, me.id, str(b.from_agent));   // 最後活動時間（#397）：背景寫入，失敗不影響寄信
     return json(200, { id: sent.id });
   }
@@ -676,6 +685,13 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPair = DEVICE_PAIR_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleDevicePairAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPair);
+    return json(r.status, r.body);
+  }
+  // 手機推播權杖（#797，見 _shared/push_ctl.ts）：節點金鑰；權杖只交給資料庫，不回傳、不寫 log
+  if (action && PUSH_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const r = await handlePushAction({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, action, raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {});
     return json(r.status, r.body);
   }
   // 別台看畫面的控制面（見 _shared/term_view_ctl.ts）：看的那台要本人簽章，被看的那台用節點金鑰
