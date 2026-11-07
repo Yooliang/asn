@@ -5,6 +5,7 @@
 // 所以 irori-api/relay.ts 的呼叫端不用關心走的是哪一條路。租戶一律由呼叫端（登入者的帳號）決定，不接受任何來自 body 的租戶或節點。
 
 import { expectsReplyArgs } from "./expects_reply.ts";
+import { badSenderName } from "./reserved_sender.ts";
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
@@ -66,6 +67,7 @@ export async function nodeAction(deps: OpsDeps, who: Actor, action: string, body
     }
     case "send": {
       if (typeof b.to_node !== "string" || typeof b.body !== "string") return err(400, "bad_request");
+      if (badSenderName(b.from_agent, who.node)) return err(400, "bad_request"); // 寄件名保留字檢查（見 reserved_sender.ts）
       const rt = typeof b.reply_to === "string" && UUID_RE.test(b.reply_to) ? b.reply_to : null;
       const er = expectsReplyArgs(b.expects_reply); // 寄件人明說要不要等回信（選填 boolean）；型別不對回 400
       if (!er) return err(400, "bad_expects_reply");

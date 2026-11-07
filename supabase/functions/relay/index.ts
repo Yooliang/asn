@@ -33,6 +33,7 @@ import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
 import { handlePushAction, notifyPush, PUSH_ACTIONS } from "../_shared/push_ctl.ts";
+import { badSenderName } from "../_shared/reserved_sender.ts";
 import { createFcm } from "../_shared/push_fcm.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
@@ -567,6 +568,8 @@ Deno.serve(async (req) => {
   if (action === "send" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || typeof b.to_node !== "string" || typeof b.body !== "string") return json(400, { error: "bad_request" });
+    // 寄件名保留字檢查：用戶端不能把信掛在系統通知的名字下（見 _shared/reserved_sender.ts）
+    if (badSenderName(b.from_agent, me.id)) return json(400, { error: "bad_request" });
     const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 100) : null);
     const rt = typeof b.reply_to === "string" && UUID.test(b.reply_to) ? b.reply_to : null;
     // expects_reply：寄件人明說要不要等回信（選填 boolean，給了就存；型別不對回 400）。沒給就不帶這個參數，信的欄位是 null（舊寄件工具）
