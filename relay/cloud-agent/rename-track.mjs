@@ -17,9 +17,54 @@ export function readNames(file) {
   } catch { return {} }
 }
 
-export function writeNames(file, names) {
+/** 不帶第三個參數時保留檔案裡原有的舊名紀錄（只改現名對照的呼叫端不會把舊名洗掉） */
+export function writeNames(file, names, old = readOldNames(file)) {
   const entries = Object.entries(names).slice(-NAMES_MAX)
-  writeFileAtomic(file, JSON.stringify({ version: 1, names: Object.fromEntries(entries) }))
+  writeFileAtomic(file, JSON.stringify({ version: 1, names: Object.fromEntries(entries), old }))
+}
+
+// ---------- 舊名轉投（#746）：改名後 7 天內，寄到舊名的信算給改名後的那位，不給預設那位 ----------
+// 規則和電腦版 names.rs 一致：保留 7 天、每位最多 5 個舊名。記在 agent-names.json 的 old（[{ id, from, to, at }]），
+// 只在名單回報成功、真的接上改名之後才記（detectRenames 跳過的不記，因為那些不確定是誰）。
+
+export const OLD_KEEP_MS = 7 * 24 * 60 * 60 * 1000
+export const OLD_PER_ID = 5
+
+export function readOldNames(file) {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const old = v && typeof v === 'object' && !Array.isArray(v) ? v.old : null
+    if (!Array.isArray(old)) return []
+    return old.filter(o => o && typeof o.id === 'string' && o.id && typeof o.from === 'string' && o.from && typeof o.to === 'string' && o.to && Number.isFinite(o.at))
+  } catch { return [] }
+}
+
+/** 只留 7 天內的；每位（編號）只留最新的 5 筆；結果照時間由舊到新 */
+export function pruneOldNames(old, now) {
+  const fresh = (Array.isArray(old) ? old : []).filter(o => now - o.at < OLD_KEEP_MS && o.at - now < OLD_KEEP_MS)   // 時間在未來太遠的（時鐘亂掉）也丟
+  const perId = new Map()
+  const kept = [...fresh].sort((x, y) => y.at - x.at).filter(o => { const n = (perId.get(o.id) ?? 0) + 1; perId.set(o.id, n); return n <= OLD_PER_ID })
+  return kept.sort((x, y) => x.at - y.at).slice(-NAMES_MAX)
+}
+
+/** 這一輪接上的改名記成舊名（同一位、同一個舊名只留最新一筆） */
+export function recordOldNames(old, renames, now) {
+  const add = (Array.isArray(renames) ? renames : []).map(r => ({ id: r.id, from: r.from, to: r.to, at: now }))
+  const rest = (Array.isArray(old) ? old : []).filter(o => !add.some(a => a.id === o.id && a.from === o.from))
+  return pruneOldNames([...rest, ...add], now)
+}
+
+/**
+ * 收件名不在現在的名單上時，看它是不是 7 天內某位夥伴的舊名，是的話回那位現在的名字；對不到回 null（照舊給預設那位）。
+ * 不猜：同一個舊名 7 天內被兩位不同的夥伴用過、或那位現在不在名單上，都回 null。
+ * names＝agent-names.json 的編號 → 現名；present＝這一輪名單上的名字（Set）。
+ */
+export function resolveOldName(name, { names, old, present, now }) {
+  if (typeof name !== 'string' || !name || present.has(name)) return null
+  const hits = pruneOldNames(old, now).filter(o => o.from === name)
+  if (!hits.length || new Set(hits.map(o => o.id)).size > 1) return null
+  const cur = names?.[hits[0].id]
+  return typeof cur === 'string' && cur !== name && present.has(cur) ? cur : null
 }
 
 /**
