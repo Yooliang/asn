@@ -30,8 +30,11 @@ export function frameToWrite(frame) {
   let body = full
   if (Number.isInteger(rows) && rows > 0) {
     const lines = full.replace(/(\r\n)$/, '').split('\r\n')
-    if (lines.length && lines[lines.length - 1] === '') lines.pop()
-    if (lines.length > rows) body = lines.slice(-rows).join('\r\n')
+    // 最後多出來的那個元素是『整份結尾的裸換行』切出來的：純文字時是空字串，真的有顏色時會是殘留的重置序列（例如 `ESC[39m`），不是空字串。
+    // 看不見的內容（空或只有顏色／字元集序列）就是這個假列；只在行數超過 rows 時才去掉，剛好 rows 行時不動
+    if (lines.length > rows && lines[lines.length - 1].replace(/\x1b\[[0-9;:]*m|\x1b\(B/g, '') === '') lines.pop()
+    // 去掉假列之後一律用處理過的 lines 重組（不能留著原文：原文結尾還帶著那個殘留序列，寫進 xterm 會多一個換行、多捲一列）
+    body = (lines.length > rows ? lines.slice(-rows) : lines).join('\r\n')
   }
   body = body.replace(/(\r\n)+$/, '')
   const x = Math.max(0, Number(frame?.meta?.cursor_x) || 0)

@@ -448,3 +448,48 @@ test('903：meta.rows 缺或不是正整數時維持舊行為', () => {
   }
   assert.deepEqual(parseWrite(frameToWrite({ text })).lines, ['a', 'b', 'c'])
 })
+
+// 903b：真的有顏色時，整份結尾是 `\r\n\x1b[39m\n`（最後一列之後多一個只有重置序列的假列，不是空字串）。
+// 30家用 實機（0.2.7 候選，全螢幕 Claude 窗格，沒有捲動紀錄）：cursor_y=36、提示列在文字第 36 列，舊判斷沒把那個假列去掉，
+// 行數 41 > rows 40，就把最前面一列裁掉，提示列變第 35 列、游標落在它下一列（和 #903 原本的症狀一樣）
+function coloredScreen({ rows, scrollback, markerRow }) {
+  const lines = []
+  for (let i = 0; i < scrollback; i++) lines.push(`\x1b[38:2::1:2:3mSB${i}\x1b[39m`)
+  for (let r = 0; r < rows; r++) lines.push(r === markerRow ? '\x1b[38:2::9:9:9m❯ MARK\x1b[39m' : `\x1b[38:2::1:2:3mrow ${r}\x1b[39m`)
+  return lines.join('\r\n') + '\r\n\x1b[39m\n'   // 最後一列也以 CRLF 結尾，整份最後多一個裸換行，前面帶著殘留的重置序列
+}
+const markIndex = out => {
+  const body = out.split('\x1b[2J')[1]
+  const lines = body.slice(0, body.lastIndexOf('\x1b[0m\x1b[')).split('\r\n')
+  return { lines, at: lines.findIndex(l => l.includes('MARK')) }
+}
+
+test('903b：結尾帶殘留顏色序列的真實格式——沒有捲動紀錄：剛好 rows 列，提示列索引＝cursor_y', () => {
+  const out = frameToWrite({ text: coloredScreen({ rows: 40, scrollback: 0, markerRow: 36 }), meta: { cursor_x: 2, cursor_y: 36, cols: 120, rows: 40 } })
+  const { lines, at } = markIndex(out)
+  assert.equal(lines.length, 40, '假列要去掉，不能多一列')
+  assert.equal(at, 36)
+  assert.ok(out.endsWith('\x1b[37;3H'))
+})
+
+test('903b：結尾帶殘留顏色序列——有 2 列捲動紀錄：只留最後 40 列，提示列索引仍＝cursor_y', () => {
+  const out = frameToWrite({ text: coloredScreen({ rows: 40, scrollback: 2, markerRow: 20 }), meta: { cursor_x: 4, cursor_y: 20, cols: 120, rows: 40 } })
+  const { lines, at } = markIndex(out)
+  assert.equal(lines.length, 40)
+  assert.equal(at, 20)
+  assert.ok(!lines.some(l => l.includes('SB')), '捲動紀錄那兩列要被裁掉')
+})
+
+test('903b：去掉假列之後不留殘留序列在結尾（否則寫進 xterm 會多一個換行、多捲一列）', () => {
+  const out = frameToWrite({ text: coloredScreen({ rows: 40, scrollback: 0, markerRow: 36 }), meta: { cursor_x: 2, cursor_y: 36, cols: 120, rows: 40 } })
+  const body = out.split('\x1b[2J')[1]
+  assert.ok(!/\r\n\x1b\[39m\x1b\[0m\x1b\[/.test(body), '結尾不能是 CRLF＋殘留重置序列')
+})
+
+test('903b：剛好 rows 列且最後一列本來就是只有顏色的空列時不誤刪（沒有假列的格式）', () => {
+  const rowsArr = []
+  for (let r = 0; r < 5; r++) rowsArr.push(r === 4 ? '\x1b[39m' : `row ${r}`)
+  const out = frameToWrite({ text: rowsArr.join('\r\n') + '\r\n', meta: { cursor_x: 0, cursor_y: 1, cols: 80, rows: 5 } })
+  const body = out.split('\x1b[2J')[1]
+  assert.equal(body.slice(0, body.lastIndexOf('\x1b[0m\x1b[')).split('\r\n').length, 5, '行數剛好 rows，不動')
+})
