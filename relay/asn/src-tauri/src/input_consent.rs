@@ -26,7 +26,7 @@ pub struct Who {
 
 /// 去掉控制字元與改變文字方向的字元，截長度
 fn clean(s: &str, max: usize) -> String {
-    let bad = |c: char| c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+    let bad = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
     s.chars().map(|c| if bad(c) { ' ' } else { c }).collect::<String>().trim().chars().take(max).collect()
 }
 
@@ -42,6 +42,13 @@ pub fn ask_text(who: &Who, window: &str) -> String {
     let window = clean(window, 64);
     let first = if who.first { "\n\n這台電腦是第一次連線到這裡，請確認是你自己的電腦。" } else { "" };
     format!("{name}（指紋 {}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。\n\n要允許嗎？", who.fp8)
+}
+
+/// 紅條（有人在看／在打字）上的「誰」：名字＋指紋前 8 碼，第一次連線另外標示。畫面會在外面加「」
+pub fn bar_label(who: &Who) -> String {
+    let name = if who.name.is_empty() { "另一台電腦" } else { who.name.as_str() };
+    let first = if who.first { "，第一次連線" } else { "" };
+    format!("{name}（指紋 {}{first}）", who.fp8)
 }
 
 /// 問本人。允許回 true；不允許、關掉、逾時都回 false
@@ -122,6 +129,32 @@ mod tests {
         let long = who_of(&KnownPeers::default(), "d", &"長".repeat(100), PUB, Tofu::New);
         assert_eq!(long.name.chars().count(), NAME_MAX);
         assert!(!ask_text(&w, "小\u{202e}乙").contains('\u{202e}'), "視窗名也清掉");
+        for c in ['\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}', '\u{2028}', '\u{2029}'] {
+            let n = who_of(&KnownPeers::default(), "d", &format!("家{c}用機"), PUB, Tofu::New).name;
+            assert!(!n.contains(c), "{:?} 要去掉：{n:?}", c);
+        }
+    }
+
+    #[test]
+    fn 紅條上的誰_用本機記住的名字和指紋_第一次連線標示() {
+        let same = who_of(&known_d(), "d", "假裝是工作機", PUB, Tofu::Same);
+        let t = bar_label(&same);
+        assert_eq!(t, format!("家用機（指紋 {}）", same.fp8));
+        assert!(!t.contains("假裝是工作機"));
+        let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
+        assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
+        assert!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), first: false }).starts_with("另一台電腦"));
+    }
+
+    #[test]
+    fn 守門_紅條和同意框的誰都不直接用後台給的名字() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
+        assert!(!f.contains(concat!("row.get(\"from", "_name\")")), "不能直接從後台的列拿名字");
+        let who = f.find("let who = input_consent::bar_label(&asker);").expect("紅條的誰要用 bar_label");
+        let asker = f.find("let asker = input_consent::who_of(").expect("要用 who_of 組");
+        assert!(asker < who, "先組 who_of 再給紅條");
+        assert!(f.contains("input_consent::ask(&app, &asker,"), "同意框也用同一個 who_of");
     }
 
     #[test]
