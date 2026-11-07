@@ -266,7 +266,7 @@
                   <span class="m-dv-grip-gap" v-else aria-hidden="true"></span>
                   <button type="button" class="m-dv-go" @click="openAcctDevice(d.key)">
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
-                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kind }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span><span class="m-dv-line" v-if="d.stateLine">{{ d.stateLine }}</span></span>
+                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span><span class="m-dv-line" v-if="d.stateLine">{{ d.stateLine }}</span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                     <span class="m-dv-chev" aria-hidden="true">&rsaquo;</span>
                   </button>

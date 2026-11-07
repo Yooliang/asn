@@ -85,6 +85,16 @@ export function isCloudNode({ phone = false, self = false, asnOnline = false, re
 }
 
 /**
+ * 設備列「種類」那一段的字（#930，0.2.15）：手機／電腦；雲端節點在後面加「雲端」（例如「電腦 · 雲端」）。
+ * 雲端節點照一般設備各自一列，只在這裡標示，不另開分類（小良哥 11-07）。cloud 是 null（資料還不夠）就不標示，照舊是電腦。
+ * 手機和電腦版都用這一個函式，兩邊字一樣。
+ */
+export const CLOUD_TAG = '雲端'
+export function deviceKindLabel({ kind = '電腦', cloud = null } = {}) {
+  return cloud === true ? `${kind} · ${CLOUD_TAG}` : kind
+}
+
+/**
  * 別台帳號回報的新鮮度。rep：acct_remote_list 的結果 { error, asnOnline, reportedAt, accounts }
  * → 'never'（從沒收到）、'error'（讀取失敗）、'stale'（超過 15 分鐘沒更新）、'fresh'
  */
