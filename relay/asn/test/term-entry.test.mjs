@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TERM_BACK_TIP, TERM_LABEL, TERM_REOPEN_NOTE, TERM_TIP, askTermService, restoreTop, scrollMemo, termEntry } from '../ui/lib/term-entry.mjs'
+import { TERM_BACK_TIP, TERM_LABEL, TERM_REOPEN_NOTE, TERM_TIP, askTermService, restoreTop, scrollMemo, termButtonView, termEntry } from '../ui/lib/term-entry.mjs'
 import { WINDOW_LABEL, barSlots } from '../ui/lib/actionbar.mjs'
 import { TERM_VIEW_LOST } from '../ui/lib/term-view.mjs'
 
@@ -95,6 +95,23 @@ test('大按鈕接線：第 2 格按下發 term，開著時有 on 與 aria-press
   assert.match(ab, /term: !lite\.value && props\.term\?\.ready === true/, '終端分頁的簡版不放')
   assert.ok(TERM_TIP.includes('ASN 裡') && TERM_BACK_TIP === '回到訊息')
   assert.match(read('ui', 'img', 'ab-term.svg'), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32" width="32" height="32">/)
+})
+
+test('上排第 2 個大按鈕依狀態換字與圖示（#901b）：看訊息時「看終端」＋終端圖示，看終端時「看訊息」＋對話圖示', () => {
+  assert.deepEqual(termButtonView(false), { label: '看終端', icon: 'img/ab-term.svg' })
+  assert.deepEqual(termButtonView(true), { label: '看訊息', icon: 'img/ab-window.svg' })
+  assert.notEqual(termButtonView(true).icon, termButtonView(false).icon, '圖示不同，不只靠按下的顏色')
+  assert.notEqual(termButtonView(true).label, termButtonView(false).label)
+  // 與別台夥伴的「看畫面」互斥（#968）：有自訂字就用它、不隨開關換；沒有才是看終端／看訊息
+  assert.deepEqual(termButtonView(false, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' })
+  assert.deepEqual(termButtonView(true, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' }, '看畫面開著時字與圖示也不變')
+  assert.deepEqual(termButtonView(false, ''), { label: '看終端', icon: 'img/ab-term.svg' })
+  assert.deepEqual(termButtonView(true, ''), { label: '看訊息', icon: 'img/ab-window.svg' })
+  const ab = read('ui', 'lib', 'actionbar.mjs')
+  assert.match(ab, /const termBtn = computed\(\(\) => termButtonView\(termOn\.value, props\.term\?\.label \|\| ''\)\)/)
+  assert.match(ab, /slot\.window\.term \? termBtn\.icon : 'img\/ab-window\.svg'/, '圖示由 termButtonView 來')
+  assert.match(ab, /\{\{ slot\.window\.term \? termBtn\.label : slot\.window\.label \}\}/, '文字由 termButtonView 來')
+  assert.match(ab, /:aria-label="slot\.window\.term \? termBtn\.label : slot\.window\.label"/)
 })
 
 test('文案：不寫技術名詞；讀不到畫面不猜「視窗可能已經關了」', () => {

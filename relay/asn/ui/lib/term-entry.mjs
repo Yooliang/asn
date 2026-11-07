@@ -5,6 +5,16 @@
 export const TERM_LABEL = '終端'
 export const TERM_TIP = '在 ASN 裡看這位夥伴的終端（再按一次回到訊息）'
 export const TERM_BACK_TIP = '回到訊息'
+// 上排第 2 個大按鈕（在共用終端服務裡的夥伴）：看訊息時寫「看終端」、看終端時寫「看訊息」，圖示跟著換（不只靠按下去的顏色）
+// 對話圖示：專案裡沒有專用的訊息圖示，借用 ab-window.svg（視窗裡有文字行，最接近「看訊息」）
+export const TERM_BTN_TERM = { label: '看終端', icon: 'img/ab-term.svg' }
+export const TERM_BTN_MSG = { label: '看訊息', icon: 'img/ab-window.svg' }
+/** shown：終端畫面是不是正開著。回這一格要顯示的字與圖示（按了會去的地方） */
+export function termButtonView(shown, customLabel = '') {
+  // 別台夥伴的「看畫面」（#968）：字與圖示固定，不隨開關換（跟本機服務裡夥伴的「看終端／看訊息」互斥，條件在 termBar／props.term.label）
+  if (typeof customLabel === 'string' && customLabel !== '') return { label: customLabel, icon: TERM_BTN_TERM.icon }
+  return shown === true ? { ...TERM_BTN_MSG } : { ...TERM_BTN_TERM }
+}
 export const TERM_REOPEN_NOTE = '重新開一次這位夥伴，就能在 ASN 裡看終端'
 
 /**
