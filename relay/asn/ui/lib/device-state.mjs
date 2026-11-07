@@ -43,6 +43,48 @@ export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
 }
 
 /**
+ * 這台是不是「雲端夥伴」（#930，0.2.15）：**沒有電腦版 ASN、只有橋或雲端代理的節點**。
+ * 例：Grok 雲端代理、牧陽 Aegis 的轉接橋、日本VM（無畫面 Linux，只有橋＋代理）。手機不算；有電腦版 ASN 的實體電腦不算。
+ * 規則若要改（小良哥決定），只改這一個函式；電腦版與手機版的設備分組都呼叫它。
+ *
+ * 用到的資料（電腦版、手機版都拿得到，不需要新的後台回報）：
+ *   - phone：isPhoneDevice 的結果（後台平台優先、再看名單種類）
+ *   - asnOnline：這台現在有沒有在線的 ASN 視窗（名單帶的 asn，只有 ASN 應用程式會回報；橋與雲端代理不會）
+ *   - rep：這台的帳號回報（acct_list：{ error, reportedAt, asnOnline }）。帳號回報**只有電腦版 ASN 會送**（每 5 分鐘），
+ *     後台存最後一次的時間；回報裡的 asnOnline 是後台查的「3 分鐘內有 ASN 回報在線」，手機讀到的也保留這個欄位
+ *   - engines：這台名單上各視窗的引擎；全部是 'cloud'（雲端代理）就是雲端
+ *   - partnersOffline：呼叫端確定這台名單上的夥伴**全部**明確離線（status 是 offline）；不知道就是 false
+ * 平台（platform）不能拿來判斷：機器橋也會回報 linux／windows，日本VM 就是 linux。
+ *
+ * 判斷順序：
+ *   1. 手機、本機 → 不是雲端
+ *   2. 現在有電腦版 ASN 在線（名單的 asn，或帳號回報的 asnOnline）→ 不是雲端
+ *   3. 帳號回報有時間（曾跑過電腦版 ASN，現在離線也算）→ 不是雲端
+ *   4. 名單上的引擎全部是雲端代理 → 雲端
+ *   5. 讀到帳號回報、從沒送過，而且夥伴不是全部離線 → 雲端
+ *   6. 其他 → null（資料還不夠，不猜）
+ * 第 5 條要看「夥伴不是全部離線」：後台會刪 90 天沒更新的帳號回報（migrations/20261021040000_asn_account_switch.sql 的清理），
+ * 所以「從沒送過」實際上是「90 天內沒送過」——一台離線超過 90 天的實體電腦也會長這樣；它的夥伴也都離線，所以回 null。
+ * 轉接橋、日本VM 這類節點是 24 小時在線，夥伴有人在線，照樣判成雲端。
+ * 不採「名單上有非雲端引擎的夥伴就回 null」：那樣 Aegis（引擎 aegis）、日本VM（引擎 claude／pi）這類只有橋或代理的節點
+ * 都會變 null，違反「沒有電腦版 ASN、只有橋或雲端代理就算雲端」的規則（asn真 定，#995）。
+ *
+ * 回傳 true／false／null。null＝資料還不夠，不要猜：例如手機還沒讀這台的帳號回報、或讀取失敗，而且現在沒有 ASN 在線。
+ * 呼叫端拿到 null 一律暫放「電腦」，不猜成雲端；手機版不為了分組多讀帳號回報，讀到之後自然會歸對（asn真 定，#995）。
+ * 已接受的情況：新裝的電腦剛好離線、又還沒送過帳號回報時，可能被判成 null 或雲端（asn真 定，#995）。
+ */
+export function isCloudNode({ phone = false, self = false, asnOnline = false, rep = undefined, engines = [], partnersOffline = false } = {}) {
+  if (phone) return false
+  if (self) return false                       // 本機：電腦版自己就是電腦版 ASN；手機版的本機是手機（上一行）
+  if (asnOnline || rep?.asnOnline === true) return false   // 現在就有電腦版 ASN 在線
+  if (rep && !rep.error && rep.reportedAt) return false   // 曾經跑過電腦版 ASN（帳號回報只有它會送）
+  const list = (engines ?? []).map(e => String(e ?? '').toLowerCase()).filter(Boolean)
+  if (list.length && list.every(e => e === 'cloud')) return true   // 只有雲端代理
+  if (rep && !rep.error && !rep.reportedAt && !partnersOffline) return true   // 讀到了：90 天內沒有電腦版 ASN 回報過，而且夥伴有人在線
+  return null                                  // 沒讀到帳號回報（或讀取失敗）、夥伴全離線、也沒有其他證據
+}
+
+/**
  * 別台帳號回報的新鮮度。rep：acct_remote_list 的結果 { error, asnOnline, reportedAt, accounts }
  * → 'never'（從沒收到）、'error'（讀取失敗）、'stale'（超過 15 分鐘沒更新）、'fresh'
  */

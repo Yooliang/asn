@@ -12,7 +12,7 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceStateLine, installAction, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceStateLine, installAction, isCloudNode, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -49,6 +49,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * friends：名單（node、device、engine、kind、status）；nodeOrder：節點順序；selfNode：本機節點
  * asn：節點 → 在線的 ASN 視窗列；launchers：節點 → 啟動器回報。電腦版放啟動器本身 { profiles }，手機版放整筆電腦設定 { launcher: { profiles } }（兩種都認）；
  *   本機那筆可多帶 detected: false＝本機偵測還沒跑完（這時不能說「未安裝」）
+ * 每一台多帶 cloud：true／false／null（雲端夥伴，見 device-state.mjs 的 isCloudNode；null＝資料還不夠）
  * machines：節點 → { platform }（後台回報的平台，#652）。電腦版是 remoteMachines、手機版是 machinesByNode
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
  * self：{ claude:[{email,plan,current}], codex:{ loggedIn, text } }（本機的帳號庫與 Codex 登入）
@@ -76,6 +77,11 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const phone = isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
     const isOn = isSelf || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
     const rep = reports[node] ?? null
+    const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
+    // 雲端夥伴（#930）：只標記，不改這裡的分組與顯示（之後的 PR 才用它分出「雲端夥伴」）
+    // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線
+    const partnersOffline = mine.length > 0 && mine.every(f => String(f.status ?? '').toLowerCase() === 'offline')
+    const cloud = isCloudNode({ phone, self: isSelf, asnOnline, rep: reports[node], engines: mine.map(f => engineKey(f)), partnersOffline })
 
     // 這台有哪些廠商：視窗用的引擎、啟動器回報的 CLI、帳號回報裡的廠商、本機登入的帳號
     const keys = new Set()
@@ -142,7 +148,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, platform, phone, missing, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, self: isSelf, platform, phone, cloud, missing, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }
