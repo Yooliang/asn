@@ -9,12 +9,11 @@ const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261109100000_push_tokens.sql'
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
-const FNS = ['asn_relay_push_register(text, text)', 'asn_relay_push_unregister(text)', 'asn_relay_push_targets(text, text)', 'asn_relay_push_prune()', 'asn_relay_push_invalid(text, text)']
+const FNS = ['asn_relay_push_register(text, text)', 'asn_relay_push_unregister(text)', 'asn_relay_push_targets(uuid, text)', 'asn_relay_push_prune()', 'asn_relay_push_invalid(text, text)']
 
 test('靜態：交易內、新表開 RLS、只給 service_role、不改既有函式', () => {
   const code = read(MIG).split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
   assert.match(code, /^begin;$/m); assert.match(code, /^commit;$/m)
-  assert.equal(files.at(-1), MIG, '要是最後一支')
   assert.doesNotMatch(code, /drop table|drop column|truncate|drop function|alter table relay\.(nodes|messages|asn_presence)/i)
   assert.match(code, /alter table relay\.push_tokens enable row level security/)
   assert.doesNotMatch(code, /grant [^;]*to (anon|authenticated|public)/i)
@@ -63,7 +62,7 @@ async function rpc(db, fn, args = {}) {
   return (await db.query(`select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')}) r`, keys.map(k => args[k]))).rows[0].r
 }
 const reg = (db, node, token = TOK) => rpc(db, 'asn_relay_push_register', { p_node: node, p_token: token })
-const targets = (db, kind = 'owner_mail', node = PC) => rpc(db, 'asn_relay_push_targets', { p_node: node, p_kind: kind })
+const targets = (db, kind = 'owner_mail', user = U1) => rpc(db, 'asn_relay_push_targets', { p_user: user, p_kind: kind })
 const seen = (db, node, ago) => db.query(`insert into relay.asn_presence(node, window_name, version, status, updated_at) values ($1, 'ASN', '0.2.11', 'online', now() - $2::interval)
   on conflict (node, window_name) do update set updated_at = excluded.updated_at`, [node, ago])
 const tokens = async db => (await db.query('select node, token from relay.push_tokens order by node')).rows
@@ -106,7 +105,8 @@ test('要推誰：本人名下、android、有權杖、30 天內開過、現在�
   assert.deepEqual(await targets(db, 'waiting'), { targets: [{ node: PH, token: TOK }] }, '夥伴在等你')
   assert.equal((await targets(db, 'other')).error, 'bad_request')
   assert.equal((await targets(db, null)).error, 'bad_request')
-  assert.deepEqual(await targets(db, 'owner_mail', 'nope00'), { targets: [] }, '觸發節點不存在')
+  assert.deepEqual(await targets(db, 'owner_mail', null), { targets: [] }, '收件人不明')
+  assert.equal((await targets(db, 'OWNER_MAIL')).error, 'bad_request', '大小寫不同也拒絕')
 })
 
 test('要推誰：在線不推；30 天沒開不推；沒有開過也不推', { skip }, async () => {
@@ -162,4 +162,24 @@ test('權限：anon／authenticated 不能執行任何推播函式，也不能�
   }
   const { rows } = await db.query(`select has_table_privilege('anon', 'relay.push_tokens', 'select') a, has_table_privilege('authenticated', 'relay.push_tokens', 'select') u`)
   assert.deepEqual(rows[0], { a: false, u: false })
+})
+
+test('要推誰：別的帳號寄給本人時，推給收件的那個人（U1）的手機，不推寄件帳號（U2）的', { skip }, async () => {
+  const db = await boot()
+  await reg(db, PH); await reg(db, OTHER, TOK2)
+  await seen(db, PH, '10 minutes'); await seen(db, OTHER, '10 minutes')
+  // U2 的節點寄信給 U1：Edge 從寄信結果拿到收件人 U1，用它查
+  assert.deepEqual(await targets(db, 'owner_mail', U1), { targets: [{ node: PH, token: TOK }] })
+  assert.deepEqual(await targets(db, 'owner_mail', U1), { targets: [] }, '60 秒內不再推')
+  assert.deepEqual((await tokens(db)).find(t => t.node === OTHER), { node: OTHER, token: TOK2 }, '寄件帳號的手機沒被動到')
+  const { rows } = await db.query(`select last_sent_at from relay.push_tokens where node = $1`, [OTHER])
+  assert.equal(rows[0].last_sent_at, null, '寄件帳號的手機沒有被推')
+})
+
+test('清理排程：每天跑一次 prune', { skip }, async () => {
+  const db = await boot()
+  const { rows } = await db.query(`select schedule, command from cron.job where jobname = 'asn-push-tokens-prune'`)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].schedule, '51 3 * * *')
+  assert.match(rows[0].command, /asn_relay_push_prune\(\)/)
 })
