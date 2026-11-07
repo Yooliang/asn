@@ -917,6 +917,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-view-lost{margin:6px 8px;font-size:12px}
 /* 停止跟隨時的「回到最新」：放在終端畫面區右下角內側（.term-view 是定位基準） */
 .term-view-latest{position:absolute;right:12px;bottom:12px;z-index:2;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.term-view-loading{position:absolute;top:6px;left:10px;z-index:2;margin:0;padding:2px 8px;font-size:12px;color:#ddd;background:rgba(0,0,0,.55);border-radius:3px;pointer-events:none}
 .term-view-paste{margin:6px 8px;font-size:12px;padding:6px 8px;border:1px solid var(--line,#c8d4e0);background:#fff8dc}
 .term-view-paste .aero-btn{margin-left:8px}
 .term-view-lost .aero-btn{margin-left:8px}

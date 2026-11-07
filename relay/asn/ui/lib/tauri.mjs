@@ -83,6 +83,8 @@ export const termViewApi = {
   available: name => invoke('term_view_available', { name }),   // 這位夥伴在不在共用終端服務裡（#900）→ true／false
   // 在畫面裡打字（#597 D）：只有這個本機命令，Rust 端檢查開著的畫面、視窗在前景、窗格是 ASN 開的、授權
   input: (viewId, data, paste, ime) => invoke('term_view_input', { viewId, data, paste: !!paste, ime: !!ime }),
+  // 往上看更早的內容（#904 B3）：一次回 { text, lines, truncated, meta }，text 最後 meta.rows 行是目前畫面、之前都是歷史；失敗丟字串
+  history: (viewId, lines) => invoke('term_view_history', { viewId, lines }),
   notices: () => invoke('partner_notices'),   // 畫面上的一行提示用：只有視窗名與固定代號
   listen,
 }

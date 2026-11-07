@@ -277,7 +277,8 @@ test('「回到最新」提示：只有停止跟隨才顯示', () => {
 test('「回到最新」接線：按了把外層捲到最底並恢復跟隨；放在畫面區右下角內側、沿用 aero-btn（#904）', () => {
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.match(src, /<button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">/)
-  assert.match(src, /const jumpLatest = \(\) => \{[\s\S]{0,200}follow\.resume\(top\)[\s\S]{0,80}host\.value\.scrollTop = top/)
+  assert.match(src, /const toBottom = \(\) => \{[\s\S]{0,200}follow\.resume\(top\)[\s\S]{0,80}host\.value\.scrollTop = top/)
+  assert.match(src, /const jumpLatest = \(\) => \{ resumeLive\(\)/, '按了回到最新：解除凍結＋捲到最底（#904 B3）')
   assert.match(src, /t\.attachCustomWheelEventHandler\(\(\) => false\)[\s\S]*t\.onData\(/, '滾輪仍交給外層，排在 onData 之前')
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
   assert.match(css, /\.term-view-latest\{position:absolute;right:12px;bottom:12px/)

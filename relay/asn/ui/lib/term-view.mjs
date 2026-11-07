@@ -2,6 +2,7 @@
 // Rust 端再檢查一次：開著的畫面、視窗在前景、窗格是 ASN 開的、授權），字一次一支送進窗格、不丟字。
 // xterm.js 打包在 ui/vendor，要看時才載入。全程在本機，不連外。
 import { viewHint } from './partner-notice.mjs'
+import { HISTORY_LINES, atBottom, createHistory, historyScrollTop, historyToWrite, scrollWantsHistory, wheelWantsHistory } from './term-history.mjs'
 /** 畫面上提示多久查一次 */
 export const HINT_POLL_MS = 3_000
 const { ref, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
@@ -101,6 +102,7 @@ export function createFollow() {
       const mine = lastSet !== null && Math.abs(scrollTop - lastSet) <= SLACK
       lastSet = null   // 只算一次：使用者之後捲回同一個位置，要算他捲的
       if (!mine) following = scrollTop >= max - SLACK
+      return mine
     },
   }
 }
@@ -110,9 +112,9 @@ export function followScrollTo({ following, current, target }) {
   return following && target > current ? target : null
 }
 
-/** 「回到最新」提示：只有停止跟隨才顯示 */
-export function latestVisible(following) {
-  return following === false
+/** 「回到最新」提示：停止跟隨、或正在看凍結的歷史（#904 B3）才顯示 */
+export function latestVisible(following, frozen = false) {
+  return following === false || frozen === true
 }
 
 /**
@@ -125,6 +127,8 @@ export function createTermViewSession(deps) {
   let viewId = null, term = null, stopped = false, lastSeq = 0, size = null, chain = Promise.resolve()
   const unlisten = []
   const early = new Map()   // 開好之前就到的畫面：每個編號只留最新一幅
+  const hist = createHistory()   // 往上看更早的內容（#904 B3）：平常 live，要到歷史後凍結重畫
+  const now = () => (deps.now ? deps.now() : Date.now())
 
   const paint = async frame => {
     if (stopped || frame.seq <= lastSeq) return
@@ -135,6 +139,8 @@ export function createTermViewSession(deps) {
       if (stopped) { term.dispose(); term = null; return }
       size = { cols, rows }
     }
+    // 凍結（看歷史）時新的畫面幅只存起來，不寫進 xterm，閱讀時內容才不會被推走
+    if (!hist.frame(frame)) return
     if (size.cols !== cols || size.rows !== rows) { term.resize(cols, rows); size = { cols, rows } }
     term.write(frameToWrite(frame))
     deps.onPainted?.(frame)
@@ -142,6 +148,43 @@ export function createTermViewSession(deps) {
   // 一幅一幅照順序畫；xterm 載入中到的畫面排在後面
   const enqueue = frame => {
     chain = chain.then(() => paint(frame)).catch(e => { console.info('[ASN] 終端畫面畫不出來', String(e?.message ?? e)); lost(String(e?.message ?? e)) })
+  }
+  // 向後端要一次歷史（只有 live 且不在冷卻才會真的要）。拿到有歷史的就凍結：xterm 拉高成「歷史＋畫面」列，通知畫面調整捲動位置
+  const applyHistory = (token, payload) => {
+    if (stopped || !term) return
+    const m = payload?.meta ?? {}
+    const cols = Number(m.cols) || size.cols, rows = Number(m.rows) || size.rows
+    const plan = historyToWrite(payload?.text, { ...m, rows })
+    if (!hist.loaded(token, plan.histCount, now())) { deps.onHistoryState?.(hist.state()); return }
+    term.resize(cols, plan.totalRows)
+    size = { cols, rows: plan.totalRows }
+    term.write(plan.data)
+    deps.onHistoryState?.('frozen', { histCount: plan.histCount, totalRows: plan.totalRows, rows })
+  }
+  const wantHistory = () => {
+    if (stopped || viewId === null || !term || !deps.history) return false
+    const token = hist.request(now())
+    if (!token) return false
+    deps.onHistoryState?.('loading')
+    const id = viewId
+    Promise.resolve().then(() => deps.history(id, HISTORY_LINES)).then(
+      payload => { chain = chain.then(() => applyHistory(token, payload)).catch(e => console.info('[ASN] 歷史畫不出來', String(e?.message ?? e))) },
+      e => { console.info('[ASN] 讀不到更早的內容', String(e?.message ?? e)); hist.failed(token, now()); deps.onHistoryState?.(hist.state()) },
+    )
+    return true
+  }
+  // 回到最新：解除凍結，xterm 恢復成窗格大小，用最新一幅重畫
+  const backToBottom = () => {
+    const was = hist.state()
+    const f = hist.release()
+    if (was !== 'live') deps.onHistoryState?.('live')
+    if (!f || !term || stopped) return false
+    const cols = Number(f.meta?.cols) || DEFAULT_COLS, rows = Number(f.meta?.rows) || DEFAULT_ROWS
+    term.resize(cols, rows)
+    size = { cols, rows }
+    term.write(frameToWrite(f))
+    deps.onPainted?.(f)
+    return true
   }
   const lost = reason => {
     if (stopped) return
@@ -198,7 +241,7 @@ export function createTermViewSession(deps) {
       lost(String(e?.message ?? e))
     }
   }
-  return { start, stop, input, flushed: () => chain, inputFlushed: () => inputChain, viewId: () => viewId }
+  return { start, stop, input, wantHistory, backToBottom, frozen: () => hist.frozen(), historyState: () => hist.state(), flushed: () => chain, inputFlushed: () => inputChain, viewId: () => viewId }
 }
 
 let xtermLoad = null
@@ -241,7 +284,7 @@ export const TermView = {
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
   },
   setup(props) {
-    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref(''), behind = ref(false)
+    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref(''), behind = ref(false), histLoading = ref(false)
     // 夥伴停在要你回答的地方：本機的同意框這時不跳，改在畫面上方提示
     let hintTimer = 0
     const refreshHint = async () => {
@@ -259,6 +302,7 @@ export const TermView = {
       return followTarget({ cursorRow: lastRow, rowHeight: screen.clientHeight / lastRows, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight })
     }
     const followCursor = frame => {
+      if (session?.frozen()) return   // 看歷史時不動捲動位置
       lastRow = Math.max(0, Number(frame?.meta?.cursor_y) || 0)
       lastRows = Number(frame?.meta?.rows) || DEFAULT_ROWS
       const t = followScrollTo({ following: follow.following(), current: host.value.scrollTop, target: target() })
@@ -267,12 +311,48 @@ export const TermView = {
       host.value.scrollTop = t
     }
     const maxTop = () => Math.max(0, host.value.scrollHeight - host.value.clientHeight)
-    const onScroll = () => { follow.onScroll(host.value.scrollTop, maxTop()); behind.value = latestVisible(follow.following()) }
-    const jumpLatest = () => {
+    const refreshBehind = () => { behind.value = latestVisible(follow.following(), !!session?.frozen()) }
+    const toBottom = () => {
       const top = maxTop()
       follow.resume(top)
       host.value.scrollTop = top
-      behind.value = false
+    }
+    // 回到最新：解除凍結（xterm 縮回窗格大小、用最新一幅重畫），外層捲到最底、恢復跟隨。縮回後高度要等下一個畫面才準，補捲一次
+    const resumeLive = () => {
+      session?.backToBottom()
+      toBottom()
+      refreshBehind()
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { if (host.value && !session?.frozen()) { toBottom(); refreshBehind() } })
+    }
+    const onScroll = () => {
+      const el = host.value, max = maxTop()
+      const mine = follow.onScroll(el.scrollTop, max)
+      if (session?.frozen()) { if (!mine && atBottom(el.scrollTop, max)) resumeLive(); else refreshBehind(); return }
+      if (scrollWantsHistory({ scrollTop: el.scrollTop, max, mine })) session?.wantHistory()
+      refreshBehind()
+    }
+    // 滾輪往上、而且已在最頂（含內容沒超過容器、本來就捲不動）：想看更舊的
+    const onPullUp = ev => { if (wheelWantsHistory({ deltaY: ev.deltaY, scrollTop: host.value.scrollTop })) session?.wantHistory() }
+    const jumpLatest = () => { resumeLive(); behind.value = false }
+    // 歷史狀態變了：載入中顯示小字；凍結後保持使用者看到的位置不跳（原本的畫面部分留在原處，歷史出現在上方）
+    let snap = { max: 0, rowHeight: 0 }   // 去要歷史那一刻的外層可捲高度與列高：xterm 拉高之後這兩個值就變了
+    const onHistoryState = (state, info) => {
+      histLoading.value = state === 'loading'
+      if (state === 'loading' && host.value) {
+        const screen = host.value.querySelector('.xterm-screen')
+        snap = { max: maxTop(), rowHeight: screen ? screen.clientHeight / lastRows : 0 }
+      }
+      if (state !== 'frozen' || !host.value) return
+      const oldTop = host.value.scrollTop
+      const apply = () => {
+        if (!host.value || !session?.frozen()) return
+        const top = historyScrollTop({ oldTop, oldMax: snap.max, histCount: info.histCount, rowHeight: snap.rowHeight, newMax: maxTop() })
+        follow.place(top)
+        host.value.scrollTop = top
+      }
+      refreshBehind()
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(apply))
+      else apply()
     }
     const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; pendingPaste.value = '' }
     const typed = (data, paste = false, ime = false) => {
@@ -301,6 +381,7 @@ export const TermView = {
       lostText.value = ''
       follow = createFollow()
       behind.value = false
+      histLoading.value = false
       const target = props.id ? { id: props.id } : { name: props.name }
       session = createTermViewSession({
         open: () => props.api.open(target),
@@ -325,18 +406,21 @@ export const TermView = {
         },
         onLost: () => { session = null; lostText.value = TERM_VIEW_LOST },
         onPainted: followCursor,
+        history: props.api.history ? (viewId, lines) => props.api.history(viewId, lines) : undefined,
+        onHistoryState,
       })
       void session.start()
     }
     watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
     onMounted(() => { if (props.active) start() })
     onBeforeUnmount(stop)
-    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, jumpLatest, TERM_VIEW_LATEST }
+    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
   },
   template: `
 <div class="term-view">
   <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
-  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
+  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @wheel.passive="onPullUp" @click="focusTerm" @paste.capture="onPaste"></div>
+  <p class="term-view-loading" v-if="histLoading" role="status">讀取更早的內容…</p>
   <button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">{{ TERM_VIEW_LATEST }}</button>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
   <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
