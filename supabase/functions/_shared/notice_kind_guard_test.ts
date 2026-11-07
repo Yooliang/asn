@@ -69,11 +69,27 @@ Deno.test("relay_ops 的 send：用戶端帶 kind／p_kind 也不會出現在 RP
     ring: () => Promise.resolve(),
   };
   const r = await nodeAction(deps, { tenant: "T", node: "N" }, "send", {
-    to_node: "B", body: "hi", kind: "notice:login", p_kind: "notice:login", from_agent: "ASN 通知",
+    to_node: "B", body: "hi", kind: "notice:login", p_kind: "notice:login", from_agent: "測試窗",
   });
   assertEquals(r.status, 200);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].fn, "asn_relay_send");
   assert(!("p_kind" in calls[0].args) && !("kind" in calls[0].args));
   assert(!JSON.stringify(calls[0].args).includes("notice:"));
+});
+
+Deno.test("relay_ops 的 send：寄件名用「ASN 通知」回 400，而且不呼叫任何 RPC", async () => {
+  const calls: string[] = [];
+  const deps = {
+    rpc: (fn: string) => {
+      calls.push(fn);
+      return Promise.resolve({ data: { id: "i1", bell_topic: "t" }, error: null });
+    },
+    ring: () => Promise.resolve(),
+  };
+  const r = await nodeAction(deps, { tenant: "T", node: "N" }, "send", {
+    to_node: "B", body: "hi", kind: "notice:login", from_agent: "ASN 通知",
+  });
+  assertEquals(r.status, 400);
+  assertEquals(calls.length, 0);
 });
