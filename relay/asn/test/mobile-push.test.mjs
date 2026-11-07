@@ -1,7 +1,7 @@
 // 手機推播的前端流程（lib/mobile-push.mjs，#797 PR③）：外殼、註冊、計時都用假的。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPushSync, isPushToken, pushSettingView, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS, PUSH_TEXT } from '../ui/lib/mobile-push.mjs'
+import { createPushSync, isPushToken, pushSettingView, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS, PUSH_TEXT, PUSH_UNREGISTER_MS } from '../ui/lib/mobile-push.mjs'
 import { androidBridge } from '../ui/lib/mobile.mjs'
 
 const TOK = 'f'.repeat(40) + ':APA91b_tok-1'
@@ -88,6 +88,26 @@ test('收到格式不對的權杖：不送；取權杖失敗：稍後重試', as
   s.p.sync(); s.emit({ t: 'token', token: 'bad"token' }); s.emit({ t: 'token' }); await s.tick()
   assert.deepEqual(s.calls.register, [])
   s.emit({ t: 'token-error' }); assert.equal(s.timers.size, 1)
+})
+
+test('登出：取消後台的最多等 5 秒就繼續刪權杖（不讓按鈕卡住）；登出後這個物件停了，事件與同步都不理', async () => {
+  const calls = { del: 0 }
+  let t = 0, seq = 0
+  const timers = new Map()
+  const p = createPushSync({
+    native: { state: () => 'granted', askPermission() {}, requestToken() { calls.req = (calls.req ?? 0) + 1 }, deleteToken() { calls.del++ }, onEvent: () => () => {} },
+    register: async () => { calls.reg = (calls.reg ?? 0) + 1 }, unregister: () => new Promise(() => {}),   // 後台一直不回
+    now: () => t, setTimer: (f, ms) => { const id = ++seq; timers.set(id, { f, at: ms }); return id }, clearTimer: id => timers.delete(id),
+  })
+  const done = p.logout()
+  await new Promise(r => setImmediate(r))
+  assert.equal(calls.del, 0, '還在等後台')
+  const give = [...timers.values()].find(x => x.at === PUSH_UNREGISTER_MS)
+  assert.ok(give, '有 5 秒的上限')
+  give.f(); await done
+  assert.equal(calls.del, 1, '逾時照樣刪權杖')
+  p.sync(true); p.onEvent({ t: 'token', token: TOK }); p.onEvent({ t: 'refresh' })
+  assert.deepEqual([calls.req ?? 0, calls.reg ?? 0], [0, 0], '登出後不再取權杖、不註冊')
 })
 
 test('登出：先取消後台的，再刪 Firebase 的權杖；取消失敗也照樣刪；之後不再重試', async () => {

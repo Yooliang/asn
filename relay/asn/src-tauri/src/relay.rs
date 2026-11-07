@@ -362,7 +362,8 @@ impl Relay {
     }
     /// 登出、換帳號、移除裝置時先取消（連不上也沒關係，後台清除規則會補）
     pub async fn push_unregister(&self) -> Result<(), String> {
-        self.api("push_unregister", Some(json!({}))).await.map(|_| ()).map_err(|_| "push_unregister_failed".to_string())
+        // 逾時短一點（5 秒）：登出、關掉通知時按鈕不能卡 20 秒；沒取消成功也照樣刪 Firebase 權杖，後台靠失效回報或每天的清除收
+        self.api_with("push_unregister", Some(json!({})), Duration::from_secs(5)).await.map(|_| ()).map_err(|_| "push_unregister_failed".to_string())
     }
     /// 取走「要求更新」的旗標（有就回 true，並清掉，不會重複觸發）
     pub fn take_update_request(&self) -> bool {

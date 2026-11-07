@@ -119,6 +119,7 @@ test('前端接線：第一次收信之後與回到前景才同步；登出先�
   assert.match(js, /await core\.start\(\); sync\(\); push\?\.sync\(\)/)
   assert.match(js, /void roomsHook\.refresh\?\.\(\); push\?\.sync\(\)/)
   assert.match(js, /await push\?\.logout\(\); await authApi\.logout\(\)/)
+  assert.match(read('src-tauri', 'src', 'relay.rs'), /api_with\("push_unregister", Some\(json!\(\{\}\)\), Duration::from_secs\(5\)\)/, '取消註冊的逾時只有 5 秒')
   assert.match(js, /invoke\('android_push_register', \{ token \}\)/)
 })
 
