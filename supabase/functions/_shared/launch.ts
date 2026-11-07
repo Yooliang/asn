@@ -6,6 +6,7 @@
 type Json = any;
 
 // 視窗名：英數、連字號、中文，1～40 字，不能以連字號開頭（不然會被 claude 當成命令列旗標）。跟 SQL、機器橋同一條規則
+import { isReservedSender } from "./reserved_sender.ts";
 export const LAUNCH_NAME_RE = /^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$/;
 export const FIRST_MESSAGE_MAX = 4000;
 export const NODE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
@@ -43,7 +44,7 @@ export function parseLaunch(b: Json): LaunchRequest | { error: string } {
   const { node, profile, name, cwd } = b;
   if (typeof node !== "string" || !NODE_ID_RE.test(node)) return { error: "bad_request" };
   if (typeof profile !== "string" || profile.length < 1 || profile.length > 40) return { error: "bad_profile" };
-  if (typeof name !== "string" || !LAUNCH_NAME_RE.test(name)) return { error: "bad_name" };
+  if (typeof name !== "string" || !LAUNCH_NAME_RE.test(name) || isReservedSender(name)) return { error: "bad_name" }; // 寄件名保留字檢查（見 reserved_sender.ts）
   if (typeof cwd !== "string" || cwd.length < 1 || cwd.length > 260) return { error: "bad_cwd" };
   let first: string | null = null;
   if (b.first_message != null) {

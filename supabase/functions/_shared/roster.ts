@@ -2,6 +2,7 @@
 // engine＝這個視窗背後是哪家 AI（claude／codex／gemini／grok…）。格式不對或沒帶（舊版機器橋）就是 null，
 // 不因此拒絕整份名單；detail（選填，最多 80 字）同理；資料庫那邊也有同樣的格式檢查（supabase/sql/19_roster_engine.sql）。
 
+import { isReservedSender } from "./reserved_sender.ts";
 export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null; active_at: number | null };
 
 export const DETAIL_MAX = 80;
@@ -21,8 +22,9 @@ export function contextPct(v: unknown): number | null {
 
 export const ENGINE_RE = /^[a-z][a-z0-9_-]{0,19}$/;
 
-export function normalizeRosterAgents(agents: Array<Record<string, unknown>>): RosterAgent[] {
-  return agents.map((a) => ({
+export function normalizeRosterAgents(agents: Array<Record<string, unknown>>, nodeId: string | null = null): RosterAgent[] {
+  // 寄件名保留字檢查（見 reserved_sender.ts）：名字是保留的視窗不收進名單（只有這台自己的預設橋名放行）；其他視窗照常
+  return agents.filter((a) => !(typeof a?.name === "string" && isReservedSender(a.name, nodeId))).map((a) => ({
     name: a?.name,
     status: a?.status ?? null,
     cwd_label: a?.cwd_label ?? null,

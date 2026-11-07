@@ -19,10 +19,10 @@ export interface AsnPresence {
   platform: string | null;
 }
 
-export function parseAsnPresence(b: unknown): AsnPresence | null {
+export function parseAsnPresence(b: unknown, nodeId: string | null = null): AsnPresence | null {
   if (!b || typeof b !== "object") return null;
   const o = b as Record<string, unknown>;
-  const window_name = parseSelfName(o.window_name);
+  const window_name = parseSelfName(o.window_name, nodeId);
   if (window_name === null) return null;
   if (typeof o.version !== "string" || !VERSION_RE.test(o.version)) return null;
   if (typeof o.status !== "string" || !(STATUSES as readonly string[]).includes(o.status)) return null;

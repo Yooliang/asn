@@ -6,6 +6,7 @@
 type Json = any;
 
 import { LAUNCH_NAME_RE, NODE_ID_RE, type LaunchDeps, type Reply } from "./launch.ts";
+import { isReservedSender } from "./reserved_sender.ts";
 
 export const PARTNER_OPS = ["info", "rename", "model", "close", "handover", "resume", "restart", "remove"] as const;
 export const NOTE_MAX = 1000;
@@ -57,7 +58,7 @@ export function parsePartnerOp(b: Json): PartnerOpRequest | { error: string } {
   if (typeof op !== "string" || !(PARTNER_OPS as readonly string[]).includes(op)) return { error: "bad_request" };
   const out: PartnerOpRequest = { node, name, op: op as PartnerOpRequest["op"], new_name: null, model: null, note: null };
   if (op === "rename") {
-    if (typeof b.new_name !== "string" || !LAUNCH_NAME_RE.test(b.new_name)) return { error: "bad_name" };
+    if (typeof b.new_name !== "string" || !LAUNCH_NAME_RE.test(b.new_name) || isReservedSender(b.new_name)) return { error: "bad_name" }; // 寄件名保留字檢查（見 reserved_sender.ts）
     out.new_name = b.new_name;
   } else if (op === "model") {
     if (typeof b.model !== "string" || !MODEL_RE.test(b.model)) return { error: "bad_model" };
