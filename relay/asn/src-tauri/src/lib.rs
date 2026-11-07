@@ -909,7 +909,8 @@ impl view_stream::TPort for LiveTPort {
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
     fn log(&mut self, line: &str) {
-        let _ = ui_log::append(&self.data_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        // 寫到機器資料夾的 ui.log（和其他紀錄、設定頁「開啟記錄」同一份），不寫 data_dir（#961）
+        let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
     }
 }
 
@@ -2403,6 +2404,15 @@ pub fn run() {
 
 #[cfg(all(test, feature = "gui"))]
 mod tests {
+    #[test]
+    fn 守門_紀錄只寫機器資料夾的_ui_log_不寫_data_dir() {
+        let src = include_str!("lib.rs");
+        let code = src.split("\nmod tests {").next().unwrap();
+        for bad in ["ui_log::append(&self.data_dir", "ui_log::append(&data_dir", "ui_log::append(&app.data_dir"] {
+            assert!(!code.contains(bad), "紀錄要寫到 work_dir 的 ui.log：{bad}");
+        }
+    }
+
     #[test]
     fn 守門_截圖模式不登記_asn_協定_不改使用者的登錄檔() {
         let src = include_str!("lib.rs").split("mod tests {").next().unwrap();
