@@ -1,4 +1,4 @@
--- 20261110100000_notice_center.sql 的回復檔（不是 migration，不會被部署；要用時人工執行）。
+-- 20261111100000_notice_center.sql 的回復檔（不是 migration，不會被部署；要用時人工執行）。
 -- 把九支通知函式與四支讀信函式逐字換回各自的上一版定義：
 --   asn_relay_login_alert          ← 20261031110000_acct_login_alert_notify.sql
 --   asn_relay_inbox_watch          ← 20261102170000_node_platform_phone.sql

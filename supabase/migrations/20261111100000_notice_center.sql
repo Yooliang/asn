@@ -15,7 +15,7 @@
 -- 相容：舊用戶端忽略多出來的欄位；新寄件名「ASN 通知」要等新版用戶端普及後才部署本 migration（見設計文件 3.3「不可逆的點」）。
 -- 上線當下，舊寄件名（xx收發室）的舊信不計入新的限流，各通知種類最多一次性多寄一輪。
 -- 部署順序：本 migration（先不部署，等 PR-B 普及）→ 之後沒有 Edge 變更需要配合（Edge 對信件欄位是原樣轉出）。
--- 回復：supabase/sql/rollback/20261110100000_notice_center_revert.sql（九支與讀信函式換回上一版；asn_relay_send_notice 與 kind 欄位留著無害）。
+-- 回復：supabase/sql/rollback/20261111100000_notice_center_revert.sql（九支與讀信函式換回上一版；asn_relay_send_notice 與 kind 欄位留著無害）。
 begin;
 
 alter table relay.messages add column if not exists kind text;
