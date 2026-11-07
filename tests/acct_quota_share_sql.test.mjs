@@ -1,4 +1,4 @@
-// 額度查詢的後台（20261106100000_acct_quota_share.sql，todo-next-193）：
+// 額度查詢的後台（20261110100000_acct_quota_share.sql，todo-next-193）：
 // 1. 靜態：三支既有函式除了明列的片段，與現行本體逐字相同；只授權 service_role；回復檔換回現行本體。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    舊用戶端回報與 roster 不變；grok 只收每週、minimax 只收 5 小時與每週；舊的 asn_relay_acct_report 不收 minimax；
@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const FILE = '20261106100000_acct_quota_share.sql'
+const FILE = '20261110100000_acct_quota_share.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(FILE)
