@@ -55,3 +55,11 @@ test('入口：只有本人帳號底下的設備才問電腦端', () => {
   assert.match(src, /remoteViewApi: mineViewApi/)
 
 })
+
+test('看別台畫面：沒有返回鈕（只靠上排第 2 格切回訊息），關掉時照樣結束那次觀看', () => {
+  const src = read('../ui/lib/term-remote.mjs')
+  assert.ok(!src.includes('term-view-back') && !src.includes("emit('back')") && !src.includes("emits: ['back']"), '沒有返回鈕、沒有 back 事件')
+  assert.ok(!src.includes("'回到訊息'"), '畫面裡沒有回到訊息按鈕')
+  // 離開（第 2 格切回訊息 → v-if 卸載）時要結束觀看：不能因為拿掉按鈕就沒人叫 stop
+  assert.match(src, /onBeforeUnmount\(\(\) => \{ stop\(\); cleanup\(\) \}\)/)
+})

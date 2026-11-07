@@ -416,7 +416,7 @@ export const ChatPane = {
   <div class="chatpane-body">
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
-  <remote-view v-if="remoteShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active" @back="remoteOn = false"></remote-view>
+  <remote-view v-if="remoteShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active"></remote-view>
   <div class="conv" v-show="!termShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>

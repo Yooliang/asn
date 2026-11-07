@@ -102,9 +102,9 @@ test('上排第 2 個大按鈕依狀態換字與圖示（#901b）：看訊息時
   assert.deepEqual(termButtonView(true), { label: '看訊息', icon: 'img/ab-window.svg' })
   assert.notEqual(termButtonView(true).icon, termButtonView(false).icon, '圖示不同，不只靠按下的顏色')
   assert.notEqual(termButtonView(true).label, termButtonView(false).label)
-  // 與別台夥伴的「看畫面」互斥（#968）：有自訂字就用它、不隨開關換；沒有才是看終端／看訊息
-  assert.deepEqual(termButtonView(false, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' })
-  assert.deepEqual(termButtonView(true, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' }, '看畫面開著時字與圖示也不變')
+  // 與別台夥伴的「看畫面」（#968）：關著時各用各的字（看畫面／看終端），開著時一律看訊息
+  assert.deepEqual(termButtonView(false, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' }, '別台夥伴：關著時是看畫面＋終端圖示')
+  assert.deepEqual(termButtonView(true, '看畫面'), { label: '看訊息', icon: 'img/ab-window.svg' }, '別台夥伴：開著時也跟本機一樣變看訊息＋對話圖示')
   assert.deepEqual(termButtonView(false, ''), { label: '看終端', icon: 'img/ab-term.svg' })
   assert.deepEqual(termButtonView(true, ''), { label: '看訊息', icon: 'img/ab-window.svg' })
   const ab = read('ui', 'lib', 'actionbar.mjs')

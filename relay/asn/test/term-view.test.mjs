@@ -302,7 +302,9 @@ test('終端上方不再有說明行（#901b）：template、樣式、原句字�
 test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高矮一樣（#901／#901b）', () => {
   const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
   const termLine = chat.split('\n').find(l => l.includes('<term-view '))
-  assert.ok(termLine && !termLine.includes('can-back') && !termLine.includes('@back='), '終端畫面不再有回到訊息的接線（別台夥伴看畫面 remote-view 的 @back 不在這一條範圍）')
+  assert.ok(termLine && !termLine.includes('can-back') && !termLine.includes('@back='), '終端畫面不再有回到訊息的接線')
+  const remoteLine = chat.split('\n').find(l => l.includes('<remote-view '))
+  assert.ok(remoteLine && !remoteLine.includes('@back='), '別台夥伴的看畫面也一樣：只靠第 2 格切回訊息，沒有返回鈕')
   assert.ok(!chat.includes('can-back'), '沒有任何地方再傳 can-back')
   assert.ok(chat.includes('@term="toggleTerm"'), '上排大按鈕負責切換')
   assert.ok(chat.includes('<div class="conv" v-show="!termShown">'), '終端開著時訊息列表收起')

@@ -55,8 +55,7 @@ export const RemoteView = {
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
   },
-  emits: ['back'],
-  setup(props, { emit }) {
+  setup(props) {
     const host = ref(null), phase = ref('pin'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0
     const where = () => (props.machine ? `「${props.machine}」上「${props.name}」` : `「${props.name}」`)
@@ -96,10 +95,9 @@ export const RemoteView = {
       }
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
-    const back = () => { stop(); emit('back') }
     onMounted(() => { if (props.active) void start() })
     onBeforeUnmount(() => { stop(); cleanup() })
-    return { host, phase, note, soon, where, back, again: start, TEXT: REMOTE_TEXT }
+    return { host, phase, note, soon, where, again: start, TEXT: REMOTE_TEXT }
   },
   template: `
 <div class="term-view term-remote">
@@ -107,7 +105,6 @@ export const RemoteView = {
   <p class="term-view-ask" role="status" v-else-if="phase === 'waiting'">{{ TEXT.waiting }}</p>
   <p class="term-remote-bar" role="status" v-else-if="phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
   <p class="term-view-lost" role="status" v-if="soon && phase !== 'ended'">{{ TEXT.soon }}</p>
-  <button class="aero-btn term-view-back" type="button" @click="back">{{ phase === 'ended' ? '回到訊息' : TEXT.stop }}</button>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ note }}<button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button></p>
 </div>`,

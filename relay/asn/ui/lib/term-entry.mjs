@@ -11,9 +11,11 @@ export const TERM_BTN_TERM = { label: '看終端', icon: 'img/ab-term.svg' }
 export const TERM_BTN_MSG = { label: '看訊息', icon: 'img/ab-window.svg' }
 /** shown：終端畫面是不是正開著。回這一格要顯示的字與圖示（按了會去的地方） */
 export function termButtonView(shown, customLabel = '') {
-  // 別台夥伴的「看畫面」（#968）：字與圖示固定，不隨開關換（跟本機服務裡夥伴的「看終端／看訊息」互斥，條件在 termBar／props.term.label）
+  // 開著：一律「看訊息」＋對話圖示（本機終端與別台『看畫面』一致，只靠第 2 格切回訊息）
+  if (shown === true) return { ...TERM_BTN_MSG }
+  // 關著：別台夥伴的『看畫面』（#968）用自訂字，圖示同終端；本機服務裡的夥伴是『看終端』
   if (typeof customLabel === 'string' && customLabel !== '') return { label: customLabel, icon: TERM_BTN_TERM.icon }
-  return shown === true ? { ...TERM_BTN_MSG } : { ...TERM_BTN_TERM }
+  return { ...TERM_BTN_TERM }
 }
 export const TERM_REOPEN_NOTE = '重新開一次這位夥伴，就能在 ASN 裡看終端'
 
