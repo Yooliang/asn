@@ -33,3 +33,19 @@ test('core：同帳號節點的舊寄件名信進「通知」並標出是哪台�
   assert.equal(core.logOf('Z/Z-收發室').length, 1)
   await core.stop()
 })
+
+test('core：舊的「○○收發室」對話列等名單載入後才併進「通知」，只併同帳號節點的；別帳號節點的同名列照舊是一般聯絡人', async () => {
+  const saved = {
+    friends: [
+      { id: 'W/額度通知收發室', node: 'W', agent: '額度通知收發室', nick: '額度通知收發室', psm: '', engine: null, lastAt: 1, known: true },
+      { id: 'Z/Z-收發室', node: 'Z', agent: 'Z-收發室', nick: 'Z-收發室', psm: '', engine: null, lastAt: 2, known: true },
+    ],
+    logs: { 'W/額度通知收發室': [{ k: 'them', text: '同帳號舊信', t: 1, id: 'a1' }], 'Z/Z-收發室': [{ k: 'them', text: '外人舊信', t: 2, id: 'a2' }] },
+  }
+  const core = new AsnCore({ transport: { list: async () => ({ members: roster() }), inbox: async () => ({ messages: [] }), ack: async () => ({}) }, store: memStore(saved), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000 })
+  await core.start()
+  assert.deepEqual(core.logOf(NOTICE_ID).map(m => m.text), ['同帳號舊信'])
+  const z = core.snapshot().friends.find(f => f.id === 'Z/Z-收發室')
+  assert.ok(z && !z.mergedInto, '別帳號節點的列不併')
+  await core.stop()
+})

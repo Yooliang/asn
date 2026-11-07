@@ -69,7 +69,7 @@ test('core：各種系統通知不建聯絡人，全部進同一個「通知」�
 })
 
 test('core：舊的「○○收發室」對話第一次載入就併進「通知」（依時間、未讀相加），舊列隱藏、原始記錄還在，第二次不重複併', async () => {
-  const friend = (id, agent) => ({ id, node: 'H', agent, nick: agent, psm: '', engine: null, onRoster: false, known: true, lastAt: 0 })
+  const friend = (id, agent) => ({ id, node: 'W', agent, nick: agent, psm: '', engine: null, onRoster: false, known: true, lastAt: 0 })
   const data = {
     friends: [friend('H/額度通知收發室', '額度通知收發室'), friend('H/W-收發室', 'W-收發室')],
     logs: {

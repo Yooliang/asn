@@ -121,8 +121,7 @@ export class AsnCore {
     const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
     for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...restoredFriendOf(f), psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
-    { const nf = this.friends.get(NOTICE_ID); if (nf) nf.status = 'none' }   // 通知對話沒有上線狀態
-    this.#mergeLegacyNotice()
+    { const nf = this.friends.get(NOTICE_ID); if (nf) nf.status = 'none' }   // 通知對話沒有上線狀態（舊列的合併等名單載入、知道哪些節點是同帳號之後才做）
     this.readDirty = cleanMarks(saved?.readDirty)   // 上次離線時沒送出的已讀位置，連線後補送
     this.emit('state')
     await this.refreshRoster()
@@ -175,6 +174,7 @@ export class AsnCore {
     for (const m of Array.isArray(members) ? members : []) for (const a of Array.isArray(m?.agents) ? m.agents : []) if (a && typeof a.name === 'string' && a.cwd_label) this.cwdOf.set(friendId(m.id, a.name), String(a.cwd_label))
     await this.refreshLocal(true)   // 本機視窗以本機現讀為準，蓋掉後台稍舊的狀態
     this.rosterLoaded = true
+    this.#mergeLegacyNotice()
     this.emit('state')
     void this.syncReads()   // 定期順便取回別台設備的已讀、補送沒送出的
     await this.#syncAvatars(members)
@@ -192,9 +192,12 @@ export class AsnCore {
     if (!quiet) this.emit('state')
   }
 
-  // 寄件節點是不是同一個帳號的：名單（後台只列同帳號的節點）有這個節點，或就是本機。名單還沒載入＝不知道，當作是
+  // 寄件節點是不是同一個帳號的：名單（後台只列同租戶的節點）有這個節點，或就是本機。
+  // 前提是「租戶＝帳號」（目前每個租戶只有一個擁有者，asn真 2026-11-07 查證）；哪天租戶內有了別人的節點，
+  // 就要改成看後台在信件上帶的「擁有者本人名下節點寄的」旗標（另開一張，排在 PR-C 之前）。名單還沒載入＝不知道：
+  // 除了本機一律先當一般信（長出聯絡人列），名單載入後由 #mergeLegacyNotice 併進「通知」
   #sameAccountNode(node) {
-    if (!this.rosterLoaded && !this.nodeOrder.length) return true
+    if (!this.rosterLoaded && !this.nodeOrder.length) return node === this.selfNode
     return node === this.selfNode || this.nodeOrder.includes(node)
   }
   // 通知是哪一台設備寄的：信上的設備名優先，其次名單上該節點的設備名，都沒有就寫「未命名設備」
@@ -208,7 +211,7 @@ export class AsnCore {
   // 往來記錄依時間合併（有信件 id 的去重）、未讀相加；舊列不刪、本機的原始記錄也不動，只標 mergedInto 讓畫面不再列出。
   // 已併過的（有 mergedInto）不會再併第二次；沒有舊列就不建立「通知」對話（從沒收過通知的帳號名單上不會多一列）
   #mergeLegacyNotice() {
-    const olds = [...this.friends.values()].filter(f => isLegacyNoticeFriend(f) && !isMergedAway(f))
+    const olds = [...this.friends.values()].filter(f => isLegacyNoticeFriend(f) && !isMergedAway(f) && this.#sameAccountNode(f.node))   // 別帳號節點的同名列不併，照一般聯絡人
     if (!olds.length) return
     let to = this.friends.get(NOTICE_ID)
     if (!to) { to = this.#decorate({ ...noticeFriend(), unread: 0, waiting: false, replyTo: null }); this.friends.set(NOTICE_ID, to) }
