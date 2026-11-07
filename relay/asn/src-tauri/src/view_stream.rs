@@ -695,4 +695,62 @@ mod tests {
     fn 傳輸沒接上就送不出去() {
         assert!(NoTransport.send("x").is_err());
     }
+
+    /// 從一段程式碼找出 get("鍵")／field("鍵")／s("鍵") 讀的鍵
+    fn read_keys(code: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = code;
+        while let Some(i) = rest.find("(\"") {
+            let before = &rest[..i];
+            let name: String = before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect::<Vec<_>>().into_iter().rev().collect();
+            let after = &rest[i + 2..];
+            if let Some(j) = after.find('"') {
+                let key = &after[..j];
+                if ["get", "field", "s"].contains(&name.as_str()) && !key.is_empty() && key.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                    out.push(key.to_string());
+                }
+            }
+            rest = after;
+        }
+        out
+    }
+
+    /// 取一個函式的本體：頂層函式到 "\n}"，方法到 "\n    }"
+    fn fn_body<'a>(src: &'a str, head: &str, method: bool) -> &'a str {
+        let src_from = &src[src.find(head).unwrap_or_else(|| panic!("找不到 {head}"))..];
+        let end = if method { "\n    }" } else { "\n}" };
+        &src_from[..src_from.find(end).unwrap_or(src_from.len())]
+    }
+
+    #[test]
+    fn 契約_電腦端讀的後台欄位都在共用清單裡() {
+        let contract: serde_json::Value = serde_json::from_str(include_str!("../../../../supabase/functions/_shared/term_view_contract.json")).unwrap();
+        let listed = |k: &str| -> Vec<String> { contract[k].as_array().unwrap_or_else(|| panic!("清單少了 {k}")).iter().map(|v| v.as_str().unwrap().to_string()).collect() };
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let me = include_str!("view_stream.rs").replace("\r\n", "\n");
+        let remote = include_str!("view_remote.rs").replace("\r\n", "\n");
+        let cases: [(&str, String); 6] = [
+            ("term_view_start", fn_body(&lib, "async fn term_view_remote_start(", false).to_string()),
+            ("term_view_report", fn_body(&remote, "pub fn step_of(", false).to_string()),
+            ("term_view_pending.requests[]", fn_body(&me, "pub fn accept_request(", false).to_string()),
+            ("term_view_pending.active[]", fn_body(&me, "pub fn ctl_from_active(", false).to_string()),
+            ("term_view_notice", fn_body(&lib, "    fn notify(&mut self)", true).to_string()),
+            ("term_view_pending", fn_body(&lib, "    fn ctl(&mut self)", true).to_string()),
+        ];
+        for (action, code) in cases {
+            let keys = read_keys(&code);
+            assert!(!keys.is_empty(), "{action}：找不到讀欄位的程式，守門失效");
+            let ok = listed(action);
+            for k in keys {
+                assert!(ok.contains(&k), "{action} 讀了 {k}，但共用清單沒有（Edge 不一定會回）");
+            }
+        }
+        // 被看的那台領請求時讀的
+        let poll = fn_body(&lib, "fn start_view_poller(", false);
+        let mut ok = listed("term_view_pending");
+        ok.extend(listed("term_view_pending.requests[]"));
+        for k in read_keys(poll) {
+            assert!(ok.contains(&k), "start_view_poller 讀了 {k}，但共用清單沒有");
+        }
+    }
 }

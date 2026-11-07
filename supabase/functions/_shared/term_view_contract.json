@@ -1,0 +1,36 @@
+{
+  "_說明": "別台看畫面：電腦端（Rust）從後台回傳讀的欄位。Edge 的回傳必須涵蓋這些鍵（term_view_ctl_test.ts），Rust 讀的鍵也不能超出這份（view_stream.rs 的契約測試）。改任一邊都要同步改這裡。",
+  "term_view_start": [
+    "topic",
+    "to_pub"
+  ],
+  "term_view_report": [
+    "status",
+    "end_reason",
+    "t_eph_pub",
+    "t_sig"
+  ],
+  "term_view_pending": [
+    "requests",
+    "active"
+  ],
+  "term_view_pending.requests[]": [
+    "id",
+    "from_node",
+    "from_name",
+    "from_pub",
+    "window_name",
+    "topic",
+    "expires_s",
+    "d_eph_pub",
+    "d_sig"
+  ],
+  "term_view_pending.active[]": [
+    "id",
+    "status",
+    "viewer_stale"
+  ],
+  "term_view_notice": [
+    "notify"
+  ]
+}

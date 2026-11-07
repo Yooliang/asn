@@ -27,9 +27,9 @@ Deno.test("看的那台的動作沒簽章一律 403，也不碰資料庫", async
 });
 
 Deno.test("發起：只傳認得的欄位，敲對方門鈴，回應不帶門鈴主題", async () => {
-  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t" });
+  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: PUB });
   const r = await handleTermViewAction(m.deps, me, "term_view_start", { ...start, text: "rm -rf /", keys: "x" }, USER);
-  assertEquals(r.body, { id: ID, topic: "tv_x" });
+  assertEquals(r.body, { id: ID, topic: "tv_x", to_pub: PUB });
   assertEquals(m.rung, ["bell-t"]);
   assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_to_node: "hom7a1", p_window_name: "小乙", p_d_eph_pub: PUB, p_d_sig: D_SIG, p_expires_at: start.expires_at });
 });
@@ -89,4 +89,26 @@ Deno.test("領取、錯誤、不認得的動作", async () => {
   assertEquals((await handleTermViewAction(mk({}, new Error("x")).deps, me, "term_view_pending", {}, null)).body.error, "internal");
   assertEquals((await handleTermViewAction(mk().deps, me, "term_view_send", {}, USER)).status, 404);
   for (const a of TERM_VIEW_SIGNED_ACTIONS) assertEquals(TERM_VIEW_ACTIONS.has(a), true);
+});
+
+// 契約：資料庫回了電腦端要讀的欄位，Edge 不能在轉送時漏掉（0.2.8 漏過 to_pub）
+const CONTRACT: Record<string, string[]> = JSON.parse(await Deno.readTextFile(new URL("./term_view_contract.json", import.meta.url)));
+const full = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, k === "viewer_stale" ? false : k === "expires_s" ? 1 : `v_${k}`]));
+Deno.test("契約：電腦端讀的欄位 Edge 都會回", async () => {
+  const has = (body: unknown, keys: string[], where: string) => {
+    for (const k of keys) assertEquals(Object.prototype.hasOwnProperty.call(body, k), true, `${where} 少了 ${k}`);
+  };
+  const st = await handleTermViewAction(mk({ id: ID, ...full(CONTRACT.term_view_start) }).deps, me, "term_view_start", start, USER);
+  has(st.body, CONTRACT.term_view_start, "term_view_start");
+  const rep = await handleTermViewAction(mk(full(CONTRACT.term_view_report)).deps, me, "term_view_report", { id: ID, state: "watching" }, USER);
+  has(rep.body, CONTRACT.term_view_report, "term_view_report");
+  const row = full(CONTRACT["term_view_pending.requests[]"]);
+  const act = full(CONTRACT["term_view_pending.active[]"]);
+  const pend = await handleTermViewAction(mk({ requests: [row], active: [act] }).deps, me, "term_view_pending", {}, null);
+  has(pend.body, CONTRACT.term_view_pending, "term_view_pending");
+  const b = pend.body as { requests: unknown[]; active: unknown[] };
+  has(b.requests[0], CONTRACT["term_view_pending.requests[]"], "term_view_pending.requests[]");
+  has(b.active[0], CONTRACT["term_view_pending.active[]"], "term_view_pending.active[]");
+  const no = await handleTermViewAction(mk({ notify: "sent", bell_topics: [] }).deps, me, "term_view_notice", { id: ID }, null);
+  has(no.body, CONTRACT.term_view_notice, "term_view_notice");
 });
