@@ -125,6 +125,8 @@ if [ "$up" != yes ]; then
   { pgrep -a wezterm; ls -laR "$OUT" /run/user 2>/dev/null | head -60; } > diag.log 2>&1
   exit 0
 fi
+# daemonize 模式：一開始抓到的是 fork 之前的那個程序（會馬上結束），等服務真的連得上之後再找一次，才是常駐的那個
+if [ "$MODE" = daemonize ]; then MUXPID=$(pgrep -n -f wezterm-mux-server || echo 0); fi
 note "起 mux-server（沒有 DISPLAY）" "✔" "pid $MUXPID，啟動者 pid $STARTER"
 
 # ---- 4. spawn 窗格、送字、讀出 ----
