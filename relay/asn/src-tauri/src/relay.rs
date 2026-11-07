@@ -780,6 +780,12 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查看帳號列表")?;
         self.api_signed("acct_roster", Some(json!({})), Some(t)).await
     }
+    /// 額度查詢代碼（todo-next-193）：開或撤。要本人簽章；開的時候回 { code }，只有這一次拿得到
+    pub async fn quota_share_signed(&self, create: bool, vendor: &str, account: &str, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法變更查詢代碼")?;
+        let action = if create { "acct_share_create" } else { "acct_share_revoke" };
+        self.api_signed(action, Some(json!({ "vendor": vendor, "account": account })), Some(t)).await
+    }
     /// 送出「切換帳號」指令（只帶目標 email）。要本人簽章；回 { id }
     pub async fn acct_switch_signed(&self, node: &str, email: &str, token: Option<&str>) -> Result<Value, String> {
         let b = build_acct_switch_body(node, email)?;

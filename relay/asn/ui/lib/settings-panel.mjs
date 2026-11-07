@@ -17,11 +17,13 @@ import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
+import { QUOTA_TEXT, shareKey } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { TERM_SERVER_MISSING_NOTE, keyProtectionNote, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
+  'quota-source', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-input-no-ask', 'bridge-term-server', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
@@ -99,8 +101,17 @@ export const SettingsPanel = {
       return out
     }
     const act = (op, value) => emit('act', op, value)
+    // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
+    const mmEmail = ref('')
+    const mmKey = ref('')
+    const addMinimax = () => {
+      act('quota-mm-add', { email: mmEmail.value, key: mmKey.value })
+      mmKey.value = ''
+      mmEmail.value = ''
+    }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { KNOWN,
+      QUOTA_TEXT, shareKey, mmEmail, mmKey, addMinimax,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, TERM_SERVER_MISSING_NOTE, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -190,10 +201,56 @@ export const SettingsPanel = {
                     <span class="dv-sw" v-if="switchTargets(v.key, a).length" role="group" :aria-label="'切換 ' + a.account">
                       <button class="aero-btn" type="button" v-for="t in switchTargets(v.key, a)" :key="t.key" :disabled="st.accounts && st.accounts.busy" @click="act(t.op, t.value)">切換到{{ t.label }}</button>
                     </span>
+                    <span class="dv-share" v-if="st.quotaReaders">
+                      <span class="dv-cur" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
+                      <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</button>
+                      <button class="aero-btn" type="button" v-if="a.shared" :disabled="st.quotaReaders.busy" @click="act('quota-unshare', { vendor: v.key, account: a.account })">{{ st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmRevoke : QUOTA_TEXT.shareRevoke }}</button>
+                      <small class="acct-warn" v-if="st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareAgainWarn }}</small>
+                      <small class="acct-warn" v-if="st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareRevokeWarn }}</small>
+                    </span>
+                    <div class="dv-code" role="status" v-if="st.quotaReaders && st.quotaReaders.code && st.quotaReaders.code.key === shareKey(v.key, a.account)">
+                      <b>{{ QUOTA_TEXT.codeTitle }}</b>
+                      <code>{{ st.quotaReaders.code.value }}</code>
+                      <small>{{ QUOTA_TEXT.codeOnce }}</small>
+                      <span class="dv-ibtns">
+                        <button class="aero-btn" type="button" @click="act('quota-copy')">{{ st.quotaReaders.copied ? QUOTA_TEXT.copied : QUOTA_TEXT.copy }}</button>
+                        <button class="aero-btn" type="button" @click="act('quota-close')">{{ QUOTA_TEXT.close }}</button>
+                      </span>
+                    </div>
                   </li>
                 </ul>
               </div>
             </section>
+          <section class="dv-my dv-readers" v-if="st.quotaReaders" :aria-label="QUOTA_TEXT.title">
+            <h3 class="dv-my-h">{{ QUOTA_TEXT.title }}</h3>
+            <small>{{ QUOTA_TEXT.note }}</small>
+            <label class="chk"><input type="checkbox" :checked="st.quotaReaders.grok" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'grok', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.grok }}</span></label>
+            <small>{{ QUOTA_TEXT.grokNote }}</small>
+            <small class="acct-warn" v-if="st.quotaReaders.grok && st.quotaReaders.status.grok">{{ st.quotaReaders.status.grok }}</small>
+            <label class="chk"><input type="checkbox" :checked="st.quotaReaders.agy" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'agy', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.agy }}</span></label>
+            <small>{{ QUOTA_TEXT.agyNote }}</small>
+            <small v-if="st.quotaReaders.agy">{{ st.quotaReaders.agyAccount ? QUOTA_TEXT.agyAccount(st.quotaReaders.agyAccount) : QUOTA_TEXT.agyNoAccount }}</small>
+            <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
+            <b>{{ QUOTA_TEXT.minimax }}</b>
+            <small v-if="!st.quotaReaders.minimaxSupported">{{ QUOTA_TEXT.minimaxUnsupported }}</small>
+            <template v-else>
+              <small>{{ QUOTA_TEXT.minimaxNote }}</small>
+              <ul class="dv-accts" v-if="st.quotaReaders.minimax.length">
+                <li class="dv-acct" v-for="m in st.quotaReaders.minimax" :key="m.email">
+                  <span class="dv-mail">{{ m.email }}</span>
+                  <span class="dv-side"><button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-mm-remove', m.email)">{{ st.quotaReaders.confirm === 'minimax\\n' + m.email ? QUOTA_TEXT.minimaxConfirmRemove : QUOTA_TEXT.minimaxRemove }}</button></span>
+                  <small class="dv-why acct-warn" v-if="!m.hasKey">{{ QUOTA_TEXT.minimaxNoKey }}</small>
+                  <small class="dv-why acct-warn" v-else-if="m.status">{{ m.status }}</small>
+                </li>
+              </ul>
+              <form class="dv-mm" v-if="st.quotaReaders.minimax.length < 2" @submit.prevent="addMinimax">
+                <input type="email" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxEmail" :aria-label="QUOTA_TEXT.minimaxEmail" v-model="mmEmail" />
+                <input type="password" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxKey" :aria-label="QUOTA_TEXT.minimaxKey" v-model="mmKey" />
+                <button class="aero-btn" type="submit" :disabled="st.quotaReaders.busy">{{ QUOTA_TEXT.minimaxAdd }}</button>
+              </form>
+            </template>
+            <small role="status" v-if="st.quotaReaders.msg">{{ st.quotaReaders.msg }}</small>
+          </section>
           <small class="dv-none" v-else>{{ ROSTER_TEXT.noList }}</small>
         </div>
       </template>
