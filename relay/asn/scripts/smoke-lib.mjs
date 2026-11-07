@@ -494,8 +494,44 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// #930 帳號永遠不能切到這支手機自己：noplat＝這支手機的平台還沒讀到（設備樹會先把它當成電腦）；android＝讀到了
+export const MNOSELF_PROBES = { noplat: { mnoself: 'noplat' }, android: { mnoself: 'android' } }
+export const mnoselfProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  btn.click(); await sleep(500);
+  const rows = () => [...document.querySelectorAll('.m-dv-row')].filter(vis);
+  const n = rows().length;
+  if (n < 3) return { ok: false, why: '設備列少於 3 列：' + n };
+  let sawSelf = false;
+  for (let i = 0; i < n; i++) {
+    const row = rows()[i];
+    const name = row?.querySelector('b')?.textContent ?? '';
+    const go = row?.querySelector('.m-dv-go');
+    if (!go) continue;
+    go.click(); await sleep(500);
+    if (name.includes('這支手機')) {
+      sawSelf = true;
+      if ([...document.querySelectorAll('.m-dv-sw')].some(vis)) return { ok: false, why: '「這支手機」的細部頁出現切換鈕' };
+    }
+    const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis);
+    if (back) { back.click(); await sleep(400) }
+  }
+  if (!sawSelf) return { ok: false, why: '設備列表沒有「這支手機」' };
+  let seg = null;
+  for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="accounts"]'); if (!seg) await sleep(100) }
+  if (!seg) return { ok: false, why: '找不到「帳號」分頁鈕' };
+  seg.click(); await sleep(600);
+  const sws = [...document.querySelectorAll('.m-dv-sw')].filter(vis).map(b => b.textContent.trim());
+  if (sws.some(t => t.includes('這支手機') || t.includes('測試機'))) return { ok: false, why: '帳號頁出現切到這支手機的按鈕：' + sws.join('、') };
+  if (!sws.some(t => t.includes('辦公室'))) return { ok: false, why: '別台電腦的切換鈕不見了：' + (sws.join('、') || '（沒有按鈕）') };
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mnoself ? '手機不能切到本機檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mnoself ? mnoselfProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -533,6 +569,12 @@ function layoutRoster(now = SMOKE_NOW) {
     { vendor: 'claude', account: 'work@example.com', plan: 'claude_pro', seen_at: read, seen_node: 'Q', nodes: [{ node: 'Q', current: true, reported_at: read }],
       windows: [{ name: 'five_hour', left_pct: 64, resets_at: toMinute(now + 2 * 3600_000), read_at: read, read_node: 'Q' }, { name: 'weekly', left_pct: 50, resets_at: toMinute(now + 3 * 24 * 3600_000), read_at: read, read_node: 'Q' }] }] }
 }
+// #930：這支手機也掛著 work@（不是使用中），本機若被當成切換對象就會出現「切換到這支手機」
+function noselfRoster(now = SMOKE_NOW) {
+  const r = layoutRoster(now)
+  const read = toMinute(now - 10 * 60_000)
+  return { ...r, accounts: r.accounts.map(a => (a.account === 'work@example.com' ? { ...a, nodes: [...a.nodes, { node: 'P', current: false, reported_at: read }] } : a)) }
+}
 const layoutAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
   Q: { asn_online: true, reported_at: toMinute(now - 5 * 60_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
   R: { asn_online: false, reported_at: toMinute(now - 9 * 24 * 3600_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
@@ -562,6 +604,8 @@ export const SCENARIOS = [
   { name: 'm-layout-accounts', page: 'm.html', state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-412.png' },
   { name: 'm-layout-accounts-360', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-360.png' },
   { name: 'm-layout-accounts-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accountsBig, shot: 'm-layout-accounts-big.png' },
+  { name: 'm-noself-noplat', page: 'm.html', state: { signedIn: true, mnoself: 'noplat' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.noplat, shot: 'm-noself-noplat.png' },
+  { name: 'm-noself-android', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.android, shot: 'm-noself-android.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -656,6 +700,14 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } }
     t.android_launchers = { machines: [] }
     t.android_acct_roster = layoutRoster()
+    t.android_acct_list = layoutAcctList()
+  }
+  if (scenario.state.mnoself) {
+    t.relay_list = { members: MACCT_MEMBERS.two }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } }
+    // noplat：後台的設備清單沒有這支手機（平台還沒回報）；android：有，平台是 android
+    t.android_launchers = { machines: scenario.state.mnoself === 'android' ? [{ node: 'P', platform: 'android', launcher: null }] : [] }
+    t.android_acct_roster = noselfRoster()
     t.android_acct_list = layoutAcctList()
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }

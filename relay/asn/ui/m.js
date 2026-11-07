@@ -30,7 +30,7 @@ import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/acco
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
-import { ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
+import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -601,7 +601,9 @@ const app = createApp({
     }
     // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
     const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
-    const acctSwitchOn = async (node, email) => { await openAcctDevice(node); startAcctSwitch(email) }
+    // 能不能把帳號切到這一台：手機版的本機永遠不行（判斷只在 isSwitchTarget 一處）
+    const acctCanSwitchTo = node => isSwitchTarget(acctDevs.value.find(d => d.key === node), info.node)
+    const acctSwitchOn = async (node, email) => { if (!acctCanSwitchTo(node)) return; await openAcctDevice(node); startAcctSwitch(email) }
     // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
     const setupSt = reactive({ node: '', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' })
     let setupTimer = null
@@ -679,14 +681,14 @@ const app = createApp({
     const gripKey = (key, e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); acctMove(key, e.key === 'ArrowUp' ? -1 : 1) } }
     // 點某個帳號的「切換」＝選好它並進確認畫面（要先看過確認才能送出）
     function startAcctSwitch(email) {
-      if (acctSw.phase !== 'pick') return
+      if (acctSw.phase !== 'pick' || !acctCanSwitchTo(acctCur.value?.key)) return
       acctSw.picked = email
       if (acctView.value.canPick && acctView.value.pickEmail) acctSw.phase = 'confirm'
       else acctSw.picked = ''
     }
     const acctBackToPick = () => { acctSw.phase = 'pick'; acctSw.picked = '' }
     async function submitAcct() {
-      if (acctSw.phase !== 'confirm' || !acctView.value.pickEmail) return   // 一定要先看過確認畫面才送
+      if (acctSw.phase !== 'confirm' || !acctView.value.pickEmail || !acctCanSwitchTo(acctCur.value?.key)) return   // 一定要先看過確認畫面才送；不能切到這支手機自己
       const token = ++acctToken, run = ++acctRunSeq, email = acctView.value.pickEmail, node = acctCur.value.key, label = acctCur.value.label
       acctSw.phase = 'run'
       // 離開進行中的畫面（退回列表、離開設備與帳號）後：指令照樣送出、照樣等結果，只是不再更新畫面；送出另一個切換才停止等這一個
@@ -1115,7 +1117,7 @@ const app = createApp({
       pq, PERMREQ_TEXT, permReqTitle, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,

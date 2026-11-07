@@ -119,7 +119,7 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /const openAcct = g => askBeforeLeave\(acctPage\(\), \(\) => void openAcctNow\(g\)\)/, '開新夥伴第 2 步還沒送出時先問一句')
   assert.match(js, /function startAcctSwitch\(email\)[\s\S]*?acctSw\.phase = 'confirm'/)
   assert.match(js, /acctView\.value\.canPick/, '進確認前仍檢查能不能切換')
-  assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail\) return/, '一定先看過確認畫面才送')
+  assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail \|\| !acctCanSwitchTo\(acctCur\.value\?\.key\)\) return/, '一定先看過確認畫面才送（也不能送到這支手機自己，#930）')
   assert.match(js, /acctSw\.phase = 'run'\n[\s\S]{0,200}const v = await runAcctSwitch\(acctTransport, node, email, \{ onUpdate: v => \{ if \(token === acctToken\) acctSw\.view = v \}, cancelled: \(\) => run !== acctRunSeq \}\)/, '送出後進進度畫面；離開畫面後照樣等結果（只有送出新的切換才停）')
   assert.match(js, /android_acct_list/)
   assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '在第四頁籤打開（#461）')
