@@ -72,18 +72,22 @@ Deno.test("parseReport：windows 清完一窗都不剩就不帶，讓資料庫�
   assertEquals(r[0].five_hour_pct, 40);
 });
 
-Deno.test("parseReport：claude、codex 放行 windows；grok 一律不收額度；windows 壞掉不退回整份", () => {
+Deno.test("parseReport：claude、codex 放行 windows；grok 只收每週、不收舊四欄；minimax 只收 5 小時與每週；windows 壞掉不退回整份", () => {
   const r = parseReport({ accounts: [
     { ...C, windows: [{ name: "weekly", left_pct: 50, read_at: AT }, { name: "weekly", left_pct: 999, read_at: AT }] },
     { vendor: "codex", email: "c@x.test", plan: "plus", current: false, windows: [{ name: "w300", left_pct: 70, resets_at: RESET, read_at: AT }] },
-    { vendor: "grok", email: "g@x.test", windows: [{ name: "weekly", left_pct: 50, read_at: AT }], five_hour_pct: 5, at: AT },
+    { vendor: "grok", email: "g@x.test", windows: [{ name: "five_hour", left_pct: 9, read_at: AT }, { name: "weekly", left_pct: 50, read_at: AT }], five_hour_pct: 5, at: AT },
     { ...C, email: "b@x.test", windows: "壞掉" },
+    { vendor: "grok", email: "h@x.test" },
+    { vendor: "minimax", email: "m@x.test", windows: [{ name: "w60", left_pct: 1, read_at: AT }, { name: "five_hour", left_pct: 40, read_at: AT }] },
   ] })!;
   assert(r);
   assertEquals(r[0].windows, [{ name: "weekly", left_pct: 50, resets_at: null, read_at: AT }]);
   assertEquals(r[1].windows, [{ name: "w300", left_pct: 70, resets_at: RESET, read_at: AT }]);
-  assertEquals(r[2], { vendor: "grok", email: "g@x.test", plan: "", current: false });
+  assertEquals(r[2], { vendor: "grok", email: "g@x.test", plan: "", current: false, windows: [{ name: "weekly", left_pct: 50, resets_at: null, read_at: AT }] });
   assertEquals(r[3], { ...C, email: "b@x.test" }, "windows 不是陣列就當沒帶");
+  assertEquals(r[4], { vendor: "grok", email: "h@x.test", plan: "", current: false }, "舊用戶端的 grok 不帶窗，內容不變");
+  assertEquals(r[5].windows, [{ name: "five_hour", left_pct: 40, resets_at: null, read_at: AT }]);
   assert(!("windows" in parseReport({ accounts: [C] })![0]), "舊用戶端不帶就不多欄位");
 });
 
