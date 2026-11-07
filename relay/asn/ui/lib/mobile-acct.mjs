@@ -168,16 +168,21 @@ export const ACCT_SWITCH_REASON = Object.freeze({
 })
 
 /**
- * 手機上「能不能把帳號切到這一台」的唯一判斷（#930：手機上不跑夥伴，帳號永遠不能切到這支手機自己）。
+ * 手機上「能不能把帳號切到這一台」的基本判斷（#930：手機上不跑夥伴，帳號永遠不能切到這支手機自己）。
+ * 細部頁的「切換」鈕、從帳號頁點切換、進確認畫面、送出前都用這一層。
  * 本機的認法不靠設備樹的 kind／平台：平台還沒讀到（android_launchers 還沒回來、舊版沒回報平台）時，
  * 這支手機在設備樹裡會暫時被當成「電腦」，但它的節點代號一定等於 selfNode。
  * selfNode 是空的（還認不出這支手機是哪一台）時一律不給切換，寧可少列也不列錯。
+ * **不看 hidden／removed**：已隱藏的電腦一樣點得進細部頁（自動隱藏含「夥伴全封存」，在線能切的電腦也可能被隱藏），細部頁照樣能切。
  */
 export function isSwitchTarget(d, selfNode) {
   if (!d || !selfNode) return false
   if (d.self || d.key === selfNode) return false
-  return !d.hidden && !d.removed && d.kind !== '手機'
+  return d.kind !== '手機'
 }
+
+/** 帳號頁「切換到…」要不要列出這一台：基本判斷之外，再排掉已隱藏、已永久移除的 */
+export const isListedSwitchTarget = (d, selfNode) => isSwitchTarget(d, selfNode) && !d.hidden && !d.removed
 
 /**
  * 帳號分頁：這個帳號在每一台電腦的「切換到某台」按鈕（手機只有 Claude 能切換；手機自己沒有帳號）。
@@ -191,7 +196,7 @@ export function acctSwitchTargets(devices, vendor, account, selfNode) {
   if (!mail) return []
   const out = []
   for (const d of Array.isArray(devices) ? devices : []) {
-    if (!isSwitchTarget(d, selfNode)) continue
+    if (!isListedSwitchTarget(d, selfNode)) continue
     const v = (d.vendors ?? []).find(x => x.key === 'claude')
     if (!v) continue
     const has = (v.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)

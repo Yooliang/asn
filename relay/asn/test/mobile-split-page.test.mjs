@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ACCT_SETTING_KEYS, MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows } from '../ui/lib/mobile-settings.mjs'
-import { ACCT_SWITCH_REASON, ACCT_TABS, acctSwitchTargets as targetsOf, acctTabOf, isSwitchTarget } from '../ui/lib/mobile-acct.mjs'
+import { ACCT_SWITCH_REASON, ACCT_TABS, acctSwitchTargets as targetsOf, acctTabOf, isListedSwitchTarget, isSwitchTarget } from '../ui/lib/mobile-acct.mjs'
 const SELF = 'PHONE'
 // 手機上一定知道自己是哪一台；原本的測試都在「認得出本機」的情況下
 const acctSwitchTargets = (devs, vendor, a, self = SELF) => targetsOf(devs, vendor, a, self)
@@ -105,6 +105,19 @@ test('#930 帳號永遠不能切到這支手機自己：平台還沒讀到被當
   assert.equal(isSwitchTarget({ key: 'OLD', kind: '手機' }, SELF), false, '別支手機也不行')
   assert.equal(isSwitchTarget(other, ''), false)
   assert.equal(isSwitchTarget(null, SELF), false)
+})
+
+test('#930 判斷分兩層：已隱藏的電腦細部頁照樣能切；帳號頁的「切換到…」才排掉已隱藏、已移除的', () => {
+  const hidden = { key: 'H', label: '藏起來的', kind: '電腦', hidden: true }
+  const removed = { key: 'X', label: '移除的', kind: '電腦', removed: true }
+  assert.equal(isSwitchTarget(hidden, SELF), true, '已隱藏的電腦一樣點得進細部頁，細部頁照樣能切')
+  assert.equal(isSwitchTarget(removed, SELF), true)
+  assert.equal(isListedSwitchTarget(hidden, SELF), false, '帳號頁不列已隱藏的')
+  assert.equal(isListedSwitchTarget(removed, SELF), false, '帳號頁不列已移除的')
+  assert.equal(isListedSwitchTarget({ key: 'PC', kind: '電腦' }, SELF), true)
+  assert.equal(isListedSwitchTarget({ key: SELF, kind: '電腦' }, SELF), false, '本機兩層都不行')
+  const claudeOn = { key: 'claude', switchable: true, switchHint: '', accounts: [{ email: 'w@example.test', current: false }] }
+  assert.deepEqual(acctSwitchTargets([{ ...hidden, vendors: [claudeOn] }, { ...removed, vendors: [claudeOn] }], 'claude', { account: 'w@example.test' }), [], '帳號頁不列已隱藏、已移除的')
 })
 
 test('#930 細部頁與送出也走同一個判斷：本機的細部頁不出現「切換」，送出前再擋一次', () => {
