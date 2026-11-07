@@ -395,7 +395,7 @@ export const ChatPane = {
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
+  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <div class="conv" v-show="!termShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>

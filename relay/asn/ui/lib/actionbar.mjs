@@ -16,7 +16,7 @@ import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
 import { placeMenu } from './menu-place.mjs'
-import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP } from './term-entry.mjs'
+import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP, termButtonView } from './term-entry.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -342,6 +342,7 @@ export const ActionBar = {
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const termOn = computed(() => props.term?.on === true)
     const termTip = computed(() => (termOn.value ? TERM_BACK_TIP : TERM_TIP))
+    const termBtn = computed(() => termButtonView(termOn.value))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
     // pi 的模型清單：本機的直接問 pi；別台的用名單視窗收到的回報（和名單右鍵同一份）
@@ -472,7 +473,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, onWindow, termOn, termTip, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { root, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -480,8 +481,8 @@ export const ActionBar = {
     <button class="abtn" type="button" data-slot="call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall">
       <img src="img/ab-call.svg" alt="" width="32" height="32"><span class="ab-name">通話</span>
     </button>
-    <button class="abtn" type="button" data-slot="window" :class="{ on: slot.window.term && termOn }" :aria-pressed="slot.window.term ? String(termOn) : null" :aria-disabled="slot.window.ok && (slot.window.wake || slot.window.term || !cons.busy) ? null : 'true'" :aria-label="slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : slot.window.term ? termTip : consoleView.tip) : slot.window.reason" @click="onWindow">
-      <img :src="slot.window.wake ? 'img/ab-wake.svg' : slot.window.term ? 'img/ab-term.svg' : 'img/ab-window.svg'" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.label }}</span>
+    <button class="abtn" type="button" data-slot="window" :class="{ on: slot.window.term && termOn }" :aria-pressed="slot.window.term ? String(termOn) : null" :aria-disabled="slot.window.ok && (slot.window.wake || slot.window.term || !cons.busy) ? null : 'true'" :aria-label="slot.window.term ? termBtn.label : slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : slot.window.term ? termTip : consoleView.tip) : slot.window.reason" @click="onWindow">
+      <img :src="slot.window.wake ? 'img/ab-wake.svg' : slot.window.term ? termBtn.icon : 'img/ab-window.svg'" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.term ? termBtn.label : slot.window.label }}</span>
     </button>
     <div class="ab-wrap">
       <button class="abtn" type="button" data-slot="model" :class="{ on: model.open }" :aria-disabled="slot.model.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" :title="slot.model.ok ? MODEL_TIP : slot.model.reason" @click="onModel">

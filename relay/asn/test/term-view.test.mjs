@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createFollow, createTermViewSession, followTarget, frameToWrite, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
+import { TERM_VIEW_LATEST, createFollow, createTermViewSession, followScrollTo, followTarget, frameToWrite, latestVisible, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
@@ -215,33 +215,108 @@ test('跟著游標：游標在下面就捲下去，多留一列；不超過範�
   assert.equal(followTarget({ rowHeight: 10, clientHeight: 500, scrollHeight: 400, cursorRow: 39 }), 0, '整個放得下')
 })
 
-test('跟著游標：往上捲就不跟，捲回游標或底部再跟；自己捲的不算', () => {
+test('跟著游標（#904）：只有人在底部附近才跟；往上捲離開就停，捲回底部附近才恢復；自己捲的不算', () => {
+  // onScroll(scrollTop, max)：max＝外層可捲的最大值。舊規則是和「游標列＋2」比，游標在中間時一捲過去就被拉回
   const f = createFollow()
-  assert.equal(f.following(), true)
+  assert.equal(f.following(), true, '一開始跟隨')
   f.place(240)
-  f.onScroll(240, 240)
-  assert.equal(f.following(), true, '程式自己捲的')
-  f.onScroll(100, 240)
-  assert.equal(f.following(), false, '使用者往上捲')
-  f.onScroll(150, 240)
-  assert.equal(f.following(), false, '還沒捲回去')
-  f.onScroll(240, 240)
-  assert.equal(f.following(), true, '捲回游標，再跟（就算和上次程式設定的位置相同）')
-  f.onScroll(100, 240)
-  f.onScroll(320, 240)
-  assert.equal(f.following(), true, '捲到底，再跟')
+  f.onScroll(240, 400)
+  assert.equal(f.following(), true, '程式自己捲的（雖然不在底部）不算使用者捲的')
+  f.onScroll(100, 400)
+  assert.equal(f.following(), false, '使用者往上捲離開底部')
+  f.onScroll(240, 400)
+  assert.equal(f.following(), false, '捲到舊規則的游標位置（240）不能恢復：人還不在底部')
+  f.onScroll(300, 400)
+  assert.equal(f.following(), false, '中間位置照樣不跟')
+  f.onScroll(398, 400)
+  assert.equal(f.following(), true, '捲回底部附近（差 2px 內）恢復')
+  f.onScroll(100, 400)
+  f.onScroll(400, 400)
+  assert.equal(f.following(), true, '捲到最底恢復')
+  f.onScroll(100, 400)
+  assert.equal(f.following(), false)
+  f.onScroll(397, 400)
+  assert.equal(f.following(), false, '差 3px 還不算底部')
+  f.resume(400)
+  assert.equal(f.following(), true, '點「回到最新」直接恢復')
+  f.onScroll(400, 400)
+  assert.equal(f.following(), true, '回到最新捲出來的事件不算使用者捲的')
 })
 
-test('打開終端時收起訊息區、有切回按鈕；視窗高矮一樣（#901）', () => {
+test('跟著游標（#904）：停止跟隨時每幅都不得設 scrollTop；跟隨時只往下推進、不後退', () => {
+  // [跟隨中, 目前 scrollTop, 目標, 預期]
+  const rows = [
+    [true, 0, 200, 200],      // 游標在下面：往下推
+    [true, 200, 200, null],   // 已經在位置：不動
+    [true, 380, 200, null],   // 人在更下面（底部）：不後退
+    [false, 100, 200, null],  // 人往上看舊的：不拉走
+    [false, 250, 200, null],  // 捲在中間，新幅進來：不被拉走
+    [false, 0, 400, null],    // 不跟隨時目標再大也不動
+  ]
+  for (const [following, current, target, want] of rows) {
+    assert.equal(followScrollTo({ following, current, target }), want, JSON.stringify({ following, current, target }))
+  }
+  // 連續十幅：人在中間（不跟隨）→ scrollTop 一次都沒被設
+  const f = createFollow()
+  f.onScroll(100, 400)
+  let sets = 0
+  for (let i = 0; i < 10; i++) if (followScrollTo({ following: f.following(), current: 100, target: 200 + i }) !== null) sets++
+  assert.equal(sets, 0)
+})
+
+test('「回到最新」提示：只有停止跟隨才顯示', () => {
+  const f = createFollow()
+  assert.equal(latestVisible(f.following()), false, '跟隨中不顯示')
+  f.onScroll(100, 400)
+  assert.equal(latestVisible(f.following()), true, '停止跟隨才顯示')
+  f.onScroll(400, 400)
+  assert.equal(latestVisible(f.following()), false, '捲回底部就收起')
+  assert.equal(TERM_VIEW_LATEST, '回到最新')
+})
+
+test('「回到最新」接線：按了把外層捲到最底並恢復跟隨；放在畫面區右下角內側、沿用 aero-btn（#904）', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.match(src, /<button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">/)
+  assert.match(src, /const jumpLatest = \(\) => \{[\s\S]{0,200}follow\.resume\(top\)[\s\S]{0,80}host\.value\.scrollTop = top/)
+  assert.match(src, /t\.attachCustomWheelEventHandler\(\(\) => false\)[\s\S]*t\.onData\(/, '滾輪仍交給外層，排在 onData 之前')
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.match(css, /\.term-view-latest\{position:absolute;right:12px;bottom:12px/)
+})
+
+test('終端上方不再有說明行（#901b）：template、樣式、原句字串全專案都不在', () => {
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(!view.includes('term-view-note') && !view.includes('TERM_VIEW_NOTE'), 'term-view 裡沒有說明行')
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.ok(!css.includes('term-view-note'))
+  const sentence = '點一下畫面就能打字'
+  const root = new URL('../ui/', import.meta.url)
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === 'vendor' ? [] : walk(new URL(`${e.name}/`, d))) : [new URL(e.name, d)]))
+  for (const f of walk(root)) {
+    if (!/\.(mjs|js|html|css)$/.test(f.pathname)) continue
+    assert.ok(!fs.readFileSync(f, 'utf8').includes(sentence), `${f.pathname} 還有說明句`)
+  }
+  assert.match(view, /<p class="term-view-ask" v-if="askHint"/, '其他提示不動')
+  assert.match(view, /term-view-lost/)
+})
+
+test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高矮一樣（#901／#901b）', () => {
   const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
-  assert.ok(chat.includes(':can-back="true"') && chat.includes('@back="termViewOn = false"'))
+  assert.ok(!chat.includes('can-back') && !chat.includes('@back='), '終端畫面不再有回到訊息的接線')
+  assert.ok(chat.includes('@term="toggleTerm"'), '上排大按鈕負責切換')
   assert.ok(chat.includes('<div class="conv" v-show="!termShown">'), '終端開著時訊息列表收起')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
-  assert.ok(view.includes('回到訊息'))
+  assert.ok(!view.includes('回到訊息') && !view.includes('canBack') && !view.includes("emit('back')"), '終端畫面裡沒有回到訊息按鈕')
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
   assert.doesNotMatch(css, /max-height:620px/, '不再只有矮視窗才收起')
   assert.match(css, /\.chatpane-main > \.term-view\{flex:1 1 0\}/, '終端占滿訊息區')
-  assert.doesNotMatch(css, /\.term-view-back\{display:none/, '切回按鈕不再藏起來')
+})
+
+test('守門 901b-scroll-kept：大按鈕切換終端／訊息時，訊息列表的捲動位置照舊保留', () => {
+  const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  // 打開（termShown 變 true）時記下，關掉時還原；只看 termShown 的變化，與哪顆按鈕無關
+  assert.match(chat, /watch\(termShown, on => \{\s*if \(on\) \{ termScroll = scrollMemo\(msgsEl\.value\); return \}/)
+  assert.match(chat, /el\.scrollTop = restoreTop\(memo, el\)/)
+  assert.ok(chat.includes('const toggleTerm = () => { if (canTermView.value) termViewOn.value = !termViewOn.value }'))
 })
 
 test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）；接上輸入之後更不能拿掉', () => {
@@ -277,4 +352,93 @@ test('守門：貼上鍵不被 xterm 吃掉（Ctrl+V、Ctrl+Shift+V、Shift+Inse
   assert.equal(termKeyHandler({ type: 'keyup', key: 'v', ctrlKey: true }), true)
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(src.includes('attachCustomKeyEventHandler(termKeyHandler)'), '要接上 xterm')
+})
+
+test('守門 901b-noscroll：終端畫面直捲軸隱藏、回到訊息按鈕已不存在', () => {
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.match(css, /\.term-view-screen::-webkit-scrollbar\{width:0;/, '直捲軸寬度為 0')
+  assert.match(css, /\.term-view-screen\{[^}]*overflow:auto/, '仍可捲動')
+  assert.match(css, /\.term-view-screen \.xterm-viewport::-webkit-scrollbar\{width:0/, 'xterm 自己的空直捲軸也藏起來')
+  assert.ok(!css.includes('term-view-back') && !css.includes('term-view-stage'), '樣式裡沒有按鈕與 stage 的規則')
+  assert.ok(!view.includes('term-view-back') && !view.includes('term-view-stage'), '畫面裡沒有按鈕與 stage')
+  assert.ok(!/<button[^>]*>\s*回到訊息\s*<\/button>/.test(view), '沒有「回到訊息」按鈕')
+})
+
+// ---- #903 游標對位：真實 WezTerm 取樣（test/fixtures/term-cursor，內容都是假文字） ----
+const FIX = name => fs.readFileSync(new URL('./fixtures/term-cursor/' + name, import.meta.url), 'utf8')
+const sample = name => {
+  const j = JSON.parse(FIX(name + '.json'))
+  return { text: FIX(name + '.escapes.txt'), meta: { cursor_x: j.cursor_x, cursor_y: j.cursor_y, cols: j.size.cols, rows: j.size.rows } }
+}
+/** 把 frameToWrite 的輸出拆回「內容各列」與「游標落點」 */
+function parseWrite(out) {
+  const head = '\x1b[0m\x1b[H\x1b[2J'
+  assert.ok(out.startsWith(head))
+  const k = out.lastIndexOf('\x1b[0m\x1b[')
+  const m = /^\x1b\[0m\x1b\[(\d+);(\d+)H$/.exec(out.slice(k))
+  assert.ok(m, '結尾是游標定位')
+  return { lines: out.slice(head.length, k).split('\r\n'), row: Number(m[1]) - 1, col: Number(m[2]) - 1 }
+}
+
+test('903：B（150 行捲動紀錄後游標在最後一列）只留畫面這 40 列，標記字串在 cursor_y 那一列', () => {
+  const f = sample('B'), { lines, row } = parseWrite(frameToWrite(f))
+  assert.equal(f.text.split('\n').length - 1, 43, '樣本確實比畫面多（42 列＋最後的裸換行）')
+  assert.equal(lines.length, f.meta.rows)
+  assert.equal(row, f.meta.cursor_y)
+  assert.ok(lines[f.meta.cursor_y].includes('MARK_B>'), lines[f.meta.cursor_y])
+  assert.ok(lines[0].includes('LINE 112'), '最上面的捲動紀錄 2 行被裁掉：' + lines[0])
+})
+
+test('903：C（捲動紀錄後游標移到第 20 列）標記字串在 cursor_y 那一列', () => {
+  const f = sample('C'), { lines, row } = parseWrite(frameToWrite(f))
+  assert.equal(f.meta.cursor_y, 19)
+  assert.equal(row, 19)
+  assert.ok(lines.length <= f.meta.rows && lines.length >= f.meta.rows - 1, '尾端空列會被去掉：' + lines.length)
+  assert.ok(lines[f.meta.cursor_y].includes('MARK_C'), lines[f.meta.cursor_y])
+})
+
+test('903：A（空畫面）與 E（全形字折行）沒有多出來的列，內容不變、索引仍等於 cursor_y', () => {
+  const a = sample('A'), pa = parseWrite(frameToWrite(a))
+  assert.ok(pa.lines[a.meta.cursor_y].includes('PS C:'), pa.lines[0])
+  assert.equal(pa.lines.length, 1, '空畫面只有提示列（尾端空列去掉）')
+  const e = sample('E'), pe = parseWrite(frameToWrite(e))
+  assert.ok(pe.lines[e.meta.cursor_y].includes('MARK_E'), pe.lines[e.meta.cursor_y])
+  assert.equal(pe.lines.length, 10)
+  assert.ok(pe.lines[1].startsWith('\x1b(B\x1b[0m'), '折行處的列頭逃逸序列沒被弄壞')
+  // 沒有比 rows 多的列時，內容和不裁（舊行為）一模一樣
+  assert.equal(frameToWrite(e), frameToWrite({ text: e.text, meta: { ...e.meta, rows: undefined } }))
+})
+
+test('903：行數比 rows 少、剛好、多 1、多 2、多很多的表格（--escapes 形式：每列 CRLF，最後多一個裸換行）', () => {
+  const run = (n, rows) => {
+    const text = Array.from({ length: n }, (_, i) => 'L' + i + '\r\n').join('') + '\n'
+    return parseWrite(frameToWrite({ text, meta: { rows, cursor_x: 0, cursor_y: rows - 1 } })).lines
+  }
+  for (const [n, rows, cut] of [[3, 5, 0], [5, 5, 0], [6, 5, 1], [7, 5, 2], [50, 5, 45]]) {
+    const lines = run(n, rows)
+    assert.equal(lines.length, Math.min(n, rows), `n=${n}`)
+    assert.equal(lines[0], 'L' + cut, `n=${n} 頭一列`)
+    assert.equal(lines.at(-1), 'L' + (n - 1), `n=${n} 最後一列`)
+  }
+})
+
+test('903：尾端是空列時照算畫面列數（不因為去掉結尾空列而少裁）', () => {
+  // 7 列，最後 2 列是空的；rows=5 要裁掉最前面 2 列：留 L2 L3 L4，後面兩列空列去掉
+  const text = ['L0', 'L1', 'L2', 'L3', 'L4', '', ''].map(l => l + '\r\n').join('') + '\n'
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 5, cursor_x: 0, cursor_y: 0 } })).lines, ['L2', 'L3', 'L4'])
+})
+
+test('903：最上面幾列是空列時不被誤裁（只裁多出來的最前面幾列，不是空列）', () => {
+  const text = ['', '', 'A', 'B'].map(l => l + '\r\n').join('') + '\n'
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 4, cursor_x: 0, cursor_y: 3 } })).lines, ['', '', 'A', 'B'])
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 3, cursor_x: 0, cursor_y: 2 } })).lines, ['', 'A', 'B'])
+})
+
+test('903：meta.rows 缺或不是正整數時維持舊行為', () => {
+  const text = 'a\r\nb\r\nc\r\n\n'
+  for (const rows of [undefined, 0, -3, 2.5, 'x']) {
+    assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows, cursor_x: 0, cursor_y: 0 } })).lines, ['a', 'b', 'c'])
+  }
+  assert.deepEqual(parseWrite(frameToWrite({ text })).lines, ['a', 'b', 'c'])
 })

@@ -1,0 +1,2 @@
+# 真實 WezTerm 取樣，含 CRLF 與逃逸序列：不要讓 git 換行轉換
+* -text
