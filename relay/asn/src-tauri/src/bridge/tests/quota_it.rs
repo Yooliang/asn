@@ -44,7 +44,7 @@ async fn 額度用完_轉交中的信扣住_不寄逾時_不_ack_不記轉交逾
     assert!(bodies(&h).iter().all(|b| !b.contains("逾時")), "{:?}", bodies(&h));
     assert!(h.fr.acked().is_empty());
     assert_eq!(held_ids(&h), vec![uid(1)]);
-    assert_eq!(crate::login_watch::forward_timeouts_since(TQ as i64 - 1), 0);
+    assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 2 * 86_400_000), 0, "只看自己的時間區段");
     assert_eq!(h.said().len(), 1, "重置前不再送 worker");
 }
 
@@ -193,13 +193,15 @@ async fn 試送又撞額度_繼續扣住_暫停時間只延長_不重複通知_�
     let said = h.said();
     assert_eq!(said.len(), 3);
     assert!(said[2].contains(&quota_late_line(TQ)), "仍寫最初收到的時間：{}", said[2]);
-    assert_eq!(crate::login_watch::forward_timeouts_since(TQ as i64 - 1), 0);
+    assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 2 * 86_400_000), 0, "只看自己的時間區段");
 }
 
 #[tokio::test]
 async fn 試送沒回應不是額度用完的證據_連續兩次沒回應就解除_走一般逾時並記轉交逾時() {
-    // 這個測試會真的讓轉交逾時並被記一筆；用較早的時間區段，免得別的測試「沒有被記到逾時」的檢查被它污染
-    const TQ: u64 = T0 + 150 * 86_400_000;
+    // 這個測試會真的讓轉交逾時並被記一筆。轉交逾時紀錄是行程內全域的，每記一筆會清掉那一筆時間 24 小時前的紀錄：
+    // 用遠在未來的時間區段（2100 年），別的平行測試不管用什麼時間（包括真實時間）記一筆都清不到它；
+    // 其他測試「沒有被記到逾時」的檢查只看自己的時間區段，不會把這一筆算進去
+    const TQ: u64 = 4_102_444_800_000;
     const RESETS_S: u64 = TQ / 1000 + 3 * 3600;
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));

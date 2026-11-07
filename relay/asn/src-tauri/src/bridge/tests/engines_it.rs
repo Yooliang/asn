@@ -197,6 +197,13 @@ async fn acp_子程序的_pid_記在帳本_關掉引擎後行程真的結束() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert!(!crate::heartbeat::pid_alive(pids[0]), "只關記下的 PID，而且真的關掉了");
+    // 帳本是行程結束之後才劃掉的：機器忙時會晚一點，等它空了（最多 8 秒）再檢查
+    for _ in 0..80 {
+        if std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap_or_default().trim().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     let left = std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap_or_default();
     assert!(left.trim().is_empty(), "結束後帳本劃掉：{left}");
 }
@@ -1285,6 +1292,13 @@ fn 整條路徑_start_接上引擎_信送進_gemini_回覆寄回_結束時只關
         let run = super::super::start(c, relay, None).expect("內建橋啟動");
         let t0 = std::time::Instant::now();
         while fr.sent().is_empty() && t0.elapsed() < std::time::Duration::from_secs(60) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        // 寄回之後才 ack、名單也是隨後才回報：機器忙時這幾件事會晚一點，等到都到了（最多 10 秒）再檢查
+        let t1 = std::time::Instant::now();
+        while (fr.acked().is_empty() || !fr.rosters().iter().any(|r| r["agents"].as_array().is_some_and(|a| a.iter().any(|a| a["name"] == "Gemini"))))
+            && t1.elapsed() < std::time::Duration::from_secs(10)
+        {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         let log = run.log.recent().join("\n");
