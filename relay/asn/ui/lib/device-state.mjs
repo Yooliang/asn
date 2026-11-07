@@ -43,6 +43,32 @@ export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
 }
 
 /**
+ * 這台是不是「雲端夥伴」（#930，0.2.15）：**沒有電腦版 ASN、只有橋或雲端代理的節點**。
+ * 例：Grok 雲端代理、牧陽 Aegis 的轉接橋、日本VM（無畫面 Linux，只有橋＋代理）。手機不算；有電腦版 ASN 的實體電腦不算。
+ * 規則若要改（小良哥決定），只改這一個函式；電腦版與手機版的設備分組都呼叫它。
+ *
+ * 用到的資料（電腦版、手機版都拿得到，不需要新的後台回報）：
+ *   - phone：isPhoneDevice 的結果（後台平台優先、再看名單種類）
+ *   - asnOnline：這台現在有沒有在線的 ASN 視窗（名單帶的 asn，只有 ASN 應用程式會回報；橋與雲端代理不會）
+ *   - rep：這台的帳號回報（acct_list：{ error, reportedAt }）。帳號回報**只有電腦版 ASN 會送**（每 5 分鐘），
+ *     後台存最後一次的時間；有 reportedAt＝這台曾經跑過電腦版 ASN，即使現在離線也算數
+ *   - engines：這台名單上各視窗的引擎；全部是 'cloud'（雲端代理）就是雲端
+ * 平台（platform）不能拿來判斷：機器橋也會回報 linux／windows，日本VM 就是 linux。
+ *
+ * 回傳 true／false／null。null＝資料還不夠，不要猜：例如手機還沒讀這台的帳號回報、或讀取失敗，而且現在沒有 ASN 在線。
+ */
+export function isCloudNode({ phone = false, self = false, asnOnline = false, rep = undefined, engines = [] } = {}) {
+  if (phone) return false
+  if (self) return false                       // 本機：電腦版自己就是電腦版 ASN；手機版的本機是手機（上一行）
+  if (asnOnline) return false                  // 現在就有電腦版 ASN 在線
+  if (rep && !rep.error && rep.reportedAt) return false   // 曾經跑過電腦版 ASN（帳號回報只有它會送）
+  const list = (engines ?? []).map(e => String(e ?? '').toLowerCase()).filter(Boolean)
+  if (list.length && list.every(e => e === 'cloud')) return true   // 只有雲端代理
+  if (rep && !rep.error && !rep.reportedAt) return true            // 讀到了：從沒有電腦版 ASN 回報過
+  return null                                  // 沒讀到帳號回報（或讀取失敗）、也沒有其他證據
+}
+
+/**
  * 別台帳號回報的新鮮度。rep：acct_remote_list 的結果 { error, asnOnline, reportedAt, accounts }
  * → 'never'（從沒收到）、'error'（讀取失敗）、'stale'（超過 15 分鐘沒更新）、'fresh'
  */
