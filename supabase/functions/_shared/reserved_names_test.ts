@@ -47,8 +47,11 @@ Deno.test("夥伴同步與接班：保留名字的視窗不收；接班的新名
   const ok = { predecessor: "p_" + "0".repeat(20), node: "H", name: "小乙" };
   assertEquals(parseSucceed(ok)?.name, "小乙");
   assertEquals(parseSucceed({ ...ok, name: "ASN 通知" }), null);
-  assertEquals(parseSucceed({ ...ok, name: "H-收發室" })?.name, "H-收發室", "新視窗所在節點的預設橋名");
-  assertEquals(parseSucceed({ ...ok, name: "W-收發室" }), null);
+  // 放行例外只看金鑰決定的節點（第二個參數），不看請求內容裡自己填的 node
+  assertEquals(parseSucceed({ ...ok, name: "H-收發室" }, "H")?.name, "H-收發室");
+  assertEquals(parseSucceed({ ...ok, node: "H", name: "H-收發室" }, "W"), null, "請求裡填 node 不能替自己放行");
+  assertEquals(parseSucceed({ ...ok, name: "W-收發室" }, "H"), null);
+  assertEquals(parseSucceed({ ...ok, name: "H-收發室" }), null, "沒有節點就不放行");
 });
 
 Deno.test("開視窗與夥伴改名：名字是保留的回 bad_name", () => {
@@ -80,4 +83,6 @@ Deno.test("守門：relay/index.ts 與舊 irori-relay 把金鑰決定的節點�
   assertEquals(old.includes("normalizeRosterAgents(b.agents, me.id)"), true);
   const partners = await Deno.readTextFile(new URL("./partners.ts", import.meta.url));
   assertEquals(partners.includes("parsePartnerSync(body, me.id)"), true);
+  assertEquals(partners.includes("parseSucceed(body, me.id)"), true);
+  assertEquals(partners.includes("isReservedSender(o.name, o.node)"), false, "例外不能取自請求內容");
 });

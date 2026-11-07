@@ -86,7 +86,7 @@ export interface SignedDeps {
 }
 
 /** 「這是某某的接班」請求：前任夥伴 ID、新視窗所在節點與名字；格式不對回 null */
-export function parseSucceed(b: unknown): { predecessor: string; node: string; name: string } | null {
+export function parseSucceed(b: unknown, nodeId: string | null = null): { predecessor: string; node: string; name: string } | null {
   if (!b || typeof b !== "object") return null;
   const o = b as Record<string, unknown>;
   if (typeof o.predecessor !== "string" || !PARTNER_ID_RE.test(o.predecessor)) return null;
@@ -94,7 +94,7 @@ export function parseSucceed(b: unknown): { predecessor: string; node: string; n
   if (typeof o.name !== "string") return null;
   const len = Array.from(o.name).length;
   if (len < 1 || len > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(o.name)) return null;
-  if (isReservedSender(o.name, o.node)) return null; // 寄件名保留字檢查（見 reserved_sender.ts）
+  if (isReservedSender(o.name, nodeId)) return null; // 寄件名保留字檢查（見 reserved_sender.ts）
   return { predecessor: o.predecessor, node: o.node, name: o.name };
 }
 
@@ -108,7 +108,7 @@ export async function handlePartnerSucceed(
   signHeader: string | null,
   body: unknown,
 ): Promise<{ status: number; body: unknown }> {
-  const q = parseSucceed(body);
+  const q = parseSucceed(body, me.id);
   if (!q) return { status: 400, body: { error: "bad_request" } };
   const user = await signedUserId(deps.verifyJwt, signHeader);
   if (!user) return { status: 401, body: { error: "unauthorized" } };
