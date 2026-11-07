@@ -930,3 +930,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .pair-btns{display:flex;gap:8px;flex-wrap:wrap}
 .pair-warn{margin:0;color:var(--danger,#b3261e)}
 .viewed-bar{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:6px 10px;background:#b3261e;color:#fff;font-size:13px}
+/* 被打字（0.2.10）：比被看更醒目 */
+.viewed-bar-input{background:#7a0d0d;font-size:15px;font-weight:700;padding:10px 12px;border-bottom:3px solid #ffcc00}
+.term-remote-switch{margin:4px 0}
+.term-remote-typing{background:#7a0d0d;color:#fff;font-weight:700}

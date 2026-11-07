@@ -10,6 +10,8 @@ export const TEXT = {
   forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
   firstSeen: t => `第一次記住：${t}`,
   fingerprint: '指紋',
+  inputNoAsk: '這台要在這裡打字時，不用每次問我',
+  inputNoAskWarn: '勾了之後，這台開始打字時這裡不會跳出「允許」，只會顯示紅條並通知你。只在你常常不在這台電腦前、又需要從那台操作時才勾。',
 }
 
 const ERR = [['紀錄壞了', '認得的電腦紀錄壞了，請告訴開發團隊。']]
@@ -27,6 +29,7 @@ export function normalizeView(raw) {
       node: p.node,
       name: clean(p.name) || '某台電腦',
       fingerprint: clean(p.fingerprint, 32),
+      inputNoAsk: p.input_no_ask === true,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
     })),
   }

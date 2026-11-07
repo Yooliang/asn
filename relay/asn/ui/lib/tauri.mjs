@@ -98,6 +98,15 @@ export const remoteViewApi = {
   listen,
 }
 
+// 別台打字（0.2.10）：和看畫面分開。開始時這台先確認本人，那台會再請那邊的人同意；字在 Rust 端編號、加密、補送
+export const remoteInputApi = {
+  start: (toNode, partner, machine) => invoke('term_view_remote_start', { toNode, partner, machine: machine || null, scope: 'input' }),
+  send: (id, data, paste) => invoke('term_view_remote_input', { id, data, paste: !!paste }),
+  pause: (id, paused) => invoke('term_view_remote_set', { id, paused: !!paused }),
+  stop: id => invoke('term_view_remote_stop', { id }),
+  listen,
+}
+
 export const shotApi = {
   supported: () => invoke('shot_supported').catch(() => false),
   capture: async () => {
