@@ -344,7 +344,12 @@ fn new_core(fr: &FakeRelay, work: &std::path::Path, sessions: &std::path::Path, 
     let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
     // 假的「程序還活著」：pid 99999 以上視為已死
     let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(|p| p < 90_000);
-    Core::new(cfg(work, sessions), relay, sink, NONCE, Arc::new(BridgeLog::new(None)), alive, now)
+    let mut c = Core::new(cfg(work, sessions), relay, sink, NONCE, Arc::new(BridgeLog::new(None)), alive, now);
+    // 假的「程序建立時間」：一律查不到（None＝當作同一個程序）。不假造的話會去查這台機器上真的同號 PID，
+    // CI（Linux 讀 /proc）剛好有 5100 之類的行程時，session 檔的 startedAt（T0）比它早，視窗就被當成 pid 重用而排除。
+    // 要測 pid 重用的測試自己再 set_created（例如 self_pull_it、上面 5002 那條）
+    c.set_created(Arc::new(|_| None));
+    c
 }
 
 async fn harness(windows: &[(&str, &str)]) -> H {
