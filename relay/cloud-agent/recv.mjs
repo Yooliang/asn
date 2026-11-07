@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
 import { normalizeAttachments } from '../machine/attach-format.mjs'
-import { aliasCursors, detectRenames, readNames, writeNames } from './rename-track.mjs'
+import { aliasCursors, detectRenames, readNames, readOldNames, recordOldNames, writeNames } from './rename-track.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { applyEnvCompat } from './env-compat.mjs'
 import { NODE_CHECK_EXIT, identityEnvConflict, nodeMismatch } from './node-check.mjs'
@@ -165,7 +165,7 @@ export function createReceiver({
     try {
       await api('roster', { method: 'POST', body: { agents, used_legacy_env: [...legacyEnv] } })
       for (const r of renames) log(`partner renamed: ${r.from} -> ${r.to} (reported; group identity and read position are moved by the backend)`)
-      if (JSON.stringify(names) !== JSON.stringify(stored)) { try { writeNames(cfg.namesFile, names) } catch (e) { log(`agent names write failed: ${e.message}`) } }   // 回報成功才記；失敗下一輪再試
+      if (JSON.stringify(names) !== JSON.stringify(stored)) { try { writeNames(cfg.namesFile, names, recordOldNames(readOldNames(cfg.namesFile), renames, now())) } catch (e) { log(`agent names write failed: ${e.message}`) } }   // 回報成功才記；失敗下一輪再試。接上的改名順便記成舊名（#746，7 天內寄到舊名的信轉給新名）
       if (warned) log('roster ok again')
       warned = false
       return true

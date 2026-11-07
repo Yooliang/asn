@@ -14,6 +14,7 @@ import { appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 import { bodyWithNotes } from '../machine/attach-format.mjs'
 import { cleanLabel, escapeBody, isPersonMail, senderLine, voiceNote } from '../machine/mail-format.mjs'
 import { cloudCmd } from './attach.mjs'
+import { readNames, readOldNames, resolveOldName } from './rename-track.mjs'
 
 const USAGE = `用法：
   node inbox.mjs [--unread] [--all] [--json] [--agent <名>]
@@ -73,9 +74,11 @@ export async function main(argv, rawEnv = process.env, out = s => process.stdout
     return bad ? 1 : 0
   }
   const seen = new Set()
-  // 沒指定收件代理、或收件代理不在名單上的信，算給預設那位（不會被漏掉）
+  // 沒指定收件代理、或收件代理不在名單上的信，算給預設那位（不會被漏掉）；
+  // 但收件名是 7 天內某位夥伴改名前的舊名時，算給改名後的那位（#746，規則見 rename-track.mjs 的 resolveOldName）
   const names = new Set((await resolveCloudAgents(cfg, rosterScanEnvFrom(cfg))).map(x => x.name))
-  const owner = m => (m.to_agent && names.has(m.to_agent) ? m.to_agent : cfg.name)
+  const renamed = { names: readNames(cfg.namesFile), old: readOldNames(cfg.namesFile), present: names, now: Date.now() }
+  const owner = m => (m.to_agent && names.has(m.to_agent) ? m.to_agent : resolveOldName(m.to_agent, renamed) ?? cfg.name)
   const list = mails.filter(m => m?.id && !seen.has(m.id) && seen.add(m.id)).filter(m => a.all || !doneIds.has(m.id))
     .filter(m => !a.agent || owner(m) === a.agent)
   if (a.json) { for (const m of list) out(JSON.stringify({ ...m, done: doneIds.has(m.id) })); return 0 }
