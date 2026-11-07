@@ -15,7 +15,7 @@ pub struct OldName {
     pub t: u64,
 }
 
-/// 去頭尾空白、1～40 字、不能含控制字元、不能用保留給系統通知的名字（「ASN 通知」、結尾是「收發室」；比對前先正規化，見 bridge::notice::fold_name）
+/// 去頭尾空白、1～40 字、不能含控制字元、不能用保留給系統通知的名字（「ASN 通知」、結尾是「收發室」；比對前先正規化，見 notice_name::fold_name）
 pub fn validate_name(raw: &str) -> Result<String, String> {
     let n = raw.trim().to_string();
     if n.is_empty() {
@@ -27,7 +27,7 @@ pub fn validate_name(raw: &str) -> Result<String, String> {
     if n.chars().any(|c| c.is_control()) {
         return Err("名字不能含控制字元".into());
     }
-    if crate::bridge::notice::is_reserved_name(&n) {
+    if crate::notice_name::is_reserved_name(&n) {
         return Err("這個名字是保留給系統通知的（「ASN 通知」或結尾是「收發室」），請換一個".into());
     }
     Ok(n)

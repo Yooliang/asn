@@ -119,7 +119,7 @@ mod tests {
 
     /// 共用案例檔（和後台、UI、Node 橋同一份）
     fn cases() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../../../supabase/functions/_shared/reserved_sender_cases.json")).expect("共用案例檔是合法 JSON")
+        serde_json::from_str(include_str!("../../../../supabase/functions/_shared/reserved_sender_cases.json")).expect("共用案例檔是合法 JSON")
     }
 
     #[test]

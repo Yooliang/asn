@@ -1028,7 +1028,7 @@ impl Core {
     }
     /// 只有寄件名時的系統通知判斷（Origin 這類只存寄件名的地方）；整封信用 Mail::is_system_notice
     fn is_system_notice(from_agent: &str) -> bool {
-        super::notice::is_system_notice_name(from_agent)
+        crate::notice_name::is_system_notice_name(from_agent)
     }
     fn fresh(&self, t: Option<&u64>) -> bool {
         t.map(|t| self.now.saturating_sub(*t) < NOTICE_TTL_MS).unwrap_or(false)

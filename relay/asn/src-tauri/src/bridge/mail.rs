@@ -81,11 +81,11 @@ pub struct Mail {
 impl Mail {
     /// 這封信是不是系統通知（不回信、不計時）：kind 或（截止時間前的）舊寄件名
     pub fn is_system_notice(&self) -> bool {
-        super::notice::is_system_notice(self.from_agent.as_deref().unwrap_or(""), self.kind.as_deref(), self.sent_ms)
+        crate::notice_name::is_system_notice(self.from_agent.as_deref().unwrap_or(""), self.kind.as_deref(), self.sent_ms)
     }
     /// 內文開頭是舊版的 `[收發室]` 標記（只對截止時間前的信有效）
     pub fn has_legacy_notice_mark(&self) -> bool {
-        super::notice::has_legacy_body_prefix(&self.body, self.sent_ms)
+        crate::notice_name::has_legacy_body_prefix(&self.body, self.sent_ms)
     }
 
     pub fn from_json(v: &Value) -> Option<Mail> {

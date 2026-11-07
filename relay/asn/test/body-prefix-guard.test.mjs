@@ -42,7 +42,7 @@ test('Rust：舊內文標記只出現在三個「不回頭通知寄件人」的�
   walk(RS)
   let seen = 0
   for (const f of files) {
-    if (f === RS + 'bridge/notice.rs') continue   // 定義與它自己的測試
+    if (f === RS + 'notice_name.rs') continue   // 定義與它自己的測試
     const uses = usesOf(f)
     if (!uses.length) continue
     seen += uses.length
@@ -58,7 +58,7 @@ test('Rust：舊內文標記只出現在三個「不回頭通知寄件人」的�
 
 test('Rust：is_system_notice、sender_line 與不回信的判斷不含舊內文標記規則', () => {
   const mail = read(RS + 'bridge/mail.rs')
-  const notice = read(RS + 'bridge/notice.rs')
+  const notice = read(RS + 'notice_name.rs')
   const core = read(RS + 'bridge/core.rs')
   for (const [src, name] of [[mail, 'is_system_notice'], [mail, 'sender_line'], [notice, 'is_system_notice'], [notice, 'is_system_notice_at'], [notice, 'is_system_notice_name'], [core, 'is_system_notice']]) {
     const b = bodyOf(src, name)

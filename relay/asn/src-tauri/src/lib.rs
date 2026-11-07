@@ -31,6 +31,8 @@ mod identity;
 mod invite_link;
 mod lastlogin;
 mod names;
+// 系統通知與寄件名保留字的判斷（純函式，電腦與手機都編；橋、改名驗證、relay 都用）
+mod notice_name;
 mod nowin;
 mod nowplaying;
 mod relay;
