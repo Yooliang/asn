@@ -4,6 +4,7 @@
 // deno-lint-ignore no-explicit-any
 type Json = any;
 import { noteHeld, type RankInput, type RoomRank } from "./wake_rank.ts";
+import { isReservedSender } from "./reserved_sender.ts";
 
 export const OWNER_KEY = "~owner"; // 帳號擁有者本人的成員 key（節點代號不可能含 ~）；顯示名取租戶的帳號名稱
 export const WINDOW_SEP = "~";
@@ -312,6 +313,7 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
   }
   const agent = typeof params.as_agent === "string" && params.as_agent ? params.as_agent : typeof params.from_agent === "string" && params.from_agent ? params.from_agent : null;
   if (agent && (agent.includes(WINDOW_SEP) || agent.length > 60)) return err(400, "bad_agent");
+  if (agent && isReservedSender(agent, me.id)) return err(400, "bad_agent"); // 群組裡也不能用系統通知的名字發言（見 reserved_sender.ts）
   const room = typeof params.room === "string" ? params.room : "";
   if (action !== "room_list" && action !== "room_confirm_status" && !ROOM_ID_RE.test(room)) return err(400, "bad_request");
 

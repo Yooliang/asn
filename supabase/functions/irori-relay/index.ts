@@ -4,6 +4,7 @@ import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/ro
 import { rankFromEnv } from "../_shared/wake_rank.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
+import { badSenderName } from "../_shared/reserved_sender.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -237,6 +238,7 @@ Deno.serve(async (req) => {
   if (action === "send" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || typeof b.to_node !== "string" || typeof b.body !== "string") return json(400, { error: "bad_request" });
+    if (badSenderName(b.from_agent, me.id)) return json(400, { error: "bad_request" }); // 寄件名保留字檢查（舊函式也一樣擋）
     const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 100) : null);
     const rt = typeof b.reply_to === "string" && UUID.test(b.reply_to) ? b.reply_to : null;
     // expects_reply：寄件人明說要不要等回信（選填 boolean，給了就存；型別不對回 400）。沒給就不帶這個參數，信的欄位是 null（舊寄件工具）
