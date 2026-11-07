@@ -12,6 +12,7 @@
 //   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
 //   @@CRASH          往 stderr 寫字然後結束碼 3
 //   @@ENV <名稱>     回覆該環境變數有沒有被帶進來
+// 環境變數 FAKE_AGY_WRITE_MS：@@WRITE 真的寫檔前等多久（毫秒，預設 150）。
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
 // `fake-agy.mjs models`：照 agy 1.x 實測的格式列模型（說明行在 stderr；stdout 一行「代號<Tab>名稱」），清單取 FAKE_AGY_MODELS（逗號分隔）
 import fs from 'node:fs'
@@ -71,7 +72,7 @@ async function handle(line) {
   if ((t = /@@WRITE\s+(\S+)/.exec(body) || (process.env.FAKE_AGY_STUBBORN === '1' && /這個位置不能寫：(\S+?)。/.exec(body)))) {
     const si = step++
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
-    await sleep(150)
+    await sleep(Number(process.env.FAKE_AGY_WRITE_MS) || 150)   // 測試可以用 FAKE_AGY_WRITE_MS 把寫檔拉長，給上層的絆線更多時間（機器忙的時候 150 毫秒不夠它殺掉我）
     fs.writeFileSync(t[1], 'written-by-fake-agy')
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'DONE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
     return resultOf(`已寫入 ${t[1]}`)

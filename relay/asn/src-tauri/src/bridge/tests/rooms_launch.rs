@@ -551,6 +551,9 @@ struct FakeEnv {
     extra_profiles: bool,
     /// 背景夥伴排進佇列後引擎的處理結果（Some(Ok)＝記進名冊、Some(Err)＝記失敗、None＝沒人處理）
     bg_outcome: Option<Result<(), String>>,
+    /// 引擎的處理先卡住：true 的時候，假引擎不開始算它那 80 毫秒、也不記進名冊，由測試自己放開。
+    /// 測試要檢查「引擎還沒處理完的時候不能回報成功」時一定要用這個，不能靠假引擎的 80 毫秒計時（機器一忙，測試執行緒被卡過 80 毫秒就檢查不到「還沒處理完」）
+    bg_hold: Arc<std::sync::atomic::AtomicBool>,
     /// 排佇列時就失敗（缺執行檔、未授權資料夾…）
     enq_err: Option<String>,
     enqueued: Mutex<Vec<(String, String, String)>>,
@@ -576,6 +579,7 @@ impl FakeEnv {
             config_err: Mutex::new(None),
             extra_profiles: false,
             bg_outcome: None,
+            bg_hold: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             enq_err: None,
             enqueued: Mutex::new(vec![]),
             started: Mutex::new(vec![]),
@@ -614,7 +618,11 @@ impl LaunchEnv for FakeEnv {
         self.enqueued.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
         if let Some(o) = self.bg_outcome.clone() {
             let (wd, name, profile, cwd) = (work_dir.to_path_buf(), name.to_string(), profile.to_string(), cwd.to_string());
+            let hold = self.bg_hold.clone();
             std::thread::spawn(move || {
+                while hold.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match o {
                     Ok(()) => crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd),
@@ -872,11 +880,13 @@ async fn 遠端開視窗_兩個同名請求同時在等時第二個算重名() {
 
 #[tokio::test]
 async fn 遠端開背景夥伴_grok_排佇列_等引擎記進名冊才回_ok_不走開視窗_第一句話照送() {
-    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.bg_outcome = Some(Ok(())); }), (30_000, 60_000, 20)).await;
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.bg_outcome = Some(Ok(())); e.bg_hold.store(true, std::sync::atomic::Ordering::SeqCst); }), (30_000, 60_000, 20)).await;
     let cwd = l.proj.path().to_path_buf();
     l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok", "first_message": "你好", "command": "calc.exe"})));
     l.h.core.pull("bell", T0).await;
+    // 引擎先被卡住（不靠它的計時）：不管機器多忙，這一刻引擎一定還沒處理完
     assert!(results(&l.h).is_empty(), "排進佇列只是開始，引擎還沒處理完不能回報成功");
+    l.env.bg_hold.store(false, std::sync::atomic::Ordering::SeqCst);   // 放開，引擎才開始處理
     wait_until(|| !results(&l.h).is_empty()).await;
     assert_eq!(results(&l.h), vec![json!({"id": uid(1), "status": "ok", "detail": "小格 已開啟"})]);
     assert_eq!(l.env.enqueued.lock().unwrap().len(), 1);

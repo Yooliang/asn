@@ -26,7 +26,7 @@ fn worker(name: &str, protocol: &str, extra: Value) -> Value {
     let script = if protocol == "agy-stream" { fake("fake-agy.mjs") } else { fake("fake-acp-worker.mjs") };
     let mut w = json!({
         "name": name, "engine": "acp", "roster_engine": "gemini", "protocol": protocol, "command": "node", "args": [script], "label": "工作者",
-        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
+        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_AGY_WRITE_MS", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
     });
     for (k, v) in extra.as_object().unwrap() {
         w[k] = v.clone();
@@ -566,7 +566,7 @@ fn agy_home() -> tempfile::TempDir {
 async fn agy_資料夾外寫檔被絆線中止_接回同一段對話請它換位置_做完照常回覆_檔案沒寫成_下一封仍可用() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up)], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), SLOW_WRITE], "acp", &[]).await;
     let target = h.work.path().join("outside.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", target.display()))).await;
     h.wait("換位置後回覆", |h| !h.bodies().is_empty()).await;
@@ -577,24 +577,29 @@ async fn agy_資料夾外寫檔被絆線中止_接回同一段對話請它換位
     // 被擋的那一次可能已經寫進去了：回覆後面照實附一行
     assert!(b.contains(&format!("（收發室）中途有一次寫到不允許的位置：{}，已中止並請它改寫到工作資料夾；那個位置可能已經留下檔案。", target.display())), "{b}");
     assert!(h.log_text().contains("接回同一段對話"), "{}", h.log_text());
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(AFTER_WRITE_MS)).await;
     assert!(!target.exists());
     h.put_pull(to_agent(2, "Gemini", "還在嗎")).await;
     h.wait("下一封", |h| h.bodies().iter().any(|b| b.contains("還在嗎 [第3輪"))).await;
 }
 
+/// 假 agy 寫檔前等多久（毫秒）：絆線測試要證明「被殺就不會有檔案」，假 agy 預設 150 毫秒就寫，機器一忙上層來不及殺，測試就偶發紅。
+/// 拉長到 1.2 秒，再等 [`AFTER_WRITE_MS`] 才檢查檔案：絆線若沒生效，檔案會在 1.2 秒時出現，一定抓得到；絆線有生效就有一整秒多的餘裕
+const SLOW_WRITE: (&str, &str) = ("FAKE_AGY_WRITE_MS", "1200");
+const AFTER_WRITE_MS: u64 = 1500;
+
 #[tokio::test]
 async fn agy_換位置一輪只給一次_再寫錯位置照舊中止並明確回報() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), ("FAKE_AGY_STUBBORN", "1")], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), ("FAKE_AGY_STUBBORN", "1"), SLOW_WRITE], "acp", &[]).await;
     let target = h.work.path().join("outside.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", target.display()))).await;
     h.wait("寫檔被中止", |h| h.bodies().iter().any(|b| b.contains("想做不被允許的事"))).await;
     let b = h.bodies().remove(0);
     assert!(b.contains("寫入：檔案：") && b.contains("outside.txt") && b.contains("檔案可能已經被寫入"), "{b}");
     assert_eq!(h.log_text().matches("接回同一段對話").count(), 1, "{}", h.log_text());
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(AFTER_WRITE_MS)).await;
     assert!(!target.exists());
     h.put_pull(to_agent(2, "Gemini", "還在嗎")).await;
     h.wait("下一封", |h| h.bodies().iter().any(|b| b.contains("還在嗎"))).await;
@@ -604,13 +609,13 @@ async fn agy_換位置一輪只給一次_再寫錯位置照舊中止並明確回
 async fn agy_寫到放登入資料的地方_不給換位置_直接中止() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up)], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), SLOW_WRITE], "acp", &[]).await;
     std::fs::create_dir_all(uh.path().join(".gemini")).unwrap();
     let target = uh.path().join(".gemini").join("x.json");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", target.display()))).await;
     h.wait("寫檔被中止", |h| h.bodies().iter().any(|b| b.contains("想做不被允許的事"))).await;
     assert!(!h.log_text().contains("接回同一段對話"), "{}", h.log_text());
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(AFTER_WRITE_MS)).await;
     assert!(!target.exists());
 }
 
@@ -618,7 +623,7 @@ async fn agy_寫到放登入資料的地方_不給換位置_直接中止() {
 async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方與別段對話的_scratch_不行() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up)], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), SLOW_WRITE], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "先開對話")).await;
     h.wait("第一輪", |h| h.bodies().len() == 1).await;
     let sid = serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
@@ -638,14 +643,14 @@ async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方
         h.put_pull(to_agent(3 + i as u32, "Gemini", &format!("@@WRITE {}", bad.display()))).await;
         h.wait("被擋", |h| h.bodies().len() > n).await;
         assert!(h.bodies()[n].contains("想做不被允許的事"), "{}", h.bodies()[n]);
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(AFTER_WRITE_MS)).await;
         assert!(!bad.exists(), "{}", bad.display());
     }
 }
 
 #[tokio::test]
 async fn agy_write_allow_資料夾內可寫_資料夾外仍被擋_提醒它換位置() {
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"write": "allow"}}))])), &[], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"write": "allow"}}))])), &[SLOW_WRITE], "acp", &[]).await;
     let inside = h.work.path().join("workers").join("Gemini").join("ok.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", inside.display()))).await;
     h.wait("寫入完成", |h| h.bodies().iter().any(|b| b.contains("已寫入"))).await;
@@ -653,7 +658,7 @@ async fn agy_write_allow_資料夾內可寫_資料夾外仍被擋_提醒它換�
     let outside = h.work.path().join("no.txt");
     h.put_pull(to_agent(2, "Gemini", &format!("@@WRITE {}", outside.display()))).await;
     h.wait("被擋後提醒換位置", |h| h.bodies().iter().any(|b| b.contains("這個位置不能寫"))).await;
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(AFTER_WRITE_MS)).await;
     assert!(!outside.exists());
 }
 
