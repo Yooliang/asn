@@ -52,6 +52,23 @@ Deno.test("寫入前檢查：長度與寫入的值", () => {
   assertEquals(badSenderName(5, "H"), false);
 });
 
+// ---- 三邊共用的案例檔（Edge、用戶端 JS、Rust 橋都讀同一份；內容由 asn40 維護在 reserved_sender_cases.json） ----
+const CASES = JSON.parse(await Deno.readTextFile(new URL("./reserved_sender_cases.json", import.meta.url))) as { reserved: string[]; ordinary: string[]; fold: [string, string][] };
+
+Deno.test("共用案例檔：reserved 一律擋（不管有沒有節點）、ordinary 一律不擋、fold 對得上", () => {
+  assertEquals(CASES.reserved.length > 20 && CASES.ordinary.length > 5 && CASES.fold.length >= 1, true, "案例檔不能是空的");
+  for (const n of CASES.reserved) {
+    assertEquals(isReservedSender(n), true, JSON.stringify(n));
+    assertEquals(isReservedSender(n, "H"), true, JSON.stringify(n));
+    assertEquals(badSenderName(n, "H"), true, JSON.stringify(n));
+  }
+  for (const n of CASES.ordinary) {
+    assertEquals(isReservedSender(n), false, JSON.stringify(n));
+    assertEquals(badSenderName(n, "H"), false, JSON.stringify(n));
+  }
+  for (const [input, want] of CASES.fold) assertEquals(foldName(input), want, JSON.stringify(input));
+});
+
 // ---- 各個入口 ----
 const WHO = { tenant: "ta", node: "ROLE1" };
 function opsFake() {
