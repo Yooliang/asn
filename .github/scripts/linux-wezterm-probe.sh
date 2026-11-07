@@ -89,6 +89,7 @@ LUA
 cli() { WEZTERM_UNIX_SOCKET="$SOCK" "$WEZ" --config-file "$OUT/mux.lua" cli --no-auto-start --prefer-mux "$@"; }
 
 # 「啟動者」：模擬 ASN——它用 setsid 讓 mux-server 脫離自己再啟動，之後自己繼續活著（我們會殺它）
+# （pgrep 用 -f：行程名稱會被截成 15 個字，-x 比對不到 wezterm-mux-server）
 # PROBE_MODE=setsid（預設）：啟動者用 setsid 起一個前景的 mux-server；PROBE_MODE=daemonize：啟動者呼叫 mux-server --daemonize（它自己 fork 到背景後啟動者的指令就結束），之後啟動者留著不動
 MODE="${PROBE_MODE:-setsid}"
 if [ "$MODE" = daemonize ]; then
@@ -97,7 +98,7 @@ if [ "$MODE" = daemonize ]; then
     sleep 600
   ) &
   STARTER=$!
-  for _ in $(seq 1 40); do pgrep -n -x wezterm-mux-server > mux.pid 2>/dev/null && [ -s mux.pid ] && break; sleep 0.25; done
+  for _ in $(seq 1 40); do pgrep -n -f wezterm-mux-server > mux.pid 2>/dev/null && [ -s mux.pid ] && break; sleep 0.25; done
 else
   (
     setsid "$MUX" --config-file "$OUT/mux.lua" > mux.log 2>&1 &
