@@ -1,4 +1,4 @@
--- 退回 20261106100000_acct_quota_share.sql：所有查詢代碼失效、MiniMax 帳號列刪除、Grok 的窗清空，四支函式換回原本體。執行前先在群組問。
+-- 退回 20261110100000_acct_quota_share.sql：所有查詢代碼失效、MiniMax 帳號列刪除、Grok 的窗清空，四支函式換回原本體。執行前先在群組問。
 begin;
 
 drop function if exists public.asn_relay_quota_read(text, text);

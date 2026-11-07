@@ -13,7 +13,7 @@
 -- roster 多一個欄位，舊畫面不讀。
 -- 權限：對 public／anon／authenticated 收回，只給 service_role；security definer、search_path 空。
 -- 部署順序：本 migration → relay（Edge Function）→ 電腦端。先上 migration 時舊 relay 照常運作。
--- 回復：supabase/sql/rollback/20261106100000_acct_quota_share_down.sql（會刪 minimax 帳號列、清 grok 的窗、所有代碼失效）。
+-- 回復：supabase/sql/rollback/20261110100000_acct_quota_share_down.sql（會刪 minimax 帳號列、清 grok 的窗、所有代碼失效）。
 begin;
 
 alter table relay.asn_user_accounts drop constraint if exists asn_user_accounts_vendor_check;
