@@ -61,7 +61,7 @@ async function rpc(db, fn, args = {}) {
   return (await db.query(`select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')}) r`, keys.map(k => args[k]))).rows[0].r
 }
 const alert = (db, o = {}) => rpc(db, 'asn_relay_device_key_alert', { p_node: Z, p_peer: D, p_kind: 'first', p_fp: FP, ...o })
-const mails = async db => (await db.query(`select body from relay.messages where from_agent = '看畫面收發室' order by created_at`)).rows.map(r => r.body)
+const mails = async db => (await db.query(`select body from relay.messages where kind = 'notice:device_key' order by created_at`)).rows.map(r => r.body)
 
 test('公鑰上傳：格式要對；重裝就蓋掉', { skip }, async () => {
   const db = await boot()
@@ -79,8 +79,8 @@ test('通知：第一次記住、金鑰換了，文字固定帶指紋；同一�
   assert.equal((await alert(db, { p_kind: 'changed', p_fp: 'fedcba9876543210' })).notify, 'sent')
   const m = await mails(db)
   assert.equal(m.length, 2, '第一次一封、換鑰一封')
-  assert.match(m[0], /「工作機」第一次連到這台（家用機）.*指紋 0123456789abcdef/)
-  assert.match(m[1], /「工作機」的設備金鑰變了（新指紋 fedcba9876543210）.*已拒絕連線/)
+  assert.match(m[0], /^家用機：「工作機」第一次連到這台\n[\s\S]*指紋 0123456789abcdef/)
+  assert.match(m[1], /^家用機：「工作機」的設備金鑰變了\n新指紋 fedcba9876543210[\s\S]*已拒絕連線/)
 })
 
 test('通知：只寄給同一個本人的另一台；參數要對', { skip }, async () => {
