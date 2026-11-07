@@ -602,7 +602,7 @@ pub trait PlatformHost: Send + Sync {
 - 終端服務**核心**（mux 生命週期、窗格對照表、權限檢查）不搬；搬的是「在這個作業系統上怎麼把它裝起來、接回來」。
 - `kill_owned` 只認 ASN 自己記錄過的程序（沿用現行 pid 帳本規則）。
 
-測試與行為不變：Windows 既有 `win_term.rs`／`pi_term.rs` 測試（含 `FakeHost`）合併後數量不減；新增 Linux 版對同一組 `WindowSpec` 的 argv 黃金測試；守門——`PlatformHost` 簽名不回傳窗格或程序控制代碼。實機：Windows 工作機、Linux 一台（有桌面）、Linux 無桌面（若 0.2.9 含）各走：開夥伴→關 ASN→重開認回→停止。回退：revert；Windows 路徑維持原函式至下一版再刪。預估：新增 400～700 行、搬動約 1200 行（推斷），1～2 位開發員約 1.5 週。
+測試與行為不變：Windows 既有 `win_term.rs`／`pi_term.rs` 測試（含 `FakeHost`）合併後數量不減；新增 Linux 版對同一組 `WindowSpec` 的 argv 黃金測試；守門——`PlatformHost` 簽名不回傳窗格或程序控制代碼。實機：Windows 工作機、Linux 一台（有桌面）、Linux 無桌面（若 0.2.10 含）各走：開夥伴→關 ASN→重開認回→停止。回退：revert；Windows 路徑維持原函式至下一版再刪。預估：新增 400～700 行、搬動約 1200 行（推斷），1～2 位開發員約 1.5 週。
 
 > **衝突提醒**：0.2.26 與 0.2.19～0.2.22 都會動 `term.rs`（6687 行）與 `local.rs`。這幾版不可同時進行；見 §9.2。
 
