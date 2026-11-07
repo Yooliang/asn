@@ -89,6 +89,11 @@ test('門鈴：收到 bell 與 join 會通知呼叫端（既有行為不變）',
     ws.frame({ event: 'phx_reply', topic: 'realtime:topic1', payload: { status: 'ok' } })
     ws.frame({ event: 'broadcast', topic: 'realtime:topic1', payload: { event: 'bell' } })
     assert.deepEqual(got, ['join', 'bell'])
-    ws.onclose = null; ws.onerror = null
+    // 收尾：連線開著時每秒送一次心跳的計時器不會自己停（門鈴沒有關閉的入口），不處理的話測試檔跑完行程也結束不了（CI 用 --test-force-exit 蓋住了這點）。
+    // 假裝連線斷了：心跳計時器會被清掉，並排一個 1 秒後的重連；等它在假的 WebSocket 還在的時候發生，再把新連線的事件處理拿掉，就不會再有任何計時器
+    ws.onclose()
+    await sleep(1100)
+    assert.ok(FakeWS.all.length >= 2, '斷線後有排重連')
+    FakeWS.all.forEach(w => { w.onclose = null; w.onerror = null })
   })
 })
