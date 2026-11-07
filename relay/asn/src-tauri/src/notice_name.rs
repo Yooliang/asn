@@ -58,16 +58,17 @@ pub fn is_system_notice_name(from_agent: &str) -> bool {
     legacy_applies(None, LEGACY_NOTICE_UNTIL_MS) && is_reserved_name(from_agent)
 }
 
-/// 整封信的判斷：kind 是 `notice:*` 一定算；否則看（截止時間前的）舊寄件名
-pub fn is_system_notice(from_agent: &str, kind: Option<&str>, sent_ms: Option<u64>) -> bool {
-    is_system_notice_at(from_agent, kind, sent_ms, LEGACY_NOTICE_UNTIL_MS)
+/// 整封信的判斷：kind 是 `notice:*` 一定算；否則看（截止時間前的）舊寄件名。
+/// from_owner：後台在信件上帶的「寄件節點屬於帳號擁有者」旗標；Some(false) 的舊寄件名信是一般信，None（舊後台沒有這個欄位）照舊規則
+pub fn is_system_notice(from_agent: &str, kind: Option<&str>, sent_ms: Option<u64>, from_owner: Option<bool>) -> bool {
+    is_system_notice_at(from_agent, kind, sent_ms, LEGACY_NOTICE_UNTIL_MS, from_owner)
 }
 
-pub fn is_system_notice_at(from_agent: &str, kind: Option<&str>, sent_ms: Option<u64>, until: Option<u64>) -> bool {
+pub fn is_system_notice_at(from_agent: &str, kind: Option<&str>, sent_ms: Option<u64>, until: Option<u64>, from_owner: Option<bool>) -> bool {
     if kind.is_some_and(|k| k.starts_with(NOTICE_KIND_PREFIX)) {
         return true;
     }
-    legacy_applies(sent_ms, until) && is_reserved_name(from_agent)
+    from_owner != Some(false) && legacy_applies(sent_ms, until) && is_reserved_name(from_agent)
 }
 
 /// 內文開頭的 `[收發室]` 標記（舊版橋寄的通知）：同樣只對截止時間以前的信有效
@@ -91,25 +92,34 @@ mod tests {
 
     #[test]
     fn kind_與舊寄件名() {
-        assert!(is_system_notice("小乙", Some("notice:quota"), None));
-        assert!(!is_system_notice("小乙", Some("chat"), None));
-        assert!(is_system_notice("ASN 通知", None, None));
-        assert!(is_system_notice("額度通知收發室", None, None));
-        assert!(is_system_notice("W-收发室", None, None));
-        assert!(is_system_notice("ＡＳＮ通知", None, None));
-        assert!(is_system_notice("asn\u{200b}通知", None, None));
-        assert!(!is_system_notice("W-政策", None, None));
-        assert!(!is_system_notice("ASN 通知單", None, None));
+        assert!(is_system_notice("小乙", Some("notice:quota"), None, None));
+        assert!(!is_system_notice("小乙", Some("chat"), None, None));
+        assert!(is_system_notice("ASN 通知", None, None, None));
+        assert!(is_system_notice("額度通知收發室", None, None, None));
+        assert!(is_system_notice("W-收发室", None, None, None));
+        assert!(is_system_notice("ＡＳＮ通知", None, None, None));
+        assert!(is_system_notice("asn\u{200b}通知", None, None, None));
+        assert!(!is_system_notice("W-政策", None, None, None));
+        assert!(!is_system_notice("ASN 通知單", None, None, None));
+    }
+
+    #[test]
+    fn from_owner_舊寄件名只對同帳號節點有效() {
+        assert!(is_system_notice("ASN 通知", None, None, Some(true)));
+        assert!(!is_system_notice("ASN 通知", None, None, Some(false)));
+        assert!(!is_system_notice("Z-收發室", None, None, Some(false)));
+        assert!(is_system_notice("Z-收發室", None, None, None), "沒有這個欄位（舊後台）照舊規則");
+        assert!(is_system_notice("X", Some("notice:bridge"), None, Some(false)), "有 kind 不受影響");
     }
 
     #[test]
     fn 設了截止時間_舊規則只對截止前的信有效() {
         let u = Some(1_000);
-        assert!(is_system_notice_at("ASN 通知", None, Some(999), u));
-        assert!(!is_system_notice_at("ASN 通知", None, Some(1_000), u));
-        assert!(!is_system_notice_at("X收發室", None, Some(2_000), u));
-        assert!(!is_system_notice_at("ASN 通知", None, None, u), "沒有寄出時間且已設截止＝不算");
-        assert!(is_system_notice_at("X", Some("notice:login"), Some(2_000), u), "有 kind 不受截止影響");
+        assert!(is_system_notice_at("ASN 通知", None, Some(999), u, None));
+        assert!(!is_system_notice_at("ASN 通知", None, Some(1_000), u, None));
+        assert!(!is_system_notice_at("X收發室", None, Some(2_000), u, None));
+        assert!(!is_system_notice_at("ASN 通知", None, None, u, None), "沒有寄出時間且已設截止＝不算");
+        assert!(is_system_notice_at("X", Some("notice:login"), Some(2_000), u, None), "有 kind 不受截止影響");
         assert!(has_legacy_body_prefix_at("[收發室] 嗨", Some(999), u));
         assert!(!has_legacy_body_prefix_at("[收發室] 嗨", Some(1_000), u));
         assert!(!has_legacy_body_prefix_at("[收發室] 嗨", None, u));

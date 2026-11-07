@@ -38,19 +38,23 @@ export const isLegacyNoticeName = name => {
 }
 export const isNoticeKind = kind => typeof kind === 'string' && kind.startsWith(NOTICE_KIND_PREFIX)
 
+// 寄件節點是不是同一個帳號的：呼叫端明說就用呼叫端的；否則看後台在信件上帶的 from_owner（布林）；
+// 兩個都沒有（舊後台）＝不知道，當作是，照舊規則
+export const sameAccountOf = (mail, explicit) => (typeof explicit === 'boolean' ? explicit : typeof mail?.from_owner === 'boolean' ? mail.from_owner : true)
+
 // 這封信的寄件人是不是系統通知（不回信、不計時）：kind 是 notice:* 一定算；沒有 kind 時才退回舊的寄件名規則，
 // 而且舊規則只對截止時間以前的信有效。
-// sameAccount：寄件節點是不是同一個帳號的；false 的舊寄件名信是一般信。橋收到的信沒有這個資訊，所以呼叫端通常不給（＝照舊規則）
-export function isSystemNotice(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount = true } = {}) {
+// sameAccount：寄件節點是不是同一個帳號的；false 的舊寄件名信是一般信。通常不用給：橋直接看信上的 from_owner，舊後台沒有就照舊規則
+export function isSystemNotice(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount } = {}) {
   if (!mail || typeof mail !== 'object') return false
   if (isNoticeKind(mail.kind)) return true
-  if (sameAccount === false || !legacyApplies(mail, until)) return false
+  if (sameAccountOf(mail, sameAccount) === false || !legacyApplies(mail, until)) return false
   return isLegacyNoticeName(mail.from_agent)
 }
 
 // 內文開頭的 [收發室] 標記（舊版橋寄的通知）：同樣只對截止時間以前的信有效
 export function hasLegacyBodyPrefix(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount = true } = {}) {
-  if (!mail || typeof mail !== 'object' || sameAccount === false || !legacyApplies(mail, until)) return false
+  if (!mail || typeof mail !== 'object' || sameAccountOf(mail, sameAccount) === false || !legacyApplies(mail, until)) return false
   return String(mail.body ?? '').trimStart().startsWith(LEGACY_BODY_PREFIX)
 }
 
