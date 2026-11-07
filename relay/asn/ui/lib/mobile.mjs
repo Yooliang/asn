@@ -141,8 +141,8 @@ export const PULL_TEXT = { idle: '', pull: '下拉重新整理', ready: '放開�
 export const shouldRefreshOnRelease = (h, loading) => !loading && h >= PTR_THRESHOLD
 
 // ---------- 提示 ----------
-export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true }
-export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false })
+export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true }
+export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false, push: raw?.push !== false })
 export const NUDGE_VIBRATE_MS = 300
 export const MSG_VIBRATE_MS = 60
 

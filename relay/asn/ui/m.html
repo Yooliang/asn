@@ -474,6 +474,11 @@
                       <div class="m-card m-form">
                         <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
                         <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
+                        <template v-if="pushView.show">
+                          <label class="m-check"><input type="checkbox" :checked="pushView.checked" @change="setPush($event.target.checked)"> {{ PUSH_TEXT.label }}</label>
+                          <p class="m-fine">{{ pushView.note }}</p>
+                          <p class="m-err" role="status" v-if="pushView.denied">{{ pushView.denied }}</p>
+                        </template>
                       </div>
                 </template>
                 <template v-else-if="settingCat === 'update'">

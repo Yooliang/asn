@@ -1,17 +1,17 @@
 // 手機推播的前端流程（lib/mobile-push.mjs，#797 PR③）：外殼、註冊、計時都用假的。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPushSync, isPushToken, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS } from '../ui/lib/mobile-push.mjs'
+import { createPushSync, isPushToken, pushSettingView, PUSH_MAX_RETRY, PUSH_RETRY_MS, PUSH_SYNC_MIN_MS, PUSH_TEXT, PUSH_UNREGISTER_MS } from '../ui/lib/mobile-push.mjs'
 import { androidBridge } from '../ui/lib/mobile.mjs'
 
 const TOK = 'f'.repeat(40) + ':APA91b_tok-1'
 
-function setup({ state = 'granted', registerImpl = async () => {} } = {}) {
+function setup({ state = 'granted', registerImpl = async () => {}, on = { v: true } } = {}) {
   let t = 1_000_000, seq = 0
   const timers = new Map()
   const calls = { ask: 0, request: 0, del: 0, register: [], unregister: 0 }
   const logs = []
-  let handler = null
+  let handler = null, changes = 0
   const native = {
     state: () => state,
     askPermission: () => { calls.ask++ },
@@ -21,10 +21,11 @@ function setup({ state = 'granted', registerImpl = async () => {} } = {}) {
   }
   const p = createPushSync({
     native, register: async tok => { calls.register.push(tok); return registerImpl(tok) }, unregister: async () => { calls.unregister++ },
+    enabled: () => on.v, onChange: () => { changes++ },
     now: () => t, setTimer: (f, ms) => { const id = ++seq; timers.set(id, { f, at: t + ms }); return id }, clearTimer: id => timers.delete(id), log: m => logs.push(m),
   }).start()
   return {
-    p, calls, logs, emit: e => handler?.(e),
+    p, calls, logs, on, changes: () => changes, emit: e => handler?.(e),
     advance(ms) { t += ms; for (const [id, x] of [...timers]) if (x.at <= t) { timers.delete(id); x.f() } },
     setState: s => { state = s }, timers, tick: () => new Promise(r => setImmediate(r)),
   }
@@ -89,6 +90,26 @@ test('收到格式不對的權杖：不送；取權杖失敗：稍後重試', as
   s.emit({ t: 'token-error' }); assert.equal(s.timers.size, 1)
 })
 
+test('登出：取消後台的最多等 5 秒就繼續刪權杖（不讓按鈕卡住）；登出後這個物件停了，事件與同步都不理', async () => {
+  const calls = { del: 0 }
+  let t = 0, seq = 0
+  const timers = new Map()
+  const p = createPushSync({
+    native: { state: () => 'granted', askPermission() {}, requestToken() { calls.req = (calls.req ?? 0) + 1 }, deleteToken() { calls.del++ }, onEvent: () => () => {} },
+    register: async () => { calls.reg = (calls.reg ?? 0) + 1 }, unregister: () => new Promise(() => {}),   // 後台一直不回
+    now: () => t, setTimer: (f, ms) => { const id = ++seq; timers.set(id, { f, at: ms }); return id }, clearTimer: id => timers.delete(id),
+  })
+  const done = p.logout()
+  await new Promise(r => setImmediate(r))
+  assert.equal(calls.del, 0, '還在等後台')
+  const give = [...timers.values()].find(x => x.at === PUSH_UNREGISTER_MS)
+  assert.ok(give, '有 5 秒的上限')
+  give.f(); await done
+  assert.equal(calls.del, 1, '逾時照樣刪權杖')
+  p.sync(true); p.onEvent({ t: 'token', token: TOK }); p.onEvent({ t: 'refresh' })
+  assert.deepEqual([calls.req ?? 0, calls.reg ?? 0], [0, 0], '登出後不再取權杖、不註冊')
+})
+
 test('登出：先取消後台的，再刪 Firebase 的權杖；取消失敗也照樣刪；之後不再重試', async () => {
   const s = setup({ registerImpl: async () => { throw 'not_ready' } })
   s.p.sync(); s.emit({ t: 'token', token: TOK }); await s.tick()
@@ -110,4 +131,58 @@ test('外殼橋：push 只在外殼有這些方法時才有；state 認不得的
   win.__asnPushEvent('{"t":"refresh"}'); win.__asnPushEvent('不是 JSON')
   assert.deepEqual(seen, [{ t: 'refresh' }])
   off(); assert.equal(win.__asnPushEvent, null)
+})
+
+test('設定頁那一列：沒有 Firebase 不顯示；問過被拒時打勾仍留著並說明怎麼打開；文字是白話', () => {
+  assert.equal(pushSettingView('unavailable', true).show, false)
+  assert.equal(pushSettingView('weird', true).show, false)
+  const g = pushSettingView('granted', true)
+  assert.deepEqual([g.show, g.checked, g.denied], [true, true, ''])
+  assert.deepEqual([pushSettingView('ask', true).show, pushSettingView('ask', true).denied], [true, ''], '還沒問過：勾著就是第一次會問')
+  assert.equal(pushSettingView('denied', true).denied, PUSH_TEXT.denied)
+  assert.equal(pushSettingView('denied', false).denied, '', '自己關掉就不用再提醒權限')
+  assert.equal(pushSettingView('granted', false).checked, false)
+  assert.ok(PUSH_TEXT.note.includes('只告訴你「有新訊息」') && PUSH_TEXT.note.includes('要打開 App 才看得到'), '不洩漏內容的說明')
+  assert.ok(PUSH_TEXT.denied.includes('「設定」→「應用程式」→「ASN」→「通知」'))
+  for (const t of Object.values(PUSH_TEXT)) assert.doesNotMatch(t.replace(/App|ASN/g, ''), /[A-Za-z]{3,}/, '給人看的文字不要中英夾雜：' + t)
+})
+
+test('使用者關掉：不取權杖、不註冊、外殼推什麼進來都不理；關的當下先取消後台再刪權杖；再打開才同步（沒問過就在這時問）', async () => {
+  const on = { v: false }
+  const s = setup({ on, state: 'ask' })
+  s.p.sync(); s.emit({ t: 'perm', granted: true }); s.emit({ t: 'token', token: TOK }); s.emit({ t: 'refresh' }); await s.tick()
+  assert.deepEqual([s.calls.ask, s.calls.request, s.calls.register.length], [0, 0, 0])
+  on.v = true
+  s.p.enable()
+  assert.equal(s.calls.ask, 1, '打開時才問權限')
+  s.setState('granted'); s.emit({ t: 'perm', granted: true }); s.emit({ t: 'token', token: TOK }); await s.tick()
+  assert.deepEqual(s.calls.register, [TOK])
+  on.v = false
+  await s.p.disable()
+  assert.deepEqual([s.calls.unregister, s.calls.del], [1, 1])
+  assert.ok(s.changes() >= 2, '狀態有變就通知畫面重畫')
+})
+
+test('快速「關→開」：舊的取消晚一步回來時，已經又打開了就不刪權杖（不然會刪掉剛註冊的）；登出照刪', async () => {
+  const on = { v: true }
+  const calls = { del: 0 }
+  let release
+  const p = createPushSync({
+    native: { state: () => 'granted', askPermission() {}, requestToken() {}, deleteToken() { calls.del++ }, onEvent: () => () => {} },
+    register: async () => {}, unregister: () => new Promise(r => { release = r }), enabled: () => on.v,
+  })
+  on.v = false
+  const closing = p.disable()
+  await new Promise(r => setImmediate(r))
+  on.v = true; p.enable()   // 取消還沒回來，使用者又打開了
+  release(); await closing
+  assert.equal(calls.del, 0, '還開著就不刪')
+  on.v = false
+  const again = p.disable()
+  await new Promise(r => setImmediate(r)); release(); await again
+  assert.equal(calls.del, 1, '真的關著才刪')
+  on.v = true
+  const out = p.logout()
+  await new Promise(r => setImmediate(r)); release(); await out
+  assert.equal(calls.del, 2, '登出不看開關，一律刪')
 })
