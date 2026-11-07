@@ -292,6 +292,7 @@ test('守門 901b-noscroll：終端畫面直捲軸隱藏、回到訊息按鈕已
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.match(css, /\.term-view-screen::-webkit-scrollbar\{width:0;/, '直捲軸寬度為 0')
   assert.match(css, /\.term-view-screen\{[^}]*overflow:auto/, '仍可捲動')
+  assert.match(css, /\.term-view-screen \.xterm-viewport::-webkit-scrollbar\{width:0/, 'xterm 自己的空直捲軸也藏起來')
   assert.ok(!css.includes('term-view-back') && !css.includes('term-view-stage'), '樣式裡沒有按鈕與 stage 的規則')
   assert.ok(!view.includes('term-view-back') && !view.includes('term-view-stage'), '畫面裡沒有按鈕與 stage')
   assert.ok(!/<button[^>]*>\s*回到訊息\s*<\/button>/.test(view), '沒有「回到訊息」按鈕')
