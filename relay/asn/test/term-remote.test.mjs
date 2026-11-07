@@ -3,7 +3,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { REMOTE_LABEL, REMOTE_TEXT, askRemote, remoteEntry, remoteXtermOptions, startError } from '../ui/lib/term-remote.mjs'
-import { helloNote, TEXT as PAIR_TEXT } from '../ui/lib/device-pair.mjs'
 import { barSlots } from '../ui/lib/actionbar.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
@@ -19,7 +18,7 @@ test('守門：看別台畫面只能看，沒有打字、貼上、按鍵的路',
   assert.doesNotMatch(api, /input|send/, 'remoteViewApi 沒有送字的命令')
 })
 
-test('入口：別台電腦、不是離線、那台已配對而且這台能看才有', () => {
+test('入口：別台電腦、不是離線、這台能發起才有', () => {
   const api = {}
   const f = { node: 'hom7a1', status: 'online' }
   assert.equal(remoteEntry({ api, friend: f, selfNode: 'wrk9b2', avail: true }), true)
@@ -43,16 +42,16 @@ test('第 2 格可以換成「看畫面」', () => {
   assert.equal(s.term, true)
 })
 
-test('文字：開始前先說會要 PIN；錯誤用 Rust 回的白話', () => {
-  assert.match(REMOTE_TEXT.pin('「家用機」上「小乙」'), /PIN/)
+test('文字：開始前先說會確認本人；錯誤用 Rust 回的白話', () => {
+  assert.match(REMOTE_TEXT.pin('「家用機」上「小乙」'), /確認是本人/)
   assert.match(REMOTE_TEXT.watching('家用機', '小乙'), /只能看/)
   assert.equal(startError(new Error('已取消，沒有完成')), '已取消，沒有完成')
   assert.equal(startError(''), REMOTE_TEXT.failed)
 })
 
-test('配對：沒設 PIN 或沒有 Hello 時多一句話，正常時沒有', () => {
-  assert.equal(helloNote({ hello: 'no_pin' }), PAIR_TEXT.noPin)
-  assert.equal(helloNote({ hello: 'unsupported' }), PAIR_TEXT.noHello)
-  assert.equal(helloNote({ hello: 'ok' }), '')
-  assert.equal(helloNote(undefined), '')
+test('入口：只有本人帳號底下的設備才問電腦端', () => {
+  const src = read('../ui/list.js')
+  assert.match(src, /Object\.hasOwn\(remoteMine\.value, node\) \? remoteViewApi\.available\(node\) : false/)
+  assert.match(src, /remoteViewApi: mineViewApi/)
+
 })

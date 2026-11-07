@@ -1,6 +1,6 @@
 // 看別台電腦上夥伴的畫面（#597 別台看畫面）。**只能看：** 這裡沒有任何打字、貼上、按鍵的路，
 // xterm 也關掉輸入（disableStdin）。畫面內容在 Rust 端解密、擋重放、再過濾過才送來；xterm 只寫入，不解析連結。
-// 開始時 Windows 會要本人輸入 PIN（Rust 端呼叫 Windows Hello），之後每 15 秒在背景回報一次，不再跳 PIN。
+// 開始時 Rust 端先確認是本人（Windows Hello 的 PIN 或指紋；沒有 Hello 就跳確認框），之後每 15 秒在背景回報一次，不再確認。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -12,7 +12,7 @@ export const END_EVENT = 'term-view-remote-end'
 export const WARN_BEFORE_MS = 60_000
 
 export const REMOTE_TEXT = {
-  pin: where => `接下來 Windows 會要你輸入 PIN，用來開始看${where}的畫面。`,
+  pin: where => `接下來會請你確認是本人（Windows Hello 的 PIN 或指紋，沒有的話是一個確認框），用來開始看${where}的畫面。`,
   waiting: '等那台電腦回應……',
   watching: (machine, name) => `正在看「${machine}」上「${name}」的畫面（只能看）`,
   soon: '再 1 分鐘就會結束，要繼續看請結束後再按一次。',
@@ -21,7 +21,7 @@ export const REMOTE_TEXT = {
   failed: '沒有開始。',
 }
 
-/** 這位夥伴能不能從這台看：電腦版、別台電腦的、不是離線、那台已配對而且這台能看（avail＝電腦端回的 true／false／null） */
+/** 這位夥伴能不能從這台看：電腦版、別台電腦的、不是離線、那台在本人帳號底下而且這台能發起（avail＝電腦端回的 true／false／null） */
 export function remoteEntry({ api, friend, selfNode, avail }) {
   return Boolean(api) && Boolean(friend?.node) && friend.node !== selfNode && friend?.status !== 'offline' && avail === true
 }
@@ -80,7 +80,7 @@ export const RemoteView = {
           term.write(frameToWrite(f))
         })
         offEnd = await props.api.listen(END_EVENT, ev => { if (ev?.payload?.id === id) finish(ev.payload.text || '') })
-        const r = await props.api.start(props.node, props.name)
+        const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
         phase.value = 'waiting'
         await nextTick()

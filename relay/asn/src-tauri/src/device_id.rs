@@ -348,6 +348,8 @@ mod tests {
                 .collect()
         };
         assert!(fns("device_id::live::forget(").iter().all(|f| f == "device_known_forget"), "忘記只能從設定頁的命令");
+        let see = fns("device_id::live::see(");
+        assert!(!see.is_empty() && see.iter().all(|f| f == "start_view_poller" || f == "start_remote_view"), "記住只在收到請求（T）或看的那台驗過 T 的簽章時：{see:?}");
         for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "android.rs", "headless.rs"] {
             let s = std::fs::read_to_string(root.join(f)).unwrap();
             assert!(!s.contains("live::forget") && !s.contains("live::see"), "{f} 不能改認得的電腦");

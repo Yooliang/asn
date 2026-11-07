@@ -94,7 +94,7 @@ export const ChatPane = {
       const r = await askTermService(props.termViewApi, termViewName.value)
       if (sameFriend(props.friend, f)) termInService.value = r
     }
-    // 看別台電腦上的夥伴（#597）：那台已配對、這台能看（有 Windows Hello）才有入口，同樣放在第 2 格
+    // 看別台電腦上的夥伴（#597）：那台在本人帳號底下、這台能發起才有入口，同樣放在第 2 格
     const remoteAvail = ref(null)
     const canRemote = computed(() => !canTermView.value && remoteEntry({ api: props.remoteViewApi, friend: props.friend, selfNode: props.selfNode, avail: remoteAvail.value }))
     const remoteOn = ref(false)

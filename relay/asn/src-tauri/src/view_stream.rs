@@ -96,13 +96,15 @@ pub enum End {
     Expired,
     /// 控制面已經沒有這筆，不用再回報
     Gone,
+    /// 本人在這台關掉了「允許其他設備替這台開新視窗」
+    NotAllowed,
 }
 
 impl End {
     /// 後台 `term_view_stop` 的原因；不用回報的是 None
     pub fn reason(self) -> Option<&'static str> {
         match self {
-            End::TargetEnded => Some("target_ended"),
+            End::TargetEnded | End::NotAllowed => Some("target_ended"),
             End::ViewerGone => Some("viewer_gone"),
             End::Failed => Some("failed"),
             End::Expired | End::Gone => None,
@@ -123,6 +125,8 @@ pub trait TPort {
     fn send(&mut self, wire: &str) -> Result<(), String>;
     /// 本人按了結束
     fn stop_requested(&mut self) -> bool;
+    /// 本機現在還允許別台看嗎（「允許其他設備替這台開新視窗」）。每次查控制面時一起查
+    fn allowed(&mut self) -> bool;
     fn now_ms(&mut self) -> u64;
     fn sleep_ms(&mut self, ms: u64);
     /// 只記長度和次數
@@ -165,6 +169,10 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
         }
         if last_ctl.is_none_or(|t| now.saturating_sub(t) >= CTL_EVERY_MS) {
             last_ctl = Some(now);
+            if !port.allowed() {
+                finish(&mut |l| port.log(l), "not_allowed", sent, bytes);
+                return End::NotAllowed;
+            }
             match port.ctl() {
                 Ok(Ctl::Gone) => {
                     finish(&mut |l| port.log(l), "gone", sent, bytes);
@@ -362,6 +370,8 @@ mod tests {
         sent: Vec<String>,
         send_err: bool,
         stop_at_ms: Option<u64>,
+        /// 從這個時間起本機不再允許
+        disallow_at_ms: Option<u64>,
         logs: Vec<String>,
         reads: u32,
     }
@@ -411,6 +421,9 @@ mod tests {
         }
         fn stop_requested(&mut self) -> bool {
             self.stop_at_ms.is_some_and(|t| self.now >= t)
+        }
+        fn allowed(&mut self) -> bool {
+            !self.disallow_at_ms.is_some_and(|t| self.now >= t)
         }
         fn now_ms(&mut self) -> u64 {
             self.now
@@ -527,6 +540,32 @@ mod tests {
         let mut f = Fake { send_err: true, ..fake() };
         assert_eq!(run_t(&session(), a, &mut f), End::Failed);
         assert!(f.now - START_MS <= LOST_AFTER_MS + 2 * FRAME_EVERY_MS);
+    }
+
+    #[test]
+    fn 守門_被看的那台每次查控制面都看本機還允不允許() {
+        let lib = include_str!("lib.rs");
+        let port = lib.split("impl view_stream::TPort for LiveTPort {").nth(1).expect("有 LiveTPort").split("
+}").next().unwrap();
+        let allowed = port.split("fn allowed(").nth(1).expect("有 allowed").split("
+    }").next().unwrap();
+        assert!(allowed.contains("bridge::read_settings(") && allowed.contains(".allow_remote_launch"), "每次都重讀設定，不用快取");
+    }
+
+    #[test]
+    fn 本機關掉允許_進行中的觀看下一次查控制面就結束() {
+        let (a, _) = pair();
+        let mut f = Fake { disallow_at_ms: Some(START_MS + 1), ..fake() };
+        assert_eq!(run_t(&session(), a, &mut f), End::NotAllowed);
+        assert_eq!(End::NotAllowed.reason(), Some("target_ended"));
+        let sent = f.sent.len();
+        assert!(sent >= 1, "關掉之前照常傳");
+        assert!(f.now - START_MS <= CTL_EVERY_MS + FRAME_EVERY_MS, "最晚下一次查控制面就停：{}", f.now - START_MS);
+        assert!(f.calls.last().is_some_and(|c| c == "watching=false"), "收掉「正在被看」");
+        let (b, _) = pair();
+        let mut off = Fake { disallow_at_ms: Some(START_MS), ..fake() };
+        assert_eq!(run_t(&session(), b, &mut off), End::NotAllowed);
+        assert!(off.sent.is_empty(), "一開始就關著：一幅都不送");
     }
 
     #[test]

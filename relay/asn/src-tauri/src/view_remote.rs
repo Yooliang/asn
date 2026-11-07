@@ -1,7 +1,8 @@
 //! 看別台電腦的畫面：發起觀看的那台（D）這一側（#597 別台看畫面 PR 5）。
 //!
-//! - 發起只有一個入口：本人按「看畫面」（lib.rs 的 `term_view_remote_start`）。那一刻 Windows 會要本人輸入 PIN。
-//! - 之後的回報迴圈**不簽章、不碰 Hello**：每 [`REPORT_EVERY_S`] 秒回報一次狀態，拿到對方的一次性公鑰就導出金鑰、開始收。
+//! - 發起只有一個入口：本人按「看畫面」（lib.rs 的 `term_view_remote_start`）。那一刻先確認是本人（`presence`：Hello 或確認框），再用設備金鑰簽。
+//! - 那台的設備公鑰和本機記住的比（TOFU）：換了就不開始並通知本人；第一次看到的，驗過 T 的簽章才記住（first 通知只有 T 寄）。
+//! - 之後的回報迴圈**不簽章、不確認本人**：每 [`REPORT_EVERY_S`] 秒回報一次狀態，拿到對方的一次性公鑰就導出金鑰、開始收。
 //! - **只收不送：** 這裡只有接收頻道，沒有任何送出端（守門測試）。暫停、結束只走控制面的固定狀態值。
 //! - 收到的畫面在 `DReceiver` 解密、擋重放、再過濾一次，才交給畫面；畫面那邊只能看。
 //! - 紀錄只有長度和次數，沒有畫面內容。
@@ -18,7 +19,13 @@ pub const VIEW_SECS: i64 = 600;
 /// 同時最多看幾個，和後台上限相同
 pub const MAX_OPEN: usize = 3;
 pub const TOO_MANY: &str = "同時最多看 3 個畫面，請先結束一個";
-pub const NOT_PAIRED: &str = "這兩台還沒有配對，或是這台不能看那台";
+/// 那台的設備公鑰和這台記住的不同
+pub const TARGET_KEY_CHANGED: &str = "那台電腦的設備金鑰變了，沒有開始看。如果是你重裝了那台，請到設定頁「認得的電腦」按「忘記這台」再看一次";
+/// 確認本人時給 Hello／確認框的話
+pub fn presence_text(machine: &str, window: &str) -> String {
+    let m = if machine.is_empty() { "別台電腦".to_string() } else { format!("「{machine}」") };
+    format!("要開始看{m}上「{window}」的畫面嗎？只有你本人按了「看畫面」才確認。")
+}
 
 /// 本人在畫面上要的狀態：看、暫停（畫面被藏起來）、結束
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +120,7 @@ pub fn step_of(report: &serde_json::Value) -> Step {
 /// 結束原因 → 給本人看的話
 pub fn end_text(reason: &str) -> &'static str {
     match reason {
-        "rejected" => "那台沒有接受，可能是現在沒有這個夥伴的畫面，或是配對已經撤銷",
+        "rejected" => "那台沒有接受，可能是現在沒有這個夥伴的畫面，或是那台沒有允許別台看",
         "target_ended" => "那台結束了觀看",
         "expired" => "時間到了，要再看請再按一次",
         "viewer_ended" | "ended" => "已經結束",
@@ -145,9 +152,9 @@ pub fn receive(rx: &mut DReceiver, wire: &str) -> Show {
     }
 }
 
-/// D 導出金鑰：用本機記的 T 設備公鑰驗 T 的簽章
-pub fn finish(trust: &crate::device_id::Trust, eph: view_handshake::Eph, s: &Session, t_eph: &str, t_sig: &str, now_s: i64) -> Result<DReceiver, String> {
-    let key = view_handshake::d_finish(trust, eph, s, t_eph, t_sig, now_s)?;
+/// D 導出金鑰：用 T 的設備公鑰（呼叫端已經和本機記住的比過）驗 T 的簽章
+pub fn finish(t_pub: &str, eph: view_handshake::Eph, s: &Session, t_eph: &str, t_sig: &str, now_s: i64) -> Result<DReceiver, String> {
+    let key = view_handshake::d_finish(t_pub, eph, s, t_eph, t_sig, now_s)?;
     Ok(DReceiver::new(key, &s.id))
 }
 
@@ -201,10 +208,16 @@ mod tests {
     }
 
     #[test]
-    fn 守門_這裡只收不送_也不碰_hello() {
+    fn 確認本人的話() {
+        assert!(presence_text("家用機", "小乙").contains("「家用機」上「小乙」"));
+        assert!(presence_text("", "小乙").contains("別台電腦上「小乙」"));
+    }
+
+    #[test]
+    fn 守門_這裡只收不送_也不確認本人不簽章() {
         let src = include_str!("view_remote.rs");
         let code = src.split("\nmod tests {").next().unwrap();
-        for bad in ["Outbound", "send_via", "broadcast_msg", "hello_win", "WinHello", "sign("] {
+        for bad in ["Outbound", "send_via", "broadcast_msg", "presence::", "sign_b64", "live::see", "live::forget"] {
             assert!(!code.contains(bad), "看的那台的背景流程不能有：{bad}");
         }
     }

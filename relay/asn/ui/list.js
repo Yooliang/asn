@@ -236,6 +236,14 @@ const remoteMine = ref({}), remoteErr = reactive({})
 const refreshRemoteUpd = async () => {
   try { remoteMine.value = mineFromStatus(await invoke('update_remote_status')) } catch { /* 沒登入、後台還沒部署或連不上：保持上一次的狀態 */ }
 }
+// 看別台畫面（#597）：只有本人帳號底下的設備才有入口（兩台不是同一個本人時後台也會擋）
+const mineViewApi = {
+  ...remoteViewApi,
+  available: async node => {
+    if (!Object.keys(remoteMine.value).length) await refreshRemoteUpd()
+    return Object.hasOwn(remoteMine.value, node) ? remoteViewApi.available(node) : false
+  },
+}
 const remoteBtn = node => remoteUpdateView(remoteMine.value, node, !!asnBadge(node)?.outdated, remoteErr[node])
 const requestRemoteUpdate = async node => {
   if (remoteBtn(node)?.busy) return
@@ -1804,7 +1812,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
-      beingViewed, stopBeingViewed, termViewApi, remoteViewApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
+      beingViewed, stopBeingViewed, termViewApi, remoteViewApi: mineViewApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
       dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,

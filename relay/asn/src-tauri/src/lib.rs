@@ -59,6 +59,8 @@ mod view_stream;
 mod view_seen;
 #[cfg(desktop)]
 mod view_remote;
+#[cfg(all(desktop, feature = "gui"))]
+mod presence;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -762,7 +764,6 @@ async fn term_read(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
 /// 本人簽章的權杖（看別台畫面的發起與回報要用）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-#[allow(dead_code)]
 async fn pair_token(auth: &auth::AuthState) -> Result<String, String> {
     account::signing_token(auth).await.filter(|t| !t.is_empty()).ok_or_else(|| "尚未登入".to_string())
 }
@@ -880,6 +881,10 @@ impl view_stream::TPort for LiveTPort {
     fn stop_requested(&mut self) -> bool {
         self.stop.load(std::sync::atomic::Ordering::SeqCst)
     }
+    fn allowed(&mut self) -> bool {
+        // 本人在這台關掉「允許其他設備替這台開新視窗」：進行中的觀看也要結束
+        bridge::read_settings(&self.data_dir).allow_remote_launch
+    }
     fn now_ms(&mut self) -> u64 {
         auth::now_ms()
     }
@@ -986,58 +991,72 @@ struct ViewNet(Option<String>);
 #[cfg(desktop)]
 #[tauri::command]
 async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>, node: String) -> Result<bool, String> {
-    if net.0.is_none() {
-        return Ok(false);
-    }
-    let trust = device_id::live::read(&app.data_dir)?;
-    let Some(peer) = trust.peer(&node) else { return Ok(false) };
-    if trust.check(&node, &peer.sign_pub, device_id::Direction::MeToPeer, device_id::SCOPE_VIEW) != device_id::Verdict::Allowed {
-        return Ok(false);
-    }
-    #[cfg(windows)]
-    return tauri::async_runtime::spawn_blocking(hello_win::supported).await.map_err(|e| e.to_string());
-    #[cfg(not(windows))]
-    Ok(false)
+    // 這台能不能發起：連得上即時頻道、不是這台、這台的設備金鑰有系統保護。兩台是不是同一個本人由後台擋，那台允不允許由那台決定
+    Ok(net.0.is_some() && node != app.node && device_id::can_be_viewed_here(&app.data_dir))
 }
 
-/// 本人按「看畫面」：Windows 會要本人輸入 PIN（除了配對以外唯一能叫 Hello 簽章的入口，守門測試在 hello_key）。
-/// 簽好就向後台發起，背景開始回報；回（觀看編號, 到期時間秒）
+/// 本人按「看畫面」：先確認是本人（Hello 或確認框，**只有這個入口能叫**，守門測試在 presence），再用設備金鑰簽、向後台發起。
+/// 後台回那台的設備公鑰：和本機記住的不同就不開始並通知本人。回（觀看編號, 到期時間秒）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, net: State<'_, ViewNet>, to_node: String, partner: String) -> Result<Value, String> {
+#[allow(clippy::too_many_arguments)]
+async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, net: State<'_, ViewNet>, to_node: String, partner: String, machine: Option<String>) -> Result<Value, String> {
     let url = net.0.clone().ok_or("這台現在連不上即時頻道，不能看畫面")?;
+    if !device_id::can_be_viewed_here(&app.data_dir) {
+        return Err(device_id::NOT_VIEWABLE_HERE.into());
+    }
+    let machine: String = machine.unwrap_or_default().chars().filter(|c| !c.is_control()).take(64).collect();
     let token = pair_token(&auth).await?;
-    let trust = device_id::live::read(&app.data_dir)?;
+    // 先確認本人，再取金鑰、登記（確認框可能等到 60 秒）
+    presence::confirm(&window, &view_remote::presence_text(&machine, &partner)).await?;
+    let key = device_id::live::key_async(&app.data_dir).await?;
     let id = view_remote::new_session_id()?;
     let now_s = (auth::now_ms() / 1000) as i64;
     let s = view_remote::session(&id, &app.node, &to_node, &partner, now_s);
     views.add(&id)?;
-    // Windows Hello 的 PIN 提示會跟著前景視窗：先把 ASN 叫到前面，不然提示可能被別的視窗擋住（40家用 實測）
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-    #[cfg(windows)]
-    let signed = {
-        let (t, s2) = (trust.clone(), s.clone());
-        tauri::async_runtime::spawn_blocking(move || view_handshake::d_start(&t, &hello_win::WinHello, &s2, now_s)).await.map_err(|e| e.to_string()).and_then(|r| r)
-    };
-    #[cfg(not(windows))]
-    let signed: Result<(view_handshake::Eph, String), String> = Err(view_handshake::HELLO_NOT_READY.to_string());
-    let (eph, d_sig) = match signed {
+    let (eph, d_sig) = match view_handshake::d_start(&key, &s, now_s) {
         Ok(v) => v,
         Err(e) => {
             views.remove(&id);
             return Err(e);
         }
     };
+    let relay = relay_of(&app)?;
     let body = serde_json::json!({ "id": id, "to_node": to_node, "window_name": partner, "d_eph_pub": eph.public_b64(), "d_sig": d_sig, "expires_at": claude_quota::iso_secs(s.expires_s * 1000) });
-    let started = relay_of(&app)?.api_signed("term_view_start", Some(body), Some(&token)).await;
-    let Some(topic) = started.ok().and_then(|v| v.get("topic").and_then(Value::as_str).map(str::to_string)) else {
+    let started = relay.api_signed("term_view_start", Some(body), Some(&token)).await.ok();
+    let field = |k: &str| started.as_ref().and_then(|v| v.get(k).and_then(Value::as_str).map(str::to_string));
+    let (Some(topic), Some(to_pub)) = (field("topic"), field("to_pub")) else {
         views.remove(&id);
         return Err("沒有發起成功，請稍後再試".into());
     };
-    start_remote_view(window.app_handle().clone(), window.label().to_string(), relay_of(&app)?, app.data_dir.clone(), views.inner().clone(), url, topic, s.clone(), eph);
+    // 那台的設備公鑰先和本機記住的比（TOFU）：換了就不開始、通知本人（兩邊都寄 changed）
+    let tofu = match device_id::live::known(&app.data_dir) {
+        Ok(k) => k.check(&to_node, &to_pub),
+        Err(e) => {
+            views.remove(&id);
+            let _ = relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": "ended" })), Some(&token)).await;
+            return Err(e);
+        }
+    };
+    if tofu == device_id::Tofu::Changed {
+        views.remove(&id);
+        let _ = relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": "ended" })), Some(&token)).await;
+        device_id::live::alert(&relay, &to_node, "changed", &to_pub).await;
+        return Err(view_remote::TARGET_KEY_CHANGED.into());
+    }
+    let target = RemoteTarget { node: to_node, name: machine, sign_pub: to_pub, tofu };
+    start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), url, topic, s.clone(), eph, target);
     Ok(serde_json::json!({ "id": id, "expires_s": s.expires_s }))
+}
+
+/// 看的那台要看的那台：節點、名字、設備公鑰，和本機記住的比過的結果
+#[cfg(all(desktop, feature = "gui"))]
+struct RemoteTarget {
+    node: String,
+    name: String,
+    sign_pub: String,
+    tofu: device_id::Tofu,
 }
 
 /// 本人把觀看畫面藏起來（暫停）或叫出來（繼續）
@@ -1056,11 +1075,11 @@ fn term_view_remote_stop(views: State<'_, Arc<view_remote::RemoteViews>>, id: St
     views.set(&id, view_remote::Want::Ended);
 }
 
-/// 看的那台的背景：每 15 秒回報一次（不簽章、不碰 Hello）；拿到對方的公鑰就導出金鑰、開接收頻道；結束就收掉、告訴畫面。
+/// 看的那台的背景：每 15 秒回報一次（不簽章、不確認本人）；拿到對方的公鑰就導出金鑰、開接收頻道；結束就收掉、告訴畫面。
 /// 接收頻道只收不送，收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面
 #[cfg(all(desktop, feature = "gui"))]
 #[allow(clippy::too_many_arguments)]
-fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir: std::path::PathBuf, views: Arc<view_remote::RemoteViews>, url: String, topic: String, s: view_handshake::Session, eph: view_handshake::Eph) {
+fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir: std::path::PathBuf, views: Arc<view_remote::RemoteViews>, url: String, topic: String, s: view_handshake::Session, eph: view_handshake::Eph, target: RemoteTarget) {
     tauri::async_runtime::spawn(async move {
         let id = s.id.clone();
         let mut eph = Some(eph);
@@ -1084,12 +1103,15 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                     match view_remote::step_of(&v) {
                         view_remote::Step::Ended(r) => break r,
                         view_remote::Step::Accepted { t_eph, t_sig } if eph.is_some() => {
-                            let Ok(trust) = device_id::live::read(&data_dir) else { break "failed".to_string() };
                             let Some(e) = eph.take() else { break "failed".to_string() };
-                            let mut rx = match view_remote::finish(&trust, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
+                            let mut rx = match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
                                 Ok(rx) => rx,
                                 Err(_) => break "rejected".to_string(),
                             };
+                            // 第一次看到這台：T 的簽章驗過才記住（first 通知只有 T 寄）；記不住就不看
+                            if target.tofu == device_id::Tofu::New && !matches!(device_id::live::see(&data_dir, &target.node, &target.name, &target.sign_pub, now_ms), Ok(device_id::Tofu::New | device_id::Tofu::Same)) {
+                                break "failed".to_string();
+                            }
                             let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                             stop_rx = Some(tx);
                             let (app2, label2, views2, id2, seen) = (app.clone(), label.clone(), views.clone(), id.clone(), frames_seen.clone());
