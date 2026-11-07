@@ -821,6 +821,11 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 /* 「我的帳號」（#374）：設備列表上面，按廠牌列出本人全部帳號 */
 .dv-my{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
 .dv-my-h{margin:0;font-size:13px}
+.dv-share{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+.dv-code{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px}
+.dv-code code{word-break:break-all;user-select:all}
+.dv-mm{display:flex;flex-wrap:wrap;gap:6px}
+.dv-mm input{flex:1 1 140px;min-width:0}
 .dv-my-v{border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .dv-my-v .dv-accts{padding:8px 10px}
 .acct-quota.stale{opacity:.7}

@@ -21,8 +21,8 @@ export const ROSTER_TEXT = {
 }
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
-const VENDOR_RANK = { claude: 0, codex: 1, gemini: 2, grok: 3 }
-const VENDOR_NAME = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok' }
+const VENDOR_RANK = { claude: 0, codex: 1, gemini: 2, grok: 3, minimax: 4 }
+const VENDOR_NAME = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok', minimax: 'MiniMax' }
 // 沒有額度窗時寫什麼：Codex、Gemini 要開過才讀得到；其他寫「額度讀不到」
 const NO_WINDOW_TEXT = { codex: 'codexOff', gemini: 'geminiOff' }
 
@@ -64,9 +64,9 @@ export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台�
   return node => names.get(node) || (node && node === selfNode ? selfLabel : UNNAMED_DEVICE)
 }
 
-// 一個帳號可用的額度窗（Grok 一律不算；壞掉的窗略過），照 5 小時、每週、其他由短到長排
+// 一個帳號可用的額度窗（壞掉的窗略過），照 5 小時、每週、其他由短到長排
 function cleanWindows(entry) {
-  if (entry?.vendor === 'grok' || !Array.isArray(entry?.windows)) return []
+  if (!Array.isArray(entry?.windows)) return []
   return entry.windows
     .map(w => ({ name: String(w?.name ?? ''), pct: pct(w?.left_pct), reset: time(w?.resets_at), read: time(w?.read_at), node: typeof w?.read_node === 'string' ? w.read_node : '' }))
     .filter(w => w.pct != null && w.read != null)
@@ -88,7 +88,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   const wins = cleanWindows(entry)
   // gemini 的 nodes 後台一律回空陣列（20261029130000_acct_roster_gemini：nodes 來自舊表、舊表不收 gemini），
   // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
-  const gone = entry?.vendor !== 'gemini' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
+  const gone = entry?.vendor !== 'gemini' && entry?.vendor !== 'minimax' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
   const stamp = (at, node) => {
     const ago = at != null ? agoText(new Date(at).toISOString(), now) : ''
     const when = ago && gone ? `${ago}讀的` : ago
@@ -176,6 +176,7 @@ export function rosterView(roster, opts = {}) {
       vendor, account, plan: planLabel(e.plan),
       current: Array.isArray(e.nodes) && e.nodes.some(n => n?.current === true),
       quota: rosterQuota(e, opts),
+      shared: e.shared === true,   // 有沒有開查詢代碼（代碼本身讀不回來）
       // 用在哪幾台（目前還有在回報這個帳號的設備；使用中的排前面）
       usedOn: usedOnOf(e, opts),
     }

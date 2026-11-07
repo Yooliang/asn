@@ -100,6 +100,10 @@ mod codex_quota;
 #[cfg(desktop)]
 mod gemini_quota;
 #[cfg(desktop)]
+mod quota_readers;
+#[cfg(desktop)]
+mod claude_extra;
+#[cfg(desktop)]
 mod gemini_session;
 #[cfg(desktop)]
 mod grok_accounts;
@@ -393,6 +397,53 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     let notifier = login_watch::RelayNotifier { relay: relay.clone() };
     let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx, &notifier)).await.unwrap_or(false);
     acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed, write).await
+}
+// ---------- 額度來源與查詢代碼（todo-next-193） ----------
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn quota_readers_get() -> Value {
+    quota_readers::view(&identity::home_dir())
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn quota_readers_set(source: String, on: bool) -> Result<Value, String> {
+    let home = identity::home_dir();
+    quota_readers::set_source(&home, &source, on)?;
+    Ok(quota_readers::view(&home))
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn quota_minimax_add(email: String, key: String) -> Result<Value, String> {
+    let home = identity::home_dir();
+    quota_readers::add_minimax(&home, &email, &key)?;
+    Ok(quota_readers::view(&home))
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn quota_minimax_remove(email: String) -> Result<Value, String> {
+    let home = identity::home_dir();
+    quota_readers::remove_minimax(&home, &email)?;
+    Ok(quota_readers::view(&home))
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn quota_share_create(app: State<'_, App>, auth: State<'_, auth::AuthState>, vendor: String, account: String) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.quota_share_signed(true, &vendor, &account, token.as_deref()).await
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn quota_share_revoke(app: State<'_, App>, auth: State<'_, auth::AuthState>, vendor: String, account: String) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.quota_share_signed(false, &vendor, &account, token.as_deref()).await
 }
 /// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度。要本人簽章；沒登入回錯，不打後台
 #[cfg(feature = "gui")]
@@ -2494,6 +2545,7 @@ pub fn run() {
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
+            quota_readers_get, quota_readers_set, quota_minimax_add, quota_minimax_remove, quota_share_create, quota_share_revoke,
             acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
@@ -2687,6 +2739,14 @@ pub fn run() {
                     let (r6, wd6) = (r.clone(), work_dir.clone());
                     let every = std::time::Duration::from_secs(300);
                     tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
+                }
+                // 額度讀取器：全部預設關閉；關著時不連網、不執行任何程式
+                #[cfg(desktop)]
+                if handle.state::<App>().shot.is_none() {
+                    let wd7 = work_dir.clone();
+                    tauri::async_runtime::spawn(quota_readers::run_loop(identity::home_dir(), grok_accounts::grok_home(), launch::term::free_memory_bytes, move |line| {
+                        let _ = ui_log::append(&wd7, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+                    }));
                 }
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
                 // 後台還沒部署（404／400）就停止，直到下次啟動；--shot 模式連的是本機假後端。

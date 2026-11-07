@@ -72,18 +72,22 @@ Deno.test("parseReport：windows 清完一窗都不剩就不帶，讓資料庫�
   assertEquals(r[0].five_hour_pct, 40);
 });
 
-Deno.test("parseReport：claude、codex 放行 windows；grok 一律不收額度；windows 壞掉不退回整份", () => {
+Deno.test("parseReport：claude、codex 放行 windows；grok 只收每週、不收舊四欄；minimax 只收 5 小時與每週；windows 壞掉不退回整份", () => {
   const r = parseReport({ accounts: [
     { ...C, windows: [{ name: "weekly", left_pct: 50, read_at: AT }, { name: "weekly", left_pct: 999, read_at: AT }] },
     { vendor: "codex", email: "c@x.test", plan: "plus", current: false, windows: [{ name: "w300", left_pct: 70, resets_at: RESET, read_at: AT }] },
-    { vendor: "grok", email: "g@x.test", windows: [{ name: "weekly", left_pct: 50, read_at: AT }], five_hour_pct: 5, at: AT },
+    { vendor: "grok", email: "g@x.test", windows: [{ name: "five_hour", left_pct: 9, read_at: AT }, { name: "weekly", left_pct: 50, read_at: AT }], five_hour_pct: 5, at: AT },
     { ...C, email: "b@x.test", windows: "壞掉" },
+    { vendor: "grok", email: "h@x.test" },
+    { vendor: "minimax", email: "m@x.test", windows: [{ name: "w60", left_pct: 1, read_at: AT }, { name: "five_hour", left_pct: 40, read_at: AT }] },
   ] })!;
   assert(r);
   assertEquals(r[0].windows, [{ name: "weekly", left_pct: 50, resets_at: null, read_at: AT }]);
   assertEquals(r[1].windows, [{ name: "w300", left_pct: 70, resets_at: RESET, read_at: AT }]);
-  assertEquals(r[2], { vendor: "grok", email: "g@x.test", plan: "", current: false });
+  assertEquals(r[2], { vendor: "grok", email: "g@x.test", plan: "", current: false, windows: [{ name: "weekly", left_pct: 50, resets_at: null, read_at: AT }] });
   assertEquals(r[3], { ...C, email: "b@x.test" }, "windows 不是陣列就當沒帶");
+  assertEquals(r[4], { vendor: "grok", email: "h@x.test", plan: "", current: false }, "舊用戶端的 grok 不帶窗，內容不變");
+  assertEquals(r[5].windows, [{ name: "five_hour", left_pct: 40, resets_at: null, read_at: AT }]);
   assert(!("windows" in parseReport({ accounts: [C] })![0]), "舊用戶端不帶就不多欄位");
 });
 
@@ -168,4 +172,21 @@ Deno.test("acct_roster：沒簽章回 forbidden、不呼叫資料庫；有簽章
   assertEquals(b.calls, [{ fn: "asn_relay_acct_roster", args: { p_actor: "P", p_signed_user: SIGNED } }]);
   const c = fakeDeps(() => ({ data: { error: "forbidden" }, error: null }));
   assertEquals((await handleAcctAction(c.deps, { id: "P" }, "acct_roster", {}, SIGNED)).status, 403);
+});
+
+Deno.test("額外帳號：只有 Claude 能標；不進舊表、會進帳號列表；沒標的照舊", async () => {
+  const r = parseReport({ accounts: [
+    { ...C, email: "q@x.test", current: false, extra: true, windows: [{ name: "weekly", left_pct: 50, read_at: AT }] },
+    { vendor: "grok", email: "g@x.test", extra: true },
+    { ...C, extra: "yes" },
+  ] })!;
+  assertEquals(r[0].extra, true);
+  assert(!("extra" in r[1]), "別家不收這個標記");
+  assert(!("extra" in r[2]), "不是 true 不算");
+  const { deps, calls } = fakeDeps();
+  await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: [{ ...C, email: "q@x.test", current: false, extra: true }, C] });
+  const legacy = calls.find((c) => c.fn === "asn_relay_acct_report")!.args.p_accounts as { email: string }[];
+  assertEquals(legacy.map((a) => a.email), ["a@x.test"]);
+  const roster = calls.find((c) => c.fn === "asn_relay_acct_roster_report")!.args.p_accounts as { email: string }[];
+  assertEquals(roster.map((a) => a.email), ["q@x.test", "a@x.test"]);
 });
