@@ -99,7 +99,7 @@ test('安卓專案：套件名、權限、關閉備份、登入回來的網址�
   assert.match(manifest, /<uses-permission android:name="android\.permission\.RECORD_AUDIO" \/>/, '通話需要麥克風權限（Play 版與自行安裝版共用這份清單）')
   assert.match(manifest, /android\.hardware\.microphone"\s+android:required="false"/, '沒有麥克風的裝置也要能裝')
   assert.match(manifest, /android\.speech\.RecognitionService/); assert.match(manifest, /android\.intent\.action\.TTS_SERVICE/)   // Android 11 以上看得到系統語音服務
-  assert.deepEqual([...manifest.matchAll(/uses-permission android:name="android\.permission\.(\w+)"/g)].map(m => m[1]).sort(), ['INTERNET', 'RECORD_AUDIO', 'VIBRATE'], '權限只有網路、震動、麥克風（另有安裝權限的置換字串）')
+  assert.deepEqual([...manifest.matchAll(/uses-permission android:name="android\.permission\.(\w+)"/g)].map(m => m[1]).sort(), ['INTERNET', 'POST_NOTIFICATIONS', 'RECORD_AUDIO', 'VIBRATE'], '權限只有網路、通知（推播，#797）、震動、麥克風（另有安裝權限的置換字串）')
   const gradle = g('app', 'build.gradle.kts')
   assert.match(gradle, /applicationId = "tw\.yooliang\.asn"/); assert.match(gradle, /namespace = "tw\.yooliang\.asn"/)
   assert.doesNotMatch(gradle, /storeFile|signingConfigs|keystore/i, '第一期只用除錯簽章，不帶正式簽章金鑰')

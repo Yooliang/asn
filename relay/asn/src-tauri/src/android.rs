@@ -46,6 +46,20 @@ pub async fn relay_attachment_save(app: State<'_, App>, id: String, name: Option
     Ok(saved.map(|p| p.display().to_string()))
 }
 
+// ---------- 手機推播（#797，FCM）：權杖由外殼（Kotlin）向 Firebase 取得、經畫面交給這裡，這裡再交給後台 ----------
+
+/// 把 FCM 權杖交給後台。要先有一次在線回報成功（沒有回 not_ready，畫面稍後再試）；權杖不寫 log，錯誤一律是固定字串
+#[tauri::command]
+pub async fn android_push_register(app: State<'_, App>, token: String) -> Result<(), String> {
+    relay_of(&app)?.push_register(&token).await
+}
+
+/// 登出、換帳號前先取消這支手機的推播權杖（連不上也沒關係，後台清除規則會補）
+#[tauri::command]
+pub async fn android_push_unregister(app: State<'_, App>) -> Result<(), String> {
+    relay_of(&app)?.push_unregister().await
+}
+
 // ---------- 幫電腦開新夥伴（遠端開視窗；視窗開在那台電腦上，手機只下指令） ----------
 
 /// 各電腦的啟動設定（模型、允許的資料夾、在不在線）與最近開視窗的進度。要本人簽章；沒登入回錯，不打後台

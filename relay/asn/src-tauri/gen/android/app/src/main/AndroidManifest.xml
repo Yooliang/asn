@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 對方傳來「震動」時讓手機震動 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 推播（#797）：Android 13 以上要先問使用者才能顯示通知；只問一次，被拒就不再問（AsnPush.kt） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 偽通話（#99）：用說的跟 AI 夥伴對話。麥克風只在通話中使用，第一次按「通話」才詢問；Play 版與自行安裝版都有 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 沒有麥克風的裝置也能裝（只是沒有通話鈕），不要被 Play 擋掉 -->
@@ -26,6 +28,8 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.asn"
         android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -70,6 +74,18 @@
             </intent-filter>
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
+
+        <!-- 推播（#797）：FCM 接收端，不解析訊息內容（AsnMessagingService.kt）。沒有 google-services.json 的建置裡 Firebase 不會啟動，這個服務也就不會被叫到 -->
+        <service
+            android:name=".AsnMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- 系統直接顯示的通知（App 關著時）用的頻道與小圖示；頻道在 MainActivity 一開就建好 -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="asn_messages" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_asn" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

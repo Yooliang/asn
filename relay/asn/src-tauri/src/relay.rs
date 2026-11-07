@@ -29,6 +29,8 @@ pub struct Relay {
     presence: Mutex<(String, String)>,
     /// 後台還沒部署 asn_presence（404／400）：靜默停止回報，直到下次啟動
     presence_off: AtomicBool,
+    /// 這次啟動以來，至少有一次在線回報成功（推播權杖要等到這個才註冊：後台要先從在線回報知道這台是手機）
+    presence_ok: AtomicBool,
     /// 已經送過離線回報（關閉流程可能走兩次，只送一次，之後迴圈也不再回報）
     presence_closed: AtomicBool,
     /// 後台在回報回應裡說「本人要這台更新」：記下來等迴圈取走（只取一次，後台也只回一次）
@@ -254,6 +256,10 @@ pub fn set_name_unsupported(err: &str) -> bool {
 
 pub const PRESENCE_PSM_MAX: usize = 80;
 /// 回報的狀態只有這四個（offline＝關閉或使用者選「顯示為離線」，後端刪掉那一列）；不認得的當線上
+/// FCM 權杖的格式：只看長度與字元集（和後台一致），不信任內容
+pub fn push_token_ok(t: &str) -> bool {
+    (32..=1024).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'-'))
+}
 pub fn normalize_presence_status(s: &str) -> &'static str {
     match s {
         "busy" => "busy",
@@ -298,7 +304,7 @@ impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
-            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
+            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
@@ -318,6 +324,7 @@ impl Relay {
         let body = build_presence_body(&self.window_name(), version, &status, &psm);
         match self.api_with("asn_presence", Some(body), timeout).await {
             Ok(v) => {
+                self.presence_ok.store(true, Ordering::Relaxed);
                 if v.get("update_requested").and_then(Value::as_bool) == Some(true) {
                     self.update_requested.store(true, Ordering::SeqCst);
                 }
@@ -337,6 +344,25 @@ impl Relay {
                 true
             }
         }
+    }
+    /// 這次啟動以來有沒有成功回報過在線（推播註冊的前提）
+    pub fn presence_reported(&self) -> bool {
+        self.presence_ok.load(Ordering::Relaxed)
+    }
+    /// 手機把 FCM 權杖交給後台（#797）。**要先有一次在線回報成功**（後台靠它知道這台是手機，沒有就會被拒），還沒有回 not_ready，畫面稍後再試。
+    /// 權杖只在這裡經過：不寫 log，錯誤一律換成固定字串（不帶後台回應，也不帶權杖）。
+    pub async fn push_register(&self, token: &str) -> Result<(), String> {
+        if !push_token_ok(token) {
+            return Err("bad_token".into());
+        }
+        if !self.presence_reported() {
+            return Err("not_ready".into());
+        }
+        self.api("push_register", Some(json!({ "token": token }))).await.map(|_| ()).map_err(|_| "push_register_failed".to_string())
+    }
+    /// 登出、換帳號、移除裝置時先取消（連不上也沒關係，後台清除規則會補）
+    pub async fn push_unregister(&self) -> Result<(), String> {
+        self.api("push_unregister", Some(json!({}))).await.map(|_| ()).map_err(|_| "push_unregister_failed".to_string())
     }
     /// 取走「要求更新」的旗標（有就回 true，並清掉，不會重複觸發）
     pub fn take_update_request(&self) -> bool {
@@ -1216,6 +1242,29 @@ pub fn build_group_body(action: &str, raw: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 推播權杖_格式只看長度與字元集() {
+        assert!(push_token_ok(&("f".repeat(40) + ":APA91b_tok-1")));
+        for bad in ["", "短", &"x".repeat(31), &"x".repeat(1025), &("a".repeat(40) + " b"), &("a".repeat(40) + "
+"), &("a".repeat(40) + "中")] {
+            assert!(!push_token_ok(bad), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 推播註冊_要先有一次在線回報成功_格式不對不打後台() {
+        let r = Relay::new("http://127.0.0.1:9".into(), "k".into(), "n".into(), "w".into());
+        let tok = "f".repeat(40) + ":APA91b_tok-1";
+        assert_eq!(r.push_register("短").await, Err("bad_token".into()));
+        assert_eq!(r.push_register(&tok).await, Err("not_ready".into()), "還沒回報過在線：後台不知道這台是手機");
+        assert!(!r.presence_reported());
+        r.presence_ok.store(true, Ordering::Relaxed);
+        // 回報過之後才會真的去打後台（這裡連不上，錯誤是固定字串，不帶權杖）
+        let e = r.push_register(&tok).await.unwrap_err();
+        assert_eq!(e, "push_register_failed");
+        assert!(!e.contains(&tok));
+    }
 
     #[test]
     fn 遠端開視窗_請求只留五個欄位_格式擋在前面() {

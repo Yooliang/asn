@@ -82,9 +82,18 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // 推播（#797，FCM）。服務帳戶金鑰絕不進 APK；google-services.json 只有公開的設定值，也不進 repo（見下方 apply 條件）
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
 
 apply(from = file("tauri.build.gradle.kts"))
+
+// google-services 外掛只在 google-services.json 存在時才套用：沒放這個檔的建置（CI、一般開發者）照樣建得過，只是 Firebase 不啟動、推播不啟用。
+// 這個檔放在建置機的 app/ 底下（比照簽章檔，不進 repo、不進 APK 以外的任何地方）；它只有公開的專案設定值，**不是**服務帳戶金鑰（金鑰只在後台的環境變數）
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}

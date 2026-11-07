@@ -13,6 +13,7 @@ import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
+import { createPushSync } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
@@ -61,6 +62,8 @@ const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 const bridge = androidBridge(window)
+// 推播（#797）：App 關著也要響。權杖由外殼向 Firebase 取、經這裡交給 Rust；沒有 Firebase 的建置 state 是 unavailable，什麼都不做
+const push = bridge?.push ? createPushSync({ native: bridge.push, register: token => invoke('android_push_register', { token }), unregister: () => invoke('android_push_unregister'), log: m => console.info('[ASN]', m) }).start() : null
 // 偽通話（#99）：用手機內建的語音辨識與念出（外殼 CallVoice.kt）。外殼沒有、或這支手機沒有辨識服務就沒有通話鈕
 const callOn = ref(false)   // 現在有沒有通話（通話中每 2 秒多收一次信）
 let liveCall = null
@@ -233,10 +236,10 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.()
+    void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
-  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
+  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景）；分頁與第四頁籤的規則在 lib/mobile-nav.mjs ----------
@@ -1096,7 +1099,7 @@ const app = createApp({
     async function doLogout() {
       if (loggingOut.value) return
       loggingOut.value = true
-      try { await authApi.logout(); location.reload() } catch (e) { loggingOut.value = false; say(e.message) }
+      try { await push?.logout(); await authApi.logout(); location.reload() } catch (e) { loggingOut.value = false; say(e.message) }
     }
 
     return {

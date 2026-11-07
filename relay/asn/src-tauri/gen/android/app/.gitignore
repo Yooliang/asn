@@ -4,3 +4,5 @@
 /tauri.build.gradle.kts
 /proguard-tauri.pro
 /tauri.properties
+# 推播（#797）：Firebase 的設定檔放在建置機，不進 repo（見 build.gradle.kts）
+google-services.json

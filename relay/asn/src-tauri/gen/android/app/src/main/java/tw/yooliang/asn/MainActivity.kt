@@ -13,13 +13,25 @@ import androidx.core.view.WindowInsetsCompat
 //   2. 把 AsnBridge 以 window.AsnAndroid 交給網頁（震動、匯出收到的檔案、重新開啟、通話的語音）。只有本 App 內建的頁面載得進這個 WebView
 //   3. 登入完成後，瀏覽器用 tw.yooliang.asn://login-done 把使用者帶回來（AndroidManifest 的 intent-filter）
 class MainActivity : TauriActivity() {
-  var webView: WebView? = null   // 通話的事件（CallVoice）要推回網頁
+  var webView: WebView? = null   // 通話的事件（CallVoice）、推播的事件（AsnPush）要推回網頁
+  companion object {
+    /** 目前開著的主畫面（推播服務收到「權杖換新」時用來通知網頁）；沒開著就是 null */
+    @Volatile var current: MainActivity? = null
+  }
+
+  /** 推一則推播事件給網頁（window.__asnPushEvent）。內容是外殼自己組的 JSON（權杖已檢過格式），網頁不在就略過 */
+  fun pushEvent(json: String) {
+    val w = webView ?: return
+    w.post { w.evaluateJavascript("window.__asnPushEvent && window.__asnPushEvent(${org.json.JSONObject.quote(json)})", null) }
+  }
   val callVoice: CallVoice by lazy { CallVoice(this) }
 
   // 麥克風權限的回答（通話第一次使用時才問）
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     if (requestCode == CallVoice.REQ_MIC) callVoice.onPermissionResult(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+    // 通知權限的回答（只問一次，被拒之後不再問）：給了就請網頁去取權杖
+    if (requestCode == AsnPush.REQ_NOTIF) pushEvent("{\"t\":\"perm\",\"granted\":${grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED}}")
   }
 
   // 螢幕關閉或切到其他程式：通話自動結束（麥克風不留著）
@@ -31,12 +43,19 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    current = this
+    AsnPush.ensureChannel(this)   // App 關著時系統顯示的通知要用這個頻道，所以一開 App 就先建好
     val content = findViewById<View>(android.R.id.content)
     ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
       val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
       v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       WindowInsetsCompat.CONSUMED
     }
+  }
+
+  override fun onDestroy() {
+    if (current === this) current = null
+    super.onDestroy()
   }
 
   override fun onWebViewCreate(webView: WebView) {
