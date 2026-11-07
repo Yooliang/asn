@@ -14,6 +14,8 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
 pub const FRAME_EVERY_MS: u64 = 2_000;
+/// 打字時多久看一次窗格（毫秒）：打的字要快一點出現，確認也跟著畫面幀回去
+pub const INPUT_FRAME_EVERY_MS: u64 = 300;
 pub const CTL_EVERY_MS: u64 = 15_000;
 /// 控制面或傳輸連續失敗多久就停
 pub const LOST_AFTER_MS: u64 = 90_000;
@@ -32,6 +34,9 @@ pub struct Frame {
     pub cursor_y: i64,
     pub cols: u32,
     pub rows: u32,
+    /// 打字時：已經交給窗格到第幾號（D 用來確認、補送）。看畫面時沒有
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ack: Option<u64>,
 }
 
 /// AAD：session id、方向、序號。方向只有 T→D
@@ -98,15 +103,19 @@ pub enum End {
     Gone,
     /// 本人在這台關掉了「允許其他設備替這台開新視窗」
     NotAllowed,
+    /// 打字：太久沒有新的字
+    InputIdle,
+    /// 打字：缺字太久（網路不穩）、太快太多、一直解不開。不跳過缺的字
+    InputStopped,
 }
 
 impl End {
     /// 後台 `term_view_stop` 的原因；不用回報的是 None
     pub fn reason(self) -> Option<&'static str> {
         match self {
-            End::TargetEnded | End::NotAllowed => Some("target_ended"),
+            End::TargetEnded | End::NotAllowed | End::InputIdle => Some("target_ended"),
             End::ViewerGone => Some("viewer_gone"),
-            End::Failed => Some("failed"),
+            End::Failed | End::InputStopped => Some("failed"),
             End::Expired | End::Gone => None,
         }
     }
@@ -131,6 +140,11 @@ pub trait TPort {
     fn sleep_ms(&mut self, ms: u64);
     /// 只記長度和次數
     fn log(&mut self, line: &str);
+    /// 打字的工作階段：把收到、排好順序的字交給窗格，回已經交到第幾號（放進畫面幀給 D 確認）。
+    /// 看畫面時沒有打字，回 None。出錯（缺字太久、窗格收不了）回結束原因
+    fn input(&mut self, _now_ms: u64) -> Result<Option<u64>, End> {
+        Ok(None)
+    }
 }
 
 /// T 傳畫面，跑到該停為止。金鑰在這裡被消耗，回來就沒了。一定會收掉「正在被看」
@@ -194,10 +208,22 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
                 Err(_) => {}
             }
         }
+        // 打字：控制面查到之後才收；收到的字依序交給窗格，確認跟著下一幅回去
+        let ack = if ctl_seen {
+            match port.input(now) {
+                Ok(a) => a,
+                Err(e) => {
+                    finish(&mut |l| port.log(l), "input_ended", sent, bytes);
+                    return e;
+                }
+            }
+        } else {
+            None
+        };
         // 控制面還沒查到過就不傳；暫停時不讀窗格
         if ctl_seen && !paused {
             let frame = match port.frame() {
-                Ok(f) => Frame { text: filter_frame(&f.text), ..f },
+                Ok(f) => Frame { text: filter_frame(&f.text), ack, ..f },
                 Err(_) => {
                     finish(&mut |l| port.log(l), "read_failed", sent, bytes);
                     return End::Failed;
@@ -234,7 +260,7 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
                 send_ok_at = now;
             }
         }
-        port.sleep_ms(FRAME_EVERY_MS);
+        port.sleep_ms(if s.scope == crate::view_handshake::Scope::Input { INPUT_FRAME_EVERY_MS } else { FRAME_EVERY_MS });
     }
 }
 
@@ -323,6 +349,11 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
         d_node: get("from_node")?.to_string(),
         t_node: me_node.to_string(),
         window: get("window_name")?.to_string(),
+        // 沒帶就是看畫面（0.2.8 的後台）；帶了不認得的一律不接受。範圍簽在握手裡，後台改不了
+        scope: match row.get("scope") {
+            None => crate::view_handshake::Scope::View,
+            Some(v) => v.as_str().and_then(crate::view_handshake::Scope::parse).ok_or_else(bad)?,
+        },
         expires_s: row.get("expires_s").and_then(serde_json::Value::as_i64).ok_or_else(bad)?,
     };
     let from_pub = get("from_pub")?.to_string();
@@ -353,10 +384,10 @@ mod tests {
     const START_MS: u64 = 1_800_000_000_000;
 
     fn session() -> Session {
-        Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), expires_s: (START_MS / 1000 + 600) as i64 }
+        Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: crate::view_handshake::Scope::View, expires_s: (START_MS / 1000 + 600) as i64 }
     }
     fn frame(text: &str) -> Frame {
-        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40 }
+        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40, ack: None }
     }
 
     #[derive(Default)]
@@ -674,7 +705,7 @@ mod tests {
         let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
         let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
         let now = 1_800_000_000i64;
-        let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), expires_s: now + 60 };
+        let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: crate::view_handshake::Scope::View, expires_s: now + 60 };
         let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
         let row = json!({ "id": "s1", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
         let mut known = KnownPeers::default();
@@ -689,6 +720,102 @@ mod tests {
         forged["from_pub"] = json!(t.public_b64());
         assert!(matches!(accept_request(&forged, "t", &KnownPeers::default(), &t, now), Err(Refused::Bad(_))), "公鑰對不上簽章：拒絕");
         assert!(matches!(accept_request(&json!({ "id": "s1" }), "t", &known, &t, now), Err(Refused::Bad(_))));
+    }
+
+    #[test]
+    fn 請求的範圍_沒帶是看畫面_打字要簽進去_不認得的不接受() {
+        use crate::view_handshake::Scope;
+        use serde_json::json;
+        let (dd, td) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
+        let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
+        let now = 1_800_000_000i64;
+        let known = crate::device_id::KnownPeers::default();
+        let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: Scope::Input, expires_s: now + 60 };
+        let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
+        let row = json!({ "id": "s1", "scope": "input", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
+        assert_eq!(accept_request(&row, "t", &known, &t, now).unwrap().session.scope, Scope::Input);
+        let mut as_view = row.clone();
+        as_view.as_object_mut().unwrap().remove("scope");
+        assert!(matches!(accept_request(&as_view, "t", &known, &t, now), Err(Refused::Bad(_))), "打字的簽章不能當看畫面接受");
+        let mut odd = row.clone();
+        odd["scope"] = json!("admin");
+        assert!(matches!(accept_request(&odd, "t", &known, &t, now), Err(Refused::Bad(_))));
+    }
+
+    #[test]
+    fn 打字_收到的字依序交出_確認放進下一幅_出錯就結束() {
+        struct Typing {
+            inner: Fake,
+            acks: Vec<Result<Option<u64>, End>>,
+            sleeps: Vec<u64>,
+        }
+        impl TPort for Typing {
+            fn window_ok(&mut self) -> bool {
+                self.inner.window_ok()
+            }
+            fn notify(&mut self) -> Result<(), String> {
+                self.inner.notify()
+            }
+            fn set_watching(&mut self, on: bool) {
+                self.inner.set_watching(on)
+            }
+            fn frame(&mut self) -> Result<Frame, String> {
+                self.inner.frame()
+            }
+            fn ctl(&mut self) -> Result<Ctl, String> {
+                self.inner.ctl()
+            }
+            fn send(&mut self, wire: &str) -> Result<(), String> {
+                self.inner.send(wire)
+            }
+            fn stop_requested(&mut self) -> bool {
+                self.inner.stop_requested()
+            }
+            fn allowed(&mut self) -> bool {
+                self.inner.allowed()
+            }
+            fn now_ms(&mut self) -> u64 {
+                self.inner.now_ms()
+            }
+            fn sleep_ms(&mut self, ms: u64) {
+                self.sleeps.push(ms);
+                self.inner.sleep_ms(ms)
+            }
+            fn log(&mut self, line: &str) {
+                self.inner.log(line)
+            }
+            fn input(&mut self, _now_ms: u64) -> Result<Option<u64>, End> {
+                if self.acks.is_empty() {
+                    Err(End::InputIdle)
+                } else {
+                    self.acks.remove(0)
+                }
+            }
+        }
+        let (tk, dk) = pair();
+        let s = Session { scope: crate::view_handshake::Scope::Input, ..session() };
+        let mut p = Typing { inner: fake(), acks: vec![Ok(Some(1)), Ok(Some(2)), Err(End::InputStopped)], sleeps: Vec::new() };
+        assert_eq!(run_t(&s, tk, &mut p), End::InputStopped);
+        let mut rx = DReceiver::new(dk, &s.id);
+        let acks: Vec<Option<u64>> = p.inner.sent.iter().filter_map(|w| match rx.receive(w) {
+            Received::Frame(_, f) => Some(f.ack),
+            _ => None,
+        }).collect();
+        assert_eq!(acks.first().copied().flatten(), Some(1), "確認跟著畫面幀：{acks:?}");
+        assert!(acks.contains(&Some(2)), "確認變了就算畫面沒變也要再送一幅：{acks:?}");
+        assert!(p.sleeps.iter().all(|&ms| ms == INPUT_FRAME_EVERY_MS), "打字時看得比較勤");
+        assert_eq!(End::InputStopped.reason(), Some("failed"));
+        assert_eq!(End::InputIdle.reason(), Some("target_ended"));
+    }
+
+    #[test]
+    fn 看畫面的幀沒有確認欄位_和以前一樣() {
+        let f = frame("x");
+        let j = serde_json::to_string(&f).unwrap();
+        assert!(!j.contains("ack"), "{j}");
+        let back: Frame = serde_json::from_str(r#"{"text":"x","cursor_x":1,"cursor_y":2,"cols":120,"rows":40}"#).unwrap();
+        assert_eq!(back, f, "舊的幀照樣解得開");
     }
 
     #[test]

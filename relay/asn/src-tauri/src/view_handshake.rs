@@ -2,9 +2,10 @@
 //!
 //! - 兩邊都用自己的設備金鑰（`device_id`，Ed25519）簽；Windows Hello 只用來確認本人在場（在 lib.rs 的入口，不在這裡）。
 //! - 驗章用的對方公鑰是**本機記住的那一把**（TOFU，`device_id::KnownPeers`），由呼叫端比對過才傳進來；後台只轉交。
-//! - 簽章涵蓋雙方一次性公鑰、session id、雙方節點、視窗名、範圍、到期時間；T 的簽章包含 D 的一次性公鑰，防重放。
+//! - 簽章涵蓋雙方一次性公鑰、session id、雙方節點、視窗名、範圍（看畫面／打字）、到期時間；T 的簽章包含 D 的一次性公鑰，防重放。
+//!   範圍簽進去，後台改不了：看畫面的請求不能被改成打字。看畫面的簽章內容和 0.2.8 一字不差。
 #![cfg_attr(not(test), allow(dead_code))]
-use crate::device_id::{self, DeviceKey, SCOPE_VIEW};
+use crate::device_id::{self, DeviceKey, SCOPE_INPUT, SCOPE_VIEW};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
 use ring::rand::SystemRandom;
@@ -15,6 +16,31 @@ use zeroize::Zeroizing;
 pub const MAX_LIFETIME_SECS: i64 = 630;
 const KDF_LABEL: &[u8] = b"asn-view-key-v1";
 
+/// 這次是看畫面還是打字。打字一定也看得到畫面
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    View,
+    Input,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::View => SCOPE_VIEW,
+            Scope::Input => SCOPE_INPUT,
+        }
+    }
+
+    /// 只認這兩個字，其他一律不認
+    pub fn parse(s: &str) -> Option<Scope> {
+        match s {
+            SCOPE_VIEW => Some(Scope::View),
+            SCOPE_INPUT => Some(Scope::Input),
+            _ => None,
+        }
+    }
+}
+
 /// 這次觀看的固定資料。兩邊要完全相同，簽章才對得上
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -22,12 +48,13 @@ pub struct Session {
     pub d_node: String,
     pub t_node: String,
     pub window: String,
+    pub scope: Scope,
     pub expires_s: i64,
 }
 
 impl Session {
     fn lines(&self) -> String {
-        format!("{}\n{}\n{}\n{}\n{}\n{}", self.id, self.d_node, self.t_node, self.window, SCOPE_VIEW, self.expires_s)
+        format!("{}\n{}\n{}\n{}\n{}\n{}", self.id, self.d_node, self.t_node, self.window, self.scope.as_str(), self.expires_s)
     }
 
     /// D 簽的內容
@@ -53,6 +80,14 @@ impl SessionKey {
     /// 只給同一包的加解密用
     pub(crate) fn raw(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// 從這次的金鑰再導出一把專用的（例如打字的反向通道），和畫面用的那把不同；label 不同導出來就不同
+    pub(crate) fn sub(&self, label: &[u8]) -> Result<SessionKey, String> {
+        let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, b"asn-view-sub-v1").extract(&self.0[..]);
+        let info: [&[u8]; 1] = [label];
+        let mut out = Zeroizing::new([0u8; 32]);
+        prk.expand(&info, Len32).and_then(|o| o.fill(&mut out[..])).map(|_| SessionKey(out)).map_err(|_| "導出金鑰失敗".to_string())
     }
 }
 
@@ -149,7 +184,7 @@ mod tests {
         device_id::load_or_create(d.path(), &PlainFile).unwrap()
     }
     fn session() -> Session {
-        Session { id: "11111111-2222-3333-4444-555555555555".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), expires_s: NOW + 600 }
+        Session { id: "11111111-2222-3333-4444-555555555555".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: Scope::View, expires_s: NOW + 600 }
     }
 
     #[test]
@@ -213,6 +248,36 @@ mod tests {
         assert!(t_accept(&d.public_b64(), &t, &s, eph.public_b64(), &d_sig, NOW + 601).is_err(), "過期");
         let long = Session { expires_s: NOW + MAX_LIFETIME_SECS + 1, ..session() };
         assert!(d_start(&d, &long, NOW).is_err(), "太長");
+    }
+
+    #[test]
+    fn 範圍簽進去_看畫面的請求不能改成打字_看畫面的內容和以前一樣() {
+        let (d, t) = (key(), key());
+        let s = session();
+        let (eph, d_sig) = d_start(&d, &s, NOW).unwrap();
+        let d_eph = eph.public_b64().to_string();
+        let input = Session { scope: Scope::Input, ..session() };
+        assert!(t_accept(&d.public_b64(), &t, &input, &d_eph, &d_sig, NOW).is_err(), "看畫面的簽章不能拿去開打字");
+        let want = format!("asn-view-start-v1\n{}\nd\nt\n小乙\nview\n{}\n{d_eph}", s.id, s.expires_s);
+        assert_eq!(s.d_message(&d_eph), want.into_bytes(), "看畫面的簽章內容和 0.2.8 一樣");
+        assert!(String::from_utf8(input.d_message(&d_eph)).unwrap().contains("\ninput\n"));
+        assert_eq!(Scope::parse("view"), Some(Scope::View));
+        assert_eq!(Scope::parse("input"), Some(Scope::Input));
+        assert_eq!(Scope::parse("INPUT"), None);
+    }
+
+    #[test]
+    fn 子金鑰_和原本的不同_標籤不同就不同_兩邊導出來相同() {
+        let (d, t) = (key(), key());
+        let s = Session { scope: Scope::Input, ..session() };
+        let (eph, d_sig) = d_start(&d, &s, NOW).unwrap();
+        let d_eph = eph.public_b64().to_string();
+        let (t_eph, t_sig, tk) = t_accept(&d.public_b64(), &t, &s, &d_eph, &d_sig, NOW).unwrap();
+        let dk = d_finish(&t.public_b64(), eph, &s, &t_eph, &t_sig, NOW).unwrap();
+        let (ta, da) = (tk.sub(b"a").unwrap(), dk.sub(b"a").unwrap());
+        assert_eq!(ta.raw(), da.raw());
+        assert_ne!(ta.raw(), tk.raw());
+        assert_ne!(ta.raw(), tk.sub(b"b").unwrap().raw());
     }
 
     #[test]

@@ -88,8 +88,8 @@ pub fn new_session_id() -> Result<String, String> {
 }
 
 /// 這次觀看的資料。到期時間取整秒，T 拿到的也是整秒
-pub fn session(id: &str, me_node: &str, to_node: &str, window: &str, now_s: i64) -> Session {
-    Session { id: id.to_string(), d_node: me_node.to_string(), t_node: to_node.to_string(), window: window.to_string(), expires_s: now_s + VIEW_SECS }
+pub fn session(id: &str, me_node: &str, to_node: &str, window: &str, scope: view_handshake::Scope, now_s: i64) -> Session {
+    Session { id: id.to_string(), d_node: me_node.to_string(), t_node: to_node.to_string(), window: window.to_string(), scope, expires_s: now_s + VIEW_SECS }
 }
 
 /// 回報的結果怎麼處理
@@ -125,6 +125,7 @@ pub fn end_text(reason: &str) -> &'static str {
         "expired" => "時間到了，要再看請再按一次",
         "viewer_ended" | "ended" => "已經結束",
         "bad_frames" => "收到的畫面一直解不開，已經結束",
+        "input_stalled" => "網路不穩，打字已經停止，最後幾個字可能沒送到",
         _ => "這次觀看結束了",
     }
 }

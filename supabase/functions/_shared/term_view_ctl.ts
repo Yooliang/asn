@@ -16,6 +16,8 @@ const NODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOW_MAX = 64;
 const STOP_REASONS = ["target_ended", "rejected", "viewer_gone", "failed"];
 const REPORT_STATES = ["watching", "paused", "ended"];
+// 看畫面／打字（0.2.10）。沒帶就是看畫面；範圍兩端簽進握手，這裡只轉交
+const SCOPES = ["view", "input"];
 
 async function call(deps: TermViewDeps, fn: string, args: Record<string, unknown>): Promise<{ data: Json } | Reply> {
   const { data, error } = await deps.rpc(fn, args);
@@ -55,11 +57,12 @@ export async function handleTermViewAction(deps: TermViewDeps, me: { id: string 
   if (!signedUser) return fail("forbidden");
   if (action === "term_view_start") {
     const { id, to_node, window_name, d_eph_pub, d_sig, expires_at } = b;
+    const scope = b.scope ?? "view";
     if (typeof id !== "string" || !UUID_RE.test(id) || typeof to_node !== "string" || !NODE_RE.test(to_node)
       || typeof window_name !== "string" || window_name.length < 1 || window_name.length > WINDOW_MAX
       || typeof d_eph_pub !== "string" || !PUB_RE.test(d_eph_pub) || typeof d_sig !== "string" || !D_SIG_RE.test(d_sig)
-      || typeof expires_at !== "string" || !Number.isFinite(Date.parse(expires_at))) return fail("bad_request");
-    const r = await call(deps, "asn_relay_term_view_start", { p_actor: me.id, p_signed_user: signedUser, p_id: id, p_to_node: to_node, p_window_name: window_name, p_d_eph_pub: d_eph_pub, p_d_sig: d_sig, p_expires_at: expires_at });
+      || typeof expires_at !== "string" || !Number.isFinite(Date.parse(expires_at)) || !SCOPES.includes(scope)) return fail("bad_request");
+    const r = await call(deps, "asn_relay_term_view_start", { p_actor: me.id, p_signed_user: signedUser, p_id: id, p_to_node: to_node, p_window_name: window_name, p_d_eph_pub: d_eph_pub, p_d_sig: d_sig, p_expires_at: expires_at, p_scope: scope });
     if (isReply(r)) return r;
     if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic);
     return { status: 200, body: { id: r.data.id, topic: r.data.topic, to_pub: r.data.to_pub } };   // to_pub：看的那台要和本機記住的比（TOFU）

@@ -23,7 +23,8 @@
     "topic",
     "expires_s",
     "d_eph_pub",
-    "d_sig"
+    "d_sig",
+    "scope"
   ],
   "term_view_pending.active[]": [
     "id",

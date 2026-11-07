@@ -61,6 +61,10 @@ mod view_seen;
 mod view_remote;
 #[cfg(all(desktop, feature = "gui"))]
 mod presence;
+#[cfg(desktop)]
+mod view_input;
+#[cfg(all(desktop, feature = "gui"))]
+mod input_consent;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
@@ -784,6 +788,14 @@ fn device_known_forget(app: State<'_, App>, node: String) -> Result<bool, String
     device_id::live::forget(&app.data_dir, &node)
 }
 
+/// 本人在這台的設定頁勾「這台打字不用每次問我」（0.2.10）。**只有這個本機命令能改**（守門測試）；不送後台、不同步
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
+    device_id::live::set_input_no_ask(&app.data_dir, &node, on)
+}
+
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
 #[cfg(all(desktop, feature = "gui"))]
 fn start_device_key_publish(relay: std::sync::Arc<Relay>, data_dir: std::path::PathBuf) {
@@ -803,7 +815,8 @@ fn start_device_key_publish(relay: std::sync::Arc<Relay>, data_dir: std::path::P
 #[cfg(desktop)]
 #[derive(Default)]
 struct BeingViewed {
-    open: std::sync::Mutex<std::collections::HashMap<String, (String, String, Arc<std::sync::atomic::AtomicBool>)>>,
+    /// 觀看編號 → （誰、哪個視窗、本人按結束、是不是打字）
+    open: std::sync::Mutex<std::collections::HashMap<String, (String, String, Arc<std::sync::atomic::AtomicBool>, bool)>>,
 }
 
 #[cfg(feature = "gui")]
@@ -811,7 +824,7 @@ struct BeingViewed {
 impl BeingViewed {
     /// 通知畫面，並把視窗叫出來：「正在被看」不能被藏住
     fn publish(&self, app: &AppHandle) {
-        let list: Vec<Value> = self.open.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(id, (who, win, _))| serde_json::json!({ "id": id, "who": who, "window": win })).collect();
+        let list: Vec<Value> = self.open.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(id, (who, win, _, input))| serde_json::json!({ "id": id, "who": who, "window": win, "input": input })).collect();
         let _ = app.emit("term-being-viewed", &list);
         if !list.is_empty() {
             if let Some(w) = app.get_webview_window("list") {
@@ -836,6 +849,10 @@ struct LiveTPort {
     stop: Arc<std::sync::atomic::AtomicBool>,
     /// 送畫面的頻道（要回條）。丟掉它頻道就收掉；沒有即時頻道時是 None，一律送不出去
     out: Option<tokio::sync::mpsc::Sender<bell::Outbound>>,
+    /// 打字（0.2.10）：頻道收到的字先放這裡排好順序；看畫面時是 None
+    input: Option<Arc<std::sync::Mutex<view_input::TInput>>>,
+    /// 這次一共交給窗格幾個字（只記數量，內容不記）
+    typed: u64,
 }
 
 #[cfg(feature = "gui")]
@@ -856,7 +873,7 @@ impl view_stream::TPort for LiveTPort {
         {
             let mut open = views.open.lock().unwrap_or_else(|e| e.into_inner());
             if on {
-                open.insert(self.id.clone(), (self.who.clone(), self.window.clone(), self.stop.clone()));
+                open.insert(self.id.clone(), (self.who.clone(), self.window.clone(), self.stop.clone(), self.input.is_some()));
             } else {
                 open.remove(&self.id);
             }
@@ -867,7 +884,7 @@ impl view_stream::TPort for LiveTPort {
         let id = self.terms.partner_term_id(&self.window)?;
         let text = self.terms.view_text(&id)?;
         let m = self.terms.view_meta(&id)?;
-        Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows })
+        Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows, ack: None })
     }
     fn ctl(&mut self) -> Result<view_stream::Ctl, String> {
         let v = tauri::async_runtime::block_on(self.relay.api("term_view_pending", Some(serde_json::json!({}))))?;
@@ -894,6 +911,31 @@ impl view_stream::TPort for LiveTPort {
     fn log(&mut self, line: &str) {
         // 寫到機器資料夾的 ui.log（和其他紀錄、設定頁「開啟記錄」同一份），不寫 data_dir（#961）
         let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+    }
+    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {
+        let Some(inp) = self.input.clone() else { return Ok(None) };
+        let taken = inp.lock().unwrap_or_else(|e| e.into_inner()).take(now_ms);
+        let keys = match taken {
+            Ok(k) => k,
+            Err(e) => {
+                let line = format!("view {}: input end {} typed={}", self.id, e.label(), self.typed);
+                view_stream::TPort::log(self, &line);
+                return Err(e.end());
+            }
+        };
+        if !keys.is_empty() {
+            // 和本機看畫面打字同一個入口：按鍵規則、貼上清理、接手的窗格不給、資料夾要有授權
+            let pane = self.terms.partner_term_id(&self.window).map_err(|_| view_stream::End::Failed)?;
+            for k in &keys {
+                if self.terms.view_input(&pane, &k.d, k.p).is_err() {
+                    let line = format!("view {}: input refused typed={}", self.id, self.typed);
+                    view_stream::TPort::log(self, &line);
+                    return Err(view_stream::End::InputStopped);
+                }
+                self.typed += k.d.chars().count() as u64;
+            }
+        }
+        Ok(Some(inp.lock().unwrap_or_else(|e| e.into_inner()).applied()))
     }
 }
 
@@ -942,22 +984,47 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             }
                             device_id::live::alert(&relay, &a.session.d_node, "first", &a.from_pub).await;
                         }
+                        let who = row.get("from_name").and_then(Value::as_str).unwrap_or("").to_string();
+                        // 打字（0.2.10）：預設每次都要本人在這台的 ASN 視窗按允許；本人在設定頁對那台設過「不用每次問」才不問
+                        if a.session.scope == view_handshake::Scope::Input {
+                            let no_ask = device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
+                            if !no_ask && !input_consent::ask(&app, &a.from_name, &a.session.window).await {
+                                let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                                continue;
+                            }
+                        }
                         let view_stream::Accepted { session, t_eph, t_sig, key: session_key, .. } = a;
+                        let input = match session.scope {
+                            view_handshake::Scope::View => None,
+                            view_handshake::Scope::Input => match view_input::input_key(&session_key) {
+                                Ok(k) => Some(Arc::new(std::sync::Mutex::new(view_input::TInput::new(k, &id, auth::now_ms())))),
+                                Err(_) => {
+                                    let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "failed" }))).await;
+                                    continue;
+                                }
+                            },
+                        };
                         if relay.api("term_view_accept", Some(serde_json::json!({ "id": id, "t_eph_pub": t_eph, "t_sig": t_sig }))).await.is_err() {
                             continue;
                         }
-                        let who = row.get("from_name").and_then(Value::as_str).unwrap_or("").to_string();
                         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        // 送畫面的頻道：只送不收（收到的一律丟掉），每幅等伺服器回條；這次觀看結束、port 丟掉時一起收掉
+                        // 送畫面的頻道，每幅等伺服器回條；這次觀看結束、port 丟掉時一起收掉。
+                        // 看畫面：只送不收（收到的一律丟掉）。打字：另外只收 event=input 的字，排進 TInput（解密、排序、上限都在那裡）
                         let out = match (app.state::<ViewNet>().0.clone(), row.get("topic").and_then(Value::as_str)) {
                             (Some(url), Some(topic)) => {
                                 let (tx, rx) = tokio::sync::mpsc::channel(4);
-                                tauri::async_runtime::spawn(bell::run_channel(url, topic.to_string(), true, Some(rx), std::future::pending::<()>(), |_| {}));
+                                let inbox = input.clone();
+                                tauri::async_runtime::spawn(bell::run_channel(url, topic.to_string(), true, Some(rx), std::future::pending::<()>(), move |e| {
+                                    let (Some(inbox), bell::Event::Broadcast { event, payload }) = (&inbox, e) else { return };
+                                    if let Some(w) = view_input::wire_of(event, payload) {
+                                        inbox.lock().unwrap_or_else(|e| e.into_inner()).push(&w, auth::now_ms());
+                                    }
+                                }));
                                 Some(tx)
                             }
                             _ => None,
                         };
-                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out };
+                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out, input, typed: 0 };
                         let relay2 = relay.clone();
                         std::thread::spawn(move || {
                             let end = view_stream::run_t(&session, session_key, &mut port);
@@ -977,7 +1044,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
 #[cfg(desktop)]
 #[tauri::command]
 fn term_viewed_stop(views: State<'_, Arc<BeingViewed>>, id: String) {
-    if let Some((_, _, stop)) = views.open.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+    if let Some((_, _, stop, _)) = views.open.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -1001,19 +1068,31 @@ async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>
 #[cfg(desktop)]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, net: State<'_, ViewNet>, to_node: String, partner: String, machine: Option<String>) -> Result<Value, String> {
+async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, inputs: State<'_, Arc<RemoteInputs>>, net: State<'_, ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>) -> Result<Value, String> {
     let url = net.0.clone().ok_or("這台現在連不上即時頻道，不能看畫面")?;
     if !device_id::can_be_viewed_here(&app.data_dir) {
         return Err(device_id::NOT_VIEWABLE_HERE.into());
     }
     let machine: String = machine.unwrap_or_default().chars().filter(|c| !c.is_control()).take(64).collect();
+    // 看畫面或打字（0.2.10）。沒帶是看畫面；其他字一律不收
+    let scope = match scope.as_deref() {
+        None => view_handshake::Scope::View,
+        Some(x) => view_handshake::Scope::parse(x).ok_or("不認得的範圍")?,
+    };
+    if scope == view_handshake::Scope::Input && inputs.count() >= view_input::MAX_OPEN {
+        return Err(view_input::TOO_MANY.into());
+    }
     let token = pair_token(&auth).await?;
     // 先確認本人，再取金鑰、登記（確認框可能等到 60 秒）
-    presence::confirm(&window, &view_remote::presence_text(&machine, &partner)).await?;
+    let ask = match scope {
+        view_handshake::Scope::View => view_remote::presence_text(&machine, &partner),
+        view_handshake::Scope::Input => view_input::presence_text(&machine, &partner),
+    };
+    presence::confirm(&window, &ask).await?;
     let key = device_id::live::key_async(&app.data_dir).await?;
     let id = view_remote::new_session_id()?;
     let now_s = (auth::now_ms() / 1000) as i64;
-    let s = view_remote::session(&id, &app.node, &to_node, &partner, now_s);
+    let s = view_remote::session(&id, &app.node, &to_node, &partner, scope, now_s);
     views.add(&id)?;
     let (eph, d_sig) = match view_handshake::d_start(&key, &s, now_s) {
         Ok(v) => v,
@@ -1023,7 +1102,7 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
         }
     };
     let relay = relay_of(&app)?;
-    let body = serde_json::json!({ "id": id, "to_node": to_node, "window_name": partner, "d_eph_pub": eph.public_b64(), "d_sig": d_sig, "expires_at": claude_quota::iso_secs(s.expires_s * 1000) });
+    let body = serde_json::json!({ "id": id, "to_node": to_node, "window_name": partner, "d_eph_pub": eph.public_b64(), "d_sig": d_sig, "expires_at": claude_quota::iso_secs(s.expires_s * 1000), "scope": scope.as_str() });
     let started = relay.api_signed("term_view_start", Some(body), Some(&token)).await.ok();
     let field = |k: &str| started.as_ref().and_then(|v| v.get(k).and_then(Value::as_str).map(str::to_string));
     let (Some(topic), Some(to_pub)) = (field("topic"), field("to_pub")) else {
@@ -1046,8 +1125,85 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
         return Err(view_remote::TARGET_KEY_CHANGED.into());
     }
     let target = RemoteTarget { node: to_node, name: machine, sign_pub: to_pub, tofu };
-    start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), url, topic, s.clone(), eph, target);
-    Ok(serde_json::json!({ "id": id, "expires_s": s.expires_s }))
+    start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), inputs.inner().clone(), url, topic, s.clone(), eph, target);
+    Ok(serde_json::json!({ "id": id, "expires_s": s.expires_s, "scope": scope.as_str() }))
+}
+
+/// 本人在打字的畫面上打的字（0.2.10）：只有這個入口。字先過按鍵規則，編序號、加密，送到那台；那台確認之前會補送。
+/// 視窗要在前景、要是開著的打字工作階段；太快、太多回錯（字沒有收，畫面要告訴本人）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_view_remote_input(window: tauri::WebviewWindow, inputs: State<'_, Arc<RemoteInputs>>, id: String, data: String, paste: Option<bool>) -> Result<(), String> {
+    if !window.is_focused().unwrap_or(false) {
+        return Err("視窗不在前景，不送".into());
+    }
+    launch::term_view::check_input(&data)?;
+    let (ob, tx) = inputs.get(&id).ok_or("這個畫面現在不能打字")?;
+    let wires = ob.lock().unwrap_or_else(|e| e.into_inner()).push(&data, paste.unwrap_or(false), auth::now_ms())?;
+    for w in wires {
+        // 送不出去不用回錯：那台沒確認就會補送，太久沒確認會停下來告訴本人
+        let _ = bell::send_via(&tx, view_input::EVENT, serde_json::json!({ "w": w })).await;
+    }
+    Ok(())
+}
+
+/// 進行中的打字（看的那台）：觀看編號 → 送出端。只在本機
+#[cfg(all(desktop, feature = "gui"))]
+#[derive(Default)]
+struct RemoteInputs {
+    open: std::sync::Mutex<std::collections::HashMap<String, (Arc<std::sync::Mutex<view_input::DOutbox>>, tokio::sync::mpsc::Sender<bell::Outbound>, bool)>>,
+}
+
+#[cfg(all(desktop, feature = "gui"))]
+impl RemoteInputs {
+    fn add(&self, id: &str, ob: Arc<std::sync::Mutex<view_input::DOutbox>>, tx: tokio::sync::mpsc::Sender<bell::Outbound>) {
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), (ob, tx, false));
+    }
+    fn get(&self, id: &str) -> Option<(Arc<std::sync::Mutex<view_input::DOutbox>>, tokio::sync::mpsc::Sender<bell::Outbound>)> {
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).get(id).filter(|v| !v.2).map(|v| (v.0.clone(), v.1.clone()))
+    }
+    fn count(&self) -> usize {
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+    /// 網路不穩：不再收字
+    fn stall(&self, id: &str) {
+        if let Some(v) = self.open.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
+            v.2 = true;
+        }
+    }
+    /// 收掉。回是不是因為網路不穩停的
+    fn remove(&self, id: &str) -> bool {
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(id).is_some_and(|v| v.2)
+    }
+}
+
+/// 打字的補送：每 300 毫秒看一次，那台沒確認的再送；最舊的一幅 5 秒還沒確認就停下（不跳過缺的字），結束這次打字
+#[cfg(all(desktop, feature = "gui"))]
+fn spawn_input_resend(app: AppHandle, label: String, views: Arc<view_remote::RemoteViews>, inputs: Arc<RemoteInputs>, id: String) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let Some((ob, tx)) = inputs.get(&id) else { break };
+            if views.want(&id) == view_remote::Want::Ended {
+                break;
+            }
+            let now = auth::now_ms();
+            let (again, stalled) = {
+                let mut g = ob.lock().unwrap_or_else(|e| e.into_inner());
+                (g.resend(now), g.stalled(now))
+            };
+            if stalled {
+                inputs.stall(&id);
+                views.set(&id, view_remote::Want::Ended);
+                let _ = app.emit_to(label.as_str(), "term-view-remote-input-stalled", serde_json::json!({ "id": id }));
+                break;
+            }
+            for w in again {
+                let _ = bell::send_via(&tx, view_input::EVENT, serde_json::json!({ "w": w })).await;
+            }
+        }
+    });
 }
 
 /// 看的那台要看的那台：節點、名字、設備公鑰，和本機記住的比過的結果
@@ -1079,7 +1235,7 @@ fn term_view_remote_stop(views: State<'_, Arc<view_remote::RemoteViews>>, id: St
 /// 接收頻道只收不送，收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面
 #[cfg(all(desktop, feature = "gui"))]
 #[allow(clippy::too_many_arguments)]
-fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir: std::path::PathBuf, views: Arc<view_remote::RemoteViews>, url: String, topic: String, s: view_handshake::Session, eph: view_handshake::Eph, target: RemoteTarget) {
+fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir: std::path::PathBuf, views: Arc<view_remote::RemoteViews>, inputs: Arc<RemoteInputs>, url: String, topic: String, s: view_handshake::Session, eph: view_handshake::Eph, target: RemoteTarget) {
     tauri::async_runtime::spawn(async move {
         let id = s.id.clone();
         let mut eph = Some(eph);
@@ -1104,9 +1260,16 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                         view_remote::Step::Ended(r) => break r,
                         view_remote::Step::Accepted { t_eph, t_sig } if eph.is_some() => {
                             let Some(e) = eph.take() else { break "failed".to_string() };
-                            let mut rx = match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
-                                Ok(rx) => rx,
-                                Err(_) => break "rejected".to_string(),
+                            // 打字：同一次握手另外導出送字的金鑰（只有打字的工作階段才有送出端）
+                            let (mut rx, outbox) = match s.scope {
+                                view_handshake::Scope::View => match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
+                                    Ok(rx) => (rx, None),
+                                    Err(_) => break "rejected".to_string(),
+                                },
+                                view_handshake::Scope::Input => match view_input::d_finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
+                                    Ok((rx, ob)) => (rx, Some(Arc::new(std::sync::Mutex::new(ob)))),
+                                    Err(_) => break "rejected".to_string(),
+                                },
                             };
                             // 第一次看到這台：T 的簽章驗過才記住（first 通知只有 T 寄）；記不住就不看
                             if target.tofu == device_id::Tofu::New && !matches!(device_id::live::see(&data_dir, &target.node, &target.name, &target.sign_pub, now_ms), Ok(device_id::Tofu::New | device_id::Tofu::Same)) {
@@ -1114,13 +1277,25 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                             }
                             let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                             stop_rx = Some(tx);
+                            // 打字才有送出端（要回條）；看畫面只收不送
+                            let send = outbox.as_ref().map(|ob| {
+                                let (otx, orx) = tokio::sync::mpsc::channel::<bell::Outbound>(16);
+                                inputs.add(&id, ob.clone(), otx);
+                                spawn_input_resend(app.clone(), label.clone(), views.clone(), inputs.clone(), id.clone());
+                                orx
+                            });
+                            let ack_to = outbox.clone();
                             let (app2, label2, views2, id2, seen) = (app.clone(), label.clone(), views.clone(), id.clone(), frames_seen.clone());
-                            tauri::async_runtime::spawn(bell::run_channel(url.clone(), topic.clone(), false, None, async move { let _ = stop.await; }, move |e| {
+                            tauri::async_runtime::spawn(bell::run_channel(url.clone(), topic.clone(), send.is_some(), send, async move { let _ = stop.await; }, move |e| {
                                 let bell::Event::Broadcast { event, payload } = e else { return };
                                 let Some(w) = view_remote::frame_wire(event, payload) else { return };
                                 match view_remote::receive(&mut rx, &w) {
                                     view_remote::Show::Frame(f) => {
                                         seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        // 打字：那台已經交給窗格到第幾號，之前的不用再補送
+                                        if let (Some(ob), Some(a)) = (&ack_to, f.ack) {
+                                            ob.lock().unwrap_or_else(|e| e.into_inner()).ack(a);
+                                        }
                                         if views2.want(&id2) == view_remote::Want::Watching {
                                             let _ = app2.emit_to(label2.as_str(), "term-view-remote-frame", serde_json::json!({ "id": id2, "text": f.text, "meta": { "cursor_x": f.cursor_x, "cursor_y": f.cursor_y, "cols": f.cols, "rows": f.rows } }));
                                         }
@@ -1161,6 +1336,8 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         drop(stop_rx.take());
         let frames = frames_seen.load(std::sync::atomic::Ordering::Relaxed);
         views.remove(&id);
+        // 打字的送出端停掉時是網路不穩：最後幾個字可能沒送到，要說清楚
+        let reason = if inputs.remove(&id) { "input_stalled".to_string() } else { reason };
         let _ = app.emit_to(label.as_str(), "term-view-remote-end", serde_json::json!({ "id": id, "text": view_remote::end_text(&reason) }));
         let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
     });
@@ -2284,6 +2461,7 @@ pub fn run() {
         .manage(Arc::new(TermViews::default()))
         .manage(Arc::new(BeingViewed::default()))
         .manage(Arc::new(view_remote::RemoteViews::default()))
+        .manage(Arc::new(RemoteInputs::default()))
         .manage(ViewNet(anon_url.clone()))
         .manage(wins::Frame::default())
         .manage(tray::CloseToTray::default())
@@ -2302,7 +2480,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
