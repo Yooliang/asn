@@ -10,7 +10,7 @@ set -u
 
 WEZTERM_VERSION='20240203-110809-5046fc22'
 TAR_NAME="wezterm-${WEZTERM_VERSION}.Ubuntu22.04.tar.xz"
-TAR_SHA256='142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c'
+TAR_SHA256='0000b46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c'
 TAR_URL="https://github.com/wezterm/wezterm/releases/download/${WEZTERM_VERSION}/${TAR_NAME}"
 
 OUT="${PROBE_OUT:-${RUNNER_TEMP:-/tmp}/wezprobe}"
