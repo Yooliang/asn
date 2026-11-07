@@ -192,10 +192,10 @@ export class AsnCore {
     if (!quiet) this.emit('state')
   }
 
-  // 寄件節點是不是同一個帳號的：名單（後台只列同租戶的節點）有這個節點，或就是本機。
-  // 前提是「租戶＝帳號」（目前每個租戶只有一個擁有者，asn真 2026-11-07 查證）；哪天租戶內有了別人的節點，
-  // 就要改成看後台在信件上帶的「擁有者本人名下節點寄的」旗標（另開一張，排在 PR-C 之前）。名單還沒載入＝不知道：
-  // 除了本機一律先當一般信（長出聯絡人列），名單載入後由 #mergeLegacyNotice 併進「通知」
+  // 寄件節點是不是同一個帳號的（只在信上沒有 from_owner 時用，也就是舊後台）：名單（後台只列同租戶的節點）有這個節點，或就是本機。
+  // 這條退路的前提是「租戶＝帳號」（目前每個租戶只有一個擁有者，asn真 2026-11-07 查證）。名單還沒載入＝不知道：
+  // 除了本機一律先當一般信（長出聯絡人列），名單載入後由 #mergeLegacyNotice 併進「通知」。
+  // #mergeLegacyNotice 處理的舊列沒有 from_owner（只有節點），所以仍然看名單
   #sameAccountNode(node) {
     if (!this.rosterLoaded && !this.nodeOrder.length) return node === this.selfNode
     return node === this.selfNode || this.nodeOrder.includes(node)
@@ -389,7 +389,7 @@ export class AsnCore {
 
   // quiet：照常記進對話、算未讀，只是不跳提示（代收舊信一次很多時由 pull 合成一則）。回這封信落在哪位夥伴
   async #incoming(m, { quiet = false } = {}) {
-    const asNotice = isSystemNotice(m, { sameAccount: this.#sameAccountNode(m.from_node) })
+    const asNotice = isSystemNotice(m, { sameAccount: typeof m.from_owner === 'boolean' ? m.from_owner : this.#sameAccountNode(m.from_node) })   // 後台有帶 from_owner 就用它，舊後台才看名單
     const r = asNotice ? { id: NOTICE_ID } : routeMail(this.friends, m)   // 系統通知（#848）：不建聯絡人，全部進固定的「通知」對話
     let f = this.friends.get(r.id)
     if (!f) { f = this.#decorate({ ...(r.id === NOTICE_ID ? noticeFriend() : stubFriend(r)), unread: 0, waiting: false, replyTo: null }); this.friends.set(r.id, f) }

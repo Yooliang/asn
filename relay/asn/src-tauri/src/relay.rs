@@ -584,7 +584,7 @@ impl Relay {
         for m in v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default() {
             let none = m.get("to_agent").and_then(Value::as_str).map(str::is_empty).unwrap_or(true);
             let from = m.get("from_agent").and_then(Value::as_str).unwrap_or("");
-            if none && !crate::notice_name::is_system_notice(from, m.get("kind").and_then(Value::as_str), None) {
+            if none && !crate::notice_name::is_system_notice(from, m.get("kind").and_then(Value::as_str), None, m.get("from_owner").and_then(Value::as_bool)) {
                 self.hold_unaddressed(m);
             }
         }

@@ -38,13 +38,17 @@ export const isLegacyNoticeName = name => {
   return s === foldName(NOTICE_SENDER) || s.endsWith(LEGACY_NOTICE_SUFFIX)
 }
 
+// 寄件節點是不是同一個帳號的：呼叫端明說就用呼叫端的；否則看後台在信件上帶的 from_owner（布林）；
+// 兩個都沒有（舊後台）＝不知道，當作是，照舊規則
+export const sameAccountOf = (mail, explicit) => (typeof explicit === 'boolean' ? explicit : typeof mail?.from_owner === 'boolean' ? mail.from_owner : true)
+
 // 這封是不是系統通知（不回信、不建聯絡人、併進「通知」對話）。
 // 一律先看 kind；沒有 kind 時才退回舊規則（寄件名），而且舊規則只對截止時間以前的信有效。
-// sameAccount：寄件節點是不是同一個帳號的節點（呼叫端用名單的節點判斷）；false 的舊寄件名信是一般信。沒給＝不知道，照舊規則
-export function isSystemNotice(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount = true } = {}) {
+// sameAccount：寄件節點是不是同一個帳號的節點（呼叫端明說的優先，其次看信上的 from_owner）；false 的舊寄件名信是一般信。都沒有＝不知道，照舊規則
+export function isSystemNotice(mail, { until = LEGACY_NOTICE_UNTIL, sameAccount } = {}) {
   if (!mail || typeof mail !== 'object') return false
   if (isNoticeKind(mail.kind)) return true
-  if (sameAccount === false || !legacyApplies(mail, until)) return false
+  if (sameAccountOf(mail, sameAccount) === false || !legacyApplies(mail, until)) return false
   return isLegacyNoticeName(mail.from_agent)
 }
 

@@ -76,12 +76,14 @@ pub struct Mail {
     pub sent_ms: Option<u64>,
     /// 信件類別（後台選填；`notice:` 開頭＝系統通知，舊後台沒有）
     pub kind: Option<String>,
+    /// 寄件節點是不是帳號擁有者名下的（後台選填布林；舊後台沒有＝None）
+    pub from_owner: Option<bool>,
 }
 
 impl Mail {
     /// 這封信是不是系統通知（不回信、不計時）：kind 或（截止時間前的）舊寄件名
     pub fn is_system_notice(&self) -> bool {
-        crate::notice_name::is_system_notice(self.from_agent.as_deref().unwrap_or(""), self.kind.as_deref(), self.sent_ms)
+        crate::notice_name::is_system_notice(self.from_agent.as_deref().unwrap_or(""), self.kind.as_deref(), self.sent_ms, self.from_owner)
     }
     /// 內文開頭是舊版的 `[收發室]` 標記（只對截止時間前的信有效）
     pub fn has_legacy_notice_mark(&self) -> bool {
@@ -105,6 +107,7 @@ impl Mail {
             attachments: super::attach::normalize(v.get("attachments")),
             sent_ms: s("created_at").and_then(|t| parse_sent_ms(&t)),
             kind: s("kind"),
+            from_owner: v.get("from_owner").and_then(Value::as_bool),
         })
     }
 }
@@ -462,6 +465,30 @@ mod tests {
     use serde_json::json;
 
     const ID: &str = "11111111-2222-3333-4444-555555555555";
+
+    fn mail_from(v: serde_json::Value) -> Mail {
+        let mut o = json!({ "id": ID, "from_node": "W", "body": "x", "trust": "member" });
+        o.as_object_mut().unwrap().extend(v.as_object().unwrap().clone());
+        Mail::from_json(&o).unwrap()
+    }
+
+    #[test]
+    fn from_owner_舊寄件名的信只有同帳號節點寄的才算系統通知() {
+        let yes = mail_from(json!({ "from_agent": "額度通知收發室", "from_owner": true }));
+        assert_eq!(yes.from_owner, Some(true));
+        assert!(yes.is_system_notice());
+        assert!(sender_line(&yes).starts_with("寄件人：收發室通知"));
+        let no = mail_from(json!({ "from_agent": "額度通知收發室", "from_owner": false }));
+        assert_eq!(no.from_owner, Some(false));
+        assert!(!no.is_system_notice(), "別帳號節點寄的是一般信：回信照舊允許");
+        assert!(!sender_line(&no).starts_with("寄件人：收發室通知"));
+        let absent = mail_from(json!({ "from_agent": "額度通知收發室" }));
+        assert_eq!(absent.from_owner, None);
+        assert!(absent.is_system_notice(), "舊後台沒有欄位：照舊");
+        assert!(sender_line(&absent).starts_with("寄件人：收發室通知"));
+        let kind = mail_from(json!({ "from_agent": "W-政策", "kind": "notice:bridge", "from_owner": false }));
+        assert!(kind.is_system_notice(), "有 kind 不受 from_owner 影響");
+    }
 
     #[test]
     fn 要不要回信_欄位優先_null_才看舊標記() {
