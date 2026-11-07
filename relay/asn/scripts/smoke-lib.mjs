@@ -530,8 +530,8 @@ export const mnoselfProbeSource = () => `(async () => {
   if (!sws.some(t => t.includes('辦公室'))) return { ok: false, why: '別台電腦的切換鈕不見了：' + (sws.join('、') || '（沒有按鈕）') };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mnoself ? '手機不能切到本機檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mnoself ? mnoselfProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -579,6 +579,46 @@ const layoutAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
   Q: { asn_online: true, reported_at: toMinute(now - 5 * 60_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
   R: { asn_online: false, reported_at: toMinute(now - 9 * 24 * 3600_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
 }, fallback: null })
+// 手機設備列的「雲端」標示（#930，0.2.15）：一開始沒有任何帳號回報，進設備頁後讀到（不點進任何一台）→ Aegis（只有橋）、日本VM（橋＋代理）、Grok 雲端（雲端代理）各自一列、種類旁標「雲端」；
+// 實體電腦不標；這支手機一定是「手機」、不標雲端（平台還沒讀到 noplat、讀到 android 兩種都驗）
+const MCLOUD_MEMBERS = [
+  { id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'claude', cwd_label: 'demo' }] },
+  { id: 'A', name: '牧陽 Aegis', agents: [{ name: '麗麗', status: 'idle', engine: 'aegis', cwd_label: '' }] },
+  { id: 'J', name: '日本VM', agents: [{ name: 'jp-claude', status: 'idle', engine: 'claude', cwd_label: 'jp' }, { name: 'jp-pi', status: 'working', engine: 'pi', cwd_label: 'jp' }] },
+  { id: 'G', name: 'Grok 雲端', agents: [{ name: 'Grok正見', status: 'idle', engine: 'cloud', cwd_label: '' }] },
+]
+const mcloudAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
+  Q: { asn_online: true, reported_at: toMinute(now - 5 * 60_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }] },
+  A: { asn_online: false, reported_at: '', accounts: [] },
+  J: { asn_online: false, reported_at: '', accounts: [] },
+  G: { asn_online: false, reported_at: '', accounts: [] },
+}, fallback: null })
+export const MCLOUD_PROBE = { mcloud: true }
+export const mcloudProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  btn.click();
+  await sleep(500);
+  // 不點進任何一台：進設備頁時就會把各台的帳號回報讀進來（#930），讀到之後雲端節點才標得出來；最多等 3 秒
+  const tagged = () => [...document.querySelectorAll('.m-dv-row .m-dv-rs')].filter(e => e.textContent.includes('雲端')).length;
+  for (let i = 0; i < 30 && tagged() < 3; i++) await sleep(100);
+  await sleep(300);
+  const rows = [...document.querySelectorAll('.m-dv-row')].filter(e => e.offsetParent !== null).map(r => ({ name: r.querySelector('.m-dv-rn b')?.textContent.trim() ?? '', kind: r.querySelector('.m-dv-rs')?.textContent.trim() ?? '' }));
+  const row = name => rows.find(r => r.name === name);
+  for (const name of ['牧陽 Aegis', '日本VM', 'Grok 雲端']) {
+    const r = row(name);
+    if (!r) return { ok: false, why: '找不到「' + name + '」那列（各自一列）：' + rows.map(x => x.name).join('／') };
+    if (!r.kind.startsWith('電腦 · 雲端')) return { ok: false, why: '「' + name + '」沒標雲端：' + r.kind };
+  }
+  const pc = row('辦公室');
+  if (!pc || pc.kind.includes('雲端')) return { ok: false, why: '實體電腦不該標雲端：' + (pc?.kind ?? '找不到') };
+  const me = rows.find(r => r.kind.includes('這支手機'));
+  if (!me) return { ok: false, why: '找不到這支手機那列' };
+  if (!me.kind.startsWith('手機') || me.kind.includes('雲端')) return { ok: false, why: '這支手機要是「手機」、不標雲端：' + me.kind };
+  return { ok: true, why: '' };
+})()`
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 export const SCENARIOS = [
@@ -603,6 +643,9 @@ export const SCENARIOS = [
   { name: 'm-layout-devices-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devicesBig, shot: 'm-layout-devices-big.png' },
   { name: 'm-layout-accounts', page: 'm.html', state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-412.png' },
   { name: 'm-layout-accounts-360', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-360.png' },
+  // 手機設備列的雲端標示（#930）：這支手機的平台還沒讀到（noplat）、讀到 android 各一張
+  { name: 'm-cloud-tag-noplat', page: 'm.html', state: { signedIn: true, mcloud: 'noplat' }, ready: '#app.m .m-row-btn', probe: MCLOUD_PROBE, shot: 'm-cloud-tag-noplat.png' },
+  { name: 'm-cloud-tag-android', page: 'm.html', state: { signedIn: true, mcloud: 'android' }, ready: '#app.m .m-row-btn', probe: MCLOUD_PROBE, shot: 'm-cloud-tag-android.png' },
   { name: 'm-layout-accounts-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accountsBig, shot: 'm-layout-accounts-big.png' },
   { name: 'm-noself-noplat', page: 'm.html', state: { signedIn: true, mnoself: 'noplat' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.noplat, shot: 'm-noself-noplat.png' },
   { name: 'm-noself-android', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.android, shot: 'm-noself-android.png' },
@@ -709,6 +752,13 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: scenario.state.mnoself === 'android' ? [{ node: 'P', platform: 'android', launcher: null }] : [] }
     t.android_acct_roster = noselfRoster()
     t.android_acct_list = layoutAcctList()
+  }
+  if (scenario.state.mcloud) {
+    t.relay_list = { members: MCLOUD_MEMBERS }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } }
+    t.android_launchers = { machines: scenario.state.mcloud === 'android' ? [{ node: 'P', platform: 'android', launcher: null }] : [] }
+    t.android_acct_roster = ROSTER_SAMPLE
+    t.android_acct_list = mcloudAcctList()
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   return t

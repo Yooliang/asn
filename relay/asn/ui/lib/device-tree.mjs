@@ -12,7 +12,7 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceStateLine, installAction, isCloudNode, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceStateLine, installAction, isCloudNode, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -56,7 +56,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, now = Date.now() } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now() } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })
@@ -74,7 +74,8 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
-    const phone = isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
+    // 手機版（selfIsPhone）的本機一定是手機：不等後台回報的平台（還沒讀到、或舊版沒回報時，不能先顯示成電腦）
+    const phone = (isSelf && selfIsPhone) || isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
     const isOn = isSelf || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
@@ -148,7 +149,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, platform, phone, cloud, missing, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, self: isSelf, platform, phone, cloud, missing, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

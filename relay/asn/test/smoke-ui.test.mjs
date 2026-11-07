@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -261,4 +261,18 @@ test('手機群組附件情境（0.1.111）：沒有外部成員、有外部成�
   const mjs = fs.readFileSync(fileURLToPath(new URL('../ui/m.js', import.meta.url)), 'utf8')
   assert.ok(/createRoomHub\(\{.*photos: true/.test(mjs), '手機群組要帶 photos:true，附件照片才看得到')
   assert.ok(/\.is-room \.toolbar>\.tool\.dict/.test(css) && /\.is-room \.toolbar>\.tool\.mic/.test(css), '群組只藏語音輸入與麥克風')
+})
+
+test('手機設備列雲端標示情境（#930）：平台未讀到與 android 各一，檢查表達式語法正確、假資料各自一列', async () => {
+  const cs = SCENARIOS.filter(s => s.probe?.mcloud)
+  assert.deepEqual(cs.map(s => s.name), ['m-cloud-tag-noplat', 'm-cloud-tag-android'])
+  for (const s of cs) assert.doesNotThrow(() => new vm.Script(probeSource(s.probe)))
+  for (const s of cs) {
+    const ctx = vm.createContext({}); ctx.globalThis = ctx
+    vm.runInContext(injectSource(tableFor(s)), ctx)
+    const names = (await ctx.__TAURI__.core.invoke('relay_list')).members.map(m => m.name)
+    assert.equal(JSON.stringify(names), JSON.stringify(['辦公室', '牧陽 Aegis', '日本VM', 'Grok 雲端']))   // vm 裡的陣列不同 realm，比字串
+    const machines = (await ctx.__TAURI__.core.invoke('android_launchers')).machines
+    assert.equal(machines.some(m => m.node === 'P' && m.platform === 'android'), s.name.endsWith('android'))
+  }
 })

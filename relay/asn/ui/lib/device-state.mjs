@@ -70,7 +70,8 @@ export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
  * 都會變 null，違反「沒有電腦版 ASN、只有橋或雲端代理就算雲端」的規則（asn真 定，#995）。
  *
  * 回傳 true／false／null。null＝資料還不夠，不要猜：例如手機還沒讀這台的帳號回報、或讀取失敗，而且現在沒有 ASN 在線。
- * 呼叫端拿到 null 一律暫放「電腦」，不猜成雲端；手機版不為了分組多讀帳號回報，讀到之後自然會歸對（asn真 定，#995）。
+ * 呼叫端拿到 null 一律暫放「電腦」，不猜成雲端（asn真 定，#995）。手機版為了顯示雲端標示，進設備頁時讀一次各台的帳號回報
+ * （mobile-acct.mjs 的 createReportPrefetch；一分鐘內不重讀、同時最多 3 台），讀到之後自然會歸對；讀失敗的照舊是「電腦」（#930）。
  * 已接受的情況：新裝的電腦剛好離線、又還沒送過帳號回報時，可能被判成 null 或雲端（asn真 定，#995）。
  */
 export function isCloudNode({ phone = false, self = false, asnOnline = false, rep = undefined, engines = [], partnersOffline = false } = {}) {
@@ -82,6 +83,16 @@ export function isCloudNode({ phone = false, self = false, asnOnline = false, re
   if (list.length && list.every(e => e === 'cloud')) return true   // 只有雲端代理
   if (rep && !rep.error && !rep.reportedAt && !partnersOffline) return true   // 讀到了：90 天內沒有電腦版 ASN 回報過，而且夥伴有人在線
   return null                                  // 沒讀到帳號回報（或讀取失敗）、夥伴全離線、也沒有其他證據
+}
+
+/**
+ * 設備列「種類」那一段的字（#930，0.2.15）：手機／電腦；雲端節點在後面加「雲端」（例如「電腦 · 雲端」）。
+ * 雲端節點照一般設備各自一列，只在這裡標示，不另開分類（小良哥 11-07）。cloud 是 null（資料還不夠）就不標示，照舊是電腦。
+ * 手機和電腦版都用這一個函式，兩邊字一樣。
+ */
+export const CLOUD_TAG = '雲端'
+export function deviceKindLabel({ kind = '電腦', cloud = null } = {}) {
+  return cloud === true ? `${kind} · ${CLOUD_TAG}` : kind
 }
 
 /**
