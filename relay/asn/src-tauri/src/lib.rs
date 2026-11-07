@@ -991,11 +991,13 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             }
                             device_id::live::alert(&relay, &a.session.d_node, "first", &a.from_pub).await;
                         }
-                        let who = row.get("from_name").and_then(Value::as_str).unwrap_or("").to_string();
+                        // 框上和紅條上的「誰」都用本機記住的名字＋指紋前 8 碼（後台給的名字不在簽章裡）；第一次連線才用後台的並標示
+                        let asker = input_consent::who_of(&known, &a.session.d_node, &a.from_name, &a.from_pub, a.tofu);
+                        let who = input_consent::bar_label(&asker);
                         // 打字（0.2.10）：預設每次都要本人在這台的 ASN 視窗按允許；本人在設定頁對那台設過「不用每次問」才不問
                         if a.session.scope == view_handshake::Scope::Input {
                             let no_ask = device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
-                            if !no_ask && !input_consent::ask(&app, &a.from_name, &a.session.window).await {
+                            if !no_ask && !input_consent::ask(&app, &asker, &a.session.window).await {
                                 let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                                 continue;
                             }
