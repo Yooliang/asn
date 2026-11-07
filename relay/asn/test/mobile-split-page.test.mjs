@@ -40,7 +40,7 @@ const dev = (key, label, vendors, over = {}) => ({ key, label, self: false, hidd
 const claude = (accounts, switchable = true) => ({ key: 'claude', switchable, accounts })
 const acc = (email, current = false, extra = {}) => ({ email, current, ...extra })
 
-test('帳號分頁的「切換到…」：能切的可以按；不能切的反灰並寫原因；正在用的、隱藏、移除、手機不列', () => {
+test('帳號分頁的「切換到…」：能切的可以按；不能切的反灰並寫原因；正在用的、沒存這個帳號的、隱藏、移除、手機不列', () => {
   const a = { account: 'Z@Example.test' }
   const devs = [
     dev('W', '工作機', [claude([acc('w@example.test', true), acc('z@example.test')])]),
@@ -57,12 +57,12 @@ test('帳號分頁的「切換到…」：能切的可以按；不能切的反�
     { node: 'W', label: '工作機', enabled: true, reason: '' },
     { node: 'Y', label: '新電腦', enabled: false, reason: ACCT_SWITCH_REASON.unavailable },
     { node: 'I', label: '不完整', enabled: false, reason: ACCT_SWITCH_REASON.incomplete },
-    { node: 'N', label: '沒這個帳號', enabled: false, reason: ACCT_SWITCH_REASON.notSaved },
-  ], '帳號比對不分大小寫；不能按的也列出來，正在用的、隱藏、移除、手機不列')
+  ], '帳號比對不分大小寫；不能按的也列出來並寫原因；正在用的、沒存這個帳號的（#930）、隱藏、移除、手機不列')
   const off = dev('O', '離線的', [{ ...claude([acc('z@example.test'), acc('w@example.test')], false), switchHint: '對方電腦的 ASN 沒有在線，無法切換' }])
   assert.deepEqual(acctSwitchTargets([off], 'claude', a), [{ node: 'O', label: '離線的', enabled: false, reason: ACCT_SWITCH_REASON.offline }])
   assert.deepEqual(acctSwitchTargets([dev('Q', '沒 Claude', [])], 'claude', a), [], '沒有 Claude 的不列')
-  assert.deepEqual(acctSwitchTargets([dev('A', '離線沒存', [{ ...claude([acc('w@example.test')], false), switchHint: 'x' }])], 'claude', a)[0].reason, ACCT_SWITCH_REASON.notSaved, '沒存過就先講沒存過')
+  assert.deepEqual(acctSwitchTargets([dev('A', '離線沒存', [{ ...claude([acc('w@example.test')], false), switchHint: 'x' }])], 'claude', a), [], '沒存過這個帳號的不列（#930：「這台沒有存這個帳號」在手機上會被讀成指手機）')
+  assert.ok(Object.values(ACCT_SWITCH_REASON).every(t => !t.includes('這台')), '說明字不說「這台」：按鈕已寫切換到哪台（#930）')
   assert.deepEqual(acctSwitchTargets(devs, 'codex', a), [], '手機只有 Claude 能切換')
   assert.deepEqual(acctSwitchTargets([], 'claude', a), [])
   assert.deepEqual(acctSwitchTargets(null, 'claude', a), [])

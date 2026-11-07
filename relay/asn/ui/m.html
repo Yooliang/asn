@@ -280,7 +280,7 @@
               </div>
               </template>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
-              <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
+              <p class="m-fine m-dv-foot" v-if="acctSw.tab === 'accounts'">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
             <template v-else-if="acctSw.phase === 'pick'">
               <section class="m-dv-dev" role="region" :aria-label="acctCur.label">

@@ -244,6 +244,9 @@ test('手機列表：整列一個大按鈕（高度至少 56px）進細部頁、
   assert.match(/\.m-dv-row\{([^}]*)\}/.exec(css)[1], /min-height:\s*56px/)
   assert.match(/\.m-dv-grip\{([^}]*)\}/.exec(css)[1], /touch-action:\s*none/, '只有把手擋住瀏覽器捲動，其餘地方照常捲動')
   assert.match(/\.m-dv-grip\{([^}]*)\}/.exec(css)[1], /width:\s*4\dpx/)
+  const gripW = /\.m-dv-grip\{[^}]*width:\s*(\d+)px/.exec(css)[1]
+  assert.equal(/\.m-dv-grip-gap\{[^}]*width:\s*(\d+)px/.exec(css)[1], gripW, '「這支手機」左邊的空位和把手同寬，圓點才對齊（#930）')
+  assert.ok(!/\.m-dv-list\{[^}]*overflow:\s*hidden/.test(css), '設備列表不能用 overflow:hidden 裁掉列的第三行（#930）')
   assert.match(/\.m-dv-row\.hid\{([^}]*)\}/.exec(css)[1], /opacity/)
   assert.match(read('ui/lib/mobile.mjs'), /SWIPE_BLOCK_SELECTOR = '[^']*\.m-dv-grip/, '拖把手時不能被分頁左右滑手勢搶走')
   for (const gone of ['重新整理', 'refreshAcct', 'm-dv-hidden', '已隱藏的設備（', 'm-dv-tabs']) assert.ok(!pane.includes(gone) && !css.includes(gone === 'm-dv-hidden' ? '.m-dv-hidden' : '@@'), `手機不該還有「${gone}」`)

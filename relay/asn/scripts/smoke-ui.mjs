@@ -87,7 +87,7 @@ async function runScenario(cdp, sc, base) {
     else if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') errors.push(`瀏覽器錯誤：${d.params.entry.text} ${d.params.entry.url ?? ''}`.trim())
   })
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
-  await S('Emulation.setDeviceMetricsOverride', { width: sc.page.startsWith('m.html') ? 412 : 1100, height: 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
+  await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
   await S('Page.addScriptToEvaluateOnNewDocument', { source: injectSource(tableFor(sc)) })
   await S('Page.navigate', { url: `${base}/${sc.page}` })
   const expr = mountCheckSource(sc.ready, pathOf(sc.page))
