@@ -44,6 +44,8 @@ async fn 額度用完_轉交中的信扣住_不寄逾時_不_ack_不記轉交逾
     assert!(bodies(&h).iter().all(|b| !b.contains("逾時")), "{:?}", bodies(&h));
     assert!(h.fr.acked().is_empty());
     assert_eq!(held_ids(&h), vec![uid(1)]);
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 2 * 86_400_000), 0, "只看自己的時間區段");
     assert_eq!(h.said().len(), 1, "重置前不再送 worker");
 }
@@ -193,6 +195,8 @@ async fn 試送又撞額度_繼續扣住_暫停時間只延長_不重複通知_�
     let said = h.said();
     assert_eq!(said.len(), 3);
     assert!(said[2].contains(&quota_late_line(TQ)), "仍寫最初收到的時間：{}", said[2]);
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 2 * 86_400_000), 0, "只看自己的時間區段");
 }
 
@@ -217,6 +221,8 @@ async fn 試送沒回應不是額度用完的證據_連續兩次沒回應就解�
     assert!(h.fr.acked().is_empty());
     assert_eq!(held_ids(&h), vec![uid(1)], "第一次沒回應：回到扣住");
     assert_eq!(h.core.inbox_hold_until(), until, "沒回應不延長暫停");
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 10 * HOUR as i64), 0);
     // 第二次試送（一小時後，仍沒到暫停時間）：連續第二次沒回應 → 解除，信走一般流程（轉交逾時通知、ack、記轉交逾時）
     let p2 = p1 + HOUR;
@@ -226,6 +232,8 @@ async fn 試送沒回應不是額度用完的證據_連續兩次沒回應就解�
     assert_eq!(h.core.inbox_hold_until(), None, "連續兩次沒回應：解除扣住（名單會報空值）");
     assert!(bodies(&h).iter().any(|b| b.contains("逾時")), "走一般逾時通知");
     assert_eq!(h.fr.acked(), vec![uid(1)]);
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 10 * HOUR as i64) >= 1, "照舊記轉交逾時");
     assert!(held_ids(&h).is_empty());
     h.core.tick(p2 + 130_000).await;
@@ -773,6 +781,8 @@ async fn 登入失效_信留著不退_不連續失敗_寄件人同一段只通�
     assert_eq!(auth_notices_to(&h, "W", "W-政策"), 1, "通知一次：登入失效、信留著、重新登入後送出");
     assert!(h.core.inbox_hold_until().is_some(), "和額度一樣，名單回報帶暫停時間");
     // 只有這一次 AuthFailed、後面信全扣住（下一次試送在一小時後）：本人的通知靠這一筆（登入失效偵測一筆就算）
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert!(crate::login_watch::worker_errors_since(TQ as i64) >= 1, "worker 回報的登入失效已記給本人通知用");
     // 這一輪結束後 #726 會馬上再拉：後面來的信直接扣住，不再一封一封試
     h.fr.put(mail(2, json!({})));
@@ -812,6 +822,8 @@ async fn 登入失效_每小時試送_又失效就繼續留著_好了就依原�
     assert!(h.fr.acked().is_empty());
     assert_eq!(auth_notices_to(&h, "W", "W-政策"), 1, "不重複通知");
     // 本人的通知：失敗 → 扣住 → 約 5 分鐘後試送又失敗，兩筆落在十分鐘內（走真實順序，不是手動塞兩筆）
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert!(crate::login_watch::worker_errors_since(TQ as i64) >= 2, "worker 回報的登入失效記了兩筆，間隔 5 分鐘");
     // 之後每小時試送一次；這次成功（worker 回報 SENT）＝登入好了：依原收到順序重送其餘，照 one_per_turn 一封一封來
     let probe2 = probe + 1000 + HOUR; // 第一次試送失敗後改成每小時
@@ -819,6 +831,8 @@ async fn 登入失效_每小時試送_又失效就繼續留著_好了就依原�
     assert_eq!(h.said().len(), 3);
     worker_ok(&mut h.core, &uid(1), probe2 + 1000).await;
     assert_eq!(h.core.inbox_hold_until(), None, "恢復");
+    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
+    #[cfg(all(feature = "gui", desktop))]
     assert!(crate::login_watch::worker_recoveries_since(TQ as i64) >= 1, "試送成功：告訴登入失效偵測 worker 好了（失效狀態才會解除）");
     h.core.tick(probe2 + 5000).await;
     let ids = |h: &H| -> Vec<String> { h.said().iter().filter_map(|t| t.split("id=").nth(1).map(|x| x.split(' ').next().unwrap_or("").to_string())).collect() };

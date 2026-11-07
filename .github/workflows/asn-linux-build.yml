@@ -91,6 +91,7 @@ jobs:
       - name: 無畫面跑單元測試
         shell: bash
         run: |
+          echo "headless 少驗 7 處斷言（轉交逾時／登入失效紀錄，只有視窗版會產生）、另略過 1 條只在視窗版成立的測試，見 PR 內文"
           mapfile -t skips < <(tr -d '\r' < ../scripts/headless-test-skip.txt | grep -v '^[[:space:]]*#' | sed '/^[[:space:]]*$/d')
           echo "略過 ${#skips[@]} 條（清單：relay/asn/scripts/headless-test-skip.txt）"
           for t in "${skips[@]}"; do echo "  - $t"; done
