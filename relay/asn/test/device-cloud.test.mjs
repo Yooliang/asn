@@ -78,3 +78,17 @@ test('只加 cloud 欄位，不改既有的種類（手機／電腦）與其他�
   assert.equal(by.grok1.kind, '電腦', '分組與顯示在之後的 PR 才改')
   assert.equal(by.ph1.kind, '手機')
 })
+
+test('離線超過 90 天的實體電腦（後台已清掉帳號回報、名單只剩離線的 claude 視窗）→ null，不判成雲端', () => {
+  assert.equal(isCloudNode({ engines: ['claude'], rep: NEVER, partnersOffline: true }), null)
+  const old = [{ id: 'z', node: 'pc90', agent: '小丁', engine: 'claude', device: '舊電腦', status: 'offline' }]
+  const tree = buildDeviceTree({ friends: old, selfNode: 'self1', reports: { pc90: NEVER } })
+  assert.equal(tree.find(d => d.key === 'pc90').cloud, null)
+})
+
+test('手機路徑：帳號回報帶 asnOnline:true、reportedAt 空 → 不是雲端（看回報裡的在線，不只看名單的 asn）', () => {
+  assert.equal(isCloudNode({ engines: ['claude'], rep: { error: '', reportedAt: '', asnOnline: true } }), false)
+  const f = [{ id: 'y', node: 'pc4', agent: '小戊', engine: 'claude', device: '新電腦', status: 'idle' }]
+  const phone = acctDeviceTree({ friends: f, selfNode: 'ph0', reports: { pc4: { loading: false, asnOnline: true, reportedAt: '', msg: '', list: [] } } })
+  assert.equal(phone.find(d => d.key === 'pc4').cloud, false)
+})
