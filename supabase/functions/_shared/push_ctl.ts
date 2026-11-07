@@ -4,7 +4,7 @@
 //   notifyPush：收件人（p_user）只從伺服器端取：寄信結果裡的信編號、或金鑰所屬的節點；**不接受用戶端的任何參數**。
 // 推播失敗一律不影響寄信：呼叫端用 background 跑，這裡自己吞掉所有例外。
 import { fail, type Json, type Reply } from "./term_request.ts";
-import type { Fcm } from "./push_fcm.ts";
+import type { Fcm, FcmResult } from "./push_fcm.ts";
 
 export type PushDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
@@ -53,8 +53,8 @@ async function recipient(deps: PushDeps, kind: PushKind, nodeId: string, message
 
 /**
  * 寄信（或等待通知）寄出之後呼叫。**永遠不丟例外、不影響呼叫端。**
- * 同一輪的處理：每台一則；404／UNREGISTERED 刪權杖；400 只有同一輪裡至少有一台成功才算「這個權杖壞」，
- * 全部 400 就是我們送的內容有問題，**一個權杖都不刪**，記一筆就停手（不重試）。
+ * 同一輪的處理：每台一則；明確回 UNREGISTERED 才刪權杖；400、沒有錯誤碼的 404（專案代號設錯會整批 404）只有同一輪裡至少有一台成功才算「這個權杖壞」，
+ * 整輪都是這種失敗就是我們這邊有問題，**一個權杖都不刪**，記一筆就停手（不重試）。
  */
 export async function notifyPush(deps: PushDeps, kind: PushKind, nodeId: string, messageId: string | null): Promise<void> {
   try {
@@ -71,13 +71,14 @@ export async function notifyPush(deps: PushDeps, kind: PushKind, nodeId: string,
     if (targets.length === 0) return;
     const results = await Promise.all(targets.map(async (t) => ({ t, r: await deps.fcm!.send(t.token) })));
     const ok = results.filter((x) => x.r.status >= 200 && x.r.status < 300).length;
-    const bad400 = results.filter((x) => x.r.status === 400);
-    if (bad400.length === results.length) {
-      console.warn("push all_400", kind, results.length);   // 全部 400：我們寫錯，不刪權杖、不重試
+    // 400、沒有錯誤碼的 404：分不出是權杖壞還是我們設錯（內容、專案代號）
+    const plain = (x: { r: FcmResult }) => !x.r.invalid && (x.r.status === 400 || x.r.status === 404);
+    if (results.every(plain)) {
+      console.warn("push all_4xx", kind, results.length);   // 整輪都是：我們這邊有問題，不刪權杖、不重試
       return;
     }
     for (const { t, r } of results) {
-      const bad = r.invalid || (r.status === 400 && ok > 0);
+      const bad = r.invalid || (plain({ r }) && ok > 0);
       if (!bad) {
         if (!(r.status >= 200 && r.status < 300)) console.warn("push send status", r.status, t.node);
         continue;

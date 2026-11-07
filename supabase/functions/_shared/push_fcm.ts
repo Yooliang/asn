@@ -106,14 +106,14 @@ export function createFcm(env: FcmEnv, fetchFn: typeof fetch = fetch, nowMs: () 
           if (!at) return { status: 0, invalid: false };
           r = await post(deviceToken, at);
         }
-        // 只看錯誤碼這一個欄位判斷權杖失效；回應內文其他部分不記、不外傳
+        // 只看錯誤碼這一個欄位判斷權杖失效（必須是明確的 UNREGISTERED；沒有錯誤碼的 404 可能是專案代號設錯，不算權杖失效）；回應內文其他部分不記、不外傳
         let code = "";
         if (!r.ok) {
           const j = await r.json().catch(() => null);
           const d = Array.isArray(j?.error?.details) ? j.error.details.find((x: { errorCode?: string }) => typeof x?.errorCode === "string") : null;
           code = String(d?.errorCode ?? "");
         } else await r.body?.cancel();
-        return { status: r.status, invalid: r.status === 404 || code === "UNREGISTERED" };
+        return { status: r.status, invalid: code === "UNREGISTERED" };
       } catch (_e) {
         console.warn("push send error");   // 例外訊息可能帶請求內容，不記
         return { status: 0, invalid: false };

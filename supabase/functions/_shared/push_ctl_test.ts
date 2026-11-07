@@ -110,7 +110,7 @@ Deno.test("查不到收件人（不是寄給本人、不是這台寄的、信編
   }
 });
 
-Deno.test("404／UNREGISTERED：只刪那一台的權杖（節點和權杖要對得上）", async () => {
+Deno.test("明確的 UNREGISTERED：只刪那一台的權杖（節點和權杖要對得上）", async () => {
   const m = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: targets2 });
   const f = fcmReturning({ status: 404, invalid: true }, ok());
   await notifyPush({ rpc: m.rpc, fcm: f.fcm }, "owner_mail", "wrk9b2", MSG);
@@ -125,10 +125,27 @@ Deno.test("400：同一輪有台成功才算該權杖壞；全部 400＝我們�
   const all = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: targets2 });
   const logs = await captureLogs(() => notifyPush({ rpc: all.rpc, fcm: fcmReturning({ status: 400, invalid: false }).fcm }, "owner_mail", "wrk9b2", MSG));
   assertEquals(all.calls.filter((c) => c.fn === "asn_relay_push_invalid").length, 0, "全部 400 不刪");
-  assert(logs.includes("push all_400"), logs);
+  assert(logs.includes("push all_4xx"), logs);
   const single = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: { targets: [targets2.targets[0]] } });
   await notifyPush({ rpc: single.rpc, fcm: fcmReturning({ status: 400, invalid: false }).fcm }, "owner_mail", "wrk9b2", MSG);
   assertEquals(single.calls.some((c) => c.fn === "asn_relay_push_invalid"), false, "只有一台又是 400：分不出是權杖還是我們，不刪");
+});
+
+Deno.test("整批 404（例如專案代號設錯）：權杖一個都不能刪；同一輪有成功的才刪那台沒有錯誤碼的 404", async () => {
+  const bare404: FcmResult = { status: 404, invalid: false };
+  const all = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: targets2 });
+  const logs = await captureLogs(() => notifyPush({ rpc: all.rpc, fcm: fcmReturning(bare404).fcm }, "owner_mail", "wrk9b2", MSG));
+  assertEquals(all.calls.filter((c) => c.fn === "asn_relay_push_invalid").length, 0, "整批 404 不能把權杖刪光");
+  assert(logs.includes("push all_4xx"), logs);
+  const one = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: { targets: [targets2.targets[0]] } });
+  await notifyPush({ rpc: one.rpc, fcm: fcmReturning(bare404).fcm }, "owner_mail", "wrk9b2", MSG);
+  assertEquals(one.calls.some((c) => c.fn === "asn_relay_push_invalid"), false, "只有一台又是 404：分不出，不刪");
+  const some = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: targets2 });
+  await notifyPush({ rpc: some.rpc, fcm: fcmReturning(bare404, ok()).fcm }, "owner_mail", "wrk9b2", MSG);
+  assertEquals(some.calls.filter((c) => c.fn === "asn_relay_push_invalid"), [{ fn: "asn_relay_push_invalid", args: { p_node: "phn1a1", p_token: TOK } }]);
+  const mixed = mk({ asn_relay_push_recipient_mail: { user: USER }, asn_relay_push_targets: targets2 });
+  await notifyPush({ rpc: mixed.rpc, fcm: fcmReturning({ status: 404, invalid: true }, bare404).fcm }, "owner_mail", "wrk9b2", MSG);
+  assertEquals(mixed.calls.filter((c) => c.fn === "asn_relay_push_invalid").length, 1, "明確 UNREGISTERED 照刪，沒有錯誤碼的那台不刪");
 });
 
 Deno.test("任何失敗都不丟例外：資料庫丟例外、FCM 丟例外、targets 回錯", async () => {

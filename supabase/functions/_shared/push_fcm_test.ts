@@ -82,13 +82,17 @@ Deno.test("換存取權杖：JWT 簽章驗得過、範圍只有 firebase.messagi
   assert(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", kp.publicKey, unb64(s), new TextEncoder().encode(`${h}.${c}`)), "簽章要用服務帳戶私鑰簽");
 });
 
-Deno.test("401：換一把存取權杖再試一次；404／UNREGISTERED＝權杖失效", async () => {
+Deno.test("401：換一把存取權杖再試一次；只有明確的 UNREGISTERED 才算權杖失效（沒有錯誤碼的 404 不算）", async () => {
   let n = 0;
   const a = fakeFetch({ fcm: (i) => (i === 1 ? new Response("{}", { status: 401 }) : new Response("{}", { status: 200 })), token: () => new Response(JSON.stringify({ access_token: ACCESS + (++n), expires_in: 3600 })) });
   assertEquals(await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), a.f)!.send(DEVICE), { status: 200, invalid: false });
   assertEquals(n, 2, "401 之後重換一次");
   const b = fakeFetch({ fcm: () => new Response("{}", { status: 404 }) });
-  assertEquals(await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), b.f)!.send(DEVICE), { status: 404, invalid: true });
+  assertEquals(await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), b.f)!.send(DEVICE), { status: 404, invalid: false }, "沒有錯誤碼的 404（例如專案代號設錯）不是權杖失效");
+  const nf = fakeFetch({ fcm: () => new Response(JSON.stringify({ error: { code: 404, status: "NOT_FOUND" } }), { status: 404 }) });
+  assertEquals((await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), nf.f)!.send(DEVICE)).invalid, false);
+  const un = fakeFetch({ fcm: () => new Response(JSON.stringify({ error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } }), { status: 404 }) });
+  assertEquals(await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), un.f)!.send(DEVICE), { status: 404, invalid: true });
   const body = JSON.stringify({ error: { status: "NOT_FOUND", details: [{ "@type": "x", errorCode: "UNREGISTERED" }] } });
   const c = fakeFetch({ fcm: () => new Response(body, { status: 400 }) });
   assertEquals((await createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), c.f)!.send(DEVICE)).invalid, true);
