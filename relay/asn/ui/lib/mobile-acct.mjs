@@ -208,3 +208,26 @@ export function acctSwitchTargets(devices, vendor, account, selfNode) {
   }
   return out
 }
+
+// 進設備頁時把各台電腦的帳號回報讀進來（#930，0.2.15）：為了顯示「雲端」標示（沒點過的 Aegis、日本VM 也標得出來），進設備頁時讀一次。
+// 後台的 acct_list 一次只收一台（沒有批次版本），所以逐台讀，同時最多 max 台；gapMs 內再進設備頁不重讀（回 false，呼叫端用上次的結果）。
+// 讀失敗的那台只記一行 console.info、不回報給畫面：它的帳號回報照舊是空的，畫面照舊顯示「電腦」。
+export const REPORT_PREFETCH_MAX = 3
+export const REPORT_PREFETCH_GAP_MS = 60_000
+export function createReportPrefetch({ read, max = REPORT_PREFETCH_MAX, gapMs = REPORT_PREFETCH_GAP_MS, now = () => Date.now(), log = (...a) => console.info(...a) } = {}) {
+  let lastAt = -Infinity
+  return async function run(nodes, onResult) {
+    const t = now()
+    if (t - lastAt < gapMs) return false
+    lastAt = t
+    const queue = [...new Set((Array.isArray(nodes) ? nodes : []).filter(n => typeof n === 'string' && n))]
+    const worker = async () => {
+      while (queue.length) {
+        const node = queue.shift()
+        try { onResult(node, await read(node)) } catch (e) { log('[ASN] 設備頁預讀帳號回報失敗', node, String(e?.message ?? e)) }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(max, queue.length) }, worker))
+    return true
+  }
+}

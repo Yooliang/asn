@@ -70,7 +70,8 @@ export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
  * 都會變 null，違反「沒有電腦版 ASN、只有橋或雲端代理就算雲端」的規則（asn真 定，#995）。
  *
  * 回傳 true／false／null。null＝資料還不夠，不要猜：例如手機還沒讀這台的帳號回報、或讀取失敗，而且現在沒有 ASN 在線。
- * 呼叫端拿到 null 一律暫放「電腦」，不猜成雲端；手機版不為了分組多讀帳號回報，讀到之後自然會歸對（asn真 定，#995）。
+ * 呼叫端拿到 null 一律暫放「電腦」，不猜成雲端（asn真 定，#995）。手機版為了顯示雲端標示，進設備頁時讀一次各台的帳號回報
+ * （mobile-acct.mjs 的 createReportPrefetch；一分鐘內不重讀、同時最多 3 台），讀到之後自然會歸對；讀失敗的照舊是「電腦」（#930）。
  * 已接受的情況：新裝的電腦剛好離線、又還沒送過帳號回報時，可能被判成 null 或雲端（asn真 定，#995）。
  */
 export function isCloudNode({ phone = false, self = false, asnOnline = false, rep = undefined, engines = [], partnersOffline = false } = {}) {

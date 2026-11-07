@@ -579,7 +579,7 @@ const layoutAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
   Q: { asn_online: true, reported_at: toMinute(now - 5 * 60_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
   R: { asn_online: false, reported_at: toMinute(now - 9 * 24 * 3600_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
 }, fallback: null })
-// 手機設備列的「雲端」標示（#930，0.2.15）：Aegis（只有橋）、日本VM（橋＋代理）、Grok 雲端（雲端代理）各自一列、種類旁標「雲端」；
+// 手機設備列的「雲端」標示（#930，0.2.15）：一開始沒有任何帳號回報，進設備頁後讀到（不點進任何一台）→ Aegis（只有橋）、日本VM（橋＋代理）、Grok 雲端（雲端代理）各自一列、種類旁標「雲端」；
 // 實體電腦不標；這支手機一定是「手機」、不標雲端（平台還沒讀到 noplat、讀到 android 兩種都驗）
 const MCLOUD_MEMBERS = [
   { id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'claude', cwd_label: 'demo' }] },
@@ -601,15 +601,9 @@ export const mcloudProbeSource = () => `(async () => {
   if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
   btn.click();
   await sleep(500);
-  // 手機版只在點進某台時讀它的帳號回報（asn真 定：不為了分組多讀）：逐台點進去再返回，讀到之後才判得出雲端
-  const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
-  for (let i = 0; i < n; i++) {
-    const go = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i]?.querySelector('.m-dv-go');
-    if (!go) break;
-    go.click(); await sleep(500);
-    const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
-    if (back) { back.click(); await sleep(400) }
-  }
+  // 不點進任何一台：進設備頁時就會把各台的帳號回報讀進來（#930），讀到之後雲端節點才標得出來；最多等 3 秒
+  const tagged = () => [...document.querySelectorAll('.m-dv-row .m-dv-rs')].filter(e => e.textContent.includes('雲端')).length;
+  for (let i = 0; i < 30 && tagged() < 3; i++) await sleep(100);
   await sleep(300);
   const rows = [...document.querySelectorAll('.m-dv-row')].filter(e => e.offsetParent !== null).map(r => ({ name: r.querySelector('.m-dv-rn b')?.textContent.trim() ?? '', kind: r.querySelector('.m-dv-rs')?.textContent.trim() ?? '' }));
   const row = name => rows.find(r => r.name === name);
