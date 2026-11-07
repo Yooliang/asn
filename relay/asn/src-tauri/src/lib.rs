@@ -1073,6 +1073,11 @@ async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermV
                 if n > 0 {
                     elog!("終端畫面輸入結束：共 {n} 字（內容不記）");
                 }
+                // 打字紀錄（#956）：結束時把還沒寫的寫出
+                let now = auth::now_ms();
+                if let Some(line) = st.tally.lock().unwrap_or_else(|e| e.into_inner()).take(now) {
+                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now as i64))]);
+                }
             })
             .map_err(|e| e.to_string())?;
     }
@@ -1130,7 +1135,7 @@ fn term_view_close(views: State<'_, Arc<TermViews>>, view_id: u64) {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-fn term_view_input(window: tauri::WebviewWindow, views: State<'_, Arc<TermViews>>, view_id: u64, data: String, paste: Option<bool>) -> Result<(), String> {
+fn term_view_input(window: tauri::WebviewWindow, app: State<'_, App>, views: State<'_, Arc<TermViews>>, view_id: u64, data: String, paste: Option<bool>, ime: Option<bool>) -> Result<(), String> {
     let label = window.label().to_string();
     let state = {
         let open = views.open.lock().unwrap_or_else(|e| e.into_inner());
@@ -1144,7 +1149,13 @@ fn term_view_input(window: tauri::WebviewWindow, views: State<'_, Arc<TermViews>
     }
     launch::term_view::check_input(&data)?;
     state.input.push(&data, paste.unwrap_or(false))?;
-    state.last_input_ms.store(auth::now_ms(), std::sync::atomic::Ordering::SeqCst);
+    let now = auth::now_ms();
+    state.last_input_ms.store(now, std::sync::atomic::Ordering::SeqCst);
+    // 打字紀錄（#956）：只記數量，不記內容
+    let line = state.tally.lock().unwrap_or_else(|e| e.into_inner()).add(now, data.chars().count(), paste.unwrap_or(false), ime.unwrap_or(false));
+    if let Some(line) = line {
+        let _ = ui_log::append(&app.work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now as i64))]);
+    }
     Ok(())
 }
 

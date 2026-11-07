@@ -234,6 +234,47 @@ pub struct ViewState {
     pub input: InputQueue,
     /// 這次觀看一共送出幾個字（只記字數，內容不記；結束時寫一行紀錄）
     pub sent_chars: AtomicU64,
+    /// 打字紀錄（#956）：只記數量
+    pub tally: std::sync::Mutex<InputTally>,
+}
+
+/// 多久寫一行打字紀錄（毫秒）；貼上、輸入法組字的那一筆不等，馬上寫
+pub const TALLY_MS: u64 = 5_000;
+
+/// 本機看畫面打字的紀錄（#956）：**只記數量，不記內容**——幾次送出、幾個字、其中幾次是貼上、幾次是輸入法組字。
+/// 累積到 [`TALLY_MS`]，或遇到貼上／組字，就回一行要寫進 ui.log 的字
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct InputTally {
+    since_ms: u64,
+    sends: u32,
+    chars: u64,
+    pastes: u32,
+    ime: u32,
+}
+
+impl InputTally {
+    /// 記一次送出。回要寫的那一行（沒到時間、也不是貼上或組字就回 None）
+    pub fn add(&mut self, now_ms: u64, chars: usize, paste: bool, ime: bool) -> Option<String> {
+        if self.sends == 0 {
+            self.since_ms = now_ms;
+        }
+        self.sends += 1;
+        self.chars += chars as u64;
+        self.pastes += u32::from(paste);
+        self.ime += u32::from(ime);
+        (paste || ime || now_ms.saturating_sub(self.since_ms) >= TALLY_MS).then(|| self.take(now_ms)).flatten()
+    }
+
+    /// 把累積的寫出來（沒有就 None），歸零
+    pub fn take(&mut self, now_ms: u64) -> Option<String> {
+        if self.sends == 0 {
+            return None;
+        }
+        let secs = now_ms.saturating_sub(self.since_ms) / 1000;
+        let line = format!("term-view input sends={} chars={} paste={} ime={} secs={secs}", self.sends, self.chars, self.pastes, self.ime);
+        *self = InputTally::default();
+        Some(line)
+    }
 }
 
 /// 迴圈會用到的外部動作，正式版接窗格和視窗，測試接假的
@@ -286,6 +327,33 @@ pub fn run_view(view_id: u64, state: &ViewState, port: &mut impl ViewPort) -> Op
         port.sleep(Duration::from_millis(delay));
     }
     None
+}
+
+#[cfg(test)]
+mod tally_tests {
+    use super::*;
+
+    #[test]
+    fn 打字紀錄_只有數量_五秒一行_貼上和組字馬上寫() {
+        let mut t = InputTally::default();
+        assert_eq!(t.add(1_000, 1, false, false), None, "一般單鍵先累積");
+        assert_eq!(t.add(2_000, 1, false, false), None);
+        assert_eq!(t.add(6_000, 1, false, false).as_deref(), Some("term-view input sends=3 chars=3 paste=0 ime=0 secs=5"));
+        assert_eq!(t.add(7_000, 1, false, true).as_deref(), Some("term-view input sends=1 chars=1 paste=0 ime=1 secs=0"), "組字馬上寫");
+        assert_eq!(t.add(8_000, 12, true, false).as_deref(), Some("term-view input sends=1 chars=12 paste=1 ime=0 secs=0"), "貼上馬上寫");
+        assert_eq!(t.take(9_000), None, "寫過就歸零");
+        t.add(9_000, 2, false, false);
+        assert_eq!(t.take(9_500).as_deref(), Some("term-view input sends=1 chars=2 paste=0 ime=0 secs=0"), "結束時把剩下的寫出");
+    }
+
+    #[test]
+    fn 打字紀錄裡沒有原文() {
+        let secret = "SECRET-密碼-123";
+        let mut t = InputTally::default();
+        let line = t.add(0, secret.chars().count(), true, true).unwrap();
+        assert!(!line.contains("SECRET") && !line.contains("密碼") && !line.contains("123"), "{line}");
+        assert!(line.chars().all(|c| c.is_ascii()), "只有欄位名和數字：{line}");
+    }
 }
 
 #[cfg(test)]
