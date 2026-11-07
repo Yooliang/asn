@@ -2012,10 +2012,8 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
 
     #[test]
     fn 關閉時後台連不上不擋關閉() {
-        // 連線埠沒人聽：很快失敗，report_offline_blocking 照常返回
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
-        drop(l);
+        // 連線埠沒人聽：很快失敗，report_offline_blocking 照常返回。0 號埠一定連不上（不用「先綁再放掉」的埠，#994）
+        let url = "http://127.0.0.1:0/relay".to_string();
         let r = std::sync::Arc::new(Relay::new(url, "k".into(), "H".into(), "H-ASN".into()));
         let t = std::time::Instant::now();
         r.report_offline_blocking("0.1.13");

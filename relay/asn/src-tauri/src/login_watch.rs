@@ -932,10 +932,8 @@ mod tests {
             assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err(cat.to_string()));
             assert_eq!(seen.lock().unwrap().len(), 1, "只打一次，不重試");
         }
-        // 連不上（沒有人在聽的埠）：網路錯誤，不 panic
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
-        drop(l);
+        // 連不上（沒有人在聽的埠）：網路錯誤，不 panic。0 號埠一定連不上；不用「先綁再放掉」的埠（平行測試的假後端可能剛好拿去用，#994）
+        let url = "http://127.0.0.1:0/relay".to_string();
         let n = RelayNotifier { relay: std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into())) };
         assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err("network".to_string()));
     }
