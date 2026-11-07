@@ -1013,6 +1013,9 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
     let now_s = (auth::now_ms() / 1000) as i64;
     let s = view_remote::session(&id, &app.node, &to_node, &partner, now_s);
     views.add(&id)?;
+    // Windows Hello 的 PIN 提示會跟著前景視窗：先把 ASN 叫到前面，不然提示可能被別的視窗擋住（40家用 實測）
+    let _ = window.unminimize();
+    let _ = window.set_focus();
     #[cfg(windows)]
     let signed = {
         let (t, s2) = (trust.clone(), s.clone());
