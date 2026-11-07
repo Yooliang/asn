@@ -95,21 +95,45 @@
 - 「通知」對話不顯示上線狀態，也不能回信。
 - 第四格沿用 3 分鐘逾時，加未讀紅點。
 
-## 附錄：要改的地方
+## 附錄：要改的地方（2026-11-07 依 main 逐行核對）
 
-- **後台寄件**：
-  - `20261031110000_acct_login_alert_notify.sql`
-  - `20261102130000_inbox_watch.sql`、`20261102170000_node_platform_phone.sql`
-  - `20261102160000_inbox_hold_until.sql`
-  - `20261102200000_misroute_notice.sql`
-  - `20261104140000_waiting_notice.sql`
-  - `20261105110000_mux_down_notice.sql`
-  - `20261106130000_node_mismatch_notice.sql`
-  - `20261107110000_term_views.sql`、`20261107130000_device_key_alert.sql`、`20261108100000_term_view_scope.sql`
-- **不回信判斷**：
-  - Rust：`bridge/core.rs`（`is_mailbox_sender` 和它的呼叫點、內文 `[收發室]` 的判斷）、`core/dup.rs`、`held_notice.rs`、`misroute.rs`、`quota.rs`、`bridge/mail.rs:174`、`engines/acp.rs:626`、`partner_ops.rs:521`、`src/relay.rs:560`、`names.rs:30`
-  - Node 版：`relay/machine/bridge.mjs:175`、`engines/acp.mjs:96`、`mail-format.mjs:78`
-  - 雲端代理：`relay/cloud-agent/config.mjs:92,124`、`grok-agents.mjs:52`
-  - UI：`ui/lib/text.mjs:99`
-- **名單**：`ui/lib/core.mjs:349–353`、`ui/lib/routing.mjs:6,15`
-- **手機導覽**：`ui/lib/mobile.mjs:15,20`、`mobile-fourth.mjs`、`mobile-nav.mjs`、`m.js` 的 `checkFourth` 和 `tabs`
+- **後台寄件**：`v_agent constant text := '…收發室'`，共 11 處，分屬 8 種寄件名。改的時候以每支函式**最後一次定義**的 migration 為準。
+  - `20261031110000_acct_login_alert_notify.sql:33`：登入通知收發室
+  - `20261102130000_inbox_watch.sql:96`、`20261102170000_node_platform_phone.sql:138`：收信監控收發室（第二個檔重新定義了同一支函式）
+  - `20261102160000_inbox_hold_until.sql:41`：額度通知收發室
+  - `20261102200000_misroute_notice.sql:33`：轉交核對收發室
+  - `20261104140000_waiting_notice.sql:30`：等待確認收發室
+  - `20261105110000_mux_down_notice.sql:29`：終端服務收發室
+  - `20261106130000_node_mismatch_notice.sql:29`：雲端設定收發室
+  - `20261107110000_term_views.sql:219`、`20261107130000_device_key_alert.sql:36`、`20261108100000_term_view_scope.sql:125`：看畫面收發室
+- **不回信，以及「收發室」名字的判斷**：
+  - Rust 橋 `relay/asn/src-tauri/src/bridge/`
+    - `core.rs`：
+      - 預設寄件名在第 151 行（`{node}-收發室`）。
+      - `is_mailbox_sender` 定義在第 1029–1030 行，呼叫點在第 923、963、1585、1601、1612、1731、1944、2581 行。
+      - 內文開頭是 `[收發室]` 的判斷在第 923、963 行。
+    - `core/dup.rs:32,47`、`core/held_notice.rs:76`、`core/misroute.rs:77`、`core/quota.rs:177`（這行也判斷內文 `[收發室]`）
+    - `mail.rs:174`：寄件人說明行寫成「收發室通知」
+    - `engines/acp.rs:626`
+    - `partner_ops.rs:521`：受保護的名字
+  - Rust 其他：
+    - `src/relay.rs:560`：沒指定收件人的信會略過收發室寄來的
+    - `src/names.rs:30`：改名時禁止名字以「收發室」結尾。**這條要留著**，避免夥伴取到和系統通知一樣的名字。
+  - Node 橋 `relay/machine/`
+    - `bridge.mjs`：預設寄件名在第 35 行；`isMailboxSender` 在第 175 行，用在第 209、323、448 行。
+    - `engines/acp.mjs:96`
+    - `mail-format.mjs:78`
+  - 雲端代理 `relay/cloud-agent/`
+    - `config.mjs:92,124`：從夥伴名單排除
+    - `grok-agents.mjs:52`
+  - UI `relay/asn/ui/lib/`
+    - `text.mjs:101`：`noReplyNoticeOf`
+    - `roster.mjs:22`：`isRelayRoom`，用在 `roster.mjs:95`、`groups.mjs:71`、`partner-ops.mjs:178`。這幾處把收發室排除在名單、群組候選和夥伴操作之外，改成新的判斷時也要一起改。
+- **名單**：
+  - `ui/lib/core.mjs`：第 13 行引入，第 351–353 行的 `#incoming` 用 `routeMail` 和 `stubFriend` 建出 stub 好友。
+  - `ui/lib/routing.mjs`：第 6 行 `routeMail`，第 15 行 `stubFriend`。
+- **手機導覽**：
+  - `ui/lib/mobile.mjs:15,20`
+  - `mobile-fourth.mjs`
+  - `mobile-nav.mjs`
+  - `m.js` 的 `checkFourth` 和 `tabs`
