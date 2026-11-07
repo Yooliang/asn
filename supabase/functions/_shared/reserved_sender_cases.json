@@ -1,0 +1,10 @@
+{
+  "_comment": "寄件名保留字檢查的共用測試案例（從 reserved_sender_test.ts 抄出的與執行環境無關的部分）。用戶端 JS（relay/asn、relay/machine）與 Rust（relay/asn/src-tauri 的 bridge/notice.rs）的測試都讀這個檔；Edge 端測試在 #999 合併後也應讀同一個檔。不可見字元一律用 \\u 跳脫寫。reserved 與 ordinary 都不帶節點放行（isReservedSender 的 nodeId 放行規則只在 Edge 端）。",
+  "reserved": ["ASN 通知", "ASN通知", "asn 通知", "Asn\u3000通知", "\uff21\uff33\uff2e 通知", "A\u200bSN 通\u200d知", "ASN\u202e 通知", " ASN  通知 ", "ASN\t通知\n", "ASN-通知", "ASN・通知", "ASN\uff0e通知", "ASN_通知", "ASN\uff1a通知", "[ASN] 通知", "\u00c1SN通知", "ASN通知!", "\u0410\u0405\u039d通知", "\u0430\u0455\u03bd通知", "\u0251\ua731\u0274通知", "\u1d00\u0455\u0578通知", "A\u0455N通知", "\u0430SN 通知", "登入通知收發室", "收發室", "看畫面收發室", "X-收發室", "登入通知收发室", "登入通知収発室", "登入通知收発室", "登入通知収發室", "登入通知収发室", "登入通知收發室。", "登入通知收發室\uff01", "登入通知收發室 ", "登入通知收發\u200b室", "登入通知收發室\u200b", "登入通知收發室...", "登入通知(收發室)"],
+  "ordinary": ["小乙", "H-主線", "W02", "收發室工具人", "通知小幫手", "ASN", "ASN 助手", "我的收發室筆記", "ASN2 通知小幫手", "ASN 通知單"],
+  "fold": [
+    ["\uff21\uff33\uff2e 通知", "asn通知"],
+    ["収発室", "收發室"],
+    ["\u0410\u0405\u039d-通知", "asn通知"]
+  ]
+}

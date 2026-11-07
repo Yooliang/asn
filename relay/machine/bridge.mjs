@@ -6,6 +6,7 @@
 // No private Claude Code protocol is used; everything goes through public CLI flags and the public SendMessage tool.
 import { envGet, usedLegacyEnv } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
+import { isSystemNotice } from './system-notice.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -172,7 +173,7 @@ const lastRequester = {}           // 收件視窗 -> {from_node, from_agent, ma
 // 要不要計時看信件的 expects_reply 欄位（寄件人明說；判斷在 mail-format.mjs 的 wantsReply）：true／false 就只看欄位，
 // 欄位是 null（舊版寄件工具、舊信）才退回看內文的「（不需回覆）」「[no-reply]」標記——過渡期相容，之後拿掉。
 // 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
-const isMailboxSender = m => String(m?.from_agent ?? '').endsWith('收發室')
+const isMailboxSender = m => isSystemNotice(m)   // kind 是 notice:*，或（截止時間前的）舊寄件名；見 system-notice.mjs
 const selfHandled = new Set() // mail ids already logged as left to the window's own recv
 const unrouted = new Set()   // mail ids already logged as kept in the inbox for the owner
 

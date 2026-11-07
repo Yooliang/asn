@@ -23,6 +23,7 @@ export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
 // 組標題：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
 export function groupHeading(g) {
   const items = g?.items ?? []
+  if (g?.kind === 'notice') return g.label
   if (g?.kind === 'archived') return `${g.label}（${items.length}）`   // 名單最底下收合的「已封存」群組
   if (g?.kind === 'status') return `${g.label} (${items.length})`
   return `${g?.label ?? ''} (${items.filter(c => c.status !== 'offline').length}/${items.length})`
@@ -43,6 +44,7 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], d
   }
   slot(selfNode, selfName)   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
   for (const f of friends) {
+    if (f.isNotice === true || (typeof f.mergedInto === 'string' && f.mergedInto)) continue   // 「通知」對話不屬於任何設備
     const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : f.device)
     if (isAsnWindow(f)) continue   // ASN 視窗隱藏：設備頁籤照開，但不算進人數與未讀
     t.total++

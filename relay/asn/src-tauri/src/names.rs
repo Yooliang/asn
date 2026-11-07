@@ -15,7 +15,7 @@ pub struct OldName {
     pub t: u64,
 }
 
-/// 去頭尾空白、1～40 字、不能結尾是「收發室」（那是收發室自己的名字）、不能含控制字元
+/// 去頭尾空白、1～40 字、不能含控制字元、不能用保留給系統通知的名字（「ASN 通知」、結尾是「收發室」；比對前先正規化，見 notice_name::fold_name）
 pub fn validate_name(raw: &str) -> Result<String, String> {
     let n = raw.trim().to_string();
     if n.is_empty() {
@@ -27,8 +27,8 @@ pub fn validate_name(raw: &str) -> Result<String, String> {
     if n.chars().any(|c| c.is_control()) {
         return Err("名字不能含控制字元".into());
     }
-    if n.ends_with("收發室") {
-        return Err("名字不能以「收發室」結尾".into());
+    if crate::notice_name::is_reserved_name(&n) {
+        return Err("這個名字是保留給系統通知的（「ASN 通知」或結尾是「收發室」），請換一個".into());
     }
     Ok(n)
 }
@@ -93,6 +93,10 @@ mod tests {
         assert!(validate_name(&"字".repeat(41)).is_err());
         assert!(validate_name("a\nb").is_err() && validate_name("a\u{7}b").is_err());
         assert!(validate_name("家用收發室").is_err());
+        for bad in ["ASN 通知", "asn通知", "ＡＳＮ通知", "ASN\u{200b}通知", "x收发室", "АЅΝ通知", "登入通知収発室"] {
+            assert!(validate_name(bad).is_err(), "{bad}");
+        }
+        assert!(validate_name("ASN 通知單").is_ok());
         assert!(validate_name("收發室很棒").is_ok());
     }
 

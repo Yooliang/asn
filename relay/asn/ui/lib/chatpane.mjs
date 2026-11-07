@@ -138,7 +138,8 @@ export const ChatPane = {
     const side = computed(() => sideOf(props.dpMode))
     const displayOnly = computed(() => !isRoom.value && isDisplayOnly(props.friend))   // 本機程序掃描的條目：只顯示，不能收信
     const loginText = computed(() => loginNote(props.friend))
-    const warn = computed(() => (displayOnly.value ? null : warnKind(props.friend?.status, { hideBusy: props.hideBusyWarn })))
+    const isNotice = computed(() => props.friend?.isNotice === true)   // 「通知」對話（#848）：沒有上線狀態、沒有輸入列、沒有通話鈕
+    const warn = computed(() => (displayOnly.value || isNotice.value ? null : warnKind(props.friend?.status, { hideBusy: props.hideBusyWarn })))
     const barArrow = computed(() => foldBarArrow(side.value, collapsed.value))
     const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
@@ -313,7 +314,7 @@ export const ChatPane = {
       })
     }
     // ---- 針對某則訊息回覆（#225）：引用顯示在訊息上方，點引用跳回原訊息；群組自動 @ 原作者 ----
-    const canReply = m => !!replyTarget(m, { friend: props.friend, meName: props.me.nick, index: 0 })
+    const canReply = m => !isNotice.value && !!replyTarget(m, { friend: props.friend, meName: props.me.nick, index: 0 })
     function startReply(m, i) {
       replying.value = replyTarget(m, { friend: props.friend, meName: props.me.nick, index: i })
       nextTick(() => composeEl.value && composeEl.value.focus())
@@ -353,7 +354,7 @@ export const ChatPane = {
     const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
     // ---- 通話（#99）：每個面板自己一個通話；回信到達（log 變多）時交給通話念出來。換夥伴、切走分頁、關掉面板都自動掛斷 ----
     const call = props.callApi?.newCall ? props.callApi.newCall({ hints: () => buildNameHints(props.friend, props.hintNames) }) : props.voice?.newCall ? props.voice.newCall({ send: (t, o) => emit('send', t, o), hints: () => buildNameHints(props.friend, props.hintNames) }) : null
-    const showCallBtn = computed(() => !!props.callApi && !!call && canCallPartner(props.friend))   // 手機：工具列的「通話」鈕，只有 AI 夥伴才有
+    const showCallBtn = computed(() => !!props.callApi && !!call && !isNotice.value && canCallPartner(props.friend))   // 手機：工具列的「通話」鈕，只有 AI 夥伴才有
     const callActive = computed(() => !!call && call.state.active)
     const startCall = () => { if (call && !call.state.active) void call.start(props.log) }
     const hangUp = () => { if (call) void call.end() }
@@ -413,11 +414,11 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
@@ -460,6 +461,7 @@ export const ChatPane = {
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                 </button>
               </div>
+              <div class="m-dev" v-if="m.dev">{{ plain(m.dev) }}</div>
               <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
               <div class="dup-act" v-if="shownBody(m).dup.length" aria-label="關掉重複的視窗">
@@ -489,7 +491,7 @@ export const ChatPane = {
       </div>
     </div>
   </div>
-  <div class="compose-row">
+  <div class="compose-row" v-if="!isNotice">
     <div class="compose-main">
       <div class="toolbar">
         <span class="tool-group">

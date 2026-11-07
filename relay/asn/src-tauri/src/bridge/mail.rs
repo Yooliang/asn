@@ -74,9 +74,20 @@ pub struct Mail {
     pub attachments: Vec<super::attach::Attachment>,
     /// 後台記的寄出時間（毫秒；後台欄位 created_at，舊後台或格式不對＝None）：先留著的信送出時註明「原本幾點收到」用這個
     pub sent_ms: Option<u64>,
+    /// 信件類別（後台選填；`notice:` 開頭＝系統通知，舊後台沒有）
+    pub kind: Option<String>,
 }
 
 impl Mail {
+    /// 這封信是不是系統通知（不回信、不計時）：kind 或（截止時間前的）舊寄件名
+    pub fn is_system_notice(&self) -> bool {
+        crate::notice_name::is_system_notice(self.from_agent.as_deref().unwrap_or(""), self.kind.as_deref(), self.sent_ms)
+    }
+    /// 內文開頭是舊版的 `[收發室]` 標記（只對截止時間前的信有效）
+    pub fn has_legacy_notice_mark(&self) -> bool {
+        crate::notice_name::has_legacy_body_prefix(&self.body, self.sent_ms)
+    }
+
     pub fn from_json(v: &Value) -> Option<Mail> {
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(String::from);
         Some(Mail {
@@ -93,6 +104,7 @@ impl Mail {
             voice: v.get("voice").and_then(Value::as_bool) == Some(true),
             attachments: super::attach::normalize(v.get("attachments")),
             sent_ms: s("created_at").and_then(|t| parse_sent_ms(&t)),
+            kind: s("kind"),
         })
     }
 }
@@ -171,7 +183,7 @@ pub fn sender_line(m: &Mail) -> String {
         return format!("寄件人：{display}（本人，帳號簽章已驗證{from}）");
     }
     let status = if m.trust == "owner" { "擁有者身分" } else { "成員身分" };
-    if agent.ends_with("收發室") {
+    if m.is_system_notice() {
         return format!("寄件人：收發室通知（{status}）");
     }
     let name = if agent.is_empty() { "未具名視窗".to_string() } else { agent };

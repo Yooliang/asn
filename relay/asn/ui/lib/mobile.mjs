@@ -2,7 +2,8 @@
 // 手機三個大分頁：夥伴、對話（最後使用的那一位）、設置。沒有多視窗、系統匣、設定分頁。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
-import { withoutAsn } from './roster.mjs'
+import { isAsnWindow, withoutAsn } from './roster.mjs'
+import { isMergedAway } from './notice.mjs'
 import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 
@@ -87,7 +88,7 @@ export function rosterGroups(friends, { query = '', selfNode = '', selfName = ''
   const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)))
   return groupItems(items, 'device', { selfNode, selfName, deviceOrder })
 }
-export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
+export const totalUnread = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f) && !isMergedAway(f)).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)   // 含「通知」對話的未讀
 
 // ---------- 名單每列：廠商小徽章與「最後一句話」 ----------
 // 廠商圖：與電腦版名單共用（vendor-icons.mjs，#308）

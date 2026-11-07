@@ -15,6 +15,7 @@ import { createAcpDriver } from './acp-driver-acp.mjs'
 import { createAgyDriver } from './acp-driver-agy.mjs'
 import { createWorker } from './acp-worker.mjs'
 import { headReply, wantsReply } from '../mail-format.mjs'
+import { isSystemNotice } from '../system-notice.mjs'
 
 const DRIVERS = { 'agy-stream': createAgyDriver, acp: createAcpDriver }
 const defaultMakeDriver = args => DRIVERS[args.cfg.protocol](args)
@@ -93,7 +94,7 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
       }
       // 要不要把回覆寄回：和橋同一條規則——抬頭的 reply=yes|no 是寄件人明說的（橋從信件欄位寫上去），有就只看它；
       // reply=?（舊信沒有欄位）或舊橋沒有這個欄位才退回看內文標記（過渡期相容，之後拿掉）。寄件人是收發室的系統信照舊不寄回
-      const noReply = !wantsReply(headReply(text), body) || agent.endsWith('收發室')
+      const noReply = !wantsReply(headReply(text), body) || isSystemNotice({ from_agent: agent })
       w.enqueue({ id, text, sender: { node, agent }, noReply })
     },
     /** 動態加一個背景工作者（開新夥伴；同名且還在跑就拒絕） */

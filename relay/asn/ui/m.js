@@ -37,6 +37,7 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
+import { withNoticeGroup } from './lib/notice.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
@@ -295,7 +296,7 @@ const app = createApp({
     // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（搜尋字同樣適用）
     const groups = computed(() => {
       const o = { query: query.value, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, plainText: plain }
-      return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))
+      return withNoticeGroup(withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items)), friends.value, { query: query.value })
     })
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
     // 資料與動作都在 lib/room-hub.mjs（電腦版共用）；發言與讀取走 Rust 指令並帶本人簽章

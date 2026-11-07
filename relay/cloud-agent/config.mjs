@@ -9,6 +9,7 @@
 //   舊名 IRORI_* 由 env-compat.mjs 在 resolveConfig 入口轉成 ASN_*（ONBOARDING §5）
 import { pickAnon } from '../machine/anon.mjs'
 import { resolveHome } from '../machine/home.mjs'
+import { isReservedPartnerName } from '../machine/system-notice.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_URL, ID_RE } from '../machine/register.mjs'
@@ -89,7 +90,7 @@ const STATUSES = new Set(['idle', 'busy', 'waiting'])
 
 function normalizeManualEntry(a, cfg) {
   const name = String((typeof a === 'string' ? a : a?.name) ?? '').trim().slice(0, 100)
-  if (!name || /收發室$/.test(name)) return null
+  if (!name || isReservedPartnerName(name)) return null
   return {
     name,
     status: STATUSES.has(a?.status) ? a.status : 'idle',
@@ -121,7 +122,7 @@ export function loadAgents(cfg) {
 
 function normalizeScannedEntry(a, cfg) {
   const name = String(a?.name ?? '').trim()
-  if (!name || /收發室$/.test(name)) return null
+  if (!name || isReservedPartnerName(name)) return null
   return {
     name,
     status: STATUSES.has(a?.status) ? a.status : 'idle',

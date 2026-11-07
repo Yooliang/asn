@@ -73,7 +73,7 @@ impl Core {
             }
             self.held_open.push(f.clone());
         }
-        if kind == "released" || f.is_notice || Self::is_mailbox_sender(&f.origin.from_agent) {
+        if kind == "released" || f.is_notice || Self::is_system_notice(&f.origin.from_agent) {
             return;
         }
         if let Some(room) = &f.room {

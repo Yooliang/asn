@@ -54,6 +54,7 @@ import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
+import { withNoticeGroup } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
@@ -1407,7 +1408,7 @@ const app = createApp({
       const base = rosterShownGroups(activeFriends(friendsAct.value), o)
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
       const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items)
-      return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
+      return withNoticeGroup(withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived), friendsAct.value, { query: query.value })
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))

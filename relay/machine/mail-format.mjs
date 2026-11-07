@@ -6,6 +6,8 @@
 
 // 舊式的內文標記。【過渡期相容】只有欄位是 null 的信（舊版寄件工具、舊信）才退回看它；
 // 所有寄件工具與機器都換成會帶 expects_reply 的版本之後，這份正則與 wantsReply 的退路就可以拿掉。
+import { isSystemNotice } from './system-notice.mjs'
+
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 
 // 欄位值 → true／false／null。接受 boolean，也接受抬頭上的 yes／no 字樣；其他一律當「不知道」
@@ -75,7 +77,7 @@ export function senderLine(m) {
     return `寄件人：${cleanLabel(m.sender_display)}（本人，帳號簽章已驗證${dev ? `，從「${dev}」寄出` : ''}）`
   }
   const status = m?.trust === 'owner' ? '擁有者身分' : '成員身分'
-  if (agent.endsWith('收發室')) return `寄件人：收發室通知（${status}）`
+  if (isSystemNotice(m)) return `寄件人：收發室通知（${status}）`
   const name = agent || '未具名視窗'
   if (m?.sender_engine === 'cloud') return `寄件人：${name}（雲端代理，${status}）`
   const eng = ENGINE_NAMES[m?.sender_engine] ?? cleanLabel(m?.sender_engine)

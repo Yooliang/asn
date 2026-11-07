@@ -920,7 +920,7 @@ impl Core {
     /// 告訴寄件人「先留著」：同一次重開、同一位寄件人對同一位夥伴只說一次；收發室寄的、通知本身都不回
     async fn tell_sender_waiting(&mut self, m: &Mail, target: &str) {
         let from_agent = m.from_agent.clone().unwrap_or_default();
-        if Self::is_mailbox_sender(&from_agent) || m.body.trim_start().starts_with("[收發室]") {
+        if m.is_system_notice() || m.has_legacy_notice_mark() {
             return;
         }
         if !self.awaiting_told.insert(format!("{}/{}->{target}", m.from_node, from_agent)) {
@@ -960,7 +960,7 @@ impl Core {
     async fn hold_for_self_pull(&mut self, m: &Mail, to: &str) -> Option<String> {
         let first = *self.self_pull_first.entry(m.id.clone()).or_insert(m.sent_ms.unwrap_or(self.now));
         let from_agent = m.from_agent.clone().unwrap_or_default();
-        let quiet = Self::is_mailbox_sender(&from_agent) || m.body.trim_start().starts_with("[收發室]");
+        let quiet = m.is_system_notice() || m.has_legacy_notice_mark();
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent: from_agent.clone() };
         if self.now.saturating_sub(first) >= AWAIT_GRACE_MS {
             self.log.line(&format!("id={} to={to}: self-pull window did not collect it in {} h, bounced", m.id, AWAIT_GRACE_MS / 3_600_000));
@@ -1026,8 +1026,9 @@ impl Core {
         let recent = self.pending.iter().any(|p| p.target == me && !p.replied && matches!(p.state, State::Forwarding | State::Waiting) && self.now.saturating_sub(p.t.max(p.t0)) < RESPOND_BUSY_GRACE_MS);
         if recent || self.respond_open { "busy" } else { "idle" }
     }
-    fn is_mailbox_sender(from_agent: &str) -> bool {
-        from_agent.ends_with("收發室")
+    /// 只有寄件名時的系統通知判斷（Origin 這類只存寄件名的地方）；整封信用 Mail::is_system_notice
+    fn is_system_notice(from_agent: &str) -> bool {
+        crate::notice_name::is_system_notice_name(from_agent)
     }
     fn fresh(&self, t: Option<&u64>) -> bool {
         t.map(|t| self.now.saturating_sub(*t) < NOTICE_TTL_MS).unwrap_or(false)
@@ -1582,7 +1583,7 @@ impl Core {
                     // 僅引擎模式（Aegis 主機沒有本人視窗）：引擎自己說明怎麼指定收件人，不留在信箱
                     if let Some(text) = self.engine_only_reply(|e| e.unaddressed_reply()) {
                         self.log.line(&format!("id={} has no to_agent: engine asked sender to specify", m.id));
-                        if !Self::is_mailbox_sender(&from_agent) {
+                        if !m.is_system_notice() {
                             let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent: from_agent.clone() };
                             if !self.send_back(&o, &text, None, None).await {
                                 return None; // 寄回失敗：留在信箱，下次補拉再來
@@ -1598,7 +1599,7 @@ impl Core {
         };
         // 「寄回成功才 ack」的引擎（Aegis）：寄件人說不需回覆也照問、照回（和 Node 版一樣）；其他引擎維持原行為
         let always = { let eng = self.engine_of(&target); self.engines.as_ref().is_some_and(|e| e.always_replies(&eng)) };
-        let no_reply = (!wants_reply(m.expects_reply, &m.body) && !always) || Self::is_mailbox_sender(&from_agent);
+        let no_reply = (!wants_reply(m.expects_reply, &m.body) && !always) || m.is_system_notice();
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
         p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
         // 重開後夥伴視窗還沒接回來：信留在後台信箱（不退回、不 ack），等它接回來再照順序送；等太久或留太多才退回
@@ -1609,7 +1610,7 @@ impl Core {
         if !self.forwardable(&target) {
             let names = if self.roster.is_empty() { "(無)".to_string() } else { self.roster.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join("、") };
             p.state = State::Done;
-            if Self::is_mailbox_sender(&from_agent) {
+            if m.is_system_notice() {
                 self.log.line(&format!("id={} target {target} not found; notice to mailbox sender not sent", m.id));
             } else {
                 let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
@@ -1728,7 +1729,7 @@ impl Core {
         }
         let owner = self.relay.window_name();
         self.log.line(&format!("id={} has no to_agent: kept in inbox for the owner ({owner}), not acked", m.id));
-        if wants_reply(m.expects_reply, &m.body) && !Self::is_mailbox_sender(from_agent) {
+        if wants_reply(m.expects_reply, &m.body) && !m.is_system_notice() {
             let p = Pending::new(&m.id, &m.from_node, from_agent, &owner, self.now, true);
             self.owner_receipts.push((self.now + OWNER_RECEIPT_GRACE_MS, Origin::of(&p)));
         }
@@ -1941,7 +1942,7 @@ impl Core {
             return;
         }
         self.count_forward_fail("mail", id, &target);
-        if Self::is_mailbox_sender(&from_agent) {
+        if Self::is_system_notice(&from_agent) {
             self.log.line(&format!("forward failure notice to mailbox sender {}/{} not sent id={id}", o.from_node, from_agent));
         } else if self.bounce_notices.contains(id) {
             self.log.line(&format!("forward failure notice not sent id={id}: the failed mail is itself a notice"));
@@ -2578,7 +2579,7 @@ impl Core {
                 #[cfg(feature = "gui")]
                 crate::login_watch::record_forward_timeout(now as i64);
                 self.count_forward_fail("mail-timeout", &id, &p.target);
-                if Self::is_mailbox_sender(&p.from_agent) {
+                if Self::is_system_notice(&p.from_agent) {
                     self.log.line(&format!("forward timeout notice to mailbox sender not sent id={id}"));
                 } else if self.bounce_notices.contains(&id) {
                     self.log.line(&format!("forward timeout notice not sent id={id}: the failed mail is itself a notice"));

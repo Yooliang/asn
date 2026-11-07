@@ -623,7 +623,7 @@ impl Engine for AcpEngine {
         }
         // 要不要把回覆寄回：和橋同一條規則——抬頭的 reply=yes|no 是寄件人明說的，有就只看它；
         // reply=?（舊信沒有欄位）才退回看內文標記。寄件人是收發室的系統信照舊不寄回
-        let no_reply = !wants_reply(head_reply(text), &body) || agent.ends_with("收發室");
+        let no_reply = !wants_reply(head_reply(text), &body) || crate::notice_name::is_system_notice_name(&agent);
         w.enqueue(Job { id: id.to_string(), text: text.to_string(), sender_node: node, sender_agent: agent, no_reply });
         Ok(())
     }

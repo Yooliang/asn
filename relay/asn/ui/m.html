@@ -135,13 +135,13 @@
                 </ul>
               </div>
               <div v-for="g in groups" :key="g.key" class="m-group">
-                <div class="m-ghead-row">
+                <div class="m-ghead-row" v-if="g.kind !== 'notice'">
                   <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
                     <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
                   </button>
                   <button class="m-ghead-act" type="button" v-if="acctKeys.has(g.key)" :aria-label="ACCT_TEXT.button + '：' + g.label" @click="openAcct(g)">{{ ACCT_TEXT.button }}</button>
                 </div>
-                <ul v-show="!collapsed[g.key]">
+                <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
                   <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
                     <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
                       <span class="m-av-wrap">

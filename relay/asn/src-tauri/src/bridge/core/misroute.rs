@@ -74,7 +74,7 @@ impl Core {
             None => self.fwd_origin.get(id).cloned(),
         };
         let Some(o) = origin else { return };
-        if Self::is_mailbox_sender(&o.from_agent) {
+        if Self::is_system_notice(&o.from_agent) {
             return;
         }
         // 只寫寄件人自己指定的收件人；實際收到的視窗名可能是這台電腦上別人的，不寫進通知
