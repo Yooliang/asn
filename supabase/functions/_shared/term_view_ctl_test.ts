@@ -27,9 +27,11 @@ Deno.test("看的那台的動作沒簽章一律 403，也不碰資料庫", async
 });
 
 Deno.test("發起：只傳認得的欄位，敲對方門鈴，回應不帶門鈴主題", async () => {
-  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t" });
+  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: "p".repeat(43) });
   const r = await handleTermViewAction(m.deps, me, "term_view_start", { ...start, text: "rm -rf /", keys: "x" }, USER);
-  assertEquals(r.body, { id: ID, topic: "tv_x" });
+  assertEquals(r.body, { id: ID, topic: "tv_x", to_pub: "p".repeat(43) }, "那台的設備公鑰要轉回給看的那台（TOFU 要用）");
+  const old = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: 5 });
+  assertEquals((await handleTermViewAction(old.deps, me, "term_view_start", start, USER)).body, { id: ID, topic: "tv_x", to_pub: null }, "型別不對就給 null，看的那台會停");
   assertEquals(m.rung, ["bell-t"]);
   assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_to_node: "hom7a1", p_window_name: "小乙", p_d_eph_pub: PUB, p_d_sig: D_SIG, p_expires_at: start.expires_at });
 });
@@ -89,4 +91,15 @@ Deno.test("領取、錯誤、不認得的動作", async () => {
   assertEquals((await handleTermViewAction(mk({}, new Error("x")).deps, me, "term_view_pending", {}, null)).body.error, "internal");
   assertEquals((await handleTermViewAction(mk().deps, me, "term_view_send", {}, USER)).status, 404);
   for (const a of TERM_VIEW_SIGNED_ACTIONS) assertEquals(TERM_VIEW_ACTIONS.has(a), true);
+});
+
+Deno.test("守門：看的那台從 term_view_start 讀的欄位，這裡都要回", async () => {
+  // 0.2.8 漏過一次：後台回了 to_pub，這裡沒轉，看的那台一定開不起來，兩邊各自的測試都看不出來
+  const lib = await Deno.readTextFile(new URL("../../../relay/asn/src-tauri/src/lib.rs", import.meta.url));
+  const f = lib.split("fn term_view_remote_start(")[1]?.split("\nfn ")[0] ?? "";
+  const read = [...f.matchAll(/field\("([a-z_]+)"\)/g)].map((m) => m[1]);
+  assertEquals(read.length > 0, true, "找不到看的那台讀的欄位");
+  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: PUB });
+  const body = (await handleTermViewAction(m.deps, me, "term_view_start", start, USER)).body as Record<string, unknown>;
+  for (const k of read) assertEquals(typeof body[k], "string", `term_view_start 沒回 ${k}`);
 });

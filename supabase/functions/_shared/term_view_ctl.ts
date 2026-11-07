@@ -10,7 +10,7 @@ export type TermViewDeps = {
 };
 
 const PUB_RE = /^[A-Za-z0-9_-]{43}$/;
-const D_SIG_RE = /^[A-Za-z0-9_-]{86,700}$/;   // 看的那台用 Hello 的金鑰（RSA），比 Ed25519 長
+const D_SIG_RE = /^[A-Za-z0-9_-]{86,700}$/;   // 看的那台用設備金鑰（Ed25519，86 字）；上限留給舊版
 const T_SIG_RE = /^[A-Za-z0-9_-]{86}$/;
 const NODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOW_MAX = 64;
@@ -62,7 +62,8 @@ export async function handleTermViewAction(deps: TermViewDeps, me: { id: string 
     const r = await call(deps, "asn_relay_term_view_start", { p_actor: me.id, p_signed_user: signedUser, p_id: id, p_to_node: to_node, p_window_name: window_name, p_d_eph_pub: d_eph_pub, p_d_sig: d_sig, p_expires_at: expires_at });
     if (isReply(r)) return r;
     if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic);
-    return { status: 200, body: { id: r.data.id, topic: r.data.topic } };
+    // to_pub＝那台的設備公鑰：看的那台要先和本機記住的比（TOFU），少了就不能開始
+    return { status: 200, body: { id: r.data.id, topic: r.data.topic, to_pub: typeof r.data.to_pub === "string" ? r.data.to_pub : null } };
   }
   if (action === "term_view_report") {
     if (typeof b.id !== "string" || !UUID_RE.test(b.id) || (b.state != null && !REPORT_STATES.includes(b.state))) return fail("bad_request");
