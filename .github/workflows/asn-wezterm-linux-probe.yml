@@ -1,0 +1,40 @@
+name: Linux 無畫面 WezTerm 實驗（#893）
+
+# 實驗用，不是日常 CI：只有動到這兩個檔的 PR、或手動執行時才跑。不碰產品程式。
+# 做的事見 .github/scripts/linux-wezterm-probe.sh；結果在每個 job 的「Summary」頁。
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/asn-wezterm-linux-probe.yml'
+      - '.github/scripts/linux-wezterm-probe.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 沒有 DISPLAY 的 mux-server 實驗
+        env:
+          PROBE_OUT: ${{ runner.temp }}/wezprobe
+        run: bash .github/scripts/linux-wezterm-probe.sh
+
+      - name: 上傳 log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wezprobe-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/wezprobe/*.log
+            ${{ runner.temp }}/wezprobe/*.err
+            ${{ runner.temp }}/wezprobe/mux.lua
+          if-no-files-found: ignore

@@ -21,3 +21,6 @@ relay/asn/scripts/aegis/* text eol=lf
 
 # Linux 無視窗橋的單元範本：一律 LF
 relay/asn/scripts/headless/*.service text eol=lf
+
+# CI 的實驗腳本在 Linux 上跑：一律 LF
+.github/scripts/*.sh text eol=lf
