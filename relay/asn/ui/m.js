@@ -30,7 +30,7 @@ import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/acco
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
-import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
+import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -580,6 +580,20 @@ const app = createApp({
         if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
       } catch (e) { if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
     }
+    // 進設備頁時預讀各台帳號回報（#930）：為了顯示「雲端」標示，進設備頁時讀一次；一分鐘內再進就用上次讀到的，不重讀
+    const acctPrefetch = createReportPrefetch({ read: node => acctTransport.acctList(node) })
+    const acctPrefetched = {}
+    async function prefetchReports() {
+      const epoch = acctEpoch
+      const put = (node, r) => { if (epoch === acctEpoch && !acctSw.reports[node]) acctSw.reports[node] = r }
+      const nodes = acctDevs.value.filter(d => acctNeedsLoad(d)).map(d => d.key)
+      const ran = await acctPrefetch(nodes, (node, v) => {
+        const r = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
+        acctPrefetched[node] = r
+        put(node, r)
+      })
+      if (!ran) for (const [node, r] of Object.entries(acctPrefetched)) put(node, r)
+    }
     // 從夥伴列表設備旁的「選項」或設置列表進來；開新夥伴第 2 步還沒送出時先問一句
     const openAcct = g => askBeforeLeave(acctPage(), () => void openAcctNow(g))
     async function openAcctNow(g) {
@@ -591,6 +605,7 @@ const app = createApp({
       if (!fourthNav.openPage(acctPage(acctSw.node))) return
       if (!lchData.loaded) void loadLaunchers()
       void loadRoster()
+      void prefetchReports()
       if (acctSw.page === 'detail') void loadAcct(g.node)
     }
     function openAcctDevice(key) {
