@@ -1,11 +1,11 @@
 {
-  "version": "0.2.7",
-  "notes": "- 新功能：自己手開的 agy 視窗，可以在名單上按「接進收發室」，之後它能用自己的名字寄信、收信；寄給它的信會留著等它自己收，寄件人會收到一次「要自己收信，可能比較晚看到」。\n- 改善：開新夥伴時的運行選項改用固定的名稱（asn終端（原生 cli）、asn終端（pi shell）、acp通道（無介面）），預設改成 asn終端（原生 cli）；畫面上的說明改成一般的說法。手機版開新夥伴也是同一套名稱。從手機或另一台電腦開夥伴時，那台開著背景終端服務的話，會開在服務裡、不會跳到那台的畫面前面。\n- 改善：電腦版聊天頁的「終端」按鈕搬到上面那排，打開時占滿訊息區、關掉回到原本的位置；更新前就開著的夥伴會提示「重新開一次這位夥伴，就能在 ASN 裡看終端」。畫面暫時讀不到時改說「暫時讀不到這個畫面」。\n- 修正：手機的回答框，在電腦上移動游標或換題時不再收了又跳；電腦上已經答掉的，手機的框會說一聲後自己收起來；框的標題改成「哪台電腦的哪位夥伴正在詢問」，版面更精簡。手機要更新 App 才有。\n- 修正：手機對話頂端的指令進度框，只顯示在下指令那位夥伴的對話裡。手機要更新 App 才有。\n- 修正：喚醒後的夥伴跳權限確認時，手機不再出現「找不到這個夥伴視窗」。\n- 修正：從手機或另一台電腦開窗時，如果這台已經有同名的視窗在跑，不再開出第二個。\n- 修正：減少 ASN 啟動時對背景終端服務的讀取，降低更新換版時服務中斷的機會。\n- 已知問題：背景終端服務偶爾仍可能意外中斷；中斷後 ASN 會自動把夥伴接回來。",
-  "pub_date": "2026-11-07T00:05:14.212Z",
+  "version": "0.2.8",
+  "notes": "- 新功能：電腦版可以看自己帳號底下另一台電腦上夥伴的終端畫面（只能看，不能打字）。開始前要用 Windows Hello（PIN 或指紋）確認是本人，沒有 Hello 的電腦會跳系統確認框。被看的那台會顯示正在被看，並把 ASN 視窗叫出來（不會被藏住）；那台關掉「允許我的其他設備替這台開新視窗」時，正在看的也會結束。\n- 新功能：兩台電腦第一次連上時會記住對方，之後對方的識別換了就不讓看，並寄信通知你。設定頁有「認得的電腦」，可以「忘記這台」。\n- 改善：終端畫面拿掉右邊的直捲軸和「回到訊息」按鈕；往下捲不會再被拉回，離開底部時有「回到最新」；上排的大按鈕會依狀態換字和圖示。看別台夥伴的畫面也一樣。\n- 改善：終端畫面往上捲到頂時會讀出較早的內容；往上捲的期間畫面停住不跳，回到底部才恢復即時。\n- 修正：終端畫面的游標不再差一到兩列，會落在輸入列上。\n- 已知問題：「看別台畫面」是第一版，還沒在真機上完整走過（Windows Hello 確認、正在被看的提示、通知信），有問題請回報。\n- 已知問題：背景終端服務偶爾仍可能意外中斷；中斷後 ASN 會自動把夥伴接回來。",
+  "pub_date": "2026-11-07T07:00:37.021Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRTOGhCcm5xY2xpa0hoVDR0SzcwZkoybzZnRDJJQllkaHlCanYzbHBqR05RdGdpUWQ2clAyd3J1Zm1ZL0JQSW0xOXRZVzhtMlRLUG5XZURTWCt2UGc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDA5OTE0CWZpbGU6QVNOXzAuMi43X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuNwpva2RHamNRQk5KNXJ6NTNTQVJuUmFuSk5JeUg1M2ZuM2tDaStweTlrc2RNMFdYa2lKUVZhZlphV3RHYUlWUEZGYkVCRTN6dW05UkF6Nk1sRk1tRm9CUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhEVXUxNjVIWHNzclFQUlVvcTNUZE94d2gxcUV6WTNtOHNXNGlYcEVVbjREQmM3eEY2UGZOeEpTak8vdHZvbWx5VG41VnRNMzRib0dYMytUbUZjUlFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDM0ODM2CWZpbGU6QVNOXzAuMi44X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuOAprakNhcCtlQnZQTEh1STFtc29UR1hBRDRWQXBaaHRwWlJETGlrZ0pmNHkrbmI3SGViS1FQeng3UkRKK2NMb0VrVklzU0ZSZlVEcC9NMVMxaFRRb0NBQT09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.8_x64-setup.exe"
     }
   }
 }
