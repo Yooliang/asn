@@ -31,7 +31,7 @@ Deno.test("發起：只傳認得的欄位，敲對方門鈴，回應不帶門鈴
   const r = await handleTermViewAction(m.deps, me, "term_view_start", { ...start, text: "rm -rf /", keys: "x" }, USER);
   assertEquals(r.body, { id: ID, topic: "tv_x", to_pub: PUB });
   assertEquals(m.rung, ["bell-t"]);
-  assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_to_node: "hom7a1", p_window_name: "小乙", p_d_eph_pub: PUB, p_d_sig: D_SIG, p_expires_at: start.expires_at, p_scope: "view" });
+  assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_to_node: "hom7a1", p_window_name: "小乙", p_d_eph_pub: PUB, p_d_sig: D_SIG, p_expires_at: start.expires_at }, "看畫面不帶 p_scope：migration 沒上也照常");
 });
 
 Deno.test("發起：壞參數不碰資料庫", async () => {
@@ -116,15 +116,18 @@ Deno.test("契約：電腦端讀的欄位 Edge 都會回", async () => {
 Deno.test("發起：範圍沒帶是看畫面、可以是打字，其他不收；照樣轉給後台", async () => {
   const m = mk({ id: ID, topic: "tv_x", to_pub: PUB });
   await handleTermViewAction(m.deps, me, "term_view_start", start, USER);
-  assertEquals(m.calls[0].args.p_scope, "view", "沒帶＝看畫面");
+  assertEquals("p_scope" in m.calls[0].args, false, "沒帶＝看畫面，呼叫八個參數的版本");
   const i = mk({ id: ID, topic: "ti_x", to_pub: PUB });
   assertEquals((await handleTermViewAction(i.deps, me, "term_view_start", { ...start, scope: "input" }, USER)).status, 200);
   assertEquals(i.calls[0].args.p_scope, "input");
+  const v = mk({ id: ID, topic: "tv_x", to_pub: PUB });
+  await handleTermViewAction(v.deps, me, "term_view_start", { ...start, scope: "view" }, USER);
+  assertEquals("p_scope" in v.calls[0].args, false, "明講看畫面也一樣不帶");
   for (const scope of ["admin", "", 1, null]) {
     const bad = mk({ id: ID, topic: "tv_x" });
     const r = await handleTermViewAction(bad.deps, me, "term_view_start", { ...start, scope }, USER);
     if (scope === null) {
-      assertEquals(bad.calls[0].args.p_scope, "view", "null 當沒帶");
+      assertEquals("p_scope" in bad.calls[0].args, false, "null 當沒帶");
     } else {
       assertEquals(r.status, 400, JSON.stringify(scope));
       assertEquals(bad.calls.length, 0);
