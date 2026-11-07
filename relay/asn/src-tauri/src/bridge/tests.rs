@@ -512,10 +512,9 @@ async fn 名單回報失敗只記一次_不影響後續() {
     let fr = FakeRelay::start();
     let work = tempfile::tempdir().unwrap();
     let sessions = tempfile::tempdir().unwrap();
-    // 指到沒人聽的埠
-    let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}/relay", dead.local_addr().unwrap().port());
-    drop(dead);
+    // 指到一定連不上的埠：0 號埠沒有人能聽（作業系統一定拒絕連線）。
+    // 以前是「先綁一個埠再放掉」，但測試是平行跑的，放掉的埠很快會被別條測試的假後端拿去用，這裡就連得上、不會記失敗（偶發紅）
+    let url = "http://127.0.0.1:0/relay".to_string();
     let relay = Arc::new(Relay::new(url, "k".into(), "T".into(), "T-ASN".into()));
     let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(|_| true);
     let log = Arc::new(BridgeLog::new(None));
