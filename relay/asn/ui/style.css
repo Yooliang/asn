@@ -904,12 +904,18 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-view{position:relative;flex:0 1 38%;display:flex;flex-direction:column;min-height:0;overflow:hidden;border-bottom:1px solid var(--line,#c8d4e0)}
 .term-view + .conv{min-height:72px}
 /* 視窗矮時放不下兩邊：開著終端就收起訊息區（關掉就回來），輸入框和工具列都留著 */
-.term-view-back{position:absolute;top:6px;right:20px;z-index:40}
+.term-view-stage{position:relative;flex:1;min-height:0;display:flex}
+/* 回到訊息按鈕浮在終端畫面右上角內側（#901b：直捲軸已拿掉，不必再閃捲軸） */
+.term-view-back{position:absolute;top:6px;right:8px;z-index:40}
 /* 對話區裡打開終端（#901）：不管視窗高矮，終端都占滿訊息區（訊息列表收起，輸入框留著） */
 .chatpane-main > .term-view{flex:1 1 0}
 .term-reopen-note{margin:0;padding:2px 10px 4px;font-size:12px;color:var(--muted,#667)}
 .term-view-note{margin:4px 8px;font-size:12px;color:var(--muted,#667)}
 .term-view-screen{flex:1;min-height:0;overflow:auto;background:#000;padding:4px}
+/* #901b：拿掉直的捲軸欄，滾輪／觸控板照樣能捲；橫向捲軸（窗格比視窗寬時）保留，改成深色細條 */
+.term-view-screen::-webkit-scrollbar{width:0;height:10px;background:#000}
+.term-view-screen::-webkit-scrollbar-thumb{background:#555;border-radius:5px}
+.term-view-screen::-webkit-scrollbar-corner{background:#000}
 .term-view-lost{margin:6px 8px;font-size:12px}
 .term-view-paste{margin:6px 8px;font-size:12px;padding:6px 8px;border:1px solid var(--line,#c8d4e0);background:#fff8dc}
 .term-view-paste .aero-btn{margin-left:8px}

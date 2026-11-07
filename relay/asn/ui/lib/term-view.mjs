@@ -285,8 +285,10 @@ export const TermView = {
 <div class="term-view">
   <p class="term-view-note">{{ note }}</p>
   <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
-  <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
-  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
+  <div class="term-view-stage">
+    <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
+    <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
+  </div>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
   <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>
