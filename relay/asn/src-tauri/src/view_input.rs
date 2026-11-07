@@ -394,7 +394,11 @@ mod tests {
         assert_eq!(open(&k, "s1", &w).unwrap(), (3, keys("ls\r")));
         assert!(open(&k, "s2", &w).is_err(), "別的 session");
         assert!(open(&test_key(2), "s1", &w).is_err(), "別的金鑰");
-        assert!(!w.contains("ls"), "密文裡看不到字");
+        // 看解開 base64 後的原始位元組，比對明文 JSON 的一段（7 個位元組）：
+        // 原本看 base64 字串裡有沒有「ls」，隨機 nonce 讓它約 1% 剛好出現而誤判
+        let raw_w = B64.decode(&w).unwrap();
+        let plain: &[u8] = br#""d":"ls"#;
+        assert!(!raw_w.windows(plain.len()).any(|x| x == plain), "密文裡看不到字");
         // 多一個欄位就不收：只送打字
         let mut buf = br#"{"d":"x","p":false,"cmd":"rm"}"#.to_vec();
         let nonce = [0u8; NONCE_LEN];
