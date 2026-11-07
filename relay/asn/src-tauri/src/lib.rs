@@ -757,58 +757,31 @@ async fn term_read(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     launch::blocking_timeout(move || terms.read(&req.id, req.lines)).await
 }
 
-/// 配對要本人簽章（#597）
+/// 本人簽章的權杖（看別台畫面的發起與回報要用）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
+#[allow(dead_code)]
 async fn pair_token(auth: &auth::AuthState) -> Result<String, String> {
     account::signing_token(auth).await.filter(|t| !t.is_empty()).ok_or_else(|| "尚未登入".to_string())
 }
 
-/// 設定頁「配對的電腦」：同步狀態（收到對方確認就在這裡驗簽章、記下來）
+/// 設定頁「認得的電腦」：名字、指紋、第一次記住的時間（只讀本機）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn device_pair_view(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
-    let token = pair_token(&auth).await?;
-    device_id::live::sync(relay_of(&app)?.as_ref(), &token, &app.data_dir, &app.node).await
+fn device_known_list(app: State<'_, App>) -> Result<Value, String> {
+    device_id::live::view(&app.data_dir)
 }
 
-/// 在這台發起配對
+/// 本人在這台的設定頁按「忘記這台」：下次那台再連就當第一次（會再通知本人）。**只有這個本機命令能忘記**（守門測試）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn device_pair_start(app: State<'_, App>, auth: State<'_, auth::AuthState>, to_node: String) -> Result<(), String> {
-    let token = pair_token(&auth).await?;
-    device_id::live::start(relay_of(&app)?.as_ref(), &token, &app.data_dir, &to_node).await
+fn device_known_forget(app: State<'_, App>, node: String) -> Result<bool, String> {
+    device_id::live::forget(&app.data_dir, &node)
 }
 
-/// 本人在這台比對號碼後按確認或拒絕
-#[cfg(feature = "gui")]
-#[cfg(desktop)]
-#[tauri::command]
-async fn device_pair_decide(app: State<'_, App>, auth: State<'_, auth::AuthState>, id: String, confirm: bool) -> Result<(), String> {
-    let token = pair_token(&auth).await?;
-    device_id::live::decide(relay_of(&app)?.as_ref(), &token, &app.data_dir, &app.node, &id, confirm).await
-}
-
-/// 撤回自己發起的，或收掉已看過的結果
-#[cfg(feature = "gui")]
-#[cfg(desktop)]
-#[tauri::command]
-async fn device_pair_close(app: State<'_, App>, auth: State<'_, auth::AuthState>, id: String) -> Result<(), String> {
-    let token = pair_token(&auth).await?;
-    device_id::live::close(relay_of(&app)?.as_ref(), &token, &app.data_dir, &id).await
-}
-
-/// 撤銷一台：只動本機，不用連線，不用登入
-#[cfg(feature = "gui")]
-#[cfg(desktop)]
-#[tauri::command]
-fn device_peer_revoke(app: State<'_, App>, node: String) -> Result<bool, String> {
-    device_id::live::revoke(&app.data_dir, &node)
-}
-
-/// 啟動時上傳這台的設備公鑰，別台才能發起配對。失敗就隔 10 分鐘再試，成功就停
+/// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
 #[cfg(all(desktop, feature = "gui"))]
 fn start_device_key_publish(relay: std::sync::Arc<Relay>, data_dir: std::path::PathBuf) {
     tauri::async_runtime::spawn(async move {
@@ -924,24 +897,42 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            let Ok(trust) = device_id::live::read(&data_dir) else { continue };
-            if !trust.peers.iter().any(|p| p.grants.iter().any(|g| g.direction == device_id::Direction::PeerToMe && g.scope == device_id::SCOPE_VIEW)) {
+            // 放行條件：本機的「允許其他設備替這台開新視窗」開著（兩台是同一個本人，由後台擋）
+            if !bridge::read_settings(&data_dir).allow_remote_launch {
                 continue;
             }
+            let Ok(known) = device_id::live::known(&data_dir) else { continue };
             let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { continue };
             let Ok(key) = device_id::live::key_async(&data_dir).await else { continue };
             for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
                 let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else { continue };
                 let now_s = (auth::now_ms() / 1000) as i64;
                 // 同一筆只能接受一次：驗章前先查，驗過、回覆接受前先記下；記不下來就拒絕（見 view_seen）
-                let verified = view_seen::check_unseen(&data_dir, &id, now_s)
-                    .and_then(|()| view_stream::accept_request(&row, &me_node, &trust, &view_handshake::HelloNotReady, &key, now_s))
-                    .and_then(|ok| view_seen::record(&data_dir, &id, ok.0.expires_s, now_s).map(|()| ok));
+                // D 的設備公鑰先和本機記住的比（TOFU）：換了就拒絕並通知本人；第一次看到的驗章通過才記住，並通知本人（只有 T 寄）
+                let verified = match view_seen::check_unseen(&data_dir, &id, now_s) {
+                    Err(e) => Err(e),
+                    Ok(()) => match view_stream::accept_request(&row, &me_node, &known, &key, now_s) {
+                        Err(view_stream::Refused::KeyChanged { node, sign_pub }) => {
+                            device_id::live::alert(&relay, &node, "changed", &sign_pub).await;
+                            Err(device_id::KEY_CHANGED.to_string())
+                        }
+                        Err(view_stream::Refused::Bad(e)) => Err(e),
+                        Ok(a) => view_seen::record(&data_dir, &id, a.session.expires_s, now_s).map(|()| a),
+                    },
+                };
                 match verified {
                     Err(_) => {
                         let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                     }
-                    Ok((session, t_eph, t_sig, session_key)) => {
+                    Ok(a) => {
+                        if a.tofu == device_id::Tofu::New {
+                            if device_id::live::see(&data_dir, &a.session.d_node, &a.from_name, &a.from_pub, auth::now_ms()).is_err() {
+                                let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                                continue;
+                            }
+                            device_id::live::alert(&relay, &a.session.d_node, "first", &a.from_pub).await;
+                        }
+                        let view_stream::Accepted { session, t_eph, t_sig, key: session_key, .. } = a;
                         if relay.api("term_view_accept", Some(serde_json::json!({ "id": id, "t_eph_pub": t_eph, "t_sig": t_sig }))).await.is_err() {
                             continue;
                         }
@@ -2085,7 +2076,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_pair_view, device_pair_start, device_pair_decide, device_pair_close, device_peer_revoke, term_viewed_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, device_known_list, device_known_forget, term_viewed_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,

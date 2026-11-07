@@ -1,9 +1,10 @@
-//! 設備金鑰與配對（#597 工作包 E）。別台看畫面、之後的電腦互按、別台打字都用這一份。
+//! 設備金鑰與認得的電腦（#597 別台看畫面，0.2.8 改版：不再手動配對）。之後的電腦互按、別台打字也用這一份。
 //!
-//! - 每台一把 Ed25519，私鑰經 DPAPI 存在機器資料夾，只在 Rust。被看的那台可能沒人在，所以這把不要求本人。
-//!   發起觀看另外用 Windows Hello 的金鑰，不在這張。
-//! - 後台只轉交公鑰和簽章，**信任只看本機記的**（`Trust`）。公鑰變了就警告並停止，要本人在那台撤銷才能重新配對。
-//! - 權限分方向：D 可以看 T，不代表 T 可以看 D。
+//! - 每台一把 Ed25519，私鑰經 DPAPI（Windows）或系統金鑰庫（Linux）保護、存在機器資料夾，只在 Rust。
+//!   看的那台（D）和被看的那台（T）都用它簽握手；Windows Hello 只用來確認本人在場，不碰金鑰。
+//! - **認得的電腦（TOFU，像 SSH 的 known_hosts）：** 兩台第一次連線時各自記住對方的設備公鑰，之後公鑰不同就拒絕並通知本人。
+//!   後台只轉交公鑰，**信任只看本機記的**；本人可以在設定頁「忘記這台」重來。
+//! - 誰能看誰：兩台都要是同一個本人的（後台擋），T 本機要開「允許其他設備替這台開新視窗」，而且這台的金鑰有保護。
 //!
 //! 同一個 Windows 使用者的程式仍然讀得到這些檔案，這點 DPAPI 擋不住，見私有設計。
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
@@ -15,19 +16,16 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 const KEY_FILE: &str = "device_key.bin";
-const TRUST_FILE: &str = "device_trust.json";
-/// 指紋長度（位元組）
-const FINGERPRINT_BYTES: usize = 10;
+const KNOWN_FILE: &str = "device_known.json";
 pub const SCOPE_VIEW: &str = "view";
-/// 這台還不能讓別台看畫面（Linux：設備私鑰還沒有系統金鑰庫保護，0.2.9 接上 Secret Service 前不開）
+/// 這台目前不能讓別台看畫面（設定沒開，或金鑰只靠檔案權限保護）
 pub const NOT_VIEWABLE_HERE: &str = "這台目前不能讓別台看畫面";
+pub const KEY_CHANGED: &str = "這台電腦的設備金鑰變了，已拒絕連線。如果是你重裝了那台，請到設定頁「認得的電腦」按忘記再連一次";
 
-/// 這台能不能被別台看：Windows（設備私鑰經 DPAPI 保護），或設備私鑰已經由系統金鑰庫保護（Linux）。只靠檔案權限的一律不行
+/// 這台的金鑰有沒有保護到可以讓別台看：Windows（DPAPI），或設備私鑰已經由系統金鑰庫保護（Linux）。只靠檔案權限的一律不行
 pub fn can_be_viewed_here(dir: &Path) -> bool {
     cfg!(windows) || crate::keystore::device_key_sealed(dir)
 }
-
-pub const KEY_CHANGED: &str = "這台電腦的金鑰變了，可能是重裝過。請先在這裡撤銷，再重新配對";
 
 pub struct DeviceKey {
     pair: Ed25519KeyPair,
@@ -121,158 +119,94 @@ pub fn verify(pub_b64: &str, msg: &[u8], sig_b64: &str) -> bool {
     UnparsedPublicKey::new(&ED25519, public).verify(msg, &sig).is_ok()
 }
 
-/// 兩邊比對用的指紋：兩台的節點和公鑰，排序後算，所以兩邊算出來相同。10 位元組，每 2 位元組一組
-pub fn fingerprint(node_a: &str, pub_a: &str, node_b: &str, pub_b: &str) -> String {
-    let ((n1, p1), (n2, p2)) = if node_a <= node_b { ((node_a, pub_a), (node_b, pub_b)) } else { ((node_b, pub_b), (node_a, pub_a)) };
-    let h = Sha256::digest(format!("asn-pair-fp-v1\n{n1}\n{p1}\n{n2}\n{p2}").as_bytes());
-    h[..FINGERPRINT_BYTES].chunks(2).map(|c| format!("{:02x}{:02x}", c[0], c[1])).collect::<Vec<_>>().join("-")
+/// 指紋：公鑰的 SHA-256 前 8 位元組，16 個小寫十六進位字元（設定頁顯示、通知信裡帶，給本人比對）
+pub fn fingerprint(sign_pub: &str) -> String {
+    Sha256::digest(format!("asn-device-fp-v1\n{sign_pub}").as_bytes())[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// T 確認配對時簽的內容：綁請求、雙方節點、雙方公鑰
-pub fn confirm_message(id: &str, from_node: &str, to_node: &str, from_pub: &str, to_pub: &str) -> Vec<u8> {
-    format!("asn-pair-confirm-v1\n{id}\n{from_node}\n{to_node}\n{from_pub}\n{to_pub}").into_bytes()
-}
-
-/// 權限的方向
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Direction {
-    /// 對方可以對我做（例如對方看我）
-    PeerToMe,
-    /// 我可以對對方做（例如我看對方）
-    MeToPeer,
-}
-
+/// 認得的一台電腦
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Grant {
-    pub direction: Direction,
-    pub scope: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Peer {
+pub struct KnownPeer {
     pub node: String,
     pub name: String,
     pub sign_pub: String,
-    /// 對方發起觀看用的 Hello 公鑰。Hello 接上之前都是空的，所以 T 不會接受任何觀看
-    #[serde(default)]
-    pub view_pub: Option<String>,
-    #[serde(default)]
-    pub grants: Vec<Grant>,
+    /// 第一次記住的時間（毫秒）
+    pub first_seen_ms: u64,
 }
 
-/// 我發起、還在等對方確認的配對。對方的公鑰記在這裡，收到確認時要對得上
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outgoing {
-    pub id: String,
-    pub to_node: String,
-    pub to_name: String,
-    pub to_pub: String,
-}
-
+/// 收到對方公鑰時的比對結果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    Allowed,
-    NotGranted,
-    Unknown,
-    KeyChanged,
+pub enum Tofu {
+    /// 第一次看到這台
+    New,
+    /// 和記住的一樣
+    Same,
+    /// 和記住的不一樣：拒絕
+    Changed,
 }
 
-/// 本機記的信任。純資料，不碰網路
+/// 本機記住的電腦（TOFU）。純資料，不碰網路
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Trust {
+pub struct KnownPeers {
     #[serde(default)]
-    pub peers: Vec<Peer>,
-    #[serde(default)]
-    pub outgoing: Vec<Outgoing>,
+    pub peers: Vec<KnownPeer>,
 }
 
-impl Trust {
-    /// 讀不到檔案就是還沒配對過；**檔案壞了回錯誤，不當成空的：** 不然存檔時會把紀錄洗掉
+impl KnownPeers {
+    /// 讀不到檔案就是一台都不認得；**檔案壞了回錯誤，不當成空的：** 當成空的就等於全部重新信任
     pub fn load(dir: &Path) -> Result<Self, String> {
-        match std::fs::read_to_string(dir.join(TRUST_FILE)) {
-            Ok(t) => serde_json::from_str(&t).map_err(|_| "配對紀錄壞了".to_string()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Trust::default()),
-            Err(e) => Err(format!("讀配對紀錄失敗：{e}")),
+        match std::fs::read_to_string(dir.join(KNOWN_FILE)) {
+            Ok(t) => serde_json::from_str(&t).map_err(|_| "認得的電腦紀錄壞了".to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KnownPeers::default()),
+            Err(e) => Err(format!("讀認得的電腦失敗：{e}")),
         }
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
-        let path: PathBuf = dir.join(TRUST_FILE);
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        crate::write_atomic(&path, &text).map_err(|e| format!("存配對紀錄失敗：{e}"))
+        write_private(&dir.join(KNOWN_FILE), text.as_bytes()).map_err(|e| format!("存認得的電腦失敗：{e}"))
     }
 
-    pub fn peer(&self, node: &str) -> Option<&Peer> {
+    pub fn peer(&self, node: &str) -> Option<&KnownPeer> {
         self.peers.iter().find(|p| p.node == node)
     }
 
-    pub fn key_changed(&self, node: &str, sign_pub: &str) -> bool {
-        self.peer(node).is_some_and(|p| p.sign_pub != sign_pub)
-    }
-
-    /// 這台、這把公鑰、這個方向和範圍，可不可以
-    pub fn check(&self, node: &str, sign_pub: &str, direction: Direction, scope: &str) -> Verdict {
-        let Some(p) = self.peer(node) else { return Verdict::Unknown };
-        if p.sign_pub != sign_pub {
-            return Verdict::KeyChanged;
-        }
-        if p.grants.iter().any(|g| g.direction == direction && g.scope == scope) {
-            Verdict::Allowed
-        } else {
-            Verdict::NotGranted
+    pub fn check(&self, node: &str, sign_pub: &str) -> Tofu {
+        match self.peer(node) {
+            None => Tofu::New,
+            Some(p) if p.sign_pub == sign_pub => Tofu::Same,
+            Some(_) => Tofu::Changed,
         }
     }
 
-    /// 記下一個權限。已經認得這台但公鑰不同就拒絕：要本人先撤銷
-    pub fn grant(&mut self, node: &str, name: &str, sign_pub: &str, direction: Direction, scope: &str) -> Result<(), String> {
-        if self.key_changed(node, sign_pub) {
-            return Err(KEY_CHANGED.to_string());
-        }
-        if self.peer(node).is_none() {
-            self.peers.push(Peer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), view_pub: None, grants: Vec::new() });
-        }
-        let g = Grant { direction, scope: scope.to_string() };
-        if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
-            p.name = name.to_string();
-            if !p.grants.contains(&g) {
-                p.grants.push(g);
+    /// 記住一台。已經記過同一把就只更新名字；記過不同的一把是錯誤（要本人先忘記）
+    pub fn remember(&mut self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<(), String> {
+        match self.check(node, sign_pub) {
+            Tofu::Changed => Err(KEY_CHANGED.to_string()),
+            Tofu::Same => {
+                if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
+                    p.name = name.to_string();
+                }
+                Ok(())
+            }
+            Tofu::New => {
+                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms });
+                Ok(())
             }
         }
-        Ok(())
     }
 
-    /// 記下對方的 Hello 公鑰。配對接上 Hello 時才會用到
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn set_view_pub(&mut self, node: &str, view_pub: &str) {
-        if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
-            p.view_pub = Some(view_pub.to_string());
-        }
-    }
-
-    /// 撤銷：整台忘掉，兩個方向都沒了。回有沒有這台
-    pub fn revoke(&mut self, node: &str) -> bool {
+    /// 忘記一台（本機設定頁才能做）。回有沒有這台
+    pub fn forget(&mut self, node: &str) -> bool {
         let before = self.peers.len();
         self.peers.retain(|p| p.node != node);
         before != self.peers.len()
     }
 }
 
-/// 我發起的配對收到確認：公鑰要和發起時記的相同，簽章也要對。對得上才算配對成功
-pub fn outgoing_confirmed(o: &Outgoing, me_node: &str, me_pub: &str, row_to_pub: &str, sig: &str) -> bool {
-    row_to_pub == o.to_pub && verify(&o.to_pub, &confirm_message(&o.id, me_node, &o.to_node, me_pub, &o.to_pub), sig)
-}
-
-/// 後台回的配對清單：（等我確認的, 我發起的）。**缺欄位或不是陣列就是錯誤：** 不能當成空的，
-/// 否則本機等待中的配對會被當成已結束收掉
-pub fn pair_lists(v: &serde_json::Value) -> Result<(&Vec<serde_json::Value>, &Vec<serde_json::Value>), String> {
-    let list = |k: &str| v.get(k).and_then(serde_json::Value::as_array).ok_or_else(|| "後台回的資料不對".to_string());
-    Ok((list("incoming")?, list("outgoing")?))
-}
-
 #[cfg(feature = "gui")]
 pub mod live {
-    //! 和後台的往來。讀寫本機檔案都在這把鎖裡，不跨 await
+    //! 讀寫本機檔案都在這把鎖裡，不跨 await
     use super::*;
     use crate::relay::Relay;
     use serde_json::{json, Value};
@@ -291,17 +225,36 @@ pub mod live {
         load_or_create(dir, protector(dir).as_ref())
     }
 
-    fn update<T>(dir: &Path, f: impl FnOnce(&mut Trust) -> Result<T, String>) -> Result<T, String> {
+    pub fn known(dir: &Path) -> Result<KnownPeers, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut t = Trust::load(dir)?;
-        let out = f(&mut t)?;
-        t.save(dir)?;
-        Ok(out)
+        KnownPeers::load(dir)
     }
 
-    pub fn read(dir: &Path) -> Result<Trust, String> {
+    /// 收到對方的公鑰：比對；第一次就記住。回比對結果（Changed 什麼都不寫）
+    pub fn see(dir: &Path, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<Tofu, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        Trust::load(dir)
+        let mut k = KnownPeers::load(dir)?;
+        let t = k.check(node, sign_pub);
+        if t != Tofu::Changed {
+            k.remember(node, name, sign_pub, now_ms)?;
+            k.save(dir)?;
+        }
+        Ok(t)
+    }
+
+    /// 忘記一台：**只有本機設定頁的命令能叫**（守門測試）
+    pub fn forget(dir: &Path, node: &str) -> Result<bool, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let gone = k.forget(node);
+        k.save(dir)?;
+        Ok(gone)
+    }
+
+    /// 設定頁要的列表：名字、指紋、第一次記住的時間
+    pub fn view(dir: &Path) -> Result<Value, String> {
+        let k = known(dir)?;
+        Ok(json!({ "peers": k.peers.iter().map(|p| json!({ "node": p.node, "name": p.name, "fingerprint": fingerprint(&p.sign_pub), "first_seen_ms": p.first_seen_ms })).collect::<Vec<_>>() }))
     }
 
     /// 上傳這台的公鑰（沒有金鑰就先建）
@@ -310,149 +263,12 @@ pub mod live {
         relay.api("device_key_publish", Some(json!({ "sign_pub": k.public_b64() }))).await.map(|_| ())
     }
 
-    fn peers_view(t: &Trust, me_node: &str, me_pub: &str) -> Vec<Value> {
-        let has = |p: &Peer, d: Direction| p.grants.iter().any(|g| g.direction == d && g.scope == SCOPE_VIEW);
-        t.peers
-            .iter()
-            .map(|p| {
-                json!({
-                    "node": p.node, "name": p.name, "fingerprint": fingerprint(me_node, me_pub, &p.node, &p.sign_pub),
-                    "peer_can_view_me": has(p, Direction::PeerToMe), "i_can_view_peer": has(p, Direction::MeToPeer),
-                })
-            })
-            .collect()
-    }
-
-    /// 同步配對狀態，回給畫面。收到對方確認就在這裡驗簽章、記下來
-    pub async fn sync(relay: &Relay, token: &str, dir: &Path, me_node: &str) -> Result<Value, String> {
-        let k = key_async(dir).await?;
-        let me_pub = k.public_b64();
-        let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
-        let (rows_in, rows_out) = pair_lists(&v)?;
-        let mut outgoing = Vec::new();
-        let mut done: Vec<String> = Vec::new();
-        for row in rows_out {
-            let (Some(id), Some(status)) = (row.get("id").and_then(Value::as_str), row.get("status").and_then(Value::as_str)) else { continue };
-            let Some(o) = read(dir)?.outgoing.iter().find(|o| o.id == id).cloned() else {
-                done.push(id.to_string()); // 這台沒有記錄（重裝前發的）：不算數
-                continue;
-            };
-            let fp = fingerprint(me_node, &me_pub, &o.to_node, &o.to_pub);
-            let mut shown = status.to_string();
-            if status == "confirmed" {
-                let sig = row.get("confirm_sig").and_then(Value::as_str).unwrap_or("");
-                let to_pub = row.get("to_pub").and_then(Value::as_str).unwrap_or("");
-                shown = if !outgoing_confirmed(&o, me_node, &me_pub, to_pub, sig) {
-                    "bad_signature".to_string()
-                } else {
-                    match update(dir, |t| t.grant(&o.to_node, &o.to_name, &o.to_pub, Direction::MeToPeer, SCOPE_VIEW)) {
-                        Ok(()) => "paired".to_string(),
-                        Err(_) => "key_changed".to_string(),
-                    }
-                };
-                update(dir, |t| {
-                    t.outgoing.retain(|x| x.id != o.id);
-                    Ok(())
-                })?;
-                done.push(id.to_string());
-            }
-            outgoing.push(json!({ "id": id, "to_node": o.to_node, "to_name": o.to_name, "fingerprint": fp, "status": shown }));
+    /// 通知本人：第一次記住（只有 T 寄）或公鑰換了（兩邊都寄）。送不出去只記 log
+    pub async fn alert(relay: &Relay, peer: &str, kind: &str, sign_pub: &str) {
+        let body = json!({ "peer": peer, "kind": kind, "fp": fingerprint(sign_pub) });
+        if let Err(e) = relay.api("device_key_alert", Some(body)).await {
+            elog!("[ASN] 設備金鑰通知送不出去：{e}");
         }
-        for id in done {
-            let _ = relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await;
-        }
-        // 後台已經沒有的（對方 7 天內沒確認、這台太久沒開）：不留著假裝還在等，告訴本人一次
-        let on_server: Vec<&str> = rows_out.iter().filter_map(|r| r.get("id").and_then(Value::as_str)).collect();
-        let gone = update(dir, |t| {
-            let gone: Vec<Outgoing> = t.outgoing.iter().filter(|o| !on_server.contains(&o.id.as_str())).cloned().collect();
-            t.outgoing.retain(|o| on_server.contains(&o.id.as_str()));
-            Ok(gone)
-        })?;
-        for o in gone {
-            let fp = fingerprint(me_node, &me_pub, &o.to_node, &o.to_pub);
-            outgoing.push(json!({ "id": o.id, "to_node": o.to_node, "to_name": o.to_name, "fingerprint": fp, "status": "expired" }));
-        }
-        let trust = read(dir)?;
-        let incoming: Vec<Value> = rows_in
-            .iter()
-            .filter_map(|row| {
-                let (id, from_node, from_pub, to_pub) = (row.get("id")?.as_str()?, row.get("from_node")?.as_str()?, row.get("from_pub")?.as_str()?, row.get("to_pub")?.as_str()?);
-                Some(json!({
-                    "id": id, "from_node": from_node, "from_name": row.get("from_name").and_then(Value::as_str).unwrap_or(""),
-                    "fingerprint": fingerprint(from_node, from_pub, me_node, &me_pub),
-                    "key_changed": trust.key_changed(from_node, from_pub),
-                    "stale": to_pub != me_pub,
-                    "expires_at": row.get("expires_at"),
-                }))
-            })
-            .collect();
-        Ok(json!({ "peers": peers_view(&trust, me_node, &me_pub), "incoming": incoming, "outgoing": outgoing }))
-    }
-
-    /// 在 D 發起配對。對方公鑰記下來，之後要對得上
-    pub async fn start(relay: &Relay, token: &str, dir: &Path, to_node: &str) -> Result<(), String> {
-        let k = key_async(dir).await?;
-        publish(relay, dir).await?;
-        let v = relay.api_signed("device_pair_start", Some(json!({ "to_node": to_node, "from_pub": k.public_b64() })), Some(token)).await?;
-        let (Some(id), Some(to_pub)) = (v.get("id").and_then(Value::as_str), v.get("to_pub").and_then(Value::as_str)) else {
-            return Err("後台回的資料不對".into());
-        };
-        let to_name = v.get("to_name").and_then(Value::as_str).unwrap_or("").to_string();
-        let row = Outgoing { id: id.to_string(), to_node: to_node.to_string(), to_name, to_pub: to_pub.to_string() };
-        update(dir, |t| {
-            if t.key_changed(to_node, to_pub) {
-                return Err(KEY_CHANGED.to_string());
-            }
-            t.outgoing.retain(|o| o.to_node != to_node);
-            t.outgoing.push(row);
-            Ok(())
-        })
-    }
-
-    /// 在 T 決定。確認才記下「對方可以看我」；後台成功了才記，後台失敗就什麼都不生效
-    pub async fn decide(relay: &Relay, token: &str, dir: &Path, me_node: &str, id: &str, confirm: bool) -> Result<(), String> {
-        if !confirm {
-            relay.api_signed("device_pair_decide", Some(json!({ "id": id, "decision": "reject" })), Some(token)).await?;
-            return Ok(());
-        }
-        // 確認＝記下「對方可以看我」：這台還不能被看就不確認（後台和本機都不動）
-        if !can_be_viewed_here(dir) {
-            return Err(NOT_VIEWABLE_HERE.to_string());
-        }
-        let k = key_async(dir).await?;
-        let me_pub = k.public_b64();
-        let v = relay.api_signed("device_pair_list", None, Some(token)).await?;
-        let row = v.get("incoming").and_then(Value::as_array).and_then(|a| a.iter().find(|r| r.get("id").and_then(Value::as_str) == Some(id)).cloned()).ok_or("這筆配對已經結束了")?;
-        let from_node = row.get("from_node").and_then(Value::as_str).ok_or("後台回的資料不對")?;
-        let from_pub = row.get("from_pub").and_then(Value::as_str).ok_or("後台回的資料不對")?;
-        let to_pub = row.get("to_pub").and_then(Value::as_str).ok_or("後台回的資料不對")?;
-        let from_name = row.get("from_name").and_then(Value::as_str).unwrap_or("");
-        if to_pub != me_pub {
-            return Err("這筆配對是用這台舊的金鑰發起的，請對方重新發起".into());
-        }
-        if read(dir)?.key_changed(from_node, from_pub) {
-            return Err(KEY_CHANGED.to_string());
-        }
-        let sig = k.sign_b64(&confirm_message(id, from_node, me_node, from_pub, &me_pub));
-        relay.api_signed("device_pair_decide", Some(json!({ "id": id, "decision": "confirm", "sig": sig })), Some(token)).await?;
-        update(dir, |t| t.grant(from_node, from_name, from_pub, Direction::PeerToMe, SCOPE_VIEW))
-    }
-
-    /// 在 D 撤回或收掉結果
-    pub async fn close(relay: &Relay, token: &str, dir: &Path, id: &str) -> Result<(), String> {
-        update(dir, |t| {
-            t.outgoing.retain(|o| o.id != id);
-            Ok(())
-        })?;
-        match relay.api_signed("device_pair_close", Some(json!({ "id": id })), Some(token)).await {
-            Err(e) if !e.contains("not_found") => Err(e),
-            _ => Ok(()), // 後台已經沒有這筆，就是收掉了
-        }
-    }
-
-    /// 撤銷一台：只動本機。信任只看本機記的，所以這裡撤了就生效
-    pub fn revoke(dir: &Path, node: &str) -> Result<bool, String> {
-        update(dir, |t| Ok(t.revoke(node)))
     }
 }
 
@@ -478,6 +294,63 @@ mod tests {
         }
         fn unprotect(&self, _: &[u8]) -> Result<Vec<u8>, String> {
             Err("不能用".into())
+        }
+    }
+
+    #[test]
+    fn 認得的電腦_第一次記住_一樣的照常_不一樣就拒絕_忘記才重來() {
+        let mut k = KnownPeers::default();
+        assert_eq!(k.check("d", "pk1"), Tofu::New);
+        k.remember("d", "工作機", "pk1", 1).unwrap();
+        assert_eq!(k.check("d", "pk1"), Tofu::Same);
+        assert_eq!(k.check("d", "pk2"), Tofu::Changed);
+        assert_eq!(k.remember("d", "工作機", "pk2", 2).unwrap_err(), KEY_CHANGED, "換了就拒絕，不蓋掉");
+        assert_eq!(k.peer("d").unwrap().sign_pub, "pk1");
+        k.remember("d", "改名了", "pk1", 3).unwrap();
+        assert_eq!((k.peer("d").unwrap().name.as_str(), k.peer("d").unwrap().first_seen_ms), ("改名了", 1), "同一把只更新名字");
+        assert!(k.forget("d"));
+        assert!(!k.forget("d"));
+        assert_eq!(k.check("d", "pk2"), Tofu::New, "忘記之後才能重來");
+    }
+
+    #[test]
+    fn 認得的電腦_存讀一致_沒有檔案是空的_壞了回錯誤不洗掉() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(KnownPeers::load(d.path()).unwrap(), KnownPeers::default());
+        let mut k = KnownPeers::default();
+        k.remember("d", "工作機", "pk", 5).unwrap();
+        k.save(d.path()).unwrap();
+        assert_eq!(KnownPeers::load(d.path()).unwrap(), k);
+        std::fs::write(d.path().join(KNOWN_FILE), "{壞").unwrap();
+        assert!(KnownPeers::load(d.path()).is_err());
+    }
+
+    #[test]
+    fn 指紋_十六個小寫十六進位_公鑰不同就不同() {
+        let f = fingerprint("pk1");
+        assert_eq!(f.len(), 16);
+        assert!(f.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(f, fingerprint("pk2"));
+    }
+
+    #[test]
+    fn 守門_忘記只有本機設定頁能叫_記住只有收到請求時() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let lib = std::fs::read_to_string(root.join("lib.rs")).unwrap();
+        let lib = lib.split("\nmod tests {").next().unwrap();
+        let fns = |pat: &str| -> Vec<String> {
+            lib.match_indices(pat)
+                .map(|(i, _)| {
+                    let before = &lib[..i];
+                    let f = before.rfind("\nasync fn ").max(before.rfind("\nfn ")).unwrap();
+                    before[f..].trim_start_matches('\n').trim_start_matches("async ").trim_start_matches("fn ").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
+                })
+                .collect()
+        };
+        assert!(fns("device_id::live::forget(").iter().all(|f| f == "device_known_forget"), "忘記只能從設定頁的命令");
+        for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "android.rs", "headless.rs"] {
+            let s = std::fs::read_to_string(root.join(f)).unwrap();
+            assert!(!s.contains("live::forget") && !s.contains("live::see"), "{f} 不能改認得的電腦");
         }
     }
 
@@ -510,22 +383,6 @@ mod tests {
     }
 
     #[test]
-    fn 守門_還不能被看的平台_確認配對前就拒絕_被看的背景也不啟動() {
-        let d = tempfile::tempdir().unwrap();
-        assert_eq!(can_be_viewed_here(d.path()), cfg!(windows), "沒有金鑰庫保護的設備金鑰：只有 Windows");
-        let src = include_str!("device_id.rs");
-        let decide = src.split("pub async fn decide(").nth(1).unwrap();
-        let guard = decide.find("if !can_be_viewed_here(dir)").expect("確認前要先查");
-        assert!(guard < decide.find("device_pair_decide\", Some(json!({ \"id\": id, \"decision\": \"confirm\"").unwrap(), "後台收到確認之前就擋");
-        assert!(guard < decide.find(".grant(").unwrap(), "本機記下權限之前就擋");
-        let lib = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-        let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller");
-        // 核心模組不能寫出 tauri 的路徑（headless 守門），只比對後半
-        let first = poller.split("async_runtime::spawn").next().unwrap();
-        assert!(first.contains("if !device_id::can_be_viewed_here(&data_dir)"), "被看的背景在還不能被看的平台不啟動");
-    }
-
-    #[test]
     fn 金鑰_解不開時回錯誤_不蓋掉() {
         let d = tempfile::tempdir().unwrap();
         load_or_create(d.path(), &Flip).unwrap();
@@ -548,85 +405,6 @@ mod tests {
         assert!(!verify(&k2.public_b64(), b"abc", &s));
         assert!(!verify("壞的", b"abc", &s));
         assert!(!verify(&k1.public_b64(), b"abc", "壞的"));
-    }
-
-    #[test]
-    fn 指紋_兩邊算出來相同_十位元組_分組_公鑰或節點不同就不同() {
-        let f = fingerprint("aaa", "p1", "bbb", "p2");
-        assert_eq!(f, fingerprint("bbb", "p2", "aaa", "p1"));
-        assert_eq!(f.len(), 24, "{f}");
-        assert_eq!(f.split('-').count(), 5);
-        assert_ne!(f, fingerprint("aaa", "p9", "bbb", "p2"));
-        assert_ne!(f, fingerprint("aaa", "p2", "bbb", "p1"), "公鑰對調");
-        assert_ne!(f, fingerprint("aaa", "p1", "ccc", "p2"));
-    }
-
-    #[test]
-    fn 權限分方向_我可以看對方_不代表對方可以看我() {
-        let mut t = Trust::default();
-        t.grant("t", "家用機", "pk", Direction::MeToPeer, SCOPE_VIEW).unwrap();
-        assert_eq!(t.check("t", "pk", Direction::MeToPeer, SCOPE_VIEW), Verdict::Allowed);
-        assert_eq!(t.check("t", "pk", Direction::PeerToMe, SCOPE_VIEW), Verdict::NotGranted);
-        assert_eq!(t.check("t", "pk", Direction::MeToPeer, "input"), Verdict::NotGranted, "範圍也分開");
-        assert_eq!(t.check("別台", "pk", Direction::MeToPeer, SCOPE_VIEW), Verdict::Unknown);
-    }
-
-    #[test]
-    fn 公鑰變了_警告並停止_要撤銷才能重新配對() {
-        let mut t = Trust::default();
-        t.grant("t", "家用機", "pk", Direction::PeerToMe, SCOPE_VIEW).unwrap();
-        assert_eq!(t.check("t", "新", Direction::PeerToMe, SCOPE_VIEW), Verdict::KeyChanged);
-        assert_eq!(t.grant("t", "家用機", "新", Direction::PeerToMe, SCOPE_VIEW).unwrap_err(), KEY_CHANGED);
-        assert_eq!(t.peer("t").unwrap().sign_pub, "pk", "沒有被蓋掉");
-        assert!(t.revoke("t"));
-        assert!(!t.revoke("t"));
-        t.grant("t", "家用機", "新", Direction::PeerToMe, SCOPE_VIEW).unwrap();
-        assert_eq!(t.check("t", "新", Direction::PeerToMe, SCOPE_VIEW), Verdict::Allowed);
-    }
-
-    #[test]
-    fn 同一個權限記兩次只留一筆() {
-        let mut t = Trust::default();
-        t.grant("t", "甲", "pk", Direction::PeerToMe, SCOPE_VIEW).unwrap();
-        t.grant("t", "乙", "pk", Direction::PeerToMe, SCOPE_VIEW).unwrap();
-        assert_eq!(t.peer("t").unwrap().grants.len(), 1);
-        assert_eq!(t.peer("t").unwrap().name, "乙");
-    }
-
-    #[test]
-    fn 確認_公鑰和發起時相同_簽章對_才算() {
-        let dt = tempfile::tempdir().unwrap();
-        let kt = load_or_create(dt.path(), &Flip).unwrap();
-        let o = Outgoing { id: "r1".into(), to_node: "t".into(), to_name: "家用機".into(), to_pub: kt.public_b64() };
-        let good = kt.sign_b64(&confirm_message("r1", "d", "t", "dpub", &o.to_pub));
-        assert!(outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &good));
-        assert!(!outgoing_confirmed(&o, "d", "dpub", "別的公鑰", &good), "後台換了公鑰");
-        assert!(!outgoing_confirmed(&o, "d", "別的", &o.to_pub, &good), "簽的是別把公鑰");
-        assert!(!outgoing_confirmed(&o, "x", "dpub", &o.to_pub, &good), "簽的是別台");
-        assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, ""), "沒有簽章");
-        let other = kt.sign_b64(&confirm_message("r2", "d", "t", "dpub", &o.to_pub));
-        assert!(!outgoing_confirmed(&o, "d", "dpub", &o.to_pub, &other), "別筆的簽章");
-    }
-
-    #[test]
-    fn 後台清單_缺欄位或型別不對就是錯誤_不當成空的() {
-        use serde_json::json;
-        assert!(pair_lists(&json!({ "incoming": [], "outgoing": [] })).is_ok());
-        for bad in [json!({}), json!({ "incoming": [] }), json!({ "outgoing": [] }), json!({ "incoming": [], "outgoing": null }), json!({ "incoming": {}, "outgoing": [] }), json!(null)] {
-            assert!(pair_lists(&bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn 信任檔_存讀一致_沒有檔案是空的_壞了回錯誤不洗掉() {
-        let d = tempfile::tempdir().unwrap();
-        assert_eq!(Trust::load(d.path()).unwrap(), Trust::default());
-        let mut t = Trust::default();
-        t.grant("t", "家用機", "pk", Direction::MeToPeer, SCOPE_VIEW).unwrap();
-        t.save(d.path()).unwrap();
-        assert_eq!(Trust::load(d.path()).unwrap(), t);
-        std::fs::write(d.path().join(TRUST_FILE), "{壞的").unwrap();
-        assert!(Trust::load(d.path()).is_err());
     }
 
     #[test]

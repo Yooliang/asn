@@ -284,18 +284,47 @@ pub fn ctl_from_active(active: &[serde_json::Value], id: &str) -> Ctl {
     }
 }
 
-/// T 收到一筆請求：全部驗過才接受。回（這次的資料, T 的一次性公鑰, T 的簽章, 金鑰）。缺欄位或驗不過回錯誤
-pub fn accept_request(row: &serde_json::Value, me_node: &str, trust: &crate::device_id::Trust, verifier: &dyn crate::view_handshake::ViewVerifier, key: &crate::device_id::DeviceKey, now_s: i64) -> Result<(Session, String, String, SessionKey), String> {
-    let get = |k: &str| row.get(k).and_then(serde_json::Value::as_str).ok_or("後台回的資料不對");
+/// T 接受的一筆請求
+pub struct Accepted {
+    pub session: Session,
+    pub t_eph: String,
+    pub t_sig: String,
+    pub key: SessionKey,
+    /// D 的名字和設備公鑰（第一次看到就要記住）
+    pub from_name: String,
+    pub from_pub: String,
+    /// 和本機記住的比：New＝第一次（呼叫端記住並通知本人）、Same＝照常
+    pub tofu: crate::device_id::Tofu,
+}
+
+/// T 拒絕一筆請求的原因
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// D 的設備公鑰和本機記住的不同：呼叫端通知本人
+    KeyChanged { node: String, sign_pub: String },
+    Bad(String),
+}
+
+/// T 收到一筆請求：D 的公鑰先和本機記住的比（TOFU），對不上就拒絕；再用那把公鑰驗章，全部驗過才接受。
+/// **這裡不寫檔：** 第一次看到的公鑰由呼叫端在驗章通過之後才記住
+pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64) -> Result<Accepted, Refused> {
+    let bad = || Refused::Bad("後台回的資料不對".into());
+    let get = |k: &str| row.get(k).and_then(serde_json::Value::as_str).ok_or_else(bad);
     let s = Session {
         id: get("id")?.to_string(),
         d_node: get("from_node")?.to_string(),
         t_node: me_node.to_string(),
         window: get("window_name")?.to_string(),
-        expires_s: row.get("expires_s").and_then(serde_json::Value::as_i64).ok_or("後台回的資料不對")?,
+        expires_s: row.get("expires_s").and_then(serde_json::Value::as_i64).ok_or_else(bad)?,
     };
-    let (t_eph, t_sig, session_key) = crate::view_handshake::t_accept(trust, verifier, key, &s, get("d_eph_pub")?, get("d_sig")?, now_s)?;
-    Ok((s, t_eph, t_sig, session_key))
+    let from_pub = get("from_pub")?.to_string();
+    let tofu = known.check(&s.d_node, &from_pub);
+    if tofu == crate::device_id::Tofu::Changed {
+        return Err(Refused::KeyChanged { node: s.d_node.clone(), sign_pub: from_pub });
+    }
+    let (t_eph, t_sig, session_key) = crate::view_handshake::t_accept(&from_pub, key, &s, get("d_eph_pub")?, get("d_sig")?, now_s).map_err(Refused::Bad)?;
+    let from_name = row.get("from_name").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+    Ok(Accepted { session: s, t_eph, t_sig, key: session_key, from_name, from_pub, tofu })
 }
 
 /// 傳輸還沒接上（要動 bell.rs，排在 0.2.4 之後）：送不出去，T 超過時限就會自己停
@@ -600,18 +629,29 @@ mod tests {
     }
 
     #[test]
-    fn 請求_hello_沒接上就不接受_缺欄位回錯誤() {
-        use crate::view_handshake::HelloNotReady;
+    fn 請求_第一次看到要記住_一樣的照常_換了就拒絕_缺欄位回錯誤() {
+        use crate::device_id::{KnownPeers, Tofu};
         use serde_json::json;
-        let d = tempfile::tempdir().unwrap();
-        let key = crate::device_id::load_or_create(d.path(), &crate::auth::PlainFile).unwrap();
-        let mut trust = crate::device_id::Trust::default();
-        trust.grant("d", "工作機", "pk", crate::device_id::Direction::PeerToMe, crate::device_id::SCOPE_VIEW).unwrap();
-        trust.set_view_pub("d", "hello");
+        let dir = |_: u8| tempfile::tempdir().unwrap();
+        let (dd, td) = (dir(0), dir(1));
+        let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
+        let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
         let now = 1_800_000_000i64;
-        let row = json!({ "id": "s1", "from_node": "d", "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": "a".repeat(43), "d_sig": "b".repeat(342) });
-        assert!(accept_request(&row, "t", &trust, &HelloNotReady, &key, now).is_err(), "正式版現在一律不接受");
-        assert!(accept_request(&json!({ "id": "s1" }), "t", &trust, &HelloNotReady, &key, now).is_err());
+        let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), expires_s: now + 60 };
+        let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
+        let row = json!({ "id": "s1", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
+        let mut known = KnownPeers::default();
+        let a = accept_request(&row, "t", &known, &t, now).unwrap();
+        assert_eq!((a.tofu, a.from_name.as_str()), (Tofu::New, "工作機"), "第一次：呼叫端要記住");
+        known.remember("d", "工作機", &d.public_b64(), 1).unwrap();
+        assert_eq!(accept_request(&row, "t", &known, &t, now).unwrap().tofu, Tofu::Same);
+        let mut other = KnownPeers::default();
+        other.remember("d", "工作機", "別的公鑰", 1).unwrap();
+        assert!(matches!(accept_request(&row, "t", &other, &t, now), Err(Refused::KeyChanged { .. })), "公鑰換了：拒絕");
+        let mut forged = row.clone();
+        forged["from_pub"] = json!(t.public_b64());
+        assert!(matches!(accept_request(&forged, "t", &KnownPeers::default(), &t, now), Err(Refused::Bad(_))), "公鑰對不上簽章：拒絕");
+        assert!(matches!(accept_request(&json!({ "id": "s1" }), "t", &known, &t, now), Err(Refused::Bad(_))));
     }
 
     #[test]
