@@ -48,9 +48,12 @@ test('多行貼上要先問；一行不用', () => {
   assert.match(INPUT_TEXT.pasteAsk(3), /3 行/)
 })
 
-test('送不出去要說，不默默丟掉', () => {
-  assert.equal(sendError(new Error('打太快了，請稍等一下再打')), INPUT_TEXT.sendFailed + '打太快了，請稍等一下再打')
-  assert.equal(sendError(''), INPUT_TEXT.sendFailed + '請稍後再打')
+test('送不出去要說，不默默丟掉：整段沒送就照實講', () => {
+  assert.equal(sendError(new Error('打太快了，這段沒有送出，請再試一次')), '打太快了，這段沒有送出，請再試一次')
+  assert.equal(sendError(''), INPUT_TEXT.sendFailed)
+  assert.match(INPUT_TEXT.sendFailed, /沒有送出/)
+  const rs = read('../src-tauri/src/view_input.rs')
+  for (const k of ['TOO_FAST', 'TOO_LONG', 'TOO_MUCH']) assert.match(rs, new RegExp(`pub const ${k}: &str = "[^"]*這段沒有送出`), k + ' 要講清楚這段沒有送出')
 })
 
 test('認得的電腦：打字不用問只認 true，舊資料沒有這欄當要問', () => {

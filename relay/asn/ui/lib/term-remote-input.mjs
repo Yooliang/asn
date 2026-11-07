@@ -20,7 +20,7 @@ export const INPUT_TEXT = {
   pasteAsk: n => `要貼上 ${n} 行嗎？貼上之後那個視窗可能會一次執行好幾行。`,
   paste: '貼上',
   cancel: '取消',
-  sendFailed: '這幾個字沒有送出去：',
+  sendFailed: '這段沒有送出，請再試一次。',
 }
 
 /** 可以打字的 xterm 設定：和本機看畫面一樣，只是不關輸入 */
@@ -32,10 +32,10 @@ export function pasteLines(text) {
   return s ? s.split('\n').length : 0
 }
 
-/** 送字失敗的話：Rust 端回的已經是白話（例如「打太快了」）；空的用通用的 */
+/** 送字失敗的話：Rust 端回的已經是白話、也寫了這段沒有送出（例如「打太快了，這段沒有送出，請再試一次」）；空的用通用的 */
 export function sendError(e) {
   const s = String(e?.message ?? e ?? '').trim()
-  return INPUT_TEXT.sendFailed + (s || '請稍後再打')
+  return s || INPUT_TEXT.sendFailed
 }
 
 export const RemoteInput = {

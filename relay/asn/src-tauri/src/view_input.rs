@@ -42,7 +42,8 @@ const SEQ_LEN: usize = 8;
 /// 一幅密文（base64）最長多少：控制字元在 JSON 裡會變成 6 個字元（例如 ESC），再加序號、nonce、tag、base64 的餘裕
 const MAX_WIRE: usize = 40 * 1024;
 
-pub const TOO_FAST: &str = "打太快了，請稍等一下再打";
+pub const TOO_FAST: &str = "打太快了，這段沒有送出，請再試一次";
+pub const TOO_LONG: &str = "一次貼上的字太多，這段沒有送出，請分段貼上";
 /// 看的那台同時只能在幾個畫面打字（和後台每台被打字的上限相同）
 pub const MAX_OPEN: usize = 1;
 pub const TOO_MANY: &str = "同時只能在一個畫面打字，請先結束另一個";
@@ -52,7 +53,7 @@ pub fn presence_text(machine: &str, window: &str) -> String {
     let m = if machine.is_empty() { "別台電腦".to_string() } else { format!("「{machine}」") };
     format!("要開始在{m}上「{window}」打字嗎？對方的電腦會請那邊的人同意。只有你本人按了「打字」才確認。")
 }
-pub const TOO_MUCH: &str = "這次打字的字數到上限了，請結束後再開一次";
+pub const TOO_MUCH: &str = "這次打字的字數到上限了，這段沒有送出，請結束後再開一次";
 
 /// 一幅打字：字和是不是貼上。**沒有別的欄位**（多的就解不開）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,14 +163,28 @@ struct Rate {
 }
 
 impl Rate {
-    fn hit(&mut self, now_ms: u64) -> bool {
+    fn roll(&mut self, now_ms: u64) {
         let sec = now_ms / 1000;
         if sec != self.sec {
             self.sec = sec;
             self.n = 0;
         }
-        self.n += 1;
-        self.n <= MAX_PER_SEC
+    }
+    /// 這一秒還放得下 k 幅嗎（不記帳）
+    fn room(&mut self, now_ms: u64, k: u32) -> bool {
+        self.roll(now_ms);
+        self.n + k <= MAX_PER_SEC
+    }
+    /// 記 k 幅；放不下就不記、回 false
+    fn take(&mut self, now_ms: u64, k: u32) -> bool {
+        if !self.room(now_ms, k) {
+            return false;
+        }
+        self.n += k;
+        true
+    }
+    fn hit(&mut self, now_ms: u64) -> bool {
+        self.take(now_ms, 1)
     }
 }
 
@@ -278,7 +293,8 @@ impl DOutbox {
         DOutbox { key, session_id: session_id.to_string(), next: 0, unacked: VecDeque::new(), total: 0, rate: Rate::default() }
     }
 
-    /// 排一段字：太長的切成幾幅（不從字中間切，順序不變）。回要馬上送的密文；太快、太多回錯（字沒有收）
+    /// 排一段字：太長的切成幾幅（不從字中間切，順序不變）。回要馬上送的密文。
+    /// **整段成功或整段不收：** 太快、太長、總量到上限都回錯，序號和等確認的佇列都不動（不會只送前半段，後面靜默丟掉）
     pub fn push(&mut self, data: &str, paste: bool, now_ms: u64) -> Result<Vec<String>, String> {
         let parts = crate::launch::term_view::split_chunks(data, MAX_DATA_BYTES);
         if parts.is_empty() {
@@ -287,18 +303,34 @@ impl DOutbox {
         if self.total + data.len() as u64 > MAX_TOTAL_BYTES {
             return Err(TOO_MUCH.into());
         }
-        let mut out = Vec::with_capacity(parts.len());
-        for part in parts {
-            if !self.rate.hit(now_ms) {
-                return if out.is_empty() { Err(TOO_FAST.into()) } else { Ok(out) };
-            }
-            self.next += 1;
-            let wire = seal(&self.key, &self.session_id, self.next, &Keys { d: part.to_string(), p: paste })?;
-            self.total += part.len() as u64;
-            self.unacked.push_back(Pending { seq: self.next, wire: wire.clone(), first_ms: now_ms, sent_ms: now_ms });
+        if parts.len() > MAX_PER_SEC as usize {
+            return Err(TOO_LONG.into());
+        }
+        if !self.rate.room(now_ms, parts.len() as u32) {
+            return Err(TOO_FAST.into());
+        }
+        // 先全部加密好，任何一幅失敗就整段不收；都好了才記帳
+        let mut sealed = Vec::with_capacity(parts.len());
+        for (i, part) in parts.iter().enumerate() {
+            let seq = self.next + 1 + i as u64;
+            sealed.push((seq, seal(&self.key, &self.session_id, seq, &Keys { d: part.to_string(), p: paste })?));
+        }
+        let taken = self.rate.take(now_ms, parts.len() as u32);
+        debug_assert!(taken);
+        self.next += parts.len() as u64;
+        self.total += data.len() as u64;
+        let mut out = Vec::with_capacity(sealed.len());
+        for (seq, wire) in sealed {
+            self.unacked.push_back(Pending { seq, wire: wire.clone(), first_ms: now_ms, sent_ms: now_ms });
             out.push(wire);
         }
         Ok(out)
+    }
+
+    /// 下一幅會用的序號（測試用）
+    #[cfg(test)]
+    fn next_seq(&self) -> u64 {
+        self.next + 1
     }
 
     /// T 確認套用到第幾號：之前的都不用再補送
@@ -444,6 +476,56 @@ mod tests {
     }
 
     #[test]
+    fn 額度不夠整段拒絕_序號不前進_下一段從原序號開始() {
+        let (mut d, mut t) = pair();
+        for _ in 0..10 {
+            d.push("a", false, NOW).unwrap();
+        }
+        let before = (d.next_seq(), d.waiting());
+        let big = "a".repeat(MAX_DATA_BYTES * 45);
+        assert_eq!(d.push(&big, true, NOW).unwrap_err(), TOO_FAST, "同一秒已用 10 幅，45 幅放不下：整段不收");
+        assert_eq!((d.next_seq(), d.waiting()), before, "序號和等確認的佇列都沒動");
+        let w = d.push("b", false, NOW + 1000).unwrap();
+        assert_eq!(open(&test_key(7), "s1", &w[0]).unwrap().0, before.0, "下一段從原本的序號開始，T 不會以為缺號");
+        let huge = "a".repeat(MAX_DATA_BYTES * 64);
+        let before = (d.next_seq(), d.waiting());
+        assert_eq!(d.push(&huge, true, NOW + 5000).unwrap_err(), TOO_LONG, "一次 64 幅：永遠放不下，叫本人分段");
+        assert_eq!((d.next_seq(), d.waiting()), before);
+        // T 收到的照樣連續，沒有半段
+        for x in d.resend(NOW + 10_000) {
+            t.push(&x, NOW);
+        }
+        assert_eq!(text(&t.take(NOW).unwrap()), "aaaaaaaaaab");
+    }
+
+    #[test]
+    fn 額度剛好夠時整段送出() {
+        let (mut d, _) = pair();
+        for _ in 0..10 {
+            d.push("a", false, NOW).unwrap();
+        }
+        let fit = "a".repeat(MAX_DATA_BYTES * 40);
+        assert_eq!(d.push(&fit, true, NOW).unwrap().len(), 40, "10＋40＝50：剛好放得下");
+        assert_eq!(d.push("x", false, NOW).unwrap_err(), TOO_FAST, "這一秒滿了");
+        let mut d = DOutbox::new(test_key(7), "s1");
+        assert_eq!(d.push(&"a".repeat(MAX_DATA_BYTES * MAX_PER_SEC as usize), true, NOW).unwrap().len(), MAX_PER_SEC as usize, "一次 50 幅也可以");
+    }
+
+    #[test]
+    fn 總量到上限整段拒絕_不吃序號() {
+        let mut d = DOutbox::new(test_key(7), "s1");
+        let chunk = "a".repeat(MAX_DATA_BYTES * 50);
+        let mut t = NOW;
+        while d.push(&chunk, true, t).is_ok() {
+            t += 1000;
+        }
+        let before = (d.next_seq(), d.waiting());
+        assert_eq!(d.push(&chunk, true, t + 1000).unwrap_err(), TOO_MUCH);
+        assert_eq!((d.next_seq(), d.waiting()), before, "總量放不下：整段不收");
+        assert!(d.push("a", false, t + 2000).is_ok(), "還放得下的小段照樣能送");
+    }
+
+    #[test]
     fn 長的字切成幾幅_順序不變_每幅不超過上限() {
         let (mut d, mut t) = pair();
         let long: String = "字".repeat(MAX_DATA_BYTES);
@@ -485,6 +567,16 @@ mod tests {
         assert_eq!(wire_of("input", &json!({ "w": "x" })), Some("x".into()));
         assert_eq!(wire_of("frame", &json!({ "w": "x" })), None);
         assert_eq!(wire_of("input", &json!({ "x": "x" })), None);
+    }
+
+    #[test]
+    fn 守門_被打字的那台每次把字交給窗格前都看本機還允不允許() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let f = lib.split("    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {").nth(1).expect("有 LiveTPort::input").split("\n    }\n").next().unwrap();
+        let check = f.find("bridge::read_settings(&self.data_dir).allow_remote_launch").expect("每次都重讀本機設定，不用快取");
+        let apply = f.find("self.terms.view_input(").expect("有交給窗格");
+        assert!(check < apply, "先查允不允許，再交字");
+        assert!(f.contains("End::NotAllowed"), "關掉就結束");
     }
 
     #[test]

@@ -924,6 +924,12 @@ impl view_stream::TPort for LiveTPort {
             }
         };
         if !keys.is_empty() {
+            // 本人在這台關掉「允許其他設備替這台開新視窗」：字不再交給窗格，馬上結束（不等下一次查控制面）
+            if !bridge::read_settings(&self.data_dir).allow_remote_launch {
+                let line = format!("view {}: input end not_allowed typed={}", self.id, self.typed);
+                view_stream::TPort::log(self, &line);
+                return Err(view_stream::End::NotAllowed);
+            }
             // 和本機看畫面打字同一個入口：按鍵規則、貼上清理、接手的窗格不給、資料夾要有授權
             let pane = self.terms.partner_term_id(&self.window).map_err(|_| view_stream::End::Failed)?;
             for k in &keys {
