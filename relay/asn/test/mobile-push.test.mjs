@@ -162,3 +162,27 @@ test('使用者關掉：不取權杖、不註冊、外殼推什麼進來都不�
   assert.deepEqual([s.calls.unregister, s.calls.del], [1, 1])
   assert.ok(s.changes() >= 2, '狀態有變就通知畫面重畫')
 })
+
+test('快速「關→開」：舊的取消晚一步回來時，已經又打開了就不刪權杖（不然會刪掉剛註冊的）；登出照刪', async () => {
+  const on = { v: true }
+  const calls = { del: 0 }
+  let release
+  const p = createPushSync({
+    native: { state: () => 'granted', askPermission() {}, requestToken() {}, deleteToken() { calls.del++ }, onEvent: () => () => {} },
+    register: async () => {}, unregister: () => new Promise(r => { release = r }), enabled: () => on.v,
+  })
+  on.v = false
+  const closing = p.disable()
+  await new Promise(r => setImmediate(r))
+  on.v = true; p.enable()   // 取消還沒回來，使用者又打開了
+  release(); await closing
+  assert.equal(calls.del, 0, '還開著就不刪')
+  on.v = false
+  const again = p.disable()
+  await new Promise(r => setImmediate(r)); release(); await again
+  assert.equal(calls.del, 1, '真的關著才刪')
+  on.v = true
+  const out = p.logout()
+  await new Promise(r => setImmediate(r)); release(); await out
+  assert.equal(calls.del, 2, '登出不看開關，一律刪')
+})

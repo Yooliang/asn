@@ -71,12 +71,14 @@ export function createPushSync({ native, register, unregister, signedIn = () => 
     // unavailable／denied：什麼都不做
   }
   /** 先取消後台的（最多等 PUSH_UNREGISTER_MS），再刪 Firebase 的權杖。取消失敗或逾時也照樣刪（後台的清除規則會補） */
-  async function teardown() {
+  async function teardown(skipIfEnabled = false) {
     stopTimer(); retries = 0
     let giveUp = 0
     try {
       await Promise.race([unregister(), new Promise((_, rej) => { giveUp = setTimer(() => rej(new Error('timeout')), PUSH_UNREGISTER_MS) })])
     } catch { log('push: 取消註冊沒成功，後台會自己清') } finally { clearTimer(giveUp) }
+    // 設定頁快速「關→開」：取消等了一陣子，這段時間使用者又打開了、新的權杖也可能已經註冊，這時刪權杖會把剛註冊的刪掉，所以還開著就不刪
+    if (skipIfEnabled && enabled()) return
     try { native.deleteToken() } catch { /* 外殼沒有就算了 */ }
   }
   /** 登出、換帳號：取消並刪權杖，之後這個物件就停了（登出後畫面會重新載入，不再同步） */
@@ -85,7 +87,7 @@ export function createPushSync({ native, register, unregister, signedIn = () => 
     await teardown()
   }
   /** 使用者在設定頁關掉：先取消後台的、再刪 Firebase 的權杖（和登出同一套，只是不「停掉」，之後還能再打開） */
-  async function disable() { await teardown(); onChange() }
+  async function disable() { await teardown(true); onChange() }
   /** 使用者在設定頁打開：馬上同步（沒問過權限就在這時問，只問一次） */
   function enable() { lastTry = -Infinity; sync(true); onChange() }
   function start() { off = native.onEvent(onEvent); return api }
