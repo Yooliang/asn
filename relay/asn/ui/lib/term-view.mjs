@@ -12,8 +12,8 @@ const INPUT_ERROR_EVENT = 'term-view-input-error'
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 40
 
-export const TERM_VIEW_NOTE = '點一下畫面就能打字。終端視窗如果開著，那邊也是同一個畫面。'
-export const TERM_VIEW_NOTE_READONLY = '這裡只能看。終端視窗如果開著，那邊也是同一個畫面。'
+/** 停止跟隨時畫面右下角的提示字 */
+export const TERM_VIEW_LATEST = '回到最新'
 /** 一次貼上最多幾個字（再多請分段）：Rust 端上限是 256 KB，中文一字最多 3 位元組 */
 export const PASTE_MAX_CHARS = 80000
 // 只有在共用終端服務裡的夥伴才看得到這個畫面（#900），讀不到就是讀不到：不猜原因，真正的原因進 console
@@ -66,8 +66,10 @@ export function followTarget({ cursorRow, rowHeight, clientHeight, scrollHeight 
 }
 
 /**
- * 要不要跟著游標捲。使用者往上捲就先不跟，捲回游標或底部再跟。
+ * 要不要跟著游標捲（#904）。只有人在底部附近（scrollTop 接近外層可捲的最大值 max，容許 2px）才跟；
+ * 人往上捲離開底部就停止跟隨，之後每幅畫面都不碰 scrollTop；捲回底部附近才恢復。
  * 自己設定捲動位置也會觸發 scroll 事件：和剛設的位置一樣的就不算使用者捲的。
+ * onScroll(scrollTop, max)：max＝scrollHeight - clientHeight。resume(top)：點「回到最新」，直接恢復跟隨。
  */
 export function createFollow() {
   let following = true, lastSet = null
@@ -75,12 +77,23 @@ export function createFollow() {
   return {
     following: () => following,
     place: top => { lastSet = top },
-    onScroll: (scrollTop, target) => {
+    resume: top => { following = true; lastSet = top },
+    onScroll: (scrollTop, max) => {
       const mine = lastSet !== null && Math.abs(scrollTop - lastSet) <= SLACK
       lastSet = null   // 只算一次：使用者之後捲回同一個位置，要算他捲的
-      if (!mine) following = scrollTop >= target - SLACK
+      if (!mine) following = scrollTop >= max - SLACK
     },
   }
+}
+
+/** 跟隨時這幅畫面要把 scrollTop 設成多少：只往下推進、不後退；不跟隨或不需要動回 null */
+export function followScrollTo({ following, current, target }) {
+  return following && target > current ? target : null
+}
+
+/** 「回到最新」提示：只有停止跟隨才顯示 */
+export function latestVisible(following) {
+  return following === false
 }
 
 /**
@@ -209,7 +222,7 @@ export const TermView = {
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
   },
   setup(props) {
-    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref('')
+    const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref(''), behind = ref(false)
     // 夥伴停在要你回答的地方：本機的同意框這時不跳，改在畫面上方提示
     let hintTimer = 0
     const refreshHint = async () => {
@@ -229,12 +242,19 @@ export const TermView = {
     const followCursor = frame => {
       lastRow = Math.max(0, Number(frame?.meta?.cursor_y) || 0)
       lastRows = Number(frame?.meta?.rows) || DEFAULT_ROWS
-      if (!follow.following()) return
-      const t = target()
+      const t = followScrollTo({ following: follow.following(), current: host.value.scrollTop, target: target() })
+      if (t === null) return
       follow.place(t)
       host.value.scrollTop = t
     }
-    const onScroll = () => follow.onScroll(host.value.scrollTop, target())
+    const maxTop = () => Math.max(0, host.value.scrollHeight - host.value.clientHeight)
+    const onScroll = () => { follow.onScroll(host.value.scrollTop, maxTop()); behind.value = latestVisible(follow.following()) }
+    const jumpLatest = () => {
+      const top = maxTop()
+      follow.resume(top)
+      host.value.scrollTop = top
+      behind.value = false
+    }
     const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; pendingPaste.value = '' }
     const typed = (data, paste = false) => {
       if (!session || !data) return
@@ -259,6 +279,7 @@ export const TermView = {
       stop()
       lostText.value = ''
       follow = createFollow()
+      behind.value = false
       const target = props.id ? { id: props.id } : { name: props.name }
       session = createTermViewSession({
         open: () => props.api.open(target),
@@ -288,13 +309,13 @@ export const TermView = {
     watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
     onMounted(() => { if (props.active) start() })
     onBeforeUnmount(stop)
-    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, note: props.api.input ? TERM_VIEW_NOTE : TERM_VIEW_NOTE_READONLY }
+    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, jumpLatest, TERM_VIEW_LATEST }
   },
   template: `
 <div class="term-view">
-  <p class="term-view-note">{{ note }}</p>
   <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
   <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
+  <button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">{{ TERM_VIEW_LATEST }}</button>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
   <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>

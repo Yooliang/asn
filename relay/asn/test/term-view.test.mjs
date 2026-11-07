@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createFollow, createTermViewSession, followTarget, frameToWrite, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
+import { TERM_VIEW_LATEST, createFollow, createTermViewSession, followScrollTo, followTarget, frameToWrite, latestVisible, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
@@ -215,21 +215,88 @@ test('跟著游標：游標在下面就捲下去，多留一列；不超過範�
   assert.equal(followTarget({ rowHeight: 10, clientHeight: 500, scrollHeight: 400, cursorRow: 39 }), 0, '整個放得下')
 })
 
-test('跟著游標：往上捲就不跟，捲回游標或底部再跟；自己捲的不算', () => {
+test('跟著游標（#904）：只有人在底部附近才跟；往上捲離開就停，捲回底部附近才恢復；自己捲的不算', () => {
+  // onScroll(scrollTop, max)：max＝外層可捲的最大值。舊規則是和「游標列＋2」比，游標在中間時一捲過去就被拉回
   const f = createFollow()
-  assert.equal(f.following(), true)
+  assert.equal(f.following(), true, '一開始跟隨')
   f.place(240)
-  f.onScroll(240, 240)
-  assert.equal(f.following(), true, '程式自己捲的')
-  f.onScroll(100, 240)
-  assert.equal(f.following(), false, '使用者往上捲')
-  f.onScroll(150, 240)
-  assert.equal(f.following(), false, '還沒捲回去')
-  f.onScroll(240, 240)
-  assert.equal(f.following(), true, '捲回游標，再跟（就算和上次程式設定的位置相同）')
-  f.onScroll(100, 240)
-  f.onScroll(320, 240)
-  assert.equal(f.following(), true, '捲到底，再跟')
+  f.onScroll(240, 400)
+  assert.equal(f.following(), true, '程式自己捲的（雖然不在底部）不算使用者捲的')
+  f.onScroll(100, 400)
+  assert.equal(f.following(), false, '使用者往上捲離開底部')
+  f.onScroll(240, 400)
+  assert.equal(f.following(), false, '捲到舊規則的游標位置（240）不能恢復：人還不在底部')
+  f.onScroll(300, 400)
+  assert.equal(f.following(), false, '中間位置照樣不跟')
+  f.onScroll(398, 400)
+  assert.equal(f.following(), true, '捲回底部附近（差 2px 內）恢復')
+  f.onScroll(100, 400)
+  f.onScroll(400, 400)
+  assert.equal(f.following(), true, '捲到最底恢復')
+  f.onScroll(100, 400)
+  assert.equal(f.following(), false)
+  f.onScroll(397, 400)
+  assert.equal(f.following(), false, '差 3px 還不算底部')
+  f.resume(400)
+  assert.equal(f.following(), true, '點「回到最新」直接恢復')
+  f.onScroll(400, 400)
+  assert.equal(f.following(), true, '回到最新捲出來的事件不算使用者捲的')
+})
+
+test('跟著游標（#904）：停止跟隨時每幅都不得設 scrollTop；跟隨時只往下推進、不後退', () => {
+  // [跟隨中, 目前 scrollTop, 目標, 預期]
+  const rows = [
+    [true, 0, 200, 200],      // 游標在下面：往下推
+    [true, 200, 200, null],   // 已經在位置：不動
+    [true, 380, 200, null],   // 人在更下面（底部）：不後退
+    [false, 100, 200, null],  // 人往上看舊的：不拉走
+    [false, 250, 200, null],  // 捲在中間，新幅進來：不被拉走
+    [false, 0, 400, null],    // 不跟隨時目標再大也不動
+  ]
+  for (const [following, current, target, want] of rows) {
+    assert.equal(followScrollTo({ following, current, target }), want, JSON.stringify({ following, current, target }))
+  }
+  // 連續十幅：人在中間（不跟隨）→ scrollTop 一次都沒被設
+  const f = createFollow()
+  f.onScroll(100, 400)
+  let sets = 0
+  for (let i = 0; i < 10; i++) if (followScrollTo({ following: f.following(), current: 100, target: 200 + i }) !== null) sets++
+  assert.equal(sets, 0)
+})
+
+test('「回到最新」提示：只有停止跟隨才顯示', () => {
+  const f = createFollow()
+  assert.equal(latestVisible(f.following()), false, '跟隨中不顯示')
+  f.onScroll(100, 400)
+  assert.equal(latestVisible(f.following()), true, '停止跟隨才顯示')
+  f.onScroll(400, 400)
+  assert.equal(latestVisible(f.following()), false, '捲回底部就收起')
+  assert.equal(TERM_VIEW_LATEST, '回到最新')
+})
+
+test('「回到最新」接線：按了把外層捲到最底並恢復跟隨；放在畫面區右下角內側、沿用 aero-btn（#904）', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.match(src, /<button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">/)
+  assert.match(src, /const jumpLatest = \(\) => \{[\s\S]{0,200}follow\.resume\(top\)[\s\S]{0,80}host\.value\.scrollTop = top/)
+  assert.match(src, /t\.attachCustomWheelEventHandler\(\(\) => false\)[\s\S]*t\.onData\(/, '滾輪仍交給外層，排在 onData 之前')
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.match(css, /\.term-view-latest\{position:absolute;right:12px;bottom:12px/)
+})
+
+test('終端上方不再有說明行（#901b）：template、樣式、原句字串全專案都不在', () => {
+  const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
+  assert.ok(!view.includes('term-view-note') && !view.includes('TERM_VIEW_NOTE'), 'term-view 裡沒有說明行')
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.ok(!css.includes('term-view-note'))
+  const sentence = '點一下畫面就能打字'
+  const root = new URL('../ui/', import.meta.url)
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === 'vendor' ? [] : walk(new URL(`${e.name}/`, d))) : [new URL(e.name, d)]))
+  for (const f of walk(root)) {
+    if (!/\.(mjs|js|html|css)$/.test(f.pathname)) continue
+    assert.ok(!fs.readFileSync(f, 'utf8').includes(sentence), `${f.pathname} 還有說明句`)
+  }
+  assert.match(view, /<p class="term-view-ask" v-if="askHint"/, '其他提示不動')
+  assert.match(view, /term-view-lost/)
 })
 
 test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高矮一樣（#901／#901b）', () => {
