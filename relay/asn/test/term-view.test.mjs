@@ -232,16 +232,24 @@ test('跟著游標：往上捲就不跟，捲回游標或底部再跟；自己�
   assert.equal(f.following(), true, '捲到底，再跟')
 })
 
-test('打開終端時收起訊息區、有切回按鈕；視窗高矮一樣（#901）', () => {
+test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高矮一樣（#901／#901b）', () => {
   const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
-  assert.ok(chat.includes(':can-back="true"') && chat.includes('@back="termViewOn = false"'))
+  assert.ok(!chat.includes('can-back') && !chat.includes('@back='), '終端畫面不再有回到訊息的接線')
+  assert.ok(chat.includes('@term="toggleTerm"'), '上排大按鈕負責切換')
   assert.ok(chat.includes('<div class="conv" v-show="!termShown">'), '終端開著時訊息列表收起')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
-  assert.ok(view.includes('回到訊息'))
+  assert.ok(!view.includes('回到訊息') && !view.includes('canBack') && !view.includes("emit('back')"), '終端畫面裡沒有回到訊息按鈕')
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
   assert.doesNotMatch(css, /max-height:620px/, '不再只有矮視窗才收起')
   assert.match(css, /\.chatpane-main > \.term-view\{flex:1 1 0\}/, '終端占滿訊息區')
-  assert.doesNotMatch(css, /\.term-view-back\{display:none/, '切回按鈕不再藏起來')
+})
+
+test('守門 901b-scroll-kept：大按鈕切換終端／訊息時，訊息列表的捲動位置照舊保留', () => {
+  const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  // 打開（termShown 變 true）時記下，關掉時還原；只看 termShown 的變化，與哪顆按鈕無關
+  assert.match(chat, /watch\(termShown, on => \{\s*if \(on\) \{ termScroll = scrollMemo\(msgsEl\.value\); return \}/)
+  assert.match(chat, /el\.scrollTop = restoreTop\(memo, el\)/)
+  assert.ok(chat.includes('const toggleTerm = () => { if (canTermView.value) termViewOn.value = !termViewOn.value }'))
 })
 
 test('守門：滾輪不交給 xterm（否則會變成方向鍵，外層也捲不動）；接上輸入之後更不能拿掉', () => {
@@ -279,13 +287,90 @@ test('守門：貼上鍵不被 xterm 吃掉（Ctrl+V、Ctrl+Shift+V、Shift+Inse
   assert.ok(src.includes('attachCustomKeyEventHandler(termKeyHandler)'), '要接上 xterm')
 })
 
-test('守門 901b-noscroll：終端畫面直捲軸隱藏、回到訊息按鈕在 stage 容器內', () => {
+test('守門 901b-noscroll：終端畫面直捲軸隱藏、回到訊息按鈕已不存在', () => {
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.match(css, /\.term-view-screen::-webkit-scrollbar\{width:0;/, '直捲軸寬度為 0')
   assert.match(css, /\.term-view-screen\{[^}]*overflow:auto/, '仍可捲動')
-  assert.doesNotMatch(css, /\.term-view-back\{[^}]*right:20px/, '按鈕不再為閃捲軸留 20px')
-  assert.match(css, /\.term-view-stage\{position:relative;/)
-  const m = view.match(/<div class="term-view-stage">([\s\S]*?)\n  <\/div>/)
-  assert.ok(m && m[1].includes('term-view-back') && m[1].includes('term-view-screen'), '按鈕與畫面都在 stage 內')
+  assert.ok(!css.includes('term-view-back') && !css.includes('term-view-stage'), '樣式裡沒有按鈕與 stage 的規則')
+  assert.ok(!view.includes('term-view-back') && !view.includes('term-view-stage'), '畫面裡沒有按鈕與 stage')
+  assert.ok(!/<button[^>]*>\s*回到訊息\s*<\/button>/.test(view), '沒有「回到訊息」按鈕')
+})
+
+// ---- #903 游標對位：真實 WezTerm 取樣（test/fixtures/term-cursor，內容都是假文字） ----
+const FIX = name => fs.readFileSync(new URL('./fixtures/term-cursor/' + name, import.meta.url), 'utf8')
+const sample = name => {
+  const j = JSON.parse(FIX(name + '.json'))
+  return { text: FIX(name + '.escapes.txt'), meta: { cursor_x: j.cursor_x, cursor_y: j.cursor_y, cols: j.size.cols, rows: j.size.rows } }
+}
+/** 把 frameToWrite 的輸出拆回「內容各列」與「游標落點」 */
+function parseWrite(out) {
+  const head = '\x1b[0m\x1b[H\x1b[2J'
+  assert.ok(out.startsWith(head))
+  const k = out.lastIndexOf('\x1b[0m\x1b[')
+  const m = /^\x1b\[0m\x1b\[(\d+);(\d+)H$/.exec(out.slice(k))
+  assert.ok(m, '結尾是游標定位')
+  return { lines: out.slice(head.length, k).split('\r\n'), row: Number(m[1]) - 1, col: Number(m[2]) - 1 }
+}
+
+test('903：B（150 行捲動紀錄後游標在最後一列）只留畫面這 40 列，標記字串在 cursor_y 那一列', () => {
+  const f = sample('B'), { lines, row } = parseWrite(frameToWrite(f))
+  assert.equal(f.text.split('\n').length - 1, 43, '樣本確實比畫面多（42 列＋最後的裸換行）')
+  assert.equal(lines.length, f.meta.rows)
+  assert.equal(row, f.meta.cursor_y)
+  assert.ok(lines[f.meta.cursor_y].includes('MARK_B>'), lines[f.meta.cursor_y])
+  assert.ok(lines[0].includes('LINE 112'), '最上面的捲動紀錄 2 行被裁掉：' + lines[0])
+})
+
+test('903：C（捲動紀錄後游標移到第 20 列）標記字串在 cursor_y 那一列', () => {
+  const f = sample('C'), { lines, row } = parseWrite(frameToWrite(f))
+  assert.equal(f.meta.cursor_y, 19)
+  assert.equal(row, 19)
+  assert.ok(lines.length <= f.meta.rows && lines.length >= f.meta.rows - 1, '尾端空列會被去掉：' + lines.length)
+  assert.ok(lines[f.meta.cursor_y].includes('MARK_C'), lines[f.meta.cursor_y])
+})
+
+test('903：A（空畫面）與 E（全形字折行）沒有多出來的列，內容不變、索引仍等於 cursor_y', () => {
+  const a = sample('A'), pa = parseWrite(frameToWrite(a))
+  assert.ok(pa.lines[a.meta.cursor_y].includes('PS C:'), pa.lines[0])
+  assert.equal(pa.lines.length, 1, '空畫面只有提示列（尾端空列去掉）')
+  const e = sample('E'), pe = parseWrite(frameToWrite(e))
+  assert.ok(pe.lines[e.meta.cursor_y].includes('MARK_E'), pe.lines[e.meta.cursor_y])
+  assert.equal(pe.lines.length, 10)
+  assert.ok(pe.lines[1].startsWith('\x1b(B\x1b[0m'), '折行處的列頭逃逸序列沒被弄壞')
+  // 沒有比 rows 多的列時，內容和不裁（舊行為）一模一樣
+  assert.equal(frameToWrite(e), frameToWrite({ text: e.text, meta: { ...e.meta, rows: undefined } }))
+})
+
+test('903：行數比 rows 少、剛好、多 1、多 2、多很多的表格（--escapes 形式：每列 CRLF，最後多一個裸換行）', () => {
+  const run = (n, rows) => {
+    const text = Array.from({ length: n }, (_, i) => 'L' + i + '\r\n').join('') + '\n'
+    return parseWrite(frameToWrite({ text, meta: { rows, cursor_x: 0, cursor_y: rows - 1 } })).lines
+  }
+  for (const [n, rows, cut] of [[3, 5, 0], [5, 5, 0], [6, 5, 1], [7, 5, 2], [50, 5, 45]]) {
+    const lines = run(n, rows)
+    assert.equal(lines.length, Math.min(n, rows), `n=${n}`)
+    assert.equal(lines[0], 'L' + cut, `n=${n} 頭一列`)
+    assert.equal(lines.at(-1), 'L' + (n - 1), `n=${n} 最後一列`)
+  }
+})
+
+test('903：尾端是空列時照算畫面列數（不因為去掉結尾空列而少裁）', () => {
+  // 7 列，最後 2 列是空的；rows=5 要裁掉最前面 2 列：留 L2 L3 L4，後面兩列空列去掉
+  const text = ['L0', 'L1', 'L2', 'L3', 'L4', '', ''].map(l => l + '\r\n').join('') + '\n'
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 5, cursor_x: 0, cursor_y: 0 } })).lines, ['L2', 'L3', 'L4'])
+})
+
+test('903：最上面幾列是空列時不被誤裁（只裁多出來的最前面幾列，不是空列）', () => {
+  const text = ['', '', 'A', 'B'].map(l => l + '\r\n').join('') + '\n'
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 4, cursor_x: 0, cursor_y: 3 } })).lines, ['', '', 'A', 'B'])
+  assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows: 3, cursor_x: 0, cursor_y: 2 } })).lines, ['', 'A', 'B'])
+})
+
+test('903：meta.rows 缺或不是正整數時維持舊行為', () => {
+  const text = 'a\r\nb\r\nc\r\n\n'
+  for (const rows of [undefined, 0, -3, 2.5, 'x']) {
+    assert.deepEqual(parseWrite(frameToWrite({ text, meta: { rows, cursor_x: 0, cursor_y: 0 } })).lines, ['a', 'b', 'c'])
+  }
+  assert.deepEqual(parseWrite(frameToWrite({ text })).lines, ['a', 'b', 'c'])
 })

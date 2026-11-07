@@ -415,7 +415,7 @@ export const ChatPane = {
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :can-back="true" @back="termViewOn = false"></term-view>
+  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <remote-view v-if="remoteShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active" @back="remoteOn = false"></remote-view>
   <div class="conv" v-show="!termShown">
     <div class="conv-main">

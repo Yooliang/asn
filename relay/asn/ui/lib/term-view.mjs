@@ -21,7 +21,18 @@ export const TERM_VIEW_LOST = '暫時讀不到這個畫面。'
 
 /** 一幅畫面要寫給 xterm 的內容：清掉重畫，最後把游標放回窗格的位置。一次寫完，xterm 只會畫一次，不會閃 */
 export function frameToWrite(frame) {
-  const body = String(frame?.text ?? '').replace(/\r?\n/g, '\r\n').replace(/(\r\n)+$/, '')
+  const full = String(frame?.text ?? '').replace(/\r?\n/g, '\r\n')
+  // #903：有捲動紀錄時，WezTerm 的 get-text 會比畫面多回最多 2 行（畫面上方的捲動紀錄），
+  // 但游標列號是畫面內的列號。只留最後 rows 行，文字的第 N 行才會和 cursor_y 對上。
+  // --escapes 的輸出是每列一個 \r\n，整份最後再多一個裸換行：先去掉這一個，再去掉最後一列的結尾，剩下的就是一列一個元素
+  const rows = Number(frame?.meta?.rows)
+  let body = full
+  if (Number.isInteger(rows) && rows > 0) {
+    const lines = full.replace(/(\r\n)$/, '').split('\r\n')
+    if (lines.length && lines[lines.length - 1] === '') lines.pop()
+    if (lines.length > rows) body = lines.slice(-rows).join('\r\n')
+  }
+  body = body.replace(/(\r\n)+$/, '')
   const x = Math.max(0, Number(frame?.meta?.cursor_x) || 0)
   const y = Math.max(0, Number(frame?.meta?.cursor_y) || 0)
   return `\x1b[0m\x1b[H\x1b[2J${body}\x1b[0m\x1b[${y + 1};${x + 1}H`
@@ -215,9 +226,7 @@ export const TermView = {
     id: { type: String, default: '' },        // 終端編號（ASN 開的 grok、agy）
     name: { type: String, default: '' },      // 夥伴視窗名（Claude）
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
-    canBack: { type: Boolean, default: false },   // 對話區裡打開時訊息區會收起來（#901）：要有切回去的按鈕
   },
-  emits: ['back'],
   setup(props) {
     const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref('')
     // 夥伴停在要你回答的地方：本機的同意框這時不跳，改在畫面上方提示
@@ -307,10 +316,7 @@ export const TermView = {
 <div class="term-view">
   <p class="term-view-note">{{ note }}</p>
   <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
-  <div class="term-view-stage">
-    <button class="aero-btn term-view-back" type="button" v-if="canBack" @click="$emit('back')">回到訊息</button>
-    <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
-  </div>
+  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @click="focusTerm" @paste.capture="onPaste"></div>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
   <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>
