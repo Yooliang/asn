@@ -29,7 +29,7 @@ impl Core {
             Hold::Expired => {
                 self.dup_held.remove(&m.id);
                 self.log.line(&format!("id={} to={target}: still duplicate windows after waiting, gave up", m.id));
-                if !Self::is_mailbox_sender(&o.from_agent) {
+                if !Self::is_system_notice(&o.from_agent) {
                     self.send_back(o, &dup_session::expired_text(target), Some(target), None).await;
                 }
                 self.ack_ids(&[m.id.clone()]).await;
@@ -44,7 +44,7 @@ impl Core {
                 self.dup_held.insert(m.id.clone(), self.now);
                 let pids: Vec<String> = wins.iter().map(|w| w.pid.to_string()).collect();
                 self.log.line(&format!("id={} to={target}: {} live windows share this name (pids {}), mail held until one is closed", m.id, wins.len(), pids.join(",")));
-                if !Self::is_mailbox_sender(&o.from_agent) {
+                if !Self::is_system_notice(&o.from_agent) {
                     let text = dup_session::notice_text(target, &wins, self.now, mail::is_person_mail(m));
                     self.send_back(o, &text, Some(target), None).await;
                 }

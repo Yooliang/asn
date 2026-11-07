@@ -1,4 +1,5 @@
 // 文字工具（純函式，介面與測試共用）：跳脫、舊式表情代碼、震動標記。
+import { isLegacyNoticeName, isNoticeKind, legacyApplies } from './notice.mjs'
 // 信件內文與好友名稱都是外部資料：一律先 esc 再進 v-html，絕不把原文直接塞進 v-html。
 
 // 那個年代的表情代碼
@@ -98,7 +99,8 @@ export const UNNAMED_DEVICE = '未命名設備'
 // 回傳 null（不是這類信）或 { mins }（mins＝內文寫的等待分鐘數，沒寫＝0，例如對方視窗已關閉）。
 export function noReplyNoticeOf(m) {
   const body = String(m?.body ?? '')
-  if (!/收發室$/.test(String(m?.from_agent ?? '')) || !body.startsWith('[收發室] ') || !/沒有經收發室收到/.test(body)) return null
+  const fromNotice = isNoticeKind(m?.kind) || (isLegacyNoticeName(m?.from_agent) && legacyApplies(m))   // 寄件人是系統通知（內文標記單獨不算）
+  if (!fromNotice || !body.startsWith('[收發室] ') || !/沒有經收發室收到/.test(body)) return null
   const n = body.match(/等了約\s*(\d+)\s*分鐘/) ?? body.match(/(\d+)\s*分鐘內/)
   return { mins: n ? Number(n[1]) : 0 }
 }

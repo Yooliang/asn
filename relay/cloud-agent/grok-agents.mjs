@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { UUID_RE } from './config.mjs'
+import { isReservedPartnerName } from '../machine/system-notice.mjs'
 import { applyEnvCompat } from './env-compat.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -49,7 +50,7 @@ export async function listClaudeSessions(env = process.env) {
     })
     const arr = JSON.parse(stdout)
     if (!Array.isArray(arr)) return []
-    return arr.filter(a => a && a.kind === 'interactive' && a.entrypoint === 'cli' && a.name && !String(a.name).endsWith('收發室'))
+    return arr.filter(a => a && a.kind === 'interactive' && a.entrypoint === 'cli' && a.name && !isReservedPartnerName(a.name))
       .map(a => ({ name: String(a.name), status: a.status || 'idle', engine: 'claude', kind: 'claude', cwd_label: path.basename(String(a.cwd || '')) || 'claude' }))
   } catch { return [] }
 }

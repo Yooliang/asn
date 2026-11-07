@@ -1,6 +1,7 @@
 // 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
 import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
 import { pctOf } from './context-usage.mjs'
+import { isLegacyNoticeName, isMergedAway, isNoticeFriend } from './notice.mjs'
 
 const PARTNER_ID = /^p_[0-9a-f]{20}$/
 // 後台給的這台電腦的 Claude 外掛狀態（claude_mod：state／version／reason）→ 乾淨的物件；舊後台沒有或格式不對＝null
@@ -19,12 +20,13 @@ export const PROCESS_NAME_RE = /^[A-Za-z0-9._-]+(?: · [A-Za-z0-9._-]+)? #\d+(?:
 export const isProcessName = name => PROCESS_NAME_RE.test(String(name ?? ''))
 export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
-export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
+export const isRelayRoom = name => isLegacyNoticeName(name)   // 也含系統通知的固定寄件人「ASN 通知」
 
 // 「ASN 程式本身」的視窗（名單回報 engine＝asn，代表某台設備上的 ASN，不是 AI）：名單上的好友項目一律隱藏。
 // 設備分組、設備頁籤、遠端更新都以設備為單位，不受影響；往來記錄與好友資料照常保留，只是各處顯示的清單都不列它、也不算進人數與未讀。
 export const isAsnWindow = f => String(f?.engine ?? '').trim().toLowerCase() === 'asn'
-export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f))
+// 「通知」對話與已併進它的舊「○○收發室」列也不在一般名單裡（通知對話另外固定排在最上面）
+export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f) && !isNoticeFriend(f) && !isMergedAway(f))
 // 寄給 ASN 程式本身的信不期待回信（它不是 AI）：寄信一律 expects_reply＝false，畫面也不顯示「等對方回信」與「未回」提示。
 export const expectsReplyTo = f => !isAsnWindow(f)
 export const showsWaiting = f => Boolean(f?.waiting) && !isAsnWindow(f)

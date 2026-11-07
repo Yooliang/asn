@@ -402,13 +402,14 @@ test('手機積信：舊信超過 3 封合併提示，新信照常，電腦版�
   assert.equal(desktop.unread, 5)
 })
 
-test('卡框通知這類系統寄件人：手機也有一列點得到、算未讀', async () => {
+test('卡框通知這類系統寄件人：進固定的「通知」對話、算未讀，不長出聯絡人', async () => {
   const msg = { id: '00000000-0000-4000-8000-000000000799', from_node: 'H', from_agent: '等待確認收發室', to_agent: NAME, body: '這台（30家用）的夥伴「小乙」在等你回答，已經等超過 2 分鐘。', trust: 'member', created_at: new Date().toISOString() }
   const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: [msg] }), ack: async () => ({}) }
   const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000, backlogAfterMs: 300_000 })
   await core.pull('test')
-  const f = core.snapshot().friends.find(x => x.id === 'H/等待確認收發室')
-  assert.ok(f, '要有一列')
+  assert.ok(!core.snapshot().friends.some(x => x.id === 'H/等待確認收發室'), '不再長出「○○收發室」聯絡人')
+  const f = core.snapshot().friends.find(x => x.id === 'notice:me')
+  assert.ok(f && f.isNotice && f.nick === '通知', '要有「通知」對話')
   assert.equal(f.unread, 1)
   assert.match(core.logOf(f.id)[0].text, /小乙/)
 })

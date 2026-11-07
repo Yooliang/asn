@@ -11,7 +11,8 @@ import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
+import { NOTICE_ID, isLegacyNoticeFriend, isMergedAway, isNoticeFriend, isSystemNotice, noticeFriend } from './notice.mjs'
+import { UNNAMED_DEVICE, hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { friendlySendError } from './display-only.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
@@ -60,6 +61,7 @@ export const savedFriendOf = f => ({
   id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine,
   ...optStr('model', f.model), ...optStr('device', f.device), ...optStr('kind', f.kind),
   ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true,
+  ...(f.isNotice === true ? { isNotice: true } : {}), ...(isMergedAway(f) ? { mergedInto: f.mergedInto } : {}),   // 「通知」對話與已併進它的舊列（#848）
 })
 // 讀回存檔的一筆：這三欄只收非空字串（存檔是本機檔，壞掉或被改過的值不帶進畫面）；沒有就不補，畫面照舊退回
 export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
@@ -119,6 +121,8 @@ export class AsnCore {
     const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
     for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...restoredFriendOf(f), psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
+    { const nf = this.friends.get(NOTICE_ID); if (nf) nf.status = 'none' }   // 通知對話沒有上線狀態
+    this.#mergeLegacyNotice()
     this.readDirty = cleanMarks(saved?.readDirty)   // 上次離線時沒送出的已讀位置，連線後補送
     this.emit('state')
     await this.refreshRoster()
@@ -150,7 +154,7 @@ export class AsnCore {
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
-    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known || keepsOfflineForWake(f)) && !(f.entryKind === 'process' || isProcessName(f.agent)))   // 程序條目（「pi #pid」這類）不當離線好友記住，有沒有對話記錄都一樣（#447）；對話記錄本身不刪
+    const known = [...this.friends.values()].filter(f => !isNoticeFriend(f) && !isMergedAway(f) && (this.logs.has(f.id) || f.known || keepsOfflineForWake(f)) && !(f.entryKind === 'process' || isProcessName(f.agent)))   // 程序條目（「pi #pid」這類）不當離線好友記住，有沒有對話記錄都一樣（#447）；對話記錄本身不刪
     const merged = mergeFriends(known, live, archivedKeysOf(members))
     const next = new Map()
     for (const m of merged) {
@@ -161,6 +165,7 @@ export class AsnCore {
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
       }
     }
+    for (const f of this.friends.values()) if (isNoticeFriend(f) || isMergedAway(f)) next.set(f.id, f)   // 通知對話與已併走的舊列不在名單裡，原樣留著
     this.friends = next
     for (const a of this.contextWatch.update([...next.values()].filter(f => !isAsnWindow(f)))) {
       const f = next.get(a.id)
@@ -185,6 +190,39 @@ export class AsnCore {
     if (!next) return
     this.friends = next
     if (!quiet) this.emit('state')
+  }
+
+  // 寄件節點是不是同一個帳號的：名單（後台只列同帳號的節點）有這個節點，或就是本機。名單還沒載入＝不知道，當作是
+  #sameAccountNode(node) {
+    if (!this.rosterLoaded && !this.nodeOrder.length) return true
+    return node === this.selfNode || this.nodeOrder.includes(node)
+  }
+  // 通知是哪一台設備寄的：信上的設備名優先，其次名單上該節點的設備名，都沒有就寫「未命名設備」
+  #deviceNameOf(m) {
+    const own = typeof m.sender_device === 'string' ? m.sender_device.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60) : ''
+    if (own) return own
+    for (const f of this.friends.values()) if (f.node === m.from_node && f.device) return f.device
+    return UNNAMED_DEVICE
+  }
+  // 舊版自動長出來的「○○收發室」「ASN 通知」聯絡人列併進固定的「通知」對話（#848）：
+  // 往來記錄依時間合併（有信件 id 的去重）、未讀相加；舊列不刪、本機的原始記錄也不動，只標 mergedInto 讓畫面不再列出。
+  // 已併過的（有 mergedInto）不會再併第二次；沒有舊列就不建立「通知」對話（從沒收過通知的帳號名單上不會多一列）
+  #mergeLegacyNotice() {
+    const olds = [...this.friends.values()].filter(f => isLegacyNoticeFriend(f) && !isMergedAway(f))
+    if (!olds.length) return
+    let to = this.friends.get(NOTICE_ID)
+    if (!to) { to = this.#decorate({ ...noticeFriend(), unread: 0, waiting: false, replyTo: null }); this.friends.set(NOTICE_ID, to) }
+    const seenIds = new Set()
+    const merged = [this.logs.get(NOTICE_ID) ?? [], ...olds.map(o => this.logs.get(o.id) ?? [])].flat()
+      .filter(m => { if (!m.id) return true; if (seenIds.has(m.id)) return false; seenIds.add(m.id); return true })
+      .map((m, i) => [m, i]).sort((a, b) => (a[0].t ?? 0) - (b[0].t ?? 0) || a[1] - b[1]).map(x => x[0])
+    this.logs.set(NOTICE_ID, merged)
+    for (const o of olds) {
+      to.unread = (to.unread || 0) + (o.unread || 0)
+      to.lastAt = Math.max(to.lastAt ?? 0, o.lastAt ?? 0)
+      this.friends.set(o.id, { ...o, mergedInto: NOTICE_ID, unread: 0 })   // 原始記錄（this.logs 裡舊鍵）原樣保留
+    }
+    this.#scheduleSave()
   }
 
   // 改名合併（夥伴 ID）：本機記住的舊名那筆若夥伴 ID 和名單上某位成員相同，就是同一位夥伴改了名——
@@ -348,9 +386,10 @@ export class AsnCore {
 
   // quiet：照常記進對話、算未讀，只是不跳提示（代收舊信一次很多時由 pull 合成一則）。回這封信落在哪位夥伴
   async #incoming(m, { quiet = false } = {}) {
-    const r = routeMail(this.friends, m)
+    const asNotice = isSystemNotice(m, { sameAccount: this.#sameAccountNode(m.from_node) })
+    const r = asNotice ? { id: NOTICE_ID } : routeMail(this.friends, m)   // 系統通知（#848）：不建聯絡人，全部進固定的「通知」對話
     let f = this.friends.get(r.id)
-    if (!f) { f = this.#decorate({ ...stubFriend(r), unread: 0, waiting: false, replyTo: null }); this.friends.set(r.id, f) }
+    if (!f) { f = this.#decorate({ ...(r.id === NOTICE_ID ? noticeFriend() : stubFriend(r)), unread: 0, waiting: false, replyTo: null }); this.friends.set(r.id, f) }
     f.known = true
     f.waiting = false
     const t = Date.parse(m.created_at) || this.now()
@@ -366,7 +405,7 @@ export class AsnCore {
     const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
     // 沒指定收件視窗、由橋交給本人的信：先標出「XX 寄來的信沒有指定收件人」，由使用者決定轉給誰或自己回；震動信一律只顯示「傳送了一個震動」，不加這行
     if (shown && !nudge && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} 寄來的信沒有指定收件人`, t })
-    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(asNotice ? { dev: this.#deviceNameOf(m) } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
     const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)
@@ -397,6 +436,7 @@ export class AsnCore {
     const f = this.friends.get(id)
     const text = String(raw ?? '').trim()
     if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
+    if (isNoticeFriend(f)) return { ok: false, error: '「通知」對話不能回信' }
     if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
     const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: expectsReplyTo(f), ...this.#personFlag(f), ...(voice ? { voice: true } : {}) }
     let sent
@@ -418,6 +458,7 @@ export class AsnCore {
   async sendAttachment(id, photo, caption = "") {
     const f = this.friends.get(id)
     if (!f || !photo?.data) return { ok: false, error: '沒有內容或找不到好友' }
+    if (isNoticeFriend(f)) return { ok: false, error: '「通知」對話不能回信' }
     const cap = String(caption ?? '').trim()
     if (cap.length > MAX_BODY - 200) return { ok: false, error: `說明文字超過 ${MAX_BODY - 200} 字` }
     if (typeof this.transport.sendAttachment !== "function") return { ok: false, error: "這個版本不能傳照片或檔案" }
@@ -448,6 +489,7 @@ export class AsnCore {
   async nudge(id) {
     const f = this.friends.get(id)
     if (!f) return { ok: false, error: '找不到好友' }
+    if (isNoticeFriend(f)) return { ok: false, error: '「通知」對話不能回信' }
     let sent
     try { sent = await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false, ...this.#personFlag(f) }) }
     catch (e) { return this.#fail(id, e) }

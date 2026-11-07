@@ -97,16 +97,16 @@
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
+              <button class="g-head" type="button" v-if="g.kind !== 'notice'" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
                 <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span><span class="asn-upd" :class="'tone-' + remoteBtn(g.node).tone" role="button" tabindex="0" v-if="remoteBtn(g.node)" :aria-disabled="remoteBtn(g.node).busy" :title="remoteBtn(g.node).title" @click.stop="requestRemoteUpdate(g.node)" @keydown.enter.stop.prevent="requestRemoteUpdate(g.node)" @keydown.space.stop.prevent="requestRemoteUpdate(g.node)">{{ remoteBtn(g.node).label }}</span></template>
               </button>
-              <ul v-show="!collapsed[g.key]">
-                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
+              <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
+                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="!c.isNotice && openBuddyMenu(c, $event)">
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
                     <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'"></asn-avatar>
                     <span class="b-text">
-                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="!c.isNotice && statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                     </span>
                     <span class="unread" v-if="c.unread">{{ c.unread }}</span>

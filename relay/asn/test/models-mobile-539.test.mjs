@@ -117,7 +117,7 @@ test('手機接線：對話頁不放任何按鈕列（手機版、電腦版都�
   assert.doesNotMatch(mjs, /barView|onBar|phoneBarSlots/)
   assert.doesNotMatch(pane, /mobile-bar|MobileBar|phoneBar/)
   assert.match(pane, /noBar: \{ type: Boolean, default: false \}/, '電腦版預設照舊有功能列')
-  assert.match(pane, /<action-bar [^>]*v-if="!noBar && \(!isRoom/, 'noBar 時電腦版的功能列也不出現')
+  assert.match(pane, /<action-bar [^>]*v-if="!noBar && !isNotice && \(!isRoom/, 'noBar 時電腦版的功能列也不出現')
   assert.match(mhtml, /aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps"/)
   assert.match(mhtml, /v-else-if="opsAcp\.models\.length" v-model="ops\.model"/)
   assert.ok(mhtml.indexOf('v-for="i in opsView.rows"') < mhtml.indexOf('v-for="g in groupItems"'), '喚醒、切換模型在選單最前面，邀請排後面')

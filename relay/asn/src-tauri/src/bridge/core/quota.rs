@@ -174,7 +174,7 @@ impl Core {
     /// 通知私信原寄件人：同一寄件人同一次額度用完只通知一次；收發室寄來的與收發室自己寫的通知不回
     pub(super) async fn quota_notify_sender(&mut self, m: &Mail) {
         let from_agent = m.from_agent.clone().unwrap_or_default();
-        if Self::is_mailbox_sender(&from_agent) || m.body.trim_start().starts_with("[收發室]") {
+        if m.is_system_notice() || m.has_legacy_notice_mark() {
             return;
         }
         let key = format!("{}/{}", m.from_node, from_agent);
