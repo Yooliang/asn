@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
   if (action === "roster" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || !Array.isArray(b.agents)) return json(400, { error: "bad_request" });
-    const agents = normalizeRosterAgents(b.agents); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
+    const agents = normalizeRosterAgents(b.agents, me.id); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
     const { data, error } = await db.rpc("asn_relay_roster", { p_node: me.id, p_agents: agents });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
@@ -341,7 +341,7 @@ Deno.serve(async (req) => {
       }
     }
     // 名單裡視窗帶 renamed_from（改名前的名字）：先把群組成員改名，再做自動入群（否則新名會被當成新視窗、舊名被標離開）
-    for (const rn of renamesFromRoster(b.agents)) await applyWindowRename(me.id, rn.from, rn.to);
+    for (const rn of renamesFromRoster(b.agents, me.id)) await applyWindowRename(me.id, rn.from, rn.to);
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
@@ -349,7 +349,7 @@ Deno.serve(async (req) => {
   // 視窗改名（#229）：用戶端明說 from→to，同節點在群組裡的成員記錄跟著改名。節點只取自金鑰；舊後台沒有這個動作＝用戶端收 404 靜默略過
   if (action === "window_rename" && req.method === "POST") {
     const b = await req.json().catch(() => null);
-    const rn = parseWindowRename(b?.from, b?.to);
+    const rn = parseWindowRename(b?.from, b?.to, me.id);
     if (!rn) return json(400, { error: "bad_request" });
     const d = await applyWindowRename(me.id, rn.from, rn.to);
     if (d === null) return json(500, { error: "internal" });
@@ -360,7 +360,7 @@ Deno.serve(async (req) => {
   // 節點改自己的顯示名（ASN 把視窗名寫進來；只改自己這一列的 name）
   if (action === "set_name" && req.method === "POST") {
     const b = await req.json().catch(() => null);
-    const name = parseSelfName(b?.name);
+    const name = parseSelfName(b?.name, me.id);
     if (name === null) return json(400, { error: "bad_request" });
     const { data, error } = await db.rpc("asn_relay_set_self_name", { p_node: me.id, p_name: name });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
@@ -419,7 +419,7 @@ Deno.serve(async (req) => {
   }
   // ASN 回報在線狀態與版本（每 60 秒一次；關閉時 status=offline＝刪掉那一列）。節點一律是金鑰所屬的 me.id
   if (action === "asn_presence" && req.method === "POST") {
-    const p = parseAsnPresence(await req.json().catch(() => null));
+    const p = parseAsnPresence(await req.json().catch(() => null), me.id);
     if (p === null) return json(400, { error: "bad_request" });
     const { data, error } = await db.rpc("asn_relay_asn_presence_set", {
       p_node: me.id, p_window: p.window_name, p_version: p.version, p_status: p.status, p_psm: p.psm,

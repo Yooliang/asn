@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
   if (action === "roster" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || !Array.isArray(b.agents)) return json(400, { error: "bad_request" });
-    const agents = normalizeRosterAgents(b.agents); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
+    const agents = normalizeRosterAgents(b.agents, me.id); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
     const { data, error } = await db.rpc("irori_relay_roster", { p_node: me.id, p_agents: agents });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });

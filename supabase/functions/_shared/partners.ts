@@ -6,6 +6,7 @@
 import type { AuthUser } from "./account.ts";
 import { signedUserId } from "./owner_sign.ts";
 
+import { isReservedSender } from "./reserved_sender.ts";
 export type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
 
 export const SESSION_RE = /^[A-Za-z0-9_-]{8,80}$/;
@@ -24,7 +25,7 @@ export interface PartnerWindow {
 }
 
 /** 整理橋送來的名單；格式不對的名字整份拒絕（回 null），session／引擎／模型格式不對只當沒帶 */
-export function parsePartnerSync(b: unknown): PartnerWindow[] | null {
+export function parsePartnerSync(b: unknown, nodeId: string | null = null): PartnerWindow[] | null {
   if (!b || typeof b !== "object") return null;
   const ws = (b as Record<string, unknown>).windows;
   if (!Array.isArray(ws) || ws.length > WINDOWS_MAX) return null;
@@ -35,6 +36,7 @@ export function parsePartnerSync(b: unknown): PartnerWindow[] | null {
     if (typeof o.name !== "string") return null;
     const len = Array.from(o.name).length;
     if (len < 1 || len > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(o.name)) return null;
+    if (isReservedSender(o.name, nodeId)) continue; // 寄件名保留字檢查（見 reserved_sender.ts）：保留的名字不收，其他視窗照常
     const model = typeof o.model === "string" ? o.model.trim().slice(0, MODEL_MAX) : "";
     out.push({
       name: o.name,
@@ -59,7 +61,7 @@ export async function handlePartnerSync(
   me: { id: string },
   body: unknown,
 ): Promise<{ status: number; body: unknown }> {
-  const windows = parsePartnerSync(body);
+  const windows = parsePartnerSync(body, me.id);
   if (windows === null) return { status: 400, body: { error: "bad_request" } };
   const { data, error } = await deps.rpc("asn_relay_partner_sync", { p_node: me.id, p_windows: windows });
   if (error) {
@@ -84,7 +86,7 @@ export interface SignedDeps {
 }
 
 /** 「這是某某的接班」請求：前任夥伴 ID、新視窗所在節點與名字；格式不對回 null */
-export function parseSucceed(b: unknown): { predecessor: string; node: string; name: string } | null {
+export function parseSucceed(b: unknown, nodeId: string | null = null): { predecessor: string; node: string; name: string } | null {
   if (!b || typeof b !== "object") return null;
   const o = b as Record<string, unknown>;
   if (typeof o.predecessor !== "string" || !PARTNER_ID_RE.test(o.predecessor)) return null;
@@ -92,6 +94,7 @@ export function parseSucceed(b: unknown): { predecessor: string; node: string; n
   if (typeof o.name !== "string") return null;
   const len = Array.from(o.name).length;
   if (len < 1 || len > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(o.name)) return null;
+  if (isReservedSender(o.name, nodeId)) return null; // 寄件名保留字檢查（見 reserved_sender.ts）
   return { predecessor: o.predecessor, node: o.node, name: o.name };
 }
 
@@ -105,7 +108,7 @@ export async function handlePartnerSucceed(
   signHeader: string | null,
   body: unknown,
 ): Promise<{ status: number; body: unknown }> {
-  const q = parseSucceed(body);
+  const q = parseSucceed(body, me.id);
   if (!q) return { status: 400, body: { error: "bad_request" } };
   const user = await signedUserId(deps.verifyJwt, signHeader);
   if (!user) return { status: 401, body: { error: "unauthorized" } };

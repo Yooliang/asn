@@ -3,6 +3,7 @@
 // node_claim 另外要 x-relay-key（現有節點金鑰）證明擁有；node_create 發新金鑰，只在這次回應裡出現一次，資料庫只存雜湊。
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
+import { isReservedSender } from "./reserved_sender.ts";
 
 export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs"]);
 
@@ -40,7 +41,9 @@ export function bearerToken(header: string | null | undefined): string | null {
 export function cleanDisplayName(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const s = v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
-  return s ? Array.from(s).slice(0, 40).join("") : null;
+  if (!s) return null;
+  const t = Array.from(s).slice(0, 40).join("");
+  return isReservedSender(s) || isReservedSender(t) ? null : t; // 寄件名保留字檢查（見 reserved_sender.ts）：帳號名、雲端代理名、登入帶來的名字都不能是系統通知的名字
 }
 
 export interface NodeCreateInput {
