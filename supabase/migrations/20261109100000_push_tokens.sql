@@ -11,6 +11,8 @@
 --       owner_mail：寄信函式回傳的收件人（人代號 alias 解出來的那位 user），不是寄件那台的擁有者（外部帳號寄給本人時兩者不同）；
 --       waiting：asn_relay_waiting_notice 處理的那位夥伴節點的 owner_user（就是被通知的人）。
 --   * 推的對象：p_user 名下、啟用中、android、有權杖、30 天內開過 App、現在不在線（3 分鐘，和 #796 同一套判斷）；
+--     「30 天內開過」看權杖的 updated_at（App 每次啟動都重報權杖），**不看 asn_presence**：設成「顯示為離線」的人沒有在線列，看在線列會永遠收不到。
+--     「現在不在線」＝3 分鐘內沒有任何 asn_presence 列（完全沒有列也算不在線）。
 --     同一台 60 秒最多一則：update … where last_sent_at 超過 60 秒 … returning，原子判斷並同時記下送出時間。
 --   * 清除：asn_relay_push_prune() 刪 60 天沒更新的，pg_cron 每天 03:51（UTC）跑一次（asn-push-tokens-prune）；asn_relay_push_invalid(p_node, p_token) 給 Edge 在 FCM 回權杖失效時刪（權杖要對得上）。
 --   * 權杖格式只檢查長度和字元集，不信任內容。
@@ -77,7 +79,7 @@ begin
     select t.node
       from relay.push_tokens t join relay.nodes n on n.id = t.node
      where n.owner_user = p_user and n.status = 'active' and n.platform = 'android'
-       and exists (select 1 from relay.asn_presence p where p.node = t.node and p.updated_at > now() - interval '30 days')
+       and t.updated_at > now() - interval '30 days'
        and not exists (select 1 from relay.asn_presence p where p.node = t.node and p.updated_at > now() - interval '3 minutes')
   ), sent as (
     update relay.push_tokens t set last_sent_at = now()

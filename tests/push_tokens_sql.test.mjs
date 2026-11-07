@@ -1,6 +1,6 @@
 // 推播權杖（migration 20261109100000_push_tokens.sql，#797 PR①）。
 // 靜態：交易內、新表開 RLS、函式只給 service_role、不動既有函式。
-// 實跑（要 pglite）：註冊條件、權杖唯一、取消、要推誰（不在線、30 天、60 秒一則、停用、兩種情境）、權杖不外流、權限、清除。
+// 實跑（要 pglite）：註冊條件、權杖唯一、取消、要推誰（不在線、權杖 30 天內更新、60 秒一則、停用、兩種情境）、權杖不外流、權限、清除。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -96,7 +96,7 @@ test('註冊：同一台換新權杖覆蓋；同一個權杖換到別的節點�
   assert.deepEqual(await tokens(db), [])
 })
 
-test('要推誰：本人名下、android、有權杖、30 天內開過、現在不在線；兩種情境都可以', { skip }, async () => {
+test('要推誰：本人名下、android、有權杖、30 天內開過（權杖有更新）、現在不在線；兩種情境都可以', { skip }, async () => {
   const db = await boot()
   await reg(db, PH); await reg(db, OTHER, TOK2)
   await seen(db, PH, '10 minutes'); await seen(db, OTHER, '10 minutes')
@@ -109,16 +109,33 @@ test('要推誰：本人名下、android、有權杖、30 天內開過、現在�
   assert.equal((await targets(db, 'OWNER_MAIL')).error, 'bad_request', '大小寫不同也拒絕')
 })
 
-test('要推誰：在線不推；30 天沒開不推；沒有開過也不推', { skip }, async () => {
+const ageToken = (db, node, ago) => db.query(`update relay.push_tokens set updated_at = now() - $2::interval where node = $1`, [node, ago])
+
+test('要推誰：在線（3 分鐘內）不推；在線列久了就算不在線', { skip }, async () => {
   const db = await boot()
   await reg(db, PH)
-  assert.deepEqual(await targets(db), { targets: [] }, '從沒開過')
   await seen(db, PH, '1 minute')
   assert.deepEqual(await targets(db), { targets: [] }, '在線（3 分鐘內）')
-  await seen(db, PH, '31 days')
-  assert.deepEqual(await targets(db), { targets: [] }, '超過 30 天')
   await seen(db, PH, '4 minutes')
-  assert.equal((await targets(db)).targets.length, 1, '不在線、30 天內')
+  assert.equal((await targets(db)).targets.length, 1, '超過 3 分鐘沒回報＝不在線')
+})
+
+test('要推誰：沒有任何在線列（顯示為離線）、權杖 10 天前更新過 → 推', { skip }, async () => {
+  const db = await boot()
+  await reg(db, PH); await ageToken(db, PH, '10 days')
+  const { rows } = await db.query(`select count(*)::int n from relay.asn_presence where node = $1`, [PH])
+  assert.equal(rows[0].n, 0, '前提：完全沒有在線列')
+  assert.deepEqual(await targets(db), { targets: [{ node: PH, token: TOK }] })
+})
+
+test('要推誰：權杖 31 天沒更新（30 天沒開 App）→ 不推', { skip }, async () => {
+  const db = await boot()
+  await reg(db, PH); await ageToken(db, PH, '31 days')
+  assert.deepEqual(await targets(db), { targets: [] }, '沒有在線列')
+  await seen(db, PH, '40 days')
+  assert.deepEqual(await targets(db), { targets: [] }, '有很久以前的在線列也一樣')
+  await reg(db, PH)
+  assert.equal((await targets(db)).targets.length, 1, '開 App 重報權杖之後又會推')
 })
 
 test('要推誰：同一台 60 秒最多一則，過了再推；送出時間會記下', { skip }, async () => {
