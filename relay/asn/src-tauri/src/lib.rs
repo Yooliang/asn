@@ -935,7 +935,8 @@ impl view_stream::TPort for LiveTPort {
                 self.typed += k.d.chars().count() as u64;
             }
         }
-        Ok(Some(inp.lock().unwrap_or_else(|e| e.into_inner()).applied()))
+        let applied = inp.lock().unwrap_or_else(|e| e.into_inner()).applied();
+        Ok(Some(applied))
     }
 }
 
