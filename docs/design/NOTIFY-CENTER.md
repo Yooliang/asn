@@ -32,15 +32,18 @@
 - **固定的寄件人**：`from_agent = 'ASN 通知'`。`from_node` 照舊用「出事的那台」，或後台的系統節點，讓舊用戶端照舊能顯示。
   - 名字裡不含「收發室」。過渡期內，舊用戶端會把它當成一位新聯絡人，所以要等新版普及後才切換（見 3.4）。
 - **新增信件類別** `kind`（文字，可以是 null）：
-  - 系統通知帶 `notice:<種類>`，例如 `notice:login`、`notice:quota`、`notice:mux_down`、`notice:waiting`、`notice:view`、`notice:node_mismatch`、`notice:bridge`。
+  - 系統通知帶 `notice:<種類>`，例如 `notice:login`、`notice:quota`、`notice:mux_down`、`notice:waiting`、`notice:view`、`notice:device_key`、`notice:node_mismatch`、`notice:bridge`。
   - 一般信件是 null。
-  - 用戶端判斷是不是系統通知：先看 `kind` 開頭是不是 `notice:`；沒有 `kind` 時，再看寄件人是 `ASN 通知`，或名字結尾是「收發室」（相容舊信）。
+  - 用戶端判斷是不是系統通知**只信 `kind`**：開頭是 `notice:` 才算。寄件人名字（`ASN 通知`、結尾是「收發室」）和內文開頭 `[收發室]` 只用來相容**切換日期之前**的舊信，用信件的 `created_at` 切；切換日期定在 PR-C 上線那天，寫成用戶端的一個常數，PR-C 上線前先不設（照舊全部適用名字規則）。
+  - `kind` 只能由後台寫：PR-C 的 Edge 寄信路徑（`send` 等用戶端可以呼叫的動作）一律把用戶端帶來的 `kind` 清成 null，只有後台的寄通知函式能寫 `notice:*`。
+  - 寄件名保留：`names.rs` 的命名規則除了「不能以收發室結尾」，再加「不能叫 `ASN 通知`」；後台擋保留寄件名另開一張小 PR 先做。
+  - **命名不要撞**：推播已經有 `PushKind`（`owner_mail`、`waiting`，`push_ctl.ts:42`，也是 `asn_relay_push_targets` 的 `p_kind`），`waiting_notice` 和 `device_key_alert` 也各有自己的 `p_kind` 參數（權限種類、`first`／`changed`）。所以信件欄位的值一律帶 `notice:` 前綴，共用函式的參數叫 `p_topic`，不叫 `p_kind`；推播的種類照舊，不和信件類別共用名字。
   - 要不要加 `kind` 欄位需要改資料庫，見 3.3。如果不加，就只能靠固定寄件人判斷，不能分種類。建議加，手機分頁的篩選和未讀數之後都會用到。
 
 ### 3.2 用戶端（PR-B，先發版）
 
 - **共用判斷**：新增 `ui/lib/notice.mjs`，提供 `isSystemNotice(mail)`，供 `core.mjs`、`text.mjs`、電腦和手機的畫面使用。
-- **Rust 和 Node 橋**：`is_mailbox_sender` 改名成 `is_system_notice`，判斷「`kind` 是 `notice:*`、或寄件人是 `ASN 通知`、或名字結尾是『收發室』」。呼叫點照舊。內文開頭 `[收發室]` 的判斷也保留。
+- **Rust 和 Node 橋**：`is_mailbox_sender` 改名成 `is_system_notice`，判斷規則同 3.1（只信 `kind`，名字和內文開頭 `[收發室]` 只用於切換日期前的舊信）。呼叫點照舊。
 - **雲端代理**（`config.mjs:92,124`、`grok-agents.mjs:52`）也做同樣的改動。
 - **`core.mjs` 的 `#incoming`**：遇到系統通知不建 stub 好友，一律放進固定的對話 `notice:<帳號>`，畫面上顯示成「通知」。
   - 舊的「○○收發室」對話第一次載入時就併進「通知」：往來記錄依時間合併，未讀數相加。舊的那幾列不再顯示。
@@ -50,11 +53,15 @@
 
 ### 3.3 後台（PR-C，等新版普及才上）
 
-- **共用函式**：新增 `public.asn_relay_send_notice(p_node text, p_kind text, p_body text)`。
-  - 收件人是節點的擁有者，寄件人固定是 `ASN 通知`，`kind` 寫成 `notice:<p_kind>`，不能回信。
+- **共用函式**：新增 `public.asn_relay_send_notice(p_node text, p_topic text, p_body text)`。
+  - 收件人是節點的擁有者，寄件人固定是 `ASN 通知`，`kind` 寫成 `notice:<p_topic>`，不能回信。
+  - **回傳形狀不變**：各通知函式現在回 `{ ok, notify, bell_topics }`（`notify` 是 `sent`／`failed`／`rate_limited`／`skipped`）。Edge 靠 `notify` 記 log、決定要不要推播（例如 `relay/index.ts:393` 只在 `notify === "sent"` 時送 `waiting` 推播），靠 `bell_topics` 敲各設備的門鈴。改成呼叫共用函式後，各函式照舊回這個形狀，Edge 不用改。
   - 限流改成看「節點＋種類＋1 小時」，不再看寄件名。改了寄件名，限流也不會失效。
-- **各通知函式**：約 10 支（附錄列出 migration 檔名）改成呼叫這支共用函式。內文第一行一律寫「<設備顯示名>：<什麼事>」。
+- **各通知函式**：9 支函式、11 處定義（附錄列出 migration 檔名與行號）改成呼叫這支共用函式。內文第一行一律寫「<設備顯示名>：<什麼事>」。
 - **`relay.messages` 加 `kind` 欄位**：文字，可以是 null，不加預設值，舊資料是 null。Edge 收信時把它原樣帶給用戶端。舊用戶端不認得這個欄位，會直接忽略。
+- **手機推播（FCM）和看畫面通知**：
+  - 推播不在這次範圍內：哪些事要推播、推給誰，照舊由 Edge 依 `notify` 決定（現在只有本人信件 `owner_mail` 和等待確認 `waiting` 會推）。通知集中只改信件寄到哪個對話，不改推播。之後手機通知分頁（PR-H）若要依 `kind` 決定推播，再另外設計。
+  - 看畫面通知（`asn_relay_term_view_notice`，由 `term_view_ctl.ts` 的 `term_view_notice` 動作呼叫）和設備金鑰通知（`asn_relay_device_key_alert`）一樣改用共用函式，主題分別是 `view` 和 `device_key`；看畫面的請求、接受、停止這些流程本身不是通知，不動。
 - **舊信**：已經存在 `relay.messages` 的舊寄件名信件不動，用戶端照 3.2 的規則併進「通知」。
 - **不可逆的點**：PR-C 上線後，還沒更新的舊版用戶端會看到一位新聯絡人「ASN 通知」。所以要等 PR-B 發出去 7 天之後才上；上線前用在線回報確認大多數設備都已經是新版。
 - **回復**：`asn_relay_send_notice` 照舊保留，各通知函式改回原本的寄件名就能回復。`kind` 欄位可以留著不刪。
@@ -100,7 +107,7 @@ asn真 直接定的技術細節：環境變數用 `ASN_CLOUD_AGENTS`；#746 舊�
 
 ## 附錄：要改的地方（2026-11-07 依 main 逐行核對）
 
-- **後台寄件**：`v_agent constant text := '…收發室'`，共 11 處，分屬 8 種寄件名。改的時候以每支函式**最後一次定義**的 migration 為準。
+- **後台寄件**：`v_agent constant text := '…收發室'`，9 支函式、11 處定義，分屬 8 種寄件名。改的時候以每支函式**最後一次定義**的 migration 為準。
   - `20261031110000_acct_login_alert_notify.sql:33`：登入通知收發室
   - `20261102130000_inbox_watch.sql:96`、`20261102170000_node_platform_phone.sql:138`：收信監控收發室（第二個檔重新定義了同一支函式）
   - `20261102160000_inbox_hold_until.sql:41`：額度通知收發室
@@ -108,7 +115,8 @@ asn真 直接定的技術細節：環境變數用 `ASN_CLOUD_AGENTS`；#746 舊�
   - `20261104140000_waiting_notice.sql:30`：等待確認收發室
   - `20261105110000_mux_down_notice.sql:29`：終端服務收發室
   - `20261106130000_node_mismatch_notice.sql:29`：雲端設定收發室
-  - `20261107110000_term_views.sql:219`、`20261107130000_device_key_alert.sql:36`、`20261108100000_term_view_scope.sql:125`：看畫面收發室
+  - `20261107110000_term_views.sql:219`、`20261108100000_term_view_scope.sql:125`：看畫面收發室（`asn_relay_term_view_notice`，兩支 migration 都定義了它，以後者為準）
+  - `20261107130000_device_key_alert.sql:36`：看畫面收發室（`asn_relay_device_key_alert`，同一個寄件名、另一支函式）
 - **不回信，以及「收發室」名字的判斷**：
   - Rust 橋 `relay/asn/src-tauri/src/bridge/`
     - `core.rs`：
