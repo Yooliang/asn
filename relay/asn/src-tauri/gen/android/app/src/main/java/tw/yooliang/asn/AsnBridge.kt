@@ -91,6 +91,16 @@ class AsnBridge(private val activity: MainActivity) {
   @JavascriptInterface fun callStopSpeak() = activity.callVoice.stopSpeak()
   @JavascriptInterface fun callEnd() = activity.callVoice.end()
 
+  // ---------- 推播（#797，FCM）：見 AsnPush.kt；事件（perm／token／token-error／refresh）由它推回網頁 ----------
+  /** unavailable（沒有 Firebase）／granted／ask（還沒問過通知權限）／denied（問過被拒，不再問） */
+  @JavascriptInterface fun pushState(): String = AsnPush.state(activity)
+  /** 問通知權限（只問一次） */
+  @JavascriptInterface fun pushAskPermission() = AsnPush.askPermission(activity)
+  /** 向 Firebase 取權杖，結果用事件交給網頁 */
+  @JavascriptInterface fun pushRequestToken() = AsnPush.requestToken(activity)
+  /** 登出、換帳號時刪掉 Firebase 的權杖 */
+  @JavascriptInterface fun pushDeleteToken() = AsnPush.deleteToken(activity)
+
   /** 通話中讓螢幕保持亮著（不然自己暗掉就會被當成切到背景而結束通話） */
   @JavascriptInterface
   fun keepAwake(on: Boolean) {

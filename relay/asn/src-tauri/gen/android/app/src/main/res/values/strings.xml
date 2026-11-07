@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">"ASN"</string>
     <string name="main_activity_title">"ASN"</string>
+    <string name="push_channel_name">新訊息</string>
 </resources>

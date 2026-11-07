@@ -179,6 +179,25 @@ export function androidBridge(win) {
     installApk: path => String(call('installApk', path) ?? 'error'),   // ok／need_permission／error／unsupported
     call: callBridge(win, b),   // 偽通話用的語音辨識與念出（沒有就是 null，畫面不出現通話鈕）
     keepAwake: on => call('keepAwake', on === true),   // 通話中螢幕不要自己暗掉
+    push: pushBridge(win, b),   // 推播（#797，FCM）：App 關著也要響；外殼沒有這些方法或沒有 Firebase 就是 null／unavailable
+  }
+}
+
+// 推播的外殼橋（AsnPush.kt）：權限、向 Firebase 取權杖、刪權杖。事件由外殼用 window.__asnPushEvent(json字串) 推進來（見 mobile-push.mjs）。
+// 外殼太舊（沒有這些方法）就回 null。權杖只經過事件，這裡不存、不寫 log。
+function pushBridge(win, b) {
+  if (typeof b.pushState !== 'function') return null
+  const run = (fn, ...a) => { try { return typeof b[fn] === 'function' ? b[fn](...a) : undefined } catch { return undefined } }
+  return {
+    state: () => { const s = run('pushState'); return s === 'ask' || s === 'granted' || s === 'denied' ? s : 'unavailable' },
+    askPermission: () => run('pushAskPermission'),
+    requestToken: () => run('pushRequestToken'),
+    deleteToken: () => run('pushDeleteToken'),
+    onEvent(fn) {
+      const h = s => { let e = null; try { e = JSON.parse(s) } catch { return } fn(e) }
+      win.__asnPushEvent = h
+      return () => { if (win.__asnPushEvent === h) win.__asnPushEvent = null }
+    },
   }
 }
 
