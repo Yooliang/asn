@@ -19,15 +19,28 @@ mkdir -p "$OUT"
 cd "$OUT" || exit 1
 
 rows=()
-note() { rows+=("| $1 | $2 | $3 |"); echo "[probe] $1: $2 $3"; }
+FAILED=0   # 有 ✖ 的項目數：任一關鍵步驟失敗，整個腳本以 exit 1 結束（job 會紅）
+WARNED=0   # 有 △ 的項目數：不讓 job 變紅，但會在 summary 標出來
+note() {
+  rows+=("| $1 | $2 | $3 |"); echo "[probe] $1: $2 $3"
+  case "$2" in ✖*) FAILED=$((FAILED + 1));; △*) WARNED=$((WARNED + 1));; esac
+}
 finish() {
+  local rc=$?
   {
     echo "### WezTerm（${WEZTERM_VERSION}，${TAR_NAME}）在 $(. /etc/os-release && echo "$PRETTY_NAME")，沒有 DISPLAY"
+    echo
+    if [ "$FAILED" -gt 0 ] || [ "$rc" -ne 0 ]; then echo "**結果：失敗（$FAILED 項 ✖）**"
+    elif [ "$WARNED" -gt 0 ]; then echo "**結果：通過，但有 $WARNED 項 △ 要看**"
+    else echo "**結果：全部通過**"; fi
     echo
     echo "| 項目 | 結果 | 備註 |"
     echo "|---|---|---|"
     printf '%s\n' "${rows[@]}"
   } >> "$SUMMARY"
+  # 在 EXIT 的處理裡 exit，可以改掉整個腳本的結束碼：有 ✖ 就讓 job 變紅
+  if [ "$FAILED" -gt 0 ]; then exit 1; fi
+  exit "$rc"
 }
 trap finish EXIT
 
@@ -76,14 +89,26 @@ LUA
 cli() { WEZTERM_UNIX_SOCKET="$SOCK" "$WEZ" --config-file "$OUT/mux.lua" cli --no-auto-start --prefer-mux "$@"; }
 
 # 「啟動者」：模擬 ASN——它用 setsid 讓 mux-server 脫離自己再啟動，之後自己繼續活著（我們會殺它）
-(
-  setsid "$MUX" --config-file "$OUT/mux.lua" > mux.log 2>&1 &
-  echo $! > mux.pid
-  wait
-) &
-STARTER=$!
-for _ in $(seq 1 40); do [ -s mux.pid ] && break; sleep 0.25; done
+# PROBE_MODE=setsid（預設）：啟動者用 setsid 起一個前景的 mux-server；PROBE_MODE=daemonize：啟動者呼叫 mux-server --daemonize（它自己 fork 到背景後啟動者的指令就結束），之後啟動者留著不動
+MODE="${PROBE_MODE:-setsid}"
+if [ "$MODE" = daemonize ]; then
+  (
+    "$MUX" --daemonize --config-file "$OUT/mux.lua" > mux.log 2>&1
+    sleep 600
+  ) &
+  STARTER=$!
+  for _ in $(seq 1 40); do pgrep -n -x wezterm-mux-server > mux.pid 2>/dev/null && [ -s mux.pid ] && break; sleep 0.25; done
+else
+  (
+    setsid "$MUX" --config-file "$OUT/mux.lua" > mux.log 2>&1 &
+    echo $! > mux.pid
+    wait
+  ) &
+  STARTER=$!
+  for _ in $(seq 1 40); do [ -s mux.pid ] && break; sleep 0.25; done
+fi
 MUXPID=$(cat mux.pid 2>/dev/null || echo 0)
+note "啟動方式" "$MODE" "啟動者 pid $STARTER"
 up=no
 for _ in $(seq 1 60); do
   if cli list > list0.log 2>&1; then up=yes; break; fi
