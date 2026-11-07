@@ -414,8 +414,88 @@ const MACCT_MEMBERS = {
   one: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
   two: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
 }
-export const probeKind = probe => (probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 手機設置頁排版（#930）：設置 → 設備／帳號，412、360 寬與大字型（字放大 1.3 倍，模擬手機系統的大字型）各一張。
+// 檢查：分頁鈕的字沒被切、每列三行都在列內、「這支手機」的圓點和別列對齊、設備頁沒有額度註腳；
+// 帳號頁註腳在、沒有「這台沒有存這個帳號」、切換鈕右緣對齊且字沒被切
+export const MLAYOUT_PROBES = {
+  devices: { mlayout: true, tab: 'devices', big: false },
+  accounts: { mlayout: true, tab: 'accounts', big: false },
+  devicesBig: { mlayout: true, tab: 'devices', big: true },
+  accountsBig: { mlayout: true, tab: 'accounts', big: true },
+}
+export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const tab = ${JSON.stringify(tab)};
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  btn.click();
+  // 帳號頁的「切換到…」要先讀過各台的帳號回報（點進那台細部才讀）：逐台點進去再返回
+  if (tab === 'accounts') {
+    await sleep(500);
+    const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
+    for (let i = 0; i < n; i++) {
+      const go = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i]?.querySelector('.m-dv-go');
+      if (!go) break;
+      go.click(); await sleep(500);
+      const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
+      if (back) { back.click(); await sleep(400) }
+    }
+  }
+  let seg = null;
+  for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="' + tab + '"]'); if (!seg) await sleep(100) }
+  if (!seg) return { ok: false, why: '找不到「' + tab + '」分頁鈕' };
+  seg.click();
+  await sleep(600);
+  if (${big ? 'true' : 'false'}) {
+    const els = [...document.querySelectorAll('#app *')];
+    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
+    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
+    await sleep(300);
+  }
+  const vis = e => e && e.offsetParent !== null;
+  const R = e => e.getBoundingClientRect();
+  const textRect = e => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect() };
+  for (const b of document.querySelectorAll('.m-dv-segbtn')) {
+    const t = textRect(b), r = R(b);
+    if (t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '分頁鈕「' + b.textContent.trim() + '」的字被切' };
+  }
+  const foot = [...document.querySelectorAll('.m-dv-foot')].find(vis);
+  if (tab === 'devices') {
+    const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
+    if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
+    if (!rows.some(r => (r.querySelector('.m-dv-line')?.textContent ?? '').includes('還沒收到這台的回報'))) return { ok: false, why: '沒有一列有第三行「還沒收到這台的回報」' };
+    const list = R(document.querySelector('.m-dv-list'));
+    for (const row of rows) {
+      const rr = R(row);
+      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .m-dv-line')) {
+        const t = textRect(e);
+        if (t.bottom > rr.bottom + 0.5 || t.bottom > list.bottom + 0.5) return { ok: false, why: '「' + (row.querySelector('b')?.textContent ?? '') + '」那列的「' + e.textContent.trim() + '」被切' };
+      }
+    }
+    const dots = rows.map(r => R(r.querySelector('.m-dv-dot')).left);
+    if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
+    if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
+  } else {
+    if (!foot) return { ok: false, why: '帳號頁沒有額度註腳' };
+    if (document.querySelector('.m-dv-my')?.textContent.includes('這台沒有存這個帳號')) return { ok: false, why: '還有「這台沒有存這個帳號」' };
+    const sws = [...document.querySelectorAll('.m-dv-sw')].filter(vis);
+    if (!sws.length) return { ok: false, why: '沒有切換鈕可以檢查' };
+    for (const b of sws) if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
+    const cards = [...document.querySelectorAll('.m-dv-acct')].filter(c => c.querySelector('.m-dv-sw'));
+    for (const c of cards) {
+      const rights = [...c.querySelectorAll('.m-dv-sw')].map(b => R(b).right);
+      if (Math.max(...rights) - Math.min(...rights) > 1) return { ok: false, why: '同一張卡的切換鈕右緣沒對齊' };
+      const smalls = [...c.querySelectorAll('.m-dv-swt small')].filter(vis);
+      const left = [...c.querySelectorAll('.m-dv-sw')].map(b => R(b).left);
+      if (Math.max(...left) - Math.min(...left) > 1) return { ok: false, why: '同一張卡的切換鈕寬度不一' };
+      for (const sm of smalls) if (R(sm).right > Math.min(...left) + 0.5) return { ok: false, why: '說明字壓到按鈕' };
+    }
+  }
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -444,6 +524,19 @@ function cardsRoster(now = SMOKE_NOW) {
       windows: [{ name: 'five_hour', left_pct: 55, resets_at: toMinute(now + 2 * 3600_000), read_at: old, read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: toMinute(now + 4 * 24 * 3600_000), read_at: old, read_node: 'P' }] },
     { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: old, seen_node: 'P', nodes: [] }] }
 }
+// #930 手機設置頁排版：這支手機＋兩台電腦（工作機的回報是舊的，第三行會是「還沒收到這台的回報」）；
+// 辦公室有兩個 Claude 帳號、ASN 在線（可以切換）；工作機也存了兩個但 ASN 不在線（按鈕停用、左邊有說明字），第 8 點的對齊才看得到
+function layoutRoster(now = SMOKE_NOW) {
+  const r = resetRoster(now)
+  const read = toMinute(now - 10 * 60_000)
+  return { ...r, accounts: [...r.accounts,
+    { vendor: 'claude', account: 'work@example.com', plan: 'claude_pro', seen_at: read, seen_node: 'Q', nodes: [{ node: 'Q', current: true, reported_at: read }],
+      windows: [{ name: 'five_hour', left_pct: 64, resets_at: toMinute(now + 2 * 3600_000), read_at: read, read_node: 'Q' }, { name: 'weekly', left_pct: 50, resets_at: toMinute(now + 3 * 24 * 3600_000), read_at: read, read_node: 'Q' }] }] }
+}
+const layoutAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
+  Q: { asn_online: true, reported_at: toMinute(now - 5 * 60_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
+  R: { asn_online: false, reported_at: toMinute(now - 9 * 24 * 3600_000), accounts: [{ vendor: 'claude', email: 'work@example.com', plan: 'claude_pro', current: true }, { vendor: 'claude', email: 'me@example.com', plan: 'claude_max', current: false }] },
+}, fallback: null })
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 export const SCENARIOS = [
@@ -462,6 +555,13 @@ export const SCENARIOS = [
   { name: 'm-acct-cards', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-cards.png' },
   { name: 'm-acct-back-one', page: 'm.html', state: { signedIn: true, macct: 'one' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
   { name: 'm-acct-back-two', page: 'm.html', state: { signedIn: true, macct: 'two' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
+  // 手機設置頁排版（#930）：412、360 寬與大字型各一張
+  { name: 'm-layout-devices', page: 'm.html', state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devices, shot: 'm-layout-devices-412.png' },
+  { name: 'm-layout-devices-360', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devices, shot: 'm-layout-devices-360.png' },
+  { name: 'm-layout-devices-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devicesBig, shot: 'm-layout-devices-big.png' },
+  { name: 'm-layout-accounts', page: 'm.html', state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-412.png' },
+  { name: 'm-layout-accounts-360', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accounts, shot: 'm-layout-accounts-360.png' },
+  { name: 'm-layout-accounts-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accountsBig, shot: 'm-layout-accounts-big.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -550,6 +650,13 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MACCT_ME) } }
     t.android_launchers = { machines: [] }
     t.android_acct_roster = ROSTER_SAMPLE
+  }
+  if (scenario.state.mlayout) {
+    t.relay_list = { members: MACCT_MEMBERS.two }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } }
+    t.android_launchers = { machines: [] }
+    t.android_acct_roster = layoutRoster()
+    t.android_acct_list = layoutAcctList()
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   return t
