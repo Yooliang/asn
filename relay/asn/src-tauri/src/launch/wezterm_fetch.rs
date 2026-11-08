@@ -140,22 +140,41 @@ pub(crate) fn avail_bytes(frsize: u64, bsize: u64, bavail: u64) -> u64 {
     bavail.saturating_mul(unit)
 }
 
-/// 該資料夾所在檔案系統的可用位元組；查不到回 None。直接呼叫 libc 的 statvfs（和 wezterm.rs 呼叫 setsid 同樣的寫法，不新增相依、
-/// 不跑外部指令）。只在 64 位元 Linux 做：那裡 glibc 與 musl 的 struct statvfs 前 11 個欄位都是 8 位元組，
-/// 這裡用一塊 128 位元組（比實際的 112 大）的緩衝區，只按位置讀要的欄位（1＝f_frsize、0＝f_bsize、4＝f_bavail），不宣告整個結構
-#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+/// x86_64 Linux 的 `struct statvfs`（glibc 的 <bits/statvfs.h>、musl 的 <sys/statvfs.h> 欄位順序與大小相同，共 112 位元組）。
+/// 前 11 個欄位都是 unsigned long／fsblkcnt_t／fsfilcnt_t＝8 位元組；最後 24 位元組是保留位（glibc 是 int __f_spare[6]，
+/// musl 是 unsigned f_type + int __reserved[5]），這裡一律當 6 個 int 的保留位
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[repr(C)]
+struct StatVfs {
+    f_bsize: u64,
+    f_frsize: u64,
+    f_blocks: u64,
+    f_bfree: u64,
+    f_bavail: u64,
+    f_files: u64,
+    f_ffree: u64,
+    f_favail: u64,
+    f_fsid: u64,
+    f_flag: u64,
+    f_namemax: u64,
+    f_spare: [i32; 6],
+}
+
+/// 該資料夾所在檔案系統的可用位元組；查不到回 None。直接呼叫 libc 的 `statvfs`（和 wezterm.rs 呼叫 setsid 同樣的寫法，
+/// 不新增相依、不跑外部指令）。只在 x86_64 Linux 做，其他平台回 None（呼叫端照放行處理）
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn free_bytes(dir: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     extern "C" {
-        fn statvfs(path: *const std::os::raw::c_char, buf: *mut u64) -> i32;
+        fn statvfs(path: *const std::os::raw::c_char, buf: *mut StatVfs) -> i32;
     }
     let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
-    let mut buf = [0u64; 16];
-    // SAFETY: path 是以 NUL 結尾的 C 字串；buf 比 struct statvfs 大，statvfs 只會寫進它
-    let rc = unsafe { statvfs(path.as_ptr(), buf.as_mut_ptr()) };
-    (rc == 0).then(|| avail_bytes(buf[1], buf[0], buf[4]))
+    // SAFETY: path 是以 NUL 結尾的 C 字串；全部欄位都是整數，全 0 是合法值；statvfs 只寫進這個大小正確的結構
+    let mut v: StatVfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { statvfs(path.as_ptr(), &mut v) };
+    (rc == 0).then(|| avail_bytes(v.f_frsize, v.f_bsize, v.f_bavail))
 }
-#[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn free_bytes(_dir: &Path) -> Option<u64> {
     None
 }
@@ -606,9 +625,10 @@ mod tests {
         assert!(check_space(None, NEED_FREE).is_ok());
     }
 
-    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn 磁碟空間_statvfs_真的讀得到_不存在的路徑是_none() {
+        assert_eq!(std::mem::size_of::<StatVfs>(), 112, "和 glibc／musl 的 struct statvfs 一樣大");
         let d = tempfile::tempdir().unwrap();
         let free = free_bytes(d.path()).expect("暫存資料夾所在的檔案系統查得到");
         assert!(free > 0 && free < (1u64 << 60), "{free}");
@@ -776,6 +796,11 @@ mod tests {
         let found = super::super::wezterm::locate(&super::super::wezterm::RealFs).expect("locate 要找得到取得的");
         assert!(found.cli.starts_with(&base), "{:?}", found.cli);
         assert_eq!(found.gui, None, "沒有桌面版");
+        for name in ["wezterm", "wezterm-mux-server"] {
+            let o = std::process::Command::new(dir.join(name)).no_window().arg("--version").env_clear().output().expect("跑 --version");
+            assert!(o.status.success(), "{name} --version 失敗");
+            println!("--version {name}：{}", String::from_utf8_lossy(&o.stdout).trim());
+        }
         println!("取得完成：{}", dir.display());
     }
 }
