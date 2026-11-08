@@ -53,8 +53,9 @@ mod term_remote;
 mod perm_remote;
 mod device_id;
 mod keystore;
-#[cfg(desktop)]
 mod view_handshake;
+mod view_frame;
+mod term_frame;
 #[cfg(desktop)]
 mod view_stream;
 #[cfg(desktop)]
