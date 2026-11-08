@@ -440,8 +440,19 @@ fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, Strin
 /// 找到的 WezTerm 資料夾
 #[derive(Debug, Clone)]
 pub struct WezTermDir {
-    pub gui: PathBuf,
+    /// 桌面版（wezterm-gui）。無畫面的 Linux 主機沒有它：None。Windows 一定是 Some
+    pub gui: Option<PathBuf>,
     pub cli: PathBuf,
+}
+
+/// 沒有桌面版卻要開 GUI 時給使用者看的話
+pub const NO_GUI: &str = "這台電腦沒有安裝 WezTerm 桌面版，無法開啟終端畫面";
+
+impl WezTermDir {
+    /// 開 GUI 用：沒有桌面版就回清楚的錯
+    pub fn gui_path(&self) -> Result<&Path, String> {
+        self.gui.as_deref().ok_or_else(|| NO_GUI.to_string())
+    }
 }
 
 const NOT_FOUND: &str = "找不到 WezTerm（安裝資料夾裡的 wezterm 不見了，請重新安裝 ASN；開發時可用 ASN_WEZTERM_DIR 指到別的副本）";
@@ -474,11 +485,11 @@ pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
 pub fn locate_unix(env: Option<PathBuf>, path_var: Option<&str>, fs: &dyn Fs) -> Result<WezTermDir, String> {
     let usable = |p: &Path| fs.file_len(p).is_some_and(|n| n > 0);
     // 無畫面主機（沒有桌面）只裝 wezterm（cli）和 wezterm-mux-server，沒有 wezterm-gui：兩者有一支就算找到，
-    // gui 路徑照樣填（不存在也無妨，mux 模式不會用它）
+    // 沒有 gui 就是 None，要開 GUI 的地方會回「沒有安裝桌面版」
     let pick = |dir: &Path| {
         let (gui, cli) = (dir.join(UNIX_GUI), dir.join(UNIX_CLI));
         let server = dir.join(UNIX_MUX);
-        (usable(&cli) && (usable(&gui) || usable(&server))).then_some(WezTermDir { gui, cli })
+        (usable(&cli) && (usable(&gui) || usable(&server))).then(|| WezTermDir { gui: usable(&gui).then_some(gui), cli })
     };
     if let Some(dir) = env.filter(|d| !d.as_os_str().is_empty()) {
         return pick(&dir).ok_or_else(|| NOT_FOUND_UNIX.to_string());
@@ -506,7 +517,7 @@ pub fn locate_with(env: Option<PathBuf>, bundled: Option<PathBuf>, fs: &dyn Fs) 
     if !usable(&gui) || !usable(&cli) {
         return Err(NOT_FOUND.to_string());
     }
-    Ok(WezTermDir { gui, cli })
+    Ok(WezTermDir { gui: Some(gui), cli })
 }
 
 /// 啟動後的視窗資訊
@@ -763,11 +774,11 @@ impl<'a> WezTerm<'a> {
         args.extend(command.iter().cloned());
         let mut merged = env.clone();
         merged.extend(self.config_env());
-        self.runner.spawn_clean(&self.dir.gui, &args, &merged)
+        self.runner.spawn_clean(self.dir.gui_path()?, &args, &merged)
     }
 
     fn spawn_gui(&self, args: Vec<String>) -> Result<Window, String> {
-        let gui_pid = self.runner.spawn(&self.dir.gui, &args, &self.config_env())?;
+        let gui_pid = self.runner.spawn(self.dir.gui_path()?, &args, &self.config_env())?;
         self.wait_sock(gui_pid)
     }
 
@@ -1238,7 +1249,7 @@ mod tests {
 
     fn dirs() -> WezTermDir {
         WezTermDir {
-            gui: "W/wezterm-gui.exe".into(),
+            gui: Some("W/wezterm-gui.exe".into()),
             cli: "W/wezterm.exe".into(),
         }
     }
@@ -1460,7 +1471,7 @@ mod tests {
             fs.files.borrow_mut().insert(f.into());
         }
         let d = locate_unix(None, Some(".::rel:/usr/bin:/opt/w"), &fs).unwrap();
-        assert_eq!((d.gui, d.cli), (PathBuf::from("/opt/w/wezterm-gui"), PathBuf::from("/opt/w/wezterm")), "跳過 .、空字串、相對路徑，也跳過只有其中一支的");
+        assert_eq!((d.gui, d.cli), (Some(PathBuf::from("/opt/w/wezterm-gui")), PathBuf::from("/opt/w/wezterm")), "跳過 .、空字串、相對路徑，也跳過只有其中一支的");
         assert_eq!(locate_unix(None, Some(".:rel:"), &fs).unwrap_err(), NOT_FOUND_UNIX, "只有相對路徑：找不到");
         assert_eq!(locate_unix(None, None, &fs).unwrap_err(), NOT_FOUND_UNIX);
         assert!(locate_unix(Some("/opt/w".into()), Some(""), &fs).is_ok(), "環境變數有設就只認它");
@@ -1480,6 +1491,8 @@ mod tests {
         let d = locate_unix(None, Some("/g/bin:/h/bin"), &fs).unwrap();
         assert_eq!(d.cli, PathBuf::from("/h/bin/wezterm"), "沒有 cli 的資料夾跳過");
         assert_eq!(d.cli.with_file_name(UNIX_MUX), PathBuf::from("/h/bin/wezterm-mux-server"));
+        assert_eq!(d.gui, None, "沒有桌面版就是 None，不填一個不存在的路徑");
+        assert_eq!(d.gui_path().unwrap_err(), NO_GUI);
     }
 
     #[test]

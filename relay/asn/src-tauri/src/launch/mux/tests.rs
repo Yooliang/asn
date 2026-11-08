@@ -787,14 +787,39 @@ fn linux_real_mux_spawn_get_text() {
             outcome = Err(format!("get-text 沒讀到 ASN-OK：{text:?}"));
         }
     }
+    // 第二個窗格：包了結束暗號殼（產品的 mux_wrapped_argv_sh）跑 `sh -c 'exit 3'`，get-text 要讀得到結束標記與結束碼 3
+    let nonce = "c0ffee00c0ffee00";
+    let wrapped = super::super::local::mux_wrapped_argv_sh(&["sh".to_string(), "-c".to_string(), "exit 3".to_string()], nonce, &[]);
+    let mut sub2: Vec<&str> = vec!["spawn", "--new-window", "--workspace", "asn-2", "--cwd", "/tmp", "--"];
+    sub2.extend(wrapped.iter().map(String::as_str));
+    let mut exit_code = None;
+    let mut text2 = String::new();
+    match r.run_clean(&m.cli, &spawn_args(&sub2), &cli_env(&m.base_env, &m.paths.sock), Duration::from_secs(20)) {
+        Ok(o) if o.success => {
+            let pane2 = o.stdout.trim().to_string();
+            for _ in 0..50 {
+                if let Ok(o) = m.cli(&["get-text", "--pane-id", &pane2]) {
+                    text2 = o.stdout;
+                    exit_code = super::super::wezterm::pane_exit_from_screen(&text2, nonce);
+                    if exit_code.is_some() {
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+        other => text2 = format!("spawn 失敗：{other:?}"),
+    }
     let count = m.pane_count();
     // 先收尾（只停 pid 檔記的那個），再下判斷，失敗也不會留下 mux
     let stopped = m.stop();
     std::thread::sleep(Duration::from_secs(1));
     let still = crate::heartbeat::pid_alive(pid);
     println!("get-text 內容：{:?}", text.lines().find(|l| l.contains("ASN-OK")));
+    println!("結束標記：{:?}", text2.lines().find(|l| l.contains("[asn-exit")));
     outcome.expect("開窗格與讀畫面");
-    assert_eq!(count, Ok(1), "只有我們開的那個夥伴窗格");
+    assert_eq!(exit_code, Some(3), "包殼窗格讀得到結束碼 3：{text2:?}");
+    assert_eq!(count, Ok(2), "兩個夥伴窗格（asn-1、asn-2）");
     stopped.expect("停 mux");
     assert!(!still, "mux 已經結束");
 }

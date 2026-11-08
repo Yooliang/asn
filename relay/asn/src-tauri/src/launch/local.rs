@@ -576,6 +576,21 @@ pub(crate) fn mux_wrapped_argv_env(argv: &[String], nonce: &str, ps_module_path:
     vec![format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"), "-NoLogo".into(), "-NoProfile".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-EncodedCommand".into(), encode_ps_command(&script)]
 }
 
+/// Linux／macOS 的夥伴窗格包裝殼（對應上面 Windows 的 PowerShell 版）：用 `/bin/sh`，程式結束後印 [`exit_marker`] 與結束碼。
+/// 原指令**不進腳本文字**，而是當 `sh -c` 的位置參數（`"$@"`）原樣傳進去，所以空白、單引號、`$`、反引號、換行都不需要跳脫，也不可能被當成 shell 語法。
+/// `trap : INT`：按 Ctrl+C 時夥伴自己（預設處理）被中斷，殼不跟著死，照樣印標記（對應 Windows 版的 finally）。
+/// `remove`：從夥伴環境拿掉的變數名（只收合法的 shell 變數名，其他略過）。結束碼：被信號結束是 128+信號，找不到指令是 127
+pub(crate) fn mux_wrapped_argv_sh(argv: &[String], nonce: &str, remove: &[String]) -> Vec<String> {
+    let nonce: String = nonce.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let valid = |n: &&String| !n.is_empty() && !n.starts_with(|c: char| c.is_ascii_digit()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let unset: String = remove.iter().filter(valid).map(|n| format!("unset {n}\n")).collect();
+    let reset = r"printf '\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?1015l\033[?1004l\033[?2004l\033[?25h'";
+    let script = format!(
+        "trap : INT\n{unset}\"$@\"\ncode=$?\n{reset}\nprintf '\\n[ASN] 程式已結束（結束碼 %s）\\n' \"$code\"\nprintf '[asn-exit {nonce} %s]\\n' \"$code\"\nexit \"$code\"\n"
+    );
+    ["/bin/sh".to_string(), "-c".to_string(), script, "asn-wrap".to_string()].into_iter().chain(argv.iter().cloned()).collect()
+}
+
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
@@ -1107,5 +1122,68 @@ mod tests {
         let e = start_console_window_windows("t", "cmd.exe", &[], bad, true, &[]).unwrap_err();
         assert!(e.starts_with("開不起來"), "{e}");
         assert!(e.len() > "開不起來：".len(), "{e}");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod sh_wrap_tests {
+    use super::*;
+
+    fn run(argv: &[&str], nonce: &str, remove: &[String]) -> (String, i32) {
+        let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+        let w = mux_wrapped_argv_sh(&argv, nonce, remove);
+        let o = Command::new(&w[0]).args(&w[1..]).env("ASN_TEST_SECRET", "x").stdin(Stdio::null()).output().unwrap();
+        (String::from_utf8_lossy(&o.stdout).into_owned(), o.status.code().unwrap_or(-1))
+    }
+
+    #[test]
+    fn sh_包殼_參數含空白_單引號_錢字號_反引號_換行_原樣傳進去() {
+        let args = ["a b", "it's", "$HOME", "`id`", "x\ny", "", "\"q\"", "a;b&c|d"];
+        let mut argv = vec!["printf", "[%s]"];
+        argv.extend(args);
+        let (out, code) = run(&argv, "n0nce", &[]);
+        assert_eq!(code, 0);
+        let want: String = args.iter().map(|a| format!("[{a}]")).collect();
+        assert!(out.starts_with(&want), "{out:?}");
+        assert!(out.contains("[asn-exit n0nce 0]"), "{out:?}");
+    }
+
+    #[test]
+    fn sh_包殼_腳本文字不含原指令_沒辦法被注入() {
+        let w = mux_wrapped_argv_sh(&["echo".to_string(), "$(touch /tmp/asn-x)'; rm -rf /; '".to_string()], "abc", &[]);
+        assert_eq!(&w[..2], ["/bin/sh", "-c"]);
+        assert!(!w[2].contains("touch") && !w[2].contains("rm -rf"), "{}", w[2]);
+        assert_eq!(&w[3..5], ["asn-wrap", "echo"]);
+        assert!(w[5].contains("rm -rf"), "原指令在位置參數裡，原樣");
+    }
+
+    #[test]
+    fn sh_包殼_結束碼印在標記裡_解析程式認得() {
+        for (cmd, want) in [(vec!["sh", "-c", "exit 3"], 3), (vec!["true"], 0), (vec!["sh", "-c", "exit 255"], 255), (vec!["/no/such/prog"], 127)] {
+            let (out, code) = run(&cmd, "f00d", &[]);
+            assert_eq!(code, want, "{cmd:?}");
+            assert_eq!(crate::launch::wezterm::pane_exit_from_screen(&out, "f00d"), Some(want), "{cmd:?} {out:?}");
+            assert_eq!(crate::launch::wezterm::pane_exit_from_screen(&out, "other"), None, "暗號不符不算");
+        }
+    }
+
+    #[test]
+    fn sh_包殼_程式被信號結束_結束碼是_128_加信號() {
+        let (out, _) = run(&["sh", "-c", "kill -TERM $$"], "abc1", &[]);
+        assert_eq!(crate::launch::wezterm::pane_exit_from_screen(&out, "abc1"), Some(143), "{out:?}");
+    }
+
+    #[test]
+    fn sh_包殼_要移除的環境變數拿掉_名字不合法的略過() {
+        let remove = vec!["ASN_TEST_SECRET".to_string(), "bad name; echo pwn".to_string(), "1X".to_string(), String::new()];
+        let (out, _) = run(&["sh", "-c", "printf 'v=[%s]' \"${ASN_TEST_SECRET-unset}\""], "abc2", &remove);
+        assert!(out.contains("v=[unset]"), "{out:?}");
+        assert!(!out.contains("pwn"), "{out:?}");
+    }
+
+    #[test]
+    fn sh_包殼_暗號只留英數字() {
+        let w = mux_wrapped_argv_sh(&["true".to_string()], "a'b;c d", &[]);
+        assert!(w[2].contains("[asn-exit abcd %s]"), "{}", w[2]);
     }
 }
