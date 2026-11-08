@@ -3,7 +3,7 @@
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
-import { isMergedAway } from './notice.mjs'
+import { NOTICE_ID, NOTICE_LABEL, isMergedAway, isNoticeFriend } from './notice.mjs'
 import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 
@@ -13,12 +13,19 @@ import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 // 對話不再是蓋在名單上的一層：第二個分頁「對話」就是最後使用的那一位的對話內容（見 lib/mobile-ops.mjs 的 chatPageState）。
 // 每往下一層（夥伴→其他分頁、名單→開新夥伴、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
 // 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
-export const TABS = ['list', 'chats', 'me']
-export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
-// 分頁列上的字：前三個固定；第四頁籤用它目前內頁的標題（pageTitle）
-export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitle ?? '') : TAB_LABEL[t] ?? '')
-// 目前有哪些分頁：有第四頁籤時四個，沒有時三個（pager 的頁數、指示條、左右滑的範圍都跟著它）
-export const tabList = fourth => (fourth?.page ? [...TABS, PAGE_TAB] : TABS)
+// 四個固定分頁（PR-H，#895）：第四格平時是「通知」，進內頁時暫時換成內頁（見 lib/mobile-fourth.mjs）。
+export const TABS = ['list', 'chats', 'me', PAGE_TAB]
+export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置', [PAGE_TAB]: NOTICE_LABEL }
+// 分頁列上的字：前三個固定；第四格用它目前內頁的標題（pageTitle），沒有內頁就是「通知」
+export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitle ?? '') || NOTICE_LABEL : TAB_LABEL[t] ?? '')
+// 目前有哪些分頁：永遠四個（pager 的頁數、指示條、左右滑的範圍都是 4）；參數留著是為了呼叫端不用改
+export const tabList = () => TABS
+// 第四格的未讀紅點：通知對話有未讀就亮（內頁佔著第四格時照樣亮）；對話分頁的紅點不再算通知的未讀
+export const noticeUnread = friends => { const f = (Array.isArray(friends) ? friends : []).find(isNoticeFriend); return Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0 }
+export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
+export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'chats' ? chats > 0 : t === PAGE_TAB ? notice > 0 : false)
+// 正在看的對話（標已讀、算「看得到」用）：對話分頁看 lastChat；第四格沒有內頁時看的是通知
+export const viewedChatId = ({ tab, fourth, lastChat }) => (tab === 'chats' ? lastChat || '' : tab === PAGE_TAB && !fourth?.page ? NOTICE_ID : '')
 export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單
 export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
@@ -36,7 +43,7 @@ export function normalizeNav(raw) {
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.sheet === 'permreq') return permReqNav()
-  if (raw?.tab === PAGE_TAB) { const p = normalizePage(raw?.page); return p ? pageNav(p) : initialNav() }
+  if (raw?.tab === PAGE_TAB) return pageNav(raw?.page)   // 沒有（或不合法的）內頁描述＝第四格的「通知」（舊記錄、壞資料都落在這裡，不會壞）
   // 舊版的滿版層（設備與帳號、設置的某一項、使用指引、開新夥伴）改成第四頁籤上的同一頁
   if (raw?.sheet === 'acct') return pageNav({ kind: 'acct' })
   if (raw?.sheet === 'setting') { const p = normalizePage({ kind: 'setting', cat: raw?.cat }); return p ? pageNav(p) : tabNav('me') }   // 沒這個分類退回設置分頁

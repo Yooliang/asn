@@ -1,6 +1,6 @@
-// 手機的「第四頁籤」（#461）：設備與帳號、設置的某一項（個人、通知、更新、關於）、使用指引、開新夥伴，不再是蓋在分頁上的滿版層，
-// 而是平時不顯示、進這些內頁時才出現在頁籤列最右邊的一個分頁（標題就是內頁的標題），跟前三個一樣能左右滑、點頁籤切。
-// 同一時間只有一個第四頁籤：進別的內頁就換掉內容。離開（切到前三頁）後留著、內容不卸載，滿 3 分鐘沒回來就收起。
+// 手機的「第四頁籤」（#461、PR-H #895）：永遠存在，平時顯示「通知」對話；設備與帳號、設置的某一項（個人、提醒、更新、關於）、使用指引、開新夥伴
+// 進內頁時暫時佔用它（標題換成內頁的標題），跟前三個一樣能左右滑、點頁籤切。st.fourth＝null 就是顯示通知。
+// 同一時間只有一個內頁：進別的內頁就換掉內容。離開（切到前三頁）後留著、內容不卸載，滿 3 分鐘沒回來就跳回「通知」。
 // 只放純邏輯（內頁的描述、計時），node 與瀏覽器都能跑，不碰 DOM、不碰瀏覽記錄（瀏覽記錄在 mobile-nav.mjs）。
 import { guideByKey } from './guides.mjs'
 import { SETTING_SHEET_KEYS } from './mobile-settings.mjs'
@@ -55,4 +55,10 @@ export const fourthMsLeft = (fourth, now, keep = FOURTH_KEEP_MS) => (fourth?.lef
 // ---------- 換內頁前先問一句 ----------
 // 開新夥伴正在填第 2 步、還沒送出（draft＝true）時，要換成別的內頁就先問；選離開才換。單純切到前三頁不問（內容會保留 3 分鐘），再進開新夥伴也不問（接著填）
 export const LEAVE_ASK_TEXT = { title: '還沒送出', lead: '開新夥伴還沒送出，要離開嗎？', leave: '離開', stay: '留下' }
-export const needsLeaveAsk = (fourth, next, { draft = false } = {}) => !!draft && fourth?.page?.kind === 'launch' && !!normalizePage(next) && normalizePage(next).kind !== 'launch'
+export const NOTICE_NEXT = { kind: 'notice' }   // 「換成通知」也算換內頁：佔著第四格的內頁要先問
+export const needsLeaveAsk = (fourth, next, { draft = false } = {}) => !!draft && fourth?.page?.kind === 'launch' && (next?.kind === 'notice' || (!!normalizePage(next) && normalizePage(next).kind !== 'launch'))
+// 第四格現在顯示什麼：有內頁＝'page'，沒有（fourth 為 null）＝'notice'（預設）
+export const fourthView = fourth => (fourth?.page ? 'page' : 'notice')
+// 設置裡的「看通知」入口文字
+export const NOTICE_ENTRY_LABEL = '看通知'
+export const NOTICE_ENTRY_SUB = '系統與各設備寄來的通知'

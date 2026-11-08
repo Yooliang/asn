@@ -212,9 +212,9 @@ test('廠商徽章：pi 只是執行殼，顯示背後模型的廠商；對不�
   assert.equal(vendorBadgeHtml({ engine: 'grok', model: 'anthropic/claude-sonnet-4' }), vendorBadgeHtml({ engine: 'grok' }), '只有 pi 看模型')
 })
 
-test('大分頁：夥伴／對話／設置三個，順序固定，名稱純中文', () => {
-  assert.deepEqual(TABS, ['list', 'chats', 'me']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設置'])
-  assert.deepEqual(TABS.map(tabIndex), [0, 1, 2]); assert.equal(tabIndex('亂寫'), 0)
+test('大分頁：夥伴／對話／設置／通知四個固定，順序固定，名稱純中文', () => {
+  assert.deepEqual(TABS, ['list', 'chats', 'me', 'page']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設置', '通知'])
+  assert.deepEqual(TABS.map(tabIndex), [0, 1, 2, 3]); assert.equal(tabIndex('亂寫'), 0)
 })
 
 test('滑動手勢：邊緣不接手、水平要明顯大於垂直才算、斜的與上下捲動算垂直', () => {
@@ -237,10 +237,10 @@ test('滑動吸附：拖過一定比例或夠快才換頁；到頭不能再換�
   assert.equal(swipeTarget({ index: 1, dx: -50, dt: 60, width: W }), 2, '很快的短滑（甩）也換頁')
   assert.equal(swipeTarget({ index: 1, dx: -10, dt: 10, width: W }), 1, '太短的不算')
   assert.equal(swipeTarget({ index: 0, dx: 200, dt: 100, width: W }), 0, '最左邊再往右滑還是第一頁')
-  assert.equal(swipeTarget({ index: 2, dx: -200, dt: 100, width: W }), 2, '最右邊再往左滑還是最後一頁')
-  assert.equal(pagerShift(1, 100), 100); assert.equal(pagerShift(0, 100), 30); assert.equal(pagerShift(2, -100), -30); assert.equal(pagerShift(0, -100), -100)
+  assert.equal(swipeTarget({ index: 2, dx: -200, dt: 100, width: W }), 3, '第三頁往左滑是第四格（通知）'); assert.equal(swipeTarget({ index: 3, dx: -200, dt: 100, width: W, count: TABS.length }), 3, '最右邊再往左滑還是最後一頁')
+  assert.equal(pagerShift(1, 100), 100); assert.equal(pagerShift(0, 100), 30); assert.equal(pagerShift(3, -100), -30); assert.equal(pagerShift(0, -100), -100)
   assert.equal(indicatorPos(1, 0, W), 1); assert.equal(indicatorPos(1, -W / 2, W), 1.5, '往左拖半頁，指示條走到一半')
-  assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(2, -500, W), 2)
+  assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(3, -500, W), 3)
 })
 
 test('手機名單依設備分組：照帳號層的設備順序（deviceOrder），本機仍第一', () => {

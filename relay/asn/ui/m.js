@@ -37,7 +37,8 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
-import { withNoticeGroup } from './lib/notice.mjs'
+import { NOTICE_ID, isNoticeFriend, withNoticeGroup } from './lib/notice.mjs'
+import { chatsUnread, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
@@ -51,9 +52,10 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { NOTICE_ENTRY_LABEL, NOTICE_ENTRY_SUB } from './lib/mobile-fourth.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
-import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
+import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, NOTICE_NEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
@@ -210,12 +212,12 @@ if (screen.value === 'main') {
   lastChat.value = normalizeLastChat(saved.lastChat)
   // 重開 App 回到上次的大分頁（名單／對話／設置）；對話那頁的對象就是 lastChat
 savedTab = restoreMobileTab(saved.navTab)
-watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? (fourthSt.fourth?.from ?? 'list') : nav.tab }) }, { deep: true })
+watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? (fourthSt.fourth ? fourthSt.fourth.from : PAGE_TAB) : nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-    isChatVisible: async id => document.visibilityState === 'visible' && nav.tab === 'chats' && lastChat.value === id,   // 正在看對話分頁那位才算「看得到」（不算未讀）
+    isChatVisible: async id => document.visibilityState === 'visible' && viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: lastChat.value }) === id,   // 正在看的那一位（對話分頁那位，或第四格的通知）才算「看得到」（不算未讀）
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms, backlogAfterMs: 5 * 60_000,
     log: m => console.info('[ASN]', m),
   })
@@ -225,7 +227,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   core.on('log', id => { pushLog(id); refreshLast(id) })
   core.on('avatars', () => { avatars.value = core.avatarMap() })
   core.on('notify', n => {
-    const plan = notifyPlan(n, { openId: nav.tab === 'chats' ? lastChat.value : '', foreground: document.visibilityState === 'visible', prefs })
+    const plan = notifyPlan(n, { openId: viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: lastChat.value }), foreground: document.visibilityState === 'visible', prefs })
     if (plan.vibrate) { if (bridge) bridge.vibrate(plan.vibrate); else navigator.vibrate?.(plan.vibrate) }
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
@@ -241,6 +243,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
     if (document.visibilityState !== 'visible') return
     void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync(); refreshPushSt()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
+    else if (viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
@@ -364,7 +367,9 @@ const app = createApp({
       void invoke('invite_pending').then(onInviteCode).catch(() => {})
       void refreshRooms()
     }
-    const unreadTotal = computed(() => totalUnreadWithRooms(totalUnread(friends.value), rooms.value))
+    const unreadTotal = computed(() => totalUnreadWithRooms(chatsUnread(friends.value), rooms.value))   // 對話分頁的紅點：不含通知（通知有自己的第四格紅點）
+    const noticeDot = computed(() => noticeUnread(friends.value))
+    const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
@@ -400,6 +405,12 @@ const app = createApp({
       void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
     }
     watch([() => nav.tab, () => nav.sheet, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
+    // 第四格的「通知」對話（PR-H）：唯讀，沒有輸入列與通話鈕（chat-pane 看 friend.isNotice 自己隱藏）。正在看它（含收到新通知的當下）就標已讀
+    const noticeChat = computed(() => friends.value.find(isNoticeFriend) ?? null)
+    const noticeLog = computed(() => logs[NOTICE_ID] ?? [])
+    const noticeShown = computed(() => nav.tab === PAGE_TAB && !fourthSt.fourth && !nav.sheet && !!noticeChat.value)
+    function showNotice() { if (!noticeShown.value) return; core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
+    watch([noticeShown, () => noticeChat.value?.unread, () => noticeLog.value.length], showNotice, { immediate: true })
     const back = () => history.back()
     // 第四頁籤：目前的內頁與標題（頁籤列上的字就是內頁的標題）
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
@@ -474,6 +485,7 @@ const app = createApp({
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
+    const openNotice = () => askBeforeLeave(NOTICE_NEXT, () => fourthNav.openNotice())   // 設置裡的「看通知」：第四格換成通知（佔著的內頁照離開規則先問）
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
     const leaveSt = reactive({ ask: null })
@@ -1139,7 +1151,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      settingRows, settingCat, settingTitle, openSetting, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      settingRows, settingCat, settingTitle, openSetting, openNotice, noticeChat, noticeLog, tabHasDot, NOTICE_ENTRY_LABEL, NOTICE_ENTRY_SUB, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

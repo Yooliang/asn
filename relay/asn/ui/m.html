@@ -52,7 +52,7 @@
     <section class="m-page" :style="{ '--pages': pages }">
       <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
         <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
-        <button v-for="t in tabs" :key="t" type="button" role="tab" :class="{ on: nav.tab === t, 'is-page': t === 'page' }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ tabLabel(t) }}</span><i class="red" v-if="t === 'chats' && unreadTotal"></i></button>
+        <button v-for="t in tabs" :key="t" type="button" role="tab" :class="{ on: nav.tab === t, 'is-page': t === 'page' }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ tabLabel(t) }}</span><i class="red" v-if="tabHasDot(t)"></i></button>
       </nav>
       <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
         <span class="m-upd-tx">{{ updText }}</span>
@@ -206,6 +206,9 @@
                     <button class="m-row-btn" type="button" @click="openSetting(r.key)"><svg class="m-row-ic" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path :d="r.icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="m-row-tx"><b>{{ r.title }}</b><small>{{ r.summary }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
                   </li>
                 </ul>
+              </div>
+              <div class="m-card m-form m-guide-entry m-notice-entry">
+                <button class="m-row-btn" type="button" @click="openNotice"><span class="m-row-tx"><b>{{ NOTICE_ENTRY_LABEL }}</b><small>{{ NOTICE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
               </div>
               <div class="m-card m-form m-guide-entry">
                 <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
@@ -575,6 +578,15 @@
             </div>
           </section>
           <!-- /第四頁籤 -->
+          <!-- 第四格的預設內容：「通知」對話（唯讀：沒有輸入列、沒有通話鈕、沒有上線狀態）。進內頁時被內頁暫時取代 -->
+          <section class="m-pg m-chat m-notice" v-if="!fourthPage" aria-label="通知">
+            <header class="m-head m-chathead">
+              <div class="m-head-tx"><div class="m-title">通知</div></div>
+            </header>
+            <chat-pane v-if="noticeChat" :friend="noticeChat" :me="meForChat" :log="noticeLog" :friend-av="avOf(noticeChat)" :me-av="meAv"
+              :no-bar="true" dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :hint-names="friends" :load-older="loadOlder"></chat-pane>
+            <div class="m-scroll" v-else><div class="empty-list">還沒有通知。</div></div>
+          </section>
         </div>
       </div>
 
