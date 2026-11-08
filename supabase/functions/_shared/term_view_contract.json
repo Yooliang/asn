@@ -19,6 +19,7 @@
     "from_node",
     "from_name",
     "from_pub",
+    "from_platform",
     "window_name",
     "topic",
     "expires_s",

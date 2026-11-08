@@ -226,6 +226,8 @@ pub struct Accepted {
     pub from_pub: String,
     /// 和本機記住的比：New＝第一次（呼叫端記住並通知本人）、Same＝照常
     pub tofu: crate::device_id::Tofu,
+    /// 看的那台是移動設備（手機）。進行中的觀看每次也要看本機「允許移動設備查看終端」還開不開
+    pub mobile: bool,
 }
 
 /// T 拒絕一筆請求的原因
@@ -234,11 +236,32 @@ pub enum Refused {
     /// D 的設備公鑰和本機記住的不同：呼叫端通知本人
     KeyChanged { node: String, sign_pub: String },
     Bad(String),
+    /// 看的那台是移動設備，而本機關著「允許移動設備查看終端」：呼叫端用 [`MOBILE_OFF`] 這個原因回報，D 才看得到一句清楚的話
+    MobileOff,
+}
+
+/// 本機不允許移動設備查看時，拒絕的結束原因（後台 term_view_stop 的固定原因之一，D 端顯示一句清楚的話）
+pub const MOBILE_OFF: &str = "mobile_off";
+
+/// 看的那台是不是移動設備。**依後台登記的平台**（和 D 的設備公鑰同一列登記的，欄位 from_platform），不信 D 自己在握手裡報的：
+/// - 登記沒有（null／缺欄位，舊資料或舊後台）＝電腦；登記是 desktop＝電腦；android 或任何不認得的值＝移動設備。
+/// - D 在握手裡另外報了平台（`reported`），和登記值對不上，一律當移動設備。
+pub fn viewer_is_mobile(registered: Option<&serde_json::Value>, reported: Option<&str>) -> bool {
+    let reg_mobile = match registered {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::String(p)) => p != "desktop",
+        Some(_) => true,
+    };
+    let mismatch = match reported {
+        None => false,
+        Some(r) => (r != "desktop") != reg_mobile,
+    };
+    reg_mobile || mismatch
 }
 
 /// T 收到一筆請求：D 的公鑰先和本機記住的比（TOFU），對不上就拒絕；再用那把公鑰驗章，全部驗過才接受。
 /// **這裡不寫檔：** 第一次看到的公鑰由呼叫端在驗章通過之後才記住
-pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64) -> Result<Accepted, Refused> {
+pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64, allow_mobile: bool) -> Result<Accepted, Refused> {
     let bad = || Refused::Bad("後台回的資料不對".into());
     let get = |k: &str| row.get(k).and_then(serde_json::Value::as_str).ok_or_else(bad);
     let s = Session {
@@ -253,6 +276,11 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
         },
         expires_s: row.get("expires_s").and_then(serde_json::Value::as_i64).ok_or_else(bad)?,
     };
+    // 看的那台是移動設備而本機不允許：直接拒絕，什麼都不記（沒開始看，不跳紅條、不寄通知信）
+    let mobile = viewer_is_mobile(row.get("from_platform"), None);
+    if mobile && !allow_mobile {
+        return Err(Refused::MobileOff);
+    }
     let from_pub = get("from_pub")?.to_string();
     let tofu = known.check(&s.d_node, &from_pub);
     if tofu == crate::device_id::Tofu::Changed {
@@ -260,7 +288,7 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
     }
     let (t_eph, t_sig, session_key) = crate::view_handshake::t_accept(&from_pub, key, &s, get("d_eph_pub")?, get("d_sig")?, now_s).map_err(Refused::Bad)?;
     let from_name = row.get("from_name").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
-    Ok(Accepted { session: s, t_eph, t_sig, key: session_key, from_name, from_pub, tofu })
+    Ok(Accepted { session: s, t_eph, t_sig, key: session_key, from_name, from_pub, tofu, mobile })
 }
 
 /// 傳輸還沒接上（要動 bell.rs，排在 0.2.4 之後）：送不出去，T 超過時限就會自己停
@@ -452,7 +480,7 @@ mod tests {
         let lib = include_str!("lib.rs");
         let port = lib.split("impl view_stream::TPort for LiveTPort {").nth(1).expect("有 LiveTPort").split("\n}").next().unwrap();
         let allowed = port.split("fn allowed(").nth(1).expect("有 allowed").split("\n    }").next().unwrap();
-        assert!(allowed.contains("bridge::read_settings(") && allowed.contains(".allow_remote_launch"), "每次都重讀設定，不用快取");
+        assert!(allowed.contains("bridge::read_settings(") && allowed.contains(".view_allowed(self.mobile)"), "每次都重讀設定，不用快取；移動設備另外看「允許移動設備查看終端」");
     }
 
     #[test]
@@ -602,17 +630,75 @@ mod tests {
         let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
         let row = json!({ "id": "s1", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
         let mut known = KnownPeers::default();
-        let a = accept_request(&row, "t", &known, &t, now).unwrap();
+        let a = accept_request(&row, "t", &known, &t, now, true).unwrap();
         assert_eq!((a.tofu, a.from_name.as_str()), (Tofu::New, "工作機"), "第一次：呼叫端要記住");
         known.remember("d", "工作機", &d.public_b64(), 1).unwrap();
-        assert_eq!(accept_request(&row, "t", &known, &t, now).unwrap().tofu, Tofu::Same);
+        assert_eq!(accept_request(&row, "t", &known, &t, now, true).unwrap().tofu, Tofu::Same);
         let mut other = KnownPeers::default();
         other.remember("d", "工作機", "別的公鑰", 1).unwrap();
-        assert!(matches!(accept_request(&row, "t", &other, &t, now), Err(Refused::KeyChanged { .. })), "公鑰換了：拒絕");
+        assert!(matches!(accept_request(&row, "t", &other, &t, now, true), Err(Refused::KeyChanged { .. })), "公鑰換了：拒絕");
         let mut forged = row.clone();
         forged["from_pub"] = json!(t.public_b64());
-        assert!(matches!(accept_request(&forged, "t", &KnownPeers::default(), &t, now), Err(Refused::Bad(_))), "公鑰對不上簽章：拒絕");
-        assert!(matches!(accept_request(&json!({ "id": "s1" }), "t", &known, &t, now), Err(Refused::Bad(_))));
+        assert!(matches!(accept_request(&forged, "t", &KnownPeers::default(), &t, now, true), Err(Refused::Bad(_))), "公鑰對不上簽章：拒絕");
+        assert!(matches!(accept_request(&json!({ "id": "s1" }), "t", &known, &t, now, true), Err(Refused::Bad(_))));
+    }
+
+    #[test]
+    fn 看的那台是不是移動設備_依後台登記_對不上一律當移動設備() {
+        use serde_json::json;
+        assert!(!viewer_is_mobile(None, None), "缺欄位（舊後台）＝電腦");
+        assert!(!viewer_is_mobile(Some(&json!(null)), None), "登記是空的（舊資料）＝電腦");
+        assert!(!viewer_is_mobile(Some(&json!("desktop")), None));
+        assert!(viewer_is_mobile(Some(&json!("android")), None));
+        assert!(viewer_is_mobile(Some(&json!("ios")), None), "不認得的值＝移動設備");
+        assert!(viewer_is_mobile(Some(&json!(7)), None), "型別不對＝移動設備");
+        assert!(!viewer_is_mobile(Some(&json!("desktop")), Some("desktop")));
+        assert!(!viewer_is_mobile(None, Some("desktop")), "登記沒有、D 報電腦：一致");
+        assert!(viewer_is_mobile(Some(&json!("android")), Some("android")));
+        assert!(viewer_is_mobile(Some(&json!("desktop")), Some("android")), "D 報的和登記對不上＝移動設備");
+        assert!(viewer_is_mobile(Some(&json!("android")), Some("desktop")), "D 報的和登記對不上＝移動設備");
+        assert!(viewer_is_mobile(None, Some("android")), "登記沒有、D 報手機＝移動設備");
+    }
+
+    #[test]
+    fn 允許移動設備查看終端_開關與登記平台的組合() {
+        use serde_json::json;
+        let (dd, td) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
+        let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
+        let now = 1_800_000_000i64;
+        let known = crate::device_id::KnownPeers::default();
+        let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: crate::view_handshake::Scope::View, expires_s: now + 60 };
+        let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
+        let base = json!({ "id": "s1", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
+        let with = |p: Option<serde_json::Value>| {
+            let mut r = base.clone();
+            if let Some(p) = p {
+                r["from_platform"] = p;
+            }
+            r
+        };
+        // 登記 desktop／null／缺欄位：開關開、關都照常
+        for allow in [true, false] {
+            for p in [Some(json!("desktop")), Some(json!(null)), None] {
+                let a = accept_request(&with(p.clone()), "t", &known, &t, now, allow).unwrap_or_else(|_| panic!("電腦照常 allow={allow} p={p:?}"));
+                assert!(!a.mobile);
+            }
+        }
+        // 登記 android：開著可以看；關著拒絕
+        assert!(accept_request(&with(Some(json!("android"))), "t", &known, &t, now, true).unwrap().mobile);
+        assert!(matches!(accept_request(&with(Some(json!("android"))), "t", &known, &t, now, false), Err(Refused::MobileOff)));
+        // 不認得的登記值：當移動設備
+        assert!(matches!(accept_request(&with(Some(json!("tablet"))), "t", &known, &t, now, false), Err(Refused::MobileOff)));
+        assert_eq!(MOBILE_OFF, "mobile_off");
+    }
+
+    #[test]
+    fn 守門_移動設備被擋要在記住對方和驗章之前() {
+        let src = include_str!("view_stream.rs");
+        let f = src.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        let block = f.find("Refused::MobileOff").expect("有擋移動設備");
+        assert!(block < f.find("known.check(").unwrap() && block < f.find("t_accept(").unwrap(), "先擋，再 TOFU、驗章");
     }
 
     #[test]
@@ -627,13 +713,13 @@ mod tests {
         let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: Scope::Input, expires_s: now + 60 };
         let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
         let row = json!({ "id": "s1", "scope": "input", "from_node": "d", "from_name": "工作機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
-        assert_eq!(accept_request(&row, "t", &known, &t, now).unwrap().session.scope, Scope::Input);
+        assert_eq!(accept_request(&row, "t", &known, &t, now, true).unwrap().session.scope, Scope::Input);
         let mut as_view = row.clone();
         as_view.as_object_mut().unwrap().remove("scope");
-        assert!(matches!(accept_request(&as_view, "t", &known, &t, now), Err(Refused::Bad(_))), "打字的簽章不能當看畫面接受");
+        assert!(matches!(accept_request(&as_view, "t", &known, &t, now, true), Err(Refused::Bad(_))), "打字的簽章不能當看畫面接受");
         let mut odd = row.clone();
         odd["scope"] = json!("admin");
-        assert!(matches!(accept_request(&odd, "t", &known, &t, now), Err(Refused::Bad(_))));
+        assert!(matches!(accept_request(&odd, "t", &known, &t, now, true), Err(Refused::Bad(_))));
     }
 
     #[test]

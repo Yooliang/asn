@@ -26,6 +26,22 @@ Deno.test("上傳公鑰：格式要對", async () => {
   assertEquals(bad.calls.length, 0);
 });
 
+Deno.test("上傳公鑰：platform 選填，只收 desktop／android，其他值 400；沒帶時不傳 p_platform（舊版照常）", async () => {
+  for (const platform of ["desktop", "android"]) {
+    const m = mk();
+    assertEquals((await handleDevicePairAction(m.deps, me, "device_key_publish", { sign_pub: PUB, platform }, null)).status, 200);
+    assertEquals(m.calls[0].args, { p_node: me.id, p_sign_pub: PUB, p_platform: platform });
+  }
+  const none = mk();
+  assertEquals((await handleDevicePairAction(none.deps, me, "device_key_publish", { sign_pub: PUB, platform: null }, null)).status, 200);
+  assertEquals(none.calls[0].args, { p_node: me.id, p_sign_pub: PUB });
+  for (const platform of ["ios", "", "Android", 7, {}]) {
+    const bad = mk();
+    assertEquals((await handleDevicePairAction(bad.deps, me, "device_key_publish", { sign_pub: PUB, platform }, null)).status, 400, JSON.stringify(platform));
+    assertEquals(bad.calls.length, 0);
+  }
+});
+
 Deno.test("通知：只收對方節點、種類、指紋；寄出後敲門鈴", async () => {
   const m = mk({ ok: true, notify: "sent", bell_topics: ["bell-a"] });
   const r = await handleDevicePairAction(m.deps, me, "device_key_alert", { peer: "hom7a1", kind: "first", fp: "0123456789abcdef", extra: "丟掉" }, null);

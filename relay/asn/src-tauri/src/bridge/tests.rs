@@ -2526,3 +2526,21 @@ fn 伺服器終端設定_被系統設定固定時拒絕改_不寫檔() {
 
 /// 全域的「這次啟動的結果」只有一份，改它的測試要排隊，不然平行時會互相看到對方設的值
 static TERM_SERVER_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn 允許移動設備查看終端_預設開_關掉只擋移動設備_舊設定檔沒有這個鍵照開() {
+    let data = tempfile::tempdir().unwrap();
+    assert!(!super::read_settings(data.path()).mobile_view_off, "沒有設定檔：預設開");
+    std::fs::write(super::settings_path(data.path()), r#"{"allow_remote_launch":true}"#).unwrap();
+    let s = super::read_settings(data.path());
+    assert!(!s.mobile_view_off, "舊設定檔沒有這個鍵：預設開");
+    assert!(s.view_allowed(true) && s.view_allowed(false));
+    super::write_settings(data.path(), super::BridgeSettings { mobile_view_off: true, ..s }).unwrap();
+    let s = super::read_settings(data.path());
+    assert!(s.mobile_view_off, "存得進去、讀得回來");
+    assert!(s.allow_remote_launch, "其他設定不被蓋掉");
+    assert!(s.view_allowed(false), "電腦照常可以看");
+    assert!(!s.view_allowed(true), "移動設備不行");
+    let off = super::BridgeSettings { allow_remote_launch: false, ..Default::default() };
+    assert!(!off.view_allowed(false) && !off.view_allowed(true), "沒開允許其他設備：兩種都不行");
+}

@@ -125,6 +125,7 @@ pub fn step_of(report: &serde_json::Value) -> Step {
 pub fn end_text(reason: &str) -> &'static str {
     match reason {
         "rejected" => "那台沒有接受，可能是現在沒有這個夥伴的畫面，或是那台沒有允許別台看",
+        "mobile_off" => "這台電腦不允許移動設備查看終端",
         "target_ended" => "那台結束了觀看",
         "expired" => "時間到了，要再看請再按一次",
         "viewer_ended" | "ended" => "已經結束",
@@ -202,6 +203,7 @@ mod tests {
         assert_eq!(step_of(&json!({ "status": "ended", "end_reason": "rejected" })), Step::Ended("rejected".into()));
         assert_eq!(step_of(&json!({ "error": "not_found" })), Step::Ended("gone".into()), "這筆不見了");
         assert_eq!(end_text("expired"), "時間到了，要再看請再按一次");
+        assert_eq!(end_text("mobile_off"), "這台電腦不允許移動設備查看終端");
     }
 
     #[test]
