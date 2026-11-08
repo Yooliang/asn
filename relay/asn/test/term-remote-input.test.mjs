@@ -34,7 +34,7 @@ test('守門：「打字不用每次問」只有設定頁那條路能改', () =>
 test('打字的畫面：只有這支有按鍵的路；xterm 不關輸入；看畫面那支照舊只能看', () => {
   const src = read('../ui/lib/term-remote-input.mjs')
   assert.match(src, /term\.onData\(d => send\(d, false\)\)/)
-  assert.match(src, /new Terminal\(inputXtermOptions\(/)
+  assert.match(src, /openTerm\(Terminal, inputXtermOptions\(/)
   assert.equal(inputXtermOptions({ cols: 80, rows: 24 }).disableStdin, false)
   assert.ok(!read('../ui/lib/term-remote.mjs').includes('onData'), '看畫面那支沒有打字')
   assert.match(INPUT_TEXT.typing('家用機', '小乙'), /包括回答權限框/, '要寫清楚能做什麼')

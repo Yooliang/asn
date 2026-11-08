@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { TERM_BACK_TIP, TERM_LABEL, TERM_REOPEN_NOTE, TERM_TIP, askTermService, restoreTop, scrollMemo, termButtonView, termEntry } from '../ui/lib/term-entry.mjs'
 import { WINDOW_LABEL, barSlots } from '../ui/lib/actionbar.mjs'
 import { TERM_VIEW_LOST } from '../ui/lib/term-view.mjs'
+import { REMOTE_LABEL } from '../ui/lib/term-remote.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8').replace(/\r\n/g, '\n')
@@ -74,7 +75,7 @@ test('聊天頁接線：輸入框旁沒有終端圖示，入口只在上面那�
   const pane = read('ui', 'lib', 'chatpane.mjs')
   assert.ok(!pane.includes('看終端畫面'), '輸入框旁的終端圖示拿掉了')
   assert.match(pane, /<action-bar [^>]*:term="termBar"[^>]*@term="toggleTerm"/)
-  assert.match(pane, /: \{ ready: canTermView\.value, on: termShown\.value \}\)\)/, '本機的夥伴：第 2 格照舊是「終端」（別台電腦的夥伴才換成「看畫面」）')
+  assert.match(pane, /: \{ ready: canTermView\.value, on: termShown\.value \}\)\)/, '本機的夥伴：第 2 格照舊是「終端」（別台電腦的夥伴走 REMOTE_LABEL，字也是「終端」）')
   assert.match(pane, /<term-view v-if="termShown" /)
   assert.match(pane, /const canTermView = computed\(\(\) => termEntryView\.value\.term\)/, '入口看「在不在服務裡」')
   assert.match(pane, /askTermService\(props\.termViewApi, termViewName\.value\)/)
@@ -97,16 +98,22 @@ test('大按鈕接線：第 2 格按下發 term，開著時有 on 與 aria-press
   assert.match(read('ui', 'img', 'ab-term.svg'), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32" width="32" height="32">/)
 })
 
-test('上排第 2 個大按鈕依狀態換字與圖示（#901b）：看訊息時「看終端」＋終端圖示，看終端時「看訊息」＋對話圖示', () => {
-  assert.deepEqual(termButtonView(false), { label: '看終端', icon: 'img/ab-term.svg' })
-  assert.deepEqual(termButtonView(true), { label: '看訊息', icon: 'img/ab-window.svg' })
+test('上排第 2 個大按鈕依狀態換字與圖示（#901b、#1029）：看訊息時「終端」＋終端圖示，看終端時「訊息」＋對話圖示', () => {
+  assert.deepEqual(termButtonView(false), { label: '終端', icon: 'img/ab-term.svg' })
+  assert.deepEqual(termButtonView(true), { label: '訊息', icon: 'img/ab-window.svg' })
   assert.notEqual(termButtonView(true).icon, termButtonView(false).icon, '圖示不同，不只靠按下的顏色')
   assert.notEqual(termButtonView(true).label, termButtonView(false).label)
-  // 與別台夥伴的「看畫面」（#968）：關著時各用各的字（看畫面／看終端），開著時一律看訊息
-  assert.deepEqual(termButtonView(false, '看畫面'), { label: '看畫面', icon: 'img/ab-term.svg' }, '別台夥伴：關著時是看畫面＋終端圖示')
-  assert.deepEqual(termButtonView(true, '看畫面'), { label: '看訊息', icon: 'img/ab-window.svg' }, '別台夥伴：開著時也跟本機一樣變看訊息＋對話圖示')
-  assert.deepEqual(termButtonView(false, ''), { label: '看終端', icon: 'img/ab-term.svg' })
-  assert.deepEqual(termButtonView(true, ''), { label: '看訊息', icon: 'img/ab-window.svg' })
+  // 別台夥伴（#968）：字和本機一樣（#1029），開著時一律「訊息」
+  assert.deepEqual(termButtonView(false, REMOTE_LABEL), termButtonView(false), '別台夥伴：關著時和本機一樣是「終端」＋終端圖示')
+  assert.deepEqual(termButtonView(true, REMOTE_LABEL), termButtonView(true), '別台夥伴：開著時和本機一樣是「訊息」＋對話圖示')
+  assert.deepEqual(termButtonView(false, ''), { label: '終端', icon: 'img/ab-term.svg' })
+  assert.deepEqual(termButtonView(true, ''), { label: '訊息', icon: 'img/ab-window.svg' })
+  for (const old of ['看畫面', '看終端', '看訊息']) {
+    for (const f of ['../ui/lib/term-entry.mjs', '../ui/lib/term-remote.mjs']) {
+      const code = fs.readFileSync(new URL(f, import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/.*$/gm, '')
+      assert.ok(!code.includes(`'${old}'`), `${f} 的按鈕不再寫「${old}」`)
+    }
+  }
   const ab = read('ui', 'lib', 'actionbar.mjs')
   assert.match(ab, /const termBtn = computed\(\(\) => termButtonView\(termOn\.value, props\.term\?\.label \|\| ''\)\)/)
   assert.match(ab, /slot\.window\.term \? termBtn\.icon : 'img\/ab-window\.svg'/, '圖示由 termButtonView 來')

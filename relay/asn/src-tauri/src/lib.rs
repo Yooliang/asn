@@ -1065,7 +1065,7 @@ fn term_viewed_stop(views: State<'_, Arc<BeingViewed>>, id: String) {
 #[cfg(desktop)]
 struct ViewNet(Option<String>);
 
-/// 這台能不能看那台的畫面：已配對而且我可以看對方、這台有 Windows Hello、有即時頻道。不跳提示
+/// 這台能不能看那台的畫面：已配對而且我可以看對方、有即時頻道。不跳提示
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -1074,7 +1074,8 @@ async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>
     Ok(net.0.is_some() && node != app.node && device_id::can_be_viewed_here(&app.data_dir))
 }
 
-/// 本人按「看畫面」：先確認是本人（Hello 或確認框，**只有這個入口能叫**，守門測試在 presence），再用設備金鑰簽、向後台發起。
+/// 本人按「終端」：直接用設備金鑰簽、向後台發起。**不跳本人確認**（11-08 小良哥決定拿掉 Windows Hello 與確認框，守門測試在 presence）；
+/// 被看的那台照舊：打字要那邊的人允許，有紅條、通知信。
 /// 後台回那台的設備公鑰：和本機記住的不同就不開始並通知本人。回（觀看編號, 到期時間秒）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -1095,12 +1096,6 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
         return Err(view_input::TOO_MANY.into());
     }
     let token = pair_token(&auth).await?;
-    // 先確認本人，再取金鑰、登記（確認框可能等到 60 秒）
-    let ask = match scope {
-        view_handshake::Scope::View => view_remote::presence_text(&machine, &partner),
-        view_handshake::Scope::Input => view_input::presence_text(&machine, &partner),
-    };
-    presence::confirm(&window, &ask).await?;
     let key = device_id::live::key_async(&app.data_dir).await?;
     let id = view_remote::new_session_id()?;
     let now_s = (auth::now_ms() / 1000) as i64;
@@ -1254,6 +1249,7 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         let mut stop_rx: Option<tokio::sync::oneshot::Sender<()>> = None;
         let frames_seen = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let mut failed_since: Option<u64> = None;
+        let began_ms = auth::now_ms();
         let reason = loop {
             let want = views.want(&id);
             let token = pair_token(app.state::<auth::AuthState>().inner()).await;
@@ -1332,7 +1328,9 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
             }
             // 等下一次回報；本人按結束或藏起來時早一點回報
             let before = views.want(&id);
-            for _ in 0..view_remote::REPORT_EVERY_S {
+            // 對方還沒接受時每秒回報一次：越早拿到公鑰、開始收，越不會漏掉對方先送的畫面
+            let wait_s = view_remote::report_wait_s(eph.is_none(), auth::now_ms().saturating_sub(began_ms) / 1000);
+            for _ in 0..wait_s {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 if views.want(&id) != before {
                     break;

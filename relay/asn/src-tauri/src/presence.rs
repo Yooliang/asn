@@ -1,8 +1,12 @@
-//! 看別台畫面前確認是本人在這台按的（#597，0.2.8 改版）。**只確認在場，不簽章、不產生金鑰**：簽章用的是設備金鑰（device_id）。
+//! 確認是本人在這台按的（#597，0.2.8 改版）。**只確認在場，不簽章、不產生金鑰**：簽章用的是設備金鑰（device_id）。
+//!
+//! **11-08 起沒有人呼叫**：小良哥決定看別台畫面、別台打字都不再跳 Windows Hello 或確認框（#1029 續）。
+//! 模組保留，之後可能還會用到；守門測試鎖住「發起不跳本人確認」。
 //!
 //! - Windows 有 Hello：用 UserConsentVerifier 要本人輸入 PIN 或指紋。呼叫前先把 ASN 叫到前面，提示才不會被別的視窗擋住。
 //! - 沒有 Hello（沒設、被原則關掉、不是 Windows）：跳一個系統確認框，[`ASK_SECS`] 秒沒按就當取消。
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「本人同意」**（守門測試）；只有 lib.rs 的 `term_view_remote_start` 能叫 [`confirm`]。
+#![allow(dead_code)]
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// 確認框等多久（秒）
@@ -76,7 +80,7 @@ pub async fn confirm(window: &WebviewWindow, message: &str) -> Result<(), String
 #[cfg(test)]
 mod tests {
     #[test]
-    fn 守門_確認本人只有看畫面這個入口_沒有畫面命令能回報同意() {
+    fn 守門_發起看畫面和打字都不跳本人確認_也沒有畫面命令能回報同意() {
         let me = include_str!("presence.rs");
         let code = me.split("\nmod tests {").next().unwrap();
         assert!(!code.contains(concat!("#[tauri", "::command]")), "這裡不能有畫面命令");
@@ -95,7 +99,12 @@ mod tests {
                 callers.push(name);
             }
         }
-        assert_eq!(callers, vec!["term_view_remote_start".to_string()], "只有本人按「看畫面」能叫");
+        // 11-08 小良哥決定拿掉：看畫面、打字的發起（term_view_remote_start）都不跳 Hello 或確認框。要加回來請先改這個測試
+        assert!(callers.is_empty(), "沒有任何地方再叫本人確認：{callers:?}");
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let start = lib.split("async fn term_view_remote_start(").nth(1).expect("有發起的命令").split("\n}\n").next().unwrap();
+        assert!(!start.contains("presence") && !start.contains("dialog"), "發起不跳本人確認");
+        assert!(start.contains("key_async") && start.contains("d_start("), "設備金鑰簽章照留（給對方那台驗身分）");
     }
 
     fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

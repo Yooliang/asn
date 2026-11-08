@@ -48,11 +48,6 @@ pub const TOO_LONG: &str = "一次貼上的字太多，這段沒有送出，請�
 pub const MAX_OPEN: usize = 1;
 pub const TOO_MANY: &str = "同時只能在一個畫面打字，請先結束另一個";
 
-/// 確認本人時給 Hello／確認框的話（看的那台）
-pub fn presence_text(machine: &str, window: &str) -> String {
-    let m = if machine.is_empty() { "別台電腦".to_string() } else { format!("「{machine}」") };
-    format!("要開始在{m}上「{window}」打字嗎？對方的電腦會請那邊的人同意。只有你本人按了「打字」才確認。")
-}
 pub const TOO_MUCH: &str = "這次打字的字數到上限了，這段沒有送出，請結束後再開一次";
 
 /// 一幅打字：字和是不是貼上。**沒有別的欄位**（多的就解不開）
@@ -557,12 +552,6 @@ mod tests {
         assert_eq!(d.waiting(), 0);
         assert!(d.resend(NOW + 10 * RESEND_MS).is_empty());
         assert!(!d.stalled(NOW + 10 * GAP_END_MS));
-    }
-
-    #[test]
-    fn 確認本人的話_寫清楚是打字() {
-        assert!(presence_text("家用機", "小乙").contains("在「家用機」上「小乙」打字"));
-        assert!(presence_text("", "小乙").contains("別台電腦"));
     }
 
     #[test]
