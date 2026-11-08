@@ -60,6 +60,17 @@ export async function openTerm(Terminal, options, hostRef, tick, alive) {
   return null
 }
 
+/**
+ * 註冊事件監聽，但只在這一次發起還算數時留著：listen 是非同步的，註冊完時那一次可能已經作廢（收掉或重新發起），
+ * 這時馬上解除、回 null，不然監聽會一直留著（收掉時 cleanup 已經跑過，不會再收它）。
+ */
+export async function listenWhile(api, event, fn, wanted) {
+  const off = await api.listen(event, fn)
+  if (wanted()) return off
+  try { off?.() } catch { /* 解除失敗不影響 */ }
+  return null
+}
+
 /** 錯誤訊息給本人看的部分：Rust 端回的已經是白話；空的就用通用的 */
 export function startError(e) {
   const s = String(e?.message ?? e ?? '').trim()
@@ -96,13 +107,19 @@ export const RemoteView = {
       phase.value = 'starting'; note.value = ''; soon.value = false
       try {
         const Terminal = await loadXterm()
+        if (!wanted()) return
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）。#1029 第一版前這裡讀 ev.payload，每一幅都被丟掉，畫面一直停在「等」
-        offFrame = await props.api.listen(FRAME_EVENT, f => {
+        // 每個監聽註冊完先看這一次還算不算數：已作廢就馬上解除，不掛到 offFrame／offEnd 上
+        const offF = await listenWhile(props.api, FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'watching') phase.value = 'watching'
           term.write(frameToWrite(f))
-        })
-        offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
+        }, wanted)
+        if (!offF) return
+        offFrame = offF
+        const offE = await listenWhile(props.api, END_EVENT, e => { if (e?.id === id) finish(e.text || '') }, wanted)
+        if (!offE) return
+        offEnd = offE
         const r = await props.api.start(props.node, props.name, props.machine, { wanted })
         // 發起的時候這一格被收掉了（或又重新發起）：這次已經開始，要記得結束，不然那台會一直送到到期
         if (!wanted()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }
