@@ -8,7 +8,7 @@ import { normalizePinned, orderTabs } from './ctabs.mjs'
 export const SESSION_VERSION = 1
 const MAX_TABS = 60
 const MAX_ID = 200
-const MOBILE_TABS = ['list', 'chats', 'me']   // 與 mobile.mjs 的 TABS 相同（守門測試比對）
+const MOBILE_TABS = ['list', 'chats', 'me', 'page']   // 與 mobile.mjs 的 TABS 相同（守門測試比對）
 
 const str = v => (typeof v === 'string' && v.length > 0 && v.length <= MAX_ID ? v : '')
 const isPending = id => id.startsWith('pending:')

@@ -2,9 +2,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
+import { FOURTH_KEEP_MS, NOTICE_NEXT, PAGE_TAB, acctPage, fourthView, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { TABS, initialNav, normalizeNav, pageNav, tabIndex, tabLabel, tabList, tabNav } from '../ui/lib/mobile.mjs'
+import { TABS, chatsUnread, initialNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -41,13 +41,16 @@ test('內頁描述：設置分類、指引、設備與帳號；壞資料一律 n
   assert.deepEqual(pageLayers(null), [])
 })
 
-test('頁籤列：沒有第四頁籤時三個，有時四個；標題用內頁的標題；對話分頁永遠叫「對話」', () => {
+test('頁籤列：永遠四個；第四格沒有內頁叫「通知」，有內頁用內頁的標題；對話分頁永遠叫「對話」', () => {
   assert.deepEqual(tabList(null), TABS)
-  assert.deepEqual(tabList(openFourth(settingPage('notify'), 'me')), [...TABS, PAGE_TAB])
+  assert.deepEqual(tabList(openFourth(settingPage('notify'), 'me')), TABS)
+  assert.equal(TABS.length, 4)
+  assert.equal(tabLabel(PAGE_TAB), '通知', '預設就是通知'); assert.equal(tabLabel(PAGE_TAB, ''), '通知')
+  assert.equal(fourthView(null), 'notice'); assert.equal(fourthView(openFourth(guidePage(), 'me')), 'page')
   assert.equal(tabIndex(PAGE_TAB, tabList(openFourth(guidePage(), 'me'))), 3)
   assert.equal(tabLabel('chats'), '對話'); assert.equal(tabLabel('list'), '夥伴'); assert.equal(tabLabel('me'), '設置')
-  assert.equal(tabLabel(PAGE_TAB, '通知'), '通知')
-  assert.equal(pageTitle(settingPage('notify')), '通知')
+  assert.equal(tabLabel(PAGE_TAB, '使用指引'), '使用指引', '內頁的標題取代「通知」')
+  assert.equal(pageTitle(settingPage('notify')), '提醒', '設置的 notify 分類改叫「提醒」')
   assert.equal(pageTitle(acctPage('W')), '設備')
   assert.equal(pageTitle(guidePage()), '使用指引')
   assert.notEqual(pageTitle(guidePage('faq')), '使用指引', '單篇用那一篇的標題'); assert.ok(pageTitle(guidePage('faq')))
@@ -87,9 +90,9 @@ test('進內頁就出現並切過去；切到前三頁開始計時；未滿 3 �
   h.r.goTab('me'); h.flush()
   assert.equal(h.nav.tab, 'me'); assert.deepEqual(h.stack(), [initialNav(), tabNav('me')])
   h.clock.t += FOURTH_KEEP_MS
-  assert.equal(h.r.check(), true); assert.equal(h.st.fourth, null)
-  assert.deepEqual(tabList(h.st.fourth), TABS, '收起後只剩三個頁籤')
-  h.r.goTab(PAGE_TAB); assert.equal(h.nav.tab, 'me', '收起後點不到第四頁籤')
+  assert.equal(h.r.check(), true); assert.equal(h.st.fourth, null, '到期後 fourth 為 null＝第四格顯示通知（不是消失）')
+  assert.deepEqual(tabList(h.st.fourth), TABS, '頁籤仍是四個')
+  h.r.goTab(PAGE_TAB); assert.equal(h.nav.tab, PAGE_TAB, '到期後點第四格看到的是通知'); assert.equal(fourthView(h.st.fourth), 'notice')
 })
 
 test('App 在背景：用絕對時間判斷，回到前景時已超過就收起', () => {
@@ -206,7 +209,8 @@ test('舊的存檔或瀏覽記錄（sheet＝acct／setting／guide）轉成第�
   assert.deepEqual(normalizeNav({ tab: 'me', sheet: 'guide', guide: 'faq' }), pageNav(guidePage('faq')))
   assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 5 }), pageNav(guidePage()))
   assert.deepEqual(normalizeNav(pageNav(acctPage('W'))), pageNav(acctPage('W')))
-  for (const bad of [{ tab: PAGE_TAB }, { tab: PAGE_TAB, page: { kind: 'x' } }, { tab: PAGE_TAB, page: 7 }]) assert.deepEqual(normalizeNav(bad), initialNav(), JSON.stringify(bad))
+  for (const bad of [{ tab: PAGE_TAB }, { tab: PAGE_TAB, page: { kind: 'x' } }, { tab: PAGE_TAB, page: 7 }]) assert.deepEqual(normalizeNav(bad), pageNav(null), `第四格沒有合法內頁＝通知：${JSON.stringify(bad)}`)
+  assert.deepEqual(normalizeNav({ tab: 'page', sheet: '' }), { tab: PAGE_TAB, sheet: '', page: null }, '舊存檔 navTab＝page 也還原成通知')
   // 瀏覽記錄退到一筆舊格式的記錄：照它打開第四頁籤
   const h = harness()
   h.r.onPop({ tab: 'chats', sheet: 'acct' })
@@ -216,7 +220,7 @@ test('舊的存檔或瀏覽記錄（sheet＝acct／setting／guide）轉成第�
 test('畫面接線：第四頁籤在 pager 最右邊、內頁搬進來；對話分頁不再被借用；頁數不寫死三頁', () => {
   const html = read('ui', 'm.html'), js = read('ui', 'm.js'), css = read('ui', 'mobile.css')
   // 頁籤列與 pager 跟著目前的分頁清單
-  assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/)
+  assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span><i class="red" v-if="tabHasDot\(t\)">/)
   assert.match(html, /<section class="m-page" :style="\{ '--pages': pages \}">/)
   assert.match(css, /\.m-pager\{[^}]*width:calc\(var\(--pages,3\) \* 100%\)/); assert.match(css, /\.m-pg\{[^}]*flex:0 0 calc\(100% \/ var\(--pages,3\)\)/); assert.match(css, /\.m-ind\{[^}]*width:calc\(100% \/ var\(--pages,3\)\)/)
   assert.doesNotMatch(js, /\* 100 \/ 3\}/, 'pager 不再寫死三頁')
@@ -235,8 +239,13 @@ test('畫面接線：第四頁籤在 pager 最右邊、內頁搬進來；對話�
   const chat = html.slice(html.indexOf('<section class="m-pg m-chat"'), html.indexOf('<!-- 設置 -->'))
   assert.match(chat, /aria-label="對話"/); assert.doesNotMatch(chat, /acctSw|m-keep|ACCT_PAGE_TITLE/)
   assert.doesNotMatch(js, /sheet !== 'acct'|sheet === 'acct'/, '已讀與提示判斷不再排除設備與帳號')
-  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && nav\.tab === 'chats' && lastChat\.value === id/)
+  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(/)
   // 計時：切走時排一個計時器；回到前景檢查
   assert.match(js, /fourthMsLeft\(/); assert.match(js, /visibilitychange[\s\S]{0,120}checkFourth\(\)|checkFourth\(\)[\s\S]{0,40}visibilitychange/)
+  // 第四格的預設內容：通知對話（唯讀，沒有輸入列）；內頁時被取代
+  const notice = html.slice(html.indexOf('<section class="m-pg m-chat m-notice"'), html.indexOf('</section>', html.indexOf('<section class="m-pg m-chat m-notice"')))
+  assert.match(notice, /v-if="!fourthPage"/); assert.match(notice, /<chat-pane v-if="noticeChat" :friend="noticeChat"/); assert.doesNotMatch(notice, /@send|call-api|dict-api/)
+  assert.match(html, /@click="openNotice"/, '設置裡有「看通知」入口')
+  assert.match(js, /askBeforeLeave\(NOTICE_NEXT, \(\) => fourthNav\.openNotice\(\)\)/)
   assert.match(js, /window\.addEventListener\('popstate', e => \{[\s\S]*?fourthNav\.onPop\(e\.state\)/)
 })

@@ -1,7 +1,7 @@
 // 手機「設置」分類列表（#262，對應電腦版 #67）：分類、摘要文字、導覽狀態。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows, mobileSettingTitle } from '../ui/lib/mobile-settings.mjs'
+import { MOBILE_CAT_TITLE, MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows, mobileSettingTitle } from '../ui/lib/mobile-settings.mjs'
 import { settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { readFileSync } from 'node:fs'
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
@@ -15,10 +15,11 @@ test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦�
   for (const r of rows) {
     const c = SETTING_CATS.find(x => x.key === r.key)
     if (r.key === 'cloud') { assert.equal(c, undefined, '雲端代理在電腦版是帳號分類的一部分，手機自己獨立一列'); assert.equal(r.title, '雲端代理') }
-    else { assert.ok(c, `${r.key} 不在電腦版分類裡`); assert.equal(r.title, c.title); assert.equal(r.icon, c.icon) }
+    else { assert.ok(c, `${r.key} 不在電腦版分類裡`); assert.equal(r.title, MOBILE_CAT_TITLE[r.key] ?? c.title, '手機只改 notify 的標題'); assert.equal(r.icon, c.icon) }
     assert.ok(r.icon.length > 0)
   }
-  assert.equal(mobileSettingTitle('notify'), '通知')
+  assert.equal(mobileSettingTitle('notify'), '提醒', '不和第四格的「通知」分頁撞名（#895）'); assert.equal(MOBILE_CAT_TITLE.notify, '提醒'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))
+  assert.equal(SETTING_CATS.find(x => x.key === 'notify').title, '通知', '電腦版的分類標題不動')
   assert.equal(mobileSettingTitle('nope'), '')
 })
 

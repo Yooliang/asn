@@ -152,5 +152,5 @@ test('接線：最後使用的那位存在手機本機設定、點夥伴就成�
   assert.doesNotMatch(js, /chatNav|nav\.chat|swipeStart\(\$event, 'chat'\)|backAsync|threadMap|threadRows|\bpc\b/)
   assert.doesNotMatch(mob, /threadRows|threadTime|lastMessage|chatNav/)
   assert.doesNotMatch(css, /m-thread|m-threads|b-last2/)
-  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && nav\.tab === 'chats' && lastChat\.value === id/, '正在看對話分頁那位才算看得到（不算未讀）；設備與帳號改在第四頁籤，對話分頁看得到就算看得到')
+  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(\{ tab: nav\.tab, fourth: fourthSt\.fourth, lastChat: lastChat\.value \}\) === id/, '正在看的那位（對話分頁那位或第四格的通知）才算看得到（不算未讀）；設備與帳號改在第四頁籤，對話分頁看得到就算看得到')
 })

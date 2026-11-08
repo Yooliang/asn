@@ -1,8 +1,8 @@
-// 手機的分頁切換與瀏覽記錄（系統返回鍵＝瀏覽器上一頁）：三個固定分頁＋條件出現的第四頁籤（lib/mobile-fourth.mjs）。
+// 手機的分頁切換與瀏覽記錄（系統返回鍵＝瀏覽器上一頁）：四個固定分頁（第四格平時是「通知」，進內頁時暫時換成內頁）（lib/mobile-fourth.mjs）。
 // 規則：
 //   - 夥伴分頁是底；切到其他分頁推一筆記錄，其他分頁之間互換不增加記錄，切回夥伴＝上一頁。
 //   - 進內頁（設備與帳號、設置的某一項、使用指引、開新夥伴）：打開第四頁籤並切過去，內頁的每一層各推一筆（指引單篇、設備細部、開新夥伴第 2 步各多一層）。
-//   - 在第四頁籤按返回：先退內頁自己的層，退到頭就收起第四頁籤，回到進內頁之前的那個頁籤。
+//   - 在第四頁籤按返回：先退內頁自己的層，退到頭就跳回「通知」並回到進內頁之前的那個頁籤。第四格沒有內頁（顯示通知）時只佔一筆記錄。
 //   - 從第四頁籤切到前三頁：先把它那幾筆記錄退掉（之後的返回鍵照前三頁的規則走），頁籤與內容留著，開始計時；切回來再把那幾層推回去。
 // 不碰 DOM：history（pushState／replaceState／back／go）、nav（畫面用的導覽狀態）、st（st.fourth＝第四頁籤）與時鐘都由呼叫端給，node 測試用假的。
 import { normalizeNav, pageNav, tabList, tabNav } from './mobile.mjs'
@@ -35,9 +35,9 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   }
   const go = next => { history.pushState(next, ''); setNav(next) }
   // 第四頁籤目前佔了幾筆記錄（只有正在看它時才有）
-  const depth = () => (nav.tab === PAGE_TAB && st.fourth ? pageLayers(st.fourth.page).length : 0)
+  const depth = () => (nav.tab !== PAGE_TAB ? 0 : st.fourth ? pageLayers(st.fourth.page).length : 1)   // 第四格沒有內頁（顯示通知）時佔 1 筆
   // 現在這一頁的記錄（通話中按返回要原地補回去時用）
-  const state = () => (nav.tab === PAGE_TAB && st.fourth ? pageNav(st.fourth.page) : { tab: nav.tab, sheet: nav.sheet })
+  const state = () => (nav.tab === PAGE_TAB ? pageNav(st.fourth?.page ?? null) : { tab: nav.tab, sheet: nav.sheet })
   // 前三頁之間切換（目前不在第四頁籤上）
   function switchTab(t) {
     if (t === nav.tab) return
@@ -47,10 +47,22 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   }
   // 切到第四頁籤：把內頁的每一層推回記錄
   function showPage() {
-    const ls = pageLayers(st.fourth.page)
+    const ls = st.fourth ? pageLayers(st.fourth.page) : [null]   // 沒有內頁＝通知，一層
     for (const p of ls) history.pushState(pageNav(p), '')
     layers = ls.length
     setNav({ tab: PAGE_TAB, sheet: '' })
+  }
+  // 把第四格換成「通知」（內頁的「看通知」入口）：佔著的內頁丟掉，通知接著顯示
+  function openNotice() {
+    if (pending || nav.sheet) return false
+    if (nav.tab === PAGE_TAB) {
+      if (!st.fourth) return true
+      leavePage({ notice: true })
+      return true
+    }
+    st.fourth = null
+    showPage()
+    return true
   }
   const leavePage = then => { pending = then; history.go(-depth()) }
   // 點頁籤、左右滑：浮層（開新夥伴、⋯ 選單、要密碼…）開著時不動
@@ -88,13 +100,15 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     if (pending) {
       const then = pending
       pending = null
-      if (then.close) st.fourth = null
+      if (then.close || then.notice) st.fourth = null
       setNav(n)
+      if (then.notice) { showPage(); return }
       if (then.page) openPage(then.page)
       else if (then.tab) switchTab(then.tab)
       return
     }
     if (n.tab === PAGE_TAB) {   // 退回內頁的上一層（或從浮層退回第四頁籤）；第四頁籤已經收起又退到它的舊記錄＝照記錄重開
+      if (!n.page) { layers = 1; st.fourth = null; setNav(n); return }   // 通知那一層（或從浮層退回通知）
       layers = st.fourth ? Math.min(layers, pageLayers(n.page).length) || 1 : 1   // 照記錄重開時底下有沒有列表層不確定，當作只有這一層
       st.fourth = st.fourth ? { ...st.fourth, page: n.page } : openFourth(n.page, 'list')
       setNav(n)
@@ -115,7 +129,7 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     st.fourth = null
     return true
   }
-  return { go, goTab, openPage, pushLayer, closePage, onPop, check, state, depth, busy: () => !!pending }
+  return { go, goTab, openPage, openNotice, pushLayer, closePage, onPop, check, state, depth, busy: () => !!pending }
 }
 
 // 換內頁前先問一句（例如開新夥伴第 2 步還沒送出）：needs(next) 說要不要問；要問就開一層底部浮層（sheet: 'leave'，系統返回鍵＝留下）。
