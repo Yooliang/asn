@@ -235,7 +235,7 @@ jobs:
 
       - name: 編 Kotlin（Android，不含 Rust .so）
         working-directory: relay/asn/src-tauri/gen/android
-        run: ./gradlew --no-daemon --console=plain :app:compileUniversalDebugKotlin
+        run: sh ./gradlew --no-daemon --console=plain :app:compileUniversalDebugKotlin
 
   # 電腦版（Windows）：只有 Windows 才編的程式（#[cfg(windows)]，例如 Windows Hello、DPAPI）其他工作都編不到（#945 發現）。
   # 這裡只檢查 Rust 能不能編，不打包、不跑測試、不碰任何 secrets；權限只讀。
