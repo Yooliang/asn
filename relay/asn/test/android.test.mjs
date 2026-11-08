@@ -485,5 +485,5 @@ test('手機設備金鑰：包裝金鑰在系統金鑰庫、備份規則整個�
   for (const f of ['backup_rules.xml', 'data_extraction_rules.xml']) assert.match(xml(f), /<exclude domain="file" path="\." \/>/, `${f} 要排除 file 網域（設備金鑰檔）`)
   const di = read('src-tauri', 'src', 'device_id.rs')
   assert.match(di, /!cfg!\(target_os = "android"\) && /, '手機的設備金鑰不能讓別台看')
-  assert.match(cargo, /jni = "0\.21"/); assert.match(cargo, /ndk-context/)
+  assert.match(cargo, /jni = "=0\.21\.1"/, "鎖死版本"); assert.match(cargo, /ndk-context = "=0\.1\.1"/, "鎖死版本")
 })
