@@ -138,7 +138,7 @@ test('畫面文字：agy 帳號判斷、key 不再顯示、代碼只顯示一次
 })
 
 test('設定頁：指令都在清單；key 欄位是密碼欄且只綁元件內部；樞紐接得住', () => {
-  const ops = ['quota-source', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close']
+  const ops = ['quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close']
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   for (const op of ops) {
@@ -180,4 +180,48 @@ test('我的帳號：MiniMax 有名稱、讀得到窗，Grok 的窗也顯示；�
 test('MiniMax 不會因為舊表沒有它就標成沒有設備在回報', () => {
   const q = rosterQuota({ vendor: 'minimax', account: 'm@x.test', windows: [{ name: 'weekly', left_pct: 50, read_at: AT }], nodes: [], seen_at: AT }, { now: NOW })
   assert.equal(q.gone, false)
+})
+
+test('Claude 額外帳號：預設關；形狀不對不算開；沒有讀取就不算換新開著', () => {
+  assert.equal(normalizeReaders({}).extra, false)
+  assert.equal(normalizeReaders({}).extraRefresh, false)
+  assert.equal(normalizeReaders({ extra_claude: 'yes', extra_claude_refresh: 'yes' }).extraRefresh, false)
+  assert.equal(normalizeReaders({ extra_claude: false, extra_claude_refresh: true }).extraRefresh, false)
+  const r = normalizeReaders({ extra_claude: true, extra_claude_refresh: true, extra_claude_dirs: [{ name: 'a', status: '登入失效，要重新登入' }, { name: 'b' }, null] })
+  assert.equal(r.extraRefresh, true)
+  assert.deepEqual(r.extraDirs, [{ name: 'a', status: '登入失效，要重新登入' }, { name: 'b', status: '' }])
+})
+
+test('自動換新：打開要按兩次，關閉一次', async () => {
+  const { ui, calls } = make()
+  assert.equal(await ui.setRefresh(true), false)
+  assert.equal(calls.length, 0)
+  assert.equal(ui.state.confirm, 'refresh')
+  await ui.setRefresh(true)
+  assert.deepEqual(calls[0], ['quota_readers_set', { source: 'extra_claude_refresh', on: true }])
+  await ui.setRefresh(false)
+  assert.deepEqual(calls[1], ['quota_readers_set', { source: 'extra_claude_refresh', on: false }])
+})
+
+test('自動換新的文字寫明只能有一個程式在換，以及失敗不再試；沒有資料夾路徑與內部名稱', () => {
+  assert.match(QUOTA_TEXT.refreshWarn, /只能有一個程式在換新/)
+  assert.match(QUOTA_TEXT.refreshWarn, /被登出/)
+  assert.match(QUOTA_TEXT.refreshStopped, /不會再試/)
+  for (const t of [QUOTA_TEXT.extraNote, QUOTA_TEXT.refreshNote, QUOTA_TEXT.refreshWarn, QUOTA_TEXT.refreshStopped]) {
+    assert.doesNotMatch(t, /\.claude|token|OAuth|refresh/i)
+  }
+})
+
+test('設定頁：沒有額外帳號的人看不到這一區', () => {
+  assert.match(SettingsPanel.template, /v-if="st\.quotaReaders\.extraDirs\.length"/)
+})
+
+test('自動換新的開關旁寫明風險：開之前與開著都看得到', () => {
+  assert.equal(QUOTA_TEXT.refreshRisk, '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。')
+  const t = SettingsPanel.template
+  const risk = t.indexOf('QUOTA_TEXT.refreshRisk')
+  const button = t.indexOf("act('quota-refresh'")
+  assert.ok(risk > 0 && risk < button, '在按鈕之前')
+  const line = t.slice(t.lastIndexOf('<small', risk), risk)
+  assert.doesNotMatch(line, /v-if/, '不管開關狀態都顯示')
 })

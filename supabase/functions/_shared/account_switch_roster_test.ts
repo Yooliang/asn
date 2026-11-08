@@ -173,3 +173,20 @@ Deno.test("acct_roster：沒簽章回 forbidden、不呼叫資料庫；有簽章
   const c = fakeDeps(() => ({ data: { error: "forbidden" }, error: null }));
   assertEquals((await handleAcctAction(c.deps, { id: "P" }, "acct_roster", {}, SIGNED)).status, 403);
 });
+
+Deno.test("額外帳號：只有 Claude 能標；不進舊表、會進帳號列表；沒標的照舊", async () => {
+  const r = parseReport({ accounts: [
+    { ...C, email: "q@x.test", current: false, extra: true, windows: [{ name: "weekly", left_pct: 50, read_at: AT }] },
+    { vendor: "grok", email: "g@x.test", extra: true },
+    { ...C, extra: "yes" },
+  ] })!;
+  assertEquals(r[0].extra, true);
+  assert(!("extra" in r[1]), "別家不收這個標記");
+  assert(!("extra" in r[2]), "不是 true 不算");
+  const { deps, calls } = fakeDeps();
+  await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: [{ ...C, email: "q@x.test", current: false, extra: true }, C] });
+  const legacy = calls.find((c) => c.fn === "asn_relay_acct_report")!.args.p_accounts as { email: string }[];
+  assertEquals(legacy.map((a) => a.email), ["a@x.test"]);
+  const roster = calls.find((c) => c.fn === "asn_relay_acct_roster_report")!.args.p_accounts as { email: string }[];
+  assertEquals(roster.map((a) => a.email), ["q@x.test", "a@x.test"]);
+});

@@ -39,6 +39,10 @@ pub struct Settings {
     pub agy: bool,
     /// 要讀的 MiniMax 帳號 email；key 在憑證管理員
     pub minimax: Vec<String>,
+    /// 讀專用資料夾裡的 Claude 額外帳號
+    pub extra_claude: bool,
+    /// 額外帳號快到期時自動換新（要先開上面那個；同一個帳號只能有一支程式在換）
+    pub extra_claude_refresh: bool,
 }
 
 pub fn settings_path(home: &Path) -> PathBuf {
@@ -49,6 +53,7 @@ pub fn load_settings(home: &Path) -> Settings {
     let Ok(text) = std::fs::read_to_string(settings_path(home)) else { return Settings::default() };
     let mut s: Settings = serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default();
     s.minimax = s.minimax.iter().filter_map(|e| normalize_email(e)).take(MAX_MINIMAX).collect();
+    s.extra_claude_refresh = s.extra_claude_refresh && s.extra_claude;
     s
 }
 
@@ -78,6 +83,18 @@ pub fn set_source(home: &Path, source: &str, on: bool) -> Result<(), String> {
     match source {
         "grok" => s.grok = on,
         "agy" => s.agy = on,
+        "extra_claude" => {
+            s.extra_claude = on;
+            s.extra_claude_refresh = s.extra_claude_refresh && on;
+        }
+        "extra_claude_refresh" => {
+            if on && !s.extra_claude {
+                return Err("要先打開讀取".into());
+            }
+            s.extra_claude_refresh = on;
+            // 使用者自己重新打開：之前換新失敗的記號清掉，下一輪才會再試
+            crate::claude_extra::clear_stops(home);
+        }
         _ => return Err("不認得的來源".into()),
     }
     save_settings(home, &s)?;
@@ -126,8 +143,10 @@ fn view_with(home: &Path, supported: bool, has_key: impl Fn(&str) -> bool) -> Va
     let s = load_settings(home);
     let failures = FAILURES.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let minimax: Vec<Value> = s.minimax.iter().map(|e| json!({ "email": e, "has_key": has_key(e) })).collect();
+    let extra: Vec<Value> = crate::claude_extra::dirs(home).into_iter().map(|(name, _)| json!({ "name": name, "status": failures.get(&format!("claude:{name}")) })).collect();
     json!({
         "grok": s.grok, "agy": s.agy, "agy_account": agy_email(home), "minimax": minimax, "minimax_supported": supported,
+        "extra_claude": s.extra_claude, "extra_claude_refresh": s.extra_claude_refresh, "extra_claude_dirs": extra,
         "status": {
             "grok": failures.get("grok"), "agy": failures.get("agy"),
             "minimax": s.minimax.iter().filter_map(|e| failures.get(&format!("minimax:{e}")).map(|f| (e.clone(), json!(f)))).collect::<serde_json::Map<_, _>>(),
@@ -136,14 +155,14 @@ fn view_with(home: &Path, supported: bool, has_key: impl Fn(&str) -> bool) -> Va
 }
 
 // ---------- 解析：全部是純函式，缺值一律不產生窗 ----------
-fn window(name: &str, left: f64, resets_at: Option<String>, now_ms: i64) -> Option<Value> {
+pub(crate) fn window(name: &str, left: f64, resets_at: Option<String>, now_ms: i64) -> Option<Value> {
     if !left.is_finite() || !(0.0..=100.0).contains(&left) {
         return None;
     }
     Some(json!({ "name": name, "left_pct": left.round() as u8, "resets_at": resets_at, "read_at": iso_secs(now_ms) }))
 }
 
-fn iso_or_none(s: Option<&str>) -> Option<String> {
+pub(crate) fn iso_or_none(s: Option<&str>) -> Option<String> {
     s.and_then(|x| crate::claude_quota::parse_iso_secs(x).or_else(|| parse_iso_frac(x))).map(iso_secs)
 }
 
@@ -271,6 +290,7 @@ impl Gate {
 pub struct Store {
     grok: HashMap<String, (Vec<Value>, i64)>,
     minimax: HashMap<String, (Vec<Value>, i64)>,
+    extra_claude: HashMap<String, (Vec<Value>, i64)>,
 }
 
 static STORE: Mutex<Option<Store>> = Mutex::new(None);
@@ -305,22 +325,37 @@ impl Store {
             })
             .collect()
     }
+    /// Claude 額外帳號：email → 窗
+    pub fn extra_claude_windows(&self, now_ms: i64) -> HashMap<String, Vec<Value>> {
+        self.extra_claude.iter().filter(|(_, (w, at))| !w.is_empty() && now_ms - at < KEEP_MS).map(|(e, (w, _))| (e.clone(), w.clone())).collect()
+    }
     /// 設定關掉的來源，數字立刻不送
     pub fn retain(&mut self, s: &Settings) {
         if !s.grok {
             self.grok.clear();
         }
         self.minimax.retain(|e, _| s.minimax.contains(e));
+        if !s.extra_claude {
+            self.extra_claude.clear();
+        }
     }
 }
 
 /// 給回報用：現在可以送的 Grok 窗（email → 窗）與 MiniMax 列
-pub fn report_extras(now_ms: i64) -> (HashMap<String, Vec<Value>>, Vec<Value>) {
-    store(|s| (s.grok_windows(now_ms), s.minimax_rows(now_ms)))
+pub fn report_extras(now_ms: i64) -> ReaderExtras {
+    store(|s| ReaderExtras { grok: s.grok_windows(now_ms), minimax: s.minimax_rows(now_ms), extra_claude: s.extra_claude_windows(now_ms) })
+}
+
+/// 這一輪回報要帶的東西
+#[derive(Debug, Default, Clone)]
+pub struct ReaderExtras {
+    pub grok: HashMap<String, Vec<Value>>,
+    pub minimax: Vec<Value>,
+    pub extra_claude: HashMap<String, Vec<Value>>,
 }
 
 // ---------- 連網 ----------
-fn client() -> Result<reqwest::Client, Failure> {
+pub(crate) fn client() -> Result<reqwest::Client, Failure> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
         .redirect(reqwest::redirect::Policy::none())
@@ -328,7 +363,7 @@ fn client() -> Result<reqwest::Client, Failure> {
         .map_err(|_| Failure::Other("連線失敗".into()))
 }
 
-async fn get_json(req: reqwest::RequestBuilder) -> Result<Value, Failure> {
+pub(crate) async fn get_json(req: reqwest::RequestBuilder) -> Result<Value, Failure> {
     let resp = req.send().await.map_err(|_| Failure::Other("連線失敗".into()))?;
     let status = resp.status();
     if status == 401 || status == 403 {
@@ -498,6 +533,7 @@ struct Gates {
     grok: Gate,
     agy: Gate,
     minimax: HashMap<String, Gate>,
+    extra_claude: HashMap<String, Gate>,
 }
 
 fn note(log: &(impl Fn(String) + Sync), gate: &mut Gate, who: &str, f: &Failure, now_ms: i64, mark: Option<i64>) {
@@ -554,6 +590,29 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
         }
     }
     // 空記憶體不夠：跳過這一輪，不算失敗，下一分鐘再看
+    if s.extra_claude {
+        for (name, dir) in crate::claude_extra::dirs(home) {
+            let gate = gates.extra_claude.entry(name.clone()).or_default();
+            let mark = crate::claude_extra::modified_ms(&dir);
+            if !gate.due(now_ms, mark) {
+                continue;
+            }
+            match crate::claude_extra::read_dir(home, &name, &dir, s.extra_claude_refresh, now_ms).await {
+                Ok((email, w)) => {
+                    gate.success(now_ms);
+                    set_failure(&format!("claude:{name}"), None);
+                    store(|st| st.extra_claude.insert(email, (w, now_ms)));
+                }
+                Err(f) => {
+                    set_failure(&format!("claude:{name}"), Some(f.text()));
+                    // 換新可能剛改過憑證檔，記號要用失敗後的：沒變就不再試
+                    if gate.failure(&f, now_ms, crate::claude_extra::modified_ms(&dir)) {
+                        log(format!("額度讀取 Claude 額外帳號 {name}：{}", f.text()));
+                    }
+                }
+            }
+        }
+    }
     if s.agy && !agy_paused(free_bytes) && gates.agy.due(now_ms, None) {
         match agy_email(home) {
             // 還沒開過 agy 視窗，不知道是哪個帳號：不算失敗，下一輪再看

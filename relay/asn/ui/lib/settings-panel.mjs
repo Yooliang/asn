@@ -23,7 +23,7 @@ import { TERM_SERVER_MISSING_NOTE, keyProtectionNote, termServerNote } from './t
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
-  'quota-source', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
+  'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-input-no-ask', 'bridge-term-server', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
@@ -231,6 +231,20 @@ export const SettingsPanel = {
             <small>{{ QUOTA_TEXT.agyNote }}</small>
             <small v-if="st.quotaReaders.agy">{{ st.quotaReaders.agyAccount ? QUOTA_TEXT.agyAccount(st.quotaReaders.agyAccount) : QUOTA_TEXT.agyNoAccount }}</small>
             <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
+            <template v-if="st.quotaReaders.extraDirs.length">
+              <label class="chk"><input type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.extra }}</span></label>
+              <small>{{ QUOTA_TEXT.extraNote }} {{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}</small>
+              <template v-if="st.quotaReaders.extra">
+                <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.name }}：{{ d.status }}</small>
+                <small>{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshActive : QUOTA_TEXT.refreshNote }}</small>
+                <small class="acct-warn">{{ QUOTA_TEXT.refreshRisk }}</small>
+                <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>
+                <small v-if="st.quotaReaders.extraRefresh">{{ QUOTA_TEXT.refreshStopped }}</small>
+                <span class="dv-ibtns">
+                  <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-refresh', !st.quotaReaders.extraRefresh)">{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshOff : st.quotaReaders.confirm === 'refresh' ? QUOTA_TEXT.refreshConfirm : QUOTA_TEXT.refreshOn }}</button>
+                </span>
+              </template>
+            </template>
             <b>{{ QUOTA_TEXT.minimax }}</b>
             <small v-if="!st.quotaReaders.minimaxSupported">{{ QUOTA_TEXT.minimaxUnsupported }}</small>
             <template v-else>
