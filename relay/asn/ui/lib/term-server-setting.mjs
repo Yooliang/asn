@@ -27,6 +27,10 @@ export const TERM_FETCH_FAIL_NOTES = {
 }
 /** 這幾類按「重試」可能有用 */
 export const TERM_FETCH_RETRYABLE = ['network', 'disk', 'mismatch', 'other']
+/** 缺少的系統函式庫名（後端已過濾；這裡再擋一次，不合格式就當沒有，怪字不能進畫面）：英數開頭、只含英數與 . _ + -、最長 40 字元 */
+export const safeLibName = v => (typeof v === 'string' && v.length <= 40 && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(v) ? v : '')
+/** 跑不起來而且知道缺哪個函式庫：點名，裝好後按重試有機會成功 */
+export const termFetchMissingLibNote = lib => `終端程式取得失敗：缺少系統函式庫 ${lib}，請用套件管理員安裝後按重試。`
 /** 開關底下的取得狀態：回 { text, canRetry }。開關關著、或沒事就是空字串 */
 export function termFetchLine(st) {
   const none = { text: '', canRetry: false }
@@ -34,6 +38,8 @@ export function termFetchLine(st) {
   if (st.termFetch === 'fetching') return { text: TERM_FETCH_FETCHING_NOTE, canRetry: false }
   if (st.termFetch === 'failed') {
     const kind = Object.hasOwn(TERM_FETCH_FAIL_NOTES, st.termFetchKind) ? st.termFetchKind : 'other'
+    const lib = kind === 'unrunnable' ? safeLibName(st.termFetchDetail) : ''
+    if (lib) return { text: termFetchMissingLibNote(lib), canRetry: true }
     return { text: TERM_FETCH_FAIL_NOTES[kind], canRetry: TERM_FETCH_RETRYABLE.includes(kind) }
   }
   return none

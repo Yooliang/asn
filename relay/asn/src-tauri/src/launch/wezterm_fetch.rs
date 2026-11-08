@@ -361,14 +361,30 @@ fn open_new(p: &Path) -> std::io::Result<std::fs::File> {
 
 // ---------- 能不能跑 ----------
 
-/// `--version` 失敗時的 stderr → 使用者看得懂的話（缺函式庫要點名）
-pub(crate) fn explain_run_failure(stderr: &str) -> String {
+/// 缺的函式庫名最長幾個字元（過長的當作看不懂）
+const LIB_NAME_MAX: usize = 40;
+
+/// 只留安全的函式庫名：英數開頭，其餘只准英數與 `. _ + -`，長度有上限。路徑、空白、控制字元等一律不要
+pub(crate) fn sanitize_lib_name(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    let first_ok = s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+    let all_ok = s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'));
+    (first_ok && all_ok && s.len() <= LIB_NAME_MAX).then(|| s.to_string())
+}
+
+/// `error while loading shared libraries: libssl.so.3: cannot open…` → `libssl.so.3`（過濾後）。
+/// 顯示原本的 soname 而不換算成套件名：soname 是 stderr 裡真實的字，各發行版的套件名不一樣（libssl.so.3 在 Debian 是 libssl3，
+/// libz.so.1 卻是 zlib1g），猜錯會誤導；soname 用套件管理員的「搜尋檔案」功能一定找得到。看不懂回 None
+pub(crate) fn parse_missing_lib(stderr: &str) -> Option<String> {
     const KEY: &str = "error while loading shared libraries: ";
-    if let Some(i) = stderr.find(KEY) {
-        let lib = stderr[i + KEY.len()..].split(':').next().unwrap_or("").trim();
-        if !lib.is_empty() {
-            return format!("缺少系統函式庫 {lib}，請用套件管理員安裝後再試");
-        }
+    let i = stderr.find(KEY)?;
+    sanitize_lib_name(stderr[i + KEY.len()..].split(':').next().unwrap_or(""))
+}
+
+/// `--version` 失敗時的 stderr → 一句話（缺函式庫要點名）。這句話只進 log；畫面上的字在前端
+pub(crate) fn explain_run_failure(stderr: &str) -> String {
+    if let Some(lib) = parse_missing_lib(stderr) {
+        return format!("缺少系統函式庫 {lib}，請用套件管理員安裝後再試");
     }
     if stderr.contains("libssl") {
         return "缺少系統函式庫 libssl，請用套件管理員安裝後再試".into();
@@ -376,10 +392,30 @@ pub(crate) fn explain_run_failure(stderr: &str) -> String {
     format!("取得的終端程式在這台電腦跑不起來，{MANUAL_HINT}")
 }
 
+/// 取得後的檢查失敗：`log` 給 log 看（可以帶 stderr 的片段）；`lib` 是過濾過的缺少函式庫名，會帶到設定頁
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CheckFail {
+    pub log: String,
+    pub lib: Option<String>,
+}
+
+impl From<String> for CheckFail {
+    fn from(log: String) -> Self {
+        CheckFail { log, lib: None }
+    }
+}
+
+pub(crate) type CheckResult = Result<(), CheckFail>;
+
+/// stderr 的片段（給 log）：換行變空白、最多 300 字元
+fn stderr_excerpt(stderr: &str) -> String {
+    stderr.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect()
+}
+
 /// 兩個程式都跑一次 `--version`（核對雜湊之後才會到這裡）。環境清空、有逾時
-pub(crate) fn run_version_check(dir: &Path) -> Result<(), String> {
+pub(crate) fn run_version_check(dir: &Path) -> CheckResult {
     for (_, name) in WANTED {
-        let mut child = Command::new(dir.join(name)).no_window().arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|_| format!("取得的終端程式在這台電腦跑不起來，{MANUAL_HINT}"))?;
+        let mut child = Command::new(dir.join(name)).no_window().arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| CheckFail::from(format!("取得的終端程式在這台電腦跑不起來（{e}），{MANUAL_HINT}")))?;
         let start = Instant::now();
         let status = loop {
             match child.try_wait() {
@@ -388,13 +424,14 @@ pub(crate) fn run_version_check(dir: &Path) -> Result<(), String> {
                 _ => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("取得的終端程式在這台電腦跑不起來（等不到回應），{MANUAL_HINT}"));
+                    return Err(CheckFail::from(format!("取得的終端程式在這台電腦跑不起來（等不到回應），{MANUAL_HINT}")));
                 }
             }
         };
         if !status.success() {
-            let out = child.wait_with_output().map_err(|e| format!("讀不到終端程式的輸出：{e}"))?;
-            return Err(explain_run_failure(&String::from_utf8_lossy(&out.stderr)));
+            let out = child.wait_with_output().map_err(|e| CheckFail::from(format!("讀不到終端程式的輸出：{e}")))?;
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(CheckFail { log: format!("{name}：{}（輸出：{}）", explain_run_failure(&stderr), stderr_excerpt(&stderr)), lib: parse_missing_lib(&stderr) });
         }
     }
     Ok(())
@@ -450,11 +487,13 @@ pub(crate) struct FetchError {
     pub detail: String,
     /// 因為退避期間而沒有去取（沒有連網、也不記新的失敗）
     pub skipped: bool,
+    /// 跑不起來時缺的系統函式庫名（已過濾，短）；會記進失敗紀錄、顯示在設定頁
+    pub lib: Option<String>,
 }
 
 impl FetchError {
     fn new(kind: FailKind, detail: impl Into<String>) -> Self {
-        FetchError { kind, detail: detail.into(), skipped: false }
+        FetchError { kind, detail: detail.into(), skipped: false, lib: None }
     }
 }
 
@@ -472,6 +511,9 @@ pub(crate) const BACKOFF_MS: u64 = 24 * 3600 * 1000;
 struct FailRecord {
     kind: String,
     at_ms: u64,
+    /// 缺少的系統函式庫名（只有「跑不起來」才有）；舊版的紀錄沒有這欄
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lib: Option<String>,
 }
 
 fn read_fail(root: &Path) -> Option<(FailKind, u64)> {
@@ -480,9 +522,20 @@ fn read_fail(root: &Path) -> Option<(FailKind, u64)> {
     Some((FailKind::parse(&r.kind), r.at_ms))
 }
 
-/// 先寫暫存檔再改名，讀的人不會讀到寫一半的
+/// 紀錄裡的缺少函式庫名（讀出來也再過濾一次，檔案被改壞也不會把怪字帶到畫面）
+fn read_fail_lib(root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(root.join(STATE_FILE)).ok()?;
+    let r: FailRecord = serde_json::from_str(&text).ok()?;
+    r.lib.as_deref().and_then(sanitize_lib_name)
+}
+
 fn write_fail(root: &Path, kind: FailKind, now_ms: u64) {
-    let rec = FailRecord { kind: kind.as_str().to_string(), at_ms: now_ms };
+    write_fail_with(root, kind, now_ms, None);
+}
+
+/// 先寫暫存檔再改名，讀的人不會讀到寫一半的
+fn write_fail_with(root: &Path, kind: FailKind, now_ms: u64, lib: Option<&str>) {
+    let rec = FailRecord { kind: kind.as_str().to_string(), at_ms: now_ms, lib: lib.and_then(sanitize_lib_name) };
     let Ok(text) = serde_json::to_string(&rec) else { return };
     let tmp = root.join(format!("{STATE_FILE}.tmp"));
     if std::fs::create_dir_all(root).is_ok() && std::fs::write(&tmp, text).is_ok() {
@@ -504,12 +557,14 @@ pub(crate) fn backoff_active(at_ms: u64, now_ms: u64) -> bool {
 
 /// 已下載的 tar.xz → 核對大小與雜湊 → 解壓 → 取出兩個檔 → `check` → 原子改名成 `final_dir`。
 /// `work` 是呼叫端管理的暫存資料夾（失敗時由它清）；大小或雜湊不符會連 tarball 一起刪掉。
-pub(crate) fn install_tarball(tarball: &Path, sha256: &str, size: u64, work: &Path, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), FetchError> {
+pub(crate) fn install_tarball(tarball: &Path, sha256: &str, size: u64, work: &Path, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> CheckResult) -> Result<(), FetchError> {
     let disk = |what: &str, e: std::io::Error| FetchError::new(FailKind::Disk, format!("{what}：{e}"));
     let have = std::fs::metadata(tarball).map_err(|e| disk("讀不到下載的檔案", e))?.len();
     if have != size {
         let _ = std::fs::remove_file(tarball);
-        return Err(FetchError::new(FailKind::Mismatch, format!("下載的檔案大小不符（預期 {size}，實際 {have}），已刪除，沒有安裝")));
+        // 比預期短＝沒下載完整（算網路）；比預期長＝檔案不是我們要的（算不符）
+        let kind = if have < size { FailKind::Network } else { FailKind::Mismatch };
+        return Err(FetchError::new(kind, format!("下載的檔案大小不符（預期 {size}，實際 {have}），已刪除，沒有安裝")));
     }
     let got = sha256_file(tarball).map_err(|e| FetchError::new(FailKind::Disk, e))?;
     if !got.eq_ignore_ascii_case(sha256) {
@@ -534,7 +589,7 @@ pub(crate) fn install_tarball(tarball: &Path, sha256: &str, size: u64, work: &Pa
     let tar_file = std::fs::File::open(&tar_path).map_err(|e| disk("讀不到暫存檔", e))?;
     extract_members(std::io::BufReader::new(tar_file), &staged, lim).map_err(|e| FetchError::new(FailKind::Mismatch, e))?;
     let _ = std::fs::remove_file(&tar_path);
-    check(&staged).map_err(|e| FetchError::new(FailKind::Unrunnable, e))?;
+    check(&staged).map_err(|e| FetchError { lib: e.lib, ..FetchError::new(FailKind::Unrunnable, e.log) })?;
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(|e| disk("建立資料夾失敗", e))?;
     }
@@ -597,13 +652,14 @@ async fn download(url: &str, dest: &Path, max: u64, size: u64) -> Result<(), Fet
     }
     file.flush().map_err(disk)?;
     if total != size {
-        return Err(FetchError::new(FailKind::Mismatch, format!("下載的檔案大小不符（預期 {size}，實收 {total}）")));
+        // 連線在中途結束、實收比預期短：算網路。（比預期長的前面就以不符中止了）
+        return Err(FetchError::new(FailKind::Network, format!("下載中斷，只收到一部分（預期 {size}，實收 {total}）")));
     }
     Ok(())
 }
 
 /// 下載 + 安裝。暫存資料夾在任何結果下都會清掉
-async fn fetch_into<H: Downloader>(http: &H, root: &Path, url: &str, pin: &Pin, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), FetchError> {
+async fn fetch_into<H: Downloader>(http: &H, root: &Path, url: &str, pin: &Pin, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> CheckResult) -> Result<(), FetchError> {
     let tmp = make_tmp(root).map_err(|e| FetchError::new(FailKind::Disk, e))?;
     let tarball = tmp.0.join("download.tar.xz");
     http.fetch(url, &tarball, lim.max_tarball, pin.size).await?;
@@ -625,7 +681,7 @@ pub(crate) async fn ensure_with<H: Downloader>(http: &H, base: &Path, force: boo
         Err(e) if e.skipped => elog!("取得 WezTerm 暫不重試（上次失敗，一天內不自動重下）"),
         Err(e) => {
             elog!("取得 WezTerm 失敗：{}", e.detail);
-            write_fail(&root, e.kind, now_ms);
+            write_fail_with(&root, e.kind, now_ms, e.lib.as_deref());
         }
     }
     result
@@ -642,7 +698,7 @@ async fn ensure_inner<H: Downloader>(http: &H, root: &Path, force: bool, now_ms:
     if !force {
         if let Some((kind, at)) = read_fail(root) {
             if backoff_active(at, now_ms) {
-                return Err(FetchError { kind, detail: "退避期間".into(), skipped: true });
+                return Err(FetchError { kind, detail: "退避期間".into(), skipped: true, lib: None });
             }
         }
     }
@@ -661,7 +717,7 @@ pub(crate) struct Plan<'a> {
     pub pins: Pins,
     pub os: OsRelease,
     pub arch: String,
-    pub check: &'a dyn Fn(&Path) -> Result<(), String>,
+    pub check: &'a dyn Fn(&Path) -> CheckResult,
     pub lim: Limits,
 }
 
@@ -710,17 +766,24 @@ pub(crate) struct FetchStatus {
     pub state: &'static str,
     /// state 是 "failed" 時的原因分類（`FailKind::as_str`），否則空
     pub kind: &'static str,
+    /// 失敗時的短細節（目前只有缺少的系統函式庫名，已過濾）；沒有就空字串
+    pub detail: String,
 }
 
 pub(crate) fn status(base: &Path) -> FetchStatus {
-    status_from(is_fetching(), read_fail(&base.join("ASN").join("wezterm")).map(|(k, _)| k), !fetched_dirs(base).is_empty())
+    let root = base.join("ASN").join("wezterm");
+    let mut st = status_from(is_fetching(), read_fail(&root).map(|(k, _)| k), !fetched_dirs(base).is_empty());
+    if st.state == "failed" {
+        st.detail = read_fail_lib(&root).unwrap_or_default();
+    }
+    st
 }
 
 pub(crate) fn status_from(fetching: bool, failed: Option<FailKind>, have: bool) -> FetchStatus {
     match (fetching, failed, have) {
-        (true, _, _) => FetchStatus { state: "fetching", kind: "" },
-        (false, Some(k), false) => FetchStatus { state: "failed", kind: k.as_str() },
-        _ => FetchStatus { state: "", kind: "" },
+        (true, _, _) => FetchStatus { state: "fetching", kind: "", detail: String::new() },
+        (false, Some(k), false) => FetchStatus { state: "failed", kind: k.as_str(), detail: String::new() },
+        _ => FetchStatus { state: "", kind: "", detail: String::new() },
     }
 }
 
@@ -762,7 +825,7 @@ mod tests {
         Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
     }
 
-    fn ok_check(_: &Path) -> Result<(), String> {
+    fn ok_check(_: &Path) -> CheckResult {
         Ok(())
     }
 
@@ -954,9 +1017,9 @@ mod tests {
             let tmp = make_tmp(root.path()).unwrap();
             let tarball = tmp.0.join("download.tar.xz");
             std::fs::write(&tarball, GOOD).unwrap();
-            // 雜湊是對的，只有大小不符：也要失敗（和雜湊不符同樣處理）
-            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64 + 1, &tmp.0, &fin, &lim(), &|_: &Path| panic!("大小不符不可以執行任何東西")).unwrap_err();
-            assert_eq!(e.kind, FailKind::Mismatch);
+            // 雜湊是對的，只有大小不符：也要失敗（和雜湊不符同樣處理）。實際比預期長＝檔案不是我們要的
+            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64 - 1, &tmp.0, &fin, &lim(), &|_: &Path| panic!("大小不符不可以執行任何東西")).unwrap_err();
+            assert_eq!(e.kind, FailKind::Mismatch, "大小超過算檔案不符");
             assert!(e.detail.contains("大小不符"), "{}", e.detail);
             assert!(!tarball.exists(), "刪掉下載的檔");
         }
@@ -998,7 +1061,7 @@ mod tests {
             let tmp = make_tmp(root.path()).unwrap();
             let tarball = tmp.0.join("download.tar.xz");
             std::fs::write(&tarball, GOOD).unwrap();
-            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64, &tmp.0, &fin, &lim(), &|_: &Path| Err("缺少系統函式庫 libssl.so.3，請用套件管理員安裝後再試".to_string())).unwrap_err();
+            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64, &tmp.0, &fin, &lim(), &|_: &Path| Err("缺少系統函式庫 libssl.so.3，請用套件管理員安裝後再試".to_string().into())).unwrap_err();
             assert_eq!(e.kind, FailKind::Unrunnable);
             assert!(e.detail.contains("libssl"), "{}", e.detail);
         }
@@ -1057,7 +1120,7 @@ mod tests {
     const NOW: u64 = 1_800_000_000_000;
     const HOUR: u64 = 3_600_000;
 
-    fn plan(os_id: &str, os_ver: &str, check: &'static dyn Fn(&Path) -> Result<(), String>) -> Plan<'static> {
+    fn plan(os_id: &str, os_ver: &str, check: &'static dyn Fn(&Path) -> CheckResult) -> Plan<'static> {
         let mut linux = BTreeMap::new();
         linux.insert("ubuntu-22.04".to_string(), Pin { tarball: "wezterm-v1.Ubuntu22.04.tar.xz".into(), sha256: hex(GOOD), size: GOOD.len() as u64 });
         let pins = Pins { version: "v1".into(), release_base: DOWNLOAD_BASE.into(), linux };
@@ -1167,7 +1230,7 @@ mod tests {
         }
         // 取得後跑不起來
         let base = tempfile::tempdir().unwrap();
-        static BAD_CHECK: fn(&Path) -> Result<(), String> = |_| Err("缺少系統函式庫 libssl.so.3".to_string());
+        static BAD_CHECK: fn(&Path) -> CheckResult = |_| Err(CheckFail { log: "缺少系統函式庫 libssl.so.3（stderr 片段）".to_string(), lib: Some("libssl.so.3".to_string()) });
         let http = FakeHttp::ok();
         let e = ensure_with(&http, base.path(), false, NOW, &plan("ubuntu", "22.04", &BAD_CHECK)).await.unwrap_err();
         assert_eq!(e.kind, FailKind::Unrunnable);
@@ -1200,10 +1263,134 @@ mod tests {
 
     #[test]
     fn 設定頁狀態_取得中_失敗_沒事() {
-        assert_eq!(status_from(true, Some(FailKind::Disk), false), FetchStatus { state: "fetching", kind: "" });
-        assert_eq!(status_from(false, Some(FailKind::Disk), false), FetchStatus { state: "failed", kind: "disk" });
-        assert_eq!(status_from(false, Some(FailKind::Network), true), FetchStatus { state: "", kind: "" }, "已經有可用的：不顯示舊的失敗");
-        assert_eq!(status_from(false, None, false), FetchStatus { state: "", kind: "" });
+        let st = |state: &'static str, kind: &'static str| FetchStatus { state, kind, detail: String::new() };
+        assert_eq!(status_from(true, Some(FailKind::Disk), false), st("fetching", ""));
+        assert_eq!(status_from(false, Some(FailKind::Disk), false), st("failed", "disk"));
+        assert_eq!(status_from(false, Some(FailKind::Network), true), st("", ""), "已經有可用的：不顯示舊的失敗");
+        assert_eq!(status_from(false, None, false), st("", ""));
+    }
+
+    #[test]
+    fn 安裝_實際比預期短_算網路_不是檔案不符() {
+        let root = tempfile::tempdir().unwrap();
+        let tmp = make_tmp(root.path()).unwrap();
+        let tarball = tmp.0.join("download.tar.xz");
+        std::fs::write(&tarball, GOOD).unwrap();
+        let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64 + 1, &tmp.0, &root.path().join("v-key"), &lim(), &|_: &Path| panic!("不完整不可以執行任何東西")).unwrap_err();
+        assert_eq!(e.kind, FailKind::Network, "沒下載完整：網路");
+        assert!(!tarball.exists());
+    }
+
+    #[test]
+    fn 大小對但雜湊錯_算檔案不符() {
+        let root = tempfile::tempdir().unwrap();
+        let tmp = make_tmp(root.path()).unwrap();
+        let tarball = tmp.0.join("download.tar.xz");
+        std::fs::write(&tarball, GOOD).unwrap();
+        let e = install_tarball(&tarball, &"f".repeat(64), GOOD.len() as u64, &tmp.0, &root.path().join("v-key"), &lim(), &ok_check).unwrap_err();
+        assert_eq!(e.kind, FailKind::Mismatch);
+    }
+
+    /// 本機假伺服器：照 `script` 回一段原始 HTTP 回應就關線。回網址
+    fn serve_once(script: Vec<u8>) -> String {
+        use std::io::Read as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = c.read(&mut buf);
+                let _ = c.write_all(&script);
+                let _ = c.flush();
+            }
+        });
+        format!("http://127.0.0.1:{port}/x.tar.xz")
+    }
+
+    fn http_ok(headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut v = format!("HTTP/1.1 200 OK\r\n{headers}Connection: close\r\n\r\n").into_bytes();
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[tokio::test]
+    async fn 下載_連線中途斷掉_長度不足_算網路() {
+        let d = tempfile::tempdir().unwrap();
+        // 說有 100 位元組，只送 40 就關線
+        let url = serve_once(http_ok("Content-Length: 100\r\n", &[7u8; 40]));
+        let e = download(&url, &d.path().join("a"), MIB, 100).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Network, "{}", e.detail);
+        // 分段傳輸（沒有 Content-Length）正常結束，但實收只有 30，比預期的 40 短
+        let mut chunked = b"1e\r\n".to_vec();
+        chunked.extend([7u8; 30]);
+        chunked.extend(b"\r\n0\r\n\r\n");
+        let url = serve_once(http_ok("Transfer-Encoding: chunked\r\n", &chunked));
+        let e = download(&url, &d.path().join("b"), MIB, 40).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Network, "實收比預期短：{}", e.detail);
+        assert!(e.detail.contains("下載中斷"), "{}", e.detail);
+    }
+
+    #[tokio::test]
+    async fn 下載_伺服器宣告的長度不對_或實收超過預期_算檔案不符() {
+        let d = tempfile::tempdir().unwrap();
+        // 伺服器說 50，預期 40：宣告就不對，還沒下載就中止
+        let url = serve_once(http_ok("Content-Length: 50\r\n", &[7u8; 50]));
+        let e = download(&url, &d.path().join("a"), MIB, 40).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Mismatch, "{}", e.detail);
+        // 沒宣告長度（分段傳輸），實收 60 超過預期 40
+        let url = serve_once(http_ok("Transfer-Encoding: chunked\r\n", format!("3c\r\n{}\r\n0\r\n\r\n", "x".repeat(60)).as_bytes()));
+        let e = download(&url, &d.path().join("b"), MIB, 40).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Mismatch, "實收比預期長：{}", e.detail);
+        // 長度剛好：成功，內容完整
+        let url = serve_once(http_ok("Content-Length: 40\r\n", &[9u8; 40]));
+        download(&url, &d.path().join("c"), MIB, 40).await.unwrap();
+        assert_eq!(std::fs::read(d.path().join("c")).unwrap(), vec![9u8; 40]);
+    }
+
+    #[test]
+    fn 缺少的函式庫名_從_stderr_解析_過濾_只留安全字元() {
+        let e = "/x/wezterm: error while loading shared libraries: libssl.so.3: cannot open shared object file: No such file or directory";
+        assert_eq!(parse_missing_lib(e), Some("libssl.so.3".to_string()));
+        assert_eq!(parse_missing_lib("error while loading shared libraries: libz.so.1: cannot open"), Some("libz.so.1".to_string()));
+        assert_eq!(parse_missing_lib("error while loading shared libraries: libstdc++.so.6: x"), Some("libstdc++.so.6".to_string()));
+        assert_eq!(parse_missing_lib("boom"), None, "看不懂就沒有");
+        // 怪字元、路徑、空白、控制字元、太長：全部不要
+        for bad in ["/usr/lib/libssl.so.3", "libssl.so.3 && rm -rf", "lib<script>.so", "lib\nssl", "../libssl.so.3", "", " ", "-libssl", ".so", "libé.so.1"] {
+            assert_eq!(sanitize_lib_name(bad), None, "{bad:?}");
+            assert_eq!(parse_missing_lib(&format!("error while loading shared libraries: {bad}: x")), None, "{bad:?}");
+        }
+        assert_eq!(sanitize_lib_name(&format!("lib{}.so.1", "a".repeat(LIB_NAME_MAX))), None, "太長");
+        assert_eq!(sanitize_lib_name(&format!("l{}", "a".repeat(LIB_NAME_MAX - 1))), Some(format!("l{}", "a".repeat(LIB_NAME_MAX - 1))), "剛好上限");
+        // 解析不出名字：維持原本那句
+        assert!(explain_run_failure("boom").contains("跑不起來"));
+        assert!(explain_run_failure("error while loading shared libraries: /bad path: x").contains("跑不起來"));
+    }
+
+    #[tokio::test]
+    async fn 缺函式庫的名稱會記進失敗紀錄_帶到狀態_stderr_原文不進狀態() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        static BAD_CHECK: fn(&Path) -> CheckResult = |_| Err(CheckFail { log: "wezterm：缺少系統函式庫 libssl.so.3（輸出：/secret/path/wezterm: error while loading…）".to_string(), lib: Some("libssl.so.3".to_string()) });
+        let http = FakeHttp::ok();
+        let e = ensure_with(&http, base.path(), false, NOW, &plan("ubuntu", "22.04", &BAD_CHECK)).await.unwrap_err();
+        assert_eq!((e.kind, e.lib.as_deref()), (FailKind::Unrunnable, Some("libssl.so.3")));
+        assert!(e.detail.contains("/secret/path"), "原文只在 log 的細節裡");
+        assert_eq!(read_fail_lib(&root), Some("libssl.so.3".to_string()));
+        let record = std::fs::read_to_string(root.join(STATE_FILE)).unwrap();
+        assert!(!record.contains("secret"), "紀錄檔不存 stderr 原文：{record}");
+        // 檔案被改壞：讀出來再過濾，怪字不會帶到畫面
+        std::fs::write(root.join(STATE_FILE), r#"{"kind":"unrunnable","at_ms":1,"lib":"x; rm -rf /"}"#).unwrap();
+        assert_eq!(read_fail_lib(&root), None);
+        assert_eq!(read_fail(&root), Some((FailKind::Unrunnable, 1)));
+        // 舊版沒有 lib 欄的紀錄照讀
+        std::fs::write(root.join(STATE_FILE), r#"{"kind":"disk","at_ms":2}"#).unwrap();
+        assert_eq!(read_fail(&root), Some((FailKind::Disk, 2)));
+        assert_eq!(read_fail_lib(&root), None);
+        // 成功就清掉（含 lib）
+        write_fail_with(&root, FailKind::Unrunnable, NOW, Some("libssl.so.3"));
+        let ok = ensure_with(&FakeHttp::ok(), base.path(), true, NOW, &ubuntu()).await;
+        assert!(ok.is_ok());
+        assert_eq!(read_fail_lib(&root), None);
     }
 
     /// 真的連 GitHub 取得固定版本（要網路，預設不跑；CI 的 headless-test 明跑）：

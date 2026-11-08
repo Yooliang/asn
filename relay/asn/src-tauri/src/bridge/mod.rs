@@ -83,7 +83,7 @@ pub fn term_server_supported() -> bool {
 
 /// 設定頁要顯示的「終端程式取得」狀態（Windows 隨安裝檔附帶，永遠是沒事）
 fn term_fetch_status() -> crate::launch::wezterm_fetch::FetchStatus {
-    let none = crate::launch::wezterm_fetch::FetchStatus { state: "", kind: "" };
+    let none = crate::launch::wezterm_fetch::FetchStatus { state: "", kind: "", detail: String::new() };
     if cfg!(windows) {
         return none;
     }
@@ -363,6 +363,8 @@ pub struct Status {
     pub term_fetch: String,
     /// 失敗的原因分類：network／disk／mismatch／unsupported／unrunnable／other；沒失敗是空字串。網址、雜湊等細節只進 log，不進這裡
     pub term_fetch_kind: String,
+    /// 失敗時的短細節：目前只有「缺少的系統函式庫名」（已過濾，只有英數與 . _ + -，最長 40 字元）；沒有就空字串
+    pub term_fetch_detail: String,
     /// 登入資料和設備金鑰怎麼保護：windows／keyring（系統金鑰庫）／file_only（只靠檔案權限）
     pub key_protection: String,
     /// 這次啟動有沒有在用共用的終端服務。和 `term_server` 不同＝改了還沒生效，要重開 ASN
@@ -420,7 +422,7 @@ impl Manager {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
         let fetch = term_fetch_status();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {

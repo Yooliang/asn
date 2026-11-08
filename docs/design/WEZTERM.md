@@ -353,3 +353,8 @@ Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務
 - 失敗會記下原因分類與時間（`<資料目錄>/ASN/wezterm/fetch-state.json`），一天內不自動重下；設定頁按「重試」才忽略退避。成功就清掉紀錄。
 - 原因分類（`network`／`disk`／`mismatch`／`unsupported`／`unrunnable`／`other`）各有一句給使用者看的話（`ui/lib/term-server-setting.mjs`）；網址、雜湊、錯誤碼只寫進 log。
 - Linux 找不到 wezterm 但這台能自動取得時，設定頁照樣顯示「夥伴共用同一個終端服務」開關；打開後馬上在背景取得，狀態與重試鈕顯示在開關底下。Windows 的畫面不變。
+
+### 缺少系統函式庫與中途斷線的分類（#893 第 5 張）
+
+- 取得的程式跑 `--version` 失敗時，從 stderr 解析缺的函式庫名（`error while loading shared libraries: libssl.so.3: …`），設定頁寫「缺少系統函式庫 libssl.so.3，請用套件管理員安裝後按重試」。顯示原本的 soname，不換算成套件名：各發行版套件名不同，猜錯會誤導，soname 用套件管理員的「搜尋檔案」功能一定找得到。名稱只留英數與 `. _ + -`、最長 40 字元（後端與前端各過濾一次），路徑與 stderr 原文只寫進 log。解析不出名稱時用原本那句。
+- 下載中途斷線、逾時、實收長度不足一律算「網路」；只有完整收到卻雜湊不符、或大小超過預期，才算「檔案不符」。
