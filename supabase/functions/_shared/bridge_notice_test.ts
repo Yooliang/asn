@@ -7,16 +7,14 @@ const ID = "11111111-2222-4333-8444-555555555555";
 function deps(data: unknown, error: unknown = null) {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const rings: string[] = [];
-  const pushes: string[] = [];
   return {
-    calls, rings, pushes,
+    calls, rings,
     d: {
       rpc: (fn: string, args: Record<string, unknown>) => {
         calls.push({ fn, args });
         return Promise.resolve({ data, error });
       },
       ring: (t: string) => { rings.push(t); return Promise.resolve(); },
-      pushOwnerMail: (id: string) => { pushes.push(id); },
     },
   };
 }
@@ -35,15 +33,13 @@ Deno.test("收件人、寄件名、kind 由用戶端帶來也不會傳進資料�
   assertEquals(t.calls, [{ fn: "asn_relay_send_bridge_notice", args: { p_node: "N", p_reply_to: ID, p_body: "內文" } }]);
 });
 
-Deno.test("寄出：敲每個門鈴（去重）；扇出給本人才推播", async () => {
+Deno.test("寄出：敲每個門鈴（去重）；不推播（扇出給本人也不推，FCM 第一版只推寄給本人和夥伴在等你）", async () => {
   const t = deps({ ok: true, notify: "sent", id: ID, bell_topics: ["b1", "b1", "b2", "", 3], fanout: 2 });
   const r = await handleBridgeNotice(t.d, "N", { reply_to: ID, body: "x" });
   assertEquals(r, { status: 200, body: { ok: true, notify: "sent", id: ID } });
   assertEquals(t.rings, ["b1", "b2"]);
-  assertEquals(t.pushes, [ID]);
-  const one = deps({ ok: true, notify: "sent", id: ID, bell_topics: ["b1"] });
-  await handleBridgeNotice(one.d, "N", { reply_to: ID, body: "x" });
-  assertEquals(one.pushes, [], "不是扇出不推");
+  const src = Deno.readTextFileSync(new URL("./bridge_notice.ts", import.meta.url)).replace(/^\s*\/\/.*$/gm, "");
+  assert(!/push/i.test(src), "橋通知不推播");
 });
 
 Deno.test("沒寄出（限流、每封上限、失敗）：200 照實回 notify，不敲門鈴不推播", async () => {
@@ -51,7 +47,7 @@ Deno.test("沒寄出（限流、每封上限、失敗）：200 照實回 notify�
     const t = deps({ ok: true, notify, bell_topics: [] });
     const r = await handleBridgeNotice(t.d, "N", { reply_to: ID, body: "x" });
     assertEquals(r, { status: 200, body: { ok: true, notify } });
-    assertEquals([t.rings.length, t.pushes.length], [0, 0]);
+    assertEquals(t.rings.length, 0);
   }
 });
 

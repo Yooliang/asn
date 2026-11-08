@@ -96,6 +96,16 @@ test('實跑（pglite）：寄件人「ASN 通知」、收件人取自原信（�
   assert.deepEqual(m2, { to_agent: null, body: '未命名設備：內文' })
 })
 
+test('實跑（pglite）：第一行的設備名先用 name（使用者取的名字），沒有才用 machine（設備種類）', { skip }, async () => {
+  const { q } = await boot()
+  await q(`update relay.nodes set name = '書房', machine = '電腦' where id = 'H'`)
+  await q(`update relay.nodes set name = '  ', machine = '電腦' where id = 'N'`)
+  const a = await call(q, 'H', await orig(q, 'P', 'H'), '甲')
+  const b = await call(q, 'N', await orig(q, 'P', 'N'), '乙')
+  assert.equal((await one(q, `select body from relay.messages where id = $1`, [a.id])).body, '書房：甲', '不是「電腦：」')
+  assert.equal((await one(q, `select body from relay.messages where id = $1`, [b.id])).body, '電腦：乙', '沒有名字才用設備種類')
+})
+
 test('實跑（pglite）：扇出的每一列都標 kind；扇出的回傳交給 Edge 決定推播', { skip }, async () => {
   const { q } = await boot()
   const id = await orig(q, 'FAN', 'H')

@@ -10,8 +10,6 @@
 export type BridgeNoticeDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
   ring: (topic: string) => Promise<void>;
-  /** 寄給本人（扇出）時推一則固定文字，和一般寄信同一條路；失敗不影響 */
-  pushOwnerMail: (messageId: string) => void;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,6 +48,6 @@ export async function handleBridgeNotice(deps: BridgeNoticeDeps, node: string, r
   const topics = Array.isArray(d.bell_topics) ? d.bell_topics : [];
   for (const t of new Set(topics.filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await deps.ring(t);
   const id = typeof d.id === "string" ? d.id : undefined;
-  if (notify === "sent" && id && typeof d.fanout === "number") deps.pushOwnerMail(id);
+  // 不推播：FCM 第一版只推「寄給本人」和「夥伴在等你」，橋通知太頻繁（asn真 11-09）
   return { status: 200, body: id ? { ok: true, notify, id } : { ok: true, notify } };
 }

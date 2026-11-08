@@ -382,11 +382,7 @@ Deno.serve(async (req) => {
   }
   // 橋自己寄的通知（#848 PR-D）：後台以「ASN 通知」回覆寄給這台的那封信；收件人與寄件名由資料庫決定，跨帳號回 409 由橋照舊寄
   if (action === "bridge_notice" && req.method === "POST") {
-    const r = await handleBridgeNotice({
-      rpc: async (fn, args) => await db.rpc(fn, args),
-      ring,
-      pushOwnerMail: (id) => signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, id)),
-    }, me.id, await req.json().catch(() => null));
+    const r = await handleBridgeNotice({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me.id, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   // 核對轉交對象：收發室把信轉交錯了視窗，後台寄固定內文的通知給這個節點的擁有者（節點一律是金鑰所屬的 me.id）。失敗只記 warn，不影響轉交

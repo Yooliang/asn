@@ -42,7 +42,8 @@ begin
   if char_length(btrim(v_text)) < 1 or char_length(v_text) > 19936 then
     return jsonb_build_object('error', 'bad_body');
   end if;
-  select owner_user, coalesce(machine, name) into v_owner, v_machine from relay.nodes where id = p_node and status = 'active';
+  -- 設備名先用 name（使用者取的設備名），沒有才用 machine（設備種類，例如「電腦」）
+  select owner_user, coalesce(nullif(btrim(name), ''), machine) into v_owner, v_machine from relay.nodes where id = p_node and status = 'active';
   if not found then
     return jsonb_build_object('error', 'forbidden');
   end if;
