@@ -77,5 +77,3 @@ object ViewerConfirm {
     w.post { w.evaluateJavascript("window.__asnConfirmViewer && window.__asnConfirmViewer(${JSONObject.quote(id)}, ${JSONObject.quote(result)})", null) }
   }
 }
-
-val ciRedProbe = (
