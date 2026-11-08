@@ -74,7 +74,9 @@ export const RemoteView = {
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
   },
-  setup(props) {
+  // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
+  emits: ['cancel'],
+  setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
@@ -108,6 +110,7 @@ export const RemoteView = {
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
+        if (e?.code === 'cancel') { cleanup(); emit('cancel'); return }   // 什麼都沒送，也不留錯誤
         console.info('[ASN] 看別台畫面沒有開始', String(e?.message ?? e))
         finish(startError(e))
       }
