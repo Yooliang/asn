@@ -209,6 +209,8 @@ pub fn startup(work_dir: &Path, no_migrate: bool) -> PathBuf {
         return home.join(FALLBACK_NAME);
     };
     let (old, new) = (appdata.join(OLD_ID), appdata.join(NEW_ID));
+    #[cfg(test)]
+    crate::test_guard::assert_not_real(&new, "datadir::startup");
     if no_migrate {
         return new;
     }

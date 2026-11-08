@@ -41,12 +41,14 @@ mod tests {
     const A: &str = "00000000-0000-0000-0000-00000000000a";
 
     fn run_gate(args: &[&str], stdin: &str) -> (i32, String, String) {
+        // 用假的執行環境（家目錄在暫存資料夾）；不用 Env::from_process，免得解析到本機真的 ~/.asn
+        let fx = super::super::tests::fx("http://127.0.0.1:1", None);
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let mut inp = std::io::Cursor::new(stdin.as_bytes().to_vec());
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let code = {
             let mut io = Io { out: &mut out, err: &mut err, stdin: &mut inp };
-            super::super::run(&args, &Env::from_process(), &mut io)
+            super::super::run(&args, &fx.env, &mut io)
         };
         (code, String::from_utf8_lossy(&out).into_owned(), String::from_utf8_lossy(&err).into_owned())
     }

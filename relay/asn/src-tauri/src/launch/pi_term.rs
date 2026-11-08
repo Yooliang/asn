@@ -277,7 +277,7 @@ mod tests {
         let wez_before: Vec<u32> = crate::launch::switch::winapi::process_table().into_iter().filter(|p| p.name == "wezterm-gui.exe").map(|p| p.pid).collect();
         let data = tempfile::tempdir().unwrap();
         let work = tempfile::tempdir().unwrap();
-        let svc = super::super::term::live(data.path());
+        let svc = super::super::term::live_for_test(data.path());
         let name = "雯測試pi";
         let config = super::super::config::load_launch_config().expect("本機啟動設定");
         let req = super::super::config::LaunchReq { profile: "pi", name, cwd: work.path().to_string_lossy().into_owned() };

@@ -20,6 +20,8 @@ mod auth;
 mod avatar;
 mod bell;
 mod datadir;
+#[cfg(test)]
+mod test_guard;   // 測試隔離守衛：測試碰到真的 ASN 資料夾／mux 就 panic（只在測試編譯）
 mod device_login;
 mod envc;
 mod heartbeat;

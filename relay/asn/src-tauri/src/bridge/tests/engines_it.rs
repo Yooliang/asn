@@ -87,6 +87,8 @@ async fn eh(agents: Option<Value>, env: &[(&str, &str)], spec: &str, claude: &[(
     let fr = FakeRelay::start();
     let work = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
+    // 開新夥伴／接手會讀「啟動設定」；不指走就會去讀本機真的 ~/.asn/launcher.json（守衛會 panic）
+    crate::test_guard::isolate_launcher_file();
     let sessions = tempfile::tempdir().unwrap();
     for (i, (n, st)) in claude.iter().enumerate() {
         put_session(sessions.path(), 5000 + i as u32, n, st, 100 + i as u64);

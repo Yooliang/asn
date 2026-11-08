@@ -94,7 +94,10 @@ pub fn resolve_at(base: &Path, override_: Option<&str>) -> HomeInfo {
 
 /// 本行程的解析結果（家目錄與 ASN_HOME 取自環境）
 pub fn resolve() -> HomeInfo {
-    resolve_at(&crate::identity::home_dir(), crate::envc::get("ASN_HOME").as_deref())
+    let info = resolve_at(&crate::identity::home_dir(), crate::envc::get("ASN_HOME").as_deref());
+    #[cfg(test)]
+    crate::test_guard::assert_not_real(&info.primary, "home::resolve（使用者資料夾 ~/.asn）");
+    info
 }
 
 // ---------------------------------------------------------------- 遷移
