@@ -427,7 +427,14 @@ fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, Strin
             Ok(())
         });
     }
-    cmd.spawn().map(|c| c.id())
+    let mut child = cmd.spawn()?;
+    let pid = child.id();
+    // 收屍：mux 是 ASN 的子程序，結束後沒人 wait 就會變殭屍，/proc/<pid> 還在，會被誤判成沒停掉（CI 實測停 mux 失敗）。
+    // 交給一條背景執行緒等它；ASN 先結束時 mux 會改由 init 收，不受影響
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
 }
 
 /// 找到的 WezTerm 資料夾
