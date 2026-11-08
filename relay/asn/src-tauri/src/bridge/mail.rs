@@ -112,14 +112,9 @@ impl Mail {
     }
 }
 
-/// 後台的寄出時間（ISO 8601）→ 毫秒；只有桌面版有解析器，其他情況＝None（先留著的信就改用收發室留住它的時間）
-#[cfg(all(feature = "gui", desktop))]
+/// 後台的寄出時間（ISO 8601）→ 毫秒；格式不對或早於 1970＝None（先留著的信就改用收發室留住它的時間）。視窗版與無畫面版同一份解析
 fn parse_sent_ms(t: &str) -> Option<u64> {
-    crate::usage::parse_ts_ms(t).and_then(|v| u64::try_from(v).ok())
-}
-#[cfg(not(all(feature = "gui", desktop)))]
-fn parse_sent_ms(_t: &str) -> Option<u64> {
-    None
+    crate::timeutil::parse_ts_ms(t).and_then(|v| u64::try_from(v).ok())
 }
 
 /// 本人代號：`u:` 加十二位小寫十六進位（後台 asn_person_alias）
