@@ -33,9 +33,9 @@ jobs:
   sql-tests:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -57,11 +57,13 @@ jobs:
       run:
         working-directory: relay/asn/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           key: bridge-check
@@ -78,11 +80,13 @@ jobs:
       run:
         working-directory: relay/asn/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           key: headless-test
@@ -150,13 +154,14 @@ jobs:
       run:
         working-directory: relay/asn/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
         with:
+          toolchain: stable
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           key: android-check
@@ -184,7 +189,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # 驗 gradle-wrapper.jar 的 SHA-256 是否為 Gradle 官方發布版（固定到完整 commit，對應 v6.4.1）
       - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c
@@ -194,11 +199,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
         with:
+          toolchain: stable
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           key: android-check
@@ -224,13 +230,19 @@ jobs:
         working-directory: relay/asn/src-tauri
         env:
           TAURI_ANDROID_PROJECT_PATH: ${{ github.workspace }}/relay/asn/src-tauri/gen/android
-          # 這三個是 tauri CLI 出包時會設的；tauri 的 build.rs 靠它們產生 Kotlin 橋接檔（generated/，不進 repo）
-          WRY_ANDROID_PACKAGE: tw.yooliang.asn
-          WRY_ANDROID_LIBRARY: asn_lib
-          WRY_ANDROID_KOTLIN_FILES_OUT_DIR: ${{ github.workspace }}/relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/generated
+        # WRY_ANDROID_* 是 tauri CLI 出包時會設的；tauri 的 build.rs 靠它們產生 Kotlin 橋接檔（generated/，不進 repo）。
+        # 不寫死：套件名取自 tauri.conf.json 的 identifier、函式庫名取自 Cargo.toml 的 [lib] name，和正式出包同一份來源
         run: |
-          mkdir -p gen/android/app/src/main/java/tw/yooliang/asn/generated
-          cargo check --locked --target aarch64-linux-android --lib
+          set -euo pipefail
+          pkg="$(node -p "require('./tauri.conf.json').identifier")"
+          lib="$(awk '/^\[lib\]/{f=1;next} /^\[/{f=0} f && /^name *=/{gsub(/^name *= *"|"$/,"");print;exit}' Cargo.toml)"
+          [[ "$pkg" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]] || { echo "identifier 讀不到或格式不對：$pkg" >&2; exit 1; }
+          [[ "$lib" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "[lib] name 讀不到或格式不對：$lib" >&2; exit 1; }
+          out="$PWD/gen/android/app/src/main/java/${pkg//.//}/generated"
+          test -f "gen/android/app/src/main/java/${pkg//.//}/MainActivity.kt" || { echo "identifier（$pkg）和 Kotlin 套件路徑對不上" >&2; exit 1; }
+          echo "WRY_ANDROID_PACKAGE=$pkg WRY_ANDROID_LIBRARY=$lib"
+          mkdir -p "$out"
+          WRY_ANDROID_PACKAGE="$pkg" WRY_ANDROID_LIBRARY="$lib" WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$out" cargo check --locked --target aarch64-linux-android --lib
           ls -la gen/android/tauri.settings.gradle gen/android/app/tauri.build.gradle.kts
 
       - name: 編 Kotlin（Android，不含 Rust .so）
@@ -247,11 +259,13 @@ jobs:
       run:
         working-directory: relay/asn/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           key: windows-check
@@ -266,7 +280,7 @@ jobs:
       run:
         working-directory: relay/asn
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: 安裝系統依賴
         run: |
@@ -275,17 +289,19 @@ jobs:
             libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf xvfb scrot
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: relay/asn/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
 
       # Rust 編譯快取（target 與 ~/.cargo）：CI 一次要 9～10 分鐘，大多花在重編相依套件。
       # 以 Cargo.lock 與工具鏈為鍵，相依沒變就直接沿用；只有 main 的推送會更新快取，PR 只讀。
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: relay/asn/src-tauri -> target
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -318,7 +334,7 @@ jobs:
         run: node scripts/smoke-ui.mjs
 
       - name: 上傳成品
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: asn-linux-${{ github.sha }}
           path: |
