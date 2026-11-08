@@ -106,21 +106,31 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
     matches!((recorded_ms, now_ms), (Some(r), Some(n)) if r != n)
 }
 
-/// 帶結束暗號的包裝殼（PowerShell）只有 Windows 有；Linux 版另一張補，在那之前 Linux 的夥伴窗格不包殼、原指令原樣開，
-/// 沒有暗號的窗格走既有的「確認不了狀態」處理。測試仍照 Windows 的做法驗包裝本身（假的 runner 不會真的執行它）
-fn partner_wrapper_available() -> bool {
-    wrapper_available(cfg!(windows), cfg!(test))
+/// 夥伴窗格的包裝殼種類：Windows 用 PowerShell，其他平台（Linux）用 /bin/sh。兩種都會在程式結束後印同格式的結束標記
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PartnerShell {
+    PowerShell,
+    Sh,
 }
 
-/// 拆成純函式好驗正式路徑：正式版（非測試）只有 Windows 包殼
-fn wrapper_available(windows: bool, test_build: bool) -> bool {
-    windows || test_build
+/// 正式的預設：Windows 是 PowerShell，其他平台是 sh
+pub(crate) fn default_partner_shell() -> PartnerShell {
+    if cfg!(windows) {
+        PartnerShell::PowerShell
+    } else {
+        PartnerShell::Sh
+    }
 }
 
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
 /// 夥伴視窗的包裝（視窗與 mux 兩種模式共用）。包裝殼啟動時 PowerShell 會擴充 PSModulePath，夥伴的環境要還原成窗格開窗時給的值（沒給就移除）
-fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>) -> Vec<String> {
+fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>, shell: PartnerShell) -> Vec<String> {
     let get = |name: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
+    if shell == PartnerShell::Sh {
+        // sh 版：指令原樣當位置參數交給 sh，由 sh 照窗格的 PATH 自己找；只移除登錄檔類的名字（Linux 上沒有，保持對稱）
+        let remove = super::mux::wrapper_removals(&registry_env_names(), env);
+        return super::local::mux_wrapped_argv_sh(command, nonce, &remove);
+    }
     let resolved = super::local::resolve_for_wrap(command, get("PATH"), &|p| p.is_file());
     // WezTerm 會把使用者環境變數帶進窗格（B0 實測，11-05 再驗）：包裝殼移除原生主控台不會給的，夥伴拿到的環境才相同
     let remove = super::mux::wrapper_removals(&registry_env_names(), env);
@@ -410,6 +420,8 @@ pub struct TermService<R, F> {
     /// 隔離設定檔要不要帶 exit_behavior = "Hold"（0.2.0 第 1 階段的做法）。預設 false＝跟 0.1.113 一樣只寫空設定；
     /// 正式由 live() 在 ASN_TERM_WEZTERM=1 時設 true（#611）
     hold_config: bool,
+    /// 夥伴窗格的包裝殼種類；正式＝`default_partner_shell()`，測試要驗哪一種就明確設
+    partner_shell: PartnerShell,
     /// mux 的檔案放在這底下的 ASN\m（正式＝%LOCALAPPDATA%；測試注入暫存資料夾）
     mux_base: Option<PathBuf>,
     inner: Mutex<Inner>,
@@ -431,6 +443,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
+            partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -460,6 +473,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
+            partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -490,6 +504,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
+            partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -523,6 +538,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     #[cfg(test)]
     pub(crate) fn use_mux_for_test(&self) -> bool {
         self.use_mux
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_partner_shell(&mut self, shell: PartnerShell) {
+        self.partner_shell = shell;
     }
 
     pub fn set_use_mux(&mut self, on: bool) {
@@ -715,7 +735,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let exit_nonce = (env.is_some() && !extra.kind.is_empty()).then(new_nonce);
         let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match (&exit_nonce, env) {
-            (Some(n), Some(e)) => wrap_partner(command, n, e),
+            (Some(n), Some(e)) => wrap_partner(command, n, e, PartnerShell::PowerShell),
             _ => command.to_vec(),
         };
         let command: &[String] = &wrapped;
@@ -855,10 +875,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let cwd_s = cwd.to_string_lossy().into_owned();
         // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
-        let exit_nonce = (partner_wrapper_available() && !extra.kind.is_empty()).then(new_nonce);
+        let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
         let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match &exit_nonce {
-            Some(n) => wrap_partner(command, n, &pane_env),
+            Some(n) => wrap_partner(command, n, &pane_env, self.partner_shell),
             None => command.to_vec(),
         };
         let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];
@@ -1250,7 +1270,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let args = view_args(&m.paths.config, &workspace);
         let env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
-        let pid = self.runner.spawn_clean(&dir.gui, &args, &env).map_err(|e| format!("開不了終端畫面：{e}"))?;
+        let pid = self.runner.spawn_clean(dir.gui_path()?, &args, &env).map_err(|e| format!("開不了終端畫面：{e}"))?;
         // 查不到建立時間＝已經結束了（沒辦法確認是同一個，也就不動它）
         let mut at = self.runner.started_ms(pid);
         for _ in 0..VIEW_BIRTH_RETRIES {
@@ -3462,11 +3482,10 @@ mod tests {
     use crate::launch::profiles::{LaunchMode, Profile};
 
     #[test]
-    fn 結束暗號包殼_正式版只有_windows_有_測試版照舊驗包裝() {
-        assert!(wrapper_available(true, false), "Windows 正式版包殼");
-        assert!(!wrapper_available(false, false), "Linux 正式版不包殼，命令原樣交給窗格");
-        assert!(wrapper_available(false, true), "測試版照 Windows 的做法驗包裝本身");
+    fn 包殼種類_正式預設依平台_windows_是_powershell_其他是_sh() {
+        assert_eq!(default_partner_shell(), if cfg!(windows) { PartnerShell::PowerShell } else { PartnerShell::Sh });
     }
+
     use std::cell::RefCell;
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::rc::Rc;
@@ -3735,7 +3754,7 @@ mod tests {
         let home = PathBuf::from("H");
         let svc = TermService::fixed(
             WezTermDir {
-                gui: "W/wezterm-gui.exe".into(),
+                gui: Some("W/wezterm-gui.exe".into()),
                 cli: "W/wezterm.exe".into(),
             },
             "cfg.lua".into(),
@@ -4173,7 +4192,7 @@ mod tests {
         };
         let mut svc = TermService::fixed(
             WezTermDir {
-                gui: "W/wezterm-gui.exe".into(),
+                gui: Some("W/wezterm-gui.exe".into()),
                 cli: "W/wezterm.exe".into(),
             },
             path.clone(),
@@ -4201,7 +4220,7 @@ mod tests {
         let path = dir.path().join("wezterm-term.lua");
         let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
         let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
-        let svc = TermService::fixed(WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() }, path.clone(), dir.path().join("wezterm-terms.json"), "H".into(), runner, fs);
+        let svc = TermService::fixed(WezTermDir { gui: Some("W/wezterm-gui.exe".into()), cli: "W/wezterm.exe".into() }, path.clone(), dir.path().join("wezterm-terms.json"), "H".into(), runner, fs);
         svc.ensure_config().unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "0.1.113 寫的內容");
         svc.ensure_config().unwrap();
@@ -4749,7 +4768,7 @@ mod tests {
         let view = runner.clone();
         let svc = TermService::fixed(
             WezTermDir {
-                gui: "W/wezterm-gui.exe".into(),
+                gui: Some("W/wezterm-gui.exe".into()),
                 cli: "W/wezterm.exe".into(),
             },
             "cfg.lua".into(),
@@ -4833,7 +4852,7 @@ mod tests {
             let d = tempfile::tempdir().unwrap();
             let path = d.path().join("wezterm-term.lua");
             std::fs::write(&path, PREV_ISOLATED_CONFIG).unwrap();
-            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: "g".into(), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), wezterm::RealRunner, wezterm::RealFs);
+            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: Some("g".into()), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), wezterm::RealRunner, wezterm::RealFs);
             svc.set_hold_config(hold);
             svc.ensure_config().unwrap();
             assert_eq!(std::fs::read_to_string(&path).unwrap(), want);
@@ -4977,7 +4996,7 @@ mod tests {
         rig.runner.inner.pid_started.borrow_mut().insert(42, started);
         let cfg = rig._dir.path().join("cfg.lua");
         let mut svc = TermService::fixed(
-            WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() },
+            WezTermDir { gui: Some("W/wezterm-gui.exe".into()), cli: "W/wezterm.exe".into() },
             cfg.clone(),
             rig.store.clone(),
             rig.home.clone(),
@@ -5329,10 +5348,10 @@ mod tests {
             inner: Rc::new(fake_inner(vec![Some(1_000)], list_json, String::new())),
         };
         let wdir = WezTermDir {
-            gui: PathBuf::from("W/wezterm-gui.exe"),
+            gui: Some(PathBuf::from("W/wezterm-gui.exe")),
             cli: PathBuf::from("W/wezterm.exe"),
         };
-        files.borrow_mut().insert(wdir.gui.clone());
+        files.borrow_mut().insert(wdir.gui.clone().unwrap());
         files.borrow_mut().insert(wdir.cli.clone());
         let svc = TermService::fixed(wdir, dir.path().join("wezterm-term.lua"), store.clone(), home.clone(), runner.clone(), fs);
         *svc.test_launch_config.lock().unwrap() = Some(config.clone());
@@ -5503,7 +5522,7 @@ mod tests {
         std::fs::write(&cfg_file, "return {}").unwrap();
         let home = crate::identity::home_dir();
         // 1) 用 WezTerm 自己的命令列開一個「使用者自己開的」視窗（不經過 ASN 的啟動流程）
-        let mut gui = std::process::Command::new(&dir.gui).no_window()
+        let mut gui = std::process::Command::new(dir.gui.as_ref().unwrap()).no_window()
             .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", &grok])
             .spawn()
             .expect("開使用者視窗");
@@ -5549,7 +5568,7 @@ mod tests {
                 }
             }
             // 5) 探針：另開第二個 WezTerm 視窗搶走焦點（使用者去用別的視窗），再「不經過 ASN 的核驗」直接往 grok 那格送 y，看 grok 處理不處理
-            let mut other = std::process::Command::new(&dir.gui).no_window()
+            let mut other = std::process::Command::new(dir.gui.as_ref().unwrap()).no_window()
                 .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", "cmd.exe"])
                 .spawn()
                 .map_err(|e| e.to_string())?;
@@ -5609,6 +5628,8 @@ mod tests {
             std::fs::write(&paths.pid, format!("{MUX_PID} 1000")).unwrap();
             rig.files.borrow_mut().insert(paths.sock.clone());
             rig.svc.set_use_mux(true);
+            // 這一批測試驗的是 Windows 的 PowerShell 包殼；sh 版另有下面 unix 的測試
+            rig.svc.set_partner_shell(PartnerShell::PowerShell);
             rig.svc.set_mux_base(base);
             *rig.runner.inner.spawn_out.borrow_mut() = "9\n".into();
             *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 9, 0);
@@ -5945,7 +5966,7 @@ mod tests {
         fn wezterm_stop_看到_mux_視窗一律拒絕且不動任何程序() {
             let (rig, paths) = mux_rig();
             let fs = FakeFs { files: rig.files.clone() };
-            let dir = WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() };
+            let dir = WezTermDir { gui: Some("W/wezterm-gui.exe".into()), cli: "W/wezterm.exe".into() };
             let w = WezTerm::new(dir, "cfg.lua".into(), "H".into(), &rig.runner, &fs);
             let win = Window { gui_pid: MUX_PID, sock: paths.sock, started_ms: Some(1000), mux: true };
             assert!(w.stop(&win).unwrap_err().contains("共用的終端服務"));
@@ -5987,7 +6008,7 @@ mod tests {
         /// 同一份對照表檔、同一組假執行器，另起一個服務（等於 ASN 重啟）
         fn restarted(rig: &Rig, mux_on: bool) -> TermService<FakeRunner, FakeFs> {
             let mut svc = TermService::fixed(
-                WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() },
+                WezTermDir { gui: Some("W/wezterm-gui.exe".into()), cli: "W/wezterm.exe".into() },
                 "cfg.lua".into(),
                 rig.store.clone(),
                 rig.home.clone(),
@@ -6627,6 +6648,23 @@ mod tests {
             assert_eq!(rig.runner.inner.sleeps.borrow().len(), 10, "沒有訊號就等滿");
         }
 
+        /// Linux 正式路徑：包殼種類用正式預設，夥伴窗格的指令外面包 /bin/sh，帶暗號，原指令當位置參數
+        #[cfg(unix)]
+        #[test]
+        fn 夥伴窗格的指令外面包一層_sh_帶暗號_原指令原樣當參數() {
+            fix_nonce();
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_partner_shell(default_partner_shell());
+            open_partner(&rig);
+            let clean = rig.runner.inner.clean_calls.borrow();
+            let args = &clean[0].0;
+            let i = args.iter().position(|a| a == "--").unwrap();
+            assert_eq!(&args[i + 1..i + 3], ["/bin/sh", "-c"], "{:?}", &args[i + 1..]);
+            assert!(args[i + 3].contains("[asn-exit n0nce %s]"), "{}", args[i + 3]);
+            assert_eq!(args[i + 4], "asn-wrap");
+            assert!(args[i + 5..].iter().any(|a| a.contains("sid-1")), "原指令在後面原樣：{:?}", &args[i + 5..]);
+        }
+
         #[test]
         fn 夥伴窗格的指令外面包一層_powershell_帶暗號_原指令原樣_終端面板的不包() {
             fix_nonce();
@@ -7031,7 +7069,7 @@ mod tests {
         fn 夥伴窗格的包裝殼移除使用者環境變數裡濾掉的名字_原生也會傳的留著() {
             use base64::Engine;
             TEST_REGISTRY_NAMES.with(|n| *n.borrow_mut() = vec!["CLAUDE_X".into(), "ANTHROPIC_API_KEY".into(), "Path".into()]);
-            let w = wrap_partner(&["claude.exe".to_string()], "abc", &BTreeMap::new());
+            let w = wrap_partner(&["claude.exe".to_string()], "abc", &BTreeMap::new(), PartnerShell::PowerShell);
             TEST_REGISTRY_NAMES.with(|n| n.borrow_mut().clear());
             let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
             let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
