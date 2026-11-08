@@ -229,6 +229,7 @@ jobs:
           WRY_ANDROID_LIBRARY: asn_lib
           WRY_ANDROID_KOTLIN_FILES_OUT_DIR: ${{ github.workspace }}/relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/generated
         run: |
+          mkdir -p gen/android/app/src/main/java/tw/yooliang/asn/generated
           cargo check --locked --target aarch64-linux-android --lib
           ls -la gen/android/tauri.settings.gradle gen/android/app/tauri.build.gradle.kts
 
