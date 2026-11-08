@@ -106,14 +106,14 @@ test('不再回報的帳號（nodes 空）：標「N 天前讀的」', () => {
   assertShort(longest)
 })
 
-test('沒數字：寫「額度讀不到」；Codex 寫「開 Codex 後才讀得到」；Grok 有數字也不收', () => {
+test('沒數字：寫「額度讀不到」；Codex 寫「開 Codex 後才讀得到」；Grok 沒數字也一樣', () => {
   const c = rosterQuota(entry({ windows: [] }), { nodeLabel, now: NOW })
   assert.equal(c.known, false)
   assert.equal(c.text, ROSTER_TEXT.noQuota)
   assert.equal(c.meta, '1 小時前・工作機', '沒數字也寫最後是哪台、多久前回報的')
   const x = rosterQuota(entry({ vendor: 'codex', windows: [] }), { nodeLabel, now: NOW })
   assert.equal(x.text, '開 Codex 後才讀得到')
-  const g = rosterQuota(entry({ vendor: 'grok' }), { nodeLabel, now: NOW })
+  const g = rosterQuota(entry({ vendor: 'grok', windows: [] }), { nodeLabel, now: NOW })
   assert.equal(g.text, '額度讀不到')
   assert.equal(g.known, false)
   for (const q of [c, x, g]) { assertShort(q); assert.ok(q.text.trim(), '不留空白') }
