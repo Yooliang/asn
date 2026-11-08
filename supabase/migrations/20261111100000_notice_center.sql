@@ -181,7 +181,8 @@ begin
         insert into relay.inbox_watch (node) values (r.id);
         select * into v_state from relay.inbox_watch where node = r.id;
       end if;
-      v_name := coalesce(nullif(btrim(left(regexp_replace(coalesce(r.machine, r.name, ''), '[[:cntrl:]]', ' ', 'g'), 40)), ''), '未命名設備');
+      -- 設備名先用 name（使用者取的名字），空白才用 machine（設備種類）；其他八支本來就只用 name
+      v_name := coalesce(nullif(btrim(left(regexp_replace(coalesce(nullif(btrim(r.name), ''), r.machine, ''), '[[:cntrl:]]', ' ', 'g'), 40)), ''), '未命名設備');
       v_body := null;
       v_kind := null;
 

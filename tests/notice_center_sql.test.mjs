@@ -228,6 +228,18 @@ test('實跑（pglite）：九支通知函式——回傳形狀不變、信是�
   assert.deepEqual([iw.nodes, iw.stuck, iw.sent, iw.send_enabled], [1, 1, 1, true])
   await check('notice:inbox_watch', '家用機：收信可能卡住了')
   assert.equal((await one(q, `select notified_at is not null n from relay.inbox_watch where node = 'H'`)).n, true)
+  // 設備名先用 name，空白才用 machine（machine 是設備種類，例如「電腦」）
+  await q(`update relay.nodes set machine = '電腦' where id = 'H'`)
+  await q(`update relay.inbox_watch set state = 'ok', notified_at = null, stuck_since = now() - interval '20 minutes', updated_at = now() where node = 'H'`)
+  await q(`update relay.inbox_watch set state = 'stuck' where node = 'H'`)
+  assert.equal((await call(q, `public.asn_relay_inbox_watch(true)`)).sent, 1)
+  await check('notice:inbox_watch', '家用機：收信可能卡住了')
+  await q(`update relay.nodes set name = '  ' where id = 'H'`)
+  await q(`update relay.inbox_watch set notified_at = null where node = 'H'`)
+  await q(`delete from relay.messages where kind = 'notice:inbox_watch'`)
+  assert.equal((await call(q, `public.asn_relay_inbox_watch(true)`)).sent, 1)
+  await check('notice:inbox_watch', '電腦：收信可能卡住了')
+  await q(`update relay.nodes set name = '家用機', machine = '家用機' where id = 'H'`)
   // quota
   const qt = await call(q, `public.asn_relay_set_inbox_hold('H', now() + interval '1 hour', 3, false)`)
   shapeOk(qt); assert.equal(qt.notify, 'sent')
