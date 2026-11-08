@@ -1,0 +1,13 @@
+{
+  "_comment": "WezTerm 固定版本與雜湊的唯一來源。Windows 的 fetch-wezterm.mjs、Linux 的 wezterm_fetch.rs（編譯時讀入）、CI 的探測腳本都以這裡為準；換版本要全部一起換並重新做真機驗證。",
+  "version": "20240203-110809-5046fc22",
+  "license_sha256": "37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca",
+  "windows_zip_sha256": "57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4",
+  "linux": {
+    "ubuntu-22.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu22.04.tar.xz", "sha256": "142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c", "size": 30508792 },
+    "ubuntu-20.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu20.04.tar.xz", "sha256": "1d15105d53cdd409e251034b35a9f2dec7146fad06e2b9642553b2b3e02ed224", "size": 30515256 },
+    "debian-12": { "tarball": "wezterm-20240203-110809-5046fc22.Debian12.tar.xz", "sha256": "f1c9144b5cf04e942bc4f47239233a0f643b9625a55c8e9e7540e713c2dadc3b", "size": 30433096 },
+    "debian-11": { "tarball": "wezterm-20240203-110809-5046fc22.Debian11.tar.xz", "sha256": "83b942dcf682d4973807b0245ea9fa734bb73553e2e5d586d8efbbe7ccf0e17a", "size": 30445432 },
+    "debian-10": { "tarball": "wezterm-20240203-110809-5046fc22.Debian10.tar.xz", "sha256": "b68f54bb7271fc8de2f8a379c852036e3dc8d36cf456ade7eb79e26f116c84ee", "size": 30440576 }
+  }
+}

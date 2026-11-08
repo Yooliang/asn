@@ -63,6 +63,8 @@ png = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
+# Linux 按需取得 WezTerm（launch/wezterm_fetch.rs）解 .tar.xz 用。純 Rust（不帶 C 的 liblzma），鎖死版本
+lzma-rs = { version = "=0.3.0", default-features = false }
 zeroize = "1"
 # 遠端機密傳遞（#26 第二期）：X25519 金鑰協議＋HKDF＋AES-256-GCM 全用 ring（本來就在相依樹內），不自己寫密碼學
 ring = "0.17"
