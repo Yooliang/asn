@@ -1,6 +1,6 @@
 //! 看別台電腦的畫面：發起觀看的那台（D）這一側（#597 別台看畫面 PR 5）。
 //!
-//! - 發起只有一個入口：本人按「看畫面」（lib.rs 的 `term_view_remote_start`）。那一刻先確認是本人（`presence`：Hello 或確認框），再用設備金鑰簽。
+//! - 發起只有一個入口：本人按「終端」（lib.rs 的 `term_view_remote_start`），直接用設備金鑰簽。11-08 起不再跳本人確認（Hello 或確認框，`presence` 保留未用）。
 //! - 那台的設備公鑰和本機記住的比（TOFU）：換了就不開始並通知本人；第一次看到的，驗過 T 的簽章才記住（first 通知只有 T 寄）。
 //! - 之後的回報迴圈**不簽章、不確認本人**：每 [`REPORT_EVERY_S`] 秒回報一次狀態，拿到對方的一次性公鑰就導出金鑰、開始收。
 //! - **只收不送：** 這裡只有接收頻道，沒有任何送出端（守門測試）。暫停、結束只走控制面的固定狀態值。
@@ -30,11 +30,6 @@ pub const MAX_OPEN: usize = 3;
 pub const TOO_MANY: &str = "同時最多看 3 個畫面，請先結束一個";
 /// 那台的設備公鑰和這台記住的不同
 pub const TARGET_KEY_CHANGED: &str = "那台電腦的設備金鑰變了，沒有開始看。如果是你重裝了那台，請到設定頁「認得的電腦」按「忘記這台」再看一次";
-/// 確認本人時給 Hello／確認框的話
-pub fn presence_text(machine: &str, window: &str) -> String {
-    let m = if machine.is_empty() { "別台電腦".to_string() } else { format!("「{machine}」") };
-    format!("要開始看{m}上「{window}」的畫面嗎？只有你本人按了「終端」才確認。")
-}
 
 /// 本人在畫面上要的狀態：看、暫停（畫面被藏起來）、結束
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,12 +237,6 @@ mod tests {
         assert!(!report.to_lowercase().contains("insert into") && !report.contains("rate_limited"), "回報不新增列、沒有次數上限");
         let start = sql.split("function public.asn_relay_term_view_start(").nth(1).unwrap().split("$function$;").next().unwrap();
         assert!(start.contains("interval '1 hour'") && start.contains("rate_limited"), "次數上限在發起");
-    }
-
-    #[test]
-    fn 確認本人的話() {
-        assert!(presence_text("家用機", "小乙").contains("「家用機」上「小乙」"));
-        assert!(presence_text("", "小乙").contains("別台電腦上「小乙」"));
     }
 
     #[test]

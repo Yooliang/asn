@@ -43,8 +43,13 @@ test('第 2 格和本機一樣寫「終端」（#1029）', () => {
   assert.equal(s.term, true)
 })
 
-test('文字：開始前先說會確認本人；錯誤用 Rust 回的白話', () => {
-  assert.match(REMOTE_TEXT.pin('「家用機」上「小乙」'), /確認是本人/)
+test('文字：按下去直接開始，不再說會確認本人（11-08 拿掉 Hello）；錯誤用 Rust 回的白話', () => {
+  assert.equal(REMOTE_TEXT.pin, undefined, '沒有「會請你確認是本人」的說明')
+  for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs', '../ui/lib/tauri.mjs']) {
+    const src = read(f)
+    for (const bad of ['確認是本人', 'Hello', 'PIN']) assert.ok(!src.includes(bad), `${f} 不能再寫「${bad}」`)
+  }
+  assert.match(read('../ui/lib/term-remote.mjs'), /v-if="phase === 'starting' \|\| phase === 'waiting'">\{\{ TEXT\.waiting \}\}/, '發起到收到第一幅之間只說「等那台電腦回應」')
   assert.match(REMOTE_TEXT.watching('家用機', '小乙'), /只能看/)
   assert.equal(startError(new Error('已取消，沒有完成')), '已取消，沒有完成')
   assert.equal(startError(''), REMOTE_TEXT.failed)

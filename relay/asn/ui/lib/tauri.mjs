@@ -92,7 +92,7 @@ export const termViewApi = {
 // 看別台電腦上夥伴的畫面（#597）：只能看，沒有打字的命令。只有電腦版的畫面傳這個給 chat-pane
 export const remoteViewApi = {
   available: node => invoke('term_view_remote_available', { node }),   // 這台能不能看那台 → true／false（不跳提示）
-  start: (toNode, partner, machine) => invoke('term_view_remote_start', { toNode, partner, machine: machine || null }),   // 先確認本人（Hello 或確認框）→ { id, expires_s }
+  start: (toNode, partner, machine) => invoke('term_view_remote_start', { toNode, partner, machine: machine || null }),   // 直接發起（不確認本人）→ { id, expires_s }
   pause: (id, paused) => invoke('term_view_remote_set', { id, paused: !!paused }),
   stop: id => invoke('term_view_remote_stop', { id }),
   listen,

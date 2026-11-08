@@ -1,6 +1,6 @@
 // 看別台電腦上夥伴的畫面（#597 別台看畫面）。**只能看：** 這裡沒有任何打字、貼上、按鍵的路，
 // xterm 也關掉輸入（disableStdin）。畫面內容在 Rust 端解密、擋重放、再過濾過才送來；xterm 只寫入，不解析連結。
-// 開始時 Rust 端先確認是本人（Windows Hello 的 PIN 或指紋；沒有 Hello 就跳確認框），之後每 15 秒在背景回報一次，不再確認。
+// 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -13,7 +13,6 @@ export const END_EVENT = 'term-view-remote-end'
 export const WARN_BEFORE_MS = 60_000
 
 export const REMOTE_TEXT = {
-  pin: where => `接下來會請你確認是本人（Windows Hello 的 PIN 或指紋，沒有的話是一個確認框），用來開始看${where}的畫面。`,
   waiting: '等那台電腦回應……',
   watching: (machine, name) => `正在看「${machine}」上「${name}」的畫面（只能看）`,
   soon: '再 1 分鐘就會結束，要繼續看請結束後再按一次。',
@@ -43,7 +42,7 @@ export async function askRemote(api, node) {
 export const remoteXtermOptions = size => ({ ...xtermOptions(size), disableStdin: true })
 
 /**
- * 開始之後才建 xterm：等畫面元素真的掛上去。元素不在（例如確認本人時這一格被收掉了）就回 null，
+ * 開始之後才建 xterm：等畫面元素真的掛上去。元素不在（例如發起時這一格被收掉了）就回 null，
  * 由呼叫的一方結束這次觀看，不丟「Terminal requires a parent element」。
  */
 export async function openTerm(Terminal, options, hostRef, tick, alive) {
@@ -76,9 +75,8 @@ export const RemoteView = {
     active: { type: Boolean, default: true },
   },
   setup(props) {
-    const host = ref(null), phase = ref('pin'), note = ref(''), soon = ref(false)
+    const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
-    const where = () => (props.machine ? `「${props.machine}」上「${props.name}」` : `「${props.name}」`)
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     const cleanup = () => {
       clearTimeout(warnTimer)
@@ -89,7 +87,7 @@ export const RemoteView = {
     const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = '' }
     const start = async () => {
       cleanup()
-      phase.value = 'pin'; note.value = ''; soon.value = false
+      phase.value = 'starting'; note.value = ''; soon.value = false
       try {
         const Terminal = await loadXterm()
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）。#1029 第一版前這裡讀 ev.payload，每一幅都被丟掉，畫面一直停在「等」
@@ -101,7 +99,7 @@ export const RemoteView = {
         offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
         const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
-        // 確認本人的時候這一格被收掉了：這次已經開始，要記得結束，不然那台會一直送到到期
+        // 發起的時候這一格被收掉了：這次已經開始，要記得結束，不然那台會一直送到到期
         if (!alive) { stop(); return }
         phase.value = 'waiting'
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
@@ -117,12 +115,11 @@ export const RemoteView = {
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     onMounted(() => { if (props.active) void start() })
     onBeforeUnmount(() => { alive = false; stop(); cleanup() })
-    return { host, phase, note, soon, where, again: start, TEXT: REMOTE_TEXT }
+    return { host, phase, note, soon, again: start, TEXT: REMOTE_TEXT }
   },
   template: `
 <div class="term-view term-remote">
-  <p class="term-view-ask" role="status" v-if="phase === 'pin'">{{ TEXT.pin(where()) }}</p>
-  <p class="term-view-ask" role="status" v-else-if="phase === 'waiting'">{{ TEXT.waiting }}</p>
+  <p class="term-view-ask" role="status" v-if="phase === 'starting' || phase === 'waiting'">{{ TEXT.waiting }}</p>
   <p class="term-remote-bar" role="status" v-else-if="phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
   <p class="term-view-lost" role="status" v-if="soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
