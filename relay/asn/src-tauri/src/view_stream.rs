@@ -646,6 +646,29 @@ mod tests {
     }
 
     #[test]
+    fn 補送不增加送的次數上限_暫停或結束就不送() {
+        // 補送和換畫面共用同一個「每 FRAME_EVERY_MS 最多一幅」的位置：再怎麼補也不會超過原本的上限
+        let (a, _) = pair();
+        let span = 60_000;
+        let mut f = Fake { stop_at_ms: Some(START_MS + span), ..fake() };
+        run_t(&session(), a, &mut f);
+        assert!(f.sent.len() as u64 <= span / FRAME_EVERY_MS + 1, "一直沒變：{} 幅", f.sent.len());
+        assert!(f.sent.len() as u64 <= span / RESEND_SAME_MS + 2, "沒變的畫面只照補送的間隔送：{} 幅", f.sent.len());
+        // 暫停：一幅都不補（也不讀窗格）
+        let (b, _) = pair();
+        let ctl = vec![Ok(Ctl::Active { paused: true, viewer_stale: false }); 10];
+        let mut p = Fake { ctl, stop_at_ms: Some(START_MS + 4 * CTL_EVERY_MS), ..fake() };
+        run_t(&session(), b, &mut p);
+        assert!(p.sent.is_empty() && p.reads == 0, "暫停時不補送");
+        // 結束（控制面沒有這筆）：馬上停，不補送
+        let (c, _) = pair();
+        let mut g = Fake { ctl: vec![Ok(Ctl::Active { paused: false, viewer_stale: false }), Ok(Ctl::Gone)], ..fake() };
+        assert_eq!(run_t(&session(), c, &mut g), End::Gone);
+        let max = (CTL_EVERY_MS / RESEND_SAME_MS + 1) as usize;
+        assert!(g.sent.len() <= max, "結束之後不再送：{}", g.sent.len());
+    }
+
+    #[test]
     fn 太大的一幅不送() {
         let (a, _) = pair();
         let frames = vec![Ok(frame(&"x".repeat(MAX_FRAME_BYTES + 1)))];

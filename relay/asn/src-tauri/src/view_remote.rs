@@ -228,6 +228,23 @@ mod tests {
     }
 
     #[test]
+    fn 守門_回報迴圈不確認本人也不用設備金鑰簽_也不算進發起的次數上限() {
+        // 每秒回報只用已經登入的權杖：不跳 Hello、不跳確認框，本人不會被連問
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let body = lib.split("\nfn start_remote_view(").nth(1).expect("有 start_remote_view").split("\n}\n").next().unwrap();
+        assert!(body.contains("pair_token("), "回報用登入的權杖");
+        for bad in [concat!("presence", "::"), "key_async", "device_id::live::key", ".sign("] {
+            assert!(!body.contains(bad), "回報迴圈不能有 {bad}");
+        }
+        // 後台每小時 30 次的上限只數發起（term_views 新增的列）；回報只更新那一列，不新增、不檢查次數
+        let sql = include_str!("../../../../supabase/migrations/20261107110000_term_views.sql").replace("\r\n", "\n");
+        let report = sql.split("function public.asn_relay_term_view_report(").nth(1).unwrap().split("$function$;").next().unwrap();
+        assert!(!report.to_lowercase().contains("insert into") && !report.contains("rate_limited"), "回報不新增列、沒有次數上限");
+        let start = sql.split("function public.asn_relay_term_view_start(").nth(1).unwrap().split("$function$;").next().unwrap();
+        assert!(start.contains("interval '1 hour'") && start.contains("rate_limited"), "次數上限在發起");
+    }
+
+    #[test]
     fn 確認本人的話() {
         assert!(presence_text("家用機", "小乙").contains("「家用機」上「小乙」"));
         assert!(presence_text("", "小乙").contains("別台電腦上「小乙」"));
