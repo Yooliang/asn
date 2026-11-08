@@ -1152,11 +1152,7 @@ async fn 先留著的信送出時_原本幾點收到優先用後台記的寄出�
     // 後台記的寄出時間比收發室留住它早很多（半夜寄來、早上才接回）
     let sent_ms = T0 - 6 * 3_600_000;
     let secs = (sent_ms / 1000) as i64;
-    // 只有視窗版會產生轉交逾時／登入失效紀錄（login_watch、usage 只在 gui 版）
-    #[cfg(all(feature = "gui", desktop))]
-    let (y, mo, d) = crate::usage::civil_from_days(secs.div_euclid(86400));
-    #[cfg(not(all(feature = "gui", desktop)))]
-    let (y, mo, d) = (1970_i64, 1_i64, 1_i64); // 無畫面版沒有解析器，此測試列在 headless-test-skip.txt
+    let (y, mo, d) = crate::timeutil::civil_from_days(secs.div_euclid(86400));
     let rem = secs.rem_euclid(86400);
     let iso = format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}.000+00:00", rem / 3600, rem % 3600 / 60, rem % 60);
     h.fr.put(mail(1, json!({"to_agent": "T-丙", "created_at": iso})));
