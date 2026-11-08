@@ -125,3 +125,12 @@ test('#1029 被看的那台的紅條放在左右並排的區塊外面：只佔�
   assert.ok(bar > 0 && shell > 0 && bar < shell, '紅條在 .shell 前面（.win 是上下排的）')
   assert.match(read('../ui/style.css'), /\.viewed-bar\{flex:none;/, '紅條不伸縮')
 })
+
+test('看別台時上方寫設備名稱，不是節點代號（「正在看「H」」）：先用名單上的設備名', () => {
+  const chat = read('../ui/lib/chatpane.mjs')
+  for (const tag of ['<remote-view ', '<remote-input ']) {
+    const line = chat.split('\n').find(l => l.includes(tag))
+    assert.ok(line && line.includes(`:machine="friend.device || friend.machine || friend.nodeName || ''"`), `${tag}先用 friend.device`)
+  }
+  assert.match(read('../ui/lib/core.mjs'), /optStr\('device', f\.device\)/, '名單上的設備名放在 friend.device')
+})
