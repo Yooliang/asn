@@ -747,3 +747,54 @@ fn 起_mux_的程式名與窗格_0_依平台() {
         assert!(!server_args(Path::new("/x/mux.lua")).iter().any(|a| a.contains(".exe") || a.contains("cmd")), "Linux 的參數不能有 Windows 的東西");
     }
 }
+
+/// Linux 實測（要真的 WezTerm，預設不跑，CI 的 headless-test 會明跑）：用產品的 `Mux` 與真的 `RealRunner`，
+/// 沒有 DISPLAY 起 mux、開一個跑 `sh -c 'echo ASN-OK; sleep 30'` 的窗格、get-text 讀到 ASN-OK，最後只停 pid 檔記的那個 mux。
+/// `ASN_WEZTERM_DIR` 一定要設（指到含 wezterm、wezterm-mux-server 的資料夾）；沒設就失敗，不能悄悄略過變假綠。
+/// 執行：`ASN_WEZTERM_DIR=<資料夾> cargo test --no-default-features --lib launch::mux::tests::linux_real_mux -- --ignored --test-threads=1 --nocapture`
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+fn linux_real_mux_spawn_get_text() {
+    use super::super::wezterm::{RealRunner, Runner};
+    let w = PathBuf::from(std::env::var_os("ASN_WEZTERM_DIR").expect("要設 ASN_WEZTERM_DIR"));
+    std::env::remove_var("DISPLAY");
+    std::env::remove_var("WAYLAND_DISPLAY");
+    // tempdir 放在 /tmp 底下，socket 路徑遠小於 108 位元組的上限
+    let d = tempfile::tempdir().unwrap();
+    let r = RealRunner;
+    let m = Mux { runner: &r, cli: w.join("wezterm"), server: w.join(MUX_EXE), paths: paths(d.path()).unwrap(), base_env: super::super::config::child_env().into_iter().collect() };
+    let Ensure::Started { pid } = m.ensure().expect("起 mux") else { panic!("暫存資料夾裡不該已經有 mux") };
+    let pid_file = std::fs::read_to_string(&m.paths.pid).unwrap();
+    assert!(pid_file.starts_with(&format!("{pid} ")), "pid 檔記的就是這個 mux：{pid_file}");
+
+    // 開窗格：和 term.rs 的 open_mux 同一條路（spawn_args + cli_env + run_clean）
+    let sub = ["spawn", "--new-window", "--workspace", "asn-1", "--cwd", "/tmp", "--", "sh", "-c", "echo ASN-OK; sleep 30"];
+    let spawned = r.run_clean(&m.cli, &spawn_args(&sub), &cli_env(&m.base_env, &m.paths.sock), Duration::from_secs(20));
+    let mut outcome: Result<String, String> = spawned.map_err(|e| format!("spawn 失敗：{e}")).and_then(|o| if o.success { Ok(o.stdout.trim().to_string()) } else { Err(format!("spawn 結束碼不是 0：{}", o.stderr)) });
+    let mut text = String::new();
+    if let Ok(pane) = &outcome {
+        for _ in 0..50 {
+            if let Ok(o) = m.cli(&["get-text", "--pane-id", pane]) {
+                text = o.stdout;
+                if text.contains("ASN-OK") {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        if !text.contains("ASN-OK") {
+            outcome = Err(format!("get-text 沒讀到 ASN-OK：{text:?}"));
+        }
+    }
+    let count = m.pane_count();
+    // 先收尾（只停 pid 檔記的那個），再下判斷，失敗也不會留下 mux
+    let stopped = m.stop();
+    std::thread::sleep(Duration::from_secs(1));
+    let still = crate::heartbeat::pid_alive(pid);
+    println!("get-text 內容：{:?}", text.lines().find(|l| l.contains("ASN-OK")));
+    outcome.expect("開窗格與讀畫面");
+    assert_eq!(count, Ok(1), "只有我們開的那個夥伴窗格");
+    stopped.expect("停 mux");
+    assert!(!still, "mux 已經結束");
+}

@@ -109,7 +109,12 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
 /// 帶結束暗號的包裝殼（PowerShell）只有 Windows 有；Linux 版另一張補，在那之前 Linux 的夥伴窗格不包殼、原指令原樣開，
 /// 沒有暗號的窗格走既有的「確認不了狀態」處理。測試仍照 Windows 的做法驗包裝本身（假的 runner 不會真的執行它）
 fn partner_wrapper_available() -> bool {
-    cfg!(windows) || cfg!(test)
+    wrapper_available(cfg!(windows), cfg!(test))
+}
+
+/// 拆成純函式好驗正式路徑：正式版（非測試）只有 Windows 包殼
+fn wrapper_available(windows: bool, test_build: bool) -> bool {
+    windows || test_build
 }
 
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
@@ -3455,6 +3460,13 @@ mod live_mux;
 mod tests {
     use super::*;
     use crate::launch::profiles::{LaunchMode, Profile};
+
+    #[test]
+    fn 結束暗號包殼_正式版只有_windows_有_測試版照舊驗包裝() {
+        assert!(wrapper_available(true, false), "Windows 正式版包殼");
+        assert!(!wrapper_available(false, false), "Linux 正式版不包殼，命令原樣交給窗格");
+        assert!(wrapper_available(false, true), "測試版照 Windows 的做法驗包裝本身");
+    }
     use std::cell::RefCell;
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::rc::Rc;
