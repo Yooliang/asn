@@ -29,6 +29,7 @@ import { createAckRetry } from './ack-retry.mjs'
 import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from './self-update.mjs'
 import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
+import { sendBridgeNotice } from './bridge-notice.mjs'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'H').trim()
 const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
@@ -184,6 +185,11 @@ const unrouted = new Set()   // mail ids already logged as kept in the inbox for
 const deviceName = createDeviceNameCache({ node: NODE_ID, getList: () => api('list'), log: m => log(m) })
 // expectsReply（選填 true／false）：視窗代寄回信時寄件人明說的「要不要等回信」；系統通知與沒有明說的轉寄不帶，欄位就是 null
 async function sendBack(p, body, fromAgent, expectsReply) {
+  // 收發室自己說話（沒有代視窗寄）：先走後台 bridge_notice；跨帳號／舊後台才退回下面的舊寄法
+  if (!fromAgent) return sendBridgeNotice({ api, replyTo: p.mail.id, body, log, legacy: () => sendBackLegacy(p, body, fromAgent, expectsReply) })
+  return sendBackLegacy(p, body, fromAgent, expectsReply)
+}
+async function sendBackLegacy(p, body, fromAgent, expectsReply) {
   try {
     const dev = fromAgent ? '' : await deviceName()
     await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body: withNoticePrefix(body, fromAgent, dev), reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
