@@ -26,7 +26,16 @@ pub const KEY_CHANGED: &str = "這台電腦的設備金鑰變了，已拒絕連�
 
 /// 這台的金鑰有沒有保護到可以讓別台看：Windows（DPAPI），或設備私鑰已經由系統金鑰庫保護（Linux）。只靠檔案權限的一律不行
 pub fn can_be_viewed_here(dir: &Path) -> bool {
-    cfg!(windows) || crate::keystore::device_key_sealed(dir)
+    !cfg!(target_os = "android") && (cfg!(windows) || crate::keystore::device_key_sealed(dir))
+}
+
+/// 上報公鑰時要一起帶的平台（android／desktop）。後台還不收這個欄位，先算好留著，目前不送出
+pub fn platform() -> &'static str {
+    if cfg!(target_os = "android") {
+        "android"
+    } else {
+        "desktop"
+    }
 }
 
 pub struct DeviceKey {
@@ -47,30 +56,64 @@ impl DeviceKey {
     }
 }
 
-/// 讀這台的設備金鑰；沒有才新建。**讀到了卻解不開時回錯誤，不蓋掉：** 蓋掉等於換一個身分
+/// 讀這台的設備金鑰；沒有才新建。**讀到了卻解不開時回錯誤，不蓋掉：** 蓋掉等於換一個身分。
+/// 唯一例外：保護層明說包裝金鑰確定不在了（手機金鑰庫被重置）——檔案永遠解不開，重產一把新的（公鑰會換，別台會拒絕並通知本人）
 pub fn load_or_create(dir: &Path, prot: &dyn crate::auth::Protector) -> Result<DeviceKey, String> {
     let path = dir.join(KEY_FILE);
     match std::fs::read_to_string(&path) {
         Ok(text) => {
             let sealed = B64.decode(text.trim()).map_err(|_| "設備金鑰壞了".to_string())?;
-            let plain = zeroize::Zeroizing::new(prot.unprotect(&sealed)?);
+            let plain = match prot.unprotect(&sealed) {
+                Ok(p) => zeroize::Zeroizing::new(p),
+                Err(e) if prot.key_lost(&e) => {
+                    elog!("設備金鑰的包裝金鑰不見了，重產新的設備金鑰：{e}");
+                    return create_new(&path, prot, true);
+                }
+                Err(e) => return Err(e),
+            };
             let key = DeviceKey::from_pkcs8(&plain)?;
-            // 舊的明文檔、這次有系統金鑰庫：順手升級成包過的（失敗就維持原樣）
-            if prot.seals() && !crate::keystore::is_sealed(&sealed) {
-                if let Err(e) = prot.protect(&plain).and_then(|s| write_private(&path, B64.encode(s).as_bytes()).map_err(|e| e.to_string())) {
+            // 舊的明文檔、這次有系統金鑰庫：順手升級成包過的，舊檔先覆寫再換掉（失敗就維持原樣）
+            if prot.seals() && !prot.wrapped(&sealed) {
+                if let Err(e) = prot.protect(&plain).and_then(|s| replace_scrubbed(&path, B64.encode(s).as_bytes()).map_err(|e| e.to_string())) {
                     elog!("設備金鑰升級失敗（照舊可用）：{e}");
                 }
             }
             Ok(key)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "產生設備金鑰失敗".to_string())?;
-            let sealed = prot.protect(doc.as_ref())?;
-            write_private(&path, B64.encode(sealed).as_bytes()).map_err(|e| format!("存設備金鑰失敗：{e}"))?;
-            DeviceKey::from_pkcs8(doc.as_ref())
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => create_new(&path, prot, false),
         Err(e) => Err(format!("讀設備金鑰失敗：{e}")),
     }
+}
+
+/// 產一把新的設備金鑰並存檔；`scrub` 為真時原本的檔案先覆寫
+fn create_new(path: &Path, prot: &dyn crate::auth::Protector, scrub: bool) -> Result<DeviceKey, String> {
+    let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "產生設備金鑰失敗".to_string())?;
+    let sealed = prot.protect(doc.as_ref())?;
+    let text = B64.encode(sealed);
+    let r = if scrub { replace_scrubbed(path, text.as_bytes()) } else { write_private(path, text.as_bytes()) };
+    r.map_err(|e| format!("存設備金鑰失敗：{e}"))?;
+    DeviceKey::from_pkcs8(doc.as_ref())
+}
+
+/// 換掉金鑰檔：新內容先寫成暫存檔，再把舊檔內容就地覆寫成零（盡力而為）、最後換名。
+/// 順序不能反：先覆寫舊檔再寫新檔，中途失敗就兩邊都沒有
+fn replace_scrubbed(path: &Path, text: &[u8]) -> std::io::Result<()> {
+    if let Ok(old) = std::fs::metadata(path) {
+        let len = old.len() as usize;
+        let tmp = PathBuf::from(format!("{}.{}.new", path.display(), std::process::id()));
+        write_private(&tmp, text)?;
+        let scrub = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).open(path)?;
+            f.write_all(&vec![0u8; len])?;
+            f.sync_all()
+        };
+        if let Err(e) = scrub() {
+            elog!("舊金鑰檔覆寫失敗（仍會換掉）：{e}");
+        }
+        return std::fs::rename(&tmp, path);
+    }
+    write_private(path, text)
 }
 
 /// 寫金鑰檔：非 Windows 先用 0600 建暫存檔、寫完再換名，從頭到尾都只有本人讀得到（和登入憑證的寫法相同）。
@@ -111,8 +154,16 @@ pub fn protector(dir: &Path) -> Box<dyn crate::auth::Protector> {
         if let Some(w) = crate::keystore::wrap_for(dir, crate::keystore::Purpose::DeviceKey, KEY_FILE) {
             return Box::new(w);
         }
-        let _ = dir;
-        Box::new(crate::auth::PlainFile)
+        #[cfg(target_os = "android")]
+        {
+            let _ = dir;
+            crate::android_keywrap::android_protector()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = dir;
+            Box::new(crate::auth::PlainFile)
+        }
     }
 }
 
@@ -444,6 +495,105 @@ mod tests {
         assert_eq!(std::fs::read(d.path().join(KEY_FILE)).unwrap(), before);
         std::fs::write(d.path().join(KEY_FILE), "不是 base64!!").unwrap();
         assert!(load_or_create(d.path(), &Flip).is_err());
+    }
+
+    // ---- 手機：系統金鑰庫保護（用假的金鑰庫）----
+    use crate::android_keywrap::{fake::FakeKeystore, KeyWrap, PREFIX as AK_PREFIX};
+
+    fn raw_file(d: &Path) -> Vec<u8> {
+        B64.decode(std::fs::read_to_string(d.join(KEY_FILE)).unwrap().trim()).unwrap()
+    }
+
+    #[test]
+    fn 手機金鑰_新裝置直接產包過的檔_讀回同一把() {
+        let d = tempfile::tempdir().unwrap();
+        let ks = FakeKeystore::default();
+        let a = load_or_create(d.path(), &KeyWrap(ks.clone())).unwrap();
+        assert!(raw_file(d.path()).starts_with(AK_PREFIX), "檔案是包過的");
+        let b = load_or_create(d.path(), &KeyWrap(ks)).unwrap();
+        assert_eq!(a.public_b64(), b.public_b64());
+    }
+
+    #[test]
+    fn 手機金鑰_舊明文檔遷移_公鑰不變_舊內容不留() {
+        let d = tempfile::tempdir().unwrap();
+        // 舊版：明文（PlainFile）存的
+        let old = load_or_create(d.path(), &crate::auth::PlainFile).unwrap();
+        let plain_bytes = raw_file(d.path());
+        assert!(Ed25519KeyPair::from_pkcs8(&plain_bytes).is_ok(), "舊檔是明文");
+        let k = load_or_create(d.path(), &KeyWrap(FakeKeystore::default())).unwrap();
+        assert_eq!(old.public_b64(), k.public_b64(), "公鑰不變");
+        let now = raw_file(d.path());
+        assert!(now.starts_with(AK_PREFIX), "已改存包過的");
+        assert!(!now.windows(plain_bytes.len()).any(|w| w == plain_bytes.as_slice()), "新檔不含明文");
+        let leftovers: Vec<_> = std::fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(leftovers, vec![KEY_FILE.to_string()], "沒有留下暫存檔：{leftovers:?}");
+        // 再讀一次還是同一把，且不再重寫
+        let again = load_or_create(d.path(), &KeyWrap(FakeKeystore::default())).unwrap();
+        assert_eq!(again.public_b64(), old.public_b64());
+        assert_eq!(raw_file(d.path()), now);
+    }
+
+    #[test]
+    fn 舊檔覆寫_換掉之前先把舊內容蓋成零() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("k");
+        std::fs::write(&p, b"old-secret-old-secret").unwrap();
+        let hold = std::fs::File::open(&p).unwrap(); // 抓著舊 inode，換名後還讀得到舊的那份內容
+        replace_scrubbed(&p, b"new").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+        use std::io::Read;
+        let mut left = Vec::new();
+        let mut h = hold;
+        h.read_to_end(&mut left).unwrap();
+        assert!(left.iter().all(|b| *b == 0), "舊 inode 的內容已蓋成零");
+    }
+
+    #[test]
+    fn 手機金鑰_包裝金鑰確定不見了_重產新的設備金鑰() {
+        let d = tempfile::tempdir().unwrap();
+        let ks = FakeKeystore::default();
+        let a = load_or_create(d.path(), &KeyWrap(ks.clone())).unwrap();
+        ks.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+        let b = load_or_create(d.path(), &KeyWrap(ks.clone())).unwrap();
+        assert_ne!(a.public_b64(), b.public_b64(), "身分換了");
+        assert!(raw_file(d.path()).starts_with(AK_PREFIX), "新檔是包過的");
+        // 金鑰庫恢復後讀回的是新的那把
+        ks.lost.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(load_or_create(d.path(), &KeyWrap(ks)).unwrap().public_b64(), b.public_b64());
+    }
+
+    #[test]
+    fn 手機金鑰_暫時失敗不覆蓋() {
+        let d = tempfile::tempdir().unwrap();
+        let ks = FakeKeystore::default();
+        load_or_create(d.path(), &KeyWrap(ks.clone())).unwrap();
+        let before = std::fs::read(d.path().join(KEY_FILE)).unwrap();
+        ks.busy.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(load_or_create(d.path(), &KeyWrap(ks)).is_err());
+        assert_eq!(std::fs::read(d.path().join(KEY_FILE)).unwrap(), before);
+    }
+
+    #[test]
+    fn 手機的設備金鑰不能讓別台看() {
+        let d = tempfile::tempdir().unwrap();
+        load_or_create(d.path(), &KeyWrap(FakeKeystore::default())).unwrap();
+        assert!(!crate::keystore::device_key_sealed(d.path()), "手機的前綴不是 Linux 金鑰庫那種");
+        if cfg!(target_os = "android") {
+            assert!(!can_be_viewed_here(d.path()));
+        }
+        let src = include_str!("device_id.rs");
+        let f = src.split("pub fn can_be_viewed_here(").nth(1).unwrap().split("}").next().unwrap();
+        assert!(f.contains("!cfg!(target_os = \"android\")"), "手機寫死不能被看");
+    }
+
+    #[test]
+    fn 平台值_手機是_android_其他是_desktop() {
+        assert_eq!(platform(), if cfg!(target_os = "android") { "android" } else { "desktop" });
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let call = lib.matches("#[cfg(not(desktop))]\n                start_device_key_publish(").count();
+        assert_eq!(call, 1, "手機啟動時要叫上傳公鑰");
+        assert!(lib.contains("#[cfg(feature = \"gui\")]\nfn start_device_key_publish"), "上傳公鑰不再限定電腦版");
     }
 
     #[test]
