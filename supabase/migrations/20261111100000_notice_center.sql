@@ -425,7 +425,7 @@ begin
     v_body := coalesce(nullif(v_computer, ''), '未命名設備')
       || case when p_resumed
            then '：終端服務中斷了' || E'\n' || p_count || ' 位夥伴受影響，ASN 正在自動接回。'
-           else '：終端服務短時間內又中斷了' || E'\n' || p_count || ' 位夥伴受影響。這次沒有自動接回，請到這台電腦看一下。'
+           else '：終端服務短時間內又中斷了' || E'\n' || p_count || ' 位夥伴受影響。這次沒有自動接回，請到「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」看一下。'
          end;
     v_res := public.asn_relay_send_notice(p_node, 'mux_down', v_body, 6, interval '1 hour');
     if v_res is null or v_res ? 'error' then
@@ -471,7 +471,7 @@ begin
     end if;
     v_body := coalesce(nullif(v_here, ''), '未命名設備') || '：雲端代理啟動時發現設定不對' || E'\n'
       || '它設定的是' || case when v_other is not null then '「' || v_other || '」' else '另一個節點' end
-      || '，但金鑰對到的是這台。可能是貼上另一組設定時把金鑰蓋掉了。為了不用錯的身分收發信，它已經停下來；請把那邊的設定改回同一組再啟動。';
+      || '，但金鑰對到的是「' || coalesce(nullif(v_here, ''), '未命名設備') || '」。可能是貼上另一組設定時把金鑰蓋掉了。為了不用錯的身分收發信，它已經停下來；請把那邊的設定改回同一組再啟動。';
     perform pg_advisory_xact_lock(hashtext('node_mismatch_notice:' || p_node));
     if exists (select 1 from relay.messages where from_node = p_node and kind = 'notice:node_mismatch' and created_at > now() - interval '1 hour') then
       v_notify := 'rate_limited';
@@ -523,10 +523,10 @@ begin
   v_window := left(regexp_replace(r.window_name, '[[:cntrl:]]', '', 'g'), 64);
   if r.scope = 'input' then
     v_body := coalesce(nullif(v_computer, ''), '未命名設備') || '：「' || coalesce(v_viewer, '另一台電腦') || '」正在操作夥伴「' || v_window || '」的終端' || E'\n'
-      || '可以在這台打任何字，包括回答權限框。如果不是你，請馬上到這台按結束，並到設定頁「認得的電腦」檢查。';
+      || '可以在「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」打任何字，包括回答權限框。如果不是你，請馬上到「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」按結束，並到設定頁「認得的電腦」檢查。';
   else
     v_body := coalesce(nullif(v_computer, ''), '未命名設備') || '：「' || coalesce(v_viewer, '另一台電腦') || '」正在看夥伴「' || v_window || '」的畫面' || E'\n'
-      || '如果不是你，請到這台按結束，並到設定頁「認得的電腦」檢查。';
+      || '如果不是你，請到「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」按結束，並到設定頁「認得的電腦」檢查。';
   end if;
   -- 限流（同一節點每小時 30 封）由 asn_relay_send_notice 依「節點＋種類」計算
   v_res := public.asn_relay_send_notice(p_node, 'view', v_body, 30, interval '1 hour');
@@ -575,11 +575,11 @@ begin
     return jsonb_build_object('ok', true, 'notify', 'sent', 'bell_topics', '[]'::jsonb);
   end if;
   if p_kind = 'first' then
-    v_body := coalesce(nullif(v_me, ''), '未命名設備') || '：「' || coalesce(v_peer, '另一台電腦') || '」第一次連到這台' || E'\n'
-      || '已記住它的設備金鑰（指紋 ' || left(p_fp, 16) || '）。如果不是你，請到這台的設定頁「認得的電腦」按忘記，並檢查帳號。';
+    v_body := coalesce(nullif(v_me, ''), '未命名設備') || '：「' || coalesce(v_peer, '另一台電腦') || '」第一次連到「' || coalesce(nullif(v_me, ''), '未命名設備') || '」' || E'\n'
+      || '已記住它的設備金鑰（指紋 ' || left(p_fp, 16) || '）。如果不是你，請到「' || coalesce(nullif(v_me, ''), '未命名設備') || '」的設定頁「認得的電腦」按忘記，並檢查帳號。';
   else
     v_body := coalesce(nullif(v_me, ''), '未命名設備') || '：「' || coalesce(v_peer, '另一台電腦') || '」的設備金鑰變了' || E'\n'
-      || '新指紋 ' || left(p_fp, 16) || '，這台已拒絕連線。如果是你重裝了那台，請到這台的設定頁「認得的電腦」按忘記再連一次；不是的話請不要按，並檢查帳號。';
+      || '新指紋 ' || left(p_fp, 16) || '，已拒絕連線。如果是你重裝了那台，請到「' || coalesce(nullif(v_me, ''), '未命名設備') || '」的設定頁「認得的電腦」按忘記再連一次；不是的話請不要按，並檢查帳號。';
   end if;
   -- 限流（同一節點每小時 30 封）由 asn_relay_send_notice 依「節點＋種類」計算
   v_res := public.asn_relay_send_notice(p_node, 'device_key', v_body, 30, interval '1 hour');

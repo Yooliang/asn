@@ -264,10 +264,16 @@ test('實跑（pglite）：九支通知函式——回傳形狀不變、信是�
   assert.equal((await one(q, `select notified_at is not null n from relay.term_views where id = $1`, [vid])).n, true)
   // device_key
   const dk = await call(q, `public.asn_relay_device_key_alert('H', 'P', 'first', '0123456789abcdef0123')`); shapeOk(dk); assert.equal(dk.notify, 'sent')
-  await check('notice:device_key', '家用機：「筆電」第一次連到這台')
+  await check('notice:device_key', '家用機：「筆電」第一次連到「家用機」')
   assert.equal((await one(q, `select count(*)::int c from relay.device_key_alerts`)).c, 1)
   // 所有九種信的寄件人都沒有舊的收發室名字
   assert.equal((await one(q, `select count(*)::int c from relay.messages where from_agent like '%收發室'`)).c, 0)
+  // 第一行已經寫了設備名，正文不再用「這台」：改寫設備名（asn調查員、asn真 定）
+  assert.equal((await one(q, `select count(*)::int c from relay.messages where kind like 'notice:%' and body like '%這台%'`)).c, 0, '通知正文不准出現「這台」')
+  const bodyOf = async kind => (await one(q, `select body from relay.messages where kind = $1 order by created_at desc, id limit 1`, [kind])).body
+  assert.match(await bodyOf('notice:node_mismatch'), /但金鑰對到的是「家用機」。/)
+  assert.match(await bodyOf('notice:view'), /可以在「家用機」打任何字.*請馬上到「家用機」按結束/s)
+  assert.match(await bodyOf('notice:device_key'), /請到「家用機」的設定頁「認得的電腦」按忘記/)
 })
 
 test('實跑（pglite）：沒有設備名時第一行寫「未命名設備」；扇出節點的通知每一列都有 kind', { skip }, async () => {
@@ -352,4 +358,26 @@ test('實跑（pglite）：套用回復檔後，通知換回各自的舊寄件�
   assert.ok(!('kind' in inbox[0]) && !('from_owner' in inbox[0]))
   assert.equal((await one(q, `select count(*)::int c from pg_proc where proname = 'asn_relay_send_notice'`)).c, 1)
   assert.equal((await one(q, `select count(*)::int c from information_schema.columns where table_schema = 'relay' and table_name = 'messages' and column_name = 'kind'`)).c, 1)
+})
+
+test('實跑（pglite）：其他幾種通知正文也不用「這台」——終端服務沒接回、看畫面、設備金鑰變了', { skip }, async () => {
+  const { q } = await boot()
+  await call(q, `public.asn_relay_mux_down_notice('H', 2, false)`)
+  const vid = (await one(q, `insert into relay.term_views(from_node, to_node, status, scope, window_name) values ('P', 'H', 'accepted', 'view', '視窗一') returning id`)).id
+  await call(q, `public.asn_relay_term_view_notice('H', $1::uuid)`, [vid])
+  await call(q, `public.asn_relay_device_key_alert('H', 'P', 'changed', 'abcdef0123456789abcd')`)
+  const rows = await q(`select kind, body from relay.messages where kind like 'notice:%' order by created_at, id`)
+  assert.ok(rows.length >= 3)
+  for (const r of rows) assert.ok(!r.body.includes('這台'), r.kind + '：' + r.body)
+  const body = k => rows.find(r => r.kind === k).body
+  assert.match(body('notice:mux_down'), /這次沒有自動接回，請到「家用機」看一下。/)
+  assert.match(body('notice:view'), /如果不是你，請到「家用機」按結束/)
+  assert.match(body('notice:device_key'), /，已拒絕連線。如果是你重裝了那台，請到「家用機」的設定頁/)
+  // 沒有設備名：寫「未命名設備」
+  await call(q, `public.asn_relay_mux_down_notice('N', 1, false)`)
+  assert.match((await one(q, `select body from relay.messages where from_node = 'N' and kind = 'notice:mux_down' order by created_at desc limit 1`)).body, /請到「未命名設備」看一下/)
+})
+
+test('靜態：這支 migration 產出的通知正文不准出現「這台」（註解除外）', () => {
+  assert.doesNotMatch(mig.replace(/^\s*--.*$/gm, '').replace(/--[^\n']*$/gm, ''), /這台/)
 })
