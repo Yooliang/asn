@@ -740,7 +740,7 @@ export const mtermviewProbeSource = ({ big }) => `(async () => {
   if (!vis(conv())) return { ok: false, why: '切回「訊息」後訊息列表沒回來' };
   if (document.querySelector('.term-view-screen')) return { ok: false, why: '切回「訊息」後終端畫面還在' };
   const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
-  if (!calls.includes('term_view_remote_start')) return { ok: false, why: '沒呼叫 term_view_remote_start' };
+  if (!calls.includes('android_term_view_remote_start')) return { ok: false, why: '沒呼叫手機專用的發起指令 android_term_view_remote_start' };
   if (!calls.includes('term_view_remote_stop')) return { ok: false, why: '切回訊息沒呼叫 term_view_remote_stop' };
   btns[1].click();
   rows = '';
@@ -898,10 +898,10 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }
     t.term_view_remote_available = true
-    t.term_view_remote_start = { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 }
+    t.android_term_view_remote_start = { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 }
     t.term_view_remote_set = null
     t.term_view_remote_stop = null
-    t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
+    t.__emitOn = { android_term_view_remote_start: mtermviewFrames('v1') }
   }
   if (scenario.state.mnoself) {
     t.relay_list = { members: MACCT_MEMBERS.two }
