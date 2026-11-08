@@ -93,8 +93,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 tauri-plugin-opener = { version = "2", optional = true }
 # 手機的設備金鑰用系統金鑰庫保護（android_keywrap.rs）：直接呼叫系統的 Java 類別
-jni = "0.21"
-ndk-context = "0.1"
+jni = "=0.21.1"
+ndk-context = "=0.1.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Time", "Win32_System_Pipes", "Win32_Security_Authorization", "Win32_Security_WinTrust", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Sip", "Win32_System_Registry"] }

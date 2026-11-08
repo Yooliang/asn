@@ -556,6 +556,17 @@ mod tests {
     }
 
     #[test]
+    fn 舊檔換檔_換名之前失敗_舊檔原樣還讀得到() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("k");
+        std::fs::write(&p, b"old-secret-old-secret").unwrap();
+        // 暫存檔的位置先被一個資料夾占住：新內容寫不進去、走不到換名
+        std::fs::create_dir(format!("{}.{}.new", p.display(), std::process::id())).unwrap();
+        assert!(replace_scrubbed(&p, b"new").is_err());
+        assert_eq!(std::fs::read(&p).unwrap(), b"old-secret-old-secret", "沒換成功就不能動到舊檔（不能變成一檔零）");
+    }
+
+    #[test]
     fn 手機金鑰_包裝金鑰確定不見了_重產新的設備金鑰() {
         let d = tempfile::tempdir().unwrap();
         let ks = FakeKeystore::default();
