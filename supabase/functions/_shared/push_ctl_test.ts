@@ -170,7 +170,9 @@ Deno.test("沒有要推的（不在線、60 秒內、沒權杖）：不送", asy
 Deno.test("守門：relay/index.ts 只在『寄給本人』與『等待通知寄出』之後推，且不把用戶端參數傳進去", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const calls = [...src.matchAll(/notifyPush\(\{.*?, fcm \}, "(\w+)", ([^)]*)\)/g)].map((m) => [m[1], m[2].trim()]);
-  assertEquals(calls.sort(), [["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);
+  // 橋通知（#848 PR-D）：寄給本人（扇出）時和一般寄信一樣推；id 是資料庫寄出的那封，收件人由 notifyPush 用信件查（bridge_notice.ts 只在 fanout 是數字時呼叫）
+  assertEquals(calls.sort(), [["owner_mail", "me.id, id"], ["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);
+  assert(Deno.readTextFileSync(new URL("./bridge_notice.ts", import.meta.url)).includes('notify === "sent" && id && typeof d.fanout === "number"'), "橋通知寄給本人才推");
   assert(src.includes('typeof (sent as { fanout?: unknown }).fanout === "number"'), "寄給本人才有 fanout");
   assert(src.includes('data?.notify === "sent"'));
   assertEquals(src.includes("p_user"), false, "index.ts 不自己組收件人");
