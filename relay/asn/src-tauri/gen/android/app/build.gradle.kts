@@ -82,6 +82,8 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // 查看電腦終端前的本人確認（生物辨識或螢幕鎖）。鎖死版本
+    implementation("androidx.biometric:biometric:1.1.0")
     // 推播（#797，FCM）。服務帳戶金鑰絕不進 APK；google-services.json 只有公開的設定值，也不進 repo（見下方 apply 條件）
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     implementation("com.google.firebase:firebase-messaging")

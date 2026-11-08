@@ -104,7 +104,11 @@ mod tests {
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let start = lib.split("async fn term_view_remote_start(").nth(1).expect("有發起的命令").split("\n}\n").next().unwrap();
         assert!(!start.contains("presence") && !start.contains("dialog"), "發起不跳本人確認");
-        assert!(start.contains("key_async") && start.contains("d_start("), "設備金鑰簽章照留（給對方那台驗身分）");
+        let core = include_str!("view_d.rs").replace("\r\n", "\n");
+        let begin = core.split("pub async fn begin<").nth(1).expect("有共用的發起").split("\n}\n").next().unwrap();
+        assert!(!begin.contains("presence") && !begin.contains("dialog"), "共用的發起也不跳本人確認");
+        assert!(begin.contains("b.key()") && begin.contains("d_start("), "設備金鑰簽章照留（給對方那台驗身分）");
+        assert!(start.contains("view_d::begin("), "電腦版的發起走共用的核心");
     }
 
     fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

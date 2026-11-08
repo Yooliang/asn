@@ -29,7 +29,12 @@ pub fn can_be_viewed_here(dir: &Path) -> bool {
     !cfg!(target_os = "android") && (cfg!(windows) || crate::keystore::device_key_sealed(dir))
 }
 
-/// 上報公鑰時要一起帶的平台（android／desktop）。後台還不收這個欄位，先算好留著，目前不送出
+/// 上傳公鑰的內文：公鑰＋這台是手機還是電腦（後台用來分辨）
+pub fn publish_body(sign_pub: &str, platform: &str) -> serde_json::Value {
+    serde_json::json!({ "sign_pub": sign_pub, "platform": platform })
+}
+
+/// 上報公鑰時一起帶的平台（android／desktop）
 pub fn platform() -> &'static str {
     if cfg!(target_os = "android") {
         "android"
@@ -349,7 +354,7 @@ pub mod live {
     /// 上傳這台的公鑰（沒有金鑰就先建）
     pub async fn publish(relay: &Relay, dir: &Path) -> Result<(), String> {
         let k = key_async(dir).await?;
-        relay.api("device_key_publish", Some(json!({ "sign_pub": k.public_b64() }))).await.map(|_| ())
+        relay.api("device_key_publish", Some(publish_body(&k.public_b64(), platform()))).await.map(|_| ())
     }
 
     /// 通知本人：第一次記住（只有 T 寄）或公鑰換了（兩邊都寄）。送不出去只記 log
@@ -457,7 +462,7 @@ mod tests {
         let no_ask = fns("device_id::live::set_input_no_ask(");
         assert!(!no_ask.is_empty() && no_ask.iter().all(|f| f == "device_known_input_no_ask"), "打字不用問只能從設定頁的命令：{no_ask:?}");
         let see = fns("device_id::live::see(");
-        assert!(!see.is_empty() && see.iter().all(|f| f == "start_view_poller" || f == "start_remote_view"), "記住只在收到請求（T）或看的那台驗過 T 的簽章時：{see:?}");
+        assert!(!see.is_empty() && see.iter().all(|f| f == "start_view_poller" || f == "start_remote_view" || f == "view_backend_see"), "記住只在收到請求（T）或看的那台驗過 T 的簽章時：{see:?}");
         for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "android.rs", "headless.rs"] {
             let s = std::fs::read_to_string(root.join(f)).unwrap();
             assert!(!s.contains("live::forget") && !s.contains("live::see") && !s.contains("set_input_no_ask"), "{f} 不能改認得的電腦");
@@ -611,6 +616,16 @@ mod tests {
         let call = lib.matches("#[cfg(not(desktop))]\n                start_device_key_publish(").count();
         assert_eq!(call, 1, "手機啟動時要叫上傳公鑰");
         assert!(lib.contains("#[cfg(feature = \"gui\")]\nfn start_device_key_publish"), "上傳公鑰不再限定電腦版");
+    }
+
+    #[test]
+    fn 上傳公鑰帶平台欄() {
+        let b = publish_body("pk", "android");
+        assert_eq!(b, serde_json::json!({ "sign_pub": "pk", "platform": "android" }));
+        assert_eq!(publish_body("pk", platform())["platform"], platform());
+        let src = include_str!("device_id.rs");
+        let live = src.split("pub async fn publish(").nth(1).unwrap().split("\n    }").next().unwrap();
+        assert!(live.contains("publish_body(") && live.contains("platform()"), "上傳時帶這台的平台");
     }
 
     #[test]

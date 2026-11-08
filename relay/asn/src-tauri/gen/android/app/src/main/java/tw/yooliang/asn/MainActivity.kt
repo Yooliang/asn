@@ -34,6 +34,14 @@ class MainActivity : TauriActivity() {
     if (requestCode == AsnPush.REQ_NOTIF) pushEvent("{\"t\":\"perm\",\"granted\":${grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED}}")
   }
 
+  // 查看終端前的螢幕鎖確認（API 29 以下）的回答
+  @Deprecated("Deprecated in Java")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+    @Suppress("DEPRECATION")
+    super.onActivityResult(requestCode, resultCode, data)
+    ViewerConfirm.onActivityResult(this, requestCode, resultCode)
+  }
+
   // 螢幕關閉或切到其他程式：通話自動結束（麥克風不留著）
   override fun onStop() {
     callVoice.onBackground()
@@ -55,6 +63,7 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     if (current === this) current = null
+    if (isFinishing) ViewerConfirm.clear()
     super.onDestroy()
   }
 

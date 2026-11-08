@@ -15,7 +15,7 @@ const cargo = read('src-tauri', 'Cargo.toml')
 // 電腦端才有的 Rust 模組：手機建置一個都不能編進去
 const DESKTOP_MODS = ['acct_remote', 'statusline_hook', 'term_remote', 'ads', 'agent_tools', 'askpass', 'bridge', 'cli', 'claude_accounts', 'claude_json', 'claude_mod', 'claude_quota', 'codex_accounts', 'codex_quota', 'launch', 'shot', 'stt', 'tray', 'tts', 'updater', 'usage', 'voicecfg', 'wins']
 // 電腦端才有的指令（手機的指令清單、手機畫面都不能出現）
-const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_input_no_ask', 'term_view_remote_input', 'term_view_remote_available', 'term_view_remote_start', 'term_view_remote_set', 'term_view_remote_stop', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
+const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_input_no_ask', 'term_view_remote_input', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
 
 test('電腦端模組：每一個都掛 cfg(desktop)，手機建置不編譯', () => {
   for (const m of DESKTOP_MODS) {
@@ -486,4 +486,54 @@ test('手機設備金鑰：包裝金鑰在系統金鑰庫、備份規則整個�
   const di = read('src-tauri', 'src', 'device_id.rs')
   assert.match(di, /!cfg!\(target_os = "android"\) && /, '手機的設備金鑰不能讓別台看')
   assert.match(cargo, /jni = "=0\.21\.1"/, "鎖死版本"); assert.match(cargo, /ndk-context = "=0\.1\.1"/, "鎖死版本")
+})
+
+const REMOTE_VIEW_CMDS = ['term_view_remote_available', 'term_view_remote_start', 'term_view_remote_set', 'term_view_remote_stop']
+
+test('手機看電腦終端：四個指令手機也有、打字的指令只有電腦有', () => {
+  const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
+  const names = m[1].split(',').map(s => s.trim().replace(/^\w+::/, '')).filter(Boolean)
+  for (const c of REMOTE_VIEW_CMDS) assert.ok(names.includes(c), `手機要有 ${c}`)
+  assert.ok(!names.includes('term_view_remote_input'), '手機不能打字')
+  assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
+  const rs = read('src-tauri', 'src', 'android.rs')
+  assert.doesNotMatch(rs, /term_view_remote_input/)
+  assert.doesNotMatch(rs, /device_id::/, 'android.rs 不直接碰設備金鑰')
+  const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
+  assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')
+  assert.ok(start.indexOf('parse_scope(') < start.indexOf('relay_of('), '先擋打字，再碰任何東西')
+  assert.doesNotMatch(start, /Scope::Input/)
+})
+
+test('view_d 的核心：手機入口只看畫面、電腦版 start 走同一個核心', () => {
+  const core = read('src-tauri', 'src', 'view_d.rs')
+  assert.match(core, /pub async fn start_view[\s\S]*?parse_scope\(scope, false\)\?/)
+  assert.match(core, /INPUT_NOT_ON_MOBILE: &str = "手機只能看畫面，不能打字"/)
+  const desk = lib.split('async fn term_view_remote_start(')[1].split('\n}\n')[0]
+  assert.match(desk, /view_d::begin\(/)
+  assert.ok(lib.includes('#[cfg(feature = "gui")]\nmod view_d;'))
+  assert.match(lib, /android::term_view_remote_start/)
+})
+
+test('手機查看前要先通過本人確認：前端模組、外殼、鎖死的 biometric 版本', () => {
+  const js = read('ui', 'lib', 'mobile-confirm.mjs')
+  assert.match(js, /NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再查看終端'/)
+  assert.match(js, /if \(!bridge \|\| typeof bridge\.confirmViewer !== 'function'\) return 'cancel'/, '橋不存在不能回 ok')
+  const dir = ['src-tauri', 'gen', 'android', 'app']
+  const bridge = read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'AsnBridge.kt')
+  assert.match(bridge, /@JavascriptInterface\s+fun confirmViewer\(callbackId: String\)[\s\S]*?runOnUiThread/, '在主執行緒開框')
+  const kt = read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'ViewerConfirm.kt')
+  assert.match(kt, /isDeviceSecure/); assert.match(kt, /"no_lock"/); assert.match(kt, /BIOMETRIC_STRONG or DEVICE_CREDENTIAL/)
+  assert.match(kt, /createConfirmDeviceCredentialIntent/); assert.match(kt, /SDK_INT >= Build\.VERSION_CODES\.R/)
+  assert.match(read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt'), /ViewerConfirm\.onActivityResult/)
+  assert.match(kt, /STALE_MS = 130_000L/, '卡住的確認超過 130 秒就放掉')
+  assert.match(read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt'), /isFinishing\) ViewerConfirm\.clear\(\)/)
+  const gradle = read(...dir, 'build.gradle.kts')
+  assert.match(gradle, /implementation\("androidx\.biometric:biometric:1\.1\.0"\)/, '版本鎖死，不用 + 或範圍')
+})
+
+test('上傳設備公鑰帶平台', () => {
+  const di = read('src-tauri', 'src', 'device_id.rs')
+  assert.match(di, /publish_body\(&k\.public_b64\(\), platform\(\)\)/)
+  assert.match(di, /"sign_pub": sign_pub, "platform": platform/)
 })

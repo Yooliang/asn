@@ -342,3 +342,41 @@ mod sideload {
         Ok(json!({ "path": fin.display().to_string(), "version": m.version }))
     }
 }
+
+// ---------- 看電腦的終端（只能看，不能打字）：和電腦版同名同參數，前端共用 remoteViewApi 的呼叫方式 ----------
+
+/// 這支手機能不能發起：連得上即時頻道、不是自己
+#[tauri::command]
+pub async fn term_view_remote_available(app: State<'_, App>, net: State<'_, crate::ViewNet>, node: String) -> Result<bool, String> {
+    Ok(net.0.is_some() && node != app.node)
+}
+
+/// 發起查看。只收看畫面，`scope` 帶 input（打字）一律拒絕。回 { id, expires_s, scope }
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, net: State<'_, crate::ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+    // 要求打字的先擋下，連即時頻道都不看
+    crate::view_d::parse_scope(scope.as_deref(), false)?;
+    let url = net.0.clone().ok_or("這支手機現在連不上即時頻道，不能看畫面")?;
+    let relay = relay_of(&app)?;
+    let handle = window.app_handle().clone();
+    let backend = std::sync::Arc::new(crate::LiveBackend::new(handle.clone(), relay, app.data_dir.clone()));
+    let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
+    let (id, expires_s) = (begun.id.clone(), begun.session.expires_s);
+    let sink = std::sync::Arc::new(crate::LiveSink::new(handle, window.label().to_string()));
+    crate::view_d::spawn_view(backend, sink, views.inner().clone(), url, begun);
+    Ok(crate::view_d::started_json(&id, expires_s, crate::view_handshake::Scope::View))
+}
+
+/// 暫停（畫面藏起來）或繼續
+#[tauri::command]
+pub fn term_view_remote_set(views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, id: String, paused: bool) {
+    crate::view_d::set_paused(views.inner(), &id, paused);
+}
+
+/// 本人按「結束」
+#[tauri::command]
+pub fn term_view_remote_stop(views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, id: String) {
+    crate::view_d::stop(views.inner(), &id);
+}

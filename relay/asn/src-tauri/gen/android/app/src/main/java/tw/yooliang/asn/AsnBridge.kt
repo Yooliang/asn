@@ -101,6 +101,12 @@ class AsnBridge(private val activity: MainActivity) {
   /** 登出、換帳號時刪掉 Firebase 的權杖 */
   @JavascriptInterface fun pushDeleteToken() = AsnPush.deleteToken(activity)
 
+  /** 查看電腦終端前的本人確認（生物辨識或螢幕鎖）。結果 ok／cancel／no_lock 經 window.__asnConfirmViewer(callbackId, result) 交回 */
+  @JavascriptInterface
+  fun confirmViewer(callbackId: String) {
+    activity.runOnUiThread { ViewerConfirm.ask(activity, callbackId) }
+  }
+
   /** 通話中讓螢幕保持亮著（不然自己暗掉就會被當成切到背景而結束通話） */
   @JavascriptInterface
   fun keepAwake(on: Boolean) {

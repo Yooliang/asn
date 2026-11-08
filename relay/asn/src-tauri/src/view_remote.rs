@@ -8,7 +8,7 @@
 //! - 紀錄只有長度和次數，沒有畫面內容。
 #![cfg_attr(not(test), allow(dead_code))]
 use crate::view_handshake::{self, Session};
-use crate::view_stream::{DReceiver, Frame, Received};
+use crate::view_frame::{DReceiver, Frame, Received};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -221,6 +221,7 @@ mod tests {
         assert_eq!(report_wait_s(false, WAIT_ACCEPT_FOR_S), REPORT_EVERY_S, "一直沒接受：不要一直每秒打後台");
         assert_eq!(report_wait_s(true, 0), REPORT_EVERY_S, "已經在收：照舊 15 秒");
         // 開始收之前送的幅會漏掉：被看的那台補送的間隔要比這邊等接受的間隔長
+        #[cfg(desktop)]
         assert!(WAIT_ACCEPT_EVERY_S * 1000 < crate::view_stream::RESEND_SAME_MS);
     }
 
