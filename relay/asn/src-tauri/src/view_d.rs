@@ -161,7 +161,7 @@ pub fn started_json(id: &str, expires_s: i64, scope: Scope) -> Value {
 /// 只看畫面的背景：每 15 秒回報一次（不簽章、不確認本人）；拿到對方的公鑰就導出金鑰、開接收頻道；結束就收掉、告訴畫面。
 /// 接收頻道只收不送，收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面
 pub fn spawn_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, url: String, begun: Begun) {
-    tauri::async_runtime::spawn(run_view(b, sink, views, url, begun));
+    crate::rt::spawn(run_view(b, sink, views, url, begun));
 }
 
 async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, url: String, begun: Begun) {
@@ -200,7 +200,7 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
                         let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                         stop_tx = Some(tx);
                         let (sink2, views2, id2, seen) = (sink.clone(), views.clone(), id.clone(), frames_seen.clone());
-                        tauri::async_runtime::spawn(crate::bell::run_channel(url.clone(), topic.clone(), false, None::<tokio::sync::mpsc::Receiver<crate::bell::Outbound>>, async move { let _ = stop.await; }, move |ev| {
+                        crate::rt::spawn(crate::bell::run_channel(url.clone(), topic.clone(), false, None::<tokio::sync::mpsc::Receiver<crate::bell::Outbound>>, async move { let _ = stop.await; }, move |ev| {
                             let crate::bell::Event::Broadcast { event, payload } = ev else { return };
                             let Some(w) = view_remote::frame_wire(event, payload) else { return };
                             match view_remote::receive(&mut rx, &w) {
