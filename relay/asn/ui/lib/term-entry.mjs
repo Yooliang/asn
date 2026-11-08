@@ -6,7 +6,7 @@ export const TERM_LABEL = '終端'
 export const TERM_TIP = '在 ASN 裡看這位夥伴的終端（再按一次回到訊息）'
 export const TERM_BACK_TIP = '回到訊息'
 // 上排第 2 個大按鈕（在共用終端服務裡的夥伴）：看訊息時寫「終端」、看終端時寫「訊息」，圖示跟著換（不只靠按下去的顏色）
-// 本機與別台電腦的夥伴用同樣的字（#1033 前是「看終端」「看訊息」，別台是「看畫面」）
+// 本機與別台電腦的夥伴用同樣的字（#1029 前是「看終端」「看訊息」，別台是「看畫面」）
 // 對話圖示：專案裡沒有專用的訊息圖示，借用 ab-window.svg（視窗裡有文字行，最接近「訊息」）
 export const TERM_BTN_TERM = { label: '終端', icon: 'img/ab-term.svg' }
 export const TERM_BTN_MSG = { label: '訊息', icon: 'img/ab-window.svg' }

@@ -36,7 +36,7 @@ test('問能不能看：只收 true／false，出錯回 null', async () => {
   assert.equal(await askRemote(null, 'n'), null)
 })
 
-test('第 2 格和本機一樣寫「終端」（#1033）', () => {
+test('第 2 格和本機一樣寫「終端」（#1029）', () => {
   assert.equal(REMOTE_LABEL, '終端')
   const s = barSlots({ node: 'hom7a1', status: 'online', engine: 'claude' }, { term: true, termLabel: REMOTE_LABEL }).find(x => x.key === 'window')
   assert.equal(s.label, REMOTE_LABEL)
@@ -65,7 +65,7 @@ test('看別台畫面：沒有返回鈕（只靠上排第 2 格切回訊息）�
   assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/)
 })
 
-test('#1033 等畫面元素掛上去才建 xterm；元素不在就回 null，不丟「Terminal requires a parent element」', async () => {
+test('#1029 等畫面元素掛上去才建 xterm；元素不在就回 null，不丟「Terminal requires a parent element」', async () => {
   const made = []
   class Terminal {
     constructor(o) { this.o = o; made.push(this) }
@@ -91,7 +91,7 @@ test('#1033 等畫面元素掛上去才建 xterm；元素不在就回 null，不
   assert.equal(made.length, 0)
 })
 
-test('#1033 開始後這一格被收掉或建不了 xterm：一定結束這次觀看（那台不會一直送到到期）', () => {
+test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次觀看（那台不會一直送到到期）', () => {
   for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
     const src = read(f)
     assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)

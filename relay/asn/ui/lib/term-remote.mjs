@@ -4,7 +4,7 @@
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
-// 第 2 格的字和本機終端一樣（#1033 前是「看畫面」）
+// 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
 export const REMOTE_LABEL = '終端'
 export const REMOTE_TIP = '看這位夥伴在那台電腦上的終端（只能看；再按一次回到訊息）'
 export const FRAME_EVENT = 'term-view-remote-frame'

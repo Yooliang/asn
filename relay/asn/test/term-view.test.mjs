@@ -309,7 +309,7 @@ test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高�
   assert.ok(!chat.includes('can-back'), '沒有任何地方再傳 can-back')
   assert.ok(chat.includes('@term="toggleTerm"'), '上排大按鈕負責切換')
   assert.ok(chat.includes('<div class="conv" v-show="!paneTermShown">'), '終端開著時訊息列表收起')
-  assert.ok(chat.includes('const paneTermShown = computed(() => termShown.value || remoteShown.value)'), '#1033：看別台的終端也一樣收起訊息列表、占滿整塊，不是只佔上半部')
+  assert.ok(chat.includes('const paneTermShown = computed(() => termShown.value || remoteShown.value)'), '#1029：看別台的終端也一樣收起訊息列表、占滿整塊，不是只佔上半部')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(!view.includes('回到訊息') && !view.includes('canBack') && !view.includes("emit('back')"), '終端畫面裡沒有回到訊息按鈕')
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')

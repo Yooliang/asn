@@ -98,12 +98,12 @@ test('大按鈕接線：第 2 格按下發 term，開著時有 on 與 aria-press
   assert.match(read('ui', 'img', 'ab-term.svg'), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32" width="32" height="32">/)
 })
 
-test('上排第 2 個大按鈕依狀態換字與圖示（#901b、#1033）：看訊息時「終端」＋終端圖示，看終端時「訊息」＋對話圖示', () => {
+test('上排第 2 個大按鈕依狀態換字與圖示（#901b、#1029）：看訊息時「終端」＋終端圖示，看終端時「訊息」＋對話圖示', () => {
   assert.deepEqual(termButtonView(false), { label: '終端', icon: 'img/ab-term.svg' })
   assert.deepEqual(termButtonView(true), { label: '訊息', icon: 'img/ab-window.svg' })
   assert.notEqual(termButtonView(true).icon, termButtonView(false).icon, '圖示不同，不只靠按下的顏色')
   assert.notEqual(termButtonView(true).label, termButtonView(false).label)
-  // 別台夥伴（#968）：字和本機一樣（#1033），開著時一律「訊息」
+  // 別台夥伴（#968）：字和本機一樣（#1029），開著時一律「訊息」
   assert.deepEqual(termButtonView(false, REMOTE_LABEL), termButtonView(false), '別台夥伴：關著時和本機一樣是「終端」＋終端圖示')
   assert.deepEqual(termButtonView(true, REMOTE_LABEL), termButtonView(true), '別台夥伴：開著時和本機一樣是「訊息」＋對話圖示')
   assert.deepEqual(termButtonView(false, ''), { label: '終端', icon: 'img/ab-term.svg' })
