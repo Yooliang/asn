@@ -169,3 +169,13 @@ test('守門：device-state 是純邏輯，不碰 DOM、不呼叫後端', () => 
   const src = fs.readFileSync(new URL('../ui/lib/device-state.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(src, /document\.|window\.|invoke\(|fetch\(|localStorage/)
 })
+
+test('帳號回報該不該重讀：沒讀過要讀；失敗過了一分鐘要讀；沒到時間不讀；讀成功的不重讀', async () => {
+  const { shouldRetryReport, REPORT_RETRY_MS } = await import('../ui/lib/device-state.mjs')
+  assert.equal(REPORT_RETRY_MS, 60_000)
+  assert.equal(shouldRetryReport({ read: false }, 1000), true)
+  assert.equal(shouldRetryReport({ read: true, failedAt: null }, 1_000_000), false, '讀成功：不重讀')
+  assert.equal(shouldRetryReport({ read: true, failedAt: 1_000_000 }, 1_059_999), false, '失敗不到 60 秒')
+  assert.equal(shouldRetryReport({ read: true, failedAt: 1_000_000 }, 1_060_000), true, '失敗滿 60 秒')
+  assert.equal(shouldRetryReport({ read: true, failedAt: Number.NaN }, 5), true, '失敗時間不明：讀')
+})

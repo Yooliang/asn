@@ -253,3 +253,36 @@ test('重讀額度接線：每 5 分鐘重讀、打開設定頁時重讀；帳�
   assert.doesNotMatch(js, /accounts\.report\(\)/)   // #374 起同一支也順便讀帳號列表
   assert.match(js, /watch\(\(\) => ui\.panel\.setting, k => \{[^]*?if \(k\) void accounts\.refreshQuota\(\)[^]*?\}, \{ immediate: true \}\)/)
 })
+
+test('設備分類讀帳號回報：失敗後過了一分鐘會再讀；成功之後不再重讀；剛登入立刻重讀失敗的', async () => {
+  let t = 1_000_000
+  let fail = true
+  const f = fake({ acct_remote_list: ({ node }) => { if (node === 'bad' && fail) throw new Error('沒登入'); return { asn_online: true, reported_at: '', accounts: [] } } })
+  const ui = createAccountsUi({ invoke: f.invoke, reactive, sleep: async () => {}, now: () => t })
+  const reads = () => f.calls.filter(c => c[0] === 'acct_remote_list').map(c => c[1].node)
+  await ui.loadReports(['good', 'bad'])
+  assert.equal(ui.state.reports.bad.failedAt, 1_000_000)
+  assert.equal(await ui.retryReports(['good', 'bad']), 0, '剛失敗：不重讀')
+  t += 59_000
+  assert.equal(await ui.retryReports(['good', 'bad']), 0)
+  t += 1_000
+  fail = false
+  assert.equal(await ui.retryReports(['good', 'bad']), 1, '滿 60 秒：只重讀失敗的那台')
+  assert.deepEqual(reads(), ['good', 'bad', 'bad'])
+  assert.equal(ui.state.reports.bad.error, '')
+  t += 600_000
+  assert.equal(await ui.retryReports(['good', 'bad']), 0, '成功的不重讀')
+  // 剛登入：失敗的立刻讀，不等時間
+  fail = true
+  await ui.loadReports(['bad'])
+  fail = false
+  assert.equal(await ui.retryReports(['bad']), 0)
+  assert.equal(await ui.retryReports(['bad'], { force: true }), 1)
+  assert.equal(await ui.retryReports(['new']), 1, '沒讀過的也讀')
+})
+
+test('守門：電腦版每分鐘檢查、只在設備分類開著時重讀；登入事件接上', () => {
+  const src = read('ui/list.js')
+  assert.match(src, /setInterval\(\(\) => \{ if \(devicesOpen\(\)\) void accounts\.retryReports\(otherDeviceNodes\(\)\) \}, REPORT_RETRY_MS\)/)
+  assert.match(src, /onSignedIn = \(\) => void accounts\.retryReports\(otherDeviceNodes\(\), \{ force: true \}\)/)
+})

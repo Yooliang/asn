@@ -9,6 +9,21 @@ import { loginFailed } from './claude-accounts.mjs'
 /** 帳號回報超過這麼久沒更新就當「還沒收到回報」（每 5 分鐘回報一次，夠寬；電腦睡眠醒來不會閃，要實機看一次） */
 export const REPORT_FRESH_MS = 15 * 60 * 1000
 
+// 帳號回報讀失敗後多久可以再讀一次（電腦版、手機版共用）。剛開 ASN 時常常還沒登入、簽章拿不到，第一次讀就失敗；
+// 以前失敗的那台不會再讀，「雲端」標示就永遠停在「資料不夠」。現在失敗後超過這段時間就視為該重讀。
+export const REPORT_RETRY_MS = 60_000
+/**
+ * 這台的帳號回報該不該（重）讀。
+ * failedAt：上次讀失敗的時間（毫秒）；沒有就是沒失敗過。讀成功的（沒有 failedAt）不重讀（手機版另有自己的一分鐘間隔，見 createReportPrefetch）。
+ * 沒讀過 → true；失敗過且已超過 retryMs → true；失敗但還沒到時間 → false；失敗時間不明（舊紀錄）→ true
+ */
+export function shouldRetryReport({ read = false, failedAt = null } = {}, now = Date.now(), retryMs = REPORT_RETRY_MS) {
+  if (!read) return true
+  if (failedAt === null || failedAt === undefined) return false
+  if (!Number.isFinite(failedAt)) return true
+  return now - failedAt >= retryMs
+}
+
 /** 電腦版與手機版共用的狀態鍵 */
 export const STATE = Object.freeze({
   LOGGED_IN: 'logged_in',

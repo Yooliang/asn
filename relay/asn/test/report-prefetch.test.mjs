@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createReportPrefetch, REPORT_PREFETCH_GAP_MS, REPORT_PREFETCH_MAX, acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
+import { createReportPrefetch, isFailedReport, REPORT_PREFETCH_GAP_MS, REPORT_PREFETCH_MAX, acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -61,7 +61,7 @@ test('守門：手機進設備頁時呼叫預讀（只在 openAcctNow，一次�
   const open = src.slice(src.indexOf('async function openAcctNow('), src.indexOf('function openAcctDevice('))
   assert.equal(open.split('void prefetchReports()').length - 1, 1)
   assert.equal(src.split('prefetchReports()').length - 1, 2, '定義一次、呼叫一次')
-  assert.match(src, /if \(epoch === acctEpoch && !acctSw\.reports\[node\]\) acctSw\.reports\[node\] = r/)
+  assert.match(src, /if \(epoch === acctEpoch && \(!acctSw\.reports\[node\] \|\| isFailedReport\(acctSw\.reports\[node\]\)\)\) acctSw\.reports\[node\] = r/)
 })
 
 test('第一次進設備頁時沒有可讀的節點（名單還沒載入）→ 不記時間；一分鐘內名單載入後再進會讀', async () => {
@@ -75,4 +75,45 @@ test('第一次進設備頁時沒有可讀的節點（名單還沒載入）→ �
   t += 5_000
   assert.equal(await run(['A', 'J'], () => {}), false, '這次真的讀過了：一分鐘內不重讀')
   assert.equal(reads, 2)
+})
+
+test('手機：讀失敗的那台，過了重讀時間下次進設備頁會再讀；讀成功的一分鐘內不重讀', async () => {
+  let t = 1_000_000
+  const reads = []
+  let ok = false
+  const run = createReportPrefetch({ read: async n => { reads.push(n); if (n === 'bad' && !ok) throw new Error('沒登入'); return {} }, now: () => t, log: () => {} })
+  assert.equal(await run(['good', 'bad'], () => {}), true)
+  assert.deepEqual(reads, ['good', 'bad'])
+  t += 30_000
+  assert.equal(await run(['good', 'bad'], () => {}), false, '30 秒：失敗的還沒到時間')
+  assert.equal(reads.length, 2)
+  t += 30_000
+  ok = true
+  const got = []
+  assert.equal(await run(['good', 'bad'], (n) => got.push(n)), true)
+  assert.deepEqual(reads, ['good', 'bad', 'good', 'bad'], '過了 60 秒：兩台都讀（一分鐘間隔也到了）')
+  t += 1_000
+  await run(['good', 'bad'], () => {})
+  assert.equal(reads.length, 4, '都成功了：一分鐘內不再讀')
+})
+
+test('手機：retryMs 比間隔短時，一分鐘內只重讀失敗且到時間的，成功的不動', async () => {
+  let t = 0
+  const reads = []
+  let ok = false
+  const run = createReportPrefetch({ read: async n => { reads.push(n); if (n === 'bad' && !ok) throw new Error('x'); return {} }, now: () => t, gapMs: 60_000, retryMs: 10_000, log: () => {} })
+  await run(['good', 'bad'], () => {})
+  t += 5_000
+  await run(['good', 'bad'], () => {})
+  assert.equal(reads.length, 2)
+  t += 6_000; ok = true
+  await run(['good', 'bad'], () => {})
+  assert.deepEqual(reads, ['good', 'bad', 'bad'])
+})
+
+test('手機：點進去讀失敗留下的失敗紀錄，不擋住之後預讀讀到的成功結果', () => {
+  assert.equal(isFailedReport({ loading: false, msg: '讀不到', list: [] }), true)
+  assert.equal(isFailedReport({ loading: true, msg: '' }), false)
+  assert.equal(isFailedReport({ loading: false, msg: '', list: [] }), false)
+  assert.equal(isFailedReport(undefined), false)
 })

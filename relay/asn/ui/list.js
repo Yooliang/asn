@@ -16,6 +16,7 @@ import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.m
 import { activityRound, withActivity } from './lib/activity.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
+import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
@@ -219,10 +220,15 @@ if (!info.shot) {
 // 登入之後又掉才會再出現。每分鐘看一次登入狀態（取不到就不顯示，不吵人）
 const reloginBar = reactive({ show: false })
 let reloginDismissed = false
+let wasSignedIn = null
+let onSignedIn = () => {}   // 設備與帳號那段接上
 const refreshReloginBar = async () => {
   try {
     const st = await authApi.status()
     if (st?.signed_in === true) reloginDismissed = false
+    const nowIn = st?.signed_in === true
+    if (nowIn && wasSignedIn === false) onSignedIn()   // 從未登入變成已登入：失敗的帳號回報立刻重讀
+    if (st?.signed_in === true || st?.signed_in === false) wasSignedIn = nowIn
     reloginBar.show = showReloginBar(info.can_skip_login === true, st?.signed_in === true ? true : st?.signed_in === false ? false : null, reloginDismissed)
   } catch { reloginBar.show = false }
 }
@@ -1674,6 +1680,9 @@ const app = createApp({
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
       if (missing.length) void accounts.loadReports(missing)
     }, { immediate: true })
+    // 讀失敗的那幾台（剛開 ASN 還沒登入、簽章拿不到）：設備分類開著時每分鐘檢查，失敗超過一分鐘的再讀；剛登入就立刻讀
+    setInterval(() => { if (devicesOpen()) void accounts.retryReports(otherDeviceNodes()) }, REPORT_RETRY_MS)
+    onSignedIn = () => void accounts.retryReports(otherDeviceNodes(), { force: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
     // 帳號列表裡的設備名（#374）：跟設備樹同一份名單
     const rosterNodeLabel = computed(() => nodeLabelOf(friends.value, { selfNode: info.node }))

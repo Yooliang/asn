@@ -3,6 +3,7 @@
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 import { quotaOf } from './account-quota.mjs'
 import { fetchRoster } from './account-roster.mjs'
+import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
 
@@ -45,7 +46,7 @@ export const isFinalStatus = s => s === 'ok' || s === 'failed' || s === 'denied'
 
 const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
-export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80 }) {
+export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS }) {
   const s = reactive({
     list: [], grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     allowSwitch: true,   // 「允許切換帳號」（#371）：讓手機或別台設備替這台切換
@@ -108,14 +109,29 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     } catch (e) { r.list = []; r.msg = errText(e) }
     r.loading = false
   }
-  // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤，介面顯示「未回報」）
+  // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤與失敗時間 failedAt，介面顯示「未回報」；之後由 retryReports 過了時間再讀）
+  const reading = new Set()   // 正在讀的節點：同一台不重複送
   const loadReports = async nodes => {
-    await Promise.all([...new Set(nodes)].filter(Boolean).map(async node => {
+    await Promise.all([...new Set(nodes)].filter(n => n && !reading.has(n)).map(async node => {
+      reading.add(node)
       try {
         const v = await invoke('acct_remote_list', { node })
         s.reports[node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
-      } catch (e) { s.reports[node] = { error: errText(e), asnOnline: false, reportedAt: '', accounts: [] } }
+      } catch (e) { s.reports[node] = { error: errText(e), failedAt: now(), asnOnline: false, reportedAt: '', accounts: [] } }
+      finally { reading.delete(node) }
     }))
+  }
+  // 沒讀過的、或讀失敗且已過 retryMs 的才讀；成功的不重讀。force＝剛登入：失敗的立刻重讀，不等時間
+  const retryReports = async (nodes, { force = false } = {}) => {
+    const t = now()
+    const due = [...new Set(nodes)].filter(n => {
+      const rep = s.reports[n]
+      if (!rep) return true
+      if (!rep.error) return false
+      return force || shouldRetryReport({ read: true, failedAt: rep.failedAt ?? Number.NaN }, t, retryMs)
+    })
+    if (due.length) await loadReports(due)
+    return due.length
   }
   const remoteSelect = async (node, vendor = 'claude') => { s.remote.node = node || ''; s.remote.vendor = vendor === 'grok' ? 'grok' : 'claude'; await remoteLoad() }
   const remoteSwitch = async email => {
@@ -201,7 +217,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
+    refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, retryReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     // 登入不完整的帳號畫面上已經反灰；這裡再擋一次（Rust 端 switch_impl 也會拒絕）
     switchTo: async email => {
