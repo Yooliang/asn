@@ -436,7 +436,7 @@ export const ChatPane = {
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
   <div class="m-term-switch" role="group" aria-label="訊息或終端" v-if="mSwitch"><button type="button" :class="{ on: !remoteShown }" :aria-pressed="!remoteShown" @click="showMsgs">{{ TERM_BTN_MSG.label }}</button><button type="button" :class="{ on: remoteShown }" :aria-pressed="remoteShown" @click="showTerm">{{ TERM_BTN_TERM.label }}</button></div>
-  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive"></remote-view>
+  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" @cancel="showMsgs"></remote-view>
   <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">

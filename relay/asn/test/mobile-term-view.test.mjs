@@ -47,15 +47,50 @@ test('冒煙假 Tauri：listen 記下回呼，指令呼叫後依序送出 __emit
   assert.equal(g.__smokeListeners['term-view-remote-frame'].length, 0)
 })
 
-test('冒煙情境：三個手機看終端情境帶齊假指令', () => {
+test('冒煙情境：五個手機看終端情境帶齊假指令與假的本人確認（ok／cancel／no_lock）', () => {
   const names = SCENARIOS.filter(s => s.name.startsWith('m-term-view')).map(s => s.name)
-  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big'])
+  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big', 'm-term-view-cancel', 'm-term-view-nolock'])
   const t = tableFor(SCENARIOS.find(s => s.name === 'm-term-view'))
   assert.equal(t.term_view_remote_available, true)
-  assert.equal(t.android_term_view_remote_start.id, 'v1')
-  assert.ok(t.android_term_view_remote_start.expires_s > Date.now() / 1000)
-  assert.ok(t.__emitOn.android_term_view_remote_start.length >= 2)
-  assert.ok(!('term_view_remote_start' in t), '冒煙也不給電腦版的發起指令：手機走電腦版就會失敗')
+  assert.equal(t.term_view_remote_start.id, 'v1')
+  assert.ok(t.term_view_remote_start.expires_s > Date.now() / 1000)
+  assert.ok(t.__emitOn.term_view_remote_start.length >= 2)
+  assert.equal(t.__confirmViewer, 'ok')
+  assert.equal(tableFor(SCENARIOS.find(s => s.name === 'm-term-view-cancel')).__confirmViewer, 'cancel')
+  assert.equal(tableFor(SCENARIOS.find(s => s.name === 'm-term-view-nolock')).__confirmViewer, 'no_lock')
+})
+
+test('mobileRemoteViewApi：每次發起都先本人確認；ok 才送 start，cancel／no_lock 什麼都不送', async () => {
+  const { makeMobileRemoteViewApi, CANCELLED } = await import('../ui/lib/mobile-remote-view.mjs')
+  const { NO_LOCK_TEXT } = await import('../ui/lib/mobile-confirm.mjs')
+  const run = async results => {
+    const calls = [], asks = []
+    const api = makeMobileRemoteViewApi({ confirm: async () => { asks.push(1); return results.shift() }, invoke: async (cmd, args) => { calls.push([cmd, args]); return { id: 'v1', expires_s: 1 } } })
+    return { api, calls, asks }
+  }
+  const ok = await run(['ok', 'ok'])
+  assert.deepEqual(await ok.api.start('H', '小乙', '家用機'), { id: 'v1', expires_s: 1 })
+  await ok.api.start('H', '小乙', '')
+  assert.deepEqual(ok.calls, [['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: '家用機' }], ['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: null }]])
+  assert.equal(ok.asks.length, 2, '每次都重新確認，不記住上一次')
+  const cancel = await run(['cancel'])
+  await assert.rejects(cancel.api.start('H', '小乙'), e => e.code === CANCELLED && e.message === '')
+  assert.deepEqual(cancel.calls, [], '取消：什麼都不送')
+  const noLock = await run(['no_lock'])
+  await assert.rejects(noLock.api.start('H', '小乙'), e => e.code === 'no_lock' && e.message === NO_LOCK_TEXT)
+  assert.deepEqual(noLock.calls, [], '沒設螢幕鎖：也不送')
+  for (const weird of [undefined, 'OK', 'yes']) {
+    const w = await run([weird])
+    await assert.rejects(w.api.start('H', '小乙'))
+    assert.deepEqual(w.calls, [], `確認回 ${weird} 一律當沒過`)
+  }
+  const avail = await run([])
+  await avail.api.available('H')
+  assert.deepEqual(avail.calls, [['term_view_remote_available', { node: 'H' }]])
+  // 畫面：取消時 RemoteView 不顯示錯誤，交給外層切回訊息
+  const rv = read('../ui/lib/term-remote.mjs')
+  assert.match(rv, /if \(e\?\.code === 'cancel'\) \{ cleanup\(\); emit\('cancel'\); return \}/)
+  assert.match(read('../ui/lib/chatpane.mjs'), /:active="remoteLive" @cancel="showMsgs"/)
 })
 
 test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生物辨識）；只能用 mobileRemoteViewApi', () => {
@@ -74,5 +109,6 @@ test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生
   const mob = read('../ui/lib/mobile-remote-view.mjs')
   assert.doesNotMatch(mob, /start:\s*remoteViewApi\.start/)
   assert.doesNotMatch(mob, /\.\.\.remoteViewApi/, '不能整包展開電腦版的介面（會帶進電腦版的 start）')
-  assert.match(mob, /start: \(toNode, partner, machine\) => invoke\(MOBILE_START_CMD,/)
+  assert.match(mob, /const r = await confirm\(\)\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認，ok 才送')
+  assert.match(mob, /confirm = \(\) => confirmViewer\(\)/, '預設的確認就是 PR③ 的 confirmViewer')
 })

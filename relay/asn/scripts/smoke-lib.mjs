@@ -686,6 +686,8 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
 export const MTERMVIEW_PROBES = {
   base: { mtermview: true, big: false },
   big: { mtermview: true, big: true },
+  cancel: { mtermview: true, gate: 'cancel' },
+  noLock: { mtermview: true, gate: 'no_lock' },
 }
 export const MTERMVIEW_TEXT = [
   'Claude Code v2.1.0  Opus  ~/demo',
@@ -699,7 +701,7 @@ export const MTERMVIEW_TEXT = [
   '╰──────────────────────────────────────────────╯',
 ].join('\r\n')
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
-export const mtermviewProbeSource = ({ big }) => `(async () => {
+export const mtermviewProbeSource = ({ big, gate }) => gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => e && e.offsetParent !== null;
   let sw = null;
@@ -740,13 +742,40 @@ export const mtermviewProbeSource = ({ big }) => `(async () => {
   if (!vis(conv())) return { ok: false, why: '切回「訊息」後訊息列表沒回來' };
   if (document.querySelector('.term-view-screen')) return { ok: false, why: '切回「訊息」後終端畫面還在' };
   const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
-  if (!calls.includes('android_term_view_remote_start')) return { ok: false, why: '沒呼叫手機專用的發起指令 android_term_view_remote_start' };
+  if (!calls.includes('term_view_remote_start')) return { ok: false, why: '沒呼叫 term_view_remote_start' };
+  if ((globalThis.__smokeConfirms || []).length < 1) return { ok: false, why: '發起前沒有先跳本人確認' };
   if (!calls.includes('term_view_remote_stop')) return { ok: false, why: '切回訊息沒呼叫 term_view_remote_stop' };
   btns[1].click();
   rows = '';
   for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
   if (!rows.includes('測試通過')) return { ok: false, why: '再切回「終端」後畫面沒出來' };
   await sleep(300);
+  return { ok: true, why: '' };
+})()`
+// 本人確認沒過（PR③ 的閘門）：取消＝什麼都不送、靜默回到訊息；沒設螢幕鎖＝顯示提示、也不送。兩種都不能出現任何 start 呼叫
+export const mtermviewGateProbeSource = gate => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  let sw = null;
+  for (let i = 0; i < 80 && !sw; i++) { sw = document.querySelector('.m-term-switch'); if (!sw) await sleep(100) }
+  if (!sw) return { ok: false, why: '對話頁沒有「訊息／終端」切換' };
+  const btns = [...sw.querySelectorAll('button')];
+  btns[1].click();
+  for (let i = 0; i < 30 && (globalThis.__smokeConfirms || []).length < 1; i++) await sleep(100);
+  if ((globalThis.__smokeConfirms || []).length < 1) return { ok: false, why: '點「終端」沒有先跳本人確認' };
+  await sleep(800);
+  const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
+  if (calls.includes('term_view_remote_start')) return { ok: false, why: '確認沒過，卻呼叫了 term_view_remote_start' };
+  const conv = document.querySelector('.m-chat .conv');
+  const area = document.querySelector('.term-remote');
+  if (${JSON.stringify(gate)} === 'cancel') {
+    if (!vis(conv)) return { ok: false, why: '取消後應該靜默回到訊息列表' };
+    if (area) return { ok: false, why: '取消後不該留著終端區：' + area.textContent.slice(0, 60) };
+    if (!btns[0].classList.contains('on')) return { ok: false, why: '取消後「訊息」鈕應該選中' };
+    return { ok: true, why: '' };
+  }
+  if (!area || !area.textContent.includes('這支手機沒有設定螢幕鎖，請先設定再查看終端')) return { ok: false, why: '沒設螢幕鎖要顯示提示：' + (area?.textContent || '').slice(0, 80) };
+  if (document.querySelector('.term-view-screen .xterm')) return { ok: false, why: '沒設螢幕鎖不該開終端畫面' };
   return { ok: true, why: '' };
 })()`
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
@@ -787,6 +816,8 @@ export const SCENARIOS = [
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
+  { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
+  { name: 'm-term-view-nolock', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'no_lock' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.noLock, shot: 'm-term-view-nolock.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
@@ -898,10 +929,11 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }
     t.term_view_remote_available = true
-    t.android_term_view_remote_start = { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 }
+    t.term_view_remote_start = { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 }
+    t.__confirmViewer = scenario.state.mtermview === true ? 'ok' : scenario.state.mtermview
     t.term_view_remote_set = null
     t.term_view_remote_stop = null
-    t.__emitOn = { android_term_view_remote_start: mtermviewFrames('v1') }
+    t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
   }
   if (scenario.state.mnoself) {
     t.relay_list = { members: MACCT_MEMBERS.two }
@@ -926,6 +958,8 @@ export const tableFor = scenario => {
 export const injectSource = table => `(() => {
   const T = ${JSON.stringify(table)};
   const missing = (globalThis.__smokeMissing = []);
+  // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
+  if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), 30) } };
   globalThis.__TAURI__ = {
     // 事件：listen 記下回呼；表裡的 __emitOn[指令] 在那個指令被呼叫後依序推事件（例如看別台終端的假畫面幀）。回呼收到的是 { payload }，和真的 Tauri 一樣
     event: {
