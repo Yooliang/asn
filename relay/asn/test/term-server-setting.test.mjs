@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SETTING_OPS, SettingsPanel } from '../ui/lib/settings-panel.mjs'
-import { termFetchLine, TERM_FETCH_FAIL_NOTES, TERM_FETCH_FETCHING_NOTE, TERM_FETCH_RETRYABLE, termServerNote, TERM_SERVER_LOCKED_NOTE, TERM_SERVER_OFF_NOTE, TERM_SERVER_ON_NOTE, TERM_SERVER_RESTART_NOTE } from '../ui/lib/term-server-setting.mjs'
+import { termFetchLine, safeLibName, termFetchMissingLibNote, TERM_FETCH_FAIL_NOTES, TERM_FETCH_FETCHING_NOTE, TERM_FETCH_RETRYABLE, termServerNote, TERM_SERVER_LOCKED_NOTE, TERM_SERVER_OFF_NOTE, TERM_SERVER_ON_NOTE, TERM_SERVER_RESTART_NOTE } from '../ui/lib/term-server-setting.mjs'
 
 const base = () => ({
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
@@ -174,4 +174,40 @@ test('接線：重試指令在清單裡、樞紐會分派、後端命令有註�
   assert.ok(cmd.includes('retry_term_fetch()') && !/set_use_mux|kill_tree|stop\(/.test(cmd), '命令只在背景重新取得，不碰執行中的終端服務')
   const mod = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
   assert.ok(mod.includes('pub term_fetch: String') && mod.includes('pub term_fetch_kind: String'))
+})
+
+// ---- 缺少的系統函式庫要點名（#893 第 5 張） ----
+test('跑不起來而且知道缺哪個函式庫：點名、可以重試；沒有名稱用原本那句', () => {
+  const r = termFetchLine(fetchSt({ termFetch: 'failed', termFetchKind: 'unrunnable', termFetchDetail: 'libssl.so.3' }))
+  assert.equal(r.text, '終端程式取得失敗：缺少系統函式庫 libssl.so.3，請用套件管理員安裝後按重試。')
+  assert.equal(r.canRetry, true, '裝好函式庫之後重試有機會成功')
+  assert.deepEqual(termFetchLine(fetchSt({ termFetch: 'failed', termFetchKind: 'unrunnable', termFetchDetail: '' })), { text: TERM_FETCH_FAIL_NOTES.unrunnable, canRetry: false })
+  assert.deepEqual(termFetchLine(fetchSt({ termFetch: 'failed', termFetchKind: 'unrunnable' })), { text: TERM_FETCH_FAIL_NOTES.unrunnable, canRetry: false })
+  // 細節只對「跑不起來」有意義，其他分類帶了也不顯示
+  assert.equal(termFetchLine(fetchSt({ termFetch: 'failed', termFetchKind: 'disk', termFetchDetail: 'libssl.so.3' })).text, TERM_FETCH_FAIL_NOTES.disk)
+  assert.equal(termFetchMissingLibNote('libz.so.1'), '終端程式取得失敗：缺少系統函式庫 libz.so.1，請用套件管理員安裝後按重試。')
+})
+
+test('函式庫名稱：前端再過濾一次，怪字、路徑、過長都不能進畫面', () => {
+  for (const ok of ['libssl.so.3', 'libz.so.1', 'libstdc++.so.6', 'ld-linux-x86-64.so.2']) assert.equal(safeLibName(ok), ok)
+  for (const bad of ['', '/usr/lib/libssl.so.3', 'libssl.so.3 && rm -rf', '<b>x</b>', 'lib\nssl', '-lib', '.so', 'a'.repeat(41), null, undefined, 3, {}]) assert.equal(safeLibName(bad), '', String(bad))
+  const evil = termFetchLine(fetchSt({ termFetch: 'failed', termFetchKind: 'unrunnable', termFetchDetail: '<script>alert(1)</script>' }))
+  assert.equal(evil.text, TERM_FETCH_FAIL_NOTES.unrunnable, '不合格式就當沒有名稱')
+  assert.ok(!evil.text.includes('<script>'))
+})
+
+test('畫面：缺函式庫時顯示名稱與重試鈕；名稱裡的特殊字元會被當成沒有', async () => {
+  const html = await render({ ...base(), bridge: bridge({ termServerSupported: true, termServer: true, termFetch: 'failed', termFetchKind: 'unrunnable', termFetchDetail: 'libssl.so.3' }) })
+  assert.ok(html.includes('缺少系統函式庫 libssl.so.3，請用套件管理員安裝後按重試。'), html.slice(0, 300))
+  assert.ok(/<button[^>]*>重試<\/button>/.test(html))
+  const evil = await render({ ...base(), bridge: bridge({ termServerSupported: true, termServer: true, termFetch: 'failed', termFetchKind: 'unrunnable', termFetchDetail: 'x"><img src=x>' }) })
+  assert.ok(!evil.includes('<img') && !evil.includes('缺少系統函式庫 x'), '怪字不進畫面')
+})
+
+test('接線：細節欄位從後端讀進畫面、帶進設定頁快照；後端只放過濾過的名稱', () => {
+  const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.ok(list.includes("termFetchDetail: typeof s.term_fetch_detail === 'string'"))
+  assert.ok(list.includes('termFetchDetail: bridge.termFetchDetail'))
+  const mod = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
+  assert.ok(mod.includes('pub term_fetch_detail: String') && mod.includes('term_fetch_detail: fetch.detail.clone()'))
 })
