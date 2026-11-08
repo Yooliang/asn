@@ -75,6 +75,10 @@ export const PI_REMOTE_NO_LIST = '查不到那台的 pi 模型清單，請到那
 export const PI_REMOTE_NO_PI = '那台電腦沒有偵測到 pi'
 // 0.1.101 以前的電腦會略過選的模型、用 pi 自己的預設開（asn真 決定不加能力旗標，改成提醒＋開好時寫出實際模型）
 export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 版本較舊時，會改用 pi 的預設模型開；開好後會寫出實際用的模型'
+// 手機遠端開窗時，前台或背景由那台電腦自己的設定決定（手機不送這個選項）；只有開在終端服務視窗的運行（asn終端兩種）才會有前台／背景之分
+export const LAUNCH_DISPLAY_NOTE = '會照那台電腦的設定，開在前台或背景'
+export const DISPLAY_NOTE_RUNS = ['term', 'pi']
+export const showDisplayNote = runKey => DISPLAY_NOTE_RUNS.includes(runKey)
 export const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '不支援' }, pi: { status: 'ok', why: '只能用 asn終端（pi shell）開' }, term: { status: 'no', why: '只能用 asn終端（pi shell）開' } }
 
 // 那台的 pi：有沒有 pi 的啟動設定、回報了哪些模型
