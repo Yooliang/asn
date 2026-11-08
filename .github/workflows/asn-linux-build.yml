@@ -224,6 +224,10 @@ jobs:
         working-directory: relay/asn/src-tauri
         env:
           TAURI_ANDROID_PROJECT_PATH: ${{ github.workspace }}/relay/asn/src-tauri/gen/android
+          # 這三個是 tauri CLI 出包時會設的；tauri 的 build.rs 靠它們產生 Kotlin 橋接檔（generated/，不進 repo）
+          WRY_ANDROID_PACKAGE: tw.yooliang.asn
+          WRY_ANDROID_LIBRARY: asn_lib
+          WRY_ANDROID_KOTLIN_FILES_OUT_DIR: ${{ github.workspace }}/relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/generated
         run: |
           cargo check --locked --target aarch64-linux-android --lib
           ls -la gen/android/tauri.settings.gradle gen/android/app/tauri.build.gradle.kts
