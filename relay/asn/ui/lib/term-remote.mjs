@@ -79,6 +79,8 @@ export const RemoteView = {
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
+    // 每次發起一個序號：這一格收掉或重新發起時，舊的就作廢。手機的本人確認可能很晚才回來，作廢的就算回 ok 也不送 start
+    let gen = 0
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     const cleanup = () => {
       clearTimeout(warnTimer)
@@ -88,6 +90,8 @@ export const RemoteView = {
     }
     const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = '' }
     const start = async () => {
+      const my = ++gen
+      const wanted = () => alive && my === gen
       cleanup()
       phase.value = 'starting'; note.value = ''; soon.value = false
       try {
@@ -99,10 +103,10 @@ export const RemoteView = {
           term.write(frameToWrite(f))
         })
         offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        const r = await props.api.start(props.node, props.name, props.machine)
+        const r = await props.api.start(props.node, props.name, props.machine, { wanted })
+        // 發起的時候這一格被收掉了（或又重新發起）：這次已經開始，要記得結束，不然那台會一直送到到期
+        if (!wanted()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }
         id = r.id
-        // 發起的時候這一格被收掉了：這次已經開始，要記得結束，不然那台會一直送到到期
-        if (!alive) { stop(); return }
         phase.value = 'waiting'
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
         if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
@@ -110,6 +114,7 @@ export const RemoteView = {
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
+        if (!wanted()) return   // 已經作廢的那一次：不管結果是什麼都不動畫面
         if (e?.code === 'cancel') { cleanup(); emit('cancel'); return }   // 什麼都沒送，也不留錯誤
         console.info('[ASN] 看別台畫面沒有開始', String(e?.message ?? e))
         finish(startError(e))
@@ -117,7 +122,7 @@ export const RemoteView = {
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { alive = false; stop(); cleanup() })
+    onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup() })
     return { host, phase, note, soon, again: start, TEXT: REMOTE_TEXT }
   },
   template: `

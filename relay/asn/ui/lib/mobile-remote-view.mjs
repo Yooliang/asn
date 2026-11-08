@@ -12,12 +12,15 @@ export const CANCELLED = 'cancel'
  * 做一份手機用的介面。confirm、invoke 可以注入（測試用）。
  * start：先 confirm()，'ok' 才發起；'cancel' 丟 { code: 'cancel' }（什麼都不送）；'no_lock' 丟 NO_LOCK_TEXT（也不送）。
  * 每次 start 都重新確認，不記住上一次的結果。
+ * opts.wanted()：畫面那一次發起還算不算數。確認很晚才回來（本人已經切回訊息、或又重新發起）時回 false，
+ * 這時就算確認回 ok 也不送 start（不然被看的那台會跳允許框、閃紅條、寄通知信）。
  */
 export function makeMobileRemoteViewApi({ confirm = () => confirmViewer(), invoke = tauriInvoke } = {}) {
   return {
     available: node => invoke('term_view_remote_available', { node }),
-    start: async (toNode, partner, machine) => {
+    start: async (toNode, partner, machine, opts = {}) => {
       const r = await confirm()
+      if (typeof opts?.wanted === 'function' && !opts.wanted()) throw Object.assign(new Error(''), { code: CANCELLED })
       if (r === 'ok') return invoke('term_view_remote_start', { toNode, partner, machine: machine || null })
       if (r === 'no_lock') throw Object.assign(new Error(NO_LOCK_TEXT), { code: 'no_lock' })
       throw Object.assign(new Error(''), { code: CANCELLED })
