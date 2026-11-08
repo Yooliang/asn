@@ -1095,7 +1095,7 @@ watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { 
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
 watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 // 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
-await listen('asn:now-playing', ev => { nowPlaying.value = showNowPlaying.value ? String(ev.payload ?? '') : '' })
+await listen('asn:now-playing', p => { nowPlaying.value = showNowPlaying.value ? String(p ?? '') : '' })   // listen 已經把 payload 拆好交過來
 watch(showNowPlaying, on => {
   if (!on) nowPlaying.value = ''
   void invoke('set_now_playing', { on }).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => {})
@@ -1622,9 +1622,9 @@ const app = createApp({
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
     const devicesOpen = () => ['devices', 'accounts'].includes(normalizeCatKey(ui.panel.setting))
     setInterval(() => { void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
-    void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
-    void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
-    void listen('grok-account-auto', e => void accounts.onAuto(e.payload))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
+    void listen('claude-mod-status', p => { accounts.state.mod = String(p ?? '') })   // Rust 背景安裝 Claude 外掛完成
+    void listen('claude-account-auto', p => void accounts.onAuto(p))
+    void listen('grok-account-auto', p => void accounts.onAuto(p))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), 15_000)
       void listen('relay-bell', () => void accounts.pollIncoming())
