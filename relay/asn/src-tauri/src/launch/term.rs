@@ -106,6 +106,12 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
     matches!((recorded_ms, now_ms), (Some(r), Some(n)) if r != n)
 }
 
+/// 帶結束暗號的包裝殼（PowerShell）只有 Windows 有；Linux 版另一張補，在那之前 Linux 的夥伴窗格不包殼、原指令原樣開，
+/// 沒有暗號的窗格走既有的「確認不了狀態」處理。測試仍照 Windows 的做法驗包裝本身（假的 runner 不會真的執行它）
+fn partner_wrapper_available() -> bool {
+    cfg!(windows) || cfg!(test)
+}
+
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
 /// 夥伴視窗的包裝（視窗與 mux 兩種模式共用）。包裝殼啟動時 PowerShell 會擴充 PSModulePath，夥伴的環境要還原成窗格開窗時給的值（沒給就移除）
 fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>) -> Vec<String> {
@@ -420,7 +426,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
-            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -449,7 +455,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
-            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -479,7 +485,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             agy_args: None,
             use_mux: false,
             hold_config: false,
-            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            mux_base: super::mux::default_base(),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -799,7 +805,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 這個使用者的 mux（wezterm.exe 與 wezterm-mux-server.exe 放在同一個資料夾；檔案放在 mux_base\ASN\m）
     fn mux_handle(&self, dir: &WezTermDir, base_env: BTreeMap<String, String>) -> Result<super::mux::Mux<'_>, String> {
-        let base = self.mux_base.as_ref().ok_or_else(|| "找不到使用者的本機資料夾（LOCALAPPDATA），無法使用終端服務".to_string())?;
+        let base = self.mux_base.as_ref().ok_or_else(|| (if cfg!(windows) { "找不到使用者的本機資料夾（LOCALAPPDATA），無法使用終端服務" } else { "找不到使用者的資料夾（HOME），無法使用終端服務" }).to_string())?;
         let paths = super::mux::paths(base)?;
         Ok(super::mux::Mux { runner: &self.runner, cli: dir.cli.clone(), server: dir.cli.with_file_name(super::mux::MUX_EXE), paths, base_env })
     }
@@ -844,7 +850,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let cwd_s = cwd.to_string_lossy().into_owned();
         // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
-        let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
+        let exit_nonce = (partner_wrapper_available() && !extra.kind.is_empty()).then(new_nonce);
         let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match &exit_nonce {
             Some(n) => wrap_partner(command, n, &pane_env),

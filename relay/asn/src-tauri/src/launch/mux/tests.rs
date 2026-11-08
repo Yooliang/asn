@@ -83,7 +83,7 @@ fn base() -> BTreeMap<String, String> {
     [("PATH".to_string(), "C:\\bin".to_string())].into_iter().collect()
 }
 fn mux<'a>(r: &'a Fake, d: &Path) -> Mux<'a> {
-    Mux { runner: r, cli: PathBuf::from("W\\wezterm.exe"), server: PathBuf::from("W\\wezterm-mux-server.exe"), paths: paths(d).unwrap(), base_env: base() }
+    Mux { runner: r, cli: PathBuf::from("W\\wezterm.exe"), server: PathBuf::from(SERVER), paths: paths(d).unwrap(), base_env: base() }
 }
 
 #[test]
@@ -137,7 +137,10 @@ fn 連不上才起_用脫離方式_窗格_0_立刻結束_設定檔只設_socket(
     let (prog, args, env) = calls.iter().find(|c| c.0.ends_with(MUX_EXE)).unwrap();
     assert!(prog.ends_with(MUX_EXE));
     assert_eq!(args[0], "--config-file");
+    #[cfg(windows)]
     assert_eq!(&args[2..], ["--", "cmd.exe", "/c", "exit"], "窗格 0 不常駐");
+    #[cfg(not(windows))]
+    assert_eq!(&args[2..], ["--", "/bin/sh", "-c", "exit 0"], "窗格 0 不常駐");
     assert_eq!(env, &base(), "mux 的環境只有白名單，不帶 socket 以外的任何東西");
     let cfg = std::fs::read_to_string(&m.paths.config).unwrap();
     assert!(cfg.contains(&format!("socket_path = [[{}]]", m.paths.sock.display())), "{cfg}");
@@ -451,7 +454,10 @@ fn 起好之後關掉_hold_留著的窗格_0() {
 // ---- 收空的 mux（設計 11.2-7）
 
 const MUX_PID: u32 = 7000;
+#[cfg(windows)]
 const SERVER: &str = "W\\wezterm-mux-server.exe";
+#[cfg(not(windows))]
+const SERVER: &str = "W\\wezterm-mux-server";
 
 /// 一個「pid 檔記得到、建立時間與路徑都對得上」的 mux，清單回 `list_json`
 fn empty_rig(list_json: &str) -> (tempfile::TempDir, Fake) {
@@ -715,4 +721,29 @@ fn 收空_mux_結束失敗_回_false_pid_檔還在_下次還會再試() {
 fn 開窗格的參數_大小放在_cli_前面() {
     let a = spawn_args(&["spawn", "--new-window"]);
     assert_eq!(a, vec!["--config", "initial_cols=120", "--config", "initial_rows=40", "cli", "--no-auto-start", "spawn", "--new-window"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn linux_收空_mux_執行檔被升級換掉_路徑尾巴多_deleted_還認得_解開連結後同一支也認得() {
+    let d = tempfile::tempdir().unwrap();
+    let real = d.path().join("real-mux");
+    std::fs::write(&real, b"x").unwrap();
+    let link = d.path().join(MUX_EXE);
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let gone = PathBuf::from(format!("{}", link.display()));
+    assert!(is_server_image(&real, &link), "/proc/<pid>/exe 是解開連結後的路徑，要認得是同一支");
+    assert!(is_server_image(Path::new(&format!("{} (deleted)", gone.display())), &link), "升級換掉後仍在跑的舊 mux");
+    assert!(!is_server_image(&d.path().join("other"), &link), "別的檔不算");
+}
+
+#[test]
+fn 起_mux_的程式名與窗格_0_依平台() {
+    #[cfg(windows)]
+    assert_eq!(MUX_EXE, "wezterm-mux-server.exe");
+    #[cfg(not(windows))]
+    {
+        assert_eq!(MUX_EXE, "wezterm-mux-server");
+        assert!(!server_args(Path::new("/x/mux.lua")).iter().any(|a| a.contains(".exe") || a.contains("cmd")), "Linux 的參數不能有 Windows 的東西");
+    }
 }

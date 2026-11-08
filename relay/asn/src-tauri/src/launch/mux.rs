@@ -22,7 +22,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(windows)]
 pub const MUX_EXE: &str = "wezterm-mux-server.exe";
+/// 其他平台（Linux）：執行檔沒有副檔名，和 wezterm（cli）放在同一個資料夾
+#[cfg(not(windows))]
+pub const MUX_EXE: &str = "wezterm-mux-server";
 /// ASN 自己停 mux 時留的記號（`<程序編號> <毫秒>`）：之後 mux 不見了，監看（`mux_watch`）才知道是我們收的，不是掛掉
 pub const STOPPED_FILE: &str = "stopped";
 /// socket 路徑上限：WezTerm 在 Windows 上也走 AF_UNIX，`sun_path` 是 108 位元組（含結尾）。實測 126 字元起不來
@@ -40,7 +44,11 @@ const LOCK_STALE: Duration = Duration::from_secs(60);
 /// 開窗格結果不確定之後，多久內不收空 mux（比 cli 逾時長很多，窗格來得及出現在清單上）
 const SPAWN_UNSURE_HOLD: Duration = Duration::from_secs(600);
 /// 窗格 0 跑的程式：立刻結束（見檔頭）
+#[cfg(windows)]
 const PANE0: [&str; 3] = ["cmd.exe", "/c", "exit"];
+/// 其他平台：沒有 cmd，用 POSIX 一定有的 sh，同樣立刻結束
+#[cfg(not(windows))]
+const PANE0: [&str; 3] = ["/bin/sh", "-c", "exit 0"];
 
 /// mux 的檔案：`<資料夾>\sock`（socket）、`mux.lua`（只設 socket 位置的設定檔）、`mux.pid`、`start.lock`
 #[derive(Debug, Clone, PartialEq)]
@@ -54,7 +62,22 @@ pub struct MuxPaths {
     pub open_lock: PathBuf,
 }
 
-/// 固定放短路徑：`%LOCALAPPDATA%\ASN\m`。路徑太長就拒絕（WezTerm 起不來，還會留下看不懂的錯）
+/// mux 檔案的上層資料夾：Windows 是 `%LOCALAPPDATA%`；其他平台（Linux）是 `$XDG_DATA_HOME`（要是絕對路徑），
+/// 沒設就 `$HOME/.local/share`。找不到回 None。正式程式一律從這裡取，不各自讀環境變數
+#[cfg(windows)]
+pub fn default_base() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+}
+#[cfg(not(windows))]
+pub fn default_base() -> Option<PathBuf> {
+    let absolute = |v: std::ffi::OsString| {
+        let p = PathBuf::from(v);
+        p.is_absolute().then_some(p)
+    };
+    std::env::var_os("XDG_DATA_HOME").and_then(absolute).or_else(|| std::env::var_os("HOME").and_then(absolute).map(|h| h.join(".local").join("share")))
+}
+
+/// 固定放短路徑：`<default_base>\ASN\m`（Windows 就是 `%LOCALAPPDATA%\ASN\m`）。路徑太長就拒絕（WezTerm 起不來，還會留下看不懂的錯）
 pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
     let dir = local_app_data.join("ASN").join("m");
     let sock = dir.join("sock");
@@ -435,8 +458,35 @@ fn same_path(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
 }
 
-/// 是不是這個資料夾的 mux 執行檔。更新時占用中的檔會被改名成 `.old`、`.old1`…（見 [`clean_old`]），舊 mux 繼續跑，也算
+/// 是不是這個資料夾的 mux 執行檔。更新時占用中的檔會被改名成 `.old`、`.old1`…（見 [`clean_old`]），舊 mux 繼續跑，也算。
+/// 比的一律是**完整路徑**（Linux 讀 `/proc/<pid>/exe` 的連結），不看會被截成 15 字元的行程名
 fn is_server_image(p: &Path, server: &Path) -> bool {
+    if is_server_image_text(p, server) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        is_server_image_unix(p, server)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// Linux：`/proc/<pid>/exe` 指到的檔被換掉（升級）後，連結尾巴會多 " (deleted)"，舊 mux 還在跑；
+/// 另外套件管理員常把執行檔放在連結後面，所以兩邊都解開連結再比
+#[cfg(unix)]
+fn is_server_image_unix(p: &Path, server: &Path) -> bool {
+    let s = p.to_string_lossy();
+    let stripped = Path::new(s.strip_suffix(" (deleted)").unwrap_or(&s));
+    if is_server_image_text(stripped, server) {
+        return true;
+    }
+    matches!((std::fs::canonicalize(stripped), std::fs::canonicalize(server)), (Ok(a), Ok(b)) if a == b)
+}
+
+fn is_server_image_text(p: &Path, server: &Path) -> bool {
     if same_path(p, server) {
         return true;
     }
