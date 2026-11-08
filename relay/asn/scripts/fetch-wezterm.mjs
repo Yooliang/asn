@@ -1,4 +1,4 @@
-// 把 WezTerm 官方正式版（固定 20240203-110809-5046fc22）取下來，只留 ASN 用得到的 7 個檔，放進 src-tauri/resources/wezterm/，
+// 把 WezTerm 官方正式版（固定版本，見 wezterm-pins.json）取下來，只留 ASN 用得到的 7 個檔，放進 src-tauri/resources/wezterm/，
 // 讓 Tauri 隨 Windows 安裝檔一起打包（內建終端機用；裝好後在安裝資料夾的 wezterm 底下，ASN 預設從那裡找）。
 //   node scripts/fetch-wezterm.mjs           下載（有快取就用快取）→ 核對雜湊 → 解出 7 個檔與授權文字
 //   ASN_SKIP_WEZTERM=1                       略過（不打包 WezTerm；例如只想快速試別的）

@@ -7,6 +7,7 @@
 //! 任何一步失敗都清掉暫存資料夾，不自動重試。優先順序見 `wezterm::locate`：ASN_WEZTERM_DIR → PATH → 這裡取得的。
 #![cfg(desktop)]
 
+use crate::nowin::NoWindow;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -133,20 +134,30 @@ pub(crate) fn allowed_redirect_host(host: &str) -> bool {
 
 // ---------- 磁碟空間 ----------
 
-pub(crate) fn parse_df_avail(out: &str) -> Option<u64> {
-    let line = out.lines().nth(1)?;
-    let avail_kb: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
-    Some(avail_kb.saturating_mul(1024))
+/// statvfs 的結果 → 可用位元組（非 root 可用的區塊數 × 區塊大小）
+pub(crate) fn avail_bytes(frsize: u64, bsize: u64, bavail: u64) -> u64 {
+    let unit = if frsize > 0 { frsize } else { bsize };
+    bavail.saturating_mul(unit)
 }
 
-/// 該資料夾所在檔案系統的可用位元組；查不到回 None（固定路徑的 df，不走 PATH）
+/// 該資料夾所在檔案系統的可用位元組；查不到回 None。直接呼叫 libc 的 statvfs（和 wezterm.rs 呼叫 setsid 同樣的寫法，不新增相依、
+/// 不跑外部指令）。只在 64 位元 Linux 做：那裡 glibc 與 musl 的 struct statvfs 前 11 個欄位都是 8 位元組，
+/// 這裡用一塊 128 位元組（比實際的 112 大）的緩衝區，只按位置讀要的欄位（1＝f_frsize、0＝f_bsize、4＝f_bavail），不宣告整個結構
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 fn free_bytes(dir: &Path) -> Option<u64> {
-    let df = ["/bin/df", "/usr/bin/df"].into_iter().find(|p| Path::new(p).is_file())?;
-    let o = Command::new(df).arg("-Pk").arg(dir).env_clear().env("LC_ALL", "C").stdin(Stdio::null()).output().ok()?;
-    if !o.status.success() {
-        return None;
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        fn statvfs(path: *const std::os::raw::c_char, buf: *mut u64) -> i32;
     }
-    parse_df_avail(&String::from_utf8_lossy(&o.stdout))
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut buf = [0u64; 16];
+    // SAFETY: path 是以 NUL 結尾的 C 字串；buf 比 struct statvfs 大，statvfs 只會寫進它
+    let rc = unsafe { statvfs(path.as_ptr(), buf.as_mut_ptr()) };
+    (rc == 0).then(|| avail_bytes(buf[1], buf[0], buf[4]))
+}
+#[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+fn free_bytes(_dir: &Path) -> Option<u64> {
+    None
 }
 
 /// 查不到就放行（真的不夠時，寫檔失敗會清掉暫存）；查得到而不夠就在下載前擋下
@@ -339,7 +350,7 @@ pub(crate) fn explain_run_failure(stderr: &str) -> String {
 /// 兩個程式都跑一次 `--version`（核對雜湊之後才會到這裡）。環境清空、有逾時
 pub(crate) fn run_version_check(dir: &Path) -> Result<(), String> {
     for (_, name) in WANTED {
-        let mut child = Command::new(dir.join(name)).arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|_| format!("取得的終端程式在這台電腦跑不起來，{MANUAL_HINT}"))?;
+        let mut child = Command::new(dir.join(name)).no_window().arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|_| format!("取得的終端程式在這台電腦跑不起來，{MANUAL_HINT}"))?;
         let start = Instant::now();
         let status = loop {
             match child.try_wait() {
@@ -586,13 +597,23 @@ mod tests {
     }
 
     #[test]
-    fn 磁碟空間_df_輸出解析_不夠就擋_查不到放行() {
-        let out = "Filesystem     1024-blocks    Used Available Capacity Mounted on\n/dev/sda1         41152736 9876543  31276193      25% /\n";
-        assert_eq!(parse_df_avail(out), Some(31276193 * 1024));
-        assert_eq!(parse_df_avail("壞的"), None);
+    fn 磁碟空間_換算_不夠就擋_查不到放行() {
+        assert_eq!(avail_bytes(4096, 512, 1000), 4_096_000);
+        assert_eq!(avail_bytes(0, 512, 1000), 512_000, "沒有 frsize 用 bsize");
+        assert_eq!(avail_bytes(u64::MAX, 1, 2), u64::MAX, "不溢位");
         assert!(check_space(Some(100 * MIB), NEED_FREE).unwrap_err().contains("磁碟空間不夠"));
         assert!(check_space(Some(NEED_FREE), NEED_FREE).is_ok());
         assert!(check_space(None, NEED_FREE).is_ok());
+    }
+
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    #[test]
+    fn 磁碟空間_statvfs_真的讀得到_不存在的路徑是_none() {
+        let d = tempfile::tempdir().unwrap();
+        let free = free_bytes(d.path()).expect("暫存資料夾所在的檔案系統查得到");
+        assert!(free > 0 && free < (1u64 << 60), "{free}");
+        assert_eq!(free_bytes(&d.path().join("不存在")), None);
+        assert_eq!(free_bytes(Path::new("/proc/self/不存在")), None);
     }
 
     #[test]
