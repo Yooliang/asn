@@ -410,9 +410,31 @@ fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, Strin
         Ok(pi.dwProcessId)
     }
 }
+/// 其他平台（Linux）：新工作階段（setsid）脫離 ASN，ASN 結束或被殺時 mux 不會跟著走（CI 實測：殺掉啟動者後窗格還在）。
+/// 標準輸入輸出全接 null；環境只有 env。注意這只管程序關係，systemd 的 cgroup 整組結束要靠服務單元設定，不在這裡
 #[cfg(not(windows))]
 fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, String>, _flags: u32) -> std::io::Result<u32> {
-    Command::new(program).no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|c| c.id())
+    use std::os::unix::process::CommandExt;
+    extern "C" {
+        fn setsid() -> i32;
+    }
+    let mut cmd = Command::new(program);
+    cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // SAFETY: pre_exec 在 fork 之後、exec 之前跑；setsid 是 async-signal-safe，也沒有配置記憶體。失敗（已是組長）不影響啟動，所以不看回傳值
+    unsafe {
+        cmd.pre_exec(|| {
+            setsid();
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn()?;
+    let pid = child.id();
+    // 收屍：mux 是 ASN 的子程序，結束後沒人 wait 就會變殭屍，/proc/<pid> 還在，會被誤判成沒停掉（CI 實測停 mux 失敗）。
+    // 交給一條背景執行緒等它；ASN 先結束時 mux 會改由 init 收，不受影響
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
 }
 
 /// 找到的 WezTerm 資料夾
@@ -433,6 +455,7 @@ pub fn bundled_dir() -> Option<PathBuf> {
 pub const NOT_FOUND_UNIX: &str = "找不到 WezTerm。要用夥伴共用終端服務，請先用套件管理員安裝 wezterm（例如 sudo apt install wezterm），再重開 ASN";
 const UNIX_GUI: &str = "wezterm-gui";
 const UNIX_CLI: &str = "wezterm";
+const UNIX_MUX: &str = "wezterm-mux-server";
 
 /// 先看環境變數 ASN_WEZTERM_DIR（開發或測試指到別的副本；設了就只認它）。沒設時：Windows 用安裝檔附帶的；
 /// 其他平台從 PATH 找本人裝的。不自動下載
@@ -445,14 +468,17 @@ pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
     }
 }
 
-/// 其他平台：env 有設就只看它；沒設就照 PATH 的順序找 wezterm-gui 和 wezterm 都在的資料夾。
+/// 其他平台：env 有設就只看它；沒設就照 PATH 的順序找 wezterm 和（wezterm-gui 或 wezterm-mux-server）都在的資料夾。
 /// **只認絕對路徑的 PATH 項目：** 空字串、「.」、其他相對路徑一律跳過，免得目前資料夾被放一支同名的就被拿去用。
 /// 回的路徑都是絕對路徑
 pub fn locate_unix(env: Option<PathBuf>, path_var: Option<&str>, fs: &dyn Fs) -> Result<WezTermDir, String> {
     let usable = |p: &Path| fs.file_len(p).is_some_and(|n| n > 0);
+    // 無畫面主機（沒有桌面）只裝 wezterm（cli）和 wezterm-mux-server，沒有 wezterm-gui：兩者有一支就算找到，
+    // gui 路徑照樣填（不存在也無妨，mux 模式不會用它）
     let pick = |dir: &Path| {
         let (gui, cli) = (dir.join(UNIX_GUI), dir.join(UNIX_CLI));
-        (usable(&gui) && usable(&cli)).then_some(WezTermDir { gui, cli })
+        let server = dir.join(UNIX_MUX);
+        (usable(&cli) && (usable(&gui) || usable(&server))).then_some(WezTermDir { gui, cli })
     };
     if let Some(dir) = env.filter(|d| !d.as_os_str().is_empty()) {
         return pick(&dir).ok_or_else(|| NOT_FOUND_UNIX.to_string());
@@ -1443,6 +1469,17 @@ mod tests {
         fs.files.borrow_mut().insert("/opt/e/wezterm-gui".into());
         assert_eq!(locate_unix(None, Some("/opt/e:/opt/w"), &fs).unwrap().cli, PathBuf::from("/opt/w/wezterm"), "空檔當找不到");
         assert!(NOT_FOUND_UNIX.contains("安裝 wezterm"));
+    }
+
+    #[test]
+    fn locate_無畫面主機只有_cli_和_mux_server_也找得到() {
+        let fs = FakeFs::default();
+        for f in ["/h/bin/wezterm", "/h/bin/wezterm-mux-server", "/g/bin/wezterm-mux-server"] {
+            fs.files.borrow_mut().insert(f.into());
+        }
+        let d = locate_unix(None, Some("/g/bin:/h/bin"), &fs).unwrap();
+        assert_eq!(d.cli, PathBuf::from("/h/bin/wezterm"), "沒有 cli 的資料夾跳過");
+        assert_eq!(d.cli.with_file_name(UNIX_MUX), PathBuf::from("/h/bin/wezterm-mux-server"));
     }
 
     #[test]

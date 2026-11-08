@@ -99,6 +99,23 @@ jobs:
           for t in "${skips[@]}"; do args+=(--skip "$t"); done
           cargo test --locked --no-default-features --lib -- "${args[@]}"
 
+      # 產品的 Mux 與真的 RealRunner 在 Linux 上真的起 wezterm-mux-server、開窗格、get-text（#893）。版本與雜湊和 asn-wezterm-linux-probe 同一組；沒有 DISPLAY
+      - name: Linux 真的 WezTerm 起 mux、開窗格、get-text
+        shell: bash
+        env:
+          WEZTERM_VERSION: '20240203-110809-5046fc22'
+          TAR_SHA256: '142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c'
+        run: |
+          set -euo pipefail
+          tar_name="wezterm-${WEZTERM_VERSION}.Ubuntu22.04.tar.xz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tar_name" "https://github.com/wezterm/wezterm/releases/download/${WEZTERM_VERSION}/${tar_name}"
+          echo "${TAR_SHA256}  $RUNNER_TEMP/$tar_name" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/wz" && tar -xJf "$RUNNER_TEMP/$tar_name" -C "$RUNNER_TEMP/wz"
+          export ASN_WEZTERM_DIR="$RUNNER_TEMP/wz/wezterm/usr/bin"
+          test -x "$ASN_WEZTERM_DIR/wezterm" && test -x "$ASN_WEZTERM_DIR/wezterm-mux-server"
+          unset DISPLAY WAYLAND_DISPLAY
+          cargo test --locked --no-default-features --lib launch::mux::tests::linux_real_mux_spawn_get_text -- --ignored --test-threads=1 --nocapture
+
       - name: 沒有金鑰庫時設備金鑰照用、但不能讓別台看
         shell: bash
         run: env -u DBUS_SESSION_BUS_ADDRESS cargo test --locked --no-default-features --lib keystore::without_secret_service_tests -- --ignored --test-threads=1

@@ -281,8 +281,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             if let Some(inc) = incident {
                 let line = format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" });
                 elog!("{line}");
-                if let Some(base) = std::env::var_os("LOCALAPPDATA") {
-                    super::mux::note(&std::path::PathBuf::from(base).join("ASN").join("m"), &line);
+                if let Some(base) = super::mux::default_base() {
+                    super::mux::note(&base.join("ASN").join("m"), &line);
                 }
                 queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
                 let (wd, dd, partners, resume) = (work_dir.clone(), data_dir.clone(), inc.partners, inc.resume);
