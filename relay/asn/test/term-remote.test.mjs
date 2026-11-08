@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { REMOTE_LABEL, REMOTE_TEXT, askRemote, remoteEntry, remoteXtermOptions, startError } from '../ui/lib/term-remote.mjs'
+import { REMOTE_LABEL, REMOTE_TEXT, askRemote, openTerm, remoteEntry, remoteXtermOptions, startError } from '../ui/lib/term-remote.mjs'
 import { barSlots } from '../ui/lib/actionbar.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
@@ -13,7 +13,7 @@ test('守門：看別台畫面只能看，沒有打字、貼上、按鍵的路',
     assert.ok(!src.includes(bad), `term-remote.mjs 不能有 ${bad}`)
   }
   assert.equal(remoteXtermOptions({ cols: 80, rows: 24 }).disableStdin, true, 'xterm 關掉輸入')
-  assert.match(src, /new Terminal\(remoteXtermOptions\(/, '只用唯讀的設定建 xterm')
+  assert.match(src, /openTerm\(Terminal, remoteXtermOptions\(/, '只用唯讀的設定建 xterm')
   const api = read('../ui/lib/tauri.mjs').split('export const remoteViewApi = {')[1].split('\n}')[0]
   assert.doesNotMatch(api, /input|send/, 'remoteViewApi 沒有送字的命令')
 })
@@ -36,7 +36,8 @@ test('問能不能看：只收 true／false，出錯回 null', async () => {
   assert.equal(await askRemote(null, 'n'), null)
 })
 
-test('第 2 格可以換成「看畫面」', () => {
+test('第 2 格和本機一樣寫「終端」（#1033）', () => {
+  assert.equal(REMOTE_LABEL, '終端')
   const s = barSlots({ node: 'hom7a1', status: 'online', engine: 'claude' }, { term: true, termLabel: REMOTE_LABEL }).find(x => x.key === 'window')
   assert.equal(s.label, REMOTE_LABEL)
   assert.equal(s.term, true)
@@ -61,5 +62,43 @@ test('看別台畫面：沒有返回鈕（只靠上排第 2 格切回訊息）�
   assert.ok(!src.includes('term-view-back') && !src.includes("emit('back')") && !src.includes("emits: ['back']"), '沒有返回鈕、沒有 back 事件')
   assert.ok(!src.includes("'回到訊息'"), '畫面裡沒有回到訊息按鈕')
   // 離開（第 2 格切回訊息 → v-if 卸載）時要結束觀看：不能因為拿掉按鈕就沒人叫 stop
-  assert.match(src, /onBeforeUnmount\(\(\) => \{ stop\(\); cleanup\(\) \}\)/)
+  assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/)
+})
+
+test('#1033 等畫面元素掛上去才建 xterm；元素不在就回 null，不丟「Terminal requires a parent element」', async () => {
+  const made = []
+  class Terminal {
+    constructor(o) { this.o = o; made.push(this) }
+    attachCustomWheelEventHandler(f) { this.wheel = f }
+    open(el) { if (!el) throw new Error('Terminal requires a parent element.'); this.el = el }
+  }
+  const opts = remoteXtermOptions({ cols: 120, rows: 40 })
+  // 元素晚一拍才掛上：等一下再建
+  const host = { value: null }
+  let ticks = 0
+  const tick = async () => { ticks++; host.value = { isConnected: true } }
+  const t = await openTerm(Terminal, opts, host, tick, () => true)
+  assert.ok(t && t.el === host.value && ticks === 1, '等到元素才 open')
+  assert.equal(t.wheel(), false, '滾輪照舊不交給 xterm')
+  // 一直沒有元素：回 null，不建 xterm
+  made.length = 0
+  assert.equal(await openTerm(Terminal, opts, { value: null }, async () => {}, () => true), null)
+  assert.equal(made.length, 0)
+  // 元素已經拆掉（isConnected=false）也不建
+  assert.equal(await openTerm(Terminal, opts, { value: { isConnected: false } }, async () => {}, () => true), null)
+  // 這一格已經收掉：不建
+  assert.equal(await openTerm(Terminal, opts, { value: { isConnected: true } }, async () => {}, () => false), null)
+  assert.equal(made.length, 0)
+})
+
+test('#1033 開始後這一格被收掉或建不了 xterm：一定結束這次觀看（那台不會一直送到到期）', () => {
+  for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
+    const src = read(f)
+    assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)
+    assert.match(src, /if \(!term\) \{ stop\(\); if \(alive\) finish\(/, `${f}：建不了 xterm 就結束`)
+    assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/, `${f}：收掉時記下來`)
+    assert.ok(!src.includes('term.open(host.value)'), `${f}：不再直接 open（元素可能不在）`)
+  }
+  const chat = read('../ui/lib/chatpane.mjs')
+  assert.match(chat, /!\(r === null && remoteOn\.value\)\) remoteAvail\.value = r/, '正在看時一時問不到，不把這一格收掉')
 })

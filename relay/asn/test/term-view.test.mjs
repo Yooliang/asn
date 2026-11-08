@@ -308,7 +308,8 @@ test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高�
   assert.ok(remoteLine && !remoteLine.includes('@back='), '別台夥伴的看畫面也一樣：只靠第 2 格切回訊息，沒有返回鈕')
   assert.ok(!chat.includes('can-back'), '沒有任何地方再傳 can-back')
   assert.ok(chat.includes('@term="toggleTerm"'), '上排大按鈕負責切換')
-  assert.ok(chat.includes('<div class="conv" v-show="!termShown">'), '終端開著時訊息列表收起')
+  assert.ok(chat.includes('<div class="conv" v-show="!paneTermShown">'), '終端開著時訊息列表收起')
+  assert.ok(chat.includes('const paneTermShown = computed(() => termShown.value || remoteShown.value)'), '#1033：看別台的終端也一樣收起訊息列表、占滿整塊，不是只佔上半部')
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(!view.includes('回到訊息') && !view.includes('canBack') && !view.includes("emit('back')"), '終端畫面裡沒有回到訊息按鈕')
   const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
@@ -319,7 +320,7 @@ test('打開終端時收起訊息區、只用上排大按鈕切換；視窗高�
 test('守門 901b-scroll-kept：大按鈕切換終端／訊息時，訊息列表的捲動位置照舊保留', () => {
   const chat = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
   // 打開（termShown 變 true）時記下，關掉時還原；只看 termShown 的變化，與哪顆按鈕無關
-  assert.match(chat, /watch\(termShown, on => \{\s*if \(on\) \{ termScroll = scrollMemo\(msgsEl\.value\); return \}/)
+  assert.match(chat, /watch\(paneTermShown, on => \{\s*if \(on\) \{ termScroll = scrollMemo\(msgsEl\.value\); return \}/)
   assert.match(chat, /el\.scrollTop = restoreTop\(memo, el\)/)
   assert.ok(chat.includes('if (canTermView.value) termViewOn.value = !termViewOn.value'), '本機服務裡的夥伴：大按鈕切換終端（別台夥伴的看畫面分支在它前面，互斥）')
   assert.ok(chat.indexOf('if (canRemote.value) { remoteOn.value = !remoteOn.value; return }') < chat.indexOf('if (canTermView.value) termViewOn.value = !termViewOn.value'), '看畫面（別台）與終端（本機）互斥：先看別台，再看本機')

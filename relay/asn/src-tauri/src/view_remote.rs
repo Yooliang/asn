@@ -14,6 +14,15 @@ use std::sync::Mutex;
 
 /// 回報間隔（秒）。T 那邊超過 90 秒沒回報就停
 pub const REPORT_EVERY_S: u64 = 15;
+/// 對方還沒接受時，隔幾秒回報一次（越早拿到對方的公鑰，越早開始收畫面；頻道不留訊息，開始收之前送的幅會漏掉）
+pub const WAIT_ACCEPT_EVERY_S: u64 = 1;
+/// 等對方接受最多這麼久用快的間隔，之後回到 [`REPORT_EVERY_S`]（對方一直沒接受，不要一直每秒打後台）
+pub const WAIT_ACCEPT_FOR_S: u64 = 60;
+
+/// 下一次回報前要等幾秒。accepted：已經拿到對方的公鑰；waited_s：從開始到現在幾秒
+pub fn report_wait_s(accepted: bool, waited_s: u64) -> u64 {
+    if !accepted && waited_s < WAIT_ACCEPT_FOR_S { WAIT_ACCEPT_EVERY_S } else { REPORT_EVERY_S }
+}
 /// 一次觀看多久（秒），和後台上限相同（後台允許 10 分 30 秒，留 30 秒時鐘差）
 pub const VIEW_SECS: i64 = 600;
 /// 同時最多看幾個，和後台上限相同
@@ -24,7 +33,7 @@ pub const TARGET_KEY_CHANGED: &str = "那台電腦的設備金鑰變了，沒有
 /// 確認本人時給 Hello／確認框的話
 pub fn presence_text(machine: &str, window: &str) -> String {
     let m = if machine.is_empty() { "別台電腦".to_string() } else { format!("「{machine}」") };
-    format!("要開始看{m}上「{window}」的畫面嗎？只有你本人按了「看畫面」才確認。")
+    format!("要開始看{m}上「{window}」的畫面嗎？只有你本人按了「終端」才確認。")
 }
 
 /// 本人在畫面上要的狀態：看、暫停（畫面被藏起來）、結束
@@ -206,6 +215,16 @@ mod tests {
         assert_eq!(frame_wire("frame", &json!({ "x": "abc" })), None);
         assert_eq!(frame_wire("bell", &json!({ "w": "abc" })), None);
         assert_eq!(frame_wire("input", &json!({ "w": "abc" })), None);
+    }
+
+    #[test]
+    fn 對方還沒接受時每秒回報_接受後或等太久回到_15_秒() {
+        assert_eq!(report_wait_s(false, 0), 1, "還沒接受：快一點拿到公鑰、早一點開始收");
+        assert_eq!(report_wait_s(false, WAIT_ACCEPT_FOR_S - 1), 1);
+        assert_eq!(report_wait_s(false, WAIT_ACCEPT_FOR_S), REPORT_EVERY_S, "一直沒接受：不要一直每秒打後台");
+        assert_eq!(report_wait_s(true, 0), REPORT_EVERY_S, "已經在收：照舊 15 秒");
+        // 開始收之前送的幅會漏掉：被看的那台補送的間隔要比這邊等接受的間隔長
+        assert!(WAIT_ACCEPT_EVERY_S * 1000 < crate::view_stream::RESEND_SAME_MS);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 // 打的字在 Rust 端編序號、加密、補送；畫面這邊只把 xterm 收到的按鍵交給 remoteInputApi.send。
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
-import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, startError } from './term-remote.mjs'
+import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, startError } from './term-remote.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
@@ -49,7 +49,7 @@ export const RemoteInput = {
   emits: ['back'],
   setup(props, { emit }) {
     const host = ref(null), phase = ref('pin'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
-    let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0
+    let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     const where = () => (props.machine ? `「${props.machine}」上「${props.name}」` : `「${props.name}」`)
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     const send = (data, paste) => {
@@ -91,11 +91,10 @@ export const RemoteInput = {
         offEnd = await props.api.listen(END_EVENT, ev => { if (ev?.payload?.id === id) finish(ev.payload.text || '') })
         const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
+        if (!alive) { stop(); return }
         phase.value = 'waiting'
-        await nextTick()
-        term = new Terminal(inputXtermOptions({ cols: 120, rows: 40 }))
-        term.attachCustomWheelEventHandler(() => false)
-        term.open(host.value)
+        term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
+        if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         term.onData(d => send(d, false))
         host.value?.addEventListener('paste', onPaste, true)
         document.addEventListener('visibilitychange', onVisible)
@@ -109,7 +108,7 @@ export const RemoteInput = {
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { stop(); cleanup() })
+    onBeforeUnmount(() => { alive = false; stop(); cleanup() })
     return { host, phase, note, soon, warn, askPaste, where, again: start, stop, back, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
   },
   template: `

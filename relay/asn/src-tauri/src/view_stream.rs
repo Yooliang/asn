@@ -14,6 +14,8 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
 pub const FRAME_EVERY_MS: u64 = 2_000;
+/// 畫面沒變也隔這麼久補送一次（最新那幅）：看的那台開始收之前送的幅會漏掉（頻道不留訊息），閒著的畫面不補送就一直是空的
+pub const RESEND_SAME_MS: u64 = 5_000;
 /// 打字時多久看一次窗格（毫秒）：打的字要快一點出現，確認也跟著畫面幀回去
 pub const INPUT_FRAME_EVERY_MS: u64 = 300;
 pub const CTL_EVERY_MS: u64 = 15_000;
@@ -170,6 +172,7 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
     let (mut ctl_seen, mut paused) = (false, false);
     let (mut seq, mut sent, mut bytes) = (0u64, 0u64, 0u64);
     let mut last: Option<Frame> = None;
+    let mut last_sent_at = started;
     let finish = |port: &mut dyn FnMut(&str), why: &str, sent: u64, bytes: u64| port(&format!("view {}: end {why} frames={sent} bytes={bytes}", s.id));
     loop {
         let now = port.now_ms();
@@ -229,7 +232,7 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
                     return End::Failed;
                 }
             };
-            if last.as_ref() != Some(&frame) {
+            if last.as_ref() != Some(&frame) || now.saturating_sub(last_sent_at) >= RESEND_SAME_MS {
                 let plain = serde_json::to_vec(&frame).unwrap_or_default();
                 if plain.is_empty() || plain.len() > MAX_FRAME_BYTES {
                     port.log(&format!("view {}: frame skipped len={}", s.id, plain.len()));
@@ -247,6 +250,7 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
                             sent += 1;
                             bytes += wire.len() as u64;
                             send_ok_at = now;
+                            last_sent_at = now;
                             last = Some(frame);
                         }
                         Err(_) if now.saturating_sub(send_ok_at) > LOST_AFTER_MS => {
@@ -622,6 +626,23 @@ mod tests {
             Received::Frame(2, got) => assert_eq!(got.text, "乙", "相同的那幅沒有送"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn 畫面一直沒變_隔一陣子補送最新那幅_晚來的那台也看得到() {
+        // 看的那台要等下一次回報才開始收，之前送的幅收不到；閒著的畫面不補送，那邊就一直是空的
+        let (a, b) = pair();
+        let mut f = Fake { stop_at_ms: Some(START_MS + 4 * RESEND_SAME_MS + 1), ..fake() };
+        run_t(&session(), a, &mut f);
+        let n = f.sent.len();
+        assert!((4..=6).contains(&n), "第一幅加上每 {RESEND_SAME_MS} 毫秒補送一次：{n}");
+        let mut r = DReceiver::new(b, "s1");
+        // 晚來：前面幾幅都沒收到，只收最後一幅也畫得出來
+        match r.receive(f.sent.last().unwrap()) {
+            Received::Frame(_, got) => assert_eq!(got.text, SECRET),
+            other => panic!("{other:?}"),
+        }
+        assert!(FRAME_EVERY_MS < RESEND_SAME_MS && RESEND_SAME_MS < CTL_EVERY_MS, "比看窗格慢、比回報快");
     }
 
     #[test]

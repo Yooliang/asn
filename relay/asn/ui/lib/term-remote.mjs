@@ -4,8 +4,9 @@
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
-export const REMOTE_LABEL = '看畫面'
-export const REMOTE_TIP = '看這位夥伴在那台電腦上的畫面（只能看；再按一次回到訊息）'
+// 第 2 格的字和本機終端一樣（#1033 前是「看畫面」）
+export const REMOTE_LABEL = '終端'
+export const REMOTE_TIP = '看這位夥伴在那台電腦上的終端（只能看；再按一次回到訊息）'
 export const FRAME_EVENT = 'term-view-remote-frame'
 export const END_EVENT = 'term-view-remote-end'
 /** 到期前多久提醒（毫秒） */
@@ -41,6 +42,25 @@ export async function askRemote(api, node) {
 /** 唯讀的 xterm 設定：在本機看畫面的設定上關掉輸入 */
 export const remoteXtermOptions = size => ({ ...xtermOptions(size), disableStdin: true })
 
+/**
+ * 開始之後才建 xterm：等畫面元素真的掛上去。元素不在（例如確認本人時這一格被收掉了）就回 null，
+ * 由呼叫的一方結束這次觀看，不丟「Terminal requires a parent element」。
+ */
+export async function openTerm(Terminal, options, hostRef, tick, alive) {
+  for (let i = 0; i < 3; i++) {
+    if (!alive()) return null
+    const el = hostRef.value
+    if (el && el.isConnected !== false) {
+      const term = new Terminal(options)
+      term.attachCustomWheelEventHandler(() => false)
+      term.open(el)
+      return term
+    }
+    await tick()
+  }
+  return null
+}
+
 /** 錯誤訊息給本人看的部分：Rust 端回的已經是白話；空的就用通用的 */
 export function startError(e) {
   const s = String(e?.message ?? e ?? '').trim()
@@ -57,7 +77,7 @@ export const RemoteView = {
   },
   setup(props) {
     const host = ref(null), phase = ref('pin'), note = ref(''), soon = ref(false)
-    let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0
+    let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     const where = () => (props.machine ? `「${props.machine}」上「${props.name}」` : `「${props.name}」`)
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     const cleanup = () => {
@@ -81,11 +101,11 @@ export const RemoteView = {
         offEnd = await props.api.listen(END_EVENT, ev => { if (ev?.payload?.id === id) finish(ev.payload.text || '') })
         const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
+        // 確認本人的時候這一格被收掉了：這次已經開始，要記得結束，不然那台會一直送到到期
+        if (!alive) { stop(); return }
         phase.value = 'waiting'
-        await nextTick()
-        term = new Terminal(remoteXtermOptions({ cols: 120, rows: 40 }))
-        term.attachCustomWheelEventHandler(() => false)
-        term.open(host.value)
+        term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
+        if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         document.addEventListener('visibilitychange', onVisible)
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
@@ -96,7 +116,7 @@ export const RemoteView = {
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { stop(); cleanup() })
+    onBeforeUnmount(() => { alive = false; stop(); cleanup() })
     return { host, phase, note, soon, where, again: start, TEXT: REMOTE_TEXT }
   },
   template: `

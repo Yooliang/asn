@@ -105,11 +105,14 @@ export const ChatPane = {
     const remoteTyping = ref(false)
     const canRemoteInput = computed(() => remoteShown.value && Boolean(props.remoteInputApi))
     const typingShown = computed(() => remoteTyping.value && canRemoteInput.value)
+    // 終端畫面開著（本機或別台）：占滿訊息區，訊息列表收起來，兩種一模一樣
+    const paneTermShown = computed(() => termShown.value || remoteShown.value)
     async function probeRemote() {
       const f = props.friend
       if (!props.remoteViewApi || !f?.node || f.node === props.selfNode || !props.active) return
       const r = await askRemote(props.remoteViewApi, f.node)
-      if (sameFriend(props.friend, f)) remoteAvail.value = r
+      // 正在看的時候一時問不到（null），不要把這一格收掉：收掉會中斷剛開始的觀看
+      if (sameFriend(props.friend, f) && !(r === null && remoteOn.value)) remoteAvail.value = r
     }
     const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value }))
     const toggleTerm = () => {
@@ -123,7 +126,7 @@ export const ChatPane = {
     watch(() => [props.friend?.id, props.friend?.status, termViewName.value, termBase.value, props.active].join('\n'), () => void probeTerm(), { immediate: true })
     // 訊息列表收起再回來，停在原本看的位置（原本在底部就回到底部，新訊息看得到）
     let termScroll = null
-    watch(termShown, on => {
+    watch(paneTermShown, on => {
       if (on) { termScroll = scrollMemo(msgsEl.value); return }
       const memo = termScroll
       termScroll = null
@@ -413,7 +416,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -425,7 +428,7 @@ export const ChatPane = {
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
   <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active"></remote-view>
   <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
-  <div class="conv" v-show="!termShown">
+  <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="toPsm" v-html="emo(toPsm)"></span>
