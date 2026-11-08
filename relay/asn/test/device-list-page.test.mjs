@@ -211,6 +211,19 @@ test('設備類型標籤：電腦不顯示（多餘），只有手機等非電�
   assert.match(ph, /class="dv-tag kind">手機</)
 })
 
+test('電腦版設備列也標「雲端」（0.2.16，和手機同一個 deviceKindLabel）：列表與細部頁都是「電腦 · 雲端」；不是雲端的電腦照舊不標', async () => {
+  const cloud = dev('C', '雲端機', { kindLabel: '電腦 · 雲端', cloud: true })
+  const list = await render({}, { devices: [cloud, dev('D', '桌機', { kindLabel: '電腦' })], accounts: ACCT })
+  assert.match(list, /class="dv-tag kind">電腦 · 雲端</)
+  assert.equal((list.match(/class="dv-tag kind">/g) ?? []).length, 1, '一般電腦不標')
+  const detail = await render({ dev: 'C' }, { devices: [cloud], accounts: ACCT })
+  assert.match(detail, /class="dv-tag kind">電腦 · 雲端</)
+  // 資料真的帶 kindLabel：設備樹用 deviceKindLabel 算（雲端節點判斷見 device-kind-label.test.mjs）
+  assert.match(read('ui/lib/device-tree.mjs'), /kindLabel: deviceKindLabel\(/)
+  assert.match(SettingsPanel.template, /\{\{ d\.kindLabel \|\| d\.kind \}\}/)
+  assert.match(SettingsPanel.template, /\{\{ curDev\.kindLabel \|\| curDev\.kind \}\}/)
+})
+
 test('樞紐：永久移除／恢復寫入 deviceRemoved（本機不可）、活過來自動解除、三處列表都帶 removed', () => {
   const hub = read('ui/list.js')
   assert.match(hub, /devPrefs\.deviceRemoved = removeDevice\(devPrefs\.deviceRemoved, String\(value \?\? ''\), \{ selfNode: info\.node \}\)/)
