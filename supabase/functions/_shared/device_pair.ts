@@ -14,6 +14,8 @@ const PUB_RE = /^[A-Za-z0-9_-]{43}$/;
 const NODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const FP_RE = /^[0-9a-f]{16,32}$/;
 const ALERT_KINDS = ["first", "changed"];
+// 設備公鑰登記的平台（選填；沒帶＝舊版用戶端，後台當電腦）。只收這兩個值
+const PLATFORMS = ["desktop", "android"];
 
 const EXTRA_STATUS: Record<string, Reply> = {};
 
@@ -34,7 +36,11 @@ export async function handleDevicePairAction(deps: DevicePairDeps, me: { id: str
   const b = params ?? {};
   if (action === "device_key_publish") {
     if (typeof b.sign_pub !== "string" || !PUB_RE.test(b.sign_pub)) return fail("bad_request");
-    const r = await call(deps, "asn_relay_device_key_publish", { p_node: me.id, p_sign_pub: b.sign_pub });
+    if (b.platform !== undefined && b.platform !== null && !PLATFORMS.includes(b.platform)) return fail("bad_request");
+    // 沒帶 platform 就呼叫兩個參數的舊版（migration 還沒上時照常能用）；有帶才呼叫三個參數的新版
+    const args: Record<string, unknown> = { p_node: me.id, p_sign_pub: b.sign_pub };
+    if (typeof b.platform === "string") args.p_platform = b.platform;
+    const r = await call(deps, "asn_relay_device_key_publish", args);
     return isReply(r) ? r : { status: 200, body: { ok: true } };
   }
   if (action === "device_key_alert") {

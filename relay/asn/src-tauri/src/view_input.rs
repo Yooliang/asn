@@ -566,7 +566,7 @@ mod tests {
     fn 守門_被打字的那台每次把字交給窗格前都看本機還允不允許() {
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let f = lib.split("    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {").nth(1).expect("有 LiveTPort::input").split("\n    }\n").next().unwrap();
-        let check = f.find("bridge::read_settings(&self.data_dir).allow_remote_launch").expect("每次都重讀本機設定，不用快取");
+        let check = f.find("bridge::read_settings(&self.data_dir).view_allowed(self.mobile)").expect("每次都重讀本機設定，不用快取");
         let apply = f.find("self.terms.view_input(").expect("有交給窗格");
         assert!(check < apply, "先查允不允許，再交字");
         assert!(f.contains("End::NotAllowed"), "關掉就結束");

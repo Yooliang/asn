@@ -859,6 +859,8 @@ struct LiveTPort {
     input: Option<Arc<std::sync::Mutex<view_input::TInput>>>,
     /// 這次一共交給窗格幾個字（只記數量，內容不記）
     typed: u64,
+    /// 看的那台是移動設備（後台登記的平台）：本機關掉「允許移動設備查看終端」時，進行中的也要結束
+    mobile: bool,
 }
 
 #[cfg(feature = "gui")]
@@ -905,8 +907,8 @@ impl view_stream::TPort for LiveTPort {
         self.stop.load(std::sync::atomic::Ordering::SeqCst)
     }
     fn allowed(&mut self) -> bool {
-        // 本人在這台關掉「允許其他設備替這台開新視窗」：進行中的觀看也要結束
-        bridge::read_settings(&self.data_dir).allow_remote_launch
+        // 本人在這台關掉「允許其他設備替這台開新視窗」，或（看的是移動設備時）關掉「允許移動設備查看終端」：進行中的觀看也要結束
+        bridge::read_settings(&self.data_dir).view_allowed(self.mobile)
     }
     fn now_ms(&mut self) -> u64 {
         auth::now_ms()
@@ -931,7 +933,7 @@ impl view_stream::TPort for LiveTPort {
         };
         if !keys.is_empty() {
             // 本人在這台關掉「允許其他設備替這台開新視窗」：字不再交給窗格，馬上結束（不等下一次查控制面）
-            if !bridge::read_settings(&self.data_dir).allow_remote_launch {
+            if !bridge::read_settings(&self.data_dir).view_allowed(self.mobile) {
                 let line = format!("view {}: input end not_allowed typed={}", self.id, self.typed);
                 view_stream::TPort::log(self, &line);
                 return Err(view_stream::End::NotAllowed);
@@ -963,9 +965,12 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             // 放行條件：本機的「允許其他設備替這台開新視窗」開著（兩台是同一個本人，由後台擋）
-            if !bridge::read_settings(&data_dir).allow_remote_launch {
+            let settings = bridge::read_settings(&data_dir);
+            if !settings.allow_remote_launch {
                 continue;
             }
+            // 移動設備另外看「允許移動設備查看終端」（每一輪都重讀，不用快取）
+            let allow_mobile = !settings.mobile_view_off;
             let Ok(known) = device_id::live::known(&data_dir) else { continue };
             let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { continue };
             let Ok(key) = device_id::live::key_async(&data_dir).await else { continue };
@@ -976,18 +981,21 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                 // D 的設備公鑰先和本機記住的比（TOFU）：換了就拒絕並通知本人；第一次看到的驗章通過才記住，並通知本人（只有 T 寄）
                 let verified = match view_seen::check_unseen(&data_dir, &id, now_s) {
                     Err(e) => Err(e),
-                    Ok(()) => match view_stream::accept_request(&row, &me_node, &known, &key, now_s) {
+                    Ok(()) => match view_stream::accept_request(&row, &me_node, &known, &key, now_s, allow_mobile) {
                         Err(view_stream::Refused::KeyChanged { node, sign_pub }) => {
                             device_id::live::alert(&relay, &node, "changed", &sign_pub).await;
                             Err(device_id::KEY_CHANGED.to_string())
                         }
                         Err(view_stream::Refused::Bad(e)) => Err(e),
+                        Err(view_stream::Refused::MobileOff) => Err(view_stream::MOBILE_OFF.to_string()),
                         Ok(a) => view_seen::record(&data_dir, &id, a.session.expires_s, now_s).map(|()| a),
                     },
                 };
                 match verified {
-                    Err(_) => {
-                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                    Err(e) => {
+                        // 這台不允許移動設備查看：回報固定原因，手機那邊看到一句清楚的話；沒開始看，不跳紅條、不寄通知信
+                        let reason = if e == view_stream::MOBILE_OFF { view_stream::MOBILE_OFF } else { "rejected" };
+                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))).await;
                     }
                     Ok(a) => {
                         if a.tofu == device_id::Tofu::New {
@@ -1008,6 +1016,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                                 continue;
                             }
                         }
+                        let mobile = a.mobile;
                         let view_stream::Accepted { session, t_eph, t_sig, key: session_key, .. } = a;
                         let input = match session.scope {
                             view_handshake::Scope::View => None,
@@ -1039,7 +1048,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             }
                             _ => None,
                         };
-                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out, input, typed: 0 };
+                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out, input, typed: 0, mobile };
                         let relay2 = relay.clone();
                         std::thread::spawn(move || {
                             let end = view_stream::run_t(&session, session_key, &mut port);
@@ -2290,6 +2299,14 @@ fn bridge_set_perm_phone(m: State<'_, bridge::Manager>, on: bool) -> Result<brid
     Ok(s)
 }
 
+/// 打開／關閉「允許移動設備查看終端」（預設開）。關掉後手機不能看這台
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn bridge_set_mobile_view(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    m.set_mobile_view(on)
+}
+
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -2493,7 +2510,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
