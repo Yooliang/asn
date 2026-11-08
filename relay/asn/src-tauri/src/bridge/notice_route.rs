@@ -24,13 +24,17 @@ pub fn classify(status: Option<u16>, resp: &Value) -> NoticeOutcome {
         Some(200..=299) => NoticeOutcome::Sent,
         Some(404) => NoticeOutcome::Fallback,
         Some(409) if resp.get("error").and_then(Value::as_str) == Some("cross_account") => NoticeOutcome::Fallback,
+        // 原信超過 24 小時（例如關機一天後補拉的舊信）：照舊寄，不然通知收不到，僅引擎模式的信也會一直不 ack
+        Some(422) if resp.get("error").and_then(Value::as_str) == Some("no_origin") => NoticeOutcome::Fallback,
+        // 原信本身是通知：不該回，當作處理完，免得每次補拉都重打
+        Some(422) if resp.get("error").and_then(Value::as_str) == Some("is_notice") => NoticeOutcome::Sent,
         _ => NoticeOutcome::Drop,
     }
 }
 
 /// 200 但後台決定不寄（rate_limited／per_mail_limit）時回該原因，給 log 用
 pub fn skipped_reason(resp: &Value) -> Option<&str> {
-    resp.get("notify").and_then(Value::as_str).filter(|s| *s != "sent")
+    resp.get("notify").and_then(Value::as_str).filter(|s| *s != "sent").or_else(|| resp.get("error").and_then(Value::as_str))
 }
 
 /// 請求內文：只有 reply_to 與 body，收件人由後台從原信推出
@@ -56,6 +60,8 @@ mod tests {
         assert_eq!(classify(Some(409), &json!({"error":"other"})), NoticeOutcome::Drop);
         assert_eq!(classify(Some(404), &json!({"error":"not_found"})), NoticeOutcome::Fallback);
         assert_eq!(classify(Some(404), &Value::Null), NoticeOutcome::Fallback);
+        assert_eq!(classify(Some(422), &json!({"error":"no_origin"})), NoticeOutcome::Fallback, "舊信照舊寄");
+        assert_eq!(classify(Some(422), &json!({"error":"is_notice"})), NoticeOutcome::Sent, "原信是通知：不寄、當作處理完");
         for s in [400, 422, 500] {
             assert_eq!(classify(Some(s), &json!({})), NoticeOutcome::Drop);
         }

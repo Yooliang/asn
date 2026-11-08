@@ -57,3 +57,13 @@ test('bridge_notice 內文不含收件人／寄件人欄位', () => {
   assert.deepEqual(Object.keys(b).sort(), ['body', 'reply_to'])
   for (const k of ['to_node', 'to_agent', 'from_agent', 'expects_reply']) assert.ok(!(k in b))
 })
+test('422 no_origin（原信超過 24 小時）：退回舊寄法', async () => {
+  const { calls, run } = setup(() => { throw httpErr(422, 'no_origin') })
+  assert.equal(await run(), true)
+  assert.equal(calls.legacy, 1)
+})
+test('422 is_notice（原信本身是通知）：不寄也不退回，回 true（補拉時不會一直重打）', async () => {
+  const { calls, run } = setup(() => { throw httpErr(422, 'is_notice') })
+  assert.equal(await run(), true)
+  assert.equal(calls.legacy, 0)
+})
