@@ -63,6 +63,7 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     if (current === this) current = null
+    if (isFinishing) ViewerConfirm.clear()
     super.onDestroy()
   }
 

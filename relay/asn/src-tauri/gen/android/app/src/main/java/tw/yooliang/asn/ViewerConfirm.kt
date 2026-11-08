@@ -14,13 +14,24 @@ import org.json.JSONObject
 // 交回網頁的 window.__asnConfirmViewer(callbackId, result)。一次只處理一個，忙著時新的一律回 cancel。
 object ViewerConfirm {
   const val REQ = 4711
+  private const val STALE_MS = 130_000L   // 比網頁的 120 秒逾時長一點；回呼沒回來時不讓 pending 永遠卡住
   private var pending: String? = null
+  private var pendingSince = 0L
+
+  /** 外殼重建或結束時清掉還沒回的確認（網頁那邊自己會逾時） */
+  fun clear() { pending = null }
 
   fun ask(activity: MainActivity, callbackId: String) {
-    if (pending != null) { reply(activity, callbackId, "cancel"); return }
+    val old = pending
+    if (old != null) {
+      if (android.os.SystemClock.elapsedRealtime() - pendingSince <= STALE_MS) { reply(activity, callbackId, "cancel"); return }
+      pending = null
+      reply(activity, old, "cancel")
+    }
     val km = activity.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
     if (km == null || !km.isDeviceSecure) { reply(activity, callbackId, "no_lock"); return }
     pending = callbackId
+    pendingSince = android.os.SystemClock.elapsedRealtime()
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val prompt = BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), object : BiometricPrompt.AuthenticationCallback() {

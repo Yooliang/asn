@@ -526,6 +526,8 @@ test('手機查看前要先通過本人確認：前端模組、外殼、鎖死�
   assert.match(kt, /isDeviceSecure/); assert.match(kt, /"no_lock"/); assert.match(kt, /BIOMETRIC_STRONG or DEVICE_CREDENTIAL/)
   assert.match(kt, /createConfirmDeviceCredentialIntent/); assert.match(kt, /SDK_INT >= Build\.VERSION_CODES\.R/)
   assert.match(read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt'), /ViewerConfirm\.onActivityResult/)
+  assert.match(kt, /STALE_MS = 130_000L/, '卡住的確認超過 130 秒就放掉')
+  assert.match(read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt'), /isFinishing\) ViewerConfirm\.clear\(\)/)
   const gradle = read(...dir, 'build.gradle.kts')
   assert.match(gradle, /implementation\("androidx\.biometric:biometric:1\.1\.0"\)/, '版本鎖死，不用 + 或範圍')
 })
