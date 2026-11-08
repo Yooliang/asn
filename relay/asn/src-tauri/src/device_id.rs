@@ -95,25 +95,31 @@ fn create_new(path: &Path, prot: &dyn crate::auth::Protector, scrub: bool) -> Re
     DeviceKey::from_pkcs8(doc.as_ref())
 }
 
-/// 換掉金鑰檔：新內容先寫成暫存檔，再把舊檔內容就地覆寫成零（盡力而為）、最後換名。
-/// 順序不能反：先覆寫舊檔再寫新檔，中途失敗就兩邊都沒有
+/// 換掉金鑰檔：新內容先寫成暫存檔，握住舊檔、換名，再透過握把把舊內容蓋成零（盡力而為）。
+/// 順序不能反：任何一步被中斷，金鑰檔不是完整的舊內容就是完整的新內容，不會留下一檔零
 fn replace_scrubbed(path: &Path, text: &[u8]) -> std::io::Result<()> {
-    if let Ok(old) = std::fs::metadata(path) {
-        let len = old.len() as usize;
-        let tmp = PathBuf::from(format!("{}.{}.new", path.display(), std::process::id()));
-        write_private(&tmp, text)?;
-        let scrub = || -> std::io::Result<()> {
-            use std::io::Write;
-            let mut f = std::fs::OpenOptions::new().write(true).open(path)?;
-            f.write_all(&vec![0u8; len])?;
-            f.sync_all()
-        };
-        if let Err(e) = scrub() {
-            elog!("舊金鑰檔覆寫失敗（仍會換掉）：{e}");
+    let Ok(old) = std::fs::metadata(path) else { return write_private(path, text) };
+    let len = old.len() as usize;
+    let tmp = PathBuf::from(format!("{}.{}.new", path.display(), std::process::id()));
+    write_private(&tmp, text)?;
+    let held = std::fs::OpenOptions::new().write(true).open(path);
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        // Windows：開著的檔不能被換名蓋掉。放掉握把再換一次，這時就不蓋零了
+        drop(held);
+        if let Err(e2) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e2);
         }
-        return std::fs::rename(&tmp, path);
+        elog!("舊金鑰檔沒有蓋零（換名時檔案被占用）：{e}");
+        return Ok(());
     }
-    write_private(path, text)
+    if let Ok(mut f) = held {
+        use std::io::Write;
+        if let Err(e) = f.write_all(&vec![0u8; len]).and_then(|_| f.sync_all()) {
+            elog!("舊金鑰檔蓋零失敗（已換成新的）：{e}");
+        }
+    }
+    Ok(())
 }
 
 /// 寫金鑰檔：非 Windows 先用 0600 建暫存檔、寫完再換名，從頭到尾都只有本人讀得到（和登入憑證的寫法相同）。
