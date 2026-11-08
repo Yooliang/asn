@@ -49,7 +49,7 @@ test('冒煙假 Tauri：listen 記下回呼，指令呼叫後依序送出 __emit
 
 test('冒煙情境：五個手機看終端情境帶齊假指令與假的本人確認（ok／cancel／no_lock）', () => {
   const names = SCENARIOS.filter(s => s.name.startsWith('m-term-view')).map(s => s.name)
-  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big', 'm-term-view-cancel', 'm-term-view-nolock'])
+  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big', 'm-term-view-cancel', 'm-term-view-nolock', 'm-term-view-late'])
   const t = tableFor(SCENARIOS.find(s => s.name === 'm-term-view'))
   assert.equal(t.term_view_remote_available, true)
   assert.equal(t.term_view_remote_start.id, 'v1')
@@ -109,6 +109,24 @@ test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生
   const mob = read('../ui/lib/mobile-remote-view.mjs')
   assert.doesNotMatch(mob, /start:\s*remoteViewApi\.start/)
   assert.doesNotMatch(mob, /\.\.\.remoteViewApi/, '不能整包展開電腦版的介面（會帶進電腦版的 start）')
-  assert.match(mob, /const r = await confirm\(\)\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認，ok 才送')
+  assert.match(mob, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認；確認回來時那一次已作廢就不送；ok 才送')
   assert.match(mob, /confirm = \(\) => confirmViewer\(\)/, '預設的確認就是 PR③ 的 confirmViewer')
+})
+
+test('確認還在等時切回訊息（那一次作廢），之後才回 ok：完全沒有 start 呼叫（被看的那台不跳允許框、不閃紅條、不寄通知信）', async () => {
+  const { makeMobileRemoteViewApi, CANCELLED } = await import('../ui/lib/mobile-remote-view.mjs')
+  const calls = []
+  let answer
+  const api = makeMobileRemoteViewApi({ confirm: () => new Promise(r => { answer = r }), invoke: async (cmd, args) => { calls.push([cmd, args]); return { id: 'v1', expires_s: 1 } } })
+  let current = true
+  const p = api.start('H', '小乙', '家用機', { wanted: () => current })
+  current = false   // 本人切回「訊息」：這一格收掉、序號作廢
+  answer('ok')      // 確認很晚才回來
+  await assert.rejects(p, e => e.code === CANCELLED)
+  assert.deepEqual(calls, [], '作廢的那一次就算回 ok 也不送 start')
+  // 重新發起的新一次照常
+  const q = api.start('H', '小乙', '家用機', { wanted: () => true })
+  answer('ok')
+  assert.deepEqual(await q, { id: 'v1', expires_s: 1 })
+  assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
 })

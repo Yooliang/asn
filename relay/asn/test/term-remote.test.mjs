@@ -67,7 +67,7 @@ test('看別台畫面：沒有返回鈕（只靠上排第 2 格切回訊息）�
   assert.ok(!src.includes('term-view-back') && !src.includes("emit('back')") && !src.includes("emits: ['back']"), '沒有返回鈕、沒有 back 事件')
   assert.ok(!src.includes("'回到訊息'"), '畫面裡沒有回到訊息按鈕')
   // 離開（第 2 格切回訊息 → v-if 卸載）時要結束觀看：不能因為拿掉按鈕就沒人叫 stop
-  assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/)
+  assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\) \}\)/)
 })
 
 test('#1029 等畫面元素掛上去才建 xterm；元素不在就回 null，不丟「Terminal requires a parent element」', async () => {
@@ -99,9 +99,12 @@ test('#1029 等畫面元素掛上去才建 xterm；元素不在就回 null，不
 test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次觀看（那台不會一直送到到期）', () => {
   for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
     const src = read(f)
-    assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)
+    const view = f.endsWith('term-remote.mjs')
+    // 看畫面那支（手機也用）改成序號：收掉或重新發起就作廢，發起回來時已作廢就 stop 那一次
+    if (view) assert.match(src, /if \(!wanted\(\)\) \{ if \(r\?\.id\) void props\.api\.stop\(r\.id\)\.catch\(\(\) => \{\}\); return \}\s+id = r\.id/, `${f}：開始後先看這一次還算不算數`)
+    else assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)
     assert.match(src, /if \(!term\) \{ stop\(\); if \(alive\) finish\(/, `${f}：建不了 xterm 就結束`)
-    assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/, `${f}：收掉時記下來`)
+    assert.match(src, view ? /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\) \}\)/ : /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/, `${f}：收掉時記下來`)
     assert.ok(!src.includes('term.open(host.value)'), `${f}：不再直接 open（元素可能不在）`)
   }
   const chat = read('../ui/lib/chatpane.mjs')

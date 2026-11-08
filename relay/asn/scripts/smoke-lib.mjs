@@ -688,6 +688,7 @@ export const MTERMVIEW_PROBES = {
   big: { mtermview: true, big: true },
   cancel: { mtermview: true, gate: 'cancel' },
   noLock: { mtermview: true, gate: 'no_lock' },
+  late: { mtermview: true, gate: 'late' },
 }
 export const MTERMVIEW_TEXT = [
   'Claude Code v2.1.0  Opus  ~/demo',
@@ -763,6 +764,15 @@ export const mtermviewGateProbeSource = gate => `(async () => {
   btns[1].click();
   for (let i = 0; i < 30 && (globalThis.__smokeConfirms || []).length < 1; i++) await sleep(100);
   if ((globalThis.__smokeConfirms || []).length < 1) return { ok: false, why: '點「終端」沒有先跳本人確認' };
+  if (${JSON.stringify(gate)} === 'late') {
+    btns[0].click();   // 確認還在等（1.5 秒後才回 ok）就切回訊息
+    await sleep(2500);  // 等確認回 ok
+    const late = (globalThis.__smokeCalls || []).map(c => c[0]);
+    if (late.includes('term_view_remote_start')) return { ok: false, why: '已經切回訊息，晚回來的 ok 還是送了 term_view_remote_start' };
+    if (!vis(document.querySelector('.m-chat .conv'))) return { ok: false, why: '切回訊息後訊息列表應該在' };
+    if (document.querySelector('.term-remote')) return { ok: false, why: '切回訊息後不該有終端區' };
+    return { ok: true, why: '' };
+  }
   await sleep(800);
   const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
   if (calls.includes('term_view_remote_start')) return { ok: false, why: '確認沒過，卻呼叫了 term_view_remote_start' };
@@ -818,6 +828,7 @@ export const SCENARIOS = [
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
   { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
   { name: 'm-term-view-nolock', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'no_lock' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.noLock, shot: 'm-term-view-nolock.png' },
+  { name: 'm-term-view-late', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'late' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.late, shot: 'm-term-view-late.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
@@ -930,7 +941,8 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }
     t.term_view_remote_available = true
     t.term_view_remote_start = { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 }
-    t.__confirmViewer = scenario.state.mtermview === true ? 'ok' : scenario.state.mtermview
+    t.__confirmViewer = scenario.state.mtermview === true || scenario.state.mtermview === 'late' ? 'ok' : scenario.state.mtermview
+    if (scenario.state.mtermview === 'late') t.__confirmDelay = 1500
     t.term_view_remote_set = null
     t.term_view_remote_stop = null
     t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
@@ -959,7 +971,7 @@ export const injectSource = table => `(() => {
   const T = ${JSON.stringify(table)};
   const missing = (globalThis.__smokeMissing = []);
   // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
-  if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), 30) } };
+  if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), T.__confirmDelay || 30) } };
   globalThis.__TAURI__ = {
     // 事件：listen 記下回呼；表裡的 __emitOn[指令] 在那個指令被呼叫後依序推事件（例如看別台終端的假畫面幀）。回呼收到的是 { payload }，和真的 Tauri 一樣
     event: {
