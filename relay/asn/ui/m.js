@@ -42,7 +42,7 @@ import { chatsUnread, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mj
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
-import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, invoke, listen, remoteViewApi, store } from './lib/tauri.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
@@ -1135,6 +1135,7 @@ const app = createApp({
     }
 
     return {
+      remoteViewApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（只能看，案 A：對話頁頂端「訊息／終端」）
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),

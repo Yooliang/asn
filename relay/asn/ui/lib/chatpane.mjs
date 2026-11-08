@@ -15,7 +15,7 @@ import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } 
 import { TermView } from './term-view.mjs'
 import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP } from './term-remote-input.mjs'
-import { askTermService, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
+import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -53,7 +53,9 @@ export const ChatPane = {
     winMode: { type: String, default: 'split' },   // split｜merged：整合模式用較短的輸入提示
     photoApi: { type: Object, default: null },     // photoApi.fetch 回 {data_url}、photoApi.save 回路徑：放大看與另存（Rust 端，金鑰不在前端）；沒給就不能放大
     shotApi: { type: Object, default: null },      // 截圖（lib/tauri.mjs 的 shotApi）；沒給或這個系統不支援就沒有截圖鈕
-    noBar: { type: Boolean, default: false },      // 手機對話頁：上方不放功能列（管理項目在手機頁自己的「⋯」），個人訊息也不拿掉「背景工作 N 件」
+    noBar: { type: Boolean, default: false },
+    // 看別台終端的「在畫面上」：手機把 active 固定給 false（不搶焦點），另外用這個告訴元件對話分頁正開著；沒給就跟 active 一樣
+    viewActive: { type: Boolean, default: null },      // 手機對話頁：上方不放功能列（管理項目在手機頁自己的「⋯」），個人訊息也不拿掉「背景工作 N 件」
     agentApi: { type: Object, default: null },     // 上方功能列用（lib/tauri.mjs 的 transport）；沒給就沒有功能列
     termViewApi: { type: Object, default: null },
     remoteInputApi: { type: Object, default: null },  // 在別台夥伴的畫面打字（lib/tauri.mjs 的 remoteInputApi，0.2.10）；只有電腦版會給
@@ -107,9 +109,15 @@ export const ChatPane = {
     const typingShown = computed(() => remoteTyping.value && canRemoteInput.value)
     // 終端畫面開著（本機或別台）：占滿訊息區，訊息列表收起來，兩種一模一樣
     const paneTermShown = computed(() => termShown.value || remoteShown.value)
+    // 手機（noBar）的對話頁頂端「訊息／終端」切換（案 A，和電腦版同一個元件；按鈕字跟電腦版一樣）
+    const remoteLive = computed(() => (props.viewActive === null ? props.active : props.viewActive))
+    watch(remoteLive, a => { if (!a) remoteOn.value = false })   // 離開對話分頁就結束觀看（那台的紅條會收掉）
+    const mSwitch = computed(() => props.noBar && canRemote.value)
+    const showMsgs = () => { remoteOn.value = false }
+    const showTerm = () => { remoteOn.value = true }
     async function probeRemote() {
       const f = props.friend
-      if (!props.remoteViewApi || !f?.node || f.node === props.selfNode || !props.active) return
+      if (!props.remoteViewApi || !f?.node || f.node === props.selfNode || !remoteLive.value) return
       const r = await askRemote(props.remoteViewApi, f.node)
       // 正在看的時候一時問不到（null），不要把這一格收掉：收掉會中斷剛開始的觀看
       if (sameFriend(props.friend, f) && !(r === null && remoteOn.value)) remoteAvail.value = r
@@ -120,7 +128,7 @@ export const ChatPane = {
       if (canTermView.value) termViewOn.value = !termViewOn.value
     }
     watch(() => props.friend?.id, () => { remoteOn.value = false; remoteAvail.value = null; void probeRemote() })
-    watch(() => props.active, a => { if (a) void probeRemote() })
+    watch(remoteLive, a => { if (a) void probeRemote() })
     onMounted(() => { void probeRemote() })
     watch(() => props.friend?.id, () => { termViewOn.value = false; termInService.value = null })
     watch(() => [props.friend?.id, props.friend?.status, termViewName.value, termBase.value, props.active].join('\n'), () => void probeTerm(), { immediate: true })
@@ -417,7 +425,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { remoteLive, mSwitch, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -427,7 +435,8 @@ export const ChatPane = {
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
-  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active"></remote-view>
+  <div class="m-term-switch" role="group" aria-label="訊息或終端" v-if="mSwitch"><button type="button" :class="{ on: !remoteShown }" :aria-pressed="!remoteShown" @click="showMsgs">{{ TERM_BTN_MSG.label }}</button><button type="button" :class="{ on: remoteShown }" :aria-pressed="remoteShown" @click="showTerm">{{ TERM_BTN_TERM.label }}</button></div>
+  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive"></remote-view>
   <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
