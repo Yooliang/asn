@@ -203,7 +203,7 @@ export const SettingsPanel = {
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="d.kind !== '電腦'">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></button>
+                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></button>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
@@ -217,7 +217,7 @@ export const SettingsPanel = {
             <div class="dv-dev-h">
               <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <h3 class="dv-name">{{ curDev.label }}</h3>
-              <span class="dv-tag kind" v-if="curDev.kind !== '電腦'">{{ curDev.kind }}</span>
+              <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
