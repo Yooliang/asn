@@ -475,3 +475,15 @@ test('手機群組對話：讀走節點金鑰、發言走要本人簽章的專�
   assert.match(css, /\.m-chat\.is-room \.toolbar>\.tool\.dict,\.m-chat\.is-room \.toolbar>\.tool\.mic\{display:none\}/, '群組沒有語音輸入、麥克風：這兩顆藏起來；傳照片、傳檔案照常（0.1.111）')
   assert.doesNotMatch(css, /\.is-room \.toolbar>\.tool\{display:none\}/, '群組工具列不能整排藏掉')
 })
+
+test('手機設備金鑰：包裝金鑰在系統金鑰庫、備份規則整個排除、手機啟動時上傳公鑰、不碰 Kotlin 與權限', () => {
+  const kw = read('src-tauri', 'src', 'android_keywrap.rs')
+  assert.match(kw, /AndroidKeyStore/); assert.match(kw, /AES\/GCM\/NoPadding/); assert.match(kw, /asn_device_key_wrap/)
+  assert.match(lib, /#\[cfg\(not\(desktop\)\)\]\n\s*start_device_key_publish\(/, '手機啟動時要上傳設備公鑰')
+  assert.match(lib, /#\[cfg\(feature = "gui"\)\]\nfn start_device_key_publish/, '上傳公鑰不再限定電腦版')
+  const xml = f => read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res', 'xml', f)
+  for (const f of ['backup_rules.xml', 'data_extraction_rules.xml']) assert.match(xml(f), /<exclude domain="file" path="\." \/>/, `${f} 要排除 file 網域（設備金鑰檔）`)
+  const di = read('src-tauri', 'src', 'device_id.rs')
+  assert.match(di, /!cfg!\(target_os = "android"\) && /, '手機的設備金鑰不能讓別台看')
+  assert.match(cargo, /jni = "=0\.21\.1"/, "鎖死版本"); assert.match(cargo, /ndk-context = "=0\.1\.1"/, "鎖死版本")
+})

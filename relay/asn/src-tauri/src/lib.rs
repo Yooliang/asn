@@ -52,6 +52,7 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+mod android_keywrap;
 mod keystore;
 mod view_handshake;
 mod view_frame;
@@ -800,7 +801,7 @@ fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Res
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
-#[cfg(all(desktop, feature = "gui"))]
+#[cfg(feature = "gui")]
 fn start_device_key_publish(relay: std::sync::Arc<Relay>, data_dir: std::path::PathBuf) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -2682,6 +2683,9 @@ pub fn run() {
                 // 啟動時把視窗名同步成這台設備的顯示名（別台設備的前台依設備分組時顯示它）
                 let r3 = r.clone();
                 tauri::async_runtime::spawn(async move { r3.sync_device_name().await });
+                // 手機也上傳設備公鑰（電腦版在下面的終端輪詢那段啟動）
+                #[cfg(not(desktop))]
+                start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
                 // 帳號回報：啟動後 5 秒起每 5 分鐘一次，停在登入畫面也照跑（用節點金鑰，不用本人登入）；--shot 截圖模式不動
                 #[cfg(desktop)]
                 if handle.state::<App>().shot.is_none() {

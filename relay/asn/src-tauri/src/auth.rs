@@ -416,6 +416,14 @@ pub trait Protector: Send + Sync {
     fn seals(&self) -> bool {
         false
     }
+    /// 這段內容已經是這個保護層包過的（不是舊的明文）。預設看 Linux 金鑰庫的前綴
+    fn wrapped(&self, sealed: &[u8]) -> bool {
+        crate::keystore::is_sealed(sealed)
+    }
+    /// 解不開的原因是「包裝金鑰確定不在了」（只有手機金鑰庫會回 true）：呼叫端才可以重產一把新的
+    fn key_lost(&self, _err: &str) -> bool {
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -485,7 +493,7 @@ impl<P: Protector> TokenStore for FileStore<P> {
         let login = self.prot.unprotect(&sealed).ok().and_then(|p| decode_login(&p));
         // 舊的明文檔、這次有系統金鑰庫：讀到的同時升級成包過的（失敗就維持原樣，不影響使用）
         if let Some(l) = &login {
-            if self.prot.seals() && !crate::keystore::is_sealed(&sealed) {
+            if self.prot.seals() && !self.prot.wrapped(&sealed) {
                 if let Err(e) = self.save(l) {
                     elog!("[ASN] 登入存檔升級失敗（照舊可用）：{e}");
                 }
