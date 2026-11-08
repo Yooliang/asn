@@ -35,8 +35,8 @@ const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltud
 import { HOME_DIR, locateHome } from './home.mjs'
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
-// 這台的設備名：收發室自己說話的系統通知第一行會冠上它（見 notice-name.mjs）。ASN_DEVICE_NAME 優先，其次電腦名稱；都沒有就「未命名設備」（絕不露出節點代號）
-const DEVICE_NAME = noticeDevice(envGet(process.env, 'DEVICE_NAME') || process.env.COMPUTERNAME || os.hostname())
+// 這台的設備名：收發室自己說話的系統通知第一行會冠上它（見 notice-name.mjs）。電腦名稱（COMPUTERNAME，其次 os.hostname()）；都沒有就「未命名設備」（絕不露出節點代號）
+const DEVICE_NAME = noticeDevice(process.env.COMPUTERNAME || os.hostname())
 const DEFAULT_AGENT = (envGet(process.env, 'RELAY_DEFAULT_AGENT') || '').trim()   // 沒指定收件視窗的信交給誰；空＝不丟給任何 session（留在信箱，等 ASN 視窗的本人處理）
 const EXTRA_ALLOW = (envGet(process.env, 'RELAY_ALLOW') || '').split(',').map(s => s.trim()).filter(Boolean)
 const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
