@@ -335,3 +335,13 @@
 - 先前開著時留下的 WezTerm 視窗，關著之後會被當成使用者自己開的：按「關閉」只結束 Claude，視窗本身要手動關。**升級前先把這些視窗關掉。**
 - 因為上一點，關著時對照表裡的夥伴視窗列不認領，只改標為保留（留在檔案裡、不查不碰）；之後再把開關打開，會照常認回。
 - 隔離設定檔如果內容恰好是第 1 階段寫的 Hold 版本（`return { exit_behavior = "Hold" }`，一個字不差），關著時會改寫回 `return {}`；使用者改過、內容不同的檔不動。再把開關打開，空設定會照舊升級成 Hold 版本。
+
+## Linux 按需取得 WezTerm（#893 第 3 張）
+
+Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務、而 `ASN_WEZTERM_DIR` 與 PATH 都找不到 wezterm 時，ASN 在背景從官方 GitHub release 取得固定版本（`launch/wezterm_fetch.rs`），取好後重開 ASN 才會用上。
+
+- 版本與雜湊：唯一來源是 `relay/asn/scripts/wezterm-pins.json`（Windows 的 `fetch-wezterm.mjs`、Rust、CI 探測腳本都讀它或有測試核對）。
+- 發行版：讀 `/etc/os-release` 的 `ID`、`VERSION_ID`；Ubuntu 20.04／22.04／24.04、Debian 10／11／12，僅 x86_64。其他的不下載，回「請用套件管理員安裝 wezterm，或設定 ASN_WEZTERM_DIR」。
+- 流程：檢查磁碟空間 → 下載到私有暫存資料夾（只連官方 GitHub 主機、有逾時與大小上限）→ 核對 SHA-256（不符就刪檔、不重試）→ 解 xz → 只取 `wezterm`、`wezterm-mux-server` 兩個一般檔案 → 跑 `--version`（雜湊核對之後才執行）→ 原子改名到 `<資料目錄>/ASN/wezterm/<版本>-<發行版>/`。任何失敗都清掉暫存資料夾。
+- 找程式的順序（`wezterm::locate`）：`ASN_WEZTERM_DIR`（設了就只認它）→ PATH → 這裡取得的。沒有 `wezterm-gui` 時 `WezTermDir.gui` 是 `None`，要開 GUI 的地方回「這台電腦沒有安裝 WezTerm 桌面版」。
+- 不做：自動更新版本、重試、預先下載、arm64／macOS／其他發行版。

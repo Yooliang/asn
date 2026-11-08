@@ -3094,7 +3094,13 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     let (wez, mux) = if cfg!(windows) {
         super::win_term::switches_from(env_wez.as_deref(), env_mux.as_deref())
     } else {
-        super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), crate::bridge::read_settings(data_dir).term_server_on, wezterm::locate(&wezterm::RealFs).is_ok())
+        let user_on = crate::bridge::read_settings(data_dir).term_server_on;
+        let found = wezterm::locate(&wezterm::RealFs).is_ok();
+        // 開了卻找不到 wezterm：背景去官方 GitHub 取固定版本（見 wezterm_fetch）；取好後重開 ASN 才會用上
+        if super::wezterm_fetch::should_fetch(user_on, env_wez.as_deref(), env_mux.as_deref(), found) {
+            super::wezterm_fetch::spawn_background();
+        }
+        super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), user_on, found)
     };
     // #868：設定頁的「伺服器終端」開關。環境變數 0 優先；使用者關掉了就不用。啟動時讀一次，執行中不變（改了要重開 ASN 才生效，已開著的夥伴不會被搬）
     let (wanted, locked) = super::win_term::term_server_wanted(std::env::var(super::win_term::ENV_MUX).ok().as_deref(), crate::bridge::read_settings(data_dir).term_server_off);

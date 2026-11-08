@@ -2,16 +2,18 @@
 // 讓 Tauri 隨 Windows 安裝檔一起打包（內建終端機用；裝好後在安裝資料夾的 wezterm 底下，ASN 預設從那裡找）。
 //   node scripts/fetch-wezterm.mjs           下載（有快取就用快取）→ 核對雜湊 → 解出 7 個檔與授權文字
 //   ASN_SKIP_WEZTERM=1                       略過（不打包 WezTerm；例如只想快速試別的）
-// 版本與雜湊寫死在這裡：換版本要同時改雜湊，並重新做真機驗證。只在 Windows 上做。
+// 版本與雜湊寫在 wezterm-pins.json：換版本要同時改雜湊，並重新做真機驗證。只在 Windows 上做。
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-export const WEZTERM_VERSION = '20240203-110809-5046fc22'
-export const WEZTERM_ZIP_SHA256 = '57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4'
-export const WEZTERM_LICENSE_SHA256 = '37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca'
+// 版本與雜湊的唯一來源是 scripts/wezterm-pins.json（Linux 的 Rust 程式與 CI 也讀同一份）
+const PINS = JSON.parse(fs.readFileSync(new URL('./wezterm-pins.json', import.meta.url), 'utf8'))
+export const WEZTERM_VERSION = PINS.version
+export const WEZTERM_ZIP_SHA256 = PINS.windows_zip_sha256
+export const WEZTERM_LICENSE_SHA256 = PINS.license_sha256
 // 只留這 7 個：視窗與命令列、mux-server（0.2.0 夥伴窗格改由它常駐）、終端機後端（conpty）、顯示用的 ANGLE。不附除錯檔、strip-ansi-escapes、mesa 軟體算圖
 export const WEZTERM_FILES = ['wezterm-gui.exe', 'wezterm.exe', 'wezterm-mux-server.exe', 'conpty.dll', 'OpenConsole.exe', 'libEGL.dll', 'libGLESv2.dll']
 const BASE = `https://github.com/wez/wezterm/releases/download/${WEZTERM_VERSION}`

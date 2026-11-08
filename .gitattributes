@@ -24,3 +24,6 @@ relay/asn/scripts/headless/*.service text eol=lf
 
 # CI 的實驗腳本在 Linux 上跑：一律 LF
 .github/scripts/*.sh text eol=lf
+
+# wezterm_fetch 單元測試用的固定 xz 檔：不要換行轉換
+relay/asn/src-tauri/src/launch/wezterm_fetch_fixtures/* binary

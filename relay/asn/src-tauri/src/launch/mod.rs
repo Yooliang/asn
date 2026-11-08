@@ -26,6 +26,9 @@ pub(crate) mod win_term;
 #[allow(dead_code)]
 pub(crate) mod wezterm;
 #[cfg(desktop)]
+#[allow(dead_code)] // 呼叫點只在視窗版的 term::live，無畫面版編進來但不用
+pub(crate) mod wezterm_fetch;
+#[cfg(desktop)]
 pub(crate) mod proc_tree;
 #[cfg(desktop)]
 #[allow(dead_code)] // B2a 只放生命週期，呼叫點在 B2b 接上

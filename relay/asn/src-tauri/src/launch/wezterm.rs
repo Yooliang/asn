@@ -475,7 +475,14 @@ pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
     if cfg!(windows) {
         locate_with(env, bundled_dir(), fs)
     } else {
-        locate_unix(env, std::env::var("PATH").ok().as_deref(), fs)
+        // ASN_WEZTERM_DIR（設了就只認它）→ PATH 上本人裝的 → ASN 自己按需取得的（wezterm_fetch）
+        let found = locate_unix(env.clone(), std::env::var("PATH").ok().as_deref(), fs);
+        if found.is_ok() || env.as_ref().is_some_and(|d| !d.as_os_str().is_empty()) {
+            return found;
+        }
+        super::mux::default_base()
+            .and_then(|base| super::wezterm_fetch::fetched_dirs(&base).into_iter().find_map(|d| locate_unix(Some(d), None, fs).ok()))
+            .ok_or_else(|| found.unwrap_err())
     }
 }
 

@@ -100,6 +100,28 @@ jobs:
           cargo test --locked --no-default-features --lib -- "${args[@]}"
 
       # 產品的 Mux 與真的 RealRunner 在 Linux 上真的起 wezterm-mux-server、開窗格、get-text（#893）。版本與雜湊和 asn-wezterm-linux-probe 同一組；沒有 DISPLAY
+      # Linux 按需取得 WezTerm（#893 第 3 張）：空的資料夾、PATH 沒有 wezterm、不設 ASN_WEZTERM_DIR，產品的取得流程真的連 GitHub 下載固定版本、核對雜湊、解壓、跑 --version，
+      # 再讓 locate 找得到；之後的步驟拿取得的那份跑 mux 實測（取得流程 → 實際可用）
+      - name: Linux 真的下載取得 WezTerm（固定版本、核對雜湊）
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_DATA_HOME="$RUNNER_TEMP/xdg"
+          rm -rf "$XDG_DATA_HOME"; mkdir -p "$XDG_DATA_HOME"
+          unset ASN_WEZTERM_DIR DISPLAY WAYLAND_DISPLAY
+          command -v wezterm && { echo "runner 上不該有 wezterm"; exit 1; } || true
+          cargo test --locked --no-default-features --lib launch::wezterm_fetch::tests::linux_real_fetch_wezterm -- --ignored --test-threads=1 --nocapture
+          echo "ASN_FETCHED_DIR=$(ls -d "$XDG_DATA_HOME"/ASN/wezterm/*-ubuntu-*/ | head -1)" >> "$GITHUB_ENV"
+          ls -la "$XDG_DATA_HOME"/ASN/wezterm/*/
+
+      - name: 用取得的 WezTerm 起 mux、開窗格、get-text
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ASN_WEZTERM_DIR="${ASN_FETCHED_DIR%/}"
+          unset DISPLAY WAYLAND_DISPLAY
+          cargo test --locked --no-default-features --lib launch::mux::tests::linux_real_mux_spawn_get_text -- --ignored --test-threads=1 --nocapture
+
       - name: Linux 真的 WezTerm 起 mux、開窗格、get-text
         shell: bash
         env:
