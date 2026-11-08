@@ -19,9 +19,9 @@
       <button class="tb close" @click="ctl('close')" aria-label="關閉並結束" title="關閉"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </span>
   </header>
-  <div class="shell" :class="{ merged: ui.mode === 'merged' }">
-  <!-- 別台正在看這台（#597）：不能關，只能結束 -->
+  <!-- 別台正在看這台（#597）：不能關，只能結束。放在 .shell 外面：.shell 是左右排的，放裡面會被撐成整條高（#1029） -->
   <div class="viewed-bar" :class="{ 'viewed-bar-input': v.input }" v-for="v in beingViewed" :key="v.id" role="alert"><span v-if="v.input">⚠ 「{{ v.who }}」正在這台的夥伴「{{ v.window }}」打字，可以回答權限框。如果不是你，請馬上按結束。</span><span v-else>「{{ v.who }}」正在看夥伴「{{ v.window }}」的畫面。如果不是你，請按結束。</span><button class="aero-btn" type="button" @click="stopBeingViewed(v.id)">結束</button></div>
+  <div class="shell" :class="{ merged: ui.mode === 'merged' }">
   <div class="pane list-pane">
     <div class="me">
       <div class="me-av">

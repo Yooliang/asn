@@ -102,3 +102,21 @@ test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次�
   const chat = read('../ui/lib/chatpane.mjs')
   assert.match(chat, /!\(r === null && remoteOn\.value\)\) remoteAvail\.value = r/, '正在看時一時問不到，不把這一格收掉')
 })
+
+test('#1029 收到的畫面直接是內容（lib/tauri.mjs 的 listen 已經拆掉 payload）：收到第一幅就算開始看，結束也收得到', async () => {
+  const tauri = read('../ui/lib/tauri.mjs')
+  assert.match(tauri, /export const listen = \(evt, fn\) => T\.event\.listen\(evt, e => fn\(e\.payload\)\)/, 'listen 交給回呼的是 payload 本身')
+  for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
+    const code = read(f).replace(/^\s*\/\/.*$/gm, '')
+    assert.ok(!code.includes('.payload'), `${f} 不能再讀 .payload（每一幅都會被丟掉，畫面一直停在「等」）`)
+    assert.match(code, /listen\(FRAME_EVENT, f => \{/)
+    assert.match(code, /listen\(END_EVENT, e => \{ if \(e\?\.id === id\) finish\(e\.text \|\| ''\) \}\)/)
+  }
+})
+
+test('#1029 被看的那台的紅條放在左右並排的區塊外面：只佔上方一條，不會被撐成整條高', () => {
+  const html = read('../ui/list.html')
+  const bar = html.indexOf('<div class="viewed-bar"'), shell = html.indexOf('<div class="shell"')
+  assert.ok(bar > 0 && shell > 0 && bar < shell, '紅條在 .shell 前面（.win 是上下排的）')
+  assert.match(read('../ui/style.css'), /\.viewed-bar\{flex:none;/, '紅條不伸縮')
+})

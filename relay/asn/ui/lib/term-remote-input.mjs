@@ -82,13 +82,13 @@ export const RemoteInput = {
       phase.value = 'pin'; note.value = ''; soon.value = false; warn.value = ''
       try {
         const Terminal = await loadXterm()
-        offFrame = await props.api.listen(FRAME_EVENT, ev => {
-          const f = ev?.payload
+        // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
+        offFrame = await props.api.listen(FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'typing') phase.value = 'typing'
           term.write(frameToWrite(f))
         })
-        offEnd = await props.api.listen(END_EVENT, ev => { if (ev?.payload?.id === id) finish(ev.payload.text || '') })
+        offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
         const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
         if (!alive) { stop(); return }

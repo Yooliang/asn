@@ -92,13 +92,13 @@ export const RemoteView = {
       phase.value = 'pin'; note.value = ''; soon.value = false
       try {
         const Terminal = await loadXterm()
-        offFrame = await props.api.listen(FRAME_EVENT, ev => {
-          const f = ev?.payload
+        // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）。#1029 第一版前這裡讀 ev.payload，每一幅都被丟掉，畫面一直停在「等」
+        offFrame = await props.api.listen(FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'watching') phase.value = 'watching'
           term.write(frameToWrite(f))
         })
-        offEnd = await props.api.listen(END_EVENT, ev => { if (ev?.payload?.id === id) finish(ev.payload.text || '') })
+        offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
         const r = await props.api.start(props.node, props.name, props.machine)
         id = r.id
         // 確認本人的時候這一格被收掉了：這次已經開始，要記得結束，不然那台會一直送到到期
