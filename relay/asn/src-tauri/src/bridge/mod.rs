@@ -15,6 +15,7 @@ pub mod launcher;
 pub mod lock;
 pub mod wait_alert;
 pub mod mail;
+pub mod notice_route;
 pub mod orphans;
 pub mod partner_ops;
 pub mod pending;

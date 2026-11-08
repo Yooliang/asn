@@ -8,6 +8,7 @@ use super::engines::{EngineEvent, EngineSet};
 use super::forward_selftest;
 use super::launcher::{Launched, Launcher};
 use super::partner_ops::{CommandJob, PartnerOps};
+use super::notice_route;
 use super::slash;
 use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
@@ -1064,6 +1065,34 @@ impl Core {
 
     // ---- 對後端 ----
     async fn send_back(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
+        // 收發室自己說話：先走後台 bridge_notice（寄件人「ASN 通知」）；跨帳號（409）或舊後台（404）退回舊寄法
+        if notice_route::use_bridge_notice(from_agent.is_none(), &o.id) {
+            let (status, resp) = match self.relay.api_status("bridge_notice", notice_route::body(&o.id, body)).await {
+                Ok((s, v)) => (Some(s), v),
+                Err(e) => {
+                    self.log.line(&format!("bridge notice failed id={}: {e}", o.id));
+                    (None, Value::Null)
+                }
+            };
+            match notice_route::classify(status, &resp) {
+                notice_route::NoticeOutcome::Sent => {
+                    if let Some(r) = notice_route::skipped_reason(&resp) {
+                        self.log.line(&format!("bridge notice not sent id={}: {r}", o.id));
+                    }
+                    return true;
+                }
+                notice_route::NoticeOutcome::Drop => {
+                    if status.is_some() {
+                        self.log.line(&format!("bridge notice failed id={} HTTP {}", o.id, status.unwrap_or(0)));
+                    }
+                    return false;
+                }
+                notice_route::NoticeOutcome::Fallback => {}
+            }
+        }
+        self.send_back_legacy(o, body, from_agent, expects_reply).await
+    }
+    async fn send_back_legacy(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
         let mut b = json!({ "to_node": o.from_node, "body": body, "reply_to": o.id, "from_agent": from_agent.unwrap_or(&self.cfg.mailbox_name) });
         if !o.from_agent.is_empty() {
             b["to_agent"] = json!(o.from_agent);
