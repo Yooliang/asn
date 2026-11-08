@@ -78,7 +78,8 @@ export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 版本較舊時，會改用
 // 手機遠端開窗時，前台或背景由那台電腦自己的設定決定（手機不送這個選項）；只有開在終端服務視窗的運行（asn終端兩種）才會有前台／背景之分
 export const LAUNCH_DISPLAY_NOTE = '會照那台電腦的設定，開在前台或背景'
 export const DISPLAY_NOTE_RUNS = ['term', 'pi']
-export const showDisplayNote = runKey => DISPLAY_NOTE_RUNS.includes(runKey)
+// 只能開在前台的模型（目錄上 foregroundOnly，例如 pi）不顯示：那台的設定管不到，說「前台或背景」不精確（西川 #1077 二審）
+export const showDisplayNote = (runKey, row = null) => DISPLAY_NOTE_RUNS.includes(runKey) && row?.foregroundOnly !== true
 export const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '不支援' }, pi: { status: 'ok', why: '只能用 asn終端（pi shell）開' }, term: { status: 'no', why: '只能用 asn終端（pi shell）開' } }
 
 // 那台的 pi：有沒有 pi 的啟動設定、回報了哪些模型

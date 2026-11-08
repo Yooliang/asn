@@ -80,8 +80,13 @@ test('「前台或背景」的說明：給使用者看、不含數字與英文�
   assert.doesNotMatch(LAUNCH_DISPLAY_NOTE, /[0-9#A-Za-z]/)
   for (const k of ['term', 'pi']) assert.equal(showDisplayNote(k), true, k)
   for (const k of ['acp', 'self', '', null, undefined]) assert.equal(showDisplayNote(k), false, String(k))
+  // 只能開在前台的模型（pi）：選哪一種運行都不顯示
+  const pi = MODEL_CATALOG.find(r => r.id === 'pi')
+  assert.equal(pi.foregroundOnly, true)
+  for (const k of ['term', 'pi']) assert.equal(showDisplayNote(k, pi), false, `pi ${k}`)
+  assert.equal(showDisplayNote('term', MODEL_CATALOG.find(r => r.id === 'claude')), true)
   const m = read('m.html')
-  assert.ok(m.includes('v-if="showDisplayNote(lchRunKey)">{{ LAUNCH_DISPLAY_NOTE }}</p>'))
+  assert.ok(m.includes('v-if="showDisplayNote(lchRunKey, lchRow)">{{ LAUNCH_DISPLAY_NOTE }}</p>'))
   assert.ok(!m.includes(LAUNCH_DISPLAY_NOTE), '字串不寫在頁面裡')
   for (const f of ['list.html', 'list.js', 'lib/partner-launch-ui.mjs']) {
     const s = read(f)
