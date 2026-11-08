@@ -78,7 +78,7 @@ test('平台只收 desktop／android；其他值 bad_request，不寫入', { ski
   await assert.rejects(db.query(`update relay.device_keys set platform = 'ios' where node = '${D}'`), 'check constraint 擋住')
 })
 
-test('同一把公鑰第一次登記後不能改；換新公鑰（新金鑰）才能換平台', { skip }, async () => {
+test('同一把公鑰第一次登記後不能改；登記過 android 的節點換新金鑰仍是 android', { skip }, async () => {
   const db = await boot()
   assert.equal((await publish(db, D, K1, 'android')).ok, true)
   assert.equal((await publish(db, D, K1, 'desktop')).ok, true, '回 ok 但不改')
@@ -86,11 +86,24 @@ test('同一把公鑰第一次登記後不能改；換新公鑰（新金鑰）�
   assert.equal((await publish(db, D, K1)).ok, true, '舊版不帶也不會洗掉')
   assert.equal(await platformOf(db, D), 'android')
   assert.equal((await publish(db, D, K2, 'desktop')).ok, true)
-  assert.equal(await platformOf(db, D), 'desktop', '新金鑰：平台重新登記')
-  assert.equal((await publish(db, D, K1, 'android')).ok, true)
+  assert.equal(await platformOf(db, D), 'android', '登記過 android，換新金鑰報 desktop 仍是 android')
+  assert.equal((await publish(db, D, K1)).ok, true)
+  assert.equal(await platformOf(db, D), 'android', '換新金鑰不帶 platform 仍是 android')
+  assert.equal((await db.query(`select sign_pub from relay.device_keys where node = '${D}'`)).rows[0].sign_pub, K1, '公鑰照常更新')
+})
+
+test('沒登記過 android 的節點：換新金鑰可重新登記，可以變 android，變了就固定', { skip }, async () => {
+  const db = await boot()
+  await publish(db, D, K1, 'desktop')
+  assert.equal(await platformOf(db, D), 'desktop')
+  await publish(db, D, K2, 'android')
+  assert.equal(await platformOf(db, D), 'android', 'desktop → android 可以')
+  await publish(db, D, K1, 'desktop')
   assert.equal(await platformOf(db, D), 'android')
-  assert.equal((await publish(db, D, K2)).ok, true, '舊版換新公鑰：平台回到未登記')
-  assert.equal(await platformOf(db, D), null)
+  const db2 = await boot()
+  await publish(db2, D, K1)
+  await publish(db2, D, K2, 'android')
+  assert.equal(await platformOf(db2, D), 'android', 'null → android 可以')
 })
 
 test('舊版不帶 platform 照常上傳（null＝舊資料）；之後同一把公鑰可補登記一次，登記後不能改', { skip }, async () => {
@@ -105,7 +118,7 @@ test('舊版不帶 platform 照常上傳（null＝舊資料）；之後同一把
   assert.equal((await publish(db, D, 'x', 'android')).error, 'bad_request')
 })
 
-test('pending 帶 from_platform：登記什麼回什麼，null 當 desktop', { skip }, async () => {
+test('pending 帶 from_platform：公鑰登記 android 回 android，null 當 desktop', { skip }, async () => {
   const db = await boot()
   await publish(db, Z, 'Z'.repeat(43))
   await publish(db, D, K1)
@@ -117,7 +130,27 @@ test('pending 帶 from_platform：登記什麼回什麼，null 當 desktop', { s
   await publish(db, D, K1, 'android')
   assert.equal((await pending(db)).requests[0].from_platform, 'android')
   await publish(db, D, K2, 'desktop')
-  assert.equal((await pending(db)).requests[0].from_platform, 'desktop')
+  assert.equal((await pending(db)).requests[0].from_platform, 'android', '登記過 android 不會變回 desktop')
+})
+
+test('pending 的平台也看節點回報：android／ios 都回 android；兩邊都 desktop 或 null 才回 desktop', { skip }, async () => {
+  const db = await boot()
+  await publish(db, Z, 'Z'.repeat(43))
+  await publish(db, D, K1)
+  await startView(db)
+  const nodePlatform = p => db.query(`update relay.nodes set platform = $1 where id = '${D}'`, [p])
+  const from = async () => (await pending(db)).requests[0].from_platform
+  assert.equal(await from(), 'desktop', '兩邊都 null')
+  await nodePlatform('android')
+  assert.equal(await from(), 'android', '公鑰沒登記平台、節點是 android（舊版手機）')
+  await nodePlatform('ios')
+  assert.equal(await from(), 'android', 'ios 也算')
+  await nodePlatform('windows')
+  assert.equal(await from(), 'desktop')
+  await publish(db, D, K1, 'desktop')
+  assert.equal(await from(), 'desktop', '兩邊都 desktop')
+  await nodePlatform('android')
+  assert.equal(await from(), 'android', '節點是 android 優先')
 })
 
 test('term_view_stop 多了 mobile_off 原因；D 查得到', { skip }, async () => {

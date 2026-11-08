@@ -1,9 +1,10 @@
 -- 允許移動設備查看終端（手機看電腦的終端 PR⑤）：後台登記每把設備公鑰屬於電腦還是手機，被看的那台依此決定要不要接受。
 -- 設計（asn真 定）：
---   * 平台記在 relay.device_keys，和設備公鑰同一列：同一把公鑰「第一次登記平台」時寫入，之後不能改（要換平台就得換新金鑰，被看的那台會走首次提示）。
---     null＝舊資料（還沒登記平台），一律當電腦。只收 desktop／android。
+--   * 平台記在 relay.device_keys，和設備公鑰同一列：同一把公鑰「第一次登記平台」時寫入，之後不能改。
+--     登記過 android 的節點，換新金鑰後仍是 android（只能維持 android，或從 null／desktop 變 android）。
+--     null＝舊資料（還沒登記平台），當電腦。只收 desktop／android。
 --   * 公鑰上傳新增選填的 p_platform。舊版用戶端不帶，照常能上傳（兩個參數的版本轉呼叫三個參數的版本，和 term_view_start 同一個做法，避免同名多載歧義）。
---   * 被看的那台領請求（term_view_pending）時多拿到 from_platform＝看的那台的公鑰登記的平台（null 當 desktop）。
+--   * 被看的那台領請求（term_view_pending）時多拿到 from_platform：公鑰登記的是 android，或節點回報的平台是 android／ios（舊版手機不帶 platform 也算），回 android；否則回 desktop。
 --     「允許移動設備查看終端」這個開關只存在被看的那台本機，後台不存、發起階段不擋：被看的那台領到請求時依本機設定接受或拒絕。
 --   * 被看的那台拒絕移動設備時用新的固定原因 mobile_off 回報（term_view_stop），看的那台顯示一句清楚的話。
 -- 先不用：舊版不帶 platform、不認得 from_platform 與 mobile_off，行為不變。
@@ -28,10 +29,11 @@ begin
      or (p_platform is not null and p_platform not in ('desktop', 'android')) then
     return jsonb_build_object('error', 'bad_request');
   end if;
-  -- 公鑰沒變：平台只有「原本還沒登記」時才寫入，已登記的不能改。公鑰換了＝新金鑰，平台重新登記
+  -- 公鑰沒變：平台只有「原本還沒登記」時才寫入，已登記的不能改。公鑰換了＝新金鑰，平台重新登記；但原本是 android 的仍是 android
   insert into relay.device_keys (node, tenant_id, sign_pub, platform) values (p_node, v_t, p_sign_pub, p_platform)
     on conflict (node) do update set
-      platform = case when relay.device_keys.sign_pub is distinct from excluded.sign_pub then excluded.platform
+      platform = case when relay.device_keys.platform = 'android' then 'android'
+                      when relay.device_keys.sign_pub is distinct from excluded.sign_pub then excluded.platform
                       else coalesce(relay.device_keys.platform, excluded.platform) end,
       sign_pub = excluded.sign_pub,
       updated_at = now()
@@ -48,7 +50,7 @@ as $function$
   select public.asn_relay_device_key_publish(p_node, p_sign_pub, null::text);
 $function$;
 
--- T 領取（節點金鑰）：多帶 from_platform＝看的那台的公鑰登記的平台（null 當 desktop）
+-- T 領取（節點金鑰）：多帶 from_platform（android 或 desktop）：公鑰登記 android，或節點平台是 android／ios → android
 create or replace function public.asn_relay_term_view_pending(p_node text)
  returns jsonb language plpgsql security definer set search_path to ''
 as $function$
@@ -57,7 +59,7 @@ declare
   v_act jsonb;
 begin
   perform public.asn_relay_term_view_expire();
-  select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'scope', v.scope, 'from_node', v.from_node, 'from_name', n.name, 'from_pub', k.sign_pub, 'from_platform', coalesce(k.platform, 'desktop'),
+  select coalesce(jsonb_agg(jsonb_build_object('id', v.id, 'scope', v.scope, 'from_node', v.from_node, 'from_name', n.name, 'from_pub', k.sign_pub, 'from_platform', case when k.platform = 'android' or n.platform in ('android', 'ios') then 'android' else 'desktop' end,
       'window_name', v.window_name, 'topic', v.topic,
       'd_eph_pub', v.d_eph_pub, 'd_sig', v.d_sig, 'expires_s', extract(epoch from v.expires_at)::bigint) order by v.created_at), '[]'::jsonb)
     into v_req
