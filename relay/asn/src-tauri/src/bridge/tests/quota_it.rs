@@ -73,7 +73,7 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
     assert_eq!(owner_notices(&h), 0, "主人通知改由後台寄（名單回報帶暫停時間），不寄到本機視窗");
     // 通知內容：設備名、台北時間、reply=no
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
-    assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
+    assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 收發室的 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
     assert_eq!(n["expects_reply"], json!(false));
     // 再來一次 quota 事件（同一次額度用完）：不重複通知
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 3000).await;

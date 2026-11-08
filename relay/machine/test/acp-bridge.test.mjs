@@ -93,7 +93,7 @@ test('橋＋acp：沒登入——寄件人收到說明（不吞信），信被 a
     until: c => c.st.sent.some(s => s.reply_to === uid(1) && /需要登入/.test(s.body)) && c.st.acked.has(uid(1)) && c.st.rosterPosts.some(p => p.agents.some(a => a.status === 'login-required')),
   })
   const note = r.st.sent.find(s => s.reply_to === uid(1))
-  assert.match(note.body, /^\[收發室\] 轉交給 Gemini 失敗：Gemini 需要登入/)
+  assert.match(note.body, /^[^\n：]{1,40}：\[收發室\] 轉交給 Gemini 失敗：Gemini 需要登入/)
 })
 
 test('橋＋acp：沒指定收件人——背景工作者不代收（信留在 inbox 給本人）', async () => {

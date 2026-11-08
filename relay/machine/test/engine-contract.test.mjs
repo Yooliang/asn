@@ -143,3 +143,14 @@ test('契約：身分判定經轉接器 identity 區塊；命中者帶 engine，
   const noName = { engine: 'fake', inspectCaller: () => ({ viaChain: { pid: 9, name: '' } }) }
   assert.throws(() => findCaller('收信', [noName]), /沒有名字，無法當收件人/)
 })
+
+test('系統通知（沒有 fromAgent）第一行前面加「<設備名>：」；代夥伴寄的信不加', async () => {
+  const r = await runWithFakeEngine({
+    inbox: [mail(3, { to_agent: '不存在' }), mail(4)], windows: wins, env: { ASN_DEVICE_NAME: '小良的家用機', FAKE_ENGINE_REPLY: '收到了' },
+    until: c => c.st.acked.has(uid(3)) && c.st.acked.has(uid(4)) && c.st.sent.length >= 2,
+  })
+  const notice = r.st.sent.find(s => s.reply_to === uid(3)), reply = r.st.sent.find(s => s.reply_to === uid(4))
+  assert.ok(notice.body.startsWith('小良的家用機：[收發室] 找不到名叫'), notice.body)
+  assert.equal(reply.body, '收到了', '代夥伴寄的回信不加前綴')
+  assert.equal(reply.from_agent, '假視窗甲')
+})

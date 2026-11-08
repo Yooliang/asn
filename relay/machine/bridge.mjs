@@ -22,6 +22,7 @@ import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profil
 import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
+import { noticeDevice, withNoticePrefix } from './notice-name.mjs'
 import { sentMarkName } from './sent-mark.mjs'
 import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
 import { createAckRetry } from './ack-retry.mjs'
@@ -34,6 +35,8 @@ const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltud
 import { HOME_DIR, locateHome } from './home.mjs'
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
+// 這台的設備名：收發室自己說話的系統通知第一行會冠上它（見 notice-name.mjs）。ASN_DEVICE_NAME 優先，其次電腦名稱；都沒有就「未命名設備」（絕不露出節點代號）
+const DEVICE_NAME = noticeDevice(envGet(process.env, 'DEVICE_NAME') || process.env.COMPUTERNAME || os.hostname())
 const DEFAULT_AGENT = (envGet(process.env, 'RELAY_DEFAULT_AGENT') || '').trim()   // 沒指定收件視窗的信交給誰；空＝不丟給任何 session（留在信箱，等 ASN 視窗的本人處理）
 const EXTRA_ALLOW = (envGet(process.env, 'RELAY_ALLOW') || '').split(',').map(s => s.trim()).filter(Boolean)
 const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
@@ -182,7 +185,7 @@ const unrouted = new Set()   // mail ids already logged as kept in the inbox for
 // expectsReply（選填 true／false）：視窗代寄回信時寄件人明說的「要不要等回信」；系統通知與沒有明說的轉寄不帶，欄位就是 null
 async function sendBack(p, body, fromAgent, expectsReply) {
   try {
-    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body, reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
+    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body: withNoticePrefix(body, fromAgent, DEVICE_NAME), reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
     return true
   } catch (e) { log(`send back failed id=${p.mail.id}: ${e.message}`); return false }
 }

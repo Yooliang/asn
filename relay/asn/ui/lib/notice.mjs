@@ -73,3 +73,6 @@ export function withNoticeGroup(groups, friends, { query = '' } = {}) {
   if (!f || String(query ?? '').trim()) return groups
   return [{ key: '__notice', kind: 'notice', label: NOTICE_LABEL, items: [f] }, ...groups]
 }
+
+/** 「通知」對話裡這則通知是哪一台設備寄的（氣泡上方顯示「通知 · <設備名>」）；其他對話、自己寄的、沒有設備名＝空字串 */
+export const noticeDevOf = (m, isNotice) => (isNotice === true && m && m.k === 'them' && typeof m.dev === 'string' ? m.dev : '')

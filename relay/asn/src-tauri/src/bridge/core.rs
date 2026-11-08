@@ -27,6 +27,7 @@ mod fail_notice;
 mod held_notice;
 mod misroute;
 mod quota;
+mod notice_name;
 mod selftest;
 mod mux_notice;
 mod wait_notice;
@@ -59,6 +60,8 @@ fn env_u64(k: &str, d: u64) -> u64 {
 pub struct Config {
     pub node: String,
     pub mailbox_name: String,
+    /// 這台的設備顯示名：收發室自己說話的通知第一行會冠上它（None＝不加，測試用）；見 core/notice_name.rs
+    pub device_name: Option<String>,
     /// 沒指定收件視窗的信，環境變數 ASN_RELAY_DEFAULT_AGENT 指定的收件視窗（舊相容；預設空＝交給本人）。bridge.json 的設定優先
     pub default_agent: String,
     /// 設定檔（bridge.json）所在資料夾；沒有就只看環境變數
@@ -149,6 +152,7 @@ impl Config {
         Config {
             node: node.into(),
             mailbox_name: crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
+            device_name: (!cfg!(test)).then(|| notice_name::local_device_name(|k| std::env::var(k).ok())),
             default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_default(),
             data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
@@ -1064,6 +1068,7 @@ impl Core {
 
     // ---- 對後端 ----
     async fn send_back(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
+        let body = notice_name::with_notice_prefix(body, from_agent, self.cfg.device_name.as_deref());
         let mut b = json!({ "to_node": o.from_node, "body": body, "reply_to": o.id, "from_agent": from_agent.unwrap_or(&self.cfg.mailbox_name) });
         if !o.from_agent.is_empty() {
             b["to_agent"] = json!(o.from_agent);
