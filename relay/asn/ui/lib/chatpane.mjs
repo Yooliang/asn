@@ -427,8 +427,8 @@ export const ChatPane = {
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
-  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active"></remote-view>
-  <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
+  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active"></remote-view>
+  <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
