@@ -14,11 +14,12 @@ const PINS = JSON.parse(fs.readFileSync(new URL('./wezterm-pins.json', import.me
 export const WEZTERM_VERSION = PINS.version
 export const WEZTERM_ZIP_SHA256 = PINS.windows_zip_sha256
 export const WEZTERM_LICENSE_SHA256 = PINS.license_sha256
+export const WEZTERM_ZIP_SIZE = PINS.windows_zip_size
 // 只留這 7 個：視窗與命令列、mux-server（0.2.0 夥伴窗格改由它常駐）、終端機後端（conpty）、顯示用的 ANGLE。不附除錯檔、strip-ansi-escapes、mesa 軟體算圖
 export const WEZTERM_FILES = ['wezterm-gui.exe', 'wezterm.exe', 'wezterm-mux-server.exe', 'conpty.dll', 'OpenConsole.exe', 'libEGL.dll', 'libGLESv2.dll']
-const BASE = `https://github.com/wez/wezterm/releases/download/${WEZTERM_VERSION}`
+const BASE = `${PINS.release_base}/${WEZTERM_VERSION}`
 const ZIP_NAME = `WezTerm-windows-${WEZTERM_VERSION}.zip`
-const LICENSE_URL = `https://raw.githubusercontent.com/wez/wezterm/${WEZTERM_VERSION}/LICENSE.md`
+const LICENSE_URL = `${PINS.raw_base}/${WEZTERM_VERSION}/LICENSE.md`
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,10 +34,11 @@ ASN 只取用其中 7 個檔（wezterm-gui.exe、wezterm.exe、wezterm-mux-serve
 各檔都出自上面那個壓縮檔，以壓縮檔的 SHA-256 核對（官方沒有逐檔雜湊）。這是固定版本，換版本前會重新驗證。
 `
 
-async function download(url, want) {
+async function download(url, want, wantSize) {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`下載失敗 ${res.status}：${url}`)
   const buf = Buffer.from(await res.arrayBuffer())
+  if (wantSize != null && buf.length !== wantSize) throw new Error(`大小不符：${url}\n  預期 ${wantSize}\n  實得 ${buf.length}`)
   const got = sha256(buf)
   if (got !== want) throw new Error(`雜湊不符：${url}\n  預期 ${want}\n  實得 ${got}`)
   return buf
@@ -55,7 +57,7 @@ export async function fetchWezTerm() {
   let zipOk = fs.existsSync(zipPath) && sha256(fs.readFileSync(zipPath)) === WEZTERM_ZIP_SHA256
   if (!zipOk) {
     console.log(`下載 WezTerm ${WEZTERM_VERSION}（約 63 MB）…`)
-    fs.writeFileSync(zipPath, await download(`${BASE}/${ZIP_NAME}`, WEZTERM_ZIP_SHA256))
+    fs.writeFileSync(zipPath, await download(`${BASE}/${ZIP_NAME}`, WEZTERM_ZIP_SHA256, WEZTERM_ZIP_SIZE))
   }
   const licPath = path.join(cacheDir, 'LICENSE.md')
   if (!(fs.existsSync(licPath) && sha256(fs.readFileSync(licPath)) === WEZTERM_LICENSE_SHA256)) {

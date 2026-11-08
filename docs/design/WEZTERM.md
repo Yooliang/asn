@@ -345,3 +345,11 @@ Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務
 - 流程：檢查磁碟空間 → 下載到私有暫存資料夾（只連官方 GitHub 主機、有逾時與大小上限）→ 核對 SHA-256（不符就刪檔、不重試）→ 解 xz → 只取 `wezterm`、`wezterm-mux-server` 兩個一般檔案 → 跑 `--version`（雜湊核對之後才執行）→ 原子改名到 `<資料目錄>/ASN/wezterm/<版本>-<發行版>/`。任何失敗都清掉暫存資料夾。
 - 找程式的順序（`wezterm::locate`）：`ASN_WEZTERM_DIR`（設了就只認它）→ PATH → 這裡取得的。沒有 `wezterm-gui` 時 `WezTermDir.gui` 是 `None`，要開 GUI 的地方回「這台電腦沒有安裝 WezTerm 桌面版」。
 - 不做：自動更新版本、重試、預先下載、arm64／macOS／其他發行版。
+
+### 取得失敗的顯示與退避（#893 第 4 張）
+
+- 網址統一用官方正式路徑 `wezterm/wezterm`（`wez/wezterm` 只是轉址）；基底網址在 `wezterm-pins.json`，Windows 與 Linux 共用。Rust 端還會核對它必須等於程式內的常數，改了 json 也導不到別處。
+- 大小核對：實收位元組數必須等於 pins 的 `size`（Windows zip 是 `windows_zip_size`），不等就當失敗，和雜湊不符一樣刪檔、報錯。
+- 失敗會記下原因分類與時間（`<資料目錄>/ASN/wezterm/fetch-state.json`），一天內不自動重下；設定頁按「重試」才忽略退避。成功就清掉紀錄。
+- 原因分類（`network`／`disk`／`mismatch`／`unsupported`／`unrunnable`／`other`）各有一句給使用者看的話（`ui/lib/term-server-setting.mjs`）；網址、雜湊、錯誤碼只寫進 log。
+- Linux 找不到 wezterm 但這台能自動取得時，設定頁照樣顯示「夥伴共用同一個終端服務」開關；打開後馬上在背景取得，狀態與重試鈕顯示在開關底下。Windows 的畫面不變。

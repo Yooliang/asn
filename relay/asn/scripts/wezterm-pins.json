@@ -1,8 +1,11 @@
 {
   "_comment": "WezTerm 固定版本與雜湊的唯一來源。Windows 的 fetch-wezterm.mjs、Linux 的 wezterm_fetch.rs（編譯時讀入）、CI 的探測腳本都以這裡為準；換版本要全部一起換並重新做真機驗證。",
   "version": "20240203-110809-5046fc22",
+  "release_base": "https://github.com/wezterm/wezterm/releases/download",
+  "raw_base": "https://raw.githubusercontent.com/wezterm/wezterm",
   "license_sha256": "37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca",
   "windows_zip_sha256": "57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4",
+  "windows_zip_size": 66162319,
   "linux": {
     "ubuntu-22.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu22.04.tar.xz", "sha256": "142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c", "size": 30508792 },
     "ubuntu-20.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu20.04.tar.xz", "sha256": "1d15105d53cdd409e251034b35a9f2dec7146fad06e2b9642553b2b3e02ed224", "size": 30515256 },

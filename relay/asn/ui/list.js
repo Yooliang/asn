@@ -166,9 +166,9 @@ try {
   if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, screenWatch: true, permPhone: true, mobileView: true, termServer: true, termServerSupported: false, termServerMissing: false, keyProtection: '', termServerActive: true, termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, screenWatch: true, permPhone: true, mobileView: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', keyProtection: '', termServerActive: true, termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
-  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, termFetch: typeof s.term_fetch === 'string' ? s.term_fetch : '', termFetchKind: typeof s.term_fetch_kind === 'string' ? s.term_fetch_kind : '', keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
@@ -1458,6 +1458,7 @@ const app = createApp({
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
     const setBridgeAutoResume = on => runBridge(() => invoke('bridge_set_auto_resume', { on }))
     const setBridgeTermServer = on => runBridge(() => invoke('bridge_set_term_server', { on }))
+    const retryBridgeTermFetch = () => runBridge(() => invoke('bridge_retry_term_fetch'))
     const setBridgePermPhone = on => runBridge(() => invoke('bridge_set_perm_phone', { on }))
     const setBridgeMobileView = on => runBridge(() => invoke('bridge_set_mobile_view', { on }))
     const setBridgeScreenWatch = on => runBridge(() => invoke('bridge_set_screen_watch', { on }))
@@ -1709,7 +1710,7 @@ const app = createApp({
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
       known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error } : null,
-      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
+      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
@@ -1765,6 +1766,7 @@ const app = createApp({
         case 'known-input-no-ask': if (value?.node) await setKnownNoAsk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
         case 'bridge-term-server': await setBridgeTermServer(value === true); break
+        case 'bridge-term-fetch-retry': await retryBridgeTermFetch(); break
         case 'bridge-screen-watch': await setBridgeScreenWatch(value === true); break
         case 'bridge-perm-phone': await setBridgePermPhone(value === true); break
         case 'bridge-mobile-view': await setBridgeMobileView(value === true); break
