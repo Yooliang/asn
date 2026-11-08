@@ -62,8 +62,9 @@ mod term_frame;
 mod view_stream;
 #[cfg(desktop)]
 mod view_seen;
-#[cfg(desktop)]
 mod view_remote;
+#[cfg(feature = "gui")]
+mod view_d;   // 看別台畫面（D）的共用核心：電腦與手機的命令都呼叫它
 #[cfg(all(desktop, feature = "gui"))]
 mod presence;
 #[cfg(desktop)]
@@ -772,9 +773,79 @@ async fn term_read(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
 
 /// 本人簽章的權杖（看別台畫面的發起與回報要用）
 #[cfg(feature = "gui")]
-#[cfg(desktop)]
 async fn pair_token(auth: &auth::AuthState) -> Result<String, String> {
     account::signing_token(auth).await.filter(|t| !t.is_empty()).ok_or_else(|| "尚未登入".to_string())
+}
+
+/// 看別台畫面（D）用的真實後端：本人簽章的權杖、設備金鑰、後台、認得的電腦。電腦與手機共用
+#[cfg(feature = "gui")]
+struct LiveBackend {
+    app: AppHandle,
+    relay: Arc<Relay>,
+    data_dir: std::path::PathBuf,
+}
+
+/// 驗過 T 的簽章後記住那台（看的那台專用；守門測試只允許這裡與 start_remote_view、start_view_poller）
+#[cfg(feature = "gui")]
+fn view_backend_see(dir: &std::path::Path, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<device_id::Tofu, String> {
+    device_id::live::see(dir, node, name, sign_pub, now_ms)
+}
+
+#[cfg(all(target_os = "android", feature = "gui"))]
+impl LiveBackend {
+    fn new(app: AppHandle, relay: Arc<Relay>, data_dir: std::path::PathBuf) -> Self {
+        LiveBackend { app, relay, data_dir }
+    }
+}
+
+#[cfg(feature = "gui")]
+impl view_d::ViewBackend for LiveBackend {
+    fn token(&self) -> impl std::future::Future<Output = Result<String, String>> + Send {
+        let app = self.app.clone();
+        async move { pair_token(app.state::<auth::AuthState>().inner()).await }
+    }
+    fn key(&self) -> impl std::future::Future<Output = Result<device_id::DeviceKey, String>> + Send {
+        let dir = self.data_dir.clone();
+        async move { device_id::live::key_async(&dir).await }
+    }
+    fn api(&self, action: &str, body: Value, token: &str) -> impl std::future::Future<Output = Result<Value, String>> + Send {
+        let (relay, action, token) = (self.relay.clone(), action.to_string(), token.to_string());
+        async move { relay.api_signed(&action, Some(body), Some(&token)).await }
+    }
+    fn known(&self) -> Result<device_id::KnownPeers, String> {
+        device_id::live::known(&self.data_dir)
+    }
+    fn see(&self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<device_id::Tofu, String> {
+        view_backend_see(&self.data_dir, node, name, sign_pub, now_ms)
+    }
+    fn alert(&self, peer: &str, kind: &str, sign_pub: &str) -> impl std::future::Future<Output = ()> + Send {
+        let (relay, peer, kind, sign_pub) = (self.relay.clone(), peer.to_string(), kind.to_string(), sign_pub.to_string());
+        async move { device_id::live::alert(&relay, &peer, &kind, &sign_pub).await }
+    }
+}
+
+/// 手機看畫面時，把畫面與結束送給發起的那個視窗
+#[cfg(all(not(desktop), feature = "gui"))]
+struct LiveSink {
+    app: AppHandle,
+    label: String,
+}
+
+#[cfg(all(target_os = "android", feature = "gui"))]
+impl LiveSink {
+    fn new(app: AppHandle, label: String) -> Self {
+        LiveSink { app, label }
+    }
+}
+
+#[cfg(all(not(desktop), feature = "gui"))]
+impl view_d::ViewSink for LiveSink {
+    fn emit(&self, event: &'static str, payload: Value) {
+        let _ = self.app.emit_to(self.label.as_str(), event, payload);
+    }
+    fn log(&self, line: String) {
+        elog!("{line}");
+    }
 }
 
 /// 設定頁「認得的電腦」：名字、指紋、第一次記住的時間（只讀本機）
@@ -1074,7 +1145,7 @@ fn term_viewed_stop(views: State<'_, Arc<BeingViewed>>, id: String) {
 }
 
 /// 別台看畫面用的即時頻道網址（含 anon 金鑰，只在 Rust）。沒有 anon 金鑰就沒有，看畫面也不能用
-#[cfg(desktop)]
+#[cfg(feature = "gui")]
 struct ViewNet(Option<String>);
 
 /// 這台能不能看那台的畫面：已配對而且我可以看對方、有即時頻道。不跳提示
@@ -1093,59 +1164,22 @@ async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>
 #[cfg(desktop)]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, auth::AuthState>, views: State<'_, Arc<view_remote::RemoteViews>>, inputs: State<'_, Arc<RemoteInputs>>, net: State<'_, ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>) -> Result<Value, String> {
+async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, views: State<'_, Arc<view_remote::RemoteViews>>, inputs: State<'_, Arc<RemoteInputs>>, net: State<'_, ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>) -> Result<Value, String> {
     let url = net.0.clone().ok_or("這台現在連不上即時頻道，不能看畫面")?;
     if !device_id::can_be_viewed_here(&app.data_dir) {
         return Err(device_id::NOT_VIEWABLE_HERE.into());
     }
-    let machine: String = machine.unwrap_or_default().chars().filter(|c| !c.is_control()).take(64).collect();
+    let machine = view_d::clean_machine(machine);
     // 看畫面或打字（0.2.10）。沒帶是看畫面；其他字一律不收
-    let scope = match scope.as_deref() {
-        None => view_handshake::Scope::View,
-        Some(x) => view_handshake::Scope::parse(x).ok_or("不認得的範圍")?,
-    };
+    let scope = view_d::parse_scope(scope.as_deref(), true)?;
     if scope == view_handshake::Scope::Input && inputs.count() >= view_input::MAX_OPEN {
         return Err(view_input::TOO_MANY.into());
     }
-    let token = pair_token(&auth).await?;
-    let key = device_id::live::key_async(&app.data_dir).await?;
-    let id = view_remote::new_session_id()?;
-    let now_s = (auth::now_ms() / 1000) as i64;
-    let s = view_remote::session(&id, &app.node, &to_node, &partner, scope, now_s);
-    views.add(&id)?;
-    let (eph, d_sig) = match view_handshake::d_start(&key, &s, now_s) {
-        Ok(v) => v,
-        Err(e) => {
-            views.remove(&id);
-            return Err(e);
-        }
-    };
     let relay = relay_of(&app)?;
-    let body = serde_json::json!({ "id": id, "to_node": to_node, "window_name": partner, "d_eph_pub": eph.public_b64(), "d_sig": d_sig, "expires_at": claude_quota::iso_secs(s.expires_s * 1000), "scope": scope.as_str() });
-    let started = relay.api_signed("term_view_start", Some(body), Some(&token)).await.ok();
-    let field = |k: &str| started.as_ref().and_then(|v| v.get(k).and_then(Value::as_str).map(str::to_string));
-    let (Some(topic), Some(to_pub)) = (field("topic"), field("to_pub")) else {
-        views.remove(&id);
-        return Err("沒有發起成功，請稍後再試".into());
-    };
-    // 那台的設備公鑰先和本機記住的比（TOFU）：換了就不開始、通知本人（兩邊都寄 changed）
-    let tofu = match device_id::live::known(&app.data_dir) {
-        Ok(k) => k.check(&to_node, &to_pub),
-        Err(e) => {
-            views.remove(&id);
-            let _ = relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": "ended" })), Some(&token)).await;
-            return Err(e);
-        }
-    };
-    if tofu == device_id::Tofu::Changed {
-        views.remove(&id);
-        let _ = relay.api_signed("term_view_report", Some(serde_json::json!({ "id": id, "state": "ended" })), Some(&token)).await;
-        device_id::live::alert(&relay, &to_node, "changed", &to_pub).await;
-        return Err(view_remote::TARGET_KEY_CHANGED.into());
-    }
-    let target = RemoteTarget { node: to_node, name: machine, sign_pub: to_pub, tofu };
+    let backend = LiveBackend { app: window.app_handle().clone(), relay: relay.clone(), data_dir: app.data_dir.clone() };
+    let view_d::Begun { id, session: s, eph, topic, target } = view_d::begin(&backend, views.inner(), &app.node, to_node, partner, machine, scope, auth::now_ms()).await?;
     start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), inputs.inner().clone(), url, topic, s.clone(), eph, target);
-    Ok(serde_json::json!({ "id": id, "expires_s": s.expires_s, "scope": scope.as_str() }))
+    Ok(view_d::started_json(&id, s.expires_s, scope))
 }
 
 /// 本人在打字的畫面上打的字（0.2.10）：只有這個入口。字先過按鍵規則，編序號、加密，送到那台；那台確認之前會補送。
@@ -1227,12 +1261,7 @@ fn spawn_input_resend(app: AppHandle, label: String, views: Arc<view_remote::Rem
 
 /// 看的那台要看的那台：節點、名字、設備公鑰，和本機記住的比過的結果
 #[cfg(all(desktop, feature = "gui"))]
-struct RemoteTarget {
-    node: String,
-    name: String,
-    sign_pub: String,
-    tofu: device_id::Tofu,
-}
+type RemoteTarget = view_d::Target;
 
 /// 本人把觀看畫面藏起來（暫停）或叫出來（繼續）
 #[cfg(feature = "gui")]
@@ -2504,6 +2533,9 @@ pub fn run() {
         .manage(terms)
         .manage(Arc::new(askpass::dialog::DialogState::default()))
         .plugin(tauri_plugin_updater::Builder::new().build());
+    // 手機看電腦的終端（只看）：進行中的觀看與即時頻道網址
+    #[cfg(all(not(desktop), feature = "gui"))]
+    let builder = builder.manage(Arc::new(view_remote::RemoteViews::default())).manage(ViewNet(anon_url.clone()));
     // 安卓版專屬：開系統瀏覽器（登入、點連結）
     #[cfg(target_os = "android")]
     let builder = builder.plugin(tauri_plugin_opener::init());
@@ -2530,7 +2562,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {
