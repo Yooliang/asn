@@ -117,8 +117,9 @@ test('#1029 收到的畫面直接是內容（lib/tauri.mjs 的 listen 已經拆�
   for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
     const code = read(f).replace(/^\s*\/\/.*$/gm, '')
     assert.ok(!code.includes('.payload'), `${f} 不能再讀 .payload（每一幅都會被丟掉，畫面一直停在「等」）`)
-    assert.match(code, /listen\(FRAME_EVENT, f => \{/)
-    assert.match(code, /listen\(END_EVENT, e => \{ if \(e\?\.id === id\) finish\(e\.text \|\| ''\) \}\)/)
+    // 看畫面那支改經 listenWhile（作廢就解除），回呼的寫法一樣
+    assert.match(code, /listen(While\(props\.api, |\()FRAME_EVENT, f => \{/)
+    assert.match(code, /listen(While\(props\.api, |\()END_EVENT, e => \{ if \(e\?\.id === id\) finish\(e\.text \|\| ''\) \}/)
   }
 })
 
