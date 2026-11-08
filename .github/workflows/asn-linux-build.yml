@@ -175,6 +175,68 @@ jobs:
       - name: 檢查手機版能編譯
         run: cargo check --locked --target aarch64-linux-android --lib
 
+  # 手機版 Kotlin/Gradle 編譯檢查：android-check 只編 Rust，Kotlin 與 gradle 設定出包才會知道編不編得過。
+  # 只編 Kotlin（:app:compileUniversalDebugKotlin），不編 Rust 的 .so、不簽章、不上傳成品、不碰 secrets；權限只讀。
+  # Tauri 的 gradle 檔（tauri.settings.gradle / tauri.build.gradle.kts）是 tauri-build 在 cargo 建置時產生的，不進 repo，
+  # 所以先跑一次 cargo check（沿用 android-check 的快取）讓它產生；compileKotlin 不依賴 rustBuild* 任務，gradle 不會呼叫 npm / tauri。
+  android-kotlin:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # 驗 gradle-wrapper.jar 的 SHA-256 是否為 Gradle 官方發布版（固定到完整 commit，對應 v6.4.1）
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: android-check
+          save-if: false
+
+      - name: 設定 NDK 編譯器（ring 要用）
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$bin/aarch64-linux-android26-clang"
+          {
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: 確認沒有 google-services.json（沒有這個檔也要編得過）
+        run: |
+          if [ -e relay/asn/src-tauri/gen/android/app/google-services.json ]; then
+            echo "google-services.json 不該存在於 CI" >&2; exit 1
+          fi
+
+      - name: 產生 Tauri 的 gradle 檔（cargo check 觸發 tauri-build）
+        working-directory: relay/asn/src-tauri
+        env:
+          TAURI_ANDROID_PROJECT_PATH: ${{ github.workspace }}/relay/asn/src-tauri/gen/android
+          # 這三個是 tauri CLI 出包時會設的；tauri 的 build.rs 靠它們產生 Kotlin 橋接檔（generated/，不進 repo）
+          WRY_ANDROID_PACKAGE: tw.yooliang.asn
+          WRY_ANDROID_LIBRARY: asn_lib
+          WRY_ANDROID_KOTLIN_FILES_OUT_DIR: ${{ github.workspace }}/relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/generated
+        run: |
+          mkdir -p gen/android/app/src/main/java/tw/yooliang/asn/generated
+          cargo check --locked --target aarch64-linux-android --lib
+          ls -la gen/android/tauri.settings.gradle gen/android/app/tauri.build.gradle.kts
+
+      - name: 編 Kotlin（Android，不含 Rust .so）
+        working-directory: relay/asn/src-tauri/gen/android
+        run: sh ./gradlew --no-daemon --console=plain :app:compileUniversalDebugKotlin
+
   # 電腦版（Windows）：只有 Windows 才編的程式（#[cfg(windows)]，例如 Windows Hello、DPAPI）其他工作都編不到（#945 發現）。
   # 這裡只檢查 Rust 能不能編，不打包、不跑測試、不碰任何 secrets；權限只讀。
   windows-check:
