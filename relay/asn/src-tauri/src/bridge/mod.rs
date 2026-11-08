@@ -77,7 +77,17 @@ pub fn settings_path(data_dir: &Path) -> PathBuf {
 }
 /// 這台有沒有「夥伴共用終端服務」可用：Windows 用安裝檔附帶的 WezTerm；其他平台看 PATH 上找不找得到 wezterm（不跳提示、只查檔案）
 pub fn term_server_supported() -> bool {
-    cfg!(windows) || crate::launch::wezterm::locate(&crate::launch::wezterm::RealFs).is_ok()
+    // Linux：PATH 上或之前取得過的找得到，或這台的發行版 ASN 能自動取得（取得流程見 launch/wezterm_fetch）
+    cfg!(windows) || crate::launch::wezterm::locate(&crate::launch::wezterm::RealFs).is_ok() || crate::launch::wezterm_fetch::can_fetch()
+}
+
+/// 設定頁要顯示的「終端程式取得」狀態（Windows 隨安裝檔附帶，永遠是沒事）
+fn term_fetch_status() -> crate::launch::wezterm_fetch::FetchStatus {
+    let none = crate::launch::wezterm_fetch::FetchStatus { state: "", kind: "" };
+    if cfg!(windows) {
+        return none;
+    }
+    crate::launch::mux::default_base().map_or(none, |b| crate::launch::wezterm_fetch::status(&b))
 }
 
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
@@ -349,6 +359,10 @@ pub struct Status {
     pub term_server_supported: bool,
     /// Linux 上找不到 wezterm：設定頁說一句怎麼裝（Windows 一律 false）
     pub term_server_missing: bool,
+    /// Linux 按需取得終端程式的狀態：""（沒事）／"fetching"（取得中）／"failed"（失敗，原因在 `term_fetch_kind`）
+    pub term_fetch: String,
+    /// 失敗的原因分類：network／disk／mismatch／unsupported／unrunnable／other；沒失敗是空字串。網址、雜湊等細節只進 log，不進這裡
+    pub term_fetch_kind: String,
     /// 登入資料和設備金鑰怎麼保護：windows／keyring（系統金鑰庫）／file_only（只靠檔案權限）
     pub key_protection: String,
     /// 這次啟動有沒有在用共用的終端服務。和 `term_server` 不同＝改了還沒生效，要重開 ASN
@@ -405,7 +419,8 @@ impl Manager {
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        let fetch = term_fetch_status();
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -478,6 +493,23 @@ impl Manager {
         s.term_server_off = !on;
         s.term_server_on = on;
         write_settings(&self.data_dir, s)?;
+        // Linux 剛打開、而且找不到終端程式：馬上在背景去取（一天內失敗過就照退避不連網），畫面才有狀態可以顯示
+        if on && !cfg!(windows) {
+            let (env_wez, env_mux) = (std::env::var(crate::launch::win_term::ENV_WEZTERM).ok(), std::env::var(crate::launch::win_term::ENV_MUX).ok());
+            let found = crate::launch::wezterm::locate(&crate::launch::wezterm::RealFs).is_ok();
+            if crate::launch::wezterm_fetch::should_fetch(true, env_wez.as_deref(), env_mux.as_deref(), found) {
+                crate::launch::wezterm_fetch::spawn_background(false);
+            }
+        }
+        Ok(self.status())
+    }
+
+    /// 設定頁「重試」：忽略退避，馬上重新取得終端程式（Linux 才有；結果之後從 `status()` 看）
+    pub fn retry_term_fetch(&self) -> Result<Status, String> {
+        if cfg!(windows) {
+            return Err("這個平台不需要另外取得終端程式".into());
+        }
+        crate::launch::wezterm_fetch::spawn_background(true);
         Ok(self.status())
     }
 

@@ -3098,7 +3098,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
         let found = wezterm::locate(&wezterm::RealFs).is_ok();
         // 開了卻找不到 wezterm：背景去官方 GitHub 取固定版本（見 wezterm_fetch）；取好後重開 ASN 才會用上
         if super::wezterm_fetch::should_fetch(user_on, env_wez.as_deref(), env_mux.as_deref(), found) {
-            super::wezterm_fetch::spawn_background();
+            super::wezterm_fetch::spawn_background(false);
         }
         super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), user_on, found)
     };

@@ -8,7 +8,7 @@
 #![cfg(desktop)]
 
 use crate::nowin::NoWindow;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -17,8 +17,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const PINS_JSON: &str = include_str!("../../../scripts/wezterm-pins.json");
-/// 只往這個前綴下載（網址由 pins 組出，不接受環境變數覆寫）
-pub(crate) const DOWNLOAD_PREFIX: &str = "https://github.com/wezterm/wezterm/releases/download/";
+/// 下載基底網址（官方正式路徑；`wez/wezterm` 只是轉址）。pins 裡的 `release_base` 必須等於它，網址不接受環境變數覆寫
+pub(crate) const DOWNLOAD_BASE: &str = "https://github.com/wezterm/wezterm/releases/download";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -29,9 +29,10 @@ const NEED_FREE: u64 = 512 * MIB;
 const WANTED: [(&str, &str); 2] = [("wezterm/usr/bin/wezterm", "wezterm"), ("wezterm/usr/bin/wezterm-mux-server", "wezterm-mux-server")];
 
 #[derive(Debug, Deserialize)]
-struct Pins {
-    version: String,
-    linux: BTreeMap<String, Pin>,
+pub(crate) struct Pins {
+    pub version: String,
+    pub release_base: String,
+    pub linux: BTreeMap<String, Pin>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,12 +120,12 @@ pub(crate) fn pin_key(os: &OsRelease, arch: &str) -> Result<&'static str, String
 // ---------- 網址 ----------
 
 /// 下載網址：tarball 檔名只准英數與 `._-`，版本同理，免得資料被改壞時組出奇怪的網址
-pub(crate) fn download_url(version: &str, tarball: &str) -> Result<String, String> {
+pub(crate) fn download_url(release_base: &str, version: &str, tarball: &str) -> Result<String, String> {
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if !ok(version) || !ok(tarball) {
+    if release_base != DOWNLOAD_BASE || !ok(version) || !ok(tarball) {
         return Err("內建的 WezTerm 版本資料不合法".into());
     }
-    Ok(format!("{DOWNLOAD_PREFIX}{version}/{tarball}"))
+    Ok(format!("{DOWNLOAD_BASE}/{version}/{tarball}"))
 }
 
 /// 重新導向只跟 GitHub 自己的主機（release 檔實際放在 githubusercontent.com）
@@ -258,18 +259,27 @@ fn sha256_file(p: &Path) -> Result<String, String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// 寫入量超過上限就報錯（解壓縮炸彈）
+/// 寫入量超過上限就報錯（解壓縮炸彈）；底層寫入失敗（多半是磁碟）另外記下，好分辨是檔案問題還是磁碟問題
 struct Capped<W: Write> {
     inner: W,
     left: u64,
+    write_failed: bool,
 }
 impl<W: Write> Write for Capped<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.len() as u64 > self.left {
             return Err(std::io::Error::other("解開後的大小超過上限"));
         }
-        self.left -= buf.len() as u64;
-        self.inner.write(buf)
+        match self.inner.write(buf) {
+            Ok(n) => {
+                self.left -= n as u64;
+                Ok(n)
+            }
+            Err(e) => {
+                self.write_failed = true;
+                Err(e)
+            }
+        }
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
@@ -390,38 +400,148 @@ pub(crate) fn run_version_check(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- 失敗的分類與紀錄 ----------
+
+/// 取得失敗的原因分類。畫面上每一類各有一句給使用者看的話（ui/lib/term-server-setting.mjs）；
+/// 網址、雜湊、錯誤碼等細節只進 log（`FetchError::detail`），不出現在畫面上
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailKind {
+    /// 連不上、逾時、伺服器回錯
+    Network,
+    /// 磁碟空間不夠、寫不進去
+    Disk,
+    /// 下載的檔案大小或雜湊不符、解不開、內容不是預期的
+    Mismatch,
+    /// 這台 Linux（或處理器）還沒有支援自動取得
+    Unsupported,
+    /// 取得了，但在這台電腦跑不起來（例如缺系統函式庫）
+    Unrunnable,
+    /// 其他
+    Other,
+}
+
+impl FailKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            FailKind::Network => "network",
+            FailKind::Disk => "disk",
+            FailKind::Mismatch => "mismatch",
+            FailKind::Unsupported => "unsupported",
+            FailKind::Unrunnable => "unrunnable",
+            FailKind::Other => "other",
+        }
+    }
+    pub(crate) fn parse(s: &str) -> FailKind {
+        match s {
+            "network" => FailKind::Network,
+            "disk" => FailKind::Disk,
+            "mismatch" => FailKind::Mismatch,
+            "unsupported" => FailKind::Unsupported,
+            "unrunnable" => FailKind::Unrunnable,
+            _ => FailKind::Other,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct FetchError {
+    pub kind: FailKind,
+    /// 給 log 看的細節（可以有網址、路徑）；不顯示在畫面上
+    pub detail: String,
+    /// 因為退避期間而沒有去取（沒有連網、也不記新的失敗）
+    pub skipped: bool,
+}
+
+impl FetchError {
+    fn new(kind: FailKind, detail: impl Into<String>) -> Self {
+        FetchError { kind, detail: detail.into(), skipped: false }
+    }
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+const STATE_FILE: &str = "fetch-state.json";
+/// 同一次失敗之後，這麼久之內不自動重下；本人按「重試」才忽略
+pub(crate) const BACKOFF_MS: u64 = 24 * 3600 * 1000;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FailRecord {
+    kind: String,
+    at_ms: u64,
+}
+
+fn read_fail(root: &Path) -> Option<(FailKind, u64)> {
+    let text = std::fs::read_to_string(root.join(STATE_FILE)).ok()?;
+    let r: FailRecord = serde_json::from_str(&text).ok()?;
+    Some((FailKind::parse(&r.kind), r.at_ms))
+}
+
+/// 先寫暫存檔再改名，讀的人不會讀到寫一半的
+fn write_fail(root: &Path, kind: FailKind, now_ms: u64) {
+    let rec = FailRecord { kind: kind.as_str().to_string(), at_ms: now_ms };
+    let Ok(text) = serde_json::to_string(&rec) else { return };
+    let tmp = root.join(format!("{STATE_FILE}.tmp"));
+    if std::fs::create_dir_all(root).is_ok() && std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, root.join(STATE_FILE));
+    }
+}
+
+fn clear_fail(root: &Path) {
+    let _ = std::fs::remove_file(root.join(STATE_FILE));
+}
+
+/// 上次失敗到現在還在退避期間嗎（時鐘被調過、紀錄在很久以後的未來，也當作過期）
+pub(crate) fn backoff_active(at_ms: u64, now_ms: u64) -> bool {
+    let diff = if now_ms >= at_ms { now_ms - at_ms } else { at_ms - now_ms };
+    diff < BACKOFF_MS
+}
+
 // ---------- 安裝 ----------
 
-/// 已下載的 tar.xz → 核對雜湊 → 解壓 → 取出兩個檔 → `check` → 原子改名成 `final_dir`。
-/// `work` 是呼叫端管理的暫存資料夾（失敗時由它清）；雜湊不符會連 tarball 一起刪掉。
-pub(crate) fn install_tarball(tarball: &Path, sha256: &str, work: &Path, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
-    let got = sha256_file(tarball)?;
+/// 已下載的 tar.xz → 核對大小與雜湊 → 解壓 → 取出兩個檔 → `check` → 原子改名成 `final_dir`。
+/// `work` 是呼叫端管理的暫存資料夾（失敗時由它清）；大小或雜湊不符會連 tarball 一起刪掉。
+pub(crate) fn install_tarball(tarball: &Path, sha256: &str, size: u64, work: &Path, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), FetchError> {
+    let disk = |what: &str, e: std::io::Error| FetchError::new(FailKind::Disk, format!("{what}：{e}"));
+    let have = std::fs::metadata(tarball).map_err(|e| disk("讀不到下載的檔案", e))?.len();
+    if have != size {
+        let _ = std::fs::remove_file(tarball);
+        return Err(FetchError::new(FailKind::Mismatch, format!("下載的檔案大小不符（預期 {size}，實際 {have}），已刪除，沒有安裝")));
+    }
+    let got = sha256_file(tarball).map_err(|e| FetchError::new(FailKind::Disk, e))?;
     if !got.eq_ignore_ascii_case(sha256) {
         let _ = std::fs::remove_file(tarball);
-        return Err("下載的檔案和預期的不一樣（雜湊不符），已刪除，沒有安裝".into());
+        return Err(FetchError::new(FailKind::Mismatch, "下載的檔案和預期的不一樣（雜湊不符），已刪除，沒有安裝"));
     }
     let tar_path = work.join("wezterm.tar");
     {
-        let mut input = std::io::BufReader::new(std::fs::File::open(tarball).map_err(|e| format!("讀不到下載的檔案：{e}"))?);
-        let file = std::fs::File::create(&tar_path).map_err(|e| format!("寫入暫存檔失敗：{e}"))?;
-        let mut out = Capped { inner: std::io::BufWriter::new(file), left: lim.max_tar };
-        lzma_rs::xz_decompress(&mut input, &mut out).map_err(|e| format!("解壓縮失敗：{e}"))?;
-        out.flush().map_err(|e| format!("寫入暫存檔失敗：{e}"))?;
+        let mut input = std::io::BufReader::new(std::fs::File::open(tarball).map_err(|e| disk("讀不到下載的檔案", e))?);
+        let file = std::fs::File::create(&tar_path).map_err(|e| disk("寫入暫存檔失敗", e))?;
+        let mut out = Capped { inner: std::io::BufWriter::new(file), left: lim.max_tar, write_failed: false };
+        if let Err(e) = lzma_rs::xz_decompress(&mut input, &mut out) {
+            // 寫暫存檔失敗（多半是空間不夠）算磁碟；其餘（壞檔、超過上限）算檔案不符
+            let kind = if out.write_failed { FailKind::Disk } else { FailKind::Mismatch };
+            return Err(FetchError::new(kind, format!("解壓縮失敗：{e}")));
+        }
+        out.flush().map_err(|e| disk("寫入暫存檔失敗", e))?;
     }
     let _ = std::fs::remove_file(tarball);
     let staged = work.join("out");
-    std::fs::create_dir(&staged).map_err(|e| format!("建立暫存資料夾失敗：{e}"))?;
-    let tar_file = std::fs::File::open(&tar_path).map_err(|e| format!("讀不到暫存檔：{e}"))?;
-    extract_members(std::io::BufReader::new(tar_file), &staged, lim)?;
+    std::fs::create_dir(&staged).map_err(|e| disk("建立暫存資料夾失敗", e))?;
+    let tar_file = std::fs::File::open(&tar_path).map_err(|e| disk("讀不到暫存檔", e))?;
+    extract_members(std::io::BufReader::new(tar_file), &staged, lim).map_err(|e| FetchError::new(FailKind::Mismatch, e))?;
     let _ = std::fs::remove_file(&tar_path);
-    check(&staged)?;
+    check(&staged).map_err(|e| FetchError::new(FailKind::Unrunnable, e))?;
     if let Some(parent) = final_dir.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("建立資料夾失敗：{e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| disk("建立資料夾失敗", e))?;
     }
     if dir_usable(final_dir) {
         return Ok(()); // 別的程序剛裝好同一份
     }
-    std::fs::rename(&staged, final_dir).or_else(|e| if dir_usable(final_dir) { Ok(()) } else { Err(format!("放進正式位置失敗：{e}")) })
+    std::fs::rename(&staged, final_dir).or_else(|e| if dir_usable(final_dir) { Ok(()) } else { Err(disk("放進正式位置失敗", e)) })
 }
 
 /// 兩個檔都在而且不是空的
@@ -431,7 +551,22 @@ pub(crate) fn dir_usable(dir: &Path) -> bool {
 
 // ---------- 下載 ----------
 
-async fn download(url: &str, dest: &Path, max: u64) -> Result<(), String> {
+/// 下載的介面：正式用 `RealHttp`；測試注入假的，驗證退避期間完全不連網
+pub(crate) trait Downloader {
+    /// 把 `url` 下載到 `dest`；實收位元組數必須剛好等於 `size`（超過 `max` 或不等都算失敗）
+    async fn fetch(&self, url: &str, dest: &Path, max: u64, size: u64) -> Result<(), FetchError>;
+}
+
+pub(crate) struct RealHttp;
+
+impl Downloader for RealHttp {
+    async fn fetch(&self, url: &str, dest: &Path, max: u64, size: u64) -> Result<(), FetchError> {
+        download(url, dest, max, size).await
+    }
+}
+
+async fn download(url: &str, dest: &Path, max: u64, size: u64) -> Result<(), FetchError> {
+    let net = |what: &str, e: reqwest::Error| FetchError::new(FailKind::Network, format!("{what}：{e}"));
     let policy = reqwest::redirect::Policy::custom(|a| {
         if a.previous().len() > 5 {
             return a.error("轉址太多次");
@@ -442,58 +577,103 @@ async fn download(url: &str, dest: &Path, max: u64) -> Result<(), String> {
             a.stop()
         }
     });
-    let client = reqwest::Client::builder().redirect(policy).connect_timeout(CONNECT_TIMEOUT).timeout(TOTAL_TIMEOUT).user_agent("asn").build().map_err(|e| format!("無法連線：{e}"))?;
-    let mut res = client.get(url).send().await.map_err(|e| format!("下載失敗（連不上或逾時）：{e}"))?;
+    let client = reqwest::Client::builder().redirect(policy).connect_timeout(CONNECT_TIMEOUT).timeout(TOTAL_TIMEOUT).user_agent("asn").build().map_err(|e| net("無法連線", e))?;
+    let mut res = client.get(url).send().await.map_err(|e| net("下載失敗（連不上或逾時）", e))?;
     if !res.status().is_success() {
-        return Err(format!("下載失敗：伺服器回 {}", res.status().as_u16()));
+        return Err(FetchError::new(FailKind::Network, format!("下載失敗：伺服器回 {}", res.status().as_u16())));
     }
-    if res.content_length().is_some_and(|n| n > max) {
-        return Err("下載的檔案比預期大太多，已中止".into());
+    if res.content_length().is_some_and(|n| n > max || n != size) {
+        return Err(FetchError::new(FailKind::Mismatch, format!("下載的檔案大小和預期的不一樣（預期 {size}，伺服器說 {:?}），已中止", res.content_length())));
     }
-    let mut file = std::fs::File::create(dest).map_err(|e| format!("寫入暫存檔失敗：{e}"))?;
+    let disk = |e: std::io::Error| FetchError::new(FailKind::Disk, format!("寫入暫存檔失敗：{e}"));
+    let mut file = std::fs::File::create(dest).map_err(disk)?;
     let mut total = 0u64;
-    while let Some(chunk) = res.chunk().await.map_err(|e| format!("下載中斷：{e}"))? {
+    while let Some(chunk) = res.chunk().await.map_err(|e| net("下載中斷", e))? {
         total += chunk.len() as u64;
-        if total > max {
-            return Err("下載的檔案比預期大太多，已中止".into());
+        if total > max || total > size {
+            return Err(FetchError::new(FailKind::Mismatch, "下載的檔案比預期大，已中止"));
         }
-        file.write_all(&chunk).map_err(|e| format!("寫入暫存檔失敗：{e}"))?;
+        file.write_all(&chunk).map_err(disk)?;
     }
-    file.flush().map_err(|e| format!("寫入暫存檔失敗：{e}"))?;
+    file.flush().map_err(disk)?;
+    if total != size {
+        return Err(FetchError::new(FailKind::Mismatch, format!("下載的檔案大小不符（預期 {size}，實收 {total}）")));
+    }
     Ok(())
 }
 
 /// 下載 + 安裝。暫存資料夾在任何結果下都會清掉
-async fn fetch_into(root: &Path, url: &str, sha256: &str, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
-    let tmp = make_tmp(root)?;
+async fn fetch_into<H: Downloader>(http: &H, root: &Path, url: &str, pin: &Pin, final_dir: &Path, lim: &Limits, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), FetchError> {
+    let tmp = make_tmp(root).map_err(|e| FetchError::new(FailKind::Disk, e))?;
     let tarball = tmp.0.join("download.tar.xz");
-    download(url, &tarball, lim.max_tarball).await?;
-    install_tarball(&tarball, sha256, &tmp.0, final_dir, lim, check)
+    http.fetch(url, &tarball, lim.max_tarball, pin.size).await?;
+    install_tarball(&tarball, &pin.sha256, pin.size, &tmp.0, final_dir, lim, check)
 }
 
-/// 取得（已經有就直接回）。成功回正式位置，裡面有 `wezterm`、`wezterm-mux-server`。
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// 取得（已經有就直接回）。成功回正式位置，裡面有 `wezterm`、`wezterm-mux-server`，並清掉失敗紀錄。
+/// 失敗會記下原因分類與時間；`force` 為假時，上次失敗在一天內就不連網（`skipped`）。
 /// `base` 是 mux 檔案的上層資料夾（`mux::default_base()`）
-pub(crate) async fn ensure(base: &Path) -> Result<PathBuf, String> {
+pub(crate) async fn ensure_with<H: Downloader>(http: &H, base: &Path, force: bool, now_ms: u64, plan: &Plan<'_>) -> Result<PathBuf, FetchError> {
     let root = base.join("ASN").join("wezterm");
-    let pins = pins()?;
-    let os = parse_os_release(&std::fs::read_to_string("/etc/os-release").unwrap_or_default());
-    let key = pin_key(&os, std::env::consts::ARCH)?;
-    let pin = pins.linux.get(key).ok_or("內建的 WezTerm 版本資料缺這個發行版")?;
+    let result = ensure_inner(http, &root, force, now_ms, plan).await;
+    match &result {
+        Ok(_) => clear_fail(&root),
+        Err(e) if e.skipped => elog!("取得 WezTerm 暫不重試（上次失敗，一天內不自動重下）"),
+        Err(e) => {
+            elog!("取得 WezTerm 失敗：{}", e.detail);
+            write_fail(&root, e.kind, now_ms);
+        }
+    }
+    result
+}
+
+async fn ensure_inner<H: Downloader>(http: &H, root: &Path, force: bool, now_ms: u64, plan: &Plan<'_>) -> Result<PathBuf, FetchError> {
+    let pins = &plan.pins;
+    let key = pin_key(&plan.os, &plan.arch).map_err(|e| FetchError::new(FailKind::Unsupported, e))?;
+    let pin = pins.linux.get(key).ok_or_else(|| FetchError::new(FailKind::Other, "內建的 WezTerm 版本資料缺這個發行版"))?;
     let final_dir = root.join(format!("{}-{key}", pins.version));
     if dir_usable(&final_dir) {
         return Ok(final_dir);
     }
-    let url = download_url(&pins.version, &pin.tarball)?;
-    std::fs::create_dir_all(&root).map_err(|e| format!("建立資料夾失敗：{e}"))?;
-    clean_stale(&root);
-    check_space(free_bytes(&root), NEED_FREE)?;
-    elog!("取得 WezTerm 開始：{url}");
-    let res = fetch_into(&root, &url, &pin.sha256, &final_dir, &Limits::default(), &run_version_check).await;
-    match &res {
-        Ok(()) => elog!("取得 WezTerm 完成"),
-        Err(e) => elog!("取得 WezTerm 失敗：{e}"),
+    if !force {
+        if let Some((kind, at)) = read_fail(root) {
+            if backoff_active(at, now_ms) {
+                return Err(FetchError { kind, detail: "退避期間".into(), skipped: true });
+            }
+        }
     }
-    res.map(|()| final_dir)
+    let url = download_url(&pins.release_base, &pins.version, &pin.tarball).map_err(|e| FetchError::new(FailKind::Other, e))?;
+    std::fs::create_dir_all(root).map_err(|e| FetchError::new(FailKind::Disk, format!("建立資料夾失敗：{e}")))?;
+    clean_stale(root);
+    check_space(free_bytes(root), NEED_FREE).map_err(|e| FetchError::new(FailKind::Disk, e))?;
+    elog!("取得 WezTerm 開始：{url}");
+    fetch_into(http, root, &url, pin, &final_dir, &plan.lim, plan.check).await?;
+    elog!("取得 WezTerm 完成");
+    Ok(final_dir)
+}
+
+/// 取得時用到的環境：版本資料、發行版、處理器、取得後的檢查、大小上限。正式用 `system_plan()`；測試注入
+pub(crate) struct Plan<'a> {
+    pub pins: Pins,
+    pub os: OsRelease,
+    pub arch: String,
+    pub check: &'a dyn Fn(&Path) -> Result<(), String>,
+    pub lim: Limits,
+}
+
+fn system_plan() -> Result<Plan<'static>, FetchError> {
+    let pins = pins().map_err(|e| FetchError::new(FailKind::Other, e))?;
+    let os = parse_os_release(&std::fs::read_to_string("/etc/os-release").unwrap_or_default());
+    Ok(Plan { pins, os, arch: std::env::consts::ARCH.to_string(), check: &run_version_check, lim: Limits::default() })
+}
+
+pub(crate) async fn ensure(base: &Path, force: bool) -> Result<PathBuf, FetchError> {
+    let plan = system_plan().inspect_err(|e| elog!("取得 WezTerm 失敗：{}", e.detail))?;
+    ensure_with(&RealHttp, base, force, now_ms(), &plan).await
 }
 
 /// 這台已經取得過的資料夾（版本相符的）。給 `wezterm::locate` 當第三順位
@@ -511,10 +691,41 @@ pub(crate) fn should_fetch(user_on: bool, env_wez: Option<&str>, env_mux: Option
     !found && env_wez != Some("0") && env_mux != Some("0") && (user_on || env_mux == Some("1") || env_wez == Some("1"))
 }
 
+/// 這台能不能自動取得（發行版與處理器在支援表裡）。設定頁據此決定要不要顯示開關
+pub(crate) fn can_fetch() -> bool {
+    let os = parse_os_release(&std::fs::read_to_string("/etc/os-release").unwrap_or_default());
+    pin_key(&os, std::env::consts::ARCH).is_ok()
+}
+
 static IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 背景取得（同時只跑一個）。完成後要重開 ASN 才會用上；結果只寫 log
-pub(crate) fn spawn_background() {
+pub(crate) fn is_fetching() -> bool {
+    IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// 設定頁要顯示的取得狀態
+#[derive(Debug, PartialEq)]
+pub(crate) struct FetchStatus {
+    /// ""（沒事）／"fetching"／"failed"
+    pub state: &'static str,
+    /// state 是 "failed" 時的原因分類（`FailKind::as_str`），否則空
+    pub kind: &'static str,
+}
+
+pub(crate) fn status(base: &Path) -> FetchStatus {
+    status_from(is_fetching(), read_fail(&base.join("ASN").join("wezterm")).map(|(k, _)| k), !fetched_dirs(base).is_empty())
+}
+
+pub(crate) fn status_from(fetching: bool, failed: Option<FailKind>, have: bool) -> FetchStatus {
+    match (fetching, failed, have) {
+        (true, _, _) => FetchStatus { state: "fetching", kind: "" },
+        (false, Some(k), false) => FetchStatus { state: "failed", kind: k.as_str() },
+        _ => FetchStatus { state: "", kind: "" },
+    }
+}
+
+/// 背景取得（同時只跑一個）。`force`＝本人按了「重試」，忽略退避。完成後要重開 ASN 才會用上；結果只寫 log 與失敗紀錄
+pub(crate) fn spawn_background(force: bool) {
     let Some(base) = super::mux::default_base() else { return };
     if IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -522,7 +733,7 @@ pub(crate) fn spawn_background() {
     let spawned = std::thread::Builder::new().name("asn-wezterm-fetch".into()).spawn(move || {
         match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(rt) => {
-                let _ = rt.block_on(ensure(&base));
+                let _ = rt.block_on(ensure(&base, force));
             }
             Err(e) => elog!("取得 WezTerm 失敗：{e}"),
         }
@@ -555,6 +766,10 @@ mod tests {
         Ok(())
     }
 
+    fn lim() -> Limits {
+        Limits::default()
+    }
+
     #[test]
     fn pins_讀得懂_版本與探測腳本_windows_腳本一致() {
         let p = pins().unwrap();
@@ -563,26 +778,32 @@ mod tests {
             assert!(pin.sha256.len() == 64 && pin.sha256.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{k}");
             assert!(pin.tarball.starts_with(&format!("wezterm-{}.", p.version)) && pin.tarball.ends_with(".tar.xz"), "{k}");
             assert!(pin.size > 1_000_000 && pin.size < 64 * MIB, "{k}");
-            assert!(download_url(&p.version, &pin.tarball).is_ok());
+            assert!(download_url(&p.release_base, &p.version, &pin.tarball).is_ok());
         }
         // 探測腳本（CI）用同一組版本與雜湊，不能漂開
         let probe = include_str!("../../../../../.github/scripts/linux-wezterm-probe.sh");
         let u = &p.linux["ubuntu-22.04"];
         assert!(probe.contains(&format!("WEZTERM_VERSION='{}'", p.version)), "探測腳本的版本要等於 pins");
         assert!(probe.contains(&format!("TAR_SHA256='{}'", u.sha256)), "探測腳本的雜湊要等於 pins");
-        assert!(probe.contains(&u.tarball.replace(&p.version, "${WEZTERM_VERSION}")) || probe.contains("Ubuntu22.04.tar.xz"));
-        // Windows 的腳本讀同一份
+        assert!(probe.contains("github.com/wezterm/wezterm/releases/download"), "探測腳本也用正式路徑");
+        // Windows 的腳本讀同一份（版本、網址都不手抄）
         let mjs = include_str!("../../../scripts/fetch-wezterm.mjs");
         assert!(mjs.contains("wezterm-pins.json") && !mjs.contains(&p.version), "fetch-wezterm.mjs 不能再手抄版本");
+        assert!(!mjs.contains("github.com/wez/") && !mjs.contains("githubusercontent.com/wez/"), "網址統一用 wezterm/wezterm，且放在 pins 裡");
+        // 全部用官方正式路徑（wez/wezterm 只是轉址）
+        assert_eq!(p.release_base, DOWNLOAD_BASE);
     }
 
     #[test]
     fn 網址只組官方_github_前綴_檔名不合法就拒絕() {
-        assert_eq!(download_url("v1", "a.tar.xz").unwrap(), "https://github.com/wezterm/wezterm/releases/download/v1/a.tar.xz");
+        assert_eq!(download_url(DOWNLOAD_BASE, "v1", "a.tar.xz").unwrap(), "https://github.com/wezterm/wezterm/releases/download/v1/a.tar.xz");
         for bad in ["", "../x", "a/b", "a b", "a?b", "a#b", "a%2f"] {
-            assert!(download_url("v1", bad).is_err(), "{bad}");
-            assert!(download_url(bad, "a.tar.xz").is_err(), "{bad}");
+            assert!(download_url(DOWNLOAD_BASE, "v1", bad).is_err(), "{bad}");
+            assert!(download_url(DOWNLOAD_BASE, bad, "a.tar.xz").is_err(), "{bad}");
         }
+        // pins 裡的基底網址被改成別處也不行
+        assert!(download_url("https://example.com/x", "v1", "a.tar.xz").is_err());
+        assert!(download_url("https://github.com/wez/wezterm/releases/download", "v1", "a.tar.xz").is_err());
         for ok in ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"] {
             assert!(allowed_redirect_host(ok), "{ok}");
         }
@@ -657,10 +878,10 @@ mod tests {
     #[test]
     fn xz_解壓縮_有大小上限() {
         let mut out = Vec::new();
-        lzma_rs::xz_decompress(&mut std::io::Cursor::new(hello_xz()), &mut Capped { inner: &mut out, left: 5 }).unwrap();
+        lzma_rs::xz_decompress(&mut std::io::Cursor::new(hello_xz()), &mut Capped { inner: &mut out, left: 5, write_failed: false }).unwrap();
         assert_eq!(out, b"hello");
         let mut out = Vec::new();
-        let e = lzma_rs::xz_decompress(&mut std::io::Cursor::new(hello_xz()), &mut Capped { inner: &mut out, left: 4 }).unwrap_err();
+        let e = lzma_rs::xz_decompress(&mut std::io::Cursor::new(hello_xz()), &mut Capped { inner: &mut out, left: 4, write_failed: false }).unwrap_err();
         assert!(e.to_string().contains("上限"), "{e}");
     }
 
@@ -669,7 +890,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut raw = Vec::new();
         lzma_rs::xz_decompress(&mut std::io::Cursor::new(GOOD), &mut raw).unwrap();
-        extract_members(std::io::Cursor::new(raw), d.path(), &Limits::default()).unwrap();
+        extract_members(std::io::Cursor::new(raw), d.path(), &lim()).unwrap();
         assert!(dir_usable(d.path()));
         let mut names: Vec<String> = std::fs::read_dir(d.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         names.sort();
@@ -686,15 +907,15 @@ mod tests {
         let mut raw = Vec::new();
         lzma_rs::xz_decompress(&mut std::io::Cursor::new(BADSYM), &mut raw).unwrap();
         let d = tempfile::tempdir().unwrap();
-        let e = extract_members(std::io::Cursor::new(&raw), d.path(), &Limits::default()).unwrap_err();
+        let e = extract_members(std::io::Cursor::new(&raw), d.path(), &lim()).unwrap_err();
         assert!(e.contains("不是一般檔案"), "{e}");
         let mut good = Vec::new();
         lzma_rs::xz_decompress(&mut std::io::Cursor::new(GOOD), &mut good).unwrap();
-        let tiny = Limits { max_member: 8, ..Limits::default() };
+        let tiny = Limits { max_member: 8, ..lim() };
         assert!(extract_members(std::io::Cursor::new(&good), tempfile::tempdir().unwrap().path(), &tiny).unwrap_err().contains("大小不合理"));
-        let few = Limits { max_entries: 2, ..Limits::default() };
+        let few = Limits { max_entries: 2, ..lim() };
         assert!(extract_members(std::io::Cursor::new(&good), tempfile::tempdir().unwrap().path(), &few).unwrap_err().contains("成員太多"));
-        let total = Limits { max_total: 30, ..Limits::default() };
+        let total = Limits { max_total: 30, ..lim() };
         assert!(extract_members(std::io::Cursor::new(&good), tempfile::tempdir().unwrap().path(), &total).unwrap_err().contains("總量"));
         // 只有一個要的成員 → 缺另一個
         let mut b = tar::Builder::new(Vec::new());
@@ -702,7 +923,7 @@ mod tests {
         h.set_size(1);
         h.set_cksum();
         b.append_data(&mut h, "wezterm/usr/bin/wezterm", &b"x"[..]).unwrap();
-        let e = extract_members(std::io::Cursor::new(b.into_inner().unwrap()), tempfile::tempdir().unwrap().path(), &Limits::default()).unwrap_err();
+        let e = extract_members(std::io::Cursor::new(b.into_inner().unwrap()), tempfile::tempdir().unwrap().path(), &lim()).unwrap_err();
         assert!(e.contains("找不到 wezterm-mux-server"), "{e}");
         // 路徑穿越不算要的成員
         assert_eq!(wanted_name(Path::new("./wezterm/usr/bin/wezterm")), Some("wezterm"));
@@ -712,17 +933,35 @@ mod tests {
     }
 
     #[test]
-    fn 安裝_雜湊對_全程成功_暫存放進正式位置() {
+    fn 安裝_大小與雜湊都對_全程成功_暫存放進正式位置() {
         let root = tempfile::tempdir().unwrap();
         let tmp = make_tmp(root.path()).unwrap();
         let tarball = tmp.0.join("download.tar.xz");
         std::fs::write(&tarball, GOOD).unwrap();
         let fin = root.path().join("v-key");
-        install_tarball(&tarball, &hex(GOOD), &tmp.0, &fin, &Limits::default(), &ok_check).unwrap();
+        install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64, &tmp.0, &fin, &lim(), &ok_check).unwrap();
         assert!(dir_usable(&fin));
         drop(tmp);
         let left: Vec<String> = std::fs::read_dir(root.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(left, ["v-key"], "暫存資料夾清掉了");
+    }
+
+    #[test]
+    fn 安裝_大小不符_當失敗_刪檔_什麼都不執行() {
+        let root = tempfile::tempdir().unwrap();
+        let fin = root.path().join("v-key");
+        {
+            let tmp = make_tmp(root.path()).unwrap();
+            let tarball = tmp.0.join("download.tar.xz");
+            std::fs::write(&tarball, GOOD).unwrap();
+            // 雜湊是對的，只有大小不符：也要失敗（和雜湊不符同樣處理）
+            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64 + 1, &tmp.0, &fin, &lim(), &|_: &Path| panic!("大小不符不可以執行任何東西")).unwrap_err();
+            assert_eq!(e.kind, FailKind::Mismatch);
+            assert!(e.detail.contains("大小不符"), "{}", e.detail);
+            assert!(!tarball.exists(), "刪掉下載的檔");
+        }
+        assert!(!fin.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0, "暫存資料夾清掉了");
     }
 
     #[test]
@@ -733,8 +972,9 @@ mod tests {
             let tmp = make_tmp(root.path()).unwrap();
             let tarball = tmp.0.join("download.tar.xz");
             std::fs::write(&tarball, GOOD).unwrap();
-            let e = install_tarball(&tarball, &"0".repeat(64), &tmp.0, &fin, &Limits::default(), &|_: &Path| panic!("雜湊不符不可以執行任何東西")).unwrap_err();
-            assert!(e.contains("雜湊不符"), "{e}");
+            let e = install_tarball(&tarball, &"0".repeat(64), GOOD.len() as u64, &tmp.0, &fin, &lim(), &|_: &Path| panic!("雜湊不符不可以執行任何東西")).unwrap_err();
+            assert_eq!(e.kind, FailKind::Mismatch);
+            assert!(e.detail.contains("雜湊不符"), "{}", e.detail);
             assert!(!tarball.exists(), "刪掉下載的檔");
         }
         assert!(!fin.exists());
@@ -742,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn 安裝_解壓縮壞掉_檢查失敗_都不留東西() {
+    fn 安裝_解壓縮壞掉_檢查失敗_都不留東西_分類正確() {
         let root = tempfile::tempdir().unwrap();
         let fin = root.path().join("v-key");
         let junk = b"not an xz file at all, but with a known hash".to_vec();
@@ -750,25 +990,30 @@ mod tests {
             let tmp = make_tmp(root.path()).unwrap();
             let tarball = tmp.0.join("download.tar.xz");
             std::fs::write(&tarball, &junk).unwrap();
-            assert!(install_tarball(&tarball, &hex(&junk), &tmp.0, &fin, &Limits::default(), &ok_check).unwrap_err().contains("解壓縮失敗"));
+            let e = install_tarball(&tarball, &hex(&junk), junk.len() as u64, &tmp.0, &fin, &lim(), &ok_check).unwrap_err();
+            assert_eq!(e.kind, FailKind::Mismatch);
+            assert!(e.detail.contains("解壓縮失敗"), "{}", e.detail);
         }
         {
             let tmp = make_tmp(root.path()).unwrap();
             let tarball = tmp.0.join("download.tar.xz");
             std::fs::write(&tarball, GOOD).unwrap();
-            let e = install_tarball(&tarball, &hex(GOOD), &tmp.0, &fin, &Limits::default(), &|_: &Path| Err("缺少系統函式庫 libssl.so.3，請用套件管理員安裝後再試".to_string())).unwrap_err();
-            assert!(e.contains("libssl"), "{e}");
+            let e = install_tarball(&tarball, &hex(GOOD), GOOD.len() as u64, &tmp.0, &fin, &lim(), &|_: &Path| Err("缺少系統函式庫 libssl.so.3，請用套件管理員安裝後再試".to_string())).unwrap_err();
+            assert_eq!(e.kind, FailKind::Unrunnable);
+            assert!(e.detail.contains("libssl"), "{}", e.detail);
         }
         assert!(!fin.exists());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0, "暫存資料夾清掉了");
     }
 
     #[tokio::test]
-    async fn 下載失敗_連不上_暫存資料夾也清掉() {
+    async fn 下載失敗_連不上_暫存資料夾也清掉_分類是網路() {
         let root = tempfile::tempdir().unwrap();
         let fin = root.path().join("v-key");
-        let e = fetch_into(root.path(), "https://127.0.0.1:1/x.tar.xz", &"0".repeat(64), &fin, &Limits::default(), &ok_check).await.unwrap_err();
-        assert!(e.contains("下載失敗"), "{e}");
+        let pin = Pin { tarball: "x.tar.xz".into(), sha256: "0".repeat(64), size: 10 };
+        let e = fetch_into(&RealHttp, root.path(), "https://127.0.0.1:1/x.tar.xz", &pin, &fin, &lim(), &ok_check).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Network);
+        assert!(e.detail.contains("下載失敗"), "{}", e.detail);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0, "暫存資料夾清掉了");
     }
 
@@ -781,6 +1026,186 @@ mod tests {
         assert!(fresh.exists(), "剛建的不能清（可能有人正在下載）");
     }
 
+    // ---------- 失敗紀錄與退避 ----------
+
+    /// 假的下載：數被呼叫幾次；成功時寫入 GOOD
+    struct FakeHttp {
+        calls: std::cell::Cell<usize>,
+        fail: Option<(FailKind, &'static str)>,
+    }
+    impl FakeHttp {
+        fn ok() -> Self {
+            FakeHttp { calls: std::cell::Cell::new(0), fail: None }
+        }
+        fn failing(kind: FailKind) -> Self {
+            FakeHttp { calls: std::cell::Cell::new(0), fail: Some((kind, "假的失敗（含 https://example.invalid/x 與錯誤碼 7）")) }
+        }
+    }
+    impl Downloader for FakeHttp {
+        async fn fetch(&self, _url: &str, dest: &Path, _max: u64, _size: u64) -> Result<(), FetchError> {
+            self.calls.set(self.calls.get() + 1);
+            match self.fail {
+                Some((k, d)) => Err(FetchError::new(k, d)),
+                None => {
+                    std::fs::write(dest, GOOD).unwrap();
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    const NOW: u64 = 1_800_000_000_000;
+    const HOUR: u64 = 3_600_000;
+
+    fn plan(os_id: &str, os_ver: &str, check: &'static dyn Fn(&Path) -> Result<(), String>) -> Plan<'static> {
+        let mut linux = BTreeMap::new();
+        linux.insert("ubuntu-22.04".to_string(), Pin { tarball: "wezterm-v1.Ubuntu22.04.tar.xz".into(), sha256: hex(GOOD), size: GOOD.len() as u64 });
+        let pins = Pins { version: "v1".into(), release_base: DOWNLOAD_BASE.into(), linux };
+        Plan { pins, os: OsRelease { id: os_id.into(), version_id: os_ver.into(), pretty: format!("{os_id} {os_ver}") }, arch: "x86_64".into(), check, lim: lim() }
+    }
+
+    fn ubuntu() -> Plan<'static> {
+        plan("ubuntu", "22.04", &ok_check)
+    }
+
+    fn root_of(base: &Path) -> PathBuf {
+        base.join("ASN").join("wezterm")
+    }
+
+    #[test]
+    fn 失敗紀錄_讀寫清除_看不懂的當沒有() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(read_fail(d.path()), None);
+        write_fail(d.path(), FailKind::Disk, 123);
+        assert_eq!(read_fail(d.path()), Some((FailKind::Disk, 123)));
+        std::fs::write(d.path().join(STATE_FILE), "壞的").unwrap();
+        assert_eq!(read_fail(d.path()), None);
+        write_fail(d.path(), FailKind::Network, 5);
+        clear_fail(d.path());
+        assert_eq!(read_fail(d.path()), None);
+        for k in [FailKind::Network, FailKind::Disk, FailKind::Mismatch, FailKind::Unsupported, FailKind::Unrunnable, FailKind::Other] {
+            assert_eq!(FailKind::parse(k.as_str()), k);
+        }
+        assert_eq!(FailKind::parse("不認得"), FailKind::Other);
+    }
+
+    #[test]
+    fn 退避時間_一天內算在退避_剛好一天就過期_時鐘被調過也會過期() {
+        assert!(backoff_active(NOW, NOW));
+        assert!(backoff_active(NOW - 23 * HOUR, NOW));
+        assert!(!backoff_active(NOW - 24 * HOUR, NOW));
+        assert!(!backoff_active(NOW - 48 * HOUR, NOW));
+        assert!(backoff_active(NOW + HOUR, NOW), "紀錄在不久的未來：保守當作還在退避");
+        assert!(!backoff_active(NOW + 48 * HOUR, NOW), "紀錄在很久以後的未來：時鐘被調過，不能永遠不重下");
+    }
+
+    #[tokio::test]
+    async fn 退避期間不連網_完全沒有呼叫下載() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        write_fail(&root, FailKind::Network, NOW - HOUR);
+        let http = FakeHttp::ok();
+        let e = ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap_err();
+        assert!(e.skipped && e.kind == FailKind::Network, "{e:?}");
+        assert_eq!(http.calls.get(), 0, "退避期間不能呼叫下載");
+        assert_eq!(read_fail(&root), Some((FailKind::Network, NOW - HOUR)), "沒有連網，就不更新紀錄");
+        assert!(!root.join(".tmp-0").exists() && std::fs::read_dir(&root).unwrap().flatten().all(|e| e.file_name() == STATE_FILE), "也沒有建暫存資料夾");
+    }
+
+    #[tokio::test]
+    async fn 退避過了一天_會再去取() {
+        let base = tempfile::tempdir().unwrap();
+        write_fail(&root_of(base.path()), FailKind::Network, NOW - 25 * HOUR);
+        let http = FakeHttp::ok();
+        let dir = ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap();
+        assert_eq!(http.calls.get(), 1);
+        assert!(dir_usable(&dir));
+    }
+
+    #[tokio::test]
+    async fn 按重試_忽略退避馬上連網() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        write_fail(&root, FailKind::Disk, NOW - HOUR);
+        let http = FakeHttp::ok();
+        let dir = ensure_with(&http, base.path(), true, NOW, &ubuntu()).await.unwrap();
+        assert_eq!(http.calls.get(), 1, "force＝重試：退避期間也連網");
+        assert!(dir_usable(&dir));
+    }
+
+    #[tokio::test]
+    async fn 失敗會記下分類與時間_之後一天內不再連網_重試才再連() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        let http = FakeHttp::failing(FailKind::Network);
+        let e = ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap_err();
+        assert!(!e.skipped && e.kind == FailKind::Network);
+        assert_eq!(http.calls.get(), 1);
+        assert_eq!(read_fail(&root), Some((FailKind::Network, NOW)), "記下分類與時間");
+        // 一天內自動再試：不連網
+        let e = ensure_with(&http, base.path(), false, NOW + 2 * HOUR, &ubuntu()).await.unwrap_err();
+        assert!(e.skipped);
+        assert_eq!(http.calls.get(), 1, "退避期間沒有再連網");
+        // 本人按重試：連網（這次還是失敗，紀錄更新成新的時間）
+        let e = ensure_with(&http, base.path(), true, NOW + 3 * HOUR, &ubuntu()).await.unwrap_err();
+        assert!(!e.skipped);
+        assert_eq!(http.calls.get(), 2);
+        assert_eq!(read_fail(&root), Some((FailKind::Network, NOW + 3 * HOUR)));
+        // 滿一天之後自動再試
+        let _ = ensure_with(&http, base.path(), false, NOW + 3 * HOUR + 25 * HOUR, &ubuntu()).await;
+        assert_eq!(http.calls.get(), 3);
+    }
+
+    #[tokio::test]
+    async fn 各種原因都記得下來_不支援的發行版也一樣不連網() {
+        // 下載階段的磁碟問題、檔案不符
+        for kind in [FailKind::Disk, FailKind::Mismatch, FailKind::Other] {
+            let base = tempfile::tempdir().unwrap();
+            let http = FakeHttp::failing(kind);
+            ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap_err();
+            assert_eq!(read_fail(&root_of(base.path())), Some((kind, NOW)));
+        }
+        // 取得後跑不起來
+        let base = tempfile::tempdir().unwrap();
+        static BAD_CHECK: fn(&Path) -> Result<(), String> = |_| Err("缺少系統函式庫 libssl.so.3".to_string());
+        let http = FakeHttp::ok();
+        let e = ensure_with(&http, base.path(), false, NOW, &plan("ubuntu", "22.04", &BAD_CHECK)).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Unrunnable);
+        assert_eq!(read_fail(&root_of(base.path())), Some((FailKind::Unrunnable, NOW)));
+        assert!(!root_of(base.path()).join("v1-ubuntu-22.04").exists(), "跑不起來的不留在正式位置");
+        // 不支援的發行版：不連網
+        let base = tempfile::tempdir().unwrap();
+        let http = FakeHttp::ok();
+        let e = ensure_with(&http, base.path(), false, NOW, &plan("fedora", "39", &ok_check)).await.unwrap_err();
+        assert_eq!(e.kind, FailKind::Unsupported);
+        assert_eq!(http.calls.get(), 0);
+        assert_eq!(read_fail(&root_of(base.path())), Some((FailKind::Unsupported, NOW)));
+    }
+
+    #[tokio::test]
+    async fn 成功會清掉失敗紀錄() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        write_fail(&root, FailKind::Network, NOW - 30 * HOUR);
+        let http = FakeHttp::ok();
+        ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap();
+        assert_eq!(read_fail(&root), None, "取得成功：失敗紀錄清掉");
+        // 已經取得過：直接沿用，也不留舊的失敗紀錄，而且不連網
+        write_fail(&root, FailKind::Disk, NOW);
+        let http2 = FakeHttp::ok();
+        ensure_with(&http2, base.path(), false, NOW + HOUR, &ubuntu()).await.unwrap();
+        assert_eq!(http2.calls.get(), 0);
+        assert_eq!(read_fail(&root), None);
+    }
+
+    #[test]
+    fn 設定頁狀態_取得中_失敗_沒事() {
+        assert_eq!(status_from(true, Some(FailKind::Disk), false), FetchStatus { state: "fetching", kind: "" });
+        assert_eq!(status_from(false, Some(FailKind::Disk), false), FetchStatus { state: "failed", kind: "disk" });
+        assert_eq!(status_from(false, Some(FailKind::Network), true), FetchStatus { state: "", kind: "" }, "已經有可用的：不顯示舊的失敗");
+        assert_eq!(status_from(false, None, false), FetchStatus { state: "", kind: "" });
+    }
+
     /// 真的連 GitHub 取得固定版本（要網路，預設不跑；CI 的 headless-test 明跑）：
     /// 空的資料夾 → ensure → 兩個檔都在 → 再呼叫一次直接沿用 → locate 找得到（ASN_WEZTERM_DIR 沒設、PATH 沒有 wezterm）。
     /// `XDG_DATA_HOME` 由呼叫端指定好（CI 後面的步驟要用同一個位置）
@@ -790,9 +1215,10 @@ mod tests {
     async fn linux_real_fetch_wezterm() {
         let base = PathBuf::from(std::env::var_os("XDG_DATA_HOME").expect("要設 XDG_DATA_HOME 指到空的資料夾"));
         assert!(fetched_dirs(&base).is_empty(), "要從空的開始");
-        let dir = ensure(&base).await.expect("取得 WezTerm");
+        let dir = ensure(&base, false).await.expect("取得 WezTerm");
         assert!(dir_usable(&dir), "{dir:?}");
-        assert_eq!(ensure(&base).await.unwrap(), dir, "第二次直接沿用");
+        assert_eq!(read_fail(&base.join("ASN").join("wezterm")), None, "成功沒有失敗紀錄");
+        assert_eq!(ensure(&base, false).await.unwrap(), dir, "第二次直接沿用");
         let found = super::super::wezterm::locate(&super::super::wezterm::RealFs).expect("locate 要找得到取得的");
         assert!(found.cli.starts_with(&base), "{:?}", found.cli);
         assert_eq!(found.gui, None, "沒有桌面版");

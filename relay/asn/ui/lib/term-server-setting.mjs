@@ -11,6 +11,34 @@ export const KEY_PROTECTION_NOTE = {
 }
 export const keyProtectionNote = v => KEY_PROTECTION_NOTE[v] ?? ''
 
+/**
+ * Linux：開關打開後，ASN 會自己去取終端程式。取得中、失敗各有一句給使用者看的話；
+ * 網址、雜湊、錯誤碼只寫進 log，這裡不出現。失敗的原因分類（network／disk／mismatch／unsupported／unrunnable／other）各一句，
+ * 後兩類重試也沒用，不給「重試」。
+ */
+export const TERM_FETCH_FETCHING_NOTE = '正在取得終端程式，請稍候。取得後重開 ASN 就會生效。'
+export const TERM_FETCH_FAIL_NOTES = {
+  network: '終端程式取得失敗：網路連不上或太慢，請確認網路後按重試。',
+  disk: '終端程式取得失敗：磁碟空間不夠，請清出空間後按重試。',
+  mismatch: '終端程式取得失敗：下載的檔案不完整或不對，請稍後按重試；一直不行的話，請改用套件管理員安裝 wezterm 後重開 ASN。',
+  unsupported: '這台 Linux 還不支援自動取得終端程式，請用套件管理員安裝 wezterm 後重開 ASN。',
+  unrunnable: '終端程式取得了，但在這台電腦跑不起來（可能缺少系統元件），請用套件管理員安裝 wezterm 後重開 ASN。',
+  other: '終端程式取得失敗，請稍後按重試。',
+}
+/** 這幾類按「重試」可能有用 */
+export const TERM_FETCH_RETRYABLE = ['network', 'disk', 'mismatch', 'other']
+/** 開關底下的取得狀態：回 { text, canRetry }。開關關著、或沒事就是空字串 */
+export function termFetchLine(st) {
+  const none = { text: '', canRetry: false }
+  if (!st || typeof st !== 'object' || st.termServer !== true) return none
+  if (st.termFetch === 'fetching') return { text: TERM_FETCH_FETCHING_NOTE, canRetry: false }
+  if (st.termFetch === 'failed') {
+    const kind = Object.hasOwn(TERM_FETCH_FAIL_NOTES, st.termFetchKind) ? st.termFetchKind : 'other'
+    return { text: TERM_FETCH_FAIL_NOTES[kind], canRetry: TERM_FETCH_RETRYABLE.includes(kind) }
+  }
+  return none
+}
+
 /** Linux：沒裝 WezTerm 就沒有這個開關，改說一句怎麼裝 */
 export const TERM_SERVER_MISSING_NOTE = '要讓夥伴共用同一個在背景跑的終端服務，請先用套件管理員安裝 wezterm（例如 sudo apt install wezterm），再重開 ASN。'
 export const TERM_SERVER_LOCKED_NOTE = '已由系統設定固定，這裡不能改。'
