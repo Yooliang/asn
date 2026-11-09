@@ -212,7 +212,8 @@ jobs:
           cp "$WEZ_SRC/assets/windows/conhost/conpty.dll" "$WEZ_SRC/assets/windows/conhost/OpenConsole.exe" \
              "$WEZ_SRC/assets/windows/angle/libEGL.dll" "$WEZ_SRC/assets/windows/angle/libGLESv2.dll" "$pkg/"
           git -C "$WEZ_SRC" cat-file blob "${UPSTREAM_SHA}:LICENSE.md" > "$pkg/LICENSE.md"
-          [ "$(sha256sum "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符：$(sha256sum "$pkg/LICENSE.md")（$(file -b "$pkg/LICENSE.md")）" >&2; exit 1; }
+          # 從標準輸入算：檔名含反斜線時，sha256sum 會在輸出最前面加一個反斜線
+          [ "$(sha256sum < "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符：$(sha256sum < "$pkg/LICENSE.md")（$(file -b "$pkg/LICENSE.md")）" >&2; exit 1; }
           cat > "$pkg/SOURCE.txt" <<TXT
           WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
           上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
