@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetWhen } from '../ui/lib/account-quota.mjs'
+import { LAUNCH_DISPLAY_NOTE, launchRun, launchVendors } from '../ui/lib/mobile-launch.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
 export const parseSmokeArgs = argv => {
@@ -530,8 +531,8 @@ export const mnoselfProbeSource = () => `(async () => {
   if (!sws.some(t => t.includes('辦公室'))) return { ok: false, why: '別台電腦的切換鈕不見了：' + (sws.join('、') || '（沒有按鈕）') };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mtermview ? '手機看終端檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mtermview ? mtermviewProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -617,6 +618,62 @@ export const mcloudProbeSource = () => `(async () => {
   const me = rows.find(r => r.kind.includes('這支手機'));
   if (!me) return { ok: false, why: '找不到這支手機那列' };
   if (!me.kind.startsWith('手機') || me.kind.includes('雲端')) return { ok: false, why: '這支手機要是「手機」、不標雲端：' + me.kind };
+  return { ok: true, why: '' };
+})()`
+// 手機「開新夥伴」第 2 步的運行選項：夥伴 → ＋ → 開新夥伴 → 選辦公室 → 下一步；412、360 寬與大字型（1.3 倍）各一張。
+// 辦公室回報的啟動設定只有 Claude；選項名稱、預設都要跟電腦版同一份目錄（model-catalog）算出來的一樣，並看得到「前台或背景」的說明
+const MLAUNCH_LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:/work'] }
+const MLAUNCH_RUN = launchRun(launchVendors(MLAUNCH_LAUNCHER).find(v => v.id === 'claude'), MLAUNCH_LAUNCHER)
+export const MLAUNCH_PROBES = {
+  base: { mlaunch: true, big: false, labels: MLAUNCH_RUN.options.map(o => o.label), selected: MLAUNCH_RUN.options.find(o => o.key === MLAUNCH_RUN.selected)?.label ?? '', note: LAUNCH_DISPLAY_NOTE },
+}
+MLAUNCH_PROBES.big = { ...MLAUNCH_PROBES.base, big: true }
+export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  const want = ${JSON.stringify({ labels, selected, note })};
+  const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
+  const plus = await wait(() => document.querySelector('.m-plus-wrap .m-icon-btn'));
+  if (!plus) return { ok: false, why: '找不到名單頁的「新增」鈕' };
+  plus.click();
+  const item = await wait(() => [...document.querySelectorAll('.m-plus-menu button')].find(b => b.textContent.includes('開新夥伴')));
+  if (!item) return { ok: false, why: '新增選單沒有「開新夥伴」' };
+  item.click();
+  const dev = await wait(() => [...document.querySelectorAll('.m-lch .m-opt')].find(b => b.textContent.includes('辦公室') && !b.disabled));
+  if (!dev) return { ok: false, why: '第 1 步找不到可選的「辦公室」：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
+  dev.click();
+  await sleep(100);
+  const next = [...document.querySelectorAll('.m-lch .m-btn-big')].find(b => b.textContent.includes('下一步'));
+  if (!next || next.disabled) return { ok: false, why: '「下一步」不能按' };
+  next.click();
+  const fs = await wait(() => [...document.querySelectorAll('.m-lch fieldset')].find(f => f.querySelector('legend')?.textContent.trim() === '運行'));
+  if (!fs) return { ok: false, why: '第 2 步沒有「運行」選項：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
+  if (${big ? 'true' : 'false'}) {
+    const els = [...document.querySelectorAll('#app *')];
+    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
+    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
+  }
+  await sleep(400);
+  const opts = [...fs.querySelectorAll('.m-opt')];
+  const labels = opts.map(o => o.querySelector('.m-opt-t')?.textContent.trim() ?? '');
+  if (labels.join('|') !== want.labels.join('|')) return { ok: false, why: '運行選項不對：' + labels.join('、') + '（應為 ' + want.labels.join('、') + '）' };
+  const on = opts.filter(o => o.getAttribute('aria-pressed') === 'true').map(o => o.querySelector('.m-opt-t').textContent.trim());
+  if (on.join('|') !== want.selected) return { ok: false, why: '預設選到的不對：' + on.join('、') + '（應為 ' + want.selected + '）' };
+  const note = document.querySelector('.m-lch-display');
+  if (!vis(note) || note.textContent.trim() !== want.note) return { ok: false, why: '沒看到前台或背景的說明：' + (note?.textContent ?? '沒有') };
+  fs.scrollIntoView({ block: 'start' });
+  await sleep(200);
+  const bad = [];
+  for (const e of [...fs.querySelectorAll('.m-opt, .m-opt-t, .m-opt-why'), note]) {
+    if (e.scrollWidth > e.clientWidth + 1) bad.push(e.textContent.trim().slice(0, 20));
+    const r = e.getBoundingClientRect();
+    if (r.left < -0.5 || r.right > window.innerWidth + 0.5) bad.push('超出畫面：' + e.textContent.trim().slice(0, 20));
+  }
+  if (bad.length) return { ok: false, why: '字被切或超出畫面：' + bad.join('、') };
+  const de = document.documentElement;
+  if (de.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1) return { ok: false, why: '頁面有橫向捲動：' + de.scrollWidth + ' > ' + window.innerWidth };
+  const m = /#\\d+/.exec(document.querySelector('#app').innerText);
+  if (m) return { ok: false, why: '畫面出現議題編號：' + m[0] };
   return { ok: true, why: '' };
 })()`
 // 手機第四格「通知」（#895，PR-H）：四個頁籤固定；通知分頁顯示系統通知對話（唯讀）、紅點在第四格。
@@ -819,6 +876,10 @@ export const SCENARIOS = [
   { name: 'm-noself-noplat', page: 'm.html', state: { signedIn: true, mnoself: 'noplat' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.noplat, shot: 'm-noself-noplat.png' },
   { name: 'm-noself-android', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.android, shot: 'm-noself-android.png' },
   // 手機第四格「通知」（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及第四格的未讀紅點。412、360 寬與大字型各一張
+  // 手機開新夥伴的運行選項（#931）：名稱與預設跟電腦版同一份目錄，另有「前台或背景」的說明。412、360 寬與大字型各一張
+  { name: 'm-launch', page: 'm.html', state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-412.png' },
+  { name: 'm-launch-360', page: 'm.html', width: 360, state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-360.png' },
+  { name: 'm-launch-big', page: 'm.html', width: 360, state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.big, shot: 'm-launch-big.png' },
   { name: 'm-notice-tab', page: 'm.html', state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tab, shot: 'm-notice-tab-412.png' },
   { name: 'm-notice-tab-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tab, shot: 'm-notice-tab-360.png' },
   { name: 'm-notice-tab-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tabBig, shot: 'm-notice-tab-big.png' },
@@ -927,6 +988,11 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: [] }
     t.android_acct_roster = layoutRoster()
     t.android_acct_list = layoutAcctList()
+  }
+  if (scenario.state.mlaunch) {
+    t.relay_list = { members: MACCT_MEMBERS.one }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MACCT_ME) } }
+    t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: MLAUNCH_LAUNCHER }] }
   }
   if (scenario.state.mnotice) {
     t.relay_list = { members: MACCT_MEMBERS.two }
