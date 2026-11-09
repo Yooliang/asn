@@ -8,7 +8,6 @@ set -euo pipefail
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 export DEBIAN_FRONTEND=noninteractive
 mkdir -p "$OUT"
-git config --global --add safe.directory "*"   # 原始碼資料夾是主機使用者建的，容器裡是 root
 
 if [ "${DEBIAN_ARCHIVE:-}" = 1 ]; then
   # debian:10（buster）已 EOL：主網址已下架，改指 archive.debian.org；archive 的 Release 檔早已過期，要關掉有效期檢查；security 與 updates 這兩列已無內容
@@ -21,6 +20,7 @@ fi
 
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git pkg-config make perl procps xz-utils lsb-release >/dev/null
+git config --global --add safe.directory "*"   # 原始碼資料夾是主機使用者建的，容器裡是 root
 # 上游的相依清單（原樣使用 tag 自帶的 get-deps；容器是 root，沒有 sudo，它會直接呼叫 apt-get）
 ( cd "$SRC" && SUDO= sh ./get-deps ) > "$OUT/get-deps.log" 2>&1 || { tail -40 "$OUT/get-deps.log"; exit 1; }
 
