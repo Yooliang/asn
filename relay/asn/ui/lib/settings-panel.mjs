@@ -15,7 +15,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
-import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceButtons, usedOnText } from './account-roster.mjs'
+import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
@@ -104,7 +104,9 @@ export const SettingsPanel = {
     // 帳號卡片的設備按鈕：使用中的按了不做事；其他的就是原本的「切換到那台」（同一個指令、確認框照舊）
     const selfKey = computed(() => allDevs.value.find(d => d.self)?.key ?? '')
     const devName = node => allDevs.value.find(d => d.key === node)?.label ?? ''
+    // 切不過去的（不是使用中、也沒有切換目標）帶上原因，寫在按鈕下方
     const devButtons = (vendor, a) => deviceButtons(a?.usedOn, switchTargets(vendor, a), selfKey.value, devName)
+      .map(b => (b.current || b.target ? b : { ...b, reason: deviceBlockReason(allDevs.value, vendor, a?.account, b.node) }))
     const pressDev = b => {
       if (b.current || !b.target) return
       act(b.target.op, b.target.value)
@@ -283,7 +285,7 @@ export const SettingsPanel = {
                     </span>
                     <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色、選中、前面有勾後面有「使用中」，按了不做事；其他的按了改用那台（原本的切換流程） -->
                     <span class="dv-devs" v-if="devButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
-                      <button v-for="b in devButtons(v.key, a)" :key="b.node" type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" @click="pressDev(b)"><span class="dv-devck" v-if="b.current" aria-hidden="true">✓</span>{{ b.label }}<small v-if="b.current">{{ DEVICE_BUTTON_TEXT.current }}</small></button>
+                      <span class="dv-devb" v-for="b in devButtons(v.key, a)" :key="b.node"><button type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(b)"><span class="dv-devck" v-if="b.current" aria-hidden="true">✓</span>{{ b.label }}<small v-if="b.current">{{ DEVICE_BUTTON_TEXT.current }}</small></button><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
                       <span class="dv-cur" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
