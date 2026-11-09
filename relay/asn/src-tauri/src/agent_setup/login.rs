@@ -111,7 +111,17 @@ impl Default for Limits {
 
 static BUSY: AtomicBool = AtomicBool::new(false);
 
-struct BusyGuard<'a>(&'a AtomicBool);
+/// 「同一時間只允許一個登入」：授權碼送回型與裝置碼型（`device_login`）共用同一把。裝置碼型的入口在 PR-7 才接
+#[allow(dead_code)]
+pub(super) fn try_login_busy() -> Option<BusyGuard<'static>> {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        None
+    } else {
+        Some(BusyGuard(&BUSY))
+    }
+}
+
+pub(super) struct BusyGuard<'a>(&'a AtomicBool);
 impl Drop for BusyGuard<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);

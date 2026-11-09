@@ -29,6 +29,11 @@ pub trait LoginProc {
     fn wait(&mut self, timeout: Duration) -> Option<i32>;
     /// 結束整棵程序樹（只動自己啟動的這一棵）
     fn kill_tree(&mut self);
+    /// 只結束自己啟動的這一個程序，不動它的子孫（Grok 會自己開瀏覽器，瀏覽器可能是它的子程序，不能一起關）。
+    /// 真的實作要覆寫；預設等於 `kill_tree` 只給既有的測試假物件用
+    fn kill_self(&mut self) {
+        self.kill_tree();
+    }
 }
 
 pub trait Spawner {
@@ -186,6 +191,17 @@ impl LoginProc for RealProc {
         }
         // 只結束自己啟動、記下編號的這一棵
         let _ = Command::new("taskkill").no_window().args(["/PID", &self.pid.to_string(), "/T", "/F"]).output();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.finish();
+    }
+
+    fn kill_self(&mut self) {
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            self.finish();
+            return;
+        }
+        // 只結束這一個（不加 /T）；它結束後 Drop 看到已結束，不會再收整棵樹
         let _ = self.child.kill();
         let _ = self.child.wait();
         self.finish();
