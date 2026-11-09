@@ -1,0 +1,16 @@
+Fetching available models...
+gemini-4-argon-medium	Gemini 4 Argon (Medium)
+gemini-3.8-flash-high	Gemini 3.8 Flash (High)
+
+claude-opus-5-5-low	Claude Opus 5.5 (Low)
+gemini-4-argon-medium	重複的一行
+說明文字沒有 Tab
+  gemini-padded  	前後有空白
+bad id	含空白不合法
+-leading-dash	開頭是橫線不合法
+name/with/slash	含斜線不合法
+.dotfirst	開頭是點不合法
+UPPER.Case_ok-1	大寫合法
+	第一欄是空的
+中文代號	非 ASCII 不合法
+last-no-newline	最後一行沒換行
