@@ -18,6 +18,7 @@ if [ "${DEBIAN_ARCHIVE:-}" = 1 ]; then
   echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive
 fi
 
+echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries   # 鏡像站偶爾連不上
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git pkg-config make perl procps xz-utils lsb-release >/dev/null
 git config --global --add safe.directory "*"   # 原始碼資料夾是主機使用者建的，容器裡是 root
@@ -29,6 +30,8 @@ export RUSTUP_HOME=/rustup CARGO_HOME=/cargo PATH=/cargo/bin:$PATH
 rustc --version | tee "$OUT/rustc-version.txt"
 case "$(rustc --version)" in "rustc ${RUST_VERSION} "*) ;; *) echo "::error::Rust 不是 ${RUST_VERSION}" >&2; exit 1;; esac
 
+# 版本字串：官方版是 "wezterm <tag>"；wezterm-version 的 build.rs 會讀根目錄的 .tag（沒有的話改抓 git 資訊，在這裡會是空的）
+echo "$UPSTREAM_TAG" > "$SRC/.tag"
 cd "$SRC"
 cargo build --locked --release -p wezterm -p wezterm-mux-server
 WEZ="$SRC/target/release/wezterm"; MUX="$SRC/target/release/wezterm-mux-server"
@@ -49,8 +52,9 @@ WEZ="$SRC/target/release/wezterm"; MUX="$SRC/target/release/wezterm-mux-server"
     echo '```'
     echo
   done
-} | tee -a "$SUMMARY" > "$OUT/versions-and-ldd.txt"
+} | tee -a "$SUMMARY" | tee "$OUT/versions-and-ldd.txt"
 for b in "$WEZ" "$MUX"; do
+  "$b" --version | grep -q "$UPSTREAM_TAG" || { echo "::error::$(basename "$b") 的版本字串不含 ${UPSTREAM_TAG}" >&2; exit 1; }
   if ldd "$b" | grep -q 'not found'; then echo "::error::$(basename "$b") 有找不到的函式庫" >&2; exit 1; fi
 done
 # 不內建 OpenSSL：應動態連到系統的 libssl／libcrypto
@@ -62,7 +66,7 @@ bash "$SCRIPTS/wezterm-mux-smoke.sh" "$WEZ" "$MUX" "$OUT/smoke"
 PKG="$OUT/pkg"; rm -rf "$PKG"; mkdir -p "$PKG"
 install -m 0755 "$WEZ" "$PKG/wezterm"
 install -m 0755 "$MUX" "$PKG/wezterm-mux-server"
-git -C "$SRC" show "${UPSTREAM_SHA}:LICENSE.md" > "$PKG/LICENSE.md"
+git -C "$SRC" cat-file blob "${UPSTREAM_SHA}:LICENSE.md" > "$PKG/LICENSE.md"
 cat > "$PKG/SOURCE.txt" <<TXT
 WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
 上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
@@ -72,7 +76,7 @@ Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-mu
 建置紀錄：${RUN_URL}
 授權：MIT（見 LICENSE.md，與上游 tag 的 LICENSE.md 逐位元組相同）
 TXT
-cmp "$PKG/LICENSE.md" <(git -C "$SRC" show "${UPSTREAM_SHA}:LICENSE.md")
+cmp "$PKG/LICENSE.md" <(git -C "$SRC" cat-file blob "${UPSTREAM_SHA}:LICENSE.md")
 ( cd "$PKG" && tar --owner=0 --group=0 --numeric-owner --sort=name -cJf "$OUT/$TARBALL" wezterm wezterm-mux-server LICENSE.md SOURCE.txt )
 chmod a+r "$OUT/$TARBALL"
 tar -tvJf "$OUT/$TARBALL"

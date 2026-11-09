@@ -143,6 +143,8 @@ jobs:
           perl -v | grep -q MSWin32 || { echo "::error::抓到的 perl 不是 Strawberry Perl" >&2; perl -v; exit 1; }
           rustc --version
           case "$(rustc --version)" in "rustc ${RUST_VERSION} "*) ;; *) echo "::error::Rust 不是 ${RUST_VERSION}" >&2; exit 1;; esac
+          # 版本字串：wezterm-version 的 build.rs 會讀根目錄的 .tag（官方版是 "wezterm <tag>"）
+          echo "$UPSTREAM_TAG" > "$WEZ_SRC/.tag"
           cd "$WEZ_SRC"
           cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server
       - name: 版本與依賴（dumpbin）
@@ -151,6 +153,7 @@ jobs:
           mkdir -p "$WEZ_OUT"
           rel="$WEZ_SRC/target/release"
           dumpbin="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | head -1)"
+          for e in wezterm wezterm-gui wezterm-mux-server; do "$rel/$e.exe" --version | grep -q "$UPSTREAM_TAG" || { echo "::error::$e.exe 的版本字串不含 ${UPSTREAM_TAG}" >&2; exit 1; }; done
           [ -n "$dumpbin" ] || { echo "::error::找不到 dumpbin.exe" >&2; exit 1; }
           {
             echo '### Windows（windows-2022）'
@@ -166,7 +169,7 @@ jobs:
               MSYS2_ARG_CONV_EXCL='*' "$dumpbin" /nologo /dependents "$(cygpath -w "$rel/$e.exe")" | sed -n '/Image has the following dependencies/,/Summary/p'
               echo '```'
             done
-          } | tee -a "$GITHUB_STEP_SUMMARY" > "$WEZ_OUT/versions-and-dependents.txt"
+          } | tee -a "$GITHUB_STEP_SUMMARY" | tee "$WEZ_OUT/versions-and-dependents.txt"
       - name: mux 實測（起 mux-server、spawn、get-text）
         # Windows 上的這個實測是新做的，先不當關卡：失敗會在 summary 與 log 看到，但不讓整個 job 變紅
         continue-on-error: true
@@ -195,7 +198,7 @@ jobs:
               b="$(sha256sum "$top/$f" | cut -d' ' -f1)"
               if [ "$a" = "$b" ]; then echo "| $f | \`$a\` | 一致 |"; else echo "| $f | repo \`$a\` / 官方 \`$b\` | **不一致** |"; echo "::error::$f 與官方壓縮檔不一致" >&2; fi
             done
-          } | tee -a "$GITHUB_STEP_SUMMARY" > verify-table.md
+          } | tee -a "$GITHUB_STEP_SUMMARY" | tee verify-table.md
           if grep -q '不一致' verify-table.md; then exit 1; fi
       - name: 打包
         run: |
@@ -205,8 +208,8 @@ jobs:
           for e in wezterm wezterm-gui wezterm-mux-server; do cp "$rel/$e.exe" "$pkg/"; done
           cp "$WEZ_SRC/assets/windows/conhost/conpty.dll" "$WEZ_SRC/assets/windows/conhost/OpenConsole.exe" \
              "$WEZ_SRC/assets/windows/angle/libEGL.dll" "$WEZ_SRC/assets/windows/angle/libGLESv2.dll" "$pkg/"
-          git -C "$WEZ_SRC" show "${UPSTREAM_SHA}:LICENSE.md" > "$pkg/LICENSE.md"
-          [ "$(sha256sum "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符" >&2; exit 1; }
+          git -C "$WEZ_SRC" cat-file blob "${UPSTREAM_SHA}:LICENSE.md" > "$pkg/LICENSE.md"
+          [ "$(sha256sum "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符：$(sha256sum "$pkg/LICENSE.md")（$(file -b "$pkg/LICENSE.md")）" >&2; exit 1; }
           cat > "$pkg/SOURCE.txt" <<TXT
           WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
           上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
