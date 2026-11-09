@@ -1066,6 +1066,147 @@
           "reason": null
         }
       ]
+    },
+    {
+      "id": "c7",
+      "note": "gsit 真實案例：記著的那期還沒過期就不收（不累計），過期後同一個新重置時間連 3 次、跨 10 分鐘才收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 1,
+        "resets_at": "2026-11-11T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T14:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T14:20:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T14:30:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-11T09:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:16:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c8",
+      "note": "過期後另一個身分（gsit／cwen）交錯回報＝每次都重新計數，一直不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 1,
+        "resets_at": "2026-11-11T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-11T09:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:10:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:20:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:25:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:30:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:35:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        }
+      ]
     }
   ]
 }
