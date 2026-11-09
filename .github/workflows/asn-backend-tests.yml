@@ -23,9 +23,32 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+      # setup-deno 從外部下載 deno，偶爾碰到 5xx：第一次失敗不讓整個工作停（continue-on-error），等 30 秒再試一次；
+      # 第二次仍失敗就照常紅（不放水）。版本照舊鎖 2.9.3，兩次用同一個 commit、同一個版本
+      - id: deno1
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        continue-on-error: true
         with:
           deno-version: '2.9.3'
+
+      - name: setup-deno 第一次失敗，等 30 秒再試
+        if: steps.deno1.outcome == 'failure'
+        run: |
+          echo "::warning::setup-deno 第一次失敗（多半是外部下載 5xx／逾時），30 秒後重試一次"
+          sleep 30
+
+      - id: deno2
+        if: steps.deno1.outcome == 'failure'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: '2.9.3'
+
+      - name: 確認 deno 版本
+        run: |
+          set -euo pipefail
+          v="$(deno --version | head -1)"
+          echo "$v"
+          [[ "$v" == "deno 2.9.3 "* ]] || { echo "deno 版本不對：$v" >&2; exit 1; }
 
       - name: Edge Function 測試（deno）
         run: deno test -A _shared/
