@@ -626,18 +626,90 @@ fn 身分_對不到已知帳號_只留本機未知區_不進額度檔() {
 }
 
 #[test]
-fn 身分_查不到時走舊辦法_記在目前登入的帳號() {
+fn 身分_完全沒帶_transcript_path_的舊版才走舊辦法_記在目前登入的帳號() {
     let h = home_as("a@x.test");
-    // 沒有 transcript_path
     assert!(hook_owned_in(&h, &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
     assert!(!q(&h).owner, "舊辦法記的沒有身分標記");
-    // transcript_path 指到 projects 以外：不信，也走舊辦法
+    assert_eq!(q(&h).weekly_pct, Some(70));
+}
+
+#[test]
+fn 身分_有帶_transcript_path_卻解不出身分_這次不記_別的視窗的數字不會記到目前登入的帳號() {
+    // 登入的是 A，A 的視窗有身分、已經記了；B 的視窗帶了 transcript_path，但檔裡還沒有 session-owner
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    let ta = transcript(h.path(), "wa", UA);
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &ta), NOW));
+    let before = q(&h);
+    let state_before = state_file(&h);
+    let dir = h.path().join(".claude").join("projects").join("p");
+    // 1. 檔裡沒有 session-owner
+    let none = dir.join("nb.jsonl");
+    std::fs::write(&none, "{\"type\":\"user\"}\n").unwrap();
+    // 2. 最後一筆 session-owner 格式壞掉
+    let bad = dir.join("bad.jsonl");
+    std::fs::write(&bad, "{\"type\":\"session-owner\",\"accountUuid\":\"../x\"}\n").unwrap();
+    // 3. 路徑不在 projects 底下（不安全）
     let outside = h.path().join("evil.jsonl");
     std::fs::write(&outside, json!({ "type": "session-owner", "accountUuid": UB }).to_string()).unwrap();
-    add_account(h.path(), "b@x.test", UB);
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((40.0, NOW + 3 * DAY))), &outside), NOW + 60_000));
-    assert_eq!(q(&h).weekly_pct, Some(60), "記在 a，不是 b");
-    assert!(!load_all(h.path()).contains_key("b@x.test"));
+    // 4. 檔案不存在
+    let missing = dir.join("missing.jsonl");
+    for (i, tp) in [&none, &bad, &outside, &missing].into_iter().enumerate() {
+        let t = NOW + (i as i64 + 1) * 60_000;
+        assert!(!hook_owned_in(&h, &with_tp(status(None, Some((90.0, NOW + 3 * DAY))), tp), t), "第 {i} 種：這次不記");
+    }
+    assert_eq!(q(&h), before, "A 的紀錄完全不變");
+    assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
+    assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
+    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
+}
+
+#[test]
+fn 身分_舊辦法不蓋有身分的紀錄_標記也不會被舊辦法帶著走() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    let ta = transcript(h.path(), "wa", UA);
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &ta), NOW));
+    let before = q(&h);
+    assert!(before.owner);
+    // 沒帶 transcript_path 的舊辦法，數字不同：不收
+    assert!(!hook_owned_in(&h, &status(None, Some((50.0, NOW + 3 * DAY))), NOW + 60_000));
+    assert_eq!(q(&h), before, "有身分的紀錄不被舊辦法蓋掉");
+    // 有身分的回報照常更新、仍有標記
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((40.0, NOW + 3 * DAY))), &ta), NOW + 120_000));
+    assert_eq!(q(&h).weekly_pct, Some(60));
+    assert!(q(&h).owner);
+}
+
+#[test]
+fn 身分_舊辦法寫的紀錄沒有標記_不會因為有身分的紀錄邏輯而掛上標記() {
+    let h = home_as("a@x.test");
+    assert!(hook_owned_in(&h, &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
+    assert!(hook_owned_in(&h, &status(None, Some((35.0, NOW + 3 * DAY))), NOW + 60_000));
+    assert!(!q(&h).owner);
+}
+
+#[test]
+fn 身分_備份失敗就不清舊基準_log_記一句() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW)); // 舊辦法記一筆（沒標記）
+    let before = q(&h);
+    // 讓備份的暫存檔位置被一個資料夾佔住：複製必失敗
+    std::fs::create_dir_all(super::super::owner_store::backup_tmp_path(h.path())).unwrap();
+    let t = transcript(h.path(), "wa", UA);
+    // 新數字的重置時間比舊基準晚、舊基準還沒過期：沒清舊基準時會被擋（later_not_expired）
+    assert!(!hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 60_000));
+    assert_eq!(q(&h), before, "舊基準還在");
+    assert!(log(&h).contains("備份失敗，沒有清舊基準"), "{}", log(&h));
+    assert!(!super::super::owner_store::backup_path(h.path()).exists());
+    // 備份恢復正常後，下一次就清掉舊基準並照新數字收
+    std::fs::remove_dir_all(super::super::owner_store::backup_tmp_path(h.path())).unwrap();
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
+    assert_eq!(q(&h).weekly_pct, Some(40));
+    assert!(super::super::owner_store::backup_path(h.path()).exists());
+    assert!(!super::super::owner_store::backup_tmp_path(h.path()).exists(), "沒有留下暫存檔");
 }
 
 #[test]

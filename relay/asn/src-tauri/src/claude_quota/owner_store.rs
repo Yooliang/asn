@@ -109,6 +109,59 @@ pub fn backup_path(home: &Path) -> PathBuf {
     PathBuf::from(dst)
 }
 
+/// 備份暫存檔：先寫這個、寫完再改名成 `.bak`，不會留下寫一半的備份
+pub fn backup_tmp_path(home: &Path) -> PathBuf {
+    let mut dst = backup_path(home).into_os_string();
+    dst.push(".tmp");
+    PathBuf::from(dst)
+}
+
+/// 額度檔備份（只留一份，覆寫舊的）：先複製到暫存檔、再改名蓋掉 `.bak`。成功回 true；
+/// 失敗（含額度檔本來就不存在）回 false，呼叫端據此決定不清舊基準。失敗時盡量不留暫存檔。
+pub fn backup_quota_file(home: &Path) -> bool {
+    let tmp = backup_tmp_path(home);
+    let ok = std::fs::copy(super::quota_path(home), &tmp).is_ok() && std::fs::rename(&tmp, backup_path(home)).is_ok();
+    if !ok {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    ok
+}
+
+#[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// 讀未知帳號區：uuid → 額度。逐筆驗證（格式不對的丟掉）
+pub fn unknown_load(home: &Path) -> BTreeMap<String, Quota> {
+    let Some(serde_json::Value::Object(m)) = read_small(&unknown_path(home)).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return BTreeMap::new() };
+    m.into_iter().take(UNKNOWN_MAX * 2).filter_map(|(k, v)| quota_from_value(&v).map(|q| (k, q))).collect()
+}
+
+/// 記一筆未知帳號的額度：每個 uuid 只留最新一筆（直接覆寫，不合併）；7 天沒更新的刪；超過 16 個丟最舊的
+pub fn unknown_put(home: &Path, uuid: &str, p: &Parsed, now_ms: i64) {
+    let Some(q) = merge::merge(None, p, now_ms).0 else { return };
+    let mut all = unknown_load(home);
+    all.retain(|_, q| parse_iso_secs(&q.at).is_some_and(|t| now_ms - t <= UNKNOWN_KEEP_MS));
+    all.insert(uuid.to_string(), q);
+    while all.len() > UNKNOWN_MAX {
+        let oldest = all.iter().min_by(|a, b| a.1.at.cmp(&b.1.at).then_with(|| a.0.cmp(b.0))).map(|(k, _)| k.clone());
+        let Some(k) = oldest else { break };
+        all.remove(&k);
+    }
+    if let Ok(t) = serde_json::to_string(&all) {
+        write(&unknown_path(home), &t);
+    }
+}
+
+/// 額度檔的備份位置：同目錄的 `claude-quota.json.bak`
+pub fn backup_path(home: &Path) -> PathBuf {
+    let mut dst = super::quota_path(home).into_os_string();
+    dst.push(".bak");
+    PathBuf::from(dst)
+}
+
 /// 額度檔備份（只留一份，覆寫舊的）。失敗就算了。
 pub fn backup_quota_file(home: &Path) {
     let _ = std::fs::copy(super::quota_path(home), backup_path(home));

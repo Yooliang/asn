@@ -43,6 +43,12 @@ pub fn transcript_of(input: &str) -> Option<PathBuf> {
     (!p.is_empty() && p.chars().count() <= MAX_PATH_CHARS && !p.contains('\0')).then(|| PathBuf::from(p))
 }
 
+/// 狀態列輸入有沒有帶 transcript_path 這個欄位（不管內容對不對）。舊版 Claude Code 完全不帶；
+/// 帶了卻解不出身分，是「這個視窗的身分還不明」，不能退回用目前登入的帳號猜。
+pub fn transcript_given(input: &str) -> bool {
+    serde_json::from_str::<Value>(input).ok().is_some_and(|v| v.get("transcript_path").is_some_and(|p| !p.is_null()))
+}
+
 fn is_link(m: &std::fs::Metadata) -> bool {
     if m.file_type().is_symlink() {
         return true;

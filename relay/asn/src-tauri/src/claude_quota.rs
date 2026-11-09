@@ -263,15 +263,17 @@ fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
 fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
-    if reset_base && owned && all.contains_key(email) {
-        owner_store::backup_quota_file(home);
+    let mut reset_base = reset_base;
+    if reset_base && owned && all.contains_key(email) && !owner_store::backup_quota_file(home) {
+        // 備份失敗就不清舊基準（留著比丟掉安全），下次再試
+        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
+        reset_base = false;
     }
     let dropped = reset_base && all.remove(email).is_some();
     if dropped && owned {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）
 ", iso_secs(now_ms)));
     }
-    let prev_owner = all.get(email).is_some_and(|q| q.owner);
     let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
     let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
     st.set_pending_week(m.pending_week);
@@ -281,7 +283,7 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
         st.rebase = false;
     }
     if let Some(mut q) = m.quota {
-        q.owner = owned || prev_owner;
+        q.owner = owned;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);
@@ -310,7 +312,8 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
 
 /// 同 [`hook`]，指定 Claude 設定資料夾（測試不碰真實環境變數）。
 /// 狀態列輸入帶 transcript_path、而且那個對話紀錄裡找得到這個視窗的帳號身分時（#1185），額度記到那個帳號底下，
-/// 不看現在 `.claude.json` 登入的是誰；查不到身分才走舊辦法（記在目前登入的帳號，換身分要連續確認）。
+/// 不看現在 `.claude.json` 登入的是誰；帶了 transcript_path 卻解不出身分就這次不記；
+/// 完全沒帶 transcript_path（舊版 Claude Code）才走舊辦法（記在目前登入的帳號，換身分要連續確認）。
 pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
@@ -318,6 +321,10 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
     match owner::resolve(home, cfg, input) {
         Some(o) => hook_owned(home, cfg, &o, parsed, now_ms),
+        // 有帶 transcript_path 卻解不出身分（還沒寫出 session-owner、被擠出檔尾、最後一筆壞了、路徑不安全）：
+        // 這個視窗是誰還不明，這次不記，不能拿「現在登入的是誰」去猜（會把別的帳號的數字記進來）
+        None if owner::transcript_given(input) => false,
+        // 完全沒帶 transcript_path 的舊版 Claude Code 才走舊辦法
         None => hook_legacy(home, parsed, now_ms),
     }
 }
@@ -367,6 +374,10 @@ pub fn waiting_email(home: &Path) -> Option<String> {
 
 fn hook_legacy(home: &Path, parsed: Parsed, now_ms: i64) -> bool {
     let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
+    // 這個帳號的紀錄已經是有身分的（owner 標記）：舊辦法猜出來的數字不能蓋掉它
+    if load_all(home).get(&email).is_some_and(|q| q.owner) {
+        return false;
+    }
     let before = state::load(home);
     let ident = identity_key(&email, &uuid);
     let mut st = before.clone();
@@ -550,6 +561,17 @@ mod tests {
 
     fn acct(email: &str, current: bool) -> AccountInfo {
         AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false }
+    }
+
+    #[test]
+    fn 回報不含_owner_標記_額度檔的內部欄位不會上傳() {
+        let h = tmp_home();
+        write_cj(h.path(), "a@x.test");
+        let mut q = Quota { five_hour_pct: Some(50), weekly_pct: Some(60), at: "2026-10-24T12:00:00Z".into(), owner: true, ..Default::default() };
+        q.reset_at = Some("2026-10-24T14:00:00Z".into());
+        let qs: HashMap<String, Quota> = [("a@x.test".to_string(), q)].into_iter().collect();
+        let v = build_report_with_quota(&[acct("a@x.test", true)], None, &qs);
+        assert!(!v.to_string().contains("owner"), "{v}");
     }
 
     #[test]
