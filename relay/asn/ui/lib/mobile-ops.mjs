@@ -4,6 +4,7 @@
 import { switchModelsFor } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
 import { MENU_KEYS, partnerEngine } from './partner-ops.mjs'
+import { isMergedAway } from './notice.mjs'
 
 // ---------- 「對話」分頁：最後使用的那一位 ----------
 export const EMPTY_CHAT_TEXT = '從夥伴分頁點一位開始對話'
@@ -15,6 +16,8 @@ export function chatPageState(friends, lastId) {
   const id = normalizeLastChat(lastId)
   if (!id) return { kind: 'empty', friend: null, text: EMPTY_CHAT_TEXT }
   const f = (friends ?? []).find(x => x?.id === id)
+  // 已併進「通知」的舊收發室列（#848／#895）：升級前最後開著它，對話頁也不再開它（它的信在第四格「通知」）
+  if (f && isMergedAway(f)) return { kind: 'empty', friend: null, text: EMPTY_CHAT_TEXT }
   if (f) return { kind: 'friend', friend: f, text: '' }
   if (!(friends ?? []).length) return { kind: 'loading', friend: null, text: LOADING_CHAT_TEXT }
   return { kind: 'empty', friend: null, text: EMPTY_CHAT_TEXT }
