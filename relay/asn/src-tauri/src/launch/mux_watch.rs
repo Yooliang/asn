@@ -252,6 +252,130 @@ pub fn dispatch<F: FnOnce() + Send + 'static>(name: &str, f: F) -> bool {
     std::thread::Builder::new().name(name.into()).spawn(f).is_ok()
 }
 
+/// 終端服務程序的控制代碼（只在記憶體，不存檔）。拿掉（drop）就關掉
+pub trait ProcHandle {
+    /// 結束碼；讀不到回 None
+    fn exit_code(&self) -> Option<u32>;
+}
+
+/// Windows 的控制代碼：只用 SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION 開，唯讀，不能用它結束程序
+#[cfg(windows)]
+struct WinHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl ProcHandle for WinHandle {
+    fn exit_code(&self) -> Option<u32> {
+        let mut code: u32 = 0;
+        // SAFETY: 控制代碼在 self 活著期間有效
+        let ok = unsafe { windows_sys::Win32::System::Threading::GetExitCodeProcess(self.0, &mut code) } != 0;
+        ok.then_some(code)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WinHandle {
+    fn drop(&mut self) {
+        // SAFETY: 只在這裡關一次
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+/// 開程序控制代碼；開不了回 None
+#[cfg(windows)]
+pub fn open_process(pid: u32) -> Option<Box<dyn ProcHandle>> {
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: 純查詢；權限只要 SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+    let h = unsafe { OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if h.is_null() {
+        None
+    } else {
+        Some(Box::new(WinHandle(h)))
+    }
+}
+
+/// 其他平台讀不到結束碼
+#[cfg(not(windows))]
+pub fn open_process(_pid: u32) -> Option<Box<dyn ProcHandle>> {
+    None
+}
+
+/// 結束碼的白話（純函式）
+pub fn exit_text(code: Option<u32>) -> String {
+    const STILL_ACTIVE: u32 = 259;
+    match code {
+        None => "結束碼不明（讀不到）".to_string(),
+        Some(STILL_ACTIVE) => "還在但連不上".to_string(),
+        Some(0) => "正常結束（結束碼 0）".to_string(),
+        Some(1) => "結束碼 1（可能是被強制結束）".to_string(),
+        Some(c) if c >= 0xC000_0000 => {
+            let name = match c {
+                0xC000_00FD => "，堆疊溢位",
+                0xC000_0005 => "，存取違規",
+                0xC000_0409 => "，堆疊緩衝區溢位／快速失敗",
+                _ => "",
+            };
+            format!("崩潰（0x{c:08X}{name}）")
+        }
+        Some(c) if c >= 0x10000 => format!("結束碼 {c}（0x{c:X}）"),
+        Some(c) => format!("結束碼 {c}"),
+    }
+}
+
+/// 台北時間（UTC+8）的 HH:MM:SS
+pub fn taipei_hms(ms: u64) -> String {
+    let s = ms / 1000 % 86_400 + 8 * 3600;
+    let s = s % 86_400;
+    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+/// 事故紀錄那一行（純函式）。前半和以前一字不差，後面只是多附的資訊
+pub fn incident_line(inc: &Incident, reason: &str, last_alive_ms: Option<u64>, uptime_secs: u64) -> String {
+    let head = format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" });
+    let alive = match last_alive_ms {
+        Some(t) => format!("最後看到它活著是 {}（台北）", taipei_hms(t)),
+        None => "最後看到它活著的時間不明".to_string(),
+    };
+    format!("{head}｜{reason}｜{alive}｜這台 ASN 已經跑了 {} 小時 {} 分", uptime_secs / 3600, uptime_secs / 60 % 60)
+}
+
+type Slot = ((u32, u64), Option<Box<dyn ProcHandle>>);
+
+/// 記著正在看的那個 mux 的控制代碼與最後看到它活著的時間（只在記憶體）。
+/// `slot`：Some((mux, Some(h)))＝握著；Some((mux, None))＝開不了；None＝ASN 沒看過（例如 ASN 關著期間掛的）
+pub struct Tracker {
+    supported: bool,
+    slot: Option<Slot>,
+    pub last_alive_ms: Option<u64>,
+}
+
+impl Tracker {
+    pub fn new(supported: bool) -> Tracker {
+        Tracker { supported, slot: None, last_alive_ms: None }
+    }
+
+    /// 每輪看完 `Watch::tick` 之後呼叫：mux 活著就記時間；第一次看到（或換了一個）就開控制代碼，舊的隨之關掉
+    pub fn observe(&mut self, o: &Observed, now: u64, open: &dyn Fn(u32) -> Option<Box<dyn ProcHandle>>) {
+        let Some(mux) = o.live else { return };
+        self.last_alive_ms = Some(now);
+        if self.slot.as_ref().is_none_or(|(m, _)| *m != mux) {
+            self.slot = Some((mux, if self.supported { open(mux.0) } else { None }));
+        }
+    }
+
+    /// 事故時呼叫（要在 `observe` 之前）：讀結束碼並關掉控制代碼，回原因的白話
+    pub fn take_reason(&mut self) -> String {
+        if !self.supported {
+            return "這個平台讀不到結束碼".to_string();
+        }
+        match self.slot.take() {
+            Some((_, Some(h))) => exit_text(h.exit_code()),
+            Some((_, None)) => "結束碼不明（拿不到程序控制代碼）".to_string(),
+            None => "結束碼不明（ASN 那時沒在看）".to_string(),
+        }
+    }
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -264,6 +388,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let file = work_dir.join(STATE_FILE);
         let mut w = Watch::load(&file, super::auto_resume::boot_ms(crate::heartbeat::now_ms()));
         let mut first = true;
+        let started = std::time::Instant::now();
+        let mut tracker = Tracker::new(cfg!(windows));
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -278,8 +404,12 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             w.note_exited(&terms.take_exited(), now);
             let incident = w.tick(&o, now);
             w.save(&file);
+            // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
+            let info = incident.as_ref().map(|_| (tracker.take_reason(), tracker.last_alive_ms));
+            tracker.observe(&o, now, &open_process);
             if let Some(inc) = incident {
-                let line = format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" });
+                let (reason, last_alive) = info.unwrap_or_default();
+                let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs());
                 elog!("{line}");
                 if let Some(base) = super::mux::default_base() {
                     super::mux::note(&base.join("ASN").join("m"), &line);
@@ -556,5 +686,99 @@ mod tests {
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
         std::fs::File::options().write(true).open(&f).unwrap().set_modified(old).unwrap();
         assert!(pending_names(&f, 2_000).is_empty());
+    }
+
+    #[test]
+    fn 結束碼白話對照() {
+        assert_eq!(exit_text(Some(259)), "還在但連不上");
+        assert_eq!(exit_text(Some(0)), "正常結束（結束碼 0）");
+        assert_eq!(exit_text(Some(1)), "結束碼 1（可能是被強制結束）");
+        assert_eq!(exit_text(Some(0xC00000FD)), "崩潰（0xC00000FD，堆疊溢位）");
+        assert_eq!(exit_text(Some(0xC0000005)), "崩潰（0xC0000005，存取違規）");
+        assert_eq!(exit_text(Some(0xC0000409)), "崩潰（0xC0000409，堆疊緩衝區溢位／快速失敗）");
+        assert_eq!(exit_text(Some(0xC0000374)), "崩潰（0xC0000374）");
+        assert_eq!(exit_text(Some(42)), "結束碼 42");
+        assert_eq!(exit_text(Some(0x40010004)), "結束碼 1073807364（0x40010004）");
+        assert_eq!(exit_text(None), "結束碼不明（讀不到）");
+    }
+
+    #[test]
+    fn 事故那一行_格式與時間() {
+        let inc = Incident { partners: vec!["甲".into(), "乙".into()], resume: true };
+        // 2026-11-09 02:00:41 UTC ＝ 台北 10:00:41
+        let utc = 1_794_189_641_000u64 - 1_794_189_641_000 % 86_400_000 + (2 * 3600 + 41) * 1000;
+        assert_eq!(taipei_hms(utc), "10:00:41");
+        let line = incident_line(&inc, "崩潰（0xC00000FD，堆疊溢位）", Some(utc), 6 * 3600 + 45 * 60 + 9);
+        assert_eq!(line, "終端服務中斷：2 位夥伴（甲、乙），自動接回｜崩潰（0xC00000FD，堆疊溢位）｜最後看到它活著是 10:00:41（台北）｜這台 ASN 已經跑了 6 小時 45 分");
+        let cool = incident_line(&Incident { partners: vec!["甲".into()], resume: false }, "x", None, 59);
+        assert_eq!(cool, "終端服務中斷：1 位夥伴（甲），十分鐘內又中斷，只通知不接回｜x｜最後看到它活著的時間不明｜這台 ASN 已經跑了 0 小時 0 分");
+    }
+
+    struct Fake {
+        code: Option<u32>,
+        closed: std::rc::Rc<std::cell::RefCell<Vec<u32>>>,
+        pid: u32,
+    }
+    impl ProcHandle for Fake {
+        fn exit_code(&self) -> Option<u32> {
+            self.code
+        }
+    }
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            self.closed.borrow_mut().push(self.pid);
+        }
+    }
+
+    #[test]
+    fn 控制代碼_第一次看到就開_換了就關舊的_事故讀結束碼後關掉() {
+        let closed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let (c2, o2) = (closed.clone(), opened.clone());
+        let open = move |pid: u32| -> Option<Box<dyn ProcHandle>> {
+            o2.borrow_mut().push(pid);
+            Some(Box::new(Fake { code: Some(0xC00000FD), closed: c2.clone(), pid }))
+        };
+        let mut t = Tracker::new(true);
+        t.observe(&obs(Some(M1), &["甲"]), 1_000, &open);
+        t.observe(&obs(Some(M1), &["甲"]), 2_000, &open);
+        assert_eq!(*opened.borrow(), [100], "同一個 mux 只開一次");
+        assert_eq!(t.last_alive_ms, Some(2_000));
+        t.observe(&obs(None, &[]), 3_000, &open);
+        assert_eq!(t.last_alive_ms, Some(2_000), "看不到時不更新");
+        assert_eq!(t.take_reason(), "崩潰（0xC00000FD，堆疊溢位）");
+        assert_eq!(*closed.borrow(), [100], "讀完就關");
+        // 換成別的 mux：舊的關掉、開新的
+        t.observe(&obs(Some(M1), &["甲"]), 4_000, &open);
+        t.observe(&obs(Some(M2), &["甲"]), 5_000, &open);
+        assert_eq!(*opened.borrow(), [100, 100, 200]);
+        assert_eq!(*closed.borrow(), [100, 100]);
+        drop(t);
+        assert_eq!(*closed.borrow(), [100, 100, 200]);
+    }
+
+    #[test]
+    fn 沒有控制代碼_說不明() {
+        let none = |_pid: u32| -> Option<Box<dyn ProcHandle>> { None };
+        let mut t = Tracker::new(true);
+        assert_eq!(t.take_reason(), "結束碼不明（ASN 那時沒在看）");
+        t.observe(&obs(Some(M1), &["甲"]), 1_000, &none);
+        assert_eq!(t.take_reason(), "結束碼不明（拿不到程序控制代碼）");
+        let mut other = Tracker::new(false);
+        other.observe(&obs(Some(M1), &["甲"]), 1_000, &none);
+        assert_eq!(other.take_reason(), "這個平台讀不到結束碼");
+        assert_eq!(other.last_alive_ms, Some(1_000));
+    }
+
+    #[test]
+    fn 只用唯讀權限開控制代碼_不呼叫結束程序() {
+        let all = include_str!("mux_watch.rs").replace("\r\n", "\n");
+        let src = &all[..all.find("#[cfg(test)]").unwrap()];
+        assert!(!src.contains(concat!("Terminate", "Process")));
+        assert!(!src.contains(concat!("PROCESS_", "TERMINATE")));
+        assert!(!src.contains(concat!("PROCESS_", "ALL_ACCESS")));
+        let calls: Vec<String> = src.match_indices(concat!("OpenProcess", "(")).map(|(i, _)| src[i..].chars().take(80).collect()).collect();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].starts_with("OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)"));
     }
 }
