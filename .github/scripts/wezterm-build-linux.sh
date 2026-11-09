@@ -10,21 +10,22 @@ export DEBIAN_FRONTEND=noninteractive
 mkdir -p "$OUT"
 
 if [ "${DEBIAN_ARCHIVE:-}" = 1 ]; then
-  # debian:10（buster）已 EOL：主網址已下架，改指 archive.debian.org；archive 的 Release 檔早已過期，要關掉有效期檢查；security 與 updates 這兩列已無內容
+  # debian:10（buster）、debian:11（bullseye）已 EOL：主網址已下架，改指 archive.debian.org；archive 的 Release 檔早已過期，要關掉有效期檢查；security 與 updates 這兩列已無內容
   sed -i -e 's|http://deb.debian.org/debian-security|http://archive.debian.org/debian-security|g' \
          -e 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' \
          -e 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list
-  sed -i '/buster-updates/d' /etc/apt/sources.list
+  sed -i '/-updates/d' /etc/apt/sources.list
   echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive
 fi
 
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git pkg-config make perl procps xz-utils lsb-release >/dev/null
 git config --global --add safe.directory "*"   # 原始碼資料夾是主機使用者建的，容器裡是 root
+# get-deps 會檢查 cargo 在不在，所以工具鏈要先進 PATH
+export RUSTUP_HOME=/rustup CARGO_HOME=/cargo PATH=/cargo/bin:$PATH
 # 上游的相依清單（原樣使用 tag 自帶的 get-deps；容器是 root，沒有 sudo，它會直接呼叫 apt-get）
 ( cd "$SRC" && SUDO= sh ./get-deps ) > "$OUT/get-deps.log" 2>&1 || { tail -40 "$OUT/get-deps.log"; exit 1; }
 
-export RUSTUP_HOME=/rustup CARGO_HOME=/cargo PATH=/cargo/bin:$PATH
 rustc --version | tee "$OUT/rustc-version.txt"
 case "$(rustc --version)" in "rustc ${RUST_VERSION} "*) ;; *) echo "::error::Rust 不是 ${RUST_VERSION}" >&2; exit 1;; esac
 

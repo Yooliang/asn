@@ -55,7 +55,7 @@ inject
 if ! run_test 2>&1 | tee "$LOGDIR/green.log"; then
   echo "::error::綠燈失敗：已套修補的版本沒有通過循環測試" >&2; exit 1
 fi
-grep -q 'test cycle_probe::parent_child_cycle_terminates ... ok' "$LOGDIR/green.log" \
+grep -q 'linux::cycle_probe::parent_child_cycle_terminates ... ok' "$LOGDIR/green.log" \
   || { echo "::error::綠燈：找不到測試通過的那一行（測試可能根本沒跑）" >&2; exit 1; }
 echo "::endgroup::"
 git checkout -- "$FILE"
@@ -87,6 +87,6 @@ echo "紅燈對照如預期：沒套修補的版本因堆疊溢位而失敗（�
   echo "- 紅燈對照（上游原版）：因堆疊溢位失敗，結束碼 $rc（預期要失敗，失敗才算通過）"
   echo
   echo '```'
-  grep -E 'overflowed its stack|stack overflow|test cycle_probe' "$LOGDIR/green.log" "$LOGDIR/red.log" | head -10
+  grep -E 'overflowed its stack|stack overflow|cycle_probe' "$LOGDIR/green.log" "$LOGDIR/red.log" | head -10
   echo '```'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

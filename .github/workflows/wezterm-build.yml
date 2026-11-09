@@ -62,9 +62,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # debian:10 已 EOL：apt 來源改指 archive.debian.org（DEBIAN_ARCHIVE=1）
+          # debian:10、debian:11 已 EOL（deb.debian.org 的 security 已下架）：apt 來源改指 archive.debian.org（DEBIAN_ARCHIVE=1）
           - { image: 'debian:10', label: 'Debian10', archive: '1' }
-          - { image: 'debian:11', label: 'Debian11', archive: '' }
+          - { image: 'debian:11', label: 'Debian11', archive: '1' }
           - { image: 'debian:12', label: 'Debian12', archive: '' }
           - { image: 'ubuntu:20.04', label: 'Ubuntu20.04', archive: '' }
           - { image: 'ubuntu:22.04', label: 'Ubuntu22.04', archive: '' }
