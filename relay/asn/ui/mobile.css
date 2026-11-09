@@ -164,10 +164,15 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
 .m-dv-line{display:block;font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
-.m-dv-acct>.m-dv-used{grid-column:1 / -1;font-size:12px;color:var(--muted)}
-.m-dv-acct>.m-dv-sws{grid-column:1 / -1;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
-.m-dv-swt{display:contents}
-.m-dv-swt>small{grid-column:1;text-align:right}
+/* 帳號卡片的設備按鈕（手機）：一排可換行；使用中的黃色、選中、有勾與「使用中」，深淺色都看得清楚 */
+.m-dv-acct>.m-dv-devs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
+.m-dv-devb{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.m-dv-dev{display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:2px;white-space:nowrap;max-width:100%;min-height:40px;padding:0 14px;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--fg);font-size:14px}
+.m-dv-dev:disabled{opacity:.5}
+.m-dv-dev.on{border-color:#c79a00;background:#ffd84d;color:#3b2c00;font-weight:600}
+.m-dv-dev small{display:inline;margin-left:4px;font-size:12px}
+.m-dv-devck{margin-right:3px}
+@media (prefers-color-scheme:dark){.m-dv-dev.on{border-color:#e0b400;background:#5c4700;color:#ffe680}}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
 .m-dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -183,7 +188,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-why{display:block;font-size:12px;color:#a86f00}
 .m-dv-sw{min-height:40px;min-width:60px;padding:0 14px;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--title-fg);font:inherit;font-size:14px;cursor:pointer}
 .m-dv-sw:disabled{opacity:.5}
-.m-dv-swt>.m-dv-sw{grid-column:2;width:100%}
 .m-dv-none{display:flex;align-items:center;min-height:40px;padding:6px 10px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;font-style:italic}
 .m-dv-empty{display:flex;align-items:center;justify-content:center;padding:28px 12px;border:1px dashed var(--line);border-radius:8px;background:var(--panel-soft);color:var(--muted);text-align:center}
 .m-ghead-act{flex:none;min-height:36px;min-width:44px;padding:0 10px;border:0;background:none;color:var(--muted);font:inherit;font-size:12px;opacity:.8;cursor:pointer}

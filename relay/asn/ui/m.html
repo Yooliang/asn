@@ -255,8 +255,8 @@
                         <span v-else>{{ a.quota.text }}</span>
                         <span class="m-dv-qmeta" v-if="a.quota.resetLine || a.quota.oldText || a.quota.meta"><span v-if="a.quota.resetLine">{{ a.quota.resetLine }}</span><span class="m-dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                       </span>
-                      <span class="m-dv-used" v-if="a.usedOn && a.usedOn.length">{{ ROSTER_TEXT.usedOn }}：{{ usedOnText(a) }}</span>
-                      <span class="m-dv-sws" v-if="acctSwitchTargets(v.key, a).length"><span class="m-dv-swt" v-for="t in acctSwitchTargets(v.key, a)" :key="t.node"><small class="m-fine" v-if="t.reason">{{ t.reason }}</small><button type="button" class="m-dv-sw" :disabled="!t.enabled" @click="acctSwitchOn(t.node, a.account)">切換到{{ t.label }}</button></span></span>
+                      <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色、選中、有勾與「使用中」，按了不做事；其他按了就是切換到那台（手機不能切換自己） -->
+                      <span class="m-dv-devs" v-if="acctDevButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account"><span class="m-dv-devb" v-for="b in acctDevButtons(v.key, a)" :key="b.node"><button type="button" :class="['m-dv-dev', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && !(b.target && b.target.enabled)" @click="acctDevPress(b, a)"><span class="m-dv-devck" v-if="b.current" aria-hidden="true">✓</span>{{ b.label }}<small v-if="b.current">{{ DEVICE_BUTTON_TEXT.current }}</small></button><small class="m-fine" v-if="!b.current && b.target && b.target.reason">{{ b.target.reason }}</small></span></span>
                     </li>
                   </ul>
                 </div>

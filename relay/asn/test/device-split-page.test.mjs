@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
-import { rosterView, usedOnText } from '../ui/lib/account-roster.mjs'
+import { deviceButtons, rosterView, usedOnText } from '../ui/lib/account-roster.mjs'
 import { deviceStateLine, STATE } from '../ui/lib/device-state.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 
@@ -48,33 +48,50 @@ const my = () => rosterView(roster([
   entry('claude', 'z@b.c', [{ node: 'H', current: false }, { node: 'W', current: false }]),
 ]), { nodeLabel: label, now: NOW })
 
-test('帳號頁：每個帳號寫用在哪幾台；沒在用的帳號可以「切換到這台／切換到工作機」，正在用的沒有按鈕', async () => {
+/** 帳號頁的設備按鈕：[{ text, on, pressed, disabled }]（依畫面順序） */
+const devBtns = html => [...html.matchAll(/<button([^>]*class="aero-btn dv-devbtn( on)?"[^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
+  text: m[3].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), on: Boolean(m[2]), pressed: /aria-pressed="true"/.test(m[1]), disabled: /\sdisabled/.test(m[1]),
+}))
+
+test('帳號頁：每個帳號一排設備按鈕（用過的每台一顆）；使用中的是黃色選中、有勾與「使用中」、不停用；沒在用的按了就是切換到那台', async () => {
   const devices = [
     dev('H', '家用機', true, [vend('claude', [acct('a@b.c', true), acct('z@b.c')])]),
     dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })]),
   ]
   const html = await render('accounts', state(devices, my()))
-  assert.ok(html.includes('用在：家用機（使用中）'), '使用中的排前面')
-  assert.ok(html.includes('用在：家用機、工作機'))
-  assert.ok(html.includes('切換到這台') && html.includes('切換到工作機'))
-  assert.equal(html.split('切換到這台').length - 1, 1, '只有 z 的那一列有（a 在這台已是使用中）')
+  assert.deepEqual(devBtns(html), [
+    { text: '✓家用機（這台）使用中', on: true, pressed: true, disabled: false },
+    { text: '家用機（這台）', on: false, pressed: false, disabled: false },
+    { text: '工作機', on: false, pressed: false, disabled: false },
+  ])
+  assert.ok(!html.includes('用在：') && !html.includes('切換到'), '拿掉「用在：」一行與「切換到…」按鈕')
   assert.ok(!html.includes('class="dv-list"') && !html.includes('雲端代理'))
 })
 
-test('帳號頁的切換：對方 ASN 沒在線／不可切換、帳號登入不完整、設備已隱藏或移除、Grok 只有一個帳號，都不給按鈕', async () => {
+test('設備按鈕的資料：使用中的沒有切換目標（按了不做事）；切換目標裡有、後台還沒回報的也補上；這台加「（這台）」', () => {
+  const usedOn = [{ node: 'H', label: '家用機', current: true }, { node: 'W', label: '工作機', current: false }]
+  const targets = [{ node: 'W', name: '工作機', op: 'device-switch' }, { node: 'X', name: '新電腦', op: 'device-switch' }, { node: 'H', name: '家用機', op: 'acct-switch' }]
+  const b = deviceButtons(usedOn, targets, 'H')
+  assert.deepEqual(b.map(x => [x.node, x.label, x.current, x.target?.op ?? null]), [['H', '家用機（這台）', true, null], ['W', '工作機', false, 'device-switch'], ['X', '新電腦', false, 'device-switch']])
+  assert.equal(deviceButtons([{ node: 'W', label: '', current: false }], [], 'H', () => '工作機')[0].label, '工作機', '後台沒給名字時用設備名')
+  assert.deepEqual(deviceButtons(null, null, ''), [])
+})
+
+test('帳號頁的切換：對方 ASN 沒在線／不可切換、帳號登入不完整、設備已隱藏或移除、Grok 只有一個帳號，那台的按鈕都停用', async () => {
   const mk = over => [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })]), ...[]].map(d => ({ ...d, ...over }))
   const page = async devices => render('accounts', state(devices, my()))
-  assert.ok((await page(mk({}))).includes('切換到工作機'))
-  assert.ok(!(await page(mk({ hidden: true }))).includes('切換到工作機'))
-  assert.ok(!(await page(mk({ removed: true }))).includes('切換到工作機'))
+  const work = async devices => devBtns(await page(devices)).find(b => b.text === '工作機')
+  assert.equal((await work(mk({}))).disabled, false)
+  assert.equal((await work(mk({ hidden: true }))).disabled, true)
+  assert.equal((await work(mk({ removed: true }))).disabled, true)
   const off = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: false, switchHint: '對方電腦的 ASN 沒有在線，無法切換' })])]
-  assert.ok(!(await page(off)).includes('切換到工作機'))
+  assert.equal((await work(off)).disabled, true)
   const incomplete = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c', false, { incomplete: true })], { switchable: true })])]
-  assert.ok(!(await page(incomplete)).includes('切換到工作機'))
-  // Codex 沒有切換；Grok 本機只有一個帳號不給
+  assert.equal((await work(incomplete)).disabled, true)
+  // Codex 沒有切換；Grok 本機只有一個帳號：按鈕在，但停用
   const grok = [dev('H', '家用機', true, [vend('grok', [acct('z@b.c')])])]
   const gmy = rosterView(roster([entry('grok', 'z@b.c', [{ node: 'H', current: false }])]), { nodeLabel: label, now: NOW })
-  assert.ok(!(await render('accounts', state(grok, gmy))).includes('切換到這台'))
+  assert.deepEqual(devBtns(await render('accounts', state(grok, gmy))), [{ text: '家用機（這台）', on: false, pressed: false, disabled: true }])
 })
 
 test('帳號頁：後台讀不到列表就寫提示，不是整頁空白；設備頁沒有「我的帳號」', async () => {
