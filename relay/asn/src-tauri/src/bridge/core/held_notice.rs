@@ -81,9 +81,9 @@ impl Core {
             return;
         }
         let text = match kind {
-            "denied" => format!("[收發室] 你寄給 {recipient} 的這封信可能被對方視窗的使用者拒絕了，沒有送進去。收發室不會重送。"),
-            "refused" => format!("[收發室] 你寄給 {recipient} 的這封信可能沒送進去：對方視窗目前不接受其他視窗的信。收發室不會重送。"),
-            _ => format!("[收發室] 你寄給 {recipient} 的這封信可能卡在對方視窗的確認框，對方還沒看到。需要有人在那台電腦上按確認；收發室不會重送。"),
+            "denied" => format!("你寄給 {recipient} 的這封信可能被對方視窗的使用者拒絕了，沒有送進去。收發室不會重送。"),
+            "refused" => format!("你寄給 {recipient} 的這封信可能沒送進去：對方視窗目前不接受其他視窗的信。收發室不會重送。"),
+            _ => format!("你寄給 {recipient} 的這封信可能卡在對方視窗的確認框，對方還沒看到。需要有人在那台電腦上按確認；收發室不會重送。"),
         };
         self.send_back(&f.origin, &text, None, Some(false)).await;
     }

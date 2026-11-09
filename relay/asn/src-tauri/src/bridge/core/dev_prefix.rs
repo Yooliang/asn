@@ -20,6 +20,18 @@ pub fn own_device_name(list: &Value, node: &str) -> Option<String> {
     list.get("members")?.as_array()?.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(node)).and_then(|m| m.get("name")).and_then(Value::as_str).and_then(clean_device)
 }
 
+/// 舊的「[收發室] 」字頭：收發室自己說話的通知不再帶（通知對話的氣泡上方已寫明來源）。
+/// 只有代夥伴寄的「轉交失敗」說明還保留它（那是給對方橋認「這封本身是通知」的記號，見 fail_notice.rs）
+pub const OLD_HEAD: &str = "[收發室] ";
+
+/// 收發室自己說話（from_agent 為 None）的內文去掉舊字頭；代夥伴寄的不動
+pub fn without_old_head<'a>(body: &'a str, from_agent: Option<&str>) -> &'a str {
+    match from_agent {
+        None => body.strip_prefix(OLD_HEAD).unwrap_or(body),
+        Some(_) => body,
+    }
+}
+
 /// 收發室自己說話才加前綴（from_agent 為 None）；沒有設備名＝不加。已經有同樣前綴就不重複加
 pub fn with_notice_prefix(body: &str, from_agent: Option<&str>, device: Option<&str>) -> String {
     match (from_agent, device.and_then(clean_device)) {
@@ -56,8 +68,15 @@ mod tests {
     }
 
     #[test]
+    fn 去舊字頭只對收發室自己說話的通知() {
+        assert_eq!(without_old_head("[收發室] 轉交給 X 失敗", None), "轉交給 X 失敗");
+        assert_eq!(without_old_head("[收發室] 轉交給 X 失敗", Some("X")), "[收發室] 轉交給 X 失敗", "代夥伴寄的保留");
+        assert_eq!(without_old_head("沒有字頭", None), "沒有字頭");
+    }
+
+    #[test]
     fn 前綴只加在收發室自己說話的通知() {
-        assert_eq!(with_notice_prefix("[收發室] x", None, Some("家用機")), "家用機：[收發室] x");
+        assert_eq!(with_notice_prefix("x", None, Some("家用機")), "家用機：x");
         assert_eq!(with_notice_prefix("內容", Some("小乙"), Some("家用機")), "內容", "代夥伴寄不加");
         assert_eq!(with_notice_prefix("內容", None, None), "內容", "沒拿到設備名不加");
         assert_eq!(with_notice_prefix("內容", None, Some("")), "內容", "設備名為空不加");

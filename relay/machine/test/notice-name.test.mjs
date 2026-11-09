@@ -20,8 +20,8 @@ test('ownDeviceName：從名單找自己節點；沒名字或沒這個節點＝�
 })
 
 test('withNoticePrefix：沒有 fromAgent 且有設備名才加；不重複加', () => {
-  assert.equal(withNoticePrefix('[收發室] x', undefined, '家用機'), '家用機：[收發室] x')
-  assert.equal(withNoticePrefix('[收發室] x', '', '家用機'), '家用機：[收發室] x')
+  assert.equal(withNoticePrefix('x', undefined, '家用機'), '家用機：x')
+  assert.equal(withNoticePrefix('x', '', '家用機'), '家用機：x')
   assert.equal(withNoticePrefix('內容', '小乙', '家用機'), '內容')
   assert.equal(withNoticePrefix('內容', undefined, ''), '內容', '沒拿到設備名不加')
   assert.equal(withNoticePrefix('內容', undefined, undefined), '內容')

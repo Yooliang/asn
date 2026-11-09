@@ -73,7 +73,7 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
     assert_eq!(owner_notices(&h), 0, "主人通知改由後台寄（名單回報帶暫停時間），不寄到本機視窗");
     // 通知內容：設備名、台北時間、reply=no
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
-    assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 收發室的 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
+    assert_eq!(n["body"].as_str().unwrap(), format!("Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
     assert_eq!(n["expects_reply"], json!(false));
     // 再來一次 quota 事件（同一次額度用完）：不重複通知
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 3000).await;
@@ -907,7 +907,7 @@ async fn 通知_有設備名第一行加前綴_代夥伴寄的與沒拿到設備
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
-    assert!(n["body"].as_str().unwrap().starts_with("[收發室] 收發室的 Claude 額度用完"), "{n}");
+    assert!(n["body"].as_str().unwrap().starts_with("Claude 額度用完"), "{n}");
 
     // 注入設備名：收發室自己說話的通知第一行有前綴
     let mut h = harness(&[("T-乙", "idle")]).await;
@@ -916,7 +916,7 @@ async fn 通知_有設備名第一行加前綴_代夥伴寄的與沒拿到設備
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
-    assert_eq!(n["body"].as_str().unwrap(), format!("40家用：[收發室] 收發室的 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
+    assert_eq!(n["body"].as_str().unwrap(), format!("40家用：Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
 
     // 代夥伴寄（from_agent 有值）不加
     assert!(h.core.send_back_for_test("W", "W-政策", "收到了", Some("T-乙")).await);
@@ -925,6 +925,17 @@ async fn 通知_有設備名第一行加前綴_代夥伴寄的與沒拿到設備
 
     // 設備名為空＝不加
     h.core.cfg.device_name = Some(String::new());
-    assert!(h.core.send_back_for_test("W", "W-政策", "[收發室] 空名", None).await);
-    assert!(h.fr.sent().iter().any(|s| s["body"] == "[收發室] 空名"));
+    assert!(h.core.send_back_for_test("W", "W-政策", "空名", None).await);
+    assert!(h.fr.sent().iter().any(|s| s["body"] == "空名"));
+}
+
+#[tokio::test]
+async fn 通知_去掉舊字頭_代夥伴寄的轉交失敗說明保留() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.device_name = Some("40家用".into());
+    assert!(h.core.send_back_for_test("W", "W-政策", "[收發室] 轉交給 X 失敗：原因", None).await);
+    assert!(h.core.send_back_for_test("W", "W-政策", "[收發室] 轉交給 X 失敗：原因", Some("X")).await);
+    let b = bodies(&h);
+    assert_eq!(b[0], "40家用：轉交給 X 失敗：原因", "收發室自己說話：字頭拿掉、前綴加上");
+    assert_eq!(b[1], "[收發室] 轉交給 X 失敗：原因", "代夥伴寄的保留字頭（對方橋靠它認得這封本身是通知）");
 }

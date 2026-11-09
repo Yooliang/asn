@@ -212,7 +212,7 @@ async function onFail(id, reason) {
   log(`forward failed id=${id}: ${reason}`)
   if (p.room) { pending.delete(id); return }   // 群組訊息：只記 log，不回群組
   if (isMailboxSender(p.mail)) log(`forward failure notice to mailbox sender ${p.mail.from_node}/${p.mail.from_agent} not sent id=${id}`)
-  else await sendBack(p, `[收發室] 轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
+  else await sendBack(p, `轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
   await ackIds([id])
   pending.delete(id)
 }
@@ -326,7 +326,7 @@ setInterval(async () => {
       // 收發室沒回報，但對方已經回了這封（或已寄信給原寄件人）＝其實有轉到：不寄「轉交逾時」，免得寄件人以為對方沒收到
       if (repliedDirectly(id) || sentToSender(p)) { log(`forward unconfirmed but ${p.target} already replied id=${id}: no timeout notice`); await ackIds([id]); pending.delete(id); continue }
       if (isMailboxSender(p.mail)) log(`forward timeout notice to mailbox sender not sent id=${id}`)
-      else await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
+      else await sendBack(p, `轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
       if (p.room) pending.delete(id)
@@ -451,7 +451,7 @@ async function handleMail(m) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
     if (isMailboxSender(m)) log(`id=${m.id} target ${target} not found; notice to mailbox sender not sent`)
-    else await sendBack(p, `[收發室] 找不到名叫「${target}」的 session（目前可達：${names}）`)
+    else await sendBack(p, `找不到名叫「${target}」的 session（目前可達：${names}）`)
     await ackIds([m.id])
     return
   }

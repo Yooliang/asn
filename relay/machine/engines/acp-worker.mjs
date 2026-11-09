@@ -121,9 +121,9 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
 
   // ---- 失敗 → 狀態＋給寄件人的說明 ------------------------------------------------------------------------
   function explain(e) {
-    const how = cfg.protocol === 'agy-stream' ? `請到這台電腦前在終端機執行 agy 完成 Google 瀏覽器登入` : `請到這台電腦前登入 ${cfg.command}`
+    const how = cfg.protocol === 'agy-stream' ? `請在終端機執行 agy 完成 Google 瀏覽器登入` : `請登入 ${cfg.command}`
     switch (e.code) {
-      case 'auth': return `${name} 需要登入：這台電腦上的帳號登入失效或還沒登入。${how}，好了再寄一次。（錯誤：${e.message.slice(0, 160)}）`
+      case 'auth': return `${name} 需要登入：帳號登入失效或還沒登入。${how}，好了再寄一次。（錯誤：${e.message.slice(0, 160)}）`
       case 'quota': return `${name} 的額度用完了（或被限流），請稍後再試。（錯誤：${e.message.slice(0, 160)}）`
       case 'timeout': return `${name} 處理這封信太久沒有動靜（超過 ${Math.round(cfg.turnTimeoutMs / 60000)} 分鐘），已中止這一輪。`
       case 'violation': return `${name} 想做不被允許的事：${e.summary ?? ''}（${e.message}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。`

@@ -64,9 +64,11 @@ mod notice_tests {
 }
 
 impl Core {
-    /// 記下這封信本身是不是收發室通知：之後被退就不再發通知
-    pub(super) fn note_if_notice(&mut self, id: &str, body: &str) {
-        if body.starts_with(MAIL_NOTICE_HEAD) || body.starts_with(ROOM_NOTICE_HEAD) {
+    /// 記下這封信本身是不是收發室通知：之後被退就不再發通知。
+    /// 主要看寄件名／kind（is_notice，由呼叫端用 Mail::is_system_notice 判斷）；內文字頭只是備援，
+    /// 因為代夥伴寄的「轉交失敗」說明寄件名是夥伴名，只有字頭認得出來
+    pub(super) fn note_if_notice(&mut self, id: &str, body: &str, is_notice: bool) {
+        if is_notice || body.starts_with(MAIL_NOTICE_HEAD) || body.starts_with(ROOM_NOTICE_HEAD) {
             self.bounce_notices.insert(id.to_string());
         }
     }

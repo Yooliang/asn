@@ -943,9 +943,9 @@ impl Core {
             return;
         }
         let text = if self.mux_lost.contains(target) {
-            format!("[收發室] 「{target}」所在的共用終端服務中斷了，正在接回；信已收到、先留著，接回來後會送出（最多等 {} 小時，不用重寄；送到時會註明原本幾點收到）。", AWAIT_GRACE_MS / 3_600_000)
+            format!("「{target}」所在的共用終端服務中斷了，正在接回；信已收到、先留著，接回來後會送出（最多等 {} 小時，不用重寄；送到時會註明原本幾點收到）。", AWAIT_GRACE_MS / 3_600_000)
         } else {
-            format!("[收發室] 「{target}」在收發室重開前有在線，還沒接回來；信已收到、先留著，接回來後會送出（最多等 {} 小時，不用重寄；送到時會註明原本幾點收到）。", AWAIT_GRACE_MS / 3_600_000)
+            format!("「{target}」在收發室重開前有在線，還沒接回來；信已收到、先留著，接回來後會送出（最多等 {} 小時，不用重寄；送到時會註明原本幾點收到）。", AWAIT_GRACE_MS / 3_600_000)
         };
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;
@@ -971,7 +971,7 @@ impl Core {
         if self.now.saturating_sub(first) >= AWAIT_GRACE_MS {
             self.log.line(&format!("id={} to={to}: self-pull window did not collect it in {} h, bounced", m.id, AWAIT_GRACE_MS / 3_600_000));
             if !quiet {
-                let text = format!("[收發室] 「{to}」要自己收信，這封放了 {} 小時都沒有被收走，退回給你。要找它，請等它上線收信後再寄，或改用別的方式聯絡。", AWAIT_GRACE_MS / 3_600_000);
+                let text = format!("「{to}」要自己收信，這封放了 {} 小時都沒有被收走，退回給你。要找它，請等它上線收信後再寄，或改用別的方式聯絡。", AWAIT_GRACE_MS / 3_600_000);
                 self.send_back(&o, &text, None, Some(false)).await;
             }
             self.ack_ids(&[m.id.clone()]).await;
@@ -985,7 +985,7 @@ impl Core {
             self.self_pull_first.retain(|k, _| *k == m.id);
         }
         if !quiet && self.self_pull_told.insert(format!("{}/{}->{to}", m.from_node, from_agent)) {
-            let text = format!("[收發室] 「{to}」要自己收信：信已經放進它的信箱，它來收時才會看到，可能比較晚。最多放 {} 小時，沒收走就退回給你。", AWAIT_GRACE_MS / 3_600_000);
+            let text = format!("「{to}」要自己收信：信已經放進它的信箱，它來收時才會看到，可能比較晚。最多放 {} 小時，沒收走就退回給你。", AWAIT_GRACE_MS / 3_600_000);
             self.send_back(&o, &text, None, Some(false)).await;
         }
         Some(to.to_string())
@@ -1104,7 +1104,7 @@ impl Core {
     }
     async fn send_back(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
         let dev = if from_agent.is_none() { self.notice_device().await } else { None };
-        let body = dev_prefix::with_notice_prefix(body, from_agent, dev.as_deref());
+        let body = dev_prefix::with_notice_prefix(dev_prefix::without_old_head(body, from_agent), from_agent, dev.as_deref());
         let mut b = json!({ "to_node": o.from_node, "body": body, "reply_to": o.id, "from_agent": from_agent.unwrap_or(&self.cfg.mailbox_name) });
         if !o.from_agent.is_empty() {
             b["to_agent"] = json!(o.from_agent);
@@ -1654,7 +1654,7 @@ impl Core {
             if m.is_system_notice() {
                 self.log.line(&format!("id={} target {target} not found; notice to mailbox sender not sent", m.id));
             } else {
-                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
+                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
                 self.send_back(&Origin::of(&p), &text, None, None).await;
             }
             self.ack_ids(&[m.id.clone()]).await;
@@ -1733,7 +1733,7 @@ impl Core {
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
-                self.note_if_notice(&m.id, &m.body);
+                self.note_if_notice(&m.id, &m.body, m.is_system_notice());
                 if self.fwd_origin.len() >= 400 {
                     self.fwd_origin.clear();
                 }
@@ -2424,7 +2424,7 @@ impl Core {
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
-                self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""));
+                self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""), false);
                 if !self.is_respond(&target) && self.via_worker(&target) {
                     self.fwd_rooms.insert(id.clone(), RoomFwd { room_id: room_id.clone(), room_name: room_name.clone(), member: member.to_string(), seq, received_at: late.unwrap_or(self.now) });
                 }
@@ -2625,7 +2625,7 @@ impl Core {
                 } else if self.bounce_notices.contains(&id) {
                     self.log.line(&format!("forward timeout notice not sent id={id}: the failed mail is itself a notice"));
                 } else {
-                    self.send_back(&Origin::of(&p), &format!("[收發室] 轉交給 {} 逾時（收發室沒有完成轉交）", p.target), None, None).await;
+                    self.send_back(&Origin::of(&p), &format!("轉交給 {} 逾時（收發室沒有完成轉交）", p.target), None, None).await;
                 }
                 self.ack_ids(&[id.clone()]).await;
                 self.remove(&id);

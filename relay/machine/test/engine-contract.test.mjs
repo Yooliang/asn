@@ -151,7 +151,7 @@ test('系統通知（沒有 fromAgent）第一行前面加後台的設備名；�
     until: c => c.st.acked.has(uid(3)) && c.st.acked.has(uid(4)) && c.st.sent.length >= 2,
   })
   const notice = r.st.sent.find(s => s.reply_to === uid(3)), reply = r.st.sent.find(s => s.reply_to === uid(4))
-  assert.ok(notice.body.startsWith('40家用：[收發室] 找不到名叫'), notice.body)
+  assert.ok(notice.body.startsWith('40家用：找不到名叫'), notice.body)
   assert.equal(reply.body, '收到了', '代夥伴寄的回信不加前綴')
   assert.equal(reply.from_agent, '假視窗甲')
 })
@@ -161,5 +161,5 @@ test('系統通知：名單查不到自己的設備名（後台沒這個動作�
     inbox: [mail(3, { to_agent: '不存在' })], windows: wins, env: { COMPUTERNAME: 'DESKTOP-XXXX' },
     until: c => c.st.acked.has(uid(3)) && c.st.sent.length > 0,
   })
-  assert.ok(r.st.sent[0].body.startsWith('[收發室] 找不到名叫'), r.st.sent[0].body)
+  assert.ok(r.st.sent[0].body.startsWith('找不到名叫'), r.st.sent[0].body)
 })
