@@ -30,6 +30,7 @@ import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/acco
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
+import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
@@ -565,8 +566,10 @@ const app = createApp({
     const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster, undefined, acctRoster.value) }
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
     const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, selfNode: info.node }))
-    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
+    const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
+    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
+    watch(acctAllDevs, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
     const acctRemoved = computed(() => removedRows(acctAllDevs.value))
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))

@@ -53,7 +53,7 @@ test('讀到之後 Aegis／日本VM 標「雲端」；沒讀到（或讀失敗�
   const never = { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }
   const pc = { loading: false, asnOnline: true, reportedAt: '2026-11-08T00:00:00Z', msg: '', list: [] }
   const after = Object.fromEntries(acctDeviceTree({ ...base, reports: { A: never, J: never, Q: pc } }).map(d => [d.key, d.kindLabel]))
-  assert.deepEqual([after.A, after.J, after.Q], ['電腦 · 雲端', '電腦 · 雲端', '電腦'])
+  assert.deepEqual([after.A, after.J, after.Q], ['雲端', '雲端', '電腦'])
 })
 
 test('守門：手機進設備頁時呼叫預讀（只在 openAcctNow，一次），預讀結果不蓋掉已經讀到的', () => {

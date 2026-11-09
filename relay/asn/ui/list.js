@@ -16,6 +16,7 @@ import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.m
 import { activityRound, withActivity } from './lib/activity.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
+import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
@@ -1667,7 +1668,9 @@ const app = createApp({
       await openDeviceAcct(node)
     }
     // 設定「設備」分類：設備 → 廠商 → 帳號。其他設備的帳號回報在有新設備出現時讀一次，也可按「重新整理」
+    const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
+      cloudNodes: cloudMem.value,
       friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
@@ -1675,6 +1678,7 @@ const app = createApp({
       reports: accounts.state.reports, roster: accounts.state.roster,
       self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
+    watch(deviceTree, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
     watch(() => otherDeviceNodes().join(','), () => {
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])

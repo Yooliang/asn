@@ -107,7 +107,22 @@ export function isCloudNode({ phone = false, self = false, asnOnline = false, re
  */
 export const CLOUD_TAG = '雲端'
 export function deviceKindLabel({ kind = '電腦', cloud = null } = {}) {
-  return cloud === true ? `${kind} · ${CLOUD_TAG}` : kind
+  return cloud === true ? CLOUD_TAG : kind   // 雲端夥伴只寫「雲端」（小良哥看過手機截圖），不再是「電腦 · 雲端」
+}
+
+/** 雲端夥伴那一列的第三行說明（電腦、手機共用）。原本是「還沒收到這台的回報」，雲端本來就不會有帳號回報 */
+export const CLOUD_STATE_LINE = '雲端夥伴，沒有安裝電腦版 ASN'
+
+/**
+ * 記住上次判成雲端的節點（離線時 isCloudNode 會回 null，標示不能跟著消失）。純函式。
+ * prev：上次是否判成雲端（記住的）；now：這次 isCloudNode 的結果（true／false／null）
+ * → { cloud, store }：cloud 給畫面用；store 是這台下次要不要繼續記住
+ *   這次 true → 記住；這次 null → 沿用記住的（記得是 true 就回 true，否則 null）；這次 false → 取消記住並回 false
+ */
+export function rememberCloud(prev, now) {
+  if (now === true) return { cloud: true, store: true }
+  if (now === false) return { cloud: false, store: false }
+  return prev === true ? { cloud: true, store: true } : { cloud: null, store: false }
 }
 
 /**
@@ -178,8 +193,9 @@ const SHORT_TEXT = Object.freeze({
  * 設備列表每一列的一行摘要，例如「Claude 已登入、Codex 未安裝」。
  * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）
  */
-export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false } = {}) {
+export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false, cloud = null } = {}) {
   if (phone) return ''
+  if (cloud === true) return CLOUD_STATE_LINE
   if (!self && !online) return '離線，看不到狀態'
   const all = [...vendors, ...missing]
   if (!all.length) return ''

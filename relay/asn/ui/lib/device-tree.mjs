@@ -12,7 +12,7 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceStateLine, installAction, isCloudNode, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceStateLine, installAction, isCloudNode, isPhoneDevice, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -49,6 +49,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * friends：名單（node、device、engine、kind、status）；nodeOrder：節點順序；selfNode：本機節點
  * asn：節點 → 在線的 ASN 視窗列；launchers：節點 → 啟動器回報。電腦版放啟動器本身 { profiles }，手機版放整筆電腦設定 { launcher: { profiles } }（兩種都認）；
  *   本機那筆可多帶 detected: false＝本機偵測還沒跑完（這時不能說「未安裝」）
+ * cloudNodes：本機記住的「上次判成雲端」節點（cloud-memory.mjs）；每一台多帶 cloudStore＝下次要不要記住
  * 每一台多帶 cloud：true／false／null（雲端夥伴，見 device-state.mjs 的 isCloudNode；null＝資料還不夠）
  * machines：節點 → { platform }（後台回報的平台，#652）。電腦版是 remoteMachines、手機版是 machinesByNode
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
@@ -56,7 +57,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now() } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [] } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })
@@ -82,7 +83,9 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     // 雲端夥伴（#930）：只標記，不改這裡的分組與顯示（之後的 PR 才用它分出「雲端夥伴」）
     // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線
     const partnersOffline = mine.length > 0 && mine.every(f => String(f.status ?? '').toLowerCase() === 'offline')
-    const cloud = isCloudNode({ phone, self: isSelf, asnOnline, rep: reports[node], engines: mine.map(f => engineKey(f)), partnersOffline })
+    const judged = isCloudNode({ phone, self: isSelf, asnOnline, rep: reports[node], engines: mine.map(f => engineKey(f)), partnersOffline })
+    // 離線時判不出來（null）就沿用本機記住的「上次判成雲端」；cloudStore＝下次要不要繼續記住（呼叫端存回本機）
+    const { cloud, store: cloudStore } = rememberCloud((cloudNodes ?? []).includes(node), judged)
 
     // 這台有哪些廠商：視窗用的引擎、啟動器回報的 CLI、帳號回報裡的廠商、本機登入的帳號
     const keys = new Set()
@@ -149,7 +152,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, platform, phone, cloud, missing, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }
