@@ -33,9 +33,11 @@ export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLa
  * 別台設備在開新夥伴對話框裡的模型列：用那台回報的 profile（id、標籤），不是本機偵測到的 CLI。
  * 那台是 ASN 內建收發室橋或舊版收發室橋都一樣；回報裡沒有指令，只有 id 與標籤。
  */
+// asn終端的虛擬項目（mode: term，例如 gemini-term／grok-term）不另外列成模型：它們是同一家（Gemini、Grok）的「運行：asn終端（原生 cli）」，
+// 選那一家、運行選 asn終端時才用到（remoteTermProfile）。列出來會跟 Gemini、Grok 重複，選了 acp 那行還會寫「這個設定不支援」（#931 PR-2）
 export function remoteModelRows(launcher) {
   const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
-  return list.filter(p => p && typeof p.id === 'string' && p.id).map(p => {
+  return list.filter(p => p && typeof p.id === 'string' && p.id && p.mode !== 'term').map(p => {
     const cat = MODEL_CATALOG.find(m => m.profileId === p.id)
     // 目錄上沒有的項目（自訂設定）：看那台回報的 mode（舊版回報沒有這欄＝視窗）
     const bg = !cat && p.mode === 'background'
@@ -46,6 +48,13 @@ export function remoteModelRows(launcher) {
       installed: true, installHint: '', version: '',
     }
   })
+}
+
+/** 那台摘要裡這一家的 asn終端 profile id（<目錄 id>-term 且 mode: term）；沒有回空字串（舊版、沒開終端服務、沒裝那家 CLI） */
+export function remoteTermProfile(launcher, row) {
+  const id = row?.id ? `${row.id}-term` : ''
+  const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
+  return id && list.some(p => p?.id === id && p.mode === 'term') ? id : ''
 }
 
 export function canLaunchOnNode(nodeKey, ctx) {

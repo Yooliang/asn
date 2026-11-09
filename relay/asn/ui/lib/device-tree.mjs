@@ -35,6 +35,9 @@ export function piBackends(friends) {
 const vendorKey = e => { const k = String(e ?? '').trim().toLowerCase(); return VENDOR_OF[k] ?? k }
 // 一台的啟動器 profiles：電腦版放 { profiles }，手機版放整筆電腦設定 { launcher: { profiles } }；沒開放（沒有）回 null
 export const profilesOf = l => (Array.isArray(l?.profiles) ? l.profiles : Array.isArray(l?.launcher?.profiles) ? l.launcher.profiles : null)
+// 算「這台有哪些 AI／裝了哪些」用的 profiles：去掉 asn終端（mode: 'term'，gemini-term／grok-term）。那兩個是遠端開進 asn終端用的虛擬項目，
+// 用的是 Gemini／Grok 本身的登入，不是另外的 CLI，不能在登入狀態列成「Gemini-term 已安裝未登入」
+export const vendorProfilesOf = l => (profilesOf(l) ?? []).filter(p => p?.mode !== 'term')
 
 // 一個廠商底下的帳號 → 顯示用的字
 function accountView(rows, { loggedOut = false } = {}) {
@@ -90,7 +93,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     // 這台有哪些廠商：視窗用的引擎、啟動器回報的 CLI、帳號回報裡的廠商、本機登入的帳號
     const keys = new Set()
     for (const f of mine) { const k = vendorKey(engineKey(f)); if (!SKIP.has(k)) keys.add(k) }
-    for (const p of profilesOf(launchers[node]) ?? []) {
+    for (const p of vendorProfilesOf(launchers[node])) {
       const cat = MODEL_CATALOG.find(m => m.profileId === p?.id)
       const k = vendorKey(cat?.id ?? p?.id)
       if (!SKIP.has(k)) keys.add(k)
@@ -98,7 +101,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     // 這台裝了哪些 AI：視窗在用的引擎、啟動器回報的 CLI；啟動器沒開放（沒有 profiles）就是「不知道」，不能當成沒裝
     const installedKeys = new Set()
     for (const f of mine) { const k = vendorKey(engineKey(f)); if (!SKIP.has(k)) installedKeys.add(k) }
-    for (const p of profilesOf(launchers[node]) ?? []) {
+    for (const p of vendorProfilesOf(launchers[node])) {
       const cat = MODEL_CATALOG.find(m => m.profileId === p?.id)
       const k = vendorKey(cat?.id ?? p?.id)
       if (!SKIP.has(k)) installedKeys.add(k)
