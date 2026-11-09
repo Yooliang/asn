@@ -31,7 +31,7 @@ const MAX_BINARY_BYTES: u64 = 800 * 1024 * 1024;
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// Claude Code 的固定資料（網域、簽署者、檔名、雜湊演算法）
-pub const SPEC: Spec = Spec { vendor: "Claude Code", host: "downloads.claude.ai", signer: EXPECTED_SIGNER, exe: "claude.exe", file_prefix: "claude", hash: HashAlgo::Sha256 };
+pub const SPEC: Spec = Spec { vendor: "Claude Code", host: "downloads.claude.ai", path_prefix: "/claude-code-releases/", signer: EXPECTED_SIGNER, exe: "claude.exe", file_prefix: "claude", hash: HashAlgo::Sha256 };
 
 pub fn platform() -> Result<&'static str, String> {
     if !cfg!(windows) {

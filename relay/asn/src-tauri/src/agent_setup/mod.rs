@@ -2,6 +2,7 @@
 //! 所有東西都從官方網域下載、比對雜湊、驗數位簽章，通過才執行，不跑網路上抓下來的腳本。
 //! 不讀、不寫任何登入資料。
 
+pub mod agy_install;
 pub mod authenticode;
 pub mod claude_install;
 pub mod claude_login;

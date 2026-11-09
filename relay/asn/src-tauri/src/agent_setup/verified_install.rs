@@ -78,6 +78,8 @@ pub struct Spec {
     pub vendor: &'static str,
     /// 下載只連這台主機（完全相等，不收子網域）
     pub host: &'static str,
+    /// 下載網址的路徑必須以它開頭（以 `/` 開頭與結尾）。共用網域（例如 storage.googleapis.com）只釘主機等於誰都能放檔案，一定要連路徑一起釘
+    pub path_prefix: &'static str,
     /// Authenticode 簽署者，必須完全相等
     pub signer: &'static str,
     /// 裝好的執行檔名稱（只用在訊息），例如 `claude.exe`
@@ -127,11 +129,27 @@ pub fn valid_platform(p: &str) -> bool {
     !p.is_empty() && p.len() <= 32 && p != "." && p != ".." && p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// 網址是不是 https，而且主機完全等於 `host`（不收 `host.evil.com`、`evil.com/host`、帳密、連接埠）
-pub fn url_on_host(url: &str, host: &str) -> bool {
+
+/// 下載網址是否在這家的白名單內：https、主機完全相等、路徑以 `prefix` 開頭；
+/// 路徑只收英數字與 `.` `_` `-` `/`，不收 `..`、`//`、`?`、`#`、`%`（百分比編碼可能繞過 `..` 的檢查）、帳密、連接埠
+pub fn url_allowed(url: &str, host: &str, prefix: &str) -> bool {
+    if !prefix.starts_with('/') || !prefix.ends_with('/') {
+        return false;
+    }
     let Some(rest) = url.strip_prefix("https://") else { return false };
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    &rest[..end] == host
+    let Some(slash) = rest.find('/') else { return false };
+    let (h, path) = rest.split_at(slash);
+    h == host
+        && path.starts_with(prefix)
+        && path.len() > prefix.len()
+        && path.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
+        && !path.contains("..")
+        && !path.contains("//")
+}
+
+/// `--version` 的輸出裡要有一個字完全等於版本號（Codex 印 `codex-cli 0.167.0`、agy 只印 `1.5.3`）
+pub fn version_in_output(output: &str, version: &str) -> bool {
+    output.split_whitespace().any(|w| w == version)
 }
 
 /// `--version` 的輸出第一個字必須完全等於版本號（例如 `2.1.309 (Claude Code)`）
@@ -297,7 +315,7 @@ pub fn download_locked(d: &Deps, spec: &Spec, rel: &Release, work: &Path, ext: &
     if !valid_platform(&rel.platform) {
         return Err("官方清單的平台名稱格式不對，已放棄安裝".to_string());
     }
-    if !url_on_host(&rel.url, spec.host) {
+    if !url_allowed(&rel.url, spec.host, spec.path_prefix) {
         return Err("官方清單指向不認得的下載位置，為了安全沒有安裝".to_string());
     }
     if !spec.hash.valid_hex(&rel.sum) {
@@ -536,7 +554,7 @@ mod tests {
     use std::path::PathBuf;
 
     const BIN: &[u8] = b"MZ fake vendor binary";
-    const SPEC: Spec = Spec { vendor: "測試廠商", host: "dl.example.test", signer: "Example, Inc.", exe: "tool.exe", file_prefix: "tool", hash: HashAlgo::Sha512 };
+    const SPEC: Spec = Spec { vendor: "測試廠商", host: "dl.example.test", path_prefix: "/", signer: "Example, Inc.", exe: "tool.exe", file_prefix: "tool", hash: HashAlgo::Sha512 };
 
     fn sum512(b: &[u8]) -> String {
         hex(&Sha512::digest(b))
@@ -611,8 +629,42 @@ mod tests {
             assert!(urls.is_empty(), "{bad}：不能連");
             assert!(!rec.ok && rec.line().contains("結果=失敗"), "{bad}");
         }
-        assert!(url_on_host("https://dl.example.test", "dl.example.test"));
-        assert!(url_on_host("https://dl.example.test/a?b#c", "dl.example.test"));
+    }
+
+    #[test]
+    fn 網址白名單_主機與路徑前綴都要對_路徑只收安全字元() {
+        let (h, p) = ("storage.googleapis.com", "/antigravity-public/antigravity-cli/");
+        assert!(url_allowed("https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.3-6604829099950080/windows-x64/cli_windows_x64.exe", h, p));
+        for bad in [
+            "https://storage.googleapis.com/evil-bucket/antigravity-cli/x.exe",                      // 別人的 bucket
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli-evil/x.exe",          // 前綴只差一截
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/",                    // 只有前綴、沒有檔
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/../../evil/x.exe",    // ..
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/%2e%2e/evil/x.exe",   // 百分比編碼
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/x.exe?alt=media",     // 查詢字串
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/x.exe#a",             // 片段
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli//x.exe",              // 雙斜線
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/a b.exe",             // 空白
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/a\\b.exe",            // 反斜線
+            "http://storage.googleapis.com/antigravity-public/antigravity-cli/x.exe",                // 不是 https
+            "https://storage.googleapis.com.evil.com/antigravity-public/antigravity-cli/x.exe",      // 主機
+            "https://x@storage.googleapis.com/antigravity-public/antigravity-cli/x.exe",             // 帳密
+            "https://storage.googleapis.com:443/antigravity-public/antigravity-cli/x.exe",           // 連接埠
+            "https://storage.googleapis.com",                                                       // 沒有路徑
+        ] {
+            assert!(!url_allowed(bad, h, p), "{bad}");
+        }
+        assert!(!url_allowed("https://a.test/x/y.exe", "a.test", "x/"), "前綴要以 / 開頭");
+        assert!(!url_allowed("https://a.test/x/y.exe", "a.test", "/x"), "前綴要以 / 結尾");
+    }
+
+    #[test]
+    fn 三家的白名單都對得上實際的官方網址() {
+        let c = super::super::claude_install::SPEC;
+        assert!(url_allowed("https://downloads.claude.ai/claude-code-releases/2.1.316/win32-x64/claude.exe", c.host, c.path_prefix));
+        let x = super::super::codex_install::SPEC;
+        assert!(url_allowed("https://releases.openai.com/codex/releases/0.167.0/codex-package-x86_64-pc-windows-msvc.tar.gz", x.host, x.path_prefix));
+        assert!(!url_allowed("https://releases.openai.com/codex/channels/latest", x.host, x.path_prefix), "套件只能從 releases/ 底下下載");
     }
 
     #[test]
