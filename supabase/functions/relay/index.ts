@@ -16,6 +16,7 @@ import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.t
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeInboxHold, sanitizeInboxHoldExtra } from "../_shared/inbox_hold.ts";
 import { parseMisrouteNotice } from "../_shared/misroute_notice.ts";
+import { handleBridgeNotice } from "../_shared/bridge_notice.ts";
 import { parseWaitingNotice } from "../_shared/waiting_notice.ts";
 import { parseMuxDownNotice } from "../_shared/mux_down_notice.ts";
 import { parseNodeMismatchNotice } from "../_shared/node_mismatch_notice.ts";
@@ -378,6 +379,11 @@ Deno.serve(async (req) => {
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
+  }
+  // 橋自己寄的通知（#848 PR-D）：後台以「ASN 通知」回覆寄給這台的那封信；收件人與寄件名由資料庫決定，跨帳號回 409 由橋照舊寄
+  if (action === "bridge_notice" && req.method === "POST") {
+    const r = await handleBridgeNotice({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me.id, await req.json().catch(() => null));
+    return json(r.status, r.body);
   }
   // 核對轉交對象：收發室把信轉交錯了視窗，後台寄固定內文的通知給這個節點的擁有者（節點一律是金鑰所屬的 me.id）。失敗只記 warn，不影響轉交
   if (action === "misroute_notice" && req.method === "POST") {
