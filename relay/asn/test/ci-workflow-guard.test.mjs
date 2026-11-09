@@ -40,3 +40,41 @@ test('identifier、Kotlin 套件路徑、MainActivity 的 package 三者一致�
   const lib = cargo.split(/\r?\n\[/).find(s => s.startsWith('lib]'))
   assert.match(lib ?? '', /^name\s*=\s*"[a-z][a-z0-9_]*"/m)
 })
+
+// WezTerm 自建的 release 不能被標成整個 repo 的 Latest（否則 repo 首頁和 releases/latest 會指到 WezTerm，而不是 ASN）
+test('wezterm-build 的每一處 gh release create 都帶 --latest=false', () => {
+  const scriptsDir = new URL('.github/scripts/', root)
+  const files = [
+    ['wezterm-build.yml', fs.readFileSync(new URL('wezterm-build.yml', wfDir), 'utf8')],
+    ...fs.readdirSync(scriptsDir).filter(f => /^wezterm-.*\.sh$/.test(f)).map(f => [f, fs.readFileSync(new URL(f, scriptsDir), 'utf8')]),
+  ]
+  let seen = 0
+  const bad = []
+  for (const [f, src] of files) {
+    for (const line of releaseCreateLines(src)) {
+      seen++
+      if (!/--latest=false\b/.test(line)) bad.push(`${f}: ${line.trim().slice(0, 80)}`)
+    }
+  }
+  assert.ok(seen >= 1, '找不到任何 gh release create，檢查規則可能失效')
+  assert.deepEqual(bad, [])
+})
+
+// 取出每一處 gh release create 的整條指令（接上以反斜線結尾的續行；LF 與 CRLF 都行；註解行不算）
+function releaseCreateLines(src) {
+  return src.replace(/\\\r?\n/g, ' ').split(/\r?\n/).filter(l => /gh\s+release\s+create\b/.test(l) && !/^\s*#/.test(l))
+}
+
+test('releaseCreateLines：LF、CRLF 的續行都接得起來，旗標在第二行也判得出來', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const withFlag = ['gh release create v1 \\', '  --latest=false \\', '  a.zip'].join(eol)
+    const without = ['gh release create v1 \\', '  --title x \\', '  a.zip'].join(eol)
+    const l1 = releaseCreateLines(withFlag)
+    const l2 = releaseCreateLines(without)
+    assert.equal(l1.length, 1)
+    assert.match(l1[0], /--latest=false/)
+    assert.equal(l2.length, 1)
+    assert.doesNotMatch(l2[0], /--latest=false/)
+  }
+  assert.equal(releaseCreateLines('# gh release create x').length, 0)
+})
