@@ -300,6 +300,35 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
     Value::Object(m)
 }
 
+/// 連線失敗的說明：錯誤種類＋完整的原因鏈（reqwest 的 source() 一路往下）。只有「error sending request」分不出
+/// 是連線被拒、被重設、逾時還是回應讀到一半斷掉；要分得出才知道能不能安全重試（請求有沒有送到後台，#994）。
+/// 不含網址與金鑰：最上層用 without_url，底下的原因只是作業系統與 HTTP 程式庫的說明
+pub(crate) fn net_err(e: reqwest::Error) -> String {
+    let kind = if e.is_timeout() {
+        "逾時"
+    } else if e.is_connect() {
+        "連線階段"
+    } else if e.is_body() || e.is_decode() {
+        "讀回應"
+    } else if e.is_request() {
+        "送出請求"
+    } else {
+        "其他"
+    };
+    let e = e.without_url();
+    let mut chain = Vec::new();
+    let mut cur = std::error::Error::source(&e);
+    while let Some(c) = cur {
+        chain.push(c.to_string());
+        cur = c.source();
+    }
+    if chain.is_empty() {
+        format!("{e}（{kind}）")
+    } else {
+        format!("{e}（{kind}：{}）", chain.join("；"))
+    }
+}
+
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
@@ -442,7 +471,7 @@ impl Relay {
     pub async fn api_status(&self, action: &str, body: Value) -> Result<(u16, Value), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
         Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
@@ -454,7 +483,7 @@ impl Relay {
         if let Some(t) = user_token.filter(|t| !t.is_empty()) {
             req = req.header(SIGN_HEADER, format!("Bearer {t}"));
         }
-        let res = req.header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let res = req.header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
         let data: Option<Value> = serde_json::from_str(&text).ok();
@@ -470,10 +499,10 @@ impl Relay {
     pub async fn api_bytes(&self, action: &str, body: Value, max: usize, timeout: Duration) -> Result<(Vec<u8>, String), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status();
         let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", e.without_url()))?;
+        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", net_err(e)))?;
         if !status.is_success() {
             let err = serde_json::from_slice::<Value>(&bytes).ok().and_then(|d| d.get("error").and_then(Value::as_str).map(String::from)).unwrap_or_default();
             return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
@@ -1249,6 +1278,16 @@ pub fn build_group_body(action: &str, raw: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn 連線失敗的說明_帶種類與原因鏈_不帶網址() {
+        // 先綁一個埠再放掉：之後連它一定被拒（連線階段就失敗，請求沒送出去）
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let e = reqwest::Client::new().get(format!("http://127.0.0.1:{port}/relay?action=inbox&key=SECRET")).send().await.unwrap_err();
+        let t = net_err(e);
+        assert!(t.contains("（連線階段："), "被拒是連線階段的錯，而且要帶底層原因：{t}");
+        assert!(!t.contains("http://") && !t.contains("SECRET") && !t.contains("action=inbox"), "{t}");
+    }
 
     #[test]
     fn 推播權杖_格式只看長度與字元集() {

@@ -100,7 +100,10 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     let (head_end, len) = loop {
-        let n = c.read(&mut tmp).unwrap_or(0);
+        let n = c.read(&mut tmp).unwrap_or_else(|e| {
+            eprintln!("[假後端] 讀請求失敗：{e}（{:?}）", e.kind()); // #994：負載下連線失敗時看伺服器這端發生什麼
+            0
+        });
         if n == 0 {
             return;
         }
@@ -112,7 +115,10 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         }
     };
     while buf.len() < head_end + len {
-        let n = c.read(&mut tmp).unwrap_or(0);
+        let n = c.read(&mut tmp).unwrap_or_else(|e| {
+            eprintln!("[假後端] 讀請求失敗：{e}（{:?}）", e.kind()); // #994：負載下連線失敗時看伺服器這端發生什麼
+            0
+        });
         if n == 0 {
             break;
         }
@@ -240,7 +246,9 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
     };
     drop(s);
     let text = out.to_string();
-    let _ = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len());
+    if let Err(e) = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len()) {
+        eprintln!("[假後端] 寫回應失敗 action={action}：{e}（{:?}）", e.kind());
+    }
 }
 
 impl FakeRelay {
