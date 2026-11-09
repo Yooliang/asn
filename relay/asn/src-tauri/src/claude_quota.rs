@@ -429,14 +429,19 @@ mod tests {
         write_cj(h.path(), "a@x.test");
         hook(h.path(), &status(10.0, 1_792_850_400, 10.0, 1_793_000_000), NOW);
         hook(h.path(), &status(50.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 60_000);
-        write_cj(h.path(), "b@x.test");
-        hook(h.path(), &status(70.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 120_000);
+        // 換身分後新帳號要同一組重置時間連續 3 次、隔 10 分鐘才收（#1184）：每個帳號照這個節奏送
+        let confirm = |email: &str, used: f64, t: i64| {
+            write_cj(h.path(), email);
+            for k in 0..3 {
+                hook(h.path(), &status(used, 1_793_000_000, used, 1_793_000_000), t + k * 5 * 60_000);
+            }
+        };
+        confirm("b@x.test", 70.0, NOW + 120_000);
         let all = load_all(h.path());
         assert_eq!(all["a@x.test"].five_hour_pct, Some(50));
         assert_eq!(all["b@x.test"].five_hour_pct, Some(30));
         for i in 0..25 {
-            write_cj(h.path(), &format!("u{i}@x.test"));
-            hook(h.path(), &status(5.0, 1_792_850_400, 5.0, 1_793_000_000), NOW + 200_000 + i * 1000);
+            confirm(&format!("u{i}@x.test"), 5.0, NOW + 3_000_000 + i * 20 * 60_000);
         }
         let all = load_all(h.path());
         assert_eq!(all.len(), 20);
