@@ -45,7 +45,7 @@
 | 廠商 | 官方來源（只連這些網域） | 完整性 | 簽署者（完全相等） | 版本 | 登入型 | 狀態命令 |
 |---|---|---|---|---|---|---|
 | Claude | `downloads.claude.ai`（`claude-code-releases/<版本>/manifest.json`、執行檔） | 清單 sha256 ＋ Authenticode（官方另有 `manifest.json.sig` 的 GPG 簽章，Windows 這次不驗，見第 5 節第 1 點） | `Anthropic, PBC` | stable 頻道 | B 授權碼送回（已有） | `claude auth status`（結束碼） |
-| Codex | `releases.openai.com/codex`（**不做** GitHub 備援，避免多一個來源） | 官方 `SHA256SUMS`（本身沒簽章）＋ Authenticode | `OpenAI OpCo, LLC`（#629 在 npm 版 `codex.exe` 看到） | 穩定版 | A 裝置碼：`codex login --device-auth` | `codex login status` |
+| Codex | `releases.openai.com/codex`（**不做** GitHub 備援，避免多一個來源） | metadata 的 sha256 ＝ 官方 `SHA256SUMS`（本身沒簽章）＝ 實算，再加每個 exe／dll 的 Authenticode（兩個寫死的例外，見 PR-3） | `OpenAI OpCo, LLC`（0.167.0 實測） | 穩定版 | A 裝置碼：`codex login --device-auth` | `codex login status` |
 | Gemini（agy） | `antigravity.google`（manifest 與執行檔） | 清單 sha512（本身沒簽章）＋ Authenticode | `Google LLC`（#629 本機看到） | 穩定版 | C 只能操作畫面（沒有 `login` 子命令） | 待實測（候選：`agy` 某個狀態輸出、或 ACP `authenticate`） |
 | Grok | `x.ai`（`cli/` 底下的清單與執行檔） | **官方腳本對 `grok.exe` 沒有比對雜湊**（#629），只能靠 Authenticode | **待實測**：#629 時工作機只有社群版，沒看到官方版的簽署者 | 穩定版 | A 裝置碼：`grok login --device-auth`（RFC 8628） | 待實測 |
 
@@ -75,13 +75,28 @@ Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽�
 - 動到：`agent_setup/{mod,claude_install,verified_install}.rs`。
 
 ### PR-3 Codex 安裝
-- 開工前先實測：讀官方 `install.ps1` 原文，確認：
-  - 清單與 `SHA256SUMS` 的確切路徑；
-  - Windows 檔名（社群鏡像顯示是 `codex-x86_64-pc-windows-msvc.exe.zip`／`aarch64`）；
-  - 解壓出來的檔名；
-  - 官方裝到哪個資料夾。
-- `agent_setup/codex_install.rs`：只填 `InstallSpec`，加解壓縮（zip，限制解出檔案數與大小、拒絕 `..` 路徑）。
-- 測試：假清單、雜湊不符、簽署者不符、清單網址跑到別的網域、zip 裡有 `..`，都要拒絕。
+- **實測結果**（2026-11-09，40家用，官方 0.167.0；只讀、沒執行下載的東西）：
+  - 官方腳本 `chatgpt.com/codex/install.ps1` 轉到 `releases.openai.com/codex/install.ps1`。ASN 不下載腳本，直接連 `releases.openai.com/codex`，三個網址都沒有轉址：
+    - `channels/latest`：JSON，含 `tag_name=rust-v<版本>`、各檔的 `sha256` 與下載網址；
+    - `releases/<版本>/codex-package_SHA256SUMS`；
+    - `releases/<版本>/codex-package-<target>.tar.gz`。
+  - 套件是 **tar.gz**（不是 zip），約 201 MB、52 項，含 `bin\codex.exe` 等多個執行檔與 voice 的 dll。metadata、`SHA256SUMS`、實際算出的雜湊三者一致。
+  - 簽章：31 個檔是 `OpenAI OpCo, LLC`；`codex-path\rg.exe` 沒有簽章；`codex-resources\voice\bin\vcruntime140.dll` 是 `Microsoft Windows`。
+  - 官方會解到 `~\.codex\packages\standalone\releases\…`、建交接點，並把 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` 加進 PATH。
+- **asn真 定案**：
+  - 放 `%LOCALAPPDATA%\ASN\tools\codex\<版本>\`，ASN 記完整路徑，不動 `~\.codex`、不動 PATH。
+  - 這台已有官方裝好的 codex（PATH 上的 `codex.exe` 簽署者是 `OpenAI OpCo, LLC`）就直接用它。
+  - 「更新」先不做，畫面只顯示目前版本。
+  - 雜湊三方一致；每個 exe／dll 都要 `OpenAI OpCo, LLC`，只有兩個寫死相對路徑的例外：`codex-path\rg.exe` 允許沒簽章、`vcruntime140.dll` 必須是 `Microsoft Windows`。例外寫成常數，有測試鎖住。
+  - 不退回 GitHub；不跟任何轉址。
+- `agent_setup/codex_install.rs`：
+  - 解 tar.gz，只收一般檔與資料夾，不收連結、絕對路徑、`..`，最多 200 項、600 MB。
+  - 先解到暫存資料夾，全驗過才改名就位。
+  - 腳本類檔案出現就整包不裝；`bin\codex.exe --version` 要看得到驗過的版本。
+- 測試：
+  - 假清單、三方雜湊不一致、簽署者不符、多出沒簽的執行檔、別處的 `rg.exe`、腳本、清單網址跑到別的網域；
+  - tar 裡有 `..`、絕對路徑、連結；超過項目數或總量。
+  - 以上都要拒絕。
 
 ### PR-4 Gemini（agy）安裝
 - 開工前先實測：讀官方 `install.ps1`，確認 manifest 格式（版本、網址、sha512）。
