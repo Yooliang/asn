@@ -171,7 +171,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-dev:disabled{opacity:.5}
 .m-dv-dev.on{border-color:#c79a00;background:#ffd84d;color:#3b2c00;font-weight:600}
 .m-dv-dev small{display:inline;margin-left:4px;font-size:12px}
-.m-dv-devck{margin-right:3px}
 @media (prefers-color-scheme:dark){.m-dv-dev.on{border-color:#e0b400;background:#5c4700;color:#ffe680}}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
