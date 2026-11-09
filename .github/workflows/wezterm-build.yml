@@ -55,19 +55,21 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    name: Linux ${{ matrix.image }}
+    name: Linux ${{ matrix.label }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
+          # 基底映像都鎖 digest（多架構索引的 digest，docker 會自動取 linux/amd64）；原本的 tag 就是 @ 前面那段。
+          # digest 是 2026-11-09 對各 tag 做 docker pull 後從 RepoDigests 取得；要換映像就同步改這裡並重跑。
           # debian:10、debian:11 已 EOL（deb.debian.org 的 security 已下架）：apt 來源改指 archive.debian.org（DEBIAN_ARCHIVE=1）
-          - { image: 'debian:10', label: 'Debian10', archive: '1' }
-          - { image: 'debian:11', label: 'Debian11', archive: '1' }
-          - { image: 'debian:12', label: 'Debian12', archive: '' }
-          - { image: 'ubuntu:20.04', label: 'Ubuntu20.04', archive: '' }
-          - { image: 'ubuntu:22.04', label: 'Ubuntu22.04', archive: '' }
+          - { image: 'debian:10@sha256:58ce6f1271ae1c8a2006ff7d3e54e9874d839f573d8009c20154ad0f2fb0a225', label: 'Debian10', archive: '1' }
+          - { image: 'debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9', label: 'Debian11', archive: '1' }
+          - { image: 'debian:12@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8', label: 'Debian12', archive: '' }
+          - { image: 'ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214', label: 'Ubuntu20.04', archive: '' }
+          - { image: 'ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11', label: 'Ubuntu22.04', archive: '' }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -77,7 +79,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - name: 取上游原始碼、核對、套 #7706
         run: bash .github/scripts/wezterm-src-prepare.sh "$RUNNER_TEMP/wez-src"
-      - name: 在 ${{ matrix.image }} 容器裡建置、實測、打包
+      - name: 在 ${{ matrix.label }} 容器裡建置、實測、打包
         env:
           TARBALL: wezterm-${{ env.UPSTREAM_TAG }}-${{ env.ASN_SUFFIX }}.${{ matrix.label }}.tar.xz
         run: |
