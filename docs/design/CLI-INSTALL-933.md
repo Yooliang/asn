@@ -99,11 +99,21 @@ Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽�
   - 以上都要拒絕。
 
 ### PR-4 Gemini（agy）安裝
-- 開工前先實測：讀官方 `install.ps1`，確認 manifest 格式（版本、網址、sha512）。
-- `agent_setup/agy_install.rs`：填 `InstallSpec`，放到 `%LOCALAPPDATA%\agy\bin\agy.exe`。
-  - 官方腳本之後還會跑 `agy install` 寫 PATH。ASN **不跑**這步、不動系統 PATH（第 5 節第 2 點），裝好的完整路徑存在 ASN 的設定裡，之後都用它呼叫。
-  - 畫面說明：自己開終端機時要打完整路徑。
-- 測試同 PR-3。
+- **實測結果**（2026-11-09，40家用，官方 1.5.3；沒有轉址）：
+  - 官方腳本 `antigravity.google/cli/install.ps1`（172 行）的流程：
+    1. 從 `https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json` 取 `version`、`url`、`sha512`；
+    2. 下載 `url`、比 sha512；
+    3. 複製到 `%LOCALAPPDATA%\agy\bin\agy.exe`；
+    4. 跑 `agy install` 設 PATH。
+  - 執行檔在 `https://storage.googleapis.com/antigravity-public/antigravity-cli/<版本>-<編號>/windows-x64/cli_windows_x64.exe`，單一 exe、約 225 MB；sha512 一致，簽署者 `Google LLC`。
+  - `agy --version` 只印版本號（`1.5.3`），結束碼 0；在隔離的使用者資料夾跑過，不會建立任何檔案。
+- **asn真 定案**：
+  - **manifest**：只連那台 run.app 主機，路徑寫死 `/manifests/windows_amd64.json`（或 arm64）。
+  - **執行檔**：必須在 `https://storage.googleapis.com/antigravity-public/antigravity-cli/` 底下，路徑只收英數字與 `.` `_` `-` `/`，不收 `..`、`?`、`#`、`%`。兩者都不跟轉址。
+  - **白名單共用**：`Spec` 加路徑前綴，三家同一套檢查（`url_allowed`）。
+  - **放哪裡**：`%LOCALAPPDATA%\ASN\tools\agy\agy.exe`，不分版本資料夾；不跑 `agy install`、不動 PATH。已有官方的（`%LOCALAPPDATA%\agy\bin\agy.exe` 或 PATH 上的，簽署者 `Google LLC`）就直接用。
+  - **每次啟動前重驗**：agy 會在背景自己更新，所以每次啟動 agy 前都要重驗簽署者，驗不過就不啟動、提示重新安裝（`check_before_launch`、`usable_here()` 每次重驗）。
+- 測試同 PR-3，另加：白名單擋別人的 bucket、百分比編碼、`..`、查詢字串；啟動前重驗；官方優先。
 
 ### PR-5 登入：補「裝置碼型」與「只能在電腦前登入」
 - `agent_setup/login.rs` 現在只有授權碼送回型（B）。新增：
