@@ -7,7 +7,9 @@ use super::{iso_secs, parse_iso_secs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-const MAX_BYTES: u64 = 4096;
+const MAX_BYTES: u64 = 32 * 1024;
+/// 有身分的視窗（#1185）各帳號自己的待確認與 log 狀態，最多留幾個帳號
+const MAX_OWNED: usize = 20;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub(super) struct PendingRec {
@@ -31,6 +33,9 @@ pub struct State {
     pub logged_five: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_week: Option<String>,
+    /// 視窗帶了帳號身分時，各帳號（email）自己的狀態（#1185）；每個只用待確認與 log 那幾欄
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub owned: std::collections::BTreeMap<String, State>,
 }
 
 pub fn state_path(home: &Path) -> PathBuf {
@@ -38,6 +43,18 @@ pub fn state_path(home: &Path) -> PathBuf {
 }
 
 impl State {
+    /// 取出（沒有就是空的）某個帳號自己的狀態
+    pub fn take_owned(&mut self, email: &str) -> State {
+        self.owned.remove(email).unwrap_or_default()
+    }
+    /// 放回某個帳號自己的狀態；帳號數超過上限就丟掉字母順序最前面的
+    pub fn put_owned(&mut self, email: &str, st: State) {
+        self.owned.insert(email.to_string(), st);
+        while self.owned.len() > MAX_OWNED {
+            let Some(k) = self.owned.keys().next().cloned() else { break };
+            self.owned.remove(&k);
+        }
+    }
     pub fn pending_week(&self) -> Option<Pending> {
         let r = self.pending_week.as_ref()?;
         Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })

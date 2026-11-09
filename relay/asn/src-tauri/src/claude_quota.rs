@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub(crate) mod merge;
+pub(crate) mod owner;
+pub(crate) mod owner_store;
 pub(crate) mod state;
 
 pub const MAX_ACCOUNTS: usize = 20;
@@ -41,6 +43,9 @@ pub struct Quota {
     pub five_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub week_at: Option<String>,
+    /// 這筆是視窗帶了帳號身分才記下的（#1185）：沒有標記的舊基準可能混進別的帳號的數字，第一次有身分的回報來時會清掉
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub owner: bool,
 }
 
 /// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
@@ -181,6 +186,7 @@ pub(crate) fn quota_from_value(v: &Value) -> Option<Quota> {
         week_reset_at: only(week.is_some(), s("week_reset_at")),
         five_at: only(five.is_some(), s("five_at")),
         week_at: only(week.is_some(), s("week_at")),
+        owner: v.get("owner").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -255,9 +261,17 @@ fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
 /// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log（同一原因只記一次）。
 /// `reset_base`＝登入身分剛換過：先丟掉這個 email 舊的紀錄，這次照新帳號的數字收。
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
-fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, now_ms: i64) -> Result<bool, String> {
+fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
+    if reset_base && owned && all.contains_key(email) {
+        owner_store::backup_quota_file(home);
+    }
     let dropped = reset_base && all.remove(email).is_some();
+    if dropped && owned {
+        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）
+", iso_secs(now_ms)));
+    }
+    let prev_owner = all.get(email).is_some_and(|q| q.owner);
     let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
     let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
     st.set_pending_week(m.pending_week);
@@ -266,7 +280,8 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
     if took {
         st.rebase = false;
     }
-    if let Some(q) = m.quota {
+    if let Some(mut q) = m.quota {
+        q.owner = owned || prev_owner;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);
@@ -289,10 +304,44 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
 /// 登入身分（email 與 accountUuid）跟上次看到的不一樣就重設該帳號的基準（#1184）；
 /// 讀不到身分＝沒登入，照舊什麼都不記。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
+    let cfg = owner::config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+    hook_in(home, &cfg, input, now_ms)
+}
+
+/// 同 [`hook`]，指定 Claude 設定資料夾（測試不碰真實環境變數）。
+/// 狀態列輸入帶 transcript_path、而且那個對話紀錄裡找得到這個視窗的帳號身分時（#1185），額度記到那個帳號底下，
+/// 不看現在 `.claude.json` 登入的是誰；查不到身分才走舊辦法（記在目前登入的帳號，換身分要連續確認）。
+pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
+    match owner::resolve(home, cfg, input) {
+        Some(o) => hook_owned(home, &o, parsed, now_ms),
+        None => hook_legacy(home, parsed, now_ms),
+    }
+}
+
+/// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
+fn hook_owned(home: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> bool {
+    let Some(email) = claude_accounts::email_of_account_uuid(home, &o.account_uuid) else {
+        owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
+        return false;
+    };
+    let before = state::load(home);
+    let mut all_st = before.clone();
+    let mut st = all_st.take_owned(&email);
+    // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
+    let reset_base = load_all(home).get(&email).is_some_and(|q| !q.owner);
+    let r = record(home, &email, parsed, &mut st, reset_base, true, now_ms).unwrap_or(false);
+    all_st.put_owned(&email, st);
+    if all_st != before {
+        state::save(home, &all_st);
+    }
+    r
+}
+
+fn hook_legacy(home: &Path, parsed: Parsed, now_ms: i64) -> bool {
     let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
     let before = state::load(home);
     let ident = format!("{email}|{uuid}");
@@ -301,9 +350,9 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     if st.identity.as_deref() != Some(ident.as_str()) {
         // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
         reset_base = st.identity.is_some();
-        st = state::State { identity: Some(ident), rebase: reset_base, ..state::State::default() };
+        st = state::State { identity: Some(ident), rebase: reset_base, owned: st.owned.clone(), ..state::State::default() };
     }
-    let r = record(home, &email, parsed, &mut st, reset_base, now_ms).unwrap_or(false);
+    let r = record(home, &email, parsed, &mut st, reset_base, false, now_ms).unwrap_or(false);
     if st != before {
         state::save(home, &st);
     }

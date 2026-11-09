@@ -412,6 +412,33 @@ pub fn current_identity(home: &Path) -> Option<(String, String)> {
     Some((email_of_fragment(&frag)?, uuid))
 }
 
+/// 用 accountUuid 找 email（#1185）：先在帳號庫 `claude-accounts` 底下列目錄找 account.json（只取 accountUuid 與 emailAddress，
+/// 資料夾名要等於該 email 的標準資料夾名，對不上就不用），找不到再看目前登入的 .claude.json；都找不到回 None（未知帳號）。
+/// 只讀、不拼使用者給的路徑、不改名舊資料夾。
+pub fn email_of_account_uuid(home: &Path, uuid: &str) -> Option<String> {
+    if uuid.is_empty() {
+        return None;
+    }
+    if let Ok(rd) = std::fs::read_dir(store_root(home)) {
+        for e in rd.flatten() {
+            let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
+            if uuid_of_fragment(&frag).as_deref() != Some(uuid) {
+                continue;
+            }
+            let Some(email) = email_of_fragment(&frag) else { continue };
+            if e.file_name().to_string_lossy() == email_dir_name(&email).as_str() {
+                return Some(email);
+            }
+        }
+    }
+    let (frag, cur) = current_fragment(home).ok().flatten()?;
+    if cur == uuid {
+        email_of_fragment(&frag)
+    } else {
+        None
+    }
+}
+
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None
 pub fn current_login(home: &Path) -> Option<AccountInfo> {
     let (frag, uuid) = current_fragment(home).ok().flatten()?;

@@ -562,3 +562,124 @@ fn 沒帶待確認狀態的_merge_每次都當第一次看到_行為跟以前一
     let (q, s) = merge(Some(&old), &parsed_week(60, now + 6 * DAY + 5 * H), now);
     assert!(q.is_none() && s.len() == 1 && s[0].code == "not_week_multiple");
 }
+
+// ---------- 視窗帶帳號身分（#1185）：同一台同時開著兩個帳號的視窗，數字各記各的 ----------
+const UA: &str = "aaaaaaaa-1111-2222-3333-444444444444";
+const UB: &str = "bbbbbbbb-1111-2222-3333-444444444444";
+
+fn add_account(h: &std::path::Path, email: &str, uuid: &str) {
+    let d = h.join(".asn").join("claude-accounts").join(crate::claude_accounts::email_dir_name(email));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("account.json"), json!({ "accountUuid": uuid, "emailAddress": email }).to_string()).unwrap();
+}
+/// 這個視窗的對話紀錄：`<home>/.claude/projects/p/<name>.jsonl`，最後一筆是 session-owner
+fn transcript(h: &std::path::Path, name: &str, uuid: &str) -> std::path::PathBuf {
+    let d = h.join(".claude").join("projects").join("p");
+    std::fs::create_dir_all(&d).unwrap();
+    let f = d.join(format!("{name}.jsonl"));
+    let line = json!({ "type": "session-owner", "accountUuid": uuid, "organizationUuid": "cccccccc-1111-2222-3333-444444444444" }).to_string();
+    std::fs::write(&f, format!("{{\"type\":\"user\"}}\n{line}\n")).unwrap();
+    f
+}
+/// 狀態列輸入加上 transcript_path
+fn with_tp(status_json: String, tp: &std::path::Path) -> String {
+    let mut v: Value = serde_json::from_str(&status_json).unwrap();
+    v["transcript_path"] = json!(tp.to_string_lossy());
+    v.to_string()
+}
+fn hook_owned_in(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
+    super::super::hook_in(h.path(), &h.path().join(".claude"), input, now)
+}
+fn quota_of(h: &tempfile::TempDir, email: &str) -> Quota {
+    load_all(h.path()).remove(email).unwrap_or_else(|| panic!("{email} 要有紀錄"))
+}
+
+#[test]
+fn 身分_兩個帳號的視窗交錯回報_各記各的_不互相污染() {
+    // 目前 .claude.json 登入的是 a；b 的視窗還開著，兩邊交錯送數字，重置時間也不同（c8 的情形）
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    let (ta, tb) = (transcript(h.path(), "wa", UA), transcript(h.path(), "wb", UB));
+    let (ra, rb) = (NOW + 3 * DAY, NOW + 5 * DAY + 5 * H); // 兩個重置時間差不是 7 天的倍數
+    for i in 0..12 {
+        let t = NOW + i * 5 * 60_000;
+        assert!(hook_owned_in(&h, &with_tp(status(None, Some((10.0 + i as f64, ra))), &ta), t), "a 第 {i} 次");
+        assert!(hook_owned_in(&h, &with_tp(status(None, Some((50.0 + i as f64, rb))), &tb), t + 1000), "b 第 {i} 次");
+    }
+    let (qa, qb) = (quota_of(&h, "a@x.test"), quota_of(&h, "b@x.test"));
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(100 - 21), Some(iso_secs(ra))));
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(100 - 61), Some(iso_secs(rb))));
+    assert!(qa.owner && qb.owner, "有身分的紀錄有標記");
+    assert!(!log(&h).contains("沒收"), "沒有任何一筆被當成別的帳號：{}", log(&h));
+}
+
+#[test]
+fn 身分_對不到已知帳號_只留本機未知區_不進額度檔() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    let t = transcript(h.path(), "wx", "dddddddd-1111-2222-3333-444444444444");
+    assert!(!hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &t), NOW));
+    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
+    let unk = super::super::owner_store::unknown_load(h.path());
+    assert_eq!(unk.keys().collect::<Vec<_>>(), ["dddddddd-1111-2222-3333-444444444444"]);
+}
+
+#[test]
+fn 身分_查不到時走舊辦法_記在目前登入的帳號() {
+    let h = home_as("a@x.test");
+    // 沒有 transcript_path
+    assert!(hook_owned_in(&h, &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
+    assert!(!q(&h).owner, "舊辦法記的沒有身分標記");
+    // transcript_path 指到 projects 以外：不信，也走舊辦法
+    let outside = h.path().join("evil.jsonl");
+    std::fs::write(&outside, json!({ "type": "session-owner", "accountUuid": UB }).to_string()).unwrap();
+    add_account(h.path(), "b@x.test", UB);
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((20.0, NOW + 3 * DAY))), &outside), NOW + 60_000));
+    assert_eq!(q(&h).weekly_pct, Some(80), "記在 a，不是 b");
+    assert!(!load_all(h.path()).contains_key("b@x.test"));
+}
+
+#[test]
+fn 身分_第一次有身分的回報清掉沒有標記的舊基準_備份一份_log_只記筆數() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 舊辦法記一筆（可能混進別的帳號的數字）
+    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW));
+    assert_eq!(q(&h).weekly_pct, Some(95));
+    let t = transcript(h.path(), "wa", UA);
+    // 有身分的回報，剩餘比舊基準高、重置時間也不同：因為舊基準被清掉，照收
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 60_000));
+    let got = q(&h);
+    assert_eq!(got.weekly_pct, Some(40));
+    assert!(got.owner);
+    let bak = super::super::owner_store::backup_path(h.path());
+    assert!(bak.exists(), "備份了一份");
+    let bak_text = std::fs::read_to_string(&bak).unwrap();
+    assert!(bak_text.contains("\"weekly_pct\":95"), "備份是清掉之前的內容");
+    let l = log(&h);
+    assert!(l.contains("清掉 1 筆沒有身分的舊基準"), "{l}");
+    assert!(!l.contains("a@x.test") && !l.contains(UA), "log 不含 email 與 uuid");
+    // 之後同一個帳號的回報不再清、不再備份
+    std::fs::remove_file(&bak).unwrap();
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
+    assert!(!bak.exists());
+    assert_eq!(q(&h).weekly_pct, Some(30));
+    assert_eq!(log(&h).matches("清掉").count(), 1);
+}
+
+#[test]
+fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看登入檔_都沒有就是未知() {
+    let h = home_as("cur@x.test"); // .claude.json 的 accountUuid 是 11111111-2222-3333-4444-555555555555
+    add_account(h.path(), "a@x.test", UA);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), UA).as_deref(), Some("a@x.test"));
+    // 資料夾名跟 email 對不上（被改名／被塞假檔）：不用
+    let root = h.path().join(".asn").join("claude-accounts");
+    std::fs::create_dir_all(root.join("wrong-name")).unwrap();
+    std::fs::write(root.join("wrong-name").join("account.json"), json!({ "accountUuid": UB, "emailAddress": "b@x.test" }).to_string()).unwrap();
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), UB), None);
+    // 帳號庫沒有、但正是目前登入的帳號：看 .claude.json
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), ""), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), "eeeeeeee-0000-0000-0000-000000000000"), None);
+}
