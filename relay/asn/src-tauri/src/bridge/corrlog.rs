@@ -201,6 +201,27 @@ pub fn stamp(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}")
 }
+/// 讀既有檔再寫回用：檔案不存在＝空字串；其他讀取錯誤（Windows 上剛換名的檔可能被防毒、索引暫時鎖住）
+/// 短暫重試，仍失敗就回錯。**不能把「讀不到」當成「沒有」**：那樣會用只有新一筆的內容蓋掉整份，舊的記錄就丟了（#994）。
+/// 用位元組讀再寬鬆轉字串：檔裡有一個壞字元也照樣讀得到，不會因此整份讀不進來
+fn read_existing(path: &Path) -> Result<String, String> {
+    let mut last = String::new();
+    for i in 0..READ_RETRIES {
+        match std::fs::read(path) {
+            Ok(b) => return Ok(String::from_utf8_lossy(&b).into_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+            Err(e) => last = e.to_string(),
+        }
+        if i + 1 < READ_RETRIES {
+            std::thread::sleep(std::time::Duration::from_millis(READ_RETRY_MS));
+        }
+    }
+    Err(format!("讀不到 {}：{last}", path.display()))
+}
+/// 讀不到時重試幾次、每次隔多久（只在出錯時才等）
+const READ_RETRIES: u32 = 5;
+const READ_RETRY_MS: u64 = 50;
+
 pub(crate) fn stamp_compact(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}")
@@ -327,8 +348,10 @@ impl CorrLog {
         if !srcs.is_empty() {
             srcs.sort();
             // 舊檔（依修改時間由舊到新）加上現有的 <pid>.md，記錄原樣，再依標頭行的時間穩定排序（同一秒維持原順序）
-            let mut texts: Vec<String> = srcs.iter().map(|(_, p)| std::fs::read_to_string(p).unwrap_or_default()).collect();
-            texts.push(std::fs::read_to_string(&target).unwrap_or_default());
+            // 任何一份讀不到就這次先不合，之後再試：不能合完把讀不到的來源刪掉（#994）
+            let Ok(mut texts) = srcs.iter().map(|(_, p)| read_existing(p)).collect::<Result<Vec<String>, String>>() else { return };
+            let Ok(own_text) = read_existing(&target) else { return };
+            texts.push(own_text);
             let bodies: Vec<String> = texts.iter().map(|t| {
                 let b = split_header(t).1.trim_start_matches(['\r', '\n']).to_string();
                 if !b.is_empty() && !b.ends_with('\n') { format!("{b}\n") } else { b }
@@ -356,7 +379,7 @@ impl CorrLog {
         }
         let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         let file = self.file_for(name);
-        let existing = std::fs::read_to_string(&file).unwrap_or_default();
+        let existing = read_existing(&file)?;
         // 檔頭行先拆開：輪替只認記錄，不能把檔頭當雜訊丟掉；寫回時用最新的夥伴 ID，沒有就保留原本的
         let (old_head, rest) = split_header(&existing);
         let mut text = rest.trim_start_matches(['\r', '\n']).to_string();
@@ -398,10 +421,7 @@ impl CorrLog {
         let live: String = entries[keep_from..].concat();
         // 同一秒內再次輪替就接在同一個封存檔後面（不另開檔）
         let arch = self.dir.join("archive").join(format!("{}-{}.md", safe_name(stem), stamp_compact(now_ms)));
-        let old = match std::fs::read_to_string(&arch) {
-            Ok(prev) => format!("{prev}{old}"),
-            Err(_) => old,
-        };
+        let old = format!("{}{old}", read_existing(&arch)?);
         crate::write_atomic(&arch, &old).map_err(|e| format!("存不了往來記錄封存 {}：{e}", arch.display()))?;
         Ok(live)
     }
@@ -491,6 +511,33 @@ mod tests {
         c.append("乙", &e(1, Dir::Received, "i", "▌ 假的標頭\n正文")).unwrap();
         let s = std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap();
         assert_eq!(split_entries(&s).len(), 1);
+    }
+
+    #[test]
+    fn 讀既有檔_不存在是空的_其他讀不到回錯_不當成沒有_壞字元照樣讀得到() {
+        let t = tempfile::tempdir().unwrap();
+        assert_eq!(read_existing(&t.path().join("沒有這個.md")), Ok(String::new()));
+        // 讀資料夾一定失敗、而且不是「不存在」：要回錯，呼叫端才不會拿空字串去蓋掉整份（#994）
+        let err = read_existing(t.path()).unwrap_err();
+        assert!(err.contains("讀不到"), "{err}");
+        let bad = t.path().join("壞字元.md");
+        std::fs::write(&bad, [b'a', 0xff, b'b']).unwrap();
+        assert_eq!(read_existing(&bad).unwrap(), "a\u{fffd}b");
+    }
+
+    #[test]
+    fn 守門_讀了再寫回的地方都走_read_existing_讀不到不能當成沒有() {
+        // 只有唯讀的 history_tail 可以直接 read_to_string：讀不到頂多少一段前情，不會寫回去蓋掉檔案（#994）
+        let src = include_str!("corrlog.rs");
+        let prod = src.split("\nmod tests {").next().unwrap();
+        let direct: Vec<&str> = prod.lines().filter(|l| l.contains("std::fs::read_to_string(")).collect();
+        assert_eq!(direct.len(), 1, "{direct:?}");
+        assert!(direct[0].contains("let text = std::fs::read_to_string(&file).unwrap_or_default();"), "{direct:?}");
+        let tail = prod.split("pub fn history_tail(").nth(1).unwrap();
+        assert!(tail.find("std::fs::read_to_string(&file)") < tail.find("\npub fn "), "唯一那處要在 history_tail 裡");
+        // 活檔、封存檔、合併時的舊檔與目標檔：四處都經過 read_existing（不算定義那一行）
+        let calls = prod.matches("read_existing(").count() - prod.matches("fn read_existing(").count();
+        assert!(calls >= 4, "read_existing 只被呼叫 {calls} 次");
     }
 
     #[test]
