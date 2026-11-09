@@ -1345,6 +1345,18 @@ async fn wait_pid(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, f: 
     panic!("等不到工作者程序");
 }
 
+/// 等舊程序真的結束（最多 10 秒）。停驅動是非同步的：先關 stdin 讓它收尾，1.5 秒後才強制結束（rpc.rs 的 stop），
+/// 新程序起來時舊的可能還在收尾；機器忙時更久。不能在新 pid 一出現就斷言舊的已死（#994）
+async fn wait_dead(pid: u64, what: &str) {
+    for _ in 0..200 {
+        if !crate::heartbeat::pid_alive(pid as u32) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("{what}：pid={pid} 10 秒後還活著");
+}
+
 #[tokio::test]
 async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話保留_換班接手開新對話並附接班說明() {
     let state = tempfile::tempdir().unwrap();
@@ -1366,7 +1378,7 @@ async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話�
     let r = admin.restart("Gemini").unwrap();
     assert_eq!(r["pid"].as_u64(), Some(pid1));
     let pid2 = wait_pid(&admin, "Gemini", |p| p != pid1).await;
-    assert!(!crate::heartbeat::pid_alive(pid1 as u32), "舊程序真的結束了");
+    wait_dead(pid1, "舊程序真的結束了").await;
     h.put_pull(to_agent(2, "Gemini", "two")).await;
     h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
     assert!(h.bodies()[1].contains("[第2輪]") && !h.bodies()[1].contains("含說明"), "重開後接續同一段對話：{}", h.bodies()[1]);
@@ -1375,7 +1387,7 @@ async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話�
     let r = admin.handover("Gemini", "別動資料庫").unwrap();
     assert_eq!((r["pid"].as_u64(), r["handoff_done"].clone()), (Some(pid2), json!(false)));
     wait_pid(&admin, "Gemini", |p| p != pid2).await;
-    assert!(!crate::heartbeat::pid_alive(pid2 as u32));
+    wait_dead(pid2, "換班接手後舊程序真的結束了").await;
     h.put_pull(to_agent(3, "Gemini", "three")).await;
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
     assert!(h.bodies()[2].contains("[第1輪 含說明 接班]"), "新對話、第一則是接班說明：{}", h.bodies()[2]);
@@ -1854,7 +1866,7 @@ async fn acp_改名_名單換新名字對話編號不變_下一輪接著原本�
     assert_eq!((r["pid"].as_u64(), r["old_name"].as_str(), r["new_name"].as_str()), (Some(pid), Some(old.as_str()), Some("小葛")));
     assert!(admin.has_worker("小葛") && !admin.has_worker(&old), "工作者清單換成新名字");
     let new_pid = wait_pid(&admin, "小葛", |p| p != pid).await;
-    assert!(!crate::heartbeat::pid_alive(pid as u32), "舊驅動結束了");
+    wait_dead(pid, "舊驅動結束了").await;
     assert_eq!(admin.info("小葛").unwrap()["cwd"].as_str(), Some(h.work.path().join("專案").display().to_string().as_str()), "工作資料夾不變");
     assert_eq!(admin.info("小葛").unwrap()["model"], json!("grok-4.6"), "選過的模型跟著走");
     // 名單：新名字、同一個對話編號（後台靠它認得是同一位改名）
