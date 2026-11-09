@@ -1,10 +1,13 @@
-//! 使用者明確按下安裝後，才呼叫官方安裝流程；成功後可選擇開啟「登入用」終端機（不是一般啟動捷徑）。
+//! 使用者明確按下安裝後，才呼叫安裝流程；成功後可選擇開啟「登入用」終端機（不是一般啟動捷徑）。
+//!
+//! #933：ASN **不執行任何下載來的腳本**（不 `irm 網址 | iex`、不 `curl | sh`、不 `npm install -g`）。
+//! 能一鍵安裝的只有清單標 `verified` 的工具，走 `agent_setup` 裡「下載、比對雜湊、驗數位簽章，通過才執行」的流程；
+//! 其他一律回「請到官網安裝」，不啟動任何子程序。新增一家要先在 `agent_setup` 寫好驗證式安裝，再把清單改成 `verified`。
 
-use crate::nowin::NoWindow;
 use super::catalog::{tool, InstallKind, ToolDef};
 use super::detect::binary_on_path;
 use super::types::InstallResult;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 pub fn install_tool(tool_id: &str, open_login_after: bool) -> InstallResult {
     let Some(def) = tool(tool_id) else {
@@ -51,89 +54,33 @@ pub fn open_login_terminal(def: &ToolDef) -> Result<(), String> {
     spawn_interactive_terminal(bin, &args)
 }
 
+/// 請使用者到官網安裝時的說明（不啟動任何程式）
+fn manual_text(def: &ToolDef) -> String {
+    format!("ASN 還不能替你安裝 {}，請到官網照說明安裝；裝好後 ASN 會自動偵測。", def.label)
+}
+
 fn run_install(def: &ToolDef) -> Result<String, String> {
     match def.install {
-        InstallKind::None => Err("此工具請從官方網站安裝，ASN 不提供一鍵安裝。".into()),
-        InstallKind::NativeInstaller => run_native_installer(def),
-        InstallKind::NpmGlobal => {
-            let pkg = def
-                .npm_package
-                .clone()
-                .ok_or_else(|| "缺少 npm 套件名".to_string())?;
-            run_npm_global(&pkg)
-        }
+        InstallKind::Manual => Err(manual_text(def)),
+        InstallKind::Verified => run_verified(def),
     }
 }
 
-fn run_native_installer(def: &ToolDef) -> Result<String, String> {
+/// 驗證式安裝的分派：只認寫好流程的工具，其餘就算清單標了 `verified` 也不裝（清單是資料，流程才是把關）
+fn run_verified(def: &ToolDef) -> Result<String, String> {
     #[cfg(windows)]
     {
-        // Claude：自己下載、驗雜湊與數位簽章再執行，不跑網路上抓下來的腳本（#628）；其他工具 0.2.3 起逐一換過去
-        if uses_verified_installer(&def.id) {
+        if def.id == "claude" {
             return crate::agent_setup::claude_install::install_here();
         }
-        let url = def
-            .install_ps1_url
-            .clone()
-            .ok_or_else(|| "此平台沒有官方安裝網址".to_string())?;
-        let script = format!(
-            "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; \
-             irm {url} | iex"
-        );
-        let st = Command::new("powershell").no_window()
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .map_err(|e| format!("無法啟動 PowerShell：{e}"))?;
-        if !st.success() {
-            return Err("官方安裝程式回報失敗；請檢查網路或以系統管理員身分重試。".into());
-        }
-        Ok(format!("{} 官方安裝程式已執行完成。", def.label.clone()))
+        Err(manual_text(def))
     }
     #[cfg(not(windows))]
     {
-        let url = def
-            .install_sh_url
-            .clone()
-            .ok_or_else(|| "此平台沒有官方安裝網址".to_string())?;
-        let script = format!("curl -fsSL {url} | bash");
-        let st = Command::new("bash").no_window()
-            .arg("-lc")
-            .arg(&script)
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .map_err(|e| format!("無法執行 bash：{e}"))?;
-        if !st.success() {
-            return Err("官方安裝程式回報失敗；請檢查 curl、bash 與網路連線。".into());
-        }
-        Ok(format!("{} 官方安裝程式已執行完成。", def.label.clone()))
+        // Linux／macOS 沒有 Authenticode，這一輪不做一鍵安裝（#933 第 5 節第 1 點）
+        let _ = def;
+        Err("這一版只在 Windows 上由 ASN 安裝；請到官網照說明安裝，裝好後 ASN 會自動偵測。".into())
     }
-}
-
-/// 已換成「驗過再執行」安裝流程的工具（Windows）。其餘還走官方腳本，等後續版本換
-pub(crate) fn uses_verified_installer(tool_id: &str) -> bool {
-    tool_id == "claude"
-}
-
-fn run_npm_global(package: &str) -> Result<String, String> {
-    if !binary_on_path("npm") {
-        return Err("找不到 npm。請先從 nodejs.org 安裝 Node.js 20 以上，再重試。".into());
-    }
-    let st = Command::new("npm").no_window()
-        .args(["install", "-g", package])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|e| format!("無法執行 npm：{e}"))?;
-    if !st.success() {
-        return Err("npm 安裝失敗；請勿使用 sudo，並確認 npm 全域目錄可寫。".into());
-    }
-    Ok(format!("已用 npm 安裝 {package}。"))
 }
 
 fn spawn_interactive_terminal(program: &str, args: &[String]) -> Result<(), String> {
@@ -181,20 +128,107 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_走驗證式安裝_不再用_irm_管到_iex() {
-        assert!(uses_verified_installer("claude"));
-        assert!(!uses_verified_installer("codex"), "其他工具這版還走官方腳本");
-        // claude 的 Windows 安裝路徑上不能再出現「下載腳本直接執行」
-        let src = include_str!("install.rs");
-        let start = src.find("fn run_native_installer").unwrap();
-        let body = &src[start..src[start..].find("#[cfg(not(windows))]").map(|i| start + i).unwrap()];
-        let before_fallback = &body[..body.find("let url = def").unwrap()];
-        assert!(before_fallback.contains("uses_verified_installer(&def.id)"));
-    }
-
-    #[test]
     fn 未知工具回錯() {
         let r = install_tool("nope", false);
         assert!(!r.ok);
+    }
+
+    #[test]
+    fn 請使用者到官網的工具_不安裝也不開登入() {
+        for id in ["codex", "agy", "grok", "pi"] {
+            let r = install_tool(id, true);
+            assert!(!r.ok, "{id} 不能由 ASN 安裝");
+            assert!(!r.opened_login, "{id} 沒裝成就不開登入終端機");
+            assert!(r.message.contains("請到官網"), "{id}：{}", r.message);
+        }
+    }
+
+    #[test]
+    fn 清單標了_verified_但沒有寫好流程的_也不裝() {
+        let fake = ToolDef {
+            id: "codex".into(),
+            label: "Codex".into(),
+            binary: "codex".into(),
+            engine: "codex".into(),
+            install: InstallKind::Verified,
+            login_argv: vec![],
+            install_blurb: String::new(),
+            login_blurb: String::new(),
+        };
+        let e = run_install(&fake).unwrap_err();
+        assert!(e.contains("請到官網"), "{e}");
+    }
+
+    /// 一行程式碼像不像「把下載來的腳本直接執行」或 npm 全域安裝；像的話回原因。
+    /// 比對字串用拼接組出來，免得守衛自己被自己抓到；只認真正會執行的寫法，不抓 `confirm `、閉包 `|_| sh` 這類巧合
+    fn suspicious(line: &str) -> Option<&'static str> {
+        let low = line.to_ascii_lowercase();
+        let has = |a: &str, b: &str| low.contains(&[a, b].concat());
+        if has("| ", "iex") || has("|", "iex") {
+            return Some("管線交給 iex 執行");
+        }
+        if has("invoke-", "expression") || has("download", "string") {
+            return Some("PowerShell 直接執行下載的文字");
+        }
+        // irm 要是獨立的字（前面不是英數字），才不會抓到 confirm、firm 之類
+        let pat = ["ir", "m "].concat();
+        if low.match_indices(&pat).any(|(i, _)| i == 0 || !low.as_bytes()[i - 1].is_ascii_alphanumeric()) {
+            return Some("PowerShell 下載指令");
+        }
+        let fetch = has("cur", "l ") || has("wge", "t ");
+        if fetch && (has("| ", "bash") || has("|", "bash") || has("| ", "sh") || has("|", "sh ")) {
+            return Some("下載後管線交給 shell");
+        }
+        if has("\"install\", ", "\"-g\"") || has("\"i\", ", "\"-g\"") {
+            return Some("npm 全域安裝");
+        }
+        None
+    }
+
+    #[test]
+    fn 守衛認得舊的寫法_也不誤抓巧合() {
+        // 舊版 install.rs 實際有過的三種（拼接組出，不讓守衛掃到這個測試本身）
+        let old_ps = ["\"Set-ExecutionPolicy ...; ", "ir", "m {url} | ", "iex\""].concat();
+        let old_sh = ["let script = format!(\"", "curl -fsSL {url} | ", "bash\");"].concat();
+        let old_npm = [".args([\"install\", ", "\"-g\", package])"].concat();
+        for s in [&old_ps, &old_sh, &old_npm] {
+            assert!(suspicious(s).is_some(), "要抓到：{s}");
+        }
+        for ok in ["if confirm < begin {", "on_activity: Arc::new(move || sh_act.x())", "prepare_with(a, &c, true, |_| short.map(String::from))", "runner.run(pi, &[\"install\".to_string(), ext])"] {
+            assert!(suspicious(ok).is_none(), "不該抓：{ok}");
+        }
+    }
+
+    /// 守衛（#933 PR-1）：整個 Rust 程式碼裡不能再有「把下載來的腳本直接執行」或 npm 全域安裝。只看程式碼行（略過 `//` 開頭的註解行）
+    #[test]
+    fn 原始碼裡沒有執行下載腳本或_npm_全域安裝() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        let mut hits = vec![];
+        let mut files = 0;
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                if p.extension().and_then(|x| x.to_str()) != Some("rs") {
+                    continue;
+                }
+                files += 1;
+                let src = std::fs::read_to_string(&p).unwrap();
+                for (n, line) in src.lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    if let Some(why) = suspicious(line) {
+                        hits.push(format!("{}:{}：{why}", p.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(files > 50, "守衛沒讀到程式碼（{files} 個檔）");
+        assert!(hits.is_empty(), "不能執行下載來的腳本或 npm 全域安裝：\n{}", hits.join("\n"));
     }
 }
