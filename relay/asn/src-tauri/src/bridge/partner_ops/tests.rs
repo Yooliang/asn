@@ -86,6 +86,7 @@ struct FakeEnv {
     appear: Mutex<Option<(u32, String)>>,
     sessions: PathBuf,
     mod_wait: u64,
+    mod_probe: u64,
     /// 本機啟動設定（喚醒用）
     cfg: Mutex<Result<LaunchConfig, String>>,
     /// 送進視窗的信 (視窗名, 內文)、送信當下已結束的程序數、信裡的交接檔路徑、中途回報的階段
@@ -130,7 +131,7 @@ impl OpsEnv for FakeEnv {
         self.mod_wait
     }
     fn mod_probe_ms(&self) -> u64 {
-        40
+        self.mod_probe
     }
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         self.cfg.lock().unwrap().clone()
@@ -257,12 +258,18 @@ struct Opt {
     allow_first: usize,
     status: &'static str,
     mod_wait: u64,
+    /// 狀態檔過期時探測外掛的逾時（毫秒，**真實時間**：await_control 用 Instant 算，假 sleep 不會推進它）。
+    /// 預設 40，給「外掛沒動靜就短逾時退回」那幾條用；外掛會回應、要驗的不是探測逾時的測試要設大，
+    /// 否則機器一忙，第一次輪詢到外掛回應之間超過 40 毫秒就被當成外掛不在（#994）
+    mod_probe: u64,
 }
 impl Default for Opt {
     fn default() -> Self {
-        Opt { asn_host: false, allow_first: usize::MAX, status: "idle", mod_wait: 0 }
+        Opt { asn_host: false, allow_first: usize::MAX, status: "idle", mod_wait: 0, mod_probe: 40 }
     }
 }
+/// 外掛會回應、不是在驗探測逾時的測試用：探測在測試裡不可能逾時
+const PROBE_NEVER: u64 = 600_000;
 
 /// 使用者自己開的視窗：WindowsTerminal(100) → powershell(110) → claude(220,「目標」) → node(221)；
 /// 另有一個冒牌的 claude(231)，命令列也寫著 `-n 目標`，但它的工作階段名字是「別人」。ASN 本身是 300。
@@ -309,6 +316,7 @@ fn rig(o: Opt) -> Rig {
         appear: Mutex::new(Some((501, "sid-new".into()))),
         sessions: sessions.clone(),
         mod_wait: o.mod_wait,
+        mod_probe: o.mod_probe,
         cfg: Mutex::new(Ok(launch_cfg(&[&work]))),
         told: Mutex::new(vec![]),
         terminated_at_tell: Mutex::new(None),
@@ -1371,7 +1379,7 @@ fn stale_status(r: &Rig, state: &str) {
 #[test]
 fn 過期_閒置視窗的外掛還活著_照樣由外掛切換_不重開() {
     for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "sonnet" }))] {
-        let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+        let r = rig(Opt { mod_wait: 60_000, mod_probe: PROBE_NEVER, ..Opt::default() });
         stale_status(&r, "idle");
         let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
         *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
@@ -1443,7 +1451,7 @@ fn 過期_視窗程序已死或標了結束_不寫控制檔_直接退回() {
 
 #[test]
 fn 過期_指令_外掛還活著就送_沒動靜短逾時回沒有回應() {
-    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    let r = rig(Opt { mod_wait: 60_000, mod_probe: PROBE_NEVER, ..Opt::default() });
     stale_status(&r, "idle");
     let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
     *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
