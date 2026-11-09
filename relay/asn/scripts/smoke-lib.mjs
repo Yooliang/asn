@@ -772,14 +772,12 @@ export const mtermviewProbeSource = ({ big, gate }) => gate ? mtermviewGateProbe
     await sleep(300);
   }
   const btns = [...sw.querySelectorAll('button')];
-  const labels = btns.map(b => b.textContent.trim());
-  if (labels.join('|') !== '訊息|終端') return { ok: false, why: '切換鈕的字不對：' + labels.join('、') };
-  for (const b of btns) {
-    const r = b.getBoundingClientRect(), rg = document.createRange(); rg.selectNodeContents(b); const t = rg.getBoundingClientRect();
-    if (t.left < r.left - 0.5 || t.right > r.right + 0.5 || t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '切換鈕「' + b.textContent.trim() + '」的字被切' };
-  }
-  const sr = sw.getBoundingClientRect();
-  if (sr.left < -0.5 || sr.right > window.innerWidth + 0.5) return { ok: false, why: '切換列跑出畫面' };
+  const labels = btns.map(b => b.getAttribute('aria-label'));
+  if (labels.join('|') !== '訊息|終端') return { ok: false, why: '切換圖示的名稱不對：' + labels.join('、') };
+  if (!sw.closest('.compose-row .toolbar')) return { ok: false, why: '切換圖示應該在下方圖示列' };
+  // 兩個圖示都要整顆在畫面內、夠大好按（電腦版的 44px 觸控下限）
+  const inView = () => btns.every(b => { const r = b.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5 && r.left >= -0.5 && r.right <= window.innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 });
+  if (!inView()) return { ok: false, why: '切換圖示跑出畫面或太小' };
   const conv = () => document.querySelector('.m-chat .conv');
   if (!vis(conv())) return { ok: false, why: '一開始應該先顯示訊息列表' };
   btns[1].click();
@@ -794,6 +792,15 @@ export const mtermviewProbeSource = ({ big, gate }) => gate ? mtermviewGateProbe
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '手機只能看，不該有「打字」切換鈕' };
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
   if (!btns[1].classList.contains('on')) return { ok: false, why: '「終端」鈕沒有選中' };
+  // 終端至少半個螢幕高（橫向 412 高時曾被擠成 0）；「正在看」縮成一行；輸入框收起、切換圖示仍在畫面內
+  const th = document.querySelector('.m-chat .term-remote').getBoundingClientRect().height;
+  if (!(th > 0) || th < window.innerHeight * 0.5 - 1) return { ok: false, why: '終端高度不到半個螢幕：' + Math.round(th) + ' / ' + window.innerHeight };
+  const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
+  if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
+  const bs = getComputedStyle(bar);
+  if (bar.getBoundingClientRect().height > parseFloat(bs.lineHeight) * 1.5 + 2) return { ok: false, why: '「正在看」那行沒有縮成一行' };
+  if (vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該收起' };
+  if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「訊息」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
   btns[0].click();
   await sleep(500);
@@ -887,6 +894,7 @@ export const SCENARIOS = [
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
+  { name: 'm-term-view-land', page: 'm.html', width: 915, height: 412, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-land.png' },
   { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
   { name: 'm-term-view-nolock', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'no_lock' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.noLock, shot: 'm-term-view-nolock.png' },
   { name: 'm-term-view-late', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'late' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.late, shot: 'm-term-view-late.png' },
