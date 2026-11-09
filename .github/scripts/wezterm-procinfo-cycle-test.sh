@@ -23,8 +23,7 @@ p = sys.argv[1]
 plat = sys.argv[2]
 s = open(p, encoding='utf-8').read()
 if plat == 'linux':
-    anchor = "let procs: Vec<_> = all_pids().into_iter().filter_map(info_for_pid).collect();
-"
+    anchor = "let procs: Vec<_> = all_pids().into_iter().filter_map(info_for_pid).collect();\n"
     fake = '''
         #[cfg(test)]
         let procs: Vec<LinuxStat> = vec![
@@ -33,8 +32,7 @@ if plat == 'linux':
         ];
 '''
 else:
-    anchor = "let procs = Snapshot::entries();
-"
+    anchor = "let procs = Snapshot::entries();\n"
     fake = '''
         #[cfg(test)]
         let procs: Vec<PROCESSENTRY32W> = {
