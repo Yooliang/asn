@@ -1,0 +1,93 @@
+{
+  "cfg.args 一個_其餘皆空": [
+    "--only-arg",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json"
+  ],
+  "cfg.args 含空白與特殊字元_全開": [
+    "C:\\fake agy\\script.js",
+    "--flag=a b",
+    "中文旗標",
+    "--x\ty",
+    "",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "m",
+    "--conversation",
+    "s 1/中",
+    "--dangerously-skip-permissions"
+  ],
+  "model=\"\" session=\"\" full_access=false": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json"
+  ],
+  "model=\"\" session=\"\" full_access=true": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--dangerously-skip-permissions"
+  ],
+  "model=\"\" session=\"sess-123\" full_access=false": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--conversation",
+    "sess-123"
+  ],
+  "model=\"\" session=\"sess-123\" full_access=true": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--conversation",
+    "sess-123",
+    "--dangerously-skip-permissions"
+  ],
+  "model=\"gemini-4-argon-high\" session=\"\" full_access=false": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "gemini-4-argon-high"
+  ],
+  "model=\"gemini-4-argon-high\" session=\"\" full_access=true": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "gemini-4-argon-high",
+    "--dangerously-skip-permissions"
+  ],
+  "model=\"gemini-4-argon-high\" session=\"sess-123\" full_access=false": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "gemini-4-argon-high",
+    "--conversation",
+    "sess-123"
+  ],
+  "model=\"gemini-4-argon-high\" session=\"sess-123\" full_access=true": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--model",
+    "gemini-4-argon-high",
+    "--conversation",
+    "sess-123",
+    "--dangerously-skip-permissions"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "categories": [
+    "read",
+    "write",
+    "execute",
+    "network",
+    "other"
+  ],
+  "category_labels": {
+    "": "",
+    "execute": "執行指令",
+    "internal": "internal",
+    "network": "上網",
+    "other": "其他動作",
+    "read": "讀取",
+    "write": "寫入",
+    "未知類別": "未知類別"
+  },
+  "perm_remote_tick_secs": 3
+}
