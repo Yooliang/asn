@@ -1,5 +1,5 @@
 // 仲介（relay）共用小模組：API 呼叫、ack、Realtime 門鈴、單一執行個體 pid 檔。
-// 目前只有 bridge-aegis.mjs 使用（bridge.mjs 為 Windows 家用機常駐中，暫不動它）。純 Node，無依賴。
+// createCore 目前只有 bridge-aegis.mjs 使用；寄信的 client_id 與重試（withClientId／retrySend）bridge.mjs、send.mjs 也共用。純 Node，無依賴。
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
