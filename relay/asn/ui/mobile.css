@@ -170,7 +170,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-dev{display:inline-flex;flex-direction:row;align-items:center;justify-content:center;gap:2px;white-space:nowrap;max-width:100%;min-height:40px;padding:0 14px;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--fg);font-size:14px}
 .m-dv-dev:disabled{opacity:.5}
 .m-dv-dev.on{border-color:#c79a00;background:#ffd84d;color:#3b2c00;font-weight:600}
-.m-dv-dev small{display:inline;margin-left:4px;font-size:12px}
 @media (prefers-color-scheme:dark){.m-dv-dev.on{border-color:#e0b400;background:#5c4700;color:#ffe680}}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
