@@ -508,12 +508,12 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   let btns = [];
   for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('on'))) break; await sleep(100) }
   const on = btns.filter(b => b.classList.contains('on'));
+  for (const b of btns) { const t = b.textContent.trim(); const bad = ['✓', '使用中', '（這台）'].find(w => t.includes(w)); if (bad) return { ok: false, why: '設備按鈕「' + t + '」不該有「' + bad + '」，只寫設備名' } }
   if (!on.length) return { ok: false, why: '沒有使用中的設備按鈕（共 ' + btns.length + ' 顆）' };
   for (const b of on) {
     const t = b.textContent.trim();
     if (b.getAttribute('aria-pressed') !== 'true') return { ok: false, why: '「' + t + '」不是選中的樣子（aria-pressed）' };
     if (b.disabled) return { ok: false, why: '使用中的「' + t + '」被停用了' };
-    if (!t.includes('✓') || !t.includes('使用中')) return { ok: false, why: '使用中的「' + t + '」只靠顏色區分，沒有勾或「使用中」' };
     const rgb = (getComputedStyle(b).backgroundColor.match(/[0-9]+/g) || []).map(Number);
     if (!(rgb[0] > 200 && rgb[1] > 170 && rgb[2] < 140)) return { ok: false, why: '使用中的「' + t + '」不是黃色：' + getComputedStyle(b).backgroundColor };
   }
@@ -533,9 +533,18 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
     if (r.right > k.right + 0.5 || r.left < k.left - 0.5) return { ok: false, why: '「' + b.textContent.trim() + '」超出帳號卡' };
     if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
   }
-  if (mobile) {
-    const self = btns.filter(b => b.textContent.includes('（這台）') && !b.classList.contains('on'));
-    if (self.some(b => !b.disabled)) return { ok: false, why: '手機可以把帳號切到自己：' + self.map(b => b.textContent.trim()).join('、') };
+  if (!mobile) {
+    // 開放查詢是卡片右上 tag 列（和方案、使用中同一排）的標示，不在下方按鈕列
+    for (const c of [...box.querySelectorAll('.dv-acct')].filter(vis)) {
+      const tag = c.querySelector('.dv-side .dv-shared'), row = c.querySelector('.dv-share');
+      if (row && row.textContent.includes('開放查詢')) return { ok: false, why: '「開放查詢」還在下方按鈕列' };
+      if (!tag) continue;
+      if (tag.textContent.trim() !== '開放查詢') return { ok: false, why: '開放查詢 tag 的字不對：' + tag.textContent.trim() };
+      const tr = tag.getBoundingClientRect(), k = c.getBoundingClientRect(), q = c.querySelector('.dv-quota').getBoundingClientRect();
+      if (tr.bottom > q.top + 0.5) return { ok: false, why: '開放查詢 tag 不在卡片上方的 tag 列' };
+      if (tr.right > k.right + 0.5) return { ok: false, why: '開放查詢 tag 超出卡片' };
+    }
+    if (![...box.querySelectorAll('.dv-side .dv-shared')].some(vis)) return { ok: false, why: '情境資料有開放分享的帳號，卻沒有看到「開放查詢」tag' };
   }
   const before = (globalThis.__smokeCalls || []).length;
   on[0].click();
@@ -594,7 +603,7 @@ export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
   const week = toMinute(now + 3 * 24 * 3600_000)
   return {
     now: toMinute(now),
-    accounts: [{ vendor: 'claude', account: 'me@example.com', plan: 'claude_max', seen_at: read, seen_node: 'P', nodes: [{ node: 'P', current: true, reported_at: read }],
+    accounts: [{ vendor: 'claude', account: 'me@example.com', plan: 'claude_max', shared: true, seen_at: read, seen_node: 'P', nodes: [{ node: 'P', current: true, reported_at: read }],
       windows: [{ name: 'five_hour', left_pct: 40, resets_at: five, read_at: read, read_node: 'P' }, { name: 'weekly', left_pct: 72, resets_at: week, read_at: read, read_node: 'P' }] }],
   }
 }

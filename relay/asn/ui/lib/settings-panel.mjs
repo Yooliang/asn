@@ -269,6 +269,7 @@ export const SettingsPanel = {
                     <span class="dv-side">
                       <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                       <span class="dv-cur" v-if="a.current">使用中</span>
+                      <span class="dv-plan dv-shared" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
                     </span>
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
                       <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
@@ -283,12 +284,11 @@ export const SettingsPanel = {
                       <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                       <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                     </span>
-                    <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色、選中、前面有勾後面有「使用中」，按了不做事；其他的按了改用那台（原本的切換流程） -->
+                    <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他的按了改用那台（原本的切換流程） -->
                     <span class="dv-devs" v-if="devButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
-                      <span class="dv-devb" v-for="b in devButtons(v.key, a)" :key="b.node"><button type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(b)"><span class="dv-devck" v-if="b.current" aria-hidden="true">✓</span>{{ b.label }}<small v-if="b.current">{{ DEVICE_BUTTON_TEXT.current }}</small></button><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
+                      <span class="dv-devb" v-for="b in devButtons(v.key, a)" :key="b.node"><button type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(b)">{{ b.label }}</button><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
-                      <span class="dv-cur" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
                       <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</button>
                       <button class="aero-btn" type="button" v-if="a.shared" :disabled="st.quotaReaders.busy" @click="act('quota-unshare', { vendor: v.key, account: a.account })">{{ st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmRevoke : QUOTA_TEXT.shareRevoke }}</button>
                       <small class="acct-warn" v-if="st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareAgainWarn }}</small>

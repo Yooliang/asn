@@ -53,26 +53,29 @@ const devBtns = html => [...html.matchAll(/<button([^>]*class="aero-btn dv-devbt
   text: m[3].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), on: Boolean(m[2]), pressed: /aria-pressed="true"/.test(m[1]), disabled: /\sdisabled/.test(m[1]),
 }))
 
-test('帳號頁：每個帳號一排設備按鈕（用過的每台一顆）；使用中的是黃色選中、有勾與「使用中」、不停用；沒在用的按了就是切換到那台', async () => {
+test('帳號頁：每個帳號一排設備按鈕（用過的每台一顆）；使用中的是黃色底選中（aria-pressed）、按鈕上只寫設備名、不停用；沒在用的按了就是切換到那台', async () => {
   const devices = [
     dev('H', '家用機', true, [vend('claude', [acct('a@b.c', true), acct('z@b.c')])]),
     dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })]),
   ]
   const html = await render('accounts', state(devices, my()))
   assert.deepEqual(devBtns(html), [
-    { text: '✓家用機（這台）使用中', on: true, pressed: true, disabled: false },
-    { text: '家用機（這台）', on: false, pressed: false, disabled: false },
+    { text: '家用機', on: true, pressed: true, disabled: false },
+    { text: '家用機', on: false, pressed: false, disabled: false },
     { text: '工作機', on: false, pressed: false, disabled: false },
   ])
   assert.ok(!html.includes('用在：') && !html.includes('切換到'), '拿掉「用在：」一行與「切換到…」按鈕')
+  for (const b of devBtns(html)) for (const w of ['✓', '使用中', '（這台）']) assert.ok(!b.text.includes(w), `設備按鈕只寫設備名，不含「${w}」：${b.text}`)
+  assert.ok(!html.includes('dv-devck'), '勾勾的 span 不存在')
   assert.ok(!html.includes('class="dv-list"') && !html.includes('雲端代理'))
 })
 
-test('設備按鈕的資料：使用中的沒有切換目標（按了不做事）；切換目標裡有、後台還沒回報的也補上；這台加「（這台）」', () => {
+test('設備按鈕的資料：使用中的沒有切換目標（按了不做事）；切換目標裡有、後台還沒回報的也補上；這台也只寫設備名（self 欄位留給邏輯）', () => {
   const usedOn = [{ node: 'H', label: '家用機', current: true }, { node: 'W', label: '工作機', current: false }]
   const targets = [{ node: 'W', name: '工作機', op: 'device-switch' }, { node: 'X', name: '新電腦', op: 'device-switch' }, { node: 'H', name: '家用機', op: 'acct-switch' }]
   const b = deviceButtons(usedOn, targets, 'H')
-  assert.deepEqual(b.map(x => [x.node, x.label, x.current, x.target?.op ?? null]), [['H', '家用機（這台）', true, null], ['W', '工作機', false, 'device-switch'], ['X', '新電腦', false, 'device-switch']])
+  assert.equal(b.find(x => x.node === 'H').self, true, 'self 欄位仍在')
+  assert.deepEqual(b.map(x => [x.node, x.label, x.current, x.target?.op ?? null]), [['H', '家用機', true, null], ['W', '工作機', false, 'device-switch'], ['X', '新電腦', false, 'device-switch']])
   assert.equal(deviceButtons([{ node: 'W', label: '', current: false }], [], 'H', () => '工作機')[0].label, '工作機', '後台沒給名字時用設備名')
   assert.deepEqual(deviceButtons(null, null, ''), [])
 })
@@ -103,7 +106,7 @@ test('帳號頁的切換：對方 ASN 沒在線／不可切換、帳號登入不
   const grok = [dev('H', '家用機', true, [vend('grok', [acct('z@b.c')])])]
   const gmy = rosterView(roster([entry('grok', 'z@b.c', [{ node: 'H', current: false }])]), { nodeLabel: label, now: NOW })
   const grokHtml = await render('accounts', state(grok, gmy))
-  assert.deepEqual(devBtns(grokHtml), [{ text: '家用機（這台）', on: false, pressed: false, disabled: true }])
+  assert.deepEqual(devBtns(grokHtml), [{ text: '家用機', on: false, pressed: false, disabled: true }])
   assert.deepEqual(whys(grokHtml).map(w => w.text), [DEVICE_BLOCK_REASON.single])
 })
 
@@ -177,4 +180,21 @@ test('守門：分類鍵在 list.js 兩個都認；畫面上沒有「設備與�
   assert.ok(read('ui/lib/cloud-invite.mjs').includes('請先在「個人」登入'))
   assert.ok(acc.includes('dv-my') && !dev.includes('dv-my'))
   assert.ok(!/設備與帳號/.test(read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '')))
+})
+
+test('帳號卡片：「開放查詢」是右上 tag 列（和方案、使用中同一排）的標示，不在下方按鈕列；沒開放就不出現', async () => {
+  const devices = [dev('H', '家用機', true, [vend('claude', [acct('a@b.c', true)])])]
+  const mine = shared => rosterView(roster([{ ...entry('claude', 'a@b.c', [{ node: 'H', current: true }]), shared }]), { nodeLabel: label, now: NOW })
+  const qr = { grok: false, agy: false, busy: false, msg: '', confirm: '', code: null, extra: false, extraDirs: [], minimaxSupported: false }
+  const on = await render('accounts', { ...state(devices, mine(true)), quotaReaders: qr })
+  const between = (a, b) => { const i = on.indexOf(a); return i < 0 ? '' : on.slice(i, on.indexOf(b, i)) }
+  const side = between('class="dv-side"', 'class="dv-quota"')
+  assert.ok(on.includes('<span class="dv-plan dv-shared">開放查詢</span>'), 'tag 文字是「開放查詢」')
+  assert.ok(side.includes('開放查詢') && side.includes('dv-cur'), 'tag 在右上 tag 列')
+  const share = between('class="dv-share"', '</li>')
+  assert.ok(share.includes('重新產生') && share.includes('撤銷代碼'), '重新產生、撤銷代碼留在下方按鈕列')
+  assert.ok(!share.includes('開放查詢'), '下方按鈕列沒有「開放查詢」')
+  assert.ok(!on.includes('已開放查詢'))
+  const off = await render('accounts', { ...state(devices, mine(false)), quotaReaders: qr })
+  assert.ok(!off.includes('開放查詢') && !off.includes('dv-shared'), '沒開放就沒有 tag')
 })

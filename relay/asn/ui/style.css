@@ -825,10 +825,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-devbtn.on,.dv-devbtn.on:hover{border-color:#c79a00;background:#ffd84d;color:#3b2c00;font-weight:600;cursor:default}
 /* 窄的時候可以換行：要蓋過 .settings .aero-btn 的 nowrap，選擇器至少兩個 class */
 .dv-devs .dv-devbtn{flex:0 1 auto;min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
-.dv-devbtn small{margin-left:4px;font-size:11px}
 .dv-devb{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;max-width:100%}
 .dv-devwhy{font-size:11px;color:var(--muted)}
-.dv-devck{margin-right:3px}
 @media (prefers-color-scheme:dark){.dv-devbtn.on,.dv-devbtn.on:hover{border-color:#e0b400;background:#5c4700;color:#ffe680}}
 .dv-code{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px}
 .dv-code code{word-break:break-all;user-select:all}

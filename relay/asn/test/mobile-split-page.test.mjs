@@ -87,10 +87,11 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.match(html, /v-for="b in acctDevButtons\(v\.key, a\)"/)
   assert.match(html, /:disabled="!b\.current && !\(b\.target && b\.target\.enabled\)" @click="acctDevPress\(b, a\)"/, '不能按的要反灰')
   assert.match(html, /v-if="!b\.current && b\.target && b\.target\.reason">\{\{ b\.target\.reason \}\}/, '不能按要寫原因')
+  assert.ok(!html.includes('m-dv-devck') && !html.includes('✓') && !html.includes('DEVICE_BUTTON_TEXT.current'), '設備按鈕沒有勾勾與「使用中」小字')
   assert.match(html, /:aria-pressed="b\.current \? 'true' : 'false'"/, '使用中的是選中的樣子')
   assert.ok(!html.includes('ROSTER_TEXT.usedOn') && !html.includes('切換到{{'), '拿掉「用在：」與「切換到…」')
   assert.match(js, /const acctDevPress = \(b, a\) => \{ if \(b\.current \|\| !b\.target \|\| !b\.target\.enabled\) return; void acctSwitchOn\(b\.node, a\.account\) \}/, '使用中或不能切的按了不做事，其他走原本的切換')
-  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-devs', 'm-dv-dev', 'm-dv-devck']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
+  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-devs', 'm-dv-dev']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
   // 畫面上沒有「設備與帳號」當作設置列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))
 })

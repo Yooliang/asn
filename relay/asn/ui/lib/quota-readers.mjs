@@ -41,7 +41,7 @@ export const QUOTA_TEXT = {
   shareConfirmAgain: '確認重新產生',
   shareRevoke: '撤銷代碼',
   shareConfirmRevoke: '確認撤銷',
-  shareOn: '已開放查詢',
+  shareOn: '開放查詢',
   shareAgainWarn: '舊代碼會立刻失效，用舊代碼的服務要換新的。',
   shareRevokeWarn: '撤銷後，用這組代碼的服務就查不到了。',
   codeTitle: '查詢代碼',

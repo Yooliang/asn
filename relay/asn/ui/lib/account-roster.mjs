@@ -203,7 +203,7 @@ function usedOnOf(e, opts) {
 }
 export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.label}（使用中）` : n.label)).join('、')
 
-export const DEVICE_BUTTON_TEXT = { self: '（這台）', current: '使用中', group: '用在哪幾台' }
+export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
 
 /** 設備按鈕切不過去時寫在按鈕下方的原因（電腦版；手機版的原因在 mobile-acct 的 ACCT_SWITCH_REASON） */
 export const DEVICE_BLOCK_REASON = Object.freeze({
@@ -242,7 +242,7 @@ export function deviceBlockReason(devices, vendor, email, node) {
  * usedOn＝後台回報的 [{ node, label, current }]；targets＝這個帳號可以切過去的設備 [{ node, name?, … }]，原樣放進 target 給畫面切換用；
  * selfNode＝這台；nameOf(node)＝設備名（後台沒給名字時用）。
  * 回 [{ node, label, current, self, target }]：使用中的 target 一律是 null（按了不做事）；不是使用中、也沒有切換目標的 target 也是 null（按鈕停用）。
- * 切換目標裡有、後台還沒回報的設備也補上；這台的名字後面加「（這台）」。
+ * 切換目標裡有、後台還沒回報的設備也補上；按鈕上只寫設備名（self 欄位給邏輯用）。
  */
 export function deviceButtons(usedOn, targets, selfNode, nameOf = () => '') {
   const ts = Array.isArray(targets) ? targets : []
@@ -253,7 +253,7 @@ export function deviceButtons(usedOn, targets, selfNode, nameOf = () => '') {
     const self = Boolean(selfNode) && node === selfNode
     const name = label || nameOf(node) || UNNAMED_DEVICE
     const on = current === true
-    out.push({ node, label: self ? `${name}${DEVICE_BUTTON_TEXT.self}` : name, current: on, self, target: on ? null : byNode.get(node) ?? null })
+    out.push({ node, label: name, current: on, self, target: on ? null : byNode.get(node) ?? null })
   }
   for (const u of Array.isArray(usedOn) ? usedOn : []) add(u?.node, u?.label, u?.current)
   for (const t of ts) add(t?.node, t?.name, false)
