@@ -17,6 +17,8 @@ const WHITELIST_TEXT: &str = "webp 照片，或 pdf、txt、md、json、csv、zi
 const IMAGE_EXTS: [&str; 11] = ["png", "jpg", "jpeg", "gif", "bmp", "heic", "heif", "tif", "tiff", "svg", "avif"];
 const LABEL_IMAGE: &str = "〔照片〕";
 const LABEL_FILE: &str = "〔檔案〕";
+/// 信已寄出但有附件沒附上（#1205）：專用結束碼，呼叫端不要因為它重寄整封信
+pub const EXIT_ATTACH_MISSING: i32 = 5;
 
 #[derive(Debug, Clone)]
 pub struct Item {

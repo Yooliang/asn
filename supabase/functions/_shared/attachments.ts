@@ -2,6 +2,8 @@
 // 設計見 docs/ATTACHMENTS.md；資料與權限的最後一道關在 supabase/migrations/20261020000500_attachments.sql。
 // Edge Function 只負責接線：把 Supabase Storage 包成 StorageDeps 傳進來，這裡就能不連網路單元測試。
 
+import { rpcMissing } from "./account_me.ts";
+
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
@@ -242,6 +244,33 @@ export async function bindAttachments(
   });
   if (error) { console.error("attach_bind", error); return 0; }
   return typeof data?.bound === "number" ? data.bound : 0;
+}
+
+/**
+ * 寄信後的「補綁＋核對」（#1205）：第一次寄與重複送來的請求都走這裡。
+ * 先把這次請求帶的附件裡還沒綁的綁到那封信（bind 只動還沒綁、沒過期的），再查哪些「實際上」沒綁在那封信上。
+ * 看結果、不看這次綁了幾筆：第一次與重複的請求同時在跑時，對方已綁好的不會被誤判成缺。
+ * 回缺的附件編號（空陣列＝齊全）。後台還沒套用核對函式、或核對失敗：回空陣列（等於舊行為，只記 log、不擋已寄出的信）。
+ */
+export async function reconcileAttachments(
+  deps: { rpc: Rpc }, nodeId: string, ids: string[], messageId: string,
+): Promise<string[]> {
+  if (!ids.length) return [];
+  await bindAttachments(deps, nodeId, ids, { messageId });
+  const { data, error } = await deps.rpc("asn_relay_attach_missing", { p_node: nodeId, p_ids: ids, p_message_id: messageId });
+  if (error) {
+    if (!rpcMissing(error)) console.error("attach_missing", error);
+    return [];
+  }
+  const asked = new Set(ids);
+  const missing = Array.isArray(data) ? data.filter((x: unknown): x is string => typeof x === "string" && asked.has(x)) : [];
+  if (missing.length) console.warn("send attachments missing", messageId, missing.length);
+  return missing;
+}
+
+/** 寄信成功的回應：附件齊全就只有 {id}（與以前相同）；有缺才多 attachments_missing */
+export function sendReply(id: string, missing: string[]): Reply {
+  return { status: 200, body: missing.length ? { id, attachments_missing: missing } : { id } };
 }
 
 /** 回一對一信件時附帶 attachments（沒有附件的信不加這個欄位）。查詢失敗就原樣回，不擋收信。 */

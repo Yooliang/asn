@@ -5,12 +5,14 @@
 //!   asn send --to PC1 --file 報告.pdf --file 截圖.webp --body "說明" --no-reply
 //! 寄給成員／視窗（含回信）一定要明說要不要回信；結果以 expects_reply 欄位送給後端，不往內文加任何標記。
 //! 寄件視窗名不能自填：沿父行程鏈找 ~/.claude/sessions 登記的 claude 程序（備援 CLAUDE_CODE_MESSAGING_SOCKET）。
-//! 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，結束碼：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
+//! 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，結束碼：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤、
+//! 5 信已寄出但有附件沒附上（#1205；stderr 說明缺哪幾個，不要重寄整封信，只再寄缺的附件）。
 //! 寄成功後在 ~/.asn/machine-<節點>/ 留記號給橋：`replied/<信件id>`（直接回信）、`sent/<sha1>`（曾寄給某節點／視窗）。
 use super::caller::{backend, find_caller, identity, relay, whoami};
 use super::env::Env;
-use super::upload::{attachment_text, prepare_files, upload_items, MAX_FILES};
+use super::upload::{attachment_text, prepare_files, upload_items, EXIT_ATTACH_MISSING, MAX_FILES};
 use super::{Fail, Io, R};
+use crate::attach::{missing_attachment_names, missing_attachments_message};
 use crate::bridge::core::sent_mark_name;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -219,6 +221,7 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
     let rl = relay(&id, &me.name);
     // 附件先傳完並確認；任何一個失敗就丟錯，下面不會寄信
     let attachment_ids = if items.is_empty() { None } else { Some(upload_items(&rl, &items).await?) };
+    let mut lack: Option<String> = None; // 後端回報有附件沒附上（只有 send 會回；舊後台沒有這欄＝照舊）
     if let Some(room) = &a.room {
         let mut b = json!({ "room": room, "body": body, "from_agent": me.name });
         if let Some(ids) = &attachment_ids {
@@ -275,12 +278,18 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         }
         mark_sent(&id.work_dir, &me.name, &to_node, &to_agent, now);
         io.outln(&format!("sent id={} to={shown} from={}/{}", r.get("id").and_then(Value::as_str).unwrap_or("?"), id.node, me.name));
+        let names: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+        lack = missing_attachments_message(&missing_attachment_names(&names, attachment_ids.as_deref().unwrap_or(&[]), &r));
     }
     if !note.is_empty() {
         io.errln(&note);
     }
     if let Some(w) = super::send_rate::warn_text(&me.name, left, env.send_per_hour) {
         io.errln(&w);
+    }
+    if let Some(m) = lack {
+        io.errln(&m);
+        return Ok(EXIT_ATTACH_MISSING);
     }
     Ok(0)
 }

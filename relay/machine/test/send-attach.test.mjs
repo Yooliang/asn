@@ -10,7 +10,7 @@ import path from 'node:path'
 import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { AttachFail } from '../attach-download.mjs'
-import { attachmentText, cleanUploadName, prepareFile, prepareFiles, uploadItems } from '../attach-upload.mjs'
+import { EXIT_ATTACH_MISSING, attachmentText, cleanUploadName, missingAttachmentNames, missingAttachmentsMessage, prepareFile, prepareFiles, uploadItems } from '../attach-upload.mjs'
 import { parseArgs } from '../send.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -44,7 +44,7 @@ async function fakeServer(opts = {}) {
     }
     if (a === 'attach_commit') return opts.commitError ? reply(opts.commitError.status, { error: opts.commitError.error }) : reply(200, { ok: true, id: body.id })
     if (a === 'room_post') return reply(200, { seq: 7 })
-    return reply(200, { id: 'aaaaaaaa-0000-0000-0000-000000000009' })
+    return reply(200, { id: 'aaaaaaaa-0000-0000-0000-000000000009', ...(opts.sendExtra ? opts.sendExtra(body) : {}) })
   })
   await new Promise(r => srv.listen(0, '127.0.0.1', r))
   st.port = srv.address().port; st.close = () => new Promise(r => { srv.closeAllConnections?.(); srv.close(r) })
@@ -246,4 +246,49 @@ test('不寄給自己時仍擋在上傳之前（沒浪費上傳）', async () =>
     const r = await runSend(home, st, ['--to', 'T/T-視窗甲', '--file', put(d, 'a.txt', Buffer.from('x')), '--no-reply'])
     assert.equal(r.code, 1); assert.match(r.err, /不能寄給自己/); assert.deepEqual(st.reqs, [])
   } finally { await st.close(); fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// ---- #1205 信已寄出但附件不齊 ----
+test('missingAttachmentsMessage：一個／兩個／三個以上的說法；沒缺回 null', () => {
+  assert.equal(missingAttachmentsMessage(['a.pdf']), '信已寄出，但 a.pdf 沒附上，請再寄一次這個附件')
+  assert.equal(missingAttachmentsMessage(['a.pdf', 'b.webp']), '信已寄出，但 a.pdf、b.webp 沒附上，請再寄一次這兩個附件')
+  assert.equal(missingAttachmentsMessage(['a', 'b', 'c']), '信已寄出，但 a、b、c 沒附上，請再寄一次這三個附件')
+  assert.equal(missingAttachmentsMessage([]), null)
+  assert.equal(missingAttachmentsMessage(null), null)
+})
+
+test('missingAttachmentNames：用上傳時的順序對回檔名；對不上的給「未知附件」；舊後台沒回欄位＝null', () => {
+  const items = [{ name: 'a.pdf' }, { name: 'b.webp' }]
+  assert.deepEqual(missingAttachmentNames(items, ['i1', 'i2'], ['i2']), ['b.webp'])
+  assert.deepEqual(missingAttachmentNames(items, ['i1', 'i2'], ['i2', 'zz', 'i2']), ['b.webp', '未知附件'])
+  assert.equal(missingAttachmentNames(items, ['i1', 'i2'], undefined), null)
+  assert.equal(missingAttachmentNames(items, ['i1', 'i2'], []), null)
+  assert.equal(missingAttachmentNames(items, ['i1', 'i2'], 'x'), null)
+})
+
+test('send.mjs：後端回 attachments_missing → 信已寄出（stdout 照印 sent id）、stderr 說缺哪個檔、exit 5、只 send 一次不重寄', async () => {
+  const d = tmpDir(), home = newHome()
+  const st = await fakeServer({ sendExtra: b => ({ attachments_missing: [b.attachment_ids[1]] }) })
+  try {
+    const a = put(d, 'a.pdf', pdf(50)), b = put(d, 'b.webp', webp(64))
+    const r = await runSend(home, st, ['--to', 'PC1', '--file', a, '--file', b, '--no-reply'])
+    assert.equal(r.code, EXIT_ATTACH_MISSING)
+    assert.match(r.out, /sent id=aaaaaaaa/)
+    assert.match(r.err, /信已寄出，但 b.webp 沒附上，請再寄一次這個附件/)
+    assert.equal(actions(st).filter(x => x === 'send').length, 1)
+  } finally { await st.close(); fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }) }
+})
+
+test('send.mjs：兩個都缺 → 這兩個附件；後端沒回該欄（舊後台）與回空陣列都照舊 exit 0、沒有提示', async () => {
+  const d = tmpDir(), home = newHome()
+  const both = await fakeServer({ sendExtra: b => ({ attachments_missing: b.attachment_ids }) })
+  const none = await fakeServer(), empty = await fakeServer({ sendExtra: () => ({ attachments_missing: [] }) })
+  try {
+    const a = put(d, 'a.pdf', pdf(50)), b = put(d, 'b.webp', webp(64))
+    const args = ['--to', 'PC1', '--file', a, '--file', b, '--no-reply']
+    const r = await runSend(home, both, args)
+    assert.equal(r.code, EXIT_ATTACH_MISSING)
+    assert.match(r.err, /a.pdf、b.webp 沒附上，請再寄一次這兩個附件/)
+    for (const srv of [none, empty]) { const o = await runSend(home, srv, args); assert.equal(o.code, 0); assert.doesNotMatch(o.err, /沒附上/) }
+  } finally { await both.close(); await none.close(); await empty.close(); fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }) }
 })

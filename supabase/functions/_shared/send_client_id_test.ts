@@ -54,13 +54,18 @@ Deno.test("findSentByClientId：查到回 id；沒有、函式不存在、查詢
   try { assertEquals(await findSentByClientId(() => Promise.resolve({ data: null, error: { code: "XX000" } }), "N1", CID), null); } finally { console.error = origErr; }
 });
 
-Deno.test("relay/index.ts send：格式檢查與重複判斷在附件驗證之前；重複時不綁附件、不敲門鈴", async () => {
+Deno.test("relay/index.ts send：格式檢查與重複判斷在附件驗證之前；重複時不敲門鈴、只補綁＋核對附件（#1205），不重新驗證附件", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const send = src.slice(src.indexOf('action === "send"'), src.indexOf("// 遠端開視窗"));
   const at = (s: string) => send.indexOf(s);
   assert(at("parseClientId(") > 0 && at("bad_client_id") > at("parseClientId("));
   assert(at("findSentByClientId(") > at("bad_client_id") && at("findSentByClientId(") < at("prepareAttachments"), "先認重複再處理附件");
-  assert(at("duplicate === true") > at("sendWithClientId(") && at("duplicate === true") < at("bindAttachments"), "重複不綁附件");
+  const dupAt = at("duplicate === true");
+  assert(dupAt > at("sendWithClientId(") && dupAt < at("const missing = await reconcileAttachments"), "重複分支在第一次寄的核對之前");
+  const dupBranch = send.slice(dupAt, at("const missing = await reconcileAttachments"));
+  assert(dupBranch.includes("reconcileAttachments(") && !dupBranch.includes("ring(") && !dupBranch.includes("prepareAttachments"), "重複：補綁核對、不敲門鈴");
+  const lookupBranch = send.slice(at("findSentByClientId("), at("prepareAttachments"));
+  assert(lookupBranch.includes("reconcileAttachments(") && !lookupBranch.includes("ring("), "lookup 命中：補綁核對、不敲門鈴");
 });
 
 Deno.test("SQL：新函式權限收回、search_path 空、索引只對 client_id 非空；不改既有寄信函式", async () => {
