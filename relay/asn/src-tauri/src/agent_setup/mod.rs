@@ -13,3 +13,4 @@ pub mod proc;
 pub mod remote;
 pub mod setup;
 pub mod switch;
+pub mod verified_install;
