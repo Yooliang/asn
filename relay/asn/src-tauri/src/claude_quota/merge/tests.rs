@@ -635,8 +635,8 @@ fn 身分_查不到時走舊辦法_記在目前登入的帳號() {
     let outside = h.path().join("evil.jsonl");
     std::fs::write(&outside, json!({ "type": "session-owner", "accountUuid": UB }).to_string()).unwrap();
     add_account(h.path(), "b@x.test", UB);
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((20.0, NOW + 3 * DAY))), &outside), NOW + 60_000));
-    assert_eq!(q(&h).weekly_pct, Some(80), "記在 a，不是 b");
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((40.0, NOW + 3 * DAY))), &outside), NOW + 60_000));
+    assert_eq!(q(&h).weekly_pct, Some(60), "記在 a，不是 b");
     assert!(!load_all(h.path()).contains_key("b@x.test"));
 }
 
