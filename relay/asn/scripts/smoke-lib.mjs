@@ -582,8 +582,8 @@ export const mnoselfProbeSource = () => `(async () => {
   if (!devs.some(b => b.textContent.includes('辦公室') && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -789,6 +789,82 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
   if (pane.querySelector('.tool.call, .tool.icon.call')) return { ok: false, why: '通知不該有通話鈕' };
   return { ok: true, why: '' };
 })()`
+// 手機舊「○○收發室」聯絡人列不再出現在夥伴頁／對話頁、改集中在第四格「通知」（#895 驗收，重現 11-06 截圖）：
+// 「30家用」節點底下本機存檔裡留著五個舊系統寄件人（沒 kind、各有信），後台另來一封新式通知（kind）與一封舊名無 kind 的信，外加兩位正常夥伴。
+// view: 'list'＝存檔停在夥伴頁；'lastchat'＝最後使用的對話是某個舊收發室列（升級前的狀態），對話頁不該還開著它
+const LEGACY_SENDERS = [
+  { agent: '終端服務收發室', text: '終端服務：設備 30家用 的終端已就緒。' },
+  { agent: '登入通知收發室', text: '登入通知：你的帳號剛在新設備登入。' },
+  { agent: '等待確認收發室', text: '等待確認：夥伴 demo 正在等你確認。' },
+  { agent: '額度通知收發室', text: '額度通知：Claude 額度剩 25%。' },
+  { agent: 'H-收發室', text: 'H 設備：本機服務已重新啟動。' },
+]
+const LEGACY_NODE = 'Q'
+const LEGACY_T = Date.parse('2026-11-05T08:00:00Z')
+const legacyMembers = () => [
+  { id: LEGACY_NODE, name: '30家用', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }, { name: '小工', status: 'idle', cwd_label: 'work' }] },
+  { id: 'R', name: '工作機', agents: [{ name: 'alpha', status: 'idle', cwd_label: 'alpha' }] },
+]
+const legacyChats = () => ({
+  friends: LEGACY_SENDERS.map((s, i) => ({ id: `${LEGACY_NODE}/${s.agent}`, node: LEGACY_NODE, agent: s.agent, nick: s.agent, psm: '', engine: null, known: true, onRoster: false, lastAt: LEGACY_T + i * 60_000 })),
+  logs: Object.fromEntries(LEGACY_SENDERS.map((s, i) => [`${LEGACY_NODE}/${s.agent}`, [{ k: 'them', text: s.text, t: LEGACY_T + i * 60_000, id: `00000000-0000-4000-8000-00000000b0${i}1` }]])),
+})
+const legacyMails = (now = Date.now()) => [
+  { id: '00000000-0000-4000-8000-00000000c001', from_node: LEGACY_NODE, from_agent: 'ASN 通知', kind: 'notice:device_key', body: '30家用：這台的設備金鑰剛換過。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 120_000).toISOString() },
+  { id: '00000000-0000-4000-8000-00000000c002', from_node: LEGACY_NODE, from_agent: 'H-收發室', body: 'H 設備：舊寄件名、沒有類別的新信。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 60_000).toISOString() },
+]
+const legacyMe = view => (view === 'lastchat' ? { navTab: 'list', lastChat: `${LEGACY_NODE}/${LEGACY_SENDERS[0].agent}` } : { navTab: 'list' })
+export const MNOTICE_LEGACY_PROBES = { list: { mnoticeLegacy: true, view: 'list' }, lastchat: { mnoticeLegacy: true, view: 'lastchat' } }
+export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  const view = ${JSON.stringify(view)};
+  const SENDERS = ${JSON.stringify(LEGACY_SENDERS.map(s => s.agent))};
+  const MARKS = ${JSON.stringify([...LEGACY_SENDERS.map(s => s.text.slice(0, 8)), '設備金鑰剛換過', '舊寄件名、沒有類別'])};
+  const legacyName = t => { const s = String(t || '').trim(); return s.endsWith('收發室') || s === 'ASN 通知' };
+  let tabs = [];
+  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
+  if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
+  const pg = label => document.querySelector('section.m-pg[aria-label="' + label + '"]');
+  const nicks = () => [...pg('夥伴').querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
+  for (let i = 0; i < 80 && !(nicks().includes('小工') && nicks().includes('alpha')); i++) await sleep(100);
+  for (let i = 0; i < 80 && document.querySelector('.m-banner'); i++) await sleep(100);   // 新通知的橫幅幾秒後自己消失
+  await sleep(600);
+  // 1) 夥伴頁（第一格）：正常夥伴在、沒有任何舊系統寄件人列
+  const names = nicks();
+  for (const n of ['demo', '小工', 'alpha']) if (!names.includes(n)) return { ok: false, why: '夥伴頁少了正常夥伴「' + n + '」：' + names.join('、') };
+  const bad = names.filter(legacyName);
+  if (bad.length) return { ok: false, why: '夥伴頁還列著系統寄件人：' + [...new Set(bad)].join('、') };
+  const listText = pg('夥伴').textContent;
+  for (const s of SENDERS) if (listText.includes(s)) return { ok: false, why: '夥伴頁的文字裡還出現「' + s + '」' };
+  if (!names.includes('通知')) return { ok: false, why: '夥伴頁最上面該有單一「通知」對話列：' + names.join('、') };
+  // 2) 對話頁（第二格）：沒有舊收發室的對話（列、標題、內容都不能有）
+  tabs[1].click();
+  await sleep(700);
+  const chat = pg('對話');
+  if (chat.querySelectorAll('.m-buddy').length) return { ok: false, why: '對話頁出現對話列' };
+  const title = chat.querySelector('.m-head .m-title')?.textContent.trim() || '';
+  if (legacyName(title)) return { ok: false, why: '對話頁開著舊系統寄件人的對話：「' + title + '」' };
+  for (const s of SENDERS) if (chat.textContent.includes(s)) return { ok: false, why: '對話頁的文字裡還出現「' + s + '」' };
+  for (const w of MARKS) if (chat.textContent.includes(w)) return { ok: false, why: '對話頁顯示了通知內容「' + w + '」（通知只該在第四格）' };
+  // 3) 第四格「通知」：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
+  tabs[3].click();
+  await sleep(900);
+  if (!tabs[3].classList.contains('on')) return { ok: false, why: '點第四格後沒有選中通知' };
+  const pane = document.querySelector('.m-notice');
+  if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
+  const text = pane.textContent;
+  for (const w of MARKS) if (!text.includes(w)) return { ok: false, why: '通知裡找不到「' + w + '」' };
+  if (pane.querySelector('textarea, .compose-row')) return { ok: false, why: '通知是唯讀，不該有輸入列' };
+  const W = window.innerWidth;
+  if (document.documentElement.scrollWidth > W + 1 || document.body.scrollWidth > W + 1) return { ok: false, why: '整頁橫向溢出：' + document.documentElement.scrollWidth + ' > ' + W };
+  if (pane.scrollWidth > pane.clientWidth + 1) return { ok: false, why: '通知內容橫向溢出：' + pane.scrollWidth + ' > ' + pane.clientWidth };
+  for (const e of pane.querySelectorAll('.msg, .msg *')) {
+    const r = e.getBoundingClientRect();
+    if (r.width > 0 && (r.right > W + 1 || r.left < -1)) return { ok: false, why: '通知內容超出畫面寬度：' + (e.className || e.tagName) + ' ' + Math.round(r.left) + '~' + Math.round(r.right) + ' / ' + W };
+  }
+  return { ok: true, why: '' };
+})()`
 // ---- 手機看別台電腦夥伴的終端（PR④，只能看）：對話頁頂端「訊息／終端」切換 ----
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
 export const MTERMVIEW_PROBES = {
@@ -957,6 +1033,10 @@ export const SCENARIOS = [
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
+  // 舊「○○收發室」列併進通知（#895 驗收）：夥伴頁／對話頁沒有收發室、第四格看得到每位寄件人的信；412、360 寬各一張。
+  // （lastchat 變體：最後使用的對話是舊收發室列時，對話頁仍開著它——產品缺口，修好後把 MNOTICE_LEGACY_PROBES.lastchat 的情境加回來）
+  { name: 'm-notice-legacy', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-412.png' },
+  { name: 'm-notice-legacy-360', page: 'm.html', width: 360, state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-360.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -1064,6 +1144,13 @@ export const tableFor = scenario => {
     t.relay_ack = null
     t.relay_read_sync = { marks: [] }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MNOTICE_ME[scenario.state.mnotice]) } }
+  }
+  if (scenario.state.mnoticeLegacy) {
+    t.relay_list = { members: legacyMembers() }
+    t.relay_inbox = { messages: legacyMails() }
+    t.relay_ack = null
+    t.relay_read_sync = { marks: [] }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, chats: JSON.stringify(legacyChats()), me: JSON.stringify(legacyMe(scenario.state.mnoticeLegacy)) } }
   }
   if (scenario.state.mtermview) {
     t.relay_list = { members: MBAR_MEMBERS.claude }
