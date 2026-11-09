@@ -19,7 +19,7 @@
 --   恢復那一筆的 would_notify＝這段卡住有沒有寄過（或影子跑會不會寄過）「卡住」，也就是會不會寄「恢復」。
 -- 信的內容（不帶信件內容；代理名去掉控制字元、每個最多 20 字、最多列 2 個）：
 --   卡住：「<設備名>：收信可能卡住了」＋「還在線，但寄給 A、B 等 3 個夥伴的 7 封信都沒有送到，最舊的已經等了 52 分鐘。可能要重開 ASN。」
---   恢復：「<設備名>：收信恢復了」＋「卡了約 65 分鐘，期間的 7 封信都送到了。」
+--   恢復：「<設備名>：收信恢復了」＋「卡了約 65 分鐘，現在都送到了。」（不寫封數：期間正常代理收的信也會算進去，和卡住通知的封數對不起來）
 --
 -- 依賴：20261111100000_notice_center.sql（本函式由它的版本改起，寄信照舊經 asn_relay_send_notice）。部署要在通知集中上線之後。
 -- security definer 函式碰到的資料表：與上一版相同（讀 relay.nodes、relay.messages；讀寫 relay.inbox_watch；寫、清理 relay.inbox_watch_log；
@@ -66,7 +66,6 @@ declare
   v_who text;
   v_mins int;
   v_from timestamptz;
-  v_done int;
   v_nodes int := 0;
   v_stuck_n int := 0;
   v_alert_n int := 0;
@@ -186,11 +185,8 @@ begin
         else
           -- 寄過「卡住」：寄成功才標回 ok；寄失敗或被限流就保持 stuck，下一輪還符合恢復條件時再試
           v_from := coalesce(v_state.episode_oldest_at, v_state.stuck_since);
-          -- 期間送到的信（不算通知信本身：卡住通知可能就寄到這一台）
-          select count(*)::int into v_done from relay.messages
-            where to_node = r.id and created_at >= v_from and acked_at is not null and coalesce(kind, '') not like 'notice:%';
           v_kind := 'recover';
-          v_body := v_name || '：收信恢復了' || E'\n' || '卡了約 ' || (extract(epoch from now() - v_from) / 60)::int || ' 分鐘，期間的 ' || v_done || ' 封信都送到了。';
+          v_body := v_name || '：收信恢復了' || E'\n' || '卡了約 ' || (extract(epoch from now() - v_from) / 60)::int || ' 分鐘，現在都送到了。';
         end if;
       else
         -- 介於兩個門檻之間（5～15 分鐘），或本來就正常：保持原狀，只更新數字
