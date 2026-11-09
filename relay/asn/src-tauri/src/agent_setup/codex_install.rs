@@ -126,7 +126,17 @@ fn resolve(d: &Deps, target: &str) -> Result<Release, String> {
     Ok(Release { url: asset_url(&version, &package_asset(target)), version, platform: target.to_string(), sum, size: None, max: MAX_ARCHIVE_BYTES })
 }
 
-/// tar 成員路徑 → 以 `/` 連接的相對路徑；有 `..`、根目錄、磁碟代號或空的一律不要
+/// Windows 的保留裝置名（不分大小寫，帶副檔名也算，例如 `nul.txt`）：開檔不會失敗，但資料會被吞掉
+fn reserved_device(seg: &str) -> bool {
+    let stem = seg.split('.').next().unwrap_or("").to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && matches!(stem.as_bytes()[3], b'0'..=b'9'))
+        || ((stem.starts_with("COM") || stem.starts_with("LPT")) && ["¹", "²", "³"].iter().any(|d| stem[3..] == **d))
+}
+
+/// tar 成員路徑 → 以 `/` 連接的相對路徑；有 `..`、根目錄、磁碟代號或空的一律不要。
+/// 另外擋 Windows 檔名的怪癖（縱深防禦，整包已由官方雜湊把關）：結尾是 `.` 或空白（`evil.dll.` 會被當成 `evil.dll`，
+/// 但副檔名判斷會漏掉驗簽章）、保留裝置名、控制字元與 Windows 不允許的字元
 fn rel_path(p: &Path) -> Option<String> {
     let mut parts = vec![];
     for c in p.components() {
@@ -134,7 +144,7 @@ fn rel_path(p: &Path) -> Option<String> {
             Component::CurDir => {}
             Component::Normal(s) => {
                 let s = s.to_str()?;
-                if s.is_empty() || s.contains(['\\', ':']) {
+                if s.is_empty() || s.contains(['\\', ':', '<', '>', '"', '|', '?', '*']) || s.chars().any(char::is_control) || s.ends_with(['.', ' ']) || reserved_device(s) {
                     return None;
                 }
                 parts.push(s.to_string());
@@ -264,6 +274,8 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, target: &str, rec: &mut Re
         }
         guard.seek(SeekFrom::Start(0)).map_err(|e| format!("讀不了下載的套件：{e}"))?;
         std::fs::create_dir_all(tools).map_err(|e| format!("無法建立安裝資料夾：{e}"))?;
+        // 上次當掉留下的暫存資料夾（名字帶程序編號，不會被同名覆蓋）先清掉；安裝鎖保證同時只有這一個在跑
+        clean_staging(tools);
         let staging = tools.join(format!(".staging-{}-{}", rel.version, std::process::id()));
         if staging.exists() {
             std::fs::remove_dir_all(&staging).map_err(|e| format!("清不掉上次的暫存資料夾：{e}"))?;
@@ -280,6 +292,9 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, target: &str, rec: &mut Re
     })();
     vi::discard(&archive, guard);
     let (staging, files) = staged?;
+    // 威脅模型：下載檔在驗證與解開時是鎖住的；解開後的暫存資料夾在驗簽章、跑 --version、改名就位之間沒有鎖。
+    // 能在這段時間改它的，只有同一個使用者權限的程式——它本來就能直接改 ASN 自己、改使用者的檔案，
+    // 所以這裡不再多做鎖，靠的是「整包雜湊三方一致＋逐檔簽章」擋住網路上被換掉的檔案。
     let fail = |e: String| {
         let _ = std::fs::remove_dir_all(&staging);
         Err(e)
@@ -304,8 +319,19 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, target: &str, rec: &mut Re
     if let Err(e) = std::fs::rename(&staging, &final_dir) {
         return fail(format!("無法就位安裝好的 Codex：{e}"));
     }
-    std::fs::write(tools.join(CURRENT_FILE), &rel.version).map_err(|e| format!("記不住裝好的版本：{e}"))?;
+    // 寫不進去就回錯：ASN 是靠這個檔找到裝好的 Codex（installed_in），沒有它等於沒裝；再按一次會重裝同一版並覆蓋
+    std::fs::write(tools.join(CURRENT_FILE), &rel.version).map_err(|e| format!("Codex 已解開，但記不住裝好的版本，ASN 會找不到它：{e}。請再按一次安裝"))?;
     Ok(format!("已安裝 Codex {}。", rel.version))
+}
+
+/// 清掉 `tools\codex` 底下上次留下的 `.staging-*`（只動這個前綴的資料夾）
+fn clean_staging(tools: &Path) {
+    let Ok(rd) = std::fs::read_dir(tools) else { return };
+    for e in rd.flatten() {
+        if e.file_name().to_string_lossy().starts_with(".staging-") && e.path().is_dir() {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// ASN 裝的 Codex（`tools\codex\<current>\bin\codex.exe`）；沒裝或記錄看不懂回 None。只看檔案在不在，不執行
@@ -628,6 +654,29 @@ mod tests {
             assert!(extract_all(&bytes[..], &out, 200, 1 << 20).is_err(), "{}", String::from_utf8_lossy(name));
             assert!(!d.path().join("evil.exe").exists());
         }
+    }
+
+    #[test]
+    fn windows_檔名怪癖_結尾點或空白_保留裝置名_特殊字元都不收() {
+        for bad in ["bin/evil.dll.", "bin/evil.exe ", "bin/nul", "bin/NUL.txt", "con", "Aux.dll", "bin/com1.exe", "LPT9", "COM¹", "a/b?c", "a*b", "a\"b", "a<b", "a|b", "a\u{1}b", "bin./x.exe", "bin /x.exe"] {
+            assert_eq!(rel_path(Path::new(bad)), None, "{bad:?}");
+        }
+        for ok in ["bin/codex.exe", "codex-resources/voice/bin/gst-1.0.dll", "console.dll", "nullable.txt", "com10.exe", "lpt.exe", "./bin/a.exe"] {
+            assert!(rel_path(Path::new(ok)).is_some(), "{ok:?}");
+        }
+    }
+
+    #[test]
+    fn 上次留下的暫存資料夾_開始前會清掉_別的不動() {
+        let r = rig(tar_gz(&good_files()));
+        let t = tools(&r);
+        std::fs::create_dir_all(t.join(".staging-0.1.0-999").join("bin")).unwrap();
+        std::fs::write(t.join(".staging-0.1.0-999").join("bin").join("x.exe"), b"old").unwrap();
+        std::fs::create_dir_all(t.join("0.100.0")).unwrap();
+        run(&r).0.unwrap();
+        let mut names = tools_entries(&r);
+        names.sort();
+        assert_eq!(names, vec!["0.100.0".to_string(), V.to_string(), CURRENT_FILE.to_string()]);
     }
 
     #[test]
