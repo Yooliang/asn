@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { splitTabs } from '../ui/lib/panels.mjs'
-import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
+import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
@@ -247,4 +247,17 @@ test('換大頭貼只出現一個提示：有自訂 data-tip 就不再加原生 
   const btn = html.split(/\r?\n/).find(l => l.includes('class="dp me-dp"'))
   assert.ok(btn.includes('data-tip="點一下換大頭貼"'))
   assert.ok(!/\stitle="/.test(btn), '不能同時有 title（會出現兩個提示）')
+})
+
+test('窄視窗：整合模式放不下兩個窗格時一次只顯示一個（#1192）', () => {
+  const at = (width, over = {}) => singlePane({ mode: 'merged', width, hasTabs: true, showList: false, ...over })
+  assert.equal(SINGLE_PANE_BELOW, 500)
+  assert.equal(at(280), 'chat')
+  assert.equal(at(360), 'chat')
+  assert.equal(at(499), 'chat')
+  assert.equal(at(500), '')
+  assert.equal(at(520), '')
+  assert.equal(at(360, { showList: true }), 'list')
+  assert.equal(at(360, { hasTabs: false }), 'list')
+  assert.equal(at(360, { mode: 'split' }), '')
 })

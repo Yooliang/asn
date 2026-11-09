@@ -21,7 +21,7 @@
   </header>
   <!-- 別台正在看這台（#597）：不能關，只能結束。放在 .shell 外面：.shell 是左右排的，放裡面會被撐成整條高（#1029） -->
   <div class="viewed-bar" :class="{ 'viewed-bar-input': v.input }" v-for="v in beingViewed" :key="v.id" role="alert"><span v-if="v.input">⚠ 「{{ v.who }}」正在這台的夥伴「{{ v.window }}」打字，可以回答權限框。如果不是你，請馬上按結束。</span><span v-else>「{{ v.who }}」正在看夥伴「{{ v.window }}」的畫面。如果不是你，請按結束。</span><button class="aero-btn" type="button" @click="stopBeingViewed(v.id)">結束</button></div>
-  <div class="shell" :class="{ merged: ui.mode === 'merged' }">
+  <div class="shell" :class="[{ merged: ui.mode === 'merged' }, paneOnly ? 'only-' + paneOnly : '']">
   <div class="pane list-pane">
     <div class="me">
       <div class="me-av">
@@ -184,6 +184,7 @@
   </div>
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
     <div class="tabbar" role="tablist" aria-label="開著的對話">
+      <button class="pane-back" type="button" v-if="paneOnly === 'chat'" aria-label="返回名單" title="返回名單" @click="showList = true"><span aria-hidden="true">‹</span> 名單</button>
       <div class="ctab home" v-if="!tabItems.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
       <div v-for="t in tabItems" :key="t.id" class="ctab" draggable="true" :class="[{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id), 'panel-tab': t.panel }, tabDragClass(t.id)]" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)" @dragstart="onTabDragStart(t.id, $event)" @dragend="onTabDragEnd" @dragover="onTabDragOver(t.id, $event)" @drop="onTabDrop(t.id, $event)">
         <template v-if="isChatTabPinned(t.id)">

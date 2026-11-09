@@ -387,6 +387,12 @@ html.toast-page,html.toast-page body{background:transparent}
 .shell{flex:1;min-height:0;display:flex;gap:6px}
 .shell > .list-pane{min-width:0}
 .shell.merged > .list-pane{flex:none;width:300px}
+/* 窄視窗（寬度 < SINGLE_PANE_BELOW，見 lib/merge.mjs）：一次只顯示一個窗格，顯示的那個佔滿整個寬度 */
+.shell.only-list > .chat-area,.shell.only-chat > .list-pane{display:none}
+.shell.merged.only-list > .list-pane{flex:1;width:auto}
+.pane-back{flex:none;align-self:center;height:26px;margin-right:4px;padding:0 10px 0 7px;border:1px solid rgba(40,80,130,.45);border-radius:5px;background:linear-gradient(#e4f0fc,#c4dbf2);color:var(--title-fg);font:inherit;font-weight:600;cursor:pointer}
+.pane-back:hover{background:linear-gradient(#f4faff,#d3e6f8)}
+.pane-back:focus-visible{outline:2px solid #1a6fb5;outline-offset:1px}
 .chat-area{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
 /* 分頁列壓在對話區上緣的邊框上（-1px）：選中的分頁多出 1px 蓋掉那條線，底色與對話區第一列相同＝無縫 */
 .tabbar{position:relative;z-index:2;flex:none;display:flex;gap:2px;align-items:flex-end;height:31px;margin-bottom:-1px;overflow-x:auto;overflow-y:hidden;padding:0 2px 1px 0}

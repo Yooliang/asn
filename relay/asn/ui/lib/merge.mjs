@@ -15,6 +15,20 @@ export function normalizeSize(raw, mode) {
   return ok(raw?.w, m.w) && ok(raw?.h, m.h) ? { w: Math.round(raw.w), h: Math.round(raw.h) } : { ...d }
 }
 
+// ---------- 窄視窗：一次只顯示一個窗格（#1192） ----------
+// 整合模式左邊名單固定 300px；右邊至少要 180px 才排得下設定標題與帳號卡。兩個加間隙與視窗邊框放不下（寬度 < 500）就一次只顯示一個：
+// 有開著的分頁就顯示右邊（附「返回名單」），按返回或沒有分頁就顯示名單。
+export const LIST_PANE_W = 300
+export const PANE_GAP = 6
+export const CHAT_PANE_MIN_W = 180
+export const WINDOW_CHROME_W = 14   // 視窗左右內距 6+6、外框 1+1
+export const SINGLE_PANE_BELOW = LIST_PANE_W + PANE_GAP + CHAT_PANE_MIN_W + WINDOW_CHROME_W
+// 回傳 ''（左右並排）、'list'（只顯示名單）、'chat'（只顯示右邊）
+export function singlePane({ mode, width, hasTabs, showList }) {
+  if (normalizeMode(mode) !== 'merged' || !(width < SINGLE_PANE_BELOW)) return ''
+  return !hasTabs || showList ? 'list' : 'chat'
+}
+
 // ---------- 對話分頁（整合模式） ----------
 // 狀態：{ tabs: [好友 id…], active: 好友 id | '' }。不改傳入的物件。
 export function openTab(st, id) {
