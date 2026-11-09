@@ -127,8 +127,8 @@ mod tests {
     #[test]
     fn 未知帳號區_每個_uuid_只留最新一筆() {
         let h = tempfile::tempdir().unwrap();
-        unknown_put(h.path(), "u-1", &parsed(40, NOW));
-        unknown_put(h.path(), "u-1", &parsed(90, NOW + 60_000));
+        unknown_put(h.path(), "u-1", &parsed(40, NOW), NOW);
+        unknown_put(h.path(), "u-1", &parsed(90, NOW + 60_000), NOW + 60_000);
         let all = unknown_load(h.path());
         assert_eq!(all.len(), 1);
         assert_eq!(all["u-1"].five_hour_pct, Some(90), "新的直接覆寫，不做合併");
@@ -138,13 +138,13 @@ mod tests {
     fn 未知帳號區_最多_16_個且_7_天沒更新就刪() {
         let h = tempfile::tempdir().unwrap();
         for i in 0..20 {
-            unknown_put(h.path(), &format!("u-{i:02}"), &parsed(10, NOW + i * 1000));
+            unknown_put(h.path(), &format!("u-{i:02}"), &parsed(10, NOW + i * 1000), NOW + i * 1000);
         }
         let all = unknown_load(h.path());
         assert_eq!(all.len(), UNKNOWN_MAX);
         assert!(all.contains_key("u-19") && !all.contains_key("u-00"), "留最新的");
         // 8 天後來一筆新的：舊的全過期被刪
-        unknown_put(h.path(), "u-new", &parsed(10, NOW + 8 * 86_400_000));
+        unknown_put(h.path(), "u-new", &parsed(10, NOW + 8 * 86_400_000), NOW + 8 * 86_400_000);
         let all = unknown_load(h.path());
         assert_eq!(all.keys().collect::<Vec<_>>(), ["u-new"]);
     }
