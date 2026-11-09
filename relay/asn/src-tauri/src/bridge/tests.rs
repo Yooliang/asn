@@ -1385,8 +1385,12 @@ async fn 代寄_有_reply_欄位就寄出_帶_expects_reply_內文不動() {
     h.core.on_worker_line(res(&reply_block("T-乙", "[RELAY 寄信] to=W reply=yes\n等你回")), T0).await;
     let s = h.fr.sent();
     assert_eq!(s.len(), 2);
-    assert_eq!(s[0], json!({"to_node":"W","to_agent":"W-政策","body":"順便通知你","from_agent":"T-乙","expects_reply":false}));
-    assert_eq!(s[1], json!({"to_node":"W","body":"等你回","from_agent":"T-乙","expects_reply":true}));
+    // 每封都帶 client_id（#1135，兩封的不同）；其餘欄位照原樣比對
+    let cid = |v: &Value| v["client_id"].as_str().map(str::to_string).filter(|c| c.len() == 36).expect("寄信要帶 client_id");
+    assert_ne!(cid(&s[0]), cid(&s[1]));
+    let strip = |v: &Value| { let mut v = v.clone(); v.as_object_mut().unwrap().remove("client_id"); v };
+    assert_eq!(strip(&s[0]), json!({"to_node":"W","to_agent":"W-政策","body":"順便通知你","from_agent":"T-乙","expects_reply":false}));
+    assert_eq!(strip(&s[1]), json!({"to_node":"W","body":"等你回","from_agent":"T-乙","expects_reply":true}));
 }
 
 #[tokio::test]

@@ -26,6 +26,7 @@ import { createDeviceNameCache, withNoticePrefix } from './notice-name.mjs'
 import { sentMarkName } from './sent-mark.mjs'
 import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
 import { createAckRetry } from './ack-retry.mjs'
+import { retrySend, withClientId } from './relay-core.mjs'
 import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from './self-update.mjs'
 import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
@@ -70,17 +71,20 @@ const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), read
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 async function api(action, { method = 'GET', body } = {}) {
-  const res = await fetch(`${BASE_URL}?action=${action}`, {
-    method,
-    headers: { 'x-relay-key': KEY, ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(20_000),
+  const payload = body ? JSON.stringify(withClientId(action, body)) : undefined   // 寄信：一次寄信一個 client_id，重試沿用（#1135）
+  return await retrySend(action, async () => {
+    const res = await fetch(`${BASE_URL}?action=${action}`, {
+      method,
+      headers: { 'x-relay-key': KEY, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: payload,
+      signal: AbortSignal.timeout(20_000),
+    })
+    const text = await res.text()
+    let data = null
+    try { data = JSON.parse(text) } catch {}
+    if (!res.ok) { const e = new Error(`${action} HTTP ${res.status} ${data?.error ?? ''}`.trim()); e.status = res.status; throw e }
+    return data
   })
-  const text = await res.text()
-  let data = null
-  try { data = JSON.parse(text) } catch {}
-  if (!res.ok) { const e = new Error(`${action} HTTP ${res.status} ${data?.error ?? ''}`.trim()); e.status = res.status; throw e }
-  return data
 }
 
 // ---- 本機視窗名單（轉接器 listWindows；每個引擎各自列自己的視窗）-----------------------------------
