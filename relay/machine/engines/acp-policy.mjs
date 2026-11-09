@@ -83,13 +83,23 @@ export function decide(policy, { category, paths = [] }, base) {
   const rule = policy.rules[category] ?? policy.rules.other
   if (category === 'internal') return { verdict: 'allow', reason: '內部控制' }
   const outside = (category === 'read' || category === 'write') ? paths.filter(p => !insideDirs(p, policy.allowDirs, base)) : []
-  if (outside.length) return { verdict: 'deny', reason: `路徑在白名單資料夾之外：${outside[0]}` }
+  if (outside.length) return { verdict: 'deny', reason: `路徑在白名單資料夾之外：${redact(outside[0])}` }
   return { verdict: rule, reason: `${categoryLabel(category)}的政策是 ${rule}` }
 }
 
 // ---- 摘要（要寄給人看的，不含機密）-----------------------------------------------------------------------------
-const SECRET_RE = /(sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[\w-]{15,}\.[\w-]{8,}\.[\w-]{8,}|(?:authorization\s*[=:]\s*)?Bearer\s+\S+|(?:api[_-]?key|token|secret|password|passwd|authorization)\s*[=:]\s*\S+)/gi
-export function redact(s) { return String(s ?? '').replace(SECRET_RE, '［已遮蔽］') }
+const MASK = '［已遮蔽］'
+// 共用的遮蔽規則（Rust 端 acp_policy.rs 用同一份）：依序套用，每一步都是子字串比對。
+// 值的寫法：整段引號、或到空白／引號／& # , ; ) 為止
+const VAL = String.raw`(?:"[^"]*"|'[^']*'|[^\s"'&#,;)]+)`
+const REDACT_RULES = [
+  [/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]{0,19}:\/\/)[^/\s:@]*:[^/\s@]*@/gi, `$1$2${MASK}@`],
+  [new RegExp(String.raw`(authorization["']?[ \t]*[=:][ \t]*)(?:(?:bearer|basic)[ \t]+)?` + VAL, 'gi'), `$1${MASK}`],
+  [/\bbearer[ \t]+[^\s"'`]+/gi, MASK],
+  [new RegExp(String.raw`((?:(?:api[_-]?key|token|secret|password|passwd|passphrase|credential|signature)[A-Za-z0-9_-]{0,40}["']?[ \t]*[=:]|key["']?[ \t]*=)[ \t]*)` + VAL, 'gi'), `$1${MASK}`],
+  [/(^|[^A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/gi, `$1${MASK}`],
+]
+export function redact(s) { return REDACT_RULES.reduce((t, [re, rep]) => t.replace(re, rep), String(s ?? '')) }
 const clip = (s, n) => { const t = redact(s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t }
 
 // ACP session/request_permission 的 params → { category, paths, summary }

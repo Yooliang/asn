@@ -140,6 +140,41 @@ test('摘要：不含機密、指令與路徑會截斷', () => {
   assert.match(g.summary, /執行指令：指令：echo hi/)
 })
 
+const MASK = '［已遮蔽］'
+const REDACT_CASES = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'redact-cases.json'), 'utf8')).cases
+
+test('遮蔽規則：共用表格（與 Rust 同一份）', () => {
+  for (const c of REDACT_CASES) {
+    const input = c.in.replaceAll('{M}', MASK)
+    const want = c.out.replaceAll('{M}', MASK)
+    assert.equal(redact(input), want, c.name)
+    assert.equal(redact(redact(input)), want, `${c.name}（重複遮蔽不疊加）`)
+  }
+})
+
+test('遮蔽規則：超長字串', () => {
+  const long = 'x'.repeat(100000)
+  assert.equal(redact(long), long)
+  const mid = `${'ab '.repeat(5000)}sk-FAKExxxxxxxxxxxx${' cd'.repeat(5000)}`
+  assert.equal(redact(mid), `${'ab '.repeat(5000)}${MASK}${' cd'.repeat(5000)}`)
+})
+
+test('顯示面：路徑裡的機密樣字串不會出現在摘要與拒絕原因，判斷用的路徑維持原值', () => {
+  const bad = '/other/sk-FAKExxxxxxxxxxxx/a.txt'
+  const d = describeAcpRequest({ toolCall: { kind: 'edit', locations: [{ path: bad }] } })
+  assert.deepEqual(d.paths, [bad])
+  assert.doesNotMatch(d.summary, /FAKE/)
+  const g = describeAgyTool('write_to_file', { TargetFile: bad })
+  assert.deepEqual(g.paths, [bad])
+  assert.doesNotMatch(g.summary, /FAKE/)
+  const cwd = path.resolve(WORK, 'w')
+  const p = normalizePermissions({}, cwd)
+  const r = decide(p, d, cwd)
+  assert.equal(r.verdict, 'deny')
+  assert.doesNotMatch(r.reason, /FAKE/)
+  assert.match(r.reason, /［已遮蔽］/)
+})
+
 test('授權簿：回覆解析', () => {
   const t = (s, v) => assert.equal(parseVerdict(s), v, s)
   t('允許', 'allow'); t('允許 A1B2', 'allow'); t('ok', 'allow'); t('好', 'allow'); t('可以', 'allow'); t('Yes', 'allow')

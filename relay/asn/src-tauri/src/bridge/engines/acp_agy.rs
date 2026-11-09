@@ -3,7 +3,7 @@
 //! 對應 engines/acp-driver-agy.mjs。權限的現實（實測）：agy 無頭模式不能問人，指令會被它自己拒絕，但寫檔不問就直接寫，
 //! 所以看每個工具步驟的事件，違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
 use super::acp_config::WorkerCfg;
-use super::acp_policy::{agy_scratch, agy_user_home, describe_agy_tool, sensitive_write, WorkerError};
+use super::acp_policy::{agy_scratch, agy_user_home, describe_agy_tool, redact, sensitive_write, WorkerError};
 use super::acp_worker::{Denied, Driver, DriverArgs, TurnResult};
 use super::rpc::{Rpc, SpawnOpts};
 use super::{acp_clean_env, BoxFut};
@@ -190,7 +190,7 @@ fn on_result(sh: &Arc<Shared>, r: Value) {
     for d in r.get("denied_actions").and_then(Value::as_array).into_iter().flatten() {
         if denied.is_empty() {
             let action = d.get("action").and_then(Value::as_str).unwrap_or("");
-            denied.push(Denied { category: if action == "command" { "execute".into() } else { "other".into() }, summary: d.get("display_name").and_then(Value::as_str).unwrap_or(action).to_string() });
+            denied.push(Denied { category: if action == "command" { "execute".into() } else { "other".into() }, summary: redact(d.get("display_name").and_then(Value::as_str).unwrap_or(action)) });
         }
     }
     if r.get("status").and_then(Value::as_str).unwrap_or("").to_uppercase() == "SUCCESS" {
