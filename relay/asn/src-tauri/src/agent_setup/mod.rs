@@ -5,6 +5,7 @@
 pub mod authenticode;
 pub mod claude_install;
 pub mod claude_login;
+pub mod codex_install;
 pub mod link;
 pub mod login;
 pub mod net;

@@ -87,7 +87,7 @@ fn resolve(d: &Deps, platform: &str) -> Result<Release, String> {
     }
     let manifest = d.fetch.get_text(&url_manifest(&version), MAX_MANIFEST_BYTES)?;
     let (sum, size) = parse_manifest(&manifest, &version, platform)?;
-    Ok(Release { url: url_binary(&version, platform), version, platform: platform.to_string(), sum, size })
+    Ok(Release { url: url_binary(&version, platform), version, platform: platform.to_string(), sum, size: Some(size), max: MAX_BINARY_BYTES })
 }
 
 /// 驗證式安裝，連同安裝記錄一起回。`work` 是 ASN 自己的下載資料夾，`final_exe` 是安裝完該出現的 `claude.exe`
