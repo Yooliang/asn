@@ -153,13 +153,16 @@ jobs:
           mkdir -p "$WEZ_OUT"
           rel="$WEZ_SRC/target/release"
           dumpbin="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | head -1)"
-          for e in wezterm wezterm-gui wezterm-mux-server; do "$rel/$e.exe" --version | grep -q "$UPSTREAM_TAG" || { echo "::error::$e.exe 的版本字串不含 ${UPSTREAM_TAG}" >&2; exit 1; }; done
+          for e in wezterm wezterm-mux-server; do "$rel/$e.exe" --version | grep -q "$UPSTREAM_TAG" || { echo "::error::$e.exe 的版本字串不含 ${UPSTREAM_TAG}" >&2; exit 1; }; done
+          # wezterm-gui.exe 是視窗程式，--version 不會印到命令列；改檢查執行檔裡有內嵌版本字串
+          grep -qa "$UPSTREAM_TAG" "$rel/wezterm-gui.exe" || { echo "::error::wezterm-gui.exe 裡找不到版本字串 ${UPSTREAM_TAG}" >&2; exit 1; }
           [ -n "$dumpbin" ] || { echo "::error::找不到 dumpbin.exe" >&2; exit 1; }
           {
             echo '### Windows（windows-2022）'
             echo
             echo '```'
-            for e in wezterm wezterm-gui wezterm-mux-server; do "$rel/$e.exe" --version; done
+            for e in wezterm wezterm-mux-server; do "$rel/$e.exe" --version; done
+            echo "wezterm-gui.exe（視窗程式，--version 不輸出；執行檔內嵌版本字串：$(grep -qa "$UPSTREAM_TAG" "$rel/wezterm-gui.exe" && echo 有 || echo 無)）"
             echo '```'
             for e in wezterm wezterm-gui wezterm-mux-server; do
               echo
