@@ -49,7 +49,7 @@ struct FState {
     honor_exclude: bool,
     /// 每次 inbox 請求的完整請求行
     inbox_queries: Vec<String>,
-    /// send 的 reply_to 在這份名單內就回 500（模擬寄回失敗；Aegis 引擎測「寄回成功才 ack」用）
+    /// send 的 reply_to 在這份名單內就回 400（模擬後台明確拒絕；Aegis 引擎測「寄回成功才 ack」用）。不用 500：500 起算暫時性錯誤，會進寄件匣（#1135）
     send_fail_reply_to: Vec<String>,
     /// 核對轉交對象：本人通知（misroute_notice）收到的請求；misroute_status 不為 0 就回這個狀態碼（模擬後台沒這個動作或壞了）
     misroute_notices: Vec<Value>,
@@ -274,7 +274,7 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
             s.acked.extend(ids);
             (200, json!({"acked": n}))
         }
-        "send" if body["reply_to"].as_str().is_some_and(|r| s.send_fail_reply_to.iter().any(|x| x == r)) => (500, json!({"error": "internal"})),
+        "send" if body["reply_to"].as_str().is_some_and(|r| s.send_fail_reply_to.iter().any(|x| x == r)) => (400, json!({"error": "bad_request"})),
         "send" => {
             if let Some(c) = body["client_id"].as_str() {
                 s.seen_cids.push(c.to_string());
