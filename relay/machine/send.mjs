@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { sentMarkName } from './sent-mark.mjs'
 import { wakeNote } from './mail-format.mjs'
 import { AttachFail } from './attach-download.mjs'
+import { retrySend, withClientId } from './relay-core.mjs'
 import { MAX_FILES, attachmentText, prepareFiles, uploadItems } from './attach-upload.mjs'
 import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readMachineKey, readSession, sessionsDir } from './identity.mjs'
 
@@ -116,13 +117,16 @@ function markSent(node, from, toNode, toAgent) {
 }
 
 async function call(key, action, body) {
-  const res = await fetch(`${BASE_URL}?action=${action}`, {
-    method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000),
+  const sendBody = JSON.stringify(withClientId(action, body))   // 寄信：一次寄信一個 client_id，重試沿用（#1135）
+  return await retrySend(action, async () => {
+    const res = await fetch(`${BASE_URL}?action=${action}`, {
+      method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: sendBody, signal: AbortSignal.timeout(20_000),
+    })
+    const text = await res.text(); let data = null
+    try { data = JSON.parse(text) } catch {}
+    if (!res.ok) { const f = new Fail(4, `${action} HTTP ${res.status} ${data?.error ?? ''}`.trim()); f.status = res.status; throw f }
+    return data
   })
-  const text = await res.text(); let data = null
-  try { data = JSON.parse(text) } catch {}
-  if (!res.ok) throw new Fail(4, `${action} HTTP ${res.status} ${data?.error ?? ''}`.trim())
-  return data
 }
 
 export async function main(argv) {

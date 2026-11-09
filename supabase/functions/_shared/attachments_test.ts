@@ -258,7 +258,7 @@ Deno.test("relay/index.ts：附件動作在節點驗證之後；send 寄出前�
   assert(at("ATTACH_ACTIONS.has(action)") > at("asn_relay_auth"), "附件動作要在金鑰驗證之後");
   const send = src.slice(at('action === "send"'), at("// 遠端開視窗"));
   assert(send.includes("prepareAttachments") && send.includes("bindAttachments") && send.includes("ring(t)"));
-  assert(send.indexOf("prepareAttachments") < send.indexOf("sendWithPerson("), "先驗附件再寄信");
+  assert(send.indexOf("prepareAttachments") < send.indexOf("sendWithClientId("), "先驗附件再寄信");
   assert(send.indexOf("bindAttachments") < send.indexOf("ring(t)"), "先綁再敲門鈴");
   assert(send.includes("me.id"), "綁定與驗證的節點是金鑰所屬節點");
   assertEquals((src.match(/withAttachments\(/g) ?? []).length >= 2, true, "兩種 inbox 都要附帶附件");

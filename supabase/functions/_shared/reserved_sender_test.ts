@@ -108,7 +108,7 @@ Deno.test("守門：send 入口都在寫入前先做檢查", async () => {
     const src = await Deno.readTextFile(new URL(file, import.meta.url));
     const start = src.indexOf('action === "send" && req.method === "POST"');
     const guard = src.indexOf("badSenderName(b.from_agent, me.id)", start);
-    const write = Math.min(...['rpc("asn_relay_send', 'rpc("irori_relay_send', "sendWithPerson("].map((k) => { const i = src.indexOf(k, start); return i < 0 ? Infinity : i; }));
+    const write = Math.min(...['rpc("asn_relay_send', 'rpc("irori_relay_send', "sendWithPerson(", "sendWithClientId("].map((k) => { const i = src.indexOf(k, start); return i < 0 ? Infinity : i; }));
     assertEquals(start > 0 && guard > start && guard < write, true, file);
     assertEquals(src.includes("v.slice(0, 100)"), true, file + "：截斷長度要和檢查用的一樣（100）");
   }
