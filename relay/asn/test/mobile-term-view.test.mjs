@@ -22,9 +22,14 @@ test('m.html：對話分頁的 chat-pane 給看畫面三樣，不給打字', () 
 test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同一份', () => {
   const src = read('../ui/lib/chatpane.mjs')
   assert.match(src, /const mSwitch = computed\(\(\) => props\.noBar && canRemote\.value\)/)
-  assert.match(src, /class="m-term-switch"[^>]*v-if="mSwitch"/)
-  assert.match(src, /\{\{ TERM_BTN_MSG\.label \}\}/)
-  assert.match(src, /\{\{ TERM_BTN_TERM\.label \}\}/)
+  assert.match(src, /class="tool-group m-term-switch"[^>]*v-if="mSwitch"/)
+  assert.match(src, /:aria-label="TERM_BTN_MSG\.label"/)
+  assert.match(src, /:aria-label="TERM_BTN_TERM\.label"/)
+  // 切換放在下方圖示列（compose-row 的 toolbar 裡），不再是頂端的大切換列
+  const row = src.slice(src.indexOf('<div class="compose-row"'))
+  assert.ok(row.indexOf('m-term-switch') > 0 && row.indexOf('m-term-switch') < row.indexOf('<form class="composer"'), '切換鈕要在下方圖示列')
+  assert.equal((src.match(/m-term-switch/g) || []).length, 1, '頂端不能再有一列切換')
+  assert.match(src, /'is-term': mSwitch && remoteShown/, '看終端時收起輸入框')
   assert.match(src, /watch\(remoteLive, a => \{ if \(!a\) remoteOn\.value = false \}\)/, '離開對話分頁就結束觀看')
   assert.match(src, /:active="remoteLive"/)
 })
@@ -49,7 +54,11 @@ test('冒煙假 Tauri：listen 記下回呼，指令呼叫後依序送出 __emit
 
 test('冒煙情境：五個手機看終端情境帶齊假指令與假的本人確認（ok／cancel／no_lock）', () => {
   const names = SCENARIOS.filter(s => s.name.startsWith('m-term-view')).map(s => s.name)
-  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big', 'm-term-view-cancel', 'm-term-view-nolock', 'm-term-view-late'])
+  assert.deepEqual(names, ['m-term-view', 'm-term-view-360', 'm-term-view-big', 'm-term-view-land', 'm-term-view-cancel', 'm-term-view-nolock', 'm-term-view-late'])
+  // 橫向（915×412）：曾經終端被擠成 0，探針斷言終端至少半個螢幕高
+  const land = SCENARIOS.find(s => s.name === 'm-term-view-land')
+  assert.equal(land.width, 915)
+  assert.equal(land.height, 412)
   const t = tableFor(SCENARIOS.find(s => s.name === 'm-term-view'))
   assert.equal(t.term_view_remote_available, true)
   assert.equal(t.term_view_remote_start.id, 'v1')
