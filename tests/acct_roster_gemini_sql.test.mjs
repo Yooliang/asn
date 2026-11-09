@@ -67,7 +67,7 @@ test('靜態：編號在最新之後；三支函式只改該改的地方；舊�
 })
 
 test('共用案例檔：有 gemini 的滿額案例與基本案例；claude、codex 有不套滿額規則的反向案例', () => {
-  const g = cases.cases.filter(c => c.vendor === 'gemini')
+  const g = cases.cases.filter(c => c.vendor === 'gemini' && c.scope !== 'backend_only')
   assert.ok(g.length >= 10)
   const fullOld = c => c.old?.left_pct === 100
   assert.ok(g.some(c => fullOld(c) && c.new.left_pct === 100 && c.accept), '滿額遇滿額照收')
@@ -124,7 +124,7 @@ const privs = async db => {
 
 test('實跑（pglite）：共用案例全部（含 gemini）照預期', { skip }, async () => {
   const db = await setup()
-  for (const c of cases.cases) {
+  for (const c of cases.cases.filter(x => x.scope !== 'backend_only')) {
     const r = (await db.query('select public.asn_relay_acct_window_judge($1, $2, $3::jsonb, $4::jsonb, $5::timestamptz) r',
       [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])).rows[0].r
     assert.equal(r, c.reason, `${c.id} ${c.note}`)

@@ -10,6 +10,10 @@
     "新的較早＝不收；新的較晚但 old 還沒過＝不收；Claude 的每週窗另要新舊差接近 7 天倍數（誤差 10 分鐘）；Codex 每週窗與所有 5 小時窗不看倍數。",
     "old 的重置時間早於「now −1 天」不另外處理（正常過期的期，交給「超過 7 天＝收」）。範圍兩端都含（剛好 −1 天、剛好 +8 天＝在範圍內）。",
     "Gemini（#1515／#1519）：照 Codex 規則（不看 7 天倍數），另加一條——在範圍檢查之後，old 是 100%（滿額、沒用過的桶）就照收新的；agy 對沒用過的桶每次給的重置時間都是「現在＋整個窗長」、一直往後跑。old 不是 100%、new 是 100% 照舊判斷。這條只限 gemini，claude、codex 不套。",
+    "待確認（#1184）：Claude 每週窗，old 的重置時間已過期、新的更晚、卻不是 7 天倍數時，不馬上收，記「待確認的重置時間、次數、第一次的時間」；同一個新重置時間（差 10 分鐘內）連續 3 次、第一次到這次至少隔 10 分鐘，這一次才收下，收下後清掉待確認。中間來了不同的重置時間就重新計數。old 還沒過期時不累計。",
+    "身分改變（#1184）：電腦端換登入身分後清掉該 email 的基準，之後的新數字也要走同一套待確認（同一組重置時間連續 3 次、隔 10 分鐘）才收，不會第一筆直接收；後台沒有身分概念，這條只在電腦端，序列由 claude_quota/merge/tests.rs 的「換身分」測試鎖住。",
+    "confirm_sequences：一個 old 之後依序送進 steps；每步有 now／new／accept／reason；收下後 old 換成那步的 new，待確認清空。兩邊（Rust、後台 asn_relay_acct_window_decide）都要逐步一致。",
+    "scope（#1184）：\"backend_only\"＝只有後台判斷的案例（older_read／future_read 看資料的讀取時間 read_at，客戶端不做這種判斷，由後台守）；客戶端（Rust）讀到就跳過，後台 SQL 走 asn_relay_acct_window_decide 驗。這種案例的 old／new 多一個 read_at 欄位；now 是後台收到的時間。",
     "台灣時間對照：2026-11-01T16:00:00Z＝11/2 00:00（gmail）、2026-11-04T09:00:00Z＝11/4 17:00（yooliang）。"
   ],
   "constants": {
@@ -17,14 +21,18 @@
     "week_ms": 604800000,
     "expired_after_ms": 604800000,
     "reset_past_ms": 86400000,
-    "reset_future_ms": 691200000
+    "reset_future_ms": 691200000,
+    "confirm_count": 3,
+    "confirm_span_ms": 600000
   },
   "reasons": {
     "same_period_rise": "同一期剩餘回升",
     "earlier": "重置時間比現記的早",
     "later_not_expired": "現記的還沒過，卻來了更晚的",
     "not_week_multiple": "新舊重置時間差不是 7 天倍數",
-    "reset_out_of_range": "重置時間不在現在前 1 天到後 8 天之間"
+    "reset_out_of_range": "重置時間不在現在前 1 天到後 8 天之間",
+    "older_read": "新窗的讀取時間比已存的更早（舊視窗的舊數字）",
+    "future_read": "新窗的讀取時間比後台現在晚超過 5 分鐘（電腦時鐘走快）"
   },
   "cases": [
     {
@@ -753,6 +761,571 @@
       },
       "accept": false,
       "reason": "later_not_expired"
+    },
+    {
+      "id": "b1",
+      "note": "舊視窗的舊數字（沒帶重置時間、讀取時間是 10-30）不能蓋掉今天的新值",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 51,
+        "resets_at": null,
+        "read_at": "2026-10-30T16:40:14Z"
+      },
+      "accept": false,
+      "reason": "older_read"
+    },
+    {
+      "id": "b2",
+      "note": "Gemini 記著滿額的照收例外，也要先過讀取時間這關",
+      "scope": "backend_only",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 51,
+        "resets_at": null,
+        "read_at": "2026-10-30T16:40:14Z"
+      },
+      "accept": false,
+      "reason": "older_read"
+    },
+    {
+      "id": "b3",
+      "note": "讀取時間較新、其他正常＝照收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:45:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "b4",
+      "note": "讀取時間比後台現在晚 1 小時＝時鐘走快，拒收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T15:49:57Z"
+      },
+      "accept": false,
+      "reason": "future_read"
+    },
+    {
+      "id": "b5",
+      "note": "沒有已存窗、讀取時間晚 1 小時＝一樣拒收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": null,
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T15:49:57Z"
+      },
+      "accept": false,
+      "reason": "future_read"
+    },
+    {
+      "id": "b6",
+      "note": "讀取時間只晚 5 分鐘（剛好）＝照收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:54:57Z"
+      },
+      "accept": true,
+      "reason": null
+    }
+  ],
+  "confirm_sequences": [
+    {
+      "id": "c1",
+      "note": "過期之後，同一個新重置時間連續 3 次、第一次到第三次隔 10 分鐘＝第 3 次收下",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "note": "連續 3 次但都擠在 10 分鐘內＝還不收；隔滿 10 分鐘的下一次才收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:00:30Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:01:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:09:59Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c3",
+      "note": "過期之後，交錯送 A、B 兩組重置時間（兩個視窗各送各的）＝每次都重新計數，一直不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-14T09:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-14T09:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:20:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:25:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-14T09:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:40:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        }
+      ]
+    },
+    {
+      "id": "c4",
+      "note": "中間夾一次不同的重置時間就重新計數：A、A、B、A、A 都不收，再一次 A（隔滿 10 分鐘、連續 3 次）才收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-14T09:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:20:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-09T07:25:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c5",
+      "note": "記著的還沒過期：倍數規則照擋，連續送同一個重置時間也不收（不累計待確認）",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-12T00:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T07:20:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T07:40:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T08:00:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        }
+      ]
+    },
+    {
+      "id": "c6",
+      "note": "差 7 天倍數的新一期照舊直接收（不用等 3 次）",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 70,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T07:00:00Z",
+          "new": {
+            "left_pct": 90,
+            "resets_at": "2026-11-11T09:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c7",
+      "note": "gsit 真實案例：記著的那期還沒過期就不收（不累計），過期後同一個新重置時間連 3 次、跨 10 分鐘才收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 1,
+        "resets_at": "2026-11-11T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-09T14:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T14:20:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-09T14:30:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "later_not_expired"
+        },
+        {
+          "now": "2026-11-11T09:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:10:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:16:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": true,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "id": "c8",
+      "note": "過期後另一個身分（gsit／cwen）交錯回報＝每次都重新計數，一直不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "old": {
+        "left_pct": 1,
+        "resets_at": "2026-11-11T09:00:00Z"
+      },
+      "steps": [
+        {
+          "now": "2026-11-11T09:05:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:10:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:15:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:20:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:25:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:30:00Z",
+          "new": {
+            "left_pct": 53,
+            "resets_at": "2026-11-15T16:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        },
+        {
+          "now": "2026-11-11T09:35:00Z",
+          "new": {
+            "left_pct": 30,
+            "resets_at": "2026-11-12T12:00:00Z"
+          },
+          "accept": false,
+          "reason": "not_week_multiple"
+        }
+      ]
     }
   ]
 }
