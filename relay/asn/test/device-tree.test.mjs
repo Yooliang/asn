@@ -119,3 +119,20 @@ test('守門：設備分頁的畫面接線——設定表單用 st.devices，樞
   const block = panel.slice(panel.indexOf("cat === 'devices'"), panel.indexOf("catKey === 'look'"))
   assert.ok(!/\.key\s*}}|d\.node|partnerId/.test(block), '畫面不顯示節點代號與夥伴 ID')
 })
+
+test('asn終端的兩個虛擬 profile（gemini-term／grok-term，mode: term）不算廠商、不出現在登入狀態（電腦與手機兩種回報形狀）', () => {
+  const term = [{ id: 'gemini-term', label: 'Gemini（asn終端）', engine: 'agy', mode: 'term' }, { id: 'grok-term', label: 'Grok（asn終端）', engine: 'grok', mode: 'term' }]
+  const shapes = { desktop: { profiles: [{ id: 'claude' }, ...term] }, phone: { launcher: { profiles: [{ id: 'claude' }, ...term] } } }
+  for (const [name, l] of Object.entries(shapes)) {
+    const w = byLabel(buildDeviceTree({ ...base(), launchers: { [W]: l } }), '工作機')
+    const keys = w.vendors.map(v => v.key)
+    assert.ok(!keys.some(k => /term/i.test(k)), name + '：廠商不該有 term：' + keys.join(','))
+    assert.ok(!/term/i.test(w.stateLine), name + '：登入狀態不該有 term：' + w.stateLine)
+    assert.ok(!/term/i.test(JSON.stringify(w.missing ?? [])), name + '：未安裝清單不該有 term')
+  }
+  // 只有 asn終端兩項時，跟沒有它們一樣（不會多出「已安裝未登入」）
+  const only = byLabel(buildDeviceTree({ ...base(), launchers: { [W]: { profiles: [{ id: 'claude' }, ...term] } } }), '工作機')
+  const plain = byLabel(buildDeviceTree({ ...base(), launchers: { [W]: { profiles: [{ id: 'claude' }] } } }), '工作機')
+  assert.equal(only.stateLine, plain.stateLine)
+  assert.deepEqual(only.vendors.map(v => v.key), plain.vendors.map(v => v.key))
+})
