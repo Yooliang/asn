@@ -50,8 +50,37 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: log-cycle-test
-          path: ${{ runner.temp }}/cycle-logs/*.log
+          name: log-cycle-test-linux
+          path: ${{ runner.temp }}/cycle-logs-linux/*.log
+          if-no-files-found: ignore
+
+  # Windows 版：真正當掉的是 Windows 上的 mux-server，修補重點在 windows.rs。同樣的紅綠對照，程序清單換成假的 PROCESSENTRY32W
+  cycle-test-windows:
+    name: procinfo 循環測試 Windows（綠燈＋紅燈對照）
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - name: 取上游原始碼、核對、套 #7706
+        run: bash .github/scripts/wezterm-src-prepare.sh C:/w/src
+      - name: 循環測試（綠燈）與紅燈對照（預期失敗，失敗才算通過）
+        env:
+          CYCLE_LOG_DIR: C:/w/cycle-logs-windows
+        run: bash .github/scripts/wezterm-procinfo-cycle-test.sh C:/w/src windows
+      - name: 上傳測試 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: log-cycle-test-windows
+          path: C:/w/cycle-logs-windows/*.log
           if-no-files-found: ignore
 
   build-linux:
@@ -250,7 +279,7 @@ jobs:
   # 發佈前演練：PR（或不在 main 的手動觸發）時跑，步驟與 publish 相同（同一支腳本、同樣的 download pattern），只跳過 attest 與建 release
   publish-dryrun:
     name: 發佈前演練（不 attest、不建 release）
-    needs: [cycle-test, build-linux, build-windows]
+    needs: [cycle-test, cycle-test-windows, build-linux, build-windows]
     if: ${{ !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
@@ -276,7 +305,7 @@ jobs:
   # 發佈：只在 main 上手動觸發。不跑任何建置指令、不取第三方原始碼（只取本 repo 的腳本），只做：下載 artifact → 算 SHA-256 → 產生 attestation → 建 release
   publish:
     name: 發佈 release
-    needs: [cycle-test, build-linux, build-windows]
+    needs: [cycle-test, cycle-test-windows, build-linux, build-windows]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 20

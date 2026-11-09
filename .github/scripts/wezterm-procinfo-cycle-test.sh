@@ -4,29 +4,51 @@
 # 發佈用的建置不會經過這裡（那是另一個乾淨的工作樹／之後會還原並重新核對）。
 #   綠燈：已套 #7706 的 linux.rs 必須通過，而且那個測試真的有跑。
 #   紅燈對照：把 linux.rs 換回上游 tag 原版（沒有修補），同樣的測試必須因為堆疊溢位而失敗；失敗原因不是堆疊溢位也算沒通過。
-# 用法：wezterm-procinfo-cycle-test.sh <已套修補的原始碼資料夾>；必要環境變數 UPSTREAM_SHA
+# 用法：wezterm-procinfo-cycle-test.sh <已套修補的原始碼資料夾> [linux|windows]（預設 linux）；必要環境變數 UPSTREAM_SHA
+# windows：把 Snapshot::entries() 的結果換成假的 PROCESSENTRY32W 清單；假 PID 開不起程序，ProcHandle::new 會回 None，build_proc 只用 szExeFile，不會 panic。
 set -euo pipefail
 SRC="${1:?用法：$0 <原始碼資料夾>}"
 : "${UPSTREAM_SHA:?}"
+PLATFORM="${2:-linux}"
 cd "$SRC"
-FILE=procinfo/src/linux.rs
-LOGDIR="${CYCLE_LOG_DIR:-$PWD/../cycle-logs}"
+FILE="procinfo/src/${PLATFORM}.rs"
+PY="$(command -v python3 || command -v python)"
+LOGDIR="${CYCLE_LOG_DIR:-$PWD/../cycle-logs-${PLATFORM}}"
 mkdir -p "$LOGDIR"
 
 inject() {
-  python3 - "$FILE" <<'PY'
+  "$PY" - "$FILE" "$PLATFORM" <<'PY'
 import sys
 p = sys.argv[1]
+plat = sys.argv[2]
 s = open(p, encoding='utf-8').read()
-anchor = "let procs: Vec<_> = all_pids().into_iter().filter_map(info_for_pid).collect();\n"
-assert s.count(anchor) == 1, "找不到注入點（上游程式碼變了？）"
-fake = '''
+if plat == 'linux':
+    anchor = "let procs: Vec<_> = all_pids().into_iter().filter_map(info_for_pid).collect();
+"
+    fake = '''
         #[cfg(test)]
         let procs: Vec<LinuxStat> = vec![
             LinuxStat { pid: 4000001, name: "a".into(), status: "S".into(), ppid: 4000002, starttime: 0 },
             LinuxStat { pid: 4000002, name: "b".into(), status: "S".into(), ppid: 4000001, starttime: 0 },
         ];
 '''
+else:
+    anchor = "let procs = Snapshot::entries();
+"
+    fake = '''
+        #[cfg(test)]
+        let procs: Vec<PROCESSENTRY32W> = {
+            let mk = |pid: u32, ppid: u32| {
+                let mut e: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+                e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as _;
+                e.th32ProcessID = pid;
+                e.th32ParentProcessID = ppid;
+                e
+            };
+            vec![mk(4000001, 4000002), mk(4000002, 4000001)]
+        };
+'''
+assert s.count(anchor) == 1, "找不到注入點（上游程式碼變了？）"
 s = s.replace(anchor, anchor + fake)
 s += '''
 #[cfg(test)]
@@ -55,7 +77,7 @@ inject
 if ! run_test 2>&1 | tee "$LOGDIR/green.log"; then
   echo "::error::綠燈失敗：已套修補的版本沒有通過循環測試" >&2; exit 1
 fi
-grep -q 'linux::cycle_probe::parent_child_cycle_terminates ... ok' "$LOGDIR/green.log" \
+grep -q "${PLATFORM}::cycle_probe::parent_child_cycle_terminates ... ok" "$LOGDIR/green.log" \
   || { echo "::error::綠燈：找不到測試通過的那一行（測試可能根本沒跑）" >&2; exit 1; }
 echo "::endgroup::"
 git checkout -- "$FILE"
@@ -76,12 +98,12 @@ fi
 if [ "$rc" -eq 0 ]; then
   echo "::error::紅燈對照沒有失敗：沒套修補的版本竟然通過了，這個測試擋不住循環" >&2; exit 1
 fi
-grep -Eq 'overflowed its stack|stack overflow' "$LOGDIR/red.log" \
+grep -Eq 'overflowed its stack|stack overflow|STATUS_STACK_OVERFLOW|0xc00000fd' "$LOGDIR/red.log" \
   || { echo "::error::紅燈對照雖然失敗了（結束碼 $rc），但原因不是堆疊溢位" >&2; exit 1; }
 echo "紅燈對照如預期：沒套修補的版本因堆疊溢位而失敗（結束碼 $rc）"
 
 {
-  echo "### procinfo 循環測試"
+  echo "### procinfo 循環測試（${PLATFORM}）"
   echo
   echo "- 綠燈（已套 #7706）：通過"
   echo "- 紅燈對照（上游原版）：因堆疊溢位失敗，結束碼 $rc（預期要失敗，失敗才算通過）"
