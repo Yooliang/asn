@@ -28,6 +28,8 @@ pub mod pi_control;
 #[allow(dead_code)]
 pub mod pi_adopt;
 pub mod rpc;
+#[cfg(test)]
+mod golden;
 
 use super::roster::Window;
 use std::collections::HashMap;

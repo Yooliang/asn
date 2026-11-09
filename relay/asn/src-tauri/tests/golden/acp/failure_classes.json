@@ -1,0 +1,443 @@
+[
+  [
+    "Quota exceeded for project, check your plan and billing",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "quota exceeded: please login again",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "please sign in to continue; quota reached",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "Error 429",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "HTTP 429: Too Many Requests",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "status=429.",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "error4290",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "x429",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "RESOURCE_EXHAUSTED",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "resource exhausted by upstream",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "rate limit reached",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "Rate-Limit hit",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "ratelimit",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "rate_limit_error",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "you have exceeded your daily allowance",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "usage limit reached",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "limit exceeded",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "out of credits",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "額度已用完",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "本月額度不足，請改天再試",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "Please login first",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "login",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "not logged in",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "Not Signed In",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "請登入",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "尚未登入",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "登入失效，請重新登入",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "OAuth token refresh failed",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "invalid_grant",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "Invalid Grant: expired",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "Unauthorized",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "authentication failed",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "credentials missing",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "credentialsx",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "loginx page",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "auth required",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "authorization required",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "token expired",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "the token has expired",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "HTTP 401",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "401 Unauthorized",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "error 4012",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "x401",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "401x",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "(401)",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "connection reset by peer",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "read tcp: wsarecv: An existing connection was forcibly closed by the remote host.",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "dial tcp 1.2.3.4:443: i/o timeout",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "ECONNRESET",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "Temporary failure in name resolution",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "TLS handshake timeout",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "unexpected EOF",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "broken   pipe",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "connection reset, please login",
+    {
+      "classify": "auth",
+      "network": false
+    }
+  ],
+  [
+    "network error 429",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ],
+  [
+    "no such host",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "network is unreachable",
+    {
+      "classify": null,
+      "network": true
+    }
+  ],
+  [
+    "",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "   ",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "something else went wrong",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "發生未知錯誤",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "timeout",
+    {
+      "classify": null,
+      "network": false
+    }
+  ],
+  [
+    "Quota\nexceeded",
+    {
+      "classify": "quota",
+      "network": false
+    }
+  ]
+]
