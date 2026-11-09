@@ -14,6 +14,13 @@ export const fakeClaudeBin = path.join(testDir, 'fake-claude-agents.mjs')
 export const script = name => path.join(dir, name)
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+/** 等到 f() 為真，最多 ms 毫秒；回傳最後一次 f() 的結果（逾時就是 false，由呼叫端 assert） */
+export async function until(f, ms = 10_000, step = 25) {
+  const t0 = Date.now()
+  while (!f() && Date.now() - t0 < ms) await sleep(step)
+  return f()
+}
+
 /** 去掉 shell／start.sh 帶進來的 IRORI_* 與 ASN_* */
 export const withoutIroriEnv = withoutRelayEnv
 

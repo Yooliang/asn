@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { startFakeRelay, FAKE_KEY } from './fake-relay.mjs'
-import { childEnv, rm, run, script, tmpEnv, withoutIroriEnv } from './helpers.mjs'
+import { childEnv, rm, run, script, tmpEnv, until, withoutIroriEnv } from './helpers.mjs'
 
 const POLLUTION = {
   IRORI_RELAY_KEY: 'pollution-key-must-not-leak-to-relay-or-logs',
@@ -83,13 +83,16 @@ test('process.env 帶生產 IRORI_* 時 spawn recv 只用 childEnv（不連正�
   try {
     ;({ root, env } = tmpEnv(st.url, { ASN_RELAY_KEY: FAKE_KEY, ASN_RECV_POLL_MS: '500', ASN_ROSTER_MS: '500' }))
     const c = spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
+    // spawn 當下就掛 close：recv 若提早結束，之後才掛會等不到（#891）
+    const closed = new Promise(r => c.on('close', r))
     let out = ''
     c.stdout.on('data', d => (out += d))
     c.stderr.on('data', d => (out += d))
-    await new Promise(r => setTimeout(r, 400))
+    // 等到假後端收到帶測試金鑰的請求再收掉 recv，不用固定時間；10 秒是上限，CI 忙也夠（#891）
+    const reached = await until(() => st.reqs.some(q => q.key === FAKE_KEY))
     c.kill()
-    await new Promise(r => c.on('close', r))
-    assert.ok(st.reqs.some(q => q.key === FAKE_KEY), '應連假後端')
+    await closed
+    assert.ok(reached, '應連假後端（10 秒內沒收到帶測試金鑰的請求）')
     assert.ok(!out.includes('pollution-key'))
     assert.ok(!out.includes('asn-pollution-key'))
   } finally {
