@@ -10,7 +10,8 @@
 // 兩個都沒給就不寄（exit 1）；--room 群組本來就不計時，給了會忽略。
 // 用這台機器的節點金鑰（~/.asn/<節點>.key，橋用的同一把）直接呼叫 relay。
 // 寄件視窗名不能自填：沿父行程鏈往上找 claude 程序，對照 ~/.claude/sessions/<pid>.json 的 name 當 from_agent；找不到就拒絕。
-// 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，exit code：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
+// 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，exit code：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤、
+// 5 信已寄出但有附件沒附上（#1205；stderr 說明缺哪幾個，【不要重寄整封信】，只再寄缺的附件）。
 import { envGet } from './env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -20,7 +21,7 @@ import { sentMarkName } from './sent-mark.mjs'
 import { wakeNote } from './mail-format.mjs'
 import { AttachFail } from './attach-download.mjs'
 import { retrySend, withClientId } from './relay-core.mjs'
-import { MAX_FILES, attachmentText, prepareFiles, uploadItems } from './attach-upload.mjs'
+import { EXIT_ATTACH_MISSING, MAX_FILES, attachmentText, missingAttachmentNames, missingAttachmentsMessage, prepareFiles, uploadItems } from './attach-upload.mjs'
 import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readMachineKey, readSession, sessionsDir } from './identity.mjs'
 
 export { findCaller, inspectCaller }
@@ -158,6 +159,7 @@ export async function main(argv) {
   takeRate(caller.name)
   // 附件先傳完並確認；任何一個失敗就丟錯，下面不會寄信
   const attachment_ids = items.length ? await uploadItems({ api: (action, b) => call(key, action, b), baseUrl: BASE_URL, items }) : undefined
+  let lackNote = null   // 後端回報有附件沒附上（只有 send 會回；舊後台沒有這欄＝照舊）
   if (a.room) {
     const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name, attachment_ids })
     console.log(`posted room=${a.room}${r?.seq != null ? ` seq=${r.seq}` : ''} from=${node}/${caller.name}`)
@@ -167,9 +169,10 @@ export async function main(argv) {
     if (a.replyTo) markReplied(node, a.replyTo)
     markSent(node, caller.name, toNode, toAgent)
     console.log(`sent id=${r?.id} to=${a.to} from=${node}/${caller.name}`)
+    lackNote = missingAttachmentsMessage(missingAttachmentNames(items, attachment_ids, r?.attachments_missing))
   }
   if (note) console.error(note)
-  return 0
+  return lackNote ? (console.error(lackNote), EXIT_ATTACH_MISSING) : 0
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -89,7 +89,8 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
         delivered_at: null,
         acked_at: null,
       })
-      return out(200, { id })
+      // st.sendExtra（選填，函式 body → 物件）：模擬後台在回應多帶欄位，例如 attachments_missing（#1205：信已寄出但這幾個附件沒附上）
+      return out(200, { id, ...(typeof st.sendExtra === 'function' ? st.sendExtra(body) : {}) })
     }
     if (action === 'sent_status' && req.method === 'POST') {
       const ids = body?.ids

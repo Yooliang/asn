@@ -11,7 +11,7 @@ import {
   PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, THUMB_MAX_CHARS, cleanPhotoName, expiresAt, fitSize, formatBytes, friendlyPhotoError, isThumb,
   normalizePhotos, photoExpired, photoText, photoTitle, stripPhotoLines, webpName,
 } from '../ui/lib/photo.mjs'
-import { startFakeRelay, U } from './fake-relay.mjs'
+import { FAKE_KEY, startFakeRelay, U } from './fake-relay.mjs'
 import { httpTransport, memStore } from './helpers.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -171,6 +171,23 @@ test('寄照片失敗：對話出現白話原因、不進「已送出」、沒�
   assert.equal(core.snapshot().friends.find(f => f.id === ID).waiting, false)
   assert.equal((await core.sendAttachment(ID, null)).ok, false)
   assert.equal((await core.sendAttachment('Z/Z-沒有', { data: 'x' })).ok, false)
+  await core.stop(); await relay.close()
+})
+
+test('信已寄出但附件沒附上（#1205）：對話顯示缺的檔名那一句、不加「沒有傳出去」；後台 fake 能回 attachments_missing，舊後台不帶就沒有這欄', async () => {
+  const msg = '信已寄出，但 cat.webp 沒附上，請再寄一次這個附件'
+  const { relay, core } = await setup({ sendAttachment: async () => { throw new Error(msg) } })
+  await core.start()
+  const r = await core.sendAttachment(ID, { name: 'cat.webp', data: 'UklG' }, '')
+  assert.equal(r.ok, false); assert.equal(r.error, msg)
+  const last = core.logOf(ID).at(-1)
+  assert.equal(last.k, 'sys'); assert.equal(last.text, msg)
+  // fake 後台：設了 sendExtra 才多帶 attachments_missing
+  const post = async () => await (await fetch(`${relay.url}?action=send`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-relay-key': FAKE_KEY }, body: JSON.stringify({ to_node: 'W', body: 'x' }) })).json()
+  const before = await post()
+  relay.sendExtra = () => ({ attachments_missing: [U(5)] })
+  const after = await post()
+  assert.equal('attachments_missing' in before, false); assert.deepEqual(after.attachments_missing, [U(5)])
   await core.stop(); await relay.close()
 })
 

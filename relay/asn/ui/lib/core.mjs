@@ -469,7 +469,9 @@ export class AsnCore {
     let r
     try { r = await this.transport.sendAttachment(payload) } catch (e) {
       const msg = friendlyPhotoError(e.message)
-      this.#log(id).push({ k: 'sys', text: `沒有傳出去：${msg}`, t: this.now() })
+      // 信已寄出、只是有附件沒附上（#1205）：Rust 端的說法是「信已寄出，但 … 沒附上，請再寄一次…」，不能再加「沒有傳出去」讓人以為整封都沒到、重寄整封
+      const sentButLacking = msg.startsWith('信已寄出，但')
+      this.#log(id).push({ k: 'sys', text: sentButLacking ? msg : `沒有傳出去：${msg}`, t: this.now() })
       this.emit('log', id)
       return { ok: false, error: msg }
     }

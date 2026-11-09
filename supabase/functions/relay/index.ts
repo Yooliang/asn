@@ -42,7 +42,7 @@ import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts"
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
 import {
-  ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
+  ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, parseAttachmentIds, prepareAttachments, reconcileAttachments, sendReply, type StorageDeps, withAttachments,
   withRoomAttachments,
 } from "../_shared/attachments.ts";
 import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
@@ -596,10 +596,15 @@ Deno.serve(async (req) => {
     // client_id（選填 UUID）：客戶端重試同一封信時沿用，後台據此去重；格式不對回 400，沒帶＝舊客戶端、行為不變
     const cid = parseClientId(b.client_id);
     if (!cid.ok) return json(400, { error: "bad_client_id" });
-    // 重複送來：回第一次那封的 id、照成功回；不再寄、附件不處理（只記 id）
+    // 重複送來：回第一次那封的 id、照成功回；不再寄、不敲門鈴。附件走「補綁＋核對」（#1205）：第一次綁到一半斷線時由這次補上，仍缺的回報給客戶端
     if (cid.id) {
       const dup = await findSentByClientId(rpc, me.id, cid.id);
-      if (dup) { console.info("send duplicate ignored", dup); return json(200, { id: dup }); }
+      if (dup) {
+        console.info("send duplicate ignored", dup);
+        const dupIds = parseAttachmentIds(b.attachment_ids) ?? []; // 壞編號在重複路徑照舊不報錯、當沒附件
+        const r = sendReply(dup, await reconcileAttachments({ rpc }, me.id, dupIds, dup));
+        return json(r.status, r.body);
+      }
     }
     // 附件（選填 attachment_ids）：寄出前確認都是自己上傳、已確認、沒綁過的；寄出後綁到這封信，再敲門鈴（收信端一響就能看到附件）
     const att = await prepareAttachments({ rpc }, me.id, b.attachment_ids);
@@ -626,14 +631,20 @@ Deno.serve(async (req) => {
     if (sent?.error === "not_receivable") return json(409, { error: "not_receivable" });
     if (sent?.error) return json(400, { error: sent.error });
     // 同時送來的重複請求（搶在第一次寫入完成之前）：資料庫回 duplicate，同樣回第一次的 id，附件不綁、不敲門鈴
-    if (sent?.duplicate === true) { console.info("send duplicate ignored", sent.id); return json(200, { id: sent.id }); }
-    await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
+    if (sent?.duplicate === true) {
+      console.info("send duplicate ignored", sent.id);
+      const r = sendReply(sent.id, await reconcileAttachments({ rpc }, me.id, att.ids, sent.id));
+      return json(r.status, r.body);
+    }
+    // 補綁＋核對：綁失敗、附件在檢查後過期、或另一個同時送來的請求先綁好，都看實際結果；有缺只回報（信已寄出，仍是 200）
+    const missing = await reconcileAttachments({ rpc }, me.id, att.ids, sent.id);
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
     for (const t of bellTopicsOf(sent)) await ring(t);
     // 寄給本人（回傳有 fanout 的那條路）：手機 App 關著時推一則固定文字。收件人由伺服器端用這封信查，背景跑，失敗不影響寄信
     if (typeof (sent as { fanout?: unknown }).fanout === "number") signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, sent.id));
     await touchActive(rpc, me.id, str(b.from_agent));   // 最後活動時間（#397）：背景寫入，失敗不影響寄信
-    return json(200, { id: sent.id });
+    const done = sendReply(sent.id, missing);
+    return json(done.status, done.body);
   }
   // 遠端開視窗：launch／launchers 只有 owner 節點（SQL 判斷）；launch_pending／launch_result 是機器橋取待辦、回報結果
   if (action && LAUNCH_ACTIONS.has(action)) {

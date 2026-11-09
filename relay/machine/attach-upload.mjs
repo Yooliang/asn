@@ -97,3 +97,23 @@ export async function uploadItems({ api, baseUrl, items, fetchFn = fetch }) {
   }
   return ids
 }
+
+// ---- 寄出後附件不齊（#1205）-----------------------------------------------------------------------------
+// 後端在 send 回 { id, attachments_missing: [附件編號…] }＝信已寄出，但這幾個附件沒附上。舊後台沒有這個欄位＝照舊，不提示。
+// 專用結束碼：信已經寄出，呼叫端（含自動重試的程式）不要因為它重寄整封信，只要再寄缺的那幾個附件。
+export const EXIT_ATTACH_MISSING = 5
+
+const COUNT_WORD = ['', '', '兩', '三', '四']
+/** 缺的附件編號 → 檔名（用上傳時的順序對照 ids、items）；對不上的給「未知附件」。沒缺回 null */
+export function missingAttachmentNames(items, ids, missing) {
+  if (!Array.isArray(missing) || !missing.length) return null
+  const nameOf = new Map((ids ?? []).map((id, i) => [id, items?.[i]?.name]))
+  return [...new Set(missing)].map(id => nameOf.get(id) || '未知附件')
+}
+
+/** 給人看的一句話；names 為空回 null */
+export function missingAttachmentsMessage(names) {
+  if (!names?.length) return null
+  const which = names.length === 1 ? '這個附件' : `這${COUNT_WORD[names.length] ?? names.length}個附件`
+  return `信已寄出，但 ${names.join('、')} 沒附上，請再寄一次${which}`
+}

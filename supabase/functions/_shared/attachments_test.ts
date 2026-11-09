@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   ATTACH_KINDS, type AttachDeps, bindAttachments, checkAttachInit, checkThumb, cleanName, handleAttachAction, parseAttachmentIds,
-  prepareAttachments, QUOTA_BYTES, QUOTA_COUNT, sweepExpired, type StorageDeps, THUMB_MAX_CHARS, withAttachments, withRoomAttachments,
+  prepareAttachments, reconcileAttachments, sendReply, QUOTA_BYTES, QUOTA_COUNT, sweepExpired, type StorageDeps, THUMB_MAX_CHARS, withAttachments, withRoomAttachments,
 } from "./attachments.ts";
 
 const U = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
@@ -257,10 +257,13 @@ Deno.test("relay/index.ts：附件動作在節點驗證之後；send 寄出前�
   const at = (s: string, from = 0) => src.indexOf(s, from);
   assert(at("ATTACH_ACTIONS.has(action)") > at("asn_relay_auth"), "附件動作要在金鑰驗證之後");
   const send = src.slice(at('action === "send"'), at("// 遠端開視窗"));
-  assert(send.includes("prepareAttachments") && send.includes("bindAttachments") && send.includes("ring(t)"));
+  assert(send.includes("prepareAttachments") && send.includes("reconcileAttachments") && send.includes("ring(t)"));
   assert(send.indexOf("prepareAttachments") < send.indexOf("sendWithClientId("), "先驗附件再寄信");
-  assert(send.indexOf("bindAttachments") < send.indexOf("ring(t)"), "先綁再敲門鈴");
+  assert(send.indexOf("const missing = await reconcileAttachments") < send.indexOf("ring(t)"), "先綁再敲門鈴");
   assert(send.includes("me.id"), "綁定與驗證的節點是金鑰所屬節點");
+  // #1205：lookup 命中、idem 回 duplicate、第一次寄，三條路都要補綁＋核對
+  assertEquals((send.match(/reconcileAttachments[(]/g) ?? []).length, 3, "三條路都走補綁＋核對");
+  assert(send.includes("sendReply("), "回應統一由 sendReply 組");
   assertEquals((src.match(/withAttachments\(/g) ?? []).length >= 2, true, "兩種 inbox 都要附帶附件");
   assert(src.includes("withRoomAttachments") && src.includes("beforeRing"));
   assert(src.includes('"attachments"') && src.includes("createSignedUploadUrl") && src.includes("createSignedUrl"));
@@ -298,4 +301,68 @@ Deno.test("SQL 授權：下載只給上傳者、收件節點、群組有效成�
   assert(f.includes("rm.left_at is null") && f.includes("split_part(rm.member, '~', 1) = p_node"));
   assert(f.includes("tenant_id is not distinct from v_t"), "限同租戶");
   assert(f.indexOf("v_ok") < f.indexOf("'expired'"), "先判權限再說過期，沒權限的人看不出附件存不存在");
+});
+
+// ===== #1205 附件不齊：補綁＋核對 =====
+// 模擬資料庫：bind 依 bindOk 決定綁不綁，missing 回「沒綁上」的編號
+function reconcileRpc(o: { bound: Set<string>; bindOk?: boolean; missingFn?: "absent" | "error" | "junk" }) {
+  return (fn: string, args: Record<string, unknown>) => {
+    if (fn === "asn_relay_attach_bind") {
+      if (o.bindOk !== false) for (const id of args.p_ids as string[]) o.bound.add(id);
+      return { bound: o.bindOk === false ? 0 : (args.p_ids as string[]).length };
+    }
+    if (fn === "asn_relay_attach_missing") {
+      if (o.missingFn === "absent") return { __error: true, code: "PGRST202" };
+      if (o.missingFn === "junk") return { not: "array" };
+      return (args.p_ids as string[]).filter((i) => !o.bound.has(i));
+    }
+    return null;
+  };
+}
+
+Deno.test("reconcileAttachments：沒附件不碰資料庫、回空", async () => {
+  const f = fakeDeps();
+  assertEquals(await reconcileAttachments(f.deps, "H", [], U(9)), []);
+  assertEquals(f.calls.length, 0);
+});
+
+Deno.test("reconcileAttachments：重複送來時補綁成功＝齊全（先 bind 再核對）", async () => {
+  const bound = new Set<string>();
+  const f = fakeDeps({ rpc: reconcileRpc({ bound }) });
+  assertEquals(await reconcileAttachments(f.deps, "H", [U(1), U(2)], U(9)), []);
+  assertEquals(f.calls.map((c) => c.fn), ["asn_relay_attach_bind", "asn_relay_attach_missing"]);
+  assertEquals(f.calls[0].args.p_message_id, U(9));
+  assertEquals(f.calls[1].args, { p_node: "H", p_ids: [U(1), U(2)], p_message_id: U(9) });
+});
+
+Deno.test("reconcileAttachments：bind 失敗或附件過期（綁不上）→ 回缺的編號", async () => {
+  const f = fakeDeps({ rpc: reconcileRpc({ bound: new Set([U(1)]), bindOk: false }) });
+  assertEquals(await reconcileAttachments(f.deps, "H", [U(1), U(2)], U(9)), [U(2)]);
+  // bind 直接報錯也一樣：看核對結果
+  const g = fakeDeps({ rpc: (fn, a) => (fn === "asn_relay_attach_bind" ? { __error: true } : reconcileRpc({ bound: new Set() })(fn, a)) });
+  assertEquals(await reconcileAttachments(g.deps, "H", [U(3)], U(9)), [U(3)]);
+});
+
+Deno.test("reconcileAttachments：同時在跑的另一個請求已綁好，bind 回 0 也不誤判", async () => {
+  const f = fakeDeps({
+    rpc: (fn, a) => (fn === "asn_relay_attach_bind" ? { bound: 0 } : fn === "asn_relay_attach_missing" ? (a.p_ids as string[]).filter(() => false) : null),
+  });
+  assertEquals(await reconcileAttachments(f.deps, "H", [U(1), U(2)], U(9)), []);
+});
+
+Deno.test("reconcileAttachments：核對函式不存在或失敗或回怪東西＝舊行為（空）；只回請求裡出現過的編號", async () => {
+  for (const m of ["absent", "error", "junk"] as const) {
+    const f = fakeDeps({ rpc: reconcileRpc({ bound: new Set(), missingFn: m === "error" ? undefined : m }) });
+    if (m === "error") {
+      const g = fakeDeps({ rpc: (fn) => (fn === "asn_relay_attach_missing" ? { __error: true } : { bound: 1 }) });
+      assertEquals(await reconcileAttachments(g.deps, "H", [U(1)], U(9)), []);
+    } else assertEquals(await reconcileAttachments(f.deps, "H", [U(1)], U(9)), [], m);
+  }
+  const extra = fakeDeps({ rpc: (fn) => (fn === "asn_relay_attach_missing" ? [U(1), U(77), 5] : { bound: 0 }) });
+  assertEquals(await reconcileAttachments(extra.deps, "H", [U(1)], U(9)), [U(1)]);
+});
+
+Deno.test("sendReply：齊全只有 {id}（舊客戶端看到的形狀不變）；有缺才多 attachments_missing，仍是 200", () => {
+  assertEquals(sendReply("m1", []), { status: 200, body: { id: "m1" } });
+  assertEquals(sendReply("m1", [U(2)]), { status: 200, body: { id: "m1", attachments_missing: [U(2)] } });
 });

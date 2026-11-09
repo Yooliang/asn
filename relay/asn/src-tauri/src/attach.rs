@@ -209,6 +209,32 @@ pub fn same_host(url: &str, base: &str) -> bool {
     }
 }
 
+/// 寄出後附件不齊（#1205）：後端在 send 回 { id, attachments_missing: [附件編號…] }＝信已寄出，但這幾個附件沒附上。
+/// 用上傳時的順序（names[i] 對 ids[i]）把缺的編號對回檔名；對不上的給「未知附件」。舊後台沒有這欄、或是空的＝空陣列（照舊，不提示）。
+pub fn missing_attachment_names(names: &[String], ids: &[String], reply: &Value) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for m in reply.get("attachments_missing").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        let name = ids.iter().position(|i| i == m).and_then(|k| names.get(k)).cloned().unwrap_or_else(|| "未知附件".to_string());
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// 給人看的一句話（信已寄出，不要重寄整封信）；沒缺回 None。文案與 relay/machine/attach-upload.mjs 的 missingAttachmentsMessage 一致
+pub fn missing_attachments_message(names: &[String]) -> Option<String> {
+    let which = match names.len() {
+        0 => return None,
+        1 => "這個附件".to_string(),
+        2 => "這兩個附件".to_string(),
+        3 => "這三個附件".to_string(),
+        4 => "這四個附件".to_string(),
+        n => format!("這 {n} 個附件"),
+    };
+    Some(format!("信已寄出，但 {} 沒附上，請再寄一次{which}", names.join("、")))
+}
+
 pub fn is_uuid(s: &str) -> bool {
     let p: Vec<&str> = s.split('-').collect();
     p.len() == 5 && [8, 4, 4, 4, 12].iter().zip(&p).all(|(n, x)| x.len() == *n && x.chars().all(|c| c.is_ascii_hexdigit()))
@@ -272,6 +298,10 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     }
     let body = if signed { body } else { crate::relay::without_person(body) };
     let sent = relay.api_signed("send", Some(body), token).await.map_err(|e| explain(&e))?;
+    // 信已寄出但附件沒附上：回錯誤字串讓畫面顯示（不是「寄失敗」，畫面不該叫人重寄整封信）
+    if let Some(msg) = missing_attachments_message(&missing_attachment_names(&[photo.name.clone()], &[id.clone()], &sent)) {
+        return Err(msg);
+    }
     Ok(json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }))
 }
 
@@ -782,6 +812,46 @@ mod tests {
         assert_eq!(send["from_agent"], "T-ASN", "寄件視窗名由程式決定");
         assert_eq!(send["to_node"], "W");
         assert_eq!(send["expects_reply"], true);
+    }
+
+    #[test]
+    fn 附件不齊的說法_一個_兩個_三個以上_沒缺是_none() {
+        let n = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(missing_attachments_message(&n(&["a.pdf"])).unwrap(), "信已寄出，但 a.pdf 沒附上，請再寄一次這個附件");
+        assert_eq!(missing_attachments_message(&n(&["a.pdf", "b.webp"])).unwrap(), "信已寄出，但 a.pdf、b.webp 沒附上，請再寄一次這兩個附件");
+        assert_eq!(missing_attachments_message(&n(&["a", "b", "c"])).unwrap(), "信已寄出，但 a、b、c 沒附上，請再寄一次這三個附件");
+        assert!(missing_attachments_message(&[]).is_none());
+        let (names, ids) = (n(&["a.pdf", "b.webp"]), n(&["i1", "i2"]));
+        assert_eq!(missing_attachment_names(&names, &ids, &json!({"attachments_missing": ["i2", "zz", "i2"]})), ["b.webp", "未知附件"]);
+        assert!(missing_attachment_names(&names, &ids, &json!({"id": "x"})).is_empty(), "舊後台沒這欄＝照舊");
+        assert!(missing_attachment_names(&names, &ids, &json!({"attachments_missing": []})).is_empty());
+    }
+
+    #[tokio::test]
+    async fn 寄照片_後端回附件沒附上_回錯誤字串給畫面_舊後台照舊成功() {
+        for (reply, want) in [
+            (format!(r#"{{"id":"00000000-0000-0000-0000-000000000099","attachments_missing":["{ID}"]}}"#), Some("信已寄出，但 貓 1 .webp 沒附上，請再寄一次這個附件")),
+            (r#"{"id":"00000000-0000-0000-0000-000000000099"}"#.to_string(), None),
+            (r#"{"id":"00000000-0000-0000-0000-000000000099","attachments_missing":[]}"#.to_string(), None),
+        ] {
+            let port_cell = Arc::new(Mutex::new(0u16));
+            let pc = port_cell.clone();
+            let (port, log) = serve(move |r, _| {
+                let port = *pc.lock().unwrap();
+                if r.path.starts_with("/storage/up") { return (200, b"{}".to_vec(), "application/json"); }
+                if r.path.contains("action=attach_init") { return (200, format!(r#"{{"id":"{ID}","upload_url":"http://127.0.0.1:{port}/storage/up?token=t"}}"#).into_bytes(), "application/json"); }
+                if r.path.contains("action=attach_commit") { return (200, br#"{"ok":true}"#.to_vec(), "application/json"); }
+                if r.path.contains("action=send") { return (200, reply.clone().into_bytes(), "application/json"); }
+                (404, b"{}".to_vec(), "application/json")
+            });
+            *port_cell.lock().unwrap() = port;
+            let r = send_attachment(&relay_at(port), &reqwest::Client::new(), &payload(json!({}))).await;
+            match want {
+                Some(w) => assert_eq!(r.unwrap_err(), w),
+                None => assert_eq!(r.unwrap()["attachment_id"], ID),
+            }
+            assert_eq!(log.lock().unwrap().iter().filter(|q| q.path.contains("action=send")).count(), 1, "不重寄");
+        }
     }
 
     #[tokio::test]

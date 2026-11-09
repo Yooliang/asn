@@ -559,3 +559,58 @@ fn 含中文的名字_本機沒有_照舊報格式不對_結束碼_1() {
     assert!(err.contains("成員代號格式不對") && err.contains("這台（T）也沒有"), "{err}");
     assert!(b.of("send").is_empty());
 }
+
+// ------------------------------------------------------------------ #1205 信已寄出但附件不齊
+
+/// 假後台：send 回應帶 attachments_missing（missing 給附件順序的第幾個，1 起算；空＝帶空陣列；None＝舊後台不帶這欄）
+fn backend_missing(missing: Option<Vec<u32>>) -> Fake {
+    Fake::start(move |req: &Req, port: u16| {
+        if req.method == "PUT" {
+            return Resp::bytes(200, vec![]);
+        }
+        match req.action().as_str() {
+            "attach_init" => {
+                let n = req.json()["name"].as_str().map(|s| if s == "a.pdf" { 1 } else { 2 }).unwrap_or(1);
+                Resp::ok(json!({"id": id1(n), "upload_url": format!("http://127.0.0.1:{port}/upload/{n}?token=SECRET-SIGNED")}))
+            }
+            "attach_commit" => Resp::ok(json!({"ok": true})),
+            "send" => match &missing {
+                Some(m) => Resp::ok(json!({"id": NEW_ID, "attachments_missing": m.iter().map(|n| id1(*n)).collect::<Vec<_>>()})),
+                None => Resp::ok(json!({"id": NEW_ID})),
+            },
+            _ => Resp::ok(json!({"id": NEW_ID})),
+        }
+    })
+}
+
+#[test]
+fn 信已寄出但附件不齊_stderr_說缺哪個檔_結束碼_5_只_send_一次() {
+    let b = backend_missing(Some(vec![2]));
+    let f = fx(&b.url(), Some("T-視窗甲"));
+    let (p, w) = (put_file(&f.home, "a.pdf", &pdf(100)), put_file(&f.home, "b.webp", &webp(64)));
+    let (c, out, err) = go(&f.env, &["send", "--to", "PC1", "--file", &p, "--file", &w, "--no-reply"], "");
+    assert_eq!(c, 5, "{err}");
+    assert!(out.starts_with("sent id="), "信照樣算寄出：{out}");
+    assert!(err.contains("信已寄出，但 b.webp 沒附上，請再寄一次這個附件"), "{err}");
+    assert_eq!(b.of("send").len(), 1, "不重寄");
+}
+
+#[test]
+fn 兩個附件都缺_說這兩個_舊後台沒回欄位或回空陣列_照舊_0() {
+    let f = |b: &Fake| fx(&b.url(), Some("T-視窗甲"));
+    let b = backend_missing(Some(vec![1, 2]));
+    let fx1 = f(&b);
+    let (p, w) = (put_file(&fx1.home, "a.pdf", &pdf(100)), put_file(&fx1.home, "b.webp", &webp(64)));
+    let args = ["send", "--to", "PC1", "--file", &p, "--file", &w, "--no-reply"];
+    let (c, _, err) = go(&fx1.env, &args, "");
+    assert_eq!(c, 5);
+    assert!(err.contains("a.pdf、b.webp 沒附上，請再寄一次這兩個附件"), "{err}");
+    for m in [None, Some(vec![])] {
+        let b = backend_missing(m);
+        let fx2 = f(&b);
+        let (p, w) = (put_file(&fx2.home, "a.pdf", &pdf(100)), put_file(&fx2.home, "b.webp", &webp(64)));
+        let (c, _, err) = go(&fx2.env, &["send", "--to", "PC1", "--file", &p, "--file", &w, "--no-reply"], "");
+        assert_eq!(c, 0, "{err}");
+        assert!(!err.contains("沒附上"), "{err}");
+    }
+}
