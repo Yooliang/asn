@@ -2469,6 +2469,11 @@ fn menu_keys(cursor: u32, n: u32) -> Result<Vec<AnswerKey>, String> {
     if downs > MAX_MENU_DOWN {
         return Err("往下的步數超過上限，沒有送出".into());
     }
+    // 往上原本沒有獨立的上限：cursor 很大時會先配置同樣多的鍵，之後才被 encode_keys 以「按鍵序列太長」擋下。
+    // 總長超過上限的序列一定會被 encode_keys 拒絕，所以這裡提早用同一句話拒絕：使用者看到的結果不變，只是不再先配置巨大的陣列
+    if u64::from(ups) + u64::from(downs) + 1 > MAX_ANSWER_KEYS as u64 {
+        return Err("按鍵序列太長，沒有送出".into());
+    }
     let mut keys = Vec::new();
     for _ in 0..ups {
         keys.push(AnswerKey::Up);

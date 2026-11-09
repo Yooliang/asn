@@ -464,10 +464,10 @@ fn 答案按鍵_選單游標與目標表() {
     out.insert("cursor=1 n=21".into(), keys_out(menu_keys(1, 21)));
     out.insert("cursor=1 n=22".into(), keys_out(menu_keys(1, 22)));
     out.insert("cursor=33 n=1".into(), keys_out(menu_keys(33, 1)));
-    // 注意：menu_keys 往下有上限（MAX_MENU_DOWN），但往上（cursor 大於 n）沒有上限——cursor 很大時會一次配置同等數量的鍵，
-    // 例如 cursor=u32::MAX、n=1 會要配置約 43 億個元素而讓程序中止。實際上 cursor 來自畫面分類出的選單項目，到不了這麼大，
-    // 所以這裡不鎖那種輸入（會讓測試程序崩潰），只記在 PR 說明；cursor=1000 代表「很大但配得起來」的現況。
+    // 往上（cursor 大於 n）：序列總長超過上限（MAX_ANSWER_KEYS）一律提早拒絕，cursor 再大也不會先配置巨大的陣列
+    // （修正前 cursor=u32::MAX、n=1 會要配置約 43 億個元素而讓程序中止，所以 G1 當時沒有鎖這種輸入）
     out.insert("cursor=1000 n=1".into(), keys_out(menu_keys(1000, 1)));
+    out.insert("cursor=u32max n=1".into(), keys_out(menu_keys(u32::MAX, 1)));
     out.insert("cursor=1 n=u32max".into(), keys_out(menu_keys(1, u32::MAX)));
     golden!("term/menu_keys.json", &to_golden(&out));
 }
