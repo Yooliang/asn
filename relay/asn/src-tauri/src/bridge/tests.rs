@@ -80,6 +80,10 @@ struct FState {
     /// 開了才認得 bridge_notice（預設 404，舊行為）
     bridge_notice_on: bool,
     bridge_notices: Vec<Value>,
+    /// 接下來 N 次 bridge_notice 回 503（模擬通知寄不出去）
+    notice_fail_n: usize,
+    /// 開了：send 收下之後回應只送一半就斷線（回應讀到一半斷了）
+    send_truncate: bool,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -142,6 +146,11 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         let close = st.lock().unwrap().close_each || head.to_lowercase().lines().any(|l| l.trim() == "connection: close");
         let (code, out, action) = route(&st, &head, body);
         let text = out.to_string();
+        if action == "send" && st.lock().unwrap().send_truncate {
+            // 只送一半的內文就斷線：用戶端讀回應時出錯
+            let _ = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", text.len() + 20, text);
+            return;
+        }
         let conn = if close { "close" } else { "keep-alive" };
         if let Err(e) = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: {conn}\r\n\r\n{text}", text.len()) {
             eprintln!("[假後端] 寫回應失敗 action={action}：{e}（{:?}）", e.kind());
@@ -189,6 +198,10 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
         }
         "send" if s.send_attach_bad && body["attachment_ids"].as_array().is_some_and(|a| !a.is_empty()) => (400, json!({"error": "bad_attachment"})),
         "send" if s.send_dedupe && body["client_id"].as_str().is_some_and(|c| s.seen_cids.iter().any(|x| x == c)) => (200, json!({"id": uid(900), "duplicate": true})),
+        "bridge_notice" if s.notice_fail_n > 0 => {
+            s.notice_fail_n -= 1;
+            (503, json!({"error": "gateway"}))
+        }
         "bridge_notice" if s.bridge_notice_on => {
             s.bridge_notices.push(body);
             (200, json!({"ok": true, "notify": "sent"}))

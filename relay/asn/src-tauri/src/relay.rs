@@ -331,13 +331,14 @@ pub(crate) fn with_client_id(name: &str, body: Option<Value>) -> (Option<Value>,
 }
 
 /// api 回的錯誤字串是不是「暫時性、換個時間用同一個 client_id 再寄是安全的」：連線失敗（連線被拒、逾時、讀回應斷掉）
-/// 與閘道的 502／503／504。其他 HTTP 錯誤（4xx、500）後台是明確回了，重寄也一樣（#1135 回信寄件匣用）。
+/// 與 HTTP 408（請求逾時）、429（限流）、500（後台一時出錯）、502／503／504（閘道）。這些重寄有機會成功，而且帶同一個 client_id 不會重複。
+/// 其他 4xx 後台是明確拒絕了，重寄也一樣（#1135 回信寄件匣用；目前只有寄件匣呼叫它）。
 /// 錯誤字串格式見 api_inner：`<動作> 連線失敗：…` 與 `<動作> HTTP <碼> <錯誤碼>`
 pub(crate) fn is_transient_api_err(e: &str) -> bool {
     if e.contains(" 連線失敗：") {
         return true;
     }
-    matches!(e.split(" HTTP ").nth(1).and_then(|r| r.split_whitespace().next()), Some("502" | "503" | "504"))
+    matches!(e.split(" HTTP ").nth(1).and_then(|r| r.split_whitespace().next()), Some("408" | "429" | "500" | "502" | "503" | "504"))
 }
 
 /// 連線失敗的說明：錯誤種類＋完整的原因鏈（reqwest 的 source() 一路往下）。只有「error sending request」分不出
@@ -553,6 +554,9 @@ impl Relay {
                             tokio::time::sleep(Duration::from_millis(wait.unwrap_or(0))).await;
                             attempt += 1;
                         }
+                        // 重試用盡仍讀不到回應：帶 client_id 的寄信不能當成功（後台有沒有收下不知道），回暫時性錯誤，
+                        // 由呼叫端用同一個 client_id 再寄（後台去重）。其餘動作維持原行為
+                        Err(_) if idem => return Err(format!("{name} 連線失敗：讀回應中斷")),
                         Err(_) => break (status, String::new()),
                     }
                 }
@@ -1463,6 +1467,52 @@ mod tests {
         let (b1, _) = with_client_id("send", Some(json!({"body": "y"})));
         let (b2, _) = with_client_id("send", Some(json!({"body": "y"})));
         assert_ne!(b1.unwrap()["client_id"], b2.unwrap()["client_id"]);
+    }
+
+    /// 假後端：每個連線都宣告 content-length 11 卻只送 4 個位元組就斷線（回應讀到一半斷了），記下連線數
+    fn truncating_server(port: u16) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h2 = hits.clone();
+        let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { break };
+                h2.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 8192];
+                let _ = std::io::Read::read(&mut c, &mut buf);
+                let _ = std::io::Write::write_all(&mut c, b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"id");
+            }
+        });
+        hits
+    }
+
+    #[tokio::test]
+    async fn 寄信_回應一直讀不完_重試用盡回暫時性錯誤_不當成功() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let hits = truncating_server(port);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        let e = r.api("send", Some(json!({"to_node": "x", "body": "y"}))).await.unwrap_err();
+        assert!(is_transient_api_err(&e), "{e}");
+        assert_eq!(hits.load(Ordering::SeqCst), 4, "第一次加三次重試");
+    }
+
+    #[tokio::test]
+    async fn 其他動作_回應一直讀不完_維持原行為回_Ok_Null() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let hits = truncating_server(port);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        assert_eq!(r.api("ack", Some(json!({"ids": []}))).await, Ok(Value::Null));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn 暫時性錯誤_含_408_429_500() {
+        for e in ["send HTTP 408", "send HTTP 429 rate_limited", "send HTTP 500 internal", "send HTTP 502", "send 連線失敗：讀回應中斷"] {
+            assert!(is_transient_api_err(e), "{e}");
+        }
+        for e in ["send HTTP 400 bad_attachment", "send HTTP 422 x", "send HTTP 501"] {
+            assert!(!is_transient_api_err(e), "{e}");
+        }
     }
 
     #[tokio::test]

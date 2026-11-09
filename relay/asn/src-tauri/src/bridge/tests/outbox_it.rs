@@ -207,3 +207,143 @@ async fn 超過上限時最舊那封信的片段一起丟_只通知一次() {
     assert_eq!(n.len(), 1, "同一封信只通知一次");
     assert_eq!(n[0]["reply_to"], uid(5000));
 }
+
+#[tokio::test]
+async fn 壞檔改名成_bad_之後仍可正常運作() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), "{ 這不是 json").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    assert!(c2.outbox_ids().is_empty(), "壞檔不當成有信");
+    assert!(h.work.path().join("reply-outbox.json.bad").exists(), "壞檔留著");
+    // 之後照常存、照常重寄
+    c2.outbox_test_push(&uid(1), vec![], T0, T0);
+    assert_eq!(file_items(&h), 1);
+    c2.tick(T0 + 10).await;
+    assert_eq!(h.fr.sent().len(), 1);
+    assert!(c2.outbox_ids().is_empty() && file_items(&h) == 0);
+}
+
+#[tokio::test]
+async fn 寫檔失敗_回_Failed_走原流程通知視窗() {
+    let mut h = rig().await;
+    // 存檔路徑被同名資料夾占住：先寫暫存檔再改名會失敗
+    std::fs::create_dir(outbox_file(&h)).unwrap();
+    set_fail(&h, 5, 503);
+    let before = h.said().len();
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert!(h.core.outbox_ids().is_empty(), "沒存進去");
+    assert!(h.said()[before..].iter().any(|s| s.contains("你剛才的回信沒有寄出去")), "照原流程叫視窗自己處理");
+}
+
+#[tokio::test]
+async fn 分段_前段存進去_後段寫不進去_整封信放棄並通知_不當成失敗() {
+    let mut h = rig().await;
+    h.fr.st.lock().unwrap().bridge_notice_on = true;
+    set_fail(&h, 1, 503);
+    reply(&mut h, "第一段", T0 + 3_000).await;
+    assert_eq!(h.core.outbox_ids().len(), 1);
+    // 之後存檔寫不進去
+    std::fs::remove_file(outbox_file(&h)).unwrap();
+    std::fs::create_dir(outbox_file(&h)).unwrap();
+    let before = h.said().len();
+    reply(&mut h, "第二段", T0 + 3_100).await;
+    assert!(h.core.log.has("later part cannot be stored"));
+    let n = h.fr.st.lock().unwrap().bridge_notices.clone();
+    assert_eq!(n.len(), 1, "整封信只通知一次：{n:?}");
+    assert_eq!(n[0]["reply_to"], uid(1));
+    assert!(h.core.outbox_ids().is_empty(), "通知送達後移除");
+    assert!(!h.said()[before..].iter().any(|s| s.contains("你剛才的回信沒有寄出去")), "回 Stored：不走寄送失敗流程，原信照常 ack，也不會叫視窗重答");
+    assert!(h.said()[before..].iter().any(|s| s.contains("已放棄")));
+}
+
+#[tokio::test]
+async fn 斷網積壓_一輪只嘗試一筆就停() {
+    let mut h = rig().await;
+    for n in 0..30 {
+        h.core.outbox_test_push(&uid(5000 + n), vec![], T0, T0);
+    }
+    set_fail(&h, 1000, 503);
+    h.core.tick(T0 + 10).await;
+    assert_eq!(attempts(&h).len(), 1, "暫時性失敗就結束這一輪");
+    assert_eq!(h.core.outbox_ids().len(), 30);
+}
+
+#[tokio::test]
+async fn 全部成功時一輪最多_10_筆() {
+    let mut h = rig().await;
+    for n in 0..30 {
+        h.core.outbox_test_push(&uid(5000 + n), vec![], T0, T0);
+    }
+    h.core.tick(T0 + 10).await;
+    assert_eq!(h.fr.sent().len(), 10);
+    assert_eq!(h.core.outbox_ids().len(), 20);
+    h.core.tick(T0 + 20).await;
+    assert_eq!(h.fr.sent().len(), 20);
+}
+
+#[tokio::test]
+async fn 放棄通知寄不出去_保留待通知_下一輪送達才移除() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 1;
+    }
+    set_fail(&h, 100, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    let before = h.said().len();
+    let t1 = T0 + 3_000 + 86_400_000 + 1_000;
+    h.core.tick(t1).await;
+    assert_eq!(h.core.outbox_pending_notices(), 1, "通知沒送達：保留待通知");
+    assert_eq!(file_items(&h), 1, "存檔也留著");
+    assert!(h.fr.st.lock().unwrap().bridge_notices.is_empty());
+    assert!(!h.said()[before..].iter().any(|s| s.contains("已放棄")), "通知沒送達前不告訴視窗");
+    h.core.tick(t1 + 20_000).await;
+    assert!(h.core.outbox_ids().is_empty() && file_items(&h) == 0);
+    let n = h.fr.st.lock().unwrap().bridge_notices.clone();
+    assert_eq!(n.len(), 1);
+    assert!(!n[0]["body"].as_str().unwrap().contains("機密內文"));
+    assert_eq!(h.said()[before..].iter().filter(|s| s.contains("已放棄")).count(), 1, "視窗只收到一次");
+}
+
+#[tokio::test]
+async fn 超過上限被淘汰的信_通知寄不出去時待通知項保留_不占待送上限() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 1;
+    }
+    for n in 0..200 {
+        h.core.outbox_test_push(&uid(5000 + n), vec![], T0, T0 + 1_000_000);
+    }
+    set_fail(&h, 5, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert_eq!(h.core.outbox_pending_notices(), 1);
+    assert_eq!(h.core.outbox_ids().len(), 201, "200 筆待送＋1 筆待通知");
+    assert!(h.core.outbox_reply_tos().contains(&uid(5000)), "最舊那封以待通知項留著");
+    assert_eq!(file_items(&h), 201);
+}
+
+#[tokio::test]
+async fn 暫時性的_408_429_500_進寄件匣() {
+    for code in [408u16, 429, 500] {
+        let mut h = rig().await;
+        set_fail(&h, 1, code);
+        reply(&mut h, SECRET, T0 + 3_000).await;
+        assert_eq!(h.core.outbox_ids().len(), 1, "HTTP {code} 要進寄件匣");
+        assert_eq!(file_items(&h), 1);
+    }
+}
+
+#[tokio::test]
+async fn 寄信時讀回應中斷_重試用盡_進寄件匣_不當成已寄出() {
+    let mut h = rig().await;
+    h.core.relay = Arc::new(Relay::new(h.fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()).with_connect_retry(&[1, 1, 1]));
+    h.fr.st.lock().unwrap().send_truncate = true;
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert_eq!(h.core.outbox_ids().len(), 1, "回信進了寄件匣");
+    h.fr.st.lock().unwrap().send_truncate = false;
+    h.core.tick(T0 + 3_000 + 15_000).await;
+    assert!(h.core.outbox_ids().is_empty(), "恢復後用同一個 client_id 重寄成功");
+}

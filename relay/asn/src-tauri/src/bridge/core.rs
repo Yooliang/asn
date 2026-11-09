@@ -2192,7 +2192,9 @@ impl Core {
             self.log.line(&format!("reply from {from} id={} not sent: an earlier part failed (mail stays in inbox)", o.id));
             return;
         }
-        // 回信走寄件匣（#1135）：暫時寄不出去＝已保管（Stored），不算失敗，原信照常 ack；後台明確拒絕或寄件匣寫不進去才算失敗
+        // 回信走寄件匣（#1135）：暫時寄不出去＝已保管（Stored），不算失敗，原信照常 ack；後台明確拒絕或寄件匣寫不進去才算失敗。
+        // 例外：同一封信前段已進寄件匣、後段存不進去時，send_reply 內部把整封信標記放棄並通知，仍回 Stored（不回 Failed）——
+        // 回 Failed 會讓原信留在信箱重新投遞、視窗用新的 client_id 重答，前段就重複寄了
         let outcome = self.send_reply(from, &o, &body, expects).await;
         let failed = matches!(outcome, outbox::ReplyOutcome::Failed);
         let ok: &str = match outcome { outbox::ReplyOutcome::Sent => "true", outbox::ReplyOutcome::Stored => "queued", outbox::ReplyOutcome::Failed => "false" };
