@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub(crate) mod merge;
+pub(crate) mod state;
 
 pub const MAX_ACCOUNTS: usize = 20;
 const MAX_INPUT: usize = 1_000_000;
@@ -201,14 +202,43 @@ pub fn load_all(home: &Path) -> HashMap<String, Quota> {
     out
 }
 
-/// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log。
+/// 這次沒收的原因寫進 log：同一條同一個原因代碼連續發生只記一次，收進新值或原因換了才再記（#1184）
+fn log_changes(home: &Path, st: &mut state::State, m: &merge::Merged, now_ms: i64) {
+    let mut fresh = vec![];
+    for s in &m.skipped {
+        let slot = match s.kind {
+            merge::Kind::Five => &mut st.logged_five,
+            merge::Kind::Week => &mut st.logged_week,
+        };
+        if slot.as_deref() != Some(s.code) {
+            *slot = Some(s.code.to_string());
+            fresh.push(s.clone());
+        }
+    }
+    if m.took_five {
+        st.logged_five = None;
+    }
+    if m.took_week {
+        st.logged_week = None;
+    }
+    merge::log_skipped(home, &fresh, now_ms);
+}
+
+/// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log（同一原因只記一次）。
+/// `reset_base`＝登入身分剛換過：先丟掉這個 email 舊的紀錄，這次照新帳號的數字收。
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
-fn record(home: &Path, email: &str, p: Parsed, now_ms: i64) -> Result<bool, String> {
+fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
-    let (merged, skipped) = merge::merge(all.get(email), &p, now_ms);
-    merge::log_skipped(home, &skipped, now_ms);
-    let Some(q) = merged else { return Ok(false) };
-    all.insert(email.to_string(), q);
+    let dropped = reset_base && all.remove(email).is_some();
+    let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
+    st.set_pending_week(m.pending_week);
+    log_changes(home, st, &m, now_ms);
+    let took = m.quota.is_some();
+    if let Some(q) = m.quota {
+        all.insert(email.to_string(), q);
+    } else if !dropped {
+        return Ok(false);
+    }
     if all.len() > MAX_ACCOUNTS {
         let mut by_age: Vec<(String, String)> = all.iter().map(|(k, q)| (q.at.clone(), k.clone())).collect();
         by_age.sort();
@@ -219,18 +249,33 @@ fn record(home: &Path, email: &str, p: Parsed, now_ms: i64) -> Result<bool, Stri
     }
     let text = serde_json::to_string(&all).map_err(|e| e.to_string())?;
     crate::claude_json::write_atomic(&quota_path(home), text.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(true)
+    Ok(took)
 }
 
 /// 狀態列掛鉤：把輸入裡的額度記在目前登入的帳號底下。有記下回 true；
 /// 沒登入、沒額度、輸入太大、兩條都判斷成不收（舊數字或別的帳號）或寫檔失敗回 false。
+/// 登入身分（email 與 accountUuid）跟上次看到的不一樣就重設該帳號的基準（#1184）；
+/// 讀不到身分＝沒登入，照舊什麼都不記。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
-    let Some(email) = claude_accounts::current_email(home) else { return false };
-    record(home, &email, parsed, now_ms).unwrap_or(false)
+    let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
+    let before = state::load(home);
+    let ident = format!("{email}|{uuid}");
+    let mut st = before.clone();
+    let mut reset_base = false;
+    if st.identity.as_deref() != Some(ident.as_str()) {
+        // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
+        reset_base = st.identity.is_some();
+        st = state::State { identity: Some(ident), ..state::State::default() };
+    }
+    let r = record(home, &email, parsed, &mut st, reset_base, now_ms).unwrap_or(false);
+    if st != before {
+        state::save(home, &st);
+    }
+    r
 }
 
 impl Quota {
@@ -423,7 +468,7 @@ mod tests {
             assert!(!body.contains(&b), "額度模組不該出現 {b}");
         }
         // 只靠 .claude.json 的 email 欄位判斷目前帳號
-        assert!(body.contains("current_email"));
+        assert!(body.contains("current_identity"));
     }
 
     #[test]

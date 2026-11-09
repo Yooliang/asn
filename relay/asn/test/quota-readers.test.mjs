@@ -225,3 +225,13 @@ test('自動換新的開關旁寫明風險：開之前與開著都看得到', ()
   const line = t.slice(t.lastIndexOf('<small', risk), risk)
   assert.doesNotMatch(line, /v-if/, '不管開關狀態都顯示')
 })
+
+test('登入過期的原因：後端組好完整一句，設定頁原樣畫出，額外帳號那行不再重複加資料夾名（#1184）', () => {
+  assert.match(SettingsPanel.template, /v-for="d in st\.quotaReaders\.extraDirs\.filter\(x => x\.status\)" :key="d\.name">\{\{ d\.status \}\}</)
+  assert.doesNotMatch(SettingsPanel.template, /\{\{ d\.name \}\}：/)
+  const r = normalizeReaders({ ...off, extra_claude_dirs: [{ name: 'a', status: 'Claude（a）登入已過期，請重新登入這個帳號' }] })
+  assert.deepEqual(r.extraDirs, [{ name: 'a', status: 'Claude（a）登入已過期，請重新登入這個帳號' }])
+  const g = normalizeReaders({ ...off, status: { grok: 'Grok 登入已過期，請在這台開一次 Grok 或重新登入', agy: 'Gemini 登入已過期，請在這台開一次 agy 或重新登入' } })
+  assert.match(g.status.grok, /^Grok 登入已過期/)
+  assert.match(g.status.agy, /^Gemini 登入已過期/)
+})

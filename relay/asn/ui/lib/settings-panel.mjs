@@ -235,7 +235,7 @@ export const SettingsPanel = {
               <label class="chk"><input type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.extra }}</span></label>
               <small>{{ QUOTA_TEXT.extraNote }} {{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}</small>
               <template v-if="st.quotaReaders.extra">
-                <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.name }}：{{ d.status }}</small>
+                <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.status }}</small>
                 <small>{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshActive : QUOTA_TEXT.refreshNote }}</small>
                 <small class="acct-warn">{{ QUOTA_TEXT.refreshRisk }}</small>
                 <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>

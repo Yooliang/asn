@@ -406,6 +406,12 @@ pub fn current_email(home: &Path) -> Option<String> {
     email_of_fragment(&frag)
 }
 
+/// 目前登入帳號的身分：(正規化 email, accountUuid)，只看 .claude.json 的 oauthAccount，不碰任何權杖檔；沒登入回 None（#1184）
+pub fn current_identity(home: &Path) -> Option<(String, String)> {
+    let (frag, uuid) = current_fragment(home).ok().flatten()?;
+    Some((email_of_fragment(&frag)?, uuid))
+}
+
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None
 pub fn current_login(home: &Path) -> Option<AccountInfo> {
     let (frag, uuid) = current_fragment(home).ok().flatten()?;

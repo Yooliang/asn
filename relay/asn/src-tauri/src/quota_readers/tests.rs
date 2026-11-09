@@ -409,3 +409,29 @@ fn extra_claude_default_off_in_view() {
     assert_eq!((v["extra_claude"].as_bool(), v["extra_claude_refresh"].as_bool()), (Some(false), Some(false)));
     assert_eq!(v["extra_claude_dirs"], json!([]));
 }
+
+#[test]
+fn 登入失效時畫面文字各家一句_不含細節_log_文字不變() {
+    let a = Failure::Auth;
+    assert_eq!(a.user_text(Source::Grok), "Grok 登入已過期，請在這台開一次 Grok 或重新登入");
+    assert_eq!(a.user_text(Source::Gemini), "Gemini 登入已過期，請在這台開一次 agy 或重新登入");
+    assert_eq!(a.user_text(Source::MiniMax), "MiniMax 登入已過期，請重新輸入 key");
+    assert_eq!(a.user_text(Source::ClaudeExtra("工作")), "Claude（工作）登入已過期，請重新登入這個帳號");
+    for who in [Source::Grok, Source::Gemini, Source::MiniMax, Source::ClaudeExtra("工作")] {
+        let t = a.user_text(who);
+        for bad in ["token", "Token", "401", "403", "HTTP", "\\", "/"] {
+            assert!(!t.contains(bad), "{t} 不該含 {bad}");
+        }
+    }
+    assert_eq!(a.text(), "登入失效，要重新登入", "log 用的文字不變");
+}
+
+#[test]
+fn 其他原因畫面文字照舊_額外帳號前面帶名字() {
+    let o = Failure::Other("連線失敗".into());
+    assert_eq!(o.user_text(Source::Grok), "連線失敗");
+    assert_eq!(o.user_text(Source::Gemini), "連線失敗");
+    assert_eq!(o.user_text(Source::MiniMax), "連線失敗");
+    assert_eq!(o.user_text(Source::ClaudeExtra("工作")), "Claude（工作）：連線失敗");
+    assert_eq!(o.text(), "連線失敗");
+}
