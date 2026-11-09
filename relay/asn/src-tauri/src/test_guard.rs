@@ -11,7 +11,26 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// 測試用 mux 上層資料夾：`<暫存>/asn-tm-<pid>/<序號>`（不先建立；要寫的人自己 create_dir_all）。每次呼叫給不同的，測試之間不共用 pid 檔與紀錄
 pub fn mux_base() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
-    std::env::temp_dir().join(format!("asn-tm-{}", std::process::id())).join(N.fetch_add(1, Ordering::SeqCst).to_string())
+    static CLEAN: std::sync::Once = std::sync::Once::new();
+    // 測試行程結束時刪掉自己這個 pid 的那一個暫存資料夾（只刪自己的，不掃別的；刪不掉就算了）
+    CLEAN.call_once(|| {
+        extern "C" fn clean_own() {
+            let _ = std::fs::remove_dir_all(own_dir());
+        }
+        extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+        }
+        // SAFETY：C 執行環境的 atexit，只登記一個不 panic、不碰其他狀態的函式；只在測試編譯
+        unsafe {
+            atexit(clean_own);
+        }
+    });
+    own_dir().join(N.fetch_add(1, Ordering::SeqCst).to_string())
+}
+
+/// 這個測試行程自己的暫存 mux 上層資料夾：`<暫存>/asn-tm-<pid>`
+fn own_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("asn-tm-{}", std::process::id()))
 }
 
 /// 路徑拆成一段一段（小寫）。`/` 和 `\` 都當分隔：Linux 上 `Path` 不認 `\`，Windows 形狀的路徑也要拆得開
@@ -110,18 +129,38 @@ mod tests {
     /// 禁用的字串。測試要用 mux 資料夾請走 `set_mux_base`／`term::live_for_test`／`test_guard::mux_base`
     const FORBIDDEN: &[&str] = &["term::live(", "default_base(", "RealRunner"];
 
-    /// 例外清單：(檔案結尾, 禁用字串, 理由)。每一條都要有理由；新增前先想能不能改用假的 Runner
-    const ALLOW: &[(&str, &str, &str)] = &[
+    /// 例外放行的範圍：整個測試區，或只放行出現在 `#[ignore]` 測試函式裡的（理由寫「#[ignore] 的真機測試」就要用後者）
+    #[derive(PartialEq)]
+    enum Scope {
+        File,
+        IgnoredFnsOnly,
+    }
+
+    /// 例外清單：(檔案結尾, 禁用字串, 放行範圍, 理由)。每一條都要有理由；新增前先想能不能改用假的 Runner
+    const ALLOW: &[(&str, &str, Scope, &str)] = &[
         // claude_mod／pi_setup 各自有同名但無關的 RealRunner（只跑 claude／pi 的小指令，與 mux 無關）
-        ("src/claude_mod.rs", "RealRunner", "claude_mod 自己的 RealRunner：只啟動測試自備的暫存腳本／逾時行為"),
-        ("src/launch/pi_setup.rs", "RealRunner", "pi_setup 自己的 RealRunner：#[ignore] 的真機測試，不碰 mux"),
-        ("src/launch/config.rs", "RealRunner", "只做原始碼字串檢查（assert 內文），不執行"),
+        ("src/claude_mod.rs", "RealRunner", Scope::File, "claude_mod 自己的 RealRunner：只啟動測試自備的暫存腳本／逾時行為"),
+        ("src/launch/pi_setup.rs", "RealRunner", Scope::File, "pi_setup 自己的 RealRunner（同名、與 wezterm 無關）：不碰 mux"),
+        ("src/launch/config.rs", "RealRunner", Scope::File, "只做原始碼字串檢查（assert 內文），不執行"),
         // wezterm 真機測試：全部 #[ignore] 或在沒有 WezTerm 的機器上直接略過
-        ("src/launch/wezterm.rs", "RealRunner", "wezterm 的 Runner 實作與它自己的真程序測試（只啟動測試自備的暫存程式）"),
-        ("src/launch/term.rs", "RealRunner", "#[ignore] 的真機測試：用 TermService::fixed 指到暫存資料夾與獨立的 WezTerm，mux 資料夾已注入暫存位置"),
-        ("src/launch/term_live_mux.rs", "RealRunner", "#[ignore] 的真 WezTerm 測試：set_mux_base 注入暫存位置"),
-        ("src/launch/mux/tests.rs", "RealRunner", "測試自己的暫存 mux（paths 用暫存資料夾）；真 WezTerm 的整合測試 #[ignore]，其餘跑無害的程序"),
+        ("src/launch/wezterm.rs", "RealRunner", Scope::File, "wezterm 的 Runner 實作與它自己的真程序測試（只啟動測試自備的暫存程式）"),
+        ("src/launch/term.rs", "RealRunner", Scope::IgnoredFnsOnly, "#[ignore] 的真機測試：用 TermService::fixed 指到暫存資料夾與獨立的 WezTerm，mux 資料夾已注入暫存位置"),
+        ("src/launch/term_live_mux.rs", "RealRunner", Scope::File, "整份是 #[ignore] 的真 WezTerm 測試：set_mux_base 注入暫存位置"),
+        ("src/launch/mux/tests.rs", "RealRunner", Scope::File, "測試自己的暫存 mux（paths 用暫存資料夾）；真 WezTerm 的整合測試 #[ignore]，其餘跑無害的程序"),
     ];
+
+    /// `tok` 每一次出現都在 `#[ignore]` 的測試函式裡嗎（往回找最近的 `fn `，它上面幾行的屬性要有 `#[ignore`）
+    fn only_in_ignored_fns(region: &str, tok: &str) -> bool {
+        region.match_indices(tok).all(|(i, _)| {
+            let before = &region[..i];
+            let Some(f) = before.rfind("fn ") else { return false };
+            // fn 那一行（可能前面有 async／pub）整行丟掉，只看它上面的屬性行
+            let head = &before[..f];
+            let head = &head[..head.rfind('\n').unwrap_or(0)];
+            // 函式前面連續的屬性行（#[...]）裡要有 #[ignore
+            head.lines().rev().map(str::trim).skip_while(|l| l.is_empty()).take_while(|l| l.starts_with("#[") || l.starts_with("//")).any(|l| l.starts_with("#[ignore"))
+        })
+    }
 
     fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -135,24 +174,133 @@ mod tests {
         }
     }
 
-    /// 檔案裡屬於測試的那段文字：測試專用檔整份；其他檔從 `#[cfg(test)]` 後面接 `mod` 的那行起到檔尾
-    fn test_region(rel: &str, text: &str) -> String {
+    /// 用 `#[cfg(test)] mod x;` 宣告的測試模組檔（相對路徑，用 / 分隔）：宣告在 a/b.rs 就是 a/b/x.rs 或 a/b/x/mod.rs；
+    /// 宣告在 mod.rs／lib.rs／main.rs 就是同一層的 x.rs 或 x/mod.rs
+    fn declared_test_mods(files: &[(String, String)]) -> std::collections::BTreeSet<String> {
+        let mut out = std::collections::BTreeSet::new();
+        for (rel, text) in files {
+            let t = text.replace("\r\n", "\n");
+            let lines: Vec<&str> = t.split('\n').collect();
+            for (i, l) in lines.iter().enumerate() {
+                if l.trim() != "#[cfg(test)]" {
+                    continue;
+                }
+                let Some(n) = lines.get(i + 1).map(|n| n.trim()) else { continue };
+                let decl = n.strip_prefix("pub ").unwrap_or(n);
+                let Some(name) = decl.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')).map(str::trim) else { continue };
+                let (dir, file) = rel.rsplit_once('/').unwrap_or(("", rel.as_str()));
+                let stem = file.trim_end_matches(".rs");
+                let base = if ["mod", "lib", "main"].contains(&stem) { dir.to_string() } else { format!("{dir}/{stem}") };
+                out.insert(format!("{base}/{name}.rs"));
+                out.insert(format!("{base}/{name}/mod.rs"));
+            }
+        }
+        out
+    }
+
+    /// 檔案裡屬於測試的那段文字：測試專用檔整份（tests/ 底下、路徑有 /tests/ 的、用 `#[cfg(test)] mod x;` 宣告的、
+    /// 名為 tests.rs／testsupport.rs／term_live_mux.rs 的）；其他檔從 `#[cfg(test)]` 後面接 inline `mod` 的那行起到檔尾
+    fn test_region(rel: &str, text: &str, test_mods: &std::collections::BTreeSet<String>) -> String {
         let name = rel.rsplit('/').next().unwrap_or(rel);
-        if rel.starts_with("tests/") || ["tests.rs", "testsupport.rs", "term_live_mux.rs"].contains(&name) {
+        if rel.starts_with("tests/") || rel.contains("/tests/") || test_mods.contains(rel) || ["tests.rs", "testsupport.rs", "term_live_mux.rs"].contains(&name) {
             return text.to_string();
         }
+        // 每一個 `#[cfg(test)]` 接 inline `mod x {` 的區塊，只取到它配對的 `}` 為止（後面的正式程式不算）
         let t = text.replace("\r\n", "\n");
-        let mut from = None;
+        let mut out = String::new();
         let mut off = 0;
         let lines: Vec<&str> = t.split('\n').collect();
         for (i, l) in lines.iter().enumerate() {
             if l.trim() == "#[cfg(test)]" && lines.get(i + 1).is_some_and(|n| (n.trim_start().starts_with("mod ") || n.trim_start().starts_with("pub mod ")) && n.trim_end().ends_with('{')) {
-                from = Some(off);
-                break;
+                let end = block_end(&t, off + l.len() + 1).unwrap_or(t.len());
+                out.push_str(&t[off..end]);
+                out.push('\n');
             }
             off += l.len() + 1;
         }
-        from.map(|f| t[f..].to_string()).unwrap_or_default()
+        out
+    }
+
+    /// 從 `from` 之後第一個 `{` 起，找到配對的 `}`，回它後面的位置。略過字串、原始字串、字元與註解裡的括號
+    fn block_end(t: &str, from: usize) -> Option<usize> {
+        let b = t.as_bytes();
+        let mut i = from + t[from..].find('{')?;
+        let mut depth = 0i32;
+        while i < b.len() {
+            match b[i] {
+                b'/' if b.get(i + 1) == Some(&b'/') => {
+                    i = t[i..].find('\n').map_or(b.len(), |n| i + n);
+                    continue;
+                }
+                b'/' if b.get(i + 1) == Some(&b'*') => {
+                    i = t[i + 2..].find("*/").map_or(b.len(), |n| i + 2 + n + 2);
+                    continue;
+                }
+                b'r' if (b.get(i + 1) == Some(&b'"') || b.get(i + 1) == Some(&b'#')) && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) => {
+                    let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+                    if b.get(i + 1 + hashes) == Some(&b'"') {
+                        let close = format!("\"{}", "#".repeat(hashes));
+                        let start = i + 2 + hashes;
+                        i = t[start..].find(&close).map_or(b.len(), |n| start + n + close.len());
+                        continue;
+                    }
+                }
+                b'"' => {
+                    let mut j = i + 1;
+                    while j < b.len() && b[j] != b'"' {
+                        j += if b[j] == b'\\' { 2 } else { 1 };
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                b'\'' if b.get(i + 2) == Some(&b'\'') || (b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'')) => {
+                    i += if b[i + 1] == b'\\' { 4 } else { 3 };
+                    continue;
+                }
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    #[test]
+    fn 掃描範圍_獨立測試檔與宣告的測試模組都算_ignore_判斷() {
+        let files = vec![
+            ("src/bridge/mod.rs".to_string(), "#[cfg(test)]\nmod tests;\n".to_string()),
+            ("src/launch/term.rs".to_string(), "#[cfg(test)]\npub mod golden;\n".to_string()),
+            ("src/quota.rs".to_string(), "#[cfg(test)]\nmod quota_it;\n".to_string()),
+        ];
+        let m = declared_test_mods(&files);
+        for want in ["src/bridge/tests.rs", "src/bridge/tests/mod.rs", "src/launch/term/golden.rs", "src/quota/quota_it.rs"] {
+            assert!(m.contains(want), "{want}：{m:?}");
+        }
+        assert_eq!(test_region("src/bridge/tests/rooms_launch.rs", "全文", &m), "全文", "路徑有 /tests/ 的整份算");
+        assert_eq!(test_region("src/launch/term/golden.rs", "全文", &m), "全文", "宣告成測試模組的整份算");
+        assert_eq!(test_region("src/other.rs", "正式\n#[cfg(test)]\nmod t {\n測試\n}\nfn 正式二() { let s = \"}\"; }", &m), "#[cfg(test)]\nmod t {\n測試\n}\n", "只取測試區塊，後面的正式程式不算");
+        let src = "mod t { let s = \"}\"; let r = r#\"{\"#; let c = '}'; // }\n }";
+        assert_eq!(block_end(src, 0), Some(src.len()), "字串、原始字串、字元、註解裡的括號不算：配對到最後那個右括號");
+        let ignored = "    #[test]\n    #[ignore]\n    fn 真機() {\n        let r = RealRunner;\n    }\n";
+        let plain = "    #[test]\n    fn 一般() {\n        let r = RealRunner;\n    }\n";
+        let asyncf = "    #[tokio::test]\n    #[ignore = \"真機\"]\n    async fn 真機2() {\n        RealRunner.go();\n    }\n";
+        assert!(only_in_ignored_fns(ignored, "RealRunner"));
+        assert!(only_in_ignored_fns(asyncf, "RealRunner"), "async fn、帶理由的 #[ignore] 也認得");
+        assert!(!only_in_ignored_fns(plain, "RealRunner"));
+        assert!(!only_in_ignored_fns(&format!("{ignored}{plain}"), "RealRunner"), "有一處不在 #[ignore] 裡就不放行");
+    }
+
+    #[test]
+    fn 暫存資料夾_只用自己_pid_的那一個() {
+        let a = mux_base();
+        assert!(a.starts_with(own_dir()));
+        assert!(own_dir().ends_with(format!("asn-tm-{}", std::process::id())));
     }
 
     #[test]
@@ -163,19 +311,24 @@ mod tests {
         rs_files(&root.join("tests"), &mut files);
         let mut bad = Vec::new();
         let mut used = std::collections::BTreeSet::new();
-        for f in files {
-            let rel = f.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+        let texts: Vec<(String, String)> = files
+            .iter()
+            .filter_map(|f| Some((f.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/"), std::fs::read_to_string(f).ok()?)))
+            .collect();
+        let test_mods = declared_test_mods(&texts);
+        for (rel, text) in &texts {
             if rel == "src/test_guard.rs" {
                 continue; // 守衛自己要寫出這些字串
             }
-            let Ok(text) = std::fs::read_to_string(&f) else { continue };
-            let region = test_region(&rel, &text);
+            let region = test_region(rel, text, &test_mods);
             for tok in FORBIDDEN {
                 if region.contains(tok) {
-                    if let Some(i) = ALLOW.iter().position(|(p, t, _)| rel.ends_with(p) && t == tok) {
-                        used.insert(i);
-                    } else {
-                        bad.push(format!("{rel}：測試碼用了 {tok}"));
+                    match ALLOW.iter().position(|(p, t, _, _)| rel.ends_with(p) && t == tok) {
+                        Some(i) if ALLOW[i].2 == Scope::File || only_in_ignored_fns(&region, tok) => {
+                            used.insert(i);
+                        }
+                        Some(_) => bad.push(format!("{rel}：{tok} 只准出現在 #[ignore] 的測試函式裡")),
+                        None => bad.push(format!("{rel}：測試碼用了 {tok}")),
                     }
                 }
             }
