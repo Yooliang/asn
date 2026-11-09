@@ -65,6 +65,11 @@ mod cycle_probe {
 }
 '''
 open(p, 'w', encoding='utf-8', newline='\n').write(s)
+if plat == 'windows':
+    # procinfo 單獨編譯時 winapi 缺 winbase（上游靠整個 workspace 的 feature 合併才編得過）；只在這個暫時複本補上
+    c = open('procinfo/Cargo.toml', encoding='utf-8').read()
+    assert c.count('"tlhelp32",') == 1
+    open('procinfo/Cargo.toml', 'w', encoding='utf-8', newline='\n').write(c.replace('"tlhelp32",', '"tlhelp32",\n    "winbase",'))
 PY
 }
 
@@ -78,7 +83,7 @@ fi
 grep -q "${PLATFORM}::cycle_probe::parent_child_cycle_terminates ... ok" "$LOGDIR/green.log" \
   || { echo "::error::綠燈：找不到測試通過的那一行（測試可能根本沒跑）" >&2; exit 1; }
 echo "::endgroup::"
-git checkout -- "$FILE"
+git checkout -- "$FILE" procinfo/Cargo.toml
 
 echo "::group::紅燈對照：換回上游原版（沒有修補），預期失敗"
 git checkout "$UPSTREAM_SHA" -- "$FILE"
@@ -89,7 +94,7 @@ rc=$?
 set -e
 cat "$LOGDIR/red.log"
 echo "::endgroup::"
-git checkout HEAD -- "$FILE"   # 還原成已套修補的版本
+git checkout HEAD -- "$FILE" procinfo/Cargo.toml   # 還原成已套修補的版本
 if [ -n "$(git status --porcelain)" ]; then
   echo "::error::還原後工作樹不乾淨" >&2; git status --short >&2; exit 1
 fi
