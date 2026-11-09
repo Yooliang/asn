@@ -55,7 +55,7 @@ pub fn open_login_terminal(def: &ToolDef) -> Result<(), String> {
 }
 
 /// 請使用者到官網安裝時的說明（不啟動任何程式）
-fn manual_text(def: &ToolDef) -> String {
+pub(super) fn manual_text(def: &ToolDef) -> String {
     format!("ASN 還不能替你安裝 {}，請到官網照說明安裝；裝好後 ASN 會自動偵測。", def.label)
 }
 
