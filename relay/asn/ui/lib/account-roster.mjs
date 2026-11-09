@@ -213,7 +213,7 @@ export const DEVICE_BLOCK_REASON = Object.freeze({
   missing: '這台沒有存這個帳號',
   incomplete: '登入不完整',
   single: '這台只有這一個帳號',
-  offline: 'ASN 沒有在線',
+  offline: '那台的 ASN 沒開著',
   unavailable: '目前不能切換',
 })
 
