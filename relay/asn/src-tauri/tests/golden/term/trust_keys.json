@@ -1,0 +1,55 @@
+{
+  "n=0": {
+    "keys": null,
+    "key_count": null,
+    "describe": null,
+    "encoded": null,
+    "err": "沒有這個選項，沒有送出"
+  },
+  "n=1": {
+    "keys": [
+      "Char('y')"
+    ],
+    "key_count": 1,
+    "describe": "y",
+    "encoded": "y",
+    "err": null
+  },
+  "n=2": {
+    "keys": [
+      "Char('n')"
+    ],
+    "key_count": 1,
+    "describe": "n",
+    "encoded": "n",
+    "err": null
+  },
+  "n=20": {
+    "keys": null,
+    "key_count": null,
+    "describe": null,
+    "encoded": null,
+    "err": "沒有這個選項，沒有送出"
+  },
+  "n=3": {
+    "keys": null,
+    "key_count": null,
+    "describe": null,
+    "encoded": null,
+    "err": "沒有這個選項，沒有送出"
+  },
+  "n=4": {
+    "keys": null,
+    "key_count": null,
+    "describe": null,
+    "encoded": null,
+    "err": "沒有這個選項，沒有送出"
+  },
+  "n=4294967295": {
+    "keys": null,
+    "key_count": null,
+    "describe": null,
+    "encoded": null,
+    "err": "沒有這個選項，沒有送出"
+  }
+}

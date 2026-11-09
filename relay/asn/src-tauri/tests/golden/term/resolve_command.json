@@ -1,0 +1,240 @@
+[
+  [
+    "agy_gemini正常 [\"agy\"]",
+    {
+      "ok": "C:/bin/agy.exe",
+      "err": null
+    }
+  ],
+  [
+    "agy_cmd副檔名 [\"agy\"]",
+    {
+      "ok": "C:/bin/agy.cmd",
+      "err": null
+    }
+  ],
+  [
+    "agy_無副檔名 [\"agy\"]",
+    {
+      "ok": "/usr/local/bin/agy",
+      "err": null
+    }
+  ],
+  [
+    "agy_大小寫混合與反斜線 [\"agy\"]",
+    {
+      "ok": "C:\\Program Files\\Agy\\AGY.EXE",
+      "err": null
+    }
+  ],
+  [
+    "agy_前後空白被修剪 [\"agy\"]",
+    {
+      "ok": "C:/bin/agy.exe",
+      "err": null
+    }
+  ],
+  [
+    "agy_多重副檔名 [\"agy\"]",
+    {
+      "ok": "C:/bin/agy.exe.bak",
+      "err": null
+    }
+  ],
+  [
+    "agy_資料夾叫agy但檔名是cmd [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔不是 agy，已拒絕"
+    }
+  ],
+  [
+    "agy_指向cmd_exe [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔不是 agy，已拒絕"
+    }
+  ],
+  [
+    "agy_結尾是分隔線 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔不是 agy，已拒絕"
+    }
+  ],
+  [
+    "agy_只有agy編號沒有gemini [\"agy\"]",
+    {
+      "ok": null,
+      "err": "這台電腦的啟動設定裡沒有 agy"
+    }
+  ],
+  [
+    "agy_同時有兩個編號只看gemini [\"agy\"]",
+    {
+      "ok": "C:/bin/agy.exe",
+      "err": null
+    }
+  ],
+  [
+    "agy_設定缺 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "這台電腦的啟動設定裡沒有 agy"
+    }
+  ],
+  [
+    "agy_停用有原因 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "找不到 agy"
+    }
+  ],
+  [
+    "agy_停用無原因 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "agy 目前無法啟動"
+    }
+  ],
+  [
+    "agy_停用且命令空_先報停用 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "原因"
+    }
+  ],
+  [
+    "agy_命令空 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡沒有 agy 的執行檔"
+    }
+  ],
+  [
+    "agy_命令只有空白 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡沒有 agy 的執行檔"
+    }
+  ],
+  [
+    "agy_控制字元 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔路徑不合法"
+    }
+  ],
+  [
+    "agy_換行在中間 [\"agy\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔路徑不合法"
+    }
+  ],
+  [
+    "agy_帶參數的字串 [\"agy\"]",
+    {
+      "ok": "agy.exe --yolo",
+      "err": null
+    }
+  ],
+  [
+    "agy_路徑含空白 [\"agy\"]",
+    {
+      "ok": "C:/Program Files/agy/agy.exe",
+      "err": null
+    }
+  ],
+  [
+    "grok_正常 [\"grok\"]",
+    {
+      "ok": "C:/bin/grok.exe",
+      "err": null
+    }
+  ],
+  [
+    "grok_無副檔名 [\"grok\"]",
+    {
+      "ok": "grok",
+      "err": null
+    }
+  ],
+  [
+    "grok_指向agy [\"grok\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔不是 grok，已拒絕"
+    }
+  ],
+  [
+    "grok_設定缺 [\"grok\"]",
+    {
+      "ok": null,
+      "err": "這台電腦的啟動設定裡沒有 grok"
+    }
+  ],
+  [
+    "grok_停用有原因 [\"grok\"]",
+    {
+      "ok": null,
+      "err": "未安裝"
+    }
+  ],
+  [
+    "grok_命令空 [\"grok\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡沒有 grok 的執行檔"
+    }
+  ],
+  [
+    "grok_控制字元 [\"grok\"]",
+    {
+      "ok": null,
+      "err": "啟動設定裡的執行檔路徑不合法"
+    }
+  ],
+  [
+    "白名單外_claude [\"claude\"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ],
+  [
+    "白名單外_pi [\"pi\"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ],
+  [
+    "白名單外_gemini編號 [\"gemini\"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ],
+  [
+    "白名單外_空字串 [\"\"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ],
+  [
+    "白名單外_大寫AGY [\"AGY\"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ],
+  [
+    "白名單外_agy加空白 [\"agy \"]",
+    {
+      "ok": null,
+      "err": "終端只允許 agy 與 grok，不能指定其他指令"
+    }
+  ]
+]

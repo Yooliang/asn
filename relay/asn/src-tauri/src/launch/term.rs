@@ -3483,6 +3483,9 @@ pub fn start_live(terms: &LiveTerms, profile: &str, cwd: &str, data_dir: &Path) 
 mod live_mux;
 
 #[cfg(test)]
+mod golden;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::launch::profiles::{LaunchMode, Profile};

@@ -1,0 +1,233 @@
+[
+  [
+    "",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "   ",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "hello",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ ",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ │",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "  │ ❯   │  ",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ …",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ … │",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ … x",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ hello",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ hello │",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│❯ hello",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "| ❯ hello",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "x │ ❯ hello",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ \n│ ❯ hello",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ hello\n│ ❯ ",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ \n│ ❯ ",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ │ │",
+    {
+      "input_box": "Typing",
+      "processing": false
+    }
+  ],
+  [
+    "│ ❯ …│",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "　│ ❯",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "line\r\n│ ❯ \r\n",
+    {
+      "input_box": "Empty",
+      "processing": false
+    }
+  ],
+  [
+    "[stop]",
+    {
+      "input_box": "None",
+      "processing": true
+    }
+  ],
+  [
+    "Ctrl+c:cancel",
+    {
+      "input_box": "None",
+      "processing": true
+    }
+  ],
+  [
+    "Ctrl+C:cancel",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "ctrl+c:cancel",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "Ctrl+c: cancel",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "xx[stop]yy",
+    {
+      "input_box": "None",
+      "processing": true
+    }
+  ],
+  [
+    "[ stop ]",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "[STOP]",
+    {
+      "input_box": "None",
+      "processing": false
+    }
+  ],
+  [
+    "[stop] Ctrl+c:cancel",
+    {
+      "input_box": "None",
+      "processing": true
+    }
+  ],
+  [
+    "│ ❯ [stop]",
+    {
+      "input_box": "Typing",
+      "processing": true
+    }
+  ],
+  [
+    "思考中 Ctrl+c:cancel │ ❯ ",
+    {
+      "input_box": "None",
+      "processing": true
+    }
+  ]
+]
