@@ -75,12 +75,12 @@ async function handle(line) {
   // FAKE_AGY_STUBBORN=1：收到「這個位置不能寫」的提醒時，照樣再寫同一個位置（測試一輪只給一次換位置的機會）
   if ((t = /@@WRITE\s+(\S+)/.exec(body) || (process.env.FAKE_AGY_STUBBORN === '1' && /這個位置不能寫：(\S+?)。/.exec(body)))) {
     const si = step++
-    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
+    // 閘門（FAKE_AGY_WRITE_GATE）：先記 pid 再送出寫檔步驟。上層一看到步驟就可能殺掉我，晚一步記就永遠記不到（#1106）
     const gate = process.env.FAKE_AGY_WRITE_GATE
+    const key = gate ? path.join(gate, t[1].replace(/[^A-Za-z0-9]/g, '_').slice(-120)) : ''
+    if (gate) fs.appendFileSync(`${key}.pid`, `${process.pid}\n`)
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
     if (gate) {
-      const key = path.join(gate, t[1].replace(/[^A-Za-z0-9]/g, '_').slice(-120))
-      fs.appendFileSync(`${key}.pid`, `${process.pid}
-`)
       while (!fs.existsSync(`${key}.go`)) await sleep(20)   // 被殺就永遠寫不到
     } else {
       await sleep(Number(process.env.FAKE_AGY_WRITE_MS) || 150)
