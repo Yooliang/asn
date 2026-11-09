@@ -15,7 +15,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
-import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
+import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceButtons, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
@@ -94,13 +94,21 @@ export const SettingsPanel = {
         const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
         if (!has || has.current || has.incomplete) continue
         if (d.self) {
-          if (vendor === 'claude') out.push({ key: d.key, label: '這台', op: 'acct-switch', value: has.email })
-          else if ((v.accounts ?? []).length > 1) out.push({ key: d.key, label: '這台', op: 'grok-switch', value: has.email })
-        } else if (v.switchable) out.push({ key: d.key, label: d.label, op: 'device-switch', value: { node: d.key, email: has.email, vendor } })
+          if (vendor === 'claude') out.push({ key: d.key, node: d.key, name: d.label, label: '這台', op: 'acct-switch', value: has.email })
+          else if ((v.accounts ?? []).length > 1) out.push({ key: d.key, node: d.key, name: d.label, label: '這台', op: 'grok-switch', value: has.email })
+        } else if (v.switchable) out.push({ key: d.key, node: d.key, name: d.label, label: d.label, op: 'device-switch', value: { node: d.key, email: has.email, vendor } })
       }
       return out
     }
     const act = (op, value) => emit('act', op, value)
+    // 帳號卡片的設備按鈕：使用中的按了不做事；其他的就是原本的「切換到那台」（同一個指令、確認框照舊）
+    const selfKey = computed(() => allDevs.value.find(d => d.self)?.key ?? '')
+    const devName = node => allDevs.value.find(d => d.key === node)?.label ?? ''
+    const devButtons = (vendor, a) => deviceButtons(a?.usedOn, switchTargets(vendor, a), selfKey.value, devName)
+    const pressDev = b => {
+      if (b.current || !b.target) return
+      act(b.target.op, b.target.value)
+    }
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
     const mmEmail = ref('')
     const mmKey = ref('')
@@ -111,7 +119,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { KNOWN,
-      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax,
+      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -273,9 +281,9 @@ export const SettingsPanel = {
                       <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                       <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                     </span>
-                    <small class="dv-used" v-if="a.usedOn && a.usedOn.length">{{ ROSTER_TEXT.usedOn }}：{{ usedOnText(a) }}</small>
-                    <span class="dv-sw" v-if="switchTargets(v.key, a).length" role="group" :aria-label="'切換 ' + a.account">
-                      <button class="aero-btn" type="button" v-for="t in switchTargets(v.key, a)" :key="t.key" :disabled="st.accounts && st.accounts.busy" @click="act(t.op, t.value)">切換到{{ t.label }}</button>
+                    <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色、選中、前面有勾後面有「使用中」，按了不做事；其他的按了改用那台（原本的切換流程） -->
+                    <span class="dv-devs" v-if="devButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
+                      <button v-for="b in devButtons(v.key, a)" :key="b.node" type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" @click="pressDev(b)"><span class="dv-devck" v-if="b.current" aria-hidden="true">✓</span>{{ b.label }}<small v-if="b.current">{{ DEVICE_BUTTON_TEXT.current }}</small></button>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
                       <span class="dv-cur" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
