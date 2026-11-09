@@ -141,9 +141,19 @@ impl EH {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         }
     }
+    /// 放一封信並拉一次。拉信連不上假後端時（機器忙時偶發：橋 log「inbox 連線失敗：error sending request」），
+    /// 產品會排退避、由 tick 重拉；這裡的 wait 不 tick，所以照同樣的意思直接再拉，直到假後端真的回過 inbox（最多 10 秒，#994）
     async fn put_pull(&mut self, m: Value) {
         self.fr.put(m);
-        self.core.pull("test", now()).await;
+        for _ in 0..100 {
+            let served = self.fr.st.lock().unwrap().inbox_queries.len();
+            self.core.pull("test", now()).await;
+            if self.fr.st.lock().unwrap().inbox_queries.len() > served {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("拉信 10 秒都連不上假後端\n--- 橋 log ---\n{}", self.core.log.recent().join("\n"));
     }
     fn bodies(&self) -> Vec<String> {
         self.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect()
