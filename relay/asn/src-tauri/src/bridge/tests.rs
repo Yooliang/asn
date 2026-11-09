@@ -1856,14 +1856,24 @@ async fn 往來記錄_視窗自己用命令列回信_橋只看得到記號_照�
 async fn 往來記錄_超過兩百筆輪替_活檔留最近的_舊的進_archive() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     for i in 0..205u32 {
-        h.core.on_worker_line(res(&reply_block("T-乙", &format!("[RELAY 寄信] to=W reply=no\n第 {i} 則"))), T0 + i as u64).await;
+        // 寄信要送到假後端成功才會記進往來記錄；機器忙時偶爾連不上（橋 log「連線失敗」），那一則就沒記。
+        // 產品不重試，視窗會自己再寄：這裡照樣再寄，直到這一則真的進了活檔（最多 5 秒，#994）
+        let want = format!("第 {i} 則");
+        for _ in 0..50 {
+            h.core.on_worker_line(res(&reply_block("T-乙", &format!("[RELAY 寄信] to=W reply=no\n第 {i} 則"))), T0 + i as u64).await;
+            if corr_text(&h, "T-乙").contains(&want) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
+    let log = h.core.log.recent().join("\n");
     let live = corr_text(&h, "T-乙");
-    assert!(live.contains("第 204 則") && !live.contains("第 0 則\n"));
-    assert_eq!(live.lines().filter(|l| l.starts_with('▌')).count(), 200);
+    assert!(live.contains("第 204 則") && !live.contains("第 0 則\n"), "--- 橋 log ---\n{log}");
+    assert_eq!(live.lines().filter(|l| l.starts_with('▌')).count(), 200, "--- 橋 log ---\n{log}");
     let arch = h.core.cfg.handoff_dir.join("archive");
     let n: usize = std::fs::read_dir(&arch).unwrap().flatten().map(|e| std::fs::read_to_string(e.path()).unwrap().lines().filter(|l| l.starts_with('▌')).count()).sum();
-    assert_eq!(n, 5);
+    assert_eq!(n, 5, "--- 橋 log ---\n{log}");
 }
 
 // ---- 夥伴 ID（#109）----------------------------------------------------------------------------
