@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -196,7 +196,7 @@ impl Store {
 
 /// 寫到不能寫的位置後，接回同一段對話送給它的提醒（#608）
 pub fn redirect_note(path: &str, cwd: &std::path::Path) -> String {
-    format!("（收發室提醒）這個位置不能寫：{path}。剛才那一步已被中止。請把檔案改寫到工作資料夾 {}（暫存檔也可以放你這段對話自己的 scratch 資料夾），然後繼續完成剛才的工作，最後照原本信件的要求回覆。", cwd.display())
+    format!("（收發室提醒）這個位置不能寫：{}。剛才那一步已被中止。請把檔案改寫到工作資料夾 {}（暫存檔也可以放你這段對話自己的 scratch 資料夾），然後繼續完成剛才的工作，最後照原本信件的要求回覆。", redact(path), cwd.display())
 }
 
 pub fn preamble_for(cfg: &WorkerCfg) -> String {
@@ -563,7 +563,7 @@ impl Worker {
             "auth" => format!("{name} 需要登入：帳號登入失效或還沒登入。{how}，好了再寄一次。（錯誤：{}）", clip(160)),
             "quota" => format!("{name} 的額度用完了（或被限流），請稍後再試。（錯誤：{}）", clip(160)),
             "timeout" => format!("{name} 處理這封信太久沒有動靜（超過 {} 分鐘），已中止這一輪。", (cfg.turn_timeout_ms as f64 / 60000.0).round() as u64),
-            "violation" => format!("{name} 想做不被允許的事：{}（{}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。", e.summary.clone().unwrap_or_default(), e.message),
+            "violation" => format!("{name} 想做不被允許的事：{}（{}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。", redact(&e.summary.clone().unwrap_or_default()), redact(&e.message)),
             "stopped" => format!("{name} 工作者被停止，這封信沒有處理完。"),
             "crash" => {
                 if e.spawn_failed {
@@ -700,7 +700,7 @@ impl Worker {
         // 再犯就照一般的違規結案（#608）。agy 原生通道沒辦法只拒絕那一步，所以只能「中止＋接續」
         let mut conv_note = String::new(); // 附在回覆後面讓寄件人知道的備註（中途換過位置、改開了新對話）
         if let Some(path) = r.as_ref().err().and_then(|e| e.redirect.clone()) {
-            self.log(format!("寫到不能寫的位置（{path}）：接回同一段對話，請它改寫到工作資料夾"));
+            self.log(format!("寫到不能寫的位置（{}）：接回同一段對話，請它改寫到工作資料夾", redact(&path)));
             let old = self.st.lock().unwrap().driver.take();
             if let Some(old) = old {
                 old.stop();
@@ -713,7 +713,7 @@ impl Worker {
             remember(&d);
             self.log(if r.is_ok() { "換位置後完成" } else { "換位置後仍然失敗" });
             // 絆線是事後才殺：被擋的那一次可能已經寫進去了，照實告訴寄件人
-            conv_note.push_str(&format!("\n\n（收發室）中途有一次寫到不允許的位置：{path}，已中止並請它改寫到工作資料夾；那個位置可能已經留下檔案。"));
+            conv_note.push_str(&format!("\n\n（收發室）中途有一次寫到不允許的位置：{}，已中止並請它改寫到工作資料夾；那個位置可能已經留下檔案。", redact(&path)));
         }
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）

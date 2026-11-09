@@ -2,7 +2,7 @@
 // 不知道仲介與橋，只透過注入的 handlers（onSent／onFail／onReply）與 notify（寄授權詢問／登入通知）跟外面講話。
 import { askText } from './acp-approvals.mjs'
 import { WorkerError } from './acp-errors.mjs'
-import { categoryLabel, decide } from './acp-policy.mjs'
+import { categoryLabel, decide, redact } from './acp-policy.mjs'
 
 const MAX_REPLY_CHARS = 18_000     // 仲介單封上限 20000 字
 const OWNER_NOTICE_COOLDOWN_MS = 3_600_000
@@ -123,13 +123,13 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   function explain(e) {
     const how = cfg.protocol === 'agy-stream' ? `請在終端機執行 agy 完成 Google 瀏覽器登入` : `請登入 ${cfg.command}`
     switch (e.code) {
-      case 'auth': return `${name} 需要登入：帳號登入失效或還沒登入。${how}，好了再寄一次。（錯誤：${e.message.slice(0, 160)}）`
-      case 'quota': return `${name} 的額度用完了（或被限流），請稍後再試。（錯誤：${e.message.slice(0, 160)}）`
+      case 'auth': return `${name} 需要登入：帳號登入失效或還沒登入。${how}，好了再寄一次。（錯誤：${redact(e.message).slice(0, 160)}）`
+      case 'quota': return `${name} 的額度用完了（或被限流），請稍後再試。（錯誤：${redact(e.message).slice(0, 160)}）`
       case 'timeout': return `${name} 處理這封信太久沒有動靜（超過 ${Math.round(cfg.turnTimeoutMs / 60000)} 分鐘），已中止這一輪。`
-      case 'violation': return `${name} 想做不被允許的事：${e.summary ?? ''}（${e.message}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。`
+      case 'violation': return `${name} 想做不被允許的事：${redact(e.summary ?? '')}（${redact(e.message)}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。`
       case 'stopped': return `${name} 工作者被停止，這封信沒有處理完。`
-      case 'crash': return e.spawnFailed ? `${name} 工作者起不來：${e.message.slice(0, 200)}` : `${name} 工作者中途結束了：${e.message.slice(0, 200)}`
-      default: return `${name} 這一輪出錯：${e.message.slice(0, 200)}`
+      case 'crash': return e.spawnFailed ? `${name} 工作者起不來：${redact(e.message).slice(0, 200)}` : `${name} 工作者中途結束了：${redact(e.message).slice(0, 200)}`
+      default: return `${name} 這一輪出錯：${redact(e.message).slice(0, 200)}`
     }
   }
 

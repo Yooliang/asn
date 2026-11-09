@@ -211,7 +211,7 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
     let rule = policy.rule(&req.category);
     if req.category == "read" || req.category == "write" {
         if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, &policy.allow_dirs, base)) {
-            return (Verdict::Deny, format!("路徑在白名單資料夾之外：{out}"));
+            return (Verdict::Deny, format!("路徑在白名單資料夾之外：{}", redact(out)));
         }
         if req.category == "write" {
             if let Some(wd) = &policy.write_dirs {
@@ -219,7 +219,7 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
                     return (Verdict::Deny, "有設可寫入的資料夾，但這次寫入沒有帶路徑，拒絕".into());
                 }
                 if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, wd, base)) {
-                    return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{out}"));
+                    return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{}", redact(out)));
                 }
             }
         }
@@ -305,57 +305,45 @@ pub fn sensitive_write(paths: &[String], user_home: &Path, base: &Path) -> bool 
 
 // ---- 摘要（要寄給人看的，不含機密）----
 
-fn is_secret_key_word(w: &str) -> bool {
-    let l = w.to_lowercase();
-    ["api_key", "api-key", "apikey", "token", "secret", "password", "passwd", "authorization"].iter().any(|k| l.contains(k))
+const MASK: &str = "［已遮蔽］";
+
+/// 共用的遮蔽規則（Node 端 acp-policy.mjs 用同一份）：依序套用，每一步都是子字串比對。
+/// 值的寫法：整段引號、或到空白／引號／& # , ; ) 為止。
+fn redact_rules() -> &'static [(regex::Regex, &'static str)] {
+    static RULES: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        let val = r#"(?:"[^"]*"|'[^']*'|[^\s"'&#,;)]+)"#;
+        let list: Vec<(String, &'static str)> = vec![
+            // 網址的 帳號:密碼@
+            (r"(?i)(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]{0,19}://)[^/\s:@]*:[^/\s@]*@".into(), "${1}${2}［已遮蔽］@"),
+            // Authorization 標頭（含 Bearer／Basic）：整段只遮一次
+            (format!(r#"(?i)(authorization["']?[ \t]*[=:][ \t]*)(?:(?:bearer|basic)[ \t]+)?{val}"#), "${1}［已遮蔽］"),
+            // 單獨出現的 Bearer 憑證
+            (r#"(?i)\bbearer[ \t]+[^\s"'`]+"#.into(), "［已遮蔽］"),
+            // key=value／key: value（token、secret、password…，含查詢字串與 JSON 寫法）
+            (format!(r#"(?i)((?:(?:api[_-]?key|token|secret|password|passwd|passphrase|credential|signature)[A-Za-z0-9_-]{{0,40}}["']?[ \t]*[=:]|key["']?[ \t]*=)[ \t]*){val}"#), "${1}［已遮蔽］"),
+            // 金鑰樣字串（前面不能緊接英數字，避免誤遮一般詞的尾巴）
+            (r"(?i)(^|[^A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})".into(), "${1}［已遮蔽］"),
+        ];
+        list.into_iter().map(|(p, r)| (regex::Regex::new(&p).expect("遮蔽規則"), r)).collect()
+    })
 }
 
-fn looks_secret_token(t: &str) -> bool {
-    let long = |p: &str, n: usize| t.starts_with(p) && t.len() >= p.len() + n && t[p.len()..].chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-    long("sk-", 12)
-        || long("AIza", 20)
-        || ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"].iter().any(|p| long(p, 20))
-        || (t.starts_with("xox") && t.len() >= 14 && t.chars().nth(3).map(|c| "abprs".contains(c)).unwrap_or(false) && t.chars().nth(4) == Some('-'))
-        || (t.starts_with("eyJ") && t.matches('.').count() == 2 && t.len() >= 40)
-}
-
-/// 遮蔽看起來像金鑰的字串（API 金鑰、Bearer 憑證、key=value 形式的 token／secret／password）
+/// 遮蔽看起來像金鑰的字串（API 金鑰、Authorization／Bearer 憑證、網址帳密、key=value 形式的 token／secret／password）。
+/// 只換掉機密本身，其餘文字（含空白）原樣保留；重複套用結果不變
 pub fn redact(s: &str) -> String {
-    let words: Vec<&str> = s.split_whitespace().collect();
-    let mut out: Vec<String> = vec![];
-    let mut mask_next = false;
-    for w in words {
-        if mask_next {
-            out.push("［已遮蔽］".into());
-            mask_next = w.eq_ignore_ascii_case("bearer"); // Authorization: Bearer <憑證>：連憑證一起遮
-            continue;
-        }
-        if looks_secret_token(w) {
-            out.push("［已遮蔽］".into());
-        } else if w.eq_ignore_ascii_case("bearer") {
-            out.push(w.into());
-            mask_next = true;
-        } else if let Some(i) = w.find(['=', ':']).filter(|_| is_secret_key_word(w)) {
-            let (k, v) = w.split_at(i + 1);
-            if v.is_empty() {
-                out.push(w.into());
-                mask_next = true;
-            } else {
-                out.push(format!("{k}［已遮蔽］"));
-            }
-        } else if is_secret_key_word(w) && w.ends_with(['=', ':']) {
-            out.push(w.into());
-            mask_next = true;
-        } else {
-            out.push(w.into());
+    let mut t = std::borrow::Cow::Borrowed(s);
+    for (re, rep) in redact_rules() {
+        if let std::borrow::Cow::Owned(n) = re.replace_all(&t, *rep) {
+            t = std::borrow::Cow::Owned(n);
         }
     }
-    out.join(" ")
+    t.into_owned()
 }
 
 fn clip(s: &str, n: usize) -> String {
     let t = redact(s);
-    let t = t.trim();
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
     if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t.to_string() }
 }
 
@@ -627,6 +615,49 @@ mod tests {
         assert_eq!(p.rule("execute"), Verdict::Allow);
         assert_eq!(warn.len(), 2);
         assert_eq!(decide(&p, &Req { category: "write".into(), paths: vec!["/shared/x".into()], summary: String::new() }, cwd).0, Verdict::Ask);
+    }
+
+    // 遮蔽規則的共用表格：Node 端（relay/machine/test/acp-policy.test.mjs）讀同一份檔
+    #[test]
+    fn 遮蔽規則_共用表格() {
+        let table: Value = serde_json::from_str(include_str!("../../../../../machine/test/redact-cases.json")).unwrap();
+        let cases = table["cases"].as_array().unwrap();
+        assert!(cases.len() > 20);
+        for c in cases {
+            let input = c["in"].as_str().unwrap().replace("{M}", MASK);
+            let want = c["out"].as_str().unwrap().replace("{M}", MASK);
+            let name = c["name"].as_str().unwrap();
+            assert_eq!(redact(&input), want, "{name}");
+            assert_eq!(redact(&redact(&input)), want, "{name}（重複遮蔽不疊加）");
+        }
+    }
+
+    #[test]
+    fn 遮蔽規則_超長字串() {
+        let long = "x".repeat(100_000);
+        assert_eq!(redact(&long), long);
+        let mid = format!("{}sk-FAKExxxxxxxxxxxx{}", "ab ".repeat(5000), " cd".repeat(5000));
+        assert_eq!(redact(&mid), format!("{}{MASK}{}", "ab ".repeat(5000), " cd".repeat(5000)));
+    }
+
+    #[test]
+    fn 顯示面_路徑裡的機密樣字串不進摘要與拒絕原因_判斷用的路徑維持原值() {
+        let bad = "/other/sk-FAKExxxxxxxxxxxx/a.txt";
+        let cwd = Path::new("/w/Review");
+        let (p, _) = normalize_permissions(None, cwd);
+        let d = describe_acp_request(&json!({"toolCall": {"kind": "edit", "locations": [{"path": bad}]}}));
+        assert_eq!(d.paths, vec![bad.to_string()]);
+        assert!(!d.summary.contains("FAKE"), "{}", d.summary);
+        let g = describe_agy_tool("write_to_file", Some(&json!({"TargetFile": bad})));
+        assert_eq!(g.paths, vec![bad.to_string()]);
+        assert!(!g.summary.contains("FAKE"), "{}", g.summary);
+        let (v, reason) = decide(&p, &d, cwd);
+        assert_eq!(v, Verdict::Deny);
+        assert!(!reason.contains("FAKE") && reason.contains(MASK), "{reason}");
+        let rw = Req { category: "write".into(), paths: vec![bad.to_string()], summary: String::new() };
+        let (p2, _) = normalize_permissions(Some(&json!({"allow_dirs": ["/other"], "write_dirs": ["/w/Review"]})), cwd);
+        let (_, reason2) = decide(&p2, &rw, cwd);
+        assert!(!reason2.contains("FAKE"), "{reason2}");
     }
 
     #[test]
