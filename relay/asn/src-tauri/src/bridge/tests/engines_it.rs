@@ -26,7 +26,7 @@ fn worker(name: &str, protocol: &str, extra: Value) -> Value {
     let script = if protocol == "agy-stream" { fake("fake-agy.mjs") } else { fake("fake-acp-worker.mjs") };
     let mut w = json!({
         "name": name, "engine": "acp", "roster_engine": "gemini", "protocol": protocol, "command": "node", "args": [script], "label": "工作者",
-        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_AGY_WRITE_MS", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
+        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_AGY_WRITE_MS", "FAKE_AGY_FAIL_EXIT_MS", "FAKE_AGY_ECHO_PID", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
     });
     for (k, v) in extra.as_object().unwrap() {
         w[k] = v.clone();
@@ -448,7 +448,7 @@ async fn agy_舊對話壞了改開新對話_名下的往來記錄當前情帶進
 
 #[tokio::test]
 async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_還是斷才回暫時連不上_不當成登入問題() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 重試前會先停掉舊驅動，不再靠這段時間等舊行程收尾（#994）
     let dir = tempfile::tempdir().unwrap();
     let m1 = dir.path().join("net1").display().to_string();
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
@@ -467,6 +467,22 @@ async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_�
 }
 
 #[tokio::test]
+async fn agy_網路重試時舊行程還沒結束_也要開新的行程重試_不沿用快結束的舊驅動() {
+    // 假 agy 回網路錯誤後 3 秒才結束、重試只等 50 毫秒：重試時舊行程一定還活著。
+    // 沿用它的話，重試的回覆會來自同一個行程（pid 相同），平常還會被它稍後的結束結案成 crash（#752、#994）
+    crate::bridge::engines::acp_worker::test_hooks::net_wait_for("SlowExit", 50);
+    let dir = tempfile::tempdir().unwrap();
+    let mark = dir.path().join("net-slow");
+    let mut h = eh(Some(json!([worker("SlowExit", "agy-stream", json!({}))])), &[("FAKE_AGY_FAIL_EXIT_MS", "3000"), ("FAKE_AGY_ECHO_PID", "1")], "acp", &[]).await;
+    h.put_pull(to_agent(1, "SlowExit", &format!("@@NET_ONCE {}", mark.display()))).await;
+    h.wait("再試後成功", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("NET_ONCE"))).await;
+    let failed_pid = std::fs::read_to_string(&mark).unwrap().trim().to_string();
+    let body = h.bodies().into_iter().find(|b| b.contains("收到：") && b.contains("NET_ONCE")).unwrap();
+    assert!(body.contains("(pid=") && !body.contains(&format!("(pid={failed_pid})")), "重試要開新的行程，不能沿用還沒結束的舊行程：斷線的行程 pid={failed_pid}，回覆：{body}");
+    assert!(h.log_text().contains("再試一次後恢復正常"), "{}", h.log_text());
+}
+
+#[tokio::test]
 async fn agy_網路重試的等待期間工作者被停掉_不重開驅動_不重試_結案這一輪() {
     crate::bridge::engines::acp_worker::test_hooks::net_wait_for("StopWait", 1500);
     let mut h = eh(Some(json!([worker("StopWait", "agy-stream", json!({}))])), &[], "acp", &[]).await;
@@ -481,7 +497,7 @@ async fn agy_網路重試的等待期間工作者被停掉_不重開驅動_不�
 
 #[tokio::test]
 async fn agy_網路斷線前這一輪已經動過手_不整封重送_回可能做了一半_檔案只寫一次() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 重試前會先停掉舊驅動，不再靠這段時間等舊行程收尾（#994）
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let mark = h.work.path().join("workers").join("Gemini").join("steps.txt");
     // 先有工具步驟（寫了一行）才斷線：不能重送，否則會寫第二次
@@ -537,7 +553,7 @@ async fn agy_丟掉舊對話後開不起新驅動_暫時的錯不能讓對話丟
 
 #[tokio::test]
 async fn acp_通用驅動網路斷線_不知道這一輪有沒有動過手_不自動重送_回可能做了一半() {
-    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 要比假 agy「寫完結果到結束」的 20 毫秒加上負載下的排程延遲長：太短時重試會撞上還沒結束的舊行程，被它的結束結案成 crash（#752，跟 rpc 的讀取順序是兩件事）
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);   // 重試前會先停掉舊驅動，不再靠這段時間等舊行程收尾（#994）
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@NET")).await;
     h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("網路斷線，這一輪可能做了一半"))).await;
