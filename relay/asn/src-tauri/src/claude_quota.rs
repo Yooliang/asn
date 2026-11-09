@@ -264,10 +264,13 @@ fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
 fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let mut reset_base = reset_base;
+    // 備份失敗、這次沒清舊基準：這筆還混著舊基準，不能蓋「有身分」標記，否則之後永遠不會再清
+    let mut backup_failed = false;
     if reset_base && owned && all.contains_key(email) && !owner_store::backup_quota_file(home) {
         // 備份失敗就不清舊基準（留著比丟掉安全），下次再試
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
         reset_base = false;
+        backup_failed = true;
     }
     let dropped = reset_base && all.remove(email).is_some();
     if dropped && owned {
@@ -283,7 +286,7 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
         st.rebase = false;
     }
     if let Some(mut q) = m.quota {
-        q.owner = owned;
+        q.owner = owned && !backup_failed;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);

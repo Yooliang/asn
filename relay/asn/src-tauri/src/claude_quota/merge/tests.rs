@@ -845,3 +845,26 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
     assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY))), &ta), NOW + 120_000));
     assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second);
 }
+
+#[test]
+fn 身分_備份失敗那次的紀錄不蓋有身分標記_下一次備份成功才清舊基準並蓋標記() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW)); // 舊辦法記一筆：剩 95%，沒標記
+    let tmp = super::super::owner_store::backup_tmp_path(h.path());
+    std::fs::create_dir_all(&tmp).unwrap(); // 備份必失敗
+    let t = transcript(h.path(), "wa", UA);
+    // 同一期、剩餘更低：就算沒清舊基準也會被收下
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((10.0, NOW + 3 * DAY))), &t), NOW + 60_000));
+    assert_eq!(q(&h).weekly_pct, Some(90));
+    assert!(!q(&h).owner, "備份失敗沒清舊基準，這筆不能蓋有身分的標記");
+    assert!(log(&h).contains("備份失敗，沒有清舊基準"));
+    // 備份恢復：下一次清掉舊基準（備份一份）、照有身分的數字收、蓋上標記
+    std::fs::remove_dir_all(&tmp).unwrap();
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
+    let got = q(&h);
+    assert_eq!(got.weekly_pct, Some(40), "舊基準清掉了，新的一期照收");
+    assert!(got.owner);
+    assert!(super::super::owner_store::backup_path(h.path()).exists());
+    assert_eq!(log(&h).matches("清掉 1 筆沒有身分的舊基準").count(), 1);
+}
