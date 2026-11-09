@@ -330,13 +330,17 @@ pub fn taipei_hms(ms: u64) -> String {
 }
 
 /// 事故紀錄那一行（純函式）。前半和以前一字不差，後面只是多附的資訊
-pub fn incident_line(inc: &Incident, reason: &str, last_alive_ms: Option<u64>, uptime_secs: u64) -> String {
+pub fn incident_line(inc: &Incident, reason: &str, last_alive_ms: Option<u64>, uptime_secs: u64, event: Option<&str>) -> String {
     let head = format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" });
     let alive = match last_alive_ms {
         Some(t) => format!("最後看到它活著是 {}（台北）", taipei_hms(t)),
         None => "最後看到它活著的時間不明".to_string(),
     };
-    format!("{head}｜{reason}｜{alive}｜這台 ASN 已經跑了 {} 小時 {} 分", uptime_secs / 3600, uptime_secs / 60 % 60)
+    let line = format!("{head}｜{reason}｜{alive}｜這台 ASN 已經跑了 {} 小時 {} 分", uptime_secs / 3600, uptime_secs / 60 % 60);
+    match event {
+        Some(e) => format!("{line}｜{e}"),
+        None => line,
+    }
 }
 
 type Slot = ((u32, u64), Option<Box<dyn ProcHandle>>);
@@ -364,6 +368,11 @@ impl Tracker {
     }
 
     /// 事故時呼叫（要在 `observe` 之前）：讀結束碼並關掉控制代碼，回原因的白話
+    /// 握著的 mux 的程序編號（事件記錄對照用）；要在 `take_reason` 之前讀
+    pub fn held_pid(&self) -> Option<u32> {
+        self.slot.as_ref().map(|(m, _)| m.0)
+    }
+
     pub fn take_reason(&mut self) -> String {
         if !self.supported {
             return "這個平台讀不到結束碼".to_string();
@@ -374,6 +383,183 @@ impl Tracker {
             None => "結束碼不明（ASN 那時沒在看）".to_string(),
         }
     }
+}
+
+/// 事件記錄（Application，事件 1000）裡終端服務的當機紀錄。只取這幾項，其他欄位不讀不記
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrashEvent {
+    pub app: String,
+    pub module: String,
+    pub code: String,
+    pub offset: String,
+    /// 當機程序編號（只拿來和我們握著的 mux 對照，不寫進紀錄）
+    pub pid: String,
+    pub at_ms: u64,
+}
+
+/// 事件記錄的來源（正式用 Windows API，測試用假的）。None＝讀不到
+pub trait EventSource {
+    fn crashes(&self) -> Option<Vec<CrashEvent>>;
+}
+
+/// 只找這個程式的當機
+pub const CRASH_APP: &str = "wezterm-mux-server.exe";
+/// 只查 Application 記錄、事件 1000、程式名稱完全相符、最近 5 分鐘
+pub const EVENT_QUERY: &str = "*[System[(EventID=1000) and TimeCreated[timediff(@SystemTime) <= 300000]] and EventData[Data[1]='wezterm-mux-server.exe']]";
+/// 只讀這幾個欄位（依序：程式名稱、出錯模組、例外碼、偏移、程序編號、事件時間）
+pub const EVENT_FIELDS: [&str; 6] = ["Event/EventData/Data[1]", "Event/EventData/Data[4]", "Event/EventData/Data[7]", "Event/EventData/Data[8]", "Event/EventData/Data[9]", "Event/System/TimeCreated/@SystemTime"];
+
+/// 「0xC00000FD」「0x0000000000032CC6」「c00000fd」→「0xc00000fd」「0x32cc6」；不是十六進位回 None
+fn hex_text(s: &str) -> Option<String> {
+    let t = s.trim();
+    let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+    if t.is_empty() || t.len() > 16 || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let t = t.trim_start_matches('0').to_ascii_lowercase();
+    Some(format!("0x{}", if t.is_empty() { "0" } else { &t }))
+}
+
+/// 程序編號：「0x1a2c」或十進位
+fn parse_pid(s: &str) -> Option<u32> {
+    let t = s.trim();
+    match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        Some(h) => u32::from_str_radix(h, 16).ok(),
+        None => t.parse().ok(),
+    }
+}
+
+/// 從讀到的事件挑出這次的：程式名稱要完全相符；我們握著 mux 的程序編號時，編號也要一樣；取最新的
+pub fn pick_event(events: &[CrashEvent], pid: Option<u32>) -> Option<&CrashEvent> {
+    events.iter().filter(|e| e.app == CRASH_APP && pid.is_none_or(|p| parse_pid(&e.pid) == Some(p))).max_by_key(|e| e.at_ms)
+}
+
+/// 事件記錄那一段的白話（純函式）：讀不到、沒有紀錄、找到
+pub fn crash_event_text(found: Option<Option<&CrashEvent>>) -> String {
+    match found {
+        None => "事件記錄讀不到".to_string(),
+        Some(None) => "事件記錄沒有這次的紀錄".to_string(),
+        Some(Some(e)) => format!(
+            "事件記錄：{} 崩潰，出錯模組 {}，例外碼 {}，偏移 {}，{}（台北）",
+            e.app,
+            e.module,
+            hex_text(&e.code).unwrap_or_else(|| "不明".into()),
+            hex_text(&e.offset).unwrap_or_else(|| "不明".into()),
+            taipei_hms(e.at_ms)
+        ),
+    }
+}
+
+/// 查事件記錄並寫成白話；任何失敗都只是文字，不影響其他流程
+pub fn lookup_crash_text(src: &dyn EventSource, pid: Option<u32>) -> String {
+    let events = src.crashes();
+    crash_event_text(events.as_ref().map(|v| pick_event(v, pid)))
+}
+
+#[cfg(windows)]
+struct EvtH(isize);
+
+#[cfg(windows)]
+impl Drop for EvtH {
+    fn drop(&mut self) {
+        // SAFETY: 只在這裡關一次
+        unsafe { windows_sys::Win32::System::EventLog::EvtClose(self.0) };
+    }
+}
+
+#[cfg(windows)]
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// 用 Windows 事件記錄 API 查（不開別的程式）
+#[cfg(windows)]
+pub struct WinEventLog;
+
+#[cfg(windows)]
+impl EventSource for WinEventLog {
+    fn crashes(&self) -> Option<Vec<CrashEvent>> {
+        use windows_sys::Win32::System::EventLog::{EvtCreateRenderContext, EvtNext, EvtQuery, EvtQueryChannelPath, EvtQueryReverseDirection, EvtRenderContextValues};
+        const ERROR_NO_MORE_ITEMS: i32 = 259;
+        let (path, query) = (wide("Application"), wide(EVENT_QUERY));
+        // SAFETY: 參數都是以 0 結尾的寬字串，活到呼叫結束
+        let rs = unsafe { EvtQuery(0, path.as_ptr(), query.as_ptr(), EvtQueryChannelPath | EvtQueryReverseDirection) };
+        if rs == 0 {
+            return None;
+        }
+        let rs = EvtH(rs);
+        let fields: Vec<Vec<u16>> = EVENT_FIELDS.iter().map(|f| wide(f)).collect();
+        let ptrs: Vec<*const u16> = fields.iter().map(|f| f.as_ptr()).collect();
+        // SAFETY: ptrs 指向上面的字串
+        let ctx = unsafe { EvtCreateRenderContext(ptrs.len() as u32, ptrs.as_ptr(), EvtRenderContextValues) };
+        if ctx == 0 {
+            return None;
+        }
+        let ctx = EvtH(ctx);
+        let mut handles = [0isize; 16];
+        let mut got = 0u32;
+        // 最多等 1 秒
+        // SAFETY: handles 有 16 格
+        let ok = unsafe { EvtNext(rs.0, 16, handles.as_mut_ptr(), 1000, 0, &mut got) } != 0;
+        if !ok {
+            return if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_NO_MORE_ITEMS) { Some(Vec::new()) } else { None };
+        }
+        let events: Vec<EvtH> = handles.iter().take(got as usize).map(|h| EvtH(*h)).collect();
+        Some(events.iter().filter_map(|e| render_crash(&ctx, e)).collect())
+    }
+}
+
+/// 把一筆事件的六個欄位讀出來；任何一項不對就當沒這筆
+#[cfg(windows)]
+fn render_crash(ctx: &EvtH, ev: &EvtH) -> Option<CrashEvent> {
+    use windows_sys::Win32::System::EventLog::{EvtRender, EvtRenderEventValues, EvtVarTypeFileTime, EvtVarTypeString, EVT_VARIANT};
+    let (mut used, mut count) = (0u32, 0u32);
+    // 先問需要多大的緩衝區
+    // SAFETY: 緩衝區給空的，只拿大小
+    unsafe { EvtRender(ctx.0, ev.0, EvtRenderEventValues, 0, std::ptr::null_mut(), &mut used, &mut count) };
+    if used == 0 || used > 65_536 {
+        return None;
+    }
+    let mut buf = vec![0u64; (used as usize).div_ceil(8)];
+    // SAFETY: 緩衝區夠大、8 位元組對齊
+    let ok = unsafe { EvtRender(ctx.0, ev.0, EvtRenderEventValues, (buf.len() * 8) as u32, buf.as_mut_ptr().cast(), &mut used, &mut count) } != 0;
+    if !ok || count < EVENT_FIELDS.len() as u32 {
+        return None;
+    }
+    let vars = buf.as_ptr().cast::<EVT_VARIANT>();
+    let text = |i: usize| -> Option<String> {
+        // SAFETY: i < count，字串指標指在 buf 內，以 0 結尾
+        unsafe {
+            let v = &*vars.add(i);
+            if v.Type != EvtVarTypeString as u32 || v.Anonymous.StringVal.is_null() {
+                return None;
+            }
+            let p = v.Anonymous.StringVal;
+            let len = (0..512).take_while(|&k| *p.add(k) != 0).count();
+            Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
+        }
+    };
+    // SAFETY: 第 6 個是時間
+    let ft = unsafe {
+        let v = &*vars.add(5);
+        if v.Type != EvtVarTypeFileTime as u32 {
+            return None;
+        }
+        v.Anonymous.FileTimeVal
+    };
+    // FILETIME（1601 年起、100 奈秒）→ Unix 毫秒
+    let at_ms = ft.checked_sub(116_444_736_000_000_000)? / 10_000;
+    Some(CrashEvent { app: text(0)?, module: text(1)?, code: text(2)?, offset: text(3)?, pid: text(4)?, at_ms })
+}
+
+/// 事故時查事件記錄（只有 Windows 有；其他平台整段省略）
+#[cfg(all(windows, feature = "gui"))]
+fn event_log_text(pid: Option<u32>) -> Option<String> {
+    Some(lookup_crash_text(&WinEventLog, pid))
+}
+#[cfg(all(not(windows), feature = "gui"))]
+fn event_log_text(_pid: Option<u32>) -> Option<String> {
+    None
 }
 
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
@@ -405,11 +591,14 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             let incident = w.tick(&o, now);
             w.save(&file);
             // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
-            let info = incident.as_ref().map(|_| (tracker.take_reason(), tracker.last_alive_ms));
+            let info = incident.as_ref().map(|_| {
+                let pid = tracker.held_pid();
+                (tracker.take_reason(), tracker.last_alive_ms, event_log_text(pid))
+            });
             tracker.observe(&o, now, &open_process);
             if let Some(inc) = incident {
-                let (reason, last_alive) = info.unwrap_or_default();
-                let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs());
+                let (reason, last_alive, event) = info.unwrap_or_default();
+                let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs(), event.as_deref());
                 elog!("{line}");
                 if let Some(base) = super::mux::default_base() {
                     super::mux::note(&base.join("ASN").join("m"), &line);
@@ -708,9 +897,9 @@ mod tests {
         // 2026-11-09 02:00:41 UTC ＝ 台北 10:00:41
         let utc = 1_794_189_641_000u64 - 1_794_189_641_000 % 86_400_000 + (2 * 3600 + 41) * 1000;
         assert_eq!(taipei_hms(utc), "10:00:41");
-        let line = incident_line(&inc, "崩潰（0xC00000FD，堆疊溢位）", Some(utc), 6 * 3600 + 45 * 60 + 9);
+        let line = incident_line(&inc, "崩潰（0xC00000FD，堆疊溢位）", Some(utc), 6 * 3600 + 45 * 60 + 9, None);
         assert_eq!(line, "終端服務中斷：2 位夥伴（甲、乙），自動接回｜崩潰（0xC00000FD，堆疊溢位）｜最後看到它活著是 10:00:41（台北）｜這台 ASN 已經跑了 6 小時 45 分");
-        let cool = incident_line(&Incident { partners: vec!["甲".into()], resume: false }, "x", None, 59);
+        let cool = incident_line(&Incident { partners: vec!["甲".into()], resume: false }, "x", None, 59, None);
         assert_eq!(cool, "終端服務中斷：1 位夥伴（甲），十分鐘內又中斷，只通知不接回｜x｜最後看到它活著的時間不明｜這台 ASN 已經跑了 0 小時 0 分");
     }
 
@@ -768,6 +957,68 @@ mod tests {
         other.observe(&obs(Some(M1), &["甲"]), 1_000, &none);
         assert_eq!(other.take_reason(), "這個平台讀不到結束碼");
         assert_eq!(other.last_alive_ms, Some(1_000));
+    }
+
+    fn ev(app: &str, pid: &str, at_ms: u64) -> CrashEvent {
+        CrashEvent { app: app.into(), module: "ntdll.dll".into(), code: "0xC00000FD".into(), offset: "0x0000000000032CC6".into(), pid: pid.into(), at_ms }
+    }
+
+    struct FakeLog(Option<Vec<CrashEvent>>);
+    impl EventSource for FakeLog {
+        fn crashes(&self) -> Option<Vec<CrashEvent>> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn 事件記錄_十六進位與程序編號整理() {
+        assert_eq!(hex_text("0xC00000FD").as_deref(), Some("0xc00000fd"));
+        assert_eq!(hex_text("0x0000000000032CC6").as_deref(), Some("0x32cc6"));
+        assert_eq!(hex_text("0x0").as_deref(), Some("0x0"));
+        assert_eq!(hex_text("不是數字"), None);
+        assert_eq!(hex_text(""), None);
+        assert_eq!(parse_pid("0x1a2c"), Some(0x1a2c));
+        assert_eq!(parse_pid("6700"), Some(6700));
+        assert_eq!(parse_pid("亂"), None);
+    }
+
+    #[test]
+    fn 事件記錄_挑對的那一筆_讀不到與沒紀錄各有說法() {
+        let utc = 1_794_189_641_000u64 - 1_794_189_641_000 % 86_400_000 + (2 * 3600 + 46) * 1000;
+        let events = vec![ev("wezterm-mux-server.exe", "0x1a2c", utc), ev("wezterm-mux-server.exe", "0x9999", utc + 5), ev("other.exe", "0x1a2c", utc + 9)];
+        let pick = pick_event(&events, Some(0x1a2c)).unwrap();
+        assert_eq!((pick.app.as_str(), pick.at_ms), ("wezterm-mux-server.exe", utc), "程式名稱要完全相符、程序編號要一樣");
+        assert!(pick_event(&events, Some(1)).is_none());
+        assert!(pick_event(&events, None).is_some(), "沒握著 mux 就不比對編號");
+        let found = lookup_crash_text(&FakeLog(Some(events)), Some(0x1a2c));
+        assert_eq!(found, "事件記錄：wezterm-mux-server.exe 崩潰，出錯模組 ntdll.dll，例外碼 0xc00000fd，偏移 0x32cc6，10:00:46（台北）");
+        assert_eq!(lookup_crash_text(&FakeLog(Some(vec![])), Some(1)), "事件記錄沒有這次的紀錄");
+        assert_eq!(lookup_crash_text(&FakeLog(None), Some(1)), "事件記錄讀不到");
+        // 完整的一行
+        let inc = Incident { partners: vec!["甲".into(), "乙".into()], resume: true };
+        let last = utc - 5_000;
+        let line = incident_line(&inc, "崩潰（0xC00000FD，堆疊溢位）", Some(last), 6 * 3600 + 45 * 60, Some(&found));
+        assert_eq!(
+            line,
+            "終端服務中斷：2 位夥伴（甲、乙），自動接回｜崩潰（0xC00000FD，堆疊溢位）｜最後看到它活著是 10:00:41（台北）｜這台 ASN 已經跑了 6 小時 45 分｜事件記錄：wezterm-mux-server.exe 崩潰，出錯模組 ntdll.dll，例外碼 0xc00000fd，偏移 0x32cc6，10:00:46（台北）"
+        );
+        println!("{line}");
+    }
+
+    #[test]
+    fn 事件記錄_不開別的程式_只讀六個欄位() {
+        let all = include_str!("mux_watch.rs").replace("\r\n", "\n");
+        let src = &all[..all.find("#[cfg(test)]").unwrap()];
+        for bad in [concat!("Command", "::new"), concat!("power", "shell"), concat!("wevt", "util"), concat!("std::", "process")] {
+            assert!(!src.contains(bad), "不能出現 {bad}");
+        }
+        assert_eq!(
+            EVENT_FIELDS,
+            ["Event/EventData/Data[1]", "Event/EventData/Data[4]", "Event/EventData/Data[7]", "Event/EventData/Data[8]", "Event/EventData/Data[9]", "Event/System/TimeCreated/@SystemTime"]
+        );
+        assert_eq!(src.matches("\"Event/").count(), 6, "原始碼裡只有這六條路徑");
+        assert!(EVENT_QUERY.contains("EventID=1000") && EVENT_QUERY.contains("Data[1]='wezterm-mux-server.exe'") && EVENT_QUERY.contains("timediff(@SystemTime) <= 300000"));
+        assert_eq!(src.matches("wide(\"Application\")").count(), 1, "只查 Application");
     }
 
     #[test]
