@@ -2,6 +2,15 @@
 import { UPDATE_BASE, changelogFirstSection } from './release-lib.mjs'
 
 export const ANDROID_JSON = 'android.json'
+
+/** google-services.json 相對於 relay/asn 的位置（建置機才有，不進 repo） */
+export const GOOGLE_SERVICES_REL = 'src-tauri/gen/android/app/google-services.json'
+/**
+ * 發版前後要不要警告「這次沒有推播」：沒有 google-services.json 時 Gradle 會跳過 Firebase，App 照樣建得出來但收不到推播。
+ * exists＝那個檔在不在。回警告文字，有檔就回 null。
+ */
+export const pushConfigWarning = exists => (exists ? null
+  : `⚠ 沒有 ${GOOGLE_SERVICES_REL}：這次建出的 App 不含推播（App 關著時收不到通知）。要發有推播的版本，先把這個檔放到建置機上再建。`)
 export const androidApkName = version => `ASN_${version}_android.apk`
 export const androidApkUrl = version => `${UPDATE_BASE}${encodeURIComponent(androidApkName(version))}`
 

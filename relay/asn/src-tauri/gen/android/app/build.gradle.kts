@@ -98,4 +98,7 @@ apply(from = file("tauri.build.gradle.kts"))
 // 這個檔放在建置機的 app/ 底下（比照簽章檔，不進 repo、不進 APK 以外的任何地方）；它只有公開的專案設定值，**不是**服務帳戶金鑰（金鑰只在後台的環境變數）
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+} else {
+    // 安靜跳過會在不知情時發出沒有推播的版本：在建置記錄印一行明顯的警告（CI 本來就沒有這個檔，照樣建得過）
+    logger.warn("⚠ 沒有 app/google-services.json：這次建出的 App 不含推播（Firebase 不啟動，App 關著時收不到通知）")
 }

@@ -1,7 +1,8 @@
 // 安卓自行安裝版的發版腳本邏輯：android.json 的內容要能被 App 端（android_update.rs 的 parse_manifest）接受。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { androidApkName, androidApkUrl, androidNotes, buildAndroidJson, parseAndroidArgs, versionCodeOf } from '../scripts/release-android-lib.mjs'
+import fs from 'node:fs'
+import { GOOGLE_SERVICES_REL, androidApkName, androidApkUrl, androidNotes, buildAndroidJson, parseAndroidArgs, pushConfigWarning, versionCodeOf } from '../scripts/release-android-lib.mjs'
 
 const SHA = 'a'.repeat(64)
 
@@ -29,4 +30,19 @@ test('更新說明與參數', () => {
   assert.equal(androidNotes({ arg: '', changelog: '', version: '0.1.33' }), 'ASN 0.1.33 更新')
   assert.deepEqual(parseAndroidArgs(['--dry-run', '--notes', 'x']), { notes: 'x', dryRun: true })
   assert.throws(() => parseAndroidArgs(['--bogus'])); assert.throws(() => parseAndroidArgs(['--notes']))
+})
+
+test('沒有 google-services.json 時發版要警告「這次沒有推播」：腳本建置前後各印一次、Gradle 也印一行；有檔就不警告', () => {
+  assert.equal(pushConfigWarning(true), null)
+  const w = pushConfigWarning(false)
+  assert.ok(w.includes(GOOGLE_SERVICES_REL) && w.includes('不含推播'), w)
+  const read = f => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
+  for (const f of ['../scripts/release-play.mjs', '../scripts/release-android.mjs']) {
+    const src = read(f)
+    assert.ok(src.includes('pushConfigWarning(fs.existsSync(path.join(root, GOOGLE_SERVICES_REL)))'), `${f} 要檢查 google-services.json`)
+    assert.equal(src.split('if (pushWarn) console.warn(pushWarn)').length - 1, 2, `${f} 建置前後各警告一次`)
+  }
+  const gradle = read('../src-tauri/gen/android/app/build.gradle.kts')
+  const elseBranch = gradle.slice(gradle.indexOf('apply(plugin = "com.google.gms.google-services")'))
+  assert.ok(/} else {/.test(elseBranch) && elseBranch.includes('logger.warn(') && elseBranch.includes('不含推播'), 'Gradle 沒有這個檔時印警告')
 })

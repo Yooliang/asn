@@ -11,7 +11,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
-import { ANDROID_JSON, androidApkName, androidNotes, buildAndroidJson, parseAndroidArgs } from './release-android-lib.mjs'
+import { ANDROID_JSON, GOOGLE_SERVICES_REL, androidApkName, androidNotes, buildAndroidJson, parseAndroidArgs, pushConfigWarning } from './release-android-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
@@ -35,6 +35,9 @@ const run = (cmd, args) => { const r = spawnSync(cmd, args, { cwd: root, stdio: 
 const node = process.execPath
 
 if (!smokeGate({ root, skip: skipSmoke }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
+// 沒有 google-services.json＝這次沒有推播：建置前後各印一次，免得在不知情時發出去
+const pushWarn = pushConfigWarning(fs.existsSync(path.join(root, GOOGLE_SERVICES_REL)))
+if (pushWarn) console.warn(pushWarn)
 run(node, ['scripts/prep.mjs'])
 // --features sideload：Rust 端編進自動更新；ORG_GRADLE_PROJECT_asnDist=sideload：外殼帶安裝權限與安裝程式碼（Play 版兩者都沒有）
 run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'android', 'build', '--apk', '--target', 'aarch64', '--features', 'sideload', '--ci'])
@@ -64,3 +67,4 @@ const json = buildAndroidJson({ version, notes, sha256: crypto.createHash('sha25
 fs.writeFileSync(path.join(out, ANDROID_JSON), `${JSON.stringify(json, null, 2)}\n`)
 console.log(`已產生：${out}\n  ${name}（${(buf.length / 1048576).toFixed(1)} MB）、${ANDROID_JSON}（versionCode ${json.versionCode}）`)
 console.log(opts.dryRun ? '演練完成：沒有動官網目錄。' : '下一步：提交 site/public/update/ 底下的兩個檔，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
+if (pushWarn) console.warn(pushWarn)
