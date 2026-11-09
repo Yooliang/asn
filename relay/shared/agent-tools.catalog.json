@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "與 issue #23 開新視窗偵測共用；Rust（agent_tools/catalog.rs）與 relay/shared/agent-tools.mjs 必須一致。",
+  "comment": "與 issue #23 開新視窗偵測共用；Rust（agent_tools/catalog.rs）與 relay/shared/agent-tools.mjs 必須一致。install.kind：verified＝ASN 自己下載、比對雜湊、驗數位簽章後安裝（只有這種能一鍵安裝）；manual＝請使用者到官網安裝，ASN 只偵測。不放任何安裝腳本網址（#933：不執行下載來的腳本）。",
   "tools": [
     {
       "id": "claude",
@@ -8,12 +8,12 @@
       "binary": "claude",
       "engine": "claude",
       "install": {
-        "kind": "native",
-        "sh": "https://claude.ai/install.sh",
-        "ps1": "https://claude.ai/install.ps1"
+        "kind": "verified"
       },
-      "loginCommand": ["claude"],
-      "install_blurb": "將從 Anthropic 官方腳本安裝 Claude Code。",
+      "loginCommand": [
+        "claude"
+      ],
+      "install_blurb": "將從 Anthropic 官方網站下載 Claude Code，比對檔案雜湊、驗過數位簽章後才安裝。",
       "login_blurb": "終端機會啟動 Claude Code，依畫面在瀏覽器完成登入。"
     },
     {
@@ -22,13 +22,12 @@
       "binary": "codex",
       "engine": "codex",
       "install": {
-        "kind": "native",
-        "sh": "https://chatgpt.com/codex/install.sh",
-        "ps1": "https://chatgpt.com/codex/install.ps1",
-        "npm": "@openai/codex"
+        "kind": "manual"
       },
-      "loginCommand": ["codex"],
-      "install_blurb": "將從 OpenAI 官方 Codex 安裝腳本安裝。",
+      "loginCommand": [
+        "codex"
+      ],
+      "install_blurb": "ASN 還不能替你安裝 Codex，請到 OpenAI 官網照說明安裝；裝好後 ASN 會自動偵測。",
       "login_blurb": "請在終端機選擇使用 ChatGPT 登入。"
     },
     {
@@ -37,12 +36,12 @@
       "binary": "agy",
       "engine": "gemini",
       "install": {
-        "kind": "native",
-        "sh": "https://antigravity.google/cli/install.sh",
-        "ps1": "https://antigravity.google/cli/install.ps1"
+        "kind": "manual"
       },
-      "loginCommand": ["agy"],
-      "install_blurb": "將從 Google Antigravity 官方腳本安裝 agy（不是舊版 gemini 指令，也不是 Gmail 工具 gogcli）。",
+      "loginCommand": [
+        "agy"
+      ],
+      "install_blurb": "ASN 還不能替你安裝 agy，請到 Google Antigravity 官網照說明安裝（不是舊版 gemini 指令，也不是 Gmail 工具 gogcli）；裝好後 ASN 會自動偵測。",
       "login_blurb": "終端機會啟動 agy，依畫面用 Google 帳號登入。"
     },
     {
@@ -51,13 +50,13 @@
       "binary": "grok",
       "engine": "grok",
       "install": {
-        "kind": "native",
-        "sh": "https://x.ai/cli/install.sh",
-        "ps1": "https://x.ai/cli/install.ps1",
-        "npm": "@xai-official/grok"
+        "kind": "manual"
       },
-      "loginCommand": ["grok", "login"],
-      "install_blurb": "將從 xAI 官方腳本安裝 Grok CLI（若 PATH 上已有社群版 grok，請先移除以免衝突）。",
+      "loginCommand": [
+        "grok",
+        "login"
+      ],
+      "install_blurb": "ASN 還不能替你安裝 Grok CLI，請到 xAI 官網照說明安裝（若 PATH 上已有社群版 grok，請先移除以免衝突）；裝好後 ASN 會自動偵測。",
       "login_blurb": "終端機會執行 grok login，依畫面完成登入。"
     },
     {
@@ -66,11 +65,12 @@
       "binary": "pi",
       "engine": "other",
       "install": {
-        "kind": "npm",
-        "npm": "@earendil-works/pi-coding-agent"
+        "kind": "manual"
       },
-      "loginCommand": ["pi"],
-      "install_blurb": "將用 npm 安裝官方 pi 套件（需 Node.js 22.19+）。",
+      "loginCommand": [
+        "pi"
+      ],
+      "install_blurb": "ASN 還不能替你安裝 pi，請照 pi 官網說明安裝（需 Node.js 22.19+）；裝好後 ASN 會自動偵測。",
       "login_blurb": "在 pi 裡使用 /login 完成各模型提供者登入；ASN 無法代為選提供者。"
     }
   ]
