@@ -1,4 +1,4 @@
-//! 本機 AI CLI 偵測（PATH）、官方安裝與登入引導。
+//! 本機 AI CLI 偵測（PATH）、驗證式安裝與登入引導。不執行下載來的安裝腳本（#933），見 `install.rs`。
 //! 工具清單與 `relay/shared/agent-tools.catalog.json` 共用，供 issue #23／#48 重用。
 //! 不讀取 OAuth 憑證或 auth.json。
 
@@ -25,7 +25,8 @@ fn checked_at() -> String {
 
 fn row(def: &catalog::ToolDef) -> ToolDetectRow {
     let binary_found = binary_on_path(&def.binary);
-    let install_available = def.install != InstallKind::None;
+    // 只有寫好「驗過再執行」流程的工具、而且在 Windows 上，才算能由 ASN 安裝（#933：不執行下載來的腳本）
+    let install_available = def.install == InstallKind::Verified && cfg!(windows);
     let login_available = binary_found && !def.login_argv.is_empty();
     ToolDetectRow {
         id: def.id.clone(),
@@ -33,7 +34,8 @@ fn row(def: &catalog::ToolDef) -> ToolDetectRow {
         binary_found,
         install_available,
         login_available,
-        install_blurb: def.install_blurb.clone(),
+        // 這台不能由 ASN 安裝（例如非 Windows 上的 Claude）就不顯示「ASN 會下載、驗證後安裝」那段，改成請使用者到官網
+        install_blurb: if install_available || def.install == InstallKind::Manual { def.install_blurb.clone() } else { install::manual_text(def) },
         login_blurb: def.login_blurb.clone(),
     }
 }
@@ -87,5 +89,30 @@ mod tests {
     #[test]
     fn 工具清單載入() {
         assert_eq!(tools().len(), 5);
+    }
+
+    #[test]
+    fn 能安裝的只有_windows_上的_claude() {
+        for def in tools() {
+            let want = cfg!(windows) && def.id == "claude";
+            assert_eq!(row(def).install_available, want, "{}", def.id);
+        }
+    }
+
+    #[test]
+    fn 不能由_asn_安裝時_說明不提下載驗證_改請使用者到官網() {
+        for def in tools() {
+            let r = row(def);
+            if r.install_available {
+                assert!(r.install_blurb.contains("驗過數位簽章"), "{}：{}", def.id, r.install_blurb);
+            } else {
+                assert!(r.install_blurb.contains("官網"), "{}：{}", def.id, r.install_blurb);
+                assert!(!r.install_blurb.contains("將從"), "{}：{}", def.id, r.install_blurb);
+            }
+        }
+        // 清單標 verified、但這台不能裝（模擬非 Windows）時的說明
+        let mut c = tool("claude").unwrap().clone();
+        c.install = InstallKind::Verified;
+        assert!(install::manual_text(&c).contains("請到官網"));
     }
 }
