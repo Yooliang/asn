@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { QUOTA_TEXT, createQuotaReaders, normalizeReaders, quotaReadersView, shareKey } from '../ui/lib/quota-readers.mjs'
+import { QUOTA_TEXT, createQuotaReaders, normalizeReaders, quotaReadersView, shareKey, vendorSections } from '../ui/lib/quota-readers.mjs'
 import { SETTING_OPS, SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { rosterQuota, rosterView } from '../ui/lib/account-roster.mjs'
 
@@ -212,18 +212,31 @@ test('自動換新的文字寫明只能有一個程式在換，以及失敗不�
   }
 })
 
-test('設定頁：沒有額外帳號的人看不到這一區', () => {
-  assert.match(SettingsPanel.template, /v-if="st\.quotaReaders\.extraDirs\.length"/)
+test('帳號頁的服務區段：額度開關所在的服務沒有帳號也有區段；有帳號的照原順序；Claude 要有狀態列或額外帳號才補', () => {
+  const my = { vendors: [{ key: 'codex', label: 'OpenAI（Codex）', accounts: [{ account: 'a' }] }, { key: 'grok', label: 'Grok', accounts: [{ account: 'b' }] }] }
+  const readers = { extraDirs: [] }
+  assert.deepEqual(vendorSections(my, readers, null).map(v => v.key), ['codex', 'grok', 'gemini', 'minimax'])
+  assert.deepEqual(vendorSections(my, readers, { state: 'off' }).map(v => v.key), ['codex', 'grok', 'claude', 'gemini', 'minimax'])
+  assert.deepEqual(vendorSections(null, { extraDirs: [{ name: 'x' }] }, null).map(v => v.key), ['claude', 'gemini', 'grok', 'minimax'])
+  assert.deepEqual(vendorSections(my, null, null), my.vendors, '額度來源還沒讀到：只畫有帳號的')
+  assert.deepEqual(vendorSections(null, readers, null).find(v => v.key === 'minimax'), { key: 'minimax', label: 'MiniMax', accounts: [] })
 })
 
-test('自動換新的開關旁寫明風險：開之前與開著都看得到', () => {
+test('設定頁：沒有額外帳號的人看不到這一區（Claude 區段裡的開關與說明都要有額外帳號才出現）', () => {
+  const t = SettingsPanel.template
+  assert.match(t, /<label class="chk" v-if="st\.quotaReaders && st\.quotaReaders\.extraDirs\.length"><input type="checkbox" :checked="st\.quotaReaders\.extra"/)
+  assert.match(t, /<div class="dv-vq" v-if="v\.key === 'claude' && st\.quotaReaders && st\.quotaReaders\.extraDirs\.length">/)
+})
+
+test('自動換新的風險：按「確認打開」之前一定看得到（在按鈕之前）；平常收在可展開的說明裡', () => {
   assert.equal(QUOTA_TEXT.refreshRisk, '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。')
   const t = SettingsPanel.template
-  const risk = t.indexOf('QUOTA_TEXT.refreshRisk')
+  const confirm = t.indexOf(`<template v-if="st.quotaReaders.confirm === 'refresh'">`)
+  const risk = t.indexOf('QUOTA_TEXT.refreshRisk', confirm)
   const button = t.indexOf("act('quota-refresh'")
-  assert.ok(risk > 0 && risk < button, '在按鈕之前')
-  const line = t.slice(t.lastIndexOf('<small', risk), risk)
-  assert.doesNotMatch(line, /v-if/, '不管開關狀態都顯示')
+  assert.ok(confirm > 0 && confirm < risk && risk < button, '確認打開的當下，風險在按鈕之前')
+  const more = t.indexOf('<details>', button)
+  assert.ok(more > 0 && t.indexOf('QUOTA_TEXT.refreshRisk', more) > more, '說明裡也有風險')
 })
 
 test('登入過期的原因：後端組好完整一句，設定頁原樣畫出，額外帳號那行不再重複加資料夾名（#1184）', () => {

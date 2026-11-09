@@ -12,7 +12,7 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
   const st = {
     node, members, mails: [...mails], outbox: [], rooms,
     avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
-    reqs: [], sent: [], historyRows: [], historyStatus: 0, launches: [], presence: [], asnPresenceStatus: 0,
+    reqs: [], sent: [], clientIds: [], historyRows: [], historyStatus: 0, launches: [], presence: [], asnPresenceStatus: 0,
     launchers: { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/work'], max_per_hour: 6 },
     acctRemote: { ...acctRemote }, acctReports: [], acctSwitches: [], acctIncoming: [], acctResults: [],
     setCount: 1, port: 0, url: '',
@@ -72,7 +72,11 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
     }
     if (action === 'send') {
       if (typeof body?.to_node !== 'string' || typeof body?.body !== 'string') return out(400, { error: 'bad_request' })
-      st.sent.push(body)
+      // 寄信帶的 client_id（#1135）：跟後台一樣驗 UUID 格式，另外記在 clientIds；sent 只留其他欄位，既有的整筆比對照舊
+      const { client_id: cid, ...rest } = body
+      if (cid !== undefined && !(typeof cid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid))) return out(400, { error: 'bad_client_id' })
+      st.clientIds.push(cid)
+      st.sent.push(rest)
       const id = U(900 + st.sent.length)
       st.outbox.push({
         id,

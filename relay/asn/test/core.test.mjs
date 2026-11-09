@@ -106,10 +106,12 @@ test('寄信：body／to_node／to_agent／from_agent／expects_reply／reply_to
   const id = 'W/W-政策'
   assert.equal((await core.send(id, '  好的，在做 :)  ')).ok, true)
   assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '好的，在做 :)', reply_to: U(7), from_agent: NAME, expects_reply: true, person: true })
+  assert.equal(typeof relay.clientIds[0], 'string', '寄信帶 client_id（#1135；格式由假後端驗）')
   assert.equal(relay.reqs.at(-1).key, 'fake-machine-key')
   assert.equal(core.snapshot().friends.find(f => f.id === id).waiting, true)
   await core.send(id, '再補一句')
   assert.equal(relay.sent[1].reply_to, undefined, '沒有新的未回來信就不帶 reply_to')
+  assert.notEqual(relay.clientIds[1], relay.clientIds[0], '不同次寄信用不同的 client_id')
   relay.mail(8, { body: '收到' })
   await core.pull()
   assert.equal(core.snapshot().friends.find(f => f.id === id).waiting, false, '收到回信就不再等')

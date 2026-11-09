@@ -9,10 +9,12 @@ export const QUOTA_TEXT = {
   grokNote: '用這台電腦的 Grok 登入讀取。',
   agy: '讀 Gemini 額度',
   agyNote: '不用開 Gemini 視窗也能更新。帳號依上次開視窗判斷；在別處切換帳號後，請開一次 Gemini 視窗。',
+  agyShort: '不用開 Gemini 視窗也能更新。',
   agyAccount: a => `目前算在 ${a} 名下。`,
   agyNoAccount: '還沒開過 Gemini 視窗，開一次才知道是哪個帳號。',
   extra: '讀 Claude 額外帳號',
   extraNote: '讀你另外登入在專用資料夾的帳號，平常使用的登入不會動到。',
+  extraShort: '讀另外登入的帳號，平常的登入不動。',
   extraDirs: n => `找到 ${n} 個帳號。`,
   refreshOn: '打開自動換新',
   refreshConfirm: '確認打開',
@@ -31,6 +33,9 @@ export const QUOTA_TEXT = {
   minimaxRemove: '移除',
   minimaxConfirmRemove: '確認移除',
   minimaxNoKey: '找不到 key，請移除後重新加入',
+  // 開關搬進各服務區段後（設定 → 帳號）：每個開關只管這台電腦；長說明收進可展開的「說明」
+  thisPc: '只影響這台電腦。',
+  more: '說明',
   share: '產生查詢代碼',
   shareAgain: '重新產生',
   shareConfirmAgain: '確認重新產生',
@@ -78,6 +83,24 @@ export function normalizeReaders(v) {
 }
 
 export const shareKey = (vendor, account) => `${vendor}\n${account}`
+
+/** 額度開關所在的服務（區段鍵與名稱）：還沒有帳號也要有區段，開關才有地方放 */
+const TOGGLE_VENDORS = [['claude', 'Claude'], ['gemini', 'Gemini'], ['grok', 'Grok'], ['minimax', 'MiniMax']]
+
+/**
+ * 設定 → 帳號 要畫哪些服務區段。my＝帳號清單（可能還沒有）；readers＝額度來源；hook＝Claude 狀態列額度（還沒查到是 null）。
+ * 有帳號的服務照原本的順序；額度開關所在的服務就算還沒有帳號，也補一個空區段（只有標題列的開關與說明）。
+ */
+export function vendorSections(my, readers, hook) {
+  const out = [...(my?.vendors ?? [])]
+  const need = new Set()
+  if (readers) for (const k of ['gemini', 'grok', 'minimax']) need.add(k)
+  if (hook || (readers?.extraDirs ?? []).length) need.add('claude')
+  for (const [key, label] of TOGGLE_VENDORS) {
+    if (need.has(key) && !out.some(v => v.key === key)) out.push({ key, label, accounts: [] })
+  }
+  return out
+}
 
 export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged = () => {}, clipboard = t => globalThis.navigator.clipboard.writeText(t), log = (...a) => console.info(...a) }) {
   const s = reactive({ ...EMPTY, busy: false, msg: '', code: null, copied: false, confirm: '' })

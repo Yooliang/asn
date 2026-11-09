@@ -203,6 +203,63 @@ function usedOnOf(e, opts) {
 }
 export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.label}（使用中）` : n.label)).join('、')
 
+export const DEVICE_BUTTON_TEXT = { self: '（這台）', current: '使用中', group: '用在哪幾台' }
+
+/** 設備按鈕切不過去時寫在按鈕下方的原因（電腦版；手機版的原因在 mobile-acct 的 ACCT_SWITCH_REASON） */
+export const DEVICE_BLOCK_REASON = Object.freeze({
+  vendor: '這個服務不能切換',
+  hidden: '這台已隱藏',
+  removed: '這台已移除',
+  missing: '這台沒有存這個帳號',
+  incomplete: '登入不完整',
+  single: '這台只有這一個帳號',
+  offline: '那台的 ASN 沒開著',
+  unavailable: '目前不能切換',
+})
+
+/**
+ * 某台設備為什麼切不到這個帳號（給停用的設備按鈕寫原因）。devices＝設備樹（{ key, self, hidden, removed, vendors }）；
+ * vendor＝服務；email＝帳號；node＝那台。判斷順序和切換目標的條件一致；判不出來就回「目前不能切換」。
+ */
+export function deviceBlockReason(devices, vendor, email, node) {
+  if (vendor !== 'claude' && vendor !== 'grok') return DEVICE_BLOCK_REASON.vendor
+  const d = (Array.isArray(devices) ? devices : []).find(x => x && x.key === node)
+  if (!d) return DEVICE_BLOCK_REASON.unavailable
+  if (d.removed) return DEVICE_BLOCK_REASON.removed
+  if (d.hidden) return DEVICE_BLOCK_REASON.hidden
+  const v = (d.vendors ?? []).find(x => x.key === vendor)
+  const mail = String(email ?? '').trim().toLowerCase()
+  const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
+  if (!has) return DEVICE_BLOCK_REASON.missing
+  if (has.incomplete) return DEVICE_BLOCK_REASON.incomplete
+  if (d.self) return vendor === 'grok' && (v.accounts ?? []).length <= 1 ? DEVICE_BLOCK_REASON.single : DEVICE_BLOCK_REASON.unavailable
+  if (!v.switchable) return v.switchHint ? DEVICE_BLOCK_REASON.offline : DEVICE_BLOCK_REASON.unavailable
+  return DEVICE_BLOCK_REASON.unavailable
+}
+
+/**
+ * 帳號卡片的「設備按鈕」：用過這個帳號的每台設備一顆（原本的「用在：」一行和「切換到…」按鈕合在一起）。
+ * usedOn＝後台回報的 [{ node, label, current }]；targets＝這個帳號可以切過去的設備 [{ node, name?, … }]，原樣放進 target 給畫面切換用；
+ * selfNode＝這台；nameOf(node)＝設備名（後台沒給名字時用）。
+ * 回 [{ node, label, current, self, target }]：使用中的 target 一律是 null（按了不做事）；不是使用中、也沒有切換目標的 target 也是 null（按鈕停用）。
+ * 切換目標裡有、後台還沒回報的設備也補上；這台的名字後面加「（這台）」。
+ */
+export function deviceButtons(usedOn, targets, selfNode, nameOf = () => '') {
+  const ts = Array.isArray(targets) ? targets : []
+  const byNode = new Map(ts.filter(t => t && t.node).map(t => [t.node, t]))
+  const out = []
+  const add = (node, label, current) => {
+    if (typeof node !== 'string' || !node || out.some(b => b.node === node)) return
+    const self = Boolean(selfNode) && node === selfNode
+    const name = label || nameOf(node) || UNNAMED_DEVICE
+    const on = current === true
+    out.push({ node, label: self ? `${name}${DEVICE_BUTTON_TEXT.self}` : name, current: on, self, target: on ? null : byNode.get(node) ?? null })
+  }
+  for (const u of Array.isArray(usedOn) ? usedOn : []) add(u?.node, u?.label, u?.current)
+  for (const t of ts) add(t?.node, t?.name, false)
+  return out
+}
+
 /**
  * 向後台讀一次列表。call：() => Promise（電腦 invoke('acct_roster')、手機 invoke('android_acct_roster')）。
  * 讀不到（後台沒部署 404、沒登入、forbidden、格式不對）時回 prev（上一次讀成功的列表，照它自己的「N 小時前」顯示），

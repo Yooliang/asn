@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mlaunch)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mlaunch && !s.probe.devbtn)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -275,4 +275,17 @@ test('手機設備列雲端標示情境（#930）：平台未讀到與 android �
     const machines = (await ctx.__TAURI__.core.invoke('android_launchers')).machines
     assert.equal(machines.some(m => m.node === 'P' && m.platform === 'android'), s.name.endsWith('android'))
   }
+})
+
+test('帳號卡片設備按鈕情境：桌面兩種寬度、手機兩種寬度；手機先點「帳號」；表達式語法正確', () => {
+  const d = SCENARIOS.filter(s => s.probe && s.probe.devbtn)
+  assert.deepEqual(d.map(s => [s.name, s.page, s.width ?? null, s.probe.devbtn]), [['list-acct-devbtn', 'list.html', null, 'desktop'], ['list-acct-devbtn-520', 'list.html', 520, 'desktop'], ['m-acct-devbtn', 'm.html', null, 'mobile'], ['m-acct-devbtn-360', 'm.html', 360, 'mobile']])
+  for (const s of d) {
+    assert.equal(probeKind(s.probe), '帳號設備按鈕檢查')
+    const src = probeSource(s.probe)
+    assert.doesNotThrow(() => new vm.Script(src))
+    assert.ok(src.includes('aria-pressed') && src.includes('使用中') && src.includes('switch'), '檢查選中樣子、不只靠顏色、按了不發出切換')
+    assert.ok(src.includes('帳號卡超出窗格'), '卡片不超出窗格')
+  }
+  assert.equal(d.find(s => s.page === 'm.html').probe.open, '帳號')
 })

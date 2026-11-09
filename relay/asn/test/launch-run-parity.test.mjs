@@ -93,3 +93,45 @@ test('「前台或背景」的說明：給使用者看、不含數字與英文�
     assert.ok(!s.includes(LAUNCH_DISPLAY_NOTE) && !s.includes('LAUNCH_DISPLAY_NOTE') && !s.includes('showDisplayNote'), `${f} 不該有這行說明`)
   }
 })
+
+// #931 PR-2：別台摘要裡的 asn終端（gemini-term／grok-term，mode: term）不另外列成模型，併進 Gemini、Grok 的「運行：asn終端（原生 cli）」
+const TERM = [{ id: 'gemini-term', label: 'Gemini（asn終端）', engine: 'agy', mode: 'term' }, { id: 'grok-term', label: 'Grok（asn終端）', engine: 'grok', mode: 'term' }]
+const WITH_TERM = { profiles: [...MODEL_CATALOG.map(m => ({ id: m.profileId })), ...TERM], cwd_allow: ['D:/work'] }
+const NO_TERM = { profiles: MODEL_CATALOG.map(m => ({ id: m.profileId })), cwd_allow: ['D:/work'] }
+
+test('asn終端的虛擬項目不列成模型：模型只有 Gemini、Grok，不會多出「Gemini（asn終端）」「Grok（asn終端）」', async () => {
+  const { remoteModelRows: rows } = await import('../ui/lib/partner-launch-ui.mjs')
+  const ids = rows(WITH_TERM).map(r => r.profileId)
+  assert.ok(!ids.includes('gemini-term') && !ids.includes('grok-term'), ids.join(','))
+  const vs = launchVendors(WITH_TERM)
+  assert.deepEqual(vs.map(v => v.id), launchVendors(NO_TERM).map(v => v.id), '有沒有 asn終端，模型清單都一樣')
+  assert.ok(!vs.some(v => /asn終端/.test(v.label)))
+})
+
+test('運行選 asn終端（原生 cli）：那台有 <id>-term 就能選、送 <id>-term；沒有就照舊「只能在那台電腦上開」；手機與電腦版逐字一樣', async () => {
+  const { buildLaunchRequest } = await import('../ui/lib/mobile-launch.mjs')
+  const f = { node: 'n1', name: 't1', cwd: 'D:/work', first: '', profile: '' }
+  for (const id of ['gemini', 'grok']) {
+    const row = launchVendors(WITH_TERM).find(v => v.id === id)
+    const phone = launchRun(row, WITH_TERM), desk = desktopRemote(row, WITH_TERM)
+    assert.deepEqual(project(desk), project(phone), id)
+    const term = phone.options.find(o => o.key === 'term')
+    assert.deepEqual([term.ok, term.why, term.note], [true, '', '收不到信，開在那台電腦的 ASN 終端，只能看畫面、送字'], id)
+    assert.equal(phone.selected, 'acp', `${id}：收不到信的 asn終端不搶預設`)
+    assert.ok(!phone.options.some(o => o.why === '這個設定不支援'), `${id}：不會出現自訂設定的說明`)
+    assert.equal(buildLaunchRequest({ ...f, profile: row.profileId }, { run: 'term', row, launcher: WITH_TERM }).profile, `${id}-term`)
+    assert.equal(buildLaunchRequest({ ...f, profile: row.profileId }, { run: 'acp', row, launcher: WITH_TERM }).profile, row.profileId, 'acp通道照舊送原本的 profile')
+    // 那台沒有 asn終端（舊版、沒開終端服務）：照舊反灰，也不送 -term
+    const old = launchVendors(NO_TERM).find(v => v.id === id)
+    const t2 = launchRun(old, NO_TERM).options.find(o => o.key === 'term')
+    assert.deepEqual([t2.ok, t2.why], [false, '只能在那台電腦上開'])
+    assert.equal(buildLaunchRequest({ ...f, profile: old.profileId }, { run: 'term', row: old, launcher: NO_TERM }).profile, old.profileId)
+  }
+  // Claude 開窗點：有沒有 asn終端項目都照舊送 claude
+  const c = launchVendors(WITH_TERM).find(v => v.id === 'claude')
+  assert.equal(buildLaunchRequest({ ...f, profile: 'claude' }, { run: 'term', row: c, launcher: WITH_TERM }).profile, 'claude')
+  // 只有 id 對、但沒標 mode: term 的不算（自訂設定剛好叫這個名字）
+  const fake = { profiles: [...NO_TERM.profiles, { id: 'grok-term' }], cwd_allow: ['D:/work'] }
+  const g = launchVendors(fake).find(v => v.id === 'grok')
+  assert.equal(launchRun(g, fake).options.find(o => o.key === 'term').ok, false)
+})

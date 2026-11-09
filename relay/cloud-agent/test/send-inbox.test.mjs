@@ -7,6 +7,12 @@ import { run, rm, tmpEnv } from './helpers.mjs'
 
 const KEY = { IRORI_RELAY_KEY: 'fake-grok-node-key' }
 
+// 寄信內文會帶 client_id（#1135）：確認是 UUID 後拿掉，其餘欄位照原樣比對
+const noCid = ({ client_id: id, ...rest }) => {
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  return rest
+}
+
 test('send：後端欄位（to_node／to_agent／body／reply_to／from_agent／expects_reply）、預設 from=Grok、stdin 內文', async () => {
   const st = await startFakeRelay()
   const { root, env } = tmpEnv(st.url, KEY)
@@ -14,11 +20,11 @@ test('send：後端欄位（to_node／to_agent／body／reply_to／from_agent／
     const r = await run('send.mjs', ['--to', 'W/W-政策', '--body', '-', '--reply', '--reply-to', U(5)], { env, stdin: '你好\n第二行\n\n' })
     assert.equal(r.code, 0, r.stderr)
     assert.match(r.stdout, /^sent id=\S+ to=W\/W-政策 from=grok\/Grok/)
-    assert.deepEqual(st.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '你好\n第二行', reply_to: U(5), from_agent: 'Grok', expects_reply: true })
+    assert.deepEqual(noCid(st.sent[0]), { to_node: 'W', to_agent: 'W-政策', body: '你好\n第二行', reply_to: U(5), from_agent: 'Grok', expects_reply: true })
     assert.equal(st.reqs.at(-1).key, 'fake-grok-node-key')
     const r2 = await run('send.mjs', ['--to', 'H', '--body', '告知', '--no-reply', '--from', 'Grok-2'], { env: { ...env, IRORI_CLOUD_AGENTS: 'Grok,Grok-2' } })
     assert.equal(r2.code, 0)
-    assert.deepEqual(st.sent[1], { to_node: 'H', body: '告知', from_agent: 'Grok-2', expects_reply: false })
+    assert.deepEqual(noCid(st.sent[1]), { to_node: 'H', body: '告知', from_agent: 'Grok-2', expects_reply: false })
     assert.ok(!(r.stdout + r.stderr + r2.stdout + r2.stderr).includes('fake-grok-node-key'))
   } finally { await st.close(); rm(root) }
 })

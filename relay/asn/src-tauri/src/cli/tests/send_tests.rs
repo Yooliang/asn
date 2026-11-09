@@ -4,6 +4,13 @@ use crate::cli::send::{parse_args, resolve_reply_flag, window_fallback};
 
 const NEED_FLAG: &str = "請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply";
 // 與 Node 的 sentMarkName 對照（node -e 算出來的值）：橋讀的記號檔名兩邊必須一致
+/// 寄信內文會帶 client_id（#1135）：確認是 UUID 後拿掉，其餘欄位照原樣比對
+fn no_cid(mut j: Value) -> Value {
+    let id = j.as_object_mut().and_then(|m| m.remove("client_id")).expect("寄信要帶 client_id");
+    assert!(id.as_str().is_some_and(|s| s.len() == 36), "client_id 要是 UUID：{id}");
+    j
+}
+
 const MARK_PC1: &str = "97cf92a05181dcad4bc73a244d7dd8a048010e13";
 const MARK_W_POLICY: &str = "1abddf9b1ffc0ef4839ba1b077fca66d976ce29c";
 
@@ -18,7 +25,7 @@ fn 寄給成員_from_agent_取自視窗_帶機器金鑰與_reply_to_輸出_sent_
     let reqs = b.of("send");
     assert_eq!(reqs.len(), 1);
     assert_eq!(reqs[0].headers.get("x-relay-key").map(String::as_str), Some(KEY));
-    assert_eq!(reqs[0].json(), json!({"to_node": "PC1", "body": "回報：測試都過了", "reply_to": rid, "from_agent": "T-視窗甲", "expects_reply": false}));
+    assert_eq!(no_cid(reqs[0].json()), json!({"to_node": "PC1", "body": "回報：測試都過了", "reply_to": rid, "from_agent": "T-視窗甲", "expects_reply": false}));
     let (c2, _, _) = go(&f.env, &["send", "--to", "W/W-政策", "--body", "x", "--no-reply"], "");
     assert_eq!(c2, 0);
     let j = b.of("send")[1].json();
@@ -118,7 +125,7 @@ fn 同節點寄信_可寄給本機其他視窗_寄給自己這個視窗被擋_�
     let (c, out, err) = go(&f.env, &["send", "--to", "T/H-ASN", "--body", "給本機 ASN", "--reply"], "");
     assert_eq!(c, 0, "{err}");
     assert!(out.starts_with(&format!("sent id={NEW_ID} to=T/H-ASN from=T/T-視窗甲")));
-    assert_eq!(b.of("send")[0].json(), json!({"to_node": "T", "to_agent": "H-ASN", "body": "給本機 ASN", "from_agent": "T-視窗甲", "expects_reply": true}));
+    assert_eq!(no_cid(b.of("send")[0].json()), json!({"to_node": "T", "to_agent": "H-ASN", "body": "給本機 ASN", "from_agent": "T-視窗甲", "expects_reply": true}));
     assert_eq!(go(&f.env, &["send", "--to", "T", "--body", "給本機預設", "--no-reply"], "").0, 0);
     assert_eq!(b.count(), 2);
     let (c, _, err) = go(&f.env, &["send", "--to", "T/T-視窗甲", "--body", "自言自語", "--no-reply"], "");
@@ -511,7 +518,7 @@ fn 只寫視窗名_本機有同名視窗就改寄並說明_沒有或在別台就
     assert!(err.contains("已改寄本機同名視窗 T/Test-Gemini"), "{err}");
     let sends = b.of("send");
     assert_eq!(sends.len(), 2);
-    assert_eq!(sends[1].json(), json!({"to_node": "T", "to_agent": "Test-Gemini", "body": "狀態？", "from_agent": "T-視窗甲", "expects_reply": true}));
+    assert_eq!(no_cid(sends[1].json()), json!({"to_node": "T", "to_agent": "Test-Gemini", "body": "狀態？", "from_agent": "T-視窗甲", "expects_reply": true}));
     // 只在別台：不寄，列出完整位址（含中文的名字不可能是成員代號，直接查名單、不先寄）
     let (c, _, err) = go(&f.env, &["send", "--to", "W-政策", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 4);

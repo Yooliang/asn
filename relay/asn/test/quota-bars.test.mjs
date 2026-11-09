@@ -33,7 +33,7 @@ test('重置時間：不到 1 小時、已過、沒有', () => {
 test('沒有數字：沒接上就提醒到啟動設定接上；接上了（或還沒查到）照實寫額度未知，不編數字', () => {
   assert.deepEqual(quotaBars({}, { hookOn: false, now: NOW }).bars, [])
   assert.equal(quotaBars({}, { hookOn: false, now: NOW }).note, NOT_CONNECTED_TEXT)
-  assert.match(NOT_CONNECTED_TEXT, /啟動設定/)
+  assert.match(NOT_CONNECTED_TEXT, /Claude 狀態列額度/, '指到設定 → 帳號 的 Claude 區段開關（原本在啟動設定）')
   assert.equal(quotaBars({}, { hookOn: true, now: NOW }).note, '額度未知')
   assert.equal(quotaBars({ five_hour_pct: 200, at }, { hookOn: null, now: NOW }).note, '額度未知', '壞值不畫')
 })

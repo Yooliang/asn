@@ -1,11 +1,40 @@
 // 仲介（relay）共用小模組：API 呼叫、ack、Realtime 門鈴、單一執行個體 pid 檔。
-// 目前只有 bridge-aegis.mjs 使用（bridge.mjs 為 Windows 家用機常駐中，暫不動它）。純 Node，無依賴。
+// createCore 目前只有 bridge-aegis.mjs 使用；寄信的 client_id 與重試（withClientId／retrySend）bridge.mjs、send.mjs 也共用。純 Node，無依賴。
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 
 export const API_TIMEOUT_MS = 20_000
 export const BELL_HEARTBEAT_MS = 25_000
 export const BELL_STALE_MS = 75_000   // 三個心跳週期都沒收到任何東西（含心跳回覆）＝連線半開，主動斷開重連
+
+// ---- 寄信的 client_id 與重試（#1135）-----------------------------------------------------------------
+// 同一次寄信帶一個 client_id（UUID），重試之間沿用同一個；後台在同一個寄件節點內據此去重，
+// 所以請求可能已經送達、回應卻讀失敗時，重送也不會寄出兩封。只有 action＝send 會帶 client_id 與重試；其他動作完全不變。
+export const SEND_RETRY_MS = [200, 500, 1000]
+
+/** send 動作的內文補上 client_id（呼叫端自己帶了就沿用）；其他動作、沒有內文原樣回傳 */
+export function withClientId(action, body) {
+  if (action !== 'send' || !body || typeof body !== 'object' || Array.isArray(body)) return body
+  return typeof body.client_id === 'string' && body.client_id ? body : { ...body, client_id: crypto.randomUUID() }
+}
+
+/** 值得重送的失敗：連線失敗、逾時、讀回應失敗（沒有 HTTP 狀態）或閘道暫時錯誤 502／503／504 */
+export function retriable(e) {
+  const s = e?.status
+  return s === undefined || s === null || (s >= 502 && s <= 504)
+}
+
+/** 只有 send 才重試（內文要已經帶 client_id）；其他動作只呼叫一次 */
+export async function retrySend(action, fn, { delays = SEND_RETRY_MS, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
+  if (action !== 'send') return await fn()
+  for (let i = 0; ; i++) {
+    try { return await fn() } catch (e) {
+      if (i >= delays.length || !retriable(e)) throw e
+      await sleep(delays[i])
+    }
+  }
+}
 
 export function createCore({ baseUrl, key, anonKey, log, workDir, apiTimeoutMs = API_TIMEOUT_MS, bellHeartbeatMs = BELL_HEARTBEAT_MS, bellStaleMs = BELL_STALE_MS }) {
   const BASE = baseUrl.replace(/\/+$/, '')
@@ -14,6 +43,11 @@ export function createCore({ baseUrl, key, anonKey, log, workDir, apiTimeoutMs =
   // 整個呼叫（連線、等回應、讀完內容）一個時限。不用 AbortSignal.timeout：它的計時器是 unref 的、訊號也沒人強持有，
   // 曾經懷疑過在長時間運作的行程裡不會觸發（#177，正見的收信停擺）；這裡用一般計時器＋外層再包一道競賽，兩道都擋。
   async function api(action, { method = 'GET', body } = {}) {
+    // 寄信：一次寄信一個 client_id，重試沿用（#1135）；其他動作只呼叫一次
+    const sendBody = body ? withClientId(action, body) : body
+    return await retrySend(action, () => apiOnce(action, { method, body: sendBody }))
+  }
+  async function apiOnce(action, { method = 'GET', body } = {}) {
     const ac = new AbortController()
     let timer
     const work = (async () => {
