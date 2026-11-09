@@ -405,9 +405,9 @@ pub trait EventSource {
 /// 只找這個程式的當機
 pub const CRASH_APP: &str = "wezterm-mux-server.exe";
 /// 只查 Application 記錄、事件 1000、程式名稱完全相符、最近 5 分鐘
-pub const EVENT_QUERY: &str = "*[System[(EventID=1000) and TimeCreated[timediff(@SystemTime) <= 300000]] and EventData[Data[1]='wezterm-mux-server.exe']]";
-/// 只讀這幾個欄位（依序：程式名稱、出錯模組、例外碼、偏移、程序編號、事件時間）
-pub const EVENT_FIELDS: [&str; 6] = ["Event/EventData/Data[1]", "Event/EventData/Data[4]", "Event/EventData/Data[7]", "Event/EventData/Data[8]", "Event/EventData/Data[9]", "Event/System/TimeCreated/@SystemTime"];
+pub const EVENT_QUERY: &str = "*[System[(EventID=1000) and TimeCreated[timediff(@SystemTime) <= 300000]] and EventData[Data[@Name='AppName']='wezterm-mux-server.exe']]";
+/// 只讀這幾個欄位（依序：程式名稱、出錯模組、例外碼、偏移、程序編號、事件時間）。用欄位名稱，不用位置：EvtCreateRenderContext 不接受 Data[1] 這種寫法（實機回 15001）
+pub const EVENT_FIELDS: [&str; 6] = ["Event/EventData/Data[@Name='AppName']", "Event/EventData/Data[@Name='ModuleName']", "Event/EventData/Data[@Name='ExceptionCode']", "Event/EventData/Data[@Name='FaultingOffset']", "Event/EventData/Data[@Name='ProcessId']", "Event/System/TimeCreated/@SystemTime"];
 
 /// 「0xC00000FD」「0x0000000000032CC6」「c00000fd」→「0xc00000fd」「0x32cc6」；不是十六進位回 None
 fn hex_text(s: &str) -> Option<String> {
@@ -512,7 +512,7 @@ impl EventSource for WinEventLog {
 /// 把一筆事件的六個欄位讀出來；任何一項不對就當沒這筆
 #[cfg(windows)]
 fn render_crash(ctx: &EvtH, ev: &EvtH) -> Option<CrashEvent> {
-    use windows_sys::Win32::System::EventLog::{EvtRender, EvtRenderEventValues, EvtVarTypeFileTime, EvtVarTypeString, EVT_VARIANT};
+    use windows_sys::Win32::System::EventLog::{EvtRender, EvtRenderEventValues, EvtVarTypeFileTime, EvtVarTypeHexInt32, EvtVarTypeHexInt64, EvtVarTypeString, EvtVarTypeUInt32, EvtVarTypeUInt64, EVT_VARIANT};
     let (mut used, mut count) = (0u32, 0u32);
     // 先問需要多大的緩衝區
     // SAFETY: 緩衝區給空的，只拿大小
@@ -527,16 +527,24 @@ fn render_crash(ctx: &EvtH, ev: &EvtH) -> Option<CrashEvent> {
         return None;
     }
     let vars = buf.as_ptr().cast::<EVT_VARIANT>();
+    // 欄位可能是字串，也可能是數字（實機：ProcessId 是 EvtVarTypeHexInt32）；數字一律寫成十六進位字串，後面照字串解析
     let text = |i: usize| -> Option<String> {
-        // SAFETY: i < count，字串指標指在 buf 內，以 0 結尾
+        // SAFETY: i < count；依 Type 讀對應的聯合欄位，字串指標指在 buf 內、以 0 結尾
         unsafe {
             let v = &*vars.add(i);
-            if v.Type != EvtVarTypeString as u32 || v.Anonymous.StringVal.is_null() {
-                return None;
+            match v.Type {
+                t if t == EvtVarTypeString as u32 => {
+                    let p = v.Anonymous.StringVal;
+                    if p.is_null() {
+                        return None;
+                    }
+                    let len = (0..512).take_while(|&k| *p.add(k) != 0).count();
+                    Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
+                }
+                t if t == EvtVarTypeUInt32 as u32 || t == EvtVarTypeHexInt32 as u32 => Some(format!("0x{:x}", v.Anonymous.UInt32Val)),
+                t if t == EvtVarTypeUInt64 as u32 || t == EvtVarTypeHexInt64 as u32 => Some(format!("0x{:x}", v.Anonymous.UInt64Val)),
+                _ => None,
             }
-            let p = v.Anonymous.StringVal;
-            let len = (0..512).take_while(|&k| *p.add(k) != 0).count();
-            Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
         }
     };
     // SAFETY: 第 6 個是時間
@@ -1014,10 +1022,10 @@ mod tests {
         }
         assert_eq!(
             EVENT_FIELDS,
-            ["Event/EventData/Data[1]", "Event/EventData/Data[4]", "Event/EventData/Data[7]", "Event/EventData/Data[8]", "Event/EventData/Data[9]", "Event/System/TimeCreated/@SystemTime"]
+            ["Event/EventData/Data[@Name='AppName']", "Event/EventData/Data[@Name='ModuleName']", "Event/EventData/Data[@Name='ExceptionCode']", "Event/EventData/Data[@Name='FaultingOffset']", "Event/EventData/Data[@Name='ProcessId']", "Event/System/TimeCreated/@SystemTime"]
         );
         assert_eq!(src.matches("\"Event/").count(), 6, "原始碼裡只有這六條路徑");
-        assert!(EVENT_QUERY.contains("EventID=1000") && EVENT_QUERY.contains("Data[1]='wezterm-mux-server.exe'") && EVENT_QUERY.contains("timediff(@SystemTime) <= 300000"));
+        assert!(EVENT_QUERY.contains("EventID=1000") && EVENT_QUERY.contains("Data[@Name='AppName']='wezterm-mux-server.exe'") && EVENT_QUERY.contains("timediff(@SystemTime) <= 300000"));
         assert_eq!(src.matches("wide(\"Application\")").count(), 1, "只查 Application");
     }
 
