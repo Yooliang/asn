@@ -648,6 +648,8 @@ impl WriteGate {
 async fn agy_換位置一輪只給一次_再寫錯位置照舊中止並明確回報() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
+    let gate = WriteGate::new();
+    let gd = gate.dir();
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("USERPROFILE", &up), ("FAKE_AGY_STUBBORN", "1"), ("FAKE_AGY_WRITE_GATE", &gd)], "acp", &[]).await;
     let target = h.work.path().join("outside.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", target.display()))).await;
