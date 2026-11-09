@@ -1,7 +1,7 @@
 // 收信卡住監控依收件代理判斷（20261112100000_inbox_watch_per_agent.sql；todo-next-176，asn真 審定）：
 // 1. 靜態：security definer＋search_path 空、只授權 service_role；新欄位有預設值或可空；回復檔的函式逐字等於通知集中那一版。
 // 2. 實跑（pglite，沒裝就略過）：單一代理慢不通知、60 分鐘才通知；兩個代理同時卡就通知；不存在的代理只記錄；
-//    影子跑記「會不會通知」且每段卡住只記一次；開寄信後補寄；恢復信寫卡了多久、送到幾封；舊的列不受影響；回復檔跑得回去。
+//    影子跑記「會不會通知」且每段卡住只記一次；開寄信後補寄；恢復信只寫卡了多久；舊的列不受影響；回復檔跑得回去。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -145,7 +145,7 @@ test('實跑：兩個代理同時卡 15 分鐘以上＝標成卡住當下就達�
   assert.notEqual((await st()).episode_oldest_at, null)
 })
 
-test('實跑：寄過卡住後恢復＝寄「恢復」，寫卡了多久、期間送到幾封；紀錄 recovered 的 would_notify＝true', { skip }, async () => {
+test('實跑：寄過卡住後恢復＝寄「恢復」，只寫卡了多久、不寫封數；紀錄 recovered 的 would_notify＝true', { skip }, async () => {
   const { known, unacked, ackAll, run, log, mails, age } = await boot()
   await known('A', '2 hours'); await known('B', '2 hours')
   await unacked('A', '65 minutes', 4); await unacked('B', '50 minutes', 3)
@@ -154,7 +154,7 @@ test('實跑：寄過卡住後恢復＝寄「恢復」，寫卡了多久、期�
   assert.equal((await run(true)).sent, 1)
   await ackAll()
   assert.equal((await run(true)).sent, 1)
-  assert.match((await mails()).at(-1), /^工作機：收信恢復了\n卡了約 65 分鐘，期間的 7 封信都送到了。$/)
+  assert.match((await mails()).at(-1), /^工作機：收信恢復了\n卡了約 65 分鐘，現在都送到了。$/)
   assert.deepEqual((await log()).at(-1), { note: 'recovered', would_notify: true, cnt: 0, agents: 0 })
 })
 
