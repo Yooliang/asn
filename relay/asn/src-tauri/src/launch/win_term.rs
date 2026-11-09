@@ -417,7 +417,7 @@ mod tests {
         let wt = include_str!("win_term.rs").split("#[cfg(test)]").next().unwrap();
         assert!(wt.contains("open_window_gated(wezterm_windows(),"), "open_window_real 用開關決定");
         let term = include_str!("term.rs");
-        let live = term.split("pub fn live(").nth(1).unwrap().split("#[cfg(feature = \"gui\")]").next().unwrap();
+        let live = term.split("fn live_with(").nth(1).unwrap().split("#[cfg(feature = \"gui\")]").next().unwrap();
         assert!(live.contains("switches_from(") && live.contains("set_wezterm_windows(wez)") && live.contains("set_use_mux(mux)") && live.contains("set_hold_config(wez)"), "live() 讀一次、mux 只吃 switches_from 算出來的值");
         assert!(!live.contains("set_use_mux(std::env"), "mux 不能直接吃環境變數");
         let own = term.split("pub(crate) fn own_gui_windows()").nth(1).unwrap().split("pub(crate) fn stop_own_gui").next().unwrap();
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn 守門_live_真的把設定頁的開關套進去_並記下這次啟動的結果() {
         let term = include_str!("term.rs");
-        let live = term.split("pub fn live(").nth(1).expect("有 live()").split("
+        let live = term.split("fn live_with(").nth(1).expect("有 live()").split("
 }
 ").next().unwrap();
         assert!(live.contains("term_server_wanted(") && live.contains("read_settings(data_dir).term_server_off"), "要讀設定頁的值並和環境變數一起判斷");

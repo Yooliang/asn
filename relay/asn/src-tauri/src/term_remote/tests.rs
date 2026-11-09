@@ -103,7 +103,7 @@ mod gui_tests {
         let d = TempDir::new().unwrap();
         let (url, seen) = fake_term_server(vec![]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
-        let terms = crate::launch::term::live(d.path());
+        let terms = crate::launch::term::live_for_test(d.path());
         register_fake_outgoing("1", "11111111-1111-1111-1111-111111111111", "僅本機", false);
         let req = TermSendReq { id: "1".into(), text: "僅本機".into(), enter: false };
         let _ = local_confirm_send(&relay, &terms, d.path(), &req).await;
@@ -150,7 +150,7 @@ mod gui_tests {
         let row = vec![json!({ "id": "11111111-1111-1111-1111-111111111111", "kind": "send", "term_id": "1", "body_hash": "b".repeat(64), "enter": false })];
         let (url, seen) = fake_term_server(vec![row]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
-        let terms = crate::launch::term::live(d.path());
+        let terms = crate::launch::term::live_for_test(d.path());
         register_fake_outgoing("1", "11111111-1111-1111-1111-111111111111", "實際文字", false);
         poll_once(&relay, &terms, d.path()).await;
         let reqs = seen.lock().unwrap();
@@ -164,7 +164,7 @@ mod gui_tests {
         let d = TempDir::new().unwrap();
         let (url, _seen) = fake_term_server(vec![]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
-        let terms = crate::launch::term::live(d.path());
+        let terms = crate::launch::term::live_for_test(d.path());
         mark_handled_for_test("1", "同一段", true);
         let same = TermSendReq { id: "1".into(), text: "同一段".into(), enter: true };
         let e = local_confirm_send(&relay, &terms, d.path(), &same).await.unwrap_err();
@@ -189,7 +189,7 @@ mod gui_tests {
         let row = vec![json!({ "id": rid, "kind": "send", "term_id": "1", "body_hash": hash_send("要送", false), "enter": false })];
         let (url, seen) = fake_term_server(vec![row]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
-        let terms = crate::launch::term::live(d.path());   // 沒有編號 1 的終端：手機那筆一定執行失敗
+        let terms = crate::launch::term::live_for_test(d.path());   // 沒有編號 1 的終端：手機那筆一定執行失敗
         register_fake_outgoing("1", rid, "要送", false);
         poll_once(&relay, &terms, d.path()).await;
         assert!(seen.lock().unwrap().iter().any(|r| r.contains("term_req_result") && r.contains("failed")));
@@ -206,7 +206,7 @@ mod gui_tests {
         let row = vec![json!({ "id": rid, "kind": "send", "term_id": "1", "body_hash": hash_send("搶先", false), "enter": false })];
         let (url, seen) = fake_term_server(vec![row]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
-        let terms = crate::launch::term::live(d.path());
+        let terms = crate::launch::term::live_for_test(d.path());
         register_fake_outgoing("1", rid, "搶先", false);
         let req = TermSendReq { id: "1".into(), text: "搶先".into(), enter: false };
         let _ = local_confirm_send(&relay, &terms, d.path(), &req).await;   // 本機先確認：那筆被拿走並通知後台取消

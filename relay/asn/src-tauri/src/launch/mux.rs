@@ -64,11 +64,11 @@ pub struct MuxPaths {
 
 /// mux 檔案的上層資料夾：Windows 是 `%LOCALAPPDATA%`；其他平台（Linux）是 `$XDG_DATA_HOME`（要是絕對路徑），
 /// 沒設就 `$HOME/.local/share`。找不到回 None。正式程式一律從這裡取，不各自讀環境變數
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 pub fn default_base() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
 }
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(test)))]
 pub fn default_base() -> Option<PathBuf> {
     let absolute = |v: std::ffi::OsString| {
         let p = PathBuf::from(v);
@@ -77,8 +77,16 @@ pub fn default_base() -> Option<PathBuf> {
     std::env::var_os("XDG_DATA_HOME").and_then(absolute).or_else(|| std::env::var_os("HOME").and_then(absolute).map(|h| h.join(".local").join("share")))
 }
 
+/// 測試中的 default_base：永遠回暫存資料夾，絕不解析到本機真正的 %LOCALAPPDATA%／XDG（見 test_guard）
+#[cfg(test)]
+pub fn default_base() -> Option<PathBuf> {
+    Some(crate::test_guard::mux_base())
+}
+
 /// 固定放短路徑：`<default_base>\ASN\m`（Windows 就是 `%LOCALAPPDATA%\ASN\m`）。路徑太長就拒絕（WezTerm 起不來，還會留下看不懂的錯）
 pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
+    #[cfg(test)]
+    crate::test_guard::assert_not_real(local_app_data, "mux::paths");
     let dir = local_app_data.join("ASN").join("m");
     let sock = dir.join("sock");
     if sock.as_os_str().len() >= SOCK_MAX {

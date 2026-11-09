@@ -3085,7 +3085,23 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
 
 #[cfg(feature = "gui")]
 pub fn live(data_dir: &Path) -> LiveTerms {
+    // 正式啟動：mux 用本機真的位置（default_base）；背景工作（取 WezTerm、收空 mux）照常開。
+    // 測試編譯時 default_base 會回暫存資料夾、背景工作一律不開（見 live_with）
+    live_with(data_dir, super::mux::default_base(), !cfg!(test))
+}
+
+/// 測試專用：mux 資料夾固定用新的暫存位置、不開任何背景工作。測試一律走這個，不直接呼叫 `live`（有原始碼守衛測試把關）
+#[cfg(all(test, feature = "gui"))]
+pub fn live_for_test(data_dir: &Path) -> LiveTerms {
+    live_with(data_dir, Some(crate::test_guard::mux_base()), false)
+}
+
+/// `live` 的本體：mux 的上層資料夾與「是否開背景工作」都由呼叫的人給。
+/// `background`＝false 時不開：背景取 WezTerm（wezterm_fetch）與啟動時收空 mux（asn-mux-collect，會對真的 mux 下 stop）
+#[cfg(feature = "gui")]
+fn live_with(data_dir: &Path, mux_base: Option<PathBuf>, background: bool) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
+    svc.mux_base = mux_base;
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
     // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
@@ -3097,7 +3113,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
         let user_on = crate::bridge::read_settings(data_dir).term_server_on;
         let found = wezterm::locate(&wezterm::RealFs).is_ok();
         // 開了卻找不到 wezterm：背景去官方 GitHub 取固定版本（見 wezterm_fetch）；取好後重開 ASN 才會用上
-        if super::wezterm_fetch::should_fetch(user_on, env_wez.as_deref(), env_mux.as_deref(), found) {
+        if background && super::wezterm_fetch::should_fetch(user_on, env_wez.as_deref(), env_mux.as_deref(), found) {
             super::wezterm_fetch::spawn_background(false);
         }
         super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), user_on, found)
@@ -3134,7 +3150,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
         }
     }
     // ASN 當掉後可能留下空的 mux：背景查一次就好，不拖慢啟動、不重試、不會起新的（cli 全帶 --no-auto-start）。截圖模式不動
-    if mux && !std::env::args().any(|a| a == "--shot") {
+    if background && mux && !std::env::args().any(|a| a == "--shot") {
         if let (Ok(dir), Some(Ok(paths))) = (svc.dir(), svc.mux_base.as_ref().map(|b| super::mux::paths(b))) {
             let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
             let spawned = std::thread::Builder::new().name("asn-mux-collect".into()).spawn(move || {
