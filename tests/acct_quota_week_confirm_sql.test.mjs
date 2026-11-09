@@ -227,3 +227,18 @@ test('實跑：端到端——舊窗（讀取時間較早、沒有重置時間�
   assert.equal(w.left_pct, 52)
   assert.equal(w.resets_at, rt)
 })
+
+test('實跑：讀取時間比後台現在晚超過 5 分鐘拒收（future_read）；時間正確的照常收', { skip }, async () => {
+  const db = await setup()
+  const rt = iso(Date.now() + 3 * D)
+  const rep1 = left => report(db, 'W', [{ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, windows: [{ name: 'weekly', left_pct: left, resets_at: rt, read_at: iso(Date.now() - 60_000) }] }])
+  assert.deepEqual((await rep1(60)).skipped, [])
+  // 一小時後的 read_at：windows_clean 本來就丟掉 10 分鐘以後的，直接打 decide 驗入口這關
+  const dec = (old, nw) => one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, now()) r', ['claude', 'weekly', JSON.stringify(old), JSON.stringify(nw)])
+  const old = { left_pct: 60, resets_at: rt, read_at: iso(Date.now() - 60_000) }
+  assert.equal((await dec(old, { left_pct: 10, resets_at: rt, read_at: iso(Date.now() + H) })).reason, 'future_read')
+  assert.equal((await dec(null, { left_pct: 10, resets_at: rt, read_at: iso(Date.now() + H) })).reason, 'future_read', '沒有已存窗也一樣')
+  assert.equal((await dec(old, { left_pct: 10, resets_at: rt, read_at: iso(Date.now() + 2 * 60_000) })).reason, null, '5 分鐘內的誤差照收')
+  assert.deepEqual((await rep1(40)).skipped, [])
+  assert.equal((await gotWeekly(db)).left_pct, 40)
+})
