@@ -1,0 +1,290 @@
+[
+  [
+    "有指令與路徑",
+    {
+      "category": "execute",
+      "paths": [
+        "/a/b.txt"
+      ],
+      "summary": "執行指令：指令：ls -la"
+    }
+  ],
+  [
+    "指令鍵 command",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：git status"
+    }
+  ],
+  [
+    "兩種指令鍵並存_CommandLine 優先",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：first"
+    }
+  ],
+  [
+    "指令是空字串_退回路徑",
+    {
+      "category": "execute",
+      "paths": [
+        "/p"
+      ],
+      "summary": "執行指令：檔案：/p"
+    }
+  ],
+  [
+    "指令不是字串",
+    {
+      "category": "execute",
+      "paths": [
+        "/p"
+      ],
+      "summary": "執行指令：檔案：/p"
+    }
+  ],
+  [
+    "沒有參數",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：list_dir"
+    }
+  ],
+  [
+    "參數是 null",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：list_dir"
+    }
+  ],
+  [
+    "參數是空物件",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：view_file"
+    }
+  ],
+  [
+    "參數是陣列",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：view_file"
+    }
+  ],
+  [
+    "參數是字串",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：view_file"
+    }
+  ],
+  [
+    "超長指令_截 160",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：echo 長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長…"
+    }
+  ],
+  [
+    "恰好 160 字指令",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  [
+    "161 字指令",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    }
+  ],
+  [
+    "超長路徑_摘要截 160_路徑本身不截",
+    {
+      "category": "read",
+      "paths": [
+        "/work/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+      ],
+      "summary": "讀取：檔案：/work/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+    }
+  ],
+  [
+    "超長工具名_截 60",
+    {
+      "category": "internal",
+      "paths": [],
+      "summary": "internal：x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_to…"
+    }
+  ],
+  [
+    "無參數的未知工具名",
+    {
+      "category": "internal",
+      "paths": [],
+      "summary": "internal：think_about_it"
+    }
+  ],
+  [
+    "path 命名",
+    {
+      "category": "read",
+      "paths": [
+        "/w/a.txt"
+      ],
+      "summary": "讀取：檔案：/w/a.txt"
+    }
+  ],
+  [
+    "file 命名",
+    {
+      "category": "write",
+      "paths": [
+        "/w/b.txt"
+      ],
+      "summary": "寫入：檔案：/w/b.txt"
+    }
+  ],
+  [
+    "dir 命名",
+    {
+      "category": "read",
+      "paths": [
+        "/w/d"
+      ],
+      "summary": "讀取：檔案：/w/d"
+    }
+  ],
+  [
+    "target 命名",
+    {
+      "category": "write",
+      "paths": [
+        "/w/t"
+      ],
+      "summary": "寫入：檔案：/w/t"
+    }
+  ],
+  [
+    "多個路徑參數_去重",
+    {
+      "category": "write",
+      "paths": [
+        "/w/x",
+        "/w/y"
+      ],
+      "summary": "寫入：檔案：/w/x"
+    }
+  ],
+  [
+    "路徑參數是空字串或非字串",
+    {
+      "category": "read",
+      "paths": [],
+      "summary": "讀取：view_file"
+    }
+  ],
+  [
+    "鍵名大小寫混合",
+    {
+      "category": "read",
+      "paths": [
+        "/w/u",
+        "/w/v"
+      ],
+      "summary": "讀取：檔案：/w/u"
+    }
+  ],
+  [
+    "機密_sk 金鑰在指令",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：curl -H x ［已遮蔽］"
+    }
+  ],
+  [
+    "機密_ghp 金鑰在指令",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：git clone https://［已遮蔽］"
+    }
+  ],
+  [
+    "機密_key=value",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：export API_KEY=［已遮蔽］ && run"
+    }
+  ],
+  [
+    "機密_Bearer 憑證",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：curl -H Authorization: ［已遮蔽］ url"
+    }
+  ],
+  [
+    "機密_token 後接值",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：tool --token: ［已遮蔽］ --other"
+    }
+  ],
+  [
+    "機密_password= 空值接下一詞",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：login password= ［已遮蔽］"
+    }
+  ],
+  [
+    "機密在路徑",
+    {
+      "category": "read",
+      "paths": [
+        "/w/sk-FAKEFAKEFAKEFAKEFAKEFAKE"
+      ],
+      "summary": "讀取：檔案：/w/［已遮蔽］"
+    }
+  ],
+  [
+    "內部工具",
+    {
+      "category": "internal",
+      "paths": [],
+      "summary": "internal：finish"
+    }
+  ],
+  [
+    "網路工具",
+    {
+      "category": "network",
+      "paths": [],
+      "summary": "上網：read_url_content"
+    }
+  ],
+  [
+    "指令前後空白與多空白",
+    {
+      "category": "execute",
+      "paths": [],
+      "summary": "執行指令：指令：ls -la"
+    }
+  ]
+]
