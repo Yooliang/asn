@@ -3478,6 +3478,36 @@ pub fn start_live(terms: &LiveTerms, profile: &str, cwd: &str, data_dir: &Path) 
     Ok(TermStarted { id })
 }
 
+/// 遠端（同一個人的其他設備）要開 agy／grok 終端的入口。只收 tool、name、cwd：
+/// 指令與參數來自本機啟動設定（TermService::start 內的 resolve_command），資料夾只認傳進來的設定的白名單。
+/// 不替資料夾補授權：遠端沒有人在本機按確認，白名單由呼叫端（bridge/launcher.rs）用遠端設定組好。
+/// name 只用來當分頁標題（改名失敗不影響已開好的終端）。回終端編號
+#[cfg(feature = "gui")]
+pub fn start_remote(terms: &LiveTerms, tool: &str, name: &str, cwd: &str, config: &LaunchConfig) -> Result<String, String> {
+    terms.ensure_config()?;
+    let id = terms.start(tool, cwd, config)?;
+    let _ = terms.rename(&id, name);
+    Ok(id)
+}
+
+/// 本機啟動設定裡找得到這個終端工具嗎（只看設定與檔案是否存在／PATH，不下載、不執行）。tool＝agy 或 grok
+pub(crate) fn cli_detectable(config: &LaunchConfig, tool: &str) -> bool {
+    resolve_command(tool, config).is_ok_and(|c| crate::bridge::engines::partner_queue::binary_exists(&c))
+}
+
+/// 畫面那一層交進來的終端服務；沒有畫面的建置、測試＝None
+#[cfg(feature = "gui")]
+pub(crate) fn global() -> Option<std::sync::Arc<LiveTerms>> {
+    #[cfg(test)]
+    {
+        None
+    }
+    #[cfg(not(test))]
+    {
+        GLOBAL.get().cloned()
+    }
+}
+
 #[cfg(all(test, windows, feature = "gui"))]
 #[path = "term_live_mux.rs"]
 mod live_mux;

@@ -12,6 +12,9 @@
 //! - 遠端可開的項目（`remote_allowed`）：Claude 視窗、pi 視窗（沿用 launch/pi.rs 的擴充載入）、Grok／Gemini 背景工作者
 //!   （排進 `partner-queue.jsonl`，由 engines/partner_queue.rs 重驗後建工作者；等它記進名冊才回報 ok，失敗讀 partner-queue-failed.jsonl 回中文原因）。
 //!   Codex 暫不開放：尚未實機驗證。
+//! - asn終端（原生 cli）：`gemini-term`（agy）、`grok-term`（grok）兩個固定 id（#931）。摘要只在「同意遠端開視窗、終端服務在用、
+//!   本機偵測得到那個 CLI」三者都成立時才帶；執行前再驗一次同樣三件事，加上既有的名字／重名／資料夾白名單／每小時上限。
+//!   遠端只能給 profile、名稱、資料夾（不收模型、第一句話）；指令來自本機設定。
 use super::core::BridgeLog;
 use crate::launch::config::{check_launch, load_launch_config_from, Bootstrap, LaunchConfig, LaunchReq};
 use crate::launch::profiles::{LaunchMode, Profile};
@@ -29,6 +32,9 @@ pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上�
 pub const NO_CONFIG: &str = "這台電腦還沒有可用的啟動設定";
 pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：pi 可能在問要不要信任這個資料夾，或要登入、選模型，請到那台電腦選一次；也可能是 pi 的 ASN 擴充沒載入";
 pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來：請確認這台電腦的 ASN 還在執行；稍後會自動補上結果";
+pub const TERM_EXTRA: &str = "asn終端只收名稱與資料夾，不支援指定模型或第一句話";
+pub const TERM_NO_CONSENT: &str = "這台電腦沒有開啟「允許我的其他設備替這台開新視窗」";
+pub const TERM_NO_SERVICE: &str = "這台電腦的 asn終端服務目前沒有在使用";
 pub const NO_REMOTE_PROFILE: &str = "沒有可以從遠端開啟的設定（目前支援 Claude、pi、Grok、Gemini）";
 
 fn now_ms() -> u64 {
@@ -63,6 +69,34 @@ pub trait LaunchEnv: Send + Sync {
     fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _work_dir: &Path) -> Result<(), String> {
         Err("這台電腦不能開背景夥伴".into())
     }
+    /// 使用者有沒有打開「允許我的其他設備替這台開新視窗」（asn終端每次執行前都重查，不信任先前的摘要）。預設沒有
+    fn remote_consent(&self) -> bool {
+        false
+    }
+    /// asn終端服務這次啟動有在使用嗎。預設沒有
+    fn term_service_active(&self) -> bool {
+        false
+    }
+    /// 本機設定裡找得到這個 CLI（tool＝agy 或 grok）嗎：只看設定與檔案／PATH，不下載、不執行。預設找不到
+    fn term_cli_found(&self, _config: &LaunchConfig, _tool: &str) -> bool {
+        false
+    }
+    /// 在 asn終端開 agy／grok，回終端編號。只收 tool、name、cwd，指令來自本機設定；config 的資料夾白名單是遠端設定的，不替資料夾補授權
+    fn start_term(&self, _config: &LaunchConfig, _tool: &str, _name: &str, _cwd: &str) -> Result<String, String> {
+        Err("這台電腦不能開 asn終端".into())
+    }
+}
+
+/// asn終端的固定項目：（遠端用的 id, 顯示名稱, 終端工具, 本機啟動設定裡的項目編號）。遠端只能指名這兩個 id，別的一律不收
+const TERM_PROFILES: [(&str, &str, &str, &str); 2] = [("gemini-term", "Gemini（asn終端）", "agy", "gemini"), ("grok-term", "Grok（asn終端）", "grok", "grok")];
+
+/// 遠端要開的是 asn終端嗎：是就回終端工具（agy 或 grok），完全相等才算，其他 id 回 None
+pub fn remote_term_tool(id: &str) -> Option<&'static str> {
+    TERM_PROFILES.iter().find(|r| r.0 == id).map(|r| r.2)
+}
+
+fn term_config_key(tool: &str) -> &'static str {
+    TERM_PROFILES.iter().find(|r| r.2 == tool).map(|r| r.3).unwrap_or("")
 }
 
 /// 遠端可以開哪些項目：Claude 視窗（沒寫引擎的自訂 profile 視為 Claude）、pi 視窗、Grok／Gemini 背景工作者。
@@ -213,6 +247,28 @@ impl LaunchEnv for SystemEnv {
         }
         queue_background(&pq::SystemQueueEnv { data_dir: Some(self.data_dir.clone()) }, profile, name, cwd, work_dir)
     }
+    fn remote_consent(&self) -> bool {
+        super::read_settings(&self.data_dir).allow_remote_launch
+    }
+    fn term_service_active(&self) -> bool {
+        crate::launch::win_term::term_server_active()
+    }
+    fn term_cli_found(&self, config: &LaunchConfig, tool: &str) -> bool {
+        crate::launch::term::cli_detectable(config, tool)
+    }
+    fn start_term(&self, config: &LaunchConfig, tool: &str, name: &str, cwd: &str) -> Result<String, String> {
+        // 用畫面那一層交進來的同一份終端服務（term::global）；不經本機點按的那條路，也不替資料夾補授權
+        #[cfg(feature = "gui")]
+        {
+            let terms = crate::launch::term::global().ok_or_else(|| "終端服務還沒準備好".to_string())?;
+            crate::launch::term::start_remote(&terms, tool, name, cwd, config)
+        }
+        #[cfg(not(feature = "gui"))]
+        {
+            let _ = (config, tool, name, cwd);
+            Err("這個版本沒有 asn終端".into())
+        }
+    }
 }
 
 /// 排進佇列前用消化端同一套規則先驗一次（授權資料夾、名字、執行檔），不通過就當場回中文原因；通過才附加一行
@@ -268,6 +324,14 @@ impl Launcher {
                         s["pi_models"] = Value::Array(models);
                     }
                 }
+                // asn終端：三個條件都成立才帶；每次回報都重算（服務關掉、同意撤銷、CLI 不見，下一次摘要就沒有）
+                for (id, label, tool, _) in TERM_PROFILES {
+                    if self.term_gate(&c, tool).is_ok() {
+                        if let Some(a) = s["profiles"].as_array_mut() {
+                            a.push(json!({ "id": id, "label": label, "engine": tool, "mode": "term" }));
+                        }
+                    }
+                }
                 s
             }
             Err(e) => {
@@ -310,9 +374,10 @@ impl Launcher {
     }
 
     /// 執行前再驗一次；通過回 Ok(正規化後的 cwd)，不通過回原因（中文，會回報給別台）
-    fn verify(&self, cfg: &LaunchConfig, l: &Value, names: &[String]) -> Result<String, String> {
+    /// key＝asn終端時改用本機啟動設定裡的項目編號查（遠端的 gemini-term 對 gemini）；其他沒帶＝照請求的 profile
+    fn verify(&self, cfg: &LaunchConfig, l: &Value, names: &[String], key: Option<&str>) -> Result<String, String> {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("");
-        let (profile, name) = (s("profile"), s("name"));
+        let (profile, name) = (key.unwrap_or(s("profile")), s("name"));
         let mut req = LaunchReq { profile, name, cwd: s("cwd").to_string() };
         let now = now_ms();
         check_launch(cfg, &mut req, &[], now)?;
@@ -331,6 +396,20 @@ impl Launcher {
     /// 帶了就要：是 pi 的啟動設定、格式對、而且在這台 pi 列得出來的模型裡；不合就拒絕並說明，不退回預設模型
     fn remote_pi_args(&self, l: &Value, is_pi: bool) -> Result<Vec<String>, String> {
         remote_pi_args(l, is_pi, &|p, m| self.env.pi_listed(p, m))
+    }
+
+    /// asn終端的三個條件（摘要與執行前都用這一個）：同意遠端開視窗、終端服務在用、本機偵測得到 CLI
+    fn term_gate(&self, cfg: &LaunchConfig, tool: &str) -> Result<(), String> {
+        if !self.env.remote_consent() {
+            return Err(TERM_NO_CONSENT.into());
+        }
+        if !self.env.term_service_active() {
+            return Err(TERM_NO_SERVICE.into());
+        }
+        if !self.env.term_cli_found(cfg, tool) {
+            return Err(format!("這台電腦找不到 {tool}"));
+        }
+        Ok(())
     }
 
     /// 取走待辦並逐筆處理。驗證與開視窗在這裡做完；等視窗出現的部分丟到背景工作，不擋住收信
@@ -362,7 +441,10 @@ impl Launcher {
             Ok(c) => c,
             Err(e) => return self.report(&l, "failed", if e.is_empty() { NO_CONFIG } else { &e }).await,
         };
-        let cwd = match self.verify(&cfg, &l, &names) {
+        if let Some(tool) = remote_term_tool(l.get("profile").and_then(Value::as_str).unwrap_or("")) {
+            return self.begin_term(l, tool, cfg, names).await;
+        }
+        let cwd = match self.verify(&cfg, &l, &names, None) {
             Ok(c) => c,
             Err(why) => return self.report(&l, "failed", &why).await,
         };
@@ -421,6 +503,39 @@ impl Launcher {
             me.wait_for_window(l, if is_pi { PI_HINT } else { TRUST_HINT }).await;
             me.inflight.lock().unwrap().remove(&lower);
         });
+    }
+
+    /// asn終端（gemini-term／grok-term）：不信任摘要，執行前重驗三個條件，再走和視窗同一套的名字／重名／白名單／每小時上限驗證。
+    /// 遠端只能給 profile、名稱、資料夾；帶了模型或第一句話就拒絕。開成功就回 ok（終端不會登記成收發室視窗，沒有東西可等）
+    async fn begin_term(self: &Arc<Self>, l: Value, tool: &'static str, cfg: LaunchConfig, names: Vec<String>) {
+        let present = |k: &str| l.get(k).is_some_and(|v| !v.is_null() && v.as_str().is_none_or(|x| !x.trim().is_empty()));
+        if present("pi_provider") || present("pi_model") || present("first_message") {
+            return self.report(&l, "failed", TERM_EXTRA).await;
+        }
+        let (me0, cfg0) = (self.clone(), cfg.clone());
+        if let Err(why) = tokio::task::spawn_blocking(move || me0.term_gate(&cfg0, tool)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r) {
+            return self.report(&l, "failed", &why).await;
+        }
+        let cwd = match self.verify(&cfg, &l, &names, Some(term_config_key(tool))) {
+            Ok(c) => c,
+            Err(why) => return self.report(&l, "failed", &why).await,
+        };
+        let name = l.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+        let mut h = self.read_history();
+        h.push(now_ms());
+        self.write_history(&h);
+        let lower = name.to_lowercase();
+        self.inflight.lock().unwrap().insert(lower.clone());
+        let (env, n2) = (self.env.clone(), name.clone());
+        let started = tokio::task::spawn_blocking(move || env.start_term(&cfg, tool, &n2, &cwd)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
+        self.inflight.lock().unwrap().remove(&lower);
+        match started {
+            Ok(id) => {
+                self.record(&l, "spawned", &format!("term={id}"));
+                self.report(&l, "ok", &format!("{name} 已在 asn終端開啟")).await;
+            }
+            Err(e) => self.report(&l, "failed", &format!("開不起來：{e}")).await,
+        }
     }
 
     async fn wait_for_window(&self, l: Value, hint: &str) {

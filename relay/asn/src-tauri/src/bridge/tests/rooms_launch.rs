@@ -566,6 +566,13 @@ struct FakeEnv {
     pi_list: Vec<(String, String)>,
     /// start 收到的 pi 參數
     pi_args: Mutex<Vec<Vec<String>>>,
+    /// asn終端（#931）：設定裡放 gemini／grok；同意、終端服務、CLI 偵測三個條件可隨時切換；start_term 收到的（工具, 名稱, 資料夾）
+    term_profiles: bool,
+    term_consent: std::sync::atomic::AtomicBool,
+    term_active: std::sync::atomic::AtomicBool,
+    term_cli: std::sync::atomic::AtomicBool,
+    term_fail: bool,
+    term_started: Mutex<Vec<(String, String, String)>>,
 }
 impl FakeEnv {
     fn new(sessions: &Path, allow: &Path) -> Arc<FakeEnv> {
@@ -587,6 +594,12 @@ impl FakeEnv {
             live: vec![],
             pi_list: vec![],
             pi_args: Mutex::new(vec![]),
+            term_profiles: false,
+            term_consent: std::sync::atomic::AtomicBool::new(false),
+            term_active: std::sync::atomic::AtomicBool::new(false),
+            term_cli: std::sync::atomic::AtomicBool::new(false),
+            term_fail: false,
+            term_started: Mutex::new(vec![]),
         })
     }
     fn with(sessions: &Path, allow: &Path, f: impl FnOnce(&mut FakeEnv)) -> Arc<FakeEnv> {
@@ -609,7 +622,27 @@ impl LaunchEnv for FakeEnv {
             profiles.insert("grok".to_string(), Profile { label: "Grok（背景運行、內建通道）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
             profiles.insert("pi".to_string(), Profile { label: "pi（互動視窗）".into(), command: "C:\\fake\\pi.cmd".into(), args: vec![], engine: "pi".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
         }
+        if self.term_profiles {
+            profiles.insert("grok".to_string(), Profile { label: "Grok（背景運行、內建通道）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
+            profiles.insert("gemini".to_string(), Profile { label: "Gemini（背景運行、內建通道）".into(), command: "C:\\fake\\agy.exe".into(), args: vec![], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
+        }
         Ok(LaunchConfig { profiles, cwd_allow: self.allow.clone(), max_per_hour: self.max_per_hour })
+    }
+    fn remote_consent(&self) -> bool {
+        self.term_consent.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn term_service_active(&self) -> bool {
+        self.term_active.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn term_cli_found(&self, _config: &LaunchConfig, _tool: &str) -> bool {
+        self.term_cli.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn start_term(&self, _config: &LaunchConfig, tool: &str, name: &str, cwd: &str) -> Result<String, String> {
+        self.term_started.lock().unwrap().push((tool.into(), name.into(), cwd.into()));
+        if self.term_fail {
+            return Err("WezTerm 開不起來".into());
+        }
+        Ok("t-1".into())
     }
     fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
         if let Some(e) = &self.enq_err {
@@ -692,6 +725,173 @@ async fn wait_until(f: impl Fn() -> bool) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert!(f(), "條件在 10 秒內沒達成");
+}
+
+// ---- asn終端（#931）：gemini-term／grok-term ----
+
+fn term_env(s: &Path, p: &Path, f: impl FnOnce(&mut FakeEnv)) -> Arc<FakeEnv> {
+    FakeEnv::with(s, p, |e| {
+        e.term_profiles = true;
+        e.term_consent = std::sync::atomic::AtomicBool::new(true);
+        e.term_active = std::sync::atomic::AtomicBool::new(true);
+        e.term_cli = std::sync::atomic::AtomicBool::new(true);
+        f(e);
+    })
+}
+fn flag(b: &std::sync::atomic::AtomicBool, v: bool) {
+    b.store(v, std::sync::atomic::Ordering::SeqCst);
+}
+fn term_ids(h: &H) -> Vec<String> {
+    let rosters = h.fr.rosters();
+    rosters.last().unwrap()["launcher"]["profiles"].as_array().map(|a| a.iter().filter(|p| p["mode"] == "term").map(|p| p["id"].as_str().unwrap().to_string()).collect()).unwrap_or_default()
+}
+fn log_status(h: &H) -> Vec<String> {
+    let log = std::fs::read_to_string(h.work.path().join("launch.log")).unwrap_or_default();
+    log.lines().map(|x| serde_json::from_str::<Value>(x).unwrap()["status"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn 遠端只認兩個固定的終端_id_其他自訂_id_一律不是終端() {
+    assert_eq!(launcher::remote_term_tool("gemini-term"), Some("agy"));
+    assert_eq!(launcher::remote_term_tool("grok-term"), Some("grok"));
+    for id in ["agy", "grok", "gemini", "Gemini-term", "gemini-term ", "gemini-term2", "term", "claude", "bg", ""] {
+        assert_eq!(launcher::remote_term_tool(id), None, "{id}");
+    }
+}
+
+#[tokio::test]
+async fn 遠端終端_摘要只在同意_服務在用_偵測得到_cli_三者都成立時才帶_條件消失下一次就拿掉() {
+    let mut l = lharness(|s, p| term_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    l.h.core.refresh_roster(T0).await;
+    assert_eq!(term_ids(&l.h), vec!["gemini-term", "grok-term"]);
+    let rosters = l.h.fr.rosters();
+    let rows = rosters.last().unwrap()["launcher"]["profiles"].as_array().unwrap().clone();
+    let g = rows.iter().find(|p| p["id"] == "gemini-term").unwrap();
+    let k = rows.iter().find(|p| p["id"] == "grok-term").unwrap();
+    assert_eq!(*g, json!({"id": "gemini-term", "label": "Gemini（asn終端）", "engine": "agy", "mode": "term"}));
+    assert_eq!(*k, json!({"id": "grok-term", "label": "Grok（asn終端）", "engine": "grok", "mode": "term"}));
+    assert!(!rosters.last().unwrap().to_string().contains("agy.exe"), "摘要不含指令");
+    // 終端服務關掉：下一次摘要就沒有
+    flag(&l.env.term_active, false);
+    l.h.core.refresh_roster(T0 + 1).await;
+    assert!(term_ids(&l.h).is_empty());
+    flag(&l.env.term_active, true);
+    l.h.core.refresh_roster(T0 + 2).await;
+    assert_eq!(term_ids(&l.h).len(), 2);
+    // 沒同意
+    flag(&l.env.term_consent, false);
+    l.h.core.refresh_roster(T0 + 3).await;
+    assert!(term_ids(&l.h).is_empty());
+    flag(&l.env.term_consent, true);
+    // 偵測不到 CLI
+    flag(&l.env.term_cli, false);
+    l.h.core.refresh_roster(T0 + 4).await;
+    assert!(term_ids(&l.h).is_empty());
+}
+
+#[tokio::test]
+async fn 遠端開終端_gemini_term_用_agy_只帶工具_名稱_資料夾_不走開視窗也不排佇列_紀錄與回報同視窗() {
+    let mut l = lharness(|s, p| term_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-終端1", &cwd, json!({"profile": "gemini-term", "command": "calc.exe", "args": ["x"]})));
+    l.h.fr.st.lock().unwrap().launches.push(lreq(2, "T-終端2", &cwd, json!({"profile": "grok-term"})));
+    l.h.core.pull("bell", T0).await;
+    assert_eq!(results(&l.h), vec![json!({"id": uid(1), "status": "ok", "detail": "T-終端1 已在 asn終端開啟"}), json!({"id": uid(2), "status": "ok", "detail": "T-終端2 已在 asn終端開啟"})]);
+    let canon = canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy().into_owned();
+    assert_eq!(*l.env.term_started.lock().unwrap(), vec![("agy".to_string(), "T-終端1".to_string(), canon.clone()), ("grok".to_string(), "T-終端2".to_string(), canon)]);
+    assert!(l.env.started.lock().unwrap().is_empty() && l.env.enqueued.lock().unwrap().is_empty(), "不走開視窗也不排佇列");
+    assert_eq!(log_status(&l.h), vec!["spawned", "ok", "spawned", "ok"], "紀錄與視窗路徑一樣有 spawned、ok");
+    assert!(l.h.work.path().join("launch-history.json").exists(), "算進每小時次數");
+}
+
+#[tokio::test]
+async fn 遠端開終端_執行前再驗三個條件_任一個不成立就拒絕並留失敗紀錄() {
+    let mut l = lharness(|s, p| term_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    // 服務在執行前關掉（摘要先前帶過也不算數）
+    l.h.core.refresh_roster(T0).await;
+    assert_eq!(term_ids(&l.h).len(), 2);
+    flag(&l.env.term_active, false);
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-終端1", &cwd, json!({"profile": "gemini-term"})));
+    l.h.core.pull("bell", T0).await;
+    flag(&l.env.term_active, true);
+    flag(&l.env.term_consent, false);
+    l.h.fr.st.lock().unwrap().launches.push(lreq(2, "T-終端2", &cwd, json!({"profile": "gemini-term"})));
+    l.h.core.pull("bell", T0 + 1).await;
+    flag(&l.env.term_consent, true);
+    flag(&l.env.term_cli, false);
+    l.h.fr.st.lock().unwrap().launches.push(lreq(3, "T-終端3", &cwd, json!({"profile": "grok-term"})));
+    l.h.core.pull("bell", T0 + 2).await;
+    let r = results(&l.h);
+    assert_eq!(r.len(), 3);
+    assert!(r.iter().all(|x| x["status"] == "failed"), "{r:?}");
+    assert_eq!(r[0]["detail"], launcher::TERM_NO_SERVICE);
+    assert_eq!(r[1]["detail"], launcher::TERM_NO_CONSENT);
+    assert_eq!(r[2]["detail"], "這台電腦找不到 grok");
+    assert!(l.env.term_started.lock().unwrap().is_empty());
+    assert_eq!(log_status(&l.h), vec!["failed", "failed", "failed"]);
+    assert!(!l.h.work.path().join("launch-history.json").exists(), "沒開就不計入每小時次數");
+}
+
+#[tokio::test]
+async fn 遠端開終端_既有檢查照舊_資料夾白名單_重名_名字格式_每小時上限_多帶模型或第一句話一律拒絕() {
+    let mut l = lharness(|s, p| term_env(s, p, |e| e.max_per_hour = 1), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    let outside = tempfile::tempdir().unwrap();
+    {
+        let mut st = l.h.fr.st.lock().unwrap();
+        st.launches.push(lreq(1, "T-終端1", outside.path(), json!({"profile": "gemini-term"})));
+        st.launches.push(lreq(2, "t-甲", &cwd, json!({"profile": "gemini-term"})));
+        st.launches.push(lreq(3, "a&calc", &cwd, json!({"profile": "gemini-term"})));
+        st.launches.push(lreq(4, "T-終端4", &cwd, json!({"profile": "gemini-term", "pi_provider": "x", "pi_model": "y"})));
+        st.launches.push(lreq(5, "T-終端5", &cwd, json!({"profile": "gemini-term", "first_message": "嗨"})));
+        st.launches.push(lreq(6, "T-終端6", &cwd.join(".."), json!({"profile": "grok-term"})));
+    }
+    l.h.core.pull("bell", T0).await;
+    let r = results(&l.h);
+    assert_eq!(r.len(), 6);
+    assert!(r.iter().all(|x| x["status"] == "failed"), "{r:?}");
+    let detail = |n: u32| r.iter().find(|x| x["id"] == uid(n).as_str()).unwrap()["detail"].as_str().unwrap().to_string();
+    assert!(detail(1).contains("不在允許清單"));
+    assert!(detail(2).contains("已經有叫「t-甲」的視窗"));
+    assert!(detail(3).contains("視窗名格式不對"));
+    assert_eq!(detail(4), launcher::TERM_EXTRA);
+    assert_eq!(detail(5), launcher::TERM_EXTRA);
+    assert!(detail(6).contains("不在允許清單"));
+    assert!(l.env.term_started.lock().unwrap().is_empty(), "一個都不能開");
+    // 上限 1：第一個過，第二個超過
+    l.h.fr.st.lock().unwrap().launches.push(lreq(7, "T-終端7", &cwd, json!({"profile": "gemini-term"})));
+    l.h.fr.st.lock().unwrap().launches.push(lreq(8, "T-終端8", &cwd, json!({"profile": "gemini-term"})));
+    l.h.core.pull("bell", T0 + 1).await;
+    let r = results(&l.h);
+    assert_eq!(r[6]["status"], "ok");
+    assert!(r[7]["detail"].as_str().unwrap().contains("超過上限"), "{r:?}");
+    assert_eq!(l.env.term_started.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn 遠端開終端_終端開不起來回報_failed_並留紀錄() {
+    let mut l = lharness(|s, p| term_env(s, p, |e| e.term_fail = true), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-終端1", &cwd, json!({"profile": "gemini-term"})));
+    l.h.core.pull("bell", T0).await;
+    assert_eq!(results(&l.h), vec![json!({"id": uid(1), "status": "failed", "detail": "開不起來：WezTerm 開不起來"})]);
+    assert_eq!(log_status(&l.h), vec!["failed"]);
+}
+
+#[test]
+fn 守門_遠端終端路徑不碰本機授權與本機開窗入口_start_term_只收工具_名稱_資料夾() {
+    let launcher_src = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap();
+    assert!(!launcher_src.contains("grant_local_cwd") && !launcher_src.contains("start_live"), "遠端不能替資料夾補授權，也不走本機點按的入口");
+    assert!(launcher_src.contains("fn start_term(&self, _config: &LaunchConfig, _tool: &str, _name: &str, _cwd: &str) -> Result<String, String>"), "start_term 只收 config、tool、name、cwd");
+    assert!(launcher_src.contains("fn start_term(&self, config: &LaunchConfig, tool: &str, name: &str, cwd: &str) -> Result<String, String>"));
+    let term_src = include_str!("../../launch/term.rs");
+    let body = term_src.split("pub fn start_remote(").nth(1).unwrap().split("\n}").next().unwrap();
+    assert!(!body.contains("grant_local_cwd") && !body.contains("start_live"), "{body}");
+    assert!(body.contains("terms.start(tool, cwd, config)"), "只把 tool、cwd、設定交給 TermService::start");
+    // begin_term 開終端只呼叫 env.start_term，不碰 env.start／enqueue_background
+    let bt = launcher_src.split("async fn begin_term(").nth(1).unwrap().split("async fn wait_for_window(").next().unwrap();
+    assert!(bt.contains("env.start_term(&cfg, tool, &n2, &cwd)") && !bt.contains("env.start(") && !bt.contains("enqueue_background"));
 }
 
 #[tokio::test]
