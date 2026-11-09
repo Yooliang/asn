@@ -5,6 +5,8 @@
 //!
 //! 敏感資料的處理（asn真 定案）：
 //! - 網址與代碼只存在記憶體（`DeviceCode`，沒有 `Debug`／`Display`／`Clone`，丟掉時清成零），只交給 `Show`；
+//!   讀進來的每一行用完也清掉。這是**盡力清**：管線讀取的中間緩衝、`Show` 那邊畫面的複本不在這裡的控制內，
+//!   不保證記憶體裡完全沒有殘留；
 //!   不進 log、不進安裝記錄、不進任何回報或錯誤訊息（對外的文字都是固定字串）。
 //! - 子程序的輸出**一行都不寫進 log**，只記讀了幾行。
 //! - 登入程序有時限（代碼的有效時間：Codex 印的是 15 分鐘，Grok 沒印、也定 15 分鐘），到時間照 PID 收掉整棵程序樹
@@ -18,13 +20,24 @@
 //! - agy：沒有登入子命令，只能在那台電腦前操作畫面登入（`AGY_LOGIN_HINT`）。
 //!
 //! 這一張只有流程與測試，還沒有任何入口呼叫它（畫面的 `Show` 實作與按鈕在 PR-7 接），所以先關掉「沒用到」的警告。
+//! **PR-7 接線時：`Codex`／`Grok` 的 `exe` 一定要來自 `codex_install::usable_here()`／（PR-9 的）grok 對應函式——
+//! 那是當下驗過簽署者的那一份；不能直接用 PATH 上找到的 codex／grok。**
 #![allow(dead_code)]
 
 use super::proc::{run_capture, strip_ansi, LoginProc, ReadLine, Spawner};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// 網址＋代碼：只能交給 `Show` 顯示，沒有 Debug／Display／Clone，丟掉時清成零
+/// 字串用完就盡力清成零（`String` 換成位元組不會重新配置，清的就是原本那塊）
+fn wipe(s: String) {
+    let mut b = s.into_bytes();
+    for x in b.iter_mut() {
+        // SAFETY: 指標來自可變參考，必定有效且對齊；用 volatile 避免被最佳化掉
+        unsafe { std::ptr::write_volatile(x, 0) };
+    }
+}
+
+/// 網址＋代碼：只能交給 `Show` 顯示，沒有 Debug／Display／Clone，丟掉時盡力清成零
 pub struct DeviceCode {
     url: Vec<u8>,
     code: Vec<u8>,
@@ -174,6 +187,9 @@ pub fn run_device_login_with(take: &dyn Fn() -> Option<Box<dyn std::any::Any>>, 
                 } else if code.is_none() && eng.is_code(t) {
                     code = Some(t.to_string());
                 }
+                // 讀進來的整行（含網址或代碼）用完就清
+                wipe(clean);
+                wipe(raw);
             }
             ReadLine::Timeout => {}
             ReadLine::Eof => break,
