@@ -4,13 +4,14 @@
 //! 這一張只做**本機**：網址與代碼交給這台 ASN 的畫面（`Show`），不經過後台；手機遠端觸發另案（PR-5b，反向加密通道）。
 //!
 //! 敏感資料的處理（asn真 定案）：
-//! - 網址與代碼只存在記憶體（`DeviceCode`，沒有 `Debug`／`Display`／`Clone`，丟掉時清成零），只交給 `Show`；
+//! - 網址與代碼只存在記憶體（`DeviceCode`，沒有 `Debug`／`Display`／`Clone`，丟掉時盡力清除），只交給 `Show`；
 //!   讀進來的每一行用完也清掉。這是**盡力清**：管線讀取的中間緩衝、`Show` 那邊畫面的複本不在這裡的控制內，
 //!   不保證記憶體裡完全沒有殘留；
 //!   不進 log、不進安裝記錄、不進任何回報或錯誤訊息（對外的文字都是固定字串）。
 //! - 子程序的輸出**一行都不寫進 log**，只記讀了幾行。
 //! - 登入程序有時限（代碼的有效時間：Codex 印的是 15 分鐘，Grok 沒印、也定 15 分鐘），到時間照 PID 收掉整棵程序樹
-//!   （Grok 會自己開瀏覽器，那個瀏覽器若在同一棵樹裡也一起關）。本人在這台按取消也一樣收掉。
+//!   本人在這台按取消也一樣收掉。**Grok 例外：只收 grok 本身、不加 /T**——它會自己開瀏覽器，本人當時沒開瀏覽器的話，
+//!   新開的瀏覽器是 grok 的子程序，連子孫一起收會把本人的分頁全關掉（`DeviceEngine::kill_whole_tree`，40家用 實測見 `Grok`）。
 //!
 //! 實測格式（2026-11-09，40家用，暫存設定目錄，只讀不登入）：
 //! - Codex 0.167.0：stdout 印一行 `https://auth.openai.com/…`，再印一行 `XXXX-XXXX9` 這種 4＋5 大寫英數的代碼，註明 15 分鐘到期；
@@ -82,6 +83,19 @@ pub trait DeviceEngine {
     /// 這一行（去掉前後空白後）是不是代碼
     fn is_code(&self, s: &str) -> bool;
     fn check_login(&self) -> Check;
+    /// 逾時或取消時要不要連子孫一起收。會自己開瀏覽器的（Grok）回 false：瀏覽器可能是它的子程序，連它一起關會把本人的分頁全關掉
+    fn kill_whole_tree(&self) -> bool {
+        true
+    }
+}
+
+/// 收掉登入程序：照這家的規則決定要不要連子孫一起收
+fn stop(eng: &dyn DeviceEngine, proc: &mut dyn LoginProc) {
+    if eng.kill_whole_tree() {
+        proc.kill_tree();
+    } else {
+        proc.kill_self();
+    }
 }
 
 /// 把網址與代碼顯示在這台 ASN 的畫面上；`cancelled` 是本人在這台按了取消
@@ -171,7 +185,7 @@ pub fn run_device_login_with(take: &dyn Fn() -> Option<Box<dyn std::any::Any>>, 
     let mut lines = 0u32;
     while url.is_none() || code.is_none() {
         if show.cancelled() {
-            proc.kill_tree();
+            stop(eng, proc.as_mut());
             return Outcome::Cancelled;
         }
         if started.elapsed() >= lim.find {
@@ -197,7 +211,7 @@ pub fn run_device_login_with(take: &dyn Fn() -> Option<Box<dyn std::any::Any>>, 
     }
     elog!("裝置碼登入：讀了 {lines} 行輸出（內容不記）");
     let (Some(url), Some(code)) = (url, code) else {
-        proc.kill_tree();
+        stop(eng, proc.as_mut());
         return Outcome::NeedTerminal("讀不到登入網址或代碼，請在這台電腦上用終端機登入".to_string());
     };
     let dc = DeviceCode::new(url, code);
@@ -208,11 +222,11 @@ pub fn run_device_login_with(take: &dyn Fn() -> Option<Box<dyn std::any::Any>>, 
     // 2. 等子程序自己結束（本人在別的設備授權完）；到代碼的有效時間就收掉整棵程序樹
     let exit = loop {
         if show.cancelled() {
-            proc.kill_tree();
+            stop(eng, proc.as_mut());
             return Outcome::Cancelled;
         }
         if started.elapsed() >= lim.total {
-            proc.kill_tree();
+            stop(eng, proc.as_mut());
             return Outcome::TimedOut;
         }
         if let Some(c) = proc.wait(lim.poll) {
@@ -249,8 +263,9 @@ impl DeviceEngine for Codex {
     fn url_hosts(&self) -> &'static [&'static str] {
         &CODEX_HOSTS
     }
+    /// 實測 0.167.0 是 4＋5，收緊到實測的長度（格式改了寧可讀不到、請本人用終端機，也不放寬去猜）
     fn is_code(&self, s: &str) -> bool {
-        code_shape(s, 4..=5, 4..=6)
+        code_shape(s, 4..=4, 5..=5)
     }
     fn check_login(&self) -> Check {
         codex_status(run_capture(&self.exe, &["login", "status"], STATUS_TIMEOUT))
@@ -283,11 +298,17 @@ impl DeviceEngine for Grok {
     fn url_hosts(&self) -> &'static [&'static str] {
         &GROK_HOSTS
     }
+    /// 實測 1.0.77 是 4＋4，收緊到實測的長度（格式改了寧可讀不到、請本人用終端機，也不放寬去猜）
     fn is_code(&self, s: &str) -> bool {
-        code_shape(s, 4..=5, 4..=5)
+        code_shape(s, 4..=4, 4..=4)
     }
     fn check_login(&self) -> Check {
         Check::Unknown(GROK_UNCONFIRMED.to_string())
+    }
+    /// 40家用 實測（11-09）：grok 的子程序只有 conhost 和它自己開的瀏覽器（瀏覽器主程序是 grok 的直接子程序）。
+    /// 只收 grok 本身時 conhost 跟著結束、瀏覽器留著，沒有其他程序殘留；加 /T 則會把瀏覽器整個關掉
+    fn kill_whole_tree(&self) -> bool {
+        false
     }
 }
 
@@ -309,6 +330,8 @@ mod tests {
     #[derive(Default)]
     struct Shared {
         killed: RefCell<u32>,
+        /// 只收自己（不加 /T）的次數
+        killed_self: RefCell<u32>,
         spawned: RefCell<Vec<Vec<String>>>,
     }
     struct FakeProc {
@@ -334,6 +357,9 @@ mod tests {
         }
         fn kill_tree(&mut self) {
             *self.sh.killed.borrow_mut() += 1;
+        }
+        fn kill_self(&mut self) {
+            *self.sh.killed_self.borrow_mut() += 1;
         }
     }
     struct FakeSpawner(RefCell<Option<FakeProc>>, Rc<Shared>);
@@ -366,6 +392,9 @@ mod tests {
 
     struct Eng(Check);
     impl DeviceEngine for Eng {
+        fn kill_whole_tree(&self) -> bool {
+            true
+        }
         fn exe(&self) -> PathBuf {
             PathBuf::from("codex.exe")
         }
@@ -425,6 +454,48 @@ mod tests {
         assert_eq!(Limits::default().total, Duration::from_secs(900), "預設 15 分鐘");
     }
 
+    /// 會自己開瀏覽器的（Grok）：逾時、取消、讀不到代碼都只收它本身，絕不用 /T（瀏覽器可能是它的子程序）
+    struct NoTree;
+    impl DeviceEngine for NoTree {
+        fn exe(&self) -> PathBuf {
+            PathBuf::from("grok.exe")
+        }
+        fn args(&self) -> Vec<&'static str> {
+            vec!["login", "--device-auth"]
+        }
+        fn url_hosts(&self) -> &'static [&'static str] {
+            &CODEX_HOSTS
+        }
+        fn is_code(&self, s: &str) -> bool {
+            code_shape(s, 4..=4, 5..=5)
+        }
+        fn check_login(&self) -> Check {
+            Check::Unknown(GROK_UNCONFIRMED.into())
+        }
+        fn kill_whole_tree(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn 會開瀏覽器的家_逾時取消讀不到都只收它本身_不收整棵樹() {
+        let lim = Limits { total: Duration::from_millis(30), find: Duration::from_secs(3600), poll: Duration::from_millis(1) };
+        let (sp, sh) = spawner(&CODEX_OUT, None);
+        assert_eq!(run_device_login_with(&free, &NoTree, &sp, &FakeShow::default(), &lim, &|_| {}), Outcome::TimedOut);
+        assert_eq!((*sh.killed.borrow(), *sh.killed_self.borrow()), (0, 1), "逾時");
+        let (sp, sh) = spawner(&CODEX_OUT, None);
+        let show = FakeShow { cancel_after_show: true, ..Default::default() };
+        assert_eq!(run_device_login_with(&free, &NoTree, &sp, &show, &LIM, &|_| {}), Outcome::Cancelled);
+        assert_eq!((*sh.killed.borrow(), *sh.killed_self.borrow()), (0, 1), "取消");
+        let sh = Rc::new(Shared::default());
+        let p = FakeProc { lines: [ReadLine::Line("nothing".into()), ReadLine::Eof].into_iter().collect(), exit_at: None, waits: 0, sh: sh.clone() };
+        let sp = FakeSpawner(RefCell::new(Some(p)), sh.clone());
+        assert!(matches!(run_device_login_with(&free, &NoTree, &sp, &FakeShow::default(), &LIM, &|_| {}), Outcome::NeedTerminal(_)));
+        assert_eq!((*sh.killed.borrow(), *sh.killed_self.borrow()), (0, 1), "讀不到");
+        assert!(!Grok { exe: PathBuf::new() }.kill_whole_tree(), "Grok 不收整棵樹");
+        assert!(Codex { exe: PathBuf::new() }.kill_whole_tree(), "Codex 不開瀏覽器，收整棵樹");
+    }
+
     #[test]
     fn 本人取消就收掉程序樹() {
         let (sp, sh) = spawner(&CODEX_OUT, None);
@@ -480,8 +551,11 @@ mod tests {
         let c = Codex { exe: PathBuf::new() };
         let g = Grok { exe: PathBuf::new() };
         assert!(c.is_code("AB12-C3DE4") && g.is_code("A1BC-DEFG"));
-        for bad in ["ab12-c3de4", "AB12", "AB12-C3DE4-X", "AB-CD", "AB12 C3DE4", "AB12-C3DE4 ", "1. Open", ""] {
+        for bad in ["ab12-c3de4", "AB12", "AB12-C3DE4-X", "AB-CD", "AB12 C3DE4", "AB12-C3DE4 ", "1. Open", "", "AB12-C3DE45", "ABC12-C3DE4", "AB12-C3DE"] {
             assert!(!c.is_code(bad), "{bad:?}");
+        }
+        for bad in ["A1BC-DEFGH", "A1BCD-DEFG", "A1B-DEFG", "a1bc-defg"] {
+            assert!(!g.is_code(bad), "{bad:?}");
         }
     }
 
