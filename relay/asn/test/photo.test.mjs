@@ -174,14 +174,21 @@ test('寄照片失敗：對話出現白話原因、不進「已送出」、沒�
   await core.stop(); await relay.close()
 })
 
-test('信已寄出但附件沒附上（#1205）：對話顯示缺的檔名那一句、不加「沒有傳出去」；後台 fake 能回 attachments_missing，舊後台不帶就沒有這欄', async () => {
+test('信已寄出但附件沒附上（#1205）：「我」那封照常顯示（不放沒附上的照片），下面加一行缺的檔名、不寫「沒有傳出去」；後台 fake 能回 attachments_missing，舊後台不帶就沒有這欄', async () => {
   const msg = '信已寄出，但 cat.webp 沒附上，請再寄一次這個附件'
-  const { relay, core } = await setup({ sendAttachment: async () => { throw new Error(msg) } })
+  const { relay, core } = await setup({ sendAttachment: async () => ({ id: U(901), attachment_id: U(78), name: 'cat.webp', bytes: 10, missing_note: msg }) })
   await core.start()
-  const r = await core.sendAttachment(ID, { name: 'cat.webp', data: 'UklG' }, '')
-  assert.equal(r.ok, false); assert.equal(r.error, msg)
-  const last = core.logOf(ID).at(-1)
-  assert.equal(last.k, 'sys'); assert.equal(last.text, msg)
+  const r = await core.sendAttachment(ID, { name: 'cat.webp', data: 'UklG' }, '這張')
+  assert.deepEqual(r, { ok: true, warning: msg })
+  const [mine, note] = core.logOf(ID).slice(-2)
+  assert.equal(mine.k, 'me'); assert.equal(mine.text, '這張'); assert.equal(mine.id, U(901)); assert.equal(mine.photos, undefined, '沒附上的照片不放進「我」那封')
+  assert.equal(note.k, 'sys'); assert.equal(note.text, msg)
+  assert.equal(core.logOf(ID).some(m => m.k === 'sys' && m.text.includes('沒有傳出去')), false)
+  assert.equal(core.snapshot().friends.find(f => f.id === ID).waiting, true, '照常算寄出、等回信')
+  // 沒寫說明時，「我」那封寫檔名，不是空白泡泡
+  const r2 = await core.sendAttachment(ID, { name: 'cat.webp', data: 'UklG' }, '')
+  assert.equal(r2.ok, true)
+  assert.equal(core.logOf(ID).at(-2).text, 'cat.webp')
   // fake 後台：設了 sendExtra 才多帶 attachments_missing
   const post = async () => await (await fetch(`${relay.url}?action=send`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-relay-key': FAKE_KEY }, body: JSON.stringify({ to_node: 'W', body: 'x' }) })).json()
   const before = await post()

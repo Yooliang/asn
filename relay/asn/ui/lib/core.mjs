@@ -469,18 +469,19 @@ export class AsnCore {
     let r
     try { r = await this.transport.sendAttachment(payload) } catch (e) {
       const msg = friendlyPhotoError(e.message)
-      // 信已寄出、只是有附件沒附上（#1205）：Rust 端的說法是「信已寄出，但 … 沒附上，請再寄一次…」，不能再加「沒有傳出去」讓人以為整封都沒到、重寄整封
-      const sentButLacking = msg.startsWith('信已寄出，但')
-      this.#log(id).push({ k: 'sys', text: sentButLacking ? msg : `沒有傳出去：${msg}`, t: this.now() })
+      this.#log(id).push({ k: 'sys', text: `沒有傳出去：${msg}`, t: this.now() })
       this.emit('log', id)
       return { ok: false, error: msg }
     }
     const now = this.now()
     const isFile = photo.kind === 'file'
     const mine = { id: r?.attachment_id, kind: isFile ? 'file' : 'image', name: r?.name || photo.name, mime: isFile ? fileMimeOf(r?.name || photo.name) : 'image/webp', bytes: r?.bytes ?? null, width: photo.width ?? null, height: photo.height ?? null, thumb: photo.thumb ?? null, expires_at: expiresAt(now), expired: false }
-    const photos = normalizePhotos([mine])
+    // 信已寄出、但附件沒附上（#1205）：「我」那封照常顯示（不然本人會以為沒寄出而重寄整封），只是不放沒附上的照片，下面再加一行寫缺哪個
+    const lack = typeof r?.missing_note === 'string' && r.missing_note ? r.missing_note : null
+    const photos = lack ? [] : normalizePhotos([mine])
     const mid = typeof r?.id === 'string' ? r.id : null
-    this.#log(id).push({ k: 'me', text: cap, t: now, ...(mid ? { id: mid } : {}), ...(photos.length ? { photos } : {}) })
+    this.#log(id).push({ k: 'me', text: lack && !cap ? (r?.name || photo.name || '') : cap, t: now, ...(mid ? { id: mid } : {}), ...(photos.length ? { photos } : {}) })
+    if (lack) this.#log(id).push({ k: 'sys', text: lack, t: now })
     f.waiting = expectsReplyTo(f)
     f.replyTo = null
     f.known = true
@@ -488,7 +489,7 @@ export class AsnCore {
     this.emit('state')
     this.emit('log', id)
     await this.refreshSentStatus('send')
-    return { ok: true }
+    return lack ? { ok: true, warning: lack } : { ok: true }
   }
 
   async nudge(id) {

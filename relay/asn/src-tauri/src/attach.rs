@@ -298,11 +298,12 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     }
     let body = if signed { body } else { crate::relay::without_person(body) };
     let sent = relay.api_signed("send", Some(body), token).await.map_err(|e| explain(&e))?;
-    // 信已寄出但附件沒附上：回錯誤字串讓畫面顯示（不是「寄失敗」，畫面不該叫人重寄整封信）
+    // 信已寄出但附件沒附上（#1205）：照樣回成功（信確實寄出了，畫面要照常顯示「我」那封），另帶 missing_note 讓畫面在下面加一行說缺哪個
+    let mut out = json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() });
     if let Some(msg) = missing_attachments_message(&missing_attachment_names(&[photo.name.clone()], &[id.clone()], &sent)) {
-        return Err(msg);
+        out["missing_note"] = json!(msg);
     }
-    Ok(json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }))
+    Ok(out)
 }
 
 /// 後端錯誤代碼 → 給人看的白話（relay.api 的錯誤形如「attach_init HTTP 413 quota_exceeded」）
@@ -828,7 +829,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 寄照片_後端回附件沒附上_回錯誤字串給畫面_舊後台照舊成功() {
+    async fn 寄照片_後端回附件沒附上_照樣成功並帶缺件說明_舊後台沒有這欄() {
         for (reply, want) in [
             (format!(r#"{{"id":"00000000-0000-0000-0000-000000000099","attachments_missing":["{ID}"]}}"#), Some("信已寄出，但 貓 1 .webp 沒附上，請再寄一次這個附件")),
             (r#"{"id":"00000000-0000-0000-0000-000000000099"}"#.to_string(), None),
@@ -846,9 +847,12 @@ mod tests {
             });
             *port_cell.lock().unwrap() = port;
             let r = send_attachment(&relay_at(port), &reqwest::Client::new(), &payload(json!({}))).await;
+            let r = r.unwrap();
+            assert_eq!(r["attachment_id"], ID);
+            assert_eq!(r["id"], "00000000-0000-0000-0000-000000000099", "信已寄出：回信件編號");
             match want {
-                Some(w) => assert_eq!(r.unwrap_err(), w),
-                None => assert_eq!(r.unwrap()["attachment_id"], ID),
+                Some(w) => assert_eq!(r["missing_note"], w),
+                None => assert!(r.get("missing_note").is_none(), "沒缺就沒有這欄"),
             }
             assert_eq!(log.lock().unwrap().iter().filter(|q| q.path.contains("action=send")).count(), 1, "不重寄");
         }
