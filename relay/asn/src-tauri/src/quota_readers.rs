@@ -274,9 +274,18 @@ impl Failure {
             (Failure::Auth, Source::Gemini) => "Gemini 登入已過期，請在這台開一次 agy 或重新登入".into(),
             (Failure::Auth, Source::MiniMax) => "MiniMax 登入已過期，請重新輸入 key".into(),
             (Failure::Auth, Source::ClaudeExtra(name)) => format!("Claude（{name}）登入已過期，請重新登入這個帳號"),
-            (Failure::Other(s), Source::ClaudeExtra(name)) => format!("Claude（{name}）：{s}"),
-            (Failure::Other(s), _) => s.clone(),
+            (Failure::Other(s), Source::ClaudeExtra(name)) => format!("Claude（{name}）：{}", plain_other(s)),
+            (Failure::Other(s), _) => plain_other(s),
         }
+    }
+}
+
+/// 其他原因的畫面文字：「連線失敗」這類使用者看得懂的照舊；狀態碼、結束碼、內部欄位這類細節換成通用句（細節只進 log）
+fn plain_other(s: &str) -> String {
+    if s.starts_with("HTTP ") || s.starts_with("結束碼") || s.contains("欄位") || s.contains("狀態") {
+        "暫時讀不到額度，稍後會自動重試".into()
+    } else {
+        s.to_string()
     }
 }
 

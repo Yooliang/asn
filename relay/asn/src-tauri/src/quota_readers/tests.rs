@@ -435,3 +435,13 @@ fn 其他原因畫面文字照舊_額外帳號前面帶名字() {
     assert_eq!(o.user_text(Source::ClaudeExtra("工作")), "Claude（工作）：連線失敗");
     assert_eq!(o.text(), "連線失敗");
 }
+
+#[test]
+fn 其他原因含狀態碼或內部細節時畫面換成通用句_log_照舊() {
+    for raw in ["HTTP 503", "結束碼不是 0", "缺少額度欄位", "回傳失敗狀態"] {
+        let f = Failure::Other(raw.into());
+        assert_eq!(f.user_text(Source::Grok), "暫時讀不到額度，稍後會自動重試", "{raw}");
+        assert_eq!(f.user_text(Source::ClaudeExtra("工作")), "Claude（工作）：暫時讀不到額度，稍後會自動重試", "{raw}");
+        assert_eq!(f.text(), raw, "log 保留原內容");
+    }
+}
