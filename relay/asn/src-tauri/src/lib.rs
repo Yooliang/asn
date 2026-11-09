@@ -1017,7 +1017,7 @@ impl view_stream::TPort for LiveTPort {
     fn frame(&mut self) -> Result<view_stream::Frame, String> {
         let id = self.terms.partner_term_id(&self.window)?;
         let text = self.terms.view_text(&id)?;
-        let m = self.terms.view_meta(&id)?;
+        let m = self.terms.view_meta_cached(&id, launch::term::REMOTE_META_MAX_AGE)?;
         Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows, ack: None })
     }
     fn ctl(&mut self) -> Result<view_stream::Ctl, String> {
@@ -1474,7 +1474,7 @@ impl launch::term_view::ViewPort for WindowViewPort {
         self.terms.view_text(&self.id)
     }
     fn meta(&mut self) -> Result<launch::term_view::ViewMeta, String> {
-        self.terms.view_meta(&self.id)
+        self.terms.view_meta_cached(&self.id, launch::term::LOCAL_META_MAX_AGE)
     }
     fn visible(&mut self) -> Option<bool> {
         let w = self.app.get_webview_window(&self.label)?;
