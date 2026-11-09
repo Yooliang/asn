@@ -1811,6 +1811,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let mut parked: Vec<StoreTerm> = Vec::new();
         let mut exited_now: Vec<String> = Vec::new();
         let mut probed_now: BTreeMap<String, Instant> = BTreeMap::new();
+        // 這一輪各通訊檔讀到的窗格清單（None＝讀失敗）
+        let mut lists: BTreeMap<PathBuf, Option<Vec<wezterm::PaneInfo>>> = BTreeMap::new();
         for term in file.terms {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
@@ -1853,12 +1855,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 parked.push(term);
                 continue;
             }
-            let panes = match w.list(&sock) {
-                Ok(p) => p,
-                Err(_) => {
-                    parked.push(term);
-                    continue;
-                }
+            // 同一個通訊檔這一輪只讀一次清單（每一列各讀一次會多下好幾次 wezterm cli list）；讀失敗也記下，同檔的列一起 parked
+            let listed = lists.entry(sock.clone()).or_insert_with(|| w.list(&sock).ok());
+            let Some(panes) = listed.as_ref() else {
+                parked.push(term);
+                continue;
             };
             // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
             let saw_dead = std::cell::Cell::new(false);
@@ -1870,7 +1871,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 }
                 dead
             };
-            let Some(pane) = pick_pane(&panes, &term.id, term.pane_id, &ended) else {
+            let Some(pane) = pick_pane(panes, &term.id, term.pane_id, &ended) else {
                 // ASN 關著時夥伴自己結束了：記下名字，寄給它的信馬上退回，不當成還沒接回
                 if saw_dead.get() && !term.kind.is_empty() {
                     if let Some(name) = partner_label(&term.id, &term.title) {
@@ -2919,7 +2920,11 @@ pub fn set_background_partners_for_test(n: i64) {
     BACKGROUND_PARTNERS.store(n, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// ASN 這次不用共用終端服務時，背景查一次（之後每分鐘再查，使用者自己關掉夥伴時人數會減少）。沒在用就不查、不開執行緒。
+/// 背景夥伴人數的查詢間隔：WezTerm 20240203 回 list 時走程序樹會當掉（upstream #7705），盡量少問
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+const BACKGROUND_PARTNER_POLL_SECS: u64 = 300;
+
+/// ASN 這次不用共用終端服務時，背景查一次（之後每 5 分鐘再查，使用者自己關掉夥伴時人數會減少）。沒在用就不查、不開執行緒。
 /// 只讀（`wezterm cli list`），不起 mux、不動夥伴；截圖模式不做
 #[cfg(feature = "gui")]
 pub fn start_background_partner_watch(terms: std::sync::Arc<LiveTerms>) {
@@ -2935,7 +2940,7 @@ pub fn start_background_partner_watch(terms: std::sync::Arc<LiveTerms>) {
         if n == BG_NONE {
             return; // 沒有服務或沒有夥伴：這次 ASN 不會再開新的，不用再查
         }
-        std::thread::sleep(std::time::Duration::from_secs(60));
+        std::thread::sleep(std::time::Duration::from_secs(BACKGROUND_PARTNER_POLL_SECS));
     });
     if let Err(e) = spawned {
         elog!("背景夥伴人數的查詢開不了（不影響啟動）：{e}");
@@ -5280,6 +5285,65 @@ mod tests {
         assert!(ids.contains(&"5"), "claude 列 parked＝留在檔案裡：{ids:?}");
         assert_eq!(rig.svc.list().len(), 1, "pi 的列照舊認回來（0.1.113 的行為）");
         assert!(rig.runner.killed().is_empty());
+    }
+
+    fn list_calls(r: &FakeRunner) -> usize {
+        r.inner.calls.borrow().iter().filter(|(a, _)| a.iter().any(|x| x == "list")).count()
+    }
+
+    /// 兩個窗格的清單（編號 7 是 asn-5、8 是 asn-6）
+    fn two_panes() -> String {
+        format!("[{},{}]", &one_pane("asn-5", "ASN:5", 7, 1)[1..one_pane("asn-5", "ASN:5", 7, 1).len() - 1], &one_pane("asn-6", "ASN:6", 8, 1)[1..one_pane("asn-6", "ASN:6", 8, 1).len() - 1])
+    }
+
+    #[test]
+    fn 重開認領_同一個通訊檔的多列只讀一次清單_結果跟逐列讀一樣() {
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = two_panes();
+        let r5 = row("5", "pi", "1000", "");
+        let r6 = row("6", "pi", "1000", "").replace(r#""pane_id":7"#, r#""pane_id":8"#);
+        write_store(&rig.store, 7, &format!("{r5},{r6}"));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(list_calls(&rig.runner), 1, "兩列同一個通訊檔：只下一次 list");
+        let mut ids: Vec<String> = rig.svc.list().iter().map(|t| t.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["5".to_string(), "6".to_string()], "兩列都認回來");
+    }
+
+    #[test]
+    fn 重開認領_不同通訊檔各讀一次() {
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        rig.files.borrow_mut().insert(wezterm::sock_path(Path::new("H"), 43));
+        *rig.runner.inner.list_json.borrow_mut() = two_panes();
+        let r5 = row("5", "pi", "1000", "");
+        let r6 = row("6", "pi", "1000", "").replace(r#""pane_id":7"#, r#""pane_id":8"#).replace(r#""pid":42"#, r#""pid":43"#);
+        write_store(&rig.store, 7, &format!("{r5},{r6}"));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(list_calls(&rig.runner), 2, "兩個通訊檔各一次");
+        assert_eq!(rig.svc.list().len(), 2);
+    }
+
+    #[test]
+    fn 重開認領_讀清單失敗_同檔的列都留著_只下一次() {
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        *rig.runner.inner.fail_substr.borrow_mut() = Some("list".into());
+        let r5 = row("5", "pi", "1000", "");
+        let r6 = row("6", "pi", "1000", "").replace(r#""pane_id":7"#, r#""pane_id":8"#);
+        write_store(&rig.store, 7, &format!("{r5},{r6}"));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(list_calls(&rig.runner), 1);
+        assert!(rig.svc.list().is_empty());
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        assert_eq!(v["terms"].as_array().unwrap().len(), 2, "兩列都 parked 留在檔案裡");
+    }
+
+    #[test]
+    fn 背景夥伴人數_查詢間隔是_300_秒() {
+        assert_eq!(BACKGROUND_PARTNER_POLL_SECS, 300);
+        let src = include_str!("term.rs");
+        let f = src.split("pub fn start_background_partner_watch").nth(1).unwrap().split("\npub fn ").next().unwrap();
+        assert!(f.contains("from_secs(BACKGROUND_PARTNER_POLL_SECS)") && !f.contains("from_secs(60)"), "間隔要用常數、不是寫死的 60 秒");
+        assert!(f.contains("n == BG_NONE") && f.contains("return;"), "沒有夥伴就停止的行為要留著");
     }
 
     #[test]
