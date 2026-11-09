@@ -228,6 +228,10 @@ fn 共用案例_每一個都跟預期一致() {
     let mut wrong = vec![];
     for t in cases {
         let id = t["id"].as_str().unwrap();
+        // 只有後台的案例（older_read／future_read）：客戶端不做資料讀取時間的判斷，由後台守，這裡跳過
+        if t["scope"].as_str() == Some("backend_only") {
+            continue;
+        }
         let vendor = match t["vendor"].as_str() {
             Some("claude") => Vendor::Claude,
             Some("codex") => Vendor::Codex,
