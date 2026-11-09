@@ -174,8 +174,6 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY" | tee "$WEZ_OUT/versions-and-dependents.txt"
       - name: mux 實測（起 mux-server、spawn、get-text）
-        # Windows 上的這個實測是新做的，先不當關卡：失敗會在 summary 與 log 看到，但不讓整個 job 變紅
-        continue-on-error: true
         run: |
           rel="$WEZ_SRC/target/release"
           bash .github/scripts/wezterm-mux-smoke.sh "$rel/wezterm.exe" "$rel/wezterm-mux-server.exe" "$WEZ_OUT/smoke" --windows
@@ -247,7 +245,33 @@ jobs:
             C:/w/out/smoke/*.err
           if-no-files-found: ignore
 
-  # 發佈：只在 main 上手動觸發。不跑任何建置指令、不取第三方原始碼，只做：下載 artifact → 算 SHA-256 → 產生 attestation → 建 release
+  # 發佈前演練：PR（或不在 main 的手動觸發）時跑，步驟與 publish 相同（同一支腳本、同樣的 download pattern），只跳過 attest 與建 release
+  publish-dryrun:
+    name: 發佈前演練（不 attest、不建 release）
+    needs: [cycle-test, build-linux, build-windows]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: 下載建置產物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: 'wezterm-*'
+          path: dist
+          merge-multiple: true
+      - name: 檢查產物、產生 SOURCE.txt 與 SHA256SUMS
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/wezterm-release-prepare.sh" dist
+
+  # 發佈：只在 main 上手動觸發。不跑任何建置指令、不取第三方原始碼（只取本 repo 的腳本），只做：下載 artifact → 算 SHA-256 → 產生 attestation → 建 release
   publish:
     name: 發佈 release
     needs: [cycle-test, build-linux, build-windows]
@@ -259,6 +283,9 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: release tag 已經存在就直接失敗（不覆蓋、不重建）
         env:
           GH_TOKEN: ${{ github.token }}
@@ -278,28 +305,12 @@ jobs:
           pattern: 'wezterm-*'
           path: dist
           merge-multiple: true
-      - name: 算 SHA-256、整理 release 附件
-        run: |
-          set -euo pipefail
-          cd dist
-          ls -la
-          [ "$(ls -1 *.tar.xz | wc -l)" = 5 ] || { echo "::error::Linux 產物不是 5 個" >&2; exit 1; }
-          [ "$(ls -1 WezTerm-windows-*.zip | wc -l)" = 1 ] || { echo "::error::Windows 產物不是 1 個" >&2; exit 1; }
-          # release 附上授權文字（取自 Windows 包裡的 LICENSE.md）與來源說明
-          unzip -p WezTerm-windows-*.zip LICENSE.md > LICENSE.md
-          [ "$(sha256sum LICENSE.md | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 雜湊不符" >&2; exit 1; }
-          cat > SOURCE.txt <<TXT
-          WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
-          上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-          額外套用：上游 commit ${PATCH_SHA}（#7706）
-          Rust：${RUST_VERSION}；cargo build --locked --release
-          建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}（commit ${{ github.sha }}）
-          驗證：gh attestation verify <檔案> -R ${{ github.repository }}
-          各壓縮檔裡也各有一份 SOURCE.txt，記錄該包自己的建置環境。
-          TXT
-          sha256sum *.tar.xz WezTerm-windows-*.zip > SHA256SUMS
-          cat SHA256SUMS
-          { echo '### SHA256SUMS'; echo; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: 檢查產物、產生 SOURCE.txt 與 SHA256SUMS
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/wezterm-release-prepare.sh" dist
       - name: 對每個產物產生建置來源證明（attestation）
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
