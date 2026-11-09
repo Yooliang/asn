@@ -781,6 +781,21 @@ async fn 回覆寄回原寄件人_from_agent_是回覆的視窗() {
 }
 
 #[tokio::test]
+async fn 回信寄不出去_通知那個視窗_寫收件人與信件編號與重寄方法_不默默丟掉() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    h.fr.st.lock().unwrap().send_fail_reply_to.push(uid(1));
+    let before = h.said().len();
+    h.core.on_worker_line(res(&reply_block("T-乙", "好的，已處理")), T0 + 3_000).await;
+    assert!(h.fr.sent().is_empty(), "這次寄送失敗");
+    let said = h.said();
+    let told: Vec<&String> = said[before..].iter().filter(|s| s.contains("你剛才的回信沒有寄出去")).collect();
+    assert_eq!(told.len(), 1, "{said:?}");
+    let t = told[0];
+    assert!(t.contains("收件人 W/W-政策") && t.contains(&format!("re={}", uid(1))) && t.contains("內文開頭：好的，已處理"), "{t}");
+}
+
+#[tokio::test]
 async fn 視窗自己加的回覆抬頭會被拆掉_並用它指的信件() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.forward(mail(1, json!({})), T0).await;

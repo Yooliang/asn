@@ -2039,6 +2039,19 @@ impl Core {
         self.tell_window(from, &format!("[收發室] 你傳給收發室的代寄信沒有寄出：第一行 [RELAY 寄信] to=… 少了 reply=yes 或 reply=no。等對方回信就寫 reply=yes、只是告知就寫 reply=no（回信 re=<id> 也一樣要寫），補上後請重傳一次。（這是系統通知，不用回覆。）內文開頭：{head}"));
     }
 
+    /// 這個名字是不是引擎（Aegis、內建通道、pi 等）管的視窗：通知會變成它的一輪工作，不適合
+    fn is_engine_window(&self, name: &str) -> bool {
+        self.engines.as_ref().is_some_and(|e| e.windows().iter().any(|w| w.name == name))
+    }
+
+    /// 回信寄不出去的通知：收件人、回的是哪封信、怎麼重寄（#1135）
+    fn tell_reply_failed(&mut self, from: &str, o: &Origin, text: &str) {
+        let to = if o.from_agent.is_empty() { o.from_node.clone() } else { format!("{}/{}", o.from_node, o.from_agent) };
+        let head: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect();
+        self.log.line(&format!("reply from {from} id={} not sent: told the window", o.id));
+        self.tell_window(from, &format!("[收發室] 你剛才的回信沒有寄出去（寄送失敗）：收件人 {to}，回的是信件 {}。要重寄請再傳一次，第一行寫 [RELAY 寄信] to={to} re={} reply=no（要等對方回信就寫 reply=yes）。（這是系統通知，不用回覆。）內文開頭：{head}", o.id, o.id));
+    }
+
     /// 通知信的編號／視窗記一下（TTL 10 分鐘）：視窗若回了這則通知，那則回覆不是給任何人的，丟掉
     fn tell_window(&mut self, name: &str, text: &str) {
         if self.is_respond(name) {
@@ -2144,6 +2157,10 @@ impl Core {
         }
         if ok {
             self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
+        } else if !deferred && !self.is_engine_window(from) {
+            // 回信寄不出去（連線階段已經在 relay 重試過）：不能默默丟掉，告訴那個視窗，讓它自己決定要不要重寄（#1135）。
+            // 寄回成功才 ack 的（Aegis、內建通道）信還留在信箱或另有處理，引擎視窗收到通知會白跑一輪，這兩種先不通知
+            self.tell_reply_failed(from, &o, &text);
         }
         self.log.line(&format!("{}reply from {from} -> {} id={} sent={ok} ({}ms total)", if late { "late " } else { "" }, o.from_node, o.id, self.now.saturating_sub(t0)));
     }
