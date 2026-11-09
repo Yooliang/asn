@@ -314,4 +314,4 @@ Google Play 資料安全性申報要補：「音訊：語音或聲音錄音」�
 - **通知頻道** `asn_messages`：`MainActivity` 一開就建好（App 關著時系統直接顯示的通知也用它）。
 - **設定頁**：「設置」→「通知」分頁的「App 關著時也通知我」，預設開；說明文字「App 關著時，有新訊息會在手機上跳通知，只告訴你『有新訊息』，內容要打開 App 才看得到。」被系統拒絕時另一行說明怎麼打開。
 - **建置**：play、sideload 兩個管道都要建得過（兩個都含 Firebase 相依）；Gradle 在沒有 `google-services.json` 時走一般流程。
-- **還沒做**：實機（App 關著時真的響、點通知打開 App、60 秒內連寄只響一則、登出後不響、權限被拒後不再問）要等小良哥註冊 Android App、放 `google-services.json`、設後台秘密之後才能驗。
+- **還沒做**：程式已全部合入（#982 資料表、#983 後台、#985 Android 外殼、#986 設定頁與文件）；剩下外部設定與實機。外部設定由領隊安排：註冊 Android App、`google-services.json` 放建置機、後台秘密、重新部署 relay。實機照 `PUSH-FCM.md` 的「實機測試矩陣」測（Oppo 與接近原生的 Android；App 在背景、滑掉、強制停止、省電、60 秒連寄、前景、登出或關掉後、權限被拒），重點記「寄出到手機響的延遲秒數」，結果貼回 #797。電池設定引導視實機結果決定（只用 `ACTION_APPLICATION_DETAILS_SETTINGS` 開系統頁，不申請 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`）。Play 資料安全表單照 `PUSH-FCM.md` 填，送審前以 Google 當時說明核對。
