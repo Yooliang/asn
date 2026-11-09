@@ -14,6 +14,8 @@ test('對話分頁：記得最後使用的那一位；從來沒開過、記的�
   assert.deepEqual(chatPageState(fl, ''), { kind: 'empty', friend: null, text: EMPTY_CHAT_TEXT })
   assert.equal(EMPTY_CHAT_TEXT, '從夥伴分頁點一位開始對話')
   assert.equal(chatPageState(fl, 'X/不在了').kind, 'empty')
+  const merged = [...fl, { ...F('Q', '終端服務收發室'), mergedInto: '~notice' }]
+  assert.deepEqual(chatPageState(merged, 'Q/終端服務收發室'), { kind: 'empty', friend: null, text: EMPTY_CHAT_TEXT }, '已併進「通知」的舊收發室列不再開在對話頁（#895）')
   assert.deepEqual(chatPageState([], 'W/小武'), { kind: 'loading', friend: null, text: LOADING_CHAT_TEXT })
   assert.equal(chatPageState([], '').kind, 'empty', '沒記過人就不用等名單')
   for (const bad of [null, undefined, 5, {}, [], 'x'.repeat(201)]) assert.equal(normalizeLastChat(bad), '', String(bad))

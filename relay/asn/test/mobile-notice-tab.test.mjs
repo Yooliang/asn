@@ -152,3 +152,18 @@ test('冒煙情境：通知分頁六個（412、360、大字型 × 通知內容�
   assert.deepEqual(names, ['m-notice-tab', 'm-notice-tab-360', 'm-notice-tab-big', 'm-notice-dot', 'm-notice-dot-360', 'm-notice-dot-big'])
   for (const p of Object.values(MNOTICE_PROBES)) assert.doesNotThrow(() => new vm.Script(mnoticeProbeSource(p)))
 })
+
+test('冒煙情境：舊收發室列併進通知（#895 驗收）三個（412、360，與存檔最後開著舊收發室列的 412），探測表達式語法正確、資料有五個舊寄件人', async () => {
+  const { SCENARIOS, MNOTICE_LEGACY_PROBES, mnoticeLegacyProbeSource, tableFor, probeKind } = await import('../scripts/smoke-lib.mjs')
+  const vm = await import('node:vm')
+  const sc = SCENARIOS.filter(s => s.probe?.mnoticeLegacy)
+  assert.deepEqual(sc.map(s => s.name), ['m-notice-legacy', 'm-notice-legacy-360', 'm-notice-legacy-lastchat'])
+  assert.deepEqual(sc.map(s => s.width ?? 412), [412, 360, 412])
+  for (const p of Object.values(MNOTICE_LEGACY_PROBES)) assert.doesNotThrow(() => new vm.Script(mnoticeLegacyProbeSource(p)))
+  assert.ok(!mnoticeLegacyProbeSource(MNOTICE_LEGACY_PROBES.list).includes(String.fromCharCode(92)), '探測腳本不寫反斜線')
+  assert.equal(probeKind(sc[0].probe), '手機舊收發室列併進通知檢查')
+  const chats = JSON.parse(tableFor(sc[0]).store_load.values.chats)
+  assert.equal(chats.friends.length, 5)
+  assert.ok(chats.friends.every(f => !f.kind && Object.keys(chats.logs).includes(f.id)), '舊列沒有 kind、各有信')
+  assert.ok(chats.friends.every(f => f.agent === 'H-收發室' || f.agent.endsWith('收發室')))
+})
