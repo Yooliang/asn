@@ -242,3 +242,14 @@ test('實跑：讀取時間比後台現在晚超過 5 分鐘拒收（future_read
   assert.deepEqual((await rep1(40)).skipped, [])
   assert.equal((await gotWeekly(db)).left_pct, 40)
 })
+
+test('實跑：共用案例「只有後台」的案例（older_read／future_read）每一個都照預期（走 decide）', { skip }, async () => {
+  const db = await setup()
+  const bo = cases.cases.filter(c => c.scope === 'backend_only')
+  assert.ok(bo.length >= 6 && bo.some(c => c.reason === 'older_read') && bo.some(c => c.reason === 'future_read'))
+  for (const c of bo) {
+    const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, $5::timestamptz) r',
+      [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])
+    assert.equal(r.reason, c.reason, `${c.id} ${c.note}`)
+  }
+})

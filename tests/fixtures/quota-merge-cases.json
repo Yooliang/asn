@@ -13,6 +13,7 @@
     "待確認（#1184）：Claude 每週窗，old 的重置時間已過期、新的更晚、卻不是 7 天倍數時，不馬上收，記「待確認的重置時間、次數、第一次的時間」；同一個新重置時間（差 10 分鐘內）連續 3 次、第一次到這次至少隔 10 分鐘，這一次才收下，收下後清掉待確認。中間來了不同的重置時間就重新計數。old 還沒過期時不累計。",
     "身分改變（#1184）：電腦端換登入身分後清掉該 email 的基準，之後的新數字也要走同一套待確認（同一組重置時間連續 3 次、隔 10 分鐘）才收，不會第一筆直接收；後台沒有身分概念，這條只在電腦端，序列由 claude_quota/merge/tests.rs 的「換身分」測試鎖住。",
     "confirm_sequences：一個 old 之後依序送進 steps；每步有 now／new／accept／reason；收下後 old 換成那步的 new，待確認清空。兩邊（Rust、後台 asn_relay_acct_window_decide）都要逐步一致。",
+    "scope（#1184）：\"backend_only\"＝只有後台判斷的案例（older_read／future_read 看資料的讀取時間 read_at，客戶端不做這種判斷，由後台守）；客戶端（Rust）讀到就跳過，後台 SQL 走 asn_relay_acct_window_decide 驗。這種案例的 old／new 多一個 read_at 欄位；now 是後台收到的時間。",
     "台灣時間對照：2026-11-01T16:00:00Z＝11/2 00:00（gmail）、2026-11-04T09:00:00Z＝11/4 17:00（yooliang）。"
   ],
   "constants": {
@@ -29,7 +30,9 @@
     "earlier": "重置時間比現記的早",
     "later_not_expired": "現記的還沒過，卻來了更晚的",
     "not_week_multiple": "新舊重置時間差不是 7 天倍數",
-    "reset_out_of_range": "重置時間不在現在前 1 天到後 8 天之間"
+    "reset_out_of_range": "重置時間不在現在前 1 天到後 8 天之間",
+    "older_read": "新窗的讀取時間比已存的更早（舊視窗的舊數字）",
+    "future_read": "新窗的讀取時間比後台現在晚超過 5 分鐘（電腦時鐘走快）"
   },
   "cases": [
     {
@@ -758,6 +761,122 @@
       },
       "accept": false,
       "reason": "later_not_expired"
+    },
+    {
+      "id": "b1",
+      "note": "舊視窗的舊數字（沒帶重置時間、讀取時間是 10-30）不能蓋掉今天的新值",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 51,
+        "resets_at": null,
+        "read_at": "2026-10-30T16:40:14Z"
+      },
+      "accept": false,
+      "reason": "older_read"
+    },
+    {
+      "id": "b2",
+      "note": "Gemini 記著滿額的照收例外，也要先過讀取時間這關",
+      "scope": "backend_only",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 51,
+        "resets_at": null,
+        "read_at": "2026-10-30T16:40:14Z"
+      },
+      "accept": false,
+      "reason": "older_read"
+    },
+    {
+      "id": "b3",
+      "note": "讀取時間較新、其他正常＝照收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:45:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "b4",
+      "note": "讀取時間比後台現在晚 1 小時＝時鐘走快，拒收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T15:49:57Z"
+      },
+      "accept": false,
+      "reason": "future_read"
+    },
+    {
+      "id": "b5",
+      "note": "沒有已存窗、讀取時間晚 1 小時＝一樣拒收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": null,
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T15:49:57Z"
+      },
+      "accept": false,
+      "reason": "future_read"
+    },
+    {
+      "id": "b6",
+      "note": "讀取時間只晚 5 分鐘（剛好）＝照收",
+      "scope": "backend_only",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-09T14:49:57Z",
+      "old": {
+        "left_pct": 52,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:38:53Z"
+      },
+      "new": {
+        "left_pct": 40,
+        "resets_at": "2026-11-15T16:00:00Z",
+        "read_at": "2026-11-09T14:54:57Z"
+      },
+      "accept": true,
+      "reason": null
     }
   ],
   "confirm_sequences": [
