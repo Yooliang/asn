@@ -248,9 +248,33 @@ fn grok_輸入框與忙碌判斷表() {
 
 // ---- 4. argv_for -------------------------------------------------------------------------------------
 
-fn bare_svc() -> TermService<wezterm::RealRunner, wezterm::RealFs> {
-    // argv_for 不會碰 runner／fs，用正式型別即可；不改產品程式
-    TermService::fixed(WezTermDir { gui: Some("g".into()), cli: "c".into() }, "cfg.lua".into(), "t.json".into(), "H".into(), wezterm::RealRunner, wezterm::RealFs)
+/// 什麼都不能做的假 runner：argv_for 不該啟動任何程序，萬一被呼叫就回錯誤（不用真的 runner，免得測試碰到本機的終端服務）
+struct NoRunner;
+impl wezterm::Runner for NoRunner {
+    fn run(&self, _program: &std::path::Path, _args: &[String], _env: &std::collections::BTreeMap<String, String>, _timeout: std::time::Duration) -> Result<wezterm::RunOutput, String> {
+        Err("黃金檔測試不該執行程式".into())
+    }
+    fn spawn(&self, _program: &std::path::Path, _args: &[String], _env: &std::collections::BTreeMap<String, String>) -> Result<u32, String> {
+        Err("黃金檔測試不該啟動程式".into())
+    }
+    fn kill_tree(&self, _pid: u32) {}
+    fn started_ms(&self, _pid: u32) -> Option<u64> {
+        None
+    }
+    fn sleep(&self, _d: std::time::Duration) {}
+}
+
+/// 什麼都沒有的假檔案系統（argv_for 不會碰）
+struct NoFs;
+impl wezterm::Fs for NoFs {
+    fn exists(&self, _p: &std::path::Path) -> bool {
+        false
+    }
+}
+
+fn bare_svc() -> TermService<NoRunner, NoFs> {
+    // argv_for 不會碰 runner／fs；用什麼都不做的假的，不用正式型別（不碰本機真的終端服務，也不踩 #1084 的原始碼守門）
+    TermService::fixed(WezTermDir { gui: Some("g".into()), cli: "c".into() }, "cfg.lua".into(), "t.json".into(), "H".into(), NoRunner, NoFs)
 }
 
 #[test]
