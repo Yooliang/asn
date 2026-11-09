@@ -749,3 +749,27 @@ fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家
     assert_eq!(f("11111111-0000-0000-0000-00000000000a").as_deref(), Some("home@x.test"), "設定資料夾沒有才看家目錄");
     assert_eq!(f("33333333-0000-0000-0000-000000000000"), None, "uuid 對不上就不用");
 }
+
+#[test]
+fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫同一個備份檔() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    // 兩個帳號各有一筆沒有身分標記的舊紀錄
+    let rec = |pct: u8| json!({ "weekly_pct": pct, "at": "2026-10-24T11:00:00Z", "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": "2026-10-24T11:00:00Z" });
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec(90), "b@x.test": rec(80) }).to_string()).unwrap();
+    let (ta, tb) = (transcript(h.path(), "wa", UA), transcript(h.path(), "wb", UB));
+    let baks = |h: &tempfile::TempDir| std::fs::read_dir(h.path().join(".asn")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak")).count();
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY))), &ta), NOW));
+    assert_eq!(baks(&h), 1);
+    let first = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
+    assert!(first.contains("\"weekly_pct\":90") && first.contains("\"weekly_pct\":80"), "第一份備份含兩個舊紀錄");
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((50.0, NOW + 5 * DAY))), &tb), NOW + 60_000));
+    assert_eq!(baks(&h), 1, "還是只有一份備份檔");
+    let second = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
+    assert!(second.contains("\"owner\":true") && second.contains("\"weekly_pct\":80"), "第二次覆寫成清 b 之前的內容（a 已有標記）");
+    // a 已有標記，不會再觸發備份
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY))), &ta), NOW + 120_000));
+    assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second);
+}
