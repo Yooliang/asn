@@ -205,6 +205,38 @@ export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.
 
 export const DEVICE_BUTTON_TEXT = { self: '（這台）', current: '使用中', group: '用在哪幾台' }
 
+/** 設備按鈕切不過去時寫在按鈕下方的原因（電腦版；手機版的原因在 mobile-acct 的 ACCT_SWITCH_REASON） */
+export const DEVICE_BLOCK_REASON = Object.freeze({
+  vendor: '這個服務不能切換',
+  hidden: '這台已隱藏',
+  removed: '這台已移除',
+  missing: '這台沒有存這個帳號',
+  incomplete: '登入不完整',
+  single: '這台只有這一個帳號',
+  offline: '那台的 ASN 沒開著',
+  unavailable: '目前不能切換',
+})
+
+/**
+ * 某台設備為什麼切不到這個帳號（給停用的設備按鈕寫原因）。devices＝設備樹（{ key, self, hidden, removed, vendors }）；
+ * vendor＝服務；email＝帳號；node＝那台。判斷順序和切換目標的條件一致；判不出來就回「目前不能切換」。
+ */
+export function deviceBlockReason(devices, vendor, email, node) {
+  if (vendor !== 'claude' && vendor !== 'grok') return DEVICE_BLOCK_REASON.vendor
+  const d = (Array.isArray(devices) ? devices : []).find(x => x && x.key === node)
+  if (!d) return DEVICE_BLOCK_REASON.unavailable
+  if (d.removed) return DEVICE_BLOCK_REASON.removed
+  if (d.hidden) return DEVICE_BLOCK_REASON.hidden
+  const v = (d.vendors ?? []).find(x => x.key === vendor)
+  const mail = String(email ?? '').trim().toLowerCase()
+  const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
+  if (!has) return DEVICE_BLOCK_REASON.missing
+  if (has.incomplete) return DEVICE_BLOCK_REASON.incomplete
+  if (d.self) return vendor === 'grok' && (v.accounts ?? []).length <= 1 ? DEVICE_BLOCK_REASON.single : DEVICE_BLOCK_REASON.unavailable
+  if (!v.switchable) return v.switchHint ? DEVICE_BLOCK_REASON.offline : DEVICE_BLOCK_REASON.unavailable
+  return DEVICE_BLOCK_REASON.unavailable
+}
+
 /**
  * 帳號卡片的「設備按鈕」：用過這個帳號的每台設備一顆（原本的「用在：」一行和「切換到…」按鈕合在一起）。
  * usedOn＝後台回報的 [{ node, label, current }]；targets＝這個帳號可以切過去的設備 [{ node, name?, … }]，原樣放進 target 給畫面切換用；
