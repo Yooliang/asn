@@ -115,7 +115,7 @@ jobs:
           unset ASN_WEZTERM_DIR DISPLAY WAYLAND_DISPLAY
           command -v wezterm && { echo "runner 上不該有 wezterm"; exit 1; } || true
           # 外部下載不穩（GitHub 5xx、逾時）才重試，最多 3 次；每次重試前清空資料夾（不然產品的退避紀錄會讓下一次直接略過）
-          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "Linux 取得 WezTerm" --before 'rm -rf "$XDG_DATA_HOME"; mkdir -p "$XDG_DATA_HOME"' -- \n            cargo test --locked --no-default-features --lib launch::wezterm_fetch::tests::linux_real_fetch_wezterm -- --ignored --test-threads=1 --nocapture
+          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "Linux 取得 WezTerm" --before 'rm -rf "$XDG_DATA_HOME"; mkdir -p "$XDG_DATA_HOME"' -- cargo test --locked --no-default-features --lib launch::wezterm_fetch::tests::linux_real_fetch_wezterm -- --ignored --test-threads=1 --nocapture
           echo "ASN_FETCHED_DIR=$(ls -d "$XDG_DATA_HOME"/ASN/wezterm/*-ubuntu-*/ | head -1)" >> "$GITHUB_ENV"
           ls -la "$XDG_DATA_HOME"/ASN/wezterm/*/
 
@@ -246,11 +246,29 @@ jobs:
           WRY_ANDROID_PACKAGE="$pkg" WRY_ANDROID_LIBRARY="$lib" WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$out" cargo check --locked --target aarch64-linux-android --lib
           ls -la gen/android/tauri.settings.gradle gen/android/app/tauri.build.gradle.kts
 
-      # gradle 發行包快取：key 綁 gradle-wrapper.properties，換版本就換 key；快取裡的發行包照樣經 distributionSha256Sum 核對
+      # gradle 發行包快取：**只存下載回來的 zip**（不存解開後的檔），key 綁 gradle-wrapper.properties，換版本就換 key
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ~/.gradle/wrapper/dists
-          key: gradle-wrapper-${{ hashFiles('relay/asn/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+          path: ~/.gradle/wrapper/dists/*/*/*.zip
+          key: gradle-wrapper-zip-${{ hashFiles('relay/asn/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      # 快取來的 zip 自己用 sha256sum 對 distributionSha256Sum 驗，不合就刪掉（wrapper 會重抓）；
+      # 另外刪掉解開的資料夾與完成記號，讓 wrapper 從驗過的 zip 重新解開（wrapper 對已解開的檔不會再驗）
+      - name: 核對快取的 gradle 發行包
+        shell: bash
+        run: |
+          set -euo pipefail
+          props=relay/asn/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+          want="$(sed -n 's/^distributionSha256Sum=//p' "$props" | tr -d '\r')"
+          [[ "$want" =~ ^[0-9a-f]{64}$ ]] || { echo "distributionSha256Sum 讀不到或格式不對" >&2; exit 1; }
+          shopt -s nullglob
+          for z in "$HOME"/.gradle/wrapper/dists/*/*/*.zip; do
+            got="$(sha256sum "$z" | cut -d' ' -f1)"
+            if [ "$got" = "$want" ]; then echo "快取的發行包雜湊相符：$z"; else echo "::warning::快取的發行包雜湊不符，刪掉重抓：$z"; rm -f "$z"; fi
+          done
+          for d in "$HOME"/.gradle/wrapper/dists/*/*/; do
+            find "$d" -mindepth 1 -maxdepth 1 ! -name '*.zip' -exec rm -rf {} +
+          done
 
       - name: 編 Kotlin（Android，不含 Rust .so）
         working-directory: relay/asn/src-tauri/gen/android
@@ -330,9 +348,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends gnome-keyring dbus-daemon
           dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
 
-      # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅
+      # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅。
+      # 重試前清掉上一次留下的半套 AppImage 輸出與 tauri 的工具快取（下載到一半的檔會讓 linuxdeploy 壞掉）
       - name: 建置 deb 與 AppImage
-        run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "建置 deb 與 AppImage" -- npm run build
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "建置 deb 與 AppImage" --before 'rm -rf "$GITHUB_WORKSPACE/relay/asn/src-tauri/target/release/bundle/appimage" "$HOME/.cache/tauri"' -- npm run build
 
       # 上面的 npm test 還沒有成品，這幾支會略過；#652 改欄位後過期就是這樣沒人發現（#719）
       - name: 需要成品的測試（端到端）
