@@ -4912,7 +4912,8 @@ mod tests {
             let d = tempfile::tempdir().unwrap();
             let path = d.path().join("wezterm-term.lua");
             std::fs::write(&path, PREV_ISOLATED_CONFIG).unwrap();
-            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: Some("g".into()), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), wezterm::RealRunner, wezterm::RealFs);
+            let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };   // 只寫設定檔，不需要真的程序
+            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: Some("g".into()), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), runner, wezterm::RealFs);
             svc.set_hold_config(hold);
             svc.ensure_config().unwrap();
             assert_eq!(std::fs::read_to_string(&path).unwrap(), want);
