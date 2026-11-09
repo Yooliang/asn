@@ -611,7 +611,7 @@ export const mcloudProbeSource = () => `(async () => {
   for (const name of ['牧陽 Aegis', '日本VM', 'Grok 雲端']) {
     const r = row(name);
     if (!r) return { ok: false, why: '找不到「' + name + '」那列（各自一列）：' + rows.map(x => x.name).join('／') };
-    if (!r.kind.startsWith('電腦 · 雲端')) return { ok: false, why: '「' + name + '」沒標雲端：' + r.kind };
+    if (!r.kind.startsWith('雲端')) return { ok: false, why: '「' + name + '」沒標雲端：' + r.kind };
   }
   const pc = row('辦公室');
   if (!pc || pc.kind.includes('雲端')) return { ok: false, why: '實體電腦不該標雲端：' + (pc?.kind ?? '找不到') };

@@ -9,6 +9,7 @@ import { nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
 import { buildDeviceTree, SELF_LABEL } from './device-tree.mjs'
+import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 
 export const ACCT_TEXT = {
   button: '選項',
@@ -36,9 +37,9 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 
 // roster：後台帳號列表（android_acct_roster，#374）；跟電腦版同一套 account-roster.mjs，讀不到（null）就退回各台自己回報的
-export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, machines = launchers, roster = null, now = Date.now() } = {}) {
+export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, machines = launchers, roster = null, now = Date.now(), cloudNodes = [] } = {}) {
   const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
-  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, machines, reports: rep, roster, selfIsPhone: true, now }).map(d => ({
+  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, machines, reports: rep, roster, selfIsPhone: true, now, cloudNodes }).map(d => ({
     ...d,
     label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
     // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示
@@ -214,19 +215,23 @@ export function acctSwitchTargets(devices, vendor, account, selfNode) {
 // 讀失敗的那台只記一行 console.info、不回報給畫面：它的帳號回報照舊是空的，畫面照舊顯示「電腦」。
 export const REPORT_PREFETCH_MAX = 3
 export const REPORT_PREFETCH_GAP_MS = 60_000
-export function createReportPrefetch({ read, max = REPORT_PREFETCH_MAX, gapMs = REPORT_PREFETCH_GAP_MS, now = () => Date.now(), log = (...a) => console.info(...a) } = {}) {
+// 手機自己存的帳號回報裡，「讀失敗」的那種（點進去讀失敗留下 msg）：之後讀成功的預讀結果可以蓋掉它，不要被舊的失敗擋住
+export const isFailedReport = r => Boolean(r) && r.loading !== true && Boolean(r.msg)
+export function createReportPrefetch({ read, max = REPORT_PREFETCH_MAX, gapMs = REPORT_PREFETCH_GAP_MS, retryMs = REPORT_RETRY_MS, now = () => Date.now(), log = (...a) => console.info(...a) } = {}) {
   let lastAt = -Infinity
+  const failedAt = new Map()   // 節點 → 上次讀失敗的時間；讀成功就刪掉。失敗超過 retryMs 的，下次進設備頁就算在一分鐘間隔內也再讀
   return async function run(nodes, onResult) {
     const t = now()
-    if (t - lastAt < gapMs) return false
-    const queue = [...new Set((Array.isArray(nodes) ? nodes : []).filter(n => typeof n === 'string' && n))]
+    const all = [...new Set((Array.isArray(nodes) ? nodes : []).filter(n => typeof n === 'string' && n))]
+    const inGap = t - lastAt < gapMs
+    const queue = inGap ? all.filter(n => failedAt.has(n) && shouldRetryReport({ read: true, failedAt: failedAt.get(n) }, t, retryMs)) : all
     // 沒有要讀的節點（例如名單還沒載入）就不記時間：不然剛開 App 就進設備頁，接下來一分鐘都不會再讀、雲端標示一分鐘出不來
-    if (!queue.length) return true
-    lastAt = t
+    if (!queue.length) return !inGap && !all.length
+    if (!inGap) lastAt = t
     const worker = async () => {
       while (queue.length) {
         const node = queue.shift()
-        try { onResult(node, await read(node)) } catch (e) { log('[ASN] 設備頁預讀帳號回報失敗', node, String(e?.message ?? e)) }
+        try { onResult(node, await read(node)); failedAt.delete(node) } catch (e) { failedAt.set(node, now()); log('[ASN] 設備頁預讀帳號回報失敗', node, String(e?.message ?? e)) }
       }
     }
     await Promise.all(Array.from({ length: Math.min(max, queue.length) }, worker))

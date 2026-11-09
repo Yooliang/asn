@@ -8,7 +8,7 @@ import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 
 test('種類字：雲端 true 在後面加「雲端」；false／null 照舊（null＝資料還不夠，不標示）', () => {
   assert.equal(CLOUD_TAG, '雲端')
-  assert.equal(deviceKindLabel({ kind: '電腦', cloud: true }), '電腦 · 雲端')
+  assert.equal(deviceKindLabel({ kind: '電腦', cloud: true }), '雲端')
   assert.equal(deviceKindLabel({ kind: '電腦', cloud: false }), '電腦')
   assert.equal(deviceKindLabel({ kind: '電腦', cloud: null }), '電腦')
   assert.equal(deviceKindLabel({ kind: '手機', cloud: false }), '手機')
@@ -23,7 +23,7 @@ const friends = [
 test('設備樹每一列帶 kindLabel：雲端節點各自一列並標「雲端」，實體電腦不標，順序與分組不變', () => {
   const rows = buildDeviceTree({ friends, nodeOrder: ['Q', 'G'], selfNode: 'P' })
   const by = Object.fromEntries(rows.map(r => [r.key, r]))
-  assert.equal(by.G.kindLabel, '電腦 · 雲端')
+  assert.equal(by.G.kindLabel, '雲端')
   assert.equal(by.G.kind, '電腦', 'kind 本身不變（給排序、分組、切換判斷用）')
   assert.equal(by.Q.kindLabel, '電腦')
   assert.deepEqual(rows.map(r => r.key), buildDeviceTree({ friends, nodeOrder: ['Q', 'G'], selfNode: 'P' }).map(r => r.key))

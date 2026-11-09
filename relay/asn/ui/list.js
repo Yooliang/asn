@@ -16,6 +16,8 @@ import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.m
 import { activityRound, withActivity } from './lib/activity.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
+import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
+import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
@@ -219,10 +221,15 @@ if (!info.shot) {
 // 登入之後又掉才會再出現。每分鐘看一次登入狀態（取不到就不顯示，不吵人）
 const reloginBar = reactive({ show: false })
 let reloginDismissed = false
+let wasSignedIn = null
+let onSignedIn = () => {}   // 設備與帳號那段接上
 const refreshReloginBar = async () => {
   try {
     const st = await authApi.status()
     if (st?.signed_in === true) reloginDismissed = false
+    const nowIn = st?.signed_in === true
+    if (nowIn && wasSignedIn === false) onSignedIn()   // 從未登入變成已登入：失敗的帳號回報立刻重讀
+    if (st?.signed_in === true || st?.signed_in === false) wasSignedIn = nowIn
     reloginBar.show = showReloginBar(info.can_skip_login === true, st?.signed_in === true ? true : st?.signed_in === false ? false : null, reloginDismissed)
   } catch { reloginBar.show = false }
 }
@@ -1661,7 +1668,9 @@ const app = createApp({
       await openDeviceAcct(node)
     }
     // 設定「設備」分類：設備 → 廠商 → 帳號。其他設備的帳號回報在有新設備出現時讀一次，也可按「重新整理」
+    const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
+      cloudNodes: cloudMem.value,
       friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
@@ -1669,11 +1678,15 @@ const app = createApp({
       reports: accounts.state.reports, roster: accounts.state.roster,
       self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
+    watch(deviceTree, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
     watch(() => otherDeviceNodes().join(','), () => {
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
       if (missing.length) void accounts.loadReports(missing)
     }, { immediate: true })
+    // 讀失敗的那幾台（剛開 ASN 還沒登入、簽章拿不到）：設備分類開著時每分鐘檢查，失敗超過一分鐘的再讀；剛登入就立刻讀
+    setInterval(() => { if (devicesOpen()) void accounts.retryReports(otherDeviceNodes()) }, REPORT_RETRY_MS)
+    onSignedIn = () => void accounts.retryReports(otherDeviceNodes(), { force: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
     // 帳號列表裡的設備名（#374）：跟設備樹同一份名單
     const rosterNodeLabel = computed(() => nodeLabelOf(friends.value, { selfNode: info.node }))

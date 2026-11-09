@@ -30,7 +30,8 @@ import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/acco
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
-import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch } from './lib/mobile-acct.mjs'
+import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
+import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -565,8 +566,10 @@ const app = createApp({
     const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster, undefined, acctRoster.value) }
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
     const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, selfNode: info.node }))
-    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
+    const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
+    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
+    watch(acctAllDevs, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
     const acctRemoved = computed(() => removedRows(acctAllDevs.value))
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
@@ -598,14 +601,14 @@ const app = createApp({
     const acctPrefetched = {}
     async function prefetchReports() {
       const epoch = acctEpoch
-      const put = (node, r) => { if (epoch === acctEpoch && !acctSw.reports[node]) acctSw.reports[node] = r }
+      const put = (node, r) => { if (epoch === acctEpoch && (!acctSw.reports[node] || isFailedReport(acctSw.reports[node]))) acctSw.reports[node] = r }
       const nodes = acctDevs.value.filter(d => acctNeedsLoad(d)).map(d => d.key)
-      const ran = await acctPrefetch(nodes, (node, v) => {
+      await acctPrefetch(nodes, (node, v) => {
         const r = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
         acctPrefetched[node] = r
         put(node, r)
       })
-      if (!ran) for (const [node, r] of Object.entries(acctPrefetched)) put(node, r)
+      for (const [node, r] of Object.entries(acctPrefetched)) put(node, r)   // 一分鐘內沒重讀的（或只重讀了失敗的）：先前讀到的結果補上
     }
     // 從夥伴列表設備旁的「選項」或設置列表進來；開新夥伴第 2 步還沒送出時先問一句
     const openAcct = g => askBeforeLeave(acctPage(), () => void openAcctNow(g))

@@ -9,6 +9,21 @@ import { loginFailed } from './claude-accounts.mjs'
 /** 帳號回報超過這麼久沒更新就當「還沒收到回報」（每 5 分鐘回報一次，夠寬；電腦睡眠醒來不會閃，要實機看一次） */
 export const REPORT_FRESH_MS = 15 * 60 * 1000
 
+// 帳號回報讀失敗後多久可以再讀一次（電腦版、手機版共用）。剛開 ASN 時常常還沒登入、簽章拿不到，第一次讀就失敗；
+// 以前失敗的那台不會再讀，「雲端」標示就永遠停在「資料不夠」。現在失敗後超過這段時間就視為該重讀。
+export const REPORT_RETRY_MS = 60_000
+/**
+ * 這台的帳號回報該不該（重）讀。
+ * failedAt：上次讀失敗的時間（毫秒）；沒有就是沒失敗過。讀成功的（沒有 failedAt）不重讀（手機版另有自己的一分鐘間隔，見 createReportPrefetch）。
+ * 沒讀過 → true；失敗過且已超過 retryMs → true；失敗但還沒到時間 → false；失敗時間不明（舊紀錄）→ true
+ */
+export function shouldRetryReport({ read = false, failedAt = null } = {}, now = Date.now(), retryMs = REPORT_RETRY_MS) {
+  if (!read) return true
+  if (failedAt === null || failedAt === undefined) return false
+  if (!Number.isFinite(failedAt)) return true
+  return now - failedAt >= retryMs
+}
+
 /** 電腦版與手機版共用的狀態鍵 */
 export const STATE = Object.freeze({
   LOGGED_IN: 'logged_in',
@@ -92,7 +107,22 @@ export function isCloudNode({ phone = false, self = false, asnOnline = false, re
  */
 export const CLOUD_TAG = '雲端'
 export function deviceKindLabel({ kind = '電腦', cloud = null } = {}) {
-  return cloud === true ? `${kind} · ${CLOUD_TAG}` : kind
+  return cloud === true ? CLOUD_TAG : kind   // 雲端夥伴只寫「雲端」（小良哥看過手機截圖），不再是「電腦 · 雲端」
+}
+
+/** 雲端夥伴那一列的第三行說明（電腦、手機共用）。原本是「還沒收到這台的回報」，雲端本來就不會有帳號回報 */
+export const CLOUD_STATE_LINE = '雲端夥伴，沒有安裝電腦版 ASN'
+
+/**
+ * 記住上次判成雲端的節點（離線時 isCloudNode 會回 null，標示不能跟著消失）。純函式。
+ * prev：上次是否判成雲端（記住的）；now：這次 isCloudNode 的結果（true／false／null）
+ * → { cloud, store }：cloud 給畫面用；store 是這台下次要不要繼續記住
+ *   這次 true → 記住；這次 null → 沿用記住的（記得是 true 就回 true，否則 null）；這次 false → 取消記住並回 false
+ */
+export function rememberCloud(prev, now) {
+  if (now === true) return { cloud: true, store: true }
+  if (now === false) return { cloud: false, store: false }
+  return prev === true ? { cloud: true, store: true } : { cloud: null, store: false }
 }
 
 /**
@@ -163,8 +193,9 @@ const SHORT_TEXT = Object.freeze({
  * 設備列表每一列的一行摘要，例如「Claude 已登入、Codex 未安裝」。
  * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）
  */
-export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false } = {}) {
+export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false, cloud = null } = {}) {
   if (phone) return ''
+  if (cloud === true) return CLOUD_STATE_LINE
   if (!self && !online) return '離線，看不到狀態'
   const all = [...vendors, ...missing]
   if (!all.length) return ''
