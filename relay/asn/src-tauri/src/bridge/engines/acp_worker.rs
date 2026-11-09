@@ -669,6 +669,13 @@ impl Worker {
                 #[cfg(test)]
                 let wait = test_hooks::net_wait_override(&cfg.name).unwrap_or(wait);
                 self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
+                // 先把這一輪的驅動拿掉並停下：agy 回完錯誤到行程真的結束之間有空檔（機器忙時更久），
+                // 不拿掉的話 ensure_driver 會沿用這個快結束的驅動，重試的那一輪會被它的結束結案成 crash（#752、#994）。
+                // 拿掉之後它的結束因為世代不同不會再算到這裡；對話編號已經記下，新驅動照樣接回同一段對話
+                let old = self.st.lock().unwrap().driver.take();
+                if let Some(old) = old {
+                    old.stop();
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
                 // 等的這段時間若被人按了「關閉」或「移除」，就不要再把驅動拉起來（#528）
                 let gone = { let s = self.st.lock().unwrap(); s.admin_stopped || s.stopping };

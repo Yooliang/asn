@@ -13,6 +13,8 @@
 //   @@CRASH          往 stderr 寫字然後結束碼 3
 //   @@ENV <名稱>     回覆該環境變數有沒有被帶進來
 // 環境變數 FAKE_AGY_WRITE_MS：@@WRITE 真的寫檔前等多久（毫秒，預設 150）。
+// 環境變數 FAKE_AGY_FAIL_EXIT_MS：回錯誤（@@NET、@@AUTH…）之後多久才結束行程（毫秒，預設 20）；拉長用來模擬機器忙時舊行程收尾慢（#994）。
+// 環境變數 FAKE_AGY_ECHO_PID=1：一般回覆後面附「(pid=行程編號)」；@@NET_ONCE 建的檔內容一律是行程編號。
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
 // `fake-agy.mjs models`：照 agy 1.x 實測的格式列模型（說明行在 stderr；stdout 一行「代號<Tab>名稱」），清單取 FAKE_AGY_MODELS（逗號分隔）
 import fs from 'node:fs'
@@ -64,7 +66,7 @@ async function handle(line) {
     body = body.replace(gate[0], '')
   }
   const resultOf = (response, extra = {}) => out({ event: 'result', result: { conversation_id: conv, status: 'SUCCESS', response, duration_seconds: 0.01, num_turns: 1, usage: { input_tokens: 1 }, ...extra } })
-  const fail = (err, code) => { out({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: err } }); setTimeout(() => process.exit(code), 20) }
+  const fail = (err, code) => { out({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: err } }); setTimeout(() => process.exit(code), Number(process.env.FAKE_AGY_FAIL_EXIT_MS) || 20) }
   const flags = `${flag('--dangerously-skip-permissions') ? 'full' : 'normal'}${opt('--model') ? `/${opt('--model')}` : ''}`
 
   let t
@@ -107,7 +109,7 @@ async function handle(line) {
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'DONE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
     return fail(NETERR, 1)
   }
-  if ((t = /@@NET_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail(NETERR, 1) }
+  if ((t = /@@NET_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], String(process.pid)); return fail(NETERR, 1) }
   if (/@@NET(?!_ONCE)/.test(body)) return fail(NETERR, 1)
   if (/@@AUTH(?!_ONCE)/.test(body)) return fail('not logged in: run `agy` and sign in with your Google account (authentication required)', 1)
   if (/@@QUOTA/.test(body)) return fail('RESOURCE_EXHAUSTED: quota exceeded for this account', 1)
@@ -116,6 +118,6 @@ async function handle(line) {
   if ((t = /@@ENV\s+(\S+)/.exec(body))) return resultOf(`[env ${t[1]}=${process.env[t[1]] ? 'present' : 'absent'}]`)
   const hadPreamble = content.includes('ASN 收發室替你啟動的背景工作者')
   out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'DONE', step_type: 'agent_response', text_delta: 'x' } })
-  resultOf(`收到：${body.trim().slice(0, 80)} [第${turns}輪 ${flags}${hadPreamble ? ' 含說明' : ''} cwd=${path.basename(process.cwd())}]`)
+  resultOf(`收到：${body.trim().slice(0, 80)} [第${turns}輪 ${flags}${hadPreamble ? ' 含說明' : ''} cwd=${path.basename(process.cwd())}]${process.env.FAKE_AGY_ECHO_PID === '1' ? ` (pid=${process.pid})` : ''}`)
 }
 rl.on('close', () => process.exit(0))
