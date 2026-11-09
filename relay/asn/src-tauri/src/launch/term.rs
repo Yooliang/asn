@@ -400,6 +400,11 @@ enum Source {
 }
 
 /// 產生 agy 額外參數的函式（每次開 agy 終端時叫一次）
+/// 本機畫面（App 內終端）讀游標與大小的最短間隔
+pub const LOCAL_META_MAX_AGE: Duration = Duration::from_millis(500);
+/// 遠端看（手機／別台電腦）讀游標與大小的最短間隔
+pub const REMOTE_META_MAX_AGE: Duration = Duration::from_secs(2);
+
 pub type AgyArgs = Box<dyn Fn() -> Vec<String> + Send + Sync>;
 
 /// 自己開過的終端。只認這張表裡的編號，呼叫端給的其他編號一律拒絕。
@@ -425,6 +430,12 @@ pub struct TermService<R, F> {
     /// mux 的檔案放在這底下的 ASN\m（正式＝%LOCALAPPDATA%；測試注入暫存資料夾）
     mux_base: Option<PathBuf>,
     inner: Mutex<Inner>,
+    /// 看畫面用的游標與大小的短效快取：(通訊檔, 窗格編號) → (取得時刻, 內容)。
+    /// WezTerm 20240203 的 mux 在回答 `cli list` 時會走程序樹而當掉（upstream #7705），所以看畫面的路徑不能每幅都問
+    view_meta_cache: Mutex<BTreeMap<(PathBuf, u64), (Instant, super::term_view::ViewMeta)>>,
+    /// 單元測試用的假時鐘：加在真實時間上的偏移
+    #[cfg(test)]
+    test_clock_offset: Mutex<Duration>,
     /// 單元測試注入啟動設定，避免依賴本機 launcher.json。
     #[cfg(test)]
     test_launch_config: Mutex<Option<LaunchConfig>>,
@@ -445,6 +456,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             hold_config: false,
             partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
+            view_meta_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(test)]
+            test_clock_offset: Mutex::new(Duration::ZERO),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -475,6 +489,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             hold_config: false,
             partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
+            view_meta_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(test)]
+            test_clock_offset: Mutex::new(Duration::ZERO),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -506,6 +523,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             hold_config: false,
             partner_shell: default_partner_shell(),
             mux_base: super::mux::default_base(),
+            view_meta_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(test)]
+            test_clock_offset: Mutex::new(Duration::ZERO),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -1021,9 +1041,47 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let dir = self.dir()?;
         let w = self.wez(&dir);
         let text = w.get_text_escapes_history(&snap.window.sock, snap.pane_id, lines)?;
+        let meta = self.meta_cached(&w, &snap, LOCAL_META_MAX_AGE)?;
+        Ok((text, meta))
+    }
+
+    fn meta_now(&self) -> Instant {
+        #[cfg(test)]
+        {
+            return Instant::now() + *self.test_clock_offset.lock().unwrap();
+        }
+        #[cfg(not(test))]
+        Instant::now()
+    }
+
+    /// 先看快取：同一個 (通訊檔, 窗格) 在 `max_age` 內取過就直接回，不再問 `cli list`；過期或沒有才問並存起來。
+    /// 查不到窗格的錯誤不存。鎖不跨過 list 呼叫
+    fn meta_cached(&self, w: &WezTerm<'_>, snap: &SessionSnap, max_age: Duration) -> Result<super::term_view::ViewMeta, String> {
+        let key = (snap.window.sock.clone(), snap.pane_id);
+        let now = self.meta_now();
+        if let Some((at, m)) = self.view_meta_cache.lock().unwrap().get(&key) {
+            if now.saturating_duration_since(*at) < max_age {
+                return Ok(m.clone());
+            }
+        }
         let panes = w.list(&snap.window.sock)?;
         let p = panes.iter().find(|p| p.pane_id == snap.pane_id).ok_or("這個窗格已經不在了")?;
-        Ok((text, super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows }))
+        let m = super::term_view::ViewMeta { cursor_x: p.cursor_x, cursor_y: p.cursor_y, cols: p.size.cols, rows: p.size.rows };
+        self.view_meta_cache.lock().unwrap().insert(key, (now, m.clone()));
+        Ok(m)
+    }
+
+    /// 窗格關掉或換掉：丟掉它的快取，窗格編號被重用時不會看到舊的游標與大小
+    fn forget_meta(&self, sock: &Path, pane_id: u64) {
+        self.view_meta_cache.lock().unwrap().remove(&(sock.to_path_buf(), pane_id));
+    }
+
+    /// 看畫面用的游標與大小（帶快取）：`max_age` 內不重問 `cli list`。本機看用 [`LOCAL_META_MAX_AGE`]，遠端看用 [`REMOTE_META_MAX_AGE`]。
+    /// 游標與大小可以稍微落後
+    pub fn view_meta_cached(&self, id: &str, max_age: Duration) -> Result<super::term_view::ViewMeta, String> {
+        let snap = self.view_snapshot(id)?;
+        let dir = self.dir()?;
+        self.meta_cached(&self.wez(&dir), &snap, max_age)
     }
 
     /// 看畫面用的游標與大小。查不到這個窗格就回錯
@@ -1180,6 +1238,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             let mut g = self.inner.lock().unwrap();
             g.sessions.retain(|s| s.id != id);
         }
+        self.forget_meta(&snap.window.sock, snap.pane_id);
         // 窗格都沒了，看它的 GUI 也一起收（只收自己起的那一個，見 unview）
         let _ = self.unview(id);
         self.persist()?;
@@ -5799,6 +5858,71 @@ mod tests {
                 vec!["--config-file", "C:/m/mux.lua", "--config", "initial_cols=120", "--config", "initial_rows=40", "connect", "asn", "--workspace", "asn-3"],
                 "--config 要放在 connect 前面（WezTerm 的全域選項），不然會被當成子命令的參數"
             );
+        }
+
+        fn list_calls(rig: &Rig) -> usize {
+            rig.runner.args().iter().filter(|a| a.iter().any(|x| x == "list")).count()
+        }
+
+        fn advance(rig: &Rig, ms: u64) {
+            *rig.svc.test_clock_offset.lock().unwrap() += Duration::from_millis(ms);
+        }
+
+        #[test]
+        fn 看畫面_游標大小快取_本機半秒_遠端兩秒_不快取的路徑照問() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":3,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            let base = list_calls(&rig);
+            assert_eq!(rig.svc.view_meta_cached(&id, LOCAL_META_MAX_AGE).unwrap().cursor_x, 3);
+            // 半秒內：游標變了也不重問
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":8,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            advance(&rig, 400);
+            assert_eq!(rig.svc.view_meta_cached(&id, LOCAL_META_MAX_AGE).unwrap().cursor_x, 3);
+            assert_eq!(list_calls(&rig) - base, 1);
+            advance(&rig, 100);
+            assert_eq!(rig.svc.view_meta_cached(&id, LOCAL_META_MAX_AGE).unwrap().cursor_x, 8);
+            assert_eq!(list_calls(&rig) - base, 2);
+            // 遠端兩秒窗
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":9,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            advance(&rig, 1900);
+            assert_eq!(rig.svc.view_meta_cached(&id, REMOTE_META_MAX_AGE).unwrap().cursor_x, 8);
+            assert_eq!(list_calls(&rig) - base, 2);
+            advance(&rig, 100);
+            assert_eq!(rig.svc.view_meta_cached(&id, REMOTE_META_MAX_AGE).unwrap().cursor_x, 9);
+            assert_eq!(list_calls(&rig) - base, 3);
+            // 沒走快取的 view_meta 每次都問
+            rig.svc.view_meta(&id).unwrap();
+            rig.svc.view_meta(&id).unwrap();
+            assert_eq!(list_calls(&rig) - base, 5);
+        }
+
+        #[test]
+        fn 看畫面_游標大小快取_不同窗格不共用_關閉就丟掉() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = r#"[{"pane_id":9,"tab_id":1,"cursor_x":3,"cursor_y":4,"size":{"rows":40,"cols":120}}]"#.into();
+            rig.svc.view_meta_cached(&id, LOCAL_META_MAX_AGE).unwrap();
+            // 別的窗格、別的通訊檔都用自己的鍵
+            let sock = rig.svc.view_snapshot(&id).unwrap().window.sock;
+            let other = crate::launch::term_view::ViewMeta { cursor_x: 1, cursor_y: 1, cols: 1, rows: 1 };
+            rig.svc.view_meta_cache.lock().unwrap().insert((sock.clone(), 77), (rig.svc.meta_now(), other.clone()));
+            rig.svc.view_meta_cache.lock().unwrap().insert((PathBuf::from("other-sock"), 9), (rig.svc.meta_now(), other));
+            assert_eq!(rig.svc.view_meta_cached(&id, LOCAL_META_MAX_AGE).unwrap().cursor_x, 3, "不拿別的鍵的內容");
+            assert_eq!(rig.svc.view_meta_cache.lock().unwrap().len(), 3);
+            rig.svc.stop(&id).unwrap();
+            let c = rig.svc.view_meta_cache.lock().unwrap();
+            assert!(!c.contains_key(&(sock, 9)), "關掉就丟掉這個窗格的快取");
+            assert_eq!(c.len(), 2, "別的窗格不受影響");
+        }
+
+        #[test]
+        fn 看畫面_快取間隔_原始碼守則() {
+            let lib = include_str!("../lib.rs");
+            assert!(lib.contains("view_meta_cached(&self.id, launch::term::LOCAL_META_MAX_AGE)"), "本機看用 500ms");
+            assert!(lib.contains("view_meta_cached(&id, launch::term::REMOTE_META_MAX_AGE)"), "遠端看用 2s");
+            assert_eq!(LOCAL_META_MAX_AGE, Duration::from_millis(500));
+            assert_eq!(REMOTE_META_MAX_AGE, Duration::from_secs(2));
         }
 
         #[test]
