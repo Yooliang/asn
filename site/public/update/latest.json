@@ -1,11 +1,11 @@
 {
-  "version": "0.2.11",
-  "notes": "- 新功能：系統寄來的通知（例如各台電腦「○○收發室」寄的信）集中到一個固定的「通知」對話，排在電腦和手機名單的最上面，每則會標出是哪台設備寄的。原本分散的「○○收發室」對話會併進來，未讀數相加，舊的記錄都還在。「通知」對話不能回信，也沒有通話鈕。\n- 新功能：手機版下方第四格固定是「通知」，系統通知都在這裡，有未讀時會出現紅點。\n- 新功能：手機版設定「通知」多一列「App 關著時也通知我」：打開後，手機就算沒開 ASN，有新訊息也會跳通知（只說「有新訊息」，內容要打開 App 才看得到）。這個功能已經內建，等設定好 Firebase 才會開；還沒開之前，這一列不會出現。\n- 改善：手機版和電腦版設定的「設備」清單裡，雲端的夥伴（例如雲端代理、轉接橋、只跑收發程式的伺服器）會在種類旁標「雲端」，例如「電腦 · 雲端 · 在線」。\n- 改善：手機版設定頁排版整理：「設備／帳號」分頁鈕和設備列第三行在大字型下不再被切掉；「這支手機」那一列對齊；額度說明只出現在帳號分頁；「切換到…」按鈕右緣對齊，說明字貼在按鈕左邊；拿掉「這台沒有存這個帳號」這句。\n- 修正：手機版的帳號不會再被列成可以「切換到這支手機」（手機上不跑夥伴）；替別台電腦切換照舊。\n- 修正：看別台的畫面、在別台打字時，上方寫的是設備名稱，不再顯示成代號（例如「正在看「H」」）。\n- 修正：電腦版名單上方「正在聽的歌」會顯示了；Claude 外掛在背景裝好時會更新狀態；Claude、Grok 帳號自動加入後，會重抓清單並顯示「已自動加入 …」。\n- 改善：夥伴的名字不能取成「ASN 通知」，也不能以「收發室」結尾，這兩種留給系統通知用。",
-  "pub_date": "2026-11-08T23:37:49.614Z",
+  "version": "0.2.12",
+  "notes": "- 新功能：手機可以看自己電腦上夥伴的終端（只能看，不能打字）。在夥伴的對話頁上方切到「終端」就會開始看，切回「訊息」或離開對話就結束。每次查看前都要先通過指紋或螢幕鎖；手機沒有設定螢幕鎖的話不能看。被看的那台電腦照樣會出現紅條並收到通知信。\n- 新功能：電腦設定頁多一個開關「允許移動設備查看終端」，預設開；關掉後，手機就不能看這台電腦上夥伴的終端，正在看的也會馬上結束。電腦之間互看不受影響。\n- 新功能：額度來源（設定 → 設備與帳號 → 額度來源，全部預設關）：可以讀 Grok、Gemini 的額度，Gemini 會寫出目前算在哪個帳號名下；可以加入 MiniMax 帳號（輸入 email 和 key，最多 2 個，key 存好後不再顯示，只能移除後重新加入，目前只有 Windows 能設定）；讀不到時，原因會留在畫面上，例如「登入失效，要重新登入」。\n- 新功能：「我的帳號」每個帳號都可以產生查詢代碼，讓別的程式用這個代碼查這個帳號的額度。代碼只顯示一次；重新產生或撤銷後，舊代碼立刻失效。\n- 新功能：Grok、MiniMax 的額度也會出現在帳號列表，電腦和手機都看得到。\n- 新功能：Claude 的額外帳號（另外登入在專用資料夾的帳號）可以讀額度，也可以選擇快到期時自動換新；兩個都預設關，自動換新要按兩次才會打開。沒有這個資料夾的人看不到這一區。\n- 改善：「通知」對話分得出是哪一台：每則通知的上方會寫「通知 · 設備名」，收發室自己發的通知開頭也會加上設備名。\n- 改善：從手機或別台電腦開新夥伴時，Gemini（agy）和 Grok 也能開進那台的 ASN 終端（那台要開著終端服務，並允許其他設備替它開新視窗）。手機開新夥伴頁會說明「會照那台電腦的設定，開在前台或背景」。\n- 修正：設備清單的「雲端」標示，剛開 ASN 時讀取失敗的那台，之後會自動重讀，不會一直顯示成電腦。\n- 已知問題：手機橫向看終端時，終端畫面會被擠到看不見，請先用直向看，下一版修。電腦關掉開關、切到背景的情況還沒在實機上驗過，用起來有問題請回報。\n- 已知問題：從手機替別台電腦開 Gemini、Grok 進終端服務，還沒在實機上驗過。\n- 已知問題：後台送出的部分通知，內文還會寫「這台」，下一次後台更新會改掉。",
+  "pub_date": "2026-11-09T04:13:20.989Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNiV1BTSGQyTmhzOTJ0Rzgwc3dqZ2M4aGdKdlBlTDBiZzUrbzNrRGtaOXdTSnhhLzFQRGlpd0NnUXFVV3pLcHRrUjVuOC94MXdqamYyc25kY2VPTXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTgxMDY5CWZpbGU6QVNOXzAuMi4xMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjExCjZuN0w1cTg5dzBrWlU0U2g1djRuNloyZzllS0RUbFlKMGJBZXhRNzR5a2c4YU9OOFdzaDd6NEcwbFA3V3R4bDlaYkZnOEdnS3p5N1l2aHhmWUxlOERnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.11_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjIyVktVN1RidW5hdkVkZG8yeHF0NzNWakhIeGlTN3RBRTUzU2xJREtJbkxXZGFTaHlYakxTZE95ZS83d1Z0d1BjdkRHMGV2T05HUDRXS0JCaU9BV2dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTk3NjAwCWZpbGU6QVNOXzAuMi4xMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjEyCkhsdStOZUF2SkM0OE5rMXYxbTczWW9WWnRxQUhmaXkzOXJxNDdSREZSNTZOY0hmZlpnamZDenovdUZBbE0xYVhVenRIQkMrM2FhL0VVYkY2ZGJRL0NRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.12_x64-setup.exe"
     }
   }
 }
