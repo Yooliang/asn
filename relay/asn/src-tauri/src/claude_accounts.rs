@@ -412,10 +412,21 @@ pub fn current_identity(home: &Path) -> Option<(String, String)> {
     Some((email_of_fragment(&frag)?, uuid))
 }
 
-/// 用 accountUuid 找 email（#1185）：先在帳號庫 `claude-accounts` 底下列目錄找 account.json（只取 accountUuid 與 emailAddress，
-/// 資料夾名要等於該 email 的標準資料夾名，對不上就不用），找不到再看目前登入的 .claude.json；都找不到回 None（未知帳號）。
+/// 讀某個 `.claude.json` 的登入身分：(email, accountUuid)；檔案不存在、壞掉、沒登入都是 None。只取這兩個欄位。
+fn identity_of_file(path: &Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let frag = extract_fragment(&text).ok().flatten()?;
+    Some((email_of_fragment(&frag)?, uuid_of_fragment(&frag)?))
+}
+
+/// 用 accountUuid 找 email（#1185）。順序：
+/// 1. 帳號庫 `claude-accounts`：列目錄找 account.json（只取 accountUuid 與 emailAddress），資料夾名要等於該 email 的標準資料夾名，對不上就不用；
+/// 2. 這個視窗自己的設定資料夾（`cfg`，也就是 transcript 所屬的 CLAUDE_CONFIG_DIR）裡的 `.claude.json`——同一台機器開多個帳號的視窗，
+///    靠各自的設定資料夾分開，所以要先看這份；
+/// 3. 家目錄的 `.claude.json`。
+/// 2、3 都只在裡面的 accountUuid 與要找的 uuid 完全相同時才用。都找不到回 None（未知帳號）。
 /// 只讀、不拼使用者給的路徑、不改名舊資料夾。
-pub fn email_of_account_uuid(home: &Path, uuid: &str) -> Option<String> {
+pub fn email_of_account_uuid(home: &Path, cfg: &Path, uuid: &str) -> Option<String> {
     if uuid.is_empty() {
         return None;
     }
@@ -431,12 +442,7 @@ pub fn email_of_account_uuid(home: &Path, uuid: &str) -> Option<String> {
             }
         }
     }
-    let (frag, cur) = current_fragment(home).ok().flatten()?;
-    if cur == uuid {
-        email_of_fragment(&frag)
-    } else {
-        None
-    }
+    [cfg.join(".claude.json"), cj_path(home)].iter().find_map(|p| identity_of_file(p).filter(|(_, u)| u == uuid).map(|(e, _)| e))
 }
 
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None

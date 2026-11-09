@@ -317,24 +317,25 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
     match owner::resolve(home, cfg, input) {
-        Some(o) => hook_owned(home, &o, parsed, now_ms),
+        Some(o) => hook_owned(home, cfg, &o, parsed, now_ms),
         None => hook_legacy(home, parsed, now_ms),
     }
 }
 
 /// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
-fn hook_owned(home: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> bool {
-    let Some(email) = claude_accounts::email_of_account_uuid(home, &o.account_uuid) else {
+fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> bool {
+    let Some(email) = claude_accounts::email_of_account_uuid(home, cfg, &o.account_uuid) else {
         owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
         return false;
     };
     let before = state::load(home);
     let mut all_st = before.clone();
-    let mut st = all_st.take_owned(&email);
+    let skey = email_key(&email);
+    let mut st = all_st.take_owned(&skey);
     // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
     let reset_base = load_all(home).get(&email).is_some_and(|q| !q.owner);
     let r = record(home, &email, parsed, &mut st, reset_base, true, now_ms).unwrap_or(false);
-    all_st.put_owned(&email, st);
+    all_st.put_owned(&skey, st);
     if all_st != before {
         state::save(home, &all_st);
     }
@@ -352,6 +353,15 @@ fn identity_key(email: &str, uuid: &str) -> String {
     h.update(uuid.as_bytes());
     let d = h.finalize();
     format!("h1:{}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+}
+
+/// 各帳號自己的狀態在狀態檔裡的鍵：email 的雜湊（`e1:` 開頭），狀態檔裡不留明文 email
+fn email_key(email: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"asn-claude-owned-v1|");
+    h.update(email.as_bytes());
+    format!("e1:{}", h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 /// 剛換帳號、還在等確認的帳號（舊辦法的「連續 3 次、隔 10 分鐘」）：目前登入的就是狀態檔記的那個身分、

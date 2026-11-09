@@ -672,16 +672,16 @@ fn 身分_第一次有身分的回報清掉沒有標記的舊基準_備份一份
 fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看登入檔_都沒有就是未知() {
     let h = home_as("cur@x.test"); // .claude.json 的 accountUuid 是 11111111-2222-3333-4444-555555555555
     add_account(h.path(), "a@x.test", UA);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), UA).as_deref(), Some("a@x.test"));
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), UA).as_deref(), Some("a@x.test"));
     // 資料夾名跟 email 對不上（被改名／被塞假檔）：不用
     let root = h.path().join(".asn").join("claude-accounts");
     std::fs::create_dir_all(root.join("wrong-name")).unwrap();
     std::fs::write(root.join("wrong-name").join("account.json"), json!({ "accountUuid": UB, "emailAddress": "b@x.test" }).to_string()).unwrap();
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), UB), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), UB), None);
     // 帳號庫沒有、但正是目前登入的帳號：看 .claude.json
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), ""), None);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), "eeeeeeee-0000-0000-0000-000000000000"), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), ""), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), "eeeeeeee-0000-0000-0000-000000000000"), None);
 }
 
 // ---------- 狀態檔不留明文身分、舊格式平順轉換、剛換帳號的提示（#1185） ----------
@@ -733,4 +733,29 @@ fn 剛換帳號等確認時畫面資料標_waiting_確認收下後就沒有了()
     let all = super::super::quota_all_with_waiting(h.path());
     assert_eq!(all["b@x.test"]["weekly_pct"], 60);
     assert!(all["b@x.test"].get("waiting").is_none());
+}
+
+#[test]
+fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家目錄_uuid_要對得上() {
+    let h = tempfile::tempdir().unwrap();
+    let cfg = h.path().join("cfg-b");
+    std::fs::create_dir_all(&cfg).unwrap();
+    // 家目錄那份登入的是 home@x.test；這個視窗的設定資料夾登入的是 cfgb@x.test
+    let cj = |dir: &std::path::Path, email: &str, uuid: &str| std::fs::write(dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
+    cj(h.path(), "home@x.test", "11111111-0000-0000-0000-00000000000a");
+    cj(&cfg, "cfgb@x.test", "22222222-0000-0000-0000-00000000000b");
+    let f = |uuid: &str| crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, uuid);
+    assert_eq!(f("22222222-0000-0000-0000-00000000000b").as_deref(), Some("cfgb@x.test"), "先看這個視窗自己的設定資料夾");
+    assert_eq!(f("11111111-0000-0000-0000-00000000000a").as_deref(), Some("home@x.test"), "設定資料夾沒有才看家目錄");
+    assert_eq!(f("33333333-0000-0000-0000-000000000000"), None, "uuid 對不上就不用");
+}
+
+#[test]
+fn 狀態檔裡各帳號自己的狀態用_email_雜湊當鍵_不留明文() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    let t = transcript(h.path(), "wa", UA);
+    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &t), NOW));
+    let s = state_file(&h);
+    assert!(s.contains("\"e1:") && !s.contains("a@x.test"), "{s}");
 }

@@ -58,6 +58,37 @@ fn is_link(m: &std::fs::Metadata) -> bool {
     false
 }
 
+/// 路徑去掉 root 前綴，回剩下的相對路徑；不在 root 底下回 None。
+/// Windows 的檔案系統不分大小寫，transcript_path 的磁碟代號與資料夾名大小寫常和我們算出的 root 不同（例如 c: 和 C:），
+/// 所以 Windows 逐層不分大小寫比對；安全不靠這裡的大小寫，靠後面開檔後的 handle 確認與 reparse point 檢查。Unix 分大小寫。
+#[cfg(windows)]
+fn strip_root(root: &Path, path: &Path) -> Option<PathBuf> {
+    let low = |c: Component| c.as_os_str().to_string_lossy().to_lowercase();
+    let (mut r, mut p) = (root.components(), path.components());
+    loop {
+        match (r.next(), p.next()) {
+            (None, rest) => {
+                let mut out = PathBuf::new();
+                for c in rest.into_iter().chain(p) {
+                    out.push(c.as_os_str());
+                }
+                return Some(out);
+            }
+            (Some(_), None) => return None,
+            (Some(a), Some(b)) => {
+                if low(a) != low(b) {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_root(root: &Path, path: &Path) -> Option<PathBuf> {
+    path.strip_prefix(root).ok().map(Path::to_path_buf)
+}
+
 /// 第一道檢查：路徑要在 `<root>`（= 設定資料夾/projects）底下、副檔名 .jsonl、沒有 `..`，
 /// 從 root 往下每一層都不是連結。回 (實際路徑, 相對 root 的部分)。
 fn checked_path(root: &Path, path: &Path) -> Option<(PathBuf, PathBuf)> {
@@ -65,7 +96,7 @@ fn checked_path(root: &Path, path: &Path) -> Option<(PathBuf, PathBuf)> {
     if !ext_ok {
         return None;
     }
-    let rel = path.strip_prefix(root).ok()?;
+    let rel = strip_root(root, path)?;
     if rel.as_os_str().is_empty() || !rel.components().all(|c| matches!(c, Component::Normal(_))) {
         return None;
     }
@@ -307,6 +338,33 @@ mod tests {
         assert!(handle_matches(&h, &canon), "位置相符");
         assert!(!handle_matches(&h, &std::fs::canonicalize(&other).unwrap()), "位置不符（檔案被換成別的）");
         assert!(!handle_matches(&h, &t.path().join("missing.jsonl")), "預期位置不存在");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_大小寫不同但實際是同一個位置的路徑要收() {
+        let (_t, cfg, f) = setup(&[owner_line(A)]);
+        let home = tempfile::tempdir().unwrap();
+        let upper = PathBuf::from(f.to_string_lossy().to_uppercase());
+        assert_ne!(upper, f);
+        assert_eq!(resolve(home.path(), &cfg, &input(&upper)).map(|o| o.account_uuid), Some(A.to_string()));
+        // 磁碟代號大小寫相反
+        let s = f.to_string_lossy().to_string();
+        let flipped = if s.as_bytes()[0].is_ascii_lowercase() { s[..1].to_uppercase() + &s[1..] } else { s[..1].to_lowercase() + &s[1..] };
+        assert_eq!(resolve(home.path(), &cfg, &input(Path::new(&flipped))).map(|o| o.account_uuid), Some(A.to_string()));
+        // 大小寫放寬不等於放行別的位置
+        let other = cfg.parent().unwrap().join("o.jsonl");
+        std::fs::write(&other, owner_line(A)).unwrap();
+        assert_eq!(resolve(home.path(), &cfg, &input(&PathBuf::from(other.to_string_lossy().to_uppercase()))), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_大小寫不同的路徑不收() {
+        let (_t, cfg, f) = setup(&[owner_line(A)]);
+        let home = tempfile::tempdir().unwrap();
+        let wrong = PathBuf::from(f.to_string_lossy().replace("projects", "PROJECTS"));
+        assert_eq!(resolve(home.path(), &cfg, &input(&wrong)), None);
     }
 
     #[cfg(windows)]
