@@ -30,7 +30,7 @@ const MAX_ARCHIVE_BYTES: u64 = 400 * 1024 * 1024;
 const MAX_ENTRIES: usize = 200;
 const MAX_UNPACKED_BYTES: u64 = 600 * 1024 * 1024;
 
-pub const SPEC: Spec = Spec { vendor: "Codex", host: HOST, signer: EXPECTED_SIGNER, exe: "codex.exe", file_prefix: "codex", hash: HashAlgo::Sha256 };
+pub const SPEC: Spec = Spec { vendor: "Codex", host: HOST, path_prefix: "/codex/releases/", signer: EXPECTED_SIGNER, exe: "codex.exe", file_prefix: "codex", hash: HashAlgo::Sha256 };
 
 /// 簽章例外：寫死在程式裡，不能從清單或設定檔傳進來（asn真 定案）。路徑以 `/` 分隔、相對於套件根目錄
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,10 +241,8 @@ pub(crate) fn verify_package(sig: &dyn super::authenticode::SignatureCheck, root
     Ok(codex_signer)
 }
 
-/// `--version` 的輸出裡要有一個字完全等於版本號（Codex 印成 `codex-cli 0.167.0` 這類格式）
-fn version_in_output(output: &str, version: &str) -> bool {
-    output.split_whitespace().any(|w| w == version)
-}
+/// Codex 印成 `codex-cli 0.167.0` 這類格式，用共用的比對（輸出裡要有一個字完全等於版本號）
+use super::verified_install::version_in_output;
 
 /// 記住裝好的版本的檔名（在 `tools\codex` 底下，只寫版本號）
 const CURRENT_FILE: &str = "current";
