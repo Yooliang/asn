@@ -1,6 +1,6 @@
 // 手機版「幫電腦開新夥伴」（遠端開視窗）的純邏輯：哪些電腦能開、為什麼不能、表單檢查、請求內容、進度文字、錯誤翻成中文。
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-import { closedReasonOf, remoteModelRows } from './partner-launch-ui.mjs'
+import { closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
 import { isDeviceRemoved } from './device-order.mjs'
 import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
@@ -109,7 +109,7 @@ export function launchRun(row, launcher) {
   if (!row) return { options: [], selected: null }
   if (!row.channels) return customRunOptions(row)   // 目錄上沒有的（自訂設定）：只看 mode（電腦版同一份）
   const pc = launchPiChoice(row, launcher)
-  const r = runOptions(row, { local: false, piInstalled: remotePi(launcher).installed, piReady: pc.ok })
+  const r = runOptions(row, { local: false, piInstalled: remotePi(launcher).installed, piReady: pc.ok, remoteTerm: Boolean(remoteTermProfile(launcher, row)) })
   // 經 pi 不能選時，原因用那台回報的（沒有 pi、沒開放遠端管理、沒登入那一家），比目錄的通用說明準確
   const options = r.options.map(o => (o.key === 'pi' && !o.ok && row.channels?.pi?.status !== 'no' && pc.why ? { ...o, why: pc.why } : o))
   return { options, selected: r.selected }
@@ -125,6 +125,9 @@ export function pickedRun(run, wanted) {
 // 經 pi：profile 一律是 pi，帶這次查到清單裡的提供者與模型；不在清單裡就回 null（不送）
 export function buildLaunchRequest(f, { run = '', row = null, launcher = null } = {}) {
   const base = { node: f.node, name: f.name.trim(), cwd: f.cwd, first_message: f.first.trim() || null }
+  // asn終端（原生 cli）且那台摘要有這一家的 <id>-term：送 <id>-term（那台開進 asn終端）；Claude、Codex 等開窗點的照舊送原本的 profile
+  const termId = run === 'term' ? remoteTermProfile(launcher, row) : ''
+  if (termId) return { ...base, profile: termId }
   if (run !== 'pi') return { ...base, profile: f.profile }
   const pc = launchPiChoice(row, launcher)
   const pi = pc.ok ? piLaunchArgs(row?.id, f.piModel || pc.defaultModel, pc.models) : null

@@ -47,7 +47,8 @@ export const vendorRows = rows => (Array.isArray(rows) ? rows : []).filter(r => 
  */
 export const RUN_OPTION_LABEL = { acp: 'acp通道（無介面）', pi: 'asn終端（pi shell）', term: 'asn終端（原生 cli）', self: '原始 cli 視窗' }
 const TERM_PROFILES = ['grok', 'agy']   // 後端 term_start 只收這兩個（launch/term.rs resolve_command）
-export function runOptions(row, { local = false, piInstalled = false, piReady = false } = {}) {
+// remoteTerm：別台的啟動器摘要有這一家的 asn終端（<id>-term，mode: term），可以遠端開進那台的 asn終端（#931 PR-2）；沒有就照舊「只能在那台電腦上開」
+export function runOptions(row, { local = false, piInstalled = false, piReady = false, remoteTerm = false } = {}) {
   const ch = row?.channels ?? {}
   const st = k => ch[k]?.status
   const why = k => String(ch[k]?.why ?? '')
@@ -60,9 +61,9 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
   // 終端：Claude、Codex、pi 走開窗點（終端服務開著就開進 ASN 終端，沒開退回原生主控台；別台設備也能遠端開）；Grok、Gemini 走 term_start，只能在這台開
   const termWindow = st('term') === 'window'
   const termWez = ['ok', 'noinbox'].includes(st('term')) && TERM_PROFILES.includes(row?.toolId)
-  const termOk = termWindow || (termWez && local)
+  const termOk = termWindow || (termWez && (local || remoteTerm))
   const termWhy = termWez ? '只能在那台電腦上開' : (why('term') || '不支援')
-  const termNote = termWindow ? '開在 ASN 終端，可以看畫面、喚醒' : termWez && st('term') === 'noinbox' ? '收不到信，只能看畫面、送字；也只能在這台電腦上開' : ''
+  const termNote = termWindow ? '開在 ASN 終端，可以看畫面、喚醒' : termWez && st('term') === 'noinbox' ? (local ? '收不到信，只能看畫面、送字；也只能在這台電腦上開' : '收不到信，開在那台電腦的 ASN 終端，只能看畫面、送字') : ''
   const selfNote = row?.id === 'claude' ? '自己開 claude，裝了 ASN 外掛就會出現在名單上' : isPiItself ? '自己開 pi，裝了 ASN 擴充就會出現在名單上' : '已開著的可以用「接手已開著的終端視窗」接進來'
   const options = [
     opt('term', termOk, termWhy, termOk ? termNote : ''),
