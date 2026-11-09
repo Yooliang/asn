@@ -201,7 +201,7 @@ fn log_超過上限只留後半_不會無限長() {
     let h = home_as("a@x.test");
     std::fs::create_dir_all(h.path().join(".asn")).unwrap();
     std::fs::write(log_path(h.path()), "舊的一行記錄\n".repeat(5000)).unwrap();
-    log_skipped(h.path(), &[Skipped { kind: Kind::Five, reason: "測試".into() }], NOW);
+    log_skipped(h.path(), &[Skipped { kind: Kind::Five, code: "same_period_rise", reason: "測試".into() }], NOW);
     let l = log(&h);
     assert!((l.len() as u64) < LOG_MAX_BYTES, "{}", l.len());
     assert!(l.ends_with("5 小時額度沒收：測試\n"));
@@ -369,4 +369,196 @@ fn 範圍_邊界_後_8_天內收_超過不收_前_1_天內收_超過不收() {
     assert!(judge(Kind::Five, Some((40, Some(NOW + 8 * DAY + 1000))), 90, Some(NOW + H), NOW).is_ok());
     // 記著的早於前 1 天不另外處理，照「已過 7 天才照收」（過 2 天、差不是 7 天倍數仍不收）
     assert!(judge(Kind::Week, Some((40, Some(NOW - 2 * DAY))), 90, Some(NOW + 3 * DAY), NOW).is_err());
+}
+
+// ---------- 每週待確認（#1184）：過期後同一個新重置時間連續 3 次、隔滿 10 分鐘才收 ----------
+
+fn parsed_week(pct: u8, reset: i64) -> Parsed {
+    Parsed { five_hour_pct: None, weekly_pct: Some(pct), reset_at: Some(iso_secs(reset)), five_reset_ms: None, week_reset_ms: Some(reset) }
+}
+
+fn state_text(h: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(super::super::state::state_path(h.path())).unwrap_or_default()
+}
+
+#[test]
+fn 共用案例_待確認序列_每一步都跟預期一致() {
+    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
+    let c = &v["constants"];
+    assert_eq!((c["confirm_count"].as_u64(), c["confirm_span_ms"].as_i64()), (Some(CONFIRM_COUNT as u64), Some(CONFIRM_SPAN_MS)), "待確認常數跟案例檔一致");
+    let seqs = v["confirm_sequences"].as_array().expect("confirm_sequences");
+    assert!(seqs.len() >= 6, "序列不該變少");
+    let win = |w: &Value| -> (u8, Option<i64>) { (w["left_pct"].as_u64().unwrap() as u8, w["resets_at"].as_str().map(ms)) };
+    let mut wrong = vec![];
+    for t in seqs {
+        let id = t["id"].as_str().unwrap();
+        let mut old = Some(win(&t["old"]));
+        let mut pend: Option<Pending> = None;
+        for (i, st) in t["steps"].as_array().unwrap().iter().enumerate() {
+            let (pct, reset) = win(&st["new"]);
+            let (merged, took, skipped, next) = merge_one(Vendor::Claude, Kind::Week, old, Some((pct, reset)), pend, ms(st["now"].as_str().unwrap()));
+            let want = st["accept"].as_bool().unwrap();
+            let got_reason = skipped.as_ref().map(|s| s.code);
+            if took != want || got_reason != st["reason"].as_str() {
+                wrong.push(format!("{id} 第 {} 步：預期 {want}/{:?}，實際 {took}/{got_reason:?}", i + 1, st["reason"].as_str()));
+            }
+            old = merged;
+            pend = next;
+        }
+    }
+    assert!(wrong.is_empty(), "跟共用案例不一致：{wrong:#?}");
+}
+
+#[test]
+fn 待確認_次數與間隔的邊界() {
+    let r = 1_000_000_000_000;
+    let (ok, p) = confirm_week(None, r, NOW);
+    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW }));
+    let (ok, p) = confirm_week(p, r + 9 * 60_000, NOW + 1000); // 差 10 分鐘內算同一個
+    assert!(!ok && p.unwrap().count == 2 && p.unwrap().reset_ms == r, "待確認的重置時間不跟著漂");
+    let (ok, p) = confirm_week(p, r + 11 * 60_000, NOW + 2000); // 差超過 10 分鐘＝不同，重新計
+    assert!(!ok && p == Some(Pending { reset_ms: r + 11 * 60_000, count: 1, first_ms: NOW + 2000 }));
+    let (ok, p) = confirm_week(Some(Pending { reset_ms: r, count: 2, first_ms: NOW }), r, NOW + CONFIRM_SPAN_MS);
+    assert!(ok && p.is_none(), "第 3 次且剛好隔 10 分鐘＝收");
+}
+
+/// 記著 gmail 的一期，時間推到它過期 5 天後；回 (家目錄, 現在, 新重置時間 A, 新重置時間 B)，A、B 都不是 7 天倍數
+fn expired_home() -> (tempfile::TempDir, i64, i64, i64) {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let h = home_as("a@x.test");
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), gmail - 3 * DAY));
+    let now = gmail + 5 * DAY;
+    (h, now, now + 6 * DAY + 5 * H, now + 5 * DAY + 2 * H)
+}
+
+#[test]
+fn 待確認_同一個新重置時間連續三次且隔十分鐘才收_狀態存檔重開不歸零() {
+    let (h, now, a, _) = expired_home();
+    assert!(!hook(h.path(), &status(None, Some((40.0, a))), now));
+    assert!(!hook(h.path(), &status(None, Some((40.0, a))), now + 5 * 60_000));
+    assert!(state_text(&h).contains("\"count\":2"), "次數存在狀態檔：{}", state_text(&h));
+    assert_eq!(q(&h).weekly_pct, Some(70), "還沒收");
+    assert!(hook(h.path(), &status(None, Some((40.0, a))), now + 10 * 60_000), "第 3 次且隔滿 10 分鐘");
+    let got = q(&h);
+    assert_eq!((got.weekly_pct, got.week_reset_at), (Some(60), Some(iso_secs(a))), "換成新基準");
+    assert!(!state_text(&h).contains("pending_week"), "收下後待確認清掉：{}", state_text(&h));
+}
+
+#[test]
+fn 待確認_交錯送兩組重置時間_不會誤收() {
+    let (h, now, a, b) = expired_home();
+    for i in 0..12 {
+        let r = if i % 2 == 0 { a } else { b };
+        assert!(!hook(h.path(), &status(None, Some((40.0, r))), now + i * 5 * 60_000), "第 {i} 次");
+    }
+    assert_eq!(q(&h).weekly_pct, Some(70));
+}
+
+#[test]
+fn 待確認_記著的還沒過期時倍數規則照擋_不累計() {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let yooliang = ms("2026-11-04T09:00:00Z");
+    let start = gmail - 3 * DAY;
+    let h = home_as("a@x.test");
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
+    for i in 1..=6 {
+        assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + i * 20 * 60_000));
+    }
+    assert_eq!(q(&h).weekly_pct, Some(70));
+    assert!(!state_text(&h).contains("pending_week"), "還沒過期不累計待確認：{}", state_text(&h));
+}
+
+#[test]
+fn log_同一個原因只記一次_收進新值後再發生才再記() {
+    let (h, now, a, _) = expired_home();
+    let lines = |h: &tempfile::TempDir| log(h).lines().filter(|l| l.contains("7 天的倍數")).count();
+    for i in 0..5 {
+        hook(h.path(), &status(None, Some((40.0, a))), now + i * 1000);
+    }
+    assert_eq!(lines(&h), 1, "連續 5 次同一原因只記一行：{}", log(&h));
+    // 隔滿 10 分鐘收下新的一期，原因清掉
+    assert!(hook(h.path(), &status(None, Some((40.0, a))), now + 11 * 60_000));
+    assert_eq!(lines(&h), 1);
+    // a 過期之後又來一個不是 7 天倍數的：原因又發生，要再記一行
+    let later = a + 2 * DAY;
+    let odd = later + 3 * DAY + 5 * H;
+    assert!(!hook(h.path(), &status(None, Some((40.0, odd))), later));
+    assert_eq!(lines(&h), 2, "收下之後再發生要再記：{}", log(&h));
+}
+
+#[test]
+fn 換身分_該帳號舊基準丟掉_照新帳號的數字收_同帳號正常更新照舊() {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let yooliang = ms("2026-11-04T09:00:00Z");
+    let start = gmail - 3 * DAY;
+    let write = |h: &tempfile::TempDir, email: &str, uuid: &str| {
+        std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
+    };
+    let h = tempfile::tempdir().unwrap();
+    write(&h, "a@x.test", "uuid-a");
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
+    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + H), "同一個身分：照舊規則擋");
+    assert!(hook(h.path(), &status(None, Some((35.0, gmail))), start + 2 * H), "同帳號正常更新照舊");
+    // 換成 b：b 沒有基準，第一筆不收，同一組重置時間連續 3 次隔 10 分鐘才收
+    write(&h, "b@x.test", "uuid-b");
+    let t = start + 3 * H;
+    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t));
+    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t + 5 * 60_000));
+    assert!(hook(h.path(), &status(None, Some((50.0, yooliang))), t + 10 * 60_000));
+    assert_eq!(load_all(h.path())["b@x.test"].weekly_pct, Some(50));
+    // 換回 a：a 的舊基準丟掉，同樣要確認才收
+    write(&h, "a@x.test", "uuid-a");
+    let t = start + 5 * H;
+    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t));
+    assert!(!load_all(h.path()).contains_key("a@x.test"));
+    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t + 5 * 60_000));
+    assert!(hook(h.path(), &status(None, Some((10.0, yooliang))), t + 10 * 60_000));
+    assert_eq!(load_all(h.path())["a@x.test"].weekly_pct, Some(90));
+}
+
+#[test]
+fn 換身分後_舊帳號視窗交錯送兩組重置時間_不會收() {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let a = gmail + 4 * DAY;
+    let b = gmail + 6 * DAY + 5 * H;
+    let write = |h: &tempfile::TempDir, email: &str, uuid: &str| {
+        std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
+    };
+    let h = tempfile::tempdir().unwrap();
+    write(&h, "a@x.test", "uuid-a");
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), gmail - 3 * DAY));
+    write(&h, "b@x.test", "uuid-b");
+    let t = gmail - 2 * DAY;
+    for i in 0..12 {
+        let r = if i % 2 == 0 { a } else { b };
+        assert!(!hook(h.path(), &status(None, Some((40.0, r))), t + i * 5 * 60_000), "第 {i} 次");
+    }
+    assert!(!load_all(h.path()).contains_key("b@x.test"));
+}
+
+#[test]
+fn 讀不到身分_什麼都不記_也不留狀態檔() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(!hook(h.path(), &status(None, Some((30.0, NOW + 100 * H))), NOW));
+    assert!(!super::super::state::state_path(h.path()).exists());
+    assert!(!super::super::quota_path(h.path()).exists());
+}
+
+#[test]
+fn 狀態檔壞掉或太大_當成空的_不當機() {
+    let h = home_as("a@x.test");
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::state::state_path(h.path()), "{壞掉").unwrap();
+    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 100 * H))), NOW));
+    std::fs::write(super::super::state::state_path(h.path()), "x".repeat(10_000)).unwrap();
+    assert!(hook(h.path(), &status(None, Some((40.0, NOW + 100 * H))), NOW + 60_000));
+}
+
+#[test]
+fn 沒帶待確認狀態的_merge_每次都當第一次看到_行為跟以前一樣() {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let old = Quota { weekly_pct: Some(70), week_reset_at: Some(iso_secs(gmail)), at: iso_secs(gmail - DAY), ..Default::default() };
+    let now = gmail + 5 * DAY;
+    let (q, s) = merge(Some(&old), &parsed_week(60, now + 6 * DAY + 5 * H), now);
+    assert!(q.is_none() && s.len() == 1 && s[0].code == "not_week_multiple");
 }

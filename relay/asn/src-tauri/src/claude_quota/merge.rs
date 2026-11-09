@@ -23,6 +23,10 @@
 //!   agy 對沒用過的額度桶，每次給的重置時間都是「現在＋整個窗長」、會一直往後跑；不加這條，滿額遇滿額（隔 10 分鐘以上）
 //!   或滿額後開始用（重置時間固定成開始用的時間＋窗長）都會被當成「還沒過卻來了更晚的」擋掉，畫面停在 100% 最多 7 天。
 //!   記著的不是 100%、新來的是 100% 照舊判斷（不收）。只限 Gemini：Claude 有記錯帳號的問題，Codex、Grok 維持原樣。
+//! 每週倍數檢查的放寬（#1184）：記著的每週重置時間已過期、新的更晚、卻不是 7 天倍數時，先不收，記下「待確認的重置時間、次數、
+//!   第一次的時間」（`Pending`）；同一個新重置時間（相差 10 分鐘內）連續 3 次、且第一次到這次相隔至少 10 分鐘，才當成新的一期收下、換基準。
+//!   中間來了不同的重置時間（例如另一個視窗送別的帳號的數字）就重新計數；收進任何一次新值就清掉待確認。記著的還沒過期時倍數規則照擋。
+//!   只限 Claude 的每週那條；Codex、Gemini、5 小時那條沒有倍數檢查，不受影響。
 //! 判斷規則與後台共用一份案例（tests/fixtures/quota-merge-cases.json），不收的原因用同一組代碼（`Reject::code`）。
 use super::{iso_secs, parse_iso_secs, pick_reset, Parsed, Quota};
 use std::path::Path;
@@ -34,6 +38,9 @@ const WEEK_MS: i64 = 7 * 86_400_000;
 const RESET_PAST_MS: i64 = 86_400_000;
 /// 重置時間最晚可以是現在往後這麼久（每週那條最多 7 天後，多留 1 天）
 const RESET_FUTURE_MS: i64 = 8 * 86_400_000;
+/// 待確認的重置時間：連續看到幾次、第一次到最後一次至少隔多久，才收下（#1184；後台 asn_relay_acct_window_decide 同值）
+pub const CONFIRM_COUNT: u32 = 3;
+pub const CONFIRM_SPAN_MS: i64 = 10 * 60_000;
 const LOG_FILE: &str = "claude-quota.log";
 const LOG_MAX_BYTES: u64 = 64 * 1024;
 
@@ -65,7 +72,30 @@ impl Kind {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Skipped {
     pub kind: Kind,
+    /// 不收的原因代碼（`Reject::code`）：log 同一個代碼連續發生只記一次（#1184）
+    pub code: &'static str,
     pub reason: String,
+}
+
+/// 每週那條「待確認的重置時間」（#1184）：看到幾次、第一次是什麼時候。存在狀態檔裡，重開不會歸零。
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct Pending {
+    pub reset_ms: i64,
+    pub count: u32,
+    pub first_ms: i64,
+}
+
+/// 每週倍數檢查不過時，這次的新重置時間算不算確認了：回 (收不收, 下一個待確認狀態)。收了就沒有待確認。
+pub fn confirm_week(pend: Option<Pending>, new_reset: i64, now_ms: i64) -> (bool, Option<Pending>) {
+    let next = match pend {
+        Some(p) if (new_reset - p.reset_ms).abs() <= SAME_MS => Pending { count: p.count.saturating_add(1).min(1000), ..p },
+        _ => Pending { reset_ms: new_reset, count: 1, first_ms: now_ms },
+    };
+    if next.count >= CONFIRM_COUNT && now_ms - next.first_ms >= CONFIRM_SPAN_MS {
+        (true, None)
+    } else {
+        (false, Some(next))
+    }
 }
 
 /// 不收的原因：`code` 跟後台與共用案例的代碼一致（same_period_rise／earlier／later_not_expired／not_week_multiple／reset_out_of_range），
@@ -147,12 +177,21 @@ pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new
     Ok(())
 }
 
-/// 合併一條：新來的沒有這條就留舊的；有就判斷。回 (合併後的這條, 有沒有收進新值, 沒收的原因)
-fn merge_one(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new: Option<(u8, Option<i64>)>, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>) {
-    let Some((pct, reset)) = new else { return (old, false, None) };
+/// 合併一條：新來的沒有這條就留舊的；有就判斷。回 (合併後的這條, 有沒有收進新值, 沒收的原因, 下一個待確認狀態)。
+/// 待確認只在 Claude 每週倍數不過時動：確認夠了就收、不夠就記下；收進任何一次新值就清掉；其他原因沒收時維持原樣。
+fn merge_one(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new: Option<(u8, Option<i64>)>, pend: Option<Pending>, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>, Option<Pending>) {
+    let Some((pct, reset)) = new else { return (old, false, None, pend) };
     match judge_for(vendor, kind, old, pct, reset, now_ms) {
-        Ok(()) => (Some((pct, reset)), true, None),
-        Err(r) => (old, false, Some(Skipped { kind, reason: r.detail })),
+        Ok(()) => (Some((pct, reset)), true, None, None),
+        Err(r) if r.code == "not_week_multiple" => {
+            let (ok, next) = confirm_week(pend, reset.unwrap_or(0), now_ms);
+            if ok {
+                (Some((pct, reset)), true, None, None)
+            } else {
+                (old, false, Some(Skipped { kind, code: r.code, reason: r.detail }), next)
+            }
+        }
+        Err(r) => (old, false, Some(Skipped { kind, code: r.code, reason: r.detail }), pend),
     }
 }
 
@@ -168,20 +207,36 @@ fn read_at(took: bool, has: bool, own: Option<&String>, old_at: Option<&String>,
 }
 
 /// 現有紀錄（可能沒有）＋新來的額度 → (要寫入的紀錄, 沒收的原因)。兩條都沒收時紀錄是 None（不動檔案）。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn merge(old: Option<&Quota>, p: &Parsed, now_ms: i64) -> (Option<Quota>, Vec<Skipped>) {
     merge_for(Vendor::Claude, old, p, now_ms)
 }
 
-/// 同 [`merge`]，指定廠牌的判斷規則（Gemini 的本機檔用 `Vendor::Gemini`，#374）
+/// 同 [`merge`]，指定廠牌的判斷規則（Gemini 的本機檔用 `Vendor::Gemini`，#374）。沒有待確認狀態：每次都當第一次看到。
 pub fn merge_for(vendor: Vendor, old: Option<&Quota>, p: &Parsed, now_ms: i64) -> (Option<Quota>, Vec<Skipped>) {
+    let m = merge_full(vendor, old, p, None, now_ms);
+    (m.quota, m.skipped)
+}
+
+/// 一次合併的完整結果（#1184）：除了紀錄與沒收的原因，還有各條有沒有收、每週那條下一個待確認狀態
+pub struct Merged {
+    pub quota: Option<Quota>,
+    pub skipped: Vec<Skipped>,
+    pub took_five: bool,
+    pub took_week: bool,
+    pub pending_week: Option<Pending>,
+}
+
+/// 同 [`merge_for`]，另帶每週那條現有的待確認狀態，回完整結果
+pub fn merge_full(vendor: Vendor, old: Option<&Quota>, p: &Parsed, pending_week: Option<Pending>, now_ms: i64) -> Merged {
     let (old_five_r, old_week_r) = old.map(stored_resets).unwrap_or((None, None));
     let old_five = old.and_then(|q| q.five_hour_pct).map(|v| (v, old_five_r));
     let old_week = old.and_then(|q| q.weekly_pct).map(|v| (v, old_week_r));
-    let (five, took_five, s1) = merge_one(vendor, Kind::Five, old_five, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), now_ms);
-    let (week, took_week, s2) = merge_one(vendor, Kind::Week, old_week, p.weekly_pct.map(|v| (v, p.week_reset_ms)), now_ms);
+    let (five, took_five, s1, _) = merge_one(vendor, Kind::Five, old_five, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), None, now_ms);
+    let (week, took_week, s2, pend_out) = merge_one(vendor, Kind::Week, old_week, p.weekly_pct.map(|v| (v, p.week_reset_ms)), pending_week, now_ms);
     let skipped: Vec<Skipped> = [s1, s2].into_iter().flatten().collect();
     if !took_five && !took_week {
-        return (None, skipped);
+        return Merged { quota: None, skipped, took_five, took_week, pending_week: pend_out };
     }
     let now = iso_secs(now_ms);
     let old_at = old.map(|q| &q.at);
@@ -195,7 +250,7 @@ pub fn merge_for(vendor: Vendor, old: Option<&Quota>, p: &Parsed, now_ms: i64) -
         week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &now),
         at: now,
     };
-    (Some(q), skipped)
+    Merged { quota: Some(q), skipped, took_five, took_week, pending_week: pend_out }
 }
 
 pub fn log_path(home: &Path) -> std::path::PathBuf {

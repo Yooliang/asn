@@ -247,12 +247,45 @@ pub enum Failure {
     Other(String),
 }
 
+/// 失敗的是哪個來源：決定畫面上寫給使用者看的那句話（#1184）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Source<'a> {
+    Grok,
+    Gemini,
+    MiniMax,
+    /// Claude 額外帳號，帶資料夾名
+    ClaudeExtra(&'a str),
+}
+
 impl Failure {
+    /// 給 log 看的文字（內容只有固定文字或狀態碼，不含對方回應）
     pub fn text(&self) -> String {
         match self {
             Failure::Auth => "登入失效，要重新登入".into(),
             Failure::Other(s) => s.clone(),
         }
+    }
+
+    /// 給畫面看的文字：登入失效時各家一句使用者看得懂、知道要做什麼的話；其他原因（網路、格式）照舊。
+    /// 畫面上不出現 token、路徑、HTTP 狀態碼以外的細節；細節只進 log（用 `text`）。
+    pub fn user_text(&self, who: Source) -> String {
+        match (self, who) {
+            (Failure::Auth, Source::Grok) => "Grok 登入已過期，請在這台開一次 Grok 或重新登入".into(),
+            (Failure::Auth, Source::Gemini) => "Gemini 登入已過期，請在這台開一次 agy 或重新登入".into(),
+            (Failure::Auth, Source::MiniMax) => "MiniMax 登入已過期，請重新輸入 key".into(),
+            (Failure::Auth, Source::ClaudeExtra(name)) => format!("Claude（{name}）登入已過期，請重新登入這個帳號"),
+            (Failure::Other(s), Source::ClaudeExtra(name)) => format!("Claude（{name}）：{}", plain_other(s)),
+            (Failure::Other(s), _) => plain_other(s),
+        }
+    }
+}
+
+/// 其他原因的畫面文字：「連線失敗」這類使用者看得懂的照舊；狀態碼、結束碼、內部欄位這類細節換成通用句（細節只進 log）
+fn plain_other(s: &str) -> String {
+    if s.starts_with("HTTP ") || s.starts_with("結束碼") || s.contains("欄位") || s.contains("狀態") {
+        "暫時讀不到額度，稍後會自動重試".into()
+    } else {
+        s.to_string()
     }
 }
 
@@ -537,15 +570,15 @@ struct Gates {
 }
 
 fn note(log: &(impl Fn(String) + Sync), gate: &mut Gate, who: &str, f: &Failure, now_ms: i64, mark: Option<i64>) {
-    let key = if who == "Grok" { "grok" } else { "agy" };
-    set_failure(key, Some(f.text()));
+    let (key, src) = if who == "Grok" { ("grok", Source::Grok) } else { ("agy", Source::Gemini) };
+    set_failure(key, Some(f.user_text(src)));
     if gate.failure(f, now_ms, mark) {
         log(format!("額度讀取 {who}：{}", f.text()));
     }
 }
 
 fn note_minimax(log: &(impl Fn(String) + Sync), gate: &mut Gate, email: &str, f: &Failure, now_ms: i64) {
-    set_failure(&format!("minimax:{email}"), Some(f.text()));
+    set_failure(&format!("minimax:{email}"), Some(f.user_text(Source::MiniMax)));
     if gate.failure(f, now_ms, None) {
         log(format!("額度讀取 MiniMax：{}", f.text()));
     }
@@ -604,7 +637,7 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
                     store(|st| st.extra_claude.insert(email, (w, now_ms)));
                 }
                 Err(f) => {
-                    set_failure(&format!("claude:{name}"), Some(f.text()));
+                    set_failure(&format!("claude:{name}"), Some(f.user_text(Source::ClaudeExtra(&name))));
                     // 換新可能剛改過憑證檔，記號要用失敗後的：沒變就不再試
                     if gate.failure(&f, now_ms, crate::claude_extra::modified_ms(&dir)) {
                         log(format!("額度讀取 Claude 額外帳號 {name}：{}", f.text()));

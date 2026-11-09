@@ -225,7 +225,7 @@ export const SettingsPanel = {
                 <div class="dv-vq" v-if="v.key === 'claude' && st.quotaReaders && st.quotaReaders.extraDirs.length">
                   <small>{{ QUOTA_TEXT.extraShort }}{{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}{{ QUOTA_TEXT.thisPc }}</small>
                   <template v-if="st.quotaReaders.extra">
-                    <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.name }}：{{ d.status }}</small>
+                    <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.status }}</small>
                     <small v-if="st.quotaReaders.extraRefresh">{{ QUOTA_TEXT.refreshActive }}</small>
                     <!-- 要打開自動換新的確認當下，風險與服務條款要看得到；平常收在「說明」裡 -->
                     <template v-if="st.quotaReaders.confirm === 'refresh'">
