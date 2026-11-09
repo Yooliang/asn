@@ -40,7 +40,7 @@ test('靜態：編號在最新 migration 之後；舊函式與舊表一字不動
 
 test('共用案例檔：格式完整（之後 Rust 用 include_str! 讀同一份）', () => {
   assert.ok(Array.isArray(cases.doc) && cases.doc.length > 0)
-  assert.deepEqual(Object.keys(cases.reasons).sort(), ['earlier', 'later_not_expired', 'not_week_multiple', 'reset_out_of_range', 'same_period_rise'])
+  assert.deepEqual(Object.keys(cases.reasons).sort(), ['earlier', 'future_read', 'later_not_expired', 'not_week_multiple', 'older_read', 'reset_out_of_range', 'same_period_rise'])
   assert.ok(cases.cases.length >= 15)
   const ids = new Set()
   for (const c of cases.cases) {
@@ -96,7 +96,7 @@ const win = (name, left_pct, resets_at, read_at = AT) => ({ name, left_pct, rese
 // gemini 的案例要套 20261029130000_acct_roster_gemini.sql 才對（滿額規則在那支），在 tests/acct_roster_gemini_sql.test.mjs 跑全部案例
 test('實跑（pglite）：共用案例全部照預期（同一份案例檔；gemini 的見 acct_roster_gemini_sql）', { skip }, async () => {
   const { db } = await setup()
-  for (const c of cases.cases.filter(x => x.vendor !== 'gemini')) {
+  for (const c of cases.cases.filter(x => x.vendor !== 'gemini' && x.scope !== 'backend_only')) {
     const r = (await db.query('select public.asn_relay_acct_window_judge($1, $2, $3::jsonb, $4::jsonb, $5::timestamptz) r',
       [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])).rows[0].r
     assert.equal(r, c.reason, `${c.id} ${c.note}`)
