@@ -5,7 +5,7 @@
 import { parseSelfName } from "./node_name.ts";
 import { isReservedSender } from "./reserved_sender.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "node_setup_code_fetch", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs"]);
 
 export interface AuthUser {
   id: string;
@@ -219,14 +219,37 @@ export async function handleAccountAction(
 
   // 手機替自己帳號下的電腦「安裝並登入 Claude Code」（見 supabase/migrations/20261102140000_setup_requests.sql）：
   // 身分一定是登入憑證驗過的本人（上面已驗），節點金鑰（AI 視窗拿得到的）建立不了；對別人的節點一律 not_found
+  // #933：多收種類（claude／codex／agy／grok，沒帶＝claude）與裝置碼型的請求本文、手機的設備簽章、發起手機的節點。
+  // 這裡只檢查型別與長度，內容規則（欄位一致、到期時間、手機是本人的且有設備公鑰）在資料庫函式；簽章只在電腦本機驗
   if (action === "node_setup_request") {
-    const node = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).node : null;
+    const b = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    const node = b.node;
     if (typeof node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(node)) return { status: 400, body: { error: "bad_request" } };
-    const { data, error } = await deps.rpc("asn_setup_request", { p_user: user.id, p_node: node });
+    const kind = b.kind ?? "claude";
+    if (typeof kind !== "string" || !["claude", "codex", "agy", "grok"].includes(kind)) return { status: 400, body: { error: "bad_request" } };
+    const opt = (v: unknown, re: RegExp, max: number) => v == null ? null : (typeof v === "string" && v.length <= max && re.test(v) ? v : undefined);
+    const payload = opt(b.payload, /^[\x20-\x7e]+$/, 1024);
+    const sig = opt(b.sig, /^[A-Za-z0-9_-]{86}$/, 86);
+    const pNode = opt(b.p_node, /^[A-Za-z0-9_-]{1,32}$/, 32);
+    if (payload === undefined || sig === undefined || pNode === undefined) return { status: 400, body: { error: "bad_request" } };
+    const args: Record<string, unknown> = { p_user: user.id, p_node: node };
+    if (kind !== "claude" || payload !== null || sig !== null || pNode !== null) Object.assign(args, { p_kind: kind, p_payload: payload, p_sig: sig, p_p_node: pNode });
+    const { data, error } = await deps.rpc("asn_setup_request", args);
     if (error) { console.error("node_setup_request", error); return { status: 500, body: { error: "internal" } }; }
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { ok: true, already: d?.already === true, state: d?.state } };
+  }
+
+  // #933：手機取回電腦放的密文（本人；只回自己送出的那一筆；取一次就清）。後台只轉交，手機用本機記住的電腦公鑰驗簽、用一次性私鑰解
+  if (action === "node_setup_code_fetch") {
+    const rid = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).rid : null;
+    if (typeof rid !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(rid)) return { status: 400, body: { error: "bad_request" } };
+    const { data, error } = await deps.rpc("asn_setup_code_fetch", { p_user: user.id, p_rid: rid });
+    if (error) { console.error("node_setup_code_fetch", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: d };
   }
 
   if (action === "node_setup_status") {

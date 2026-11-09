@@ -459,16 +459,24 @@ Deno.serve(async (req) => {
       if (pl.error) console.warn("set_node_platform", me.id, pl.error.message ?? pl.error);
     }
     // 順便問「本人有沒有要這台安裝並登入 Claude Code」（手機觸發；失敗不影響在線回報）。回送出者的使用者代號，ASN 要比對自己登入的是不是同一個人
-    let setup: { requested_by: string } | null = null;
+    // #933：種類不是 claude 時多帶 setup_kind；裝置碼型（codex、grok）再帶請求本文、手機的設備簽章與設備公鑰、到期時間（後台只轉交，驗章在電腦本機）。
+    // 舊版 ASN 只讀 setup_requested／setup_requested_by；非 claude 的種類資料庫只交給夠新的版本，所以舊版不會收到看不懂的請求
+    let setup: Record<string, unknown> | null = null;
     if (p.status !== "offline") {
       const s = await db.rpc("asn_relay_setup_poll", { p_node: me.id, p_version: p.version });
       if (s.error) console.error(s.error);
-      else if (s.data?.requested === true && typeof s.data?.requested_by === "string") setup = { requested_by: s.data.requested_by };
+      else if (s.data?.requested === true && typeof s.data?.requested_by === "string") {
+        setup = { setup_requested: true, setup_requested_by: s.data.requested_by };
+        if (typeof s.data.kind === "string" && s.data.kind !== "claude") setup.setup_kind = s.data.kind;
+        if (typeof s.data.rid === "string") {
+          Object.assign(setup, { setup_rid: s.data.rid, setup_payload: s.data.payload, setup_sig: s.data.sig, setup_p_node: s.data.p_node, setup_p_sign_pub: s.data.p_sign_pub ?? null, setup_expires_at: s.data.expires_at });
+        }
+      }
     }
     return json(200, {
       ok: true,
       ...(update_requested ? { update_requested: true } : {}),
-      ...(setup ? { setup_requested: true, setup_requested_by: setup.requested_by } : {}),
+      ...(setup ?? {}),
     });
   }
   // 安裝並登入的結果（ASN 取走請求後回報：ok、固定句子的原因、重裝說明）。只動金鑰所屬的自己節點
@@ -478,6 +486,19 @@ Deno.serve(async (req) => {
     if (!okField || typeof okField.ok !== "boolean" || (okField.detail != null && typeof okField.detail !== "string") || (okField.replaced != null && typeof okField.replaced !== "string")) return json(400, { error: "bad_request" });
     const { data, error } = await db.rpc("asn_relay_setup_result", { p_node: me.id, p_ok: okField.ok, p_detail: okField.detail ?? null, p_replaced: okField.replaced ?? null });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true });
+  }
+  // #933：裝置碼型登入，電腦把「網址＋代碼」的密文與電腦的設備簽章放回去（只能放自己節點那一筆、放一次就鎖；後台不驗簽、看不到明文）
+  if (action === "asn_setup_code_put" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const o = b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : null;
+    const str = (k: string) => (o && typeof o[k] === "string" ? (o[k] as string) : null);
+    const rid = str("rid"), tPub = str("t_eph_pub"), cipher = str("cipher"), tSig = str("t_sig");
+    if (!rid || !tPub || !cipher || !tSig || cipher.length > 4096) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("asn_relay_setup_code_put", { p_node: me.id, p_rid: rid, p_t_eph_pub: tPub, p_cipher: cipher, p_t_sig: tSig });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
   }

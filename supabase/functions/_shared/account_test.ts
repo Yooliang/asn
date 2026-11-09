@@ -225,6 +225,44 @@ Deno.test("node_setup_request：登入憑證決定使用者、body 的 user 被�
   assertEquals(h.calls.length, 0);
 });
 
+Deno.test("node_setup_request（#933）：帶種類與裝置碼型本文時照傳；格式不對 400 不碰資料庫；沒帶仍是舊的兩參數", async () => {
+  const sig = "C".repeat(86);
+  const payload = JSON.stringify({ v: "asn-device-login-req-v1", rid: "A".repeat(22), t_node: "NEWPC", p_node: "PHONE", vendor: "codex", p_eph_pub: "B".repeat(43), exp: 1 });
+  const f = fake({}, () => ({ ok: true, already: false, state: "pending" }));
+  const r = await handleAccountAction(f.deps, "node_setup_request", bearer, null, { node: "NEWPC", kind: "codex", payload, sig, p_node: "PHONE", p_user: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals(f.calls, [{ fn: "asn_setup_request", args: { p_user: UID, p_node: "NEWPC", p_kind: "codex", p_payload: payload, p_sig: sig, p_p_node: "PHONE" } }]);
+  const g = fake({}, () => ({ ok: true }));
+  await handleAccountAction(g.deps, "node_setup_request", bearer, null, { node: "NEWPC", kind: "agy" });
+  assertEquals(g.calls[0].args, { p_user: UID, p_node: "NEWPC", p_kind: "agy", p_payload: null, p_sig: null, p_p_node: null });
+  const old = fake({}, () => ({ ok: true }));
+  await handleAccountAction(old.deps, "node_setup_request", bearer, null, { node: "NEWPC", kind: "claude" });
+  assertEquals(old.calls[0].args, { p_user: UID, p_node: "NEWPC" }, "claude 且沒帶本文：照舊兩參數");
+  for (const bad of [{ kind: "gemini" }, { kind: 5 }, { sig: "x" }, { sig: 5 }, { payload: "x".repeat(1025) }, { payload: "含\n控制字元" }, { p_node: "a b" }]) {
+    const h = fake();
+    assertEquals((await handleAccountAction(h.deps, "node_setup_request", bearer, null, { node: "NEWPC", ...bad })).status, 400, JSON.stringify(bad));
+    assertEquals(h.calls.length, 0);
+  }
+});
+
+Deno.test("node_setup_code_fetch（#933）：只用登入憑證的本人、rid 格式要對；資料庫的錯誤照對照表", async () => {
+  const ready = { state: "ready", t_node: "NEWPC", t_sign_pub: "T".repeat(43), t_eph_pub: "B".repeat(43), cipher: "E".repeat(100), t_sig: "D".repeat(86) };
+  const f = fake({}, () => ready);
+  const r = await handleAccountAction(f.deps, "node_setup_code_fetch", bearer, null, { rid: "A".repeat(22), p_user: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals(r.body, ready);
+  assertEquals(f.calls, [{ fn: "asn_setup_code_fetch", args: { p_user: UID, p_rid: "A".repeat(22) } }]);
+  for (const bad of [null, {}, { rid: "short" }, { rid: 5 }, { rid: "A".repeat(21) + "!" }]) {
+    const g = fake();
+    assertEquals((await handleAccountAction(g.deps, "node_setup_code_fetch", bearer, null, bad)).status, 400, JSON.stringify(bad));
+    assertEquals(g.calls.length, 0);
+  }
+  assertEquals((await handleAccountAction(fake({}, () => ({ error: "not_found" })).deps, "node_setup_code_fetch", bearer, null, { rid: "A".repeat(22) })).status, 404);
+  const h = fake();
+  assertEquals((await handleAccountAction(h.deps, "node_setup_code_fetch", null, null, { rid: "A".repeat(22) })).status, 401);
+  assertEquals(h.calls.length, 0);
+});
+
 Deno.test("node_setup_request：別人的設備 404、對方不在線 409、太頻繁 429、資料庫錯誤 500 且不洩漏內容", async () => {
   for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["asn_outdated", 409], ["unsupported_platform", 409], ["rate_limited", 429]] as const) {
     const f = fake({}, () => ({ error: code }));

@@ -7,7 +7,10 @@
     "https://platform.claude.com/x?y=1#z",
     "https://console.anthropic.com/oauth",
     "https://claude.ai:443/x",
-    "https://a-b.c.claude.ai/x"
+    "https://a-b.c.claude.ai/x",
+    "https://auth.openai.com/codex/device",
+    "https://auth.openai.com",
+    "https://accounts.x.ai/device?x=1"
   ],
   "bad": [
     "",
@@ -34,6 +37,15 @@
     "javascript:alert(1)",
     "claude.ai",
     "ftp://claude.ai/x",
-    "https://claude.ai/<A*2100>"
+    "https://claude.ai/<A*2100>",
+    "https://sub.auth.openai.com/x",
+    "https://openai.com/x",
+    "https://auth.openai.com.evil.com/x",
+    "https://evilauth.openai.com/x",
+    "https://x.ai/x",
+    "https://evil.accounts.x.ai/x",
+    "https://accounts.x.ai.evil.com/x",
+    "https://auth.openai.com:8443/x",
+    "http://accounts.x.ai/x"
   ]
 }

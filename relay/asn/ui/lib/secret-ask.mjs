@@ -23,8 +23,10 @@ export function errorText(e) {
 
 // 登入網址（#628）：請求可以附一個官方登入頁的網址，讓本人在手機上打開、授權、把授權碼貼回。
 // 不信 Rust 端或後台回來的內容，這裡再驗一次（與 Rust 的 secret_remote/link.rs、資料庫約束、Edge Function 同一條規則）：
-// 只收 https；主機是官方登入網域本身或其子網域；埠只能 443；不能帶帳號密碼；整串只許可見 ASCII 且沒有反斜線。
+// 只收 https；主機是 LOGIN_HOSTS 的網域本身或其子網域、或 LOGIN_EXACT_HOSTS 的主機本身（#933）；埠只能 443；不能帶帳號密碼；整串只許可見 ASCII 且沒有反斜線。
+// 清單的唯一來源是 supabase/functions/_shared/login_domains.json（suffix／exact），這裡的兩份由一致性測試比對
 export const LOGIN_HOSTS = ['claude.ai', 'claude.com', 'anthropic.com']
+export const LOGIN_EXACT_HOSTS = ['auth.openai.com', 'accounts.x.ai']
 export function loginLinkHost(url) {
   if (typeof url !== 'string' || url.length < 12 || url.length > 2048) return null
   if (!url.startsWith('https://')) return null
@@ -37,7 +39,7 @@ export function loginLinkHost(url) {
   const colon = authority.indexOf(':')
   if (colon >= 0) { if (authority.slice(colon + 1) !== '443') return null; host = authority.slice(0, colon) }
   if (!/^[a-z0-9.-]+$/.test(host)) return null
-  const ok = LOGIN_HOSTS.some(h => host === h || (host.endsWith('.' + h) && !host.startsWith('.') && !host.slice(0, -h.length).includes('..')))
+  const ok = LOGIN_EXACT_HOSTS.includes(host) || LOGIN_HOSTS.some(h => host === h || (host.endsWith('.' + h) && !host.startsWith('.') && !host.slice(0, -h.length).includes('..')))
   return ok ? host : null
 }
 
