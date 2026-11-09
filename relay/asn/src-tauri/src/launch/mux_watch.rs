@@ -538,7 +538,14 @@ fn render_crash(ctx: &EvtH, ev: &EvtH) -> Option<CrashEvent> {
                     if p.is_null() {
                         return None;
                     }
-                    let len = (0..512).take_while(|&k| *p.add(k) != 0).count();
+                    // 只在緩衝區內找結尾的 0（西川 #1104 意見）：字串指標要落在 buf 裡，最多掃到 buf 結尾，也不超過 512 個字元
+                    let (start, end) = (buf.as_ptr() as usize, buf.as_ptr() as usize + buf.len() * 8);
+                    let at = p as usize;
+                    if at < start || at >= end {
+                        return None;
+                    }
+                    let room = ((end - at) / 2).min(512);
+                    let len = (0..room).take_while(|&k| *p.add(k) != 0).count();
                     Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
                 }
                 t if t == EvtVarTypeUInt32 as u32 || t == EvtVarTypeHexInt32 as u32 => Some(format!("0x{:x}", v.Anonymous.UInt32Val)),
