@@ -684,6 +684,8 @@ impl Worker {
                     return Err(WorkerError::new("agent", "工作者已被關閉，這封信沒有再重試"));
                 }
                 d = self.ensure_driver(self.base_full()).await?;
+                // 新驅動接不回原本的對話（新對話不知道前情）而這一輪原本沒帶開場說明：補上，和「寫到不能寫的位置」同一個處理
+                let first = if first.is_empty() && d.resume_lost() { preamble_for(&cfg) } else { first.clone() };
                 r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
                 remember(&d);
                 let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
