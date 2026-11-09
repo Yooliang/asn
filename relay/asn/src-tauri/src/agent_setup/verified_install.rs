@@ -119,6 +119,11 @@ pub fn valid_version(v: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.len() <= 6 && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// 平台名稱會組進暫存檔名：只收英數字與 `.` `_` `-`，1～32 字，不能是 `.`／`..`（之後別家可能從清單給外部字串）
+pub fn valid_platform(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 32 && p != "." && p != ".." && p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 /// 網址是不是 https，而且主機完全等於 `host`（不收 `host.evil.com`、`evil.com/host`、帳密、連接埠）
 pub fn url_on_host(url: &str, host: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else { return false };
@@ -274,6 +279,9 @@ fn install_inner(d: &Deps, spec: &Spec, rel: &Release, args: &[&str], work: &Pat
         return Err("官方回的版本號格式不對，已放棄安裝".to_string());
     }
     rec.version = Some(rel.version.clone());
+    if !valid_platform(&rel.platform) {
+        return Err("官方清單的平台名稱格式不對，已放棄安裝".to_string());
+    }
     if !url_on_host(&rel.url, spec.host) {
         return Err("官方清單指向不認得的下載位置，為了安全沒有安裝".to_string());
     }
@@ -627,6 +635,25 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join("install.log")).unwrap();
         assert!(text.len() < 64 * 1024 + 4096, "{}", text.len());
         assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn 平台名稱只收安全字元_不合格就不下載() {
+        for ok in ["win32-x64", "win32-arm64", "x86_64-pc-windows-msvc", "a.b_c"] {
+            assert!(valid_platform(ok), "{ok}");
+        }
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "x y", "x:y", "平台", &"a".repeat(33)] {
+            assert!(!valid_platform(bad), "{bad:?}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let f = OneFile(BIN.to_vec(), RefCell::new(vec![]));
+        let e = Ex(dir.path().join("t.exe"), RefCell::new(0));
+        let mut r = rel("https://dl.example.test/x.exe", BIN);
+        r.platform = "..\\..\\evil".into();
+        let (res, rec) = install(&Deps { fetch: &f, sig: &Sig("Example, Inc."), exec: &e }, &SPEC, &r, &[], &dir.path().join("work"), &dir.path().join("t.exe"), Duration::from_secs(5));
+        assert!(res.unwrap_err().contains("平台名稱"));
+        assert!(f.1.borrow().is_empty(), "不能下載");
+        assert!(!rec.ok);
     }
 
     #[test]
