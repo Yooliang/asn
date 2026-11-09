@@ -32,6 +32,7 @@ mod dev_prefix;
 mod selftest;
 mod mux_notice;
 mod wait_notice;
+mod outbox;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
@@ -349,6 +350,8 @@ pub struct Core {
     room_redo: HashMap<String, (u64, HashSet<String>)>,
     /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
     reply_fail: HashSet<String>,
+    /// 回信寄件匣（#1135，見 core/outbox.rs）
+    outbox: outbox::Outbox,
     unrouted: HashSet<String>,
     /// 交給本人、等寬限期過了仍沒被收下才說明的信：(到期時間, 來源)
     owner_receipts: Vec<(u64, Origin)>,
@@ -545,15 +548,22 @@ impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
         let held = HeldStore::load(&cfg.work_dir);
+        let (outbox, outbox_warn) = outbox::Outbox::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
+        if let Some(w) = outbox_warn {
+            c.log.line(&w);
+        }
+        if !c.outbox.items.is_empty() {
+            c.log.line(&format!("reply outbox restored: {} item(s)", c.outbox.items.len()));
+        }
         c.started_at = now;
         c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
         c.wait_alerts = super::wait_alert::WaitAlerts::load(&c.cfg.work_dir.join(super::wait_alert::WAIT_FILE), now);
@@ -2182,16 +2192,23 @@ impl Core {
             self.log.line(&format!("reply from {from} id={} not sent: an earlier part failed (mail stays in inbox)", o.id));
             return;
         }
-        let ok = self.send_back(&o, &body, Some(from), expects).await;
-        if deferred && !ok {
+        // 回信走寄件匣（#1135）：暫時寄不出去＝已保管（Stored），不算失敗，原信照常 ack；後台明確拒絕或寄件匣寫不進去才算失敗
+        let outcome = self.send_reply(from, &o, &body, expects).await;
+        let failed = matches!(outcome, outbox::ReplyOutcome::Failed);
+        let ok: &str = match outcome { outbox::ReplyOutcome::Sent => "true", outbox::ReplyOutcome::Stored => "queued", outbox::ReplyOutcome::Failed => "false" };
+        if deferred && failed {
             self.reply_fail.insert(o.id.clone());
         }
-        if ok {
-            self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
-        } else if !deferred && !self.is_engine_window(from) {
-            // 回信寄不出去（連線階段已經在 relay 重試過）：不能默默丟掉，告訴那個視窗，讓它自己決定要不要重寄（#1135）。
-            // 寄回成功才 ack 的（Aegis、內建通道）信還留在信箱或另有處理，引擎視窗收到通知會白跑一輪，這兩種先不通知
-            self.tell_reply_failed(from, &o, &text);
+        match outcome {
+            outbox::ReplyOutcome::Sent => self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]),
+            outbox::ReplyOutcome::Stored => {}
+            outbox::ReplyOutcome::Failed => {
+                if !deferred && !self.is_engine_window(from) {
+                    // 後台明確拒絕：不能默默丟掉，告訴那個視窗，讓它自己決定要不要重寄（#1135）。
+                    // 寄回成功才 ack 的（Aegis、內建通道）信還留在信箱或另有處理，引擎視窗收到通知會白跑一輪，這兩種先不通知
+                    self.tell_reply_failed(from, &o, &text);
+                }
+            }
         }
         self.log.line(&format!("{}reply from {from} -> {} id={} sent={ok} ({}ms total)", if late { "late " } else { "" }, o.from_node, o.id, self.now.saturating_sub(t0)));
     }
@@ -2616,6 +2633,7 @@ impl Core {
         self.wait_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.ack_retry_tick(now).await;
+        self.outbox_tick(now).await;
         self.selftest_tick(now).await;
         // 收信暫停的時間變了（開始扣住、或恢復）：馬上重報名單把值帶給後台（還沒報過第一次的交給啟動時的名單）
         if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until() || self.hold_cap_due()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {

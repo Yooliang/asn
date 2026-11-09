@@ -335,6 +335,24 @@ async fn ack_時機_寄回失敗不_ack_震動拆分的第二封也不寄_補拉
 }
 
 #[tokio::test]
+async fn 寄回暫時失敗_進寄件匣_視為已保管_照常_ack() {
+    let (members, allow, retry) = vec_cfg();
+    let mut h = aboot(members, &[("ASN_AEGIS_ALLOW", &allow), ("ASN_AEGIS_RETRY_MS", &retry)]).await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.send_fail_n = 50;
+        s.send_fail_code = 503;
+    }
+    h.ag.script("", "alpha", vec![(200, json!({"answer": "答案內文", "status": "success"}))]);
+    h.put_pull(mail(1, json!({"to_agent": "阿爾法"}))).await;
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(h.fr.sent().is_empty());
+    assert_eq!(h.core.outbox_ids().len(), 1);
+    assert!(h._work.path().join("reply-outbox.json").exists());
+    assert!(!h.core.log.has("an earlier part failed"));
+}
+
+#[tokio::test]
 async fn 其他引擎的_ack_時機沒變_aegis_以外的引擎不延後() {
     // 引擎集合只有 aegis：問 acp／codex／claude 是否延後 ack，一律否
     let (members, allow, _) = vec_cfg();

@@ -65,6 +65,21 @@ struct FState {
     /// 假後台回的 notify（空字串＝sent）
     wait_notice_notify: String,
     misroute_status: u16,
+    /// 寄信（send）收到的每一次請求（含失敗的）
+    send_attempts: Vec<Value>,
+    /// 接下來 N 次 send 回 send_fail_code（0＝503）；send_fail_store＝失敗前其實已收下（模擬回應在路上掉了）
+    send_fail_n: usize,
+    send_fail_code: u16,
+    send_fail_store: bool,
+    /// 依 client_id 去重（同 client_id 第二次回 200 duplicate，不再多一封）
+    send_dedupe: bool,
+    seen_cids: Vec<String>,
+    /// 帶附件的 send 回 400 bad_attachment；send_missing＝200 並附 attachments_missing
+    send_attach_bad: bool,
+    send_missing: bool,
+    /// 開了才認得 bridge_notice（預設 404，舊行為）
+    bridge_notice_on: bool,
+    bridge_notices: Vec<Value>,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -159,7 +174,25 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
     let action = line.split("action=").nth(1).unwrap_or("").split(&['&', ' '][..]).next().unwrap_or("").to_string();
     let q = query_of(line);
     let mut s = st.lock().unwrap();
+    if action == "send" {
+        s.send_attempts.push(body.clone());
+    }
     let (code, out) = match action.as_str() {
+        "send" if s.send_fail_n > 0 => {
+            s.send_fail_n -= 1;
+            if s.send_fail_store {
+                let cid = body["client_id"].as_str().unwrap_or("").to_string();
+                s.seen_cids.push(cid);
+                s.sent.push(body.clone());
+            }
+            (if s.send_fail_code == 0 { 503 } else { s.send_fail_code }, json!({"error": "gateway"}))
+        }
+        "send" if s.send_attach_bad && body["attachment_ids"].as_array().is_some_and(|a| !a.is_empty()) => (400, json!({"error": "bad_attachment"})),
+        "send" if s.send_dedupe && body["client_id"].as_str().is_some_and(|c| s.seen_cids.iter().any(|x| x == c)) => (200, json!({"id": uid(900), "duplicate": true})),
+        "bridge_notice" if s.bridge_notice_on => {
+            s.bridge_notices.push(body);
+            (200, json!({"ok": true, "notify": "sent"}))
+        }
         "room_list" => {
             let rooms: Vec<Value> = s.rooms.iter().map(|r| json!({"id": r["id"], "name": r["name"], "last_seq": r["last_seq"], "mine": r["mine"]})).collect();
             (200, json!({"rooms": rooms}))
@@ -230,8 +263,15 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
         }
         "send" if body["reply_to"].as_str().is_some_and(|r| s.send_fail_reply_to.iter().any(|x| x == r)) => (500, json!({"error": "internal"})),
         "send" => {
+            if let Some(c) = body["client_id"].as_str() {
+                s.seen_cids.push(c.to_string());
+            }
             s.sent.push(body);
-            (200, json!({"id": uid(900 + s.sent.len() as u32)}))
+            if s.send_missing {
+                (200, json!({"id": uid(900 + s.sent.len() as u32), "attachments_missing": [uid(77)]}))
+            } else {
+                (200, json!({"id": uid(900 + s.sent.len() as u32)}))
+            }
         }
         "mux_down_notice" if s.mux_notice_status != 0 => {
             s.mux_notices.push(body);
@@ -2041,6 +2081,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
 }
 
 mod ack_it;
+mod outbox_it;
 mod aegis_it;
 mod engines_it;
 mod pi_it;

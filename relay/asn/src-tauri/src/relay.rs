@@ -330,6 +330,16 @@ pub(crate) fn with_client_id(name: &str, body: Option<Value>) -> (Option<Value>,
     }
 }
 
+/// api 回的錯誤字串是不是「暫時性、換個時間用同一個 client_id 再寄是安全的」：連線失敗（連線被拒、逾時、讀回應斷掉）
+/// 與閘道的 502／503／504。其他 HTTP 錯誤（4xx、500）後台是明確回了，重寄也一樣（#1135 回信寄件匣用）。
+/// 錯誤字串格式見 api_inner：`<動作> 連線失敗：…` 與 `<動作> HTTP <碼> <錯誤碼>`
+pub(crate) fn is_transient_api_err(e: &str) -> bool {
+    if e.contains(" 連線失敗：") {
+        return true;
+    }
+    matches!(e.split(" HTTP ").nth(1).and_then(|r| r.split_whitespace().next()), Some("502" | "503" | "504"))
+}
+
 /// 連線失敗的說明：錯誤種類＋完整的原因鏈（reqwest 的 source() 一路往下）。只有「error sending request」分不出
 /// 是連線被拒、被重設、逾時還是回應讀到一半斷掉；要分得出才知道能不能安全重試（請求有沒有送到後台，#994）。
 /// 不含網址與金鑰：最上層用 without_url，底下的原因只是作業系統與 HTTP 程式庫的說明
