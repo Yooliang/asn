@@ -14,8 +14,8 @@ test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦�
   assert.deepEqual(rows.map(r => r.key), MOBILE_SETTING_KEYS)
   for (const r of rows) {
     const c = SETTING_CATS.find(x => x.key === r.key)
-    if (r.key === 'cloud') { assert.equal(c, undefined, '雲端代理在電腦版是帳號分類的一部分，手機自己獨立一列'); assert.equal(r.title, '雲端代理') }
-    else { assert.ok(c, `${r.key} 不在電腦版分類裡`); assert.equal(r.title, MOBILE_CAT_TITLE[r.key] ?? c.title, '手機只改 notify 的標題'); assert.equal(r.icon, c.icon) }
+    assert.ok(c, `${r.key} 不在電腦版分類裡`)   // 雲端代理也是：電腦版、手機都自己一類，標題與圖示同一份
+    assert.equal(r.title, MOBILE_CAT_TITLE[r.key] ?? c.title, '手機只改 notify 的標題'); assert.equal(r.icon, c.icon)
     assert.ok(r.icon.length > 0)
   }
   assert.equal(mobileSettingTitle('notify'), '提醒', '不和第四格的「通知」分頁撞名（#895）'); assert.equal(MOBILE_CAT_TITLE.notify, '提醒'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))

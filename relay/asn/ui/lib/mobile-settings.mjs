@@ -3,13 +3,11 @@
 import { SETTING_CATS, catSummary } from './settings-cats.mjs'
 import { deviceSummary } from './device-tree.mjs'
 
-// 手機有的分類（順序即畫面順序，與電腦版一致）：個人（大頭貼、名字、設備名稱、狀態）、設備與帳號、通知（震動）、更新、關於（版本）
+// 手機有的分類（順序即畫面順序，與電腦版一致）：個人（大頭貼、名字、設備名稱、狀態）、設備、帳號、雲端代理、通知（震動）、更新、關於（版本）
 export const MOBILE_SETTING_KEYS = ['me', 'devices', 'accounts', 'cloud', 'notify', 'update', 'about']
-// 只有手機設置列表自己有的分類（電腦版的雲端代理在「帳號」分類裡，手機把它獨立成一列，免得塞進設備與帳號那一頁）
-const MOBILE_ONLY_CATS = [{ key: 'cloud', title: '雲端代理', icon: 'M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 0 1 18.5 11 3.5 3.5 0 0 1 18 18z' }]
 // 手機上改名的分類（只改標題，鍵不變，存檔與瀏覽記錄照舊有效）：notify 在電腦版叫「通知」，手機的第四格已是「通知」對話，這裡叫「提醒」
 export const MOBILE_CAT_TITLE = { notify: '提醒' }
-const catOf = key => { const c = SETTING_CATS.find(x => x.key === key) ?? MOBILE_ONLY_CATS.find(x => x.key === key); return c && MOBILE_CAT_TITLE[key] ? { ...c, title: MOBILE_CAT_TITLE[key] } : c }
+const catOf = key => { const c = SETTING_CATS.find(x => x.key === key); return c && MOBILE_CAT_TITLE[key] ? { ...c, title: MOBILE_CAT_TITLE[key] } : c }
 // 設備、帳號（#268、#650）不是設置的一般分類頁：兩列都開同一頁（acct，上方「設備｜帳號」切換，各帶預設分頁），跟名單設備卡「選項」進去的是同一頁，入口並存
 export const ACCT_SETTING_KEYS = ['devices', 'accounts']
 export const SETTING_SHEET_KEYS = MOBILE_SETTING_KEYS.filter(k => !ACCT_SETTING_KEYS.includes(k))
@@ -29,7 +27,7 @@ export function mobileCatSummary(key, s = {}) {
       return n ? `${n} 個帳號` : '各家 AI 的帳號與額度'
     }
     case 'cloud':
-      return '讓雲端 AI 代理加入好友名單'
+      return catSummary('cloud')
     case 'notify':
       return `對方傳震動時震動：${onOff(s.vibrateNudge)}、新訊息輕震：${onOff(s.vibrateMsg)}`
     case 'update':

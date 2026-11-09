@@ -11,6 +11,8 @@ export const SETTING_CATS = [
   { key: 'me', title: '個人', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7' },
   { key: 'devices', title: '設備', icon: 'M3 5h13v9H3zM1 18h17M19 8h3v11h-3z' },
   { key: 'accounts', title: '帳號', icon: 'M12 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM5 20c0-3.5 3.1-5.5 7-5.5s7 2 7 5.5' },
+  // 雲端代理自己一類，跟手機設置列表同一個位置（原本放在「設備」頁的清單底下）
+  { key: 'cloud', title: '雲端代理', icon: 'M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 0 1 18.5 11 3.5 3.5 0 0 1 18 18z' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
   { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
   { key: 'notify', title: '通知', icon: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 19a2 2 0 0 0 4 0' },
@@ -48,6 +50,8 @@ export function catSummary(key, s = {}) {
       return deviceSummary(s.devices)
     case 'accounts':
       return accountSummary(s)
+    case 'cloud':
+      return '讓雲端 AI 代理加入好友名單'
     case 'look':
       return join([FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[s.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[s.bubble] ?? ''}`])
     case 'tabs':

@@ -180,6 +180,9 @@ export const SettingsPanel = {
           <small role="status">{{ st.voice.note }}</small>
         </div>
       </template>
+      <template v-if="cat === 'cloud'">
+        <cloud-invite-panel></cloud-invite-panel>
+      </template>
       <template v-if="cat === 'accounts'">
         <div class="dv-set dv-acctpage">
           <section class="dv-my" v-if="st.myAccounts || st.quotaReaders || st.quotaHook" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.title">
@@ -325,7 +328,6 @@ export const SettingsPanel = {
                 <span class="dv-chev" aria-hidden="true">&rsaquo;</span>
               </li>
             </ul>
-            <cloud-invite-panel></cloud-invite-panel>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.label">
             <div class="dv-dev-h">
