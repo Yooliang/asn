@@ -72,7 +72,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   // 只重讀這台各帳號上次記下的額度（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。
   // 先拿掉舊的額度欄位再套新的：紀錄被清掉的帳號要回到「額度未知」。讀不到（舊版 Rust 沒有這個指令）就維持原樣
-  const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at']
+  const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'waiting']
   const refreshQuota = async () => {
     let q
     try { q = (await invoke('claude_quota_all')) ?? {} } catch { return }

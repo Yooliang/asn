@@ -683,3 +683,54 @@ fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看�
     assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), ""), None);
     assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), "eeeeeeee-0000-0000-0000-000000000000"), None);
 }
+
+// ---------- 狀態檔不留明文身分、舊格式平順轉換、剛換帳號的提示（#1185） ----------
+fn state_file(h: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(super::super::state::state_path(h.path())).unwrap_or_default()
+}
+fn login_as(h: &tempfile::TempDir, email: &str, uuid: &str) {
+    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
+}
+
+#[test]
+fn 狀態檔的登入身分存雜湊_不留明文_email_與_uuid() {
+    let h = home_as("a@x.test");
+    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
+    let t = state_file(&h);
+    assert!(t.contains("\"identity\":\"h1:"), "{t}");
+    assert!(!t.contains("a@x.test") && !t.contains("11111111-2222-3333-4444-555555555555"), "狀態檔不該有明文身分：{t}");
+}
+
+#[test]
+fn 舊格式明文身分的狀態檔_平順轉成雜湊_不會誤判成換帳號() {
+    let h = home_as("a@x.test");
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::state::state_path(h.path()), r#"{"identity":"a@x.test|11111111-2222-3333-4444-555555555555"}"#).unwrap();
+    // 若被當成換帳號，第一筆要等確認、不會收；平順轉換則第一筆直接收
+    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
+    let t = state_file(&h);
+    assert!(t.contains("\"identity\":\"h1:") && !t.contains("a@x.test"), "{t}");
+    assert!(!t.contains("\"rebase\""), "{t}");
+    // 真的換成別的身分，舊格式也照樣判斷得出來
+    std::fs::write(super::super::state::state_path(h.path()), r#"{"identity":"zzz@x.test|99999999-0000-0000-0000-000000000000"}"#).unwrap();
+    assert!(!hook(h.path(), &status(None, Some((20.0, NOW + 3 * DAY))), NOW + 60_000), "別的身分：要等確認");
+    assert!(state_file(&h).contains("\"rebase\":true"));
+}
+
+#[test]
+fn 剛換帳號等確認時畫面資料標_waiting_確認收下後就沒有了() {
+    let h = home_as("a@x.test");
+    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
+    assert!(super::super::quota_all_with_waiting(h.path()).get("b@x.test").is_none());
+    login_as(&h, "b@x.test", "22222222-0000-0000-0000-000000000000");
+    let r = NOW + 4 * DAY;
+    assert!(!hook(h.path(), &status(None, Some((40.0, r))), NOW + 60_000));
+    let all = super::super::quota_all_with_waiting(h.path());
+    assert_eq!(all.get("b@x.test"), Some(&json!({ "waiting": true })), "b 還在等確認");
+    assert!(all.get("a@x.test").is_some_and(|v| v.get("weekly_pct").is_some()), "a 的紀錄照舊");
+    assert!(!hook(h.path(), &status(None, Some((40.0, r))), NOW + 5 * 60_000 + 60_000));
+    assert!(hook(h.path(), &status(None, Some((40.0, r))), NOW + 10 * 60_000 + 60_000));
+    let all = super::super::quota_all_with_waiting(h.path());
+    assert_eq!(all["b@x.test"]["weekly_pct"], 60);
+    assert!(all["b@x.test"].get("waiting").is_none());
+}

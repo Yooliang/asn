@@ -341,12 +341,41 @@ fn hook_owned(home: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> boo
     r
 }
 
+/// 登入身分在狀態檔裡的樣子：email 與 accountUuid 的雜湊（`h1:` 開頭、SHA-256 十六進位），狀態檔裡不留明文 email。
+/// 只用來比「是不是同一個身分」，不是安全邊界；換成別的版本號（h2:…）時舊值就當作沒看過。
+fn identity_key(email: &str, uuid: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"asn-claude-identity-v1\0");
+    h.update(email.as_bytes());
+    h.update(b"\0");
+    h.update(uuid.as_bytes());
+    let d = h.finalize();
+    format!("h1:{}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+}
+
+/// 剛換帳號、還在等確認的帳號（舊辦法的「連續 3 次、隔 10 分鐘」）：目前登入的就是狀態檔記的那個身分、
+/// 狀態檔標了「等確認」、而且額度檔裡還沒有它的紀錄時，回它的 email；畫面據此寫「約 10 分鐘後顯示額度」
+pub fn waiting_email(home: &Path) -> Option<String> {
+    let st = state::load(home);
+    if !st.rebase {
+        return None;
+    }
+    let (email, uuid) = claude_accounts::current_identity(home)?;
+    (st.identity.as_deref() == Some(identity_key(&email, &uuid).as_str()) && !load_all(home).contains_key(&email)).then_some(email)
+}
+
 fn hook_legacy(home: &Path, parsed: Parsed, now_ms: i64) -> bool {
     let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
     let before = state::load(home);
-    let ident = format!("{email}|{uuid}");
+    let ident = identity_key(&email, &uuid);
     let mut st = before.clone();
     let mut reset_base = false;
+    // 舊版狀態檔存的是明文 `email|uuid`：認得就當同一個身分，順便換成雜湊，不會因為格式升級就誤判成換帳號
+    let legacy_plain = format!("{email}|{uuid}");
+    if st.identity.as_deref() == Some(legacy_plain.as_str()) {
+        st.identity = Some(ident.clone());
+    }
     if st.identity.as_deref() != Some(ident.as_str()) {
         // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
         reset_base = st.identity.is_some();
@@ -377,8 +406,17 @@ impl Quota {
 
 /// 前端讀本機各帳號的額度紀錄（email → 額度）
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_quota_all() -> HashMap<String, Quota> {
-    load_all(&claude_accounts::claude_home())
+pub fn claude_quota_all() -> HashMap<String, Value> {
+    quota_all_with_waiting(&claude_accounts::claude_home())
+}
+
+/// 各帳號的額度紀錄；剛換帳號還在等確認、而且沒有紀錄的那個帳號回 `{ "waiting": true }`（畫面寫固定的一句人話）
+pub(crate) fn quota_all_with_waiting(home: &Path) -> HashMap<String, Value> {
+    let mut out: HashMap<String, Value> = load_all(home).into_iter().filter_map(|(k, q)| serde_json::to_value(q).ok().map(|v| (k, v))).collect();
+    if let Some(e) = waiting_email(home) {
+        out.entry(e).or_insert_with(|| serde_json::json!({ "waiting": true }));
+    }
+    out
 }
 
 #[cfg(test)]
