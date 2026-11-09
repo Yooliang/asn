@@ -368,7 +368,6 @@ fn 範圍_邊界_後_8_天內收_超過不收_前_1_天內收_超過不收() {
 }
 
 // ---------- 每週待確認（#1184）：過期後同一個新重置時間連續 3 次、隔滿 10 分鐘才收 ----------
-const DAY: i64 = 86_400_000;
 
 fn parsed_week(pct: u8, reset: i64) -> Parsed {
     Parsed { five_hour_pct: None, weekly_pct: Some(pct), reset_at: Some(iso_secs(reset)), five_reset_ms: None, week_reset_ms: Some(reset) }
