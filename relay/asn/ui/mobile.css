@@ -421,9 +421,13 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-cloud-list li{display:flex;align-items:center;gap:8px;justify-content:space-between}
 .m-cloud-tx{display:flex;flex-direction:column;min-width:0}
 .m-cloud-tx b em{font-style:normal;font-weight:400;font-size:12px;margin-left:6px;color:#2f7d32}
-/* 看別台電腦夥伴的終端（只能看，案 A）：對話頁頂端「訊息／終端」切換；按鈕字跟電腦版一樣。終端畫面占滿訊息區（chatpane 的 paneTermShown 收起訊息列表） */
-.m-term-switch{display:flex;gap:0;margin:6px 12px 4px;border:1px solid var(--line,#c8d4e0);border-radius:8px;overflow:hidden;flex:none}
-.m-term-switch button{flex:1;min-height:36px;border:0;background:#fff;color:#1a3d7c;font-size:15px}
-.m-term-switch button.on{background:#1a73e8;color:#fff;font-weight:600}
-.m-chat .term-view.term-remote{flex:1 1 0;min-height:0}
+/* 看別台電腦夥伴的終端（只能看，案 A）：「訊息／終端」是下方圖示列最前面的兩個小圖示（原本頂端的大切換列吃掉太多高度，橫向時終端被擠成 0）。
+   選中的那個底色高亮；看終端時圖示列只留這兩個，輸入框、表情等收起，點「訊息」才回來。終端至少半個螢幕高（chatpane 的 paneTermShown 收起訊息列表） */
+.m-chat .m-term-switch{gap:2px;margin-right:4px;padding-right:4px;border-right:1px solid var(--line,#c8d4e0)}
+.m-chat .m-term-switch .tool.icon.m-sw{border-radius:8px;border:1px solid transparent}
+.m-chat .m-term-switch .tool.icon.m-sw img{width:24px;height:24px}
+.m-chat .m-term-switch .tool.icon.m-sw.on{background:#d6e6fb;border-color:#1a73e8;box-shadow:inset 0 -3px 0 #1a73e8}
+.m-chat .compose-row.is-term .toolbar > :not(.m-term-switch),.m-chat .compose-row.is-term .composer,.m-chat .compose-row.is-term .reply-bar,.m-chat .compose-row.is-term .voice-install{display:none}
+.m-chat .term-view.term-remote{flex:1 1 0;min-height:50vh;min-height:50dvh}
 .m-chat .term-view.term-remote .term-view-screen{padding:2px}
+.m-chat .term-remote .term-remote-bar{margin:1px 6px;padding:0 6px;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}

@@ -436,7 +436,6 @@ export const ChatPane = {
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
-  <div class="m-term-switch" role="group" aria-label="訊息或終端" v-if="mSwitch"><button type="button" :class="{ on: !remoteShown }" :aria-pressed="!remoteShown" @click="showMsgs">{{ TERM_BTN_MSG.label }}</button><button type="button" :class="{ on: remoteShown }" :aria-pressed="remoteShown" @click="showTerm">{{ TERM_BTN_TERM.label }}</button></div>
   <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" @cancel="showMsgs"></remote-view>
   <remote-input v-if="typingShown" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
@@ -504,9 +503,10 @@ export const ChatPane = {
       </div>
     </div>
   </div>
-  <div class="compose-row" v-if="!isNotice">
+  <div class="compose-row" :class="{ 'is-term': mSwitch && remoteShown }" v-if="!isNotice">
     <div class="compose-main">
       <div class="toolbar">
+        <span class="tool-group m-term-switch" role="group" aria-label="訊息或終端" v-if="mSwitch"><button class="tool icon m-sw" type="button" :class="{ on: !remoteShown }" :aria-pressed="!remoteShown" :aria-label="TERM_BTN_MSG.label" :title="TERM_BTN_MSG.label" @click="showMsgs"><img :src="TERM_BTN_MSG.icon" alt="" width="22" height="22"></button><button class="tool icon m-sw" type="button" :class="{ on: remoteShown }" :aria-pressed="remoteShown" :aria-label="TERM_BTN_TERM.label" :title="TERM_BTN_TERM.label" @click="showTerm"><img :src="TERM_BTN_TERM.icon" alt="" width="22" height="22"></button></span>
         <span class="tool-group">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
