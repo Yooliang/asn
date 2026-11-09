@@ -201,3 +201,29 @@ test('實跑：權限——新函式只有 service_role；回復後回到原狀�
   assert.equal((await report(db, 'W', [weekly(30, iso(Date.now() + D))])).ok, true, '回復後照常收')
   assert.equal((await gotWeekly(db)).left_pct, 30)
 })
+
+test('實跑：讀取時間較早的舊窗不蓋掉新的（older_read）；讀取時間較新照收', { skip }, async () => {
+  const db = await setup()
+  const dec = async (vendor, old, nw) => one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, $5::timestamptz) r',
+    [vendor, 'weekly', JSON.stringify(old), JSON.stringify(nw), '2026-11-09T14:49:57Z'])
+  const stored = { left_pct: 52, resets_at: '2026-11-15T16:00:00Z', read_at: '2026-11-09T14:38:53Z' }
+  const stale = { left_pct: 51, resets_at: null, read_at: '2026-10-30T16:40:14Z' }
+  assert.equal((await dec('claude', stored, stale)).reason, 'older_read')
+  // Gemini 滿額照收的例外也要先過這關
+  assert.equal((await dec('gemini', { ...stored, left_pct: 100 }, stale)).reason, 'older_read')
+  // 讀取時間較新、其他正常：照收
+  assert.equal((await dec('claude', stored, { left_pct: 40, resets_at: '2026-11-15T16:00:00Z', read_at: '2026-11-09T14:45:00Z' })).reason, null)
+  // 缺 read_at 不比，照舊判斷
+  assert.equal((await dec('claude', { left_pct: 52, resets_at: '2026-11-15T16:00:00Z' }, { left_pct: 40, resets_at: '2026-11-15T16:00:00Z' })).reason, null)
+})
+
+test('實跑：端到端——舊窗（讀取時間較早、沒有重置時間）被拒收，已存值不變', { skip }, async () => {
+  const db = await setup()
+  const rt = iso(Date.now() + 3 * D)
+  await report(db, 'W', [{ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, windows: [{ name: 'weekly', left_pct: 52, resets_at: rt, read_at: iso(Date.now() - 60_000) }] }])
+  const r = await report(db, 'W', [{ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, windows: [{ name: 'weekly', left_pct: 51, read_at: iso(Date.now() - 20 * D) }] }])
+  assert.deepEqual(r.skipped, [{ vendor: 'claude', window: 'weekly', reason: 'older_read' }])
+  const w = await gotWeekly(db)
+  assert.equal(w.left_pct, 52)
+  assert.equal(w.resets_at, rt)
+})

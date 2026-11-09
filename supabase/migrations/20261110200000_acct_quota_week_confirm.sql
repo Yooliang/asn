@@ -7,6 +7,7 @@
 --     第一次到這次至少隔 10 分鐘，才收下（待確認清掉）；否則不收、記下待確認；中間來了不同的重置時間就重新計數。
 --     現記的還沒過期（later_not_expired）、同期回升、較早、範圍外等其他結果一律照舊。條件與電腦端 merge.rs 的 confirm_week 完全一樣，
 --     共用案例 tests/fixtures/quota-merge-cases.json 的 confirm_sequences 兩邊都跑。
+--     另在入口最前面先擋「讀取時間比已存窗更早」的新窗（原因代碼 older_read）：舊視窗的舊數字（沒帶重置時間時 judge 會直接收下）不能蓋掉新的；連 Gemini 滿額照收的例外都要先過這關。新窗或已存窗缺 read_at 時不比，照舊判斷。
 --  3. asn_relay_acct_roster_report：除了下列片段，與 20261110100000 版逐字相同——多讀寫 window_pending、判斷改呼叫 decide。
 --
 -- 舊用戶端不受影響：回報格式不變；對外回傳（roster、查詢）不含 window_pending；skipped 的原因代碼不變。
@@ -31,6 +32,11 @@ declare
   v_first timestamptz;
   v_count int := 1;
 begin
+  -- 讀取時間比已存的更早＝舊視窗的舊數字，先擋（在 judge 之前，Gemini 滿額例外也要先過這關）
+  if p_old is not null and jsonb_typeof(p_old->'read_at') = 'string' and jsonb_typeof(p_new->'read_at') = 'string'
+     and (p_new->>'read_at')::timestamptz < (p_old->>'read_at')::timestamptz then
+    return jsonb_build_object('reason', 'older_read', 'pending', p_pending);
+  end if;
   v_reason := public.asn_relay_acct_window_judge(p_vendor, p_name, p_old, p_new, p_now);
   -- 只有 Claude 每週倍數不過（not_week_multiple）才走待確認；其他結果照舊，待確認原樣帶回
   if v_reason is distinct from 'not_week_multiple' then
