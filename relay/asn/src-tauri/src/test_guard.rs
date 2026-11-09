@@ -14,8 +14,15 @@ pub fn mux_base() -> PathBuf {
     std::env::temp_dir().join(format!("asn-tm-{}", std::process::id())).join(N.fetch_add(1, Ordering::SeqCst).to_string())
 }
 
+/// 路徑拆成一段一段（小寫）。`/` 和 `\` 都當分隔：Linux 上 `Path` 不認 `\`，Windows 形狀的路徑也要拆得開
 fn comps(p: &Path) -> Vec<String> {
-    p.components().filter_map(|c| if let Component::Normal(s) = c { Some(s.to_string_lossy().to_lowercase()) } else { None }).collect()
+    let mut out: Vec<String> = Vec::new();
+    for c in p.components() {
+        if let Component::Normal(s) = c {
+            out.extend(s.to_string_lossy().split(['/', '\\']).filter(|x| !x.is_empty()).map(|x| x.to_lowercase()));
+        }
+    }
+    out
 }
 
 fn has_seq(c: &[String], seq: &[&str]) -> bool {
@@ -34,6 +41,12 @@ pub fn is_real_asn_path(p: &Path) -> bool {
     }
     if has_seq(&c, &["appdata", "roaming", "tw.yooliang.asn"]) || has_seq(&c, &["appdata", "roaming", concat!("tw.irori", ".asn")]) {
         return true;
+    }
+    // Linux 的 mux 上層資料夾也可能是 $XDG_DATA_HOME（mux::default_base 的正式版先看它）。這裡讀環境變數只會讓守衛認得更多、不會讓它放行
+    if let Some(x) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|x| x.is_absolute()) {
+        if p.starts_with(x.join("ASN")) {
+            return true;
+        }
     }
     // 真的 ~/.asn、舊的 ~/.irori-relay：必須剛好在目前行程認得的家目錄底下
     let home = crate::identity::home_dir();
@@ -74,6 +87,10 @@ mod tests {
         assert!(is_real_asn_path(Path::new("/home/x/.local/share/ASN/m")));
         assert!(is_real_asn_path(Path::new(r"C:\Users\x\AppData\Roaming\tw.yooliang.asn")));
         assert!(is_real_asn_path(&crate::identity::home_dir().join(".asn").join("k")));
+        // 本機平台的分隔符號寫法（Linux 上是 / 拆段、Windows 上是 \）也認得
+        assert!(is_real_asn_path(&Path::new("home").join("x").join(".local").join("share").join("ASN")));
+        assert!(is_real_asn_path(&Path::new("C:").join("Users").join("x").join("AppData").join("Local").join("ASN")));
+        assert!(!is_real_asn_path(Path::new("/home/x/projects/asn")), "名字裡有 asn 但不是 ASN 資料夾");
     }
 
     #[test]
