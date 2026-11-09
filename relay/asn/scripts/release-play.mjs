@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 import { playVersionCode, suffixFromArgs } from './play-version.mjs'
+import { GOOGLE_SERVICES_REL, pushConfigWarning } from './release-android-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
@@ -58,6 +59,9 @@ if (!fs.existsSync(passFile)) fail(`找不到上傳金鑰的密碼檔：${passFi
 // 要上傳就先確認這個 versionCode 比 Play 上的都大，免得建了半天才被 Play 擋
 if (process.argv.includes('--upload')) run(process.execPath, ['scripts/play-upload.mjs', '--check-only', `--expect-code=${versionCode}`])
 
+// 沒有 google-services.json＝這次沒有推播：建置前後各印一次，免得在不知情時發出去
+const pushWarn = pushConfigWarning(fs.existsSync(path.join(root, GOOGLE_SERVICES_REL)))
+if (pushWarn) console.warn(pushWarn)
 run(process.execPath, ['scripts/prep.mjs'])
 const out = path.join(root, 'src-tauri', 'target', 'play')
 fs.mkdirSync(out, { recursive: true })
@@ -79,3 +83,4 @@ if (process.argv.includes('--upload')) {
 } else {
   console.log('下一步：在 Play Console 的測試版本上傳這個檔，或執行 npm run publish:play 自動上傳。')
 }
+if (pushWarn) console.warn(pushWarn)
