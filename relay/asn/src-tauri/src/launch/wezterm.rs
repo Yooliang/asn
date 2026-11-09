@@ -471,6 +471,12 @@ const UNIX_MUX: &str = "wezterm-mux-server";
 /// 先看環境變數 ASN_WEZTERM_DIR（開發或測試指到別的副本；設了就只認它）。沒設時：Windows 用安裝檔附帶的；
 /// 其他平台從 PATH 找本人裝的。不自動下載
 pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
+    locate_in(fs, super::mux::default_base())
+}
+
+/// `locate` 的本體：ASN 自己取得的那份從哪個上層資料夾找（正式版＝`mux::default_base()`）由呼叫的人給。
+/// 測試（例如 CI 真的下載的 `linux_real_fetch_wezterm`）用它指定暫存的位置，不經過測試中的 `default_base`
+pub fn locate_in(fs: &dyn Fs, fetched_base: Option<PathBuf>) -> Result<WezTermDir, String> {
     let env = std::env::var_os(DIR_ENV).map(PathBuf::from);
     if cfg!(windows) {
         locate_with(env, bundled_dir(), fs)
@@ -480,7 +486,7 @@ pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
         if found.is_ok() || env.as_ref().is_some_and(|d| !d.as_os_str().is_empty()) {
             return found;
         }
-        super::mux::default_base()
+        fetched_base
             .and_then(|base| super::wezterm_fetch::fetched_dirs(&base).into_iter().find_map(|d| locate_unix(Some(d), None, fs).ok()))
             .ok_or_else(|| found.unwrap_err())
     }

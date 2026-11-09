@@ -1406,7 +1406,8 @@ mod tests {
         assert!(dir_usable(&dir), "{dir:?}");
         assert_eq!(read_fail(&base.join("ASN").join("wezterm")), None, "成功沒有失敗紀錄");
         assert_eq!(ensure(&base, false).await.unwrap(), dir, "第二次直接沿用");
-        let found = super::super::wezterm::locate(&super::super::wezterm::RealFs).expect("locate 要找得到取得的");
+        // 測試裡的 default_base 是暫存位置（test_guard），所以明確指定這次下載用的 base（CI 設的 $XDG_DATA_HOME）
+        let found = super::super::wezterm::locate_in(&super::super::wezterm::RealFs, Some(base.clone())).expect("locate 要找得到取得的");
         assert!(found.cli.starts_with(&base), "{:?}", found.cli);
         assert_eq!(found.gui, None, "沒有桌面版");
         for name in ["wezterm", "wezterm-mux-server"] {
