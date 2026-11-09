@@ -224,16 +224,48 @@ fn log_changes(home: &Path, st: &mut state::State, m: &merge::Merged, now_ms: i6
     merge::log_skipped(home, &fresh, now_ms);
 }
 
+/// 身分剛換過、這個帳號沒有基準時：兩條各自要「同一組新重置時間連續 3 次、隔 10 分鐘」才放行，沒確認的那條這次不收。
+/// 同一台可能還開著舊帳號的視窗交錯送別組數字，所以第一筆不能直接收（#1184）
+fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
+    match p.week_reset_ms {
+        Some(r) => {
+            let (ok, next) = merge::confirm_week(st.pending_week(), r, now_ms);
+            st.set_pending_week(next);
+            if !ok {
+                p.weekly_pct = None;
+                p.week_reset_ms = None;
+            }
+        }
+        None => p.weekly_pct = None,
+    }
+    match p.five_reset_ms {
+        Some(r) => {
+            let (ok, next) = merge::confirm_week(st.pending_five(), r, now_ms);
+            st.set_pending_five(next);
+            if !ok {
+                p.five_hour_pct = None;
+                p.five_reset_ms = None;
+            }
+        }
+        None => p.five_hour_pct = None,
+    }
+    p
+}
+
 /// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log（同一原因只記一次）。
 /// `reset_base`＝登入身分剛換過：先丟掉這個 email 舊的紀錄，這次照新帳號的數字收。
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
 fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let dropped = reset_base && all.remove(email).is_some();
+    let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
     let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
     st.set_pending_week(m.pending_week);
     log_changes(home, st, &m, now_ms);
     let took = m.quota.is_some();
+    if took {
+        st.rebase = false;
+    }
     if let Some(q) = m.quota {
         all.insert(email.to_string(), q);
     } else if !dropped {
@@ -269,7 +301,7 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     if st.identity.as_deref() != Some(ident.as_str()) {
         // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
         reset_base = st.identity.is_some();
-        st = state::State { identity: Some(ident), ..state::State::default() };
+        st = state::State { identity: Some(ident), rebase: reset_base, ..state::State::default() };
     }
     let r = record(home, &email, parsed, &mut st, reset_base, now_ms).unwrap_or(false);
     if st != before {

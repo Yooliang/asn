@@ -23,6 +23,11 @@ pub struct State {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) pending_week: Option<PendingRec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) pending_five: Option<PendingRec>,
+    /// 身分剛換過、這個帳號還沒有被確認的基準：數字要同一組重置時間連續確認才收（#1184）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rebase: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_five: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_week: Option<String>,
@@ -36,6 +41,13 @@ impl State {
     pub fn pending_week(&self) -> Option<Pending> {
         let r = self.pending_week.as_ref()?;
         Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
+    }
+    pub fn pending_five(&self) -> Option<Pending> {
+        let r = self.pending_five.as_ref()?;
+        Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
+    }
+    pub fn set_pending_five(&mut self, p: Option<Pending>) {
+        self.pending_five = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });
     }
     pub fn set_pending_week(&mut self, p: Option<Pending>) {
         self.pending_week = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });

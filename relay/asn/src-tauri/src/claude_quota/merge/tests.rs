@@ -496,16 +496,41 @@ fn 換身分_該帳號舊基準丟掉_照新帳號的數字收_同帳號正常�
     assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
     assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + H), "同一個身分：照舊規則擋");
     assert!(hook(h.path(), &status(None, Some((35.0, gmail))), start + 2 * H), "同帳號正常更新照舊");
-    // 換成 b，再換回 a：a 的舊基準（gmail 那期）丟掉，這次照新數字收
+    // 換成 b：b 沒有基準，第一筆不收，同一組重置時間連續 3 次隔 10 分鐘才收
     write(&h, "b@x.test", "uuid-b");
-    assert!(hook(h.path(), &status(None, Some((50.0, yooliang))), start + 3 * H));
+    let t = start + 3 * H;
+    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t));
+    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t + 5 * 60_000));
+    assert!(hook(h.path(), &status(None, Some((50.0, yooliang))), t + 10 * 60_000));
+    assert_eq!(load_all(h.path())["b@x.test"].weekly_pct, Some(50));
+    // 換回 a：a 的舊基準丟掉，同樣要確認才收
     write(&h, "a@x.test", "uuid-a");
-    assert!(hook(h.path(), &status(None, Some((10.0, yooliang))), start + 4 * H), "換回來照新帳號的數字收");
+    let t = start + 5 * H;
+    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t));
+    assert!(!load_all(h.path()).contains_key("a@x.test"));
+    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t + 5 * 60_000));
+    assert!(hook(h.path(), &status(None, Some((10.0, yooliang))), t + 10 * 60_000));
     assert_eq!(load_all(h.path())["a@x.test"].weekly_pct, Some(90));
-    // 同 email 但 accountUuid 變了也算換身分
-    write(&h, "a@x.test", "uuid-a2");
-    assert!(hook(h.path(), &status(None, Some((60.0, gmail))), start + 5 * H));
-    assert_eq!(load_all(h.path())["a@x.test"].weekly_pct, Some(40));
+}
+
+#[test]
+fn 換身分後_舊帳號視窗交錯送兩組重置時間_不會收() {
+    let gmail = ms("2026-11-01T16:00:00Z");
+    let a = gmail + 4 * DAY;
+    let b = gmail + 6 * DAY + 5 * H;
+    let write = |h: &tempfile::TempDir, email: &str, uuid: &str| {
+        std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
+    };
+    let h = tempfile::tempdir().unwrap();
+    write(&h, "a@x.test", "uuid-a");
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), gmail - 3 * DAY));
+    write(&h, "b@x.test", "uuid-b");
+    let t = gmail - 2 * DAY;
+    for i in 0..12 {
+        let r = if i % 2 == 0 { a } else { b };
+        assert!(!hook(h.path(), &status(None, Some((40.0, r))), t + i * 5 * 60_000), "第 {i} 次");
+    }
+    assert!(!load_all(h.path()).contains_key("b@x.test"));
 }
 
 #[test]
