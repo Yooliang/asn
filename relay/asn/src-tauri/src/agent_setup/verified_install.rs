@@ -14,7 +14,7 @@ use super::net::Fetch;
 use sha2::{Digest, Sha256, Sha512};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// 官方清單提供的雜湊演算法
@@ -95,7 +95,10 @@ pub struct Release {
     pub url: String,
     /// 清單上的雜湊（小寫十六進位）
     pub sum: String,
-    pub size: u64,
+    /// 清單上的確切大小；清單沒給（例如 Codex 的 metadata）就是 `None`，只靠 `max` 擋住過大的下載與雜湊比對
+    pub size: Option<u64>,
+    /// 下載最多幾個位元組（超過就中止）
+    pub max: u64,
 }
 
 /// 執行安裝程式（逾時要殺掉整棵程序樹並回錯）。結束碼 `None` 不會出現：逾時一律回 `Err`
@@ -188,7 +191,7 @@ fn clean_stale(dir: &Path, prefix: &str) {
     let head = format!("{prefix}-");
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with(&head) && (name.ends_with(".exe") || name.ends_with(".part")) {
+        if name.starts_with(&head) && (name.ends_with(".exe") || name.ends_with(".tar.gz") || name.ends_with(".part")) {
             let _ = std::fs::remove_file(e.path());
         }
     }
@@ -275,6 +278,18 @@ pub fn install(d: &Deps, spec: &Spec, rel: &Release, args: &[&str], work: &Path,
 
 #[allow(clippy::too_many_arguments)]
 fn install_inner(d: &Deps, spec: &Spec, rel: &Release, args: &[&str], work: &Path, final_exe: &Path, timeout: Duration, rec: &mut Record) -> Result<String, String> {
+    let (path, guard) = download_locked(d, spec, rel, work, "exe", rec)?;
+    let outcome = verify_then_run(d, spec, &guard, &path, &rel.sum, args, work, timeout, rec);
+    drop(guard);
+    remove_with_retry(&path);
+    outcome?;
+    verify_installed(d, spec, final_exe, &rel.version)?;
+    Ok(format!("已安裝 {} {}。", spec.vendor, rel.version))
+}
+
+/// 檢查清單資料 → 下載（邊下載邊算雜湊）→ 大小、雜湊和清單一致 → 改名就位 → 鎖成「別人不能改、不能刪」。
+/// 回傳下載檔的路徑與握著的鎖；呼叫端用完要 `drop` 鎖並刪檔（`discard`）。`ext` 是下載檔的副檔名（`exe`、`tar.gz`）
+pub fn download_locked(d: &Deps, spec: &Spec, rel: &Release, work: &Path, ext: &str, rec: &mut Record) -> Result<(PathBuf, File), String> {
     if !valid_version(&rel.version) {
         return Err("官方回的版本號格式不對，已放棄安裝".to_string());
     }
@@ -288,23 +303,26 @@ fn install_inner(d: &Deps, spec: &Spec, rel: &Release, args: &[&str], work: &Pat
     if !spec.hash.valid_hex(&rel.sum) {
         return Err("官方清單的雜湊格式不對".to_string());
     }
-    if rel.size == 0 {
+    if rel.size == Some(0) || rel.max == 0 || rel.size.is_some_and(|s| s > rel.max) {
         return Err("官方清單的檔案大小不合理".to_string());
+    }
+    if !matches!(ext, "exe" | "tar.gz") {
+        return Err("不支援的下載檔類型".to_string());
     }
     std::fs::create_dir_all(work).map_err(|e| format!("無法建立下載資料夾：{e}"))?;
     clean_stale(work, spec.file_prefix);
 
     let stem = format!("{}-{}-{}", spec.file_prefix, rel.version, rel.platform);
-    let part = work.join(format!("{stem}.exe.part"));
-    let path = work.join(format!("{stem}.exe"));
+    let part = work.join(format!("{stem}.{ext}.part"));
+    let path = work.join(format!("{stem}.{ext}"));
     let got_sum = {
         let mut f = File::create(&part).map_err(|e| format!("無法建立下載檔：{e}"))?;
         let mut hw = HashWriter { file: &mut f, hash: Hasher::new(spec.hash) };
-        let r = d.fetch.download(&rel.url, &mut hw, rel.size);
+        let r = d.fetch.download(&rel.url, &mut hw, rel.size.unwrap_or(rel.max));
         let sum = hw.hash.hex();
         drop(f);
         match r {
-            Ok(n) if n == rel.size => sum,
+            Ok(n) if rel.size.map_or(n > 0, |s| n == s) => sum,
             Ok(_) => {
                 let _ = std::fs::remove_file(&part);
                 return Err("下載的檔案大小和官方清單不符，已放棄安裝".to_string());
@@ -325,20 +343,21 @@ fn install_inner(d: &Deps, spec: &Spec, rel: &Release, args: &[&str], work: &Pat
         format!("無法就位下載的檔案：{e}")
     })?;
 
-    // 從這裡起，驗與跑都是同一個被鎖住的檔案
-    let guard = match open_locked(&path) {
-        Ok(g) => g,
+    // 從這裡起，驗與用都是同一個被鎖住的檔案
+    match open_locked(&path) {
+        Ok(g) => Ok((path, g)),
         Err(e) => {
             remove_with_retry(&path);
-            return Err(e);
+            Err(e)
         }
-    };
-    let outcome = verify_then_run(d, spec, &guard, &path, &rel.sum, args, work, timeout, rec);
+    }
+}
+
+/// 放掉鎖之後刪掉下載檔（刪不掉會重試幾次）。目前只有 Codex 用，入口在 PR-7 才接
+#[allow(dead_code)]
+pub fn discard(path: &Path, guard: File) {
     drop(guard);
-    remove_with_retry(&path);
-    outcome?;
-    verify_installed(d, spec, final_exe, &rel.version)?;
-    Ok(format!("已安裝 {} {}。", spec.vendor, rel.version))
+    remove_with_retry(path);
 }
 
 /// 鎖住後：重算雜湊 → 驗簽署者 → 執行同一個檔
@@ -553,7 +572,7 @@ mod tests {
     }
 
     fn rel(url: &str, body: &[u8]) -> Release {
-        Release { version: "1.2.3".into(), platform: "win32-x64".into(), url: url.into(), sum: sum512(body), size: body.len() as u64 }
+        Release { version: "1.2.3".into(), platform: "win32-x64".into(), url: url.into(), sum: sum512(body), size: Some(body.len() as u64), max: 1 << 20 }
     }
 
     fn go(url: &str, signer: &'static str) -> (Result<String, String>, Record, u32, Vec<String>) {
