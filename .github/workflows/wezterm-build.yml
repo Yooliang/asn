@@ -1,0 +1,310 @@
+name: WezTerm 自建（20240203 正式版＋上游 #7706）
+
+# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位），
+# 打包成 Windows zip 與各 Linux 發行版 tar.xz，附 SHA256SUMS 與建置來源證明（artifact attestation）。
+#   - pull_request（只在這支 workflow 或它用的腳本變動時）：只建置與測試，不發佈。
+#   - workflow_dispatch：建置與測試；只有在 main 上手動觸發時，才會跑最後的「發佈」job。
+# 這一張只管建置與發佈，ASN 下載 WezTerm 的來源（wezterm-pins.json、fetch-wezterm.mjs、wezterm_fetch.rs）沒有動。
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/wezterm-build.yml'
+      - '.github/scripts/wezterm-*.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_TAG: '20240203-110809-5046fc22'
+  UPSTREAM_SHA: '5046fc225992db6ba2ef8812743fadfdfe4b184a'
+  PATCH_SHA: '29d01fc8e53f4d0fe0c1cf4f31b64b49358a2ff8'
+  # 1.76.0：tag 自帶的 Cargo.lock 裡 time 0.3.31 在更新的 Rust 編不過
+  RUST_VERSION: '1.76.0'
+  ASN_SUFFIX: 'asn.1'
+  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.1'
+  # 上游官方 Windows 壓縮檔（用來核對四個現成的二進位檔）；與 relay/asn/scripts/wezterm-pins.json 的值相同
+  OFFICIAL_ZIP_SHA256: '57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4'
+  OFFICIAL_ZIP_SIZE: '66162319'
+  OFFICIAL_ZIP_URL: 'https://github.com/wezterm/wezterm/releases/download/20240203-110809-5046fc22/WezTerm-windows-20240203-110809-5046fc22.zip'
+  LICENSE_SHA256: '37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca'
+
+jobs:
+  # 父子 PID 循環的單元測試＋紅燈對照（沒套修補的版本必須失敗）
+  cycle-test:
+    name: procinfo 循環測試（綠燈＋紅燈對照）
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - name: 取上游原始碼、核對、套 #7706
+        run: bash .github/scripts/wezterm-src-prepare.sh "$RUNNER_TEMP/wez-src"
+      - name: 循環測試（綠燈）與紅燈對照（預期失敗，失敗才算通過）
+        run: bash .github/scripts/wezterm-procinfo-cycle-test.sh "$RUNNER_TEMP/wez-src"
+      - name: 上傳測試 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: log-cycle-test
+          path: ${{ runner.temp }}/cycle-logs/*.log
+          if-no-files-found: ignore
+
+  build-linux:
+    name: Linux ${{ matrix.image }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # debian:10 已 EOL：apt 來源改指 archive.debian.org（DEBIAN_ARCHIVE=1）
+          - { image: 'debian:10', label: 'Debian10', archive: '1' }
+          - { image: 'debian:11', label: 'Debian11', archive: '' }
+          - { image: 'debian:12', label: 'Debian12', archive: '' }
+          - { image: 'ubuntu:20.04', label: 'Ubuntu20.04', archive: '' }
+          - { image: 'ubuntu:22.04', label: 'Ubuntu22.04', archive: '' }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - name: 取上游原始碼、核對、套 #7706
+        run: bash .github/scripts/wezterm-src-prepare.sh "$RUNNER_TEMP/wez-src"
+      - name: 在 ${{ matrix.image }} 容器裡建置、實測、打包
+        env:
+          TARBALL: wezterm-${{ env.UPSTREAM_TAG }}-${{ env.ASN_SUFFIX }}.${{ matrix.label }}.tar.xz
+        run: |
+          set -euo pipefail
+          docker pull -q "${{ matrix.image }}"
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "${{ matrix.image }}")"
+          mkdir -p "$RUNNER_TEMP/wez-out"
+          # Rust 工具鏈由主機掛進容器（rustc 對 glibc 的要求很低，舊發行版也能跑）
+          docker run --rm \
+            -v "$RUNNER_TEMP/wez-src:/src" \
+            -v "$RUNNER_TEMP/wez-out:/out" \
+            -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
+            -v "$HOME/.rustup:/rustup" -v "$HOME/.cargo:/cargo" \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" \
+            -e GITHUB_STEP_SUMMARY=/summary.md \
+            -e SCRIPTS=/scripts -e SRC=/src -e OUT=/out -e TARBALL \
+            -e IMAGE="${{ matrix.image }} (${digest})" \
+            -e DEBIAN_ARCHIVE="${{ matrix.archive }}" \
+            -e RUST_VERSION -e UPSTREAM_TAG -e UPSTREAM_SHA -e PATCH_SHA \
+            -e RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ matrix.image }}" bash /scripts/wezterm-build-linux.sh
+      - name: 上傳產物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wezterm-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/wez-out/wezterm-*.tar.xz
+          if-no-files-found: error
+      - name: 上傳實測 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: log-linux-${{ matrix.label }}
+          path: |
+            ${{ runner.temp }}/wez-out/versions-and-ldd.txt
+            ${{ runner.temp }}/wez-out/get-deps.log
+            ${{ runner.temp }}/wez-out/smoke/*.log
+            ${{ runner.temp }}/wez-out/smoke/*.err
+          if-no-files-found: ignore
+
+  build-windows:
+    name: Windows（windows-2022）
+    runs-on: windows-2022
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    env:
+      WEZ_SRC: C:/w/src
+      WEZ_OUT: C:/w/out
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - name: 取上游原始碼、核對、套 #7706
+        run: bash .github/scripts/wezterm-src-prepare.sh "$WEZ_SRC"
+      - name: 建置（需要 Strawberry Perl 給 openssl-sys）
+        run: |
+          set -euo pipefail
+          export PATH="/c/Strawberry/perl/bin:$PATH"
+          perl -v | grep -q MSWin32 || { echo "::error::抓到的 perl 不是 Strawberry Perl" >&2; perl -v; exit 1; }
+          rustc --version
+          case "$(rustc --version)" in "rustc ${RUST_VERSION} "*) ;; *) echo "::error::Rust 不是 ${RUST_VERSION}" >&2; exit 1;; esac
+          cd "$WEZ_SRC"
+          cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server
+      - name: 版本與依賴（dumpbin）
+        run: |
+          set -euo pipefail
+          mkdir -p "$WEZ_OUT"
+          rel="$WEZ_SRC/target/release"
+          dumpbin="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | head -1)"
+          [ -n "$dumpbin" ] || { echo "::error::找不到 dumpbin.exe" >&2; exit 1; }
+          {
+            echo '### Windows（windows-2022）'
+            echo
+            echo '```'
+            for e in wezterm wezterm-gui wezterm-mux-server; do "$rel/$e.exe" --version; done
+            echo '```'
+            for e in wezterm wezterm-gui wezterm-mux-server; do
+              echo
+              echo "**dumpbin /dependents $e.exe**"
+              echo
+              echo '```'
+              MSYS2_ARG_CONV_EXCL='*' "$dumpbin" /nologo /dependents "$(cygpath -w "$rel/$e.exe")" | sed -n '/Image has the following dependencies/,/Summary/p'
+              echo '```'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY" > "$WEZ_OUT/versions-and-dependents.txt"
+      - name: mux 實測（起 mux-server、spawn、get-text）
+        # Windows 上的這個實測是新做的，先不當關卡：失敗會在 summary 與 log 看到，但不讓整個 job 變紅
+        continue-on-error: true
+        run: |
+          rel="$WEZ_SRC/target/release"
+          bash .github/scripts/wezterm-mux-smoke.sh "$rel/wezterm.exe" "$rel/wezterm-mux-server.exe" "$WEZ_OUT/smoke" --windows
+      - name: 核對四個現成的二進位檔（與官方壓縮檔裡的同名檔逐一比對）
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o official.zip "$OFFICIAL_ZIP_URL"
+          got="$(sha256sum official.zip | cut -d' ' -f1)"
+          [ "$got" = "$OFFICIAL_ZIP_SHA256" ] || { echo "::error::官方壓縮檔雜湊不符：$got" >&2; exit 1; }
+          [ "$(stat -c %s official.zip)" = "$OFFICIAL_ZIP_SIZE" ] || { echo "::error::官方壓縮檔大小不符" >&2; exit 1; }
+          rm -rf off && 7z x -y -ooff official.zip > /dev/null
+          top="$(dirname "$(find off -name conpty.dll | head -1)")"
+          [ -n "$top" ] && [ "$top" != . ] || { echo "::error::官方壓縮檔裡找不到 conpty.dll" >&2; exit 1; }
+          {
+            echo '#### 現成二進位檔核對（上游 repo 的 assets/windows 與官方壓縮檔同名檔）'
+            echo
+            echo '| 檔案 | SHA-256 | 結果 |'
+            echo '|---|---|---|'
+            for pair in conhost/conpty.dll conhost/OpenConsole.exe angle/libEGL.dll angle/libGLESv2.dll; do
+              f="$(basename "$pair")"
+              a="$(sha256sum "$WEZ_SRC/assets/windows/$pair" | cut -d' ' -f1)"
+              b="$(sha256sum "$top/$f" | cut -d' ' -f1)"
+              if [ "$a" = "$b" ]; then echo "| $f | \`$a\` | 一致 |"; else echo "| $f | repo \`$a\` / 官方 \`$b\` | **不一致** |"; echo "::error::$f 與官方壓縮檔不一致" >&2; fi
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY" > verify-table.md
+          if grep -q '不一致' verify-table.md; then exit 1; fi
+      - name: 打包
+        run: |
+          set -euo pipefail
+          rel="$WEZ_SRC/target/release"
+          pkg="$RUNNER_TEMP/winpkg"; rm -rf "$pkg"; mkdir -p "$pkg"
+          for e in wezterm wezterm-gui wezterm-mux-server; do cp "$rel/$e.exe" "$pkg/"; done
+          cp "$WEZ_SRC/assets/windows/conhost/conpty.dll" "$WEZ_SRC/assets/windows/conhost/OpenConsole.exe" \
+             "$WEZ_SRC/assets/windows/angle/libEGL.dll" "$WEZ_SRC/assets/windows/angle/libGLESv2.dll" "$pkg/"
+          git -C "$WEZ_SRC" show "${UPSTREAM_SHA}:LICENSE.md" > "$pkg/LICENSE.md"
+          [ "$(sha256sum "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符" >&2; exit 1; }
+          cat > "$pkg/SOURCE.txt" <<TXT
+          WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
+          上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
+          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）
+          Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server，用 tag 自帶的 Cargo.lock）
+          建置環境：GitHub Actions windows-2022 runner（映像版本 ${ImageVersion:-未知}）
+          建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          現成檔案：conpty.dll、OpenConsole.exe、libEGL.dll、libGLESv2.dll 取自上游 repo 的 assets/windows，沒有重建；
+            已核對與官方壓縮檔（SHA-256 ${OFFICIAL_ZIP_SHA256}）裡的同名檔逐一一致。OpenConsole.exe 與 conpty.dll 來自 Microsoft Terminal（MIT）。
+          授權：MIT（見 LICENSE.md，與上游 tag 的 LICENSE.md 逐位元組相同）
+          TXT
+          mkdir -p "$WEZ_OUT"
+          zip="$WEZ_OUT/WezTerm-windows-${UPSTREAM_TAG}-${ASN_SUFFIX}.zip"
+          ( cd "$pkg" && 7z a -tzip -mx=9 "$(cygpath -w "$zip")" wezterm.exe wezterm-gui.exe wezterm-mux-server.exe conpty.dll OpenConsole.exe libEGL.dll libGLESv2.dll LICENSE.md SOURCE.txt > /dev/null )
+          7z l "$(cygpath -w "$zip")"
+          sha256sum "$zip"
+      - name: 上傳產物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wezterm-windows
+          path: C:/w/out/WezTerm-windows-*.zip
+          if-no-files-found: error
+      - name: 上傳實測 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: log-windows
+          path: |
+            C:/w/out/versions-and-dependents.txt
+            C:/w/out/smoke/*.log
+            C:/w/out/smoke/*.err
+          if-no-files-found: ignore
+
+  # 發佈：只在 main 上手動觸發。不跑任何建置指令、不取第三方原始碼，只做：下載 artifact → 算 SHA-256 → 產生 attestation → 建 release
+  publish:
+    name: 發佈 release
+    needs: [cycle-test, build-linux, build-windows]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: release tag 已經存在就直接失敗（不覆蓋、不重建）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" > /dev/null 2>&1; then
+            echo "::error::tag ${RELEASE_TAG} 已存在。同一版不重建；要修請換新的版本後綴" >&2
+            exit 1
+          fi
+          if gh release view "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            echo "::error::release ${RELEASE_TAG} 已存在" >&2
+            exit 1
+          fi
+      - name: 下載建置產物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: 'wezterm-*'
+          path: dist
+          merge-multiple: true
+      - name: 算 SHA-256、整理 release 附件
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -la
+          [ "$(ls -1 *.tar.xz | wc -l)" = 5 ] || { echo "::error::Linux 產物不是 5 個" >&2; exit 1; }
+          [ "$(ls -1 WezTerm-windows-*.zip | wc -l)" = 1 ] || { echo "::error::Windows 產物不是 1 個" >&2; exit 1; }
+          # release 附上授權文字（取自 Windows 包裡的 LICENSE.md）與來源說明
+          unzip -p WezTerm-windows-*.zip LICENSE.md > LICENSE.md
+          [ "$(sha256sum LICENSE.md | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 雜湊不符" >&2; exit 1; }
+          cat > SOURCE.txt <<TXT
+          WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
+          上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
+          額外套用：上游 commit ${PATCH_SHA}（#7706）
+          Rust：${RUST_VERSION}；cargo build --locked --release
+          建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}（commit ${{ github.sha }}）
+          驗證：gh attestation verify <檔案> -R ${{ github.repository }}
+          各壓縮檔裡也各有一份 SOURCE.txt，記錄該包自己的建置環境。
+          TXT
+          sha256sum *.tar.xz WezTerm-windows-*.zip > SHA256SUMS
+          cat SHA256SUMS
+          { echo '### SHA256SUMS'; echo; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: 對每個產物產生建置來源證明（attestation）
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            dist/*.tar.xz
+            dist/WezTerm-windows-*.zip
+      - name: 建 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" \
+            --title "WezTerm ${UPSTREAM_TAG}（ASN 自建，${ASN_SUFFIX}）" \
+            --notes "上游 WezTerm ${UPSTREAM_TAG} 加上上游 #7706 的修補，由 GitHub Actions 建置。來源、雜湊與驗證方式見 SOURCE.txt 與 SHA256SUMS；驗證：gh attestation verify <檔案> -R ${GITHUB_REPOSITORY}" \
+            dist/*.tar.xz dist/WezTerm-windows-*.zip dist/SHA256SUMS dist/SOURCE.txt dist/LICENSE.md
