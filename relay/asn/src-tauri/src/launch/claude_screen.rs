@@ -66,6 +66,8 @@ const LOGIN_EXPIRED: &str = "Please run /login";
 const USAGE_LIMIT: &str = "You've hit your limit";
 /// 輸入框上方往回看幾行，找登入失效與額度訊息
 const NOTICE_LOOKBACK: usize = 8;
+/// 底部認不出的選單游標往上看幾行（真的選單底下可能還有預覽）
+const MENU_CURSOR_LOOKBACK: usize = 16;
 
 /// 這個種類對應的固定代號（寫進狀態檔的只有它，不含畫面文字；名單顯示的字見 bridge::roster 的 screen_label）
 pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
@@ -293,10 +295,15 @@ fn input_box_at_bottom(lines: &[&str]) -> bool {
         if STATUS_LINE_MARKS.iter().any(|m| t.contains(m)) {
             return true;
         }
-        let Some(rest) = t.strip_prefix(CURSOR) else { return false };
-        let numbered_row = rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
-        i > 0 && is_rule(lines[i - 1]) && !numbered_row
+        is_input_row(lines, i)
     })
+}
+
+/// 一般輸入列：分隔線下面接 ❯，後面不是編號（編號的是選單）
+fn is_input_row(lines: &[&str], i: usize) -> bool {
+    let Some(rest) = lines[i].trim().strip_prefix(CURSOR) else { return false };
+    let numbered_row = rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
+    i > 0 && is_rule(lines[i - 1]) && !numbered_row
 }
 
 /// 狀態列下面的背景代理清單一列：「● main」「○ quota-1184 …  9m 30s」（實心是目前這段、空心是背景的）
@@ -364,10 +371,11 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
         }
     }
     let Some(menu) = parse_options(&lines[..last]) else {
-        // 底部沒有選單。底部那一塊（最後 NOTICE_LOOKBACK 行）還有選單游標的話，有東西在等但認不出來；
-        // 對話區上面出現的 ❯（例如模型回覆裡引用的「❯ 1.」）不算
-        let bottom = lines.len().saturating_sub(NOTICE_LOOKBACK);
-        let cursors_bottom = lines[bottom..].iter().filter(|l| l.trim_start().starts_with(CURSOR)).count();
+        // 底部沒有選單。底部那一塊（最後 MENU_CURSOR_LOOKBACK 行）還有選單游標的話，有東西在等但認不出來。
+        // 不算的 ❯：一般輸入列（分隔線下面、後面不是編號），以及更上面對話區裡出現的 ❯（例如模型回覆引用的「❯ 1.」）。
+        // 範圍放到 16 行：真的選單底下可能還有預覽（例如第一次啟動選佈景，游標下面約 13 行）
+        let bottom = lines.len().saturating_sub(MENU_CURSOR_LOOKBACK);
+        let cursors_bottom = (bottom..lines.len()).filter(|&i| lines[i].trim_start().starts_with(CURSOR) && !is_input_row(lines, i)).count();
         return (cursors_bottom > 0).then(|| screen(ClaudeScreenKind::Attention, "", Vec::new(), 0, None, None));
     };
     // 同一個區塊裡只能有一個游標：區塊從上一條分隔線算起
@@ -646,6 +654,13 @@ mod tests {
      Compiling dep5
      Compiling dep6
      Compiling dep7
+     Compiling more1
+     Compiling more2
+     Compiling more3
+     Compiling more4
+     Compiling more5
+     Compiling more6
+     Compiling more7
 
 ✻ Building… (12s · esc to interrupt)
 
