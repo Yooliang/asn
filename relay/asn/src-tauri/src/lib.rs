@@ -85,6 +85,8 @@ pub mod askpass;
 pub mod secret_remote;
 #[cfg(desktop)]
 mod bridge;
+#[cfg(test)]
+mod golden_util;
 #[cfg(desktop)]
 pub mod headless;
 #[cfg(desktop)]

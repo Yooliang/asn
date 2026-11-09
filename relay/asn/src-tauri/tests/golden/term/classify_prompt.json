@@ -1,0 +1,238 @@
+{
+  "fixture/claude-ask-user-question.txt": null,
+  "fixture/claude-auto-mode-teach.txt": null,
+  "fixture/claude-bypass-warning.synthetic.txt": null,
+  "fixture/claude-firstrun-theme.txt": null,
+  "fixture/claude-idle-after-reply.txt": null,
+  "fixture/claude-idle-auto-mode.txt": null,
+  "fixture/claude-idle-manual-mode.txt": null,
+  "fixture/claude-login-expired.synthetic.txt": null,
+  "fixture/claude-login-method.txt": null,
+  "fixture/claude-lookalike-model-text.txt": null,
+  "fixture/claude-lookalike-tool-output.txt": null,
+  "fixture/claude-permission-bash.txt": null,
+  "fixture/claude-permission-webfetch.txt": null,
+  "fixture/claude-permission-write.txt": null,
+  "fixture/claude-plan-approval.txt": null,
+  "fixture/claude-running.txt": null,
+  "fixture/claude-trust-folder-yes-selected.txt": null,
+  "fixture/claude-trust-folder.txt": null,
+  "fixture/claude-usage-limit.synthetic.txt": null,
+  "fixture/pi-crash-verbatim-cwd.txt": null,
+  "fixture/pi-error-400-credit-low.txt": null,
+  "fixture/pi-error-401-invalid-key.txt": null,
+  "fixture/pi-idle-no-auth.txt": null,
+  "fixture/pi-idle.txt": null,
+  "fixture/pi-trust-folder.txt": null,
+  "synthetic/grok信任句_下方四行": null,
+  "synthetic/grok信任句_下方有輸入框與版本": {
+    "kind": "trust_dialog",
+    "cursor": 0,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "Yes, proceed"
+      },
+      {
+        "n": 2,
+        "label": "No, quit"
+      }
+    ],
+    "text_chars": 52,
+    "text": "Do you trust the contents of this directory? C:/work"
+  },
+  "synthetic/grok信任句_不在行首": null,
+  "synthetic/grok信任句_前面有縮排": {
+    "kind": "trust_dialog",
+    "cursor": 0,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "Yes, proceed"
+      },
+      {
+        "n": 2,
+        "label": "No, quit"
+      }
+    ],
+    "text_chars": 44,
+    "text": "Do you trust the contents of this directory?"
+  },
+  "synthetic/pi式箭頭_兩個箭頭": null,
+  "synthetic/pi式箭頭_縮排箭頭": null,
+  "synthetic/pi式箭頭_輸出裡的箭頭": null,
+  "synthetic/pi式箭頭_選單": null,
+  "synthetic/兩個游標": {
+    "kind": "unknown_prompt",
+    "cursor": 0,
+    "option_count": 0,
+    "options": [],
+    "text_chars": 19,
+    "text": "請選擇\n> 第一項\n> 第二項\n第三項"
+  },
+  "synthetic/兩個游標_內文超過五百字_取尾": {
+    "kind": "unknown_prompt",
+    "cursor": 0,
+    "option_count": 0,
+    "options": [],
+    "text_chars": 500,
+    "text": "ＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡ\n> a\n> b"
+  },
+  "synthetic/兩個游標_符號式": {
+    "kind": "unknown_prompt",
+    "cursor": 0,
+    "option_count": 0,
+    "options": [],
+    "text_chars": 15,
+    "text": "請選擇\n❯ 甲\n❯ 乙\n○ 丙"
+  },
+  "synthetic/只有空白行": null,
+  "synthetic/問題三行": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "a"
+      },
+      {
+        "n": 2,
+        "label": "b"
+      }
+    ],
+    "text_chars": 12,
+    "text": "第一行\n第二行\n第三行？"
+  },
+  "synthetic/問題超過五百字_menu取頭": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "a"
+      },
+      {
+        "n": 2,
+        "label": "b"
+      }
+    ],
+    "text_chars": 500,
+    "text": "ＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡ"
+  },
+  "synthetic/單一游標_第一項": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "是"
+      },
+      {
+        "n": 2,
+        "label": "否"
+      }
+    ],
+    "text_chars": 5,
+    "text": "要繼續嗎？"
+  },
+  "synthetic/單一游標_第二項": {
+    "kind": "menu",
+    "cursor": 2,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "是"
+      },
+      {
+        "n": 2,
+        "label": "否"
+      }
+    ],
+    "text_chars": 5,
+    "text": "要繼續嗎？"
+  },
+  "synthetic/空字串": null,
+  "synthetic/符號清單_三個中點": {
+    "kind": "unknown_prompt",
+    "cursor": 0,
+    "option_count": 0,
+    "options": [],
+    "text_chars": 11,
+    "text": "· a\n· b\n· c"
+  },
+  "synthetic/符號清單_兩個空心圈": {
+    "kind": "unknown_prompt",
+    "cursor": 0,
+    "option_count": 0,
+    "options": [],
+    "text_chars": 7,
+    "text": "○ a\n○ b"
+  },
+  "synthetic/符號清單_單項": null,
+  "synthetic/符號清單_實心加空心": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 3,
+    "options": [
+      {
+        "n": 1,
+        "label": "甲"
+      },
+      {
+        "n": 2,
+        "label": "乙"
+      },
+      {
+        "n": 3,
+        "label": "丙"
+      }
+    ],
+    "text_chars": 4,
+    "text": "Pick"
+  },
+  "synthetic/符號清單_項目後無空格": null,
+  "synthetic/縮排不一致": null,
+  "synthetic/輸入框在下方": null,
+  "synthetic/輸入框在下方_有字": null,
+  "synthetic/選單下方四行": null,
+  "synthetic/選單下方恰好三行": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "是"
+      },
+      {
+        "n": 2,
+        "label": "否"
+      }
+    ],
+    "text_chars": 5,
+    "text": "要繼續嗎？"
+  },
+  "synthetic/選項含控制字元": {
+    "kind": "menu",
+    "cursor": 1,
+    "option_count": 2,
+    "options": [
+      {
+        "n": 1,
+        "label": "ab"
+      },
+      {
+        "n": 2,
+        "label": "c"
+      }
+    ],
+    "text_chars": 1,
+    "text": "Q"
+  }
+}

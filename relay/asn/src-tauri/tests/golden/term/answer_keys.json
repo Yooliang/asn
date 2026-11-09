@@ -1,0 +1,231 @@
+{
+  "encode_key": [
+    [
+      "Up",
+      {
+        "ok": "\u001b[A",
+        "err": null
+      }
+    ],
+    [
+      "Down",
+      {
+        "ok": "\u001b[B",
+        "err": null
+      }
+    ],
+    [
+      "Enter",
+      {
+        "ok": "\r",
+        "err": null
+      }
+    ],
+    [
+      "Esc",
+      {
+        "ok": "\u001b",
+        "err": null
+      }
+    ],
+    [
+      "Char('a')",
+      {
+        "ok": "a",
+        "err": null
+      }
+    ],
+    [
+      "Char('Z')",
+      {
+        "ok": "Z",
+        "err": null
+      }
+    ],
+    [
+      "Char('0')",
+      {
+        "ok": "0",
+        "err": null
+      }
+    ],
+    [
+      "Char('y')",
+      {
+        "ok": "y",
+        "err": null
+      }
+    ],
+    [
+      "Char('é')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('!')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char(' ')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('\\n')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('\\r')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('\\u{1b}')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('\\0')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('中')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "Char('１')",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ]
+  ],
+  "encode_keys": [
+    [
+      "空序列",
+      {
+        "ok": null,
+        "err": "按鍵序列太長，沒有送出"
+      }
+    ],
+    [
+      "一個Enter",
+      {
+        "ok": "\r",
+        "err": null
+      }
+    ],
+    [
+      "三十二個Down",
+      {
+        "ok": "\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B",
+        "err": null
+      }
+    ],
+    [
+      "三十三個Down",
+      {
+        "ok": null,
+        "err": "按鍵序列太長，沒有送出"
+      }
+    ],
+    [
+      "Up Down Enter Esc",
+      {
+        "ok": "\u001b[A\u001b[B\r\u001b",
+        "err": null
+      }
+    ],
+    [
+      "中間夾非法字元鍵",
+      {
+        "ok": null,
+        "err": "按鍵只能是單一英數字元，不能送控制碼"
+      }
+    ],
+    [
+      "字元鍵y",
+      {
+        "ok": "y",
+        "err": null
+      }
+    ],
+    [
+      "兩個字元鍵",
+      {
+        "ok": "yn",
+        "err": null
+      }
+    ]
+  ],
+  "describe_keys": [
+    [
+      "空序列",
+      ""
+    ],
+    [
+      "單一字元鍵",
+      "y"
+    ],
+    [
+      "單一Enter",
+      "Enter"
+    ],
+    [
+      "單一Esc",
+      "Esc"
+    ],
+    [
+      "單一Up",
+      "Up×1"
+    ],
+    [
+      "Down二加Enter",
+      "Down×2 + Enter"
+    ],
+    [
+      "Up一加Enter",
+      "Up×1 + Enter"
+    ],
+    [
+      "Up Down Enter Esc 全有",
+      "Up×1 + Down×1 + Enter + Esc"
+    ],
+    [
+      "Esc加Enter",
+      "Enter + Esc"
+    ],
+    [
+      "兩個字元鍵",
+      ""
+    ],
+    [
+      "字元鍵加Enter",
+      "Enter"
+    ],
+    [
+      "順序不影響描述",
+      "Down×1 + Enter"
+    ]
+  ]
+}

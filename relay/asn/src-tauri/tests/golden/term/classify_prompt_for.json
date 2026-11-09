@@ -1,0 +1,320 @@
+{
+  "fixture/claude-ask-user-question.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-auto-mode-teach.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-bypass-warning.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-firstrun-theme.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-idle-after-reply.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-idle-auto-mode.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-idle-manual-mode.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-login-expired.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-login-method.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-lookalike-model-text.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-lookalike-tool-output.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-permission-bash.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-permission-webfetch.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-permission-write.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-plan-approval.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-running.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-trust-folder-yes-selected.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-trust-folder.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-usage-limit.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-crash-verbatim-cwd.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-error-400-credit-low.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-error-401-invalid-key.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-idle-no-auth.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-idle.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/pi-trust-folder.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "menu cursor=1 options=[\"1:Trust\", \"2:Trust parent folder\"] text_chars=0"
+  },
+  "synthetic/grok信任句_下方四行": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/grok信任句_下方有輸入框與版本": {
+    "agy": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=52",
+    "claude": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=52",
+    "grok": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=52",
+    "pi": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=52"
+  },
+  "synthetic/grok信任句_不在行首": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/grok信任句_前面有縮排": {
+    "agy": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=44",
+    "claude": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=44",
+    "grok": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=44",
+    "pi": "trust_dialog cursor=0 options=[\"1:Yes, proceed\", \"2:No, quit\"] text_chars=44"
+  },
+  "synthetic/pi式箭頭_兩個箭頭": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=18"
+  },
+  "synthetic/pi式箭頭_縮排箭頭": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "menu cursor=1 options=[\"1:one\", \"2:two\"] text_chars=6"
+  },
+  "synthetic/pi式箭頭_輸出裡的箭頭": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/pi式箭頭_選單": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "menu cursor=1 options=[\"1:one\", \"2:two\", \"3:three\"] text_chars=6"
+  },
+  "synthetic/兩個游標": {
+    "agy": "unknown_prompt cursor=0 options=[] text_chars=19",
+    "claude": "unknown_prompt cursor=0 options=[] text_chars=19",
+    "grok": "unknown_prompt cursor=0 options=[] text_chars=19",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=19"
+  },
+  "synthetic/兩個游標_內文超過五百字_取尾": {
+    "agy": "unknown_prompt cursor=0 options=[] text_chars=500",
+    "claude": "unknown_prompt cursor=0 options=[] text_chars=500",
+    "grok": "unknown_prompt cursor=0 options=[] text_chars=500",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=500"
+  },
+  "synthetic/兩個游標_符號式": {
+    "agy": "unknown_prompt cursor=0 options=[] text_chars=15",
+    "claude": "unknown_prompt cursor=0 options=[] text_chars=15",
+    "grok": "unknown_prompt cursor=0 options=[] text_chars=15",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=15"
+  },
+  "synthetic/只有空白行": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/問題三行": {
+    "agy": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=12",
+    "claude": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=12",
+    "grok": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=12",
+    "pi": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=12"
+  },
+  "synthetic/問題超過五百字_menu取頭": {
+    "agy": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=500",
+    "claude": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=500",
+    "grok": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=500",
+    "pi": "menu cursor=1 options=[\"1:a\", \"2:b\"] text_chars=500"
+  },
+  "synthetic/單一游標_第一項": {
+    "agy": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "claude": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "grok": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "pi": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5"
+  },
+  "synthetic/單一游標_第二項": {
+    "agy": "menu cursor=2 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "claude": "menu cursor=2 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "grok": "menu cursor=2 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "pi": "menu cursor=2 options=[\"1:是\", \"2:否\"] text_chars=5"
+  },
+  "synthetic/空字串": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/符號清單_三個中點": {
+    "agy": "unknown_prompt cursor=0 options=[] text_chars=11",
+    "claude": "unknown_prompt cursor=0 options=[] text_chars=11",
+    "grok": "unknown_prompt cursor=0 options=[] text_chars=11",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=11"
+  },
+  "synthetic/符號清單_兩個空心圈": {
+    "agy": "unknown_prompt cursor=0 options=[] text_chars=7",
+    "claude": "unknown_prompt cursor=0 options=[] text_chars=7",
+    "grok": "unknown_prompt cursor=0 options=[] text_chars=7",
+    "pi": "unknown_prompt cursor=0 options=[] text_chars=7"
+  },
+  "synthetic/符號清單_單項": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/符號清單_實心加空心": {
+    "agy": "menu cursor=1 options=[\"1:甲\", \"2:乙\", \"3:丙\"] text_chars=4",
+    "claude": "menu cursor=1 options=[\"1:甲\", \"2:乙\", \"3:丙\"] text_chars=4",
+    "grok": "menu cursor=1 options=[\"1:甲\", \"2:乙\", \"3:丙\"] text_chars=4",
+    "pi": "menu cursor=1 options=[\"1:甲\", \"2:乙\", \"3:丙\"] text_chars=4"
+  },
+  "synthetic/符號清單_項目後無空格": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/縮排不一致": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/輸入框在下方": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/輸入框在下方_有字": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/選單下方四行": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "synthetic/選單下方恰好三行": {
+    "agy": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "claude": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "grok": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5",
+    "pi": "menu cursor=1 options=[\"1:是\", \"2:否\"] text_chars=5"
+  },
+  "synthetic/選項含控制字元": {
+    "agy": "menu cursor=1 options=[\"1:ab\", \"2:c\"] text_chars=1",
+    "claude": "menu cursor=1 options=[\"1:ab\", \"2:c\"] text_chars=1",
+    "grok": "menu cursor=1 options=[\"1:ab\", \"2:c\"] text_chars=1",
+    "pi": "menu cursor=1 options=[\"1:ab\", \"2:c\"] text_chars=1"
+  }
+}

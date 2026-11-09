@@ -1,0 +1,76 @@
+{
+  "split_marker": {
+    "\"   \"": null,
+    "\"  > a\"": {
+      "indent": 2,
+      "marker": ">",
+      "label_col": 4,
+      "label": "a"
+    },
+    "\"  ○   多空格\"": {
+      "indent": 2,
+      "marker": "○",
+      "label_col": 6,
+      "label": "多空格"
+    },
+    "\"\"": null,
+    "\"- a\"": null,
+    "\"> \"": null,
+    "\"> \\u{7}\"": null,
+    "\"> a\"": {
+      "indent": 0,
+      "marker": ">",
+      "label_col": 2,
+      "label": "a"
+    },
+    "\">\"": null,
+    "\">a\"": null,
+    "\"\\t> a\"": null,
+    "\"· z\"": {
+      "indent": 0,
+      "marker": "·",
+      "label_col": 2,
+      "label": "z"
+    },
+    "\"→ a\"": null,
+    "\"▶ y\"": {
+      "indent": 0,
+      "marker": "▶",
+      "label_col": 2,
+      "label": "y"
+    },
+    "\"○ z\"": {
+      "indent": 0,
+      "marker": "○",
+      "label_col": 2,
+      "label": "z"
+    },
+    "\"● x\"": {
+      "indent": 0,
+      "marker": "●",
+      "label_col": 2,
+      "label": "x"
+    },
+    "\"◦ z\"": {
+      "indent": 0,
+      "marker": "◦",
+      "label_col": 2,
+      "label": "z"
+    },
+    "\"❯ 甲\"": {
+      "indent": 0,
+      "marker": "❯",
+      "label_col": 2,
+      "label": "甲"
+    }
+  },
+  "at_bottom": {
+    "下方0行": true,
+    "下方1行": true,
+    "下方2行": true,
+    "下方3行": true,
+    "下方4行": false,
+    "下方有輸入框": false,
+    "下方空白行不算": true
+  }
+}

@@ -1,0 +1,294 @@
+{
+  "\"\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / settings加路徑": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / settings加路徑": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"AGY\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe",
+    "--settings",
+    "  x.json  "
+  ],
+  "\"agy\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / settings加路徑": [
+    "C:/bin/x.exe",
+    "--settings",
+    "C:/asn/gemini-session-settings.json"
+  ],
+  "\"agy\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"agy\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / settings加路徑": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"claude\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / settings加路徑": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"grok\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值前後有空白不修剪": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值含tab": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值含換行": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值含跳脫字元": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值為空字串": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings值為空白": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / settings加路徑": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 三個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 三個元素_旗標值在前": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 兩個值順序顛倒": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 只有一個元素": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 回空陣列": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 旗標不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 旗標大小寫不同": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 旗標少一槓": [
+    "C:/bin/x.exe"
+  ],
+  "\"pi\" / 沒設額外參數函式": [
+    "C:/bin/x.exe"
+  ]
+}

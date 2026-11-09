@@ -3529,6 +3529,9 @@ pub(crate) fn global() -> Option<std::sync::Arc<LiveTerms>> {
 mod live_mux;
 
 #[cfg(test)]
+mod golden;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::launch::profiles::{LaunchMode, Profile};
