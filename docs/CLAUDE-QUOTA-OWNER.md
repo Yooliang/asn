@@ -76,11 +76,12 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 `h1:` 加上 SHA-256（對 `版本標記 + email + accountUuid`）的十六進位。狀態檔裡不再有 email 與 uuid。
 
 - 用途只有一個：比對「現在登入的是不是上次那個身分」，所以雜湊就夠，不需要還原。這不是安全邊界，只是不把明文留在檔案裡。
-- 有身分的視窗不用這個欄位：各帳號自己的待確認狀態存在同一個檔的 `owned` 區，鍵也改成 email 的雜湊（`e1:` 開頭、固定前綴後 SHA-256），
-  狀態檔裡沒有任何明文 email。
+- 有身分的視窗不用這個欄位：各帳號自己的待確認狀態存在同一個檔的 `owned` 區，鍵是 email。
+  **已決定（asn真）**：`owned` 區與額度檔的鍵維持用 email，不改成雜湊——額度檔本來就以 email 為鍵，後台也用同一個鍵，
+  `owned` 區要和額度檔對得上；狀態檔裡「上次登入的身分」欄位才是被雜湊的那個。
 - 新增的本機小檔也照同一原則檢查：身分快取 `claude-owner-cache.json` 只存「路徑、大小、修改時間、accountUuid、organizationUuid」，
   未知帳號區 `claude-quota-unknown.json` 只存 accountUuid 與額度數字，兩者都沒有 email。accountUuid 本身要留明文，因為要拿它去對帳號庫的
-  account.json；它不是登入憑證。額度檔 `claude-quota.json` 以 email 為鍵是舊有設計（後台也用同一個鍵），這次不動。
+  account.json；它不是登入憑證。額度檔 `claude-quota.json` 以 email 為鍵是舊有設計（後台也用同一個鍵），已決定不動。
 - **舊格式平順轉換**：讀到舊的明文 `email|uuid` 時，若等於現在登入的身分，視為同一個身分並順手換成雜湊，
   不會因為格式升級就誤判成「換帳號」而丟掉舊紀錄；若是別的身分，照原本的換帳號流程處理。測試涵蓋兩種。
 

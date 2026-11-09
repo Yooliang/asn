@@ -330,12 +330,11 @@ fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms:
     };
     let before = state::load(home);
     let mut all_st = before.clone();
-    let skey = email_key(&email);
-    let mut st = all_st.take_owned(&skey);
+    let mut st = all_st.take_owned(&email);
     // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
     let reset_base = load_all(home).get(&email).is_some_and(|q| !q.owner);
     let r = record(home, &email, parsed, &mut st, reset_base, true, now_ms).unwrap_or(false);
-    all_st.put_owned(&skey, st);
+    all_st.put_owned(&email, st);
     if all_st != before {
         state::save(home, &all_st);
     }
@@ -353,15 +352,6 @@ fn identity_key(email: &str, uuid: &str) -> String {
     h.update(uuid.as_bytes());
     let d = h.finalize();
     format!("h1:{}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
-}
-
-/// 各帳號自己的狀態在狀態檔裡的鍵：email 的雜湊（`e1:` 開頭），狀態檔裡不留明文 email
-fn email_key(email: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b"asn-claude-owned-v1|");
-    h.update(email.as_bytes());
-    format!("e1:{}", h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 /// 剛換帳號、還在等確認的帳號（舊辦法的「連續 3 次、隔 10 分鐘」）：目前登入的就是狀態檔記的那個身分、

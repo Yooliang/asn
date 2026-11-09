@@ -749,13 +749,3 @@ fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家
     assert_eq!(f("11111111-0000-0000-0000-00000000000a").as_deref(), Some("home@x.test"), "設定資料夾沒有才看家目錄");
     assert_eq!(f("33333333-0000-0000-0000-000000000000"), None, "uuid 對不上就不用");
 }
-
-#[test]
-fn 狀態檔裡各帳號自己的狀態用_email_雜湊當鍵_不留明文() {
-    let h = home_as("a@x.test");
-    add_account(h.path(), "a@x.test", UA);
-    let t = transcript(h.path(), "wa", UA);
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &t), NOW));
-    let s = state_file(&h);
-    assert!(s.contains("\"e1:") && !s.contains("a@x.test"), "{s}");
-}
