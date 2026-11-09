@@ -79,7 +79,7 @@ test('通知：第一次記住、金鑰換了，文字固定帶指紋；同一�
   assert.equal((await alert(db, { p_kind: 'changed', p_fp: 'fedcba9876543210' })).notify, 'sent')
   const m = await mails(db)
   assert.equal(m.length, 2, '第一次一封、換鑰一封')
-  assert.match(m[0], /^家用機：「工作機」第一次連到這台\n[\s\S]*指紋 0123456789abcdef/)
+  assert.match(m[0], /^家用機：「工作機」第一次連到「家用機」\n[\s\S]*指紋 0123456789abcdef/)
   assert.match(m[1], /^家用機：「工作機」的設備金鑰變了\n新指紋 fedcba9876543210[\s\S]*已拒絕連線/)
 })
 
