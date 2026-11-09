@@ -10,7 +10,7 @@
 import { spawn } from 'node:child_process'
 import { cleanEnv } from './acp-client.mjs'
 import { classifyFailure, WorkerError } from './acp-errors.mjs'
-import { describeAgyTool } from './acp-policy.mjs'
+import { describeAgyTool, redact } from './acp-policy.mjs'
 
 // cfg.args 放最前面（可放額外旗標；測試時放假 agy 的腳本路徑），後面才是這個驅動需要的旗標
 export function agyArgs({ cfg, sessionId, fullAccess }) {
@@ -72,7 +72,7 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
     if (r.conversation_id) sid = r.conversation_id
     if (cur.violation) return finish('reject', new WorkerError('violation', cur.violation.reason, { summary: cur.violation.summary }))
     const denied = [...cur.denied]
-    for (const d of r.denied_actions ?? []) if (!denied.length) denied.push({ category: d.action === 'command' ? 'execute' : 'other', summary: String(d.display_name ?? d.action ?? '') })
+    for (const d of r.denied_actions ?? []) if (!denied.length) denied.push({ category: d.action === 'command' ? 'execute' : 'other', summary: redact(String(d.display_name ?? d.action ?? '')) })
     if (String(r.status ?? '').toUpperCase() === 'SUCCESS') return finish('resolve', { text: String(r.response ?? ''), denied, sessionId: sid, usage: r.usage ?? null })
     const err = String(r.error ?? r.status ?? '原因不明')
     finish('reject', new WorkerError(classifyFailure(err) ?? 'agent', err.slice(0, 400)))
