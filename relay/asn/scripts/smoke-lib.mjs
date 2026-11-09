@@ -519,6 +519,13 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   }
   const box = document.querySelector(mobile ? '.m-dv-my' : '.dv-my');
   if (box.textContent.includes('用在：')) return { ok: false, why: '還有「用在：」那一行' };
+  // 卡片與裡面的東西都不超出窗格（窄的時候額度條原本會把卡片撐出去）：卡片在「我的帳號」區內、卡片裡看得到的元素都在卡片內
+  const area = box.getBoundingClientRect();
+  for (const c of [...box.querySelectorAll(mobile ? '.m-dv-acct' : '.dv-acct')].filter(vis)) {
+    const k = c.getBoundingClientRect(), who = c.querySelector(mobile ? '.m-dv-mail' : '.dv-mail')?.textContent.trim() ?? '';
+    if (k.right > area.right + 0.5 || k.left < area.left - 0.5) return { ok: false, why: who + ' 的帳號卡超出窗格' };
+    for (const e of [...c.querySelectorAll('*')].filter(vis)) { const r = e.getBoundingClientRect(); if (r.width && (r.right > k.right + 0.5 || r.left < k.left - 0.5)) return { ok: false, why: who + ' 的「' + (e.textContent.trim().slice(0, 20) || e.className) + '」超出帳號卡' } }
+  }
   if ([...box.querySelectorAll('button')].some(b => vis(b) && b.textContent.includes('切換到'))) return { ok: false, why: '還有「切換到…」按鈕' };
   for (const b of btns) {
     const c = b.closest(mobile ? '.m-dv-acct' : '.dv-acct');

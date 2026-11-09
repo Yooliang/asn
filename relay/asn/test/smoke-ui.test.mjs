@@ -285,6 +285,7 @@ test('帳號卡片設備按鈕情境：桌面兩種寬度、手機兩種寬度�
     const src = probeSource(s.probe)
     assert.doesNotThrow(() => new vm.Script(src))
     assert.ok(src.includes('aria-pressed') && src.includes('使用中') && src.includes('switch'), '檢查選中樣子、不只靠顏色、按了不發出切換')
+    assert.ok(src.includes('帳號卡超出窗格'), '卡片不超出窗格')
   }
   assert.equal(d.find(s => s.page === 'm.html').probe.open, '帳號')
 })
