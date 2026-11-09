@@ -17,6 +17,7 @@
     { "name": "指令中的 Authorization", "in": "curl -H \"Authorization: Bearer FAKEtoken123\" https://x", "out": "curl -H \"Authorization: {M}\" https://x" },
     { "name": "Authorization Basic", "in": "Authorization: Basic RkFLRTpGQUtF", "out": "Authorization: {M}" },
     { "name": "單獨的 Bearer", "in": "Bearer FAKEtoken123 tail", "out": "{M} tail" },
+    { "name": "中文緊接 bearer", "in": "認證bearer FAKEtoken123 tail", "out": "認證{M} tail" },
     { "name": "key=value", "in": "password=hunter2 done", "out": "password={M} done" },
     { "name": "key 加金鑰", "in": "key AIzaFAKExxxxxxxxxxxxxxxxx ok", "out": "key {M} ok" },
     { "name": "api_key 與標頭式", "in": "api_key=FAKEv X-Api-Key: FAKEv2", "out": "api_key={M} X-Api-Key: {M}" },

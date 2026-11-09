@@ -319,7 +319,7 @@ fn redact_rules() -> &'static [(regex::Regex, &'static str)] {
             // Authorization 標頭（含 Bearer／Basic）：整段只遮一次
             (format!(r#"(?i)(authorization["']?[ \t]*[=:][ \t]*)(?:(?:bearer|basic)[ \t]+)?{val}"#), "${1}［已遮蔽］"),
             // 單獨出現的 Bearer 憑證
-            (r#"(?i)\bbearer[ \t]+[^\s"'`]+"#.into(), "［已遮蔽］"),
+            (r#"(?i)(?-u:\b)bearer[ \t]+[^\s"'`]+"#.into(), "［已遮蔽］"),
             // key=value／key: value（token、secret、password…，含查詢字串與 JSON 寫法）
             (format!(r#"(?i)((?:(?:api[_-]?key|token|secret|password|passwd|passphrase|credential|signature)[A-Za-z0-9_-]{{0,40}}["']?[ \t]*[=:]|key["']?[ \t]*=)[ \t]*){val}"#), "${1}［已遮蔽］"),
             // 金鑰樣字串（前面不能緊接英數字，避免誤遮一般詞的尾巴）

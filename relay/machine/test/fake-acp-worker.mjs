@@ -34,7 +34,7 @@ rl.on('line', line => {
   }
   if (m.method === 'authenticate') return out({ id: m.id, result: {} })
   if (m.method === 'session/new') {
-    if (process.env.FAKE_ACP_AUTH === '1') return out({ id: m.id, error: { code: -32000, message: 'Authentication required' } })
+    if (process.env.FAKE_ACP_AUTH) return out({ id: m.id, error: { code: -32000, message: process.env.FAKE_ACP_AUTH === '1' ? 'Authentication required' : `Authentication required ${process.env.FAKE_ACP_AUTH}` } })   // 不是 1 時，值接在錯誤訊息後面（測錯誤文字有沒有遮蔽）
     const id = `sess-${Math.random().toString(16).slice(2, 8)}`
     if (stateDir) fs.writeFileSync(sFile(id), JSON.stringify({ turns: 0 }))
     return out({ id: m.id, result: { sessionId: id, ...modelsField() } })

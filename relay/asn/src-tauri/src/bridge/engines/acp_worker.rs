@@ -558,7 +558,8 @@ impl Worker {
         let cfg = &self.i.cfg;
         let name = &cfg.name;
         let how = if cfg.protocol == "agy-stream" { "請在終端機執行 agy 完成 Google 瀏覽器登入".to_string() } else { format!("請登入 {}", cfg.command) };
-        let clip = |n: usize| e.message.chars().take(n).collect::<String>();
+        let safe = redact(&e.message);
+        let clip = |n: usize| safe.chars().take(n).collect::<String>();
         match e.code {
             "auth" => format!("{name} 需要登入：帳號登入失效或還沒登入。{how}，好了再寄一次。（錯誤：{}）", clip(160)),
             "quota" => format!("{name} 的額度用完了（或被限流），請稍後再試。（錯誤：{}）", clip(160)),
@@ -577,7 +578,7 @@ impl Worker {
     }
 
     fn apply_failure(&self, e: WorkerError, job: Option<&Job>) -> WorkerError {
-        let short: String = e.message.chars().take(120).collect();
+        let short: String = redact(&e.message).chars().take(120).collect();
         match e.code {
             "auth" => self.set_health(Health::LoginRequired, &short),
             "quota" => self.set_health(Health::Quota, &short),

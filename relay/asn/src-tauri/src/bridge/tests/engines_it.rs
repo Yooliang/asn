@@ -333,6 +333,26 @@ async fn acp_啟動時要求登入_名單標_login_required_寄信得到說明_�
 }
 
 #[tokio::test]
+async fn acp_錯誤文字送出前經過遮蔽_給寄件人的說明與名單狀態文字都不含假金鑰() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[("FAKE_ACP_AUTH", "sk-FAKExxxxxxxxxxxxxxxx 與 Bearer FAKEtoken123")], "acp", &[]).await;
+    for _ in 0..100 {
+        if h.last_roster()["agents"][0]["status"] == "login-required" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        h.set.refresh_all().await;
+        h.core.refresh_roster(now()).await;
+    }
+    assert_eq!(h.last_roster()["agents"][0]["status"], "login-required", "{}", h.last_roster());
+    h.put_pull(to_agent(1, "Gemini", "在嗎")).await;
+    h.wait("失敗說明", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
+    let b = h.bodies().into_iter().find(|b| b.contains("需要登入")).unwrap();
+    assert!(!b.contains("FAKExxxx") && !b.contains("FAKEtoken123"), "說明含未遮蔽的字串：{b}");
+    let r = h.last_roster().to_string();
+    assert!(!r.contains("FAKExxxx") && !r.contains("FAKEtoken123"), "名單狀態文字含未遮蔽的字串：{r}");
+}
+
+#[tokio::test]
 async fn acp_太久沒動靜_取消並中止_回報_之後仍可用() {
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({"turn_timeout_ms": 1500}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@SLEEP")).await;
