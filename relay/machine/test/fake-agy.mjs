@@ -15,6 +15,8 @@
 // 環境變數 FAKE_AGY_WRITE_MS：@@WRITE 真的寫檔前等多久（毫秒，預設 150）。
 // 環境變數 FAKE_AGY_FAIL_EXIT_MS：回錯誤（@@NET、@@AUTH…）之後多久才結束行程（毫秒，預設 20）；拉長用來模擬機器忙時舊行程收尾慢（#994）。
 // 環境變數 FAKE_AGY_ECHO_PID=1：一般回覆後面附「(pid=行程編號)」；@@NET_ONCE 建的檔內容一律是行程編號。
+// 環境變數 FAKE_AGY_WRITE_GATE：資料夾。有設時 @@WRITE 不看時間：送出寫檔步驟後把自己的 pid 加進 <閘門>/<目標>.pid，
+//   等到 <閘門>/<目標>.go 出現才真的寫（<目標>＝路徑裡非英數字換成 _、取最後 120 字）。測試等「被殺」事件再檢查檔案，不靠時間差（#994）。
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
 // `fake-agy.mjs models`：照 agy 1.x 實測的格式列模型（說明行在 stderr；stdout 一行「代號<Tab>名稱」），清單取 FAKE_AGY_MODELS（逗號分隔）
 import fs from 'node:fs'
@@ -73,8 +75,16 @@ async function handle(line) {
   // FAKE_AGY_STUBBORN=1：收到「這個位置不能寫」的提醒時，照樣再寫同一個位置（測試一輪只給一次換位置的機會）
   if ((t = /@@WRITE\s+(\S+)/.exec(body) || (process.env.FAKE_AGY_STUBBORN === '1' && /這個位置不能寫：(\S+?)。/.exec(body)))) {
     const si = step++
+    // 閘門（FAKE_AGY_WRITE_GATE）：先記 pid 再送出寫檔步驟。上層一看到步驟就可能殺掉我，晚一步記就永遠記不到（#1106）
+    const gate = process.env.FAKE_AGY_WRITE_GATE
+    const key = gate ? path.join(gate, t[1].replace(/[^A-Za-z0-9]/g, '_').slice(-120)) : ''
+    if (gate) fs.appendFileSync(`${key}.pid`, `${process.pid}\n`)
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
-    await sleep(Number(process.env.FAKE_AGY_WRITE_MS) || 150)   // 測試可以用 FAKE_AGY_WRITE_MS 把寫檔拉長，給上層的絆線更多時間（機器忙的時候 150 毫秒不夠它殺掉我）
+    if (gate) {
+      while (!fs.existsSync(`${key}.go`)) await sleep(20)   // 被殺就永遠寫不到
+    } else {
+      await sleep(Number(process.env.FAKE_AGY_WRITE_MS) || 150)
+    }
     fs.writeFileSync(t[1], 'written-by-fake-agy')
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'DONE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
     return resultOf(`已寫入 ${t[1]}`)
