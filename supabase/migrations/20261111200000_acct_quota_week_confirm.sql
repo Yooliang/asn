@@ -13,7 +13,7 @@
 -- 舊用戶端不受影響：回報格式不變；對外回傳（roster、查詢）不含 window_pending；skipped 的原因代碼不變。
 -- 權限：新函式對 public／anon／authenticated 收回，只給 service_role；security definer 的函式 search_path 空。
 -- 部署順序：本 migration → relay（Edge Function，這次不需改）→ 電腦端。先上 migration 時舊電腦端照常運作。
--- 回復：supabase/sql/rollback/20261110200000_acct_quota_week_confirm_down.sql（只會丟掉待確認的暫存，不動任何額度）。
+-- 回復：supabase/sql/rollback/20261111200000_acct_quota_week_confirm_down.sql（只會丟掉待確認的暫存，不動任何額度）。
 begin;
 
 alter table relay.asn_user_accounts add column if not exists window_pending jsonb not null default '{}'::jsonb;

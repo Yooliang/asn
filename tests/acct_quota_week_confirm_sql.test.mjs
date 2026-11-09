@@ -1,4 +1,4 @@
-// 每週額度倍數檢查的待確認（#1184，20261110200000_acct_quota_week_confirm.sql）：
+// 每週額度倍數檢查的待確認（#1184，20261111200000_acct_quota_week_confirm.sql）：
 // 1. 靜態：roster_report 除了明列的片段與 20261110100000 版逐字相同；回復檔換回原本體；新函式只授權 service_role；沒有權杖類字樣。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例檔 confirm_sequences 每一步都跟電腦端一致（asn_relay_acct_window_decide）；
@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const FILE = '20261110200000_acct_quota_week_confirm.sql'
+const FILE = '20261111200000_acct_quota_week_confirm.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(FILE)

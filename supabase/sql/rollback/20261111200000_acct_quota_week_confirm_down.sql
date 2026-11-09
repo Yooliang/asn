@@ -1,4 +1,4 @@
--- 退回 20261110200000_acct_quota_week_confirm.sql：roster_report 換回 20261110100000 版本體，丟掉 decide 與待確認欄位（只是暫存，不動任何額度）。
+-- 退回 20261111200000_acct_quota_week_confirm.sql：roster_report 換回 20261110100000 版本體，丟掉 decide 與待確認欄位（只是暫存，不動任何額度）。
 begin;
 
 create or replace function public.asn_relay_acct_roster_report(p_node text, p_accounts jsonb)
