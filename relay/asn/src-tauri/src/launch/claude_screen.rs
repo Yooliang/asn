@@ -282,8 +282,13 @@ pub fn classify(text: &str) -> Option<ClaudeScreen> {
 
 /// 底部有輸入框或狀態列：這時選單不會擋住輸入，畫面上任何長得像選單的文字都不當提示
 fn input_box_at_bottom(lines: &[&str]) -> bool {
-    let start = lines.len().saturating_sub(4);
-    (start..lines.len()).any(|i| {
+    // 有背景子代理時，狀態列下面還有一段代理清單（「● main」「○ 名字 … idle」）：先跳過，再看最後 4 行
+    let mut end = lines.len();
+    while end > 0 && is_agent_row(lines[end - 1]) {
+        end -= 1;
+    }
+    let start = end.saturating_sub(4);
+    (start..end).any(|i| {
         let t = lines[i].trim();
         if STATUS_LINE_MARKS.iter().any(|m| t.contains(m)) {
             return true;
@@ -292,6 +297,13 @@ fn input_box_at_bottom(lines: &[&str]) -> bool {
         let numbered_row = rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
         i > 0 && is_rule(lines[i - 1]) && !numbered_row
     })
+}
+
+/// 狀態列下面的背景代理清單一列：「● main」「○ quota-1184 …  9m 30s」（實心是目前這段、空心是背景的）
+fn is_agent_row(line: &str) -> bool {
+    let t = line.trim_start();
+    let mut c = t.chars();
+    matches!(c.next(), Some('●' | '○')) && c.next() == Some(' ')
 }
 
 /// 分隔線。有名字的視窗會把名字嵌在線上（`─── 名字 ─`），所以只要頭尾是線、線的字元夠多就算
@@ -334,7 +346,6 @@ struct Menu {
 }
 
 fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
-    let cursors = lines.iter().filter(|l| l.trim_start().starts_with(CURSOR)).count();
     // 用來判斷的是最底下的區塊：往上跳過頁尾與分隔線，碰到別的內容就算不是選單
     let mut last = lines.len();
     let mut footers = 0;
@@ -353,8 +364,11 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
         }
     }
     let Some(menu) = parse_options(&lines[..last]) else {
-        // 底部沒有選單。還有選單游標的話，有東西在等但認不出來
-        return (cursors > 0).then(|| screen(ClaudeScreenKind::Attention, "", Vec::new(), 0, None, None));
+        // 底部沒有選單。底部那一塊（最後 NOTICE_LOOKBACK 行）還有選單游標的話，有東西在等但認不出來；
+        // 對話區上面出現的 ❯（例如模型回覆裡引用的「❯ 1.」）不算
+        let bottom = lines.len().saturating_sub(NOTICE_LOOKBACK);
+        let cursors_bottom = lines[bottom..].iter().filter(|l| l.trim_start().starts_with(CURSOR)).count();
+        return (cursors_bottom > 0).then(|| screen(ClaudeScreenKind::Attention, "", Vec::new(), 0, None, None));
     };
     // 同一個區塊裡只能有一個游標：區塊從上一條分隔線算起
     let block_start = lines[..menu.above].iter().rposition(|l| is_rule(l)).map_or(0, |i| i + 1);
@@ -600,6 +614,58 @@ mod tests {
         ] {
             assert_eq!(kind(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn 有背景子代理_狀態列被代理清單擠上去_仍認得是在等輸入() {
+        let text = "● 剛才的回覆
+
+────────────────────────────────────────
+❯ 
+────────────────────────────────────────
+  ⏵⏵ bypass permissions on · 1 shell · ← 2 agents
+● main
+○ wezterm-build  完成建置                     idle
+○ quota-1184  讀額度                          9m 30s
+";
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 對話區有_游標樣的字_底部是執行中_沒有提示() {
+        let text = "模型說：選單長這樣
+ ❯ 1. Yes
+   2. No
+
+● Bash(cargo build)
+  ⎿  Compiling asn v0.2.12
+     Compiling dep1
+     Compiling dep2
+     Compiling dep3
+     Compiling dep4
+     Compiling dep5
+     Compiling dep6
+     Compiling dep7
+
+✻ Building… (12s · esc to interrupt)
+
+
+
+
+
+";
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 認不出的選單游標在底部_照樣要人工確認() {
+        let text = "前面的內容
+
+要選一個
+ ❯ 甲
+   乙
+";
+        assert_eq!(kind(text), Some(K::Attention), "{text}");
     }
 
     #[test]
