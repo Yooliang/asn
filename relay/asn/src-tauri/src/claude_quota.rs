@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub(crate) mod merge;
+pub(crate) mod owner;
+pub(crate) mod owner_store;
 pub(crate) mod state;
 
 pub const MAX_ACCOUNTS: usize = 20;
@@ -41,6 +43,9 @@ pub struct Quota {
     pub five_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub week_at: Option<String>,
+    /// 這筆是視窗帶了帳號身分才記下的（#1185）：沒有標記的舊基準可能混進別的帳號的數字，第一次有身分的回報來時會清掉
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub owner: bool,
 }
 
 /// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
@@ -181,6 +186,7 @@ pub(crate) fn quota_from_value(v: &Value) -> Option<Quota> {
         week_reset_at: only(week.is_some(), s("week_reset_at")),
         five_at: only(five.is_some(), s("five_at")),
         week_at: only(week.is_some(), s("week_at")),
+        owner: v.get("owner").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -255,9 +261,19 @@ fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
 /// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log（同一原因只記一次）。
 /// `reset_base`＝登入身分剛換過：先丟掉這個 email 舊的紀錄，這次照新帳號的數字收。
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
-fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, now_ms: i64) -> Result<bool, String> {
+fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
+    let mut reset_base = reset_base;
+    if reset_base && owned && all.contains_key(email) && !owner_store::backup_quota_file(home) {
+        // 備份失敗就不清舊基準（留著比丟掉安全），下次再試
+        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
+        reset_base = false;
+    }
     let dropped = reset_base && all.remove(email).is_some();
+    if dropped && owned {
+        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）
+", iso_secs(now_ms)));
+    }
     let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
     let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
     st.set_pending_week(m.pending_week);
@@ -266,7 +282,8 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
     if took {
         st.rebase = false;
     }
-    if let Some(q) = m.quota {
+    if let Some(mut q) = m.quota {
+        q.owner = owned;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);
@@ -289,21 +306,93 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
 /// 登入身分（email 與 accountUuid）跟上次看到的不一樣就重設該帳號的基準（#1184）；
 /// 讀不到身分＝沒登入，照舊什麼都不記。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
+    let cfg = owner::config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+    hook_in(home, &cfg, input, now_ms)
+}
+
+/// 同 [`hook`]，指定 Claude 設定資料夾（測試不碰真實環境變數）。
+/// 狀態列輸入帶 transcript_path、而且那個對話紀錄裡找得到這個視窗的帳號身分時（#1185），額度記到那個帳號底下，
+/// 不看現在 `.claude.json` 登入的是誰；帶了 transcript_path 卻解不出身分就這次不記；
+/// 完全沒帶 transcript_path（舊版 Claude Code）才走舊辦法（記在目前登入的帳號，換身分要連續確認）。
+pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
-    let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
+    match owner::resolve(home, cfg, input) {
+        Some(o) => hook_owned(home, cfg, &o, parsed, now_ms),
+        // 有帶 transcript_path 卻解不出身分（還沒寫出 session-owner、被擠出檔尾、最後一筆壞了、路徑不安全）：
+        // 這個視窗是誰還不明，這次不記，不能拿「現在登入的是誰」去猜（會把別的帳號的數字記進來）
+        None if owner::transcript_given(input) => false,
+        // 完全沒帶 transcript_path 的舊版 Claude Code 才走舊辦法
+        None => hook_legacy(home, parsed, now_ms),
+    }
+}
+
+/// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
+fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> bool {
+    let Some(email) = claude_accounts::email_of_account_uuid(home, cfg, &o.account_uuid) else {
+        owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
+        return false;
+    };
     let before = state::load(home);
-    let ident = format!("{email}|{uuid}");
+    let mut all_st = before.clone();
+    let mut st = all_st.take_owned(&email);
+    // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
+    let reset_base = load_all(home).get(&email).is_some_and(|q| !q.owner);
+    let r = record(home, &email, parsed, &mut st, reset_base, true, now_ms).unwrap_or(false);
+    all_st.put_owned(&email, st);
+    if all_st != before {
+        state::save(home, &all_st);
+    }
+    r
+}
+
+/// 登入身分在狀態檔裡的樣子：email 與 accountUuid 的雜湊（`h1:` 開頭、SHA-256 十六進位），狀態檔裡不留明文 email。
+/// 只用來比「是不是同一個身分」，不是安全邊界；換成別的版本號（h2:…）時舊值就當作沒看過。
+fn identity_key(email: &str, uuid: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"asn-claude-identity-v1\0");
+    h.update(email.as_bytes());
+    h.update(b"\0");
+    h.update(uuid.as_bytes());
+    let d = h.finalize();
+    format!("h1:{}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+}
+
+/// 剛換帳號、還在等確認的帳號（舊辦法的「連續 3 次、隔 10 分鐘」）：目前登入的就是狀態檔記的那個身分、
+/// 狀態檔標了「等確認」、而且額度檔裡還沒有它的紀錄時，回它的 email；畫面據此寫「約 10 分鐘後顯示額度」
+pub fn waiting_email(home: &Path) -> Option<String> {
+    let st = state::load(home);
+    if !st.rebase {
+        return None;
+    }
+    let (email, uuid) = claude_accounts::current_identity(home)?;
+    (st.identity.as_deref() == Some(identity_key(&email, &uuid).as_str()) && !load_all(home).contains_key(&email)).then_some(email)
+}
+
+fn hook_legacy(home: &Path, parsed: Parsed, now_ms: i64) -> bool {
+    let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
+    // 這個帳號的紀錄已經是有身分的（owner 標記）：舊辦法猜出來的數字不能蓋掉它
+    if load_all(home).get(&email).is_some_and(|q| q.owner) {
+        return false;
+    }
+    let before = state::load(home);
+    let ident = identity_key(&email, &uuid);
     let mut st = before.clone();
     let mut reset_base = false;
+    // 舊版狀態檔存的是明文 `email|uuid`：認得就當同一個身分，順便換成雜湊，不會因為格式升級就誤判成換帳號
+    let legacy_plain = format!("{email}|{uuid}");
+    if st.identity.as_deref() == Some(legacy_plain.as_str()) {
+        st.identity = Some(ident.clone());
+    }
     if st.identity.as_deref() != Some(ident.as_str()) {
         // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
         reset_base = st.identity.is_some();
-        st = state::State { identity: Some(ident), rebase: reset_base, ..state::State::default() };
+        st = state::State { identity: Some(ident), rebase: reset_base, owned: st.owned.clone(), ..state::State::default() };
     }
-    let r = record(home, &email, parsed, &mut st, reset_base, now_ms).unwrap_or(false);
+    let r = record(home, &email, parsed, &mut st, reset_base, false, now_ms).unwrap_or(false);
     if st != before {
         state::save(home, &st);
     }
@@ -328,8 +417,17 @@ impl Quota {
 
 /// 前端讀本機各帳號的額度紀錄（email → 額度）
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_quota_all() -> HashMap<String, Quota> {
-    load_all(&claude_accounts::claude_home())
+pub fn claude_quota_all() -> HashMap<String, Value> {
+    quota_all_with_waiting(&claude_accounts::claude_home())
+}
+
+/// 各帳號的額度紀錄；剛換帳號還在等確認、而且沒有紀錄的那個帳號回 `{ "waiting": true }`（畫面寫固定的一句人話）
+pub(crate) fn quota_all_with_waiting(home: &Path) -> HashMap<String, Value> {
+    let mut out: HashMap<String, Value> = load_all(home).into_iter().filter_map(|(k, q)| serde_json::to_value(q).ok().map(|v| (k, v))).collect();
+    if let Some(e) = waiting_email(home) {
+        out.entry(e).or_insert_with(|| serde_json::json!({ "waiting": true }));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -463,6 +561,17 @@ mod tests {
 
     fn acct(email: &str, current: bool) -> AccountInfo {
         AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false }
+    }
+
+    #[test]
+    fn 回報不含_owner_標記_額度檔的內部欄位不會上傳() {
+        let h = tmp_home();
+        write_cj(h.path(), "a@x.test");
+        let mut q = Quota { five_hour_pct: Some(50), weekly_pct: Some(60), at: "2026-10-24T12:00:00Z".into(), owner: true, ..Default::default() };
+        q.reset_at = Some("2026-10-24T14:00:00Z".into());
+        let qs: HashMap<String, Quota> = [("a@x.test".to_string(), q)].into_iter().collect();
+        let v = build_report_with_quota(&[acct("a@x.test", true)], None, &qs);
+        assert!(!v.to_string().contains("owner"), "{v}");
     }
 
     #[test]

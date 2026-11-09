@@ -249,6 +249,7 @@ pub fn merge_full(vendor: Vendor, old: Option<&Quota>, p: &Parsed, pending_week:
         five_at: read_at(took_five, five.is_some(), old.and_then(|q| q.five_at.as_ref()), old_at, &now),
         week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &now),
         at: now,
+        owner: false,
     };
     Merged { quota: Some(q), skipped, took_five, took_week, pending_week: pend_out }
 }
