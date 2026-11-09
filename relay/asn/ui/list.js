@@ -274,6 +274,8 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
 const pinnedChat = normalizePinned(savedMe.pinnedChat)
 // panel＝指引、設定兩個聊天窗目前顯示哪一篇／哪一類（整合模式是右邊的分頁、分離模式是獨立視窗；不存檔）
+// 窄視窗只顯示一個窗格時（#1192），使用者按了「返回名單」＝true；從名單開對話或設定就回到 false（切到右邊）。不存檔
+const pane = reactive({ showList: false })
 const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, panel: { guide: '', setting: '' } })
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
@@ -953,6 +955,7 @@ async function openRoomChat(id) {
   openedRooms.add(id)
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -1002,6 +1005,7 @@ async function openChat(id) {
   void core.syncHistory(id)   // 打開對話：向後台補這位夥伴的往來（以後台為準；失敗就用本機快取）
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -1018,6 +1022,7 @@ async function openPanel(kind, key) {
   ui.panel[kind] = key
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     await invoke('show_main')
     sync()
     return
@@ -1485,9 +1490,9 @@ const app = createApp({
     // 窄視窗（#1192）：兩個窗格放不下就一次只顯示一個；開了分頁或換了分頁就切到右邊，按「返回名單」回名單
     const winW = ref(window.innerWidth)
     window.addEventListener('resize', () => { winW.value = window.innerWidth })
-    const showList = ref(false)
-    watch([() => ui.tabs, () => ui.active], () => { showList.value = false })
-    const paneOnly = computed(() => singlePane({ mode: ui.mode, width: winW.value, hasTabs: ui.tabs.length > 0, showList: showList.value }))
+    watch([() => ui.tabs, () => ui.active], () => { pane.showList = false })
+    const paneOnly = computed(() => singlePane({ mode: ui.mode, width: winW.value, hasTabs: ui.tabs.length > 0, showList: pane.showList }))
+    const backToList = () => { pane.showList = true }
     // 大幅廣告的網頁（iframe）：--shot 不載入；載入失敗或 5 秒內沒載入完就退回樣板（load 事件才算成功）
     const pageSrc = a => (info.shot || pageFail[a.key] ? '' : adPageUrl(a))
     const pageLoaded = reactive({})
@@ -1836,7 +1841,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, paneOnly, showList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, paneOnly, backToList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
