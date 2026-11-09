@@ -176,9 +176,13 @@ impl Core {
         let first_of_mail = !self.outbox.has_reply(&item.reply_to);
         let mut next = self.outbox.items.clone();
         next.push(item.clone());
-        let mut evicted = vec![];
-        while next.len() > 1 && (next.len() > OUTBOX_MAX_ITEMS || file_text(&next).len() > OUTBOX_MAX_BYTES) {
-            evicted.push(next.remove(0));
+        // 超過上限：丟最舊的那一封信（同一封信的所有片段一起丟，只通知一次；不會只丟前段、留下後段單獨送出）
+        let mut evicted: Vec<OutboxItem> = vec![];
+        while next.len() > 1 && next[0].reply_to != item.reply_to && (next.len() > OUTBOX_MAX_ITEMS || file_text(&next).len() > OUTBOX_MAX_BYTES) {
+            let rt = next[0].reply_to.clone();
+            let (gone, keep): (Vec<OutboxItem>, Vec<OutboxItem>) = next.into_iter().partition(|i| i.reply_to == rt);
+            next = keep;
+            evicted.extend(gone.into_iter().take(1));
         }
         if file_text(&next).len() > OUTBOX_MAX_BYTES {
             self.log.line(&format!("reply id={} too big for the outbox: not stored", item.reply_to));

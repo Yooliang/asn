@@ -187,3 +187,23 @@ async fn 同一封信的後續片段排在後面_依序寄出() {
     let bodies: Vec<String> = h.fr.sent().iter().map(|s| s["body"].as_str().unwrap().to_string()).collect();
     assert_eq!(bodies, ["第一段", "第二段"]);
 }
+
+#[tokio::test]
+async fn 超過上限時最舊那封信的片段一起丟_只通知一次() {
+    let mut h = rig().await;
+    h.fr.st.lock().unwrap().bridge_notice_on = true;
+    // 最舊的那封信有兩段；之後塞到剛好 200 筆
+    h.core.outbox_test_push(&uid(5000), vec![], T0, T0 + 1_000_000);
+    h.core.outbox_test_push(&uid(5000), vec![], T0, T0 + 1_000_000);
+    for n in 1..199 {
+        h.core.outbox_test_push(&uid(5000 + n), vec![], T0, T0 + 1_000_000);
+    }
+    set_fail(&h, 5, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    let ids = h.core.outbox_reply_tos();
+    assert!(!ids.contains(&uid(5000)), "最舊那封信的兩段都丟掉，不會留下後段單獨送出");
+    assert_eq!(ids.len(), 199);
+    let n = h.fr.st.lock().unwrap().bridge_notices.clone();
+    assert_eq!(n.len(), 1, "同一封信只通知一次");
+    assert_eq!(n[0]["reply_to"], uid(5000));
+}
