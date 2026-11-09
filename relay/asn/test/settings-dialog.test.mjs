@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十二類（設備與帳號拆成設備、帳號）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+test('分類：十三類（設備與帳號拆成設備、帳號；雲端代理自己一類，跟手機一樣）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '雲端代理', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -98,6 +98,8 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
     devices: ['家用機', '工作機', '手機一號', '在線'],
     // 帳號：我的帳號（後台列表）；這份狀態沒有列表，所以寫提示
     accounts: ['現在讀不到帳號列表'],
+    // 雲端代理：自己一類（跟手機一樣），邀請鈕在這裡
+    cloud: ['雲端代理', '邀請雲端代理'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
@@ -210,7 +212,8 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
   assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
   assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '設備與帳號分類不再放登入狀態與登出')
-  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('允許切換帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
+  assert.ok(accts.includes('允許切換帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
+  assert.ok(!accts.includes('<cloud-invite-panel>'), '雲端代理搬到自己一類，設備頁不再放')
   const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
   assert.ok(lp.includes('LogoutPanel') && /logout-btn/.test(lp))
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)

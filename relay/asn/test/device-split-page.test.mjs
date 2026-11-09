@@ -132,7 +132,7 @@ test('帳號頁：後台讀不到列表就寫提示，不是整頁空白；設�
   assert.ok(!d.includes('class="dv-my"') && d.includes('class="dv-list"'))
 })
 
-test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這一家的狀態；雲端代理只在設備頁', async () => {
+test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這一家的狀態；設備頁不放雲端代理', async () => {
   const S = 'aaaaaaaa-0000-4000-8000-000000000001', W = 'bbbbbbbb-0000-4000-8000-000000000002'
   const fr = (node, device, agent, engine) => ({ node, device, agent, engine, status: 'online', kind: null, partnerId: 'eeeeeeee-0000-4000-8000-0000000000aa' })
   const tree = buildDeviceTree({
@@ -143,10 +143,10 @@ test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這�
   })
   const html = await render('devices', state(tree, null))
   assert.ok(html.includes('Claude 已登入、OpenAI（Codex） 未安裝、Grok 未安裝'), html.match(/dv-line[^<]*<?[^>]*>[^<]*/)?.[0])
-  assert.ok(html.includes('雲端代理'), '雲端代理在設備列表頁')
+  assert.ok(!html.includes('邀請雲端代理'), '設備列表頁不放雲端代理（自己一類）')
   globalThis.Vue = Vue
   const detail = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state(tree, null), catKey: 'devices', meAv: '', dev: W }) }))
-  assert.ok(detail.includes('dv-dev-h') && !detail.includes('雲端代理'), '細部頁沒有雲端代理')
+  assert.ok(detail.includes('dv-dev-h') && !detail.includes('邀請雲端代理'), '細部頁沒有雲端代理')
 })
 
 test('設備摘要一行：手機沒有、離線看不到、沒收到回報只說一句、其餘逐家說', () => {
@@ -165,17 +165,15 @@ test('設備摘要一行：手機沒有、離線看不到、沒收到回報只�
   assert.equal(deviceStateLine({}), '')
 })
 
-test('守門：分類鍵在 list.js 兩個都認；畫面上沒有「設備與帳號」；cloud-invite 在設備頁裡', () => {
+test('守門：分類鍵在 list.js 兩個都認；畫面上沒有「設備與帳號」；雲端代理自己一類、不在設備或帳號頁', () => {
   const list = read('ui/list.js')
   assert.match(list, /\['devices', 'accounts'\]\.includes\(normalizeCatKey\(ui\.panel\.setting\)\)/)
   const panel = read('ui/lib/settings-panel.mjs')
   const dev = panel.slice(panel.indexOf("<template v-if=\"cat === 'devices'\">"), panel.indexOf("<template v-if=\"catKey === 'look'\">"))
   const acc = panel.slice(panel.indexOf("<template v-if=\"cat === 'accounts'\">"), panel.indexOf("<template v-if=\"cat === 'devices'\">"))
-  assert.ok(dev.includes('<cloud-invite-panel>') && !acc.includes('<cloud-invite-panel>'))
-  // 雲端代理只在設備列表頁（!curDev 那一段），細部頁（v-else 那一段）沒有
-  const listPart = dev.slice(0, dev.indexOf('<section class="dv-dev" v-else'))
-  const detailPart = dev.slice(dev.indexOf('<section class="dv-dev" v-else'))
-  assert.ok(listPart.includes('<cloud-invite-panel>') && !detailPart.includes('<cloud-invite-panel>'), '雲端代理只放設備列表頁')
+  assert.ok(!dev.includes('<cloud-invite-panel>') && !acc.includes('<cloud-invite-panel>'), '設備頁、帳號頁都不放雲端代理（搬到自己一類，跟手機一樣）')
+  assert.match(panel, /<template v-if="cat === 'cloud'">\s*<cloud-invite-panel><\/cloud-invite-panel>\s*<\/template>/)
+  assert.equal((panel.match(/<cloud-invite-panel>/g) || []).length, 1, '整個設定只有一處')
   assert.ok(!read('ui/lib/cloud-invite.mjs').includes('上面的「登入狀態」'), '拆頁後上面沒有登入狀態，改請先在「個人」登入')
   assert.ok(read('ui/lib/cloud-invite.mjs').includes('請先在「個人」登入'))
   assert.ok(acc.includes('dv-my') && !dev.includes('dv-my'))

@@ -65,12 +65,12 @@ test('元件轉得出來：登入後有「邀請雲端代理」鈕；畫面純�
   assert.ok(!/localStorage/.test(html))
 })
 
-test('設定「帳號」分類裡有雲端代理區塊；別的分類沒有', async () => {
+test('設定「雲端代理」自己一類，跟手機一樣；設備、帳號和別的分類都沒有', async () => {
   globalThis.Vue = Vue
   const st = { accounts: { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', trustOwn: false, autoAdd: false, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }, notify: {}, upd: { status: { tone: 'ok', head: '', lines: [] } } }
   const render = key => renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: key, meAv: '' }) }))
-  assert.ok((await render('devices')).includes('邀請雲端代理'))
-  assert.ok(!(await render('look')).includes('邀請雲端代理'))
+  assert.ok((await render('cloud')).includes('邀請雲端代理'))
+  for (const k of ['devices', 'accounts', 'look']) assert.ok(!(await render(k)).includes('邀請雲端代理'), k)
 })
 
 test('守門：金鑰只在元件記憶體——不寫 localStorage／檔案／記錄，也不放進給代理的說明', () => {
