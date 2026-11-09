@@ -1,10 +1,13 @@
-// 設定頁「啟動設定」裡的「額度回報」區塊（#228）的純邏輯與文案（node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri）。
+// 設定 → 帳號 的 Claude 區段裡「Claude 狀態列額度」開關（#228；原本是「啟動設定」的「額度回報」區塊）的純邏輯與文案（node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri）。
 // 經使用者同意，ASN 把 `asn-cli claude-quota --chain` 接在 Claude Code 的狀態列上，記下目前帳號的 5 小時與每週剩餘額度，
 // 讓手機的「設備與帳號」看得到；可隨時取消，設定還原。預設不接。後端見 src-tauri/src/statusline_hook.rs。
 // 給人看的文字：純繁體中文。
 
 export const QUOTA_HOOK_TEXT = {
   title: '額度回報',
+  // 設定 → 帳號 的 Claude 區段裡的開關（原本是「啟動設定」的「額度回報」卡片）：開＝接上、關＝取消接上
+  toggle: 'Claude 狀態列額度',
+  short: { off: '打開後，手機看得到這台 Claude 帳號的剩餘額度。', on: '已接上，手機看得到這台 Claude 帳號的剩餘額度。', stale: '位置對不上了，請按「重新接上」。', blocked: '目前的狀態列 ASN 改不了，打不開。' },
   off: '目前沒有接上：手機的「設備與帳號」看不到這台 Claude 帳號還剩多少額度。',
   on: '已接上：每次 Claude Code 更新狀態列時，ASN 會記下目前帳號的剩餘額度，手機就看得到。',
   stale: '之前接上的 ASN 位置對不上了（搬過或重裝過），按「重新接上」就會修好。',
@@ -59,6 +62,12 @@ export function quotaHookView(raw, ui = {}) {
     showAgree: canConnect && confirm,
     showCancel: confirm,
     showDisconnect: s.state === 'on' || s.state === 'stale',
+    // 開關：現狀原樣讀出（接上了、位置對不上都算開著）；確認中、處理中、改不了時不能按
+    toggle: QUOTA_HOOK_TEXT.toggle,
+    toggleOn: s.state === 'on' || s.state === 'stale',
+    toggleDisabled: busy || confirm || s.state === 'blocked',
+    short: QUOTA_HOOK_TEXT.short[s.state],
+    showReconnect: s.state === 'stale' && !confirm,
     askLabel: s.state === 'stale' ? QUOTA_HOOK_TEXT.reconnect : QUOTA_HOOK_TEXT.ask,
     agreeLabel: QUOTA_HOOK_TEXT.agree,
     cancelLabel: QUOTA_HOOK_TEXT.cancel,

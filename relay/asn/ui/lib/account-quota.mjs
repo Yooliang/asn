@@ -96,7 +96,7 @@ export function quotaView(a, now = Date.now()) {
 
 // ---- 電腦版設定頁的額度條（#374）：5 小時、每週兩條剩餘百分比，重置時間寫「約 N 小時後」 ----
 export const NO_QUOTA_TEXT = '沒有額度資料'   // Codex、Grok 沒有額度回報
-export const NOT_CONNECTED_TEXT = '尚未接上，到「啟動設定」的「額度回報」接上'
+export const NOT_CONNECTED_TEXT = '尚未接上，到「帳號」的 Claude 區段打開「Claude 狀態列額度」'
 export const LOW_PCT = 20   // 剩這麼多以下，條改成警示色
 
 /** 重置時間 → 「約 N 小時後重置」（不到 1 小時寫「不到 1 小時後重置」；已過或沒有就空字串）。who＝哪一條的（例如「5 小時額度」），放在最前面 */

@@ -353,7 +353,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" \
+          gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --latest=false \
             --title "WezTerm ${UPSTREAM_TAG}（ASN 自建，${ASN_SUFFIX}）" \
             --notes "上游 WezTerm ${UPSTREAM_TAG} 加上上游 #7706 的修補，由 GitHub Actions 建置。來源、雜湊與驗證方式見 SOURCE.txt 與 SHA256SUMS；驗證：gh attestation verify <檔案> -R ${GITHUB_REPOSITORY}" \
             dist/*.tar.xz dist/WezTerm-windows-*.zip dist/SHA256SUMS dist/SOURCE.txt dist/LICENSE.md

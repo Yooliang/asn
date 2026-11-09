@@ -480,19 +480,69 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   } else {
     if (!foot) return { ok: false, why: '帳號頁沒有額度註腳' };
     if (document.querySelector('.m-dv-my')?.textContent.includes('這台沒有存這個帳號')) return { ok: false, why: '還有「這台沒有存這個帳號」' };
-    const sws = [...document.querySelectorAll('.m-dv-sw')].filter(vis);
-    if (!sws.length) return { ok: false, why: '沒有切換鈕可以檢查' };
-    for (const b of sws) if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
-    const cards = [...document.querySelectorAll('.m-dv-acct')].filter(c => c.querySelector('.m-dv-sw'));
-    for (const c of cards) {
-      const rights = [...c.querySelectorAll('.m-dv-sw')].map(b => R(b).right);
-      if (Math.max(...rights) - Math.min(...rights) > 1) return { ok: false, why: '同一張卡的切換鈕右緣沒對齊' };
-      const smalls = [...c.querySelectorAll('.m-dv-swt small')].filter(vis);
-      const left = [...c.querySelectorAll('.m-dv-sw')].map(b => R(b).left);
-      if (Math.max(...left) - Math.min(...left) > 1) return { ok: false, why: '同一張卡的切換鈕寬度不一' };
-      for (const sm of smalls) if (R(sm).right > Math.min(...left) + 0.5) return { ok: false, why: '說明字壓到按鈕' };
+    // 帳號卡片的設備按鈕（原本的「切換到…」按鈕併進來）：字不被切、按鈕與說明字都不超出卡片
+    const devs = [...document.querySelectorAll('.m-dv-my .m-dv-dev')].filter(vis);
+    if (!devs.length) return { ok: false, why: '沒有設備按鈕可以檢查' };
+    for (const b of devs) if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
+    for (const c of [...document.querySelectorAll('.m-dv-acct')].filter(c => c.querySelector('.m-dv-dev'))) {
+      const box = R(c);
+      for (const e of [...c.querySelectorAll('.m-dv-dev, .m-dv-devb small')].filter(vis)) if (R(e).right > box.right + 0.5 || R(e).left < box.left - 0.5) return { ok: false, why: '「' + e.textContent.trim() + '」超出帳號卡' };
     }
   }
+  return { ok: true, why: '' };
+})()`
+// 帳號卡片的設備按鈕（小良哥 11-09）：用過這個帳號的每台一顆；使用中＝黃色、選中（aria-pressed）、有勾與「使用中」（不能只靠顏色）、
+// 不停用但按了不做事（不發出任何切換指令）；「用在：」一行與「切換到…」按鈕都拿掉；按鈕不超出卡片；手機不能切換自己
+export const DEVBTN_PROBES = { desktop: { devbtn: 'desktop' }, mobile: { devbtn: 'mobile', open: '帳號' } }
+export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  const mobile = ${JSON.stringify(devbtn)} === 'mobile', open = ${JSON.stringify(open)};
+  if (open) {
+    let row = null;
+    for (let i = 0; i < 60 && !row; i++) { row = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!row) await sleep(100) }
+    if (!row) return { ok: false, why: '找不到「' + open + '」' };
+    row.click();
+  }
+  const sel = mobile ? '.m-dv-my .m-dv-dev' : '.dv-my .dv-devbtn';
+  let btns = [];
+  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('on'))) break; await sleep(100) }
+  const on = btns.filter(b => b.classList.contains('on'));
+  if (!on.length) return { ok: false, why: '沒有使用中的設備按鈕（共 ' + btns.length + ' 顆）' };
+  for (const b of on) {
+    const t = b.textContent.trim();
+    if (b.getAttribute('aria-pressed') !== 'true') return { ok: false, why: '「' + t + '」不是選中的樣子（aria-pressed）' };
+    if (b.disabled) return { ok: false, why: '使用中的「' + t + '」被停用了' };
+    if (!t.includes('✓') || !t.includes('使用中')) return { ok: false, why: '使用中的「' + t + '」只靠顏色區分，沒有勾或「使用中」' };
+    const rgb = (getComputedStyle(b).backgroundColor.match(/[0-9]+/g) || []).map(Number);
+    if (!(rgb[0] > 200 && rgb[1] > 170 && rgb[2] < 140)) return { ok: false, why: '使用中的「' + t + '」不是黃色：' + getComputedStyle(b).backgroundColor };
+  }
+  const box = document.querySelector(mobile ? '.m-dv-my' : '.dv-my');
+  if (box.textContent.includes('用在：')) return { ok: false, why: '還有「用在：」那一行' };
+  // 卡片與裡面的東西都不超出窗格（窄的時候額度條原本會把卡片撐出去）：卡片在「我的帳號」區內、卡片裡看得到的元素都在卡片內
+  const area = box.getBoundingClientRect();
+  for (const c of [...box.querySelectorAll(mobile ? '.m-dv-acct' : '.dv-acct')].filter(vis)) {
+    const k = c.getBoundingClientRect(), who = c.querySelector(mobile ? '.m-dv-mail' : '.dv-mail')?.textContent.trim() ?? '';
+    if (k.right > area.right + 0.5 || k.left < area.left - 0.5) return { ok: false, why: who + ' 的帳號卡超出窗格' };
+    for (const e of [...c.querySelectorAll('*')].filter(vis)) { const r = e.getBoundingClientRect(); if (r.width && (r.right > k.right + 0.5 || r.left < k.left - 0.5)) return { ok: false, why: who + ' 的「' + (e.textContent.trim().slice(0, 20) || e.className) + '」超出帳號卡' } }
+  }
+  if ([...box.querySelectorAll('button')].some(b => vis(b) && b.textContent.includes('切換到'))) return { ok: false, why: '還有「切換到…」按鈕' };
+  for (const b of btns) {
+    const c = b.closest(mobile ? '.m-dv-acct' : '.dv-acct');
+    const r = b.getBoundingClientRect(), k = c.getBoundingClientRect();
+    if (r.right > k.right + 0.5 || r.left < k.left - 0.5) return { ok: false, why: '「' + b.textContent.trim() + '」超出帳號卡' };
+    if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
+  }
+  if (mobile) {
+    const self = btns.filter(b => b.textContent.includes('（這台）') && !b.classList.contains('on'));
+    if (self.some(b => !b.disabled)) return { ok: false, why: '手機可以把帳號切到自己：' + self.map(b => b.textContent.trim()).join('、') };
+  }
+  const before = (globalThis.__smokeCalls || []).length;
+  on[0].click();
+  await sleep(600);
+  const sw = (globalThis.__smokeCalls || []).slice(before).map(c => c[0]).filter(c => /switch/i.test(c));
+  if (sw.length) return { ok: false, why: '按使用中的按鈕發出了切換：' + sw.join('、') };
+  if (document.querySelector('.m-sheet.open, .acct-confirm, [role="alertdialog"]')) return { ok: false, why: '按使用中的按鈕跳出了確認畫面' };
   return { ok: true, why: '' };
 })()`
 // #930 帳號永遠不能切到這支手機自己：noplat＝這支手機的平台還沒讀到（設備樹會先把它當成電腦）；android＝讀到了
@@ -526,13 +576,14 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="accounts"]'); if (!seg) await sleep(100) }
   if (!seg) return { ok: false, why: '找不到「帳號」分頁鈕' };
   seg.click(); await sleep(600);
-  const sws = [...document.querySelectorAll('.m-dv-sw')].filter(vis).map(b => b.textContent.trim());
-  if (sws.some(t => t.includes('這支手機') || t.includes('測試機'))) return { ok: false, why: '帳號頁出現切到這支手機的按鈕：' + sws.join('、') };
-  if (!sws.some(t => t.includes('辦公室'))) return { ok: false, why: '別台電腦的切換鈕不見了：' + (sws.join('、') || '（沒有按鈕）') };
+  const devs = [...document.querySelectorAll('.m-dv-my .m-dv-dev')].filter(vis);
+  const names = devs.map(b => b.textContent.trim()).join('、') || '（沒有按鈕）';
+  if (devs.some(b => (b.textContent.includes('這支手機') || b.textContent.includes('測試機')) && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '帳號頁可以把帳號切到這支手機：' + names };
+  if (!devs.some(b => b.textContent.includes('辦公室') && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -772,14 +823,12 @@ export const mtermviewProbeSource = ({ big, gate }) => gate ? mtermviewGateProbe
     await sleep(300);
   }
   const btns = [...sw.querySelectorAll('button')];
-  const labels = btns.map(b => b.textContent.trim());
-  if (labels.join('|') !== '訊息|終端') return { ok: false, why: '切換鈕的字不對：' + labels.join('、') };
-  for (const b of btns) {
-    const r = b.getBoundingClientRect(), rg = document.createRange(); rg.selectNodeContents(b); const t = rg.getBoundingClientRect();
-    if (t.left < r.left - 0.5 || t.right > r.right + 0.5 || t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '切換鈕「' + b.textContent.trim() + '」的字被切' };
-  }
-  const sr = sw.getBoundingClientRect();
-  if (sr.left < -0.5 || sr.right > window.innerWidth + 0.5) return { ok: false, why: '切換列跑出畫面' };
+  const labels = btns.map(b => b.getAttribute('aria-label'));
+  if (labels.join('|') !== '訊息|終端') return { ok: false, why: '切換圖示的名稱不對：' + labels.join('、') };
+  if (!sw.closest('.compose-row .toolbar')) return { ok: false, why: '切換圖示應該在下方圖示列' };
+  // 兩個圖示都要整顆在畫面內、夠大好按（電腦版的 44px 觸控下限）
+  const inView = () => btns.every(b => { const r = b.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5 && r.left >= -0.5 && r.right <= window.innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 });
+  if (!inView()) return { ok: false, why: '切換圖示跑出畫面或太小' };
   const conv = () => document.querySelector('.m-chat .conv');
   if (!vis(conv())) return { ok: false, why: '一開始應該先顯示訊息列表' };
   btns[1].click();
@@ -794,6 +843,15 @@ export const mtermviewProbeSource = ({ big, gate }) => gate ? mtermviewGateProbe
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '手機只能看，不該有「打字」切換鈕' };
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
   if (!btns[1].classList.contains('on')) return { ok: false, why: '「終端」鈕沒有選中' };
+  // 終端至少半個螢幕高（橫向 412 高時曾被擠成 0）；「正在看」縮成一行；輸入框收起、切換圖示仍在畫面內
+  const th = document.querySelector('.m-chat .term-remote').getBoundingClientRect().height;
+  if (!(th > 0) || th < window.innerHeight * 0.5 - 1) return { ok: false, why: '終端高度不到半個螢幕：' + Math.round(th) + ' / ' + window.innerHeight };
+  const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
+  if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
+  const bs = getComputedStyle(bar);
+  if (bar.getBoundingClientRect().height > parseFloat(bs.lineHeight) * 1.5 + 2) return { ok: false, why: '「正在看」那行沒有縮成一行' };
+  if (vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該收起' };
+  if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「訊息」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
   btns[0].click();
   await sleep(500);
@@ -875,6 +933,11 @@ export const SCENARIOS = [
   { name: 'm-layout-accounts-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.accountsBig, shot: 'm-layout-accounts-big.png' },
   { name: 'm-noself-noplat', page: 'm.html', state: { signedIn: true, mnoself: 'noplat' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.noplat, shot: 'm-noself-noplat.png' },
   { name: 'm-noself-android', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.android, shot: 'm-noself-android.png' },
+  // 帳號卡片的設備按鈕：桌面兩種寬度、手機兩種寬度
+  { name: 'list-acct-devbtn', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-1100.png' },
+  { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
+  { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
+  { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },
   // 手機第四格「通知」（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及第四格的未讀紅點。412、360 寬與大字型各一張
   // 手機開新夥伴的運行選項（#931）：名稱與預設跟電腦版同一份目錄，另有「前台或背景」的說明。412、360 寬與大字型各一張
   { name: 'm-launch', page: 'm.html', state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-412.png' },
@@ -887,6 +950,7 @@ export const SCENARIOS = [
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
+  { name: 'm-term-view-land', page: 'm.html', width: 915, height: 412, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-land.png' },
   { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
   { name: 'm-term-view-nolock', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'no_lock' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.noLock, shot: 'm-term-view-nolock.png' },
   { name: 'm-term-view-late', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'late' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.late, shot: 'm-term-view-late.png' },

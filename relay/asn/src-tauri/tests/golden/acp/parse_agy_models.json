@@ -1,0 +1,31 @@
+{
+  "fixture_crlf": [
+    "gemini-4-argon-medium",
+    "gemini-3.8-flash-high",
+    "claude-opus-5-5-low",
+    "gemini-padded",
+    "UPPER.Case_ok-1",
+    "last-no-newline"
+  ],
+  "fixture_lf": [
+    "gemini-4-argon-medium",
+    "gemini-3.8-flash-high",
+    "claude-opus-5-5-low",
+    "gemini-padded",
+    "UPPER.Case_ok-1",
+    "last-no-newline"
+  ],
+  "兩個Tab只取第一欄": [
+    "a-1"
+  ],
+  "六十一字不合法": [],
+  "六十字合法": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "只有換行": [],
+  "只有說明文字": [],
+  "無換行單行": [
+    "one-id"
+  ],
+  "空字串": []
+}

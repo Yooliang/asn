@@ -8,6 +8,7 @@ use super::engines::{EngineEvent, EngineSet};
 use super::forward_selftest;
 use super::launcher::{Launched, Launcher};
 use super::partner_ops::{CommandJob, PartnerOps};
+use super::notice_route;
 use super::slash;
 use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
@@ -1103,8 +1104,38 @@ impl Core {
         self.send_back(&o, body, from_agent, None).await
     }
     async fn send_back(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
+        // 收發室自己說話：舊字頭先拿掉。先走後台 bridge_notice（寄件人「ASN 通知」，後台自己在第一行加設備名，這裡不加）；
+        // 跨帳號（409）、舊後台（404）、原信過期（422 no_origin）退回舊寄法，舊寄法由橋自己在第一行加「<設備名>：」
+        let raw = dev_prefix::without_old_head(body, from_agent);
+        if notice_route::use_bridge_notice(from_agent.is_none(), &o.id) {
+            let (status, resp) = match self.relay.api_status("bridge_notice", notice_route::body(&o.id, raw)).await {
+                Ok((s, v)) => (Some(s), v),
+                Err(e) => {
+                    self.log.line(&format!("bridge notice failed id={}: {e}", o.id));
+                    (None, Value::Null)
+                }
+            };
+            match notice_route::classify(status, &resp) {
+                notice_route::NoticeOutcome::Sent => {
+                    if let Some(r) = notice_route::skipped_reason(&resp) {
+                        self.log.line(&format!("bridge notice not sent id={}: {r}", o.id));
+                    }
+                    return true;
+                }
+                notice_route::NoticeOutcome::Drop => {
+                    if status.is_some() {
+                        self.log.line(&format!("bridge notice failed id={} HTTP {}", o.id, status.unwrap_or(0)));
+                    }
+                    return false;
+                }
+                notice_route::NoticeOutcome::Fallback => {}
+            }
+        }
         let dev = if from_agent.is_none() { self.notice_device().await } else { None };
-        let body = dev_prefix::with_notice_prefix(dev_prefix::without_old_head(body, from_agent), from_agent, dev.as_deref());
+        let body = dev_prefix::with_notice_prefix(raw, from_agent, dev.as_deref());
+        self.send_back_legacy(o, &body, from_agent, expects_reply).await
+    }
+    async fn send_back_legacy(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
         let mut b = json!({ "to_node": o.from_node, "body": body, "reply_to": o.id, "from_agent": from_agent.unwrap_or(&self.cfg.mailbox_name) });
         if !o.from_agent.is_empty() {
             b["to_agent"] = json!(o.from_agent);
@@ -2039,6 +2070,19 @@ impl Core {
         self.tell_window(from, &format!("[收發室] 你傳給收發室的代寄信沒有寄出：第一行 [RELAY 寄信] to=… 少了 reply=yes 或 reply=no。等對方回信就寫 reply=yes、只是告知就寫 reply=no（回信 re=<id> 也一樣要寫），補上後請重傳一次。（這是系統通知，不用回覆。）內文開頭：{head}"));
     }
 
+    /// 這個名字是不是引擎（Aegis、內建通道、pi 等）管的視窗：通知會變成它的一輪工作，不適合
+    fn is_engine_window(&self, name: &str) -> bool {
+        self.engines.as_ref().is_some_and(|e| e.windows().iter().any(|w| w.name == name))
+    }
+
+    /// 回信寄不出去的通知：收件人、回的是哪封信、怎麼重寄（#1135）
+    fn tell_reply_failed(&mut self, from: &str, o: &Origin, text: &str) {
+        let to = if o.from_agent.is_empty() { o.from_node.clone() } else { format!("{}/{}", o.from_node, o.from_agent) };
+        let head: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect();
+        self.log.line(&format!("reply from {from} id={} not sent: told the window", o.id));
+        self.tell_window(from, &format!("[收發室] 你剛才的回信沒有寄出去（寄送失敗）：收件人 {to}，回的是信件 {}。要重寄請再傳一次，第一行寫 [RELAY 寄信] to={to} re={} reply=no（要等對方回信就寫 reply=yes）。（這是系統通知，不用回覆。）內文開頭：{head}", o.id, o.id));
+    }
+
     /// 通知信的編號／視窗記一下（TTL 10 分鐘）：視窗若回了這則通知，那則回覆不是給任何人的，丟掉
     fn tell_window(&mut self, name: &str, text: &str) {
         if self.is_respond(name) {
@@ -2144,6 +2188,10 @@ impl Core {
         }
         if ok {
             self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
+        } else if !deferred && !self.is_engine_window(from) {
+            // 回信寄不出去（連線階段已經在 relay 重試過）：不能默默丟掉，告訴那個視窗，讓它自己決定要不要重寄（#1135）。
+            // 寄回成功才 ack 的（Aegis、內建通道）信還留在信箱或另有處理，引擎視窗收到通知會白跑一輪，這兩種先不通知
+            self.tell_reply_failed(from, &o, &text);
         }
         self.log.line(&format!("{}reply from {from} -> {} id={} sent={ok} ({}ms total)", if late { "late " } else { "" }, o.from_node, o.id, self.now.saturating_sub(t0)));
     }

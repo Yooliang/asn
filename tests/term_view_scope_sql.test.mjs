@@ -127,7 +127,7 @@ test('pending 帶 scope 給 T（T 依本機設定決定同不同意）；後台�
 test('通知文字分 scope：打字要寫清楚可以回答權限框；不再提配對', { skip }, async () => {
   const db = await boot()
   const notice = id => rpc(db, 'asn_relay_term_view_notice', { p_node: Z, p_id: id })
-  const last = async () => (await db.query(`select body from relay.messages where from_node = '${Z}' and from_agent = '看畫面收發室' order by created_at desc limit 1`)).rows[0].body
+  const last = async () => (await db.query(`select body from relay.messages where from_node = '${Z}' and from_agent = 'ASN 通知' and kind = 'notice:view' order by created_at desc limit 1`)).rows[0].body
   const v = await start(db, 'view'); await accept(db, v.id)
   assert.equal((await notice(v.id)).notify, 'sent')
   const vb = await last()

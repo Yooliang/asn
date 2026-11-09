@@ -1553,10 +1553,13 @@ async fn agy_遠端管理_重開保留對話_換班接手換新對話() {
     h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
     let info = admin.info("Gemini").unwrap();
     assert_eq!((info["has_session"].clone(), info["load_session"].clone()), (json!(true), json!(true)));
+    // 回信寄出後工作者還在收尾（狀態仍是忙碌），這時重開／換班會被拒絕「工作者正在處理信件」：先等它閒下來（#994）
+    wait_not_busy(&admin, "Gemini").await;
     admin.restart("Gemini").unwrap();
     h.put_pull(to_agent(2, "Gemini", "二")).await;
     h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
     assert!(h.bodies()[1].contains("[第2輪 full"), "{}", h.bodies()[1]);
+    wait_not_busy(&admin, "Gemini").await;
     admin.handover("Gemini", "").unwrap();
     h.put_pull(to_agent(3, "Gemini", "三")).await;
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;

@@ -20,6 +20,8 @@ fn uid(n: u32) -> String {
 
 #[derive(Default)]
 struct FState {
+    /// 每個回應都斷線（舊行為）：要驗連線中斷、重試的測試打開；預設持久連線（#994）
+    close_each: bool,
     inbox: Vec<Value>,
     acked: Vec<String>,
     ack_calls: usize,
@@ -97,29 +99,62 @@ struct FakeRelay {
 }
 
 fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
-    let mut buf = Vec::new();
+    // 持久連線（#994）：同一條連線上可以有好幾個請求，依 Content-Length 一個一個讀；讀完一個只取走那一個，
+    // 下一個（可能已經一起讀進來）留在 buf，不會被吃進上一個的 body。原本每個回應都 connection: close，
+    // 負載下大量短連線把 Windows 本機臨時埠占滿（os error 10048），是 bridge 測試連帶紅的主因
+    let mut buf: Vec<u8> = Vec::new();
     let mut tmp = [0u8; 4096];
-    let (head_end, len) = loop {
-        let n = c.read(&mut tmp).unwrap_or(0);
-        if n == 0 {
+    loop {
+        let (head_end, len) = loop {
+            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buf[..i]).to_lowercase();
+                let len = head.lines().find_map(|l| l.strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())).unwrap_or(0);
+                break (i + 4, len);
+            }
+            if !read_more(&mut c, &mut buf, &mut tmp) {
+                return;
+            }
+        };
+        while buf.len() < head_end + len {
+            if !read_more(&mut c, &mut buf, &mut tmp) {
+                return;
+            }
+        }
+        let req: Vec<u8> = buf.drain(..head_end + len).collect();
+        let head = String::from_utf8_lossy(&req[..head_end]).to_string();
+        let body: Value = serde_json::from_slice(&req[head_end..]).unwrap_or(Value::Null);
+        // 開關打開（要驗連線中斷、重試的測試）或用戶端自己要求關：回完就斷線，照舊行為
+        let close = st.lock().unwrap().close_each || head.to_lowercase().lines().any(|l| l.trim() == "connection: close");
+        let (code, out, action) = route(&st, &head, body);
+        let text = out.to_string();
+        let conn = if close { "close" } else { "keep-alive" };
+        if let Err(e) = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: {conn}\r\n\r\n{text}", text.len()) {
+            eprintln!("[假後端] 寫回應失敗 action={action}：{e}（{:?}）", e.kind());
             return;
         }
-        buf.extend_from_slice(&tmp[..n]);
-        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(&buf[..i]).to_lowercase();
-            let len = head.lines().find_map(|l| l.strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())).unwrap_or(0);
-            break (i + 4, len);
+        if close {
+            return;
         }
-    };
-    while buf.len() < head_end + len {
-        let n = c.read(&mut tmp).unwrap_or(0);
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&tmp[..n]);
     }
-    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
-    let body: Value = serde_json::from_slice(&buf[head_end..(head_end + len).min(buf.len())]).unwrap_or(Value::Null);
+}
+
+/// 從連線讀一段進 buf；連線關了或讀失敗回 false
+fn read_more(c: &mut std::net::TcpStream, buf: &mut Vec<u8>, tmp: &mut [u8; 4096]) -> bool {
+    match c.read(tmp) {
+        Ok(0) => false,
+        Ok(n) => {
+            buf.extend_from_slice(&tmp[..n]);
+            true
+        }
+        Err(e) => {
+            eprintln!("[假後端] 讀請求失敗：{e}（{:?}）", e.kind()); // #994：負載下連線失敗時看伺服器這端發生什麼
+            false
+        }
+    }
+}
+
+/// 依 action 回應一個請求：回（狀態碼, 內容, action）。原本 handle_conn 中間那段原樣搬出來，持久連線才能一個請求一個請求呼叫
+fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, String) {
     let line = head.lines().next().unwrap_or("");
     let action = line.split("action=").nth(1).unwrap_or("").split(&['&', ' '][..]).next().unwrap_or("").to_string();
     let q = query_of(line);
@@ -239,8 +274,7 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         _ => (404, json!({"error": "not_found"})),
     };
     drop(s);
-    let text = out.to_string();
-    let _ = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len());
+    (code, out, action)
 }
 
 impl FakeRelay {
@@ -761,6 +795,37 @@ async fn 收發室漏寫_sent_行但_sendmessage_真的成功_也算已轉交() 
 
 // ---- 回覆寄回、遲到、無回覆通知 ----------------------------------------------------------------------
 
+#[test]
+fn 假後端_同一條連線依序處理多個請求_不把下一個請求吃進上一個的_body_開關打開就每次斷線() {
+    use std::io::{Read, Write};
+    let fr = FakeRelay::start();
+    let addr = fr.url.trim_start_matches("http://").split('/').next().unwrap().to_string();
+    let req = |b: &str| format!("POST /relay?action=send HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{b}", b.len());
+    // 兩個請求一次寫進去（第二個可能和第一個的 body 一起被讀進來）：兩封都要分開收到、各回一個回應
+    let mut c = std::net::TcpStream::connect(&addr).unwrap();
+    c.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    c.write_all(format!("{}{}", req(r#"{"to_node":"A","body":"一"}"#), req(r#"{"to_node":"B","body":"二"}"#)).as_bytes()).unwrap();
+    let mut got = String::new();
+    let mut tmp = [0u8; 4096];
+    while got.matches("HTTP/1.1 200").count() < 2 {
+        let n = c.read(&mut tmp).unwrap();
+        assert!(n > 0, "連線被關掉了：{got}");
+        got.push_str(&String::from_utf8_lossy(&tmp[..n]));
+    }
+    assert!(got.contains("connection: keep-alive") && !got.contains("connection: close"), "{got}");
+    let bodies: Vec<String> = fr.sent().iter().map(|v| v["body"].as_str().unwrap_or("").to_string()).collect();
+    assert_eq!(bodies, vec!["一".to_string(), "二".to_string()]);
+    // 開關打開：回完第一個就斷線
+    fr.st.lock().unwrap().close_each = true;
+    let mut c = std::net::TcpStream::connect(&addr).unwrap();
+    c.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    c.write_all(req(r#"{"to_node":"C","body":"三"}"#).as_bytes()).unwrap();
+    let mut all = Vec::new();
+    c.read_to_end(&mut all).unwrap();
+    let text = String::from_utf8_lossy(&all);
+    assert!(text.contains("connection: close") && text.matches("HTTP/1.1").count() == 1, "{text}");
+}
+
 #[tokio::test]
 async fn 回覆寄回原寄件人_from_agent_是回覆的視窗() {
     let mut h = harness(&[("T-乙", "idle")]).await;
@@ -770,6 +835,21 @@ async fn 回覆寄回原寄件人_from_agent_是回覆的視窗() {
     assert_eq!(s.len(), 1);
     assert_eq!((s[0]["to_node"].as_str(), s[0]["to_agent"].as_str(), s[0]["body"].as_str(), s[0]["reply_to"].as_str(), s[0]["from_agent"].as_str()), (Some("W"), Some("W-政策"), Some("好的，已處理"), Some(uid(1).as_str()), Some("T-乙")));
     assert!(s[0].get("expects_reply").is_none(), "一般回覆不帶 expects_reply");
+}
+
+#[tokio::test]
+async fn 回信寄不出去_通知那個視窗_寫收件人與信件編號與重寄方法_不默默丟掉() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    h.fr.st.lock().unwrap().send_fail_reply_to.push(uid(1));
+    let before = h.said().len();
+    h.core.on_worker_line(res(&reply_block("T-乙", "好的，已處理")), T0 + 3_000).await;
+    assert!(h.fr.sent().is_empty(), "這次寄送失敗");
+    let said = h.said();
+    let told: Vec<&String> = said[before..].iter().filter(|s| s.contains("你剛才的回信沒有寄出去")).collect();
+    assert_eq!(told.len(), 1, "{said:?}");
+    let t = told[0];
+    assert!(t.contains("收件人 W/W-政策") && t.contains(&format!("re={}", uid(1))) && t.contains("內文開頭：好的，已處理"), "{t}");
 }
 
 #[tokio::test]
@@ -1305,8 +1385,12 @@ async fn 代寄_有_reply_欄位就寄出_帶_expects_reply_內文不動() {
     h.core.on_worker_line(res(&reply_block("T-乙", "[RELAY 寄信] to=W reply=yes\n等你回")), T0).await;
     let s = h.fr.sent();
     assert_eq!(s.len(), 2);
-    assert_eq!(s[0], json!({"to_node":"W","to_agent":"W-政策","body":"順便通知你","from_agent":"T-乙","expects_reply":false}));
-    assert_eq!(s[1], json!({"to_node":"W","body":"等你回","from_agent":"T-乙","expects_reply":true}));
+    // 每封都帶 client_id（#1135，兩封的不同）；其餘欄位照原樣比對
+    let cid = |v: &Value| v["client_id"].as_str().map(str::to_string).filter(|c| c.len() == 36).expect("寄信要帶 client_id");
+    assert_ne!(cid(&s[0]), cid(&s[1]));
+    let strip = |v: &Value| { let mut v = v.clone(); v.as_object_mut().unwrap().remove("client_id"); v };
+    assert_eq!(strip(&s[0]), json!({"to_node":"W","to_agent":"W-政策","body":"順便通知你","from_agent":"T-乙","expects_reply":false}));
+    assert_eq!(strip(&s[1]), json!({"to_node":"W","body":"等你回","from_agent":"T-乙","expects_reply":true}));
 }
 
 #[tokio::test]

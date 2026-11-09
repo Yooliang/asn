@@ -46,3 +46,22 @@ test('接線守門：改設定檔的指令只在 quota-hook-connect／disconnect
   assert.ok(tauri.includes("invoke('claude_quota_hook_connect')"))
   assert.equal((panel.match(/act\('quota-hook-connect'\)/g) ?? []).length, 1, '只有「同意並接上」按鈕觸發接上')
 })
+
+test('帳號頁 Claude 區段的「Claude 狀態列額度」開關：現狀原樣讀出，確認中、處理中、改不了時不能按', () => {
+  const v = (state, ui = {}) => quotaHookView({ state }, ui)
+  assert.deepEqual([v('off').toggleOn, v('off').toggleDisabled, v('off').showReconnect], [false, false, false])
+  assert.deepEqual([v('on').toggleOn, v('on').toggleDisabled], [true, false])
+  assert.deepEqual([v('stale').toggleOn, v('stale').showReconnect], [true, true], '位置對不上：開著，另有「重新接上」')
+  assert.equal(v('blocked').toggleDisabled, true, '改不了：不能按')
+  assert.equal(v('off', { confirm: true }).toggleDisabled, true, '確認說明出現時不能再按開關')
+  assert.equal(v('on', { busy: true }).toggleDisabled, true)
+  assert.equal(v('off').toggle, 'Claude 狀態列額度')
+  for (const s of ['off', 'on', 'stale', 'blocked']) assert.ok(v(s).short, s)
+})
+
+test('守門：開關打開只會先跳確認（quota-hook-ask），關掉是取消接上；啟動設定不再有「額度回報」卡片', () => {
+  const panel = read('lib/settings-panel.mjs')
+  assert.ok(panel.includes("$event.target.checked ? act('quota-hook-ask') : act('quota-hook-disconnect'); $event.target.checked = st.quotaHook.toggleOn"))
+  assert.ok(!panel.includes('aria-label="額度回報"'), '卡片已搬走')
+  assert.equal((panel.match(/act\('quota-hook-connect'\)/g) ?? []).length, 1, '只有「同意並接上」按鈕觸發接上')
+})

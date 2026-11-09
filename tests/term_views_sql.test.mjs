@@ -210,13 +210,13 @@ test('通知：只有被看的那台、接受之後；文字固定；同一筆�
   assert.equal(n.notify, 'sent')
   assert.ok(n.bell_topics.length > 0, '敲本人的門鈴')
   const box = (await db.query(`select body, from_agent from relay.messages where from_node = '${Z}' order by created_at desc limit 1`)).rows[0]
-  assert.equal(box.from_agent, '看畫面收發室')
+  assert.equal(box.from_agent, 'ASN 通知')
   assert.ok(box.body.includes('工作機') && box.body.includes('小乙') && box.body.includes('如果不是你'))
-  const count = async () => (await db.query(`select count(distinct coalesce(fanout_id, id))::int n from relay.messages where from_agent = '看畫面收發室'`)).rows[0].n
+  const count = async () => (await db.query(`select count(distinct coalesce(fanout_id, id))::int n from relay.messages where kind = 'notice:view'`)).rows[0].n
   const before = await count()
   assert.equal((await notice(s.id)).notify, 'sent')
   assert.equal(await count(), before, '同一筆只寄一次')
-  await db.exec(`insert into relay.messages (from_node, from_agent, to_node, to_agent, body, tenant_id) select '${Z}', '看畫面收發室', '${D}', 'x', 'x', '${T1}' from generate_series(1, 30)`)
+  await db.exec(`insert into relay.messages (from_node, from_agent, to_node, to_agent, body, tenant_id, kind) select '${Z}', 'ASN 通知', '${D}', 'x', 'x', '${T1}', 'notice:view' from generate_series(1, 30)`)
   const t = await start(db, { p_window_name: '小丙' })
   await accept(db, t.id)
   assert.equal((await notice(t.id)).notify, 'rate_limited')

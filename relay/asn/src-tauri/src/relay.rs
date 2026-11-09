@@ -23,6 +23,9 @@ pub struct Relay {
     unaddressed_acked: Mutex<Vec<String>>,
     /// 這個程式的內建橋正在跑（橋自己負責把沒指定收件人的信交給本人，這裡不再另外去節點信箱撈）
     bridge_on: AtomicBool,
+    /// 連線階段失敗時的退避（毫秒，見 CONNECT_RETRY_MS）。單元測試預設空的＝不重試：
+    /// 不少測試故意把 relay 指到連不上的埠，不能每次呼叫都多等將近 2 秒；要測重試的用 with_connect_retry 打開
+    connect_retry_ms: &'static [u64],
     /// 存「誰負責撈節點信箱裡沒指定收件人的信」記號檔的資料夾（橋的工作資料夾）；None＝不做互斥（測試）
     owner_dir: Mutex<Option<PathBuf>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
@@ -300,14 +303,79 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
     Value::Object(m)
 }
 
+/// 隨機 UUID（第 4 版）：寄信的 client_id 用
+pub(crate) fn new_client_id() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("系統亂數不可用");
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+}
+
+/// 寄信（動作 send）的內文補上 client_id（沒帶才補；呼叫端自己帶了就沿用）。回（內文, 這次是不是帶 client_id 的寄信）。
+/// 其他動作原樣不動
+pub(crate) fn with_client_id(name: &str, body: Option<Value>) -> (Option<Value>, bool) {
+    if name != "send" {
+        return (body, false);
+    }
+    match body {
+        Some(Value::Object(mut m)) => {
+            if !m.get("client_id").is_some_and(|v| v.is_string()) {
+                m.insert("client_id".into(), json!(new_client_id()));
+            }
+            (Some(Value::Object(m)), true)
+        }
+        other => (other, false),
+    }
+}
+
+/// 連線失敗的說明：錯誤種類＋完整的原因鏈（reqwest 的 source() 一路往下）。只有「error sending request」分不出
+/// 是連線被拒、被重設、逾時還是回應讀到一半斷掉；要分得出才知道能不能安全重試（請求有沒有送到後台，#994）。
+/// 不含網址與金鑰：最上層用 without_url，底下的原因只是作業系統與 HTTP 程式庫的說明
+/// 連線階段失敗時的退避（毫秒）：最多再試這麼多次，全部加起來不到 2 秒
+static CONNECT_RETRY_MS: [u64; 3] = [200, 500, 1000];
+
+pub(crate) fn net_err(e: reqwest::Error) -> String {
+    let kind = if e.is_timeout() {
+        "逾時"
+    } else if e.is_connect() {
+        "連線階段"
+    } else if e.is_body() || e.is_decode() {
+        "讀回應"
+    } else if e.is_request() {
+        "送出請求"
+    } else {
+        "其他"
+    };
+    let e = e.without_url();
+    let mut chain = Vec::new();
+    let mut cur = std::error::Error::source(&e);
+    while let Some(c) = cur {
+        chain.push(c.to_string());
+        cur = c.source();
+    }
+    if chain.is_empty() {
+        format!("{e}（{kind}）")
+    } else {
+        format!("{e}（{kind}：{}）", chain.join("；"))
+    }
+}
+
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
+            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
+    }
+    /// 測試用：打開連線階段的重試（單元測試預設不重試）
+    #[cfg(test)]
+    pub(crate) fn with_connect_retry(mut self, ms: &'static [u64]) -> Relay {
+        self.connect_retry_ms = ms;
+        self
     }
     /// 前端改了狀態或個人訊息：記下來並叫醒回報迴圈立刻回報
     pub fn set_presence(&self, status: &str, psm: &str) {
@@ -442,7 +510,7 @@ impl Relay {
     pub async fn api_status(&self, action: &str, body: Value) -> Result<(u16, Value), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
         Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
@@ -450,13 +518,44 @@ impl Relay {
     async fn api_inner(&self, action: &str, body: Option<Value>, timeout: Duration, user_token: Option<&str>) -> Result<Value, String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let mut req = if let Some(b) = body { self.client.post(&url).json(&b) } else { self.client.get(&url) };
-        if let Some(t) = user_token.filter(|t| !t.is_empty()) {
-            req = req.header(SIGN_HEADER, format!("Bearer {t}"));
-        }
-        let res = req.header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
-        let status = res.status();
-        let text = res.text().await.unwrap_or_default();
+        // 寄信（#1135）：這一次寄信帶一個 client_id，重試之間沿用同一個（呼叫端已經帶了就用它的）；後台據此去重，所以「請求可能已送達」也能安全重試
+        let (body, idem) = with_client_id(name, body);
+        let mut attempt = 0;
+        let (status, text) = loop {
+            let mut req = if let Some(b) = &body { self.client.post(&url).json(b) } else { self.client.get(&url) };
+            if let Some(t) = user_token.filter(|t| !t.is_empty()) {
+                req = req.header(SIGN_HEADER, format!("Bearer {t}"));
+            }
+            let wait = self.connect_retry_ms.get(attempt).copied();
+            match req.header("x-relay-key", &self.key).timeout(timeout).send().await {
+                Ok(r) => {
+                    let status = r.status();
+                    // 閘道暫時回 502／503／504：寄信帶了 client_id 才重試（後台去重，不會寄兩封）
+                    if idem && matches!(status.as_u16(), 502..=504) && wait.is_some() {
+                        tokio::time::sleep(Duration::from_millis(wait.unwrap_or(0))).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    match r.text().await {
+                        Ok(t) => break (status, t),
+                        // 回應讀到一半斷了：後台可能已經寄出。有 client_id 就重送同一個，後台回第一次那封的 id
+                        Err(_) if idem && wait.is_some() => {
+                            tokio::time::sleep(Duration::from_millis(wait.unwrap_or(0))).await;
+                            attempt += 1;
+                        }
+                        Err(_) => break (status, String::new()),
+                    }
+                }
+                // 連線還沒建起來就失敗＝請求根本沒送出去（例如 Windows 本機臨時埠被占滿，os error 10048）：
+                // 退避後再送一次是安全的，不會重複寄信、重複 ack（#1135）。
+                // 送出之後才失敗的（逾時、讀回應）：只有帶 client_id 的寄信才重試，其餘照舊不重試
+                Err(e) if (e.is_connect() || idem) && wait.is_some() => {
+                    tokio::time::sleep(Duration::from_millis(wait.unwrap_or(0))).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(format!("{name} 連線失敗：{}", net_err(e))),
+            }
+        };
         let data: Option<Value> = serde_json::from_str(&text).ok();
         if !status.is_success() {
             let err = data.as_ref().and_then(|d| d.get("error")).and_then(Value::as_str).unwrap_or("");
@@ -470,10 +569,10 @@ impl Relay {
     pub async fn api_bytes(&self, action: &str, body: Value, max: usize, timeout: Duration) -> Result<(Vec<u8>, String), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status();
         let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", e.without_url()))?;
+        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", net_err(e)))?;
         if !status.is_success() {
             let err = serde_json::from_slice::<Value>(&bytes).ok().and_then(|d| d.get("error").and_then(Value::as_str).map(String::from)).unwrap_or_default();
             return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
@@ -1249,6 +1348,135 @@ pub fn build_group_body(action: &str, raw: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 本機一個一次性的假後端：放掉的埠等 delay 毫秒後才綁起來，每個連線回 status，記下連線數
+    fn late_server(port: u16, delay_ms: u64, status: u16) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h2 = hits.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+            let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+            for c in l.incoming() {
+                let Ok(mut c) = c else { break };
+                h2.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = std::io::Read::read(&mut c, &mut buf);
+                let _ = std::io::Write::write_all(&mut c, format!("HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}").as_bytes());
+            }
+        });
+        hits
+    }
+
+    #[tokio::test]
+    async fn 連線階段失敗_退避後重試_後台起來了就送成功() {
+        // 一開始沒有人在聽（連線被拒＝請求沒送出去），300 毫秒後才起來：第一次失敗、退避後重試成功（#1135）
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let hits = late_server(port, 300, 200);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&CONNECT_RETRY_MS);
+        assert_eq!(r.api("inbox", None).await, Ok(json!({})));
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "請求只真的送到一次");
+    }
+
+    #[tokio::test]
+    async fn 送到後台才失敗的不在這裡重試_只送一次() {
+        // HTTP 500＝請求已經到後台：重試可能重複寄，這一層不重試
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let hits = late_server(port, 0, 500);
+        std::thread::sleep(Duration::from_millis(100));
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&CONNECT_RETRY_MS);
+        let e = r.api("send", Some(json!({"to_node": "x", "body": "y"}))).await.unwrap_err();
+        assert!(e.contains("HTTP 500"), "{e}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// 假後端：第一個連線收完請求就掐斷（請求已送達、回應讀失敗），之後的連線回 200 {"id":"m1"}；回傳每個連線收到的請求原文
+    fn flaky_server(port: u16, first_status: Option<u16>) -> std::sync::Arc<Mutex<Vec<String>>> {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { break };
+                let mut buf = [0u8; 8192];
+                let n = std::io::Read::read(&mut c, &mut buf).unwrap_or(0);
+                let n_seen = { let mut g = s2.lock().unwrap(); g.push(String::from_utf8_lossy(&buf[..n]).to_string()); g.len() };
+                if n_seen == 1 {
+                    if let Some(st) = first_status {
+                        let _ = std::io::Write::write_all(&mut c, format!("HTTP/1.1 {st} X\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes());
+                    }
+                    continue; // 沒回應就掐斷
+                }
+                let _ = std::io::Write::write_all(&mut c, b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"id\":\"m1\"}");
+            }
+        });
+        seen
+    }
+    fn client_id_of(req: &str) -> Option<String> {
+        let i = req.find("\"client_id\":\"")? + 13;
+        Some(req[i..i + 36].to_string())
+    }
+    static FAST_RETRY: [u64; 3] = [10, 10, 10];
+
+    #[tokio::test]
+    async fn 寄信_回應讀失敗_沿用同一個client_id重試_收到第一次的結果() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let seen = flaky_server(port, None);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        assert_eq!(r.api("send", Some(json!({"to_node": "x", "body": "y"}))).await, Ok(json!({"id": "m1"})));
+        let g = seen.lock().unwrap();
+        assert_eq!(g.len(), 2, "第一次被掐斷、第二次重送");
+        let (a, b) = (client_id_of(&g[0]).expect("第一次就帶 client_id"), client_id_of(&g[1]).expect("重試也帶"));
+        assert_eq!(a, b, "同一次寄信的重試沿用同一個 client_id");
+        assert_eq!(a.len(), 36);
+        assert_eq!(a.as_bytes()[14], b'4', "第 4 版 UUID");
+    }
+
+    #[tokio::test]
+    async fn 寄信_閘道503_沿用同一個client_id重試() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let seen = flaky_server(port, Some(503));
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        assert_eq!(r.api("send", Some(json!({"to_node": "x", "body": "y"}))).await, Ok(json!({"id": "m1"})));
+        let g = seen.lock().unwrap();
+        assert_eq!(g.len(), 2);
+        assert_eq!(client_id_of(&g[0]), client_id_of(&g[1]));
+    }
+
+    #[tokio::test]
+    async fn 呼叫端自己帶了client_id就沿用_不同次寄信用不同的id() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let seen = flaky_server(port, None);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        let mine = "11111111-2222-4333-8444-555555555555";
+        r.api("send", Some(json!({"to_node": "x", "body": "y", "client_id": mine}))).await.unwrap();
+        assert!(seen.lock().unwrap().iter().all(|q| client_id_of(q).as_deref() == Some(mine)));
+        let (b1, _) = with_client_id("send", Some(json!({"body": "y"})));
+        let (b2, _) = with_client_id("send", Some(json!({"body": "y"})));
+        assert_ne!(b1.unwrap()["client_id"], b2.unwrap()["client_id"]);
+    }
+
+    #[tokio::test]
+    async fn 其他動作_回應讀失敗不重試_也不帶client_id() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let seen = flaky_server(port, None);
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_connect_retry(&FAST_RETRY);
+        assert!(r.api("ack", Some(json!({"ids": []}))).await.is_err());
+        let g = seen.lock().unwrap();
+        assert_eq!(g.len(), 1, "ack 不是寄信，維持原行為不重試");
+        assert!(!g[0].contains("client_id"));
+        assert_eq!(with_client_id("ack", Some(json!({"ids": []}))), (Some(json!({"ids": []})), false));
+        assert_eq!(with_client_id("send", None), (None, false));
+    }
+
+    #[tokio::test]
+    async fn 連線失敗的說明_帶種類與原因鏈_不帶網址() {
+        // 先綁一個埠再放掉：之後連它一定被拒（連線階段就失敗，請求沒送出去）
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let e = reqwest::Client::new().get(format!("http://127.0.0.1:{port}/relay?action=inbox&key=SECRET")).send().await.unwrap_err();
+        let t = net_err(e);
+        assert!(t.contains("（連線階段："), "被拒是連線階段的錯，而且要帶底層原因：{t}");
+        assert!(!t.contains("http://") && !t.contains("SECRET") && !t.contains("action=inbox"), "{t}");
+    }
 
     #[test]
     fn 推播權杖_格式只看長度與字元集() {

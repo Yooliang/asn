@@ -10,12 +10,14 @@ import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
-import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs } from "../_shared/account_me.ts";
+import { findSentByClientId, parseClientId, sendWithClientId } from "../_shared/send_client_id.ts";
+import { bellTopicsOf, handleChatHistory, personArgs, voiceArgs } from "../_shared/account_me.ts";
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeInboxHold, sanitizeInboxHoldExtra } from "../_shared/inbox_hold.ts";
 import { parseMisrouteNotice } from "../_shared/misroute_notice.ts";
+import { handleBridgeNotice } from "../_shared/bridge_notice.ts";
 import { parseWaitingNotice } from "../_shared/waiting_notice.ts";
 import { parseMuxDownNotice } from "../_shared/mux_down_notice.ts";
 import { parseNodeMismatchNotice } from "../_shared/node_mismatch_notice.ts";
@@ -379,6 +381,11 @@ Deno.serve(async (req) => {
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
   }
+  // 橋自己寄的通知（#848 PR-D）：後台以「ASN 通知」回覆寄給這台的那封信；收件人與寄件名由資料庫決定，跨帳號回 409 由橋照舊寄
+  if (action === "bridge_notice" && req.method === "POST") {
+    const r = await handleBridgeNotice({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me.id, await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
   // 核對轉交對象：收發室把信轉交錯了視窗，後台寄固定內文的通知給這個節點的擁有者（節點一律是金鑰所屬的 me.id）。失敗只記 warn，不影響轉交
   if (action === "misroute_notice" && req.method === "POST") {
     const p = parseMisrouteNotice(await req.json().catch(() => null));
@@ -586,13 +593,21 @@ Deno.serve(async (req) => {
     // expects_reply：寄件人明說要不要等回信（選填 boolean，給了就存；型別不對回 400）。沒給就不帶這個參數，信的欄位是 null（舊寄件工具）
     const er = expectsReplyArgs(b.expects_reply);
     if (!er) return json(400, { error: "bad_expects_reply" });
+    // client_id（選填 UUID）：客戶端重試同一封信時沿用，後台據此去重；格式不對回 400，沒帶＝舊客戶端、行為不變
+    const cid = parseClientId(b.client_id);
+    if (!cid.ok) return json(400, { error: "bad_client_id" });
+    // 重複送來：回第一次那封的 id、照成功回；不再寄、附件不處理（只記 id）
+    if (cid.id) {
+      const dup = await findSentByClientId(rpc, me.id, cid.id);
+      if (dup) { console.info("send duplicate ignored", dup); return json(200, { id: dup }); }
+    }
     // 附件（選填 attachment_ids）：寄出前確認都是自己上傳、已確認、沒綁過的；寄出後綁到這封信，再敲門鈴（收信端一響就能看到附件）
     const att = await prepareAttachments({ rpc }, me.id, b.attachment_ids);
     if (!att.ok) return json(att.reply.status, att.reply.body);
     // 本人簽章（選填）：ASN 視窗另帶登入憑證；驗過才傳使用者 id，資料庫再核對擁有關係。沒帶或驗不過＝照舊，不擋寄送
     const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
     // 以「人」寄出（#108）：新版 ASN 明說 as_person 且簽章有效，資料庫才把寄件視窗名換成人代號；沒說＝與以前完全一樣
-    const { data, error } = await sendWithPerson(rpc, {
+    const { data, error } = await sendWithClientId(rpc, cid.id, {
       ...signedArgs(signed),
       ...personArgs(b.as_person, signed),
       ...voiceArgs(b.voice), // 語音通話標記（選填布林）：舊後台沒有 asn_relay_send_voice 時退回一般寄信
@@ -605,11 +620,13 @@ Deno.serve(async (req) => {
       ...er,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
-    const sent = data as { id: string; bell_topic: string; error?: string };
+    const sent = data as { id: string; bell_topic: string; error?: string; duplicate?: boolean };
     if (sent?.error === "rate_limited") return json(429, { error: "rate_limited" });
     // 收件條目標為 receivable=false（只報狀態、不收信，見 20261024110000_roster_kind.sql）：明確錯誤碼，信沒有寄出
     if (sent?.error === "not_receivable") return json(409, { error: "not_receivable" });
     if (sent?.error) return json(400, { error: sent.error });
+    // 同時送來的重複請求（搶在第一次寫入完成之前）：資料庫回 duplicate，同樣回第一次的 id，附件不綁、不敲門鈴
+    if (sent?.duplicate === true) { console.info("send duplicate ignored", sent.id); return json(200, { id: sent.id }); }
     await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
     for (const t of bellTopicsOf(sent)) await ring(t);
