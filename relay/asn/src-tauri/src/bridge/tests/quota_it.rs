@@ -898,3 +898,33 @@ async fn 登入失效_重開後扣住原因還在_新寄件人收到登入失效
     let last = h.said().last().cloned().unwrap();
     assert!(last.contains("這封因收發室登入失效延遲，原本") || last.contains(&uid(1)), "{last}");
 }
+
+#[tokio::test]
+async fn 通知_有設備名第一行加前綴_代夥伴寄的與沒拿到設備名的不加() {
+    // 沒拿到設備名（假後台沒有 list，查不到）：內文不變、也不退回電腦名稱
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
+    assert!(n["body"].as_str().unwrap().starts_with("[收發室] 收發室的 Claude 額度用完"), "{n}");
+
+    // 注入設備名：收發室自己說話的通知第一行有前綴
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.device_name = Some("40家用".into());
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
+    assert_eq!(n["body"].as_str().unwrap(), format!("40家用：[收發室] 收發室的 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
+
+    // 代夥伴寄（from_agent 有值）不加
+    assert!(h.core.send_back_for_test("W", "W-政策", "收到了", Some("T-乙")).await);
+    let r = h.fr.sent().into_iter().find(|s| s["body"] == "收到了").expect("代寄的信沒加前綴");
+    assert_eq!(r["from_agent"], "T-乙");
+
+    // 設備名為空＝不加
+    h.core.cfg.device_name = Some(String::new());
+    assert!(h.core.send_back_for_test("W", "W-政策", "[收發室] 空名", None).await);
+    assert!(h.fr.sent().iter().any(|s| s["body"] == "[收發室] 空名"));
+}

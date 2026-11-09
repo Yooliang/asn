@@ -27,7 +27,7 @@ mod fail_notice;
 mod held_notice;
 mod misroute;
 mod quota;
-mod notice_name;
+mod dev_prefix;
 mod selftest;
 mod mux_notice;
 mod wait_notice;
@@ -60,7 +60,7 @@ fn env_u64(k: &str, d: u64) -> u64 {
 pub struct Config {
     pub node: String,
     pub mailbox_name: String,
-    /// 這台的設備顯示名：收發室自己說話的通知第一行會冠上它（None＝不加，測試用）；見 core/notice_name.rs
+    /// 注入的設備名（測試用；None＝向後台名單查自己節點的名字）。通知第一行會冠上它，空或查不到＝不加；見 core/dev_prefix.rs
     pub device_name: Option<String>,
     /// 沒指定收件視窗的信，環境變數 ASN_RELAY_DEFAULT_AGENT 指定的收件視窗（舊相容；預設空＝交給本人）。bridge.json 的設定優先
     pub default_agent: String,
@@ -152,7 +152,7 @@ impl Config {
         Config {
             node: node.into(),
             mailbox_name: crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
-            device_name: (!cfg!(test)).then(|| notice_name::local_device_name(|k| std::env::var(k).ok())),
+            device_name: None,
             default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_default(),
             data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
@@ -373,6 +373,8 @@ pub struct Core {
     /// 後台還沒支援夥伴 ID（404／400）：靜默停止，直到下次啟動
     partner_off: bool,
     partner_warned: bool,
+    /// 這台在後台的設備名（名單查來）與上次查的時間（毫秒，0＝還沒查過）；見 notice_device
+    own_device: std::sync::Mutex<(Option<String>, u64)>,
     /// 這台電腦的外掛狀態從哪裡來（預設讀 claude_mod 的全域狀態；測試可換）
     mod_src: Arc<dyn Fn() -> Option<Value> + Send + Sync>,
     /// 上次成功回報的外掛狀態（內容, 時間）；沒變化就不重報
@@ -547,7 +549,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
-            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
@@ -1067,8 +1069,42 @@ impl Core {
     }
 
     // ---- 對後端 ----
+    /// 這台在後台的設備名（relay.nodes.name，名單 list 查來，記在記憶體）。注入的優先；沒查到（或失敗、後台沒取名）＝None，不退回電腦名稱
+    async fn notice_device(&self) -> Option<String> {
+        if let Some(d) = &self.cfg.device_name {
+            return Some(d.clone());
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        {
+            let c = self.own_device.lock().unwrap();
+            if c.1 != 0 && now.saturating_sub(c.1) < dev_prefix::REFRESH_MS {
+                return c.0.clone();
+            }
+        }
+        let found = match self.relay.list().await {
+            Ok(v) => Some(dev_prefix::own_device_name(&v, &self.cfg.node)),
+            Err(e) => {
+                self.log.line(&format!("device name lookup failed: {e}"));
+                None
+            }
+        };
+        let mut c = self.own_device.lock().unwrap();
+        // 查失敗：保留上次查到的名字，只是隔 REFRESH_MS 再試
+        if let Some(n) = found {
+            c.0 = n;
+        }
+        c.1 = now.max(1);
+        c.0.clone()
+    }
+    /// 測試用：直接寄一則給 node/agent（走和正式一樣的 send_back，含設備名前綴）
+    #[cfg(test)]
+    pub(super) async fn send_back_for_test(&self, node: &str, agent: &str, body: &str, from_agent: Option<&str>) -> bool {
+        let o = Origin { id: "00000000-0000-0000-0000-000000000009".into(), from_node: node.into(), from_agent: agent.into() };
+        self.send_back(&o, body, from_agent, None).await
+    }
     async fn send_back(&self, o: &Origin, body: &str, from_agent: Option<&str>, expects_reply: Option<bool>) -> bool {
-        let body = notice_name::with_notice_prefix(body, from_agent, self.cfg.device_name.as_deref());
+        let dev = if from_agent.is_none() { self.notice_device().await } else { None };
+        let body = dev_prefix::with_notice_prefix(body, from_agent, dev.as_deref());
         let mut b = json!({ "to_node": o.from_node, "body": body, "reply_to": o.id, "from_agent": from_agent.unwrap_or(&self.cfg.mailbox_name) });
         if !o.from_agent.is_empty() {
             b["to_agent"] = json!(o.from_agent);
