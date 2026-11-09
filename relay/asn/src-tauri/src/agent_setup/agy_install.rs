@@ -8,6 +8,10 @@
 //! 不跑 `agy install`、不動 PATH（asn真 定案）。已經有官方的（`%LOCALAPPDATA%\agy\bin\agy.exe` 或 PATH 上的，簽署者是 Google LLC）就直接用。
 //! 因為 agy 會自己更新，**每次要啟動 agy 之前都要重驗簽署者**：`usable_here()` 回傳前一定驗過，不能快取它的結果（`check_before_launch`）。
 //!
+//! 信任錨是 Google LLC 的簽章；manifest 的 sha512 只防傳輸損壞（它和 manifest 從同一台來）。**沒有回滾保護**：
+//! manifest 那台主機若被控制，可以餵出「舊的、Google 簽的」版本（版本字串與 --version 一致也照樣過）。這和官方安裝腳本同等級，
+//! 目前接受；之後若要擋，可以記下裝過的最高版本、拒絕比它舊的。
+//!
 //! 這一張只有流程與測試，還沒有任何入口呼叫它（清單仍是 manual、畫面沒有按鈕）；入口、偵測與開夥伴改用 `usable_here()` 在 PR-7 接上。
 #![allow(dead_code)]
 
@@ -104,7 +108,11 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, platform: &str, rec: &mut 
         }
         std::fs::create_dir_all(tools).map_err(|e| format!("無法建立安裝資料夾：{e}"))?;
         guard.seek(SeekFrom::Start(0)).map_err(|e| format!("讀不了下載的 agy：{e}"))?;
-        let mut out = std::fs::File::create(&new).map_err(|e| format!("無法寫入 agy：{e}"))?;
+        // 先刪掉上次留下的 .new，再用 create_new：不沿用預先放好的同名檔（例如連結）
+        if new.exists() {
+            std::fs::remove_file(&new).map_err(|e| format!("清不掉上次留下的 agy.exe.new：{e}"))?;
+        }
+        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&new).map_err(|e| format!("無法寫入 agy：{e}"))?;
         std::io::copy(&mut &guard, &mut out).map_err(|e| format!("無法寫入 agy：{e}"))?;
         Ok(())
     })();
@@ -120,12 +128,14 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, platform: &str, rec: &mut 
             return Err("複製出來的 agy 和驗過的不一樣，已放棄安裝".to_string());
         }
         check_before_launch(d.sig, &new)?;
-        drop(g);
-        match d.exec.version_output(&new, vi::VERSION_TIMEOUT) {
+        // 鎖著跑 --version（鎖的是「別人不能寫、不能刪」，仍可執行；Claude 的安裝程式也是鎖著跑），跑完才放鎖
+        let r = match d.exec.version_output(&new, vi::VERSION_TIMEOUT) {
             Ok(out) if version_in_output(&out, &rel.version) => Ok(()),
             Ok(_) => Err(format!("裝好的 agy 版本和驗證過的 {} 不一致，沒有算成功", rel.version)),
             Err(e) => Err(format!("問不出裝好的 agy 的版本：{e}")),
-        }
+        };
+        drop(g);
+        r
     })();
     if let Err(e) = checked {
         let _ = std::fs::remove_file(&new);
@@ -289,6 +299,16 @@ mod tests {
         assert!(rec.line().contains("sha512=") && rec.line().contains("來源=storage.googleapis.com"));
         let log = r.fetch.log.borrow();
         assert_eq!(*log, vec![manifest_url(P).unwrap(), URL.to_string()]);
+    }
+
+    #[test]
+    fn 上次留下的_agy_exe_new_會先刪掉_換上的是這次驗過的() {
+        let r = rig();
+        std::fs::create_dir_all(tools(&r)).unwrap();
+        std::fs::write(tools(&r).join("agy.exe.new"), b"MZ stale planted").unwrap();
+        run(&r).0.unwrap();
+        assert_eq!(std::fs::read(tools(&r).join("agy.exe")).unwrap(), BIN);
+        assert!(!tools(&r).join("agy.exe.new").exists());
     }
 
     #[test]
