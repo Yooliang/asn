@@ -40,3 +40,24 @@ test('identifier、Kotlin 套件路徑、MainActivity 的 package 三者一致�
   const lib = cargo.split(/\r?\n\[/).find(s => s.startsWith('lib]'))
   assert.match(lib ?? '', /^name\s*=\s*"[a-z][a-z0-9_]*"/m)
 })
+
+// WezTerm 自建的 release 不能被標成整個 repo 的 Latest（否則 repo 首頁和 releases/latest 會指到 WezTerm，而不是 ASN）
+test('wezterm-build 的每一處 gh release create 都帶 --latest=false', () => {
+  const scriptsDir = new URL('.github/scripts/', root)
+  const files = [
+    ['wezterm-build.yml', fs.readFileSync(new URL('wezterm-build.yml', wfDir), 'utf8')],
+    ...fs.readdirSync(scriptsDir).filter(f => /^wezterm-.*\.sh$/.test(f)).map(f => [f, fs.readFileSync(new URL(f, scriptsDir), 'utf8')]),
+  ]
+  let seen = 0
+  const bad = []
+  for (const [f, src] of files) {
+    const joined = src.replace(/\\r?\n/g, ' ')   // 接上以反斜線換行的續行
+    for (const line of joined.split(/\r?\n/)) {
+      if (!/gh\s+release\s+create\b/.test(line) || /^\s*#/.test(line)) continue
+      seen++
+      if (!/--latest=false\b/.test(line)) bad.push(`${f}: ${line.trim().slice(0, 80)}`)
+    }
+  }
+  assert.ok(seen >= 1, '找不到任何 gh release create，檢查規則可能失效')
+  assert.deepEqual(bad, [])
+})
