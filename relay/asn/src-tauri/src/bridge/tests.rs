@@ -615,7 +615,7 @@ async fn 找不到收件視窗_寄回說明並_ack() {
     h.core.pull("test", T0).await;
     let s = h.fr.sent();
     assert_eq!(s.len(), 1);
-    assert_eq!(s[0]["body"], "[收發室] 找不到名叫「T-不存在」的 session（目前可達：T-乙）");
+    assert_eq!(s[0]["body"], "找不到名叫「T-不存在」的 session（目前可達：T-乙）");
     assert_eq!((s[0]["to_node"].as_str(), s[0]["to_agent"].as_str(), s[0]["reply_to"].as_str(), s[0]["from_agent"].as_str()), (Some("W"), Some("W-政策"), Some(uid(1).as_str()), Some("T-收發室")));
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     assert!(h.said().is_empty());
@@ -719,7 +719,7 @@ async fn 轉交逾時_收發室一直沒回報_寄通知並_ack() {
     h.core.tick(T0 + 119_000).await;
     assert!(h.fr.sent().is_empty());
     h.core.tick(T0 + 121_000).await;
-    assert_eq!(h.fr.sent()[0]["body"], "[收發室] 轉交給 T-乙 逾時（收發室沒有完成轉交）");
+    assert_eq!(h.fr.sent()[0]["body"], "轉交給 T-乙 逾時（收發室沒有完成轉交）");
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     assert!(h.core.pending.is_empty());
 }

@@ -22,6 +22,7 @@ import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profil
 import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
+import { createDeviceNameCache, withNoticePrefix } from './notice-name.mjs'
 import { sentMarkName } from './sent-mark.mjs'
 import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
 import { createAckRetry } from './ack-retry.mjs'
@@ -179,10 +180,13 @@ const unrouted = new Set()   // mail ids already logged as kept in the inbox for
 
 // 來信抬頭（mailHead，mail-format.mjs）：…id=<id> engine=<引擎> reply=yes|no|?（?＝舊信沒有 expects_reply 欄位）
 
+// 這台在後台的設備名（名單 list 的 members[].name，和畫面標頭同一個來源）：收發室自己說話的系統通知第一行會冠上它；拿不到就不加（見 notice-name.mjs）
+const deviceName = createDeviceNameCache({ node: NODE_ID, getList: () => api('list'), log: m => log(m) })
 // expectsReply（選填 true／false）：視窗代寄回信時寄件人明說的「要不要等回信」；系統通知與沒有明說的轉寄不帶，欄位就是 null
 async function sendBack(p, body, fromAgent, expectsReply) {
   try {
-    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body, reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
+    const dev = fromAgent ? '' : await deviceName()
+    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body: withNoticePrefix(body, fromAgent, dev), reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
     return true
   } catch (e) { log(`send back failed id=${p.mail.id}: ${e.message}`); return false }
 }
@@ -208,7 +212,7 @@ async function onFail(id, reason) {
   log(`forward failed id=${id}: ${reason}`)
   if (p.room) { pending.delete(id); return }   // 群組訊息：只記 log，不回群組
   if (isMailboxSender(p.mail)) log(`forward failure notice to mailbox sender ${p.mail.from_node}/${p.mail.from_agent} not sent id=${id}`)
-  else await sendBack(p, `[收發室] 轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
+  else await sendBack(p, `轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
   await ackIds([id])
   pending.delete(id)
 }
@@ -322,7 +326,7 @@ setInterval(async () => {
       // 收發室沒回報，但對方已經回了這封（或已寄信給原寄件人）＝其實有轉到：不寄「轉交逾時」，免得寄件人以為對方沒收到
       if (repliedDirectly(id) || sentToSender(p)) { log(`forward unconfirmed but ${p.target} already replied id=${id}: no timeout notice`); await ackIds([id]); pending.delete(id); continue }
       if (isMailboxSender(p.mail)) log(`forward timeout notice to mailbox sender not sent id=${id}`)
-      else await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
+      else await sendBack(p, `轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
       if (p.room) pending.delete(id)
@@ -447,7 +451,7 @@ async function handleMail(m) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
     if (isMailboxSender(m)) log(`id=${m.id} target ${target} not found; notice to mailbox sender not sent`)
-    else await sendBack(p, `[收發室] 找不到名叫「${target}」的 session（目前可達：${names}）`)
+    else await sendBack(p, `找不到名叫「${target}」的 session（目前可達：${names}）`)
     await ackIds([m.id])
     return
   }

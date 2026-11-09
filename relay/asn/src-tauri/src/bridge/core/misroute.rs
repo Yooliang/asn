@@ -78,7 +78,7 @@ impl Core {
             return;
         }
         // 只寫寄件人自己指定的收件人；實際收到的視窗名可能是這台電腦上別人的，不寫進通知
-        let text = format!("[收發室] 你寄給 {expected} 的信（編號 {id}）曾被誤送到同一台電腦的另一個視窗，可能已被讀取，收發室正在重新轉交給 {expected}。");
+        let text = format!("你寄給 {expected} 的信（編號 {id}）曾被誤送到同一台電腦的另一個視窗，可能已被讀取，收發室正在重新轉交給 {expected}。");
         self.send_back(&o, &text, None, Some(false)).await;
     }
 

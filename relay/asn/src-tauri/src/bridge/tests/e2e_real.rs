@@ -395,7 +395,7 @@ fn e2e_一輪只交一封_處理第一封時再來幾封_依序交() {
             })
             .await;
             drive_count(&mut core, &mut rx, 8, &mut refusals, |_| false).await; // 再等一下，看有沒有晚到的失敗通知
-            let notes: Vec<String> = fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).filter(|b| b.starts_with("[收發室]")).collect();
+            let notes: Vec<String> = fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).filter(|b| b.starts_with("[收發室]") || b.contains("轉交給")).collect();
             let order: Vec<String> = read(&work.path().join("bridge.log")).lines().filter(|l| l.contains("forwarded id=")).map(|l| l.split("forwarded id=").nth(1).unwrap_or("").split(' ').next().unwrap_or("").to_string()).collect();
             println!("---- 一輪只交一封實跑（one_per_turn={one_per_turn}，共 {n} 封，模型 haiku，標明：不一定代表正式收發室）----");
             println!("第一封交出去 {t_inject:.1} 秒後放入後面 {} 封", n - 1);

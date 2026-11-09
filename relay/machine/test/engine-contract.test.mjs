@@ -19,8 +19,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 const readBody = req => new Promise(r => { let b = ''; req.on('data', d => b += d); req.on('end', () => r(b ? JSON.parse(b) : null)) })
 const uid = n => `00000000-0000-0000-0000-${n.toString(16).padStart(12, '0')}`
 
-async function fakeRelay(inbox) {
-  const st = { acked: new Set(), sent: [], rosterPosts: [] }
+async function fakeRelay(inbox, deviceName = '') {
+  const st = { acked: new Set(), sent: [], rosterPosts: [], deviceName }
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x')
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
@@ -30,6 +30,7 @@ async function fakeRelay(inbox) {
     if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
     if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
     if (a === 'roster') { st.rosterPosts.push(await readBody(req)); return out(200, { ok: true }) }
+    if (a === 'list' && st.deviceName) return out(200, { members: [{ id: 'T', name: st.deviceName }] })
     if (a === 'launch_pending') return out(200, { launches: [] })
     out(404, {})
   })
@@ -39,8 +40,8 @@ async function fakeRelay(inbox) {
   return st
 }
 
-async function runWithFakeEngine({ inbox, windows, env = {}, until }) {
-  const st = await fakeRelay(inbox)
+async function runWithFakeEngine({ inbox, windows, env = {}, until, deviceName = '' }) {
+  const st = await fakeRelay(inbox, deviceName)
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-engine-test-'))
   const winFile = path.join(home, 'windows.json'), rec = path.join(home, 'record.jsonl')
   fs.writeFileSync(winFile, JSON.stringify(windows))
@@ -142,4 +143,23 @@ test('契約：身分判定經轉接器 identity 區塊；命中者帶 engine，
   assert.throws(() => findCaller('寄信', [miss]), /找不到呼叫者所屬的 Claude 視窗/)
   const noName = { engine: 'fake', inspectCaller: () => ({ viaChain: { pid: 9, name: '' } }) }
   assert.throws(() => findCaller('收信', [noName]), /沒有名字，無法當收件人/)
+})
+
+test('系統通知（沒有 fromAgent）第一行前面加後台的設備名；代夥伴寄的信不加', async () => {
+  const r = await runWithFakeEngine({
+    inbox: [mail(3, { to_agent: '不存在' }), mail(4)], windows: wins, deviceName: '40家用', env: { COMPUTERNAME: 'DESKTOP-XXXX', FAKE_ENGINE_REPLY: '收到了' },
+    until: c => c.st.acked.has(uid(3)) && c.st.acked.has(uid(4)) && c.st.sent.length >= 2,
+  })
+  const notice = r.st.sent.find(s => s.reply_to === uid(3)), reply = r.st.sent.find(s => s.reply_to === uid(4))
+  assert.ok(notice.body.startsWith('40家用：找不到名叫'), notice.body)
+  assert.equal(reply.body, '收到了', '代夥伴寄的回信不加前綴')
+  assert.equal(reply.from_agent, '假視窗甲')
+})
+
+test('系統通知：名單查不到自己的設備名（後台沒這個動作）→ 不加前綴，也不退回電腦名稱', async () => {
+  const r = await runWithFakeEngine({
+    inbox: [mail(3, { to_agent: '不存在' })], windows: wins, env: { COMPUTERNAME: 'DESKTOP-XXXX' },
+    until: c => c.st.acked.has(uid(3)) && c.st.sent.length > 0,
+  })
+  assert.ok(r.st.sent[0].body.startsWith('找不到名叫'), r.st.sent[0].body)
 })

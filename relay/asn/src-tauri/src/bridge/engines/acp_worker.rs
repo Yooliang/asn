@@ -557,10 +557,10 @@ impl Worker {
     fn explain(&self, e: &WorkerError) -> String {
         let cfg = &self.i.cfg;
         let name = &cfg.name;
-        let how = if cfg.protocol == "agy-stream" { "請到這台電腦前在終端機執行 agy 完成 Google 瀏覽器登入".to_string() } else { format!("請到這台電腦前登入 {}", cfg.command) };
+        let how = if cfg.protocol == "agy-stream" { "請在終端機執行 agy 完成 Google 瀏覽器登入".to_string() } else { format!("請登入 {}", cfg.command) };
         let clip = |n: usize| e.message.chars().take(n).collect::<String>();
         match e.code {
-            "auth" => format!("{name} 需要登入：這台電腦上的帳號登入失效或還沒登入。{how}，好了再寄一次。（錯誤：{}）", clip(160)),
+            "auth" => format!("{name} 需要登入：帳號登入失效或還沒登入。{how}，好了再寄一次。（錯誤：{}）", clip(160)),
             "quota" => format!("{name} 的額度用完了（或被限流），請稍後再試。（錯誤：{}）", clip(160)),
             "timeout" => format!("{name} 處理這封信太久沒有動靜（超過 {} 分鐘），已中止這一輪。", (cfg.turn_timeout_ms as f64 / 60000.0).round() as u64),
             "violation" => format!("{name} 想做不被允許的事：{}（{}）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入。", e.summary.clone().unwrap_or_default(), e.message),

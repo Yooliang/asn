@@ -183,9 +183,9 @@ impl Core {
             return;
         }
         let text = if self.quota_ep.as_ref().is_some_and(|e| e.auth) {
-            "[收發室] 這台收發室的 Claude 登入失效了，信已收到、先留著，重新登入後會送出。".to_string()
+            "Claude 登入失效了，信已收到、先留著，重新登入後會送出。".to_string()
         } else {
-            format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(self.quota_until))
+            format!("Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(self.quota_until))
         };
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;

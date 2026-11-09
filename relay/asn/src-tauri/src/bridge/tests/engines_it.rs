@@ -328,7 +328,7 @@ async fn acp_啟動時要求登入_名單標_login_required_寄信得到說明_�
     h.put_pull(to_agent(1, "Gemini", "在嗎")).await;
     h.wait("失敗說明", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
     let b = h.bodies().into_iter().find(|b| b.contains("需要登入")).unwrap();
-    assert!(b.starts_with("[收發室] 轉交給 Gemini 失敗：") && b.contains("請到這台電腦前登入 node"), "{b}");
+    assert!(b.starts_with("[收發室] 轉交給 Gemini 失敗：") && b.contains("請登入 node"), "{b}");
     assert!(h.fr.acked().contains(&uid(1)), "信沒有被吞：已通知寄件人並 ack");
 }
 
@@ -705,7 +705,7 @@ async fn agy_沒登入_額度用完_回報並標示狀態_通知指定的人() {
     h.put_pull(to_agent(1, "Gemini", "@@AUTH")).await;
     h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
     let b = h.bodies().into_iter().find(|b| b.contains("需要登入")).unwrap();
-    assert!(b.contains("請到這台電腦前在終端機執行 agy"), "{b}");
+    assert!(b.contains("請在終端機執行 agy"), "{b}");
     h.set.refresh_all().await;
     h.core.refresh_roster(now()).await;
     assert_eq!(h.last_roster()["agents"][0]["status"], "login-required");
