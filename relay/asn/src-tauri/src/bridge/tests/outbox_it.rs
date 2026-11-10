@@ -208,13 +208,123 @@ async fn 超過上限時最舊那封信的片段一起丟_只通知一次() {
     assert_eq!(n[0]["reply_to"], uid(5000));
 }
 
+fn bad_files(h: &H) -> Vec<std::path::PathBuf> {
+    let mut v: Vec<_> = std::fs::read_dir(h.work.path())
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("reply-outbox.json.bad-")))
+        .collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn 壞檔第二次壞掉_不蓋掉先前的_bad() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), "{ 壞一").unwrap();
+    let _c1 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    let first = bad_files(&h);
+    assert_eq!(first.len(), 1);
+    std::fs::write(outbox_file(&h), "{ 壞二").unwrap();
+    let _c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 5_000);
+    let all = bad_files(&h);
+    assert_eq!(all.len(), 2, "第二個壞檔另存，不蓋掉第一個");
+    assert_eq!(std::fs::read_to_string(&first[0]).unwrap(), "{ 壞一", "舊 .bad 內容原封不動");
+}
+
+fn bad_notices(h: &H) -> Vec<Value> {
+    h.fr.st.lock().unwrap().outbox_bad_notices.clone()
+}
+
+#[tokio::test]
+async fn 壞檔_第一次_tick_通知本人一次_之後不再送() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), format!("{{ 壞掉 {SECRET}")).unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    assert!(bad_notices(&h).is_empty(), "Core::new 不送（同步），等 tick");
+    c2.tick(T0 + 5_000).await;
+    let n = bad_notices(&h);
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(!n[0].to_string().contains("機密內文") && !n[0].to_string().contains("壞掉"), "請求不帶任何內文：{n:?}");
+    c2.tick(T0 + 6_000).await;
+    c2.tick(T0 + 20_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "只送一次");
+    let lg = c2.log.recent().join("\n");
+    assert!(lg.contains("owner notice requested") && !lg.contains("機密內文"), "{lg}");
+}
+
+#[tokio::test]
+async fn 壞檔通知失敗_只記_log_不重試() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_status = 404; // 舊後台沒有這個動作
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    c2.tick(T0 + 700_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "失敗也只試一次");
+    assert!(c2.log.recent().iter().any(|l| l.contains("只留本機紀錄")));
+}
+
+#[tokio::test]
+async fn 壞檔通知_第一次_503_六十秒後成功_共送兩次() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_fail_n = 1;
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    assert_eq!(bad_notices(&h).len(), 1);
+    c2.tick(T0 + 30_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "還沒到六十秒");
+    c2.tick(T0 + 65_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "六十秒後再試一次");
+    c2.tick(T0 + 200_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "成功後不再送");
+}
+
+#[tokio::test]
+async fn 壞檔通知_一直_503_超過一小時放棄() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_fail_n = 1000;
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    c2.tick(T0 + 65_000).await;
+    assert_eq!(bad_notices(&h).len(), 2);
+    c2.tick(T0 + 4_000 + 3_600_001).await;
+    assert_eq!(bad_notices(&h).len(), 2, "超過一小時不再送");
+    assert!(c2.log.recent().iter().any(|l| l.contains("不再通知")));
+    c2.tick(T0 + 4_000 + 3_700_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "放棄後不再試");
+}
+
+#[tokio::test]
+async fn 寄件匣檔不是_utf8_也當壞檔_改名並通知() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), [0xff_u8, 0xfe, 0x00, 0x80]).unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    assert_eq!(bad_files(&h).len(), 1, "改名留著，不被下一次存檔蓋掉");
+    assert!(!outbox_file(&h).exists());
+    c2.tick(T0 + 5_000).await;
+    assert_eq!(bad_notices(&h).len(), 1);
+}
+
+#[tokio::test]
+async fn 正常的寄件匣檔_不送壞檔通知() {
+    let mut h = rig().await;
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    assert!(bad_notices(&h).is_empty());
+}
+
 #[tokio::test]
 async fn 壞檔改名成_bad_之後仍可正常運作() {
     let h = rig().await;
     std::fs::write(outbox_file(&h), "{ 這不是 json").unwrap();
     let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
     assert!(c2.outbox_ids().is_empty(), "壞檔不當成有信");
-    assert!(h.work.path().join("reply-outbox.json.bad").exists(), "壞檔留著");
+    assert_eq!(bad_files(&h).len(), 1, "壞檔留著（檔名帶時間戳）");
     // 之後照常存、照常重寄
     c2.outbox_test_push(&uid(1), vec![], T0, T0);
     assert_eq!(file_items(&h), 1);

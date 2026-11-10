@@ -19,6 +19,9 @@ const OUTBOX_TICK_MAX: usize = 10;
 const OUTBOX_GIVE_UP_MS: u64 = 86_400_000;
 /// 第 N 次失敗後多久再寄：15 秒、1、2、5、10、30 分鐘，之後每 30 分鐘
 const RETRY_GAPS_MS: [u64; 6] = [15_000, 60_000, 120_000, 300_000, 600_000, 1_800_000];
+/// 壞檔通知：失敗後隔多久再試／從啟動起超過多久放棄
+const OUTBOX_BAD_RETRY_MS: u64 = 60_000;
+const OUTBOX_BAD_GIVE_UP_MS: u64 = 3_600_000;
 const ATTACH_GONE_TRAILER: &str = "（附件已過期，沒有附上）";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -92,20 +95,33 @@ pub(super) struct Outbox {
 }
 
 impl Outbox {
-    /// 讀回存檔；壞檔改名成 .bad 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
+    /// 讀回存檔；壞檔改名成 .bad-<毫秒> 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
     pub fn load(work_dir: &std::path::Path) -> (Outbox, Option<String>) {
         let file = work_dir.join(OUTBOX_FILE);
         let mut warn = None;
-        let items = match std::fs::read_to_string(&file) {
-            Err(_) => vec![],
-            Ok(t) => match serde_json::from_str::<OutboxFile>(&t) {
-                Ok(f) => f.items,
-                Err(e) => {
-                    let _ = std::fs::rename(&file, work_dir.join(format!("{OUTBOX_FILE}.bad")));
-                    warn = Some(format!("reply outbox file unreadable, moved to .bad: {e}"));
-                    vec![]
+        // 沒有檔＝空的；讀不了（非 UTF-8、權限、被占用）或解析失敗都當壞檔，免得下一次存檔蓋掉原檔
+        let parsed: Result<Vec<OutboxItem>, String> = match std::fs::read_to_string(&file) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(e) => Err(e.to_string()),
+            Ok(t) => serde_json::from_str::<OutboxFile>(&t).map(|f| f.items).map_err(|e| e.to_string()),
+        };
+        let items = match parsed {
+            Ok(items) => items,
+            Err(e) => {
+                // 檔名帶毫秒時間戳，不蓋掉先前留下的 .bad；同一毫秒已有同名檔就往後找沒用過的
+                let mut stamp = crate::heartbeat::now_ms();
+                let mut bad = work_dir.join(format!("{OUTBOX_FILE}.bad-{stamp}"));
+                while bad.exists() {
+                    stamp += 1;
+                    bad = work_dir.join(format!("{OUTBOX_FILE}.bad-{stamp}"));
                 }
-            },
+                let moved = std::fs::rename(&file, &bad);
+                warn = Some(match moved {
+                    Ok(()) => format!("reply outbox file unreadable, moved to {OUTBOX_FILE}.bad-{stamp}: {e}"),
+                    Err(re) => format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}"),
+                });
+                vec![]
+            }
         };
         (Outbox { items, busy: HashSet::new(), file }, warn)
     }
@@ -351,6 +367,40 @@ impl Core {
             Err(e) => {
                 self.log.line(&format!("reply id={} resend rejected: {e}", it.reply_to));
                 Resend::GiveUp("對方收不到")
+            }
+        }
+    }
+
+    /// 啟動時發現寄件匣存檔壞了：請後台寄一則固定內文的通知給本人（節點擁有者）。後台每台每小時最多一則。
+    /// 做法同 mux_blind_tick：網路錯、5xx 隔 60 秒再試（開機自啟時網路常常還沒通），從啟動起超過一小時就放棄；
+    /// 4xx（含舊後台沒有這個動作的 404）立即放棄、只記 log。成功（200）就清旗標。log 不含任何回信內文
+    pub(super) async fn outbox_bad_notice_tick(&mut self, now: u64) {
+        let Some(since) = self.outbox_bad_pending else { return };
+        if now < self.outbox_bad_retry_at {
+            return;
+        }
+        if now.saturating_sub(since) > OUTBOX_BAD_GIVE_UP_MS {
+            self.outbox_bad_pending = None;
+            self.log.line("outbox bad file: 過了一小時，不再通知");
+            return;
+        }
+        match self.relay.api_status("outbox_bad_notice", json!({})).await {
+            Ok((200, v)) => {
+                self.outbox_bad_pending = None;
+                let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
+                self.log.line(&format!("outbox bad file: owner notice requested notify={notify}"));
+            }
+            Ok((status, _)) if (400..500).contains(&status) => {
+                self.outbox_bad_pending = None;
+                self.log.line(&format!("outbox bad file: 後台回 {status}，只留本機紀錄"));
+            }
+            Ok((status, _)) => {
+                self.outbox_bad_retry_at = now + OUTBOX_BAD_RETRY_MS;
+                self.log.line(&format!("outbox bad file: 後台回 {status}，稍後再試"));
+            }
+            Err(e) => {
+                self.outbox_bad_retry_at = now + OUTBOX_BAD_RETRY_MS;
+                self.log.line(&format!("outbox bad file: owner notice failed: {e}"));
             }
         }
     }
