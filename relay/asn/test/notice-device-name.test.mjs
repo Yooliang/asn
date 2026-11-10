@@ -42,6 +42,8 @@ const HEAD_ALLOWED = [
   ['fail_notice.rs', '[收發室] '],
   ['dev_prefix.rs', '[收發室] '],         // 要去掉的舊字頭常數
   ['acp_approvals.rs', '[收發室]'],        // 解析夥伴回覆時要剝掉的字頭，不是寄出的文字
+  ['outbox.rs', '[收發室] 你剛才的回信暫時寄不出去'],   // 回信寄件匣（#1135）：tell_window 告訴本機回信的視窗，不寄給人
+  ['outbox.rs', '[收發室] 你之前對信件 {} 的回信一直沒能送出'],   // 同上：放棄後告訴本機視窗
 ]
 const rsLiterals = () => {
   const dir = path.join(ROOT, 'src-tauri', 'src', 'bridge')
