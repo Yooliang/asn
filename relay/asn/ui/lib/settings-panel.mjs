@@ -19,7 +19,7 @@ import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, used
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
-import { TERM_SERVER_MISSING_NOTE, keyProtectionNote, termFetchLine, termServerNote } from './term-server-setting.mjs'
+import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFetchLine, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
@@ -122,7 +122,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { KNOWN,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
-      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, keyProtectionNote,
+      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
@@ -505,6 +505,7 @@ export const SettingsPanel = {
           <template v-if="st.bridge.termServerSupported">
             <label class="chk"><input type="checkbox" :checked="st.bridge.termServer" :disabled="st.bridge.busy || st.bridge.termServerLocked" @change="act('bridge-term-server', $event.target.checked)" aria-label="夥伴共用同一個終端服務" /><span>夥伴共用同一個終端服務</span></label>
             <small>{{ termServerNote(st.bridge) }}</small>
+            <small v-if="termServerWhyLine(st.bridge)" class="term-server-why" role="note">{{ termServerWhyLine(st.bridge) }}</small>
             <template v-if="termFetchLine(st.bridge).text">
               <small role="status">{{ termFetchLine(st.bridge).text }}</small>
               <span class="pair-btns" v-if="termFetchLine(st.bridge).canRetry"><button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-term-fetch-retry')">重試</button></span>
