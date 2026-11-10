@@ -104,6 +104,12 @@ fn 電腦_認得這支手機但本人沒允許替這台登入_就拒絕() {
 }
 
 #[test]
+fn 不認得與沒允許_回給手機的句子一樣_後台分辨不出這台認不認得那支手機() {
+    assert_eq!(Refuse::UnknownPhone.text(), Refuse::NotAllowed.text());
+    assert_eq!(Refuse::NotAllowed.text(), NOT_ALLOWED_TEXT);
+}
+
+#[test]
 fn 代碼只收英數與連字號_兩端都擋() {
     let w = world();
     let (_, payload, sig) = new_request(&w.p, "PC", "PH", "codex", NOW).unwrap();

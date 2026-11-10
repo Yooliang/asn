@@ -30,6 +30,7 @@ import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
+import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft, showLoginButton } from './lib/mobile-device-login.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
@@ -674,11 +675,58 @@ const app = createApp({
       void setupPoll()
     }
     const setupClose = () => setupReset()
+    // 從手機替電腦登入裝置碼型 CLI（#933 PR-5b，先做 Codex）：按鈕 → 確認 → 送出（這支手機的設備金鑰簽）→ 每 3 秒取一次 →
+    // 拿到就顯示「給哪台、哪一家」、開啟登入頁、代碼與倒數（不給複製）→ 之後照狀態顯示結果。網址與代碼只在顯示階段放在這裡，離開、進背景、到期就清
+    const loginSt = reactive({ node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, url: '', code: '', exp: 0, name: '', left: 0 })
+    let loginTimer = null
+    const loginStop = () => { clearInterval(loginTimer); loginTimer = null }
+    const loginWipe = () => { Object.assign(loginSt, { url: '', code: '', exp: 0, left: 0 }) }
+    const loginReset = () => { loginStop(); loginWipe(); Object.assign(loginSt, { node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, name: '' }) }
+    const loginEnd = (text, good = false) => { loginStop(); loginWipe(); Object.assign(loginSt, { stage: 'done', text, ok: good }) }
+    const loginAsk = (node, vendor) => { if (!Object.hasOwn(LOGIN_VENDORS, vendor)) return; loginReset(); Object.assign(loginSt, { node, vendor, stage: 'confirm' }) }
+    const loginNo = () => { if (loginSt.stage === 'confirm') loginReset() }
+    const loginTick = async () => {
+      const { node, rid } = loginSt
+      if (loginSt.stage === 'show') {
+        loginSt.left = secondsLeft(loginSt.exp)
+        if (!loginSt.left) return loginEnd(LOGIN_TEXT.expired)
+        // 代碼顯示中：看那台電腦回報的結果（不再取代碼）
+        let st = null
+        try { st = setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } catch { return }
+        if (loginSt.node !== node || loginSt.stage !== 'show') return
+        if (st && (st.state === 'done' || st.state === 'failed')) loginEnd(st.detail || (st.state === 'done' ? LOGIN_TEXT.doneOk : LOGIN_TEXT.failed), st.state === 'done')
+        return
+      }
+      if (loginSt.stage !== 'waiting' || !rid) return
+      let r = null
+      try { r = await invoke('setup_device_fetch', { rid }) } catch { return }   // 查不到這一輪就下一輪再查
+      if (loginSt.rid !== rid || loginSt.stage !== 'waiting') return
+      const v = fetchView(r)
+      if (v.stage === 'show') { Object.assign(loginSt, { stage: 'show', url: v.url, code: v.code, exp: v.exp, name: v.name, left: secondsLeft(v.exp) }); return }
+      if (v.stage === 'done') return loginEnd(v.text, v.ok)
+      loginSt.text = v.text
+    }
+    const loginYes = async () => {
+      if (loginSt.stage !== 'confirm') return
+      const { node, vendor } = loginSt
+      Object.assign(loginSt, { stage: 'sending', text: LOGIN_TEXT.sending })
+      let r = null
+      try { r = await invoke('setup_device_request', { node, vendor }) } catch (e) { if (loginSt.node === node) loginEnd(loginErrorText(e)); return }
+      if (loginSt.node !== node) return
+      const v = requestView(r)
+      if (v.stage === 'done') return loginEnd(v.text)
+      Object.assign(loginSt, { stage: 'waiting', rid: v.rid, text: v.text })
+      loginTimer = setInterval(() => void loginTick(), LOGIN_POLL_MS)
+      void loginTick()
+    }
+    const loginClose = () => loginReset()
+    // App 進背景：顯示中的代碼清掉，結束這一輪
+    document.addEventListener('visibilitychange', () => { if (document.hidden && loginSt.stage === 'show') loginEnd(LOGIN_TEXT.expired) })
     // 返回：細部頁回列表＝退一筆記錄（細部是第四頁籤上的一層；退回列表時 acctSw 由下面的監看整理）。細部頁頂端的「‹ 返回」、標題列返回鍵、系統返回鍵都一樣
     const acctBackToList = () => back()
     // 第四頁籤的內頁換了：設備與帳號的列表／細部跟著記錄走；離開設備與帳號就讓還在跑的讀取與切換不再更新畫面
     watch(fourthPage, (p, old) => {
-      if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset() } return }
+      if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset(); loginReset() } return }
       if (p.node) { acctSw.node = p.node; acctSw.page = 'detail'; return }
       if (old?.kind === 'acct' && old.node) acctToken++   // 細部退回列表：進行中的切換不再更新畫面
       Object.assign(acctSw, { phase: 'pick', page: 'list', node: '', picked: '' })
@@ -1153,7 +1201,7 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permReqTitle, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,

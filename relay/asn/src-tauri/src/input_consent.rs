@@ -51,6 +51,29 @@ pub fn bar_label(who: &Who) -> String {
     format!("{name}（指紋 {}{first}）", who.fp8)
 }
 
+/// #933：本人在設定頁勾「允許這支手機替這台登入」之前的確認框文字：名字＋指紋前 8 碼（和紅條同一種），寫清楚勾了能做什麼
+pub fn login_ok_text(name: &str, sign_pub: &str) -> String {
+    let name = clean(name, NAME_MAX);
+    let name = if name.is_empty() { "這支手機".to_string() } else { format!("「{name}」") };
+    let fp8: String = fingerprint(sign_pub).chars().take(8).collect();
+    format!("{name}（指紋 {fp8}）\n\n勾了以後，這支手機可以讓這台電腦登入 Codex 等帳號：這台會開始登入，登入網址和代碼只會加密送到那支手機。\n\n請先確認指紋和那支手機設定頁顯示的一樣，而且是你自己的手機。要允許嗎？")
+}
+
+/// 勾「允許替這台登入」前問本人。允許回 true；取消、關掉、逾時都回 false
+pub async fn ask_login_ok(app: &AppHandle, name: &str, sign_pub: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    app.dialog()
+        .message(login_ok_text(name, sign_pub))
+        .title("ASN：允許手機替這台登入")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("允許".into(), "取消".into()))
+        .show(move |ok| {
+            let _ = tx.send(ok);
+        });
+    matches!(tokio::time::timeout(std::time::Duration::from_secs(ASK_SECS), rx).await, Ok(Ok(true)))
+}
+
 /// 問本人。允許回 true；不允許、關掉、逾時都回 false
 pub async fn ask(app: &AppHandle, who: &Who, window: &str) -> bool {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -81,6 +104,26 @@ mod tests {
         let mut k = KnownPeers::default();
         k.remember("d", "家用機", PUB, 1).unwrap();
         k
+    }
+
+    #[test]
+    fn 允許替這台登入的確認框_有名字與指紋前八碼_寫清楚能做什麼() {
+        let t = login_ok_text("我的手機", PUB);
+        let fp8: String = fingerprint(PUB).chars().take(8).collect();
+        assert!(t.starts_with(&format!("「我的手機」（指紋 {fp8}）")), "{t}");
+        assert!(t.contains("可以讓這台電腦登入 Codex 等帳號"));
+        assert!(login_ok_text("", PUB).starts_with("這支手機（指紋 "));
+    }
+
+    /// 接線守門：打開「允許替這台登入」一定先問本人（確認框），按允許才寫入；關掉不用問
+    #[test]
+    fn 守門_勾允許替這台登入要先過確認框() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let start = lib.find("async fn device_known_login_ok(").expect("設定頁的命令");
+        let f = &lib[start..start + lib[start..].find("\n}\n").unwrap()];
+        let (ask, set) = (f.find("input_consent::ask_login_ok(").expect("要先問"), f.find("device_id::live::set_login_ok(").unwrap());
+        assert!(ask < set, "先問本人才寫入");
+        assert!(f.contains("if on {"), "只有打開時要問");
     }
 
     #[test]
