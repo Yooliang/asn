@@ -293,3 +293,28 @@ fn 同期回升_差超過_2_的值重新計數() {
     assert!(feed(&h, 0.90, T1 + 15 * MIN), "新值第 3 次、離新值第一次 10 分鐘");
     assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(90));
 }
+
+#[test]
+fn 同一次讀取裡_5_小時同期回升被擋_每週照常收下_5_小時維持舊值_每週有更新() {
+    // 實際情境（11-09 工作機）：兩條窗在同一次讀取裡，一條同期回升被擋、另一條（值沒變）照收
+    let h = tempfile::tempdir().unwrap();
+    let both = |five: f64, week: f64| {
+        json!({ "email": ME, "quota": {
+            "gemini-5h": { "remaining_fraction": five, "reset_time": "2026-11-09T16:00:00Z" },
+            "gemini-weekly": { "remaining_fraction": week, "reset_time": RESET } } })
+        .to_string()
+    };
+    let r = parse_statusline(&both(0.20, 0.0), T1).unwrap();
+    assert!(record(h.path(), &r, T1).unwrap());
+    let before = load_all(h.path())[ME].quota.clone();
+    // 6 分鐘後（超過 5 分鐘的重寫間隔）：5 小時回升到 60%（被擋），每週還是 0%（照收）
+    let t = T1 + 6 * MIN;
+    let r = parse_statusline(&both(0.60, 0.0), t).unwrap();
+    assert!(record(h.path(), &r, t).unwrap(), "每週收下了，要寫檔");
+    let after = load_all(h.path())[ME].quota.clone();
+    assert_eq!(after.five_hour_pct, Some(20), "被擋的 5 小時維持舊值");
+    assert_eq!(after.five_at, before.five_at, "被擋的 5 小時讀取時間不動");
+    assert_eq!(after.weekly_pct, Some(0));
+    assert_eq!(after.week_at, Some(iso_secs(t)), "每週的讀取時間往前走");
+    assert_ne!(after.week_at, before.week_at);
+}
