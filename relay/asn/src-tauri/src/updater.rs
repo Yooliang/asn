@@ -45,9 +45,31 @@ pub async fn update_check(app: AppHandle, st: State<'_, App>, pending: State<'_,
     Ok(info)
 }
 
+/// 誰觸發這次安裝（記進 ui.log，事後查得到是本機按的還是別台交辦的）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    /// 本機名單上方的「更新」鈕
+    Local,
+    /// 本人在別台按「更新」，經在線回報交辦
+    Remote,
+}
+
+/// ui.log 的一行：誰觸發、從哪版到哪版（不記任何內容或網址）
+pub fn install_log_line(now_ms: i64, trigger: Trigger, from: &str, to: &str) -> String {
+    let who = match trigger {
+        Trigger::Local => "本機按「更新」",
+        Trigger::Remote => "別台交辦的遠端更新",
+    };
+    format!("{} info [ASN] 更新：開始下載並安裝（{who}），{from} → {to}", crate::claude_quota::iso_secs(now_ms))
+}
+
 /// 下載（進度以 `update-progress` 事件送給前端）→ 驗簽（下載完成時由外掛做，不符就丟錯）→ 安裝；Windows 安裝程式會結束本程式並自動重開
 #[tauri::command]
 pub async fn update_install(app: AppHandle, st: State<'_, App>, pending: State<'_, Pending>) -> Result<(), String> {
+    install_from(app, st, pending, Trigger::Local).await
+}
+
+async fn install_from(app: AppHandle, st: State<'_, App>, pending: State<'_, Pending>, trigger: Trigger) -> Result<(), String> {
     if st.shot.is_some() {
         return Err("--shot 模式不更新".into());
     }
@@ -55,7 +77,12 @@ pub async fn update_install(app: AppHandle, st: State<'_, App>, pending: State<'
     if pending.busy.swap(true, Ordering::SeqCst) {
         return Err(BUSY_TEXT.into());
     }
+    let now = crate::heartbeat::now_ms() as i64;
+    let _ = crate::ui_log::append(&st.work_dir, &[install_log_line(now, trigger, env!("CARGO_PKG_VERSION"), &update.version)]);
     let r = run_install(&app, &update).await;
+    if let Err(e) = &r {
+        let _ = crate::ui_log::append(&st.work_dir, &[format!("{} info [ASN] 更新：沒有完成（{e}）", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+    }
     pending.busy.store(false, Ordering::SeqCst);
     r
 }
@@ -79,7 +106,7 @@ pub async fn run_remote(app: &AppHandle) -> Result<Remote, String> {
     if update_check(app.clone(), app.state::<App>(), app.state::<Pending>()).await?.is_none() {
         return Ok(Remote::Latest);
     }
-    match update_install(app.clone(), app.state::<App>(), app.state::<Pending>()).await {
+    match install_from(app.clone(), app.state::<App>(), app.state::<Pending>(), Trigger::Remote).await {
         Ok(()) => Ok(Remote::Installed),
         Err(e) if e == BUSY_TEXT => Ok(Remote::Busy),
         Err(e) => Err(e),
@@ -116,6 +143,18 @@ mod tests {
         assert_eq!(clean_notes(None), "");
         assert_eq!(clean_notes(Some("  修好了\n第二行 ")), "修好了\n第二行");
         assert_eq!(clean_notes(Some(&"字".repeat(5000))).chars().count(), 2000);
+    }
+
+    #[test]
+    fn 安裝時記一行_誰觸發_從哪版到哪版() {
+        let now = 1_794_276_711_000; // 2026-11-10T02:11:51Z
+        let l = install_log_line(now, Trigger::Local, "0.2.12", "0.2.13");
+        assert_eq!(l, "2026-11-10T02:11:51Z info [ASN] 更新：開始下載並安裝（本機按「更新」），0.2.12 → 0.2.13");
+        assert!(install_log_line(now, Trigger::Remote, "0.2.12", "0.2.13").contains("（別台交辦的遠端更新）"));
+        // 兩個入口都要經過記這一行的函式
+        let src = include_str!("updater.rs");
+        assert!(src.contains("install_from(app, st, pending, Trigger::Local)"));
+        assert!(src.contains("Trigger::Remote).await"));
     }
 
     #[test]
