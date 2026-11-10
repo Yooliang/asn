@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { splitTabs } from '../ui/lib/panels.mjs'
-import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, SIDE_FOLD_BELOW, SIDE_FOLD_LOCK_TIP, autoFoldSide, sideAutoFolded, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
+import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, SIDE_FOLD_BELOW, SIDE_FOLD_LOCK_TIP, SIDE_OPEN_W, SIDE_FOLDED_W, LIST_PANE_W, autoFoldSide, sideAutoFolded, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
@@ -296,4 +296,22 @@ test('守門（#1293）：chatpane 三顆收合鈕都吃 foldLocked 反灰，提
   assert.equal(btns.length, 3)
   for (const l of btns) { assert.ok(l.includes(':disabled="foldLocked"'), l.trim()); assert.ok(l.includes(':aria-label="foldTip"') && l.includes(':title="foldTip"'), l.trim()) }
   assert.match(fs.readFileSync(path.join(UI, 'list.html'), 'utf8'), /:dp-locked="sideLocked"/)
+})
+
+test('守門（#1293）：list.js 的 toggleDp 鎖定時直接 return、不改 ui.collapsed；style.css 有反灰樣式且 hover 排除 :disabled', () => {
+  const js = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
+  assert.match(js, /const toggleDp = \(\) => \{ if \(sideLocked\.value\) return; ui\.collapsed = toggleCollapsed\(ui\.collapsed\) \}/)
+  assert.equal((js.match(/const toggleDp\b/g) || []).length, 1)
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  assert.match(css, /\.dp-fold-bar:disabled,\.dp-fold-strip:disabled\{opacity:\.45;cursor:not-allowed\}/)
+  assert.match(css, /\.dp-fold-strip:hover:not\(:disabled\)/)
+  assert.match(css, /\.dp-fold-bar:hover:not\(:disabled\)/)
+})
+
+test('守門：style.css 寫死的寬度跟 merge.mjs 常數一致（大頭貼欄、收起、名單）', () => {
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  const xl = Number(css.match(/\.dp-side\{--dp-xl:(\d+)px;[^}]*width:calc\(var\(--dp-xl\) \+ (\d+)px\)/)?.slice(1).map(Number).reduce((a, b) => a + b))
+  assert.equal(xl, SIDE_OPEN_W)
+  assert.equal(Number(css.match(/\.dp-collapsed \.dp-side\{width:(\d+)px\}/)?.[1]), SIDE_FOLDED_W)
+  assert.equal(Number(css.match(/\.shell\.merged > \.list-pane\{flex:none;width:(\d+)px\}/)?.[1]), LIST_PANE_W)
 })

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetWhen } from '../ui/lib/account-quota.mjs'
+import { CHAT_PANE_MIN_W, SIDE_OPEN_W } from '../ui/lib/merge.mjs'
 import { LAUNCH_DISPLAY_NOTE, launchRun, launchVendors } from '../ui/lib/mobile-launch.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
@@ -594,7 +595,7 @@ export const mnoselfProbeSource = () => `(async () => {
 // 整合模式窄視窗（#1192）：兩個窗格放不下時一次只顯示一個，右窗格開著時要有「返回名單」回到名單；放得下就維持左右並排。
 // single=true：這個寬度必須是單窗格；single=false：必須是兩窗格且右邊夠寬。共通：不橫向捲動、標題不直排、帳號卡看得到
 export const MPANE_PROBES = { single: { mpane: true, single: true }, double: { mpane: true, single: false } }
-export const MPANE_CHAT_MIN = 180
+export const MPANE_CHAT_MIN = CHAT_PANE_MIN_W   // 跟斷點用同一個常數（200）
 export const mpaneProbeSource = ({ single }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
@@ -670,13 +671,30 @@ export const mpaneChatProbeSource = ({ single, folded }) => `(async () => {
   if (${folded ? 'true' : 'false'}) {
     if (!strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄應該被自動收起' };
     if (!strip.disabled) return { ok: false, why: '自動收起時展開鈕應該反灰' };
+    const cs = getComputedStyle(strip);
+    if (!(parseFloat(cs.opacity) < 1) || cs.cursor === 'pointer') return { ok: false, why: '自動收起時展開鈕要看得出反灰：opacity ' + cs.opacity + '、cursor ' + cs.cursor };
+    strip.click(); await sleep(300);   // 反灰的鈕按了不能改設定（放寬後的 widen 探測會確認欄恢復展開）
+    if (!q('.chat-area .dp-fold-strip')) return { ok: false, why: '點反灰的展開鈕後欄不該展開' };
     if (strip.title !== '視窗太窄，放寬就會恢復' || strip.getAttribute('aria-label') !== '視窗太窄，放寬就會恢復') return { ok: false, why: '展開鈕提示不對：' + strip.title + ' / ' + strip.getAttribute('aria-label') };
   } else {
     if (strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄不該被收起' };
+    const cs = getComputedStyle(foldBtn);
+    if (cs.opacity !== '1' || cs.cursor !== 'pointer') return { ok: false, why: '可按的收合鈕 opacity 要 1、cursor 要 pointer：' + cs.opacity + ' / ' + cs.cursor };
     if (foldBtn.disabled || foldBtn.title.includes('視窗太窄')) return { ok: false, why: '放得下時收合鈕應該可按、沒有「視窗太窄」提示：' + foldBtn.title };
   }
   const conv = q('.chat-area .conv-main');
   if (!conv || conv.getBoundingClientRect().width < ${MPANE_CONV_MIN}) return { ok: false, why: '對話區只有 ' + (conv ? Math.round(conv.getBoundingClientRect().width) : 0) + 'px（至少 ${MPANE_CONV_MIN}）：' + JSON.stringify(m) };
+  return { ok: true, why: '' };
+})()`
+// 放寬視窗後（smoke-ui 把寬度改成 sc.widen 再跑這個）：自動收起沒有寫進設定，所以大頭貼欄要恢復展開、收合鈕可按
+export const mpaneWidenProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  await sleep(500);
+  const side = document.querySelector('.chat-area .dp-side'), bar = document.querySelector('.chat-area .dp-fold-bar');
+  if (!side) return { ok: false, why: '找不到大頭貼欄' };
+  if (document.querySelector('.chat-area .dp-fold-strip')) return { ok: false, why: '放寬到 ' + window.innerWidth + ' 後大頭貼欄還是收起（自動收起不該寫進設定）' };
+  if (Math.round(side.getBoundingClientRect().width) !== ${SIDE_OPEN_W}) return { ok: false, why: '大頭貼欄寬 ' + side.getBoundingClientRect().width + '，應該恢復展開的 ${SIDE_OPEN_W}' };
+  if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
 export const probeKind = probe => (probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
@@ -1229,7 +1247,7 @@ export const SCENARIOS = [
   { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
   { name: 'list-merged-280', page: 'list.html', width: 280, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-280.png' },
   { name: 'list-merged-360', page: 'list.html', width: 360, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-360.png' },
-  { name: 'list-merged-chat-520', page: 'list.html', width: 520, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-520.png' },
+  { name: 'list-merged-chat-520', page: 'list.html', width: 520, widen: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-520.png' },
   { name: 'list-merged-chat-600', page: 'list.html', width: 600, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-600.png' },
   { name: 'list-merged-chat-700', page: 'list.html', width: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-700.png' },
   { name: 'list-merged-chat-800', page: 'list.html', width: 800, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-800.png' },
