@@ -103,3 +103,9 @@ test('903 矩陣：最後一列寫滿整列時，沒有多的換行（不會多�
   assert.equal(p.row, 39)
   assert.equal(p.col, 119)
 })
+
+test('預設是文字樣式的符號（🖥 🌡 🗨）照 1 格，預設彩色的 emoji（✅ 🙂 🚀 🤖）2 格', async () => {
+  const { cellWidth } = await import('../ui/lib/term-width.mjs')
+  for (const ch of ['\u{1F5A5}', '\u{1F321}', '\u{1F5E8}']) assert.equal(cellWidth(ch.codePointAt(0)), 1, ch)
+  for (const ch of ['\u2705', '\u{1F642}', '\u{1F680}', '\u{1F916}']) assert.equal(cellWidth(ch.codePointAt(0)), 2, ch)
+})
