@@ -69,8 +69,8 @@ test('守門：全文不進儲存、網址、console；只有選項按鈕，沒�
   assert.ok(!/<input|<textarea|contenteditable|v-html/.test(sheet), '沒有輸入框，全文不走 v-html')
   assert.match(sheet, /:disabled="pq\.busy \|\| !pq\.armed"/)
   // 排版（#921b）：標題用 askTitle 組；沒有說明句、沒有「哪台電腦／哪個夥伴／內容」標籤列；內容緊接標題
-  assert.match(sheet, /<h2 class="m-ops-h">\{\{ permReqTitle \}\}<\/h2>/)
-  assert.match(sheet, /:aria-label="permReqTitle"/)
+  assert.match(sheet, /<h2 class="m-ops-h">\{\{ permShownTitle \}\}<\/h2>/)
+  assert.match(sheet, /:aria-label="permShownTitle"/)
   assert.match(js, /permReqTitle = computed\(\(\) => pqAskTitle\(pq\.cur\?\.deviceName, pq\.cur\?\.window\)\)/)
   for (const gone of ['deviceLabel', 'windowLabel', 'textLabel', 'PERMREQ_TEXT.lead', 'PERMREQ_TEXT.title', 'm-ops-lead', '<dl', '<dt', '<dd']) assert.ok(!sheet.includes(gone), `不再有 ${gone}`)
   assert.match(sheet, /<div class="m-term-preview m-perm-text"><template v-for="\(g, i\) in permSegs\(pq\.cur\.text\)"[^>]*><hr class="m-perm-rule" aria-hidden="true" v-if="g\.rule"><template v-else>\{\{ g\.text \}\}<\/template><\/template><\/div>/, '內容仍是文字節點、版型 class 不變')

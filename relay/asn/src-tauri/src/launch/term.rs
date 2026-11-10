@@ -2036,8 +2036,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
         let (snap, text) = self.partner_screen_checked(name, session_pid)?;
-        let screen = super::claude_screen::classify(&text).filter(|s| s.kind == super::claude_screen::ClaudeScreenKind::Permission).ok_or("這個提示已經不在畫面上")?;
-        let prompt = super::claude_screen::permission_text(&text).ok_or("這個提示已經不在畫面上")?;
+        use super::claude_screen::ClaudeScreenKind as K;
+        let screen = super::claude_screen::classify(&text).filter(|s| matches!(s.kind, K::Permission | K::HeldMessage)).ok_or("這個提示已經不在畫面上")?;
+        // 外來訊息只給整理過的摘要，不給畫面原文
+        let prompt = if screen.kind == K::HeldMessage { super::claude_screen::phone_text(&text) } else { super::claude_screen::permission_text(&text) }.ok_or("這個提示已經不在畫面上")?;
         Ok((snap, screen, prompt))
     }
 
@@ -2051,8 +2053,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 權限詢問的文字，只給本機畫面的命令用（其他畫面、其他代號都拿不到文字）
     fn permission_prompt_with(&self, name: &str, session_pid: Option<u32>) -> Result<PermissionPrompt, String> {
-        let (_, _, p) = self.permission_checked(name, session_pid)?;
-        Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete })
+        let (_, screen, p) = self.permission_checked(name, session_pid)?;
+        let kind = if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage { "held_message" } else { "permission" };
+        Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete, kind })
     }
 
     /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
@@ -2071,6 +2074,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !(1..=9).contains(&n) || !offer.options.iter().any(|o| o.n == n) {
             return Err("這個提示沒有這個選項".into());
         }
+        if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
+            // 外來訊息框是不帶編號的選單：游標一定要在第一項，才送「Enter」或「向下＋Enter」，一次寫進去
+            if screen.cursor != 0 {
+                return Err(HELD_CHANGED.into());
+            }
+            let keys = held_keys(screen.cursor, n).ok_or(HELD_CHANGED)?;
+            let bytes = encode_keys(&keys)?;
+            let dir = self.dir()?;
+            return self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &bytes);
+        }
         let dir = self.dir()?;
         self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &n.to_string())
     }
@@ -2084,6 +2097,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         if allow && !p.complete {
             return Err("提示太長，請到視窗裡確認".into());
+        }
+        if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
+            // 重查已經做完（permission_checked 重新讀畫面並分類、上面比過雜湊）：還要框還在、游標還在「不放行」上
+            if screen.cursor != 0 {
+                return Err(HELD_CHANGED.into());
+            }
+            let keys = held_keys(screen.cursor, if allow { 2 } else { 1 }).ok_or(HELD_CHANGED)?;
+            let bytes = encode_keys(&keys)?;
+            let dir = self.dir()?;
+            return self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &bytes);
         }
         let n = if allow { screen.allow_once } else { screen.deny }.ok_or("這個提示沒有這個選項")?;
         if !(1..=9).contains(&n) {
@@ -2603,6 +2626,23 @@ fn menu_keys(cursor: u32, n: u32) -> Result<Vec<AnswerKey>, String> {
     Ok(keys)
 }
 
+/// 外來訊息確認框送鍵時畫面已經不一樣
+const HELD_CHANGED: &str = "畫面已經變了，請到那台電腦的畫面上處理";
+
+/// 外來訊息確認框：兩個沒有編號的選項，游標預設在「不放行」。只有游標在第一項才算得出鍵：
+/// 1（不放行）＝Enter；2（放行）＝向下、Enter。其他情況一律 None。
+/// 只有「本人在提示框上按下」的兩個入口（permission_answer_with、phone_answer_with）會呼叫
+fn held_keys(cursor: usize, n: u32) -> Option<Vec<AnswerKey>> {
+    if cursor != 0 {
+        return None;
+    }
+    match n {
+        1 => Some(vec![AnswerKey::Enter]),
+        2 => Some(vec![AnswerKey::Down, AnswerKey::Enter]),
+        _ => None,
+    }
+}
+
 /// 唯一會產生終端機控制碼的地方。字元鍵只准單一英數字元，其他控制碼字串一律拒絕。
 fn encode_key(key: AnswerKey) -> Result<String, String> {
     Ok(match key {
@@ -3038,6 +3078,8 @@ pub struct PermissionPrompt {
     pub hash: String,
     /// 看得到完整的提示才可以按「允許」
     pub complete: bool,
+    /// "permission"（權限框）或 "held_message"（外來訊息確認框）
+    pub kind: &'static str,
 }
 
 /// 這個視窗名現在活著的 Claude 程序：session 檔的編號活著、建立時間相符，而且只有一份；不是一份就回 None
@@ -3638,6 +3680,53 @@ mod remote_guard_tests {
         let g = port.find("remote_input_guard(&pane)").expect("遠端打字先查畫面");
         assert!(g < port.find("self.terms.view_input(").unwrap(), "查完才交");
         assert!(port[g..].contains("End::HeldPrompt"));
+    }
+
+    #[test]
+    fn 外來訊息確認框的送鍵_游標在第一項才有鍵_只認兩個選項() {
+        assert_eq!(encode_keys(&held_keys(0, 1).unwrap()).unwrap(), "\r", "不放行：Enter");
+        assert_eq!(encode_keys(&held_keys(0, 2).unwrap()).unwrap(), "\u{1b}[B\r", "放行：向下、Enter");
+        assert!(held_keys(1, 1).is_none() && held_keys(1, 2).is_none(), "游標不在第一項：不送");
+        assert!(held_keys(0, 0).is_none() && held_keys(0, 3).is_none() && held_keys(0, 9).is_none());
+    }
+
+    fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                rs_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    #[test]
+    fn 守門_外來訊息的送鍵只有兩個本人按下的入口會呼叫_橋接與遠端入口碰不到() {
+        let src = include_str!("term.rs").replace("\r\n", "\n");
+        let prod = src.split("mod remote_guard_tests").next().unwrap();
+        // 定義一次、呼叫兩次：各在 permission_answer_with 與 phone_answer_with 裡
+        assert_eq!(prod.matches("held_keys(").count(), 3, "定義加兩個入口");
+        for f in ["fn permission_answer_with(", "fn phone_answer_with("] {
+            let body = prod.split(f).nth(1).unwrap().split("\n    }\n").next().unwrap();
+            assert_eq!(body.matches("held_keys(").count(), 1, "{f}");
+            assert!(body.contains("HeldMessage"), "{f} 先確認還是外來訊息框");
+        }
+        // 終端面板的代答：先擋外來訊息框
+        let ans = prod.split("pub fn answer(").nth(1).unwrap().split("\n    }\n").next().unwrap();
+        assert!(ans.contains("is_held_message(&text)") && ans.contains("HELD_ANSWER_REFUSED"));
+        assert!(!ans.contains("held_keys("));
+        // 橋接與遠端打字的程式碼不能碰這些入口
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![root.join("term_remote.rs")];
+        rs_files(&root.join("bridge"), &mut files);
+        rs_files(&root.join("term_remote"), &mut files);
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            for name in ["permission_answer_with", "phone_answer_with", "held_keys", "partner_permission_answer", "partner_phone_answer"] {
+                assert!(!text.contains(name), "{} 不能碰 {name}", f.display());
+            }
+        }
     }
 }
 

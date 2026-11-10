@@ -1,4 +1,5 @@
 // 夥伴卡住的本機提醒（todo-next-162）：後端只給視窗名與固定代號，畫面上的字都在這裡，不顯示任何畫面內容。
+import { HELD_HINT, heldTitle } from './held.mjs'
 export const NOTICE_POLL_MS = 15_000
 
 const NOTICES = {
@@ -10,6 +11,7 @@ const NOTICES = {
   question: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選一個答案，請到它的視窗回答。` }),
   question_view: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選答案，請到它的視窗回答。` }),
   attention: name => ({ title: '夥伴需要你看一下', body: `「${name}」停在一個選單，請到它的視窗確認。` }),
+  held_message: name => ({ title: '夥伴收到外來訊息', body: `「${name}」收到一則外來訊息，等你決定要不要放行。` }),
 }
 
 /** 代號 → 要顯示的字；不認得的代號不顯示 */
@@ -27,8 +29,8 @@ export function nextNotices(list, seen = new Set()) {
     const key = `${item.code}\n${item.name}`
     now.add(key)
     if (seen.has(key)) continue
-    // 權限詢問另外開確認框（要讀完整的提示），不跳一般提醒
-    if (item.code === 'permission') freshItems.push(item)
+    // 權限詢問與外來訊息另外開確認框（要讀完整的提示），不跳一般提醒
+    if (item.code === 'permission' || item.code === 'held_message') freshItems.push(item)
     else fresh.push(text)
   }
   // 上一輪有、這一輪沒有的：夥伴已經回答了，開著的提醒要收掉
@@ -45,6 +47,7 @@ const VIEW_HINTS = {
   trust: '它在問要不要信任這個資料夾：直接在下面的畫面回答。',
   bypass_warning: '它在等你確認權限設定：直接在下面的畫面回答。',
   attention: '它停在一個選單：直接在下面的畫面回答。',
+  held_message: '它收到一則外來訊息，在等你決定要不要放行：請你自己在下面的畫面選。',
 }
 export function viewHint(list, name) {
   const hit = (Array.isArray(list) ? list : []).find(i => i?.name === name && Object.hasOwn(VIEW_HINTS, i?.code))
@@ -55,8 +58,12 @@ export function viewHint(list, name) {
 export const noticeStillFor = (item, body) => noticeText(item)?.body === body
 
 /** 權限確認框要顯示什麼：不完整就不給「允許」 */
-export function permissionView(p) {
+export function permissionView(p, name = '') {
   const text = typeof p?.text === 'string' ? p.text : ''
+  // 外來訊息：文字是後端整理過的摘要，只能放行或不放行（沒有「以後都放行」）；不完整就不給放行
+  if (p?.kind === 'held_message') {
+    return { held: true, title: heldTitle(name), text, canAllow: p?.complete === true && !!text, canDeny: !!text, hint: HELD_HINT, denyLabel: '不放行', allowLabel: '放行這一則' }
+  }
   return { text, canAllow: p?.complete === true && !!text, canDeny: !!text, hint: p?.complete === true ? '' : '提示太長，這裡顯示不完整。要允許請到它的視窗確認。' }
 }
 
