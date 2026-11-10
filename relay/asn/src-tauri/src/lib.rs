@@ -55,6 +55,10 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+// 手機確認電腦指紋的四選一（只在手機建置用；電腦版只編進測試）
+#[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod known_pick;
 // #933 PR-5b：手機替電腦登入裝置碼型 CLI 的請求與回傳格式（電腦、手機共用）
 mod device_relay;
 mod android_keywrap;
@@ -2875,7 +2879,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_confirm, android::android_known_forget, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_confirm, android::android_known_forget, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {

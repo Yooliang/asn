@@ -498,7 +498,7 @@ test('手機看電腦終端：四個指令手機也有、打字的指令只有�
   assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.doesNotMatch(rs, /term_view_remote_input/)
-  const noKnown = rs.replace(/pub fn android_known_(list|confirm|forget)[\s\S]*?\n\}\n/g, '')
+  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|confirm|forget)[\s\S]*?\n\}\n/g, '')
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')

@@ -186,14 +186,11 @@ pub fn started_json(id: &str, expires_s: i64, scope: Scope) -> Value {
     json!({ "id": id, "expires_s": expires_s, "scope": scope.as_str() })
 }
 
-/// 手機看畫面開始後回給畫面的資料：多帶這台電腦的指紋（完整 16 字元＋前 8 碼）和有沒有確認過。
-/// 指紋由驗過的公鑰算出來，不是顯示用的文字；畫面按「記住這台」時把完整指紋原樣交回
+/// 手機看畫面開始後回給畫面的資料：多帶有沒有確認過、那台的節點。**不帶指紋**：
+/// 沒確認過的電腦，畫面不能知道它的指紋（確認靠四選一，答案只在 Rust）
 pub fn started_view_json(begun: &Begun) -> Value {
-    let fp = crate::device_id::fingerprint(&begun.target.sign_pub);
     let mut v = started_json(&begun.id, begun.session.expires_s, begun.session.scope);
     v["confirmed"] = json!(begun.target.confirmed);
-    v["fp8"] = json!(crate::device_id::fp8(&begun.target.sign_pub));
-    v["fp"] = json!(fp);
     v["node"] = json!(begun.target.node);
     v
 }
@@ -408,13 +405,15 @@ mod tests {
     }
 
     #[test]
-    fn 手機的開始資料_帶指紋和有沒有確認_確認只算記住的同一把() {
+    fn 手機的開始資料_帶有沒有確認_不帶指紋_確認只算記住的同一把() {
         let fp = crate::device_id::fingerprint("same");
         let mut k = known_with("pc", "same");
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), k.clone());
         let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), None, NOW)).unwrap();
         let j = started_view_json(&got);
-        assert_eq!((j["confirmed"].clone(), j["fp"].clone(), j["fp8"].clone()), (json!(false), json!(fp), json!(&fp[..8])));
+        assert_eq!((j["confirmed"].clone(), j["node"].clone()), (json!(false), json!("pc")));
+        assert!(j.get("fp").is_none() && j.get("fp8").is_none(), "不帶指紋：{j}");
+        assert!(!j.to_string().contains(&fp));
         assert!(k.confirm("pc", &fp, NOW));
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), k.clone());
         let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
@@ -423,7 +422,8 @@ mod tests {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), KnownPeers::default());
         let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
         assert_eq!((got.target.tofu, got.target.confirmed), (Tofu::New, false));
-        assert_eq!(started_view_json(&got)["fp"], json!(fp));
+        let j = started_view_json(&got);
+        assert!(j.get("fp").is_none() && j.get("fp8").is_none() && !j.to_string().contains(&fp), "{j}");
     }
 
     #[test]

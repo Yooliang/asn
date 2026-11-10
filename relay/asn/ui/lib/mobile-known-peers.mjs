@@ -12,9 +12,12 @@ export const TEXT = {
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   sheetTitle: name => `確認「${name}」的指紋`,
-  sheetBody: fp => `請到那台電腦的設定頁，確認那裡顯示的這台電腦指紋是 ${fp}（16 個字全部一樣）。一樣再按「記住這台」。`,
-  remember: '記住這台',
-  decline: '不要',
+  sheetBody: '請看那台電腦的設定頁，選出和那裡顯示的「這台電腦的指紋」完全一樣的那一組。',
+  noneOption: '都不一樣',
+  cancel: '取消',
+  wrong: '選的和電腦上顯示的不一樣，這次沒有記住。要再確認請重新按「確認指紋」。',
+  noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。',
+  expired: '太久沒選，請重新按「確認指紋」。',
   settingTitle: '認得的電腦',
   settingLead: '看過的電腦會記在這支手機上。確認過指紋的，才放心讓它接受這支手機的操作。',
   none: '還沒有認得的電腦。',
@@ -26,7 +29,6 @@ export const TEXT = {
   noneSummary: '還沒有認得的電腦',
   summary: n => `${n} 台`,
   notReady: '還沒記住這台電腦，請等畫面出來再按一次。',
-  mismatch: '指紋對不上，沒有記住。請關掉再重新看一次。',
   failed: '操作沒有成功，請稍後再試。',
 }
 
@@ -37,27 +39,30 @@ export const fpSuffix = fp8 => `（指紋 ${fp8}）`
 export const groupFp = fp => (FP16.test(String(fp ?? '')) ? String(fp).match(/.{4}/g).join(' ') : '')
 
 const FP16 = /^[0-9a-f]{16}$/
+const OPTION = /^[0-9a-f]{4}( [0-9a-f]{4}){3}$/
 
 /**
- * Rust 回的「開始看」資料 → 這台電腦的指紋狀態。fp 不是 16 個小寫十六進位字元就當沒有（不顯示確認條）。
- * fp8 一律從 fp 切，不信另外傳來的字。name 是畫面上顯示用的名字（只當文字顯示）
+ * Rust 回的「開始看」資料 → 這台電腦的確認狀態。只要有節點就算（不帶指紋：沒確認的電腦，畫面不能知道它的指紋）。
+ * name 是畫面上顯示用的名字（只當文字顯示）
  */
 export function peerOf(started, name = '') {
-  const fp = typeof started?.fp === 'string' ? started.fp : ''
   const node = typeof started?.node === 'string' ? started.node : ''
-  if (!FP16.test(fp) || !node) return null
-  return { node, fp, fp8: fp.slice(0, 8), fpShow: groupFp(fp), confirmed: started?.confirmed === true, name: clean(name) || '那台電腦' }
+  if (!node) return null
+  return { node, confirmed: started?.confirmed === true, name: clean(name) || '那台電腦' }
 }
 
 /** 要不要顯示「還沒確認指紋」的條 */
 export const needsConfirm = peer => !!peer && peer.confirmed !== true
 
-/** Rust 回的設定頁列表 → 畫面。欄位壞掉的丟掉；只有名字、指紋前 8 碼、有沒有確認 */
+/** Rust 回的設定頁列表 → 畫面。欄位壞掉的丟掉；指紋只有確認過的才有（沒確認的 fpShow 是空字串，不顯示） */
 export function normalizeList(raw) {
   const arr = Array.isArray(raw?.peers) ? raw.peers : []
   return arr
-    .filter(p => typeof p?.node === 'string' && p.node && FP16.test(String(p?.fp ?? '')))
-    .map(p => ({ node: p.node, name: clean(p.name) || '某台電腦', fpShow: groupFp(p.fp), confirmed: p.confirmed === true }))
+    .filter(p => typeof p?.node === 'string' && p.node)
+    .map(p => {
+      const confirmed = p.confirmed === true
+      return { node: p.node, name: clean(p.name) || '某台電腦', fpShow: confirmed ? groupFp(p.fp) : '', confirmed }
+    })
 }
 
 /** 設置分頁那一列的摘要 */
@@ -82,11 +87,30 @@ export function makeKnownPeers({ confirm = () => confirmViewer(), invoke = tauri
   }
   return {
     list: async () => normalizeList(await invoke('android_known_list')),
-    /** 回 'done'（記住了）｜'cancel'（本人取消）｜'not_ready'（Rust 說沒記到：還沒記住那台，或指紋對不上） */
-    remember: async peer => {
-      if (!peer?.node || !FP16.test(String(peer?.fp ?? ''))) return 'not_ready'
+    /** 出四選一的題目：回 { id, options:[4 組分組指紋] }；那台還沒記住回 null */
+    challenge: async peer => {
+      if (!peer?.node) return null
+      let r
+      try { r = await invoke('android_known_challenge', { node: peer.node }) } catch (e) {
+        if (String(e?.message ?? e) === 'not_ready') return null
+        throw e
+      }
+      const options = Array.isArray(r?.options) ? r.options : []
+      if (typeof r?.id !== 'string' || !r.id || options.length !== 4 || !options.every(o => OPTION.test(String(o)))) return null
+      return { id: r.id, options: options.map(String) }
+    },
+    /**
+     * 本人選了第 index 個（-1＝都不一樣）。回 'wrong'｜'none'｜'expired'（Rust 說的，題目已收掉）｜
+     * 選對時先過本人確認：'cancel'（取消，沒記住）｜'done'（記住了）｜'not_ready'（Rust 沒記到：金鑰換了、被忘記、過了 60 秒）。
+     * 哪一個是對的只有 Rust 知道，這裡只送選了第幾個
+     */
+    pick: async (id, index) => {
+      if (!id || !Number.isInteger(index) || index < -1 || index > 3) return 'expired'
+      const r = await invoke('android_known_answer', { id, pick: index })
+      if (r === 'wrong' || r === 'none' || r === 'expired') return r
+      if (r !== 'right') throw new Error('unexpected')
       if (!(await gate())) return 'cancel'
-      return (await invoke('android_known_confirm', { node: peer.node, fp: peer.fp })) === true ? 'done' : 'not_ready'
+      return (await invoke('android_known_confirm', { id })) === true ? 'done' : 'not_ready'
     },
     /** 回 'done'｜'cancel' */
     forget: async node => {

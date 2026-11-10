@@ -363,7 +363,7 @@ pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_,
     let handle = window.app_handle().clone();
     let backend = std::sync::Arc::new(crate::LiveBackend::new(handle.clone(), relay, app.data_dir.clone()));
     let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
-    // 回給畫面的資料多帶那台的指紋與有沒有確認過（由驗過的公鑰算出）
+    // 回給畫面的資料多帶有沒有確認過（不帶指紋）
     let started = crate::view_d::started_view_json(&begun);
     let sink = std::sync::Arc::new(crate::LiveSink::new(handle, window.label().to_string()));
     crate::view_d::spawn_view(backend, sink, views.inner().clone(), url, begun);
@@ -384,16 +384,38 @@ pub fn term_view_remote_stop(views: State<'_, std::sync::Arc<crate::view_remote:
 
 // ---------- 認得的電腦（手機）：列表、確認指紋、忘記。確認與忘記前的本人確認（生物辨識或螢幕鎖）由畫面做，命令只收具體的電腦 ----------
 
-/// 設定頁「認得的電腦」：名字、節點、指紋前 8 碼、有沒有確認過。不含完整公鑰
+/// 設定頁「認得的電腦」：名字、節點、有沒有確認過；只有確認過的才帶指紋。不含完整公鑰
 #[tauri::command]
 pub fn android_known_list(app: State<'_, App>) -> Result<serde_json::Value, String> {
     crate::device_id::live::phone_view(&app.data_dir)
 }
 
-/// 本人對照過那台電腦設定頁上的指紋、按了「記住這台」：fp 要和這支手機記住的那把公鑰算出的指紋完全一樣才記。回有沒有記到
+/// 出四選一的題目：只給題目編號與四個選項文字；正確的是哪一個只留在 Rust。那台要先記住（否則 not_ready）。
+/// 正確的指紋由這支手機記住的公鑰算出來
 #[tauri::command]
-pub fn android_known_confirm(app: State<'_, App>, node: String, fp: String) -> Result<bool, String> {
-    crate::device_id::live::confirm(&app.data_dir, &node, &fp, crate::auth::now_ms())
+pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serde_json::Value, String> {
+    let known = crate::device_id::live::known(&app.data_dir)?;
+    let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
+    let (id, options) = crate::known_pick::issue(&node, &peer.sign_pub, crate::auth::now_ms());
+    Ok(serde_json::json!({ "id": id, "options": options }))
+}
+
+/// 回答四選一：pick 是第幾個（從 0 起），-1 是「都不一樣」。回 right／wrong／none／expired；這裡不會記住任何東西
+#[tauri::command]
+pub fn android_known_answer(id: String, pick: i64) -> String {
+    let out = crate::known_pick::answer(&id, pick, crate::auth::now_ms());
+    if out == crate::known_pick::Outcome::NoneMatch {
+        elog!("本人表示手機上的指紋選項都和電腦不一樣，沒有記住");
+    }
+    out.as_str().to_string()
+}
+
+/// 選對之後（畫面先過本人確認）才記住：取走過關的題目（一次、60 秒內），再用記住的那把公鑰重算指紋交給確認；
+/// 這期間那台被忘記或換了公鑰就不記。回有沒有記到
+#[tauri::command]
+pub fn android_known_confirm(app: State<'_, App>, id: String) -> Result<bool, String> {
+    let Some((node, sign_pub)) = crate::known_pick::take_passed(&id, crate::auth::now_ms()) else { return Ok(false) };
+    crate::device_id::live::confirm(&app.data_dir, &node, &crate::device_id::fingerprint(&sign_pub), crate::auth::now_ms())
 }
 
 /// 本人在設定頁按「忘記」：下次再連就當第一次。回有沒有這台

@@ -232,9 +232,15 @@ pub fn fp_grouped(sign_pub: &str) -> String {
     fp.chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
 }
 
-/// 手機設定頁「認得的電腦」的列表：名字、節點、完整指紋（給人核對）、前 8 碼、有沒有確認過。**不含公鑰**
+/// 手機設定頁「認得的電腦」的列表：名字、節點、有沒有確認過；**只有確認過的才帶完整指紋 fp**（沒確認的電腦，畫面不能知道它的指紋，不然四選一就沒意義）。**不含公鑰**
 pub fn phone_known_view(k: &KnownPeers) -> serde_json::Value {
-    serde_json::json!({ "peers": k.peers.iter().map(|p| serde_json::json!({ "node": p.node, "name": p.name, "fp": fingerprint(&p.sign_pub), "fp8": fp8(&p.sign_pub), "confirmed": p.confirmed_at.is_some() })).collect::<Vec<_>>() })
+    serde_json::json!({ "peers": k.peers.iter().map(|p| {
+        let mut v = serde_json::json!({ "node": p.node, "name": p.name, "confirmed": p.confirmed_at.is_some() });
+        if p.confirmed_at.is_some() {
+            v["fp"] = serde_json::json!(fingerprint(&p.sign_pub));
+        }
+        v
+    }).collect::<Vec<_>>() })
 }
 
 /// 收到對方公鑰時的比對結果
@@ -626,16 +632,24 @@ mod tests {
     }
 
     #[test]
-    fn 手機的認得的電腦列表_只有名字_節點_指紋_有沒有確認() {
+    fn 手機的認得的電腦列表_沒確認的不帶指紋_確認過的才帶() {
         let mut k = KnownPeers::default();
         k.remember("pc", "工作機", "pk", 1).unwrap();
+        k.remember("pc2", "辦公室", "pk2", 1).unwrap();
         let v = phone_known_view(&k);
         let p = &v["peers"][0];
-        assert_eq!((p["name"].as_str(), p["node"].as_str(), p["fp8"].as_str(), p["confirmed"].as_bool()), (Some("工作機"), Some("pc"), Some(&fingerprint("pk")[..8]), Some(false)));
-        assert_eq!(p["fp"].as_str(), Some(fingerprint("pk").as_str()), "給人核對的完整指紋");
+        assert_eq!((p["name"].as_str(), p["node"].as_str(), p["confirmed"].as_bool()), (Some("工作機"), Some("pc"), Some(false)));
+        assert_eq!(p.as_object().unwrap().len(), 3, "沒確認的：只有 node／name／confirmed");
+        assert!(p.get("fp").is_none() && p.get("fp8").is_none());
+        let fp = fingerprint("pk2");
+        assert!(k.confirm("pc2", &fp, 5));
+        let v = phone_known_view(&k);
+        let q = &v["peers"][1];
+        assert_eq!(q["fp"].as_str(), Some(fp.as_str()), "確認過的帶完整指紋");
+        assert!(q.get("fp8").is_none());
+        assert_eq!(v["peers"][0].get("fp"), None, "沒確認的仍然沒有");
         let text = v.to_string();
-        assert!(!text.contains("\"pk\""), "不含公鑰：{text}");
-        assert_eq!(p.as_object().unwrap().len(), 5);
+        assert!(!text.contains("\"pk\"") && !text.contains("\"pk2\"") && !text.contains(&fingerprint("pk")), "不含公鑰、沒確認那台的指紋：{text}");
         let g = fp_grouped("pk");
         assert_eq!(g.split(' ').count(), 4);
         assert_eq!(g.replace(' ', ""), fingerprint("pk"));
@@ -885,8 +899,59 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
-            assert!(["android_known_list", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+            assert!(["android_known_list", "android_known_challenge", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
         }
         assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
+    }
+
+    /// 函式本體（從 pub fn 名字到下一個空行加右大括號）
+    fn body_of<'a>(code: &'a str, name: &str) -> &'a str {
+        let at = code.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("找不到 {name}"));
+        code[at..].split("
+}
+").next().unwrap()
+    }
+
+    #[test]
+    fn 守門_四選一_先取走過關的題目才確認_回答不記住_答案不進日誌與事件() {
+        let rs = include_str!("android.rs").replace("
+", "
+");
+        let code = rs.split("
+#[cfg(test)]").next().unwrap();
+        let confirm = body_of(code, "android_known_confirm");
+        let (t, c) = (confirm.find("take_passed(").expect("要先取走過關的題目"), confirm.find("live::confirm(").expect("要確認"));
+        assert!(t < c, "take_passed 在 live::confirm 之前");
+        assert!(confirm.contains("fingerprint(&sign_pub)"), "指紋由記住的公鑰在 Rust 重算，不收畫面給的");
+        assert!(!confirm.contains("fp:"), "確認不收指紋參數");
+        let ans = body_of(code, "android_known_answer");
+        for bad in ["confirmed", "confirm(", "remember(", "live::", "set_confirmed", "confirmed_at"] {
+            assert!(!ans.contains(bad), "回答不能記住任何東西：{bad}");
+        }
+        // 這四個命令：日誌只有「都不一樣」那一行；題目、選項、答案都不進任何日誌、事件、顯示
+        let chal = body_of(code, "android_known_challenge");
+        for (name, b) in [("challenge", chal), ("answer", ans), ("confirm", confirm)] {
+            for bad in ["emit", "ui_log", "println!", "dbg!", "tracing::", "log::", "olog!", "format!"] {
+                assert!(!b.contains(bad), "android_known_{name} 不能有：{bad}");
+            }
+        }
+        assert_eq!(chal.matches("elog!").count() + confirm.matches("elog!").count(), 0);
+        assert_eq!(ans.matches("elog!").count(), 1);
+        let line = ans.split("elog!(").nth(1).unwrap().split(");").next().unwrap();
+        assert_eq!(line, "\"本人表示手機上的指紋選項都和電腦不一樣，沒有記住\"", "只有這一句，不帶任何變數");
+        assert!(chal.contains("peer.sign_pub") && !chal.contains("fingerprint"), "正確指紋由 known_pick 用記住的公鑰算");
+        // 四選一的模組：不寫日誌、不發事件，而且 known_pick 只被這幾個命令叫
+        let kp = include_str!("known_pick.rs").replace("
+", "
+");
+        let kp = kp.split("
+#[cfg(test)]").next().unwrap();
+        for bad in ["elog!", "olog!", "println!", "dbg!", "log::", "tracing::", "emit", "ui_log"] {
+            assert!(!kp.contains(bad), "known_pick.rs 不能有：{bad}");
+        }
+        for (i, _) in code.match_indices("known_pick::") {
+            let f = owner_at(code, i);
+            assert!(["android_known_challenge", "android_known_answer", "android_known_confirm"].contains(&f.as_str()), "{f}");
+        }
     }
 }

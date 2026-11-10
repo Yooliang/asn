@@ -474,24 +474,38 @@ const app = createApp({
       try { await knownPeers.forget(node); await loadKnown() } catch (e) { console.info('[ASN] 忘記這台沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
     }
     // 正在看的那台電腦：開始看時 Rust 回它的指紋與有沒有確認；結束或切回訊息就清掉
-    const vp = reactive({ cur: null, sheet: false, busy: false, error: '' })
-    const onRemoteStarted = r => { vp.cur = knownPeerOf(r, r?.machine); vp.sheet = false; vp.busy = false; vp.error = '' }
-    const onRemoteEnded = () => { vp.cur = null; vp.sheet = false; vp.busy = false; vp.error = '' }
+    const vp = reactive({ cur: null, sheet: false, busy: false, error: '', ch: null, note: '' })
+    const vpReset = () => { vp.cur = null; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = '' }
+    const onRemoteStarted = r => { vpReset(); vp.cur = knownPeerOf(r, r?.machine) }
+    const onRemoteEnded = () => vpReset()
     const peerStrip = computed(() => knownNeedsConfirm(vp.cur))
-    const openPeerSheet = () => { vp.error = ''; vp.sheet = true }
-    const closePeerSheet = () => { vp.sheet = false }
-    const rememberPeer = async () => {
+    // 按「確認指紋」：向 Rust 要四選一的題目（答案只在 Rust），題目出來才開浮層
+    const openPeerSheet = async () => {
       const cur = vp.cur
       if (!cur || vp.busy) return
+      vp.busy = true; vp.error = ''; vp.note = ''
+      try {
+        const ch = await knownPeers.challenge(cur)
+        if (!ch) vp.note = KNOWN_TEXT.notReady
+        else { vp.ch = ch; vp.sheet = true }
+      } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
+    }
+    const closePeerSheet = () => { vp.sheet = false; vp.ch = null }
+    const PEER_NOTES = { wrong: KNOWN_TEXT.wrong, none: KNOWN_TEXT.noneMatch, expired: KNOWN_TEXT.expired, not_ready: KNOWN_TEXT.notReady }
+    // 選一個（-1＝都不一樣）：Rust 判斷；選對才過本人確認再記住。結果都收掉浮層，需要說的話放在條下面
+    const choosePeer = async index => {
+      const cur = vp.cur, ch = vp.ch
+      if (!cur || !ch || vp.busy) return
       vp.busy = true; vp.error = ''
       try {
-        const r = await knownPeers.remember(cur)
-        if (r === 'done') { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; vp.sheet = false; void loadKnown() }
-        else if (r === 'not_ready') vp.error = KNOWN_TEXT.notReady
-      } catch (e) { console.info('[ASN] 記住這台沒成功', String(e?.message ?? e)); vp.error = knownErrorText(e) } finally { vp.busy = false }
+        const r = await knownPeers.pick(ch.id, index)
+        closePeerSheet()
+        if (r === 'done') { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; vp.note = ''; void loadKnown() }
+        else vp.note = PEER_NOTES[r] ?? ''
+      } catch (e) { console.info('[ASN] 確認指紋沒成功', String(e?.message ?? e)); closePeerSheet(); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.cur.name) : ''))
-    const peerSheetBody = computed(() => (vp.cur ? KNOWN_TEXT.sheetBody(vp.cur.fpShow) : ''))
+    const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
     const settingRows = computed(() => mobileSettingRows({ knownCount: kp.list.length, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
@@ -1246,7 +1260,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, kp, forgetKnown, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, rememberPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, kp, forgetKnown, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
