@@ -98,16 +98,23 @@ export const TEXT = {
 }
 
 // 詢問內容是從終端畫面抄來的，裡面整排「────」在窄螢幕會折成好幾行。整行都是分隔線的換成一條細線。
-// 分隔字元（至少 3 個）；行首尾可有空白與框線，行內有別的字就不算（`npm i --silent`、`a--b`、`x = y` 都不動）
-const RULE_CHARS = '─━═╌╍┄┅┈┉-_='
+// 分隔字元；行首尾可有空白與框線，行內有別的字就不算（`npm i --silent`、`a--b`、`x = y` 都不動）。
+// 這是「權限確認」的內容，要盡量照原樣給人看：終端的框線字元（─━═…）3 個就算；ASCII 的 - _ = 要至少 8 個才算，
+// 免得寫檔或 heredoc 內容裡單獨一行的 `---`（YAML／Markdown 分隔）、`===` 被畫成細線（二審意見）
+const BOX_RULE_CHARS = '─━═╌╍┄┅┈┉'
+const ASCII_RULE_CHARS = '-_='
 const FRAME_CHARS = '│┃║|┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝'
+export const BOX_RULE_MIN = 3
+export const ASCII_RULE_MIN = 8
 const isRuleLine = line => {
-  let n = 0
+  let box = 0
+  let ascii = 0
   for (const ch of line) {
-    if (RULE_CHARS.includes(ch)) n++
+    if (BOX_RULE_CHARS.includes(ch)) box++
+    else if (ASCII_RULE_CHARS.includes(ch)) ascii++
     else if (!FRAME_CHARS.includes(ch) && !/\s/.test(ch)) return false
   }
-  return n >= 3
+  return box >= BOX_RULE_MIN || ascii >= ASCII_RULE_MIN
 }
 const trimBlankLines = lines => {
   let a = 0, b = lines.length

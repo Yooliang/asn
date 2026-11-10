@@ -198,8 +198,8 @@ test('分隔線：行內的字不動，沒有線就原文回傳', () => {
   assert.deepEqual(ruleSegments('a\n  npm i --silent\nb'), [{ text: 'a\n  npm i --silent\nb' }])
 })
 
-test('分隔線：混空白與 ═ ━ ┄ - _ = 也認得；至少 3 個', () => {
-  for (const line of ['─ ─ ─', '══ ━━ ═', '  ┄┄┄┄  ', '---', '___', '===', '┃ ━━━ ┃', '╭────╮']) {
+test('分隔線：混空白與 ═ ━ ┄ 也認得（框線字元至少 3 個）；ASCII 的 - _ = 至少 8 個', () => {
+  for (const line of ['─ ─ ─', '══ ━━ ═', '  ┄┄┄┄  ', '--------', '________', '========', '| ---- ---- |', '┃ ━━━ ┃', '╭────╮']) {
     assert.deepEqual(ruleSegments('甲\n' + line + '\n乙'), [{ text: '甲' }, { rule: true }, { text: '乙' }], line)
   }
   assert.deepEqual(ruleSegments('甲\n──\n乙'), [{ text: '甲\n──\n乙' }], '兩個字元不算')
@@ -218,4 +218,15 @@ test('分隔線：畫面都走 ruleSegments、不用 v-html', () => {
   assert.match(read('../ui/m.html'), /permSegs\(pq\.cur\.text\)/)
   const list = read('../ui/list.html')
   for (const e of ['termPaneRow.prompt.text', 'termPrompt.pv.text', 'permissionDlgView.text']) assert.ok(list.includes(`ruleSegs(${e})`), e)
+})
+
+test('分隔線：ASCII 的 - _ = 要至少 8 個才算，寫檔內容裡的 --- 與 === 照原樣顯示；框線字元 3 個就算', async () => {
+  const { ruleSegments } = await import('../ui/lib/perm-ask.mjs')
+  const yaml = 'cat > a.yml <<EOF\n---\nname: x\n---\nEOF'
+  assert.deepEqual(ruleSegments(yaml), [{ text: yaml }], 'YAML 的 --- 不動')
+  const md = 'Title\n===\nbody\n_______'
+  assert.deepEqual(ruleSegments(md), [{ text: md }], '7 個以下的 ASCII 線不動')
+  assert.deepEqual(ruleSegments('a\n--------\nb'), [{ text: 'a' }, { rule: true }, { text: 'b' }], '8 個 ASCII 就算')
+  assert.deepEqual(ruleSegments('a\n│ ─── │\nb'), [{ text: 'a' }, { rule: true }, { text: 'b' }], '框線字元 3 個就算')
+  assert.deepEqual(ruleSegments('a\n=== ===\nb'), [{ text: 'a\n=== ===\nb' }], '夾空白的短 ASCII 也不算')
 })
