@@ -349,6 +349,7 @@ html.toast-page,html.toast-page body{background:transparent}
 @media (prefers-reduced-motion:reduce){.ad{animation:none}}
 
 /* ---------- 大頭貼欄收合（對話區）：分開模式欄在右、整合模式欄在左 ---------- */
+/* 下面的寬度（欄 104+24＝SIDE_OPEN_W 128、收起 20＝SIDE_FOLDED_W、名單 300＝LIST_PANE_W）要跟 ui/lib/merge.mjs 的常數一致；test/merge.test.mjs 守門會比對 */
 .dp-side{--dp-xl:104px;flex:none;box-sizing:border-box;width:calc(var(--dp-xl) + 24px);display:flex;flex-direction:column;align-items:stretch;background:var(--panel-soft);border-left:1px solid var(--line);min-height:0}
 .dp-left .chatpane-body{flex-direction:row-reverse}
 .dp-left .dp-side{border-left:0;border-right:1px solid var(--line)}
@@ -358,8 +359,10 @@ html.toast-page,html.toast-page body{background:transparent}
 .dp-fold-bar,.dp-fold-strip{margin:0;padding:0;border:1px solid var(--line);background:linear-gradient(var(--panel-head),var(--panel-soft));color:var(--muted);font-size:15px;line-height:1;cursor:pointer}
 .dp-fold-bar{flex:none;width:100%;height:16px;margin-top:3px;border-radius:4px}
 .dp-fold-strip{flex:1;width:100%;border-width:0;border-radius:0}
-.dp-fold-strip:hover{background:#dcebf9;color:var(--title-fg)}
-.dp-fold-bar:hover{background:#dcebf9;color:var(--title-fg)}
+.dp-fold-strip:hover:not(:disabled){background:#dcebf9;color:var(--title-fg)}
+.dp-fold-bar:hover:not(:disabled){background:#dcebf9;color:var(--title-fg)}
+/* 窗太窄被自動收起時展開鈕反灰（自帶 background/color 會蓋掉瀏覽器預設，所以自己寫） */
+.dp-fold-bar:disabled,.dp-fold-strip:disabled{opacity:.45;cursor:not-allowed}
 .dp-collapsed .dp-side{width:20px}
 .rtab-vendor{display:grid;place-items:center;line-height:0}
 .rtab-vendor svg{display:block}
