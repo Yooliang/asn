@@ -292,3 +292,12 @@ Deno.test("安裝並登入的遠端請求：動作只在帳號動作（要登入
   // 節點金鑰這邊沒有任何能「建立」請求的呼叫
   assert(!src.includes("asn_setup_request"), "節點金鑰的 Edge 路徑不能呼叫建立請求");
 });
+
+Deno.test("node_setup_request（#933）：這台已經有進行中的請求時多帶那筆的種類；沒有時不帶", async () => {
+  const busy = fake({}, () => ({ ok: true, already: true, state: "taken", kind: "codex" }));
+  assertEquals((await handleAccountAction(busy.deps, "node_setup_request", bearer, null, { node: "NEWPC", kind: "grok" })).body, { ok: true, already: true, state: "taken", kind: "codex" });
+  const fresh = fake({}, () => ({ ok: true, already: false, state: "pending", kind: "codex" }));
+  assertEquals((await handleAccountAction(fresh.deps, "node_setup_request", bearer, null, { node: "NEWPC" })).body, { ok: true, already: false, state: "pending" });
+  const odd = fake({}, () => ({ ok: true, already: true, state: "pending", kind: 5 }));
+  assertEquals((await handleAccountAction(odd.deps, "node_setup_request", bearer, null, { node: "NEWPC" })).body, { ok: true, already: true, state: "pending" });
+});

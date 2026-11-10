@@ -238,7 +238,9 @@ export async function handleAccountAction(
     if (error) { console.error("node_setup_request", error); return { status: 500, body: { error: "internal" } }; }
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
-    return { status: 200, body: { ok: true, already: d?.already === true, state: d?.state } };
+    // 這台已經有進行中的請求時，多帶那筆的種類（手機據此說「這台已經有一個進行中的請求」）
+    const already = d?.already === true;
+    return { status: 200, body: { ok: true, already, state: d?.state, ...(already && typeof d?.kind === "string" ? { kind: d.kind } : {}) } };
   }
 
   // #933：手機取回電腦放的密文（本人；只回自己送出的那一筆；取一次就清）。後台只轉交，手機用本機記住的電腦公鑰驗簽、用一次性私鑰解

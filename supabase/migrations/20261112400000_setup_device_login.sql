@@ -165,7 +165,9 @@ begin
   select * into v_r from relay.setup_requests where node = p_node for update;
   if found and ((v_r.status = 'pending' and v_r.requested_at > now() - interval '10 minutes')
              or (v_r.status = 'taken' and v_r.updated_at > now() - interval '40 minutes')) then
-    return jsonb_build_object('ok', true, 'already', true, 'state', v_r.status);
+    -- 這台已經有進行中的請求：照舊回 already（舊版手機的行為不變），多帶那筆的種類。
+    -- 裝置碼型每次都用新的 rid，所以手機看到 already 就知道不是自己這次的請求
+    return jsonb_build_object('ok', true, 'already', true, 'state', v_r.status, 'kind', v_r.kind);
   end if;
   if found and v_r.status = 'failed' and v_r.updated_at > now() - interval '1 minute' then
     return jsonb_build_object('error', 'rate_limited');

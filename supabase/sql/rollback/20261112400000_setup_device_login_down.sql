@@ -1,6 +1,7 @@
 -- 回復 20261112400000_setup_device_login.sql：
 --   刪掉非 claude 的請求（不然 kind 約束加不回去）、drop 新函式與新欄位、asn_setup_request／asn_relay_setup_poll／asn_relay_secret_request_link
 --   與 link 約束換回原文（逐字取自 20261102170000_node_platform_phone.sql 與 20261101230000_secret_link.sql）。
+--   換回 link 約束之前，先把不合舊規則的登入網址清成空。
 -- 部署順序：先把 Edge（relay、account）換回舊版，再跑這支。
 begin;
 delete from relay.setup_requests where kind <> 'claude';
@@ -94,6 +95,10 @@ begin
 end;
 $function$;
 
+-- 已存的 Codex／Grok 登入網址（只是網址欄，不是密碼）不合舊規則：先清成空，否則下面加回約束會失敗
+update relay.secret_requests set link = null
+ where link is not null
+   and link !~ '^https://([a-z0-9-]+\.)*(claude\.ai|claude\.com|anthropic\.com)(:443)?([/?#][\x21-\x5b\x5d-\x7e]*)?$';
 alter table relay.secret_requests drop constraint if exists secret_requests_link_ck;
 alter table relay.secret_requests add constraint secret_requests_link_ck check (
   link is null or (
