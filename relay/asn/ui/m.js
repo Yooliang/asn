@@ -18,7 +18,7 @@ import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
-import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS } from './lib/perm-ask.mjs'
+import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS, ruleSegments as permSegs } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
@@ -1150,7 +1150,7 @@ const app = createApp({
       pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
-      pq, PERMREQ_TEXT, permReqTitle, decidePermReq, laterPermReq,
+      pq, PERMREQ_TEXT, permSegs, permReqTitle, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,

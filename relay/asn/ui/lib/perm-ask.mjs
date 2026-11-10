@@ -96,3 +96,53 @@ export const TEXT = {
   unknown: '電腦還沒有回報。請到電腦上確認',
   close: '關閉',
 }
+
+// 詢問內容是從終端畫面抄來的，裡面整排「────」在窄螢幕會折成好幾行。整行都是分隔線的換成一條細線。
+// 分隔字元；行首尾可有空白與框線，行內有別的字就不算（`npm i --silent`、`a--b`、`x = y` 都不動）。
+// 這是「權限確認」的內容，要盡量照原樣給人看：終端的框線字元（─━═…）3 個就算；ASCII 的 - _ = 要至少 8 個才算，
+// 免得寫檔或 heredoc 內容裡單獨一行的 `---`（YAML／Markdown 分隔）、`===` 被畫成細線（二審意見）
+const BOX_RULE_CHARS = '─━═╌╍┄┅┈┉'
+const ASCII_RULE_CHARS = '-_='
+const FRAME_CHARS = '│┃║|┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝'
+export const BOX_RULE_MIN = 3
+export const ASCII_RULE_MIN = 8
+const isRuleLine = line => {
+  let box = 0
+  let ascii = 0
+  for (const ch of line) {
+    if (BOX_RULE_CHARS.includes(ch)) box++
+    else if (ASCII_RULE_CHARS.includes(ch)) ascii++
+    else if (!FRAME_CHARS.includes(ch) && !/\s/.test(ch)) return false
+  }
+  return box >= BOX_RULE_MIN || ascii >= ASCII_RULE_MIN
+}
+const trimBlankLines = lines => {
+  let a = 0, b = lines.length
+  while (a < b && lines[a].trim() === '') a++
+  while (b > a && lines[b - 1].trim() === '') b--
+  return lines.slice(a, b)
+}
+
+/** 文字 → 區段 [{ text }, { rule: true }, …]。連續分隔線（中間只夾空白行）只留一條，首尾的分隔線拿掉。
+ *  沒有任何分隔線時原文不動；空字串或只有空白、只有分隔線 → []。畫面用文字節點顯示 text，不走 v-html */
+export function ruleSegments(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return []
+  const lines = raw.split(/\r\n|\r|\n/)
+  if (!lines.some(isRuleLine)) return [{ text: raw.replace(/\r\n?/g, '\n') }]
+  const out = []
+  let buf = []
+  let pendingRule = false
+  const flush = () => {
+    const t = trimBlankLines(buf)
+    buf = []
+    if (!t.length) return
+    if (pendingRule && out.length) out.push({ rule: true })
+    pendingRule = false
+    out.push({ text: t.join('\n') })
+  }
+  for (const line of lines) {
+    if (isRuleLine(line)) { flush(); pendingRule = true } else buf.push(line)
+  }
+  flush()
+  return out
+}

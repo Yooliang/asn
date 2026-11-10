@@ -633,8 +633,8 @@ export const mpaneProbeSource = ({ single }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mpane ? mpaneProbeSource(probe) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? mpaneProbeSource(probe) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -938,6 +938,30 @@ export const MTERMVIEW_TEXT = [
   '│ > 輸入訊息                                     │',
   '╰──────────────────────────────────────────────╯',
 ].join('\r\n')
+// 手機權限框（詢問內容從終端抄來，整排分隔線要變成一條細線）：指令前後各四行線、行首有框線；中段再夾一組四行線
+export const MPERMREQ_TEXT = '│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ Bash command\n│ npm test --silent\n│ Run the unit tests\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\nDo you want to proceed?\n❯ 1. Yes\n  2. No'
+export const mpermreqRows = () => [{ id: '11111111-2222-3333-4444-555555555555', node: 'Q', window_name: 'demo', prompt_text: MPERMREQ_TEXT, complete: true, options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }], body_hash: 'a'.repeat(64), expires_at: new Date(Date.now() + 600_000).toISOString() }]
+export const mpermreqProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let box = null;
+  for (let i = 0; i < 80 && !box; i++) { box = document.querySelector('.m-perm-text'); if (!box) { for (const fn of ((globalThis.__smokeListeners || {})['relay-bell'] || [])) fn({ event: 'relay-bell', payload: null }); await sleep(250) } }
+  if (!box) return { ok: false, why: '權限框沒有跳出來' };
+  await sleep(300);
+  const ALL = '│┃║| ─━═-_=', RULE = '─━═-_=';
+  const lines = box.innerText.split(String.fromCharCode(10));
+  const ruleOnly = lines.filter(l => [...l].every(c => ALL.includes(c) || c === String.fromCharCode(9)) && [...l].filter(c => RULE.includes(c)).length >= 3);
+  if (ruleOnly.length) return { ok: false, why: '還有整行是分隔線的文字：' + ruleOnly[0].slice(0, 20) };
+  const hrs = box.querySelectorAll('hr.m-perm-rule');
+  if (hrs.length !== 1) return { ok: false, why: '分隔線應該剛好一條（前後的拿掉、中間四行合成一條），實際 ' + hrs.length };
+  if (hrs[0].getBoundingClientRect().height > 3) return { ok: false, why: '分隔線太粗' };
+  if (!box.textContent.includes('npm test --silent')) return { ok: false, why: '指令文字不見了' };
+  if (!box.textContent.includes('Do you want to proceed?')) return { ok: false, why: '問題文字不見了' };
+  const panel = box.closest('.m-ops-panel');
+  const bad = [box, panel].find(e => e && e.scrollWidth > e.clientWidth + 1);
+  if (bad) return { ok: false, why: '卡片橫向溢出：' + bad.className };
+  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
+  return { ok: true, why: '' };
+})()`
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
 export const mtermviewProbeSource = ({ big, gate, stayChat }) => gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1099,6 +1123,8 @@ export const SCENARIOS = [
   { name: 'm-notice-tab-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tab, shot: 'm-notice-tab-360.png' },
   { name: 'm-notice-tab-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tabBig, shot: 'm-notice-tab-big.png' },
   // 手機看別台電腦夥伴的終端（PR④，只能看）：「訊息／終端」切換、終端畫面占滿訊息區、不能打字。412、360 寬與大字型各一張
+  // 手機權限框的分隔線：指令前後各四行線、行首有框線 → 只剩一條細線、沒有整行分隔字元、不橫向溢出。412 寬
+  { name: 'm-perm-rules', page: 'm.html', state: { signedIn: true, mpermreq: true }, ready: '#app.m .m-pager .m-search', probe: { mpermreq: true }, shot: 'm-perm-rules-412.png' },
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
@@ -1243,6 +1269,11 @@ export const tableFor = scenario => {
     t.term_view_remote_set = null
     t.term_view_remote_stop = null
     t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
+  }
+  if (scenario.state.mpermreq) {
+    t.relay_list = { members: MBAR_MEMBERS.claude }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
+    t.android_perm_req_list = { requests: mpermreqRows(), recent: [] }
   }
   if (scenario.state.mnoself) {
     t.relay_list = { members: MACCT_MEMBERS.two }

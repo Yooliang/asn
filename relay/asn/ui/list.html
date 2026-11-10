@@ -221,7 +221,7 @@
           </ul>
           <div class="tp-ask" v-if="termPaneRow.prompt">
             <p class="tp-ask-title">{{ termPaneRow.prompt.title }}</p>
-            <pre class="term-prompt-text">{{ termPaneRow.prompt.text }}</pre>
+            <pre class="term-prompt-text"><template v-for="(g, i) in ruleSegs(termPaneRow.prompt.text)" :key="i"><hr class="term-prompt-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></pre>
             <p class="partner-hint" v-if="termPaneRow.adopted && !termPaneRow.answerUnlocked">這個視窗還沒允許代答，請直接在終端視窗裡處理，或先 <button class="aero-btn" type="button" @click="adoptUnlockAsk(termPaneRow, 'answer')">允許…</button></p>
             <div class="partner-actions" v-else-if="termPaneRow.prompt.options.length"><button v-for="o in termPaneRow.prompt.options" :key="o.n" class="aero-btn" type="button" :disabled="terms.busy" @click="termPaneAnswer(o.n)">{{ o.n }}. {{ o.label }}</button></div>
             <p class="partner-hint" v-else>這個提示看不出選項，請直接在終端視窗裡處理。</p>
@@ -378,7 +378,7 @@
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
 
   <asn-dialog v-if="permissionDlg.open" :title="`「${permissionDlg.name}」在等你同意`" @close="closePermissionDlg">
-    <pre class="permission-text">{{ permissionDlgView.text }}</pre>
+    <pre class="permission-text"><template v-for="(g, i) in ruleSegs(permissionDlgView.text)" :key="i"><hr class="term-prompt-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></pre>
     <p class="launch-notice-body" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
     <p class="launch-notice-body model-err" v-if="permissionDlg.error">{{ permissionDlg.error }}</p>
     <div class="partner-actions">
@@ -477,7 +477,7 @@
     <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-prompt-title" @click.stop>
       <h3 id="term-prompt-title">{{ termPrompt.pv.title }}</h3>
       <p class="partner-node">{{ termPrompt.row.title }}<template v-if="termPrompt.row.folder">・{{ termPrompt.row.folder }}</template></p>
-      <pre class="term-prompt-text" v-if="termPrompt.pv.text">{{ termPrompt.pv.text }}</pre>
+      <pre class="term-prompt-text" v-if="termPrompt.pv.text"><template v-for="(g, i) in ruleSegs(termPrompt.pv.text)" :key="i"><hr class="term-prompt-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></pre>
       <div class="partner-models term-options" role="group" aria-label="選項" v-if="termPrompt.pv.options.length">
         <button v-for="o in termPrompt.pv.options" :key="o.n" type="button" class="pmodel term-opt" :class="{ on: terms.selected === o.n }" :aria-pressed="terms.selected === o.n" @click="termPick(o.n)"><span class="pmodel-lb">{{ o.n }}. {{ o.label }}</span></button>
       </div>
