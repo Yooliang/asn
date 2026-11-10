@@ -39,6 +39,55 @@ export async function askRemote(api, node) {
   }
 }
 
+/**
+ * 手機看終端：xterm 依電腦端的列數固定高度，區塊比它矮（鍵盤開著）時，最底下的輸入列會在可見範圍外。
+ * 回傳要把外層 scrollTop 設成多少，才讓游標那一整列看得到；不用動回 null。
+ * follow＝使用者沒有自己捲離底部（false 就完全不動，不把正在看舊內容的人拉回來）。
+ * offset＝畫面頂端離外層內容頂端的距離（內距）。
+ */
+export function cursorScrollTop({ cursorRow, rowHeight, viewHeight, scrollTop, maxScroll, follow, offset = 0 }) {
+  if (!follow) return null
+  const row = Number(cursorRow), h = Number(rowHeight), view = Number(viewHeight)
+  if (!(h > 0) || !(view > 0) || !Number.isFinite(row) || row < 0) return null
+  const top = offset + row * h, bottom = top + h
+  const cur = Number(scrollTop) || 0
+  let want = null
+  if (bottom > cur + view) want = bottom - view
+  else if (top < cur) want = top
+  if (want === null) return null
+  const t = Math.min(Math.max(0, Number(maxScroll) || 0), Math.max(0, Math.ceil(want)))
+  return Math.abs(t - cur) < 0.5 ? null : t
+}
+
+/** 位置差在這個像素內，不算使用者捲的（鍵盤開關造成的版面夾值、慣性殘留、瀏覽器多送的 scroll 事件） */
+export const USER_SCROLL_SLACK = 8
+
+/**
+ * 手機看終端的「使用者是否自己捲離」狀態。和電腦版 createFollow 不同：我們把 scrollTop 設在游標列下緣（不是最底），
+ * 所以不能用「在最底」判斷。
+ * - onProgrammatic(t)：我們自己設了 scrollTop；之後離 t 在 USER_SCROLL_SLACK 內的 scroll 事件都不算使用者捲的。
+ * - onScroll(scrollTop, { cursorVisible })：離最後一次自己設的位置超過 SLACK 才算使用者捲的；
+ *   捲到游標看不到的地方就 away，捲回游標看得到的位置就恢復（不是捲到最底）。
+ * - away()：true 時 cursorScrollTop 要用 follow=false。reset()：重新開始。
+ */
+export function createCursorFollow(slack = USER_SCROLL_SLACK) {
+  let userAway = false, lastSet = null
+  return {
+    away: () => userAway,
+    onProgrammatic: t => { lastSet = Number(t) },
+    // 容器大小變了（鍵盤收起／長高）：瀏覽器會把 scrollTop 夾回新範圍並送 scroll 事件，那不是使用者捲的。
+    // 還沒捲離時，把夾值後的位置當成「自己設的」，讓那次事件落在 slack 內；已經捲離的不動（使用者的意思照舊）
+    onLayout: scrollTop => { if (!userAway) lastSet = Number(scrollTop) },
+    onScroll: (scrollTop, { cursorVisible }) => {
+      // 小幅變動不會讓人「捲離」，但游標看得到時可以恢復
+      if (lastSet !== null && Math.abs(scrollTop - lastSet) <= slack) { if (cursorVisible) userAway = false; return false }
+      userAway = !cursorVisible
+      return true
+    },
+    reset: () => { userAway = false; lastSet = null },
+  }
+}
+
 /** 唯讀的 xterm 設定：在本機看畫面的設定上關掉輸入 */
 export const remoteXtermOptions = size => ({ ...xtermOptions(size), disableStdin: true })
 
@@ -92,6 +141,47 @@ export const RemoteView = {
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
+    // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
+    let follow = createCursorFollow(), ro = null, scrollEl = null, lastSize = ''
+    // 大小有沒有變（和上次記的比）。scroll 事件和 ResizeObserver 回呼誰先到都不一定（算繪流程裡 scroll 事件在 ResizeObserver 之前），
+    // 所以兩邊都先問這個：先到的那邊負責把這次當成「版面造成」，不看位置差，比開一個時間窗穩（不會誤吞使用者緊接著的真捲動）
+    const sizeChanged = el => {
+      const now = el.clientWidth + 'x' + el.clientHeight
+      const changed = lastSize !== '' && now !== lastSize
+      lastSize = now
+      return changed
+    }
+    const followMax = el => Math.max(0, el.scrollHeight - el.clientHeight)
+    // 游標那一列要把 scrollTop 設到哪（null＝已經看得到、不用動）；follow 傳 true 就是「不管使用者有沒有捲離」，用來判斷游標看不看得到
+    const cursorTarget = followFlag => {
+      const el = host.value, screen = el?.querySelector?.('.xterm-screen')
+      if (!el || !screen || !term?.rows) return undefined
+      const rowHeight = screen.clientHeight / term.rows
+      const offset = screen.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+      return cursorScrollTop({ cursorRow: term.buffer?.active?.cursorY, rowHeight, viewHeight: el.clientHeight, scrollTop: el.scrollTop, maxScroll: followMax(el), follow: followFlag, offset })
+    }
+    const keepCursorVisible = () => {
+      const t = cursorTarget(!follow.away())
+      if (t === null || t === undefined) return
+      follow.onProgrammatic(t)
+      host.value.scrollTop = t
+    }
+    const onUserScroll = () => {
+      const el = host.value
+      if (!el) return
+      if (sizeChanged(el)) { follow.onLayout(el.scrollTop); keepCursorVisible(); return }   // 大小剛變：夾值造成的，不是使用者
+      const t = cursorTarget(true)
+      if (t !== undefined) follow.onScroll(el.scrollTop, { cursorVisible: t === null })
+    }
+    const onResize = () => {
+      const el = host.value
+      if (el && sizeChanged(el)) follow.onLayout(el.scrollTop)
+      keepCursorVisible()
+    }
+    const unwatchScroll = () => {
+      ro?.disconnect?.(); ro = null
+      scrollEl?.removeEventListener?.('scroll', onUserScroll); scrollEl = null
+    }
     // 每次發起一個序號：這一格收掉或重新發起時，舊的就作廢。手機的本人確認可能很晚才回來，作廢的就算回 ok 也不送 start
     let gen = 0
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
@@ -99,6 +189,7 @@ export const RemoteView = {
       clearTimeout(warnTimer)
       offFrame?.(); offEnd?.(); offFrame = offEnd = null
       document.removeEventListener('visibilitychange', onVisible)
+      unwatchScroll()
       term?.dispose?.(); term = null
     }
     const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = '' }
@@ -118,7 +209,7 @@ export const RemoteView = {
           // 窗格的欄、列數和畫面不一樣就跟著改（#903）：游標列是窗格內的列號，xterm 的列數不同時最後一列會落在別處
           const c = Number(f.meta?.cols), r = Number(f.meta?.rows)
           if (Number.isInteger(c) && Number.isInteger(r) && c > 0 && r > 0 && (term.cols !== c || term.rows !== r) && typeof term.resize === 'function') term.resize(c, r)
-          term.write(frameToWrite(f))
+          term.write(frameToWrite(f), keepCursorVisible)   // 寫完（游標位置更新後）再調捲動位置
         }, wanted)
         if (!offF) return
         offFrame = offF
@@ -133,6 +224,11 @@ export const RemoteView = {
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
         if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         document.addEventListener('visibilitychange', onVisible)
+        follow = createCursorFollow()
+        scrollEl = host.value
+        lastSize = ''; if (scrollEl) sizeChanged(scrollEl)
+        scrollEl?.addEventListener?.('scroll', onUserScroll, { passive: true })
+        if (typeof ResizeObserver === 'function' && scrollEl) { ro = new ResizeObserver(onResize); ro.observe(scrollEl) }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
