@@ -243,7 +243,7 @@ export async function handleAccountAction(
     return { status: 200, body: { ok: true, already, state: d?.state, ...(already && typeof d?.kind === "string" ? { kind: d.kind } : {}) } };
   }
 
-  // #933：手機取回電腦放的密文（本人；只回自己送出的那一筆；取一次就清）。後台只轉交，手機用本機記住的電腦公鑰驗簽、用一次性私鑰解
+  // #933：手機取回電腦放的密文（本人；只回自己送出的那一筆；取一次就清）。
   if (action === "node_setup_code_fetch") {
     const rid = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).rid : null;
     if (typeof rid !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(rid)) return { status: 400, body: { error: "bad_request" } };

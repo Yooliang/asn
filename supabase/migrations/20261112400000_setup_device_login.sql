@@ -3,7 +3,7 @@
 --   1. 官方登入網址白名單（secret_requests.link 的約束與 asn_relay_secret_request_link）多收 auth.openai.com、accounts.x.ai（只收這兩個主機本身）。
 --      唯一來源是 supabase/functions/_shared/login_domains.json，這裡的規則由一致性測試比對。
 --   2. relay.setup_requests：kind 擴成 claude／codex／agy／grok；多存「裝置碼型」登入用的欄位（請求本文與手機的設備簽章、
---      電腦回傳的密文與電腦的設備簽章、到期時間）。後台**只存、只轉交**，不驗任何簽章、看不到明文（驗章在兩端本機）。
+--      電腦回傳的密文與電腦的設備簽章、到期時間）。後台**只存、只轉交**這些欄位。
 --   3. public.asn_setup_request 多收 kind 與裝置碼型的請求本文、簽章、發起手機的節點；public.asn_relay_setup_poll 交請求時多帶這些
 --      和發起手機的設備公鑰（只轉交，信任看電腦本機記的）。舊的兩參數呼叫照舊是 claude。
 --   4. 新函式：asn_relay_setup_code_put（電腦，節點金鑰，寫一次就鎖）、asn_setup_code_fetch（本人，登入憑證，取一次就清）。
@@ -113,7 +113,7 @@ begin
   if p_kind is null or p_kind not in ('claude', 'codex', 'agy', 'grok') then
     return jsonb_build_object('error', 'bad_request');
   end if;
-  -- 不是自己的節點、或節點不存在：一律 not_found（不透露別人帳號下有沒有這台）
+  -- 不是自己的節點、或節點不存在：一律回 not_found
   if p_user is null or not exists (select 1 from relay.nodes where id = p_node and status = 'active' and owner_user = p_user) then
     return jsonb_build_object('error', 'not_found');
   end if;
@@ -121,7 +121,7 @@ begin
   if exists (select 1 from relay.nodes where id = p_node and platform in ('android', 'ios')) then
     return jsonb_build_object('error', 'unsupported_platform');
   end if;
-  -- 裝置碼型：要有請求本文、手機的設備簽章、發起的手機（本人的、有設備公鑰）。後台只檢查格式與欄位一致，不驗簽（驗章在電腦本機）
+  -- 裝置碼型：要有請求本文、手機的設備簽章、發起的手機（本人的、有設備公鑰）。後台只檢查格式與欄位一致
   if v_device then
     if p_payload is null or p_sig is null or p_p_node is null
        or char_length(p_payload) > 1024 or p_sig !~ '^[A-Za-z0-9_-]{86}$' or p_p_node !~ '^[A-Za-z0-9_-]{1,32}$' then
@@ -175,7 +175,7 @@ begin
   if (select count(*) from relay.account_events where user_id = p_user and event = 'setup_requested' and at > now() - interval '1 hour') >= 6 then
     return jsonb_build_object('error', 'rate_limited');
   end if;
-  -- 同一個 rid 用過就不能再用（重放）
+  -- rid 只在列存活期間不重複：只查現存的列，同一台的請求被新請求覆蓋、或列被刪除後，舊的 rid 就不再檢查
   if v_device and exists (select 1 from relay.setup_requests where rid = v_rid) then
     return jsonb_build_object('error', 'bad_request');
   end if;

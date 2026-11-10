@@ -459,7 +459,7 @@ Deno.serve(async (req) => {
       if (pl.error) console.warn("set_node_platform", me.id, pl.error.message ?? pl.error);
     }
     // 順便問「本人有沒有要這台安裝並登入 Claude Code」（手機觸發；失敗不影響在線回報）。回送出者的使用者代號，ASN 要比對自己登入的是不是同一個人
-    // #933：種類不是 claude 時多帶 setup_kind；裝置碼型（codex、grok）再帶請求本文、手機的設備簽章與設備公鑰、到期時間（後台只轉交，驗章在電腦本機）。
+    // #933：種類不是 claude 時多帶 setup_kind；裝置碼型（codex、grok）再帶請求本文、手機的設備簽章與設備公鑰、到期時間（後台只轉交）。
     // 舊版 ASN 只讀 setup_requested／setup_requested_by；非 claude 的種類資料庫只交給夠新的版本，所以舊版不會收到看不懂的請求
     let setup: Record<string, unknown> | null = null;
     if (p.status !== "offline") {
@@ -489,7 +489,7 @@ Deno.serve(async (req) => {
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
   }
-  // #933：裝置碼型登入，電腦把「網址＋代碼」的密文與電腦的設備簽章放回去（只能放自己節點那一筆、放一次就鎖；後台不驗簽、看不到明文）
+  // #933：裝置碼型登入，電腦把「網址＋代碼」的密文與電腦的設備簽章放回去（只能放自己節點那一筆、放一次就鎖）
   if (action === "asn_setup_code_put" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     const o = b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : null;
