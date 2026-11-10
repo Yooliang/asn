@@ -65,7 +65,11 @@ test('Rust 端：命令登錄、回報迴圈取走旗標後走內建更新器、
   const fn = up.slice(up.indexOf('pub async fn run_remote'), up.indexOf('async fn run_install'))
   assert.match(fn, /busy\.load/, '正在更新中不重複啟動')
   assert.match(fn, /update_check\(/)
-  assert.match(fn, /update_install\(/, '同一條路：檢查→下載→驗簽→安裝（update_install 內含）')
+  // 同一條路：檢查→下載→驗簽→安裝。本機的 update_install 與遠端都經 install_from（帶觸發來源記 ui.log），再進 run_install
+  assert.match(fn, /install_from\([^;]*Trigger::Remote\)/, '遠端走 install_from（觸發來源：遠端）')
+  assert.match(up, /pub async fn update_install\([^)]*\)[^{]*\{\s*install_from\(app, st, pending, Trigger::Local\)/, '本機按鈕也走 install_from')
+  const inst = up.slice(up.indexOf('async fn install_from'), up.indexOf('/// 遠端更新'))
+  assert.match(inst, /run_install\(&app, &update\)/, 'install_from 內含下載→驗簽→安裝')
   const acct = read('src-tauri/src/account.rs')
   assert.match(acct, /"node_update_request", None, json!\(\{ "node": node \}\)/, '只帶節點，身分由登入憑證決定')
 })
