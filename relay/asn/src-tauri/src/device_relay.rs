@@ -12,7 +12,6 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{aead, agreement, hkdf};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use zeroize::Zeroizing;
 
 pub const REQ_V: &str = "asn-device-login-req-v1";
@@ -59,6 +58,8 @@ pub fn canon(pairs: &[(&str, Value)]) -> String {
 pub enum Refuse {
     /// 本機不認得這支手機（從沒互看過）：一律拒絕
     UnknownPhone,
+    /// 認得，但本人沒在這台的設定頁允許它替這台登入
+    NotAllowed,
     /// 這支手機的設備金鑰和本機記住的不同
     KeyChanged,
     /// 簽章驗不過
@@ -75,6 +76,7 @@ impl Refuse {
     pub fn text(&self) -> &'static str {
         match self {
             Refuse::UnknownPhone => "這台電腦還不認得發出要求的手機，請先用這支手機看過這台的畫面一次",
+            Refuse::NotAllowed => "這台電腦還沒允許這支手機替它登入：請在這台電腦的設定、認得的電腦裡，勾選這支手機的「允許替這台登入」",
             Refuse::KeyChanged => "這支手機的設備金鑰變了，這台電腦不接受它的要求",
             Refuse::BadSignature => "要求的簽章驗不過，這台電腦沒有開始登入",
             Refuse::Bad(why) => why,
@@ -110,7 +112,16 @@ impl Request {
     }
 
     fn aad(&self) -> Vec<u8> {
-        canon(&[("v", json!(CODE_V)), ("rid", json!(self.rid)), ("t_node", json!(self.t_node)), ("p_node", json!(self.p_node)), ("vendor", json!(self.vendor)), ("exp", json!(self.exp))]).into_bytes()
+        canon(&[
+            ("v", json!(CODE_V)),
+            ("rid", json!(self.rid)),
+            ("t_node", json!(self.t_node)),
+            ("p_node", json!(self.p_node)),
+            ("vendor", json!(self.vendor)),
+            ("p_eph_pub", json!(self.p_eph_pub)),
+            ("exp", json!(self.exp)),
+        ])
+        .into_bytes()
     }
 
     /// T 簽的內容
@@ -121,6 +132,7 @@ impl Request {
             ("t_node", json!(self.t_node)),
             ("p_node", json!(self.p_node)),
             ("vendor", json!(self.vendor)),
+            ("p_eph_pub", json!(self.p_eph_pub)),
             ("exp", json!(self.exp)),
             ("code_exp", json!(code_exp)),
             ("t_eph_pub", json!(t_eph_pub)),
@@ -147,25 +159,10 @@ fn pub_bytes(b64: &str) -> Option<[u8; PUB_LEN]> {
     (!a.iter().all(|b| *b == 0)).then_some(a)
 }
 
-/// 處理過的請求編號，留到它到期為止（只在記憶體）
-#[derive(Debug, Default)]
-pub struct Replay(HashMap<String, i64>);
-
-impl Replay {
-    /// 第一次看到回 true 並記下；看過回 false。順便清掉已過期的
-    pub fn first_time(&mut self, rid: &str, exp: i64, now: i64) -> bool {
-        self.0.retain(|_, e| *e > now);
-        if self.0.contains_key(rid) {
-            return false;
-        }
-        self.0.insert(rid.to_string(), exp);
-        true
-    }
-}
-
 /// T 收到請求：依序檢查，任何一條不過就拒絕。
 /// `p_node` 是後台說的發起手機；`p_sign_pub` 是後台這次給的手機公鑰（只用來判斷「變了」，驗章只用本機記住的那把）。
-pub fn verify_request(payload: &str, sig: &str, kind: &str, me: &str, p_node: &str, p_sign_pub: Option<&str>, known: &KnownPeers, now: i64, seen: &mut Replay) -> Result<Request, Refuse> {
+/// rid 有沒有處理過不在這裡查：呼叫端驗章前查、驗過後先記下存檔才開始（見 lib.rs 的 run_remote_device_login）
+pub fn verify_request(payload: &str, sig: &str, kind: &str, me: &str, p_node: &str, p_sign_pub: Option<&str>, known: &KnownPeers, now: i64) -> Result<Request, Refuse> {
     if vendor_hosts(kind).is_none() {
         return Err(Refuse::Bad("不支援的登入種類"));
     }
@@ -175,6 +172,10 @@ pub fn verify_request(payload: &str, sig: &str, kind: &str, me: &str, p_node: &s
     let Some(peer) = known.peer(p_node) else { return Err(Refuse::UnknownPhone) };
     if p_sign_pub.is_some_and(|k| k != peer.sign_pub) {
         return Err(Refuse::KeyChanged);
+    }
+    // 記住公鑰（例如看過畫面）不等於允許登入：要本人在這台的設定頁勾過
+    if !peer.login_ok {
+        return Err(Refuse::NotAllowed);
     }
     if !device_id::verify(&peer.sign_pub, payload.as_bytes(), sig) {
         return Err(Refuse::BadSignature);
@@ -207,9 +208,6 @@ pub fn verify_request(payload: &str, sig: &str, kind: &str, me: &str, p_node: &s
     if req.exp <= now || req.exp > now + MAX_LIFETIME_SECS + CLOCK_SKEW_SECS {
         return Err(Refuse::Expired);
     }
-    if !seen.first_time(&req.rid, req.exp, now) {
-        return Err(Refuse::Replayed);
-    }
     Ok(req)
 }
 
@@ -234,6 +232,11 @@ fn derive(ikm: &[u8], rid: &str, p_pub: &[u8], t_pub: &[u8]) -> Result<Zeroizing
 
 fn aead_key(key: &[u8; 32]) -> Result<aead::LessSafeKey, ()> {
     aead::UnboundKey::new(&aead::AES_256_GCM, key).map(aead::LessSafeKey::new).map_err(|_| ())
+}
+
+/// 代碼只收英數與 `-`，最長 64 字（兩端都檢查）
+fn code_ok(c: &str) -> bool {
+    (1..=64).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 fn sha256_hex(b: &[u8]) -> String {
@@ -261,8 +264,8 @@ pub fn seal(req: &Request, url: &str, code: &str, code_exp: i64, key: &DeviceKey
     let code_exp = code_exp.min(req.exp);
     let plain_json = Zeroizing::new(canon(&[("url", json!(url)), ("code", json!(code)), ("code_exp", json!(code_exp))]));
     let n = plain_json.len();
-    if url.is_empty() || code.is_empty() || n > MAX_PLAIN {
-        return Err("登入資料太長或是空的");
+    if url.is_empty() || !code_ok(code) || n > MAX_PLAIN {
+        return Err("登入資料太長、是空的或格式不對");
     }
     let p_pub = pub_bytes(&req.p_eph_pub).ok_or(FAIL)?;
     let rng = SystemRandom::new();
@@ -384,7 +387,7 @@ impl Pending {
         let (Some(url), Some(code), Some(ce)) = (o.get("url").and_then(Value::as_str), o.get("code").and_then(Value::as_str), o.get("code_exp").and_then(Value::as_i64)) else {
             return Err(BAD);
         };
-        if o.len() != 3 || ce != code_exp || !url_ok(url, &self.req.vendor) || code.is_empty() || code.len() > 64 {
+        if o.len() != 3 || ce != code_exp || !url_ok(url, &self.req.vendor) || !code_ok(code) {
             return Err(BAD);
         }
         Ok(Code { url: Zeroizing::new(url.to_string()), code: Zeroizing::new(code.to_string()), code_exp })

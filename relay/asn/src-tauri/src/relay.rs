@@ -491,7 +491,8 @@ impl Relay {
         let body = json!({ "rid": rid, "t_eph_pub": s.t_eph_pub, "cipher": s.cipher, "t_sig": s.t_sig });
         match self.api_with("asn_setup_code_put", Some(body), Duration::from_secs(15)).await {
             Ok(_) => Ok(()),
-            Err(e) if e.contains("HTTP 404") => Err(CodePutErr::Gone),
+            // api_inner 的錯誤固定是「動作名 HTTP 狀態碼 錯誤代碼」
+            Err(e) if e == "asn_setup_code_put HTTP 404" || e.starts_with("asn_setup_code_put HTTP 404 ") => Err(CodePutErr::Gone),
             Err(e) => Err(CodePutErr::Other(e)),
         }
     }

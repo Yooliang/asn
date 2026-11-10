@@ -12,6 +12,8 @@ export const TEXT = {
   fingerprint: '指紋',
   inputNoAsk: '這台要在這裡打字時，不用每次問我',
   inputNoAskWarn: '勾了之後，這台開始打字時這裡不會跳出「允許」，只會顯示紅條並通知你。只在你常常不在這台電腦前、又需要從那台操作時才勾。',
+  loginOk: '允許這支手機替這台登入（Codex 等）',
+  loginOkWarn: '勾了之後，這支手機可以要求這台登入別家的 CLI；登入網址和代碼只會加密送到那支手機。只勾你自己的手機。',
 }
 
 const ERR = [['紀錄壞了', '認得的電腦紀錄壞了，請告訴開發團隊。']]
@@ -30,6 +32,7 @@ export function normalizeView(raw) {
       name: clean(p.name) || '某台電腦',
       fingerprint: clean(p.fingerprint, 32),
       inputNoAsk: p.input_no_ask === true,
+      loginOk: p.login_ok === true,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
     })),
   }

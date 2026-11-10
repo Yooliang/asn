@@ -402,6 +402,11 @@ async function setKnownNoAsk(node, on) {
   known.busy = true
   try { await invoke('device_known_input_no_ask', { node, on: !!on }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 打字要不要問沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
+// 允許這支手機替這台登入（#933）：只有這台的設定頁能改，存在這台
+async function setKnownLoginOk(node, on) {
+  known.busy = true
+  try { await invoke('device_known_login_ok', { node, on: !!on }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+}
 async function forgetKnown(node) {
   known.busy = true
   try { await invoke('device_known_forget', { node }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
@@ -1790,6 +1795,7 @@ const app = createApp({
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'known-forget': if (value) await forgetKnown(value); break
         case 'known-input-no-ask': if (value?.node) await setKnownNoAsk(value.node, value.on); break
+        case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
         case 'bridge-term-server': await setBridgeTermServer(value === true); break
         case 'bridge-term-fetch-retry': await retryBridgeTermFetch(); break

@@ -68,11 +68,8 @@ impl Show for RemoteShow {
     }
 }
 
-/// 處理過的請求編號（只在記憶體，留到各自到期）
-pub fn replay() -> &'static Mutex<crate::device_relay::Replay> {
-    static R: std::sync::OnceLock<Mutex<crate::device_relay::Replay>> = std::sync::OnceLock::new();
-    R.get_or_init(Default::default)
-}
+/// 處理過的請求編號存在這個檔（和看畫面的 view_seen.json 同一套：存檔、重開也擋得住、最多 64 筆未到期的）
+pub const LOGIN_SEEN_FILE: &str = "login_seen.json";
 
 /// 進度小窗的文字（固定句子，不帶網址或代碼）
 pub fn step_json(s: super::device_login::Step) -> serde_json::Value {
@@ -102,7 +99,7 @@ pub fn report_of(o: &Outcome, kind: &str, stop: Option<&'static str>) -> (bool, 
 mod tests {
     use super::*;
     use crate::device_id::{load_or_create, KnownPeers};
-    use crate::device_relay::{new_request, verify_request, Replay};
+    use crate::device_relay::{new_request, verify_request};
 
     const NOW: i64 = 1_800_000_000;
 
@@ -119,7 +116,8 @@ mod tests {
         let (pending, payload, sig) = new_request(&p, "PC", "PH", "codex", NOW).unwrap();
         let mut known = KnownPeers::default();
         known.remember("PH", "手機", &p.public_b64(), 1).unwrap();
-        let req = verify_request(&payload, &sig, "codex", "PC", "PH", None, &known, NOW, &mut Replay::default()).unwrap();
+        known.set_login_ok("PH", true);
+        let req = verify_request(&payload, &sig, "codex", "PC", "PH", None, &known, NOW).unwrap();
         let t_pub = t.public_b64();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let stop: StopWhy = Arc::default();
@@ -157,6 +155,20 @@ mod tests {
     }
 
     #[test]
+    fn 手機共用的主機清單_和電腦端的完全相同() {
+        assert_eq!(crate::device_relay::CODEX_LOGIN_HOSTS, super::super::device_login::CODEX_HOSTS);
+        assert_eq!(crate::device_relay::GROK_LOGIN_HOSTS, super::super::device_login::GROK_HOSTS);
+    }
+
+    /// 放回重試時的 404 不能誤殺正在授權的登入：只有第一次就 404 才停
+    #[test]
+    fn 守門_重試才遇到_404_當成已送達() {
+        let lib = include_str!("../lib.rs");
+        assert!(lib.contains("Err(relay::CodePutErr::Gone) if tries == 1 => {"));
+        assert!(lib.contains("Err(relay::CodePutErr::Gone) => break,"));
+    }
+
+    #[test]
     fn grok_與不認得的種類_先不跑() {
         assert!(engine_here("grok").is_err());
         assert!(engine_here("claude").is_err());
@@ -172,6 +184,8 @@ mod tests {
         assert!(body.contains("agent_setup::switch::remote_allowed(&app.data_dir)"));
         assert!(at("gate(") < at("verify_request(") && at("verify_request(") < at("engine_here(") && at("engine_here(") < at("run_device_login("));
         assert!(at("open_setup_progress(") < at("run_device_login("), "看得到進度、能取消才開始");
+        // 同一筆只處理一次：驗章前查存檔的紀錄，驗過後先記下存檔才往下（存不進去就不開始）
+        assert!(at("view_seen::check_unseen_in(") < at("verify_request(") && at("verify_request(") < at("view_seen::record_in(") && at("view_seen::record_in(") < at("engine_here("));
         // 驗章用本機記住的手機公鑰（known），後台給的公鑰只用來判斷有沒有變
         assert!(body.contains("device_id::live::known(&app.data_dir)"));
         // 呼叫這條路的只有 run_remote_setup（kind 不是 claude 時）

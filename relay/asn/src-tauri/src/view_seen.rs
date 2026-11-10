@@ -30,7 +30,12 @@ pub struct SeenIds {
 
 impl SeenIds {
     pub fn load(dir: &Path) -> Result<Self, String> {
-        match std::fs::read_to_string(dir.join(SEEN_FILE)) {
+        Self::load_file(dir, SEEN_FILE)
+    }
+
+    /// 指定檔名（#933 手機替這台登入用另一個檔，和看畫面的分開）
+    pub fn load_file(dir: &Path, file: &str) -> Result<Self, String> {
+        match std::fs::read_to_string(dir.join(file)) {
             Ok(t) => serde_json::from_str(&t).map_err(|_| "觀看紀錄壞了".to_string()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(SeenIds::default()),
             Err(e) => Err(format!("讀觀看紀錄失敗：{e}")),
@@ -38,8 +43,12 @@ impl SeenIds {
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
+        self.save_file(dir, SEEN_FILE)
+    }
+
+    pub fn save_file(&self, dir: &Path, file: &str) -> Result<(), String> {
         let text = serde_json::to_string(self).map_err(|e| e.to_string())?;
-        crate::write_atomic(&dir.join(SEEN_FILE), &text).map_err(|e| format!("存觀看紀錄失敗：{e}"))
+        crate::write_atomic(&dir.join(file), &text).map_err(|e| format!("存觀看紀錄失敗：{e}"))
     }
 
     /// 去掉已經到期（加上誤差）的，回新的一份
@@ -68,7 +77,12 @@ impl SeenIds {
 
 /// 驗章前：這筆看過沒有。讀不到紀錄也當看過（不能確定就不接受）
 pub fn check_unseen(dir: &Path, id: &str, now_s: i64) -> Result<(), String> {
-    if SeenIds::load(dir)?.pruned(now_s).contains(id) {
+    check_unseen_in(dir, SEEN_FILE, id, now_s)
+}
+
+/// 同上，指定檔名
+pub fn check_unseen_in(dir: &Path, file: &str, id: &str, now_s: i64) -> Result<(), String> {
+    if SeenIds::load_file(dir, file)?.pruned(now_s).contains(id) {
         return Err(ALREADY_SEEN.to_string());
     }
     Ok(())
@@ -76,7 +90,12 @@ pub fn check_unseen(dir: &Path, id: &str, now_s: i64) -> Result<(), String> {
 
 /// 驗章通過、回覆接受之前：記下並存檔。任何一步失敗都回錯誤，呼叫端要拒絕這筆
 pub fn record(dir: &Path, id: &str, expires_s: i64, now_s: i64) -> Result<(), String> {
-    SeenIds::load(dir)?.with(id, expires_s, now_s)?.save(dir)
+    record_in(dir, SEEN_FILE, id, expires_s, now_s)
+}
+
+/// 同上，指定檔名
+pub fn record_in(dir: &Path, file: &str, id: &str, expires_s: i64, now_s: i64) -> Result<(), String> {
+    SeenIds::load_file(dir, file)?.with(id, expires_s, now_s)?.save_file(dir, file)
 }
 
 #[cfg(test)]

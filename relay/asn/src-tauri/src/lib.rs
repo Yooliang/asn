@@ -635,7 +635,13 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
         relay.report_setup_result(false, "要求的格式不對", None).await;
         return;
     };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0);
+    let now_s = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0);
+    let now = now_s();
+    // 同一筆只處理一次：驗章前先查存檔的紀錄（重開 ASN 也擋得住）；讀不到紀錄也不接受
+    if view_seen::check_unseen_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &d.rid, now).is_err() {
+        relay.report_setup_result(false, device_relay::Refuse::Replayed.text(), None).await;
+        return;
+    }
     let known = match device_id::live::known(&app.data_dir) {
         Ok(k) => k,
         Err(e) => {
@@ -644,10 +650,7 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
             return;
         }
     };
-    let checked = {
-        let mut seen = dr::replay().lock().unwrap_or_else(|e| e.into_inner());
-        device_relay::verify_request(&d.payload, &d.sig, &ask.kind, &relay.node, &d.p_node, d.p_sign_pub.as_deref(), &known, now, &mut seen)
-    };
+    let checked = device_relay::verify_request(&d.payload, &d.sig, &ask.kind, &relay.node, &d.p_node, d.p_sign_pub.as_deref(), &known, now);
     let req = match checked {
         Ok(r) if r.rid == d.rid => r,
         Ok(_) => {
@@ -660,6 +663,12 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
             return;
         }
     };
+    // 驗過就先記下並存檔，存不進去就不開始。rid 在這裡就算用掉了：之後任何一步沒過（例如沒裝 Codex、正在忙），手機都要重新發起
+    if let Err(e) = view_seen::record_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &req.rid, req.exp, now) {
+        elog!("手機要求登入 {name}：記不下這次要求：{e}");
+        relay.report_setup_result(false, "這台電腦記不下這次要求，沒有開始登入", None).await;
+        return;
+    }
     let eng = match dr::engine_here(&ask.kind) {
         Ok(e) => e,
         Err(e) => {
@@ -695,29 +704,33 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
     let text = format!("你的手機正在替這台登入 {name}。登入網址和代碼只會出現在那支手機上");
     let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": text, "cancellable": true }));
     wins::progress_emit(&handle, serde_json::json!({ "phase": "login", "text": text }));
-    // 登入程序的上限：請求到期和 15 分鐘取較早的；代碼過了這個時間一定用不了
-    let total = std::time::Duration::from_secs((req.exp - now).clamp(1, device_relay::MAX_LIFETIME_SECS) as u64);
+    // 登入程序的上限：請求到期和 15 分鐘取較早的；代碼過了這個時間一定用不了。前面可能等過金鑰庫、開小窗，開始前重取時間
+    let started = now_s();
+    let total = std::time::Duration::from_secs((req.exp - started).clamp(1, device_relay::MAX_LIFETIME_SECS) as u64);
     let lim = agent_setup::device_login::Limits { total, ..Default::default() };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<device_relay::Sealed>();
     let stop: dr::StopWhy = Default::default();
-    let show = dr::RemoteShow { req: req.clone(), key, code_exp: now + total.as_secs() as i64, tx, stop: stop.clone(), cancelled: agent_setup::setup::cancel_requested };
+    let show = dr::RemoteShow { req: req.clone(), key, code_exp: started + total.as_secs() as i64, tx, stop: stop.clone(), cancelled: agent_setup::setup::cancel_requested };
     let h = handle.clone();
     let login = tokio::task::spawn_blocking(move || {
         let _lock = lock;
         let sp = agent_setup::proc::RealSpawner { pid_file: Some(identity::relay_home().join("setup").join("device_login.pid")) };
         agent_setup::device_login::run_device_login(eng.as_ref(), &sp, &show, &lim, &|step| wins::progress_emit(&h, dr::step_json(step)))
     });
-    // 讀到的網址＋代碼（已加密）放回後台。404＝這筆已經不在：請登入程序停下，不重試；其他錯誤最多試 3 次
+    // 讀到的網址＋代碼（已加密）放回後台，其他錯誤最多試 3 次。
+    // 第一次就 404＝這筆已經不在（過期、被新的請求蓋掉）：請登入程序停下，不重試。
+    // 重試時才 404：多半是前一次其實已經放進去、只是回應沒收到（後台只收一次），當成已送達，讓本人繼續授權
     let (r2, stop2, rid) = (relay.clone(), stop.clone(), req.rid.clone());
     let sender = tokio::spawn(async move {
         while let Some(s) = rx.recv().await {
             for tries in 1..=3 {
                 match r2.setup_code_put(&rid, &s).await {
                     Ok(()) => break,
-                    Err(relay::CodePutErr::Gone) => {
+                    Err(relay::CodePutErr::Gone) if tries == 1 => {
                         dr::stop_with(&stop2, dr::STOP_GONE);
                         return;
                     }
+                    Err(relay::CodePutErr::Gone) => break,
                     Err(relay::CodePutErr::Other(e)) => {
                         elog!("登入資料放回失敗（第 {tries} 次）：{e}");
                         if tries == 3 {
@@ -1059,6 +1072,14 @@ fn device_known_forget(app: State<'_, App>, node: String) -> Result<bool, String
 #[tauri::command]
 fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
     device_id::live::set_input_no_ask(&app.data_dir, &node, on)
+}
+
+/// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn device_known_login_ok(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
+    device_id::live::set_login_ok(&app.data_dir, &node, on)
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
@@ -2744,7 +2765,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, device_known_login_ok, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
