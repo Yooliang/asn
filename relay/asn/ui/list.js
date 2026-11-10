@@ -1148,6 +1148,9 @@ window.addEventListener('resize', () => {
 })
 if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
 
+// 別台要在這台打字的確認框：逾時之後才按、或前一個框還開著，都沒有允許；用既有的提示窗告訴本人（純文字）
+await listen('input-consent-expired', () => showLaunchNotice({ title: '打字確認', body: '這次請求已逾時或已取消，沒有允許。' }))
+await listen('input-consent-busy', () => showLaunchNotice({ title: '打字確認', body: '前一個打字確認框還開著，這次沒有允許。請先關掉它。' }))
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
 await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
