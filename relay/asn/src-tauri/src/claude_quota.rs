@@ -620,6 +620,66 @@ mod tests {
     const T0: i64 = 1_794_229_200_000;
 
     #[test]
+    fn 只有一條窗而且過期_整筆額度回_none_帳號仍在回報清單上() {
+        // 只有 5 小時那條，重置時間已過
+        let only_five = Quota {
+            five_hour_pct: Some(50),
+            reset_at: Some("2026-11-09T12:00:00Z".into()),
+            five_reset_at: Some("2026-11-09T12:00:00Z".into()),
+            at: "2026-11-09T11:00:00Z".into(),
+            five_at: Some("2026-11-09T11:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(only_five.without_expired(T0), None);
+        // 只有每週那條，重置時間已過
+        let only_week = Quota {
+            weekly_pct: Some(60),
+            reset_at: Some("2026-11-09T12:00:00Z".into()),
+            week_reset_at: Some("2026-11-09T12:00:00Z".into()),
+            at: "2026-11-09T11:00:00Z".into(),
+            week_at: Some("2026-11-09T11:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(only_week.without_expired(T0), None);
+        // 整批整理：該帳號不再帶額度，但帳號仍在回報的清單裡（只是沒有額度欄位）
+        let all: HashMap<String, Quota> = [("a@x.test".to_string(), only_five), ("b@x.test".to_string(), only_week)].into_iter().collect();
+        let kept = without_expired(&all, T0);
+        assert!(kept.is_empty());
+        let v = build_report_with_quota(&[acct("a@x.test", true), acct("b@x.test", false)], None, &kept);
+        let rows = v["accounts"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "帳號都還在清單上");
+        assert_eq!(rows[0], json!({ "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true }));
+        assert_eq!(rows[1], json!({ "vendor": "claude", "email": "b@x.test", "plan": "max", "current": false }));
+        // 同樣的單窗紀錄，還沒過期就照送
+        let fresh = Quota { five_hour_pct: Some(50), five_reset_at: Some("2026-11-09T15:00:00Z".into()), reset_at: Some("2026-11-09T15:00:00Z".into()), at: "2026-11-09T11:00:00Z".into(), ..Default::default() };
+        assert_eq!(fresh.without_expired(T0), Some(fresh.clone()));
+    }
+
+    #[test]
+    fn 舊格式只有單一_reset_at_過期就拿掉_屬於哪一條照舊規則推() {
+        let legacy = |five: Option<u8>, week: Option<u8>, reset: &str| Quota { five_hour_pct: five, weekly_pct: week, reset_at: Some(reset.into()), at: "2026-11-09T11:00:00Z".into(), ..Default::default() };
+        // 兩條都沒用完：單一 reset_at 屬於 5 小時那條。過期 → 5 小時拿掉，每週留著（沒存重置時間，無從判斷）
+        let got = legacy(Some(40), Some(70), "2026-11-09T12:00:00Z").without_expired(T0).expect("每週還在");
+        assert_eq!(names(&got), ["weekly"]);
+        assert_eq!((got.five_hour_pct, got.weekly_pct), (None, Some(70)));
+        assert_eq!(got.reset_at, None, "剩下的每週沒有重置時間，舊的單一重置時間不能再沿用");
+        assert!(got.windows()[0]["resets_at"].is_null());
+        assert_eq!(got.at, "2026-11-09T11:00:00Z");
+        // 每週用完（剩 0%）：單一 reset_at 屬於每週那條。過期 → 每週拿掉，5 小時留著
+        let got = legacy(Some(40), Some(0), "2026-11-09T12:00:00Z").without_expired(T0).expect("5 小時還在");
+        assert_eq!(names(&got), ["five_hour"]);
+        assert_eq!((got.five_hour_pct, got.weekly_pct, got.reset_at.clone()), (Some(40), None, None));
+        // 只有 5 小時一條、過期 → 整筆沒了
+        assert_eq!(legacy(Some(50), None, "2026-11-09T12:00:00Z").without_expired(T0), None);
+        // 沒過期：整筆不變
+        let ok = legacy(Some(40), Some(70), "2026-11-09T15:00:00Z");
+        assert_eq!(ok.without_expired(T0), Some(ok.clone()));
+        // 兩條都用完：推不出單一 reset_at 屬於哪一條，兩條都留著（不亂丟）
+        let both0 = legacy(Some(0), Some(0), "2026-11-09T12:00:00Z");
+        assert_eq!(names(&both0.without_expired(T0).unwrap()), ["five_hour", "weekly"]);
+    }
+
+    #[test]
     fn 過期的窗不送_沒過期的照送_另一條原封不動() {
         // 5 小時那條的重置時間在 12:00（已過），每週那條 11-12（還沒到）
         let q = quota_two(Some("2026-11-09T12:00:00Z"), Some("2026-11-12T00:00:00Z"));
