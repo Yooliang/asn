@@ -88,10 +88,22 @@ fn retry_gap(attempts: u32) -> u64 {
 
 /// 壞檔最多保留幾個
 const BAD_KEEP: usize = 5;
+/// 改名失敗時的「已通知」標記檔（內容記壞檔的大小與修改時間）；不算進壞檔保留名額
+const BAD_MARK: &str = ".bad-notified";
+
+/// 壞檔的指紋（大小、修改時間毫秒）；讀不到就回 None
+fn file_sig(file: &std::path::Path) -> Option<Value> {
+    let md = std::fs::metadata(file).ok()?;
+    let ms = md.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+    Some(json!({ "size": md.len(), "mtime_ms": ms }))
+}
 
 /// 壞檔排序用時間戳：`.bad-<毫秒>` 取毫秒；舊格式 `.bad` 與解析不出來的都當 0（最舊）。不是壞檔回 None
 fn bad_stamp(name: &str) -> Option<u64> {
     let rest = name.strip_prefix(OUTBOX_FILE)?;
+    if rest.starts_with(BAD_MARK) {
+        return None; // 標記檔（含它的暫存檔）不是壞檔
+    }
     if rest == ".bad" {
         return Some(0);
     }
@@ -159,11 +171,34 @@ impl Outbox {
                         logs.push(format!("reply outbox file unreadable, moved to {OUTBOX_FILE}.bad-{stamp}: {e}"));
                         // 改名成功才通知：壞檔已離開原位，下次啟動不會再被判成壞檔
                         notify = true;
+                        // 殘留的「已通知」標記（先前改名失敗留下的）已無用，刪掉；刪不掉只記 log
+                        let mark = work_dir.join(format!("{OUTBOX_FILE}{BAD_MARK}"));
+                        if let Err(me) = std::fs::remove_file(&mark) {
+                            if me.kind() != std::io::ErrorKind::NotFound {
+                                logs.push(format!("reply outbox: 刪除標記檔 {OUTBOX_FILE}{BAD_MARK} 失敗：{me}"));
+                            }
+                        }
                         logs.extend(prune_bad_files(work_dir, BAD_KEEP, &|p| std::fs::remove_file(p)));
                     }
                     Err(re) => {
-                        // 改名失敗＝原壞檔還留在原處，下次啟動會再被判成壞檔；若此處也通知，同一份壞檔每次啟動都會吵一次，所以只記 log
-                        logs.push(format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}; 不通知，只留本機紀錄"));
+                        // 改名失敗＝原壞檔還留在原處，下次啟動會再被判成壞檔。只通知一次：
+                        // 標記檔記著上次通知時這份壞檔的大小＋修改時間，相符就不再通知（只記 log），不相符（沒標記或壞檔變了）才通知並更新標記。
+                        // 讀不到壞檔指紋時無法標記，寧可通知（訊號不丟）
+                        let mark = work_dir.join(format!("{OUTBOX_FILE}{BAD_MARK}"));
+                        let sig = file_sig(&file);
+                        let marked = sig.is_some() && std::fs::read_to_string(&mark).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) == sig;
+                        let mut line = format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}");
+                        if marked {
+                            line.push_str("; 這份壞檔已通知過，不再通知");
+                        } else {
+                            notify = true;
+                            if let Some(sg) = &sig {
+                                if let Err(we) = pending::save_atomic(&mark, sg) {
+                                    logs.push(format!("reply outbox: 寫標記檔 {OUTBOX_FILE}{BAD_MARK} 失敗：{we}"));
+                                }
+                            }
+                        }
+                        logs.push(line);
                     }
                 }
                 vec![]
@@ -563,20 +598,41 @@ mod tests {
     }
 
     #[test]
-    fn 壞檔改名失敗_不通知_只記_log_原檔留著() {
+    fn 壞檔改名失敗_同一份只通知一次_壞檔變了再通知_成功後刪標記() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join(OUTBOX_FILE), "{ 壞").unwrap();
         let fail = |_: &std::path::Path, _: &std::path::Path| -> std::io::Result<()> { Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked")) };
         let (ob, logs, notify) = Outbox::load_with(d.path(), &fail);
         assert!(ob.items.is_empty());
-        assert!(!notify, "改名失敗不通知，免得同一份壞檔每次啟動都通知");
+        assert!(notify, "第一次改名失敗要通知（訊號不能丟）");
         assert!(logs.iter().any(|l| l.contains("rename") && l.contains("failed")), "{logs:?}");
         assert!(d.path().join(OUTBOX_FILE).exists(), "原壞檔還在原處");
-        // 改名成功則通知
-        std::fs::write(d.path().join(OUTBOX_FILE), "{ 壞").unwrap();
+        let mark = d.path().join(format!("{OUTBOX_FILE}{BAD_MARK}"));
+        assert!(mark.exists(), "寫了已通知標記");
+        // 同一份壞檔第二次啟動：不再通知
+        let (_, logs, notify) = Outbox::load_with(d.path(), &fail);
+        assert!(!notify, "{logs:?}");
+        assert!(logs.iter().any(|l| l.contains("不再通知")), "{logs:?}");
+        // 壞檔內容變了（大小不同）：再通知一次，並更新標記
+        std::fs::write(d.path().join(OUTBOX_FILE), "{ 壞得不一樣、更長").unwrap();
+        let (_, _, notify) = Outbox::load_with(d.path(), &fail);
+        assert!(notify, "壞檔變了要再通知");
+        let (_, _, notify) = Outbox::load_with(d.path(), &fail);
+        assert!(!notify, "更新標記後又不再通知");
+        // 只有修改時間不同（大小相同）也再通知
+        let f = std::fs::OpenOptions::new().write(true).open(d.path().join(OUTBOX_FILE)).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(10)).unwrap();
+        drop(f);
+        let (_, _, notify) = Outbox::load_with(d.path(), &fail);
+        assert!(notify, "修改時間變了要再通知");
+        // 標記檔不算進壞檔保留名額
+        assert_eq!(bad_stamp(&format!("{OUTBOX_FILE}{BAD_MARK}")), None);
+        assert_eq!(bad_stamp(&format!("{OUTBOX_FILE}{BAD_MARK}.123.tmp")), None);
+        // 改名成功則通知，並刪掉標記
         let (_, logs, notify) = Outbox::load(d.path());
         assert!(notify && logs.iter().any(|l| l.contains("moved to")), "{logs:?}");
         assert!(!d.path().join(OUTBOX_FILE).exists());
+        assert!(!mark.exists(), "改名成功後標記被刪");
     }
 
     fn names(d: &std::path::Path) -> Vec<String> {
