@@ -175,9 +175,12 @@ test('chatpane／RemoteView 把開始與結束交給手機畫面；開始時帶�
 
 test('Rust：金鑰變了的說法帶原本與新的完整指紋、名字用本機記住的；手機的開始資料只帶 confirmed 與節點、不帶指紋；五個命令登記在手機清單', () => {
   const vr = read('../src-tauri/src/view_remote.rs')
-  assert.match(vr, /\{who\}的金鑰和這支手機記住的不一樣（原本的指紋 \{old_fp\}，現在是 \{new_fp\}），已經擋下。/)
+  assert.match(vr, /\{who\}的金鑰和這支手機記住的不一樣（\{fps\}），已經擋下。/)
+  assert.match(vr, /Some\(old\) => format!\("原本的指紋 \{old\}，現在是 \{new_fp\}"\)/)
+  assert.match(vr, /None => format!\("現在的指紋是 \{new_fp\}"\)/)
   const vd = read('../src-tauri/src/view_d.rs')
-  assert.match(vd, /phone_key_changed_text\(&clean_machine\(Some\(local_name\)\), &crate::device_id::fp_grouped\(&old_pub\), &crate::device_id::fp_grouped\(&to_pub\)\)/)
+  assert.match(vd, /let old_fp = was_confirmed\.then\(\|\| crate::device_id::fp_grouped\(&old_pub\)\);/, '原本那把沒確認過就不給它的指紋')
+  assert.match(vd, /phone_key_changed_text\(&clean_machine\(Some\(local_name\)\), old_fp\.as_deref\(\), &crate::device_id::fp_grouped\(&to_pub\)\)/)
   assert.doesNotMatch(vd, /phone_key_changed_text\(&machine/, '不用後台這次給的名字')
   assert.match(vd, /v\["confirmed"\]/)
   assert.doesNotMatch(vd.split('pub fn started_view_json')[1].split('\n}\n')[0], /fp/, '開始資料不帶指紋')

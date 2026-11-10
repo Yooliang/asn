@@ -128,7 +128,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
     let (tofu, confirmed, remembered) = match b.known() {
         Ok(k) => {
             let t = k.check(&to_node, &to_pub);
-            let remembered = k.peer(&to_node).map(|p| (p.name.clone(), p.sign_pub.clone()));
+            let remembered = k.peer(&to_node).map(|p| (p.name.clone(), p.sign_pub.clone(), p.confirmed_at.is_some()));
             // 確認只算在記住的同一把公鑰上：不是 Same 一律當沒確認
             (t, t == Tofu::Same && crate::device_id::phone_input_allowed(k.peer(&to_node)), remembered)
         }
@@ -143,8 +143,10 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
         report_ended(b, &id, &token).await;
         b.alert(&to_node, "changed", &to_pub).await;
         let msg = if phone {
-            let (local_name, old_pub) = remembered.unwrap_or_default();
-            view_remote::phone_key_changed_text(&clean_machine(Some(local_name)), &crate::device_id::fp_grouped(&old_pub), &crate::device_id::fp_grouped(&to_pub))
+            let (local_name, old_pub, was_confirmed) = remembered.unwrap_or_default();
+            // 原本那把還沒確認過：不顯示它的指紋（確認時要從選項選出它，不能先給網頁看到）
+            let old_fp = was_confirmed.then(|| crate::device_id::fp_grouped(&old_pub));
+            view_remote::phone_key_changed_text(&clean_machine(Some(local_name)), old_fp.as_deref(), &crate::device_id::fp_grouped(&to_pub))
         } else {
             view_remote::TARGET_KEY_CHANGED.to_string()
         };
@@ -380,12 +382,19 @@ mod tests {
         let v = RemoteViews::default();
         // 後台這次給的名字不能出現在說明裡：只用這支手機自己記住的「工作機」
         let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("後台給的名字".into()), None, NOW)).err().unwrap();
-        let (old_fp8, new_fp8) = (crate::device_id::fp_grouped("old-key"), crate::device_id::fp_grouped("new-key"));
-        assert!(err.contains(&new_fp8) && err.contains(&old_fp8), "手機看到的話帶原本與新的完整指紋（分組）：{err}");
+        let (old_fp, new_fp) = (crate::device_id::fp_grouped("old-key"), crate::device_id::fp_grouped("new-key"));
+        assert!(err.contains(&new_fp), "手機看到的話帶新的完整指紋（分組）：{err}");
+        assert!(!err.contains(&old_fp), "原本那把還沒確認過：不顯示它的指紋：{err}");
         assert!(err.contains("設定 → 認得的電腦"), "{err}");
         assert!(err.contains("「工作機」") && !err.contains("後台給的名字"), "名字用本機記住的：{err}");
-        assert_eq!(err, view_remote::phone_key_changed_text("工作機", &old_fp8, &new_fp8));
-        assert!(view_remote::phone_key_changed_text("", &old_fp8, &new_fp8).starts_with("這台電腦的金鑰"), "本機沒記名字就寫這台電腦");
+        assert_eq!(err, view_remote::phone_key_changed_text("工作機", None, &new_fp));
+        assert!(view_remote::phone_key_changed_text("", None, &new_fp).starts_with("這台電腦的金鑰"), "本機沒記名字就寫這台電腦");
+        // 原本那把確認過：才帶原本的指紋
+        let mut k = known_with("pc", "old-key");
+        assert!(k.confirm("pc", &crate::device_id::fingerprint("old-key"), NOW));
+        let b2 = Fake::new(Some(json!({ "topic": "t1", "to_pub": "new-key" })), k);
+        let err2 = run(start_view(&b2, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap();
+        assert!(err2.contains(&old_fp) && err2.contains(&new_fp), "{err2}");
         assert_eq!(b.alerts.lock().unwrap().clone(), vec![("pc".to_string(), "changed".to_string())]);
         assert_eq!(b.actions(), vec!["term_view_start", "term_view_report"]);
         let sent_id = b.calls.lock().unwrap()[0].1["id"].as_str().unwrap().to_string();
