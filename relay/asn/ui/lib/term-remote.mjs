@@ -1,7 +1,7 @@
 // 看別台電腦上夥伴的畫面（#597 別台看畫面）。**只能看：** 這裡沒有任何打字、貼上、按鍵的路，
 // xterm 也關掉輸入（disableStdin）。畫面內容在 Rust 端解密、擋重放、再過濾過才送來；xterm 只寫入，不解析連結。
 // 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
-import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
+import { createFollow, frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { installWideChars } from './term-width.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -37,6 +37,26 @@ export async function askRemote(api, node) {
     console.info('[ASN] 查不到這台能不能看那台的畫面', String(e?.message ?? e))
     return null
   }
+}
+
+/**
+ * 手機看終端：xterm 依電腦端的列數固定高度，區塊比它矮（鍵盤開著）時，最底下的輸入列會在可見範圍外。
+ * 回傳要把外層 scrollTop 設成多少，才讓游標那一整列看得到；不用動回 null。
+ * follow＝使用者沒有自己捲離底部（false 就完全不動，不把正在看舊內容的人拉回來）。
+ * offset＝畫面頂端離外層內容頂端的距離（內距）。
+ */
+export function cursorScrollTop({ cursorRow, rowHeight, viewHeight, scrollTop, maxScroll, follow, offset = 0 }) {
+  if (!follow) return null
+  const row = Number(cursorRow), h = Number(rowHeight), view = Number(viewHeight)
+  if (!(h > 0) || !(view > 0) || !Number.isFinite(row) || row < 0) return null
+  const top = offset + row * h, bottom = top + h
+  const cur = Number(scrollTop) || 0
+  let want = null
+  if (bottom > cur + view) want = bottom - view
+  else if (top < cur) want = top
+  if (want === null) return null
+  const t = Math.min(Math.max(0, Number(maxScroll) || 0), Math.max(0, Math.ceil(want)))
+  return Math.abs(t - cur) < 0.5 ? null : t
 }
 
 /** 唯讀的 xterm 設定：在本機看畫面的設定上關掉輸入 */
@@ -92,6 +112,24 @@ export const RemoteView = {
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
+    // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
+    let follow = createFollow(), ro = null, scrollEl = null
+    const followMax = el => Math.max(0, el.scrollHeight - el.clientHeight)
+    const keepCursorVisible = () => {
+      const el = host.value, screen = el?.querySelector?.('.xterm-screen')
+      if (!el || !screen || !term?.rows) return
+      const rowHeight = screen.clientHeight / term.rows
+      const offset = screen.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+      const t = cursorScrollTop({ cursorRow: term.buffer?.active?.cursorY, rowHeight, viewHeight: el.clientHeight, scrollTop: el.scrollTop, maxScroll: followMax(el), follow: follow.following(), offset })
+      if (t === null) return
+      follow.place(t)
+      el.scrollTop = t
+    }
+    const onUserScroll = () => { const el = host.value; if (el) follow.onScroll(el.scrollTop, followMax(el)) }
+    const unwatchScroll = () => {
+      ro?.disconnect?.(); ro = null
+      scrollEl?.removeEventListener?.('scroll', onUserScroll); scrollEl = null
+    }
     // 每次發起一個序號：這一格收掉或重新發起時，舊的就作廢。手機的本人確認可能很晚才回來，作廢的就算回 ok 也不送 start
     let gen = 0
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
@@ -99,6 +137,7 @@ export const RemoteView = {
       clearTimeout(warnTimer)
       offFrame?.(); offEnd?.(); offFrame = offEnd = null
       document.removeEventListener('visibilitychange', onVisible)
+      unwatchScroll()
       term?.dispose?.(); term = null
     }
     const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = '' }
@@ -118,7 +157,7 @@ export const RemoteView = {
           // 窗格的欄、列數和畫面不一樣就跟著改（#903）：游標列是窗格內的列號，xterm 的列數不同時最後一列會落在別處
           const c = Number(f.meta?.cols), r = Number(f.meta?.rows)
           if (Number.isInteger(c) && Number.isInteger(r) && c > 0 && r > 0 && (term.cols !== c || term.rows !== r) && typeof term.resize === 'function') term.resize(c, r)
-          term.write(frameToWrite(f))
+          term.write(frameToWrite(f), keepCursorVisible)   // 寫完（游標位置更新後）再調捲動位置
         }, wanted)
         if (!offF) return
         offFrame = offF
@@ -133,6 +172,10 @@ export const RemoteView = {
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
         if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         document.addEventListener('visibilitychange', onVisible)
+        follow = createFollow()
+        scrollEl = host.value
+        scrollEl?.addEventListener?.('scroll', onUserScroll, { passive: true })
+        if (typeof ResizeObserver === 'function' && scrollEl) { ro = new ResizeObserver(() => keepCursorVisible()); ro.observe(scrollEl) }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
