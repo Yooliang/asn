@@ -962,3 +962,31 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-remote-switch{margin:4px 0}
 .term-remote-typing{background:#7a0d0d;color:#fff;font-weight:700}
 .m-dev{font-size:12px;opacity:.7;margin:0 0 2px}
+
+/* ---------- 左側「通知」頁籤（方案 A）：鈴鐺排在最上面（群組之前），右上角是未讀數；清單、分類、右邊的通知內容 ---------- */
+.rail .rtab-notice{order:-2}
+.rtab-count{position:absolute;top:-4px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--busy);color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center;box-shadow:0 0 0 1px #fff;pointer-events:none}
+.notice-list{display:flex;flex-direction:column;padding:0}
+.nt-head{flex:none;display:flex;align-items:center;gap:6px;padding:8px 10px 4px;min-width:0}
+.nt-title{font-weight:700;color:var(--title-fg)}
+.nt-head .unread{flex:none}
+.nt-head .nt-all{margin-left:auto;padding:3px 8px;font-size:12px;white-space:nowrap}
+.nt-chips{flex:none;display:flex;flex-wrap:wrap;gap:4px;padding:4px 10px 6px;border-bottom:1px solid var(--line)}
+.nt-chip{border:1px solid #b8cde3;border-radius:11px;padding:1px 9px;background:#fff;color:var(--title-fg);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.nt-chip.on{border-color:var(--accent);background:var(--accent);color:#fff}
+.nt-chip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.notice-list ul{flex:1;overflow-y:auto;margin:0;padding:4px 0;list-style:none}
+.nt-row{padding-left:10px;align-items:center}
+.nt-row.on{background:#d9eafa;border-color:#9fc3e8}
+.nt-row .b-nick{flex:1}
+.nt-row.nt-unread .b-nick{font-weight:700}
+.nt-time{flex:none;font-size:11px;color:var(--muted)}
+.nt-ic{width:20px;height:20px}
+.nt-ic.nt-stuck{stroke:#c0392b}
+.nt-ic.nt-security{stroke:#8e44ad}
+.nt-ic.nt-quota{stroke:#d07a10}
+.nt-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--busy)}
+.notice-pane .nt-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;color:var(--muted);font-size:12px}
+.notice-pane .nt-cat{font-weight:700;color:var(--title-fg)}
+.notice-pane .nt-h{overflow-wrap:anywhere}
+.notice-pane .nt-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}

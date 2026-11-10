@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -288,4 +288,27 @@ test('帳號卡片設備按鈕情境：桌面兩種寬度、手機兩種寬度�
     assert.ok(src.includes('帳號卡超出窗格'), '卡片不超出窗格')
   }
   assert.equal(d.find(s => s.page === 'm.html').probe.open, '帳號')
+})
+
+test('電腦版通知頁籤情境（方案 A）：整合、分離、窄視窗 360 各一張截圖；四則通知（含一則內文夾角括號）；表達式語法正確', async () => {
+  const sc = SCENARIOS.filter(s => s.probe?.dnotice)
+  assert.deepEqual(sc.map(s => s.name), ['list-notice-merged', 'list-notice-split', 'list-notice-narrow'])
+  assert.deepEqual(sc.map(s => s.shot), ['list-notice-merged.png', 'list-notice-split.png', 'list-notice-narrow-360.png'])
+  for (const s of sc) {
+    assert.equal(s.page, 'list.html')
+    assert.equal(probeKind(s.probe), '電腦版通知頁籤檢查')
+    const src = probeSource(s.probe)
+    assert.doesNotThrow(() => new vm.Script(src))
+    assert.match(src, /querySelector\('b'\)/, '要檢查內文沒有被當成 HTML')
+    assert.match(src, /noScroll\(\)/, '要檢查沒有橫向捲動')
+    const ctx = vm.createContext({}); ctx.globalThis = ctx
+    vm.runInContext(injectSource(tableFor(s)), ctx)
+    const inbox = await ctx.__TAURI__.core.invoke('relay_inbox')
+    assert.equal(inbox.messages.length, 4)
+    assert.ok(inbox.messages.every(m => m.kind.startsWith('notice:')))
+    assert.ok(inbox.messages.some(m => m.body.includes('<b>')))
+    const me = JSON.parse(await ctx.__TAURI__.core.invoke('store_load', { name: 'me' }))
+    assert.equal(me.winMode, s.probe.dnotice === 'split' ? undefined : 'merged')
+  }
+  assert.equal(sc.find(s => s.name === 'list-notice-narrow').width, 360)
 })

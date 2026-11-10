@@ -19,7 +19,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
-import { emo, initial, plain } from './lib/text.mjs'
+import { UNNAMED_DEVICE, emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { TermView } from './lib/term-view.mjs'
@@ -57,7 +57,7 @@ import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { withNoticeGroup } from './lib/notice.mjs'
+import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
@@ -283,7 +283,7 @@ const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
 // 記住開著的分頁與對話視窗（重啟後回到原狀態）：存在 asn-me.json 的 session。還原完成前不寫新的，免得把上次的狀態蓋成空的
 const sess = reactive({ saved: normalizeSession(savedMe.session), ready: false, wins: [], panelWins: [] })
-const currentSession = () => snapshotSession({ tabs: ui.tabs, active: ui.active, panel: ui.panel, windows: sess.wins, panelWindows: sess.panelWins }, id => core.friends.get(id))
+const currentSession = () => snapshotSession({ tabs: withoutNoticeTabs(ui.tabs), active: withoutNoticeTabs([ui.active])[0] ?? '', panel: ui.panel, windows: sess.wins, panelWindows: sess.panelWins }, id => core.friends.get(id))
 async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，由 Rust 端的視窗清單為準
   if (!sess.ready || ui.mode !== 'split') { if (sess.wins.length || sess.panelWins.length) { sess.wins = []; sess.panelWins = [] } ; return }
   try {
@@ -1003,8 +1003,51 @@ const onInviteCode = code => { if (typeof code === 'string' && code) { void invo
 await listen('asn:invite', onInviteCode)
 void invoke('invite_pending').then(onInviteCode).catch(() => {})
 
+// ---------- 左側「通知」頁籤（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
+// 整合模式：點一則＝右邊固定的「通知」內容分頁（NOTICE_TAB，沒有輸入列），窄視窗切到右邊並附「‹ 通知」返回鈕；
+// 分離模式：沿用原本唯讀的「通知」對話視窗（NOTICE_ID，對話窗本來就不給通知輸入列與通話鈕）。
+// 通知內容一律當純文字顯示（樣板用 {{ }}，不用 v-html）；這裡不做任何遠端動作
+const noticeView = reactive({ cat: NOTICE_CAT_ALL, sel: '', opened: [] })   // opened：這次開著期間點開過、但通知對話還沒整個標已讀的那幾則
+let setRailTab = () => {}   // 名單頁籤的 ref 在下面才建立，建立後換成真的
+const noticeFriendNow = computed(() => friends.value.find(isNoticeFriend) ?? null)
+const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened, hideDev: [UNNAMED_DEVICE] }))
+const noticeShown = computed(() => filterNoticeRows(noticeAll.value, noticeView.cat))
+const noticeUnreadN = computed(() => noticeUnreadCount(noticeAll.value))
+const noticeSelRow = computed(() => noticeAll.value.find(r => r.key === noticeView.sel) ?? null)
+function markAllNotices() {
+  core.markRead(NOTICE_ID)
+  noticeView.opened = []
+}
+function markNoticeOne(key) {
+  const opened = noticeView.opened.includes(key) ? noticeView.opened : [...noticeView.opened, key]
+  const left = noticeUnreadCount(noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened }))
+  if (left === 0) markAllNotices()
+  else noticeView.opened = opened
+}
+async function openNoticeRow(key) {
+  noticeView.sel = key
+  if (ui.mode === 'merged') {
+    if (key) markNoticeOne(key)
+    Object.assign(ui, openChatTab(ui, NOTICE_TAB, ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（返回鈕寫「通知」）
+    await invoke('show_main')
+    sync()
+    return
+  }
+  // 分離模式：打開（或叫出）原本的「通知」對話視窗；視窗一打開就整段標已讀
+  await invoke('open_chat', { id: NOTICE_ID, title: '通知 - 對話' })
+  noticeView.opened = []
+  sync(); pushLog(NOTICE_ID)
+}
+// 別處要求打開「通知」對話（點右下角提示、舊存檔）：整合模式改成切到左邊的通知頁籤、右邊顯示最新一則
+function openNoticeFromChat() {
+  setRailTab('notice')
+  return openNoticeRow(ui.mode === 'merged' ? (noticeAll.value[0]?.key ?? '') : '')
+}
+
 async function openChat(id) {
   if (isRoomChat(id)) return openRoomChat(id)
+  if (id === NOTICE_ID || id === NOTICE_TAB) return openNoticeFromChat()
   if (String(id).startsWith('pending:')) return
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
@@ -1080,8 +1123,9 @@ async function setMode(to) {
     const closed = from === 'split' ? await invoke('close_chats') : []
     const closedPanels = from === 'split' ? (await invoke('close_panels')).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
     // 指引、設定也跟著轉：分離→整合＝視窗變分頁；整合→分開＝分頁開成視窗。好友的對話照舊交給 switchMode
-    const { chats: chatTabs, panels: panelTabs } = splitTabs(ui.tabs)
-    const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) ? '' : ui.active, windowIds: closed })
+    // 「通知」不跟著轉成分頁或視窗（它只從左邊的通知頁籤打開）
+    const { chats: chatTabs, panels: panelTabs } = splitTabs(withoutNoticeTabs(ui.tabs))
+    const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) || ui.active === NOTICE_TAB ? '' : ui.active, windowIds: withoutNoticeTabs(closed) })
     ui.mode = to
     ui.tabs = orderTabs([...plan.tabs, ...closedPanels.map(panelTabId)], ui.pinnedChat); ui.active = plan.active || ui.tabs.at(-1) || ''
     await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
@@ -1122,9 +1166,10 @@ watch(showNowPlaying, on => {
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friendsAct.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
 
-// 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
+// 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（舊版已拿掉的通知紀錄頁籤或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
 const shotTab = ref(startTab || (dims.tabDim === 'device' ? info.node : ''))
+setRailTab = key => { shotTab.value = key }
 const adI = ref(0)   // 底部小廣告與「開始」頁大幅廣告共用同一個目前位置
 // 廣告：預設是打包備用（ADS）；啟動時與每 6 小時由 Rust 的 ads_fetch 從官網抓一次（--shot 模式不抓），抓不到（回空）就維持現況。內容一律當純文字顯示
 const ads = ref(ADS)
@@ -1424,10 +1469,11 @@ const app = createApp({
     const shown = computed(() => {
       if (!isDevice.value) return []
       const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
-      const base = rosterShownGroups(activeFriends(friendsAct.value), o)
+      // 「通知」對話不進名單（連搜尋也不列），只在左邊的「通知」頁籤看
+      const base = withoutNoticeItems(rosterShownGroups(activeFriends(friendsAct.value), o))
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
-      const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items)
-      return withNoticeGroup(withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived), friendsAct.value, { query: query.value })
+      const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items).filter(f => !isNoticeFriend(f))
+      return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
@@ -1518,7 +1564,7 @@ const app = createApp({
     const pageDone = a => { pageLoaded[a.key] = true }
     const pageBroken = a => { pageFail[a.key] = true }
     // 分頁列：好友的對話分頁，加上「指引：…」「設定：…」兩種面板分頁（各最多一個）
-    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : isTermTab(id) ? termTabItem(terms.rows.find(r => r.id === termIdOf(id))) : tabFriend(id))).filter(Boolean))
+    const tabItems = computed(() => ui.tabs.map(id => (id === NOTICE_TAB ? { id, panel: 'notice', nick: '通知', status: '', unread: 0 } : isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : isTermTab(id) ? termTabItem(terms.rows.find(r => r.id === termIdOf(id))) : tabFriend(id))).filter(Boolean))
     const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))   // 只有好友的對話才有對話窗
     const chatTabMenu = ref('')
     const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
@@ -1853,7 +1899,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, paneOnly, sideFolded, sideLocked, backToList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
@@ -1895,6 +1941,7 @@ app.component('settings-panel', SettingsPanel)
 const root = app.mount('#app')
 
 await core.start()
+pushLog(NOTICE_ID)   // 左邊「通知」頁籤讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()
 
 // 還原上次開著的分頁與對話視窗：要等 1 對 1 名單（夥伴 ID 才對得上）與群組列表都載入；名單一直連不上、或群組列表讀取失敗，
@@ -1905,15 +1952,16 @@ async function restoreOpenSession(r) {
   for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = k === 'setting' ? normalizeCatKey(r.panel[k]) : r.panel[k]
   let rooms = []
   if (ui.mode === 'merged') {
-    const tabs = orderTabs([...r.tabs, ...ui.tabs.filter(id => !r.tabs.includes(id))], ui.pinnedChat)
+    const saved = withoutNoticeTabs(r.tabs)   // 舊存檔裡的「通知」對話分頁一律不還原（通知只在左邊的通知頁籤看）
+    const tabs = orderTabs([...saved, ...ui.tabs.filter(id => !saved.includes(id))], ui.pinnedChat)
     ui.tabs = tabs
-    if (!ui.active || !tabs.includes(ui.active)) ui.active = r.active || tabs.at(-1) || ''
+    if (!ui.active || !tabs.includes(ui.active)) ui.active = (tabs.includes(r.active) ? r.active : '') || tabs.at(-1) || ''
     rooms = tabs.filter(isRoomChat)
     for (const id of rooms) openedRooms.add(id)   // 群組分頁要持續讀新訊息（不經 openRoomChat：它會把主視窗拉到前面）
     for (const id of tabs) if (!isPanelTab(id)) pushLog(id)
     if (ui.active && !isPanelTab(ui.active) && !isRoomChat(ui.active)) { core.markRead(ui.active); void core.syncHistory(ui.active) }
   } else {
-    for (const id of r.windows) await openChat(id)
+    for (const id of withoutNoticeTabs(r.windows)) await openChat(id)
     for (const kind of r.panelWindows) await openPanel(kind, ui.panel[kind])
   }
   sess.ready = true

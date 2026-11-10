@@ -78,13 +78,15 @@
           </ul>
         </div>
         <span class="rail-gap"></span>
-        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key, 'rtab-groups': t.key === 'groups' }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
+        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key, 'rtab-groups': t.key === 'groups', 'rtab-notice': t.key === 'notice' }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" @click="tab = t.key">
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <g v-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
+            <g v-if="t.key === 'notice'"><path d="M12 3.2c-3.3 0-5.6 2.5-5.6 5.8v3.6L4.5 16v1.2h15V16l-1.9-3.4V9c0-3.3-2.3-5.8-5.6-5.8z" fill="#f6c845" stroke="#a06a10" stroke-width="1.2" stroke-linejoin="round"/><path d="M9.6 18.4a2.4 2.4 0 0 0 4.8 0z" fill="#f0b040" stroke="#a06a10" stroke-width="1.1"/><path d="M9 6.6c.6-.8 1.5-1.2 2.4-1.3" stroke="#fff6cf" stroke-width="1.2" stroke-linecap="round" fill="none"/></g>
+            <g v-else-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
             <g v-else-if="t.key === 'guide'"><path d="M4.5 4.5c2.6-.9 5.2-.7 7.5 1v14c-2.3-1.7-4.9-1.9-7.5-1z" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M19.5 4.5c-2.6-.9-5.2-.7-7.5 1v14c2.3-1.7 4.9-1.9 7.5-1z" fill="#e8f3fd" stroke="#1f5d9e"/><path d="M6.5 8.2c1.4-.2 2.7 0 3.6.6M6.5 11.2c1.4-.2 2.7 0 3.6.6M14 8.8c.9-.6 2.2-.8 3.6-.6M14 11.8c.9-.6 2.2-.8 3.6-.6" stroke="#1f5d9e" stroke-width="1" stroke-linecap="round" fill="none"/></g>
             <g v-else><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="#4a5d73" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="5.6" fill="#dfe8f2" stroke="#4a5d73" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="#fff" stroke="#4a5d73"/></g>
           </svg>
           <span class="red" v-if="t.key === 'groups' && groupsUnreadN"></span>
+          <span class="rtab-count" v-if="t.key === 'notice' && noticeUnreadN" aria-hidden="true">{{ noticeUnreadN > 99 ? '99+' : noticeUnreadN }}</span>
         </button>
       </nav>
       <div class="content" role="tabpanel">
@@ -97,12 +99,12 @@
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" type="button" v-if="g.kind !== 'notice'" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
+              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
                 <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span><span class="asn-upd" :class="'tone-' + remoteBtn(g.node).tone" role="button" tabindex="0" v-if="remoteBtn(g.node)" :aria-disabled="remoteBtn(g.node).busy" :title="remoteBtn(g.node).title" @click.stop="requestRemoteUpdate(g.node)" @keydown.enter.stop.prevent="requestRemoteUpdate(g.node)" @keydown.space.stop.prevent="requestRemoteUpdate(g.node)">{{ remoteBtn(g.node).label }}</span></template>
               </button>
-              <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
-                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="!c.isNotice && openBuddyMenu(c, $event)">
+              <ul v-show="!collapsed[g.key]">
+                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
                     <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'"></asn-avatar>
                     <span class="b-text">
@@ -145,6 +147,28 @@
           <div class="empty-list" v-if="!roomRows.length">{{ hub.st.err ? '讀不到群組。' : '還沒有群組。' }}</div>
           <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err">自己建立一個，或貼上別人給你的邀請連結加入。</p>
         </div>
+        <div class="list notice-list" v-else-if="tab === 'notice'">
+          <div class="nt-head">
+            <span class="nt-title">通知</span><span class="unread" v-if="noticeUnreadN">{{ noticeUnreadN }}</span>
+            <button class="gs-btn nt-all" type="button" :disabled="!noticeUnreadN" @click="markAllNotices">全部標為已讀</button>
+          </div>
+          <div class="nt-chips" role="group" aria-label="通知分類">
+            <button v-for="c in NOTICE_CATS" :key="c.key" class="nt-chip" type="button" :class="{ on: noticeView.cat === c.key }" :aria-pressed="noticeView.cat === c.key" @click="noticeView.cat = c.key">{{ c.label }}</button>
+          </div>
+          <ul>
+            <li v-for="r in noticeShown" :key="r.key">
+              <button class="buddy nt-row" type="button" :class="{ on: ui.mode === 'merged' && ui.active === NOTICE_TAB && noticeView.sel === r.key, 'nt-unread': r.unread }" @click="openNoticeRow(r.key)">
+                <svg class="cat-ic nt-ic" :class="'nt-' + r.cat" viewBox="0 0 24 24" aria-hidden="true"><path :d="NOTICE_CAT_ICON[r.cat]"/></svg>
+                <span class="b-text">
+                  <span class="b-line"><span class="b-nick">{{ r.title }}</span><time class="nt-time">{{ noticeTime(r.t) }}</time></span>
+                  <span class="b-psm" v-if="r.summary">{{ r.summary }}</span>
+                </span>
+                <i class="nt-dot" v-if="r.unread" title="未讀" aria-label="未讀"></i>
+              </button>
+            </li>
+          </ul>
+          <div class="empty-list" v-if="!noticeShown.length">{{ noticeAll.length ? '這一類目前沒有通知。' : '目前沒有通知。' }}</div>
+        </div>
         <div class="list guide-list" v-else-if="tab === 'guide'">
           <ul>
             <li v-for="g in GUIDES" :key="g.key">
@@ -184,14 +208,14 @@
   </div>
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
     <div class="tabbar" role="tablist" aria-label="開著的對話">
-      <button class="pane-back" type="button" v-if="paneOnly === 'chat'" aria-label="返回名單" title="返回名單" @click="backToList"><span aria-hidden="true">‹</span> 名單</button>
+      <button class="pane-back" type="button" v-if="paneOnly === 'chat'" :aria-label="ui.active === NOTICE_TAB ? '返回通知' : '返回名單'" :title="ui.active === NOTICE_TAB ? '返回通知' : '返回名單'" @click="backToList"><span aria-hidden="true">‹</span> {{ ui.active === NOTICE_TAB ? '通知' : '名單' }}</button>
       <div class="ctab home" v-if="!tabItems.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
       <div v-for="t in tabItems" :key="t.id" class="ctab" draggable="true" :class="[{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id), 'panel-tab': t.panel }, tabDragClass(t.id)]" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)" @dragstart="onTabDragStart(t.id, $event)" @dragend="onTabDragEnd" @dragover="onTabDragOver(t.id, $event)" @drop="onTabDrop(t.id, $event)">
         <template v-if="isChatTabPinned(t.id)">
           <asn-avatar class="pin-av" :src="avOf(t)" :friend="!t.panel &amp;&amp; !t.room ? t : null" :status="t.status"></asn-avatar>
         </template>
         <template v-else>
-          <svg v-if="t.panel" class="panel-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="t.panel === 'term' ? 'M3 5h18v14H3zM7 10l3 2-3 2M12 15h4' : t.panel === 'guide' ? 'M4.5 5c2.6-.9 5.2-.7 7.5 1v13c-2.3-1.7-4.9-1.9-7.5-1zM19.5 5c-2.6-.9-5.2-.7-7.5 1v13c2.3-1.7 4.9-1.9 7.5-1z' : 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1'"/></svg>
+          <svg v-if="t.panel" class="panel-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="t.panel === 'notice' ? NOTICE_CAT_ICON.other : t.panel === 'term' ? 'M3 5h18v14H3zM7 10l3 2-3 2M12 15h4' : t.panel === 'guide' ? 'M4.5 5c2.6-.9 5.2-.7 7.5 1v13c-2.3-1.7-4.9-1.9-7.5-1zM19.5 5c-2.6-.9-5.2-.7-7.5 1v13c2.3-1.7 4.9-1.9 7.5-1z' : 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1'"/></svg>
           <span v-else class="dot" :class="'st-' + t.status"></span>
           <span class="ctab-name">{{ plain(t.nick) }}</span>
         </template>
@@ -262,6 +286,20 @@
           </template>
         </div>
       </template>
+      <!-- 通知內容（整合模式）：左邊「通知」頁籤點一則就顯示在這裡；唯讀、沒有輸入列。內容是後台送來的，一律當純文字 -->
+      <div class="pane panel-pane notice-pane" v-if="view === 'chat' && ui.active === NOTICE_TAB">
+        <template v-if="noticeSelRow">
+          <div class="nt-meta">
+            <svg class="cat-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="NOTICE_CAT_ICON[noticeSelRow.cat]"/></svg>
+            <span class="nt-cat">{{ NOTICE_CAT_LABEL[noticeSelRow.cat] }}</span>
+            <span class="nt-dev" v-if="noticeSelRow.dev">{{ noticeSelRow.dev }}</span>
+            <time class="nt-time">{{ noticeTime(noticeSelRow.t) }}</time>
+          </div>
+          <h2 class="panel-h nt-h">{{ noticeSelRow.title }}</h2>
+          <div class="nt-body" v-if="noticeSelRow.rest">{{ noticeSelRow.rest }}</div>
+        </template>
+        <p class="empty-list" v-else>{{ noticeAll.length ? '從左邊選一則通知。' : '目前沒有通知。' }}</p>
+      </div>
       <div class="pane home-pane" v-if="view === 'home'">
         <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">
           <section v-for="(a, i) in ads" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">
