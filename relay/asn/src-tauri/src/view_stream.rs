@@ -240,6 +240,9 @@ pub enum Refused {
     MobileOff,
 }
 
+/// 依設備種類限制工作階段範圍：移動設備的工作階段只能查看畫面（拒絕時的結束原因用一般的 rejected）
+pub const SCOPE_VIEW_ONLY: &str = "這種設備只能查看畫面";
+
 /// 本機不允許移動設備查看時，拒絕的結束原因（後台 term_view_stop 的固定原因之一，D 端顯示一句清楚的話）
 pub const MOBILE_OFF: &str = "mobile_off";
 
@@ -280,6 +283,10 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
     let mobile = viewer_is_mobile(row.get("from_platform"), None);
     if mobile && !allow_mobile {
         return Err(Refused::MobileOff);
+    }
+    // 依設備種類限制工作階段範圍：移動設備只能查看（範圍簽在握手裡；這裡在記住對方、驗章之前就擋）
+    if mobile && s.scope != crate::view_handshake::Scope::View {
+        return Err(Refused::Bad(SCOPE_VIEW_ONLY.into()));
     }
     let from_pub = get("from_pub")?.to_string();
     let tofu = known.check(&s.d_node, &from_pub);
@@ -720,6 +727,47 @@ mod tests {
         let mut odd = row.clone();
         odd["scope"] = json!("admin");
         assert!(matches!(accept_request(&odd, "t", &known, &t, now, true), Err(Refused::Bad(_))));
+    }
+
+    #[test]
+    fn 依設備種類限制工作階段範圍_移動設備只能查看() {
+        use crate::view_handshake::Scope;
+        use serde_json::json;
+        let (dd, td) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
+        let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
+        let now = 1_800_000_000i64;
+        let known = crate::device_id::KnownPeers::default();
+        let row_of = |scope: Scope, platform: Option<&str>| {
+            let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope, expires_s: now + 60 };
+            let (eph, sig) = crate::view_handshake::d_start(&d, &s, now).unwrap();
+            let mut row = json!({ "id": "s1", "from_node": "d", "from_name": "手機", "from_pub": d.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
+            if scope == Scope::Input {
+                row["scope"] = json!("input");
+            }
+            if let Some(p) = platform {
+                row["from_platform"] = json!(p);
+            }
+            row
+        };
+        // 移動設備：查看照常，其他範圍一律不接受（就算本機允許移動設備查看）
+        assert_eq!(accept_request(&row_of(Scope::View, Some("android")), "t", &known, &t, now, true).unwrap().session.scope, Scope::View);
+        match accept_request(&row_of(Scope::Input, Some("android")), "t", &known, &t, now, true) {
+            Err(Refused::Bad(e)) => assert_eq!(e, SCOPE_VIEW_ONLY),
+            _ => panic!("移動設備的工作階段只能查看"),
+        }
+        assert!(matches!(accept_request(&row_of(Scope::Input, Some("ios")), "t", &known, &t, now, true), Err(Refused::Bad(_))));
+        // 電腦照舊
+        assert_eq!(accept_request(&row_of(Scope::Input, Some("desktop")), "t", &known, &t, now, true).unwrap().session.scope, Scope::Input);
+        assert_eq!(accept_request(&row_of(Scope::Input, None), "t", &known, &t, now, true).unwrap().session.scope, Scope::Input);
+    }
+
+    #[test]
+    fn 守門_範圍限制也在記住對方和驗章之前() {
+        let src = include_str!("view_stream.rs");
+        let f = src.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        let block = f.find("SCOPE_VIEW_ONLY").expect("有依設備種類限制範圍");
+        assert!(block < f.find("known.check(").unwrap() && block < f.find("t_accept(").unwrap(), "先擋，再 TOFU、驗章");
     }
 
     #[test]
