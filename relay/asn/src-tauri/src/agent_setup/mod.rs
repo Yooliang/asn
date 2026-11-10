@@ -8,6 +8,7 @@ pub mod claude_install;
 pub mod claude_login;
 pub mod codex_install;
 pub mod device_login;
+pub mod device_remote;
 pub mod link;
 pub mod login;
 pub mod net;

@@ -45,9 +45,9 @@ test('Rust：link.rs 編譯時讀這份 JSON，不另外寫主機清單', () => 
   for (const h of [...D.suffix, ...D.exact]) assert.ok(!code.includes(`"${h}"`), `link.rs 的程式碼不該自己寫 ${h}`)
 })
 
-test('裝置碼型登入（device_login.rs）的 Codex／Grok 主機都在 JSON 的 exact 裡（電腦讀得到的網址，手機也一定認得）', () => {
-  const rs = rd('relay/asn/src-tauri/src/agent_setup/device_login.rs')
-  for (const name of ['CODEX_HOSTS', 'GROK_HOSTS']) {
+test('裝置碼型登入的 Codex／Grok 主機（device_login.rs、手機共用的 device_relay.rs）都在 JSON 的 exact 裡（電腦讀得到的網址，手機也一定認得）', () => {
+  for (const [file, name] of [['agent_setup/device_login.rs', 'CODEX_HOSTS'], ['agent_setup/device_login.rs', 'GROK_HOSTS'], ['device_relay.rs', 'CODEX_LOGIN_HOSTS'], ['device_relay.rs', 'GROK_LOGIN_HOSTS']]) {
+    const rs = rd(`relay/asn/src-tauri/src/${file}`)
     const m = rs.match(new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\];`))
     assert.ok(m, `找不到 ${name}`)
     const hosts = [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1])

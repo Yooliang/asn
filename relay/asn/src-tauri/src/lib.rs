@@ -55,6 +55,8 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+// #933 PR-5b：手機替電腦登入裝置碼型 CLI 的請求與回傳格式（電腦、手機共用）
+mod device_relay;
 mod android_keywrap;
 mod keystore;
 mod view_handshake;
@@ -553,8 +555,13 @@ fn agent_setup_cancel() {
 /// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: String) {
+async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
     use agent_setup::remote::{gate, Gate};
+    // #933：別家的裝置碼型登入走另一條路（同樣先過本機把關）
+    if ask.kind != "claude" {
+        return run_remote_device_login(handle, relay, ask).await;
+    }
+    let requested_by = ask.by;
     let app = handle.state::<App>();
     let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
     if let Gate::Refuse(why) = gate(agent_setup::switch::remote_allowed(&app.data_dir), token.as_deref(), &requested_by) {
@@ -603,6 +610,145 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
             relay.report_setup_result(false, "安裝並登入中途中斷", None).await
         }
     }
+    // 結果留在畫面上幾秒讓人看到，再自己關
+    tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
+    wins::close_setup_progress(&handle, round);
+}
+
+/// #933 PR-5b：手機要這台登入裝置碼型 CLI（Codex、Grok）。依序：本機把關（開關、同一個人）→ 檢查請求（本機認得的手機、
+/// 簽章、欄位、到期、沒處理過）→ 有驗證過的執行檔 → 開進度小窗（看得到、能取消）→ 跑登入，網址＋代碼加密後放回後台給那支手機
+/// → 回報結果（固定句子，不帶網址或代碼）。任何一步不過就不跑登入、不送任何東西
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
+    use agent_setup::device_remote as dr;
+    use agent_setup::remote::{gate, Gate};
+    let app = handle.state::<App>();
+    let name = dr::vendor_name(&ask.kind);
+    let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
+    if let Gate::Refuse(why) = gate(agent_setup::switch::remote_allowed(&app.data_dir), token.as_deref(), &ask.by) {
+        elog!("手機要求登入 {name} 被拒絕：{why}");
+        relay.report_setup_result(false, why, None).await;
+        return;
+    }
+    let Some(d) = ask.device.as_ref() else {
+        relay.report_setup_result(false, "要求的格式不對", None).await;
+        return;
+    };
+    let now_s = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0);
+    let now = now_s();
+    // 同一筆只處理一次：驗章前先查存檔的紀錄（重開 ASN 也擋得住）；讀不到紀錄也不接受
+    if view_seen::check_unseen_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &d.rid, now).is_err() {
+        relay.report_setup_result(false, device_relay::Refuse::Replayed.text(), None).await;
+        return;
+    }
+    let known = match device_id::live::known(&app.data_dir) {
+        Ok(k) => k,
+        Err(e) => {
+            elog!("手機要求登入 {name}：讀不到認得的設備：{e}");
+            relay.report_setup_result(false, "這台電腦讀不到認得的設備紀錄，沒有開始登入", None).await;
+            return;
+        }
+    };
+    let checked = device_relay::verify_request(&d.payload, &d.sig, &ask.kind, &relay.node, &d.p_node, d.p_sign_pub.as_deref(), &known, now);
+    let req = match checked {
+        Ok(r) if r.rid == d.rid => r,
+        Ok(_) => {
+            relay.report_setup_result(false, "要求的格式不對", None).await;
+            return;
+        }
+        Err(r) => {
+            elog!("手機要求登入 {name} 被拒絕：{}", r.text());
+            relay.report_setup_result(false, r.text(), None).await;
+            return;
+        }
+    };
+    // 驗過就先記下並存檔，存不進去就不開始。rid 在這裡就算用掉了：之後任何一步沒過（例如沒裝 Codex、正在忙），手機都要重新發起
+    if let Err(e) = view_seen::record_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &req.rid, req.exp, now) {
+        elog!("手機要求登入 {name}：記不下這次要求：{e}");
+        relay.report_setup_result(false, "這台電腦記不下這次要求，沒有開始登入", None).await;
+        return;
+    }
+    let eng = match dr::engine_here(&ask.kind) {
+        Ok(e) => e,
+        Err(e) => {
+            relay.report_setup_result(false, &e, None).await;
+            return;
+        }
+    };
+    // 和安裝並登入 Claude Code 同一把鎖：正在跑就不開始、不去動那一輪的小窗
+    let lock = match agent_setup::setup::begin_remote_round() {
+        Ok(g) => g,
+        Err(_) => {
+            relay.report_setup_result(false, "這台電腦正在安裝或登入，請稍後再試", None).await;
+            return;
+        }
+    };
+    let key = match device_id::live::key_async(&app.data_dir).await {
+        Ok(k) => k,
+        Err(e) => {
+            elog!("手機要求登入 {name}：讀不到設備金鑰：{e}");
+            relay.report_setup_result(false, "這台電腦讀不到設備金鑰，沒有開始登入", None).await;
+            return;
+        }
+    };
+    // 右下角的常駐進度小窗：人在電腦前看得到、能取消。開不起來就不開始
+    let round = match wins::open_setup_progress(&handle) {
+        Ok(r) => r,
+        Err(e) => {
+            elog!("開進度小窗失敗，不開始登入：{e}");
+            relay.report_setup_result(false, "這台電腦無法顯示進度，沒有開始登入", None).await;
+            return;
+        }
+    };
+    let text = format!("你的手機正在替這台登入 {name}。登入網址和代碼只會出現在那支手機上");
+    let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": text, "cancellable": true }));
+    wins::progress_emit(&handle, serde_json::json!({ "phase": "login", "text": text }));
+    // 登入程序的上限：請求到期和 15 分鐘取較早的；代碼過了這個時間一定用不了。前面可能等過金鑰庫、開小窗，開始前重取時間
+    let started = now_s();
+    let total = std::time::Duration::from_secs((req.exp - started).clamp(1, device_relay::MAX_LIFETIME_SECS) as u64);
+    let lim = agent_setup::device_login::Limits { total, ..Default::default() };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<device_relay::Sealed>();
+    let stop: dr::StopWhy = Default::default();
+    let show = dr::RemoteShow { req: req.clone(), key, code_exp: started + total.as_secs() as i64, tx, stop: stop.clone(), cancelled: agent_setup::setup::cancel_requested };
+    let h = handle.clone();
+    let login = tokio::task::spawn_blocking(move || {
+        let _lock = lock;
+        let sp = agent_setup::proc::RealSpawner { pid_file: Some(identity::relay_home().join("setup").join("device_login.pid")) };
+        agent_setup::device_login::run_device_login(eng.as_ref(), &sp, &show, &lim, &|step| wins::progress_emit(&h, dr::step_json(step)))
+    });
+    // 讀到的網址＋代碼（已加密）放回後台，其他錯誤最多試 3 次。
+    // 第一次就 404＝這筆已經不在（過期、被新的請求蓋掉）：請登入程序停下，不重試。
+    // 重試時才 404：多半是前一次其實已經放進去、只是回應沒收到（後台只收一次），當成已送達，讓本人繼續授權
+    let (r2, stop2, rid) = (relay.clone(), stop.clone(), req.rid.clone());
+    let sender = tokio::spawn(async move {
+        while let Some(s) = rx.recv().await {
+            for tries in 1..=3 {
+                match r2.setup_code_put(&rid, &s).await {
+                    Ok(()) => break,
+                    Err(relay::CodePutErr::Gone) if tries == 1 => {
+                        dr::stop_with(&stop2, dr::STOP_GONE);
+                        return;
+                    }
+                    Err(relay::CodePutErr::Gone) => break,
+                    Err(relay::CodePutErr::Other(e)) => {
+                        elog!("登入資料放回失敗（第 {tries} 次）：{e}");
+                        if tries == 3 {
+                            dr::stop_with(&stop2, dr::STOP_UNSENT);
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                }
+            }
+        }
+    });
+    let outcome = login.await.unwrap_or_else(|_| agent_setup::device_login::Outcome::Failed("登入中途中斷".to_string()));
+    let _ = sender.await;
+    let why = *stop.lock().unwrap_or_else(|e| e.into_inner());
+    let (ok, text) = dr::report_of(&outcome, &ask.kind, why);
+    wins::progress_emit(&handle, serde_json::json!({ "phase": "done", "ok": ok, "text": text }));
+    relay.report_setup_result(ok, &text, None).await;
     // 結果留在畫面上幾秒讓人看到，再自己關
     tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
     wins::close_setup_progress(&handle, round);
@@ -926,6 +1072,14 @@ fn device_known_forget(app: State<'_, App>, node: String) -> Result<bool, String
 #[tauri::command]
 fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
     device_id::live::set_input_no_ask(&app.data_dir, &node, on)
+}
+
+/// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn device_known_login_ok(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
+    device_id::live::set_login_ok(&app.data_dir, &node, on)
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
@@ -2638,7 +2792,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_input_no_ask, device_known_login_ok, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -2870,8 +3024,8 @@ pub fn run() {
                         }
                         // 本人在手機上要這台安裝並登入 Claude Code：本機三道把關（開關、已登入、同一個人）過了才做
                         #[cfg(desktop)]
-                        if let Some(by) = r4.take_setup_request() {
-                            tauri::async_runtime::spawn(run_remote_setup(up_handle.clone(), r4.clone(), by));
+                        if let Some(ask) = r4.take_setup_request() {
+                            tauri::async_runtime::spawn(run_remote_setup(up_handle.clone(), r4.clone(), ask));
                         }
                         tokio::select! {
                             _ = tokio::time::sleep(every) => {}
