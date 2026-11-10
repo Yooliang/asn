@@ -163,16 +163,72 @@ pub(crate) fn window(name: &str, left: f64, resets_at: Option<String>, now_ms: i
 }
 
 pub(crate) fn iso_or_none(s: Option<&str>) -> Option<String> {
-    s.and_then(|x| crate::claude_quota::parse_iso_secs(x).or_else(|| parse_iso_frac(x))).map(iso_secs)
+    s.and_then(parse_iso_flex).map(iso_secs)
 }
 
-/// 帶小數秒的 ISO（例 `2026-11-08T00:15:00.000Z`）
-fn parse_iso_frac(s: &str) -> Option<i64> {
-    let (head, frac) = s.strip_suffix('Z')?.split_once('.')?;
-    if frac.is_empty() || !frac.bytes().all(|c| c.is_ascii_digit()) {
+/// 通用的 ISO 8601 時間（#1195）→ UTC 毫秒（小數秒捨去）。
+/// 接受：日期與時間之間用 `T` 或空白；秒可省略；小數秒任意位數；結尾 `Z`、`±HH:MM`、`±HHMM` 或 `±HH`。
+/// 沒有時區的不採用（不知道是哪一區，寧可沒有重置時間也不猜）。
+pub(crate) fn parse_iso_flex(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let b = s.as_bytes();
+    if b.len() < 16 || !matches!(b[10], b'T' | b't' | b' ') {
         return None;
     }
-    crate::claude_quota::parse_iso_secs(&format!("{head}Z"))
+    let (date, rest) = (s.get(0..10)?, s.get(11..)?);
+    // 時區：結尾 Z，或最後一個 + / -（時間部分本身沒有負號）
+    let (clock, off_min) = if let Some(c) = rest.strip_suffix('Z').or_else(|| rest.strip_suffix('z')) {
+        (c, 0i64)
+    } else {
+        let i = rest.rfind(['+', '-'])?;
+        let (c, tz) = rest.split_at(i);
+        let sign = if tz.starts_with('-') { -1 } else { 1 };
+        let digits: String = tz[1..].chars().filter(|c| *c != ':').collect();
+        if !digits.bytes().all(|c| c.is_ascii_digit()) || !matches!(digits.len(), 2 | 4) || (tz[1..].contains(':') && tz.len() != 6) {
+            return None;
+        }
+        let hh: i64 = digits.get(0..2)?.parse().ok()?;
+        let mm: i64 = if digits.len() == 4 { digits.get(2..4)?.parse().ok()? } else { 0 };
+        if hh > 23 || mm > 59 {
+            return None;
+        }
+        (c, sign * (hh * 60 + mm))
+    };
+    // 時間：HH:MM、HH:MM:SS、HH:MM:SS.小數
+    let (hms, frac) = match clock.split_once('.') {
+        Some((h, f)) => (h, Some(f)),
+        None => (clock, None),
+    };
+    if frac.is_some_and(|f| f.is_empty() || !f.bytes().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    let hms = match hms.len() {
+        5 if frac.is_none() => format!("{hms}:00"),
+        8 => hms.to_string(),
+        _ => return None,
+    };
+    let utc = crate::claude_quota::parse_iso_secs(&format!("{date}T{hms}Z"))?;
+    Some(utc - off_min * 60_000)
+}
+
+/// 認不得的時間字串的「形狀」（給 log 用，不記原值）：數字→d、字母→a（T、Z 保留），標點與空白照留，其他→x；最多 40 字
+pub(crate) fn iso_shape(s: &str) -> String {
+    s.chars()
+        .take(40)
+        .map(|c| match c {
+            '0'..='9' => 'd',
+            'T' | 'Z' => c,
+            c if c.is_ascii_alphabetic() => 'a',
+            c if c.is_ascii_punctuation() || c == ' ' => c,
+            _ => 'x',
+        })
+        .collect()
+}
+
+/// Grok 回應裡的重置時間有值、但格式認不得時，回它的形狀（給 log；#1195）
+pub(crate) fn grok_reset_shape(v: &Value) -> Option<String> {
+    let end = v["config"]["currentPeriod"]["end"].as_str()?;
+    parse_iso_flex(end).is_none().then(|| iso_shape(end))
 }
 
 /// auth.json → (email, key)。有好幾筆取 create_time 最新的；欄位不齊回 None。回傳值不得寫進 log。
@@ -408,9 +464,11 @@ pub(crate) async fn get_json(req: reqwest::RequestBuilder) -> Result<Value, Fail
     resp.json().await.map_err(|_| Failure::Other("回應格式不對".into()))
 }
 
-async fn read_grok(key: &str, now_ms: i64) -> Result<Vec<Value>, Failure> {
+/// 回（窗, 重置時間格式認不得時的形狀）
+async fn read_grok(key: &str, now_ms: i64) -> Result<(Vec<Value>, Option<String>), Failure> {
     let req = client()?.get(GROK_URL).bearer_auth(key).header("x-xai-token-auth", "xai-grok-cli").header("user-agent", "asn-quota-reader");
-    Ok(parse_grok(&get_json(req).await?, now_ms))
+    let v = get_json(req).await?;
+    Ok((parse_grok(&v, now_ms), grok_reset_shape(&v)))
 }
 
 async fn read_minimax(key: &str, now_ms: i64) -> Result<Vec<Value>, Failure> {
@@ -594,7 +652,10 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
             match std::fs::read(&path).ok().as_deref().and_then(grok_login) {
                 None => note(log, &mut gates.grok, "Grok", &Failure::Other("沒有登入資料".into()), now_ms, mark),
                 Some((email, key)) => match read_grok(&key, now_ms).await {
-                    Ok(w) => {
+                    Ok((w, shape)) => {
+                        if let Some(shape) = shape {
+                            log(format!("額度讀取 Grok：重置時間的格式不認得（形狀 {shape}）"));
+                        }
                         gates.grok.success(now_ms);
                         set_failure("grok", None);
                         store(|st| st.grok.insert(email, (w, now_ms)));

@@ -192,7 +192,7 @@ pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
     Ok(())
 }
 
-/// 重置時間可能帶小數秒與 +00:00；不是 UTC 的不猜
+/// 重置時間可能帶小數秒與時區偏移：明寫了偏移就換成 UTC；沒寫時區的不猜（iso_or_none，#1195）
 fn reset_iso(v: &Value) -> Option<String> {
     let s = v.as_str()?;
     let z = s.strip_suffix("+00:00").map(|h| format!("{h}Z")).unwrap_or_else(|| s.to_string());

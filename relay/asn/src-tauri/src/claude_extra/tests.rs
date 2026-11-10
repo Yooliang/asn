@@ -148,8 +148,12 @@ fn usage_missing_is_not_zero() {
     assert!(parse_usage(&json!({ "five_hour": { "utilization": null } }), NOW).is_empty());
     assert!(parse_usage(&json!({ "five_hour": { "utilization": "81" } }), NOW).is_empty());
     assert!(parse_usage(&json!({ "five_hour": { "utilization": 130 } }), NOW).is_empty());
+    // 明寫了時區偏移：換成 UTC，不算猜（#1195）
     let w = parse_usage(&json!({ "seven_day": { "utilization": 10, "resets_at": "2026-11-11T09:00:00+08:00" } }), NOW);
-    assert_eq!(w[0]["resets_at"], Value::Null, "不是 UTC 不猜");
+    assert_eq!(w[0]["resets_at"], "2026-11-11T01:00:00Z", "帶 +08:00 換成對應的 UTC");
+    // 沒寫時區：不知道是哪一區，不猜
+    let w = parse_usage(&json!({ "seven_day": { "utilization": 10, "resets_at": "2026-11-11T09:00:00" } }), NOW);
+    assert_eq!(w[0]["resets_at"], Value::Null, "沒寫時區不猜");
 }
 
 #[test]

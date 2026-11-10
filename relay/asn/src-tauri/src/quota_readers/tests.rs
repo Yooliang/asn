@@ -445,3 +445,45 @@ fn 其他原因含狀態碼或內部細節時畫面換成通用句_log_照舊() 
         assert_eq!(f.text(), raw, "log 保留原內容");
     }
 }
+
+#[test]
+fn 重置時間_各種_iso_寫法都認得_換成_utc() {
+    let z = |s: &str| iso_or_none(Some(s));
+    let want = Some("2026-11-08T00:15:00Z".to_string());
+    for s in [
+        "2026-11-08T00:15:00Z",
+        "2026-11-08T00:15:00.000Z",
+        "2026-11-08T00:15:00+00:00",
+        "2026-11-08T08:15:00+08:00",
+        "2026-11-08T08:15:00+0800",
+        "2026-11-08T08:15:00+08",
+        "2026-11-07T19:15:00-05:00",
+        "2026-11-08T00:15Z",
+        "2026-11-08T00:15+00:00",
+        "2026-11-08 00:15:00Z",
+        "2026-11-08 08:15:00+08:00",
+        "2026-11-08T00:15:00.123456789Z",
+        "2026-11-08T00:15:00.123456789+00:00",
+        " 2026-11-08T00:15:00Z ",
+    ] {
+        assert_eq!(z(s), want, "{s}");
+    }
+    // 跨日、跨年
+    assert_eq!(z("2027-01-01T07:30:00+08:00").as_deref(), Some("2026-12-31T23:30:00Z"));
+    // 不採用：沒有時區、壞的時區、壞的時間
+    for s in ["2026-11-08T00:15:00", "2026-11-08", "2026-11-08T00:15:00+8", "2026-11-08T00:15:00+08:0", "2026-11-08T00:15:00+25:00", "2026-11-08T24:15:00Z", "2026-11-08T00:15:00.Z", "2026-11-08X00:15:00Z", "壞", ""] {
+        assert_eq!(z(s), None, "{s}");
+    }
+}
+
+#[test]
+fn 重置時間認不得時_log_只記形狀不記原值() {
+    assert_eq!(iso_shape("2026-11-08T00:15:00+08:00"), "dddd-dd-ddTdd:dd:dd+dd:dd");
+    assert_eq!(iso_shape("Sun Nov 08 2026"), "aaa aaa dd dddd");
+    let bad = json!({"config": {"creditUsagePercent": 10, "currentPeriod": {"end": "1762560900"}}});
+    assert_eq!(grok_reset_shape(&bad).as_deref(), Some("dddddddddd"));
+    let ok = json!({"config": {"creditUsagePercent": 10, "currentPeriod": {"end": "2026-11-08T08:15:00+08:00"}}});
+    assert_eq!(grok_reset_shape(&ok), None);
+    assert_eq!(parse_grok(&ok, NOW)[0]["resets_at"], "2026-11-08T00:15:00Z", "Grok 帶時區偏移也有重置時間");
+    assert_eq!(grok_reset_shape(&json!({"config": {}})), None, "沒有這欄不算格式錯");
+}
