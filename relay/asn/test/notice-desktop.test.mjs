@@ -130,3 +130,12 @@ test('守門：通知不會變成一般對話分頁；存檔與還原都拿掉�
   assert.deepEqual([...new Set(invokes)].sort(), ['open_chat', 'show_main'])
   assert.ok(!/transport\./.test(block), '不呼叫後台')
 })
+
+test('「通知」分頁不能固定：右鍵選單不給「固定分頁」，就算叫到也不動', () => {
+  const js = read('../ui/list.js')
+  assert.match(js, /const chatTabMenuPanel = computed\(\(\) => isPanelTab\(chatTabMenu\.value\) \|\| chatTabMenu\.value === NOTICE_TAB\)/)
+  assert.match(js, /const menuTogglePin = \(\) => runTabMenu\(id => \{ if \(id === NOTICE_TAB\) return;/)
+  const html = read('../ui/list.html')
+  assert.match(html, /<li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">/, '選單的固定分頁項目由 chatTabMenuPanel 決定')
+})
+

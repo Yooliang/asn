@@ -1599,8 +1599,9 @@ const app = createApp({
     const tabFriendOf = id => withCallState(tabFriend(id), mergedCalls[id] || callBeats.isCalling(id))   // 通話中的分頁算忙碌，關閉閒置不關
     const hasIdleTabs = computed(() => callTick.value >= 0 && idleTabIds(ui.tabs, ui.pinnedChat, tabFriendOf).length > 0)
     const menuCloseIdle = () => { closeChatTabMenu(); applyChatTabClose(closeIdleChatTabs(ui, ui.pinnedChat, tabFriendOf)) }
-    const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
-    const chatTabMenuPanel = computed(() => isPanelTab(chatTabMenu.value))   // 指引、設定的分頁不能固定，選單不給「固定分頁」
+    // 「通知」內容分頁不能固定（還原時本來就會丟掉，釘了看起來像壞了）
+    const menuTogglePin = () => runTabMenu(id => { if (id === NOTICE_TAB) return; const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
+    const chatTabMenuPanel = computed(() => isPanelTab(chatTabMenu.value) || chatTabMenu.value === NOTICE_TAB)   // 指引、設定、通知的分頁不能固定，選單不給「固定分頁」
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
     // 左邊設備頁籤的手動排序：滑鼠拖放，或聚焦頁籤後按 Alt+上／下（設定的「設備與帳號」也有上移／下移鈕）。本機固定第一、不能拖
     const deviceDrag = ref('')
