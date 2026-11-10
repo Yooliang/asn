@@ -96,3 +96,46 @@ export const TEXT = {
   unknown: '電腦還沒有回報。請到電腦上確認',
   close: '關閉',
 }
+
+// 詢問內容是從終端畫面抄來的，裡面整排「────」在窄螢幕會折成好幾行。整行都是分隔線的換成一條細線。
+// 分隔字元（至少 3 個）；行首尾可有空白與框線，行內有別的字就不算（`npm i --silent`、`a--b`、`x = y` 都不動）
+const RULE_CHARS = '─━═╌╍┄┅┈┉-_='
+const FRAME_CHARS = '│┃║|┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝'
+const isRuleLine = line => {
+  let n = 0
+  for (const ch of line) {
+    if (RULE_CHARS.includes(ch)) n++
+    else if (!FRAME_CHARS.includes(ch) && !/\s/.test(ch)) return false
+  }
+  return n >= 3
+}
+const trimBlankLines = lines => {
+  let a = 0, b = lines.length
+  while (a < b && lines[a].trim() === '') a++
+  while (b > a && lines[b - 1].trim() === '') b--
+  return lines.slice(a, b)
+}
+
+/** 文字 → 區段 [{ text }, { rule: true }, …]。連續分隔線（中間只夾空白行）只留一條，首尾的分隔線拿掉。
+ *  沒有任何分隔線時原文不動；空字串或只有空白、只有分隔線 → []。畫面用文字節點顯示 text，不走 v-html */
+export function ruleSegments(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return []
+  const lines = raw.split(/\r\n|\r|\n/)
+  if (!lines.some(isRuleLine)) return [{ text: raw.replace(/\r\n?/g, '\n') }]
+  const out = []
+  let buf = []
+  let pendingRule = false
+  const flush = () => {
+    const t = trimBlankLines(buf)
+    buf = []
+    if (!t.length) return
+    if (pendingRule && out.length) out.push({ rule: true })
+    pendingRule = false
+    out.push({ text: t.join('\n') })
+  }
+  for (const line of lines) {
+    if (isRuleLine(line)) { flush(); pendingRule = true } else buf.push(line)
+  }
+  flush()
+  return out
+}

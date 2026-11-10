@@ -43,7 +43,7 @@ test('守門：確認框的文字只用純文字顯示', () => {
   assert.ok(i > 0)
   const block = html.slice(i, html.indexOf('</asn-dialog>', i))
   assert.ok(!block.includes('v-html'), block)
-  assert.match(block, /permission-text">\{\{ permissionDlgView\.text \}\}/)
+  assert.match(block, /permission-text"><template v-for="\(g, i\) in ruleSegs\(permissionDlgView\.text\)"[^>]*><hr [^>]*v-if="g\.rule"><template v-else>\{\{ g\.text \}\}<\/template>/)
 })
 
 test('多帶的欄位不會顯示', () => {

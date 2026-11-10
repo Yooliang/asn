@@ -133,6 +133,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-vendor{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
 .m-term-preview{white-space:pre-wrap;word-break:break-word;font-family:Consolas,monospace;font-size:13px}
 .m-perm-text{max-height:40vh;overflow:auto}
+.m-perm-rule{border:0;border-top:1px solid var(--line,#ccc);height:0;margin:6px 0}
 .m-term-opts{display:flex;flex-direction:column;gap:6px;margin:6px 0}
 .m-term-opt.on{outline:2px solid var(--accent,#1b6ac9)}
 .m-dv-vh{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 12px;background:var(--panel-soft);border-bottom:1px solid var(--line);color:var(--title-fg)}

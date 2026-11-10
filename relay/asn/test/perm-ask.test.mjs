@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ARM_MS, AUTOCLOSE_MS, TEXT, askTitle, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending, watchOutcome } from '../ui/lib/perm-ask.mjs'
+import { ARM_MS, AUTOCLOSE_MS, TEXT, ruleSegments, askTitle, WATCH_MS, decideArgs, nextToAsk, normalizeList, resultOf, stillPending, watchOutcome } from '../ui/lib/perm-ask.mjs'
 import { normalizeNav, permReqNav } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -73,7 +73,7 @@ test('守門：全文不進儲存、網址、console；只有選項按鈕，沒�
   assert.match(sheet, /:aria-label="permReqTitle"/)
   assert.match(js, /permReqTitle = computed\(\(\) => pqAskTitle\(pq\.cur\?\.deviceName, pq\.cur\?\.window\)\)/)
   for (const gone of ['deviceLabel', 'windowLabel', 'textLabel', 'PERMREQ_TEXT.lead', 'PERMREQ_TEXT.title', 'm-ops-lead', '<dl', '<dt', '<dd']) assert.ok(!sheet.includes(gone), `不再有 ${gone}`)
-  assert.match(sheet, /<div class="m-term-preview m-perm-text">\{\{ pq\.cur\.text \}\}<\/div>/, '內容仍是文字節點、版型 class 不變')
+  assert.match(sheet, /<div class="m-term-preview m-perm-text"><template v-for="\(g, i\) in permSegs\(pq\.cur\.text\)"[^>]*><hr class="m-perm-rule" aria-hidden="true" v-if="g\.rule"><template v-else>\{\{ g\.text \}\}<\/template><\/template><\/div>/, '內容仍是文字節點、版型 class 不變')
   assert.ok(sheet.indexOf('m-perm-text') < sheet.indexOf('m-term-opts'), '內容在選項按鈕之前')
   for (const k of ['title', 'lead', 'deviceLabel', 'windowLabel', 'textLabel']) assert.ok(!(k in TEXT), `TEXT.${k} 已刪`)
   assert.ok(ARM_MS >= 500)
@@ -178,4 +178,44 @@ test('標題：〈電腦名〉的〈夥伴名〉正在詢問；缺哪個就省�
     ['30家用', '', '30家用 的 夥伴正在詢問'],
   ]) assert.equal(askTitle(dev, win), want, JSON.stringify([dev, win]))
   assert.ok(!/[A-Za-z]/.test(`${TEXT.asking}${TEXT.askingNoName}${TEXT.ofWord}`), '固定字純中文')
+})
+
+// 分隔線：終端抄來的整排「────」在手機會折成好幾行，換成一條細線
+const R4 = ('│ ' + '─'.repeat(30) + '\n').repeat(4)
+test('分隔線：指令前後各四行線（行首有框線）→ 首尾拿掉，只剩指令', () => {
+  assert.deepEqual(ruleSegments(R4 + '│ npm test --silent\n' + R4.trimEnd()), [{ text: '│ npm test --silent' }])
+})
+
+test('分隔線：文字、四行線、文字 → 文字、一條線、文字（線間夾空白行也算連續）', () => {
+  assert.deepEqual(ruleSegments('甲\n' + R4 + '\n' + R4 + '乙'), [{ text: '甲' }, { rule: true }, { text: '乙' }])
+  assert.deepEqual(ruleSegments('甲\n\n───\n\n乙\n丙'), [{ text: '甲' }, { rule: true }, { text: '乙\n丙' }])
+})
+
+test('分隔線：行內的字不動，沒有線就原文回傳', () => {
+  for (const t of ['npm i --silent', 'a--b', 'a___b', 'x = y', '--', '│ 只有框線 │', '│ │', '  --  ']) {
+    assert.deepEqual(ruleSegments(t), [{ text: t }], t)
+  }
+  assert.deepEqual(ruleSegments('a\n  npm i --silent\nb'), [{ text: 'a\n  npm i --silent\nb' }])
+})
+
+test('分隔線：混空白與 ═ ━ ┄ - _ = 也認得；至少 3 個', () => {
+  for (const line of ['─ ─ ─', '══ ━━ ═', '  ┄┄┄┄  ', '---', '___', '===', '┃ ━━━ ┃', '╭────╮']) {
+    assert.deepEqual(ruleSegments('甲\n' + line + '\n乙'), [{ text: '甲' }, { rule: true }, { text: '乙' }], line)
+  }
+  assert.deepEqual(ruleSegments('甲\n──\n乙'), [{ text: '甲\n──\n乙' }], '兩個字元不算')
+})
+
+test('分隔線：空字串、只有空白、全是線 → 空陣列；壞輸入也不丟錯', () => {
+  for (const t of ['', '  \n ', R4, '───\n\n═══', null, undefined, 5]) assert.deepEqual(ruleSegments(t), [], String(t))
+})
+
+test('分隔線：Windows 換行', () => {
+  assert.deepEqual(ruleSegments('甲\r\n────\r\n────\r\n乙\r\n'), [{ text: '甲' }, { rule: true }, { text: '乙' }])
+  assert.deepEqual(ruleSegments('甲\r\n乙'), [{ text: '甲\n乙' }])
+})
+
+test('分隔線：畫面都走 ruleSegments、不用 v-html', () => {
+  assert.match(read('../ui/m.html'), /permSegs\(pq\.cur\.text\)/)
+  const list = read('../ui/list.html')
+  for (const e of ['termPaneRow.prompt.text', 'termPrompt.pv.text', 'permissionDlgView.text']) assert.ok(list.includes(`ruleSegs(${e})`), e)
 })
