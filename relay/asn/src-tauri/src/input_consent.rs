@@ -3,6 +3,7 @@
 //! - **同意框是 ASN 的視窗（系統對話框），不在終端裡：** 終端裡的提示可能被當成按鍵答掉。問之前先把 ASN 叫到前面。
 //! - [`ASK_SECS`] 秒沒按當不允許（再受這次請求自己的有效期限限制）；按了「不允許」、關掉框也是不允許。系統對話框從外面關不掉：逾時後框還在，那時才按的一律算不允許，並通知本人。
 //! - 同一台同一時間只開一個確認框（[`ConsentSlot`]）；前一個還開著（含逾時後沒關的）就不開第二個，直接不允許。
+//!   系統對話框一直沒叫回呼時，到了請求期限加 [`SLOT_GRACE_SECS`] 也放開位子（舊框按了也不算允許）。
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
 //! - 本人可以在這台的設定頁「認得的電腦」對某一台設「打字不用每次問我」，那台就不跳這個框（判斷在呼叫端，存在本機）。
 //! - **框上的名字用本機記住的（[`who_of`]），不用後台這次給的：** 後台給的名字不在簽章裡。只有第一次連線（本機還沒記住）才用後台給的，並在框上標示「第一次連線」；另外附設備指紋前 8 碼讓本人比對設定頁。
@@ -138,30 +139,41 @@ pub fn wait_secs(now_s: i64, expires_s: i64) -> u64 {
     u64::try_from(expires_s.saturating_sub(now_s)).unwrap_or(0).min(ASK_SECS)
 }
 
-/// 一台同一時間只開一個打字確認框。框開著就一直被佔用，只有框真的被關掉（對話框的回呼）才放開；逾時不放
-pub struct ConsentSlot(AtomicBool);
+/// 請求過期之後再等多久（秒），就算系統對話框一直沒叫回呼也把位子放掉。過期後按什麼都不算允許，放掉不會讓舊框變得能用
+pub const SLOT_GRACE_SECS: i64 = 120;
+
+/// 一台同一時間只開一個打字確認框。框開著就一直被佔用：框真的被關掉（對話框的回呼）才放開；
+/// 回呼一直沒來時，到了「請求期限＋寬限」也自動放開（逾時本身不放）
+pub struct ConsentSlot(std::sync::Mutex<Option<(u64, i64)>>, std::sync::atomic::AtomicU64);
 
 impl ConsentSlot {
     pub const fn new() -> Self {
-        Self(AtomicBool::new(false))
+        Self(std::sync::Mutex::new(None), std::sync::atomic::AtomicU64::new(1))
     }
 
-    /// 取得位子；已經被佔用回 None
-    pub fn try_take(&'static self) -> Option<SlotGuard> {
-        if self.0.swap(true, Ordering::SeqCst) {
-            None
-        } else {
-            Some(SlotGuard(self))
+    /// 取得位子；已經被佔用、而且還沒到它的放開時間就回 None。`release_at` 是這次的自動放開時間（秒）
+    pub fn try_take(&'static self, now_s: i64, release_at: i64) -> Option<SlotGuard> {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, until)) = *g {
+            if now_s < until {
+                return None;
+            }
         }
+        let token = self.1.fetch_add(1, Ordering::SeqCst);
+        *g = Some((token, release_at));
+        Some(SlotGuard(self, token))
     }
 }
 
-/// 佔著位子的憑證；丟掉（drop）就放開
-pub struct SlotGuard(&'static ConsentSlot);
+/// 佔著位子的憑證；丟掉（drop）就放開。位子已經被後來的請求接手時不動它
+pub struct SlotGuard(&'static ConsentSlot, u64);
 
 impl Drop for SlotGuard {
     fn drop(&mut self) {
-        (self.0).0.store(false, Ordering::SeqCst);
+        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
+        if g.is_some_and(|(token, _)| token == self.1) {
+            *g = None;
+        }
     }
 }
 
@@ -175,7 +187,7 @@ fn now_s() -> i64 {
 /// `expires_s` 是這次請求的有效期限（秒）：超過就不能再算允許
 pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bool {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-    let Some(slot) = SLOT.try_take() else {
+    let Some(slot) = SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
         return false;
     };
@@ -311,12 +323,27 @@ mod tests {
     #[test]
     fn 同時只能開一個確認框_放開前拿不到第二個() {
         static S: ConsentSlot = ConsentSlot::new();
-        let g = S.try_take().expect("第一次拿得到");
-        assert!(S.try_take().is_none(), "框還開著，第二個拿不到");
-        assert!(S.try_take().is_none());
+        let g = S.try_take(0, 100).expect("第一次拿得到");
+        assert!(S.try_take(10, 200).is_none(), "框還開著，第二個拿不到");
+        assert!(S.try_take(99, 200).is_none());
         drop(g);
-        let g2 = S.try_take().expect("放開之後又拿得到");
+        let g2 = S.try_take(10, 200).expect("放開之後又拿得到");
         drop(g2);
+    }
+
+    #[test]
+    fn 確認框的回呼一直沒來_過期加寬限之後位子自動放開_舊的放開不影響新的() {
+        static S: ConsentSlot = ConsentSlot::new();
+        let expires = 1_000;
+        let old = S.try_take(900, expires + SLOT_GRACE_SECS).expect("第一個框");
+        assert!(S.try_take(expires, 5_000).is_none(), "剛過期還在寬限內：不開第二個");
+        assert!(S.try_take(expires + SLOT_GRACE_SECS - 1, 5_000).is_none());
+        let new = S.try_take(expires + SLOT_GRACE_SECS, 5_000).expect("過了寬限：就算舊框的回呼沒來也放開");
+        drop(old);
+        assert!(S.try_take(2_000, 9_000).is_none(), "舊框後來才關：不能把新框的位子放掉");
+        drop(new);
+        assert!(S.try_take(2_000, 9_000).is_some(), "新框關了才放開");
+        assert!(SLOT_GRACE_SECS >= 60);
     }
 
     /// 接線守門：ask 先佔位子、位子在回呼裡才放、逾時後才按會通知；poller 在 accept 之前重查期限與是否還在等
@@ -325,7 +352,7 @@ mod tests {
         let me = include_str!("input_consent.rs").replace("\r\n", "\n");
         let code = me.split("#[cfg(test)]").next().unwrap();
         let ask = &code[code.find("pub async fn ask(").expect("有 ask")..];
-        let (take, show) = (ask.find("SLOT.try_take()").expect("ask 要先佔位子"), ask.find("show_with_result(").unwrap());
+        let (take, show) = (ask.find("SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS))").expect("ask 要先佔位子，放開時間＝期限加寬限"), ask.find("show_with_result(").unwrap());
         assert!(take < show, "先佔位子才開框");
         let cb = &ask[show..ask.find("let answer =").unwrap()];
         assert!(cb.contains("let _slot = slot;"), "位子要在回呼裡才放開");
