@@ -261,3 +261,12 @@ test('窄視窗：整合模式放不下兩個窗格時一次只顯示一個（#1
   assert.equal(at(360, { hasTabs: false }), 'list')
   assert.equal(at(360, { mode: 'split' }), '')
 })
+
+test('守門（#1192）：list.js 每個從名單開分頁的入口（openChatTab）之後都設 pane.showList = false，也不監看 tabs／active 來切窗格', () => {
+  const src = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
+  const lines = src.split(/\r?\n/)
+  const calls = lines.map((l, i) => [l, i]).filter(([l]) => /Object\.assign\(ui, openChatTab\(/.test(l))
+  assert.ok(calls.length >= 4, `openChatTab 的入口太少（${calls.length}），規則可能失效`)
+  for (const [l, i] of calls) assert.match(lines[i + 1] ?? '', /^\s*pane\.showList = false\b/, `第 ${i + 1} 行之後沒有切回右邊：${l.trim()}`)
+  assert.ok(!/watch\(\[\(\) => ui\.tabs, \(\) => ui\.active\]/.test(src), '不監看 ui.tabs／ui.active（終端消失自動關分頁時會把使用者從名單切走）')
+})

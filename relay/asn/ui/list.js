@@ -1263,6 +1263,7 @@ async function openTermTab(id) {
   if (!terms.rows.some(r => r.id === id)) return
   if (ui.mode !== 'merged') { terms.open = true; return }   // 分離模式沒有分頁區：先用舊的終端面板
   Object.assign(ui, openChatTab(ui, termFriendId(id), ui.pinnedChat))
+  pane.showList = false   // 窄視窗只顯示一個窗格時：點終端（含「N 個終端等你回答」）就切到右邊
   await invoke('show_main')
   sync()
 }
@@ -1487,10 +1488,10 @@ const app = createApp({
       maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
     })
     const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
-    // 窄視窗（#1192）：兩個窗格放不下就一次只顯示一個；開了分頁或換了分頁就切到右邊，按「返回名單」回名單
+    // 窄視窗（#1192）：兩個窗格放不下就一次只顯示一個。從名單開對話、群組、設定、終端時（每個 openChatTab 之後）直接設 pane.showList = false 切到右邊；
+    // 不監看 ui.tabs／ui.active：終端消失自動關分頁也會改到它們，使用者在名單看到一半會被切走。按「返回名單」回名單
     const winW = ref(window.innerWidth)
     window.addEventListener('resize', () => { winW.value = window.innerWidth })
-    watch([() => ui.tabs, () => ui.active], () => { pane.showList = false })
     const paneOnly = computed(() => singlePane({ mode: ui.mode, width: winW.value, hasTabs: ui.tabs.length > 0, showList: pane.showList }))
     const backToList = () => { pane.showList = true }
     // 大幅廣告的網頁（iframe）：--shot 不載入；載入失敗或 5 秒內沒載入完就退回樣板（load 事件才算成功）
