@@ -14,7 +14,9 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.sheetBody, '請看那台電腦的設定頁，選出和那裡顯示的「這台電腦的指紋」完全一樣的那一組。')
   assert.equal(TEXT.noneOption, '都不一樣')
   assert.equal(TEXT.cancel, '取消')
-  assert.equal(TEXT.wrong, '選的和電腦上顯示的不一樣，這次沒有記住。要再確認請重新按「確認指紋」。')
+  assert.equal(TEXT.wrong, '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。')
+  assert.equal(TEXT.locked(7), '答錯過一次，請 7 分鐘後再確認。')
+  assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 認得的電腦把它忘掉，再重新連線。')
   assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。')
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
@@ -71,13 +73,26 @@ function fake(result, answers = {}) {
 const OPTS = ['a93c c519 1f2e 3b4d', '1111 2222 3333 4444', '5555 6666 7777 8888', '9999 aaaa bbbb cccc']
 const names = calls => calls.map(c => (Array.isArray(c) ? c[0] : c))
 
-test('出題：只帶節點，回題目編號與四個分組選項；格式不對或那台沒記住就是 null', async () => {
-  let f = fake('ok', { android_known_challenge: { id: 'q1', options: OPTS } })
-  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { id: 'q1', options: OPTS })
+test('出題：答錯過一次回鎖住（帶分鐘）、答錯兩次回擋住；沒有狀態、狀態不認得就是 null；鎖住與擋住的回覆不帶選項', async () => {
+  let f = fake('ok', { android_known_challenge: { state: 'locked', minutes: 7, options: OPTS, id: 'q1' } })
+  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'locked', minutes: 7 })
+  f = fake('ok', { android_known_challenge: { state: 'locked' } })
+  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'locked', minutes: 10 }, '分鐘不對就用 10')
+  f = fake('ok', { android_known_challenge: { state: 'blocked', options: OPTS, id: 'q1' } })
+  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'blocked' })
+  for (const bad of [{ id: 'q1', options: OPTS }, { state: 'weird' }, null]) {
+    f = fake('ok', { android_known_challenge: bad })
+    assert.equal(await f.api.challenge({ node: 'pc' }), null)
+  }
+})
+
+test('出題：只帶節點，回狀態、題目編號與四個分組選項；格式不對或那台沒記住就是 null', async () => {
+  let f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS } })
+  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'ok', id: 'q1', options: OPTS })
   assert.deepEqual(f.calls, [['android_known_challenge', { node: 'pc' }]], '不用先過本人確認、不帶指紋')
-  f = fake('ok', { android_known_challenge: { id: 'q1', options: OPTS.slice(0, 3) } })
+  f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS.slice(0, 3) } })
   assert.equal(await f.api.challenge({ node: 'pc' }), null)
-  f = fake('ok', { android_known_challenge: { id: 'q1', options: [...OPTS.slice(0, 3), '<b>x</b>'] } })
+  f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: [...OPTS.slice(0, 3), '<b>x</b>'] } })
   assert.equal(await f.api.challenge({ node: 'pc' }), null)
   f = fake('ok', { android_known_challenge: new Error('not_ready') })
   assert.equal(await f.api.challenge({ node: 'pc' }), null)
@@ -104,7 +119,7 @@ test('選對但本人取消、沒設螢幕鎖都不記；Rust 沒記到回 not_r
 })
 
 test('選錯、都不一樣、過期：不過本人確認、不叫 confirm，把 Rust 的話原樣回；-1 是都不一樣', async () => {
-  for (const r of ['wrong', 'none', 'expired']) {
+  for (const r of ['wrong', 'none', 'expired', 'locked', 'blocked']) {
     const idx = r === 'none' ? -1 : 1
     const f = fake('ok', { android_known_answer: r })
     assert.equal(await f.api.pick('q1', idx), r)
@@ -163,7 +178,10 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(js, /knownPeers\.challenge\(cur\)/)
   assert.match(js, /knownPeers\.pick\(ch\.id, index\)/)
   assert.match(js, /knownPeers\.forget\(node\)/)
-  for (const k of ['wrong', 'none', 'expired']) assert.match(js, new RegExp(`${k}: KNOWN_TEXT\\.`))
+  for (const k of ['wrong', 'none', 'expired', 'locked', 'blocked']) assert.match(js, new RegExp(`${k}: KNOWN_TEXT\\.`))
+  assert.match(js, /ch\.state === 'locked'\) vp\.note = KNOWN_TEXT\.locked\(ch\.minutes\)/)
+  assert.match(js, /ch\.state === 'blocked'\) vp\.note = KNOWN_TEXT\.blocked/)
+  assert.doesNotMatch(sheet, /minutes|state/, '浮層只有選項，不看狀態')
 })
 
 test('chatpane／RemoteView 把開始與結束交給手機畫面；開始時帶上那台的名字', () => {

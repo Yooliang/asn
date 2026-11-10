@@ -487,11 +487,13 @@ const app = createApp({
       try {
         const ch = await knownPeers.challenge(cur)
         if (!ch) vp.note = KNOWN_TEXT.notReady
+        else if (ch.state === 'locked') vp.note = KNOWN_TEXT.locked(ch.minutes)
+        else if (ch.state === 'blocked') vp.note = KNOWN_TEXT.blocked
         else { vp.ch = ch; vp.sheet = true }
       } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
     const closePeerSheet = () => { vp.sheet = false; vp.ch = null }
-    const PEER_NOTES = { wrong: KNOWN_TEXT.wrong, none: KNOWN_TEXT.noneMatch, expired: KNOWN_TEXT.expired, not_ready: KNOWN_TEXT.notReady }
+    const PEER_NOTES = { wrong: KNOWN_TEXT.wrong, none: KNOWN_TEXT.noneMatch, locked: KNOWN_TEXT.lockedNow, blocked: KNOWN_TEXT.blocked, expired: KNOWN_TEXT.expired, not_ready: KNOWN_TEXT.notReady }
     // 選一個（-1＝都不一樣）：Rust 判斷；選對才過本人確認再記住。結果都收掉浮層，需要說的話放在條下面
     const choosePeer = async index => {
       const cur = vp.cur, ch = vp.ch

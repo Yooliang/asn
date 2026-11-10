@@ -15,7 +15,10 @@ export const TEXT = {
   sheetBody: '請看那台電腦的設定頁，選出和那裡顯示的「這台電腦的指紋」完全一樣的那一組。',
   noneOption: '都不一樣',
   cancel: '取消',
-  wrong: '選的和電腦上顯示的不一樣，這次沒有記住。要再確認請重新按「確認指紋」。',
+  wrong: '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。',
+  locked: n => `答錯過一次，請 ${n} 分鐘後再確認。`,
+  lockedNow: '答錯過一次，請稍後再確認。',
+  blocked: '這台的指紋兩次對不上，可能被換過。請到設定 → 認得的電腦把它忘掉，再重新連線。',
   noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。',
   expired: '太久沒選，請重新按「確認指紋」。',
   settingTitle: '認得的電腦',
@@ -87,7 +90,10 @@ export function makeKnownPeers({ confirm = () => confirmViewer(), invoke = tauri
   }
   return {
     list: async () => normalizeList(await invoke('android_known_list')),
-    /** 出四選一的題目：回 { id, options:[4 組分組指紋] }；那台還沒記住回 null */
+    /**
+     * 出四選一的題目：回 { state:'ok', id, options:[4 組分組指紋] }｜{ state:'locked', minutes }（答錯過一次，鎖住中）｜{ state:'blocked' }（答錯兩次，要忘記那台才能重來）；
+     * 那台還沒記住或格式不對回 null。四個選項對同一台電腦每次都一樣，由 Rust 固定
+     */
     challenge: async peer => {
       if (!peer?.node) return null
       let r
@@ -95,19 +101,22 @@ export function makeKnownPeers({ confirm = () => confirmViewer(), invoke = tauri
         if (String(e?.message ?? e) === 'not_ready') return null
         throw e
       }
+      if (r?.state === 'blocked') return { state: 'blocked' }
+      if (r?.state === 'locked') return { state: 'locked', minutes: Number.isInteger(r.minutes) && r.minutes > 0 ? r.minutes : 10 }
+      if (r?.state !== 'ok') return null
       const options = Array.isArray(r?.options) ? r.options : []
       if (typeof r?.id !== 'string' || !r.id || options.length !== 4 || !options.every(o => OPTION.test(String(o)))) return null
-      return { id: r.id, options: options.map(String) }
+      return { state: 'ok', id: r.id, options: options.map(String) }
     },
     /**
-     * 本人選了第 index 個（-1＝都不一樣）。回 'wrong'｜'none'｜'expired'（Rust 說的，題目已收掉）｜
+     * 本人選了第 index 個（-1＝都不一樣）。回 'wrong'｜'none'｜'expired'（題目已收掉）｜'locked'｜'blocked'（Rust 說現在不能答）｜
      * 選對時先過本人確認：'cancel'（取消，沒記住）｜'done'（記住了）｜'not_ready'（Rust 沒記到：金鑰換了、被忘記、過了 60 秒）。
      * 哪一個是對的只有 Rust 知道，這裡只送選了第幾個
      */
     pick: async (id, index) => {
       if (!id || !Number.isInteger(index) || index < -1 || index > 3) return 'expired'
       const r = await invoke('android_known_answer', { id, pick: index })
-      if (r === 'wrong' || r === 'none' || r === 'expired') return r
+      if (r === 'wrong' || r === 'none' || r === 'expired' || r === 'locked' || r === 'blocked') return r
       if (r !== 'right') throw new Error('unexpected')
       if (!(await gate())) return 'cancel'
       return (await invoke('android_known_confirm', { id })) === true ? 'done' : 'not_ready'

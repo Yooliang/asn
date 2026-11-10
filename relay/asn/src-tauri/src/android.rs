@@ -391,35 +391,60 @@ pub fn android_known_list(app: State<'_, App>) -> Result<serde_json::Value, Stri
 }
 
 /// 出四選一的題目：只給題目編號與四個選項文字；正確的是哪一個只留在 Rust。那台要先記住（否則 not_ready）。
-/// 正確的指紋由這支手機記住的公鑰算出來
+/// 每台電腦的四個選項固定（第一次出題時產生並存檔），同一台同時只有一題；答錯過就回鎖住（還要等幾分鐘）或擋住。
+/// 回 { state:"ok", id, options } | { state:"locked", minutes } | { state:"blocked" }
 #[tauri::command]
 pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serde_json::Value, String> {
-    let known = crate::device_id::live::known(&app.data_dir)?;
-    let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
-    let (id, options) = crate::known_pick::issue(&node, &peer.sign_pub, crate::auth::now_ms());
-    Ok(serde_json::json!({ "id": id, "options": options }))
-}
-
-/// 回答四選一：pick 是第幾個（從 0 起），-1 是「都不一樣」。回 right／wrong／none／expired；這裡不會記住任何東西
-#[tauri::command]
-pub fn android_known_answer(id: String, pick: i64) -> String {
-    let out = crate::known_pick::answer(&id, pick, crate::auth::now_ms());
-    if out == crate::known_pick::Outcome::NoneMatch {
-        elog!("本人表示手機上的指紋選項都和電腦不一樣，沒有記住");
+    use crate::device_id::PickGate;
+    let prep = crate::device_id::live::pick_prepare(&app.data_dir, &node, crate::auth::now_ms(), crate::known_pick::options_for)?.ok_or_else(|| "not_ready".to_string())?;
+    match prep.gate {
+        PickGate::Blocked => Ok(serde_json::json!({ "state": "blocked" })),
+        PickGate::Locked { minutes } => Ok(serde_json::json!({ "state": "locked", "minutes": minutes })),
+        PickGate::Open => {
+            let id = crate::known_pick::issue(&node, &prep.sign_pub, prep.answer).map_err(|_| "busy".to_string())?;
+            Ok(serde_json::json!({ "state": "ok", "id": id, "options": prep.options }))
+        }
     }
-    out.as_str().to_string()
 }
 
-/// 選對之後（畫面先過本人確認）才記住：取走過關的題目（一次、60 秒內），再用記住的那把公鑰重算指紋交給確認；
-/// 這期間那台被忘記或換了公鑰就不記。回有沒有記到
+/// 回答四選一：pick 是第幾個（從 0 起），-1 是「都不一樣」。回 right／wrong／locked／blocked／none／expired。
+/// 答錯記在那台的紀錄上（第一次鎖 10 分鐘、第二次擋住）；「都不一樣」直接擋住；選對只是過關，這裡不會記住任何東西
+#[tauri::command]
+pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Result<String, String> {
+    use crate::device_id::PickGate;
+    let Some(node) = crate::known_pick::node_of(&id) else { return Ok("expired".to_string()) };
+    match crate::device_id::live::pick_gate(&app.data_dir, &node, crate::auth::now_ms())? {
+        None => return Ok("expired".to_string()),
+        Some(PickGate::Blocked) => return Ok("blocked".to_string()),
+        Some(PickGate::Locked { .. }) => return Ok("locked".to_string()),
+        Some(PickGate::Open) => {}
+    }
+    let out = crate::known_pick::answer(&id, pick);
+    match out {
+        crate::known_pick::Outcome::Wrong => {
+            crate::device_id::live::pick_record_wrong(&app.data_dir, &node, crate::auth::now_ms())?;
+        }
+        crate::known_pick::Outcome::NoneMatch => {
+            crate::device_id::live::pick_block(&app.data_dir, &node)?;
+            elog!("本人表示手機上的指紋選項都和電腦不一樣，沒有記住");
+        }
+        _ => {}
+    }
+    Ok(out.as_str().to_string())
+}
+
+/// 選對之後（畫面先過本人確認）才記住：取走過關的題目（一次、60 秒內），再用記住的那把公鑰重算指紋交給確認（成功會清掉答錯紀錄）；
+/// 這期間那台被忘記、換了公鑰、或被鎖住就不記。回有沒有記到
 #[tauri::command]
 pub fn android_known_confirm(app: State<'_, App>, id: String) -> Result<bool, String> {
-    let Some((node, sign_pub)) = crate::known_pick::take_passed(&id, crate::auth::now_ms()) else { return Ok(false) };
+    let Some((node, sign_pub)) = crate::known_pick::take_passed(&id) else { return Ok(false) };
     crate::device_id::live::confirm(&app.data_dir, &node, &crate::device_id::fingerprint(&sign_pub), crate::auth::now_ms())
 }
 
 /// 本人在設定頁按「忘記」：下次再連就當第一次。回有沒有這台
 #[tauri::command]
 pub fn android_known_forget(app: State<'_, App>, node: String) -> Result<bool, String> {
-    crate::device_id::live::forget(&app.data_dir, &node)
+    let gone = crate::device_id::live::forget(&app.data_dir, &node)?;
+    crate::known_pick::drop_node(&node);
+    Ok(gone)
 }

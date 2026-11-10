@@ -214,6 +214,67 @@ pub struct KnownPeer {
     /// 只記在這支手機，不送後台、不同步；只對記住的那把公鑰有效（公鑰換了會被擋，要忘記才能重來）
     #[serde(default)]
     pub confirmed_at: Option<u64>,
+    /// 手機確認指紋用的四個選項與正確的是第幾個：每台電腦（這把公鑰）只出一次、之後每次都是同一組同一個順序；
+    /// 忘記再重新記住才會重出。**不進任何給畫面的資料**（守門測試）；舊檔沒有這欄＝第一次出題時才產生
+    #[serde(default)]
+    pub pick: Option<PickSet>,
+    /// 四選一累計答錯幾次（2 次就擋住，只有忘記才清掉；確認成功歸零）。**只有答題、確認、忘記三條路能改**（守門測試）
+    #[serde(default)]
+    pub pick_wrong: u8,
+    /// 第一次答錯、鎖住那一刻的牆上時間（毫秒）。時鐘被往回撥時，比這個還早也算還在鎖
+    #[serde(default)]
+    pub pick_lock_set_ms: Option<u64>,
+    /// 鎖到什麼時候（毫秒）
+    #[serde(default)]
+    pub pick_lock_until_ms: Option<u64>,
+}
+
+/// 答錯一次之後鎖多久（毫秒）：10 分鐘
+pub const PICK_LOCK_MS: u64 = 10 * 60 * 1000;
+/// 答錯幾次就擋住
+pub const PICK_WRONG_LIMIT: u8 = 2;
+
+/// 四選一的固定選項
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PickSet {
+    /// 四組分組指紋（含一組正確的）
+    pub options: Vec<String>,
+    /// 正確的是第幾個（從 0 起）
+    pub answer: usize,
+}
+
+/// 現在能不能對這台出四選一
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickGate {
+    Open,
+    /// 鎖住中，還要等幾分鐘（進位到整分鐘）
+    Locked { minutes: u64 },
+    /// 答錯兩次或回答「都不一樣」：要忘記那台才能重來
+    Blocked,
+}
+
+impl KnownPeer {
+    /// 時鐘被往回撥（現在比鎖住那刻還早）也算還在鎖
+    #[allow(dead_code)]
+    fn pick_gate(&self, now_ms: u64) -> PickGate {
+        if self.pick_wrong >= PICK_WRONG_LIMIT {
+            return PickGate::Blocked;
+        }
+        let before_start = self.pick_lock_set_ms.is_some_and(|s| now_ms < s);
+        let before_end = self.pick_lock_until_ms.is_some_and(|u| now_ms < u);
+        if !(before_start || before_end) {
+            return PickGate::Open;
+        }
+        let left = self.pick_lock_until_ms.unwrap_or(now_ms).saturating_sub(now_ms);
+        PickGate::Locked { minutes: left.div_ceil(60_000).max(1) }
+    }
+
+    /// 選項是這把公鑰的、四個、答案位置對的才算有效（檔案被改壞就重出）
+    #[allow(dead_code)]
+    fn pick_valid(&self) -> bool {
+        let want = fp_grouped(&self.sign_pub);
+        self.pick.as_ref().is_some_and(|s| s.options.len() == 4 && s.options.get(s.answer) == Some(&want))
+    }
 }
 
 /// 手機上要不要讓這台電腦接受打字：只有本人確認過指紋的才行（沒記住、沒確認都不行）
@@ -299,7 +360,7 @@ impl KnownPeers {
                 Ok(())
             }
             Tofu::New => {
-                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false, confirmed_at: None });
+                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false, confirmed_at: None, pick: None, pick_wrong: 0, pick_lock_set_ms: None, pick_lock_until_ms: None });
                 Ok(())
             }
         }
@@ -355,13 +416,64 @@ impl KnownPeers {
     }
 
     /// 本人在手機上對照過指紋、按了「記住這台」：只有這台記住的公鑰算出來的指紋（16 個字元）完全一樣才記。回有沒有記到
+    /// 還鎖著或已經擋住的不記（答錯之後不能靠之前選對留著的題目繞過去）；記成功就把答錯次數與鎖清掉
     pub fn confirm(&mut self, node: &str, fp16: &str, now_ms: u64) -> bool {
         match self.peers.iter_mut().find(|p| p.node == node) {
-            Some(p) if fingerprint(&p.sign_pub) == fp16 => {
+            Some(p) if fingerprint(&p.sign_pub) == fp16 && p.pick_gate(now_ms) == PickGate::Open => {
                 p.confirmed_at = Some(now_ms);
+                p.pick_wrong = 0;
+                p.pick_lock_set_ms = None;
+                p.pick_lock_until_ms = None;
                 true
             }
             _ => false,
+        }
+    }
+
+    /// 現在能不能對這台出四選一；沒記住這台回 None
+    #[allow(dead_code)]
+    pub fn pick_gate(&self, node: &str, now_ms: u64) -> Option<PickGate> {
+        self.peer(node).map(|p| p.pick_gate(now_ms))
+    }
+
+    /// 這台的固定選項：沒有（或壞了）就用 make 產生一次存進紀錄。回（選項、是不是剛產生的＝呼叫端要存檔）；沒記住這台回 None
+    #[allow(dead_code)]
+    pub fn ensure_pick(&mut self, node: &str, make: impl FnOnce(&str) -> (Vec<String>, usize)) -> Option<(PickSet, bool)> {
+        let p = self.peers.iter_mut().find(|p| p.node == node)?;
+        if p.pick_valid() {
+            return p.pick.clone().map(|s| (s, false));
+        }
+        let (options, answer) = make(&fingerprint(&p.sign_pub));
+        let set = PickSet { options, answer };
+        p.pick = Some(set.clone());
+        Some((set, true))
+    }
+
+    /// 答錯一次：第一次鎖 10 分鐘、第二次擋住。**只有 android_known_answer 能叫**（守門測試）。回有沒有這台
+    #[allow(dead_code)]
+    pub fn pick_record_wrong(&mut self, node: &str, now_ms: u64) -> bool {
+        match self.peers.iter_mut().find(|p| p.node == node) {
+            Some(p) => {
+                p.pick_wrong = p.pick_wrong.saturating_add(1).min(PICK_WRONG_LIMIT);
+                if p.pick_wrong < PICK_WRONG_LIMIT {
+                    p.pick_lock_set_ms = Some(now_ms);
+                    p.pick_lock_until_ms = Some(now_ms.saturating_add(PICK_LOCK_MS));
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 回答「都不一樣」：直接擋住。**只有 android_known_answer 能叫**（守門測試）。回有沒有這台
+    #[allow(dead_code)]
+    pub fn pick_block(&mut self, node: &str) -> bool {
+        match self.peers.iter_mut().find(|p| p.node == node) {
+            Some(p) => {
+                p.pick_wrong = PICK_WRONG_LIMIT;
+                true
+            }
+            None => false,
         }
     }
 
@@ -387,6 +499,15 @@ pub mod live {
     use std::sync::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
+
+    /// 出題前的準備結果（只在 Rust 內部傳，不序列化給畫面）
+    #[allow(dead_code)]
+    pub struct PickPrep {
+        pub gate: PickGate,
+        pub sign_pub: String,
+        pub answer: usize,
+        pub options: Vec<String>,
+    }
 
     /// async 裡用這個：取金鑰可能要問系統金鑰庫（最多等幾秒），不佔用 async 的執行緒
     pub async fn key_async(dir: &Path) -> Result<DeviceKey, String> {
@@ -434,6 +555,55 @@ pub mod live {
             k.save(dir)?;
         }
         Ok(done)
+    }
+
+    /// 出題前的準備（手機）：現在能不能出；能的話回這台固定的四個選項與答案位置（沒有就用 make 產生一次、存檔）。
+    /// 全程在同一把鎖裡。沒記住這台回 None。**答案只給呼叫的 Rust 命令，不進任何畫面資料**
+    #[allow(dead_code)]
+    pub fn pick_prepare(dir: &Path, node: &str, now_ms: u64, make: impl FnOnce(&str) -> (Vec<String>, usize)) -> Result<Option<PickPrep>, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let Some(gate) = k.pick_gate(node, now_ms) else { return Ok(None) };
+        let sign_pub = k.peer(node).map(|p| p.sign_pub.clone()).unwrap_or_default();
+        if gate != PickGate::Open {
+            return Ok(Some(PickPrep { gate, sign_pub, answer: 0, options: Vec::new() }));
+        }
+        let Some((set, created)) = k.ensure_pick(node, make) else { return Ok(None) };
+        if created {
+            k.save(dir)?;
+        }
+        Ok(Some(PickPrep { gate, sign_pub, answer: set.answer, options: set.options }))
+    }
+
+    /// 現在能不能回答這台的題目；沒記住這台回 None
+    #[allow(dead_code)]
+    pub fn pick_gate(dir: &Path, node: &str, now_ms: u64) -> Result<Option<PickGate>, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(KnownPeers::load(dir)?.pick_gate(node, now_ms))
+    }
+
+    /// 答錯一次（鎖 10 分鐘或擋住）：**只有 android_known_answer 能叫**（守門測試）
+    #[allow(dead_code)]
+    pub fn pick_record_wrong(dir: &Path, node: &str, now_ms: u64) -> Result<bool, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let found = k.pick_record_wrong(node, now_ms);
+        if found {
+            k.save(dir)?;
+        }
+        Ok(found)
+    }
+
+    /// 回答「都不一樣」：直接擋住。**只有 android_known_answer 能叫**（守門測試）
+    #[allow(dead_code)]
+    pub fn pick_block(dir: &Path, node: &str) -> Result<bool, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let found = k.pick_block(node);
+        if found {
+            k.save(dir)?;
+        }
+        Ok(found)
     }
 
     /// 手機設定頁的列表（不含完整公鑰）
@@ -716,6 +886,214 @@ mod tests {
         }
     }
 
+    // ---- 手機：四選一的固定選項、答錯的限制 ----
+
+    /// 固定亂數（不同種子給不同序列）
+    fn xs(seed: u64) -> impl FnMut(&mut [u8]) {
+        let mut s = (seed << 1) | 1;
+        move |buf: &mut [u8]| {
+            for b in buf.iter_mut() {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                *b = (s >> 24) as u8;
+            }
+        }
+    }
+
+    fn pick_of(k: &mut KnownPeers, node: &str, seed: u64) -> (PickSet, bool) {
+        k.ensure_pick(node, |fp| crate::known_pick::make_options(fp, xs(seed))).unwrap()
+    }
+
+    fn one_peer() -> KnownPeers {
+        let mut k = KnownPeers::default();
+        k.remember("pc", "工作機", "pk", 1).unwrap();
+        k
+    }
+
+    #[test]
+    fn 固定選項_每台只出一次_同一組同一順序_存檔讀回一樣_忘記再記住才重出() {
+        let mut k = one_peer();
+        assert!(k.peer("pc").unwrap().pick.is_none(), "新記住的：還沒有選項");
+        assert_eq!(k.ensure_pick("沒有", |_| (Vec::new(), 0)), None, "沒記住的不出");
+        let (a, created) = pick_of(&mut k, "pc", 1);
+        assert!(created);
+        assert_eq!(a.options.len(), 4);
+        assert_eq!(a.options[a.answer], fp_grouped("pk"));
+        for seed in 2..30u64 {
+            let (b, again) = pick_of(&mut k, "pc", seed);
+            assert!(!again, "已經有了就不再產生");
+            assert_eq!(b, a, "每次都是同一組、同一個順序");
+        }
+        let d = tempfile::tempdir().unwrap();
+        k.save(d.path()).unwrap();
+        let mut back = KnownPeers::load(d.path()).unwrap();
+        assert_eq!(back, k);
+        assert_eq!(pick_of(&mut back, "pc", 99), (a.clone(), false), "重開 App 讀回的還是同一組");
+        k.remember("pc", "改名", "pk", 5).unwrap();
+        assert_eq!(k.peer("pc").unwrap().pick, Some(a.clone()), "同一把再看到：選項不變");
+        assert!(k.forget("pc"));
+        k.remember("pc", "工作機", "pk", 9).unwrap();
+        assert!(k.peer("pc").unwrap().pick.is_none(), "忘記再記住：重新來過");
+        let (b, created) = pick_of(&mut k, "pc", 77);
+        assert!(created && b != a, "重出一組新的");
+        // 檔案被改壞（不是四個、或答案位置不是這把公鑰的指紋）就重出
+        k.peers[0].pick.as_mut().unwrap().options.truncate(3);
+        assert!(pick_of(&mut k, "pc", 5).1);
+        let bad_answer = (k.peers[0].pick.as_ref().unwrap().answer + 1) % 4;
+        k.peers[0].pick.as_mut().unwrap().answer = bad_answer;
+        assert!(pick_of(&mut k, "pc", 6).1);
+        let ok = k.peers[0].pick.clone().unwrap();
+        assert_eq!(ok.options[ok.answer], fp_grouped("pk"));
+    }
+
+    #[test]
+    fn 答錯_第一次鎖十分鐘_第二次擋住_只有忘記才重來() {
+        let mut k = one_peer();
+        let now = 1_000_000u64;
+        assert_eq!(k.pick_gate("pc", now), Some(PickGate::Open));
+        assert_eq!(k.pick_gate("沒有", now), None);
+        assert!(k.pick_record_wrong("pc", now));
+        assert_eq!(k.pick_gate("pc", now), Some(PickGate::Locked { minutes: 10 }));
+        assert_eq!(k.pick_gate("pc", now + 3 * 60_000), Some(PickGate::Locked { minutes: 7 }));
+        assert_eq!(k.pick_gate("pc", now + PICK_LOCK_MS - 1), Some(PickGate::Locked { minutes: 1 }));
+        assert_eq!(k.pick_gate("pc", now + PICK_LOCK_MS), Some(PickGate::Open), "十分鐘過了可以再試");
+        assert_eq!(k.peer("pc").unwrap().pick_wrong, 1, "答錯的次數還記著");
+        let later = now + PICK_LOCK_MS + 5;
+        assert!(k.pick_record_wrong("pc", later));
+        assert_eq!(k.peer("pc").unwrap().pick_wrong, 2);
+        for t in [later, later + PICK_LOCK_MS, later + 365 * 24 * 3_600_000, 0] {
+            assert_eq!(k.pick_gate("pc", t), Some(PickGate::Blocked), "第二次錯之後任何時候都擋住");
+        }
+        assert!(!k.pick_record_wrong("沒有", 1));
+        assert!(k.pick_record_wrong("pc", later + 1));
+        assert_eq!(k.peer("pc").unwrap().pick_wrong, 2, "不會再往上加");
+        assert!(!k.confirm("pc", &fingerprint("pk"), later + 365 * 24 * 3_600_000), "擋住的不能記住");
+        assert!(k.forget("pc"));
+        k.remember("pc", "工作機", "pk", 3).unwrap();
+        let p = k.peer("pc").unwrap();
+        assert_eq!((p.pick_wrong, p.pick_lock_set_ms, p.pick_lock_until_ms), (0, None, None), "忘記再記住：全部重來");
+        assert_eq!(k.pick_gate("pc", later), Some(PickGate::Open));
+    }
+
+    #[test]
+    fn 都不一樣_直接擋住_不用等第二次() {
+        let mut k = one_peer();
+        assert!(k.pick_block("pc"));
+        assert_eq!(k.pick_gate("pc", 5), Some(PickGate::Blocked));
+        assert_eq!(k.peer("pc").unwrap().pick_wrong, PICK_WRONG_LIMIT);
+        assert!(!k.pick_block("沒有"));
+        assert!(!k.confirm("pc", &fingerprint("pk"), 9));
+        assert_eq!(k.peer("pc").unwrap().confirmed_at, None);
+    }
+
+    #[test]
+    fn 確認成功清掉答錯紀錄_鎖住中不能確認() {
+        let mut k = one_peer();
+        let fp = fingerprint("pk");
+        assert!(k.pick_record_wrong("pc", 1_000));
+        assert!(!k.confirm("pc", &fp, 1_001), "鎖住中，即使有過關的題目也不記");
+        assert_eq!(k.peer("pc").unwrap().confirmed_at, None);
+        let after = 1_000 + PICK_LOCK_MS;
+        assert!(k.confirm("pc", &fp, after));
+        let p = k.peer("pc").unwrap();
+        assert_eq!((p.pick_wrong, p.pick_lock_set_ms, p.pick_lock_until_ms, p.confirmed_at), (0, None, None, Some(after)));
+        assert_eq!(k.pick_gate("pc", after), Some(PickGate::Open));
+    }
+
+    #[test]
+    fn 手機時鐘被往回撥_鎖還是鎖著() {
+        let mut k = one_peer();
+        let set = 5_000_000u64;
+        assert!(k.pick_record_wrong("pc", set));
+        for t in [set - 1, set - 1_000_000, 0] {
+            assert!(matches!(k.pick_gate("pc", t), Some(PickGate::Locked { .. })), "時間 {t}：比鎖住那刻還早，還是鎖著");
+        }
+        assert_eq!(k.pick_gate("pc", set - 1_000_000), Some(PickGate::Locked { minutes: 27 }), "剩餘時間照實算（進位到整分鐘）");
+        assert!(!k.confirm("pc", &fingerprint("pk"), set - 5));
+        assert_eq!(k.pick_gate("pc", set + PICK_LOCK_MS), Some(PickGate::Open));
+    }
+
+    #[test]
+    fn 舊檔沒有選項與答錯欄位_照常讀得進來() {
+        let old: KnownPeers = serde_json::from_str(r#"{"peers":[{"node":"d","name":"n","sign_pub":"pk","first_seen_ms":1,"confirmed_at":5}]}"#).unwrap();
+        let p = old.peer("d").unwrap();
+        assert_eq!((p.pick.clone(), p.pick_wrong, p.pick_lock_set_ms, p.pick_lock_until_ms), (None, 0, None, None));
+        assert_eq!(old.pick_gate("d", 1), Some(PickGate::Open));
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join(KNOWN_FILE), r#"{"peers":[{"node":"d","name":"n","sign_pub":"pk","first_seen_ms":1}]}"#).unwrap();
+        assert_eq!(KnownPeers::load(d.path()).unwrap().peers.len(), 1);
+    }
+
+    #[test]
+    fn 給畫面的列表不帶選項_答案_次數_鎖() {
+        let mut k = one_peer();
+        k.remember("pc2", "辦公室", "pk2", 1).unwrap();
+        let (a, _) = pick_of(&mut k, "pc", 1);
+        let (b, _) = pick_of(&mut k, "pc2", 2);
+        k.pick_record_wrong("pc", 100);
+        k.pick_block("pc2");
+        assert!(!k.confirm("pc2", &fingerprint("pk2"), 1), "擋住的不會被確認");
+        let text = phone_known_view(&k).to_string();
+        for bad in ["options", "answer", "pick", "lock", "wrong"] {
+            assert!(!text.contains(bad), "列表不能有 {bad}：{text}");
+        }
+        for o in a.options.iter().chain(b.options.iter()) {
+            assert!(!text.contains(o.as_str()), "列表不能有選項 {o}");
+        }
+        assert_eq!(phone_known_view(&k)["peers"][0].as_object().unwrap().len(), 3);
+    }
+
+    /// 這個位置落在哪個方法裡（縮排四格的 fn）
+    fn method_at(code: &str, i: usize) -> String {
+        let before = &code[..i];
+        let start = ["\n    pub fn ", "\n    fn "].iter().filter_map(|p| before.rfind(p).map(|at| (at, p.len()))).max();
+        match start {
+            Some((at, len)) => before[at + len..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect(),
+            None => String::new(),
+        }
+    }
+
+    fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                rs_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    #[test]
+    fn 守門_答錯次數與鎖只有答題_確認_忘記三條路能寫_別的檔案碰不到() {
+        let src = include_str!("device_id.rs").replace("\r\n", "\n");
+        let code = src.split("\n#[cfg(test)]\nmod tests {").next().unwrap();
+        let mut n = 0;
+        for field in [".pick_wrong = ", ".pick_lock_set_ms = ", ".pick_lock_until_ms = "] {
+            for (i, _) in code.match_indices(field) {
+                n += 1;
+                let o = method_at(code, i);
+                assert!(["confirm", "pick_record_wrong", "pick_block"].contains(&o.as_str()), "{field}被 {o} 寫了");
+            }
+        }
+        assert!(n >= 6, "至少三個欄位各被寫到：{n}");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        for f in files {
+            let name = f.file_name().unwrap().to_string_lossy().to_string();
+            if name == "device_id.rs" {
+                continue;
+            }
+            let s = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
+            let s = s.split("\n#[cfg(test)]").next().unwrap();
+            assert!(!s.contains(".pick_wrong") && !s.contains(".pick_lock") && !s.contains("pick_wrong:"), "{name} 不能碰答錯次數與鎖");
+            if name != "android.rs" {
+                assert!(!s.contains("pick_record_wrong(") && !s.contains("pick_block(") && !s.contains("pick_prepare("), "{name} 不能叫四選一的紀錄");
+            }
+        }
+    }
     #[test]
     fn 金鑰_第一次建_之後讀回同一把_檔案裡不是明文() {
         let d = tempfile::tempdir().unwrap();
@@ -899,7 +1277,7 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
-            assert!(["android_known_list", "android_known_challenge", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
         }
         assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
     }
@@ -920,9 +1298,16 @@ mod tests {
         assert!(confirm.contains("fingerprint(&sign_pub)"), "指紋由記住的公鑰在 Rust 重算，不收畫面給的");
         assert!(!confirm.contains("fp:"), "確認不收指紋參數");
         let ans = body_of(code, "android_known_answer");
-        for bad in ["confirmed", "confirm(", "remember(", "live::", "set_confirmed", "confirmed_at"] {
+        for bad in ["confirmed", "confirm(", "remember(", "live::confirm", "live::see", "live::known", "live::pick_prepare", "set_confirmed", "confirmed_at"] {
             assert!(!ans.contains(bad), "回答不能記住任何東西：{bad}");
         }
+        // 答錯、都不一樣的紀錄只有回答這條路寫；題目準備只有出題那條路叫
+        for (pat, only) in [("live::pick_record_wrong(", "android_known_answer"), ("live::pick_block(", "android_known_answer"), ("live::pick_prepare(", "android_known_challenge")] {
+            let o: Vec<String> = code.match_indices(pat).map(|(i, _)| owner_at(code, i)).collect();
+            assert!(!o.is_empty() && o.iter().all(|f| f == only), "{pat} 只有 {only} 能叫：{o:?}");
+        }
+        assert!(ans.contains("pick_record_wrong(") && ans.contains("pick_block("), "回答要把答錯記到檔案");
+        assert!(ans.find("pick_gate(").unwrap() < ans.find("known_pick::answer(").unwrap(), "先看有沒有被鎖住、擋住，才判斷答案");
         // 這四個命令：日誌只有「都不一樣」那一行；題目、選項、答案都不進任何日誌、事件、顯示
         let chal = body_of(code, "android_known_challenge");
         for (name, b) in [("challenge", chal), ("answer", ans), ("confirm", confirm)] {
@@ -934,7 +1319,12 @@ mod tests {
         assert_eq!(ans.matches("elog!").count(), 1);
         let line = ans.split("elog!(").nth(1).unwrap().split(");").next().unwrap();
         assert_eq!(line, "\"本人表示手機上的指紋選項都和電腦不一樣，沒有記住\"", "只有這一句，不帶任何變數");
-        assert!(chal.contains("peer.sign_pub") && !chal.contains("fingerprint"), "正確指紋由 known_pick 用記住的公鑰算");
+        assert!(chal.contains("prep.sign_pub") && !chal.contains("fingerprint"), "正確指紋由 known_pick 用記住的公鑰算");
+        // 出題的 JSON 只有狀態、編號、選項、分鐘；答案位置與紀錄上的次數、鎖都不出現
+        for bad in ["\"answer\"", "pick_wrong", "pick_lock", "\"pick\""] {
+            assert!(!chal.contains(bad), "android_known_challenge 的回傳不能有：{bad}");
+        }
+        assert!(chal.contains("\"options\": prep.options") && chal.contains("\"minutes\": minutes"));
         // 四選一的模組：不寫日誌、不發事件，而且 known_pick 只被這幾個命令叫
         let kp = include_str!("known_pick.rs").replace("\r\n", "\n");
         let kp = kp.split("\n#[cfg(test)]").next().unwrap();
@@ -943,7 +1333,7 @@ mod tests {
         }
         for (i, _) in code.match_indices("known_pick::") {
             let f = owner_at(code, i);
-            assert!(["android_known_challenge", "android_known_answer", "android_known_confirm"].contains(&f.as_str()), "{f}");
+            assert!(["android_known_challenge", "android_known_answer", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "{f}");
         }
     }
 }
