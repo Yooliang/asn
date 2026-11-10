@@ -124,11 +124,13 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
         return Err("沒有發起成功，請稍後再試".into());
     };
     // 那台的設備公鑰先和本機記住的比（TOFU）：換了就不開始、通知本人（兩邊都寄 changed）
-    let (tofu, confirmed) = match b.known() {
+    // remembered：這支手機自己記住的名字與那把公鑰（金鑰變了的說明只用這份，不用後台這次給的名字）
+    let (tofu, confirmed, remembered) = match b.known() {
         Ok(k) => {
             let t = k.check(&to_node, &to_pub);
+            let remembered = k.peer(&to_node).map(|p| (p.name.clone(), p.sign_pub.clone()));
             // 確認只算在記住的同一把公鑰上：不是 Same 一律當沒確認
-            (t, t == Tofu::Same && crate::device_id::phone_input_allowed(k.peer(&to_node)))
+            (t, t == Tofu::Same && crate::device_id::phone_input_allowed(k.peer(&to_node)), remembered)
         }
         Err(e) => {
             views.remove(&id);
@@ -140,7 +142,12 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
         views.remove(&id);
         report_ended(b, &id, &token).await;
         b.alert(&to_node, "changed", &to_pub).await;
-        let msg = if phone { view_remote::phone_key_changed_text(&machine, &crate::device_id::fp8(&to_pub)) } else { view_remote::TARGET_KEY_CHANGED.to_string() };
+        let msg = if phone {
+            let (local_name, old_pub) = remembered.unwrap_or_default();
+            view_remote::phone_key_changed_text(&clean_machine(Some(local_name)), &crate::device_id::fp8(&old_pub), &crate::device_id::fp8(&to_pub))
+        } else {
+            view_remote::TARGET_KEY_CHANGED.to_string()
+        };
         return Err(msg);
     }
     // 手機要打字得先確認過那台的指紋（現在手機只能看；之後開放打字時這裡照樣擋）
@@ -374,11 +381,14 @@ mod tests {
     fn 那台換金鑰_不開始_通知本人_回報結束_不留登記() {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "new-key" })), known_with("pc", "old-key"));
         let v = RemoteViews::default();
-        let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap();
-        let new_fp8 = crate::device_id::fp8("new-key");
-        assert!(err.contains(&new_fp8), "手機看到的話帶新的指紋前 8 碼：{err}");
+        // 後台這次給的名字不能出現在說明裡：只用這支手機自己記住的「工作機」
+        let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("後台給的名字".into()), None, NOW)).err().unwrap();
+        let (old_fp8, new_fp8) = (crate::device_id::fp8("old-key"), crate::device_id::fp8("new-key"));
+        assert!(err.contains(&new_fp8) && err.contains(&old_fp8), "手機看到的話帶原本與新的指紋前 8 碼：{err}");
         assert!(err.contains("設定 → 認得的電腦"), "{err}");
-        assert_eq!(err, view_remote::phone_key_changed_text("", &new_fp8));
+        assert!(err.contains("「工作機」") && !err.contains("後台給的名字"), "名字用本機記住的：{err}");
+        assert_eq!(err, view_remote::phone_key_changed_text("工作機", &old_fp8, &new_fp8));
+        assert!(view_remote::phone_key_changed_text("", &old_fp8, &new_fp8).starts_with("這台電腦的金鑰"), "本機沒記名字就寫這台電腦");
         assert_eq!(b.alerts.lock().unwrap().clone(), vec![("pc".to_string(), "changed".to_string())]);
         assert_eq!(b.actions(), vec!["term_view_start", "term_view_report"]);
         let sent_id = b.calls.lock().unwrap()[0].1["id"].as_str().unwrap().to_string();
