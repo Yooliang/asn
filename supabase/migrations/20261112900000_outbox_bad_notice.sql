@@ -5,7 +5,7 @@
 -- security definer、search_path 空、只授權 service_role；只讀 relay.nodes、經 asn_relay_send_notice 寄信（寫法同 asn_relay_mux_blind_notice）。
 -- 依賴：20261111100000_notice_center.sql。部署順序：本 migration → relay（Edge 新增 outbox_bad_notice）→ 新版 ASN。
 --   提早上任何一步都不會壞：舊 Edge 回 404、舊資料庫回 500，橋只記 log、不重試。
--- 回復：supabase/sql/rollback/20261112600000_outbox_bad_notice_down.sql（drop 新函式；不刪任何資料）。
+-- 回復：supabase/sql/rollback/20261112900000_outbox_bad_notice_down.sql（drop 新函式；不刪任何資料）。
 begin;
 
 create or replace function public.asn_relay_outbox_bad_notice(p_node text)

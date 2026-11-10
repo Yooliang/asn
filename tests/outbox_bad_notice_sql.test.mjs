@@ -1,12 +1,12 @@
-// 橋的回信寄件匣存檔壞了，通知本人（20261112600000_outbox_bad_notice.sql，Yooliang/asn#1249）。
+// 橋的回信寄件匣存檔壞了，通知本人（20261112900000_outbox_bad_notice.sql，Yooliang/asn#1249）。
 // 靜態：security definer＋search_path 空、只授權 service_role、固定內文、限頻參數、down 檔。實跑（pglite，沒裝就略過）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const rd = s => s.replace(/\r+\n/g, '\n')
-const mig = rd(fs.readFileSync(new URL('../supabase/migrations/20261112600000_outbox_bad_notice.sql', import.meta.url), 'utf8'))
-const down = rd(fs.readFileSync(new URL('../supabase/sql/rollback/20261112600000_outbox_bad_notice_down.sql', import.meta.url), 'utf8'))
+const mig = rd(fs.readFileSync(new URL('../supabase/migrations/20261112900000_outbox_bad_notice.sql', import.meta.url), 'utf8'))
+const down = rd(fs.readFileSync(new URL('../supabase/sql/rollback/20261112900000_outbox_bad_notice_down.sql', import.meta.url), 'utf8'))
 const BODY = '這台電腦的回信寄件匣檔案壞了，裡面還沒寄出的回信無法再寄，可能有夥伴的回信沒送到對方。'
 
 test('靜態：一支函式、security definer、search_path 空、只授權 service_role、固定內文與限頻', () => {
