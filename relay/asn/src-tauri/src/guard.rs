@@ -2,7 +2,7 @@
 //!
 //! 起因：11-03 10:07 asn.exe 停止回應被 Windows 關掉，內建的收發室跟著斷，要等人發現才重開。
 //!
-//! 做法：設定頁勾選後，替使用者建一個使用者層級的工作排程（`AsnGuard-<使用者名>`，不用系統管理員），
+//! 做法：設定頁勾選後，替使用者建一個使用者層級的工作排程（名字見 task_name，不用系統管理員），
 //! 每 5 分鐘執行 `asn.exe --guard`。守護不開畫面，只判斷一次就結束：
 //! - ASN 在跑（alive.json 的 pid 還活著、而且確實是 asn.exe）：不動。心跳超過 3 分鐘沒更新（畫面卡住、還沒被關）只記一行 log，
 //!   不開新的、也不關它（守護不關任何行程）。
@@ -20,6 +20,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const GUARD_FLAG: &str = "--guard";
+/// 解除安裝時由 NSIS 呼叫（installer-hooks.nsh 的 NSIS_HOOK_PREUNINSTALL）：刪掉這個使用者的排程，找不到不算錯
+pub const REMOVE_FLAG: &str = "--guard-remove";
 /// ASN 自己多久更新一次心跳
 pub const ALIVE_EVERY_MS: u64 = 60_000;
 /// 心跳超過這麼久沒更新、程序卻還在：看起來卡住了（只記 log）
@@ -207,14 +209,23 @@ fn relaunch() -> Result<(), String> {
 
 // ───────── 工作排程 ─────────
 
-/// 排程名：`AsnGuard-<使用者名>`（工作排程器的根資料夾是全機共用的，帶使用者名才不會兩個帳號互蓋）；只留英數與 - _
+/// 排程名（工作排程器的根資料夾是全機共用的，要帶使用者才不會兩個帳號互蓋）：
+/// 使用者名全是英數與 - _（最多 40 字）就直接用 `AsnGuard-<使用者名>`；有中文、空白或其他字元（#762 那類）一律改用
+/// 使用者名（轉小寫）的雜湊前 8 碼 `AsnGuard-<8 位十六進位>`。排程名永遠只有英數與 - _，/TN 不用煩惱引號與編碼。
+/// 解除安裝時由 asn.exe --guard-remove 用同一支函式算名字，NSIS 不用自己算。
 pub fn task_name(user: &str) -> String {
-    let u: String = user.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(40).collect();
-    if u.is_empty() {
-        "AsnGuard".into()
-    } else {
-        format!("AsnGuard-{u}")
+    if user.is_empty() {
+        return "AsnGuard".into();
     }
+    if user.len() <= 40 && user.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return format!("AsnGuard-{user}");
+    }
+    format!("AsnGuard-{:08x}", fnv1a(user.to_lowercase().as_bytes()) >> 32)
+}
+
+/// FNV-1a 64 位元：固定演算法，同一個使用者名在每台電腦、每個版本都算出同一個值（換演算法會讓解除安裝找不到當初建的排程）
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
 /// 建排程的參數（每 5 分鐘、以目前使用者在登入時執行、已存在就覆寫）
@@ -245,6 +256,11 @@ mod sys {
             let o = Command::new("schtasks").no_window().args(super::create_args(&n, exe)).output().map_err(|e| format!("建不了工作排程：{e}"))?;
             return if o.status.success() { Ok(()) } else { Err("建不了工作排程".into()) };
         }
+        remove()
+    }
+    /// 刪排程；找不到不算錯
+    pub fn remove() -> Result<(), String> {
+        let n = name();
         if !exists() {
             return Ok(());
         }
@@ -264,6 +280,15 @@ mod sys {
     pub fn set(_on: bool, _exe: &std::path::Path) -> Result<(), String> {
         Err("這個系統還不支援自動重新開啟".into())
     }
+    pub fn remove() -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// `asn.exe --guard-remove`（解除安裝時）：刪掉這個使用者的排程；找不到或刪不掉都回 0，不擋解除安裝
+pub fn run_remove() -> i32 {
+    let _ = sys::remove();
+    0
 }
 
 // ───────── 設定頁 ─────────
@@ -402,7 +427,22 @@ mod tests {
     #[test]
     fn 排程名與參數() {
         assert_eq!(task_name("cwen0708"), "AsnGuard-cwen0708");
-        assert_eq!(task_name("小良 哥"), "AsnGuard", "非英數字去掉，空了就用固定名");
+        assert_eq!(task_name("a_b-c"), "AsnGuard-a_b-c");
+        assert_eq!(task_name(""), "AsnGuard");
+        // 中文、空白、其他字元（#762 那類）、太長：改用雜湊前 8 碼，排程名只有英數
+        let hashed = |n: &str| n.strip_prefix("AsnGuard-").is_some_and(|h| h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        let long = "x".repeat(41);
+        for u in ["小良哥", "小良 哥", "John Smith", "user.name", "Ünïcödé", "a\"b", long.as_str()] {
+            let n = task_name(u);
+            assert!(hashed(&n), "{u} → {n}");
+            assert_eq!(n, task_name(u), "同一個名字每次算出一樣的");
+        }
+        assert_ne!(task_name("小良哥"), task_name("小良 哥"), "不同的使用者名不撞");
+        assert_eq!(task_name("John Smith"), task_name("john smith"), "Windows 使用者名不分大小寫");
+        // 演算法固定：FNV-1a 64 的標準測試值（換掉會讓解除安裝算出的名字和當初建的不一樣）
+        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(task_name("John Smith"), format!("AsnGuard-{:08x}", fnv1a(b"john smith") >> 32));
         let exe = Path::new(r"C:\Users\u\AppData\Local\ASN\asn.exe");
         assert_eq!(
             create_args("AsnGuard-u", exe),
@@ -410,6 +450,9 @@ mod tests {
         );
         assert_eq!(delete_args("AsnGuard-u"), ["/Delete", "/TN", "AsnGuard-u", "/F"]);
         assert_eq!(query_args("AsnGuard-u"), ["/Query", "/TN", "AsnGuard-u"]);
+        // 執行檔路徑有中文與空白：/TR 的值用雙引號包住路徑（每個參數由 CreateProcessW 以 UTF-16 傳，不經過字碼頁）
+        let cn = Path::new(r"C:\Users\小良 哥\AppData\Local\ASN\asn.exe");
+        assert_eq!(create_args("AsnGuard-1a2b3c4d", cn)[4], r#""C:\Users\小良 哥\AppData\Local\ASN\asn.exe" --guard"#);
     }
 
     #[test]

@@ -60,6 +60,19 @@
   Delete "$INSTDIR\wezterm\*.old*"
 !macroend
 
+; 解除安裝前：刪掉「ASN 意外關閉時自動重新開啟」建的工作排程（todo-next-191 B1）。排程名由 asn.exe 自己算
+; （使用者名，或有中文、空白時用雜湊；見 src/guard.rs 的 task_name），所以交給還在的 asn.exe --guard-remove 處理，
+; NSIS 不另算一份。找不到排程、刪不掉、asn.exe 不在，都不擋解除安裝（ClearErrors）。
+; 更新時 Tauri 的安裝程式會用 /UPDATE 跑舊版的解除安裝（範本 un.onInit 會設 $UpdateMode = 1）：那不是真的解除安裝，
+; 排程要留著，不然每次更新都會把使用者勾的「自動重新開啟」默默關掉
+!macro NSIS_HOOK_PREUNINSTALL
+  ${If} $UpdateMode <> 1
+    IfFileExists "$INSTDIR\asn.exe" 0 +2
+      ExecWait '"$INSTDIR\asn.exe" --guard-remove'
+    ClearErrors
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_POSTUNINSTALL
   Delete "$INSTDIR\asn-cli.old"
   Delete "$INSTDIR\asn-askpass.old"

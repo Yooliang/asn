@@ -261,3 +261,18 @@ test('視窗與系統匣：「ASN 意外關閉時自動重新開啟」預設關�
   const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
   assert.ok(lib.includes('guard::guard_get, guard::guard_set, guard::guard_resume'))
 })
+
+test('解除安裝時刪掉自動重新開啟的排程；更新（/UPDATE 跑舊版解除安裝）時不刪（todo-next-191 B1）', () => {
+  const nsh = fs.readFileSync(new URL('../src-tauri/installer-hooks.nsh', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const m = /!macro NSIS_HOOK_PREUNINSTALL\n([\s\S]*?)!macroend/.exec(nsh)
+  assert.ok(m, '要有 NSIS_HOOK_PREUNINSTALL')
+  const body = m[1]
+  assert.match(body, /\$\{If\} \$UpdateMode <> 1/, '更新時不刪')
+  const bs = String.fromCharCode(92)   // 反斜線（NSIS 路徑），避免字串跳脫寫錯
+  assert.ok(body.includes(`ExecWait '"$INSTDIR${bs}asn.exe" --guard-remove'`), '排程名交給 asn.exe 自己算')
+  assert.ok(body.includes(`IfFileExists "$INSTDIR${bs}asn.exe"`) && body.includes('ClearErrors'), 'asn.exe 不在或刪不掉都不擋解除安裝')
+  const main = fs.readFileSync(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8')
+  assert.ok(main.includes('asn_lib::guard::REMOVE_FLAG') && main.includes('asn_lib::guard::run_remove()'))
+  const guard = fs.readFileSync(new URL('../src-tauri/src/guard.rs', import.meta.url), 'utf8')
+  assert.ok(guard.includes('pub const REMOVE_FLAG: &str = "--guard-remove";'))
+})

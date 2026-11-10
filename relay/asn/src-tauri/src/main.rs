@@ -11,5 +11,10 @@ fn main() {
     if args.iter().any(|a| a == asn_lib::guard::GUARD_FLAG) {
         std::process::exit(asn_lib::guard::run_guard());
     }
+    // 解除安裝前（installer-hooks.nsh）：刪掉自動重開的排程，不開視窗；找不到不算錯
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if args.iter().any(|a| a == asn_lib::guard::REMOVE_FLAG) {
+        std::process::exit(asn_lib::guard::run_remove());
+    }
     asn_lib::run()
 }
