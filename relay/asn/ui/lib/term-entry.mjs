@@ -10,6 +10,10 @@ export const TERM_BACK_TIP = '回到訊息'
 // 對話圖示：專案裡沒有專用的訊息圖示，借用 ab-window.svg（視窗裡有文字行，最接近「訊息」）
 export const TERM_BTN_TERM = { label: '終端', icon: 'img/ab-term.svg' }
 export const TERM_BTN_MSG = { label: '訊息', icon: 'img/ab-window.svg' }
+/** 手機對話頁的切換鈕（一顆、放在下方圖示列最後面；小良哥 11-10）：寫「按了會去哪裡」——看對話時是「終端」、看終端時是「對話」。不做選中樣式 */
+export const M_TERM_TOGGLE = { toTerm: { label: '終端', icon: TERM_BTN_TERM.icon }, toChat: { label: '對話', icon: TERM_BTN_MSG.icon } }
+/** shown：終端正開著 → 回這顆按鈕要顯示的（按了會去的地方） */
+export const mTermToggle = shown => (shown === true ? M_TERM_TOGGLE.toChat : M_TERM_TOGGLE.toTerm)
 /** shown：終端畫面是不是正開著。回這一格要顯示的字與圖示（按了會去的地方） */
 export function termButtonView(shown, customLabel = '') {
   // 開著：一律「訊息」＋對話圖示（本機終端與別台一致，只靠第 2 格切回訊息）

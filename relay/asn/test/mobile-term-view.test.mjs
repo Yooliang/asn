@@ -22,12 +22,15 @@ test('m.html：對話分頁的 chat-pane 給看畫面三樣，不給打字', () 
 test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同一份', () => {
   const src = read('../ui/lib/chatpane.mjs')
   assert.match(src, /const mSwitch = computed\(\(\) => props\.noBar && canRemote\.value\)/)
-  assert.match(src, /class="tool-group m-term-switch"[^>]*v-if="mSwitch"/)
-  assert.match(src, /:aria-label="TERM_BTN_MSG\.label"/)
-  assert.match(src, /:aria-label="TERM_BTN_TERM\.label"/)
+  // 小良哥 11-10：一顆按鈕、放在這排最後面（emoji 選單之前）、不做選中樣式；字與圖示寫按了會去哪裡
+  assert.match(src, /<button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle\.label"/)
+  assert.doesNotMatch(src.slice(src.indexOf('m-term-switch') - 200, src.indexOf('m-term-switch') + 400), /aria-pressed|\bon: /, '不做選中樣式')
+  assert.match(src, /@click="remoteShown \? showMsgs\(\) : showTerm\(\)"/)
+  assert.match(src, /const mToggle = computed\(\(\) => mTermToggle\(remoteShown\.value\)\)/)
   // 切換放在下方圖示列（compose-row 的 toolbar 裡），不再是頂端的大切換列
   const row = src.slice(src.indexOf('<div class="compose-row"'))
   assert.ok(row.indexOf('m-term-switch') > 0 && row.indexOf('m-term-switch') < row.indexOf('<form class="composer"'), '切換鈕要在下方圖示列')
+  assert.ok(row.indexOf('m-term-switch') > row.indexOf('class="tool icon mic"') && row.indexOf('m-term-switch') < row.indexOf('<div class="picker"'), '切換鈕放在這排最後面')
   assert.equal((src.match(/m-term-switch/g) || []).length, 1, '頂端不能再有一列切換')
   assert.match(src, /'is-term': mSwitch && remoteShown/, '看終端時收起輸入框')
   assert.match(src, /watch\(remoteLive, a => \{ if \(!a\) remoteOn\.value = false \}\)/, '離開對話分頁就結束觀看')
@@ -138,4 +141,14 @@ test('確認還在等時切回訊息（那一次作廢），之後才回 ok：�
   answer('ok')
   assert.deepEqual(await q, { id: 'v1', expires_s: 1 })
   assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
+})
+
+test('手機對話／終端切換鈕的字：看對話時「終端」、看終端時「對話」（寫按了會去哪裡）', async () => {
+  const { M_TERM_TOGGLE, mTermToggle } = await import('../ui/lib/term-entry.mjs')
+  assert.deepEqual(mTermToggle(false), M_TERM_TOGGLE.toTerm)
+  assert.equal(mTermToggle(false).label, '終端')
+  assert.equal(mTermToggle(true).label, '對話')
+  assert.notEqual(mTermToggle(true).icon, mTermToggle(false).icon, '圖示也跟著換')
+  const css = read('../ui/mobile.css')
+  assert.doesNotMatch(css, /m-term-switch[^{]*\.on\{/, '沒有選中樣式')
 })

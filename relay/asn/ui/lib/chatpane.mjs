@@ -15,7 +15,7 @@ import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } 
 import { TermView } from './term-view.mjs'
 import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP } from './term-remote-input.mjs'
-import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
+import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -114,6 +114,7 @@ export const ChatPane = {
     const remoteLive = computed(() => (props.viewActive === null ? props.active : props.viewActive))
     watch(remoteLive, a => { if (!a) remoteOn.value = false })   // 離開對話分頁就結束觀看（那台的紅條會收掉）
     const mSwitch = computed(() => props.noBar && canRemote.value)
+    const mToggle = computed(() => mTermToggle(remoteShown.value))
     const showMsgs = () => { remoteOn.value = false }
     const showTerm = () => { remoteOn.value = true }
     async function probeRemote() {
@@ -426,7 +427,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { remoteLive, mSwitch, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -506,7 +507,6 @@ export const ChatPane = {
   <div class="compose-row" :class="{ 'is-term': mSwitch && remoteShown }" v-if="!isNotice">
     <div class="compose-main">
       <div class="toolbar">
-        <span class="tool-group m-term-switch" role="group" aria-label="訊息或終端" v-if="mSwitch"><button class="tool icon m-sw" type="button" :class="{ on: !remoteShown }" :aria-pressed="!remoteShown" :aria-label="TERM_BTN_MSG.label" :title="TERM_BTN_MSG.label" @click="showMsgs"><img :src="TERM_BTN_MSG.icon" alt="" width="22" height="22"></button><button class="tool icon m-sw" type="button" :class="{ on: remoteShown }" :aria-pressed="remoteShown" :aria-label="TERM_BTN_TERM.label" :title="TERM_BTN_TERM.label" @click="showTerm"><img :src="TERM_BTN_TERM.icon" alt="" width="22" height="22"></button></span>
         <span class="tool-group">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -536,6 +536,8 @@ export const ChatPane = {
         <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>
+        <!-- 對話／終端切換（手機）：一顆、放在這排最後面；字與圖示寫按了會去哪裡，不做選中樣式；沒有終端可看的夥伴不顯示 -->
+        <button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle.label" :title="mToggle.label" @click="remoteShown ? showMsgs() : showTerm()"><img :src="mToggle.icon" alt="" width="22" height="22"></button>
         <div class="picker" v-if="pickerOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
