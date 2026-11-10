@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 const hooks = { mounted: [], unmount: [] }
 globalThis.Vue = {
   ref: v => ({ value: v }),
+  computed: fn => ({ get value() { return fn() } }),
   watch: () => {},
   nextTick: async () => {},
   onMounted: fn => hooks.mounted.push(fn),

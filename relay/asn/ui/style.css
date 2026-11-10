@@ -2,6 +2,7 @@
 :root{
   --glass-top:#8fbfec; --glass-bottom:#c3def6; --glass-edge:rgba(255,255,255,.85);
   --title-fg:#0b2a4a;
+  --chat-gap:8px;   /* 對話區四周的留白：訊息框（.conv／.compose-row）和電腦版看別台終端的黑色畫面共用同一個值 */
   --panel:#ffffff; --panel-soft:#eef5fc; --panel-head:#dcebfa; --line:#bcd2e8;
   --fg:#1d2733; --muted:#5b6d80; --link:#0b5fb3;
   --online:#3cb521; --busy:#d9302b; --away:#f0a020; --offline:#9aa5b1;
@@ -206,7 +207,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .ab-sub{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-radius:3px}
 .ab-sub-text{min-width:0;flex:1;overflow-wrap:anywhere}
 .ab-sub-kind{flex:none;font-size:11px;color:var(--muted)}
-.conv,.compose-row{display:flex;gap:8px;padding:8px;background:var(--panel-soft);min-height:0}
+.conv,.compose-row{display:flex;gap:8px;padding:var(--chat-gap);background:var(--panel-soft);min-height:0}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}
 .conv-main,.compose-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
@@ -959,7 +960,16 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .viewed-bar{flex:none;display:flex;align-items:center;gap:8px;justify-content:space-between;padding:6px 10px;background:#b3261e;color:#fff;font-size:13px}
 /* 被打字（0.2.10）：比被看更醒目 */
 .viewed-bar-input{background:#7a0d0d;font-size:15px;font-weight:700;padding:10px 12px;border-bottom:3px solid #ffcc00}
-.term-remote-switch{margin:4px 0}
+.term-remote-switch{margin:4px 0 0;padding:0 var(--chat-gap)}
+/* 電腦版看別台終端：黑色畫面和下面的訊息框（.compose-main）左右對齊、四周留同樣的間距（--chat-gap）；狀態文字在最下面的狀態列 */
+.term-view.term-desk{padding:var(--chat-gap) var(--chat-gap) 0;border-bottom:0}
+.term-view.term-desk .term-view-screen{border-radius:3px;margin-bottom:var(--chat-gap)}
+/* 最下面的狀態列（.typing）放看／打字別台畫面的狀態：可以折行、顏色跟著等級；打字中最醒目 */
+.typing.typing-remote{height:auto;min-height:22px;white-space:normal;overflow:visible;font-size:13px;font-weight:600}
+.typing-remote .aero-btn{margin-left:8px}
+.typing-info{background:#e8f0fe;color:#1a3d7c}
+.typing-ask,.typing-warn{background:#fff4ce;color:#5c4400}
+.typing-danger{background:#7a0d0d;color:#fff;font-weight:700;border-top:2px solid #ffcc00}
 .term-remote-typing{background:#7a0d0d;color:#fff;font-weight:700}
 .m-dev{font-size:12px;opacity:.7;margin:0 0 2px}
 
