@@ -24,6 +24,12 @@ class MainActivity : TauriActivity() {
     val w = webView ?: return
     w.post { w.evaluateJavascript("window.__asnPushEvent && window.__asnPushEvent(${org.json.JSONObject.quote(json)})", null) }
   }
+
+  /** 告知網頁 App 進前景（true）或進背景（false）：網頁再交給 Rust，在線回報立刻帶 foreground（#1281，推播只看前景）。網頁不在就略過 */
+  private fun fgEvent(fg: Boolean) {
+    val w = webView ?: return
+    w.post { w.evaluateJavascript("window.__asnFgEvent && window.__asnFgEvent($fg)", null) }
+  }
   val callVoice: CallVoice by lazy { CallVoice(this) }
 
   // 麥克風權限的回答（通話第一次使用時才問）
@@ -44,8 +50,19 @@ class MainActivity : TauriActivity() {
 
   // 螢幕關閉或切到其他程式：通話自動結束（麥克風不留著）
   override fun onStop() {
-    callVoice.onBackground()
-    super.onStop()
+    // 先排進「進背景」的告知（false），再結束通話；結束通話就算丟例外，false 也已經排進去，super.onStop() 一定會執行。
+    // 注意 fgEvent 只是把 JS 排進網頁的佇列，不保證在網頁被凍住之前執行；漏掉時 Rust 端的前景告知 90 秒後自己過期
+    try {
+      fgEvent(false)
+      callVoice.onBackground()
+    } finally {
+      super.onStop()
+    }
+  }
+
+  override fun onStart() {
+    super.onStart()
+    fgEvent(true)    // 回前景也立刻送一次
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {

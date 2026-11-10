@@ -449,7 +449,7 @@ Deno.serve(async (req) => {
     const p = parseAsnPresence(await req.json().catch(() => null), me.id);
     if (p === null) return json(400, { error: "bad_request" });
     const { data, error } = await db.rpc("asn_relay_asn_presence_set", {
-      p_node: me.id, p_window: p.window_name, p_version: p.version, p_status: p.status, p_psm: p.psm,
+      p_node: me.id, p_window: p.window_name, p_version: p.version, p_status: p.status, p_psm: p.psm, p_foreground: p.foreground,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });

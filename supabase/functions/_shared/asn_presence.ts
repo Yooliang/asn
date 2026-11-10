@@ -17,6 +17,8 @@ export interface AsnPresence {
   status: AsnStatus;
   psm: string | null;
   platform: string | null;
+  // 手機端帶：true＝App 在前景、false＝在背景（#1281，只給推播判斷用）。沒帶或不是布林＝null（舊版 App、電腦版），後台視同前景
+  foreground: boolean | null;
 }
 
 export function parseAsnPresence(b: unknown, nodeId: string | null = null): AsnPresence | null {
@@ -34,5 +36,6 @@ export function parseAsnPresence(b: unknown, nodeId: string | null = null): AsnP
     psm = t === "" ? null : t;
   }
   const platform = typeof o.platform === "string" && (PLATFORMS as readonly string[]).includes(o.platform) ? o.platform : null;
-  return { window_name, version: o.version, status: o.status as AsnStatus, psm, platform };
+  const foreground = typeof o.foreground === "boolean" ? o.foreground : null;
+  return { window_name, version: o.version, status: o.status as AsnStatus, psm, platform, foreground };
 }

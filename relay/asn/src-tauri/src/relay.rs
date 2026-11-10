@@ -87,6 +87,13 @@ pub struct Relay {
     /// 手機要這台安裝並登入：後台說的送出者、種類與裝置碼型的請求內容（取走一次就清掉）
     setup_requested: Mutex<Option<SetupAsk>>,
     pub presence_wake: tokio::sync::Notify,
+    /// App 目前在不在前景（只有手機版回報；#1281）。預設 false：推播把 App 在背景喚醒時，這一筆不能算前景；
+    /// 畫面真的在前景時，外殼與網頁會立刻告知（set_foreground），前景時網頁每 30 秒再告知一次（續命）。電腦版不看這個值。
+    /// 存「最後一次收到前景告知的時間（毫秒）」，0＝沒有（背景）；超過 [FG_TTL_MS] 沒續命就當背景（背景時網頁被凍住不會續命，
+    /// 所以就算進背景的告知遺失、程序還活著，也不會永遠報前景）
+    foreground_ms: AtomicU64,
+    /// 這個 Relay 要不要在在線回報裡帶 foreground：手機版帶，電腦版不帶（維持舊行為）
+    reports_foreground: bool,
     /// 正在聽的歌（預設關；開了才有值，回報時蓋過個人訊息）
     pub now_playing: std::sync::Arc<crate::nowplaying::NowPlaying>,
     /// 畫面端最近一次呼叫收信（relay_inbox）的時間（毫秒）；0＝這次啟動以來畫面從沒收過
@@ -334,7 +341,15 @@ pub fn platform_name() -> Option<&'static str> {
     }
 }
 
+/// 前景告知的有效時間（毫秒）：網頁在前景時每 30 秒續命一次，容許漏兩次；超過就當背景（#1281）
+pub const FG_TTL_MS: u64 = 90_000;
+
 pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str) -> Value {
+    build_presence_body_fg(window, version, status, psm, None)
+}
+
+/// 同上，多一個 foreground（手機版帶：true＝App 在前景、false＝在背景；#1281）；None＝不帶（電腦版、離線回報）
+pub fn build_presence_body_fg(window: &str, version: &str, status: &str, psm: &str, foreground: Option<bool>) -> Value {
     let mut m = Map::new();
     if let Some(p) = platform_name() {
         m.insert("platform".into(), json!(p));
@@ -345,6 +360,9 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
     let p = clean_presence_psm(psm);
     if !p.is_empty() {
         m.insert("psm".into(), json!(p));
+    }
+    if let Some(fg) = foreground {
+        m.insert("foreground".into(), json!(fg));
     }
     Value::Object(m)
 }
@@ -424,7 +442,7 @@ impl Relay {
         Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
-            presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
+            presence_wake: tokio::sync::Notify::new(), foreground_ms: AtomicU64::new(0), reports_foreground: cfg!(target_os = "android"), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
     }
@@ -439,6 +457,37 @@ impl Relay {
         *self.presence.lock().unwrap() = (normalize_presence_status(status).to_string(), clean_presence_psm(psm));
         self.presence_wake.notify_one();
     }
+    /// 手機版：App 進前景／進背景。狀態有變就叫醒回報迴圈，立刻回報一次（不等下一輪 60 秒）；沒變就不動作
+    pub fn set_foreground(&self, fg: bool) {
+        self.set_foreground_at(fg, crate::heartbeat::now_ms());
+    }
+    /// 同上，時間由呼叫端給（測試用）。true＝記下時間（續命也走這裡，狀態沒變不叫醒）；false＝立刻清掉
+    fn set_foreground_at(&self, fg: bool, now_ms: u64) {
+        let was = self.foreground_at(now_ms);
+        // 時間至少記 1，避免剛好 0 被當成沒有
+        self.foreground_ms.store(if fg { now_ms.max(1) } else { 0 }, Ordering::SeqCst);
+        if was != fg {
+            self.presence_wake.notify_one();
+        }
+    }
+    /// 現在算不算前景：最後一次前景告知在 [FG_TTL_MS] 之內
+    fn foreground_at(&self, now_ms: u64) -> bool {
+        let t = self.foreground_ms.load(Ordering::SeqCst);
+        t != 0 && now_ms.saturating_sub(t) <= FG_TTL_MS
+    }
+    /// 這一次在線回報要帶的 foreground：手機版帶目前狀態，電腦版不帶
+    fn presence_foreground(&self) -> Option<bool> {
+        self.presence_foreground_at(crate::heartbeat::now_ms())
+    }
+    fn presence_foreground_at(&self, now_ms: u64) -> Option<bool> {
+        if self.reports_foreground { Some(self.foreground_at(now_ms)) } else { None }
+    }
+    /// 測試用：讓電腦上的測試也走手機版的 foreground 回報
+    #[cfg(test)]
+    pub(crate) fn with_foreground_report(mut self) -> Relay {
+        self.reports_foreground = true;
+        self
+    }
     /// 回報一次在線狀態；回傳 false＝不用再回報了（後台不支援或已送過離線）。其他失敗只記 log，下一輪再試。
     pub async fn report_presence(&self, version: &str, timeout: Duration) -> bool {
         if self.presence_off.load(Ordering::Relaxed) || self.presence_closed.load(Ordering::Relaxed) {
@@ -446,7 +495,7 @@ impl Relay {
         }
         let (status, psm) = self.presence.lock().unwrap().clone();
         let psm = crate::nowplaying::compose_psm(&psm, &self.now_playing.current());
-        let body = build_presence_body(&self.window_name(), version, &status, &psm);
+        let body = build_presence_body_fg(&self.window_name(), version, &status, &psm, self.presence_foreground());
         match self.api_with("asn_presence", Some(body), timeout).await {
             Ok(v) => {
                 self.presence_ok.store(true, Ordering::Relaxed);
@@ -2032,6 +2081,64 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert_eq!(clean_presence_psm(&"字".repeat(100)).chars().count(), PRESENCE_PSM_MAX);
         // 請求內容裡沒有節點欄位（節點由後端依金鑰決定）
         assert!(build_presence_body("w", "1.2.3", "online", "x").get("node").is_none());
+    }
+
+    /// #1281：手機版的在線回報帶 foreground（true／false）；電腦版不帶。狀態有變就叫醒回報迴圈，沒變不叫
+    #[test]
+    fn 在線回報帶前景旗標_只有手機版帶() {
+        assert_eq!(build_presence_body_fg("w", "1.2.3", "online", "", Some(true)).get("foreground"), Some(&json!(true)));
+        assert_eq!(build_presence_body_fg("w", "1.2.3", "online", "", Some(false)).get("foreground"), Some(&json!(false)));
+        assert!(build_presence_body_fg("w", "1.2.3", "online", "", None).get("foreground").is_none());
+        assert!(build_presence_body("w", "1.2.3", "online", "").get("foreground").is_none(), "舊寫法（電腦版、離線回報）不帶");
+        let desktop = Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "n".into(), "w".into());
+        let phone = Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "n".into(), "w".into()).with_foreground_report();
+        if !cfg!(target_os = "android") {
+            assert_eq!(desktop.presence_foreground(), None, "電腦版不帶");
+        }
+        assert_eq!(phone.presence_foreground_at(1_000_000), Some(false), "預設在背景：推播喚醒的那一筆不算前景");
+        phone.set_foreground_at(true, 1_000_000);
+        assert_eq!(phone.presence_foreground_at(1_000_000), Some(true));
+        phone.set_foreground_at(false, 1_000_001);
+        assert_eq!(phone.presence_foreground_at(1_000_001), Some(false));
+    }
+
+    /// 前景告知有有效期限：TTL 內報前景、超過報背景、false 立即背景、續命會延長
+    #[test]
+    fn 前景告知過期就當背景_續命延長_false立即清掉() {
+        let r = Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "n".into(), "w".into()).with_foreground_report();
+        let t0 = 5_000_000u64;
+        r.set_foreground_at(true, t0);
+        assert_eq!(r.presence_foreground_at(t0 + FG_TTL_MS), Some(true), "TTL 內（含邊界）報前景");
+        assert_eq!(r.presence_foreground_at(t0 + FG_TTL_MS + 1), Some(false), "超過 TTL（false 的告知遺失）報背景");
+        // 續命：在過期前再告知一次，期限從新時間起算
+        r.set_foreground_at(true, t0 + 30_000);
+        assert_eq!(r.presence_foreground_at(t0 + 30_000 + FG_TTL_MS), Some(true), "續命後延長");
+        assert_eq!(r.presence_foreground_at(t0 + 30_000 + FG_TTL_MS + 1), Some(false));
+        // false 立即清掉，不必等 TTL
+        r.set_foreground_at(true, t0 + 100_000);
+        r.set_foreground_at(false, t0 + 100_001);
+        assert_eq!(r.presence_foreground_at(t0 + 100_002), Some(false));
+        // 過期後再收到 true 又是前景
+        r.set_foreground_at(true, t0 + 1_000_000);
+        assert_eq!(r.presence_foreground_at(t0 + 1_000_000), Some(true));
+        // 時鐘倒退（now 小於記下的時間）不會溢位、當作剛告知
+        assert_eq!(r.presence_foreground_at(t0), Some(true));
+    }
+
+    #[tokio::test]
+    async fn 前景狀態改變才叫醒在線回報迴圈() {
+        let r = Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "n".into(), "w".into()).with_foreground_report();
+        async fn woke(r: &Relay) -> bool {
+            tokio::time::timeout(Duration::from_millis(50), r.presence_wake.notified()).await.is_ok()
+        }
+        r.set_foreground(false);
+        assert!(!woke(&r).await, "沒變（預設就是背景）不叫醒");
+        r.set_foreground(true);
+        assert!(woke(&r).await, "進前景立刻叫醒");
+        r.set_foreground(true);
+        assert!(!woke(&r).await, "重複告知不叫醒");
+        r.set_foreground(false);
+        assert!(woke(&r).await, "進背景立刻叫醒");
     }
 
     /// 後台 relay.nodes.platform 只收固定幾個值；這台跑的作業系統要對得上（安卓版 target_os = android → "android"）
