@@ -22,9 +22,10 @@ export const CIPHER_MIN = 100;
 export const CIPHER_MAX = 2048;
 const PUB_RE = /^[A-Za-z0-9_-]{43}$/;
 const CIPHER_RE = /^[A-Za-z0-9_-]+$/;
-// 登入網址：官方登入網域的 https（埠只能 443），後面只許可見的 ASCII（不含空白、控制字元、反斜線）。與資料庫的檢查約束同一條規則
+// 登入網址：官方登入網域的 https（埠只能 443），後面只許可見的 ASCII（不含空白、控制字元、反斜線）。與資料庫的檢查約束同一條規則。
+// 主機清單的唯一來源是 ./login_domains.json（suffix＝本身或子網域、exact＝只收本身）；這裡的字面規則由一致性測試比對（tests/login_domains_consistency.test.mjs）
 export const LINK_MAX = 2048;
-export const LINK_RE = /^https:\/\/([a-z0-9-]+\.)*(claude\.ai|claude\.com|anthropic\.com)(:443)?([/?#][\x21-\x5b\x5d-\x7e]*)?$/;
+export const LINK_RE = /^https:\/\/(([a-z0-9-]+\.)*(claude\.ai|claude\.com|anthropic\.com)|auth\.openai\.com|accounts\.x\.ai)(:443)?([/?#][\x21-\x5b\x5d-\x7e]*)?$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ERROR_TEXT: Record<string, string> = {

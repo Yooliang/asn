@@ -9,6 +9,8 @@ on:
       - 'supabase/sql/**'
       - 'tests/**'
       - 'tools/run-root-tests.mjs'
+      - 'supabase/functions/_shared/login_domains.json'
+      - 'supabase/functions/_shared/secret_remote.ts'
       - '.github/workflows/asn-linux-build.yml'
   pull_request:
     paths:
@@ -17,6 +19,8 @@ on:
       - 'supabase/sql/**'
       - 'tests/**'
       - 'tools/run-root-tests.mjs'
+      - 'supabase/functions/_shared/login_domains.json'
+      - 'supabase/functions/_shared/secret_remote.ts'
       - '.github/workflows/asn-linux-build.yml'
   workflow_dispatch:
 
@@ -45,8 +49,8 @@ jobs:
       - name: 測試執行器本身的單元測試
         run: node --test tests/run_root_tests.test.mjs
 
-      - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）
-        run: node tools/run-root-tests.mjs _sql --timeout=180 --require-pglite
+      - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）＋登入網域清單的一致性測試
+        run: node tools/run-root-tests.mjs _sql login_domains --timeout=180 --require-pglite
 
 
   # 無視窗橋（asn-bridge，Linux 節點用）：下面的 build 只編 gui 版，這個組合沒人編就會壞了也不知道。

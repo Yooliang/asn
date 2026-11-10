@@ -1,16 +1,25 @@
 //! 登入網址（#628 第 3 段）：請求可以附一個「官方登入頁」的網址，讓本人在手機上打開、授權，再把頁面上的授權碼貼回。
 //! 這裡只放**驗證**（電腦與手機共用）：不信請求端自報的內容，收到的網址在送出前、收到後、顯示前各驗一次。
 //! 規則與資料庫的檢查約束、Edge Function 的 `LINK_RE` 是同一條：
-//!   只收 https；主機是官方登入網域本身或其子網域（目前 claude.ai、claude.com、anthropic.com）；埠只能 443；不能帶帳號密碼；
-//!   網域後面只許可見的 ASCII（不含空白、控制字元、反斜線）。
-//! 要新增別家引擎的登入網域時，三處（SQL、TS、這裡）一起改，並各補測試。
+//!   只收 https；主機是清單裡 suffix 的網域本身或其子網域（claude.ai、claude.com、anthropic.com），或 exact 的主機本身
+//!   （auth.openai.com、accounts.x.ai，#933）；埠只能 443；不能帶帳號密碼；網域後面只許可見的 ASCII（不含空白、控制字元、反斜線）。
+//! 主機清單的唯一來源是 `supabase/functions/_shared/login_domains.json`，這裡編譯時讀進來（`include_str!`）；
+//! SQL、Edge、手機畫面的字面規則由一致性測試比對。新增網域改那份 JSON，再照一致性測試把其他四處改齊。
 //!
 //! **誰能送出帶網址的請求**：請求端的 `Opts` 只收 `agent_setup` 裡的網址型別，那個型別的建構子只有 `agent_setup` 看得到；
 //! `asn-cli` 與夥伴能呼叫的指令都建不出來（有守門測試）。
 
 /// 網址長度上限（與資料庫約束相同）
 pub const LINK_MAX: usize = 2048;
-const ALLOWED_HOSTS: [&str; 3] = ["claude.ai", "claude.com", "anthropic.com"];
+const DOMAINS_JSON: &str = include_str!("../../../../../supabase/functions/_shared/login_domains.json");
+
+/// （suffix＝本身或子網域都收, exact＝只收本身）。清單壞掉就兩邊都空（一個都不收，安全地失敗），測試會抓到。
+/// 清單很小，每次解析就好（這個模組的守門測試不允許 `static`）
+fn domains() -> (Vec<String>, Vec<String>) {
+    let v: serde_json::Value = serde_json::from_str(DOMAINS_JSON).unwrap_or_default();
+    let list = |k: &str| v.get(k).and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default();
+    (list("suffix"), list("exact"))
+}
 
 /// 是不是可以送出、可以顯示、可以打開的官方登入網址
 pub fn valid_login_link(url: &str) -> bool {
@@ -36,7 +45,9 @@ pub fn valid_login_link(url: &str) -> bool {
     if host.is_empty() || !host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.') {
         return false;
     }
-    ALLOWED_HOSTS.iter().any(|h| host == *h || host.strip_suffix(h).is_some_and(|p| p.ends_with('.') && !p.starts_with('.') && !p.contains("..")))
+    let (suffix, exact) = domains();
+    exact.iter().any(|h| host == h)
+        || suffix.iter().any(|h| host == h || host.strip_suffix(h.as_str()).is_some_and(|p| p.ends_with('.') && !p.starts_with('.') && !p.contains("..")))
 }
 
 /// 畫面上只顯示網域（網址的其他部分不顯示）。不合格的網址回 None

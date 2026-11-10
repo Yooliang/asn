@@ -46,7 +46,7 @@
 |---|---|---|---|---|---|---|
 | Claude | `downloads.claude.ai`（`claude-code-releases/<版本>/manifest.json`、執行檔） | 清單 sha256 ＋ Authenticode（官方另有 `manifest.json.sig` 的 GPG 簽章，Windows 這次不驗，見第 5 節第 1 點） | `Anthropic, PBC` | stable 頻道 | B 授權碼送回（已有） | `claude auth status`（結束碼） |
 | Codex | `releases.openai.com/codex`（**不做** GitHub 備援，避免多一個來源） | metadata 的 sha256 ＝ 官方 `SHA256SUMS`（本身沒簽章）＝ 實算，再加每個 exe／dll 的 Authenticode（兩個寫死的例外，見 PR-3） | `OpenAI OpCo, LLC`（0.167.0 實測） | 穩定版 | A 裝置碼：`codex login --device-auth` | `codex login status` |
-| Gemini（agy） | `antigravity.google`（manifest 與執行檔） | 清單 sha512（本身沒簽章）＋ Authenticode | `Google LLC`（#629 本機看到） | 穩定版 | C 只能操作畫面（沒有 `login` 子命令） | 待實測（候選：`agy` 某個狀態輸出、或 ACP `authenticate`） |
+| Gemini（agy） | manifest：官方腳本寫死的 `antigravity-cli-auto-updater-974169037036.us-central1.run.app` 的 `/manifests/<平台>.json`；執行檔：`storage.googleapis.com` 的 `/antigravity-public/antigravity-cli/` 底下（主機＋路徑前綴都釘，見 PR-4） | 清單 sha512（本身沒簽章）＋ Authenticode | `Google LLC`（1.5.3 實測） | 穩定版 | C 只能操作畫面（沒有 `login` 子命令） | 待實測（候選：`agy` 某個狀態輸出、或 ACP `authenticate`） |
 | Grok | `x.ai`（`cli/` 底下的清單與執行檔） | **官方腳本對 `grok.exe` 沒有比對雜湊**（#629），只能靠 Authenticode | **待實測**：#629 時工作機只有社群版，沒看到官方版的簽署者 | 穩定版 | A 裝置碼：`grok login --device-auth`（RFC 8628） | 待實測 |
 
 Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽章**，就只剩「同網域下載」一層，不符合第 1 節第 3 條。這種情況**不做一鍵安裝**，畫面改成「請到 xAI 官網照說明安裝，裝好後 ASN 會自動偵測」，登入（裝置碼）照做。
@@ -58,7 +58,7 @@ Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽�
 ### PR-1 關掉舊的「執行網路腳本」安裝路（先做，獨立可合）
 - `agent_tools/install.rs`：刪掉 `irm | iex`、`curl | bash`、`npm install -g` 三段。Claude 照舊走 `claude_install`；其他工具回「這家還不能由 ASN 安裝，請到官網安裝」。
 - `agent_tools/mod.rs`：`ai_cli_install` 只接「驗過再執行」登記過的工具。
-- `relay/shared/agent-tools.catalog.json`：`install.ps1`／`sh` 欄位改名為「官網說明頁」（只給人看的連結，不再是要執行的東西）；`agent_tools/catalog.rs` 同步。
+- `relay/shared/agent-tools.catalog.json`：`install` 的 `ps1`、`sh`、`npm` 欄位**整個拿掉**，只剩 `kind`（`verified`／`manual`；認不得的當 `manual`）；`agent_tools/catalog.rs` 同步（#1156 實作）。
 - 測試：
   - 原始碼守衛：`src-tauri/src` 不得出現 `| iex`、`irm `、`| bash`、`| sh`、`npm install -g`。
   - 呼叫 `ai_cli_install("codex")` 不會啟動任何子程序（假 Runner）。
@@ -118,7 +118,7 @@ Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽�
 ### PR-5 登入：補「裝置碼型」與「只能在電腦前登入」
 - `agent_setup/login.rs` 現在只有授權碼送回型（B）。新增：
   - **A 裝置碼型**（Codex、Grok）：
-    - 從輸出抓「網址＋代碼」，經 `secret_remote` 的帶網址請求送到本人手機。手機只顯示，不用回傳任何東西。
+    - 從輸出抓「網址＋代碼」。**本機**登入時交給這台 ASN 的畫面（PR-5a，#1186）；**手機遠端觸發**時不走 `secret_remote`，改走 PR-5b 定案的反向加密通道：手機用設備金鑰簽請求，電腦用一次性公鑰加密網址＋代碼並用設備金鑰簽，手機用本機記住的電腦公鑰驗過才顯示（安全細節在私有設計）。手機只顯示，不用回傳任何東西。
     - 等子程序自己結束，再用狀態命令確認。
     - 代碼與網址記 log 前遮掉。
   - **C 只能操作畫面**（agy）：不做自動送鍵。

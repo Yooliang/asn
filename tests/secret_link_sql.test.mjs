@@ -116,7 +116,10 @@ test('實跑（pglite）：共用正反例（與 Edge Function、Rust、手機�
   // 空字元連資料庫的參數都送不進去（編碼錯誤），不在這裡比；其餘照比
   for (const b of cases.bad.filter(x => !x.includes('\0'))) assert.equal((await reqLink({ link: expand(b), pub: pub(i++) })).error, 'bad_request', b.slice(0, 40))
   assert.equal((await q('select count(*)::int n from relay.secret_requests'))[0].n, 0)
-  for (const g of cases.good) {
+  // 這支只套到 20261101230000 那一版的規則；#933 加的 exact 主機（auth.openai.com、accounts.x.ai）在那一版還不收，
+  // 由 setup_device_login_sql.test.mjs 用最新規則跑完整正反例
+  const exact = JSON.parse(fs.readFileSync(new URL('../supabase/functions/_shared/login_domains.json', import.meta.url), 'utf8')).exact
+  for (const g of cases.good.filter(u => !exact.some(h => u.startsWith(`https://${h}`)))) {
     assert.ok((await reqLink({ link: expand(g), pub: pub(i++) })).id, g)
     await q(`update relay.secret_requests set status = 'denied'`)
   }
