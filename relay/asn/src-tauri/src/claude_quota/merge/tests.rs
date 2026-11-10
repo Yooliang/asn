@@ -897,3 +897,56 @@ fn 回升確認_只有_gemini_claude_與_codex_維持回升一律不收() {
     let (_, took, sk, p) = merge_one(Vendor::Gemini, Kind::Week, old, Some((99, Some(r))), None, NOW);
     assert!(!took && sk.is_some_and(|s| s.code == "same_period_rise") && p.is_some(), "Gemini 先記下待確認");
 }
+
+// ---------- 兩條窗各自判斷（#1261）：一條被擋不准連帶另一條不存 ----------
+#[test]
+fn 共用案例_兩條窗各自判斷_一條被擋另一條照收() {
+    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
+    let cases = v["window_pair_cases"].as_array().expect("window_pair_cases");
+    assert!(cases.len() >= 3, "案例不該變少");
+    for t in cases {
+        let id = t["id"].as_str().unwrap();
+        let vendor = match t["vendor"].as_str() {
+            Some("claude") => Vendor::Claude,
+            Some("gemini") => Vendor::Gemini,
+            o => panic!("{id} 廠牌不認得：{o:?}"),
+        };
+        let now = ms(t["now"].as_str().unwrap());
+        let pct = |side: &str, w: &str| t[side][w]["left_pct"].as_u64().unwrap() as u8;
+        let rst = |side: &str, w: &str| t[side][w]["resets_at"].as_str().unwrap().to_string();
+        let read = |side: &str, w: &str| t[side][w]["read_at"].as_str().unwrap().to_string();
+        let old = Quota {
+            five_hour_pct: Some(pct("old", "five_hour")),
+            weekly_pct: Some(pct("old", "weekly")),
+            at: read("old", "five_hour"),
+            five_reset_at: Some(rst("old", "five_hour")),
+            week_reset_at: Some(rst("old", "weekly")),
+            five_at: Some(read("old", "five_hour")),
+            week_at: Some(read("old", "weekly")),
+            ..Default::default()
+        };
+        let newp = Parsed {
+            five_hour_pct: Some(pct("new", "five_hour")),
+            weekly_pct: Some(pct("new", "weekly")),
+            reset_at: None,
+            five_reset_ms: Some(ms(&rst("new", "five_hour"))),
+            week_reset_ms: Some(ms(&rst("new", "weekly"))),
+        };
+        let m = merge_full(vendor, Some(&old), &newp, None, None, now);
+        let want = |w: &str| t["expect"][w]["accept"].as_bool().unwrap();
+        assert_eq!((m.took_five, m.took_week), (want("five_hour"), want("weekly")), "{id} 各條收不收");
+        for (w, took) in [("five_hour", m.took_five), ("weekly", m.took_week)] {
+            let got = m.skipped.iter().find(|s| s.kind == if w == "weekly" { Kind::Week } else { Kind::Five }).map(|s| s.code);
+            assert_eq!(got, t["expect"][w]["reason"].as_str(), "{id} {w} 原因（收了就沒有）");
+            assert_eq!(took, got.is_none());
+        }
+        // 只要有一條收下，整筆就要寫（不會因為另一條被擋就整筆不存）
+        let q = m.quota.unwrap_or_else(|| panic!("{id} 有一條收下，紀錄不該是 None"));
+        let (nf, nw) = (iso_secs(now), iso_secs(now));
+        let pick = |took: bool, side_new: u8, side_old: u8| if took { side_new } else { side_old };
+        assert_eq!(q.five_hour_pct, Some(pick(m.took_five, pct("new", "five_hour"), pct("old", "five_hour"))), "{id} 5 小時：被擋的維持舊值、收下的用新值");
+        assert_eq!(q.weekly_pct, Some(pick(m.took_week, pct("new", "weekly"), pct("old", "weekly"))), "{id} 每週");
+        assert_eq!(q.five_at, Some(if m.took_five { nf } else { read("old", "five_hour") }), "{id} 5 小時的讀取時間：收下才往前走");
+        assert_eq!(q.week_at, Some(if m.took_week { nw } else { read("old", "weekly") }), "{id} 每週的讀取時間");
+    }
+}

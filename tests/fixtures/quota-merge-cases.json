@@ -15,6 +15,7 @@
     "confirm_sequences：一個 old 之後依序送進 steps；每步有 now／new／accept／reason；收下後 old 換成那步的 new，待確認清空。兩邊（Rust、後台 asn_relay_acct_window_decide）都要逐步一致。",
     "scope（#1184）：\"backend_only\"＝只有後台判斷的案例（older_read／future_read 看資料的讀取時間 read_at，客戶端不做這種判斷，由後台守）；客戶端（Rust）讀到就跳過，後台 SQL 走 asn_relay_acct_window_decide 驗。這種案例的 old／new 多一個 read_at 欄位；now 是後台收到的時間。",
     "同期回升確認（#1261）：Gemini（客戶端與後台）、MiniMax（只有後台）同一期剩餘回升不直接拒收，新窗的 read_at 比已存的新時，同一個新值（重置時間差 10 分鐘內、剩餘與第一次看到的差 ±2% 以內）連續 3 次、第一次到這次至少隔 10 分鐘才收，待確認期間已存的值不動、原因代碼仍是 same_period_rise；中間來了不同的值就重新計數。Claude、Codex 維持回升一律拒收。confirm_sequences 的步驟若帶 read_at，後台用它判斷新舊。",
+    "window_pair_cases（#1261）：一次讀取同時帶 5 小時與每週兩條窗，各條各自判斷——一條被擋不准連帶另一條不存。old／new 各有 five_hour、weekly；expect 是每條收不收與原因。電腦端驗合併後的紀錄（被擋的那條維持舊值、收下的那條用新值與新的讀取時間），後台每條各呼叫 decide 並端到端跑一次回報。",
     "台灣時間對照：2026-11-01T16:00:00Z＝11/2 00:00（gmail）、2026-11-04T09:00:00Z＝11/4 17:00（yooliang）。"
   ],
   "constants": {
@@ -1658,6 +1659,128 @@
           "reason": "same_period_rise"
         }
       ]
+    }
+  ],
+  "window_pair_cases": [
+    {
+      "id": "p1",
+      "note": "Gemini 真實情境（11-09 工作機）：5 小時窗同一期回升被擋，週窗（剩 0%、值沒變）照收，讀取時間往前走；被擋的 5 小時窗維持舊值",
+      "vendor": "gemini",
+      "now": "2026-11-09T01:50:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 20,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        },
+        "weekly": {
+          "left_pct": 0,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        }
+      },
+      "new": {
+        "five_hour": {
+          "left_pct": 60,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        },
+        "weekly": {
+          "left_pct": 0,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        }
+      },
+      "expect": {
+        "five_hour": {
+          "accept": false,
+          "reason": "same_period_rise"
+        },
+        "weekly": {
+          "accept": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "id": "p2",
+      "note": "Claude：5 小時窗同一期回升被擋，週窗剩餘下降照收（一條被擋不連帶另一條不存）",
+      "vendor": "claude",
+      "now": "2026-11-09T01:50:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 20,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        },
+        "weekly": {
+          "left_pct": 70,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        }
+      },
+      "new": {
+        "five_hour": {
+          "left_pct": 60,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        },
+        "weekly": {
+          "left_pct": 60,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        }
+      },
+      "expect": {
+        "five_hour": {
+          "accept": false,
+          "reason": "same_period_rise"
+        },
+        "weekly": {
+          "accept": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "id": "p3",
+      "note": "反過來：週窗被擋、5 小時窗照收（Gemini）",
+      "vendor": "gemini",
+      "now": "2026-11-09T01:50:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:40:00Z"
+        }
+      },
+      "new": {
+        "five_hour": {
+          "left_pct": 40,
+          "resets_at": "2026-11-09T04:58:49Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        },
+        "weekly": {
+          "left_pct": 30,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T01:50:00Z"
+        }
+      },
+      "expect": {
+        "five_hour": {
+          "accept": true,
+          "reason": null
+        },
+        "weekly": {
+          "accept": false,
+          "reason": "same_period_rise"
+        }
+      }
     }
   ]
 }

@@ -186,3 +186,31 @@ test('實跑：權限與回復——新版 decide 只有 service_role；回復�
     ['gemini', 'weekly', JSON.stringify({ left_pct: 0, resets_at: R, read_at: '2026-11-09T12:00:00Z' }), JSON.stringify({ left_pct: 99, resets_at: R, read_at: '2026-11-09T12:30:00Z' }), '2026-11-09T12:40:00Z'])
   assert.deepEqual([r.reason, r.pending], ['same_period_rise', null])
 })
+
+test('實跑：共用案例 window_pair_cases——每條窗各自 decide；端到端回報一次帶兩條窗，被擋的那條不連帶另一條', { skip }, async () => {
+  const db = await setup()
+  const pairs = cases.window_pair_cases
+  assert.ok(pairs.length >= 3)
+  for (const c of pairs) {
+    for (const w of ['five_hour', 'weekly']) {
+      const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, $5::timestamptz) r',
+        [c.vendor, w, JSON.stringify(c.old[w]), JSON.stringify(c.new[w]), c.now])
+      assert.equal(r.reason, c.expect[w].reason, `${c.id} ${w} ${c.note}`)
+    }
+  }
+  // 端到端：gemini 的 p1，一次回報帶兩條窗
+  const c = pairs.find(x => x.id === 'p1')
+  const dayShift = Date.now() - Date.parse(c.now)   // 案例的時間搬到「現在」附近（重置時間要落在合理範圍內）
+  const shift = t => iso(Date.parse(t) + dayShift)
+  const mk = side => ['five_hour', 'weekly'].map(w => ({ name: w, left_pct: c[side][w].left_pct, resets_at: shift(c[side][w].resets_at), read_at: shift(c[side][w].read_at) }))
+  await report(db, 'W', [{ vendor: 'gemini', email: 'a@x.test', plan: 'pro', current: true, windows: mk('old') }])
+  await db.query(`update relay.asn_user_accounts set windows = $1::jsonb where vendor = 'gemini'`, [JSON.stringify(mk('old').map(x => ({ ...x, read_node: 'W' })))])
+  const nw = mk('new').map(x => ({ ...x, read_at: iso(Date.now() - 5_000) }))
+  const r = await report(db, 'W', [{ vendor: 'gemini', email: 'a@x.test', plan: 'pro', current: true, windows: nw }])
+  assert.deepEqual(r.skipped, [{ vendor: 'gemini', window: 'five_hour', reason: 'same_period_rise' }], '只有 5 小時被擋')
+  const acct = (await rosterOf(db, 'H', U1)).accounts.find(a => a.vendor === 'gemini')
+  const five = acct.windows.find(x => x.name === 'five_hour'), week = acct.windows.find(x => x.name === 'weekly')
+  assert.equal(five.left_pct, 20, '被擋的 5 小時維持舊值')
+  assert.equal(week.left_pct, 0)
+  assert.equal(week.read_at, nw[1].read_at, '週窗照收，讀取時間往前走')
+})
