@@ -1,4 +1,4 @@
--- Gemini、MiniMax 同一期剩餘回升改走待確認（#1239）。
+-- Gemini、MiniMax 同一期剩餘回升改走待確認（#1261）。
 --
 -- 現況：同一期（重置時間差 10 分鐘內）剩餘回升（same_period_rise）一律拒收，只有 Gemini／MiniMax 記著 100% 才例外。
 -- 真實案例：Gemini 每週剩 0% 之後讀到 99%，同一個桶、同一期，結果一直被擋到重置為止。
@@ -40,7 +40,7 @@ begin
     return jsonb_build_object('reason', 'older_read', 'pending', p_pending);
   end if;
   v_reason := public.asn_relay_acct_window_judge(p_vendor, p_name, p_old, p_new, p_now);
-  -- Gemini、MiniMax 同一期剩餘回升（#1239）：新的讀取時間比已存的新才走待確認（缺讀取時間照舊直接拒收）。
+  -- Gemini、MiniMax 同一期剩餘回升（#1261）：新的讀取時間比已存的新才走待確認（缺讀取時間照舊直接拒收）。
   -- 同一個新值（重置時間差 10 分鐘內、剩餘與第一次看到的差 ±2% 以內）連續 3 次、第一次到這次至少隔 10 分鐘才收；
   -- 中間來了不同的值就重新計數。待確認期間已存的值不動。Claude、Codex 維持回升一律拒收。
   if p_vendor in ('gemini', 'minimax') and v_reason = 'same_period_rise'

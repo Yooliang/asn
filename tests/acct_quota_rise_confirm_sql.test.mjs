@@ -1,4 +1,4 @@
-// Gemini、MiniMax 同一期剩餘回升改走待確認（#1239，20261113000000_acct_quota_rise_confirm.sql）：
+// Gemini、MiniMax 同一期剩餘回升改走待確認（#1261，20261113000000_acct_quota_rise_confirm.sql）：
 // 1. 靜態：decide 除了明列的片段與 20261111200000 版逐字相同；回復檔換回上一版；只授權 service_role；沒有權杖類字樣、沒動資料表。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 confirm_sequences 全部（含 gemini、minimax、claude 的新序列）逐步跟預期一致；
@@ -32,7 +32,7 @@ test('靜態：decide 只改明列的片段；回復檔換回上一版；只授�
   assert.ok(files.indexOf(FILE) > files.indexOf('20261112100000_inbox_watch_per_agent.sql'), '編號要在 main 最新的之後')
   let d = body(mig, 'asn_relay_acct_window_decide')
   d = swap(d, '  v_count int := 1;\n  v_left int;\nbegin', '  v_count int := 1;\nbegin')
-  d = d.replace(/  -- Gemini、MiniMax 同一期剩餘回升（#1239）[\s\S]*?  end if;\n(?=  -- 只有 Claude 每週倍數不過)/, '')
+  d = d.replace(/  -- Gemini、MiniMax 同一期剩餘回升（#1261）[\s\S]*?  end if;\n(?=  -- 只有 Claude 每週倍數不過)/, '')
   assert.equal(d, body(prev, 'asn_relay_acct_window_decide'))
   assert.equal(body(down, 'asn_relay_acct_window_decide'), body(prev, 'asn_relay_acct_window_decide'))
   assert.ok(mig.includes(`revoke all on function public.${DECIDE} from public, anon, authenticated;`))

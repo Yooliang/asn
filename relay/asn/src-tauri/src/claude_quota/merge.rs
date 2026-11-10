@@ -27,7 +27,7 @@
 //!   第一次的時間」（`Pending`）；同一個新重置時間（相差 10 分鐘內）連續 3 次、且第一次到這次相隔至少 10 分鐘，才當成新的一期收下、換基準。
 //!   中間來了不同的重置時間（例如另一個視窗送別的帳號的數字）就重新計數；收進任何一次新值就清掉待確認。記著的還沒過期時倍數規則照擋。
 //!   只限 Claude 的每週那條；Codex、Gemini、5 小時那條沒有倍數檢查，不受影響。
-//! 同一期剩餘回升的確認（Gemini，#1239）：Gemini 同一期剩餘回升（例如 0% 回到 99%）原本一律拒收，會一直擋到重置為止；
+//! 同一期剩餘回升的確認（Gemini，#1261）：Gemini 同一期剩餘回升（例如 0% 回到 99%）原本一律拒收，會一直擋到重置為止；
 //!   現在改走待確認：同一個新值（差 ±2% 以內、重置時間差 10 分鐘內）連續 3 次、第一次到這次至少隔 10 分鐘才收下，待確認期間照舊顯示舊值。
 //!   `Pending` 多記一個 `pct`（第一次看到的剩餘 %）用來比 ±2%。Claude 與 Codex 維持現狀（回升一律不收）；MiniMax 客戶端沒有合併判斷，只有後台走這條。
 //! 判斷規則與後台共用一份案例（tests/fixtures/quota-merge-cases.json），不收的原因用同一組代碼（`Reject::code`）。
@@ -106,7 +106,7 @@ pub fn confirm_week(pend: Option<Pending>, new_reset: i64, now_ms: i64) -> (bool
     }
 }
 
-/// 同期剩餘回升時，這次的新值算不算確認了（#1239）：同一個新值（重置時間差 10 分鐘內、剩餘與第一次差 ±2% 以內）
+/// 同期剩餘回升時，這次的新值算不算確認了（#1261）：同一個新值（重置時間差 10 分鐘內、剩餘與第一次差 ±2% 以內）
 /// 連續 3 次、第一次到這次至少隔 10 分鐘才收；中間來了不同的值就重新計數。回 (收不收, 下一個待確認狀態)。
 pub fn confirm_rise(pend: Option<Pending>, new_reset: i64, new_pct: u8, now_ms: i64) -> (bool, Option<Pending>) {
     let same = |p: &Pending| (new_reset - p.reset_ms).abs() <= SAME_MS && p.pct.is_some_and(|q| q.abs_diff(new_pct) <= RISE_TOLERANCE_PCT);
@@ -206,7 +206,7 @@ fn merge_one(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new: Op
     let Some((pct, reset)) = new else { return (old, false, None, pend) };
     match judge_for(vendor, kind, old, pct, reset, now_ms) {
         Ok(()) => (Some((pct, reset)), true, None, None),
-        // Gemini 同期剩餘回升：走待確認，同一個新值連續 3 次、隔 10 分鐘才收（#1239）
+        // Gemini 同期剩餘回升：走待確認，同一個新值連續 3 次、隔 10 分鐘才收（#1261）
         Err(r) if r.code == "same_period_rise" && vendor == Vendor::Gemini => {
             let (ok, next) = confirm_rise(pend, reset.unwrap_or(0), pct, now_ms);
             if ok {

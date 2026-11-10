@@ -36,7 +36,7 @@ const BUCKET_WEEK: &str = "gemini-weekly";
 pub fn path(home: &Path) -> PathBuf {
     home.join(".asn").join(FILE)
 }
-/// 同期回升待確認的狀態檔（#1239）：`~/.asn/gemini-quota-state.json`，email → 兩條各自的待確認（重置時間、剩餘 %、次數、第一次的時間）。
+/// 同期回升待確認的狀態檔（#1261）：`~/.asn/gemini-quota-state.json`，email → 兩條各自的待確認（重置時間、剩餘 %、次數、第一次的時間）。
 /// 狀態列每次叫一次都是新行程，所以要存檔；壞掉或太大當空的，不影響記額度。最多 20 個帳號。
 pub fn state_path(home: &Path) -> PathBuf {
     home.join(".asn").join(STATE_FILE)
@@ -221,7 +221,7 @@ fn same_values(a: &Entry, b: &Entry) -> bool {
 pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let old = all.get(&r.email);
-    // 同期剩餘回升要同一個新值連續確認才收（#1239）：待確認狀態存檔，值沒變就不寫
+    // 同期剩餘回升要同一個新值連續確認才收（#1261）：待確認狀態存檔，值沒變就不寫
     let mut pends = pend_load(home);
     let cur = pends.get(&r.email).cloned().unwrap_or_default();
     let (cur_five, cur_week) = (cur.five.as_ref().and_then(pending_of), cur.week.as_ref().and_then(pending_of));
@@ -271,7 +271,7 @@ pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 寫一行說明到 log（不含時間的內容跟檔案最後一行一樣就不寫）。給 quota_readers 記「重複的額度桶」用（#1239）
+/// 寫一行說明到 log（不含時間的內容跟檔案最後一行一樣就不寫）。給 quota_readers 記「重複的額度桶」用（#1261）
 pub fn log_note(home: &Path, note: &str, now_ms: i64) {
     log_once(home, &[], &format!("{} {note}\n", iso_secs(now_ms)), now_ms);
 }

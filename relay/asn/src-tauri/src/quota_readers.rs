@@ -273,7 +273,7 @@ pub fn agy_statusline(stdout: &str, email: &str) -> Option<String> {
     agy_statusline_dups(stdout, email).map(|(line, _)| line)
 }
 
-/// 同 [`agy_statusline`]，另回「同一個群組裡 window 一樣的重複桶」的桶名（#1239）：同名的 window 只取第一個，後面的不蓋掉前面的。
+/// 同 [`agy_statusline`]，另回「同一個群組裡 window 一樣的重複桶」的桶名（#1261）：同名的 window 只取第一個，後面的不蓋掉前面的。
 /// 桶名只有 `gemini-5h`／`gemini-weekly` 兩種固定字串，不含數字。
 pub fn agy_statusline_dups(stdout: &str, email: &str) -> Option<(String, Vec<&'static str>)> {
     let v: Value = serde_json::from_str(stdout.trim_start_matches('\u{feff}').trim()).ok()?;

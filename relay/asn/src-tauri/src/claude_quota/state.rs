@@ -16,7 +16,7 @@ pub(crate) struct PendingRec {
     reset_at: String,
     count: u32,
     first_at: String,
-    /// 同期回升確認用的剩餘 %（#1239）；每週倍數確認沒有
+    /// 同期回升確認用的剩餘 %（#1261）；每週倍數確認沒有
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pct: Option<u8>,
 }

@@ -860,7 +860,7 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
     assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second);
 }
 
-// ---------- Gemini 同期剩餘回升的確認（#1239） ----------
+// ---------- Gemini 同期剩餘回升的確認（#1261） ----------
 #[test]
 fn 回升確認_次數_間隔_正負_2_的邊界() {
     let r = ms("2026-11-13T23:42:55Z");
