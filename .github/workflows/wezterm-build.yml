@@ -4,7 +4,8 @@ name: WezTerm 自建（20240203 正式版＋上游 #7706）
 # 打包成 Windows zip 與各 Linux 發行版 tar.xz，附 SHA256SUMS 與建置來源證明（artifact attestation）。
 #   - pull_request（只在這支 workflow 或它用的腳本變動時）：只建置與測試，不發佈。
 #   - workflow_dispatch：建置與測試；只有在 main 上手動觸發時，才會跑最後的「發佈」job。
-# 這一張只管建置與發佈，ASN 下載 WezTerm 的來源（wezterm-pins.json、fetch-wezterm.mjs、wezterm_fetch.rs）沒有動。
+# Windows 安裝檔附的 WezTerm 由 fetch-wezterm.mjs 從這裡發佈的 release 取得（wezterm-pins.json 的 windows_bundle）；Linux 按需下載（wezterm_fetch.rs）仍取上游。
+# release 一律建成預發行（--prerelease）：repo 沒有別的正式 release 時，光帶 --latest=false 仍會被 GitHub 當成 Latest。
 on:
   pull_request:
     paths:
@@ -353,7 +354,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --latest=false \
+          gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --latest=false --prerelease \
             --title "WezTerm ${UPSTREAM_TAG}（ASN 自建，${ASN_SUFFIX}）" \
             --notes "上游 WezTerm ${UPSTREAM_TAG} 加上上游 #7706 的修補，由 GitHub Actions 建置。來源、雜湊與驗證方式見 SOURCE.txt 與 SHA256SUMS；驗證：gh attestation verify <檔案> -R ${GITHUB_REPOSITORY}" \
             dist/*.tar.xz dist/WezTerm-windows-*.zip dist/SHA256SUMS dist/SOURCE.txt dist/LICENSE.md

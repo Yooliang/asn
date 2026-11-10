@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 import { buildLatestJson, installerName, installerUrl, parseArgs, patchDownloadLink, resolveNotes } from './release-lib.mjs'
+import { wezTermReady, wezTermReleaseGuard } from './fetch-wezterm.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
@@ -46,6 +47,10 @@ const run = (cmd, args, extra = {}) => {
 }
 const node = process.execPath
 
+// 發版與候選包都不准略過 WezTerm（在改版本號之前就擋）：略過會打包出沒有修補的舊 mux-server 或根本沒有 WezTerm
+const wezGuard = wezTermReleaseGuard(process.env)
+if (wezGuard) fail(wezGuard)
+
 // 打包前先過啟動冒煙測試（在改版本號之前；沒過就中止）
 if (!smokeGate({ root, skip: skipSmoke }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
 
@@ -61,7 +66,9 @@ if (newChangelog !== null) {
 }
 
 run(node, ['scripts/prep.mjs'])
-run(node, ['scripts/fetch-wezterm.mjs'])   // 內建終端機用的 WezTerm（固定版本、核對雜湊；ASN_SKIP_WEZTERM=1 可略過）
+// 內建終端機用的 WezTerm（ASN 自建、固定版本；先驗來源證明再驗雜湊）。打包前再核對一次資料夾內容就是這次取的那份
+run(node, ['scripts/fetch-wezterm.mjs'])
+if (!wezTermReady()) fail('resources/wezterm 不是這次取得的自建版 WezTerm（SOURCE.txt 與樣板不一致或缺檔），不打包')
 run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build', '--bundles', 'nsis'])
 
 const bundle = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis')

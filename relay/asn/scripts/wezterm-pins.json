@@ -6,6 +6,15 @@
   "license_sha256": "37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca",
   "windows_zip_sha256": "57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4",
   "windows_zip_size": 66162319,
+  "windows_bundle": {
+    "_comment": "Windows 安裝檔實際附的 WezTerm：本 repo 的 wezterm-build.yml 自建（上游 version 加上上游 #7706），fetch-wezterm.mjs 只從這裡取，先驗 attestation 再驗雜湊與大小，任何一項失敗就讓建置失敗，不退回上游。上面的 windows_zip_sha256／windows_zip_size 是上游官方壓縮檔，只給 CI 自建時核對現成檔用。",
+    "repo": "Yooliang/asn",
+    "tag": "wezterm-20240203-110809-5046fc22-asn.1",
+    "signer_workflow": "Yooliang/asn/.github/workflows/wezterm-build.yml",
+    "zip": "WezTerm-windows-20240203-110809-5046fc22-asn.1.zip",
+    "sha256": "c8f5be4b6926361dee969d2a66268fe680a6de0555b3686e41b461b3bf282716",
+    "size": 46647726
+  },
   "linux": {
     "ubuntu-22.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu22.04.tar.xz", "sha256": "142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c", "size": 30508792 },
     "ubuntu-20.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu20.04.tar.xz", "sha256": "1d15105d53cdd409e251034b35a9f2dec7146fad06e2b9642553b2b3e02ed224", "size": 30515256 },

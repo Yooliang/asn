@@ -2,7 +2,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { WEZTERM_FILES, WEZTERM_VERSION, WEZTERM_ZIP_SHA256, WEZTERM_LICENSE_SHA256, wezTermReady } from '../scripts/fetch-wezterm.mjs'
+import {
+  WEZTERM_FILES, WEZTERM_VERSION, WEZTERM_ZIP_SHA256, WEZTERM_ZIP_SIZE, WEZTERM_LICENSE_SHA256, WEZTERM_ZIP_URL,
+  WEZTERM_BUNDLE_TAG, WEZTERM_BUNDLE_REPO, WEZTERM_SIGNER_WORKFLOW, wezTermReady, verifyAttestation, checkBytes, wezTermReleaseGuard,
+} from '../scripts/fetch-wezterm.mjs'
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -12,6 +16,57 @@ test('版本與雜湊寫死：20240203 穩定版，雜湊是 64 位十六進位'
   assert.equal(WEZTERM_VERSION, '20240203-110809-5046fc22')
   assert.match(WEZTERM_ZIP_SHA256, /^[0-9a-f]{64}$/)
   assert.match(WEZTERM_LICENSE_SHA256, /^[0-9a-f]{64}$/)
+})
+
+test('Windows 附的是本 repo 自建的 release（上游同版本＋#7706），不是上游官方網址', () => {
+  assert.equal(WEZTERM_BUNDLE_REPO, 'Yooliang/asn')
+  assert.equal(WEZTERM_BUNDLE_TAG, `wezterm-${WEZTERM_VERSION}-asn.1`)
+  assert.equal(WEZTERM_SIGNER_WORKFLOW, 'Yooliang/asn/.github/workflows/wezterm-build.yml')
+  assert.equal(WEZTERM_ZIP_URL, `https://github.com/Yooliang/asn/releases/download/${WEZTERM_BUNDLE_TAG}/WezTerm-windows-${WEZTERM_VERSION}-asn.1.zip`)
+  assert.ok(Number.isInteger(WEZTERM_ZIP_SIZE) && WEZTERM_ZIP_SIZE > 0)
+  const src = read('scripts', 'fetch-wezterm.mjs')
+  assert.ok(!src.includes('github.com/wezterm/wezterm'), 'Windows 取檔不能再出現上游官方下載網址（不退回上游）')
+  assert.ok(!/ASN_SKIP_ATTEST|skipAttest/i.test(src), '不提供略過來源證明的開關')
+  // tag 與 workflow 的 RELEASE_TAG 一致
+  const wf = read('..', '..', '.github', 'workflows', 'wezterm-build.yml')
+  assert.match(wf, new RegExp(`RELEASE_TAG: '${WEZTERM_BUNDLE_TAG.replace(/\./g, '\\.')}'`))
+})
+
+test('先驗來源證明、綁本 repo＋wezterm-build.yml＋main；gh 不在或驗不過都丟錯', () => {
+  const calls = []
+  verifyAttestation('x.zip', (cmd, args) => { calls.push([cmd, args]); return { status: 0 } })
+  assert.deepEqual(calls, [['gh', ['attestation', 'verify', 'x.zip', '--repo', 'Yooliang/asn', '--signer-workflow', WEZTERM_SIGNER_WORKFLOW, '--source-ref', 'refs/heads/main']]])
+  assert.throws(() => verifyAttestation('x.zip', () => ({ status: 1, stderr: 'no attestations' })), /來源證明驗不過/)
+  assert.throws(() => verifyAttestation('x.zip', () => ({ error: new Error('ENOENT') })), /需要 gh CLI/)
+  const src = read('scripts', 'fetch-wezterm.mjs')
+  const body = src.slice(src.indexOf('export async function fetchWezTerm'))
+  assert.ok(body.indexOf('verifyAttestation(zipPath)') < body.indexOf('checkBytes(fs.readFileSync(zipPath)'), '先驗來源證明再驗雜湊')
+  assert.ok(body.indexOf('checkBytes(fs.readFileSync(zipPath)') < body.indexOf("spawnSync(sysTar"), '兩項都過才解壓縮')
+  assert.match(body, /catch \(e\) \{ fs\.rmSync\(zipPath, \{ force: true \}\); throw e \}/, '驗不過要刪快取並讓建置失敗')
+})
+
+test('ASN_SKIP_WEZTERM：取檔腳本略過時清空 resources/wezterm；發版看到這個變數（任何值）就失敗，打包前還要核對 SOURCE.txt', () => {
+  const src = read('scripts', 'fetch-wezterm.mjs')
+  const skip = src.slice(src.indexOf("if (process.env.ASN_SKIP_WEZTERM === '1')"), src.indexOf("if (process.platform !== 'win32')"))
+  assert.ok(skip.indexOf('fs.rmSync(outDir') >= 0 && skip.indexOf('fs.rmSync(outDir') < skip.indexOf('return false'), '略過前先清空資料夾')
+  assert.equal(wezTermReleaseGuard({}), null)
+  for (const v of ['1', '0', '']) assert.match(wezTermReleaseGuard({ ASN_SKIP_WEZTERM: v }), /不能略過 WezTerm/)
+  const rel = read('scripts', 'release.mjs')
+  const iGuard = rel.indexOf('wezTermReleaseGuard(process.env)')
+  const iBump = rel.indexOf("run(node, ['scripts/bump.mjs'])")
+  const iFetch = rel.indexOf("run(node, ['scripts/fetch-wezterm.mjs'])")
+  const iReady = rel.indexOf('if (!wezTermReady())')
+  const iBuild = rel.indexOf("'build', '--bundles', 'nsis'")
+  assert.ok(iGuard >= 0 && iGuard < iBump, '改版本號之前就擋')
+  assert.ok(iFetch >= 0 && iFetch < iReady && iReady < iBuild, '取檔後、打包前核對 SOURCE.txt')
+})
+
+test('雜湊與大小核對：任一項不符都丟錯', () => {
+  const b = Buffer.from('abc')
+  const h = crypto.createHash('sha256').update(b).digest('hex')
+  checkBytes(b, h, 3, 't')
+  assert.throws(() => checkBytes(b, h, 4, 't'), /大小不符/)
+  assert.throws(() => checkBytes(b, '0'.repeat(64), 3, 't'), /雜湊不符/)
 })
 
 test('只附 7 個必要檔（含 mux-server；不附除錯檔、mesa 軟體算圖），加上授權與來源說明', () => {
@@ -83,6 +138,13 @@ test('建置占位：沒取過時先放空檔讓 Tauri 建置過得去，但空�
     for (const f of [...WEZTERM_FILES, 'LICENSE.md', 'SOURCE.txt']) fs.writeFileSync(path.join(d, f), '')
     assert.equal(wezTermReady(d), false, '全是空檔＝占位，不算就緒')
     for (const f of [...WEZTERM_FILES, 'LICENSE.md', 'SOURCE.txt']) fs.writeFileSync(path.join(d, f), 'x')
+    assert.equal(wezTermReady(d), false, 'SOURCE.txt 不是這次自建版的內容（例如舊建置留下的上游官方版）＝不算就緒，會重新取得')
+    const src = read('scripts', 'fetch-wezterm.mjs')
+    const sourceText = src.match(/const SOURCE_TEXT = `([^`]*)`/)[1]
+      .replace(/\$\{WEZTERM_VERSION\}/g, WEZTERM_VERSION).replace(/\$\{WEZTERM_ZIP_URL\}/g, WEZTERM_ZIP_URL)
+      .replace(/\$\{WEZTERM_ZIP_SHA256\}/g, WEZTERM_ZIP_SHA256).replace(/\$\{WEZTERM_BUNDLE_REPO\}/g, WEZTERM_BUNDLE_REPO)
+      .replace(/\$\{WEZTERM_SIGNER_WORKFLOW\}/g, WEZTERM_SIGNER_WORKFLOW)
+    fs.writeFileSync(path.join(d, 'SOURCE.txt'), sourceText)
     assert.equal(wezTermReady(d), true)
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
