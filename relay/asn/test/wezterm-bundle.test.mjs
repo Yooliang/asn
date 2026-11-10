@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
   WEZTERM_FILES, WEZTERM_VERSION, WEZTERM_ZIP_SHA256, WEZTERM_ZIP_SIZE, WEZTERM_LICENSE_SHA256, WEZTERM_ZIP_URL,
-  WEZTERM_BUNDLE_TAG, WEZTERM_BUNDLE_REPO, WEZTERM_SIGNER_WORKFLOW, wezTermReady, verifyAttestation, checkBytes,
+  WEZTERM_BUNDLE_TAG, WEZTERM_BUNDLE_REPO, WEZTERM_SIGNER_WORKFLOW, wezTermReady, verifyAttestation, checkBytes, wezTermReleaseGuard,
 } from '../scripts/fetch-wezterm.mjs'
 import crypto from 'node:crypto'
 import os from 'node:os'
@@ -43,6 +43,22 @@ test('先驗來源證明、綁本 repo＋wezterm-build.yml＋main；gh 不在或
   assert.ok(body.indexOf('verifyAttestation(zipPath)') < body.indexOf('checkBytes(fs.readFileSync(zipPath)'), '先驗來源證明再驗雜湊')
   assert.ok(body.indexOf('checkBytes(fs.readFileSync(zipPath)') < body.indexOf("spawnSync(sysTar"), '兩項都過才解壓縮')
   assert.match(body, /catch \(e\) \{ fs\.rmSync\(zipPath, \{ force: true \}\); throw e \}/, '驗不過要刪快取並讓建置失敗')
+})
+
+test('ASN_SKIP_WEZTERM：取檔腳本略過時清空 resources/wezterm；發版看到這個變數（任何值）就失敗，打包前還要核對 SOURCE.txt', () => {
+  const src = read('scripts', 'fetch-wezterm.mjs')
+  const skip = src.slice(src.indexOf("if (process.env.ASN_SKIP_WEZTERM === '1')"), src.indexOf("if (process.platform !== 'win32')"))
+  assert.ok(skip.indexOf('fs.rmSync(outDir') >= 0 && skip.indexOf('fs.rmSync(outDir') < skip.indexOf('return false'), '略過前先清空資料夾')
+  assert.equal(wezTermReleaseGuard({}), null)
+  for (const v of ['1', '0', '']) assert.match(wezTermReleaseGuard({ ASN_SKIP_WEZTERM: v }), /不能略過 WezTerm/)
+  const rel = read('scripts', 'release.mjs')
+  const iGuard = rel.indexOf('wezTermReleaseGuard(process.env)')
+  const iBump = rel.indexOf("run(node, ['scripts/bump.mjs'])")
+  const iFetch = rel.indexOf("run(node, ['scripts/fetch-wezterm.mjs'])")
+  const iReady = rel.indexOf('if (!wezTermReady())')
+  const iBuild = rel.indexOf("'build', '--bundles', 'nsis'")
+  assert.ok(iGuard >= 0 && iGuard < iBump, '改版本號之前就擋')
+  assert.ok(iFetch >= 0 && iFetch < iReady && iReady < iBuild, '取檔後、打包前核對 SOURCE.txt')
 })
 
 test('雜湊與大小核對：任一項不符都丟錯', () => {

@@ -1,7 +1,7 @@
 // 把 ASN 自建的 WezTerm（固定版本，見 wezterm-pins.json 的 windows_bundle）取下來，只留 ASN 用得到的 7 個檔，放進 src-tauri/resources/wezterm/，
 // 讓 Tauri 隨 Windows 安裝檔一起打包（內建終端機用；裝好後在安裝資料夾的 wezterm 底下，ASN 預設從那裡找）。
 //   node scripts/fetch-wezterm.mjs           下載（有快取就用快取）→ 驗建置來源證明（attestation）→ 核對雜湊與大小 → 解出 7 個檔與授權文字
-//   ASN_SKIP_WEZTERM=1                       略過（不打包 WezTerm；例如只想快速試別的）
+//   ASN_SKIP_WEZTERM=1                       略過（不打包 WezTerm；例如只想快速試別的）。會清空 resources/wezterm；發版（release.mjs）不准略過
 // 來源是本 repo 的 wezterm-build.yml 建出來的 release（上游 20240203 加上上游 #7706，修 mux-server 的堆疊溢位）。
 // 來源證明、雜湊、大小任何一項不符都讓建置失敗，不退回上游官方版。驗來源證明要用 gh CLI（發版機本來就有）。只在 Windows 上做。
 import crypto from 'node:crypto'
@@ -49,6 +49,13 @@ export function wezTermReady(dir = outDir) {   // 空檔（建置時的占位）
   return filled && sourceMatches(dir)
 }
 
+/** 發版用：環境裡只要有 ASN_SKIP_WEZTERM（不管值是什麼，例如從舊環境繼承下來）就不准發版。回傳錯誤訊息，沒問題回 null */
+export function wezTermReleaseGuard(env) {
+  return env.ASN_SKIP_WEZTERM !== undefined
+    ? `環境裡有 ASN_SKIP_WEZTERM（值：${JSON.stringify(env.ASN_SKIP_WEZTERM)}）：發版與候選包不能略過 WezTerm，請先清掉這個環境變數`
+    : null
+}
+
 export function checkBytes(buf, want, wantSize, label) {
   if (wantSize != null && buf.length !== wantSize) throw new Error(`大小不符：${label}\n  預期 ${wantSize}\n  實得 ${buf.length}`)
   const got = sha256(buf)
@@ -70,7 +77,12 @@ async function download(url) {
 }
 
 export async function fetchWezTerm() {
-  if (process.env.ASN_SKIP_WEZTERM === '1') { console.log('略過 WezTerm（ASN_SKIP_WEZTERM=1）'); return false }
+  if (process.env.ASN_SKIP_WEZTERM === '1') {
+    // 略過時一定清空：不能讓舊的檔（例如上游官方版的 mux-server）留在 resources 裡被打包
+    fs.rmSync(outDir, { recursive: true, force: true })
+    console.log('略過 WezTerm（ASN_SKIP_WEZTERM=1），已清空 resources/wezterm；這樣建出來的安裝檔不含 WezTerm，不能拿來發版')
+    return false
+  }
   if (process.platform !== 'win32') { console.log('非 Windows，不附 WezTerm'); return false }
   if (wezTermReady()) { console.log('WezTerm 已就緒（沿用）'); return true }
   fs.mkdirSync(cacheDir, { recursive: true })
