@@ -11,7 +11,7 @@ import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { NOTICE_ID, isLegacyNoticeFriend, isMergedAway, isNoticeFriend, isSystemNotice, noticeFriend } from './notice.mjs'
+import { NOTICE_ID, isLegacyNoticeFriend, isMergedAway, isNoticeFriend, isNoticeKind, isSystemNotice, noticeFriend } from './notice.mjs'
 import { UNNAMED_DEVICE, hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { friendlySendError } from './display-only.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
@@ -408,7 +408,7 @@ export class AsnCore {
     const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
     // 沒指定收件視窗、由橋交給本人的信：先標出「XX 寄來的信沒有指定收件人」，由使用者決定轉給誰或自己回；震動信一律只顯示「傳送了一個震動」，不加這行
     if (shown && !nudge && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} 寄來的信沒有指定收件人`, t })
-    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(asNotice ? { dev: this.#deviceNameOf(m) } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(asNotice ? { dev: this.#deviceNameOf(m), ...(isNoticeKind(m.kind) ? { kind: m.kind.slice(0, 64) } : {}) } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
     const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)

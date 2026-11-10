@@ -5,13 +5,15 @@ import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 
-// 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
+// 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）。
+// 「通知」排第一（方案 A）：系統通知不再出現在名單與對話分頁，只在這個頁籤看（像手機的第四格）
 export const FIXED_TABS = [
+  { key: 'notice', label: '通知' },
   { key: 'groups', label: '群組' },
   { key: 'guide', label: '指引' },
   { key: 'settings', label: '設定' },
 ]
-// 名單頁籤的鍵：舊存檔／設定若寫著已拿掉的頁籤（例如通知）或任何不認得的值，一律當沒有，退回名單第一頁
+// 名單頁籤的鍵：舊存檔／設定若寫著已拿掉的頁籤（例如舊版的通知紀錄頁籤）或任何不認得的值，一律當沒有，退回名單第一頁
 export const normalizeTab = (key, validKeys = []) => (FIXED_TABS.some(t => t.key === key) || validKeys.includes(key) ? key : '')
 export const DEVICE_TAB_MAX = 6   // 設備頁籤超過 6 個時，第 6 個起收進「更多」
 export const MORE_KEY = 'more'
