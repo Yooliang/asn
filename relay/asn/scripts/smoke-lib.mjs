@@ -928,6 +928,9 @@ export const MTERMVIEW_PROBES = {
   late: { mtermview: true, gate: 'late' },
   // 停在對話畫面截圖：看切換鈕在這排最後面、寫「終端」、沒有選中樣式（小良哥 11-10）
   toggle: { mtermview: true, big: false, stayChat: true },
+  // 看終端時輸入框要照樣在最下面（小良哥 11-10）；kb＝鍵盤開著（視窗高度縮小、輸入框取得焦點）
+  composer: { mtermview: true, composer: true, kb: false },
+  composerKb: { mtermview: true, composer: true, kb: true },
 }
 export const MTERMVIEW_TEXT = [
   'Claude Code v2.1.0  Opus  ~/demo',
@@ -965,7 +968,74 @@ export const mpermreqProbeSource = () => `(async () => {
   return { ok: true, why: '' };
 })()`
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
-export const mtermviewProbeSource = ({ big, gate, stayChat, cursor }) => cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
+// 看終端時輸入框要在：可見、可聚焦、在畫面內；終端區的底不超過輸入框的頂（不重疊）；不橫向溢出；切回對話也正常
+export const mtermComposerProbeSource = ({ kb }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  let sw = null;
+  for (let i = 0; i < 80 && !sw; i++) { sw = document.querySelector('.m-term-switch'); if (!sw) await sleep(100) }
+  if (!sw) return { ok: false, why: '對話頁沒有「對話／終端」切換鈕' };
+  const H = window.innerHeight, W = window.innerWidth;
+  sw.click();
+  let rows = '';
+  for (let i = 0; i < 80 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
+  if (!rows.includes('測試通過')) return { ok: false, why: '終端畫面沒有出現假畫面的字' };
+  await sleep(300);
+  const ta = document.querySelector('.m-chat .composer textarea');
+  const form = document.querySelector('.m-chat .composer');
+  if (!vis(ta) || !vis(form)) return { ok: false, why: '看終端時輸入框被藏起來了' };
+  if (${kb ? 'true' : 'false'}) { ta.focus(); await sleep(300) }
+  const check = (tag) => {
+    const f = form.getBoundingClientRect(), t = ta.getBoundingClientRect();
+    const term = document.querySelector('.m-chat .term-remote').getBoundingClientRect();
+    if (!(f.height > 20 && t.height > 20)) return tag + '輸入框高度太小：' + Math.round(t.height);
+    if (f.top < -0.5 || f.bottom > window.innerHeight + 0.5 || f.left < -0.5 || f.right > window.innerWidth + 0.5) return tag + '輸入框跑出畫面：' + [f.left, f.top, f.right, f.bottom].map(Math.round).join(',') + ' / ' + window.innerWidth + 'x' + window.innerHeight;
+    if (!(term.height > 40)) return tag + '終端區被擠扁：' + Math.round(term.height);
+    if (term.bottom > f.top + 0.5) return tag + '終端區蓋到輸入框：終端底 ' + Math.round(term.bottom) + ' > 輸入框頂 ' + Math.round(f.top);
+    if (term.top < -0.5) return tag + '終端區頂端跑出畫面：' + Math.round(term.top);
+    const s = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect();
+    if (s.bottom > f.top + 0.5) return tag + '終端畫面溢出到輸入框：' + Math.round(s.bottom) + ' > ' + Math.round(f.top);
+    if (document.documentElement.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1) return tag + '整頁橫向溢出';
+    if (document.documentElement.scrollHeight > window.innerHeight + 1) return tag + '整頁縱向溢出：' + document.documentElement.scrollHeight + ' > ' + window.innerHeight;
+    const sr = sw.getBoundingClientRect();
+    if (sr.right > window.innerWidth + 0.5 || sr.left < -0.5 || sr.bottom > window.innerHeight + 0.5) return tag + '切換鈕跑出畫面';
+    return '';
+  };
+  let bad = check('看終端：');
+  if (bad) return { ok: false, why: bad };
+  ta.focus();
+  if (document.activeElement !== ta) return { ok: false, why: '輸入框無法取得焦點' };
+  const stopSend = e => { e.preventDefault() };
+  form.addEventListener('submit', stopSend);
+  const setVal = v => { ta.value = v; ta.dispatchEvent(new Event('input', { bubbles: true })) };
+  setVal('你好');
+  await sleep(100);
+  if (ta.value !== '你好') return { ok: false, why: '輸入框打不了字' };
+  const btn = form.querySelector('button[type=submit]');
+  if (!btn || btn.disabled) return { ok: false, why: '打了字之後傳送鈕沒有啟用' };
+  setVal('');
+  form.removeEventListener('submit', stopSend);
+  await sleep(100);
+  bad = check('打字後：');
+  if (bad) return { ok: false, why: bad };
+  // 切回對話：訊息列表回來、輸入框仍在、不溢出
+  sw.click();
+  await sleep(500);
+  if (!vis(document.querySelector('.m-chat .conv'))) return { ok: false, why: '切回對話後訊息列表沒回來' };
+  if (!vis(ta)) return { ok: false, why: '切回對話後輸入框不見了' };
+  const f2 = form.getBoundingClientRect();
+  if (f2.bottom > window.innerHeight + 0.5 || document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '切回對話後版面跑掉' };
+  // 再切到終端，讓截圖停在終端畫面
+  sw.click();
+  rows = '';
+  for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
+  if (${kb ? 'true' : 'false'}) ta.focus();
+  await sleep(300);
+  bad = check('再切到終端：');
+  if (bad) return { ok: false, why: bad };
+  return { ok: true, why: '' };
+})()`
+export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb }) => composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => e && e.offsetParent !== null;
   let sw = null;
@@ -1020,12 +1090,12 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor }) => cursor 
   if (!lastInRow()) return { ok: false, why: '看終端時切換鈕應該還在這排最後面' };
   // 終端至少半個螢幕高（橫向 412 高時曾被擠成 0）；「正在看」縮成一行；輸入框收起、切換圖示仍在畫面內
   const th = document.querySelector('.m-chat .term-remote').getBoundingClientRect().height;
-  if (!(th > 0) || th < window.innerHeight * 0.5 - 1) return { ok: false, why: '終端高度不到半個螢幕：' + Math.round(th) + ' / ' + window.innerHeight };
+  if (!(th > 0) || th < window.innerHeight * 0.4 - 1) return { ok: false, why: '終端高度不到螢幕的四成（輸入框回來後橫向 412 高約 46%）：' + Math.round(th) + ' / ' + window.innerHeight };
   const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
   if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
   const bs = getComputedStyle(bar);
   if (bar.getBoundingClientRect().height > parseFloat(bs.lineHeight) * 1.5 + 2) return { ok: false, why: '「正在看」那行沒有縮成一行' };
-  if (vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該收起' };
+  if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（小良哥 11-10）' };
   if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「對話」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
   sw.click();
@@ -1139,6 +1209,11 @@ export const SCENARIOS = [
   // 對話／終端合成一顆、放在最後面（小良哥 11-10）：停在對話畫面截圖，412、360 兩種寬度
   { name: 'm-term-toggle', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.toggle, shot: 'm-term-toggle-412.png' },
   { name: 'm-term-toggle-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.toggle, shot: 'm-term-toggle-360.png' },
+  // 看終端時輸入框照樣在最下面、終端縮到它上面不重疊；412、360 寬各兩種：鍵盤收著（高 800）、鍵盤開著（高 420、輸入框聚焦）
+  { name: 'm-term-composer', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composer, shot: 'm-term-composer-412.png' },
+  { name: 'm-term-composer-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composer, shot: 'm-term-composer-360.png' },
+  { name: 'm-term-composer-kb', page: 'm.html', height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composerKb, shot: 'm-term-composer-kb-412.png' },
+  { name: 'm-term-composer-kb-360', page: 'm.html', width: 360, height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composerKb, shot: 'm-term-composer-kb-360.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
