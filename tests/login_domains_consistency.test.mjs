@@ -26,7 +26,7 @@ test('清單本身：兩組都非空、沒有重複、都是小寫主機', () =>
 
 test('SQL：最新一支規則 migration 的約束與函式，都等於清單產生的規則', () => {
   const f = latestRuleMigration()
-  assert.equal(f, '20261112200000_setup_device_login.sql')
+  assert.equal(f, '20261112400000_setup_device_login.sql')
   assert.equal(rd(`supabase/migrations/${f}`).split(SQL_RULE).length - 1, 2)
 })
 

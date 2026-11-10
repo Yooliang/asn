@@ -16,7 +16,7 @@
 --   asn_relay_secret_request_link：與原本相同，只換網址規則
 -- 全部 set search_path to ''，只授權 service_role。
 -- 部署順序：本 migration → Edge（relay、account）→ 發新版 ASN。舊版 Edge 呼叫兩參數的 asn_setup_request（具名參數），解析到新函式的預設值，行為不變。
--- 回復：supabase/sql/rollback/20261112200000_setup_device_login_down.sql。
+-- 回復：supabase/sql/rollback/20261112400000_setup_device_login_down.sql。
 begin;
 
 -- 1. 官方登入網址白名單（和 _shared/login_domains.json 一致）
