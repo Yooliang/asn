@@ -2,6 +2,7 @@
 // xterm 也關掉輸入（disableStdin）。畫面內容在 Rust 端解密、擋重放、再過濾過才送來；xterm 只寫入，不解析連結。
 // 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
+import { installWideChars } from './term-width.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 // 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
@@ -51,6 +52,7 @@ export async function openTerm(Terminal, options, hostRef, tick, alive) {
     const el = hostRef.value
     if (el && el.isConnected !== false) {
       const term = new Terminal(options)
+      installWideChars(term)
       term.attachCustomWheelEventHandler(() => false)
       term.open(el)
       return term
@@ -113,6 +115,9 @@ export const RemoteView = {
         const offF = await listenWhile(props.api, FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'watching') phase.value = 'watching'
+          // 窗格的欄、列數和畫面不一樣就跟著改（#903）：游標列是窗格內的列號，xterm 的列數不同時最後一列會落在別處
+          const c = Number(f.meta?.cols), r = Number(f.meta?.rows)
+          if (Number.isInteger(c) && Number.isInteger(r) && c > 0 && r > 0 && (term.cols !== c || term.rows !== r) && typeof term.resize === 'function') term.resize(c, r)
           term.write(frameToWrite(f))
         }, wanted)
         if (!offF) return

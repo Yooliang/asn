@@ -918,7 +918,9 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
 })()`
 // ---- 手機看別台電腦夥伴的終端（PR④，只能看）：對話頁頂端「訊息／終端」切換 ----
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
+import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
 export const MTERMVIEW_PROBES = {
+  cursor: { mtermview: true, cursor: true },
   base: { mtermview: true, big: false },
   big: { mtermview: true, big: true },
   cancel: { mtermview: true, gate: 'cancel' },
@@ -963,7 +965,7 @@ export const mpermreqProbeSource = () => `(async () => {
   return { ok: true, why: '' };
 })()`
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
-export const mtermviewProbeSource = ({ big, gate, stayChat }) => gate ? mtermviewGateProbeSource(gate) : `(async () => {
+export const mtermviewProbeSource = ({ big, gate, stayChat, cursor }) => cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => e && e.offsetParent !== null;
   let sw = null;
@@ -1127,6 +1129,8 @@ export const SCENARIOS = [
   { name: 'm-perm-rules', page: 'm.html', state: { signedIn: true, mpermreq: true }, ready: '#app.m .m-pager .m-search', probe: { mpermreq: true }, shot: 'm-perm-rules-412.png' },
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
+  { name: 'm-term-cursor', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cursor, shot: 'm-term-cursor-412.png' },
+  { name: 'm-term-cursor-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cursor, shot: 'm-term-cursor-360.png' },
   { name: 'm-term-view-big', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.big, shot: 'm-term-view-big.png' },
   { name: 'm-term-view-land', page: 'm.html', width: 915, height: 412, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-land.png' },
   { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
