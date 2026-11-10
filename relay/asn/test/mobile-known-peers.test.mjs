@@ -152,3 +152,16 @@ test('Rust：金鑰變了的說法帶原本與新的完整指紋、名字用本�
   const rs = read('../src-tauri/src/android.rs')
   assert.doesNotMatch(rs, /Scope::Input/)
 })
+
+test('兩端給人核對的指紋一樣：電腦版設定頁回完整 16 碼，手機與電腦都每 4 個一組顯示', async () => {
+  const lib = read('../src-tauri/src/lib.rs')
+  const own = lib.slice(lib.indexOf('async fn device_own_fingerprint('), lib.indexOf('async fn device_own_fingerprint(') + 400)
+  assert.match(own, /device_id::fingerprint\(&k\.public_b64\(\)\)/, '電腦版回完整指紋')
+  assert.doesNotMatch(own.split('\n}')[0], /fp8\(/, '不是只有前 8 碼')
+  const desk = await import('../ui/lib/known-peers.mjs')
+  for (const fp of ['0123456789abcdef', 'a93cc5191f2e3b4d']) {
+    assert.equal(desk.groupFp(fp), groupFp(fp), '兩端分組寫法一樣')
+    assert.equal(groupFp(fp).replace(/ /g, ''), fp, '顯示的是完整 16 碼')
+    assert.equal(desk.TEXT.ownFp(fp), `這台電腦的指紋：${groupFp(fp)}`)
+  }
+})
