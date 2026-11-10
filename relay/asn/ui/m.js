@@ -216,6 +216,12 @@ if (screen.value === 'main') {
 savedTab = restoreMobileTab(saved.navTab)
 watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? (fourthSt.fourth ? fourthSt.fourth.from : PAGE_TAB) : nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
+  // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent（網頁被凍住前最可靠的一次），
+  // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）
+  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}) }
+  window.__asnFgEvent = tellFg
+  document.addEventListener('visibilitychange', () => tellFg(document.visibilityState === 'visible'))
+  tellFg(document.visibilityState === 'visible')
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,

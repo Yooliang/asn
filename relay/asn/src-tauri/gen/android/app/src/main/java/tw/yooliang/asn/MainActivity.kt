@@ -24,6 +24,12 @@ class MainActivity : TauriActivity() {
     val w = webView ?: return
     w.post { w.evaluateJavascript("window.__asnPushEvent && window.__asnPushEvent(${org.json.JSONObject.quote(json)})", null) }
   }
+
+  /** 告知網頁 App 進前景（true）或進背景（false）：網頁再交給 Rust，在線回報立刻帶 foreground（#1281，推播只看前景）。網頁不在就略過 */
+  private fun fgEvent(fg: Boolean) {
+    val w = webView ?: return
+    w.post { w.evaluateJavascript("window.__asnFgEvent && window.__asnFgEvent($fg)", null) }
+  }
   val callVoice: CallVoice by lazy { CallVoice(this) }
 
   // 麥克風權限的回答（通話第一次使用時才問）
@@ -45,7 +51,13 @@ class MainActivity : TauriActivity() {
   // 螢幕關閉或切到其他程式：通話自動結束（麥克風不留著）
   override fun onStop() {
     callVoice.onBackground()
+    fgEvent(false)   // 進背景那一刻就送一次；網頁很快會被系統凍住，不能等下一輪 60 秒
     super.onStop()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    fgEvent(true)    // 回前景也立刻送一次
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {

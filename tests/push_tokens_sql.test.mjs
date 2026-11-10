@@ -63,8 +63,9 @@ async function rpc(db, fn, args = {}) {
 }
 const reg = (db, node, token = TOK) => rpc(db, 'asn_relay_push_register', { p_node: node, p_token: token })
 const targets = (db, kind = 'owner_mail', user = U1) => rpc(db, 'asn_relay_push_targets', { p_user: user, p_kind: kind })
-const seen = (db, node, ago) => db.query(`insert into relay.asn_presence(node, window_name, version, status, updated_at) values ($1, 'ASN', '0.2.11', 'online', now() - $2::interval)
-  on conflict (node, window_name) do update set updated_at = excluded.updated_at`, [node, ago])
+// 在線列：fg_at 與 updated_at 同時間（等同 App 在前景回報；#1281 起推播判斷看 fg_at）
+const seen = (db, node, ago) => db.query(`insert into relay.asn_presence(node, window_name, version, status, updated_at, fg_at) values ($1, 'ASN', '0.2.11', 'online', now() - $2::interval, now() - $2::interval)
+  on conflict (node, window_name) do update set updated_at = excluded.updated_at, fg_at = excluded.fg_at`, [node, ago])
 const tokens = async db => (await db.query('select node, token from relay.push_tokens order by node')).rows
 const ageSent = (db, node, ago) => db.query(`update relay.push_tokens set last_sent_at = now() - $2::interval where node = $1`, [node, ago])
 
