@@ -116,8 +116,9 @@ impl Watch {
             self.lost.clear();
         }
         let prev = self.seen.clone();
-        // 這一輪看到的：mux 活著而且裡面有夥伴才值得記（沒有夥伴，不見了也沒有誰要通知）
-        let current = o.live.filter(|_| !o.partners.is_empty()).map(|mux| Seen { mux, partners: o.partners.clone(), at: now });
+        // 這一輪看到的：mux 活著就記，裡面沒有夥伴也記（11-10 30家用：服務崩潰後一直沒有任何訊號）。
+        // 沒有夥伴的那種事故不接回，只寫紀錄、發一次通知；正常結束（結束碼 0）由呼叫端略過
+        let current = o.live.map(|mux| Seen { mux, partners: o.partners.clone(), at: now });
         let Some(p) = prev else {
             self.suspect = false;
             self.seen = current;
@@ -145,7 +146,8 @@ impl Watch {
         if o.stopped.is_some_and(|(pid, at)| pid == p.mux.0 && at.saturating_add(5_000) >= p.at) {
             return None;
         }
-        let resume = self.last_resume_at.is_none_or(|t| now.saturating_sub(t) >= RESUME_GAP_MS);
+        // 沒有夥伴就沒有東西要接回，也不佔「十分鐘一次」的接回額度
+        let resume = !p.partners.is_empty() && self.last_resume_at.is_none_or(|t| now.saturating_sub(t) >= RESUME_GAP_MS);
         if resume {
             self.last_resume_at = Some(now);
         }
@@ -204,7 +206,8 @@ pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
     if work_dir.as_os_str().is_empty() {
         return;
     }
-    let body = serde_json::json!({ "count": count.clamp(1, NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
+    // 0＝服務裡沒有夥伴（只通知服務停了）
+    let body = serde_json::json!({ "count": count.min(NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
     let tmp = work_dir.join(format!("{NOTICE_FILE}.tmp"));
     if std::fs::write(&tmp, body.to_string()).is_ok() {
         let _ = std::fs::rename(&tmp, work_dir.join(NOTICE_FILE));
@@ -224,7 +227,7 @@ pub fn read_notice(work_dir: &Path) -> Option<(usize, bool, u64)> {
     };
     let count = v.get("count").and_then(serde_json::Value::as_u64)? as usize;
     let resumed = v.get("resumed").and_then(serde_json::Value::as_bool)?;
-    Some((count.clamp(1, NOTICE_MAX_COUNT), resumed, v.get("at").and_then(serde_json::Value::as_u64).unwrap_or(0)))
+    Some((count.min(NOTICE_MAX_COUNT), resumed, v.get("at").and_then(serde_json::Value::as_u64).unwrap_or(0)))
 }
 
 pub fn clear_notice(work_dir: &Path) {
@@ -300,6 +303,11 @@ pub fn open_process(_pid: u32) -> Option<Box<dyn ProcHandle>> {
     None
 }
 
+/// 裡面沒有夥伴、而且結束碼是 0（正常結束）：不算事故（純函式）
+pub fn empty_normal_exit(inc: &Incident, reason: &str) -> bool {
+    inc.partners.is_empty() && reason == exit_text(Some(0))
+}
+
 /// 結束碼的白話（純函式）
 pub fn exit_text(code: Option<u32>) -> String {
     const STILL_ACTIVE: u32 = 259;
@@ -331,7 +339,11 @@ pub fn taipei_hms(ms: u64) -> String {
 
 /// 事故紀錄那一行（純函式）。前半和以前一字不差，後面只是多附的資訊
 pub fn incident_line(inc: &Incident, reason: &str, last_alive_ms: Option<u64>, uptime_secs: u64, event: Option<&str>) -> String {
-    let head = format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" });
+    let head = if inc.partners.is_empty() {
+        "終端服務停了：裡面沒有夥伴，不用接回".to_string()
+    } else {
+        format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" })
+    };
     let alive = match last_alive_ms {
         Some(t) => format!("最後看到它活著是 {}（台北）", taipei_hms(t)),
         None => "最後看到它活著的時間不明".to_string(),
@@ -613,12 +625,19 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             tracker.observe(&o, now, &open_process);
             if let Some(inc) = incident {
                 let (reason, last_alive, event) = info.unwrap_or_default();
+                // 裡面沒有夥伴、而且是正常結束（結束碼 0）：不是事故，不寫紀錄、不通知
+                if empty_normal_exit(&inc, &reason) {
+                    continue;
+                }
                 let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs(), event.as_deref());
                 elog!("{line}");
                 if let Some(base) = super::mux::default_base() {
                     super::mux::note(&base.join("ASN").join("m"), &line);
                 }
                 queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
+                if inc.partners.is_empty() {
+                    continue;
+                }
                 let (wd, dd, partners, resume) = (work_dir.clone(), data_dir.clone(), inc.partners, inc.resume);
                 if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
                     elog!("接回夥伴的背景工作開不了（不影響監看）");
@@ -711,17 +730,43 @@ mod tests {
     }
 
     #[test]
-    fn 沒有夥伴或夥伴自己關光_mux_不見了也不報() {
+    fn 沒有夥伴的服務不見了_也算一次事故_不接回也不佔接回額度() {
+        let empty = Incident { partners: vec![], resume: false };
         let mut w = Watch::default();
-        assert_eq!(w.tick(&obs(Some(M1), &[]), 0), None, "mux 活著但沒夥伴，不記");
-        assert_eq!(w.tick(&obs(None, &[]), TICK_MS), None);
-        assert_eq!(w.tick(&obs(None, &[]), 2 * TICK_MS), None);
-        // 夥伴都自己關了，mux 之後被收掉：看到的最後一輪沒有夥伴
+        assert_eq!(w.tick(&obs(Some(M1), &[]), 0), None, "第一輪只記下");
+        assert_eq!(w.tick(&obs(None, &[]), TICK_MS), None, "只掉一輪不算");
+        assert_eq!(w.tick(&obs(None, &[]), 2 * TICK_MS), Some(empty.clone()), "11-10 30家用：裡面沒有夥伴也要有訊號");
+        // 夥伴都自己關了，之後服務不見：也是沒有夥伴的那種（結束碼 0 的由呼叫端略過，見 empty_normal_exit）
         let mut w2 = Watch::default();
         w2.tick(&obs(Some(M1), &["甲"]), 0);
         w2.tick(&obs(Some(M1), &[]), TICK_MS);
         assert_eq!(w2.tick(&obs(None, &[]), 2 * TICK_MS), None);
-        assert_eq!(w2.tick(&obs(None, &[]), 3 * TICK_MS), None);
+        assert_eq!(w2.tick(&obs(None, &[]), 3 * TICK_MS), Some(empty));
+        // 沒有夥伴的事故不佔接回額度：接著有夥伴的那台掛了照樣自動接回
+        let mut w3 = Watch::default();
+        w3.tick(&obs(Some(M1), &[]), 0);
+        w3.tick(&obs(Some(M2), &["甲"]), TICK_MS);
+        w3.tick(&obs(None, &[]), 2 * TICK_MS);
+        assert!(w3.tick(&obs(None, &[]), 3 * TICK_MS).unwrap().resume, "前一次沒有夥伴，不算用掉十分鐘一次的接回");
+        // ASN 自己收的（有記號）照舊不算
+        let mut w4 = Watch::default();
+        w4.tick(&obs(Some(M1), &[]), 100_000);
+        let mut gone = obs(None, &[]);
+        gone.stopped = Some((M1.0, 110_000));
+        w4.tick(&gone, 130_000);
+        assert_eq!(w4.tick(&gone, 160_000), None);
+    }
+
+    #[test]
+    fn 沒有夥伴而且正常結束_不算事故_被強制結束或崩潰才算() {
+        let empty = Incident { partners: vec![], resume: false };
+        assert!(empty_normal_exit(&empty, &exit_text(Some(0))));
+        assert!(!empty_normal_exit(&empty, &exit_text(Some(1))), "被強制結束要算");
+        assert!(!empty_normal_exit(&empty, &exit_text(Some(0xC000_00FD))), "崩潰（11-10 30家用 06:33 那種）要算");
+        assert!(!empty_normal_exit(&empty, "結束碼不明（ASN 那時沒在看）"), "ASN 關著期間不見的也算");
+        assert!(!empty_normal_exit(&Incident { partners: vec!["甲".into()], resume: true }, &exit_text(Some(0))), "有夥伴的照舊算");
+        let line = incident_line(&empty, "崩潰（0xC00000FD，堆疊溢位）", None, 60, Some("事件記錄：…"));
+        assert!(line.starts_with("終端服務停了：裡面沒有夥伴，不用接回｜崩潰（0xC00000FD，堆疊溢位）"), "{line}");
     }
 
     #[test]
@@ -770,13 +815,13 @@ mod tests {
     }
 
     #[test]
-    fn 通知檔_寫了讀得到_人數夾在一到一百_刪了就沒有() {
+    fn 通知檔_寫了讀得到_人數夾在零到一百_刪了就沒有() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(read_notice(d.path()), None);
         queue_notice(d.path(), 250, false, 42);
         assert_eq!(read_notice(d.path()), Some((100, false, 42)));
-        queue_notice(d.path(), 0, true, 43);
-        assert_eq!(read_notice(d.path()), Some((1, true, 43)));
+        queue_notice(d.path(), 0, false, 43);
+        assert_eq!(read_notice(d.path()), Some((0, false, 43)), "0＝服務裡沒有夥伴，只通知服務停了");
         clear_notice(d.path());
         assert_eq!(read_notice(d.path()), None);
         std::fs::write(d.path().join(NOTICE_FILE), "壞掉").unwrap();
