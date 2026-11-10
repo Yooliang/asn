@@ -428,7 +428,9 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
    選中的那個底色高亮；看終端時圖示列只留這兩個，輸入框、表情等收起，點「訊息」才回來。終端至少半個螢幕高（chatpane 的 paneTermShown 收起訊息列表） */
 .m-chat .tool.icon.m-sw.m-term-switch{border-radius:8px;border:1px solid transparent}
 .m-chat .tool.icon.m-sw.m-term-switch img{width:24px;height:24px}
-.m-chat .compose-row.is-term .toolbar > :not(.m-term-switch),.m-chat .compose-row.is-term .composer,.m-chat .compose-row.is-term .reply-bar,.m-chat .compose-row.is-term .voice-install{display:none}
-.m-chat .term-view.term-remote{flex:1 1 0;min-height:50vh;min-height:50dvh}
+/* 看終端時：輸入框（.composer）照樣留在最下面，圖示列只留切換鈕（其他圖示會擠）；回覆列、語音安裝提示收起 */
+.m-chat .compose-row.is-term .toolbar > :not(.m-term-switch),.m-chat .compose-row.is-term .reply-bar,.m-chat .compose-row.is-term .voice-install{display:none}
+.m-chat .term-view.term-remote{flex:1 1 0;min-height:0;overflow:hidden}
+.m-chat .compose-row{flex:none}
 .m-chat .term-view.term-remote .term-view-screen{padding:2px}
 .m-chat .term-remote .term-remote-bar{margin:1px 6px;padding:0 6px;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
