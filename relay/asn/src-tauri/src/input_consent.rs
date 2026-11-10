@@ -155,6 +155,21 @@ mod tests {
         assert!(!code.contains(".show(move"), "要看按了哪一顆，不能只看 true／false");
     }
 
+    /// 接線守門（0.2.15）：打字免問要同時是記住的那把公鑰（Same）且本人按過允許；沒免問就一定先問，按了允許才記下；
+    /// 紅條照樣顯示誰在打字、有「結束」
+    #[test]
+    fn 守門_自己電腦打字免問的條件與紅條() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let start = lib.find("if a.session.scope == view_handshake::Scope::Input {").expect("打字的分支");
+        let f = &lib[start..start + 1200];
+        assert!(f.contains("let no_ask = a.tofu == device_id::Tofu::Same && "), "免問一定要是記住的那把公鑰");
+        let (ask, confirm) = (f.find("input_consent::ask(").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
+        assert!(ask < confirm, "先問、按了允許才記下");
+        assert!(f[ask..confirm].contains("continue;"), "不允許就結束，不記");
+        let html = include_str!("../../ui/list.html");
+        assert!(html.contains("正在這台的夥伴「{{ v.window }}」打字") && html.contains("@click=\"stopBeingViewed(v.id)\">結束</button>"), "紅條有誰在打字、有結束");
+    }
+
     #[test]
     fn 允許替這台登入的確認框_有名字與指紋前八碼_寫清楚能做什麼() {
         let t = login_ok_text("我的手機", PUB);
