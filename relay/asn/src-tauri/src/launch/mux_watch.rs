@@ -201,6 +201,69 @@ pub const NOTICE_FILE: &str = "mux-notice.json";
 /// 後台一次最多收幾位（超過會被擋，所以自己夾住）
 pub const NOTICE_MAX_COUNT: usize = 100;
 
+/// 連續幾輪看不到終端服務的狀態（mux_snapshot 回 None）就算「監看看不到」：10 輪約 5 分鐘
+pub const BLIND_ROUNDS: u32 = 10;
+/// 「監看看不到」的通知檔（工作資料夾）：只存時間，後台文字固定
+pub const BLIND_FILE: &str = "mux-blind.json";
+
+/// 看得到／看不到的轉變
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlindEvent {
+    /// 沒變
+    Same,
+    /// 剛好連續 BLIND_ROUNDS 輪看不到：寫紀錄、發一次通知
+    Became,
+    /// 看不到之後又看得到了：寫一行恢復
+    Recovered,
+}
+
+/// 連續看不到幾輪（純邏輯，好測）
+#[derive(Debug, Default)]
+pub struct Blind {
+    misses: u32,
+    blind: bool,
+}
+
+impl Blind {
+    /// 這一輪看不看得到（不用終端服務的情況，呼叫端不要叫）
+    pub fn step(&mut self, seen: bool) -> BlindEvent {
+        if seen {
+            self.misses = 0;
+            return if std::mem::take(&mut self.blind) { BlindEvent::Recovered } else { BlindEvent::Same };
+        }
+        self.misses = self.misses.saturating_add(1);
+        if !self.blind && self.misses >= BLIND_ROUNDS {
+            self.blind = true;
+            return BlindEvent::Became;
+        }
+        BlindEvent::Same
+    }
+}
+
+/// 排一則「監看看不到終端服務」的通知（只存時間）
+pub fn queue_blind(work_dir: &Path, now_ms: u64) {
+    if work_dir.as_os_str().is_empty() {
+        return;
+    }
+    let tmp = work_dir.join(format!("{BLIND_FILE}.tmp"));
+    if std::fs::write(&tmp, serde_json::json!({ "at": now_ms }).to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, work_dir.join(BLIND_FILE));
+    }
+}
+/// 排著的「監看看不到」通知的時間；沒有或壞掉回 None（壞檔順手刪掉）
+pub fn read_blind(work_dir: &Path) -> Option<u64> {
+    let f = work_dir.join(BLIND_FILE);
+    let text = std::fs::read_to_string(&f).ok()?;
+    let at = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("at").and_then(serde_json::Value::as_u64));
+    if at.is_none() {
+        let _ = std::fs::remove_file(&f);
+    }
+    at
+}
+pub fn clear_blind(work_dir: &Path) {
+    let _ = std::fs::remove_file(work_dir.join(BLIND_FILE));
+}
+
 /// 排一則通知：只存人數與有沒有接回，不存夥伴名字（後台文字固定）
 pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
     if work_dir.as_os_str().is_empty() {
@@ -301,6 +364,11 @@ pub fn open_process(pid: u32) -> Option<Box<dyn ProcHandle>> {
 #[cfg(not(windows))]
 pub fn open_process(_pid: u32) -> Option<Box<dyn ProcHandle>> {
     None
+}
+
+/// 「監看看不到」那一行（純函式）
+pub fn blind_line(reason: &str) -> String {
+    format!("看不到終端服務的狀態已經連續 {BLIND_ROUNDS} 輪（約 {} 分鐘）：{reason}", u64::from(BLIND_ROUNDS) * TICK_MS / 60_000)
 }
 
 /// 裡面沒有夥伴、而且結束碼是 0（正常結束）：不算事故（純函式）
@@ -603,6 +671,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut first = true;
         let started = std::time::Instant::now();
         let mut tracker = Tracker::new(cfg!(windows));
+        // 監看自己看不到終端服務時也要有訊號（11-10 30家用：02:22～11:59 每輪都看不到，一行紀錄都沒有）
+        let mut blind = Blind::default();
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -612,7 +682,30 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
                 return;
             }
-            let Some(o) = terms.mux_snapshot() else { continue };
+            let Some(o) = terms.mux_snapshot() else {
+                // 不用終端服務（沒有原因）不算；用了卻連續看不到，寫紀錄並發一次通知（後台限同一台 24 小時一次）
+                if let Some(reason) = terms.mux_blind_reason() {
+                    if blind.step(false) == BlindEvent::Became {
+                        let now = crate::heartbeat::now_ms();
+                        let line = blind_line(&reason);
+                        elog!("{line}");
+                        if let Some(base) = super::mux::default_base() {
+                            super::mux::note(&base.join("ASN").join("m"), &line);
+                        }
+                        let _ = crate::ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+                        queue_blind(&work_dir, now);
+                    }
+                }
+                continue;
+            };
+            if blind.step(true) == BlindEvent::Recovered {
+                let line = "又看得到終端服務的狀態了";
+                elog!("{line}");
+                if let Some(base) = super::mux::default_base() {
+                    super::mux::note(&base.join("ASN").join("m"), line);
+                }
+                clear_blind(&work_dir);
+            }
             let now = crate::heartbeat::now_ms();
             w.note_exited(&terms.take_exited(), now);
             let incident = w.tick(&o, now);
@@ -755,6 +848,41 @@ mod tests {
         gone.stopped = Some((M1.0, 110_000));
         w4.tick(&gone, 130_000);
         assert_eq!(w4.tick(&gone, 160_000), None);
+    }
+
+    #[test]
+    fn 監看連續看不到_十輪才算_只算一次_看得到了記恢復() {
+        let mut b = Blind::default();
+        for _ in 0..BLIND_ROUNDS - 1 {
+            assert_eq!(b.step(false), BlindEvent::Same);
+        }
+        assert_eq!(b.step(false), BlindEvent::Became, "第 10 輪");
+        for _ in 0..30 {
+            assert_eq!(b.step(false), BlindEvent::Same, "只算一次");
+        }
+        assert_eq!(b.step(true), BlindEvent::Recovered);
+        assert_eq!(b.step(true), BlindEvent::Same);
+        // 中間看到一次就重新數
+        for _ in 0..BLIND_ROUNDS - 1 {
+            b.step(false);
+        }
+        b.step(true);
+        assert_eq!(b.step(false), BlindEvent::Same);
+        assert_eq!(blind_line("找不到終端服務的程式"), "看不到終端服務的狀態已經連續 10 輪（約 5 分鐘）：找不到終端服務的程式");
+    }
+
+    #[test]
+    fn 監看看不到的通知檔_寫了讀得到_壞檔當沒有() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(read_blind(d.path()), None);
+        queue_blind(d.path(), 42);
+        assert_eq!(read_blind(d.path()), Some(42));
+        clear_blind(d.path());
+        assert_eq!(read_blind(d.path()), None);
+        std::fs::write(d.path().join(BLIND_FILE), "壞掉").unwrap();
+        assert_eq!(read_blind(d.path()), None);
+        assert!(!d.path().join(BLIND_FILE).exists());
+        queue_blind(Path::new(""), 1);
     }
 
     #[test]

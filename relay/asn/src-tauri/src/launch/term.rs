@@ -1401,6 +1401,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 共用 mux 的現況，給掛掉監看用（`mux_watch`）：mux 現在活不活（程序編號＋建立時間）、裡面有哪些夥伴（名字）、
     /// ASN 自己停 mux 的記號。沒開 mux 模式、或找不到 WezTerm 就回 None（不監看）
+    /// 用了終端服務、這一輪卻看不到它的狀態（mux_snapshot 回 None）時的原因；沒用終端服務回 None（監看不用報）
+    pub fn mux_blind_reason(&self) -> Option<String> {
+        if !self.use_mux {
+            return None;
+        }
+        let dir = match self.dir() {
+            Ok(d) => d,
+            Err(e) => return Some(format!("找不到終端服務的程式（{e}）")),
+        };
+        Some(match self.mux_handle(&dir, BTreeMap::new()) {
+            Ok(_) => "讀不到終端服務的狀態".to_string(),
+            Err(e) => e,
+        })
+    }
+
     pub fn mux_snapshot(&self) -> Option<super::mux_watch::Observed> {
         self.mux_snapshot_at(Instant::now())
     }

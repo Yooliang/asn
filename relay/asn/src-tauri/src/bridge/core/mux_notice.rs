@@ -8,7 +8,47 @@ const RETRY_MS: u64 = 60_000;
 /// 事故過了這麼久還沒通知成功就放棄（太晚的通知只會讓人困惑）
 const GIVE_UP_MS: u64 = 600_000;
 
+/// 「監看看不到終端服務」的通知過了這麼久還沒送成就放棄
+const BLIND_GIVE_UP_MS: u64 = 3_600_000;
+
 impl Core {
+    /// 監看連續看不到終端服務（launch/mux_watch 排了通知檔）：請後台寄一則通知給本人（同一台 24 小時一次由後台擋）。
+    /// 舊後台（404）、參數不合（400）、節點停用（403）只記 log 不重試；寄送失敗隔一分鐘再試，過一小時放棄
+    pub async fn mux_blind_tick(&mut self, now: u64) {
+        if self.cfg.respond.is_some() || now < self.mux_blind_retry_at {
+            return;
+        }
+        let dir = self.cfg.work_dir.clone();
+        let Some(at) = mux_watch::read_blind(&dir) else { return };
+        if crate::heartbeat::now_ms().saturating_sub(at) > BLIND_GIVE_UP_MS {
+            self.log.line("mux-blind: 過了一小時，不再通知");
+            mux_watch::clear_blind(&dir);
+            return;
+        }
+        match self.relay.api_status("mux_blind_notice", json!({})).await {
+            Ok((200, v)) => {
+                let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
+                self.log.line(&format!("mux-blind notify={notify}"));
+                match notify {
+                    "sent" | "skipped" | "rate_limited" => mux_watch::clear_blind(&dir),
+                    _ => self.mux_blind_retry_at = now + RETRY_MS,
+                }
+            }
+            Ok((status @ (400 | 403 | 404), _)) => {
+                self.log.line(&format!("mux-blind: 後台回 {status}，只留本機紀錄"));
+                mux_watch::clear_blind(&dir);
+            }
+            Ok((status, _)) => {
+                self.mux_blind_retry_at = now + RETRY_MS;
+                self.log.line(&format!("mux-blind: 後台回 {status}，稍後再試"));
+            }
+            Err(e) => {
+                self.mux_blind_retry_at = now + RETRY_MS;
+                self.log.line(&format!("mux-blind failed: {e}"));
+            }
+        }
+    }
+
     /// 讀共用終端服務監看的名單（至多每 5 秒一次）：中斷後還沒接回來的、和最近還看得到的夥伴名字
     fn refresh_mux_pending(&mut self, now: u64) {
         if now.saturating_sub(self.mux_pending_at) < 5_000 {

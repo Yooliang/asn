@@ -14,9 +14,15 @@ const fnBlock = s => {
   return s.slice(i, s.indexOf('$function$;', s.indexOf('as $function$', i)) + '$function$;'.length)
 }
 
-test('靜態：只改這一支、security definer、search_path 空、只授權 service_role；回復檔逐字換回', () => {
+test('靜態：兩支函式、security definer、search_path 空、只授權 service_role；回復檔逐字換回', () => {
   const body = mig.replace(/^--.*$/gm, '')
-  assert.equal((body.match(/create or replace function/g) ?? []).length, 1)
+  assert.equal((body.match(/create or replace function/g) ?? []).length, 2)
+  const blind = body.slice(body.indexOf('create or replace function public.asn_relay_mux_blind_notice('))
+  assert.match(blind, /security definer\n set search_path to ''/)
+  assert.match(body, /revoke all on function public\.asn_relay_mux_blind_notice\(text\) from public, anon, authenticated;/)
+  assert.match(body, /grant execute on function public\.asn_relay_mux_blind_notice\(text\) to service_role;/)
+  assert.match(blind, /asn_relay_send_notice\(p_node, 'mux_blind', v_body, 1, interval '24 hours'\)/, '同一台 24 小時一則')
+  assert.match(down, /drop function if exists public\.asn_relay_mux_blind_notice\(text\);/)
   assert.match(fnBlock(body), /security definer\n set search_path to ''/)
   assert.match(body, /revoke all on function public\.asn_relay_mux_down_notice\(text, integer, boolean\) from public, anon, authenticated;/)
   assert.match(body, /grant execute on function public\.asn_relay_mux_down_notice\(text, integer, boolean\) to service_role;/)
@@ -44,8 +50,9 @@ async function boot(sql) {
   await db.exec(sql)
   const q = async (t, a) => (await db.query(t, a)).rows
   const call = async (n, r) => (await q('select public.asn_relay_mux_down_notice($1, $2, $3) r', ['H', n, r]))[0].r
+  const blindCall = async n => (await q('select public.asn_relay_mux_blind_notice($1) r', [n]))[0].r
   const last = async () => (await q('select topic, body from relay.sent order by ctid desc limit 1'))[0]
-  return { call, last }
+  return { call, blindCall, last }
 }
 
 test('實跑：0 位夥伴＝「這台的終端服務停了」；1～100 照舊；範圍外照舊擋', { skip }, async () => {
@@ -63,4 +70,11 @@ test('實跑：回復檔跑回去後 0 位又被擋（舊版行為）', { skip }
   const { call } = await boot(mig + '\n' + down)
   assert.equal((await call(0, false)).error, 'bad_request')
   assert.equal((await call(1, true)).notify, 'sent')
+})
+
+test('實跑：監看看不到終端服務的通知＝固定句型；查不到節點回 forbidden', { skip }, async () => {
+  const { blindCall, last } = await boot(mig)
+  assert.equal((await blindCall('H')).notify, 'sent')
+  assert.deepEqual(await last(), { topic: 'mux_blind', body: '30家用：ASN 看不到終端服務的狀態\n已經約 5 分鐘看不到，這段期間夥伴的窗格出事時不會自動接回。請重開 ASN；重開後還是這樣，請回報。' })
+  assert.equal((await blindCall('沒有這台')).error, 'forbidden')
 })
