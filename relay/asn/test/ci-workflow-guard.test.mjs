@@ -41,8 +41,9 @@ test('identifier、Kotlin 套件路徑、MainActivity 的 package 三者一致�
   assert.match(lib ?? '', /^name\s*=\s*"[a-z][a-z0-9_]*"/m)
 })
 
-// WezTerm 自建的 release 不能被標成整個 repo 的 Latest（否則 repo 首頁和 releases/latest 會指到 WezTerm，而不是 ASN）
-test('wezterm-build 的每一處 gh release create 都帶 --latest=false', () => {
+// WezTerm 自建的 release 不能被標成整個 repo 的 Latest（否則 repo 首頁和 releases/latest 會指到 WezTerm，而不是 ASN）。
+// 光帶 --latest=false 不夠：repo 沒有別的正式 release 時 GitHub 仍會把它當成 Latest（11-10 asn.1 第一次發佈就是這樣），所以一律建成預發行
+test('wezterm-build 的每一處 gh release create 都帶 --latest=false 與 --prerelease', () => {
   const scriptsDir = new URL('.github/scripts/', root)
   const files = [
     ['wezterm-build.yml', fs.readFileSync(new URL('wezterm-build.yml', wfDir), 'utf8')],
@@ -53,7 +54,7 @@ test('wezterm-build 的每一處 gh release create 都帶 --latest=false', () =>
   for (const [f, src] of files) {
     for (const line of releaseCreateLines(src)) {
       seen++
-      if (!/--latest=false\b/.test(line)) bad.push(`${f}: ${line.trim().slice(0, 80)}`)
+      if (!/--latest=false\b/.test(line) || !/--prerelease\b/.test(line)) bad.push(`${f}: ${line.trim().slice(0, 80)}`)
     }
   }
   assert.ok(seen >= 1, '找不到任何 gh release create，檢查規則可能失效')
