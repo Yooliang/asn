@@ -237,5 +237,11 @@ test('計時器預設值不能直接放 setTimeout／clearTimeout（WebView2 當
 test('語音狀態文字放在底下狀態列，不放在輸入框上方', () => {
   const s = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
   assert.ok(!s.includes('class="voice-note"'), '輸入框上方不再有 voice-note')
-  assert.match(s, /<div class="typing"[^>]*>\s*<template v-if="voiceNote">\{\{ voiceNote \}\}<\/template>/)
+  // 打字中、送不出去（danger）的警示排在語音提示前面（語音提示並列在後面，不蓋掉警示與「結束打字」）；其他等級在語音提示之後
+  const bar = s.slice(s.indexOf('<div class="typing"'), s.indexOf('<teleport'))
+  const iDanger = bar.indexOf("v-if=\"remoteBar && remoteBar.level === 'danger'\""), iVoice = bar.indexOf('v-else-if="voiceNote"'), iOther = bar.indexOf('v-else-if="remoteBar"')
+  assert.ok(iDanger >= 0 && iDanger < iVoice && iVoice < iOther, '警示 → 語音提示 → 其他遠端狀態')
+  assert.match(bar, /v-if="remoteBar\.stoppable"[^>]*@click="stopTyping"/, '警示裡有結束打字')
+  assert.match(bar, /v-if="voiceNote">\s*\{\{ voiceNote \}\}<\/span>/, '警示與語音提示並列')
+  assert.match(bar, /<template v-else-if="voiceNote">\{\{ voiceNote \}\}<\/template>/)
 })

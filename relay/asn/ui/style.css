@@ -970,6 +970,17 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .typing-info{background:#e8f0fe;color:#1a3d7c}
 .typing-ask,.typing-warn{background:#fff4ce;color:#5c4400}
 .typing-danger{background:#7a0d0d;color:#fff;font-weight:700;border-top:2px solid #ffcc00}
+.typing-extra{margin-left:8px;font-weight:400}
+/* 深色模式與強制色彩（高對比）：不靠底色分辨，邊框與文字色都用系統色 */
+@media (prefers-color-scheme: dark){
+  .typing-info{background:#1c2f52;color:#cfe0ff}
+  .typing-ask,.typing-warn{background:#4a3a08;color:#ffe9a6}
+  .typing-danger{background:#8f1414;color:#fff;border-top-color:#ffd84d}
+}
+@media (forced-colors: active){
+  .typing.typing-remote{border-top:2px solid CanvasText;forced-color-adjust:auto}
+  .typing-danger{border:3px solid Highlight;font-weight:700}
+}
 .term-remote-typing{background:#7a0d0d;color:#fff;font-weight:700}
 .m-dev{font-size:12px;opacity:.7;margin:0 0 2px}
 

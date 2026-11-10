@@ -24,6 +24,12 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     sw.click();
     if (!(await wait(() => document.querySelector('.typing')?.textContent.includes('打字：')))) return { ok: false, why: '按「打字」後狀態列沒出現打字中：' + (document.querySelector('.typing')?.textContent || '').slice(0, 60) };
     if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '打字的終端畫面沒有出現假畫面的字' };
+    // 同時有語音提示：按麥克風（假的語音引擎已就緒、瀏覽器沒有麥克風，會留下一句提示）。打字中的警示與「結束打字」不能被語音提示蓋掉
+    const mic = document.querySelector('.chatpane .compose-row .tool.mic');
+    if (!mic) return { ok: false, why: '找不到麥克風按鈕' };
+    mic.click();
+    const extra = await wait(() => document.querySelector('.chatpane .typing .typing-extra'), 60);
+    if (!extra) return { ok: false, why: '按麥克風後狀態列沒有語音提示（要和打字中並列）：' + (document.querySelector('.typing')?.textContent || '').slice(0, 60) };
   } else if (!(await wait(() => document.querySelector('.typing')?.textContent.includes('正在看')))) {
     return { ok: false, why: '狀態列沒有「正在看」：' + (document.querySelector('.typing')?.textContent || '（沒有狀態列）').slice(0, 60) };
   }

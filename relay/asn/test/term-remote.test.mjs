@@ -153,3 +153,12 @@ test('電腦版狀態列：等待、正在看、打字（醒目）、快到期�
   assert.equal(remoteBarState({ phase: 'ended', soon: false, note: '', warn: '', main, danger: false }), null)
   assert.deepEqual(remoteBarState({ phase: 'typing', soon: false, note: '', warn: '送不出去', main, danger: true }), { text: '送不出去', level: 'danger' })
 })
+
+test('狀態列與畫面上的固定句不含英文（給人看的字）', async () => {
+  const { INPUT_TEXT, INPUT_LABEL } = await import('../ui/lib/term-remote-input.mjs')
+  const sentences = []
+  for (const T of [REMOTE_TEXT, INPUT_TEXT]) for (const v of Object.values(T)) sentences.push(typeof v === 'function' ? v('家用機', '小乙', 3) : v)
+  sentences.push(REMOTE_LABEL, INPUT_LABEL)
+  assert.ok(sentences.length > 12)
+  for (const s of sentences) assert.ok(!/[A-Za-z]/.test(s), `固定句不該有英文：${s}`)
+})

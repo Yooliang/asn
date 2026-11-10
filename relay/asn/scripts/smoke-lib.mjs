@@ -1517,6 +1517,7 @@ export const tableFor = scenario => {
     t.term_view_remote_set = null
     t.term_view_remote_stop = null
     t.term_view_remote_input = null
+    t.stt_status = { ready: true }   // 語音引擎已就緒：按麥克風會留下語音提示（驗證打字中的警示不被蓋掉）
     t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
   }
   if (scenario.state.mpermreq) {

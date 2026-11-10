@@ -582,8 +582,9 @@ export const ChatPane = {
   </aside>
   </div>
   <div class="typing" :class="remoteBar && ['typing-remote', 'typing-' + remoteBar.level]" role="status">
-    <template v-if="voiceNote">{{ voiceNote }}</template>
-    <template v-else-if="remoteBar">{{ remoteBar.text }}<button v-if="remoteBar.stoppable" class="aero-btn" type="button" @click="stopTyping">{{ INPUT_TEXT.stop }}</button></template>
+    <template v-if="remoteBar && remoteBar.level === 'danger'">{{ remoteBar.text }}<button v-if="remoteBar.stoppable" class="aero-btn" type="button" @click="stopTyping">{{ INPUT_TEXT.stop }}</button><span class="typing-extra" v-if="voiceNote"> {{ voiceNote }}</span></template>
+    <template v-else-if="voiceNote">{{ voiceNote }}</template>
+    <template v-else-if="remoteBar">{{ remoteBar.text }}</template>
     <template v-else-if="jumpNote">{{ jumpNote }}</template>
     <template v-else-if="photoMsg">{{ photoMsg }}<button v-if="savedHere" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></template>
     <template v-else-if="showWaiting">✎ 已送出，等對方回信…</template>
