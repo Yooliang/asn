@@ -137,14 +137,14 @@ begin
       return jsonb_build_object('error', 'bad_request');
     end;
     v_rid := v_j ->> 'rid';
-    if jsonb_typeof(v_j) <> 'object'
+    if jsonb_typeof(v_j) is distinct from 'object'
        or v_j ->> 'v' is distinct from 'asn-device-login-req-v1'
        or v_j ->> 't_node' is distinct from p_node
        or v_j ->> 'p_node' is distinct from p_p_node
        or v_j ->> 'vendor' is distinct from p_kind
        or coalesce(v_rid, '') !~ '^[A-Za-z0-9_-]{22}$'
        or coalesce(v_j ->> 'p_eph_pub', '') !~ '^[A-Za-z0-9_-]{43}$'
-       or jsonb_typeof(v_j -> 'exp') <> 'number' then
+       or jsonb_typeof(v_j -> 'exp') is distinct from 'number' then
       return jsonb_build_object('error', 'bad_request');
     end if;
     v_exp := (v_j ->> 'exp')::numeric;

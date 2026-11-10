@@ -1,5 +1,5 @@
 {
-  "說明": "官方登入網址的主機白名單：唯一來源（#933 PR-5b，asn真 定案：五處同一份清單）。suffix＝網域本身或它的子網域都收；exact＝只收這個主機本身。Rust 用 include_str! 在編譯時讀這份；Edge 的 secret_remote.ts（LINK_RE）、資料表約束與 SQL 函式、手機畫面的 secret-ask.mjs 各寫一份字面值，由一致性測試（tests/login_domains_consistency.test.mjs）比對和這裡完全相同。改這裡就要五處一起改，login_link_cases.json 也要加正反例。",
+  "說明": "官方登入網址的主機白名單：唯一來源（#933 PR-5b，asn真 定案：五處同一份清單）。suffix＝網域本身或它的子網域都收；exact＝只收這個主機本身。Rust 用 include_str! 在編譯時讀這份；Edge 的 secret_remote.ts（LINK_RE）、資料表約束與 SQL 函式、手機畫面的 secret-ask.mjs、電腦本機 Claude 登入的 claude_login.rs 各寫一份字面值，由一致性測試（tests/login_domains_consistency.test.mjs）比對和這裡完全相同。改這裡就要各處一起改，login_link_cases.json 也要加正反例。",
   "suffix": ["claude.ai", "claude.com", "anthropic.com"],
   "exact": ["auth.openai.com", "accounts.x.ai"]
 }

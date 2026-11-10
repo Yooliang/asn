@@ -1,6 +1,7 @@
-// 官方登入網址主機白名單：五處同一份清單（#933 PR-5b，asn真 定案第 4 點）。
+// 官方登入網址主機白名單：各處同一份清單（#933 PR-5b，asn真 定案第 4 點）。
 // 唯一來源：supabase/functions/_shared/login_domains.json（suffix＝本身或子網域、exact＝只收本身）。
-// 五處：資料表約束、帶網址的 SQL 函式（同一個 migration 裡）、Edge 的 LINK_RE、Rust 的 secret_remote/link.rs（include_str! 讀 JSON）、手機畫面的 secret-ask.mjs。
+// 對照：資料表約束、帶網址的 SQL 函式（同一個 migration 裡）、Edge 的 LINK_RE、Rust 的 secret_remote/link.rs（include_str! 讀 JSON）、手機畫面的 secret-ask.mjs、
+// 電腦本機 Claude 登入的 claude_login.rs（ALLOWED_HOSTS＝suffix）；device_login.rs 的 Codex／Grok 主機要在 exact 裡。
 // 有一處漏改就紅；正反例（login_link_cases.json）由各處自己的測試跑。
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -53,6 +54,13 @@ test('裝置碼型登入（device_login.rs）的 Codex／Grok 主機都在 JSON 
     assert.ok(hosts.length >= 1, name)
     for (const h of hosts) assert.ok(D.exact.includes(h), `${name} 的 ${h} 不在 login_domains.json 的 exact 裡`)
   }
+})
+
+test('電腦本機的 Claude 登入（claude_login.rs）收的主機等於 JSON 的 suffix', () => {
+  const rs = rd('relay/asn/src-tauri/src/agent_setup/claude_login.rs')
+  const m = rs.match(/const ALLOWED_HOSTS: \[&str; \d+\] = \[([^\]]*)\];/)
+  assert.ok(m, '找不到 ALLOWED_HOSTS')
+  assert.deepEqual([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]), D.suffix)
 })
 
 test('手機畫面：secret-ask.mjs 的兩份清單等於 JSON', async () => {
