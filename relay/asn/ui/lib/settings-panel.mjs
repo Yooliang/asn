@@ -490,7 +490,8 @@ export const SettingsPanel = {
             <p><b>{{ p.name }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
             <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ p.fingerprint }}</code>
             <label class="chk"><input type="checkbox" :checked="p.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
-            <small v-if="p.inputNoAsk" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
+            <small v-if="p.inputNoAsk && p.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
+            <small v-if="p.inputNoAsk && !p.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
             <label class="chk"><input type="checkbox" :checked="p.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
             <small v-if="p.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
             <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.node)">{{ KNOWN.forget }}</button></span>

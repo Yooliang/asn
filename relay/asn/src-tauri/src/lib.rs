@@ -1330,12 +1330,18 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         // 框上和紅條上的「誰」都用本機記住的名字＋指紋前 8 碼（後台給的名字不在簽章裡）；第一次連線才用後台的並標示
                         let asker = input_consent::who_of(&known, &a.session.d_node, &a.from_name, &a.from_pub, a.tofu);
                         let who = input_consent::bar_label(&asker);
-                        // 打字（0.2.10）：預設每次都要本人在這台的 ASN 視窗按允許；本人在設定頁對那台設過「不用每次問」才不問
+                        // 打字（0.2.15）：自己的電腦之間預設不用每次問，但要同時成立：公鑰就是記住的那把（Tofu::Same）、
+                        // 本人在這台對這把公鑰按過「允許」（看畫面記住的不算）、本人沒在設定頁改成每次都問。否則照樣問；按了允許就記下來
                         if a.session.scope == view_handshake::Scope::Input {
-                            let no_ask = device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
-                            if !no_ask && !input_consent::ask(&app, &asker, &a.session.window).await {
-                                let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
-                                continue;
+                            let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
+                            if !no_ask {
+                                if !input_consent::ask(&app, &asker, &a.session.window).await {
+                                    let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                                    continue;
+                                }
+                                if let Err(e) = device_id::live::confirm_input(&data_dir, &a.session.d_node, &a.from_pub) {
+                                    elog!("記下按過允許失敗（下次還會問）：{e}");
+                                }
                             }
                         }
                         let mobile = a.mobile;
