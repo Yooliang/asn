@@ -415,8 +415,8 @@ impl Quota {
     }
 }
 
-/// 前端讀本機各帳號的額度紀錄（email → 額度）
-#[cfg_attr(feature = "gui", tauri::command)]
+/// 前端讀本機各帳號的額度紀錄（email → 額度）。讀檔：在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn claude_quota_all() -> HashMap<String, Value> {
     quota_all_with_waiting(&claude_accounts::claude_home())
 }

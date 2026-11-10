@@ -35,6 +35,9 @@ pub fn clean_line(s: &str) -> Option<String> {
 /// 附加一批記錄。回實際寫進去的行數
 pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     use std::io::Write;
+    // 指令改成非同步後可能同時寫（todo-next-191）：截半與追加要一次做完，不然截半時會吃掉另一支剛寫的行
+    static APPEND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = APPEND_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // 還沒有節點金鑰時工作資料夾是空路徑：寫下去會在目前目錄留 ui.log（#859）
     if dir.as_os_str().is_empty() {
         return Ok(0);
