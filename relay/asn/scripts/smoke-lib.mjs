@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetWhen } from '../ui/lib/account-quota.mjs'
+import { CHAT_PANE_MIN_W, SIDE_OPEN_W } from '../ui/lib/merge.mjs'
 import { LAUNCH_DISPLAY_NOTE, launchRun, launchVendors } from '../ui/lib/mobile-launch.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
@@ -594,7 +595,7 @@ export const mnoselfProbeSource = () => `(async () => {
 // 整合模式窄視窗（#1192）：兩個窗格放不下時一次只顯示一個，右窗格開著時要有「返回名單」回到名單；放得下就維持左右並排。
 // single=true：這個寬度必須是單窗格；single=false：必須是兩窗格且右邊夠寬。共通：不橫向捲動、標題不直排、帳號卡看得到
 export const MPANE_PROBES = { single: { mpane: true, single: true }, double: { mpane: true, single: false } }
-export const MPANE_CHAT_MIN = 180
+export const MPANE_CHAT_MIN = CHAT_PANE_MIN_W   // 跟斷點用同一個常數（200）
 export const mpaneProbeSource = ({ single }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
@@ -633,8 +634,71 @@ export const mpaneProbeSource = ({ single }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
+// 整合模式窄視窗、右邊開著對話（#1227 後續）：量右窗格各層寬度，輸入框、傳送鈕要完整看得到。
+// 左右並排（single=false）時：對話區（.conv-main）至少 CHAT_CONV_MIN 寬、輸入框與傳送鈕在右窗格內、不橫向溢出；
+// 單窗格（single=true）時：只顯示右邊，同樣檢查輸入框完整可見。
+export const MPANE_CHAT_PROBES = { single: { mpane: true, chat: true, single: true, folded: true }, double: { mpane: true, chat: true, single: false, folded: true }, wide: { mpane: true, chat: true, single: false, folded: false } }
+export const MPANE_CONV_MIN = 160
+export const mpaneChatProbeSource = ({ single, folded }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
+  const W = window.innerWidth, wantSingle = ${single ? 'true' : 'false'};
+  const R = e => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), r: Math.round(r.right) } };
+  const q = s => document.querySelector(s);
+  let box = null;
+  for (let i = 0; i < 40 && !(box = q('.chat-area .compose-main textarea')); i++) await sleep(100);
+  await sleep(300);
+  const list = q('.shell > .list-pane'), chat = q('.shell > .chat-area');
+  const m = { W, list: R(list), chat: R(chat), side: R(q('.chat-area .dp-side')), main: R(q('.chat-area .chatpane-main')), conv: R(q('.chat-area .conv-main')), compose: R(q('.chat-area .compose-main')), ta: R(box), send: R(q('.chat-area .composer .aero-btn')), doc: document.documentElement.scrollWidth };
+  if (${JSON.stringify(process.env.ASN_MEASURE || '')}) return { ok: false, why: 'MEASURE ' + JSON.stringify(m) };
+  if (!list || !chat) return { ok: false, why: '找不到名單或對話窗格' };
+  if (!box) return { ok: false, why: '右邊沒有輸入框：' + JSON.stringify(m) };
+  const both = shown(list) && shown(chat);
+  if (wantSingle && both) return { ok: false, why: '寬 ' + W + ' 應該一次只顯示一個窗格：' + JSON.stringify(m) };
+  if (!wantSingle && !both) return { ok: false, why: '寬 ' + W + ' 應該左右並排：' + JSON.stringify(m) };
+  if (document.documentElement.scrollWidth > W + 1 || document.body.scrollWidth > W + 1) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + JSON.stringify(m) };
+  const send = q('.chat-area .composer .aero-btn');
+  const cr = chat.getBoundingClientRect();
+  for (const [name, e] of [['輸入框', box], ['傳送鈕', send]]) {
+    if (!shown(e)) return { ok: false, why: name + '看不到：' + JSON.stringify(m) };
+    const r = e.getBoundingClientRect();
+    if (r.left < cr.left - 1 || r.right > cr.right + 1 || r.right > W + 1) return { ok: false, why: name + '被截掉（超出右窗格 ' + Math.round(cr.left) + '~' + Math.round(cr.right) + '）：' + JSON.stringify(m) };
+  }
+  if (box.getBoundingClientRect().width < 60) return { ok: false, why: '輸入框只剩 ' + Math.round(box.getBoundingClientRect().width) + 'px：' + JSON.stringify(m) };
+  // 大頭貼欄被自動收起（右窗格放不下展開的欄）時展開鈕反灰並寫原因；放得下時照舊可按
+  const strip = q('.chat-area .dp-fold-strip'), foldBtn = strip || q('.chat-area .dp-fold-bar');
+  if (!foldBtn) return { ok: false, why: '找不到大頭貼欄的收合鈕' };
+  if (${folded ? 'true' : 'false'}) {
+    if (!strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄應該被自動收起' };
+    if (!strip.disabled) return { ok: false, why: '自動收起時展開鈕應該反灰' };
+    const cs = getComputedStyle(strip);
+    if (!(parseFloat(cs.opacity) < 1) || cs.cursor === 'pointer') return { ok: false, why: '自動收起時展開鈕要看得出反灰：opacity ' + cs.opacity + '、cursor ' + cs.cursor };
+    strip.click(); await sleep(300);   // 反灰的鈕按了不能改設定（放寬後的 widen 探測會確認欄恢復展開）
+    if (!q('.chat-area .dp-fold-strip')) return { ok: false, why: '點反灰的展開鈕後欄不該展開' };
+    if (strip.title !== '視窗太窄，放寬就會恢復' || strip.getAttribute('aria-label') !== '視窗太窄，放寬就會恢復') return { ok: false, why: '展開鈕提示不對：' + strip.title + ' / ' + strip.getAttribute('aria-label') };
+  } else {
+    if (strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄不該被收起' };
+    const cs = getComputedStyle(foldBtn);
+    if (cs.opacity !== '1' || cs.cursor !== 'pointer') return { ok: false, why: '可按的收合鈕 opacity 要 1、cursor 要 pointer：' + cs.opacity + ' / ' + cs.cursor };
+    if (foldBtn.disabled || foldBtn.title.includes('視窗太窄')) return { ok: false, why: '放得下時收合鈕應該可按、沒有「視窗太窄」提示：' + foldBtn.title };
+  }
+  const conv = q('.chat-area .conv-main');
+  if (!conv || conv.getBoundingClientRect().width < ${MPANE_CONV_MIN}) return { ok: false, why: '對話區只有 ' + (conv ? Math.round(conv.getBoundingClientRect().width) : 0) + 'px（至少 ${MPANE_CONV_MIN}）：' + JSON.stringify(m) };
+  return { ok: true, why: '' };
+})()`
+// 放寬視窗後（smoke-ui 把寬度改成 sc.widen 再跑這個）：自動收起沒有寫進設定，所以大頭貼欄要恢復展開、收合鈕可按
+export const mpaneWidenProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  await sleep(500);
+  const side = document.querySelector('.chat-area .dp-side'), bar = document.querySelector('.chat-area .dp-fold-bar');
+  if (!side) return { ok: false, why: '找不到大頭貼欄' };
+  if (document.querySelector('.chat-area .dp-fold-strip')) return { ok: false, why: '放寬到 ' + window.innerWidth + ' 後大頭貼欄還是收起（自動收起不該寫進設定）' };
+  if (Math.round(side.getBoundingClientRect().width) !== ${SIDE_OPEN_W}) return { ok: false, why: '大頭貼欄寬 ' + side.getBoundingClientRect().width + '，應該恢復展開的 ${SIDE_OPEN_W}' };
+  if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
+  return { ok: true, why: '' };
+})()`
 export const probeKind = probe => (probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? mpaneProbeSource(probe) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeSource = probe => (probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1185,6 +1249,13 @@ export const SCENARIOS = [
   { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
   { name: 'list-merged-280', page: 'list.html', width: 280, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-280.png' },
   { name: 'list-merged-360', page: 'list.html', width: 360, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-360.png' },
+  { name: 'list-merged-chat-520', page: 'list.html', width: 520, widen: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-520.png' },
+  { name: 'list-merged-chat-600', page: 'list.html', width: 600, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-600.png' },
+  { name: 'list-merged-chat-700', page: 'list.html', width: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-700.png' },
+  { name: 'list-merged-chat-800', page: 'list.html', width: 800, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-800.png' },
+  { name: 'list-merged-chat-500', page: 'list.html', width: 500, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.single, shot: 'list-merged-chat-500.png' },
+  { name: 'list-merged-chat-655', page: 'list.html', width: 655, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-655.png' },
+  { name: 'list-merged-chat-656', page: 'list.html', width: 656, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-656.png' },
   { name: 'list-merged-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.double, shot: 'list-merged-520.png' },
   { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },

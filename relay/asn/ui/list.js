@@ -32,7 +32,7 @@ import { createRoomHub } from './lib/room-hub.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
-import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, singlePane, switchMode, chatShown, toggleCollapsed } from './lib/merge.mjs'
+import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, singlePane, autoFoldSide, sideAutoFolded, switchMode, chatShown, toggleCollapsed } from './lib/merge.mjs'
 import { normalizeSession, planRestore, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
@@ -1068,7 +1068,6 @@ const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await 
 const activateTab = id => { ui.active = id; core.markRead(id); sync(); if (isRoomChat(id) && openedRooms.has(id)) void hub.read(roomIdOf(id)).then(() => { pushLog(id); sync() }) }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過；切到群組分頁＝現在看著它，有未讀就標已讀
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
-const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
 
 // 切換視窗模式：已開的對話接得上（分開→整合：對話視窗關掉變分頁；整合→分開：分頁開成視窗）
 async function setMode(to) {
@@ -1499,6 +1498,11 @@ const app = createApp({
     const winW = ref(window.innerWidth)
     window.addEventListener('resize', () => { winW.value = window.innerWidth })
     const paneOnly = computed(() => singlePane({ mode: ui.mode, width: winW.value, hasTabs: ui.tabs.length > 0, showList: pane.showList }))
+    // 並排但右邊放不下展開的大頭貼欄時，自動收起（不改存檔的設定）
+    const sideFolded = computed(() => ui.collapsed === true || autoFoldSide({ mode: ui.mode, width: winW.value }))
+    const sideLocked = computed(() => sideAutoFolded({ mode: ui.mode, width: winW.value, collapsed: ui.collapsed }))
+    // 自動收起鎖定時不改 ui.collapsed（鈕已反灰，這裡再擋一次，鍵盤或程式觸發也一樣）
+    const toggleDp = () => { if (sideLocked.value) return; ui.collapsed = toggleCollapsed(ui.collapsed) }
     const backToList = () => { pane.showList = true }
     // 大幅廣告的網頁（iframe）：--shot 不載入；載入失敗或 5 秒內沒載入完就退回樣板（load 事件才算成功）
     const pageSrc = a => (info.shot || pageFail[a.key] ? '' : adPageUrl(a))
@@ -1849,7 +1853,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, paneOnly, backToList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, paneOnly, sideFolded, sideLocked, backToList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,

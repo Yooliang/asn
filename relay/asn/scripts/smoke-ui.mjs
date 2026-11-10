@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -99,6 +99,16 @@ async function runScenario(cdp, sc, base) {
   let probeWhy = ''
   if (check.ok && sc.probe) {
     try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果' } catch (e) { probeWhy = `執行失敗：${e.message}` }
+  }
+  // 情境帶 widen：探測完把視窗放寬到那個寬度，再確認自動收起沒有寫進設定（大頭貼欄恢復展開）
+  if (check.ok && !probeWhy && sc.widen) {
+    try {
+      await S('Emulation.setDeviceMetricsOverride', { width: sc.widen, height: sc.height ?? 800, deviceScaleFactor: 1, mobile: false })
+      const v = (await S('Runtime.evaluate', { expression: mpaneWidenProbeSource(), awaitPromise: true, returnByValue: true })).result.value
+      if (!v?.ok) probeWhy = v?.why || '放寬後沒有回結果'
+    } catch (e) { probeWhy = `放寬後執行失敗：${e.message}` }
+    await S('Emulation.setDeviceMetricsOverride', { width: sc.width, height: sc.height ?? 800, deviceScaleFactor: 1, mobile: false })
+    await sleep(300)
   }
   // 情境帶 shot（#374）：探測完存一張截圖（ASN_SMOKE_SHOTS 指定的資料夾，沒指定放暫存資料夾）；存不了只記一筆，不算失敗
   let shot = ''
