@@ -419,6 +419,7 @@ mod tests {
         const GUI_ONLY: &[&str] = &[
             "presence.rs", "input_consent.rs", "lib.rs", "main.rs", "rt.rs", "headless.rs", "account.rs", "ads.rs", "tray.rs", "updater.rs", "wins.rs", "shot.rs", "tts.rs", "stt.rs", "usage.rs", "cloud_invite.rs", "android.rs", "android_update.rs",
             "claude_mod.rs", "claude_accounts.rs", "codex_accounts.rs", "dialog.rs", "desktop.rs", "tests.rs",
+            "guard.rs",   // 意外關閉自動重開（lib.rs 用 cfg(feature = "gui")、cfg(desktop) 掛上；設定頁的三支指令用 tauri::command）
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
             for e in std::fs::read_dir(dir).unwrap().flatten() {
