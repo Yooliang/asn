@@ -551,6 +551,11 @@ mod tests {
     /// 外來訊息確認框的真實樣本（#1254）：放在 held-message 資料夾，不放 term-screens（那裡的樣本要同步更新黃金檔，等第二張一起做）
     const HELD_FIXTURE: &str = include_str!("../../tests/fixtures/held-message/claude-held-message.txt");
 
+    /// 樣本換行一律當 LF：Windows 取出來可能是 CRLF，下面的測試會用含換行的字串替換
+    fn held_fixture() -> String {
+        HELD_FIXTURE.replace("\r\n", "\n")
+    }
+
     fn kind(text: &str) -> Option<K> {
         classify(text).map(|s| s.kind)
     }
@@ -604,7 +609,8 @@ mod tests {
 
     #[test]
     fn 外來訊息的確認框_以底端的框為準_一律要本人處理_不當成權限框或提問() {
-        let t = HELD_FIXTURE;
+        let held = held_fixture();
+        let t = held.as_str();
         assert!(is_held_message(t));
         let s = classify(t).expect("認得出來");
         assert_eq!(s.kind, K::Attention, "這一版不給任何代答路徑");
@@ -618,7 +624,8 @@ mod tests {
 
     #[test]
     fn 外來訊息的確認框_反例_引用標題_框已收掉_沒有游標或兩個游標() {
-        let t = HELD_FIXTURE;
+        let held = held_fixture();
+        let t = held.as_str();
         // 框已經收掉：對話記錄裡的「● Held peer message」還在，底端回到輸入框
         let head = t.split("────").next().unwrap();
         let closed = format!("{head}\n{}", fixture!("claude-idle-manual-mode"));
