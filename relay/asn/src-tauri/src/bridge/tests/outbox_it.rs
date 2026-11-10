@@ -334,6 +334,27 @@ async fn 壞檔改名成_bad_之後仍可正常運作() {
 }
 
 #[tokio::test]
+async fn 壞檔超過五個_只留最新五個_刪除有_log() {
+    let h = rig().await;
+    // 先放 6 個舊壞檔（含舊格式 .bad），時間戳都比現在小
+    std::fs::write(h.work.path().join("reply-outbox.json.bad"), "x").unwrap();
+    for n in 1..=5 {
+        std::fs::write(h.work.path().join(format!("reply-outbox.json.bad-{n}")), "x").unwrap();
+    }
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    let left = bad_files(&h);
+    assert_eq!(left.len(), 5, "{left:?}");
+    assert!(!h.work.path().join("reply-outbox.json.bad").exists(), "舊格式視為最舊，先刪");
+    assert!(!h.work.path().join("reply-outbox.json.bad-1").exists() && h.work.path().join("reply-outbox.json.bad-2").exists(), "最舊的兩個被刪、bad-2 以後留著");
+    let lg = c2.log.recent().join("
+");
+    assert!(lg.contains("已刪除最舊的 reply-outbox.json.bad"), "{lg}");
+    c2.tick(T0 + 5_000).await;
+    assert_eq!(bad_notices(&h).len(), 1);
+}
+
+#[tokio::test]
 async fn 寫檔失敗_回_Failed_走原流程通知視窗() {
     let mut h = rig().await;
     // 存檔路徑被同名資料夾占住：先寫暫存檔再改名會失敗
