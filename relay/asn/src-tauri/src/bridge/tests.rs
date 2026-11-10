@@ -65,6 +65,9 @@ struct FState {
     /// 假後台回的 notify（空字串＝sent）
     wait_notice_notify: String,
     misroute_status: u16,
+    /// 寄件匣壞檔通知（outbox_bad_notice）收到的請求；outbox_bad_status 不為 0 就回這個狀態碼（模擬舊後台沒這個動作或壞了）
+    outbox_bad_notices: Vec<Value>,
+    outbox_bad_status: u16,
     /// 寄信（send）收到的每一次請求（含失敗的）
     send_attempts: Vec<Value>,
     /// 接下來 N 次 send 回 send_fail_code（0＝503）；send_fail_store＝失敗前其實已收下（模擬回應在路上掉了）
@@ -305,6 +308,14 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
             s.misroute_notices.push(body);
             if s.misroute_status != 0 {
                 (s.misroute_status, json!({"error": "x"}))
+            } else {
+                (200, json!({"ok": true, "notify": "sent"}))
+            }
+        }
+        "outbox_bad_notice" => {
+            s.outbox_bad_notices.push(body);
+            if s.outbox_bad_status != 0 {
+                (s.outbox_bad_status, json!({"error": "x"}))
             } else {
                 (200, json!({"ok": true, "notify": "sent"}))
             }

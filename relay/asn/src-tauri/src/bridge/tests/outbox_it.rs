@@ -232,6 +232,49 @@ async fn 壞檔第二次壞掉_不蓋掉先前的_bad() {
     assert_eq!(std::fs::read_to_string(&first[0]).unwrap(), "{ 壞一", "舊 .bad 內容原封不動");
 }
 
+fn bad_notices(h: &H) -> Vec<Value> {
+    h.fr.st.lock().unwrap().outbox_bad_notices.clone()
+}
+
+#[tokio::test]
+async fn 壞檔_第一次_tick_通知本人一次_之後不再送() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), format!("{{ 壞掉 {SECRET}")).unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    assert!(bad_notices(&h).is_empty(), "Core::new 不送（同步），等 tick");
+    c2.tick(T0 + 5_000).await;
+    let n = bad_notices(&h);
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(!n[0].to_string().contains("機密內文") && !n[0].to_string().contains("壞掉"), "請求不帶任何內文：{n:?}");
+    c2.tick(T0 + 6_000).await;
+    c2.tick(T0 + 20_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "只送一次");
+    let lg = c2.log.recent().join("\n");
+    assert!(lg.contains("owner notice requested") && !lg.contains("機密內文"), "{lg}");
+}
+
+#[tokio::test]
+async fn 壞檔通知失敗_只記_log_不重試() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_status = 404; // 舊後台沒有這個動作
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    c2.tick(T0 + 700_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "失敗也只試一次");
+    assert!(c2.log.recent().iter().any(|l| l.contains("owner notice failed")));
+}
+
+#[tokio::test]
+async fn 正常的寄件匣檔_不送壞檔通知() {
+    let mut h = rig().await;
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    assert!(bad_notices(&h).is_empty());
+}
+
 #[tokio::test]
 async fn 壞檔改名成_bad_之後仍可正常運作() {
     let h = rig().await;

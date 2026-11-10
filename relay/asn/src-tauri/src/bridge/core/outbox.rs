@@ -366,6 +366,21 @@ impl Core {
     }
 
     /// 處理到期的寄件匣（每個 tick 呼叫）。同一封信的片段依序：前面的還沒送出，後面的等著。
+    /// 啟動時發現寄件匣存檔壞了：請後台寄一則固定內文的通知給本人（節點擁有者），只送一次、不重試。
+    /// 後台每台每小時最多一則；舊後台（沒有這個動作，404）、連不上都只記 log。log 不含任何回信內文
+    pub(super) async fn outbox_bad_notice_tick(&mut self) {
+        if !std::mem::take(&mut self.outbox_bad_pending) {
+            return;
+        }
+        match self.relay.api("outbox_bad_notice", Some(json!({}))).await {
+            Ok(v) => {
+                let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
+                self.log.line(&format!("outbox bad file: owner notice requested notify={notify}"));
+            }
+            Err(e) => self.log.line(&format!("outbox bad file: owner notice failed: {e}")),
+        }
+    }
+
     /// 一輪最多 OUTBOX_TICK_MAX 次實際送出嘗試（重寄、寄放棄通知都算）；任一次暫時性失敗（網路大概整個不通）就結束這一輪。
     /// 「超過 24 小時」的檢查本身不算嘗試，但放棄後馬上寄的那則通知算一次
     pub(super) async fn outbox_tick(&mut self, now: u64) {
