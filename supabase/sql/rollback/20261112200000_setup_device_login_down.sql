@@ -1,4 +1,4 @@
--- 回復 20261111200000_setup_device_login.sql：
+-- 回復 20261112200000_setup_device_login.sql：
 --   刪掉非 claude 的請求（不然 kind 約束加不回去）、drop 新函式與新欄位、asn_setup_request／asn_relay_setup_poll／asn_relay_secret_request_link
 --   與 link 約束換回原文（逐字取自 20261102170000_node_platform_phone.sql 與 20261101230000_secret_link.sql）。
 -- 部署順序：先把 Edge（relay、account）換回舊版，再跑這支。
