@@ -392,7 +392,7 @@ pub fn android_known_list(app: State<'_, App>) -> Result<serde_json::Value, Stri
 
 /// 出四選一的題目：只給題目編號與四個選項文字；正確的是哪一個只留在 Rust。那台要先記住（否則 not_ready）。
 /// 每台電腦的四個選項固定（第一次出題時產生並存檔），同一台同時只有一題；答錯過就回鎖住（還要等幾分鐘）或擋住。
-/// 回 { state:"ok", id, options } | { state:"locked", minutes } | { state:"blocked" }
+/// 回 { state:"ok", id, options, name } | { state:"locked", minutes } | { state:"blocked" }；name＝這支手機本機記的名字（可能是空字串）
 #[tauri::command]
 pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serde_json::Value, String> {
     use crate::device_id::PickGate;
@@ -402,7 +402,8 @@ pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serd
         PickGate::Locked { minutes } => Ok(serde_json::json!({ "state": "locked", "minutes": minutes })),
         PickGate::Open => {
             let id = crate::known_pick::issue(&node, &prep.sign_pub, prep.answer)?;
-            Ok(serde_json::json!({ "state": "ok", "id": id, "options": prep.options }))
+            let name = crate::device_id::live::local_name(&app.data_dir, &node)?.unwrap_or_default();
+            Ok(serde_json::json!({ "state": "ok", "id": id, "options": prep.options, "name": name }))
         }
     }
 }
@@ -438,18 +439,52 @@ pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Resul
     Ok(out.as_str().to_string())
 }
 
-/// 選對之後（畫面先過本人確認）才記住：取走過關的題目（一次、60 秒內），再用記住的那把公鑰重算指紋交給確認（成功會清掉答錯紀錄）；
-/// 這期間那台被忘記、換了公鑰、或被鎖住就不記。回有沒有記到
+/// 要一個一次性的確認憑證（`action`＝confirm 或 forget，要對哪台電腦）：32 位元組亂數的十六進位字串，30 秒內有效、只能用一次。
+/// 畫面拿它請外殼跳生物辨識；外殼驗證通過才寫出對應的憑證檔，之後的確認、忘記帶著它回來才算數（見 consent.rs）。只有主畫面視窗能要
 #[tauri::command]
-pub fn android_known_confirm(app: State<'_, App>, id: String) -> Result<bool, String> {
+pub fn android_known_token(window: tauri::WebviewWindow, action: String, node: String) -> Result<String, String> {
+    if !crate::consent::label_ok(window.label()) {
+        return Err(crate::consent::NOT_VERIFIED.to_string());
+    }
+    let Some(act) = crate::consent::Action::parse(&action) else { return Err("bad_action".to_string()) };
+    if node.is_empty() || node.len() > 64 {
+        return Err("bad_node".to_string());
+    }
+    crate::consent::issue(act, &node)
+}
+
+/// 選對之後才記住：先取走過關的題目（一次、60 秒內），再用那台的憑證（本人剛在這支手機上驗證過、30 秒內、一次）；
+/// 兩者都通過才用記住的那把公鑰重算指紋交給確認（成功會清掉答錯紀錄）。這期間那台被忘記、換了公鑰、或被鎖住就不記。回有沒有記到
+#[tauri::command]
+pub fn android_known_confirm(window: tauri::WebviewWindow, app: State<'_, App>, id: String, challenge: String) -> Result<bool, String> {
+    if !crate::consent::label_ok(window.label()) {
+        return Ok(false);
+    }
     let Some((node, sign_pub)) = crate::known_pick::take_passed(&id) else { return Ok(false) };
+    if !crate::consent::redeem(&app.data_dir, crate::consent::Action::Confirm, &node, &challenge) {
+        return Ok(false);
+    }
     crate::device_id::live::confirm(&app.data_dir, &node, &crate::device_id::fingerprint(&sign_pub), crate::auth::now_ms())
 }
 
-/// 本人在設定頁按「忘記」：下次再連就當第一次。回有沒有這台
+/// 本人在設定頁按「忘記」：要帶這台的憑證（本人剛在這支手機上驗證過）。下次再連就當第一次。回有沒有這台
 #[tauri::command]
-pub fn android_known_forget(app: State<'_, App>, node: String) -> Result<bool, String> {
+pub fn android_known_forget(window: tauri::WebviewWindow, app: State<'_, App>, node: String, challenge: String) -> Result<bool, String> {
+    if !crate::consent::label_ok(window.label()) || !crate::consent::redeem(&app.data_dir, crate::consent::Action::Forget, &node, &challenge) {
+        return Err(crate::consent::NOT_VERIFIED.to_string());
+    }
     let gone = crate::device_id::live::forget(&app.data_dir, &node)?;
     crate::known_pick::drop_node(&node);
+    crate::consent::drop_node(&node);
     Ok(gone)
+}
+
+/// 本人替這台電腦改名（只改這支手機上記的名字；不用生物辨識，因為不影響信任）。名字先整理過（去控制字元、最多 32 字，空的＝未命名）。
+/// 只有這個命令能改手機上的名字（守門測試）。回有沒有這台
+#[tauri::command]
+pub fn android_known_rename(window: tauri::WebviewWindow, app: State<'_, App>, node: String, name: String) -> Result<bool, String> {
+    if !crate::consent::label_ok(window.label()) {
+        return Ok(false);
+    }
+    crate::device_id::live::rename_peer(&app.data_dir, &node, &name)
 }

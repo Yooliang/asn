@@ -15,7 +15,7 @@ const cargo = read('src-tauri', 'Cargo.toml')
 // 電腦端才有的 Rust 模組：手機建置一個都不能編進去
 const DESKTOP_MODS = ['acct_remote', 'statusline_hook', 'term_remote', 'ads', 'agent_tools', 'askpass', 'bridge', 'cli', 'claude_accounts', 'claude_json', 'claude_mod', 'claude_quota', 'codex_accounts', 'codex_quota', 'launch', 'shot', 'stt', 'tray', 'tts', 'updater', 'usage', 'voicecfg', 'wins']
 // 電腦端才有的指令（手機的指令清單、手機畫面都不能出現）
-const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_input_no_ask', 'device_known_login_ok', 'device_own_fingerprint', 'term_view_remote_input', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
+const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_rename', 'device_known_input_no_ask', 'device_known_login_ok', 'device_own_fingerprint', 'term_view_remote_input', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
 
 test('電腦端模組：每一個都掛 cfg(desktop)，手機建置不編譯', () => {
   for (const m of DESKTOP_MODS) {
@@ -516,7 +516,7 @@ test('手機看電腦終端：四個指令手機也有、打字的指令只有�
   assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.doesNotMatch(rs, /term_view_remote_input/)
-  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|confirm|forget)[\s\S]*?\n\}\n/g, '')
+  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|confirm|forget|rename)[\s\S]*?\n\}\n/g, '')
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')
@@ -537,7 +537,7 @@ test('view_d 的核心：手機入口只看畫面、電腦版 start 走同一個
 test('手機查看前要先通過本人確認：前端模組、外殼、鎖死的 biometric 版本', () => {
   const js = read('ui', 'lib', 'mobile-confirm.mjs')
   assert.match(js, /NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再查看終端'/)
-  assert.match(js, /if \(!bridge \|\| typeof bridge\.confirmViewer !== 'function'\) return 'cancel'/, '橋不存在不能回 ok')
+  assert.match(js, /if \(!bridge \|\| typeof bridge\[method\] !== 'function'\) return 'cancel'/, '橋不存在不能回 ok')
   const dir = ['src-tauri', 'gen', 'android', 'app']
   const bridge = read(...dir, 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'AsnBridge.kt')
   assert.match(bridge, /@JavascriptInterface\s+fun confirmViewer\(callbackId: String\)[\s\S]*?runOnUiThread/, '在主執行緒開框')
@@ -555,4 +555,63 @@ test('上傳設備公鑰帶平台', () => {
   const di = read('src-tauri', 'src', 'device_id.rs')
   assert.match(di, /publish_body\(&k\.public_b64\(\), platform\(\)\)/)
   assert.match(di, /"sign_pub": sign_pub, "platform": platform/)
+})
+
+// ---- 「記住這台」「忘記」的一次性本人確認憑證（consent.rs）：外殼驗證通過才寫憑證檔 ----
+const KT_DIR = ['src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn']
+
+test('憑證檔：只有生物辨識通過（onAuthenticationSucceeded）與螢幕鎖 RESULT_OK 兩處會寫；橋接方法一個都不寫', () => {
+  const vc = read(...KT_DIR, 'ViewerConfirm.kt')
+  const bridge = read(...KT_DIR, 'AsnBridge.kt')
+  // 寫檔的函式只被 verified 叫；verified 只被兩個通過的地方叫
+  const writes = vc.split('\n').map((l, i) => [l, i]).filter(([l]) => l.includes('writeConsentMarker('))
+  assert.equal(writes.length, 2, '一個定義、一個呼叫')
+  assert.ok(writes.some(([l]) => l.includes('private fun writeConsentMarker(')))
+  const call = vc.slice(vc.indexOf('private fun verified('), vc.indexOf('private fun validChallenge('))
+  assert.ok(call.includes('writeConsentMarker(activity, ch)'), '呼叫在 verified 裡')
+  const verifiedCalls = vc.split('\n').filter(l => l.includes('verified(activity)') && !l.includes('private fun'))
+  assert.equal(verifiedCalls.length, 2)
+  assert.ok(verifiedCalls.some(l => l.includes('override fun onAuthenticationSucceeded(')), '生物辨識通過')
+  assert.ok(verifiedCalls.some(l => l.includes('Activity.RESULT_OK')), '螢幕鎖通過')
+  assert.doesNotMatch(vc.slice(vc.indexOf('onAuthenticationError')).split('\n')[0], /verified|writeConsentMarker/, '失敗、取消不寫')
+  assert.doesNotMatch(bridge, /writeConsentMarker|consent|\.irori-asn|writeText|writeBytes|FileOutputStream|createNewFile/, '橋接方法不寫憑證檔')
+  assert.match(bridge, /@JavascriptInterface\s+fun confirmWithToken\(callbackId: String, challenge: String\) \{\s+activity\.runOnUiThread \{ ViewerConfirm\.ask\(activity, callbackId, challenge\) \}/)
+})
+
+test('憑證檔：檔名是憑證的 SHA-256 小寫十六進位、由外殼自己算；憑證格式先驗；位置在 filesDir/.irori-asn/consent', () => {
+  const vc = read(...KT_DIR, 'ViewerConfirm.kt')
+  assert.match(vc, /MessageDigest\.getInstance\("SHA-256"\)\.digest\(challenge\.toByteArray\(Charsets\.UTF_8\)\)\.joinToString\(""\) \{ "%02x"\.format\(it\) \}/)
+  assert.match(vc, /File\(activity\.filesDir, CONSENT_DIR\)/)
+  assert.match(vc, /CONSENT_DIR = "\.irori-asn\/consent"/)
+  assert.match(vc, /s\.length == CHALLENGE_LEN && s\.all \{ it in '0'\.\.'9' \|\| it in 'a'\.\.'f' \}/)
+  assert.match(vc, /if \(challenge != null && !validChallenge\(challenge\)\) \{ reply\(activity, callbackId, "cancel"\); return \}/)
+  assert.match(vc, /File\(dir, name\)\.writeText/, '檔名只用算出來的雜湊')
+  assert.doesNotMatch(vc, /File\([^)]*challenge/, '不用憑證字串組路徑')
+  const rs = read('src-tauri', 'src', 'datadir.rs')
+  assert.match(rs, /FALLBACK_NAME: &str = "\.irori-asn"/)
+  const consent = read('src-tauri', 'src', 'consent.rs')
+  assert.match(consent, /MARKER_DIR: &str = "consent"/)
+})
+
+test('憑證：專案沒有檔案外掛、權限沒開檔案存取，網頁自己造不出憑證檔；新命令只登記在手機清單', () => {
+  assert.doesNotMatch(cargo, /tauri-plugin-fs/)
+  assert.doesNotMatch(lib, /tauri_plugin_fs|plugin-fs/)
+  for (const f of fs.readdirSync(path.join(root, 'src-tauri', 'capabilities'))) assert.doesNotMatch(read('src-tauri', 'capabilities', f), /"fs:|plugin-fs/, f)
+  const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
+  const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
+  for (const c of ['android_known_token', 'android_known_rename']) { assert.ok(phone.includes(`android::${c}`), c); assert.ok(!desk.includes(c), `電腦版沒有 ${c}`) }
+  assert.ok(desk.includes('device_known_rename') && !phone.includes('device_known_rename'), '電腦版改名只在電腦版')
+  assert.match(lib, /#\[cfg\(any\(target_os = "android", test\)\)\][^\n]*\n#\[cfg_attr\(not\(target_os = "android"\), allow\(dead_code\)\)\]\nmod consent;/)
+})
+
+test('憑證：Rust 命令先核對憑證才動手，視窗要是主畫面（list）', () => {
+  const rs = read('src-tauri', 'src', 'android.rs')
+  const fnBody = n => rs.slice(rs.indexOf(`pub fn ${n}(`)).split('\n}\n')[0]
+  const conf = fnBody('android_known_confirm')
+  assert.ok(conf.indexOf('take_passed(') < conf.indexOf('consent::redeem(') && conf.indexOf('consent::redeem(') < conf.indexOf('live::confirm('))
+  assert.match(conf, /challenge: String/)
+  const forget = fnBody('android_known_forget')
+  assert.ok(forget.indexOf('consent::redeem(') < forget.indexOf('live::forget('))
+  for (const n of ['android_known_token', 'android_known_confirm', 'android_known_forget', 'android_known_rename']) assert.match(fnBody(n), /consent::label_ok\(window\.label\(\)\)/, n)
+  assert.match(read('src-tauri', 'tauri.android.conf.json'), /"label": "list"/)
 })

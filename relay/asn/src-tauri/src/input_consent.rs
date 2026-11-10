@@ -7,7 +7,7 @@
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
 //! - 本人可以在這台的設定頁「認得的電腦」對某一台設「打字不用每次問我」，那台就不跳這個框（判斷在呼叫端，存在本機）。
 //! - **框上的名字用本機記住的（[`who_of`]），不用後台這次給的：** 後台給的名字不在簽章裡。只有第一次連線（本機還沒記住）才用後台給的，並在框上標示「第一次連線」；另外附設備指紋前 8 碼讓本人比對設定頁。
-use crate::device_id::{fingerprint, KnownPeers, Tofu};
+use crate::device_id::{fingerprint, fp_grouped, KnownPeers, Tofu};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -24,6 +24,8 @@ pub struct Who {
     pub name: String,
     /// 設備指紋前 8 碼（設定頁「認得的電腦」顯示完整指紋）
     pub fp8: String,
+    /// 完整指紋（16 碼、每 4 碼一組）：名字是空的時候改顯示這個，本人才有東西可以核對
+    pub fp_full: String,
     /// 本機還沒記住這台（第一次連線）：名字是後台給的
     pub first: bool,
     /// 本人在這台對這把公鑰按過「允許」打字（0.2.15）
@@ -45,15 +47,29 @@ pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str
     Who {
         name: clean(local.unwrap_or(backend_name), NAME_MAX),
         fp8: fingerprint(sign_pub).chars().take(8).collect(),
+        fp_full: fp_grouped(sign_pub),
         first: local.is_none(),
         typed_before: peer.is_some() && known.input_confirmed(node),
         always_ask: peer.is_some_and(|p| p.input_always_ask),
     }
 }
 
+/// 沒有名字的電腦一律叫這個，後面接完整指紋讓本人核對（不從後台補名字）
+pub const UNNAMED: &str = "未命名的電腦";
+
+/// 框與紅條上的「名字、指紋」：有名字用名字＋前 8 碼；沒有名字用「未命名的電腦」＋完整分組指紋
+fn head_of(who: &Who) -> (&str, &str, bool) {
+    if who.name.is_empty() {
+        (UNNAMED, who.fp_full.as_str(), false)
+    } else {
+        (who.name.as_str(), who.fp8.as_str(), true)
+    }
+}
+
 /// 同意框的話：誰（名字＋指紋）、哪個視窗、能做什麼
 pub fn ask_text(who: &Who, window: &str) -> String {
-    let name = if who.name.is_empty() { "另一台電腦".to_string() } else { format!("「{}」", who.name) };
+    let (name, fp, named) = head_of(who);
+    let name = if named { format!("「{name}」") } else { name.to_string() };
     let window = clean(window, 64);
     let first = if who.first {
         "\n\n這台電腦是第一次連線到這裡，請確認是你自己的電腦。"
@@ -64,14 +80,14 @@ pub fn ask_text(who: &Who, window: &str) -> String {
     };
     // 按了允許之後會不會再問（0.2.15）：設成每次都問的就照樣每次問
     let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到設定 → 認得的電腦取消勾選。" };
-    format!("{name}（指紋 {}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？", who.fp8)
+    format!("{name}（指紋 {fp}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？")
 }
 
 /// 紅條（有人在看／在打字）上的「誰」：名字＋指紋前 8 碼，第一次連線另外標示。畫面會在外面加「」
 pub fn bar_label(who: &Who) -> String {
-    let name = if who.name.is_empty() { "另一台電腦" } else { who.name.as_str() };
+    let (name, fp, _) = head_of(who);
     let first = if who.first { "，第一次連線" } else { "" };
-    format!("{name}（指紋 {}{first}）", who.fp8)
+    format!("{name}（指紋 {fp}{first}）")
 }
 
 /// #933：本人在設定頁勾「允許這支手機替這台登入」之前的確認框文字：名字＋指紋前 8 碼（和紅條同一種），寫清楚勾了能做什麼
@@ -431,8 +447,8 @@ mod tests {
         assert!(t.contains("「家用機」（指紋 "), "{t}");
         assert!(t.contains("要在這台的「小乙」打字"));
         assert!(t.contains("包括回答權限框"));
-        let blank = Who { name: String::new(), fp8: "01234567".into(), first: true, typed_before: false, always_ask: false };
-        assert!(ask_text(&blank, "小乙").starts_with("另一台電腦"));
+        let blank = Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: true, typed_before: false, always_ask: false };
+        assert!(ask_text(&blank, "小乙").starts_with("未命名的電腦（指紋 0123 4567 89ab cdef）"), "{}", ask_text(&blank, "小乙"));
     }
 
     #[test]
@@ -485,7 +501,7 @@ mod tests {
         assert!(!t.contains("假裝是工作機"));
         let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
         assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
-        assert!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), first: false, typed_before: false, always_ask: false }).starts_with("另一台電腦"));
+        assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false, typed_before: false, always_ask: false }), "未命名的電腦（指紋 0123 4567 89ab cdef）");
     }
 
     #[test]

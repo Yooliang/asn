@@ -26,7 +26,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -112,6 +112,11 @@ export const SettingsPanel = {
       act(b.target.op, b.target.value)
     }
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
+    // 認得的電腦：改名的輸入（只在這個元件裡，存的時候才交給樞紐）
+    const renameNode = ref(''), renameText = ref('')
+    const renameStart = p => { renameNode.value = p.node; renameText.value = p.name }
+    const renameCancel = () => { renameNode.value = ''; renameText.value = '' }
+    const renameSave = () => { const node = renameNode.value; if (!node) return; act('known-rename', { node, name: renameText.value }); renameCancel() }
     const mmEmail = ref('')
     const mmKey = ref('')
     const addMinimax = () => {
@@ -120,7 +125,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN, groupFp,
+    return { KNOWN, groupFp, renameNode, renameText, renameStart, renameCancel, renameSave,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -488,14 +493,19 @@ export const SettingsPanel = {
           <p v-if="st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b></p>
           <small v-if="!st.known.peers.length">{{ KNOWN.none }}</small>
           <div class="pair-row" v-for="p in st.known.peers" :key="p.node">
-            <p><b>{{ p.name }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
+            <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
             <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
             <label class="chk"><input type="checkbox" :checked="p.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
             <small v-if="p.inputNoAsk && p.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
             <small v-if="p.inputNoAsk && !p.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
             <label class="chk"><input type="checkbox" :checked="p.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
             <small v-if="p.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
-            <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.node)">{{ KNOWN.forget }}</button></span>
+            <form class="pair-rename" v-if="renameNode === p.node" @submit.prevent="renameSave">
+              <input type="text" maxlength="32" autocomplete="off" v-model="renameText" :aria-label="KNOWN.renameLabel" />
+              <small>{{ KNOWN.renameHint }}</small>
+              <span class="pair-btns"><button class="aero-btn" type="submit" :disabled="st.known.busy">{{ KNOWN.renameSave }}</button><button class="aero-btn" type="button" @click="renameCancel">{{ KNOWN.renameCancel }}</button></span>
+            </form>
+            <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="renameStart(p)">{{ KNOWN.rename }}</button><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.node)">{{ KNOWN.forget }}</button></span>
           </div>
           <small v-if="st.known.peers.length">{{ KNOWN.forgetNote }}</small>
           <p class="pair-warn" v-if="st.known.error" role="alert">{{ st.known.error }}</p>

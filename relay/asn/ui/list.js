@@ -416,6 +416,11 @@ async function setKnownLoginOk(node, on) {
   known.busy = true
   try { await invoke('device_known_login_ok', { node, on: !!on }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
+// 替某台電腦改名（只改這台記的名字；空的＝未命名）：判斷與整理都在 Rust
+async function renameKnown(node, name) {
+  known.busy = true
+  try { await invoke('device_known_rename', { node, name: String(name ?? '') }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+}
 async function forgetKnown(node) {
   known.busy = true
   try { await invoke('device_known_forget', { node }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
@@ -1859,6 +1864,7 @@ const app = createApp({
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'known-forget': if (value) await forgetKnown(value); break
+        case 'known-rename': if (value?.node) await renameKnown(value.node, value.name); break
         case 'known-input-no-ask': if (value?.node) await setKnownNoAsk(value.node, value.on); break
         case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
