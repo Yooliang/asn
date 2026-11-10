@@ -697,8 +697,8 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -850,6 +850,70 @@ const noticeMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-0000000000a2', from_node: 'R', from_agent: 'ASN 通知', kind: 'notice:waiting', body: '工作機：夥伴 demo 正在等你確認。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
   { id: '00000000-0000-4000-8000-0000000000a3', from_node: 'Q', from_agent: 'ASN 通知', kind: 'notice:device_key', body: '辦公室：這台的設備金鑰剛換過。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 60_000).toISOString() },
 ]
+// 電腦版左側「通知」頁籤（方案 A）：鈴鐺頁籤在最上面、右上角有未讀數；點開是通知清單（分類小籤、新的在前）；名單裡沒有「通知」；
+// 通知內文一律純文字（內文夾 <b> 標籤要原樣顯示、不能變成元素）；畫面不能橫向捲動。
+// mode：'merged'＝點第一則、右邊顯示內容；'split'＝點第一則改開「通知」對話視窗；'narrow'＝窄視窗只顯示右邊，有「‹ 通知」返回鈕
+const DNOTICE_ME = { merged: { winMode: 'merged' }, split: {}, narrow: { winMode: 'merged' } }
+const dnoticeMails = (now = Date.now()) => [...noticeMails(now), { id: '00000000-0000-4000-8000-0000000000a4', from_node: 'Q', from_agent: 'ASN 通知', kind: 'notice:login', body: '辦公室有新的登入\n登入的設備 <b>不認得</b> 的話請到設定檢查', trust: 'member', to_agent: '測試機', created_at: new Date(now - 30_000).toISOString() }]
+export const DNOTICE_PROBES = { merged: { dnotice: 'merged' }, split: { dnotice: 'split' }, narrow: { dnotice: 'narrow' } }
+export const dnoticeProbeSource = ({ dnotice }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
+  const mode = ${JSON.stringify(dnotice)}, W = window.innerWidth;
+  const noScroll = () => document.documentElement.scrollWidth <= W + 1 && document.body.scrollWidth <= W + 1;
+  const badge = () => { const c = document.querySelector('.rail .rtab-notice .rtab-count'); return c ? c.textContent.trim() : '' };
+  let bell = null;
+  for (let i = 0; i < 60 && badge() !== '4'; i++) await sleep(100);
+  bell = document.querySelector('.rail .rtab-notice');
+  if (!bell) return { ok: false, why: '左邊沒有「通知」頁籤' };
+  if (badge() !== '4') return { ok: false, why: '通知頁籤的未讀數應是 4，實際：' + (badge() || '沒有') };
+  const rail = [...document.querySelectorAll('.rail .rtab')].filter(shown).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  if (rail[0] !== bell) return { ok: false, why: '通知頁籤應排在左邊最上面' };
+  if ([...document.querySelectorAll('.content .buddy')].some(b => b.textContent.trim().startsWith('通知'))) return { ok: false, why: '名單裡還有「通知」' };
+  bell.click(); await sleep(300);
+  const rows = [...document.querySelectorAll('.notice-list .nt-row')];
+  if (rows.length !== 4) return { ok: false, why: '通知清單應有 4 則，實際 ' + rows.length };
+  const chips = [...document.querySelectorAll('.notice-list .nt-chip')].map(e => e.textContent.trim()).join('／');
+  if (chips !== '全部／卡住／登入／額度／安全／其他') return { ok: false, why: '分類小籤不對：' + chips };
+  const first = rows[0];
+  if (!first.textContent.includes('辦公室有新的登入')) return { ok: false, why: '最新的一則不在最上面：' + first.textContent.trim().slice(0, 30) };
+  if (first.querySelector('b')) return { ok: false, why: '通知內文被當成 HTML（出現 <b> 元素）' };
+  if (!first.textContent.includes('<b>不認得</b>')) return { ok: false, why: '摘要沒有原樣顯示角括號' };
+  if (!first.querySelector('.nt-dot')) return { ok: false, why: '未讀的通知沒有紅點' };
+  if (!document.querySelector('.notice-list .nt-head') || !document.querySelector('.notice-list .nt-all')) return { ok: false, why: '找不到通知標頭或「全部標為已讀」' };
+  const chip = t => [...document.querySelectorAll('.notice-list .nt-chip')].find(e => e.textContent.trim() === t);
+  chip('登入').click(); await sleep(200);
+  const loginRows = document.querySelectorAll('.notice-list .nt-row').length;
+  if (loginRows !== 1) return { ok: false, why: '「登入」分類應只剩 1 則，實際 ' + loginRows };
+  chip('全部').click(); await sleep(200);
+  if (!noScroll()) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + document.documentElement.scrollWidth };
+  document.querySelector('.notice-list .nt-row').click(); await sleep(500);
+  if (mode === 'split') {
+    const calls = (globalThis.__smokeCalls || []).filter(c => c[0] === 'open_chat');
+    if (!calls.some(c => c[1] && c[1].id === 'notice:me')) return { ok: false, why: '分離模式點通知應打開「通知」對話視窗' };
+    if (document.querySelector('.notice-pane')) return { ok: false, why: '分離模式不該有右邊的通知內容' };
+    return noScroll() ? { ok: true, why: '' } : { ok: false, why: '點開後出現橫向捲動' };
+  }
+  const pane = document.querySelector('.notice-pane');
+  if (!shown(pane)) return { ok: false, why: '右邊沒有顯示通知內容' };
+  const body = pane.querySelector('.nt-body');
+  if (!body || body.querySelector('b') || !body.textContent.includes('<b>不認得</b>')) return { ok: false, why: '通知內容沒有用純文字顯示' };
+  if (pane.querySelector('textarea, .compose-row')) return { ok: false, why: '通知內容不該有輸入列' };
+  if (document.querySelector('.chat-stack .compose-row')) return { ok: false, why: '通知被開成一般對話分頁' };
+  if (badge() !== '3') return { ok: false, why: '點開一則後未讀數應剩 3，實際：' + (badge() || '沒有') };
+  if (mode === 'narrow') {
+    const list = document.querySelector('.shell > .list-pane');
+    if (shown(list)) return { ok: false, why: '窄視窗點開通知後應只顯示右邊' };
+    const back = document.querySelector('.chat-area .pane-back');
+    if (!shown(back) || back.textContent.replace(/\\s+/g, '') !== '‹通知') return { ok: false, why: '返回鈕應寫「‹ 通知」，實際：' + (back ? back.textContent.trim() : '沒有') };
+    back.click(); await sleep(400);
+    if (!shown(list) || !document.querySelector('.notice-list')) return { ok: false, why: '按返回後應回到通知清單' };
+    if (!noScroll()) return { ok: false, why: '通知清單單獨顯示時出現橫向捲動' };
+    document.querySelector('.notice-list .nt-row').click(); await sleep(400);
+    if (shown(list) || !shown(document.querySelector('.notice-pane'))) return { ok: false, why: '再點一次應切回右邊的通知內容' };
+  }
+  return noScroll() ? { ok: true, why: '' } : { ok: false, why: '點開後出現橫向捲動：' + document.documentElement.scrollWidth };
+})()`
 export const MNOTICE_PROBES = {
   tab: { mnotice: true, view: 'tab', big: false },
   dot: { mnotice: true, view: 'dot', big: false },
@@ -1298,6 +1362,10 @@ export const SCENARIOS = [
   { name: 'm-notice-legacy', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-412.png' },
   { name: 'm-notice-legacy-360', page: 'm.html', width: 360, state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-360.png' },
   { name: 'm-notice-legacy-lastchat', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'lastchat' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.lastchat, shot: 'm-notice-legacy-lastchat-412.png' },
+  // 電腦版左側「通知」頁籤（方案 A）：整合模式右邊顯示內容、分離模式開通知對話視窗、窄視窗（360）只顯示右邊並有「‹ 通知」返回鈕
+  { name: 'list-notice-merged', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dnotice: 'merged' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.merged, shot: 'list-notice-merged.png' },
+  { name: 'list-notice-split', page: 'list.html', width: 360, height: 660, state: { signedIn: true, dnotice: 'split' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.split, shot: 'list-notice-split.png' },
+  { name: 'list-notice-narrow', page: 'list.html', width: 360, height: 640, state: { signedIn: true, dnotice: 'narrow' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.narrow, shot: 'list-notice-narrow-360.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -1405,6 +1473,14 @@ export const tableFor = scenario => {
     t.relay_ack = null
     t.relay_read_sync = { marks: [] }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MNOTICE_ME[scenario.state.mnotice]) } }
+  }
+  if (scenario.state.dnotice) {
+    t.relay_inbox = { messages: dnoticeMails() }
+    t.relay_ack = null
+    t.relay_read_sync = { marks: [] }
+    t.open_chat = null
+    t.show_toast = null   // 新通知會跳右下角提示
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(DNOTICE_ME[scenario.state.dnotice]) } }
   }
   if (scenario.state.mnoticeLegacy) {
     t.relay_list = { members: legacyMembers() }
