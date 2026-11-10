@@ -179,3 +179,37 @@ test('權限：anon／authenticated 不能執行新函式', { skip }, async () =
     await db.exec('reset role')
   }
 })
+
+test('舊 relay（Edge）以 5 個具名參數呼叫新函式照樣成功，視同前景', { skip }, async () => {
+  const db = await boot()
+  const r = await db.query(`select public.asn_relay_asn_presence_set(p_node => $1, p_window => 'ASN', p_version => '0.2.14', p_status => 'online', p_psm => null) r`, [PH])
+  assert.deepEqual(r.rows[0].r, { ok: true })
+  assert.ok((await row(db, PH)).fg_at)
+  assert.deepEqual((await db.query(`select public.asn_relay_asn_presence_set(p_node => $1, p_window => 'ASN', p_version => '0.2.14', p_status => 'away', p_psm => '忙') r`, [PH])).rows[0].r, { ok: true })
+})
+
+test('回復檔實跑：套 up 再套 down，回到舊狀態（5 參數版可呼叫、push_targets 看 updated_at、fg_at 沒了、舊權限還在）', { skip }, async () => {
+  const db = await boot()
+  await setPresence(db, PH, { p_foreground: false })   // up 的狀態：背景
+  await db.exec(fs.readFileSync(new URL('../supabase/sql/rollback/20261112700000_presence_foreground_down.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n'))
+  assert.equal((await db.query(`select count(*)::int n from information_schema.columns where table_schema = 'relay' and table_name = 'asn_presence' and column_name = 'fg_at'`)).rows[0].n, 0, 'fg_at 已刪')
+  const sigs = (await db.query(`select pg_get_function_identity_arguments(oid) a from pg_proc where proname = 'asn_relay_asn_presence_set'`)).rows.map(x => x.a)
+  assert.deepEqual(sigs, ['p_node text, p_window text, p_version text, p_status text, p_psm text'], '只剩 5 參數版')
+  assert.deepEqual((await db.query(`select public.asn_relay_asn_presence_set($1, 'ASN', '0.2.14', 'online', null) r`, [PH])).rows[0].r, { ok: true })
+  assert.deepEqual((await db.query(`select public.irori_relay_asn_presence_set($1, 'ASN', '0.2.14', 'online', null) r`, [PC])).rows[0].r, { ok: true }, '舊名包裝仍可用')
+  // push_targets 回到看 updated_at：在線列剛寫入 → 不推；4 分鐘前 → 推
+  await reg(db)
+  assert.deepEqual(await targets(db), [], 'updated_at 很新就不推（舊規則）')
+  await db.query(`update relay.asn_presence set updated_at = now() - interval '4 minutes' where node = $1`, [PH]); await clearSent(db)
+  assert.equal((await targets(db)).length, 1)
+  // 權限還原：anon 不能執行、service_role 可以
+  await db.exec('set role anon')
+  await assert.rejects(db.query(`select public.asn_relay_asn_presence_set('${PH}', 'ASN', '0.2.14', 'online', null)`), /permission denied/)
+  await db.exec('reset role')
+  await db.exec('set role service_role')
+  assert.deepEqual((await db.query(`select public.asn_relay_asn_presence_set('${PH}', 'ASN', '0.2.14', 'online', null) r`)).rows[0].r, { ok: true })
+  await db.exec('reset role')
+  // 再套一次 up 也能回來（可重跑）
+  await db.exec(read(MIG))
+  assert.ok((await row(db, PH)).fg_at, 'up 再套一次：fg_at 回填')
+})

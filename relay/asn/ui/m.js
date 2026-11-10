@@ -64,6 +64,7 @@ import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib
 import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
+const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 const bridge = androidBridge(window)
@@ -216,12 +217,14 @@ if (screen.value === 'main') {
 savedTab = restoreMobileTab(saved.navTab)
 watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? (fourthSt.fourth ? fourthSt.fourth.from : PAGE_TAB) : nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
-  // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent（網頁被凍住前最可靠的一次），
-  // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）
+  // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
+  // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。
+  // 前景時每 30 秒再告知一次（續命）：Rust 的前景告知 90 秒就過期，背景時網頁計時器被凍住不會續命，所以「進背景」的告知就算遺失也只會多撐一下
   const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}) }
   window.__asnFgEvent = tellFg
   document.addEventListener('visibilitychange', () => tellFg(document.visibilityState === 'visible'))
   tellFg(document.visibilityState === 'visible')
+  setInterval(() => { if (document.visibilityState === 'visible') tellFg(true) }, FG_RENEW_MS)
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
