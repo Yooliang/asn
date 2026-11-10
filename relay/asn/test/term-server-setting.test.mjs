@@ -211,3 +211,16 @@ test('接線：細節欄位從後端讀進畫面、帶進設定頁快照；後�
   const mod = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
   assert.ok(mod.includes('pub term_fetch_detail: String') && mod.includes('term_fetch_detail: fetch.detail.clone()'))
 })
+
+test('啟動方式會讓夥伴跟著 ASN 一起關閉時：設定頁用人話說明並教怎麼恢復，不出現工作群組、旗標這些字', async () => {
+  const why = '這次的啟動方式會讓夥伴跟著 ASN 一起關閉，所以夥伴開在一般視窗'
+  const html = await render({ ...base(), bridge: bridge({ termServerWhy: why }) })
+  assert.ok(html.includes(why) && html.includes('從開始選單或桌面捷徑重新開啟 ASN'), '原因與恢復方法都要在畫面上')
+  assert.ok(!/工作群組|旗標|Job|TakesMuxDown/.test(html), '不出現技術名詞')
+  assert.ok(!(await render({ ...base(), bridge: bridge({ termServerWhy: '' }) })).includes('從開始選單或桌面捷徑重新開啟 ASN'), '沒有原因就不顯示')
+  // 接線：後台狀態帶 term_server_why（來自啟動時記下的原因），畫面照抄
+  const rs = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
+  assert.ok(rs.includes('term_server_why: crate::launch::term::mux_off_reason()'))
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.ok(js.includes("termServerWhy: typeof s.term_server_why === 'string' ? s.term_server_why : ''") && js.includes('termServerWhy: bridge.termServerWhy'))
+})

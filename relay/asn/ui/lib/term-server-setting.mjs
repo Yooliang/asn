@@ -70,3 +70,6 @@ export function termServerNote(st) {
   // 設定和這次啟動實際在用的不同＝改了還沒生效
   return (st.termServer !== st.termServerActive ? `${base} ${TERM_SERVER_RESTART_NOTE}` : base) + bg
 }
+
+// 這次 ASN 的啟動方式會讓夥伴跟著一起關閉，所以夥伴改開在一般視窗時，告訴使用者怎麼恢復（不出現工作群組、旗標這些字）
+export const TERM_SERVER_WHY_HINT = '從開始選單或桌面捷徑重新開啟 ASN，夥伴就會回到共用的終端服務。'

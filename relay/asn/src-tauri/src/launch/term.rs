@@ -3537,6 +3537,17 @@ pub(crate) fn stop_mux_partner(id: &str) -> Result<(), String> {
 #[cfg(feature = "gui")]
 static MUX_OFF_REASON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// 設定頁用：這次想開終端服務、卻因為 ASN 的啟動方式改把夥伴開在一般視窗的原因（給人看的話）；沒有就空字串
+pub(crate) fn mux_off_reason() -> String {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        if let Some(why) = MUX_OFF_REASON.get() {
+            return why.clone();
+        }
+    }
+    String::new()
+}
+
 /// B2c：夥伴清單上「使用者環境變數裡有金鑰類變數」的一句話（只有開了 mux 模式、而且真的有才回）。只讀名字，不改登錄檔
 pub(crate) fn mux_env_notice() -> Option<String> {
     #[cfg(all(feature = "gui", not(test)))]
