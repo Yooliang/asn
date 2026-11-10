@@ -2190,6 +2190,20 @@ async fn 通道信_這一輪結束才_ack_寄回後記號清掉() {
 }
 
 #[tokio::test]
+async fn 通道信_回信暫時寄不出去_進寄件匣_照常_ack() {
+    let mut h = channel_h().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.send_fail_n = 50;
+        s.send_fail_code = 503;
+    }
+    h.put_pull(to_agent(1, "Gemini", "@@ECHO_ALL 一")).await;
+    h.wait("ack", |h| h.fr.acked() == vec![uid(1)]).await;
+    assert!(h.fr.sent().is_empty());
+    assert_eq!(h.core.outbox_ids().len(), 1, "回信已保管在寄件匣");
+}
+
+#[tokio::test]
 async fn 通道信_不用回的_也是做完才_ack_不寄回() {
     let mut h = channel_h().await;
     let gate = gate_of(&h);

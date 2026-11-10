@@ -1,0 +1,468 @@
+//! 回信寄件匣（#1135）：視窗的回信寄不出去（連線失敗、逾時、讀回應斷、閘道 502～504）時，
+//! 連同自己產生的 client_id 存進 `<工作資料夾>/reply-outbox.json`，之後在 tick 裡用同一個 client_id 重寄（後台據此去重）。
+//! 寫進去＝已保管：原信照常 ack。4xx（後台明確拒絕）不進寄件匣，照舊走「寄送失敗」流程。
+//! 單一處理者：橋本身靠 bridge.pid 互斥（見 lock.rs），同一個工作資料夾只會有一個 Core；Core 是 &mut 單執行緒，另外用 busy 記號擋同一筆重入。
+//! log 只記編號與筆數，絕不記內文。
+use super::*;
+use serde::{Deserialize, Serialize};
+
+pub(super) const OUTBOX_FILE: &str = "reply-outbox.json";
+/// 寄件匣最多幾筆「待送」項目／序列化後最多幾位元組（含待通知項）；超過就把最舊那封信放棄並通知
+const OUTBOX_MAX_ITEMS: usize = 200;
+const OUTBOX_MAX_BYTES: usize = 2 * 1024 * 1024;
+/// 「待通知」項（已放棄、只欠一則通知）最多幾筆。體積很小，不計入上面的 200 筆；
+/// 超過（通知一直寄不出去）才丟最舊的待通知項，只記 log
+const OUTBOX_MAX_PENDING: usize = 100;
+/// 每個 tick 最多做幾次「實際送出嘗試」（重寄回信或寄放棄通知）；任一次暫時性失敗就結束這一輪
+const OUTBOX_TICK_MAX: usize = 10;
+/// 從第一次失敗起超過這麼久就放棄
+const OUTBOX_GIVE_UP_MS: u64 = 86_400_000;
+/// 第 N 次失敗後多久再寄：15 秒、1、2、5、10、30 分鐘，之後每 30 分鐘
+const RETRY_GAPS_MS: [u64; 6] = [15_000, 60_000, 120_000, 300_000, 600_000, 1_800_000];
+const ATTACH_GONE_TRAILER: &str = "（附件已過期，沒有附上）";
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub(super) struct OutboxItem {
+    pub client_id: String,
+    pub to_node: String,
+    pub to_agent: String,
+    pub body: String,
+    pub reply_to: String,
+    pub from_agent: String,
+    pub expects_reply: Option<bool>,
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
+    pub first_failed_at: u64,
+    pub attempts: u32,
+    pub next_at: u64,
+    /// 不是 None＝這封信已放棄（值是原因），這筆只代表「還欠原寄件人一則放棄通知」：body 已清空、不再重寄回信。
+    /// 通知送達才真正移除。舊版存檔沒有這個欄位，讀回來當 None（serde default），新舊檔案互通
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gave_up: Option<String>,
+}
+
+impl OutboxItem {
+    /// 轉成「待通知」項：清掉回信內文與附件，計時重來（通知本身也有 24 小時的期限）
+    fn into_pending_notice(mut self, reason: &str, now: u64) -> OutboxItem {
+        self.gave_up = Some(reason.to_string());
+        self.body = String::new();
+        self.attachment_ids.clear();
+        self.first_failed_at = now;
+        self.attempts = 0;
+        self.next_at = now;
+        self
+    }
+
+    fn request_body(&self) -> Value {
+        let mut b = json!({ "to_node": self.to_node, "body": self.body, "reply_to": self.reply_to, "from_agent": self.from_agent, "client_id": self.client_id });
+        if !self.to_agent.is_empty() {
+            b["to_agent"] = json!(self.to_agent);
+        }
+        if let Some(e) = self.expects_reply {
+            b["expects_reply"] = json!(e);
+        }
+        if !self.attachment_ids.is_empty() {
+            b["attachment_ids"] = json!(self.attachment_ids);
+        }
+        b
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct OutboxFile {
+    v: u32,
+    items: Vec<OutboxItem>,
+}
+
+fn file_text(items: &[OutboxItem]) -> String {
+    serde_json::to_string(&json!({ "v": 1, "items": items })).unwrap_or_default()
+}
+
+fn retry_gap(attempts: u32) -> u64 {
+    let i = (attempts.max(1) as usize - 1).min(RETRY_GAPS_MS.len() - 1);
+    RETRY_GAPS_MS[i]
+}
+
+#[derive(Default)]
+pub(super) struct Outbox {
+    pub items: Vec<OutboxItem>,
+    /// 正在重寄的 client_id（處理中標記）
+    pub busy: HashSet<String>,
+    file: PathBuf,
+}
+
+impl Outbox {
+    /// 讀回存檔；壞檔改名成 .bad 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
+    pub fn load(work_dir: &std::path::Path) -> (Outbox, Option<String>) {
+        let file = work_dir.join(OUTBOX_FILE);
+        let mut warn = None;
+        let items = match std::fs::read_to_string(&file) {
+            Err(_) => vec![],
+            Ok(t) => match serde_json::from_str::<OutboxFile>(&t) {
+                Ok(f) => f.items,
+                Err(e) => {
+                    let _ = std::fs::rename(&file, work_dir.join(format!("{OUTBOX_FILE}.bad")));
+                    warn = Some(format!("reply outbox file unreadable, moved to .bad: {e}"));
+                    vec![]
+                }
+            },
+        };
+        (Outbox { items, busy: HashSet::new(), file }, warn)
+    }
+
+    /// 這封信還有沒有「待送」的片段（已放棄、只剩通知的不算：放棄之後新來的片段另算）
+    pub fn has_reply(&self, reply_to: &str) -> bool {
+        self.items.iter().any(|i| i.gave_up.is_none() && i.reply_to == reply_to)
+    }
+
+    fn save(&self, items: &[OutboxItem]) -> std::io::Result<()> {
+        let v: Value = serde_json::from_str(&file_text(items)).unwrap_or(Value::Null);
+        pending::save_atomic(&self.file, &v)
+    }
+
+    /// 存檔（失敗只回說明，由呼叫端決定怎麼辦）
+    fn persist(&self) -> Result<(), String> {
+        self.save(&self.items).map_err(|e| e.to_string())
+    }
+}
+
+/// 回信寄送的結果
+pub(super) enum ReplyOutcome {
+    Sent,
+    /// 暫時寄不出去，已存進寄件匣
+    Stored,
+    /// 後台明確拒絕，或寄件匣寫不進去（同一封信已有前段存進寄件匣時不會回這個，見 send_reply）
+    Failed,
+}
+
+enum Resend {
+    Done,
+    Retry,
+    GiveUp(&'static str),
+}
+
+fn attach_gone(e: &str) -> bool {
+    e.contains("HTTP 400 bad_attachment")
+}
+
+impl Core {
+    /// 寄一則視窗的回信：先用自己產生的 client_id 寄一次（relay 內層照舊快速重試）。
+    /// 暫時性失敗進寄件匣；同一封信前面的片段還在寄件匣時，後面的片段直接排在後面（保序）。
+    /// 前段已存進寄件匣、後段卻存不進去（寫檔失敗、單筆超過 2MB）：不能回 Failed——Failed 會讓原信留在信箱重新投遞，
+    /// 視窗又用新的 client_id 重答一次，前段就重複寄了。改成整封信標記放棄、通知原寄件人，仍回 Stored 讓原信照常 ack
+    pub(super) async fn send_reply(&mut self, from: &str, o: &Origin, body: &str, expects: Option<bool>) -> ReplyOutcome {
+        let raw = dev_prefix::without_old_head(body, Some(from));
+        let body = dev_prefix::with_notice_prefix(raw, Some(from), None);
+        let item = OutboxItem {
+            client_id: crate::relay::new_client_id(),
+            to_node: o.from_node.clone(),
+            to_agent: o.from_agent.clone(),
+            body,
+            reply_to: o.id.clone(),
+            from_agent: from.to_string(),
+            expects_reply: expects,
+            // 目前橋的回信一律不帶附件，這裡永遠是空的；附件過期改寄那段（outbox_resend）是給之後有附件時用的
+            attachment_ids: vec![],
+            first_failed_at: self.now,
+            attempts: 0,
+            next_at: 0,
+            gave_up: None,
+        };
+        if self.outbox.has_reply(&o.id) {
+            return match self.outbox_store(item).await {
+                ReplyOutcome::Failed => {
+                    self.log.line(&format!("reply id={} later part cannot be stored: giving up the whole mail", o.id));
+                    self.outbox_give_up(&o.id, "回信存不進寄件匣").await;
+                    ReplyOutcome::Stored
+                }
+                r => r,
+            };
+        }
+        match self.relay.api("send", Some(item.request_body())).await {
+            Ok(v) => {
+                self.log_attach_missing(&o.id, &v);
+                ReplyOutcome::Sent
+            }
+            Err(e) => {
+                self.log.line(&format!("send back failed id={}: {e}", o.id));
+                if crate::relay::is_transient_api_err(&e) {
+                    self.outbox_store(item).await
+                } else {
+                    ReplyOutcome::Failed
+                }
+            }
+        }
+    }
+
+    fn log_attach_missing(&self, reply_to: &str, resp: &Value) {
+        let n = resp.get("attachments_missing").and_then(Value::as_array).map_or(0, |a| a.len());
+        if n > 0 {
+            self.log.line(&format!("reply id={reply_to} sent but {n} attachment(s) missing (not resent)"));
+        }
+    }
+
+    async fn outbox_store(&mut self, mut item: OutboxItem) -> ReplyOutcome {
+        item.first_failed_at = self.now;
+        item.attempts = 1;
+        item.next_at = self.now + retry_gap(1);
+        let now = self.now;
+        let first_of_mail = !self.outbox.has_reply(&item.reply_to);
+        let mut next = self.outbox.items.clone();
+        next.push(item.clone());
+        // 超過上限：把最舊的一封「待送」的信（所有片段）放棄，只留一筆待通知項代表它（不會只丟前段、留下後段單獨送出）。
+        // 上限邊界：200 筆只算待送項；位元組上限算全部。位元組還是超過、而且已沒有可放棄的待送項（剩剛來的這封）時，
+        // 才丟最舊的待通知項（只記 log）。待通知項另有 100 筆的上限，超過一樣丟最舊的
+        let mut evicted: Vec<OutboxItem> = vec![];
+        loop {
+            let live = next.iter().filter(|i| i.gave_up.is_none()).count();
+            if live <= OUTBOX_MAX_ITEMS && file_text(&next).len() <= OUTBOX_MAX_BYTES {
+                break;
+            }
+            let oldest = next.iter().find(|i| i.gave_up.is_none() && i.reply_to != item.reply_to).map(|i| i.reply_to.clone());
+            if let Some(rt) = oldest {
+                let (gone, keep): (Vec<OutboxItem>, Vec<OutboxItem>) = next.into_iter().partition(|i| i.gave_up.is_none() && i.reply_to == rt);
+                next = keep;
+                if let Some(first) = gone.into_iter().next() {
+                    let pending = first.into_pending_notice("待送的回信太多", now);
+                    next.push(pending.clone());
+                    evicted.push(pending);
+                }
+            } else if let Some(pos) = next.iter().position(|i| i.gave_up.is_some()) {
+                let d = next.remove(pos);
+                self.log.line(&format!("outbox full: dropped a pending give-up notice id={} client_id={} (not delivered)", d.reply_to, d.client_id));
+                evicted.retain(|e| e.client_id != d.client_id);
+            } else {
+                break;
+            }
+        }
+        while next.iter().filter(|i| i.gave_up.is_some()).count() > OUTBOX_MAX_PENDING {
+            let Some(pos) = next.iter().position(|i| i.gave_up.is_some()) else { break };
+            let d = next.remove(pos);
+            self.log.line(&format!("too many pending give-up notices: dropped the oldest id={} client_id={} (not delivered)", d.reply_to, d.client_id));
+            evicted.retain(|e| e.client_id != d.client_id);
+        }
+        if file_text(&next).len() > OUTBOX_MAX_BYTES {
+            self.log.line(&format!("reply id={} too big for the outbox: not stored", item.reply_to));
+            return ReplyOutcome::Failed;
+        }
+        if let Err(e) = self.outbox.save(&next) {
+            self.log.line(&format!("reply outbox save failed id={}: {e}", item.reply_to));
+            return ReplyOutcome::Failed;
+        }
+        self.outbox.items = next;
+        self.log.line(&format!("reply id={} client_id={} queued in outbox ({} in outbox)", item.reply_to, item.client_id, self.outbox.items.len()));
+        for ev in evicted {
+            self.log.line(&format!("outbox full: gave up oldest reply id={} client_id={}", ev.reply_to, ev.client_id));
+            self.outbox_notify_pending(&ev).await;
+        }
+        if first_of_mail && !self.is_engine_window(&item.from_agent) {
+            let w = item.from_agent.clone();
+            self.tell_window(&w, "[收發室] 你剛才的回信暫時寄不出去，收發室會自動重寄，不用再寄一次。（這是系統通知，不用回覆。）");
+        }
+        ReplyOutcome::Stored
+    }
+
+    /// 寄一則「待通知」項的放棄通知：寄給原寄件人（bridge_notice，寄件人是系統的「ASN 通知」，不以視窗名義），內文不含回信內文。
+    /// 送達才從寄件匣移除、並告訴回信的視窗（只這一次）；沒送達就保留、依退避之後再寄。回傳是否送達
+    async fn outbox_notify_pending(&mut self, it: &OutboxItem) -> bool {
+        let reason = it.gave_up.clone().unwrap_or_default();
+        let o = Origin { id: it.reply_to.clone(), from_node: it.to_node.clone(), from_agent: it.to_agent.clone() };
+        let text = format!("收發室：{} 對你這封信的回覆沒能送出（{reason}，已放棄）。請再問一次。（原信編號 {}）", it.from_agent, it.reply_to);
+        let ok = self.send_back(&o, &text, None, None).await;
+        self.log.line(&format!("outbox gave up id={} client_id={} reason={reason} notified={ok}", it.reply_to, it.client_id));
+        if ok {
+            self.outbox_remove(&it.client_id);
+            if !self.is_engine_window(&it.from_agent) {
+                let w = it.from_agent.clone();
+                self.tell_window(&w, &format!("[收發室] 你之前對信件 {} 的回信一直沒能送出，已放棄，並已通知對方。（這是系統通知，不用回覆。）", it.reply_to));
+            }
+        } else {
+            let mut n = it.clone();
+            n.attempts += 1;
+            n.next_at = self.now + retry_gap(n.attempts);
+            self.outbox_update(&n);
+        }
+        ok
+    }
+
+    /// 放棄同一封信所有待送的片段：換成一筆待通知項（只留第一筆當代表、其餘刪除），存檔後馬上試著通知一次。回傳通知是否送達。
+    /// 通知寄不出去時待通知項留在寄件匣，由 outbox_tick 之後重試
+    async fn outbox_give_up(&mut self, reply_to: &str, reason: &str) -> bool {
+        let now = self.now;
+        let (gone, keep): (Vec<OutboxItem>, Vec<OutboxItem>) = self.outbox.items.iter().cloned().partition(|i| i.gave_up.is_none() && i.reply_to == reply_to);
+        let Some(first) = gone.into_iter().next() else { return true };
+        let pending = first.into_pending_notice(reason, now);
+        let mut next = keep;
+        next.push(pending.clone());
+        self.outbox.items = next;
+        if let Err(e) = self.outbox.persist() {
+            // 連待通知都存不進檔：記憶體裡照樣留著、馬上通知；重開機就沒了，至少留 log
+            self.log.line(&format!("reply outbox save failed (give-up notice not persisted) id={reply_to}: {e}"));
+        }
+        self.outbox_notify_pending(&pending).await
+    }
+
+    fn outbox_remove(&mut self, client_id: &str) {
+        self.outbox.items.retain(|x| x.client_id != client_id);
+        if let Err(e) = self.outbox.persist() {
+            self.log.line(&format!("reply outbox save failed: {e}"));
+        }
+    }
+
+    fn outbox_update(&mut self, it: &OutboxItem) {
+        if let Some(x) = self.outbox.items.iter_mut().find(|x| x.client_id == it.client_id) {
+            *x = it.clone();
+        }
+        if let Err(e) = self.outbox.persist() {
+            self.log.line(&format!("reply outbox save failed: {e}"));
+        }
+    }
+
+    async fn outbox_resend(&mut self, mut it: OutboxItem) -> Resend {
+        let now = self.now;
+        let mut res = self.relay.api("send", Some(it.request_body())).await;
+        if let Err(e) = &res {
+            if !it.attachment_ids.is_empty() && attach_gone(e) {
+                self.log.line(&format!("reply id={} attachments expired: resending without them", it.reply_to));
+                it.attachment_ids.clear();
+                it.body = format!("{}\n{ATTACH_GONE_TRAILER}", it.body);
+                self.outbox_update(&it);
+                res = self.relay.api("send", Some(it.request_body())).await;
+            }
+        }
+        match res {
+            Ok(v) => {
+                self.log_attach_missing(&it.reply_to, &v);
+                self.outbox.items.retain(|x| x.client_id != it.client_id);
+                if let Err(e) = self.outbox.persist() {
+                    self.log.line(&format!("reply outbox save failed: {e}"));
+                }
+                self.corr_note(&it.from_agent, Dir::Replied, &it.from_agent, &Self::node_agent(&it.to_node, &it.to_agent), &it.reply_to, &it.body, &[]);
+                self.log.line(&format!("reply id={} resent from outbox client_id={} after {} attempt(s) ({} left)", it.reply_to, it.client_id, it.attempts, self.outbox.items.len()));
+                Resend::Done
+            }
+            Err(e) if crate::relay::is_transient_api_err(&e) => {
+                it.attempts += 1;
+                it.next_at = now + retry_gap(it.attempts);
+                self.outbox_update(&it);
+                self.log.line(&format!("reply id={} resend failed (attempt {}): {e}", it.reply_to, it.attempts));
+                Resend::Retry
+            }
+            Err(e) => {
+                self.log.line(&format!("reply id={} resend rejected: {e}", it.reply_to));
+                Resend::GiveUp("對方收不到")
+            }
+        }
+    }
+
+    /// 處理到期的寄件匣（每個 tick 呼叫）。同一封信的片段依序：前面的還沒送出，後面的等著。
+    /// 一輪最多 OUTBOX_TICK_MAX 次實際送出嘗試（重寄、寄放棄通知都算）；任一次暫時性失敗（網路大概整個不通）就結束這一輪。
+    /// 「超過 24 小時」的檢查本身不算嘗試，但放棄後馬上寄的那則通知算一次
+    pub(super) async fn outbox_tick(&mut self, now: u64) {
+        if self.outbox.items.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = self.outbox.items.iter().map(|i| i.client_id.clone()).collect();
+        let mut blocked: HashSet<String> = HashSet::new();
+        let mut tries = 0usize;
+        for cid in ids {
+            if tries >= OUTBOX_TICK_MAX {
+                break;
+            }
+            let Some(it) = self.outbox.items.iter().find(|i| i.client_id == cid).cloned() else { continue };
+            if it.gave_up.is_some() {
+                // 待通知項：到期就重寄通知；通知本身超過 24 小時也寄不出去就丟掉（只記 log）
+                if now.saturating_sub(it.first_failed_at) > OUTBOX_GIVE_UP_MS {
+                    self.log.line(&format!("outbox give-up notice for id={} undeliverable for 24h: dropped", it.reply_to));
+                    self.outbox_remove(&cid);
+                    continue;
+                }
+                if it.next_at > now || !self.outbox.busy.insert(cid.clone()) {
+                    continue;
+                }
+                tries += 1;
+                let ok = self.outbox_notify_pending(&it).await;
+                self.outbox.busy.remove(&cid);
+                if !ok {
+                    break;
+                }
+                continue;
+            }
+            if blocked.contains(&it.reply_to) {
+                continue;
+            }
+            blocked.insert(it.reply_to.clone());
+            if now.saturating_sub(it.first_failed_at) > OUTBOX_GIVE_UP_MS {
+                tries += 1;
+                if !self.outbox_give_up(&it.reply_to, "網路一直不通").await {
+                    break;
+                }
+                continue;
+            }
+            if it.next_at > now || !self.outbox.busy.insert(cid.clone()) {
+                continue;
+            }
+            tries += 1;
+            let r = self.outbox_resend(it.clone()).await;
+            self.outbox.busy.remove(&cid);
+            match r {
+                Resend::Done => {
+                    blocked.remove(&it.reply_to);
+                }
+                Resend::Retry => break,
+                Resend::GiveUp(why) => {
+                    tries += 1;
+                    if !self.outbox_give_up(&it.reply_to, why).await {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 測試用
+    #[cfg(test)]
+    pub(crate) fn outbox_ids(&self) -> Vec<String> {
+        self.outbox.items.iter().map(|i| i.client_id.clone()).collect()
+    }
+    #[cfg(test)]
+    pub(crate) fn outbox_reply_tos(&self) -> Vec<String> {
+        self.outbox.items.iter().map(|i| i.reply_to.clone()).collect()
+    }
+    #[cfg(test)]
+    pub(crate) fn outbox_pending_notices(&self) -> usize {
+        self.outbox.items.iter().filter(|i| i.gave_up.is_some()).count()
+    }
+    #[cfg(test)]
+    pub(crate) fn outbox_mark_busy(&mut self, cid: &str) {
+        self.outbox.busy.insert(cid.to_string());
+    }
+    /// 測試用：直接塞一筆（寄給 W/W-政策、視窗 T-乙）
+    #[cfg(test)]
+    pub(crate) fn outbox_test_push(&mut self, reply_to: &str, attachment_ids: Vec<String>, first_failed_at: u64, next_at: u64) -> String {
+        let client_id = crate::relay::new_client_id();
+        self.outbox.items.push(OutboxItem { client_id: client_id.clone(), to_node: "W".into(), to_agent: "W-政策".into(), body: "附件信".into(), reply_to: reply_to.into(), from_agent: "T-乙".into(), expects_reply: None, attachment_ids, first_failed_at, attempts: 1, next_at, gave_up: None });
+        self.outbox.persist().unwrap();
+        client_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 哪些錯誤算暫時性() {
+        use crate::relay::is_transient_api_err as t;
+        assert!(t("send 連線失敗：error sending request（逾時）"));
+        assert!(t("send 連線失敗：讀回應中斷"));
+        assert!(t("send HTTP 502") && t("send HTTP 503 gateway") && t("send HTTP 504"));
+        assert!(t("send HTTP 408") && t("send HTTP 429 rate_limited") && t("send HTTP 500 internal"));
+        assert!(!t("send HTTP 400 bad_attachment") && !t("send HTTP 422 not_receivable") && !t("send HTTP 404 not_found") && !t("send HTTP 501"));
+    }
+
+    #[test]
+    fn 重寄間隔() {
+        assert_eq!([1, 2, 3, 4, 5, 6, 7, 50].map(retry_gap), [15_000, 60_000, 120_000, 300_000, 600_000, 1_800_000, 1_800_000, 1_800_000]);
+    }
+}
