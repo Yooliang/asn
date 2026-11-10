@@ -1,0 +1,13 @@
+────────────────────────────────────────────────────────────────────────────────
+ Accessing workspace:
+
+ C:\Users\<user>\AppData\Local\Temp\<scratch>\trustdir
+
+ Quick safety check: Is this a project you created or one you trust? (Like your
+ own code, a well-known open source project, or work from your team).
+
+ ❯ No, exit
+   Yes, I trust this folder
+   Yes, and don't ask again for this folder
+
+ Enter to confirm · Esc to cancel

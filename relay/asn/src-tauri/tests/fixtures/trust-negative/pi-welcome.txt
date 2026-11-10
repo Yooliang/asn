@@ -1,0 +1,10 @@
+
+ pi v1.4.2
+ escape interrupt · ctrl+c clear · ctrl+c twice exit
+ / commands · ! bash
+
+────────────────
+> 
+────────────────
+ C:\Users\u\proj
+ anthropic/claude-sonnet-5-5
