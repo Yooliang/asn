@@ -1,7 +1,7 @@
 //! 讀夥伴畫面判斷卡在哪（todo-next-162 第 2 段）的排程。只決定「這一輪讀哪幾扇」，不碰檔案與程序，好測。
 //! Windows 預設開（ASN_SCREEN_WATCH=0 或設定頁關掉），其他平台要 =1。讀畫面本身有開銷，所以有三道限制：每分鐘總量上限、讀失敗就退避、空記憶體低就整個暫停。
 #![cfg_attr(not(test), allow(dead_code))]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const ENV_SCREEN_WATCH: &str = "ASN_SCREEN_WATCH";
@@ -51,6 +51,8 @@ const MAX_READS_PER_MIN: u32 = 30;
 const MINUTE_MS: u64 = 60_000;
 /// 讀失敗的退避上限
 const MAX_BACKOFF_MS: u64 = 300_000;
+/// 退避等到這麼久（含）以上才寫一行紀錄，免得每次小失敗都洗版
+const BACKOFF_LOG_MS: u64 = 60_000;
 /// 空記憶體低於這個值就暫停
 pub(super) const PAUSE_BELOW_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 /// 多久寫一行開銷紀錄
@@ -96,11 +98,22 @@ pub fn match_sessions(partners: &[(String, String)], sessions: &[(String, String
         .collect()
 }
 
+/// 連續失敗、下次要等很久時寫進紀錄的一行：只有視窗編號、次數、秒數，不含任何畫面內容
+pub fn backoff_line(id: &str, fails: u32, wait_ms: u64) -> String {
+    format!("讀畫面 {id} 連續失敗 {fails} 次，下次在 {} 秒後", wait_ms / 1000)
+}
+
+/// 還沒有 session 檔的視窗過了前期、不再讀畫面時寫進紀錄的一行（每扇只寫一次）
+pub fn early_stop_line(id: &str) -> String {
+    format!("讀畫面 {id} 沒有對話紀錄檔，已超過 {} 分鐘，不再讀這扇視窗的畫面", EARLY_MS / 60_000)
+}
+
 #[derive(Default)]
 pub struct Schedule {
     next_at: HashMap<String, u64>,
     fails: HashMap<String, u32>,
     first_seen: HashMap<String, u64>,
+    early_stopped: HashSet<String>,
     window_start: u64,
     window_reads: u32,
     reads: u64,
@@ -116,6 +129,12 @@ impl Schedule {
         self.first_seen.retain(|k, _| current.contains(&k.as_str()));
         let first = *self.first_seen.entry(id.to_string()).or_insert(now);
         now.saturating_sub(first) < EARLY_MS
+    }
+
+    /// 沒有 session 檔的視窗已經過了前期、這一輪不讀它：第一次回一行紀錄，之後回 None。`current`＝現在表上所有的視窗，關掉的就忘記
+    pub fn early_stopped(&mut self, id: &str, current: &[&str]) -> Option<String> {
+        self.early_stopped.retain(|k| current.contains(&k.as_str()));
+        self.early_stopped.insert(id.to_string()).then(|| early_stop_line(id))
     }
 
     /// 這一輪要讀哪幾扇。`windows`＝（編號, 頻率）；`free_bytes` 讀不到（None）就不靠它判斷。
@@ -151,18 +170,21 @@ impl Schedule {
         picked
     }
 
-    /// 讀完回報。成功照頻率排下一次；失敗依連續失敗次數加倍退避，不重試
-    pub fn done(&mut self, id: &str, pace: Pace, ok: bool, now: u64) {
+    /// 讀完回報。成功照頻率排下一次；失敗依連續失敗次數加倍退避，不重試。
+    /// 失敗後要等 60 秒以上時回一行紀錄（呼叫端寫進 ui.log），否則回 None
+    pub fn done(&mut self, id: &str, pace: Pace, ok: bool, now: u64) -> Option<String> {
         if ok {
             self.fails.remove(id);
             self.next_at.insert(id.to_string(), now + pace.interval());
-            return;
+            return None;
         }
         self.failed += 1;
         let n = self.fails.entry(id.to_string()).or_insert(0);
         *n = n.saturating_add(1);
-        let wait = pace.interval().saturating_mul(1u64 << (*n).min(16)).min(MAX_BACKOFF_MS);
+        let fails = *n;
+        let wait = pace.interval().saturating_mul(1u64 << fails.min(16)).min(MAX_BACKOFF_MS);
         self.next_at.insert(id.to_string(), now + wait);
+        (wait >= BACKOFF_LOG_MS).then(|| backoff_line(id, fails, wait))
     }
 
     /// 該寫開銷紀錄時回一行（累計值），之後歸零
@@ -336,6 +358,35 @@ mod tests {
         s.early("w0", NOW, &["w0"]);
         s.early("w1", NOW, &["w1"]);
         assert!(!s.first_seen.contains_key("w0"), "關掉的視窗就忘記");
+    }
+
+    #[test]
+    fn 退避到一分鐘以上才回一行紀錄_只有編號次數秒數() {
+        let mut s = Schedule::default();
+        // 5 秒的視窗：失敗 1～3 次等 10、20、40 秒，不寫；第 4 次起 80 秒、160 秒，寫；之後頂在 300 秒
+        for n in 1..=3 {
+            assert_eq!(s.done("w0", Pace::Frequent, false, NOW), None, "第 {n} 次");
+        }
+        assert_eq!(s.done("w0", Pace::Frequent, false, NOW).as_deref(), Some("讀畫面 w0 連續失敗 4 次，下次在 80 秒後"));
+        assert_eq!(s.done("w0", Pace::Frequent, false, NOW).as_deref(), Some("讀畫面 w0 連續失敗 5 次，下次在 160 秒後"));
+        assert_eq!(s.done("w0", Pace::Frequent, false, NOW).as_deref(), Some("讀畫面 w0 連續失敗 6 次，下次在 300 秒後"));
+        assert_eq!(s.done("w0", Pace::Frequent, true, NOW), None, "成功不寫");
+        assert_eq!(s.done("w0", Pace::Frequent, false, NOW), None, "成功後從頭算");
+        // 閒置的視窗（60 秒一次）第一次失敗就等 120 秒
+        assert_eq!(s.done("w1", Pace::Slow, false, NOW).as_deref(), Some("讀畫面 w1 連續失敗 1 次，下次在 120 秒後"));
+        for line in [backoff_line("w9", 7, 300_000), early_stop_line("w9")] {
+            assert!(line.contains("w9") && !line.contains("screen") && !line.contains('\n'), "{line}");
+        }
+    }
+
+    #[test]
+    fn 沒有_session_檔的視窗不再讀時_每扇只寫一次紀錄_關掉的忘記() {
+        let mut s = Schedule::default();
+        assert_eq!(s.early_stopped("w0", &["w0"]).as_deref(), Some("讀畫面 w0 沒有對話紀錄檔，已超過 10 分鐘，不再讀這扇視窗的畫面"));
+        assert_eq!(s.early_stopped("w0", &["w0"]), None, "同一扇只寫一次");
+        assert!(s.early_stopped("w1", &["w0", "w1"]).is_some(), "另一扇各算各的");
+        assert_eq!(s.early_stopped("w1", &["w1"]), None);
+        assert!(s.early_stopped("w0", &["w0", "w1"]).is_some(), "視窗關掉又開了再寫一次");
     }
 
     #[test]

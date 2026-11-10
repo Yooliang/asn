@@ -3245,6 +3245,10 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-screen-watch".into()).spawn(move || {
         let mut schedule = Schedule::default();
+        // 一行說明（退避很久、不再讀沒有紀錄檔的視窗）也寫進 ui.log；只有編號、次數、秒數，沒有畫面內容
+        let note = |now: u64, line: &str| {
+            let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+        };
         // 編號 → 目前的提醒
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
         loop {
@@ -3270,7 +3274,11 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                     Some((_, sid)) => windows.push((id.clone(), pace_of(mod_state_of(&status_dir, sid).as_deref()))),
                     // 還沒有 session 檔：名單沒有這一列可標，只在剛開的一段時間內讀，結果只給本機畫面
                     None if schedule.early(id, now, &ids) => windows.push((id.clone(), pace_of(None))),
-                    None => {}
+                    None => {
+                        if let Some(line) = schedule.early_stopped(id, &ids) {
+                            note(now, &line);
+                        }
+                    }
                 }
             }
             notices.retain(|id, _| windows.iter().any(|(w, _)| w == id));
@@ -3289,13 +3297,15 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                         notices.remove(&id);
                     }
                 }
-                schedule.done(&id, pace, result.is_ok(), now);
+                if let Some(line) = schedule.done(&id, pace, result.is_ok(), now) {
+                    note(now, &line);
+                }
             }
             if let Ok(mut g) = PARTNER_NOTICES.lock() {
                 *g = notices.values().cloned().collect();
             }
             if let Some(line) = schedule.report(now, windows.len()) {
-                let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+                note(now, &line);
             }
         }
     });
