@@ -648,15 +648,18 @@ mod tests {
             std::fs::write(d.path().join(n), "x").unwrap();
         }
         let logs = prune_bad_files(d.path(), BAD_KEEP, &|p| std::fs::remove_file(p));
-        assert_eq!(logs.len(), 3, "{logs:?}");
+        // 7 個壞檔留 5 個＝刪 2 個：舊格式 .bad（算最舊）與 .bad-9（數值最小；字串排序的話會誤刪 .bad-100）
+        assert_eq!(logs.len(), 2, "{logs:?}");
         assert!(logs.iter().all(|l| l.contains("已刪除")));
         let left = names(d.path());
         assert_eq!(left.len(), 6, "{left:?}");
         assert!(left.contains(&"other.txt".to_string()));
-        for gone in [".bad", ".bad-9", ".bad-100"] {
+        for gone in [".bad", ".bad-9"] {
             assert!(!left.contains(&format!("{OUTBOX_FILE}{gone}")), "{gone} 應被刪");
         }
-        assert!(left.contains(&format!("{OUTBOX_FILE}.bad-500")));
+        for kept in [".bad-100", ".bad-500"] {
+            assert!(left.contains(&format!("{OUTBOX_FILE}{kept}")), "{kept} 應保留");
+        }
     }
 
     #[test]
