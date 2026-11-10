@@ -22,6 +22,10 @@ pub struct Who {
     pub fp8: String,
     /// 本機還沒記住這台（第一次連線）：名字是後台給的
     pub first: bool,
+    /// 本人在這台對這把公鑰按過「允許」打字（0.2.15）
+    pub typed_before: bool,
+    /// 本人在設定頁把這台設成每次都問
+    pub always_ask: bool,
 }
 
 /// 去掉控制字元與改變文字方向的字元，截長度
@@ -33,15 +37,30 @@ fn clean(s: &str, max: usize) -> String {
 /// 框上要顯示的「誰」：和本機記住的一樣（Same）就用本機記住的名字；其他情況（第一次）才用後台給的，並標示第一次連線
 pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str, tofu: Tofu) -> Who {
     let local = if tofu == Tofu::Same { known.peer(node).map(|p| p.name.as_str()) } else { None };
-    Who { name: clean(local.unwrap_or(backend_name), NAME_MAX), fp8: fingerprint(sign_pub).chars().take(8).collect(), first: local.is_none() }
+    let peer = if tofu == Tofu::Same { known.peer(node) } else { None };
+    Who {
+        name: clean(local.unwrap_or(backend_name), NAME_MAX),
+        fp8: fingerprint(sign_pub).chars().take(8).collect(),
+        first: local.is_none(),
+        typed_before: peer.is_some() && known.input_confirmed(node),
+        always_ask: peer.is_some_and(|p| p.input_always_ask),
+    }
 }
 
 /// 同意框的話：誰（名字＋指紋）、哪個視窗、能做什麼
 pub fn ask_text(who: &Who, window: &str) -> String {
     let name = if who.name.is_empty() { "另一台電腦".to_string() } else { format!("「{}」", who.name) };
     let window = clean(window, 64);
-    let first = if who.first { "\n\n這台電腦是第一次連線到這裡，請確認是你自己的電腦。" } else { "" };
-    format!("{name}（指紋 {}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。\n\n要允許嗎？", who.fp8)
+    let first = if who.first {
+        "\n\n這台電腦是第一次連線到這裡，請確認是你自己的電腦。"
+    } else if !who.typed_before {
+        "\n\n這台電腦還沒在這裡打過字，名字可能不準，請用指紋確認是你自己的電腦。"
+    } else {
+        ""
+    };
+    // 按了允許之後會不會再問（0.2.15）：設成每次都問的就照樣每次問
+    let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到設定 → 認得的電腦取消勾選。" };
+    format!("{name}（指紋 {}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？", who.fp8)
 }
 
 /// 紅條（有人在看／在打字）上的「誰」：名字＋指紋前 8 碼，第一次連線另外標示。畫面會在外面加「」
@@ -155,6 +174,42 @@ mod tests {
         assert!(!code.contains(".show(move"), "要看按了哪一顆，不能只看 true／false");
     }
 
+    /// 接線守門（0.2.15）：打字免問要同時是記住的那把公鑰（Same）且本人按過允許；沒免問就一定先問，按了允許才記下；
+    /// 紅條照樣顯示誰在打字、有「結束」
+    #[test]
+    fn 守門_自己電腦打字免問的條件與紅條() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let start = lib.find("if a.session.scope == view_handshake::Scope::Input {").expect("打字的分支");
+        let f = &lib[start..start + lib[start..].find("let mobile = a.mobile;").expect("打字分支後面的下一句")];
+        assert!(f.contains("let no_ask = a.tofu == device_id::Tofu::Same && "), "免問一定要是記住的那把公鑰");
+        let (ask, confirm) = (f.find("input_consent::ask(").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
+        assert!(ask < confirm, "先問、按了允許才記下");
+        assert!(f[ask..confirm].contains("continue;"), "不允許就結束，不記");
+        let html = include_str!("../../ui/list.html");
+        assert!(html.contains("正在這台的夥伴「{{ v.window }}」打字") && html.contains("@click=\"stopBeingViewed(v.id)\">結束</button>"), "紅條有誰在打字、有結束");
+    }
+
+    /// 0.2.15：框上寫清楚按允許之後就不再問；還沒在這裡打過字的要提醒名字可能不準；設成每次都問的不說「不再問」
+    #[test]
+    fn 打字確認框_寫清楚之後不再問_沒打過字的提醒用指紋確認() {
+        let mut k = known_d();
+        let w = who_of(&k, "d", "家用機", PUB, Tofu::Same);
+        assert!(!w.first && !w.typed_before && !w.always_ask);
+        let t = ask_text(&w, "小乙");
+        assert!(t.contains("還沒在這裡打過字") && t.contains("請用指紋確認"), "{t}");
+        assert!(t.contains("這台以後要在這裡打字就不會再問你") && t.contains("設定 → 認得的電腦"), "{t}");
+        k.confirm_input("d", PUB);
+        let t = ask_text(&who_of(&k, "d", "家用機", PUB, Tofu::Same), "小乙");
+        assert!(!t.contains("還沒在這裡打過字"), "按過允許的不再提醒");
+        k.set_input_no_ask("d", false);
+        let w = who_of(&k, "d", "家用機", PUB, Tofu::Same);
+        assert!(w.always_ask);
+        assert!(!ask_text(&w, "小乙").contains("不會再問你"), "設成每次都問的不說不再問");
+        // 第一次連線：沿用原本那句，不說「名字可能不準」
+        let t = ask_text(&who_of(&KnownPeers::default(), "d", "家用機", PUB, Tofu::New), "小乙");
+        assert!(t.contains("第一次連線到這裡") && !t.contains("還沒在這裡打過字"));
+    }
+
     #[test]
     fn 允許替這台登入的確認框_有名字與指紋前八碼_寫清楚能做什麼() {
         let t = login_ok_text("我的手機", PUB);
@@ -181,7 +236,7 @@ mod tests {
         assert!(t.contains("「家用機」（指紋 "), "{t}");
         assert!(t.contains("要在這台的「小乙」打字"));
         assert!(t.contains("包括回答權限框"));
-        let blank = Who { name: String::new(), fp8: "01234567".into(), first: true };
+        let blank = Who { name: String::new(), fp8: "01234567".into(), first: true, typed_before: false, always_ask: false };
         assert!(ask_text(&blank, "小乙").starts_with("另一台電腦"));
     }
 
@@ -235,7 +290,7 @@ mod tests {
         assert!(!t.contains("假裝是工作機"));
         let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
         assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
-        assert!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), first: false }).starts_with("另一台電腦"));
+        assert!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), first: false, typed_before: false, always_ask: false }).starts_with("另一台電腦"));
     }
 
     #[test]
