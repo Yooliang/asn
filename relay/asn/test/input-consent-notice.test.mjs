@@ -13,7 +13,7 @@ test('list.js 聽逾時與框還開著的事件，用 showLaunchNotice 顯示', 
   assert.ok(busy, '要聽 input-consent-busy')
   assert.match(expired, /showLaunchNotice\(/)
   assert.match(busy, /showLaunchNotice\(/)
-  assert.ok(expired.includes('這次請求已逾時，沒有允許'))
+  assert.ok(expired.includes('這次請求已逾時或已取消，沒有允許'))
   assert.ok(busy.includes('前一個打字確認框還開著'))
 })
 

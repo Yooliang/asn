@@ -1346,6 +1346,10 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                                 // 按下去之後再確認一次：請求還沒過期、對方也沒撤回，才往下走；逾時或撤回之後按允許也不能開始打字
                                 let still = answered && input_consent::consent_outcome(Some(true), (auth::now_ms() / 1000) as i64, a.session.expires_s) && view_still_pending(&relay, &id).await;
                                 if !still {
+                                    if answered {
+                                        // 本人按了允許，但請求已經過期或被對方取消：告訴本人這次沒有允許
+                                        let _ = app.emit_to("list", input_consent::EV_EXPIRED, serde_json::json!({}));
+                                    }
                                     let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                                     continue;
                                 }
