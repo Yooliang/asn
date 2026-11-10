@@ -165,7 +165,48 @@ pub fn issue(action: Action, node: &str) -> Result<String, String> {
 
 /// 用憑證：成功回 true（憑證檔已刪、紀錄已用掉）
 pub fn redeem(data_dir: &Path, action: Action, node: &str, challenge: &str) -> bool {
-    store().lock().unwrap_or_else(|e| e.into_inner()).redeem(action, node, challenge, Instant::now(), |h| take_marker(data_dir, h))
+    let ok = store().lock().unwrap_or_else(|e| e.into_inner()).redeem(action, node, challenge, Instant::now(), |h| take_marker(data_dir, h));
+    // 說明檔用不到了：不管成不成功都收掉
+    if is_hash(&hash_hex(challenge)) {
+        let _ = std::fs::remove_file(desc_path(data_dir, &hash_hex(challenge)));
+    }
+    ok
+}
+
+/// 生物辨識框上的字最多幾個字
+pub const DESC_MAX: usize = 60;
+/// 說明檔的副檔名：`<consent>/<憑證雜湊>.desc`
+pub const DESC_EXT: &str = "desc";
+
+fn desc_path(data_dir: &Path, hash: &str) -> std::path::PathBuf {
+    data_dir.join(MARKER_DIR).join(format!("{hash}.{DESC_EXT}"))
+}
+
+/// 框上要寫的字（純函式）：動作＋這支手機記住的名字（沒有就「未命名的電腦」）＋指紋前兩組。網頁給的字一律不進來
+pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
+    let name = if local_name.trim().is_empty() { "未命名的電腦".to_string() } else { format!("「{local_name}」") };
+    let fp: String = fp_grouped.chars().take(9).collect();
+    let text = match action {
+        Action::Confirm => format!("記住{name}（{fp}）"),
+        Action::Forget => format!("忘記{name}（{fp}）"),
+    };
+    text.chars().filter(|c| !c.is_control()).take(DESC_MAX).collect()
+}
+
+/// 發憑證時把框上要寫的字存起來（外殼用憑證的雜湊來讀；沒有這個檔外殼就不跳框）。順手清掉放太久的舊說明檔
+pub fn write_desc(data_dir: &Path, challenge: &str, text: &str) -> Result<(), String> {
+    let dir = data_dir.join(MARKER_DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建不了資料夾：{e}"))?;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|d| d > TOKEN_TTL * 4);
+            if old && p.extension().is_some_and(|x| x == DESC_EXT) {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    std::fs::write(desc_path(data_dir, &hash_hex(challenge)), text).map_err(|e| format!("寫不出說明：{e}"))
 }
 
 pub fn drop_node(node: &str) {
@@ -174,6 +215,27 @@ pub fn drop_node(node: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 框上的字_動作加本機名字加指紋前兩組_沒有名字寫未命名_去掉控制字元() {
+        assert_eq!(describe(Action::Confirm, "工作機", "a93c c519 1f2e 3b4d"), "記住「工作機」（a93c c519）");
+        assert_eq!(describe(Action::Forget, "", "a93c c519 1f2e 3b4d"), "忘記未命名的電腦（a93c c519）");
+        assert_eq!(describe(Action::Confirm, "甲\n乙", "a93c c519 1f2e 3b4d"), "記住「甲乙」（a93c c519）");
+        assert!(describe(Action::Confirm, &"長".repeat(200), "a93c c519 1f2e 3b4d").chars().count() <= DESC_MAX);
+    }
+
+    #[test]
+    fn 說明檔_以憑證雜湊命名_兌換後收掉() {
+        let dir = std::env::temp_dir().join(format!("asn-consent-desc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ch = "ab".repeat(32);
+        write_desc(&dir, &ch, "記住「甲」（a93c c519）").unwrap();
+        let p = dir.join(MARKER_DIR).join(format!("{}.{DESC_EXT}", hash_hex(&ch)));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "記住「甲」（a93c c519）");
+        assert!(!redeem(&dir, Action::Confirm, "沒發過", &ch));
+        assert!(!p.exists(), "兌換（不論成敗）後說明檔收掉");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     /// 不同的種子一定給不同的序列

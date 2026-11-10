@@ -1321,7 +1321,7 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
-            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_confirm", "android_known_forget", "android_known_rename"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
         }
         assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
     }

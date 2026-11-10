@@ -40,7 +40,9 @@ object ViewerConfirm {
       pendingChallenge = null
       reply(activity, old, "cancel")
     }
-    val title = if (challenge == null) "查看電腦終端" else "確認這項操作"
+    // 框上的字：查看終端是固定字；帶憑證的只用 Rust 發憑證時寫的說明檔（動作＋電腦名＋指紋），讀不到就不跳框
+    val title = if (challenge == null) VIEW_TITLE else readDescription(activity, challenge)
+    if (title == null) { reply(activity, callbackId, "cancel"); return }
     val km = activity.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
     if (km == null || !km.isDeviceSecure) { reply(activity, callbackId, "no_lock"); return }
     pending = callbackId
@@ -90,10 +92,28 @@ object ViewerConfirm {
 
   private fun validChallenge(s: String): Boolean = s.length == CHALLENGE_LEN && s.all { it in '0'..'9' || it in 'a'..'f' }
 
+  private const val VIEW_TITLE = "查看電腦終端"
+  private const val DESC_MAX = 60
+
+  private fun hashOf(challenge: String): String =
+    MessageDigest.getInstance("SHA-256").digest(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+  /** Rust 發憑證時寫的說明檔（`<consent>/<雜湊>.desc`）：框上只用這段字。沒有、讀不到、是空的就回 null（不跳框） */
+  private fun readDescription(activity: MainActivity, challenge: String): String? {
+    return try {
+      val f = File(File(activity.filesDir, CONSENT_DIR), hashOf(challenge) + ".desc")
+      if (!f.isFile) return null
+      val t = f.readText(Charsets.UTF_8).filter { !it.isISOControl() }.take(DESC_MAX).trim()
+      if (t.isEmpty()) null else t
+    } catch (e: Exception) {
+      null
+    }
+  }
+
   /** 憑證檔：檔名＝憑證字串（UTF-8）的 SHA-256 小寫十六進位。只有 verified 能叫；回有沒有寫成功 */
   private fun writeConsentMarker(activity: MainActivity, challenge: String): Boolean {
     return try {
-      val name = MessageDigest.getInstance("SHA-256").digest(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+      val name = hashOf(challenge)
       val dir = File(activity.filesDir, CONSENT_DIR)
       if (!dir.isDirectory && !dir.mkdirs()) return false
       File(dir, name).writeText("1")

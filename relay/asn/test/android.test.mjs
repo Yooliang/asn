@@ -516,7 +516,7 @@ test('手機看電腦終端：四個指令手機也有、打字的指令只有�
   assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.doesNotMatch(rs, /term_view_remote_input/)
-  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|confirm|forget|rename)[\s\S]*?\n\}\n/g, '')
+  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|token|confirm|forget|rename)[\s\S]*?\n\}\n/g, '')
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')
@@ -614,4 +614,19 @@ test('憑證：Rust 命令先核對憑證才動手，視窗要是主畫面（lis
   assert.ok(forget.indexOf('consent::redeem(') < forget.indexOf('live::forget('))
   for (const n of ['android_known_token', 'android_known_confirm', 'android_known_forget', 'android_known_rename']) assert.match(fnBody(n), /consent::label_ok\(window\.label\(\)\)/, n)
   assert.match(read('src-tauri', 'tauri.android.conf.json'), /"label": "list"/)
+})
+
+test('生物辨識框上的字：查看終端用固定字；帶憑證的只用 Rust 寫的說明檔，讀不到就不跳框，網頁給的字進不了框', () => {
+  const vc = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'ViewerConfirm.kt').replace(/\r\n/g, '\n')
+  assert.match(vc, /val title = if \(challenge == null\) VIEW_TITLE else readDescription\(activity, challenge\)/)
+  assert.match(vc, /if \(title == null\) \{ reply\(activity, callbackId, "cancel"\); return \}/)
+  for (const m of vc.matchAll(/setTitle\(([^)]*)\)/g)) assert.equal(m[1], 'title', '框的標題只能是 title')
+  for (const m of vc.matchAll(/createConfirmDeviceCredentialIntent\(([^,]*),/g)) assert.equal(m[1], 'title')
+  assert.match(vc, /\.setSubtitle\("請驗證是你本人"\)/, '副標是固定字')
+  const rd = vc.slice(vc.indexOf('private fun readDescription('), vc.indexOf('private fun writeConsentMarker('))
+  assert.match(rd, /hashOf\(challenge\) \+ "\.desc"/, '用憑證雜湊找說明檔，不用網頁的字組路徑')
+  const an = read('src-tauri', 'src', 'android.rs').replace(/\r\n/g, '\n')
+  const tok = an.slice(an.indexOf('pub fn android_known_token('), an.indexOf('pub fn android_known_confirm('))
+  assert.match(tok, /consent::describe\(act, &peer\.name, &crate::device_id::fp_grouped\(&peer\.sign_pub\)\)/, '框上的字由 Rust 從本機記住的資料決定')
+  assert.ok(tok.indexOf('consent::issue(') < tok.indexOf('consent::write_desc('))
 })
