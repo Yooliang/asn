@@ -8,6 +8,52 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::path::PathBuf;
 
+/// 手機要這台做的安裝或登入（presence 回應帶來）。只收字串並截長度，內容由本機檢查（agent_setup::remote、device_relay）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupAsk {
+    /// 送出者的使用者代號
+    pub by: String,
+    /// claude（沒帶）、codex、agy、grok
+    pub kind: String,
+    /// 裝置碼型（codex、grok）才有
+    pub device: Option<DeviceAsk>,
+}
+
+/// 裝置碼型的請求內容：手機簽的本文與簽章、發起的手機、後台這次給的手機公鑰（只用來判斷有沒有變，驗章用本機記住的）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceAsk {
+    pub rid: String,
+    pub payload: String,
+    pub sig: String,
+    pub p_node: String,
+    pub p_sign_pub: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CodePutErr {
+    /// 這筆已經不在了：當成結束，不重試
+    Gone,
+    Other(String),
+}
+
+/// presence 回應裡的請求。沒有請求回 None；裝置碼型的欄位缺一個就整組不帶（之後由本機檢查拒絕）
+pub fn setup_ask_of(v: &Value) -> Option<SetupAsk> {
+    if v.get("setup_requested").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let s = |k: &str, max: usize| v.get(k).and_then(Value::as_str).filter(|x| x.len() <= max).map(str::to_string);
+    let by = v.get("setup_requested_by").and_then(Value::as_str).unwrap_or("").chars().take(64).collect::<String>();
+    let kind = match v.get("setup_kind") {
+        None | Some(Value::Null) => "claude".to_string(),
+        Some(k) => k.as_str().unwrap_or("").chars().take(16).collect(),
+    };
+    let device = match (s("setup_rid", 64), s("setup_payload", 1024), s("setup_sig", 128), s("setup_p_node", 64)) {
+        (Some(rid), Some(payload), Some(sig), Some(p_node)) => Some(DeviceAsk { rid, payload, sig, p_node, p_sign_pub: s("setup_p_sign_pub", 64) }),
+        _ => None,
+    };
+    Some(SetupAsk { by, kind, device })
+}
+
 pub struct Relay {
     client: reqwest::Client,
     base: String,
@@ -38,8 +84,8 @@ pub struct Relay {
     presence_closed: AtomicBool,
     /// 後台在回報回應裡說「本人要這台更新」：記下來等迴圈取走（只取一次，後台也只回一次）
     update_requested: AtomicBool,
-    /// 手機要這台安裝並登入 Claude Code：後台說的送出者使用者代號（取走一次就清掉）
-    setup_requested: Mutex<Option<String>>,
+    /// 手機要這台安裝並登入：後台說的送出者、種類與裝置碼型的請求內容（取走一次就清掉）
+    setup_requested: Mutex<Option<SetupAsk>>,
     pub presence_wake: tokio::sync::Notify,
     /// 正在聽的歌（預設關；開了才有值，回報時蓋過個人訊息）
     pub now_playing: std::sync::Arc<crate::nowplaying::NowPlaying>,
@@ -396,10 +442,8 @@ impl Relay {
                 if v.get("update_requested").and_then(Value::as_bool) == Some(true) {
                     self.update_requested.store(true, Ordering::SeqCst);
                 }
-                if v.get("setup_requested").and_then(Value::as_bool) == Some(true) {
-                    // 送出者只收字串；格式由本機把關檢查（agent_setup::remote::gate）
-                    let by = v.get("setup_requested_by").and_then(Value::as_str).unwrap_or("").chars().take(64).collect::<String>();
-                    *self.setup_requested.lock().unwrap() = Some(by);
+                if let Some(ask) = setup_ask_of(&v) {
+                    *self.setup_requested.lock().unwrap() = Some(ask);
                 }
                 true
             }
@@ -437,9 +481,19 @@ impl Relay {
     pub fn take_update_request(&self) -> bool {
         self.update_requested.swap(false, Ordering::SeqCst)
     }
-    /// 取走「手機要這台安裝並登入」的請求（有就回送出者的使用者代號，並清掉，不會重複觸發）
-    pub fn take_setup_request(&self) -> Option<String> {
+    /// 取走「手機要這台安裝並登入」的請求（有就回請求內容，並清掉，不會重複觸發）
+    pub fn take_setup_request(&self) -> Option<SetupAsk> {
         self.setup_requested.lock().unwrap().take()
+    }
+    /// #933：裝置碼型登入，把加密後的網址＋代碼與這台的設備簽章放回後台（只能放自己節點那一筆、放一次）。
+    /// 404＝這筆已經不在（過期、已放過、被新的請求蓋掉）：當成結束，不重試
+    pub async fn setup_code_put(&self, rid: &str, s: &crate::device_relay::Sealed) -> Result<(), CodePutErr> {
+        let body = json!({ "rid": rid, "t_eph_pub": s.t_eph_pub, "cipher": s.cipher, "t_sig": s.t_sig });
+        match self.api_with("asn_setup_code_put", Some(body), Duration::from_secs(15)).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.contains("HTTP 404") => Err(CodePutErr::Gone),
+            Err(e) => Err(CodePutErr::Other(e)),
+        }
     }
     /// 安裝並登入的結果回報到手機：ok、固定句子的原因、重裝說明（後台各留前 200 字）。失敗只記 log
     pub async fn report_setup_result(&self, ok: bool, detail: &str, replaced: Option<&str>) {
@@ -2042,6 +2096,43 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert!(s[0].contains(r#""ok":false"#) && s[0].contains("下載失敗") && !s[0].contains("\\n"));
     }
 
+    #[test]
+    fn 手機要求_種類與裝置碼型的內容_缺一個欄位就整組不帶_太長的不收() {
+        let base = json!({ "setup_requested": true, "setup_requested_by": "u" });
+        assert_eq!(setup_ask_of(&json!({ "ok": true })), None);
+        assert_eq!(setup_ask_of(&base).unwrap().kind, "claude");
+        let full = json!({ "setup_requested": true, "setup_requested_by": "u", "setup_kind": "codex", "setup_rid": "R", "setup_payload": "{}", "setup_sig": "S", "setup_p_node": "PH", "setup_p_sign_pub": "K" });
+        let a = setup_ask_of(&full).unwrap();
+        assert_eq!(a.kind, "codex");
+        assert_eq!(a.device, Some(DeviceAsk { rid: "R".into(), payload: "{}".into(), sig: "S".into(), p_node: "PH".into(), p_sign_pub: Some("K".into()) }));
+        let mut miss = full.clone();
+        miss.as_object_mut().unwrap().remove("setup_sig");
+        assert_eq!(setup_ask_of(&miss).unwrap().device, None, "缺簽章就不帶，本機會拒絕");
+        let mut long = full.clone();
+        long["setup_payload"] = json!("x".repeat(1025));
+        assert_eq!(setup_ask_of(&long).unwrap().device, None);
+        let mut no_pub = full.clone();
+        no_pub["setup_p_sign_pub"] = Value::Null;
+        assert_eq!(setup_ask_of(&no_pub).unwrap().device.unwrap().p_sign_pub, None);
+    }
+
+    #[tokio::test]
+    async fn 裝置碼密文放回_只用節點金鑰_404_當成結束() {
+        let s = crate::device_relay::Sealed { t_eph_pub: "T".into(), cipher: "C".into(), t_sig: "G".into(), code_exp: 1 };
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        assert_eq!(r.setup_code_put("RID", &s).await, Ok(()));
+        let req = seen.lock().unwrap()[0].clone();
+        assert!(req.starts_with("POST /relay?action=asn_setup_code_put") && req.to_lowercase().contains("x-relay-key: secret-key") && !req.to_lowercase().contains("x-asn-user"));
+        assert!(req.contains(r#""rid":"RID""#) && req.contains(r#""cipher":"C""#) && req.contains(r#""t_sig":"G""#) && req.contains(r#""t_eph_pub":"T""#));
+        let (url, _) = fake_server(404);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        assert_eq!(r.setup_code_put("RID", &s).await, Err(CodePutErr::Gone));
+        let (url, _) = fake_server(500);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        assert!(matches!(r.setup_code_put("RID", &s).await, Err(CodePutErr::Other(_))));
+    }
+
     #[tokio::test]
     async fn 手機要求安裝並登入_旗標只取一次_帶送出者_結果回報只用節點金鑰() {
         let (url, _seen) = fake_server(200);
@@ -2051,7 +2142,7 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let (url, _seen) = fake_server_with(200, r#"{"ok":true,"setup_requested":true,"setup_requested_by":"11111111-1111-1111-1111-111111111111"}"#);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
         assert!(r.report_presence("0.2.2", Duration::from_secs(5)).await);
-        assert_eq!(r.take_setup_request().as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+        assert_eq!(r.take_setup_request(), Some(SetupAsk { by: "11111111-1111-1111-1111-111111111111".into(), kind: "claude".into(), device: None }), "舊後台沒帶種類＝claude");
         assert_eq!(r.take_setup_request(), None, "只取一次，不會重複啟動");
         let (url, seen) = fake_server(200);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());

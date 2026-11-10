@@ -55,6 +55,8 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+// #933 PR-5b：手機替電腦登入裝置碼型 CLI 的請求與回傳格式（電腦、手機共用）
+mod device_relay;
 mod android_keywrap;
 mod keystore;
 mod view_handshake;
@@ -553,8 +555,13 @@ fn agent_setup_cancel() {
 /// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: String) {
+async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
     use agent_setup::remote::{gate, Gate};
+    // #933：別家的裝置碼型登入走另一條路（同樣先過本機把關）
+    if ask.kind != "claude" {
+        return run_remote_device_login(handle, relay, ask).await;
+    }
+    let requested_by = ask.by;
     let app = handle.state::<App>();
     let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
     if let Gate::Refuse(why) = gate(agent_setup::switch::remote_allowed(&app.data_dir), token.as_deref(), &requested_by) {
@@ -603,6 +610,132 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
             relay.report_setup_result(false, "安裝並登入中途中斷", None).await
         }
     }
+    // 結果留在畫面上幾秒讓人看到，再自己關
+    tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
+    wins::close_setup_progress(&handle, round);
+}
+
+/// #933 PR-5b：手機要這台登入裝置碼型 CLI（Codex、Grok）。依序：本機把關（開關、同一個人）→ 檢查請求（本機認得的手機、
+/// 簽章、欄位、到期、沒處理過）→ 有驗證過的執行檔 → 開進度小窗（看得到、能取消）→ 跑登入，網址＋代碼加密後放回後台給那支手機
+/// → 回報結果（固定句子，不帶網址或代碼）。任何一步不過就不跑登入、不送任何東西
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
+    use agent_setup::device_remote as dr;
+    use agent_setup::remote::{gate, Gate};
+    let app = handle.state::<App>();
+    let name = dr::vendor_name(&ask.kind);
+    let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
+    if let Gate::Refuse(why) = gate(agent_setup::switch::remote_allowed(&app.data_dir), token.as_deref(), &ask.by) {
+        elog!("手機要求登入 {name} 被拒絕：{why}");
+        relay.report_setup_result(false, why, None).await;
+        return;
+    }
+    let Some(d) = ask.device.as_ref() else {
+        relay.report_setup_result(false, "要求的格式不對", None).await;
+        return;
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0);
+    let known = match device_id::live::known(&app.data_dir) {
+        Ok(k) => k,
+        Err(e) => {
+            elog!("手機要求登入 {name}：讀不到認得的設備：{e}");
+            relay.report_setup_result(false, "這台電腦讀不到認得的設備紀錄，沒有開始登入", None).await;
+            return;
+        }
+    };
+    let checked = {
+        let mut seen = dr::replay().lock().unwrap_or_else(|e| e.into_inner());
+        device_relay::verify_request(&d.payload, &d.sig, &ask.kind, &relay.node, &d.p_node, d.p_sign_pub.as_deref(), &known, now, &mut seen)
+    };
+    let req = match checked {
+        Ok(r) if r.rid == d.rid => r,
+        Ok(_) => {
+            relay.report_setup_result(false, "要求的格式不對", None).await;
+            return;
+        }
+        Err(r) => {
+            elog!("手機要求登入 {name} 被拒絕：{}", r.text());
+            relay.report_setup_result(false, r.text(), None).await;
+            return;
+        }
+    };
+    let eng = match dr::engine_here(&ask.kind) {
+        Ok(e) => e,
+        Err(e) => {
+            relay.report_setup_result(false, &e, None).await;
+            return;
+        }
+    };
+    // 和安裝並登入 Claude Code 同一把鎖：正在跑就不開始、不去動那一輪的小窗
+    let lock = match agent_setup::setup::begin_remote_round() {
+        Ok(g) => g,
+        Err(_) => {
+            relay.report_setup_result(false, "這台電腦正在安裝或登入，請稍後再試", None).await;
+            return;
+        }
+    };
+    let key = match device_id::live::key_async(&app.data_dir).await {
+        Ok(k) => k,
+        Err(e) => {
+            elog!("手機要求登入 {name}：讀不到設備金鑰：{e}");
+            relay.report_setup_result(false, "這台電腦讀不到設備金鑰，沒有開始登入", None).await;
+            return;
+        }
+    };
+    // 右下角的常駐進度小窗：人在電腦前看得到、能取消。開不起來就不開始
+    let round = match wins::open_setup_progress(&handle) {
+        Ok(r) => r,
+        Err(e) => {
+            elog!("開進度小窗失敗，不開始登入：{e}");
+            relay.report_setup_result(false, "這台電腦無法顯示進度，沒有開始登入", None).await;
+            return;
+        }
+    };
+    let text = format!("你的手機正在替這台登入 {name}。登入網址和代碼只會出現在那支手機上");
+    let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": text, "cancellable": true }));
+    wins::progress_emit(&handle, serde_json::json!({ "phase": "login", "text": text }));
+    // 登入程序的上限：請求到期和 15 分鐘取較早的；代碼過了這個時間一定用不了
+    let total = std::time::Duration::from_secs((req.exp - now).clamp(1, device_relay::MAX_LIFETIME_SECS) as u64);
+    let lim = agent_setup::device_login::Limits { total, ..Default::default() };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<device_relay::Sealed>();
+    let stop: dr::StopWhy = Default::default();
+    let show = dr::RemoteShow { req: req.clone(), key, code_exp: now + total.as_secs() as i64, tx, stop: stop.clone(), cancelled: agent_setup::setup::cancel_requested };
+    let h = handle.clone();
+    let login = tokio::task::spawn_blocking(move || {
+        let _lock = lock;
+        let sp = agent_setup::proc::RealSpawner { pid_file: Some(identity::relay_home().join("setup").join("device_login.pid")) };
+        agent_setup::device_login::run_device_login(eng.as_ref(), &sp, &show, &lim, &|step| wins::progress_emit(&h, dr::step_json(step)))
+    });
+    // 讀到的網址＋代碼（已加密）放回後台。404＝這筆已經不在：請登入程序停下，不重試；其他錯誤最多試 3 次
+    let (r2, stop2, rid) = (relay.clone(), stop.clone(), req.rid.clone());
+    let sender = tokio::spawn(async move {
+        while let Some(s) = rx.recv().await {
+            for tries in 1..=3 {
+                match r2.setup_code_put(&rid, &s).await {
+                    Ok(()) => break,
+                    Err(relay::CodePutErr::Gone) => {
+                        dr::stop_with(&stop2, dr::STOP_GONE);
+                        return;
+                    }
+                    Err(relay::CodePutErr::Other(e)) => {
+                        elog!("登入資料放回失敗（第 {tries} 次）：{e}");
+                        if tries == 3 {
+                            dr::stop_with(&stop2, dr::STOP_UNSENT);
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                }
+            }
+        }
+    });
+    let outcome = login.await.unwrap_or_else(|_| agent_setup::device_login::Outcome::Failed("登入中途中斷".to_string()));
+    let _ = sender.await;
+    let why = *stop.lock().unwrap_or_else(|e| e.into_inner());
+    let (ok, text) = dr::report_of(&outcome, &ask.kind, why);
+    wins::progress_emit(&handle, serde_json::json!({ "phase": "done", "ok": ok, "text": text }));
+    relay.report_setup_result(ok, &text, None).await;
     // 結果留在畫面上幾秒讓人看到，再自己關
     tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
     wins::close_setup_progress(&handle, round);
@@ -2843,8 +2976,8 @@ pub fn run() {
                         }
                         // 本人在手機上要這台安裝並登入 Claude Code：本機三道把關（開關、已登入、同一個人）過了才做
                         #[cfg(desktop)]
-                        if let Some(by) = r4.take_setup_request() {
-                            tauri::async_runtime::spawn(run_remote_setup(up_handle.clone(), r4.clone(), by));
+                        if let Some(ask) = r4.take_setup_request() {
+                            tauri::async_runtime::spawn(run_remote_setup(up_handle.clone(), r4.clone(), ask));
                         }
                         tokio::select! {
                             _ = tokio::time::sleep(every) => {}

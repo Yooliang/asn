@@ -319,6 +319,13 @@ pub const AGY_LOGIN_HINT: &str = "Gemini 要在那台電腦前登入：打開 AS
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    /// 給別的模組的測試造一份網址＋代碼（只在測試）
+    impl DeviceCode {
+        pub(crate) fn for_test(url: &str, code: &str) -> Self {
+            Self::new(url.to_string(), code.to_string())
+        }
+    }
     use std::collections::VecDeque;
     use std::path::Path;
     use std::rc::Rc;
