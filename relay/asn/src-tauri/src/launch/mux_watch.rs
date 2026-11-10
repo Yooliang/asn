@@ -269,7 +269,10 @@ pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
     if work_dir.as_os_str().is_empty() {
         return;
     }
-    // 0＝服務裡沒有夥伴（只通知服務停了）
+    // 0＝服務裡沒有夥伴（只通知服務停了）。還有一則有夥伴的通知在排隊（重試中）時，不拿 0 蓋掉它（西川二審 A）
+    if count == 0 && read_notice(work_dir).is_some_and(|(n, _, _)| n > 0) {
+        return;
+    }
     let body = serde_json::json!({ "count": count.min(NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
     let tmp = work_dir.join(format!("{NOTICE_FILE}.tmp"));
     if std::fs::write(&tmp, body.to_string()).is_ok() {
@@ -949,7 +952,12 @@ mod tests {
         queue_notice(d.path(), 250, false, 42);
         assert_eq!(read_notice(d.path()), Some((100, false, 42)));
         queue_notice(d.path(), 0, false, 43);
-        assert_eq!(read_notice(d.path()), Some((0, false, 43)), "0＝服務裡沒有夥伴，只通知服務停了");
+        assert_eq!(read_notice(d.path()), Some((100, false, 42)), "有夥伴的通知還在排隊：不拿 0 蓋掉");
+        clear_notice(d.path());
+        queue_notice(d.path(), 0, false, 43);
+        assert_eq!(read_notice(d.path()), Some((0, false, 43)), "0＝ASN 沒看到夥伴，只通知服務停了");
+        queue_notice(d.path(), 2, true, 44);
+        assert_eq!(read_notice(d.path()), Some((2, true, 44)), "有夥伴的可以蓋掉 0");
         clear_notice(d.path());
         assert_eq!(read_notice(d.path()), None);
         std::fs::write(d.path().join(NOTICE_FILE), "壞掉").unwrap();
