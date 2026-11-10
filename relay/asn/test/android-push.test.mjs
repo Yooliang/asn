@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8').replace(/\r\n/g, '\n')
@@ -12,15 +13,40 @@ const A = ['src-tauri', 'gen', 'android']
 const kt = f => read(...A, 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', f)
 const noComments = s => s.replace(/\/\/[^\n]*/g, '')
 
+// google-services.json 有沒有進 git：發版機照流程會把它複製進來（被 .gitignore 擋住），所以看「git 有沒有追蹤」，不看檔案在不在。
+// 有 git 時：沒被追蹤，而且檔案在的話要被忽略；沒有 git（例如解開的原始碼包）才退回看檔案在不在。
+function googleServicesTracked(run = spawnSync, exists = fs.existsSync) {
+  const rel = path.join(...A, 'app', 'google-services.json')
+  const ls = run('git', ['ls-files', '--', rel], { cwd: root, encoding: 'utf8' })
+  if (ls.error || ls.status !== 0) return exists(path.join(root, rel))
+  if (ls.stdout.trim() !== '') return true
+  if (exists(path.join(root, rel))) {
+    const ig = run('git', ['check-ignore', '-q', '--', rel], { cwd: root, encoding: 'utf8' })
+    if (ig.status !== 0) return true   // 檔案在、卻沒被忽略：下一次 git add 就會進 repo
+  }
+  return false
+}
+
 test('google-services 外掛只在 google-services.json 存在時才套用；那個檔不進 repo', () => {
   const app = read(...A, 'app', 'build.gradle.kts')
   assert.match(app, /if \(file\("google-services\.json"\)\.exists\(\)\) \{\s*apply\(plugin = "com\.google\.gms\.google-services"\)\s*\}/)
   assert.doesNotMatch(app.replace(/if \(file\("google-services\.json"\)[\s\S]*?\n\}/, ''), /google\.gms|google-services"\)/, '沒有別的地方無條件套用')
   assert.doesNotMatch(app.split('plugins {')[1].split('}')[0], /google/, 'plugins 區塊不能無條件套用')
   assert.match(read(...A, 'app', '.gitignore'), /^google-services\.json$/m)
-  assert.ok(!fs.existsSync(path.join(root, ...A, 'app', 'google-services.json')), 'repo 裡不能有這個檔')
+  assert.equal(googleServicesTracked(), false, 'repo 裡不能有這個檔（發版機上照流程會放一份，但不能進 git）')
   assert.match(read(...A, 'build.gradle.kts'), /classpath\("com\.google\.gms:google-services:/)
   assert.match(app, /firebase-messaging/)
+})
+
+test('googleServicesTracked：被追蹤、在卻沒被忽略都算進 repo；只在本機且被忽略不算；沒有 git 才看檔案在不在', () => {
+  const fake = (ls, ig) => (cmd, args) => (args[0] === 'ls-files' ? ls : ig)
+  const ok = { status: 0, stdout: '' }
+  assert.equal(googleServicesTracked(fake({ status: 0, stdout: 'x/google-services.json\n' }, ok), () => true), true, '被 git 追蹤')
+  assert.equal(googleServicesTracked(fake(ok, { status: 1 }), () => true), true, '檔案在、沒被忽略')
+  assert.equal(googleServicesTracked(fake(ok, { status: 0 }), () => true), false, '發版機：檔案在、被忽略')
+  assert.equal(googleServicesTracked(fake(ok, ok), () => false), false, '檔案不在')
+  assert.equal(googleServicesTracked(fake({ error: new Error('ENOENT') }, ok), () => true), true, '沒有 git：檔案在就算')
+  assert.equal(googleServicesTracked(fake({ error: new Error('ENOENT') }, ok), () => false), false, '沒有 git：檔案不在')
 })
 
 test('APK 不帶任何服務帳戶金鑰：專案裡找不到私鑰、服務帳戶欄位、FCM 秘密名', () => {
