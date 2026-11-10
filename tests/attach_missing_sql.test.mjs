@@ -13,7 +13,7 @@ const mig = rd(fs.readFileSync(new URL(FILE, DIR), 'utf8'))
 const down = rd(fs.readFileSync(new URL('../supabase/sql/rollback/20261112000000_attach_missing_down.sql', import.meta.url), 'utf8'))
 const SIG = 'asn_relay_attach_missing(text, uuid[], uuid)'
 
-test('靜態：只授權 service_role、search_path 空、純讀取；排在最新 migration 之後；有回復檔', () => {
+test('靜態：只授權 service_role、search_path 空、純讀取；排在依賴的前一支之後；有回復檔', () => {
   const body = mig.replace(/^--.*$/gm, '')
   assert.ok(body.includes(`revoke all on function public.${SIG} from public, anon, authenticated;`))
   assert.ok(body.includes(`grant execute on function public.${SIG} to service_role;`))
@@ -21,7 +21,7 @@ test('靜態：只授權 service_role、search_path 空、純讀取；排在最�
   assert.doesNotMatch(body, /\b(insert|update|delete)\b/i)
   assert.doesNotMatch(body, /attach_(claim|bind)/)
   const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
-  assert.equal(files[files.length - 1], FILE, '本 migration 要是最新的一支')
+  // 只要求排在它依賴的前一支之後；不要求是最新的一支（之後加 migration 不該弄壞這張測試）
   assert.ok(files.indexOf(FILE) > files.indexOf('20261111200000_acct_quota_week_confirm.sql'))
   assert.match(down, /drop function if exists public\.asn_relay_attach_missing\(text, uuid\[\], uuid\)/)
 })
