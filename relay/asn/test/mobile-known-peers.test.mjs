@@ -17,7 +17,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.wrong, '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。')
   assert.equal(TEXT.locked(7), '答錯過一次，請 7 分鐘後再確認。')
   assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 認得的電腦把它忘掉，再重新連線。')
-  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。')
+  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 認得的電腦把它忘掉，才能重新確認。')
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
   assert.equal(TEXT.confirmed, '已確認')

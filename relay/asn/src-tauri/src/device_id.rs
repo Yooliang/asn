@@ -260,9 +260,8 @@ impl KnownPeer {
         if self.pick_wrong >= PICK_WRONG_LIMIT {
             return PickGate::Blocked;
         }
-        let before_start = self.pick_lock_set_ms.is_some_and(|s| now_ms < s);
-        let before_end = self.pick_lock_until_ms.is_some_and(|u| now_ms < u);
-        if !(before_start || before_end) {
+        // 鎖到期前都算鎖住；時鐘倒退到上鎖之前，也一定早於到期時間（到期＝上鎖＋10 分鐘），所以照樣鎖住
+        if !self.pick_lock_until_ms.is_some_and(|u| now_ms < u) {
             return PickGate::Open;
         }
         let left = self.pick_lock_until_ms.unwrap_or(now_ms).saturating_sub(now_ms);
@@ -438,12 +437,12 @@ impl KnownPeers {
 
     /// 這台的固定選項：沒有（或壞了）就用 make 產生一次存進紀錄。回（選項、是不是剛產生的＝呼叫端要存檔）；沒記住這台回 None
     #[allow(dead_code)]
-    pub fn ensure_pick(&mut self, node: &str, make: impl FnOnce(&str) -> (Vec<String>, usize)) -> Option<(PickSet, bool)> {
-        let p = self.peers.iter_mut().find(|p| p.node == node)?;
+    pub fn ensure_pick(&mut self, node: &str, make: impl FnOnce(&str) -> Result<(Vec<String>, usize), String>) -> Result<Option<(PickSet, bool)>, String> {
+        let Some(p) = self.peers.iter_mut().find(|p| p.node == node) else { return Ok(None) };
         if p.pick_valid() {
-            return p.pick.clone().map(|s| (s, false));
+            return Ok(p.pick.clone().map(|s| (s, false)));
         }
-        let (options, answer) = make(&fingerprint(&p.sign_pub));
+        let (options, answer) = make(&fingerprint(&p.sign_pub))?;
         let set = PickSet { options, answer };
         p.pick = Some(set.clone());
         Some((set, true))
@@ -560,7 +559,7 @@ pub mod live {
     /// 出題前的準備（手機）：現在能不能出；能的話回這台固定的四個選項與答案位置（沒有就用 make 產生一次、存檔）。
     /// 全程在同一把鎖裡。沒記住這台回 None。**答案只給呼叫的 Rust 命令，不進任何畫面資料**
     #[allow(dead_code)]
-    pub fn pick_prepare(dir: &Path, node: &str, now_ms: u64, make: impl FnOnce(&str) -> (Vec<String>, usize)) -> Result<Option<PickPrep>, String> {
+    pub fn pick_prepare(dir: &Path, node: &str, now_ms: u64, make: impl FnOnce(&str) -> Result<(Vec<String>, usize), String>) -> Result<Option<PickPrep>, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut k = KnownPeers::load(dir)?;
         let Some(gate) = k.pick_gate(node, now_ms) else { return Ok(None) };
@@ -568,7 +567,7 @@ pub mod live {
         if gate != PickGate::Open {
             return Ok(Some(PickPrep { gate, sign_pub, answer: 0, options: Vec::new() }));
         }
-        let Some((set, created)) = k.ensure_pick(node, make) else { return Ok(None) };
+        let Some((set, created)) = k.ensure_pick(node, make)? else { return Ok(None) };
         if created {
             k.save(dir)?;
         }
@@ -902,7 +901,7 @@ mod tests {
     }
 
     fn pick_of(k: &mut KnownPeers, node: &str, seed: u64) -> (PickSet, bool) {
-        k.ensure_pick(node, |fp| crate::known_pick::make_options(fp, xs(seed))).unwrap()
+        k.ensure_pick(node, |fp| Ok(crate::known_pick::make_options(fp, xs(seed)))).unwrap().unwrap()
     }
 
     fn one_peer() -> KnownPeers {
@@ -915,7 +914,9 @@ mod tests {
     fn 固定選項_每台只出一次_同一組同一順序_存檔讀回一樣_忘記再記住才重出() {
         let mut k = one_peer();
         assert!(k.peer("pc").unwrap().pick.is_none(), "新記住的：還沒有選項");
-        assert_eq!(k.ensure_pick("沒有", |_| (Vec::new(), 0)), None, "沒記住的不出");
+        assert_eq!(k.ensure_pick("沒有", |_| Ok((Vec::new(), 0))), Ok(None), "沒記住的不出");
+        assert_eq!(k.ensure_pick("pc", |_| Err("系統亂數不可用".to_string())), Err("系統亂數不可用".to_string()), "取不到亂數：回錯誤、不存");
+        assert!(k.peer("pc").unwrap().pick.is_none());
         let (a, created) = pick_of(&mut k, "pc", 1);
         assert!(created);
         assert_eq!(a.options.len(), 4);

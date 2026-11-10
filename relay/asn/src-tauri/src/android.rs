@@ -401,7 +401,7 @@ pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serd
         PickGate::Blocked => Ok(serde_json::json!({ "state": "blocked" })),
         PickGate::Locked { minutes } => Ok(serde_json::json!({ "state": "locked", "minutes": minutes })),
         PickGate::Open => {
-            let id = crate::known_pick::issue(&node, &prep.sign_pub, prep.answer).map_err(|_| "busy".to_string())?;
+            let id = crate::known_pick::issue(&node, &prep.sign_pub, prep.answer)?;
             Ok(serde_json::json!({ "state": "ok", "id": id, "options": prep.options }))
         }
     }
@@ -422,7 +422,12 @@ pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Resul
     let out = crate::known_pick::answer(&id, pick);
     match out {
         crate::known_pick::Outcome::Wrong => {
-            crate::device_id::live::pick_record_wrong(&app.data_dir, &node, crate::auth::now_ms())?;
+            let now = crate::auth::now_ms();
+            crate::device_id::live::pick_record_wrong(&app.data_dir, &node, now)?;
+            // 第二次答錯：已經擋住，回 blocked（畫面顯示擋住的字，不是「10 分鐘後」）
+            if crate::device_id::live::pick_gate(&app.data_dir, &node, now)? == Some(PickGate::Blocked) {
+                return Ok("blocked".to_string());
+            }
         }
         crate::known_pick::Outcome::NoneMatch => {
             crate::device_id::live::pick_block(&app.data_dir, &node)?;

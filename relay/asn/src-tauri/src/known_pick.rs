@@ -77,25 +77,27 @@ fn rand_below(rng: &mut impl FnMut(&mut [u8]), n: usize) -> usize {
 
 /// 出四個選項：正確的一個、三個亂數湊的（前 4 個字元與正確的、彼此都不同），洗牌後回（四個分組字串、正確的是第幾個）
 pub fn make_options(correct_fp16: &str, mut rng: impl FnMut(&mut [u8])) -> (Vec<String>, usize) {
-    let mut used: Vec<String> = vec![correct_fp16.chars().take(4).collect()];
+    // 誘餌和正確那組共用第一組 4 碼，從第二組起各自不同（第二組彼此也不同）：只比第一組分不出來，要比完整 16 碼
+    let head: String = correct_fp16.chars().take(4).collect();
+    let mut used: Vec<String> = vec![correct_fp16.chars().skip(4).take(4).collect()];
     let mut items: Vec<(String, bool)> = vec![(grouped(correct_fp16), true)];
     for _ in 0..3 {
         let mut fp = String::new();
         for _ in 0..64 {
-            let mut b = [0u8; 8];
+            let mut b = [0u8; 6];
             rng(&mut b);
-            let cand = hex_of(&b);
-            if !used.contains(&cand[..4].to_string()) {
-                fp = cand;
+            let tail = hex_of(&b);
+            if !used.contains(&tail[..4].to_string()) {
+                fp = format!("{head}{tail}");
                 break;
             }
         }
         if fp.is_empty() {
-            // 亂數一直撞（不該發生）：照順序找一個沒用過的開頭
-            let head = (0..=0xffffu32).map(|n| format!("{n:04x}")).find(|h| !used.contains(h)).unwrap_or_default();
-            fp = format!("{head}0000000000{:02x}", items.len());
+            // 亂數一直撞（不該發生）：照順序找一個沒用過的第二組
+            let second = (0..=0xffffu32).map(|n| format!("{n:04x}")).find(|h| !used.contains(h)).unwrap_or_default();
+            fp = format!("{head}{second}000000{:02x}", items.len());
         }
-        used.push(fp[..4].to_string());
+        used.push(fp[4..8].to_string());
         items.push((grouped(&fp), false));
     }
     for i in (1..items.len()).rev() {
@@ -196,18 +198,40 @@ fn store() -> &'static Mutex<Store> {
     S.get_or_init(|| Mutex::new(Store::default()))
 }
 
-fn os_rng(b: &mut [u8]) {
-    getrandom::fill(b).expect("系統亂數不可用");
+/// 系統亂數取不到時回錯誤（不 panic）
+pub const NO_RANDOM: &str = "系統亂數不可用";
+
+/// 用系統亂數跑 f；途中取不到亂數就整個作廢、回錯誤
+fn with_os_rng<T>(f: impl FnOnce(&mut dyn FnMut(&mut [u8])) -> T) -> Result<T, String> {
+    let mut failed = false;
+    let out = f(&mut |b: &mut [u8]| {
+        if getrandom::fill(b).is_err() {
+            failed = true;
+            b.fill(0);
+        }
+    });
+    if failed {
+        Err(NO_RANDOM.to_string())
+    } else {
+        Ok(out)
+    }
 }
 
 /// 用系統亂數出四個選項（每台電腦只在第一次出題時叫一次，結果存在那台的紀錄上）
-pub fn options_for(fp16: &str) -> (Vec<String>, usize) {
-    make_options(fp16, os_rng)
+pub fn options_for(fp16: &str) -> Result<(Vec<String>, usize), String> {
+    with_os_rng(|rng| make_options(fp16, rng))
 }
 
 /// 出題（或回這台已經開著的那題）：答案由呼叫端從記住的紀錄帶進來，只留在記憶體
-pub fn issue(node: &str, sign_pub: &str, answer: usize) -> Result<String, Busy> {
-    store().lock().unwrap_or_else(|e| e.into_inner()).issue(node, sign_pub, answer, Instant::now(), os_rng)
+/// 同時開著的題目太多（而且都已過關、在等確認）
+pub const BUSY: &str = "busy";
+
+pub fn issue(node: &str, sign_pub: &str, answer: usize) -> Result<String, String> {
+    let mut g = store().lock().unwrap_or_else(|e| e.into_inner());
+    match with_os_rng(|rng| g.issue(node, sign_pub, answer, Instant::now(), rng)) {
+        Ok(r) => r.map_err(|_| BUSY.to_string()),
+        Err(e) => Err(e),
+    }
 }
 
 pub fn node_of(id: &str) -> Option<String> {
@@ -251,16 +275,17 @@ mod tests {
     }
 
     #[test]
-    fn 四個選項_只有一個是正確的_開頭四碼都不同_答案位置對() {
+    fn 四個選項_只有一個是正確的_第一組都一樣_第二組都不同_答案位置對() {
         for seed in 1..200u64 {
             let (opts, ans) = make_options(FP, rng(seed));
             assert_eq!(opts.len(), 4);
             assert_eq!(opts[ans], "a93c c519 1f2e 3b4d");
             assert_eq!(opts.iter().filter(|o| o.replace(' ', "") == FP).count(), 1);
-            let mut heads: Vec<&str> = opts.iter().map(|o| &o[..4]).collect();
-            heads.sort();
-            heads.dedup();
-            assert_eq!(heads.len(), 4, "{opts:?}");
+            assert!(opts.iter().all(|o| &o[..4] == "a93c"), "只比第一組分不出來：{opts:?}");
+            let mut seconds: Vec<&str> = opts.iter().map(|o| &o[5..9]).collect();
+            seconds.sort();
+            seconds.dedup();
+            assert_eq!(seconds.len(), 4, "第二組彼此不同：{opts:?}");
             for o in &opts {
                 assert_eq!(o.len(), 19);
                 assert_eq!(o.split(' ').count(), 4);
@@ -278,14 +303,26 @@ mod tests {
     }
 
     #[test]
-    fn 亂數一直撞也不卡住_還是四個不同開頭() {
-        let (opts, ans) = make_options(FP, |b: &mut [u8]| b.fill(0xa9));
+    fn 亂數一直撞也不卡住_第一組一樣_第二組還是四個不同() {
+        let (opts, ans) = make_options(FP, |b: &mut [u8]| b.fill(0xc5));
         assert_eq!(opts.len(), 4);
         assert_eq!(opts[ans], "a93c c519 1f2e 3b4d");
-        let mut heads: Vec<&str> = opts.iter().map(|o| &o[..4]).collect();
-        heads.sort();
-        heads.dedup();
-        assert_eq!(heads.len(), 4, "{opts:?}");
+        assert!(opts.iter().all(|o| &o[..4] == "a93c"), "{opts:?}");
+        let mut seconds: Vec<&str> = opts.iter().map(|o| &o[5..9]).collect();
+        seconds.sort();
+        seconds.dedup();
+        assert_eq!(seconds.len(), 4, "{opts:?}");
+        assert!(opts.iter().all(|o| o.len() == 19), "{opts:?}");
+    }
+
+    #[test]
+    fn 系統亂數_取得到就出題_取不到回錯誤不當掉() {
+        let (opts, _) = options_for(FP).expect("一般情況取得到");
+        assert_eq!(opts.len(), 4);
+        assert_eq!(with_os_rng(|_| 1), Ok(1));
+        let src = include_str!("known_pick.rs").replace("\r\n", "\n");
+        let prod = src.split("\n#[cfg(test)]").next().unwrap();
+        assert!(!prod.contains(".expect(") && !prod.contains(".unwrap()"), "正式程式碼不 panic");
     }
 
     /// 為某台電腦出題，答案固定是 2
