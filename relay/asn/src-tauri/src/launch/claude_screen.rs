@@ -95,6 +95,8 @@ pub struct PromptText {
     pub text: String,
     /// 看得到提示的開頭，而且沒有超過行數上限。不完整就不能按「允許」
     pub complete: bool,
+    /// 不顯示、只綁進雜湊的內容：外來訊息框是整個框的內文（顯示的只是摘要，兩則摘要相同也要分得出來）；其他是空字串
+    pub bind: String,
 }
 
 /// 畫面文字是外部內容：去掉控制字元與會改變顯示順序、藏字的字元，只留換行
@@ -120,7 +122,7 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     let start = top.map_or(0, |t| t + 1);
     let kept: Vec<String> = lines[start..end].iter().map(|l| clean_prompt_line(l)).collect();
     let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES;
-    Some(PromptText { text: kept.join("\n"), complete })
+    Some(PromptText { text: kept.join("\n"), complete, bind: String::new() })
 }
 
 /// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
@@ -182,7 +184,7 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
     match classify(screen)?.kind {
         ClaudeScreenKind::Permission => permission_text(screen),
         // 外來訊息只顯示整理過的摘要（寄件名、前幾行），不放畫面原文
-        ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true }),
+        ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true, bind: held_bind(screen) }),
         ClaudeScreenKind::Question | ClaudeScreenKind::QuestionView => {
             let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
@@ -190,7 +192,7 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
             // 自由輸入那一行（「N. Type something.」）手機沒有按鈕，內容也不放（#914）
             let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| hide_cursor(&clean_prompt_line(l))).collect();
             let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
-            Some(PromptText { text: kept.join("\n").trim().to_string(), complete })
+            Some(PromptText { text: kept.join("\n").trim().to_string(), complete, bind: String::new() })
         }
         _ => None,
     }
@@ -397,6 +399,18 @@ pub fn held_view(text: &str) -> HeldView {
         })
         .collect();
     HeldView { sender, body, more_lines }
+}
+
+/// 雜湊用：最底下那個框從標題到底的整段內文，每行空白正規化、游標拿掉、空行略過（游標位置另外檢查）
+pub fn held_bind(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(title) = lines.iter().rposition(|l| l.trim() == HELD_TITLE) else { return String::new() };
+    lines[title..]
+        .iter()
+        .map(|l| strip_unsafe(&l.replace(CURSOR, " ")).split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 const HELD_RULE: &str = "────────────────────";
@@ -791,6 +805,17 @@ mod tests {
         assert!(t.text.lines().any(|l| l.chars().count() == 20 && l.chars().all(|c| c == '─')), "有分隔線");
         // 內容不同、手機文字就不同（雜湊跟著變）
         assert_ne!(phone_text(&owned.replace("trust=member", "trust=other")).unwrap().text, t.text);
+        // 摘要看不到的地方不同（總字數）：摘要一樣，綁進雜湊的內文不同
+        let at = owned.rfind(" chars total").expect("框裡有總字數");
+        let other = format!("{}0{}", &owned[..at], &owned[at..]);
+        assert_ne!(other, owned, "樣本要有總字數那一行");
+        let o = phone_text(&other).unwrap();
+        assert_eq!(o.text, t.text);
+        assert_ne!(o.bind, t.bind);
+        // 游標移到「放行」：內文不變（游標另外檢查）
+        let moved = owned.replace(" ❯ Deny", "   Deny").replace("   Deliver this message", " ❯ Deliver this message");
+        assert_eq!(held_bind(&moved), held_bind(&owned));
+        assert!(t.bind.starts_with("Held message from another session") && !t.bind.contains('❯'), "{}", t.bind);
     }
 
     #[test]

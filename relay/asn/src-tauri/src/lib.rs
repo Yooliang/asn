@@ -1741,6 +1741,11 @@ async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermV
             .spawn(move || {
                 while !st.stop.load(Ordering::SeqCst) {
                     let Some((paste, text)) = st.input.next_batch(launch::term_view::INPUT_CHUNK_BYTES, std::time::Duration::from_millis(200)) else { continue };
+                    // #1254：窗格停在外來訊息的確認框時，這一批字不交（只能用提示框的兩顆按鈕回答）；不結束打字，框收掉後照常
+                    if terms.remote_input_guard(&id) == launch::term::RemoteGuard::HeldPrompt {
+                        let _ = app.emit_to(label.as_str(), "term-view-input-error", serde_json::json!({ "view_id": view_id, "message": launch::term::HELD_LOCAL_REFUSED, "lost_bytes": text.len() }));
+                        continue;
+                    }
                     match terms.view_input(&id, &text, paste) {
                         Ok(()) => {
                             st.sent_chars.fetch_add(text.chars().count() as u64, Ordering::SeqCst);

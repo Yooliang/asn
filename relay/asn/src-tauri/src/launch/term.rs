@@ -2055,7 +2055,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     fn permission_prompt_with(&self, name: &str, session_pid: Option<u32>) -> Result<PermissionPrompt, String> {
         let (_, screen, p) = self.permission_checked(name, session_pid)?;
         let kind = if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage { "held_message" } else { "permission" };
-        Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete, kind })
+        Ok(PermissionPrompt { name: name.to_string(), hash: prompt_hash(&p), text: p.text, complete: p.complete, kind })
     }
 
     /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
@@ -2092,7 +2092,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 只送一個數字鍵，不帶 Enter：萬一判斷錯、其實停在輸入框，也只是打出一個字
     fn permission_answer_with(&self, name: &str, hash: &str, allow: bool, session_pid: Option<u32>) -> Result<(), String> {
         let (snap, screen, p) = self.permission_checked(name, session_pid)?;
-        if crate::term_remote::hash_hex(&p.text) != hash {
+        if prompt_hash(&p) != hash {
             return Err("提示內容變了，沒有送出".into());
         }
         if allow && !p.complete {
@@ -2626,6 +2626,15 @@ fn menu_keys(cursor: u32, n: u32) -> Result<Vec<AnswerKey>, String> {
     Ok(keys)
 }
 
+/// 本機提示框的雜湊：顯示的文字，加上只綁不顯示的內容（外來訊息框的整個框內文；其他框沒有，雜湊和以前一樣）
+fn prompt_hash(p: &super::claude_screen::PromptText) -> String {
+    if p.bind.is_empty() {
+        crate::term_remote::hash_hex(&p.text)
+    } else {
+        crate::term_remote::hash_hex(&format!("{}\u{0}{}", p.text, p.bind))
+    }
+}
+
 /// 外來訊息確認框送鍵時畫面已經不一樣
 const HELD_CHANGED: &str = "畫面已經變了，請到那台電腦的畫面上處理";
 
@@ -3112,7 +3121,13 @@ fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super
     let options = super::claude_screen::phone_options(screen, complete);
     // 全文和選項都綁進雜湊：選項變了也算內容變了
     let opts: Vec<String> = options.iter().map(|o| format!("{}:{}", o.n, o.label)).collect();
-    let hash = crate::term_remote::hash_hex(&format!("{text}\u{0}{}\u{0}{complete}", opts.join("\u{0}")));
+    let mut basis = format!("{text}\u{0}{}\u{0}{complete}", opts.join("\u{0}"));
+    // 外來訊息框：顯示的是摘要，整個框的內文另外綁進來（其他框 bind 是空的，雜湊和以前一樣）
+    if !p.bind.is_empty() {
+        basis.push('\u{0}');
+        basis.push_str(&p.bind);
+    }
+    let hash = crate::term_remote::hash_hex(&basis);
     PhoneOffer { name: name.to_string(), text, complete, options, hash }
 }
 
@@ -3608,6 +3623,8 @@ pub(crate) fn stop_mux_partner(id: &str) -> Result<(), String> {
 
 /// 代答入口遇到外來訊息的確認框時的回覆（#1254）
 pub const HELD_ANSWER_REFUSED: &str = "這個窗格正在等你確認一則外來訊息，這裡不能代答";
+/// 本機看畫面時對著停在外來訊息確認框的窗格打字：字不交
+pub const HELD_LOCAL_REFUSED: &str = "這個窗格正在等你確認一則外來訊息，這裡打的字沒有送出。請用跳出的提示框，或到它自己的終端視窗處理";
 
 /// 遠端打字交給窗格之前的判斷結果（#1254）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3680,6 +3697,16 @@ mod remote_guard_tests {
         let g = port.find("remote_input_guard(&pane)").expect("遠端打字先查畫面");
         assert!(g < port.find("self.terms.view_input(").unwrap(), "查完才交");
         assert!(port[g..].contains("End::HeldPrompt"));
+    }
+
+    #[test]
+    fn 守門_本機看畫面打字_停在外來訊息框時這批字不交_也不結束打字() {
+        let lib = include_str!("../lib.rs").replace("\r\n", "\n");
+        let th = lib.split(".name(\"asn-term-input\".into())").nth(1).expect("本機送字的執行緒").split(".name(\"asn-term-view\"").next().unwrap();
+        let g = th.find("terms.remote_input_guard(&id) == launch::term::RemoteGuard::HeldPrompt").expect("交之前先查畫面");
+        assert!(g < th.find("terms.view_input(&id, &text, paste)").unwrap(), "查完才交");
+        let refuse = &th[g..th.find("terms.view_input(&id, &text, paste)").unwrap()];
+        assert!(refuse.contains("HELD_LOCAL_REFUSED") && refuse.contains("continue;") && !refuse.contains("break"), "字不交、提示一句、打字不結束");
     }
 
     #[test]
@@ -7512,6 +7539,12 @@ mod tests {
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).is_err());
             // 換了一則訊息：雜湊不同
             *rig.runner.inner.screen.borrow_mut() = held.replace("trust=member", "trust=other");
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            // 摘要相同、框裡別處不同（總字數）：也算換了
+            let at = held.rfind(" chars total").unwrap();
+            *rig.runner.inner.screen.borrow_mut() = format!("{}0{}", &held[..at], &held[at..]);
+            assert_eq!(rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap().text, p.text, "摘要一樣");
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(sent(&rig).is_empty(), "{:?}", sent(&rig));
