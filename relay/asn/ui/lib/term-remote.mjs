@@ -75,6 +75,9 @@ export function createCursorFollow(slack = USER_SCROLL_SLACK) {
   return {
     away: () => userAway,
     onProgrammatic: t => { lastSet = Number(t) },
+    // 容器大小變了（鍵盤收起／長高）：瀏覽器會把 scrollTop 夾回新範圍並送 scroll 事件，那不是使用者捲的。
+    // 還沒捲離時，把夾值後的位置當成「自己設的」，讓那次事件落在 slack 內；已經捲離的不動（使用者的意思照舊）
+    onLayout: scrollTop => { if (!userAway) lastSet = Number(scrollTop) },
     onScroll: (scrollTop, { cursorVisible }) => {
       // 小幅變動不會讓人「捲離」，但游標看得到時可以恢復
       if (lastSet !== null && Math.abs(scrollTop - lastSet) <= slack) { if (cursorVisible) userAway = false; return false }
@@ -139,7 +142,15 @@ export const RemoteView = {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
-    let follow = createCursorFollow(), ro = null, scrollEl = null
+    let follow = createCursorFollow(), ro = null, scrollEl = null, lastSize = ''
+    // 大小有沒有變（和上次記的比）。scroll 事件和 ResizeObserver 回呼誰先到都不一定（算繪流程裡 scroll 事件在 ResizeObserver 之前），
+    // 所以兩邊都先問這個：先到的那邊負責把這次當成「版面造成」，不看位置差，比開一個時間窗穩（不會誤吞使用者緊接著的真捲動）
+    const sizeChanged = el => {
+      const now = el.clientWidth + 'x' + el.clientHeight
+      const changed = lastSize !== '' && now !== lastSize
+      lastSize = now
+      return changed
+    }
     const followMax = el => Math.max(0, el.scrollHeight - el.clientHeight)
     // 游標那一列要把 scrollTop 設到哪（null＝已經看得到、不用動）；follow 傳 true 就是「不管使用者有沒有捲離」，用來判斷游標看不看得到
     const cursorTarget = followFlag => {
@@ -156,8 +167,16 @@ export const RemoteView = {
       host.value.scrollTop = t
     }
     const onUserScroll = () => {
-      const el = host.value, t = cursorTarget(true)
-      if (el && t !== undefined) follow.onScroll(el.scrollTop, { cursorVisible: t === null })
+      const el = host.value
+      if (!el) return
+      if (sizeChanged(el)) { follow.onLayout(el.scrollTop); keepCursorVisible(); return }   // 大小剛變：夾值造成的，不是使用者
+      const t = cursorTarget(true)
+      if (t !== undefined) follow.onScroll(el.scrollTop, { cursorVisible: t === null })
+    }
+    const onResize = () => {
+      const el = host.value
+      if (el && sizeChanged(el)) follow.onLayout(el.scrollTop)
+      keepCursorVisible()
     }
     const unwatchScroll = () => {
       ro?.disconnect?.(); ro = null
@@ -207,8 +226,9 @@ export const RemoteView = {
         document.addEventListener('visibilitychange', onVisible)
         follow = createCursorFollow()
         scrollEl = host.value
+        lastSize = ''; if (scrollEl) sizeChanged(scrollEl)
         scrollEl?.addEventListener?.('scroll', onUserScroll, { passive: true })
-        if (typeof ResizeObserver === 'function' && scrollEl) { ro = new ResizeObserver(() => keepCursorVisible()); ro.observe(scrollEl) }
+        if (typeof ResizeObserver === 'function' && scrollEl) { ro = new ResizeObserver(onResize); ro.observe(scrollEl) }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {

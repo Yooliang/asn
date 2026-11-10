@@ -52,8 +52,18 @@ export const mtermviewFollowProbeSource = () => `(async () => {
   await sleep(400);
   bad = inside();
   if (bad) return { ok: false, why: '多送一次 scroll 事件、再來新畫面之後：' + bad };
+  // 鍵盤收起：區域從矮變高，同時瀏覽器把 scrollTop 夾到別處、送一次 scroll 事件（夾到游標看不到的位置，用 scrollTop = 0 手動模擬）。
+  // 這是版面造成的，不能被當成使用者捲離：游標仍要補到可見，之後的新畫面也要補
   s0.style.maxHeight = '';
-  await sleep(300);
+  s0.scrollTop = 0;
+  s0.dispatchEvent(new Event('scroll'));
+  await sleep(500);
+  bad = inside();
+  if (bad) return { ok: false, why: '鍵盤收起、夾值 scroll 之後被當成使用者捲離：' + bad };
+  fire(12);
+  await sleep(400);
+  bad = inside();
+  if (bad) return { ok: false, why: '鍵盤收起之後再來新畫面：' + bad };
   // 使用者往上捲到頂：再來新畫面，不拉回去
   s0.scrollTop = 0;
   await sleep(200);

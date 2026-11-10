@@ -82,6 +82,28 @@ test('跟隨狀態：使用者捲到最底、游標仍看得到：維持跟隨�
   assert.equal(cursorScrollTop({ ...base, cursorRow: 38, scrollTop: 420, follow: !f.away() }), null)
 })
 
+test('容器變高被夾回：onLayout 之後的夾值 scroll 不算使用者捲的', () => {
+  const f = createCursorFollow()
+  f.onProgrammatic(405)
+  f.onLayout(300)   // 鍵盤收起，瀏覽器把 scrollTop 夾到 300，游標那一列這時看不到
+  f.onScroll(300, { cursorVisible: visible(300) })
+  assert.equal(f.away(), false, '夾值不算捲離')
+  // 對照：沒先 onLayout 的話，同一件事會被當成使用者捲離（這就是要擋的）
+  const g = createCursorFollow()
+  g.onProgrammatic(405)
+  g.onScroll(300, { cursorVisible: visible(300) })
+  assert.equal(g.away(), true)
+})
+
+test('容器變高：已經捲離的人，onLayout 不會替他清掉捲離', () => {
+  const f = createCursorFollow()
+  f.onProgrammatic(405)
+  f.onScroll(100, { cursorVisible: false })
+  f.onLayout(100)
+  f.onScroll(100, { cursorVisible: false })
+  assert.equal(f.away(), true)
+})
+
 test('跟隨狀態：reset 之後重新開始', () => {
   const f = createCursorFollow()
   f.onScroll(50, { cursorVisible: false })
