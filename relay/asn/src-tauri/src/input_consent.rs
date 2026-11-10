@@ -134,6 +134,17 @@ pub fn consent_outcome(answer: Option<bool>, now_s: i64, expires_s: i64) -> bool
     answer == Some(true) && now_s < expires_s
 }
 
+/// 確認框被按下時怎麼算（純函式）：`pressed_allow` 是不是按了「允許」、`timed_out` 是不是已經不等了、
+/// `now_s`／`deadline_s` 是現在與這次的期限。回（算不算允許、要不要告訴本人「已逾時」）。
+/// 逾時或過了期限才按：一律不允許；只有那時按的是「允許」才提示（按「不允許」本來就是不允許，不用多一句）
+pub fn click_outcome(pressed_allow: bool, timed_out: bool, now_s: i64, deadline_s: i64) -> (bool, bool) {
+    let late = timed_out || now_s >= deadline_s;
+    if late {
+        return (false, pressed_allow);
+    }
+    (consent_outcome(Some(pressed_allow), now_s, deadline_s), false)
+}
+
 /// 最多等幾秒：[`ASK_SECS`] 和這次請求剩下的有效時間取小的；已經過期就是 0
 pub fn wait_secs(now_s: i64, expires_s: i64) -> u64 {
     u64::try_from(expires_s.saturating_sub(now_s)).unwrap_or(0).min(ASK_SECS)
@@ -194,6 +205,8 @@ pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bo
     let start = now_s();
     let wait = wait_secs(start, expires_s);
     if wait == 0 {
+        // 收到時就已經過期（多半是這台時鐘比後台快）：不開框、不允許；記一行原因，不記內容
+        elog!("[asn] 別台打字的請求收到時已過期，沒有開確認框（現在 {start}，期限 {expires_s}）");
         return false;
     }
     let deadline_s = start + wait as i64;
@@ -213,13 +226,12 @@ pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bo
         .show_with_result(move |r| {
             // 位子在框真的被關掉的這一刻才放開（逾時時框還在畫面上，不能放）
             let _slot = slot;
-            let now = now_s();
-            let late = cb_timed_out.load(Ordering::SeqCst) || now >= deadline_s;
-            if late {
-                // 逾時之後才按：不管按了什麼都不允許，告訴本人
+            let (allow, notify) = click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s);
+            if notify {
+                // 逾時之後才按「允許」：不允許，告訴本人
                 let _ = cb_app.emit_to("list", EV_EXPIRED, serde_json::json!({ "window": cb_window }));
             }
-            let _ = tx.send(!late && consent_outcome(Some(allowed(&r)), now, deadline_s));
+            let _ = tx.send(allow);
         });
     let answer = match tokio::time::timeout(std::time::Duration::from_secs(wait), rx).await {
         Ok(Ok(v)) => Some(v),
@@ -311,6 +323,24 @@ mod tests {
     }
 
     #[test]
+    fn 確認框被按下_逾時或過期後按允許一律不允許_只有按允許才提示() {
+        // 期限內
+        assert_eq!(click_outcome(true, false, 99, 100), (true, false), "期限內按允許：允許");
+        assert_eq!(click_outcome(false, false, 99, 100), (false, false));
+        // 已經不等了（逾時）：按允許也不允許，並提示
+        assert_eq!(click_outcome(true, true, 50, 100), (false, true), "逾時後按允許：不允許、提示");
+        assert_eq!(click_outcome(false, true, 50, 100), (false, false), "逾時後按不允許：不用提示");
+        // 剛好到期、過了期限
+        assert_eq!(click_outcome(true, false, 100, 100), (false, true));
+        assert_eq!(click_outcome(true, false, 10_000, 100), (false, true));
+        for now in [100, 101, 500, i64::MAX] {
+            for timed_out in [false, true] {
+                assert!(!click_outcome(true, timed_out, now, 100).0, "過期後按允許絕不允許：now={now}");
+            }
+        }
+    }
+
+    #[test]
     fn 最多等幾秒_取六十秒和剩餘時間較小的() {
         assert_eq!(wait_secs(0, 1000), ASK_SECS);
         assert_eq!(wait_secs(0, 60), 60);
@@ -357,6 +387,7 @@ mod tests {
         let cb = &ask[show..ask.find("let answer =").unwrap()];
         assert!(cb.contains("let _slot = slot;"), "位子要在回呼裡才放開");
         assert!(cb.contains("emit_to(\"list\", EV_EXPIRED"), "逾時後才按要通知本人");
+        assert!(cb.contains("click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s)") && cb.contains("tx.send(allow)"), "回呼的判斷走 click_outcome");
         assert!(ask[..show].contains("emit_to(\"list\", EV_BUSY"), "前一個框還開著要通知本人");
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
