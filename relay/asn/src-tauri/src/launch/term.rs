@@ -7480,6 +7480,47 @@ mod tests {
             assert!(sent(&rig).is_empty());
         }
 
+        /// 外來訊息確認框的樣本（Windows 取出可能是 CRLF，統一成 LF）
+        fn held_screen() -> String {
+            include_str!("../../tests/fixtures/held-message/claude-held-message.txt").replace("\r\n", "\n")
+        }
+
+        #[test]
+        fn 外來訊息框_本機提示框_不放行送_enter_放行送向下加_enter_文字是摘要() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = held_screen();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(p.kind, "held_message");
+            assert!(p.complete && p.text.contains("對方自稱：") && !p.text.contains("uds:"), "{p:?}");
+            rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["\r"]);
+            rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B\r"]);
+        }
+
+        #[test]
+        fn 外來訊息框_游標已經不在不放行_或內容變了_都不送() {
+            let rig = permission_rig();
+            let held = held_screen();
+            *rig.runner.inner.screen.borrow_mut() = held.clone();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(o.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![1, 2]);
+            // 游標移到「放行」：本機與手機都不送
+            *rig.runner.inner.screen.borrow_mut() = held.replace(" ❯ Deny", "   Deny").replace("   Deliver this message", " ❯ Deliver this message");
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).is_err());
+            // 換了一則訊息：雜湊不同
+            *rig.runner.inner.screen.borrow_mut() = held.replace("trust=member", "trust=other");
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert!(sent(&rig).is_empty(), "{:?}", sent(&rig));
+            // 手機按「放行」：向下加 Enter
+            *rig.runner.inner.screen.borrow_mut() = held;
+            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["\u{1b}[B\r"]);
+        }
+
         #[test]
         fn 手機_框不見了_程序不對_都不送() {
             let rig = permission_rig();
