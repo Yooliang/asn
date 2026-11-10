@@ -68,6 +68,8 @@ struct FState {
     /// 寄件匣壞檔通知（outbox_bad_notice）收到的請求；outbox_bad_status 不為 0 就回這個狀態碼（模擬舊後台沒這個動作或壞了）
     outbox_bad_notices: Vec<Value>,
     outbox_bad_status: u16,
+    /// 接下來 N 次 outbox_bad_notice 回 503（之後照 outbox_bad_status／成功）
+    outbox_bad_fail_n: usize,
     /// 寄信（send）收到的每一次請求（含失敗的）
     send_attempts: Vec<Value>,
     /// 接下來 N 次 send 回 send_fail_code（0＝503）；send_fail_store＝失敗前其實已收下（模擬回應在路上掉了）
@@ -314,7 +316,10 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
         }
         "outbox_bad_notice" => {
             s.outbox_bad_notices.push(body);
-            if s.outbox_bad_status != 0 {
+            if s.outbox_bad_fail_n > 0 {
+                s.outbox_bad_fail_n -= 1;
+                (503, json!({"error": "internal"}))
+            } else if s.outbox_bad_status != 0 {
                 (s.outbox_bad_status, json!({"error": "x"}))
             } else {
                 (200, json!({"ok": true, "notify": "sent"}))

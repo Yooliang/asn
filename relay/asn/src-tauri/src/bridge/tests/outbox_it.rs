@@ -262,7 +262,50 @@ async fn 壞檔通知失敗_只記_log_不重試() {
     c2.tick(T0 + 5_000).await;
     c2.tick(T0 + 700_000).await;
     assert_eq!(bad_notices(&h).len(), 1, "失敗也只試一次");
-    assert!(c2.log.recent().iter().any(|l| l.contains("owner notice failed")));
+    assert!(c2.log.recent().iter().any(|l| l.contains("只留本機紀錄")));
+}
+
+#[tokio::test]
+async fn 壞檔通知_第一次_503_六十秒後成功_共送兩次() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_fail_n = 1;
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    assert_eq!(bad_notices(&h).len(), 1);
+    c2.tick(T0 + 30_000).await;
+    assert_eq!(bad_notices(&h).len(), 1, "還沒到六十秒");
+    c2.tick(T0 + 65_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "六十秒後再試一次");
+    c2.tick(T0 + 200_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "成功後不再送");
+}
+
+#[tokio::test]
+async fn 壞檔通知_一直_503_超過一小時放棄() {
+    let h = rig().await;
+    h.fr.st.lock().unwrap().outbox_bad_fail_n = 1000;
+    std::fs::write(outbox_file(&h), "{ 壞").unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    c2.tick(T0 + 5_000).await;
+    c2.tick(T0 + 65_000).await;
+    assert_eq!(bad_notices(&h).len(), 2);
+    c2.tick(T0 + 4_000 + 3_600_001).await;
+    assert_eq!(bad_notices(&h).len(), 2, "超過一小時不再送");
+    assert!(c2.log.recent().iter().any(|l| l.contains("不再通知")));
+    c2.tick(T0 + 4_000 + 3_700_000).await;
+    assert_eq!(bad_notices(&h).len(), 2, "放棄後不再試");
+}
+
+#[tokio::test]
+async fn 寄件匣檔不是_utf8_也當壞檔_改名並通知() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), [0xff_u8, 0xfe, 0x00, 0x80]).unwrap();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    assert_eq!(bad_files(&h).len(), 1, "改名留著，不被下一次存檔蓋掉");
+    assert!(!outbox_file(&h).exists());
+    c2.tick(T0 + 5_000).await;
+    assert_eq!(bad_notices(&h).len(), 1);
 }
 
 #[tokio::test]
