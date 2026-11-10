@@ -424,6 +424,15 @@ Deno.serve(async (req) => {
     for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
     return json(200, { ok: true, notify: data?.notify ?? "skipped" });
   }
+  // 監看連續看不到終端服務（電腦端判斷）：只帶節點（取自金鑰），文字固定在資料庫函式，同一台 24 小時一次
+  if (action === "mux_blind_notice" && req.method === "POST") {
+    const { data, error } = await db.rpc("asn_relay_mux_blind_notice", { p_node: me.id });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error) return json(400, { error: data.error });
+    for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
+    return json(200, { ok: true, notify: data?.notify ?? "skipped" });
+  }
   if (action === "mux_down_notice" && req.method === "POST") {
     const p = parseMuxDownNotice(await req.json().catch(() => null));
     if (!p) return json(400, { error: "bad_request" });
