@@ -3597,6 +3597,12 @@ mod remote_guard_tests {
         assert_eq!(text_only("\x1b[B\r"), "", "向下鍵加 Enter：放行外來訊息的那兩下，全部拿掉");
         assert_eq!(text_only("a\x1b[A\x1bOBb\tc\nd\x03e\x1b"), "abcde");
         assert_eq!(text_only("\x1b[1;5C中"), "中");
+        assert_eq!(text_only("選1號\r"), "選號", "數字拿掉：認不出的選單按數字會直接選取");
+        assert_eq!(text_only("a\x1b]0;偷改標題\x07b"), "ab", "OSC 到 BEL 整段丟掉");
+        assert_eq!(text_only("a\x1b]2;標題\x1b\\b"), "ab", "OSC 到 ST 整段丟掉");
+        assert_eq!(text_only("a\x1bPq#0;1;2\x1b\\b"), "ab", "DCS 整段丟掉");
+        assert_eq!(text_only("a\u{9b}2Jb\x1bcz"), "aJbz", "C1 控制字元拿掉；ESC 加一個字的序列連那個字一起丟");
+        assert_eq!(text_only("甲\r\n乙"), "甲乙");
     }
 
     #[test]
@@ -3620,14 +3626,15 @@ mod remote_guard_tests {
     }
 }
 
-/// 只留文字：ESC 開頭的整段控制序列、其他控制字元（含 Enter、Tab）一律拿掉（純函式）
+/// 只留文字（純函式）：ESC 開頭的整段控制序列（CSI、SS3、OSC、DCS 等）、其他控制字元（含 Enter、Tab）、C1 控制字元一律拿掉；
+/// 數字也拿掉：Claude 的編號選單按數字就直接選取，停在認不出的選單時不能讓遠端用數字代選（西川二審）
 pub fn text_only(data: &str) -> String {
     let mut out = String::new();
     let mut it = data.chars().peekable();
     while let Some(c) = it.next() {
         if c == '\x1b' {
-            // CSI（ESC [ … 結尾字母）、SS3（ESC O x）或單獨的 ESC：整段丟掉
-            match it.peek() {
+            match it.peek().copied() {
+                // CSI：ESC [ … 結尾字母
                 Some('[') => {
                     it.next();
                     for d in it.by_ref() {
@@ -3636,17 +3643,36 @@ pub fn text_only(data: &str) -> String {
                         }
                     }
                 }
+                // SS3：ESC O x
                 Some('O') => {
                     it.next();
                     it.next();
                 }
-                _ => {}
+                // OSC（ESC ]）、DCS（ESC P）、SOS（ESC X）、PM（ESC ^）、APC（ESC _）：到 BEL 或 ST（ESC \）為止整段丟掉
+                Some(']') | Some('P') | Some('X') | Some('^') | Some('_') => {
+                    it.next();
+                    while let Some(d) = it.next() {
+                        if d == '\x07' {
+                            break;
+                        }
+                        if d == '\x1b' && it.peek() == Some(&'\\') {
+                            it.next();
+                            break;
+                        }
+                    }
+                }
+                // 其他兩字元序列（ESC 加一個字）：連那個字一起丟
+                Some(_) => {
+                    it.next();
+                }
+                None => {}
             }
             continue;
         }
-        if !c.is_control() {
-            out.push(c);
+        if c.is_control() || c.is_ascii_digit() {
+            continue;
         }
+        out.push(c);
     }
     out
 }
