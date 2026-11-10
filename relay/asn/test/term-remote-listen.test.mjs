@@ -5,9 +5,13 @@ import assert from 'node:assert/strict'
 
 // RemoteView 在模組載入時從 globalThis.Vue 取 ref／onMounted／onBeforeUnmount／nextTick：先放假的，再載入
 const hooks = { mounted: [], unmount: [] }
+const watchers = []
+const flush = () => { for (const w of watchers) { const v = w.src(); if (v !== w.last) { w.last = v; w.cb() } } }
 globalThis.Vue = {
   ref: v => ({ value: v }),
-  watch: () => {},
+  computed: fn => ({ get value() { return fn() } }),
+  // 會追蹤的假 watch：flush() 時比較取值有沒有變，變了才呼叫回呼（immediate 先呼叫一次）
+  watch: (src, cb, opts) => { const w = { src, cb, last: src() }; watchers.push(w); if (opts?.immediate) cb() },
   nextTick: async () => {},
   onMounted: fn => hooks.mounted.push(fn),
   onBeforeUnmount: fn => hooks.unmount.push(fn),
@@ -31,9 +35,9 @@ function fakeApi() {
   return { api, live, pending, calls, release }
 }
 
-function mount(api) {
-  hooks.mounted.length = 0; hooks.unmount.length = 0
-  const st = RemoteView.setup({ api, node: 'H', name: '小乙', machine: '家用機', active: true }, { emit: () => {} })
+function mount(api, extra = {}, emit = () => {}) {
+  hooks.mounted.length = 0; hooks.unmount.length = 0; watchers.length = 0
+  const st = RemoteView.setup({ api, node: 'H', name: '小乙', machine: '家用機', active: true, ...extra }, { emit })
   st.host.value = { isConnected: true }
   for (const f of hooks.mounted) f()
   return { st, unmount: () => { for (const f of hooks.unmount) f() } }
@@ -94,4 +98,36 @@ test('重新發起時，舊那一次晚註冊完的監聽也解除；新的一�
   assert.deepEqual([...f.live].map(h => h.event).sort(), [END_EVENT, FRAME_EVENT].sort())
   v.unmount()
   assert.equal(f.live.size, 0, '收掉時全部解除')
+})
+
+/** 開到「正在看」：放行 listen、等發起、對 frame 監聽推一幅 */
+async function watching(f, v) {
+  for (let i = 0; i < 40 && v.st.phase.value !== 'watching'; i++) {
+    await f.release(); await tick()
+    const h = [...f.live].find(x => x.event === FRAME_EVENT)
+    if (h && f.calls.some(c => c[0] === 'start')) h.fn({ id: 'v1', text: '測試通過', meta: { cols: 120, rows: 40 } })
+  }
+  assert.equal(v.st.phase.value, 'watching', '收到第一幅後進到正在看')
+  flush()
+  return v
+}
+
+test('電腦版（barInline false）：狀態事件跟著等待→正在看走，卸載後發 null（狀態列不殘留）', async () => {
+  const f = fakeApi(), seen = []
+  const v = mount(f.api, { barInline: false }, (name, payload) => { if (name === 'status') seen.push(payload) })
+  assert.equal(seen[0]?.level, 'ask', '一開始就是等待')
+  await watching(f, v)
+  const last = seen.at(-1)
+  assert.equal(last.level, 'info')
+  assert.match(last.text, /^正在看「家用機」上「小乙」的畫面/)
+  v.unmount()
+  assert.equal(seen.at(-1), null, '卸載後發 null')
+})
+
+test('手機（barInline 預設 true）：不發 status 事件，也不在卸載時發', async () => {
+  const f = fakeApi(), seen = []
+  const v = mount(f.api, { barInline: true }, name => { seen.push(name) })
+  await watching(f, v)
+  v.unmount()
+  assert.ok(!seen.includes('status'), '手機不該有 status 事件：' + seen.join(','))
 })

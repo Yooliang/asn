@@ -3,8 +3,8 @@
 // 打的字在 Rust 端編序號、加密、補送；畫面這邊只把 xterm 收到的按鍵交給 remoteInputApi.send。
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
-import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, startError } from './term-remote.mjs'
-const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
+import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBarState, startError } from './term-remote.mjs'
+const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
 export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那邊的人要同意；2 分鐘沒打字會自動結束）'
@@ -44,10 +44,13 @@ export const RemoteInput = {
     name: { type: String, required: true },
     machine: { type: String, default: '' },
     active: { type: Boolean, default: true },
+    barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
-  emits: ['back'],
+  emits: ['back', 'status'],
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
+    const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: warn.value, main: { waiting: INPUT_TEXT.waiting, active: phase.value === 'typing' ? INPUT_TEXT.typing(props.machine || props.node, props.name) : '' }, danger: true }))
+    watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + phase.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, stoppable: phase.value === 'typing' } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     const send = (data, paste) => {
@@ -106,23 +109,23 @@ export const RemoteInput = {
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { alive = false; stop(); cleanup() })
+    onBeforeUnmount(() => { alive = false; stop(); cleanup(); if (!props.barInline) emit('status', null) })
     return { host, phase, note, soon, warn, askPaste, again: start, stop, back, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
   },
   template: `
-<div class="term-view term-remote term-remote-input">
-  <p class="term-view-ask" role="status" v-if="phase === 'starting' || phase === 'waiting'">{{ TEXT.waiting }}</p>
-  <p class="term-remote-bar term-remote-typing" role="status" v-else-if="phase === 'typing'">{{ TEXT.typing(machine || node, name) }}
+<div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">
+  <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
+  <p class="term-remote-bar term-remote-typing" role="status" v-else-if="barInline && phase === 'typing'">{{ TEXT.typing(machine || node, name) }}
     <button class="aero-btn" type="button" @click="stop">{{ TEXT.stop }}</button>
   </p>
-  <p class="term-view-lost" role="status" v-if="soon && phase !== 'ended'">{{ TEXT.soon }}</p>
-  <p class="term-view-lost" role="alert" v-if="warn">{{ warn }}</p>
+  <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
+  <p class="term-view-lost" role="alert" v-if="barInline && warn">{{ warn }}</p>
   <p class="term-view-ask" role="alert" v-if="askPaste">{{ TEXT.pasteAsk(pasteLines(askPaste)) }}
     <button class="aero-btn" type="button" @click="pasteYes">{{ TEXT.paste }}</button>
     <button class="aero-btn" type="button" @click="pasteNo">{{ TEXT.cancel }}</button>
   </p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="phase === 'waiting' || phase === 'typing'"></div>
-  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ note }}
+  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}
     <button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button>
     <button class="aero-btn" type="button" @click="back">{{ TEXT.back }}</button>
   </p>

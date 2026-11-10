@@ -3,7 +3,7 @@
 // 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { installWideChars } from './term-width.mjs'
-const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
+const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 // 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
 export const REMOTE_LABEL = '終端'
@@ -20,6 +20,19 @@ export const REMOTE_TEXT = {
   stop: '結束',
   again: '再看一次',
   failed: '沒有開始。',
+}
+
+/**
+ * 電腦版把狀態放在視窗最下面的狀態列（手機照舊在終端上方一條）：這裡算出狀態列要顯示的 { text, level }，沒有就回 null。
+ * level：info（正在看）、ask（等對方回應）、warn（快到期、結束）、danger（正在打字、送不出去，要醒目）。
+ * 優先順序：結束的說明 > 送不出去 > 目前狀態；快到期的提醒接在目前狀態後面。
+ */
+export function remoteBarState({ phase, soon, note, warn, main, danger }) {
+  if (phase === 'ended') return note ? { text: note, level: 'warn' } : null
+  if (warn) return { text: warn, level: 'danger' }
+  const base = (phase === 'starting' || phase === 'waiting') ? { text: main.waiting, level: 'ask' } : (main.active ? { text: main.active, level: danger ? 'danger' : 'info' } : null)
+  if (!base) return null
+  return soon ? { text: `${base.text} ${REMOTE_TEXT.soon}`, level: base.level === 'danger' ? 'danger' : 'warn' } : base
 }
 
 /** 這位夥伴能不能從這台看：電腦版、別台電腦的、不是離線、那台在本人帳號底下而且這台能發起（avail＝電腦端回的 true／false／null） */
@@ -135,11 +148,14 @@ export const RemoteView = {
     name: { type: String, required: true },       // 夥伴名（那台的視窗名）
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
+    barInline: { type: Boolean, default: true },  // true＝狀態文字在終端上方一條（手機）；false＝交給外層放到視窗最下面的狀態列（電腦版，用 status 事件傳）
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
-  emits: ['cancel'],
+  emits: ['cancel', 'status'],
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
+    const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
+    watch(() => (bar.value ? bar.value.level + '|' + bar.value.text : ''), () => { if (!props.barInline) emit('status', bar.value) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
     let follow = createCursorFollow(), ro = null, scrollEl = null, lastSize = ''
@@ -240,15 +256,15 @@ export const RemoteView = {
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup() })
+    onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup(); if (!props.barInline) emit('status', null) })
     return { host, phase, note, soon, again: start, TEXT: REMOTE_TEXT }
   },
   template: `
-<div class="term-view term-remote">
-  <p class="term-view-ask" role="status" v-if="phase === 'starting' || phase === 'waiting'">{{ TEXT.waiting }}</p>
-  <p class="term-remote-bar" role="status" v-else-if="phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
-  <p class="term-view-lost" role="status" v-if="soon && phase !== 'ended'">{{ TEXT.soon }}</p>
+<div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
+  <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
+  <p class="term-remote-bar" role="status" v-else-if="barInline && phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
+  <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
-  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ note }}<button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button></p>
+  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}<button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button></p>
 </div>`,
 }

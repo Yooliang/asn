@@ -49,7 +49,7 @@ test('文字：按下去直接開始，不再說會確認本人（11-08 拿掉 H
     const src = read(f)
     for (const bad of ['確認是本人', 'Hello', 'PIN']) assert.ok(!src.includes(bad), `${f} 不能再寫「${bad}」`)
   }
-  assert.match(read('../ui/lib/term-remote.mjs'), /v-if="phase === 'starting' \|\| phase === 'waiting'">\{\{ TEXT\.waiting \}\}/, '發起到收到第一幅之間只說「等那台電腦回應」')
+  assert.match(read('../ui/lib/term-remote.mjs'), /v-if="barInline && \(phase === 'starting' \|\| phase === 'waiting'\)">\{\{ TEXT\.waiting \}\}/, '發起到收到第一幅之間只說「等那台電腦回應」')
   assert.match(REMOTE_TEXT.watching('家用機', '小乙'), /只能看/)
   assert.equal(startError(new Error('已取消，沒有完成')), '已取消，沒有完成')
   assert.equal(startError(''), REMOTE_TEXT.failed)
@@ -67,7 +67,7 @@ test('看別台畫面：沒有返回鈕（只靠上排第 2 格切回訊息）�
   assert.ok(!src.includes('term-view-back') && !src.includes("emit('back')") && !src.includes("emits: ['back']"), '沒有返回鈕、沒有 back 事件')
   assert.ok(!src.includes("'回到訊息'"), '畫面裡沒有回到訊息按鈕')
   // 離開（第 2 格切回訊息 → v-if 卸載）時要結束觀看：不能因為拿掉按鈕就沒人叫 stop
-  assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\) \}\)/)
+  assert.match(src, /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\);/)
 })
 
 test('#1029 等畫面元素掛上去才建 xterm；元素不在就回 null，不丟「Terminal requires a parent element」', async () => {
@@ -104,7 +104,7 @@ test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次�
     if (view) assert.match(src, /if \(!wanted\(\)\) \{ if \(r\?\.id\) void props\.api\.stop\(r\.id\)\.catch\(\(\) => \{\}\); return \}\s+id = r\.id/, `${f}：開始後先看這一次還算不算數`)
     else assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)
     assert.match(src, /if \(!term\) \{ stop\(\); if \(alive\) finish\(/, `${f}：建不了 xterm 就結束`)
-    assert.match(src, view ? /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\) \}\)/ : /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\) \}\)/, `${f}：收掉時記下來`)
+    assert.match(src, view ? /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\);/ : /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\);/, `${f}：收掉時記下來`)
     assert.ok(!src.includes('term.open(host.value)'), `${f}：不再直接 open（元素可能不在）`)
   }
   const chat = read('../ui/lib/chatpane.mjs')
@@ -137,4 +137,28 @@ test('看別台時上方寫設備名稱，不是節點代號（「正在看「H�
     assert.ok(line && line.includes(`:machine="friend.device || friend.machine || friend.nodeName || ''"`), `${tag}先用 friend.device`)
   }
   assert.match(read('../ui/lib/core.mjs'), /optStr\('device', f\.device\)/, '名單上的設備名放在 friend.device')
+})
+
+test('電腦版狀態列：等待、正在看、打字（醒目）、快到期、結束的文字與等級', async () => {
+  const { remoteBarState } = await import('../ui/lib/term-remote.mjs')
+  const main = { waiting: '等', active: '正在看' }
+  assert.deepEqual(remoteBarState({ phase: 'waiting', soon: false, note: '', warn: '', main, danger: false }), { text: '等', level: 'ask' })
+  assert.deepEqual(remoteBarState({ phase: 'watching', soon: false, note: '', warn: '', main, danger: false }), { text: '正在看', level: 'info' })
+  assert.equal(remoteBarState({ phase: 'watching', soon: false, note: '', warn: '', main, danger: true }).level, 'danger')
+  const soon = remoteBarState({ phase: 'watching', soon: true, note: '', warn: '', main, danger: false })
+  assert.equal(soon.level, 'warn')
+  assert.ok(soon.text.startsWith('正在看 ') && soon.text.includes(REMOTE_TEXT.soon))
+  assert.equal(remoteBarState({ phase: 'typing', soon: true, note: '', warn: '', main, danger: true }).level, 'danger')
+  assert.deepEqual(remoteBarState({ phase: 'ended', soon: true, note: '被拒絕了', warn: '', main, danger: false }), { text: '被拒絕了', level: 'warn' })
+  assert.equal(remoteBarState({ phase: 'ended', soon: false, note: '', warn: '', main, danger: false }), null)
+  assert.deepEqual(remoteBarState({ phase: 'typing', soon: false, note: '', warn: '送不出去', main, danger: true }), { text: '送不出去', level: 'danger' })
+})
+
+test('狀態列與畫面上的固定句不含英文（給人看的字）', async () => {
+  const { INPUT_TEXT, INPUT_LABEL } = await import('../ui/lib/term-remote-input.mjs')
+  const sentences = []
+  for (const T of [REMOTE_TEXT, INPUT_TEXT]) for (const v of Object.values(T)) sentences.push(typeof v === 'function' ? v('家用機', '小乙', 3) : v)
+  sentences.push(REMOTE_LABEL, INPUT_LABEL)
+  assert.ok(sentences.length > 12)
+  for (const s of sentences) assert.ok(!/[A-Za-z]/.test(s), `固定句不該有英文：${s}`)
 })
