@@ -1106,7 +1106,8 @@ async fn device_known_login_ok(app: State<'_, App>, handle: AppHandle, node: Str
 #[tauri::command]
 async fn device_own_fingerprint(app: State<'_, App>) -> Result<String, String> {
     let k = device_id::live::key_async(&app.data_dir).await?;
-    Ok(device_id::fp8(&k.public_b64()))
+    // 給手機核對用：完整 16 碼（畫面每 4 個一組顯示），不是只有前 8 碼
+    Ok(device_id::fingerprint(&k.public_b64()))
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
