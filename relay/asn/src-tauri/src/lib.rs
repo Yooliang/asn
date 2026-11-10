@@ -638,9 +638,17 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
     let now_s = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0);
     let now = now_s();
     // 同一筆只處理一次：驗章前先查存檔的紀錄（重開 ASN 也擋得住）；讀不到紀錄也不接受
-    if view_seen::check_unseen_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &d.rid, now).is_err() {
-        relay.report_setup_result(false, device_relay::Refuse::Replayed.text(), None).await;
-        return;
+    match view_seen::check_unseen_in(&app.data_dir, dr::LOGIN_SEEN_FILE, &d.rid, now) {
+        Ok(()) => {}
+        Err(e) if e == view_seen::ALREADY_SEEN => {
+            relay.report_setup_result(false, device_relay::Refuse::Replayed.text(), None).await;
+            return;
+        }
+        Err(e) => {
+            elog!("手機要求登入 {name}：讀不到處理紀錄：{e}");
+            relay.report_setup_result(false, "這台電腦讀不到處理紀錄，沒有開始登入", None).await;
+            return;
+        }
     }
     let known = match device_id::live::known(&app.data_dir) {
         Ok(k) => k,
@@ -658,7 +666,8 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
             return;
         }
         Err(r) => {
-            elog!("手機要求登入 {name} 被拒絕：{}", r.text());
+            // log 記真正的原因（不認得／金鑰變了／沒允許），回給手機的是同一句
+            elog!("手機要求登入 {name} 被拒絕：{r:?}");
             relay.report_setup_result(false, r.text(), None).await;
             return;
         }
@@ -1074,12 +1083,21 @@ fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Res
     device_id::live::set_input_no_ask(&app.data_dir, &node, on)
 }
 
-/// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步
+/// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步。
+/// 打開前一定先跳確認框（名字＋指紋前 8 碼），本人按「允許」才寫入；取消回 false、什麼都不改。關掉不用問
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-fn device_known_login_ok(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
-    device_id::live::set_login_ok(&app.data_dir, &node, on)
+async fn device_known_login_ok(app: State<'_, App>, handle: AppHandle, node: String, on: bool) -> Result<bool, String> {
+    if on {
+        let peer = device_id::live::known(&app.data_dir)?.peer(&node).cloned().ok_or("不認得這台")?;
+        if !input_consent::ask_login_ok(&handle, &peer.name, &peer.sign_pub).await {
+            return Ok(false);
+        }
+        // 寫入時再比一次公鑰：框開著時這台被忘記、又用別把金鑰記住，就不寫
+        return device_id::live::set_login_ok(&app.data_dir, &node, true, Some(&peer.sign_pub));
+    }
+    device_id::live::set_login_ok(&app.data_dir, &node, false, None)
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
@@ -2811,7 +2829,7 @@ pub fn run() {
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
-        account::setup_remote_request, account::setup_remote_status,
+        account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
         site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);

@@ -345,6 +345,26 @@
                             <div class="m-dv-sbtns" v-if="setupSt.stage === 'done'"><button type="button" class="m-btn" @click="setupClose">{{ SETUP_TEXT.close }}</button></div>
                           </div>
                         </div>
+                        <div class="m-dv-setup" v-if="LOGIN_VENDORS[v.key] && ((showLoginButton(v.key, v.action) && loginSt.stage === 'idle') || (loginSt.node === acctCur.key && loginSt.vendor === v.key && loginSt.stage !== 'idle'))">
+                          <button type="button" class="m-btn" v-if="loginSt.stage === 'idle'" @click="loginAsk(acctCur.key, v.key)">{{ LOGIN_TEXT.button(LOGIN_VENDORS[v.key]) }}</button>
+                          <div class="m-dv-confirm" role="alertdialog" :aria-label="LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key])" v-else-if="loginSt.stage === 'confirm'">
+                            <b>{{ LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key]) }}</b>
+                            <p>{{ LOGIN_TEXT.confirmBody(LOGIN_VENDORS[v.key]) }}</p>
+                            <p class="m-fine">{{ LOGIN_TEXT.confirmNeed }}</p>
+                            <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="loginYes">{{ LOGIN_TEXT.yes }}</button><button type="button" class="m-btn" @click="loginNo">{{ LOGIN_TEXT.no }}</button></div>
+                          </div>
+                          <div class="m-dv-login" role="region" :aria-label="LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[v.key])" v-else-if="loginSt.stage === 'show'">
+                            <b>{{ LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[v.key]) }}</b>
+                            <a class="m-btn m-btn-big" :href="loginSt.url" target="_blank" rel="noopener noreferrer">{{ LOGIN_TEXT.open }}</a>
+                            <p class="m-fine">{{ LOGIN_TEXT.howTo }}</p>
+                            <p class="m-dv-code" translate="no">{{ loginSt.code }}</p>
+                            <p class="m-fine" aria-live="polite">{{ LOGIN_TEXT.left(loginSt.left) }}</p>
+                          </div>
+                          <div class="m-dv-prog" role="status" aria-live="polite" v-else>
+                            <b :class="{ ok: loginSt.stage === 'done' && loginSt.ok, bad: loginSt.stage === 'done' && !loginSt.ok }">{{ loginSt.text }}</b>
+                            <div class="m-dv-sbtns" v-if="loginSt.stage === 'done'"><button type="button" class="m-btn" @click="loginClose">{{ LOGIN_TEXT.close }}</button></div>
+                          </div>
+                        </div>
                         <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
                       </div>
                     </li>

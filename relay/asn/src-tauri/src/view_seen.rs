@@ -95,6 +95,9 @@ pub fn record(dir: &Path, id: &str, expires_s: i64, now_s: i64) -> Result<(), St
 
 /// 同上，指定檔名
 pub fn record_in(dir: &Path, file: &str, id: &str, expires_s: i64, now_s: i64) -> Result<(), String> {
+    // 讀、改、存在同一把鎖裡：兩筆同時進來不會互蓋、丟掉一筆
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     SeenIds::load_file(dir, file)?.with(id, expires_s, now_s)?.save_file(dir, file)
 }
 

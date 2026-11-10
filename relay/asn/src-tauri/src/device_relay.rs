@@ -53,6 +53,8 @@ pub fn canon(pairs: &[(&str, Value)]) -> String {
     format!("{{{}}}", body.join(","))
 }
 
+pub const NOT_ALLOWED_TEXT: &str = "這台電腦沒有允許這支手機替它登入：請在這台電腦的設定、認得的電腦裡，勾選這支手機的「允許替這台登入」";
+
 /// 拒絕的原因（給人看的固定句子；不帶網址、代碼、金鑰）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refuse {
@@ -75,9 +77,8 @@ pub enum Refuse {
 impl Refuse {
     pub fn text(&self) -> &'static str {
         match self {
-            Refuse::UnknownPhone => "這台電腦還不認得發出要求的手機，請先用這支手機看過這台的畫面一次",
-            Refuse::NotAllowed => "這台電腦還沒允許這支手機替它登入：請在這台電腦的設定、認得的電腦裡，勾選這支手機的「允許替這台登入」",
-            Refuse::KeyChanged => "這支手機的設備金鑰變了，這台電腦不接受它的要求",
+            // 不認得、金鑰變了、沒允許：回同一句，真正的原因只記在這台的 log
+            Refuse::UnknownPhone | Refuse::KeyChanged | Refuse::NotAllowed => NOT_ALLOWED_TEXT,
             Refuse::BadSignature => "要求的簽章驗不過，這台電腦沒有開始登入",
             Refuse::Bad(why) => why,
             Refuse::Expired => "要求已經過期，請在手機上重新發起",

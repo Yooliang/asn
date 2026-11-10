@@ -694,3 +694,77 @@ pub async fn setup_remote_status(app: State<'_, App>, auth: State<'_, AuthState>
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
     Ok(call(&c.client, &c.relay_url, &token, "node_setup_status", None, json!({})).await?)
 }
+
+/// #933 PR-5b 手機端：這支手機發出、還沒取回的裝置碼登入。一次性私鑰只在這裡（記憶體），取回、過期或被拒就丟掉
+fn pending_logins() -> &'static std::sync::Mutex<std::collections::HashMap<String, crate::device_relay::Pending>> {
+    static P: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, crate::device_relay::Pending>>> = std::sync::OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_secs() as i64).unwrap_or(0)
+}
+
+/// 手機要某台電腦登入裝置碼型 CLI（Codex）：用這支手機的設備金鑰簽一筆請求送出，私鑰留在記憶體等取回。
+/// 那台已經有進行中的請求（already）：這筆沒有建立，私鑰丟掉，回 { already: true, kind }。→ { rid, exp }
+#[tauri::command]
+pub async fn setup_device_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String, vendor: String) -> Result<Value, String> {
+    if app.shot.is_some() {
+        return Err("--shot 模式不登入".into());
+    }
+    let now = unix_now();
+    let key = crate::device_id::live::key_async(&app.data_dir).await?;
+    let (pending, payload, sig) = crate::device_relay::new_request(&key, &node, &app.node, &vendor, now).map_err(str::to_string)?;
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let body = json!({ "node": node, "kind": vendor, "payload": payload, "sig": sig, "p_node": app.node });
+    let v = call(&c.client, &c.relay_url, &token, "node_setup_request", None, body).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })?;
+    if v.get("already").and_then(Value::as_bool) == Some(true) {
+        return Ok(json!({ "already": true, "kind": v.get("kind").and_then(Value::as_str).unwrap_or("") }));
+    }
+    let (rid, exp) = (pending.req.rid.clone(), pending.req.exp);
+    let mut m = pending_logins().lock().unwrap_or_else(|e| e.into_inner());
+    m.retain(|_, p| p.req.exp > now);
+    m.insert(rid.clone(), pending);
+    Ok(json!({ "rid": rid, "exp": exp }))
+}
+
+/// 這支手機不等了（離開畫面、App 進背景、到期、按關閉）：把這筆的一次性私鑰丟掉。沒有這筆也回 ok
+#[tauri::command]
+pub fn setup_device_cancel(rid: String) -> Result<(), String> {
+    pending_logins().lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
+    Ok(())
+}
+
+/// 取回電腦放回的登入網址＋代碼。只取這支手機自己發出的（記憶體裡有私鑰的）；取一次就清。
+/// 驗章只用這支手機本機記住的那台公鑰（不用後台回的），驗不過整筆丟棄。
+/// → { state: waiting（帶 status、detail）| expired | delivered | untrusted | bad | ready（帶 url、code、code_exp、name） }
+#[tauri::command]
+pub async fn setup_device_fetch(app: State<'_, App>, auth: State<'_, AuthState>, rid: String) -> Result<Value, String> {
+    if !pending_logins().lock().unwrap_or_else(|e| e.into_inner()).contains_key(&rid) {
+        return Ok(json!({ "state": "gone" }));
+    }
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "node_setup_code_fetch", None, json!({ "rid": rid })).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })?;
+    let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let state = s("state");
+    if state == "waiting" {
+        return Ok(json!({ "state": "waiting", "status": s("status"), "detail": s("detail").chars().take(300).collect::<String>() }));
+    }
+    let Some(pending) = pending_logins().lock().unwrap_or_else(|e| e.into_inner()).remove(&rid) else {
+        return Ok(json!({ "state": "gone" }));
+    };
+    if state != "ready" {
+        return Ok(json!({ "state": if state == "expired" || state == "delivered" { state.as_str() } else { "bad" } }));
+    }
+    let known = crate::device_id::live::known(&app.data_dir)?;
+    let Some(peer) = known.peer(&pending.req.t_node) else {
+        return Ok(json!({ "state": "untrusted" }));
+    };
+    let (t_pub, name) = (peer.sign_pub.clone(), peer.name.clone());
+    match pending.open(&t_pub, &s("t_eph_pub"), &s("cipher"), &s("t_sig"), unix_now()) {
+        Ok(code) => Ok(json!({ "state": "ready", "url": code.url.as_str(), "code": code.code.as_str(), "code_exp": code.code_exp, "name": name })),
+        Err(_) => Ok(json!({ "state": "bad" })),
+    }
+}
