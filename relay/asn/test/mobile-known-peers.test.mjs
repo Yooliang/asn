@@ -169,7 +169,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
 test('chatpane／RemoteView 把開始與結束交給手機畫面；開始時帶上那台的名字', () => {
   const tr = read('../ui/lib/term-remote.mjs')
   assert.match(tr, /emit\('started', \{ \.\.\.r, machine: props\.machine \|\| props\.node \}\)/)
-  assert.match(tr, /emits: \['cancel', 'started', 'ended'\]/)
+  assert.match(tr, /emits: \['cancel', 'status', 'started', 'ended'\]/)
   assert.match(read('../ui/lib/chatpane.mjs'), /@started="\$emit\('remote-started', \$event\)" @ended="\$emit\('remote-ended'\)"/)
 })
 
