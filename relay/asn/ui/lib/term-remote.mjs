@@ -1,7 +1,7 @@
 // 看別台電腦上夥伴的畫面（#597 別台看畫面）。**只能看：** 這裡沒有任何打字、貼上、按鍵的路，
 // xterm 也關掉輸入（disableStdin）。畫面內容在 Rust 端解密、擋重放、再過濾過才送來；xterm 只寫入，不解析連結。
 // 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
-import { createFollow, frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
+import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { installWideChars } from './term-width.mjs'
 const { ref, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -59,6 +59,32 @@ export function cursorScrollTop({ cursorRow, rowHeight, viewHeight, scrollTop, m
   return Math.abs(t - cur) < 0.5 ? null : t
 }
 
+/** 位置差在這個像素內，不算使用者捲的（鍵盤開關造成的版面夾值、慣性殘留、瀏覽器多送的 scroll 事件） */
+export const USER_SCROLL_SLACK = 8
+
+/**
+ * 手機看終端的「使用者是否自己捲離」狀態。和電腦版 createFollow 不同：我們把 scrollTop 設在游標列下緣（不是最底），
+ * 所以不能用「在最底」判斷。
+ * - onProgrammatic(t)：我們自己設了 scrollTop；之後離 t 在 USER_SCROLL_SLACK 內的 scroll 事件都不算使用者捲的。
+ * - onScroll(scrollTop, { cursorVisible })：離最後一次自己設的位置超過 SLACK 才算使用者捲的；
+ *   捲到游標看不到的地方就 away，捲回游標看得到的位置就恢復（不是捲到最底）。
+ * - away()：true 時 cursorScrollTop 要用 follow=false。reset()：重新開始。
+ */
+export function createCursorFollow(slack = USER_SCROLL_SLACK) {
+  let userAway = false, lastSet = null
+  return {
+    away: () => userAway,
+    onProgrammatic: t => { lastSet = Number(t) },
+    onScroll: (scrollTop, { cursorVisible }) => {
+      // 小幅變動不會讓人「捲離」，但游標看得到時可以恢復
+      if (lastSet !== null && Math.abs(scrollTop - lastSet) <= slack) { if (cursorVisible) userAway = false; return false }
+      userAway = !cursorVisible
+      return true
+    },
+    reset: () => { userAway = false; lastSet = null },
+  }
+}
+
 /** 唯讀的 xterm 設定：在本機看畫面的設定上關掉輸入 */
 export const remoteXtermOptions = size => ({ ...xtermOptions(size), disableStdin: true })
 
@@ -113,19 +139,26 @@ export const RemoteView = {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
-    let follow = createFollow(), ro = null, scrollEl = null
+    let follow = createCursorFollow(), ro = null, scrollEl = null
     const followMax = el => Math.max(0, el.scrollHeight - el.clientHeight)
-    const keepCursorVisible = () => {
+    // 游標那一列要把 scrollTop 設到哪（null＝已經看得到、不用動）；follow 傳 true 就是「不管使用者有沒有捲離」，用來判斷游標看不看得到
+    const cursorTarget = followFlag => {
       const el = host.value, screen = el?.querySelector?.('.xterm-screen')
-      if (!el || !screen || !term?.rows) return
+      if (!el || !screen || !term?.rows) return undefined
       const rowHeight = screen.clientHeight / term.rows
       const offset = screen.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
-      const t = cursorScrollTop({ cursorRow: term.buffer?.active?.cursorY, rowHeight, viewHeight: el.clientHeight, scrollTop: el.scrollTop, maxScroll: followMax(el), follow: follow.following(), offset })
-      if (t === null) return
-      follow.place(t)
-      el.scrollTop = t
+      return cursorScrollTop({ cursorRow: term.buffer?.active?.cursorY, rowHeight, viewHeight: el.clientHeight, scrollTop: el.scrollTop, maxScroll: followMax(el), follow: followFlag, offset })
     }
-    const onUserScroll = () => { const el = host.value; if (el) follow.onScroll(el.scrollTop, followMax(el)) }
+    const keepCursorVisible = () => {
+      const t = cursorTarget(!follow.away())
+      if (t === null || t === undefined) return
+      follow.onProgrammatic(t)
+      host.value.scrollTop = t
+    }
+    const onUserScroll = () => {
+      const el = host.value, t = cursorTarget(true)
+      if (el && t !== undefined) follow.onScroll(el.scrollTop, { cursorVisible: t === null })
+    }
     const unwatchScroll = () => {
       ro?.disconnect?.(); ro = null
       scrollEl?.removeEventListener?.('scroll', onUserScroll); scrollEl = null
@@ -172,7 +205,7 @@ export const RemoteView = {
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
         if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         document.addEventListener('visibilitychange', onVisible)
-        follow = createFollow()
+        follow = createCursorFollow()
         scrollEl = host.value
         scrollEl?.addEventListener?.('scroll', onUserScroll, { passive: true })
         if (typeof ResizeObserver === 'function' && scrollEl) { ro = new ResizeObserver(() => keepCursorVisible()); ro.observe(scrollEl) }

@@ -39,6 +39,21 @@ export const mtermviewFollowProbeSource = () => `(async () => {
   if (term.buffer.active.cursorY !== 38) return { ok: false, why: '游標列 ' + term.buffer.active.cursorY + '（應 38）' };
   let bad = inside();
   if (bad) return { ok: false, why: '來了新畫面後：' + bad + '；scrollTop ' + s0.scrollTop };
+  // 程式跟隨之後，多來一次非使用者造成的 scroll 事件（不改 scrollTop）不能關掉跟隨：
+  // 再把區域壓矮（像鍵盤又長高）並來一幅新畫面，游標那一列仍要補到可見範圍
+  s0.dispatchEvent(new Event('scroll'));
+  await sleep(100);
+  s0.style.maxHeight = Math.round(s0.clientHeight * 0.7) + 'px';
+  await sleep(400);
+  bad = inside();
+  if (bad) return { ok: false, why: '多送一次 scroll 事件、區域變矮之後跟隨被關掉：' + bad };
+  s0.dispatchEvent(new Event('scroll'));
+  fire(11);
+  await sleep(400);
+  bad = inside();
+  if (bad) return { ok: false, why: '多送一次 scroll 事件、再來新畫面之後：' + bad };
+  s0.style.maxHeight = '';
+  await sleep(300);
   // 使用者往上捲到頂：再來新畫面，不拉回去
   s0.scrollTop = 0;
   await sleep(200);

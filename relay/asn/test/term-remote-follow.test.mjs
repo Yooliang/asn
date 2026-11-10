@@ -1,8 +1,7 @@
 // 手機看終端：游標那一列要看得到（cursorScrollTop），使用者捲離就不拉回
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cursorScrollTop } from '../ui/lib/term-remote.mjs'
-import { createFollow } from '../ui/lib/term-view.mjs'
+import { createCursorFollow, cursorScrollTop } from '../ui/lib/term-remote.mjs'
 
 // 40 列、每列 15px＝600；可見 180；最多捲 420
 const base = { rowHeight: 15, viewHeight: 180, maxScroll: 420, follow: true, offset: 0 }
@@ -48,15 +47,45 @@ test('壞輸入：不動、不丟錯', () => {
   assert.equal(cursorScrollTop({ ...base, cursorRow: 5, viewHeight: 0, scrollTop: 0 }), null)
 })
 
-test('跟隨狀態：使用者往上捲停止跟隨、程式自己設的捲動不算、捲回底部恢復', () => {
-  const f = createFollow()
-  assert.equal(f.following(), true, '一開始跟隨')
-  f.place(405)
-  f.onScroll(405, 420)
-  assert.equal(f.following(), true, '程式自己設的捲動位置不算使用者捲的')
-  f.onScroll(0, 420)
-  assert.equal(f.following(), false, '使用者捲到頂')
-  assert.equal(cursorScrollTop({ ...base, cursorRow: 38, scrollTop: 0, follow: f.following() }), null)
-  f.onScroll(419, 420)
-  assert.equal(f.following(), true, '捲回底部恢復')
+// 游標第 38 列、max 420、可見 180：游標列看得到的 scrollTop 約 390..420，我們設 405（不是最底）
+const visible = top => cursorScrollTop({ ...base, cursorRow: 38, scrollTop: top }) === null
+
+test('跟隨狀態：程式設 405 之後，非程式的小幅 scroll 事件（夾值、慣性）不會關掉跟隨', () => {
+  const f = createCursorFollow()
+  assert.equal(f.away(), false, '一開始跟隨')
+  f.onProgrammatic(405)
+  for (const top of [405, 404, 406, 405]) {
+    f.onScroll(top, { cursorVisible: visible(top) })
+    assert.equal(f.away(), false, `scroll 到 ${top} 不算使用者捲的`)
+  }
+})
+
+test('跟隨狀態：使用者捲到 100 才算捲離；捲回游標看得到的位置（不必到最底）就恢復', () => {
+  const f = createCursorFollow()
+  f.onProgrammatic(405)
+  assert.equal(f.onScroll(100, { cursorVisible: visible(100) }), true)
+  assert.equal(f.away(), true)
+  assert.equal(cursorScrollTop({ ...base, cursorRow: 38, scrollTop: 100, follow: !f.away() }), null, '捲離時不拉回')
+  f.onScroll(300, { cursorVisible: visible(300) })
+  assert.equal(f.away(), true, '還沒捲到游標看得到的位置')
+  f.onScroll(400, { cursorVisible: visible(400) })
+  assert.equal(f.away(), true, '400 還差一點，游標那一列的下緣被切到')
+  f.onScroll(410, { cursorVisible: visible(410) })
+  assert.equal(f.away(), false, '游標看得到就恢復跟隨')
+})
+
+test('跟隨狀態：使用者捲到最底、游標仍看得到：維持跟隨，下一幅不會往上拉', () => {
+  const f = createCursorFollow()
+  f.onProgrammatic(405)
+  f.onScroll(420, { cursorVisible: visible(420) })
+  assert.equal(f.away(), false)
+  assert.equal(cursorScrollTop({ ...base, cursorRow: 38, scrollTop: 420, follow: !f.away() }), null)
+})
+
+test('跟隨狀態：reset 之後重新開始', () => {
+  const f = createCursorFollow()
+  f.onScroll(50, { cursorVisible: false })
+  assert.equal(f.away(), true)
+  f.reset()
+  assert.equal(f.away(), false)
 })
