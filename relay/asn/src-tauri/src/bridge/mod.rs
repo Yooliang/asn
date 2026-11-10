@@ -370,6 +370,8 @@ pub struct Status {
     pub key_protection: String,
     /// 這次啟動有沒有在用共用的終端服務。和 `term_server` 不同＝改了還沒生效，要重開 ASN
     pub term_server_active: bool,
+    /// 想用終端服務、但這次 ASN 的啟動方式會讓夥伴跟著 ASN 一起關閉，所以夥伴改開在一般視窗：給人看的原因；沒有是空字串
+    pub term_server_why: String,
     /// 被系統設定固定關著（環境變數），設定頁不能改
     pub term_server_locked: bool,
     /// 共用終端服務還在跑、裡面還有夥伴，但這次 ASN 沒在管它們（設定關掉後重開）：人數；0＝沒有；-1＝服務在跑但數不出人數
@@ -423,7 +425,7 @@ impl Manager {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
         let fetch = term_fetch_status();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
