@@ -12,7 +12,7 @@
 --  2. 不動 asn_relay_acct_window_judge、asn_relay_acct_roster_report、任何資料表（不新增欄位）。原因代碼不變。
 -- 電腦端（Gemini）同一份規則寫在 claude_quota/merge.rs 的 confirm_rise，共用案例 tests/fixtures/quota-merge-cases.json 的 confirm_sequences 兩邊都跑。
 -- 權限：維持只給 service_role。部署順序：本 migration → relay（Edge Function，不需改）→ 電腦端。
--- 回復：supabase/sql/rollback/20261113000000_acct_quota_rise_confirm_down.sql（換回上一版本體；window_pending 裡多出的 left_pct 無害）。
+-- 回復：supabase/sql/rollback/20261112500000_acct_quota_rise_confirm_down.sql（換回上一版本體；window_pending 裡多出的 left_pct 無害）。
 begin;
 
 create or replace function public.asn_relay_acct_window_decide(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_pending jsonb, p_now timestamptz)

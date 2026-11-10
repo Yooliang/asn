@@ -101,7 +101,7 @@ const H = 3600_000, D = 24 * H
 
 test('實跑：共用案例 confirm_sequences 每一步都跟預期一致（decide 逐步帶著待確認狀態）', { skip }, async () => {
   const db = await setup()
-  // 這支 migration 之後（20261113000000）才有 Gemini／MiniMax 的同期回升確認，那幾組在 acct_quota_rise_confirm_sql 跑
+  // 這支 migration 之後（20261112500000）才有 Gemini／MiniMax 的同期回升確認，那幾組在 acct_quota_rise_confirm_sql 跑
   for (const s of cases.confirm_sequences.filter(x => x.vendor === 'claude')) {
     let old = s.old, pending = null
     for (const [i, st] of s.steps.entries()) {

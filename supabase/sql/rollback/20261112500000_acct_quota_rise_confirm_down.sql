@@ -1,4 +1,4 @@
--- 退回 20261113000000_acct_quota_rise_confirm.sql：decide 換回 20261111200000 版本體（同期回升一律拒收）。
+-- 退回 20261112500000_acct_quota_rise_confirm.sql：decide 換回 20261111200000 版本體（同期回升一律拒收）。
 begin;
 
 create or replace function public.asn_relay_acct_window_decide(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_pending jsonb, p_now timestamptz)

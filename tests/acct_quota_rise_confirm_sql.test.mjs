@@ -1,4 +1,4 @@
-// Gemini、MiniMax 同一期剩餘回升改走待確認（#1261，20261113000000_acct_quota_rise_confirm.sql）：
+// Gemini、MiniMax 同一期剩餘回升改走待確認（#1261，20261112500000_acct_quota_rise_confirm.sql）：
 // 1. 靜態：decide 除了明列的片段與 20261111200000 版逐字相同；回復檔換回上一版；只授權 service_role；沒有權杖類字樣、沒動資料表。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 confirm_sequences 全部（含 gemini、minimax、claude 的新序列）逐步跟預期一致；
@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const FILE = '20261113000000_acct_quota_rise_confirm.sql'
+const FILE = '20261112500000_acct_quota_rise_confirm.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(FILE)
