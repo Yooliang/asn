@@ -919,6 +919,7 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
 // ---- 手機看別台電腦夥伴的終端（PR④，只能看）：對話頁頂端「訊息／終端」切換 ----
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
 import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
+import { mtermviewFollowProbeSource } from './smoke-term-follow.mjs'
 export const MTERMVIEW_PROBES = {
   cursor: { mtermview: true, cursor: true },
   base: { mtermview: true, big: false },
@@ -931,6 +932,7 @@ export const MTERMVIEW_PROBES = {
   // 看終端時輸入框要照樣在最下面（小良哥 11-10）；kb＝鍵盤開著（視窗高度縮小、輸入框取得焦點）
   composer: { mtermview: true, composer: true, kb: false },
   composerKb: { mtermview: true, composer: true, kb: true },
+  follow: { mtermview: true, follow: true },
 }
 export const MTERMVIEW_TEXT = [
   'Claude Code v2.1.0  Opus  ~/demo',
@@ -1035,7 +1037,7 @@ export const mtermComposerProbeSource = ({ kb }) => `(async () => {
   if (bad) return { ok: false, why: bad };
   return { ok: true, why: '' };
 })()`
-export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb }) => composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
+export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb, follow }) => follow ? mtermviewFollowProbeSource() : composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => e && e.offsetParent !== null;
   let sw = null;
@@ -1214,6 +1216,9 @@ export const SCENARIOS = [
   { name: 'm-term-composer-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composer, shot: 'm-term-composer-360.png' },
   { name: 'm-term-composer-kb', page: 'm.html', height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composerKb, shot: 'm-term-composer-kb-412.png' },
   { name: 'm-term-composer-kb-360', page: 'm.html', width: 360, height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composerKb, shot: 'm-term-composer-kb-360.png' },
+  // 鍵盤開著（視窗高 420）、40 列假畫面、游標在倒數第 2 列：游標那一列要完整看得到；使用者捲到頂後來新畫面不拉回去
+  { name: 'm-term-follow', page: 'm.html', height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.follow, shot: 'm-term-follow-412.png' },
+  { name: 'm-term-follow-360', page: 'm.html', width: 360, height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.follow, shot: 'm-term-follow-360.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
