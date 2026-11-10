@@ -294,7 +294,11 @@ async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，�
 }
 
 // 整合模式：只有「目前分頁」且主視窗開著沒最小化才算看得到；分開模式：那段對話自己的視窗開著沒最小化（1 對 1 與群組共用）
-const chatShownId = id => chatShown(ui, id, { mainVisible: () => invoke('main_visible'), chatVisible: cid => invoke('chat_visible', { id: cid }) })
+// 「通知」對話正在看：左邊選著通知頁籤，或整合模式右邊開著通知內容分頁（主視窗要看得到）。這時新來的通知等於當場看到，
+// 不算未讀、不跳提示（跟以前通知開成對話分頁時一樣，西川二審）；分離模式照舊看通知對話視窗
+let railTabNow = () => ''   // 名單頁籤的 ref 在下面才建立，建立後換成真的
+const noticeOnScreen = () => railTabNow() === 'notice' || (ui.mode === 'merged' && ui.active === NOTICE_TAB)
+const chatShownId = async id => (id === NOTICE_ID && noticeOnScreen() ? Boolean(await invoke('main_visible')) : chatShown(ui, id, { mainVisible: () => invoke('main_visible'), chatVisible: cid => invoke('chat_visible', { id: cid }) }))
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
   isChatVisible: chatShownId,
@@ -1170,6 +1174,7 @@ const pages = computed(() => pageTabs(friendsAct.value, dims.tabDim, { selfNode:
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
 const shotTab = ref(startTab || (dims.tabDim === 'device' ? info.node : ''))
 setRailTab = key => { shotTab.value = key }
+railTabNow = () => shotTab.value
 const adI = ref(0)   // 底部小廣告與「開始」頁大幅廣告共用同一個目前位置
 // 廣告：預設是打包備用（ADS）；啟動時與每 6 小時由 Rust 的 ads_fetch 從官網抓一次（--shot 模式不抓），抓不到（回空）就維持現況。內容一律當純文字顯示
 const ads = ref(ADS)

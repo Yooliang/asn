@@ -139,3 +139,10 @@ test('「通知」分頁不能固定：右鍵選單不給「固定分頁」，�
   assert.match(html, /<li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">/, '選單的固定分頁項目由 chatTabMenuPanel 決定')
 })
 
+test('正在看通知（左邊選著通知頁籤，或右邊開著通知內容）時，新通知不算未讀、不跳提示', () => {
+  const js = read('../ui/list.js')
+  assert.match(js, /const noticeOnScreen = \(\) => railTabNow\(\) === 'notice' \|\| \(ui\.mode === 'merged' && ui\.active === NOTICE_TAB\)/)
+  assert.match(js, /const chatShownId = async id => \(id === NOTICE_ID && noticeOnScreen\(\) \? Boolean\(await invoke\('main_visible'\)\) : chatShown\(/)
+  assert.match(js, /railTabNow = \(\) => shotTab\.value/)
+})
+
