@@ -2067,6 +2067,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 手機按了一個選項。送之前全部重查：框還在、內容和選項沒變、這個數字還在選項裡。只送一個數字鍵，不帶 Enter
     fn phone_answer_with(&self, name: &str, hash: &str, n: u32, session_pid: Option<u32>) -> Result<(), String> {
         let (snap, screen, p) = self.phone_checked(name, session_pid)?;
+        let want = prompt_hash(&p);
         let offer = phone_offer(name, &screen, p);
         if offer.hash != hash {
             return Err("提示內容變了，沒有送出".into());
@@ -2075,17 +2076,66 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err("這個提示沒有這個選項".into());
         }
         if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
-            // 外來訊息框是不帶編號的選單：游標一定要在第一項，才送「Enter」或「向下＋Enter」，一次寫進去
-            if screen.cursor != 0 {
-                return Err(HELD_CHANGED.into());
-            }
-            let keys = held_keys(screen.cursor, n).ok_or(HELD_CHANGED)?;
-            let bytes = encode_keys(&keys)?;
-            let dir = self.dir()?;
-            return self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &bytes);
+            return self.held_send(name, session_pid, &snap, screen.cursor, &want, n);
         }
         let dir = self.dir()?;
         self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &n.to_string())
+    }
+
+    /// 外來訊息確認框的送鍵：只有本人按下的兩個入口（本機提示框、手機提示框）呼叫，呼叫前已重查過一次（框還在、雜湊相同）。
+    /// 不放行＝Enter。放行分兩步：先送向下，重讀確認還是同一個框、游標到了「放行」才送 Enter；不對就不送 Enter，回報失敗
+    fn held_send(&self, name: &str, session_pid: Option<u32>, snap: &SessionSnap, cursor: usize, want: &str, n: u32) -> Result<(), String> {
+        let mut recheck = || -> Result<(usize, String), String> {
+            let (_, s, p) = self.permission_checked(name, session_pid)?;
+            if s.kind != super::claude_screen::ClaudeScreenKind::HeldMessage {
+                return Err(HELD_CHANGED.into());
+            }
+            Ok((s.cursor, prompt_hash(&p)))
+        };
+        self.held_send_with(snap, cursor, want, n, &mut recheck, HELD_STEP_WAIT)
+    }
+
+    /// `held_send` 的本體（重讀畫面的方式由呼叫的一方給，測試用）
+    fn held_send_with(&self, snap: &SessionSnap, cursor: usize, want: &str, n: u32, recheck: &mut dyn FnMut() -> Result<(usize, String), String>, wait: std::time::Duration) -> Result<(), String> {
+        if cursor != 0 {
+            return Err(HELD_CHANGED.into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let send = |k: AnswerKey| -> Result<(), String> { w.send_bytes(&snap.window.sock, snap.pane_id, &encode_keys(&[k])?) };
+        match n {
+            1 => send(AnswerKey::Enter)?,
+            2 => {
+                send(AnswerKey::Down)?;
+                let mut at_deliver = false;
+                for _ in 0..HELD_STEP_TRIES {
+                    std::thread::sleep(wait);
+                    let Ok((now, hash)) = recheck() else { return Err(HELD_HALF.into()) };
+                    if hash != want {
+                        return Err(HELD_HALF.into());
+                    }
+                    match now {
+                        1 => {
+                            at_deliver = true;
+                            break;
+                        }
+                        0 => continue,
+                        _ => return Err(HELD_HALF.into()),
+                    }
+                }
+                if !at_deliver {
+                    return Err(HELD_HALF.into());
+                }
+                send(AnswerKey::Enter)?;
+            }
+            _ => return Err(HELD_CHANGED.into()),
+        }
+        // 送完再讀一次：同一個框還在就不算成功（框消失、換成別的畫面或別則訊息才算）
+        std::thread::sleep(wait);
+        match recheck() {
+            Ok((_, hash)) if hash == want => Err(HELD_STILL.into()),
+            _ => Ok(()),
+        }
     }
 
     /// 本人在本機畫面按了「允許這一次」或「拒絕」。送之前全部重查，文字要和顯示給本人的相同；
@@ -2099,14 +2149,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err("提示太長，請到視窗裡確認".into());
         }
         if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
-            // 重查已經做完（permission_checked 重新讀畫面並分類、上面比過雜湊）：還要框還在、游標還在「不放行」上
-            if screen.cursor != 0 {
-                return Err(HELD_CHANGED.into());
-            }
-            let keys = held_keys(screen.cursor, if allow { 2 } else { 1 }).ok_or(HELD_CHANGED)?;
-            let bytes = encode_keys(&keys)?;
-            let dir = self.dir()?;
-            return self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &bytes);
+            return self.held_send(name, session_pid, &snap, screen.cursor, &prompt_hash(&p), if allow { 2 } else { 1 });
         }
         let n = if allow { screen.allow_once } else { screen.deny }.ok_or("這個提示沒有這個選項")?;
         if !(1..=9).contains(&n) {
@@ -2638,19 +2681,13 @@ fn prompt_hash(p: &super::claude_screen::PromptText) -> String {
 /// 外來訊息確認框送鍵時畫面已經不一樣
 const HELD_CHANGED: &str = "畫面已經變了，請到那台電腦的畫面上處理";
 
-/// 外來訊息確認框：兩個沒有編號的選項，游標預設在「不放行」。只有游標在第一項才算得出鍵：
-/// 1（不放行）＝Enter；2（放行）＝向下、Enter。其他情況一律 None。
-/// 只有「本人在提示框上按下」的兩個入口（permission_answer_with、phone_answer_with）會呼叫
-fn held_keys(cursor: usize, n: u32) -> Option<Vec<AnswerKey>> {
-    if cursor != 0 {
-        return None;
-    }
-    match n {
-        1 => Some(vec![AnswerKey::Enter]),
-        2 => Some(vec![AnswerKey::Down, AnswerKey::Enter]),
-        _ => None,
-    }
-}
+/// 放行送了向下之後，畫面沒有照預期變成游標在「放行」：不按 Enter
+const HELD_HALF: &str = "游標已經往下移了一格，但畫面沒有照預期停在「放行」，所以沒有按 Enter，訊息沒有放行。請到那台電腦的畫面上處理";
+/// 按了 Enter，同一個框還在畫面上
+const HELD_STILL: &str = "已經按下，但這個框還在畫面上，請到那台電腦的畫面上確認";
+/// 放行的兩步之間，每次重讀前等多久、最多讀幾次
+const HELD_STEP_WAIT: std::time::Duration = std::time::Duration::from_millis(120);
+const HELD_STEP_TRIES: usize = 8;
 
 /// 唯一會產生終端機控制碼的地方。字元鍵只准單一英數字元，其他控制碼字串一律拒絕。
 fn encode_key(key: AnswerKey) -> Result<String, String> {
@@ -3709,14 +3746,6 @@ mod remote_guard_tests {
         assert!(refuse.contains("HELD_LOCAL_REFUSED") && refuse.contains("continue;") && !refuse.contains("break"), "字不交、提示一句、打字不結束");
     }
 
-    #[test]
-    fn 外來訊息確認框的送鍵_游標在第一項才有鍵_只認兩個選項() {
-        assert_eq!(encode_keys(&held_keys(0, 1).unwrap()).unwrap(), "\r", "不放行：Enter");
-        assert_eq!(encode_keys(&held_keys(0, 2).unwrap()).unwrap(), "\u{1b}[B\r", "放行：向下、Enter");
-        assert!(held_keys(1, 1).is_none() && held_keys(1, 2).is_none(), "游標不在第一項：不送");
-        assert!(held_keys(0, 0).is_none() && held_keys(0, 3).is_none() && held_keys(0, 9).is_none());
-    }
-
     fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
@@ -3729,28 +3758,36 @@ mod remote_guard_tests {
     }
 
     #[test]
-    fn 守門_外來訊息的送鍵只有兩個本人按下的入口會呼叫_橋接與遠端入口碰不到() {
+    fn 守門_外來訊息的送鍵只有兩個本人按下的入口會呼叫_白名單以外的檔案都不准出現() {
         let src = include_str!("term.rs").replace("\r\n", "\n");
         let prod = src.split("mod remote_guard_tests").next().unwrap();
-        // 定義一次、呼叫兩次：各在 permission_answer_with 與 phone_answer_with 裡
-        assert_eq!(prod.matches("held_keys(").count(), 3, "定義加兩個入口");
+        // held_send：各在 permission_answer_with 與 phone_answer_with 裡呼叫一次；held_send_with 只有 held_send 呼叫
+        assert_eq!(prod.matches("self.held_send(").count(), 2, "兩個入口");
+        assert_eq!(prod.matches("self.held_send_with(").count(), 1, "只有 held_send");
         for f in ["fn permission_answer_with(", "fn phone_answer_with("] {
             let body = prod.split(f).nth(1).unwrap().split("\n    }\n").next().unwrap();
-            assert_eq!(body.matches("held_keys(").count(), 1, "{f}");
+            assert_eq!(body.matches("self.held_send(").count(), 1, "{f}");
             assert!(body.contains("HeldMessage"), "{f} 先確認還是外來訊息框");
         }
+        // 放行分兩步：向下之後重讀，游標到了「放行」才送 Enter
+        let with = prod.split("fn held_send_with(").nth(1).unwrap().split("\n    }\n").next().unwrap();
+        let (down, re, enter) = (with.find("send(AnswerKey::Down)?").unwrap(), with.find("recheck()").unwrap(), with.rfind("send(AnswerKey::Enter)").unwrap());
+        assert!(down < re && re < enter, "先向下、重讀、再 Enter");
+        assert!(with[enter..].contains("recheck()") && with[enter..].contains("HELD_STILL"), "送完再讀一次，框還在不算成功");
+        assert!(!with.contains("AnswerKey::Down, AnswerKey::Enter"), "不一次送向下加 Enter");
         // 終端面板的代答：先擋外來訊息框
         let ans = prod.split("pub fn answer(").nth(1).unwrap().split("\n    }\n").next().unwrap();
         assert!(ans.contains("is_held_message(&text)") && ans.contains("HELD_ANSWER_REFUSED"));
-        assert!(!ans.contains("held_keys("));
-        // 橋接與遠端打字的程式碼不能碰這些入口
+        assert!(!ans.contains("held_send"));
+        // 整個 src：這些入口只准出現在白名單的檔案（定義在 launch/term.rs；命令在 lib.rs；手機在 perm_remote.rs）
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("term_remote.rs")];
-        rs_files(&root.join("bridge"), &mut files);
-        rs_files(&root.join("term_remote"), &mut files);
-        for f in files {
-            let text = std::fs::read_to_string(&f).unwrap();
-            for name in ["permission_answer_with", "phone_answer_with", "held_keys", "partner_permission_answer", "partner_phone_answer"] {
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        assert!(files.len() > 20, "掃得到 src");
+        let allowed = [root.join("launch").join("term.rs"), root.join("lib.rs"), root.join("perm_remote.rs")];
+        for f in files.iter().filter(|f| !allowed.contains(f)) {
+            let text = std::fs::read_to_string(f).unwrap();
+            for name in ["held_send", "permission_answer_with", "phone_answer_with", "partner_permission_answer", "partner_phone_answer"] {
                 assert!(!text.contains(name), "{} 不能碰 {name}", f.display());
             }
         }
@@ -7519,10 +7556,56 @@ mod tests {
             let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
             assert_eq!(p.kind, "held_message");
             assert!(p.complete && p.text.contains("對方自稱：") && !p.text.contains("uds:"), "{p:?}");
-            rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap();
-            assert_eq!(sent(&rig), vec!["\r"]);
-            rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap();
-            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B\r"]);
+            // 這個假畫面不會動：送了 Enter 框還在，回報「還在」（不算成功）
+            let e = rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("還在畫面上"), "{e}");
+            assert_eq!(sent(&rig), vec!["\r"], "不放行：只送 Enter");
+            // 放行：先送向下；這個假畫面不會動（游標還在「不放行」），所以不按 Enter、回報失敗
+            let e = rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("沒有按 Enter"), "{e}");
+            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B"]);
+        }
+
+        #[test]
+        fn 外來訊息框_放行兩步_向下後重讀_游標到放行且同一個框才按_enter() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = held_screen();
+            let (snap, _) = rig.svc.partner_screen_checked("小乙", Some(SESSION_PID)).unwrap();
+            let z = std::time::Duration::ZERO;
+            type Re = Box<dyn FnMut() -> Result<(usize, String), String>>;
+            fn at(cursor: usize, hash: &str) -> Re {
+                let hash = hash.to_string();
+                Box::new(move || Ok((cursor, hash.clone())))
+            }
+            /// 依序回這些結果，用完之後回「框不見了」
+            fn seq(v: Vec<Result<(usize, String), String>>) -> Re {
+                let mut it = v.into_iter();
+                Box::new(move || it.next().unwrap_or_else(|| Err("這個提示已經不在畫面上".to_string())))
+            }
+            let h = || "h".to_string();
+            // 游標到了「放行」、雜湊相同：送 Enter；之後框不見了＝成功
+            rig.svc.held_send_with(&snap, 0, "h", 2, &mut *seq(vec![Ok((1, h()))]), z).unwrap();
+            assert_eq!(sent(&rig), vec!["\u{1b}[B", "\r"]);
+            // 游標晚一點才到「放行」：照樣等到再送
+            rig.svc.held_send_with(&snap, 0, "h", 2, &mut *seq(vec![Ok((0, h())), Ok((1, h()))]), z).unwrap();
+            assert_eq!(sent(&rig)[2..].to_vec(), vec!["\u{1b}[B".to_string(), "\r".to_string()]);
+            // 按了之後同一個框還在：不算成功；換成別則訊息（雜湊不同）算成功
+            let before = sent(&rig).len();
+            assert!(rig.svc.held_send_with(&snap, 0, "h", 1, &mut *at(0, "h"), z).unwrap_err().contains("還在畫面上"));
+            rig.svc.held_send_with(&snap, 0, "h", 1, &mut *at(0, "下一則"), z).unwrap();
+            assert_eq!(sent(&rig)[before..].to_vec(), vec!["\r".to_string(), "\r".to_string()]);
+            // 換成別的框（雜湊不同）、重讀失敗（例如變成權限框）、游標一直沒動、游標跑到別處：都不按 Enter
+            let gone: Re = Box::new(|| Err("這個提示已經不在畫面上".to_string()));
+            for mut re in [at(1, "別的"), gone, at(0, "h"), at(2, "h")] {
+                let before = sent(&rig).len();
+                assert!(rig.svc.held_send_with(&snap, 0, "h", 2, &mut *re, z).unwrap_err().contains("沒有按 Enter"));
+                assert_eq!(sent(&rig)[before..].to_vec(), vec!["\u{1b}[B".to_string()], "只有向下");
+            }
+            // 游標一開始就不在「不放行」、或不是這兩個選項：什麼都不送
+            let before = sent(&rig).len();
+            assert!(rig.svc.held_send_with(&snap, 1, "h", 2, &mut *at(1, "h"), z).is_err());
+            assert!(rig.svc.held_send_with(&snap, 0, "h", 3, &mut *at(1, "h"), z).is_err());
+            assert_eq!(sent(&rig).len(), before);
         }
 
         #[test]
@@ -7548,10 +7631,12 @@ mod tests {
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(sent(&rig).is_empty(), "{:?}", sent(&rig));
-            // 手機按「放行」：向下加 Enter
+            // 手機按「不放行」：只送 Enter；按「放行」：先送向下，假畫面不動就不按 Enter
             *rig.runner.inner.screen.borrow_mut() = held;
-            rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
-            assert_eq!(sent(&rig), vec!["\u{1b}[B\r"]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("還在畫面上"));
+            assert_eq!(sent(&rig), vec!["\r"]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("沒有按 Enter"));
+            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B"]);
         }
 
         #[test]
