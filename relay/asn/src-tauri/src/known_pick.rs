@@ -201,7 +201,8 @@ mod tests {
 
     /// 固定的亂數：xorshift，種子相同結果相同
     fn rng(seed: u64) -> impl FnMut(&mut [u8]) {
-        let mut s = seed | 1;
+        // 不同的種子一定給不同的序列（不能用 seed | 1：20 和 21 會變成同一個）
+        let mut s = (seed << 1) | 1;
         move |buf: &mut [u8]| {
             for b in buf.iter_mut() {
                 s ^= s << 13;

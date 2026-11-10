@@ -907,18 +907,13 @@ mod tests {
     /// 函式本體（從 pub fn 名字到下一個空行加右大括號）
     fn body_of<'a>(code: &'a str, name: &str) -> &'a str {
         let at = code.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("找不到 {name}"));
-        code[at..].split("
-}
-").next().unwrap()
+        code[at..].split("\n}\n").next().unwrap()
     }
 
     #[test]
     fn 守門_四選一_先取走過關的題目才確認_回答不記住_答案不進日誌與事件() {
-        let rs = include_str!("android.rs").replace("
-", "
-");
-        let code = rs.split("
-#[cfg(test)]").next().unwrap();
+        let rs = include_str!("android.rs").replace("\r\n", "\n");
+        let code = rs.split("\n#[cfg(test)]").next().unwrap();
         let confirm = body_of(code, "android_known_confirm");
         let (t, c) = (confirm.find("take_passed(").expect("要先取走過關的題目"), confirm.find("live::confirm(").expect("要確認"));
         assert!(t < c, "take_passed 在 live::confirm 之前");
@@ -931,7 +926,7 @@ mod tests {
         // 這四個命令：日誌只有「都不一樣」那一行；題目、選項、答案都不進任何日誌、事件、顯示
         let chal = body_of(code, "android_known_challenge");
         for (name, b) in [("challenge", chal), ("answer", ans), ("confirm", confirm)] {
-            for bad in ["emit", "ui_log", "println!", "dbg!", "tracing::", "log::", "olog!", "format!"] {
+            for bad in ["emit", "ui_log", concat!("print", "ln!"), concat!("db", "g!"), "tracing::", "log::", "olog!", "format!"] {
                 assert!(!b.contains(bad), "android_known_{name} 不能有：{bad}");
             }
         }
@@ -941,12 +936,9 @@ mod tests {
         assert_eq!(line, "\"本人表示手機上的指紋選項都和電腦不一樣，沒有記住\"", "只有這一句，不帶任何變數");
         assert!(chal.contains("peer.sign_pub") && !chal.contains("fingerprint"), "正確指紋由 known_pick 用記住的公鑰算");
         // 四選一的模組：不寫日誌、不發事件，而且 known_pick 只被這幾個命令叫
-        let kp = include_str!("known_pick.rs").replace("
-", "
-");
-        let kp = kp.split("
-#[cfg(test)]").next().unwrap();
-        for bad in ["elog!", "olog!", "println!", "dbg!", "log::", "tracing::", "emit", "ui_log"] {
+        let kp = include_str!("known_pick.rs").replace("\r\n", "\n");
+        let kp = kp.split("\n#[cfg(test)]").next().unwrap();
+        for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit", "ui_log"] {
             assert!(!kp.contains(bad), "known_pick.rs 不能有：{bad}");
         }
         for (i, _) in code.match_indices("known_pick::") {
