@@ -31,6 +31,12 @@ pub const TOO_MANY: &str = "同時最多看 3 個畫面，請先結束一個";
 /// 那台的設備公鑰和這台記住的不同
 pub const TARGET_KEY_CHANGED: &str = "那台電腦的設備金鑰變了，沒有開始看。如果是你重裝了那台，請到設定頁「認得的電腦」按「忘記這台」再看一次";
 
+/// 手機上那台電腦的金鑰和記住的不一樣時給本人看的話：帶新的指紋前 8 碼，讓本人到那台的設定頁對照
+pub fn phone_key_changed_text(name: &str, new_fp8: &str) -> String {
+    let who = if name.trim().is_empty() { "那台電腦" } else { name };
+    format!("「{who}」的金鑰和這支手機記住的不一樣，已經擋下。如果那台重灌或換了電腦，請到那台的設定頁確認指紋是 {new_fp8}；確定是那台，再到這支手機的「設定 → 認得的電腦」把它忘掉，重新連一次。")
+}
+
 /// 本人在畫面上要的狀態：看、暫停（畫面被藏起來）、結束
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Want {

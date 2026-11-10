@@ -151,7 +151,8 @@ export const RemoteView = {
     barInline: { type: Boolean, default: true },  // true＝狀態文字在終端上方一條（手機）；false＝交給外層放到視窗最下面的狀態列（電腦版，用 status 事件傳）
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
-  emits: ['cancel', 'status'],
+  // started：發起成功（帶 Rust 回的資料，手機用來顯示那台的確認狀態）；ended：這次觀看結束或被收掉
+  emits: ['cancel', 'status', 'started', 'ended'],
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
@@ -207,6 +208,7 @@ export const RemoteView = {
       document.removeEventListener('visibilitychange', onVisible)
       unwatchScroll()
       term?.dispose?.(); term = null
+      emit('ended')   // 每次收掉都告訴外層（手機用來收起「確認指紋」條）；收掉前沒開始過也無妨
     }
     const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = '' }
     const start = async () => {
@@ -237,6 +239,7 @@ export const RemoteView = {
         if (!wanted()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }
         id = r.id
         phase.value = 'waiting'
+        emit('started', { ...r, machine: props.machine || props.node })
         term = await openTerm(Terminal, remoteXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
         if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
         document.addEventListener('visibilitychange', onVisible)

@@ -363,10 +363,11 @@ pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_,
     let handle = window.app_handle().clone();
     let backend = std::sync::Arc::new(crate::LiveBackend::new(handle.clone(), relay, app.data_dir.clone()));
     let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
-    let (id, expires_s) = (begun.id.clone(), begun.session.expires_s);
+    // 回給畫面的資料多帶那台的指紋與有沒有確認過（由驗過的公鑰算出）
+    let started = crate::view_d::started_view_json(&begun);
     let sink = std::sync::Arc::new(crate::LiveSink::new(handle, window.label().to_string()));
     crate::view_d::spawn_view(backend, sink, views.inner().clone(), url, begun);
-    Ok(crate::view_d::started_json(&id, expires_s, crate::view_handshake::Scope::View))
+    Ok(started)
 }
 
 /// 暫停（畫面藏起來）或繼續
@@ -379,4 +380,24 @@ pub fn term_view_remote_set(views: State<'_, std::sync::Arc<crate::view_remote::
 #[tauri::command]
 pub fn term_view_remote_stop(views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, id: String) {
     crate::view_d::stop(views.inner(), &id);
+}
+
+// ---------- 認得的電腦（手機）：列表、確認指紋、忘記。確認與忘記前的本人確認（生物辨識或螢幕鎖）由畫面做，命令只收具體的電腦 ----------
+
+/// 設定頁「認得的電腦」：名字、節點、指紋前 8 碼、有沒有確認過。不含完整公鑰
+#[tauri::command]
+pub fn android_known_list(app: State<'_, App>) -> Result<serde_json::Value, String> {
+    crate::device_id::live::phone_view(&app.data_dir)
+}
+
+/// 本人對照過那台電腦設定頁上的指紋、按了「記住這台」：fp 要和這支手機記住的那把公鑰算出的指紋完全一樣才記。回有沒有記到
+#[tauri::command]
+pub fn android_known_confirm(app: State<'_, App>, node: String, fp: String) -> Result<bool, String> {
+    crate::device_id::live::confirm(&app.data_dir, &node, &fp, crate::auth::now_ms())
+}
+
+/// 本人在設定頁按「忘記」：下次再連就當第一次。回有沒有這台
+#[tauri::command]
+pub fn android_known_forget(app: State<'_, App>, node: String) -> Result<bool, String> {
+    crate::device_id::live::forget(&app.data_dir, &node)
 }

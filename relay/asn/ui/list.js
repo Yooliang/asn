@@ -397,8 +397,13 @@ function closeLaunchNotice() { launchNotice.open = false }
 const beingViewed = ref([])
 const stopBeingViewed = id => invoke('term_viewed_stop', { id }).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「認得的電腦」（#597）：判斷都在 Rust，這裡只讀本機紀錄。第一次記住和金鑰換了的通知由 Rust 寄信，不在這裡
-const known = reactive({ peers: [], busy: false, error: '', shown: false })
+const known = reactive({ peers: [], busy: false, error: '', shown: false, ownFp: '' })
+// 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對
+async function loadOwnFp() {
+  try { known.ownFp = String(await invoke('device_own_fingerprint') ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
+}
 async function refreshKnown() {
+  void loadOwnFp()
   try { Object.assign(known, knownView(await invoke('device_known_list')), { shown: true }) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); known.error = knownError(e); known.shown = true }
 }
 // 這台打字不用每次問我（0.2.10）：只有這台的設定頁能改，存在這台
@@ -1800,7 +1805,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
-      known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error } : null,
+      known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp } : null,
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },

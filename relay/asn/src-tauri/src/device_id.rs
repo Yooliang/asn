@@ -210,6 +210,25 @@ pub struct KnownPeer {
     /// 舊檔沒有這欄、第一次記住、忘記後重新記住，一律是不允許：記住了公鑰不等於允許登入
     #[serde(default)]
     pub login_ok: bool,
+    /// 本人在手機上對照過這台電腦的指紋、按了「記住這台」的時間（毫秒）。沒有＝還沒確認；舊檔沒有這欄＝還沒確認。
+    /// 只記在這支手機，不送後台、不同步；只對記住的那把公鑰有效（公鑰換了會被擋，要忘記才能重來）
+    #[serde(default)]
+    pub confirmed_at: Option<u64>,
+}
+
+/// 手機上要不要讓這台電腦接受打字：只有本人確認過指紋的才行（沒記住、沒確認都不行）
+pub fn phone_input_allowed(peer: Option<&KnownPeer>) -> bool {
+    peer.is_some_and(|p| p.confirmed_at.is_some())
+}
+
+/// 指紋前 8 個字元（畫面上顯示、給本人比對的那一段）
+pub fn fp8(sign_pub: &str) -> String {
+    fingerprint(sign_pub).chars().take(8).collect()
+}
+
+/// 手機設定頁「認得的電腦」的列表：名字、節點、指紋前 8 碼、有沒有確認過。**不含完整公鑰或完整指紋**
+pub fn phone_known_view(k: &KnownPeers) -> serde_json::Value {
+    serde_json::json!({ "peers": k.peers.iter().map(|p| serde_json::json!({ "node": p.node, "name": p.name, "fp8": fp8(&p.sign_pub), "confirmed": p.confirmed_at.is_some() })).collect::<Vec<_>>() })
 }
 
 /// 收到對方公鑰時的比對結果
@@ -268,7 +287,7 @@ impl KnownPeers {
                 Ok(())
             }
             Tofu::New => {
-                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false });
+                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false, confirmed_at: None });
                 Ok(())
             }
         }
@@ -320,6 +339,17 @@ impl KnownPeers {
                 true
             }
             None => false,
+        }
+    }
+
+    /// 本人在手機上對照過指紋、按了「記住這台」：只有這台記住的公鑰算出來的指紋（16 個字元）完全一樣才記。回有沒有記到
+    pub fn confirm(&mut self, node: &str, fp16: &str, now_ms: u64) -> bool {
+        match self.peers.iter_mut().find(|p| p.node == node) {
+            Some(p) if fingerprint(&p.sign_pub) == fp16 => {
+                p.confirmed_at = Some(now_ms);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -381,6 +411,22 @@ pub mod live {
         let gone = k.forget(node);
         k.save(dir)?;
         Ok(gone)
+    }
+
+    /// 本人在手機上按了「記住這台」：**只有手機的 android_known_confirm 能叫**（守門測試）
+    pub fn confirm(dir: &Path, node: &str, fp16: &str, now_ms: u64) -> Result<bool, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let done = k.confirm(node, fp16, now_ms);
+        if done {
+            k.save(dir)?;
+        }
+        Ok(done)
+    }
+
+    /// 手機設定頁的列表（不含完整公鑰）
+    pub fn phone_view(dir: &Path) -> Result<Value, String> {
+        Ok(phone_known_view(&known(dir)?))
     }
 
     /// 本人在打字確認框按了「允許」：**只有收到打字請求、本人按了允許的那條路能叫**（守門測試）
@@ -549,6 +595,74 @@ mod tests {
     }
 
     #[test]
+    fn 手機確認指紋_要完全一樣才記_舊檔是沒確認_第一次記住是沒確認() {
+        let mut k = KnownPeers::default();
+        k.remember("pc", "工作機", "pk", 1).unwrap();
+        assert!(!phone_input_allowed(k.peer("pc")) && !phone_input_allowed(None), "沒確認、沒記住都不能打字");
+        let fp = fingerprint("pk");
+        assert!(!k.confirm("pc", &fp[..8], 9), "只有前 8 碼不算");
+        assert!(!k.confirm("pc", &fingerprint("別把"), 9), "別把公鑰的指紋不算");
+        assert!(!k.confirm("zz", &fp, 9), "沒記住的電腦不算");
+        assert_eq!(k.peer("pc").unwrap().confirmed_at, None);
+        assert!(k.confirm("pc", &fp, 9));
+        assert_eq!(k.peer("pc").unwrap().confirmed_at, Some(9));
+        assert!(phone_input_allowed(k.peer("pc")));
+        // 同一把再記住不會蓋掉確認；忘記之後重來又是沒確認
+        k.remember("pc", "新名字", "pk", 20).unwrap();
+        assert!(phone_input_allowed(k.peer("pc")));
+        assert!(k.forget("pc"));
+        k.remember("pc", "工作機", "pk", 30).unwrap();
+        assert!(!phone_input_allowed(k.peer("pc")));
+        let old: KnownPeers = serde_json::from_str(r#"{"peers":[{"node":"d","name":"n","sign_pub":"pk","first_seen_ms":1}]}"#).unwrap();
+        assert_eq!(old.peer("d").unwrap().confirmed_at, None, "舊檔沒有這欄：沒確認");
+        let back: KnownPeers = serde_json::from_str(&serde_json::to_string(&k).unwrap()).unwrap();
+        assert_eq!(back, k);
+    }
+
+    #[test]
+    fn 手機的認得的電腦列表_只有名字_節點_指紋前八碼_有沒有確認() {
+        let mut k = KnownPeers::default();
+        k.remember("pc", "工作機", "pk", 1).unwrap();
+        let v = phone_known_view(&k);
+        let p = &v["peers"][0];
+        assert_eq!((p["name"].as_str(), p["node"].as_str(), p["fp8"].as_str(), p["confirmed"].as_bool()), (Some("工作機"), Some("pc"), Some(&fingerprint("pk")[..8]), Some(false)));
+        let text = v.to_string();
+        assert!(!text.contains("pk\"") && !text.contains(&fingerprint("pk")), "不含公鑰或完整指紋：{text}");
+        assert_eq!(p.as_object().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn 守門_手機確認與忘記只有兩個命令能叫_橋_收發室不碰() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let rs = std::fs::read_to_string(root.join("android.rs")).unwrap().replace("\r\n", "\n");
+        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        let owners = |pat: &str| -> Vec<String> { code.match_indices(pat).map(|(i, _)| owner_at(code, i)).collect() };
+        let confirm = owners("live::confirm(");
+        assert!(!confirm.is_empty() && confirm.iter().all(|f| f == "android_known_confirm"), "{confirm:?}");
+        let forget = owners("live::forget(");
+        assert!(!forget.is_empty() && forget.iter().all(|f| f == "android_known_forget"), "{forget:?}");
+        for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "headless.rs", "view_d.rs", "view_remote.rs", "relay.rs"] {
+            if let Ok(s) = std::fs::read_to_string(root.join(f)) {
+                let s = s.split("\n#[cfg(test)]").next().unwrap().to_string();
+                assert!(!s.contains("live::confirm(") && !s.contains("known.confirm("), "{f} 不能確認指紋");
+            }
+        }
+        let lib = std::fs::read_to_string(root.join("lib.rs")).unwrap();
+        let lib = lib.split("\nmod tests {").next().unwrap();
+        assert!(!lib.contains("live::confirm("), "lib.rs 不能確認指紋");
+    }
+
+    /// 這個位置落在哪個函式裡（往前找最近的 fn 宣告）
+    fn owner_at(code: &str, i: usize) -> String {
+        let before = &code[..i];
+        let start = ["\npub async fn ", "\npub fn ", "\nasync fn ", "\nfn "].iter().filter_map(|p| before.rfind(p).map(|at| (at, p.len()))).max();
+        match start {
+            Some((at, len)) => before[at + len..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect(),
+            None => String::new(),
+        }
+    }
+
+    #[test]
     fn 守門_忘記只有本機設定頁能叫_記住只有收到請求時() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let lib = std::fs::read_to_string(root.join("lib.rs")).unwrap();
@@ -572,7 +686,7 @@ mod tests {
         assert_eq!(lib.matches("set_login_ok(").count(), 2, "lib.rs 只有設定頁的命令會改（打開、關掉各一處）");
         let see = fns("device_id::live::see(");
         assert!(!see.is_empty() && see.iter().all(|f| f == "start_view_poller" || f == "start_remote_view" || f == "view_backend_see"), "記住只在收到請求（T）或看的那台驗過 T 的簽章時：{see:?}");
-        for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "android.rs", "headless.rs"] {
+        for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "headless.rs"] {
             let s = std::fs::read_to_string(root.join(f)).unwrap();
             assert!(!s.contains("live::forget") && !s.contains("live::see") && !s.contains("set_input_no_ask") && !s.contains("set_login_ok"), "{f} 不能改認得的電腦");
         }
@@ -753,8 +867,16 @@ mod tests {
 
     #[test]
     fn 守門_入口只有畫面的命令_橋_cli_手機都接不到() {
-        for src in [include_str!("bridge/mod.rs"), include_str!("bridge/launcher.rs"), include_str!("cli/mod.rs"), include_str!("android.rs")] {
+        for src in [include_str!("bridge/mod.rs"), include_str!("bridge/launcher.rs"), include_str!("cli/mod.rs")] {
             assert!(!src.contains("device_id::"), "不能從這裡碰設備金鑰");
         }
+        // 手機只有「認得的電腦」三個命令碰得到（列表、確認、忘記），其他地方一律不行；那三個命令不碰設備私鑰
+        let rs = include_str!("android.rs").replace("\r\n", "\n");
+        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        for (i, _) in code.match_indices("device_id::") {
+            let f = owner_at(code, i);
+            assert!(["android_known_list", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+        }
+        assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
     }
 }

@@ -10,6 +10,7 @@ export const TEXT = {
   forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
   firstSeen: t => `第一次記住：${t}`,
   fingerprint: '指紋',
+  ownFp: fp => `這台電腦的指紋：${fp}`,
   inputNoAsk: '這台要在這裡打字時，不用每次問我',
   inputNoAskWarn: '這台打字時不會再跳出「允許」，但紅條照樣會出現，可以按結束。想每次都問，就取消勾選。',
   inputFirstAsk: '這台第一次在這裡打字時，還是會問你一次。',

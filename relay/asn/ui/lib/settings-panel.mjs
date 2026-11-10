@@ -485,6 +485,7 @@ export const SettingsPanel = {
         <section class="set-card" aria-label="認得的電腦" v-if="st.known">
           <h3 class="set-h">{{ KNOWN.title }}</h3>
           <small>{{ KNOWN.lead }}</small>
+          <p v-if="st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b></p>
           <small v-if="!st.known.peers.length">{{ KNOWN.none }}</small>
           <div class="pair-row" v-for="p in st.known.peers" :key="p.node">
             <p><b>{{ p.name }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
