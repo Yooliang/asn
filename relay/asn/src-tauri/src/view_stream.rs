@@ -891,7 +891,7 @@ mod tests {
         let me = include_str!("view_stream.rs").replace("\r\n", "\n");
         let remote = include_str!("view_remote.rs").replace("\r\n", "\n");
         let cases: [(&str, String); 6] = [
-            ("term_view_start", fn_body(&include_str!("view_d.rs").replace("\r\n", "\n"), "pub async fn begin<", false).to_string()),
+            ("term_view_start", fn_body(&include_str!("view_d.rs").replace("\r\n", "\n"), "async fn begin_on<", false).to_string()),
             ("term_view_report", fn_body(&remote, "pub fn step_of(", false).to_string()),
             ("term_view_pending.requests[]", fn_body(&me, "pub fn accept_request(", false).to_string()),
             ("term_view_pending.active[]", fn_body(&me, "pub fn ctl_from_active(", false).to_string()),
