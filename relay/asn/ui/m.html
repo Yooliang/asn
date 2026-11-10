@@ -533,7 +533,7 @@
                     <p class="m-note" v-if="kp.loaded && !kp.list.length">{{ KNOWN_TEXT.none }}</p>
                     <ul class="m-known-list" v-if="kp.list.length">
                       <li class="m-known-row" v-for="p in kp.list" :key="p.node">
-                        <span class="m-row-tx"><b>{{ p.name }}</b><small>{{ KNOWN_TEXT.fp(p.fp8) }}　{{ p.confirmed ? KNOWN_TEXT.confirmed : KNOWN_TEXT.unconfirmed }}</small></span>
+                        <span class="m-row-tx"><b>{{ p.name }}</b><small>{{ KNOWN_TEXT.fp(p.fpShow) }}　{{ p.confirmed ? KNOWN_TEXT.confirmed : KNOWN_TEXT.unconfirmed }}</small></span>
                         <button class="m-btn" type="button" :disabled="kp.busy" @click="forgetKnown(p.node)">{{ KNOWN_TEXT.forget }}</button>
                       </li>
                     </ul>

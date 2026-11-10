@@ -31,11 +31,11 @@ pub const TOO_MANY: &str = "同時最多看 3 個畫面，請先結束一個";
 /// 那台的設備公鑰和這台記住的不同
 pub const TARGET_KEY_CHANGED: &str = "那台電腦的設備金鑰變了，沒有開始看。如果是你重裝了那台，請到設定頁「認得的電腦」按「忘記這台」再看一次";
 
-/// 手機上那台電腦的金鑰和記住的不一樣時給本人看的話：帶原本與新的指紋前 8 碼，讓本人到那台的設定頁對照。
+/// 手機上那台電腦的金鑰和記住的不一樣時給本人看的話：帶原本與新的完整指紋（分組），讓本人到那台的設定頁對照。
 /// `local_name` 只能是這支手機自己記住的名字（不用後台這次給的）；沒記名字就寫「這台電腦」
-pub fn phone_key_changed_text(local_name: &str, old_fp8: &str, new_fp8: &str) -> String {
+pub fn phone_key_changed_text(local_name: &str, old_fp: &str, new_fp: &str) -> String {
     let who = if local_name.trim().is_empty() { "這台電腦".to_string() } else { format!("「{local_name}」") };
-    format!("{who}的金鑰和這支手機記住的不一樣（指紋 {old_fp8} → {new_fp8}），已經擋下。如果那台重灌或換了電腦，請到那台的設定頁確認指紋是 {new_fp8}；確定是那台，再到這支手機的「設定 → 認得的電腦」把它忘掉，重新連一次。")
+    format!("{who}的金鑰和這支手機記住的不一樣（原本的指紋 {old_fp}，現在是 {new_fp}），已經擋下。如果那台重灌或換了電腦，請到那台的設定頁確認指紋是 {new_fp}；確定是那台，再到這支手機的「設定 → 認得的電腦」把它忘掉，重新連一次。")
 }
 
 /// 本人在畫面上要的狀態：看、暫停（畫面被藏起來）、結束

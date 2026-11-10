@@ -12,13 +12,13 @@ export const TEXT = {
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   sheetTitle: name => `確認「${name}」的指紋`,
-  sheetBody: fp8 => `請到那台電腦的設定頁，確認那裡顯示的這台電腦指紋是 ${fp8}。一樣再按「記住這台」。`,
+  sheetBody: fp => `請到那台電腦的設定頁，確認那裡顯示的這台電腦指紋是 ${fp}（16 個字全部一樣）。一樣再按「記住這台」。`,
   remember: '記住這台',
   decline: '不要',
   settingTitle: '認得的電腦',
   settingLead: '看過的電腦會記在這支手機上。確認過指紋的，才放心讓它接受這支手機的操作。',
   none: '還沒有認得的電腦。',
-  fp: fp8 => `指紋 ${fp8}`,
+  fp: fp => `指紋 ${fp}`,
   confirmed: '已確認',
   unconfirmed: '還沒確認',
   forget: '忘記',
@@ -30,11 +30,13 @@ export const TEXT = {
   failed: '操作沒有成功，請稍後再試。',
 }
 
-/** 和電腦版同一種寫法：名字後面接「（指紋 xxxxxxxx）」 */
+/** 和電腦版同一種寫法：名字後面接「（指紋 xxxxxxxx）」（辨認用的前 8 碼） */
 export const fpSuffix = fp8 => `（指紋 ${fp8}）`
 
+/** 給人核對的完整指紋：16 個字元每 4 個一組（和電腦版設定頁一樣）。不是 16 個十六進位字元就回空字串 */
+export const groupFp = fp => (FP16.test(String(fp ?? '')) ? String(fp).match(/.{4}/g).join(' ') : '')
+
 const FP16 = /^[0-9a-f]{16}$/
-const FP8 = /^[0-9a-f]{8}$/
 
 /**
  * Rust 回的「開始看」資料 → 這台電腦的指紋狀態。fp 不是 16 個小寫十六進位字元就當沒有（不顯示確認條）。
@@ -44,7 +46,7 @@ export function peerOf(started, name = '') {
   const fp = typeof started?.fp === 'string' ? started.fp : ''
   const node = typeof started?.node === 'string' ? started.node : ''
   if (!FP16.test(fp) || !node) return null
-  return { node, fp, fp8: fp.slice(0, 8), confirmed: started?.confirmed === true, name: clean(name) || '那台電腦' }
+  return { node, fp, fp8: fp.slice(0, 8), fpShow: groupFp(fp), confirmed: started?.confirmed === true, name: clean(name) || '那台電腦' }
 }
 
 /** 要不要顯示「還沒確認指紋」的條 */
@@ -54,8 +56,8 @@ export const needsConfirm = peer => !!peer && peer.confirmed !== true
 export function normalizeList(raw) {
   const arr = Array.isArray(raw?.peers) ? raw.peers : []
   return arr
-    .filter(p => typeof p?.node === 'string' && p.node && FP8.test(String(p?.fp8 ?? '')))
-    .map(p => ({ node: p.node, name: clean(p.name) || '某台電腦', fp8: p.fp8, confirmed: p.confirmed === true }))
+    .filter(p => typeof p?.node === 'string' && p.node && FP16.test(String(p?.fp ?? '')))
+    .map(p => ({ node: p.node, name: clean(p.name) || '某台電腦', fpShow: groupFp(p.fp), confirmed: p.confirmed === true }))
 }
 
 /** 設置分頁那一列的摘要 */

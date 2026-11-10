@@ -2,7 +2,7 @@
 // 元件只顯示「狀態快照」（st）並用 act 事件下指令；狀態與所有動作都在名單視窗的樞紐（list.js）——
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
-import { TEXT as KNOWN } from './known-peers.mjs'
+import { TEXT as KNOWN, groupFp } from './known-peers.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
@@ -120,7 +120,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN,
+    return { KNOWN, groupFp,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -489,7 +489,7 @@ export const SettingsPanel = {
           <small v-if="!st.known.peers.length">{{ KNOWN.none }}</small>
           <div class="pair-row" v-for="p in st.known.peers" :key="p.node">
             <p><b>{{ p.name }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
-            <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ p.fingerprint }}</code>
+            <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
             <label class="chk"><input type="checkbox" :checked="p.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
             <small v-if="p.inputNoAsk && p.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
             <small v-if="p.inputNoAsk && !p.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>

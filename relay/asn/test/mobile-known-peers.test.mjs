@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { TEXT, fpSuffix, makeKnownPeers, needsConfirm, normalizeList, peerOf, errorText } from '../ui/lib/mobile-known-peers.mjs'
+import { TEXT, fpSuffix, groupFp, makeKnownPeers, needsConfirm, normalizeList, peerOf, errorText } from '../ui/lib/mobile-known-peers.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const FP = '0123456789abcdef'
@@ -11,14 +11,17 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.stripTitle, '這台還沒確認指紋')
   assert.equal(TEXT.stripButton, '確認指紋')
   assert.equal(TEXT.sheetTitle('工作機'), '確認「工作機」的指紋')
-  assert.equal(TEXT.sheetBody('01234567'), '請到那台電腦的設定頁，確認那裡顯示的這台電腦指紋是 01234567。一樣再按「記住這台」。')
+  assert.equal(TEXT.sheetBody('0123 4567 89ab cdef'), '請到那台電腦的設定頁，確認那裡顯示的這台電腦指紋是 0123 4567 89ab cdef（16 個字全部一樣）。一樣再按「記住這台」。')
   assert.equal(TEXT.remember, '記住這台')
   assert.equal(TEXT.decline, '不要')
   assert.equal(TEXT.forget, '忘記')
   assert.equal(TEXT.confirmed, '已確認')
   assert.equal(TEXT.unconfirmed, '還沒確認')
   assert.equal(TEXT.settingTitle, '認得的電腦')
-  assert.equal(TEXT.fp('01234567'), '指紋 01234567')
+  assert.equal(TEXT.fp('0123 4567 89ab cdef'), '指紋 0123 4567 89ab cdef')
+  assert.equal(groupFp('0123456789abcdef'), '0123 4567 89ab cdef', '核對用完整 16 碼分組')
+  assert.equal(groupFp('01234567'), '')
+  assert.equal(groupFp(null), '')
   for (const t of Object.values(TEXT).map(x => (typeof x === 'function' ? x('示範', '01234567') : x))) assert.doesNotMatch(t, /[A-Za-z]{3,}/, t)
 })
 
@@ -30,7 +33,7 @@ test('指紋寫法和電腦版一樣：名字後面接「（指紋 xxxxxxxx）�
 
 test('peerOf：指紋要是 16 個小寫十六進位字元，前 8 碼一律從完整指紋切；沒確認、壞資料不顯示', () => {
   const p = peerOf({ id: 'x', node: 'pc', fp: FP, fp8: 'ffffffff', confirmed: false }, '工作機')
-  assert.deepEqual(p, { node: 'pc', fp: FP, fp8: '01234567', confirmed: false, name: '工作機' })
+  assert.deepEqual(p, { node: 'pc', fp: FP, fp8: '01234567', fpShow: groupFp(FP), confirmed: false, name: '工作機' })
   assert.equal(needsConfirm(p), true)
   assert.equal(needsConfirm(peerOf({ node: 'pc', fp: FP, confirmed: true })), false)
   assert.equal(peerOf({ node: 'pc', fp: FP, confirmed: 'true' }).confirmed, false, '只認布林 true')
@@ -42,11 +45,11 @@ test('peerOf：指紋要是 16 個小寫十六進位字元，前 8 碼一律從�
   assert.equal(peerOf({ node: 'pc', fp: FP }, '').name, '那台電腦')
 })
 
-test('normalizeList：只留名字、節點、指紋前 8 碼、有沒有確認；壞的丟掉、不帶完整指紋', () => {
-  const raw = { peers: [{ node: 'a', name: '甲\n機', fp8: '01234567', confirmed: true, sign_pub: 'SECRET', fp: FP }, { node: 'b', fp8: 'zz' }, { name: 'x' }, { node: 'c', name: '丙', fp8: 'abcdef01' }] }
+test('normalizeList：只留名字、節點、分組的完整指紋、有沒有確認；壞的丟掉、不帶公鑰', () => {
+  const raw = { peers: [{ node: 'a', name: '甲\n機', fp8: '01234567', confirmed: true, sign_pub: 'SECRET', fp: FP }, { node: 'b', fp: 'zz' }, { name: 'x' }, { node: 'c', name: '丙', fp: 'abcdef0123456789' }] }
   const l = normalizeList(raw)
-  assert.deepEqual(l, [{ node: 'a', name: '甲 機', fp8: '01234567', confirmed: true }, { node: 'c', name: '丙', fp8: 'abcdef01', confirmed: false }])
-  assert.doesNotMatch(JSON.stringify(l), /SECRET|0123456789abcdef/)
+  assert.deepEqual(l, [{ node: 'a', name: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true }, { node: 'c', name: '丙', fpShow: 'abcd ef01 2345 6789', confirmed: false }])
+  assert.doesNotMatch(JSON.stringify(l), /SECRET/)
   assert.deepEqual(normalizeList(null), [])
 })
 
@@ -134,11 +137,12 @@ test('chatpane／RemoteView 把開始與結束交給手機畫面；開始時帶�
   assert.match(read('../ui/lib/chatpane.mjs'), /@started="\$emit\('remote-started', \$event\)" @ended="\$emit\('remote-ended'\)"/)
 })
 
-test('Rust：金鑰變了的說法帶新指紋；手機的開始資料帶 confirmed／fp／fp8；三個命令登記在手機清單', () => {
+test('Rust：金鑰變了的說法帶原本與新的完整指紋、名字用本機記住的；手機的開始資料帶 confirmed／fp／fp8；三個命令登記在手機清單', () => {
   const vr = read('../src-tauri/src/view_remote.rs')
-  assert.match(vr, /「\{who\}」的金鑰和這支手機記住的不一樣，已經擋下。如果那台重灌或換了電腦，請到那台的設定頁確認指紋是 \{new_fp8\}；確定是那台，再到這支手機的「設定 → 認得的電腦」把它忘掉，重新連一次。/)
+  assert.match(vr, /\{who\}的金鑰和這支手機記住的不一樣（原本的指紋 \{old_fp\}，現在是 \{new_fp\}），已經擋下。/)
   const vd = read('../src-tauri/src/view_d.rs')
-  assert.match(vd, /phone_key_changed_text\(&machine, &crate::device_id::fp8\(&to_pub\)\)/)
+  assert.match(vd, /phone_key_changed_text\(&clean_machine\(Some\(local_name\)\), &crate::device_id::fp_grouped\(&old_pub\), &crate::device_id::fp_grouped\(&to_pub\)\)/)
+  assert.doesNotMatch(vd, /phone_key_changed_text\(&machine/, '不用後台這次給的名字')
   assert.match(vd, /v\["confirmed"\]/)
   const lib = read('../src-tauri/src/lib.rs')
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))

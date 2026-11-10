@@ -226,9 +226,15 @@ pub fn fp8(sign_pub: &str) -> String {
     fingerprint(sign_pub).chars().take(8).collect()
 }
 
-/// 手機設定頁「認得的電腦」的列表：名字、節點、指紋前 8 碼、有沒有確認過。**不含完整公鑰或完整指紋**
+/// 給人核對用的完整指紋：16 個字元，每 4 個一組用空格隔開（例如「a93c c519 1f2e 3b4d」）。前 8 碼只拿來辨認，核對一律用這個
+pub fn fp_grouped(sign_pub: &str) -> String {
+    let fp: Vec<char> = fingerprint(sign_pub).chars().collect();
+    fp.chunks(4).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+}
+
+/// 手機設定頁「認得的電腦」的列表：名字、節點、完整指紋（給人核對）、前 8 碼、有沒有確認過。**不含公鑰**
 pub fn phone_known_view(k: &KnownPeers) -> serde_json::Value {
-    serde_json::json!({ "peers": k.peers.iter().map(|p| serde_json::json!({ "node": p.node, "name": p.name, "fp8": fp8(&p.sign_pub), "confirmed": p.confirmed_at.is_some() })).collect::<Vec<_>>() })
+    serde_json::json!({ "peers": k.peers.iter().map(|p| serde_json::json!({ "node": p.node, "name": p.name, "fp": fingerprint(&p.sign_pub), "fp8": fp8(&p.sign_pub), "confirmed": p.confirmed_at.is_some() })).collect::<Vec<_>>() })
 }
 
 /// 收到對方公鑰時的比對結果
@@ -620,15 +626,19 @@ mod tests {
     }
 
     #[test]
-    fn 手機的認得的電腦列表_只有名字_節點_指紋前八碼_有沒有確認() {
+    fn 手機的認得的電腦列表_只有名字_節點_指紋_有沒有確認() {
         let mut k = KnownPeers::default();
         k.remember("pc", "工作機", "pk", 1).unwrap();
         let v = phone_known_view(&k);
         let p = &v["peers"][0];
         assert_eq!((p["name"].as_str(), p["node"].as_str(), p["fp8"].as_str(), p["confirmed"].as_bool()), (Some("工作機"), Some("pc"), Some(&fingerprint("pk")[..8]), Some(false)));
+        assert_eq!(p["fp"].as_str(), Some(fingerprint("pk").as_str()), "給人核對的完整指紋");
         let text = v.to_string();
-        assert!(!text.contains("pk\"") && !text.contains(&fingerprint("pk")), "不含公鑰或完整指紋：{text}");
-        assert_eq!(p.as_object().unwrap().len(), 4);
+        assert!(!text.contains("\"pk\""), "不含公鑰：{text}");
+        assert_eq!(p.as_object().unwrap().len(), 5);
+        let g = fp_grouped("pk");
+        assert_eq!(g.split(' ').count(), 4);
+        assert_eq!(g.replace(' ', ""), fingerprint("pk"));
     }
 
     #[test]

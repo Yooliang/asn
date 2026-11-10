@@ -144,7 +144,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
         b.alert(&to_node, "changed", &to_pub).await;
         let msg = if phone {
             let (local_name, old_pub) = remembered.unwrap_or_default();
-            view_remote::phone_key_changed_text(&clean_machine(Some(local_name)), &crate::device_id::fp8(&old_pub), &crate::device_id::fp8(&to_pub))
+            view_remote::phone_key_changed_text(&clean_machine(Some(local_name)), &crate::device_id::fp_grouped(&old_pub), &crate::device_id::fp_grouped(&to_pub))
         } else {
             view_remote::TARGET_KEY_CHANGED.to_string()
         };
@@ -383,8 +383,8 @@ mod tests {
         let v = RemoteViews::default();
         // 後台這次給的名字不能出現在說明裡：只用這支手機自己記住的「工作機」
         let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("後台給的名字".into()), None, NOW)).err().unwrap();
-        let (old_fp8, new_fp8) = (crate::device_id::fp8("old-key"), crate::device_id::fp8("new-key"));
-        assert!(err.contains(&new_fp8) && err.contains(&old_fp8), "手機看到的話帶原本與新的指紋前 8 碼：{err}");
+        let (old_fp8, new_fp8) = (crate::device_id::fp_grouped("old-key"), crate::device_id::fp_grouped("new-key"));
+        assert!(err.contains(&new_fp8) && err.contains(&old_fp8), "手機看到的話帶原本與新的完整指紋（分組）：{err}");
         assert!(err.contains("設定 → 認得的電腦"), "{err}");
         assert!(err.contains("「工作機」") && !err.contains("後台給的名字"), "名字用本機記住的：{err}");
         assert_eq!(err, view_remote::phone_key_changed_text("工作機", &old_fp8, &new_fp8));

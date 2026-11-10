@@ -491,7 +491,7 @@ const app = createApp({
       } catch (e) { console.info('[ASN] 記住這台沒成功', String(e?.message ?? e)); vp.error = knownErrorText(e) } finally { vp.busy = false }
     }
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.cur.name) : ''))
-    const peerSheetBody = computed(() => (vp.cur ? KNOWN_TEXT.sheetBody(vp.cur.fp8) : ''))
+    const peerSheetBody = computed(() => (vp.cur ? KNOWN_TEXT.sheetBody(vp.cur.fpShow) : ''))
     void loadKnown()
     const settingRows = computed(() => mobileSettingRows({ knownCount: kp.list.length, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
