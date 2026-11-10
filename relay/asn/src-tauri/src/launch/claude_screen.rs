@@ -408,7 +408,6 @@ fn held_phone_text(v: &HeldView) -> String {
         Some(s) => format!("對方自稱：{s}"),
         None => "寄件視窗沒有寫名字".to_string(),
     });
-    lines.push("要讓這則外來訊息進到這位夥伴嗎？".to_string());
     lines.push(HELD_RULE.to_string());
     lines.extend(v.body.iter().cloned());
     lines.push(HELD_RULE.to_string());
