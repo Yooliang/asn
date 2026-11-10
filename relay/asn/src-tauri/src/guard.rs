@@ -355,7 +355,7 @@ mod sys {
     fn user_id() -> String {
         let user = std::env::var("USERNAME").unwrap_or_default();
         match std::env::var("USERDOMAIN") {
-            Ok(d) if !d.is_empty() => format!("{d}\{user}"),
+            Ok(d) if !d.is_empty() => format!(r"{d}\{user}"),
             _ => user,
         }
     }
