@@ -1,4 +1,5 @@
--- 終端服務停了也要通知：服務裡沒有夥伴（p_count = 0）時，只通知「這台的終端服務停了」（asn真 11-10 交辦）。
+-- 終端服務停了也要通知：ASN 沒看到服務裡有夥伴（p_count = 0）時，通知「這台的終端服務停了」，但不下「沒事」的判斷
+--   （asn真 11-10 交辦；30家用 那次其實有夥伴在裡面、只是 ASN 沒算到，所以請本人自己確認要不要叫醒）。
 -- 起因：11-10 30家用 的終端服務崩潰（0xc00000fd）後，電腦端一直沒有任何訊號；監看原本「裡面沒有夥伴就不記」，沒有夥伴的服務停了更不會通知。
 -- 1. asn_relay_mux_down_notice：p_count 下限由 1 改成 0，0 用固定的新句型；1～100 的句型一字不改。
 -- 2. 新函式 asn_relay_mux_blind_notice(p_node)：電腦端監看連續約 5 分鐘看不到終端服務時，通知本人一次（同一台 24 小時一則）。
@@ -35,7 +36,7 @@ begin
     perform pg_advisory_xact_lock(hashtext('mux_down_notice:' || p_node));
     v_body := coalesce(nullif(v_computer, ''), '未命名設備')
       || case when p_count = 0
-           then '：這台的終端服務停了' || E'\n' || '目前沒有夥伴在裡面，不用接回；下次開夥伴時會自動重新啟動。'
+           then '：這台的終端服務停了' || E'\n' || 'ASN 沒有看到夥伴開在裡面。如果有夥伴是開在終端服務裡的，請到「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」重新叫醒它們。'
          when p_resumed
            then '：終端服務中斷了' || E'\n' || p_count || ' 位夥伴受影響，ASN 正在自動接回。'
            else '：終端服務短時間內又中斷了' || E'\n' || p_count || ' 位夥伴受影響。這次沒有自動接回，請到「' || coalesce(nullif(v_computer, ''), '未命名設備') || '」看一下。'

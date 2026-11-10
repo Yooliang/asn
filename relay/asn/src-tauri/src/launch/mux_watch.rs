@@ -408,7 +408,7 @@ pub fn taipei_hms(ms: u64) -> String {
 /// 事故紀錄那一行（純函式）。前半和以前一字不差，後面只是多附的資訊
 pub fn incident_line(inc: &Incident, reason: &str, last_alive_ms: Option<u64>, uptime_secs: u64, event: Option<&str>) -> String {
     let head = if inc.partners.is_empty() {
-        "終端服務停了：裡面沒有夥伴，不用接回".to_string()
+        "終端服務停了：ASN 沒看到裡面有夥伴，沒有自動接回".to_string()
     } else {
         format!("終端服務中斷：{} 位夥伴（{}）{}", inc.partners.len(), inc.partners.join("、"), if inc.resume { "，自動接回" } else { "，十分鐘內又中斷，只通知不接回" })
     };
@@ -894,7 +894,7 @@ mod tests {
         assert!(!empty_normal_exit(&empty, "結束碼不明（ASN 那時沒在看）"), "ASN 關著期間不見的也算");
         assert!(!empty_normal_exit(&Incident { partners: vec!["甲".into()], resume: true }, &exit_text(Some(0))), "有夥伴的照舊算");
         let line = incident_line(&empty, "崩潰（0xC00000FD，堆疊溢位）", None, 60, Some("事件記錄：…"));
-        assert!(line.starts_with("終端服務停了：裡面沒有夥伴，不用接回｜崩潰（0xC00000FD，堆疊溢位）"), "{line}");
+        assert!(line.starts_with("終端服務停了：ASN 沒看到裡面有夥伴，沒有自動接回｜崩潰（0xC00000FD，堆疊溢位）"), "{line}");
     }
 
     #[test]

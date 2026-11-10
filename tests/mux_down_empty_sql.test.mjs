@@ -58,7 +58,8 @@ async function boot(sql) {
 test('實跑：0 位夥伴＝「這台的終端服務停了」；1～100 照舊；範圍外照舊擋', { skip }, async () => {
   const { call, last } = await boot(mig)
   assert.equal((await call(0, false)).notify, 'sent')
-  assert.deepEqual(await last(), { topic: 'mux_down', body: '30家用：這台的終端服務停了\n目前沒有夥伴在裡面，不用接回；下次開夥伴時會自動重新啟動。' })
+  assert.deepEqual(await last(), { topic: 'mux_down', body: '30家用：這台的終端服務停了\nASN 沒有看到夥伴開在裡面。如果有夥伴是開在終端服務裡的，請到「30家用」重新叫醒它們。' })
+  assert.doesNotMatch((await last()).body, /不用接回|沒事/, '不下「沒事」的判斷：30家用 那次其實有夥伴，只是 ASN 沒算到')
   assert.equal((await call(0, true)).notify, 'sent', '0 位時有沒有接回都一樣')
   assert.match((await last()).body, /^30家用：這台的終端服務停了\n/)
   await call(2, true)
