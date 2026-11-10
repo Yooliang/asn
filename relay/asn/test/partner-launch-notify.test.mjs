@@ -83,6 +83,29 @@ test('#884 shouldRestoreForeground：讀畫面關著照舊切；開著只有信�
   assert.equal(shouldRestoreForeground({ watching: true, alerts: trust, name: '別人' }), false)
 })
 
+test('#884 shouldRestoreForeground 逐條：剛開沒輸出（讀畫面在跑、沒有任何提示）不切前台', () => {
+  const me = '新夥伴'
+  // 讀畫面在跑、alerts 空：剛開還沒輸出，不能當卡住
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [], name: me }), false)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: undefined, name: me }), false)
+  // alerts 只有別人的 trust：不是我
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '別人', code: 'trust' }], name: me }), false)
+  // alerts 有我、但狀態不是 trust：不切
+  for (const code of ['permission', 'attention', 'question', 'login', 'usage_limit', 'bypass_warning']) {
+    assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: me, code }], name: me }), false, code)
+  }
+  // 別人是 trust、我是別的狀態：不切
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '別人', code: 'trust' }, { name: me, code: 'attention' }], name: me }), false)
+  // 有我的 trust（夾在別人中間也算）：切
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: me, code: 'trust' }], name: me }), true)
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '別人', code: 'permission' }, { name: me, code: 'trust' }], name: me }), true)
+  // 讀畫面沒在跑：照 #899 決定，照舊切前台（不論 alerts 是什麼）
+  assert.equal(shouldRestoreForeground({ watching: false, alerts: [], name: me }), true)
+  assert.equal(shouldRestoreForeground({ watching: false, alerts: [{ name: me, code: 'attention' }], name: me }), true)
+  // 名字空的不會被誤配
+  assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '', code: 'trust' }], name: '' }), false)
+})
+
 test('#884 表格：非 Windows 設定頁開著但讀畫面沒在跑（partnerNoticesActive 為 false 或查不到）→ 照舊切前台', () => {
   // list.js 把 partnerNoticesActive 的結果當 watching；不是 true 一律 false，也不會去查 notices
   const asWatching = r => r === true

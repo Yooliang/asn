@@ -4607,6 +4607,17 @@ mod tests {
     }
 
     #[test]
+    fn pi_剛開的空白與歡迎畫面_不判信任提問() {
+        // #884：剛開、還沒輸出的 pi 不能被當成卡在信任框
+        let blank = include_str!("../../tests/fixtures/trust-negative/pi-blank.txt");
+        let welcome = include_str!("../../tests/fixtures/trust-negative/pi-welcome.txt");
+        assert!(classify_prompt_for("pi", blank).is_none(), "空白畫面沒有提問");
+        assert!(classify_prompt_for("pi", "").is_none());
+        let p = classify_prompt_for("pi", welcome);
+        assert!(p.as_ref().is_none_or(|p| p.kind != "trust_dialog" && p.kind != "menu"), "歡迎畫面不是提問：{:?}", p.map(|p| p.kind));
+    }
+
+    #[test]
     fn pi_沒有提問時說忙閒看名單_不猜() {
         let (rig, id) = pi_rig();
         *rig.runner.inner.screen.borrow_mut() = "pi  anthropic/claude-sonnet-5-5\n> \n".into();

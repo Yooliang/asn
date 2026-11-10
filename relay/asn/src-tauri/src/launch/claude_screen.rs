@@ -524,6 +524,53 @@ mod tests {
         classify(text).map(|s| s.kind)
     }
 
+    macro_rules! negative {
+        ($name:literal) => {
+            include_str!(concat!("../../tests/fixtures/trust-negative/", $name, ".txt"))
+        };
+    }
+
+    /// 判成信任框的條件：kind 是 TrustFolder，或對外代號是 trust（#884：這兩個都不能出現在非信任框的畫面）
+    fn looks_trust(text: &str) -> bool {
+        classify(text).is_some_and(|s| s.kind == K::TrustFolder || status_code(s.kind) == "trust")
+    }
+
+    #[test]
+    fn 信任框反例_剛開的空白畫面_與歡迎畫面_不判信任框() {
+        // #884：剛開、還沒輸出的夥伴不能被當成卡在信任資料夾
+        for text in [negative!("claude-blank"), negative!("claude-welcome-empty-input"), negative!("claude-input-has-text")] {
+            assert_eq!(kind(text), None, "{text}");
+            assert!(!looks_trust(text), "{text}");
+        }
+        assert_eq!(kind("\n\n\n"), None);
+        assert_eq!(kind(""), None);
+    }
+
+    #[test]
+    fn 信任框反例_有安全檢查標題但選項不齊_不判信任框() {
+        for text in [negative!("claude-safety-check-one-option"), negative!("claude-safety-check-three-options")] {
+            assert_ne!(kind(text), Some(K::TrustFolder), "{text}");
+            assert!(!looks_trust(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn 信任框反例_有信任選項文字但沒有安全檢查標題_不判信任框() {
+        // 選項文字被引用在模型回覆裡、或框的標題不在：都不是信任框
+        for text in [negative!("claude-trust-options-no-title"), negative!("claude-trust-options-quoted-in-reply")] {
+            assert_ne!(kind(text), Some(K::TrustFolder), "{text}");
+            assert!(!looks_trust(text), "{text}");
+        }
+        assert_eq!(kind(negative!("claude-trust-options-quoted-in-reply")), None);
+    }
+
+    #[test]
+    fn 信任框正向對照_真的信任框仍判信任框_代號是_trust() {
+        let s = classify(fixture!("claude-trust-folder")).unwrap();
+        assert_eq!(status_code(s.kind), "trust");
+        assert!(looks_trust(fixture!("claude-trust-folder")));
+    }
+
     #[test]
     fn 權限詢問_最底下多一條嵌著視窗名字的分隔線也認得() {
         // ASN 開的夥伴都有名字：Claude 在頁尾下面再畫一條「─── 名字 ─」（40家用 實機，#863）
