@@ -19,6 +19,12 @@ import java.io.File
 // 這個物件只交給本 App 內建的頁面；收到的檔案路徑一律先檢查是在 App 私有資料夾底下才動。
 class AsnBridge(private val activity: MainActivity) {
   private val filesRoot: File = activity.filesDir.canonicalFile
+  /**
+   * 只有「收到的檔案」可以匯出：Rust 端 relay_attachment_save 存到 `<data_dir>/received`，
+   * 安卓的 data_dir 是 `<filesDir>/.irori-asn`（datadir.rs 的 FALLBACK_NAME，守門測試鎖住兩邊一致）。
+   * App 私有資料夾裡的其他檔案（金鑰、登入資料、設定）一律不匯出
+   */
+  private val exportRoot: File = File(File(filesRoot, ".irori-asn"), "received").canonicalFile
 
   /** 震動（對方傳來「震動」時）：兩下短震。網頁自己的 navigator.vibrate 沒有點擊動作就會被擋，所以走這裡 */
   @JavascriptInterface
@@ -34,13 +40,14 @@ class AsnBridge(private val activity: MainActivity) {
     v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, d, 80, d), -1))
   }
 
-  /** 把收到的檔案從 App 私有資料夾複製到系統「下載/ASN」。成功回給人看的位置，失敗回空字串 */
+  /** 把「收到的檔案」資料夾裡的檔案複製到系統「下載/ASN」。成功回給人看的位置，失敗回空字串。
+   *  路徑先解開（canonicalFile：消掉 ..、解開符號連結）再比對，只收 exportRoot 底下的一般檔 */
   @JavascriptInterface
   fun exportFile(path: String): String {
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ""
       val src = File(path).canonicalFile
-      if (!src.path.startsWith(filesRoot.path + File.separator) || !src.isFile) return ""
+      if (!src.path.startsWith(exportRoot.path + File.separator) || !src.isFile) return ""
       val ext = src.extension.lowercase()
       val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
       val values = ContentValues().apply {
