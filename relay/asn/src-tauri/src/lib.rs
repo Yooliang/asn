@@ -1276,6 +1276,13 @@ impl view_stream::TPort for LiveTPort {
     }
 }
 
+/// 這筆請求還在後台的待處理清單裡嗎？查不到、查失敗都當不在（不能在不確定時開始打字）
+#[cfg(all(desktop, feature = "gui"))]
+async fn view_still_pending(relay: &Relay, id: &str) -> bool {
+    let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { return false };
+    v.get("requests").and_then(Value::as_array).is_some_and(|rows| rows.iter().any(|r| r.get("id").and_then(Value::as_str) == Some(id)))
+}
+
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
 #[cfg(all(desktop, feature = "gui"))]
 fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
@@ -1335,10 +1342,14 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         if a.session.scope == view_handshake::Scope::Input {
                             let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
                             if !no_ask {
-                                if !input_consent::ask(&app, &asker, &a.session.window).await {
+                                let answered = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s).await;
+                                // 按下去之後再確認一次：請求還沒過期、對方也沒撤回，才往下走；逾時或撤回之後按允許也不能開始打字
+                                let still = answered && input_consent::consent_outcome(Some(true), (auth::now_ms() / 1000) as i64, a.session.expires_s) && view_still_pending(&relay, &id).await;
+                                if !still {
                                     let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                                     continue;
                                 }
+                                // 重查都過了才記下「按過允許」：過期或被撤回的請求不能被記成信任
                                 if let Err(e) = device_id::live::confirm_input(&data_dir, &a.session.d_node, &a.from_pub) {
                                     elog!("記下按過允許失敗（下次還會問）：{e}");
                                 }
