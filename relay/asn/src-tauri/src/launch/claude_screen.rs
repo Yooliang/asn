@@ -269,7 +269,35 @@ fn question_box(lines: &[&str]) -> Option<QuestionBox> {
 }
 
 /// 判斷畫面。回 None 代表沒有偵測到提示（包含閒置、執行中，以及認不出來的畫面）
+/// Claude Code 的「Held message from another session」確認框（#1254）：別的 session 塞進來的訊息被擋住，等本人決定要不要放行。
+/// 以畫面最底端的框為準：最後兩個非空行是兩個沒有編號的選項（Deny…、Deliver…），只有一個游標，上面不遠處有標題列。
+/// 對話記錄裡的「● Held peer message」在框收掉後還會留著，不能單獨當依據；對話內容剛好引用標題也不算（那時底端是輸入框）。
+pub const HELD_TITLE: &str = "Held message from another session";
+pub fn is_held_message(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let n = lines.len();
+    if n < 3 {
+        return false;
+    }
+    let opt = |l: &str| {
+        let t = l.trim();
+        match t.strip_prefix(CURSOR) {
+            Some(r) => (true, r.trim_start().to_string()),
+            None => (false, t.to_string()),
+        }
+    };
+    let ((c1, a), (c2, b)) = (opt(lines[n - 2]), opt(lines[n - 1]));
+    if !(a.starts_with("Deny") && b.starts_with("Deliver")) || c1 == c2 {
+        return false;
+    }
+    lines[n.saturating_sub(40)..n - 2].iter().any(|l| l.trim() == HELD_TITLE)
+}
+
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
+    // 外來訊息的確認框：這一版只認出來、一律當成要本人處理（Attention），絕不當成權限框或提問，任何代答路徑都碰不到（#1254 A）
+    if is_held_message(text) {
+        return Some(screen(ClaudeScreenKind::Attention, HELD_TITLE, Vec::new(), 0, None, None));
+    }
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
     let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
     let lines = &lines[..end];
@@ -520,6 +548,9 @@ mod tests {
         };
     }
 
+    /// 外來訊息確認框的真實樣本（#1254）：放在 held-message 資料夾，不放 term-screens（那裡的樣本要同步更新黃金檔，等第二張一起做）
+    const HELD_FIXTURE: &str = include_str!("../../tests/fixtures/held-message/claude-held-message.txt");
+
     fn kind(text: &str) -> Option<K> {
         classify(text).map(|s| s.kind)
     }
@@ -569,6 +600,40 @@ mod tests {
         let s = classify(fixture!("claude-trust-folder")).unwrap();
         assert_eq!(status_code(s.kind), "trust");
         assert!(looks_trust(fixture!("claude-trust-folder")));
+    }
+
+    #[test]
+    fn 外來訊息的確認框_以底端的框為準_一律要本人處理_不當成權限框或提問() {
+        let t = HELD_FIXTURE;
+        assert!(is_held_message(t));
+        let s = classify(t).expect("認得出來");
+        assert_eq!(s.kind, K::Attention, "這一版不給任何代答路徑");
+        assert!(!goes_to_phone(status_code(s.kind)));
+        assert!(phone_options(&s, true).is_empty() && s.allow_once.is_none() && s.deny.is_none());
+        // 游標移到 Deliver 也一樣認得
+        let moved = t.replace(" ❯ Deny", "   Deny").replace("   Deliver this message", " ❯ Deliver this message");
+        assert!(is_held_message(&moved));
+        assert_eq!(kind(&moved), Some(K::Attention));
+    }
+
+    #[test]
+    fn 外來訊息的確認框_反例_引用標題_框已收掉_沒有游標或兩個游標() {
+        let t = HELD_FIXTURE;
+        // 框已經收掉：對話記錄裡的「● Held peer message」還在，底端回到輸入框
+        let head = t.split("────").next().unwrap();
+        let closed = format!("{head}\n{}", fixture!("claude-idle-manual-mode"));
+        assert!(!is_held_message(&closed), "框收掉後只剩記錄，不能算");
+        // 對話內容剛好引用了標題與選項，底端是輸入框
+        let quoted = format!(" Held message from another session\n ❯ Deny — drop it\n   Deliver this message to Claude\n{}", fixture!("claude-idle-manual-mode"));
+        assert!(!is_held_message(&quoted), "引用的不算");
+        // 沒有標題、沒有游標、兩個游標、順序反了
+        let no_title = t.replace(" Held message from another session", " Something else");
+        assert!(!is_held_message(&no_title));
+        assert!(!is_held_message(&t.replace(" ❯ Deny", "   Deny")), "沒有游標");
+        assert!(!is_held_message(&t.replace("   Deliver this message", " ❯ Deliver this message")), "兩個游標");
+        let swapped = t.replace(" ❯ Deny — drop it and tell the sender it was declined\n   Deliver this message to Claude", " ❯ Deliver this message to Claude\n   Deny — drop it");
+        assert!(!is_held_message(&swapped), "順序對不上就不認");
+        assert!(!is_held_message(""));
     }
 
     #[test]

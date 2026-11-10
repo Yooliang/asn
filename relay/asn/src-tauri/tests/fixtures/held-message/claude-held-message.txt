@@ -1,0 +1,27 @@
+  <遠端工作階段網址>
+
+● Held peer message — from uds:\.\pipe\LOCAL\cc-msg-<pipe> (peer claims name:
+  n678feaac-收發室); preview: «RELAY 來信 trust=member from=n678feaac/asn40 to=t923
+  id=<id> engine=claude reply=no» …[5 lines, 375 chars total — expand to review
+  before approving] — not delivered to Claude (1 held). The sending session's permission mode class doesn't
+  match this session's. Review it below, or set "crossSessionInbound" to "accept".
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Held message from another session
+
+ Another Claude session sent a message: from uds:\.\pipe\LOCAL\cc-msg-<pipe> (peer claims
+ name: n678feaac-收發室)
+
+ The sending session's permission mode class doesn't match this session's, so it wasn't delivered automatically.
+
+ Message body (this is what will be delivered):
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ RELAY 來信 trust=member from=n678feaac/asn40 to=t923 id=<id>
+ │ <內容>
+ │ <內容>
+ │ <內容>
+ │ <內容>
+ │ …[5 lines, 375 chars total — full body will be delivered on approve]
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ ❯ Deny — drop it and tell the sender it was declined
+   Deliver this message to Claude

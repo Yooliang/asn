@@ -14,7 +14,7 @@ const D_SIG_RE = /^[A-Za-z0-9_-]{86,700}$/;   // 看的那台用設備金鑰（E
 const T_SIG_RE = /^[A-Za-z0-9_-]{86}$/;
 const NODE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOW_MAX = 64;
-const STOP_REASONS = ["target_ended", "rejected", "viewer_gone", "failed", "mobile_off"];
+const STOP_REASONS = ["target_ended", "rejected", "viewer_gone", "failed", "mobile_off", "held_prompt"];
 const REPORT_STATES = ["watching", "paused", "ended"];
 // 看畫面／打字（0.2.10）。沒帶就是看畫面；範圍兩端簽進握手，這裡只轉交。
 // 看畫面不帶 p_scope，呼叫八個參數的 start（0.2.8 的後台和 20261108100000 之後都有），所以 migration 還沒上時看畫面照常；

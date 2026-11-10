@@ -1067,13 +1067,36 @@ impl view_stream::TPort for LiveTPort {
             }
             // 和本機看畫面打字同一個入口：按鍵規則、貼上清理、接手的窗格不給、資料夾要有授權
             let pane = self.terms.partner_term_id(&self.window).map_err(|_| view_stream::End::Failed)?;
+            // #1254：交之前重讀畫面。停在外來訊息的確認框就結束（一個字都不交）；Claude 停在認不出的選單只交文字
+            let guard = self.terms.remote_input_guard(&pane);
+            if guard == launch::term::RemoteGuard::HeldPrompt {
+                let line = format!("view {}: input end held_prompt typed={}", self.id, self.typed);
+                view_stream::TPort::log(self, &line);
+                return Err(view_stream::End::HeldPrompt);
+            }
+            let mut stripped = false;
             for k in &keys {
-                if self.terms.view_input(&pane, &k.d, k.p).is_err() {
+                let only;
+                let d = if guard == launch::term::RemoteGuard::TextOnly {
+                    only = launch::term::text_only(&k.d);
+                    stripped |= only != k.d;
+                    if only.is_empty() {
+                        continue;
+                    }
+                    only.as_str()
+                } else {
+                    k.d.as_str()
+                };
+                if self.terms.view_input(&pane, d, k.p).is_err() {
                     let line = format!("view {}: input refused typed={}", self.id, self.typed);
                     view_stream::TPort::log(self, &line);
                     return Err(view_stream::End::InputStopped);
                 }
-                self.typed += k.d.chars().count() as u64;
+                self.typed += d.chars().count() as u64;
+            }
+            if stripped {
+                let line = format!("view {}: input text_only (認不出的選單：只交文字，不交 Enter 和方向鍵)", self.id);
+                view_stream::TPort::log(self, &line);
             }
         }
         let applied = inp.lock().unwrap_or_else(|e| e.into_inner()).applied();
@@ -1180,7 +1203,11 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         std::thread::spawn(move || {
                             let end = view_stream::run_t(&session, session_key, &mut port);
                             if let Some(reason) = end.reason() {
-                                let _ = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))));
+                                let r = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))));
+                                // 舊後台不認得 held_prompt：改用 failed 結束，不能讓這次觀看掛著
+                                if r.is_err() && reason == view_stream::HELD_PROMPT {
+                                    let _ = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "failed" }))));
+                                }
                             }
                         });
                     }

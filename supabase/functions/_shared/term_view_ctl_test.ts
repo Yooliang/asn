@@ -52,7 +52,7 @@ Deno.test("接受：節點金鑰就可以；T 的簽章只收 Ed25519 長度", a
 });
 
 Deno.test("結束：原因只能是固定值，自由文字進不去", async () => {
-  for (const reason of ["target_ended", "rejected", "viewer_gone", "failed", "mobile_off"]) {
+  for (const reason of ["target_ended", "rejected", "viewer_gone", "failed", "mobile_off", "held_prompt"]) {
     assertEquals((await handleTermViewAction(mk({ ok: true }).deps, me, "term_view_stop", { id: ID, reason }, null)).status, 200, reason);
   }
   for (const reason of ["viewer_ended", "expired", "隨便寫", null, undefined]) {
