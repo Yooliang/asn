@@ -147,6 +147,22 @@ fn is_cancelled() -> bool {
     CANCEL.load(Ordering::SeqCst)
 }
 
+/// 手機替這台登入裝置碼型 CLI（#933 PR-5b）也佔同一把鎖：和安裝並登入 Claude Code 不會同時跑。
+/// 拿到時清掉上一次的「取消」；值丟掉（含 panic）就放鎖
+#[derive(Debug)]
+pub struct RemoteRound(#[allow(dead_code)] Busy);
+
+pub fn begin_remote_round() -> Result<RemoteRound, String> {
+    let b = Busy::take(&BUSY)?;
+    CANCEL.store(false, Ordering::SeqCst);
+    Ok(RemoteRound(b))
+}
+
+/// 人在這台電腦前按了「取消」（進度小窗的按鈕）
+pub fn cancel_requested() -> bool {
+    is_cancelled()
+}
+
 /// 同一時間只允許一個安裝並登入。取到的鎖交給執行緒，結束（含 panic）時放掉
 #[derive(Debug)]
 struct Busy(&'static AtomicBool);
