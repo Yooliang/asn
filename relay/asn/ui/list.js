@@ -38,6 +38,7 @@ import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withC
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { TERM_CLOSE_KEY, TERM_CLOSE_NOTE, closeTermRun, termBarBlocked, termCloseTitle, termManageItems, composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
+import { ruleSegments as ruleSegs } from './lib/perm-ask.mjs'
 import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
@@ -1864,7 +1865,7 @@ const app = createApp({
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
+      ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
