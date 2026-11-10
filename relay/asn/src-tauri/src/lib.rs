@@ -391,7 +391,8 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
     // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
-    let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::load_all(&claude_accounts::claude_home())).await.unwrap_or_default();
+    // 重置時間已過的窗不送（那個百分比不代表現在，送出去會蓋掉後台較新的數字，#1212）；帳號本身仍照常回報
+    let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::without_expired(&claude_quota::load_all(&claude_accounts::claude_home()), heartbeat::now_ms() as i64)).await.unwrap_or_default();
     // Grok 帳號庫（email 與是否使用中）；沒有就是空的
     let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
     // Codex 的額度窗：橋的 Codex 引擎存在工作資料夾；帳號跟目前登入對得上才帶（沒開 Codex 橋接就沒有）

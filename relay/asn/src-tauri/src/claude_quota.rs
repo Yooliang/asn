@@ -264,10 +264,13 @@ fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
 fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let mut reset_base = reset_base;
+    // 備份失敗、這次沒清舊基準：這筆還混著舊基準，不能蓋「有身分」標記，否則之後永遠不會再清
+    let mut backup_failed = false;
     if reset_base && owned && all.contains_key(email) && !owner_store::backup_quota_file(home) {
         // 備份失敗就不清舊基準（留著比丟掉安全），下次再試
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
         reset_base = false;
+        backup_failed = true;
     }
     let dropped = reset_base && all.remove(email).is_some();
     if dropped && owned {
@@ -283,7 +286,7 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
         st.rebase = false;
     }
     if let Some(mut q) = m.quota {
-        q.owner = owned;
+        q.owner = owned && !backup_failed;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);
@@ -413,6 +416,40 @@ impl Quota {
         }
         out
     }
+}
+
+impl Quota {
+    /// 送出前把「重置時間已經過了」的窗拿掉（#1212）：那個百分比是重置前的舊值，不代表現在，送出去只會蓋掉後台較新的數字。
+    /// 只拿掉過期的那一條（該條的百分比、重置時間、讀取時間），另一條原封不動；舊的單一 `reset_at` 依剩下的窗重算；
+    /// 兩條都過期（或本來就沒有）回 None。沒有重置時間的窗無從判斷過沒過期，留著。`owner` 等其他欄位照舊帶著（回報本來就不送它）。
+    pub fn without_expired(&self, now_ms: i64) -> Option<Quota> {
+        let (r5, rw) = merge::stored_resets(self);
+        let gone = |pct: Option<u8>, r: Option<i64>| pct.is_some() && r.is_some_and(|r| r <= now_ms);
+        let (drop5, dropw) = (gone(self.five_hour_pct, r5), gone(self.weekly_pct, rw));
+        let five = self.five_hour_pct.filter(|_| !drop5);
+        let week = self.weekly_pct.filter(|_| !dropw);
+        if five.is_none() && week.is_none() {
+            return None;
+        }
+        let reset_at = pick_reset(five.map(|p| (p, r5)), week.map(|p| (p, rw))).map(iso_secs);
+        Some(Quota {
+            five_hour_pct: five,
+            weekly_pct: week,
+            reset_at: if drop5 || dropw { reset_at } else { self.reset_at.clone() },
+            at: self.at.clone(),
+            five_reset_at: self.five_reset_at.clone().filter(|_| !drop5),
+            week_reset_at: self.week_reset_at.clone().filter(|_| !dropw),
+            five_at: self.five_at.clone().filter(|_| !drop5),
+            week_at: self.week_at.clone().filter(|_| !dropw),
+            owner: self.owner,
+        })
+    }
+}
+
+/// 回報前整理各帳號的額度（#1212）：每個帳號拿掉過期的窗，兩條都過期的帳號就不帶額度（帳號本身仍在帳號清單裡）。
+/// 不能改成「只送有在更新的帳號」：後台的 acct_report 每次都用這次送來的清單整份覆寫這台電腦的帳號清單，沒送的帳號會從名單上消失。
+pub fn without_expired(all: &HashMap<String, Quota>, now_ms: i64) -> HashMap<String, Quota> {
+    all.iter().filter_map(|(k, q)| q.without_expired(now_ms).map(|q| (k.clone(), q))).collect()
 }
 
 /// 前端讀本機各帳號的額度紀錄（email → 額度）。讀檔：在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）
@@ -561,6 +598,99 @@ mod tests {
 
     fn acct(email: &str, current: bool) -> AccountInfo {
         AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false }
+    }
+
+    fn quota_two(r5: Option<&str>, rw: Option<&str>) -> Quota {
+        Quota {
+            five_hour_pct: Some(40),
+            weekly_pct: Some(70),
+            reset_at: r5.map(String::from),
+            at: "2026-11-09T12:00:00Z".into(),
+            five_reset_at: r5.map(String::from),
+            week_reset_at: rw.map(String::from),
+            five_at: Some("2026-11-09T12:00:00Z".into()),
+            week_at: Some("2026-11-09T11:00:00Z".into()),
+            owner: true,
+        }
+    }
+    fn names(q: &Quota) -> Vec<String> {
+        q.windows().iter().map(|w| w["name"].as_str().unwrap().to_string()).collect()
+    }
+    // 2026-11-09T13:00:00Z
+    const T0: i64 = 1_794_229_200_000;
+
+    #[test]
+    fn 過期的窗不送_沒過期的照送_另一條原封不動() {
+        // 5 小時那條的重置時間在 12:00（已過），每週那條 11-12（還沒到）
+        let q = quota_two(Some("2026-11-09T12:00:00Z"), Some("2026-11-12T00:00:00Z"));
+        let got = q.without_expired(T0).expect("每週還在");
+        assert_eq!(names(&got), ["weekly"]);
+        assert_eq!((got.five_hour_pct, got.five_reset_at.clone(), got.five_at.clone()), (None, None, None), "過期那條整條拿掉");
+        assert_eq!((got.weekly_pct, got.week_reset_at.clone(), got.week_at.clone()), (q.weekly_pct, q.week_reset_at.clone(), q.week_at.clone()), "另一條不受影響");
+        assert_eq!(got.reset_at.as_deref(), Some("2026-11-12T00:00:00Z"), "舊的單一重置時間依剩下的窗重算");
+        assert_eq!(got.at, q.at);
+        // 兩條都沒過期：整筆不變
+        let all_ok = quota_two(Some("2026-11-09T15:00:00Z"), Some("2026-11-12T00:00:00Z"));
+        assert_eq!(all_ok.without_expired(T0), Some(all_ok.clone()));
+        // 每週那條過期、5 小時還沒：反過來
+        let w_gone = quota_two(Some("2026-11-09T15:00:00Z"), Some("2026-11-09T00:00:00Z"));
+        let got = w_gone.without_expired(T0).unwrap();
+        assert_eq!(names(&got), ["five_hour"]);
+        assert_eq!((got.five_hour_pct, got.five_reset_at.clone()), (Some(40), Some("2026-11-09T15:00:00Z".into())));
+    }
+
+    #[test]
+    fn 重置時間剛好等於現在也算過期_沒有重置時間的窗無從判斷就留著() {
+        let q = quota_two(Some("2026-11-09T13:00:00Z"), None);
+        let got = q.without_expired(T0).unwrap();
+        assert_eq!(names(&got), ["weekly"], "剛好到期＝過期");
+        assert!(got.windows()[0]["resets_at"].is_null(), "沒存重置時間就是 null，不編");
+        // 本來就沒有任何重置時間：兩條都留著
+        let none = quota_two(None, None);
+        assert_eq!(names(&none.without_expired(T0).unwrap()), ["five_hour", "weekly"]);
+    }
+
+    #[test]
+    fn 兩條都過期的帳號不帶額度_其他帳號照常() {
+        let old = quota_two(Some("2026-11-09T10:00:00Z"), Some("2026-11-09T11:00:00Z"));
+        let fresh = quota_two(Some("2026-11-09T15:00:00Z"), Some("2026-11-12T00:00:00Z"));
+        let all: HashMap<String, Quota> = [("old@x.test".to_string(), old), ("fresh@x.test".to_string(), fresh.clone())].into_iter().collect();
+        let got = without_expired(&all, T0);
+        assert!(!got.contains_key("old@x.test"));
+        assert_eq!(got.get("fresh@x.test"), Some(&fresh));
+        // 帳號本身仍在回報的清單裡，只是沒有額度欄位
+        let v = build_report_with_quota(&[acct("old@x.test", false), acct("fresh@x.test", true)], None, &got);
+        assert_eq!(v["accounts"][0], json!({ "vendor": "claude", "email": "old@x.test", "plan": "max", "current": false }));
+        assert!(v["accounts"][1]["windows"].as_array().is_some_and(|w| w.len() == 2));
+    }
+
+    #[test]
+    fn 送出的窗只要本機有存重置時間就一定帶上() {
+        // 新格式：兩條各存
+        let q = quota_two(Some("2026-11-09T15:00:00Z"), Some("2026-11-12T00:00:00Z"));
+        let ws = q.windows();
+        assert_eq!(ws[0]["resets_at"], "2026-11-09T15:00:00Z");
+        assert_eq!(ws[1]["resets_at"], "2026-11-12T00:00:00Z");
+        // 舊格式：只有單一 reset_at，兩條都沒用完時它屬於 5 小時那條
+        let legacy = Quota { five_hour_pct: Some(40), weekly_pct: Some(70), reset_at: Some("2026-11-09T15:00:00Z".into()), at: "2026-11-09T12:00:00Z".into(), ..Default::default() };
+        let ws = legacy.windows();
+        assert_eq!(ws[0]["resets_at"], "2026-11-09T15:00:00Z", "舊檔推得出來的就要帶");
+        assert!(ws[1]["resets_at"].is_null(), "推不出來才是 null");
+        // 沒有任何重置時間：null，不編
+        assert!(quota_two(None, None).windows().iter().all(|w| w["resets_at"].is_null()));
+        // 經過 without_expired 之後仍然一樣
+        let kept = q.without_expired(T0).unwrap().windows();
+        assert!(kept.iter().all(|w| !w["resets_at"].is_null()));
+    }
+
+    #[test]
+    fn 過期整理後的回報照樣不含_owner() {
+        let q = quota_two(Some("2026-11-09T12:00:00Z"), Some("2026-11-12T00:00:00Z"));
+        assert!(q.owner, "額度檔內部有標記");
+        let all: HashMap<String, Quota> = [("a@x.test".to_string(), q)].into_iter().collect();
+        let v = build_report_with_quota(&[acct("a@x.test", true)], None, &without_expired(&all, T0));
+        assert!(!v.to_string().contains("owner"), "{v}");
+        assert_eq!(v["accounts"][0]["windows"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]
