@@ -555,7 +555,7 @@ impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
         let held = HeldStore::load(&cfg.work_dir);
-        let (outbox, outbox_warn) = outbox::Outbox::load(&cfg.work_dir);
+        let (outbox, outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
@@ -565,8 +565,10 @@ impl Core {
             wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
-        if let Some(w) = outbox_warn {
-            c.log.line(&w);
+        for w in &outbox_logs {
+            c.log.line(w);
+        }
+        if outbox_notify {
             c.outbox_bad_pending = Some(now);
         }
         if !c.outbox.items.is_empty() {

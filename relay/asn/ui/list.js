@@ -1046,7 +1046,8 @@ async function closePanel(kind) {
 await listen('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
-  else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
+  // 大頭貼欄被視窗太窄自動收起而鎖定時不改（#1293；setup 裡的 sideLocked 在這裡拿不到，用同一個判斷式現算）
+  else if (c.op === 'dp') { if (sideAutoFolded({ mode: ui.mode, width: window.innerWidth, collapsed: ui.collapsed })) return; ui.collapsed = toggleCollapsed(ui.collapsed) }
   else if (c.op === 'send') {
     if (isRoomChat(c.id)) { await hub.post(roomIdOf(c.id), c.text, { replySeq: c.replySeq }); pushLog(c.id) }
     else { const r = await core.send(c.id, c.text, { voice: c.voice === true }); if (!r.ok) console.info('[ASN] send failed', r.error) }

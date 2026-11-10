@@ -86,6 +86,38 @@ fn retry_gap(attempts: u32) -> u64 {
     RETRY_GAPS_MS[i]
 }
 
+/// 壞檔最多保留幾個
+const BAD_KEEP: usize = 5;
+
+/// 壞檔排序用時間戳：`.bad-<毫秒>` 取毫秒；舊格式 `.bad` 與解析不出來的都當 0（最舊）。不是壞檔回 None
+fn bad_stamp(name: &str) -> Option<u64> {
+    let rest = name.strip_prefix(OUTBOX_FILE)?;
+    if rest == ".bad" {
+        return Some(0);
+    }
+    rest.strip_prefix(".bad-").map(|t| t.parse::<u64>().unwrap_or(0))
+}
+
+/// 只留最新 keep 個壞檔，其餘刪掉；回傳要記的 log 行（只記檔名，不記內容）。刪除失敗只記 log
+fn prune_bad_files(work_dir: &std::path::Path, keep: usize, remove: &dyn Fn(&std::path::Path) -> std::io::Result<()>) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(work_dir) else { return vec![] };
+    let mut found: Vec<(u64, String)> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter_map(|n| bad_stamp(&n).map(|t| (t, n)))
+        .collect();
+    found.sort();
+    let drop_n = found.len().saturating_sub(keep);
+    let mut logs = vec![];
+    for (_, name) in found.into_iter().take(drop_n) {
+        match remove(&work_dir.join(&name)) {
+            Ok(()) => logs.push(format!("reply outbox: 壞檔超過 {keep} 個，已刪除最舊的 {name}")),
+            Err(e) => logs.push(format!("reply outbox: 刪除舊壞檔 {name} 失敗：{e}")),
+        }
+    }
+    logs
+}
+
 #[derive(Default)]
 pub(super) struct Outbox {
     pub items: Vec<OutboxItem>,
@@ -95,10 +127,17 @@ pub(super) struct Outbox {
 }
 
 impl Outbox {
-    /// 讀回存檔；壞檔改名成 .bad-<毫秒> 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
-    pub fn load(work_dir: &std::path::Path) -> (Outbox, Option<String>) {
+    /// 讀回存檔；壞檔改名成 .bad-<毫秒> 留著（不直接當沒有，免得丟信）。
+    /// 回傳（內容, 要寫進 log 的行, 要不要通知本人）。
+    pub fn load(work_dir: &std::path::Path) -> (Outbox, Vec<String>, bool) {
+        Self::load_with(work_dir, &|from, to| std::fs::rename(from, to))
+    }
+
+    /// 同 load，改名動作可注入（測試用來製造改名失敗）
+    pub(super) fn load_with(work_dir: &std::path::Path, rename: &dyn Fn(&std::path::Path, &std::path::Path) -> std::io::Result<()>) -> (Outbox, Vec<String>, bool) {
         let file = work_dir.join(OUTBOX_FILE);
-        let mut warn = None;
+        let mut logs: Vec<String> = vec![];
+        let mut notify = false;
         // 沒有檔＝空的；讀不了（非 UTF-8、權限、被占用）或解析失敗都當壞檔，免得下一次存檔蓋掉原檔
         let parsed: Result<Vec<OutboxItem>, String> = match std::fs::read_to_string(&file) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
@@ -115,15 +154,22 @@ impl Outbox {
                     stamp += 1;
                     bad = work_dir.join(format!("{OUTBOX_FILE}.bad-{stamp}"));
                 }
-                let moved = std::fs::rename(&file, &bad);
-                warn = Some(match moved {
-                    Ok(()) => format!("reply outbox file unreadable, moved to {OUTBOX_FILE}.bad-{stamp}: {e}"),
-                    Err(re) => format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}"),
-                });
+                match rename(&file, &bad) {
+                    Ok(()) => {
+                        logs.push(format!("reply outbox file unreadable, moved to {OUTBOX_FILE}.bad-{stamp}: {e}"));
+                        // 改名成功才通知：壞檔已離開原位，下次啟動不會再被判成壞檔
+                        notify = true;
+                        logs.extend(prune_bad_files(work_dir, BAD_KEEP, &|p| std::fs::remove_file(p)));
+                    }
+                    Err(re) => {
+                        // 改名失敗＝原壞檔還留在原處，下次啟動會再被判成壞檔；若此處也通知，同一份壞檔每次啟動都會吵一次，所以只記 log
+                        logs.push(format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}; 不通知，只留本機紀錄"));
+                    }
+                }
                 vec![]
             }
         };
-        (Outbox { items, busy: HashSet::new(), file }, warn)
+        (Outbox { items, busy: HashSet::new(), file }, logs, notify)
     }
 
     /// 這封信還有沒有「待送」的片段（已放棄、只剩通知的不算：放棄之後新來的片段另算）
@@ -514,5 +560,58 @@ mod tests {
     #[test]
     fn 重寄間隔() {
         assert_eq!([1, 2, 3, 4, 5, 6, 7, 50].map(retry_gap), [15_000, 60_000, 120_000, 300_000, 600_000, 1_800_000, 1_800_000, 1_800_000]);
+    }
+
+    #[test]
+    fn 壞檔改名失敗_不通知_只記_log_原檔留著() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join(OUTBOX_FILE), "{ 壞").unwrap();
+        let fail = |_: &std::path::Path, _: &std::path::Path| -> std::io::Result<()> { Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked")) };
+        let (ob, logs, notify) = Outbox::load_with(d.path(), &fail);
+        assert!(ob.items.is_empty());
+        assert!(!notify, "改名失敗不通知，免得同一份壞檔每次啟動都通知");
+        assert!(logs.iter().any(|l| l.contains("rename") && l.contains("failed")), "{logs:?}");
+        assert!(d.path().join(OUTBOX_FILE).exists(), "原壞檔還在原處");
+        // 改名成功則通知
+        std::fs::write(d.path().join(OUTBOX_FILE), "{ 壞").unwrap();
+        let (_, logs, notify) = Outbox::load(d.path());
+        assert!(notify && logs.iter().any(|l| l.contains("moved to")), "{logs:?}");
+        assert!(!d.path().join(OUTBOX_FILE).exists());
+    }
+
+    fn names(d: &std::path::Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(d).unwrap().filter_map(|e| e.ok()?.file_name().to_str().map(str::to_string)).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn 壞檔只留最新五個_舊格式算最舊_依數值不是字串排序() {
+        let d = tempfile::tempdir().unwrap();
+        for n in [OUTBOX_FILE.to_string() + ".bad", format!("{OUTBOX_FILE}.bad-9"), format!("{OUTBOX_FILE}.bad-100"), format!("{OUTBOX_FILE}.bad-200"), format!("{OUTBOX_FILE}.bad-300"), format!("{OUTBOX_FILE}.bad-400"), format!("{OUTBOX_FILE}.bad-500"), "other.txt".to_string()] {
+            std::fs::write(d.path().join(n), "x").unwrap();
+        }
+        let logs = prune_bad_files(d.path(), BAD_KEEP, &|p| std::fs::remove_file(p));
+        assert_eq!(logs.len(), 3, "{logs:?}");
+        assert!(logs.iter().all(|l| l.contains("已刪除")));
+        let left = names(d.path());
+        assert_eq!(left.len(), 6, "{left:?}");
+        assert!(left.contains(&"other.txt".to_string()));
+        for gone in [".bad", ".bad-9", ".bad-100"] {
+            assert!(!left.contains(&format!("{OUTBOX_FILE}{gone}")), "{gone} 應被刪");
+        }
+        assert!(left.contains(&format!("{OUTBOX_FILE}.bad-500")));
+    }
+
+    #[test]
+    fn 壞檔清理_刪除失敗只記_log() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 1..=3 {
+            std::fs::write(d.path().join(format!("{OUTBOX_FILE}.bad-{i}")), "x").unwrap();
+        }
+        let logs = prune_bad_files(d.path(), 1, &|_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked")));
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().all(|l| l.contains("失敗")), "{logs:?}");
+        assert_eq!(names(d.path()).len(), 3);
     }
 }
