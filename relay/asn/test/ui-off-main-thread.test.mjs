@@ -4,6 +4,8 @@
 //    現有還沒改的列在 PENDING，之後改掉就從清單拿掉（清單只准變短）。
 // 2. 這次改的幾支一定要是非同步。
 // 3. 存檔：同一個存檔名一支寫完才送下一支、內容在呼叫當下定好、前一支失敗不擋後一支。
+// 注意：守門是提醒，不是保證。它只看指令本體裡直接寫的讀寫檔；把 I/O 包一層 helper、或換一種屬性寫法
+// （例如 #[tauri::command(rename_all = ...)]）就掃不到。審查時仍要看同步指令實際做了什麼。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
