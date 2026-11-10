@@ -58,7 +58,7 @@ test('共用案例檔：待確認序列格式完整', () => {
   const ids = new Set()
   for (const s of seqs) {
     assert.ok(!ids.has(s.id), s.id); ids.add(s.id)
-    assert.equal(s.vendor, 'claude'); assert.equal(s.window, 'weekly')
+    assert.ok(['claude', 'gemini', 'minimax'].includes(s.vendor)); assert.equal(s.window, 'weekly')
     assert.ok(s.steps.length >= 1)
     for (const st of s.steps) { assert.equal(st.accept, st.reason === null, s.id); assert.ok(st.reason === null || st.reason in cases.reasons, s.id) }
   }
@@ -101,7 +101,8 @@ const H = 3600_000, D = 24 * H
 
 test('實跑：共用案例 confirm_sequences 每一步都跟預期一致（decide 逐步帶著待確認狀態）', { skip }, async () => {
   const db = await setup()
-  for (const s of cases.confirm_sequences) {
+  // 這支 migration 之後（20261113000000）才有 Gemini／MiniMax 的同期回升確認，那幾組在 acct_quota_rise_confirm_sql 跑
+  for (const s of cases.confirm_sequences.filter(x => x.vendor === 'claude')) {
     let old = s.old, pending = null
     for (const [i, st] of s.steps.entries()) {
       const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz) r',

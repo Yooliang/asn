@@ -387,16 +387,30 @@ fn 共用案例_待確認序列_每一步都跟預期一致() {
     let c = &v["constants"];
     assert_eq!((c["confirm_count"].as_u64(), c["confirm_span_ms"].as_i64()), (Some(CONFIRM_COUNT as u64), Some(CONFIRM_SPAN_MS)), "待確認常數跟案例檔一致");
     let seqs = v["confirm_sequences"].as_array().expect("confirm_sequences");
-    assert!(seqs.len() >= 6, "序列不該變少");
+    assert!(seqs.len() >= 12, "序列不該變少");
     let win = |w: &Value| -> (u8, Option<i64>) { (w["left_pct"].as_u64().unwrap() as u8, w["resets_at"].as_str().map(ms)) };
     let mut wrong = vec![];
     for t in seqs {
         let id = t["id"].as_str().unwrap();
+        // 只有後台的序列（MiniMax：客戶端沒有合併判斷）跳過
+        if t["scope"].as_str() == Some("backend_only") {
+            continue;
+        }
+        let vendor = match t["vendor"].as_str() {
+            Some("claude") => Vendor::Claude,
+            Some("gemini") => Vendor::Gemini,
+            o => panic!("{id} 廠牌不認得：{o:?}"),
+        };
+        let kind = match t["window"].as_str() {
+            Some("weekly") => Kind::Week,
+            Some("five_hour") => Kind::Five,
+            o => panic!("{id} 窗名不認得：{o:?}"),
+        };
         let mut old = Some(win(&t["old"]));
         let mut pend: Option<Pending> = None;
         for (i, st) in t["steps"].as_array().unwrap().iter().enumerate() {
             let (pct, reset) = win(&st["new"]);
-            let (merged, took, skipped, next) = merge_one(Vendor::Claude, Kind::Week, old, Some((pct, reset)), pend, ms(st["now"].as_str().unwrap()));
+            let (merged, took, skipped, next) = merge_one(vendor, kind, old, Some((pct, reset)), pend, ms(st["now"].as_str().unwrap()));
             let want = st["accept"].as_bool().unwrap();
             let got_reason = skipped.as_ref().map(|s| s.code);
             if took != want || got_reason != st["reason"].as_str() {
@@ -413,12 +427,12 @@ fn 共用案例_待確認序列_每一步都跟預期一致() {
 fn 待確認_次數與間隔的邊界() {
     let r = 1_000_000_000_000;
     let (ok, p) = confirm_week(None, r, NOW);
-    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW }));
+    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW, pct: None }));
     let (ok, p) = confirm_week(p, r + 9 * 60_000, NOW + 1000); // 差 10 分鐘內算同一個
     assert!(!ok && p.unwrap().count == 2 && p.unwrap().reset_ms == r, "待確認的重置時間不跟著漂");
     let (ok, p) = confirm_week(p, r + 11 * 60_000, NOW + 2000); // 差超過 10 分鐘＝不同，重新計
-    assert!(!ok && p == Some(Pending { reset_ms: r + 11 * 60_000, count: 1, first_ms: NOW + 2000 }));
-    let (ok, p) = confirm_week(Some(Pending { reset_ms: r, count: 2, first_ms: NOW }), r, NOW + CONFIRM_SPAN_MS);
+    assert!(!ok && p == Some(Pending { reset_ms: r + 11 * 60_000, count: 1, first_ms: NOW + 2000, pct: None }));
+    let (ok, p) = confirm_week(Some(Pending { reset_ms: r, count: 2, first_ms: NOW, pct: None }), r, NOW + CONFIRM_SPAN_MS);
     assert!(ok && p.is_none(), "第 3 次且剛好隔 10 分鐘＝收");
 }
 
@@ -844,4 +858,42 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
     // a 已有標記，不會再觸發備份
     assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY))), &ta), NOW + 120_000));
     assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second);
+}
+
+// ---------- Gemini 同期剩餘回升的確認（#1239） ----------
+#[test]
+fn 回升確認_次數_間隔_正負_2_的邊界() {
+    let r = ms("2026-11-13T23:42:55Z");
+    let (ok, p) = confirm_rise(None, r, 99, NOW);
+    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW, pct: Some(99) }));
+    // 差 2% 以內（含）、重置時間差 10 分鐘內：算同一個，次數累加，待確認的值不跟著漂
+    let (ok, p) = confirm_rise(p, r + 5 * 60_000, 97, NOW + 1000);
+    assert!(!ok && p.unwrap().count == 2 && p.unwrap().pct == Some(99));
+    // 差 3%：不同的值，重新計數
+    let (ok, p) = confirm_rise(p, r, 96, NOW + 2000);
+    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW + 2000, pct: Some(96) }));
+    // 重置時間差超過 10 分鐘：不同，重新計數
+    let (ok, p) = confirm_rise(p, r + 11 * 60_000, 96, NOW + 3000);
+    assert_eq!(p.unwrap().count, 1);
+    assert!(!ok);
+    // 第 3 次且剛好隔 10 分鐘：收
+    let (ok, p) = confirm_rise(Some(Pending { reset_ms: r, count: 2, first_ms: NOW, pct: Some(99) }), r, 100, NOW + CONFIRM_SPAN_MS);
+    assert!(ok && p.is_none());
+    // 待確認沒有 pct（例如每週倍數留下的）：不能拿來比，重新計數
+    let (ok, p) = confirm_rise(Some(Pending { reset_ms: r, count: 5, first_ms: NOW, pct: None }), r, 99, NOW + CONFIRM_SPAN_MS);
+    assert!(!ok && p.unwrap().count == 1);
+}
+
+#[test]
+fn 回升確認_只有_gemini_claude_與_codex_維持回升一律不收() {
+    let r = NOW + 5 * DAY;
+    let old = Some((10u8, Some(r)));
+    for v in [Vendor::Claude, Vendor::Codex] {
+        for i in 0..5 {
+            let (_, took, sk, p) = merge_one(v, Kind::Week, old, Some((99, Some(r))), None, NOW + i * 10 * 60_000);
+            assert!(!took && sk.is_some_and(|s| s.code == "same_period_rise") && p.is_none(), "{v:?}：不累計待確認");
+        }
+    }
+    let (_, took, sk, p) = merge_one(Vendor::Gemini, Kind::Week, old, Some((99, Some(r))), None, NOW);
+    assert!(!took && sk.is_some_and(|s| s.code == "same_period_rise") && p.is_some(), "Gemini 先記下待確認");
 }

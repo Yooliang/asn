@@ -270,6 +270,12 @@ pub fn parse_minimax(v: &Value, now_ms: i64) -> Result<Vec<Value>, Failure> {
 /// `agy -p /quota --output-format json` 的輸出 → 狀態列格式，交給 gemini_quota 同一套解析與新舊判斷。
 /// 不是內建指令的回應（`/quota` 被當成提示詞）回 None。
 pub fn agy_statusline(stdout: &str, email: &str) -> Option<String> {
+    agy_statusline_dups(stdout, email).map(|(line, _)| line)
+}
+
+/// 同 [`agy_statusline`]，另回「同一個群組裡 window 一樣的重複桶」的桶名（#1239）：同名的 window 只取第一個，後面的不蓋掉前面的。
+/// 桶名只有 `gemini-5h`／`gemini-weekly` 兩種固定字串，不含數字。
+pub fn agy_statusline_dups(stdout: &str, email: &str) -> Option<(String, Vec<&'static str>)> {
     let v: Value = serde_json::from_str(stdout.trim_start_matches('\u{feff}').trim()).ok()?;
     if v["status"] != "SUCCESS" {
         return None;
@@ -277,15 +283,22 @@ pub fn agy_statusline(stdout: &str, email: &str) -> Option<String> {
     let data = v.get("command")?.get("data")?;
     let group = data["groups"].as_array()?.iter().find(|g| g["name"] == AGY_GROUP)?;
     let mut quota = serde_json::Map::new();
+    let mut dups: Vec<&'static str> = vec![];
     for b in group["buckets"].as_array()? {
         let key = match b["window"].as_str() {
             Some("5h") => "gemini-5h",
             Some("weekly") => "gemini-weekly",
             _ => continue,
         };
+        if quota.contains_key(key) {
+            if !dups.contains(&key) {
+                dups.push(key);
+            }
+            continue;
+        }
         quota.insert(key.into(), b.clone());
     }
-    Some(json!({ "email": email, "quota": quota }).to_string())
+    Some((json!({ "email": email, "quota": quota }).to_string(), dups))
 }
 
 /// ASN 開的 agy 視窗最近記下的帳號
@@ -484,7 +497,10 @@ async fn read_agy(home: &Path, email: &str, now_ms: i64) -> Result<(), Failure> 
     if !out.status.success() {
         return Err(Failure::Other("結束碼不是 0".into()));
     }
-    let line = agy_statusline(&String::from_utf8_lossy(&out.stdout), email).ok_or(Failure::Other("沒有回傳額度資料".into()))?;
+    let (line, dups) = agy_statusline_dups(&String::from_utf8_lossy(&out.stdout), email).ok_or(Failure::Other("沒有回傳額度資料".into()))?;
+    if !dups.is_empty() {
+        crate::gemini_quota::log_note(home, &format!("重複的額度桶（只取第一個）：{}", dups.join(", ")), now_ms);
+    }
     let reading = crate::gemini_quota::parse_statusline(&line, now_ms).ok_or(Failure::Other("沒有回傳額度資料".into()))?;
     crate::gemini_quota::record(home, &reading, now_ms).map(|_| ()).map_err(|_| Failure::Other("寫入失敗".into()))
 }

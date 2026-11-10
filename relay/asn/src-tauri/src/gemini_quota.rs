@@ -12,7 +12,9 @@
 //! 紅線：函式一律吃家目錄路徑參數；只有命令列入口與 Tauri 指令決定真實家目錄。不讀任何登入憑證、不連網、不執行外部程式。
 use crate::claude_accounts::normalize_email;
 use crate::claude_quota::merge::{self, Vendor};
+use crate::claude_quota::state::{pending_of, rec_of, PendingRec};
 use crate::claude_quota::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,6 +24,8 @@ pub const MAX_ACCOUNTS: usize = 20;
 pub const MAX_REPORT: usize = 5;
 const MAX_INPUT: usize = 1_000_000;
 const FILE: &str = "gemini-quota.json";
+const STATE_FILE: &str = "gemini-quota-state.json";
+const STATE_MAX_BYTES: u64 = 16 * 1024;
 const LOG_FILE: &str = "gemini-quota.log";
 const PLAN_MAX: usize = 30;
 const SAME_RESET_MS: i64 = 10 * 60_000;
@@ -32,6 +36,36 @@ const BUCKET_WEEK: &str = "gemini-weekly";
 pub fn path(home: &Path) -> PathBuf {
     home.join(".asn").join(FILE)
 }
+/// 同期回升待確認的狀態檔（#1239）：`~/.asn/gemini-quota-state.json`，email → 兩條各自的待確認（重置時間、剩餘 %、次數、第一次的時間）。
+/// 狀態列每次叫一次都是新行程，所以要存檔；壞掉或太大當空的，不影響記額度。最多 20 個帳號。
+pub fn state_path(home: &Path) -> PathBuf {
+    home.join(".asn").join(STATE_FILE)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+struct PendRec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    five: Option<PendingRec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    week: Option<PendingRec>,
+}
+
+fn pend_load(home: &Path) -> std::collections::BTreeMap<String, PendRec> {
+    let p = state_path(home);
+    if std::fs::metadata(&p).map(|m| m.len() > STATE_MAX_BYTES).unwrap_or(false) {
+        return Default::default();
+    }
+    std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or_default()
+}
+
+fn pend_save(home: &Path, m: &std::collections::BTreeMap<String, PendRec>) {
+    let Ok(text) = serde_json::to_string(m) else { return };
+    if let Some(d) = state_path(home).parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = crate::claude_json::write_atomic(&state_path(home), text.as_bytes());
+}
+
 pub fn log_path(home: &Path) -> PathBuf {
     home.join(".asn").join(LOG_FILE)
 }
@@ -187,7 +221,25 @@ fn same_values(a: &Entry, b: &Entry) -> bool {
 pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let old = all.get(&r.email);
-    let (merged, skipped) = merge::merge_for(Vendor::Gemini, old.map(|e| &e.quota), &r.parsed, now_ms);
+    // 同期剩餘回升要同一個新值連續確認才收（#1239）：待確認狀態存檔，值沒變就不寫
+    let mut pends = pend_load(home);
+    let cur = pends.get(&r.email).cloned().unwrap_or_default();
+    let (cur_five, cur_week) = (cur.five.as_ref().and_then(pending_of), cur.week.as_ref().and_then(pending_of));
+    let m = merge::merge_full(Vendor::Gemini, old.map(|e| &e.quota), &r.parsed, cur_five, cur_week, now_ms);
+    let next = PendRec { five: m.pending_five.map(rec_of), week: m.pending_week.map(rec_of) };
+    if next != cur {
+        if next == PendRec::default() {
+            pends.remove(&r.email);
+        } else {
+            pends.insert(r.email.clone(), next);
+            while pends.len() > MAX_ACCOUNTS {
+                let Some(k) = pends.keys().next().cloned() else { break };
+                pends.remove(&k);
+            }
+        }
+        pend_save(home, &pends);
+    }
+    let (merged, skipped) = (m.quota, m.skipped);
     log_once(home, &r.dropped, &merge::skipped_lines(&skipped, now_ms), now_ms);
     let plan = if r.plan.is_empty() { old.map(|e| e.plan.clone()).unwrap_or_default() } else { r.plan.clone() };
     let new = match (merged, old) {
@@ -217,6 +269,11 @@ pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     let text = serde_json::to_string(&Value::Object(obj)).map_err(|e| e.to_string())?;
     crate::claude_json::write_atomic(&path(home), text.as_bytes()).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// 寫一行說明到 log（不含時間的內容跟檔案最後一行一樣就不寫）。給 quota_readers 記「重複的額度桶」用（#1239）
+pub fn log_note(home: &Path, note: &str, now_ms: i64) {
+    log_once(home, &[], &format!("{} {note}\n", iso_secs(now_ms)), now_ms);
 }
 
 /// log 一行的內容（不含時間）；跟檔案最後一行一樣就不寫，免得每 300ms 寫一次同樣的話

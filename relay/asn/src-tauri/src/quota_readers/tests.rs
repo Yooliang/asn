@@ -487,3 +487,23 @@ fn 重置時間認不得時_log_只記形狀不記原值() {
     assert_eq!(parse_grok(&ok, NOW)[0]["resets_at"], "2026-11-08T00:15:00Z", "Grok 帶時區偏移也有重置時間");
     assert_eq!(grok_reset_shape(&json!({"config": {}})), None, "沒有這欄不算格式錯");
 }
+
+#[test]
+fn agy_同一群組裡_window_一樣的桶_只取第一個_並回報重複的桶名() {
+    let out = r#"{"status":"SUCCESS","command":{"data":{"groups":[
+      {"name":"Gemini Models","buckets":[
+        {"window":"weekly","remaining_fraction":0.5,"reset_time":"2030-01-02T00:00:00Z"},
+        {"window":"5h","remaining_fraction":0.8,"reset_time":"2030-01-01T00:00:00Z"},
+        {"window":"weekly","remaining_fraction":0.1,"reset_time":"2030-01-03T00:00:00Z"},
+        {"window":"5h","remaining_fraction":0.2,"reset_time":"2030-01-01T05:00:00Z"},
+        {"window":"weekly","remaining_fraction":0.3,"reset_time":"2030-01-04T00:00:00Z"}]}]}}}"#;
+    let (line, dups) = agy_statusline_dups(out, "a@x.test").unwrap();
+    assert_eq!(dups, ["gemini-weekly", "gemini-5h"], "只記桶名，每個名字一次");
+    let r = crate::gemini_quota::parse_statusline(&line, NOW).unwrap();
+    assert_eq!((r.parsed.five_hour_pct, r.parsed.weekly_pct), (Some(80), Some(50)), "取第一個，後面的不蓋掉前面的");
+    assert!(!dups.iter().any(|d| d.chars().any(|c| c.is_ascii_digit())), "桶名不含數字");
+    // 沒有重複：行為跟 agy_statusline 一樣
+    let (l2, d2) = agy_statusline_dups(AGY_OK, "a@x.test").unwrap();
+    assert!(d2.is_empty());
+    assert_eq!(Some(l2), agy_statusline(AGY_OK, "a@x.test"));
+}

@@ -226,3 +226,70 @@ fn 守門_gemini_額度模組不碰憑證檔也不連網() {
         assert!(!body.contains(&b), "Gemini 額度模組不該出現 {b}");
     }
 }
+
+// ---------- 同期剩餘回升的確認（#1239）：真實案例——每週剩 0% 之後讀到 99%，同一期（重置時間不變）要能回補 ----------
+const RESET: &str = "2026-11-13T23:42:55Z";
+fn week_at(f: f64) -> String {
+    json!({ "email": ME, "quota": { "gemini-weekly": { "remaining_fraction": f, "reset_time": RESET } } }).to_string()
+}
+fn feed(h: &tempfile::TempDir, f: f64, now: i64) -> bool {
+    let r = parse_statusline(&week_at(f), now).unwrap();
+    record(h.path(), &r, now).unwrap()
+}
+// 2026-11-09T12:40:00Z
+const T1: i64 = 1_794_228_000_000;
+const MIN: i64 = 60_000;
+
+#[test]
+fn 同期回升_剩_0_之後連續_3_次讀到_99_跨_10_分鐘_收下_待確認期間照舊顯示舊值() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed(&h, 0.0, T1 - 11 * 3_600_000));
+    assert!(!feed(&h, 0.99, T1));
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(0), "待確認期間照舊顯示舊值");
+    assert!(!feed(&h, 0.99, T1 + 5 * MIN));
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(0));
+    assert!(feed(&h, 0.99, T1 + 10 * MIN), "第 3 次且隔滿 10 分鐘");
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(99));
+    // 收下後待確認清掉（狀態檔沒有這個帳號的殘留）
+    assert!(!std::fs::read_to_string(state_path(h.path())).unwrap_or_default().contains(ME));
+}
+
+#[test]
+fn 同期回升_99_與_0_交錯_永遠湊不滿_3_次_不收() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed(&h, 0.0, T1 - 11 * 3_600_000));
+    for i in 0..8 {
+        let t = T1 + i * 5 * MIN;
+        feed(&h, 0.99, t);
+        feed(&h, 0.0, t + 2 * MIN);
+    }
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(0));
+}
+
+#[test]
+fn 同期回升_待確認存在狀態檔_重開不歸零_壞掉或太大當空的() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed(&h, 0.0, T1 - 11 * 3_600_000));
+    assert!(!feed(&h, 0.99, T1));
+    assert!(!feed(&h, 0.98, T1 + 5 * MIN), "差 1% 算同一個值");
+    let t = std::fs::read_to_string(state_path(h.path())).unwrap();
+    assert!(t.contains("\"count\":2"), "{t}");
+    assert!(feed(&h, 0.99, T1 + 10 * MIN));
+    // 壞檔、太大：當空的，照常記額度
+    std::fs::write(state_path(h.path()), "{壞").unwrap();
+    assert!(feed(&h, 0.5, T1 + 20 * MIN), "剩餘下降照常收");
+    std::fs::write(state_path(h.path()), "x".repeat(20_000)).unwrap();
+    assert!(feed(&h, 0.4, T1 + 30 * MIN));
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(40));
+}
+
+#[test]
+fn 同期回升_差超過_2_的值重新計數() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed(&h, 0.0, T1 - 11 * 3_600_000));
+    assert!(!feed(&h, 0.99, T1));
+    assert!(!feed(&h, 0.90, T1 + 5 * MIN), "差 9%：重新計數");
+    assert!(!feed(&h, 0.90, T1 + 10 * MIN), "新值只有第 2 次");
+    assert!(feed(&h, 0.90, T1 + 15 * MIN), "新值第 3 次、離新值第一次 10 分鐘");
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(90));
+}

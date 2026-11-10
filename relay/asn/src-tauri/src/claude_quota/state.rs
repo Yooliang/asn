@@ -12,10 +12,23 @@ const MAX_BYTES: u64 = 32 * 1024;
 const MAX_OWNED: usize = 20;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub(super) struct PendingRec {
+pub(crate) struct PendingRec {
     reset_at: String,
     count: u32,
     first_at: String,
+    /// 同期回升確認用的剩餘 %（#1239）；每週倍數確認沒有
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pct: Option<u8>,
+}
+
+/// 待確認 → 存檔的樣子
+pub(crate) fn rec_of(p: Pending) -> PendingRec {
+    PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms), pct: p.pct.filter(|v| *v <= 100) }
+}
+
+/// 存檔的樣子 → 待確認；時間壞掉回 None
+pub(crate) fn pending_of(r: &PendingRec) -> Option<Pending> {
+    Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)?, pct: r.pct.filter(|v| *v <= 100) })
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
@@ -56,18 +69,16 @@ impl State {
         }
     }
     pub fn pending_week(&self) -> Option<Pending> {
-        let r = self.pending_week.as_ref()?;
-        Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
+        pending_of(self.pending_week.as_ref()?)
     }
     pub fn pending_five(&self) -> Option<Pending> {
-        let r = self.pending_five.as_ref()?;
-        Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
+        pending_of(self.pending_five.as_ref()?)
     }
     pub fn set_pending_five(&mut self, p: Option<Pending>) {
-        self.pending_five = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });
+        self.pending_five = p.map(rec_of);
     }
     pub fn set_pending_week(&mut self, p: Option<Pending>) {
-        self.pending_week = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });
+        self.pending_week = p.map(rec_of);
     }
 }
 

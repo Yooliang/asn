@@ -275,7 +275,7 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
 ", iso_secs(now_ms)));
     }
     let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
-    let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
+    let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, None, st.pending_week(), now_ms);
     st.set_pending_week(m.pending_week);
     log_changes(home, st, &m, now_ms);
     let took = m.quota.is_some();
