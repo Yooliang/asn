@@ -123,11 +123,29 @@ test('安卓專案：套件名、權限、關閉備份、登入回來的網址�
 
 test('外殼橋：只動 App 私有資料夾裡的檔案，匯出到「下載/ASN」，不碰其他位置', () => {
   const kt = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'AsnBridge.kt')
-  assert.match(kt, /filesRoot/); assert.match(kt, /canonicalFile/); assert.match(kt, /startsWith\(filesRoot\.path/)
+  assert.match(kt, /filesRoot/); assert.match(kt, /canonicalFile/)
   assert.match(kt, /Download\/ASN/)
   assert.match(kt, /@JavascriptInterface\s+fun vibrate/); assert.match(kt, /fun relaunch/)
   const act = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt')
   assert.match(act, /addJavascriptInterface\(AsnBridge\(this\), "AsnAndroid"\)/)
+})
+
+test('外殼橋：匯出只收「收到的檔案」資料夾（白名單），和 Rust 存檔的位置一致', () => {
+  const kt = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'AsnBridge.kt').replace(/\r\n/g, '\n')
+  assert.match(kt, /private val exportRoot: File = File\(File\(filesRoot, "\.irori-asn"\), "received"\)\.canonicalFile/)
+  const fn = kt.slice(kt.indexOf('fun exportFile('), kt.indexOf('fun openDownloads('))
+  assert.match(fn, /val src = File\(path\)\.canonicalFile/, '先解開路徑（.. 與符號連結）')
+  assert.match(fn, /if \(!src\.path\.startsWith\(exportRoot\.path \+ File\.separator\) \|\| !src\.isFile\) return ""/, '只收白名單底下的一般檔')
+  assert.doesNotMatch(fn, /startsWith\(filesRoot/, '不能用整個私有資料夾當範圍')
+  // Rust 端：安卓的資料資料夾名稱、收到的檔案存在 data_dir/received
+  const dd = read('src-tauri', 'src', 'datadir.rs')
+  assert.match(dd, /pub const FALLBACK_NAME: &str = "\.irori-asn";/)
+  const an = read('src-tauri', 'src', 'android.rs')
+  assert.match(an, /let dir = app\.data_dir\.join\("received"\);/)
+  // 金鑰與登入資料都不在白名單底下
+  for (const f of ['.asn/n1.key', '.irori-asn/login.bin', '.irori-asn/device_key.bin', '.irori-asn/device_known.json', '.irori-asn/settings.json']) {
+    assert.ok(!('/' + f).startsWith('/.irori-asn/received/'), f)
+  }
 })
 
 test('手機畫面（m.html／m.js／mobile.mjs）：不叫任何電腦端指令、不出現電腦端的設定與視窗外框', () => {
