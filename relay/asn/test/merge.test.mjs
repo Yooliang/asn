@@ -298,6 +298,13 @@ test('守門（#1293）：chatpane 三顆收合鈕都吃 foldLocked 反灰，提
   assert.match(fs.readFileSync(path.join(UI, 'list.html'), 'utf8'), /:dp-locked="sideLocked"/)
 })
 
+test('守門（followups）：asn:cmd 的 dp 指令鎖定時直接 return、不改 ui.collapsed', () => {
+  const js = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
+  assert.equal((js.match(/c\.op === 'dp'/g) || []).length, 1)
+  assert.match(js, /else if \(c\.op === 'dp'\) \{ if \(sideAutoFolded\(\{ mode: ui\.mode, width: window\.innerWidth, collapsed: ui\.collapsed \}\)\) return; ui\.collapsed = toggleCollapsed\(ui\.collapsed\) \}/)
+  assert.ok(!/c\.op === 'dp'\) ui\.collapsed/.test(js), '不可回到沒看鎖定的寫法')
+})
+
 test('守門（#1293）：list.js 的 toggleDp 鎖定時直接 return、不改 ui.collapsed；style.css 有反灰樣式且 hover 排除 :disabled', () => {
   const js = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
   assert.match(js, /const toggleDp = \(\) => \{ if \(sideLocked\.value\) return; ui\.collapsed = toggleCollapsed\(ui\.collapsed\) \}/)
