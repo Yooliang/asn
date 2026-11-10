@@ -3577,7 +3577,7 @@ pub fn remote_guard_of(profile: &str, text: &str) -> RemoteGuard {
 #[cfg(test)]
 mod remote_guard_tests {
     use super::*;
-    const HELD: &str = include_str!("../../tests/fixtures/term-screens/claude-held-message.txt");
+    const HELD: &str = include_str!("../../tests/fixtures/held-message/claude-held-message.txt");
 
     #[test]
     fn 遠端打字_停在外來訊息的確認框就結束_認不出的選單只交文字_其他照常() {
