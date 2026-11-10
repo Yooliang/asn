@@ -24,7 +24,9 @@ pub const GUARD_FLAG: &str = "--guard";
 pub const REMOVE_FLAG: &str = "--guard-remove";
 /// ASN 自己多久更新一次心跳
 pub const ALIVE_EVERY_MS: u64 = 60_000;
-/// 心跳超過這麼久沒更新、程序卻還在：看起來卡住了（只記 log）
+/// 心跳超過這麼久沒更新、程序卻還在：看起來卡住了（只記 log）。
+/// 注意：心跳是另一條執行緒在寫，跟畫面那條無關，所以畫面卡住時心跳通常照常更新，這條幾乎不會觸發；
+/// 只有整個程序都停住（例如被除錯器暫停、整台電腦卡死）才看得到。留著當紀錄，不靠它判斷畫面卡住
 pub const HUNG_AFTER_MS: u64 = 3 * 60_000;
 /// 一小時內最多重開幾次，超過就暫停
 pub const MAX_RELAUNCH_PER_HOUR: usize = 3;
@@ -126,10 +128,15 @@ pub fn user_quit(dir: &Path) -> bool {
     quit_path(dir).exists()
 }
 
-/// ASN 開起來時：清掉「正常結束」的記號、寫心跳。要在「同一個視窗名只留一個」的檢查之後才呼叫（不然被擋下的那個會蓋掉別人的心跳）
+/// ASN 開起來時：清掉「正常結束」的記號、寫心跳。要在「同一個視窗名只留一個」的檢查之後才呼叫（不然被擋下的那個會蓋掉別人的心跳）。
+/// 暫停中、而且最近一小時沒有重開紀錄（＝這次是使用者自己開的，不是在反覆當掉的循環裡）：解除暫停，之後真的當掉照樣會重開
 pub fn note_start(dir: &Path, pid: u32, now: u64) {
     let _ = fs::remove_file(quit_path(dir));
     touch_alive(dir, pid, now);
+    let r = read_relaunches(dir);
+    if r.paused && recent(&r, now) == 0 {
+        resume(dir);
+    }
 }
 pub fn touch_alive(dir: &Path, pid: u32, now: u64) {
     if let Ok(s) = serde_json::to_string(&Alive { pid, t: now }) {
@@ -228,15 +235,113 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
-/// 建排程的參數（每 5 分鐘、以目前使用者在登入時執行、已存在就覆寫）
-pub fn create_args(name: &str, exe: &Path) -> Vec<String> {
-    vec!["/Create".into(), "/TN".into(), name.into(), "/TR".into(), format!("\"{}\" {GUARD_FLAG}", exe.display()), "/SC".into(), "MINUTE".into(), "/MO".into(), "5".into(), "/F".into()]
+/// 排程內容（schtasks /Create /XML）。不用 /SC MINUTE：那樣建的排程預設「只在接電源時啟動、改用電池就停止」，
+/// 筆電拔掉電源時守護根本不會跑。這裡明寫：
+/// - 兩個觸發：登入後 1 分鐘、以及每 5 分鐘重複（不設結束時間）
+/// - 用電池也跑、改用電池不停（DisallowStartIfOnBatteries／StopIfGoingOnBatteries＝false）
+/// - 同時只跑一個（MultipleInstancesPolicy＝IgnoreNew）；ExecutionTimeLimit＝PT0S（守護一下就結束，這條是保險）
+/// - 以目前使用者、一般權限、只在登入時執行（InteractiveToken／LeastPrivilege），不用系統管理員
+/// `user_id`＝`網域\使用者名`；路徑與使用者名做 XML 跳脫（中文照原樣，檔案存 UTF-16）
+pub fn task_xml(user_id: &str, exe: &Path) -> String {
+    let u = xml_escape(user_id);
+    let cmd = xml_escape(&exe.display().to_string());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>ASN 意外關閉時自動重新開啟</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{u}</UserId>
+      <Delay>PT1M</Delay>
+    </LogonTrigger>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT5M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{u}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{cmd}</Command>
+      <Arguments>{GUARD_FLAG}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#
+    )
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+/// schtasks 讀 XML 檔要 UTF-16（小端、開頭帶 BOM）
+pub fn utf16_bom(s: &str) -> Vec<u8> {
+    let mut out = vec![0xFF, 0xFE];
+    for u in s.encode_utf16() {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+/// 建排程的參數（讀 XML 檔、已存在就覆寫）
+pub fn create_args(name: &str, xml_path: &Path) -> Vec<String> {
+    vec!["/Create".into(), "/TN".into(), name.into(), "/XML".into(), xml_path.display().to_string(), "/F".into()]
 }
 pub fn delete_args(name: &str) -> Vec<String> {
     vec!["/Delete".into(), "/TN".into(), name.into(), "/F".into()]
 }
 pub fn query_args(name: &str) -> Vec<String> {
     vec!["/Query".into(), "/TN".into(), name.into()]
+}
+
+// 使用者的意思（guard\enabled）：勾選時寫、取消時刪。排程以系統上實際的為準，但手動覆蓋安裝時 Tauri 的安裝程式
+// 會先跑舊版的解除安裝（會刪排程），所以新版開起來時看到「有勾、排程卻不在」就照意思重建。
+// 真的解除安裝不刪這個檔（分不出是升級還是解除安裝）；使用者在解除安裝時勾「刪除應用程式資料」才會一起清掉。
+fn intent_path(dir: &Path) -> PathBuf {
+    dir.join("enabled")
+}
+pub fn intended(dir: &Path) -> bool {
+    intent_path(dir).exists()
+}
+fn set_intent(dir: &Path, on: bool) {
+    if on {
+        let _ = crate::write_atomic(&intent_path(dir), "1");
+    } else {
+        let _ = fs::remove_file(intent_path(dir));
+    }
 }
 
 #[cfg(windows)]
@@ -247,16 +352,30 @@ mod sys {
     fn name() -> String {
         super::task_name(&std::env::var("USERNAME").unwrap_or_default())
     }
+    fn user_id() -> String {
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        match std::env::var("USERDOMAIN") {
+            Ok(d) if !d.is_empty() => format!("{d}\{user}"),
+            _ => user,
+        }
+    }
     pub fn exists() -> bool {
         Command::new("schtasks").no_window().args(super::query_args(&name())).output().map(|o| o.status.success()).unwrap_or(false)
     }
     pub fn set(on: bool, exe: &std::path::Path) -> Result<(), String> {
-        let n = name();
-        if on {
-            let o = Command::new("schtasks").no_window().args(super::create_args(&n, exe)).output().map_err(|e| format!("建不了工作排程：{e}"))?;
-            return if o.status.success() { Ok(()) } else { Err("建不了工作排程".into()) };
+        if !on {
+            return remove();
         }
-        remove()
+        let dir = super::guard_dir().ok_or("找不到 ASN 的資料夾")?;
+        std::fs::create_dir_all(&dir).map_err(|_| "建不了工作排程".to_string())?;
+        let xml = dir.join("task.xml");
+        std::fs::write(&xml, super::utf16_bom(&super::task_xml(&user_id(), exe))).map_err(|_| "建不了工作排程".to_string())?;
+        let o = Command::new("schtasks").no_window().args(super::create_args(&name(), &xml)).output();
+        let _ = std::fs::remove_file(&xml);
+        match o {
+            Ok(o) if o.status.success() => Ok(()),
+            _ => Err("建不了工作排程".into()),
+        }
     }
     /// 刪排程；找不到不算錯
     pub fn remove() -> Result<(), String> {
@@ -285,10 +404,32 @@ mod sys {
     }
 }
 
-/// `asn.exe --guard-remove`（解除安裝時）：刪掉這個使用者的排程；找不到或刪不掉都回 0，不擋解除安裝
+/// `asn.exe --guard-remove`（解除安裝時）：刪掉這個使用者的排程。最多等 10 秒（schtasks 卡住也不能卡住整個解除安裝），
+/// 找不到、刪不掉、逾時都回 0
 pub fn run_remove() -> i32 {
-    let _ = sys::remove();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new().name("asn-guard-remove".into()).spawn(move || {
+        let _ = tx.send(sys::remove());
+    });
+    let _ = rx.recv_timeout(std::time::Duration::from_secs(10));
     0
+}
+
+/// ASN 開起來時（背景執行緒）：有勾、排程卻不在（手動覆蓋安裝時被舊版的解除安裝刪掉）就照意思重建。開發版不建
+pub fn restore_from_intent() {
+    let Some(dir) = guard_dir() else { return };
+    if !intended(&dir) || sys::exists() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    if crate::tray::is_dev_build_path(&exe) {
+        return;
+    }
+    let now = crate::heartbeat::now_ms();
+    match sys::set(true, &exe) {
+        Ok(()) => log_line(&dir, now, "有勾自動重新開啟、排程卻不在：已照設定重建"),
+        Err(e) => log_line(&dir, now, &format!("照設定重建排程失敗：{e}")),
+    }
 }
 
 // ───────── 設定頁 ─────────
@@ -336,6 +477,8 @@ pub async fn guard_set(on: bool) -> Result<GuardView, String> {
         }
         sys::set(on, &exe)?;
         if let Some(d) = guard_dir() {
+            let _ = fs::create_dir_all(&d);
+            set_intent(&d, on);
             if !on {
                 resume(&d);
             }
@@ -443,16 +586,62 @@ mod tests {
         assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(task_name("John Smith"), format!("AsnGuard-{:08x}", fnv1a(b"john smith") >> 32));
-        let exe = Path::new(r"C:\Users\u\AppData\Local\ASN\asn.exe");
-        assert_eq!(
-            create_args("AsnGuard-u", exe),
-            ["/Create", "/TN", "AsnGuard-u", "/TR", r#""C:\Users\u\AppData\Local\ASN\asn.exe" --guard"#, "/SC", "MINUTE", "/MO", "5", "/F"]
-        );
+        let xml = Path::new(r"C:\Users\小良 哥\AppData\Local\tw.yooliang.asn\guard\task.xml");
+        assert_eq!(create_args("AsnGuard-u", xml), ["/Create", "/TN", "AsnGuard-u", "/XML", r"C:\Users\小良 哥\AppData\Local\tw.yooliang.asn\guard\task.xml", "/F"]);
         assert_eq!(delete_args("AsnGuard-u"), ["/Delete", "/TN", "AsnGuard-u", "/F"]);
         assert_eq!(query_args("AsnGuard-u"), ["/Query", "/TN", "AsnGuard-u"]);
-        // 執行檔路徑有中文與空白：/TR 的值用雙引號包住路徑（每個參數由 CreateProcessW 以 UTF-16 傳，不經過字碼頁）
-        let cn = Path::new(r"C:\Users\小良 哥\AppData\Local\ASN\asn.exe");
-        assert_eq!(create_args("AsnGuard-1a2b3c4d", cn)[4], r#""C:\Users\小良 哥\AppData\Local\ASN\asn.exe" --guard"#);
+    }
+
+    #[test]
+    fn 排程_xml_用電池也跑_登入與每_5_分鐘_同時只跑一個_路徑與使用者跳脫() {
+        let exe = Path::new(r"C:\Users\小良 & 哥\AppData\Local\ASN\asn.exe");
+        let x = task_xml(r"DESKTOP-1\小良 & 哥", exe);
+        for want in [
+            "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+            "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+            "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+            "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+            "<LogonTrigger>",
+            "<Delay>PT1M</Delay>",
+            "<Interval>PT5M</Interval>",
+            "<StopAtDurationEnd>false</StopAtDurationEnd>",
+            "<LogonType>InteractiveToken</LogonType>",
+            "<RunLevel>LeastPrivilege</RunLevel>",
+            r"<UserId>DESKTOP-1\小良 &amp; 哥</UserId>",
+            r"<Command>C:\Users\小良 &amp; 哥\AppData\Local\ASN\asn.exe</Command>",
+            "<Arguments>--guard</Arguments>",
+        ] {
+            assert!(x.contains(want), "少了 {want}");
+        }
+        assert_eq!(x.matches("<UserId>").count(), 2, "登入觸發與執行身分都是目前使用者");
+        assert!(!x.contains("<Duration>"), "每 5 分鐘重複不設結束時間");
+        assert!(x.starts_with(r#"<?xml version="1.0" encoding="UTF-16"?>"#));
+        // 存檔是 UTF-16 小端、帶 BOM
+        let b = utf16_bom("<中");
+        assert_eq!(&b[..2], &[0xFF, 0xFE]);
+        assert_eq!(&b[2..], &[0x3C, 0x00, 0x2D, 0x4E]);
+        assert_eq!(xml_escape(r#"a&b<c>d"e'f"#), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
+    }
+
+    #[test]
+    fn 使用者自己開_asn_且一小時內沒重開過_就解除暫停_還在循環裡就不解除() {
+        let d = tempfile::tempdir().unwrap();
+        write_relaunches(d.path(), &r(&[NOW - 2 * HOUR_MS], true));
+        note_start(d.path(), 7, NOW);
+        assert!(!read_relaunches(d.path()).paused, "一小時內沒有重開紀錄：使用者自己開的，解除暫停");
+        write_relaunches(d.path(), &r(&[NOW - 10 * 60_000], true));
+        note_start(d.path(), 7, NOW);
+        assert!(read_relaunches(d.path()).paused, "一小時內還有重開：可能還在反覆當掉的循環裡，維持暫停");
+    }
+
+    #[test]
+    fn 勾選的意思另存一份_手動覆蓋安裝被刪排程後可以照它重建() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!intended(d.path()));
+        set_intent(d.path(), true);
+        assert!(intended(d.path()));
+        set_intent(d.path(), false);
+        assert!(!intended(d.path()));
     }
 
     #[test]

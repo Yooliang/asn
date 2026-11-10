@@ -62,9 +62,10 @@
 
 ; 解除安裝前：刪掉「ASN 意外關閉時自動重新開啟」建的工作排程（todo-next-191 B1）。排程名由 asn.exe 自己算
 ; （使用者名，或有中文、空白時用雜湊；見 src/guard.rs 的 task_name），所以交給還在的 asn.exe --guard-remove 處理，
-; NSIS 不另算一份。找不到排程、刪不掉、asn.exe 不在，都不擋解除安裝（ClearErrors）。
-; 更新時 Tauri 的安裝程式會用 /UPDATE 跑舊版的解除安裝（範本 un.onInit 會設 $UpdateMode = 1）：那不是真的解除安裝，
-; 排程要留著，不然每次更新都會把使用者勾的「自動重新開啟」默默關掉
+; NSIS 不另算一份。找不到排程、刪不掉、asn.exe 不在，都不擋解除安裝（ClearErrors）；--guard-remove 自己最多等 10 秒。
+; 自動更新（/UPDATE）不會跑解除安裝；萬一帶 /UPDATE 跑到這裡（範本 un.onInit 會設 $UpdateMode = 1）也不刪。
+; 手動用新安裝檔覆蓋安裝時，範本預設會先跑舊版的解除安裝（不帶 /UPDATE），排程會被刪掉：
+; 新版開起來看到「使用者有勾（guard\enabled）、排程卻不在」會照設定重建（guard.rs 的 restore_from_intent）
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
     IfFileExists "$INSTDIR\asn.exe" 0 +2

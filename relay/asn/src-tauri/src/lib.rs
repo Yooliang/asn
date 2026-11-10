@@ -2812,9 +2812,13 @@ pub fn run() {
         if let Some(gd) = guard::guard_dir() {
             if std::fs::create_dir_all(&gd).is_ok() {
                 guard::note_start(&gd, std::process::id(), heartbeat::now_ms());
-                let spawned = std::thread::Builder::new().name("asn-guard-alive".into()).spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_millis(guard::ALIVE_EVERY_MS));
-                    guard::touch_alive(&gd, std::process::id(), heartbeat::now_ms());
+                let spawned = std::thread::Builder::new().name("asn-guard-alive".into()).spawn(move || {
+                    // 有勾、排程卻不在（手動覆蓋安裝時被舊版的解除安裝刪掉）：照設定重建（呼叫 schtasks，所以放在背景執行緒）
+                    guard::restore_from_intent();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(guard::ALIVE_EVERY_MS));
+                        guard::touch_alive(&gd, std::process::id(), heartbeat::now_ms());
+                    }
                 });
                 if let Err(e) = spawned {
                     elog!("自動重開的心跳開不了（不影響啟動）：{e}");
