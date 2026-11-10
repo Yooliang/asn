@@ -288,6 +288,13 @@ mod tests {
         let (ask, confirm) = (f.find("input_consent::ask(").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
         assert!(ask < confirm, "先問、按了允許才記下");
         assert!(f[ask..confirm].contains("continue;"), "不允許就結束，不記");
+        // 重查（期限、對方沒撤回）通過才記：過期或被撤回的請求不能被記成「按過允許」
+        for needle in ["input_consent::consent_outcome(", "view_still_pending("] {
+            let at = f.find(needle).unwrap_or_else(|| panic!("打字分支要有 {needle}"));
+            assert!(ask < at && at < confirm, "{needle} 要在 ask 之後、confirm_input 之前");
+        }
+        let still = f.find("if !still {").expect("重查不過就結束");
+        assert!(still < confirm && f[still..confirm].contains("continue;"), "重查不過就 continue，不記");
         let html = include_str!("../../ui/list.html");
         assert!(html.contains("正在這台的夥伴「{{ v.window }}」打字") && html.contains("@click=\"stopBeingViewed(v.id)\">結束</button>"), "紅條有誰在打字、有結束");
     }
