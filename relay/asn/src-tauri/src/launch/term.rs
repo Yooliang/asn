@@ -2083,7 +2083,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 外來訊息確認框的送鍵：只有本人按下的兩個入口（本機提示框、手機提示框）呼叫，呼叫前已重查過一次（框還在、雜湊相同）。
-    /// 不放行＝Enter。放行分兩步：先送向下，重讀確認還是同一個框、游標到了「放行」才送 Enter；不對就不送 Enter，回報失敗
+    /// 不放行＝Esc（真框實測等於拒絕；萬一框剛好換成權限框，Esc 也是拒絕，比 Enter 按到預設安全）。放行分兩步：先送向下，重讀確認還是同一個框、游標到了「放行」才送 Enter；不對就不送 Enter，回報失敗
     fn held_send(&self, name: &str, session_pid: Option<u32>, snap: &SessionSnap, cursor: usize, want: &str, n: u32) -> Result<(), String> {
         let mut recheck = || -> Result<(usize, String), String> {
             let (_, s, p) = self.permission_checked(name, session_pid)?;
@@ -2104,7 +2104,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let w = self.wez(&dir);
         let send = |k: AnswerKey| -> Result<(), String> { w.send_bytes(&snap.window.sock, snap.pane_id, &encode_keys(&[k])?) };
         match n {
-            1 => send(AnswerKey::Enter)?,
+            1 => send(AnswerKey::Esc)?,
             2 => {
                 send(AnswerKey::Down)?;
                 let mut at_deliver = false;
@@ -3775,6 +3775,7 @@ mod remote_guard_tests {
         assert!(down < re && re < enter, "先向下、重讀、再 Enter");
         assert!(with[enter..].contains("recheck()") && with[enter..].contains("HELD_STILL"), "送完再讀一次，框還在不算成功");
         assert!(!with.contains("AnswerKey::Down, AnswerKey::Enter"), "不一次送向下加 Enter");
+        assert!(with.contains("1 => send(AnswerKey::Esc)?"), "不放行送 Esc，不盲送 Enter");
         // 終端面板的代答：先擋外來訊息框
         let ans = prod.split("pub fn answer(").nth(1).unwrap().split("\n    }\n").next().unwrap();
         assert!(ans.contains("is_held_message(&text)") && ans.contains("HELD_ANSWER_REFUSED"));
@@ -7550,20 +7551,20 @@ mod tests {
         }
 
         #[test]
-        fn 外來訊息框_本機提示框_不放行送_enter_放行送向下加_enter_文字是摘要() {
+        fn 外來訊息框_本機提示框_不放行送_esc_放行先送向下_文字是摘要() {
             let rig = permission_rig();
             *rig.runner.inner.screen.borrow_mut() = held_screen();
             let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
             assert_eq!(p.kind, "held_message");
             assert!(p.complete && p.text.contains("對方自稱：") && !p.text.contains("uds:"), "{p:?}");
-            // 這個假畫面不會動：送了 Enter 框還在，回報「還在」（不算成功）
+            // 這個假畫面不會動：送了 Esc 框還在，回報「還在」（不算成功）
             let e = rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap_err();
             assert!(e.contains("還在畫面上"), "{e}");
-            assert_eq!(sent(&rig), vec!["\r"], "不放行：只送 Enter");
+            assert_eq!(sent(&rig), vec!["\u{1b}"], "不放行：只送 Esc，不送 Enter");
             // 放行：先送向下；這個假畫面不會動（游標還在「不放行」），所以不按 Enter、回報失敗
             let e = rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err();
             assert!(e.contains("沒有按 Enter"), "{e}");
-            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B"]);
+            assert_eq!(sent(&rig), vec!["\u{1b}", "\u{1b}[B"]);
         }
 
         #[test]
@@ -7593,7 +7594,7 @@ mod tests {
             let before = sent(&rig).len();
             assert!(rig.svc.held_send_with(&snap, 0, "h", 1, &mut *at(0, "h"), z).unwrap_err().contains("還在畫面上"));
             rig.svc.held_send_with(&snap, 0, "h", 1, &mut *at(0, "下一則"), z).unwrap();
-            assert_eq!(sent(&rig)[before..].to_vec(), vec!["\r".to_string(), "\r".to_string()]);
+            assert_eq!(sent(&rig)[before..].to_vec(), vec!["\u{1b}".to_string(), "\u{1b}".to_string()], "不放行送 Esc");
             // 換成別的框（雜湊不同）、重讀失敗（例如變成權限框）、游標一直沒動、游標跑到別處：都不按 Enter
             let gone: Re = Box::new(|| Err("這個提示已經不在畫面上".to_string()));
             for mut re in [at(1, "別的"), gone, at(0, "h"), at(2, "h")] {
@@ -7631,12 +7632,12 @@ mod tests {
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("變了"));
             assert!(sent(&rig).is_empty(), "{:?}", sent(&rig));
-            // 手機按「不放行」：只送 Enter；按「放行」：先送向下，假畫面不動就不按 Enter
+            // 手機按「不放行」：只送 Esc；按「放行」：先送向下，假畫面不動就不按 Enter
             *rig.runner.inner.screen.borrow_mut() = held;
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("還在畫面上"));
-            assert_eq!(sent(&rig), vec!["\r"]);
+            assert_eq!(sent(&rig), vec!["\u{1b}"]);
             assert!(rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err().contains("沒有按 Enter"));
-            assert_eq!(sent(&rig), vec!["\r", "\u{1b}[B"]);
+            assert_eq!(sent(&rig), vec!["\u{1b}", "\u{1b}[B"]);
         }
 
         #[test]
