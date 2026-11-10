@@ -445,7 +445,7 @@ impl KnownPeers {
         let (options, answer) = make(&fingerprint(&p.sign_pub))?;
         let set = PickSet { options, answer };
         p.pick = Some(set.clone());
-        Some((set, true))
+        Ok(Some((set, true)))
     }
 
     /// 答錯一次：第一次鎖 10 分鐘、第二次擋住。**只有 android_known_answer 能叫**（守門測試）。回有沒有這台
