@@ -16,13 +16,23 @@ export function normalizeSize(raw, mode) {
 }
 
 // ---------- 窄視窗：一次只顯示一個窗格（#1192） ----------
-// 整合模式左邊名單固定 300px；右邊至少要 180px 才排得下設定標題與帳號卡。兩個加間隙與視窗邊框放不下（寬度 < 500）就一次只顯示一個：
+// 整合模式左邊名單固定 300px；右邊至少要排得下「收起大頭貼欄」的對話（#1227 後續，量測自 520 寬）：
+//   收起的大頭貼欄 20 ＋ 對話區與輸入區的內距、間隙、邊框 44 ＋ 傳送鈕 64 ＋ 輸入框至少 72 ＝ 200（設定標題與帳號卡也放得下）。
+// 兩個加間隙與視窗邊框放不下（寬度 < 520）就一次只顯示一個：
 // 有開著的分頁就顯示右邊（附「返回名單」），按返回或沒有分頁就顯示名單。
 export const LIST_PANE_W = 300
 export const PANE_GAP = 6
-export const CHAT_PANE_MIN_W = 180
+export const SIDE_FOLDED_W = 20       // 收起後的大頭貼欄
+export const SIDE_OPEN_W = 128        // 展開的大頭貼欄：頭像 104 ＋ 內距 24（含 1px 邊線）
+export const CHAT_CHROME_W = 44 + 64   // 內距、間隙、邊框 ＋ 傳送鈕（實測：輸入框寬 ＝ 右窗格寬 － 大頭貼欄 － 108）
+export const INPUT_MIN_W = 72
+export const CHAT_PANE_MIN_W = SIDE_FOLDED_W + CHAT_CHROME_W + INPUT_MIN_W
 export const WINDOW_CHROME_W = 14   // 視窗左右內距 6+6、外框 1+1
 export const SINGLE_PANE_BELOW = LIST_PANE_W + PANE_GAP + CHAT_PANE_MIN_W + WINDOW_CHROME_W
+// 左右並排時，展開大頭貼欄還能留給輸入框 100px 的最小視窗寬（量測：寬 600 展開時輸入框只剩 44px、520 時 12px 且傳送鈕被截掉）；
+// 比這窄就自動把大頭貼欄收起來（只影響畫面，不改使用者存的收合設定，放寬後恢復）
+export const SIDE_FOLD_BELOW = LIST_PANE_W + PANE_GAP + SIDE_OPEN_W + CHAT_CHROME_W + 100 + WINDOW_CHROME_W
+export const autoFoldSide = ({ mode, width }) => normalizeMode(mode) === 'merged' && width < SIDE_FOLD_BELOW
 // 回傳 ''（左右並排）、'list'（只顯示名單）、'chat'（只顯示右邊）
 export function singlePane({ mode, width, hasTabs, showList }) {
   if (normalizeMode(mode) !== 'merged' || !(width < SINGLE_PANE_BELOW)) return ''

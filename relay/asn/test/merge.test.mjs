@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { splitTabs } from '../ui/lib/panels.mjs'
-import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
+import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, SIDE_FOLD_BELOW, autoFoldSide, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
@@ -251,15 +251,26 @@ test('換大頭貼只出現一個提示：有自訂 data-tip 就不再加原生 
 
 test('窄視窗：整合模式放不下兩個窗格時一次只顯示一個（#1192）', () => {
   const at = (width, over = {}) => singlePane({ mode: 'merged', width, hasTabs: true, showList: false, ...over })
-  assert.equal(SINGLE_PANE_BELOW, 500)
+  assert.equal(SINGLE_PANE_BELOW, 520)   // 300 + 6 + (20 + 108 + 72) + 14
   assert.equal(at(280), 'chat')
   assert.equal(at(360), 'chat')
-  assert.equal(at(499), 'chat')
-  assert.equal(at(500), '')
+  assert.equal(at(500), 'chat')
+  assert.equal(at(519), 'chat')
   assert.equal(at(520), '')
+  assert.equal(at(600), '')
   assert.equal(at(360, { showList: true }), 'list')
   assert.equal(at(360, { hasTabs: false }), 'list')
   assert.equal(at(360, { mode: 'split' }), '')
+})
+
+test('窄視窗：並排但放不下展開的大頭貼欄就自動收起', () => {
+  assert.equal(SIDE_FOLD_BELOW, 300 + 6 + 128 + 108 + 100 + 14)
+  assert.equal(autoFoldSide({ mode: 'merged', width: 520 }), true)
+  assert.equal(autoFoldSide({ mode: 'merged', width: 600 }), true)
+  assert.equal(autoFoldSide({ mode: 'merged', width: SIDE_FOLD_BELOW - 1 }), true)
+  assert.equal(autoFoldSide({ mode: 'merged', width: SIDE_FOLD_BELOW }), false)
+  assert.equal(autoFoldSide({ mode: 'merged', width: 900 }), false)
+  assert.equal(autoFoldSide({ mode: 'split', width: 300 }), false)
 })
 
 test('守門（#1192）：list.js 每個從名單開分頁的入口（openChatTab）之後都設 pane.showList = false，也不監看 tabs／active 來切窗格', () => {
