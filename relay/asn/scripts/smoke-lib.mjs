@@ -636,9 +636,9 @@ export const mpaneProbeSource = ({ single }) => `(async () => {
 // 整合模式窄視窗、右邊開著對話（#1227 後續）：量右窗格各層寬度，輸入框、傳送鈕要完整看得到。
 // 左右並排（single=false）時：對話區（.conv-main）至少 CHAT_CONV_MIN 寬、輸入框與傳送鈕在右窗格內、不橫向溢出；
 // 單窗格（single=true）時：只顯示右邊，同樣檢查輸入框完整可見。
-export const MPANE_CHAT_PROBES = { single: { mpane: true, chat: true, single: true }, double: { mpane: true, chat: true, single: false } }
+export const MPANE_CHAT_PROBES = { single: { mpane: true, chat: true, single: true, folded: true }, double: { mpane: true, chat: true, single: false, folded: true }, wide: { mpane: true, chat: true, single: false, folded: false } }
 export const MPANE_CONV_MIN = 160
-export const mpaneChatProbeSource = ({ single }) => `(async () => {
+export const mpaneChatProbeSource = ({ single, folded }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
   const W = window.innerWidth, wantSingle = ${single ? 'true' : 'false'};
@@ -664,6 +664,17 @@ export const mpaneChatProbeSource = ({ single }) => `(async () => {
     if (r.left < cr.left - 1 || r.right > cr.right + 1 || r.right > W + 1) return { ok: false, why: name + '被截掉（超出右窗格 ' + Math.round(cr.left) + '~' + Math.round(cr.right) + '）：' + JSON.stringify(m) };
   }
   if (box.getBoundingClientRect().width < 60) return { ok: false, why: '輸入框只剩 ' + Math.round(box.getBoundingClientRect().width) + 'px：' + JSON.stringify(m) };
+  // 大頭貼欄被自動收起（右窗格放不下展開的欄）時展開鈕反灰並寫原因；放得下時照舊可按
+  const strip = q('.chat-area .dp-fold-strip'), foldBtn = strip || q('.chat-area .dp-fold-bar');
+  if (!foldBtn) return { ok: false, why: '找不到大頭貼欄的收合鈕' };
+  if (${folded ? 'true' : 'false'}) {
+    if (!strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄應該被自動收起' };
+    if (!strip.disabled) return { ok: false, why: '自動收起時展開鈕應該反灰' };
+    if (strip.title !== '視窗太窄，放寬就會恢復' || strip.getAttribute('aria-label') !== '視窗太窄，放寬就會恢復') return { ok: false, why: '展開鈕提示不對：' + strip.title + ' / ' + strip.getAttribute('aria-label') };
+  } else {
+    if (strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄不該被收起' };
+    if (foldBtn.disabled || foldBtn.title.includes('視窗太窄')) return { ok: false, why: '放得下時收合鈕應該可按、沒有「視窗太窄」提示：' + foldBtn.title };
+  }
   const conv = q('.chat-area .conv-main');
   if (!conv || conv.getBoundingClientRect().width < ${MPANE_CONV_MIN}) return { ok: false, why: '對話區只有 ' + (conv ? Math.round(conv.getBoundingClientRect().width) : 0) + 'px（至少 ${MPANE_CONV_MIN}）：' + JSON.stringify(m) };
   return { ok: true, why: '' };
@@ -1220,11 +1231,11 @@ export const SCENARIOS = [
   { name: 'list-merged-360', page: 'list.html', width: 360, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-360.png' },
   { name: 'list-merged-chat-520', page: 'list.html', width: 520, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-520.png' },
   { name: 'list-merged-chat-600', page: 'list.html', width: 600, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-600.png' },
-  { name: 'list-merged-chat-700', page: 'list.html', width: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-700.png' },
-  { name: 'list-merged-chat-800', page: 'list.html', width: 800, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-800.png' },
+  { name: 'list-merged-chat-700', page: 'list.html', width: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-700.png' },
+  { name: 'list-merged-chat-800', page: 'list.html', width: 800, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-800.png' },
   { name: 'list-merged-chat-500', page: 'list.html', width: 500, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.single, shot: 'list-merged-chat-500.png' },
   { name: 'list-merged-chat-655', page: 'list.html', width: 655, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-655.png' },
-  { name: 'list-merged-chat-656', page: 'list.html', width: 656, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-656.png' },
+  { name: 'list-merged-chat-656', page: 'list.html', width: 656, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.wide, shot: 'list-merged-chat-656.png' },
   { name: 'list-merged-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.double, shot: 'list-merged-520.png' },
   { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },

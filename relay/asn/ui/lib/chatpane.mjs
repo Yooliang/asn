@@ -3,7 +3,7 @@
 import { renderMarkdown, handleLinkClick } from './markdown.mjs'
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
-import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
+import { foldBarArrow, SIDE_FOLD_LOCK_TIP, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
@@ -49,6 +49,7 @@ export const ChatPane = {
     dpMode: { type: String, default: 'left' },     // 頭像模式：left／right＝側欄；inline＝頭像在每則訊息旁
     toolbar: { type: String, default: 'top' },     // 工具列位置：top（輸入框上方）／bottom（輸入框下方）
     bubble: { type: String, default: 'none' },     // 文字底色：none／color／auto
+    dpLocked: { type: Boolean, default: false },     // 窗太窄被自動收起：展開鈕反灰
     dpCollapsed: { type: Boolean, default: false },  // 側欄收合（只對 left／right 有意義）
     active: { type: Boolean, default: true },      // 整合模式下只有目前分頁是 true；變成 true 時捲到底並聚焦輸入框
     winMode: { type: String, default: 'split' },   // split｜merged：整合模式用較短的輸入提示
@@ -154,7 +155,8 @@ export const ChatPane = {
     const isNotice = computed(() => props.friend?.isNotice === true)   // 「通知」對話（#848）：沒有上線狀態、沒有輸入列、沒有通話鈕
     const warn = computed(() => (displayOnly.value || isNotice.value ? null : warnKind(props.friend?.status, { hideBusy: props.hideBusyWarn })))
     const barArrow = computed(() => foldBarArrow(side.value, collapsed.value))
-    const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
+    const foldLocked = computed(() => props.dpLocked && collapsed.value)
+    const foldTip = computed(() => (foldLocked.value ? SIDE_FOLD_LOCK_TIP : collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
     // ---- 往上捲自動載入更舊的信：捲到距頂端 120px 內就向樞紐要；載入後停在原本看的那一則 ----
@@ -427,7 +429,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, foldLocked, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -564,14 +566,14 @@ export const ChatPane = {
     <div class="dp-side-stack" v-show="!collapsed">
       <div class="dp-grp">
         <asn-avatar size="xl" :src="friendAv" :friend="isRoom ? null : friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
-        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :disabled="foldLocked" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
       </div>
       <div class="dp-grp">
         <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
-        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :disabled="foldLocked" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
       </div>
     </div>
-    <button class="dp-fold-strip" type="button" v-if="collapsed" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="false" :title="foldTip">{{ barArrow }}</button>
+    <button class="dp-fold-strip" type="button" v-if="collapsed" @click="$emit('toggle-dp')" :disabled="foldLocked" :aria-label="foldTip" :aria-expanded="false" :title="foldTip">{{ barArrow }}</button>
   </aside>
   </div>
   <div class="typing" role="status">

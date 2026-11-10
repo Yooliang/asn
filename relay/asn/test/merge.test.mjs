@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { splitTabs } from '../ui/lib/panels.mjs'
-import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, SIDE_FOLD_BELOW, autoFoldSide, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
+import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, SIDE_FOLD_BELOW, SIDE_FOLD_LOCK_TIP, autoFoldSide, sideAutoFolded, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
@@ -280,4 +280,20 @@ test('守門（#1192）：list.js 每個從名單開分頁的入口（openChatTa
   assert.ok(calls.length >= 4, `openChatTab 的入口太少（${calls.length}），規則可能失效`)
   for (const [l, i] of calls) assert.match(lines[i + 1] ?? '', /^\s*pane\.showList = false\b/, `第 ${i + 1} 行之後沒有切回右邊：${l.trim()}`)
   assert.ok(!/watch\(\[\(\) => ui\.tabs, \(\) => ui\.active\]/.test(src), '不監看 ui.tabs／ui.active（終端消失自動關分頁時會把使用者從名單切走）')
+})
+
+test('大頭貼欄自動收起時展開鈕反灰（#1293）：只在窄視窗且使用者設定是展開時成立', () => {
+  assert.equal(sideAutoFolded({ mode: 'merged', width: 520, collapsed: false }), true)
+  assert.equal(sideAutoFolded({ mode: 'merged', width: 520, collapsed: true }), false)   // 使用者自己收起：鈕照舊可按
+  assert.equal(sideAutoFolded({ mode: 'merged', width: SIDE_FOLD_BELOW, collapsed: false }), false)
+  assert.equal(sideAutoFolded({ mode: 'split', width: 300, collapsed: false }), false)
+  assert.equal(SIDE_FOLD_LOCK_TIP, '視窗太窄，放寬就會恢復')
+})
+
+test('守門（#1293）：chatpane 三顆收合鈕都吃 foldLocked 反灰，提示用 foldTip（title 與 aria-label）；list.html 傳 dp-locked', () => {
+  const src = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
+  const btns = src.split(/\r?\n/).filter(l => /class="dp-fold-(bar|strip)"/.test(l))
+  assert.equal(btns.length, 3)
+  for (const l of btns) { assert.ok(l.includes(':disabled="foldLocked"'), l.trim()); assert.ok(l.includes(':aria-label="foldTip"') && l.includes(':title="foldTip"'), l.trim()) }
+  assert.match(fs.readFileSync(path.join(UI, 'list.html'), 'utf8'), /:dp-locked="sideLocked"/)
 })

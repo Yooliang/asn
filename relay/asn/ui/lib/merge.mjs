@@ -33,6 +33,9 @@ export const SINGLE_PANE_BELOW = LIST_PANE_W + PANE_GAP + CHAT_PANE_MIN_W + WIND
 // 比這窄就自動把大頭貼欄收起來（只影響畫面，不改使用者存的收合設定，放寬後恢復）
 export const SIDE_FOLD_BELOW = LIST_PANE_W + PANE_GAP + SIDE_OPEN_W + CHAT_CHROME_W + 100 + WINDOW_CHROME_W
 export const autoFoldSide = ({ mode, width }) => normalizeMode(mode) === 'merged' && width < SIDE_FOLD_BELOW
+// 大頭貼欄現在是否被「窗太窄」自動收起（使用者設定是展開的）；這時展開鈕要反灰，使用者自己收起的不算
+export const sideAutoFolded = ({ mode, width, collapsed }) => autoFoldSide({ mode, width }) && collapsed !== true
+export const SIDE_FOLD_LOCK_TIP = '視窗太窄，放寬就會恢復'
 // 回傳 ''（左右並排）、'list'（只顯示名單）、'chat'（只顯示右邊）
 export function singlePane({ mode, width, hasTabs, showList }) {
   if (normalizeMode(mode) !== 'merged' || !(width < SINGLE_PANE_BELOW)) return ''
