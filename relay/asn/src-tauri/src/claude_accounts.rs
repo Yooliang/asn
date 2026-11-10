@@ -921,34 +921,59 @@ pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std
 
 // ---------- Tauri 指令（前端只拿得到 AccountInfo） ----------
 
+// 這幾支都會讀寫帳號檔、拿 LOCK（切換時最多再等 5 秒網路查帳號）：一律在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）。
+// 同步的 Tauri 指令跑在主執行緒，記憶體吃緊、磁碟在換頁時一卡幾秒，Windows 就判定「沒有回應」（11-03 asn.exe 被關、收發室跟著斷）。
+// 改成非同步後可能同時跑兩支：讀寫一律在同一把 LOCK 底下，照舊排隊。
+async fn off_main<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())
+}
+
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_accounts_list() -> Vec<AccountInfo> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    list(&claude_home())
+pub async fn claude_accounts_list() -> Vec<AccountInfo> {
+    off_main(|| {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        list(&claude_home())
+    })
+    .await
+    .unwrap_or_default()
 }
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_account_current() -> Option<AccountInfo> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    current_login(&claude_home())
+pub async fn claude_account_current() -> Option<AccountInfo> {
+    off_main(|| {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        current_login(&claude_home())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_account_save() -> Result<AccountInfo, String> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    save_current(&claude_home()).map_err(|e| e.to_string())
+pub async fn claude_account_save() -> Result<AccountInfo, String> {
+    off_main(|| {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        save_current(&claude_home()).map_err(|e| e.to_string())
+    })
+    .await?
 }
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_account_switch(email: String) -> Result<SwitchOutcome, String> {
-    local_switch(&email)
+pub async fn claude_account_switch(email: String) -> Result<SwitchOutcome, String> {
+    off_main(move || local_switch(&email)).await?
 }
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_account_delete(email: String) -> Result<(), String> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    delete(&claude_home(), &email).map_err(|e| e.to_string())
+pub async fn claude_account_delete(email: String) -> Result<(), String> {
+    off_main(move || {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        delete(&claude_home(), &email).map_err(|e| e.to_string())
+    })
+    .await?
 }
 #[cfg_attr(feature = "gui", tauri::command)]
-pub fn claude_account_undo() -> Result<String, String> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    undo_last_switch(&claude_home()).map_err(|e| e.to_string())
+pub async fn claude_account_undo() -> Result<String, String> {
+    off_main(|| {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        undo_last_switch(&claude_home()).map_err(|e| e.to_string())
+    })
+    .await?
 }
 /// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）
 pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {

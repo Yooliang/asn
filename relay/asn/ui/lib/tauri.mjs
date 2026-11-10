@@ -139,9 +139,17 @@ export const cloudApi = {
   rename: (node, name) => invoke('cloud_agent_rename', { node, name }),   // → 後台確認後的名字（只改設備名）
   approve: (code, name, nodeId) => invoke('cloud_agent_approve', { code, name, nodeId: nodeId || null }),   // 核准無畫面主機的短碼 → { id, name }（金鑰不經過這裡）
 }
+// 存檔寫入改在背景執行緒跑之後（todo-next-191），兩支同時送出時後端不保證照順序寫完：同一個存檔名一支寫完才送下一支，
+// 內容在呼叫當下就轉成文字（之後改了資料不影響這一次）。前一支失敗不擋後一支
+const saveChain = new Map()
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
-  save: data => invoke('store_save', { name, text: JSON.stringify(data) }),
+  save: data => {
+    const text = JSON.stringify(data)
+    const next = (saveChain.get(name) ?? Promise.resolve()).catch(() => {}).then(() => invoke('store_save', { name, text }))
+    saveChain.set(name, next)
+    return next
+  },
 })
 
 // ---------- 視窗外框（自訂／Windows 原生） ----------

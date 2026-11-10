@@ -1893,7 +1893,7 @@ struct RelayLogPaths {
 /// 主視窗的 [ASN] 記錄整批附加到機器資料夾的 ui.log（#339）。寫不進去回錯誤，畫面不必理會
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-#[tauri::command]
+#[tauri::command(async)]   // 寫檔：在背景執行緒跑（todo-next-191）；同時寫由 ui_log::append 自己的鎖排隊
 fn ui_log(app: State<'_, App>, lines: Vec<String>) -> Result<usize, String> {
     ui_log::append(&app.work_dir, &lines)
 }
@@ -2290,17 +2290,22 @@ fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
     }
     Ok(app.data_dir.join(format!("asn-{name}.json")))
 }
+// 存檔讀寫在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）；寫入用 STORE_LOCK 排隊（同一個暫存檔名，兩支同時寫會互相蓋掉）。
+// 呼叫順序由前端保證（lib/tauri.mjs 的 store().save 同一個存檔名一支寫完才送下一支）
 #[cfg(feature = "gui")]
-#[tauri::command]
+static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(feature = "gui")]
+#[tauri::command(async)]
 fn store_load(app: State<'_, App>, name: String) -> Result<Option<String>, String> {
     Ok(std::fs::read_to_string(store_path(&app, &name)?).ok())
 }
 #[cfg(feature = "gui")]
-#[tauri::command]
+#[tauri::command(async)]
 fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), String> {
     if text.len() > 8_000_000 {
         return Err("存檔太大".into());
     }
+    let _g = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     write_atomic(&store_path(&app, &name)?, &text).map_err(|e| e.to_string())
 }
 
