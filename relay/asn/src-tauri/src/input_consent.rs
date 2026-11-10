@@ -59,24 +59,51 @@ pub fn login_ok_text(name: &str, sign_pub: &str) -> String {
     format!("{name}（指紋 {fp8}）\n\n勾了以後，這支手機可以讓這台電腦登入 Codex 等帳號：這台會開始登入，登入網址和代碼只會加密送到那支手機。\n\n請先確認指紋和那支手機設定頁顯示的一樣，而且是你自己的手機。要允許嗎？")
 }
 
-/// 勾「允許替這台登入」前問本人。允許回 true；取消、關掉、逾時都回 false
+/// 「允許」按鈕的字：只有按了這一顆才算允許
+const ALLOW: &str = "允許";
+
+/// 三顆按鈕：第一顆（預設焦點，按 Enter 就是它）是「不要」，第二顆才是「允許」，第三顆是取消。
+/// Windows 的對話框預設焦點一定在第一顆，所以「允許」不能放第一顆；關掉框、按 Esc 在各平台都回取消或第三顆
+fn buttons(no: &str) -> tauri_plugin_dialog::MessageDialogButtons {
+    tauri_plugin_dialog::MessageDialogButtons::YesNoCancelCustom(no.into(), ALLOW.into(), "取消".into())
+}
+
+/// 對話框的結果算不算允許：只有明確按了「允許」那一顆
+fn allowed(r: &tauri_plugin_dialog::MessageDialogResult) -> bool {
+    matches!(r, tauri_plugin_dialog::MessageDialogResult::Custom(s) if s == ALLOW)
+}
+
+/// 勾「允許替這台登入」前問本人。允許回 true；不要、取消、關掉、逾時都回 false。
+/// 同一時間只開一個框：已經有框開著就直接回 false
 pub async fn ask_login_ok(app: &AppHandle, name: &str, sign_pub: &str) -> bool {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    static ASKING: AtomicBool = AtomicBool::new(false);
+    if ASKING.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            ASKING.store(false, Ordering::SeqCst);
+        }
+    }
+    let _done = Done;
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     app.dialog()
         .message(login_ok_text(name, sign_pub))
         .title("ASN：允許手機替這台登入")
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("允許".into(), "取消".into()))
-        .show(move |ok| {
-            let _ = tx.send(ok);
+        .buttons(buttons("先不要"))
+        .show_with_result(move |r| {
+            let _ = tx.send(allowed(&r));
         });
     matches!(tokio::time::timeout(std::time::Duration::from_secs(ASK_SECS), rx).await, Ok(Ok(true)))
 }
 
-/// 問本人。允許回 true；不允許、關掉、逾時都回 false
+/// 問本人。允許回 true；不允許、取消、關掉、逾時都回 false
 pub async fn ask(app: &AppHandle, who: &Who, window: &str) -> bool {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     if let Some(w) = app.get_webview_window("list") {
         let _ = w.unminimize();
         let _ = w.show();
@@ -87,9 +114,9 @@ pub async fn ask(app: &AppHandle, who: &Who, window: &str) -> bool {
         .message(ask_text(who, window))
         .title("ASN：別台要在這台打字")
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("允許".into(), "不允許".into()))
-        .show(move |ok| {
-            let _ = tx.send(ok);
+        .buttons(buttons("不允許"))
+        .show_with_result(move |r| {
+            let _ = tx.send(allowed(&r));
         });
     matches!(tokio::time::timeout(std::time::Duration::from_secs(ASK_SECS), rx).await, Ok(Ok(true)))
 }
@@ -104,6 +131,28 @@ mod tests {
         let mut k = KnownPeers::default();
         k.remember("d", "家用機", PUB, 1).unwrap();
         k
+    }
+
+    /// 預設焦點（第一顆）不能是「允許」；只有明確按了「允許」才算，Enter、Esc、關掉、別的按鈕都不算
+    #[test]
+    fn 確認框_第一顆不是允許_只有按允許才算() {
+        use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogResult as R};
+        for no in ["先不要", "不允許"] {
+            match buttons(no) {
+                MessageDialogButtons::YesNoCancelCustom(first, second, third) => {
+                    assert_eq!((first.as_str(), second.as_str(), third.as_str()), (no, ALLOW, "取消"));
+                }
+                _ => panic!("要三顆自訂按鈕"),
+            }
+        }
+        assert!(allowed(&R::Custom(ALLOW.into())));
+        for r in [R::Custom("先不要".into()), R::Custom("不允許".into()), R::Custom("取消".into()), R::Cancel, R::Ok, R::Yes, R::No] {
+            assert!(!allowed(&r), "{r:?}");
+        }
+        let src = include_str!("input_consent.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap();
+        assert!(!code.contains("OkCancelCustom"), "兩顆按鈕的框第一顆會是預設焦點");
+        assert!(!code.contains(".show(move"), "要看按了哪一顆，不能只看 true／false");
     }
 
     #[test]

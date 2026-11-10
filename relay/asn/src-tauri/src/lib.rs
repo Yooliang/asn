@@ -666,7 +666,8 @@ async fn run_remote_device_login(handle: AppHandle, relay: Arc<Relay>, ask: rela
             return;
         }
         Err(r) => {
-            elog!("手機要求登入 {name} 被拒絕：{}", r.text());
+            // log 記真正的原因（不認得／金鑰變了／沒允許），回給手機的是同一句
+            elog!("手機要求登入 {name} 被拒絕：{r:?}");
             relay.report_setup_result(false, r.text(), None).await;
             return;
         }
@@ -1093,8 +1094,10 @@ async fn device_known_login_ok(app: State<'_, App>, handle: AppHandle, node: Str
         if !input_consent::ask_login_ok(&handle, &peer.name, &peer.sign_pub).await {
             return Ok(false);
         }
+        // 寫入時再比一次公鑰：框開著時這台被忘記、又用別把金鑰記住，就不寫
+        return device_id::live::set_login_ok(&app.data_dir, &node, true, Some(&peer.sign_pub));
     }
-    device_id::live::set_login_ok(&app.data_dir, &node, on)
+    device_id::live::set_login_ok(&app.data_dir, &node, false, None)
 }
 
 /// 啟動時上傳這台的設備公鑰，別台才能看這台（別台第一次連就記住它）。失敗就隔 10 分鐘再試，成功就停
@@ -2799,7 +2802,7 @@ pub fn run() {
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
-        account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch,
+        account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
         site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);

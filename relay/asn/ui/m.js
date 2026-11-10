@@ -679,7 +679,8 @@ const app = createApp({
     // 拿到就顯示「給哪台、哪一家」、開啟登入頁、代碼與倒數（不給複製）→ 之後照狀態顯示結果。網址與代碼只在顯示階段放在這裡，離開、進背景、到期就清
     const loginSt = reactive({ node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, url: '', code: '', exp: 0, name: '', left: 0 })
     let loginTimer = null
-    const loginStop = () => { clearInterval(loginTimer); loginTimer = null }
+    // 停止這一輪：連 Rust 那邊記著的一次性私鑰也丟掉（離開、進背景、到期、出錯、按關閉都走這裡）
+    const loginStop = () => { clearInterval(loginTimer); loginTimer = null; if (loginSt.rid) void invoke('setup_device_cancel', { rid: loginSt.rid }).catch(() => {}) }
     const loginWipe = () => { Object.assign(loginSt, { url: '', code: '', exp: 0, left: 0 }) }
     const loginReset = () => { loginStop(); loginWipe(); Object.assign(loginSt, { node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, name: '' }) }
     const loginEnd = (text, good = false) => { loginStop(); loginWipe(); Object.assign(loginSt, { stage: 'done', text, ok: good }) }

@@ -62,7 +62,10 @@ test('守門（手機 Rust）：取回時驗章只用手機本機記住的電腦
   assert.match(req, /already[\s\S]*return Ok/, 'already 時不留私鑰')
   const lib = read('../src-tauri/src/lib.rs')
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]'), lib.indexOf('let builder = builder\n        .setup'))
-  assert.ok(phone.includes('account::setup_device_request') && phone.includes('account::setup_device_fetch'), '手機的指令清單要有')
+  assert.ok(phone.includes('account::setup_device_request') && phone.includes('account::setup_device_fetch') && phone.includes('account::setup_device_cancel'), '手機的指令清單要有')
+  const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
+  assert.ok(desk.includes('generate_handler!'), '找得到電腦的指令清單')
+  for (const c of ['setup_device_request', 'setup_device_fetch', 'setup_device_cancel']) assert.ok(!desk.includes(c), `電腦的指令清單不能有 ${c}`)
 })
 
 test('守門（手機畫面）：代碼不給複製、不能選取；離開頁面與進背景就清；送出只在確認階段；不寫 log', () => {
@@ -78,4 +81,7 @@ test('守門（手機畫面）：代碼不給複製、不能選取；離開頁�
   assert.match(js, /if \(document\.hidden && loginSt\.stage === 'show'\) loginEnd\(/, '進背景就清')
   assert.match(js, /setupReset\(\); loginReset\(\)/, '離開設備頁就清')
   assert.match(sec, /const loginWipe = \(\) => \{ Object\.assign\(loginSt, \{ url: '', code: '', exp: 0, left: 0 \}\) \}/)
+  assert.match(sec, /const loginStop = \(\) => \{[^\n]*invoke\('setup_device_cancel', \{ rid: loginSt\.rid \}\)/, '停止時連 Rust 記著的私鑰也丟掉')
+  assert.match(sec, /const loginReset = \(\) => \{ loginStop\(\);/)
+  assert.match(sec, /const loginEnd = \(text, good = false\) => \{ loginStop\(\);/)
 })

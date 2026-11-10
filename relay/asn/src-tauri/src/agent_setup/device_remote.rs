@@ -116,7 +116,7 @@ mod tests {
         let (pending, payload, sig) = new_request(&p, "PC", "PH", "codex", NOW).unwrap();
         let mut known = KnownPeers::default();
         known.remember("PH", "手機", &p.public_b64(), 1).unwrap();
-        known.set_login_ok("PH", true);
+        known.set_login_ok("PH", true, Some(&p.public_b64()));
         let req = verify_request(&payload, &sig, "codex", "PC", "PH", None, &known, NOW).unwrap();
         let t_pub = t.public_b64();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

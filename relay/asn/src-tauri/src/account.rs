@@ -729,6 +729,13 @@ pub async fn setup_device_request(app: State<'_, App>, auth: State<'_, AuthState
     Ok(json!({ "rid": rid, "exp": exp }))
 }
 
+/// 這支手機不等了（離開畫面、App 進背景、到期、按關閉）：把這筆的一次性私鑰丟掉。沒有這筆也回 ok
+#[tauri::command]
+pub fn setup_device_cancel(rid: String) -> Result<(), String> {
+    pending_logins().lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
+    Ok(())
+}
+
 /// 取回電腦放回的登入網址＋代碼。只取這支手機自己發出的（記憶體裡有私鑰的）；取一次就清。
 /// 驗章只用這支手機本機記住的那台公鑰（不用後台回的），驗不過整筆丟棄。
 /// → { state: waiting（帶 status、detail）| expired | delivered | untrusted | bad | ready（帶 url、code、code_exp、name） }

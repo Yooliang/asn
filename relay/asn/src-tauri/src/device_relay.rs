@@ -77,9 +77,8 @@ pub enum Refuse {
 impl Refuse {
     pub fn text(&self) -> &'static str {
         match self {
-            // 不認得和沒允許回同一句：不讓後台從回覆分辨這台認不認得那支手機
-            Refuse::UnknownPhone | Refuse::NotAllowed => NOT_ALLOWED_TEXT,
-            Refuse::KeyChanged => "這支手機的設備金鑰變了，這台電腦不接受它的要求",
+            // 不認得、金鑰變了、沒允許：回同一句，真正的原因只記在這台的 log
+            Refuse::UnknownPhone | Refuse::KeyChanged | Refuse::NotAllowed => NOT_ALLOWED_TEXT,
             Refuse::BadSignature => "要求的簽章驗不過，這台電腦沒有開始登入",
             Refuse::Bad(why) => why,
             Refuse::Expired => "要求已經過期，請在手機上重新發起",

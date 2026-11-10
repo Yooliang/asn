@@ -24,7 +24,7 @@ fn world() -> World {
     let (d2, t) = key();
     let mut t_known = KnownPeers::default();
     t_known.remember("PH", "手機", &p.public_b64(), 1).unwrap();
-    t_known.set_login_ok("PH", true);
+    t_known.set_login_ok("PH", true, Some(&p.public_b64()));
     World { _d: vec![d1, d2], p, t, t_known }
 }
 
@@ -95,7 +95,7 @@ fn 電腦_認得這支手機但本人沒允許替這台登入_就拒絕() {
     let w = world();
     let (_, payload, sig) = new_request(&w.p, "PC", "PH", "codex", NOW).unwrap();
     let mut k = w.t_known.clone();
-    k.set_login_ok("PH", false);
+    k.set_login_ok("PH", false, None);
     assert_eq!(verify_request(&payload, &sig, "codex", "PC", "PH", None, &k, NOW), Err(Refuse::NotAllowed));
     // 只看過畫面（第一次記住）也一樣不允許
     let mut fresh = KnownPeers::default();
@@ -106,6 +106,7 @@ fn 電腦_認得這支手機但本人沒允許替這台登入_就拒絕() {
 #[test]
 fn 不認得與沒允許_回給手機的句子一樣_後台分辨不出這台認不認得那支手機() {
     assert_eq!(Refuse::UnknownPhone.text(), Refuse::NotAllowed.text());
+    assert_eq!(Refuse::KeyChanged.text(), Refuse::NotAllowed.text(), "金鑰變了也同一句");
     assert_eq!(Refuse::NotAllowed.text(), NOT_ALLOWED_TEXT);
 }
 

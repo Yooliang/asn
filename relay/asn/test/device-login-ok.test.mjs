@@ -14,7 +14,7 @@ test('守門：「允許替這台登入」只有設定頁那條路能改', () =>
   assert.deepEqual(hits.map(f => f.split(/[\/]/).pop()), ['list.js'])
   assert.ok(SETTING_OPS.includes('known-login-ok'))
   const lib = read('../src-tauri/src/lib.rs')
-  assert.equal(lib.split('device_id::live::set_login_ok(').length - 1, 1, 'Rust 只有一個命令能改')
+  assert.equal(lib.split('device_id::live::set_login_ok(').length - 1, 2, 'Rust 只有一個命令能改（打開、關掉各一處）')
 })
 
 test('列表：只有明確的 true 才算允許；沒帶（舊版）就是不允許', () => {

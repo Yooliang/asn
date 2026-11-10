@@ -283,9 +283,11 @@ impl KnownPeers {
         self.peer(node).is_some_and(|p| p.input_no_ask)
     }
 
-    /// 允不允許這支手機替這台登入（本機設定頁才能改）。回有沒有這台
-    pub fn set_login_ok(&mut self, node: &str, on: bool) -> bool {
+    /// 允不允許這支手機替這台登入（本機設定頁才能改）。回有沒有改到。
+    /// 打開時要帶確認框上給本人看的那把公鑰：框開著時這台被忘記、又用別把金鑰重新記住，就不改
+    pub fn set_login_ok(&mut self, node: &str, on: bool, shown_pub: Option<&str>) -> bool {
         match self.peers.iter_mut().find(|p| p.node == node) {
+            Some(p) if on && shown_pub != Some(p.sign_pub.as_str()) => false,
             Some(p) => {
                 p.login_ok = on;
                 true
@@ -366,10 +368,10 @@ pub mod live {
     }
 
     /// 允不允許這支手機替這台登入：**只有本機設定頁的命令能叫**（守門測試）
-    pub fn set_login_ok(dir: &Path, node: &str, on: bool) -> Result<bool, String> {
+    pub fn set_login_ok(dir: &Path, node: &str, on: bool, shown_pub: Option<&str>) -> Result<bool, String> {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut k = KnownPeers::load(dir)?;
-        let found = k.set_login_ok(node, on);
+        let found = k.set_login_ok(node, on, shown_pub);
         if found {
             k.save(dir)?;
         }
@@ -481,8 +483,11 @@ mod tests {
         k.remember("p", "手機", "pk", 1).unwrap();
         assert!(!k.login_ok("p"), "第一次記住（例如看過畫面）：不允許");
         assert!(!k.login_ok("沒有"));
-        assert!(k.set_login_ok("p", true));
-        assert!(!k.set_login_ok("沒有", true), "不認得的不能設");
+        assert!(!k.set_login_ok("p", true, None), "打開一定要帶給本人看過的公鑰");
+        assert!(!k.set_login_ok("p", true, Some("別把")), "確認框開著時換了金鑰：不改");
+        assert!(!k.login_ok("p"));
+        assert!(k.set_login_ok("p", true, Some("pk")));
+        assert!(!k.set_login_ok("沒有", true, Some("pk")), "不認得的不能設");
         assert!(!k.input_no_ask("p"), "和打字不用問是兩回事");
         k.remember("p", "改名", "pk", 2).unwrap();
         assert!(k.login_ok("p"), "同一把再看到一次：設定不變");
@@ -512,7 +517,7 @@ mod tests {
         assert!(!no_ask.is_empty() && no_ask.iter().all(|f| f == "device_known_input_no_ask"), "打字不用問只能從設定頁的命令：{no_ask:?}");
         let login_ok = fns("device_id::live::set_login_ok(");
         assert!(!login_ok.is_empty() && login_ok.iter().all(|f| f == "device_known_login_ok"), "允許替這台登入只能從設定頁的命令：{login_ok:?}");
-        assert_eq!(lib.matches("set_login_ok(").count(), 1, "lib.rs 只有設定頁的命令會改");
+        assert_eq!(lib.matches("set_login_ok(").count(), 2, "lib.rs 只有設定頁的命令會改（打開、關掉各一處）");
         let see = fns("device_id::live::see(");
         assert!(!see.is_empty() && see.iter().all(|f| f == "start_view_poller" || f == "start_remote_view" || f == "view_backend_see"), "記住只在收到請求（T）或看的那台驗過 T 的簽章時：{see:?}");
         for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "android.rs", "headless.rs"] {
