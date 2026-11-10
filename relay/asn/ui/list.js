@@ -1406,7 +1406,7 @@ async function adoptUnlockConfirm() {
 // 夥伴停在要本人處理的提示：每種情況提醒一次，提示消失後再出現才會再提醒；舊版後端沒有這個命令就靜默略過
 // 權限詢問：讀完整的提示給本人看，按下去時文字變了後端就不送
 const permissionDlg = reactive({ open: false, name: '', prompt: null, busy: false, error: '' })
-const permissionDlgView = computed(() => permissionView(permissionDlg.prompt))
+const permissionDlgView = computed(() => permissionView(permissionDlg.prompt, permissionDlg.name))
 function closePermissionDlg() { permissionDlg.open = false }
 async function openPermissionDlg(item) {
   if (permissionDlg.open) return
@@ -1429,7 +1429,7 @@ async function answerPermission(allow) {
 // 夥伴已經回答了：開著的提醒收掉。權限確認框正在送出時不動，結果由送出那邊處理
 function closeGoneNotice(item) {
   if (launchNotice.open && noticeStillFor(item, launchNotice.body)) closeLaunchNotice()
-  if (item.code === 'permission' && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
+  if ((item.code === 'permission' || item.code === 'held_message') && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
 }
 if (!info.shot) { void refreshKnown(); setInterval(() => void refreshKnown(), 60_000) }
 if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()

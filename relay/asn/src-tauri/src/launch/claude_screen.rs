@@ -24,6 +24,8 @@ pub enum ClaudeScreenKind {
     QuestionView,
     /// 看起來停在某個選單，但不是認得的種類：需要人工確認
     Attention,
+    /// 外來訊息確認框：只能由本人在電腦或手機的提示框上按，其他代答路徑一律不收
+    HeldMessage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +82,7 @@ pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
         ClaudeScreenKind::Question => "question",
         ClaudeScreenKind::QuestionView => "question_view",
         ClaudeScreenKind::Attention => "attention",
+        ClaudeScreenKind::HeldMessage => "held_message",
     }
 }
 
@@ -92,11 +95,26 @@ pub struct PromptText {
     pub text: String,
     /// 看得到提示的開頭，而且沒有超過行數上限。不完整就不能按「允許」
     pub complete: bool,
+    /// 不顯示、只綁進雜湊的內容：外來訊息框是整個框的內文（顯示的只是摘要，兩則摘要相同也要分得出來）；其他是空字串
+    pub bind: String,
 }
 
 /// 畫面文字是外部內容：去掉控制字元與會改變顯示順序、藏字的字元，只留換行
 fn clean_prompt_line(line: &str) -> String {
-    line.chars().filter(|c| !c.is_control() && !matches!(*c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')).collect::<String>().trim_end().to_string()
+    strip_unsafe(line).trim_end().to_string()
+}
+
+/// 去掉控制字元與會改變顯示順序、藏字的字元（不處理空白）：零寬字元、方向控制、行／段分隔、軟連字號、標籤字元等
+fn strip_unsafe(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    *c,
+                    '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E0000}'..='\u{E007F}'
+                )
+        })
+        .collect()
 }
 
 /// 只有認得的權限詢問才有文字，其他畫面一律 None
@@ -112,7 +130,7 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     let start = top.map_or(0, |t| t + 1);
     let kept: Vec<String> = lines[start..end].iter().map(|l| clean_prompt_line(l)).collect();
     let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES;
-    Some(PromptText { text: kept.join("\n"), complete })
+    Some(PromptText { text: kept.join("\n"), complete, bind: String::new() })
 }
 
 /// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
@@ -122,9 +140,17 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
 /// 權限框的按鈕字在手機上用中文（Claude 原文是英文的 Yes／No）；選項框的選項是夥伴自己寫的，照原文
 pub const PHONE_ALLOW_ONCE: &str = "只有這一次";
 pub const PHONE_DENY: &str = "拒絕";
+/// 外來訊息確認框的兩顆按鈕字。沒有「以後都放行」這類選項
+pub const PHONE_HELD_DENY: &str = "不放行";
+pub const PHONE_HELD_DELIVER: &str = "放行這一則";
 
 pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption> {
     match screen.kind {
+        // 游標不在「不放行」上就只能看，不給按鈕：送鍵的算法只認游標在第一項
+        ClaudeScreenKind::HeldMessage if screen.cursor == 0 => vec![
+            ClaudeOption { n: 1, label: PHONE_HELD_DENY.to_string() },
+            ClaudeOption { n: 2, label: PHONE_HELD_DELIVER.to_string() },
+        ],
         ClaudeScreenKind::Permission => screen
             .options
             .iter()
@@ -146,7 +172,10 @@ pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption>
 
 /// 這個狀態代號的內容要不要傳到手機（`status_code` 的值）
 pub fn goes_to_phone(code: &str) -> bool {
-    code == status_code(ClaudeScreenKind::Permission) || code == status_code(ClaudeScreenKind::Question) || code == status_code(ClaudeScreenKind::QuestionView)
+    code == status_code(ClaudeScreenKind::Permission)
+        || code == status_code(ClaudeScreenKind::Question)
+        || code == status_code(ClaudeScreenKind::QuestionView)
+        || code == status_code(ClaudeScreenKind::HeldMessage)
 }
 
 /// 選項列開頭的游標符號換成空格：游標在哪一列不算內容。**雜湊就是從這份文字算的**，建請求和送字前重查
@@ -162,6 +191,8 @@ fn hide_cursor(line: &str) -> String {
 pub fn phone_text(screen: &str) -> Option<PromptText> {
     match classify(screen)?.kind {
         ClaudeScreenKind::Permission => permission_text(screen),
+        // 外來訊息只顯示整理過的摘要（寄件名、前幾行），不放畫面原文
+        ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true, bind: held_bind(screen) }),
         ClaudeScreenKind::Question | ClaudeScreenKind::QuestionView => {
             let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
@@ -169,7 +200,7 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
             // 自由輸入那一行（「N. Type something.」）手機沒有按鈕，內容也不放（#914）
             let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| hide_cursor(&clean_prompt_line(l))).collect();
             let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
-            Some(PromptText { text: kept.join("\n").trim().to_string(), complete })
+            Some(PromptText { text: kept.join("\n").trim().to_string(), complete, bind: String::new() })
         }
         _ => None,
     }
@@ -293,10 +324,128 @@ pub fn is_held_message(text: &str) -> bool {
     lines[n.saturating_sub(40)..n - 2].iter().any(|l| l.trim() == HELD_TITLE)
 }
 
+/// 外來訊息確認框底下兩個選項的原文與游標位置（0＝不放行、1＝放行）。只在 `is_held_message` 成立時呼叫
+fn held_options(text: &str) -> (Vec<ClaudeOption>, usize) {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let n = lines.len();
+    let label = |l: &str| {
+        let t = l.trim();
+        t.strip_prefix(CURSOR).map_or(t, str::trim_start).to_string()
+    };
+    let cursor = usize::from(!lines[n - 2].trim_start().starts_with(CURSOR));
+    (vec![ClaudeOption { n: 1, label: label(lines[n - 2]) }, ClaudeOption { n: 2, label: label(lines[n - 1]) }], cursor)
+}
+
+/// 外來訊息確認框裡要給本人看的部分。框裡的字是外來內容：只拿來顯示，不能決定任何動作
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeldView {
+    /// 對方自稱的名字（不一定是真的）
+    pub sender: Option<String>,
+    /// 訊息前幾行
+    pub body: Vec<String>,
+    /// 框裡寫的總行數（比顯示的多時，代表還有沒列出來的）
+    pub more_lines: Option<u32>,
+}
+
+const HELD_CLAIMS: &str = "(peer claims name: ";
+const HELD_BODY_HEAD: &str = "Message body (this is what will be delivered):";
+const HELD_SENDER_MAX: usize = 40;
+const HELD_BODY_LINE_MAX: usize = 100;
+const HELD_BODY_MAX_LINES: usize = 6;
+
+fn cap_chars(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        let mut out: String = s.chars().take(max).collect();
+        out.push('…');
+        out
+    } else {
+        s.to_string()
+    }
+}
+
+/// Claude 自己寫在框裡最後一行的總行數標記：整行剛好是「│ …[N lines, M chars total — full body will be delivered on approve]」。
+/// 只認這個固定格式：訊息本文自己寫的「[1 lines] …」之類不算，照樣留在摘要裡
+const HELD_TOTAL_TAIL: &str = " chars total — full body will be delivered on approve]";
+fn held_total_lines(line: &str) -> Option<u32> {
+    let rest = line.trim_start().strip_prefix('│')?.trim().strip_prefix("…[")?;
+    let lines: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let after = rest[lines.len()..].strip_prefix(" lines, ")?;
+    let chars: String = after.chars().take_while(char::is_ascii_digit).collect();
+    if lines.is_empty() || chars.is_empty() || &after[chars.len()..] != HELD_TOTAL_TAIL {
+        return None;
+    }
+    lines.parse().ok()
+}
+
+/// 只從畫面最底下的框（最後一個標題列起）取出寄件名與訊息前幾行
+pub fn held_view(text: &str) -> HeldView {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(title) = lines.iter().rposition(|l| l.trim() == HELD_TITLE) else { return HeldView::default() };
+    let region = &lines[title + 1..];
+    let head_at = region.iter().position(|l| l.contains(HELD_BODY_HEAD));
+    let (desc, after) = match head_at {
+        Some(i) => (&region[..i], &region[i + 1..]),
+        None => (region, &region[region.len()..]),
+    };
+    // 說明那段會被終端機折行，名字可能被折到下一行：先併成一行再找
+    let joined = desc.iter().flat_map(|l| l.split_whitespace()).collect::<Vec<_>>().join(" ");
+    let sender = joined.split_once(HELD_CLAIMS).and_then(|(_, rest)| rest.split_once(')')).and_then(|(name, _)| {
+        let clean = strip_unsafe(name);
+        let shown = cap_chars(clean.trim(), HELD_SENDER_MAX);
+        (!shown.is_empty()).then_some(shown)
+    });
+    let bars: Vec<&str> = after.iter().map(|l| l.trim_start()).filter(|l| l.starts_with('│')).collect();
+    let more_lines = bars.last().and_then(|l| held_total_lines(l));
+    let content = if more_lines.is_some() { &bars[..bars.len() - 1] } else { &bars[..] };
+    let body = content
+        .iter()
+        .take(HELD_BODY_MAX_LINES)
+        .map(|l: &&str| {
+            let l: &str = l;
+            let t = l.strip_prefix('│').unwrap_or(l);
+            let t = t.strip_prefix(' ').unwrap_or(t);
+            cap_chars(strip_unsafe(t).trim_end(), HELD_BODY_LINE_MAX)
+        })
+        .collect();
+    HeldView { sender, body, more_lines }
+}
+
+/// 雜湊用：最底下那個框從標題到底的整段內文，每行空白正規化、游標拿掉、空行略過（游標位置另外檢查）
+pub fn held_bind(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(title) = lines.iter().rposition(|l| l.trim() == HELD_TITLE) else { return String::new() };
+    lines[title..]
+        .iter()
+        .map(|l| strip_unsafe(&l.replace(CURSOR, " ")).split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+const HELD_RULE: &str = "────────────────────";
+
+/// 傳給本人看的外來訊息摘要（不含對方的連線位址）
+fn held_phone_text(v: &HeldView) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(match &v.sender {
+        Some(s) => format!("對方自稱：{s}"),
+        None => "寄件視窗沒有寫名字".to_string(),
+    });
+    lines.push(HELD_RULE.to_string());
+    // 本文每行前面加「│ 」：本文自己寫的分隔線、「對方自稱：」之類不會被當成框的結構
+    lines.extend(v.body.iter().map(|l| format!("│ {l}")));
+    lines.push(HELD_RULE.to_string());
+    if let Some(n) = v.more_lines {
+        lines.push(format!("還有 {n} 行，放行後會整封送進去"));
+    }
+    lines.join("\n")
+}
+
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
-    // 外來訊息的確認框：這一版只認出來、一律當成要本人處理（Attention），絕不當成權限框或提問，任何代答路徑都碰不到（#1254 A）
+    // 外來訊息的確認框：絕不當成權限框或提問；只有本人在提示框上按，才會送鍵（送鍵在 launch/term.rs），其他代答路徑都碰不到（#1254 A）
     if is_held_message(text) {
-        return Some(screen(ClaudeScreenKind::Attention, HELD_TITLE, Vec::new(), 0, None, None));
+        let (options, cursor) = held_options(text);
+        return Some(screen(ClaudeScreenKind::HeldMessage, HELD_TITLE, options, cursor, Some(2), Some(1)));
     }
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
     let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
@@ -551,7 +700,7 @@ mod tests {
     /// 外來訊息確認框的真實樣本（#1254）：放在 held-message 資料夾，不放 term-screens（那裡的樣本要同步更新黃金檔，等第二張一起做）
     const HELD_FIXTURE: &str = include_str!("../../tests/fixtures/held-message/claude-held-message.txt");
 
-    /// 樣本換行一律當 LF：Windows 取出來可能是 CRLF，下面的測試會用含換行的字串替換
+    /// Windows 上 git 可能把樣本換成 CRLF：統一成 LF 再用
     fn held_fixture() -> String {
         HELD_FIXTURE.replace("\r\n", "\n")
     }
@@ -608,24 +757,98 @@ mod tests {
     }
 
     #[test]
-    fn 外來訊息的確認框_以底端的框為準_一律要本人處理_不當成權限框或提問() {
-        let held = held_fixture();
-        let t = held.as_str();
+    fn 外來訊息的確認框_以底端的框為準_只給本人按_不當成權限框或提問() {
+        let owned = held_fixture();
+        let t = owned.as_str();
         assert!(is_held_message(t));
         let s = classify(t).expect("認得出來");
-        assert_eq!(s.kind, K::Attention, "這一版不給任何代答路徑");
-        assert!(!goes_to_phone(status_code(s.kind)));
-        assert!(phone_options(&s, true).is_empty() && s.allow_once.is_none() && s.deny.is_none());
-        // 游標移到 Deliver 也一樣認得
+        assert_eq!(s.kind, K::HeldMessage);
+        assert_eq!(status_code(s.kind), "held_message");
+        assert!(goes_to_phone("held_message"));
+        assert_eq!((s.cursor, s.deny, s.allow_once), (0, Some(1), Some(2)));
+        assert!(s.options[0].label.starts_with("Deny") && s.options[1].label.starts_with("Deliver"));
+        // 游標移到 Deliver 也一樣認得，但只能看、不給按鈕
         let moved = t.replace(" ❯ Deny", "   Deny").replace("   Deliver this message", " ❯ Deliver this message");
         assert!(is_held_message(&moved));
-        assert_eq!(kind(&moved), Some(K::Attention));
+        let m = classify(&moved).unwrap();
+        assert_eq!((m.kind, m.cursor), (K::HeldMessage, 1));
+        assert!(phone_options(&m, true).is_empty(), "游標不在第一項：不給按鈕");
+    }
+
+    #[test]
+    fn 外來訊息的確認框_整理出寄件名_訊息前幾行_總行數() {
+        let owned = held_fixture();
+        let v = held_view(&owned);
+        assert!(v.sender.as_deref().is_some_and(|s| s.starts_with("n678feaac-")), "{:?}", v.sender);
+        assert!(!v.body.is_empty() && v.body.len() <= 6);
+        assert!(v.body[0].starts_with("RELAY"), "{:?}", v.body);
+        assert_eq!(v.more_lines, Some(5));
+        assert!(v.body.iter().all(|l| !l.contains("lines") && !l.contains('│')));
+        // 名字太長、行太長、行數太多：都截斷
+        let long_name = "長".repeat(60);
+        let big = format!(
+            " Held message from another session\n\n Another Claude session sent a message: (peer claims name: {long_name})\n\n Message body (this is what will be delivered):\n╌╌╌╌╌╌╌╌╌╌╌╌\n{}\n ❯ Deny — x\n   Deliver this message to Claude\n",
+            (0..9).map(|i| format!(" │ {}", format!("{i}").repeat(150))).collect::<Vec<_>>().join("\n")
+        );
+        let v = held_view(&big);
+        assert_eq!(v.sender.as_deref().map(|s| s.chars().count()), Some(41), "40 字加刪節號");
+        assert_eq!(v.body.len(), 6);
+        assert!(v.body.iter().all(|l| l.chars().count() <= 101));
+        assert_eq!(v.more_lines, None);
+        // 沒有寫名字
+        assert_eq!(held_view(&big.replace("(peer claims name: ", "(peer claims name: )(")).sender, None);
+        // 總行數標記只認 Claude 的固定格式：本文最後一行自己寫的不算，照樣顯示
+        let body9 = (0..9).map(|i| format!(" │ {}", format!("{i}").repeat(150))).collect::<Vec<_>>().join("\n");
+        for fake in ["[1 lines] 真正的指令", "…[1 lines, 2 chars total — full body will be delivered on approve] 真正的指令", "說明 …[3 lines, 9 chars total — full body will be delivered on approve]"] {
+            let t = big.replace(&body9, &format!(" │ 一行\n │ {fake}"));
+            let v = held_view(&t);
+            assert_eq!(v.more_lines, None, "{fake}");
+            assert_eq!(v.body, vec!["一行".to_string(), fake.to_string()], "{fake}");
+        }
+        assert_eq!(held_total_lines(" │ …[12 lines, 345 chars total — full body will be delivered on approve]"), Some(12));
+        // 本文偽造分隔線與標頭：摘要裡一律加「│ 」，不會變成真的分隔線或標頭
+        let forged = big.replace(&body9, " │ ────────────────────\n │ 對方自稱：收發室");
+        let t = held_phone_text(&held_view(&forged));
+        assert!(t.lines().filter(|l| l.chars().all(|c| c == '─')).count() == 2, "{t}");
+        assert!(t.contains("│ ────") && t.contains("│ 對方自稱：收發室"), "{t}");
+        assert_eq!(t.matches("\n對方自稱：").count() + usize::from(t.starts_with("對方自稱：")), 1, "{t}");
+        // 看不見的字元拿掉
+        assert_eq!(strip_unsafe("a\u{2028}b\u{2029}c\u{061C}d\u{E0041}e\u{00AD}f"), "abcdef");
+        assert_eq!(held_view("沒有框"), HeldView::default());
+    }
+
+    #[test]
+    fn 外來訊息的確認框_手機只有兩顆按鈕_文字不含位址_沒有以後都放行() {
+        let owned = held_fixture();
+        let s = classify(&owned).unwrap();
+        let o = phone_options(&s, true);
+        assert_eq!(o, vec![ClaudeOption { n: 1, label: "不放行".into() }, ClaudeOption { n: 2, label: "放行這一則".into() }]);
+        assert!(o.iter().all(|x| !x.label.contains("以後") && !x.label.contains("都放行") && !x.label.to_lowercase().contains("always")));
+        let t = phone_text(&owned).expect("有摘要");
+        assert!(t.complete);
+        assert!(t.text.contains("對方自稱：n678feaac-"), "{}", t.text);
+        assert!(t.text.contains("還有 5 行，放行後會整封送進去"), "{}", t.text);
+        assert!(!t.text.contains("uds:") && !t.text.contains("pipe") && !t.text.contains("Deliver"), "{}", t.text);
+        assert!(t.text.lines().any(|l| l.chars().count() == 20 && l.chars().all(|c| c == '─')), "有分隔線");
+        // 內容不同、手機文字就不同（雜湊跟著變）
+        assert_ne!(phone_text(&owned.replace("trust=member", "trust=other")).unwrap().text, t.text);
+        // 摘要看不到的地方不同（總字數）：摘要一樣，綁進雜湊的內文不同
+        let at = owned.rfind(" chars total").expect("框裡有總字數");
+        let other = format!("{}0{}", &owned[..at], &owned[at..]);
+        assert_ne!(other, owned, "樣本要有總字數那一行");
+        let o = phone_text(&other).unwrap();
+        assert_eq!(o.text, t.text);
+        assert_ne!(o.bind, t.bind);
+        // 游標移到「放行」：內文不變（游標另外檢查）
+        let moved = owned.replace(" ❯ Deny", "   Deny").replace("   Deliver this message", " ❯ Deliver this message");
+        assert_eq!(held_bind(&moved), held_bind(&owned));
+        assert!(t.bind.starts_with("Held message from another session") && !t.bind.contains('❯'), "{}", t.bind);
     }
 
     #[test]
     fn 外來訊息的確認框_反例_引用標題_框已收掉_沒有游標或兩個游標() {
-        let held = held_fixture();
-        let t = held.as_str();
+        let owned = held_fixture();
+        let t = owned.as_str();
         // 框已經收掉：對話記錄裡的「● Held peer message」還在，底端回到輸入框
         let head = t.split("────").next().unwrap();
         let closed = format!("{head}\n{}", fixture!("claude-idle-manual-mode"));
