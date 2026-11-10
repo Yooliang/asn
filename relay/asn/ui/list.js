@@ -32,7 +32,7 @@ import { createRoomHub } from './lib/room-hub.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
-import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, chatShown, toggleCollapsed } from './lib/merge.mjs'
+import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, singlePane, switchMode, chatShown, toggleCollapsed } from './lib/merge.mjs'
 import { normalizeSession, planRestore, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
@@ -274,6 +274,8 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
 const pinnedChat = normalizePinned(savedMe.pinnedChat)
 // panel＝指引、設定兩個聊天窗目前顯示哪一篇／哪一類（整合模式是右邊的分頁、分離模式是獨立視窗；不存檔）
+// 窄視窗只顯示一個窗格時（#1192），使用者按了「返回名單」＝true；從名單開對話或設定就回到 false（切到右邊）。不存檔
+const pane = reactive({ showList: false })
 const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, panel: { guide: '', setting: '' } })
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
@@ -953,6 +955,7 @@ async function openRoomChat(id) {
   openedRooms.add(id)
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -1002,6 +1005,7 @@ async function openChat(id) {
   void core.syncHistory(id)   // 打開對話：向後台補這位夥伴的往來（以後台為準；失敗就用本機快取）
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -1018,6 +1022,7 @@ async function openPanel(kind, key) {
   ui.panel[kind] = key
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
+    pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     await invoke('show_main')
     sync()
     return
@@ -1258,6 +1263,7 @@ async function openTermTab(id) {
   if (!terms.rows.some(r => r.id === id)) return
   if (ui.mode !== 'merged') { terms.open = true; return }   // 分離模式沒有分頁區：先用舊的終端面板
   Object.assign(ui, openChatTab(ui, termFriendId(id), ui.pinnedChat))
+  pane.showList = false   // 窄視窗只顯示一個窗格時：點終端（含「N 個終端等你回答」）就切到右邊
   await invoke('show_main')
   sync()
 }
@@ -1482,6 +1488,12 @@ const app = createApp({
       maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
     })
     const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
+    // 窄視窗（#1192）：兩個窗格放不下就一次只顯示一個。從名單開對話、群組、設定、終端時（每個 openChatTab 之後）直接設 pane.showList = false 切到右邊；
+    // 不監看 ui.tabs／ui.active：終端消失自動關分頁也會改到它們，使用者在名單看到一半會被切走。按「返回名單」回名單
+    const winW = ref(window.innerWidth)
+    window.addEventListener('resize', () => { winW.value = window.innerWidth })
+    const paneOnly = computed(() => singlePane({ mode: ui.mode, width: winW.value, hasTabs: ui.tabs.length > 0, showList: pane.showList }))
+    const backToList = () => { pane.showList = true }
     // 大幅廣告的網頁（iframe）：--shot 不載入；載入失敗或 5 秒內沒載入完就退回樣板（load 事件才算成功）
     const pageSrc = a => (info.shot || pageFail[a.key] ? '' : adPageUrl(a))
     const pageLoaded = reactive({})
@@ -1830,7 +1842,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, paneOnly, backToList, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,

@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { splitTabs } from '../ui/lib/panels.mjs'
-import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
+import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, SINGLE_PANE_BELOW, singlePane, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
@@ -247,4 +247,26 @@ test('換大頭貼只出現一個提示：有自訂 data-tip 就不再加原生 
   const btn = html.split(/\r?\n/).find(l => l.includes('class="dp me-dp"'))
   assert.ok(btn.includes('data-tip="點一下換大頭貼"'))
   assert.ok(!/\stitle="/.test(btn), '不能同時有 title（會出現兩個提示）')
+})
+
+test('窄視窗：整合模式放不下兩個窗格時一次只顯示一個（#1192）', () => {
+  const at = (width, over = {}) => singlePane({ mode: 'merged', width, hasTabs: true, showList: false, ...over })
+  assert.equal(SINGLE_PANE_BELOW, 500)
+  assert.equal(at(280), 'chat')
+  assert.equal(at(360), 'chat')
+  assert.equal(at(499), 'chat')
+  assert.equal(at(500), '')
+  assert.equal(at(520), '')
+  assert.equal(at(360, { showList: true }), 'list')
+  assert.equal(at(360, { hasTabs: false }), 'list')
+  assert.equal(at(360, { mode: 'split' }), '')
+})
+
+test('守門（#1192）：list.js 每個從名單開分頁的入口（openChatTab）之後都設 pane.showList = false，也不監看 tabs／active 來切窗格', () => {
+  const src = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
+  const lines = src.split(/\r?\n/)
+  const calls = lines.map((l, i) => [l, i]).filter(([l]) => /Object\.assign\(ui, openChatTab\(/.test(l))
+  assert.ok(calls.length >= 4, `openChatTab 的入口太少（${calls.length}），規則可能失效`)
+  for (const [l, i] of calls) assert.match(lines[i + 1] ?? '', /^\s*pane\.showList = false\b/, `第 ${i + 1} 行之後沒有切回右邊：${l.trim()}`)
+  assert.ok(!/watch\(\[\(\) => ui\.tabs, \(\) => ui\.active\]/.test(src), '不監看 ui.tabs／ui.active（終端消失自動關分頁時會把使用者從名單切走）')
 })

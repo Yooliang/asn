@@ -591,8 +591,50 @@ export const mnoselfProbeSource = () => `(async () => {
   if (!devs.some(b => b.textContent.includes('辦公室') && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 整合模式窄視窗（#1192）：兩個窗格放不下時一次只顯示一個，右窗格開著時要有「返回名單」回到名單；放得下就維持左右並排。
+// single=true：這個寬度必須是單窗格；single=false：必須是兩窗格且右邊夠寬。共通：不橫向捲動、標題不直排、帳號卡看得到
+export const MPANE_PROBES = { single: { mpane: true, single: true }, double: { mpane: true, single: false } }
+export const MPANE_CHAT_MIN = 180
+export const mpaneProbeSource = ({ single }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
+  const W = window.innerWidth, wantSingle = ${single ? 'true' : 'false'};
+  const list = document.querySelector('.shell > .list-pane'), chat = document.querySelector('.shell > .chat-area');
+  if (!list || !chat) return { ok: false, why: '找不到名單或對話窗格' };
+  const noScroll = () => document.documentElement.scrollWidth <= W + 1 && document.body.scrollWidth <= W + 1;
+  if (!noScroll()) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + document.documentElement.scrollWidth };
+  const both = shown(list) && shown(chat);
+  if (wantSingle && both) return { ok: false, why: '寬 ' + W + ' 應該一次只顯示一個窗格，但名單 ' + Math.round(list.getBoundingClientRect().width) + 'px、右邊 ' + Math.round(chat.getBoundingClientRect().width) + 'px 同時顯示' };
+  if (!wantSingle && !both) return { ok: false, why: '寬 ' + W + ' 應該左右並排，但只顯示一個窗格' };
+  if (!shown(chat)) return { ok: false, why: '開著設定時右窗格沒顯示' };
+  const cw = chat.getBoundingClientRect().width;
+  if (cw < ${MPANE_CHAT_MIN}) return { ok: false, why: '右窗格只有 ' + Math.round(cw) + 'px（至少 ${MPANE_CHAT_MIN}）' };
+  const h = document.querySelector('.panel-pane .panel-h');
+  if (!h) return { ok: false, why: '找不到設定標題' };
+  const lh = parseFloat(getComputedStyle(h).lineHeight) || parseFloat(getComputedStyle(h).fontSize) * 1.3;
+  if (h.getBoundingClientRect().height > lh * 2 + 2) return { ok: false, why: '設定標題高 ' + Math.round(h.getBoundingClientRect().height) + 'px，被擠成直排' };
+  const card = document.querySelector('.panel-pane .dv-acct');
+  if (!card || !shown(card) || card.getBoundingClientRect().width < 120) return { ok: false, why: '帳號卡看不到或太窄：' + (card ? Math.round(card.getBoundingClientRect().width) : '不存在') };
+  if (wantSingle) {
+    const back = chat.querySelector('button[aria-label="返回名單"]');
+    if (!back || !shown(back)) return { ok: false, why: '單窗格顯示右邊時沒有「返回名單」按鈕' };
+    if (back.disabled) return { ok: false, why: '返回名單按鈕不能按' };
+    back.click(); await sleep(400);
+    if (!shown(list) || shown(chat)) return { ok: false, why: '按返回名單後應只剩名單' };
+    if (list.getBoundingClientRect().right > W + 1 || !noScroll()) return { ok: false, why: '名單單獨顯示時超出視窗寬 ' + W };
+    // 從名單再開一次設定的帳號：應切回右窗格、看得到帳號卡
+    const gear = [...list.querySelectorAll('.rtab')].find(e => e.getAttribute('aria-label') === '設定');
+    if (!gear) return { ok: false, why: '名單找不到設定分頁' };
+    gear.click(); await sleep(300);
+    const acct = [...list.querySelectorAll('.cat-list .buddy')].find(e => e.textContent.includes('帳號'));
+    if (!acct) return { ok: false, why: '設定清單找不到帳號' };
+    acct.click(); await sleep(500);
+    if (!shown(chat) || shown(list) || !shown(chat.querySelector('.dv-acct'))) return { ok: false, why: '從名單開帳號後應只顯示右窗格與帳號卡' };
+  }
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mpane ? mpaneProbeSource(probe) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1021,6 +1063,9 @@ export const SCENARIOS = [
   // 帳號卡片的設備按鈕：桌面兩種寬度、手機兩種寬度
   { name: 'list-acct-devbtn', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-1100.png' },
   { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
+  { name: 'list-merged-280', page: 'list.html', width: 280, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-280.png' },
+  { name: 'list-merged-360', page: 'list.html', width: 360, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-360.png' },
+  { name: 'list-merged-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.double, shot: 'list-merged-520.png' },
   { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },
   // 手機第四格「通知」（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及第四格的未讀紅點。412、360 寬與大字型各一張
