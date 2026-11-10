@@ -121,7 +121,7 @@ test('守門：xterm 收輸入、沒有捲動記錄；輸入只接 onData，不�
   const o = xtermOptions({ cols: 1, rows: 1 })
   assert.equal(o.disableStdin, false)
   assert.equal(o.scrollback, 0)
-  assert.equal(o.allowProposedApi, false)
+  assert.equal(o.allowProposedApi, true, '#903：只為了註冊自己的字寬表')
   const src = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(src.includes('t.onData('), '按鍵從 onData 來')
   assert.ok(!/\.onBinary|\.onKey\b|term_send|term_answer/.test(src), '不接二進位輸入，也不走舊的送字命令')

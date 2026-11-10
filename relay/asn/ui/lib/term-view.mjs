@@ -2,6 +2,7 @@
 // Rust 端再檢查一次：開著的畫面、視窗在前景、窗格是 ASN 開的、授權），字一次一支送進窗格、不丟字。
 // xterm.js 打包在 ui/vendor，要看時才載入。全程在本機，不連外。
 import { viewHint } from './partner-notice.mjs'
+import { installWideChars } from './term-width.mjs'
 import { HISTORY_LINES, atBottom, createHistory, historyScrollTop, historyToWrite, scrollWantsHistory, wheelWantsHistory } from './term-history.mjs'
 /** 畫面上提示多久查一次 */
 export const HINT_POLL_MS = 3_000
@@ -272,7 +273,7 @@ export const xtermOptions = ({ cols, rows }) => ({
   scrollback: 0,
   cursorBlink: false,
   cursorInactiveStyle: 'block',   // 沒點進去的時候，不設就看不清楚游標在哪
-  allowProposedApi: false,
+  allowProposedApi: true,   // 只為了註冊自己的字寬表（term-width.mjs）；不載入任何會讀寫終端的外掛
   logLevel: 'off',
   fontSize: 13,
   fontFamily: '"Cascadia Mono", Consolas, "Microsoft JhengHei", monospace',
@@ -396,6 +397,7 @@ export const TermView = {
           const Terminal = await loadXterm()
           await nextTick()
           const t = new Terminal(xtermOptions(size))
+          installWideChars(t)
           // 沒有捲動記錄時，xterm 會把滾輪換成方向鍵送給程式、還攔下事件，外層就捲不動。滾輪一律交給外層
           t.attachCustomWheelEventHandler(() => false)
           // 貼上鍵不讓 xterm 吃掉，交給瀏覽器貼上
