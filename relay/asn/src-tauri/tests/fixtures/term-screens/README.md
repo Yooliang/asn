@@ -17,6 +17,7 @@
 
 | 檔案 | 狀態 | 判斷重點 |
 |---|---|---|
+| claude-held-message.txt | 外來訊息的確認框（#1254） | 標題「Held message from another session」；選項沒有編號，**游標預設在 Deny**；框出現時輸入列被擠出畫面。11-10 asn40 在 40家用取樣（Claude Code 2.1.322，120×40，取第 14 列起），pipe 編號、信件 id、內容、網址已遮 |
 | claude-trust-folder.txt | 卡信任資料夾 | 「Quick safety check」「Yes, I trust this folder」；**預設選項是 No, exit** |
 | claude-trust-folder-yes-selected.txt | 同上，游標移到 Yes | 代答前核對游標位置用 |
 | claude-firstrun-theme.txt | 第一次執行：選主題 | 「Choose the text style」 |

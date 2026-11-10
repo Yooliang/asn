@@ -1129,6 +1129,18 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(())
     }
 
+    /// 遠端打字（別台電腦、之後的手機）這一批字交給窗格之前的檢查（#1254）：重讀一次畫面。
+    /// 停在外來訊息的確認框＝這次遠端打字要結束；Claude 停在認不出的選單＝只送文字，不送 Enter 和方向鍵；讀不到畫面也當只送文字
+    pub fn remote_input_guard(&self, id: &str) -> RemoteGuard {
+        let Ok(snap) = self.view_snapshot(id) else { return RemoteGuard::TextOnly };
+        let Ok(dir) = self.dir() else { return RemoteGuard::TextOnly };
+        let w = self.wez(&dir);
+        match self.sample(&w, &snap) {
+            Ok(s) => remote_guard_of(&snap.profile, &s.text),
+            Err(_) => RemoteGuard::TextOnly,
+        }
+    }
+
     /// 夥伴視窗的名字換成終端編號，給本機畫面看畫面用。已結束的窗格不算；同名不只一個就拒絕，不猜
     pub fn partner_term_id(&self, name: &str) -> Result<String, String> {
         let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
@@ -1730,6 +1742,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             term_adopt::verify_adopted_for_write(&live, ad, &config)?;
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
+        // 外來訊息的確認框（#1254）：這個代答入口一律不碰，要本人在專用的提示上處理
+        if super::claude_screen::is_held_message(&text) {
+            return Err(HELD_ANSWER_REFUSED.into());
+        }
         let Some(seen) = classify_prompt_for(&snap.profile, &text) else {
             return Err("這個提示已經不在畫面上，沒有送出".into());
         };
@@ -3531,6 +3547,108 @@ pub(crate) fn stop_mux_partner(id: &str) -> Result<(), String> {
         let _ = id;
         Err("這個建置沒有自帶的終端".into())
     }
+}
+
+/// 代答入口遇到外來訊息的確認框時的回覆（#1254）
+pub const HELD_ANSWER_REFUSED: &str = "這個窗格正在等你確認一則外來訊息，這裡不能代答";
+
+/// 遠端打字交給窗格之前的判斷結果（#1254）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteGuard {
+    /// 照常交
+    Normal,
+    /// 只交文字：去掉 Enter、方向鍵、Tab、ESC 等控制鍵
+    TextOnly,
+    /// 停在外來訊息的確認框：結束這次遠端打字，一個字都不交
+    HeldPrompt,
+}
+
+/// 依畫面判斷遠端打字能交什麼（純函式）。外來訊息的確認框對任何 CLI 都擋；認不出的選單只看 Claude 的畫面
+pub fn remote_guard_of(profile: &str, text: &str) -> RemoteGuard {
+    if super::claude_screen::is_held_message(text) {
+        return RemoteGuard::HeldPrompt;
+    }
+    if profile == super::win_term::KIND_CLAUDE && super::claude_screen::classify(text).is_some_and(|s| s.kind == super::claude_screen::ClaudeScreenKind::Attention) {
+        return RemoteGuard::TextOnly;
+    }
+    RemoteGuard::Normal
+}
+
+#[cfg(test)]
+mod remote_guard_tests {
+    use super::*;
+    const HELD: &str = include_str!("../../tests/fixtures/term-screens/claude-held-message.txt");
+
+    #[test]
+    fn 遠端打字_停在外來訊息的確認框就結束_認不出的選單只交文字_其他照常() {
+        assert_eq!(remote_guard_of("claude", HELD), RemoteGuard::HeldPrompt);
+        assert_eq!(remote_guard_of("pi", HELD), RemoteGuard::HeldPrompt, "對任何 CLI 都擋");
+        let theme = include_str!("../../tests/fixtures/term-screens/claude-firstrun-theme.txt");
+        assert_eq!(remote_guard_of("claude", theme), RemoteGuard::TextOnly, "認不出的選單：只交文字");
+        let perm = include_str!("../../tests/fixtures/term-screens/claude-permission-bash.txt");
+        assert_eq!(remote_guard_of("claude", perm), RemoteGuard::Normal, "認得的權限框照常（本人在別台打字回答）");
+        let idle = include_str!("../../tests/fixtures/term-screens/claude-idle-manual-mode.txt");
+        assert_eq!(remote_guard_of("claude", idle), RemoteGuard::Normal);
+    }
+
+    #[test]
+    fn 只交文字_拿掉_enter_方向鍵_tab_esc_和其他控制字元() {
+        assert_eq!(text_only("你好 abc"), "你好 abc");
+        assert_eq!(text_only("\x1b[B\r"), "", "向下鍵加 Enter：放行外來訊息的那兩下，全部拿掉");
+        assert_eq!(text_only("a\x1b[A\x1bOBb\tc\nd\x03e\x1b"), "abcde");
+        assert_eq!(text_only("\x1b[1;5C中"), "中");
+    }
+
+    #[test]
+    fn 守門_所有代答與送鍵入口都碰不到外來訊息的確認框() {
+        let src = include_str!("term.rs");
+        // 本機提示框的代答：讀完畫面先擋，再分類
+        let ans = src.split("pub fn answer(").nth(1).unwrap().split("\n    }\n").next().unwrap();
+        let held = ans.find("is_held_message(&text)").expect("代答前擋外來訊息框");
+        assert!(held < ans.find("classify_prompt_for(").unwrap());
+        // 手機代答、本機權限框：只收 classify 判成權限框或提問的，而外來訊息框一律判成 Attention（claude_screen 測試）
+        for f in ["fn phone_checked(", "fn permission_checked("] {
+            let body = src.split(f).nth(1).unwrap().split("\n    }\n").next().unwrap();
+            assert!(body.contains("claude_screen::classify("), "{f} 依分類結果決定");
+        }
+        // 遠端打字：交給窗格之前先看 remote_input_guard，停在框上就結束
+        let lib = include_str!("../lib.rs");
+        let port = lib.split("let pane = self.terms.partner_term_id(&self.window)").nth(1).unwrap();
+        let g = port.find("remote_input_guard(&pane)").expect("遠端打字先查畫面");
+        assert!(g < port.find("self.terms.view_input(").unwrap(), "查完才交");
+        assert!(port[g..].contains("End::HeldPrompt"));
+    }
+}
+
+/// 只留文字：ESC 開頭的整段控制序列、其他控制字元（含 Enter、Tab）一律拿掉（純函式）
+pub fn text_only(data: &str) -> String {
+    let mut out = String::new();
+    let mut it = data.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            // CSI（ESC [ … 結尾字母）、SS3（ESC O x）或單獨的 ESC：整段丟掉
+            match it.peek() {
+                Some('[') => {
+                    it.next();
+                    for d in it.by_ref() {
+                        if ('@'..='~').contains(&d) {
+                            break;
+                        }
+                    }
+                }
+                Some('O') => {
+                    it.next();
+                    it.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if !c.is_control() {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// 想開 mux 但因工作群組關掉的原因（夥伴清單上講一次）

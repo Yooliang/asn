@@ -126,6 +126,7 @@ pub fn end_text(reason: &str) -> &'static str {
     match reason {
         "rejected" => "那台沒有接受，可能是現在沒有這個夥伴的畫面，或是那台沒有允許別台看",
         "mobile_off" => "這台電腦不允許移動設備查看終端",
+        "held_prompt" => "對方畫面出現需要本人確認的框，遠端輸入已停止。請在那台電腦的畫面上處理完再重新開始",
         "target_ended" => "那台結束了觀看",
         "expired" => "時間到了，要再看請再按一次",
         "viewer_ended" | "ended" => "已經結束",
@@ -204,6 +205,7 @@ mod tests {
         assert_eq!(step_of(&json!({ "error": "not_found" })), Step::Ended("gone".into()), "這筆不見了");
         assert_eq!(end_text("expired"), "時間到了，要再看請再按一次");
         assert_eq!(end_text("mobile_off"), "這台電腦不允許移動設備查看終端");
+        assert!(end_text("held_prompt").starts_with("對方畫面出現需要本人確認的框，遠端輸入已停止"));
     }
 
     #[test]

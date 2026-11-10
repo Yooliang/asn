@@ -45,7 +45,12 @@ pub enum End {
     InputIdle,
     /// 打字：缺字太久（網路不穩）、太快太多、一直解不開。不跳過缺的字
     InputStopped,
+    /// 打字：窗格停在需要本人確認的外來訊息框（#1254），遠端輸入一律停止
+    HeldPrompt,
 }
+
+/// 窗格停在外來訊息的確認框而結束時，回報後台的原因（舊後台不認得就改回 failed，見 lib.rs）
+pub const HELD_PROMPT: &str = "held_prompt";
 
 impl End {
     /// 後台 `term_view_stop` 的原因；不用回報的是 None
@@ -54,6 +59,7 @@ impl End {
             End::TargetEnded | End::NotAllowed | End::InputIdle => Some("target_ended"),
             End::ViewerGone => Some("viewer_gone"),
             End::Failed | End::InputStopped => Some("failed"),
+            End::HeldPrompt => Some(HELD_PROMPT),
             End::Expired | End::Gone => None,
         }
     }
@@ -833,6 +839,7 @@ mod tests {
         assert!(acks.contains(&Some(2)), "確認變了就算畫面沒變也要再送一幅：{acks:?}");
         assert!(p.sleeps.iter().all(|&ms| ms == INPUT_FRAME_EVERY_MS), "打字時看得比較勤");
         assert_eq!(End::InputStopped.reason(), Some("failed"));
+        assert_eq!(End::HeldPrompt.reason(), Some("held_prompt"), "#1254：窗格停在外來訊息的確認框");
         assert_eq!(End::InputIdle.reason(), Some("target_ended"));
     }
 
