@@ -92,7 +92,7 @@ pub(super) struct Outbox {
 }
 
 impl Outbox {
-    /// 讀回存檔；壞檔改名成 .bad 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
+    /// 讀回存檔；壞檔改名成 .bad-<毫秒> 留著（不直接當沒有，免得丟信），回傳（內容, 壞檔說明）
     pub fn load(work_dir: &std::path::Path) -> (Outbox, Option<String>) {
         let file = work_dir.join(OUTBOX_FILE);
         let mut warn = None;
@@ -101,8 +101,18 @@ impl Outbox {
             Ok(t) => match serde_json::from_str::<OutboxFile>(&t) {
                 Ok(f) => f.items,
                 Err(e) => {
-                    let _ = std::fs::rename(&file, work_dir.join(format!("{OUTBOX_FILE}.bad")));
-                    warn = Some(format!("reply outbox file unreadable, moved to .bad: {e}"));
+                    // 檔名帶毫秒時間戳，不蓋掉先前留下的 .bad；同一毫秒已有同名檔就往後找沒用過的
+                    let mut stamp = crate::heartbeat::now_ms();
+                    let mut bad = work_dir.join(format!("{OUTBOX_FILE}.bad-{stamp}"));
+                    while bad.exists() {
+                        stamp += 1;
+                        bad = work_dir.join(format!("{OUTBOX_FILE}.bad-{stamp}"));
+                    }
+                    let moved = std::fs::rename(&file, &bad);
+                    warn = Some(match moved {
+                        Ok(()) => format!("reply outbox file unreadable, moved to {OUTBOX_FILE}.bad-{stamp}: {e}"),
+                        Err(re) => format!("reply outbox file unreadable ({e}), and rename to {OUTBOX_FILE}.bad-{stamp} failed: {re}"),
+                    });
                     vec![]
                 }
             },

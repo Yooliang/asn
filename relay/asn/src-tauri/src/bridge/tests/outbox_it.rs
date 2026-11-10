@@ -208,13 +208,37 @@ async fn 超過上限時最舊那封信的片段一起丟_只通知一次() {
     assert_eq!(n[0]["reply_to"], uid(5000));
 }
 
+fn bad_files(h: &H) -> Vec<std::path::PathBuf> {
+    let mut v: Vec<_> = std::fs::read_dir(h.work.path())
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("reply-outbox.json.bad-")))
+        .collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn 壞檔第二次壞掉_不蓋掉先前的_bad() {
+    let h = rig().await;
+    std::fs::write(outbox_file(&h), "{ 壞一").unwrap();
+    let _c1 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
+    let first = bad_files(&h);
+    assert_eq!(first.len(), 1);
+    std::fs::write(outbox_file(&h), "{ 壞二").unwrap();
+    let _c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 5_000);
+    let all = bad_files(&h);
+    assert_eq!(all.len(), 2, "第二個壞檔另存，不蓋掉第一個");
+    assert_eq!(std::fs::read_to_string(&first[0]).unwrap(), "{ 壞一", "舊 .bad 內容原封不動");
+}
+
 #[tokio::test]
 async fn 壞檔改名成_bad_之後仍可正常運作() {
     let h = rig().await;
     std::fs::write(outbox_file(&h), "{ 這不是 json").unwrap();
     let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 4_000);
     assert!(c2.outbox_ids().is_empty(), "壞檔不當成有信");
-    assert!(h.work.path().join("reply-outbox.json.bad").exists(), "壞檔留著");
+    assert_eq!(bad_files(&h).len(), 1, "壞檔留著（檔名帶時間戳）");
     // 之後照常存、照常重寄
     c2.outbox_test_push(&uid(1), vec![], T0, T0);
     assert_eq!(file_items(&h), 1);
