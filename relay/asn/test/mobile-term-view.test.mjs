@@ -33,7 +33,7 @@ test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同
   assert.ok(row.indexOf('m-term-switch') > row.indexOf('class="tool icon mic"') && row.indexOf('m-term-switch') < row.indexOf('<div class="picker"'), '切換鈕放在這排最後面')
   assert.equal((src.match(/m-term-switch/g) || []).length, 1, '頂端不能再有一列切換')
   assert.match(src, /'is-term': mSwitch && remoteShown/, '看終端時收起輸入框')
-  assert.match(src, /watch\(remoteLive, a => \{ if \(!a\) remoteOn\.value = false \}\)/, '離開對話分頁就結束觀看')
+  assert.match(src, /if \(props\.viewActive !== null\) \{ if \(!a\) remoteOn\.value = false; return \}/, '離開對話分頁就結束觀看（手機沒有寬限，只有電腦版有）')
   assert.match(src, /:active="remoteLive"/)
 })
 

@@ -14,6 +14,7 @@ import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
 import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
+import { GRACE_AGAIN_LABEL, createGrace } from './term-grace.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
 import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
@@ -117,11 +118,20 @@ export const ChatPane = {
     const paneTermShown = computed(() => termShown.value || remoteShown.value)
     // 手機（noBar）的對話頁頂端「訊息／終端」切換（案 A，和電腦版同一個元件；按鈕字跟電腦版一樣）
     const remoteLive = computed(() => (props.viewActive === null ? props.active : props.viewActive))
-    watch(remoteLive, a => { if (!a) remoteOn.value = false })   // 離開對話分頁就結束觀看（那台的紅條會收掉）
+    // 手機：離開對話分頁就結束觀看（那台的紅條會收掉）。電腦版（viewActive 沒給）：離開分頁不馬上結束，寬限內切回來照舊在，
+    // 超過寬限在到期當下結束（term-grace.mjs）；打字中離開馬上結束打字（打字不適用寬限），切回來換回只看
+    const rvEl = ref(null)
+    const graceView = createGrace({ onExpire: () => rvEl.value?.expire?.() })
+    const restartView = () => rvEl.value?.again?.()
+    watch(remoteLive, a => {
+      if (props.viewActive !== null) { if (!a) remoteOn.value = false; return }
+      if (!a) { if (remoteTyping.value) remoteTyping.value = false; else if (remoteShown.value) graceView.leave(); return }
+      if (graceView.back() === 'kept') nextTick(() => rvEl.value?.refit?.())
+    })
     const mSwitch = computed(() => props.noBar && canRemote.value)
     const mToggle = computed(() => mTermToggle(remoteShown.value))
     const showMsgs = () => { remoteOn.value = false }
-    watch(remoteShown, on => { if (!on) remoteBar.value = null })
+    watch(remoteShown, on => { if (!on) { remoteBar.value = null; graceView.cancel() } })
     const showTerm = () => { remoteOn.value = true }
     async function probeRemote() {
       const f = props.friend
@@ -434,7 +444,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { INPUT_TEXT, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { INPUT_TEXT, rvEl, restartView, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -442,9 +452,9 @@ export const ChatPane = {
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
+  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
-  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
+  <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
   <remote-input v-if="typingShown" ref="rinEl" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
@@ -584,7 +594,7 @@ export const ChatPane = {
   <div class="typing" :class="remoteBar && ['typing-remote', 'typing-' + remoteBar.level]" role="status">
     <template v-if="remoteBar && remoteBar.level === 'danger'">{{ remoteBar.text }}<button v-if="remoteBar.stoppable" class="aero-btn" type="button" @click="stopTyping">{{ INPUT_TEXT.stop }}</button><span class="typing-extra" v-if="voiceNote"> {{ voiceNote }}</span></template>
     <template v-else-if="voiceNote">{{ voiceNote }}</template>
-    <template v-else-if="remoteBar">{{ remoteBar.text }}</template>
+    <template v-else-if="remoteBar">{{ remoteBar.text }}<button v-if="remoteBar.restartable" class="aero-btn" type="button" @click="restartView">{{ GRACE_AGAIN_LABEL }}</button></template>
     <template v-else-if="jumpNote">{{ jumpNote }}</template>
     <template v-else-if="photoMsg">{{ photoMsg }}<button v-if="savedHere" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></template>
     <template v-else-if="showWaiting">✎ 已送出，等對方回信…</template>
