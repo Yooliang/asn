@@ -313,7 +313,36 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     }
     let Some((o, last_ms)) = owner::resolve_timed(home, cfg, input) else { return false };
     let Some(read_ms) = last_ms else { return false };
+    // 對話紀錄記的是「這個視窗開的時候的帳號」；ASN 切換帳號後，同一個視窗之後送來的額度可能已經是新帳號的（對話紀錄的身分不會變）。
+    // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：兩邊一致才收，不一致或讀不到都不記（#1339）
+    if !window_matches(home, cfg, input, &o, now_ms) {
+        return false;
+    }
     hook_owned(home, cfg, &o, parsed, read_ms, now_ms)
+}
+
+/// 視窗現在登入的帳號跟對話紀錄的身分一致才回 true。不一致、讀不到都不記，寫一行 log（只有兩邊 uuid 與視窗路徑雜湊的前 6 碼；同一個原因連續發生只記一次）
+fn window_matches(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, now_ms: i64) -> bool {
+    let cur = owner::window_account_uuid(home, cfg);
+    let ok = cur.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&o.account_uuid));
+    let mut st = state::load(home);
+    if ok {
+        if st.logged_window.take().is_some() {
+            state::save(home, &st);
+        }
+        return true;
+    }
+    let win = owner::transcript_of(input).map(|p| owner::short_hash(&p.to_string_lossy())).unwrap_or_default();
+    let line = match cur {
+        Some(c) => format!("視窗帳號對不上：視窗 {win}，對話紀錄 {}、視窗目前登入 {}，這筆不記", owner::short_hash(&o.account_uuid), owner::short_hash(&c)),
+        None => format!("視窗帳號讀不到：視窗 {win}，對話紀錄 {}，這筆不記", owner::short_hash(&o.account_uuid)),
+    };
+    if st.logged_window.as_deref() != Some(line.as_str()) {
+        merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+        st.logged_window = Some(line);
+        state::save(home, &st);
+    }
+    false
 }
 
 /// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
@@ -502,6 +531,7 @@ mod tests {
         std::fs::write(&f, format!("{}\n{owner}\n{asst}\n", json!({ "type": "user", "pad": "x".repeat(pad) }))).unwrap();
         let mut v: serde_json::Value = serde_json::from_str(&status_json).unwrap();
         v["transcript_path"] = json!(f.to_string_lossy());
+        owner::test_set_window_account(h.path(), uuid);
         hook_in(h.path(), &h.path().join(".claude"), &v.to_string(), now)
     }
 

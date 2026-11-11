@@ -412,6 +412,12 @@ pub fn current_identity(home: &Path) -> Option<(String, String)> {
     Some((email_of_fragment(&frag)?, uuid))
 }
 
+/// 一份 `.claude.json` 文字裡 oauthAccount 的 accountUuid（只取這一個欄位；沒登入、壞掉都是 None）
+pub fn account_uuid_in_text(text: &str) -> Option<String> {
+    let frag = extract_fragment(text).ok().flatten()?;
+    uuid_of_fragment(&frag)
+}
+
 /// 讀某個 `.claude.json` 的登入身分：(email, accountUuid)；檔案不存在、壞掉、沒登入都是 None。只取這兩個欄位。
 fn identity_of_file(path: &Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(path).ok()?;

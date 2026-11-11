@@ -59,6 +59,12 @@ test('帳號頁 Claude 區段的「Claude 狀態列額度」開關：現狀原�
   for (const s of ['off', 'on', 'stale', 'blocked']) assert.ok(v(s).short, s)
 })
 
+test('Claude 區段固定寫一句：切換帳號後，已經開著的視窗要重開才會更新額度（每個狀態都有；沒有內部名稱）', () => {
+  for (const s of ['off', 'on', 'stale', 'blocked']) assert.equal(quotaHookView({ state: s }).switchNote, '切換帳號後，已經開著的視窗要重開才會更新額度。', s)
+  assert.doesNotMatch(QUOTA_HOOK_TEXT.switchNote, /uuid|transcript|session|oauth|claude/i)
+  assert.ok(read('lib/settings-panel.mjs').includes('{{ st.quotaHook.switchNote }}'), '畫面有接上這句')
+})
+
 test('守門：開關打開只會先跳確認（quota-hook-ask），關掉是取消接上；啟動設定不再有「額度回報」卡片', () => {
   const panel = read('lib/settings-panel.mjs')
   assert.ok(panel.includes("$event.target.checked ? act('quota-hook-ask') : act('quota-hook-disconnect'); $event.target.checked = st.quotaHook.toggleOn"))

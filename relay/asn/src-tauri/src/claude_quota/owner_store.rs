@@ -83,6 +83,47 @@ impl Cache {
     }
 }
 
+/// 視窗自己的登入帳號（`.claude.json` 的 oauthAccount.accountUuid）的快取（#1339 之後）：路徑 → 大小、修改時間、accountUuid（讀不到身分也記，免得每次重讀）。
+/// 檔案可能有好幾 MB、狀態列又叫得很勤，大小與修改時間沒變就不重讀。最多 8 筆。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AcctCache(BTreeMap<String, AcctEnt>);
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct AcctEnt {
+    len: u64,
+    mtime_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account_uuid: Option<String>,
+}
+
+const ACCT_CACHE_MAX: usize = 8;
+
+pub fn acct_cache_path(home: &Path) -> PathBuf {
+    dir(home).join("claude-window-account-cache.json")
+}
+
+impl AcctCache {
+    pub fn load(home: &Path) -> AcctCache {
+        read_small(&acct_cache_path(home)).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+    pub fn save(&self, home: &Path) {
+        if let Ok(t) = serde_json::to_string(self) {
+            write(&acct_cache_path(home), &t);
+        }
+    }
+    /// 命中回 Some(身分或「這個檔裡沒有身分」)；沒命中回 None
+    pub fn get(&self, key: &str, len: u64, mtime_ms: i64) -> Option<Option<String>> {
+        self.0.get(key).filter(|e| e.len == len && e.mtime_ms == mtime_ms).map(|e| e.account_uuid.clone())
+    }
+    pub fn put(&mut self, key: &str, len: u64, mtime_ms: i64, account_uuid: Option<String>) {
+        self.0.insert(key.to_string(), AcctEnt { len, mtime_ms, account_uuid });
+        while self.0.len() > ACCT_CACHE_MAX {
+            let Some(k) = self.0.keys().next().cloned() else { break };
+            self.0.remove(&k);
+        }
+    }
+}
+
 /// 讀未知帳號區：uuid → 額度。逐筆驗證（格式不對的丟掉）
 pub fn unknown_load(home: &Path) -> BTreeMap<String, Quota> {
     let Some(serde_json::Value::Object(m)) = read_small(&unknown_path(home)).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return BTreeMap::new() };

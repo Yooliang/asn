@@ -265,6 +265,7 @@ fn hook_at(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
 /// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、送狀態列
 fn feed(h: &tempfile::TempDir, name: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
     let t = transcript(h.path(), name, uuid, Some(ts), pad);
+    super::super::owner::test_set_window_account(h.path(), uuid);
     hook_at(h, &with_tp(st, &t), now)
 }
 fn quota_of(h: &tempfile::TempDir, email: &str) -> Quota {
@@ -664,4 +665,104 @@ fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
         want.sort();
         assert_eq!(present, want, "{id} {}", t["note"].as_str().unwrap());
     }
+}
+
+// ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（#1339：ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
+use super::super::owner::{short_hash, test_set_window_account, window_account_uuid};
+
+fn cj_in(dir: &std::path::Path, text: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(".claude.json"), text).unwrap();
+}
+
+#[test]
+fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記一次() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 視窗開的時候是 A（對話紀錄記 A），之後 ASN 切成 B：這個視窗自己的登入設定現在是 B
+    let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
+    test_set_window_account(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + MIN), "對不上：不記");
+    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
+    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
+    let lg = log(&h);
+    assert!(lg.contains("視窗帳號對不上") && lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
+    assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("a@x.test") && !lg.contains("wa.jsonl"), "log 不留 uuid、email、路徑：{lg}");
+    // 同一個原因連續發生只記一次
+    assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("視窗帳號對不上").count(), 1);
+    // 這個視窗重開後登入設定與對話紀錄一致：照收；之後又對不上會再記一次
+    test_set_window_account(h.path(), UA);
+    assert!(hook_at(&h, &with_tp(wk(30.0), &t), NOW + 3 * MIN), "一致：收");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
+    test_set_window_account(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(wk(31.0), &t), NOW + 4 * MIN));
+    assert_eq!(log(&h).matches("視窗帳號對不上").count(), 2);
+}
+
+#[test]
+fn 視窗帳號讀不到_不記_沒有檔_沒有_oauthaccount_壞掉_太大都一樣() {
+    let big = format!("{{\"oauthAccount\":{{\"accountUuid\":\"{UA}\"}},\"pad\":\"{}\"}}", "x".repeat(8 * 1024 * 1024 + 16));
+    let cases: Vec<(&str, Option<String>)> = vec![("沒有檔", None), ("沒有 oauthAccount", Some("{\"theme\":\"dark\"}".into())), ("壞掉", Some("{壞".into())), ("太大", Some(big)), ("uuid 格式不對", Some("{\"oauthAccount\":{\"accountUuid\":\"../x\"}}".into()))];
+    for (i, (name, text)) in cases.into_iter().enumerate() {
+        let h = tempfile::tempdir().unwrap();
+        add_account(h.path(), "a@x.test", UA);
+        let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
+        if let Some(text) = text {
+            cj_in(&h.path().join(".claude"), &text);
+        }
+        assert!(!hook_in(h.path(), &h.path().join(".claude"), &with_tp(wk(70.0), &t), NOW + MIN), "{name}：不記");
+        assert!(!super::super::quota_path(h.path()).exists(), "{name}：額度檔不該有（第 {i} 種）");
+        assert!(std::fs::read_to_string(super::super::merge::log_path(h.path())).unwrap().contains("視窗帳號讀不到"), "{name}：log 有記");
+    }
+}
+
+#[test]
+fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
+    let h = tempfile::tempdir().unwrap();
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    // 家目錄登入的是 A；這個視窗的設定資料夾（CLAUDE_CONFIG_DIR）登入的是 B
+    cj_in(h.path(), &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "a@x.test" } }).to_string());
+    let cfg = h.path().join(".claude");
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" } }).to_string());
+    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+    let tb = transcript(h.path(), "wb", UB, Some(NOW), 1);
+    assert!(hook_in(h.path(), &cfg, &with_tp(wk(60.0), &tb), NOW + MIN), "視窗是 B、對話紀錄也是 B：收");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+    // 對話紀錄是 A（家目錄的帳號）但這個視窗自己是 B：不收，不能拿家目錄那份來湊
+    let ta = transcript(h.path(), "wa", UA, Some(NOW + MIN), 2);
+    assert!(!hook_in(h.path(), &cfg, &with_tp(wk(10.0), &ta), NOW + 2 * MIN));
+    assert!(load_all(h.path()).get("a@x.test").is_none());
+    // 設定資料夾裡沒有 .claude.json 才退回家目錄那份
+    std::fs::remove_file(cfg.join(".claude.json")).unwrap();
+    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UA));
+}
+
+#[test]
+fn 視窗帳號的讀取有快取_大小或修改時間變了才重讀() {
+    let h = tempfile::tempdir().unwrap();
+    let cfg = h.path().join(".claude");
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UA } }).to_string());
+    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UA));
+    let cache = std::fs::read_to_string(super::super::owner_store::acct_cache_path(h.path())).unwrap();
+    assert!(cache.contains(UA) && !cache.contains("emailAddress"), "快取只存 accountUuid：{cache}");
+    // 換成另一個帳號（長度不同）：重讀
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB }, "pad": "xxxx" }).to_string());
+    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+    // 快取壞掉當成沒有快取，照樣讀得到
+    std::fs::write(super::super::owner_store::acct_cache_path(h.path()), "{壞").unwrap();
+    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+}
+
+#[cfg(unix)]
+#[test]
+fn 視窗帳號的設定檔是符號連結_不讀() {
+    let h = tempfile::tempdir().unwrap();
+    let cfg = h.path().join(".claude");
+    std::fs::create_dir_all(&cfg).unwrap();
+    let real = h.path().join("real.json");
+    std::fs::write(&real, json!({ "oauthAccount": { "accountUuid": UA } }).to_string()).unwrap();
+    std::os::unix::fs::symlink(&real, cfg.join(".claude.json")).unwrap();
+    assert_eq!(window_account_uuid(h.path(), &cfg), None);
 }

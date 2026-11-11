@@ -8,6 +8,8 @@ export const QUOTA_HOOK_TEXT = {
   // 設定 → 帳號 的 Claude 區段裡的開關（原本是「啟動設定」的「額度回報」卡片）：開＝接上、關＝取消接上
   toggle: 'Claude 狀態列額度',
   short: { off: '打開後，手機看得到這台 Claude 帳號的剩餘額度。', on: '已接上，手機看得到這台 Claude 帳號的剩餘額度。', stale: '位置對不上了，請按「重新接上」。', blocked: '目前的狀態列 ASN 改不了，打不開。' },
+  // 切換帳號後，對話紀錄記的還是舊帳號，ASN 會把對不上的額度擋下來（見 claude_quota.rs），所以舊視窗要重開（固定的一句，畫面上每個狀態都顯示）
+  switchNote: '切換帳號後，已經開著的視窗要重開才會更新額度。',
   off: '目前沒有接上：手機的「設備與帳號」看不到這台 Claude 帳號還剩多少額度。',
   on: '已接上：每次 Claude Code 更新狀態列時，ASN 會記下目前帳號的剩餘額度，手機就看得到。',
   stale: '之前接上的 ASN 位置對不上了（搬過或重裝過），按「重新接上」就會修好。',
@@ -67,6 +69,7 @@ export function quotaHookView(raw, ui = {}) {
     toggleOn: s.state === 'on' || s.state === 'stale',
     toggleDisabled: busy || confirm || s.state === 'blocked',
     short: QUOTA_HOOK_TEXT.short[s.state],
+    switchNote: QUOTA_HOOK_TEXT.switchNote,
     showReconnect: s.state === 'stale' && !confirm,
     askLabel: s.state === 'stale' ? QUOTA_HOOK_TEXT.reconnect : QUOTA_HOOK_TEXT.ask,
     agreeLabel: QUOTA_HOOK_TEXT.agree,

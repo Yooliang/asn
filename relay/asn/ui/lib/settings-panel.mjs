@@ -216,7 +216,7 @@ export const SettingsPanel = {
                   <details><summary>{{ QUOTA_TEXT.more }}</summary><small>{{ QUOTA_TEXT.agyNote }}</small></details>
                 </div>
                 <div class="dv-vq" v-if="v.key === 'claude' && st.quotaHook">
-                  <small>{{ st.quotaHook.short }}{{ QUOTA_TEXT.thisPc }}</small>
+                  <small>{{ st.quotaHook.short }}{{ QUOTA_TEXT.thisPc }}{{ st.quotaHook.switchNote }}</small>
                   <small v-if="st.quotaHook.current">目前的狀態列指令：<code>{{ st.quotaHook.current }}</code></small>
                   <small v-if="st.quotaHook.consent">{{ st.quotaHook.consent }}</small>
                   <span class="dv-ibtns" v-if="st.quotaHook.showAgree || st.quotaHook.showCancel || st.quotaHook.showReconnect">
