@@ -298,13 +298,69 @@ const render = async st => {
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
 }
 
+test('「我的帳號」卡片的資料：時間放帳號後面（舊資料加「較舊」），讀這筆額度的那台另外給（readNodes）；舊欄位照留給手機', () => {
+  const fresh = rosterQuota(entry(), { nodeLabel, now: NOW })
+  assert.equal(fresh.ageLabel, '3 小時前')
+  assert.deepEqual(fresh.readNodes, [W])
+  assert.equal(fresh.meta, '3 小時前・工作機', '手機與設備卡還在用 meta')
+  const old = rosterQuota(entry({ windows: [win('five_hour', 40, 11 * H), win('weekly', 72, 11 * H)] }), { nodeLabel, now: NOW })
+  assert.equal(old.ageLabel, '11 小時前，較舊')
+  assert.equal(old.oldText, '資料較舊', '舊欄位不變')
+  // 兩窗是不同台讀的：兩台都標；同一台只列一次
+  const two = rosterQuota(entry({ windows: [win('five_hour', 40, H, { read_node: S }), win('weekly', 72, 2 * H)] }), { nodeLabel, now: NOW })
+  assert.deepEqual([...two.readNodes].sort(), [S, W].sort())
+  // 不再回報的帳號：「3 天前讀的」，資料超過 6 小時一樣加「較舊」
+  assert.equal(rosterQuota(entry({ nodes: [], windows: [win('weekly', 72, 3 * D)] }), { nodeLabel, now: NOW }).ageLabel, '3 天前讀的，較舊')
+  // 沒有額度窗（Codex 還沒開）：時間用最後一次回報，哪台用 seen_node；說明文字照留
+  const codex = rosterQuota(entry({ vendor: 'codex', windows: [] }), { nodeLabel, now: NOW })
+  assert.equal(codex.text, '開 Codex 後才讀得到')
+  assert.equal(codex.ageLabel, '1 小時前')
+  assert.deepEqual(codex.readNodes, [W])
+  // 這一行要放的窗都已重置：時間照寫，不加「較舊」
+  const reset = rosterQuota(entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - H) }), win('weekly', 60, 2 * H, { resets_at: iso(NOW - H) })] }), { nodeLabel, now: NOW })
+  assert.ok(!reset.ageLabel.includes('較舊'))
+  // 畫面上的字不能出現內部代號
+  for (const q of [fresh, old, two, codex]) assert.doesNotMatch(q.ageLabel, /read_node|seen_node|node|uuid|undefined/i)
+})
+
+test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間・哪台）；讀的那台設備按鈕上有藍線，所有按鈕上框一樣高', async () => {
+  const my = rosterView(roster([
+    entry(),
+    entry({ account: 'old@x.test', windows: [win('five_hour', 40, 11 * H), win('weekly', 72, 11 * H)], nodes: [{ node: W, current: false, reported_at: iso(NOW - H) }, { node: S, current: false, reported_at: iso(NOW - H) }] }),
+    entry({ vendor: 'codex', account: 'c@x.test', windows: [] }),
+  ]), { nodeLabel, now: NOW })
+  const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
+  assert.ok(/<span class="dv-mail">a@x\.test<\/span><span class="dv-age">（3 小時前）<\/span>/.test(html), '時間在帳號後面')
+  assert.ok(html.includes('（11 小時前，較舊）'), '舊資料在括號裡加「較舊」')
+  assert.ok(html.includes('c@x.test') && html.includes('（1 小時前）') && html.includes('開 Codex 後才讀得到'), '說明文字照留，時間在帳號後面')
+  assert.ok(!/（\d+ (小時|分鐘|天)前・/.test(html) && !html.includes('資料較舊'), '舊的「（時間・哪台）」與「資料較舊」標籤都不見了')
+  // 讀的那台（W）的按鈕外框有 read；另一台（S，old@ 的卡片上）沒有
+  const oldCard = html.slice(html.indexOf('old@x.test'), html.indexOf('c@x.test'))
+  assert.match(oldCard, /<span class="dv-devb read">/)
+  assert.match(oldCard, /<span class="dv-devb">/, '沒讀的那台沒有線')
+  // 按鈕本身的 class 不變（其他頁的測試與樣式靠它）
+  assert.ok(!oldCard.includes('dv-devbtn read'))
+})
+
+test('設備按鈕的藍線：4px、用主題色、深色模式有對應；沒線的是透明上框（高度一致）；手機版是另一份樣板，不動', () => {
+  const css = read('ui/style.css')
+  assert.match(css, /\.dv-devs \.dv-devb \.dv-devbtn,\.dv-devs \.dv-devb \.dv-devbtn:hover\{border-top:4px solid transparent\}/)
+  assert.match(css, /\.dv-devs \.dv-devb\.read \.dv-devbtn,\.dv-devs \.dv-devb\.read \.dv-devbtn:hover\{border-top-color:var\(--accent\)\}/)
+  assert.match(css, /prefers-color-scheme:dark\)\{[^}]*\}[^@]*\.dv-devs \.dv-devb\.read \.dv-devbtn[^}]*var\(--msg-st-read\)/s)
+  const panel = read('ui/lib/settings-panel.mjs')
+  assert.ok(panel.includes(`:class="['dv-devb', { read: (a.quota.readNodes || []).includes(b.node) }]"`))
+  assert.ok(!panel.includes('<span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>\n                    </span>\n                    <!-- 設備按鈕'), '「我的帳號」卡片的額度行後面不再接 meta')
+  assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'), '手機版的樣板與樣式是分開的，沒有跟著改')
+})
+
 test('電腦設定頁：「帳號」頁有「我的帳號」，按廠牌列出帳號與額度；沒有列表寫提示', async () => {
   const my = rosterView(roster([entry(), entry({ vendor: 'codex', windows: [] })]), { nodeLabel, now: NOW })
   const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
   assert.match(html, /<section class="dv-my"[^>]*aria-label="我的帳號"/)
   assert.ok(html.includes('data-vendor="claude"') && html.includes('data-vendor="codex"'))
-  // #374：改成兩條額度條（5 小時、每週），各自寫重置時間；括號裡寫較舊那窗的時間與哪台讀的
-  assert.ok(html.includes('剩 40%') && html.includes('剩 72%') && html.includes('（3 小時前・工作機）'))
+  // #374：改成兩條額度條（5 小時、每週），各自寫重置時間；時間改放在帳號後面的括號，哪台讀的標在設備按鈕上（見下一條測試）
+  assert.ok(html.includes('剩 40%') && html.includes('剩 72%') && html.includes('（3 小時前）'))
+  assert.ok(!html.includes('（3 小時前・工作機）'), '額度那一行後面不再有「（時間・哪台）」')
   assert.match(html, /role="progressbar"/)
   assert.ok(html.includes('開 Codex 後才讀得到'))
   assert.ok(html.includes('使用中'))
