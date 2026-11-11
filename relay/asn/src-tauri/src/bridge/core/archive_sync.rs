@@ -7,8 +7,9 @@ use super::*;
 use crate::bridge::known;
 use std::collections::BTreeSet;
 
-/// 向後台查封存名單的間隔（手機、別台電腦封存要等到下一輪才同步過來）
-const REFRESH_MS: u64 = 120_000;
+/// 向後台查封存名單的間隔（手機、別台電腦封存要等到下一輪才同步過來）。
+/// 名單回報（roster）與夥伴對照（partner_sync）的回應都不帶封存資料，只有 list 有，所以另外查；不改後台的前提下拉長到 10 分鐘，本機封存另會立即重查
+const REFRESH_MS: u64 = 600_000;
 
 impl Core {
     pub async fn archive_tick(&mut self, now: u64) {
