@@ -89,9 +89,16 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 
 見第四節：舊版 Claude Code（沒帶 `transcript_path`）不收，畫面寫固定的一句「升級 Claude Code 後才會顯示額度」，不出現內部代號。
 
-### 八、後台不改
+### 八、後台（#1266 簡化後：三條規則）
 
-額度檔的格式對後台不變（`owner` 與 `legacy` 都不上報：`acct_remote.rs` 的回報是逐欄挑選額度欄位，不會整筆序列化，有測試鎖住不含 `owner`），共用案例與 SQL 都不動。
+後台（`asn_relay_acct_window_decide`、`asn_relay_acct_window_judge`）與電腦端 `merge.rs` 一樣只剩三條規則，共用案例 `tests/fixtures/quota-merge-cases.json` 兩邊都跑：
+
+1. `future_read`：資料時間（`read_at`）比現在晚超過 5 分鐘（電腦時鐘走快）。
+2. `older_read`：資料時間比記著的那條早（同一秒照收）。
+3. `reset_out_of_range`：新的重置時間不在「現在 −1 天」到「現在 +8 天」之間（含兩端）。
+
+其餘一律照收（同期回升、重置時間倒退、不是 7 天倍數）。每條窗各自判斷。額度檔的格式對後台不變（`owner` 與 `legacy` 都不上報：`acct_remote.rs` 的回報是逐欄挑選額度欄位，不會整筆序列化，有測試鎖住不含 `owner`）。
+Claude 的資料時間是對話紀錄最後一筆 assistant 回應的時間戳。**部署順序：migration 必須先於客戶端上線**，否則舊後台加上新客戶端時，同期回升會被舊規則擋掉，重現 11-09 的停更。
 
 ## 驗收情境
 

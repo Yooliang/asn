@@ -253,3 +253,10 @@ test('登入過期的原因：後端組好完整一句，設定頁原樣畫出�
   assert.match(g.status.grok, /^Grok 登入已過期/)
   assert.match(g.status.agy, /^Gemini 登入已過期/)
 })
+
+test('設定頁：Gemini 那一項不再有開關，只留固定的一句說明（輪詢目前不會記到任何帳號，開關先藏起來、設定與程式保留）', () => {
+  const t = SettingsPanel.template
+  assert.ok(!t.includes("source: 'agy'"), 'agy 的開關藏起來了')
+  assert.match(t, /QUOTA_TEXT\.agyShort/)
+  assert.equal(QUOTA_TEXT.agyShort, 'Gemini 額度要開著 agy 視窗才會更新。')
+})
