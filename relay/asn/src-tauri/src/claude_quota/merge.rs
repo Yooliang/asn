@@ -161,18 +161,23 @@ pub fn without_missing_expired(old: &Quota, p: &Parsed, now_ms: i64) -> Option<Q
 
 /// 同 [`merge`]，另帶這次的資料時間 `read_ms`（Claude：對話紀錄裡最後一筆 assistant 回應的時間；兩條都用它）
 pub fn merge_full(old: Option<&Quota>, p: &Parsed, read_ms: i64, now_ms: i64) -> Merged {
+    merge_full_each(old, p, read_ms, read_ms, now_ms)
+}
+
+/// 同 [`merge_full`]，兩條窗各自的資料時間（Gemini：各視窗各條的資料時間不同，見 gemini_quota/seen.rs）
+pub fn merge_full_each(old: Option<&Quota>, p: &Parsed, read_five_ms: i64, read_week_ms: i64, now_ms: i64) -> Merged {
     let (old_five_r, old_week_r) = old.map(stored_resets).unwrap_or((None, None));
     let old_five = old.and_then(|q| q.five_hour_pct).map(|v| (v, old_five_r));
     let old_week = old.and_then(|q| q.weekly_pct).map(|v| (v, old_week_r));
     let read_of = |own: Option<&String>| own.or(old.map(|q| &q.at)).and_then(|t| parse_iso_secs(t));
     let (old_five_read, old_week_read) = (read_of(old.and_then(|q| q.five_at.as_ref())), read_of(old.and_then(|q| q.week_at.as_ref())));
-    let (five, took_five, s1) = merge_one(Kind::Five, old_five, old_five_read, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), read_ms, now_ms);
-    let (week, took_week, s2) = merge_one(Kind::Week, old_week, old_week_read, p.weekly_pct.map(|v| (v, p.week_reset_ms)), read_ms, now_ms);
+    let (five, took_five, s1) = merge_one(Kind::Five, old_five, old_five_read, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), read_five_ms, now_ms);
+    let (week, took_week, s2) = merge_one(Kind::Week, old_week, old_week_read, p.weekly_pct.map(|v| (v, p.week_reset_ms)), read_week_ms, now_ms);
     let skipped: Vec<Skipped> = [s1, s2].into_iter().flatten().collect();
     if !took_five && !took_week {
         return Merged { quota: None, skipped, took_five, took_week };
     }
-    let (now, read) = (iso_secs(now_ms), iso_secs(read_ms));
+    let (now, read_five, read_week) = (iso_secs(now_ms), iso_secs(read_five_ms), iso_secs(read_week_ms));
     let old_at = old.map(|q| &q.at);
     let q = Quota {
         five_hour_pct: five.map(|f| f.0),
@@ -180,8 +185,8 @@ pub fn merge_full(old: Option<&Quota>, p: &Parsed, read_ms: i64, now_ms: i64) ->
         reset_at: pick_reset(five, week).map(iso_secs),
         five_reset_at: five.and_then(|f| f.1).map(iso_secs),
         week_reset_at: week.and_then(|w| w.1).map(iso_secs),
-        five_at: read_at(took_five, five.is_some(), old.and_then(|q| q.five_at.as_ref()), old_at, &read),
-        week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &read),
+        five_at: read_at(took_five, five.is_some(), old.and_then(|q| q.five_at.as_ref()), old_at, &read_five),
+        week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &read_week),
         at: now,
         owner: false,
     };

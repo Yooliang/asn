@@ -9,6 +9,7 @@
     "window_pair_cases：一次讀取同時帶 5 小時與每週兩條窗，各條各自判斷——一條被擋不准連帶另一條不存。old／new 各有 five_hour、weekly；expect 是每條收不收與原因。同一次讀取兩條窗共用一個資料時間，所以 new 的兩個 read_at 要一樣；兩條被擋與否的差別來自記著的資料時間各條不同、或重置時間。",
     "電腦端驗合併後的紀錄（被擋的那條維持舊值與舊的讀取時間、收下的那條用新值與新的讀取時間），後台每條各呼叫 decide 並端到端跑一次回報。",
     "missing_window_cases（#1321）：這次讀數完全沒有某一窗（new_has 只列有帶的窗），而存著的那一窗已過重置時間（resets_at ≤ now，剛好等於也算）就拿掉；還沒過、或存著的那一窗沒有 resets_at 就留著；有帶的窗不拿掉。expect_present 是處理後剩下哪些窗。電腦端驗 without_missing_expired，後台端到端跑一次回報。",
+    "Gemini 的資料時間（#1316）：agy 的狀態列每次重繪都會送額度，閒置視窗送的是快取的舊數字。客戶端以「agy 視窗＋那一窗額度」為單位記住上次的數值，數值有變才把資料時間設成現在、沒變沿用上次的；第一次看到的視窗只記不送。這一層只在客戶端，規則本身（older_read 等）兩邊一樣，n27／n28 是這種情況在規則上的樣子。",
     "台灣時間對照：2026-11-13T23:42:55Z＝11/14 07:42。"
   ],
   "constants": {
@@ -474,6 +475,44 @@
       },
       "accept": false,
       "reason": "older_read"
+    },
+    {
+      "id": "n27",
+      "note": "Gemini 閒置的 agy 視窗一直重送同樣的數字：資料時間沿用它上次看到數值變動的時間（11:00），比別處記著的（11:30）早，不收（客戶端用 seen 記住上次的數值決定資料時間，見 gemini_quota/seen.rs）",
+      "vendor": "gemini",
+      "window": "five_hour",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "left_pct": 30,
+        "resets_at": "2026-11-09T16:00:00Z",
+        "read_at": "2026-11-09T11:30:00Z"
+      },
+      "new": {
+        "left_pct": 60,
+        "resets_at": "2026-11-09T16:00:00Z",
+        "read_at": "2026-11-09T11:00:00Z"
+      },
+      "accept": false,
+      "reason": "older_read"
+    },
+    {
+      "id": "n28",
+      "note": "Gemini 數值變了：資料時間是現在，照收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "left_pct": 30,
+        "resets_at": "2026-11-13T23:42:55Z",
+        "read_at": "2026-11-09T11:00:00Z"
+      },
+      "new": {
+        "left_pct": 25,
+        "resets_at": "2026-11-13T23:42:55Z",
+        "read_at": "2026-11-09T11:59:00Z"
+      },
+      "accept": true,
+      "reason": null
     }
   ],
   "window_pair_cases": [

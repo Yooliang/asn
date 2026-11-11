@@ -14,7 +14,7 @@ fn usage() -> &'static str {
 ASN 開的 agy 視窗會自動帶上這個狀態列指令：記下目前 Gemini 帳號的 5 小時與每週剩餘額度，並印一行狀態。結束碼一律 0。"
 }
 
-pub async fn main(args: &[String], _env: &Env, io: &mut Io<'_>) -> R<i32> {
+pub async fn main(args: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         io.outln(usage());
         return Ok(0);
@@ -24,7 +24,9 @@ pub async fn main(args: &[String], _env: &Env, io: &mut Io<'_>) -> R<i32> {
     let _ = io.stdin.take(MAX_INPUT).read_to_end(&mut buf);
     let text = String::from_utf8_lossy(&buf);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let line = crate::gemini_quota::hook(&crate::identity::home_dir(), &text, now);
+    // 視窗代號：叫起這個狀態列指令的 agy 行程（找不到就退回狀態列資料的 session_id；行程表讀不到，例如 macOS，也是退回）
+    let proc_key = || (env.procs)().ok().and_then(|t| crate::gemini_quota::agy_key(env.self_pid, &t, &*env.started));
+    let line = crate::gemini_quota::hook_with(&crate::identity::home_dir(), &text, now, &proc_key);
     io.outln(&line);
     Ok(0)
 }
