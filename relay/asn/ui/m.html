@@ -291,7 +291,7 @@
               <p class="m-fine m-dv-foot" v-if="acctSw.tab === 'accounts'">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
             <template v-else-if="acctSw.phase === 'pick'">
-              <section class="m-dv-dev" role="region" :aria-label="acctCur.label">
+              <section class="m-dv-node" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
                   <h3 class="m-dv-name">{{ acctCur.label }}</h3>
                   <span class="m-dv-tag">{{ acctCur.kind }}</span>

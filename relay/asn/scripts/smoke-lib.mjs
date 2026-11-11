@@ -555,6 +555,61 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   if (document.querySelector('.m-sheet.open, .acct-confirm, [role="alertdialog"]')) return { ok: false, why: '按使用中的按鈕跳出了確認畫面' };
   return { ok: true, why: '' };
 })()`
+// 手機設備細部頁（設備 → 點某台電腦）：整個詳情區塊與底下的廠商卡片、關閉鈕、註腳不能互疊、不能超出視窗、卡片不被水平切掉
+export const MDEVSHEET_PROBES = { mobile: { mdevsheet: true } }
+export const mdevsheetProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  const W = window.innerWidth;
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  btn.click(); await sleep(500);
+  let opened = false;
+  for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
+    if ((row.querySelector('b')?.textContent ?? '').includes('這支手機')) continue;
+    const go = row.querySelector('.m-dv-go');
+    if (!go) continue;
+    go.click(); await sleep(600);
+    if ([...document.querySelectorAll('.m-dv-vendor')].some(vis)) { opened = true; break }
+    const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis);
+    if (back) { back.click(); await sleep(400) }
+  }
+  if (!opened) return { ok: false, why: '找不到有廠商卡片的電腦細部頁' };
+  const R = e => e.getBoundingClientRect();
+  const head = [...document.querySelectorAll('.m-dv .m-dv-dh')].find(vis);
+  const sec = head && head.parentElement;
+  if (!sec) return { ok: false, why: '找不到設備詳情區塊' };
+  const sr = R(sec);
+  if (sr.left < -0.5 || sr.right > W + 0.5) return { ok: false, why: '詳情區塊超出視窗：' + Math.round(sr.left) + '～' + Math.round(sr.right) + '（視窗寬 ' + W + '）' };
+  if (document.documentElement.scrollWidth > W + 1) return { ok: false, why: '頁面出現橫向捲動：' + document.documentElement.scrollWidth + '（視窗寬 ' + W + '）' };
+  if (sec.scrollWidth > sec.clientWidth + 1) return { ok: false, why: '詳情區塊內容被水平切掉：' + sec.scrollWidth + '／' + sec.clientWidth };
+  const cards = [...document.querySelectorAll('.m-dv-vendor')].filter(vis);
+  for (const c of cards) {
+    const r = R(c), name = c.querySelector('b')?.textContent.trim() ?? '';
+    if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5) return { ok: false, why: '「' + name + '」卡片超出詳情區塊：' + Math.round(r.left) + '～' + Math.round(r.right) + '，區塊 ' + Math.round(sr.left) + '～' + Math.round(sr.right) };
+    if (r.right > W + 0.5) return { ok: false, why: '「' + name + '」卡片右邊超出視窗：' + Math.round(r.right) + '／' + W };
+    if (c.scrollWidth > c.clientWidth + 1) return { ok: false, why: '「' + name + '」卡片內容被水平切掉' };
+    const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 20, window.innerHeight - 1));
+    if (r.top + 20 < window.innerHeight && r.top + 20 > 0 && hit && !c.contains(hit)) return { ok: false, why: '「' + name + '」卡片上面蓋著別的東西：' + (hit.className || hit.tagName) };
+  }
+  const close = [...document.querySelectorAll('.m-dv .m-ops-cancel')].find(b => vis(b) && b.textContent.includes('關閉'));
+  const foot = [...document.querySelectorAll('.m-dv .m-dv-foot')].find(vis);
+  const hit = (r, a, b) => !(a.right <= b.left + 0.5 || a.left >= b.right - 0.5 || a.bottom <= b.top + 0.5 || a.top >= b.bottom - 0.5);
+  for (const [label, e] of [['關閉鈕', close], ['額度註腳', foot]]) {
+    if (!e) continue;
+    const r = R(e);
+    for (const c of cards) if (hit(r, r, R(c))) return { ok: false, why: label + '與「' + (c.querySelector('b')?.textContent.trim() ?? '') + '」卡片互疊' };
+    if (hit(r, r, sr)) return { ok: false, why: label + '壓在詳情區塊上' };
+    if (r.right > W + 0.5 || r.left < -0.5) return { ok: false, why: label + '超出視窗' };
+  }
+  if (close) {
+    close.scrollIntoView({ block: 'center' }); await sleep(200);
+    const r = R(close), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!top || !close.contains(top)) return { ok: false, why: '關閉鈕中心點到的不是它：' + (top ? (top.className || top.tagName) : '無') };
+  }
+  return { ok: true, why: '' };
+})()`
 // #930 帳號永遠不能切到這支手機自己：noplat＝這支手機的平台還沒讀到（設備樹會先把它當成電腦）；android＝讀到了
 export const MNOSELF_PROBES = { noplat: { mnoself: 'noplat' }, android: { mnoself: 'android' } }
 export const mnoselfProbeSource = () => `(async () => {
@@ -697,8 +752,8 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.dterm ? '電腦版看別台終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.dterm ? '電腦版看別台終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1324,6 +1379,8 @@ export const SCENARIOS = [
   { name: 'list-merged-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.double, shot: 'list-merged-520.png' },
   { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },
+  { name: 'm-devsheet', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-412.png' },
+  { name: 'm-devsheet-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-360.png' },
   // 手機第四格「通知」（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及第四格的未讀紅點。412、360 寬與大字型各一張
   // 手機開新夥伴的運行選項（#931）：名稱與預設跟電腦版同一份目錄，另有「前台或背景」的說明。412、360 寬與大字型各一張
   { name: 'm-launch', page: 'm.html', state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-412.png' },
