@@ -15,7 +15,7 @@ const cargo = read('src-tauri', 'Cargo.toml')
 // 電腦端才有的 Rust 模組：手機建置一個都不能編進去
 const DESKTOP_MODS = ['acct_remote', 'statusline_hook', 'term_remote', 'ads', 'agent_tools', 'askpass', 'bridge', 'cli', 'claude_accounts', 'claude_json', 'claude_mod', 'claude_quota', 'codex_accounts', 'codex_quota', 'launch', 'shot', 'stt', 'tray', 'tts', 'updater', 'usage', 'voicecfg', 'wins']
 // 電腦端才有的指令（手機的指令清單、手機畫面都不能出現）
-const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_rename', 'device_known_input_no_ask', 'device_known_login_ok', 'device_own_fingerprint', 'term_view_remote_input', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
+const DESKTOP_CMDS = ['term_viewed_stop', 'device_known_list', 'device_known_forget', 'device_known_rename', 'device_known_input_no_ask', 'device_known_login_ok', 'device_own_fingerprint', 'device_own_fingerprint_qr', 'term_view_remote_input', 'term_view_active', 'term_view_available', 'term_view_open', 'term_view_close', 'bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_mobile_view', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'term_start', 'term_send', 'term_read', 'term_list', 'term_stop', 'term_status', 'term_rename', 'term_answer', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'tasks_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'claude_quota_all', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_roster', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'open_ui_log', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
 
 test('電腦端模組：每一個都掛 cfg(desktop)，手機建置不編譯', () => {
   for (const m of DESKTOP_MODS) {
@@ -516,7 +516,7 @@ test('手機看電腦終端：四個指令手機也有、打字的指令只有�
   assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.doesNotMatch(rs, /term_view_remote_input/)
-  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|token|confirm|forget|rename)[\s\S]*?\n\}\n/g, '')
+  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|token|confirm|forget|rename|scan_confirm)[\s\S]*?\n\}\n/g, '')
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')
@@ -567,7 +567,7 @@ test('憑證檔：只有生物辨識通過（onAuthenticationSucceeded）與螢�
   const writes = vc.split('\n').map((l, i) => [l, i]).filter(([l]) => l.includes('writeConsentMarker('))
   assert.equal(writes.length, 2, '一個定義、一個呼叫')
   assert.ok(writes.some(([l]) => l.includes('private fun writeConsentMarker(')))
-  const call = vc.slice(vc.indexOf('private fun verified('), vc.indexOf('private fun validChallenge('))
+  const call = vc.slice(vc.indexOf('private fun verified('), vc.indexOf('fun validChallenge('))
   assert.ok(call.includes('writeConsentMarker(activity, ch)'), '呼叫在 verified 裡')
   const verifiedCalls = vc.split('\n').filter(l => l.includes('verified(activity, ') && !l.includes('private fun'))
   assert.equal(verifiedCalls.length, 2)
@@ -608,7 +608,7 @@ test('憑證：專案沒有檔案外掛、權限沒開檔案存取，網頁自�
   for (const f of fs.readdirSync(path.join(root, 'src-tauri', 'capabilities'))) assert.doesNotMatch(read('src-tauri', 'capabilities', f), /"fs:|plugin-fs/, f)
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
   const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
-  for (const c of ['android_known_token', 'android_known_rename']) { assert.ok(phone.includes(`android::${c}`), c); assert.ok(!desk.includes(c), `電腦版沒有 ${c}`) }
+  for (const c of ['android_known_token', 'android_known_rename', 'android_known_scan_confirm']) { assert.ok(phone.includes(`android::${c}`), c); assert.ok(!desk.includes(c), `電腦版沒有 ${c}`) }
   assert.ok(desk.includes('device_known_rename') && !phone.includes('device_known_rename'), '電腦版改名只在電腦版')
   assert.match(lib, /#\[cfg\(any\(target_os = "android", test\)\)\][^\n]*\n#\[cfg_attr\(not\(target_os = "android"\), allow\(dead_code\)\)\]\nmod consent;/)
 })
@@ -621,7 +621,7 @@ test('憑證：Rust 命令先核對憑證才動手，視窗要是主畫面（lis
   assert.match(conf, /challenge: String/)
   const forget = fnBody('android_known_forget')
   assert.ok(forget.indexOf('consent::redeem(') < forget.indexOf('live::forget('))
-  for (const n of ['android_known_token', 'android_known_confirm', 'android_known_forget', 'android_known_rename']) assert.match(fnBody(n), /consent::label_ok\(window\.label\(\)\)/, n)
+  for (const n of ['android_known_token', 'android_known_confirm', 'android_known_forget', 'android_known_rename', 'android_known_scan_confirm']) assert.match(fnBody(n), /consent::label_ok\(window\.label\(\)\)/, n)
   assert.match(read('src-tauri', 'tauri.android.conf.json'), /"label": "list"/)
 })
 
@@ -632,10 +632,113 @@ test('生物辨識框上的字：查看終端用固定字；帶憑證的只用 R
   for (const m of vc.matchAll(/setTitle\(([^)]*)\)/g)) assert.equal(m[1], 'title', '框的標題只能是 title')
   for (const m of vc.matchAll(/createConfirmDeviceCredentialIntent\(([^,]*),/g)) assert.equal(m[1], 'title')
   assert.match(vc, /\.setSubtitle\("請驗證是你本人"\)/, '副標是固定字')
-  const rd = vc.slice(vc.indexOf('private fun readDescription('), vc.indexOf('private fun writeConsentMarker('))
+  const rd = vc.slice(vc.indexOf('fun readDescription('), vc.indexOf('private fun writeConsentMarker('))
   assert.match(rd, /hashOf\(challenge\) \+ "\.desc"/, '用憑證雜湊找說明檔，不用網頁的字組路徑')
   const an = read('src-tauri', 'src', 'android.rs').replace(/\r\n/g, '\n')
   const tok = an.slice(an.indexOf('pub fn android_known_token('), an.indexOf('pub fn android_known_confirm('))
   assert.match(tok, /consent::describe\(act, crate::consent::prompt_name\(peer\), &crate::device_id::fp_grouped\(&peer\.sign_pub\)\)/, '框上的字由 Rust 從本機記住的資料決定')
   assert.ok(tok.indexOf('consent::issue(') < tok.indexOf('consent::write_desc('))
+})
+// ---- 用相機掃電腦畫面上的指紋 QR code：掃到的字只在外殼與 Rust 之間，網頁只拿到狀態字 ----
+const MANIFEST = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml')
+
+test('掃 QR code：掃描畫面不對外開放、直向；函式庫內建的 CaptureActivity 在清單裡移除；相機是選配', () => {
+  assert.match(MANIFEST, /xmlns:tools="http:\/\/schemas\.android\.com\/tools"/)
+  const act = /<activity\s+android:name="\.FingerprintScanActivity"[\s\S]*?\/>/.exec(MANIFEST)?.[0] ?? ''
+  assert.ok(act, '有宣告自己的掃描畫面')
+  assert.match(act, /android:exported="false"/)
+  assert.match(act, /android:screenOrientation="portrait"/)
+  assert.doesNotMatch(act, /intent-filter/)
+  assert.match(MANIFEST, /<activity\s+android:name="com\.journeyapps\.barcodescanner\.CaptureActivity"\s+tools:node="remove"\s*\/>/)
+  assert.match(MANIFEST, /<uses-feature android:name="android\.hardware\.camera" android:required="false" \/>/, '沒有相機的裝置也能裝')
+  // 清單自己不宣告相機權限（由函式庫帶進來）；除了主畫面，沒有別的 activity 對外開放
+  assert.doesNotMatch(MANIFEST, /uses-permission android:name="android\.permission\.CAMERA"/)
+  for (const m of MANIFEST.matchAll(/<activity\b[^>]*>/g)) {
+    if (m[0].includes('android:name=".MainActivity"')) continue
+    assert.doesNotMatch(m[0], /android:exported="true"/, m[0])
+  }
+  const mainAt = MANIFEST.indexOf('android:name=".MainActivity"')
+  assert.match(MANIFEST.slice(mainAt, mainAt + 200), /android:exported="true"/, '主畫面照舊')
+})
+
+test('掃 QR code：Gradle 帶 zxing-android-embedded 4.3.0 與明確的 core 3.5.4（鎖死版本、有註解）', () => {
+  const g = read('src-tauri', 'gen', 'android', 'app', 'build.gradle.kts')
+  assert.match(g, /implementation\("com\.journeyapps:zxing-android-embedded:4\.3\.0"\)/)
+  assert.match(g, /implementation\("com\.google\.zxing:core:3\.5\.4"\)/)
+  assert.match(g, /\/\/[^\n]*指紋掃 QR code[^\n]*\n\s*implementation\("com\.journeyapps/)
+  assert.match(g, /\/\/[^\n]*3\.5\.4[^\n]*\n\s*implementation\("com\.google\.zxing:core:3\.5\.4"\)/)
+  assert.match(g, /minSdk = 26/)
+})
+
+test('掃 QR code：掃描畫面只解 QR code、第一個就停相機、不存影像、結果只交給同一個行程裡的物件；缺權限回 denied', () => {
+  const k = read(...KT_DIR, 'FingerprintScanActivity.kt')
+  assert.match(k, /DefaultDecoderFactory\(listOf\(BarcodeFormat\.QR_CODE\)\)/, '只認 QR code')
+  assert.match(k, /decodeSingle\(/)
+  assert.match(k, /Manifest\.permission\.CAMERA/)
+  assert.match(k, /end\("denied", null\)/)
+  assert.match(k, /end\("no_camera", null\)/)
+  assert.match(k, /scanView\?\.pause\(\)\s+FingerprintScan\.deliver\(/, '先停相機再交結果')
+  assert.doesNotMatch(k, /JavascriptInterface|evaluateJavascript|WebView|Bitmap|saveImage|MediaStore|FileOutputStream|writeText|writeBytes|openFileOutput|takePicture|ImageCapture/, '不碰網頁、不存影像、不寫檔')
+  assert.doesNotMatch(k, /android\.permission\.INTERNET|java\.net|okhttp/i, '不上傳')
+})
+
+test('掃 QR code：橋接方法一個都不寫檔；掃描檔與憑證檔只在驗證通過那一刻（verified）寫；掃到的字不回給網頁', () => {
+  const vc = read(...KT_DIR, 'ViewerConfirm.kt')
+  const bridge = read(...KT_DIR, 'AsnBridge.kt')
+  const scan = read(...KT_DIR, 'FingerprintScan.kt')
+  // 橋：收回呼編號與憑證，只轉給 FingerprintScan；不寫檔、不回傳
+  assert.match(bridge, /@JavascriptInterface\s+fun scanFingerprint\(callbackId: String, challenge: String\) \{\s+activity\.runOnUiThread \{ FingerprintScan\.start\(activity, callbackId, challenge\) \}\s+\}/)
+  assert.doesNotMatch(bridge, /writeScanData|writeConsentMarker|\.scan"|\.irori-asn|writeText|writeBytes|FileOutputStream|createNewFile/)
+  // 寫檔的函式各一個定義、一個呼叫（都在 verified 裡），失敗與取消的路徑不寫
+  const lines = f => vc.split('\n').filter(l => l.includes(f))
+  assert.equal(lines('writeScanData(').length, 2, '一個定義、一個呼叫')
+  assert.ok(lines('writeScanData(').some(l => l.includes('private fun writeScanData(')))
+  const verified = vc.slice(vc.indexOf('private fun verified('), vc.indexOf('fun validChallenge('))
+  assert.ok(verified.includes('writeScanData(activity, ch, scan)') && verified.includes('writeConsentMarker(activity, ch)'))
+  assert.ok(verified.indexOf('writeScanData(') < verified.indexOf('writeConsentMarker('), '先寫掃描檔、再寫憑證檔')
+  assert.doesNotMatch(vc.slice(vc.indexOf('onAuthenticationError')).split('\n')[0], /verified|writeScanData|writeConsentMarker/)
+  // 掃描檔：位置在 consent 資料夾、副檔名 .scan、檔名是算出來的雜湊、字數有上限
+  const w = vc.slice(vc.indexOf('private fun writeScanData('), vc.indexOf('private fun removeScanData('))
+  assert.match(w, /val name = hashOf\(challenge\) \+ "\.scan"/)
+  assert.match(w, /File\(dir, name\)\.writeText\(text\.take\(FingerprintScan\.MAX_CHARS\), Charsets\.UTF_8\)/)
+  assert.match(w, /File\(activity\.filesDir, CONSENT_DIR\)/)
+  assert.match(scan, /const val MAX_CHARS = 200/)
+  // 太長的字不往下傳、不跳框；框上的字還是 Rust 的說明檔（沒有說明就不掃）
+  assert.match(vc, /scanText\.length > FingerprintScan\.MAX_CHARS/)
+  assert.match(scan, /readDescription\(activity, challenge\) == null/)
+  // 掃到的字只有 ViewerConfirm.ask 的 scanText 參數會用；FingerprintScan 不回給網頁（reply 只收狀態字）
+  for (const m of scan.matchAll(/ViewerConfirm\.reply\(activity, [^)]*\)/g)) assert.doesNotMatch(m[0], /text/, m[0])
+  assert.doesNotMatch(scan, /evaluateJavascript|WebView|writeText|writeBytes|FileOutputStream/)
+  assert.match(read(...KT_DIR, 'MainActivity.kt'), /FingerprintScan\.onActivityResult\(this, requestCode\)/)
+  assert.match(read(...KT_DIR, 'MainActivity.kt'), /isFinishing\) FingerprintScan\.clear\(\)/)
+})
+
+test('掃 QR code：Rust 命令只在手機清單、視窗要是主畫面、先用憑證再讀掃描檔；掃描檔只由 consent::take_scan 讀（讀完就刪）、Rust 不寫', () => {
+  const rs = read('src-tauri', 'src', 'android.rs')
+  const body = rs.slice(rs.indexOf('pub fn android_known_scan_confirm(')).split('\n}\n')[0]
+  assert.match(body, /challenge: String/)
+  assert.ok(body.indexOf('consent::redeem(') < body.indexOf('consent::take_scan('))
+  assert.match(body, /Action::Scan/)
+  assert.doesNotMatch(body, /fs::|File::|read_to_string/, '命令自己不碰檔案')
+  const consent = read('src-tauri', 'src', 'consent.rs').split('\n#[cfg(test)]')[0]
+  assert.equal((consent.match(/fs::write\(/g) ?? []).length, 1, 'consent.rs 只寫說明檔')
+  assert.match(consent, /pub fn take_scan\(/)
+  assert.match(consent, /std::fs::remove_file\(&p\)\.is_err\(\)/, '讀完要刪得掉')
+  for (const f of fs.readdirSync(path.join(root, 'src-tauri', 'src'))) {
+    if (!f.endsWith('.rs') || f === 'consent.rs' || f === 'fp_scan.rs' || f === 'android.rs') continue
+    assert.doesNotMatch(read('src-tauri', 'src', f).split('\n#[cfg(test)]')[0], /take_scan\(|SCAN_EXT/, `${f} 不碰掃描檔`)
+  }
+  const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
+  assert.ok(phone.includes('android::android_known_scan_confirm'))
+})
+
+test('掃 QR code（電腦版）：QR 的格子只有電腦版有（cfg(desktop)、手機不編 qrcode）；套件不開圖片功能', () => {
+  assert.match(lib, /#\[cfg\(feature = "gui"\)\]\n#\[cfg\(desktop\)\]\n#\[tauri::command\]\nasync fn device_own_fingerprint_qr\(/)
+  const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
+  assert.ok(desk.includes('device_own_fingerprint_qr'))
+  assert.ok(!lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler(')).includes('device_own_fingerprint_qr'))
+  assert.match(cargo, /\[target\.'cfg\(not\(any\(target_os = "android", target_os = "ios"\)\)\)'\.dependencies\]\nqrcode = \{ version = "0\.14\.1", default-features = false \}/)
+  const lock = read('src-tauri', 'Cargo.lock')
+  assert.match(lock, /name = "qrcode"\nversion = "0\.14\.1"\nsource = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"\nchecksum = "[0-9a-f]{64}"\n/)
+  assert.doesNotMatch(read('src-tauri', 'src', 'fp_scan.rs').split('\n#[cfg(test)]')[0].replace(/\/\/.*$/gm, ''), /image::|\.render\(/)
 })

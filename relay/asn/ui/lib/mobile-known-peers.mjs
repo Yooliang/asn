@@ -2,7 +2,9 @@
 // 判斷（指紋對不對、記住哪一把）都在 Rust（device_id.rs、android.rs）；這裡只有要顯示的字、整理資料，和「確認、忘記之前先過本人確認」的流程。
 // 本人確認＝生物辨識，沒設就用螢幕鎖（mobile-confirm.mjs 的 confirmWithToken）：先向 Rust 要一次性憑證（android_known_token），
 // 外殼驗證通過才寫憑證檔，再帶著憑證叫 android_known_confirm／android_known_forget；Rust 核對憑證檔才動手。畫面只拿得到憑證字串，寫不了憑證檔。
-import { confirmWithToken } from './mobile-confirm.mjs'
+// 另一條路是掃電腦設定頁上的 QR code（scan）：外殼開相機掃、本人確認後把掃到的字存進 App 私有資料夾，**畫面只拿得到狀態字，拿不到掃到的字**；
+// 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
+import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
 
 const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, n)
@@ -24,6 +26,12 @@ export const TEXT = {
   renameHint: '只記在這支手機上；留空就是未命名。',
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
+  methodBody: '請在那台電腦的設定頁按「顯示 QR code」，再用相機掃它；也可以改成用選的。',
+  scanButton: '用相機掃電腦上的 QR code',
+  scanFallback: '沒辦法掃，改用選的',
+  scanMismatch: '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 認得的電腦把它忘掉，再重新連線。',
+  scanBad: '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。',
+  scanNoCamera: '沒辦法用相機，改用選的。',
   sheetTitle: name => `確認「${name}」的指紋`,
   sheetBody: '請看那台電腦的設定頁，選出和那裡顯示的「這台電腦的指紋」完全一樣的那一組。',
   noneOption: '都不一樣',
@@ -99,7 +107,7 @@ export function errorText(e) {
  * 確認、忘記要做的事。confirm、invoke 可以注入（測試用）。
  * 每次都先過本人確認（'ok' 才繼續；'cancel' 什麼都不送；'no_lock' 丟沒設螢幕鎖的說明），不記住上一次的結果。
  */
-export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), invoke = tauriInvoke } = {}) {
+export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke } = {}) {
   // 回憑證字串（本人驗證過）或 null（取消）；沒設螢幕鎖丟說明。憑證每次都重要，不記住上一次的
   const gate = async (action, node) => {
     const challenge = await invoke('android_known_token', { action, node })
@@ -152,6 +160,31 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
       if (!challenge) return 'cancel'
       await invoke('android_known_forget', { node, challenge })
       return 'done'
+    },
+    /**
+     * 掃電腦設定頁上的 QR code 核對指紋。只收節點；掃到的字不會到這裡（外殼存給 Rust，Rust 判斷）。
+     * 回 'done'（一樣，已記住）｜'cancel'（取消，什麼都沒做）｜'no_camera'（相機權限被拒或沒有相機：改用選的）｜
+     * 'mismatch'（掃到的不一樣，已擋下）｜'bad_qr'（不是 ASN 的指紋 QR code）｜'blocked'／'locked'（這台被擋住或鎖住，不開相機）｜'not_ready'（還沒記住這台、憑證不對或過期）
+     */
+    scan: async node => {
+      if (!node) return 'cancel'
+      let challenge
+      try { challenge = await invoke('android_known_token', { action: 'scan', node }) } catch (e) {
+        const m = String(e?.message ?? e)
+        if (m === 'blocked' || m === 'locked' || m === 'not_ready') return m
+        throw e
+      }
+      if (typeof challenge !== 'string' || !challenge) throw new Error('no_token')
+      const st = await scan(challenge)
+      if (st === 'no_lock') throw new Error(NO_LOCK_TEXT)
+      if (st === 'denied' || st === 'no_camera') return 'no_camera'
+      if (st === 'bad_qr') return 'bad_qr'
+      if (st !== 'ok') return 'cancel'
+      const out = await invoke('android_known_scan_confirm', { node, challenge })
+      if (out === 'ok') return 'done'
+      if (out === 'mismatch' || out === 'bad_qr' || out === 'blocked' || out === 'locked') return out
+      if (out === 'not_verified') return 'not_ready'
+      throw new Error('unexpected')
     },
     /** 替這台改名（只記在這支手機；不影響信任，所以不用本人確認）。空字串＝未命名。回有沒有改到 */
     rename: async (node, name) => {

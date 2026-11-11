@@ -892,7 +892,7 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         let owners = |pat: &str| -> Vec<String> { code.match_indices(pat).map(|(i, _)| owner_at(code, i)).collect() };
         let confirm = owners("live::confirm(");
-        assert!(!confirm.is_empty() && confirm.iter().all(|f| f == "android_known_confirm"), "{confirm:?}");
+        assert!(!confirm.is_empty() && confirm.iter().all(|f| f == "android_known_confirm" || f == "android_known_scan_confirm"), "{confirm:?}");
         let forget = owners("live::forget(");
         assert!(!forget.is_empty() && forget.iter().all(|f| f == "android_known_forget"), "{forget:?}");
         for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "headless.rs", "view_d.rs", "view_remote.rs", "relay.rs"] {
@@ -1339,7 +1339,7 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
-            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
         }
         assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
     }
@@ -1364,9 +1364,9 @@ mod tests {
             assert!(!ans.contains(bad), "回答不能記住任何東西：{bad}");
         }
         // 答錯、都不一樣的紀錄只有回答這條路寫；題目準備只有出題那條路叫
-        for (pat, only) in [("live::pick_record_wrong(", "android_known_answer"), ("live::pick_block(", "android_known_answer"), ("live::pick_prepare(", "android_known_challenge")] {
+        for (pat, only) in [("live::pick_record_wrong(", &["android_known_answer"][..]), ("live::pick_block(", &["android_known_answer", "android_known_scan_confirm"][..]), ("live::pick_prepare(", &["android_known_challenge"][..])] {
             let o: Vec<String> = code.match_indices(pat).map(|(i, _)| owner_at(code, i)).collect();
-            assert!(!o.is_empty() && o.iter().all(|f| f == only), "{pat} 只有 {only} 能叫：{o:?}");
+            assert!(!o.is_empty() && o.iter().all(|f| only.contains(&f.as_str())), "{pat} 只有 {only:?} 能叫：{o:?}");
         }
         assert!(ans.contains("pick_record_wrong(") && ans.contains("pick_block("), "回答要把答錯記到檔案");
         assert!(ans.find("pick_gate(").unwrap() < ans.find("known_pick::answer(").unwrap(), "先看有沒有被鎖住、擋住，才判斷答案");

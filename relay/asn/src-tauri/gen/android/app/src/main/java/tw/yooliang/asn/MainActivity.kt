@@ -46,6 +46,8 @@ class MainActivity : TauriActivity() {
     @Suppress("DEPRECATION")
     super.onActivityResult(requestCode, resultCode, data)
     ViewerConfirm.onActivityResult(this, requestCode, resultCode)
+    // 掃 QR code 核對指紋的掃描畫面結束
+    FingerprintScan.onActivityResult(this, requestCode)
   }
 
   // 螢幕關閉或切到其他程式：通話自動結束（麥克風不留著）
@@ -81,6 +83,7 @@ class MainActivity : TauriActivity() {
   override fun onDestroy() {
     if (current === this) current = null
     if (isFinishing) ViewerConfirm.clear()
+    if (isFinishing) FingerprintScan.clear()
     super.onDestroy()
   }
 

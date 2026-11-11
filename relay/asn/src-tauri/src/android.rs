@@ -453,6 +453,14 @@ pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, ac
     // 框上的字由這裡決定：動作＋本人自己取的名字（沒取就未命名）＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
     let known = crate::device_id::live::known(&app.data_dir)?;
     let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
+    // 掃 QR code 是四選一以外的另一條確認路：答錯被鎖住或擋住的電腦一樣不給掃（不開相機）
+    if act == crate::consent::Action::Scan {
+        match crate::device_id::live::pick_gate(&app.data_dir, &node, crate::auth::now_ms())? {
+            Some(crate::device_id::PickGate::Blocked) => return Err("blocked".to_string()),
+            Some(crate::device_id::PickGate::Locked { .. }) => return Err("locked".to_string()),
+            _ => {}
+        }
+    }
     let text = crate::consent::describe(act, crate::consent::prompt_name(peer), &crate::device_id::fp_grouped(&peer.sign_pub));
     let challenge = crate::consent::issue(act, &node)?;
     crate::consent::write_desc(&app.data_dir, &challenge, &text)?;
@@ -471,6 +479,43 @@ pub fn android_known_confirm(window: tauri::WebviewWindow, app: State<'_, App>, 
         return Ok(false);
     }
     crate::device_id::live::confirm(&app.data_dir, &node, &crate::device_id::fingerprint(&sign_pub), crate::auth::now_ms())
+}
+
+/// 用相機掃電腦設定頁上的 QR code 核對指紋（先用 `android_known_token` 要 scan 憑證，外殼掃描、本人驗證通過後才寫掃描檔與憑證檔）。
+/// 掃到的字不經過畫面：這裡先用憑證（本人驗證過）、再讀出並刪掉掃描檔，格式、節點、指紋由 Rust 判斷（fp_scan.rs），
+/// 指紋是用這支手機記住的公鑰重算的。一樣就記住（清掉答錯紀錄）；不一樣就擋住（和「都不一樣」同一種），不是 ASN 的 QR code 什麼都不動。
+/// 回 ok／mismatch／bad_qr／not_verified／blocked／locked
+#[tauri::command]
+pub fn android_known_scan_confirm(window: tauri::WebviewWindow, app: State<'_, App>, node: String, challenge: String) -> Result<String, String> {
+    use crate::device_id::PickGate;
+    if !crate::consent::label_ok(window.label()) {
+        return Ok(crate::consent::NOT_VERIFIED.to_string());
+    }
+    let known = crate::device_id::live::known(&app.data_dir)?;
+    let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
+    let remembered = crate::device_id::fingerprint(&peer.sign_pub);
+    let dir = &app.data_dir;
+    let now = crate::auth::now_ms();
+    let out = crate::fp_scan::run(
+        || crate::consent::redeem(dir, crate::consent::Action::Scan, &node, &challenge),
+        || crate::consent::take_scan(dir, &challenge),
+        || {
+            Ok(match crate::device_id::live::pick_gate(dir, &node, now)? {
+                Some(PickGate::Blocked) => Some("blocked"),
+                Some(PickGate::Locked { .. }) => Some("locked"),
+                _ => None,
+            })
+        },
+        &node,
+        &remembered,
+        || crate::device_id::live::confirm(dir, &node, &remembered, now),
+        || {
+            crate::device_id::live::pick_block(dir, &node)?;
+            elog!("掃到的指紋和這支手機記住的不一樣，已經擋下");
+            Ok(())
+        },
+    )?;
+    Ok(out.to_string())
 }
 
 /// 本人在設定頁按「忘記」：要帶這台的憑證（本人剛在這支手機上驗證過）。下次再連就當第一次。回有沒有這台

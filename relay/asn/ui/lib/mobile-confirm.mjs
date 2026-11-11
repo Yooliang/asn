@@ -5,6 +5,8 @@ export const NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再
 export const CONFIRM_TIMEOUT_MS = 120_000
 const HOOK = '__asnConfirmViewer'   // 外殼把結果交回網頁的函式：window.__asnConfirmViewer(callbackId, result)
 const RESULTS = ['ok', 'cancel', 'no_lock']
+// 掃 QR code 核對指紋（外殼的 scanFingerprint）多出來的狀態字；掃到的字不會交回網頁，只有這些狀態
+const SCAN_RESULTS = [...RESULTS, 'denied', 'no_camera', 'bad_qr']
 
 let seq = 0
 
@@ -22,7 +24,18 @@ export async function confirmWithToken(challenge, win = globalThis, timeoutMs = 
   return run(win, timeoutMs, 'confirmWithToken', String(challenge))
 }
 
-async function run(win, timeoutMs, method, token) {
+/**
+ * 用相機掃電腦設定頁上的指紋 QR code（外殼的 scanFingerprint）：challenge 是 Rust 剛發的 scan 憑證。
+ * 外殼開相機、掃到後跳本人確認，通過才把掃到的字存進 App 私有資料夾給 Rust 讀；**這裡只拿得到狀態字，拿不到掃到的字**。
+ * 回 'ok'（掃到而且本人確認過）｜'cancel'｜'no_lock'｜'denied'（相機權限被拒）｜'no_camera'（沒有相機）｜'bad_qr'（掃到的字太長，不是 ASN 的 QR code）；
+ * 外殼不存在、憑證格式不對、任何意外一律 'cancel'
+ */
+export async function scanFingerprint(challenge, win = globalThis, timeoutMs = CONFIRM_TIMEOUT_MS) {
+  if (!/^[0-9a-f]{64}$/.test(String(challenge ?? ''))) return 'cancel'
+  return run(win, timeoutMs, 'scanFingerprint', String(challenge), SCAN_RESULTS)
+}
+
+async function run(win, timeoutMs, method, token, allowed = RESULTS) {
   const bridge = win?.AsnAndroid
   if (!bridge || typeof bridge[method] !== 'function') return 'cancel'
   const id = `cv${Date.now().toString(36)}-${++seq}`
@@ -35,7 +48,7 @@ async function run(win, timeoutMs, method, token) {
       done = true
       if (timer) clearTimeout(timer)
       win[HOOK] = prev
-      resolve(RESULTS.includes(r) ? r : 'cancel')
+      resolve(allowed.includes(r) ? r : 'cancel')
     }
     win[HOOK] = (cbId, r) => {
       if (cbId === id) finish(r)

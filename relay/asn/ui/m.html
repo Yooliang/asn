@@ -188,7 +188,7 @@
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <div class="m-peer-strip" v-if="chatFriend && peerStrip" role="status">
               <span class="m-peer-strip-tx">{{ KNOWN_TEXT.stripTitle }}</span>
-              <button class="m-btn m-peer-strip-btn" type="button" @click="openPeerSheet">{{ KNOWN_TEXT.stripButton }}</button>
+              <button class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet">{{ KNOWN_TEXT.stripButton }}</button>
             </div>
             <p class="m-err m-room-note" v-if="chatFriend && vp.note" role="alert">{{ vp.note }}</p>
             <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
@@ -774,6 +774,15 @@
       </section>
     </div>
     <!-- 確認電腦的指紋：名字、指紋都只用文字節點顯示 -->
+    <div class="m-ops" v-if="vp.method && vp.cur && !vp.sheet" @click.self="closeMethodSheet">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="peerSheetTitle">
+        <h2 class="m-ops-h">{{ peerSheetTitle }}</h2>
+        <p class="m-note m-peer-body">{{ KNOWN_TEXT.methodBody }}</p>
+        <button type="button" class="m-btn m-btn-big" :disabled="vp.busy" @click="scanPeer">{{ KNOWN_TEXT.scanButton }}</button>
+        <button type="button" class="m-btn" :disabled="vp.busy" @click="methodPickInstead">{{ KNOWN_TEXT.scanFallback }}</button>
+        <button type="button" class="m-btn m-ops-cancel" :disabled="vp.busy" @click="closeMethodSheet">{{ KNOWN_TEXT.cancel }}</button>
+      </section>
+    </div>
     <div class="m-ops" v-if="vp.sheet && vp.cur && vp.ch" @click.self="closePeerSheet">
       <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="peerSheetTitle">
         <h2 class="m-ops-h">{{ peerSheetTitle }}</h2>

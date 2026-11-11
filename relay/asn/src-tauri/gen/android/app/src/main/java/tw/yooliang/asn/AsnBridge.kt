@@ -123,6 +123,16 @@ class AsnBridge(private val activity: MainActivity) {
     activity.runOnUiThread { ViewerConfirm.ask(activity, callbackId, challenge) }
   }
 
+  /**
+   * 用相機掃電腦設定頁上的指紋 QR code：challenge 是 Rust 剛發的 scan 憑證。掃到的字**不會**交回網頁：外殼掃到後跳本人確認，
+   * 通過才把字存進 App 私有資料夾給 Rust 讀；網頁只收到狀態字 ok／cancel／denied／no_camera／bad_qr／no_lock
+   * （同一個 window.__asnConfirmViewer(callbackId, result)）。這裡不寫任何檔
+   */
+  @JavascriptInterface
+  fun scanFingerprint(callbackId: String, challenge: String) {
+    activity.runOnUiThread { FingerprintScan.start(activity, callbackId, challenge) }
+  }
+
   /** 通話中讓螢幕保持亮著（不然自己暗掉就會被當成切到背景而結束通話） */
   @JavascriptInterface
   fun keepAwake(on: Boolean) {
