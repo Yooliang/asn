@@ -227,7 +227,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(sheet, /v-for="\(o, i\) in vp\.ch\.options"[^>]*@click="choosePeer\(i\)">\{\{ o \}\}/)
   assert.match(sheet, /@click="choosePeer\(-1\)">\{\{ KNOWN_TEXT\.noneOption \}\}/)
   assert.match(sheet, /@click="closePeerSheet">\{\{ KNOWN_TEXT\.cancel \}\}/)
-  assert.match(html, /v-if="chatFriend && vp\.note"[^>]*>\{\{ vp\.note \}\}/)
+  assert.match(html, /v-if="chatFriend && vp\.note && !vp\.noteOwn"[^>]*>\{\{ vp\.note \}\}/)
   assert.match(html, /v-if="chatFriend && peerStrip"/)
   assert.match(html, /@click="openMethodSheet">\{\{ KNOWN_TEXT\.stripButton \}\}/)
   assert.match(html, /@remote-started="onRemoteStarted" @remote-ended="onRemoteEnded"/)
@@ -395,4 +395,78 @@ test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、�
   assert.match(js, /KNOWN_TEXT\.scanNoCamera/)
   assert.match(js, /const methodPickInstead = async \(\) => \{ vp\.method = false; await openPeerSheet\(\) \}/)
   assert.doesNotMatch(js, /console\.\w+\([^)]*(scan\w*Text|decoded)/)
+})
+
+test('認得的電腦頁：說明文字照規格；只有還沒確認的那列有「確認」按鈕，按下去走和提示條同一個開浮層的入口', () => {
+  assert.equal(TEXT.confirmButton, '確認')
+  assert.equal(TEXT.settingLead, '看過的電腦會記在這支手機上。確認過指紋的電腦，你才能從這支手機替它登入、在它的終端打字。還沒確認的，先按「確認」，對照那台電腦設定頁上的指紋。')
+  const html = read('../ui/m.html')
+  const list = html.slice(html.indexOf('class="m-known-list"'), html.indexOf('{{ KNOWN_TEXT.forgetNote }}'))
+  assert.match(list, /v-if="!p\.confirmed"[^>]*@click="confirmKnown\(p\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
+  assert.equal((list.match(/confirmKnown\(p\)/g) ?? []).length, 1)
+  // 提示條與設定頁按鈕最後都開同一個選方法浮層（openMethodSheet）
+  assert.match(html, /class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet"/)
+  const js = read('../ui/m.js')
+  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\)[^\n]* \}/, '設定頁的確認呼叫同一個 openMethodSheet')
+  assert.match(js, /if \(!p\?\.node \|\| p\.confirmed/, '已確認的不處理')
+  assert.doesNotMatch(js, /confirmKnown[^\n]*android_known/, '不另寫一套確認流程')
+})
+
+test('設定頁開確認：先暫存原本正在看的電腦，所有出口（成功、取消、失敗）收掉後統一還原；提示條路徑不受影響', () => {
+  const js = read('../ui/m.js')
+  assert.match(js, /const prev = vpPrev \?\? \{ cur: vp\.cur \}; vpReset\(\); vpPrev = prev;/, '開之前先記下原本的對象')
+  assert.match(js, /watch\(\(\) => !vp\.method && !vp\.sheet && !vp\.busy, idle => \{ if \(idle && vpPrev\) \{ vp\.cur = vpPrev\.cur; vpPrev = null \} \}\)/, '全部收掉後統一還原')
+  assert.match(js, /const vpReset = \(\) => \{ vpPrev = null;/, '開始／結束看電腦時作廢暫存')
+  // 提示條的入口不碰暫存；暫存只在 confirmKnown 設
+  assert.equal((js.match(/vpPrev = prev/g) ?? []).length, 1)
+  const strip = js.slice(js.indexOf('const openMethodSheet'), js.indexOf('const markConfirmed'))
+  assert.doesNotMatch(strip, /vpPrev/)
+})
+
+test('還原邏輯（模擬）：A 在看，從設定頁確認 B，成功、取消、失敗收掉後 A 都回來；沒暫存時不動', () => {
+  for (const exit of ['done', 'cancel', 'fail']) {
+    const vp = { cur: { node: 'A' }, method: false, sheet: false, busy: false }
+    let vpPrev = null
+    const idleCheck = () => { if (!vp.method && !vp.sheet && !vp.busy && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } }
+    vpPrev = { cur: vp.cur }; vp.cur = { node: 'B' }; vp.method = true; idleCheck()
+    assert.equal(vp.cur.node, 'B', '確認中維持 B')
+    if (exit === 'done') vp.cur = { node: 'B', confirmed: true }
+    vp.method = false; idleCheck()
+    assert.equal(vp.cur.node, 'A', exit)
+  }
+  const vp = { cur: { node: 'C' }, method: false, sheet: false, busy: false }
+  const vpPrev = null
+  if (!vp.method && !vp.sheet && !vp.busy && vpPrev) vp.cur = null
+  assert.equal(vp.cur.node, 'C', '提示條路徑不動')
+})
+
+test('設定頁確認留下的提示：成功路徑已清；離開或重進設定頁時只清設定頁開的那種，終端提示條的不碰', () => {
+  const js = read('../ui/m.js')
+  assert.match(js, /if \(r === 'done'\) \{[^\n]*vp\.note = ''/, '掃描成功清提示')
+  assert.match(js, /if \(r === 'done'\) \{ markConfirmed\(cur\); vp\.note = ''/, '四選一成功清提示')
+  assert.match(js, /openMethodSheet\(\); vp\.noteOwn = true \}/, '只有設定頁的確認標記為自己的提示')
+  assert.match(js, /const openMethodSheet = \(\) => \{ if \(!vp\.cur \|\| vp\.busy\) return; vp\.noteOwn = false;/, '提示條開的確認取消標記')
+  assert.match(js, /const vpReset = \(\) => \{ vpPrev = null; vp\.noteOwn = false;/, '開始／結束看電腦取消標記')
+  assert.match(js, /watch\(settingCat, \(c, old\) => \{ if \(\(c === 'known' \|\| old === 'known'\) && vp\.noteOwn\) \{ vp\.note = ''; vp\.noteOwn = false \} \}\)/, '離開或重進才清、且只清自己的')
+})
+
+test('設定頁確認的就是正在看的那台：成功後原本對象一併標已確認（還原後提示條不再跳出）；失敗提示只在設定頁顯示', () => {
+  const js = read('../ui/m.js')
+  assert.match(js, /const markConfirmed = cur => \{ if \(vp\.cur === cur\) vp\.cur = \{ \.\.\.cur, confirmed: true \}; if \(vpPrev\?\.cur\?\.node === cur\.node\) vpPrev = \{ cur: \{ \.\.\.vpPrev\.cur, confirmed: true \} \} \}/)
+  assert.equal((js.match(/markConfirmed\(cur\)/g) ?? []).length, 2, '掃描與四選一兩條成功路徑都走同一處')
+  // 模擬：A 在看（未確認），設定頁確認 A 成功，還原後仍是已確認；確認別台 B 則還原成原樣的 A
+  const run = confirmNode => {
+    const A = { node: 'A', confirmed: false }, B = { node: confirmNode, confirmed: false }
+    const vp = { cur: B }
+    let vpPrev = { cur: A }
+    const markConfirmed = cur => { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; if (vpPrev?.cur?.node === cur.node) vpPrev = { cur: { ...vpPrev.cur, confirmed: true } } }
+    markConfirmed(B)
+    vp.cur = vpPrev.cur
+    return vp.cur
+  }
+  assert.equal(run('A').confirmed, true)
+  assert.equal(run('B').confirmed, false)
+  const html = read('../ui/m.html')
+  assert.match(html, /v-if="chatFriend && vp\.note && !vp\.noteOwn"/, '終端提示條不顯示設定頁的提示')
+  assert.match(html, /v-if="vp\.note && vp\.noteOwn" role="alert"/, '設定頁只顯示自己的提示')
 })
