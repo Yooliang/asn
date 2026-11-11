@@ -36,7 +36,7 @@ import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
-import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
 import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
@@ -234,6 +234,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms, backlogAfterMs: 5 * 60_000,
     log: m => console.info('[ASN]', m),
   })
+  setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
   const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }
   core.on('state', sync)

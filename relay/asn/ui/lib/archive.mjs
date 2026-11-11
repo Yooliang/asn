@@ -59,17 +59,22 @@ export function buildArchiveRequest(friend, archived) {
 }
 
 const DONE_TEXT = { true: '已封存，這位夥伴不會再出現在名單上；它再寄信來或重新上線就會自動回來。', false: '已取消封存。' }
+// 本機封存：後台名單已經沒有這位（舊好友只剩本機存檔）時，封存改記在本機。AsnCore.setLocalArchived 由各頁面建好 core 後交進來
+let localArchiver = null
+export const setLocalArchiver = fn => { localArchiver = typeof fn === 'function' ? fn : null }
+const NOT_FOUND = /HTTP 404 ?not_found/
 // 送出一次封存／取消封存。回 { ok, text }；api 要有 partnerArchive（lib/tauri.mjs 的 transport）。後台舊版（404）會說要先更新
-export const GONE_TEXT = '這位夥伴已經不在名單上，不用封存'
-export async function runArchive(api, friend, archived) {
+// 後台說名單上沒有這位（not_found）：改在本機標記（封存進「已封存」、取消封存拿掉標記），往來記錄不動；成功就照常說已封存／已取消封存
+export async function runArchive(api, friend, archived, local = localArchiver) {
   if (typeof api?.partnerArchive !== 'function') return { ok: false, text: '這個版本還不能封存，請先更新' }
   try {
     const r = await api.partnerArchive(buildArchiveRequest(friend, archived))
     if (r && r.ok === false) return { ok: false, text: '封存失敗，請稍後再試' }
+    if (archived !== true && friend?.localArchived === true && local) local(friend, false)   // 取消封存：本機標記也一併拿掉
     return { ok: true, text: DONE_TEXT[archived === true] }
   } catch (e) {
-    // 後台名單裡沒有這個名字（程序關掉、夥伴被移除）：不是壞掉，用專用的說法，不要講「找不到這個視窗」（#447）
-    if (/HTTP 404 ?not_found/.test(String(e?.message ?? ''))) return { ok: false, text: GONE_TEXT }
+    // 後台名單裡沒有這個名字（程序關掉、夥伴被移除、只剩本機存檔的舊好友）：只動本機標記
+    if (NOT_FOUND.test(String(e?.message ?? '')) && local && local(friend, archived === true)) return { ok: true, text: DONE_TEXT[archived === true] }
     return { ok: false, text: opErrorText(e?.message) }
   }
 }

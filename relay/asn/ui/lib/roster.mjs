@@ -133,8 +133,9 @@ export const isKeyArchived = (keys, f) => Boolean(keys && keys.size && ((f?.part
 export function mergeFriends(known, live, archivedKeys = new Set()) {
   const map = new Map()
   for (const k of known) map.set(k.id, { ...k, status: 'offline', archived: false })
-  for (const l of live) map.set(l.id, { ...(map.get(l.id) ?? {}), ...l })
-  return [...map.values()].map(f => ({ ...f, archived: f.archived === true || isKeyArchived(archivedKeys, f), hue: hueOf(f.id), dp: initial(f.nick) }))
+  // 本機封存（localArchived：後台沒有這位、只在本機標記）：名單上有它就以後台為準，標記丟掉；不在名單才沿用
+  for (const l of live) map.set(l.id, { ...(map.get(l.id) ?? {}), ...l, localArchived: false })
+  return [...map.values()].map(f => ({ ...f, archived: f.archived === true || f.localArchived === true || isKeyArchived(archivedKeys, f), hue: hueOf(f.id), dp: initial(f.nick) }))
     .sort((a, b) => a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
