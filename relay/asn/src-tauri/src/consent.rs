@@ -376,7 +376,7 @@ mod tests {
             let b = body_of(code, name);
             assert!(b.contains("label_ok(window.label())"), "{name} 要檢查視窗代號");
             let head = &code[code.find(&format!("pub fn {name}(")).unwrap()..];
-            assert!(head.split(')').next().unwrap().contains("window: tauri::WebviewWindow"), "{name} 要收視窗");
+            assert!(head.split(')').next().unwrap().contains(concat!("window: tau", "ri::WebviewWindow")), "{name} 要收視窗");
         }
         for (i, _) in code.match_indices("consent::") {
             let before = &code[..i];
@@ -399,8 +399,12 @@ mod tests {
     fn 守門_這裡不寫日誌_不發事件_不寫憑證檔_正式程式不當掉() {
         let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("consent.rs")).unwrap().replace("\r\n", "\n");
         let code = src.split("\n#[cfg(test)]").next().unwrap();
-        for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit(", "ui_log", "fs::write", "File::create", "OpenOptions", ".unwrap()", ".expect("] {
+        for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit(", "ui_log", "File::create", "OpenOptions", ".unwrap()", ".expect("] {
             assert!(!code.contains(bad), "consent.rs 不能有：{bad}");
         }
+        // 只寫一種檔：框上的說明檔（`<雜湊>.desc`）。憑證檔（記號）只有外殼在驗證通過時寫，Rust 一律不寫
+        assert_eq!(code.matches("fs::write(").count(), 1, "只有寫說明檔那一處");
+        let w = &code[code.find("fs::write(").unwrap()..];
+        assert!(w.starts_with("fs::write(desc_path(data_dir, &hash_hex(challenge)), text)"), "只能寫說明檔：{}", &w[..w.find('\n').unwrap_or(w.len())]);
     }
 }

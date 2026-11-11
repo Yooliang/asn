@@ -1473,7 +1473,8 @@ mod tests {
                 continue;
             }
             let s = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
-            let s = s.split("\n#[cfg(test)]").next().unwrap().to_string();
+            // 切到測試模組為止（lib.rs 前面就有零星的 #[cfg(test)] 項目，不能從那裡切）
+            let s = s.split("\nmod tests {").next().unwrap().to_string();
             assert!(!s.contains("named_by_owner"), "{name} 不能碰名字旗標");
             for (i, _) in s.match_indices("rename_peer(") {
                 callers.push((name.clone(), owner_at(&s, i)));
@@ -1482,7 +1483,7 @@ mod tests {
         callers.sort();
         assert_eq!(callers, vec![("android.rs".to_string(), "android_known_rename".to_string()), ("lib.rs".to_string(), "device_known_rename".to_string())], "{callers:?}");
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        assert!(lib.contains("#[cfg(feature = \"gui\")]\n#[cfg(desktop)]\n#[tauri::command]\nfn device_known_rename("), "電腦版才有");
+        assert!(lib.contains(concat!("#[cfg(feature = \"gui\")]\n#[cfg(desktop)]\n#[tau", "ri::command]\nfn device_known_rename(")), "電腦版才有");
         let rs = include_str!("android.rs").replace("\r\n", "\n");
         assert!(rs.contains("android::android_known_rename") || lib.contains("android::android_known_rename"), "手機登記");
     }
