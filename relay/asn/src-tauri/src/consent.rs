@@ -186,9 +186,10 @@ fn desc_path(data_dir: &Path, hash: &str) -> std::path::PathBuf {
     data_dir.join(MARKER_DIR).join(format!("{hash}.{DESC_EXT}"))
 }
 
-/// 框上顯示的電腦名字：只認本人自己取的名字（`named_by_owner`）；電腦自己報上來的名字不進框（回空字串＝「未命名的電腦」）
+/// 框上顯示的電腦名字：只認本人自己取的名字；電腦自己報上來的名字不進框（回空字串＝「未命名的電腦」）。
+/// 名字旗標只在 device_id.rs 碰（守門測試），這裡轉呼叫
 pub fn prompt_name(peer: &crate::device_id::KnownPeer) -> &str {
-    if peer.named_by_owner { &peer.name } else { "" }
+    crate::device_id::owner_given_name(peer)
 }
 
 /// 框上要寫的字（純函式）：動作＋本人取的名字（沒有就「未命名的電腦」，去掉控制字元與改變文字方向的字元、最多 32 字）＋指紋前兩組。

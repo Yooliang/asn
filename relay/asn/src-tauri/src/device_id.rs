@@ -236,6 +236,15 @@ pub struct KnownPeer {
 pub const OWNER_NAME_MAX: usize = 32;
 
 /// 整理本人輸入的名字：控制字元、改變文字方向的字元、不可見的填充／組合／變體選擇／標籤字元換成空白，去頭尾空白，最多 32 個字。空字串＝沒有名字（畫面顯示「未命名的電腦」）
+/// 本人自己取的名字；沒取過（名字是電腦自己報上來的）回空字串。只讀，給確認框用
+pub fn owner_given_name(peer: &KnownPeer) -> &str {
+    if peer.named_by_owner {
+        &peer.name
+    } else {
+        ""
+    }
+}
+
 pub fn clean_owner_name(s: &str) -> String {
     let bad = |c: char| {
         c.is_control()
