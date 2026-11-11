@@ -2,7 +2,9 @@
 //!
 //! 名單上的名字同時是收信地址，所以這類條目一律標 `receivable:false`、`kind:"process"`，名字固定是
 //! 「引擎 · 供應商 #pid」，不會和視窗名相撞；橋不會把信投給它們。
-//! 判斷模型只看命令列的 `--model／-m／--provider`：不讀、不印環境變數與金鑰，拿不到就留空。
+//! Windows：判斷模型只看命令列的 `--model／-m／--provider`，而且值要符合已知的模型／供應商命名才顯示，其餘一律顯示「其他模型」；
+//! 不讀、不印環境變數與金鑰，拿不到就留空。
+//! Linux：只看行程名稱與啟動時間（node／bun 這類執行環境才多看命令列開頭的執行檔與腳本路徑），不顯示模型、也不分前景背景。
 //! 程序清單由 [`system_table`] 取得（Windows：ToolHelp＋PEB 命令列；Linux：/proc）；判斷邏輯 [`scan`] 是純函式，測試用假清單。
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -16,6 +18,10 @@ pub struct ProcInfo {
     pub exe: String,
     /// 命令列（含第 0 項執行檔）；讀不到就是空
     pub cmdline: Vec<String>,
+    /// 啟動時間（秒，從 1970 起）；只有 Linux 的精簡讀法會帶
+    pub start_secs: Option<u64>,
+    /// 精簡條目（Linux）：引擎已由行程名稱或腳本路徑決定，不帶命令列，也不判斷前景背景與模型
+    pub light: bool,
 }
 
 /// 掃到的執行中代理
@@ -33,6 +39,8 @@ pub struct ProcAgent {
     pub hidden: Option<bool>,
     /// 名單上的說明（#467：前景 pi 沒登記成可收信視窗的原因）；沒有就不帶
     pub detail: Option<String>,
+    /// 不判斷前景或背景（Linux 精簡條目）：名字不帶括號
+    pub place_unknown: bool,
 }
 
 /// 名單上限，避免失控時灌爆名單
@@ -41,10 +49,16 @@ pub const MAX_AGENTS: usize = 50;
 impl ProcAgent {
     /// 「pi · MiniMax #1234」；沒有供應商資訊就是「pi #1234」
     pub fn name(&self) -> String {
-        let place = if self.background { "背景" } else { "前景" };
+        let place = if self.place_unknown {
+            ""
+        } else if self.background {
+            "（背景）"
+        } else {
+            "（前景）"
+        };
         match &self.label {
-            Some(l) => format!("{} · {} #{}（{place}）", self.engine, l, self.pid),
-            None => format!("{} #{}（{place}）", self.engine, self.pid),
+            Some(l) => format!("{} · {} #{}{place}", self.engine, l, self.pid),
+            None => format!("{} #{}{place}", self.engine, self.pid),
         }
     }
     pub fn to_json(&self) -> Value {
@@ -125,7 +139,7 @@ fn engine_of_script(script: &str) -> Option<&'static str> {
 
 /// 這個程序是不是 pi（直接跑 pi，或 node／bun 跑 pi 的腳本）。exe＝執行檔名；cmdline＝含第 0 項的命令列（0.2 A5 接手用）
 pub fn is_pi_process(exe: &str, cmdline: &[String]) -> bool {
-    identify(&ProcInfo { pid: 0, ppid: 0, exe: exe.to_string(), cmdline: cmdline.to_vec() }).is_some_and(|(e, _)| e == "pi")
+    identify(&ProcInfo { pid: 0, ppid: 0, exe: exe.to_string(), cmdline: cmdline.to_vec(), start_secs: None, light: false }).is_some_and(|(e, _)| e == "pi")
 }
 
 /// 這個程序是哪個引擎、後面的參數是什麼（不含執行檔／腳本）
@@ -180,30 +194,91 @@ fn clean(v: &str) -> Option<String> {
     Some(v.to_string())
 }
 
-fn flag_value(args: &[String], longs: &[&str], shorts: &[&str]) -> Option<String> {
+/// 模型名稱的已知命名：第一組要「整個等於」或「接著分隔字元（- . : / _）」，避免一串亂碼剛好以 o3、gpt 開頭；
+/// 第二組是常見的連寫命名（glm4.6、qwen3-coder、kimi-k2、deepseek-v3），用開頭判斷（minimax-m2、MiniMax-Text-01 也是）。
+/// 比對前一律轉小寫，並只看最後一個「/」之後（anthropic/claude-opus-4 這種寫法）。
+const MODEL_DELIMITED_BASES: &[&str] = &["claude", "opus", "sonnet", "haiku", "gpt", "o3", "o4", "gemini", "grok"];
+const MODEL_LOOSE_PREFIXES: &[&str] = &["glm", "deepseek", "qwen", "kimi", "minimax"];
+/// 已知的供應商名稱（小寫）；等於它，或接著分隔字元（minimax-cn、google-vertex）才算
+const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai", "google", "gemini", "xai", "minimax", "zhipu", "zai", "deepseek", "moonshot", "mistral", "openrouter", "groq", "ollama", "azure", "bedrock"];
+/// 命令列上有給模型或供應商，但不是已知命名時，名單上顯示的簡稱（原值不送、不記錄）
+pub const OTHER_MODEL_LABEL: &str = "其他模型";
+
+fn starts_delimited(v: &str, base: &str) -> bool {
+    v == base || v.strip_prefix(base).is_some_and(|r| r.starts_with(['-', '.', ':', '/', '_']))
+}
+
+fn known_model(v: &str) -> bool {
+    let lower = v.to_lowercase();
+    let last = lower.rsplit('/').next().unwrap_or(&lower);
+    MODEL_DELIMITED_BASES.iter().any(|b| starts_delimited(last, b)) || MODEL_LOOSE_PREFIXES.iter().any(|p| last.starts_with(p))
+}
+
+fn known_provider(v: &str) -> bool {
+    let lower = v.to_lowercase();
+    KNOWN_PROVIDERS.iter().any(|p| starts_delimited(&lower, p))
+}
+
+/// 旗標後面的原始值（沒給值、或值是另一個旗標就是 None）。只在本機判斷用，呼叫端不得送出或記錄
+fn flag_raw<'a>(args: &'a [String], longs: &[&str], shorts: &[&str]) -> Option<&'a str> {
+    let ok = |v: &'a str| Some(v.trim()).filter(|v| !v.is_empty() && !v.starts_with('-'));
     for (i, a) in args.iter().enumerate() {
         for l in longs {
             if let Some(v) = a.strip_prefix(&format!("{l}=")) {
-                return clean(v);
+                return ok(v);
             }
             if a == l {
-                return args.get(i + 1).and_then(|v| clean(v));
+                return args.get(i + 1).and_then(|v| ok(v));
             }
         }
         if shorts.contains(&a.as_str()) {
-            return args.get(i + 1).and_then(|v| clean(v));
+            return args.get(i + 1).and_then(|v| ok(v));
         }
     }
     None
 }
 
-/// 命令列 → (模型, 顯示簡稱)。模型或供應商含 minimax 一律顯示 MiniMax；否則有 --provider 用供應商、再不然用模型名
+/// 命令列 → (模型, 顯示簡稱)。只有符合已知命名的模型才送出；（已通過白名單的）模型或供應商含 minimax 一律顯示 MiniMax；
+/// 否則有（已知的）供應商用供應商、再不然用模型名；有給但不是已知命名就顯示「其他模型」，原值不留
 fn model_of(args: &[String]) -> (Option<String>, Option<String>) {
-    let model = flag_value(args, &["--model"], &["-m"]);
-    let provider = flag_value(args, &["--provider"], &[]);
+    let raw_model = flag_raw(args, &["--model"], &["-m"]);
+    let raw_provider = flag_raw(args, &["--provider"], &[]);
+    let model = raw_model.and_then(clean).filter(|m| known_model(m));
+    let provider = raw_provider.and_then(clean).filter(|p| known_provider(p));
     let hit_minimax = |s: &Option<String>| s.as_deref().map(|x| x.to_lowercase().contains("minimax")).unwrap_or(false);
-    let label = if hit_minimax(&model) || hit_minimax(&provider) { Some("MiniMax".to_string()) } else { provider.clone().or_else(|| model.clone()) };
+    let label = if hit_minimax(&model) || hit_minimax(&provider) {
+        Some("MiniMax".to_string())
+    } else if let Some(l) = provider.clone().or_else(|| model.clone()) {
+        Some(l)
+    } else if raw_model.is_some() || raw_provider.is_some() {
+        Some(OTHER_MODEL_LABEL.to_string())
+    } else {
+        None
+    };
     (model, label)
+}
+
+/// 秒（1970 起）→「月-日 時:分」（UTC）
+fn fmt_utc(secs: u64) -> String {
+    let (days, rem) = (secs / 86_400, secs % 86_400);
+    // 由天數換算月日（公曆，Howard Hinnant 的 civil_from_days）
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{m:02}-{d:02} {:02}:{:02}", rem / 3600, rem % 3600 / 60)
+}
+
+/// 精簡條目的名單說明（Linux）：偵測到、未接管，帶啟動時間
+fn detected_detail(start_secs: Option<u64>) -> String {
+    match start_secs {
+        Some(s) => format!("偵測到，未接管 · 啟動 {} UTC", fmt_utc(s)),
+        None => "偵測到，未接管".to_string(),
+    }
 }
 
 /// 從程序清單找出執行中的代理。排除：本程序的後代（橋自己開的 worker／引擎，已在名單上）、
@@ -216,7 +291,7 @@ pub fn scan(table: &[ProcInfo], self_pid: u32) -> Vec<ProcAgent> {
 /// skip 裡的 pid 本身，以及它往上同引擎的包裝程序（pi.cmd → node 這種）都不列
 pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<ProcAgent> {
     let by_pid: HashMap<u32, &ProcInfo> = table.iter().map(|p| (p.pid, p)).collect();
-    let ids: HashMap<u32, (&'static str, Vec<String>)> = table.iter().filter_map(|p| identify(p).filter(|(e, a)| is_run(e, a)).map(|x| (p.pid, x))).collect();
+    let ids: HashMap<u32, (&'static str, Vec<String>)> = table.iter().filter_map(|p| identify(p).filter(|(e, a)| p.light || is_run(e, a)).map(|x| (p.pid, x))).collect();
     let descends_from_self = |pid: u32| {
         let mut cur = pid;
         for _ in 0..64 {
@@ -253,8 +328,13 @@ pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<Pr
         if ids.get(&p.ppid).map(|(e, _)| e == engine).unwrap_or(false) {
             continue;
         }
+        if p.light {
+            // 精簡條目（Linux）：沒有參數資訊，不判斷模型與前景背景
+            out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model: None, label: None, background: false, hidden: None, detail: Some(detected_detail(p.start_secs)), place_unknown: true });
+            continue;
+        }
         let (model, label) = model_of(args);
-        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args), hidden: None, detail: None });
+        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args), hidden: None, detail: None, place_unknown: false });
     }
     out.sort_by(|a, b| a.engine.cmp(&b.engine).then(a.pid.cmp(&b.pid)));
     out.truncate(MAX_AGENTS);
@@ -284,24 +364,83 @@ pub fn scan_system_excluding(skip: &[u32]) -> Vec<ProcAgent> {
 
 #[cfg(not(windows))]
 mod imp {
-    use super::ProcInfo;
+    use super::{engine_of_name, engine_of_script, exe_stem, ProcInfo, RUNTIMES};
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Path;
+
+    /// node／bun 這類執行環境才讀命令列，而且只讀開頭這麼多位元組
+    const CMDLINE_PREFIX: usize = 512;
+
+    /// uid 讀不到時用的值：沒有程序屬於它，等於一個代理都不列（寧可漏列，不把別人的程序送出去）
+    const NO_OWNER: u32 = u32::MAX;
 
     pub fn table() -> Vec<ProcInfo> {
+        let root = Path::new("/proc");
+        let me = std::fs::metadata(root.join("self")).map(|m| m.uid()).unwrap_or(NO_OWNER);
+        table_owned(root, Some(me))
+    }
+
+    /// 不限擁有者（測試用的假 /proc）
+    #[cfg(test)]
+    pub fn table_at(root: &Path) -> Vec<ProcInfo> {
+        table_owned(root, None)
+    }
+
+    /// 讀 `root`（真實是 /proc）下的程序。每個程序只讀 comm 與 stat；
+    /// comm 是引擎名就直接認定、不讀命令列；comm 是 node／bun 這類執行環境才讀命令列開頭，
+    /// 只取執行檔與腳本路徑兩個欄位判斷引擎，其餘丟棄、不留在結果裡。不讀環境變數。
+    /// `owner` 有給時，只有屬於這個 uid 的程序會被認成代理；別的使用者的程序照樣留著當親子關係用，但不會上名單
+    /// （多人共用的主機上，別人的程序名稱與 PID 不送出去）
+    pub fn table_owned(root: &Path, owner: Option<u32>) -> Vec<ProcInfo> {
         let mut out = vec![];
-        let Ok(rd) = std::fs::read_dir("/proc") else { return out };
+        let Ok(rd) = std::fs::read_dir(root) else { return out };
+        let proc_stat = std::fs::read_to_string(root.join("stat")).unwrap_or_default();
         for e in rd.flatten() {
             let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
             let dir = e.path();
             let Ok(stat) = std::fs::read_to_string(dir.join("stat")) else { continue };
             let Some(ppid) = stat.rsplit_once(')').and_then(|x| x.1.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok())) else { continue };
             let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default().trim().to_string();
-            let raw = std::fs::read(dir.join("cmdline")).unwrap_or_default();
-            let cmdline: Vec<String> = raw.split(|b| *b == 0).filter(|s| !s.is_empty()).take(64).map(|s| String::from_utf8_lossy(&s[..s.len().min(4096)]).to_string()).collect();
-            // comm 最多 15 字；執行檔名以命令列第 0 項的檔名為準
-            let exe = cmdline.first().map(|c| c.rsplit('/').next().unwrap_or(c).to_string()).filter(|s| !s.is_empty()).unwrap_or(comm);
-            out.push(ProcInfo { pid, ppid, exe, cmdline });
+            let stem = exe_stem(&comm);
+            let mine = owner.is_none_or(|u| std::fs::metadata(&dir).is_ok_and(|m| m.uid() == u));
+            let engine: Option<String> = if !mine {
+                None
+            } else if engine_of_name(&stem).is_some() {
+                Some(stem)
+            } else if RUNTIMES.contains(&stem.as_str()) {
+                engine_from_cmdline_prefix(&read_prefix(&dir.join("cmdline"))).map(String::from)
+            } else {
+                None
+            };
+            match engine {
+                // 引擎名放在 exe：之後的判斷只看這個，命令列不留
+                Some(name) => out.push(ProcInfo { pid, ppid, exe: name, cmdline: vec![], start_secs: crate::heartbeat::parse_start_secs(&stat, &proc_stat), light: true }),
+                // 別人的程序只留 pid／ppid（親子關係用），名稱清空：之後的判斷不可能把它認成代理，也不會送出
+                None => out.push(ProcInfo { pid, ppid, exe: if mine { comm } else { String::new() }, cmdline: vec![], start_secs: None, light: false }),
+            }
         }
         out
+    }
+
+    /// 讀檔案開頭至多 CMDLINE_PREFIX 位元組；讀不到回空（讀到一半出錯就用已讀到的部分）
+    fn read_prefix(path: &Path) -> Vec<u8> {
+        let Ok(f) = std::fs::File::open(path) else { return vec![] };
+        let mut buf = Vec::with_capacity(CMDLINE_PREFIX);
+        let _ = f.take(CMDLINE_PREFIX as u64).read_to_end(&mut buf);
+        buf
+    }
+
+    /// 命令列開頭（以 NUL 分隔）→ 引擎：只看第 0 欄（執行檔）與第 1 欄（腳本路徑），其餘不碰。
+    /// 第 1 欄是旗標（-e／-p／--eval 等內嵌程式碼也在內）就認不出，寧可漏列
+    pub(super) fn engine_from_cmdline_prefix(raw: &[u8]) -> Option<&'static str> {
+        let mut fields = raw.split(|b| *b == 0);
+        let _exe = fields.next()?;
+        let script = fields.next()?;
+        if script.is_empty() || script[0] == b'-' {
+            return None;
+        }
+        engine_of_script(&String::from_utf8_lossy(script))
     }
 }
 
@@ -332,7 +471,7 @@ mod imp {
                 let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
                 let exe = String::from_utf16_lossy(&e.szExeFile[..n]);
                 let cmdline = if is_candidate_exe(&exe) { read_cmdline(e.th32ProcessID).map(|c| split_cmdline(&c)).unwrap_or_default() } else { vec![] };
-                out.push(ProcInfo { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, exe, cmdline });
+                out.push(ProcInfo { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, exe, cmdline, start_secs: None, light: false });
                 ok = Process32NextW(snap, &mut e);
             }
             CloseHandle(snap);
@@ -417,7 +556,7 @@ mod tests {
     use super::*;
 
     fn p(pid: u32, ppid: u32, exe: &str, cmd: &str) -> ProcInfo {
-        ProcInfo { pid, ppid, exe: exe.into(), cmdline: cmd.split_whitespace().map(String::from).collect() }
+        ProcInfo { pid, ppid, exe: exe.into(), cmdline: cmd.split_whitespace().map(String::from).collect(), start_secs: None, light: false }
     }
 
     #[test]
@@ -482,10 +621,39 @@ mod tests {
         let a = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
         assert_eq!(model_of(&a("--model=minimax-m2")).1.as_deref(), Some("MiniMax"));
         assert_eq!(model_of(&a("-m gpt-5")), (Some("gpt-5".into()), Some("gpt-5".into())));
-        assert_eq!(model_of(&a("--model sk-ant=secret$value")), (None, None));
+        // 有給值但不是已知命名：不送模型、簡稱一律「其他模型」，原值不留
+        assert_eq!(model_of(&a("--model sk-ant=secret$value")), (None, Some(OTHER_MODEL_LABEL.into())));
         assert_eq!(model_of(&a("--model")), (None, None));
         assert_eq!(model_of(&a("--model --print")), (None, None));
         assert_eq!(model_of(&a("run")), (None, None));
+    }
+
+    #[test]
+    fn 已知模型照常顯示_像金鑰的值不送() {
+        let a = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+        for m in ["claude-opus-4", "gpt-5", "MiniMax-M2", "gemini-2.5-pro", "grok-4", "Sonnet", "o3", "o4-mini", "glm-4.6", "deepseek-v3", "qwen3-coder", "kimi-k2", "anthropic/claude-opus-4"] {
+            let (model, label) = model_of(&a(&format!("--model {m}")));
+            assert_eq!(model.as_deref(), Some(m), "{m}");
+            assert!(label.is_some() && label.as_deref() != Some(OTHER_MODEL_LABEL), "{m}");
+        }
+        assert_eq!(model_of(&a("--model MiniMax-M2")).1.as_deref(), Some("MiniMax"));
+        assert_eq!(model_of(&a("--provider openai --model gpt-5")), (Some("gpt-5".into()), Some("openai".into())));
+        assert_eq!(model_of(&a("--provider minimax-cn")).1.as_deref(), Some("MiniMax"));
+        for secret in ["abcd1234efgh5678", "sk-abc123def456", "o3abc123def456", "gptabc123", "xxminimaxk3y", "k3y/xxminimax"] {
+            for flags in [format!("--model {secret}"), format!("-m {secret}"), format!("--provider {secret}"), format!("--model={secret}")] {
+                let (model, label) = model_of(&a(&flags));
+                assert_eq!(model, None, "{flags}");
+                assert_eq!(label.as_deref(), Some(OTHER_MODEL_LABEL), "{flags}");
+            }
+            let t = vec![p(7, 1, "pi", &format!("pi --model {secret} --provider {secret}"))];
+            let r = scan(&t, 999);
+            let all = format!("{:?}{}{}", r, r[0].name(), r[0].to_json());
+            assert!(!all.contains(secret), "{all}");
+            assert_eq!(r[0].name(), format!("pi · {OTHER_MODEL_LABEL} #7（前景）"));
+            assert!(r[0].to_json().get("model").is_none());
+        }
+        // 供應商未知但模型已知：簡稱用模型；兩個都不認得才是其他模型
+        assert_eq!(model_of(&a("--provider abcd1234efgh5678 --model gpt-5")), (Some("gpt-5".into()), Some("gpt-5".into())));
     }
 
     #[test]
@@ -536,7 +704,7 @@ mod hidden_tests {
 
     #[test]
     fn 程序條目_hidden_有值才帶() {
-        let mut a = ProcAgent { pid: 7, engine: "grok".into(), model: None, label: None, background: false, hidden: None, detail: None };
+        let mut a = ProcAgent { pid: 7, engine: "grok".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false };
         assert!(a.to_json().get("hidden").is_none());
         a.hidden = Some(true);
         assert_eq!(a.to_json()["hidden"], json!(true));
@@ -546,9 +714,210 @@ mod hidden_tests {
 
     #[test]
     fn 程序條目_detail_有值才帶() {
-        let mut a = ProcAgent { pid: 7, engine: "pi".into(), model: None, label: None, background: false, hidden: None, detail: None };
+        let mut a = ProcAgent { pid: 7, engine: "pi".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false };
         assert!(a.to_json().get("detail").is_none());
         a.detail = Some(crate::bridge::engines::PI_DISABLED.into());
         assert_eq!(a.to_json()["detail"], json!(crate::bridge::engines::PI_DISABLED));
+    }
+}
+
+/// 假的 /proc 目錄：只在非 Windows 跑（Windows 沒有 /proc，table_at 也不存在）
+#[cfg(all(test, not(windows)))]
+mod fake_proc_tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    const MARK: &str = "SECRET_MARKER_123";
+    /// btime 1800000000＋starttime 12345 刻度（123 秒）＝ 2027-01-15 08:02:03 UTC
+    const START_TEXT: &str = "01-15 08:02";
+
+    fn base(root: &Path) {
+        fs::write(root.join("stat"), "cpu  1 2 3\nbtime 1800000000\nprocesses 9\n").unwrap();
+    }
+
+    /// 建一個假程序；cmdline 為 None 就不建檔（用來證明沒去讀）
+    fn proc_dir(root: &Path, pid: u32, ppid: u32, comm: &str, cmdline: Option<&[u8]>) {
+        let d = root.join(pid.to_string());
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("comm"), format!("{comm}\n")).unwrap();
+        fs::write(d.join("stat"), format!("{pid} ({comm}) S {ppid} 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 12345 0 0")).unwrap();
+        if let Some(c) = cmdline {
+            fs::write(d.join("cmdline"), c).unwrap();
+        }
+    }
+
+    fn cmd(parts: &[&str]) -> Vec<u8> {
+        let mut v = vec![];
+        for p in parts {
+            v.extend_from_slice(p.as_bytes());
+            v.push(0);
+        }
+        v
+    }
+
+    fn names(root: &Path, self_pid: u32) -> Vec<String> {
+        scan(&imp::table_at(root), self_pid).iter().map(|a| a.name()).collect()
+    }
+
+    #[test]
+    fn 只認同一個使用者的程序_別人的不上名單() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        for (pid, comm) in [(10, "claude"), (11, "pi"), (12, "codex"), (13, "node")] {
+            proc_dir(root, pid, 1, comm, Some(&cmd(&["node", "/x/node_modules/@openai/codex/bin/codex.js"])));
+        }
+        let me = fs::metadata(root.join("10")).unwrap().uid();
+        assert_eq!(scan(&imp::table_owned(root, Some(me)), 999).len(), 4);
+        // 不是自己的 uid：程序還在表裡（親子關係要用），但不會被認成代理
+        let other = imp::table_owned(root, Some(me.wrapping_add(1)));
+        assert_eq!(other.len(), 4);
+        assert!(other.iter().all(|p| p.exe.is_empty() && !p.light), "{other:?}");
+        assert!(scan(&other, 999).is_empty());
+    }
+
+    #[test]
+    fn 行程名是引擎名就直接認定_不讀命令列() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        // 全部沒有 cmdline 檔：若去讀就會讀不到，仍要認得
+        for (pid, comm) in [(10, "claude"), (11, "codex"), (12, "pi"), (13, "agy"), (14, "gemini"), (15, "grok"), (16, "bash")] {
+            proc_dir(root, pid, 1, comm, None);
+        }
+        let r = scan(&imp::table_at(root), 999);
+        let n: Vec<String> = r.iter().map(|a| a.name()).collect();
+        assert_eq!(n, vec!["claude #10", "codex #11", "gemini #13", "gemini #14", "grok #15", "pi #12"]);
+        for a in &r {
+            assert_eq!((a.model.clone(), a.label.clone(), a.background, a.place_unknown), (None, None, false, true));
+            let d = a.detail.clone().unwrap();
+            assert!(d.starts_with("偵測到，未接管"), "{d}");
+            assert!(d.contains(START_TEXT), "{d}");
+            assert!(d.chars().count() <= 80);
+            let j = a.to_json();
+            assert_eq!(j["kind"], json!("process"));
+            assert_eq!(j["receivable"], json!(false));
+            assert!(j.get("model").is_none());
+        }
+    }
+
+    #[test]
+    fn node_與_bun_只看腳本路徑_認得各引擎_其餘不認() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        proc_dir(root, 20, 1, "node", Some(&cmd(&["node", "/usr/lib/node_modules/@openai/codex/bin/codex.js", "exec", "--api-key", MARK])));
+        proc_dir(root, 21, 1, "node", Some(&cmd(&["/usr/bin/node", "/usr/lib/node_modules/@google/gemini-cli/bundle/gemini.js", "--model", MARK])));
+        proc_dir(root, 22, 1, "bun", Some(&cmd(&["bun", "/home/u/.npm/pi-coding-agent/dist/cli.js", "--api-key", MARK])));
+        proc_dir(root, 23, 1, "node", Some(&cmd(&["node", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js", "-p", MARK])));
+        proc_dir(root, 24, 1, "node", Some(&cmd(&["node", "/srv/app/server.js", "--secret", MARK])));
+        proc_dir(root, 25, 1, "node", Some(&cmd(&["node", "-e", "require('/x/@openai/codex/y')", MARK])));
+        proc_dir(root, 26, 1, "node", Some(&cmd(&["node"])));
+        proc_dir(root, 27, 1, "python3", Some(&cmd(&["python3", "/x/tool/a.py"])));
+        assert_eq!(names(root, 999), vec!["claude #23", "codex #20", "gemini #21", "pi #22"]);
+    }
+
+    #[test]
+    fn 命令列的特徵字串不會出現在任何輸出() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        proc_dir(root, 30, 1, "node", Some(&cmd(&["node", "/usr/lib/node_modules/@openai/codex/bin/codex.js", "--api-key", MARK, "--model", MARK])));
+        proc_dir(root, 31, 1, "codex", Some(&cmd(&["codex", "--api-key", MARK])));
+        proc_dir(root, 32, 1, "node", Some(&cmd(&["node", "-e", MARK])));
+        let table = imp::table_at(root);
+        assert!(!format!("{table:?}").contains(MARK), "ProcInfo");
+        let agents = scan(&table, 999);
+        assert_eq!(agents.len(), 2);
+        assert!(!format!("{agents:?}").contains(MARK), "ProcAgent");
+        for a in &agents {
+            assert!(!a.name().contains(MARK));
+            assert!(!a.to_json().to_string().contains(MARK), "to_json");
+        }
+        assert!(table.iter().all(|t| t.cmdline.is_empty()), "命令列一律不留在 ProcInfo");
+    }
+
+    #[test]
+    fn 超過前綴長度的內容不影響結果_也不出現() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        let mut raw = cmd(&["node", "/usr/lib/node_modules/@google/gemini-cli/bundle/gemini.js"]);
+        raw.resize(raw.len() + 600, b'A');
+        raw.extend_from_slice(MARK.as_bytes());
+        proc_dir(root, 40, 1, "node", Some(&raw));
+        let table = imp::table_at(root);
+        assert_eq!(scan(&table, 999).iter().map(|a| a.name()).collect::<Vec<_>>(), vec!["gemini #40"]);
+        assert!(!format!("{table:?}").contains(MARK));
+    }
+
+    #[test]
+    fn 命令列讀不到時其他照常() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        proc_dir(root, 50, 1, "node", None);
+        proc_dir(root, 51, 1, "node", None);
+        fs::create_dir_all(root.join("51").join("cmdline")).unwrap(); // 是資料夾：開得起來但讀不了
+        proc_dir(root, 52, 1, "codex", None);
+        assert_eq!(names(root, 999), vec!["codex #52"]);
+    }
+
+    #[test]
+    fn 排除橋自己與後代_同引擎父子不重複() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        proc_dir(root, 60, 1, "asn-bridge", None);
+        proc_dir(root, 61, 60, "claude", None); // 橋開的
+        proc_dir(root, 62, 61, "codex", None); // 橋後代的後代
+        proc_dir(root, 63, 1, "pi", None);
+        proc_dir(root, 64, 63, "node", Some(&cmd(&["node", "/a/pi-coding-agent/cli.js"]))); // pi 的包裝子程序
+        proc_dir(root, 65, 1, "grok", None);
+        assert_eq!(names(root, 60), vec!["grok #65", "pi #63"]);
+        proc_dir(root, 66, 60, "asn-bridge", None);
+        assert_eq!(names(root, 66), vec!["claude #61", "codex #62", "grok #65", "pi #63"], "換個自己，原本的後代就不再被排除");
+    }
+
+    #[test]
+    fn 上限_五十() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        for pid in 100..160 {
+            proc_dir(root, pid, 1, "pi", None);
+        }
+        assert_eq!(scan(&imp::table_at(root), 999).len(), MAX_AGENTS);
+    }
+
+    #[test]
+    fn 程序消失下一輪就不見() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        proc_dir(root, 70, 1, "claude", None);
+        proc_dir(root, 71, 1, "codex", None);
+        assert_eq!(names(root, 999), vec!["claude #70", "codex #71"]);
+        fs::remove_dir_all(root.join("70")).unwrap();
+        assert_eq!(names(root, 999), vec!["codex #71"]);
+    }
+
+    #[test]
+    fn 讀不到開機時間仍列出_只是不帶啟動時間() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        proc_dir(root, 80, 1, "pi", None); // 沒有 root/stat
+        let r = scan(&imp::table_at(root), 999);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].detail.as_deref(), Some("偵測到，未接管"));
+    }
+
+    #[test]
+    fn 啟動時間格式() {
+        assert_eq!(fmt_utc(1_800_000_123), "01-15 08:02");
+        assert_eq!(fmt_utc(0), "01-01 00:00");
+        assert_eq!(fmt_utc(951_782_400 + 59 * 60 + 3600 * 23), "02-29 23:59"); // 2000-02-29
     }
 }

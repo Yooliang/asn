@@ -175,7 +175,7 @@ mod tests {
     use std::cell::RefCell;
 
     fn proc(pid: u32, engine: &str, label: Option<&str>, background: bool) -> ProcAgent {
-        ProcAgent { pid, engine: engine.into(), model: None, label: label.map(String::from), background, hidden: None, detail: None }
+        ProcAgent { pid, engine: engine.into(), model: None, label: label.map(String::from), background, hidden: None, detail: None, place_unknown: false }
     }
     fn ask<'a>(engine: &'a str, name: &'a str, kind: &'a str, pid: Option<u32>) -> Ask<'a> {
         Ask { engine, name, kind, pid }

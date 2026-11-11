@@ -1253,7 +1253,8 @@ impl Core {
         // 本機執行中的代理（claude -p／pi／codex／gemini…）：僅顯示、不可收信；讀程序放背景執行緒，開關見 procscan::enabled
         // 已登記成可收信視窗的 pi（擴充登記的 pid）不再重複列成僅顯示條目
         // 本人接進收發室的視窗也一樣：同一個程序不再列成僅顯示條目
-        let registered: Vec<u32> = self.roster.iter().filter(|w| w.engine == "pi" || w.is_self_pull()).map(|w| w.pid).collect();
+        // Linux 偵測不看參數、互動式 claude 也會列出（#893）：已在名單上的視窗（有 pid 的）一律排除，免得同一個程序出現兩次
+        let registered: Vec<u32> = self.roster.iter().filter(|w| w.engine == "pi" || w.is_self_pull() || w.pid != 0).map(|w| w.pid).collect();
         // 主控台視窗表一輪只列一次（EnumWindows，不接上別人的主控台），名單裡所有有視窗的條目共用
         let (mut procs, snap) = tokio::task::spawn_blocking(move || (super::procscan::scan_system_excluding(&registered), crate::launch::console::window_snapshot())).await.unwrap_or_default();
         roster::apply_hidden(&mut self.roster, &snap);
@@ -1261,7 +1262,8 @@ impl Core {
         for p in procs.iter_mut() {
             p.hidden = roster::hidden_of(&snap, p.pid);
             // 前景（互動）pi 沒登記成可收信視窗：說明原因，不要看起來像一般自己開的程式（#467）。-p 等背景單次執行本來就不登記
-            if p.engine == "pi" && !p.background {
+            // Linux 不判斷前景／背景（place_unknown）：保留「偵測到，未接管」與啟動時間，不覆蓋成前景 pi 的說明
+            if p.engine == "pi" && !p.background && !p.place_unknown {
                 p.detail = Some(super::engines::pi_unregistered_detail(pi_loaded).to_string());
             }
         }
