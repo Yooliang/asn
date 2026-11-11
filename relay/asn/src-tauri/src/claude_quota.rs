@@ -314,7 +314,7 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     let Some((o, last_ms)) = owner::resolve_timed(home, cfg, input) else { return false };
     let Some(read_ms) = last_ms else { return false };
     // 對話紀錄記的是「這個視窗開的時候的帳號」；ASN 切換帳號後，同一個視窗之後送來的額度可能已經是新帳號的（對話紀錄的身分不會變）。
-    // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：兩邊一致才收，不一致或讀不到都不記（#1339）
+    // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：兩邊一致才收，不一致或讀不到都不記
     if !window_matches(home, cfg, input, &o, now_ms) {
         return false;
     }

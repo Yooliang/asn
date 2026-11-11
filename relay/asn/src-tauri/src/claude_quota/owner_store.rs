@@ -83,7 +83,7 @@ impl Cache {
     }
 }
 
-/// 視窗自己的登入帳號（`.claude.json` 的 oauthAccount.accountUuid）的快取（#1339 之後）：路徑 → 大小、修改時間、accountUuid（讀不到身分也記，免得每次重讀）。
+/// 視窗自己的登入帳號（`.claude.json` 的 oauthAccount.accountUuid）的快取：路徑 → 大小、修改時間、accountUuid（讀不到身分也記，免得每次重讀）。
 /// 檔案可能有好幾 MB、狀態列又叫得很勤，大小與修改時間沒變就不重讀。最多 8 筆。
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct AcctCache(BTreeMap<String, AcctEnt>);

@@ -667,7 +667,7 @@ fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
     }
 }
 
-// ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（#1339：ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
+// ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
 use super::super::owner::{short_hash, test_set_window_account, window_account_uuid};
 
 fn cj_in(dir: &std::path::Path, text: &str) {
