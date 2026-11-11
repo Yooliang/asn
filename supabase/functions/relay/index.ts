@@ -36,6 +36,7 @@ import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
 import { handlePushAction, notifyPush, PUSH_ACTIONS } from "../_shared/push_ctl.ts";
+import { handleNodeRotate, NODE_ROTATE_ACTION } from "../_shared/node_rotate.ts";
 import { badSenderName } from "../_shared/reserved_sender.ts";
 import { createFcm } from "../_shared/push_fcm.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
@@ -775,6 +776,13 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPair = DEVICE_PAIR_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleDevicePairAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPair);
+    return json(r.status, r.body);
+  }
+  // 手機換一把新的節點金鑰（見 _shared/node_rotate.ts）：用舊金鑰認證；節點一律取自金鑰，雜湊不寫 log
+  if (action === NODE_ROTATE_ACTION) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const r = await handleNodeRotate({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {});
     return json(r.status, r.body);
   }
   // 手機推播權杖（#797，見 _shared/push_ctl.ts）：節點金鑰；權杖只交給資料庫，不回傳、不寫 log

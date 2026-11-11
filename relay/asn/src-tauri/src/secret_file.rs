@@ -76,7 +76,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
 }
 
 /// 換檔後把所在資料夾也同步到磁碟（只有 unix 有這個操作；盡力而為，失敗不影響已換好的檔）
-fn sync_parent(path: &Path) {
+pub(crate) fn sync_parent(path: &Path) {
     #[cfg(unix)]
     {
         if let Some(p) = path.parent() {

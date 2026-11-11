@@ -57,7 +57,8 @@ pub fn setup_ask_of(v: &Value) -> Option<SetupAsk> {
 pub struct Relay {
     client: reqwest::Client,
     base: String,
-    key: String,
+    /// 節點金鑰。手機換新金鑰後（node_rotate.rs）用 set_key 換掉，之後的請求就帶新的；請求前先複製出來，不跨 await 持鎖
+    key: std::sync::RwLock<String>,
     pub node: String,
     pub window: Mutex<String>,
     old: Mutex<Vec<OldName>>,
@@ -440,7 +441,7 @@ pub(crate) fn net_err(e: reqwest::Error) -> String {
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, owner_dir: Mutex::new(None),
+            client: reqwest::Client::new(), base, key: std::sync::RwLock::new(key), node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), foreground_ms: AtomicU64::new(0), reports_foreground: cfg!(target_os = "android"), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
@@ -623,9 +624,26 @@ impl Relay {
     /// 不把非 2xx 當錯誤：回（HTTP 狀態碼, 回應 JSON）。給需要後台中文說明（detail、field）的指令用（asn-cli site）。
     /// 只有連線失敗才回 Err；錯誤訊息只含動作名，不含金鑰。
     pub async fn api_status(&self, action: &str, body: Value) -> Result<(u16, Value), String> {
+        self.call_with_key(&self.key(), action, Some(body)).await
+    }
+    /// 目前使用的節點金鑰（複製一份；不要記進 log）
+    fn key(&self) -> String {
+        self.key.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+    /// 換上新的節點金鑰：之後的請求都帶新的（手機換鑰完成時呼叫，不必重啟）
+    pub fn set_key(&self, new_key: String) {
+        *self.key.write().unwrap_or_else(|p| p.into_inner()) = new_key;
+    }
+    /// 用指定的金鑰呼叫一個動作（有 body＝POST、沒有＝GET），不把非 2xx 當錯誤：回（HTTP 狀態碼, 回應 JSON）。
+    /// 手機換鑰要分別用舊金鑰、新金鑰各打一次，所以金鑰由呼叫端給。只有連線失敗才回 Err；錯誤訊息只含動作名，不含金鑰
+    pub async fn call_with_key(&self, key: &str, action: &str, body: Option<Value>) -> Result<(u16, Value), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
+        let req = match &body {
+            Some(b) => self.client.post(&url).json(b),
+            None => self.client.get(&url),
+        };
+        let res = req.header("x-relay-key", key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
         Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
@@ -642,7 +660,7 @@ impl Relay {
                 req = req.header(SIGN_HEADER, format!("Bearer {t}"));
             }
             let wait = self.connect_retry_ms.get(attempt).copied();
-            match req.header("x-relay-key", &self.key).timeout(timeout).send().await {
+            match req.header("x-relay-key", self.key()).timeout(timeout).send().await {
                 Ok(r) => {
                     let status = r.status();
                     // 閘道暫時回 502／503／504：寄信帶了 client_id 才重試（後台去重，不會寄兩封）
@@ -687,7 +705,7 @@ impl Relay {
     pub async fn api_bytes(&self, action: &str, body: Value, max: usize, timeout: Duration) -> Result<(Vec<u8>, String), String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
+        let res = self.client.post(&url).json(&body).header("x-relay-key", self.key()).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status();
         let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
         let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", net_err(e)))?;
