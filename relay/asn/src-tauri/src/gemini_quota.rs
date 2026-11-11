@@ -6,12 +6,13 @@
 //! - 沒有 `email` 或沒有 `quota` 的整筆略過：agy 啟動前 1～2 秒欄位是陸續補上的，不能當成「沒額度」。
 //! - 新舊判斷用 merge.rs 的簡化規則（#1266）：資料時間不能比記著的舊、不能在未來、重置時間要在合理範圍；其餘照收（滾動窗的回升是合法的）。
 //! - 本機檔 `~/.asn/gemini-quota.json`：以 email 為鍵、最多 20 個帳號，只存兩個額度窗（剩餘、重置時間、讀取時間）、方案、記錄時間。
-//!   cwd、工作階段／對話編號、token 數、模型一律不留。
+//!   cwd、工作階段／對話編號的原值、token 數、模型一律不留。
 //! - 狀態列最快每 300ms 叫一次：值沒變就不寫檔（重置時間差 10 分鐘內算沒變；滿額的窗重置時間會一直往後跑）。
 //!   值沒變但上次記錄已超過 5 分鐘才重寫一次，讓「多久前讀的」不會一直停在開窗那一刻。
 //! 紅線：函式一律吃家目錄路徑參數；只有命令列入口與 Tauri 指令決定真實家目錄。不讀任何登入憑證、不連網、不執行外部程式。
 use crate::claude_accounts::normalize_email;
 use crate::claude_quota::merge;
+mod seen;
 use crate::claude_quota::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -49,6 +50,8 @@ pub struct Reading {
     pub email: String,
     pub plan: String,
     pub parsed: Parsed,
+    /// 視窗代號的雜湊（session_id，沒有才用 conversation_id；原值不留，見 seen.rs）；都沒有就是 None
+    pub session: Option<String>,
     /// 丟掉的額度桶名（給 log 看）
     pub dropped: Vec<String>,
 }
@@ -120,9 +123,11 @@ pub fn parse_statusline(text: &str, now_ms: i64) -> Option<Reading> {
         }
     }
     let plan = v.get("plan_tier").and_then(Value::as_str).map(clean_plan).unwrap_or_default();
+    let session = ["session_id", "conversation_id"].iter().find_map(|k| v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 200)).map(seen::session_key);
     Some(Reading {
         email,
         plan,
+        session,
         parsed: Parsed {
             five_hour_pct: five.map(|f| f.0),
             weekly_pct: week.map(|w| w.0),
@@ -185,12 +190,24 @@ fn same_values(a: &Entry, b: &Entry) -> bool {
 /// 記一筆。有寫檔回 Ok(true)；沒有可收的、值沒變（且 5 分鐘內記過）回 Ok(false)，不動檔案。
 /// 不收的原因與丟掉的桶寫進 `~/.asn/gemini-quota.log`（跟上一筆一樣就不重複寫）。
 pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
+    record_at(home, r, (Some(now_ms), Some(now_ms)), now_ms)
+}
+
+/// 同 [`record`]，兩條窗各自的資料時間：`None`＝這條窗這次不送（第一次看到的視窗，見 seen.rs）
+fn record_at(home: &Path, r: &Reading, reads: (Option<i64>, Option<i64>), now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let old = all.get(&r.email);
     // Gemini 的數字是讀取當下的即時值，資料時間就是現在；帳號是 agy 自己給的 email（#1266）
-    // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉再合併（#1321）
+    // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉再合併（#1321）；有沒有這一窗看實際讀數，不看下面因為「第一次看到」而清掉的那份
     let trimmed = old.and_then(|e| merge::without_missing_expired(&e.quota, &r.parsed, now_ms));
-    let m = merge::merge_full(trimmed.as_ref().or(old.map(|e| &e.quota)), &r.parsed, now_ms, now_ms);
+    let mut parsed = r.parsed.clone();
+    if reads.0.is_none() {
+        (parsed.five_hour_pct, parsed.five_reset_ms) = (None, None);
+    }
+    if reads.1.is_none() {
+        (parsed.weekly_pct, parsed.week_reset_ms) = (None, None);
+    }
+    let m = merge::merge_full_each(trimmed.as_ref().or(old.map(|e| &e.quota)), &parsed, reads.0.unwrap_or(now_ms), reads.1.unwrap_or(now_ms), now_ms);
     let (merged, skipped) = (m.quota.or(trimmed), m.skipped);
     log_once(home, &r.dropped, &merge::skipped_lines(&skipped, now_ms), now_ms);
     let plan = if r.plan.is_empty() { old.map(|e| e.plan.clone()).unwrap_or_default() } else { r.plan.clone() };
@@ -251,7 +268,22 @@ fn log_once(home: &Path, dropped: &[String], skipped: &str, now_ms: i64) {
 /// 狀態列掛鉤：解析＋記錄，回要印在狀態列的那一行。任何失敗都照樣回一行。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> String {
     let Some(r) = parse_statusline(input, now_ms) else { return status_line(None) };
-    let _ = record(home, &r, now_ms);
+    // 資料時間：以「agy 視窗＋那一窗額度」為單位，數值有變才設成現在，沒變沿用上次的（seen.rs）；
+    // 認不出是哪個視窗（狀態列資料沒有 session_id／conversation_id）就沒辦法判斷新舊，這筆不記
+    if let Some(key) = &r.session {
+        let before = seen::Seen::load(home);
+        let mut now_seen = before.clone();
+        let o = now_seen.observe(key, &r.parsed, now_ms);
+        if now_seen != before {
+            now_seen.save(home);
+        }
+        let pick = |v: seen::Verdict| match v {
+            seen::Verdict::FirstSeen => None,
+            seen::Verdict::Read(t) => Some(t),
+            seen::Verdict::Absent => Some(now_ms),
+        };
+        let _ = record_at(home, &r, (pick(o.five), pick(o.week)), now_ms);
+    }
     status_line(Some(&r))
 }
 
