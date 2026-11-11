@@ -255,15 +255,32 @@ fn 讀數沒有某一窗_存著的那窗已過重置時間才拿掉_還沒過就
 
 #[test]
 fn 讀數有那一窗但這次不送_存著的過期窗不算缺_不拿掉() {
-    // #1321 的「缺一窗」看實際讀數有沒有那一窗；#1316 因為「第一次看到」而不送的那窗，讀數裡其實有，不能被當成缺
+    // #1321 的「缺一窗」看實際讀數裡有沒有那一窗；#1316 因為「第一次看到」而不送的那窗，讀數裡其實有，不能被當成缺
     let h = tempfile::tempdir().unwrap();
     let r = parse_statusline(&status(Some(0.9), Some(0.5)), NOW).unwrap();
     assert!(record(h.path(), &r, NOW).unwrap());
-    let t = NOW + 2 * 3_600_000; // 5 小時的重置時間（16:37）已過
-    let r = parse_statusline(&status(Some(0.8), Some(0.4)), t).unwrap();
+    let t = NOW + 2 * 3_600_000; // 存著的 5 小時重置時間（16:37）已過
+    // 讀數裡的 5 小時是新一期（重置時間在未來），這次不送；每週照送
+    let line = status(Some(0.8), Some(0.4)).replace("2026-10-29T16:37:30Z", "2026-10-29T21:37:30Z");
+    let r = parse_statusline(&line, t).unwrap();
+    assert_eq!(r.parsed.five_hour_pct, Some(80), "讀數裡有 5 小時");
     assert!(record_at(h.path(), &r, (None, Some(t)), t).unwrap());
     let q = load_all(h.path())[ME].quota.clone();
     assert_eq!((q.five_hour_pct, q.weekly_pct), (Some(90), Some(40)), "5 小時沒送也沒被拿掉，每週照新值");
+}
+
+#[test]
+fn 讀數裡的桶重置時間已過_算沒有這一窗_存著的過期窗拿掉() {
+    // bucket() 會丟掉重置時間已過的桶（那個比例是重置前的舊值）：這種讀數＝沒有這一窗，存著的也已過期就拿掉
+    let h = tempfile::tempdir().unwrap();
+    let r = parse_statusline(&status(Some(0.9), Some(0.5)), NOW).unwrap();
+    assert!(record(h.path(), &r, NOW).unwrap());
+    let t = NOW + 2 * 3_600_000;
+    let r = parse_statusline(&status(Some(0.9), Some(0.4)), t).unwrap();
+    assert_eq!(r.parsed.five_hour_pct, None, "重置時間已過的桶被丟掉");
+    assert!(record_at(h.path(), &r, (Some(t), Some(t)), t).unwrap());
+    let q = load_all(h.path())[ME].quota.clone();
+    assert_eq!((q.five_hour_pct, q.five_reset_at, q.weekly_pct), (None, None, Some(40)));
 }
 
 // ---------- 資料時間：數值有變才前進（#1316） ----------
@@ -317,6 +334,22 @@ fn 數值變了照送_資料時間是現在_重置時間差十分鐘內算沒變
     let jitter = win_status("S-A", Some(0.85), None).replace("2026-10-29T16:37:30Z", "2026-10-29T16:37:40Z");
     hook(h.path(), &jitter, NOW + 20 * MIN);
     assert_eq!(quota_of(&h).five_at, Some(iso_secs(NOW + 10 * MIN)));
+}
+
+#[test]
+fn 跨過重置時間_剩餘百分比沒變_新一期照送_資料時間是現在() {
+    let h = tempfile::tempdir().unwrap();
+    hook(h.path(), &win_status("S-A", Some(0.9), Some(0.5)), NOW);
+    hook(h.path(), &win_status("S-A", Some(0.9), Some(0.5)), NOW + MIN);
+    let q = quota_of(&h);
+    assert_eq!((q.five_hour_pct, q.five_at.clone()), (Some(90), Some(iso_secs(NOW))), "沒變：沿用第一次看到的時間");
+    // 3 小時後：舊的重置時間（16:37）已過，agy 給新一期的重置時間，剩餘 % 一樣
+    let t = NOW + 3 * 3_600_000;
+    let next = win_status("S-A", Some(0.9), Some(0.5)).replace("2026-10-29T16:37:30Z", "2026-10-29T22:37:30Z");
+    hook(h.path(), &next, t);
+    let q = quota_of(&h);
+    assert_eq!((q.five_hour_pct, q.five_at, q.five_reset_at), (Some(90), Some(iso_secs(t)), Some("2026-10-29T22:37:30Z".to_string())), "新一期照送，資料時間是現在");
+    assert_eq!(q.week_at, Some(iso_secs(NOW)), "每週沒變，沿用舊的時間");
 }
 
 #[test]
