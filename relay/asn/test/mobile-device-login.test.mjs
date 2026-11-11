@@ -37,6 +37,10 @@ test('取回的回應：各種狀態對應成畫面；ready 的網址、代碼�
   }
 })
 
+test('發出請求時回 untrusted：同一句說明', () => {
+  assert.deepEqual(requestView({ state: 'untrusted' }), { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted })
+})
+
 test('未確認指紋的電腦：回 untrusted，說明要先在這支手機看一次那台的終端、照畫面確認指紋', () => {
   assert.equal(LOGIN_TEXT.untrusted, '這支手機還沒有確認過這台電腦的指紋。請先在這支手機看一次那台的終端，照畫面確認指紋。')
   assert.deepEqual(fetchView({ state: 'untrusted' }), { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted })
@@ -103,6 +107,8 @@ test('守門（手機 Rust）：取回時驗章只用手機本機記住的電腦
   assert.match(req, /"node_setup_request"/)
   assert.match(req, /"p_node": app\.node/)
   assert.match(req, /already[\s\S]*return Ok/, 'already 時不留私鑰')
+  assert.ok(req.indexOf('confirmed_at.is_some()') > 0 && req.indexOf('"state": "untrusted"') > 0, '發出請求前先查那台電腦確認過指紋')
+  assert.ok(req.indexOf('confirmed_at.is_some()') < req.indexOf('new_request('), '先查再建請求（未確認的不產私鑰、不送出）')
   const lib = read('../src-tauri/src/lib.rs')
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]'), lib.indexOf('let builder = builder\n        .setup'))
   assert.ok(phone.includes('account::setup_device_request') && phone.includes('account::setup_device_fetch') && phone.includes('account::setup_device_cancel'), '手機的指令清單要有')

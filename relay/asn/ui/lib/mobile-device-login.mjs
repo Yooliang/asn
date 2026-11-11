@@ -53,6 +53,7 @@ export const showLoginButton = (vendorKey, action, enabled = DEVICE_LOGIN_UI) =>
 /** setup_device_request 的回應 → 下一步 */
 export function requestView(r) {
   if (r?.already === true) return { stage: 'done', ok: false, text: LOGIN_TEXT.already }
+  if (r?.state === 'untrusted') return { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted }
   if (typeof r?.rid === 'string' && r.rid) return { stage: 'waiting', rid: r.rid, text: LOGIN_TEXT.waiting }
   return { stage: 'done', ok: false, text: setupErrorText('') }
 }

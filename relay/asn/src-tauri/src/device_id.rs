@@ -235,9 +235,17 @@ pub struct KnownPeer {
 /// 本人替電腦取的名字最多幾個字
 pub const OWNER_NAME_MAX: usize = 32;
 
-/// 整理本人輸入的名字：控制字元、改變文字方向的字元換成空白，去頭尾空白，最多 32 個字。空字串＝沒有名字（畫面顯示「未命名的電腦」）
+/// 整理本人輸入的名字：控制字元、改變文字方向的字元、不可見的填充／組合／變體選擇／標籤字元換成空白，去頭尾空白，最多 32 個字。空字串＝沒有名字（畫面顯示「未命名的電腦」）
 pub fn clean_owner_name(s: &str) -> String {
-    let bad = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
+    let bad = |c: char| {
+        c.is_control()
+            || matches!(
+                c,
+                '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}'
+                    | '\u{061c}' | '\u{00ad}' | '\u{034f}' | '\u{115f}' | '\u{1160}' | '\u{3164}' | '\u{ffa0}' | '\u{180e}'
+                    | '\u{2060}'..='\u{2064}' | '\u{206a}'..='\u{206f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0000}'..='\u{e007f}'
+            )
+    };
     s.chars().map(|c| if bad(c) { ' ' } else { c }).collect::<String>().trim().chars().take(OWNER_NAME_MAX).collect::<String>().trim().to_string()
 }
 
@@ -1391,7 +1399,10 @@ mod tests {
         assert_eq!(clean_owner_name(""), "");
         assert_eq!(clean_owner_name(&"長".repeat(100)).chars().count(), OWNER_NAME_MAX);
         assert_eq!(OWNER_NAME_MAX, 32);
-        for c in ['\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2028}', '\u{2029}', '\u{2066}', '\u{2069}', '\u{feff}', '\u{0}', '\u{7f}'] {
+        for c in ['\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2028}', '\u{2029}', '\u{2066}', '\u{2069}', '\u{feff}', '\u{0}', '\u{7f}',
+            '\u{061c}', '\u{00ad}', '\u{034f}', '\u{115f}', '\u{1160}', '\u{3164}', '\u{ffa0}', '\u{180e}',
+            '\u{2060}', '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{206a}', '\u{206b}', '\u{206c}', '\u{206d}', '\u{206e}', '\u{206f}',
+            '\u{fe00}', '\u{fe0f}', '\u{e0000}', '\u{e0020}', '\u{e007f}'] {
             assert!(!clean_owner_name(&format!("家{c}用機")).contains(c), "{c:?}");
         }
     }

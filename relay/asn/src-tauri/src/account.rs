@@ -716,11 +716,17 @@ fn unix_now() -> i64 {
 }
 
 /// 手機要某台電腦登入裝置碼型 CLI（Codex）：用這支手機的設備金鑰簽一筆請求送出，私鑰留在記憶體等取回。
-/// 那台已經有進行中的請求（already）：這筆沒有建立，私鑰丟掉，回 { already: true, kind }。→ { rid, exp }
+/// 那台已經有進行中的請求（already）：這筆沒有建立，私鑰丟掉，回 { already: true, kind }。
+/// 那台電腦不是這支手機上確認過指紋的（confirmed_at 沒值）：不送出，回 { state: "untrusted" }。→ { rid, exp }
 #[tauri::command]
 pub async fn setup_device_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String, vendor: String) -> Result<Value, String> {
     if app.shot.is_some() {
         return Err("--shot 模式不登入".into());
+    }
+    // 只對這支手機上本人確認過指紋的電腦發（和取回時同一條規則；未確認就不送出）
+    let known = crate::device_id::live::known(&app.data_dir)?;
+    if !known.peer(&node).is_some_and(|p| p.confirmed_at.is_some()) {
+        return Ok(json!({ "state": "untrusted" }));
     }
     let now = unix_now();
     let key = crate::device_id::live::key_async(&app.data_dir).await?;
