@@ -21,6 +21,8 @@ import java.security.MessageDigest
 // 只有編號仍是目前這一筆時才會寫檔或回覆；被取代的舊提示框就算還在畫面上，也寫不出新憑證的檔。
 // 範圍：這道關只防網頁內容直接呼叫（不防 root 或原生層被改）。
 // 檔名由這裡自己算雜湊，不用網頁給的字串組路徑；沒有任何 @JavascriptInterface 方法會寫這個檔。
+// 掃 QR code 核對指紋（FingerprintScan）時多帶一段掃到的字（scanText）：同樣**只有在驗證通過的那一刻**，verified 先把它寫成
+// `<憑證的 SHA-256>.scan`（UTF-8、最多 200 字），再寫憑證檔；掃到的字不經過網頁，網頁只拿到 ok／cancel 等狀態字。
 object ViewerConfirm {
   const val REQ = 4711
   private const val REQ_SPAN = 1000   // requestCode ＝ REQ ＋ (世代編號 % REQ_SPAN)，讓舊畫面的結果對得出是哪一筆
@@ -31,6 +33,7 @@ object ViewerConfirm {
   private var pendingGen = 0L
   private var genCounter = 0L
   private var pendingPrompt: BiometricPrompt? = null
+  private var pendingScan: String? = null
   private const val CONSENT_DIR = ".irori-asn/consent"
   private const val CHALLENGE_LEN = 64
 
@@ -40,6 +43,7 @@ object ViewerConfirm {
     pending = null
     pendingChallenge = null
     pendingGen = 0L
+    pendingScan = null
   }
 
   private fun cancelPrompt() {
@@ -49,8 +53,10 @@ object ViewerConfirm {
   }
 
   /** challenge＝null：查看電腦終端前的確認（不寫任何檔）；有值：64 個小寫十六進位字元的憑證，驗證通過時寫憑證檔 */
-  fun ask(activity: MainActivity, callbackId: String, challenge: String? = null) {
+  fun ask(activity: MainActivity, callbackId: String, challenge: String? = null, scanText: String? = null) {
     if (challenge != null && !validChallenge(challenge)) { reply(activity, callbackId, "cancel"); return }
+    // 掃到的字只跟著憑證走；沒有憑證或太長就不跳框
+    if (scanText != null && (challenge == null || scanText.length > FingerprintScan.MAX_CHARS)) { reply(activity, callbackId, "cancel"); return }
     val old = pending
     if (old != null) {
       if (android.os.SystemClock.elapsedRealtime() - pendingSince <= STALE_MS) { reply(activity, callbackId, "cancel"); return }
@@ -58,6 +64,7 @@ object ViewerConfirm {
       pending = null
       pendingChallenge = null
       pendingGen = 0L
+      pendingScan = null
       reply(activity, old, "cancel")
     }
     // 框上的字：查看終端是固定字；帶憑證的只用 Rust 發憑證時寫的說明檔（動作＋電腦名＋指紋），讀不到就不跳框
@@ -69,6 +76,7 @@ object ViewerConfirm {
     pending = callbackId
     pendingChallenge = challenge
     pendingGen = gen
+    pendingScan = scanText
     pendingSince = android.os.SystemClock.elapsedRealtime()
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -112,11 +120,20 @@ object ViewerConfirm {
   private fun verified(activity: MainActivity, gen: Long) {
     if (pending == null || gen != pendingGen) return
     val ch = pendingChallenge
-    if (ch != null && !writeConsentMarker(activity, ch)) { finish(activity, "cancel", gen); return }
+    if (ch != null) {
+      val scan = pendingScan
+      // 先寫掃到的字、再寫憑證檔：憑證檔出現時，掃描檔一定已經在
+      if (scan != null && !writeScanData(activity, ch, scan)) { finish(activity, "cancel", gen); return }
+      if (!writeConsentMarker(activity, ch)) {
+        if (scan != null) removeScanData(activity, ch)
+        finish(activity, "cancel", gen)
+        return
+      }
+    }
     finish(activity, "ok", gen)
   }
 
-  private fun validChallenge(s: String): Boolean = s.length == CHALLENGE_LEN && s.all { it in '0'..'9' || it in 'a'..'f' }
+  fun validChallenge(s: String): Boolean = s.length == CHALLENGE_LEN && s.all { it in '0'..'9' || it in 'a'..'f' }
 
   private const val VIEW_TITLE = "查看電腦終端"
   private const val DESC_MAX = 60
@@ -125,7 +142,7 @@ object ViewerConfirm {
     MessageDigest.getInstance("SHA-256").digest(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
   /** Rust 發憑證時寫的說明檔（`<consent>/<雜湊>.desc`）：框上只用這段字。沒有、讀不到、是空的就回 null（不跳框） */
-  private fun readDescription(activity: MainActivity, challenge: String): String? {
+  fun readDescription(activity: MainActivity, challenge: String): String? {
     return try {
       val f = File(File(activity.filesDir, CONSENT_DIR), hashOf(challenge) + ".desc")
       if (!f.isFile) return null
@@ -149,6 +166,26 @@ object ViewerConfirm {
     }
   }
 
+  /** 掃描檔：`<雜湊>.scan`，內容是掃到的字。只有 verified 能叫；回有沒有寫成功 */
+  private fun writeScanData(activity: MainActivity, challenge: String, text: String): Boolean {
+    return try {
+      val dir = File(activity.filesDir, CONSENT_DIR)
+      if (!dir.isDirectory && !dir.mkdirs()) return false
+      val name = hashOf(challenge) + ".scan"
+      File(dir, name).writeText(text.take(FingerprintScan.MAX_CHARS), Charsets.UTF_8)
+      true
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  private fun removeScanData(activity: MainActivity, challenge: String) {
+    try {
+      File(File(activity.filesDir, CONSENT_DIR), hashOf(challenge) + ".scan").delete()
+    } catch (e: Exception) {
+    }
+  }
+
   private fun finish(activity: MainActivity, result: String, gen: Long) {
     if (gen != pendingGen) return
     val id = pending ?: return
@@ -156,10 +193,11 @@ object ViewerConfirm {
     pendingChallenge = null
     pendingGen = 0L
     pendingPrompt = null
+    pendingScan = null
     reply(activity, id, result)
   }
 
-  private fun reply(activity: MainActivity, id: String, result: String) {
+  fun reply(activity: MainActivity, id: String, result: String) {
     val w = activity.webView ?: return
     w.post { w.evaluateJavascript("window.__asnConfirmViewer && window.__asnConfirmViewer(${JSONObject.quote(id)}, ${JSONObject.quote(result)})", null) }
   }

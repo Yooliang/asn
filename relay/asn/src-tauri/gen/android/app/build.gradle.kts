@@ -84,6 +84,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     // 查看電腦終端前的本人確認（生物辨識或螢幕鎖）。鎖死版本
     implementation("androidx.biometric:biometric:1.1.0")
+    // 指紋掃 QR code（FingerprintScanActivity）：相機預覽與 QR 解碼。只用它的相機畫面元件，不用它內建的 CaptureActivity（清單裡移除）。版本鎖死
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // 解碼核心明確升到 3.5.4（函式庫預設帶的版本較舊）。minSdk 26 高於 24，依函式庫說明可以這樣覆蓋；CI 會檢查最後解析出來是 3.5.4
+    implementation("com.google.zxing:core:3.5.4")
     // 推播（#797，FCM）。服務帳戶金鑰絕不進 APK；google-services.json 只有公開的設定值，也不進 repo（見下方 apply 條件）
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     implementation("com.google.firebase:firebase-messaging")

@@ -27,7 +27,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(groupFp('0123456789abcdef'), '0123 4567 89ab cdef', '核對用完整 16 碼分組')
   assert.equal(groupFp('01234567'), '')
   assert.equal(groupFp(null), '')
-  for (const t of Object.values(TEXT).map(x => (typeof x === 'function' ? x('示範', '01234567') : x))) assert.doesNotMatch(t, /[A-Za-z]{3,}/, t)
+  for (const t of Object.values(TEXT).map(x => (typeof x === 'function' ? x('示範', '01234567') : x))) assert.doesNotMatch(t.replace(/QR code|ASN/g, ''), /[A-Za-z]{3,}/, t)
 })
 
 test('指紋寫法和電腦版一樣：名字後面接「（指紋 xxxxxxxx）」', () => {
@@ -208,7 +208,7 @@ test('守門：android_known_confirm／forget 前一定先 gate（要憑證、�
   assert.ok(pick.indexOf("'android_known_answer'") < pick.indexOf('await gate(') && pick.indexOf('await gate(') < pick.indexOf("'android_known_confirm'"), '順序')
   const gate = src.slice(src.indexOf('const gate = async'), src.indexOf('return {\n    list:'))
   assert.ok(gate.indexOf("'android_known_token'") < gate.indexOf('await confirm('), '先要憑證才開本人確認')
-  assert.match(src, /import \{ confirmWithToken \} from '\.\/mobile-confirm\.mjs'/)
+  assert.match(src, /import \{ confirmWithToken, scanFingerprint \} from '\.\/mobile-confirm\.mjs'/)
   assert.doesNotMatch(src, /confirmViewer/, '不用沒有憑證的那種')
   assert.doesNotMatch(src, /remember|{ node: peer.node, fp/, '不再有「記住這台」、不送指紋')
   for (const f of ['../ui/m.js', '../ui/m.html', '../ui/lib/mobile-remote-view.mjs', '../ui/lib/term-remote.mjs', '../ui/lib/chatpane.mjs']) {
@@ -229,7 +229,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(sheet, /@click="closePeerSheet">\{\{ KNOWN_TEXT\.cancel \}\}/)
   assert.match(html, /v-if="chatFriend && vp\.note"[^>]*>\{\{ vp\.note \}\}/)
   assert.match(html, /v-if="chatFriend && peerStrip"/)
-  assert.match(html, /@click="openPeerSheet">\{\{ KNOWN_TEXT\.stripButton \}\}/)
+  assert.match(html, /@click="openMethodSheet">\{\{ KNOWN_TEXT\.stripButton \}\}/)
   assert.match(html, /@remote-started="onRemoteStarted" @remote-ended="onRemoteEnded"/)
   assert.match(html, /@click="forgetKnown\(p\.node\)">\{\{ KNOWN_TEXT\.forget \}\}/)
   const js = read('../ui/m.js')
@@ -296,4 +296,103 @@ test('守門：四選一的答案、選項不進日誌、事件；畫面層不�
   for (const f of ['../ui/m.js', '../ui/lib/mobile-known-peers.mjs']) assert.doesNotMatch(read(f), /console\.\w+\([^)]*(options|\.ch\b|pick|answer)/, `${f} 不把選項、答案寫進 console`)
   const ui = ['../ui/m.js', '../ui/m.html', '../ui/lib/mobile-known-peers.mjs'].map(read).join('\n')
   assert.doesNotMatch(ui, /\.fp8\b|started\??\.fp\b/, '畫面層不讀沒確認電腦的指紋')
+})
+
+// ---- 掃電腦畫面上的 QR code 核對指紋：畫面只拿得到狀態字，拿不到掃到的字 ----
+
+test('掃 QR code 的文字：照規格、繁體中文', () => {
+  assert.equal(TEXT.scanButton, '用相機掃電腦上的 QR code')
+  assert.equal(TEXT.scanFallback, '沒辦法掃，改用選的')
+  assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 認得的電腦把它忘掉，再重新連線。')
+  assert.equal(TEXT.scanBad, '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。')
+  assert.equal(TEXT.scanNoCamera, '沒辦法用相機，改用選的。')
+  assert.match(TEXT.methodBody, /顯示 QR code/)
+})
+
+function fakeScan(status, answers = {}) {
+  const calls = []
+  const api = makeKnownPeers({
+    confirm: async ch => { calls.push(['confirm', ch]); return 'ok' },
+    scan: async ch => { calls.push(['scan', ch]); return status },
+    invoke: async (cmd, args) => { calls.push([cmd, args]); if (answers[cmd] instanceof Error) throw answers[cmd]; if (cmd === 'android_known_token' && !(cmd in answers)) return TOKEN; return cmd in answers ? answers[cmd] : 'ok' },
+  })
+  return { api, calls }
+}
+const STOK = ['android_known_token', { action: 'scan', node: 'pc' }]
+
+test('掃描：先要 scan 憑證、外殼掃並過本人確認，通過才叫 android_known_scan_confirm（只帶節點與憑證）', async () => {
+  const { api, calls } = fakeScan('ok')
+  assert.equal(await api.scan('pc'), 'done')
+  assert.deepEqual(calls, [STOK, ['scan', TOKEN], ['android_known_scan_confirm', { node: 'pc', challenge: TOKEN }]])
+  assert.equal(await fakeScan('ok').api.scan(''), 'cancel')
+})
+
+test('掃描：取消、沒相機、被拒、掃到的不是 ASN 的（外殼說的）都不叫 Rust 判斷', async () => {
+  for (const [st, want] of [['cancel', 'cancel'], ['denied', 'no_camera'], ['no_camera', 'no_camera'], ['bad_qr', 'bad_qr'], ['weird', 'cancel']]) {
+    const f = fakeScan(st)
+    assert.equal(await f.api.scan('pc'), want, st)
+    assert.deepEqual(f.calls, [STOK, ['scan', TOKEN]], st)
+  }
+  await assert.rejects(() => fakeScan('no_lock').api.scan('pc'), /螢幕鎖/)
+})
+
+test('掃描：Rust 的判斷原樣對應；被擋住或鎖住的不開相機；不認得的回覆丟錯', async () => {
+  for (const [out, want] of [['ok', 'done'], ['mismatch', 'mismatch'], ['bad_qr', 'bad_qr'], ['blocked', 'blocked'], ['locked', 'locked'], ['not_verified', 'not_ready']]) {
+    assert.equal(await fakeScan('ok', { android_known_scan_confirm: out }).api.scan('pc'), want, out)
+  }
+  await assert.rejects(() => fakeScan('ok', { android_known_scan_confirm: 'weird' }).api.scan('pc'), /unexpected/)
+  await assert.rejects(() => fakeScan('ok', { android_known_scan_confirm: true }).api.scan('pc'), /unexpected/, '只認得字串狀態')
+  for (const e of ['blocked', 'locked', 'not_ready']) {
+    const f = fakeScan('ok', { android_known_token: new Error(e) })
+    assert.equal(await f.api.scan('pc'), e)
+    assert.deepEqual(f.calls, [STOK], '要不到憑證就不開相機')
+  }
+  await assert.rejects(() => fakeScan('ok', { android_known_token: new Error('boom') }).api.scan('pc'), /boom/)
+  await assert.rejects(() => fakeScan('ok', { android_known_token: '' }).api.scan('pc'), /no_token/)
+})
+
+test('守門：掃到的字不經過網頁——橋只回狀態字、Rust 命令只收節點與憑證、畫面沒有任何讀掃描內容的地方', async () => {
+  const mc = read('../ui/lib/mobile-confirm.mjs')
+  assert.match(mc, /const SCAN_RESULTS = \[\.\.\.RESULTS, 'denied', 'no_camera', 'bad_qr'\]/)
+  assert.match(mc, /resolve\(allowed\.includes\(r\) \? r : 'cancel'\)/, '外殼回什麼字都先過白名單，不在名單內一律 cancel')
+  const kp = read('../ui/lib/mobile-known-peers.mjs')
+  assert.match(kp, /invoke\('android_known_scan_confirm', \{ node, challenge \}\)/, '只帶節點與憑證')
+  assert.equal((kp.match(/invoke\('android_known_scan_confirm'/g) ?? []).length, 1, '只有 scan 那一處叫')
+  const scanFn = kp.slice(kp.indexOf('scan: async node'), kp.indexOf('/** 替這台改名'))
+  assert.doesNotMatch(scanFn, /scanText|\.text\b|decoded|JSON\.parse/, '沒有任何讀掃描內容的寫法')
+  // 外殼的橋收（回呼編號、憑證），不回傳字串
+  const { scanFingerprint } = await import('../ui/lib/mobile-confirm.mjs')
+  const win = { AsnAndroid: { scanFingerprint(id, ch) { this.got = [id, ch]; setTimeout(() => win.__asnConfirmViewer(id, 'ok'), 0) } } }
+  assert.equal(await scanFingerprint('ab'.repeat(32), win), 'ok')
+  assert.equal(win.AsnAndroid.got[1], 'ab'.repeat(32))
+  assert.equal(await scanFingerprint('壞的', win), 'cancel', '憑證格式不對不送')
+  const bad = { AsnAndroid: { scanFingerprint(id) { setTimeout(() => bad.__asnConfirmViewer(id, 'asn-fp:v1:pc:0123456789abcdef'), 0) } } }
+  assert.equal(await scanFingerprint('ab'.repeat(32), bad), 'cancel', '就算外殼回了一段字，也不當結果、不往下傳')
+  assert.equal(await scanFingerprint('ab'.repeat(32), {}), 'cancel', '沒有外殼＝取消')
+  for (const st of ['denied', 'no_camera', 'bad_qr', 'no_lock', 'cancel']) {
+    const w = { AsnAndroid: { scanFingerprint(id) { setTimeout(() => w.__asnConfirmViewer(id, st), 0) } } }
+    assert.equal(await scanFingerprint('ab'.repeat(32), w), st)
+  }
+  // 查看終端與記住的確認，不接受掃描專用的狀態字
+  const { confirmWithToken } = await import('../ui/lib/mobile-confirm.mjs')
+  const w2 = { AsnAndroid: { confirmWithToken(id) { setTimeout(() => w2.__asnConfirmViewer(id, 'denied'), 0) } } }
+  assert.equal(await confirmWithToken('ab'.repeat(32), w2), 'cancel')
+  const js = read('../ui/m.js')
+  assert.doesNotMatch(js, /scanFingerprint|android_known_scan|AsnAndroid/, 'm.js 只透過 mobile-known-peers.mjs')
+})
+
+test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、改用選的接到原本的四選一；結果說明放在條下面', () => {
+  const html = read('../ui/m.html')
+  const sheet = html.slice(html.indexOf('v-if="vp.method && vp.cur && !vp.sheet"'), html.indexOf('v-if="vp.sheet && vp.cur && vp.ch"'))
+  assert.ok(sheet.length > 100)
+  assert.doesNotMatch(sheet, /v-html|innerHTML/)
+  assert.match(sheet, /class="m-btn m-btn-big"[^>]*@click="scanPeer">\{\{ KNOWN_TEXT\.scanButton \}\}/)
+  assert.match(sheet, /@click="methodPickInstead">\{\{ KNOWN_TEXT\.scanFallback \}\}/)
+  assert.match(sheet, /@click="closeMethodSheet">\{\{ KNOWN_TEXT\.cancel \}\}/)
+  const js = read('../ui/m.js')
+  assert.match(js, /knownPeers\.scan\(cur\.node\)/)
+  for (const k of ['mismatch', 'bad_qr']) assert.match(js, new RegExp(`${k}: KNOWN_TEXT\.scan`))
+  assert.match(js, /KNOWN_TEXT\.scanNoCamera/)
+  assert.match(js, /const methodPickInstead = async \(\) => \{ vp\.method = false; await openPeerSheet\(\) \}/)
+  assert.doesNotMatch(js, /console\.\w+\([^)]*(scan\w*Text|decoded)/)
 })

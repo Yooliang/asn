@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 對方傳來「震動」時讓手機震動 -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -9,6 +10,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 沒有麥克風的裝置也能裝（只是沒有通話鈕），不要被 Play 擋掉 -->
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- 指紋掃 QR code 用相機（權限由 zxing-android-embedded 的清單帶進來）。相機只用來在手機上掃電腦畫面上的 QR code 核對指紋，影像不儲存、不上傳。沒有相機的裝置也能裝（改用選的） -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <!-- Android 11 以上要先宣告才看得到系統的語音辨識與語音合成服務 -->
     <queries>
@@ -74,6 +77,18 @@
             </intent-filter>
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
+
+        <!-- 掃電腦畫面上的指紋 QR code：自己的畫面，不對外開放（只有本 App 從主畫面叫得起來）、直向 -->
+        <activity
+            android:name=".FingerprintScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize"
+            android:theme="@style/Theme.asn" />
+        <!-- 函式庫內建的掃描畫面（CaptureActivity）用不到、也不要編進 App：整個移除，只留上面我們自己的 -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            tools:node="remove" />
 
         <!-- 推播（#797）：FCM 接收端，不解析訊息內容（AsnMessagingService.kt）。沒有 google-services.json 的建置裡 Firebase 不會啟動，這個服務也就不會被叫到 -->
         <service

@@ -484,8 +484,8 @@ const app = createApp({
       try { await knownPeers.rename(node, kp.editText); renameCancel(); await loadKnown() } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
     }
     // 正在看的那台電腦：開始看時 Rust 回它的指紋與有沒有確認；結束或切回訊息就清掉
-    const vp = reactive({ cur: null, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '' })
-    const vpReset = () => { vp.cur = null; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
+    const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '' })
+    const vpReset = () => { vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
     const onRemoteStarted = r => { vpReset(); vp.cur = knownPeerOf(r, r?.machine) }
     const onRemoteEnded = () => vpReset()
     const peerStrip = computed(() => knownNeedsConfirm(vp.cur))
@@ -501,6 +501,29 @@ const app = createApp({
         else if (ch.state === 'blocked') vp.note = KNOWN_TEXT.blocked
         else { vp.ch = ch; vp.sheetName = ch.localName === null ? cur.name : (ch.localName || KNOWN_TEXT.unnamed); vp.sheet = true }
       } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
+    }
+    // 「確認指紋」先選方法：用相機掃電腦上的 QR code（預設），或改用選的（四選一）。掃到的字只在外殼與 Rust 之間，這裡只拿得到結果的狀態字
+    const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vp.note = ''; vp.error = ''; vp.method = true }
+    const closeMethodSheet = () => { vp.method = false }
+    const methodPickInstead = async () => { vp.method = false; await openPeerSheet() }
+    const SCAN_NOTES = { mismatch: KNOWN_TEXT.scanMismatch, bad_qr: KNOWN_TEXT.scanBad, blocked: KNOWN_TEXT.blocked, locked: KNOWN_TEXT.lockedNow, not_ready: KNOWN_TEXT.notReady }
+    const scanPeer = async () => {
+      const cur = vp.cur
+      if (!cur || vp.busy) return
+      vp.busy = true; vp.error = ''; vp.note = ''
+      let r = 'cancel'
+      try { r = await knownPeers.scan(cur.node) } catch (e) { console.info('[ASN] 掃 QR code 核對指紋沒成功', String(e?.message ?? e)); vp.method = false; vp.note = knownErrorText(e) } finally { vp.busy = false }
+      if (r === 'cancel') return   // 本人取消：留在選方法的畫面，可以再選
+      vp.method = false
+      if (r === 'done') { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; vp.note = ''; void loadKnown(); return }
+      if (r === 'no_camera') {
+        // 沒有相機或沒給權限：直接改用選的，並在選的畫面上說明
+        await openPeerSheet()
+        if (vp.sheet) vp.error = KNOWN_TEXT.scanNoCamera
+        else if (!vp.note) vp.note = KNOWN_TEXT.scanNoCamera
+        return
+      }
+      vp.note = SCAN_NOTES[r] ?? ''
     }
     const closePeerSheet = () => { vp.sheet = false; vp.ch = null; vp.sheetName = '' }
     const PEER_NOTES = { wrong: KNOWN_TEXT.wrong, none: KNOWN_TEXT.noneMatch, locked: KNOWN_TEXT.lockedNow, blocked: KNOWN_TEXT.blocked, expired: KNOWN_TEXT.expired, not_ready: KNOWN_TEXT.notReady }
@@ -1272,7 +1295,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, kp, forgetKnown, renameStart, renameCancel, renameSave, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, kp, forgetKnown, renameStart, renameCancel, renameSave, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,

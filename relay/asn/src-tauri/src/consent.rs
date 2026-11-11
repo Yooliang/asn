@@ -36,6 +36,8 @@ pub const NO_RANDOM: &str = "系統亂數不可用";
 pub enum Action {
     Confirm,
     Forget,
+    /// 用相機掃電腦畫面上的 QR code 核對指紋（fp_scan.rs）
+    Scan,
 }
 
 impl Action {
@@ -43,6 +45,7 @@ impl Action {
         match s {
             "confirm" => Some(Action::Confirm),
             "forget" => Some(Action::Forget),
+            "scan" => Some(Action::Scan),
             _ => None,
         }
     }
@@ -199,11 +202,12 @@ pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
     let cleaned: String = crate::device_id::clean_owner_name(local_name).chars().take(NAME_SHOW_MAX).collect();
     let name = if cleaned.trim().is_empty() { "未命名的電腦".to_string() } else { format!("「{}」", cleaned.trim()) };
     let fp: String = fp_grouped.chars().filter(|c| !c.is_control()).take(9).collect();
-    let verb = match action {
-        Action::Confirm => "記住",
-        Action::Forget => "忘記",
-    };
-    format!("{verb}{name}（{fp}）")
+    match action {
+        Action::Confirm => format!("記住{name}（{fp}）"),
+        Action::Forget => format!("忘記{name}（{fp}）"),
+        // 掃 QR code：最長 2＋34＋3＋1＋9＋1＝50 字，指紋一樣固定在最後
+        Action::Scan => format!("核對{name}的指紋（{fp}）"),
+    }
 }
 
 /// 可以收掉的舊檔：說明檔（.desc）、掃描暫存（.scan）、沒人來兌換的憑證檔（64 個十六進位字元、沒有副檔名）
@@ -228,6 +232,39 @@ pub fn write_desc(data_dir: &Path, challenge: &str, text: &str) -> Result<(), St
         }
     }
     std::fs::write(desc_path(data_dir, &hash_hex(challenge)), text).map_err(|e| format!("寫不出說明：{e}"))
+}
+
+/// 掃描檔的副檔名：`<consent>/<憑證雜湊>.scan`，內容是相機掃到的字（UTF-8）。只有外殼在本人驗證通過的那一刻寫，Rust 不寫
+pub const SCAN_EXT: &str = "scan";
+/// 掃到的字最多幾個字元（和 fp_scan::MAX_LEN 一樣）；外殼寫入時也照這個截
+pub const SCAN_MAX: usize = 200;
+/// 掃描檔最多幾個位元組（200 個字元最多 800 位元組）
+const SCAN_BYTES_MAX: u64 = 1024;
+
+/// 讀出並刪掉掃描檔，一步做完：一般檔案、大小合理、刪得掉、是 UTF-8 且不超過上限才回內容；刪不掉當失敗（不回內容）
+pub fn take_scan(data_dir: &Path, challenge: &str) -> Option<String> {
+    let hash = hash_hex(challenge);
+    if !is_hash(&hash) {
+        return None;
+    }
+    let p = data_dir.join(MARKER_DIR).join(format!("{hash}.{SCAN_EXT}"));
+    let small = std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_file() && m.len() <= SCAN_BYTES_MAX);
+    if !small {
+        // 太大或不是一般檔案的，能刪就刪，不讀
+        if std::fs::symlink_metadata(&p).is_ok() {
+            let _ = std::fs::remove_file(&p);
+        }
+        return None;
+    }
+    let bytes = std::fs::read(&p).ok();
+    if std::fs::remove_file(&p).is_err() {
+        return None;
+    }
+    let text = String::from_utf8(bytes?).ok()?;
+    if text.chars().count() > SCAN_MAX {
+        return None;
+    }
+    Some(text)
 }
 
 pub fn drop_node(node: &str) {
@@ -308,6 +345,44 @@ mod tests {
         assert!(!redeem(&dir, Action::Confirm, "沒發過", &ch));
         assert!(!p.exists(), "兌換（不論成敗）後說明檔收掉");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 掃描動作_框上的字_動作代號() {
+        assert_eq!(Action::parse("scan"), Some(Action::Scan));
+        assert_eq!(Action::parse("Scan"), None);
+        assert_eq!(describe(Action::Scan, "工作機", "a93c c519 1f2e 3b4d"), "核對「工作機」的指紋（a93c c519）");
+        assert_eq!(describe(Action::Scan, "", "a93c c519 1f2e 3b4d"), "核對未命名的電腦的指紋（a93c c519）");
+    }
+
+    #[test]
+    fn 掃描檔_讀出就刪掉_只能一次_太大_不是檔案_不是文字_名字不合格都不給() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join(MARKER_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ch = "cd".repeat(32);
+        let p = dir.join(format!("{}.{SCAN_EXT}", hash_hex(&ch)));
+        assert_eq!(take_scan(d.path(), &ch), None, "還沒有檔");
+        std::fs::write(&p, "asn-fp:v1:pc:a93cc5191f2e3b4d").unwrap();
+        assert_eq!(take_scan(d.path(), &ch).as_deref(), Some("asn-fp:v1:pc:a93cc5191f2e3b4d"));
+        assert!(!p.exists(), "已刪掉");
+        assert_eq!(take_scan(d.path(), &ch), None, "只能一次");
+        std::fs::write(&p, "x".repeat(SCAN_MAX + 1)).unwrap();
+        assert_eq!(take_scan(d.path(), &ch), None, "超過字數上限");
+        assert!(!p.exists(), "超過上限也收掉");
+        std::fs::write(&p, "y".repeat(2000)).unwrap();
+        assert_eq!(take_scan(d.path(), &ch), None, "檔案太大不讀");
+        assert!(!p.exists());
+        std::fs::write(&p, [0xffu8, 0xfe, 0x00]).unwrap();
+        assert_eq!(take_scan(d.path(), &ch), None, "不是 UTF-8");
+        assert!(!p.exists());
+        std::fs::create_dir_all(&p).unwrap();
+        assert_eq!(take_scan(d.path(), &ch), None, "資料夾不算");
+        std::fs::remove_dir_all(&p).unwrap();
+        // 憑證字串的格式不管：取的是它的雜湊，不能用它組出別的路徑
+        for bad in ["", "../x", "ABC"] {
+            assert_eq!(take_scan(d.path(), bad), None, "{bad:?}");
+        }
     }
 
     use super::*;
@@ -446,7 +521,7 @@ mod tests {
         let forget = body_of(code, "android_known_forget");
         assert!(forget.find("consent::redeem(").expect("忘記要先用憑證") < forget.find("live::forget(").unwrap(), "先用憑證才忘記");
         assert!(forget.contains("Action::Forget"));
-        for name in ["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename"] {
+        for name in ["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"] {
             let b = body_of(code, name);
             assert!(b.contains("label_ok(window.label())"), "{name} 要檢查視窗代號");
             let head = &code[code.find(&format!("pub fn {name}(")).unwrap()..];
@@ -456,11 +531,18 @@ mod tests {
             let before = &code[..i];
             let start = before.rfind("\npub fn ").unwrap();
             let owner: String = before[start + 8..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-            assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename"].contains(&owner.as_str()), "{owner} 不能碰憑證");
+            assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&owner.as_str()), "{owner} 不能碰憑證");
         }
         for name in ["android_known_challenge", "android_known_answer", "android_known_list"] {
             assert!(!body_of(code, name).contains("consent::"), "{name}");
         }
+        // 掃描確認：先用憑證（本人驗證過）、再讀出並刪掉掃到的字，最後才記住或擋住；掃到的字不從畫面來（沒有字串參數以外的內容）
+        let scan = body_of(code, "android_known_scan_confirm");
+        let (r, t) = (scan.find("consent::redeem(").expect("掃描要先用憑證"), scan.find("consent::take_scan(").expect("要讀出掃到的字"));
+        assert!(r < t, "先用憑證、再讀掃到的字");
+        assert!(scan.contains("Action::Scan") && scan.contains("fp_scan::run("));
+        let sig = code[code.find("pub fn android_known_scan_confirm(").unwrap()..].split(") ->").next().unwrap();
+        assert!(sig.contains("challenge: String") && !sig.contains("bool") && !sig.contains("text"), "不收掃到的字：{sig}");
         // 確認、忘記、改名的畫面命令不收「已驗證」這類布林參數：驗證只認憑證檔
         for name in ["android_known_confirm", "android_known_forget"] {
             let head = &code[code.find(&format!("pub fn {name}(")).unwrap()..];

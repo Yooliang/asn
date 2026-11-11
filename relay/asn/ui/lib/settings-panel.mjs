@@ -3,6 +3,7 @@
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { TEXT as KNOWN, groupFp } from './known-peers.mjs'
+import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
@@ -26,11 +27,11 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
-  components: { LoginPanel, LogoutPanel, CloudInvitePanel },
+  components: { LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -125,7 +126,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN, groupFp, renameNode, renameText, renameStart, renameCancel, renameSave,
+    return { KNOWN, QR_TEXT, groupFp, renameNode, renameText, renameStart, renameCancel, renameSave,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -486,7 +487,11 @@ export const SettingsPanel = {
         <section class="set-card" aria-label="認得的電腦" v-if="st.known">
           <h3 class="set-h">{{ KNOWN.title }}</h3>
           <small>{{ KNOWN.lead }}</small>
-          <p v-if="st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b></p>
+          <p v-if="st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b> <button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-qr', !st.known.qr)">{{ st.known.qr ? QR_TEXT.hide : QR_TEXT.show }}</button></p>
+          <div class="fp-qr-box" v-if="st.known.ownFp && st.known.qr">
+            <fp-qr-canvas :qr="st.known.qr"></fp-qr-canvas>
+            <small>{{ QR_TEXT.note }}</small>
+          </div>
           <small v-if="!st.known.peers.length">{{ KNOWN.none }}</small>
           <div class="pair-row" v-for="p in st.known.peers" :key="p.node">
             <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>

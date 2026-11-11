@@ -279,6 +279,68 @@ jobs:
         # 下載 gradle 發行包碰到 5xx／逾時才重試（wrapper 自己只試一次），最多 3 次；編譯錯誤照常立刻紅
         run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "下載 gradle 並編 Kotlin" -- sh ./gradlew --no-daemon --console=plain :app:compileUniversalDebugKotlin
 
+      # 掃 QR code（zxing-android-embedded）的把關：解碼核心要解析成 3.5.4、函式庫不能順便拉進 Google 服務或 Firebase；
+      # 合併後的清單不能留函式庫內建的 CaptureActivity、除了主畫面沒有別的 activity 對外開放。印出來讓審 PR 的人直接看。
+      # 兩步都只解析相依與合併清單，不編 Rust、不簽章、不上傳。
+      - name: 檢查 zxing 相依（core 要是 3.5.4、不拉 gms／firebase）
+        working-directory: relay/asn/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          deps="$RUNNER_TEMP/asn-release-deps.txt"
+          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "解析 release 相依" -- sh -c "sh ./gradlew --no-daemon --console=plain :app:dependencies --configuration universalReleaseRuntimeClasspath > \"$deps\""
+          echo "=== 含 zxing 的行 ==="
+          grep -i 'zxing' "$deps" || { echo "::error::相依樹裡找不到 zxing"; exit 1; }
+          echo "=== zxing-android-embedded 底下的子樹 ==="
+          awk '
+            /zxing-android-embedded/ && !on { on = 1; start = index($0, "--- "); print; next }
+            on {
+              idx = index($0, "--- ")
+              if (idx > 0 && idx <= start) { on = 0; next }
+              if ($0 ~ /^[[:space:]]*$/) { on = 0; next }
+              print
+            }
+          ' "$deps" | tee "$RUNNER_TEMP/asn-zxing-subtree.txt"
+          if grep -Eiq 'com\.google\.android\.gms|firebase' "$RUNNER_TEMP/asn-zxing-subtree.txt"; then
+            echo "::error::zxing 的相依裡有 com.google.android.gms 或 firebase"; exit 1
+          fi
+          core="$(grep -E 'com\.google\.zxing:core:' "$deps" || true)"
+          [ -n "$core" ] || { echo "::error::相依樹裡找不到 com.google.zxing:core"; exit 1; }
+          bad="$(printf '%s\n' "$core" | grep -Ev 'com\.google\.zxing:core:(3\.5\.4|[0-9.]+ -> 3\.5\.4)( \(\*\))?[[:space:]]*$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::com.google.zxing:core 沒有解析成 3.5.4："; printf '%s\n' "$bad"; exit 1
+          fi
+          echo "com.google.zxing:core 解析成 3.5.4"
+
+      # processUniversalReleaseMainManifest：只做清單合併（函式庫的清單、tools:node="remove"、置換字串），不編碼、不編 Rust；
+      # 變體 universalRelease 與上面編 Kotlin 的 universal 是同一個 abi 面向（Tauri 的 universal）。
+      - name: 檢查合併後的清單（沒有 CaptureActivity、只有主畫面對外開放）
+        working-directory: relay/asn/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "合併 release 清單" -- sh ./gradlew --no-daemon --console=plain :app:processUniversalReleaseMainManifest
+          files="$(find app/build/intermediates -type f -name AndroidManifest.xml -path '*universalRelease*' -path '*merged_manifest*' | sort)"
+          [ -n "$files" ] || { echo "::error::找不到合併後的 AndroidManifest.xml"; find app/build/intermediates -name AndroidManifest.xml | head -20; exit 1; }
+          fail=0
+          while IFS= read -r f; do
+            echo "=== $f ==="
+            flat="$(tr '\r\n' '  ' < "$f")"
+            echo "--- uses-permission ---"
+            printf '%s' "$flat" | grep -oE '<uses-permission[^>]*>' | sed 's/  */ /g' || true
+            echo "--- activity ---"
+            acts="$(printf '%s' "$flat" | grep -oE '<activity[^>]*>' | sed 's/  */ /g' || true)"
+            printf '%s\n' "$acts"
+            if printf '%s' "$acts" | grep -q 'CaptureActivity'; then
+              echo "::error::合併後的清單還有 CaptureActivity（$f）"; fail=1
+            fi
+            if printf '%s\n' "$acts" | grep 'android:exported="true"' | grep -Ev 'android:name="(tw\.yooliang\.asn)?\.MainActivity"' | grep -q .; then
+              echo "::error::主畫面以外還有對外開放的 activity（$f）"
+              printf '%s\n' "$acts" | grep 'android:exported="true"' | grep -Ev 'android:name="(tw\.yooliang\.asn)?\.MainActivity"' || true
+              fail=1
+            fi
+            printf '%s' "$acts" | grep -q 'FingerprintScanActivity' || { echo "::error::合併後的清單沒有自己的掃描畫面（$f）"; fail=1; }
+          done <<< "$files"
+          exit "$fail"
+
   # 電腦版（Windows）：只有 Windows 才編的程式（#[cfg(windows)]，例如 Windows Hello、DPAPI）其他工作都編不到（#945 發現）。
   # 這裡只檢查 Rust 能不能編，不打包、不跑測試、不碰任何 secrets；權限只讀。
   windows-check:
