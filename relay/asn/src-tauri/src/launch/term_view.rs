@@ -236,6 +236,8 @@ pub struct ViewFrame {
 #[derive(Default)]
 pub struct ViewState {
     pub stop: AtomicBool,
+    /// 分頁不在畫面上（電腦版）：暫停讀取窗格，連線和畫面留著；恢復後會補推最新的一幅
+    pub paused: AtomicBool,
     pub last_input_ms: AtomicU64,
     pub input: InputQueue,
     /// 這次觀看一共送出幾個字（只記字數，內容不記；結束時寫一行紀錄）
@@ -307,6 +309,12 @@ pub fn run_view(view_id: u64, state: &ViewState, port: &mut impl ViewPort) -> Op
                 continue;
             }
             Some(true) => {}
+        }
+        // 暫停（分頁不在畫面上）：不讀窗格；上一幅清掉，恢復後的第一輪一定補推最新的一幅（內容沒變也推）
+        if state.paused.load(Ordering::SeqCst) {
+            last = None;
+            port.sleep(Duration::from_millis(HIDDEN_MS));
+            continue;
         }
         let text = match port.text() {
             Ok(t) => filter_frame(&t),
@@ -448,6 +456,8 @@ mod tests {
         emit_ok: bool,
         state: &'a ViewState,
         input_at_read: Option<u32>,
+        pause_at_read: Option<u32>,
+        unpause_after_sleeps: Option<usize>,
     }
 
     fn meta() -> ViewMeta {
@@ -459,6 +469,9 @@ mod tests {
             self.reads += 1;
             if self.input_at_read == Some(self.reads) {
                 self.state.last_input_ms.store(self.now, Ordering::SeqCst);
+            }
+            if self.pause_at_read == Some(self.reads) {
+                self.state.paused.store(true, Ordering::SeqCst);
             }
             if self.texts.is_empty() {
                 self.state.stop.store(true, Ordering::SeqCst);
@@ -487,6 +500,9 @@ mod tests {
         fn sleep(&mut self, d: Duration) {
             self.sleeps.push(d.as_millis() as u64);
             self.now += d.as_millis() as u64;
+            if self.unpause_after_sleeps == Some(self.sleeps.len()) {
+                self.state.paused.store(false, Ordering::SeqCst);
+            }
         }
     }
 
@@ -503,6 +519,8 @@ mod tests {
             emit_ok: true,
             state,
             input_at_read: None,
+            pause_at_read: None,
+            unpause_after_sleeps: None,
         }
     }
 
@@ -539,6 +557,31 @@ mod tests {
         assert_eq!(run_view(1, &st, &mut f), None);
         assert_eq!(f.reads, 0, "看不到時不讀");
         assert_eq!(f.sleeps, vec![HIDDEN_MS, HIDDEN_MS]);
+    }
+
+    #[test]
+    fn 暫停期間不讀窗格也不送_恢復後第一輪一定補送() {
+        let st = ViewState::default();
+        let mut f = fake(&st, &["甲", "甲"]);
+        f.pause_at_read = Some(1);
+        f.unpause_after_sleeps = Some(3);
+        assert_eq!(run_view(7, &st, &mut f), None);
+        let got: Vec<(u64, &str)> = f
+            .emitted
+            .iter()
+            .filter(|x| !x.text.is_empty())
+            .map(|x| (x.seq, x.text.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(1, "甲"), (2, "甲")],
+            "內容沒變，恢復後也要補送一幅"
+        );
+        assert_eq!(
+            f.sleeps[..3].to_vec(),
+            vec![IDLE_MS, HIDDEN_MS, HIDDEN_MS],
+            "暫停時不讀、只睡"
+        );
     }
 
     #[test]

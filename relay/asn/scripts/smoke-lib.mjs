@@ -752,8 +752,8 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.dterm || probe.dtermTab ? '電腦版看別台終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1104,7 +1104,7 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
 import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
 import { mtermviewFollowProbeSource } from './smoke-term-follow.mjs'
 import { mtermBarProbeSource, mtermSwipeProbeSource } from './smoke-term-swipe.mjs'
-import { DTERM_ME, DTERM_ME2, DTERM_MEMBERS, DTERM_MEMBERS2, DTERM_NODE, DTERM_PROBES, DTERM_TAB_PROBES, dtermProbeSource, dtermTabProbeSource } from './smoke-desk-term.mjs'
+import { DTERM_ME, DTERM_ME2, DTERM_MEMBERS, DTERM_MEMBERS2, DTERM_NODE, DTERM_PROBES, DTERM_TAB_PROBES, LTERM_ME, LTERM_MEMBERS, LTERM_PROBES, dtermProbeSource, dtermTabProbeSource, ltermPauseProbeSource } from './smoke-desk-term.mjs'
 export const MTERMVIEW_PROBES = {
   cursor: { mtermview: true, cursor: true },
   base: { mtermview: true, big: false },
@@ -1428,6 +1428,8 @@ export const SCENARIOS = [
   { name: 'list-term-switchback', page: 'list.html', state: { signedIn: true, dterm: true, dtermTabs: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_TAB_PROBES.switchback, shot: 'list-term-switchback-1100.png' },
   { name: 'list-term-expired', page: 'list.html', state: { signedIn: true, dterm: true, dtermTabs: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_TAB_PROBES.expired, shot: 'list-term-expired-1100.png' },
   { name: 'list-term-typeaway', page: 'list.html', state: { signedIn: true, dterm: true, dtermTabs: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_TAB_PROBES.typeaway, shot: 'list-term-typeaway-1100.png' },
+  // 本機終端：分頁隱藏時暫停讀取（隱藏期間後台不推畫面），切回來補一幅再恢復
+  { name: 'list-term-local-pause', page: 'list.html', state: { signedIn: true, dtermLocal: true }, ready: '#app.win .chatpane .actionbar', probe: LTERM_PROBES.pause, shot: 'list-term-local-pause-1100.png' },
   { name: 'list-term-typing', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.typing, shot: 'list-term-typing-1100.png' },
   { name: 'list-term-typing-360', page: 'list.html', width: 360, state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.typing, shot: 'list-term-typing-360.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
@@ -1577,6 +1579,18 @@ export const tableFor = scenario => {
     t.term_view_remote_stop = null
     t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
   }
+  if (scenario.state.dtermLocal) {
+    // 電腦版本機終端：夥伴在這台、在共用終端服務裡；假後台依 paused 停推畫面（見 injectSource 的 __tvLive）
+    t.relay_list = { members: LTERM_MEMBERS }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(LTERM_ME) } }
+    t.term_view_available = true
+    t.term_view_open = 7
+    t.term_view_close = null
+    t.term_view_set = null
+    t.term_view_input = null
+    t.term_view_history = null
+    t.__tvLive = { text: MTERMVIEW_TEXT }
+  }
   if (scenario.state.dterm) {
     // 電腦版：開著別台（Q）上夥伴的對話，按鈕列「終端」＝看那台的畫面；那台在本人帳號底下（update_remote_status 有它）
     t.relay_list = { members: scenario.state.dtermTabs ? DTERM_MEMBERS2 : DTERM_MEMBERS }
@@ -1620,6 +1634,12 @@ export const injectSource = table => `(() => {
   const missing = (globalThis.__smokeMissing = []);
   // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
   if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), T.__confirmDelay || 30) } };
+  const tv = T.__tvLive ? (globalThis.__smokeTv = { paused: false, timer: 0, seq: 0, sent: 0, id: 7 }) : null;
+  const tvSend = () => {
+    tv.seq++; tv.sent++;
+    const payload = { view_id: tv.id, seq: tv.seq, text: T.__tvLive.text + String.fromCharCode(13, 10) + '  更新 ' + tv.seq, meta: { cursor_x: 2, cursor_y: 3, cols: 120, rows: 40 } };
+    for (const fn of ((globalThis.__smokeListeners || {})['term-view-frame'] || [])) fn({ event: 'term-view-frame', payload });
+  };
   globalThis.__TAURI__ = {
     // 事件：listen 記下回呼；表裡的 __emitOn[指令] 在那個指令被呼叫後依序推事件（例如看別台終端的假畫面幀）。回呼收到的是 { payload }，和真的 Tauri 一樣
     event: {
@@ -1630,6 +1650,12 @@ export const injectSource = table => `(() => {
     core: { invoke: async (cmd, args) => {
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
       (globalThis.__smokeCalls ||= []).push([cmd, args]);
+      // 本機終端的假後台（__tvLive）：開了就每 100 毫秒推一幅，paused 時不推、恢復時補推一幅；__smokeTv.sent＝一共推了幾幅
+      if (tv) {
+        if (cmd === 'term_view_open') { clearInterval(tv.timer); tv.timer = setInterval(() => { if (!tv.paused) tvSend() }, 100); setTimeout(tvSend, 50); return tv.id }
+        if (cmd === 'term_view_close') { clearInterval(tv.timer); return null }
+        if (cmd === 'term_view_set') { const was = tv.paused; tv.paused = !!(args && args.paused); if (was && !tv.paused) tvSend(); return null }
+      }
       const ev = T.__emitOn && T.__emitOn[cmd];
       if (Array.isArray(ev)) ev.forEach((e, i) => setTimeout(() => { for (const fn of ((globalThis.__smokeListeners || {})[e.event] || [])) fn({ event: e.event, payload: JSON.parse(JSON.stringify(e.payload)) }) }, 50 * (i + 1)));
       const v = T[cmd];

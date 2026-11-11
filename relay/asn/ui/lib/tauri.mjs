@@ -80,6 +80,8 @@ export const photoApi = {
 export const termViewApi = {
   open: ({ id, name }) => invoke('term_view_open', { id: id ?? null, name: name ?? null }),   // → 觀看編號
   close: viewId => invoke('term_view_close', { viewId }),
+  // 分頁不在畫面上就暫停讀取窗格（連線和畫面留著），切回來再恢復並補推最新的一幅。舊版沒有這個指令，呼叫會失敗（畫面端吞掉）
+  pause: (viewId, paused) => invoke('term_view_set', { viewId, paused: !!paused }),
   available: name => invoke('term_view_available', { name }),   // 這位夥伴在不在共用終端服務裡（#900）→ true／false
   // 在畫面裡打字（#597 D）：只有這個本機命令，Rust 端檢查開著的畫面、視窗在前景、窗格是 ASN 開的、授權
   input: (viewId, data, paste, ime) => invoke('term_view_input', { viewId, data, paste: !!paste, ime: !!ime }),

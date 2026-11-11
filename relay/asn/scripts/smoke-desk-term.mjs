@@ -142,3 +142,43 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
   if (kind === 'switchback' && calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來又重新請求了一次（start 次數 ' + starts + ' → ' + calls('term_view_remote_start') + '）' };
   return { ok: true, why: '' };
 })()`
+
+// ---- 本機終端：分頁隱藏時暫停讀取（term_view_set），切回來補讀一幅再恢復 ----
+// 假後台（smoke-lib 的 injectSource）會依 paused 停推假畫面、恢復時補推一幅，並記下推了幾幅（__smokeTv.sent）
+export const LTERM_NODE = 'P'   // 假 Tauri 的 startup_info 裡這台的節點代號：夥伴在這台，才走本機看終端
+export const LTERM_MEMBERS = [{ id: LTERM_NODE, name: '測試機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }, { name: 'demo2', status: 'idle', cwd_label: 'demo2' }] }]
+export const LTERM_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: LTERM_NODE + '/demo' }, { id: LTERM_NODE + '/demo2' }], active: { id: LTERM_NODE + '/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
+export const LTERM_PROBES = { pause: { ltermPause: true } }
+
+export const ltermPauseProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
+  const sent = () => (globalThis.__smokeTv || {}).sent || 0;
+  const sets = paused => (globalThis.__smokeCalls || []).filter(c => c[0] === 'term_view_set' && c[1] && c[1].paused === paused).length;
+  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.getClientRects().length > 0);
+  const rowsOf = () => (vis('.term-view-screen .xterm-rows')[0] || {}).textContent || '';
+  const tabs = () => [...document.querySelectorAll('.ctab')];
+  const entry = await wait(() => vis('.chatpane .actionbar button').find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
+  if (!entry) return { ok: false, why: '按鈕列沒有「終端」' };
+  entry.click();
+  if (!(await wait(() => rowsOf().includes('測試通過') && sent() >= 3))) return { ok: false, why: '本機終端畫面沒有出現假畫面的字，或沒有持續收到畫面：' + rowsOf().slice(0, 40) + ' / 已推 ' + sent() };
+  if (tabs().length < 2) return { ok: false, why: '分頁不到兩個：' + tabs().length };
+  tabs()[1].click();
+  if (!(await wait(() => vis('.term-view-screen').length === 0))) return { ok: false, why: '切走後第一個分頁的終端還看得到' };
+  await sleep(400);
+  if (!(await wait(() => sets(true) >= 1, 20))) return { ok: false, why: '分頁隱藏時沒有呼叫 term_view_set(paused=true)' };
+  const hiddenFrom = sent();
+  await sleep(1500);
+  if (sent() !== hiddenFrom) return { ok: false, why: '分頁隱藏期間後台還在推畫面：' + hiddenFrom + ' → ' + sent() };
+  if (sets(false) !== 0) return { ok: false, why: '還沒切回來就呼叫了 term_view_set(paused=false)' };
+  tabs()[0].click();
+  if (!(await wait(() => sent() > hiddenFrom, 30))) return { ok: false, why: '切回來沒有補到最新的一幅（' + hiddenFrom + ' → ' + sent() + '）' };
+  if (sets(false) < 1) return { ok: false, why: '切回來沒有呼叫 term_view_set(paused=false)' };
+  const resumed = sent();
+  await sleep(1000);
+  if (sent() < resumed + 3) return { ok: false, why: '切回來之後沒有恢復持續推畫面：' + resumed + ' → ' + sent() };
+  if (!rowsOf().includes('測試通過')) return { ok: false, why: '切回來後終端沒有內容：' + rowsOf().slice(0, 40) };
+  const sc = vis('.term-view-screen .xterm-screen')[0];
+  if (!sc || sc.clientWidth < 50) return { ok: false, why: '切回來後終端畫面寬度是 0' };
+  return { ok: true, why: '' };
+})()`

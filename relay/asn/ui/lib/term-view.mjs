@@ -236,6 +236,7 @@ export function createTermViewSession(deps) {
       const id = await deps.open()
       if (stopped) { await deps.close(id); return }   // 開到一半就被關掉：不留著背景讀畫面
       viewId = id
+      deps.onOpened?.(id)
       const first = early.get(id)
       early.clear()
       if (first?.closed) lost(first.closed)
@@ -381,8 +382,17 @@ export const TermView = {
     const confirmPaste = () => { const t = pendingPaste.value; pendingPaste.value = ''; typed(t, true); xtermRef?.focus() }
     const cancelPaste = () => { pendingPaste.value = ''; xtermRef?.focus() }
     const focusTerm = () => xtermRef?.focus()
+    // 電腦版 keep：分頁不在畫面上就請後台暫停讀取窗格。舊版後台沒有這個指令：呼叫失敗就吞掉，畫面照常（只是後台照舊一直讀）
+    let hidden = false, pauseWarned = false
+    const sendPause = (viewId, paused) => {
+      if (!props.api.pause || viewId === null || viewId === undefined) return
+      let r
+      try { r = props.api.pause(viewId, paused) } catch (e) { r = Promise.reject(e) }
+      Promise.resolve(r).catch(e => { if (!pauseWarned) { pauseWarned = true; console.info('[ASN] 暫停讀取終端畫面沒有成功（舊版後台沒有這個指令時正常）', String(e?.message ?? e)) } })
+    }
     const start = () => {
       stop()
+      hidden = props.keep && !props.active
       lostText.value = ''
       follow = createFollow()
       behind.value = false
@@ -412,6 +422,7 @@ export const TermView = {
         },
         onLost: () => { session = null; lostText.value = TERM_VIEW_LOST },
         onPainted: followCursor,
+        onOpened: id => { if (hidden) sendPause(id, true) },
         history: props.api.history ? (viewId, lines) => props.api.history(viewId, lines) : undefined,
         onHistoryState,
       })
@@ -427,7 +438,13 @@ export const TermView = {
       const to = followScrollTo({ following: follow.following(), current: host.value.scrollTop, target: target() })
       if (to !== null) { follow.place(to); host.value.scrollTop = to }
     })
-    watch(() => props.active, a => { if (a && props.keep) refit() })
+    // keep：離開分頁先請後台暫停讀取；切回來先重畫（refit），再請後台恢復（後台恢復時會補推最新的一幅）
+    watch(() => props.active, a => {
+      if (!props.keep) return
+      if (!a) { hidden = true; sendPause(session?.viewId(), true); return }
+      hidden = false
+      refit().then(() => { if (props.active && !hidden) sendPause(session?.viewId(), false) })
+    })
     onMounted(() => { if (props.active || props.keep) start() })
     onBeforeUnmount(stop)
     return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
