@@ -78,7 +78,17 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
-    let opened = start_window_noted(&req.name, &command, &args, &cwd, display_bg)?;
+    // 同一位夥伴剛被別條路（開機接回、終端服務中斷接回、另一次喚醒）開了、視窗還沒上線：不開第二個（登記見 opening.rs）
+    if !super::opening::claim(resumed.as_deref().unwrap_or(""), &req.name) {
+        return Err(format!("{}，請稍候幾秒再看名單", super::opening::BUSY));
+    }
+    let opened = match start_window_noted(&req.name, &command, &args, &cwd, display_bg) {
+        Ok(o) => o,
+        Err(e) => {
+            super::opening::release(resumed.as_deref().unwrap_or(""), &req.name);
+            return Err(e);
+        }
+    };
     let mut out = json!({
         "ok": true,
         "mode": "window",
@@ -225,7 +235,15 @@ pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cw
     let (command, args, spawn_cwd) = build_spawn_spec(config, &req)?;
     let args = super::auto_resume::resumed_args(&command, &args, session, perm)?;
     maybe_trust_claude_cwd("claude", &req.cwd);
-    start_window(name, &command, &args, &spawn_cwd, hidden)
+    // 別條路（本人喚醒、開機接回、終端服務中斷接回）剛開了同一位、還沒上線：不開第二個。開失敗要解除，不然本人之後手動喚醒會被擋
+    if !super::opening::claim(session, name) {
+        return Err(super::opening::BUSY.to_string());
+    }
+    let opened = start_window(name, &command, &args, &spawn_cwd, hidden);
+    if opened.is_err() {
+        super::opening::release(session, name);
+    }
+    opened
 }
 
 /// 接手使用者自己開的 pi（0.2 A5）：用本機 pi 的啟動設定、載入收信擴充、帶名字，在原本的資料夾用 --session 接回同一段對話。
