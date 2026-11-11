@@ -487,7 +487,9 @@ const app = createApp({
     const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '' })
     // 從設定頁開確認畫面時暫存原本正在看的那台（{ cur }）；確認畫面全部收掉後由下面的 watch 統一還原。開始／結束看電腦（vpReset）就作廢
     let vpPrev = null
-    const vpReset = () => { vpPrev = null; vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
+    // vp.note 目前是不是設定頁開的確認留下的（只有這種才在離開、重進設定頁時清掉；終端提示條那邊的提示不碰）
+    let vpNoteOwn = false
+    const vpReset = () => { vpPrev = null; vpNoteOwn = false; vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
     const onRemoteStarted = r => { vpReset(); vp.cur = knownPeerOf(r, r?.machine) }
     const onRemoteEnded = () => vpReset()
     const peerStrip = computed(() => knownNeedsConfirm(vp.cur))
@@ -505,10 +507,10 @@ const app = createApp({
       } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
     // 「確認指紋」先選方法：用相機掃電腦上的 QR code（預設），或改用選的（四選一）。掃到的字只在外殼與 Rust 之間，這裡只拿得到結果的狀態字
-    const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vp.note = ''; vp.error = ''; vp.method = true }
+    const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vpNoteOwn = false; vp.note = ''; vp.error = ''; vp.method = true }
     const closeMethodSheet = () => { vp.method = false }
     // 設定頁「認得的電腦」每列的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
-    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet() }
+    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet(); vpNoteOwn = true }
     // 選方法、四選一、掃描都收掉且沒在忙（成功、取消、失敗、掃描結束都會走到這）→ 把目前對象還原成設定頁開啟前的那台；終端提示條開的沒有暫存，不動
     watch(() => !vp.method && !vp.sheet && !vp.busy, idle => { if (idle && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } })
     const methodPickInstead = async () => { vp.method = false; await openPeerSheet() }
@@ -561,6 +563,8 @@ const app = createApp({
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
     watch(settingCat, c => { if (c === 'known') void loadKnown() })
+    // 離開或重進「認得的電腦」頁：清掉設定頁開的確認留下的失敗提示（成功時 scanPeer／choosePeer 已清）
+    watch(settingCat, (c, old) => { if ((c === 'known' || old === 'known') && vpNoteOwn) { vp.note = ''; vpNoteOwn = false } })
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({

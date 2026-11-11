@@ -439,3 +439,13 @@ test('還原邏輯（模擬）：A 在看，從設定頁確認 B，成功、取�
   if (!vp.method && !vp.sheet && !vp.busy && vpPrev) vp.cur = null
   assert.equal(vp.cur.node, 'C', '提示條路徑不動')
 })
+
+test('設定頁確認留下的提示：成功路徑已清；離開或重進設定頁時只清設定頁開的那種，終端提示條的不碰', () => {
+  const js = read('../ui/m.js')
+  assert.match(js, /if \(r === 'done'\) \{[^\n]*vp\.note = ''/, '掃描成功清提示')
+  assert.match(js, /if \(r === 'done'\) \{ if \(vp\.cur === cur\)[^\n]*vp\.note = ''/, '四選一成功清提示')
+  assert.match(js, /openMethodSheet\(\); vpNoteOwn = true \}/, '只有設定頁的確認標記為自己的提示')
+  assert.match(js, /const openMethodSheet = \(\) => \{ if \(!vp\.cur \|\| vp\.busy\) return; vpNoteOwn = false;/, '提示條開的確認取消標記')
+  assert.match(js, /const vpReset = \(\) => \{ vpPrev = null; vpNoteOwn = false;/, '開始／結束看電腦取消標記')
+  assert.match(js, /watch\(settingCat, \(c, old\) => \{ if \(\(c === 'known' \|\| old === 'known'\) && vpNoteOwn\) \{ vp\.note = ''; vpNoteOwn = false \} \}\)/, '離開或重進才清、且只清自己的')
+})
