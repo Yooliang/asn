@@ -31,6 +31,7 @@ mod quota;
 mod dev_prefix;
 mod selftest;
 mod mux_notice;
+mod archive_sync;
 mod wait_notice;
 mod outbox;
 
@@ -64,6 +65,8 @@ pub struct Config {
     pub mailbox_name: String,
     /// 注入的設備名（測試用；None＝向後台名單查自己節點的名字）。通知第一行會冠上它，空或查不到＝不加；見 core/dev_prefix.rs
     pub device_name: Option<String>,
+    /// 定時向後台查「哪些夥伴被本人封存」並從認得的夥伴存檔拿掉（core/archive_sync.rs）。測試預設關：假後台不認得這個查詢
+    pub archive_sync: bool,
     /// 沒指定收件視窗的信，環境變數 ASN_RELAY_DEFAULT_AGENT 指定的收件視窗（舊相容；預設空＝交給本人）。bridge.json 的設定優先
     pub default_agent: String,
     /// 設定檔（bridge.json）所在資料夾；沒有就只看環境變數
@@ -155,6 +158,7 @@ impl Config {
             node: node.into(),
             mailbox_name: crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
             device_name: None,
+            archive_sync: !cfg!(test),
             default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_default(),
             data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
@@ -476,6 +480,9 @@ pub struct Core {
     /// 確定自己結束的夥伴（監看記的）：不等它接回
     mux_exited: HashSet<String>,
     mux_pending_at: u64,
+    /// 下次向後台查封存名單的時間（見 core/archive_sync.rs）與查失敗的 log 是否已寫過
+    archive_next_at: u64,
+    archive_warned: bool,
     /// session 檔缺欄位的紀錄已經寫過（每次啟動一次）
     wait_fields_warned: bool,
     /// 認得的夥伴（#766）：存檔的視窗名單；重開後還沒接回來的夥伴，寄給它的信先留著、群組點名游標不前進
@@ -562,7 +569,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
+            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
         for w in &outbox_logs {
@@ -2647,6 +2654,7 @@ impl Core {
         self.wait_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.mux_blind_tick(now).await;
+        self.archive_tick(now).await;
         self.ack_retry_tick(now).await;
         self.outbox_bad_notice_tick(now).await;
         self.outbox_tick(now).await;

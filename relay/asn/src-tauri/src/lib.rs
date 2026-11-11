@@ -2430,7 +2430,12 @@ async fn relay_partner_op(app: State<'_, App>, auth: State<'_, auth::AuthState>,
 async fn relay_partner_archive(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
     let token = account::signing_token(&auth).await;
-    r.partner_archive_signed(&body, token.as_deref()).await
+    let res = r.partner_archive_signed(&body, token.as_deref()).await;
+    if res.is_ok() {
+        // 封存狀態在後台：請這台的收發室馬上重查，把剛封存的夥伴從「重開機後接回」的存檔拿掉（取消封存也一樣重查）
+        bridge::known::request_archive_refresh();
+    }
+    res
 }
 /// 查管理操作的進度（最多 20 筆）。要本人簽章；沒登入回錯，不打後台。回 { ops: [...] }
 #[cfg(feature = "gui")]

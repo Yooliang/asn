@@ -359,7 +359,12 @@ pub(crate) struct PartnerOps {
     acp: Mutex<Option<Arc<dyn AcpAdmin>>>,
     /// grok 的資料夾（~/.grok）：接手時只讀裡面的使用中對話登記與 sessions 的資料夾名稱。沒設＝不能接手
     grok_home: Mutex<Option<PathBuf>>,
+    /// 本人（從手機或電腦名單）下令關掉、也真的關掉了的視窗名字：收發室每輪取走，從「認得的夥伴」存檔拿掉，重開機後就不會接回（見 core/archive_sync.rs）
+    closed: Mutex<Vec<String>>,
 }
+
+/// 記著還沒被收發室取走的關閉名字最多幾個（收發室不在時不會無限長大）
+const CLOSED_MAX: usize = 200;
 
 impl PartnerOps {
     pub(crate) fn new(relay: Arc<Relay>, log: Arc<BridgeLog>, handoff_dir: PathBuf, env: Arc<dyn OpsEnv>, dirs: OpsDirs, protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync>) -> Arc<PartnerOps> {
@@ -378,7 +383,24 @@ impl PartnerOps {
             cmds: Mutex::new(std::collections::HashMap::new()),
             acp: Mutex::new(None),
             grok_home: Mutex::new(None),
+            closed: Mutex::new(Vec::new()),
         })
+    }
+
+    /// 關閉（或移除）成功才記下視窗名字；失敗、其他動作都不記
+    pub(crate) fn note_closed(&self, op: &Op, r: &OpResult) {
+        if r.status != "ok" || !(op.op == "close" || op.op == "remove") || op.name.is_empty() {
+            return;
+        }
+        let mut v = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+        if v.len() < CLOSED_MAX && !v.contains(&op.name) {
+            v.push(op.name.clone());
+        }
+    }
+
+    /// 取走目前記著的關閉名字
+    pub(crate) fn take_closed(&self) -> Vec<String> {
+        std::mem::take(&mut *self.closed.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// 真實環境版：收發室視窗名與 ASN 自己的 worker pid 受保護
@@ -817,6 +839,7 @@ impl PartnerOps {
     /// 寫 log、往來記錄，再回報後台
     async fn finish(&self, op: &Op, r: OpResult) {
         self.record(op, &r);
+        self.note_closed(op, &r);
         let detail: String = r.detail.chars().take(DETAIL_MAX).collect();
         let mut body = json!({ "id": op.id, "status": r.status, "detail": detail });
         if let Some(res) = &r.result {
