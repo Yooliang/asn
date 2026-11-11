@@ -350,7 +350,14 @@ impl SealedLoginStore {
         if login.is_some() {
             match migrate_plain(&self.path, LOGIN_AAD, &raw, &*self.aead, hook) {
                 Ok(true) => {}
-                Ok(false) => return self.load_hooked(&|| {}),
+                // 讀到之後檔案被換成較新的內容：不蓋它，只再讀一次、這次不改存（有次數上限；下次啟動再改存）
+                Ok(false) => {
+                    let now = std::fs::read(&self.path).map_err(|e| format!("讀不到登入存檔：{e}"))?;
+                    return match now.strip_prefix(PREFIX) {
+                        Some(body) => Ok(self.aead.open(LOGIN_AAD, body).ok().and_then(|p| decode_login(&p))),
+                        None => Ok(decode_login(&now)),
+                    };
+                }
                 Err(_) => log_once(&LOGIN_SEAL_LOGGED, LOGIN_SEAL_FAIL),
             }
         }
