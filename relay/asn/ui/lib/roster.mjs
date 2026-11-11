@@ -31,12 +31,13 @@ export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).fil
 export const expectsReplyTo = f => !isAsnWindow(f)
 export const showsWaiting = f => Boolean(f?.waiting) && !isAsnWindow(f)
 
-// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，stopped＝已停止（內建通道的工作者被「關閉」，0.2 B3），
+// 後端回報的視窗狀態 → 介面狀態（isProc＝本機程序條目：只顯示、不能收信，不分狀態一律 running＝「執行中・僅顯示」、灰點，不用代表可寄信的綠點）：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，stopped＝已停止（內建通道的工作者被「關閉」，0.2 B3），
 // 其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
 const AWAY = new Set(['waiting', 'away', 'blocked', 'paused'])
-export function statusOf(raw) {
+export function statusOf(raw, isProc = false) {
   const s = String(raw ?? '').trim().toLowerCase()
+  if (isProc) return 'running'
   return BUSY.has(s) ? 'busy' : AWAY.has(s) ? 'away' : s === 'stopped' ? 'stopped' : 'online'
 }
 
@@ -109,7 +110,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
         activeAt: activeAtOf(a.last_active_at),   // 後台的最後活動時間（選填；舊後台沒有＝null，活躍度退回只看本機往來）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
-        onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
+        onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status, isProcEntry(a)),
         archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與交接檔資料夾，不顯示
       })
