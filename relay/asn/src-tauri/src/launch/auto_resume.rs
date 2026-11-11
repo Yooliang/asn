@@ -78,6 +78,8 @@ pub trait Deps {
     /// 同名或同一段對話已經有活著的視窗
     fn live(&self, name: &str, session: &str) -> bool;
     fn launch(&self, entry: &KnownEntry) -> Result<(), String>;
+    /// 開了卻一直沒上線：解除「正在開」的登記（見 opening.rs），本人之後手動喚醒才不會被擋。預設什麼都不做
+    fn unclaim(&self, _entry: &KnownEntry) {}
     /// 開出來的視窗上線了（有活著的同名 session 檔）
     fn appeared(&self, name: &str) -> bool;
     /// 這一輪接回的原因（寫進結果給畫面顯示）。預設空＝重開機
@@ -87,6 +89,37 @@ pub trait Deps {
     /// 接回失敗、視窗又是隱藏的：把它顯示出來讓本人看得到（回有沒有成功）。只有隱藏的視窗才會被呼叫
     fn reveal(&self, entry: &KnownEntry) -> bool;
     fn report(&self, status: &Status);
+}
+
+/// 命令列是不是接續這段對話：`--resume <編號>`、`-r <編號>`、`--resume=<編號>`、`--session-id <編號>`（引號與大小寫以外逐字相同）。
+/// 只回有沒有，不回傳也不記錄命令列內容
+#[cfg(any(feature = "gui", test))]
+fn cmdline_resumes(cmdline: &str, session: &str) -> bool {
+    if session.is_empty() {
+        return false;
+    }
+    let toks: Vec<&str> = cmdline.split_whitespace().map(|t| t.trim_matches('"')).collect();
+    toks.iter().enumerate().any(|(i, t)| match *t {
+        "--resume" | "-r" | "--session-id" => toks.get(i + 1).is_some_and(|v| *v == session),
+        _ => t.strip_prefix("--resume=").is_some_and(|v| v == session),
+    })
+}
+
+/// 程序表裡有沒有「活著、而且命令列接續這段對話」的 Claude 程序（只看 claude／node 的程序，不逐一讀所有程序的命令列）。
+/// 讀不到命令列的程序當作不是
+#[cfg(any(feature = "gui", test))]
+fn process_resumes(procs: &[super::switch::Proc], alive: &dyn Fn(u32) -> bool, cmdline: &dyn Fn(u32) -> Option<String>, session: &str) -> bool {
+    procs.iter().filter(|p| p.name.starts_with("claude") || p.name == "node.exe" || p.name == "node").any(|p| alive(p.pid) && cmdline(p.pid).is_some_and(|c| cmdline_resumes(&c, session)))
+}
+
+#[cfg(feature = "gui")]
+fn process_resumes_real(session: &str) -> bool {
+    use super::switch::{Os, RealOs};
+    if !crate::bridge::roster::valid_sid(session) {
+        return false;
+    }
+    let os = RealOs;
+    process_resumes(&os.processes(), &|p| os.alive(p), &|p| os.cmdline(p), session)
 }
 
 /// 要不要接、接哪些。`boot`＝現在這次開機的時間（讀不到不接）；`saved_boot`＝存檔記的（舊檔沒有，不接：不知道是不是換了開機）
@@ -165,6 +198,11 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
             continue;
         }
         if let Err(why) = deps.launch(e) {
+            // 別條路剛登記要開同一位（開機接回與終端服務中斷接回、本人喚醒撞在一起）：視窗已經在開，不重開也不算失敗
+            if why == super::opening::BUSY {
+                st.total -= 1;
+                continue;
+            }
             fail(&mut st, format!("開不起來：{why}"));
             continue;
         }
@@ -173,6 +211,9 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
         while !up && deps.now() < until {
             deps.sleep(APPEAR_POLL_MS);
             up = deps.appeared(&e.name);
+        }
+        if !up {
+            deps.unclaim(e);
         }
         if up {
             st.resumed.push(e.name.clone());
@@ -201,9 +242,11 @@ static RESUME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// 終端服務中斷時要接回的名單：存檔（known-windows.json）裡有這位的對話編號與資料夾就照它接；
 /// 沒有記到（或不是 Claude 視窗）就放一列沒有對話編號的，讓 `run` 把它列進「沒有接回」並寫原因，不無聲略過。
 /// 這條路的對象是 ASN 自己開在共用 mux 裡的夥伴，不看存檔裡「ASN 開的」那一欄
-pub fn crash_entries(names: &[String], known: Vec<KnownEntry>) -> Vec<KnownEntry> {
+/// 本人封存的夥伴（`archived`，存檔記的）不接回，和重開機的 `pick` 一樣
+pub fn crash_entries(names: &[String], known: Vec<KnownEntry>, archived: &std::collections::BTreeSet<String>) -> Vec<KnownEntry> {
     names
         .iter()
+        .filter(|n| !archived.contains(n.as_str()))
         .map(|n| {
             known.iter().find(|e| &e.name == n && e.engine == "claude").cloned().unwrap_or_else(|| KnownEntry {
                 name: n.clone(),
@@ -220,7 +263,7 @@ pub fn crash_entries(names: &[String], known: Vec<KnownEntry>) -> Vec<KnownEntry
 pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool) {
     let now = crate::heartbeat::now_ms();
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
-    let entries = crash_entries(names, known.entries());
+    let entries = crash_entries(names, known.entries(), known.archived_names());
     let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE };
     if !resume {
         let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
@@ -384,7 +427,11 @@ impl Deps for RealDeps {
         }
     }
     fn live(&self, name: &str, session: &str) -> bool {
-        self.live_session(name, Some(session))
+        // session 檔要等 Claude 起來才寫：剛開的視窗還沒有檔，所以再看程序（命令列接續這段對話的活程序）。查不到程序就只看 session 檔
+        self.live_session(name, Some(session)) || process_resumes_real(session)
+    }
+    fn unclaim(&self, e: &KnownEntry) {
+        super::opening::release(&e.facts.session, &e.name);
     }
     fn launch(&self, e: &KnownEntry) -> Result<(), String> {
         let mut config = super::config::load_launch_config()?;
@@ -453,7 +500,7 @@ mod tests {
             e.engine = "pi".into();
             e
         }];
-        let es = crash_entries(&sv(&["甲", "乙", "丙"]), known);
+        let es = crash_entries(&sv(&["甲", "乙", "丙"]), known, &Default::default());
         assert_eq!(es.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲", "乙", "丙"], "順序照名單");
         assert!(crate::bridge::roster::valid_sid(&es[0].facts.session), "存檔有的帶原本的對話編號");
         // pi 視窗與沒記到的：不帶對話編號、引擎改成 claude 讓 run 走「沒有記到原本的對話編號」那條
@@ -534,11 +581,12 @@ mod tests {
         peak: Cell<usize>,
         revealed: RefCell<Vec<String>>,
         reveal_ok: bool,
+        released: RefCell<Vec<String>>,
     }
 
     impl Fake {
         fn new() -> Fake {
-            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false }
+            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]) }
         }
     }
 
@@ -571,7 +619,7 @@ mod tests {
         fn launch(&self, e: &KnownEntry) -> Result<(), String> {
             self.launched.borrow_mut().push(e.name.clone());
             if self.fail_launch.contains(&e.name) {
-                return Err("壞了".into());
+                return Err(if e.name == "別條路開的" { crate::launch::opening::BUSY.to_string() } else { "壞了".into() });
             }
             self.running.set(self.running.get() + 1);
             self.peak.set(self.peak.get().max(self.running.get()));
@@ -583,6 +631,9 @@ mod tests {
                 self.running.set(self.running.get().saturating_sub(1));
             }
             up
+        }
+        fn unclaim(&self, e: &KnownEntry) {
+            self.released.borrow_mut().push(e.name.clone());
         }
         fn reveal(&self, e: &KnownEntry) -> bool {
             self.revealed.borrow_mut().push(e.name.clone());
@@ -632,6 +683,69 @@ mod tests {
         stale[1].facts.asn_opened = true;
         let archived: std::collections::BTreeSet<String> = ["封存了".to_string()].into_iter().collect();
         assert_eq!(names(pick(stale, boots.0, boots.1, true, false, &archived)), ["沒關"]);
+    }
+
+    #[test]
+    fn 別條路剛登記要開同一位_不重開_也不算失敗() {
+        let mut f = Fake::new();
+        f.fail_launch = vec!["別條路開的".into()];
+        let st = run(vec![entry("別條路開的"), entry("乙")], &f);
+        assert_eq!(st.resumed, ["乙"]);
+        assert!(st.failed.is_empty(), "{:?}", st.failed);
+        assert_eq!(st.total, 1, "別條路開的不算在這一輪");
+    }
+
+    #[test]
+    fn 開了卻沒看到上線_解除登記_上線了的不解除() {
+        let mut f = Fake::new();
+        f.never_appears = vec!["甲".into()];
+        let st = run(vec![entry("甲"), entry("乙")], &f);
+        assert_eq!(st.resumed, ["乙"]);
+        assert_eq!(*f.released.borrow(), ["甲"], "只有沒上線的解除，本人之後手動喚醒才不會被擋");
+    }
+
+    #[test]
+    fn 命令列接續這段對話才算已經開著() {
+        let sid = "76c44a7f-d488-49f0-9d6c-d089a427b5ed";
+        assert!(cmdline_resumes(&format!(r#""C:\x\claude.exe" --dangerously-skip-permissions --resume {sid} -n "甲""#), sid));
+        assert!(cmdline_resumes(&format!("claude --resume={sid}"), sid));
+        assert!(cmdline_resumes(&format!("claude -r {sid}"), sid));
+        assert!(cmdline_resumes(&format!("claude --session-id {sid}"), sid));
+        assert!(!cmdline_resumes(&format!("claude --resume {sid}x"), sid), "編號要逐字相同");
+        assert!(!cmdline_resumes("claude --resume other-sid", sid));
+        assert!(!cmdline_resumes(&format!("claude -n {sid}"), sid), "不是接續參數的值不算");
+        assert!(!cmdline_resumes("claude --resume", sid));
+        assert!(!cmdline_resumes(&format!("claude --resume {sid}"), ""), "沒有編號不比對");
+    }
+
+    #[test]
+    fn 程序表有活著的接續程序就算開著_查不到命令列或已結束就不算() {
+        use super::super::switch::Proc;
+        let sid = "76c44a7f-d488-49f0-9d6c-d089a427b5ed";
+        let procs = vec![
+            Proc { pid: 1, ppid: 0, name: "explorer.exe".into() },
+            Proc { pid: 10, ppid: 1, name: "claude.exe".into() },
+            Proc { pid: 20, ppid: 1, name: "node.exe".into() },
+            Proc { pid: 30, ppid: 1, name: "powershell.exe".into() },
+        ];
+        let cmd = |p: u32| match p {
+            10 => Some(format!("claude --resume {sid}")),
+            20 => None,
+            30 => Some(format!("powershell -c claude --resume {sid}")),
+            _ => Some(format!("claude --resume {sid}")),
+        };
+        assert!(process_resumes(&procs, &|_| true, &cmd, sid));
+        assert!(!process_resumes(&procs, &|p| p != 10, &cmd, sid), "pid 10 已結束，node 讀不到命令列，殼不算：退回只看 session 檔");
+        assert!(!process_resumes(&procs, &|_| true, &|_| None, sid), "命令列都讀不到：不算（退回 session 檔的判斷）");
+        assert!(!process_resumes(&procs[..1], &|_| true, &cmd, sid), "探索者之類不是 Claude 的程序不讀命令列");
+    }
+
+    #[test]
+    fn 終端服務中斷接回_封存的夥伴不接() {
+        let known = vec![entry("甲"), entry("乙")];
+        let archived: std::collections::BTreeSet<String> = ["乙".to_string()].into_iter().collect();
+        let es = crash_entries(&sv(&["甲", "乙"]), known, &archived);
+        assert_eq!(es.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"]);
     }
 
     #[test]

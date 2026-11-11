@@ -142,6 +142,11 @@ impl Watch {
         }
         self.suspect = false;
         self.seen = current;
+        // 記著的那個 mux 是這次開機以前的（重開機前留下的紀錄，開機時間沒能讓 load 丟掉它）：
+        // 新起的終端服務不是「這次開機的終端服務掛了」，不算事故、也不算還沒接回，重開機後該接回的交給開機接回（auto_resume）
+        if self.boot.is_some_and(|b| p.mux.1.saturating_add(crate::bridge::known::BOOT_TOLERANCE_MS) < b) {
+            return None;
+        }
         // 我們自己收的（記號是這個 mux、晚於記下的時間）：不算掛掉
         if o.stopped.is_some_and(|(pid, at)| pid == p.mux.0 && at.saturating_add(5_000) >= p.at) {
             return None;
@@ -764,8 +769,8 @@ mod tests {
         assert!(guard < spawn, "要在開監看之前擋下");
     }
 
-    const M1: (u32, u64) = (100, 1_000);
-    const M2: (u32, u64) = (200, 2_000);
+    const M1: (u32, u64) = (100, 20_000_000);
+    const M2: (u32, u64) = (200, 30_000_000);
 
     fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
         Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None }
@@ -1153,6 +1158,30 @@ mod tests {
         other.observe(&obs(Some(M1), &["甲"]), 1_000, &none);
         assert_eq!(other.take_reason(), "這個平台讀不到結束碼");
         assert_eq!(other.last_alive_ms, Some(1_000));
+    }
+
+    #[test]
+    fn 記著的終端服務是重開機前的_新起的終端服務不算事故_同一次開機換掉才算() {
+        let mut w = Watch { boot: Some(1_000_000), ..Default::default() };
+        // 重開機前記下的 mux（建立時間早於這次開機）：開機時間沒能讓 load 丟掉它
+        w.seen = Some(Seen { mux: (10, 500_000), partners: vec!["甲".into(), "乙".into()], at: 600_000 });
+        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None };
+        assert_eq!(w.tick(&fresh, 1_200_000), None, "新起的 mux 不是這次開機的事故，交給開機接回");
+        assert!(w.lost.is_empty(), "也不算還沒接回");
+        assert_eq!(w.seen.as_ref().map(|s| s.mux), Some((20, 1_100_000)), "改記新的");
+        // 這次開機的 mux 之後被換掉，才是真的事故
+        w.seen = Some(Seen { mux: (20, 1_100_000), partners: vec!["丙".into()], at: 1_150_000 });
+        let newer = Observed { live: Some((30, 1_300_000)), partners: vec![], stopped: None };
+        let inc = w.tick(&newer, 1_400_000).expect("同一次開機換掉 mux 要算事故");
+        assert_eq!(inc.partners, ["丙"]);
+    }
+
+    #[test]
+    fn 開機時間讀不到_照原本的判斷() {
+        let mut w = Watch::default();
+        w.seen = Some(Seen { mux: (10, 500_000), partners: vec!["甲".into()], at: 600_000 });
+        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None };
+        assert!(w.tick(&fresh, 1_200_000).is_some(), "沒有開機時間就不能斷定是重開機前的紀錄");
     }
 
     fn ev(app: &str, pid: &str, at_ms: u64) -> CrashEvent {

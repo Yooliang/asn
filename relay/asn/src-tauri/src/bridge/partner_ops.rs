@@ -99,6 +99,15 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn mod_wait_ms(&self) -> u64;
     /// 狀態檔已過期的視窗：控制檔寫出後，外掛若完全沒有動靜（沒回報、狀態檔也沒更新），最多等這麼久就當外掛不在
     fn mod_probe_ms(&self) -> u64;
+    /// 開視窗前登記「正在開」（見 launch/opening.rs）：別條路（開機接回、終端服務中斷接回、本人喚醒）剛登記過同一位就回 false。
+    /// 預設用全程序共用的登記，測試換成自己的
+    fn claim_opening(&self, session: &str, name: &str) -> bool {
+        crate::launch::opening::claim(session, name)
+    }
+    /// 開失敗或一直沒上線：解除登記，本人之後手動喚醒才不會被擋
+    fn release_opening(&self, session: &str, name: &str) {
+        crate::launch::opening::release(session, name)
+    }
     /// 本機啟動設定（profile、工作資料夾允許清單）；每次現讀。喚醒用它決定能不能在原資料夾開、怎麼開
     fn launch_config(&self) -> Result<LaunchConfig, String>;
     /// 把一段話當成信送進某個視窗（換班接手時請前任寫交接）。失敗回原因
@@ -1447,7 +1456,12 @@ impl PartnerOps {
         if !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
+        // 別條路（例如重開機後的自動接回）剛登記要開同一位、視窗還沒上線：不開第二個（兩個視窗寫同一段對話會互相覆蓋）
+        if !self.env.claim_opening(sid, name) {
+            return failed(format!("{}，請稍候幾秒再看名單", crate::launch::opening::BUSY));
+        }
         if let Err(e) = self.env.launch(&plan) {
+            self.env.release_opening(sid, name);
             return failed(format!("開不起來：{e}"));
         }
         // 7. 等名單出現同名視窗才算成功
@@ -1468,7 +1482,10 @@ impl PartnerOps {
         });
         match (appeared, found) {
             (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
-            _ => unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）"),
+            _ => {
+                self.env.release_opening(sid, name);
+                unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）")
+            }
         }
     }
 
