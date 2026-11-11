@@ -1,6 +1,6 @@
 // FCM HTTP v1 用戶端（#797 PR②）。只做兩件事：用服務帳戶私鑰換存取權杖（只要 firebase.messaging 範圍）、送一則固定文字的通知。
 // 紅線（設計見私有文件，這裡只寫程式上的規則）：
-//   * 通知的文字、tag、collapse_key 都是這支檔案裡的常數；函式不接受任何文字參數，所以信件內容、寄件人、群組名不可能進到 Google。
+//   * 通知的文字、tag、collapse_key 都是這支檔案裡的常數；函式只接受種類與（已清理的）電腦名，不接受其他文字，所以信件內容、寄件人、群組名不可能進到 Google。
 //   * `data` 欄位整個不送。
 //   * 沒有設秘密（FCM_SERVICE_ACCOUNT）時 createFcm 回 null：呼叫端安靜不送。
 //   * 存取權杖只放在這個 isolate 的記憶體；不寫資料庫、不寫 log。log 只記狀態碼，不記權杖、Google 的回應內文、私鑰。
@@ -8,17 +8,43 @@ export const PUSH_TITLE = "ASN";
 export const PUSH_BODY = "ASN 有新訊息";
 export const PUSH_TAG = "asn-new-message";
 export const PUSH_CHANNEL = "asn_messages";
+// 「需要你確認」：自己的標題、內文與 tag（不蓋掉新訊息的通知）；內文只帶電腦名，不帶請求內容
+export const CONFIRM_TITLE = "ASN 需要你確認";
+export const CONFIRM_BODY = "有一個需要你確認的畫面";
+export const CONFIRM_TAG = "asn-confirm";
+export const NAME_MAX = 32;
+export type PushKind = "owner_mail" | "waiting" | "confirm";
 export const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SKEW_S = 60;
 
 /** 一次送出的結果：只有狀態碼和「權杖失效」判斷，沒有 Google 的回應內文 */
 export type FcmResult = { status: number; invalid: boolean };
-export type Fcm = { send: (deviceToken: string) => Promise<FcmResult> };
+/** kind 沒給＝owner_mail；name 只在 confirm 用（電腦名） */
+export type PushContent = { kind?: PushKind; name?: string | null };
+export type Fcm = { send: (deviceToken: string, content?: PushContent) => Promise<FcmResult> };
 export type FcmEnv = { get: (k: string) => string | undefined };
 
-/** 送給 FCM 的固定內容（測試鎖住：逐字等於這個，沒有 data） */
-export function pushMessage(deviceToken: string) {
+/** 電腦名清理：拿掉控制字元與雙向控制字元、壓縮空白、最多 32 字；清完是空的回 null */
+export function cleanName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ").replace(/\s+/g, " ").trim();
+  const cut = Array.from(s).slice(0, NAME_MAX).join("").trim();
+  return cut.length > 0 ? cut : null;
+}
+
+/** 送給 FCM 的內容（測試鎖住：沒有 data）。owner_mail／waiting 是固定文字；confirm 只多電腦名 */
+export function pushMessage(deviceToken: string, kind: PushKind = "owner_mail", name: string | null = null) {
+  if (kind === "confirm") {
+    const n = cleanName(name);
+    return {
+      message: {
+        token: deviceToken,
+        notification: { title: CONFIRM_TITLE, body: n ? `${CONFIRM_BODY}（${n}）` : CONFIRM_BODY },
+        android: { collapse_key: CONFIRM_TAG, priority: "HIGH", notification: { tag: CONFIRM_TAG, channel_id: PUSH_CHANNEL } },
+      },
+    };
+  }
   return {
     message: {
       token: deviceToken,
@@ -86,25 +112,25 @@ export function createFcm(env: FcmEnv, fetchFn: typeof fetch = fetch, nowMs: () 
     return cached.token;
   }
 
-  async function post(deviceToken: string, at: string): Promise<Response> {
+  async function post(deviceToken: string, at: string, c?: PushContent): Promise<Response> {
     return await fetchFn(`https://fcm.googleapis.com/v1/projects/${acct!.project_id}/messages:send`, {
       method: "POST",
       headers: { authorization: `Bearer ${at}`, "content-type": "application/json" },
-      body: JSON.stringify(pushMessage(deviceToken)),
+      body: JSON.stringify(pushMessage(deviceToken, c?.kind, c?.name ?? null)),
     });
   }
 
   return {
-    async send(deviceToken) {
+    async send(deviceToken, content) {
       try {
         let at = await accessToken();
         if (!at) return { status: 0, invalid: false };
-        let r = await post(deviceToken, at);
+        let r = await post(deviceToken, at, content);
         if (r.status === 401) {   // 存取權杖被撤銷或過期：換一把再試一次
           await r.body?.cancel();
           at = await accessToken(true);
           if (!at) return { status: 0, invalid: false };
-          r = await post(deviceToken, at);
+          r = await post(deviceToken, at, content);
         }
         // 只看錯誤碼這一個欄位判斷權杖失效（必須是明確的 UNREGISTERED；沒有錯誤碼的 404 可能是專案代號設錯，不算權杖失效）；回應內文其他部分不記、不外傳
         let code = "";

@@ -90,3 +90,15 @@ Deno.test("動作清單：不認得的回 404；不和 term_req 重疊", async (
   for (const a of PERM_REQ_ACTIONS) assertEquals(a.startsWith("perm_req_"), true);
   for (const a of PERM_REQ_SIGNED_ACTIONS) assertEquals(PERM_REQ_ACTIONS.has(a), true);
 });
+
+Deno.test("建立成功（新增一筆）才通知推播一次；busy／錯誤不推", async () => {
+  const m = mk({ id: ID, expires_at: "t", bell_topics: [] });
+  const ids: string[] = [];
+  const deps = { ...m.deps, onCreated: (id: string) => ids.push(id) };
+  assertEquals((await handlePermReqAction(deps, { id: "W" }, "perm_req_create", ok as never, null)).status, 200);
+  assertEquals(ids, [ID]);
+  const busy = mk({ error: "busy" });
+  assertEquals((await handlePermReqAction({ ...busy.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "perm_req_create", ok as never, null)).status, 409);
+  assertEquals((await handlePermReqAction({ ...m.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "perm_req_create", {} as never, null)).status, 400);
+  assertEquals(ids, [ID]);
+});

@@ -79,3 +79,15 @@ Deno.test("relay/index.ts：終端請求動作在金鑰驗證之後、手機兩�
   assertEquals(block.includes("handleTermReqAction({ rpc"), true);
   assertEquals(block.includes("me, action, params, signedTerm"), true);
 });
+
+Deno.test("建立成功（新增一筆）才通知推播一次；busy／錯誤不推", async () => {
+  const m = mk({ id: ID, expires_at: "t", bell_topic: "b" });
+  const ids: string[] = [];
+  const deps = { ...m.deps, onCreated: (id: string) => ids.push(id) };
+  assertEquals((await handleTermReqAction(deps, { id: "W" }, "term_req_create", ok as never)).status, 200);
+  assertEquals(ids, [ID]);
+  const busy = mk({ error: "busy" });
+  assertEquals((await handleTermReqAction({ ...busy.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "term_req_create", ok as never)).status, 409);
+  assertEquals((await handleTermReqAction({ ...m.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "term_req_create", {} as never)).status, 400);
+  assertEquals(ids, [ID]);
+});

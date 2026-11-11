@@ -167,11 +167,44 @@ Deno.test("沒有要推的（不在線、60 秒內、沒權杖）：不送", asy
 });
 
 // 守門：index.ts 的接法。收件人不能取自用戶端；只有寄給本人那條路（有 fanout）和 waiting 通知真的寄出才推
-Deno.test("守門：relay/index.ts 只在『寄給本人』與『等待通知寄出』之後推，且不把用戶端參數傳進去", async () => {
+Deno.test("守門：relay/index.ts 只在『寄給本人』『等待通知寄出』『建立確認請求成功』之後推，且不把用戶端參數傳進去", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const calls = [...src.matchAll(/notifyPush\(\{.*?, fcm \}, "(\w+)", ([^)]*)\)/g)].map((m) => [m[1], m[2].trim()]);
-  assertEquals(calls.sort(), [["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);
+  assertEquals(calls.sort(), [["confirm", "me.id, id"], ["confirm", "me.id, id"], ["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);   // confirm：建立請求成功後（onCreated）才推，編號來自資料庫回應
   assert(src.includes('typeof (sent as { fanout?: unknown }).fanout === "number"'), "寄給本人才有 fanout");
   assert(src.includes('data?.notify === "sent"'));
   assertEquals(src.includes("p_user"), false, "index.ts 不自己組收件人");
+});
+
+Deno.test("需要你確認：收件人＝節點擁有者、targets 用 confirm、通知帶清理過的電腦名", async () => {
+  const m = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn1a1", token: TOK }] }, asn_relay_push_node_name: { name: "工作\u202E機" } });
+  const contents: unknown[] = [];
+  const fcm: Fcm = { send: (_t, c) => { contents.push(c); return Promise.resolve(ok()); } };
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", "req-0001");
+  assertEquals(m.calls[0], { fn: "asn_relay_push_recipient_node", args: { p_node: "wrk9b2" } });
+  assertEquals(m.calls[1], { fn: "asn_relay_push_targets", args: { p_user: USER, p_kind: "confirm" } });
+  assertEquals(m.calls[2], { fn: "asn_relay_push_node_name", args: { p_node: "wrk9b2" } });
+  assertEquals(contents, [{ kind: "confirm", name: "工作 機" }]);
+});
+
+Deno.test("需要你確認：同一筆請求不會推兩次；沒有請求編號不推；名字查不到照推（沒名字版）", async () => {
+  const ans = { asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn1a1", token: TOK }] }, asn_relay_push_node_name: { data: null, error: { message: "x" } } };
+  const m = mk(ans);
+  const contents: unknown[] = [];
+  const fcm: Fcm = { send: (_t, c) => { contents.push(c); return Promise.resolve(ok()); } };
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", "req-dup-1");
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", "req-dup-1");
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", null);
+  assertEquals(contents, [{ kind: "confirm", name: null }]);
+});
+
+Deno.test("需要你確認：沒有目標就不查名字；owner_mail／waiting 不帶內容", async () => {
+  const m = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [] } });
+  await notifyPush({ rpc: m.rpc, fcm: fcmReturning(ok()).fcm }, "confirm", "wrk9b2", "req-none-1");
+  assertEquals(m.calls.some((c) => c.fn === "asn_relay_push_node_name"), false);
+  const w = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn1a1", token: TOK }] } });
+  const contents: unknown[] = [];
+  await notifyPush({ rpc: w.rpc, fcm: { send: (_t, c) => { contents.push(c); return Promise.resolve(ok()); } } }, "waiting", "wrk9b2", null);
+  assertEquals(contents, [undefined]);
+  assertEquals(w.calls.some((c) => c.fn === "asn_relay_push_node_name"), false);
 });

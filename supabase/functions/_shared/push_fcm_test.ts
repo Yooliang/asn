@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { createFcm, FCM_SCOPE, PUSH_BODY, PUSH_CHANNEL, PUSH_TAG, PUSH_TITLE, pushMessage } from "./push_fcm.ts";
+import { cleanName, createFcm, FCM_SCOPE, PUSH_BODY, PUSH_CHANNEL, PUSH_TAG, PUSH_TITLE, pushMessage } from "./push_fcm.ts";
 
 const DEVICE = "d".repeat(40) + ":APA91b_secret-device-token";
 const ACCESS = "ya29.secret-access-token";
@@ -112,4 +112,35 @@ Deno.test("log 不出現權杖、存取權杖、私鑰：換權杖失敗、送�
     for (const secret of [DEVICE, ACCESS, "BEGIN PRIVATE KEY", PEM.slice(40, 80)]) assertEquals(t.includes(secret), false, `log 含 ${secret.slice(0, 12)}…`);
   }
   assert(t1.includes("400"), "只記狀態碼");
+});
+
+Deno.test("通知文字：owner_mail／waiting 維持原樣；confirm 有自己的標題、內文、tag，沒有 data", () => {
+  const base = pushMessage(DEVICE);
+  assertEquals(pushMessage(DEVICE, "owner_mail"), base);
+  assertEquals(pushMessage(DEVICE, "waiting"), base);
+  assertEquals(base.message.notification, { title: "ASN", body: "ASN 有新訊息" });
+  const c = pushMessage(DEVICE, "confirm", "工作機");
+  assertEquals(c.message.notification, { title: "ASN 需要你確認", body: "有一個需要你確認的畫面（工作機）" });
+  assertEquals(c.message.android.notification.tag, "asn-confirm");
+  assertEquals(c.message.android.collapse_key, "asn-confirm");
+  assertEquals(c.message.android.notification.channel_id, "asn_messages");
+  assertEquals(Object.keys(c.message).sort(), ["android", "notification", "token"]);
+});
+
+Deno.test("電腦名清理：控制字元、雙向字元去掉、最多 32 字、空的就不帶", () => {
+  assertEquals(cleanName("a\u202Eb\u0007c\nd"), "a b c d");
+  assertEquals(cleanName("x".repeat(50))!.length, 32);
+  assertEquals(cleanName("電".repeat(40))!.length, 32);
+  for (const e of ["", "   ", "\u202E\u0000", null, undefined, 5]) assertEquals(cleanName(e), null);
+  assertEquals(pushMessage(DEVICE, "confirm", "").message.notification.body, "有一個需要你確認的畫面");
+  assertEquals(pushMessage(DEVICE, "confirm", null).message.notification.body, "有一個需要你確認的畫面");
+  assertEquals(pushMessage(DEVICE, "confirm", "A\u202EB").message.notification.body.includes("\u202E"), false);
+});
+
+Deno.test("send 帶 confirm 內容時，實際送出的就是 confirm 文字", async () => {
+  const { f, calls } = fakeFetch();
+  const fcm = createFcm(env({ FCM_SERVICE_ACCOUNT: ACCOUNT }), f)!;
+  await fcm.send(DEVICE, { kind: "confirm", name: "工作機" });
+  const body = JSON.parse(String(calls[calls.length - 1].init.body));
+  assertEquals(body.message.notification.title, "ASN 需要你確認");
 });
