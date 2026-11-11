@@ -811,6 +811,7 @@ fn 週期指紋_新讀數的那一期是另一個帳號的_這筆是串號_整�
     assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
     let lg = log(&h);
     assert!(lg.contains("別的帳號的數字") && lg.contains(&short_hash("a@x.test")) && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)), "{lg}");
+    assert!(lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
     assert!(!lg.contains("a@x.test") && !lg.contains("b@x.test"), "log 不留 email：{lg}");
     // 同一個原因連續發生只記一次
     assert!(!feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((82.0, rb))), NOW + 2 * MIN));
@@ -829,6 +830,7 @@ fn 週期指紋_存著的那一期是另一個帳號的_存著的才是串號_�
     assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(40), Some(iso_secs(rb))), "b 不動");
     let lg = log(&h);
     assert!(lg.contains("換成這次的") && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)) && !lg.contains("a@x.test"), "{lg}");
+    assert!(lg.contains(&short_hash("a@x.test")) && lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
 }
 
 #[test]
@@ -863,6 +865,7 @@ fn 週期指紋_a_沒有存著的週期_新讀數等於別的帳號還沒過期�
     assert!(!load_all(h.path()).contains_key("a@x.test"), "整筆不收，a 沒有紀錄");
     let lg = log(&h);
     assert!(lg.contains("別的帳號的數字") && lg.contains("沒有還沒過期的") && lg.contains(&iso_secs(rb)), "{lg}");
+    assert!(lg.contains(&short_hash("a@x.test")) && lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
     // A 存著的那一期已經過期：一樣要擋
     let (h, ra, rb) = two_accounts();
     let expired = rec_wk(70, NOW - DAY);

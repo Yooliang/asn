@@ -325,11 +325,16 @@ fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, 
             st.logged_cross = None;
             return None;
         }
-        IncomingFromOther { new_reset, stored_reset } => {
+        // 每次被指紋擋下都寫一行：兩邊帳號（這個帳號與撞到的那個）的雜湊前 6 碼與重置時間；同一個原因只記一次
+        IncomingFromOther { new_reset, stored_reset, other } => {
             let stored = stored_reset.map(t).unwrap_or_else(|| "沒有還沒過期的".to_string());
-            (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號還沒過期的那一期（這帳號存著的是 {stored}），這筆是別的帳號的數字，不收", t(new_reset)), true)
+            let o = owner::short_hash(&other);
+            (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號 {o} 還沒過期的那一期（這帳號存著的是 {stored}），這筆是別的帳號的數字，不收", t(new_reset)), true)
         }
-        StoredFromOther { new_reset, stored_reset } => (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false),
+        StoredFromOther { new_reset, stored_reset, other } => {
+            let o = owner::short_hash(&other);
+            (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號 {o} 的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false)
+        }
         // 兩邊都沒有其他帳號的證據（例如用了重置卷，週期提前換成新的一期）：照收，交給視窗身分那一層把關；只留一行 log
         Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間從 {} 變成 {}，對不上本機其他帳號，照收", t(stored_reset), t(new_reset)), false),
     };

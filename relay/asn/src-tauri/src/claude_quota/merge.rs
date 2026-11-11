@@ -172,9 +172,10 @@ pub enum Cross {
     Pass,
     /// 新讀數的那一期＝本機另一個帳號還沒過期的那一期：這筆是別的帳號的數字，不收。
     /// 不管 A 有沒有存著還沒過期的那一期都擋（`stored_reset` 是 A 存著、還沒過期的那一期，沒有就是 None）；只有「新舊是同一期」放行
-    IncomingFromOther { new_reset: i64, stored_reset: Option<i64> },
+    /// `other` 是撞到的那個帳號的 email（只給 log 算雜湊前 6 碼用）
+    IncomingFromOther { new_reset: i64, stored_reset: Option<i64>, other: String },
     /// A 存著的那一期＝本機另一個帳號還沒過期的那一期：存著的那筆才是串號，收下新讀數、把錯的換掉
-    StoredFromOther { new_reset: i64, stored_reset: i64 },
+    StoredFromOther { new_reset: i64, stored_reset: i64, other: String },
     /// 兩邊都對不上任何其他帳號（沒有其他帳號的證據，例如用了重置卷、週期提前換成新的一期）：照收，只留一行 log，交給視窗身分那一層把關
     Unmatched { new_reset: i64, stored_reset: i64 },
 }
@@ -192,13 +193,15 @@ pub fn week_fingerprint(all: &HashMap<String, Quota>, email: &str, p: &Parsed, n
     if stored.is_some_and(|s| same(new_reset, s)) {
         return Cross::Pass;
     }
-    let live_others: Vec<i64> = all.iter().filter(|(k, q)| k.as_str() != email && q.verified && q.weekly_pct.is_some()).filter_map(|(_, q)| stored_resets(q).1).filter(|&r| r > now_ms).collect();
-    if live_others.iter().any(|&r| same(new_reset, r)) {
-        return Cross::IncomingFromOther { new_reset, stored_reset: stored };
+    // (帳號 email, 它還沒過期的那一期)，依 email 排序：同時有好幾個對得上時，挑哪一個是固定的（log 才穩定）
+    let mut live_others: Vec<(&String, i64)> = all.iter().filter(|(k, q)| k.as_str() != email && q.verified && q.weekly_pct.is_some()).filter_map(|(k, q)| stored_resets(q).1.map(|r| (k, r))).filter(|&(_, r)| r > now_ms).collect();
+    live_others.sort();
+    if let Some((other, _)) = live_others.iter().find(|&&(_, r)| same(new_reset, r)) {
+        return Cross::IncomingFromOther { new_reset, stored_reset: stored, other: (*other).clone() };
     }
     let Some(stored_reset) = stored else { return Cross::Pass };
-    if live_others.iter().any(|&r| same(stored_reset, r)) {
-        Cross::StoredFromOther { new_reset, stored_reset }
+    if let Some((other, _)) = live_others.iter().find(|&&(_, r)| same(stored_reset, r)) {
+        Cross::StoredFromOther { new_reset, stored_reset, other: (*other).clone() }
     } else {
         Cross::Unmatched { new_reset, stored_reset }
     }
