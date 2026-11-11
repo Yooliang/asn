@@ -484,12 +484,11 @@ const app = createApp({
       try { await knownPeers.rename(node, kp.editText); renameCancel(); await loadKnown() } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
     }
     // 正在看的那台電腦：開始看時 Rust 回它的指紋與有沒有確認；結束或切回訊息就清掉
-    const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '' })
+    const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '', noteOwn: false })
     // 從設定頁開確認畫面時暫存原本正在看的那台（{ cur }）；確認畫面全部收掉後由下面的 watch 統一還原。開始／結束看電腦（vpReset）就作廢
     let vpPrev = null
-    // vp.note 目前是不是設定頁開的確認留下的（只有這種才在離開、重進設定頁時清掉；終端提示條那邊的提示不碰）
-    let vpNoteOwn = false
-    const vpReset = () => { vpPrev = null; vpNoteOwn = false; vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
+    // vp.noteOwn＝vp.note 是不是設定頁開的確認留下的：只在設定頁顯示、只在離開／重進設定頁時清；終端提示條那邊不顯示這種提示也不碰
+    const vpReset = () => { vpPrev = null; vp.noteOwn = false; vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
     const onRemoteStarted = r => { vpReset(); vp.cur = knownPeerOf(r, r?.machine) }
     const onRemoteEnded = () => vpReset()
     const peerStrip = computed(() => knownNeedsConfirm(vp.cur))
@@ -507,10 +506,12 @@ const app = createApp({
       } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
     // 「確認指紋」先選方法：用相機掃電腦上的 QR code（預設），或改用選的（四選一）。掃到的字只在外殼與 Rust 之間，這裡只拿得到結果的狀態字
-    const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vpNoteOwn = false; vp.note = ''; vp.error = ''; vp.method = true }
+    const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vp.noteOwn = false; vp.note = ''; vp.error = ''; vp.method = true }
+    // 確認成功：目前對象與（設定頁確認時暫存的）原本對象若是同一台，兩邊都標已確認，還原後提示條才不會又跳出來
+    const markConfirmed = cur => { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; if (vpPrev?.cur?.node === cur.node) vpPrev = { cur: { ...vpPrev.cur, confirmed: true } } }
     const closeMethodSheet = () => { vp.method = false }
     // 設定頁「認得的電腦」每列的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
-    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet(); vpNoteOwn = true }
+    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet(); vp.noteOwn = true }
     // 選方法、四選一、掃描都收掉且沒在忙（成功、取消、失敗、掃描結束都會走到這）→ 把目前對象還原成設定頁開啟前的那台；終端提示條開的沒有暫存，不動
     watch(() => !vp.method && !vp.sheet && !vp.busy, idle => { if (idle && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } })
     const methodPickInstead = async () => { vp.method = false; await openPeerSheet() }
@@ -523,7 +524,7 @@ const app = createApp({
       try { r = await knownPeers.scan(cur.node) } catch (e) { console.info('[ASN] 掃 QR code 核對指紋沒成功', String(e?.message ?? e)); vp.method = false; vp.note = knownErrorText(e) } finally { vp.busy = false }
       if (r === 'cancel') return   // 本人取消：留在選方法的畫面，可以再選
       vp.method = false
-      if (r === 'done') { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; vp.note = ''; void loadKnown(); return }
+      if (r === 'done') { markConfirmed(cur); vp.note = ''; void loadKnown(); return }
       if (r === 'no_camera') {
         // 沒有相機或沒給權限：直接改用選的，並在選的畫面上說明
         await openPeerSheet()
@@ -543,7 +544,7 @@ const app = createApp({
       try {
         const r = await knownPeers.pick(ch.id, index, cur.node)
         closePeerSheet()
-        if (r === 'done') { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; vp.note = ''; void loadKnown() }
+        if (r === 'done') { markConfirmed(cur); vp.note = ''; void loadKnown() }
         else vp.note = PEER_NOTES[r] ?? ''
       } catch (e) { console.info('[ASN] 確認指紋沒成功', String(e?.message ?? e)); closePeerSheet(); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
@@ -564,7 +565,7 @@ const app = createApp({
     const relNote = computed(() => releasesNote(rel))
     watch(settingCat, c => { if (c === 'known') void loadKnown() })
     // 離開或重進「認得的電腦」頁：清掉設定頁開的確認留下的失敗提示（成功時 scanPeer／choosePeer 已清）
-    watch(settingCat, (c, old) => { if ((c === 'known' || old === 'known') && vpNoteOwn) { vp.note = ''; vpNoteOwn = false } })
+    watch(settingCat, (c, old) => { if ((c === 'known' || old === 'known') && vp.noteOwn) { vp.note = ''; vp.noteOwn = false } })
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({

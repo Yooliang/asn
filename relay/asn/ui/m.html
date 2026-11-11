@@ -190,7 +190,7 @@
               <span class="m-peer-strip-tx">{{ KNOWN_TEXT.stripTitle }}</span>
               <button class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet">{{ KNOWN_TEXT.stripButton }}</button>
             </div>
-            <p class="m-err m-room-note" v-if="chatFriend && vp.note" role="alert">{{ vp.note }}</p>
+            <p class="m-err m-room-note" v-if="chatFriend && vp.note && !vp.noteOwn" role="alert">{{ vp.note }}</p>
             <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
               :no-bar="true" dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :view-active="nav.tab === 'chats'" :self-node="selfNode" :remote-view-api="mobileRemoteViewApi" :enter-sends="false" :photo-api="photoApi" :call-api="callApi" :dict-api="dictApi" :hint-names="friends" @call-state="onCallState" :load-older="loadOlder" @remote-started="onRemoteStarted" @remote-ended="onRemoteEnded"
               @send="(text, opts) => sendTo(chatFriend.id, text, opts)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"
@@ -548,7 +548,7 @@
                     </ul>
                     <p class="m-note" v-if="kp.list.length">{{ KNOWN_TEXT.forgetNote }}</p>
                     <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
-                    <p class="m-err" v-if="vp.note" role="alert">{{ vp.note }}</p>
+                    <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                   </div>
                 </template>
                 <template v-else-if="settingCat === 'about'">
