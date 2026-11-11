@@ -246,8 +246,14 @@ fn read_secret_hooked(path: &Path, aad: &[u8], aead: Option<&dyn Aead>, seal_fai
     if !raw.iter().all(|b| b.is_ascii_whitespace()) {
         match migrate_plain(path, aad, &raw, a, hook) {
             Ok(true) => {}
-            // 讀到之後檔案被換成較新的內容：不蓋它，改回傳現在的內容
-            Ok(false) => return read_secret_hooked(path, aad, aead, seal_fail_flag, seal_fail_line, &|| {}),
+            // 讀到之後檔案被換成較新的內容：不蓋它，改回傳現在的內容。只再讀一次、這次不改存（有次數上限；下次啟動再改存）
+            Ok(false) => {
+                let now = std::fs::read(path).map_err(|e| ReadErr::Io(e.to_string()))?;
+                return match now.strip_prefix(PREFIX) {
+                    Some(body) => a.open(aad, body).map_err(ReadErr::Unseal),
+                    None => Ok(now),
+                };
+            }
             Err(_) => log_once(seal_fail_flag, seal_fail_line),
         }
     }
