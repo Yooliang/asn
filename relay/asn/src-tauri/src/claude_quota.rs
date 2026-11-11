@@ -261,11 +261,18 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     if dropped {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）\n", iso_secs(now_ms)));
     }
-    let m = merge::merge_full(all.get(email), &p, read_ms, now_ms);
+    // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉，再合併新讀數（#1321）
+    let cur = all.get(email).cloned();
+    let trimmed = cur.as_ref().and_then(|q| merge::without_missing_expired(q, &p, now_ms));
+    let m = merge::merge_full(trimmed.as_ref().or(cur.as_ref()), &p, read_ms, now_ms);
     log_changes(home, st, &m, now_ms);
-    let took = m.quota.is_some();
-    if let Some(mut q) = m.quota {
+    let took = m.quota.is_some() || trimmed.is_some();
+    // 兩條都沒收、只有拿掉過期窗：照樣要寫
+    let out = m.quota.map(|mut q| {
         q.owner = !backup_failed;
+        q
+    });
+    if let Some(q) = out.or(trimmed) {
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);

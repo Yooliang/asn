@@ -230,3 +230,22 @@ fn 守門_gemini_額度模組不碰憑證檔也不連網() {
         assert!(!body.contains(&b), "Gemini 額度模組不該出現 {b}");
     }
 }
+
+#[test]
+fn 讀數沒有某一窗_存著的那窗已過重置時間才拿掉_還沒過就留著() {
+    let h = tempfile::tempdir().unwrap();
+    let r = parse_statusline(&status(Some(0.9), Some(0.5)), NOW).unwrap();
+    assert!(record(h.path(), &r, NOW).unwrap());
+    // 10 分鐘後的讀數只有每週：5 小時（重置時間 16:37）還沒過，留著
+    let r = parse_statusline(&status(None, Some(0.4)), NOW + 600_000).unwrap();
+    assert!(record(h.path(), &r, NOW + 600_000).unwrap());
+    let q = load_all(h.path())[ME].quota.clone();
+    assert_eq!((q.five_hour_pct, q.weekly_pct), (Some(90), Some(40)));
+    // 2 小時後（過了 16:37）：讀數仍然沒有 5 小時，拿掉
+    let t = NOW + 2 * 3_600_000;
+    let r = parse_statusline(&status(None, Some(0.4)), t).unwrap();
+    record(h.path(), &r, t).unwrap();
+    let q = load_all(h.path())[ME].quota.clone();
+    assert_eq!((q.five_hour_pct, q.five_reset_at, q.five_at), (None, None, None));
+    assert_eq!(q.weekly_pct, Some(40));
+}

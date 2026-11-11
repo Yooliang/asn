@@ -543,3 +543,99 @@ fn 身分_備份失敗那次的紀錄不蓋有身分標記_下一次備份成功
     assert_eq!(log(&h).matches("清掉 1 筆沒有身分的舊基準").count(), 1);
     assert!(!tmp.exists(), "沒有留下暫存檔");
 }
+
+// ---------- 讀數沒有某一窗、存著的那一窗已過重置時間：拿掉（#1321；方案拿掉 5 小時限制） ----------
+#[test]
+fn 缺一窗_存著的那窗還沒過重置時間_保留() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((50.0, NOW + 2 * H)), Some((10.0, NOW + 3 * DAY))), NOW));
+    // 這次讀數剛好沒帶 5 小時：它的重置時間還沒到，留著
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((12.0, NOW + 3 * DAY))), NOW + MIN));
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.weekly_pct), (Some(50), Some(88)));
+    assert_eq!(q.five_reset_at, Some(iso_secs(NOW + 2 * H)));
+    assert_eq!(q.five_at, Some(iso_secs(NOW)), "5 小時的資料時間不動");
+}
+
+#[test]
+fn 缺一窗_存著的那窗已過重置時間_拿掉_剩餘_重置時間_資料時間都清掉() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((50.0, NOW + 2 * H)), Some((10.0, NOW + 3 * DAY))), NOW));
+    // 3 小時後：5 小時的重置時間早就過了，讀數裡又沒有 5 小時（最大方案沒有這個限制）
+    let t = NOW + 3 * H;
+    assert!(feed(&h, "wa", UA, t, 2, status(None, Some((20.0, NOW + 3 * DAY))), t));
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.five_reset_at.clone(), q.five_at.clone()), (None, None, None), "那一窗整個拿掉");
+    assert_eq!((q.weekly_pct, q.week_at.clone()), (Some(80), Some(iso_secs(t))), "另一窗照常更新");
+    assert_eq!(q.reset_at, Some(iso_secs(NOW + 3 * DAY)), "舊的單一重置時間依剩下的窗重算");
+    let names: Vec<String> = q.windows().iter().map(|w| w["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["weekly"], "回報的額度窗也只剩每週");
+}
+
+#[test]
+fn 缺一窗_另一窗這次被擋_過期的那窗照樣拿掉() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((50.0, NOW + 2 * H)), Some((10.0, NOW + 3 * DAY))), NOW));
+    // 3 小時後來了一筆資料時間比記著的舊的（舊視窗重送）：每週被 older_read 擋掉，但缺的 5 小時已過期，照樣拿掉
+    let t = NOW + 3 * H;
+    assert!(feed(&h, "wb", UA, NOW - H, 2, status(None, Some((5.0, NOW + 3 * DAY))), t), "有拿掉過期窗，紀錄有寫");
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.weekly_pct), (None, Some(90)), "每週沒被蓋掉");
+}
+
+#[test]
+fn 兩窗都在_照舊更新_不拿掉任何一窗() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((50.0, NOW + 2 * H)), Some((10.0, NOW + 3 * DAY))), NOW));
+    let t = NOW + 3 * H;
+    assert!(feed(&h, "wa", UA, t, 2, status(Some((30.0, t + 2 * H)), Some((20.0, NOW + 3 * DAY))), t));
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.weekly_pct), (Some(70), Some(80)));
+}
+
+#[test]
+fn 缺一窗_存著的那窗沒有重置時間_無從判斷_留著() {
+    let old = Quota { five_hour_pct: Some(50), weekly_pct: Some(10), week_reset_at: Some(iso_secs(NOW + 3 * DAY)), at: iso_secs(NOW), ..Default::default() };
+    let p = Parsed { five_hour_pct: None, weekly_pct: Some(20), reset_at: None, five_reset_ms: None, week_reset_ms: Some(NOW + 3 * DAY) };
+    assert_eq!(without_missing_expired(&old, &p, NOW + 100 * H), None, "5 小時那窗沒有重置時間（舊檔也推不出來）");
+}
+
+#[test]
+fn without_missing_expired_邊界_剛好等於現在算已過_兩窗都缺都過期_讀數有的窗不動() {
+    let r = NOW + H;
+    let old = Quota { five_hour_pct: Some(50), weekly_pct: Some(10), five_reset_at: Some(iso_secs(r)), week_reset_at: Some(iso_secs(r)), five_at: Some(iso_secs(NOW)), week_at: Some(iso_secs(NOW)), at: iso_secs(NOW), ..Default::default() };
+    let none = Parsed { five_hour_pct: None, weekly_pct: None, reset_at: None, five_reset_ms: None, week_reset_ms: None };
+    assert_eq!(without_missing_expired(&old, &none, r - 1), None, "還沒到");
+    let got = without_missing_expired(&old, &none, r).expect("剛好等於現在＝已過");
+    assert_eq!((got.five_hour_pct, got.weekly_pct, got.reset_at), (None, None, None), "兩窗都缺都過期：都拿掉");
+    // 讀數裡有每週：每週不動（交給合併判斷），只拿掉 5 小時
+    let wk_only = Parsed { weekly_pct: Some(5), week_reset_ms: Some(r + DAY), ..none.clone() };
+    let got = without_missing_expired(&old, &wk_only, r).unwrap();
+    assert_eq!((got.five_hour_pct, got.weekly_pct), (None, Some(10)));
+}
+
+#[test]
+fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
+    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
+    let cases = v["missing_window_cases"].as_array().expect("missing_window_cases");
+    assert!(cases.len() >= 5, "案例不該變少");
+    for t in cases {
+        let id = t["id"].as_str().unwrap();
+        let now = ms(t["now"].as_str().unwrap());
+        let side = |w: &str| (t["old"][w]["left_pct"].as_u64().map(|p| p as u8), t["old"][w]["resets_at"].as_str().map(String::from), t["old"][w]["read_at"].as_str().map(String::from));
+        let (f, w) = (side("five_hour"), side("weekly"));
+        let old = Quota { five_hour_pct: f.0, weekly_pct: w.0, five_reset_at: f.1, week_reset_at: w.1, five_at: f.2.clone(), week_at: w.2, at: f.2.unwrap(), ..Default::default() };
+        let has = |n: &str| t["new_has"].as_array().unwrap().iter().any(|x| x.as_str() == Some(n));
+        let p = Parsed { five_hour_pct: has("five_hour").then_some(40), weekly_pct: has("weekly").then_some(40), reset_at: None, five_reset_ms: has("five_hour").then_some(now + 2 * H), week_reset_ms: has("weekly").then_some(now + 4 * DAY) };
+        let after = without_missing_expired(&old, &p, now).unwrap_or(old);
+        let mut present: Vec<String> = after.windows().iter().map(|x| x["name"].as_str().unwrap().to_string()).collect();
+        present.sort();
+        let mut want: Vec<String> = t["expect_present"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        want.sort();
+        assert_eq!(present, want, "{id} {}", t["note"].as_str().unwrap());
+    }
+}
