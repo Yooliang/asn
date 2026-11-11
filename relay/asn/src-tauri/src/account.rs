@@ -522,6 +522,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn 守門_手機替電腦登入_那台要是這支手機確認過指紋的才取代碼() {
+        let src = include_str!("account.rs").replace("\r\n", "\n");
+        let body = src.split(concat!("pub async fn setup_device_", "fetch(")).nth(1).unwrap().split("\n}\n").next().unwrap();
+        let (known, filter, untrusted, open) = (body.find("live::known(").unwrap(), body.find("confirmed_at.is_some()").expect("要確認過指紋"), body.find("\"untrusted\"").unwrap(), body.find("pending.open(").unwrap());
+        assert!(known < filter && filter < untrusted && untrusted < open, "沒確認過就回 untrusted，不開封");
+        let (url_ok, bad_url, ready) = (body.find("device_relay::url_ok(").expect("交給畫面前要再驗網址"), body.find("\"bad_url\"").unwrap(), body.find("\"state\": \"ready\"").unwrap());
+        assert!(open < url_ok && url_ok < bad_url && bad_url < ready, "先驗網址，不合格就回 bad_url，才輪到 ready");
+    }
+
+    #[test]
     fn 帳號名稱驗證() {
         assert_eq!(clean_account_name("  啟良 ").unwrap(), "啟良");
         assert!(clean_account_name("").is_err() && clean_account_name("   ").is_err());
@@ -706,11 +716,17 @@ fn unix_now() -> i64 {
 }
 
 /// 手機要某台電腦登入裝置碼型 CLI（Codex）：用這支手機的設備金鑰簽一筆請求送出，私鑰留在記憶體等取回。
-/// 那台已經有進行中的請求（already）：這筆沒有建立，私鑰丟掉，回 { already: true, kind }。→ { rid, exp }
+/// 那台已經有進行中的請求（already）：這筆沒有建立，私鑰丟掉，回 { already: true, kind }。
+/// 那台電腦不是這支手機上確認過指紋的（confirmed_at 沒值）：不送出，回 { state: "untrusted" }。→ { rid, exp }
 #[tauri::command]
 pub async fn setup_device_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String, vendor: String) -> Result<Value, String> {
     if app.shot.is_some() {
         return Err("--shot 模式不登入".into());
+    }
+    // 只對這支手機上本人確認過指紋的電腦發（和取回時同一條規則；未確認就不送出）
+    let known = crate::device_id::live::known(&app.data_dir)?;
+    if !known.peer(&node).is_some_and(|p| p.confirmed_at.is_some()) {
+        return Ok(json!({ "state": "untrusted" }));
     }
     let now = unix_now();
     let key = crate::device_id::live::key_async(&app.data_dir).await?;
@@ -736,7 +752,7 @@ pub fn setup_device_cancel(rid: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 取回電腦放回的登入網址＋代碼。只取這支手機自己發出的（記憶體裡有私鑰的）；取一次就清。
+/// 取回電腦放回的登入網址＋代碼。只取這支手機自己發出的（記憶體裡有私鑰的）；取一次就清。那台電腦要是這支手機上確認過指紋的（confirmed_at 有值），否則回 untrusted。
 /// 驗章只用這支手機本機記住的那台公鑰（不用後台回的），驗不過整筆丟棄。
 /// → { state: waiting（帶 status、detail）| expired | delivered | untrusted | bad | ready（帶 url、code、code_exp、name） }
 #[tauri::command]
@@ -759,11 +775,15 @@ pub async fn setup_device_fetch(app: State<'_, App>, auth: State<'_, AuthState>,
         return Ok(json!({ "state": if state == "expired" || state == "delivered" { state.as_str() } else { "bad" } }));
     }
     let known = crate::device_id::live::known(&app.data_dir)?;
-    let Some(peer) = known.peer(&pending.req.t_node) else {
+    // 只認這支手機上本人確認過指紋的電腦（記住了但還沒確認的也不算）
+    let Some(peer) = known.peer(&pending.req.t_node).filter(|p| p.confirmed_at.is_some()) else {
         return Ok(json!({ "state": "untrusted" }));
     };
     let (t_pub, name) = (peer.sign_pub.clone(), peer.name.clone());
+    let vendor = pending.req.vendor.clone();
     match pending.open(&t_pub, &s("t_eph_pub"), &s("cipher"), &s("t_sig"), unix_now()) {
+        // 網址交給畫面之前再驗一次：不是這一家的登入網址就不給（畫面只會顯示「登入網址不對」）
+        Ok(code) if !crate::device_relay::url_ok(code.url.as_str(), &vendor) => Ok(json!({ "state": "bad_url" })),
         Ok(code) => Ok(json!({ "state": "ready", "url": code.url.as_str(), "code": code.code.as_str(), "code_exp": code.code_exp, "name": name })),
         Err(_) => Ok(json!({ "state": "bad" })),
     }

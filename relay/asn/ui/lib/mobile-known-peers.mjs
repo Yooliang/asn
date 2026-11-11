@@ -1,14 +1,27 @@
 // 手機上的「認得的電腦」：看電腦畫面時確認那台的指紋、設定頁列出並忘記。
 // 判斷（指紋對不對、記住哪一把）都在 Rust（device_id.rs、android.rs）；這裡只有要顯示的字、整理資料，和「確認、忘記之前先過本人確認」的流程。
-// 本人確認＝生物辨識，沒設就用螢幕鎖（mobile-confirm.mjs 的 confirmViewer，和看畫面前同一個）。
-import { confirmViewer } from './mobile-confirm.mjs'
+// 本人確認＝生物辨識，沒設就用螢幕鎖（mobile-confirm.mjs 的 confirmWithToken）：先向 Rust 要一次性憑證（android_known_token），
+// 外殼驗證通過才寫憑證檔，再帶著憑證叫 android_known_confirm／android_known_forget；Rust 核對憑證檔才動手。畫面只拿得到憑證字串，寫不了憑證檔。
+import { confirmWithToken } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
 
 const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, n)
 
 export const NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再操作'
 
+/** 這支手機上沒有名字的電腦一律叫這個 */
+export const UNNAMED = '未命名的電腦'
+
+/** 名字最多幾個字（和 Rust 端一致） */
+export const NAME_MAX = 32
+
 export const TEXT = {
+  unnamed: UNNAMED,
+  rename: '改名',
+  renameSave: '儲存',
+  renameCancel: '取消',
+  renameLabel: '這台電腦的名字',
+  renameHint: '只記在這支手機上；留空就是未命名。',
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   sheetTitle: name => `確認「${name}」的指紋`,
@@ -44,6 +57,9 @@ export const groupFp = fp => (FP16.test(String(fp ?? '')) ? String(fp).match(/.{
 const FP16 = /^[0-9a-f]{16}$/
 const OPTION = /^[0-9a-f]{4}( [0-9a-f]{4}){3}$/
 
+/** 整理名字：控制字元與改變文字方向的字元換成空白、去頭尾空白、最多 32 字（Rust 端還會再整理一次） */
+export const cleanName = s => clean(s, NAME_MAX)
+
 /**
  * Rust 回的「開始看」資料 → 這台電腦的確認狀態。只要有節點就算（不帶指紋：沒確認的電腦，畫面不能知道它的指紋）。
  * name 是畫面上顯示用的名字（只當文字顯示）
@@ -64,7 +80,9 @@ export function normalizeList(raw) {
     .filter(p => typeof p?.node === 'string' && p.node)
     .map(p => {
       const confirmed = p.confirmed === true
-      return { node: p.node, name: clean(p.name) || '某台電腦', fpShow: confirmed ? groupFp(p.fp) : '', confirmed }
+      const name = cleanName(p.name)
+      // name＝本機記的名字（可能是空的，改名輸入框用）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
+      return { node: p.node, name, label: name || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed }
     })
 }
 
@@ -81,12 +99,15 @@ export function errorText(e) {
  * 確認、忘記要做的事。confirm、invoke 可以注入（測試用）。
  * 每次都先過本人確認（'ok' 才繼續；'cancel' 什麼都不送；'no_lock' 丟沒設螢幕鎖的說明），不記住上一次的結果。
  */
-export function makeKnownPeers({ confirm = () => confirmViewer(), invoke = tauriInvoke } = {}) {
-  const gate = async () => {
-    const r = await confirm()
-    if (r === 'ok') return true
+export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), invoke = tauriInvoke } = {}) {
+  // 回憑證字串（本人驗證過）或 null（取消）；沒設螢幕鎖丟說明。憑證每次都重要，不記住上一次的
+  const gate = async (action, node) => {
+    const challenge = await invoke('android_known_token', { action, node })
+    if (typeof challenge !== 'string' || !challenge) throw new Error('no_token')
+    const r = await confirm(challenge)
+    if (r === 'ok') return challenge
     if (r === 'no_lock') throw new Error(NO_LOCK_TEXT)
-    return false
+    return null
   }
   return {
     list: async () => normalizeList(await invoke('android_known_list')),
@@ -106,27 +127,36 @@ export function makeKnownPeers({ confirm = () => confirmViewer(), invoke = tauri
       if (r?.state !== 'ok') return null
       const options = Array.isArray(r?.options) ? r.options : []
       if (typeof r?.id !== 'string' || !r.id || options.length !== 4 || !options.every(o => OPTION.test(String(o)))) return null
-      return { state: 'ok', id: r.id, options: options.map(String) }
+      // name＝這支手機本機記的名字：有就用它（可能是空字串＝未命名），沒有這欄才退回畫面上原有的名字
+      return { state: 'ok', id: r.id, options: options.map(String), localName: typeof r.name === 'string' ? cleanName(r.name) : null }
     },
     /**
      * 本人選了第 index 個（-1＝都不一樣）。回 'wrong'｜'none'｜'expired'（題目已收掉）｜'locked'｜'blocked'（Rust 說現在不能答）｜
-     * 選對時先過本人確認：'cancel'（取消，沒記住）｜'done'（記住了）｜'not_ready'（Rust 沒記到：金鑰換了、被忘記、過了 60 秒）。
-     * 哪一個是對的只有 Rust 知道，這裡只送選了第幾個
+     * 選對時先過本人確認：'cancel'（取消，沒記住）｜'done'（記住了）｜'not_ready'（Rust 沒記到：金鑰換了、被忘記、過了 60 秒、憑證不對）。
+     * 哪一個是對的只有 Rust 知道，這裡只送選了第幾個（node＝這台電腦的節點，要憑證用）
      */
-    pick: async (id, index) => {
+    pick: async (id, index, node) => {
       if (!id || !Number.isInteger(index) || index < -1 || index > 3) return 'expired'
       const r = await invoke('android_known_answer', { id, pick: index })
       if (r === 'wrong' || r === 'none' || r === 'expired' || r === 'locked' || r === 'blocked') return r
       if (r !== 'right') throw new Error('unexpected')
-      if (!(await gate())) return 'cancel'
-      return (await invoke('android_known_confirm', { id })) === true ? 'done' : 'not_ready'
+      if (!node) return 'not_ready'
+      const challenge = await gate('confirm', node)
+      if (!challenge) return 'cancel'
+      return (await invoke('android_known_confirm', { id, challenge })) === true ? 'done' : 'not_ready'
     },
     /** 回 'done'｜'cancel' */
     forget: async node => {
       if (!node) return 'cancel'
-      if (!(await gate())) return 'cancel'
-      await invoke('android_known_forget', { node })
+      const challenge = await gate('forget', node)
+      if (!challenge) return 'cancel'
+      await invoke('android_known_forget', { node, challenge })
       return 'done'
+    },
+    /** 替這台改名（只記在這支手機；不影響信任，所以不用本人確認）。空字串＝未命名。回有沒有改到 */
+    rename: async (node, name) => {
+      if (!node) return false
+      return (await invoke('android_known_rename', { node, name: cleanName(name) })) === true
     },
   }
 }

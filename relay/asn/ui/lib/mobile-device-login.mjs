@@ -2,11 +2,22 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文。
 // 網址與代碼只在顯示階段拿在記憶體：不寫進對話、不進通知、不存檔、不提供複製；離開畫面、App 進背景、到期就清掉。
 import { setupErrorText } from './mobile-setup.mjs'
+import { loginLinkHost } from './secret-ask.mjs'
 
 /** 入口還沒開（電腦端與後台要一起放行，入口在之後的 PR 打開） */
 export const DEVICE_LOGIN_UI = false
 export const POLL_MS = 3000
 export const VENDORS = Object.freeze({ codex: 'Codex' })
+/** 各家登入頁的主機（完全相等才收；要和 Rust 的 device_relay.rs 的 CODEX／GROK_LOGIN_HOSTS 完全一致，有測試比對）：網址交給畫面之前，除了共同規則（https、ASCII、沒帳密、埠 443、官方網域）還要是這一家的 */
+export const VENDOR_HOSTS = Object.freeze({ codex: Object.freeze(['auth.openai.com']), grok: Object.freeze(['accounts.x.ai']) })
+
+/** 網址能不能綁到連結上：只收 https、可見 ASCII、沒有帳密、埠只能 443、主機在這一家的清單裡。vendor 沒給＝只套共同規則 */
+export function safeLoginUrl(url, vendor) {
+  const host = loginLinkHost(url)
+  if (host === null) return ''
+  if (vendor !== undefined && !(VENDOR_HOSTS[vendor] ?? []).includes(host)) return ''
+  return url
+}
 
 export const LOGIN_TEXT = Object.freeze({
   button: name => `從手機替這台登入 ${name}`,
@@ -26,7 +37,8 @@ export const LOGIN_TEXT = Object.freeze({
   left: s => `剩下 ${Math.floor(s / 60)} 分 ${String(s % 60).padStart(2, '0')} 秒`,
   expired: '要求或代碼已經過期，請重新發起。',
   delivered: '這筆登入代碼已經被取走了（可能是你的另一台設備），請重新發起。',
-  untrusted: '這支手機還不認得那台電腦，沒有顯示登入代碼。請先用這支手機看過那台的畫面一次。',
+  untrusted: '這支手機還沒有確認過這台電腦的指紋。請先在這支手機看一次那台的終端，照畫面確認指紋。',
+  badUrl: '登入網址不對，沒有顯示',
   bad: '收到的內容驗不過，沒有顯示。請重新發起；如果一直這樣，請告訴開發團隊。',
   gone: '這筆要求已經不在這支手機上了，請重新發起。',
   doneOk: '已完成',
@@ -41,12 +53,13 @@ export const showLoginButton = (vendorKey, action, enabled = DEVICE_LOGIN_UI) =>
 /** setup_device_request 的回應 → 下一步 */
 export function requestView(r) {
   if (r?.already === true) return { stage: 'done', ok: false, text: LOGIN_TEXT.already }
+  if (r?.state === 'untrusted') return { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted }
   if (typeof r?.rid === 'string' && r.rid) return { stage: 'waiting', rid: r.rid, text: LOGIN_TEXT.waiting }
   return { stage: 'done', ok: false, text: setupErrorText('') }
 }
 
-/** setup_device_fetch 的回應 → 畫面。ready 才帶網址與代碼（只給畫面顯示） */
-export function fetchView(r) {
+/** setup_device_fetch 的回應 → 畫面。ready 才帶網址與代碼（只給畫面顯示）；網址不合格就當純文字說明，不給連結。vendor＝這次登入的種類 */
+export function fetchView(r, vendor) {
   switch (r?.state) {
     case 'waiting': {
       const status = r.status
@@ -57,14 +70,16 @@ export function fetchView(r) {
       return { stage: 'waiting', text: status === 'taken' ? LOGIN_TEXT.taken : LOGIN_TEXT.waiting }
     }
     case 'ready': {
-      const url = typeof r.url === 'string' ? r.url : ''
+      const url = safeLoginUrl(typeof r.url === 'string' ? r.url : '', vendor)
       const code = typeof r.code === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(r.code) ? r.code : ''
       const exp = Number.isFinite(r.code_exp) ? r.code_exp : 0
-      if (!url.startsWith('https://') || !code || !exp) return { stage: 'done', ok: false, text: LOGIN_TEXT.bad }
+      if (!url) return { stage: 'done', ok: false, text: LOGIN_TEXT.badUrl }
+      if (!code || !exp) return { stage: 'done', ok: false, text: LOGIN_TEXT.bad }
       return { stage: 'show', url, code, exp, name: String(r.name ?? '').slice(0, 80) }
     }
     case 'expired': return { stage: 'done', ok: false, text: LOGIN_TEXT.expired }
     case 'delivered': return { stage: 'done', ok: false, text: LOGIN_TEXT.delivered }
+    case 'bad_url': return { stage: 'done', ok: false, text: LOGIN_TEXT.badUrl }
     case 'untrusted': return { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted }
     case 'gone': return { stage: 'done', ok: false, text: LOGIN_TEXT.gone }
     default: return { stage: 'done', ok: false, text: LOGIN_TEXT.bad }

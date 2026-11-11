@@ -339,9 +339,10 @@ impl std::fmt::Debug for Code {
     }
 }
 
-/// 網址要是這一家的登入主機，而且合乎登入網址的共同規則
+/// 網址要是這一家的登入主機，而且合乎登入網址的共同規則（https、只有可見 ASCII、沒有帳密、埠只能 443、主機完全等於這一家的登入主機）。
+/// 解開時驗一次，手機把網址交給畫面之前（account.rs 的 setup_device_fetch）再驗一次
 #[cfg_attr(not(test), allow(dead_code))]
-fn url_ok(url: &str, vendor: &str) -> bool {
+pub fn url_ok(url: &str, vendor: &str) -> bool {
     let Some(hosts) = vendor_hosts(vendor) else { return false };
     let Some(rest) = url.strip_prefix("https://") else { return false };
     let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];

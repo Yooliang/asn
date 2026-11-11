@@ -114,6 +114,15 @@ class AsnBridge(private val activity: MainActivity) {
     activity.runOnUiThread { ViewerConfirm.ask(activity, callbackId) }
   }
 
+  /**
+   * 「記住這台」「忘記」前的本人確認：challenge 是 Rust 剛發的一次性憑證。這裡只開生物辨識／螢幕鎖，**不寫任何檔**；
+   * 憑證檔只有在驗證通過的那一刻由 ViewerConfirm 寫。結果 ok／cancel／no_lock 一樣經 window.__asnConfirmViewer(callbackId, result) 交回
+   */
+  @JavascriptInterface
+  fun confirmWithToken(callbackId: String, challenge: String) {
+    activity.runOnUiThread { ViewerConfirm.ask(activity, callbackId, challenge) }
+  }
+
   /** 通話中讓螢幕保持亮著（不然自己暗掉就會被當成切到背景而結束通話） */
   @JavascriptInterface
   fun keepAwake(on: Boolean) {

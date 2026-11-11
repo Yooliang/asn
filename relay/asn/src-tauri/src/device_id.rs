@@ -227,6 +227,36 @@ pub struct KnownPeer {
     /// 鎖到什麼時候（毫秒）
     #[serde(default)]
     pub pick_lock_until_ms: Option<u64>,
+    /// 名字是本人自己改的：之後連線帶來的名字不再蓋掉它。**只有 rename_peer 能設**（守門測試）；舊檔沒有這欄＝不是
+    #[serde(default)]
+    pub named_by_owner: bool,
+}
+
+/// 本人替電腦取的名字最多幾個字
+pub const OWNER_NAME_MAX: usize = 32;
+
+/// 整理本人輸入的名字：控制字元、改變文字方向的字元、不可見的填充／組合／變體選擇／標籤字元換成空白，去頭尾空白，最多 32 個字。空字串＝沒有名字（畫面顯示「未命名的電腦」）
+/// 本人自己取的名字；沒取過（名字是電腦自己報上來的）回空字串。只讀，給確認框用
+pub fn owner_given_name(peer: &KnownPeer) -> &str {
+    if peer.named_by_owner {
+        &peer.name
+    } else {
+        ""
+    }
+}
+
+pub fn clean_owner_name(s: &str) -> String {
+    let bad = |c: char| {
+        c.is_control()
+            || matches!(
+                c,
+                '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}'
+                    | '\u{061c}' | '\u{00ad}' | '\u{034f}' | '\u{115f}' | '\u{1160}' | '\u{3164}' | '\u{ffa0}' | '\u{180e}'
+                    | '\u{2060}'..='\u{2064}' | '\u{206a}'..='\u{206f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0000}'..='\u{e007f}'
+                    | '\u{2800}' | '\u{fff9}'..='\u{fffb}'
+            )
+    };
+    s.chars().map(|c| if bad(c) { ' ' } else { c }).collect::<String>().trim().chars().take(OWNER_NAME_MAX).collect::<String>().trim().to_string()
 }
 
 /// 答錯一次之後鎖多久（毫秒）：10 分鐘
@@ -348,18 +378,33 @@ impl KnownPeers {
         }
     }
 
-    /// 記住一台。已經記過同一把就只更新名字；記過不同的一把是錯誤（要本人先忘記）
+    /// 本人替這台改名（只改本機的名字，不動公鑰、確認、四選一的紀錄）。名字先整理過；空字串＝未命名。**只有 rename_peer 的兩個命令能叫**（守門測試）。回有沒有這台
+    pub fn rename_peer(&mut self, node: &str, name: &str) -> bool {
+        match self.peers.iter_mut().find(|p| p.node == node) {
+            Some(p) => {
+                p.name = clean_owner_name(name);
+                p.named_by_owner = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 記住一台。已經記過同一把就只更新名字（本人改過名的除外）；記過不同的一把是錯誤（要本人先忘記）
     pub fn remember(&mut self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<(), String> {
         match self.check(node, sign_pub) {
             Tofu::Changed => Err(KEY_CHANGED.to_string()),
             Tofu::Same => {
                 if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
-                    p.name = name.to_string();
+                    // 本人自己取的名字不被後來連線帶的名字蓋掉
+                    if !p.named_by_owner {
+                        p.name = name.to_string();
+                    }
                 }
                 Ok(())
             }
             Tofu::New => {
-                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false, confirmed_at: None, pick: None, pick_wrong: 0, pick_lock_set_ms: None, pick_lock_until_ms: None });
+                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, input_no_ask: false, input_confirmed: false, input_always_ask: false, login_ok: false, confirmed_at: None, pick: None, pick_wrong: 0, pick_lock_set_ms: None, pick_lock_until_ms: None, named_by_owner: false });
                 Ok(())
             }
         }
@@ -543,6 +588,22 @@ pub mod live {
         let gone = k.forget(node);
         k.save(dir)?;
         Ok(gone)
+    }
+
+    /// 本人替這台改名：**只有 device_known_rename、android_known_rename 能叫**（守門測試）
+    pub fn rename_peer(dir: &Path, node: &str, name: &str) -> Result<bool, String> {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut k = KnownPeers::load(dir)?;
+        let found = k.rename_peer(node, name);
+        if found {
+            k.save(dir)?;
+        }
+        Ok(found)
+    }
+
+    /// 這台在本機記的名字（可能是空的）；沒記住這台回 None
+    pub fn local_name(dir: &Path, node: &str) -> Result<Option<String>, String> {
+        Ok(known(dir)?.peer(node).map(|p| p.name.clone()))
     }
 
     /// 本人在手機上按了「記住這台」：**只有手機的 android_known_confirm 能叫**（守門測試）
@@ -1278,7 +1339,7 @@ mod tests {
         let code = rs.split("\n#[cfg(test)]").next().unwrap();
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
-            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
+            assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
         }
         assert!(!code.contains("live::key"), "手機的命令不碰設備私鑰");
     }
@@ -1336,5 +1397,115 @@ mod tests {
             let f = owner_at(code, i);
             assert!(["android_known_challenge", "android_known_answer", "android_known_confirm", "android_known_forget"].contains(&f.as_str()), "{f}");
         }
+    }
+
+    // ---- 改名：本人取的名字、整理規則、不被後來連線蓋掉、只有兩個命令能叫 ----
+
+    #[test]
+    fn 整理名字_去控制字元與方向字元_去頭尾空白_最多三十二個字_空的可以() {
+        assert_eq!(clean_owner_name("  家用機  "), "家用機");
+        assert_eq!(clean_owner_name("家\u{202e}用\n機"), "家 用 機");
+        assert_eq!(clean_owner_name("\u{200b}\n\t "), "");
+        assert_eq!(clean_owner_name(""), "");
+        assert_eq!(clean_owner_name(&"長".repeat(100)).chars().count(), OWNER_NAME_MAX);
+        assert_eq!(OWNER_NAME_MAX, 32);
+        for c in ['\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2028}', '\u{2029}', '\u{2066}', '\u{2069}', '\u{feff}', '\u{0}', '\u{7f}',
+            '\u{061c}', '\u{00ad}', '\u{034f}', '\u{115f}', '\u{1160}', '\u{3164}', '\u{ffa0}', '\u{180e}',
+            '\u{2060}', '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{206a}', '\u{206b}', '\u{206c}', '\u{206d}', '\u{206e}', '\u{206f}',
+            '\u{fe00}', '\u{fe0f}', '\u{e0000}', '\u{e0020}', '\u{e007f}', '\u{2800}', '\u{fff9}', '\u{fffa}', '\u{fffb}'] {
+            assert!(!clean_owner_name(&format!("家{c}用機")).contains(c), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn 改名_只改名字_不動公鑰_確認_四選一_本人改過的名字不被之後連線蓋掉() {
+        let mut k = KnownPeers::default();
+        k.remember("d", "後台給的", "pk", 1).unwrap();
+        assert!(k.confirm("d", &fingerprint("pk"), 5));
+        let before = k.peer("d").unwrap().clone();
+        assert!(!before.named_by_owner);
+        k.remember("d", "後台改名了", "pk", 2).unwrap();
+        assert_eq!(k.peer("d").unwrap().name, "後台改名了", "沒改過名：照舊跟著更新");
+        assert!(k.rename_peer("d", "  我的工作機\n"));
+        let p = k.peer("d").unwrap().clone();
+        assert_eq!((p.name.as_str(), p.named_by_owner), ("我的工作機", true));
+        assert_eq!((&p.sign_pub, p.confirmed_at, &p.pick, p.pick_wrong, p.first_seen_ms, p.login_ok, p.input_confirmed), (&before.sign_pub, before.confirmed_at, &before.pick, before.pick_wrong, before.first_seen_ms, before.login_ok, before.input_confirmed), "其他欄位不動");
+        k.remember("d", "後台又改了", "pk", 3).unwrap();
+        assert_eq!(k.peer("d").unwrap().name, "我的工作機", "本人取的名字不被蓋掉");
+        assert_eq!(k.remember("d", "x", "pk2", 4).unwrap_err(), KEY_CHANGED);
+        assert!(!k.rename_peer("沒有", "x"));
+    }
+
+    #[test]
+    fn 改名成空的_是未命名_之後連線也不補名字() {
+        let mut k = KnownPeers::default();
+        k.remember("d", "後台給的", "pk", 1).unwrap();
+        assert!(k.rename_peer("d", "  "));
+        assert_eq!(k.peer("d").unwrap().name, "");
+        k.remember("d", "後台又給", "pk", 2).unwrap();
+        assert_eq!(k.peer("d").unwrap().name, "", "不從後台補名字");
+    }
+
+    #[test]
+    fn 改名_存檔讀回一致_舊檔沒有這欄就是沒改過() {
+        let d = tempfile::tempdir().unwrap();
+        let mut k = KnownPeers::default();
+        k.remember("d", "甲", "pk", 1).unwrap();
+        k.rename_peer("d", "乙");
+        k.save(d.path()).unwrap();
+        let back = KnownPeers::load(d.path()).unwrap();
+        assert_eq!(back, k);
+        assert!(back.peer("d").unwrap().named_by_owner);
+        let old: KnownPeers = serde_json::from_str(r#"{"peers":[{"node":"d","name":"n","sign_pub":"pk","first_seen_ms":1}]}"#).unwrap();
+        assert!(!old.peers[0].named_by_owner);
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn 改名_存到檔案_沒有這台回_false() {
+        let d = tempfile::tempdir().unwrap();
+        let mut k = KnownPeers::default();
+        k.remember("d", "甲", "pk", 1).unwrap();
+        k.save(d.path()).unwrap();
+        assert!(live::rename_peer(d.path(), "d", "乙").unwrap());
+        assert_eq!(live::local_name(d.path(), "d").unwrap().as_deref(), Some("乙"));
+        assert!(!live::rename_peer(d.path(), "x", "乙").unwrap());
+        assert_eq!(live::local_name(d.path(), "x").unwrap(), None);
+    }
+
+    #[test]
+    fn 守門_改名只有電腦版設定頁的命令和手機的改名命令能叫_名字欄位只有改名與記住會寫() {
+        let src = include_str!("device_id.rs").replace("\r\n", "\n");
+        let code = src.split("\n#[cfg(test)]\nmod tests {").next().unwrap();
+        for (i, _) in code.match_indices(".named_by_owner = ") {
+            assert_eq!(method_at(code, i), "rename_peer", "named_by_owner 只有改名能設");
+        }
+        assert_eq!(code.matches(".named_by_owner = ").count(), 1);
+        for (i, _) in code.match_indices("p.name = ") {
+            assert!(["remember", "rename_peer"].contains(&method_at(code, i).as_str()), "名字只有記住與改名能寫");
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        let mut callers = Vec::new();
+        for f in files {
+            let name = f.file_name().unwrap().to_string_lossy().to_string();
+            if name == "device_id.rs" {
+                continue;
+            }
+            let s = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
+            // 切到測試模組為止（lib.rs 前面就有零星的 #[cfg(test)] 項目，不能從那裡切）
+            let s = s.split("\nmod tests {").next().unwrap().to_string();
+            assert!(!s.contains("named_by_owner"), "{name} 不能碰名字旗標");
+            for (i, _) in s.match_indices("rename_peer(") {
+                callers.push((name.clone(), owner_at(&s, i)));
+            }
+        }
+        callers.sort();
+        assert_eq!(callers, vec![("android.rs".to_string(), "android_known_rename".to_string()), ("lib.rs".to_string(), "device_known_rename".to_string())], "{callers:?}");
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        assert!(lib.contains(concat!("#[cfg(feature = \"gui\")]\n#[cfg(desktop)]\n#[tau", "ri::command]\nfn device_known_rename(")), "電腦版才有");
+        let rs = include_str!("android.rs").replace("\r\n", "\n");
+        assert!(rs.contains("android::android_known_rename") || lib.contains("android::android_known_rename"), "手機登記");
     }
 }

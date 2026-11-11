@@ -51,7 +51,8 @@ test('peerOf：只要節點；不帶、不收指紋；沒確認、壞資料', ()
 test('normalizeList：沒確認的不顯示指紋；確認過的才顯示分組指紋；壞的丟掉、不帶公鑰', () => {
   const raw = { peers: [{ node: 'a', name: '甲\n機', confirmed: true, sign_pub: 'SECRET', fp: FP }, { node: 'b', name: '乙', confirmed: false, fp: 'abcdef0123456789', fp8: 'abcdef01' }, { name: 'x' }, { node: 'c', confirmed: true, fp: 'zz' }] }
   const l = normalizeList(raw)
-  assert.deepEqual(l, [{ node: 'a', name: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true }, { node: 'b', name: '乙', fpShow: '', confirmed: false }, { node: 'c', name: '某台電腦', fpShow: '', confirmed: true }])
+  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false }, { node: 'c', name: '', label: '未命名的電腦', fpShow: '', confirmed: true }])
+  assert.equal(normalizeList({ peers: [{ node: 'z', name: '長'.repeat(50) }] })[0].name.length, 32, '名字最多 32 字')
   assert.doesNotMatch(JSON.stringify(l), /SECRET|abcd/)
   assert.deepEqual(normalizeList(null), [])
 })
@@ -61,17 +62,20 @@ test('errorText：只顯示白話，不洩漏內部訊息', () => {
   assert.match(errorText(new Error('這支手機沒有設定螢幕鎖，請先設定再操作')), /螢幕鎖/)
 })
 
+const TOKEN = 'ab'.repeat(32)
+
 function fake(result, answers = {}) {
   const calls = []
   const api = makeKnownPeers({
-    confirm: async () => { calls.push('confirm'); return result },
-    invoke: async (cmd, args) => { calls.push([cmd, args]); if (answers[cmd] instanceof Error) throw answers[cmd]; return cmd in answers ? answers[cmd] : true },
+    confirm: async ch => { calls.push(['confirm', ch]); return result },
+    invoke: async (cmd, args) => { calls.push([cmd, args]); if (answers[cmd] instanceof Error) throw answers[cmd]; if (cmd === 'android_known_token' && !(cmd in answers)) return TOKEN; return cmd in answers ? answers[cmd] : true },
   })
   return { api, calls }
 }
 
 const OPTS = ['a93c c519 1f2e 3b4d', '1111 2222 3333 4444', '5555 6666 7777 8888', '9999 aaaa bbbb cccc']
 const names = calls => calls.map(c => (Array.isArray(c) ? c[0] : c))
+const TOK = ['android_known_token', { action: 'confirm', node: 'pc' }]
 
 test('出題：答錯過一次回鎖住（帶分鐘）、答錯兩次回擋住；沒有狀態、狀態不認得就是 null；鎖住與擋住的回覆不帶選項', async () => {
   let f = fake('ok', { android_known_challenge: { state: 'locked', minutes: 7, options: OPTS, id: 'q1' } })
@@ -88,7 +92,7 @@ test('出題：答錯過一次回鎖住（帶分鐘）、答錯兩次回擋住�
 
 test('出題：只帶節點，回狀態、題目編號與四個分組選項；格式不對或那台沒記住就是 null', async () => {
   let f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS } })
-  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'ok', id: 'q1', options: OPTS })
+  assert.deepEqual(await f.api.challenge({ node: 'pc' }), { state: 'ok', id: 'q1', options: OPTS, localName: null })
   assert.deepEqual(f.calls, [['android_known_challenge', { node: 'pc' }]], '不用先過本人確認、不帶指紋')
   f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS.slice(0, 3) } })
   assert.equal(await f.api.challenge({ node: 'pc' }), null)
@@ -101,21 +105,26 @@ test('出題：只帶節點，回狀態、題目編號與四個分組選項；�
   assert.equal(await fake('ok').api.challenge(null), null)
 })
 
-test('選對：先 android_known_answer，說 right 才過本人確認，通過才叫 android_known_confirm（只帶題目編號）', async () => {
+test('選對：先 android_known_answer，說 right 才要憑證、過本人確認，通過才叫 android_known_confirm（只帶題目編號與憑證）', async () => {
   const { api, calls } = fake('ok', { android_known_answer: 'right' })
-  assert.equal(await api.pick('q1', 2), 'done')
-  assert.deepEqual(calls, [['android_known_answer', { id: 'q1', pick: 2 }], 'confirm', ['android_known_confirm', { id: 'q1' }]])
+  assert.equal(await api.pick('q1', 2, 'pc'), 'done')
+  assert.deepEqual(calls, [['android_known_answer', { id: 'q1', pick: 2 }], TOK, ['confirm', TOKEN], ['android_known_confirm', { id: 'q1', challenge: TOKEN }]])
 })
 
 test('選對但本人取消、沒設螢幕鎖都不記；Rust 沒記到回 not_ready', async () => {
   let f = fake('cancel', { android_known_answer: 'right' })
-  assert.equal(await f.api.pick('q1', 0), 'cancel')
-  assert.deepEqual(names(f.calls), ['android_known_answer', 'confirm'])
+  assert.equal(await f.api.pick('q1', 0, 'pc'), 'cancel')
+  assert.deepEqual(names(f.calls), ['android_known_answer', 'android_known_token', 'confirm'])
   f = fake('no_lock', { android_known_answer: 'right' })
-  await assert.rejects(() => f.api.pick('q1', 0), /螢幕鎖/)
-  assert.deepEqual(names(f.calls), ['android_known_answer', 'confirm'])
+  await assert.rejects(() => f.api.pick('q1', 0, 'pc'), /螢幕鎖/)
+  assert.deepEqual(names(f.calls), ['android_known_answer', 'android_known_token', 'confirm'])
   f = fake('ok', { android_known_answer: 'right', android_known_confirm: false })
-  assert.equal(await f.api.pick('q1', 0), 'not_ready')
+  assert.equal(await f.api.pick('q1', 0, 'pc'), 'not_ready')
+  f = fake('ok', { android_known_answer: 'right', android_known_token: new Error('boom') })
+  await assert.rejects(() => f.api.pick('q1', 0, 'pc'), /boom/)
+  assert.deepEqual(names(f.calls), ['android_known_answer', 'android_known_token'], '要不到憑證就不開生物辨識、不叫 confirm')
+  f = fake('ok', { android_known_answer: 'right', android_known_token: '' })
+  await assert.rejects(() => f.api.pick('q1', 0, 'pc'), /no_token/)
 })
 
 test('選錯、都不一樣、過期：不過本人確認、不叫 confirm，把 Rust 的話原樣回；-1 是都不一樣', async () => {
@@ -131,33 +140,82 @@ test('選錯、都不一樣、過期：不過本人確認、不叫 confirm，把
   assert.equal(await fake('ok').api.pick('', 0), 'expired')
 })
 
-test('忘記：先過本人確認才叫 android_known_forget；取消就不送', async () => {
+test('忘記：先要憑證、過本人確認才叫 android_known_forget（帶憑證）；取消就不送', async () => {
+  const FTOK = ['android_known_token', { action: 'forget', node: 'pc' }]
   let f = fake('ok')
   assert.equal(await f.api.forget('pc'), 'done')
-  assert.deepEqual(f.calls, ['confirm', ['android_known_forget', { node: 'pc' }]])
+  assert.deepEqual(f.calls, [FTOK, ['confirm', TOKEN], ['android_known_forget', { node: 'pc', challenge: TOKEN }]])
   f = fake('cancel')
   assert.equal(await f.api.forget('pc'), 'cancel')
-  assert.deepEqual(f.calls, ['confirm'])
+  assert.deepEqual(f.calls, [FTOK, ['confirm', TOKEN]])
   f = fake('no_lock')
   await assert.rejects(() => f.api.forget('pc'), /螢幕鎖/)
-  assert.deepEqual(f.calls, ['confirm'])
+  assert.deepEqual(f.calls, [FTOK, ['confirm', TOKEN]])
 })
 
-test('守門：android_known_confirm／forget 前一定先 gate；先回答、再本人確認、最後才記住；只有 mobile-known-peers.mjs 叫這些命令', () => {
+test('改名：不用本人確認；名字先整理（去控制字元、最多 32 字）；沒有節點不送', async () => {
+  let f = fake('ok')
+  assert.equal(await f.api.rename('pc', '  家\n用機 '), true)
+  assert.deepEqual(f.calls, [['android_known_rename', { node: 'pc', name: '家 用機' }]], '不跳生物辨識、不要憑證')
+  f = fake('ok', { android_known_rename: false })
+  assert.equal(await f.api.rename('pc', 'x'), false)
+  f = fake('ok')
+  assert.equal(await f.api.rename('', 'x'), false)
+  assert.deepEqual(f.calls, [])
+  f = fake('ok')
+  await f.api.rename('pc', '長'.repeat(80))
+  assert.equal(f.calls[0][1].name.length, 32)
+  f = fake('ok')
+  await f.api.rename('pc', '')
+  assert.deepEqual(f.calls, [['android_known_rename', { node: 'pc', name: '' }]], '空的＝未命名')
+})
+
+test('出題帶本機記的名字：有欄位（可為空字串）就用它，沒有欄位才是 null（畫面退回原名字）', async () => {
+  let f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS, name: '家用機' } })
+  assert.equal((await f.api.challenge({ node: 'pc' })).localName, '家用機')
+  f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS, name: '' } })
+  assert.equal((await f.api.challenge({ node: 'pc' })).localName, '')
+  f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS } })
+  assert.equal((await f.api.challenge({ node: 'pc' })).localName, null)
+  assert.equal(TEXT.unnamed, '未命名的電腦')
+  for (const k of ['rename', 'renameSave', 'renameCancel', 'renameLabel', 'renameHint']) assert.doesNotMatch(TEXT[k], /[A-Za-z]{3,}/, k)
+})
+
+test('m.html：改名只用文字節點與輸入框（不走 v-html）；沒名字顯示 label；浮層標題用本機名字', () => {
+  const html = read('../ui/m.html')
+  const list = html.slice(html.indexOf('class="m-known-list"'), html.indexOf('{{ KNOWN_TEXT.forgetNote }}'))
+  assert.doesNotMatch(list, /v-html/)
+  assert.match(list, /<b>\{\{ p\.label \}\}<\/b>/)
+  assert.match(list, /@click="renameStart\(p\)">\{\{ KNOWN_TEXT\.rename \}\}/)
+  assert.match(list, /v-model="kp\.editText"/)
+  assert.match(list, /@click="renameCancel">\{\{ KNOWN_TEXT\.renameCancel \}\}/)
+  const js = read('../ui/m.js')
+  assert.match(js, /knownPeers\.rename\(node, kp\.editText\)/)
+  assert.match(js, /vp\.sheetName = ch\.localName === null \? cur\.name : \(ch\.localName \|\| KNOWN_TEXT\.unnamed\)/)
+  assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
+})
+
+test('守門：android_known_confirm／forget 前一定先 gate（要憑證、過本人確認）；先回答、再本人確認、最後才記住；只有 mobile-known-peers.mjs 叫這些命令', () => {
   const src = read('../ui/lib/mobile-known-peers.mjs')
   for (const cmd of ['android_known_confirm', 'android_known_forget']) {
     const i = src.indexOf(`'${cmd}'`)
     assert.ok(i > 0)
     const start = Math.max(src.lastIndexOf('pick:', i), src.lastIndexOf('forget:', i))
-    assert.ok(src.slice(start, i).includes('await gate()'), `${cmd} 前要先過本人確認`)
+    assert.ok(src.slice(start, i).includes('await gate('), `${cmd} 前要先過本人確認`)
+    assert.ok(src.slice(i, i + 80).includes('challenge'), `${cmd} 要帶憑證`)
   }
   const pick = src.slice(src.indexOf('pick: async'))
-  assert.ok(pick.indexOf("'android_known_answer'") < pick.indexOf('await gate()') && pick.indexOf('await gate()') < pick.indexOf("'android_known_confirm'"), '順序')
+  assert.ok(pick.indexOf("'android_known_answer'") < pick.indexOf('await gate(') && pick.indexOf('await gate(') < pick.indexOf("'android_known_confirm'"), '順序')
+  const gate = src.slice(src.indexOf('const gate = async'), src.indexOf('return {\n    list:'))
+  assert.ok(gate.indexOf("'android_known_token'") < gate.indexOf('await confirm('), '先要憑證才開本人確認')
+  assert.match(src, /import \{ confirmWithToken \} from '\.\/mobile-confirm\.mjs'/)
+  assert.doesNotMatch(src, /confirmViewer/, '不用沒有憑證的那種')
   assert.doesNotMatch(src, /remember|{ node: peer.node, fp/, '不再有「記住這台」、不送指紋')
   for (const f of ['../ui/m.js', '../ui/m.html', '../ui/lib/mobile-remote-view.mjs', '../ui/lib/term-remote.mjs', '../ui/lib/chatpane.mjs']) {
     assert.doesNotMatch(read(f), /android_known_(challenge|answer|confirm|forget)/, `${f} 不直接叫`)
   }
   assert.doesNotMatch(read('../ui/m.js'), /invoke\('android_known_/)
+  assert.doesNotMatch(read('../ui/m.js'), /android_known_token/, '憑證只在 mobile-known-peers.mjs 裡要、用')
 })
 
 test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、都不一樣、取消；結果說明放在條下面', () => {
@@ -176,7 +234,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(html, /@click="forgetKnown\(p\.node\)">\{\{ KNOWN_TEXT\.forget \}\}/)
   const js = read('../ui/m.js')
   assert.match(js, /knownPeers\.challenge\(cur\)/)
-  assert.match(js, /knownPeers\.pick\(ch\.id, index\)/)
+  assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
   assert.match(js, /knownPeers\.forget\(node\)/)
   for (const k of ['wrong', 'none', 'expired', 'locked', 'blocked']) assert.match(js, new RegExp(`${k}: KNOWN_TEXT\\.`))
   assert.match(js, /ch\.state === 'locked'\) vp\.note = KNOWN_TEXT\.locked\(ch\.minutes\)/)

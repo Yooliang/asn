@@ -199,3 +199,20 @@ fn 除錯輸出不帶網址代碼或金鑰() {
     let dbg = format!("{c:?}");
     assert!(!dbg.contains(CODE) && !dbg.contains("openai"), "{dbg}");
 }
+
+#[test]
+fn 網址檢查_只收這一家的登入主機_https_ascii_沒帳密_埠只能_443() {
+    assert!(url_ok(URL, "codex"));
+    assert!(url_ok("https://auth.openai.com/codex/device?x=1#y", "codex"));
+    let long = format!("https://auth.openai.com/{}", "a".repeat(2100));
+    for bad in [
+        "javascript:alert(1)", "data:text/html,<b>x</b>", "http://auth.openai.com/x", "ftp://auth.openai.com/x", "HTTPS://auth.openai.com/x", " https://auth.openai.com/x",
+        "https://user@auth.openai.com/x", "https://auth.openai.com@evil.example/x", "https://auth.openai.com:8443/x", "https://auth.openai.com.evil.example/x",
+        "https://evil.example/auth.openai.com", "https://sub.auth.openai.com/x", "https://accounts.x.ai/device", "https://claude.ai/x", "https://auth.openai.com/a b",
+        "https://auth.openai.com/\u{4e2d}", "https://auth.openai.com/a\\b", "https://auth.openai.com/\u{202e}x", "", long.as_str(),
+    ] {
+        assert!(!url_ok(bad, "codex"), "{bad:?}");
+    }
+    assert!(!url_ok(URL, "claude") && !url_ok(URL, ""), "不認得的種類一律不收");
+    assert!(url_ok("https://accounts.x.ai/device", "grok") && !url_ok(URL, "grok"));
+}

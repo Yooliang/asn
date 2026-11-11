@@ -442,6 +442,8 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-peer-strip-tx{font-size:14px;overflow-wrap:anywhere}
 .m-peer-strip-btn{flex:none}
 .m-known-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.m-known-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.m-known-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.m-known-edit{flex-basis:100%;display:flex;flex-direction:column;gap:6px}
+.m-known-edit .m-input{font:inherit;padding:8px 10px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}
 .m-known-row .m-row-tx{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
 .m-peer-body{font-size:15px;line-height:1.5;text-align:left;color:inherit}

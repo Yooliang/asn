@@ -78,6 +78,7 @@ dependencies = [
  "icu_normalizer",
  "image",
  "jni 0.21.1",
+ "libc",
  "lzma-rs",
  "ndk-context",
  "png 0.17.16",
