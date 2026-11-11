@@ -580,7 +580,10 @@ test('憑證檔：只有生物辨識通過（onAuthenticationSucceeded）與螢�
   assert.match(vc, /private fun finish\(activity: MainActivity, result: String, gen: Long\) \{\s+if \(gen != pendingGen\) return/)
   assert.match(vc, /cancelAuthentication\(\)/, '被取代的舊提示框要取消')
   assert.doesNotMatch(vc.slice(vc.indexOf('onAuthenticationError')).split('\n')[0], /verified|writeConsentMarker/, '失敗、取消不寫')
-  assert.doesNotMatch(bridge, /writeConsentMarker|consent|\.irori-asn|writeText|writeBytes|FileOutputStream|createNewFile/, '橋接方法不寫憑證檔')
+  // 橋接可以提到 .irori-asn（匯出只收 .irori-asn/received），但不能碰憑證資料夾、不能寫任何檔
+  assert.doesNotMatch(bridge, /writeConsentMarker|consent|writeText|writeBytes|FileOutputStream|createNewFile/, '橋接方法不寫憑證檔')
+  const bridgeCode = bridge.split(/\r?\n/).filter(l => !/^\s*(\/\/|\/?\*)/.test(l)).join('\n')
+  assert.doesNotMatch(bridgeCode.replace('File(File(filesRoot, ".irori-asn"), "received")', ''), /\.irori-asn/, '橋接程式裡的 .irori-asn 只能是匯出用的 received 資料夾')
   assert.match(bridge, /@JavascriptInterface\s+fun confirmWithToken\(callbackId: String, challenge: String\) \{\s+activity\.runOnUiThread \{ ViewerConfirm\.ask\(activity, callbackId, challenge\) \}/)
 })
 
