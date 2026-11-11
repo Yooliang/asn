@@ -329,6 +329,8 @@ mod tests {
         assert!(platform_aead().is_none(), "電腦版沒有這一層");
     }
 
+    // account 模組只在有畫面的建置裡（headless 沒有）
+    #[cfg(feature = "gui")]
     #[test]
     fn 節點金鑰_寫節點檔案走加密() {
         let d = tempfile::tempdir().unwrap();
