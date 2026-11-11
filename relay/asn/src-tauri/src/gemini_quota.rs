@@ -12,7 +12,10 @@
 //! 紅線：函式一律吃家目錄路徑參數；只有命令列入口與 Tauri 指令決定真實家目錄。不讀任何登入憑證、不連網、不執行外部程式。
 use crate::claude_accounts::normalize_email;
 use crate::claude_quota::merge;
+mod proc_key;
 mod seen;
+
+pub use proc_key::agy_key;
 use crate::claude_quota::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -267,10 +270,16 @@ fn log_once(home: &Path, dropped: &[String], skipped: &str, now_ms: i64) {
 
 /// 狀態列掛鉤：解析＋記錄，回要印在狀態列的那一行。任何失敗都照樣回一行。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> String {
+    hook_with(home, input, now_ms, &|| None)
+}
+
+/// 同 [`hook`]，另帶「這個 agy 行程的視窗代號」（`agy_key`，需要時才算）：行程代號優先，沒有才退回狀態列資料的 session_id／conversation_id
+pub fn hook_with(home: &Path, input: &str, now_ms: i64, proc_key: &dyn Fn() -> Option<String>) -> String {
     let Some(r) = parse_statusline(input, now_ms) else { return status_line(None) };
     // 資料時間：以「agy 視窗＋那一窗額度」為單位，數值有變才設成現在，沒變沿用上次的（seen.rs）；
-    // 認不出是哪個視窗（狀態列資料沒有 session_id／conversation_id）就沒辦法判斷新舊，這筆不記
-    if let Some(key) = &r.session {
+    // 認不出是哪個視窗（找不到 agy 行程，狀態列資料也沒有 session_id／conversation_id）就沒辦法判斷新舊，這筆不記
+    if let Some(key) = proc_key().or_else(|| r.session.clone()) {
+        let key = &key;
         let before = seen::Seen::load(home);
         let mut now_seen = before.clone();
         let o = now_seen.observe(key, &r.parsed, now_ms);

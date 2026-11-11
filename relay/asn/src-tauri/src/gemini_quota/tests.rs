@@ -400,3 +400,44 @@ fn 狀態檔最多_32_個視窗_7_天沒更新就刪_壞掉或太大當空的() 
     std::fs::write(seen::path(h.path()), "x".repeat(100_000)).unwrap();
     assert_eq!(seen::Seen::load(h.path()).len(), 0);
 }
+
+#[test]
+fn 行程代號優先_沒有行程代號才用_session_id_都沒有就不記() {
+    let h = tempfile::tempdir().unwrap();
+    let no_ids = status(Some(0.9), Some(0.5)).replace("\"S-1\"", "\"\"").replace("\"C-1\"", "\"\"");
+    // 剛開窗、還沒對話：沒有 session_id／conversation_id，但找得到 agy 行程 → 照樣記（第一次只記下來）
+    let pk = |k: &'static str| move || Some(seen::session_key(k));
+    hook_with(h.path(), &no_ids, NOW, &pk("proc-A"));
+    assert!(!path(h.path()).exists(), "第一次看到：只記下來");
+    assert!(seen::Seen::load(h.path()).get(&seen::session_key("proc-A")).is_some());
+    let changed = status(Some(0.8), Some(0.5)).replace("\"S-1\"", "\"\"").replace("\"C-1\"", "\"\"");
+    hook_with(h.path(), &changed, NOW + MIN, &pk("proc-A"));
+    assert_eq!(quota_of(&h).five_hour_pct, Some(80));
+    // 行程代號優先：有 session_id 也用行程代號（同一個行程之後換了對話，代號不變）
+    let with_session = win_status("S-NEW", Some(0.7), Some(0.5));
+    hook_with(h.path(), &with_session, NOW + 2 * MIN, &pk("proc-A"));
+    assert_eq!(quota_of(&h).five_hour_pct, Some(70), "沿用同一個行程代號的紀錄，不會又變成第一次看到");
+    assert!(seen::Seen::load(h.path()).get(&seen::session_key("S-NEW")).is_none());
+    // 找不到行程代號：退回 session_id
+    hook_with(h.path(), &win_status("S-B", Some(0.4), None), NOW + 3 * MIN, &|| None);
+    assert!(seen::Seen::load(h.path()).get(&seen::session_key("S-B")).is_some());
+    // 兩個都沒有：不記
+    let h2 = tempfile::tempdir().unwrap();
+    assert_eq!(hook_with(h2.path(), &no_ids, NOW, &|| None), "Gemini 5h 90% | wk 50%");
+    assert!(!path(h2.path()).exists() && !seen::path(h2.path()).exists());
+}
+
+#[test]
+fn 行程代號只在需要時才算_沒有額度的資料不用找行程() {
+    let h = tempfile::tempdir().unwrap();
+    let called = std::cell::Cell::new(0);
+    let f = || {
+        called.set(called.get() + 1);
+        None
+    };
+    hook_with(h.path(), "{}", NOW, &f);
+    hook_with(h.path(), &samples()[0], NOW, &f);
+    assert_eq!(called.get(), 0, "資料還沒有 email 或額度，不用走行程鏈");
+    hook_with(h.path(), &status(Some(0.9), None), NOW, &f);
+    assert_eq!(called.get(), 1);
+}
