@@ -587,6 +587,32 @@ fn 缺一窗_另一窗這次被擋_過期的那窗照樣拿掉() {
 }
 
 #[test]
+fn 缺一窗_只拿掉過期窗沒收新讀數_owner_標記跟正常路徑一致() {
+    // 有身分的紀錄：只拿掉過期窗（另一窗被 older_read 擋掉）寫回去，標記仍是「有身分」
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((50.0, NOW + 2 * H)), Some((10.0, NOW + 3 * DAY))), NOW));
+    assert!(quota_of(&h, "a@x.test").owner);
+    let t = NOW + 3 * H;
+    assert!(feed(&h, "wb", UA, NOW - H, 2, status(None, Some((5.0, NOW + 3 * DAY))), t));
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.weekly_pct, q.owner), (None, Some(90), true));
+    // 沒有標記的舊紀錄、備份失敗沒清舊基準：只拿掉過期窗寫回去，標記仍不蓋（跟收新值的路徑一樣）
+    let h2 = home_as("a@x.test");
+    add_account(h2.path(), "a@x.test", UA);
+    std::fs::create_dir_all(h2.path().join(".asn")).unwrap();
+    let rec = json!({ "five_hour_pct": 50, "five_reset_at": iso_secs(NOW - H), "five_at": iso_secs(NOW - 3 * H),
+        "weekly_pct": 95, "at": iso_secs(NOW), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW) });
+    std::fs::write(super::super::quota_path(h2.path()), json!({ "a@x.test": rec }).to_string()).unwrap();
+    let tmp = super::super::owner_store::backup_tmp_path(h2.path());
+    std::fs::create_dir_all(&tmp).unwrap(); // 備份必失敗
+    assert!(feed(&h2, "wa", UA, NOW - H, 1, status(None, Some((40.0, NOW + 3 * DAY))), NOW + MIN));
+    let q = quota_of(&h2, "a@x.test");
+    assert_eq!((q.five_hour_pct, q.weekly_pct, q.owner), (None, Some(95), false), "拿掉過期窗、舊基準還在、沒有標記");
+    assert!(log(&h2).contains("備份失敗，沒有清舊基準"));
+}
+
+#[test]
 fn 兩窗都在_照舊更新_不拿掉任何一窗() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);

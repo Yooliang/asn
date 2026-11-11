@@ -93,12 +93,28 @@ begin
     -- 這次回報帶了 windows、但某個 name 完全沒有，而存著的那一窗 resets_at 已經過了（例如方案拿掉 5 小時限制，rate_limits 不再有 five_hour）：
     -- 那一窗已經沒有了，從 windows 拿掉，不要一直掛著過期的舊數字（#1321）。還沒過重置時間的（只是這次剛好沒帶）、沒有 resets_at 的（無從判斷）留著；
     -- 沒帶 windows 的舊用戶端不動。
+    -- resets_at 不是合法時間（舊資料或被改壞）時不能丟錯，整支 roster_report 會停；Postgres 也不保證 and 會短路，所以轉型放進有例外處理的區塊，轉不了就當無從判斷、留著。
     if v_row ? 'windows' and jsonb_typeof(v_row->'windows') = 'array' then
-      select coalesce(jsonb_agg(e order by i), '[]'::jsonb) into v_merged
-        from jsonb_array_elements(v_merged) with ordinality t(e, i)
-        where not (
-          not exists (select 1 from jsonb_array_elements(v_new) n where n->>'name' = e->>'name')
-          and jsonb_typeof(e->'resets_at') = 'string' and (e->>'resets_at')::timestamptz <= v_now);
+      declare
+        v_keep jsonb := '[]'::jsonb;
+        v_gone boolean;
+      begin
+        for v_w in select e from jsonb_array_elements(v_merged) with ordinality t(e, i) order by i loop
+          v_gone := false;
+          if not exists (select 1 from jsonb_array_elements(v_new) n where n->>'name' = v_w->>'name')
+             and jsonb_typeof(v_w->'resets_at') = 'string' then
+            begin
+              v_gone := (v_w->>'resets_at')::timestamptz <= v_now;
+            exception when others then
+              v_gone := false;
+            end;
+          end if;
+          if not v_gone then
+            v_keep := v_keep || jsonb_build_array(v_w);
+          end if;
+        end loop;
+        v_merged := v_keep;
+      end;
     end if;
     if jsonb_array_length(v_merged) > 4 then
       select jsonb_agg(s.e order by s.i) into v_merged from (

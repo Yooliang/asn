@@ -268,11 +268,11 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     log_changes(home, st, &m, now_ms);
     let took = m.quota.is_some() || trimmed.is_some();
     // 兩條都沒收、只有拿掉過期窗：照樣要寫
-    let out = m.quota.map(|mut q| {
+    let out = m.quota.or(trimmed).map(|mut q| {
         q.owner = !backup_failed;
         q
     });
-    if let Some(q) = out.or(trimmed) {
+    if let Some(q) = out {
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);

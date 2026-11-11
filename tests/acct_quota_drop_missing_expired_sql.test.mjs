@@ -127,3 +127,17 @@ test('實跑：權限與回復——回復後沒帶的過期窗不再被拿掉',
   await report(db, 'W', rep('claude', [win('weekly', 60, iso(Date.now() + 4 * D))]))
   assert.deepEqual(await names(db), ['five_hour', 'weekly'], '回復後又是舊行為')
 })
+
+test('實跑：存著的 resets_at 是壞字串時那一窗保留，而且回報不會丟錯', { skip }, async () => {
+  const db = await setup()
+  await report(db, 'W', rep('claude', [win('five_hour', 50, iso(Date.now() + 2 * H), 60_000), win('weekly', 70, iso(Date.now() + 4 * D), 60_000)]))
+  // 直接把存著的 five_hour 重置時間改成不是時間的字串（模擬舊資料或手動改壞）
+  await db.exec(`update relay.asn_user_accounts set windows = (select jsonb_agg(case when e->>'name' = 'five_hour' then jsonb_set(e, '{resets_at}', '"not-a-time"') else e end) from jsonb_array_elements(windows) e)
+    where vendor = 'claude' and account = 'a@x.test'`)
+  // 這次只帶 weekly：five_hour 的 resets_at 讀不成時間，無從判斷 → 保留，不能丟錯
+  const r = await report(db, 'W', rep('claude', [win('weekly', 60, iso(Date.now() + 4 * D))]))
+  assert.equal(r.ok, true, JSON.stringify(r))
+  const rows = (await db.query(`select windows from relay.asn_user_accounts where vendor = 'claude' and account = 'a@x.test'`)).rows[0].windows
+  assert.deepEqual(rows.map(w => w.name).sort(), ['five_hour', 'weekly'])
+  assert.equal(rows.find(w => w.name === 'five_hour').resets_at, 'not-a-time', '壞字串原樣留著')
+})
