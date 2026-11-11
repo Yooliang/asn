@@ -55,6 +55,10 @@ mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
 mod device_id;
+// 含睡眠的開機後時間（手機憑證、題目的到期要用它算）
+#[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod boottime;
 // 手機確認電腦指紋的四選一（只在手機建置用；電腦版只編進測試）
 #[cfg(any(target_os = "android", test))]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]

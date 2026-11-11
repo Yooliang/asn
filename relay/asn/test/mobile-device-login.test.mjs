@@ -128,3 +128,17 @@ test('守門（手機畫面）：代碼不給複製、不能選取；離開頁�
   assert.match(sec, /const loginReset = \(\) => \{ loginStop\(\);/)
   assert.match(sec, /const loginEnd = \(text, good = false\) => \{ loginStop\(\);/)
 })
+
+test('登入網址主機清單：JS 與 Rust（device_relay.rs）一模一樣', () => {
+  const rs = read('../src-tauri/src/device_relay.rs')
+  const rust = {}
+  for (const m of rs.matchAll(/pub const (\w+)_LOGIN_HOSTS: \[&str; \d+\] = \[([^\]]*)\];/g)) {
+    rust[m[1].toLowerCase()] = [...m[2].matchAll(/"([^"]+)"/g)].map(x => x[1]).sort()
+  }
+  assert.deepEqual(Object.keys(rust).sort(), ['codex', 'grok'], '抓得到 Rust 的兩份清單')
+  const js = Object.fromEntries(Object.entries(VENDOR_HOSTS).map(([k, v]) => [k, [...v].sort()]))
+  assert.deepEqual(Object.keys(js).sort(), Object.keys(rust).sort(), '種類相同')
+  assert.deepEqual(js, rust, '主機相同')
+  assert.equal(safeLoginUrl('https://accounts.x.ai/device', 'grok'), 'https://accounts.x.ai/device')
+  assert.equal(safeLoginUrl('https://auth.openai.com/x', 'grok'), '')
+})

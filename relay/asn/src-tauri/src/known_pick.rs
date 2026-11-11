@@ -1,12 +1,12 @@
 //! 手機確認電腦的指紋：從四個選項裡選出電腦上顯示的那一組（只在手機建置使用）。
 //! 四個選項與正確答案的位置每台電腦只出一次、存在 device_id 的 KnownPeer 上（這裡只負責出選項的算法）；
-//! 這裡的記憶體只放「目前開著的題目」：每台電腦同時只有一題，過期用單調時鐘（Instant）算，不受手機改時間影響。
+//! 這裡的記憶體只放「目前開著的題目」：每台電腦同時只有一題，過期用開機後時間（boottime，含睡眠）算，不受手機改時間、也不怕深度睡眠。
 //! 畫面只拿到選項文字，答案由 Rust 判斷，畫面永遠不知道哪個是對的。
 //! 這個檔案不寫任何日誌、不發事件（守門測試鎖住）。
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// 題目的有效時間
 pub const CHALLENGE_TTL: Duration = Duration::from_secs(120);
@@ -29,8 +29,8 @@ pub struct Pending {
     /// 出題當時這支手機記住的公鑰
     pub sign_pub: String,
     pub answer: usize,
-    pub issued: Instant,
-    pub expires: Instant,
+    pub issued: Duration,
+    pub expires: Duration,
     pub stage: Stage,
 }
 
@@ -114,13 +114,13 @@ pub struct Store {
 }
 
 impl Store {
-    fn prune(&mut self, now: Instant) {
+    fn prune(&mut self, now: Duration) {
         self.map.retain(|_, p| now < p.expires);
     }
 
     /// 出題：這台電腦已經有一題開著（還沒選）就回同一個編號；沒有才新開。
     /// 滿了只丟最舊的「還沒選」的；全都是選對等著記住的就不出新題（回 Busy）
-    pub fn issue(&mut self, node: &str, sign_pub: &str, answer: usize, now: Instant, mut rng: impl FnMut(&mut [u8])) -> Result<String, Busy> {
+    pub fn issue(&mut self, node: &str, sign_pub: &str, answer: usize, now: Duration, mut rng: impl FnMut(&mut [u8])) -> Result<String, Busy> {
         self.prune(now);
         if let Some((id, _)) = self.map.iter().find(|(_, p)| p.node == node && p.stage == Stage::Asked) {
             return Ok(id.clone());
@@ -142,13 +142,13 @@ impl Store {
     }
 
     /// 這個題目編號是哪台電腦的（只有還沒選的題目才查得到）
-    pub fn node_of(&mut self, id: &str, now: Instant) -> Option<String> {
+    pub fn node_of(&mut self, id: &str, now: Duration) -> Option<String> {
         self.prune(now);
         self.map.get(id).filter(|p| p.stage == Stage::Asked).map(|p| p.node.clone())
     }
 
     /// 回答：pick 是第幾個（從 0 起），-1 是「都不一樣」。錯、都不一樣、過期都把題目收掉（不能重選）；選對就換成「過關」，再給 60 秒記住
-    pub fn answer(&mut self, id: &str, pick: i64, now: Instant) -> Outcome {
+    pub fn answer(&mut self, id: &str, pick: i64, now: Duration) -> Outcome {
         self.prune(now);
         let (stage, correct) = match self.map.get(id) {
             Some(p) => (p.stage, p.answer as i64),
@@ -174,7 +174,7 @@ impl Store {
     }
 
     /// 記住之前取走過關的題目（只能取一次）；沒過關、過期、沒有這題都回 None
-    pub fn take_passed(&mut self, id: &str, now: Instant) -> Option<(String, String)> {
+    pub fn take_passed(&mut self, id: &str, now: Duration) -> Option<(String, String)> {
         self.prune(now);
         if self.map.get(id).is_some_and(|p| p.stage == Stage::Passed) {
             self.map.remove(id).map(|p| (p.node, p.sign_pub))
@@ -228,22 +228,22 @@ pub const BUSY: &str = "busy";
 
 pub fn issue(node: &str, sign_pub: &str, answer: usize) -> Result<String, String> {
     let mut g = store().lock().unwrap_or_else(|e| e.into_inner());
-    match with_os_rng(|rng| g.issue(node, sign_pub, answer, Instant::now(), rng)) {
+    match with_os_rng(|rng| g.issue(node, sign_pub, answer, crate::boottime::now_boot(), rng)) {
         Ok(r) => r.map_err(|_| BUSY.to_string()),
         Err(e) => Err(e),
     }
 }
 
 pub fn node_of(id: &str) -> Option<String> {
-    store().lock().unwrap_or_else(|e| e.into_inner()).node_of(id, Instant::now())
+    store().lock().unwrap_or_else(|e| e.into_inner()).node_of(id, crate::boottime::now_boot())
 }
 
 pub fn answer(id: &str, pick: i64) -> Outcome {
-    store().lock().unwrap_or_else(|e| e.into_inner()).answer(id, pick, Instant::now())
+    store().lock().unwrap_or_else(|e| e.into_inner()).answer(id, pick, crate::boottime::now_boot())
 }
 
 pub fn take_passed(id: &str) -> Option<(String, String)> {
-    store().lock().unwrap_or_else(|e| e.into_inner()).take_passed(id, Instant::now())
+    store().lock().unwrap_or_else(|e| e.into_inner()).take_passed(id, crate::boottime::now_boot())
 }
 
 pub fn drop_node(node: &str) {
@@ -270,7 +270,7 @@ mod tests {
         }
     }
 
-    fn at(base: Instant, ms: u64) -> Instant {
+    fn at(base: Duration, ms: u64) -> Duration {
         base + Duration::from_millis(ms)
     }
 
@@ -326,13 +326,13 @@ mod tests {
     }
 
     /// 為某台電腦出題，答案固定是 2
-    fn issued(s: &mut Store, node: &str, now: Instant, seed: u64) -> String {
+    fn issued(s: &mut Store, node: &str, now: Duration, seed: u64) -> String {
         s.issue(node, "pk", 2, now, rng(seed)).unwrap()
     }
 
     #[test]
     fn 選對_錯_都不一樣_過期_各自的結果() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let id = issued(&mut s, "a", t, 3);
         assert_eq!(s.answer(&id, 2, at(t, 500)), Outcome::Right);
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn 選錯就收掉_不能重選_再回答是過期() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let id = issued(&mut s, "a", t, 9);
         assert_eq!(s.answer(&id, 0, at(t, 10)), Outcome::Wrong);
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn 每台電腦同時只有一題_再出題回同一個編號_別台不受影響() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let a = issued(&mut s, "pc", t, 1);
         assert_eq!(issued(&mut s, "pc", at(t, 5), 2), a, "不論亂數，同一台回同一題");
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn 過關才取得走_只能一次_六十秒內_用單調時間算() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let id = issued(&mut s, "pc", t, 11);
         assert_eq!(s.take_passed(&id, at(t, 5)), None, "沒選過不能取");
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn 過期的每次呼叫都清掉_數量有上限丟最舊的還沒選的() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let old = issued(&mut s, "x", t, 20);
         issued(&mut s, "y", at(t, 5) + CHALLENGE_TTL, 21);
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn 滿了也絕不丟選對等著記住的_全是選對的就不出新題() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let mut ids = Vec::new();
         for i in 0..MAX_PENDING as u64 {

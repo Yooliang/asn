@@ -440,7 +440,7 @@ pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Resul
 }
 
 /// 要一個一次性的確認憑證（`action`＝confirm 或 forget，要對哪台電腦）：32 位元組亂數的十六進位字串，30 秒內有效、只能用一次。
-/// 畫面拿它請外殼跳生物辨識；外殼驗證通過才寫出對應的憑證檔，之後的確認、忘記帶著它回來才算數（見 consent.rs）。只有主畫面視窗能要
+/// 畫面拿它請外殼跳生物辨識；外殼驗證通過才寫出對應的憑證檔，之後的確認、忘記帶著它回來才算數（見 consent.rs）。只接受主畫面（手機只有一個畫面，這條主要是防將來多視窗時誤用）
 #[tauri::command]
 pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, action: String, node: String) -> Result<String, String> {
     if !crate::consent::label_ok(window.label()) {
@@ -450,10 +450,10 @@ pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, ac
     if node.is_empty() || node.len() > 64 {
         return Err("bad_node".to_string());
     }
-    // 框上的字由這裡決定：動作＋這支手機記住的名字＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
+    // 框上的字由這裡決定：動作＋本人自己取的名字（沒取就未命名）＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
     let known = crate::device_id::live::known(&app.data_dir)?;
     let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
-    let text = crate::consent::describe(act, &peer.name, &crate::device_id::fp_grouped(&peer.sign_pub));
+    let text = crate::consent::describe(act, crate::consent::prompt_name(peer), &crate::device_id::fp_grouped(&peer.sign_pub));
     let challenge = crate::consent::issue(act, &node)?;
     crate::consent::write_desc(&app.data_dir, &challenge, &text)?;
     Ok(challenge)

@@ -15,13 +15,13 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// 憑證的有效時間
 pub const TOKEN_TTL: Duration = Duration::from_secs(30);
 /// 外殼寫憑證檔的子資料夾（在 data_dir 底下）
 pub const MARKER_DIR: &str = "consent";
-/// 手機上唯一的主畫面視窗代號（tauri.android.conf.json），只有它能要憑證、拿憑證來用
+/// 手機上唯一的主畫面視窗代號（tauri.android.conf.json）。只接受主畫面（手機只有一個畫面，這條主要是防將來多視窗時誤用）
 pub const MAIN_LABEL: &str = "list";
 /// 同時最多留幾筆
 const MAX_RECORDS: usize = 64;
@@ -46,7 +46,7 @@ impl Action {
     }
 }
 
-/// 只有主畫面視窗可以要憑證、用憑證
+/// 只接受主畫面（手機只有一個畫面，這條主要是防將來多視窗時誤用）
 pub fn label_ok(label: &str) -> bool {
     label == MAIN_LABEL
 }
@@ -64,7 +64,7 @@ pub fn hash_hex(challenge: &str) -> String {
 
 struct Rec {
     hash: String,
-    issued: Instant,
+    issued: Duration,
 }
 
 #[derive(Default)]
@@ -73,12 +73,12 @@ pub struct Store {
 }
 
 impl Store {
-    fn prune(&mut self, now: Instant) {
-        self.map.retain(|_, r| now.saturating_duration_since(r.issued) < TOKEN_TTL);
+    fn prune(&mut self, now: Duration) {
+        self.map.retain(|_, r| now.saturating_sub(r.issued) < TOKEN_TTL);
     }
 
     /// 發一個新憑證：同一個動作、同一台電腦只留最新的一個。回憑證（64 個十六進位字元）
-    pub fn issue(&mut self, action: Action, node: &str, now: Instant, mut rng: impl FnMut(&mut [u8])) -> String {
+    pub fn issue(&mut self, action: Action, node: &str, now: Duration, mut rng: impl FnMut(&mut [u8])) -> String {
         self.prune(now);
         let mut b = [0u8; 32];
         rng(&mut b);
@@ -99,7 +99,7 @@ impl Store {
 
     /// 用憑證：動作、電腦、雜湊都對、沒過期，而且 `marker_taken(雜湊)` 回 true（憑證檔存在並已刪掉）才算數；算數就把紀錄用掉。
     /// 沒過期但憑證檔還沒出現（本人還沒驗證）時紀錄保留，到期才清
-    pub fn redeem(&mut self, action: Action, node: &str, challenge: &str, now: Instant, marker_taken: impl FnOnce(&str) -> bool) -> bool {
+    pub fn redeem(&mut self, action: Action, node: &str, challenge: &str, now: Duration, marker_taken: impl FnOnce(&str) -> bool) -> bool {
         self.prune(now);
         let key = (action, node.to_string());
         let hash = hash_hex(challenge);
@@ -149,7 +149,7 @@ pub fn take_marker(data_dir: &Path, hash: &str) -> bool {
 pub fn issue(action: Action, node: &str) -> Result<String, String> {
     let mut failed = false;
     let mut g = store().lock().unwrap_or_else(|e| e.into_inner());
-    let c = g.issue(action, node, Instant::now(), |b: &mut [u8]| {
+    let c = g.issue(action, node, crate::boottime::now_boot(), |b: &mut [u8]| {
         if getrandom::fill(b).is_err() {
             failed = true;
             b.fill(0);
@@ -165,7 +165,7 @@ pub fn issue(action: Action, node: &str) -> Result<String, String> {
 
 /// 用憑證：成功回 true（憑證檔已刪、紀錄已用掉）
 pub fn redeem(data_dir: &Path, action: Action, node: &str, challenge: &str) -> bool {
-    let ok = store().lock().unwrap_or_else(|e| e.into_inner()).redeem(action, node, challenge, Instant::now(), |h| take_marker(data_dir, h));
+    let ok = store().lock().unwrap_or_else(|e| e.into_inner()).redeem(action, node, challenge, crate::boottime::now_boot(), |h| take_marker(data_dir, h));
     // 說明檔用不到了：不管成不成功都收掉
     if is_hash(&hash_hex(challenge)) {
         let _ = std::fs::remove_file(desc_path(data_dir, &hash_hex(challenge)));
@@ -175,6 +175,8 @@ pub fn redeem(data_dir: &Path, action: Action, node: &str, challenge: &str) -> b
 
 /// 生物辨識框上的字最多幾個字
 pub const DESC_MAX: usize = 60;
+/// 框上電腦名字最多幾個字
+const NAME_SHOW_MAX: usize = crate::device_id::OWNER_NAME_MAX;
 /// 說明檔的副檔名：`<consent>/<憑證雜湊>.desc`
 pub const DESC_EXT: &str = "desc";
 
@@ -182,18 +184,34 @@ fn desc_path(data_dir: &Path, hash: &str) -> std::path::PathBuf {
     data_dir.join(MARKER_DIR).join(format!("{hash}.{DESC_EXT}"))
 }
 
-/// 框上要寫的字（純函式）：動作＋這支手機記住的名字（沒有就「未命名的電腦」）＋指紋前兩組。網頁給的字一律不進來
-pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
-    let name = if local_name.trim().is_empty() { "未命名的電腦".to_string() } else { format!("「{local_name}」") };
-    let fp: String = fp_grouped.chars().take(9).collect();
-    let text = match action {
-        Action::Confirm => format!("記住{name}（{fp}）"),
-        Action::Forget => format!("忘記{name}（{fp}）"),
-    };
-    text.chars().filter(|c| !c.is_control()).take(DESC_MAX).collect()
+/// 框上顯示的電腦名字：只認本人自己取的名字（`named_by_owner`）；電腦自己報上來的名字不進框（回空字串＝「未命名的電腦」）
+pub fn prompt_name(peer: &crate::device_id::KnownPeer) -> &str {
+    if peer.named_by_owner { &peer.name } else { "" }
 }
 
-/// 發憑證時把框上要寫的字存起來（外殼用憑證的雜湊來讀；沒有這個檔外殼就不跳框）。順手清掉放太久的舊說明檔
+/// 框上要寫的字（純函式）：動作＋本人取的名字（沒有就「未命名的電腦」，去掉控制字元與改變文字方向的字元、最多 32 字）＋指紋前兩組。
+/// 指紋永遠在最後、不會被截掉：名字先處理好長度，再用組合的方式接上；網頁給的字一律不進來。
+/// 最長 2＋34＋1＋9＋1＝47 字，小於外殼的 DESC_MAX（60）
+pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
+    let cleaned: String = crate::device_id::clean_owner_name(local_name).chars().take(NAME_SHOW_MAX).collect();
+    let name = if cleaned.trim().is_empty() { "未命名的電腦".to_string() } else { format!("「{}」", cleaned.trim()) };
+    let fp: String = fp_grouped.chars().filter(|c| !c.is_control()).take(9).collect();
+    let verb = match action {
+        Action::Confirm => "記住",
+        Action::Forget => "忘記",
+    };
+    format!("{verb}{name}（{fp}）")
+}
+
+/// 可以收掉的舊檔：說明檔（.desc）、掃描暫存（.scan）、沒人來兌換的憑證檔（64 個十六進位字元、沒有副檔名）
+fn stale_kind(p: &Path) -> bool {
+    match p.extension() {
+        Some(x) => x == DESC_EXT || x == "scan",
+        None => p.file_name().and_then(|n| n.to_str()).is_some_and(is_hash),
+    }
+}
+
+/// 發憑證時把框上要寫的字存起來（外殼用憑證的雜湊來讀；沒有這個檔外殼就不跳框）。順手清掉放太久的舊說明檔、舊憑證檔與 .scan 暫存
 pub fn write_desc(data_dir: &Path, challenge: &str, text: &str) -> Result<(), String> {
     let dir = data_dir.join(MARKER_DIR);
     std::fs::create_dir_all(&dir).map_err(|e| format!("建不了資料夾：{e}"))?;
@@ -201,7 +219,7 @@ pub fn write_desc(data_dir: &Path, challenge: &str, text: &str) -> Result<(), St
         for e in rd.flatten() {
             let p = e.path();
             let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|d| d > TOKEN_TTL * 4);
-            if old && p.extension().is_some_and(|x| x == DESC_EXT) {
+            if old && stale_kind(&p) {
                 let _ = std::fs::remove_file(&p);
             }
         }
@@ -215,12 +233,65 @@ pub fn drop_node(node: &str) {
 
 #[cfg(test)]
 mod tests {
+    const FPG: &str = "a93c c519 1f2e 3b4d";
+
+    fn peer(name: &str, owner: bool) -> crate::device_id::KnownPeer {
+        let j = serde_json::json!({ "node": "n", "name": name, "sign_pub": "pk", "first_seen_ms": 1, "named_by_owner": owner });
+        serde_json::from_value(j).unwrap()
+    }
+
     #[test]
-    fn 框上的字_動作加本機名字加指紋前兩組_沒有名字寫未命名_去掉控制字元() {
-        assert_eq!(describe(Action::Confirm, "工作機", "a93c c519 1f2e 3b4d"), "記住「工作機」（a93c c519）");
-        assert_eq!(describe(Action::Forget, "", "a93c c519 1f2e 3b4d"), "忘記未命名的電腦（a93c c519）");
-        assert_eq!(describe(Action::Confirm, "甲\n乙", "a93c c519 1f2e 3b4d"), "記住「甲乙」（a93c c519）");
-        assert!(describe(Action::Confirm, &"長".repeat(200), "a93c c519 1f2e 3b4d").chars().count() <= DESC_MAX);
+    fn 框上的字_動作加本人取的名字加指紋前兩組_沒有名字寫未命名_控制字元和方向字元去掉() {
+        assert_eq!(describe(Action::Confirm, "工作機", FPG), "記住「工作機」（a93c c519）");
+        assert_eq!(describe(Action::Forget, "", FPG), "忘記未命名的電腦（a93c c519）");
+        assert_eq!(describe(Action::Confirm, "甲\n乙", FPG), "記住「甲 乙」（a93c c519）");
+        let s = describe(Action::Confirm, "甲\u{202e}乙\u{2066}丙", FPG);
+        assert!(!s.contains('\u{202e}') && !s.contains('\u{2066}'), "{s}");
+    }
+
+    #[test]
+    fn 框上的字_名字很長也不會截掉指紋_名字最多三十二字_總長不超過外殼上限() {
+        let s = describe(Action::Forget, &"長".repeat(200), FPG);
+        assert!(s.ends_with("（a93c c519）"), "{s}");
+        assert!(s.chars().count() <= DESC_MAX);
+        let name_part = s.strip_prefix("忘記「").unwrap().strip_suffix("」（a93c c519）").unwrap();
+        assert_eq!(name_part.chars().count(), 32);
+        // 最長的一種：32 字名字、忘記／記住
+        for act in [Action::Confirm, Action::Forget] {
+            let s = describe(act, &"長".repeat(500), "a93c c519 1f2e 3b4d");
+            assert!(s.chars().count() <= DESC_MAX, "{}", s.chars().count());
+            assert!(s.ends_with("（a93c c519）"));
+        }
+        assert!(DESC_MAX >= 2 + 2 + 32 + 1 + 9 + 1);
+    }
+
+    #[test]
+    fn 框上的字_名字裡假冒的指紋改不了最後真的那一組() {
+        let s = describe(Action::Confirm, "甲」（a93c c519）記住「乙（0000 1111）", FPG);
+        assert!(s.ends_with("（a93c c519）"), "{s}");
+        let name_part = s.strip_prefix("記住「").unwrap().strip_suffix("」（a93c c519）").unwrap();
+        assert!(name_part.chars().count() <= 32, "{name_part}");
+        let s2 = describe(Action::Confirm, &format!("{}（0000 1111）", "甲".repeat(40)), FPG);
+        assert!(s2.ends_with("（a93c c519）") && s2.chars().count() <= DESC_MAX, "{s2}");
+    }
+
+    #[test]
+    fn 框上的名字_只有本人取的才用_電腦自己報的一律當未命名() {
+        assert_eq!(prompt_name(&peer("本人取的", true)), "本人取的");
+        assert_eq!(prompt_name(&peer("電腦自報", false)), "");
+        let t = describe(Action::Confirm, prompt_name(&peer("電腦自報", false)), FPG);
+        assert_eq!(t, "記住未命名的電腦（a93c c519）");
+    }
+
+    #[test]
+    fn 舊檔收掉_說明檔_掃描暫存_沒兌換的憑證檔都收_名字不合的不碰() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join(MARKER_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(stale_kind(&dir.join(format!("{}.desc", hash_hex("a")))));
+        assert!(stale_kind(&dir.join("x.scan")));
+        assert!(stale_kind(&dir.join(hash_hex("b"))));
+        assert!(!stale_kind(&dir.join("readme")) && !stale_kind(&dir.join("x.txt")));
     }
 
     #[test]
@@ -251,7 +322,7 @@ mod tests {
         }
     }
 
-    fn at(base: Instant, ms: u64) -> Instant {
+    fn at(base: Duration, ms: u64) -> Duration {
         base + Duration::from_millis(ms)
     }
 
@@ -264,7 +335,7 @@ mod tests {
 
     #[test]
     fn 發憑證_六十四個十六進位字元_不同種子不同_同一個動作同一台只留最新() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let a = s.issue(Action::Confirm, "pc", t, rng(1));
         assert!(is_hash(&a));
@@ -277,7 +348,7 @@ mod tests {
 
     #[test]
     fn 用憑證_動作和電腦都要對_只能用一次_三十秒內() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let c = s.issue(Action::Forget, "pc", t, rng(3));
         assert!(!s.redeem(Action::Confirm, "pc", &c, at(t, 1), |_| true), "動作不對");
@@ -292,7 +363,7 @@ mod tests {
 
     #[test]
     fn 憑證檔沒出現或刪不掉_不算數_紀錄還在_出現了才算並用掉() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let c = s.issue(Action::Confirm, "pc", t, rng(5));
         assert!(!s.redeem(Action::Confirm, "pc", &c, at(t, 1), |_| false));
@@ -303,7 +374,7 @@ mod tests {
 
     #[test]
     fn 數量有上限_忘記一台它的憑證都作廢() {
-        let t = Instant::now();
+        let t = Duration::from_secs(1000);
         let mut s = Store::default();
         let first = s.issue(Action::Confirm, "n0", t, rng(10));
         for i in 1..(MAX_RECORDS as u64 + 5) {

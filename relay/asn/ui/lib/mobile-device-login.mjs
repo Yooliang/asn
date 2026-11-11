@@ -8,8 +8,8 @@ import { loginLinkHost } from './secret-ask.mjs'
 export const DEVICE_LOGIN_UI = false
 export const POLL_MS = 3000
 export const VENDORS = Object.freeze({ codex: 'Codex' })
-/** 各家登入頁的主機（完全相等才收）：網址交給畫面之前，除了共同規則（https、ASCII、沒帳密、埠 443、官方網域）還要是這一家的 */
-export const VENDOR_HOSTS = Object.freeze({ codex: Object.freeze(['auth.openai.com']) })
+/** 各家登入頁的主機（完全相等才收；要和 Rust 的 device_relay.rs 的 CODEX／GROK_LOGIN_HOSTS 完全一致，有測試比對）：網址交給畫面之前，除了共同規則（https、ASCII、沒帳密、埠 443、官方網域）還要是這一家的 */
+export const VENDOR_HOSTS = Object.freeze({ codex: Object.freeze(['auth.openai.com']), grok: Object.freeze(['accounts.x.ai']) })
 
 /** 網址能不能綁到連結上：只收 https、可見 ASCII、沒有帳密、埠只能 443、主機在這一家的清單裡。vendor 沒給＝只套共同規則 */
 export function safeLoginUrl(url, vendor) {

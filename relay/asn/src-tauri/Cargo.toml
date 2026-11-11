@@ -88,12 +88,15 @@ tauri = { version = "2", features = ["tray-icon"], optional = true }
 tauri-plugin-updater = { version = "=2.14.0", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# 讀開機後時間（boottime.rs）
+libc = "0.2"
 
 # 安卓版專屬：純 Rust 的加密連線（不用交叉編譯 OpenSSL）、開系統瀏覽器的外掛
 [target.'cfg(target_os = "android")'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 tauri-plugin-opener = { version = "2", optional = true }
+libc = "0.2"
 # 手機的設備金鑰用系統金鑰庫保護（android_keywrap.rs）：直接呼叫系統的 Java 類別
 jni = "=0.21.1"
 ndk-context = "=0.1.1"

@@ -627,6 +627,6 @@ test('生物辨識框上的字：查看終端用固定字；帶憑證的只用 R
   assert.match(rd, /hashOf\(challenge\) \+ "\.desc"/, '用憑證雜湊找說明檔，不用網頁的字組路徑')
   const an = read('src-tauri', 'src', 'android.rs').replace(/\r\n/g, '\n')
   const tok = an.slice(an.indexOf('pub fn android_known_token('), an.indexOf('pub fn android_known_confirm('))
-  assert.match(tok, /consent::describe\(act, &peer\.name, &crate::device_id::fp_grouped\(&peer\.sign_pub\)\)/, '框上的字由 Rust 從本機記住的資料決定')
+  assert.match(tok, /consent::describe\(act, crate::consent::prompt_name\(peer\), &crate::device_id::fp_grouped\(&peer\.sign_pub\)\)/, '框上的字由 Rust 從本機記住的資料決定')
   assert.ok(tok.indexOf('consent::issue(') < tok.indexOf('consent::write_desc('))
 })
