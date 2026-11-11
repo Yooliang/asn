@@ -882,3 +882,27 @@ fn 週期指紋_同一期差十分鐘內_或_5_小時窗_或沒帶每週_都不�
     assert_eq!((qa.five_hour_pct, qa.weekly_pct), (Some(90), Some(80)));
     assert!(!log(&h).contains("每週重置時間"), "沒有指紋相關的 log：{}", log(&h));
 }
+
+// ---------- 帳號庫有兩個以上的資料夾存同一個 uuid：帳號不確定，不記 ----------
+#[test]
+fn 帳號庫兩個資料夾同一個_uuid_帳號不確定_不記_log_只有雜湊與資料夾數() {
+    let h = home_as("a@x.test");
+    // 同一個 uuid 存在兩個資料夾（兩個正名的 email 資料夾）
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "a2@x.test", UA);
+    let cfg = h.path().join(".claude");
+    assert_eq!(crate::claude_accounts::lookup_account_uuid(h.path(), &cfg, UA), crate::claude_accounts::UuidLookup::Ambiguous(2));
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UA), None);
+    assert!(!feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW + MIN), "不記");
+    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
+    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
+    let lg = log(&h);
+    assert!(lg.contains("2 個資料夾") && lg.contains(&short_hash(UA)) && !lg.contains(UA) && !lg.contains("a@x.test") && !lg.contains("a2@x.test"), "{lg}");
+    // 同一個原因連續發生只記一次
+    assert!(!feed(&h, "wa", UA, NOW + MIN, 2, wk(60.0), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("2 個資料夾").count(), 1);
+    // 重複的資料夾刪掉一個以後：唯一了，照記
+    std::fs::remove_dir_all(h.path().join(".asn").join("claude-accounts").join("a2@x.test")).unwrap();
+    assert!(feed(&h, "wa", UA, NOW + 2 * MIN, 3, wk(50.0), NOW + 3 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(50));
+}

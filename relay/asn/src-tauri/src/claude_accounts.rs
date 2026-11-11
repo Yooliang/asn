@@ -433,22 +433,52 @@ fn identity_of_file(path: &Path) -> Option<(String, String)> {
 /// 2、3 都只在裡面的 accountUuid 與要找的 uuid 完全相同時才用。都找不到回 None（未知帳號）。
 /// 只讀、不拼使用者給的路徑、不改名舊資料夾。
 pub fn email_of_account_uuid(home: &Path, cfg: &Path, uuid: &str) -> Option<String> {
-    if uuid.is_empty() {
-        return None;
+    match lookup_account_uuid(home, cfg, uuid) {
+        UuidLookup::Found(e) => Some(e),
+        _ => None,
     }
+}
+
+/// [`lookup_account_uuid`] 的結果
+#[derive(Debug, Clone, PartialEq)]
+pub enum UuidLookup {
+    Found(String),
+    /// 帳號庫裡有兩個以上的資料夾存了同一個 uuid（帶幾個）：不照列目錄的順序挑一個，帳號不確定
+    Ambiguous(usize),
+    NotFound,
+}
+
+/// 同 [`email_of_account_uuid`]，但分得出「帳號庫裡有好幾個資料夾存同一個 uuid」：那種情況 uuid 對不出唯一的 email，回 Ambiguous，
+/// 不能看 `read_dir` 的順序（不保證）挑一個。
+pub fn lookup_account_uuid(home: &Path, cfg: &Path, uuid: &str) -> UuidLookup {
+    if uuid.is_empty() {
+        return UuidLookup::NotFound;
+    }
+    let mut hits: Vec<String> = vec![];
+    let mut matched = 0usize;
     if let Ok(rd) = std::fs::read_dir(store_root(home)) {
         for e in rd.flatten() {
             let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
             if uuid_of_fragment(&frag).as_deref() != Some(uuid) {
                 continue;
             }
+            matched += 1;
             let Some(email) = email_of_fragment(&frag) else { continue };
             if e.file_name().to_string_lossy() == email_dir_name(&email).as_str() {
-                return Some(email);
+                hits.push(email);
             }
         }
     }
-    [cfg.join(".claude.json"), cj_path(home)].iter().find_map(|p| identity_of_file(p).filter(|(_, u)| u == uuid).map(|(e, _)| e))
+    if matched >= 2 {
+        return UuidLookup::Ambiguous(matched);
+    }
+    if let Some(e) = hits.pop() {
+        return UuidLookup::Found(e);
+    }
+    match [cfg.join(".claude.json"), cj_path(home)].iter().find_map(|p| identity_of_file(p).filter(|(_, u)| u == uuid).map(|(e, _)| e)) {
+        Some(e) => UuidLookup::Found(e),
+        None => UuidLookup::NotFound,
+    }
 }
 
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None

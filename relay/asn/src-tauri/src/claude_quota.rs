@@ -381,9 +381,23 @@ fn window_matches(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, now_ms
 
 /// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
 fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, read_ms: i64, now_ms: i64) -> bool {
-    let Some(email) = claude_accounts::email_of_account_uuid(home, cfg, &o.account_uuid) else {
-        owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
-        return false;
+    let email = match claude_accounts::lookup_account_uuid(home, cfg, &o.account_uuid) {
+        claude_accounts::UuidLookup::Found(e) => e,
+        claude_accounts::UuidLookup::Ambiguous(n) => {
+            // 帳號庫裡有 n 個資料夾存了同一個 uuid：帳號不確定，這筆不記（也不進未知區）；log 只有 uuid 雜湊前 6 碼與資料夾數，同原因只記一次
+            let line = format!("帳號庫有 {n} 個資料夾存了同一個帳號代號 {}，帳號不確定，這筆不記", owner::short_hash(&o.account_uuid));
+            let mut st = state::load(home);
+            if st.logged_dup.as_deref() != Some(line.as_str()) {
+                merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+                st.logged_dup = Some(line);
+                state::save(home, &st);
+            }
+            return false;
+        }
+        claude_accounts::UuidLookup::NotFound => {
+            owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
+            return false;
+        }
     };
     let before = state::load(home);
     let mut all_st = before.clone();
