@@ -1254,7 +1254,7 @@ impl Core {
         // 已登記成可收信視窗的 pi（擴充登記的 pid）不再重複列成僅顯示條目
         // 本人接進收發室的視窗也一樣：同一個程序不再列成僅顯示條目
         // Linux 偵測不看參數、互動式 claude 也會列出（#893）：已在名單上的視窗（有 pid 的）一律排除，免得同一個程序出現兩次
-        let registered: Vec<u32> = self.roster.iter().filter(|w| w.engine == "pi" || w.is_self_pull() || w.pid != 0).map(|w| w.pid).collect();
+        let registered = super::procscan::registered_pids(&self.roster);
         // 主控台視窗表一輪只列一次（EnumWindows，不接上別人的主控台），名單裡所有有視窗的條目共用
         let (mut procs, snap) = tokio::task::spawn_blocking(move || (super::procscan::scan_system_excluding(&registered), crate::launch::console::window_snapshot())).await.unwrap_or_default();
         roster::apply_hidden(&mut self.roster, &snap);
