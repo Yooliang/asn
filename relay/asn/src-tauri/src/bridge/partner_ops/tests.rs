@@ -460,6 +460,23 @@ fn 規則2_關閉使用者自己開的視窗_只結束_claude_與子孫_留下�
 }
 
 #[test]
+fn 關閉成功才記下視窗名字_給收發室從認得的夥伴拿掉_失敗與其他動作不記() {
+    let r = rig(Opt::default());
+    let res = r.run("close", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    r.ops.note_closed(&mk_op("close", json!({})), &res);
+    r.ops.note_closed(&mk_op("close", json!({})), &res);
+    assert_eq!(r.ops.take_closed(), vec!["目標".to_string()], "同一個名字只記一次");
+    assert!(r.ops.take_closed().is_empty(), "取走就清掉");
+    r.ops.note_closed(&mk_op("close", json!({})), &failed("關不掉"));
+    r.ops.note_closed(&mk_op("rename", json!({ "new_name": "新名" })), &ok("", None));
+    r.ops.note_closed(&mk_op("info", json!({})), &ok("", None));
+    assert!(r.ops.take_closed().is_empty());
+    r.ops.note_closed(&mk_op("remove", json!({})), &ok("", None));
+    assert_eq!(r.ops.take_closed(), vec!["目標".to_string()], "移除夥伴也算關掉");
+}
+
+#[test]
 fn 規則2_關閉_asn_開的視窗_連承載殼一起收_仍不碰別人() {
     let r = rig(Opt { asn_host: true, ..Opt::default() });
     let res = r.run("close", json!({}));
