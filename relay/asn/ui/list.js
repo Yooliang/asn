@@ -163,12 +163,16 @@ const showNowPlaying = ref(normalizeNowPlaying(savedMe.showNowPlaying))   // 顯
 const nowPlaying = ref('')   // 目前正在聽的「歌名 - 歌手」（Rust 端輪詢後推來；沒在聽＝空）
 const autoAddClaude = ref(true)   // Claude 帳號自動加入／回存：固定開啟（Rust 背景工作每分鐘執行，不再有開關）
 const autostart = reactive({ supported: false, on: false, busy: false, blocked: '' })
+// ASN 意外關閉時自動重開（todo-next-191 B1；預設關，以系統上的工作排程為準，不另存）
+const guard = reactive({ supported: false, on: false, busy: false, paused: '', blocked: '' })
+const applyGuard = v => { if (v) Object.assign(guard, { supported: v.supported === true, on: v.on === true, paused: String(v.paused ?? ''), blocked: String(v.blocked ?? '') }) }
 try {
   await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
   trayOk.value = await invoke('tray_available')
   autostart.supported = await invoke('autostart_supported')
   if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
+invoke('guard_get').then(applyGuard).catch(() => { /* 舊版後端沒有這個指令：不顯示 */ })
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
 const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, screenWatch: true, permPhone: true, mobileView: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
@@ -1541,6 +1545,14 @@ const app = createApp({
       closeTo.value = normalizeClose(v)
       try { await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' }) } catch (e) { say(e.message) }
     }
+    const setGuard = async on => {
+      guard.busy = true
+      try { applyGuard(await invoke('guard_set', { on })) } catch (e) { say(String(e?.message ?? e)); applyGuard(await invoke('guard_get').catch(() => null)) } finally { guard.busy = false }
+    }
+    const resumeGuard = async () => {
+      guard.busy = true
+      try { await invoke('guard_resume'); applyGuard(await invoke('guard_get')) } catch (e) { say(String(e?.message ?? e)) } finally { guard.busy = false }
+    }
     const setAutostart = async on => {
       autostart.busy = true
       try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
@@ -1821,7 +1833,7 @@ const app = createApp({
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
-      closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
+      closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
       known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp, qr: known.qr } : null,
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
@@ -1874,6 +1886,8 @@ const app = createApp({
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? ''), String(value.vendor ?? 'claude')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
+        case 'guard': await setGuard(value === true); break
+        case 'guard-resume': await resumeGuard(); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'known-forget': if (value) await forgetKnown(value); break
         case 'known-rename': if (value?.node) await renameKnown(value.node, value.name); break

@@ -239,3 +239,40 @@ test('守門：手機設置頁——分類列表在上、使用指引在列表�
   assert.ok(updAt > 0 && verAt > updAt, '檢查更新在「更新」頁、版本號在「關於」頁')
   assert.match(fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8'), /\.m-logout\{[^}]*margin-top:(2[4-9]|[3-9]\d)px/)
 })
+
+test('視窗與系統匣：「ASN 意外關閉時自動重新開啟」預設關、說明寫清楚、暫停時有人話提示與恢復鈕；不支援就不顯示（todo-next-191 B1）', async () => {
+  const st = fullState()
+  assert.ok(!(await render('window', st)).includes('自動重新開啟'), '沒有 guard 狀態（舊版後端）就不顯示')
+  st.guard = { supported: true, on: false, busy: false, paused: '', blocked: '' }
+  let html = await render('window', st)
+  assert.ok(html.includes('ASN 意外關閉時自動重新開啟'))
+  assert.ok(html.includes('只在 ASN 意外關閉時重開，你自己按結束不會重開。'))
+  assert.ok(!html.includes('恢復自動重開'))
+  st.guard = { ...st.guard, on: true, paused: 'ASN 最近反覆被關閉，已暫停自動重開。' }
+  html = await render('window', st)
+  assert.ok(html.includes('ASN 最近反覆被關閉，已暫停自動重開。') && html.includes('恢復自動重開'))
+  assert.ok(!/pid|AsnGuard|schtasks|排程名/.test(html), '畫面不出現程序代號或排程名')
+  st.guard = { supported: false, on: false, busy: false, paused: '', blocked: '' }
+  assert.ok(!(await render('window', st)).includes('自動重新開啟'), '不支援的系統不顯示')
+  // 接線：預設關（以系統上的排程為準，不另存）；讀狀態、開關、恢復都走後端指令
+  const js = read('list.js')
+  assert.match(js, /const guard = reactive\(\{ supported: false, on: false, busy: false, paused: '', blocked: '' \}\)/)
+  for (const c of ["invoke('guard_get')", "invoke('guard_set', { on })", "invoke('guard_resume')"]) assert.ok(js.includes(c), c)
+  const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
+  assert.ok(lib.includes('guard::guard_get, guard::guard_set, guard::guard_resume'))
+})
+
+test('解除安裝時刪掉自動重新開啟的排程；更新（/UPDATE 跑舊版解除安裝）時不刪（todo-next-191 B1）', () => {
+  const nsh = fs.readFileSync(new URL('../src-tauri/installer-hooks.nsh', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const m = /!macro NSIS_HOOK_PREUNINSTALL\n([\s\S]*?)!macroend/.exec(nsh)
+  assert.ok(m, '要有 NSIS_HOOK_PREUNINSTALL')
+  const body = m[1]
+  assert.match(body, /\$\{If\} \$UpdateMode <> 1/, '更新時不刪')
+  const bs = String.fromCharCode(92)   // 反斜線（NSIS 路徑），避免字串跳脫寫錯
+  assert.ok(body.includes(`ExecWait '"$INSTDIR${bs}asn.exe" --guard-remove'`), '排程名交給 asn.exe 自己算')
+  assert.ok(body.includes(`IfFileExists "$INSTDIR${bs}asn.exe"`) && body.includes('ClearErrors'), 'asn.exe 不在或刪不掉都不擋解除安裝')
+  const main = fs.readFileSync(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8')
+  assert.ok(main.includes('asn_lib::guard::REMOVE_FLAG') && main.includes('asn_lib::guard::run_remove()'))
+  const guard = fs.readFileSync(new URL('../src-tauri/src/guard.rs', import.meta.url), 'utf8')
+  assert.ok(guard.includes('pub const REMOVE_FLAG: &str = "--guard-remove";'))
+})

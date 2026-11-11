@@ -27,7 +27,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -484,6 +484,12 @@ export const SettingsPanel = {
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy || (!!st.autostart.blocked && !st.autostart.on)" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
         <small v-if="st.autostart.supported && st.autostart.blocked" class="autostart-blocked">{{ st.autostart.blocked }}</small>
+        <template v-if="st.guard && st.guard.supported">
+          <label class="chk"><input type="checkbox" :checked="st.guard.on" :disabled="st.guard.busy || (!!st.guard.blocked && !st.guard.on)" @change="act('guard', $event.target.checked)" aria-label="ASN 意外關閉時自動重新開啟" /><span>ASN 意外關閉時自動重新開啟</span></label>
+          <small>只在 ASN 意外關閉時重開，你自己按結束不會重開。</small>
+          <small v-if="st.guard.blocked" class="autostart-blocked">{{ st.guard.blocked }}</small>
+          <small v-if="st.guard.paused" class="guard-paused" role="status">{{ st.guard.paused }} <button class="aero-btn" type="button" :disabled="st.guard.busy" @click="act('guard-resume')">恢復自動重開</button></small>
+        </template>
         <section class="set-card" aria-label="認得的電腦" v-if="st.known">
           <h3 class="set-h">{{ KNOWN.title }}</h3>
           <small>{{ KNOWN.lead }}</small>

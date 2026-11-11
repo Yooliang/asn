@@ -147,6 +147,9 @@ mod stt;
 mod tray;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
+pub mod guard;   // ASN 意外關閉時自動重開（工作排程每 5 分鐘跑 asn.exe --guard；預設關，todo-next-191 B1）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
 mod tts;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -2705,6 +2708,11 @@ async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Resu
 
 #[cfg(feature = "gui")]
 pub(crate) fn cleanup(app: &AppHandle) {
+    // 正常結束（按結束、關視窗、更新安裝、登出關機都會走這裡）：留記號，守護就不會把 ASN 重開（todo-next-191 B1）
+    #[cfg(desktop)]
+    if let Some(gd) = guard::guard_dir() {
+        guard::note_user_quit(&gd);
+    }
     // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖（手機版沒有內建橋）
     #[cfg(desktop)]
     app.state::<bridge::Manager>().shutdown();
@@ -2794,6 +2802,28 @@ pub fn run() {
             #[cfg(desktop)]
             ui_log::log_exit(&exit_log_dir, &format!("同一個視窗名已經有 ASN 在跑（pid {}），這個不開", h.pid));
             std::process::exit(3);
+        }
+    }
+
+    // 意外關閉自動重開（todo-next-191 B1）：開起來就清掉「正常結束」記號、每分鐘更新心跳給守護看。
+    // 放在「同一個視窗名只留一個」之後：被擋下的那個不能蓋掉正在跑的那個的心跳。截圖模式不碰
+    #[cfg(desktop)]
+    if !is_shot {
+        if let Some(gd) = guard::guard_dir() {
+            if std::fs::create_dir_all(&gd).is_ok() {
+                guard::note_start(&gd, std::process::id(), heartbeat::now_ms());
+                let spawned = std::thread::Builder::new().name("asn-guard-alive".into()).spawn(move || {
+                    // 有勾、排程卻不在（手動覆蓋安裝時被舊版的解除安裝刪掉）：照設定重建（呼叫 schtasks，所以放在背景執行緒）
+                    guard::restore_from_intent();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(guard::ALIVE_EVERY_MS));
+                        guard::touch_alive(&gd, std::process::id(), heartbeat::now_ms());
+                    }
+                });
+                if let Err(e) = spawned {
+                    elog!("自動重開的心跳開不了（不影響啟動）：{e}");
+                }
+            }
         }
     }
 
@@ -2897,7 +2927,7 @@ pub fn run() {
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::setup_progress_snapshot, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-            site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,
+            site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, guard::guard_get, guard::guard_set, guard::guard_resume, tray::autostart_set, updater::update_check, updater::update_install,
         ]);
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
