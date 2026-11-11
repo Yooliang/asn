@@ -374,10 +374,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # apt 來源偶爾整個卡住（11-11 連續幾個 run 卡在這一步一小時以上）：限 10 分鐘，卡住就失敗、不佔住機器；
+      # 網路慢時 apt 自己重試 3 次、單次連線 30 秒逾時
       - name: 安裝系統依賴
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y build-essential pkg-config libssl-dev \
             libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf xvfb scrot
 
@@ -408,10 +411,12 @@ jobs:
         run: npm run test:rust
       # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，金鑰圈用固定測試密碼解鎖。
       # 平常是 ignored，只在這裡明確跑；不碰任何真的帳號或 secrets
+      - name: 安裝系統金鑰庫測試依賴
+        timeout-minutes: 10
+        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends gnome-keyring dbus-daemon
       - name: 系統金鑰庫整合測試（Linux）
         working-directory: relay/asn/src-tauri
         run: |
-          sudo apt-get install -y --no-install-recommends gnome-keyring dbus-daemon
           dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
 
       # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅。
