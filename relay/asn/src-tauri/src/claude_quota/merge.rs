@@ -11,6 +11,7 @@
 //! 記錄時間 `at`：只有真的收進新值時才更新成現在；兩條都不收就整筆不動。
 //! 判斷規則與後台共用一份案例（tests/fixtures/quota-merge-cases.json），不收的原因用同一組代碼（`Reject::code`）。
 use super::{iso_secs, parse_iso_secs, pick_reset, Parsed, Quota};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// 新來的重置時間最早可以是現在往前這麼久
@@ -157,6 +158,53 @@ pub fn without_missing_expired(old: &Quota, p: &Parsed, now_ms: i64) -> Option<Q
     let week = q.weekly_pct.map(|v| (v, rw));
     q.reset_at = pick_reset(five, week).map(iso_secs);
     Some(q)
+}
+
+/// 兩個重置時間差在這麼久內算同一期（agy／Claude 給的重置時間會晃幾秒）
+pub const SAME_RESET_MS: i64 = 10 * 60_000;
+
+/// 用「每週重置時間」當帳號指紋，跟本機額度檔裡的其他帳號比（不是跟視窗比）的結果。
+/// 對視窗身分擋不住的情況：以 A 開的視窗、後來被換成 B 的登入、又切回 A，兩邊身分都是 A，送出來的數字卻是 B 的。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Cross {
+    /// 沒有問題（沒有每週讀數、A 沒有存著還沒過期的那一期、或新舊是同一期）
+    Pass,
+    /// 新讀數的那一期＝本機另一個帳號還沒過期的那一期：這筆是別的帳號的數字，不收
+    IncomingFromOther { new_reset: i64, stored_reset: i64 },
+    /// A 存著的那一期＝本機另一個帳號還沒過期的那一期：存著的那筆才是串號，收下新讀數、把錯的換掉
+    StoredFromOther { new_reset: i64, stored_reset: i64 },
+    /// 兩邊都對不上任何其他帳號：不收，等 A 存著的那一期過期才放行（那就是正常換期）
+    Unmatched { new_reset: i64, stored_reset: i64 },
+}
+
+/// 這筆讀數歸到 `email` 底下之前，用每週重置時間檢查是不是串號。只看每週那條（5 小時窗不受影響）。
+/// 只有「A 存著還沒過期的那一期，跟新讀數的那一期差超過 10 分鐘」才會有事；其他一律 Pass。
+/// 「其他帳號」＝額度檔裡別的帳號，且它存著的每週那一期也還沒過期。
+pub fn week_fingerprint(all: &HashMap<String, Quota>, email: &str, p: &Parsed, now_ms: i64) -> Cross {
+    let Some(new_reset) = p.week_reset_ms else { return Cross::Pass };
+    let Some(me) = all.get(email) else { return Cross::Pass };
+    let Some(stored_reset) = stored_resets(me).1.filter(|&r| me.weekly_pct.is_some() && r > now_ms) else { return Cross::Pass };
+    let same = |a: i64, b: i64| (a - b).abs() <= SAME_RESET_MS;
+    if same(new_reset, stored_reset) {
+        return Cross::Pass;
+    }
+    let live_others: Vec<i64> = all.iter().filter(|(k, q)| k.as_str() != email && q.weekly_pct.is_some()).filter_map(|(_, q)| stored_resets(q).1).filter(|&r| r > now_ms).collect();
+    if live_others.iter().any(|&r| same(new_reset, r)) {
+        Cross::IncomingFromOther { new_reset, stored_reset }
+    } else if live_others.iter().any(|&r| same(stored_reset, r)) {
+        Cross::StoredFromOther { new_reset, stored_reset }
+    } else {
+        Cross::Unmatched { new_reset, stored_reset }
+    }
+}
+
+/// 把存著的每週那條整個拿掉（剩餘 %、重置時間、資料時間），5 小時那條與其他欄位不動；舊的單一 `reset_at` 依剩下的窗重算
+pub fn without_week(old: &Quota) -> Quota {
+    let (r5, _) = stored_resets(old);
+    let mut q = old.clone();
+    (q.weekly_pct, q.week_reset_at, q.week_at) = (None, None, None);
+    q.reset_at = pick_reset(q.five_hour_pct.map(|v| (v, r5)), None).map(iso_secs);
+    q
 }
 
 /// 同 [`merge`]，另帶這次的資料時間 `read_ms`（Claude：對話紀錄裡最後一筆 assistant 回應的時間；兩條都用它）

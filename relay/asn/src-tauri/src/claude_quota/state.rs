@@ -21,6 +21,9 @@ pub struct State {
     /// 最近一次因為「視窗的對話紀錄帳號與視窗自己的登入帳號對不上」而不記時寫的 log 內容（同一個原因連續發生只記一次）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_window: Option<String>,
+    /// 最近一次「每週重置時間跟本機其他帳號對不上」寫的 log 內容（同一個原因連續發生只記一次）；放在各帳號自己的狀態裡
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logged_cross: Option<String>,
     /// 各帳號（email）自己的 log 去重狀態；每個只用 logged 那兩欄
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub owned: std::collections::BTreeMap<String, State>,

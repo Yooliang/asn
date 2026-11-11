@@ -766,3 +766,83 @@ fn 視窗帳號的設定檔是符號連結_不讀() {
     std::os::unix::fs::symlink(&real, cfg.join(".claude.json")).unwrap();
     assert_eq!(window_account_uuid(h.path(), &cfg), None);
 }
+
+// ---------- 每週重置時間當帳號指紋：跟本機其他帳號比（視窗身分一致也可能是串號：以 A 開窗、後來拿到 B 的 token、又切回 A） ----------
+fn seed(h: &tempfile::TempDir, recs: Value) {
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::quota_path(h.path()), recs.to_string()).unwrap();
+}
+fn rec_wk(pct: u8, reset: i64) -> Value {
+    json!({ "weekly_pct": pct, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(reset), "week_at": iso_secs(NOW - H), "owner": true })
+}
+/// a、b 兩個帳號：各有自己還沒過期的那一期（a 是 NOW+3 天，b 是 NOW+5 天多）
+fn two_accounts() -> (tempfile::TempDir, i64, i64) {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    (h, NOW + 3 * DAY, NOW + 5 * DAY + 5 * H)
+}
+
+#[test]
+fn 週期指紋_新讀數的那一期是另一個帳號的_這筆是串號_整筆不收_log_只有雜湊與兩個重置時間() {
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
+    // a 的視窗（身分與登入都是 a）送來的週期是 b 的：數字是 b 的
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(Some((20.0, NOW + 2 * H)), Some((81.0, rb))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at.clone(), qa.five_hour_pct), (Some(70), Some(iso_secs(ra)), None), "整筆不收，5 小時也不記");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+    let lg = log(&h);
+    assert!(lg.contains("別的帳號的數字") && lg.contains(&short_hash("a@x.test")) && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)), "{lg}");
+    assert!(!lg.contains("a@x.test") && !lg.contains("b@x.test"), "log 不留 email：{lg}");
+    // 同一個原因連續發生只記一次
+    assert!(!feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((82.0, rb))), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("別的帳號的數字").count(), 1);
+}
+
+#[test]
+fn 週期指紋_存著的那一期是另一個帳號的_存著的才是串號_收下新讀數把錯的換掉() {
+    // 實際案例：it@ 存著的是 cwen 的那一期（11-15），it@ 真正的讀數是另一期（11-12）
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_wk(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, ra))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(40), Some(iso_secs(ra))), "換成 a 自己的讀數");
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(40), Some(iso_secs(rb))), "b 不動");
+    let lg = log(&h);
+    assert!(lg.contains("換成這次的") && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)) && !lg.contains("a@x.test"), "{lg}");
+}
+
+#[test]
+fn 週期指紋_兩邊都對不上任何帳號_不收_等存著的那一期過期才放行() {
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
+    let rc = NOW + 6 * DAY;
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, rc))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(70), Some(iso_secs(ra))), "不動");
+    assert!(log(&h).contains("對不上本機其他帳號"), "{}", log(&h));
+    // 存著的那一期過期之後：正常換期，照收
+    let t = ra + 5 * MIN;
+    let rn = t + 7 * DAY;
+    assert!(feed(&h, "wa", UA, t, 2, status(None, Some((10.0, rn))), t));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(90), Some(iso_secs(rn))));
+}
+
+#[test]
+fn 週期指紋_同一期差十分鐘內_或_5_小時窗_或沒帶每週_都不受影響() {
+    let (h, ra, rb) = two_accounts();
+    let rec = json!({ "five_hour_pct": 50, "five_reset_at": iso_secs(NOW + H), "five_at": iso_secs(NOW - H), "weekly_pct": 70, "week_reset_at": iso_secs(ra), "week_at": iso_secs(NOW - H), "at": iso_secs(NOW - H), "owner": true });
+    seed(&h, json!({ "a@x.test": rec, "b@x.test": rec_wk(40, rb) }));
+    // 每週的重置時間晃了 5 分鐘：還是同一期。5 小時的重置時間往後（新的一期）也照收
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((30.0, NOW + 4 * H)), Some((20.0, ra + 5 * MIN))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct), (Some(70), Some(80)));
+    // 這次沒帶每週（只有 5 小時）：不看指紋，5 小時照收，每週留著
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(Some((10.0, NOW + 5 * H)), None), NOW + 2 * MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct), (Some(90), Some(80)));
+    assert!(!log(&h).contains("每週重置時間"), "沒有指紋相關的 log：{}", log(&h));
+}

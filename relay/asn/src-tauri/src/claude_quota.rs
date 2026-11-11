@@ -261,14 +261,24 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     if dropped {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）\n", iso_secs(now_ms)));
     }
+    // 每週重置時間當帳號指紋，跟本機其他帳號比：串號的讀數不收，存著的是串號就換掉
+    let mut cur = all.get(email).cloned();
+    let mut replaced = false;
+    match week_cross(home, st, email, merge::week_fingerprint(&all, email, &p, now_ms), now_ms) {
+        Some(true) => return Ok(false),
+        Some(false) => {
+            cur = cur.as_ref().map(merge::without_week);
+            replaced = true;
+        }
+        None => {}
+    }
     // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉，再合併新讀數（#1321）
-    let cur = all.get(email).cloned();
     let trimmed = cur.as_ref().and_then(|q| merge::without_missing_expired(q, &p, now_ms));
     let m = merge::merge_full(trimmed.as_ref().or(cur.as_ref()), &p, read_ms, now_ms);
     log_changes(home, st, &m, now_ms);
-    let took = m.quota.is_some() || trimmed.is_some();
-    // 兩條都沒收、只有拿掉過期窗：照樣要寫
-    let out = m.quota.or(trimmed).map(|mut q| {
+    let took = m.quota.is_some() || trimmed.is_some() || replaced;
+    // 兩條都沒收、只有拿掉過期窗或換掉串號的那條：照樣要寫
+    let out = m.quota.or(trimmed).or(replaced.then(|| cur.clone()).flatten()).map(|mut q| {
         q.owner = !backup_failed;
         q
     });
@@ -288,6 +298,28 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     let text = serde_json::to_string(&all).map_err(|e| e.to_string())?;
     crate::claude_json::write_atomic(&quota_path(home), text.as_bytes()).map_err(|e| e.to_string())?;
     Ok(took)
+}
+
+/// 每週重置時間指紋的結果處理：回 Some(true)＝這筆不收（串號或對不上）、Some(false)＝存著的是串號要換掉、None＝沒事。
+/// 有事都寫一行 log：只有帳號雜湊的前 6 碼與兩個重置時間（不含 email）；同一個原因連續發生只記一次。
+fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, now_ms: i64) -> Option<bool> {
+    use merge::Cross::*;
+    let h = owner::short_hash(email);
+    let t = |ms: i64| iso_secs(ms);
+    let (line, reject) = match c {
+        Pass => {
+            st.logged_cross = None;
+            return None;
+        }
+        IncomingFromOther { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號還沒過期的那一期（這帳號存著的是 {}），這筆是別的帳號的數字，不收", t(new_reset), t(stored_reset)), true),
+        StoredFromOther { new_reset, stored_reset } => (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false),
+        Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間 {} 跟存著還沒過期的 {} 不同、也對不上本機其他帳號，不收，等存著的那一期過期再收", t(new_reset), t(stored_reset)), true),
+    };
+    if st.logged_cross.as_deref() != Some(line.as_str()) {
+        merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+        st.logged_cross = Some(line);
+    }
+    Some(reject)
 }
 
 /// 狀態列掛鉤：把輸入裡的額度記在「這個視窗自己的帳號」底下。有記下回 true；
