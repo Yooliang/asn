@@ -485,7 +485,9 @@ const app = createApp({
     }
     // 正在看的那台電腦：開始看時 Rust 回它的指紋與有沒有確認；結束或切回訊息就清掉
     const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '' })
-    const vpReset = () => { vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
+    // 從設定頁開確認畫面時暫存原本正在看的那台（{ cur }）；確認畫面全部收掉後由下面的 watch 統一還原。開始／結束看電腦（vpReset）就作廢
+    let vpPrev = null
+    const vpReset = () => { vpPrev = null; vp.cur = null; vp.method = false; vp.sheet = false; vp.busy = false; vp.error = ''; vp.ch = null; vp.note = ''; vp.sheetName = '' }
     const onRemoteStarted = r => { vpReset(); vp.cur = knownPeerOf(r, r?.machine) }
     const onRemoteEnded = () => vpReset()
     const peerStrip = computed(() => knownNeedsConfirm(vp.cur))
@@ -506,7 +508,9 @@ const app = createApp({
     const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vp.note = ''; vp.error = ''; vp.method = true }
     const closeMethodSheet = () => { vp.method = false }
     // 設定頁「認得的電腦」每列的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
-    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; vpReset(); vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet() }
+    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet() }
+    // 選方法、四選一、掃描都收掉且沒在忙（成功、取消、失敗、掃描結束都會走到這）→ 把目前對象還原成設定頁開啟前的那台；終端提示條開的沒有暫存，不動
+    watch(() => !vp.method && !vp.sheet && !vp.busy, idle => { if (idle && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } })
     const methodPickInstead = async () => { vp.method = false; await openPeerSheet() }
     const SCAN_NOTES = { mismatch: KNOWN_TEXT.scanMismatch, bad_qr: KNOWN_TEXT.scanBad, blocked: KNOWN_TEXT.blocked, locked: KNOWN_TEXT.lockedNow, not_ready: KNOWN_TEXT.notReady }
     const scanPeer = async () => {

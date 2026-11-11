@@ -411,3 +411,31 @@ test('認得的電腦頁：說明文字照規格；只有還沒確認的那列�
   assert.match(js, /if \(!p\?\.node \|\| p\.confirmed/, '已確認的不處理')
   assert.doesNotMatch(js, /confirmKnown[^\n]*android_known/, '不另寫一套確認流程')
 })
+
+test('設定頁開確認：先暫存原本正在看的電腦，所有出口（成功、取消、失敗）收掉後統一還原；提示條路徑不受影響', () => {
+  const js = read('../ui/m.js')
+  assert.match(js, /const prev = vpPrev \?\? \{ cur: vp\.cur \}; vpReset\(\); vpPrev = prev;/, '開之前先記下原本的對象')
+  assert.match(js, /watch\(\(\) => !vp\.method && !vp\.sheet && !vp\.busy, idle => \{ if \(idle && vpPrev\) \{ vp\.cur = vpPrev\.cur; vpPrev = null \} \}\)/, '全部收掉後統一還原')
+  assert.match(js, /const vpReset = \(\) => \{ vpPrev = null;/, '開始／結束看電腦時作廢暫存')
+  // 提示條的入口不碰暫存；暫存只在 confirmKnown 設
+  assert.equal((js.match(/vpPrev = prev/g) ?? []).length, 1)
+  const strip = js.slice(js.indexOf('const openMethodSheet'), js.indexOf('const closeMethodSheet'))
+  assert.doesNotMatch(strip, /vpPrev/)
+})
+
+test('還原邏輯（模擬）：A 在看，從設定頁確認 B，成功、取消、失敗收掉後 A 都回來；沒暫存時不動', () => {
+  for (const exit of ['done', 'cancel', 'fail']) {
+    const vp = { cur: { node: 'A' }, method: false, sheet: false, busy: false }
+    let vpPrev = null
+    const idleCheck = () => { if (!vp.method && !vp.sheet && !vp.busy && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } }
+    vpPrev = { cur: vp.cur }; vp.cur = { node: 'B' }; vp.method = true; idleCheck()
+    assert.equal(vp.cur.node, 'B', '確認中維持 B')
+    if (exit === 'done') vp.cur = { node: 'B', confirmed: true }
+    vp.method = false; idleCheck()
+    assert.equal(vp.cur.node, 'A', exit)
+  }
+  const vp = { cur: { node: 'C' }, method: false, sheet: false, busy: false }
+  const vpPrev = null
+  if (!vp.method && !vp.sheet && !vp.busy && vpPrev) vp.cur = null
+  assert.equal(vp.cur.node, 'C', '提示條路徑不動')
+})
