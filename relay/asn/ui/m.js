@@ -67,7 +67,7 @@ import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
-const STATUS = { online: '線上', busy: '忙碌', running: '執行中', away: '暫離', offline: '顯示為離線' }
+const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 const bridge = androidBridge(window)
 // 推播（#797）：App 關著也要響。權杖由外殼向 Firebase 取、經這裡交給 Rust；沒有 Firebase 的建置 state 是 unavailable，什麼都不做
