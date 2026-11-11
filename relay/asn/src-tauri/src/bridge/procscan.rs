@@ -194,12 +194,17 @@ fn clean(v: &str) -> Option<String> {
     Some(v.to_string())
 }
 
-/// 模型名稱的已知命名：第一組要「整個等於」或「接著分隔字元（- . : / _）」，避免一串亂碼剛好以 o3、gpt 開頭；
-/// 第二組是常見的連寫命名（glm4.6、qwen3-coder、kimi-k2、deepseek-v3），用開頭判斷（minimax-m2、MiniMax-Text-01 也是）。
+/// 模型家族（小寫）。命令列的模型名只送「家族＋已知等級詞＋數字版本」，其餘字一律丟掉：
+/// gpt-4o-acme-prod 只送「gpt 4o」，自訂部署名、帳號代號這類字不會出去。
 /// 比對前一律轉小寫，並只看最後一個「/」之後（anthropic/claude-opus-4 這種寫法）。
-const MODEL_DELIMITED_BASES: &[&str] = &["claude", "opus", "sonnet", "haiku", "gpt", "o3", "o4", "gemini", "grok"];
-const MODEL_LOOSE_PREFIXES: &[&str] = &["glm", "deepseek", "qwen", "kimi", "minimax"];
-/// 已知的供應商名稱（小寫）；等於它，或接著分隔字元（minimax-cn、google-vertex）才算
+const MODEL_FAMILIES: &[&str] = &["claude", "gpt", "gemini", "grok", "glm", "deepseek", "qwen", "kimi", "minimax", "codex"];
+/// 單獨寫等級（--model sonnet）時視為 claude
+const CLAUDE_TIERS: &[&str] = &["opus", "sonnet", "haiku"];
+/// 已知等級詞；不在這裡、也不是版本號的字都丟掉
+const MODEL_TIERS: &[&str] = &[
+    "opus", "sonnet", "haiku", "pro", "flash", "lite", "mini", "nano", "turbo", "max", "plus", "coder", "codex", "chat", "reasoner", "thinking", "instruct", "preview", "air", "text",
+];
+/// 已知的供應商名稱（小寫）；等於它，或接著分隔字元（minimax-cn、google-vertex）才算，送出的只有這裡的名稱本身
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai", "google", "gemini", "xai", "minimax", "zhipu", "zai", "deepseek", "moonshot", "mistral", "openrouter", "groq", "ollama", "azure", "bedrock"];
 /// 命令列上有給模型或供應商，但不是已知命名時，名單上顯示的簡稱（原值不送、不記錄）
 pub const OTHER_MODEL_LABEL: &str = "其他模型";
@@ -208,15 +213,59 @@ fn starts_delimited(v: &str, base: &str) -> bool {
     v == base || v.strip_prefix(base).is_some_and(|r| r.starts_with(['-', '.', ':', '/', '_']))
 }
 
-fn known_model(v: &str) -> bool {
-    let lower = v.to_lowercase();
-    let last = lower.rsplit('/').next().unwrap_or(&lower);
-    MODEL_DELIMITED_BASES.iter().any(|b| starts_delimited(last, b)) || MODEL_LOOSE_PREFIXES.iter().any(|p| last.starts_with(p))
+/// 版本號：數字開頭，只含數字、點、o（4、4o、4.5、2.5），最多 5 個字；日期、長串數字不收
+fn is_version(t: &str) -> bool {
+    (1..=5).contains(&t.len()) && t.starts_with(|c: char| c.is_ascii_digit()) && t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == 'o')
 }
 
-fn known_provider(v: &str) -> bool {
+/// 帶一個字母的版本號：m2（MiniMax-M2）、k2（kimi-k2）、v3（deepseek-v3）、r1
+fn is_tagged_version(t: &str) -> bool {
+    t.strip_prefix(['m', 'k', 'v', 'r']).is_some_and(is_version)
+}
+
+fn keep_model_word(t: &str) -> bool {
+    MODEL_TIERS.contains(&t) || is_version(t) || is_tagged_version(t)
+}
+
+/// 模型名 → 正規化後的「家族 等級 版本」（例：claude-opus-4-5 → claude opus 4.5）；第一段不是已知家族就是 None
+fn normalize_model(v: &str) -> Option<String> {
     let lower = v.to_lowercase();
-    KNOWN_PROVIDERS.iter().any(|p| starts_delimited(&lower, p))
+    let last = lower.rsplit('/').next().unwrap_or(&lower);
+    let mut words = last.split(['-', '_', ':']).filter(|t| !t.is_empty());
+    let first = words.next()?;
+    let mut out: Vec<String> = if CLAUDE_TIERS.contains(&first) {
+        vec!["claude".into(), first.into()]
+    } else if first.strip_prefix('o').is_some_and(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit())) {
+        vec![first.into()]
+    } else {
+        let (fam, rest) = MODEL_FAMILIES.iter().find_map(|f| first.strip_prefix(*f).map(|r| (*f, r)))?;
+        if rest.is_empty() {
+            vec![fam.to_string()]
+        } else if is_version(rest) || is_tagged_version(rest) {
+            vec![fam.to_string(), rest.to_string()]
+        } else {
+            return None;
+        }
+    };
+    for t in words.filter(|t| keep_model_word(t)) {
+        // 連續的純數字段併成一個版本（opus-4-5 → opus 4.5）
+        let merge = out.len() > 1 && t.chars().all(|c| c.is_ascii_digit()) && out.last().is_some_and(|l| l.chars().all(|c| c.is_ascii_digit()));
+        if merge {
+            if let Some(l) = out.last_mut() {
+                l.push('.');
+                l.push_str(t);
+            }
+        } else {
+            out.push(t.to_string());
+        }
+    }
+    Some(out.join(" "))
+}
+
+/// 供應商 → 名單上的已知名稱本身（google-vertex-acme 只送 google）
+fn normalize_provider(v: &str) -> Option<String> {
+    let lower = v.to_lowercase();
+    KNOWN_PROVIDERS.iter().find(|p| starts_delimited(&lower, p)).map(|p| (*p).to_string())
 }
 
 /// 旗標後面的原始值（沒給值、或值是另一個旗標就是 None）。只在本機判斷用，呼叫端不得送出或記錄
@@ -238,15 +287,15 @@ fn flag_raw<'a>(args: &'a [String], longs: &[&str], shorts: &[&str]) -> Option<&
     None
 }
 
-/// 命令列 → (模型, 顯示簡稱)。只有符合已知命名的模型才送出；（已通過白名單的）模型或供應商含 minimax 一律顯示 MiniMax；
-/// 否則有（已知的）供應商用供應商、再不然用模型名；有給但不是已知命名就顯示「其他模型」，原值不留
+/// 命令列 → (模型, 顯示簡稱)。模型與供應商都只送正規化後的值（見 normalize_model／normalize_provider）；
+/// 家族或供應商是 minimax 一律顯示 MiniMax；否則有供應商用供應商、再不然用模型；有給但認不得就顯示「其他模型」，原值不留
 fn model_of(args: &[String]) -> (Option<String>, Option<String>) {
     let raw_model = flag_raw(args, &["--model"], &["-m"]);
     let raw_provider = flag_raw(args, &["--provider"], &[]);
-    let model = raw_model.and_then(clean).filter(|m| known_model(m));
-    let provider = raw_provider.and_then(clean).filter(|p| known_provider(p));
-    let hit_minimax = |s: &Option<String>| s.as_deref().map(|x| x.to_lowercase().contains("minimax")).unwrap_or(false);
-    let label = if hit_minimax(&model) || hit_minimax(&provider) {
+    let model = raw_model.and_then(clean).and_then(|m| normalize_model(&m));
+    let provider = raw_provider.and_then(clean).and_then(|p| normalize_provider(&p));
+    let is_minimax = model.as_deref().is_some_and(|m| m.starts_with("minimax")) || provider.as_deref() == Some("minimax");
+    let label = if is_minimax {
         Some("MiniMax".to_string())
     } else if let Some(l) = provider.clone().or_else(|| model.clone()) {
         Some(l)
@@ -355,6 +404,11 @@ pub fn scan_system() -> Vec<ProcAgent> {
 }
 
 /// 同 [`scan_system`]，排除已登記成可收信視窗的 pid（見 [`scan_excluding`]）
+/// 名單上已登記的視窗（pi、自己拉進收發室的、任何有 pid 的）的 pid：偵測時這些程序（與同引擎的上層包裝程序）不再重複列出
+pub fn registered_pids(roster: &[super::roster::Window]) -> Vec<u32> {
+    roster.iter().filter(|w| w.engine == "pi" || w.is_self_pull() || w.pid != 0).map(|w| w.pid).collect()
+}
+
 pub fn scan_system_excluding(skip: &[u32]) -> Vec<ProcAgent> {
     if !enabled() {
         return vec![];
@@ -589,8 +643,8 @@ mod tests {
         ];
         let r = scan(&t, 999);
         let names: Vec<String> = r.iter().map(|a| a.name()).collect();
-        assert_eq!(names, vec!["claude · MiniMax #11（背景）", "codex #14（背景）", "gemini #15（前景）", "gemini #16（前景）", "pi · MiniMax #12（前景）", "pi · glm-4.6 #13（前景）"]);
-        assert_eq!(r[0].model.as_deref(), Some("MiniMax-M2"));
+        assert_eq!(names, vec!["claude · MiniMax #11（背景）", "codex #14（背景）", "gemini #15（前景）", "gemini #16（前景）", "pi · MiniMax #12（前景）", "pi · glm 4.6 #13（前景）"]);
+        assert_eq!(r[0].model.as_deref(), Some("minimax m2"));
         let j = r[0].to_json();
         assert_eq!(j["receivable"], json!(false));
         assert_eq!(j["kind"], json!("process"));
@@ -620,7 +674,7 @@ mod tests {
     fn 模型只來自命令列_髒值與金鑰樣式不收() {
         let a = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
         assert_eq!(model_of(&a("--model=minimax-m2")).1.as_deref(), Some("MiniMax"));
-        assert_eq!(model_of(&a("-m gpt-5")), (Some("gpt-5".into()), Some("gpt-5".into())));
+        assert_eq!(model_of(&a("-m gpt-5")), (Some("gpt 5".into()), Some("gpt 5".into())));
         // 有給值但不是已知命名：不送模型、簡稱一律「其他模型」，原值不留
         assert_eq!(model_of(&a("--model sk-ant=secret$value")), (None, Some(OTHER_MODEL_LABEL.into())));
         assert_eq!(model_of(&a("--model")), (None, None));
@@ -631,15 +685,47 @@ mod tests {
     #[test]
     fn 已知模型照常顯示_像金鑰的值不送() {
         let a = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
-        for m in ["claude-opus-4", "gpt-5", "MiniMax-M2", "gemini-2.5-pro", "grok-4", "Sonnet", "o3", "o4-mini", "glm-4.6", "deepseek-v3", "qwen3-coder", "kimi-k2", "anthropic/claude-opus-4"] {
+        for (m, want) in [
+            ("claude-opus-4", "claude opus 4"),
+            ("claude-opus-4-5", "claude opus 4.5"),
+            ("claude-3-5-sonnet-20241022", "claude 3.5 sonnet"),
+            ("anthropic/claude-opus-4", "claude opus 4"),
+            ("Sonnet", "claude sonnet"),
+            ("gpt-5", "gpt 5"),
+            ("gpt5", "gpt 5"),
+            ("gpt-5-codex", "gpt 5 codex"),
+            ("o1", "o1"),
+            ("o3", "o3"),
+            ("o4-mini", "o4 mini"),
+            ("codex-mini", "codex mini"),
+            ("MiniMax-M2", "minimax m2"),
+            ("MiniMax-M3.1-Flash", "minimax m3.1 flash"),
+            ("gemini-2.5-pro", "gemini 2.5 pro"),
+            ("grok-4", "grok 4"),
+            ("glm-4.6", "glm 4.6"),
+            ("glm4.6", "glm 4.6"),
+            ("deepseek-v3", "deepseek v3"),
+            ("qwen3-coder", "qwen 3 coder"),
+            ("kimi-k2", "kimi k2"),
+        ] {
             let (model, label) = model_of(&a(&format!("--model {m}")));
-            assert_eq!(model.as_deref(), Some(m), "{m}");
+            assert_eq!(model.as_deref(), Some(want), "{m}");
             assert!(label.is_some() && label.as_deref() != Some(OTHER_MODEL_LABEL), "{m}");
         }
+        // 自訂部署名、帳號代號這類字丟掉，只留家族與已知的等級、版本
+        assert_eq!(model_of(&a("--model gpt-4o-acme-prod")), (Some("gpt 4o".into()), Some("gpt 4o".into())));
+        assert_eq!(model_of(&a("--model claude-acme7-opus")).0.as_deref(), Some("claude opus"));
+        assert_eq!(model_of(&a("--provider google-vertex-acme")).1.as_deref(), Some("google"));
+        for flags in ["--model gpt-4o-acme-prod", "--model claude-acme7-opus", "--provider google-vertex-acme"] {
+            let t = vec![p(7, 1, "pi", &format!("pi {flags}"))];
+            let r = scan(&t, 999);
+            let all = format!("{:?}{}{}", r, r[0].name(), r[0].to_json());
+            assert!(!all.contains("acme"), "{all}");
+        }
         assert_eq!(model_of(&a("--model MiniMax-M2")).1.as_deref(), Some("MiniMax"));
-        assert_eq!(model_of(&a("--provider openai --model gpt-5")), (Some("gpt-5".into()), Some("openai".into())));
+        assert_eq!(model_of(&a("--provider openai --model gpt-5")), (Some("gpt 5".into()), Some("openai".into())));
         assert_eq!(model_of(&a("--provider minimax-cn")).1.as_deref(), Some("MiniMax"));
-        for secret in ["abcd1234efgh5678", "sk-abc123def456", "o3abc123def456", "gptabc123", "xxminimaxk3y", "k3y/xxminimax"] {
+        for secret in ["abcd1234efgh5678", "sk-abc123def456", "o3abc123def456", "gptabc123", "xxminimaxk3y", "k3y/xxminimax", "minimaxk3y", "20250514"] {
             for flags in [format!("--model {secret}"), format!("-m {secret}"), format!("--provider {secret}"), format!("--model={secret}")] {
                 let (model, label) = model_of(&a(&flags));
                 assert_eq!(model, None, "{flags}");
@@ -653,7 +739,17 @@ mod tests {
             assert!(r[0].to_json().get("model").is_none());
         }
         // 供應商未知但模型已知：簡稱用模型；兩個都不認得才是其他模型
-        assert_eq!(model_of(&a("--provider abcd1234efgh5678 --model gpt-5")), (Some("gpt-5".into()), Some("gpt-5".into())));
+        assert_eq!(model_of(&a("--provider abcd1234efgh5678 --model gpt-5")), (Some("gpt 5".into()), Some("gpt 5".into())));
+    }
+
+    #[test]
+    fn 已在名單上的視窗不重複列出() {
+        use crate::bridge::roster::Window;
+        let roster = vec![Window::claude("T-甲", Some("idle".into()), "", 20, 0, None), Window::claude("T-乙", None, "", 0, 0, None)];
+        let reg = registered_pids(&roster);
+        assert_eq!(reg, vec![20], "沒有 pid 的視窗不算");
+        let t = vec![p(1, 0, "init", "init"), p(20, 1, "claude", "claude -p hi"), p(22, 1, "claude", "claude -p other")];
+        assert_eq!(scan_excluding(&t, 999, &reg).iter().map(|a| a.pid).collect::<Vec<_>>(), vec![22], "已登記的程序不列");
     }
 
     #[test]
@@ -863,6 +959,34 @@ mod fake_proc_tests {
         fs::create_dir_all(root.join("51").join("cmdline")).unwrap(); // 是資料夾：開得起來但讀不了
         proc_dir(root, 52, 1, "codex", None);
         assert_eq!(names(root, 999), vec!["codex #52"]);
+    }
+
+    #[test]
+    fn 非數字目錄_環境變數_壞掉的_stat_都不影響() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        // 非數字目錄（self、net、1a）就算裡面長得像程序也不算
+        for name in ["self", "net", "1a"] {
+            let d = root.join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("comm"), "claude\n").unwrap();
+            fs::write(d.join("stat"), "1 (claude) S 1 2 3").unwrap();
+        }
+        // 環境變數裡有特徵字串：不讀，所以不會出現
+        proc_dir(root, 70, 1, "pi", None);
+        fs::write(root.join("70").join("environ"), format!("API_KEY={MARK}\0")).unwrap();
+        // stat 不存在、或括號後面沒有 ppid：跳過，不中斷其他
+        fs::create_dir_all(root.join("71")).unwrap();
+        fs::write(root.join("71").join("comm"), "codex\n").unwrap();
+        proc_dir(root, 72, 1, "grok", None);
+        fs::write(root.join("72").join("stat"), "72 (grok").unwrap();
+        proc_dir(root, 73, 1, "codex", None);
+        let table = imp::table_at(root);
+        assert!(!format!("{table:?}").contains(MARK));
+        let agents = scan(&table, 999);
+        assert_eq!(agents.iter().map(|a| a.name()).collect::<Vec<_>>(), vec!["codex #73", "pi #70"]);
+        assert!(!format!("{agents:?}").contains(MARK));
     }
 
     #[test]
