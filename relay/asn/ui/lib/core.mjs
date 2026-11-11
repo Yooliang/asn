@@ -61,6 +61,7 @@ export const savedFriendOf = f => ({
   id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine,
   ...optStr('model', f.model), ...optStr('device', f.device), ...optStr('kind', f.kind),
   ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true,
+  ...(f.localArchived === true ? { localArchived: true } : {}),   // 本機封存標記（後台沒有這位時只記在本機）
   ...(f.isNotice === true ? { isNotice: true } : {}), ...(isMergedAway(f) ? { mergedInto: f.mergedInto } : {}),   // 「通知」對話與已併進它的舊列（#848）
 })
 // 讀回存檔的一筆：這三欄只收非空字串（存檔是本機檔，壞掉或被改過的值不帶進畫面）；沒有就不補，畫面照舊退回
@@ -132,6 +133,16 @@ export class AsnCore {
     if (typeof this.transport.localWindows === 'function' && this.localMs > 0) this.timers.push(setInterval(() => void this.refreshLocal(), this.localMs))
     this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
     this.timers.push(setInterval(() => void this.refreshSentStatus('poll'), this.statusPollMs))
+  }
+  // 本機封存／取消封存：後台名單已經沒有這位（舊好友只剩本機存檔）、後台回找不到時用。只動標記，往來記錄不動；標記隨好友存檔留下
+  setLocalArchived(friend, archived) {
+    const f = this.friends.get(friend?.id)
+    if (!f) return false
+    f.localArchived = archived === true
+    f.archived = archived === true
+    this.#scheduleSave()
+    this.emit('state')
+    return true
   }
   // 改名後就地換名：記下舊名（改名前寄來的回信還要收）、立刻通知畫面、重抓名單（自己的視窗名要從名單濾掉）。不重載頁面
   setWindowName(name) {
@@ -408,7 +419,7 @@ export class AsnCore {
     const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
     // 沒指定收件視窗、由橋交給本人的信：先標出「XX 寄來的信沒有指定收件人」，由使用者決定轉給誰或自己回；震動信一律只顯示「傳送了一個震動」，不加這行
     if (shown && !nudge && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} 寄來的信沒有指定收件人`, t })
-    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(asNotice ? { dev: this.#deviceNameOf(m), ...(isNoticeKind(m.kind) ? { kind: m.kind.slice(0, 64) } : {}) } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(asNotice ? { dev: this.#deviceNameOf(m), ...(isNoticeKind(m.kind) ? { kind: m.kind.slice(0, 64) } : {}) } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id; if (f.localArchived) { f.localArchived = false; f.archived = false } }   // 本機封存的夥伴再寄信來＝解除，和後台封存一致
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
     const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)

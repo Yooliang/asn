@@ -58,7 +58,7 @@ import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launc
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
-import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
@@ -721,6 +721,7 @@ function openPartnerOp(it) {
 const envNotice = ref('')
 void loadEnvNotice(transport).then(t => { envNotice.value = t })
 setInterval(() => void loadEnvNotice(transport).then(t => { envNotice.value = t }), 10 * 60_000)
+setLocalArchiver((f, a) => core.setLocalArchived(f, a))
 const archiveNote = ref('')
 let archiveNoteTimer = null
 async function setArchived(f, archived) {
