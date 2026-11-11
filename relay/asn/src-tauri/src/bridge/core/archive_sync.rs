@@ -66,6 +66,7 @@ impl Core {
             return;
         }
         for n in &closed {
+            self.just_closed.mark(n, now);
             self.known.forget(n);
             self.seen_run.remove(n);
             self.missing.remove(n);

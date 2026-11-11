@@ -204,6 +204,31 @@ pub fn same_boot(a: u64, b: u64) -> bool {
     a.abs_diff(b) <= BOOT_TOLERANCE_MS
 }
 
+/// 本人剛關掉的視窗（名字 → 關掉的時間）。關閉成功到名單掃不到它之間有空檔：這段時間的名單更新若還看得到它，
+/// 不能又把它記回認得的夥伴（重開機後會被接回）。名字在某一輪名單裡消失、或超過 [`JUST_CLOSED_MS`] 就移出；
+/// 120 秒是保底，不然本人馬上喚醒同名的新視窗會一直被略過
+pub const JUST_CLOSED_MS: u64 = 120_000;
+
+#[derive(Default, Debug)]
+pub struct JustClosed {
+    at: BTreeMap<String, u64>,
+}
+
+impl JustClosed {
+    pub fn mark(&mut self, name: &str, now: u64) {
+        self.at.insert(name.to_string(), now);
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.at.contains_key(name)
+    }
+
+    /// 每輪名單更新先呼叫：`is_present`＝這一輪名單裡還看不看得到這個名字
+    pub fn sweep(&mut self, is_present: impl Fn(&str) -> bool, now: u64) {
+        self.at.retain(|n, t| is_present(n.as_str()) && now.saturating_sub(*t) < JUST_CLOSED_MS);
+    }
+}
+
 /// 後台名單（`list` 的回應）裡，這台電腦的「已封存的鍵」命中的名字。鍵是夥伴 ID，或 `n:<節點>/<名字>`（還沒有夥伴 ID 時）。
 /// 回 None＝看不出來（舊後台沒有 archived_keys、名單沒有這台）：呼叫端不要改動現有的封存名單
 pub fn archived_among(list: &Value, node: &str, partners: &BTreeMap<String, String>, names: &[String]) -> Option<BTreeSet<String>> {
@@ -401,5 +426,49 @@ mod tests {
         request_archive_refresh();
         assert!(take_archive_refresh());
         assert!(!take_archive_refresh());
+    }
+
+    /// 照核心每輪名單更新的做法跑一輪：先 sweep，剛關掉的不 touch，其餘照記
+    fn round(k: &mut Known, jc: &mut JustClosed, present: &[&str], now: u64) {
+        jc.sweep(|n| present.contains(&n), now);
+        for n in present {
+            if jc.contains(n) {
+                continue;
+            }
+            k.touch(n, "claude", now);
+        }
+    }
+
+    #[test]
+    fn 剛關掉的視窗_下一輪名單還看得到也不被記回_消失之後再出現才記() {
+        let mut k = Known::default();
+        let mut jc = JustClosed::default();
+        k.touch("甲", "claude", 1000);
+        k.touch("乙", "claude", 1000);
+        // 本人關掉甲：從認得的清單拿掉，記下剛關掉
+        k.forget("甲");
+        jc.mark("甲", 2000);
+        // 下一輪名單（關閉前掃的、視窗還沒消失）還有甲：不記回
+        round(&mut k, &mut jc, &["甲", "乙"], 3000);
+        assert!(!k.contains("甲") && k.contains("乙"));
+        round(&mut k, &mut jc, &["甲", "乙"], 4000);
+        assert!(!k.contains("甲"), "還看得到就一直不記");
+        // 名單裡消失：移出剛關掉的清單
+        round(&mut k, &mut jc, &["乙"], 5000);
+        assert!(!jc.contains("甲") && !k.contains("甲"));
+        // 重新喚醒、又出現了：這時才記回
+        round(&mut k, &mut jc, &["甲", "乙"], 6000);
+        assert!(k.contains("甲"));
+    }
+
+    #[test]
+    fn 剛關掉的名字超過一百二十秒保底移出_本人馬上喚醒同名的也不會一直被略過() {
+        let mut k = Known::default();
+        let mut jc = JustClosed::default();
+        jc.mark("甲", 1000);
+        round(&mut k, &mut jc, &["甲"], 1000 + JUST_CLOSED_MS - 1);
+        assert!(!k.contains("甲"), "還沒到 120 秒");
+        round(&mut k, &mut jc, &["甲"], 1000 + JUST_CLOSED_MS);
+        assert!(k.contains("甲") && !jc.contains("甲"), "滿 120 秒保底移出，照常記");
     }
 }

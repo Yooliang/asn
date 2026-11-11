@@ -108,7 +108,9 @@ test('接線：電腦版右鍵與手機「⋯」只用 manageItems；已封存�
 
 test('守門：Rust 指令——電腦版只在電腦清單、手機只在手機清單；都走本人簽章，沒憑證在打後台之前就回錯；後台只對簽章動作讀簽章', () => {
   const lib = read('src-tauri/src/lib.rs'), rs = read('src-tauri/src/android.rs'), relay = read('src-tauri/src/relay.rs')
-  assert.match(lib, /#\[cfg\(desktop\)\]\n#\[tauri::command\]\nasync fn relay_partner_archive\([^)]*\) -> Result<Value, String> \{\n    let r = relay_of\(&app\)\?;\n    let token = account::signing_token\(&auth\)\.await;\n    r\.partner_archive_signed\(&body, token\.as_deref\(\)\)\.await/)
+  assert.match(lib, /#\[cfg\(desktop\)\]\n#\[tauri::command\]\nasync fn relay_partner_archive\([^)]*\) -> Result<Value, String> \{\n    let r = relay_of\(&app\)\?;\n    let token = account::signing_token\(&auth\)\.await;\n    let res = r\.partner_archive_signed\(&body, token\.as_deref\(\)\)\.await;/, '先 relay_of、再 signing_token、再呼叫簽章封存')
+  const archiveFn = /async fn relay_partner_archive\([^)]*\) -> Result<Value, String> \{[\s\S]*?\n\}\n/.exec(lib)[0]
+  assert.match(archiveFn, /if res\.is_ok\(\) \{[\s\S]*?bridge::known::request_archive_refresh\(\);[\s\S]*?\}\n    res\n\}/, '封存成功才請收發室立刻重查封存名單，回傳值照原樣給畫面')
   const d = /#\[cfg\(desktop\)\]\n\s*let builder = builder\s*\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
   const mob = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
   assert.match(d[1], /\brelay_partner_archive\b/); assert.doesNotMatch(d[1], /android_partner_archive/)
