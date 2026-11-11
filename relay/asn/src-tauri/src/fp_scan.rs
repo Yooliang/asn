@@ -156,7 +156,7 @@ mod tests {
             std::fs::write(dir.join(format!("{}.{}", crate::consent::hash_hex(&ch), crate::consent::SCAN_EXT)), s).unwrap();
         }
         let mut store = crate::consent::Store::default();
-        let t = std::time::Instant::now();
+        let t = std::time::Duration::from_secs(1_000);
         let issued = store.issue(crate::consent::Action::Scan, node, t, |b: &mut [u8]| b.fill(0xab));
         assert_eq!(issued, ch, "固定亂數發出的憑證");
         let (matched, blocked) = (Cell::new(0u32), Cell::new(0u32));
