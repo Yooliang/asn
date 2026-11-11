@@ -73,6 +73,7 @@ mod fp_scan;
 // #933 PR-5b：手機替電腦登入裝置碼型 CLI 的請求與回傳格式（電腦、手機共用）
 mod device_relay;
 mod android_keywrap;
+mod secret_file;
 mod keystore;
 mod view_handshake;
 mod view_frame;

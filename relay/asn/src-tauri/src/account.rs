@@ -164,6 +164,12 @@ fn restrict_file(path: &Path) -> bool {
 /// 先建空檔並限縮權限、才寫入內容；寫完讀回比對；任何一步失敗就刪掉金鑰檔（不留下權限鬆的金鑰）。
 /// restrict 由呼叫端傳入，測試可換成假的。
 pub fn write_node_files(relay_home: &Path, node: &str, key: &str, restrict: impl Fn(&Path) -> bool) -> Result<(), String> {
+    let aead = crate::secret_file::platform_aead();
+    write_node_files_with(relay_home, node, key, restrict, aead.as_deref())
+}
+
+/// 手機（aead 有值）：金鑰以金鑰庫加密、原子寫入；加密不了就退回下面原本的明文寫法
+pub fn write_node_files_with(relay_home: &Path, node: &str, key: &str, restrict: impl Fn(&Path) -> bool, aead: Option<&dyn crate::android_keywrap::Aead>) -> Result<(), String> {
     if !identity::valid_id(node) || key.trim().is_empty() {
         return Err("後台回的節點資料格式不對".into());
     }
@@ -173,18 +179,25 @@ pub fn write_node_files(relay_home: &Path, node: &str, key: &str, restrict: impl
         let _ = std::fs::remove_file(&kf);
         Err(m)
     };
-    if let Err(e) = std::fs::write(&kf, b"") {
-        return cleanup(format!("寫不了金鑰檔：{e}"));
-    }
-    if !restrict(&kf) {
-        return cleanup("沒辦法把金鑰檔限制成只有你能讀，已放棄寫入".into());
-    }
-    if let Err(e) = std::fs::write(&kf, key) {
-        return cleanup(format!("寫不了金鑰檔：{e}"));
-    }
-    match std::fs::read_to_string(&kf) {
-        Ok(back) if back.trim() == key => {}
-        _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),
+    if crate::secret_file::write_node_key(&kf, node, key, aead) {
+        match crate::secret_file::read_node_key(&kf, node, aead) {
+            Ok(back) if back.trim() == key => {}
+            _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),
+        }
+    } else {
+        if let Err(e) = std::fs::write(&kf, b"") {
+            return cleanup(format!("寫不了金鑰檔：{e}"));
+        }
+        if !restrict(&kf) {
+            return cleanup("沒辦法把金鑰檔限制成只有你能讀，已放棄寫入".into());
+        }
+        if let Err(e) = std::fs::write(&kf, key) {
+            return cleanup(format!("寫不了金鑰檔：{e}"));
+        }
+        match std::fs::read_to_string(&kf) {
+            Ok(back) if back.trim() == key => {}
+            _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),
+        }
     }
     if let Err(e) = std::fs::write(relay_home.join("node"), node) {
         return cleanup(format!("寫不了節點代號檔：{e}"));
