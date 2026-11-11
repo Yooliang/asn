@@ -195,10 +195,10 @@ fn clean(v: &str) -> Option<String> {
 }
 
 /// 模型名稱的已知命名：第一組要「整個等於」或「接著分隔字元（- . : / _）」，避免一串亂碼剛好以 o3、gpt 開頭；
-/// 第二組是常見的連寫命名（glm4.6、qwen3-coder、kimi-k2、deepseek-v3），用開頭判斷；minimax 只要包含就算。
+/// 第二組是常見的連寫命名（glm4.6、qwen3-coder、kimi-k2、deepseek-v3），用開頭判斷（minimax-m2、MiniMax-Text-01 也是）。
 /// 比對前一律轉小寫，並只看最後一個「/」之後（anthropic/claude-opus-4 這種寫法）。
 const MODEL_DELIMITED_BASES: &[&str] = &["claude", "opus", "sonnet", "haiku", "gpt", "o3", "o4", "gemini", "grok"];
-const MODEL_LOOSE_PREFIXES: &[&str] = &["glm", "deepseek", "qwen", "kimi"];
+const MODEL_LOOSE_PREFIXES: &[&str] = &["glm", "deepseek", "qwen", "kimi", "minimax"];
 /// 已知的供應商名稱（小寫）；等於它，或接著分隔字元（minimax-cn、google-vertex）才算
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai", "google", "gemini", "xai", "minimax", "zhipu", "zai", "deepseek", "moonshot", "mistral", "openrouter", "groq", "ollama", "azure", "bedrock"];
 /// 命令列上有給模型或供應商，但不是已知命名時，名單上顯示的簡稱（原值不送、不記錄）
@@ -210,16 +210,13 @@ fn starts_delimited(v: &str, base: &str) -> bool {
 
 fn known_model(v: &str) -> bool {
     let lower = v.to_lowercase();
-    if lower.contains("minimax") {
-        return true;
-    }
     let last = lower.rsplit('/').next().unwrap_or(&lower);
     MODEL_DELIMITED_BASES.iter().any(|b| starts_delimited(last, b)) || MODEL_LOOSE_PREFIXES.iter().any(|p| last.starts_with(p))
 }
 
 fn known_provider(v: &str) -> bool {
     let lower = v.to_lowercase();
-    lower.contains("minimax") || KNOWN_PROVIDERS.iter().any(|p| starts_delimited(&lower, p))
+    KNOWN_PROVIDERS.iter().any(|p| starts_delimited(&lower, p))
 }
 
 /// 旗標後面的原始值（沒給值、或值是另一個旗標就是 None）。只在本機判斷用，呼叫端不得送出或記錄
@@ -241,7 +238,7 @@ fn flag_raw<'a>(args: &'a [String], longs: &[&str], shorts: &[&str]) -> Option<&
     None
 }
 
-/// 命令列 → (模型, 顯示簡稱)。只有符合已知命名的模型才送出；模型或供應商含 minimax 一律顯示 MiniMax；
+/// 命令列 → (模型, 顯示簡稱)。只有符合已知命名的模型才送出；（已通過白名單的）模型或供應商含 minimax 一律顯示 MiniMax；
 /// 否則有（已知的）供應商用供應商、再不然用模型名；有給但不是已知命名就顯示「其他模型」，原值不留
 fn model_of(args: &[String]) -> (Option<String>, Option<String>) {
     let raw_model = flag_raw(args, &["--model"], &["-m"]);
@@ -624,7 +621,7 @@ mod tests {
         assert_eq!(model_of(&a("--model MiniMax-M2")).1.as_deref(), Some("MiniMax"));
         assert_eq!(model_of(&a("--provider openai --model gpt-5")), (Some("gpt-5".into()), Some("openai".into())));
         assert_eq!(model_of(&a("--provider minimax-cn")).1.as_deref(), Some("MiniMax"));
-        for secret in ["abcd1234efgh5678", "sk-abc123def456", "o3abc123def456", "gptabc123"] {
+        for secret in ["abcd1234efgh5678", "sk-abc123def456", "o3abc123def456", "gptabc123", "xxminimaxk3y", "k3y/xxminimax"] {
             for flags in [format!("--model {secret}"), format!("-m {secret}"), format!("--provider {secret}"), format!("--model={secret}")] {
                 let (model, label) = model_of(&a(&flags));
                 assert_eq!(model, None, "{flags}");
