@@ -363,10 +363,11 @@ pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_,
     let handle = window.app_handle().clone();
     let backend = std::sync::Arc::new(crate::LiveBackend::new(handle.clone(), relay, app.data_dir.clone()));
     let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
-    let (id, expires_s) = (begun.id.clone(), begun.session.expires_s);
+    // 回給畫面的資料多帶有沒有確認過（不帶指紋）
+    let started = crate::view_d::started_view_json(&begun);
     let sink = std::sync::Arc::new(crate::LiveSink::new(handle, window.label().to_string()));
     crate::view_d::spawn_view(backend, sink, views.inner().clone(), url, begun);
-    Ok(crate::view_d::started_json(&id, expires_s, crate::view_handshake::Scope::View))
+    Ok(started)
 }
 
 /// 暫停（畫面藏起來）或繼續
@@ -379,4 +380,76 @@ pub fn term_view_remote_set(views: State<'_, std::sync::Arc<crate::view_remote::
 #[tauri::command]
 pub fn term_view_remote_stop(views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, id: String) {
     crate::view_d::stop(views.inner(), &id);
+}
+
+// ---------- 認得的電腦（手機）：列表、確認指紋、忘記。確認與忘記前的本人確認（生物辨識或螢幕鎖）由畫面做，命令只收具體的電腦 ----------
+
+/// 設定頁「認得的電腦」：名字、節點、有沒有確認過；只有確認過的才帶指紋。不含完整公鑰
+#[tauri::command]
+pub fn android_known_list(app: State<'_, App>) -> Result<serde_json::Value, String> {
+    crate::device_id::live::phone_view(&app.data_dir)
+}
+
+/// 出四選一的題目：只給題目編號與四個選項文字；正確的是哪一個只留在 Rust。那台要先記住（否則 not_ready）。
+/// 每台電腦的四個選項固定（第一次出題時產生並存檔），同一台同時只有一題；答錯過就回鎖住（還要等幾分鐘）或擋住。
+/// 回 { state:"ok", id, options } | { state:"locked", minutes } | { state:"blocked" }
+#[tauri::command]
+pub fn android_known_challenge(app: State<'_, App>, node: String) -> Result<serde_json::Value, String> {
+    use crate::device_id::PickGate;
+    let prep = crate::device_id::live::pick_prepare(&app.data_dir, &node, crate::auth::now_ms(), crate::known_pick::options_for)?.ok_or_else(|| "not_ready".to_string())?;
+    match prep.gate {
+        PickGate::Blocked => Ok(serde_json::json!({ "state": "blocked" })),
+        PickGate::Locked { minutes } => Ok(serde_json::json!({ "state": "locked", "minutes": minutes })),
+        PickGate::Open => {
+            let id = crate::known_pick::issue(&node, &prep.sign_pub, prep.answer)?;
+            Ok(serde_json::json!({ "state": "ok", "id": id, "options": prep.options }))
+        }
+    }
+}
+
+/// 回答四選一：pick 是第幾個（從 0 起），-1 是「都不一樣」。回 right／wrong／locked／blocked／none／expired。
+/// 答錯記在那台的紀錄上（第一次鎖 10 分鐘、第二次擋住）；「都不一樣」直接擋住；選對只是過關，這裡不會記住任何東西
+#[tauri::command]
+pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Result<String, String> {
+    use crate::device_id::PickGate;
+    let Some(node) = crate::known_pick::node_of(&id) else { return Ok("expired".to_string()) };
+    match crate::device_id::live::pick_gate(&app.data_dir, &node, crate::auth::now_ms())? {
+        None => return Ok("expired".to_string()),
+        Some(PickGate::Blocked) => return Ok("blocked".to_string()),
+        Some(PickGate::Locked { .. }) => return Ok("locked".to_string()),
+        Some(PickGate::Open) => {}
+    }
+    let out = crate::known_pick::answer(&id, pick);
+    match out {
+        crate::known_pick::Outcome::Wrong => {
+            let now = crate::auth::now_ms();
+            crate::device_id::live::pick_record_wrong(&app.data_dir, &node, now)?;
+            // 第二次答錯：已經擋住，回 blocked（畫面顯示擋住的字，不是「10 分鐘後」）
+            if crate::device_id::live::pick_gate(&app.data_dir, &node, now)? == Some(PickGate::Blocked) {
+                return Ok("blocked".to_string());
+            }
+        }
+        crate::known_pick::Outcome::NoneMatch => {
+            crate::device_id::live::pick_block(&app.data_dir, &node)?;
+            elog!("本人表示手機上的指紋選項都和電腦不一樣，沒有記住");
+        }
+        _ => {}
+    }
+    Ok(out.as_str().to_string())
+}
+
+/// 選對之後（畫面先過本人確認）才記住：取走過關的題目（一次、60 秒內），再用記住的那把公鑰重算指紋交給確認（成功會清掉答錯紀錄）；
+/// 這期間那台被忘記、換了公鑰、或被鎖住就不記。回有沒有記到
+#[tauri::command]
+pub fn android_known_confirm(app: State<'_, App>, id: String) -> Result<bool, String> {
+    let Some((node, sign_pub)) = crate::known_pick::take_passed(&id) else { return Ok(false) };
+    crate::device_id::live::confirm(&app.data_dir, &node, &crate::device_id::fingerprint(&sign_pub), crate::auth::now_ms())
+}
+
+/// 本人在設定頁按「忘記」：下次再連就當第一次。回有沒有這台
+#[tauri::command]
+pub fn android_known_forget(app: State<'_, App>, node: String) -> Result<bool, String> {
+    let gone = crate::device_id::live::forget(&app.data_dir, &node)?;
+    crate::known_pick::drop_node(&node);
+    Ok(gone)
 }
