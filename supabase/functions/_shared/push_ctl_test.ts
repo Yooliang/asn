@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handlePushAction, notifyPush, PUSH_ACTIONS } from "./push_ctl.ts";
+import { CONFIRM_GAP_MS, handlePushAction, notifyPush, PUSH_ACTIONS } from "./push_ctl.ts";
 import type { Fcm, FcmResult } from "./push_fcm.ts";
 
 const ME = { id: "phn1a1" };
@@ -176,6 +176,19 @@ Deno.test("守門：relay/index.ts 只在『寄給本人』『等待通知寄出
   assertEquals(src.includes("p_user"), false, "index.ts 不自己組收件人");
 });
 
+Deno.test("需要你確認：同一台 10 秒內只推一則（防洪在這裡，資料庫不擋 60 秒）；不同台各自算", async () => {
+  const contents: unknown[] = [];
+  const fcm = { send: (_t: string, c?: unknown) => { contents.push(c); return Promise.resolve(ok()); } };
+  const m = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "flood1", token: TOK }] }, asn_relay_push_node_name: { name: "工作機" } });
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", "req-flood-1");
+  await notifyPush({ rpc: m.rpc, fcm }, "confirm", "wrk9b2", "req-flood-2");
+  assertEquals(contents.length, 1, "10 秒內第二個請求不再推同一台");
+  const m2 = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "flood2", token: TOK2 }] }, asn_relay_push_node_name: { name: "工作機" } });
+  await notifyPush({ rpc: m2.rpc, fcm }, "confirm", "wrk9b2", "req-flood-3");
+  assertEquals(contents.length, 2, "另一台照樣推");
+  assertEquals(CONFIRM_GAP_MS, 10_000);
+});
+
 Deno.test("需要你確認：收件人＝節點擁有者、targets 用 confirm、通知帶清理過的電腦名", async () => {
   const m = mk({ asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn1a1", token: TOK }] }, asn_relay_push_node_name: { name: "工作\u202E機" } });
   const contents: unknown[] = [];
@@ -188,7 +201,8 @@ Deno.test("需要你確認：收件人＝節點擁有者、targets 用 confirm�
 });
 
 Deno.test("需要你確認：同一筆請求不會推兩次；沒有請求編號不推；名字查不到照推（沒名字版）", async () => {
-  const ans = { asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn1a1", token: TOK }] }, asn_relay_push_node_name: { data: null, error: { message: "x" } } };
+  // 每台 10 秒防洪是整個模組共用：每支測試用不同的手機節點
+  const ans = { asn_relay_push_recipient_node: { user: USER }, asn_relay_push_targets: { targets: [{ node: "phn3c3", token: TOK }] }, asn_relay_push_node_name: { data: null, error: { message: "x" } } };
   const m = mk(ans);
   const contents: unknown[] = [];
   const fcm: Fcm = { send: (_t, c) => { contents.push(c); return Promise.resolve(ok()); } };

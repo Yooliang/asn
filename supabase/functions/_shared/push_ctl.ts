@@ -50,6 +50,17 @@ function firstConfirm(id: string): boolean {
   return true;
 }
 
+// 需要你確認：資料庫不幫它擋 60 秒（有人在等），這裡在同一個 isolate 內擋「同一台 10 秒一則」防洪
+export const CONFIRM_GAP_MS = 10_000;
+const confirmSentAt = new Map<string, number>();
+function confirmRoom(node: string, now: number): boolean {
+  const last = confirmSentAt.get(node);
+  if (last !== undefined && now - last < CONFIRM_GAP_MS) return false;
+  if (confirmSentAt.size >= SEEN_MAX) confirmSentAt.delete(confirmSentAt.keys().next().value as string);
+  confirmSentAt.set(node, now);
+  return true;
+}
+
 /** 收件人：寄給本人＝剛寄出的那封信上記的收件人；夥伴在等你、需要你確認＝金鑰所屬節點的擁有者 */
 async function recipient(deps: PushDeps, kind: PushKind, nodeId: string, messageId: string | null): Promise<string | null> {
   const r = kind === "owner_mail"
@@ -82,8 +93,10 @@ export async function notifyPush(deps: PushDeps, kind: PushKind, nodeId: string,
       console.warn("push targets failed", kind);
       return;
     }
+    const now = Date.now();
     const targets: { node: string; token: string }[] = (Array.isArray(data?.targets) ? data!.targets : [])
-      .filter((t: Json) => typeof t?.node === "string" && typeof t?.token === "string");
+      .filter((t: Json) => typeof t?.node === "string" && typeof t?.token === "string")
+      .filter((t: { node: string }) => kind !== "confirm" || confirmRoom(t.node, now));
     if (targets.length === 0) return;
     const content = kind === "confirm" ? { kind, name: await nodeName(deps, nodeId) } : undefined;
     const results = await Promise.all(targets.map(async (t) => ({ t, r: await deps.fcm!.send(t.token, content) })));

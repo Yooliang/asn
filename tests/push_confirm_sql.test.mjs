@@ -17,7 +17,20 @@ const fn = (src, name) => src.match(new RegExp(`create or replace function publi
 test('靜態：push_targets 與上一版逐字相同，只差允許的種類清單', () => {
   const a = fn(read(PREV), 'asn_relay_push_targets'), b = fn(read(MIG), 'asn_relay_push_targets')
   assert.notEqual(a, b)
-  assert.equal(b.replace("('owner_mail', 'waiting', 'confirm')", "('owner_mail', 'waiting')"), a)
+  // 只多了種類清單裡的 'confirm'，以及 confirm 專用的那一段（不佔 60 秒名額）
+  const CONFIRM_BLOCK = `  -- 需要你確認（confirm）：有人在等，不受每台 60 秒一則的名額限制、也不佔名額（不更新 last_sent_at）。
+  -- 同一個請求在 Edge 已去重，另有每台 10 秒一則的防洪；前景不推的規則照舊
+  if p_kind = 'confirm' then
+    select coalesce(jsonb_agg(jsonb_build_object('node', t.node, 'token', t.token) order by t.node), '[]'::jsonb) into v_out
+      from relay.push_tokens t join relay.nodes n on n.id = t.node
+     where n.owner_user = p_user and n.status = 'active' and n.platform = 'android'
+       and t.updated_at > now() - interval '30 days'
+       and not exists (select 1 from relay.asn_presence p where p.node = t.node and p.fg_at > now() - interval '3 minutes');
+    return jsonb_build_object('targets', v_out);
+  end if;
+`
+  assert.ok(b.includes(CONFIRM_BLOCK), 'confirm 專用段落')
+  assert.equal(b.replace(CONFIRM_BLOCK, '').replace("('owner_mail', 'waiting', 'confirm')", "('owner_mail', 'waiting')"), a)
 })
 
 test('靜態：回復檔的 push_targets 逐字等於上一版；移除新函式', () => {
@@ -78,16 +91,29 @@ test('confirm 種類可用；未知種類與空值仍拒絕', { skip }, async ()
   for (const k of ['nope', '', null]) assert.deepEqual(await targets(db, k), { error: 'bad_request' }, String(k))
 })
 
-test('confirm 前景規則與 owner_mail 相同：3 分鐘內前景不推、超過就推；60 秒名額共用', { skip }, async () => {
+test('confirm 前景規則與 owner_mail 相同：3 分鐘內前景不推、超過就推', { skip }, async () => {
   const db = await boot(); await reg(db)
   await fg(db, '10 seconds')
   assert.deepEqual((await targets(db, 'confirm')).targets, [], '前景不推')
   assert.deepEqual((await targets(db, 'owner_mail')).targets, [])
   await fg(db, '4 minutes')
   assert.equal((await targets(db, 'confirm')).targets.length, 1, '背景會推')
-  assert.deepEqual((await targets(db, 'owner_mail')).targets, [], '60 秒內共用名額')
+})
+
+test('confirm 不受 60 秒名額限制、也不佔名額：60 秒內剛推過信件，確認框照樣推；推了確認框，信件的名額不受影響', { skip }, async () => {
+  const db = await boot(); await reg(db)
+  const sentAt = async () => (await db.query(`select last_sent_at from relay.push_tokens`)).rows[0].last_sent_at
+  assert.equal((await targets(db, 'owner_mail')).targets.length, 1, '先推一則信件')
+  const t1 = await sentAt()
+  assert.ok(t1, '信件佔了名額')
+  assert.deepEqual((await targets(db, 'owner_mail')).targets, [], '60 秒內第二則信件被擋')
+  assert.equal((await targets(db, 'confirm')).targets.length, 1, '確認框照樣推')
+  assert.equal((await targets(db, 'confirm')).targets.length, 1, '資料庫不擋確認框（防洪在 Edge）')
+  assert.equal(String(await sentAt()), String(t1), '確認框不更新 last_sent_at')
   await clearSent(db)
-  assert.equal((await targets(db, 'owner_mail')).targets.length, 1)
+  assert.equal((await targets(db, 'confirm')).targets.length, 1)
+  assert.equal(await sentAt(), null, '名額空著時推確認框，也不佔名額')
+  assert.equal((await targets(db, 'owner_mail')).targets.length, 1, '之後的信件照常推')
 })
 
 test('節點名查詢：啟用中的回名稱；停用或不存在回空；只給 service_role', { skip }, async () => {
