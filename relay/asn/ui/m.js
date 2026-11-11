@@ -9,7 +9,7 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, SCROLL_TERM_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -1196,6 +1196,7 @@ const app = createApp({
       const t = e.touches[0]
       if (!swipeStartOk(t.clientX, window.innerWidth)) return
       if (e.target?.closest?.(SWIPE_BLOCK_SELECTOR)) return
+      if (e.target?.closest?.(SCROLL_TERM_SELECTOR)) return   // 在終端畫面上滑：交給終端自己捲，不換頁
       if (inScrollableX(e.target)) return   // 在橫向可捲的表格／程式碼上滑：只捲它，不換頁
       if (String(window.getSelection?.() ?? '').length > 0) return   // 正在選文字
       Object.assign(sw, { mode, x0: t.clientX, y0: t.clientY, t0: Date.now(), dx: 0, shift: 0, width: window.innerWidth })

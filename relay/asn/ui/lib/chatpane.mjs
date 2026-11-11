@@ -107,7 +107,7 @@ export const ChatPane = {
     const remoteShown = computed(() => remoteOn.value && canRemote.value)
     // 打字（0.2.10）：在看畫面時才有，按了換成可以打字的畫面；關掉看畫面就一起收掉
     const remoteTyping = ref(false)
-    // 電腦版看／打字別台畫面的狀態：放在視窗最下面的狀態列（.typing），不在終端上方；手機（noBar）照舊在終端上方一條
+    // 電腦版看／打字別台畫面的狀態：放在視窗最下面的狀態列（.typing），不在終端上方；手機也一樣（0.2.17），共用同一個 remoteBarState
     const remoteBar = ref(null), rinEl = ref(null)
     const setRemoteBar = (src, s) => { if (s) remoteBar.value = { ...s, src }; else if (remoteBar.value?.src === src) remoteBar.value = null }
     const stopTyping = () => rinEl.value?.stop?.()
@@ -444,8 +444,8 @@ export const ChatPane = {
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active"></term-view>
   <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
-  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="noBar" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
-  <remote-input v-if="typingShown" ref="rinEl" :bar-inline="noBar" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
+  <remote-view v-if="remoteShown && !typingShown" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
+  <remote-input v-if="typingShown" ref="rinEl" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>

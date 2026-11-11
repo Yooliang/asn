@@ -102,7 +102,7 @@ test('mobileRemoteViewApi：每次發起都先本人確認；ok 才送 start，c
   // 畫面：取消時 RemoteView 不顯示錯誤，交給外層切回訊息
   const rv = read('../ui/lib/term-remote.mjs')
   assert.match(rv, /if \(e\?\.code === 'cancel'\) \{ cleanup\(\); emit\('cancel'\); return \}/)
-  assert.match(read('../ui/lib/chatpane.mjs'), /:active="remoteLive" :bar-inline="noBar" @cancel="showMsgs"/)
+  assert.match(read('../ui/lib/chatpane.mjs'), /:active="remoteLive" :bar-inline="false" @cancel="showMsgs"/)
 })
 
 test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生物辨識）；只能用 mobileRemoteViewApi', () => {
