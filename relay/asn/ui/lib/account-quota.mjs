@@ -9,7 +9,7 @@ export const QUOTA_NOTE = '額度是各台電腦上次讀到的數字。'   // �
 const pct = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null)
 
 // 只取額度欄位（舊四欄＋兩條各自的重置時間，#374；其他欄位一律丟掉）
-const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at', 'waiting']
+const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at', 'legacy']
 export function quotaOf(a) {
   if (!a || typeof a !== 'object') return undefined
   return Object.fromEntries(QUOTA_KEYS.filter(k => a[k] != null).map(k => [k, a[k]]))
@@ -18,7 +18,7 @@ export function quotaOf(a) {
 // ---- 一條額度自己的重置時間（#374）----
 export const RESET_PASSED = '可能已恢復'   // 重置時間已經過了：記著的百分比不代表現在
 export const OLD_TEXT = '資料較舊'
-export const WAITING_TEXT = '剛換帳號，約 10 分鐘後顯示額度'   // 換帳號後要連續確認幾次才收新數字，期間還沒有數字
+export const LEGACY_TEXT = '升級 Claude Code 後才會顯示額度'   // 舊版 Claude Code 的視窗沒帶帳號身分，額度不收，畫面提示升級
 export const PLAN_UNKNOWN = '方案未知'   // 帳號卡第二行：沒有回報方案時
 const WEEKDAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六']
 const two = n => String(n).padStart(2, '0')
@@ -69,7 +69,7 @@ export function quotaView(a, now = Date.now()) {
   const five = pct(a?.five_hour_pct), week = pct(a?.weekly_pct)
   const at = Date.parse(a?.at ?? '')
   if ((five == null && week == null) || !Number.isFinite(at)) {
-    return { known: false, text: a?.waiting === true ? WAITING_TEXT : '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false }
+    return { known: false, text: a?.legacy === true ? LEGACY_TEXT : '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false }
   }
   const parts = []
   if (five != null) parts.push(`5 小時剩 ${five}%`)

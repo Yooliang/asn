@@ -209,7 +209,6 @@ export const SettingsPanel = {
                 </div>
                 <div class="dv-vq" v-if="st.quotaReaders && v.key === 'gemini'">
                   <small>{{ QUOTA_TEXT.agyShort }}{{ QUOTA_TEXT.thisPc }}</small>
-                  <small v-if="st.quotaReaders.agy">{{ st.quotaReaders.agyAccount ? QUOTA_TEXT.agyAccount(st.quotaReaders.agyAccount) : QUOTA_TEXT.agyNoAccount }}</small>
                   <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
                   <details><summary>{{ QUOTA_TEXT.more }}</summary><small>{{ QUOTA_TEXT.agyNote }}</small></details>
                 </div>

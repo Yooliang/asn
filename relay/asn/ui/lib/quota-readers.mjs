@@ -8,10 +8,8 @@ export const QUOTA_TEXT = {
   grok: '讀 Grok 額度',
   grokNote: '用這台電腦的 Grok 登入讀取。',
   agy: '讀 Gemini 額度',
-  agyNote: '不用開 Gemini 視窗也能更新。帳號依上次開視窗判斷；在別處切換帳號後，請開一次 Gemini 視窗。',
-  agyShort: '不用開 Gemini 視窗也能更新。',
-  agyAccount: a => `目前算在 ${a} 名下。`,
-  agyNoAccount: '還沒開過 Gemini 視窗，開一次才知道是哪個帳號。',
+  agyNote: 'agy 的額度查詢不會告訴我們是哪個帳號，所以這個開關目前不會主動查額度；Gemini 的額度只在開著 agy 視窗時更新。',
+  agyShort: 'Gemini 額度要開著 agy 視窗才會更新。',
   extra: '讀 Claude 額外帳號',
   extraNote: '讀你另外登入在專用資料夾的帳號，平常使用的登入不會動到。',
   extraShort: '讀另外登入的帳號，平常的登入不動。',
@@ -59,7 +57,7 @@ export const QUOTA_TEXT = {
   failLogin: '要先登入才能變更查詢代碼。',
 }
 
-const EMPTY = { grok: false, agy: false, agyAccount: '', minimax: [], minimaxSupported: false, status: { grok: '', agy: '' }, extra: false, extraRefresh: false, extraDirs: [] }
+const EMPTY = { grok: false, agy: false, minimax: [], minimaxSupported: false, status: { grok: '', agy: '' }, extra: false, extraRefresh: false, extraDirs: [] }
 
 /** Rust 回的設定 → 畫面資料。形狀不對就當全關，不會顯示成已開。 */
 export function normalizeReaders(v) {
@@ -70,7 +68,6 @@ export function normalizeReaders(v) {
   return {
     grok: v.grok === true,
     agy: v.agy === true,
-    agyAccount: text(v.agy_account),
     minimaxSupported: v.minimax_supported === true,
     minimax: (Array.isArray(v.minimax) ? v.minimax : [])
       .filter(m => m && typeof m.email === 'string')
@@ -172,7 +169,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
 /** 設定頁快照：沒有 key，只有帳號與有沒有存。 */
 export function quotaReadersView(s) {
   return {
-    grok: s.grok, agy: s.agy, agyAccount: s.agyAccount, minimax: s.minimax, minimaxSupported: s.minimaxSupported, status: s.status,
+    grok: s.grok, agy: s.agy, minimax: s.minimax, minimaxSupported: s.minimaxSupported, status: s.status,
     extra: s.extra, extraRefresh: s.extraRefresh, extraDirs: s.extraDirs,
     busy: s.busy, msg: s.msg, code: s.code, copied: s.copied, confirm: s.confirm,
   }

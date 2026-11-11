@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { quotaView, quotaOf, STALE_MS, QUOTA_NOTE, WAITING_TEXT } from '../ui/lib/account-quota.mjs'
+import { quotaView, quotaOf, STALE_MS, QUOTA_NOTE, LEGACY_TEXT } from '../ui/lib/account-quota.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { acctDeviceTree, ACCT_TEXT } from '../ui/lib/mobile-acct.mjs'
 
@@ -118,14 +118,14 @@ test('本機的額度紀錄要被讀進電腦版狀態（claude_quota_all），�
   assert.match(acc, /\.\.\.quotaOf\(q\[a\.email\]\)/)
 })
 
-test('剛換帳號還在等確認：額度欄寫固定的一句人話，沒有內部代號；有數字就照數字', () => {
-  const v = quotaView({ waiting: true }, Date.parse('2026-11-10T00:00:00Z'))
+test('舊版 Claude Code（沒帶帳號身分）：額度欄寫固定的一句人話，沒有內部代號；有數字就照數字', () => {
+  const v = quotaView({ legacy: true }, Date.parse('2026-11-10T00:00:00Z'))
   assert.equal(v.known, false)
-  assert.equal(v.text, WAITING_TEXT)
-  assert.equal(WAITING_TEXT, '剛換帳號，約 10 分鐘後顯示額度')
-  assert.doesNotMatch(WAITING_TEXT, /pending|rebase|waiting|確認 3 次|uuid/i)
-  assert.equal(quotaView({}, Date.now()).text, '額度未知', '沒在等就還是額度未知')
-  assert.deepEqual(quotaOf({ waiting: true, accessToken: 'SECRET' }), { waiting: true })
-  const known = quotaView({ waiting: true, weekly_pct: 60, at: '2026-11-10T00:00:00Z' }, Date.parse('2026-11-10T00:05:00Z'))
-  assert.equal(known.known, true, '已經有數字就不寫等待')
+  assert.equal(v.text, LEGACY_TEXT)
+  assert.equal(LEGACY_TEXT, '升級 Claude Code 後才會顯示額度')
+  assert.doesNotMatch(LEGACY_TEXT, /pending|rebase|legacy|transcript|uuid/i)
+  assert.equal(quotaView({}, Date.now()).text, '額度未知', '沒有舊版視窗就還是額度未知')
+  assert.deepEqual(quotaOf({ legacy: true, accessToken: 'SECRET' }), { legacy: true })
+  const known = quotaView({ legacy: true, weekly_pct: 60, at: '2026-11-10T00:00:00Z' }, Date.parse('2026-11-10T00:05:00Z'))
+  assert.equal(known.known, true, '已經有數字就不寫提示')
 })

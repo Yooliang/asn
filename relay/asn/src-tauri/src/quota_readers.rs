@@ -145,7 +145,7 @@ fn view_with(home: &Path, supported: bool, has_key: impl Fn(&str) -> bool) -> Va
     let minimax: Vec<Value> = s.minimax.iter().map(|e| json!({ "email": e, "has_key": has_key(e) })).collect();
     let extra: Vec<Value> = crate::claude_extra::dirs(home).into_iter().map(|(name, _)| json!({ "name": name, "status": failures.get(&format!("claude:{name}")) })).collect();
     json!({
-        "grok": s.grok, "agy": s.agy, "agy_account": agy_email(home), "minimax": minimax, "minimax_supported": supported,
+        "grok": s.grok, "agy": s.agy, "minimax": minimax, "minimax_supported": supported,
         "extra_claude": s.extra_claude, "extra_claude_refresh": s.extra_claude_refresh, "extra_claude_dirs": extra,
         "status": {
             "grok": failures.get("grok"), "agy": failures.get("agy"),
@@ -288,10 +288,13 @@ pub fn agy_statusline(stdout: &str, email: &str) -> Option<String> {
     Some(json!({ "email": email, "quota": quota }).to_string())
 }
 
-/// ASN 開的 agy 視窗最近記下的帳號
-pub fn agy_email(home: &Path) -> Option<String> {
-    let all = crate::gemini_quota::load_all(home);
-    all.into_iter().max_by(|a, b| a.1.quota.at.cmp(&b.1.quota.at).then_with(|| b.0.cmp(&a.0))).map(|(email, _)| email)
+/// agy 的 `/quota` 輪詢要查哪個帳號：**一律不查**（#1266）。
+/// `/quota` 的回應不帶帳號，也找不到可信的帳號來源——原本用的「ASN 開的 agy 視窗最近記下的帳號」切過帳號後會對錯；
+/// `~/.gemini/google_accounts.json` 的 `active` 實測是空的、檔案從 7 月就沒再寫過，agy 不會寫這個檔。
+/// 照「帳號不可信就不收」處理：Gemini 的額度只靠 agy 視窗狀態列帶的 email 那條路徑更新（gemini_quota.rs）。
+/// 輪詢的程式（`read_agy`、`agy_statusline`）與設定、開關都保留，之後 agy 開始回帳號時，只要讓這個函式回那個帳號就能接回去。
+fn agy_poll_account(_home: &Path) -> Option<String> {
+    None
 }
 
 // ---------- 退避 ----------
@@ -708,8 +711,8 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
         }
     }
     if s.agy && !agy_paused(free_bytes) && gates.agy.due(now_ms, None) {
-        match agy_email(home) {
-            // 還沒開過 agy 視窗，不知道是哪個帳號：不算失敗，下一輪再看
+        match agy_poll_account(home) {
+            // 沒有可信的帳號來源（見 agy_poll_account）：不查、不記，也不算失敗：不算失敗，下一輪再看
             None => gates.agy.success(now_ms),
             Some(email) => match read_agy(home, &email, now_ms).await {
                 Ok(()) => {

@@ -128,13 +128,18 @@ test('代碼失敗：畫面是白話，細節進主控台；沒回代碼不算�
 })
 
 test('畫面文字：agy 帳號判斷、key 不再顯示、代碼只顯示一次都寫明；沒有內部名稱', () => {
-  assert.match(QUOTA_TEXT.agyNote, /帳號依上次開視窗判斷/)
+  assert.equal(QUOTA_TEXT.agyShort, 'Gemini 額度要開著 agy 視窗才會更新。')
+  assert.match(QUOTA_TEXT.agyNote, /不會告訴我們是哪個帳號/)
+  assert.ok(!('agyAccount' in QUOTA_TEXT) && !('agyNoAccount' in QUOTA_TEXT), '不再顯示「算在哪個帳號」')
   assert.match(QUOTA_TEXT.minimaxNote, /不會再顯示/)
   assert.match(QUOTA_TEXT.codeOnce, /只顯示這一次/)
   assert.match(QUOTA_TEXT.codeOnce, /只能重新產生/)
   assert.match(QUOTA_TEXT.note, /都是關的/)
   const all = Object.values(QUOTA_TEXT).filter(v => typeof v === 'string').join('\n')
-  assert.doesNotMatch(all, /relay|supabase|rpc|hash|雜湊|憑證管理員|HTTP|API|agy/i)
+  assert.doesNotMatch(all, /relay|supabase|rpc|hash|雜湊|憑證管理員|HTTP|API/i)
+  // agy 是使用者看得到的程式名稱，只允許出現在 Gemini 那兩句（「要開著 agy 視窗」）
+  const rest = Object.entries(QUOTA_TEXT).filter(([k, v]) => typeof v === 'string' && !['agyShort', 'agyNote'].includes(k)).map(([, v]) => v).join('')
+  assert.doesNotMatch(rest, /agy/i)
 })
 
 test('設定頁：指令都在清單；key 欄位是密碼欄且只綁元件內部；樞紐接得住', () => {

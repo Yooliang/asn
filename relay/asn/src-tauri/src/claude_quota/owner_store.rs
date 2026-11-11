@@ -44,6 +44,9 @@ struct Ent {
     account_uuid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     org_uuid: Option<String>,
+    /// 對話紀錄裡最後一筆 assistant 回應的時間（毫秒），額度的資料時間（#1266）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assistant_ms: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
@@ -58,17 +61,17 @@ impl Cache {
             write(&cache_path(home), &t);
         }
     }
-    /// 命中（同一個檔、大小與修改時間都沒變）回 Some(身分或「這個檔裡沒有身分」)；沒命中回 None
-    pub fn get(&self, key: &str, len: u64, mtime_ms: i64) -> Option<Option<super::owner::Owner>> {
+    /// 命中（同一個檔、大小與修改時間都沒變）回 Some((身分或「這個檔裡沒有身分」, 最後一筆 assistant 的時間))；沒命中回 None
+    pub fn get(&self, key: &str, len: u64, mtime_ms: i64) -> Option<(Option<super::owner::Owner>, Option<i64>)> {
         let e = self.0.get(key).filter(|e| e.len == len && e.mtime_ms == mtime_ms)?;
-        Some(e.account_uuid.clone().map(|u| super::owner::Owner { account_uuid: u, org_uuid: e.org_uuid.clone() }))
+        Some((e.account_uuid.clone().map(|u| super::owner::Owner { account_uuid: u, org_uuid: e.org_uuid.clone() }), e.assistant_ms))
     }
-    pub fn put(&mut self, key: &str, len: u64, mtime_ms: i64, o: Option<super::owner::Owner>) {
+    pub fn put(&mut self, key: &str, len: u64, mtime_ms: i64, o: Option<super::owner::Owner>, assistant_ms: Option<i64>) {
         let (account_uuid, org_uuid) = match o {
             Some(o) => (Some(o.account_uuid), o.org_uuid),
             None => (None, None),
         };
-        self.0.insert(key.to_string(), Ent { len, mtime_ms, account_uuid, org_uuid });
+        self.0.insert(key.to_string(), Ent { len, mtime_ms, account_uuid, org_uuid, assistant_ms });
         while self.0.len() > CACHE_MAX {
             let Some(k) = self.0.keys().next().cloned() else { break };
             self.0.remove(&k);

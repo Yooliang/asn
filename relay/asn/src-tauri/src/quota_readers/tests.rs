@@ -487,3 +487,18 @@ fn 重置時間認不得時_log_只記形狀不記原值() {
     assert_eq!(parse_grok(&ok, NOW)[0]["resets_at"], "2026-11-08T00:15:00Z", "Grok 帶時區偏移也有重置時間");
     assert_eq!(grok_reset_shape(&json!({"config": {}})), None, "沒有這欄不算格式錯");
 }
+
+#[test]
+fn agy_輪詢沒有可信的帳號來源_一律不查_不記到任何帳號() {
+    // 就算 ASN 的 Gemini 紀錄裡有帳號、~/.gemini/google_accounts.json 裡也有 active，輪詢都不查
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join(".gemini");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("google_accounts.json"), r#"{"active":"me@x.test","old":[]}"#).unwrap();
+    let r = crate::gemini_quota::parse_statusline(&json!({ "email": "me@x.test", "quota": { "gemini-weekly": { "remaining_fraction": 0.5, "reset_time": crate::claude_quota::iso_secs(NOW + 3 * 86_400_000) } } }).to_string(), NOW).unwrap();
+    crate::gemini_quota::record(h.path(), &r, NOW).unwrap();
+    assert!(!crate::gemini_quota::load_all(h.path()).is_empty());
+    assert_eq!(agy_poll_account(h.path()), None);
+    let v = view_with(h.path(), true, |_| false);
+    assert!(v.get("agy_account").is_none(), "設定頁資料不再帶 agy 的帳號");
+}

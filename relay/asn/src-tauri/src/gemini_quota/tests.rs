@@ -122,21 +122,25 @@ fn 滿額的窗重置時間一直往後跑_十分鐘內算沒變_不寫檔() {
 }
 
 #[test]
-fn 用_gemini_規則合併_記著滿額照收新的_同一期回升不收() {
+fn 簡化後的規則合併_同一期回升照收_滾動窗與四捨五入的回升是合法的新數字() {
     let h = tempfile::tempdir().unwrap();
     let mk = |f: f64, reset: &str| json!({ "email": ME, "quota": { "gemini-weekly": { "remaining_fraction": f, "reset_time": reset } } }).to_string();
     let r = parse_statusline(&mk(1.0, "2026-11-05T14:51:00Z"), NOW).unwrap();
     assert!(record(h.path(), &r, NOW).unwrap());
-    // 開始用了：重置時間固定成較早的時間（Claude 規則會當成「比較早」擋掉；Gemini 記著 100% 照收）
+    // 開始用了：重置時間固定成較早的時間，照收
     let r = parse_statusline(&mk(0.9, "2026-11-05T13:00:00Z"), NOW + 600_000).unwrap();
     assert!(record(h.path(), &r, NOW + 600_000).unwrap());
     assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(90));
-    // 同一期回升不收，記 log（不含 email）
+    // 同一期剩餘回升（滾動窗、四捨五入）：照收，不再被擋
     let r = parse_statusline(&mk(0.95, "2026-11-05T13:00:00Z"), NOW + 1_200_000).unwrap();
-    assert!(!record(h.path(), &r, NOW + 1_200_000).unwrap());
-    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(90));
+    assert!(record(h.path(), &r, NOW + 1_200_000).unwrap());
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(95));
+    // 重置時間離譜（不在現在前 1 天到後 8 天之間）：不收，記 log（不含 email）
+    let r = parse_statusline(&mk(0.5, "2099-01-01T00:00:00Z"), NOW + 1_800_000).unwrap();
+    assert!(!record(h.path(), &r, NOW + 1_800_000).unwrap());
+    assert_eq!(load_all(h.path())[ME].quota.weekly_pct, Some(95));
     let log = std::fs::read_to_string(log_path(h.path())).unwrap();
-    assert!(log.contains("回升") && !log.contains("example.test"), "{log}");
+    assert!(log.contains("重置時間") && !log.contains("example.test"), "{log}");
 }
 
 #[test]
