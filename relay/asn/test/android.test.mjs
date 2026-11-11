@@ -688,7 +688,10 @@ test('掃 QR code：橋接方法一個都不寫檔；掃描檔與憑證檔只在
   const scan = read(...KT_DIR, 'FingerprintScan.kt')
   // 橋：收回呼編號與憑證，只轉給 FingerprintScan；不寫檔、不回傳
   assert.match(bridge, /@JavascriptInterface\s+fun scanFingerprint\(callbackId: String, challenge: String\) \{\s+activity\.runOnUiThread \{ FingerprintScan\.start\(activity, callbackId, challenge\) \}\s+\}/)
-  assert.doesNotMatch(bridge, /writeScanData|writeConsentMarker|\.scan"|\.irori-asn|writeText|writeBytes|FileOutputStream|createNewFile/)
+  assert.doesNotMatch(bridge, /writeScanData|writeConsentMarker|\.scan"|consent|writeText|writeBytes|FileOutputStream|createNewFile/)
+  // .irori-asn 只能出現在匯出用的 received 資料夾（#1313），註解不算
+  const bridgeCode = bridge.split(/\r?\n/).filter(l => !/^\s*(\/\/|\/?\*)/.test(l)).join('\n')
+  assert.doesNotMatch(bridgeCode.replace('File(File(filesRoot, ".irori-asn"), "received")', ''), /\.irori-asn/)
   // 寫檔的函式各一個定義、一個呼叫（都在 verified 裡），失敗與取消的路徑不寫
   const lines = f => vc.split('\n').filter(l => l.includes(f))
   assert.equal(lines('writeScanData(').length, 2, '一個定義、一個呼叫')
