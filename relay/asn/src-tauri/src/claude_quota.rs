@@ -300,12 +300,13 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     Ok(took)
 }
 
-/// 每週重置時間指紋的結果處理：回 Some(true)＝這筆不收（串號或對不上）、Some(false)＝存著的是串號要換掉、None＝沒事。
+/// 每週重置時間指紋的結果處理：回 Some(true)＝這筆不收（串號）、Some(false)＝存著的是串號要換掉、None＝照常收（沒事，或沒有其他帳號的證據）。
 /// 有事都寫一行 log：只有帳號雜湊的前 6 碼與兩個重置時間（不含 email）；同一個原因連續發生只記一次。
 fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, now_ms: i64) -> Option<bool> {
     use merge::Cross::*;
     let h = owner::short_hash(email);
     let t = |ms: i64| iso_secs(ms);
+    let accept_only = matches!(c, Unmatched { .. });
     let (line, reject) = match c {
         Pass => {
             st.logged_cross = None;
@@ -313,13 +314,14 @@ fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, 
         }
         IncomingFromOther { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號還沒過期的那一期（這帳號存著的是 {}），這筆是別的帳號的數字，不收", t(new_reset), t(stored_reset)), true),
         StoredFromOther { new_reset, stored_reset } => (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false),
-        Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間 {} 跟存著還沒過期的 {} 不同、也對不上本機其他帳號，不收，等存著的那一期過期再收", t(new_reset), t(stored_reset)), true),
+        // 兩邊都沒有其他帳號的證據（例如用了重置卷，週期提前換成新的一期）：照收，交給視窗身分那一層把關；只留一行 log
+        Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間從 {} 變成 {}，對不上本機其他帳號，照收", t(stored_reset), t(new_reset)), false),
     };
     if st.logged_cross.as_deref() != Some(line.as_str()) {
         merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
         st.logged_cross = Some(line);
     }
-    Some(reject)
+    (!accept_only).then_some(reject)
 }
 
 /// 狀態列掛鉤：把輸入裡的額度記在「這個視窗自己的帳號」底下。有記下回 true；
