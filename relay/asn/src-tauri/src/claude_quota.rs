@@ -46,6 +46,11 @@ pub struct Quota {
     /// 這筆是視窗帶了帳號身分才記下的（#1185）：沒有標記的舊基準可能混進別的帳號的數字，第一次有身分的回報來時會清掉
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub owner: bool,
+    /// 每週這一條是新的記錄路徑寫進來的（session-owner 與視窗自己的 oauthAccount 一致才收，額度記在 oauthAccount 的 email 底下）。
+    /// 每週期指紋（merge::week_fingerprint）只拿這種紀錄當「別的帳號」的證據：舊路徑寫的紀錄即使有 `owner` 標記也可能混進別的帳號的數字，不算。
+    /// 舊檔沒有這個欄位就當 false。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub verified: bool,
 }
 
 /// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
@@ -200,6 +205,7 @@ pub(crate) fn quota_from_value(v: &Value) -> Option<Quota> {
         five_at: only(five.is_some(), s("five_at")),
         week_at: only(week.is_some(), s("week_at")),
         owner: v.get("owner").and_then(Value::as_bool) == Some(true),
+        verified: v.get("verified").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -278,7 +284,14 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     log_changes(home, st, &m, now_ms);
     let took = m.quota.is_some() || trimmed.is_some() || replaced;
     // 兩條都沒收、只有拿掉過期窗或換掉串號的那條：照樣要寫
-    let out = m.quota.or(trimmed).or(replaced.then(|| cur.clone()).flatten()).map(|mut q| {
+    // verified（每週這一條是新記錄路徑寫的）：這次收了每週就是 true（備份失敗那次沒清舊基準，混著舊數字，不算）；沒收就沿用原本的
+    let base_verified = trimmed.as_ref().or(cur.as_ref()).is_some_and(|q| q.verified);
+    let took_week = m.took_week;
+    let merged = m.quota.map(|mut q| {
+        q.verified = if took_week { !backup_failed } else { base_verified };
+        q
+    });
+    let out = merged.or(trimmed).or(replaced.then(|| cur.clone()).flatten()).map(|mut q| {
         q.owner = !backup_failed;
         q
     });
@@ -312,7 +325,10 @@ fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, 
             st.logged_cross = None;
             return None;
         }
-        IncomingFromOther { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號還沒過期的那一期（這帳號存著的是 {}），這筆是別的帳號的數字，不收", t(new_reset), t(stored_reset)), true),
+        IncomingFromOther { new_reset, stored_reset } => {
+            let stored = stored_reset.map(t).unwrap_or_else(|| "沒有還沒過期的".to_string());
+            (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號還沒過期的那一期（這帳號存著的是 {stored}），這筆是別的帳號的數字，不收", t(new_reset)), true)
+        }
         StoredFromOther { new_reset, stored_reset } => (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false),
         // 兩邊都沒有其他帳號的證據（例如用了重置卷，週期提前換成新的一期）：照收，交給視窗身分那一層把關；只留一行 log
         Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間從 {} 變成 {}，對不上本機其他帳號，照收", t(stored_reset), t(new_reset)), false),
@@ -486,6 +502,7 @@ impl Quota {
             five_at: self.five_at.clone().filter(|_| !drop5),
             week_at: self.week_at.clone().filter(|_| !dropw),
             owner: self.owner,
+            verified: self.verified && !dropw,
         })
     }
 }
@@ -671,6 +688,7 @@ mod tests {
             five_at: Some("2026-11-09T12:00:00Z".into()),
             week_at: Some("2026-11-09T11:00:00Z".into()),
             owner: true,
+            verified: false,
         }
     }
     fn names(q: &Quota) -> Vec<String> {

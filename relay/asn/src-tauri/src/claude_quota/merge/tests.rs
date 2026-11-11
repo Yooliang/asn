@@ -783,7 +783,12 @@ fn seed(h: &tempfile::TempDir, recs: Value) {
     std::fs::create_dir_all(h.path().join(".asn")).unwrap();
     std::fs::write(super::super::quota_path(h.path()), recs.to_string()).unwrap();
 }
+/// 新記錄路徑寫的紀錄（owner 與 verified 都是 true）：可以當「別的帳號」的證據
 fn rec_wk(pct: u8, reset: i64) -> Value {
+    json!({ "weekly_pct": pct, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(reset), "week_at": iso_secs(NOW - H), "owner": true, "verified": true })
+}
+/// 舊路徑寫的紀錄（11-11 那批汙染紀錄的樣子）：有 owner 標記、沒有 verified。不能當證據
+fn rec_wk_old(pct: u8, reset: i64) -> Value {
     json!({ "weekly_pct": pct, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(reset), "week_at": iso_secs(NOW - H), "owner": true })
 }
 /// a、b 兩個帳號：各有自己還沒過期的那一期（a 是 NOW+3 天，b 是 NOW+5 天多）
@@ -826,21 +831,66 @@ fn 週期指紋_存著的那一期是另一個帳號的_存著的才是串號_�
 }
 
 #[test]
-fn 週期指紋_另一個帳號的紀錄沒有身分標記_不拿來比() {
-    // b 的紀錄是舊辦法記的（沒有 owner 標記），可能混進別的帳號的數字：不能拿它的週期當指紋
+fn 週期指紋_另一個帳號的紀錄是舊路徑寫的_即使有_owner_沒有_verified_也不拿來當證據() {
+    // b 的紀錄是舊路徑寫的（有 owner、沒有 verified；11-11 的汙染紀錄就是這種樣子），可能混進別的帳號的數字：不能拿它的週期當指紋
     let (h, ra, rb) = two_accounts();
-    let rec_b = json!({ "weekly_pct": 40, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(rb), "week_at": iso_secs(NOW - H) });
-    // 新讀數的週期＝b 的：b 有標記時是串號（上面那條），沒有標記就只是「對不上任何帳號」，照收
-    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_b.clone() }));
+    // 新讀數的週期＝b 的：b 是 verified 時是串號（上面那條），舊紀錄就只是「對不上任何帳號」，照收
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk_old(40, rb) }));
     assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((81.0, rb))), NOW + MIN));
     let lg = log(&h);
     assert!(lg.contains("對不上本機其他帳號，照收") && !lg.contains("別的帳號的數字"), "{lg}");
-    // 存著的週期＝b 的：b 有標記時會把存著的換掉，沒有標記就不當證據（也是照收新讀數，只是 log 不同）
+    // 存著的週期＝b 的：b 是 verified 時會把存著的換掉，舊紀錄不當證據（也是照收新讀數，只是 log 不同）
     let (h, ra, rb) = two_accounts();
-    let rec_b = json!({ "weekly_pct": 40, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(rb), "week_at": iso_secs(NOW - H) });
-    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_b }));
+    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_wk_old(40, rb) }));
     assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, ra))), NOW + MIN));
     assert!(!log(&h).contains("換成這次的"), "{}", log(&h));
+    // 舊檔沒有 verified 欄位讀進來就是 false；這次只收 5 小時、沒收每週，每週原本不是 verified 就維持不是
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk_old(70, ra), "b@x.test": rec_wk(40, rb) }));
+    assert!(!quota_of(&h, "a@x.test").verified);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((30.0, NOW + 2 * H)), None), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct, qa.verified), (Some(70), Some(70), false), "每週沒收，verified 不因為 5 小時收了就變 true");
+}
+
+#[test]
+fn 週期指紋_a_沒有存著的週期_新讀數等於別的帳號還沒過期的那一期_也要擋() {
+    // A 是新帳號（額度檔裡沒有）：新讀數的週期是 b 的，就是 b 的數字
+    let (h, _ra, rb) = two_accounts();
+    seed(&h, json!({ "b@x.test": rec_wk(40, rb) }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(Some((20.0, NOW + 2 * H)), Some((81.0, rb))), NOW + MIN));
+    assert!(!load_all(h.path()).contains_key("a@x.test"), "整筆不收，a 沒有紀錄");
+    let lg = log(&h);
+    assert!(lg.contains("別的帳號的數字") && lg.contains("沒有還沒過期的") && lg.contains(&iso_secs(rb)), "{lg}");
+    // A 存著的那一期已經過期：一樣要擋
+    let (h, ra, rb) = two_accounts();
+    let expired = rec_wk(70, NOW - DAY);
+    seed(&h, json!({ "a@x.test": expired, "b@x.test": rec_wk(40, rb) }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(None, Some((81.0, rb))), NOW + MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70), "不動");
+    // 正常新週期（不是別的帳號的）照收
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((81.0, ra))), NOW + 2 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(19));
+    // A 沒有存著的週期、新讀數也不是別的帳號的：照收
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "b@x.test": rec_wk(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((50.0, ra))), NOW + MIN));
+}
+
+#[test]
+fn 週期指紋_今天的情境_cwen_自己的視窗寫入_verified_紀錄後_it_存著的_cwen_週期會被換掉() {
+    // it@（a）底下是舊路徑寫的 cwen 的數字（owner=true、沒有 verified），cwen（b）還沒有紀錄
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk_old(19, rb) }));
+    // cwen 自己的視窗送來 rb：舊紀錄不算證據，照常收，而且這筆是 verified
+    assert!(feed(&h, "wb", UB, NOW, 1, status(None, Some((40.0, rb))), NOW + MIN));
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at.clone(), qb.owner, qb.verified), (Some(60), Some(iso_secs(rb)), true, true));
+    // it@ 自己的視窗送來真正的週期 ra：存著的 rb 是 verified 的 cwen 的那一期 → 換掉
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((60.0, ra))), NOW + 2 * MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at, qa.verified), (Some(40), Some(iso_secs(ra)), true));
+    assert!(log(&h).contains("換成這次的"), "{}", log(&h));
 }
 
 #[test]
