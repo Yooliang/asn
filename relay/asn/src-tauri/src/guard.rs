@@ -8,7 +8,11 @@
 //!   不開新的、也不關它（守護不關任何行程）。
 //! - ASN 不在、而且上次是正常結束（使用者按結束、關視窗、更新安裝、登出關機都會走 cleanup 寫 user-quit）：不動。
 //! - ASN 不在、上次不是正常結束（當掉、被系統以「停止回應」關掉、被工作管理員結束）：重開（帶 --background，縮在系統匣）。
+//! - ASN 不在、而且安裝程式正在跑（安裝資料夾裡 asn.exe 旁邊的 asn-installing 記號，30 分鐘內）：不動。安裝程式可能是強制
+//!   結束舊的 ASN（不會留 user-quit），這時重開會用舊路徑把 ASN 開回來、卡住檔案覆蓋。記號由安裝程式（installer-hooks.nsh）
+//!   在動手前寫、裝完清；新版開起來也清。放在安裝資料夾而不是 guard 資料夾：安裝程式不寫死資料夾識別名。
 //! - 一小時內已經重開 3 次：暫停自動重開，設定頁顯示「ASN 最近反覆被關閉，已暫停自動重開」，按「恢復」才再開始。
+//!   被「同一個視窗名只留一個」擋下的那次（ASN 其實還在，只是心跳檔不見）不算進去。
 //! 不會開出兩個：只在確認 ASN 不在時才開；同一時間只有一個守護在跑（guard.lock）；萬一撞上，ASN 本身的
 //! 「同一個視窗名只留一個」會讓後開的自己退出。
 //! 預設關：公開發佈的程式不替使用者建排程，要使用者自己勾。
@@ -62,6 +66,43 @@ pub enum Action {
     Relaunch,
     /// 一小時內重開太多次：暫停並記下
     Pause,
+    /// 不在、但安裝程式正在跑：不開，記一行
+    Installing,
+}
+
+/// 安裝中的記號（安裝程式寫在 $INSTDIR、裝完清）；檔名要和 installer-hooks.nsh 一致（有測試核對）
+pub const INSTALLING_FILE: &str = "asn-installing";
+/// 安裝中的記號超過這麼久算殘留（安裝中途被取消、當掉），不再擋
+pub const INSTALLING_STALE_MS: u64 = 30 * 60_000;
+/// 新開的 ASN 被「同一個視窗名只留一個」擋下時的結束碼（lib.rs 的 std::process::exit(3)）
+pub const EXIT_OTHER_INSTANCE: i32 = 3;
+/// 重開後等多久看它是不是馬上被擋下（被擋下的在幾秒內就會退出）
+const SPAWN_WATCH_MS: u64 = 30_000;
+
+/// 安裝中的記號還有效嗎：存在、而且沒超過 30 分鐘（`age_ms`＝檔案多久前寫的；讀不到時間當剛寫）
+pub fn installing_fresh(age_ms: Option<u64>) -> bool {
+    age_ms.is_some_and(|a| a < INSTALLING_STALE_MS)
+}
+
+/// 先看安裝中（ASN 不在時才看），再照一般規則判斷
+pub fn decide_all(alive: Option<Alive>, running: bool, installing: bool, user_quit: bool, r: &Relaunches, now: u64) -> Action {
+    if !running && installing {
+        return Action::Installing;
+    }
+    decide(alive, running, user_quit, r, now)
+}
+
+/// 重開之後怎麼記：被「同一個視窗名只留一個」擋下＝ASN 其實還在，不算一次重開
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spawned {
+    /// 開起來了（或看不出結果）：算一次
+    Started,
+    /// 被擋下：不算
+    OtherInstance,
+}
+
+pub fn spawned_of(exit_code: Option<i32>) -> Spawned {
+    if exit_code == Some(EXIT_OTHER_INSTANCE) { Spawned::OtherInstance } else { Spawned::Started }
 }
 
 /// 判斷（純函式，好測）。`running`＝alive.json 的 pid 還活著、而且確實是 asn.exe
@@ -127,11 +168,31 @@ fn write_relaunches(dir: &Path, r: &Relaunches) {
 pub fn user_quit(dir: &Path) -> bool {
     quit_path(dir).exists()
 }
+/// 安裝中的記號的位置：這支 asn.exe 旁邊（＝安裝資料夾）
+fn installing_marker() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join(INSTALLING_FILE))
+}
+/// 安裝中的記號：存在而且 30 分鐘內寫的
+pub fn installing_at(marker: &Path) -> bool {
+    let Ok(m) = fs::metadata(marker) else { return false };
+    let age = m.modified().ok().map(|t| t.elapsed().map(|e| e.as_millis() as u64).unwrap_or(0));
+    installing_fresh(Some(age.unwrap_or(0)))
+}
+/// 更新安裝沒有成功（安裝程式沒起來，ASN 還活著）：撤回 cleanup 留的「正常結束」記號、補一次心跳，
+/// 之後真的當掉守護照樣會重開
+pub fn note_still_running(dir: &Path, pid: u32, now: u64) {
+    let _ = fs::remove_file(quit_path(dir));
+    touch_alive(dir, pid, now);
+}
 
 /// ASN 開起來時：清掉「正常結束」的記號、寫心跳。要在「同一個視窗名只留一個」的檢查之後才呼叫（不然被擋下的那個會蓋掉別人的心跳）。
 /// 暫停中、而且最近一小時沒有重開紀錄（＝這次是使用者自己開的，不是在反覆當掉的循環裡）：解除暫停，之後真的當掉照樣會重開
 pub fn note_start(dir: &Path, pid: u32, now: u64) {
     let _ = fs::remove_file(quit_path(dir));
+    // 新版開起來＝安裝已經結束（安裝程式裝完也會清，這裡是保險）
+    if let Some(m) = installing_marker() {
+        let _ = fs::remove_file(m);
+    }
     touch_alive(dir, pid, now);
     let r = read_relaunches(dir);
     if r.paused && recent(&r, now) == 0 {
@@ -188,18 +249,21 @@ pub fn run_guard() -> i32 {
     let alive = read_alive(&dir);
     let running = alive.is_some_and(|a| crate::heartbeat::pid_alive(a.pid) && crate::heartbeat::is_asn_process(a.pid) == Some(true));
     let r = read_relaunches(&dir);
-    match decide(alive, running, user_quit(&dir), &r, now) {
+    match decide_all(alive, running, installing_marker().is_some_and(|m| installing_at(&m)), user_quit(&dir), &r, now) {
         Action::Nothing => {}
+        Action::Installing => log_line(&dir, now, "ASN 不在、安裝程式正在跑：不重開"),
         Action::LogHung => log_line(&dir, now, "ASN 還在，但超過 3 分鐘沒有更新心跳（可能卡住）；不開新的、不關它"),
         Action::Pause => {
             write_relaunches(&dir, &Relaunches { paused: true, ..r });
             log_line(&dir, now, "一小時內已重開 3 次，暫停自動重開");
         }
         Action::Relaunch => match relaunch() {
-            Ok(()) => {
+            Ok(Spawned::Started) => {
                 write_relaunches(&dir, &with_relaunch(&r, now));
                 log_line(&dir, now, "ASN 不在、上次不是正常結束：已重新開啟");
             }
+            // 心跳檔不見或寫不進去，但 ASN 其實還在：新開的被擋下，不算進一小時 3 次（不然會誤暫停）
+            Ok(Spawned::OtherInstance) => log_line(&dir, now, "心跳檔看不到 ASN，但 ASN 其實還在（新開的被擋下）；不算一次重開"),
             Err(e) => log_line(&dir, now, &format!("重新開啟失敗：{e}")),
         },
     }
@@ -207,11 +271,22 @@ pub fn run_guard() -> i32 {
     0
 }
 
-fn relaunch() -> Result<(), String> {
+/// 重開，並等最多 30 秒看新開的是不是馬上被「同一個視窗名只留一個」擋下（被擋下的幾秒內就退出、結束碼 3）。
+/// 30 秒內沒結束＝開起來了；不關它、不等它
+fn relaunch() -> Result<Spawned, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     use crate::nowin::NoWindow;
     // ASN 是視窗程式，no_window 只是不另開主控台、標準輸入接 null，不影響它自己的視窗
-    std::process::Command::new(exe).no_window().arg(crate::tray::BACKGROUND_FLAG).spawn().map(|_| ()).map_err(|e| e.to_string())
+    let mut child = std::process::Command::new(exe).no_window().arg(crate::tray::BACKGROUND_FLAG).spawn().map_err(|e| e.to_string())?;
+    let start = std::time::Instant::now();
+    while start.elapsed().as_millis() < u128::from(SPAWN_WATCH_MS) {
+        match child.try_wait() {
+            Ok(Some(st)) => return Ok(spawned_of(st.code())),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(500)),
+            Err(_) => break,
+        }
+    }
+    Ok(Spawned::Started)
 }
 
 // ───────── 工作排程 ─────────
@@ -328,7 +403,8 @@ pub fn query_args(name: &str) -> Vec<String> {
 }
 
 // 使用者的意思（guard\enabled）：勾選時寫、取消時刪。排程以系統上實際的為準，但手動覆蓋安裝時 Tauri 的安裝程式
-// 會先跑舊版的解除安裝（會刪排程），所以新版開起來時看到「有勾、排程卻不在」就照意思重建。
+// 可能先跑舊版的解除安裝（會刪排程；有畫面的安裝升級、降版時預設會跑，同版本預設不跑，/S 靜默安裝與自動更新不跑），
+// 所以新版開起來時看到「有勾、排程卻不在或指到別處」就照意思重建。
 // 真的解除安裝不刪這個檔（分不出是升級還是解除安裝）；使用者在解除安裝時勾「刪除應用程式資料」才會一起清掉。
 fn intent_path(dir: &Path) -> PathBuf {
     dir.join("enabled")
@@ -342,6 +418,33 @@ fn set_intent(dir: &Path, on: bool) {
     } else {
         let _ = fs::remove_file(intent_path(dir));
     }
+}
+
+// 排程指到哪個 asn.exe：建排程時記下（task-exe）。不從 schtasks /Query /XML 讀回來比對：它的輸出走系統碼頁，
+// 中文使用者名（C:\Users\小良哥\…）的路徑會變成問號，比不準。
+fn task_exe_path(dir: &Path) -> PathBuf {
+    dir.join("task-exe")
+}
+fn recorded_task_exe(dir: &Path) -> Option<PathBuf> {
+    fs::read_to_string(task_exe_path(dir)).ok().filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+fn record_task_exe(dir: &Path, exe: Option<&Path>) {
+    match exe {
+        Some(e) => {
+            let _ = crate::write_atomic(&task_exe_path(dir), &e.display().to_string());
+        }
+        None => {
+            let _ = fs::remove_file(task_exe_path(dir));
+        }
+    }
+}
+/// Windows 路徑不分大小寫
+fn same_exe(a: &Path, b: &Path) -> bool {
+    a.as_os_str().to_string_lossy().to_lowercase() == b.as_os_str().to_string_lossy().to_lowercase()
+}
+/// 開起來時要不要重建排程：有勾，而且排程不在、或沒有記錄、或記錄的路徑不是這次的 asn.exe（改裝到別的資料夾）
+pub fn needs_rebuild(intended: bool, exists: bool, recorded: Option<&Path>, exe: &Path) -> bool {
+    intended && !(exists && recorded.is_some_and(|r| same_exe(r, exe)))
 }
 
 #[cfg(windows)]
@@ -415,19 +518,23 @@ pub fn run_remove() -> i32 {
     0
 }
 
-/// ASN 開起來時（背景執行緒）：有勾、排程卻不在（手動覆蓋安裝時被舊版的解除安裝刪掉）就照意思重建。開發版不建
+/// ASN 開起來時（背景執行緒）：有勾，但排程不在（覆蓋安裝時被舊版的解除安裝刪掉）、或排程指到的不是這次的 asn.exe
+/// （改裝到別的資料夾）就照意思重建（/F 覆寫）。開發版不建
 pub fn restore_from_intent() {
     let Some(dir) = guard_dir() else { return };
-    if !intended(&dir) || sys::exists() {
+    if !intended(&dir) {
         return;
     }
     let Ok(exe) = std::env::current_exe() else { return };
-    if crate::tray::is_dev_build_path(&exe) {
+    if crate::tray::is_dev_build_path(&exe) || !needs_rebuild(true, sys::exists(), recorded_task_exe(&dir).as_deref(), &exe) {
         return;
     }
     let now = crate::heartbeat::now_ms();
     match sys::set(true, &exe) {
-        Ok(()) => log_line(&dir, now, "有勾自動重新開啟、排程卻不在：已照設定重建"),
+        Ok(()) => {
+            record_task_exe(&dir, Some(&exe));
+            log_line(&dir, now, "有勾自動重新開啟，但排程不在或指到別的位置：已照設定重建");
+        }
         Err(e) => log_line(&dir, now, &format!("照設定重建排程失敗：{e}")),
     }
 }
@@ -479,6 +586,7 @@ pub async fn guard_set(on: bool) -> Result<GuardView, String> {
         if let Some(d) = guard_dir() {
             let _ = fs::create_dir_all(&d);
             set_intent(&d, on);
+            record_task_exe(&d, on.then_some(exe.as_path()));
             if !on {
                 resume(&d);
             }
@@ -655,5 +763,73 @@ mod tests {
         assert_eq!(view(true, false, Some(exe)).paused, "");
         assert_eq!(view(true, false, Some(Path::new(r"G:\x\target\release\asn.exe"))).blocked, DEV_BUILD_MSG);
         assert_eq!(view(false, true, Some(exe)).paused, "", "沒開就不顯示暫停");
+    }
+
+    #[test]
+    fn 安裝中_不在也不重開_記號超過_30_分鐘不理_在跑時照常() {
+        assert!(installing_fresh(Some(0)) && installing_fresh(Some(INSTALLING_STALE_MS - 1)));
+        assert!(!installing_fresh(Some(INSTALLING_STALE_MS)) && !installing_fresh(None));
+        assert_eq!(decide_all(None, false, true, false, &r(&[], false), NOW), Action::Installing, "強制結束（沒有 user-quit）也不開");
+        assert_eq!(decide_all(None, false, false, false, &r(&[], false), NOW), Action::Relaunch);
+        assert_eq!(decide_all(a(HUNG_AFTER_MS + 1), true, true, false, &r(&[], false), NOW), Action::LogHung, "在跑就照原本的判斷");
+        let d = tempfile::tempdir().unwrap();
+        let m = d.path().join(INSTALLING_FILE);
+        assert!(!installing_at(&m));
+        fs::write(&m, "1").unwrap();
+        assert!(installing_at(&m), "剛寫的記號有效");
+    }
+
+    #[test]
+    fn 安裝程式掛勾_動手前寫安裝中記號_裝完刪掉_檔名一致() {
+        let nsh = include_str!("../installer-hooks.nsh").replace("\r\n", "\n");
+        let body = |name: &str| {
+            let start = nsh.find(&format!("!macro {name}\n")).unwrap_or_else(|| panic!("少了 {name}"));
+            let rest = &nsh[start..];
+            rest[..rest.find("!macroend").unwrap()].to_string()
+        };
+        let marker = format!("\"$INSTDIR\\{INSTALLING_FILE}\"");
+        let pre = body("NSIS_HOOK_PREINSTALL");
+        let open = pre.find(&format!("FileOpen $R9 {marker} w")).expect("PREINSTALL 要寫安裝中記號");
+        assert!(open < pre.find("Rename").unwrap(), "要在動任何檔案之前寫");
+        assert!(pre.contains("Push $R9") && pre.contains("Pop $R9"), "不弄亂範本的暫存器");
+        assert!(body("NSIS_HOOK_POSTINSTALL").contains(&format!("Delete {marker}")), "裝完刪掉");
+    }
+
+    #[test]
+    fn 被單實例擋下的那次不算重開() {
+        assert_eq!(spawned_of(Some(EXIT_OTHER_INSTANCE)), Spawned::OtherInstance);
+        assert_eq!(spawned_of(None), Spawned::Started, "30 秒內沒結束＝開起來了");
+        assert_eq!(spawned_of(Some(1)), Spawned::Started, "別的原因馬上結束照樣算（一直失敗才會暫停）");
+        let lib = include_str!("lib.rs");
+        assert!(lib.contains("std::process::exit(3);"), "單實例擋下的結束碼要和 EXIT_OTHER_INSTANCE 一致");
+    }
+
+    #[test]
+    fn 排程指到別的_asn_exe_就重建_路徑不分大小寫() {
+        let exe = Path::new(r"C:\Users\小良哥\AppData\Local\ASN\asn.exe");
+        assert!(!needs_rebuild(false, false, None, exe), "沒勾不建");
+        assert!(needs_rebuild(true, false, Some(exe), exe), "排程不在");
+        assert!(needs_rebuild(true, true, None, exe), "沒有記錄（舊測試版建的）：重建一次");
+        assert!(needs_rebuild(true, true, Some(Path::new(r"D:\ASN\asn.exe")), exe), "改裝到別的資料夾");
+        assert!(!needs_rebuild(true, true, Some(exe), exe));
+        assert!(!needs_rebuild(true, true, Some(Path::new(r"c:\users\小良哥\appdata\local\asn\ASN.EXE")), exe));
+        let d = tempfile::tempdir().unwrap();
+        record_task_exe(d.path(), Some(exe));
+        assert_eq!(recorded_task_exe(d.path()).as_deref(), Some(exe));
+        record_task_exe(d.path(), None);
+        assert_eq!(recorded_task_exe(d.path()), None);
+    }
+
+    #[test]
+    fn 更新安裝失敗_撤回正常結束記號_補心跳() {
+        let d = tempfile::tempdir().unwrap();
+        note_user_quit(d.path());
+        note_still_running(d.path(), 9, NOW);
+        assert!(!user_quit(d.path()));
+        assert_eq!(read_alive(d.path()), Some(Alive { pid: 9, t: NOW }));
+        let up = include_str!("updater.rs").replace("\r\n", "\n");
+        let i = up.find("if let Err(e) = update.install(bytes) {").expect("install 失敗要接住");
+        assert!(up[i..].chars().take(300).collect::<String>().contains("crate::guard::note_still_running("), "install 回錯時要清掉記號");
+        assert!(up[..i].rfind("crate::cleanup(app);").is_some());
     }
 }

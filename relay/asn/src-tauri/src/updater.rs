@@ -130,7 +130,14 @@ async fn run_install(app: &AppHandle, update: &Update) -> Result<(), String> {
         .map_err(|e| format!("下載或驗簽失敗：{e}"))?;
     // 安裝程式一啟動就會結束本程式：先清掉心跳檔
     crate::cleanup(app);
-    update.install(bytes).map_err(|e| format!("安裝失敗：{e}"))?;
+    if let Err(e) = update.install(bytes) {
+        // 安裝程式沒起來、ASN 還活著：撤回 cleanup 留的「正常結束」記號，不然之後真的當掉守護不會重開（todo-next-191 B1）
+        #[cfg(desktop)]
+        if let Some(gd) = crate::guard::guard_dir() {
+            crate::guard::note_still_running(&gd, std::process::id(), crate::heartbeat::now_ms());
+        }
+        return Err(format!("安裝失敗：{e}"));
+    }
     Ok(())
 }
 
