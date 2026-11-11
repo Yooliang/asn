@@ -35,7 +35,7 @@ import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
-const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+const STATUS = { online: '線上', busy: '忙碌', running: '執行中', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
 
 export const ChatPane = {
   name: 'ChatPane',

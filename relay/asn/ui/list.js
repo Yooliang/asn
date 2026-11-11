@@ -91,7 +91,7 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 installUiLog({ invoke })
 
 const { createApp, reactive, ref, computed, watch, nextTick } = Vue
-const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
+const STATUS = { online: '線上', busy: '忙碌', running: '執行中', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 
 // ---------- 音效（WebAudio 合成） ----------

@@ -19,7 +19,7 @@ export const DEVICE_TAB_MAX = 6   // 設備頁籤超過 6 個時，第 6 個起�
 export const MORE_KEY = 'more'
 
 // 名字後面的灰字狀態：線上不加
-const NOTE = { busy: '忙碌', away: '暫離', offline: '離線' }
+const NOTE = { busy: '忙碌', running: '執行中', away: '暫離', offline: '離線' }
 export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
 
 // 組標題：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線

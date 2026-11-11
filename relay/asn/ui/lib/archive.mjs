@@ -4,7 +4,7 @@
 // 往來記錄、未讀、通知都不動；封存的夥伴再寄信來，或封存時離線、之後重新上線，後台會自動解除。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { withoutAsn } from './roster.mjs'
-import { isAiPartner, loginBlock, menuItems, opErrorText } from './partner-ops.mjs'
+import { isAiPartner, isProcessEntry, loginBlock, menuItems, opErrorText } from './partner-ops.mjs'
 
 export const ARCHIVE_GROUP_KEY = '__archived'
 export const isArchived = f => f?.archived === true
@@ -48,7 +48,7 @@ export function archiveMenuItem(friend, ctx = {}) {
 // 不是 AI 夥伴（人、手機、收發室、ASN 自己的視窗）回空陣列
 export function manageItems(friend, ctx = {}) {
   if (!isAiPartner(friend, ctx)) return []
-  return [...menuItems(friend, ctx), archiveMenuItem(friend, ctx)]
+  return isProcessEntry(friend) ? menuItems(friend, ctx) : [...menuItems(friend, ctx), archiveMenuItem(friend, ctx)]
 }
 
 // 送給 Rust 的內容：節點與名字來自名單；有夥伴 ID 就帶（內部用，畫面不顯示）
