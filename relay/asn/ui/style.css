@@ -54,7 +54,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .dp.sm>span{font-size:15px}
 .dp.xl{width:104px;height:104px;padding:4px;border-radius:10px}
 .dp.xl>span{font-size:42px;border-radius:6px}
-.dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline,.dp.st-stopped,.dot.st-stopped,.dp.st-running,.dot.st-running{--frame:var(--offline)}
+.dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline,.dp.st-stopped,.dot.st-stopped{--frame:var(--offline)} .dp.st-running,.dot.st-running{--frame:var(--offline)}
 /* 活躍度頁籤的燈（#372、小良哥 #950）：活躍綠、閒置黃、離線紅；用 lv- 跟上線狀態的 st-（離線＝灰）分開。封存的夥伴不分級，名單裡一律灰（list.html 已封存群組） */
 .dot.lv-active{--frame:var(--online)} .dot.lv-idle{--frame:var(--away)} .dot.lv-offline{--frame:var(--busy)}
 
