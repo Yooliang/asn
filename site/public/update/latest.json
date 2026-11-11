@@ -1,11 +1,11 @@
 {
-  "version": "0.2.14",
-  "notes": "- 修正：同一台電腦同時開著登入不同帳號的 Claude 視窗時，每個視窗的額度會記到它自己登入的帳號，不會再算到別的帳號頭上。\n- 修正：信寄出了、附件卻沒附齊時，寄件人會收到通知，寫出哪些附件沒附上。\n- 改善：帳號卡片的設備按鈕只寫設備名，正在用的那台用黃底標出來；「開放查詢」改放在右上角的標籤列。\n- 改善：電腦版的「雲端代理」跟手機版一樣，在設定裡自己一類，排在「帳號」後面。\n- 改善：整合模式的視窗太窄、放不下兩個窗格時，一次只顯示一個，上方有「‹ 名單」可以回到名單；寬度夠時外觀不變。\n- 修正：手機的夥伴頁不會再列出已經併進「通知」的舊收發室；從舊連結點進去也不會再開到那些舊對話。\n- 改善：App 沒開、在背景或被滑掉、螢幕關著時，寄給本人的信會在幾秒內跳出「ASN 有新訊息」的通知；同一分鐘內的多封只響一次（要在手機的「設置 → 提醒」打開「App 關著時也通知我」）。\n- 修正：Grok 的額度重置時間顯示正確。\n- 改善：權限確認框裡整排的分隔線改成一條細線。\n- 改善：手機對話頁的「對話」「終端」兩顆按鈕合成一顆切換鈕，放在最後面。\n- 已知問題：收到推播後約 3 分鐘內，再來的信可能不會再響（第一則通知仍在），0.2.15 修正。",
-  "pub_date": "2026-11-10T09:39:56.845Z",
+  "version": "0.2.15",
+  "notes": "- 修正：終端服務偶爾會當掉、讓夥伴斷線好幾個小時的問題。安裝檔附的終端程式換成修好這個問題的版本。\n- 修正：收到推播之後約 3 分鐘內，再來的信不會響（0.2.14 的已知問題）。現在手機在背景時都會響。\n- 改善：終端服務停了，或 ASN 看不到它時，會寄通知給你。\n- 改善：回信暫時寄不出去時，會先保管起來，網路恢復後自動補寄，對方不會收到兩封；保管的檔案壞掉時會通知你。\n- 改善：Claude 跳出要你確認外來訊息的框時，電腦和手機都會提示，要你本人按了才放行；在別台打字時遇到這種框，也會先停下來。不放行時送出的是取消，不是 Enter。\n- 修正：確認框按 Enter 不再等於允許。別台要在這台打字時跳出的確認框，第一顆按鈕改成「不允許」，要明確按「允許」才會放行。\n- 修正：別台要在這台打字的確認框，逾時或取消之後再按，也不會放行。\n- 改善：自己帳號的電腦之間，在別台打字不用每次都按允許。第一次還是會問；在別台打字時，被打字的那台照樣會亮紅條，隨時可以按結束。想每次都問，可以在設定 → 認得的電腦取消勾選。\n- 改善：電腦版的系統通知移到左側固定的「通知」頁籤。\n- 改善：電腦版看終端時，狀態改到視窗最下方的狀態列，終端區和訊息框對齊。\n- 改善：整合模式的視窗變窄時，對話區的排版會跟著調整，不會被擠壞。\n- 改善：設定頁會說明這次夥伴為什麼開在一般視窗，以及怎麼恢復。\n- 修正：終端畫面裡有 emoji 時，游標位置對不上。\n- 改善：手機看終端時，輸入框留在最下面，終端縮到它上方；有新畫面時會自動捲到游標那一列，你往上捲著看的時候不會被拉回去。\n- 修正：已經過了重置時間的額度，不會再被當成還在計算。\n- 改善：切換帳號、存設定時畫面比較不會卡住。\n- 已知問題：需要你本人確認的框，手機 App 關著時不會跳通知，要打開 App 才看得到，下一版修正。",
+  "pub_date": "2026-11-11T03:14:20.016Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjllVkxpZ08wR0s3bG5jQzFEUEc5Rnl3OG1kOHNUK3FoNmcyWDFRYklCNVIzV2doa3BZMmJFVWJkNkt2Z3g1R29XQzhpSkJNUnFFS3JLdE9JMXhqekFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjgyMTI0CWZpbGU6QVNOXzAuMi4xNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE0CjV3eUhoWmZobDN4Rm1QbUhOQmpiTXpjME9QZDMwbnVzQVlZU05Xem44SE5Na1JPbTExQ2tzTnBSdTJ1V1Q1R3BSY2x0SklBNmRueEl6bk9Wd1BPM0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.14_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlLTDVWL0ZOVEVmMEVKdVZkdEVzaS9kWkpDVnhCNmt1KzdrWi8zb01TM2xncmhLZVFQS29iOXJ5VHlyRVJuY3doeVlML2pTUkJmeS9LeUtNNkJCTFFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzU2NTc1CWZpbGU6QVNOXzAuMi4xNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE1CmhqODBmSk1UOFBmSiswckM2UzNtU1hEbUkrWTIvejVXYzZxU1V1eWEydjBVUlAxSGZrNnhXd0E4QnM1YTg2YVZWTFlBV0trdVZvYU90NVFYM3ZrWkR3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.15_x64-setup.exe"
     }
   }
 }
