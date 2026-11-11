@@ -119,7 +119,7 @@ struct Paths {
 
 fn paths(dir: &Path, node: &str) -> Paths {
     Paths {
-        key: dir.join(format!("{node}.key")),
+        key: secret_file::node_key_path(dir, node),
         new_key: dir.join(format!("{node}.key.new")),
         state: dir.join(STATE_FILE),
         marker: dir.join(MARKER),
@@ -534,6 +534,10 @@ mod tests {
         v.sort();
         v
     }
+    fn sorted(mut v: Vec<String>) -> Vec<String> {
+        v.sort();
+        v
+    }
     fn cur_is(s: &Sim, key: &str) -> bool {
         *s.cur.lock().unwrap() == key_hash(key)
     }
@@ -558,7 +562,7 @@ mod tests {
         assert!(k.starts_with("NEW-KEY"), "金鑰檔換成新的");
         assert!(cur_is(&s, &k) && !cur_is(&s, OLD));
         assert_eq!(s.adopted.lock().unwrap().as_slice(), [k.clone()], "客戶端換上新金鑰");
-        assert_eq!(names(d.path()), vec![format!("{NODE}.key"), MARKER.to_string()]);
+        assert_eq!(names(d.path()), sorted(vec![format!("{NODE}.key"), MARKER.to_string()]));
         assert!(s.auth(&k), "新金鑰後台認");
         assert!(!s.auth(OLD), "用過新金鑰後舊的失效");
         no_plaintext(d.path());
@@ -683,7 +687,7 @@ mod tests {
         let k = key_file(d.path());
         assert!(cur_is(&s, &k) && k.starts_with("NEW-KEY"));
         assert_eq!(s.adopted.lock().unwrap().len(), 1);
-        assert_eq!(names(d.path()), vec![format!("{NODE}.key"), MARKER.to_string()]);
+        assert_eq!(names(d.path()), sorted(vec![format!("{NODE}.key"), MARKER.to_string()]));
     }
 
     #[tokio::test]
@@ -697,7 +701,7 @@ mod tests {
         std::fs::rename(&p.new_key, &p.key).unwrap();
         let k = key_file(d.path());
         assert_eq!(run_once(&s, d.path(), NODE).await, Outcome::Done);
-        assert_eq!(names(d.path()), vec![format!("{NODE}.key"), MARKER.to_string()]);
+        assert_eq!(names(d.path()), sorted(vec![format!("{NODE}.key"), MARKER.to_string()]));
         assert_eq!(key_file(d.path()), k, "金鑰檔沒動");
         assert_eq!(s.rotations.load(Ordering::SeqCst), 1);
         assert_eq!(run_once(&s, d.path(), NODE).await, Outcome::Skipped(Skip::AlreadyDone));
