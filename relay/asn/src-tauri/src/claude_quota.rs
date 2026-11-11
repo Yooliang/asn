@@ -105,6 +105,19 @@ pub fn parse_iso_secs(s: &str) -> Option<i64> {
     Some((days * 86400 + hh * 3600 + mm * 60 + ss) * 1000)
 }
 
+/// 帶毫秒也認的 ISO（`2026-11-09T12:00:00.123Z`）→ 毫秒；Claude 對話紀錄的時間戳是這個格式。其他格式回 None
+pub(crate) fn parse_iso_ms(s: &str) -> Option<i64> {
+    if let Some(ms) = parse_iso_secs(s) {
+        return Some(ms);
+    }
+    let (head, frac) = s.strip_suffix('Z')?.split_once('.')?;
+    if head.len() != 19 || frac.is_empty() || !frac.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let ms: i64 = frac.chars().chain("000".chars()).take(3).collect::<String>().parse().ok()?;
+    Some(parse_iso_secs(&format!("{head}Z"))? + ms)
+}
+
 // ---------- 解析 ----------
 fn used_to_left(v: &Value) -> Option<u8> {
     let used = v.as_f64().filter(|u| u.is_finite() && *u >= 0.0)?;
@@ -230,63 +243,29 @@ fn log_changes(home: &Path, st: &mut state::State, m: &merge::Merged, now_ms: i6
     merge::log_skipped(home, &fresh, now_ms);
 }
 
-/// 身分剛換過、這個帳號沒有基準時：兩條各自要「同一組新重置時間連續 3 次、隔 10 分鐘」才放行，沒確認的那條這次不收。
-/// 同一台可能還開著舊帳號的視窗交錯送別組數字，所以第一筆不能直接收（#1184）
-fn rebase_gate(st: &mut state::State, mut p: Parsed, now_ms: i64) -> Parsed {
-    match p.week_reset_ms {
-        Some(r) => {
-            let (ok, next) = merge::confirm_week(st.pending_week(), r, now_ms);
-            st.set_pending_week(next);
-            if !ok {
-                p.weekly_pct = None;
-                p.week_reset_ms = None;
-            }
-        }
-        None => p.weekly_pct = None,
-    }
-    match p.five_reset_ms {
-        Some(r) => {
-            let (ok, next) = merge::confirm_week(st.pending_five(), r, now_ms);
-            st.set_pending_five(next);
-            if !ok {
-                p.five_hour_pct = None;
-                p.five_reset_ms = None;
-            }
-        }
-        None => p.five_hour_pct = None,
-    }
-    p
-}
-
 /// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log（同一原因只記一次）。
-/// `reset_base`＝登入身分剛換過：先丟掉這個 email 舊的紀錄，這次照新帳號的數字收。
+/// `read_ms`＝這筆數字的資料時間（對話紀錄裡最後一筆 assistant 回應的時間）。
+/// `clear_unowned`＝這個帳號在額度檔裡那筆沒有「有身分」的標記：舊辦法記的，可能混進別的帳號的數字，先備份、清掉，這次照新數字收；
+/// 備份失敗就不清（留著比丟掉安全），這筆也不蓋有身分的標記，下次再試。
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
-fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base: bool, owned: bool, now_ms: i64) -> Result<bool, String> {
+fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::State, clear_unowned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
-    let mut reset_base = reset_base;
-    // 備份失敗、這次沒清舊基準：這筆還混著舊基準，不能蓋「有身分」標記，否則之後永遠不會再清
+    let mut clear = clear_unowned && all.contains_key(email);
     let mut backup_failed = false;
-    if reset_base && owned && all.contains_key(email) && !owner_store::backup_quota_file(home) {
-        // 備份失敗就不清舊基準（留著比丟掉安全），下次再試
+    if clear && !owner_store::backup_quota_file(home) {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
-        reset_base = false;
+        clear = false;
         backup_failed = true;
     }
-    let dropped = reset_base && all.remove(email).is_some();
-    if dropped && owned {
-        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）
-", iso_secs(now_ms)));
+    let dropped = clear && all.remove(email).is_some();
+    if dropped {
+        merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）\n", iso_secs(now_ms)));
     }
-    let p = if st.rebase && !all.contains_key(email) { rebase_gate(st, p, now_ms) } else { p };
-    let m = merge::merge_full(merge::Vendor::Claude, all.get(email), &p, st.pending_week(), now_ms);
-    st.set_pending_week(m.pending_week);
+    let m = merge::merge_full(all.get(email), &p, read_ms, now_ms);
     log_changes(home, st, &m, now_ms);
     let took = m.quota.is_some();
-    if took {
-        st.rebase = false;
-    }
     if let Some(mut q) = m.quota {
-        q.owner = owned && !backup_failed;
+        q.owner = !backup_failed;
         all.insert(email.to_string(), q);
     } else if !dropped {
         return Ok(false);
@@ -304,36 +283,34 @@ fn record(home: &Path, email: &str, p: Parsed, st: &mut state::State, reset_base
     Ok(took)
 }
 
-/// 狀態列掛鉤：把輸入裡的額度記在目前登入的帳號底下。有記下回 true；
-/// 沒登入、沒額度、輸入太大、兩條都判斷成不收（舊數字或別的帳號）或寫檔失敗回 false。
-/// 登入身分（email 與 accountUuid）跟上次看到的不一樣就重設該帳號的基準（#1184）；
-/// 讀不到身分＝沒登入，照舊什麼都不記。
+/// 狀態列掛鉤：把輸入裡的額度記在「這個視窗自己的帳號」底下。有記下回 true；
+/// 沒額度、輸入太大、沒身分、取不到資料時間、兩條都判斷成不收或寫檔失敗回 false。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     let cfg = owner::config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
     hook_in(home, &cfg, input, now_ms)
 }
 
 /// 同 [`hook`]，指定 Claude 設定資料夾（測試不碰真實環境變數）。
-/// 狀態列輸入帶 transcript_path、而且那個對話紀錄裡找得到這個視窗的帳號身分時（#1185），額度記到那個帳號底下，
-/// 不看現在 `.claude.json` 登入的是誰；帶了 transcript_path 卻解不出身分就這次不記；
-/// 完全沒帶 transcript_path（舊版 Claude Code）才走舊辦法（記在目前登入的帳號，換身分要連續確認）。
+/// 帳號與資料時間都從這個視窗的對話紀錄（transcript_path）來（#1185、#1266）：
+/// - 沒帶 `transcript_path`（舊版 Claude Code）：不收，只記下「看過舊版視窗」，畫面據此寫一句固定的人話（`legacy_email`）。
+/// - 帶了但解不出身分（還沒寫出 session-owner、被擠出檔尾、格式壞、路徑不安全）或取不到最後一筆 assistant 回應的時間戳：這次不記。
+/// - 都有：額度記到該帳號底下，資料時間用那個時間戳；比記著的舊就不收（閒置的視窗會一直重送舊數字）。
 pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
-    match owner::resolve(home, cfg, input) {
-        Some(o) => hook_owned(home, cfg, &o, parsed, now_ms),
-        // 有帶 transcript_path 卻解不出身分（還沒寫出 session-owner、被擠出檔尾、最後一筆壞了、路徑不安全）：
-        // 這個視窗是誰還不明，這次不記，不能拿「現在登入的是誰」去猜（會把別的帳號的數字記進來）
-        None if owner::transcript_given(input) => false,
-        // 完全沒帶 transcript_path 的舊版 Claude Code 才走舊辦法
-        None => hook_legacy(home, parsed, now_ms),
+    if !owner::transcript_given(input) {
+        note_legacy(home, now_ms);
+        return false;
     }
+    let Some((o, last_ms)) = owner::resolve_timed(home, cfg, input) else { return false };
+    let Some(read_ms) = last_ms else { return false };
+    hook_owned(home, cfg, &o, parsed, read_ms, now_ms)
 }
 
 /// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
-fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms: i64) -> bool {
+fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, read_ms: i64, now_ms: i64) -> bool {
     let Some(email) = claude_accounts::email_of_account_uuid(home, cfg, &o.account_uuid) else {
         owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
         return false;
@@ -342,8 +319,8 @@ fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms:
     let mut all_st = before.clone();
     let mut st = all_st.take_owned(&email);
     // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
-    let reset_base = load_all(home).get(&email).is_some_and(|q| !q.owner);
-    let r = record(home, &email, parsed, &mut st, reset_base, true, now_ms).unwrap_or(false);
+    let clear_unowned = load_all(home).get(&email).is_some_and(|q| !q.owner);
+    let r = record(home, &email, parsed, read_ms, &mut st, clear_unowned, now_ms).unwrap_or(false);
     all_st.put_owned(&email, st);
     if all_st != before {
         state::save(home, &all_st);
@@ -351,55 +328,26 @@ fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, now_ms:
     r
 }
 
-/// 登入身分在狀態檔裡的樣子：email 與 accountUuid 的雜湊（`h1:` 開頭、SHA-256 十六進位），狀態檔裡不留明文 email。
-/// 只用來比「是不是同一個身分」，不是安全邊界；換成別的版本號（h2:…）時舊值就當作沒看過。
-fn identity_key(email: &str, uuid: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b"asn-claude-identity-v1\0");
-    h.update(email.as_bytes());
-    h.update(b"\0");
-    h.update(uuid.as_bytes());
-    let d = h.finalize();
-    format!("h1:{}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+/// 舊版視窗（沒帶 transcript_path）最近一次被看到的時間：每 10 分鐘最多寫一次，狀態列叫得很勤，不能每次都寫檔
+const LEGACY_REWRITE_MS: i64 = 10 * 60_000;
+/// 畫面上提示「升級 Claude Code」要看多久內有舊版視窗
+const LEGACY_SHOW_MS: i64 = 30 * 60_000;
+
+fn note_legacy(home: &Path, now_ms: i64) {
+    let mut st = state::load(home);
+    if st.legacy_at.as_deref().and_then(parse_iso_secs).is_some_and(|t| now_ms - t < LEGACY_REWRITE_MS) {
+        return;
+    }
+    st.legacy_at = Some(iso_secs(now_ms));
+    state::save(home, &st);
 }
 
-/// 剛換帳號、還在等確認的帳號（舊辦法的「連續 3 次、隔 10 分鐘」）：目前登入的就是狀態檔記的那個身分、
-/// 狀態檔標了「等確認」、而且額度檔裡還沒有它的紀錄時，回它的 email；畫面據此寫「約 10 分鐘後顯示額度」
-pub fn waiting_email(home: &Path) -> Option<String> {
+/// 目前登入的帳號，如果最近有舊版視窗在跑、而且額度檔還沒有它的紀錄：回它的 email；畫面據此寫「升級 Claude Code 後才會顯示額度」
+pub fn legacy_email(home: &Path, now_ms: i64) -> Option<String> {
     let st = state::load(home);
-    if !st.rebase {
-        return None;
-    }
-    let (email, uuid) = claude_accounts::current_identity(home)?;
-    (st.identity.as_deref() == Some(identity_key(&email, &uuid).as_str()) && !load_all(home).contains_key(&email)).then_some(email)
-}
-
-fn hook_legacy(home: &Path, parsed: Parsed, now_ms: i64) -> bool {
-    let Some((email, uuid)) = claude_accounts::current_identity(home) else { return false };
-    // 這個帳號的紀錄已經是有身分的（owner 標記）：舊辦法猜出來的數字不能蓋掉它
-    if load_all(home).get(&email).is_some_and(|q| q.owner) {
-        return false;
-    }
-    let before = state::load(home);
-    let ident = identity_key(&email, &uuid);
-    let mut st = before.clone();
-    let mut reset_base = false;
-    // 舊版狀態檔存的是明文 `email|uuid`：認得就當同一個身分，順便換成雜湊，不會因為格式升級就誤判成換帳號
-    let legacy_plain = format!("{email}|{uuid}");
-    if st.identity.as_deref() == Some(legacy_plain.as_str()) {
-        st.identity = Some(ident.clone());
-    }
-    if st.identity.as_deref() != Some(ident.as_str()) {
-        // 第一次看到（沒有狀態檔）只記下身分，不丟東西；真的從別的身分換過來才重設基準
-        reset_base = st.identity.is_some();
-        st = state::State { identity: Some(ident), rebase: reset_base, owned: st.owned.clone(), ..state::State::default() };
-    }
-    let r = record(home, &email, parsed, &mut st, reset_base, false, now_ms).unwrap_or(false);
-    if st != before {
-        state::save(home, &st);
-    }
-    r
+    st.legacy_at.as_deref().and_then(parse_iso_secs).filter(|t| now_ms - t < LEGACY_SHOW_MS)?;
+    let (email, _) = claude_accounts::current_identity(home)?;
+    (!load_all(home).contains_key(&email)).then_some(email)
 }
 
 impl Quota {
@@ -455,14 +403,14 @@ pub fn without_expired(all: &HashMap<String, Quota>, now_ms: i64) -> HashMap<Str
 /// 前端讀本機各帳號的額度紀錄（email → 額度）。讀檔：在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn claude_quota_all() -> HashMap<String, Value> {
-    quota_all_with_waiting(&claude_accounts::claude_home())
+    quota_all_view(&claude_accounts::claude_home(), crate::heartbeat::now_ms() as i64)
 }
 
-/// 各帳號的額度紀錄；剛換帳號還在等確認、而且沒有紀錄的那個帳號回 `{ "waiting": true }`（畫面寫固定的一句人話）
-pub(crate) fn quota_all_with_waiting(home: &Path) -> HashMap<String, Value> {
+/// 各帳號的額度紀錄；最近有舊版視窗在跑、而且沒有紀錄的那個帳號回 `{ "legacy": true }`（畫面寫固定的一句人話）
+pub(crate) fn quota_all_view(home: &Path, now_ms: i64) -> HashMap<String, Value> {
     let mut out: HashMap<String, Value> = load_all(home).into_iter().filter_map(|(k, q)| serde_json::to_value(q).ok().map(|v| (k, v))).collect();
-    if let Some(e) = waiting_email(home) {
-        out.entry(e).or_insert_with(|| serde_json::json!({ "waiting": true }));
+    if let Some(e) = legacy_email(home, now_ms) {
+        out.entry(e).or_insert_with(|| serde_json::json!({ "legacy": true }));
     }
     out
 }
@@ -527,33 +475,55 @@ mod tests {
         std::fs::write(home.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": "11111111-2222-3333-4444-555555555555" } }).to_string()).unwrap();
     }
 
+    const UA: &str = "aaaaaaaa-1111-2222-3333-444444444444";
+
+    fn add_account(home: &std::path::Path, email: &str, uuid: &str) {
+        // 帳號庫的資料夾名是正規化（小寫）後的 email
+        let email = crate::claude_accounts::normalize_email(email).unwrap();
+        let d = home.join(".asn").join("claude-accounts").join(crate::claude_accounts::email_dir_name(&email));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("account.json"), json!({ "accountUuid": uuid, "emailAddress": email }).to_string()).unwrap();
+    }
+    /// 一個視窗回報一次：寫對話紀錄（session-owner＋最後一筆 assistant 回應，時間 ts）、狀態列輸入帶 transcript_path、呼叫掛鉤
+    fn feed(h: &tempfile::TempDir, email: &str, uuid: &str, name: &str, ts: i64, pad: usize, status_json: String, now: i64) -> bool {
+        add_account(h.path(), email, uuid);
+        let d = h.path().join(".claude").join("projects").join("p");
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join(format!("{name}.jsonl"));
+        let owner = json!({ "type": "session-owner", "accountUuid": uuid, "organizationUuid": "cccccccc-1111-2222-3333-444444444444" });
+        let asst = json!({ "type": "assistant", "timestamp": iso_secs(ts).replace('Z', ".250Z") });
+        std::fs::write(&f, format!("{}\n{owner}\n{asst}\n", json!({ "type": "user", "pad": "x".repeat(pad) }))).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&status_json).unwrap();
+        v["transcript_path"] = json!(f.to_string_lossy());
+        hook_in(h.path(), &h.path().join(".claude"), &v.to_string(), now)
+    }
+
     #[test]
-    fn 掛鉤把額度記在目前登入的帳號底下_不留任何其他內容() {
+    fn 掛鉤把額度記在視窗自己的帳號底下_不留任何其他內容() {
         let h = tmp_home();
-        write_cj(h.path(), "A@X.test");
-        assert!(hook(h.path(), &status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW));
+        assert!(feed(&h, "A@X.test", UA, "w1", NOW, 1, status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW));
         let all = load_all(h.path());
         let q = all.get("a@x.test").expect("以正規化 email 為鍵");
         assert_eq!((q.five_hour_pct, q.weekly_pct), (Some(62), Some(80)));
         assert_eq!(q.at, "2026-10-24T12:00:00Z");
-        // 守門：檔案只有額度四欄，沒有輸入裡的 token／工作階段／路徑
+        // 守門：檔案只有額度欄位，沒有輸入裡的 token／工作階段／路徑
         let raw = std::fs::read_to_string(quota_path(h.path())).unwrap();
-        for bad in ["SECRET", "oauth_token", "session_id", "cwd", "D:/x"] {
+        for bad in ["SECRET", "oauth_token", "session_id", "cwd", "D:/x", "transcript"] {
             assert!(!raw.contains(bad), "額度檔不該含 {bad}");
         }
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let mut keys: Vec<&String> = v["a@x.test"].as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "reset_at", "week_at", "week_reset_at", "weekly_pct"]);
+        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "owner", "reset_at", "week_at", "week_reset_at", "weekly_pct"]);
         assert_eq!((v["a@x.test"]["five_reset_at"].as_str(), v["a@x.test"]["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-26T07:33:20Z")), "兩條各存自己的重置時間");
     }
 
     #[test]
-    fn 掛鉤沒登入或沒額度就什麼都不寫() {
+    fn 掛鉤沒帶身分或沒額度就什麼都不寫() {
         let h = tmp_home();
-        assert!(!hook(h.path(), &status(1.0, 1_792_850_400, 1.0, 1_793_000_000), NOW), "沒登入");
-        assert!(!quota_path(h.path()).exists());
         write_cj(h.path(), "a@x.test");
+        assert!(!hook(h.path(), &status(1.0, 1_792_850_400, 1.0, 1_793_000_000), NOW), "沒帶 transcript_path（舊版）不收");
+        assert!(!quota_path(h.path()).exists());
         assert!(!hook(h.path(), "{}", NOW), "沒額度欄位");
         assert!(!quota_path(h.path()).exists());
     }
@@ -561,22 +531,15 @@ mod tests {
     #[test]
     fn 同一帳號覆寫_不同帳號並存_最多留_20_個() {
         let h = tmp_home();
-        write_cj(h.path(), "a@x.test");
-        hook(h.path(), &status(10.0, 1_792_850_400, 10.0, 1_793_000_000), NOW);
-        hook(h.path(), &status(50.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 60_000);
-        // 換身分後新帳號要同一組重置時間連續 3 次、隔 10 分鐘才收（#1184）：每個帳號照這個節奏送
-        let confirm = |email: &str, used: f64, t: i64| {
-            write_cj(h.path(), email);
-            for k in 0..3 {
-                hook(h.path(), &status(used, 1_793_000_000, used, 1_793_000_000), t + k * 5 * 60_000);
-            }
-        };
-        confirm("b@x.test", 70.0, NOW + 120_000);
+        assert!(feed(&h, "a@x.test", UA, "wa", NOW, 1, status(10.0, 1_792_850_400, 10.0, 1_793_000_000), NOW));
+        assert!(feed(&h, "a@x.test", UA, "wa", NOW + 60_000, 2, status(50.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 60_000));
+        assert!(feed(&h, "b@x.test", "bbbbbbbb-1111-2222-3333-444444444444", "wb", NOW + 120_000, 3, status(70.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 120_000));
         let all = load_all(h.path());
         assert_eq!(all["a@x.test"].five_hour_pct, Some(50));
         assert_eq!(all["b@x.test"].five_hour_pct, Some(30));
-        for i in 0..25 {
-            confirm(&format!("u{i}@x.test"), 5.0, NOW + 3_000_000 + i * 20 * 60_000);
+        for i in 0..25usize {
+            let t = NOW + 200_000 + i as i64 * 1000;
+            assert!(feed(&h, &format!("u{i}@x.test"), &format!("{:08x}-0000-0000-0000-000000000000", i + 1), &format!("w{i}"), t, i, status(5.0, 1_792_850_400, 5.0, 1_793_000_000), t));
         }
         let all = load_all(h.path());
         assert_eq!(all.len(), 20);
@@ -767,8 +730,7 @@ mod tests {
     #[test]
     fn 回報只對有紀錄的_claude_帳號帶額度四欄_其餘維持原樣() {
         let h = tmp_home();
-        write_cj(h.path(), "a@x.test");
-        hook(h.path(), &status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW);
+        assert!(feed(&h, "a@x.test", UA, "w1", NOW, 1, status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW));
         let v = build_report_with_quota(&[acct("a@x.test", true), acct("b@x.test", false)], None, &load_all(h.path()));
         assert_eq!(v["accounts"][0], json!({ "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true, "five_hour_pct": 62, "weekly_pct": 80, "reset_at": "2026-10-24T14:00:00Z", "at": "2026-10-24T12:00:00Z",
             "five_reset_at": "2026-10-24T14:00:00Z", "week_reset_at": "2026-10-26T07:33:20Z",
@@ -803,7 +765,7 @@ mod tests {
         for b in banned {
             assert!(!body.contains(&b), "額度模組不該出現 {b}");
         }
-        // 只靠 .claude.json 的 email 欄位判斷目前帳號
+        // 畫面提示用目前登入的帳號（只看 .claude.json 的 email 欄位）
         assert!(body.contains("current_identity"));
     }
 

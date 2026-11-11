@@ -195,9 +195,6 @@ export const SettingsPanel = {
                   <span class="dv-vtog" v-if="st.quotaReaders && v.key === 'grok'">
                     <label class="chk"><input type="checkbox" :checked="st.quotaReaders.grok" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'grok', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.grok }}</span></label>
                   </span>
-                  <span class="dv-vtog" v-if="st.quotaReaders && v.key === 'gemini'">
-                    <label class="chk"><input type="checkbox" :checked="st.quotaReaders.agy" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'agy', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.agy }}</span></label>
-                  </span>
                   <span class="dv-vtog" v-if="v.key === 'claude' && (st.quotaHook || (st.quotaReaders && st.quotaReaders.extraDirs.length))">
                     <label class="chk" v-if="st.quotaHook"><input type="checkbox" :checked="st.quotaHook.toggleOn" :disabled="st.quotaHook.toggleDisabled" @change="$event.target.checked ? act('quota-hook-ask') : act('quota-hook-disconnect'); $event.target.checked = st.quotaHook.toggleOn" /><span>{{ st.quotaHook.toggle }}</span></label>
                     <label class="chk" v-if="st.quotaReaders && st.quotaReaders.extraDirs.length"><input type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.extra }}</span></label>
@@ -209,7 +206,6 @@ export const SettingsPanel = {
                 </div>
                 <div class="dv-vq" v-if="st.quotaReaders && v.key === 'gemini'">
                   <small>{{ QUOTA_TEXT.agyShort }}{{ QUOTA_TEXT.thisPc }}</small>
-                  <small v-if="st.quotaReaders.agy">{{ st.quotaReaders.agyAccount ? QUOTA_TEXT.agyAccount(st.quotaReaders.agyAccount) : QUOTA_TEXT.agyNoAccount }}</small>
                   <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
                   <details><summary>{{ QUOTA_TEXT.more }}</summary><small>{{ QUOTA_TEXT.agyNote }}</small></details>
                 </div>

@@ -1,39 +1,24 @@
-//! 額度掛鉤的小狀態檔（#1184）：`~/.asn/claude-quota-state.json`。跟額度檔分開，額度檔只放各帳號的額度。
-//! 內容只有：上次看到的登入身分（正規化 email 與 accountUuid 合成的字串，不含任何權杖）、每週那條待確認的重置時間
-//! （重置時間、次數、第一次的時間）、兩條各自最後記過的不收原因代碼（同一個原因連續發生只記一次）。
+//! 額度掛鉤的小狀態檔（#1184、#1266）：`~/.asn/claude-quota-state.json`。跟額度檔分開，額度檔只放各帳號的額度。
+//! 內容只有：各帳號兩條各自最後記過的不收原因代碼（同一個原因連續發生只記一次；鍵是 email，與額度檔一致）、
+//! 最近一次看到「沒帶 transcript_path 的舊版 Claude Code 視窗」的時間（畫面據此寫一句固定的人話）。
 //! 每次掛鉤是一個新行程，所以這些要存檔；ASN 重開也不會歸零。壞掉或讀不到就當空的，不影響記額度。
-use super::merge::Pending;
-use super::{iso_secs, parse_iso_secs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const MAX_BYTES: u64 = 32 * 1024;
-/// 有身分的視窗（#1185）各帳號自己的待確認與 log 狀態，最多留幾個帳號
+/// 各帳號自己的 log 去重狀態，最多留幾個帳號
 const MAX_OWNED: usize = 20;
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub(super) struct PendingRec {
-    reset_at: String,
-    count: u32,
-    first_at: String,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct State {
+    /// 最近一次看到舊版視窗（沒帶 transcript_path）的時間（UTC 秒的 ISO）；舊版不收，只記這個時間讓畫面提示升級
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) pending_week: Option<PendingRec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) pending_five: Option<PendingRec>,
-    /// 身分剛換過、這個帳號還沒有被確認的基準：數字要同一組重置時間連續確認才收（#1184）
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub rebase: bool,
+    pub legacy_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_five: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_week: Option<String>,
-    /// 視窗帶了帳號身分時，各帳號（email）自己的狀態（#1185）；每個只用待確認與 log 那幾欄
+    /// 各帳號（email）自己的 log 去重狀態；每個只用 logged 那兩欄
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub owned: std::collections::BTreeMap<String, State>,
 }
@@ -54,20 +39,6 @@ impl State {
             let Some(k) = self.owned.keys().next().cloned() else { break };
             self.owned.remove(&k);
         }
-    }
-    pub fn pending_week(&self) -> Option<Pending> {
-        let r = self.pending_week.as_ref()?;
-        Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
-    }
-    pub fn pending_five(&self) -> Option<Pending> {
-        let r = self.pending_five.as_ref()?;
-        Some(Pending { reset_ms: parse_iso_secs(&r.reset_at)?, count: r.count.min(1000), first_ms: parse_iso_secs(&r.first_at)? })
-    }
-    pub fn set_pending_five(&mut self, p: Option<Pending>) {
-        self.pending_five = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });
-    }
-    pub fn set_pending_week(&mut self, p: Option<Pending>) {
-        self.pending_week = p.map(|p| PendingRec { reset_at: iso_secs(p.reset_ms), count: p.count, first_at: iso_secs(p.first_ms) });
     }
 }
 

@@ -15,7 +15,7 @@ const lock = read('20261029110000_acct_roster_lock_lower.sql')
 const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases.json', import.meta.url), 'utf8'))
+const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-legacy.json', import.meta.url), 'utf8'))
 
 const FNS = {
   asn_relay_acct_window_judge: 'asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz)',

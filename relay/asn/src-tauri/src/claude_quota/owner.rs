@@ -194,6 +194,27 @@ pub fn parse_tail(bytes: &[u8], partial_first: bool) -> Option<Owner> {
     None
 }
 
+/// 從檔尾的位元組找最後一筆 assistant 回應的時間戳（毫秒）。`partial_first` 同 [`parse_tail`]。
+/// 沒有 assistant 行、或最後一筆的時間戳格式不對都是 None（不退回更早的）。
+pub fn last_assistant_ms(bytes: &[u8], partial_first: bool) -> Option<i64> {
+    let mut lines = bytes.split(|&b| b == b'\n');
+    if partial_first {
+        lines.next();
+    }
+    let all: Vec<&[u8]> = lines.collect();
+    for line in all.into_iter().rev() {
+        if !line.windows(9).any(|w| w == b"assistant") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        return v.get("timestamp").and_then(Value::as_str).and_then(super::parse_iso_ms);
+    }
+    None
+}
+
 /// 讀檔尾（最多 TAIL_BYTES）；回 (位元組, 是不是從中間開始讀)
 fn read_tail(f: &mut File) -> Option<(Vec<u8>, bool)> {
     let len = f.metadata().ok()?.len();
@@ -211,20 +232,28 @@ fn mtime_ms(m: &std::fs::Metadata) -> i64 {
 /// 這個視窗的帳號身分：路徑不安全、讀不到、沒有 session-owner 都是 None。
 /// 同一個檔、大小與修改時間沒變就用上次的結果、不重讀（快取存在本機一個小檔，因為每次狀態列掛鉤都是新行程）；
 /// 但每次都還是會先開檔、做 handle 確認，快取不能繞過安全檢查。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn resolve(home: &Path, cfg: &Path, input: &str) -> Option<Owner> {
+    resolve_timed(home, cfg, input).map(|(o, _)| o)
+}
+
+/// 同 [`resolve`]，另回對話紀錄裡最後一筆 assistant 回應的時間戳（毫秒，額度的資料時間，#1266）；取不到時間戳是 None
+pub fn resolve_timed(home: &Path, cfg: &Path, input: &str) -> Option<(Owner, Option<i64>)> {
     let path = transcript_of(input)?;
     let mut f = safe_open(&cfg.join("projects"), &path)?;
     let meta = f.metadata().ok()?;
     let (len, mt) = (meta.len(), mtime_ms(&meta));
     let key = path.to_string_lossy().into_owned();
     let mut cache = Cache::load(home);
-    if let Some(hit) = cache.get(&key, len, mt) {
-        return hit;
+    if let Some((owner, t)) = cache.get(&key, len, mt) {
+        return owner.map(|o| (o, t));
     }
-    let owner = read_tail(&mut f).and_then(|(b, p)| parse_tail(&b, p));
-    cache.put(&key, len, mt, owner.clone());
+    let tail = read_tail(&mut f);
+    let owner = tail.as_ref().and_then(|(b, p)| parse_tail(b, *p));
+    let t = tail.as_ref().and_then(|(b, p)| last_assistant_ms(b, *p));
+    cache.put(&key, len, mt, owner.clone(), t);
     cache.save(home);
-    owner
+    owner.map(|o| (o, t))
 }
 
 #[cfg(test)]
@@ -259,6 +288,40 @@ mod tests {
         let (_t, cfg, f) = setup(&l);
         let home = tempfile::tempdir().unwrap();
         assert_eq!(resolve(home.path(), &cfg, &input(&f)), Some(Owner { account_uuid: B.into(), org_uuid: Some(ORG.into()) }));
+    }
+
+    #[test]
+    fn 最後一筆_assistant_的時間戳_就是額度的資料時間() {
+        let a = |t: &str| serde_json::json!({ "type": "assistant", "timestamp": t }).to_string();
+        let u = serde_json::json!({ "type": "user", "timestamp": "2099-01-01T00:00:00.000Z" }).to_string();
+        let text = [a("2026-11-09T12:00:00.100Z"), u.clone(), a("2026-11-09T12:30:00.500Z"), u.clone()].join("\n");
+        assert_eq!(last_assistant_ms(text.as_bytes(), false), Some(crate::claude_quota::parse_iso_ms("2026-11-09T12:30:00.500Z").unwrap()), "取最後一筆 assistant，user 行不算");
+        // 沒有 assistant 行、時間戳格式不對、沒有時間戳：都是 None（不退回更早的）
+        assert_eq!(last_assistant_ms(u.as_bytes(), false), None);
+        assert_eq!(last_assistant_ms([a("2026-11-09T12:00:00.100Z"), a("昨天")].join("\n").as_bytes(), false), None);
+        assert_eq!(last_assistant_ms(serde_json::json!({ "type": "assistant" }).to_string().as_bytes(), false), None);
+        // 只提到 assistant 這個字、type 不是 assistant
+        assert_eq!(last_assistant_ms(serde_json::json!({ "type": "user", "text": "assistant", "timestamp": "2026-11-09T12:00:00Z" }).to_string().as_bytes(), false), None);
+        // 從中間開始讀時，第一行可能被截斷要丟掉
+        let cut = format!("ssistant\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n{}", a("2026-11-09T13:00:00Z"));
+        assert_eq!(last_assistant_ms(cut.as_bytes(), true), Some(crate::claude_quota::parse_iso_secs("2026-11-09T13:00:00Z").unwrap()));
+    }
+
+    #[test]
+    fn resolve_timed_身分與資料時間一起回_改了檔就重讀() {
+        let ts = |t: &str| serde_json::json!({ "type": "assistant", "timestamp": t }).to_string();
+        let (_t, cfg, f) = setup(&[owner_line(A), ts("2026-11-09T12:00:00.000Z")]);
+        let home = tempfile::tempdir().unwrap();
+        let (o, t) = resolve_timed(home.path(), &cfg, &input(&f)).unwrap();
+        assert_eq!((o.account_uuid.as_str(), t), (A, crate::claude_quota::parse_iso_ms("2026-11-09T12:00:00.000Z")));
+        // 檔案變長（多一筆 assistant）：大小變了，快取不命中，取新的時間
+        std::fs::write(&f, format!("{}\n{}\n{}\n", owner_line(A), ts("2026-11-09T12:00:00.000Z"), ts("2026-11-09T12:45:00.000Z"))).unwrap();
+        let (_, t2) = resolve_timed(home.path(), &cfg, &input(&f)).unwrap();
+        assert_eq!(t2, crate::claude_quota::parse_iso_ms("2026-11-09T12:45:00.000Z"));
+        // 沒有 assistant：身分有、時間是 None
+        std::fs::write(&f, format!("{}\n", owner_line(A))).unwrap();
+        let (o3, t3) = resolve_timed(home.path(), &cfg, &input(&f)).unwrap();
+        assert_eq!((o3.account_uuid.as_str(), t3), (A, None));
     }
 
     #[test]
@@ -385,17 +448,17 @@ mod tests {
         let h = tempfile::tempdir().unwrap();
         let mut c = Cache::load(h.path());
         assert_eq!(c.get("k", 10, 5), None);
-        c.put("k", 10, 5, Some(Owner { account_uuid: A.into(), org_uuid: None }));
-        c.put("n", 3, 3, None);
+        c.put("k", 10, 5, Some(Owner { account_uuid: A.into(), org_uuid: None }), Some(1234));
+        c.put("n", 3, 3, None, None);
         c.save(h.path());
         let c = Cache::load(h.path());
-        assert_eq!(c.get("k", 10, 5), Some(Some(Owner { account_uuid: A.into(), org_uuid: None })));
+        assert_eq!(c.get("k", 10, 5), Some((Some(Owner { account_uuid: A.into(), org_uuid: None }), Some(1234))), "身分與最後一筆 assistant 的時間一起快取");
         assert_eq!(c.get("k", 11, 5), None, "大小變了");
         assert_eq!(c.get("k", 10, 6), None, "修改時間變了");
-        assert_eq!(c.get("n", 3, 3), Some(None), "沒有身分也快取");
+        assert_eq!(c.get("n", 3, 3), Some((None, None)), "沒有身分也快取");
         let mut c = c;
         for i in 0..100 {
-            c.put(&format!("f{i:03}"), 1, 1, None);
+            c.put(&format!("f{i:03}"), 1, 1, None, None);
         }
         assert!(c.len() <= 32);
     }
@@ -409,7 +472,7 @@ mod tests {
         let key = f.to_string_lossy().into_owned();
         let meta = std::fs::metadata(&f).unwrap();
         let mut c = Cache::load(home.path());
-        c.put(&key, meta.len(), mtime_ms(&meta), Some(Owner { account_uuid: B.into(), org_uuid: None }));
+        c.put(&key, meta.len(), mtime_ms(&meta), Some(Owner { account_uuid: B.into(), org_uuid: None }), None);
         c.save(home.path());
         assert_eq!(resolve(home.path(), &cfg, &input(&f)).map(|o| o.account_uuid), Some(B.to_string()), "命中就不重讀");
         // 路徑不安全時，即使有快取也不給
@@ -417,7 +480,7 @@ mod tests {
         std::fs::write(&outside, owner_line(A)).unwrap();
         let om = std::fs::metadata(&outside).unwrap();
         let mut c = Cache::load(home.path());
-        c.put(&outside.to_string_lossy(), om.len(), mtime_ms(&om), Some(Owner { account_uuid: A.into(), org_uuid: None }));
+        c.put(&outside.to_string_lossy(), om.len(), mtime_ms(&om), Some(Owner { account_uuid: A.into(), org_uuid: None }), None);
         c.save(home.path());
         assert_eq!(resolve(home.path(), &cfg, &input(&outside)), None);
     }

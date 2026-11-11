@@ -1,6 +1,6 @@
 // 帳號列表第一批（#374，20261029100000_acct_roster.sql）：
 // 1. 靜態：編號排在最新之後、舊的 asn_relay_acct_report／asn_relay_acct_quota／relay.asn_accounts 一字不動、只授權 service_role、沒有權杖類字樣。
-// 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例 tests/fixtures/quota-merge-cases.json 全跑、
+// 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例 tests/fixtures/quota-merge-cases-legacy.json 全跑、
 //    權限、擁有者寫入／沒認領不寫／租戶不符不寫、舊四欄轉兩窗、兩台逐窗合併、A 讀不到 B、沒簽章 forbidden、30 天保留、上限、舊函式原文不變。
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -12,7 +12,7 @@ const mig = read(FILE)
 const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases.json', import.meta.url), 'utf8'))
+const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-legacy.json', import.meta.url), 'utf8'))
 
 const FNS = [
   'asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz)', 'asn_relay_acct_iso(jsonb)',

@@ -1,10 +1,12 @@
-use super::super::{hook, load_all, parse_iso_secs, parse_statusline};
+use super::super::{hook_in, load_all, parse_iso_secs, parse_statusline, quota_from_value};
 use super::*;
 use serde_json::{json, Value};
 
 // 2026-10-24T12:00:00Z
 const NOW: i64 = 1_792_843_200_000;
 const H: i64 = 3_600_000;
+const DAY: i64 = 86_400_000;
+const MIN: i64 = 60_000;
 
 fn ms(iso: &str) -> i64 {
     parse_iso_secs(iso).expect(iso)
@@ -20,15 +22,6 @@ fn status(five: Option<(f64, i64)>, week: Option<(f64, i64)>) -> String {
     }
     json!({ "rate_limits": Value::Object(rl) }).to_string()
 }
-/// 假的登入狀態：目前帳號要有 accountUuid 才認得（少了它掛鉤會一律回 false）
-fn home_as(email: &str) -> tempfile::TempDir {
-    let h = tempfile::tempdir().unwrap();
-    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": "11111111-2222-3333-4444-555555555555" } }).to_string()).unwrap();
-    h
-}
-fn q(h: &tempfile::TempDir) -> Quota {
-    load_all(h.path()).remove("a@x.test").expect("要有紀錄")
-}
 fn log(h: &tempfile::TempDir) -> String {
     std::fs::read_to_string(log_path(h.path())).unwrap_or_default()
 }
@@ -38,274 +31,166 @@ fn 時間字串可以換回毫秒_格式不對就是沒有() {
     assert_eq!(parse_iso_secs("2026-10-24T12:00:00Z"), Some(NOW));
     assert_eq!(parse_iso_secs(&iso_secs(NOW + 12_345_000)), Some(NOW + 12_345_000));
     assert_eq!(parse_iso_secs("2000-02-29T00:00:00Z").map(iso_secs).as_deref(), Some("2000-02-29T00:00:00Z"));
-    for bad in ["", "T", "2026-10-24 12:00:00Z", "2026-13-01T00:00:00Z", "2026-10-24T12:00:00+08:00", "２０２６-10-24T12:00:00Z"] {
+    for bad in ["", "壞", "2026-13-01T00:00:00Z", "2026-10-24 12:00:00Z", "2026-10-24T12:00:00", "2026-10-24T25:00:00Z"] {
         assert_eq!(parse_iso_secs(bad), None, "{bad}");
     }
+    // 帶毫秒也認（Claude 對話紀錄的時間戳）
+    assert_eq!(super::super::parse_iso_ms("2026-10-24T12:00:00.250Z"), Some(NOW + 250));
+    assert_eq!(super::super::parse_iso_ms("2026-10-24T12:00:00.5Z"), Some(NOW + 500));
+    assert_eq!(super::super::parse_iso_ms("2026-10-24T12:00:00.123456Z"), Some(NOW + 123));
+    assert_eq!(super::super::parse_iso_ms("2026-10-24T12:00:00+08:00"), None);
 }
 
-#[test]
-fn 同一期先_4_再送_35_維持_4_並記_log_記錄時間不動() {
-    let h = home_as("a@x.test");
-    let r = NOW + 2 * H;
-    assert!(hook(h.path(), &status(Some((96.0, r)), None), NOW));
-    assert!(!hook(h.path(), &status(Some((65.0, r)), None), NOW + 60_000), "回升的不收");
-    let got = q(&h);
-    assert_eq!(got.five_hour_pct, Some(4));
-    assert_eq!(got.at, iso_secs(NOW), "沒收進新值，記錄時間不動");
-    let l = log(&h);
-    assert!(l.contains("5 小時額度沒收") && l.contains("4% → 35%"), "{l}");
-    assert!(!l.contains("a@x.test"), "log 不印 email");
-    // 同一期繼續下降照收，記錄時間跟著更新
-    assert!(hook(h.path(), &status(Some((98.0, r)), None), NOW + 120_000));
-    assert_eq!((q(&h).five_hour_pct, q(&h).at), (Some(2), iso_secs(NOW + 120_000)));
-}
-
-#[test]
-fn _5_小時_記著的過了才收較晚的新一期_還沒過就來更晚的不收() {
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(Some((96.0, NOW + 2 * H)), None), NOW));
-    assert!(!hook(h.path(), &status(Some((10.0, NOW + 4 * H)), None), NOW + H), "記著的還沒到就來更晚的：別的帳號");
-    assert_eq!(q(&h).five_hour_pct, Some(4));
-    assert!(log(&h).contains("還沒重置"));
-    assert!(hook(h.path(), &status(Some((10.0, NOW + 7 * H)), None), NOW + 3 * H), "記著的已過：新的一期");
-    let got = q(&h);
-    assert_eq!((got.five_hour_pct, got.reset_at.as_deref(), got.at.as_str()), (Some(90), Some(iso_secs(NOW + 7 * H).as_str()), iso_secs(NOW + 3 * H).as_str()));
-}
-
-#[test]
-fn 重置時間比記著的早是舊視窗的數字_不收() {
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(Some((50.0, NOW + 4 * H)), None), NOW));
-    assert!(!hook(h.path(), &status(Some((20.0, NOW + 2 * H)), None), NOW + 60_000));
-    assert_eq!(q(&h).five_hour_pct, Some(50));
-    assert!(log(&h).contains("早"));
-}
-
-#[test]
-fn 只送每週那條時_5_小時那條保留() {
-    let h = home_as("a@x.test");
-    let r5 = NOW + 2 * H;
-    assert!(hook(h.path(), &status(Some((60.0, r5)), Some((30.0, NOW + 100 * H))), NOW));
-    assert!(hook(h.path(), &status(None, Some((40.0, NOW + 100 * H))), NOW + 60_000));
-    let got = q(&h);
-    assert_eq!((got.five_hour_pct, got.weekly_pct), (Some(40), Some(60)));
-    assert_eq!(got.reset_at, Some(iso_secs(r5)), "存的重置時間仍是 5 小時那條的");
-}
-
-#[test]
-fn 兩條各自判斷_一條不收不影響另一條() {
-    // 記著的重置時間屬於 5 小時那條：5 小時回升不收，每週照收
-    let h = home_as("a@x.test");
-    let r5 = NOW + 2 * H;
-    assert!(hook(h.path(), &status(Some((96.0, r5)), Some((30.0, NOW + 100 * H))), NOW));
-    assert!(hook(h.path(), &status(Some((65.0, r5)), Some((45.0, NOW + 100 * H))), NOW + 60_000));
-    let got = q(&h);
-    assert_eq!((got.five_hour_pct, got.weekly_pct), (Some(4), Some(55)));
-    assert_eq!(got.at, iso_secs(NOW + 60_000), "有一條收進新值就更新記錄時間");
-    assert!(log(&h).contains("5 小時額度沒收") && !log(&h).contains("每週額度沒收"));
-    // 記著的重置時間屬於每週那條（每週用完）：每週回升不收，5 小時照收
-    let h = home_as("a@x.test");
-    let rw = NOW + 100 * H;
-    assert!(hook(h.path(), &status(Some((70.0, r5)), Some((100.0, rw))), NOW));
-    assert_eq!(q(&h).reset_at, Some(iso_secs(rw)));
-    assert!(hook(h.path(), &status(Some((80.0, r5)), Some((50.0, rw))), NOW + 60_000));
-    let got = q(&h);
-    assert_eq!((got.five_hour_pct, got.weekly_pct), (Some(20), Some(0)));
-    assert!(log(&h).contains("每週額度沒收") && !log(&h).contains("5 小時額度沒收"));
-}
-
-#[test]
-fn 每週_調查員的例子_別的帳號的較晚重置時間不收_新一期要差_7_天的倍數() {
-    // gmail 帳號每週在 11/2 00:00（台灣時間）重置；yooliang 帳號在 11/4 17:00 重置
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let yooliang = ms("2026-11-04T09:00:00Z");
-    let next_gmail = ms("2026-11-08T16:00:00Z");
-    // 現在＝gmail 重置前 3 天（重置時間要在「現在 +8 天」內才收）
-    let start = gmail - 3 * 86_400_000;
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
-    // 記著 gmail（11/2 還沒到），舊視窗送來 yooliang 的數字
-    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + H));
-    assert_eq!(q(&h).weekly_pct, Some(70));
-    assert!(log(&h).contains("每週額度沒收") && log(&h).contains("還沒重置"));
-    // 時間推到 11/2 過後
-    let after = gmail + H;
-    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), after), "差不是 7 天的倍數");
-    assert!(log(&h).contains("7 天的倍數"));
-    assert_eq!(q(&h).weekly_pct, Some(70));
-    assert!(hook(h.path(), &status(None, Some((10.0, next_gmail))), after + 60_000), "差 7 天：新的一期");
-    let got = q(&h);
-    assert_eq!((got.weekly_pct, got.reset_at), (Some(90), Some(iso_secs(next_gmail))));
-}
-
-#[test]
-fn 每週_差_7_天倍數的誤差_10_分鐘內才算() {
-    let old = ms("2026-11-01T16:00:00Z");
-    let now = old + H;
-    let w = |d: i64| judge(Kind::Week, Some((50, Some(old))), 80, Some(old + d), now);
-    assert!(w(WEEK_MS).is_ok());
-    assert!(w(WEEK_MS + 9 * 60_000).is_ok());
-    // 隔了兩週：現在要推到記著的過了 6 天，新的重置時間才落在「現在 +8 天」內
-    assert!(judge(Kind::Week, Some((50, Some(old))), 80, Some(old + 2 * WEEK_MS - 9 * 60_000), old + 6 * 86_400_000).is_ok(), "隔了兩週也算");
-    assert!(w(WEEK_MS + 11 * 60_000).is_err());
-    assert!(w(3 * 86_400_000).is_err());
-    // 5 小時那條不看倍數：記著的過了，任何較晚的都收
-    assert!(judge(Kind::Five, Some((50, Some(old))), 80, Some(old + 7 * H + 123_000), now).is_ok());
-}
-
-#[test]
-fn 記著的重置時間過了超過_7_天就照收_只過_6_天仍照原規則() {
-    let h = home_as("a@x.test");
-    let old = NOW + H;
-    assert!(hook(h.path(), &status(None, Some((30.0, old))), NOW));
-    let odd = 3 * 86_400_000 + 5 * H; // 不是 7 天的倍數
-    // 只過了 6 天：仍照原規則，不收
-    let six = old + 6 * 86_400_000;
-    assert!(!hook(h.path(), &status(None, Some((50.0, six + odd))), six));
-    assert_eq!(q(&h).weekly_pct, Some(70));
-    // 過了 8 天：任意重置時間都收
-    let eight = old + 8 * 86_400_000;
-    assert!(hook(h.path(), &status(None, Some((50.0, eight + odd))), eight));
-    assert_eq!((q(&h).weekly_pct, q(&h).reset_at), (Some(50), Some(iso_secs(eight + odd))));
-    // 5 小時那條也一樣
-    assert!(judge(Kind::Five, Some((10, Some(old))), 90, Some(eight + 123_000), eight).is_ok());
-}
-
-#[test]
-fn 分不出新舊時照舊收下() {
-    // 記著的那條沒有重置時間、或新來的沒有重置時間、或之前沒有紀錄
-    assert!(judge(Kind::Five, Some((4, None)), 90, Some(NOW + H), NOW).is_ok());
-    assert!(judge(Kind::Five, Some((4, Some(NOW + H))), 90, None, NOW).is_ok());
-    assert!(judge(Kind::Week, None, 90, Some(NOW + H), NOW).is_ok());
-    // 兩條都用完時存的是較晚的那個，分不出是哪條的，兩條都當沒有重置時間
-    let both = Quota { five_hour_pct: Some(0), weekly_pct: Some(0), reset_at: Some(iso_secs(NOW + H)), at: iso_secs(NOW), ..Default::default() };
-    assert_eq!(stored_resets(&both), (None, None));
-}
-
-#[test]
-fn _5_小時有百分比卻沒有重置時間時_不拿每週的重置時間來頂() {
-    let t = r#"{"rate_limits":{"five_hour":{"used_percentage":10},"seven_day":{"used_percentage":20,"resets_at":1793000000}}}"#;
-    let p = parse_statusline(t, NOW).unwrap();
-    assert_eq!((p.five_hour_pct, p.weekly_pct, p.reset_at.as_deref()), (Some(90), Some(80), None), "畫面會標成 5 小時額度，存的就不能是每週的");
-    assert_eq!(p.week_reset_ms, Some(1_793_000_000_000), "每週的重置時間仍用來判斷新舊");
-    // 5 小時用完但沒有重置時間、每週沒用完：一樣不拿每週的
-    let t = r#"{"rate_limits":{"five_hour":{"used_percentage":100},"seven_day":{"used_percentage":20,"resets_at":1793000000}}}"#;
-    assert_eq!(parse_statusline(t, NOW).unwrap().reset_at, None);
-    // 只有每週那條：就是每週的
-    let t = r#"{"rate_limits":{"seven_day":{"used_percentage":20,"resets_at":1793000000}}}"#;
-    assert_eq!(parse_statusline(t, NOW).unwrap().reset_at, Some(iso_secs(1_793_000_000_000)));
-}
-
-#[test]
-fn log_超過上限只留後半_不會無限長() {
-    let h = home_as("a@x.test");
-    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
-    std::fs::write(log_path(h.path()), "舊的一行記錄\n".repeat(5000)).unwrap();
-    log_skipped(h.path(), &[Skipped { kind: Kind::Five, code: "same_period_rise", reason: "測試".into() }], NOW);
-    let l = log(&h);
-    assert!((l.len() as u64) < LOG_MAX_BYTES, "{}", l.len());
-    assert!(l.ends_with("5 小時額度沒收：測試\n"));
-}
-
-// ---------- 共用案例（#374）：跟後台 SQL 讀同一份，規則不會分成兩套 ----------
+// ---------- 共用案例：跟後台 SQL 讀同一份，規則不會分成兩套 ----------
 const SHARED_CASES: &str = include_str!("../../../../../../tests/fixtures/quota-merge-cases.json");
 
 #[test]
 fn 共用案例_每一個都跟預期一致() {
     let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
     let c = &v["constants"];
-    assert_eq!((c["same_period_ms"].as_i64(), c["week_ms"].as_i64(), c["expired_after_ms"].as_i64()), (Some(SAME_MS), Some(WEEK_MS), Some(WEEK_MS)), "常數跟案例檔一致");
-    assert_eq!((c["reset_past_ms"].as_i64(), c["reset_future_ms"].as_i64()), (Some(RESET_PAST_MS), Some(RESET_FUTURE_MS)), "重置時間範圍跟案例檔一致");
+    assert_eq!((c["reset_past_ms"].as_i64(), c["reset_future_ms"].as_i64(), c["future_read_ms"].as_i64()), (Some(RESET_PAST_MS), Some(RESET_FUTURE_MS), Some(FUTURE_READ_MS)), "常數跟案例檔一致");
     let cases = v["cases"].as_array().expect("cases");
-    assert!(cases.iter().any(|t| t["reason"] == "reset_out_of_range"), "要有範圍外的反向案例");
     assert!(cases.len() >= 20, "案例不該變少：{}", cases.len());
-    let win = |w: &Value| -> Option<(u8, Option<i64>)> {
-        if w.is_null() {
-            return None;
-        }
-        Some((w["left_pct"].as_u64().unwrap() as u8, w["resets_at"].as_str().map(ms)))
-    };
     let mut wrong = vec![];
     for t in cases {
         let id = t["id"].as_str().unwrap();
-        // 只有後台的案例（older_read／future_read）：客戶端不做資料讀取時間的判斷，由後台守，這裡跳過
-        if t["scope"].as_str() == Some("backend_only") {
-            continue;
-        }
-        let vendor = match t["vendor"].as_str() {
-            Some("claude") => Vendor::Claude,
-            Some("codex") => Vendor::Codex,
-            Some("gemini") => Vendor::Gemini,
-            o => panic!("{id} 廠牌不認得：{o:?}"),
-        };
-        let kind = match t["window"].as_str() {
-            Some("five_hour") => Kind::Five,
-            Some("weekly") => Kind::Week,
-            o => panic!("{id} 窗名不認得：{o:?}"),
-        };
-        let (new_pct, new_reset) = win(&t["new"]).expect("new 一定有");
-        let got = judge_for(vendor, kind, win(&t["old"]), new_pct, new_reset, ms(t["now"].as_str().unwrap()));
+        let now = ms(t["now"].as_str().unwrap());
+        let new_read = ms(t["new"]["read_at"].as_str().unwrap());
+        let new_reset = t["new"]["resets_at"].as_str().map(ms);
+        let old_read = t["old"]["read_at"].as_str().map(ms);
+        let got = judge(old_read, new_read, new_reset, now);
         let want_accept = t["accept"].as_bool().unwrap();
         let want_reason = t["reason"].as_str();
         let got_reason = got.as_ref().err().map(|r| r.code);
         if got.is_ok() != want_accept || got_reason != want_reason {
             wrong.push(format!("{id}：預期 {want_accept}/{want_reason:?}，實際 {}/{got_reason:?}", got.is_ok()));
         }
+        // 同樣的案例走 merge_one（含有沒有舊的窗）：收不收要一樣
+        let kind = if t["window"].as_str() == Some("five_hour") { Kind::Five } else { Kind::Week };
+        let old = t["old"]["left_pct"].as_u64().map(|p| (p as u8, t["old"]["resets_at"].as_str().map(ms)));
+        let new = Some((t["new"]["left_pct"].as_u64().unwrap() as u8, new_reset));
+        let (_, took, sk) = merge_one(kind, old, old_read, new, new_read, now);
+        if took != want_accept || sk.map(|s| s.code) != want_reason {
+            wrong.push(format!("{id}：merge_one 跟預期不一致"));
+        }
     }
     assert!(wrong.is_empty(), "跟共用案例不一致：{wrong:#?}");
     // 代碼表裡的每個代碼，Rust 都可能回（反過來也守：Rust 回的代碼都在表裡）
     let codes: Vec<&str> = v["reasons"].as_object().unwrap().keys().map(String::as_str).collect();
-    for c in ["same_period_rise", "earlier", "later_not_expired", "not_week_multiple", "reset_out_of_range"] {
+    assert_eq!(codes.len(), 3);
+    for c in ["older_read", "future_read", "reset_out_of_range"] {
         assert!(codes.contains(&c), "{c} 不在案例檔的代碼表");
     }
 }
 
-// ---------- 兩條各記自己的重置時間（#374） ----------
 #[test]
-fn 新格式_兩條各存自己的重置時間與讀取時間_舊欄位照寫() {
-    let h = home_as("a@x.test");
-    let (r5, rw) = (NOW + 2 * H, NOW + 100 * H);
-    assert!(hook(h.path(), &status(Some((96.0, r5)), Some((100.0, rw))), NOW));
-    let got = q(&h);
-    assert_eq!((got.five_reset_at.clone(), got.week_reset_at.clone()), (Some(iso_secs(r5)), Some(iso_secs(rw))));
-    assert_eq!(got.reset_at, Some(iso_secs(rw)), "舊的 reset_at 照 pick_reset：每週用完給每週的");
-    assert_eq!((got.five_at.clone(), got.week_at.clone()), (Some(iso_secs(NOW)), Some(iso_secs(NOW))));
-    // 只有 5 小時那條收進新值：它的讀取時間更新，每週那條留原本的
-    assert!(hook(h.path(), &status(Some((97.0, r5)), None), NOW + 60_000));
-    let got = q(&h);
-    assert_eq!((got.five_at, got.week_at, got.at), (Some(iso_secs(NOW + 60_000)), Some(iso_secs(NOW)), iso_secs(NOW + 60_000)));
+fn 共用案例_兩條窗各自判斷_一條被擋另一條照收() {
+    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
+    let cases = v["window_pair_cases"].as_array().expect("window_pair_cases");
+    assert!(cases.len() >= 4, "案例不該變少");
+    for t in cases {
+        let id = t["id"].as_str().unwrap();
+        let now = ms(t["now"].as_str().unwrap());
+        let pct = |side: &str, w: &str| t[side][w]["left_pct"].as_u64().unwrap() as u8;
+        let rst = |side: &str, w: &str| t[side][w]["resets_at"].as_str().unwrap().to_string();
+        let read = |side: &str, w: &str| t[side][w]["read_at"].as_str().unwrap().to_string();
+        assert_eq!(read("new", "five_hour"), read("new", "weekly"), "{id} 同一次讀取兩條窗共用一個資料時間");
+        let new_read = ms(&read("new", "weekly"));
+        let old = Quota {
+            five_hour_pct: Some(pct("old", "five_hour")),
+            weekly_pct: Some(pct("old", "weekly")),
+            at: read("old", "five_hour"),
+            five_reset_at: Some(rst("old", "five_hour")),
+            week_reset_at: Some(rst("old", "weekly")),
+            five_at: Some(read("old", "five_hour")),
+            week_at: Some(read("old", "weekly")),
+            ..Default::default()
+        };
+        let newp = Parsed {
+            five_hour_pct: Some(pct("new", "five_hour")),
+            weekly_pct: Some(pct("new", "weekly")),
+            reset_at: None,
+            five_reset_ms: Some(ms(&rst("new", "five_hour"))),
+            week_reset_ms: Some(ms(&rst("new", "weekly"))),
+        };
+        let m = merge_full(Some(&old), &newp, new_read, now);
+        let want = |w: &str| t["expect"][w]["accept"].as_bool().unwrap();
+        assert_eq!((m.took_five, m.took_week), (want("five_hour"), want("weekly")), "{id} 各條收不收");
+        for (w, took) in [("five_hour", m.took_five), ("weekly", m.took_week)] {
+            let got = m.skipped.iter().find(|s| s.kind == if w == "weekly" { Kind::Week } else { Kind::Five }).map(|s| s.code);
+            assert_eq!(got, t["expect"][w]["reason"].as_str(), "{id} {w} 原因（收了就沒有）");
+            assert_eq!(took, got.is_none());
+        }
+        // 只要有一條收下，整筆就要寫（不會因為另一條被擋就整筆不存）
+        let q = m.quota.unwrap_or_else(|| panic!("{id} 有一條收下，紀錄不該是 None"));
+        let pick = |took: bool, new_v: u8, old_v: u8| if took { new_v } else { old_v };
+        assert_eq!(q.five_hour_pct, Some(pick(m.took_five, pct("new", "five_hour"), pct("old", "five_hour"))), "{id} 5 小時：被擋的維持舊值、收下的用新值");
+        assert_eq!(q.weekly_pct, Some(pick(m.took_week, pct("new", "weekly"), pct("old", "weekly"))), "{id} 每週");
+        assert_eq!(q.five_at, Some(if m.took_five { iso_secs(new_read) } else { read("old", "five_hour") }), "{id} 5 小時的資料時間：收下才往前走");
+        assert_eq!(q.week_at, Some(if m.took_week { iso_secs(new_read) } else { read("old", "weekly") }), "{id} 每週的資料時間");
+        if !m.took_five {
+            assert_eq!(q.five_reset_at, Some(rst("old", "five_hour")), "{id} 被擋的那條連重置時間也維持舊的");
+        }
+    }
 }
 
 #[test]
-fn 兩條都用完時每週那條也分得出新舊_以前的限制解掉了() {
-    // 舊做法兩條都用完時只存一個較晚的時間，兩條都當沒有重置時間、照收；現在各存一個，每週回升照樣擋下
-    let h = home_as("a@x.test");
+fn 兩條都被擋時整筆不動_有一條收下就整筆寫() {
+    let r = NOW + 3 * DAY;
+    let old = Quota { weekly_pct: Some(50), week_reset_at: Some(iso_secs(r)), week_at: Some(iso_secs(NOW)), at: iso_secs(NOW), ..Default::default() };
+    let p = Parsed { five_hour_pct: None, weekly_pct: Some(10), reset_at: None, five_reset_ms: None, week_reset_ms: Some(r) };
+    let m = merge_full(Some(&old), &p, NOW - MIN, NOW);
+    assert!(m.quota.is_none() && !m.took_week && m.skipped.len() == 1 && m.skipped[0].code == "older_read");
+    let m = merge_full(Some(&old), &p, NOW + MIN, NOW + MIN);
+    assert!(m.took_week && m.quota.is_some_and(|q| q.weekly_pct == Some(10)));
+}
+
+#[test]
+fn 簡化後的規則_同期回升_重置時間倒退_不是七天倍數都照收() {
+    let r = NOW + 3 * DAY;
+    let old = Some((10u8, Some(r)));
+    // 同一期剩餘回升（滾動窗、四捨五入）
+    assert!(judge(Some(NOW), NOW + MIN, Some(r), NOW + MIN).is_ok());
+    let (m, took, sk) = merge_one(Kind::Five, old, Some(NOW), Some((99, Some(r))), NOW + MIN, NOW + MIN);
+    assert!(took && sk.is_none() && m == Some((99, Some(r))));
+    // 重置時間倒退、不是 7 天倍數
+    assert!(judge(Some(NOW), NOW + MIN, Some(r - 2 * DAY - 5 * H), NOW + MIN).is_ok());
+    assert!(judge(Some(NOW), NOW + MIN, Some(r + 3 * DAY + 5 * H), NOW + MIN).is_ok());
+}
+
+// ---------- 兩條各記自己的重置時間與資料時間（#374） ----------
+#[test]
+fn 新格式_兩條各存自己的重置時間與資料時間_舊欄位照寫() {
     let (r5, rw) = (NOW + 2 * H, NOW + 100 * H);
-    assert!(hook(h.path(), &status(Some((100.0, r5)), Some((100.0, rw))), NOW));
-    assert!(!hook(h.path(), &status(None, Some((60.0, rw))), NOW + 60_000), "同一期每週回升不收");
-    assert_eq!(q(&h).weekly_pct, Some(0));
-    assert!(log(&h).contains("每週額度沒收"));
+    let p = parse_statusline(&status(Some((96.0, r5)), Some((100.0, rw))), NOW).unwrap();
+    let m = merge_full(None, &p, NOW - 30 * MIN, NOW);
+    let got = m.quota.unwrap();
+    assert_eq!((got.five_reset_at.clone(), got.week_reset_at.clone()), (Some(iso_secs(r5)), Some(iso_secs(rw))));
+    assert_eq!(got.reset_at, Some(iso_secs(rw)), "舊的 reset_at 照 pick_reset：每週用完給每週的");
+    assert_eq!((got.five_at.clone(), got.week_at.clone(), got.at.clone()), (Some(iso_secs(NOW - 30 * MIN)), Some(iso_secs(NOW - 30 * MIN)), iso_secs(NOW)), "各條記資料時間，at 記錄當下");
+    // 只有 5 小時那條收進新值：它的資料時間更新，每週那條留原本的
+    let p2 = parse_statusline(&status(Some((97.0, r5)), None), NOW).unwrap();
+    let got2 = merge_full(Some(&got), &p2, NOW + MIN, NOW + MIN).quota.unwrap();
+    assert_eq!((got2.five_at, got2.week_at, got2.at), (Some(iso_secs(NOW + MIN)), Some(iso_secs(NOW - 30 * MIN)), iso_secs(NOW + MIN)));
 }
 
 #[test]
 fn 舊格式的檔照樣讀得到_沒有各條重置時間就照舊反推() {
-    let h = home_as("a@x.test");
-    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
     let r5 = NOW + 2 * H;
-    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "five_hour_pct": 40, "weekly_pct": 70, "reset_at": iso_secs(r5), "at": iso_secs(NOW) } }).to_string()).unwrap();
-    let got = q(&h);
+    let got = quota_from_value(&json!({ "five_hour_pct": 40, "weekly_pct": 70, "reset_at": iso_secs(r5), "at": iso_secs(NOW) })).unwrap();
     assert_eq!((got.five_hour_pct, got.weekly_pct, got.reset_at.clone(), got.five_reset_at.clone(), got.five_at.clone()), (Some(40), Some(70), Some(iso_secs(r5)), None, None));
     assert_eq!(stored_resets(&got), (Some(r5), None), "舊檔：沒用完時那一個屬於 5 小時那條");
     // 回報的額度窗：讀取時間退回整筆的 at；每週那條推不出重置時間就是 null
     let w = got.windows();
     assert_eq!(w[0], json!({ "name": "five_hour", "left_pct": 40, "resets_at": iso_secs(r5), "read_at": iso_secs(NOW) }));
     assert_eq!(w[1], json!({ "name": "weekly", "left_pct": 70, "resets_at": null, "read_at": iso_secs(NOW) }));
-    // 舊檔照舊判斷：5 小時回升不收
-    assert!(!hook(h.path(), &status(Some((50.0, r5)), None), NOW + 60_000));
-    // 新格式的檔：不認得的欄位舊版會略過（這裡確認新版讀新欄位、各條沒百分比的就不留）
-    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "weekly_pct": 70, "at": iso_secs(NOW), "five_reset_at": iso_secs(r5), "week_reset_at": "壞", "week_at": iso_secs(NOW) } }).to_string()).unwrap();
-    let got = q(&h);
-    assert_eq!((got.five_reset_at, got.week_reset_at, got.week_at), (None, None, Some(iso_secs(NOW))), "沒有 5 小時百分比就不留它的重置時間；格式不對的丟掉");
+    // 舊檔沒有各條的資料時間，合併時退回整筆的 at 來比：比它早的資料時間不收
+    let p = Parsed { five_hour_pct: Some(50), weekly_pct: None, reset_at: None, five_reset_ms: Some(r5), week_reset_ms: None };
+    let m = merge_full(Some(&got), &p, NOW - MIN, NOW);
+    assert!(m.quota.is_none() && m.skipped[0].code == "older_read");
+    // 新格式的檔：沒有 5 小時百分比就不留它的重置時間；格式不對的丟掉
+    let got = quota_from_value(&json!({ "weekly_pct": 70, "at": iso_secs(NOW), "five_reset_at": iso_secs(r5), "week_reset_at": "壞", "week_at": iso_secs(NOW) })).unwrap();
+    assert_eq!((got.five_reset_at, got.week_reset_at, got.week_at), (None, None, Some(iso_secs(NOW))));
 }
 
 #[test]
@@ -317,268 +202,55 @@ fn 新格式那條明寫的重置時間優先_不拿舊的反推() {
 }
 
 #[test]
-fn 不收的原因代碼跟後台一致() {
-    let old = Some((40, Some(NOW + H)));
-    assert_eq!(judge(Kind::Five, old, 50, Some(NOW + H), NOW).unwrap_err().code, "same_period_rise");
-    assert_eq!(judge(Kind::Five, old, 50, Some(NOW - H), NOW).unwrap_err().code, "earlier");
-    assert_eq!(judge(Kind::Five, old, 50, Some(NOW + 5 * H), NOW).unwrap_err().code, "later_not_expired");
-    assert_eq!(judge(Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).unwrap_err().code, "not_week_multiple");
-    assert!(judge_for(Vendor::Codex, Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).is_ok(), "Codex 每週不看倍數");
-    assert_eq!(judge(Kind::Five, None, 50, Some(NOW + 9 * 86_400_000), NOW).unwrap_err().code, "reset_out_of_range");
-}
-
-// ---------- 重置時間的合理範圍（#524 審查）：現在前 1 天到後 8 天 ----------
-const DAY: i64 = 86_400_000;
-
-#[test]
-fn 範圍_很遠的重置時間不收_也不會存進來() {
-    let h = home_as("a@x.test");
-    let far = ms("2099-01-01T00:00:00Z");
-    assert!(!hook(h.path(), &status(None, Some((30.0, far))), NOW), "2099 年的重置時間不收");
-    assert!(load_all(h.path()).get("a@x.test").is_none(), "沒有紀錄時也不會存進來");
-    assert!(log(&h).contains("每週額度沒收") && log(&h).contains("不在現在前 1 天到後 8 天之間"), "{}", log(&h));
-    // 之後正常的回報照收
-    assert!(hook(h.path(), &status(None, Some((40.0, NOW + 100 * H))), NOW + 60_000));
-    assert_eq!(q(&h).weekly_pct, Some(60));
-    // 已經有正常紀錄時，送很遠的也不收，正常的那條不動
-    assert!(!hook(h.path(), &status(None, Some((10.0, far))), NOW + 120_000));
-    assert_eq!((q(&h).weekly_pct, q(&h).reset_at), (Some(60), Some(iso_secs(NOW + 100 * H))));
+fn _5_小時有百分比卻沒有重置時間時_不拿每週的重置時間來頂() {
+    let p = Parsed { five_hour_pct: Some(60), weekly_pct: Some(30), reset_at: None, five_reset_ms: None, week_reset_ms: Some(NOW + 3 * DAY) };
+    let got = merge_full(None, &p, NOW, NOW).quota.unwrap();
+    assert_eq!(got.five_reset_at, None);
+    assert_eq!(got.week_reset_at, Some(iso_secs(NOW + 3 * DAY)));
+    assert!(got.windows()[0]["resets_at"].is_null(), "5 小時那條沒有重置時間就是 null，不編");
 }
 
 #[test]
-fn 範圍_已經存了很遠的重置時間_正常的照收_鎖住的會解開() {
-    let h = home_as("a@x.test");
+fn log_超過上限只留後半_不會無限長() {
+    let h = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(h.path().join(".asn")).unwrap();
-    let far = "2099-01-01T00:00:00Z";
-    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "weekly_pct": 70, "reset_at": far, "at": iso_secs(NOW) } }).to_string()).unwrap();
-    assert!(hook(h.path(), &status(None, Some((60.0, NOW + 100 * H))), NOW + 60_000), "記著 2099 年的，正常的要收");
-    assert_eq!((q(&h).weekly_pct, q(&h).reset_at), (Some(40), Some(iso_secs(NOW + 100 * H))));
-    // 解開以後照一般規則：同一期回升不收
-    assert!(!hook(h.path(), &status(None, Some((20.0, NOW + 100 * H))), NOW + 120_000));
+    std::fs::write(log_path(h.path()), "舊的一行記錄\n".repeat(5000)).unwrap();
+    log_skipped(h.path(), &[Skipped { kind: Kind::Five, code: "older_read", reason: "測試".into() }], NOW);
+    let l = log(&h);
+    assert!((l.len() as u64) < LOG_MAX_BYTES, "{}", l.len());
+    assert!(l.ends_with("5 小時額度沒收：測試\n"));
 }
 
-#[test]
-fn 範圍_邊界_後_8_天內收_超過不收_前_1_天內收_超過不收() {
-    let j = |r: i64| judge(Kind::Five, None, 50, Some(r), NOW);
-    assert!(j(NOW + 8 * DAY).is_ok(), "剛好 8 天");
-    assert!(j(NOW + 8 * DAY + 1000).is_err());
-    assert!(j(NOW - DAY).is_ok(), "剛好前 1 天");
-    assert!(j(NOW - DAY - 1000).is_err());
-    // 記著的剛好在 +8 天內仍照一般規則（較早不收）；超過 +8 天才當沒有重置時間
-    assert!(judge(Kind::Five, Some((40, Some(NOW + 8 * DAY))), 90, Some(NOW + H), NOW).is_err());
-    assert!(judge(Kind::Five, Some((40, Some(NOW + 8 * DAY + 1000))), 90, Some(NOW + H), NOW).is_ok());
-    // 記著的早於前 1 天不另外處理，照「已過 7 天才照收」（過 2 天、差不是 7 天倍數仍不收）
-    assert!(judge(Kind::Week, Some((40, Some(NOW - 2 * DAY))), 90, Some(NOW + 3 * DAY), NOW).is_err());
-}
-
-// ---------- 每週待確認（#1184）：過期後同一個新重置時間連續 3 次、隔滿 10 分鐘才收 ----------
-
-fn parsed_week(pct: u8, reset: i64) -> Parsed {
-    Parsed { five_hour_pct: None, weekly_pct: Some(pct), reset_at: Some(iso_secs(reset)), five_reset_ms: None, week_reset_ms: Some(reset) }
-}
-
-fn state_text(h: &tempfile::TempDir) -> String {
-    std::fs::read_to_string(super::super::state::state_path(h.path())).unwrap_or_default()
-}
-
-#[test]
-fn 共用案例_待確認序列_每一步都跟預期一致() {
-    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
-    let c = &v["constants"];
-    assert_eq!((c["confirm_count"].as_u64(), c["confirm_span_ms"].as_i64()), (Some(CONFIRM_COUNT as u64), Some(CONFIRM_SPAN_MS)), "待確認常數跟案例檔一致");
-    let seqs = v["confirm_sequences"].as_array().expect("confirm_sequences");
-    assert!(seqs.len() >= 6, "序列不該變少");
-    let win = |w: &Value| -> (u8, Option<i64>) { (w["left_pct"].as_u64().unwrap() as u8, w["resets_at"].as_str().map(ms)) };
-    let mut wrong = vec![];
-    for t in seqs {
-        let id = t["id"].as_str().unwrap();
-        let mut old = Some(win(&t["old"]));
-        let mut pend: Option<Pending> = None;
-        for (i, st) in t["steps"].as_array().unwrap().iter().enumerate() {
-            let (pct, reset) = win(&st["new"]);
-            let (merged, took, skipped, next) = merge_one(Vendor::Claude, Kind::Week, old, Some((pct, reset)), pend, ms(st["now"].as_str().unwrap()));
-            let want = st["accept"].as_bool().unwrap();
-            let got_reason = skipped.as_ref().map(|s| s.code);
-            if took != want || got_reason != st["reason"].as_str() {
-                wrong.push(format!("{id} 第 {} 步：預期 {want}/{:?}，實際 {took}/{got_reason:?}", i + 1, st["reason"].as_str()));
-            }
-            old = merged;
-            pend = next;
-        }
-    }
-    assert!(wrong.is_empty(), "跟共用案例不一致：{wrong:#?}");
-}
-
-#[test]
-fn 待確認_次數與間隔的邊界() {
-    let r = 1_000_000_000_000;
-    let (ok, p) = confirm_week(None, r, NOW);
-    assert!(!ok && p == Some(Pending { reset_ms: r, count: 1, first_ms: NOW }));
-    let (ok, p) = confirm_week(p, r + 9 * 60_000, NOW + 1000); // 差 10 分鐘內算同一個
-    assert!(!ok && p.unwrap().count == 2 && p.unwrap().reset_ms == r, "待確認的重置時間不跟著漂");
-    let (ok, p) = confirm_week(p, r + 11 * 60_000, NOW + 2000); // 差超過 10 分鐘＝不同，重新計
-    assert!(!ok && p == Some(Pending { reset_ms: r + 11 * 60_000, count: 1, first_ms: NOW + 2000 }));
-    let (ok, p) = confirm_week(Some(Pending { reset_ms: r, count: 2, first_ms: NOW }), r, NOW + CONFIRM_SPAN_MS);
-    assert!(ok && p.is_none(), "第 3 次且剛好隔 10 分鐘＝收");
-}
-
-/// 記著 gmail 的一期，時間推到它過期 5 天後；回 (家目錄, 現在, 新重置時間 A, 新重置時間 B)，A、B 都不是 7 天倍數
-fn expired_home() -> (tempfile::TempDir, i64, i64, i64) {
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), gmail - 3 * DAY));
-    let now = gmail + 5 * DAY;
-    (h, now, now + 6 * DAY + 5 * H, now + 5 * DAY + 2 * H)
-}
-
-#[test]
-fn 待確認_同一個新重置時間連續三次且隔十分鐘才收_狀態存檔重開不歸零() {
-    let (h, now, a, _) = expired_home();
-    assert!(!hook(h.path(), &status(None, Some((40.0, a))), now));
-    assert!(!hook(h.path(), &status(None, Some((40.0, a))), now + 5 * 60_000));
-    assert!(state_text(&h).contains("\"count\":2"), "次數存在狀態檔：{}", state_text(&h));
-    assert_eq!(q(&h).weekly_pct, Some(70), "還沒收");
-    assert!(hook(h.path(), &status(None, Some((40.0, a))), now + 10 * 60_000), "第 3 次且隔滿 10 分鐘");
-    let got = q(&h);
-    assert_eq!((got.weekly_pct, got.week_reset_at), (Some(60), Some(iso_secs(a))), "換成新基準");
-    assert!(!state_text(&h).contains("pending_week"), "收下後待確認清掉：{}", state_text(&h));
-}
-
-#[test]
-fn 待確認_交錯送兩組重置時間_不會誤收() {
-    let (h, now, a, b) = expired_home();
-    for i in 0..12 {
-        let r = if i % 2 == 0 { a } else { b };
-        assert!(!hook(h.path(), &status(None, Some((40.0, r))), now + i * 5 * 60_000), "第 {i} 次");
-    }
-    assert_eq!(q(&h).weekly_pct, Some(70));
-}
-
-#[test]
-fn 待確認_記著的還沒過期時倍數規則照擋_不累計() {
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let yooliang = ms("2026-11-04T09:00:00Z");
-    let start = gmail - 3 * DAY;
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
-    for i in 1..=6 {
-        assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + i * 20 * 60_000));
-    }
-    assert_eq!(q(&h).weekly_pct, Some(70));
-    assert!(!state_text(&h).contains("pending_week"), "還沒過期不累計待確認：{}", state_text(&h));
-}
-
-#[test]
-fn log_同一個原因只記一次_收進新值後再發生才再記() {
-    let (h, now, a, _) = expired_home();
-    let lines = |h: &tempfile::TempDir| log(h).lines().filter(|l| l.contains("7 天的倍數")).count();
-    for i in 0..5 {
-        hook(h.path(), &status(None, Some((40.0, a))), now + i * 1000);
-    }
-    assert_eq!(lines(&h), 1, "連續 5 次同一原因只記一行：{}", log(&h));
-    // 隔滿 10 分鐘收下新的一期，原因清掉
-    assert!(hook(h.path(), &status(None, Some((40.0, a))), now + 11 * 60_000));
-    assert_eq!(lines(&h), 1);
-    // a 過期之後又來一個不是 7 天倍數的：原因又發生，要再記一行
-    let later = a + 2 * DAY;
-    let odd = later + 3 * DAY + 5 * H;
-    assert!(!hook(h.path(), &status(None, Some((40.0, odd))), later));
-    assert_eq!(lines(&h), 2, "收下之後再發生要再記：{}", log(&h));
-}
-
-#[test]
-fn 換身分_該帳號舊基準丟掉_照新帳號的數字收_同帳號正常更新照舊() {
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let yooliang = ms("2026-11-04T09:00:00Z");
-    let start = gmail - 3 * DAY;
-    let write = |h: &tempfile::TempDir, email: &str, uuid: &str| {
-        std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
-    };
-    let h = tempfile::tempdir().unwrap();
-    write(&h, "a@x.test", "uuid-a");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
-    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + H), "同一個身分：照舊規則擋");
-    assert!(hook(h.path(), &status(None, Some((35.0, gmail))), start + 2 * H), "同帳號正常更新照舊");
-    // 換成 b：b 沒有基準，第一筆不收，同一組重置時間連續 3 次隔 10 分鐘才收
-    write(&h, "b@x.test", "uuid-b");
-    let t = start + 3 * H;
-    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t));
-    assert!(!hook(h.path(), &status(None, Some((50.0, yooliang))), t + 5 * 60_000));
-    assert!(hook(h.path(), &status(None, Some((50.0, yooliang))), t + 10 * 60_000));
-    assert_eq!(load_all(h.path())["b@x.test"].weekly_pct, Some(50));
-    // 換回 a：a 的舊基準丟掉，同樣要確認才收
-    write(&h, "a@x.test", "uuid-a");
-    let t = start + 5 * H;
-    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t));
-    assert!(!load_all(h.path()).contains_key("a@x.test"));
-    assert!(!hook(h.path(), &status(None, Some((10.0, yooliang))), t + 5 * 60_000));
-    assert!(hook(h.path(), &status(None, Some((10.0, yooliang))), t + 10 * 60_000));
-    assert_eq!(load_all(h.path())["a@x.test"].weekly_pct, Some(90));
-}
-
-#[test]
-fn 換身分後_舊帳號視窗交錯送兩組重置時間_不會收() {
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let a = gmail + 4 * DAY;
-    let b = gmail + 6 * DAY + 5 * H;
-    let write = |h: &tempfile::TempDir, email: &str, uuid: &str| {
-        std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
-    };
-    let h = tempfile::tempdir().unwrap();
-    write(&h, "a@x.test", "uuid-a");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), gmail - 3 * DAY));
-    write(&h, "b@x.test", "uuid-b");
-    let t = gmail - 2 * DAY;
-    for i in 0..12 {
-        let r = if i % 2 == 0 { a } else { b };
-        assert!(!hook(h.path(), &status(None, Some((40.0, r))), t + i * 5 * 60_000), "第 {i} 次");
-    }
-    assert!(!load_all(h.path()).contains_key("b@x.test"));
-}
-
-#[test]
-fn 讀不到身分_什麼都不記_也不留狀態檔() {
-    let h = tempfile::tempdir().unwrap();
-    assert!(!hook(h.path(), &status(None, Some((30.0, NOW + 100 * H))), NOW));
-    assert!(!super::super::state::state_path(h.path()).exists());
-    assert!(!super::super::quota_path(h.path()).exists());
-}
-
-#[test]
-fn 狀態檔壞掉或太大_當成空的_不當機() {
-    let h = home_as("a@x.test");
-    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
-    std::fs::write(super::super::state::state_path(h.path()), "{壞掉").unwrap();
-    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 100 * H))), NOW));
-    std::fs::write(super::super::state::state_path(h.path()), "x".repeat(10_000)).unwrap();
-    assert!(hook(h.path(), &status(None, Some((40.0, NOW + 100 * H))), NOW + 60_000));
-}
-
-#[test]
-fn 沒帶待確認狀態的_merge_每次都當第一次看到_行為跟以前一樣() {
-    let gmail = ms("2026-11-01T16:00:00Z");
-    let old = Quota { weekly_pct: Some(70), week_reset_at: Some(iso_secs(gmail)), at: iso_secs(gmail - DAY), ..Default::default() };
-    let now = gmail + 5 * DAY;
-    let (q, s) = merge(Some(&old), &parsed_week(60, now + 6 * DAY + 5 * H), now);
-    assert!(q.is_none() && s.len() == 1 && s[0].code == "not_week_multiple");
-}
-
-// ---------- 視窗帶帳號身分（#1185）：同一台同時開著兩個帳號的視窗，數字各記各的 ----------
+// ---------- 視窗帶帳號身分與資料時間（#1185、#1266） ----------
 const UA: &str = "aaaaaaaa-1111-2222-3333-444444444444";
 const UB: &str = "bbbbbbbb-1111-2222-3333-444444444444";
 
+fn home_as(email: &str) -> tempfile::TempDir {
+    let h = tempfile::tempdir().unwrap();
+    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": "11111111-2222-3333-4444-555555555555" } }).to_string()).unwrap();
+    h
+}
 fn add_account(h: &std::path::Path, email: &str, uuid: &str) {
     let d = h.join(".asn").join("claude-accounts").join(crate::claude_accounts::email_dir_name(email));
     std::fs::create_dir_all(&d).unwrap();
     std::fs::write(d.join("account.json"), json!({ "accountUuid": uuid, "emailAddress": email }).to_string()).unwrap();
 }
-/// 這個視窗的對話紀錄：`<home>/.claude/projects/p/<name>.jsonl`，最後一筆是 session-owner
-fn transcript(h: &std::path::Path, name: &str, uuid: &str) -> std::path::PathBuf {
+/// 對話紀錄的時間戳（帶毫秒）
+fn stamp(t: i64) -> String {
+    iso_secs(t).replace('Z', ".250Z")
+}
+/// 這個視窗的對話紀錄：`<home>/.claude/projects/p/<name>.jsonl`。最後一筆 assistant 回應的時間是 `assistant_ms`（None＝沒有 assistant 行）。
+/// `pad` 讓每次寫出來的長度不一樣（身分快取以檔案大小與修改時間判斷有沒有變）
+fn transcript(h: &std::path::Path, name: &str, uuid: &str, assistant_ms: Option<i64>, pad: usize) -> std::path::PathBuf {
     let d = h.join(".claude").join("projects").join("p");
     std::fs::create_dir_all(&d).unwrap();
     let f = d.join(format!("{name}.jsonl"));
-    let line = json!({ "type": "session-owner", "accountUuid": uuid, "organizationUuid": "cccccccc-1111-2222-3333-444444444444" }).to_string();
-    std::fs::write(&f, format!("{{\"type\":\"user\"}}\n{line}\n")).unwrap();
+    let owner = json!({ "type": "session-owner", "accountUuid": uuid, "organizationUuid": "cccccccc-1111-2222-3333-444444444444" }).to_string();
+    let mut text = format!("{}\n{owner}\n", json!({ "type": "user", "pad": "x".repeat(pad) }));
+    if let Some(t) = assistant_ms {
+        text.push_str(&format!("{}\n", json!({ "type": "assistant", "timestamp": stamp(t) })));
+    }
+    std::fs::write(&f, text).unwrap();
     f
 }
 /// 狀態列輸入加上 transcript_path
@@ -587,25 +259,36 @@ fn with_tp(status_json: String, tp: &std::path::Path) -> String {
     v["transcript_path"] = json!(tp.to_string_lossy());
     v.to_string()
 }
-fn hook_owned_in(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
-    super::super::hook_in(h.path(), &h.path().join(".claude"), input, now)
+fn hook_at(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
+    hook_in(h.path(), &h.path().join(".claude"), input, now)
+}
+/// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、送狀態列
+fn feed(h: &tempfile::TempDir, name: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
+    let t = transcript(h.path(), name, uuid, Some(ts), pad);
+    hook_at(h, &with_tp(st, &t), now)
 }
 fn quota_of(h: &tempfile::TempDir, email: &str) -> Quota {
     load_all(h.path()).remove(email).unwrap_or_else(|| panic!("{email} 要有紀錄"))
 }
+fn state_file(h: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(super::super::state::state_path(h.path())).unwrap_or_default()
+}
+/// 兩個視窗各自的狀態列：每週剩餘 = 100 − used，重置時間固定
+fn wk(used: f64) -> String {
+    status(None, Some((used, NOW + 3 * DAY)))
+}
 
 #[test]
 fn 身分_兩個帳號的視窗交錯回報_各記各的_不互相污染() {
-    // 目前 .claude.json 登入的是 a；b 的視窗還開著，兩邊交錯送數字，重置時間也不同（c8 的情形）
+    // 目前 .claude.json 登入 a；b 的視窗還開著，兩邊交錯送數字，重置時間也不同
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
     add_account(h.path(), "b@x.test", UB);
-    let (ta, tb) = (transcript(h.path(), "wa", UA), transcript(h.path(), "wb", UB));
-    let (ra, rb) = (NOW + 3 * DAY, NOW + 5 * DAY + 5 * H); // 兩個重置時間差不是 7 天的倍數
-    for i in 0..12 {
-        let t = NOW + i * 5 * 60_000;
-        assert!(hook_owned_in(&h, &with_tp(status(None, Some((10.0 + i as f64, ra))), &ta), t), "a 第 {i} 次");
-        assert!(hook_owned_in(&h, &with_tp(status(None, Some((50.0 + i as f64, rb))), &tb), t + 1000), "b 第 {i} 次");
+    let (ra, rb) = (NOW + 3 * DAY, NOW + 5 * DAY + 5 * H);
+    for i in 0..12i64 {
+        let t = NOW + i * 5 * MIN;
+        assert!(feed(&h, "wa", UA, t, i as usize, status(None, Some((10.0 + i as f64, ra))), t), "a 第 {i} 次");
+        assert!(feed(&h, "wb", UB, t, i as usize, status(None, Some((50.0 + i as f64, rb))), t + 1000), "b 第 {i} 次");
     }
     let (qa, qb) = (quota_of(&h, "a@x.test"), quota_of(&h, "b@x.test"));
     assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(100 - 21), Some(iso_secs(ra))));
@@ -615,196 +298,186 @@ fn 身分_兩個帳號的視窗交錯回報_各記各的_不互相污染() {
 }
 
 #[test]
+fn 身分_同一個帳號的舊視窗重送舊數字_不蓋過新的_同期回升照收() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 視窗 X 最近有回應（12:00，剩 30%）
+    assert!(feed(&h, "wx", UA, NOW, 1, wk(70.0), NOW + MIN));
+    // 視窗 Y 閒置很久，最後一次回應是 11:30（剩 90%）：它每次重繪都用現在的時間重送這個舊數字，資料時間是 11:30，不收
+    assert!(!feed(&h, "wy", UA, NOW - 30 * MIN, 2, wk(10.0), NOW + 2 * MIN));
+    assert!(!feed(&h, "wy", UA, NOW - 30 * MIN, 3, wk(10.0), NOW + 20 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(30));
+    assert!(log(&h).contains("資料時間") && !log(&h).contains("a@x.test"));
+    // 視窗 X 之後回應了，資料時間 12:30，剩餘回升到 95%（滾動窗／四捨五入）：照收
+    assert!(feed(&h, "wx", UA, NOW + 30 * MIN, 4, wk(5.0), NOW + 31 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(95));
+}
+
+#[test]
 fn 身分_對不到已知帳號_只留本機未知區_不進額度檔() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    let t = transcript(h.path(), "wx", "dddddddd-1111-2222-3333-444444444444");
-    assert!(!hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &t), NOW));
+    assert!(!feed(&h, "wx", "dddddddd-1111-2222-3333-444444444444", NOW, 1, wk(70.0), NOW));
     assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
     let unk = super::super::owner_store::unknown_load(h.path());
     assert_eq!(unk.keys().collect::<Vec<_>>(), ["dddddddd-1111-2222-3333-444444444444"]);
 }
 
 #[test]
-fn 身分_完全沒帶_transcript_path_的舊版才走舊辦法_記在目前登入的帳號() {
+fn 舊版_沒帶_transcript_path_不收_只記下看過舊版視窗_畫面寫固定一句() {
     let h = home_as("a@x.test");
-    assert!(hook_owned_in(&h, &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
-    assert!(!q(&h).owner, "舊辦法記的沒有身分標記");
-    assert_eq!(q(&h).weekly_pct, Some(70));
+    assert!(!hook_at(&h, &wk(70.0), NOW));
+    assert!(!super::super::quota_path(h.path()).exists(), "不收");
+    assert!(state_file(&h).contains("legacy_at"), "{}", state_file(&h));
+    // 畫面資料：目前登入的帳號沒有紀錄、最近有舊版視窗 → 標 legacy
+    let v = super::super::quota_all_view(h.path(), NOW + MIN);
+    assert_eq!(v.get("a@x.test"), Some(&json!({ "legacy": true })));
+    // 太久以前看到的舊版視窗不再提示
+    assert!(super::super::quota_all_view(h.path(), NOW + 2 * H).is_empty());
+    // 狀態列叫得很勤：10 分鐘內不重寫狀態檔
+    let before = state_file(&h);
+    assert!(!hook_at(&h, &wk(70.0), NOW + 5 * MIN));
+    assert_eq!(state_file(&h), before);
+    // 有紀錄了（別的視窗帶了身分）：照紀錄顯示，不再寫 legacy
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW + 6 * MIN, 1, wk(70.0), NOW + 7 * MIN));
+    let v = super::super::quota_all_view(h.path(), NOW + 8 * MIN);
+    assert!(v["a@x.test"].get("legacy").is_none() && v["a@x.test"].get("weekly_pct").is_some());
 }
 
 #[test]
-fn 身分_有帶_transcript_path_卻解不出身分_這次不記_別的視窗的數字不會記到目前登入的帳號() {
-    // 登入的是 A，A 的視窗有身分、已經記了；B 的視窗帶了 transcript_path，但檔裡還沒有 session-owner
+fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次不記() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    add_account(h.path(), "b@x.test", UB);
-    let ta = transcript(h.path(), "wa", UA);
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &ta), NOW));
-    let before = q(&h);
+    assert!(feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW));
+    let before = quota_of(&h, "a@x.test");
     let state_before = state_file(&h);
     let dir = h.path().join(".claude").join("projects").join("p");
-    // 1. 檔裡沒有 session-owner
+    // 1. 沒有 assistant 回應（取不到時間戳）
+    let no_ts = transcript(h.path(), "nots", UA, None, 1);
+    // 2. 檔裡沒有 session-owner
     let none = dir.join("nb.jsonl");
     std::fs::write(&none, "{\"type\":\"user\"}\n").unwrap();
-    // 2. 最後一筆 session-owner 格式壞掉
+    // 3. 最後一筆 session-owner 格式壞掉
     let bad = dir.join("bad.jsonl");
-    std::fs::write(&bad, "{\"type\":\"session-owner\",\"accountUuid\":\"../x\"}\n").unwrap();
-    // 3. 路徑不在 projects 底下（不安全）
+    std::fs::write(&bad, format!("{{\"type\":\"session-owner\",\"accountUuid\":\"../x\"}}\n{}\n", json!({ "type": "assistant", "timestamp": stamp(NOW) }))).unwrap();
+    // 4. 路徑不在 projects 底下（不安全）
     let outside = h.path().join("evil.jsonl");
-    std::fs::write(&outside, json!({ "type": "session-owner", "accountUuid": UB }).to_string()).unwrap();
-    // 4. 檔案不存在
+    std::fs::write(&outside, format!("{}\n{}\n", json!({ "type": "session-owner", "accountUuid": UB }), json!({ "type": "assistant", "timestamp": stamp(NOW) }))).unwrap();
+    // 5. 檔案不存在
     let missing = dir.join("missing.jsonl");
-    for (i, tp) in [&none, &bad, &outside, &missing].into_iter().enumerate() {
-        let t = NOW + (i as i64 + 1) * 60_000;
-        assert!(!hook_owned_in(&h, &with_tp(status(None, Some((90.0, NOW + 3 * DAY))), tp), t), "第 {i} 種：這次不記");
+    // 6. assistant 時間戳格式不對
+    let badts = dir.join("badts.jsonl");
+    std::fs::write(&badts, format!("{}\n{}\n", json!({ "type": "session-owner", "accountUuid": UA, "organizationUuid": "cccccccc-1111-2222-3333-444444444444" }), json!({ "type": "assistant", "timestamp": "昨天" }))).unwrap();
+    for (i, tp) in [&no_ts, &none, &bad, &outside, &missing, &badts].into_iter().enumerate() {
+        assert!(!hook_at(&h, &with_tp(wk(5.0), tp), NOW + (i as i64 + 1) * MIN), "第 {i} 種：這次不記");
     }
-    assert_eq!(q(&h), before, "A 的紀錄完全不變");
+    assert_eq!(quota_of(&h, "a@x.test"), before, "A 的紀錄完全不變");
     assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
     assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
     assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
 }
 
 #[test]
-fn 身分_舊辦法不蓋有身分的紀錄_標記也不會被舊辦法帶著走() {
+fn log_同一個原因只記一次_收進新值後再發生才再記() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    let ta = transcript(h.path(), "wa", UA);
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((30.0, NOW + 3 * DAY))), &ta), NOW));
-    let before = q(&h);
-    assert!(before.owner);
-    // 沒帶 transcript_path 的舊辦法，數字不同：不收
-    assert!(!hook_owned_in(&h, &status(None, Some((50.0, NOW + 3 * DAY))), NOW + 60_000));
-    assert_eq!(q(&h), before, "有身分的紀錄不被舊辦法蓋掉");
-    // 有身分的回報照常更新、仍有標記
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((40.0, NOW + 3 * DAY))), &ta), NOW + 120_000));
-    assert_eq!(q(&h).weekly_pct, Some(60));
-    assert!(q(&h).owner);
-}
-
-#[test]
-fn 身分_舊辦法寫的紀錄沒有標記_不會因為有身分的紀錄邏輯而掛上標記() {
-    let h = home_as("a@x.test");
-    assert!(hook_owned_in(&h, &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
-    assert!(hook_owned_in(&h, &status(None, Some((35.0, NOW + 3 * DAY))), NOW + 60_000));
-    assert!(!q(&h).owner);
-}
-
-#[test]
-fn 身分_備份失敗就不清舊基準_log_記一句() {
-    let h = home_as("a@x.test");
-    add_account(h.path(), "a@x.test", UA);
-    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW)); // 舊辦法記一筆（沒標記）
-    let before = q(&h);
-    // 讓備份的暫存檔位置被一個資料夾佔住：複製必失敗
-    std::fs::create_dir_all(super::super::owner_store::backup_tmp_path(h.path())).unwrap();
-    let t = transcript(h.path(), "wa", UA);
-    // 新數字的重置時間比舊基準晚、舊基準還沒過期：沒清舊基準時會被擋（later_not_expired）
-    assert!(!hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 60_000));
-    assert_eq!(q(&h), before, "舊基準還在");
-    assert!(log(&h).contains("備份失敗，沒有清舊基準"), "{}", log(&h));
-    assert!(!super::super::owner_store::backup_path(h.path()).exists());
-    // 備份恢復正常後，下一次就清掉舊基準並照新數字收
-    std::fs::remove_dir_all(super::super::owner_store::backup_tmp_path(h.path())).unwrap();
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
-    assert_eq!(q(&h).weekly_pct, Some(40));
-    assert!(super::super::owner_store::backup_path(h.path()).exists());
-    assert!(!super::super::owner_store::backup_tmp_path(h.path()).exists(), "沒有留下暫存檔");
+    assert!(feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW));
+    let lines = |h: &tempfile::TempDir| log(h).lines().filter(|l| l.contains("每週額度沒收")).count();
+    for i in 0..5 {
+        assert!(!feed(&h, "wold", UA, NOW - 10 * MIN, 10 + i, wk(60.0), NOW + MIN + i as i64));
+    }
+    assert_eq!(lines(&h), 1, "連續 5 次同一原因只記一行：{}", log(&h));
+    // 收進新值（資料較新）後原因清掉；再發生同一原因要再記
+    assert!(feed(&h, "wa", UA, NOW + 10 * MIN, 20, wk(50.0), NOW + 11 * MIN));
+    assert!(!feed(&h, "wold", UA, NOW - 10 * MIN, 30, wk(60.0), NOW + 12 * MIN));
+    assert_eq!(lines(&h), 2, "收下之後再發生要再記：{}", log(&h));
 }
 
 #[test]
 fn 身分_第一次有身分的回報清掉沒有標記的舊基準_備份一份_log_只記筆數() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    // 舊辦法記一筆（可能混進別的帳號的數字）
-    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW));
-    assert_eq!(q(&h).weekly_pct, Some(95));
-    let t = transcript(h.path(), "wa", UA);
-    // 有身分的回報，剩餘比舊基準高、重置時間也不同：因為舊基準被清掉，照收
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 60_000));
-    let got = q(&h);
-    assert_eq!(got.weekly_pct, Some(40));
+    // 沒有身分標記的舊紀錄（舊辦法記的，資料時間是記錄當下 12:00，可能混進別的帳號的數字）
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    let rec = json!({ "weekly_pct": 95, "at": iso_secs(NOW), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW) });
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec }).to_string()).unwrap();
+    // 有身分的回報，資料時間 11:00（比舊紀錄的「記錄當下」早）：舊基準被清掉，所以照收
+    assert!(feed(&h, "wa", UA, NOW - H, 1, wk(40.0), NOW + MIN));
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!(got.weekly_pct, Some(60));
     assert!(got.owner);
     let bak = super::super::owner_store::backup_path(h.path());
-    assert!(bak.exists(), "備份了一份");
-    let bak_text = std::fs::read_to_string(&bak).unwrap();
-    assert!(bak_text.contains("\"weekly_pct\":95"), "備份是清掉之前的內容");
+    assert!(std::fs::read_to_string(&bak).unwrap().contains("\"weekly_pct\":95"), "備份是清掉之前的內容");
     let l = log(&h);
-    assert!(l.contains("清掉 1 筆沒有身分的舊基準"), "{l}");
-    assert!(!l.contains("a@x.test") && !l.contains(UA), "log 不含 email 與 uuid");
+    assert!(l.contains("清掉 1 筆沒有身分的舊基準") && !l.contains("a@x.test") && !l.contains(UA), "log 只記筆數：{l}");
     // 之後同一個帳號的回報不再清、不再備份
     std::fs::remove_file(&bak).unwrap();
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
+    assert!(feed(&h, "wa", UA, NOW + 10 * MIN, 2, wk(30.0), NOW + 11 * MIN));
     assert!(!bak.exists());
-    assert_eq!(q(&h).weekly_pct, Some(30));
     assert_eq!(log(&h).matches("清掉").count(), 1);
+}
+
+#[test]
+fn 身分_備份失敗就不清舊基準_log_記一句() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    let rec = json!({ "weekly_pct": 95, "at": iso_secs(NOW), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW) });
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec }).to_string()).unwrap();
+    let tmp = super::super::owner_store::backup_tmp_path(h.path());
+    std::fs::create_dir_all(&tmp).unwrap(); // 備份必失敗
+    // 資料時間 11:00 比舊紀錄的 12:00 早：沒清舊基準就被擋
+    assert!(!feed(&h, "wa", UA, NOW - H, 1, wk(40.0), NOW + MIN));
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!((got.weekly_pct, got.owner), (Some(95), false), "舊基準還在、沒有標記");
+    assert!(log(&h).contains("備份失敗，沒有清舊基準"));
+    assert!(!super::super::owner_store::backup_path(h.path()).exists());
+    // 備份恢復：下一次清掉舊基準、照新數字收、蓋上標記
+    std::fs::remove_dir_all(&tmp).unwrap();
+    assert!(feed(&h, "wa", UA, NOW - H, 2, wk(40.0), NOW + 2 * MIN));
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!((got.weekly_pct, got.owner), (Some(60), true));
+    assert!(super::super::owner_store::backup_path(h.path()).exists());
+    assert!(!tmp.exists(), "沒有留下暫存檔");
+}
+
+#[test]
+fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫同一個備份檔() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    let rec = |pct: u8| json!({ "weekly_pct": pct, "at": iso_secs(NOW - DAY), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW - DAY) });
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec(90), "b@x.test": rec(80) }).to_string()).unwrap();
+    let baks = |h: &tempfile::TempDir| std::fs::read_dir(h.path().join(".asn")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak")).count();
+    assert!(feed(&h, "wa", UA, NOW, 1, wk(60.0), NOW));
+    assert_eq!(baks(&h), 1);
+    let first = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
+    assert!(first.contains("\"weekly_pct\":90") && first.contains("\"weekly_pct\":80"), "第一份備份含兩個舊紀錄");
+    assert!(feed(&h, "wb", UB, NOW, 2, wk(50.0), NOW + MIN));
+    assert_eq!(baks(&h), 1, "還是只有一份備份檔");
+    let second = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
+    assert!(second.contains("\"owner\":true") && second.contains("\"weekly_pct\":80"), "第二次覆寫成清 b 之前的內容（a 已有標記）");
+    assert!(feed(&h, "wa", UA, NOW + MIN, 3, wk(40.0), NOW + 2 * MIN));
+    assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second, "a 已有標記，不再備份");
 }
 
 #[test]
 fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看登入檔_都沒有就是未知() {
     let h = home_as("cur@x.test"); // .claude.json 的 accountUuid 是 11111111-2222-3333-4444-555555555555
     add_account(h.path(), "a@x.test", UA);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), UA).as_deref(), Some("a@x.test"));
+    let cfg = h.path().join(".claude");
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UA).as_deref(), Some("a@x.test"));
     // 資料夾名跟 email 對不上（被改名／被塞假檔）：不用
     let root = h.path().join(".asn").join("claude-accounts");
     std::fs::create_dir_all(root.join("wrong-name")).unwrap();
     std::fs::write(root.join("wrong-name").join("account.json"), json!({ "accountUuid": UB, "emailAddress": "b@x.test" }).to_string()).unwrap();
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), UB), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UB), None);
     // 帳號庫沒有、但正是目前登入的帳號：看 .claude.json
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), ""), None);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &h.path().join(".claude"), "eeeeeeee-0000-0000-0000-000000000000"), None);
-}
-
-// ---------- 狀態檔不留明文身分、舊格式平順轉換、剛換帳號的提示（#1185） ----------
-fn state_file(h: &tempfile::TempDir) -> String {
-    std::fs::read_to_string(super::super::state::state_path(h.path())).unwrap_or_default()
-}
-fn login_as(h: &tempfile::TempDir, email: &str, uuid: &str) {
-    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
-}
-
-#[test]
-fn 狀態檔的登入身分存雜湊_不留明文_email_與_uuid() {
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
-    let t = state_file(&h);
-    assert!(t.contains("\"identity\":\"h1:"), "{t}");
-    assert!(!t.contains("a@x.test") && !t.contains("11111111-2222-3333-4444-555555555555"), "狀態檔不該有明文身分：{t}");
-}
-
-#[test]
-fn 舊格式明文身分的狀態檔_平順轉成雜湊_不會誤判成換帳號() {
-    let h = home_as("a@x.test");
-    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
-    std::fs::write(super::super::state::state_path(h.path()), r#"{"identity":"a@x.test|11111111-2222-3333-4444-555555555555"}"#).unwrap();
-    // 若被當成換帳號，第一筆要等確認、不會收；平順轉換則第一筆直接收
-    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
-    let t = state_file(&h);
-    assert!(t.contains("\"identity\":\"h1:") && !t.contains("a@x.test"), "{t}");
-    assert!(!t.contains("\"rebase\""), "{t}");
-    // 真的換成別的身分，舊格式也照樣判斷得出來
-    std::fs::write(super::super::state::state_path(h.path()), r#"{"identity":"zzz@x.test|99999999-0000-0000-0000-000000000000"}"#).unwrap();
-    assert!(!hook(h.path(), &status(None, Some((20.0, NOW + 3 * DAY))), NOW + 60_000), "別的身分：要等確認");
-    assert!(state_file(&h).contains("\"rebase\":true"));
-}
-
-#[test]
-fn 剛換帳號等確認時畫面資料標_waiting_確認收下後就沒有了() {
-    let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, NOW + 3 * DAY))), NOW));
-    assert!(super::super::quota_all_with_waiting(h.path()).get("b@x.test").is_none());
-    login_as(&h, "b@x.test", "22222222-0000-0000-0000-000000000000");
-    let r = NOW + 4 * DAY;
-    assert!(!hook(h.path(), &status(None, Some((40.0, r))), NOW + 60_000));
-    let all = super::super::quota_all_with_waiting(h.path());
-    assert_eq!(all.get("b@x.test"), Some(&json!({ "waiting": true })), "b 還在等確認");
-    assert!(all.get("a@x.test").is_some_and(|v| v.get("weekly_pct").is_some()), "a 的紀錄照舊");
-    assert!(!hook(h.path(), &status(None, Some((40.0, r))), NOW + 5 * 60_000 + 60_000));
-    assert!(hook(h.path(), &status(None, Some((40.0, r))), NOW + 10 * 60_000 + 60_000));
-    let all = super::super::quota_all_with_waiting(h.path());
-    assert_eq!(all["b@x.test"]["weekly_pct"], 60);
-    assert!(all["b@x.test"].get("waiting").is_none());
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, ""), None);
+    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "eeeeeeee-0000-0000-0000-000000000000"), None);
 }
 
 #[test]
@@ -812,7 +485,6 @@ fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家
     let h = tempfile::tempdir().unwrap();
     let cfg = h.path().join("cfg-b");
     std::fs::create_dir_all(&cfg).unwrap();
-    // 家目錄那份登入的是 home@x.test；這個視窗的設定資料夾登入的是 cfgb@x.test
     let cj = |dir: &std::path::Path, email: &str, uuid: &str| std::fs::write(dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
     cj(h.path(), "home@x.test", "11111111-0000-0000-0000-00000000000a");
     cj(&cfg, "cfgb@x.test", "22222222-0000-0000-0000-00000000000b");
@@ -823,48 +495,51 @@ fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家
 }
 
 #[test]
-fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫同一個備份檔() {
+fn 狀態檔壞掉或太大_當成空的_不當機() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    add_account(h.path(), "b@x.test", UB);
-    // 兩個帳號各有一筆沒有身分標記的舊紀錄
-    let rec = |pct: u8| json!({ "weekly_pct": pct, "at": "2026-10-24T11:00:00Z", "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": "2026-10-24T11:00:00Z" });
     std::fs::create_dir_all(h.path().join(".asn")).unwrap();
-    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec(90), "b@x.test": rec(80) }).to_string()).unwrap();
-    let (ta, tb) = (transcript(h.path(), "wa", UA), transcript(h.path(), "wb", UB));
-    let baks = |h: &tempfile::TempDir| std::fs::read_dir(h.path().join(".asn")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak")).count();
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY))), &ta), NOW));
-    assert_eq!(baks(&h), 1);
-    let first = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
-    assert!(first.contains("\"weekly_pct\":90") && first.contains("\"weekly_pct\":80"), "第一份備份含兩個舊紀錄");
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((50.0, NOW + 5 * DAY))), &tb), NOW + 60_000));
-    assert_eq!(baks(&h), 1, "還是只有一份備份檔");
-    let second = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
-    assert!(second.contains("\"owner\":true") && second.contains("\"weekly_pct\":80"), "第二次覆寫成清 b 之前的內容（a 已有標記）");
-    // a 已有標記，不會再觸發備份
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((70.0, NOW + 5 * DAY))), &ta), NOW + 120_000));
-    assert_eq!(std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap(), second);
+    std::fs::write(super::super::state::state_path(h.path()), "{壞掉").unwrap();
+    assert!(feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW));
+    std::fs::write(super::super::state::state_path(h.path()), "x".repeat(40_000)).unwrap();
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, wk(60.0), NOW + MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(40));
+}
+
+#[test]
+fn 沒帶資料時間的_merge_資料時間用現在() {
+    let r = NOW + 3 * DAY;
+    let old = Quota { weekly_pct: Some(70), week_reset_at: Some(iso_secs(r)), week_at: Some(iso_secs(NOW - H)), at: iso_secs(NOW - H), ..Default::default() };
+    let p = Parsed { five_hour_pct: None, weekly_pct: Some(60), reset_at: None, five_reset_ms: None, week_reset_ms: Some(r) };
+    let (q, s) = merge(Some(&old), &p, NOW);
+    assert!(s.is_empty());
+    let q = q.unwrap();
+    assert_eq!((q.weekly_pct, q.week_at), (Some(60), Some(iso_secs(NOW))));
 }
 
 #[test]
 fn 身分_備份失敗那次的紀錄不蓋有身分標記_下一次備份成功才清舊基準並蓋標記() {
+    // 西川在 #1213 指出：備份失敗那次沒清舊基準，這筆還混著舊基準，不能蓋「有身分」標記，否則之後永遠不會再清
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    assert!(hook_owned_in(&h, &status(None, Some((5.0, NOW + 3 * DAY))), NOW)); // 舊辦法記一筆：剩 95%，沒標記
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    // 沒有標記的舊紀錄（舊辦法記的）：剩 95%、資料時間 11:00
+    let rec = json!({ "weekly_pct": 95, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW - H) });
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec }).to_string()).unwrap();
     let tmp = super::super::owner_store::backup_tmp_path(h.path());
     std::fs::create_dir_all(&tmp).unwrap(); // 備份必失敗
-    let t = transcript(h.path(), "wa", UA);
-    // 同一期、剩餘更低：就算沒清舊基準也會被收下
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((10.0, NOW + 3 * DAY))), &t), NOW + 60_000));
-    assert_eq!(q(&h).weekly_pct, Some(90));
-    assert!(!q(&h).owner, "備份失敗沒清舊基準，這筆不能蓋有身分的標記");
+    // 資料較新（12:00）、剩 90%：沒清舊基準也會被收下，但這筆不能蓋有身分的標記
+    assert!(feed(&h, "wa", UA, NOW, 1, wk(10.0), NOW + MIN));
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!((got.weekly_pct, got.owner), (Some(90), false), "收下了，但沒有蓋標記");
     assert!(log(&h).contains("備份失敗，沒有清舊基準"));
-    // 備份恢復：下一次清掉舊基準（備份一份）、照有身分的數字收、蓋上標記
+    assert!(!super::super::owner_store::backup_path(h.path()).exists());
+    // 備份恢復：下一次因為還沒有標記，清掉舊基準（備份一份）、照有身分的數字收、蓋上標記
     std::fs::remove_dir_all(&tmp).unwrap();
-    assert!(hook_owned_in(&h, &with_tp(status(None, Some((60.0, NOW + 5 * DAY + 5 * H))), &t), NOW + 120_000));
-    let got = q(&h);
-    assert_eq!(got.weekly_pct, Some(40), "舊基準清掉了，新的一期照收");
-    assert!(got.owner);
+    assert!(feed(&h, "wa", UA, NOW + 30 * MIN, 2, wk(20.0), NOW + 31 * MIN));
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!((got.weekly_pct, got.owner), (Some(80), true));
     assert!(super::super::owner_store::backup_path(h.path()).exists());
     assert_eq!(log(&h).matches("清掉 1 筆沒有身分的舊基準").count(), 1);
+    assert!(!tmp.exists(), "沒有留下暫存檔");
 }

@@ -4,14 +4,14 @@
 //! - 額度桶只收 `gemini-5h`→five_hour、`gemini-weekly`→weekly，剩餘 ＝ remaining_fraction×100 四捨五入。
 //!   其他桶（`3p-*`、分模型的）、`disabled` 的、只有剩餘數量算不出 % 的一律丟掉，寫進 log。
 //! - 沒有 `email` 或沒有 `quota` 的整筆略過：agy 啟動前 1～2 秒欄位是陸續補上的，不能當成「沒額度」。
-//! - 新舊判斷用 merge.rs 的 Gemini 規則（Codex 規則＋記著 100% 照收）。
+//! - 新舊判斷用 merge.rs 的簡化規則（#1266）：資料時間不能比記著的舊、不能在未來、重置時間要在合理範圍；其餘照收（滾動窗的回升是合法的）。
 //! - 本機檔 `~/.asn/gemini-quota.json`：以 email 為鍵、最多 20 個帳號，只存兩個額度窗（剩餘、重置時間、讀取時間）、方案、記錄時間。
 //!   cwd、工作階段／對話編號、token 數、模型一律不留。
 //! - 狀態列最快每 300ms 叫一次：值沒變就不寫檔（重置時間差 10 分鐘內算沒變；滿額的窗重置時間會一直往後跑）。
 //!   值沒變但上次記錄已超過 5 分鐘才重寫一次，讓「多久前讀的」不會一直停在開窗那一刻。
 //! 紅線：函式一律吃家目錄路徑參數；只有命令列入口與 Tauri 指令決定真實家目錄。不讀任何登入憑證、不連網、不執行外部程式。
 use crate::claude_accounts::normalize_email;
-use crate::claude_quota::merge::{self, Vendor};
+use crate::claude_quota::merge;
 use crate::claude_quota::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -187,7 +187,8 @@ fn same_values(a: &Entry, b: &Entry) -> bool {
 pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let old = all.get(&r.email);
-    let (merged, skipped) = merge::merge_for(Vendor::Gemini, old.map(|e| &e.quota), &r.parsed, now_ms);
+    // Gemini 的數字是讀取當下的即時值，資料時間就是現在；帳號是 agy 自己給的 email（#1266）
+    let (merged, skipped) = merge::merge(old.map(|e| &e.quota), &r.parsed, now_ms);
     log_once(home, &r.dropped, &merge::skipped_lines(&skipped, now_ms), now_ms);
     let plan = if r.plan.is_empty() { old.map(|e| e.plan.clone()).unwrap_or_default() } else { r.plan.clone() };
     let new = match (merged, old) {
