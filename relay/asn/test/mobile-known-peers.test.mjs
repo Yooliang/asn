@@ -407,7 +407,7 @@ test('認得的電腦頁：說明文字照規格；只有還沒確認的那列�
   // 提示條與設定頁按鈕最後都開同一個選方法浮層（openMethodSheet）
   assert.match(html, /class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet"/)
   const js = read('../ui/m.js')
-  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\) \}/, '設定頁的確認呼叫同一個 openMethodSheet')
+  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\)[^\n]* \}/, '設定頁的確認呼叫同一個 openMethodSheet')
   assert.match(js, /if \(!p\?\.node \|\| p\.confirmed/, '已確認的不處理')
   assert.doesNotMatch(js, /confirmKnown[^\n]*android_known/, '不另寫一套確認流程')
 })
