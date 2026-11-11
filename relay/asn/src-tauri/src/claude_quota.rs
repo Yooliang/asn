@@ -628,7 +628,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let mut keys: Vec<&String> = v["a@x.test"].as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "owner", "reset_at", "week_at", "week_reset_at", "weekly_pct"]);
+        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "owner", "reset_at", "verified", "week_at", "week_reset_at", "weekly_pct"]);
         assert_eq!((v["a@x.test"]["five_reset_at"].as_str(), v["a@x.test"]["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-26T07:33:20Z")), "兩條各存自己的重置時間");
     }
 
@@ -647,13 +647,13 @@ mod tests {
         let h = tmp_home();
         assert!(feed(&h, "a@x.test", UA, "wa", NOW, 1, status(10.0, 1_792_850_400, 10.0, 1_793_000_000), NOW));
         assert!(feed(&h, "a@x.test", UA, "wa", NOW + 60_000, 2, status(50.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 60_000));
-        assert!(feed(&h, "b@x.test", "bbbbbbbb-1111-2222-3333-444444444444", "wb", NOW + 120_000, 3, status(70.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 120_000));
+        assert!(feed(&h, "b@x.test", "bbbbbbbb-1111-2222-3333-444444444444", "wb", NOW + 120_000, 3, status(70.0, 1_792_850_400, 10.0, 1_793_020_000), NOW + 120_000));   // 不同帳號的每週重置時間不一樣
         let all = load_all(h.path());
         assert_eq!(all["a@x.test"].five_hour_pct, Some(50));
         assert_eq!(all["b@x.test"].five_hour_pct, Some(30));
         for i in 0..25usize {
             let t = NOW + 200_000 + i as i64 * 1000;
-            assert!(feed(&h, &format!("u{i}@x.test"), &format!("{:08x}-0000-0000-0000-000000000000", i + 1), &format!("w{i}"), t, i, status(5.0, 1_792_850_400, 5.0, 1_793_000_000), t));
+            assert!(feed(&h, &format!("u{i}@x.test"), &format!("{:08x}-0000-0000-0000-000000000000", i + 1), &format!("w{i}"), t, i, status(5.0, 1_792_850_400, 5.0, 1_793_030_000 + i as i64 * 10_800), t));   // 每個帳號的每週重置時間都不一樣（各差 3 小時）
         }
         let all = load_all(h.path());
         assert_eq!(all.len(), 20);

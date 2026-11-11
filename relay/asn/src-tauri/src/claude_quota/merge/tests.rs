@@ -470,7 +470,8 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
     assert_eq!(baks(&h), 1);
     let first = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
     assert!(first.contains("\"weekly_pct\":90") && first.contains("\"weekly_pct\":80"), "第一份備份含兩個舊紀錄");
-    assert!(feed(&h, "wb", UB, NOW, 2, wk(50.0), NOW + MIN));
+    // 兩個帳號的每週重置時間要不一樣（現實裡不會剛好同一期；一樣的話 b 會被當成 a 的串號擋掉）
+    assert!(feed(&h, "wb", UB, NOW, 2, status(None, Some((50.0, NOW + 4 * DAY))), NOW + MIN));
     assert_eq!(baks(&h), 1, "還是只有一份備份檔");
     let second = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
     assert!(second.contains("\"owner\":true") && second.contains("\"weekly_pct\":80"), "第二次覆寫成清 b 之前的內容（a 已有標記）");
