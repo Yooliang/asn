@@ -179,7 +179,8 @@ pub enum Cross {
 
 /// 這筆讀數歸到 `email` 底下之前，用每週重置時間檢查是不是串號。只看每週那條（5 小時窗不受影響）。
 /// 只有「A 存著還沒過期的那一期，跟新讀數的那一期差超過 10 分鐘」才會有事；其他一律 Pass。
-/// 「其他帳號」＝額度檔裡別的帳號，且它存著的每週那一期也還沒過期。
+/// 「其他帳號」＝本機額度檔裡別的帳號，而且它的紀錄有身分標記（`owner`：從它自己的視窗讀到、經過 session-owner 確認的），存著的每週那一期也還沒過期；
+/// 舊辦法記的、沒有身分標記的紀錄不算（免得被錯的資料連鎖帶歪）。後台、別台送來的資料根本不在這份額度檔裡。
 pub fn week_fingerprint(all: &HashMap<String, Quota>, email: &str, p: &Parsed, now_ms: i64) -> Cross {
     let Some(new_reset) = p.week_reset_ms else { return Cross::Pass };
     let Some(me) = all.get(email) else { return Cross::Pass };
@@ -188,7 +189,7 @@ pub fn week_fingerprint(all: &HashMap<String, Quota>, email: &str, p: &Parsed, n
     if same(new_reset, stored_reset) {
         return Cross::Pass;
     }
-    let live_others: Vec<i64> = all.iter().filter(|(k, q)| k.as_str() != email && q.weekly_pct.is_some()).filter_map(|(_, q)| stored_resets(q).1).filter(|&r| r > now_ms).collect();
+    let live_others: Vec<i64> = all.iter().filter(|(k, q)| k.as_str() != email && q.owner && q.weekly_pct.is_some()).filter_map(|(_, q)| stored_resets(q).1).filter(|&r| r > now_ms).collect();
     if live_others.iter().any(|&r| same(new_reset, r)) {
         Cross::IncomingFromOther { new_reset, stored_reset }
     } else if live_others.iter().any(|&r| same(stored_reset, r)) {

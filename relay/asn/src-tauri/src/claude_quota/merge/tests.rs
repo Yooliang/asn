@@ -815,6 +815,26 @@ fn 週期指紋_存著的那一期是另一個帳號的_存著的才是串號_�
 }
 
 #[test]
+fn 週期指紋_另一個帳號的紀錄沒有身分標記_不拿來比() {
+    // b 的紀錄是舊辦法記的（沒有 owner 標記），可能混進別的帳號的數字：不能拿它的週期當指紋
+    let (h, ra, rb) = two_accounts();
+    let rec_b = json!({ "weekly_pct": 40, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(rb), "week_at": iso_secs(NOW - H) });
+    // 新讀數的週期＝b 的：b 有標記時是串號（上面那條），沒有標記就只是「對不上任何帳號」
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_b.clone() }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(None, Some((81.0, rb))), NOW + MIN));
+    let lg = log(&h);
+    assert!(lg.contains("對不上本機其他帳號") && !lg.contains("別的帳號的數字"), "{lg}");
+    // 存著的週期＝b 的：b 有標記時會把存著的換掉，沒有標記就不換（不收，等過期）
+    let (h, ra, rb) = two_accounts();
+    let rec_b = json!({ "weekly_pct": 40, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(rb), "week_at": iso_secs(NOW - H) });
+    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_b }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, ra))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(19), Some(iso_secs(rb))), "不換");
+    assert!(!log(&h).contains("換成這次的"), "{}", log(&h));
+}
+
+#[test]
 fn 週期指紋_兩邊都對不上任何帳號_不收_等存著的那一期過期才放行() {
     let (h, ra, rb) = two_accounts();
     seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
