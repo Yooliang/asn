@@ -161,7 +161,7 @@ fn restrict_file(path: &Path) -> bool {
 }
 
 /// 把新金鑰寫進 <relay_home>/<節點>.key（沿用現有格式：只有金鑰本身），再寫 <relay_home>/node。
-/// 先建空檔並限縮權限、才寫入內容；寫完讀回比對；任何一步失敗就刪掉金鑰檔（不留下權限鬆的金鑰）。
+/// 明文寫法：先寫同資料夾的暫存檔並限縮權限、寫完同步再換名蓋掉（不會先清空現有的金鑰檔，限縮或寫入失敗時原檔不動）；寫完讀回比對，讀回不一致或節點代號檔寫不了就刪掉金鑰檔。
 /// restrict 由呼叫端傳入，測試可換成假的。
 pub fn write_node_files(relay_home: &Path, node: &str, key: &str, restrict: impl Fn(&Path) -> bool) -> Result<(), String> {
     let aead = crate::secret_file::platform_aead();
@@ -185,15 +185,8 @@ pub fn write_node_files_with(relay_home: &Path, node: &str, key: &str, restrict:
             _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),
         }
     } else {
-        if let Err(e) = std::fs::write(&kf, b"") {
-            return cleanup(format!("寫不了金鑰檔：{e}"));
-        }
-        if !restrict(&kf) {
-            return cleanup("沒辦法把金鑰檔限制成只有你能讀，已放棄寫入".into());
-        }
-        if let Err(e) = std::fs::write(&kf, key) {
-            return cleanup(format!("寫不了金鑰檔：{e}"));
-        }
+        // 不先清空現有的金鑰檔：寫暫存檔、限縮暫存檔權限、同步，再換名蓋掉；失敗只刪暫存檔，原檔不動
+        crate::secret_file::write_plain_atomic(&kf, key.as_bytes(), &restrict)?;
         match std::fs::read_to_string(&kf) {
             Ok(back) if back.trim() == key => {}
             _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),

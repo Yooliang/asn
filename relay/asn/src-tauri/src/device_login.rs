@@ -150,7 +150,10 @@ pub fn save_key(dir: &Path, id: &str, key: &str) -> Result<(), String> {
     let back = if sealed {
         crate::secret_file::read_node_key(&f, id, aead.as_deref()).map_err(|_| "金鑰存完讀不回來".to_string())?
     } else {
-        write_private(&f, key).map_err(|e| format!("金鑰存不進這台電腦：{e}"))?;
+        {
+            let _g = crate::secret_file::lock();
+            write_private(&f, key).map_err(|e| format!("金鑰存不進這台電腦：{e}"))?;
+        }
         std::fs::read_to_string(&f).map_err(|e| format!("金鑰存完讀不回來：{e}"))?
     };
     if back.trim() != key {

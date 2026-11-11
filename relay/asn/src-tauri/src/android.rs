@@ -60,6 +60,13 @@ pub async fn android_push_unregister(app: State<'_, App>) -> Result<(), String> 
     relay_of(&app)?.push_unregister().await
 }
 
+/// 登入資料有沒有照規矩加密存著。回 false＝存檔是明文（金鑰庫暫時用不了而備援），畫面提示「下次開啟會再試」；
+/// 沒有存檔、讀不到＝true（沒有東西要提醒）。只有手機有這個命令
+#[tauri::command]
+pub fn android_login_sealed(app: State<'_, App>) -> bool {
+    crate::secret_file::login_is_sealed(&app.data_dir)
+}
+
 // ---------- 幫電腦開新夥伴（遠端開視窗；視窗開在那台電腦上，手機只下指令） ----------
 
 /// 各電腦的啟動設定（模型、允許的資料夾、在不在線）與最近開視窗的進度。要本人簽章；沒登入回錯，不打後台

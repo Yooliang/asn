@@ -419,6 +419,7 @@
                         <label v-if="acct.signed_in">{{ AI_WAKE_LIMIT_LABEL }}<input class="set-input" type="number" inputmode="numeric" min="0" max="200" step="1" v-model="wakeDraft" enterkeyhint="done" @change="commitWake" @keydown.enter="$event.target.blur()"><small class="m-fine">{{ AI_WAKE_LIMIT_NOTE }}</small></label>
                         <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
                         <p class="m-acct">{{ accountText }}</p>
+                        <p class="m-fine" v-if="sealNote">{{ sealNote }}</p>
                         <label>這台設備的名稱<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"><small class="m-fine">只有這支手機用：別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small></label>
                         <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
                         <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>

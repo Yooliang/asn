@@ -608,7 +608,7 @@ test('憑證：專案沒有檔案外掛、權限沒開檔案存取，網頁自�
   for (const f of fs.readdirSync(path.join(root, 'src-tauri', 'capabilities'))) assert.doesNotMatch(read('src-tauri', 'capabilities', f), /"fs:|plugin-fs/, f)
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
   const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
-  for (const c of ['android_known_token', 'android_known_rename', 'android_known_scan_confirm']) { assert.ok(phone.includes(`android::${c}`), c); assert.ok(!desk.includes(c), `電腦版沒有 ${c}`) }
+  for (const c of ['android_known_token', 'android_known_rename', 'android_known_scan_confirm', 'android_login_sealed']) { assert.ok(phone.includes(`android::${c}`), c); assert.ok(!desk.includes(c), `電腦版沒有 ${c}`) }
   assert.ok(desk.includes('device_known_rename') && !phone.includes('device_known_rename'), '電腦版改名只在電腦版')
   assert.match(lib, /#\[cfg\(any\(target_os = "android", test\)\)\][^\n]*\n#\[cfg_attr\(not\(target_os = "android"\), allow\(dead_code\)\)\]\nmod consent;/)
 })

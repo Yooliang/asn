@@ -65,6 +65,7 @@ import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
+import { loginUnsealedNote } from './lib/mobile-login-seal.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
@@ -1273,6 +1274,9 @@ const app = createApp({
     void authApi.status().then(s => { acct.value = s ? { ...s, known: true, error: '' } : { ...acct.value, error: '沒有收到回應' } }).catch(e => { acct.value = { ...acct.value, error: String(e?.message ?? e).slice(0, 80) } })
     // 我的名字（帳號層）：先用上次存的，登入帳號的資料取到後更新並存起來（離線也有名字可顯示）
     void authApi.accountInfo().then(i => { if (typeof i?.owner_name === 'string') ownerName.value = i.owner_name }).catch(() => {})
+    // 登入資料暫時沒有加密保存時的一句提醒（只有文字；平常是空字串）
+    const sealNote = ref('')
+    void loginUnsealedNote(invoke).then(t => { sealNote.value = t })
     const myName = computed(() => accountDisplayName(ownerName.value, acct.value.email))
     watch(myName, v => { nameDraft.value = v }, { immediate: true })
     const meForChat = computed(() => ({ ...me, nick: myName.value }))   // 對話裡自己的名字用帳號名；設備名只在「從 …」小標
@@ -1286,7 +1290,7 @@ const app = createApp({
 
     return {
       mobileRemoteViewApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（只能看，案 A：對話頁頂端「訊息／終端」）；發起先過生物辨識，不能用電腦版的 remoteViewApi
-      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
+      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, pages, TAB_LABEL, tabLabel, fourthPage, fourthTitle, closePage, myName, meForChat, lastOf,
