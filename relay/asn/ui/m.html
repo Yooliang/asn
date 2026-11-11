@@ -535,6 +535,7 @@
                     <ul class="m-known-list" v-if="kp.list.length">
                       <li class="m-known-row" v-for="p in kp.list" :key="p.node">
                         <span class="m-row-tx"><b>{{ p.label }}</b><small><template v-if="p.fpShow">{{ KNOWN_TEXT.fp(p.fpShow) }}　</template>{{ p.confirmed ? KNOWN_TEXT.confirmed : KNOWN_TEXT.unconfirmed }}</small></span>
+                        <button class="m-btn" type="button" v-if="!p.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(p)">{{ KNOWN_TEXT.confirmButton }}</button>
                         <button class="m-btn" type="button" :disabled="kp.busy" @click="renameStart(p)">{{ KNOWN_TEXT.rename }}</button>
                         <button class="m-btn" type="button" :disabled="kp.busy" @click="forgetKnown(p.node)">{{ KNOWN_TEXT.forget }}</button>
                         <form class="m-known-edit" v-if="kp.editNode === p.node" @submit.prevent="renameSave">
@@ -547,6 +548,7 @@
                     </ul>
                     <p class="m-note" v-if="kp.list.length">{{ KNOWN_TEXT.forgetNote }}</p>
                     <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
+                    <p class="m-err" v-if="vp.note" role="alert">{{ vp.note }}</p>
                   </div>
                 </template>
                 <template v-else-if="settingCat === 'about'">

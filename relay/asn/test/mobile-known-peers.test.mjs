@@ -396,3 +396,18 @@ test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、�
   assert.match(js, /const methodPickInstead = async \(\) => \{ vp\.method = false; await openPeerSheet\(\) \}/)
   assert.doesNotMatch(js, /console\.\w+\([^)]*(scan\w*Text|decoded)/)
 })
+
+test('認得的電腦頁：說明文字照規格；只有還沒確認的那列有「確認」按鈕，按下去走和提示條同一個開浮層的入口', () => {
+  assert.equal(TEXT.confirmButton, '確認')
+  assert.equal(TEXT.settingLead, '看過的電腦會記在這支手機上。確認過指紋的電腦，你才能從這支手機替它登入、在它的終端打字。還沒確認的，先按「確認」，對照那台電腦設定頁上的指紋。')
+  const html = read('../ui/m.html')
+  const list = html.slice(html.indexOf('class="m-known-list"'), html.indexOf('{{ KNOWN_TEXT.forgetNote }}'))
+  assert.match(list, /v-if="!p\.confirmed"[^>]*@click="confirmKnown\(p\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
+  assert.equal((list.match(/confirmKnown\(p\)/g) ?? []).length, 1)
+  // 提示條與設定頁按鈕最後都開同一個選方法浮層（openMethodSheet）
+  assert.match(html, /class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet"/)
+  const js = read('../ui/m.js')
+  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\) \}/, '設定頁的確認呼叫同一個 openMethodSheet')
+  assert.match(js, /if \(!p\?\.node \|\| p\.confirmed/, '已確認的不處理')
+  assert.doesNotMatch(js, /confirmKnown[^\n]*android_known/, '不另寫一套確認流程')
+})

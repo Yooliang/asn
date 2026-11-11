@@ -505,6 +505,8 @@ const app = createApp({
     // 「確認指紋」先選方法：用相機掃電腦上的 QR code（預設），或改用選的（四選一）。掃到的字只在外殼與 Rust 之間，這裡只拿得到結果的狀態字
     const openMethodSheet = () => { if (!vp.cur || vp.busy) return; vp.note = ''; vp.error = ''; vp.method = true }
     const closeMethodSheet = () => { vp.method = false }
+    // 設定頁「認得的電腦」每列的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
+    const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; vpReset(); vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet() }
     const methodPickInstead = async () => { vp.method = false; await openPeerSheet() }
     const SCAN_NOTES = { mismatch: KNOWN_TEXT.scanMismatch, bad_qr: KNOWN_TEXT.scanBad, blocked: KNOWN_TEXT.blocked, locked: KNOWN_TEXT.lockedNow, not_ready: KNOWN_TEXT.notReady }
     const scanPeer = async () => {
@@ -1295,7 +1297,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, kp, forgetKnown, renameStart, renameCancel, renameSave, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, kp, forgetKnown, renameStart, renameCancel, renameSave, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
