@@ -366,19 +366,33 @@ pub fn scan_system_excluding(skip: &[u32]) -> Vec<ProcAgent> {
 mod imp {
     use super::{engine_of_name, engine_of_script, exe_stem, ProcInfo, RUNTIMES};
     use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
     /// node／bun 這類執行環境才讀命令列，而且只讀開頭這麼多位元組
     const CMDLINE_PREFIX: usize = 512;
 
+    /// uid 讀不到時用的值：沒有程序屬於它，等於一個代理都不列（寧可漏列，不把別人的程序送出去）
+    const NO_OWNER: u32 = u32::MAX;
+
     pub fn table() -> Vec<ProcInfo> {
-        table_at(Path::new("/proc"))
+        let root = Path::new("/proc");
+        let me = std::fs::metadata(root.join("self")).map(|m| m.uid()).unwrap_or(NO_OWNER);
+        table_owned(root, Some(me))
+    }
+
+    /// 不限擁有者（測試用的假 /proc）
+    #[cfg(test)]
+    pub fn table_at(root: &Path) -> Vec<ProcInfo> {
+        table_owned(root, None)
     }
 
     /// 讀 `root`（真實是 /proc）下的程序。每個程序只讀 comm 與 stat；
     /// comm 是引擎名就直接認定、不讀命令列；comm 是 node／bun 這類執行環境才讀命令列開頭，
     /// 只取執行檔與腳本路徑兩個欄位判斷引擎，其餘丟棄、不留在結果裡。不讀環境變數。
-    pub fn table_at(root: &Path) -> Vec<ProcInfo> {
+    /// `owner` 有給時，只有屬於這個 uid 的程序會被認成代理；別的使用者的程序照樣留著當親子關係用，但不會上名單
+    /// （多人共用的主機上，別人的程序名稱與 PID 不送出去）
+    pub fn table_owned(root: &Path, owner: Option<u32>) -> Vec<ProcInfo> {
         let mut out = vec![];
         let Ok(rd) = std::fs::read_dir(root) else { return out };
         let proc_stat = std::fs::read_to_string(root.join("stat")).unwrap_or_default();
@@ -389,7 +403,10 @@ mod imp {
             let Some(ppid) = stat.rsplit_once(')').and_then(|x| x.1.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok())) else { continue };
             let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default().trim().to_string();
             let stem = exe_stem(&comm);
-            let engine: Option<String> = if engine_of_name(&stem).is_some() {
+            let mine = owner.is_none_or(|u| std::fs::metadata(&dir).is_ok_and(|m| m.uid() == u));
+            let engine: Option<String> = if !mine {
+                None
+            } else if engine_of_name(&stem).is_some() {
                 Some(stem)
             } else if RUNTIMES.contains(&stem.as_str()) {
                 engine_from_cmdline_prefix(&read_prefix(&dir.join("cmdline"))).map(String::from)
@@ -399,7 +416,8 @@ mod imp {
             match engine {
                 // 引擎名放在 exe：之後的判斷只看這個，命令列不留
                 Some(name) => out.push(ProcInfo { pid, ppid, exe: name, cmdline: vec![], start_secs: crate::heartbeat::parse_start_secs(&stat, &proc_stat), light: true }),
-                None => out.push(ProcInfo { pid, ppid, exe: comm, cmdline: vec![], start_secs: None, light: false }),
+                // 別人的程序只留 pid／ppid（親子關係用），名稱清空：之後的判斷不可能把它認成代理，也不會送出
+                None => out.push(ProcInfo { pid, ppid, exe: if mine { comm } else { String::new() }, cmdline: vec![], start_secs: None, light: false }),
             }
         }
         out
@@ -740,6 +758,24 @@ mod fake_proc_tests {
 
     fn names(root: &Path, self_pid: u32) -> Vec<String> {
         scan(&imp::table_at(root), self_pid).iter().map(|a| a.name()).collect()
+    }
+
+    #[test]
+    fn 只認同一個使用者的程序_別人的不上名單() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        base(root);
+        for (pid, comm) in [(10, "claude"), (11, "pi"), (12, "codex"), (13, "node")] {
+            proc_dir(root, pid, 1, comm, Some(&cmd(&["node", "/x/node_modules/@openai/codex/bin/codex.js"])));
+        }
+        let me = fs::metadata(root.join("10")).unwrap().uid();
+        assert_eq!(scan(&imp::table_owned(root, Some(me)), 999).len(), 4);
+        // 不是自己的 uid：程序還在表裡（親子關係要用），但不會被認成代理
+        let other = imp::table_owned(root, Some(me.wrapping_add(1)));
+        assert_eq!(other.len(), 4);
+        assert!(other.iter().all(|p| p.exe.is_empty() && !p.light), "{other:?}");
+        assert!(scan(&other, 999).is_empty());
     }
 
     #[test]
