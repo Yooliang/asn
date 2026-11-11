@@ -269,10 +269,10 @@ fn window_cj_path(home: &Path, cfg: &Path) -> PathBuf {
     }
 }
 
-/// 這個視窗現在登入的帳號 accountUuid（讀 `.claude.json` 的 oauthAccount.accountUuid，只取這一個欄位，不讀任何憑證）。
-/// 讀不到（檔案不存在、是連結、太大、壞掉、沒登入、uuid 格式不對）都是 None。
+/// 這個視窗現在登入的帳號：(accountUuid, 正規化 email)，讀 `.claude.json` 同一份 oauthAccount 的這兩個欄位，不讀其他欄位、不讀任何憑證。
+/// 額度歸屬用這個（不查帳號庫）。讀不到（檔案不存在、是連結、太大、壞掉、沒登入、uuid 格式不對、沒有 email）都是 None。
 /// 大小與修改時間都沒變就用上次的結果、不重讀（快取存本機一個小檔，因為每次狀態列掛鉤都是新行程）。
-pub fn window_account_uuid(home: &Path, cfg: &Path) -> Option<String> {
+pub fn window_identity(home: &Path, cfg: &Path) -> Option<(String, String)> {
     let path = window_cj_path(home, cfg);
     let m = std::fs::symlink_metadata(&path).ok()?;
     if is_link(&m) || !m.is_file() || m.len() > CJ_MAX_BYTES {
@@ -292,25 +292,40 @@ pub fn window_account_uuid(home: &Path, cfg: &Path) -> Option<String> {
     }
     let mut buf = Vec::new();
     (&mut f).take(CJ_MAX_BYTES + 1).read_to_end(&mut buf).ok()?;
-    let uuid = if buf.len() as u64 > CJ_MAX_BYTES {
+    let id = if buf.len() as u64 > CJ_MAX_BYTES {
         None
     } else {
-        String::from_utf8(buf).ok().and_then(|t| crate::claude_accounts::account_uuid_in_text(t.trim_start_matches('\u{feff}'))).filter(|u| valid_id(u))
+        String::from_utf8(buf).ok().and_then(|t| crate::claude_accounts::identity_in_text(t.trim_start_matches('\u{feff}'))).filter(|(u, _)| valid_id(u))
     };
-    cache.put(&key, len, mt, uuid.clone());
+    cache.put(&key, len, mt, id.clone());
     cache.save(home);
-    uuid
+    id
 }
 
-/// 測試用：把這個視窗自己的登入設定（設定資料夾 `<home>/.claude/.claude.json`）寫成這個 accountUuid。
-/// 每次寫出來的長度都不同（快取以大小與修改時間判斷有沒有變，同樣長度的 uuid 在同一毫秒內換掉會讀到舊的）。
+/// 測試用：把這個視窗自己的登入設定（設定資料夾 `<home>/.claude/.claude.json`）寫成這個 (email, accountUuid)。
+/// 每次寫出來的長度都不同（快取以大小與修改時間判斷有沒有變，同樣長度的內容在同一毫秒內換掉會讀到舊的）。
 #[cfg(test)]
-pub(crate) fn test_set_window_account(home: &Path, uuid: &str) {
+pub(crate) fn test_set_window_identity(home: &Path, email: &str, uuid: &str) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
     let pad = N.fetch_add(1, Ordering::Relaxed) % 4000;
     std::fs::create_dir_all(home.join(".claude")).unwrap();
-    std::fs::write(home.join(".claude").join(".claude.json"), serde_json::json!({ "oauthAccount": { "accountUuid": uuid }, "pad": "x".repeat(pad) }).to_string()).unwrap();
+    let oauth = serde_json::json!({ "accountUuid": uuid, "emailAddress": email });
+    std::fs::write(home.join(".claude").join(".claude.json"), serde_json::json!({ "oauthAccount": oauth, "pad": "x".repeat(pad) }).to_string()).unwrap();
+}
+
+/// 測試用：同上，email 從這台的帳號庫（`~/.asn/claude-accounts/*/account.json`）找同一個 uuid 的那份；找不到就用 `<uuid 前 8 碼>@x.test`。
+/// 只給「帳號庫與視窗登入一致」的既有測試用；要測不一致的情境用 [`test_set_window_identity`] 明寫。
+#[cfg(test)]
+pub(crate) fn test_set_window_account(home: &Path, uuid: &str) {
+    let found = std::fs::read_dir(home.join(".asn").join("claude-accounts")).ok().and_then(|rd| {
+        rd.flatten().find_map(|e| {
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("account.json")).ok()?).ok()?;
+            (v.get("accountUuid")?.as_str()? == uuid).then(|| v.get("emailAddress")?.as_str().map(String::from)).flatten()
+        })
+    });
+    let email = found.unwrap_or_else(|| format!("{}@x.test", &uuid[..8]));
+    test_set_window_identity(home, &email, uuid);
 }
 
 /// log 裡用的短代號：sha256 的前 6 個十六進位字元（原值不寫進 log）

@@ -315,13 +315,17 @@ fn 身分_同一個帳號的舊視窗重送舊數字_不蓋過新的_同期回�
 }
 
 #[test]
-fn 身分_對不到已知帳號_只留本機未知區_不進額度檔() {
+fn 身分_帳號庫裡沒有這個帳號也照記_額度歸屬看視窗自己的_oauthaccount_不看帳號庫() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    assert!(!feed(&h, "wx", "dddddddd-1111-2222-3333-444444444444", NOW, 1, wk(70.0), NOW));
-    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
-    let unk = super::super::owner_store::unknown_load(h.path());
-    assert_eq!(unk.keys().collect::<Vec<_>>(), ["dddddddd-1111-2222-3333-444444444444"]);
+    let d = "dddddddd-1111-2222-3333-444444444444";
+    let t = transcript(h.path(), "wx", d, Some(NOW), 1);
+    test_set_window_identity(h.path(), "D@x.test", d);
+    assert!(hook_at(&h, &with_tp(wk(70.0), &t), NOW));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["d@x.test"], "記在視窗自己 oauthAccount 的 email（正規化）底下");
+    assert_eq!(all["d@x.test"].weekly_pct, Some(30));
+    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "不再有未知區");
 }
 
 #[test]
@@ -465,34 +469,31 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
 }
 
 #[test]
-fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看登入檔_都沒有就是未知() {
-    let h = home_as("cur@x.test"); // .claude.json 的 accountUuid 是 11111111-2222-3333-4444-555555555555
+fn 帳號庫檢查_uuid_一樣_email_不一樣_或_email_一樣_uuid_不一樣_才算可疑() {
+    let h = home_as("cur@x.test");
     add_account(h.path(), "a@x.test", UA);
-    let cfg = h.path().join(".claude");
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UA).as_deref(), Some("a@x.test"));
-    // 資料夾名跟 email 對不上（被改名／被塞假檔）：不用
+    add_account(h.path(), "b@x.test", UB);
+    let sus = |e: &str, u: &str| crate::claude_accounts::library_suspect(h.path(), e, u);
+    assert_eq!(sus("a@x.test", UA), None, "庫裡的跟登入的一致");
+    assert_eq!(sus("c@x.test", "cccccccc-0000-0000-0000-000000000000"), None, "庫裡沒有這個帳號不算可疑");
+    // 庫裡 b 的資料夾存的是 a 的 uuid
     let root = h.path().join(".asn").join("claude-accounts");
-    std::fs::create_dir_all(root.join("wrong-name")).unwrap();
-    std::fs::write(root.join("wrong-name").join("account.json"), json!({ "accountUuid": UB, "emailAddress": "b@x.test" }).to_string()).unwrap();
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UB), None);
-    // 帳號庫沒有、但正是目前登入的帳號：看 .claude.json
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, ""), None);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "eeeeeeee-0000-0000-0000-000000000000"), None);
+    std::fs::write(root.join("b@x.test").join("account.json"), json!({ "accountUuid": UA, "emailAddress": "b@x.test" }).to_string()).unwrap();
+    assert_eq!(sus("a@x.test", UA), Some(1), "uuid 一樣 email 不一樣的資料夾有 1 個");
+    assert_eq!(sus("b@x.test", UB), Some(1), "email 一樣 uuid 不一樣的資料夾有 1 個");
 }
 
 #[test]
-fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家目錄_uuid_要對得上() {
+fn 視窗身分_先看視窗自己的設定資料夾裡的_claude_json_沒有才看家目錄() {
     let h = tempfile::tempdir().unwrap();
     let cfg = h.path().join("cfg-b");
     std::fs::create_dir_all(&cfg).unwrap();
     let cj = |dir: &std::path::Path, email: &str, uuid: &str| std::fs::write(dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
-    cj(h.path(), "home@x.test", "11111111-0000-0000-0000-00000000000a");
-    cj(&cfg, "cfgb@x.test", "22222222-0000-0000-0000-00000000000b");
-    let f = |uuid: &str| crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, uuid);
-    assert_eq!(f("22222222-0000-0000-0000-00000000000b").as_deref(), Some("cfgb@x.test"), "先看這個視窗自己的設定資料夾");
-    assert_eq!(f("11111111-0000-0000-0000-00000000000a").as_deref(), Some("home@x.test"), "設定資料夾沒有才看家目錄");
-    assert_eq!(f("33333333-0000-0000-0000-000000000000"), None, "uuid 對不上就不用");
+    let (ua, ub) = ("11111111-0000-0000-0000-00000000000a", "22222222-0000-0000-0000-00000000000b");
+    cj(h.path(), "Home@x.test", ua);
+    assert_eq!(window_identity(h.path(), &cfg), Some((ua.to_string(), "home@x.test".to_string())), "設定資料夾沒有 .claude.json 才看家目錄，email 正規化");
+    cj(&cfg, "cfgb@x.test", ub);
+    assert_eq!(window_identity(h.path(), &cfg), Some((ub.to_string(), "cfgb@x.test".to_string())), "先看這個視窗自己的設定資料夾");
 }
 
 #[test]
@@ -668,7 +669,7 @@ fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
 }
 
 // ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
-use super::super::owner::{short_hash, test_set_window_account, window_account_uuid};
+use super::super::owner::{short_hash, test_set_window_account, test_set_window_identity, window_identity};
 
 fn cj_in(dir: &std::path::Path, text: &str) {
     std::fs::create_dir_all(dir).unwrap();
@@ -703,7 +704,7 @@ fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記�
 #[test]
 fn 視窗帳號讀不到_不記_沒有檔_沒有_oauthaccount_壞掉_太大都一樣() {
     let big = format!("{{\"oauthAccount\":{{\"accountUuid\":\"{UA}\"}},\"pad\":\"{}\"}}", "x".repeat(8 * 1024 * 1024 + 16));
-    let cases: Vec<(&str, Option<String>)> = vec![("沒有檔", None), ("沒有 oauthAccount", Some("{\"theme\":\"dark\"}".into())), ("壞掉", Some("{壞".into())), ("太大", Some(big)), ("uuid 格式不對", Some("{\"oauthAccount\":{\"accountUuid\":\"../x\"}}".into()))];
+    let cases: Vec<(&str, Option<String>)> = vec![("沒有檔", None), ("沒有 oauthAccount", Some("{\"theme\":\"dark\"}".into())), ("壞掉", Some("{壞".into())), ("沒有 email", Some(format!("{{\"oauthAccount\":{{\"accountUuid\":\"{UA}\"}}}}"))), ("太大", Some(big)), ("uuid 格式不對", Some("{\"oauthAccount\":{\"accountUuid\":\"../x\"}}".into()))];
     for (i, (name, text)) in cases.into_iter().enumerate() {
         let h = tempfile::tempdir().unwrap();
         add_account(h.path(), "a@x.test", UA);
@@ -726,7 +727,7 @@ fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
     cj_in(h.path(), &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "a@x.test" } }).to_string());
     let cfg = h.path().join(".claude");
     cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" } }).to_string());
-    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+    assert_eq!(window_identity(h.path(), &cfg), Some((UB.to_string(), "b@x.test".to_string())));
     let tb = transcript(h.path(), "wb", UB, Some(NOW), 1);
     assert!(hook_in(h.path(), &cfg, &with_tp(wk(60.0), &tb), NOW + MIN), "視窗是 B、對話紀錄也是 B：收");
     assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
@@ -736,23 +737,24 @@ fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
     assert!(load_all(h.path()).get("a@x.test").is_none());
     // 設定資料夾裡沒有 .claude.json 才退回家目錄那份
     std::fs::remove_file(cfg.join(".claude.json")).unwrap();
-    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UA));
+    assert_eq!(window_identity(h.path(), &cfg), Some((UA.to_string(), "a@x.test".to_string())));
 }
 
 #[test]
 fn 視窗帳號的讀取有快取_大小或修改時間變了才重讀() {
     let h = tempfile::tempdir().unwrap();
     let cfg = h.path().join(".claude");
-    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UA } }).to_string());
-    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UA));
+    let id = |u: &str, e: &str| Some((u.to_string(), e.to_string()));
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "A@x.test", "organizationName": "ORG-SECRET" } }).to_string());
+    assert_eq!(window_identity(h.path(), &cfg), id(UA, "a@x.test"), "email 正規化");
     let cache = std::fs::read_to_string(super::super::owner_store::acct_cache_path(h.path())).unwrap();
-    assert!(cache.contains(UA) && !cache.contains("emailAddress"), "快取只存 accountUuid：{cache}");
+    assert!(cache.contains(UA) && cache.contains("a@x.test") && !cache.contains("ORG-SECRET"), "快取只存 accountUuid 與 email：{cache}");
     // 換成另一個帳號（長度不同）：重讀
-    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB }, "pad": "xxxx" }).to_string());
-    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" }, "pad": "xxxx" }).to_string());
+    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
     // 快取壞掉當成沒有快取，照樣讀得到
     std::fs::write(super::super::owner_store::acct_cache_path(h.path()), "{壞").unwrap();
-    assert_eq!(window_account_uuid(h.path(), &cfg).as_deref(), Some(UB));
+    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
 }
 
 #[cfg(unix)]
@@ -764,7 +766,7 @@ fn 視窗帳號的設定檔是符號連結_不讀() {
     let real = h.path().join("real.json");
     std::fs::write(&real, json!({ "oauthAccount": { "accountUuid": UA } }).to_string()).unwrap();
     std::os::unix::fs::symlink(&real, cfg.join(".claude.json")).unwrap();
-    assert_eq!(window_account_uuid(h.path(), &cfg), None);
+    assert_eq!(window_identity(h.path(), &cfg), None);
 }
 
 // ---------- 每週重置時間當帳號指紋：跟本機其他帳號比（視窗身分一致也可能是串號：以 A 開窗、後來拿到 B 的 token、又切回 A） ----------
@@ -883,26 +885,70 @@ fn 週期指紋_同一期差十分鐘內_或_5_小時窗_或沒帶每週_都不�
     assert!(!log(&h).contains("每週重置時間"), "沒有指紋相關的 log：{}", log(&h));
 }
 
-// ---------- 帳號庫有兩個以上的資料夾存同一個 uuid：帳號不確定，不記 ----------
+// ---------- 額度歸屬不依賴帳號庫：email 直接取視窗自己的 oauthAccount；帳號庫存錯只警示 ----------
+/// 一個視窗回報一次：對話紀錄的 session-owner 是 uuid、視窗自己的登入設定是 (email, uuid)，不經過帳號庫
+fn feed_win(h: &tempfile::TempDir, name: &str, email: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
+    let t = transcript(h.path(), name, uuid, Some(ts), pad);
+    test_set_window_identity(h.path(), email, uuid);
+    hook_at(h, &with_tp(st, &t), now)
+}
+const LIB_WARN: &str = "帳號庫可能存錯，重新存一次帳號";
+
 #[test]
-fn 帳號庫兩個資料夾同一個_uuid_帳號不確定_不記_log_只有雜湊與資料夾數() {
-    let h = home_as("a@x.test");
-    // 同一個 uuid 存在兩個資料夾（兩個正名的 email 資料夾）
+fn 家用機情境_視窗是_cwen_帳號庫裡_it_的資料夾存的是_cwen_的_uuid_記到_cwen_log_有警示() {
+    let h = tempfile::tempdir().unwrap();
+    let uc = "cccccccc-1111-2222-3333-444444444444";
+    // 帳號庫存錯：it@ 的資料夾裡是 cwen 的 uuid
+    add_account(h.path(), "it@x.test", uc);
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW, 1, wk(81.0), NOW + MIN));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["cwen@x.test"], "記到視窗自己的帳號，不是帳號庫查到的 it@");
+    assert_eq!(all["cwen@x.test"].weekly_pct, Some(19));
+    let lg = log(&h);
+    assert!(lg.contains(LIB_WARN) && lg.contains(&short_hash(uc)) && lg.contains("1 個資料夾"), "{lg}");
+    assert!(!lg.contains(uc) && !lg.contains("it@x.test") && !lg.contains("cwen@x.test"), "log 不留 uuid 與 email：{lg}");
+    // 同一句只記一次（10 分鐘內不重看、之後看了也是同一句）
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + MIN, 2, wk(80.0), NOW + 2 * MIN));
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + 20 * MIN, 3, wk(79.0), NOW + 21 * MIN));
+    assert_eq!(log(&h).matches(LIB_WARN).count(), 1);
+    // 重新存一次帳號（庫裡改成正確的）：下一次檢查警示消掉，之後不再有
+    let root = h.path().join(".asn").join("claude-accounts");
+    std::fs::remove_dir_all(root.join("it@x.test")).unwrap();
+    add_account(h.path(), "cwen@x.test", uc);
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + 40 * MIN, 4, wk(70.0), NOW + 41 * MIN));
+    assert!(!state_file(&h).contains("logged_lib"), "{}", state_file(&h));
+    assert_eq!(log(&h).matches(LIB_WARN).count(), 1);
+}
+
+#[test]
+fn 工作機情境_gsit_的_uuid_被存在_yooliang_資料夾_記到_gsit_log_有警示() {
+    let h = tempfile::tempdir().unwrap();
+    let ug = "99999999-1111-2222-3333-444444444444";
+    add_account(h.path(), "yooliang@x.test", ug);
+    assert!(feed_win(&h, "w1", "gsit@x.test", ug, NOW, 1, wk(40.0), NOW + MIN));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["gsit@x.test"], "yooliang 底下不會有這筆");
+    assert_eq!(all["gsit@x.test"].weekly_pct, Some(60));
+    let lg = log(&h);
+    assert!(lg.contains(LIB_WARN) && lg.contains(&short_hash(ug)), "{lg}");
+}
+
+#[test]
+fn 同一個_uuid_在兩個資料夾_照記_只警示_資料夾數寫在_log() {
+    let h = tempfile::tempdir().unwrap();
     add_account(h.path(), "a@x.test", UA);
     add_account(h.path(), "a2@x.test", UA);
-    let cfg = h.path().join(".claude");
-    assert_eq!(crate::claude_accounts::lookup_account_uuid(h.path(), &cfg, UA), crate::claude_accounts::UuidLookup::Ambiguous(2));
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UA), None);
-    assert!(!feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW + MIN), "不記");
-    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
-    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
-    let lg = log(&h);
-    assert!(lg.contains("2 個資料夾") && lg.contains(&short_hash(UA)) && !lg.contains(UA) && !lg.contains("a@x.test") && !lg.contains("a2@x.test"), "{lg}");
-    // 同一個原因連續發生只記一次
-    assert!(!feed(&h, "wa", UA, NOW + MIN, 2, wk(60.0), NOW + 2 * MIN));
-    assert_eq!(log(&h).matches("2 個資料夾").count(), 1);
-    // 重複的資料夾刪掉一個以後：唯一了，照記
-    std::fs::remove_dir_all(h.path().join(".asn").join("claude-accounts").join("a2@x.test")).unwrap();
-    assert!(feed(&h, "wa", UA, NOW + 2 * MIN, 3, wk(50.0), NOW + 3 * MIN));
-    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(50));
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW, 1, wk(70.0), NOW + MIN), "不再因為帳號庫有重複就不記");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(30));
+    assert!(log(&h).contains(LIB_WARN) && log(&h).contains("1 個資料夾"), "{}", log(&h));
+}
+
+#[test]
+fn 帳號庫正常或沒有帳號庫_不警示() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW, 1, wk(70.0), NOW + MIN), "沒有帳號庫也記");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW + 20 * MIN, 2, wk(60.0), NOW + 21 * MIN));
+    assert!(!log(&h).contains(LIB_WARN), "{}", log(&h));
 }

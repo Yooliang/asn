@@ -18,6 +18,7 @@ fn dir(home: &Path) -> PathBuf {
 pub fn cache_path(home: &Path) -> PathBuf {
     dir(home).join("claude-owner-cache.json")
 }
+#[cfg_attr(not(test), allow(dead_code))] // 額度歸屬改看視窗自己的 oauthAccount 之後不再寫未知區，保留給讀舊檔與測試
 pub fn unknown_path(home: &Path) -> PathBuf {
     dir(home).join("claude-quota-unknown.json")
 }
@@ -83,7 +84,7 @@ impl Cache {
     }
 }
 
-/// 視窗自己的登入帳號（`.claude.json` 的 oauthAccount.accountUuid）的快取：路徑 → 大小、修改時間、accountUuid（讀不到身分也記，免得每次重讀）。
+/// 視窗自己的登入帳號（`.claude.json` 的 oauthAccount.accountUuid 與 emailAddress）的快取：路徑 → 大小、修改時間、兩個欄位（讀不到身分也記，免得每次重讀）。
 /// 檔案可能有好幾 MB、狀態列又叫得很勤，大小與修改時間沒變就不重讀。最多 8 筆。
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct AcctCache(BTreeMap<String, AcctEnt>);
@@ -94,6 +95,9 @@ struct AcctEnt {
     mtime_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     account_uuid: Option<String>,
+    /// 同一份 oauthAccount 裡的 email（正規化後）；額度歸屬用它，不查帳號庫
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
 }
 
 const ACCT_CACHE_MAX: usize = 8;
@@ -111,12 +115,21 @@ impl AcctCache {
             write(&acct_cache_path(home), &t);
         }
     }
-    /// 命中回 Some(身分或「這個檔裡沒有身分」)；沒命中回 None
-    pub fn get(&self, key: &str, len: u64, mtime_ms: i64) -> Option<Option<String>> {
-        self.0.get(key).filter(|e| e.len == len && e.mtime_ms == mtime_ms).map(|e| e.account_uuid.clone())
+    /// 命中回 Some((uuid, email) 或「這個檔裡沒有身分」)；沒命中（或存的只有一半）回 None
+    pub fn get(&self, key: &str, len: u64, mtime_ms: i64) -> Option<Option<(String, String)>> {
+        let e = self.0.get(key).filter(|e| e.len == len && e.mtime_ms == mtime_ms)?;
+        match (&e.account_uuid, &e.email) {
+            (Some(u), Some(m)) => Some(Some((u.clone(), m.clone()))),
+            (None, None) => Some(None),
+            _ => None,
+        }
     }
-    pub fn put(&mut self, key: &str, len: u64, mtime_ms: i64, account_uuid: Option<String>) {
-        self.0.insert(key.to_string(), AcctEnt { len, mtime_ms, account_uuid });
+    pub fn put(&mut self, key: &str, len: u64, mtime_ms: i64, identity: Option<(String, String)>) {
+        let (account_uuid, email) = match identity {
+            Some((u, m)) => (Some(u), Some(m)),
+            None => (None, None),
+        };
+        self.0.insert(key.to_string(), AcctEnt { len, mtime_ms, account_uuid, email });
         while self.0.len() > ACCT_CACHE_MAX {
             let Some(k) = self.0.keys().next().cloned() else { break };
             self.0.remove(&k);
@@ -125,12 +138,14 @@ impl AcctCache {
 }
 
 /// 讀未知帳號區：uuid → 額度。逐筆驗證（格式不對的丟掉）
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn unknown_load(home: &Path) -> BTreeMap<String, Quota> {
     let Some(serde_json::Value::Object(m)) = read_small(&unknown_path(home)).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return BTreeMap::new() };
     m.into_iter().take(UNKNOWN_MAX * 2).filter_map(|(k, v)| quota_from_value(&v).map(|q| (k, q))).collect()
 }
 
 /// 記一筆未知帳號的額度：每個 uuid 只留最新一筆（直接覆寫，不合併）；7 天沒更新的刪；超過 16 個丟最舊的
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn unknown_put(home: &Path, uuid: &str, p: &Parsed, now_ms: i64) {
     let Some(q) = merge::merge(None, p, now_ms).0 else { return };
     let mut all = unknown_load(home);
