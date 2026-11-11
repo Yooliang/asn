@@ -8,6 +8,8 @@ export type Reply = { status: number; body: Json };
 export type TermReqDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
   ring: (topic: string) => Promise<void>;
+  /** 建立成功（新增了一筆）後呼叫，參數是請求編號；用來推播「需要你確認」。沒給就不推 */
+  onCreated?: (id: string) => void;
 };
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -69,6 +71,7 @@ export async function handleTermReqAction(deps: TermReqDeps, me: { id: string },
     });
     if (isReply(r)) return r;
     if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic);   // 通知只敲門鈴，不帶任何內容
+    if (typeof r.data.id === "string") deps.onCreated?.(r.data.id);   // 重複的畫面會回 busy（上面已回傳），能走到這裡＝新增了一筆
     return { status: 200, body: { id: r.data.id, expires_at: r.data.expires_at } };
   }
   if (action === "term_req_take") {

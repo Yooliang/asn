@@ -758,7 +758,7 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedTerm = TERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
-    const r = await handleTermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedTerm);
+    const r = await handleTermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring, onCreated: (id) => signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "confirm", me.id, id)) }, me, action, params, signedTerm);
     return json(r.status, r.body);
   }
   // 手機回答權限框（見 _shared/perm_request.ts）：電腦用節點金鑰建立、領取、回報；手機用本人簽章列出、決定
@@ -766,7 +766,7 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPerm = PERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
-    const r = await handlePermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedPerm);
+    const r = await handlePermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring, onCreated: (id) => signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "confirm", me.id, id)) }, me, action, params, signedPerm);
     return json(r.status, r.body);
   }
   // 設備配對（見 _shared/device_pair.ts）：上傳公鑰用節點金鑰，其他都要本人簽章

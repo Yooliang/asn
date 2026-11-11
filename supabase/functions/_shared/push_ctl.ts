@@ -4,7 +4,8 @@
 //   notifyPush：收件人（p_user）只從伺服器端取：寄信結果裡的信編號、或金鑰所屬的節點；**不接受用戶端的任何參數**。
 // 推播失敗一律不影響寄信：呼叫端用 background 跑，這裡自己吞掉所有例外。
 import { fail, type Json, type Reply } from "./term_request.ts";
-import type { Fcm, FcmResult } from "./push_fcm.ts";
+import { cleanName, type Fcm, type FcmResult, type PushKind } from "./push_fcm.ts";
+export type { PushKind };
 
 export type PushDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
@@ -39,9 +40,28 @@ export async function handlePushAction(deps: Pick<PushDeps, "rpc">, me: { id: st
   return fail("not_found");
 }
 
-export type PushKind = "owner_mail" | "waiting";
+// 同一筆請求在這個 isolate 裡只推一次（建立成功才會呼叫；這是額外保險）；上限避免無限長大
+const SEEN_MAX = 500;
+const seenConfirm = new Set<string>();
+function firstConfirm(id: string): boolean {
+  if (seenConfirm.has(id)) return false;
+  if (seenConfirm.size >= SEEN_MAX) seenConfirm.delete(seenConfirm.values().next().value as string);
+  seenConfirm.add(id);
+  return true;
+}
 
-/** 收件人：寄給本人＝剛寄出的那封信上記的收件人；夥伴在等你＝金鑰所屬節點的擁有者 */
+// 需要你確認：資料庫不幫它擋 60 秒（有人在等），這裡在同一個 isolate 內擋「同一台 10 秒一則」防洪
+export const CONFIRM_GAP_MS = 10_000;
+const confirmSentAt = new Map<string, number>();
+function confirmRoom(node: string, now: number): boolean {
+  const last = confirmSentAt.get(node);
+  if (last !== undefined && now - last < CONFIRM_GAP_MS) return false;
+  if (confirmSentAt.size >= SEEN_MAX) confirmSentAt.delete(confirmSentAt.keys().next().value as string);
+  confirmSentAt.set(node, now);
+  return true;
+}
+
+/** 收件人：寄給本人＝剛寄出的那封信上記的收件人；夥伴在等你、需要你確認＝金鑰所屬節點的擁有者 */
 async function recipient(deps: PushDeps, kind: PushKind, nodeId: string, messageId: string | null): Promise<string | null> {
   const r = kind === "owner_mail"
     ? (messageId ? await deps.rpc("asn_relay_push_recipient_mail", { p_node: nodeId, p_message_id: messageId }) : null)
@@ -51,14 +71,21 @@ async function recipient(deps: PushDeps, kind: PushKind, nodeId: string, message
   return typeof u === "string" && /^[0-9a-f-]{36}$/i.test(u) ? u : null;
 }
 
+/** 建立請求的那台電腦的名字（給通知文字用）；查不到、出錯都當沒有 */
+async function nodeName(deps: PushDeps, nodeId: string): Promise<string | null> {
+  const r = await deps.rpc("asn_relay_push_node_name", { p_node: nodeId });
+  return r.error ? null : cleanName(r.data?.name);
+}
+
 /**
- * 寄信（或等待通知）寄出之後呼叫。**永遠不丟例外、不影響呼叫端。**
+ * 寄信（或等待通知、需要確認的請求）之後呼叫。confirm 的 messageId 放請求編號（只拿來擋重複，不送出去）。**永遠不丟例外、不影響呼叫端。**
  * 同一輪的處理：每台一則；明確回 UNREGISTERED 才刪權杖；400、沒有錯誤碼的 404（專案代號設錯會整批 404）只有同一輪裡至少有一台成功才算「這個權杖壞」，
  * 整輪都是這種失敗就是我們這邊有問題，**一個權杖都不刪**，記一筆就停手（不重試）。
  */
 export async function notifyPush(deps: PushDeps, kind: PushKind, nodeId: string, messageId: string | null): Promise<void> {
   try {
     if (!deps.fcm) return;
+    if (kind === "confirm" && (!messageId || !firstConfirm(messageId))) return;
     const user = await recipient(deps, kind, nodeId, messageId);
     if (!user) return;
     const { data, error } = await deps.rpc("asn_relay_push_targets", { p_user: user, p_kind: kind });
@@ -66,10 +93,13 @@ export async function notifyPush(deps: PushDeps, kind: PushKind, nodeId: string,
       console.warn("push targets failed", kind);
       return;
     }
+    const now = Date.now();
     const targets: { node: string; token: string }[] = (Array.isArray(data?.targets) ? data!.targets : [])
-      .filter((t: Json) => typeof t?.node === "string" && typeof t?.token === "string");
+      .filter((t: Json) => typeof t?.node === "string" && typeof t?.token === "string")
+      .filter((t: { node: string }) => kind !== "confirm" || confirmRoom(t.node, now));
     if (targets.length === 0) return;
-    const results = await Promise.all(targets.map(async (t) => ({ t, r: await deps.fcm!.send(t.token) })));
+    const content = kind === "confirm" ? { kind, name: await nodeName(deps, nodeId) } : undefined;
+    const results = await Promise.all(targets.map(async (t) => ({ t, r: await deps.fcm!.send(t.token, content) })));
     const ok = results.filter((x) => x.r.status >= 200 && x.r.status < 300).length;
     // 400、沒有錯誤碼的 404：分不出是權杖壞還是我們設錯（內容、專案代號）
     const plain = (x: { r: FcmResult }) => !x.r.invalid && (x.r.status === 400 || x.r.status === 404);

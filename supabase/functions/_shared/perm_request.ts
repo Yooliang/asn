@@ -7,6 +7,8 @@ import { fail, HASH_RE, type Json, type Reply, UUID_RE } from "./term_request.ts
 export type PermReqDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
   ring: (topic: string) => Promise<void>;
+  /** 建立成功（新增了一筆）後呼叫，參數是請求編號；用來推播「需要你確認」。沒給就不推 */
+  onCreated?: (id: string) => void;
 };
 
 export const TEXT_MAX = 16000;
@@ -56,6 +58,7 @@ export async function handlePermReqAction(deps: PermReqDeps, me: { id: string },
     if (isReply(r)) return r;
     const topics = Array.isArray(r.data.bell_topics) ? r.data.bell_topics.filter((t: unknown) => typeof t === "string") : [];
     await Promise.all(topics.map((t: string) => deps.ring(t)));
+    if (typeof r.data.id === "string") deps.onCreated?.(r.data.id);   // 重複的畫面會回 busy（上面已回傳），能走到這裡＝新增了一筆
     return { status: 200, body: { id: r.data.id, expires_at: r.data.expires_at } };
   }
   if (action === "perm_req_take") {
