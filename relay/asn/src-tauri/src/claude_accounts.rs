@@ -412,37 +412,27 @@ pub fn current_identity(home: &Path) -> Option<(String, String)> {
     Some((email_of_fragment(&frag)?, uuid))
 }
 
-/// 讀某個 `.claude.json` 的登入身分：(email, accountUuid)；檔案不存在、壞掉、沒登入都是 None。只取這兩個欄位。
-fn identity_of_file(path: &Path) -> Option<(String, String)> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let frag = extract_fragment(&text).ok().flatten()?;
-    Some((email_of_fragment(&frag)?, uuid_of_fragment(&frag)?))
+/// 一份 `.claude.json` 文字裡 oauthAccount 的 (accountUuid, 正規化 email)：只取這兩個欄位，兩個都要有才算；沒登入、壞掉、缺 email 都是 None。
+/// 兩個值來自同一份文字（同一份 oauthAccount）。額度歸屬用它（#1185 之後不再拿 uuid 去查帳號庫）。
+pub fn identity_in_text(text: &str) -> Option<(String, String)> {
+    let frag = extract_fragment(text).ok().flatten()?;
+    Some((uuid_of_fragment(&frag)?, email_of_fragment(&frag)?))
 }
 
-/// 用 accountUuid 找 email（#1185）。順序：
-/// 1. 帳號庫 `claude-accounts`：列目錄找 account.json（只取 accountUuid 與 emailAddress），資料夾名要等於該 email 的標準資料夾名，對不上就不用；
-/// 2. 這個視窗自己的設定資料夾（`cfg`，也就是 transcript 所屬的 CLAUDE_CONFIG_DIR）裡的 `.claude.json`——同一台機器開多個帳號的視窗，
-///    靠各自的設定資料夾分開，所以要先看這份；
-/// 3. 家目錄的 `.claude.json`。
-/// 2、3 都只在裡面的 accountUuid 與要找的 uuid 完全相同時才用。都找不到回 None（未知帳號）。
-/// 只讀、不拼使用者給的路徑、不改名舊資料夾。
-pub fn email_of_account_uuid(home: &Path, cfg: &Path, uuid: &str) -> Option<String> {
-    if uuid.is_empty() {
-        return None;
-    }
-    if let Ok(rd) = std::fs::read_dir(store_root(home)) {
-        for e in rd.flatten() {
-            let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
-            if uuid_of_fragment(&frag).as_deref() != Some(uuid) {
-                continue;
-            }
-            let Some(email) = email_of_fragment(&frag) else { continue };
-            if e.file_name().to_string_lossy() == email_dir_name(&email).as_str() {
-                return Some(email);
-            }
+/// 帳號庫有沒有存錯的警示（唯讀檢查，只給 log 用；不影響額度記到哪個帳號、也不影響切換與帳號庫的寫入）。
+/// 給「現在這個視窗登入的」(email, uuid)，數帳號庫（`claude-accounts`）裡有幾個資料夾「uuid 一樣但 email 不一樣」或「email 一樣但 uuid 不一樣」
+/// （同一個 uuid 出現在多個資料夾，除了正確的那個以外的都算）。沒有可疑的回 None。只讀每個資料夾的 account.json（只取 accountUuid 與 emailAddress）。
+pub fn library_suspect(home: &Path, email: &str, uuid: &str) -> Option<usize> {
+    let rd = std::fs::read_dir(store_root(home)).ok()?;
+    let mut n = 0usize;
+    for e in rd.flatten() {
+        let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
+        let (Some(u), Some(m)) = (uuid_of_fragment(&frag), email_of_fragment(&frag)) else { continue };
+        if (u == uuid) != (m == email) {
+            n += 1;
         }
     }
-    [cfg.join(".claude.json"), cj_path(home)].iter().find_map(|p| identity_of_file(p).filter(|(_, u)| u == uuid).map(|(e, _)| e))
+    (n > 0).then_some(n)
 }
 
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None

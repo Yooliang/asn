@@ -843,6 +843,7 @@ mod tests {
             five_at: Some("2026-10-24T12:00:00Z".into()),
             week_at: Some("2026-10-24T11:00:00Z".into()),
             owner: false,
+            verified: false,
         }
     }
 

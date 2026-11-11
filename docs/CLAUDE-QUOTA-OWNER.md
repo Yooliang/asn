@@ -15,13 +15,12 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 ```
 狀態列輸入 ──▶ transcript_path ──▶ 兩道路徑檢查 ──▶ 讀檔尾 ──▶ accountUuid
                                                                   │
-                  帳號庫 account.json ◀── 先找 ◀── uuid → email ◀─┘
-                  .claude.json        ◀── 再找
-                  都找不到 ──▶ 未知帳號（只存本機一小區，不上傳）
+                  視窗自己的 .claude.json oauthAccount（uuid 要一致）──▶ 直接取它的 emailAddress
+                  （帳號庫只做存錯警示，不參與歸屬；舊版這裡是「uuid → 查帳號庫 → email、找不到記未知區」）
 ```
 
-程式在 `relay/asn/src-tauri/src/claude_quota/`：`owner.rs`（路徑檢查與讀取）、`owner_store.rs`（快取與未知區）、
-`../claude_quota.rs` 的 `hook_in`／`hook_owned`（記到帳號底下）、`../claude_accounts.rs` 的 `email_of_account_uuid`。
+程式在 `relay/asn/src-tauri/src/claude_quota/`：`owner.rs`（路徑檢查與讀取）、`owner_store.rs`（快取）、
+`../claude_quota.rs` 的 `hook_in`／`hook_owned`（記到帳號底下）、`../claude_accounts.rs` 的 `identity_in_text`（讀 oauthAccount 的 uuid 與 email）與 `library_suspect`（帳號庫存錯的唯讀檢查）。
 
 ### 一、路徑安全（`transcript_path` 是外面送進來的字串，不能信）
 
@@ -42,7 +41,7 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 - 每次狀態列掛鉤是一個新行程，記憶體快取沒用，所以快取存在 `~/.asn/claude-owner-cache.json`：路徑 → 大小、修改時間、身分，最多 32 筆；
   同一個檔大小與修改時間沒變就不重讀。**快取不能繞過安全檢查**：每次都先開檔做兩道檢查，才看快取。
 
-### 三、uuid 對應 email
+### 三、uuid 對應 email（已被取代：額度歸屬不再查帳號庫，見最後的「額度歸屬不再依賴帳號庫」）
 
 1. 先在 `~/.asn/claude-accounts/` 底下**列目錄**找 `account.json`（只取 `accountUuid` 與 `emailAddress`）；
    資料夾名必須等於該 email 的標準資料夾名，對不上就不用。不拼使用者給的路徑。
@@ -55,7 +54,7 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 ### 四、記到哪裡（#1266 簡化後）
 
 - 對得到 email：記到該帳號底下，**不看現在登入的是誰**。每個帳號各有自己的 log 去重狀態（`claude-quota-state.json` 的 `owned`，鍵是 email，與額度檔一致）。
-- 未知帳號：**不進額度檔、不上傳**。本機另開 `~/.asn/claude-quota-unknown.json`：最多 16 個 uuid，每個只留最新一筆，7 天沒更新就刪。
+- （舊）未知帳號區已拿掉：額度記到哪個帳號改看視窗自己的 oauthAccount，見最後的「額度歸屬不再依賴帳號庫」。
 - **資料時間**：額度的讀取時間（`read_at`）用對話紀錄最後 256 KB 裡**最後一筆 assistant 回應的時間戳**，不是掛鉤執行的時間。
   這是整個簡化的前提：閒置的視窗每次重繪都會重送舊數字，用「執行時間」會讓舊數字看起來是新的；用 assistant 回應的時間，舊視窗重送的數字資料時間就是舊的，會被 `older_read` 擋掉。
   取不到時間戳（沒有 assistant 行、格式不對）的那次，**不記**。時間戳與身分一起快取（`claude-owner-cache.json`），檔案大小或修改時間變了才重讀。
@@ -138,3 +137,49 @@ agy 狀態列給的 `transcript_path` 在啟動時指向一個不存在的檔，
 - 鏈斷掉、取不到啟動時間、行程表讀不到（macOS 沒有 `/proc`）都找不到行程代號，退回用狀態列資料的 `session_id`（沒有才用 `conversation_id`）的雜湊；兩個都沒有就不記。
 - 只用行程表的 pid、父 pid、執行檔名（比對用，不存、不進 log）與啟動時間；不讀命令列、工作目錄、環境變數或任何檔案。存下來的只有雜湊。
 - 在 Windows 工作機實測過：8 次呼叫的鏈都是 cmd.exe ← agy.exe，cmd 每次都是新的，agy.exe 的代號 8 次都一樣。
+
+## 切換帳號後，舊視窗的額度不能記到舊帳號底下（本次修正）
+
+實際發生的事：用 ASN 把這台電腦的 Claude 帳號從 A 切成 B 之後，A 開的視窗還開著。對話紀錄（transcript）裡的 `session-owner` 是視窗開的時候寫的，之後不會變，所以那個視窗之後送來的額度（已經是新帳號 B 的）被記到 A 底下。後台 it@ 那一列就這樣收進一筆「weekly 剩 19%、重置 11-15T16:00Z、read_at 03:13Z、來自 w02」的數字，跟另一個帳號的數字完全一樣。狀態列輸入裡沒有「當下帳號」欄位，所以只看對話紀錄看不出來。
+
+做法：讀數那一刻再看第二個東西——這個視窗自己的登入設定。
+- 位置：設定資料夾（`CLAUDE_CONFIG_DIR`，也就是對話紀錄所屬的資料夾）裡有 `.claude.json` 就是它，沒有才用家目錄的 `.claude.json`。只讀 `oauthAccount.accountUuid` 這一個欄位，不讀其他欄位、不讀任何憑證。
+- 兩邊一致（忽略大小寫）才收。不一致、讀不到都不記，也不進未知帳號區。讀不到包括：沒有檔、是連結（含 Windows 的 junction）、超過 8 MB、壞掉、沒有 oauthAccount、uuid 格式不對。
+- 檔案只讀一個一般檔案：先看路徑本身不是連結，開檔後再用已開啟的檔案確認真的就是那個位置（沿用 `owner.rs` 讀對話紀錄的同一套檢查）。
+- 快取：大小與修改時間都沒變就不重讀（`~/.asn/claude-window-account-cache.json`，最多 8 筆，只存路徑、大小、修改時間與 accountUuid）。`.claude.json` 可能有幾 MB，狀態列又叫得很勤。
+- log（`~/.asn/claude-quota.log`）：一行，只有兩邊 accountUuid 與視窗路徑的 sha256 前 6 碼，不寫 email、uuid 原值、路徑；同一個原因連續發生只記一次（記在 `claude-quota-state.json` 的 `logged_window`），之後一致了再對不上會再記。
+- 畫面（設定 → 帳號 → Claude）固定多一句：「切換帳號後，已經開著的視窗要重開才會更新額度。」
+- 已經記錯的舊資料不在這次處理（要看後台那一列的數字再決定要不要清）。
+
+### 再加一層：用每週重置時間當帳號指紋（跟「帳號」比，不是跟「視窗」比）
+
+上面那層擋不住這種情況：小良哥用 `/login` 把帳號從 cwen 切成 gsit。對話紀錄的 `session-owner` 在開窗那一刻就定了，之後不會變，所以會有這種視窗：以 gsit 開窗、後來又拿到 cwen 的 token。切回 gsit 以後，`session-owner` 與 `oauthAccount` 兩邊都是 gsit，送出來的數字卻是 cwen 的。
+
+這時改看**每週重置時間**（`weekly` 那一條的 `resets_at`）：一個帳號在同一期之內它是固定的，不同帳號的那一期通常不一樣。一筆讀數要歸到帳號 A 之前，先看新舊是不是同一期（跟 A 存著、還沒過期的那一期差 10 分鐘內就是同一期，直接放行），不是的話拿本機額度檔裡**其他帳號還沒過期的那一期**來比（`merge::week_fingerprint`）：
+1. 新讀數的那一期＝另一個帳號還沒過期的那一期：新的這筆是串號，**整筆不收**（5 小時也不記，因為整筆都是那個 token 的數字）。**不管 A 有沒有存著還沒過期的那一期都擋**（新帳號、剛清過、A 那一期已經過期也一樣），log 寫「沒有還沒過期的」代表 A 當時沒有存著的。
+2. A 存著的那一期＝另一個帳號還沒過期的那一期：存著的那筆才是串號，**收下新讀數、把存著的每週那一條換掉**（5 小時那一條與其他欄位不動）。今天 it@ 就是這種：存著的是 cwen 的 11-15T16:00Z，gsit 真正的讀數是 11-12T12:00Z。
+3. 兩邊都對不上任何其他帳號：**照收**，只留一行 log，交給上面第一層（session-owner 與 oauthAccount 一致）把關。原因：用了重置卷，週期會提前換成新的一期，新的重置時間跟存著、還沒過期的那一期不同，也對不上其他任何帳號；這時沒有其他帳號的證據，擋下來會把正常的讀數擋好幾天。**指紋只用在有其他帳號證據的時候**（第 1、2 種）。
+
+- 三種情況都寫一行 log（第 3 種寫「照收」）：只有帳號雜湊（email 的 sha256 前 6 碼）和兩個重置時間，同一個原因連續發生只記一次（記在各帳號自己的狀態 `logged_cross`）。
+- 範圍只到每週那一條：沒有每週讀數（只有 5 小時）、新舊是同一期，都不看指紋；A 沒有存著還沒過期的那一期時，只有「新讀數等於別的帳號的那一期」會被擋（第 1 種），其他放行。5 小時的重置時間完全不拿來比。
+- 「其他帳號」＝本機 Claude 額度檔（`claude-quota.json`）裡別的帳號，**而且它的每週那一條是 `verified`**，存著的那一期也還沒過期。`verified` 是額度檔新增的欄位（只有 `true` 才會寫出，舊檔沒有就當 false）：只有新的記錄路徑（session-owner 與視窗自己的 oauthAccount 一致，額度記在 oauthAccount 的 email 底下）收進每週那一條時才標 `true`；這次沒收每週就沿用原本的，備份失敗那次（沒清舊基準、混著舊數字）不標。舊路徑寫的紀錄**即使有 `owner` 標記也不算**——11-11 的汙染紀錄（例如 it@ 底下那筆 cwen 的數字）很可能就是 `owner=true`，會被誤當成其他帳號的證據。後台、別台送來的資料不在這份檔裡，也不拿來比，免得被錯的資料連鎖帶歪。這一版不跨到 Gemini（兩邊的每週期沒有關係）。
+- **已知限制**：這條規則假設不同帳號的每週重置時間不一樣。如果日後所有帳號改成在同一時間重置（或剛好有兩個帳號同一期），指紋規則會讓帳號互相擋住（A 的讀數等於 B 還沒過期的那一期就被當成 B 的），到時候要改程式（例如加保險：兩邊都是各自視窗確認的就放行）。目前不處理。
+- **每次被指紋擋下都會寫一行 log**（`~/.asn/claude-quota.log`）：內容有兩邊帳號（這個帳號與撞到的那個）email 的 sha256 前 6 碼與重置時間，不寫 email；同一個原因連續發生只記一次（`logged_cross`）。
+- 重置時間的 10 分鐘容差（`SAME_RESET_MS`）：agy／Claude 給的重置時間會晃幾秒，差在 10 分鐘內算同一期；兩個不同帳號的週期剛好差不到 10 分鐘的機率很低，這一版不特別處理。
+- 第 2 種只換每週那一條；5 小時那一條照現有規則處理，不跟著動。
+- 後台不動：只做客戶端。
+- 跟舊規則 `later_not_expired` 的差別：舊規則擋的是「同一個帳號、比較晚的一期」，不管怎樣都擋；這條只擋「同一個帳號、存著的那一期還沒過期、又冒出另一個週期」，而且會用其他帳號的週期判斷哪一筆才是串號（第 2 種會把存著的換掉，舊規則沒有這種）。正常使用不會碰到：同一個帳號的同一期，重置時間不變。11-09 那次停更跟每週重置時間無關。
+
+### 額度歸屬不再依賴帳號庫（取代上面「三、uuid 對應 email」與未知帳號區）
+
+實際發生的事：家用機只登入 cwen，三個視窗也都是 cwen，卻送出一筆標成 it@ 的讀數；工作機把 gsit 的數字記成 yooliang。原因是 0.2.15 拿 session-owner 的 uuid 去帳號庫（`~/.asn/claude-accounts/*/account.json`）查 email，而帳號庫裡 it@ 的資料夾存的是 cwen 的 uuid（帳號庫存錯了）。
+
+現在不查帳號庫：
+1. 上面第一層已經保證 session-owner 的 uuid 等於這個視窗自己的 `.claude.json` 的 `oauthAccount.accountUuid`，不相等就不記。所以相等時，**email 直接取同一份 oauthAccount 的 `emailAddress`**（只讀 accountUuid 與 emailAddress 兩個欄位），正規化（小寫）後就是記到哪個帳號底下。oauthAccount 讀不到 email 就不記。`claude_accounts::email_of_account_uuid` 與「未知帳號區」（`claude-quota-unknown.json` 的讀寫）已整個拿掉（不再有「對不到帳號」這回事）。
+2. 帳號庫存錯只做**警示**，不影響記不記：記錄時順便檢查庫裡有沒有「uuid 一樣但 email 不一樣」或「email 一樣但 uuid 不一樣」的資料夾（涵蓋同一個 uuid 出現在多個資料夾），有就在 `~/.asn/claude-quota.log` 寫一行「帳號庫可能存錯，重新存一次帳號」，只附 uuid 雜湊前 6 碼與可疑資料夾數，同一句只記一次（狀態檔 `logged_lib`）。檢查有快取：同一個 (email, uuid) 10 分鐘內不重看（`lib_key`、`lib_at`），不用每次狀態列都列目錄。
+3. **切換與帳號庫的寫入流程不變**（`claude_accounts.rs` 的 `switch_impl`、`save_current`、`auto_sync` 照舊）：切換功能運作正常，額度記錄讀「現在登入的帳號」（視窗自己的 oauthAccount），之後有餘力再考慮讀切換用的帳號庫。帳號庫只有上面第 2 點那個唯讀檢查，不寫、不改。
+4. 沒帶 `transcript_path` 的視窗不記：見下一節。
+
+### 沒帶 transcript_path 的視窗不記
+
+#1266 起就已經是：狀態列輸入沒帶 `transcript_path`（舊版 Claude Code），不再退回「記到目前登入的帳號」，只記下「看過舊版視窗」讓畫面提示升級（`claude_quota.rs` 的 `hook_in`，`note_legacy`）。`hook_legacy` 已在 #1266 拿掉。

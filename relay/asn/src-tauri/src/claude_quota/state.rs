@@ -18,6 +18,20 @@ pub struct State {
     pub logged_five: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_week: Option<String>,
+    /// 最近一次因為「視窗的對話紀錄帳號與視窗自己的登入帳號對不上」而不記時寫的 log 內容（同一個原因連續發生只記一次）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logged_window: Option<String>,
+    /// 最近一次「每週重置時間跟本機其他帳號對不上」寫的 log 內容（同一個原因連續發生只記一次）；放在各帳號自己的狀態裡
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logged_cross: Option<String>,
+    /// 帳號庫檢查的快取：上次檢查的是哪個 (email, uuid)（雜湊前 6 碼）與什麼時候；同一個 10 分鐘內不重看
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lib_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lib_at: Option<String>,
+    /// 最近一次「帳號庫可能存錯」寫的 log 內容（同一個原因連續發生只記一次）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logged_lib: Option<String>,
     /// 各帳號（email）自己的 log 去重狀態；每個只用 logged 那兩欄
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub owned: std::collections::BTreeMap<String, State>,

@@ -256,6 +256,71 @@ pub fn resolve_timed(home: &Path, cfg: &Path, input: &str) -> Option<(Owner, Opt
     owner.map(|o| (o, t))
 }
 
+/// `.claude.json` 最大讀這麼多（真實的檔案可能有幾 MB，專案多的時候更大）；超過就當讀不到
+const CJ_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// 這個視窗自己的登入設定檔：設定資料夾裡有 `.claude.json` 就是它（`CLAUDE_CONFIG_DIR` 指到別處的視窗），沒有才是家目錄的
+fn window_cj_path(home: &Path, cfg: &Path) -> PathBuf {
+    let p = cfg.join(".claude.json");
+    if std::fs::symlink_metadata(&p).is_ok() {
+        p
+    } else {
+        home.join(".claude.json")
+    }
+}
+
+/// 這個視窗現在登入的帳號：(accountUuid, 正規化 email)，讀 `.claude.json` 同一份 oauthAccount 的這兩個欄位，不讀其他欄位、不讀任何憑證。
+/// 額度歸屬用這個（不查帳號庫）。讀不到（檔案不存在、是連結、太大、壞掉、沒登入、uuid 格式不對、沒有 email）都是 None。
+/// 大小與修改時間都沒變就用上次的結果、不重讀（快取存本機一個小檔，因為每次狀態列掛鉤都是新行程）。
+pub fn window_identity(home: &Path, cfg: &Path) -> Option<(String, String)> {
+    let path = window_cj_path(home, cfg);
+    let m = std::fs::symlink_metadata(&path).ok()?;
+    if is_link(&m) || !m.is_file() || m.len() > CJ_MAX_BYTES {
+        return None;
+    }
+    let mut f = File::open(&path).ok()?;
+    // 開檔後確認真的就是這個位置的一般檔案（擋「檢查完到開檔之間被換成連結」）
+    if !handle_matches(&f, &std::fs::canonicalize(&path).ok()?) {
+        return None;
+    }
+    let meta = f.metadata().ok()?;
+    let (len, mt) = (meta.len(), mtime_ms(&meta));
+    let key = path.to_string_lossy().into_owned();
+    let mut cache = super::owner_store::AcctCache::load(home);
+    if let Some(hit) = cache.get(&key, len, mt) {
+        return hit;
+    }
+    let mut buf = Vec::new();
+    (&mut f).take(CJ_MAX_BYTES + 1).read_to_end(&mut buf).ok()?;
+    let id = if buf.len() as u64 > CJ_MAX_BYTES {
+        None
+    } else {
+        String::from_utf8(buf).ok().and_then(|t| crate::claude_accounts::identity_in_text(t.trim_start_matches('\u{feff}'))).filter(|(u, _)| valid_id(u))
+    };
+    cache.put(&key, len, mt, id.clone());
+    cache.save(home);
+    id
+}
+
+/// 測試用：把這個視窗自己的登入設定（設定資料夾 `<home>/.claude/.claude.json`）寫成這個 (email, accountUuid)。
+/// 每次寫出來的長度都不同（快取以大小與修改時間判斷有沒有變，同樣長度的內容在同一毫秒內換掉會讀到舊的）。
+#[cfg(test)]
+pub(crate) fn test_set_window_identity(home: &Path, email: &str, uuid: &str) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let pad = N.fetch_add(1, Ordering::Relaxed) % 4000;
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let oauth = serde_json::json!({ "accountUuid": uuid, "emailAddress": email });
+    std::fs::write(home.join(".claude").join(".claude.json"), serde_json::json!({ "oauthAccount": oauth, "pad": "x".repeat(pad) }).to_string()).unwrap();
+}
+
+/// log 裡用的短代號：sha256 的前 6 個十六進位字元（原值不寫進 log）
+pub fn short_hash(s: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let d = Sha256::digest(s.as_bytes());
+    d.iter().take(3).map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

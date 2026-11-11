@@ -262,9 +262,22 @@ fn with_tp(status_json: String, tp: &std::path::Path) -> String {
 fn hook_at(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
     hook_in(h.path(), &h.path().join(".claude"), input, now)
 }
-/// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、送狀態列
+/// 這個測試檔裡各 uuid 對應的視窗登入 email（明寫，不查帳號庫）：UA→a@x.test、UB→b@x.test，其他用 `<uuid 前 8 碼>@x.test`
+fn email_of(uuid: &str) -> String {
+    match uuid {
+        UA => "a@x.test".to_string(),
+        UB => "b@x.test".to_string(),
+        _ => format!("{}@x.test", &uuid[..8]),
+    }
+}
+/// 把這個視窗自己的登入設定（.claude.json 的 oauthAccount）寫成這個 uuid 與它對應的 email
+fn set_win(h: &std::path::Path, uuid: &str) {
+    super::super::owner::test_set_window_identity(h, &email_of(uuid), uuid);
+}
+/// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、視窗自己的登入設定、送狀態列
 fn feed(h: &tempfile::TempDir, name: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
     let t = transcript(h.path(), name, uuid, Some(ts), pad);
+    set_win(h.path(), uuid);
     hook_at(h, &with_tp(st, &t), now)
 }
 fn quota_of(h: &tempfile::TempDir, email: &str) -> Quota {
@@ -314,13 +327,16 @@ fn 身分_同一個帳號的舊視窗重送舊數字_不蓋過新的_同期回�
 }
 
 #[test]
-fn 身分_對不到已知帳號_只留本機未知區_不進額度檔() {
+fn 身分_帳號庫裡沒有這個帳號也照記_額度歸屬看視窗自己的_oauthaccount_不看帳號庫() {
     let h = home_as("a@x.test");
     add_account(h.path(), "a@x.test", UA);
-    assert!(!feed(&h, "wx", "dddddddd-1111-2222-3333-444444444444", NOW, 1, wk(70.0), NOW));
-    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
-    let unk = super::super::owner_store::unknown_load(h.path());
-    assert_eq!(unk.keys().collect::<Vec<_>>(), ["dddddddd-1111-2222-3333-444444444444"]);
+    let d = "dddddddd-1111-2222-3333-444444444444";
+    let t = transcript(h.path(), "wx", d, Some(NOW), 1);
+    test_set_window_identity(h.path(), "D@x.test", d);
+    assert!(hook_at(&h, &with_tp(wk(70.0), &t), NOW));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["d@x.test"], "記在視窗自己 oauthAccount 的 email（正規化）底下");
+    assert_eq!(all["d@x.test"].weekly_pct, Some(30));
 }
 
 #[test]
@@ -375,7 +391,6 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     assert_eq!(quota_of(&h, "a@x.test"), before, "A 的紀錄完全不變");
     assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
     assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
-    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
 }
 
 #[test]
@@ -455,7 +470,8 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
     assert_eq!(baks(&h), 1);
     let first = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
     assert!(first.contains("\"weekly_pct\":90") && first.contains("\"weekly_pct\":80"), "第一份備份含兩個舊紀錄");
-    assert!(feed(&h, "wb", UB, NOW, 2, wk(50.0), NOW + MIN));
+    // 兩個帳號的每週重置時間要不一樣（現實裡不會剛好同一期；一樣的話 b 會被當成 a 的串號擋掉）
+    assert!(feed(&h, "wb", UB, NOW, 2, status(None, Some((50.0, NOW + 4 * DAY))), NOW + MIN));
     assert_eq!(baks(&h), 1, "還是只有一份備份檔");
     let second = std::fs::read_to_string(super::super::owner_store::backup_path(h.path())).unwrap();
     assert!(second.contains("\"owner\":true") && second.contains("\"weekly_pct\":80"), "第二次覆寫成清 b 之前的內容（a 已有標記）");
@@ -464,34 +480,31 @@ fn 身分_備份只留一份_兩個帳號各自第一次清舊基準時都覆寫
 }
 
 #[test]
-fn 身分_uuid_對應_email_先看帳號庫_資料夾名對不上不用_再看登入檔_都沒有就是未知() {
-    let h = home_as("cur@x.test"); // .claude.json 的 accountUuid 是 11111111-2222-3333-4444-555555555555
+fn 帳號庫檢查_uuid_一樣_email_不一樣_或_email_一樣_uuid_不一樣_才算可疑() {
+    let h = home_as("cur@x.test");
     add_account(h.path(), "a@x.test", UA);
-    let cfg = h.path().join(".claude");
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UA).as_deref(), Some("a@x.test"));
-    // 資料夾名跟 email 對不上（被改名／被塞假檔）：不用
+    add_account(h.path(), "b@x.test", UB);
+    let sus = |e: &str, u: &str| crate::claude_accounts::library_suspect(h.path(), e, u);
+    assert_eq!(sus("a@x.test", UA), None, "庫裡的跟登入的一致");
+    assert_eq!(sus("c@x.test", "cccccccc-0000-0000-0000-000000000000"), None, "庫裡沒有這個帳號不算可疑");
+    // 庫裡 b 的資料夾存的是 a 的 uuid
     let root = h.path().join(".asn").join("claude-accounts");
-    std::fs::create_dir_all(root.join("wrong-name")).unwrap();
-    std::fs::write(root.join("wrong-name").join("account.json"), json!({ "accountUuid": UB, "emailAddress": "b@x.test" }).to_string()).unwrap();
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, UB), None);
-    // 帳號庫沒有、但正是目前登入的帳號：看 .claude.json
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "11111111-2222-3333-4444-555555555555").as_deref(), Some("cur@x.test"));
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, ""), None);
-    assert_eq!(crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, "eeeeeeee-0000-0000-0000-000000000000"), None);
+    std::fs::write(root.join("b@x.test").join("account.json"), json!({ "accountUuid": UA, "emailAddress": "b@x.test" }).to_string()).unwrap();
+    assert_eq!(sus("a@x.test", UA), Some(1), "uuid 一樣 email 不一樣的資料夾有 1 個");
+    assert_eq!(sus("b@x.test", UB), Some(1), "email 一樣 uuid 不一樣的資料夾有 1 個");
 }
 
 #[test]
-fn 身分_備援先看視窗自己的設定資料夾裡的_claude_json_再看家目錄_uuid_要對得上() {
+fn 視窗身分_先看視窗自己的設定資料夾裡的_claude_json_沒有才看家目錄() {
     let h = tempfile::tempdir().unwrap();
     let cfg = h.path().join("cfg-b");
     std::fs::create_dir_all(&cfg).unwrap();
     let cj = |dir: &std::path::Path, email: &str, uuid: &str| std::fs::write(dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
-    cj(h.path(), "home@x.test", "11111111-0000-0000-0000-00000000000a");
-    cj(&cfg, "cfgb@x.test", "22222222-0000-0000-0000-00000000000b");
-    let f = |uuid: &str| crate::claude_accounts::email_of_account_uuid(h.path(), &cfg, uuid);
-    assert_eq!(f("22222222-0000-0000-0000-00000000000b").as_deref(), Some("cfgb@x.test"), "先看這個視窗自己的設定資料夾");
-    assert_eq!(f("11111111-0000-0000-0000-00000000000a").as_deref(), Some("home@x.test"), "設定資料夾沒有才看家目錄");
-    assert_eq!(f("33333333-0000-0000-0000-000000000000"), None, "uuid 對不上就不用");
+    let (ua, ub) = ("11111111-0000-0000-0000-00000000000a", "22222222-0000-0000-0000-00000000000b");
+    cj(h.path(), "Home@x.test", ua);
+    assert_eq!(window_identity(h.path(), &cfg), Some((ua.to_string(), "home@x.test".to_string())), "設定資料夾沒有 .claude.json 才看家目錄，email 正規化");
+    cj(&cfg, "cfgb@x.test", ub);
+    assert_eq!(window_identity(h.path(), &cfg), Some((ub.to_string(), "cfgb@x.test".to_string())), "先看這個視窗自己的設定資料夾");
 }
 
 #[test]
@@ -664,4 +677,341 @@ fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
         want.sort();
         assert_eq!(present, want, "{id} {}", t["note"].as_str().unwrap());
     }
+}
+
+// ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
+use super::super::owner::{short_hash, test_set_window_identity, window_identity};
+
+fn cj_in(dir: &std::path::Path, text: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(".claude.json"), text).unwrap();
+}
+
+#[test]
+fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記一次() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 視窗開的時候是 A（對話紀錄記 A），之後 ASN 切成 B：這個視窗自己的登入設定現在是 B
+    let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + MIN), "對不上：不記");
+    assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
+    let lg = log(&h);
+    assert!(lg.contains("視窗帳號對不上") && lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
+    assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("a@x.test") && !lg.contains("wa.jsonl"), "log 不留 uuid、email、路徑：{lg}");
+    // 同一個原因連續發生只記一次
+    assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("視窗帳號對不上").count(), 1);
+    // 這個視窗重開後登入設定與對話紀錄一致：照收；之後又對不上會再記一次
+    set_win(h.path(), UA);
+    assert!(hook_at(&h, &with_tp(wk(30.0), &t), NOW + 3 * MIN), "一致：收");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(wk(31.0), &t), NOW + 4 * MIN));
+    assert_eq!(log(&h).matches("視窗帳號對不上").count(), 2);
+}
+
+#[test]
+fn 視窗帳號讀不到_不記_沒有檔_沒有_oauthaccount_壞掉_太大都一樣() {
+    let big = format!("{{\"oauthAccount\":{{\"accountUuid\":\"{UA}\"}},\"pad\":\"{}\"}}", "x".repeat(8 * 1024 * 1024 + 16));
+    let cases: Vec<(&str, Option<String>)> = vec![("沒有檔", None), ("沒有 oauthAccount", Some("{\"theme\":\"dark\"}".into())), ("壞掉", Some("{壞".into())), ("沒有 email", Some(format!("{{\"oauthAccount\":{{\"accountUuid\":\"{UA}\"}}}}"))), ("太大", Some(big)), ("uuid 格式不對", Some("{\"oauthAccount\":{\"accountUuid\":\"../x\"}}".into()))];
+    for (i, (name, text)) in cases.into_iter().enumerate() {
+        let h = tempfile::tempdir().unwrap();
+        add_account(h.path(), "a@x.test", UA);
+        let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
+        if let Some(text) = text {
+            cj_in(&h.path().join(".claude"), &text);
+        }
+        assert!(!hook_in(h.path(), &h.path().join(".claude"), &with_tp(wk(70.0), &t), NOW + MIN), "{name}：不記");
+        assert!(!super::super::quota_path(h.path()).exists(), "{name}：額度檔不該有（第 {i} 種）");
+        assert!(std::fs::read_to_string(super::super::merge::log_path(h.path())).unwrap().contains("視窗帳號讀不到"), "{name}：log 有記");
+    }
+}
+
+#[test]
+fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
+    let h = tempfile::tempdir().unwrap();
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    // 家目錄登入的是 A；這個視窗的設定資料夾（CLAUDE_CONFIG_DIR）登入的是 B
+    cj_in(h.path(), &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "a@x.test" } }).to_string());
+    let cfg = h.path().join(".claude");
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" } }).to_string());
+    assert_eq!(window_identity(h.path(), &cfg), Some((UB.to_string(), "b@x.test".to_string())));
+    let tb = transcript(h.path(), "wb", UB, Some(NOW), 1);
+    assert!(hook_in(h.path(), &cfg, &with_tp(wk(60.0), &tb), NOW + MIN), "視窗是 B、對話紀錄也是 B：收");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+    // 對話紀錄是 A（家目錄的帳號）但這個視窗自己是 B：不收，不能拿家目錄那份來湊
+    let ta = transcript(h.path(), "wa", UA, Some(NOW + MIN), 2);
+    assert!(!hook_in(h.path(), &cfg, &with_tp(wk(10.0), &ta), NOW + 2 * MIN));
+    assert!(load_all(h.path()).get("a@x.test").is_none());
+    // 設定資料夾裡沒有 .claude.json 才退回家目錄那份
+    std::fs::remove_file(cfg.join(".claude.json")).unwrap();
+    assert_eq!(window_identity(h.path(), &cfg), Some((UA.to_string(), "a@x.test".to_string())));
+}
+
+#[test]
+fn 視窗帳號的讀取有快取_大小或修改時間變了才重讀() {
+    let h = tempfile::tempdir().unwrap();
+    let cfg = h.path().join(".claude");
+    let id = |u: &str, e: &str| Some((u.to_string(), e.to_string()));
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "A@x.test", "organizationName": "ORG-SECRET" } }).to_string());
+    assert_eq!(window_identity(h.path(), &cfg), id(UA, "a@x.test"), "email 正規化");
+    let cache = std::fs::read_to_string(super::super::owner_store::acct_cache_path(h.path())).unwrap();
+    assert!(cache.contains(UA) && cache.contains("a@x.test") && !cache.contains("ORG-SECRET"), "快取只存 accountUuid 與 email：{cache}");
+    // 換成另一個帳號（長度不同）：重讀
+    cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" }, "pad": "xxxx" }).to_string());
+    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
+    // 快取壞掉當成沒有快取，照樣讀得到
+    std::fs::write(super::super::owner_store::acct_cache_path(h.path()), "{壞").unwrap();
+    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
+}
+
+#[cfg(unix)]
+#[test]
+fn 視窗帳號的設定檔是符號連結_不讀() {
+    let h = tempfile::tempdir().unwrap();
+    let cfg = h.path().join(".claude");
+    std::fs::create_dir_all(&cfg).unwrap();
+    let real = h.path().join("real.json");
+    std::fs::write(&real, json!({ "oauthAccount": { "accountUuid": UA } }).to_string()).unwrap();
+    std::os::unix::fs::symlink(&real, cfg.join(".claude.json")).unwrap();
+    assert_eq!(window_identity(h.path(), &cfg), None);
+}
+
+// ---------- 每週重置時間當帳號指紋：跟本機其他帳號比（視窗身分一致也可能是串號：以 A 開窗、後來拿到 B 的 token、又切回 A） ----------
+fn seed(h: &tempfile::TempDir, recs: Value) {
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    std::fs::write(super::super::quota_path(h.path()), recs.to_string()).unwrap();
+}
+/// 新記錄路徑寫的紀錄（owner 與 verified 都是 true）：可以當「別的帳號」的證據
+fn rec_wk(pct: u8, reset: i64) -> Value {
+    json!({ "weekly_pct": pct, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(reset), "week_at": iso_secs(NOW - H), "owner": true, "verified": true })
+}
+/// 舊路徑寫的紀錄（11-11 那批汙染紀錄的樣子）：有 owner 標記、沒有 verified。不能當證據
+fn rec_wk_old(pct: u8, reset: i64) -> Value {
+    json!({ "weekly_pct": pct, "at": iso_secs(NOW - H), "week_reset_at": iso_secs(reset), "week_at": iso_secs(NOW - H), "owner": true })
+}
+/// a、b 兩個帳號：各有自己還沒過期的那一期（a 是 NOW+3 天，b 是 NOW+5 天多）
+fn two_accounts() -> (tempfile::TempDir, i64, i64) {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    (h, NOW + 3 * DAY, NOW + 5 * DAY + 5 * H)
+}
+
+#[test]
+fn 週期指紋_新讀數的那一期是另一個帳號的_這筆是串號_整筆不收_log_只有雜湊與兩個重置時間() {
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
+    // a 的視窗（身分與登入都是 a）送來的週期是 b 的：數字是 b 的
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(Some((20.0, NOW + 2 * H)), Some((81.0, rb))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at.clone(), qa.five_hour_pct), (Some(70), Some(iso_secs(ra)), None), "整筆不收，5 小時也不記");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+    let lg = log(&h);
+    assert!(lg.contains("別的帳號的數字") && lg.contains(&short_hash("a@x.test")) && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)), "{lg}");
+    assert!(lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
+    assert!(!lg.contains("a@x.test") && !lg.contains("b@x.test"), "log 不留 email：{lg}");
+    // 同一個原因連續發生只記一次
+    assert!(!feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((82.0, rb))), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("別的帳號的數字").count(), 1);
+}
+
+#[test]
+fn 週期指紋_存著的那一期是另一個帳號的_存著的才是串號_收下新讀數把錯的換掉() {
+    // 實際案例：it@ 存著的是 cwen 的那一期（11-15），it@ 真正的讀數是另一期（11-12）
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_wk(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, ra))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(40), Some(iso_secs(ra))), "換成 a 自己的讀數");
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(40), Some(iso_secs(rb))), "b 不動");
+    let lg = log(&h);
+    assert!(lg.contains("換成這次的") && lg.contains(&iso_secs(rb)) && lg.contains(&iso_secs(ra)) && !lg.contains("a@x.test"), "{lg}");
+    assert!(lg.contains(&short_hash("a@x.test")) && lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
+}
+
+#[test]
+fn 週期指紋_另一個帳號的紀錄是舊路徑寫的_即使有_owner_沒有_verified_也不拿來當證據() {
+    // b 的紀錄是舊路徑寫的（有 owner、沒有 verified；11-11 的汙染紀錄就是這種樣子），可能混進別的帳號的數字：不能拿它的週期當指紋
+    let (h, ra, rb) = two_accounts();
+    // 新讀數的週期＝b 的：b 是 verified 時是串號（上面那條），舊紀錄就只是「對不上任何帳號」，照收
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk_old(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((81.0, rb))), NOW + MIN));
+    let lg = log(&h);
+    assert!(lg.contains("對不上本機其他帳號，照收") && !lg.contains("別的帳號的數字"), "{lg}");
+    // 存著的週期＝b 的：b 是 verified 時會把存著的換掉，舊紀錄不當證據（也是照收新讀數，只是 log 不同）
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(19, rb), "b@x.test": rec_wk_old(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, ra))), NOW + MIN));
+    assert!(!log(&h).contains("換成這次的"), "{}", log(&h));
+    // 舊檔沒有 verified 欄位讀進來就是 false；這次只收 5 小時、沒收每週，每週原本不是 verified 就維持不是
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk_old(70, ra), "b@x.test": rec_wk(40, rb) }));
+    assert!(!quota_of(&h, "a@x.test").verified);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((30.0, NOW + 2 * H)), None), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct, qa.verified), (Some(70), Some(70), false), "每週沒收，verified 不因為 5 小時收了就變 true");
+}
+
+#[test]
+fn 週期指紋_a_沒有存著的週期_新讀數等於別的帳號還沒過期的那一期_也要擋() {
+    // A 是新帳號（額度檔裡沒有）：新讀數的週期是 b 的，就是 b 的數字
+    let (h, _ra, rb) = two_accounts();
+    seed(&h, json!({ "b@x.test": rec_wk(40, rb) }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(Some((20.0, NOW + 2 * H)), Some((81.0, rb))), NOW + MIN));
+    assert!(!load_all(h.path()).contains_key("a@x.test"), "整筆不收，a 沒有紀錄");
+    let lg = log(&h);
+    assert!(lg.contains("別的帳號的數字") && lg.contains("沒有還沒過期的") && lg.contains(&iso_secs(rb)), "{lg}");
+    assert!(lg.contains(&short_hash("a@x.test")) && lg.contains(&short_hash("b@x.test")), "兩邊帳號的雜湊都要在：{lg}");
+    // A 存著的那一期已經過期：一樣要擋
+    let (h, ra, rb) = two_accounts();
+    let expired = rec_wk(70, NOW - DAY);
+    seed(&h, json!({ "a@x.test": expired, "b@x.test": rec_wk(40, rb) }));
+    assert!(!feed(&h, "wa", UA, NOW, 1, status(None, Some((81.0, rb))), NOW + MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70), "不動");
+    // 正常新週期（不是別的帳號的）照收
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((81.0, ra))), NOW + 2 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(19));
+    // A 沒有存著的週期、新讀數也不是別的帳號的：照收
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "b@x.test": rec_wk(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((50.0, ra))), NOW + MIN));
+}
+
+#[test]
+fn 週期指紋_今天的情境_cwen_自己的視窗寫入_verified_紀錄後_it_存著的_cwen_週期會被換掉() {
+    // it@（a）底下是舊路徑寫的 cwen 的數字（owner=true、沒有 verified），cwen（b）還沒有紀錄
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk_old(19, rb) }));
+    // cwen 自己的視窗送來 rb：舊紀錄不算證據，照常收，而且這筆是 verified
+    assert!(feed(&h, "wb", UB, NOW, 1, status(None, Some((40.0, rb))), NOW + MIN));
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at.clone(), qb.owner, qb.verified), (Some(60), Some(iso_secs(rb)), true, true));
+    // it@ 自己的視窗送來真正的週期 ra：存著的 rb 是 verified 的 cwen 的那一期 → 換掉
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((60.0, ra))), NOW + 2 * MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at, qa.verified), (Some(40), Some(iso_secs(ra)), true));
+    assert!(log(&h).contains("換成這次的"), "{}", log(&h));
+}
+
+#[test]
+fn 週期指紋_兩邊都對不上任何帳號_照收_log_記一行_同原因只記一次() {
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
+    let rc = NOW + 6 * DAY;
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((60.0, rc))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(40), Some(iso_secs(rc))), "照收");
+    let lg = log(&h);
+    assert!(lg.contains("對不上本機其他帳號，照收") && lg.contains(&iso_secs(ra)) && lg.contains(&iso_secs(rc)) && !lg.contains("a@x.test"), "{lg}");
+    // 收下之後存著的就是新的一期，同一期再來是同一期，不再有事
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((55.0, rc))), NOW + 2 * MIN));
+    assert_eq!(log(&h).matches("照收").count(), 1);
+    // 存著的那一期過期之後：正常換期，照收
+    let t = rc + 5 * MIN;
+    let rn = t + 7 * DAY;
+    assert!(feed(&h, "wa", UA, t, 3, status(None, Some((10.0, rn))), t));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(90), Some(iso_secs(rn))));
+}
+
+#[test]
+fn 週期指紋_重置卷_舊的一期還沒過期_新的一期剩_100_重置時間較晚_要收下() {
+    // 用了重置卷：週期提前換成新的一期，新的重置時間跟存著、還沒過期的那一期不同，也對不上其他任何帳號
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(12, ra), "b@x.test": rec_wk(40, rb) }));
+    let rn = NOW + 7 * DAY;
+    assert!(rn > ra + 3 * DAY);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((0.0, rn))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(100), Some(iso_secs(rn))), "新的一期照收");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40), "b 不動");
+    assert!(log(&h).contains("照收"), "{}", log(&h));
+}
+
+#[test]
+fn 週期指紋_同一期差十分鐘內_或_5_小時窗_或沒帶每週_都不受影響() {
+    let (h, ra, rb) = two_accounts();
+    let rec = json!({ "five_hour_pct": 50, "five_reset_at": iso_secs(NOW + H), "five_at": iso_secs(NOW - H), "weekly_pct": 70, "week_reset_at": iso_secs(ra), "week_at": iso_secs(NOW - H), "at": iso_secs(NOW - H), "owner": true });
+    seed(&h, json!({ "a@x.test": rec, "b@x.test": rec_wk(40, rb) }));
+    // 每週的重置時間晃了 5 分鐘：還是同一期。5 小時的重置時間往後（新的一期）也照收
+    assert!(feed(&h, "wa", UA, NOW, 1, status(Some((30.0, NOW + 4 * H)), Some((20.0, ra + 5 * MIN))), NOW + MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct), (Some(70), Some(80)));
+    // 這次沒帶每週（只有 5 小時）：不看指紋，5 小時照收，每週留著
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(Some((10.0, NOW + 5 * H)), None), NOW + 2 * MIN));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.five_hour_pct, qa.weekly_pct), (Some(90), Some(80)));
+    assert!(!log(&h).contains("每週重置時間"), "沒有指紋相關的 log：{}", log(&h));
+}
+
+// ---------- 額度歸屬不依賴帳號庫：email 直接取視窗自己的 oauthAccount；帳號庫存錯只警示 ----------
+/// 一個視窗回報一次：對話紀錄的 session-owner 是 uuid、視窗自己的登入設定是 (email, uuid)，不經過帳號庫
+fn feed_win(h: &tempfile::TempDir, name: &str, email: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
+    let t = transcript(h.path(), name, uuid, Some(ts), pad);
+    test_set_window_identity(h.path(), email, uuid);
+    hook_at(h, &with_tp(st, &t), now)
+}
+const LIB_WARN: &str = "帳號庫可能存錯，重新存一次帳號";
+
+#[test]
+fn 家用機情境_視窗是_cwen_帳號庫裡_it_的資料夾存的是_cwen_的_uuid_記到_cwen_log_有警示() {
+    let h = tempfile::tempdir().unwrap();
+    let uc = "cccccccc-1111-2222-3333-444444444444";
+    // 帳號庫存錯：it@ 的資料夾裡是 cwen 的 uuid
+    add_account(h.path(), "it@x.test", uc);
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW, 1, wk(81.0), NOW + MIN));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["cwen@x.test"], "記到視窗自己的帳號，不是帳號庫查到的 it@");
+    assert_eq!(all["cwen@x.test"].weekly_pct, Some(19));
+    let lg = log(&h);
+    assert!(lg.contains(LIB_WARN) && lg.contains(&short_hash(uc)) && lg.contains("1 個資料夾"), "{lg}");
+    assert!(!lg.contains(uc) && !lg.contains("it@x.test") && !lg.contains("cwen@x.test"), "log 不留 uuid 與 email：{lg}");
+    // 同一句只記一次（10 分鐘內不重看、之後看了也是同一句）
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + MIN, 2, wk(80.0), NOW + 2 * MIN));
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + 20 * MIN, 3, wk(79.0), NOW + 21 * MIN));
+    assert_eq!(log(&h).matches(LIB_WARN).count(), 1);
+    // 重新存一次帳號（庫裡改成正確的）：下一次檢查警示消掉，之後不再有
+    let root = h.path().join(".asn").join("claude-accounts");
+    std::fs::remove_dir_all(root.join("it@x.test")).unwrap();
+    add_account(h.path(), "cwen@x.test", uc);
+    assert!(feed_win(&h, "w1", "cwen@x.test", uc, NOW + 40 * MIN, 4, wk(70.0), NOW + 41 * MIN));
+    assert!(!state_file(&h).contains("logged_lib"), "{}", state_file(&h));
+    assert_eq!(log(&h).matches(LIB_WARN).count(), 1);
+}
+
+#[test]
+fn 工作機情境_gsit_的_uuid_被存在_yooliang_資料夾_記到_gsit_log_有警示() {
+    let h = tempfile::tempdir().unwrap();
+    let ug = "99999999-1111-2222-3333-444444444444";
+    add_account(h.path(), "yooliang@x.test", ug);
+    assert!(feed_win(&h, "w1", "gsit@x.test", ug, NOW, 1, wk(40.0), NOW + MIN));
+    let all = load_all(h.path());
+    assert_eq!(all.keys().collect::<Vec<_>>(), ["gsit@x.test"], "yooliang 底下不會有這筆");
+    assert_eq!(all["gsit@x.test"].weekly_pct, Some(60));
+    let lg = log(&h);
+    assert!(lg.contains(LIB_WARN) && lg.contains(&short_hash(ug)), "{lg}");
+}
+
+#[test]
+fn 同一個_uuid_在兩個資料夾_照記_只警示_資料夾數寫在_log() {
+    let h = tempfile::tempdir().unwrap();
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "a2@x.test", UA);
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW, 1, wk(70.0), NOW + MIN), "不再因為帳號庫有重複就不記");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(30));
+    assert!(log(&h).contains(LIB_WARN) && log(&h).contains("1 個資料夾"), "{}", log(&h));
+}
+
+#[test]
+fn 帳號庫正常或沒有帳號庫_不警示() {
+    let h = tempfile::tempdir().unwrap();
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW, 1, wk(70.0), NOW + MIN), "沒有帳號庫也記");
+    add_account(h.path(), "a@x.test", UA);
+    add_account(h.path(), "b@x.test", UB);
+    assert!(feed_win(&h, "wa", "a@x.test", UA, NOW + 20 * MIN, 2, wk(60.0), NOW + 21 * MIN));
+    assert!(!log(&h).contains(LIB_WARN), "{}", log(&h));
 }

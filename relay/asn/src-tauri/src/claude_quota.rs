@@ -46,6 +46,11 @@ pub struct Quota {
     /// 這筆是視窗帶了帳號身分才記下的（#1185）：沒有標記的舊基準可能混進別的帳號的數字，第一次有身分的回報來時會清掉
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub owner: bool,
+    /// 每週這一條是新的記錄路徑寫進來的（session-owner 與視窗自己的 oauthAccount 一致才收，額度記在 oauthAccount 的 email 底下）。
+    /// 每週期指紋（merge::week_fingerprint）只拿這種紀錄當「別的帳號」的證據：舊路徑寫的紀錄即使有 `owner` 標記也可能混進別的帳號的數字，不算。
+    /// 舊檔沒有這個欄位就當 false。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub verified: bool,
 }
 
 /// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
@@ -200,6 +205,7 @@ pub(crate) fn quota_from_value(v: &Value) -> Option<Quota> {
         five_at: only(five.is_some(), s("five_at")),
         week_at: only(week.is_some(), s("week_at")),
         owner: v.get("owner").and_then(Value::as_bool) == Some(true),
+        verified: v.get("verified").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -261,14 +267,31 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     if dropped {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：清掉 1 筆沒有身分的舊基準（已備份）\n", iso_secs(now_ms)));
     }
+    // 每週重置時間當帳號指紋，跟本機其他帳號比：串號的讀數不收，存著的是串號就換掉
+    let mut cur = all.get(email).cloned();
+    let mut replaced = false;
+    match week_cross(home, st, email, merge::week_fingerprint(&all, email, &p, now_ms), now_ms) {
+        Some(true) => return Ok(false),
+        Some(false) => {
+            cur = cur.as_ref().map(merge::without_week);
+            replaced = true;
+        }
+        None => {}
+    }
     // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉，再合併新讀數（#1321）
-    let cur = all.get(email).cloned();
     let trimmed = cur.as_ref().and_then(|q| merge::without_missing_expired(q, &p, now_ms));
     let m = merge::merge_full(trimmed.as_ref().or(cur.as_ref()), &p, read_ms, now_ms);
     log_changes(home, st, &m, now_ms);
-    let took = m.quota.is_some() || trimmed.is_some();
-    // 兩條都沒收、只有拿掉過期窗：照樣要寫
-    let out = m.quota.or(trimmed).map(|mut q| {
+    let took = m.quota.is_some() || trimmed.is_some() || replaced;
+    // 兩條都沒收、只有拿掉過期窗或換掉串號的那條：照樣要寫
+    // verified（每週這一條是新記錄路徑寫的）：這次收了每週就是 true（備份失敗那次沒清舊基準，混著舊數字，不算）；沒收就沿用原本的
+    let base_verified = trimmed.as_ref().or(cur.as_ref()).is_some_and(|q| q.verified);
+    let took_week = m.took_week;
+    let merged = m.quota.map(|mut q| {
+        q.verified = if took_week { !backup_failed } else { base_verified };
+        q
+    });
+    let out = merged.or(trimmed).or(replaced.then(|| cur.clone()).flatten()).map(|mut q| {
         q.owner = !backup_failed;
         q
     });
@@ -290,6 +313,38 @@ fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::Sta
     Ok(took)
 }
 
+/// 每週重置時間指紋的結果處理：回 Some(true)＝這筆不收（串號）、Some(false)＝存著的是串號要換掉、None＝照常收（沒事，或沒有其他帳號的證據）。
+/// 有事都寫一行 log：只有帳號雜湊的前 6 碼與兩個重置時間（不含 email）；同一個原因連續發生只記一次。
+fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, now_ms: i64) -> Option<bool> {
+    use merge::Cross::*;
+    let h = owner::short_hash(email);
+    let t = |ms: i64| iso_secs(ms);
+    let accept_only = matches!(c, Unmatched { .. });
+    let (line, reject) = match c {
+        Pass => {
+            st.logged_cross = None;
+            return None;
+        }
+        // 每次被指紋擋下都寫一行：兩邊帳號（這個帳號與撞到的那個）的雜湊前 6 碼與重置時間；同一個原因只記一次
+        IncomingFromOther { new_reset, stored_reset, other } => {
+            let stored = stored_reset.map(t).unwrap_or_else(|| "沒有還沒過期的".to_string());
+            let o = owner::short_hash(&other);
+            (format!("帳號 {h} 每週重置時間 {} 是本機另一個帳號 {o} 還沒過期的那一期（這帳號存著的是 {stored}），這筆是別的帳號的數字，不收", t(new_reset)), true)
+        }
+        StoredFromOther { new_reset, stored_reset, other } => {
+            let o = owner::short_hash(&other);
+            (format!("帳號 {h} 存著的每週重置時間 {} 是本機另一個帳號 {o} 的那一期，換成這次的 {}", t(stored_reset), t(new_reset)), false)
+        }
+        // 兩邊都沒有其他帳號的證據（例如用了重置卷，週期提前換成新的一期）：照收，交給視窗身分那一層把關；只留一行 log
+        Unmatched { new_reset, stored_reset } => (format!("帳號 {h} 每週重置時間從 {} 變成 {}，對不上本機其他帳號，照收", t(stored_reset), t(new_reset)), false),
+    };
+    if st.logged_cross.as_deref() != Some(line.as_str()) {
+        merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+        st.logged_cross = Some(line);
+    }
+    (!accept_only).then_some(reject)
+}
+
 /// 狀態列掛鉤：把輸入裡的額度記在「這個視窗自己的帳號」底下。有記下回 true；
 /// 沒額度、輸入太大、沒身分、取不到資料時間、兩條都判斷成不收或寫檔失敗回 false。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
@@ -301,7 +356,8 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
 /// 帳號與資料時間都從這個視窗的對話紀錄（transcript_path）來（#1185、#1266）：
 /// - 沒帶 `transcript_path`（舊版 Claude Code）：不收，只記下「看過舊版視窗」，畫面據此寫一句固定的人話（`legacy_email`）。
 /// - 帶了但解不出身分（還沒寫出 session-owner、被擠出檔尾、格式壞、路徑不安全）或取不到最後一筆 assistant 回應的時間戳：這次不記。
-/// - 都有：額度記到該帳號底下，資料時間用那個時間戳；比記著的舊就不收（閒置的視窗會一直重送舊數字）。
+/// - 都有：還要這個視窗自己的 `.claude.json` oauthAccount 的 uuid 跟對話紀錄的一致才收；一致時額度記到那份 oauthAccount 裡的 email 底下
+///   （不查帳號庫，帳號庫可能存錯，只順便檢查、有問題寫一行 log），資料時間用那個時間戳；比記著的舊就不收（閒置的視窗會一直重送舊數字）。
 pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
@@ -313,22 +369,76 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     }
     let Some((o, last_ms)) = owner::resolve_timed(home, cfg, input) else { return false };
     let Some(read_ms) = last_ms else { return false };
-    hook_owned(home, cfg, &o, parsed, read_ms, now_ms)
+    // 對話紀錄記的是「這個視窗開的時候的帳號」；ASN 切換帳號後，同一個視窗之後送來的額度可能已經是新帳號的（對話紀錄的身分不會變）。
+    // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：uuid 一致才收，不一致或讀不到都不記。
+    // 一致時，記到哪個帳號底下直接用同一份 oauthAccount 裡的 email，不查帳號庫（帳號庫可能存錯）。
+    let Some(email) = window_email(home, cfg, input, &o, now_ms) else { return false };
+    hook_owned(home, &email, &o.account_uuid, parsed, read_ms, now_ms)
 }
 
-/// 視窗帶了身分：uuid 對得到 email 就記在那個帳號；對不到是未知帳號，只留本機一小區，不進額度檔、不上傳
-fn hook_owned(home: &Path, cfg: &Path, o: &owner::Owner, parsed: Parsed, read_ms: i64, now_ms: i64) -> bool {
-    let Some(email) = claude_accounts::email_of_account_uuid(home, cfg, &o.account_uuid) else {
-        owner_store::unknown_put(home, &o.account_uuid, &parsed, now_ms);
-        return false;
+/// 視窗現在登入的帳號 uuid 跟對話紀錄的身分一致，回同一份 oauthAccount 裡的 email（正規化後）；不一致、讀不到（含沒有 email）都回 None、不記，
+/// 寫一行 log（只有兩邊 uuid 與視窗路徑雜湊的前 6 碼；同一個原因連續發生只記一次）
+fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, now_ms: i64) -> Option<String> {
+    let cur = owner::window_identity(home, cfg);
+    let matched = cur.as_ref().filter(|(u, _)| u.eq_ignore_ascii_case(&o.account_uuid)).map(|(_, e)| e.clone());
+    let mut st = state::load(home);
+    if matched.is_some() {
+        if st.logged_window.take().is_some() {
+            state::save(home, &st);
+        }
+        return matched;
+    }
+    let win = owner::transcript_of(input).map(|p| owner::short_hash(&p.to_string_lossy())).unwrap_or_default();
+    let line = match cur {
+        Some((c, _)) => format!("視窗帳號對不上：視窗 {win}，對話紀錄 {}、視窗目前登入 {}，這筆不記", owner::short_hash(&o.account_uuid), owner::short_hash(&c)),
+        None => format!("視窗帳號讀不到：視窗 {win}，對話紀錄 {}，這筆不記", owner::short_hash(&o.account_uuid)),
     };
+    if st.logged_window.as_deref() != Some(line.as_str()) {
+        merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+        st.logged_window = Some(line);
+        state::save(home, &st);
+    }
+    None
+}
+
+/// 帳號庫可能存錯的警示（只警示，不影響記不記）：多久才再看一次帳號庫（不用每次狀態列都列目錄）
+const LIB_CHECK_MS: i64 = 10 * 60_000;
+
+/// 檢查帳號庫有沒有「uuid 一樣 email 不一樣」或「email 一樣 uuid 不一樣」的資料夾，有就寫一行 log：
+/// 「帳號庫可能存錯，重新存一次帳號」，只附 uuid 雜湊前 6 碼與可疑資料夾數，同一句只記一次。
+/// 同一個 (email, uuid) 10 分鐘內不重看，狀態列叫得很勤。
+fn warn_library(home: &Path, email: &str, uuid: &str, now_ms: i64) {
+    let key = format!("{}|{}", owner::short_hash(email), owner::short_hash(uuid));
+    let mut st = state::load(home);
+    let fresh = st.lib_key.as_deref() == Some(key.as_str()) && st.lib_at.as_deref().and_then(parse_iso_secs).is_some_and(|t| t <= now_ms && now_ms - t < LIB_CHECK_MS);
+    if fresh {
+        return;
+    }
+    st.lib_key = Some(key);
+    st.lib_at = Some(iso_secs(now_ms));
+    match claude_accounts::library_suspect(home, email, uuid) {
+        Some(n) => {
+            let line = format!("帳號庫可能存錯，重新存一次帳號（帳號代號 {}，{n} 個資料夾）", owner::short_hash(uuid));
+            if st.logged_lib.as_deref() != Some(line.as_str()) {
+                merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
+                st.logged_lib = Some(line);
+            }
+        }
+        None => st.logged_lib = None,
+    }
+    state::save(home, &st);
+}
+
+/// 視窗的身分確定了（uuid 一致、email 來自同一份 oauthAccount）：額度記在 `email` 底下。額度歸屬不依賴帳號庫；帳號庫只順便檢查有沒有存錯、只警示。
+fn hook_owned(home: &Path, email: &str, uuid: &str, parsed: Parsed, read_ms: i64, now_ms: i64) -> bool {
+    warn_library(home, email, uuid, now_ms);
     let before = state::load(home);
     let mut all_st = before.clone();
-    let mut st = all_st.take_owned(&email);
+    let mut st = all_st.take_owned(email);
     // 這個帳號在額度檔裡有一筆、但沒有「有身分」的標記：舊基準可能混進別的帳號的數字，清掉（備份一份、log 只記筆數）
-    let clear_unowned = load_all(home).get(&email).is_some_and(|q| !q.owner);
-    let r = record(home, &email, parsed, read_ms, &mut st, clear_unowned, now_ms).unwrap_or(false);
-    all_st.put_owned(&email, st);
+    let clear_unowned = load_all(home).get(email).is_some_and(|q| !q.owner);
+    let r = record(home, email, parsed, read_ms, &mut st, clear_unowned, now_ms).unwrap_or(false);
+    all_st.put_owned(email, st);
     if all_st != before {
         state::save(home, &all_st);
     }
@@ -397,6 +507,7 @@ impl Quota {
             five_at: self.five_at.clone().filter(|_| !drop5),
             week_at: self.week_at.clone().filter(|_| !dropw),
             owner: self.owner,
+            verified: self.verified && !dropw,
         })
     }
 }
@@ -502,6 +613,7 @@ mod tests {
         std::fs::write(&f, format!("{}\n{owner}\n{asst}\n", json!({ "type": "user", "pad": "x".repeat(pad) }))).unwrap();
         let mut v: serde_json::Value = serde_json::from_str(&status_json).unwrap();
         v["transcript_path"] = json!(f.to_string_lossy());
+        owner::test_set_window_identity(h.path(), email, uuid);
         hook_in(h.path(), &h.path().join(".claude"), &v.to_string(), now)
     }
 
@@ -521,7 +633,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let mut keys: Vec<&String> = v["a@x.test"].as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "owner", "reset_at", "week_at", "week_reset_at", "weekly_pct"]);
+        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "owner", "reset_at", "verified", "week_at", "week_reset_at", "weekly_pct"]);
         assert_eq!((v["a@x.test"]["five_reset_at"].as_str(), v["a@x.test"]["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-26T07:33:20Z")), "兩條各存自己的重置時間");
     }
 
@@ -540,13 +652,13 @@ mod tests {
         let h = tmp_home();
         assert!(feed(&h, "a@x.test", UA, "wa", NOW, 1, status(10.0, 1_792_850_400, 10.0, 1_793_000_000), NOW));
         assert!(feed(&h, "a@x.test", UA, "wa", NOW + 60_000, 2, status(50.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 60_000));
-        assert!(feed(&h, "b@x.test", "bbbbbbbb-1111-2222-3333-444444444444", "wb", NOW + 120_000, 3, status(70.0, 1_792_850_400, 10.0, 1_793_000_000), NOW + 120_000));
+        assert!(feed(&h, "b@x.test", "bbbbbbbb-1111-2222-3333-444444444444", "wb", NOW + 120_000, 3, status(70.0, 1_792_850_400, 10.0, 1_793_020_000), NOW + 120_000));   // 不同帳號的每週重置時間不一樣
         let all = load_all(h.path());
         assert_eq!(all["a@x.test"].five_hour_pct, Some(50));
         assert_eq!(all["b@x.test"].five_hour_pct, Some(30));
         for i in 0..25usize {
             let t = NOW + 200_000 + i as i64 * 1000;
-            assert!(feed(&h, &format!("u{i}@x.test"), &format!("{:08x}-0000-0000-0000-000000000000", i + 1), &format!("w{i}"), t, i, status(5.0, 1_792_850_400, 5.0, 1_793_000_000), t));
+            assert!(feed(&h, &format!("u{i}@x.test"), &format!("{:08x}-0000-0000-0000-000000000000", i + 1), &format!("w{i}"), t, i, status(5.0, 1_792_850_400, 5.0, 1_793_030_000 + i as i64 * 10_800), t));   // 每個帳號的每週重置時間都不一樣（各差 3 小時）
         }
         let all = load_all(h.path());
         assert_eq!(all.len(), 20);
@@ -581,6 +693,7 @@ mod tests {
             five_at: Some("2026-11-09T12:00:00Z".into()),
             week_at: Some("2026-11-09T11:00:00Z".into()),
             owner: true,
+            verified: false,
         }
     }
     fn names(q: &Quota) -> Vec<String> {
