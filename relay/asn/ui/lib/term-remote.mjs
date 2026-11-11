@@ -150,13 +150,14 @@ export const RemoteView = {
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
     barInline: { type: Boolean, default: true },  // true＝狀態文字在終端上方一條（手機）；false＝交給外層放到視窗最下面的狀態列（電腦版，用 status 事件傳）
+    endedNote: { type: String, default: '' },     // 電腦版：一掛上就是「已結束」、寫這句、不發起（打字中離開分頁），等本人按「重新看」才發起
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
   // started：發起成功（帶 Rust 回的資料，手機用來顯示那台的確認狀態）；ended：這次觀看結束或被收掉
   emits: ['cancel', 'status', 'started', 'ended'],
   setup(props, { emit }) {
-    const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
-    const expired = ref(false)   // 電腦版：離開分頁超過寬限而結束（狀態列要有「重新看」）
+    const host = ref(null), phase = ref(props.endedNote ? 'ended' : 'starting'), note = ref(props.endedNote), soon = ref(false)
+    const expired = ref(Boolean(props.endedNote))   // 電腦版：離開分頁而結束（狀態列要有「重新看」）
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + expired.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, restartable: expired.value } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
@@ -267,9 +268,7 @@ export const RemoteView = {
     }
     // 切回來：畫面在隱藏期間沒有版面，重畫一次並把游標那一列捲到看得到
     const refit = () => { if (term) { term.refresh?.(0, Math.max(0, (term.rows || 1) - 1)); keepCursorVisible() } }
-    // 還沒發起過就變成在畫面上（打字結束後換回只看、元件先掛在隱藏的分頁裡）：這時才發起
-    watch(() => props.active, a => { if (a && gen === 0 && alive) void start() })
-    onMounted(() => { if (props.active) void start() })
+    onMounted(() => { if (props.active && !props.endedNote) void start() })
     onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup(); if (!props.barInline) emit('status', null) })
     return { host, phase, note, soon, again: start, expire, refit, TEXT: REMOTE_TEXT }
   },

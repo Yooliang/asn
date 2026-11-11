@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { GRACE_AGAIN_LABEL, GRACE_ENDED_TEXT, TERM_GRACE_MS, createGrace } from '../ui/lib/term-grace.mjs'
+import { GRACE_AGAIN_LABEL, GRACE_ENDED_TEXT, TERM_GRACE_MS, TYPING_ENDED_TEXT, createGrace } from '../ui/lib/term-grace.mjs'
 import { remoteBarState } from '../ui/lib/term-remote.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
@@ -26,6 +26,7 @@ function fakeClock() {
 
 test('寬限是 5 分鐘，文字固定', () => {
   assert.equal(TERM_GRACE_MS, 300_000)
+  assert.match(TYPING_ENDED_TEXT, /^已結束打字/)
   assert.equal(GRACE_ENDED_TEXT, '已結束觀看（離開超過 5 分鐘）')
   assert.equal(GRACE_AGAIN_LABEL, '重新看')
 })
@@ -96,12 +97,13 @@ test('狀態列：結束的說明是 warn；離開超過寬限的那一條帶「
 test('接線：只有電腦版（viewActive 沒給）走寬限，手機照舊離開就結束', () => {
   const pane = read('../ui/lib/chatpane.mjs')
   assert.match(pane, /if \(props\.viewActive !== null\) \{ if \(!a\) remoteOn\.value = false; return \}/, '手機：離開分頁就結束觀看')
-  assert.match(pane, /if \(remoteTyping\.value\) remoteTyping\.value = false; else if \(remoteShown\.value\) graceView\.leave\(\)/, '打字中離開馬上結束打字，只看才開寬限')
+  assert.match(pane, /if \(remoteTyping\.value\) \{ typingEndedNote\.value = TYPING_ENDED_TEXT; remoteTyping\.value = false \} else if \(remoteShown\.value\) graceView\.leave\(\)/, '打字中離開馬上結束打字並留「已結束打字」，只看才開寬限')
+  assert.match(pane, /:ended-note="typingEndedNote"/, '切回來停在已結束，不自動重新發起')
   assert.match(pane, /graceView\.back\(\) === 'kept'\) nextTick\(\(\) => rvEl\.value\?\.refit\?\.\(\)\)/, '寬限內切回來重畫一次')
   assert.match(pane, /<remote-view v-if="remoteShown && !typingShown" ref="rvEl"/)
   assert.match(pane, /<term-view v-if="termShown"[^>]*:keep="viewActive === null"/, '本機終端只有電腦版保留')
   assert.match(pane, /remoteBar\.restartable[^>]*>[\s\S]*?GRACE_AGAIN_LABEL/, '狀態列有「重新看」')
-  assert.match(pane, /watch\(remoteShown, on => \{ if \(!on\) \{ remoteBar\.value = null; graceView\.cancel\(\) \} \}\)/, '觀看收掉時狀態列與計時一起清')
+  assert.match(pane, /watch\(remoteShown, on => \{ if \(!on\) \{ remoteBar\.value = null; typingEndedNote\.value = ''; graceView\.cancel\(\) \} \}\)/, '觀看收掉時狀態列與計時一起清')
 })
 
 test('接線：RemoteView 到期當下 stop 並結束，重新看走原本的發起', () => {
@@ -110,7 +112,8 @@ test('接線：RemoteView 到期當下 stop 並結束，重新看走原本的發
   assert.match(src, /restartable: expired\.value/, '狀態列拿到可重新開始的旗標')
   assert.match(src, /expired\.value = false\s*\n?\s*try \{/, '重新開始時清掉旗標')
   assert.match(src, /return \{ host, phase, note, soon, again: start, expire, refit,/)
-  assert.match(src, /watch\(\(\) => props\.active, a => \{ if \(a && gen === 0 && alive\) void start\(\) \}\)/, '還沒發起過才在變成可見時發起')
+  assert.match(src, /onMounted\(\(\) => \{ if \(props\.active && !props\.endedNote\) void start\(\) \}\)/, '帶著已結束說明掛上時不發起')
+  assert.doesNotMatch(src, /gen === 0 && alive/, '不再在變成可見時自動發起')
 })
 
 test('接線：TermView 的 keep 不因分頁離開而停止或關閉，切回來重畫', () => {

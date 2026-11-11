@@ -5,6 +5,8 @@
 export const TERM_GRACE_MS = 5 * 60 * 1000
 /** 寬限到了、觀看已結束時，狀態列的字 */
 export const GRACE_ENDED_TEXT = '已結束觀看（離開超過 5 分鐘）'
+/** 打字中離開分頁、打字馬上結束時，切回來狀態列的字 */
+export const TYPING_ENDED_TEXT = '已結束打字（離開了這個分頁）'
 /** 狀態列上，結束後重新開始的按鈕字 */
 export const GRACE_AGAIN_LABEL = '重新看'
 

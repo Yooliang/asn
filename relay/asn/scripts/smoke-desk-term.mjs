@@ -118,6 +118,16 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
   if (kind === 'expired' && calls('term_view_remote_stop') !== stops + 1) return { ok: false, why: '離開超過寬限，到期當下就該呼叫 stop（不能等切回來）：stop 次數 ' + stops + ' → ' + calls('term_view_remote_stop') };
   if (kind === 'typeaway' && calls('term_view_remote_stop') !== stops + 1) return { ok: false, why: '打字中離開分頁，打字通道要馬上結束：stop 次數 ' + stops + ' → ' + calls('term_view_remote_stop') };
   tabs()[0].click();
+  if (kind === 'typeaway') {
+    if (!(await wait(() => barOf().includes('已結束打字')))) return { ok: false, why: '切回來狀態列沒有「已結束打字」：' + barOf().slice(0, 60) };
+    const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
+    if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
+    await sleep(800);
+    if (calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來自動重新發起了（要等本人按「重新看」）：start 次數 ' + starts + ' → ' + calls('term_view_remote_start') };
+    if (barOf().includes('打字：') || vis('.term-remote-input').length) return { ok: false, why: '切回來還殘留打字：' + barOf().slice(0, 60) };
+    again.click();
+    if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有發起' };
+  }
   if (kind === 'expired') {
     if (!(await wait(() => barOf().includes('已結束觀看（離開超過 5 分鐘）')))) return { ok: false, why: '切回來狀態列沒有「已結束觀看（離開超過 5 分鐘）」：' + barOf().slice(0, 60) };
     const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
@@ -130,6 +140,5 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
   if (!sc || sc.clientWidth < 50) return { ok: false, why: '切回來後終端畫面寬度是 0（沒有重新排版）' };
   if (!(await wait(() => barOf().includes('正在看')))) return { ok: false, why: '切回來後狀態列沒有「正在看」：' + barOf().slice(0, 60) };
   if (kind === 'switchback' && calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來又重新請求了一次（start 次數 ' + starts + ' → ' + calls('term_view_remote_start') + '）' };
-  if (kind === 'typeaway' && (barOf().includes('打字：') || vis('.term-remote-input').length)) return { ok: false, why: '切回來還殘留打字：' + barOf().slice(0, 60) };
   return { ok: true, why: '' };
 })()`
