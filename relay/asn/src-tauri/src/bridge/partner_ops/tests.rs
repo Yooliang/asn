@@ -104,9 +104,17 @@ struct FakeEnv {
     pi_launched: Mutex<Vec<(String, String, String)>>,
     pi_launch_fail: AtomicBool,
     pi_launch_registers: AtomicBool,
+    /// 「正在開」登記（測試自己一份，不碰全程序共用的）
+    opening: Mutex<crate::launch::opening::Opening>,
 }
 
 impl OpsEnv for FakeEnv {
+    fn claim_opening(&self, session: &str, name: &str) -> bool {
+        self.opening.lock().unwrap().claim(session, name, NOW)
+    }
+    fn release_opening(&self, session: &str, name: &str) {
+        self.opening.lock().unwrap().release(session, name);
+    }
     fn os(&self) -> &dyn Os {
         &*self.os
     }
@@ -329,6 +337,7 @@ fn rig(o: Opt) -> Rig {
         pi_launched: Mutex::new(vec![]),
         pi_launch_fail: AtomicBool::new(false),
         pi_launch_registers: AtomicBool::new(true),
+        opening: Mutex::new(Default::default()),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -1142,6 +1151,33 @@ fn 喚醒_成功_原資料夾用第一個_claude_profile_帶_resume_與_n_乾淨
     r.ops.record(&mk_op("resume", json!({ "name": "離線夥伴" })), &ok("視窗已喚醒", None));
     assert!(r.log.recent().join("\n").contains("op=resume"));
     assert_eq!(mk_op("resume", json!({})).what(), "喚醒視窗");
+}
+
+#[test]
+fn 喚醒守門_別條路正在開同一位_不開_解除後才開得了() {
+    let r = resume_rig(Opt::default());
+    // 開機接回正在開這一位（已登記）：遠端喚醒不能再開第二個，也不能呼叫開視窗
+    assert!(r.env.claim_opening(SID, "離線夥伴"));
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("正在開啟中"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不能呼叫開視窗");
+    // 另一位不受影響；解除登記之後同一位又開得了
+    r.env.release_opening(SID, "離線夥伴");
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 喚醒_開不起來或一直沒出現_解除登記_本人之後再喚醒不會被擋() {
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "unconfirmed");
+    assert!(r.env.claim_opening(SID, "離線夥伴"), "沒上線就解除了登記，這裡才登記得到");
+    r.env.release_opening(SID, "離線夥伴");
+    *r.env.appear.lock().unwrap() = Some((501, SID.into()));
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "ok");
 }
 
 #[test]
