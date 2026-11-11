@@ -311,10 +311,10 @@ test('電腦設定頁：「帳號」頁有「我的帳號」，按廠牌列出�
   const none = await render({ devices: [], accounts: ACCT, myAccounts: null })
   assert.ok(!none.includes('dv-my'))
   assert.ok(none.includes('現在讀不到帳號列表'), '沒有列表時寫提示，不是一整頁空白')
-  // 已重置的窗寫「可能已恢復」、不出現舊百分比（#527 審查、#374）
+  // 已重置的窗不列額度條、不出現舊百分比，也不下「可能已恢復」之類的結論（#527 審查、#374）
   const past = rosterView(roster([entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - H) }), win('weekly', 60, 2 * D)] })]), { nodeLabel, now: NOW })
   const h2 = await render({ devices: [], accounts: ACCT, myAccounts: past })
-  assert.ok(h2.includes('可能已恢復') && h2.includes('剩 60%') && !h2.includes('剩 3%'))
+  assert.ok(!h2.includes('可能已恢復') && h2.includes('剩 60%') && !h2.includes('剩 3%'))
   assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'))
 })
 

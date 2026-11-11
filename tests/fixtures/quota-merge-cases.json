@@ -8,6 +8,7 @@
     "照收的情況包括：同一期剩餘回升、重置時間往前或往後、新舊重置時間差不是 7 天倍數、記著的那期還沒過卻來了更晚的重置時間。",
     "window_pair_cases：一次讀取同時帶 5 小時與每週兩條窗，各條各自判斷——一條被擋不准連帶另一條不存。old／new 各有 five_hour、weekly；expect 是每條收不收與原因。同一次讀取兩條窗共用一個資料時間，所以 new 的兩個 read_at 要一樣；兩條被擋與否的差別來自記著的資料時間各條不同、或重置時間。",
     "電腦端驗合併後的紀錄（被擋的那條維持舊值與舊的讀取時間、收下的那條用新值與新的讀取時間），後台每條各呼叫 decide 並端到端跑一次回報。",
+    "missing_window_cases（#1321）：這次讀數完全沒有某一窗（new_has 只列有帶的窗），而存著的那一窗已過重置時間（resets_at ≤ now，剛好等於也算）就拿掉；還沒過、或存著的那一窗沒有 resets_at 就留著；有帶的窗不拿掉。expect_present 是處理後剩下哪些窗。電腦端驗 without_missing_expired，後台端到端跑一次回報。",
     "台灣時間對照：2026-11-13T23:42:55Z＝11/14 07:42。"
   ],
   "constants": {
@@ -635,6 +636,127 @@
           "reason": null
         }
       }
+    }
+  ],
+  "missing_window_cases": [
+    {
+      "id": "m1",
+      "note": "只缺一窗（這次沒有 5 小時），但存著的 5 小時還沒過重置時間：保留",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": "2026-11-09T14:00:00Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        }
+      },
+      "new_has": [
+        "weekly"
+      ],
+      "expect_present": [
+        "five_hour",
+        "weekly"
+      ]
+    },
+    {
+      "id": "m2",
+      "note": "只缺一窗，而且存著的 5 小時已過重置時間（最大方案沒有 5 小時限制）：拿掉",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": "2026-11-09T10:00:00Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        }
+      },
+      "new_has": [
+        "weekly"
+      ],
+      "expect_present": [
+        "weekly"
+      ]
+    },
+    {
+      "id": "m3",
+      "note": "兩窗都在：照舊（即使存著的 5 小時重置時間已過，這次有帶就更新，不拿掉）",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": "2026-11-09T10:00:00Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        }
+      },
+      "new_has": [
+        "five_hour",
+        "weekly"
+      ],
+      "expect_present": [
+        "five_hour",
+        "weekly"
+      ]
+    },
+    {
+      "id": "m4",
+      "note": "反過來：缺每週、存著的每週已過重置時間：拿掉；5 小時還在",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": "2026-11-09T14:00:00Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-09T09:00:00Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        }
+      },
+      "new_has": [
+        "five_hour"
+      ],
+      "expect_present": [
+        "five_hour"
+      ]
+    },
+    {
+      "id": "m5",
+      "note": "存著的 5 小時沒有重置時間（無從判斷）：保留",
+      "now": "2026-11-09T12:00:00Z",
+      "old": {
+        "five_hour": {
+          "left_pct": 50,
+          "resets_at": null,
+          "read_at": "2026-11-09T11:00:00Z"
+        },
+        "weekly": {
+          "left_pct": 10,
+          "resets_at": "2026-11-13T23:42:55Z",
+          "read_at": "2026-11-09T11:00:00Z"
+        }
+      },
+      "new_has": [
+        "weekly"
+      ],
+      "expect_present": [
+        "five_hour",
+        "weekly"
+      ]
     }
   ]
 }

@@ -82,7 +82,7 @@ function cleanWindows(entry) {
  *     兩窗讀取時間不同時，meta 標**較舊**的那個（「2 天前・工作機」），stale 也看較舊的——舊數字不能看起來像新的（#527 審查）
  *   listMeta：「我的帳號」區那一行後面的括號：有窗時只寫哪台讀的（時間各窗自己標了，最多兩台）；沒有任何窗時同 meta（最後一次回報）
  *   目前沒有任何一台還在回報的，時間寫成「3 天前讀的」
- *   bars（#374）：一行版那幾窗的額度條，每條自己寫重置時間（已過寫「可能已恢復」、不寫舊百分比）；oldText：舊資料寫「資料較舊」
+ *   bars（#374）：一行版那幾窗的額度條，每條自己寫重置時間（重置時間已過的那一窗不列）；oldText：舊資料寫「資料較舊」
  */
 export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
   const wins = cleanWindows(entry)
@@ -114,7 +114,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   const oldestOf = list => list.reduce((o, w) => (!o || w.read < o.read ? w : o), null)
   const out = wins.filter(w => w.pct === 0 && w.reset != null && w.reset > now).sort((a, b) => b.reset - a.reset)[0]
   const resetText = out ? resetIn(new Date(out.reset).toISOString(), now, `${windowLabel(out.name)}額度`) : ''
-  const bars = inLine.map(w => quotaBar(w.name, windowLabel(w.name), w.pct, w.reset != null ? new Date(w.reset).toISOString() : undefined, now))
+  const bars = inLine.filter(w => !expired(w)).map(w => quotaBar(w.name, windowLabel(w.name), w.pct, w.reset != null ? new Date(w.reset).toISOString() : undefined, now))
   if (!live.length) {
     // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
     const o = oldestOf(inLine)

@@ -43,14 +43,14 @@ test('超過 6 小時：標灰並寫「資料較舊」，仍保留當時的數�
   assert.equal(quotaView({ five_hour_pct: 62, at: iso(NOW - STALE_MS + MIN) }, NOW).stale, false, '剛好未滿 6 小時不算舊')
 })
 
-test('額度用完：標明何時重置；重置時間已過就說可能已恢復，不再宣稱用完', () => {
+test('額度用完：標明何時重置；重置時間已過就不再宣稱用完，也不下結論', () => {
   const out = quotaView({ five_hour_pct: 0, weekly_pct: 70, reset_at: iso(NOW + 90 * MIN), at: iso(NOW - MIN) }, NOW)
   assert.equal(out.exhausted, true)
   assert.match(out.text, /5 小時剩 0%/)
   assert.match(out.resetText, /^\d{2}:\d{2} 重置$|^\d+\/\d+ \d{2}:\d{2} 重置$/)
   const past = quotaView({ five_hour_pct: 0, reset_at: iso(NOW - MIN), at: iso(NOW - 30 * MIN) }, NOW)
   assert.equal(past.exhausted, false)
-  assert.match(past.resetText, /重置時間已過/)
+  assert.equal(past.resetText, '', '已過：不寫「可能已恢復」之類的結論')
   assert.equal(quotaView({ five_hour_pct: 0, at: iso(NOW) }, NOW).resetText, '重置時間未知')
 })
 
@@ -128,4 +128,24 @@ test('舊版 Claude Code（沒帶帳號身分）：額度欄寫固定的一句�
   assert.deepEqual(quotaOf({ legacy: true, accessToken: 'SECRET' }), { legacy: true })
   const known = quotaView({ legacy: true, weekly_pct: 60, at: '2026-11-10T00:00:00Z' }, Date.parse('2026-11-10T00:05:00Z'))
   assert.equal(known.known, true, '已經有數字就不寫提示')
+})
+
+test('各條自己的重置時間已過：那一窗當作沒有資料，不列、不寫舊百分比；還沒過的那一窗照舊', () => {
+  const v = quotaView({ five_hour_pct: 3, weekly_pct: 60, five_reset_at: iso(NOW - MIN), week_reset_at: iso(NOW + 2 * 24 * 60 * MIN), at: iso(NOW - MIN) }, NOW)
+  assert.equal(v.known, true)
+  assert.equal(v.text, '每週剩 60%', '5 小時那窗不列')
+  assert.deepEqual(v.bars.map(b => b.key), ['week'])
+  assert.ok(!/3%/.test(v.text))
+  // 兩窗都過了：額度未知，不下結論
+  const both = quotaView({ five_hour_pct: 3, weekly_pct: 60, five_reset_at: iso(NOW - MIN), week_reset_at: iso(NOW - MIN), at: iso(NOW - MIN) }, NOW)
+  assert.equal(both.known, false)
+  assert.equal(both.text, '額度未知')
+  // 兩窗都在、都沒過：照舊
+  const ok = quotaView({ five_hour_pct: 40, weekly_pct: 60, five_reset_at: iso(NOW + 60 * MIN), week_reset_at: iso(NOW + 2 * 24 * 60 * MIN), at: iso(NOW - MIN) }, NOW)
+  assert.equal(ok.text, '5 小時剩 40%、每週剩 60%')
+  assert.deepEqual(ok.bars.map(b => b.key), ['five', 'week'])
+  // 沒有 5 小時（方案沒有這個限制）：整列不顯示，只有每週
+  const noFive = quotaView({ weekly_pct: 60, week_reset_at: iso(NOW + 2 * 24 * 60 * MIN), at: iso(NOW - MIN) }, NOW)
+  assert.equal(noFive.text, '每週剩 60%')
+  assert.deepEqual(noFive.bars.map(b => b.key), ['week'])
 })

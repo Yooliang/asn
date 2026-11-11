@@ -135,6 +135,30 @@ pub struct Merged {
     pub took_week: bool,
 }
 
+/// 這次讀數完全沒有某一窗、而存著的那一窗重置時間已經過了：那一窗已經沒有了（例如方案拿掉 5 小時限制，rate_limits 裡不再有 five_hour），
+/// 留著只會一直掛著一個過期的舊數字。回拿掉那一窗之後的紀錄（那一窗的剩餘 %、重置時間、資料時間都清掉，舊的單一 `reset_at` 依剩下的窗重算）；
+/// 沒有要拿掉的回 None。還沒過重置時間的（只是這次剛好沒帶）、存著的那一窗沒有重置時間的（無從判斷）都留著。重置時間剛好等於現在算已過。
+/// Claude 與 Gemini 都用這個；呼叫端要先套用、再用拿掉之後的紀錄去合併新讀數。
+pub fn without_missing_expired(old: &Quota, p: &Parsed, now_ms: i64) -> Option<Quota> {
+    let (r5, rw) = stored_resets(old);
+    let drop5 = p.five_hour_pct.is_none() && old.five_hour_pct.is_some() && r5.is_some_and(|r| r <= now_ms);
+    let dropw = p.weekly_pct.is_none() && old.weekly_pct.is_some() && rw.is_some_and(|r| r <= now_ms);
+    if !drop5 && !dropw {
+        return None;
+    }
+    let mut q = old.clone();
+    if drop5 {
+        (q.five_hour_pct, q.five_reset_at, q.five_at) = (None, None, None);
+    }
+    if dropw {
+        (q.weekly_pct, q.week_reset_at, q.week_at) = (None, None, None);
+    }
+    let five = q.five_hour_pct.map(|v| (v, r5));
+    let week = q.weekly_pct.map(|v| (v, rw));
+    q.reset_at = pick_reset(five, week).map(iso_secs);
+    Some(q)
+}
+
 /// 同 [`merge`]，另帶這次的資料時間 `read_ms`（Claude：對話紀錄裡最後一筆 assistant 回應的時間；兩條都用它）
 pub fn merge_full(old: Option<&Quota>, p: &Parsed, read_ms: i64, now_ms: i64) -> Merged {
     let (old_five_r, old_week_r) = old.map(stored_resets).unwrap_or((None, None));

@@ -16,19 +16,18 @@ export function quotaOf(a) {
 }
 
 // ---- 一條額度自己的重置時間（#374）----
-export const RESET_PASSED = '可能已恢復'   // 重置時間已經過了：記著的百分比不代表現在
 export const OLD_TEXT = '資料較舊'
 export const LEGACY_TEXT = '升級 Claude Code 後才會顯示額度'   // 舊版 Claude Code 的視窗沒帶帳號身分，額度不收，畫面提示升級
 export const PLAN_UNKNOWN = '方案未知'   // 帳號卡第二行：沒有回報方案時
 const WEEKDAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六']
 const two = n => String(n).padStart(2, '0')
 
-/** 重置時間 → 「約 N 分鐘後重置」「約 N 小時後重置」（一天內）、「週六 14:00 重置」（超過一天，本地時區）、已過「可能已恢復」；沒有或壞掉回空字串 */
+/** 重置時間 → 「約 N 分鐘後重置」「約 N 小時後重置」（一天內）、「週六 14:00 重置」（超過一天，本地時區）；已過、沒有或壞掉回空字串 */
 export function resetWhen(resetAt, now = Date.now()) {
   const t = Date.parse(typeof resetAt === 'string' ? resetAt : '')
   if (!Number.isFinite(t)) return ''
   const ms = t - now
-  if (ms <= 0) return RESET_PASSED
+  if (ms <= 0) return ''   // 已過：不下結論（不寫「已恢復」之類），那一窗沒有可信的數字
   if (ms < 3600_000) return `約 ${Math.min(59, Math.max(1, Math.round(ms / 60_000)))} 分鐘後重置`
   if (ms <= 24 * 3600_000) return `約 ${Math.round(ms / 3600_000)} 小時後重置`
   const d = new Date(t)
@@ -38,7 +37,8 @@ export function resetWhen(resetAt, now = Date.now()) {
 /** 一條額度條：{ key, label, pct, low, reset, expired }。reset＝這條自己的重置時間（空＝不寫）；expired＝重置時間已過（畫面不寫舊百分比） */
 export function quotaBar(key, label, p, resetAt, now = Date.now()) {
   const reset = resetWhen(resetAt, now)
-  return { key, label, pct: p, low: p <= LOW_PCT, reset, expired: reset === RESET_PASSED }
+  const t = Date.parse(typeof resetAt === 'string' ? resetAt : '')
+  return { key, label, pct: p, low: p <= LOW_PCT, reset, expired: Number.isFinite(t) && t <= now }
 }
 
 /** 方案 → 給人看的名字：claude_max「Max」、pro「Pro」、claude_max_20x「Max 20x」；有空白或大寫的（例如「Google AI Pro」）照舊 */
@@ -57,6 +57,7 @@ function barsOf(a, now) {
   return [['five', '5 小時', pct(a?.five_hour_pct), a?.five_reset_at], ['week', '每週', pct(a?.weekly_pct), a?.week_reset_at]]
     .filter(([, , p]) => p != null)
     .map(([key, label, p, r]) => quotaBar(key, label, p, split ? r : undefined, now))
+    .filter(b => !b.expired)   // 重置時間已過的那一窗沒有可信的數字，整條不列
 }
 
 function clock(ms, now) {
@@ -66,7 +67,13 @@ function clock(ms, now) {
 }
 
 export function quotaView(a, now = Date.now()) {
-  const five = pct(a?.five_hour_pct), week = pct(a?.weekly_pct)
+  let five = pct(a?.five_hour_pct), week = pct(a?.weekly_pct)
+  // 各條自己的重置時間已過：那一窗沒有可信的數字，當作沒有（不寫舊百分比，也不下結論）
+  if (hasSplit(a)) {
+    const past = r => Number.isFinite(Date.parse(r ?? '')) && Date.parse(r) <= now
+    if (past(a?.five_reset_at)) five = null
+    if (past(a?.week_reset_at)) week = null
+  }
   const at = Date.parse(a?.at ?? '')
   if ((five == null && week == null) || !Number.isFinite(at)) {
     return { known: false, text: a?.legacy === true ? LEGACY_TEXT : '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false }
@@ -80,7 +87,7 @@ export function quotaView(a, now = Date.now()) {
   if (zero) {
     if (!Number.isFinite(reset)) resetText = '重置時間未知'
     else if (reset > now) { exhausted = true; resetText = `${clock(reset, now)} 重置` }
-    else resetText = '重置時間已過，可能已恢復'
+    else resetText = ''   // 重置時間已過：不下結論
   }
   const stale = now - at > STALE_MS
   const ago = agoText(a.at, now)

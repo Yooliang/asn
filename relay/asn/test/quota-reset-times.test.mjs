@@ -1,9 +1,9 @@
 // #374：兩條額度各自的重置時間。一天內寫「約 N 小時後重置」（不到 1 小時寫分鐘）；超過一天寫「週六 14:00 重置」；
-// 已經過了寫「可能已恢復」；沒有新欄位（舊版電腦）退回舊的單一 reset_at、照舊顯示。電腦設定頁、設備卡、我的帳號、手機同一套。
+// 已經過了的那條不列；沒有新欄位（舊版電腦）退回舊的單一 reset_at、照舊顯示。電腦設定頁、設備卡、我的帳號、手機同一套。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { RESET_PASSED, planLabel, quotaBars, quotaOf, quotaView, resetWhen } from '../ui/lib/account-quota.mjs'
+import { planLabel, quotaBars, quotaOf, quotaView, resetWhen } from '../ui/lib/account-quota.mjs'
 import { rosterAccountsOn, rosterQuota, rosterView } from '../ui/lib/account-roster.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -12,7 +12,7 @@ const H = 3600_000, MIN = 60_000, D = 24 * H
 const iso = ms => new Date(ms).toISOString()
 const at = iso(NOW - 10 * MIN)
 
-test('重置時間的寫法：分鐘、小時、超過一天寫星期幾與時刻、已過寫可能已恢復、沒有就空', () => {
+test('重置時間的寫法：分鐘、小時、超過一天寫星期幾與時刻；已過、沒有就空（不下結論）', () => {
   assert.equal(resetWhen(iso(NOW + 20 * MIN), NOW), '約 20 分鐘後重置')
   assert.equal(resetWhen(iso(NOW + 30 * 1000), NOW), '約 1 分鐘後重置')
   assert.equal(resetWhen(iso(NOW + 59.9 * MIN), NOW), '約 59 分鐘後重置')
@@ -20,18 +20,17 @@ test('重置時間的寫法：分鐘、小時、超過一天寫星期幾與時�
   assert.equal(resetWhen(iso(NOW + 23 * H), NOW), '約 23 小時後重置')
   assert.equal(resetWhen(iso(new Date(2026, 9, 31, 14, 0).getTime()), NOW), '週六 14:00 重置')
   assert.equal(resetWhen(iso(new Date(2026, 10, 2, 9, 5).getTime()), NOW), '週一 09:05 重置')
-  assert.equal(resetWhen(iso(NOW - MIN), NOW), RESET_PASSED)
-  assert.equal(RESET_PASSED, '可能已恢復')
+  assert.equal(resetWhen(iso(NOW - MIN), NOW), '', '已過：不寫結論')
   for (const v of [undefined, null, '', '壞掉']) assert.equal(resetWhen(v, NOW), '')
-  for (const s of ['約 20 分鐘後重置', '週六 14:00 重置', RESET_PASSED]) assert.ok(Array.from(s).length <= 20)
+  for (const s of ['約 20 分鐘後重置', '週六 14:00 重置']) assert.ok(Array.from(s).length <= 20)
 })
 
-test('本機額度條：有兩條各自的重置時間就各寫各的，不再另寫一句；已過的那條寫可能已恢復、不寫舊百分比', () => {
+test('本機額度條：有兩條各自的重置時間就各寫各的，不再另寫一句；已過的那條整條不列', () => {
   const v = quotaBars({ five_hour_pct: 64, weekly_pct: 12, reset_at: iso(NOW + 3 * H), five_reset_at: iso(NOW + 3 * H), week_reset_at: iso(new Date(2026, 9, 31, 14, 0).getTime()), at }, { hookOn: true, now: NOW })
   assert.deepEqual(v.bars.map(b => [b.key, b.pct, b.reset, b.expired]), [['five', 64, '約 3 小時後重置', false], ['week', 12, '週六 14:00 重置', false]])
   assert.equal(v.reset, '', '各條自己寫了，整段不再另寫')
   const old = quotaBars({ five_hour_pct: 0, weekly_pct: 50, five_reset_at: iso(NOW - H), week_reset_at: iso(NOW + 2 * D), at: iso(NOW - 8 * H) }, { now: NOW })
-  assert.deepEqual(old.bars.map(b => [b.key, b.reset, b.expired]), [['five', RESET_PASSED, true], ['week', '週五 10:00 重置', false]])
+  assert.deepEqual(old.bars.map(b => [b.key, b.reset, b.expired]), [['week', '週五 10:00 重置', false]], '已過的 5 小時整條不列')
   assert.equal(old.stale, true)
 })
 
@@ -61,12 +60,12 @@ test('別台設備卡（那台自己回報的）：有新欄位就帶兩條；�
 const entry = (windows, extra = {}) => ({ vendor: 'claude', account: 'a@x.test', plan: 'claude_max', windows, seen_at: at, seen_node: 'W', nodes: [{ node: 'W', current: true }], ...extra })
 const w = (name, left_pct, resets_at, read_at = at) => ({ name, left_pct, resets_at, read_at, read_node: 'W' })
 
-test('帳號列表：每條自己寫重置時間；已過的寫可能已恢復；舊資料標「資料較舊」', () => {
+test('帳號列表：每條自己寫重置時間；已過的那條不列；舊資料標「資料較舊」', () => {
   const q = rosterQuota(entry([w('five_hour', 40, iso(NOW + 20 * MIN)), w('weekly', 72, iso(new Date(2026, 9, 31, 14, 0).getTime()))]), { now: NOW })
   assert.deepEqual(q.bars.map(b => [b.label, b.pct, b.reset, b.expired]), [['5 小時', 40, '約 20 分鐘後重置', false], ['每週', 72, '週六 14:00 重置', false]])
   assert.equal(q.oldText, '')
   const old = rosterQuota(entry([w('five_hour', 3, iso(NOW - H), iso(NOW - 9 * H)), w('weekly', 72, iso(NOW + 2 * D), iso(NOW - 9 * H))]), { now: NOW })
-  assert.deepEqual(old.bars.map(b => [b.label, b.reset, b.expired]), [['5 小時', RESET_PASSED, true], ['每週', '週五 10:00 重置', false]])
+  assert.deepEqual(old.bars.map(b => [b.label, b.reset, b.expired]), [['每週', '週五 10:00 重置', false]])
   assert.equal(old.stale, true)
   assert.equal(old.oldText, '資料較舊')
   assert.deepEqual(rosterQuota(entry([]), { now: NOW }).bars, [])

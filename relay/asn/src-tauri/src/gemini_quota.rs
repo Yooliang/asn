@@ -188,7 +188,10 @@ pub fn record(home: &Path, r: &Reading, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
     let old = all.get(&r.email);
     // Gemini 的數字是讀取當下的即時值，資料時間就是現在；帳號是 agy 自己給的 email（#1266）
-    let (merged, skipped) = merge::merge(old.map(|e| &e.quota), &r.parsed, now_ms);
+    // 這次讀數完全沒有某一窗、存著的那一窗也已過重置時間：把那一窗拿掉再合併（#1321）
+    let trimmed = old.and_then(|e| merge::without_missing_expired(&e.quota, &r.parsed, now_ms));
+    let m = merge::merge_full(trimmed.as_ref().or(old.map(|e| &e.quota)), &r.parsed, now_ms, now_ms);
+    let (merged, skipped) = (m.quota.or(trimmed), m.skipped);
     log_once(home, &r.dropped, &merge::skipped_lines(&skipped, now_ms), now_ms);
     let plan = if r.plan.is_empty() { old.map(|e| e.plan.clone()).unwrap_or_default() } else { r.plan.clone() };
     let new = match (merged, old) {

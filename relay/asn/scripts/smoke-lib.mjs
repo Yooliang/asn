@@ -771,7 +771,7 @@ export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
 const RESET_WEEK_TEXT = resetWhen(resetRoster().accounts[0].windows[1].resets_at, SMOKE_NOW)
 export const RESET_PROBES = {
   resets: { quota: '.dv-my', want: { claude: ['Claude', '5 小時', '剩 40%', '約 3 小時後重置', '每週', '剩 72%', RESET_WEEK_TEXT] } },
-  passed: { quota: '.dv-my', want: { claude: ['Claude', '5 小時', '可能已恢復', '每週', '剩 72%'] }, absent: { claude: ['剩 40%'] } },
+  passed: { quota: '.dv-my', want: { claude: ['Claude', '每週', '剩 72%'] }, absent: { claude: ['剩 40%'] } },
 }
 // 手機三行卡片：Claude（claude_max、兩條各有重置時間、使用中）＋ Gemini 一張舊資料（9 小時前讀的）＋ Codex 沒有額度
 function cardsRoster(now = SMOKE_NOW) {
@@ -1346,7 +1346,7 @@ export const SCENARIOS = [
   { name: 'list-roster-gemini', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'gemini' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.gemini },
   { name: 'list-roster-gemini-empty', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'geminiEmpty' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.geminiEmpty },
   { name: 'm-roster-gemini', page: 'm.html', state: { signedIn: true, mroster: true }, ready: '#app.m .m-row-btn', probe: QUOTA_PROBES.mobile },
-  // 兩條額度各自的重置時間（#374）：電腦「我的帳號」各條自己寫；已過的寫「可能已恢復」、不寫舊百分比；手機三行卡片（存截圖）
+  // 兩條額度各自的重置時間（#374）：電腦「我的帳號」各條自己寫；已過的那條不列、不寫舊百分比；手機三行卡片（存截圖）
   { name: 'list-roster-resets', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.resets },
   { name: 'list-roster-reset-passed', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resetPassed' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.passed },
   { name: 'm-acct-cards', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-cards.png' },
