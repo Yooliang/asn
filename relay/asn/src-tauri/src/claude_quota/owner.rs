@@ -314,20 +314,6 @@ pub(crate) fn test_set_window_identity(home: &Path, email: &str, uuid: &str) {
     std::fs::write(home.join(".claude").join(".claude.json"), serde_json::json!({ "oauthAccount": oauth, "pad": "x".repeat(pad) }).to_string()).unwrap();
 }
 
-/// 測試用：同上，email 從這台的帳號庫（`~/.asn/claude-accounts/*/account.json`）找同一個 uuid 的那份；找不到就用 `<uuid 前 8 碼>@x.test`。
-/// 只給「帳號庫與視窗登入一致」的既有測試用；要測不一致的情境用 [`test_set_window_identity`] 明寫。
-#[cfg(test)]
-pub(crate) fn test_set_window_account(home: &Path, uuid: &str) {
-    let found = std::fs::read_dir(home.join(".asn").join("claude-accounts")).ok().and_then(|rd| {
-        rd.flatten().find_map(|e| {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("account.json")).ok()?).ok()?;
-            (v.get("accountUuid")?.as_str()? == uuid).then(|| v.get("emailAddress")?.as_str().map(String::from)).flatten()
-        })
-    });
-    let email = found.unwrap_or_else(|| format!("{}@x.test", &uuid[..8]));
-    test_set_window_identity(home, &email, uuid);
-}
-
 /// log 裡用的短代號：sha256 的前 6 個十六進位字元（原值不寫進 log）
 pub fn short_hash(s: &str) -> String {
     use sha2::{Digest, Sha256};

@@ -591,7 +591,7 @@ mod tests {
         std::fs::write(&f, format!("{}\n{owner}\n{asst}\n", json!({ "type": "user", "pad": "x".repeat(pad) }))).unwrap();
         let mut v: serde_json::Value = serde_json::from_str(&status_json).unwrap();
         v["transcript_path"] = json!(f.to_string_lossy());
-        owner::test_set_window_account(h.path(), uuid);
+        owner::test_set_window_identity(h.path(), email, uuid);
         hook_in(h.path(), &h.path().join(".claude"), &v.to_string(), now)
     }
 

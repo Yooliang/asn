@@ -413,16 +413,15 @@ pub fn current_identity(home: &Path) -> Option<(String, String)> {
 }
 
 /// 一份 `.claude.json` 文字裡 oauthAccount 的 (accountUuid, 正規化 email)：只取這兩個欄位，兩個都要有才算；沒登入、壞掉、缺 email 都是 None。
-/// 兩個值來自同一份文字（同一份 oauthAccount 快照）。
+/// 兩個值來自同一份文字（同一份 oauthAccount）。額度歸屬用它（#1185 之後不再拿 uuid 去查帳號庫）。
 pub fn identity_in_text(text: &str) -> Option<(String, String)> {
     let frag = extract_fragment(text).ok().flatten()?;
     Some((uuid_of_fragment(&frag)?, email_of_fragment(&frag)?))
 }
 
-/// 帳號庫有沒有存錯的警示（只警示，不影響額度記到哪個帳號：額度歸屬看視窗自己的 oauthAccount，不查帳號庫）。
-/// 給「現在這個視窗登入的」(email, uuid)，數帳號庫裡有幾個資料夾「uuid 一樣但 email 不一樣」或「email 一樣但 uuid 不一樣」
-/// （同一個 uuid 出現在多個資料夾，除了正確的那個以外的都算）。沒有可疑的回 None。
-/// 只讀每個資料夾的 account.json（只取 accountUuid 與 emailAddress）。
+/// 帳號庫有沒有存錯的警示（唯讀檢查，只給 log 用；不影響額度記到哪個帳號、也不影響切換與帳號庫的寫入）。
+/// 給「現在這個視窗登入的」(email, uuid)，數帳號庫（`claude-accounts`）裡有幾個資料夾「uuid 一樣但 email 不一樣」或「email 一樣但 uuid 不一樣」
+/// （同一個 uuid 出現在多個資料夾，除了正確的那個以外的都算）。沒有可疑的回 None。只讀每個資料夾的 account.json（只取 accountUuid 與 emailAddress）。
 pub fn library_suspect(home: &Path, email: &str, uuid: &str) -> Option<usize> {
     let rd = std::fs::read_dir(store_root(home)).ok()?;
     let mut n = 0usize;
@@ -434,11 +433,6 @@ pub fn library_suspect(home: &Path, email: &str, uuid: &str) -> Option<usize> {
         }
     }
     (n > 0).then_some(n)
-}
-
-/// 帳號庫寫入前的快照檢查：uuid 與 email 必須來自同一份 oauthAccount（同一段文字），缺一個就不寫
-fn snapshot_identity(frag: &str) -> Option<(String, String)> {
-    Some((uuid_of_fragment(frag)?, email_of_fragment(frag)?))
 }
 
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None
@@ -491,23 +485,12 @@ fn read_cred(home: &Path) -> R<Option<Vec<u8>>> {
 pub fn save_current(home: &Path) -> R<AccountInfo> {
     let cred = read_cred(home)?.ok_or(AccErr::NoLogin)?;
     let (frag, _) = current_fragment(home)?.ok_or(AccErr::NoLogin)?;
-    save_snapshot(home, &cred, &frag)
-}
-
-/// 把「這一份」權杖與 oauthAccount 快照存進帳號庫。寫之前：
-/// 1. uuid 與 email 必須都在同一份 oauthAccount 文字裡（不從兩個來源拼）；
-/// 2. 再讀一次目前的登入設定，跟這份快照不一樣（讀的途中登入被換了）就不寫。
-fn save_snapshot(home: &Path, cred: &[u8], frag: &str) -> R<AccountInfo> {
-    let (_, email) = snapshot_identity(frag).ok_or(AccErr::Corrupt("目前登入的帳號資訊裡沒有 email 或帳號代號，無法加入"))?;
-    if current_fragment(home)?.map(|(f, _)| f).as_deref() != Some(frag) {
-        elog!("帳號庫：登入設定在讀取的途中變了，這次不寫");
-        return Err(AccErr::Corrupt("登入資料在讀取的途中被改變，這次沒有加入"));
-    }
+    let email = email_of_fragment(&frag).ok_or(AccErr::Corrupt("目前登入的帳號資訊裡沒有 email，無法加入"))?;
     let dir = account_dir(home, &email)?;
     ensure_store(home);
     migrate_legacy(home);
     std::fs::create_dir_all(&dir)?;
-    write_atomic(&dir.join(CRED), cred)?;
+    write_atomic(&dir.join(CRED), &cred)?;
     write_atomic(&dir.join(FRAG), frag.as_bytes())?;
     list(home).into_iter().find(|a| a.email == email).ok_or(AccErr::NotFound)
 }
@@ -629,14 +612,9 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
         (Some(c), Some((frag, uuid))) => {
             let cur_email = email_of_fragment(frag);
             let owner = saved_accounts(home).into_iter().find(|s| &s.uuid == uuid || Some(&s.email) == cur_email.as_ref()).ok_or(AccErr::CurrentUnsaved)?;
-            // 回存前：目前登入的 uuid 與 email（同一份 oauthAccount）要跟庫裡這個資料夾的 uuid 與 email 都對得上；
-            // 只對上一個（例如庫裡 it@ 的資料夾存的是 cwen 的 uuid）代表庫存錯了，不能把目前的權杖寫進去
             let l = who(c);
             let (ok, what) = verdict(&l, &owner.uuid, &owner.email);
-            let consistent = cur_email.as_deref() == Some(owner.email.as_str()) && *uuid == owner.uuid;
-            if !consistent {
-                elog!("切走前核對 {}：帳號庫這份的 email 與帳號代號跟目前登入對不上，帳號庫可能存錯，這次不回存，請重新存一次帳號", owner.email);
-            } else if ok {
+            if ok {
                 write_atomic(&owner.dir.join(CRED), c)?;
                 write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
                 let _ = std::fs::remove_file(owner.dir.join(QUAR)); // 已有核對過的新權杖，舊的隔離檔沒用了
@@ -776,30 +754,14 @@ pub fn auto_enabled_from_saved(text: &str) -> bool {
 /// 回存只在切走那一刻、先核對過才做（見 `switch_impl`）。
 /// 呼叫端要自己持有 `LOCK`（見 `auto_tick`），避免和切換同時寫檔。只比對與寫入檔案，權杖不進 log。
 pub fn auto_sync(home: &Path) -> R<AutoOutcome> {
-    let Some(cred) = read_cred(home)? else { return Ok(AutoOutcome::Nothing) };
+    let Some(_) = read_cred(home)? else { return Ok(AutoOutcome::Nothing) };
     let Some((frag, uuid)) = current_fragment(home)? else { return Ok(AutoOutcome::Nothing) };
     let Some(email) = email_of_fragment(&frag) else { return Ok(AutoOutcome::Nothing) };
     if saved_accounts(home).into_iter().any(|s| s.uuid == uuid || s.email == email) {
-        // 已在庫：不寫。順便看庫裡有沒有存錯的（uuid 與 email 對不上），只警示，同一句只印一次
-        if let Some(n) = library_suspect(home, &email, &uuid) {
-            warn_library_once(&uuid, n);
-        }
         return Ok(AutoOutcome::Nothing);
     }
-    // 不在庫：用同一份快照存（uuid 與 email 同一份 oauthAccount、寫之前再核對一次），不重讀
-    save_snapshot(home, &cred, &frag)?;
+    save_current(home)?;
     Ok(AutoOutcome::Added(email))
-}
-
-/// 帳號庫可能存錯的警示：同一句（同一個 uuid 雜湊與資料夾數）只印一次，背景每分鐘叫一次不能一直洗
-fn warn_library_once(uuid: &str, n: usize) {
-    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let line = format!("帳號庫可能存錯，重新存一次帳號（帳號代號 {}，{n} 個資料夾）", crate::claude_quota::owner::short_hash(uuid));
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if last.as_deref() != Some(line.as_str()) {
-        elog!("{line}");
-        *last = Some(line);
-    }
 }
 
 // ---------- 登入檔被別的程式改寫（像 Orca）：回報實際是哪個帳號 ----------
@@ -1439,71 +1401,6 @@ mod tests {
     fn 切走前核對_逾時或失敗就不存() {
         assert_eq!(switch_with_lookup(Lookup::Timeout), cred("A1"));
         assert_eq!(switch_with_lookup(Lookup::Failed), cred("A1"));
-    }
-
-    /// 庫裡甲（A1）乙（B1）；把甲資料夾的 account.json 改成存乙的 uuid（帳號庫存錯：email 是甲、uuid 是乙的）
-    fn polluted_library(h: &Path) {
-        login(h, "u-a", "a@x.test", "A1");
-        save_current(h).unwrap();
-        login(h, "u-b", "b@x.test", "B1");
-        save_current(h).unwrap();
-        let f = dir_of(h, "a@x.test").join(FRAG);
-        fs::write(&f, read(f.clone()).replace("u-a", "u-b")).unwrap();
-    }
-
-    #[test]
-    fn 切走前回存_庫裡資料夾的_email_與_uuid_跟目前登入對不上_就不寫() {
-        let d = setup();
-        let h = d.path();
-        polluted_library(h);
-        // 目前登入乙（u-b／b@）、權杖已換新成 B2；庫裡甲的資料夾存的是乙的 uuid，會先被當成乙的資料夾
-        login(h, "u-b", "b@x.test", "B2");
-        let out = switch_impl(h, "a@x.test", Fault::None, &|_| Lookup::Account { uuid: "u-b".into(), email: "b@x.test".into() }).expect("切換照常");
-        assert_eq!(out.email, "a@x.test");
-        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"), "不能把乙的權杖寫進甲的資料夾");
-        assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"), "乙的資料夾也沒有被動");
-        assert!(read(dir_of(h, "a@x.test").join(FRAG)).contains("u-b"), "庫裡存錯的那份原樣留著，只警示");
-    }
-
-    #[test]
-    fn 背景自動加入_庫存錯時只警示不寫_庫裡一個字不動() {
-        let d = setup();
-        let h = d.path();
-        polluted_library(h);
-        login(h, "u-b", "b@x.test", "B2");
-        let before = (read(dir_of(h, "a@x.test").join(CRED)), read(dir_of(h, "a@x.test").join(FRAG)), read(dir_of(h, "b@x.test").join(CRED)), read(dir_of(h, "b@x.test").join(FRAG)));
-        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
-        let after = (read(dir_of(h, "a@x.test").join(CRED)), read(dir_of(h, "a@x.test").join(FRAG)), read(dir_of(h, "b@x.test").join(CRED)), read(dir_of(h, "b@x.test").join(FRAG)));
-        assert_eq!(before, after);
-        assert_eq!(emails(h), ["a@x.test", "b@x.test"], "沒有多出資料夾");
-        assert_eq!(library_suspect(h, "b@x.test", "u-b"), Some(1), "甲的資料夾 uuid 跟目前登入一樣、email 不一樣");
-        assert_eq!(library_suspect(h, "a@x.test", "u-a"), Some(1), "甲的資料夾 email 一樣、uuid 不一樣");
-        assert_eq!(library_suspect(h, "c@x.test", "u-c"), None);
-    }
-
-    #[test]
-    fn 存進帳號庫前_uuid_與_email_要在同一份快照裡_讀的途中被換掉就不寫() {
-        let d = setup();
-        let h = d.path();
-        login(h, "u-a", "a@x.test", "A1");
-        let frag = current_fragment(h).unwrap().unwrap().0;
-        // 讀完快照之後登入被換成乙：寫之前再核對，快照跟現在的登入設定不一樣，不寫
-        login(h, "u-b", "b@x.test", "B1");
-        assert!(matches!(save_snapshot(h, cred("A1").as_bytes(), &frag), Err(AccErr::Corrupt(_))));
-        assert!(!store_root(h).exists() || emails(h).is_empty(), "什麼都沒寫");
-        // 快照裡缺 email（只有 uuid）：不從別的地方補，不寫
-        fs::write(cj_path(h), r#"{"oauthAccount":{"accountUuid":"u-x"}}"#).unwrap();
-        assert!(matches!(save_current(h), Err(AccErr::Corrupt(_))));
-        assert!(!store_root(h).exists() || emails(h).is_empty());
-        // 快照裡缺 uuid（只有 email）：一樣不寫
-        fs::write(cj_path(h), r#"{"oauthAccount":{"emailAddress":"c@x.test"}}"#).unwrap();
-        assert!(save_current(h).is_err());
-        assert!(!store_root(h).exists() || emails(h).is_empty());
-        // 正常的一份：寫進去，資料夾名的 email 與 account.json 裡的 uuid 都出自同一份
-        login(h, "u-a", "a@x.test", "A1");
-        save_current(h).unwrap();
-        let saved = read(dir_of(h, "a@x.test").join(FRAG));
-        assert_eq!(snapshot_identity(&saved), Some(("u-a".into(), "a@x.test".into())));
     }
 
     #[test]

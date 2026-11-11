@@ -19,8 +19,8 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
                   （帳號庫只做存錯警示，不參與歸屬；舊版這裡是「uuid → 查帳號庫 → email、找不到記未知區」）
 ```
 
-程式在 `relay/asn/src-tauri/src/claude_quota/`：`owner.rs`（路徑檢查與讀取）、`owner_store.rs`（快取與未知區）、
-`../claude_quota.rs` 的 `hook_in`／`hook_owned`（記到帳號底下）、`../claude_accounts.rs` 的 `email_of_account_uuid`。
+程式在 `relay/asn/src-tauri/src/claude_quota/`：`owner.rs`（路徑檢查與讀取）、`owner_store.rs`（快取）、
+`../claude_quota.rs` 的 `hook_in`／`hook_owned`（記到帳號底下）、`../claude_accounts.rs` 的 `identity_in_text`（讀 oauthAccount 的 uuid 與 email）與 `library_suspect`（帳號庫存錯的唯讀檢查）。
 
 ### 一、路徑安全（`transcript_path` 是外面送進來的字串，不能信）
 
@@ -54,7 +54,7 @@ Claude Code 會在每個對話紀錄（transcript，`<設定資料夾>/projects/
 ### 四、記到哪裡（#1266 簡化後）
 
 - 對得到 email：記到該帳號底下，**不看現在登入的是誰**。每個帳號各有自己的 log 去重狀態（`claude-quota-state.json` 的 `owned`，鍵是 email，與額度檔一致）。
-- 未知帳號：**不進額度檔、不上傳**。本機另開 `~/.asn/claude-quota-unknown.json`：最多 16 個 uuid，每個只留最新一筆，7 天沒更新就刪。
+- （舊）未知帳號區已拿掉：額度記到哪個帳號改看視窗自己的 oauthAccount，見最後的「額度歸屬不再依賴帳號庫」。
 - **資料時間**：額度的讀取時間（`read_at`）用對話紀錄最後 256 KB 裡**最後一筆 assistant 回應的時間戳**，不是掛鉤執行的時間。
   這是整個簡化的前提：閒置的視窗每次重繪都會重送舊數字，用「執行時間」會讓舊數字看起來是新的；用 assistant 回應的時間，舊視窗重送的數字資料時間就是舊的，會被 `older_read` 擋掉。
   取不到時間戳（沒有 assistant 行、格式不對）的那次，**不記**。時間戳與身分一起快取（`claude-owner-cache.json`），檔案大小或修改時間變了才重讀。
@@ -172,12 +172,9 @@ agy 狀態列給的 `transcript_path` 在啟動時指向一個不存在的檔，
 實際發生的事：家用機只登入 cwen，三個視窗也都是 cwen，卻送出一筆標成 it@ 的讀數；工作機把 gsit 的數字記成 yooliang。原因是 0.2.15 拿 session-owner 的 uuid 去帳號庫（`~/.asn/claude-accounts/*/account.json`）查 email，而帳號庫裡 it@ 的資料夾存的是 cwen 的 uuid（帳號庫存錯了）。
 
 現在不查帳號庫：
-1. 上面第一層已經保證 session-owner 的 uuid 等於這個視窗自己的 `.claude.json` 的 `oauthAccount.accountUuid`，不相等就不記。所以相等時，**email 直接取同一份 oauthAccount 的 `emailAddress`**（只讀 accountUuid 與 emailAddress 兩個欄位），正規化（小寫）後就是記到哪個帳號底下。oauthAccount 讀不到 email 就不記。`claude_accounts::email_of_account_uuid` 與「未知帳號區」已拿掉（不再有「對不到帳號」這回事）。
+1. 上面第一層已經保證 session-owner 的 uuid 等於這個視窗自己的 `.claude.json` 的 `oauthAccount.accountUuid`，不相等就不記。所以相等時，**email 直接取同一份 oauthAccount 的 `emailAddress`**（只讀 accountUuid 與 emailAddress 兩個欄位），正規化（小寫）後就是記到哪個帳號底下。oauthAccount 讀不到 email 就不記。`claude_accounts::email_of_account_uuid` 與「未知帳號區」（`claude-quota-unknown.json` 的讀寫）已整個拿掉（不再有「對不到帳號」這回事）。
 2. 帳號庫存錯只做**警示**，不影響記不記：記錄時順便檢查庫裡有沒有「uuid 一樣但 email 不一樣」或「email 一樣但 uuid 不一樣」的資料夾（涵蓋同一個 uuid 出現在多個資料夾），有就在 `~/.asn/claude-quota.log` 寫一行「帳號庫可能存錯，重新存一次帳號」，只附 uuid 雜湊前 6 碼與可疑資料夾數，同一句只記一次（狀態檔 `logged_lib`）。檢查有快取：同一個 (email, uuid) 10 分鐘內不重看（`lib_key`、`lib_at`），不用每次狀態列都列目錄。
-3. 帳號庫的三個寫入點（`claude_accounts.rs`）寫之前都要確認 uuid 與 email 來自同一份 oauthAccount 快照，否則不寫：
-   - `save_current` 與 `auto_sync`：同一份快照（`save_snapshot`），uuid 與 email 缺一個就不寫；寫之前再讀一次目前的登入設定，跟快照不一樣（讀的途中登入被換了）就不寫。
-   - `switch_impl` 切走前回存：目前登入的 email 與 uuid 要跟庫裡那個資料夾的 email 與 uuid **都**對得上才回存；只對上一個（例如庫裡 it@ 的資料夾存的是 cwen 的 uuid）代表庫存錯了，不回存、log 一行，請重新存一次帳號。
-   - 背景 `auto_sync` 發現已在庫但庫存錯：不寫，只警示（同一句只印一次）。
+3. **切換與帳號庫的寫入流程不變**（`claude_accounts.rs` 的 `switch_impl`、`save_current`、`auto_sync` 照舊）：切換功能運作正常，額度記錄讀「現在登入的帳號」（視窗自己的 oauthAccount），之後有餘力再考慮讀切換用的帳號庫。帳號庫只有上面第 2 點那個唯讀檢查，不寫、不改。
 4. 沒帶 `transcript_path` 的視窗不記：見下一節。
 
 ### 沒帶 transcript_path 的視窗不記

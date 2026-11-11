@@ -262,10 +262,22 @@ fn with_tp(status_json: String, tp: &std::path::Path) -> String {
 fn hook_at(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
     hook_in(h.path(), &h.path().join(".claude"), input, now)
 }
-/// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、送狀態列
+/// 這個測試檔裡各 uuid 對應的視窗登入 email（明寫，不查帳號庫）：UA→a@x.test、UB→b@x.test，其他用 `<uuid 前 8 碼>@x.test`
+fn email_of(uuid: &str) -> String {
+    match uuid {
+        UA => "a@x.test".to_string(),
+        UB => "b@x.test".to_string(),
+        _ => format!("{}@x.test", &uuid[..8]),
+    }
+}
+/// 把這個視窗自己的登入設定（.claude.json 的 oauthAccount）寫成這個 uuid 與它對應的 email
+fn set_win(h: &std::path::Path, uuid: &str) {
+    super::super::owner::test_set_window_identity(h, &email_of(uuid), uuid);
+}
+/// 一個視窗回報一次：寫對話紀錄（最後一筆 assistant 的時間 ts）、視窗自己的登入設定、送狀態列
 fn feed(h: &tempfile::TempDir, name: &str, uuid: &str, ts: i64, pad: usize, st: String, now: i64) -> bool {
     let t = transcript(h.path(), name, uuid, Some(ts), pad);
-    super::super::owner::test_set_window_account(h.path(), uuid);
+    set_win(h.path(), uuid);
     hook_at(h, &with_tp(st, &t), now)
 }
 fn quota_of(h: &tempfile::TempDir, email: &str) -> Quota {
@@ -325,7 +337,6 @@ fn 身分_帳號庫裡沒有這個帳號也照記_額度歸屬看視窗自己的
     let all = load_all(h.path());
     assert_eq!(all.keys().collect::<Vec<_>>(), ["d@x.test"], "記在視窗自己 oauthAccount 的 email（正規化）底下");
     assert_eq!(all["d@x.test"].weekly_pct, Some(30));
-    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "不再有未知區");
 }
 
 #[test]
@@ -380,7 +391,6 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     assert_eq!(quota_of(&h, "a@x.test"), before, "A 的紀錄完全不變");
     assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
     assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
-    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
 }
 
 #[test]
@@ -669,7 +679,7 @@ fn 共用案例_缺一窗而存著的那窗已過重置時間才拿掉() {
 }
 
 // ---------- 視窗自己的登入帳號要跟對話紀錄的身分一致才收（ASN 切換帳號後，舊視窗的額度已是新帳號的） ----------
-use super::super::owner::{short_hash, test_set_window_account, test_set_window_identity, window_identity};
+use super::super::owner::{short_hash, test_set_window_identity, window_identity};
 
 fn cj_in(dir: &std::path::Path, text: &str) {
     std::fs::create_dir_all(dir).unwrap();
@@ -682,10 +692,9 @@ fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記�
     add_account(h.path(), "a@x.test", UA);
     // 視窗開的時候是 A（對話紀錄記 A），之後 ASN 切成 B：這個視窗自己的登入設定現在是 B
     let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
-    test_set_window_account(h.path(), UB);
+    set_win(h.path(), UB);
     assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + MIN), "對不上：不記");
     assert!(!super::super::quota_path(h.path()).exists(), "不進額度檔");
-    assert!(!super::super::owner_store::unknown_path(h.path()).exists(), "也不進未知區");
     let lg = log(&h);
     assert!(lg.contains("視窗帳號對不上") && lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
     assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("a@x.test") && !lg.contains("wa.jsonl"), "log 不留 uuid、email、路徑：{lg}");
@@ -693,10 +702,10 @@ fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記�
     assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + 2 * MIN));
     assert_eq!(log(&h).matches("視窗帳號對不上").count(), 1);
     // 這個視窗重開後登入設定與對話紀錄一致：照收；之後又對不上會再記一次
-    test_set_window_account(h.path(), UA);
+    set_win(h.path(), UA);
     assert!(hook_at(&h, &with_tp(wk(30.0), &t), NOW + 3 * MIN), "一致：收");
     assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
-    test_set_window_account(h.path(), UB);
+    set_win(h.path(), UB);
     assert!(!hook_at(&h, &with_tp(wk(31.0), &t), NOW + 4 * MIN));
     assert_eq!(log(&h).matches("視窗帳號對不上").count(), 2);
 }
