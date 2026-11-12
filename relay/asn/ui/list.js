@@ -2,7 +2,10 @@
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, groupsUnread, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
+import { activeChats } from './lib/recent.mjs'
+import { chatsUnread, lastWords } from './lib/mobile.mjs'
+import { isMergedAway } from './lib/notice.mjs'
+import { ADS, AD_MS, FIXED_TABS, TOP_TABS, topOf, goAd, groupHeading, groupRows, groupsUnread, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -14,7 +17,7 @@ import { AsnDialog } from './lib/dialog.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { activityRound, withActivity } from './lib/activity.mjs'
-import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
+import { friendMatchesQuery, normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
@@ -1510,10 +1513,30 @@ const app = createApp({
     const query = ref(''), nickErr = ref('')
     const collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
     const dev = pages
-    const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、指引、設定
+    const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是對話、通知、使用指引、設定
+    // 名單上方的四個大分頁（0.2.18）：目前在哪一個；點「夥伴」回到上次看的設備頁籤（沒有就第一個＝本機）
+    const top = computed(() => topOf(tab.value))
+    let lastDevTab = isDevice.value ? tab.value : ''
+    watch(tab, t => { if (topOf(t) === 'partners' && t) lastDevTab = t })
+    function goTop(key) {
+      if (key !== 'partners') { tab.value = key; return }
+      const keys = dev.value.all.map(x => x.key)
+      tab.value = keys.includes(lastDevTab) ? lastDevTab : keys[0] ?? ''
+    }
+    // 對話分頁：活動中的對話（30 天內有往來的夥伴與群組，新到舊；不含已封存、通知、已併進通知的舊列）；上方的搜尋框只篩這一頁
+    const chatQuery = ref('')
+    const chatRows = computed(() => {
+      void activityTick.value
+      const act = activeChats({ friends: activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => core.viewOf(id) ?? [], rooms: roomRows.value, now: Date.now() })
+      // 群組在電腦版只放在這一頁（原本的「群組」頁籤）：很久沒動靜的群組也要列，排在最後
+      const rows = [...act, ...roomRows.value.filter(r => !act.some(x => x.id === r.chatId)).map(r => ({ kind: 'room', id: r.chatId, at: r.at, room: r }))]
+      const q = normalizeSearchQuery(chatQuery.value)   // 比對規則和名單搜尋一樣（friendMatchesQuery：去掉表情代碼、不分大小寫）
+      return (q ? rows.filter(x => (x.kind === 'room' ? friendMatchesQuery({ nick: x.room.name }, q, plain) : friendMatchesQuery(x.friend, q, plain))) : rows)
+        .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) }))
+    })
+    const chatsUnreadN = computed(() => chatsUnread(friends.value) + groupsUnread(roomRows.value))   // 「對話」分頁的紅點：夥伴與群組的未讀（不含通知）
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
-    const groupsUnreadN = computed(() => groupsUnread(roomRows.value))
     // 選到的頁籤不在現在的清單（改了維度、設備消失…）時退回第一個（設備維度的第一個就是本機）
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
@@ -1980,7 +2003,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, groupsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
@@ -2103,10 +2126,10 @@ if (info.shot) {
     for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
     adI.value = Number.isInteger(savedMe.shotAd) ? savedMe.shotAd : 0
   }
-  // 逐頁籤截圖：本機、第二台設備、群組、指引（清單與一篇內容）、設定
+  // 逐頁籤截圖：本機、第二台設備、對話（含群組）、使用指引（清單與一篇內容）、設定
   const p = pages.value.all
   // 指引、設定各拍一張「清單」與一張「點了一項之後的聊天窗」：整合模式＝右邊的分頁（拍名單視窗就看得到）；分離模式＝獨立視窗（另存 panel-*.png）
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings'], ['settings-doc', 'settings']]) {
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['chats', 'chats'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings'], ['settings-doc', 'settings']]) {
     if (!key) continue
     shotTab.value = key
     if (name === 'guide-doc') await root.openPanel('guide', 'bridge')

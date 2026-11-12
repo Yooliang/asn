@@ -6,6 +6,7 @@ import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
 import { HOME_TAB, TABS, chatsUnread, initialNav, noticeUnread, normalizeNav, pageNav, tabDot, tabLabel, tabNav, totalUnread, viewedChatId } from '../ui/lib/mobile.mjs'
 import { restoreMobileTab } from '../ui/lib/session.mjs'
 import { NOTICE_ID } from '../ui/lib/notice.mjs'
+import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 
 const CLOUD_KEEP = 30 * 60 * 1000
 
@@ -106,8 +107,9 @@ test('舊的存檔與瀏覽記錄不會壞：navTab 舊值照舊、page（舊第
   h.press(); assert.equal(h.nav.tab, HOME_TAB)
 })
 
-test('設定裡的 notify 分類改叫「提醒」，沒有任何分類還叫「通知」', () => {
-  assert.equal(pageTitle(settingPage('notify')), '提醒')
+test('設定裡的 notify 分類改叫「提醒與聲音」（手機、電腦一樣），沒有任何分類還叫「通知」', () => {
+  assert.equal(pageTitle(settingPage('notify')), '提醒與聲音')
+  assert.ok(!SETTING_CATS.some(c => c.title === '通知'), '電腦版的設定分類也不叫「通知」')
 })
 
 test('未讀紅點：通知有未讀通知分頁亮（內頁開著也亮）；對話分頁的紅點不算通知', () => {

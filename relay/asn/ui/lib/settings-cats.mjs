@@ -15,7 +15,7 @@ export const SETTING_CATS = [
   { key: 'cloud', title: '雲端代理', icon: 'M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 0 1 18.5 11 3.5 3.5 0 0 1 18 18z' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
   { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
-  { key: 'notify', title: '通知', icon: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 19a2 2 0 0 0 4 0' },
+  { key: 'notify', title: '提醒與聲音', icon: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 19a2 2 0 0 0 4 0' },
   { key: 'voice', title: '語音', icon: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4' },
   { key: 'window', title: '視窗與系統匣', icon: 'M3 5h18v14H3zM3 9h18' },
   { key: 'launch', title: '啟動設定', icon: 'M6 4l14 8-14 8z' },
