@@ -24,6 +24,14 @@ export const INPUT_TEXT = {
 /** 可以打字的 xterm 設定：和本機看畫面一樣，只是不關輸入 */
 export const inputXtermOptions = size => ({ ...xtermOptions(size), disableStdin: false })
 
+/** 開始打字前本人取消了手機的本人驗證（生物辨識或螢幕鎖）：這次沒有開始，輸入框那句會放回去 */
+export const INPUT_NOT_VERIFIED = '沒有完成本人驗證，這次沒有開始打字'
+
+/** 打字沒開始的話：本人取消驗證另外講；其他照看畫面的說法（Rust 端回的已經是白話，空的用通用的） */
+export function inputStartError(e) {
+  return e?.code === 'cancel' ? INPUT_NOT_VERIFIED : startError(e)
+}
+
 /** 送字失敗的話：Rust 端回的已經是白話、也寫了這段沒有送出（例如「打太快了，這段沒有送出，請再試一次」）；空的用通用的 */
 export function sendError(e) {
   const s = String(e?.message ?? e ?? '').trim()
@@ -110,7 +118,7 @@ export const RemoteInput = {
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
         console.info('[ASN] 別台打字沒有開始', String(e?.message ?? e))
-        finish(startError(e))
+        finish(inputStartError(e))
       }
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }

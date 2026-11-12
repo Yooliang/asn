@@ -209,6 +209,42 @@ test('確認還在等時切回訊息（那一次作廢），之後才回 ok：�
   assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
 })
 
+test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設置 → 認得的電腦」確認，名稱和手機畫面一致', async () => {
+  const rs = read('../src-tauri/src/view_d.rs')
+  const m = /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)
+  assert.ok(m, '有這句')
+  assert.equal(m[1], '先在「設置 → 認得的電腦」確認這台電腦的指紋，才能在它的終端打字')
+  const { TAB_LABEL } = await import('../ui/lib/mobile.mjs')
+  const { mobileSettingTitle } = await import('../ui/lib/mobile-settings.mjs')
+  assert.ok(m[1].includes(`「${TAB_LABEL.me} → ${mobileSettingTitle('known')}」`), '分頁名稱與設定分類名稱用畫面上看得到的')
+  // 前端不轉碼：開始失敗的話就是 Rust 回的那句
+  const { inputStartError } = await import('../ui/lib/term-remote-input.mjs')
+  assert.equal(inputStartError(m[1]), m[1])
+  assert.equal(inputStartError(new Error(m[1])), m[1])
+})
+
+test('開始打字時取消本人驗證：另外說沒有完成本人驗證，不用通用的「沒開始」；那句放回輸入框', async () => {
+  const { inputStartError, INPUT_NOT_VERIFIED } = await import('../ui/lib/term-remote-input.mjs')
+  const { REMOTE_TEXT } = await import('../ui/lib/term-remote.mjs')
+  const { CANCELLED, makeMobileRemoteInputApi } = await import('../ui/lib/mobile-remote-view.mjs')
+  const { NO_LOCK_TEXT } = await import('../ui/lib/mobile-confirm.mjs')
+  assert.equal(INPUT_NOT_VERIFIED, '沒有完成本人驗證，這次沒有開始打字')
+  const api = makeMobileRemoteInputApi({ confirm: async () => 'cancel', invoke: async () => { throw new Error('不該呼叫') } })
+  const err = await api.start('H', '小乙', '家用機').catch(e => e)
+  assert.equal(err.code, CANCELLED)
+  assert.equal(inputStartError(err), INPUT_NOT_VERIFIED)
+  assert.notEqual(inputStartError(err), REMOTE_TEXT.failed)
+  // 沒設螢幕鎖照舊講怎麼辦；其他錯誤照舊
+  assert.equal(inputStartError(Object.assign(new Error(NO_LOCK_TEXT), { code: 'no_lock' })), NO_LOCK_TEXT)
+  assert.equal(inputStartError(new Error('那台不允許')), '那台不允許')
+  assert.equal(inputStartError(''), REMOTE_TEXT.failed)
+  // 接線：開始失敗走 inputStartError，結束時把輸入框送來的那句交還（unsent）
+  const src = read('../ui/lib/term-remote-input.mjs').replace(/\r\n/g, '\n')
+  assert.match(src, /finish\(inputStartError\(e\)\)/)
+  assert.match(src, /const finish = text => \{\n\s+cleanup\(\); phase\.value = 'ended'; note\.value = text; id = ''\n\s+const left = queued \?\? \(lineAsk \? askPaste\.value : null\)\n\s+queued = null; lineAsk = false; askPaste\.value = null\n\s+if \(left\) emit\('unsent', left\)/)
+  assert.match(read('../ui/lib/chatpane.mjs'), /<remote-input [^>]*@unsent="restoreDraft"/, '交還的那句放回輸入框')
+})
+
 test('手機對話／終端切換鈕的字：看對話時「終端」、看終端時「對話」（寫按了會去哪裡）', async () => {
   const { M_TERM_TOGGLE, mTermToggle } = await import('../ui/lib/term-entry.mjs')
   assert.deepEqual(mTermToggle(false), M_TERM_TOGGLE.toTerm)
