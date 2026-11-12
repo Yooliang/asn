@@ -132,10 +132,18 @@ test('外殼橋：只動 App 私有資料夾裡的檔案，匯出到「下載/AS
 
 test('外殼橋：匯出只收「收到的檔案」資料夾（白名單），和 Rust 存檔的位置一致', () => {
   const kt = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'AsnBridge.kt').replace(/\r\n/g, '\n')
-  assert.match(kt, /private val exportRoot: File = File\(File\(filesRoot, "\.irori-asn"\), "received"\)\.canonicalFile/)
+  assert.match(kt, /private val exportRoot: File = ExportPath\.expectedExportRoot\(filesRoot\)\.canonicalFile/)
+  const ep = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'ExportPath.kt').replace(/\r\n/g, '\n')
+  assert.match(ep, /const val DATA_DIR_NAME = "\.irori-asn"/); assert.match(ep, /const val RECEIVED_DIR_NAME = "received"/)
+  assert.match(ep, /File\(File\(filesRoot, DATA_DIR_NAME\), RECEIVED_DIR_NAME\)/)
+  assert.match(ep, /src\.path\.startsWith\(root\.path \+ File\.separator\)/, '只收白名單底下（補分隔字元，兄弟資料夾不算）')
+  assert.match(ep, /if \(!src\.isFile\) return null/, '只收一般檔')
   const fn = kt.slice(kt.indexOf('fun exportFile('), kt.indexOf('fun openDownloads('))
-  assert.match(fn, /val src = File\(path\)\.canonicalFile/, '先解開路徑（.. 與符號連結）')
-  assert.match(fn, /if \(!src\.path\.startsWith\(exportRoot\.path \+ File\.separator\) \|\| !src\.isFile\) return ""/, '只收白名單底下的一般檔')
+  assert.match(fn, /ExportPath\.isValidExportRoot\(filesRoot, exportRoot\)/, '先確認匯出根資料夾位置正確')
+  assert.match(fn, /val src = ExportPath\.resolve\(exportRoot, path\) \?: return ""/, '路徑判斷交給純函式')
+  assert.match(fn, /FileInputStream\(src\)\.use[\s\S]*ExportPath\.resolve\(exportRoot, path\) != src\) return ""/, '開檔後再驗一次')
+  assert.match(fn, /contentResolver\.delete\(u, null, null\)/, '失敗要刪掉下載項目')
+  assert.doesNotMatch(fn, /File\(path\)/, '不在橋上自己解路徑')
   assert.doesNotMatch(fn, /startsWith\(filesRoot/, '不能用整個私有資料夾當範圍')
   // Rust 端：安卓的資料資料夾名稱、收到的檔案存在 data_dir/received
   const dd = read('src-tauri', 'src', 'datadir.rs')

@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.os.VibrationEffect
@@ -14,6 +15,7 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import java.io.File
+import java.io.FileInputStream
 
 // 網頁（ui/m.js）能呼叫的系統功能。方法都在 WebView 的背景執行緒上被叫到，要碰畫面的一律丟回主執行緒。
 // 這個物件只交給本 App 內建的頁面；收到的檔案路徑一律先檢查是在 App 私有資料夾底下才動。
@@ -22,9 +24,10 @@ class AsnBridge(private val activity: MainActivity) {
   /**
    * 只有「收到的檔案」可以匯出：Rust 端 relay_attachment_save 存到 `<data_dir>/received`，
    * 安卓的 data_dir 是 `<filesDir>/.irori-asn`（datadir.rs 的 FALLBACK_NAME，守門測試鎖住兩邊一致）。
-   * App 私有資料夾裡的其他檔案（金鑰、登入資料、設定）一律不匯出
+   * App 私有資料夾裡的其他檔案（金鑰、登入資料、設定）一律不匯出。
+   * 每次匯出前還會用 [ExportPath.isValidExportRoot] 確認這個資料夾的位置正確
    */
-  private val exportRoot: File = File(File(filesRoot, ".irori-asn"), "received").canonicalFile
+  private val exportRoot: File = ExportPath.expectedExportRoot(filesRoot).canonicalFile
 
   /** 震動（對方傳來「震動」時）：兩下短震。網頁自己的 navigator.vibrate 沒有點擊動作就會被擋，所以走這裡 */
   @JavascriptInterface
@@ -41,30 +44,51 @@ class AsnBridge(private val activity: MainActivity) {
   }
 
   /** 把「收到的檔案」資料夾裡的檔案複製到系統「下載/ASN」。成功回給人看的位置，失敗回空字串。
-   *  路徑先解開（canonicalFile：消掉 ..、解開符號連結）再比對，只收 exportRoot 底下的一般檔 */
+   *  路徑判斷在 [ExportPath]：先確認匯出根資料夾本身就是 `<filesDir>/.irori-asn/received`，
+   *  再把輸入路徑解開（canonicalFile：消掉 ..、解開符號連結）後比對，只收根資料夾底下的一般檔。
+   *  打開來源檔之後會再解一次路徑、再判斷一次，結果和第一次不同就放棄（檢查與開檔是兩個動作，中間路徑可能變動）。
+   *  任何失敗路徑都會刪掉已建立的下載項目，不留 IS_PENDING 的半成品 */
   @JavascriptInterface
   fun exportFile(path: String): String {
+    var uri: Uri? = null
+    var done = false
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ""
-      val src = File(path).canonicalFile
-      if (!src.path.startsWith(exportRoot.path + File.separator) || !src.isFile) return ""
+      if (!ExportPath.isValidExportRoot(filesRoot, exportRoot)) return ""
+      val src = ExportPath.resolve(exportRoot, path) ?: return ""
       val ext = src.extension.lowercase()
       val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-      val values = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, src.name)
-        put(MediaStore.Downloads.MIME_TYPE, mime)
-        put(MediaStore.Downloads.RELATIVE_PATH, "Download/ASN")
-        put(MediaStore.Downloads.IS_PENDING, 1)
-      }
       val resolver = activity.contentResolver
-      val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
-      resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } } ?: return ""
-      values.clear()
-      values.put(MediaStore.Downloads.IS_PENDING, 0)
-      resolver.update(uri, values, null, null)
+      FileInputStream(src).use { input ->
+        // 開檔後再驗一次：重新解開同一個輸入路徑，必須還是剛才那個檔
+        if (ExportPath.resolve(exportRoot, path) != src) return ""
+        val values = ContentValues().apply {
+          put(MediaStore.Downloads.DISPLAY_NAME, src.name)
+          put(MediaStore.Downloads.MIME_TYPE, mime)
+          put(MediaStore.Downloads.RELATIVE_PATH, "Download/ASN")
+          put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val created = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
+        uri = created
+        resolver.openOutputStream(created)?.use { out -> input.copyTo(out) } ?: return ""
+        // 複製完、解除 pending 前再驗一次，不一致就走 finally 的清理
+        if (ExportPath.resolve(exportRoot, path) != src) return ""
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        if (resolver.update(created, values, null, null) < 1) return ""
+      }
+      done = true
       return "下載/ASN/" + src.name
     } catch (e: Exception) {
       return ""
+    } finally {
+      val u = uri
+      if (!done && u != null) {
+        try {
+          activity.contentResolver.delete(u, null, null)
+        } catch (e: Exception) {
+        }
+      }
     }
   }
 
