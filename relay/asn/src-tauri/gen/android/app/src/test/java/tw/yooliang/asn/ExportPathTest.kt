@@ -137,4 +137,26 @@ class ExportPathTest {
     assertTrue(ExportPath.isValidExportRoot(filesRoot, root))
     assertNull(ExportPath.resolve(root, File(root, "a.txt").path))
   }
+
+  // ---------- sameRegularFile ----------
+
+  private fun id(dev: Long, ino: Long, reg: Boolean = true) = ExportPath.FileId(dev, ino, reg)
+
+  @Test fun sameDeviceAndInodeAccepted() {
+    assertTrue(ExportPath.sameRegularFile(id(1, 42), id(1, 42)))
+  }
+
+  @Test fun differentInodeRejected() {
+    assertFalse(ExportPath.sameRegularFile(id(1, 42), id(1, 43)))
+  }
+
+  @Test fun differentDeviceRejected() {
+    assertFalse(ExportPath.sameRegularFile(id(1, 42), id(2, 42)))
+  }
+
+  @Test fun eitherSideNotRegularRejected() {
+    assertFalse(ExportPath.sameRegularFile(id(1, 42, false), id(1, 42)))
+    assertFalse(ExportPath.sameRegularFile(id(1, 42), id(1, 42, false)))
+    assertFalse(ExportPath.sameRegularFile(id(1, 42, false), id(1, 42, false)))
+  }
 }

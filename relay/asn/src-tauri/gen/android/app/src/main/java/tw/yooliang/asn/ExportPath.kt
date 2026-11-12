@@ -13,6 +13,13 @@ import java.io.IOException
  *    比對時多補一個分隔字元，所以名字開頭相同的兄弟資料夾不會被誤收。
  */
 object ExportPath {
+  /** 檔案的身分：所在裝置、檔案編號、是不是一般檔（不含符號連結）。值由呼叫端從作業系統取得 */
+  data class FileId(val dev: Long, val ino: Long, val isRegular: Boolean)
+
+  /** 已打開的檔（fstat）和路徑上的檔（lstat，不跟隨符號連結）是不是同一個一般檔：兩邊都要是一般檔，且裝置與檔案編號都相同 */
+  fun sameRegularFile(opened: FileId, onPath: FileId): Boolean =
+    opened.isRegular && onPath.isRegular && opened.dev == onPath.dev && opened.ino == onPath.ino
+
   /** 資料目錄的資料夾名稱，要和 Rust 端 datadir.rs 的 FALLBACK_NAME 一致（android.test.mjs 鎖住） */
   const val DATA_DIR_NAME = ".irori-asn"
 

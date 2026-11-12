@@ -7,6 +7,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Process
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructStat
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -46,7 +49,8 @@ class AsnBridge(private val activity: MainActivity) {
   /** 把「收到的檔案」資料夾裡的檔案複製到系統「下載/ASN」。成功回給人看的位置，失敗回空字串。
    *  路徑判斷在 [ExportPath]：先確認匯出根資料夾本身就是 `<filesDir>/.irori-asn/received`，
    *  再把輸入路徑解開（canonicalFile：消掉 ..、解開符號連結）後比對，只收根資料夾底下的一般檔。
-   *  打開來源檔之後會再解一次路徑、再判斷一次，結果和第一次不同就放棄（檢查與開檔是兩個動作，中間路徑可能變動）。
+   *  打開來源檔之後會再驗：比對已開的檔（fstat）和 canonical 路徑上的檔（lstat，不跟隨符號連結）是不是同一個一般檔
+   *  （裝置與檔案編號相同），並把輸入路徑重新解開再判斷一次；有任何不一致就放棄（檢查與開檔是兩個動作，中間路徑可能變動）。
    *  任何失敗路徑都會刪掉已建立的下載項目，不留 IS_PENDING 的半成品 */
   @JavascriptInterface
   fun exportFile(path: String): String {
@@ -60,8 +64,8 @@ class AsnBridge(private val activity: MainActivity) {
       val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
       val resolver = activity.contentResolver
       FileInputStream(src).use { input ->
-        // 開檔後再驗一次：重新解開同一個輸入路徑，必須還是剛才那個檔
-        if (ExportPath.resolve(exportRoot, path) != src) return ""
+        // 開檔後再驗：手上這個已開的檔，要和 canonical 路徑上的檔是同一個一般檔；另外輸入路徑重新解開也要還是剛才那個檔
+        if (!openedIsPathFile(input, src) || ExportPath.resolve(exportRoot, path) != src) return ""
         val values = ContentValues().apply {
           put(MediaStore.Downloads.DISPLAY_NAME, src.name)
           put(MediaStore.Downloads.MIME_TYPE, mime)
@@ -72,7 +76,7 @@ class AsnBridge(private val activity: MainActivity) {
         uri = created
         resolver.openOutputStream(created)?.use { out -> input.copyTo(out) } ?: return ""
         // 複製完、解除 pending 前再驗一次，不一致就走 finally 的清理
-        if (ExportPath.resolve(exportRoot, path) != src) return ""
+        if (!openedIsPathFile(input, src) || ExportPath.resolve(exportRoot, path) != src) return ""
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         if (resolver.update(created, values, null, null) < 1) return ""
@@ -91,6 +95,17 @@ class AsnBridge(private val activity: MainActivity) {
       }
     }
   }
+
+  private fun fileId(st: StructStat): ExportPath.FileId =
+    ExportPath.FileId(st.st_dev, st.st_ino, OsConstants.S_ISREG(st.st_mode))
+
+  /** 已打開的來源檔，和 canonical 路徑上的檔是不是同一個一般檔（取值在這裡，比對在 [ExportPath.sameRegularFile]） */
+  private fun openedIsPathFile(input: FileInputStream, src: File): Boolean =
+    try {
+      ExportPath.sameRegularFile(fileId(Os.fstat(input.fd)), fileId(Os.lstat(src.path)))
+    } catch (e: Exception) {
+      false
+    }
 
   /** 開啟系統的「下載」清單 */
   @JavascriptInterface
