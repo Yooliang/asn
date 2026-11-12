@@ -73,6 +73,7 @@ mod fp_scan;
 // #933 PR-5b：手機替電腦登入裝置碼型 CLI 的請求與回傳格式（電腦、手機共用）
 mod device_relay;
 mod android_keywrap;
+mod secret_file;
 mod keystore;
 mod view_handshake;
 mod view_frame;
@@ -2781,6 +2782,14 @@ pub fn run() {
 
     // 資料資料夾：Windows 是 %APPDATA%\tw.yooliang.asn（舊識別資料夾的內容首次啟動時複製過來，見 datadir.rs）
     let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| datadir::startup(&work_dir, shot.is_some()));
+    // 手機：清掉上次當掉留下的金鑰檔／登入資料換檔暫存檔（只認那兩種檔的暫存檔名）
+    #[cfg(target_os = "android")]
+    {
+        let n = secret_file::cleanup_leftover_tmp(&identity::relay_home(), &data_dir);
+        if n > 0 {
+            elog!("[ASN] 清掉 {n} 個上次沒寫完的暫存檔");
+        }
+    }
 
     let relay_obj = base.map(|(url, key)| {
         let name = read_settings_name(&data_dir).unwrap_or_else(|| default_window_name_for(&node, &account::computer_name(|k| std::env::var(k).ok())));
@@ -2942,7 +2951,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_login_sealed, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {

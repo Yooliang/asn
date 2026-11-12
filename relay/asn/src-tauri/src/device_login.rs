@@ -144,8 +144,18 @@ pub fn save_key(dir: &Path, id: &str, key: &str) -> Result<(), String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("建不了資料夾：{e}"))?;
     let f = dir.join(format!("{id}.key"));
-    write_private(&f, key).map_err(|e| format!("金鑰存不進這台電腦：{e}"))?;
-    let back = std::fs::read_to_string(&f).map_err(|e| format!("金鑰存完讀不回來：{e}"))?;
+    // 手機：金鑰庫加密、原子寫入（secret_file.rs）；沒有金鑰庫或加密失敗才走原本的明文寫法
+    let aead = crate::secret_file::platform_aead();
+    let sealed = crate::secret_file::write_node_key(&f, id, key, aead.as_deref());
+    let back = if sealed {
+        crate::secret_file::read_node_key(&f, id, aead.as_deref()).map_err(|_| "金鑰存完讀不回來".to_string())?
+    } else {
+        {
+            let _g = crate::secret_file::lock();
+            write_private(&f, key).map_err(|e| format!("金鑰存不進這台電腦：{e}"))?;
+        }
+        std::fs::read_to_string(&f).map_err(|e| format!("金鑰存完讀不回來：{e}"))?
+    };
     if back.trim() != key {
         return Err("金鑰存到這台電腦後讀回不一致，請帳號擁有者重新核准一次".into());
     }

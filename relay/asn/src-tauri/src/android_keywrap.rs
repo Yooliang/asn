@@ -55,6 +55,12 @@ pub fn android_protector() -> Box<dyn Protector> {
     Box::new(KeyWrap(jni_backend::KeystoreAead))
 }
 
+/// 手機用的金鑰庫加解密本體（節點金鑰、登入資料各自帶自己的 AAD，見 secret_file.rs）
+#[cfg(target_os = "android")]
+pub fn android_aead() -> Box<dyn Aead> {
+    Box::new(jni_backend::KeystoreAead)
+}
+
 /// 真的金鑰庫：用 JNI 呼叫 java.security.KeyStore／javax.crypto.Cipher（系統類別，任何執行緒都找得到）
 #[cfg(target_os = "android")]
 mod jni_backend {

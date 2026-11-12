@@ -396,10 +396,10 @@ pub trait TokenStore: Send + Sync {
     fn clear(&self) -> Result<(), String>;
 }
 
-fn encode_login(l: &StoredLogin) -> Vec<u8> {
+pub(crate) fn encode_login(l: &StoredLogin) -> Vec<u8> {
     serde_json::json!({ "refresh_token": l.refresh_token, "email": l.email }).to_string().into_bytes()
 }
-fn decode_login(b: &[u8]) -> Option<StoredLogin> {
+pub(crate) fn decode_login(b: &[u8]) -> Option<StoredLogin> {
     let v: serde_json::Value = serde_json::from_slice(b).ok()?;
     let rt = v.get("refresh_token")?.as_str()?.to_string();
     if rt.is_empty() {
@@ -465,7 +465,7 @@ impl Protector for Dpapi {
 }
 
 /// 非 Windows：不加密（沒有統一的系統金鑰庫可用），只靠檔案權限 0600
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "android"), allow(dead_code))]
 pub struct PlainFile;
 impl Protector for PlainFile {
     fn protect(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
@@ -476,7 +476,8 @@ impl Protector for PlainFile {
     }
 }
 
-/// 資料夾裡的 login.bin；內容經 Protector 包過
+/// 資料夾裡的 login.bin；內容經 Protector 包過（手機改用 secret_file::SealedLoginStore）
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub struct FileStore<P: Protector> {
     pub path: PathBuf,
     pub prot: P,
@@ -531,7 +532,15 @@ pub fn default_store(data_dir: &Path) -> Box<dyn TokenStore> {
         if let Some(w) = crate::keystore::wrap_for(data_dir, crate::keystore::Purpose::AuthToken, "login.bin") {
             return Box::new(FileStore { path, prot: w });
         }
-        Box::new(FileStore { path, prot: PlainFile })
+        // 手機：登入資料用系統金鑰庫加密（secret_file.rs）
+        #[cfg(target_os = "android")]
+        {
+            Box::new(crate::secret_file::SealedLoginStore { path, aead: crate::android_keywrap::android_aead() })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Box::new(FileStore { path, prot: PlainFile })
+        }
     }
 }
 

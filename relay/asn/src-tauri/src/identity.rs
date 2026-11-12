@@ -77,14 +77,25 @@ pub fn machine_node(relay_home: &Path, env_id: Option<String>, alive: impl Fn(u3
 }
 
 pub fn read_key(relay_home: &Path, node: &str, env_key: Option<String>) -> Result<String, String> {
+    let aead = crate::secret_file::platform_aead();
+    read_key_with(relay_home, node, env_key, aead.as_deref())
+}
+
+/// 讀節點金鑰：手機（aead 有值）的金鑰檔是金鑰庫加密的，舊的明文檔讀出後順手改存成加密的（secret_file.rs）；電腦版原樣讀
+pub fn read_key_with(relay_home: &Path, node: &str, env_key: Option<String>, aead: Option<&dyn crate::android_keywrap::Aead>) -> Result<String, String> {
     if let Some(k) = env_key.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
         return Ok(k);
     }
-    fs::read_to_string(relay_home.join(format!("{node}.key")))
-        .map(|s| s.trim().to_string())
-        .ok()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("找不到機器金鑰 {}", relay_home.join(format!("{node}.key")).display()))
+    let path = relay_home.join(format!("{node}.key"));
+    let missing = || format!("找不到機器金鑰 {}", path.display());
+    match crate::secret_file::read_node_key(&path, node, aead) {
+        Ok(s) => Some(s.trim().to_string()).filter(|s| !s.is_empty()).ok_or_else(missing),
+        Err(crate::secret_file::ReadErr::Unseal(e)) => {
+            elog!("[ASN] 節點金鑰解不開：{e}");
+            Err(crate::secret_file::NODE_KEY_UNSEAL_MSG.to_string())
+        }
+        Err(_) => Err(missing()),
+    }
 }
 
 /// 內建新後台的 anon 公開金鑰（公開金鑰，任何網頁前端都看得到；與 relay/machine/anon.mjs 同一把）
