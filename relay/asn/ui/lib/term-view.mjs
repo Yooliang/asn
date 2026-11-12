@@ -286,6 +286,7 @@ export const TermView = {
     id: { type: String, default: '' },        // 終端編號（ASN 開的 grok、agy）
     name: { type: String, default: '' },      // 夥伴視窗名（Claude）
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
+    keep: { type: Boolean, default: false },    // 電腦版：離開分頁時畫面與連線都留著（不停止、不關閉），切回來重畫一次；沒有時間上限（本機沒有對方的紅條、不用同意）
   },
   setup(props) {
     const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref(''), behind = ref(false), histLoading = ref(false)
@@ -416,8 +417,18 @@ export const TermView = {
       })
       void session.start()
     }
-    watch(() => [props.active, props.id, props.name].join('\n'), () => { if (props.active) start(); else stop() })
-    onMounted(() => { if (props.active) start() })
+    // keep：只有換了窗格才重開，分頁在不在畫面上不影響連線
+    watch(() => [props.keep ? true : props.active, props.id, props.name].join('\n'), () => { if (props.keep || props.active) start(); else stop() })
+    // 切回來：隱藏期間沒有版面，重畫一次並照跟隨的設定把游標那一列捲到看得到
+    const refit = () => nextTick(() => {
+      const t = xtermRef
+      if (!t || !host.value) return
+      t.refresh?.(0, Math.max(0, (t.rows || 1) - 1))
+      const to = followScrollTo({ following: follow.following(), current: host.value.scrollTop, target: target() })
+      if (to !== null) { follow.place(to); host.value.scrollTop = to }
+    })
+    watch(() => props.active, a => { if (a && props.keep) refit() })
+    onMounted(() => { if (props.active || props.keep) start() })
     onBeforeUnmount(stop)
     return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
   },

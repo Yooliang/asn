@@ -3,6 +3,7 @@
 // 按下去就直接開始（11-08 起不再確認本人），之後在背景回報狀態。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { installWideChars } from './term-width.mjs'
+import { GRACE_ENDED_TEXT } from './term-grace.mjs'
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 // 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
@@ -149,14 +150,16 @@ export const RemoteView = {
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
     barInline: { type: Boolean, default: true },  // true＝狀態文字在終端上方一條（手機）；false＝交給外層放到視窗最下面的狀態列（電腦版，用 status 事件傳）
+    endedNote: { type: String, default: '' },     // 電腦版：一掛上就是「已結束」、寫這句、不發起（打字中離開分頁），等本人按「重新看」才發起
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
   // started：發起成功（帶 Rust 回的資料，手機用來顯示那台的確認狀態）；ended：這次觀看結束或被收掉
   emits: ['cancel', 'status', 'started', 'ended'],
   setup(props, { emit }) {
-    const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false)
+    const host = ref(null), phase = ref(props.endedNote ? 'ended' : 'starting'), note = ref(props.endedNote), soon = ref(false)
+    const expired = ref(Boolean(props.endedNote))   // 電腦版：離開分頁而結束（狀態列要有「重新看」）
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
-    watch(() => (bar.value ? bar.value.level + '|' + bar.value.text : ''), () => { if (!props.barInline) emit('status', bar.value) }, { immediate: true })
+    watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + expired.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, restartable: expired.value } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
     let follow = createCursorFollow(), ro = null, scrollEl = null, lastSize = ''
@@ -215,7 +218,7 @@ export const RemoteView = {
       const my = ++gen
       const wanted = () => alive && my === gen
       cleanup()
-      phase.value = 'starting'; note.value = ''; soon.value = false
+      phase.value = 'starting'; note.value = ''; soon.value = false; expired.value = false
       try {
         const Terminal = await loadXterm()
         if (!wanted()) return
@@ -258,9 +261,16 @@ export const RemoteView = {
       }
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
-    onMounted(() => { if (props.active) void start() })
+    // 電腦版離開分頁超過寬限：現在就結束（對方的紅條收掉）。發起到一半的也作廢，等它回來時會自己結束
+    const expire = () => {
+      if (phase.value === 'ended') return
+      gen++; stop(); finish(GRACE_ENDED_TEXT); expired.value = true
+    }
+    // 切回來：畫面在隱藏期間沒有版面，重畫一次並把游標那一列捲到看得到
+    const refit = () => { if (term) { term.refresh?.(0, Math.max(0, (term.rows || 1) - 1)); keepCursorVisible() } }
+    onMounted(() => { if (props.active && !props.endedNote) void start() })
     onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup(); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, again: start, TEXT: REMOTE_TEXT }
+    return { host, phase, note, soon, again: start, expire, refit, TEXT: REMOTE_TEXT }
   },
   template: `
 <div class="term-view term-remote" :class="{ 'term-desk': !barInline }">

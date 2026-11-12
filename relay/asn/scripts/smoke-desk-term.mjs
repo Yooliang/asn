@@ -1,6 +1,7 @@
 // 電腦版看別台電腦夥伴的終端：狀態文字在視窗最下面的狀態列（不在終端上方），黑色畫面和下面的訊息框等寬、四周留同一組間距。
 // 探測在頁面裡執行；這個檔案只產生探測原始碼，字串裡不寫反斜線。
 // kind：'watch'＝只能看；'typing'＝再按「打字」進到可以打字（狀態列要用醒目的紅色警示）
+import { TERM_GRACE_MS } from '../ui/lib/term-grace.mjs'
 export const DTERM_PROBES = {
   watch: { dterm: { kind: 'watch' } },
   typing: { dterm: { kind: 'typing' } },
@@ -74,5 +75,70 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     const sw = document.querySelector('.term-remote-switch button');
     if (!sw || sw.textContent.trim() !== '打字') return { ok: false, why: '終端上方的「打字」按鈕不見了' };
   }
+  return { ok: true, why: '' };
+})()`
+
+// ---- 切分頁再切回來（電腦版）：終端要還在、有內容、不重新請求同意；離開超過寬限要在到期當下結束；打字要馬上結束 ----
+export const DTERM_MEMBERS2 = [{ id: DTERM_NODE, name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }, { name: 'demo2', status: 'idle', cwd_label: 'demo2' }] }]
+export const DTERM_ME2 = { winMode: 'merged', session: { v: 1, tabs: [{ id: DTERM_NODE + '/demo' }, { id: DTERM_NODE + '/demo2' }], active: { id: DTERM_NODE + '/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
+// switchback：開終端 → 切到第二個分頁 → 切回；expired：離開超過寬限；typeaway：打字中離開
+export const DTERM_TAB_PROBES = {
+  switchback: { dtermTab: { kind: 'switchback' } },
+  expired: { dtermTab: { kind: 'expired' } },
+  typeaway: { dtermTab: { kind: 'typeaway' } },
+}
+
+export const dtermTabProbeSource = ({ kind }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
+  const kind = ${JSON.stringify(kind)};
+  // 寬限（${TERM_GRACE_MS} 毫秒）在探測裡縮短：只換掉這個長度的計時，其他計時照舊
+  if (kind === 'expired') { const real = globalThis.setTimeout; globalThis.setTimeout = (fn, ms, ...a) => real(fn, ms === ${TERM_GRACE_MS} ? 400 : ms, ...a) }
+  const calls = name => (globalThis.__smokeCalls || []).filter(c => c[0] === name).length;
+  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.getClientRects().length > 0);
+  const rowsOf = () => (vis('.term-view-screen .xterm-rows')[0] || {}).textContent || '';
+  const barOf = () => (vis('.chatpane .typing')[0] || {}).textContent || '';
+  const tabs = () => [...document.querySelectorAll('.ctab')];
+  const entry = await wait(() => vis('.chatpane .actionbar button').find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
+  if (!entry) return { ok: false, why: '按鈕列沒有「終端」' };
+  entry.click();
+  if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
+  if (tabs().length < 2) return { ok: false, why: '分頁不到兩個：' + tabs().length };
+  if (kind === 'typeaway') {
+    const sw = await wait(() => vis('.term-remote-switch button')[0]);
+    if (!sw) return { ok: false, why: '終端上方的「打字」按鈕不見了' };
+    sw.click();
+    if (!(await wait(() => barOf().includes('打字：')))) return { ok: false, why: '按「打字」後狀態列沒出現打字中：' + barOf().slice(0, 60) };
+  }
+  const starts = calls('term_view_remote_start'), stops = calls('term_view_remote_stop');
+  tabs()[1].click();
+  if (!(await wait(() => vis('.term-view-screen').length === 0))) return { ok: false, why: '切到第二個分頁後，第一個分頁的終端還看得到' };
+  await sleep(kind === 'expired' ? 1500 : 500);
+  if (kind === 'switchback' && calls('term_view_remote_stop') !== stops) return { ok: false, why: '離開分頁就結束了觀看（寬限內不該結束），stop 被呼叫了' };
+  if (kind === 'expired' && calls('term_view_remote_stop') !== stops + 1) return { ok: false, why: '離開超過寬限，到期當下就該呼叫 stop（不能等切回來）：stop 次數 ' + stops + ' → ' + calls('term_view_remote_stop') };
+  if (kind === 'typeaway' && calls('term_view_remote_stop') !== stops + 1) return { ok: false, why: '打字中離開分頁，打字通道要馬上結束：stop 次數 ' + stops + ' → ' + calls('term_view_remote_stop') };
+  tabs()[0].click();
+  if (kind === 'typeaway') {
+    if (!(await wait(() => barOf().includes('已結束打字')))) return { ok: false, why: '切回來狀態列沒有「已結束打字」：' + barOf().slice(0, 60) };
+    const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
+    if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
+    await sleep(800);
+    if (calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來自動重新發起了（要等本人按「重新看」）：start 次數 ' + starts + ' → ' + calls('term_view_remote_start') };
+    if (barOf().includes('打字：') || vis('.term-remote-input').length) return { ok: false, why: '切回來還殘留打字：' + barOf().slice(0, 60) };
+    again.click();
+    if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有發起' };
+  }
+  if (kind === 'expired') {
+    if (!(await wait(() => barOf().includes('已結束觀看（離開超過 5 分鐘）')))) return { ok: false, why: '切回來狀態列沒有「已結束觀看（離開超過 5 分鐘）」：' + barOf().slice(0, 60) };
+    const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
+    if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
+    again.click();
+    if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有重新發起' };
+  }
+  if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '切回來後終端不見了或沒有內容：' + rowsOf().slice(0, 40) };
+  const sc = vis('.term-view-screen .xterm-screen')[0];
+  if (!sc || sc.clientWidth < 50) return { ok: false, why: '切回來後終端畫面寬度是 0（沒有重新排版）' };
+  if (!(await wait(() => barOf().includes('正在看')))) return { ok: false, why: '切回來後狀態列沒有「正在看」：' + barOf().slice(0, 60) };
+  if (kind === 'switchback' && calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來又重新請求了一次（start 次數 ' + starts + ' → ' + calls('term_view_remote_start') + '）' };
   return { ok: true, why: '' };
 })()`
