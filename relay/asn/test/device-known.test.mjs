@@ -25,6 +25,7 @@ test('joinKnown：列的 key＝紀錄的 node；不在畫面列表裡的（含�
   assert.deepEqual(joinKnown(undefined, undefined), { byNode: {}, old: [] })
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.match(panel, /joinKnown\(devs\.value, peers\.value\)/, '只傳畫面上的列，不傳已移除的')
+  assert.match(panel, /return devs\.value\.length \? j : \{ \.\.\.j, old: \[\] \}/, '名單還沒讀到不全歸舊紀錄')
 })
 
 test('「允許替這台登入」：是手機、或已經勾過（不論是不是手機）都要顯示，勾過的一定取消得掉', () => {

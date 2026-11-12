@@ -128,7 +128,8 @@ export const SettingsPanel = {
     }
     const peers = computed(() => (props.st.known && Array.isArray(props.st.known.peers) ? props.st.known.peers : []).map(p => ({ ...p, id: p.node })))   // id＝節點（畫面不直接寫 node）
     // 只算畫面上真的畫出來的設備；已永久移除的（畫面沒有列）歸到「舊設備紀錄」，才找得到地方取消授權或忘記
-    const joined = computed(() => joinKnown(devs.value, peers.value))
+    // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」（和手機版一致）
+    const joined = computed(() => { const j = joinKnown(devs.value, peers.value); return devs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
     const oldPeers = computed(() => joined.value.old)
     const mmEmail = ref('')
