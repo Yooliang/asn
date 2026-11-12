@@ -13,3 +13,9 @@ export function composePlaceholder(winMode) {
 export function composeHintTitle(winMode) {
   return composePlaceholder(winMode) === COMPOSE_HINT_MERGED ? COMPOSE_HINT_FULL : ''
 }
+
+// 看別台夥伴的終端時（電腦版，#1288）：輸入框直接打進那個終端，按鈕與提示字跟著換
+export const SEND_LABEL = '傳送'
+export const SEND_LABEL_TERM = '送出'
+/** 終端畫面時輸入框的提示字 */
+export const composeTermHint = name => `輸入的字會直接打進 ${name || '這位夥伴'} 的終端`
