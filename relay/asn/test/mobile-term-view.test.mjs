@@ -264,9 +264,11 @@ test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上
   const rs = read('../src-tauri/src/view_d.rs')
   const m = /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)
   assert.ok(m, '有這句')
-  assert.equal(m[1], '先在「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字')
+  // 分頁名、設定分類名、按鈕字都從手機畫面實際用的常數組出來：哪一個改了名（例如「設置」改成「設定」），這裡就會紅，提醒對齊 Rust 的這句
   const { TAB_LABEL } = await import('../ui/lib/mobile.mjs')
-  assert.ok(m[1].includes(`「${TAB_LABEL.me} → 設備」`), '分頁名稱用畫面上看得到的')
+  const { mobileSettingTitle } = await import('../ui/lib/mobile-settings.mjs')
+  const { TEXT: KNOWN } = await import('../ui/lib/mobile-known-peers.mjs')
+  assert.equal(m[1], `先在「${TAB_LABEL.me} → ${mobileSettingTitle('devices')}」打開這台電腦的「${KNOWN.detail}」，確認它的指紋，才能在它的終端打字`, '分頁、分類、按鈕的名稱用畫面上看得到的')
   // 前端不轉碼：開始失敗的話就是 Rust 回的那句
   const { inputStartError } = await import('../ui/lib/term-remote-input.mjs')
   assert.equal(inputStartError(m[1]), m[1])
@@ -296,7 +298,7 @@ test('開始打字時取消本人驗證：另外說沒有完成本人驗證，�
   // 接線：開始失敗走 inputStartError，結束時把輸入框送來的那句交還（unsent）
   const src = read('../ui/lib/term-remote-input.mjs').replace(/\r\n/g, '\n')
   assert.match(src, /finish\(inputStartError\(e\)\)/)
-  assert.match(src, /const finish = text => \{\n\s+cleanup\(\); phase\.value = 'ended'; note\.value = text; id = ''\n\s+const left = queued \?\? \(lineAsk \? askPaste\.value : null\)\n\s+queued = null; lineAsk = false; askPaste\.value = null\n\s+if \(left\) emit\('unsent', left\)/)
+  assert.match(src, /const finish = text => \{\n\s+cleanup\(\); phase\.value = 'ended'; note\.value = text; id = ''\n\s+const left = takeLeft\(\)[^\n]*\n\s+if \(left\) emit\('unsent', left\)/, '還沒送出的那句由共用的 createLineSender 交還')
   assert.match(read('../ui/lib/chatpane.mjs'), /<remote-input [^>]*@unsent="restoreDraft"/, '交還的那句放回輸入框')
 })
 
