@@ -73,9 +73,10 @@ export function createCore({ baseUrl, key, anonKey, log, workDir, apiTimeoutMs =
     try { return await Promise.race([work, limit]) } finally { clearTimeout(timer) }
   }
 
-  // 同一個節點只能有一個收信者：pid 檔記的橋還在跑（編號＋啟動時間對得上，見 bridge-lock.mjs）就退出（exit 3）
-  function singleInstance() {
-    const got = acquireLock(path.join(workDir, 'bridge.pid'))
+  // 同一個節點只能有一個收信者：pid 檔記的橋還在跑（編號活著、且不是寫檔之後才啟動的，見 bridge-lock.mjs）就退出（exit 3）。
+  // 非同步：查程序啟動時間不卡住啟動；呼叫端要 await。
+  async function singleInstance() {
+    const got = await acquireLock(path.join(workDir, 'bridge.pid'))
     if (!got.ok) { console.error(`another bridge is running (pid ${got.pid})`); process.exit(3) }
   }
 

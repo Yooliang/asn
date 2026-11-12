@@ -583,9 +583,9 @@ process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown)
 process.on('uncaughtException', e => log(`uncaught: ${e.stack ?? e}`))
 process.on('unhandledRejection', e => log(`unhandled: ${e?.stack ?? e}`))
 
-// single instance per node: bridge.pid 記編號＋程序啟動時間，兩者都對得上才算另一個橋在跑（#1373，見 bridge-lock.mjs）
+// single instance per node: bridge.pid 的編號活著、且那個程序不是在 bridge.pid 寫入之後才啟動的＝另一個橋在跑（#1373，見 bridge-lock.mjs）
 const LOCK = path.join(WORK_DIR, 'bridge.pid')
-{ const got = acquireLock(LOCK); if (!got.ok) { console.error(`another bridge is running (pid ${got.pid})`); process.exit(3) } }
+{ const got = await acquireLock(LOCK); if (!got.ok) { console.error(`another bridge is running (pid ${got.pid})`); process.exit(3) } }
 // 上一個橋留下的孤兒（收發室、工作者）先收掉，免得兩組同時收信（見 self-update.mjs）
 const LAST = path.join(WORK_DIR, 'bridge.last')
 try {

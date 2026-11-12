@@ -1,5 +1,6 @@
-// bridge.pid 單一實例鎖（#1373）：bridge.pid 仍只記編號（ASN 內建橋共用這個格式），另記 bridge.pid.start（程序啟動時間），
-// 編號被別的程序回收時不再誤判另一個橋在跑。只 kill 測試自己 spawn、自己記下 PID 的子程序。
+// bridge.pid 單一實例鎖（#1373）：bridge.pid 只記編號（格式不變）；編號活著但那個程序比 bridge.pid 的寫入時間晚啟動（寬限 5 秒）
+// ＝編號被回收，當殘留檔覆寫。規則同 installer/asn-common.ps1 的 Get-RecordedProcess。
+// 只 kill 測試自己 spawn、自己記下 PID 的子程序。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -8,84 +9,134 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnTracked } from './spawn-tracked.mjs'
-import { encodeStamp, parsePid, parseStamp, startTokens, stampFile, lockHolder, lockOwnedBy } from '../bridge-lock.mjs'
+import { acquireLock, lockHolder, lockOwnedBy, lockPidAlive, parsePid, processStartMs } from '../bridge-lock.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const MACHINE = path.join(here, '..')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-// 一個活著、但不是橋的程序（模擬「編號被回收給別人」）
+// 一個活著、但不是橋的程序
 async function idleChild() {
   const child = spawnTracked(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true })
   await new Promise((r, j) => { child.once('spawn', r); child.once('error', j) })
   return child
 }
 const stopChild = async child => { if (child.exitCode === null && child.signalCode === null) { const gone = new Promise(r => child.once('exit', r)); child.kill(); await gone } }
-const tmpLock = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'asn-lock-test-')), 'bridge.pid')
-// 照橋的順序寫：先 bridge.pid，再啟動時間記錄
-const writeLock = (lock, pid, start) => { fs.writeFileSync(lock, String(pid)); if (start !== undefined) fs.writeFileSync(stampFile(lock), encodeStamp(pid, start)) }
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'asn-lock-test-'))
+const rm = dir => fs.rmSync(dir, { recursive: true, force: true })
+// 寫 bridge.pid，並把寫入時間設到過去：之後才啟動（或早就啟動、但編號在這之後才被拿去用）的程序都會「比寫入時間晚」
+const writeOld = (lock, pid, agoMs = 60_000) => { fs.writeFileSync(lock, String(pid)); const t = new Date(Date.now() - agoMs); fs.utimesSync(lock, t, t) }
 
-test('parsePid／parseStamp：正常內容與壞掉的內容', () => {
+test('parsePid：正常內容與壞掉的內容', () => {
   assert.equal(parsePid('4567'), 4567); assert.equal(parsePid('4567\r\n'), 4567)
-  for (const bad of ['', 'garbage', '0', '12abc', '{"pid":1}', '-3']) assert.equal(parsePid(bad), null, bad)
-  assert.deepEqual(parseStamp(encodeStamp(123, 'tok')), { pid: 123, start: 'tok' })
-  assert.deepEqual(parseStamp(encodeStamp(123, null)), { pid: 123, start: null })
-  for (const bad of ['', 'garbage', '{"pid":"x"}', '{"pid":-1}', '{"start":"t"}', '{not json', 'null', '[1]', '12']) assert.equal(parseStamp(bad), null, bad)
+  for (const bad of ['', 'garbage', '0', '12abc', '{"pid":1}', '-3', null]) assert.equal(parsePid(bad), null, String(bad))
 })
 
-test('startTokens：查得到自己與子程序的啟動時間，兩者不同、重查一致；不存在的編號回 null', async () => {
-  const child = await idleChild()
+test('processStartMs：自己與子程序的啟動時間是 epoch 毫秒、合理且子程序較晚；不存在的編號回 null', async () => {
+  const t0 = Date.now(), child = await idleChild()
   try {
-    const a = startTokens([process.pid, child.pid])
-    assert.ok(a.get(process.pid), 'self token')
-    assert.ok(a.get(child.pid), 'child token')
-    assert.notEqual(a.get(process.pid), a.get(child.pid))
-    assert.equal(startTokens([child.pid]).get(child.pid), a.get(child.pid))
+    const self = await processStartMs(process.pid), kid = await processStartMs(child.pid)
+    assert.ok(Number.isFinite(self) && self <= Date.now() + 2000 && self > Date.now() - 24 * 3600_000, `self=${self}`)
+    assert.ok(Number.isFinite(kid) && Math.abs(kid - t0) < 5000, `child=${kid} t0=${t0}`)
+    assert.ok(kid >= self - 2000)
   } finally { await stopChild(child) }
-  assert.equal(startTokens([child.pid]).get(child.pid) ?? null, null)
+  assert.equal(await processStartMs(child.pid), null)
 })
 
-test('lockHolder：編號活著但啟動時間對不上（被回收）→ 當殘留檔；對得上 → 視為橋在跑', async () => {
-  const child = await idleChild(), lock = tmpLock()
+test('lockHolder：編號被一個在 bridge.pid 寫入之後才啟動的程序佔用 → 殘留檔；程序比寫入時間早 → 視為橋在跑', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid'), child = await idleChild()
   try {
-    writeLock(lock, child.pid, 'token-of-a-dead-bridge')
-    assert.equal(lockHolder(lock), null)
-    writeLock(lock, child.pid, startTokens([child.pid]).get(child.pid))
-    assert.equal(lockHolder(lock), child.pid)
-  } finally { await stopChild(child); fs.rmSync(path.dirname(lock), { recursive: true, force: true }) }
+    writeOld(lock, child.pid)                                   // 寫入時間在 60 秒前，子程序剛啟動
+    assert.equal(await lockHolder(lock), null)
+    fs.writeFileSync(lock, String(child.pid))                   // 子程序啟動之後才寫：真的是它寫的
+    assert.equal(await lockHolder(lock), child.pid)
+  } finally { await stopChild(child); rm(dir) }
 })
 
-test('lockHolder：沒有有效記錄（舊格式、別人後來改寫 bridge.pid、記錄壞掉）或查不到啟動時間 → 保守只看編號；壞檔／死編號／自己 → 不擋', async () => {
-  const child = await idleChild(), lock = tmpLock(), sf = stampFile(lock)
+test('lockHolder：查不到啟動時間（失敗、丟例外）→ 保守當作在跑；壞檔／死編號／自己／沒檔 → 不擋', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid'), child = await idleChild()
   try {
-    writeLock(lock, child.pid); try { fs.unlinkSync(sf) } catch {}           // 舊格式：只有 bridge.pid
-    assert.equal(lockHolder(lock), child.pid)
-    writeLock(lock, child.pid, null)                                          // 寫入時沒查到自己的啟動時間
-    assert.equal(lockHolder(lock), child.pid)
-    writeLock(lock, child.pid + 1, 'x'); fs.writeFileSync(lock, String(child.pid))   // 記錄是別的編號的
-    assert.equal(lockHolder(lock), child.pid)
-    writeLock(lock, child.pid, 'token-of-a-dead-bridge')                      // 記錄比 bridge.pid 舊（ASN 內建橋後來寫了 bridge.pid）
-    const old = new Date(Date.now() - 60_000); fs.utimesSync(sf, old, old)
-    assert.equal(lockHolder(lock), child.pid)
-    writeLock(lock, child.pid); fs.writeFileSync(sf, '{broken')               // 記錄壞掉
-    assert.equal(lockHolder(lock), child.pid)
-    writeLock(lock, child.pid, 'whatever')                                    // 查詢失敗（逾時／權限）
-    assert.equal(lockHolder(lock, { tokens: () => new Map() }), child.pid)
-    fs.writeFileSync(lock, 'garbage'); assert.equal(lockHolder(lock), null)
-    writeLock(lock, process.pid, 'x'); assert.equal(lockHolder(lock), null)
-    assert.equal(lockHolder(lock + '.missing'), null)
+    writeOld(lock, child.pid)
+    assert.equal(await lockHolder(lock, { startMs: async () => null }), child.pid)
+    assert.equal(await lockHolder(lock, { startMs: async () => { throw new Error('boom') } }), child.pid)
+    fs.writeFileSync(lock, 'garbage'); assert.equal(await lockHolder(lock), null)
+    fs.writeFileSync(lock, String(process.pid)); assert.equal(await lockHolder(lock), null)
+    assert.equal(await lockHolder(path.join(dir, 'missing.pid')), null)
   } finally { await stopChild(child) }
-  writeLock(lock, child.pid); assert.equal(lockHolder(lock), null)            // 程序已結束
-  fs.rmSync(path.dirname(lock), { recursive: true, force: true })
+  fs.writeFileSync(lock, String(child.pid)); assert.equal(await lockHolder(lock), null)   // 程序已結束
+  rm(dir)
 })
 
-test('lockOwnedBy：bridge.pid 是不是自己的編號', () => {
-  const lock = tmpLock()
+test('lockHolder：查詢不回應時不會卡超過上限，並保守當作在跑', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid'), child = await idleChild()
   try {
-    fs.writeFileSync(lock, String(process.pid)); assert.equal(lockOwnedBy(lock, process.pid), true)
+    writeOld(lock, child.pid)
+    const t0 = Date.now()
+    assert.equal(await lockHolder(lock, { startMs: () => new Promise(() => {}), timeoutMs: 300 }), child.pid)
+    assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0}ms`)
+  } finally { await stopChild(child); rm(dir) }
+})
+
+test('acquireLock：殘留檔覆寫成自己；真的有人在跑就拒絕且不動檔案', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid'), child = await idleChild()
+  try {
+    writeOld(lock, child.pid)
+    assert.deepEqual(await acquireLock(lock, 999_999_001), { ok: true })
+    assert.equal(fs.readFileSync(lock, 'utf8'), '999999001')
+    fs.writeFileSync(lock, String(child.pid))
+    assert.deepEqual(await acquireLock(lock, 999_999_001), { ok: false, pid: child.pid })
+    assert.equal(fs.readFileSync(lock, 'utf8'), String(child.pid))
+  } finally { await stopChild(child); rm(dir) }
+})
+
+test('acquireLock：判定完、建立前被別的橋搶先寫入（wx 失敗）→ 重新判斷，判定對方在跑就拒絕，不覆寫', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid'), rival = await idleChild()
+  try {
+    let calls = 0
+    const beforeCreate = () => { if (calls++ === 0) fs.writeFileSync(lock, String(rival.pid)) }   // 對方剛寫入（mtime 比它啟動晚）
+    assert.deepEqual(await acquireLock(lock, 999_999_002, { beforeCreate }), { ok: false, pid: rival.pid })
+    assert.equal(fs.readFileSync(lock, 'utf8'), String(rival.pid))
+    assert.equal(calls, 1)
+  } finally { await stopChild(rival); rm(dir) }
+})
+
+test('lockOwnedBy／lockPidAlive：只看檔案裡的編號', async () => {
+  const dir = tmpDir(), lock = path.join(dir, 'bridge.pid')
+  try {
+    fs.writeFileSync(lock, String(process.pid))
+    assert.equal(lockOwnedBy(lock, process.pid), true); assert.equal(lockPidAlive(lock), true)
     fs.writeFileSync(lock, String(process.pid + 1)); assert.equal(lockOwnedBy(lock, process.pid), false)
-    fs.writeFileSync(lock, 'garbage'); assert.equal(lockOwnedBy(lock, process.pid), false)
-  } finally { fs.rmSync(path.dirname(lock), { recursive: true, force: true }) }
+    fs.writeFileSync(lock, 'garbage'); assert.equal(lockOwnedBy(lock, process.pid), false); assert.equal(lockPidAlive(lock), false)
+  } finally { rm(dir) }
+})
+
+test('machineNode（寄信路徑）只看編號是否存活，不叫任何子程序', async () => {
+  const home = tmpDir()
+  try {
+    for (const id of ['T', 'X']) fs.mkdirSync(path.join(home, '.asn', `machine-${id}`), { recursive: true })
+    fs.writeFileSync(path.join(home, '.asn', 'machine-T', 'bridge.pid'), String(process.pid))   // 活著的編號（測試程序自己）
+    // 子程序裡把 child_process 的所有函式換成「被叫就記一筆」，再呼叫 machineNode
+    const script = `
+      import { createRequire, syncBuiltinESMExports } from 'node:module'
+      const cp = createRequire(import.meta.url)('node:child_process')
+      let calls = []
+      for (const k of ['exec', 'execFile', 'execFileSync', 'execSync', 'fork', 'spawn', 'spawnSync']) cp[k] = (...a) => { calls.push(k); throw new Error('no subprocess allowed') }
+      syncBuiltinESMExports()
+      const { machineNode } = await import(${JSON.stringify(new URL('../identity.mjs', import.meta.url).href)})
+      let node = null; try { node = machineNode() } catch (e) { node = 'ERR ' + e.message }
+      process.stdout.write(JSON.stringify({ node, calls }))`
+    const child = spawnTracked(process.execPath, ['--input-type=module', '-e', script], {
+      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home },
+    })
+    let out = '', err = ''
+    child.stdout.on('data', d => out += d); child.stderr.on('data', d => err += d)
+    await new Promise(r => child.once('exit', r))
+    const r = JSON.parse(out || 'null')
+    assert.ok(r, err)
+    assert.equal(r.node, 'T')
+    assert.deepEqual(r.calls, [])
+  } finally { rm(home) }
 })
 
 // ---- 真的起橋 ------------------------------------------------------------------------------------
@@ -132,19 +183,34 @@ function startBridge(h, st) {
   return b
 }
 
-test('橋啟動：bridge.pid 的編號被別的（活著、不是橋的）程序佔用 → 照常啟動並覆寫成自己', async () => {
+test('橋啟動：bridge.pid 的編號被一個在寫入之後才啟動、活著、不是橋的程序佔用 → 照常啟動並覆寫成自己', async () => {
   const st = await fakeServer(), h = makeHome(), other = await idleChild()
   let b
   try {
-    writeLock(h.lock, other.pid, 'token-of-a-dead-bridge')
+    writeOld(h.lock, other.pid)                                                 // 寫入時間在 60 秒前；佔用者剛啟動
     b = startBridge(h, st)
     await b.until(() => /bridge starting/.test(b.log) || b.code !== undefined, 'bridge starting')
     assert.doesNotMatch(b.log, /another bridge is running/)
     assert.equal(b.code, undefined, b.log)
     assert.equal(fs.readFileSync(h.lock, 'utf8'), String(b.child.pid))         // bridge.pid 仍只有編號（ASN 內建橋讀得懂）
-    const stamp = parseStamp(fs.readFileSync(stampFile(h.lock), 'utf8'))
-    assert.equal(stamp.pid, b.child.pid); assert.ok(stamp.start, 'start token recorded')
+    assert.equal(fs.existsSync(h.lock + '.start'), false)
   } finally { await b?.stop(); await stopChild(other); await st.close(); fs.rmSync(h.home, { recursive: true, force: true }) }
+})
+
+test('橋啟動：兩個橋幾乎同時啟動 → 只留下一個，另一個 exit 3', async () => {
+  const st = await fakeServer(), h = makeHome()
+  const bs = []
+  try {
+    bs.push(startBridge(h, st), startBridge(h, st))
+    await bs[0].until(() => bs.some(b => b.code !== undefined), 'one bridge exits')
+    await sleep(1500)                                                           // 給另一個也有機會（錯誤地）退出
+    const exited = bs.filter(b => b.code !== undefined), running = bs.filter(b => b.code === undefined)
+    assert.equal(exited.length, 1, bs.map(b => b.log).join('\n----\n'))
+    assert.equal(exited[0].code, 3, exited[0].log)
+    assert.match(exited[0].log, /another bridge is running/)
+    await running[0].until(() => /bridge starting/.test(running[0].log), 'survivor starting')
+    assert.equal(parsePid(fs.readFileSync(h.lock, 'utf8')), running[0].child.pid)
+  } finally { for (const b of bs) await b.stop(); await st.close(); fs.rmSync(h.home, { recursive: true, force: true }) }
 })
 
 test('橋啟動：真的有另一個橋在跑 → 第二個橋拒絕（exit 3），鎖仍是第一個橋的', async () => {
