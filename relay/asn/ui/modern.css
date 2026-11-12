@@ -147,3 +147,59 @@
 /* ---------- 手機訊息卡片（.m-chat）：18px 圓角、內距 10/14、14.5px 字 ---------- */
 :root[data-skin="modern"] .m-chat .msgs{padding:12px 14px;gap:9px}
 :root[data-skin="modern"] .m-chat .msg .m-body.tone-them,:root[data-skin="modern"] .m-chat .msg .m-body.tone-me,:root[data-skin="modern"] .m-chat .msg .m-body.tone-same{padding:10px 14px;border-radius:18px;font-size:14.5px;line-height:1.55}
+/* #1421 B：電腦頂部與左欄 */
+/* 頂部：一列 60px，中間置中名牌，右上「終端」「更多」兩顆 36px 圓鈕；原本的大按鈕區、收件人列、分頁列在現代下都收起來（功能搬進「更多」） */
+/* 大按鈕區不能 display:none：模型、子代理、工作項目的下拉清單和「已封存」的結果訊息還長在它裡面，只收起按鈕、把清單改成從頂部右上角往下展開（對話區 .chatpane 是定位基準） */
+:root[data-skin="modern"] .conv-main .to-line,:root[data-skin="modern"] .tabbar{display:none}
+:root[data-skin="modern"] .actionbar{position:static;display:block;height:0;min-height:0;margin:0;padding:0;border:0;overflow:visible;background:none}
+:root[data-skin="modern"] .actionbar .abtn{display:none}
+:root[data-skin="modern"] .actionbar .ab-wrap{position:static;display:block;height:0}
+:root[data-skin="modern"] .actionbar .ab-wrap > .ab-menu{position:absolute;z-index:20;left:auto;right:16px;top:56px;margin:0;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14)}
+:root[data-skin="modern"] .actionbar .ab-note{position:absolute;z-index:20;left:50%;top:58px;transform:translateX(-50%);padding:3px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12px}
+/* 三欄：名牌置中；視窗窄時左欄讓到最小、右欄留給兩顆圓鈕，名牌往左靠而不被蓋住 */
+:root[data-skin="modern"] .mbar{position:relative;z-index:6;flex:none;display:grid;grid-template-columns:minmax(12px,1fr) auto minmax(104px,1fr);align-items:center;height:60px;padding:0 16px;background:var(--panel-soft)}
+:root[data-skin="modern"] .mbar-plate{grid-column:2;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;padding:4px 14px 4px 5px;background:var(--panel);border:1px solid #e6e4df;border-radius:999px;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
+:root[data-skin="modern"] .mbar-plate .dp.xs{width:22px;height:22px}
+:root[data-skin="modern"] .mbar-plate .dp.xs>span{font-size:10px}
+:root[data-skin="modern"] .mbar-plate .dp.xs::before{width:9px;height:9px;border-width:1.5px}
+:root[data-skin="modern"] .mbar-plate .avb-v{display:none}
+:root[data-skin="modern"] .mbar-room{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;font-weight:600}
+:root[data-skin="modern"] .mbar-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--fg)}
+:root[data-skin="modern"] .mbar-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#6b706c;white-space:nowrap}
+/* 離線：名牌的狀態字與頭像變灰（原本收件人列的離線灰底，改由名牌承擔） */
+:root[data-skin="modern"] .mbar-plate.is-offline{background:#efeeea}
+:root[data-skin="modern"] .mbar-plate.is-offline .mbar-name,:root[data-skin="modern"] .mbar-plate.is-offline .mbar-sub{color:#8a8f96}
+:root[data-skin="modern"] .mbar-acts{grid-column:3;justify-self:end;display:flex;gap:8px}
+:root[data-skin="modern"] .mbar-more{display:flex}
+:root[data-skin="modern"] .mbtn{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="modern"] .mbtn:hover{background:var(--modern-hover)}
+:root[data-skin="modern"] .mbtn.on{border-color:var(--accent);color:var(--accent)}
+:root[data-skin="modern"] .mbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* 窄視窗（一次只看一個窗格）：分頁列藏起來，只留「‹ 名單」返回鈕那一小列；沒有它就回不去名單 */
+:root[data-skin="modern"] .shell.only-chat .tabbar{display:flex;height:40px;margin-bottom:0;padding:6px 8px 0;align-items:center;background:var(--panel-soft)}
+:root[data-skin="modern"] .shell.only-chat .tabbar .ctab{display:none}
+:root[data-skin="modern"] .shell.only-chat .tabbar .pane-back{align-self:center;margin:0;height:30px;border-radius:999px}
+
+/* 左欄：對話清單的選取態（白底卡片＋陰影、14px 圓角） */
+:root[data-skin="modern"] .buddy,:root[data-skin="modern"] .room-btn{border-radius:14px}
+:root[data-skin="modern"] .buddy.on,:root[data-skin="modern"] .room-btn.on{background:var(--panel);border-color:transparent;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
+/* 搜尋列旁的「＋」（開新視窗）：36px 圓鈕，和搜尋鈕一樣大；原本在用戶區裡的那顆藏起來 */
+:root[data-skin="modern"] .search-plus{position:relative;display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer}
+:root[data-skin="modern"] .search-plus:hover{background:var(--modern-hover)}
+:root[data-skin="modern"] .search .search-ic{width:36px;height:36px;border-radius:50%}
+:root[data-skin="modern"] .list-pane > .me .plus-btn{display:none}
+
+/* 左欄底部用戶區：移到最下面（廣告框在它正上方），32px 頭像、名字、「在線・這台電腦」 */
+:root[data-skin="modern"] .list-pane > .me{order:99;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #e6e4df;border-bottom:0;background:var(--panel)}
+:root[data-skin="modern"] .list-pane > .me .me-dp{width:32px;height:32px}
+:root[data-skin="modern"] .list-pane > .me .me-dp > span{font-size:12px}
+:root[data-skin="modern"] .list-pane > .me .me-info{gap:1px}
+:root[data-skin="modern"] .list-pane > .me .me-row{flex-wrap:wrap;gap:0 4px}
+:root[data-skin="modern"] .list-pane > .me .nick-input{flex:1 1 100%;font-size:13.5px;font-weight:600;padding:0 3px}
+:root[data-skin="modern"] .list-pane > .me .status-sel{appearance:none;-webkit-appearance:none;field-sizing:content;max-width:none;padding:0 0 0 3px;border:0;background:transparent;font-size:12px;color:#6b706c;cursor:pointer}
+:root[data-skin="modern"] .list-pane > .me .me-this{display:inline;font-size:12px;color:#6b706c}
+:root[data-skin="modern"] .list-pane > .me .me-this::before{content:"・"}
+/* 個人訊息與正在播放：設計稿的用戶區只有兩行，藏起來（「＋」搬去搜尋列了） */
+:root[data-skin="modern"] .list-pane > .me .me-psm-row,:root[data-skin="modern"] .list-pane > .me .me-np{display:none}
+/* 換大頭貼的選單從用戶區往上彈（用戶區在最底下，往下彈會被裁掉） */
+:root[data-skin="modern"] .list-pane > .me .av-menu{top:auto;bottom:calc(100% + 4px)}

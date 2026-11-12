@@ -13,6 +13,8 @@ import { idleCountOf, taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { REASON, WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
+import { phoneOpsRows } from './mobile-ops.mjs'
+import { AsnAvatar } from './avatar-badge.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
 import { placeMenu } from './menu-place.mjs'
@@ -203,6 +205,63 @@ export function opsMenuItems(friend) {
   return canInviteFrom(friend) ? [{ key: 'invite', label: '邀請別人加入' }] : []
 }
 
+/** 一對一多出的「邀請別人加入」、群組多出的三項：手機「⋯」與電腦「更多」共用同一份（手機 m.js 與電腦 actionbar 都呼叫它，順序不各寫一套）。 */
+export function chatGroupItems(friend) {
+  if (!friend) return []
+  return friend.room === true ? groupMenuItems(friend) : opsMenuItems(friend)
+}
+
+// ---------- 現代外觀的頂部（#1421）：置中名牌＋右上「終端」「更多」 ----------
+// 名牌的狀態字：離線寫「離線」（現代外觀把原本的收件人列藏起來，離線提示改由名牌承擔）
+const PLATE_STATUS = { online: '在線', busy: '忙碌', running: '執行中', away: '暫離', offline: '離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+export function nameplateView(friend) {
+  const room = friend?.room === true
+  const name = String(friend?.nick ?? '')
+  const machine = room ? '' : String(friend?.device || friend?.machine || friend?.nodeName || '')
+  const state = room ? '群組' : (PLATE_STATUS[friend?.status] ?? '')
+  const sub = [machine, state].filter(Boolean).join('・')
+  return { name, sub, room, offline: !room && friend?.status === 'offline', initial: [...name][0] ?? '', aria: `${name}${sub ? '，' + sub : ''}` }
+}
+
+/** 「更多」裡「管理」那段的一列：key 加 p: 前綴（接回「管理」選單原本的 handler）；切換模型、喚醒的能不能按看電腦大按鈕那一格。 */
+function moreManageRow(item, slots) {
+  const key = `p:${item.key}`
+  if (item.key === 'model' && slots.model) return { key, label: item.label, ok: slots.model.ok, reason: slots.model.ok ? '' : briefWhy(slots.model.reason) }
+  if (item.key === 'resume') {
+    const w = slots.window
+    const ok = Boolean(item.ok && w?.wake && w.ok)
+    return { key, label: item.label, ok, reason: ok ? '' : briefWhy(item.reason || w?.reason || '現在不能喚醒') }
+  }
+  return { key, label: item.label, ok: item.ok !== false, reason: item.ok === false ? briefWhy(item.reason) : '' }
+}
+
+/**
+ * 電腦版現代外觀「更多」選單的項目。順序與手機「⋯」一致：先是 phoneOpsRows(manageItems)（喚醒、切換模型排最前，離線才有喚醒），
+ * 再接 chatGroupItems（邀請別人加入；群組是邀請、加 AI、成員與設定）；分隔線之後才是電腦獨有的：
+ * 通話、前台／後台（有「終端」鈕時不列）、子代理、工作項目、納入管理。群組只有群組那三項。
+ * ctx：{ ops（loadOpsContext 的結果）, selfNode, slots（barSlots 的結果依 key 做成的物件）, term（有「終端」鈕）, subLabel }
+ */
+export function moreMenuItems(friend, ctx = {}) {
+  if (!friend) return []
+  const slots = ctx.slots ?? {}
+  const shared = chatGroupItems(friend).map(i => ({ ...i, ok: true, reason: '' }))
+  if (friend.room === true) return shared
+  const manage = phoneOpsRows(manageItems(friend, ctx.ops ?? {}), friend).map(i => moreManageRow(i, slots))
+  const slotRow = (key, label, s) => ({ key, label, ok: s?.ok === true, reason: s?.ok === true ? '' : briefWhy(s?.reason ?? '') })
+  const own = []
+  if (slots.call) own.push(slotRow('call', BAR_LABEL.call, slots.call))
+  const w = slots.window
+  if (w && !ctx.term && !w.term && !w.wake && partnerEngine(friend) !== 'acp') own.push(slotRow('window', w.label, w))
+  if (slots.subs) own.push(slotRow('subs', ctx.subLabel || BAR_LABEL.subs, slots.subs))
+  if (slots.tasks) own.push(slotRow('tasks', slots.tasks.count > 0 ? `${BAR_LABEL.tasks}（${slots.tasks.count}）` : BAR_LABEL.tasks, slots.tasks))
+  if (manage.length) {
+    const a = adoptItem(friend, ctx.selfNode)
+    own.push({ key: a.key, label: a.label, ok: a.ok, reason: briefWhy(a.reason) })
+  }
+  const head = [...manage, ...shared]
+  return [...head, ...own.map((i, n) => (n === 0 && head.length ? { ...i, sep: true } : i))]
+}
+
 // 「把這台電腦上開著的終端納入管理…」（小良哥 #753、#757 用詞）：放在夥伴管理那段、封存之前。
 // 點了打開接手清單（adopt 對話框，候選窗格、接手、允許代答／代送都沿用）；對方已經是 ASN 開的終端、或不在這台電腦時反灰並寫原因。
 export const ADOPT_LABEL = '把這台電腦上開著的終端納入管理…'
@@ -292,6 +351,49 @@ export const OpsMenuButton = {
 </div>`,
 }
 
+/**
+ * 現代外觀的「更多」圓鈕（#1421）：選單的外觀、定位與 OpsMenuButton 同一套（搬到 body、position:fixed、不被捲動容器裁掉），只是按鈕是圓形的。
+ * 按鈕不用大按鈕區的樣式（現代外觀把大按鈕區整個藏起來）。
+ */
+export const MoreMenuButton = {
+  name: 'MoreMenuButton',
+  props: { items: { type: Array, default: () => [] }, label: { type: String, default: '更多' } },
+  emits: ['pick'],
+  setup(props, { emit }) {
+    const { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } = globalThis.Vue
+    const open = ref(false)
+    const btn = ref(null), pop = ref(null)
+    const pos = reactive({ x: 0, y: 0, ready: false })
+    async function place() {
+      await nextTick()
+      if (!btn.value || !pop.value) return
+      const r = btn.value.getBoundingClientRect()
+      const p = placeMenu({ x: r.right, y: r.bottom + 4 }, { w: pop.value.offsetWidth, h: pop.value.offsetHeight }, { w: window.innerWidth, h: window.innerHeight })
+      Object.assign(pos, { x: p.x, y: p.y, ready: true })
+    }
+    function toggle() { open.value = !open.value; pos.ready = false; if (open.value) void place() }
+    function pick(it) { if (it.ok === false) return; open.value = false; emit('pick', it.key) }
+    const onDoc = e => { if (open.value && !btn.value?.contains(e.target) && !pop.value?.contains(e.target)) open.value = false }
+    const onKey = e => { if (e.key === 'Escape') open.value = false }
+    onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
+    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
+    const view = computed(() => sharedWhy(props.items))
+    return { open, btn, pop, pos, toggle, pick, view }
+  },
+  template: `
+<div class="mbar-more">
+  <button class="mbtn" type="button" ref="btn" data-slot="more" :class="{ on: open }" aria-haspopup="true" :aria-expanded="open" :aria-label="label" :title="label" @click="toggle">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>
+  </button>
+  <teleport to="body">
+    <ul class="ab-menu ab-ops more-menu" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
+      <li class="menu-note menu-shared" v-for="n in view.notes" :key="n" role="note">{{ n }}</li>
+      <template v-for="it in view.rows" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'more-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false && it.why" :id="'more-why-' + it.key">{{ it.why }}</small></button></li></template>
+    </ul>
+  </teleport>
+</div>`,
+}
+
 const CALL_TIP = '語音通話：用說的跟這位夥伴對話，回信會念出來（再按掛斷）'
 const MODEL_TIP = '切換這個代理使用的模型'
 const TASKS_TIP = '看這個代理正在跑的背景工作'
@@ -299,7 +401,7 @@ const WAKE_TIP = '叫醒這個夥伴，接回原本的對話'
 
 export const ActionBar = {
   name: 'ActionBar',
-  components: { AsnDialog, PartnerOpDialog, OpsMenuButton },
+  components: { AsnDialog, PartnerOpDialog, OpsMenuButton, MoreMenuButton, AsnAvatar },
   props: {
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
@@ -310,6 +412,7 @@ export const ActionBar = {
     group: { type: Array, default: () => [] },     // 群組對話「群組」按鈕的項目（groupMenuItems）；有給才放這顆
     blocked: { type: Object, default: null },     // 簡版（ASN 直接開的終端分頁，#904）：{ 格子 key: 反灰原因 }；有給就不向任何後端查詢，列出的格子一律反灰並顯示原因
     piModelsFor: { type: Function, default: null },   // 別台電腦的 pi 模型清單（名單視窗的 remotePiModelsFor）；沒給＝別台的 pi 退回輸入框
+    avatar: { type: String, default: '' },   // 現代外觀頂部名牌的大頭貼網址（由對話區給）；沒給就用預設頭像
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
   emits: ['call', 'ops', 'term'],
@@ -342,6 +445,20 @@ export const ActionBar = {
     const groupAll = computed(() => props.group.map(i => ({ ...i, ok: true, reason: '' })))
     const pickGroup = key => emit('ops', key)   // 開在名單視窗（openGroupMenu）；分開模式的對話視窗也是請名單視窗代開
     const showSubs = computed(() => slot.value.subs.ok)
+    // 現代外觀頂部（#1421）：名牌、「終端」圓鈕、「更多」選單；Aero 下整列藏起來，資料與 handler 都沿用上面這組
+    const plate = computed(() => nameplateView(props.friend))
+    const termReady = computed(() => !lite.value && slot.value.window?.term === true)
+    const moreItems = computed(() => (lite.value || !props.api || !props.friend
+      ? (isRoom.value ? groupAll.value : opsAll.value)
+      : moreMenuItems(props.friend, { ops: opsCtx, selfNode: props.selfNode, slots: slot.value, term: termReady.value, subLabel: subView.value.label })))
+    function pickMore(key) {
+      if (key === 'call') { startCall(); return }
+      if (key === 'window') { onWindow(); return }
+      if (key === 'subs') { toggleSubs(); return }
+      if (key === 'tasks') { onTasks(); return }
+      if (key === 'p:model') { onModel(); return }
+      void pickOps(key)
+    }
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const termOn = computed(() => props.term?.on === true)
     const termTip = computed(() => (termOn.value ? TERM_BACK_TIP : props.term?.tip || TERM_TIP))
@@ -476,7 +593,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { root, plate, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -552,5 +669,20 @@ export const ActionBar = {
       <button class="aero-btn primary" type="button" v-if="!dlg.done && !dlg.error" :disabled="dlg.busy" @click="submit">{{ dlgText.ok }}</button>
     </div>
   </asn-dialog>
+</div>
+<div class="mbar" v-if="showBar" role="toolbar" aria-label="對話標頭">
+  <div class="mbar-plate" :class="{ 'is-offline': plate.offline, 'is-room': plate.room }" role="group" :aria-label="plate.aria">
+    <asn-avatar class="mbar-av" v-if="!plate.room" :src="avatar" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
+    <span class="mbar-av mbar-room" v-else aria-hidden="true">{{ plate.initial }}</span>
+    <b class="mbar-name">{{ plate.name }}</b>
+    <small class="mbar-sub" v-if="plate.sub">{{ plate.sub }}</small>
+  </div>
+  <div class="mbar-acts">
+    <button class="mbtn" type="button" data-slot="term" v-if="termReady" :class="{ on: termOn }" :aria-pressed="String(termOn)" :aria-label="termBtn.label" :title="termTip" @click="onWindow">
+      <svg v-if="!termOn" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="m7.5 10 3 2.5-3 2.5M13 15h4"/></svg>
+      <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3.5V16.5H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"/></svg>
+    </button>
+    <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
+  </div>
 </div>`,
 }

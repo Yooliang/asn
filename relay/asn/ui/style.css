@@ -1045,3 +1045,5 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .skin-mini-modern{background:#f6f5f2}
 .skin-mini-modern i{left:8px;right:8px;top:8px;height:3px;background:#2f7a70;border-radius:2px;width:26px}
 .skin-mini-modern b{left:8px;right:8px;top:18px;bottom:8px;background:#fff;border:1px solid #e4e2dc;border-radius:8px}
+/* #1421 B：現代外觀才用的新節點，復古 Aero 一律不顯示（版面與像素不變）；現代的樣式在 modern.css 檔尾 */
+.mbar,.me-this,.search-plus{display:none}

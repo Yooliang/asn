@@ -24,7 +24,7 @@ import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdo
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileChat, restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
-import { groupMenuItems } from './lib/actionbar.mjs'
+import { chatGroupItems } from './lib/actionbar.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
 import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
@@ -58,7 +58,7 @@ import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
-import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
+import { copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
@@ -372,8 +372,7 @@ const app = createApp({
     const groupItems = computed(() => {
       const f = chatFriend.value
       if (!f) return []
-      if (f.room) return groupMenuItems(f)   // 跟電腦版「群組」按鈕同一份（#539 之四）
-      return canInviteFrom(f) ? [{ key: 'invite', label: '邀請別人加入' }] : []
+      return chatGroupItems(f)   // 跟電腦版「群組」按鈕、現代外觀的「更多」同一份（#539 之四、#1421）
     })
     function pickGroup(key) {
       const f = chatFriend.value
