@@ -38,7 +38,7 @@ export function makeMobileRemoteViewApi({ confirm = () => confirmViewer(), invok
 export const mobileRemoteViewApi = makeMobileRemoteViewApi()
 
 /** 那台電腦的指紋還沒在這支手機確認過：和 Rust（view_d.rs 的 INPUT_NEEDS_CONFIRM）同一句（測試鎖住） */
-export const INPUT_NEEDS_CONFIRM_TEXT = '先在「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字'
+export const INPUT_NEEDS_CONFIRM_TEXT = '先在「設定 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字'
 
 /**
  * 手機打字用的介面（#1378）。start 的順序：

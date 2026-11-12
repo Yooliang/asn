@@ -260,11 +260,11 @@ test('確認還在等時切回訊息（那一次作廢），之後才回 ok：�
   assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
 })
 
-test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設置 → 設備」的「詳情」確認，分頁名稱和手機畫面一致', async () => {
+test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設定 → 設備」的「詳情」確認，分頁名稱和手機畫面一致', async () => {
   const rs = read('../src-tauri/src/view_d.rs')
   const m = /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)
   assert.ok(m, '有這句')
-  // 分頁名、設定分類名、按鈕字都從手機畫面實際用的常數組出來：哪一個改了名（例如「設置」改成「設定」），這裡就會紅，提醒對齊 Rust 的這句
+  // 分頁名、設定分類名、按鈕字都從手機畫面實際用的常數組出來：哪一個改了名（例如 0.2.18 的「設置」改成「設定」），這裡就會紅，提醒對齊 Rust 的這句
   const { TAB_LABEL } = await import('../ui/lib/mobile.mjs')
   const { mobileSettingTitle } = await import('../ui/lib/mobile-settings.mjs')
   const { TEXT: KNOWN } = await import('../ui/lib/mobile-known-peers.mjs')
