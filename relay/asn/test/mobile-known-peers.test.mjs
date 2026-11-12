@@ -21,7 +21,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
   assert.equal(TEXT.confirmed, '已確認')
-  assert.equal(TEXT.unconfirmed, '還沒確認')
+  assert.equal(TEXT.unconfirmed, '未確認')
   assert.equal(TEXT.tagConfirmed, '已確認')
   assert.equal(TEXT.tagUnconfirmed, '未確認')
   assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
@@ -547,4 +547,14 @@ test('設定頁確認的就是正在看的那台：成功後原本對象一併�
   const html = read('../ui/m.html')
   assert.match(html, /v-if="chatFriend && vp\.note && !vp\.noteOwn"/, '終端提示條不顯示設定頁的提示')
   assert.match(html, /v-if="vp\.note && vp\.noteOwn" role="alert"/, '設定頁只顯示自己的提示')
+})
+
+test('#1393 審查：改名沒拿到成功回覆要顯示失敗、名單沒讀到不全歸舊紀錄、提示字改新位置、像指紋的名字當未命名', async () => {
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(js, /const r = await knownPeers\.rename\(node, dn\.text\)\s*if \(!r\) \{ dn\.err = KNOWN_TEXT\.failed; return \}/)
+  assert.match(js, /return acctAllDevs\.value\.length \? j : \{ \.\.\.j, old: \[\] \}/)
+  const { LOGIN_TEXT } = await import('../ui/lib/mobile-device-login.mjs')
+  assert.ok(LOGIN_TEXT.confirmNeed.includes('「設定 → 設備」') && !LOGIN_TEXT.confirmNeed.includes('認得的電腦'))
+  const { normalizeList } = await import('../ui/lib/mobile-known-peers.mjs')
+  assert.equal(normalizeList({ peers: [{ node: 'pc', name: '工作機 a93cc519', confirmed: false }] })[0].label, '未命名的電腦')
 })

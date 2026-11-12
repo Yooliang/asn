@@ -530,8 +530,9 @@ mod tests {
         }
         for (i, _) in code.match_indices("consent::") {
             let before = &code[..i];
-            let start = before.rfind("\npub fn ").unwrap();
-            let owner: String = before[start + 8..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            // 比照 device_id.rs 的 owner_at：async 的命令也要認得
+            let (start, len) = ["\npub async fn ", "\npub fn "].iter().filter_map(|p| before.rfind(p).map(|at| (at, p.len()))).max().unwrap();
+            let owner: String = before[start + len..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
             assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&owner.as_str()), "{owner} 不能碰憑證");
         }
         for name in ["android_known_challenge", "android_known_answer", "android_known_list"] {

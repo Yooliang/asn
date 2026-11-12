@@ -488,7 +488,8 @@ const app = createApp({
       if (!node || dn.busy || deviceNameError(dn.text)) return
       dn.busy = true; dn.err = ''
       try {
-        await knownPeers.rename(node, dn.text)
+        const r = await knownPeers.rename(node, dn.text)
+        if (!r) { dn.err = KNOWN_TEXT.failed; return }   // 沒拿到成功的回覆：編輯框留著、顯示失敗，不讓人以為改好了
         Object.assign(dn, { node: '', text: '', err: '' })
         await Promise.allSettled([core.refreshRoster(), loadKnown()])
       } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); dn.err = renameErrorText(e) } finally { dn.busy = false }
@@ -685,7 +686,8 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
-    const joined = computed(() => joinKnown(acctDevs.value, kp.list))
+    // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
+    const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）

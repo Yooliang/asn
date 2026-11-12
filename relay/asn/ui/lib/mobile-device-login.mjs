@@ -23,7 +23,7 @@ export const LOGIN_TEXT = Object.freeze({
   button: name => `從手機替這台登入 ${name}`,
   confirmTitle: (label, name) => `要讓「${label}」登入 ${name} 嗎？`,
   confirmBody: name => `這台電腦會開始登入 ${name}，登入網址和代碼會加密送到這支手機，由你在手機上打開網址、輸入代碼並核准。`,
-  confirmNeed: '那台電腦要先在設定的「認得的電腦」裡，勾選這支手機的「允許替這台登入」，並且登入著同一個 ASN 帳號；你在電腦前也可以隨時取消。',
+  confirmNeed: '那台電腦要先在「設定 → 設備」，打開這支手機的「詳情」，勾選「允許替這台登入」，並且登入著同一個 ASN 帳號；你在電腦前也可以隨時取消。',
   yes: '開始登入',
   no: '先不要',
   close: '關閉',

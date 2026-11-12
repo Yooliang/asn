@@ -6,7 +6,7 @@
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
-import { NAME_MAX as BACKEND_NAME_MAX } from './device-known.mjs'
+import { NAME_MAX as BACKEND_NAME_MAX, displayDeviceName } from './device-known.mjs'
 
 const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, n)
 
@@ -59,7 +59,7 @@ export const TEXT = {
   confirmButton: '確認',
   fp: fp => `指紋 ${fp}`,
   confirmed: '已確認',
-  unconfirmed: '還沒確認',
+  unconfirmed: '未確認',
   forget: '忘記',
   forgetNote: '只有你確定是那台重灌、換了電腦，或不想再看它時才按。忘記之後，下次連上去會當成第一次。',
   notReady: '還沒記住這台電腦，請等畫面出來再按一次。',
@@ -103,7 +103,7 @@ export function normalizeList(raw) {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
       // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: name || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
+      return { node: p.node, name, label: displayDeviceName(name) || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
     })
 }
 
