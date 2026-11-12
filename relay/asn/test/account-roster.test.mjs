@@ -309,8 +309,10 @@ test('「我的帳號」卡片的資料：時間放帳號後面（舊資料加�
   // 兩窗是不同台讀的：兩台都標；同一台只列一次
   const two = rosterQuota(entry({ windows: [win('five_hour', 40, H, { read_node: S }), win('weekly', 72, 2 * H)] }), { nodeLabel, now: NOW })
   assert.deepEqual([...two.readNodes].sort(), [S, W].sort())
-  // 不再回報的帳號：「3 天前讀的」，資料超過 6 小時一樣加「較舊」
-  assert.equal(rosterQuota(entry({ nodes: [], windows: [win('weekly', 72, 3 * D)] }), { nodeLabel, now: NOW }).ageLabel, '3 天前讀的，較舊')
+  // 不再回報的帳號：跟其他帳號寫法一致「3 天前」（不加「讀的」），資料超過 6 小時一樣加「較舊」；舊欄位 meta 還是「3 天前讀的」給手機用
+  const gone = rosterQuota(entry({ nodes: [], windows: [win('weekly', 72, 3 * D)] }), { nodeLabel, now: NOW })
+  assert.equal(gone.ageLabel, '3 天前，較舊')
+  assert.match(gone.meta, /^3 天前讀的/)
   // 沒有額度窗（Codex 還沒開）：時間用最後一次回報，哪台用 seen_node；說明文字照留
   const codex = rosterQuota(entry({ vendor: 'codex', windows: [] }), { nodeLabel, now: NOW })
   assert.equal(codex.text, '開 Codex 後才讀得到')

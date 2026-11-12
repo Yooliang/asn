@@ -20,7 +20,7 @@ export const ROSTER_TEXT = {
   resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
 const STALE_NOTE = '較舊'   // 「我的帳號」卡片上帳號後面的括號：「（11 小時前，較舊）」
-export const ROSTER_POLL_MS =5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
+export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
 const VENDOR_RANK = { claude: 0, codex: 1, gemini: 2, grok: 3, minimax: 4 }
 const VENDOR_NAME = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok', minimax: 'MiniMax' }
@@ -91,8 +91,9 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
   const gone = entry?.vendor !== 'gemini' && entry?.vendor !== 'minimax' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
   const readNodesOf = list => [...new Set(list.map(w => w.node).filter(Boolean))]   // 這幾窗是哪幾台讀的（設備按鈕上標藍線用）
+  const agoOf = at => (at != null ? agoText(new Date(at).toISOString(), now) : '')   // 「3 天前」（「我的帳號」卡片帳號後面的括號用，不加「讀的」）
   const stamp = (at, node) => {
-    const ago = at != null ? agoText(new Date(at).toISOString(), now) : ''
+    const ago = agoOf(at)
     const when = ago && gone ? `${ago}讀的` : ago
     return [when, node ? shortDevice(nodeLabel(node)) : ''].filter(Boolean).join('・')
   }
@@ -100,7 +101,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
     const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
     const seenNode = typeof entry?.seen_node === 'string' ? entry.seen_node : ''
     const meta = stamp(time(entry?.seen_at), seenNode)
-    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: stamp(time(entry?.seen_at), ''), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], oldText: '', stale: true, exhausted: false, gone }
+    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: agoOf(time(entry?.seen_at)), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], oldText: '', stale: true, exhausted: false, gone }
   }
   const expired = w => w.reset != null && w.reset <= now
   const parts = wins.map(w => (expired(w)
@@ -121,7 +122,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   if (!live.length) {
     // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
     const o = oldestOf(inLine)
-    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: stamp(o.read, ''), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', stale: true, exhausted: Boolean(out), gone }
+    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', stale: true, exhausted: Boolean(out), gone }
   }
   const oldest = oldestOf(live)
   const stale = now - oldest.read > STALE_MS
@@ -129,7 +130,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
     known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
     meta: stamp(oldest.read, oldest.node), listMeta,
     // 「我的帳號」卡片的新排法：時間放在帳號後面的括號（舊資料在括號裡加「較舊」），讀這筆額度的那台只標在它的設備按鈕上；meta／oldText 留給手機與設備卡
-    ageLabel: stamp(oldest.read, '') + (stale ? `，${STALE_NOTE}` : ''), readNodes: readNodesOf(live),
+    ageLabel: agoOf(oldest.read) + (stale ? `，${STALE_NOTE}` : ''), readNodes: readNodesOf(live),
     resetText, bars, oldText: stale ? OLD_TEXT : '',
     stale, exhausted: Boolean(out), gone,
   }
