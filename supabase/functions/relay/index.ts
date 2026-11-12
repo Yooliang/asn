@@ -10,6 +10,7 @@ import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
+import { handleDeviceRename } from "../_shared/device_rename.ts";
 import { findSentByClientId, parseClientId, sendWithClientId } from "../_shared/send_client_id.ts";
 import { bellTopicsOf, handleChatHistory, personArgs, voiceArgs } from "../_shared/account_me.ts";
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
@@ -542,6 +543,11 @@ Deno.serve(async (req) => {
   }
   if (action === "partner_list" && req.method === "POST") {
     const r = await handlePartnerList({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER));
+    return json(r.status, r.body);
+  }
+  // 設備改名（#1388）：本人簽章（x-asn-user）＋節點金鑰；送請求的節點一律是金鑰所屬的 me.id，要改的那台由資料庫核對是同一個人的
+  if (action === "device_rename" && req.method === "POST") {
+    const r = await handleDeviceRename({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER), await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   // 往來記錄（#108）：「我和某夥伴」90 天內的信，以後台為準。必須帶本人簽章（x-asn-user）：AI 視窗拿得到節點金鑰，拿不到登入憑證
