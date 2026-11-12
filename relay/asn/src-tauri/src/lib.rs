@@ -91,8 +91,9 @@ mod view_remote;
 mod view_d;   // 看別台畫面（D）的共用核心：電腦與手機的命令都呼叫它
 #[cfg(all(desktop, feature = "gui"))]
 mod presence;
-#[cfg(desktop)]
-mod view_input;
+mod view_input;   // 打字的反向通道（判斷與密碼學）：電腦與手機都會打字（#1378）
+#[cfg(feature = "gui")]
+mod view_d_input;   // 打字的那台（D）的共用部分：開著的打字、送字、補送
 #[cfg(all(desktop, feature = "gui"))]
 mod input_consent;
 #[cfg(feature = "gui")]
@@ -1510,13 +1511,11 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
     }
     let machine = view_d::clean_machine(machine);
     // 看畫面或打字（0.2.10）。沒帶是看畫面；其他字一律不收
-    let scope = view_d::parse_scope(scope.as_deref(), true)?;
-    if scope == view_handshake::Scope::Input && inputs.count() >= view_input::MAX_OPEN {
-        return Err(view_input::TOO_MANY.into());
-    }
+    // 打字同時只能一個：view_d 發起時占位（滿了就不發起），失敗會放掉
+    let scope = view_d::parse_scope(scope.as_deref())?;
     let relay = relay_of(&app)?;
     let backend = LiveBackend { app: window.app_handle().clone(), relay: relay.clone(), data_dir: app.data_dir.clone() };
-    let view_d::Begun { id, session: s, eph, topic, target } = view_d::begin(&backend, views.inner(), &app.node, to_node, partner, machine, scope, auth::now_ms()).await?;
+    let view_d::Begun { id, session: s, eph, topic, target } = view_d::begin(&backend, views.inner(), inputs.inner(), &app.node, to_node, partner, machine, scope, auth::now_ms()).await?;
     start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), inputs.inner().clone(), url, topic, s.clone(), eph, target);
     Ok(view_d::started_json(&id, s.expires_s, scope))
 }
@@ -1530,72 +1529,20 @@ async fn term_view_remote_input(window: tauri::WebviewWindow, inputs: State<'_, 
     if !window.is_focused().unwrap_or(false) {
         return Err("視窗不在前景，不送".into());
     }
-    launch::term_view::check_input(&data)?;
-    let (ob, tx) = inputs.get(&id).ok_or("這個畫面現在不能打字")?;
-    let wires = ob.lock().unwrap_or_else(|e| e.into_inner()).push(&data, paste.unwrap_or(false), auth::now_ms())?;
-    for w in wires {
-        // 送不出去不用回錯：那台沒確認就會補送，太久沒確認會停下來告訴本人
-        let _ = bell::send_via(&tx, view_input::EVENT, serde_json::json!({ "w": w })).await;
-    }
-    Ok(())
+    view_d_input::send(inputs.inner(), &id, &data, paste.unwrap_or(false), auth::now_ms()).await
 }
 
-/// 進行中的打字（看的那台）：觀看編號 → 送出端。只在本機
+/// 進行中的打字（看的那台）：電腦與手機共用（view_d_input）
 #[cfg(all(desktop, feature = "gui"))]
-#[derive(Default)]
-struct RemoteInputs {
-    open: std::sync::Mutex<std::collections::HashMap<String, (Arc<std::sync::Mutex<view_input::DOutbox>>, tokio::sync::mpsc::Sender<bell::Outbound>, bool)>>,
-}
-
-#[cfg(all(desktop, feature = "gui"))]
-impl RemoteInputs {
-    fn add(&self, id: &str, ob: Arc<std::sync::Mutex<view_input::DOutbox>>, tx: tokio::sync::mpsc::Sender<bell::Outbound>) {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), (ob, tx, false));
-    }
-    fn get(&self, id: &str) -> Option<(Arc<std::sync::Mutex<view_input::DOutbox>>, tokio::sync::mpsc::Sender<bell::Outbound>)> {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).get(id).filter(|v| !v.2).map(|v| (v.0.clone(), v.1.clone()))
-    }
-    fn count(&self) -> usize {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).len()
-    }
-    /// 網路不穩：不再收字
-    fn stall(&self, id: &str) {
-        if let Some(v) = self.open.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
-            v.2 = true;
-        }
-    }
-    /// 收掉。回是不是因為網路不穩停的
-    fn remove(&self, id: &str) -> bool {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(id).is_some_and(|v| v.2)
-    }
-}
+type RemoteInputs = view_d_input::RemoteInputs;
 
 /// 打字的補送：每 300 毫秒看一次，那台沒確認的再送；最舊的一幅 5 秒還沒確認就停下（不跳過缺的字），結束這次打字
 #[cfg(all(desktop, feature = "gui"))]
 fn spawn_input_resend(app: AppHandle, label: String, views: Arc<view_remote::RemoteViews>, inputs: Arc<RemoteInputs>, id: String) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let Some((ob, tx)) = inputs.get(&id) else { break };
-            if views.want(&id) == view_remote::Want::Ended {
-                break;
-            }
-            let now = auth::now_ms();
-            let (again, stalled) = {
-                let mut g = ob.lock().unwrap_or_else(|e| e.into_inner());
-                (g.resend(now), g.stalled(now))
-            };
-            if stalled {
-                inputs.stall(&id);
-                views.set(&id, view_remote::Want::Ended);
-                let _ = app.emit_to(label.as_str(), "term-view-remote-input-stalled", serde_json::json!({ "id": id }));
-                break;
-            }
-            for w in again {
-                let _ = bell::send_via(&tx, view_input::EVENT, serde_json::json!({ "w": w })).await;
-            }
-        }
-    });
+    let id2 = id.clone();
+    tauri::async_runtime::spawn(view_d_input::resend_loop(views, inputs, id, move || {
+        let _ = app.emit_to(label.as_str(), view_d_input::STALLED_EVENT, serde_json::json!({ "id": id2 }));
+    }));
 }
 
 /// 看的那台要看的那台：節點、名字、設備公鑰，和本機記住的比過的結果
@@ -2953,9 +2900,9 @@ pub fn run() {
         .manage(terms)
         .manage(Arc::new(askpass::dialog::DialogState::default()))
         .plugin(tauri_plugin_updater::Builder::new().build());
-    // 手機看電腦的終端（只看）：進行中的觀看與即時頻道網址
+    // 手機看電腦的終端（看、打字）：進行中的觀看、開著的打字與即時頻道網址
     #[cfg(all(not(desktop), feature = "gui"))]
-    let builder = builder.manage(Arc::new(view_remote::RemoteViews::default())).manage(ViewNet(anon_url.clone()));
+    let builder = builder.manage(Arc::new(view_remote::RemoteViews::default())).manage(Arc::new(view_d_input::RemoteInputs::default())).manage(ViewNet(anon_url.clone()));
     // 安卓版專屬：開系統瀏覽器（登入、點連結）
     #[cfg(target_os = "android")]
     let builder = builder.plugin(tauri_plugin_opener::init());
@@ -2983,7 +2930,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_login_sealed, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_input, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_login_sealed, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {

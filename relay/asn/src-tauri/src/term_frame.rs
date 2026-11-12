@@ -1,4 +1,4 @@
-//! 終端畫面的過濾（全平台都編；電腦端的 `launch::term_view` 與看別台終端的收幀共用）。
+//! 終端畫面的過濾與打字的檢查（全平台都編；電腦端的 `launch::term_view` 與看別台終端的收幀、送字共用）。
 //! 畫面內容是外部資料，這裡只做純文字判斷，不碰視窗、不碰網路。
 
 /// 畫面內容是外部資料。只放行顏色（SGR）、字元集 `ESC(B`、換行和一般文字，其他序列一律拿掉：
@@ -50,6 +50,56 @@ pub fn filter_frame(raw: &str) -> String {
             c if (c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32)) => {}
             c => out.push(c),
         }
+    }
+    out
+}
+
+/// 一次呼叫最多收多少（位元組）。貼上 1 萬字（約 3 萬位元組）要過，所以比單次送出的大
+pub const INPUT_CALL_MAX_BYTES: usize = 256 * 1024;
+
+/// xterm.js 送出來的是按鍵序列（Enter、方向鍵、Ctrl＋字母、一般文字）。這裡擋掉不是按鍵的東西：
+/// 字串類序列（OSC、DCS、APC、PM、SOS）和 8 位元的控制字元（\u{9b} 等於 CSI）。其他一律放行（含單獨的 Esc、CSI／SS3 按鍵序列）
+pub fn check_input(data: &str) -> Result<(), String> {
+    if data.is_empty() {
+        return Err("沒有要送的字".into());
+    }
+    if data.len() > INPUT_CALL_MAX_BYTES {
+        return Err("一次送的字太多，請分段貼上".into());
+    }
+    let mut it = data.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' && matches!(it.peek(), Some(']') | Some('P') | Some('X') | Some('^') | Some('_')) {
+            return Err("這不是按鍵，不送".into());
+        }
+        if (0x80..=0x9f).contains(&(c as u32)) {
+            return Err("這不是按鍵，不送".into());
+        }
+    }
+    Ok(())
+}
+
+/// 把字切成不超過 `max` 位元組的幾段，不從字中間切開，順序不變
+pub fn split_chunks(text: &str, max: usize) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if rest.len() <= max {
+            out.push(rest);
+            break;
+        }
+        let mut cut = max;
+        while cut > 0 && !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        // 不把跳脫序列切在 ESC 和後面的字元中間（ESC 在尾巴就留給下一段）
+        if cut > 0 && rest[..cut].ends_with('\x1b') {
+            cut -= 1;
+        }
+        if cut == 0 {
+            cut = rest.chars().next().map_or(rest.len(), |c| c.len_utf8());
+        }
+        out.push(&rest[..cut]);
+        rest = &rest[cut..];
     }
     out
 }

@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-pub use crate::term_frame::filter_frame;
+pub use crate::term_frame::{check_input, filter_frame, split_chunks};
 
 /// 有輸入後這段時間內讀快一點，打字才看得到（工作機實測 50 毫秒輪詢 p95 約 87 毫秒，#597）
 pub const INPUT_ACTIVE_MS: u64 = 2_000;
@@ -24,31 +24,8 @@ pub fn next_delay_ms(now_ms: u64, last_input_ms: u64) -> u64 {
 /// 單次送進窗格的字數上限（位元組）。`wezterm cli send-text` 的字是放在命令列參數裡，Windows 命令列有約 32 KB 的上限，
 /// 留一半以上的餘裕；超過的分段送，順序不變
 pub const INPUT_CHUNK_BYTES: usize = 8 * 1024;
-/// 一次呼叫最多收多少（位元組）。貼上 1 萬字（約 3 萬位元組）要過，所以比單次送出的大
-pub const INPUT_CALL_MAX_BYTES: usize = 256 * 1024;
 /// 等著送的字積壓到這麼多就先擋住（回錯給畫面），不丟字
 pub const INPUT_QUEUE_MAX_BYTES: usize = 512 * 1024;
-
-/// xterm.js 送出來的是按鍵序列（Enter、方向鍵、Ctrl＋字母、一般文字）。這裡擋掉不是按鍵的東西：
-/// 字串類序列（OSC、DCS、APC、PM、SOS）和 8 位元的控制字元（\u{9b} 等於 CSI）。其他一律放行（含單獨的 Esc、CSI／SS3 按鍵序列）
-pub fn check_input(data: &str) -> Result<(), String> {
-    if data.is_empty() {
-        return Err("沒有要送的字".into());
-    }
-    if data.len() > INPUT_CALL_MAX_BYTES {
-        return Err("一次送的字太多，請分段貼上".into());
-    }
-    let mut it = data.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '\x1b' && matches!(it.peek(), Some(']') | Some('P') | Some('X') | Some('^') | Some('_')) {
-            return Err("這不是按鍵，不送".into());
-        }
-        if (0x80..=0x9f).contains(&(c as u32)) {
-            return Err("這不是按鍵，不送".into());
-        }
-    }
-    Ok(())
-}
 
 /// 貼上的字只留文字：拿掉 ESC 和其他控制字元（只留 Tab、換行），也拿掉 8 位元控制字元。
 /// 貼上是文字，不是按鍵：貼上的內容裡如果有 ESC（例如 `ESC[201~`，bracketed paste 的結尾），就可能讓窗格跳出貼上模式、
@@ -57,32 +34,6 @@ pub fn sanitize_paste(text: &str) -> String {
     text.chars()
         .filter(|&c| matches!(c, '\t' | '\n' | '\r') || !((c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32))))
         .collect()
-}
-
-/// 把字切成不超過 `max` 位元組的幾段，不從字中間切開，順序不變
-pub fn split_chunks(text: &str, max: usize) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() {
-        if rest.len() <= max {
-            out.push(rest);
-            break;
-        }
-        let mut cut = max;
-        while cut > 0 && !rest.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        // 不把跳脫序列切在 ESC 和後面的字元中間（ESC 在尾巴就留給下一段）
-        if cut > 0 && rest[..cut].ends_with('\x1b') {
-            cut -= 1;
-        }
-        if cut == 0 {
-            cut = rest.chars().next().map_or(rest.len(), |c| c.len_utf8());
-        }
-        out.push(&rest[..cut]);
-        rest = &rest[cut..];
-    }
-    out
 }
 
 /// 讀歷史預設行數
@@ -620,7 +571,7 @@ mod tests {
         for bad in ["", "\x1b]52;c;aGVsbG8=\x07", "a\x1bPq\x1b\\", "\x1b_x\x1b\\", "\x1b^x", "\x1bXx", "\u{9b}6n", "a\u{9d}b"] {
             assert!(check_input(bad).is_err(), "{bad:?}");
         }
-        assert!(check_input(&"字".repeat(INPUT_CALL_MAX_BYTES)).is_err(), "太大擋掉");
+        assert!(check_input(&"字".repeat(crate::term_frame::INPUT_CALL_MAX_BYTES)).is_err(), "太大擋掉");
     }
 
     #[test]

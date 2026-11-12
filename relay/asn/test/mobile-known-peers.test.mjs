@@ -344,7 +344,10 @@ test('Rust：金鑰變了的說法帶原本與新的完整指紋、名字用本�
   const desk = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf('#[cfg(not(desktop))]\n    let builder = builder.invoke_handler('))
   for (const c of ['android_known_list', 'android_known_challenge', 'android_known_answer', 'android_known_confirm', 'android_known_forget']) assert.ok(!desk.includes(c), `電腦版沒有 ${c}`)
   const rs = read('../src-tauri/src/android.rs')
-  assert.doesNotMatch(rs, /Scope::Input/)
+  // 手機也能打字（#1378）：android.rs 只用範圍檢查打字的上限；要先確認過那台的指紋，判斷在共用核心（view_d），指紋不經過畫面
+  assert.equal(rs.split('\n').filter(l => l.includes('Scope::Input')).length, 1)
+  assert.match(rs, /if sc == crate::view_handshake::Scope::Input && !crate::consent::label_ok\(window\.label\(\)\) \{/)
+  assert.match(vd, /if phone && scope == Scope::Input && !crate::device_id::phone_input_allowed\(/)
 })
 
 test('兩端給人核對的指紋一樣：電腦版設定頁回完整 16 碼，手機與電腦都每 4 個一組顯示', async () => {

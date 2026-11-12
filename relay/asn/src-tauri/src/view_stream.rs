@@ -246,9 +246,6 @@ pub enum Refused {
     MobileOff,
 }
 
-/// 依設備種類限制工作階段範圍：移動設備的工作階段只能查看畫面（拒絕時的結束原因用一般的 rejected）
-pub const SCOPE_VIEW_ONLY: &str = "這種設備只能查看畫面";
-
 /// 本機不允許移動設備查看時，拒絕的結束原因（後台 term_view_stop 的固定原因之一，D 端顯示一句清楚的話）
 pub const MOBILE_OFF: &str = "mobile_off";
 
@@ -290,10 +287,8 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
     if mobile && !allow_mobile {
         return Err(Refused::MobileOff);
     }
-    // 依設備種類限制工作階段範圍：移動設備只能查看（範圍簽在握手裡；這裡在記住對方、驗章之前就擋）
-    if mobile && s.scope != crate::view_handshake::Scope::View {
-        return Err(Refused::Bad(SCOPE_VIEW_ONLY.into()));
-    }
+    // 移動設備也可以要求打字（#1378）：範圍簽在握手裡；要不要問本人、能不能免問，呼叫端的規則和電腦完全相同，不看設備種類。
+    // 「允許移動設備」關著的在上面就拒絕了；進行中的打字每次交字前也會重讀這個開關（LiveTPort::input）
     let from_pub = get("from_pub")?.to_string();
     let tofu = known.check(&s.d_node, &from_pub);
     if tofu == crate::device_id::Tofu::Changed {
@@ -736,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn 依設備種類限制工作階段範圍_移動設備只能查看() {
+    fn 移動設備的工作階段_查看照舊_打字也接受_允許移動設備關著一律拒絕() {
         use crate::view_handshake::Scope;
         use serde_json::json;
         let (dd, td) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -756,24 +751,53 @@ mod tests {
             }
             row
         };
-        // 移動設備：查看照常，其他範圍一律不接受（就算本機允許移動設備查看）
-        assert_eq!(accept_request(&row_of(Scope::View, Some("android")), "t", &known, &t, now, true).unwrap().session.scope, Scope::View);
-        match accept_request(&row_of(Scope::Input, Some("android")), "t", &known, &t, now, true) {
-            Err(Refused::Bad(e)) => assert_eq!(e, SCOPE_VIEW_ONLY),
-            _ => panic!("移動設備的工作階段只能查看"),
+        // 移動設備查看：和以前一樣
+        let a = accept_request(&row_of(Scope::View, Some("android")), "t", &known, &t, now, true).unwrap();
+        assert_eq!((a.session.scope, a.mobile), (Scope::View, true));
+        // 移動設備打字：本機允許移動設備時接受（之後問不問本人由呼叫端決定，規則和電腦相同），帶著是移動設備
+        let a = accept_request(&row_of(Scope::Input, Some("android")), "t", &known, &t, now, true).unwrap();
+        assert_eq!((a.session.scope, a.mobile, a.tofu), (Scope::Input, true, crate::device_id::Tofu::New));
+        // 「允許移動設備」關著：查看、打字一律拒絕
+        for scope in [Scope::View, Scope::Input] {
+            assert!(matches!(accept_request(&row_of(scope, Some("android")), "t", &known, &t, now, false), Err(Refused::MobileOff)), "{scope:?}");
+            assert!(matches!(accept_request(&row_of(scope, Some("ios")), "t", &known, &t, now, false), Err(Refused::MobileOff)), "{scope:?}");
         }
-        assert!(matches!(accept_request(&row_of(Scope::Input, Some("ios")), "t", &known, &t, now, true), Err(Refused::Bad(_))));
+        // 範圍簽在握手裡：打字的簽章不能被改成查看，查看的也不能被改成打字
+        let mut as_view = row_of(Scope::Input, Some("android"));
+        as_view.as_object_mut().unwrap().remove("scope");
+        assert!(matches!(accept_request(&as_view, "t", &known, &t, now, true), Err(Refused::Bad(_))));
+        let mut as_input = row_of(Scope::View, Some("android"));
+        as_input["scope"] = json!("input");
+        assert!(matches!(accept_request(&as_input, "t", &known, &t, now, true), Err(Refused::Bad(_))));
         // 電腦照舊
-        assert_eq!(accept_request(&row_of(Scope::Input, Some("desktop")), "t", &known, &t, now, true).unwrap().session.scope, Scope::Input);
+        assert_eq!(accept_request(&row_of(Scope::Input, Some("desktop")), "t", &known, &t, now, false).unwrap().session.scope, Scope::Input);
         assert_eq!(accept_request(&row_of(Scope::Input, None), "t", &known, &t, now, true).unwrap().session.scope, Scope::Input);
     }
 
     #[test]
-    fn 守門_範圍限制也在記住對方和驗章之前() {
+    fn 守門_打字的確認與免問_電腦和手機同一套規則() {
+        // start_view_poller 打字的分支（問本人、免問、記下按過允許）不看是不是移動設備
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let start = lib.find("if a.session.scope == view_handshake::Scope::Input {").expect("打字的分支");
+        let f = &lib[start..start + lib[start..].find("let mobile = a.mobile;").expect("打字分支後面的下一句")];
+        assert!(!f.contains("mobile"), "打字的確認不分設備種類");
+        assert!(f.contains("input_consent::ask(") && f.contains("device_id::live::confirm_input("));
+        // 每次把字交給窗格前都重讀「允許移動設備」（關掉就結束）
+        let port = lib.split("    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {").nth(1).expect("有 LiveTPort::input");
+        assert!(port.contains(".view_allowed(self.mobile)"));
+        // 移動設備的範圍不再寫死只能查看
+        let me = include_str!("view_stream.rs");
+        let f = me.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(!f.contains("Scope::View {"), "accept_request 不依設備種類限制範圍");
+    }
+
+    #[test]
+    fn 守門_移動設備被擋也在記住對方和驗章之前_查看打字都一樣() {
         let src = include_str!("view_stream.rs");
         let f = src.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
-        let block = f.find("SCOPE_VIEW_ONLY").expect("有依設備種類限制範圍");
+        let block = f.find("if mobile && !allow_mobile {").expect("有擋移動設備");
         assert!(block < f.find("known.check(").unwrap() && block < f.find("t_accept(").unwrap(), "先擋，再 TOFU、驗章");
+        assert!(!f[..block].contains("scope =="), "擋移動設備不看範圍");
     }
 
     #[test]

@@ -350,7 +350,7 @@ mod sideload {
     }
 }
 
-// ---------- 看電腦的終端（只能看，不能打字）：和電腦版同名同參數，前端共用 remoteViewApi 的呼叫方式 ----------
+// ---------- 看電腦的終端、在下方輸入框打字（#1378）：和電腦版同名同參數，前端的呼叫方式和電腦版相同 ----------
 
 /// 這支手機能不能發起：連得上即時頻道、不是自己
 #[tauri::command]
@@ -358,24 +358,45 @@ pub async fn term_view_remote_available(app: State<'_, App>, net: State<'_, crat
     Ok(net.0.is_some() && node != app.node)
 }
 
-/// 發起查看。只收看畫面，`scope` 帶 input（打字）一律拒絕。回 { id, expires_s, scope }
+/// 發起查看或打字（`scope` 帶 input）。打字要帶 `challenge`：先用 `android_known_token`（action＝input）要憑證、外殼本人驗證通過才算數，
+/// 這裡用掉它（30 秒內、一次）才往下走，否則回「沒有完成本人驗證」；看畫面不用憑證，行為不變。
+/// 打字還要先在手機上確認過那台的指紋（view_d 判斷）；那台照電腦的規則問那邊的人（「允許移動設備」關著就拒絕）。
+/// 同時只能在一個畫面打字（view_d 發起時占位）。回 { id, expires_s, scope, confirmed, node }
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, net: State<'_, crate::ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App>, views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, inputs: State<'_, std::sync::Arc<crate::view_d_input::RemoteInputs>>, net: State<'_, crate::ViewNet>, to_node: String, partner: String, machine: Option<String>, scope: Option<String>, challenge: Option<String>) -> Result<serde_json::Value, String> {
     use tauri::Manager;
-    // 要求打字的先擋下，連即時頻道都不看
-    crate::view_d::parse_scope(scope.as_deref(), false)?;
+    // 範圍先檢查：不認得的一律不收
+    let sc = crate::view_d::parse_scope(scope.as_deref())?;
+    // 打字：只接受主畫面，並用掉本人剛驗證過的打字憑證；看畫面直接過
+    if sc == crate::view_handshake::Scope::Input && !crate::consent::label_ok(window.label()) {
+        return Err(crate::consent::INPUT_NOT_VERIFIED.into());
+    }
+    crate::consent::gate_start(&app.data_dir, sc, &to_node, challenge.as_deref())?;
     let url = net.0.clone().ok_or("這支手機現在連不上即時頻道，不能看畫面")?;
     let relay = relay_of(&app)?;
     let handle = window.app_handle().clone();
     let backend = std::sync::Arc::new(crate::LiveBackend::new(handle.clone(), relay, app.data_dir.clone()));
-    let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
+    let begun = crate::view_d::start_view(backend.as_ref(), views.inner(), inputs.inner(), &app.node, to_node, partner, machine, scope.as_deref(), crate::auth::now_ms()).await?;
     // 回給畫面的資料多帶有沒有確認過（不帶指紋）
     let started = crate::view_d::started_view_json(&begun);
     let sink = std::sync::Arc::new(crate::LiveSink::new(handle, window.label().to_string()));
-    crate::view_d::spawn_view(backend, sink, views.inner().clone(), url, begun);
+    crate::view_d::spawn_view(backend, sink, views.inner().clone(), inputs.inner().clone(), url, begun);
     Ok(started)
 }
+
+/// 本人在下方輸入框打的字（#1378）：和電腦版同名同參數。只送到開著的打字工作階段：那台接受了（那邊的人按過允許或符合免問）、
+/// 這台驗過那台的簽章之後才登記（view_d_input）；沒登記、已結束、停住的一律回錯。畫面藏起來（暫停）時也不送
+#[tauri::command]
+pub async fn term_view_remote_input(views: State<'_, std::sync::Arc<crate::view_remote::RemoteViews>>, inputs: State<'_, std::sync::Arc<crate::view_d_input::RemoteInputs>>, id: String, data: String, paste: Option<bool>) -> Result<(), String> {
+    if views.want(&id) != crate::view_remote::Want::Watching {
+        return Err(NOT_SHOWN.into());
+    }
+    crate::view_d_input::send(inputs.inner(), &id, &data, paste.unwrap_or(false), crate::auth::now_ms()).await
+}
+
+/// 打字的畫面不在前景（被藏起來）
+const NOT_SHOWN: &str = "畫面不在前景，這段沒有送出，請回到終端畫面再打";
 
 /// 暫停（畫面藏起來）或繼續
 #[tauri::command]
@@ -446,7 +467,7 @@ pub fn android_known_answer(app: State<'_, App>, id: String, pick: i64) -> Resul
     Ok(out.as_str().to_string())
 }
 
-/// 要一個一次性的確認憑證（`action`＝confirm 或 forget，要對哪台電腦）：32 位元組亂數的十六進位字串，30 秒內有效、只能用一次。
+/// 要一個一次性的確認憑證（`action`＝confirm、forget、scan，或開始打字的 input，要對哪台電腦）：32 位元組亂數的十六進位字串，30 秒內有效、只能用一次。
 /// 畫面拿它請外殼跳生物辨識；外殼驗證通過才寫出對應的憑證檔，之後的確認、忘記帶著它回來才算數（見 consent.rs）。只接受主畫面（手機只有一個畫面，這條主要是防將來多視窗時誤用）
 #[tauri::command]
 pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, action: String, node: String) -> Result<String, String> {
@@ -459,6 +480,10 @@ pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, ac
     }
     // 框上的字由這裡決定：動作＋本人自己取的名字（沒取就未命名）＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
     let known = crate::device_id::live::known(&app.data_dir)?;
+    // 打字：那台的指紋要先在這支手機確認過才發憑證（不跳本人驗證，直接回怎麼做）
+    if act == crate::consent::Action::Input && !crate::device_id::phone_input_allowed(known.peer(&node)) {
+        return Err(crate::view_d::INPUT_NEEDS_CONFIRM.to_string());
+    }
     let peer = known.peer(&node).ok_or_else(|| "not_ready".to_string())?;
     // 掃 QR code 是四選一以外的另一條確認路：答錯被鎖住或擋住的電腦一樣不給掃（不開相機）
     if act == crate::consent::Action::Scan {

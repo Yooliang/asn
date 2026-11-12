@@ -8,15 +8,116 @@ import { injectSource, tableFor, SCENARIOS, mtermviewFrames } from '../scripts/s
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 const tag = (src, start) => { const i = src.indexOf(start); assert.ok(i >= 0, `找不到 ${start}`); return src.slice(i, src.indexOf('</chat-pane>', i)) }
 
-test('m.html：對話分頁的 chat-pane 給看畫面三樣，不給打字', () => {
+test('m.html：對話分頁的 chat-pane 給看畫面三樣，打字只接手機那一份（#1378）', () => {
   const html = read('../ui/m.html')
   const t = tag(html, '<chat-pane v-if="chatFriend"')
   assert.match(t, /:view-active="nav\.tab === 'chats'"/)
   assert.match(t, /:self-node="selfNode"/)
   assert.match(t, /:remote-view-api="mobileRemoteViewApi"/)
-  assert.doesNotMatch(t, /remote-input-api/, '手機只能看')
-  assert.doesNotMatch(tag(html, '<chat-pane v-if="noticeChat"'), /remote-view-api/, '通知分頁不看終端')
+  // remote-input-api 只准接 mobileRemoteInputApi（發起前會先過本人確認）
+  const inputs = [...html.matchAll(/:remote-input-api="([^"]*)"/g)].map(m => m[1])
+  assert.deepEqual(inputs, ['mobileRemoteInputApi'], '只有對話分頁那一個、只接手機那一份')
+  assert.match(t, /:remote-input-api="mobileRemoteInputApi"/)
+  assert.doesNotMatch(tag(html, '<chat-pane v-if="noticeChat"'), /remote-view-api|remote-input-api/, '通知分頁不看終端也不打字')
   assert.match(read('../ui/m.js'), /mobileRemoteViewApi/)
+  assert.match(read('../ui/m.js'), /import \{ mobileRemoteInputApi, mobileRemoteViewApi \} from '\.\/lib\/mobile-remote-view\.mjs'/)
+})
+
+const TOKEN = 'a'.repeat(64)
+// 假的 Rust：認得的電腦列表、發打字憑證、發起。peers 給 null 表示列表讀不到
+const fakeRust = ({ peers = [{ node: 'H', name: '家用機', confirmed: true }], token = TOKEN } = {}) => {
+  const calls = []
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args])
+    if (cmd === 'android_known_list') { if (peers === null) throw new Error('讀不到'); return { peers } }
+    if (cmd === 'android_known_token') { if (token instanceof Error) throw token; return token }
+    return { id: 'i1', expires_s: 1 }
+  }
+  return { calls, invoke }
+}
+
+test('mobileRemoteInputApi：先看指紋確認過、再要一次性憑證、本人驗證通過才帶憑證發起；cancel／no_lock／作廢的一次不發起', async () => {
+  const { makeMobileRemoteInputApi, CANCELLED } = await import('../ui/lib/mobile-remote-view.mjs')
+  const { NO_LOCK_TEXT } = await import('../ui/lib/mobile-confirm.mjs')
+  const make = (results, opts) => {
+    const rust = fakeRust(opts), asks = [], sent = []
+    const api = makeMobileRemoteInputApi({ confirm: async c => { asks.push(c); return results.shift() }, invoke: rust.invoke, send: async (...a) => { sent.push(a) } })
+    return { api, calls: rust.calls, asks, sent }
+  }
+  const ok = make(['ok', 'ok'])
+  assert.deepEqual(await ok.api.start('H', '小乙', '家用機'), { id: 'i1', expires_s: 1 })
+  await ok.api.start('H', '小乙', '')
+  assert.deepEqual(ok.calls, [
+    ['android_known_list', undefined], ['android_known_token', { action: 'input', node: 'H' }], ['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: '家用機', scope: 'input', challenge: TOKEN }],
+    ['android_known_list', undefined], ['android_known_token', { action: 'input', node: 'H' }], ['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: null, scope: 'input', challenge: TOKEN }],
+  ])
+  assert.deepEqual(ok.asks, [TOKEN, TOKEN], '每次都重新要憑證、重新驗證本人，驗證拿的是 Rust 發的憑證')
+  await ok.api.send('i1', 'ls\r', false)
+  assert.deepEqual(ok.sent, [['i1', 'ls\r', false]], '送字交給 Rust 的命令（只送到登記過的工作階段）')
+  const started = c => c.calls.filter(x => x[0] === 'term_view_remote_start')
+  const cancel = make(['cancel'])
+  await assert.rejects(cancel.api.start('H', '小乙'), e => e.code === CANCELLED && e.message === '')
+  assert.deepEqual(started(cancel), [], '取消：不發起')
+  const noLock = make(['no_lock'])
+  await assert.rejects(noLock.api.start('H', '小乙'), e => e.code === 'no_lock' && e.message === NO_LOCK_TEXT)
+  assert.deepEqual(started(noLock), [], '沒設螢幕鎖：也不發起')
+  for (const weird of [undefined, 'OK', 'yes', true]) {
+    const w = make([weird])
+    await assert.rejects(w.api.start('H', '小乙'))
+    assert.deepEqual(started(w), [], `確認回 ${weird} 一律當沒過`)
+  }
+  // 要不到憑證：不跳本人驗證、不發起；Rust 回的話照樣往上丟
+  const noTok = make(['ok'], { token: '' })
+  await assert.rejects(noTok.api.start('H', '小乙'), e => e.code === CANCELLED)
+  assert.deepEqual([noTok.asks, started(noTok)], [[], []])
+  const tokErr = make(['ok'], { token: new Error('那台不在了') })
+  await assert.rejects(tokErr.api.start('H', '小乙'), e => e.message === '那台不在了')
+  assert.deepEqual([tokErr.asks, started(tokErr)], [[], []])
+  // 確認還在等時畫面收掉（那一次作廢），之後才回 ok：不發起（那台不跳允許框）
+  let answer
+  const rust = fakeRust()
+  const late = makeMobileRemoteInputApi({ confirm: () => new Promise(r => { answer = r }), invoke: rust.invoke })
+  let current = true
+  const p = late.start('H', '小乙', '家用機', { wanted: () => current })
+  await new Promise(r => setTimeout(r, 10))
+  current = false
+  answer('ok')
+  await assert.rejects(p, e => e.code === CANCELLED)
+  assert.deepEqual(rust.calls.map(c => c[0]), ['android_known_list', 'android_known_token'], '作廢的那一次就算回 ok 也不發起')
+  // 本人驗證沒回來之前，一定還沒發起
+  const order = []
+  let ans2
+  const r2 = fakeRust()
+  const seq = makeMobileRemoteInputApi({ confirm: () => { order.push('confirm'); return new Promise(r => { ans2 = r }) }, invoke: async (cmd, a) => { order.push(cmd); return r2.invoke(cmd, a) } })
+  const q = seq.start('H', '小乙', '家用機')
+  await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(order, ['android_known_list', 'android_known_token', 'confirm'], '驗證還沒回來：不發起')
+  ans2('ok')
+  await q
+  assert.deepEqual(order, ['android_known_list', 'android_known_token', 'confirm', 'term_view_remote_start'])
+  // 打字元件把「這一次還算不算數」交給 start
+  assert.match(read('../ui/lib/term-remote-input.mjs'), /props\.api\.start\(props\.node, props\.name, props\.machine, \{ wanted: \(\) => alive \}\)/)
+})
+
+test('mobileRemoteInputApi：指紋還沒確認過的電腦，直接講怎麼做，不要憑證、不跳本人驗證；列表讀不到就交給 Rust 擋', async () => {
+  const { makeMobileRemoteInputApi, INPUT_NEEDS_CONFIRM_TEXT } = await import('../ui/lib/mobile-remote-view.mjs')
+  const rs = read('../src-tauri/src/view_d.rs')
+  assert.equal(INPUT_NEEDS_CONFIRM_TEXT, /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)[1], '和 Rust 同一句')
+  for (const peers of [[], [{ node: 'H', name: '家用機', confirmed: false }], [{ node: 'X', confirmed: true }]]) {
+    const rust = fakeRust({ peers })
+    const asks = []
+    const api = makeMobileRemoteInputApi({ confirm: async c => { asks.push(c); return 'ok' }, invoke: rust.invoke })
+    await assert.rejects(api.start('H', '小乙', '家用機'), e => e.code === 'need_confirm' && e.message === INPUT_NEEDS_CONFIRM_TEXT)
+    assert.deepEqual(rust.calls.map(c => c[0]), ['android_known_list'], '只看了列表')
+    assert.deepEqual(asks, [], '不跳本人驗證')
+  }
+  const { inputStartError } = await import('../ui/lib/term-remote-input.mjs')
+  assert.equal(inputStartError(Object.assign(new Error(INPUT_NEEDS_CONFIRM_TEXT), { code: 'need_confirm' })), INPUT_NEEDS_CONFIRM_TEXT, '畫面上就是這句')
+  // 列表讀不到：照樣要憑證（Rust 發憑證時也會擋沒確認的電腦）
+  const rust = fakeRust({ peers: null })
+  const api = makeMobileRemoteInputApi({ confirm: async () => 'ok', invoke: rust.invoke })
+  await api.start('H', '小乙', '家用機')
+  assert.deepEqual(rust.calls.map(c => c[0]), ['android_known_list', 'android_known_token', 'term_view_remote_start'])
 })
 
 test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同一份', () => {
@@ -33,7 +134,8 @@ test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同
   assert.ok(row.indexOf('m-term-switch') > row.indexOf('class="tool icon mic"') && row.indexOf('m-term-switch') < row.indexOf('<div class="picker"'), '切換鈕放在這排最後面')
   assert.equal((src.match(/m-term-switch/g) || []).length, 1, '頂端不能再有一列切換')
   assert.match(src, /'is-term': mSwitch && remoteShown/, '看終端時收起輸入框')
-  assert.match(src, /if \(props\.viewActive !== null\) \{ if \(!a\) remoteOn\.value = false; return \}/, '離開對話分頁就結束觀看（手機沒有寬限，只有電腦版有）')
+  assert.match(src, /if \(props\.viewActive !== null\) \{ if \(!a\) \{ remoteOn\.value = false; remoteTyping\.value = false \} return \}/, '離開對話分頁就結束觀看與打字（手機沒有寬限，只有電腦版有）；回來不自動重新開始打字')
+  assert.match(src, /const showTerm = \(\) => \{ remoteOn\.value = true; remoteTyping\.value = false \}/, '切到終端先只看，打字要本人從輸入框送出才開始')
   assert.match(src, /:active="remoteLive"/)
 })
 
@@ -117,10 +219,25 @@ test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生
     assert.equal([...code.matchAll(/\bremoteViewApi\b/g)].length, 0, `${f} 直接用了 remoteViewApi`)
     assert.doesNotMatch(code, /from '\.\/lib\/tauri\.mjs'[^\n]*\bremoteViewApi\b/, `${f} 不能從 tauri.mjs 匯入 remoteViewApi`)
   }
+  // 打字也一樣（#1378）：m.js、m.html、mobile*.mjs 不准引用電腦版的 remoteInputApi（大寫 I 的 mobileRemoteInputApi 不會被比到）
+  for (const f of ['../ui/m.js', '../ui/m.html', ...mobileLibs]) {
+    const code = strip(read(f))
+    assert.equal([...code.matchAll(/\bremoteInputApi\b/g)].length, 0, `${f} 直接用了 remoteInputApi`)
+    assert.doesNotMatch(code, /\.\.\.remoteInputApi/, `${f} 不能展開 remoteInputApi`)
+  }
   // 手機那一份的發起不能是電腦版的 start（電腦版不過生物辨識）
   const mob = read('../ui/lib/mobile-remote-view.mjs')
   assert.doesNotMatch(mob, /start:\s*remoteViewApi\.start/)
   assert.doesNotMatch(mob, /\.\.\.remoteViewApi/, '不能整包展開電腦版的介面（會帶進電腦版的 start）')
+  assert.doesNotMatch(mob, /start:\s*remoteInputApi\.start/, '打字的發起也不能是電腦版的 start')
+  assert.doesNotMatch(mob, /\.\.\.remoteInputApi/, '不能整包展開電腦版的打字介面')
+  const inputApi = mob.replace(/\r\n/g, '\n').split('export function makeMobileRemoteInputApi(')[1].split('\n}\n')[0]
+  // 打字的發起：先看指紋確認過、要 Rust 發的一次性憑證、拿憑證驗證本人，ok 才帶憑證發起；每一步之後作廢就不再往下
+  const order = ['android_known_list', "android_known_token', { action: 'input'", 'await confirm(challenge)', "if (r === 'ok') return invoke('term_view_remote_start', { toNode, partner, machine: machine || null, scope: 'input', challenge })"].map(x => inputApi.indexOf(x))
+  assert.ok(order.every(i => i > 0) && order.every((x, i) => i === 0 || order[i - 1] < x), '順序：列表 → 憑證 → 本人驗證 → 帶憑證發起：' + order)
+  assert.ok(inputApi.indexOf('if (!wanted()) throw cancelled()', inputApi.indexOf('await confirm(challenge)')) > 0, '驗證回來時那一次已作廢就不發起')
+  assert.match(inputApi, /confirm = challenge => confirmWithToken\(challenge\)/, '預設的本人驗證是帶憑證的那一種')
+  assert.equal((inputApi.match(/invoke\('term_view_remote_start'/g) || []).length, 1)
   assert.match(mob, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認；確認回來時那一次已作廢就不送；ok 才送')
   assert.match(mob, /confirm = \(\) => confirmViewer\(\)/, '預設的確認就是 PR③ 的 confirmViewer')
 })
@@ -141,6 +258,48 @@ test('確認還在等時切回訊息（那一次作廢），之後才回 ok：�
   answer('ok')
   assert.deepEqual(await q, { id: 'v1', expires_s: 1 })
   assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
+})
+
+test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設置 → 設備」的「詳情」確認，分頁名稱和手機畫面一致', async () => {
+  const rs = read('../src-tauri/src/view_d.rs')
+  const m = /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)
+  assert.ok(m, '有這句')
+  // 分頁名、設定分類名、按鈕字都從手機畫面實際用的常數組出來：哪一個改了名（例如「設置」改成「設定」），這裡就會紅，提醒對齊 Rust 的這句
+  const { TAB_LABEL } = await import('../ui/lib/mobile.mjs')
+  const { mobileSettingTitle } = await import('../ui/lib/mobile-settings.mjs')
+  const { TEXT: KNOWN } = await import('../ui/lib/mobile-known-peers.mjs')
+  assert.equal(m[1], `先在「${TAB_LABEL.me} → ${mobileSettingTitle('devices')}」打開這台電腦的「${KNOWN.detail}」，確認它的指紋，才能在它的終端打字`, '分頁、分類、按鈕的名稱用畫面上看得到的')
+  // 前端不轉碼：開始失敗的話就是 Rust 回的那句
+  const { inputStartError } = await import('../ui/lib/term-remote-input.mjs')
+  assert.equal(inputStartError(m[1]), m[1])
+  assert.equal(inputStartError(new Error(m[1])), m[1])
+})
+
+test('開始打字時取消本人驗證：另外說沒有完成本人驗證，不用通用的「沒開始」；那句放回輸入框', async () => {
+  const { inputStartError, INPUT_NOT_VERIFIED } = await import('../ui/lib/term-remote-input.mjs')
+  const { REMOTE_TEXT } = await import('../ui/lib/term-remote.mjs')
+  const { CANCELLED, makeMobileRemoteInputApi } = await import('../ui/lib/mobile-remote-view.mjs')
+  const { NO_LOCK_TEXT } = await import('../ui/lib/mobile-confirm.mjs')
+  assert.equal(INPUT_NOT_VERIFIED, '沒有完成本人驗證，這次沒有開始打字')
+  const rust = fakeRust()
+  const api = makeMobileRemoteInputApi({ confirm: async () => 'cancel', invoke: rust.invoke })
+  const err = await api.start('H', '小乙', '家用機').catch(e => e)
+  assert.equal(err.code, CANCELLED)
+  assert.ok(!rust.calls.some(c => c[0] === 'term_view_remote_start'), '取消就不發起')
+  // Rust 用不掉憑證時回的是同一句（consent.rs 的 INPUT_NOT_VERIFIED）
+  assert.match(read('../src-tauri/src/consent.rs'), /pub const INPUT_NOT_VERIFIED: &str = "沒有完成本人驗證，這次沒有開始打字";/)
+  assert.equal(inputStartError(new Error(INPUT_NOT_VERIFIED)), INPUT_NOT_VERIFIED)
+  assert.equal(inputStartError(err), INPUT_NOT_VERIFIED)
+  assert.notEqual(inputStartError(err), REMOTE_TEXT.failed)
+  // 沒設螢幕鎖照舊講怎麼辦；其他錯誤照舊
+  assert.equal(inputStartError(Object.assign(new Error(NO_LOCK_TEXT), { code: 'no_lock' })), NO_LOCK_TEXT)
+  assert.equal(inputStartError(new Error('那台不允許')), '那台不允許')
+  assert.equal(inputStartError(''), REMOTE_TEXT.failed)
+  // 接線：開始失敗走 inputStartError，結束時把輸入框送來的那句交還（unsent）
+  const src = read('../ui/lib/term-remote-input.mjs').replace(/\r\n/g, '\n')
+  assert.match(src, /finish\(inputStartError\(e\)\)/)
+  assert.match(src, /const finish = text => \{\n\s+cleanup\(\); phase\.value = 'ended'; note\.value = text; id = ''\n\s+const left = takeLeft\(\)[^\n]*\n\s+if \(left\) emit\('unsent', left\)/, '還沒送出的那句由共用的 createLineSender 交還')
+  assert.match(read('../ui/lib/chatpane.mjs'), /<remote-input [^>]*@unsent="restoreDraft"/, '交還的那句放回輸入框')
 })
 
 test('手機對話／終端切換鈕的字：看對話時「終端」、看終端時「對話」（寫按了會去哪裡）', async () => {
