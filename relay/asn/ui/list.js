@@ -160,7 +160,7 @@ if (!info.shot) devSync.start()
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
 const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到 localStorage，其他視窗跟著換
-watch(skin, v => applySkin(v))
+watch(skin, v => { applySkin(v); void emit('asn:skin', normalizeSkin(v)) })   // 其他視窗：storage 事件之外再送一次 Tauri 事件（skin-boot.js 兩條都聽）
 const frame = ref(normalizeFrame(savedMe.frame))   // 視窗外框：自訂（預設，含舊存檔）／Windows 原生；Rust 端開視窗時讀同一份存檔
 await initFrame()
 // 關閉視窗時：縮到系統匣（預設，含舊存檔）／結束程式；登入時自動啟動以系統上的真實設定為準（不存檔）。程式在 tray.rs

@@ -87,3 +87,19 @@
 :root[data-skin="modern"] .m-card{margin:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 :root[data-skin="modern"] .m-btn{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:none;color:var(--fg)}
 :root[data-skin="modern"] .m-pg.m-fourth{background:var(--panel-soft)}
+
+/* ---------- 危險動作：紅色要留著（上面把一般按鈕換成白底，權重比原本的紅色高，這裡再蓋回來） ---------- */
+:root[data-skin="modern"] .aero-btn.danger,:root[data-skin="modern"] .gs-btn.danger,:root[data-skin="modern"] .aero-btn.dv-danger{border-color:#c4463d;background:#fff4f3;color:#b3261e;font-weight:600}
+:root[data-skin="modern"] .aero-btn.danger:hover,:root[data-skin="modern"] .gs-btn.danger:hover,:root[data-skin="modern"] .aero-btn.dv-danger:hover{border-color:#8c1d16;background:#fde3e0}
+:root[data-skin="modern"] .logout-set .logout-btn{border-color:#d79a95;color:#b3261e}
+:root[data-skin="modern"] .m-btn.m-danger{border-color:#d79a95;color:#b3261e}
+:root[data-skin="modern"] .m-btn.m-dv-danger{border-color:#b3261e;background:#b3261e;color:#fff}
+
+/* ---------- 浮層、提示、右下角通知：不留 Aero 的藍色漸層與藍框 ---------- */
+:root[data-skin="modern"] .m-sheet{background:var(--panel-soft)}
+:root[data-skin="modern"] .m-banner{border:1px solid var(--line);background:var(--panel);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+:root[data-skin="modern"] .toast,:root[data-skin="modern"] .sp{border:1px solid #d9d6cf;background:var(--panel-soft);box-shadow:none}
+:root[data-skin="modern"] .m-ops{background:rgba(20,22,26,.4)}
+
+/* ---------- 輸入框：邊框加深，現代的淺底上也看得出邊界（約 1.6:1） ---------- */
+:root[data-skin="modern"] .search input,:root[data-skin="modern"] .m-search input,:root[data-skin="modern"] .set-sel,:root[data-skin="modern"] .compose-main{border-color:#c9c6be}
