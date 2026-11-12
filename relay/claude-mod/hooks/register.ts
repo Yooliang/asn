@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
 import { ABANDONED_NOTE, createControl, POLL_MS } from './control'
-import { createStatus, questionDetail, questionPrompt } from './status'
+import { agentsWithin, createStatus, questionDetail, questionPrompt } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
 
@@ -91,9 +91,11 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('classic.Stop', ($, e, next) => {
+  on('classic.Stop', async ($, e, next) => {
     stopSeen = { background_tasks: e.background_tasks, session_crons: e.session_crons }
-    st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, e)
+    // #1368：有背景工作時取子代理／teammate 的在跑／閒置（最多等 300ms；拿不到就退回只看 background_tasks）
+    const agents = e.background_tasks?.length ? await agentsWithin(() => $.agent.list(), ms => $.clock.sleep(ms)) : undefined
+    st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, { background_tasks: e.background_tasks, session_crons: e.session_crons, agents })
     return next(e)
   }).catch(($, e, next) => next(e))
 

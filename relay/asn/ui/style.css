@@ -207,6 +207,10 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .ab-sub{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-radius:3px}
 .ab-sub-text{min-width:0;flex:1;overflow-wrap:anywhere}
 .ab-sub-kind{flex:none;font-size:11px;color:var(--muted)}
+/* #1368：工作項目旁的「閒置 M」小字、列表後段的閒置區 */
+.ab-idle{margin-left:4px;font-size:10px;font-weight:normal;color:var(--muted)}
+.ab-menu .ab-idle-head{margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+.ab-sub-idle .ab-sub-text{color:var(--muted)}
 .conv,.compose-row{display:flex;gap:8px;padding:var(--chat-gap);background:var(--panel-soft);min-height:0}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}

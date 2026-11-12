@@ -1,11 +1,11 @@
 import { expect, test } from 'claude-code/testing'
-import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
+import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskDetail, taskEntries, taskList, agentRun, agentsWithin, AGENT_LIST_MS } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 type StatusDoc0 = { waitingTool?: string; detail?: string }
 const SID = 'sess-1'
 const PATH = 'C:/Users/u/.asn/status/sess-1.json'
-type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string }[] }
+type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string; st: string }[] }
 
 const rig = async ($: any, on: any, opts: { failWrite?: boolean } = {}) => {
   const writes: { path: string; doc: Doc }[] = []
@@ -120,7 +120,7 @@ test('有 background_tasks→background（Stop 先到）', async ($, on) => {
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
   expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 2 件' })
-  expect(r.last()?.tasks).toEqual([{ id: '1', desc: '' }, { id: '2', desc: '' }])
+  expect(r.last()?.tasks).toEqual([{ id: '1', desc: '', st: 'run' }, { id: '2', desc: '', st: 'run' }])
 })
 
 // background_tasks 每筆的欄位（Claude Code 型別 BackgroundTaskSummary）：id、type、status、description，shell 才有 command（不存）
@@ -134,7 +134,7 @@ test('背景工作列表：只取 id／說明／類型，不存指令，壞格�
     { id: '../../x', description: '路徑符號的代號不收' },
     { type: 'workflow', name: 'w', description: '沒有代號也列' },
   ])
-  expect(out[0]).toEqual({ id: 'b1', desc: 'npm test 全套', kind: 'shell' })
+  expect(out[0]).toEqual({ id: 'b1', desc: 'npm test 全套', kind: 'shell', st: 'run' })
   expect(JSON.stringify(out)).not.toContain('curl')
   expect(JSON.stringify(out)).not.toContain('sk-abc')
   expect(out[1].desc).toBe(`${'跑'.repeat(60)}…`)
@@ -142,10 +142,178 @@ test('背景工作列表：只取 id／說明／類型，不存指令，壞格�
   expect(out[2].desc).not.toContain('hunter2')
   expect(out[2].desc).not.toContain('ghp_0123')
   expect(out[2].desc).toContain('跑看看')
-  expect(out.slice(3)).toEqual([{ id: '', desc: '路徑符號的代號不收' }, { id: '', desc: '沒有代號也列', kind: 'workflow' }])
+  expect(out.slice(3)).toEqual([{ id: '', desc: '路徑符號的代號不收', st: 'run' }, { id: '', desc: '沒有代號也列', kind: 'workflow', st: 'run' }])
   expect(taskList(Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, description: 'x' }))).length).toBe(MAX_TASKS)
   expect(taskList(undefined as never)).toEqual([])
   expect(taskList('壞' as never)).toEqual([])
+})
+
+// #1368：子代理／teammate 的在跑／閒置看 $.agent.list()；background_tasks 其餘一律算在跑
+const BG = [
+  { id: 'a1', type: 'subagent', status: 'running', description: '查資料' },
+  { id: 'tsk-9', type: 'teammate', status: 'running', description: '隊友' },
+  { id: 'b1', type: 'shell', status: 'running', description: '建置' },
+  { id: 'm1', type: 'monitor', status: 'running', description: '看日誌' },
+]
+const AGENTS = [
+  { id: 'a1', description: '查資料', type: 'Explore', status: 'running' },
+  { id: 'r-7', teammateId: 'tm-7', description: '隊友', type: 'teammate', status: 'idle', name: 'bob' },
+  { id: 'a2', description: '等核准', type: 'general-purpose', status: 'waiting' },
+  { id: 'a3', description: '排隊中', type: 'general-purpose', status: 'pending' },
+  { id: 'a4', description: '做完了', type: 'general-purpose', status: 'completed' },
+  { id: 'a5', description: '失敗', type: 'general-purpose', status: 'failed' },
+  { id: 'a6', description: '被停掉', type: 'general-purpose', status: 'killed' },
+]
+
+test('子代理狀態：running／waiting／pending 在跑、idle 閒置、completed／failed／killed 不列；沒看過的值算在跑並記一筆', () => {
+  const seen: string[] = []
+  const note = (s: string) => void seen.push(s)
+  for (const s of ['running', 'waiting', 'pending']) expect(agentRun(s, note)).toBe('run')
+  expect(agentRun('idle', note)).toBe('idle')
+  for (const s of ['completed', 'failed', 'killed']) expect(agentRun(s, note)).toBe('gone')
+  expect(seen).toEqual([])
+  expect(agentRun('sleepy', note)).toBe('run')
+  expect(agentRun(undefined, note)).toBe('run')
+  expect(seen.length).toBe(2)
+  expect(seen[0]).toContain('sleepy')
+})
+
+test('agent.list 正常：running／waiting／idle／completed 混合，background_tasks 的子代理與 teammate 改由它涵蓋、不重複計數', () => {
+  const f = finalState('answer', { background_tasks: BG, agents: AGENTS })
+  // 在跑：a1、a2、a3（agent.list）＋ b1、m1（background_tasks 其餘）＝5；閒置：r-7＝1；a4～a6 不列
+  expect(f.state).toBe('background')
+  expect(f.detail).toBe('背景工作 5 件・閒置 1 件')
+  expect(f.tasks?.map(t => [t.id, t.st])).toEqual([['a1', 'run'], ['a2', 'run'], ['a3', 'run'], ['b1', 'run'], ['m1', 'run'], ['r-7', 'idle']])
+  expect(f.tasks?.find(t => t.id === 'a1')?.kind).toBe('Explore')
+  expect(JSON.stringify(f.tasks)).not.toContain('tsk-9')
+  expect(taskDetail(taskEntries(BG, AGENTS))).toBe('背景工作 5 件・閒置 1 件')
+})
+
+test('agent.list 回 idle 的子代理：不會同時又被 background_tasks 算進在跑', () => {
+  const f = finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running', description: '查資料' }], agents: [{ id: 'a1', description: '查資料', type: 'Explore', status: 'idle' }] })
+  expect(f).toEqual({ state: 'background', detail: '背景工作 0 件・閒置 1 件', tasks: [{ id: 'a1', desc: '查資料', kind: 'Explore', st: 'idle' }] })
+})
+
+test('拿不到 agent.list：background_tasks 全部算在跑（子代理、teammate 也不扣），件數不為 0', () => {
+  const f = finalState('answer', { background_tasks: BG })
+  expect(f.detail).toBe('背景工作 4 件')
+  expect(f.tasks?.every(t => t.st === 'run')).toBe(true)
+  expect(f.tasks?.map(t => t.id)).toEqual(['a1', 'tsk-9', 'b1', 'm1'])
+  // agent.list 拿到了但兩邊對不上（合起來一件都沒有）：也退回，不顯示 0 件
+  expect(finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running' }], agents: [] }).detail).toBe('背景工作 1 件')
+  // background_tasks 是空的：不管 agent.list 說什麼都不是 background（state 判斷不變）
+  expect(finalState('answer', { background_tasks: [], agents: [{ id: 'x', status: 'idle' }] }).state).toBe('idle')
+})
+
+test('取 agent.list：正常回陣列；丟錯、不存在、逾時、格式不對都退回並記原因', async () => {
+  const notes: string[] = []
+  const note = (s: string) => void notes.push(s)
+  const never = () => new Promise<never>(() => undefined)
+  expect(await agentsWithin(async () => AGENTS, never, note)).toEqual(AGENTS)
+  expect(await agentsWithin(async () => AGENTS, () => Promise.reject(new Error('沒有計時')), note)).toEqual(AGENTS)
+  expect(await agentsWithin(() => Promise.reject(new Error('refused')), never, note)).toBeUndefined()
+  expect(await agentsWithin(() => (undefined as unknown as { list: () => unknown }).list(), never, note)).toBeUndefined()
+  expect(await agentsWithin(never, async () => undefined, note)).toBeUndefined()
+  expect(await agentsWithin(async () => ({ x: 1 }), never, note)).toBeUndefined()
+  expect(notes.length).toBe(4)
+  expect(notes[0]).toContain('refused')
+  expect(notes[2]).toContain('逾時')
+  expect(AGENT_LIST_MS).toBe(300)
+})
+
+test('Stop 時 agent.list 正常：狀態檔寫出在跑／閒置分開的件數', async ($, on) => {
+  const r = await rig($, on)
+  on('agent.list', () => ({ value: AGENTS }) as never)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 5 件・閒置 1 件' })
+  expect(r.last()?.tasks?.filter(t => t.st === 'idle').map(t => t.id)).toEqual(['r-7'])
+})
+
+test('Stop 時 agent.list 丟錯：退回 background_tasks 全部算在跑', async ($, on) => {
+  const r = await rig($, on)
+  on('agent.list', () => {
+    throw new Error('壞了')
+  })
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 4 件' })
+  expect(r.last()?.tasks?.every(t => t.st === 'run')).toBe(true)
+})
+
+test('Stop 時 agent.list 逾時：不卡住，退回 background_tasks 全部算在跑', async ($, on) => {
+  const r = await rig($, on)
+  on('agent.list', () => new Promise(() => undefined) as never)
+  on('clock.sleep', () => ({ value: undefined }) as never)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 4 件' })
+})
+
+test('取 agent.list：sleep 和 list 都不回時，setTimeout 上限照樣有效', async () => {
+  const notes: string[] = []
+  const never = () => new Promise<never>(() => undefined)
+  const t0 = Date.now()
+  expect(await agentsWithin(never, never, s => void notes.push(s))).toBeUndefined()
+  const took = Date.now() - t0
+  expect(took >= AGENT_LIST_MS - 20).toBe(true)
+  expect(took < AGENT_LIST_MS + 1000).toBe(true)
+  expect(notes.length).toBe(1)
+  expect(notes[0]).toContain('逾時')
+})
+
+test('agent.list 涵蓋得比 background_tasks 少：差額補算成在跑，不會被吃掉', () => {
+  // background_tasks 有子代理 a1、a9 與 teammate tsk-9（3 筆）；agent.list 只列得出 a1（閒置）與 a8（已結束，不算）→ 差 2 筆
+  const bg = [
+    { id: 'a1', type: 'subagent', status: 'running', description: '查資料' },
+    { id: 'a9', type: 'subagent', status: 'running', description: '漏列的' },
+    { id: 'tsk-9', type: 'teammate', status: 'running', description: '隊友' },
+    { id: 'b1', type: 'shell', status: 'running', description: '建置' },
+  ]
+  const agents = [
+    { id: 'a1', description: '查資料', type: 'Explore', status: 'idle' },
+    { id: 'a8', description: '做完了', type: 'Explore', status: 'completed' },
+  ]
+  const f = finalState('answer', { background_tasks: bg, agents })
+  // 在跑：補的 a9、tsk-9（id 不在 agent.list 裡的優先）＋ shell b1＝3；閒置：a1＝1
+  expect(f.detail).toBe('背景工作 3 件・閒置 1 件')
+  expect(f.tasks?.map(t => [t.id, t.st])).toEqual([['a9', 'run'], ['tsk-9', 'run'], ['b1', 'run'], ['a1', 'idle']])
+  // 差額不夠用 id 對不上的補時，拿其餘的補：background_tasks 2 筆子代理，agent.list 全部已結束
+  const g = finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent' }, { id: 'a2', type: 'subagent' }], agents: [{ id: 'a1', status: 'completed' }, { id: 'a2', status: 'killed' }] })
+  expect(g.detail).toBe('背景工作 2 件')
+  // agent.list 涵蓋得夠多時不補
+  expect(finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent' }], agents: [{ id: 'x1', status: 'running' }, { id: 'x2', status: 'idle' }] }).detail).toBe('背景工作 1 件・閒置 1 件')
+})
+
+test('沒有背景工作時（background_tasks 空）不呼叫 agent.list', async ($, on) => {
+  const r = await rig($, on)
+  let calls = 0
+  on('agent.list', () => {
+    calls++
+    return { value: [{ id: 'a1', status: 'idle' }] } as never
+  })
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(calls).toBe(0)
+  expect(r.last()?.state).toBe('idle')
+  // 對照：有背景工作時才會呼叫
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  await r.flush()
+  expect(calls).toBe(1)
 })
 
 test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、下一輪沒有就拿掉', async ($, on) => {
@@ -155,7 +323,7 @@ test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、�
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: '建置', command: 'cargo build' }], session_crons: [] } as never)
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
-  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件', tasks: [{ id: 'b1', desc: '建置', kind: 'shell' }] })
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件', tasks: [{ id: 'b1', desc: '建置', kind: 'shell', st: 'run' }] })
   await $.turn.start({ text: 'again', turnId: 't2' })
   await r.flush()
   expect(r.last()?.tasks).toBeUndefined()

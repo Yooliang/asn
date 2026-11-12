@@ -30,14 +30,17 @@ export type StatusDoc = {
 
 export type QuestionPrompt = { question: string; options: string[] }
 
-export type TaskItem = { id: string; desc: string; kind?: string }
+// st：這件背景工作現在在不在跑（#1368）。只有兩種值；'idle'＝$.agent.list 說閒置的子代理／teammate，其餘都是 'run'
+export type TaskRun = 'run' | 'idle'
+export type TaskItem = { id: string; desc: string; kind?: string; st: TaskRun }
 
 // 外掛控制檔（control.ts）的執行結果：id 原樣回傳，detail 為中文且 ≤200 字（op:'command' 成功時放指令輸出，≤1500 字）
 export type ControlResult = { id: string; ok: boolean; detail: string }
 export type ContextUsage = { used: number; limit: number; percent: number }
 
 export type CronLike = { schedule?: string; recurring?: boolean }
-export type StopInfo = { background_tasks?: readonly unknown[]; session_crons?: readonly CronLike[] }
+// agents：Stop 當下 $.agent.list() 的結果（#1368）；undefined＝拿不到（不存在、丟錯、逾時），退回只看 background_tasks
+export type StopInfo = { background_tasks?: readonly unknown[]; session_crons?: readonly CronLike[]; agents?: readonly unknown[] }
 
 // ---------- 背景工作列表（#539 之三） ----------
 // Claude Code Stop hook 的 background_tasks 每筆是 BackgroundTaskSummary：
@@ -69,18 +72,108 @@ function clip(s: string, n: number): string {
   const cs = [...s]
   return cs.length > n ? `${cs.slice(0, n).join('')}…` : s
 }
-export function taskList(bg: readonly unknown[] | undefined): TaskItem[] {
-  if (!Array.isArray(bg)) return []
+// ---------- 在跑／閒置（#1368） ----------
+// background_tasks 只放 status 為 running／pending 的工作；teammate 一輪結束只把 isIdle 設成 true、status 仍是 running，
+// 所以光看 background_tasks 分不出閒置。子代理與 teammate 的狀態改用 $.agent.list()：Claude Code 自己換算好的
+// running／waiting／idle／completed（其他狀態原樣傳出，例如 pending／failed／killed）。
+// 對應方式：background_tasks 的 type 是換過的名稱，子代理＝subagent、teammate＝teammate；這兩種整批由 agent.list 涵蓋
+//（teammate 的任務代號和 agent.list 的 id 對不上，所以只看 type 不看 id）。其餘（shell、monitor、workflow…）照舊用 background_tasks，一律算在跑。
+// agent.list 拿不到時退回舊做法：background_tasks 全部算在跑（子代理／teammate 也不扣），件數不少算。
+export const AGENT_KINDS: ReadonlySet<string> = new Set(['subagent', 'teammate'])
+const AGENT_RUN: ReadonlySet<string> = new Set(['running', 'waiting', 'pending'])
+const AGENT_GONE: ReadonlySet<string> = new Set(['completed', 'failed', 'killed'])
+export const AGENT_LIST_MS = 300
+
+/** agent.list 每筆的 status → 在跑／閒置／已結束（不列不計）。沒看過的值算在跑，並記一筆 */
+export function agentRun(status: unknown, note: (s: string) => void = noteInfo): TaskRun | 'gone' {
+  if (status === 'idle') return 'idle'
+  if (typeof status === 'string' && AGENT_GONE.has(status)) return 'gone'
+  if (!(typeof status === 'string' && AGENT_RUN.has(status))) note(`[asn] 子代理狀態沒看過，當作在跑：${[...String(status)].slice(0, 40).join('')}`)
+  return 'run'
+}
+function noteInfo(text: string): void {
+  try {
+    console.info(text)
+  } catch {
+    /* 吞掉 */
+  }
+}
+
+/** Stop 時取 agent.list，最多等 AGENT_LIST_MS；不存在、丟錯、逾時、不是陣列都回 undefined（退回舊做法）並記一筆原因。
+ * 上限一定有效：agent.list、$.clock.sleep、setTimeout 三者一起比，任一個上限先到就算逾時；結束後清掉 setTimeout。
+ * sleep 失敗只是少一個計時，不算逾時；setTimeout 不能用時就靠 sleep。 */
+export async function agentsWithin(list: () => unknown, sleep: (ms: number) => Promise<unknown>, note: (s: string) => void = noteInfo): Promise<readonly unknown[] | undefined> {
+  const TIMEOUT = Symbol('timeout')
+  const never = new Promise<never>(() => undefined)
+  const bySleep = Promise.resolve()
+    .then(() => sleep(AGENT_LIST_MS))
+    .then(() => TIMEOUT, () => never)
+  let handle: ReturnType<typeof setTimeout> | undefined
+  const byTimer = new Promise<symbol>(r => {
+    try {
+      handle = setTimeout(() => r(TIMEOUT), AGENT_LIST_MS)
+    } catch {
+      /* 沒有 setTimeout：只靠 sleep */
+    }
+  })
+  try {
+    const r = await Promise.race([Promise.resolve().then(list), bySleep, byTimer])
+    if (r === TIMEOUT) return void note('[asn] 子代理清單逾時，背景工作全部當作在跑')
+    if (!Array.isArray(r)) return void note('[asn] 子代理清單格式不對，背景工作全部當作在跑')
+    return r
+  } catch (err) {
+    note(`[asn] 子代理清單拿不到，背景工作全部當作在跑：${err instanceof Error ? err.message : String(err)}`.slice(0, 200))
+    return undefined
+  } finally {
+    try {
+      if (handle !== undefined) clearTimeout(handle)
+    } catch {
+      /* 吞掉 */
+    }
+  }
+}
+
+type Entry = { o: Record<string, unknown>; desc: string; kind: string; st: TaskRun }
+const objOf = (t: unknown): Record<string, unknown> | undefined => (t && typeof t === 'object' && !Array.isArray(t) ? (t as Record<string, unknown>) : undefined)
+
+/** background_tasks＋agent.list → 每件工作（在跑的排前面）。agents 為 undefined＝退回舊做法。
+ * 差額補算：background_tasks 裡 subagent／teammate 有 B 筆，agent.list 裡列得出來的（在跑＋閒置，不含已結束）有 A 筆；
+ * B > A 時（id 對不上、漏列、或 agent.list 說已結束但 background_tasks 還在跑），從 background_tasks 補 B − A 筆算在跑，
+ * 優先補 id 不在 agent.list 裡的，不夠再補其餘的。件數因此不會比 background_tasks 少。 */
+export function taskEntries(bg: readonly unknown[] | undefined, agents?: readonly unknown[]): Entry[] {
+  const tasks = (Array.isArray(bg) ? bg : []).flatMap(t => {
+    const o = objOf(t)
+    return o ? [{ o, desc: str(o.description), kind: str(o.type).trim(), st: 'run' as const }] : []
+  })
+  if (!Array.isArray(agents)) return tasks
+  const fromAgents: Entry[] = agents.flatMap(a => {
+    const o = objOf(a)
+    if (!o) return []
+    const st = agentRun(o.status)
+    return st === 'gone' ? [] : [{ o, desc: str(o.description), kind: str(o.type).trim() || 'subagent', st }]
+  })
+  const bgAgents = tasks.filter(e => AGENT_KINDS.has(e.kind))
+  const others = tasks.filter(e => !AGENT_KINDS.has(e.kind))
+  const listed = new Set(fromAgents.map(e => str(e.o.id)).filter(Boolean))
+  const shortfall = Math.max(0, bgAgents.length - fromAgents.length)
+  const extra = [...bgAgents.filter(e => !listed.has(str(e.o.id))), ...bgAgents.filter(e => listed.has(str(e.o.id)))].slice(0, shortfall)
+  const all = [...fromAgents, ...extra, ...others]
+  return [...all.filter(e => e.st === 'run'), ...all.filter(e => e.st === 'idle')]
+}
+
+export function taskList(bg: readonly unknown[] | undefined, agents?: readonly unknown[]): TaskItem[] {
+  return toItems(taskEntries(bg, agents))
+}
+
+function toItems(entries: readonly Entry[]): TaskItem[] {
   const out: TaskItem[] = []
-  for (const t of bg) {
+  for (const e of entries) {
     if (out.length >= MAX_TASKS) break
-    if (!t || typeof t !== 'object' || Array.isArray(t)) continue
-    const o = t as Record<string, unknown>
-    const id = TASK_ID_RE.test(str(o.id)) ? str(o.id) : ''
-    const desc = clip(maskSecrets(str(o.description).replace(/\s+/g, ' ').trim()), MAX_DESC)
-    const kind = TASK_KIND_RE.test(str(o.type).trim()) ? str(o.type).trim() : ''
+    const id = TASK_ID_RE.test(str(e.o.id)) ? str(e.o.id) : ''
+    const desc = clip(maskSecrets(e.desc.replace(/\s+/g, ' ').trim()), MAX_DESC)
+    const kind = TASK_KIND_RE.test(e.kind) ? e.kind : ''
     if (!id && !desc && !kind) continue
-    out.push(kind ? { id, desc, kind } : { id, desc })
+    out.push(kind ? { id, desc, kind, st: e.st } : { id, desc, st: e.st })
   }
   return out
 }
@@ -151,12 +244,25 @@ export function cronDetail(crons: readonly CronLike[]): string {
   return `排程 ${crons.length} 件`
 }
 
+// 「背景工作 N 件」N 只算在跑的；有閒置的接「・閒置 M 件」（全部閒置時是「背景工作 0 件・閒置 M 件」）。
+// 件數算全部，不受列表只存 MAX_TASKS 筆影響
+export function taskDetail(entries: readonly { st: TaskRun }[]): string {
+  const idle = entries.filter(e => e.st === 'idle').length
+  const run = entries.length - idle
+  return idle > 0 ? `背景工作 ${run} 件・閒置 ${idle} 件` : `背景工作 ${run} 件`
+}
+
 // 一輪結束後的狀態。reason 不是 answer 一律 idle（中斷／出錯），不看 Stop 的資料。
 export function finalState(reason: string, stop: StopInfo | undefined): { state: WinState; detail: string; tasks?: TaskItem[] } {
   if (reason === 'aborted') return { state: 'idle', detail: '中斷' }
   if (reason === 'error') return { state: 'idle', detail: '出錯' }
   const bg = stop?.background_tasks ?? []
-  if (bg.length > 0) return { state: 'background', detail: `背景工作 ${bg.length} 件`, tasks: taskList(bg) }
+  if (bg.length > 0) {
+    // state 只看 background_tasks（跟以前一樣）；件數與列表加上 agent.list。合起來一件都沒有時（兩邊對不上）退回舊做法，不顯示 0 件
+    const merged = taskEntries(bg, stop?.agents)
+    const entries = merged.length > 0 ? merged : taskEntries(bg)
+    return { state: 'background', detail: taskDetail(entries), tasks: toItems(entries) }
+  }
   const cr = stop?.session_crons ?? []
   if (cr.length > 0) return { state: 'scheduled', detail: cronDetail(cr) }
   return { state: 'idle', detail: '' }
@@ -273,7 +379,7 @@ export function createStatus(clock: () => number = Date.now) {
       void write(io, 'busy', '')
     },
     stop(io: Io, e: StopInfo): void {
-      stop = { background_tasks: e.background_tasks, session_crons: e.session_crons }
+      stop = { background_tasks: e.background_tasks, session_crons: e.session_crons, agents: e.agents }
       if (ended === 'answer') settle(io)
     },
     turnComplete(io: Io, reason: string): void {

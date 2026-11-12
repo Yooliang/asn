@@ -128,5 +128,6 @@ test('個人訊息的「背景工作 N 件」：手機（noBar）保留，電腦
   const pane = read('ui/lib/chatpane.mjs')
   assert.match(pane, /const toPsm = computed\(\(\) => \(props\.friend\?\.room === true \|\| props\.noBar \? props\.friend\?\.psm \?\? '' : headerPsm\(props\.friend\?\.psm\)\)\)/)
   assert.equal(headerPsm('demo・背景工作 3 件'), 'demo', '電腦版照舊剝')
+  assert.equal(headerPsm('demo・背景工作 1 件・閒置 2 件'), 'demo', '電腦版連閒置那段一起剝（#1368）')
   assert.match(read('ui/m.html'), /<template v-if="chatFriend\.psm"> · <span v-html="emo\(chatFriend\.psm\)"><\/span><\/template>/, '手機標頭直接顯示個人訊息（含件數）')
 })

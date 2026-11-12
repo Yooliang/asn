@@ -124,7 +124,7 @@ test('接線：名單右鍵用 barSlots 的第 2、3 格與 partnerMenuItems；A
 
 test('工作項目（#539 之三）：件數從個人訊息讀；本機有件數可按；0 件、離線、開啟中、別台電腦、不能查的畫面反灰', () => {
   const busy = F({ psm: 'demo・背景工作 3 件' })
-  assert.deepEqual(view(busy).tasks, { key: 'tasks', label: '工作項目', ok: true, reason: '', count: 3 })
+  assert.deepEqual(view(busy).tasks, { key: 'tasks', label: '工作項目', ok: true, reason: '', count: 3, idle: 0 })
   const remote = view(F({ node: 'W', psm: 'demo・背景工作 2 件' })).tasks
   assert.deepEqual([remote.ok, remote.reason, remote.count], [false, TASKS_WHY.remote, 2], '別台電腦照樣顯示件數，列表只有本機看得到')
   assert.deepEqual([view(F({ psm: 'demo' })).tasks.ok, view(F({ psm: 'demo' })).tasks.reason], [false, TASKS_WHY.none])
@@ -134,4 +134,20 @@ test('工作項目（#539 之三）：件數從個人訊息讀；本機有件數
   assert.equal(view(busy, { ...CTX, tasks: false }).tasks.reason, TASKS_WHY.noApi)
   for (const r of Object.values(TASKS_WHY)) assert.ok(r.length <= WHY_MAX, r)
   assert.equal(barSlots(null).find(s => s.key === 'tasks').count, 0)
+})
+
+test('工作項目（#1368）：件數只算在跑的；有閒置不反灰、數字 0 照樣點得開；在跑與閒置都 0 才反灰；別台電腦、手機、離線照舊', () => {
+  const mixed = view(F({ psm: 'demo・背景工作 2 件・閒置 3 件' })).tasks
+  assert.deepEqual([mixed.ok, mixed.count, mixed.idle], [true, 2, 3])
+  const onlyIdle = view(F({ psm: 'demo・背景工作 0 件・閒置 1 件' })).tasks
+  assert.deepEqual([onlyIdle.ok, onlyIdle.reason, onlyIdle.count, onlyIdle.idle], [true, '', 0, 1], '全部閒置：不反灰、數字 0')
+  const none = view(F({ psm: 'demo・背景工作 0 件' })).tasks
+  assert.deepEqual([none.ok, none.reason, none.idle], [false, TASKS_WHY.none, 0])
+  const remote = view(F({ node: 'W', psm: '背景工作 0 件・閒置 2 件' })).tasks
+  assert.deepEqual([remote.ok, remote.reason, remote.idle], [false, TASKS_WHY.remote, 2], '別台電腦照舊反灰')
+  const phone = view(F({ psm: '背景工作 0 件・閒置 2 件' }), { ...CTX, phone: true }).tasks
+  assert.deepEqual([phone.ok, phone.reason], [false, '手機看不到工作列表'])
+  const off = view(F({ status: 'offline', psm: '背景工作 0 件・閒置 2 件' })).tasks
+  assert.deepEqual([off.ok, off.count, off.idle], [false, 0, 0], '離線時舊的件數不算')
+  assert.equal(barSlots(null).find(s => s.key === 'tasks').idle, 0)
 })

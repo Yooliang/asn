@@ -9,7 +9,7 @@ import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
-import { taskCountOf, taskView } from './tasks.mjs'
+import { idleCountOf, taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { REASON, WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
@@ -152,12 +152,15 @@ function subsSlot(f, engine, ctx) {
     || (ctx.phone ? PHONE_WHY.subs : '') || (f.node !== ctx.selfNode ? '視窗在另一台電腦上' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.subagents ? '' : '這個畫面不能查看')
   return slot('subs', ctx.subLabel || BAR_LABEL.subs, why)
 }
-// 工作項目：件數從個人訊息讀（slot 多帶 count）；0 件、離線、開啟中反灰；別台電腦的有件數也反灰（列表只有本機讀得到）；手機一律只看件數
+// 工作項目：件數從個人訊息讀（slot 多帶 count＝在跑的、idle＝閒置的，#1368）；在跑與閒置都 0 件、離線、開啟中反灰；
+// 別台電腦的有件數也反灰（列表只有本機讀得到）；手機一律只看件數
 function tasksSlot(f, ctx) {
-  const count = f.status === 'offline' || f.pending ? 0 : taskCountOf(f.psm)
-  const why = (f.pending ? '視窗還在開啟中' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (count > 0 ? '' : TASKS_WHY.none)
+  const gone = f.status === 'offline' || f.pending
+  const count = gone ? 0 : taskCountOf(f.psm)
+  const idle = gone ? 0 : idleCountOf(f.psm)
+  const why = (f.pending ? '視窗還在開啟中' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (count + idle > 0 ? '' : TASKS_WHY.none)
     || (ctx.phone ? PHONE_WHY.tasks : '') || (f.node !== ctx.selfNode ? TASKS_WHY.remote : '') || (ctx.tasks ? '' : TASKS_WHY.noApi)
-  return { ...slot('tasks', BAR_LABEL.tasks, why), count }
+  return { ...slot('tasks', BAR_LABEL.tasks, why), count, idle }
 }
 
 /**
@@ -167,10 +170,10 @@ function tasksSlot(f, ctx) {
  *        phone（手機：視窗在別台電腦上，前台／後台、子代理、工作項目列表都反灰並寫原因；切換模型走遠端夥伴管理）,
  *        wake（false＝第 2 格不換成喚醒；名單右鍵沒有大按鈕列，喚醒留在右鍵選單裡）,
  *        term（true＝這位夥伴在共用終端服務裡：第 2 格放「終端」，slot 多帶 term:true） }
- * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；離線的 Claude／pi 是「喚醒」（slot 多帶 wake:true）；其他是前台顯示／後台隱藏。「工作項目」多帶 count（背景工作件數，沒有＝0）。
+ * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；離線的 Claude／pi 是「喚醒」（slot 多帶 wake:true）；其他是前台顯示／後台隱藏。「工作項目」多帶 count（正在跑的背景工作件數，沒有＝0）與 idle（閒置件數）。
  */
 export function barSlots(friend, ctx = {}) {
-  if (!friend) return BAR_KEYS.map(k => ({ key: k, label: BAR_LABEL[k], ok: false, reason: '沒有選到夥伴', ...(k === 'tasks' ? { count: 0 } : {}) }))
+  if (!friend) return BAR_KEYS.map(k => ({ key: k, label: BAR_LABEL[k], ok: false, reason: '沒有選到夥伴', ...(k === 'tasks' ? { count: 0, idle: 0 } : {}) }))
   const engine = partnerEngine(friend)
   return [
     slot('call', BAR_LABEL.call, callBlock(friend, { hasVoice: ctx.callable === true })),
@@ -325,14 +328,14 @@ export const ActionBar = {
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const isRoom = computed(() => props.friend?.room === true)
     const subView = computed(() => subagentView(subs.q))
-    const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count))
+    const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count, slot.value.tasks.idle))
     const lite = computed(() => Boolean(props.blocked))
     const opsAll = computed(() => (lite.value ? props.ops.map(i => ({ ...i, ok: true, reason: '' })) : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
       term: !lite.value && props.term?.ready === true, termLabel: props.term?.label || '',
-    }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0 } : {}) } : s)))
+    }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0, idle: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
     const showGroup = computed(() => isRoom.value && props.group.length > 0)
@@ -512,14 +515,19 @@ export const ActionBar = {
     </div>
     <div class="ab-wrap">
       <button class="abtn" type="button" data-slot="tasks" :class="{ on: tasks.open }" :aria-disabled="slot.tasks.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="tasks.open" aria-label="工作項目" :title="slot.tasks.ok ? TASKS_TIP : slot.tasks.reason" @click="onTasks">
-        <span class="ab-icon"><img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-badge" v-if="slot.tasks.count > 0" :aria-label="slot.tasks.count + ' 件'">{{ slot.tasks.count }}</span></span><span class="ab-name">工作項目 ▾</span>
+        <span class="ab-icon"><img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-badge" v-if="slot.tasks.count > 0" :aria-label="'正在跑 ' + slot.tasks.count + ' 件'">{{ slot.tasks.count }}</span></span><span class="ab-name">工作項目 ▾<small class="ab-idle" v-if="slot.tasks.idle > 0" :aria-label="'閒置 ' + slot.tasks.idle + ' 件'">閒置 {{ slot.tasks.idle }}</small></span>
       </button>
       <ul class="ab-menu ab-subs ab-tasks" v-if="tasks.open" role="menu">
         <li class="menu-note" v-if="tasks.loading && !tasks.q">檢查中…</li>
         <template v-else>
-          <li class="menu-note" v-if="!taskList.items.length && !taskList.more">{{ taskList.empty }}</li>
+          <li class="menu-note" v-if="!taskList.items.length && !taskList.more && !taskList.idle.length && !taskList.idleMore">{{ taskList.empty }}</li>
           <li class="ab-sub" v-for="it in taskList.items" :key="it.id" role="menuitem"><span class="ab-sub-text">{{ it.text }}</span><span class="ab-sub-kind" v-if="it.kind">{{ it.kind }}</span></li>
           <li class="menu-note" v-if="taskList.more">還有 {{ taskList.more }} 件沒列出</li>
+          <template v-if="taskList.idle.length || taskList.idleMore">
+            <li class="menu-note ab-idle-head" role="presentation">{{ taskList.idleTitle }}</li>
+            <li class="ab-sub ab-sub-idle" v-for="it in taskList.idle" :key="'idle-' + it.id" role="menuitem"><span class="ab-sub-text">{{ it.text }}</span><span class="ab-sub-kind">{{ taskList.idleTag }}</span></li>
+            <li class="menu-note" v-if="taskList.idleMore">還有 {{ taskList.idleMore }} 件閒置沒列出</li>
+          </template>
         </template>
       </ul>
     </div>
