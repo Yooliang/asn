@@ -30,7 +30,7 @@ test('靜態：兩支新函式只授權 service_role、search_path 空；排在 
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const C1 = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const C2 = '1a8fad5b-d9cb-469f-a165-70867728950e'

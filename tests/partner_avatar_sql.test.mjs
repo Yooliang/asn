@@ -45,7 +45,7 @@ test('asn_relay_list：與正式庫現行定義比，只多兩行 avatar_updated
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'

@@ -60,10 +60,17 @@ async function seedDump(PGlite, base, dist) {
   return blob
 }
 
-/** 載入 PGlite 並回傳加速版的類別；沒裝 PGlite 會丟錯（呼叫端照舊 catch 後略過實跑）。 */
+/** 是不是「沒裝 PGlite」：只有這種才可以略過實跑，其他錯誤（升級後載不起來、wasm 壞掉…）都要讓測試失敗 */
+export function isPgliteMissing(err) {
+  const code = err?.code
+  return (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') && String(err?.message ?? '').includes('@electric-sql/pglite')
+}
+
+/** 載入 PGlite 並回傳加速版的類別；沒裝 PGlite 回 null（呼叫端略過實跑），其他錯誤照丟 */
 export async function fastPGlite() {
   if (fastClass) return fastClass
-  const { PGlite } = await import('@electric-sql/pglite')
+  let PGlite
+  try { ({ PGlite } = await import('@electric-sql/pglite')) } catch (e) { if (isPgliteMissing(e)) return null; throw e }
   const dist = path.dirname(createRequire(import.meta.url).resolve('@electric-sql/pglite'))
   const [pgliteWasmModule, initdbWasmModule] = await Promise.all(['pglite.wasm', 'initdb.wasm'].map(f => WebAssembly.compile(fs.readFileSync(path.join(dist, f)))))
   const fsBundle = new Blob([fs.readFileSync(path.join(dist, 'pglite.data'))])

@@ -24,7 +24,7 @@ test('靜態：只加可為 null 的欄位與檢查條件；新函式 security d
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：格式過濾、排序去重、最多 64 個、只改自己節點、寫入時間；沒回報過的節點維持 null', { skip }, async () => {

@@ -28,7 +28,7 @@ test('靜態：人代號位址只認 u: 加十二位十六進位、且必須等�
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

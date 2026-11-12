@@ -16,7 +16,7 @@ test('靜態：舊的 7 參數版本不動、新版本只給 service_role、只�
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：9 參數版本存提供者與模型、要一起給、格式不對回 bad_pi_model；表上的限制擋單邊值；取走時一起回', { skip }, async () => {

@@ -3,10 +3,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { track, keepUntilEnd, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
+import { track, keepUntilEnd, closeAtEnd, fastPGlite, isPgliteMissing } from './_pglite_close.mjs'
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：每個新資料庫都是乾淨的、彼此不共用狀態', { skip }, async () => {
@@ -50,3 +50,20 @@ test('實跑（pglite）：上一項測試的資料庫已關掉；keepUntilEnd �
 })
 
 closeAtEnd()
+
+test('只有「沒裝 PGlite」才略過；其他載入錯誤要讓整支失敗（不能無聲略過變假綠）', () => {
+  const missing = Object.assign(new Error("Cannot find package '@electric-sql/pglite' imported from x"), { code: 'ERR_MODULE_NOT_FOUND' })
+  assert.equal(isPgliteMissing(missing), true)
+  assert.equal(isPgliteMissing(Object.assign(new Error("Cannot find module '@electric-sql/pglite'"), { code: 'MODULE_NOT_FOUND' })), true)
+  assert.equal(isPgliteMissing(Object.assign(new Error("Cannot find package 'other-dep'"), { code: 'ERR_MODULE_NOT_FOUND' })), false, '是 PGlite 自己缺相依套件：不算沒裝')
+  assert.equal(isPgliteMissing(new Error('WebAssembly.compile(): expected magic word')), false, 'wasm 壞掉不算沒裝')
+  assert.equal(isPgliteMissing(Object.assign(new Error('ENOENT pglite.data'), { code: 'ENOENT' })), false, '少了資料檔不算沒裝')
+  assert.equal(isPgliteMissing(undefined), false)
+})
+
+test('呼叫端不再用 try/catch 吞掉 fastPGlite 的錯誤', async () => {
+  const fs = await import('node:fs'), path = await import('node:path')
+  const dir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+  const bad = fs.readdirSync(dir).filter(f => f.endsWith('.mjs')).filter(f => /try\s*\{\s*PGlite\s*=\s*await fastPGlite\(\)/.test(fs.readFileSync(path.join(dir, f), 'utf8')))
+  assert.deepEqual(bad, [])
+})

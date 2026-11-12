@@ -29,7 +29,7 @@ test('靜態：編號排在改名 migration 之後，且舊定義是這支的基
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'

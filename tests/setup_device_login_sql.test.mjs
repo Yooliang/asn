@@ -65,7 +65,7 @@ test('靜態：回復腳本把三個函式與 link 約束換回原文，drop 新
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑：網址規則對共用正反例（加上兩個新主機的正反例）', { skip }, async () => {

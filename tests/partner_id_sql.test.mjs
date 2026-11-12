@@ -50,7 +50,7 @@ test('清理排程：冪等（先 unschedule）；舊名 90 天、夥伴 180 天
 })
 
 let PGlite = null
-try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 
 test('實跑（pglite）：規則 1～4、冪等、舊名轉寄期、寄信解析', { skip: PGlite ? false : '沒有安裝 @electric-sql/pglite' }, async () => {
   const mig = sql.replace(/create extension if not exists pg_cron;[\s\S]*?\$\$\);\n/, '')
