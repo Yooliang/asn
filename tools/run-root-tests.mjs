@@ -1,7 +1,7 @@
 // 跑根目錄 tests/*.test.mjs：每支測試檔一個獨立程序、各自逾時（#284），多支並行（#1383）。
 // 為什麼不直接 `node --test tests/*.test.mjs`：整批一次丟出去，其中一支卡住（沒關假後台、連不到資料庫…）整批就掛著不動，也看不出是哪一支；
 // 而 `--test-force-exit` 在 Windows 結束時會觸發 libuv 斷言崩潰，造成假的「取消」，所以這裡不用它。
-// 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒] [--jobs=並行數]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
+// 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒] [--jobs=並行數] [--shard=i/n]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
 // 並行數：--jobs=N ＞ 環境變數 ROOT_TESTS_JOBS ＞ CPU 數（os.availableParallelism()）。--jobs=1 就是一支一支跑。
 // 每支各給一個自己的暫存目錄（TMPDIR／TEMP／TMP 指過去），跑完刪掉；測試檔彼此不共用暫存位置。
 // 另有一個整批共用的快取目錄（環境變數 ROOT_TESTS_SHARED_DIR）：只放建一次後只讀的檔（PGlite 空資料庫匯出檔），跑完刪掉。
@@ -22,7 +22,8 @@ function posInt(s) {
   return s !== '' && s != null && Number.isInteger(n) && n > 0 ? n : null
 }
 
-/** 參數 → { filters, timeoutSec, requirePglite, jobs }；--timeout 不是正整數就用預設 60；--jobs 不是正整數就當沒給（null）；
+/** 參數 → { filters, timeoutSec, requirePglite, jobs, shard }；--timeout 不是正整數就用預設 60；--jobs 不是正整數就當沒給（null）；
+ *  --shard=i/n＝把挑到的測試檔分成 n 份、只跑第 i 份（CI 分到幾台機器同時跑）；格式不對是 'invalid'（main 直接失敗，不默默全跑或全不跑）；
  *  --require-pglite＝pglite 載不到就整批不跑、直接失敗，且任何子測試因為 pglite 被略過也算失敗（CI 用，見 asn-linux-build.yml）。
  *  只看「因為 pglite」的略過：tenants_sql 有 3 項因舊 irori 額度邏輯而固定略過，跟 pglite 無關，不算。 */
 export function parseArgs(argv) {
@@ -30,15 +31,26 @@ export function parseArgs(argv) {
   let timeoutSec = 60
   let requirePglite = false
   let jobs = null
+  let shard = null
   for (const a of argv) {
     const m = /^--timeout=(.*)$/.exec(a)
     if (m) { const n = posInt(m[1]); if (n) timeoutSec = n; continue }
     const j = /^--jobs=(.*)$/.exec(a)
     if (j) { jobs = posInt(j[1]); continue }
+    const sh = /^--shard=(.*)$/.exec(a)
+    if (sh) { shard = parseShard(sh[1]); continue }
     if (a === '--require-pglite') { requirePglite = true; continue }
     if (!a.startsWith('--')) filters.push(a.toLowerCase())
   }
-  return { filters, timeoutSec, requirePglite, jobs }
+  return { filters, timeoutSec, requirePglite, jobs, shard }
+}
+
+function parseShard(s) {
+  const m = /^(\d+)\/(\d+)$/.exec(s)
+  if (!m) return 'invalid'
+  const index = posInt(m[1])
+  const total = posInt(m[2])
+  return index && total && index <= total ? { index, total } : 'invalid'
 }
 
 /** 並行數：參數 ＞ 環境變數 ROOT_TESTS_JOBS ＞ CPU 數；壞值略過；至少 1 */
@@ -63,6 +75,20 @@ export function pickFiles(names, filters = []) {
 /** 開跑順序：檔案大的先跑（測試項目多、通常跑得久），免得最慢那支最後才開始、拖長整體時間；同大小照檔名 */
 export function scheduleOrder(files, sizeOf) {
   return files.map(f => [f, sizeOf(f)]).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([f]) => f)
+}
+
+/** 分份：大檔先、每支丟給目前檔案總大小最小的那份（同大小給編號小的），各份工作量相近；回傳第 index 份（照開跑順序）。
+ *  同一批檔案、同樣的 total，每份拿到的檔案固定，n 份合起來剛好是全部、不重複。 */
+export function shardFiles(files, sizeOf, index, total) {
+  const load = Array(total).fill(0)
+  const mine = []
+  for (const f of scheduleOrder(files, sizeOf)) {
+    let k = 0
+    for (let i = 1; i < total; i++) if (load[i] < load[k]) k = i
+    load[k] += sizeOf(f)
+    if (k === index - 1) mine.push(f)
+  }
+  return mine
 }
 
 /** 一支的結果：passed／failed／timeout */
@@ -170,18 +196,22 @@ export async function runAll(files, { jobs = 1, timeoutSec = 60, requirePglite =
 }
 
 async function main() {
-  const { filters, timeoutSec, requirePglite, jobs: argJobs } = parseArgs(process.argv.slice(2))
+  const { filters, timeoutSec, requirePglite, jobs: argJobs, shard } = parseArgs(process.argv.slice(2))
+  if (shard === 'invalid') { console.error('--shard 要寫成 i/n（1 ≤ i ≤ n），例如 --shard=1/2'); process.exit(1) }
   if (requirePglite) {
     try { await import('@electric-sql/pglite') } catch (e) { console.error(`--require-pglite：載不到 @electric-sql/pglite（${e.code ?? e.message}），不跑`); process.exit(1) }
   }
   const testsDir = path.join(root, 'tests')
-  const files = pickFiles(fs.readdirSync(testsDir), filters)
-  if (!files.length) { console.error('沒有符合的測試檔'); process.exit(1) }
+  const picked = pickFiles(fs.readdirSync(testsDir), filters)
+  if (!picked.length) { console.error('沒有符合的測試檔'); process.exit(1) }
+  const sizeOf = f => { try { return fs.statSync(path.join(testsDir, f)).size } catch { return 0 } }
+  const files = shard ? shardFiles(picked, sizeOf, shard.index, shard.total) : scheduleOrder(picked, sizeOf)
+  if (!files.length) { console.log(`第 ${shard.index}/${shard.total} 份沒有分到測試檔`); process.exit(0) }
   const jobs = resolveJobs(argJobs)
-  console.log(`共 ${files.length} 支，並行 ${jobs} 支（CPU ${availableCpus()}；可用 --jobs=N 或環境變數 ROOT_TESTS_JOBS 改）`)
+  const shardNote = shard ? `，第 ${shard.index}/${shard.total} 份（全部 ${picked.length} 支）` : ''
+  console.log(`共 ${files.length} 支${shardNote}，並行 ${jobs} 支（CPU ${availableCpus()}；可用 --jobs=N 或環境變數 ROOT_TESTS_JOBS 改）`)
   const t0 = Date.now()
-  const ordered = scheduleOrder(files, f => { try { return fs.statSync(path.join(testsDir, f)).size } catch { return 0 } })
-  const { res, times, code } = await runAll(ordered, { jobs, timeoutSec, requirePglite })
+  const { res, times, code } = await runAll(files, { jobs, timeoutSec, requirePglite })
   const slow = [...times].sort((a, b) => b[1] - a[1]).slice(0, 10)
   console.log(`\n最慢 ${slow.length} 支：` + slow.map(([f, s]) => `${f} ${s.toFixed(1)}s`).join('、'))
   console.log(`共 ${files.length} 支：過 ${res.passed.length}、失敗 ${res.failed.length}、逾時 ${res.timeout.length}；總耗時 ${((Date.now() - t0) / 1000).toFixed(1)}s（並行 ${jobs}）`)

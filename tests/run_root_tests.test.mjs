@@ -5,12 +5,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { classify, failureExcerpt, parseArgs, pickFiles, pgliteSkips, resolveJobs, runAll, runOne, scheduleOrder } from '../tools/run-root-tests.mjs'
+import { classify, failureExcerpt, parseArgs, pickFiles, pgliteSkips, resolveJobs, runAll, runOne, scheduleOrder, shardFiles } from '../tools/run-root-tests.mjs'
 
 test('參數：預設 60 秒；--timeout 要正整數，壞的用預設；其餘當檔名篩選字（小寫）', () => {
-  assert.deepEqual(parseArgs([]), { filters: [], timeoutSec: 60, requirePglite: false, jobs: null })
-  assert.deepEqual(parseArgs(['Tenants', '--timeout=30', 'roadmap']), { filters: ['tenants', 'roadmap'], timeoutSec: 30, requirePglite: false, jobs: null })
-  assert.deepEqual(parseArgs(['_sql', '--require-pglite', '--timeout=180']), { filters: ['_sql'], timeoutSec: 180, requirePglite: true, jobs: null })
+  assert.deepEqual(parseArgs([]), { filters: [], timeoutSec: 60, requirePglite: false, jobs: null, shard: null })
+  assert.deepEqual(parseArgs(['Tenants', '--timeout=30', 'roadmap']), { filters: ['tenants', 'roadmap'], timeoutSec: 30, requirePglite: false, jobs: null, shard: null })
+  assert.deepEqual(parseArgs(['_sql', '--require-pglite', '--timeout=180']), { filters: ['_sql'], timeoutSec: 180, requirePglite: true, jobs: null, shard: null })
   for (const bad of ['--timeout=0', '--timeout=-5', '--timeout=abc', '--timeout=1.5', '--timeout=']) assert.equal(parseArgs([bad]).timeoutSec, 60, bad)
   assert.deepEqual(parseArgs(['--unknown']).filters, [], '不認得的旗標不當檔名')
 })
@@ -236,4 +236,23 @@ test('共用快取目錄：各支拿到同一個 ROOT_TESTS_SHARED_DIR，整批�
     assert.match(path.basename(shared[0]), /^asn-rrt-shared-/)
     assert.equal(fs.existsSync(shared[0]), false, '跑完要刪掉')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('分份：--shard=i/n 解析；壞值是 invalid', () => {
+  assert.deepEqual(parseArgs(['--shard=1/2']).shard, { index: 1, total: 2 })
+  assert.deepEqual(parseArgs(['--shard=3/3']).shard, { index: 3, total: 3 })
+  for (const bad of ['--shard=0/2', '--shard=3/2', '--shard=1', '--shard=a/b', '--shard=', '--shard=1/0']) assert.equal(parseArgs([bad]).shard, 'invalid', bad)
+})
+
+test('分份：n 份合起來剛好全部、不重複；大小平均；同樣輸入結果固定', () => {
+  const size = Object.fromEntries(Array.from({ length: 23 }, (_, i) => [`f${String(i).padStart(2, '0')}.test.mjs`, ((i * 37) % 11 + 1) * 100]))
+  const files = Object.keys(size)
+  const sizeOf = f => size[f]
+  for (const total of [1, 2, 3]) {
+    const parts = Array.from({ length: total }, (_, i) => shardFiles(files, sizeOf, i + 1, total))
+    assert.deepEqual(parts.flat().sort(), [...files].sort(), `total=${total}`)
+    const loads = parts.map(p => p.reduce((s, f) => s + sizeOf(f), 0))
+    assert.ok(Math.max(...loads) - Math.min(...loads) <= Math.max(...files.map(sizeOf)), `total=${total} 不平均：${loads}`)
+    assert.deepEqual(parts, Array.from({ length: total }, (_, i) => shardFiles(files, sizeOf, i + 1, total)))
+  }
 })
