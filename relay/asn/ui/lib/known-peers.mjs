@@ -14,14 +14,14 @@ export const TEXT = {
   none: '還沒有認得的電腦。',
   forget: '忘記這台',
   forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
-  forgetTitle: '忘記這台電腦？',
+  forgetTitle: '忘記這台設備？',
   forgetYes: '忘記',
   forgetCancel: '取消',
   // 忘記前的確認句：沒名字就不寫名字、沒指紋就不寫括號（指紋取畫面上分組顯示的前兩組）
   forgetConfirm: (label, fp) => {
     const name = String(label ?? '').trim()
     const g = String(fp ?? '').replace(/\s+/g, '').slice(0, 8).replace(/(.{4})(?=.)/, '$1 ')
-    return `忘記${name && name !== UNNAMED ? `「${name}」` : '這台電腦'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
+    return `忘記${name && name !== UNNAMED ? `「${name}」` : '這台設備'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
   },
   firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',

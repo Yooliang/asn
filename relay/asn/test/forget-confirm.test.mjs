@@ -12,8 +12,8 @@ test('確認句：有名字＋指紋、缺指紋、缺名字，都不出現 unde
   assert.equal(f('小乙的電腦', 'abcd efgh ijkl'), `忘記「小乙的電腦」（指紋 abcd efgh）？${TAIL}`)
   assert.equal(f('小乙的電腦', 'abcdefghijkl'), `忘記「小乙的電腦」（指紋 abcd efgh）？${TAIL}`, '指紋取畫面分組的前兩組')
   assert.equal(f('小乙的電腦', ''), `忘記「小乙的電腦」？${TAIL}`)
-  assert.equal(f('', 'abcdefghijkl'), `忘記這台電腦（指紋 abcd efgh）？${TAIL}`)
-  assert.equal(f('未命名的電腦', null), `忘記這台電腦？${TAIL}`)
+  assert.equal(f('', 'abcdefghijkl'), `忘記這台設備（指紋 abcd efgh）？${TAIL}`)
+  assert.equal(f('未命名的電腦', null), `忘記這台設備？${TAIL}`)
   for (const t of [f(undefined, undefined), f(null, null), f('  ', ' ')]) assert.doesNotMatch(t, /undefined|null|（）|「」/)
 })
 
