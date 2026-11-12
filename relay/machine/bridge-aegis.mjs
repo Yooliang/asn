@@ -213,7 +213,7 @@ async function pull(why) {
 process.on('SIGINT', () => process.exit(0)); process.on('SIGTERM', () => process.exit(0))
 process.on('uncaughtException', e => log(`uncaught: ${e.stack ?? e}`))
 process.on('unhandledRejection', e => log(`unhandled: ${e?.stack ?? e}`))
-core.singleInstance()
+await core.singleInstance()
 
 log(`aegis bridge starting node=${NODE_ID} aegis=${AEGIS_URL} allow=[${ALLOW.join(',')}]${ALLOW.length ? '' : ' (empty: everything blocked)'}`)
 membersLoaded = refreshMembers()
