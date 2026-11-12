@@ -319,6 +319,6 @@ test('接線守門：手機的指令清單有這四個指令、頁面接上、�
   assert.ok(!html.includes('localStorage') && !js.includes("store('cloud"), '金鑰不寫任何儲存')
   const cloud = phoneGuideList().find(g => g.key === 'cloud')
   assert.doesNotMatch(cloud.note, /手機不能做/)
-  assert.match(cloud.note, /設置/)
+  assert.match(cloud.note, /設定/); assert.doesNotMatch(cloud.note, /設置/)
   for (const [k, t] of Object.entries(CLOUD_TEXT)) if (typeof t === 'string') assert.doesNotMatch(t, /cloud_|agent_|invoke|https?:/i, k)
 })

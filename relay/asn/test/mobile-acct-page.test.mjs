@@ -81,7 +81,7 @@ test('Claude 的確認畫面資料：只取 Claude 帳號交給既有的 acctShe
 
 test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未回報、離線偏灰、整台空狀態；設備列表與排序見 device-list-page.test.mjs', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
+  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-go"/, '先是設備列表')
   assert.match(pane, /m-dv-dot/)
   assert.match(pane, /v-for="v in acctCur\.vendors"/)
@@ -122,7 +122,7 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail \|\| !acctCanSwitchTo\(acctCur\.value\?\.key\)\) return/, '一定先看過確認畫面才送（也不能送到這支手機自己，#930）')
   assert.match(js, /acctSw\.phase = 'run'\n[\s\S]{0,200}const v = await runAcctSwitch\(acctTransport, node, email, \{ onUpdate: v => \{ if \(token === acctToken\) acctSw\.view = v \}, cancelled: \(\) => run !== acctRunSeq \}\)/, '送出後進進度畫面；離開畫面後照樣等結果（只有送出新的切換才停）')
   assert.match(js, /android_acct_list/)
-  assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '在第四頁籤打開（#461）')
-  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備')
+  assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '當內頁打開（#461；蓋在進來的那個分頁上）')
+  assert.equal(pageTitle(acctPage()), '設備', '內頁標題（分頁列照樣標著底下那一格）')
   assert.equal(tabLabel('chats'), '對話')
 })

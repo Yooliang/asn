@@ -199,7 +199,7 @@ test('守門：廠商圖示鍵齊全（claude、codex、gemini、grok、deepseek
   for (const k of ['claude', 'codex', 'gemini', 'grok', 'deepseek', 'minimax', 'pi', 'aegis', 'other']) assert.ok(VENDOR_ICON_KEYS.includes(k), k)
 })
 
-test('手機版沒有設定的帳號／設備分類：只做電腦版（手機設置頁維持原狀）', () => {
+test('手機版沒有設定的帳號／設備分類：只做電腦版（手機設定頁維持原狀）', () => {
   const js = read('ui/m.js') + read('ui/m.html')
   assert.ok(!js.includes('settings-panel') && !js.includes('SETTING_CATS'))
 })

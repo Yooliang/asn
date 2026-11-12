@@ -11,7 +11,7 @@ const tag = (src, start) => { const i = src.indexOf(start); assert.ok(i >= 0, `�
 test('m.html：對話分頁的 chat-pane 給看畫面三樣，打字只接手機那一份（#1378）', () => {
   const html = read('../ui/m.html')
   const t = tag(html, '<chat-pane v-if="chatFriend"')
-  assert.match(t, /:view-active="nav\.tab === 'chats'"/)
+  assert.match(t, /:view-active="nav\.tab === 'chats' && nav\.chat"/, '點進那一則對話、正在看時才算')
   assert.match(t, /:self-node="selfNode"/)
   assert.match(t, /:remote-view-api="mobileRemoteViewApi"/)
   // remote-input-api 只准接 mobileRemoteInputApi（發起前會先過本人確認）

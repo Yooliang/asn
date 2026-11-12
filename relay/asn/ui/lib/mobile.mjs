@@ -1,5 +1,5 @@
 // 手機版（ui/m.html）的純邏輯：單欄導覽、名單分組、提示規則、安卓外殼橋。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-// 手機三個大分頁：夥伴、對話（最後使用的那一位）、設置。沒有多視窗、系統匣、設定分頁。
+// 手機四個大分頁：對話、夥伴、通知、設定。沒有多視窗、系統匣。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
@@ -8,47 +8,53 @@ import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 
 // ---------- 單欄導覽 ----------
-// 狀態：{ tab: 'list' | 'chats' | 'me' | 'page', sheet: '' | 'ops' | … }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
-// 'page'＝第四頁籤（設備與帳號、設置的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs），平時不顯示，進這些內頁時才出現在最右邊。
-// 對話不再是蓋在名單上的一層：第二個分頁「對話」就是最後使用的那一位的對話內容（見 lib/mobile-ops.mjs 的 chatPageState）。
-// 每往下一層（夥伴→其他分頁、名單→開新夥伴、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
-// 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
-// 四個固定分頁（PR-H，#895）：第四格平時是「通知」，進內頁時暫時換成內頁（見 lib/mobile-fourth.mjs）。
-export const TABS = ['list', 'chats', 'me', PAGE_TAB]
-export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置', [PAGE_TAB]: NOTICE_LABEL }
-// 分頁列上的字：前三個固定；第四格用它目前內頁的標題（pageTitle），沒有內頁就是「通知」
-export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitle ?? '') || NOTICE_LABEL : TAB_LABEL[t] ?? '')
+// 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
+// 四個固定分頁（0.2.18，和電腦版同樣的字、同樣的順序）：對話（chats）、夥伴（list）、通知（notice）、設定（me）。
+// 對話分頁先列出活動中的對話（夥伴與群組），點一則才進到對話內容（chat＝true，多一層瀏覽記錄，返回回清單）。
+// 'page'＝內頁（設備與帳號、設定的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs）：蓋在進來的那個分頁上（分頁列照樣標著那一格），不另外佔一格。
+// 每往下一層（對話清單→其他分頁、對話清單→一則對話、分頁→內頁、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，對話清單層再按才退到背景。
+export const TABS = ['chats', 'list', 'notice', 'me']
+export const TAB_LABEL = { chats: '對話', list: '夥伴', notice: NOTICE_LABEL, me: '設定' }
+export const HOME_TAB = 'chats'   // 底層分頁：開 App 的第一頁，切到其他分頁推一筆記錄，切回來＝上一頁
+// 分頁列上的字：四個固定（內頁不佔分頁，標題在內頁自己的頂端）
+export const tabLabel = t => TAB_LABEL[t] ?? ''
 // 目前有哪些分頁：永遠四個（pager 的頁數、指示條、左右滑的範圍都是 4）；參數留著是為了呼叫端不用改
 export const tabList = () => TABS
-// 第四格的未讀紅點：通知對話有未讀就亮（內頁佔著第四格時照樣亮）；對話分頁的紅點不再算通知的未讀
+// 內頁蓋在哪一個分頁上（分頁列要標哪一格、pager 停在哪一頁）：沒有內頁回空字串
+export const pageHost = fourth => (fourth?.page && TABS.includes(fourth.from) ? fourth.from : '')
+// 分頁列標著哪一格：在內頁上就是內頁蓋著的那一格
+export const shownTab = (tab, fourth) => (tab === PAGE_TAB ? pageHost(fourth) || HOME_TAB : tab)
+// 通知分頁的未讀紅點：通知對話有未讀就亮；對話分頁的紅點不算通知的未讀
 export const noticeUnread = friends => { const f = (Array.isArray(friends) ? friends : []).find(isNoticeFriend); return Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0 }
 export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
-export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'chats' ? chats > 0 : t === PAGE_TAB ? notice > 0 : false)
-// 正在看的對話（標已讀、算「看得到」用）：對話分頁看 lastChat；第四格沒有內頁時看的是通知
-export const viewedChatId = ({ tab, fourth, lastChat }) => (tab === 'chats' ? lastChat || '' : tab === PAGE_TAB && !fourth?.page ? NOTICE_ID : '')
+export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'chats' ? chats > 0 : t === 'notice' ? notice > 0 : false)
+// 正在看的對話（標已讀、算「看得到」用）：對話分頁要點進那一則（chat）才算；通知分頁看的是通知
+export const viewedChatId = ({ tab, chat = false, lastChat }) => (tab === 'chats' && chat ? lastChat || '' : tab === 'notice' ? NOTICE_ID : '')
 export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單
-export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
-export const initialNav = () => ({ tab: 'list', sheet: '' })
-export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
+export const normalizeTab = t => (TABS.includes(t) ? t : HOME_TAB)
+export const initialNav = () => ({ tab: HOME_TAB, sheet: '', chat: false })
+export const tabNav = t => ({ tab: normalizeTab(t), sheet: '', chat: false })
+export const chatNav = () => ({ tab: 'chats', sheet: '', chat: true })   // 對話分頁裡點進某一則
 export const meNav = () => tabNav('me')
-export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
-export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
-export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
-export const permReqNav = () => ({ tab: 'chats', sheet: 'permreq' })
-// 第四頁籤上的一層：page＝內頁描述（lib/mobile-fourth.mjs）。每一層一筆瀏覽記錄，返回鍵一層一層退
-export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', page: normalizePage(page) })
+export const opsNav = () => ({ tab: 'chats', sheet: 'ops', chat: true })
+export const secretNav = () => ({ tab: 'chats', sheet: 'secret', chat: true })
+export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq', chat: true })
+export const permReqNav = () => ({ tab: 'chats', sheet: 'permreq', chat: true })
+// 內頁上的一層：page＝內頁描述（lib/mobile-fourth.mjs）。每一層一筆瀏覽記錄，返回鍵一層一層退
+export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', chat: false, page: normalizePage(page) })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.sheet === 'permreq') return permReqNav()
-  if (raw?.tab === PAGE_TAB) return pageNav(raw?.page)   // 沒有（或不合法的）內頁描述＝第四格的「通知」（舊記錄、壞資料都落在這裡，不會壞）
-  // 舊版的滿版層（設備與帳號、設置的某一項、使用指引、開新夥伴）改成第四頁籤上的同一頁
+  if (raw?.tab === PAGE_TAB) { const p = normalizePage(raw?.page); return p ? pageNav(p) : tabNav('notice') }   // 舊版第四格沒有內頁時是「通知」：落到通知分頁
+  // 舊版的滿版層（設備與帳號、設定的某一項、使用指引、開新夥伴）改成內頁
   if (raw?.sheet === 'acct') return pageNav({ kind: 'acct' })
-  if (raw?.sheet === 'setting') { const p = normalizePage({ kind: 'setting', cat: raw?.cat }); return p ? pageNav(p) : tabNav('me') }   // 沒這個分類退回設置分頁
+  if (raw?.sheet === 'setting') { const p = normalizePage({ kind: 'setting', cat: raw?.cat }); return p ? pageNav(p) : tabNav('me') }   // 沒這個分類退回設定分頁
   if (raw?.sheet === 'guide') return pageNav({ kind: 'guide', guide: raw?.guide })
-  if (raw?.sheet === 'launch') return pageNav({ kind: 'launch', step: raw?.step })   // 開新夥伴：第 2 步（step: 2）是第四頁籤上的第二層
+  if (raw?.sheet === 'launch') return pageNav({ kind: 'launch', step: raw?.step })   // 開新夥伴：第 2 步（step: 2）是內頁的第二層
+  if (raw?.tab === 'chats' && raw?.chat === true) return chatNav()
   return tabNav(raw?.tab)
 }
 

@@ -113,10 +113,12 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
 })
 
 // ---------- 頁面接線 ----------
-test('接線：對話分頁是單一對話（不是列表）；「⋯」只在有選單項目時出現；選單在分頁外層、觸控目標 ≥ 44px', () => {
+test('接線：對話分頁先列活動中的對話、點進去才是單一對話（0.2.18）；「⋯」只在有選單項目時出現；選單在分頁外層、觸控目標 ≥ 44px', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.match(html, /<section class="m-pg m-chat" [^>]*aria-label="對話"/, '第二頁就是對話本身；#461 起設備與帳號改在第四頁籤，對話分頁不再被借用，標籤固定叫「對話」')
-  assert.doesNotMatch(html, /m-threads|m-thread|threads|threadTimeText/, '對話列表拿掉')
+  assert.match(html, /<section class="m-pg" :class="nav\.chat \? \['m-chat', \{ shake, 'is-room': chatFriend && chatFriend\.room \}\] : 'm-chat-list'" aria-label="對話">\n\s*<template v-if="nav\.chat">/, '第一頁是對話：點進一則（nav.chat）才是對話本身；內頁不借用它，標籤固定叫「對話」')
+  assert.doesNotMatch(html, /m-threads|m-thread|threads|threadTimeText/, '舊的對話列表程式不再用')
+  assert.match(html, /<li v-for="x in chatRows" :key="x\.id">/, '清單是 chatRows（活動中的對話）')
+  assert.match(html, /aria-label="回對話清單" @click="goTab\('chats'\)"/, '對話上方有回清單的鍵（再點一次「對話」分頁）')
   assert.match(html, /<chat-pane v-if="chatFriend"/); assert.match(html, /\{\{ chatEmptyText \}\}/)
   assert.match(html, /<button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
   assert.match(html, /<circle[\s\S]*?<circle[\s\S]*?<circle/, '「⋯」是三個點的 SVG（與其他圖示按鈕同一套）')
@@ -145,14 +147,14 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   assert.match(html, /v-if="opsBanner"/, '對話頁頂端顯示進度')
 })
 
-test('接線：最後使用的那位存在手機本機設定、點夥伴就成為最後使用並切到對話分頁；舊的對話層與列表程式已移除', () => {
+test('接線：最後使用的那位存在手機本機設定、點夥伴就成為最後使用並進到那一則對話；舊的對話層與列表程式已移除', () => {
   const js = read('ui', 'm.js'), mob = read('ui', 'lib', 'mobile.mjs'), css = read('ui', 'mobile.css')
   assert.match(js, /lastChat: lastChat\.value/, '存進本機設定')
   assert.match(js, /lastChat\.value = normalizeLastChat\(saved\.lastChat\)/, '重開 App 讀回來')
   const open = /function openChat\(id\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
-  assert.match(open, /lastChat\.value = id/); assert.match(open, /goTab\('chats'\)/)
-  assert.doesNotMatch(js, /chatNav|nav\.chat|swipeStart\(\$event, 'chat'\)|backAsync|threadMap|threadRows|\bpc\b/)
-  assert.doesNotMatch(mob, /threadRows|threadTime|lastMessage|chatNav/)
+  assert.match(open, /lastChat\.value = id/); assert.match(open, /fourthNav\.openChat\(\)/)
+  assert.doesNotMatch(js, /swipeStart\(\$event, 'chat'\)|backAsync|threadMap|threadRows|\bpc\b/)
+  assert.doesNotMatch(mob, /threadRows|threadTime|lastMessage/)
   assert.doesNotMatch(css, /m-thread|m-threads|b-last2/)
-  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(\{ tab: nav\.tab, fourth: fourthSt\.fourth, lastChat: lastChat\.value \}\) === id/, '正在看的那位（對話分頁那位或第四格的通知）才算看得到（不算未讀）；設備與帳號改在第四頁籤，對話分頁看得到就算看得到')
+  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(\{ tab: nav\.tab, chat: nav\.chat, lastChat: lastChat\.value \}\) === id/, '正在看的那位（對話分頁點進去的那位或通知分頁）才算看得到（不算未讀）')
 })

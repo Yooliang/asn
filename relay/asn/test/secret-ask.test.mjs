@@ -46,7 +46,7 @@ test('文案全中文（不夾英文單字）', () => {
 })
 
 test('導覽：密碼面板是合法的 sheet，瀏覽記錄讀回來認得', () => {
-  assert.deepEqual(secretNav(), { tab: 'chats', sheet: 'secret' })
+  assert.deepEqual(secretNav(), { tab: 'chats', sheet: 'secret', chat: true }, '蓋在點進去的那一則對話上')
   assert.deepEqual(normalizeNav({ sheet: 'secret', tab: 'x' }), secretNav())
 })
 

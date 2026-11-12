@@ -1,15 +1,15 @@
-// 手機的「第四頁籤」（#461、PR-H #895）：永遠存在，平時顯示「通知」對話；設備與帳號、設置的某一項（個人、提醒、更新、關於）、使用指引、開新夥伴
-// 進內頁時暫時佔用它（標題換成內頁的標題），跟前三個一樣能左右滑、點頁籤切。st.fourth＝null 就是顯示通知。
-// 同一時間只有一個內頁：進別的內頁就換掉內容。離開（切到前三頁）後留著、內容不卸載，滿 3 分鐘沒回來就跳回「通知」。
+// 手機的內頁（#461、PR-H #895；0.2.18 起不再佔第四格）：設備與帳號、設定的某一項（個人、提醒、更新、關於）、使用指引、開新夥伴。
+// 內頁蓋在進來的那個分頁上（from），分頁列照樣標著那一格；st.fourth＝null 就是沒有內頁。
+// 同一時間只有一個內頁：進別的內頁就換掉內容。切到別的分頁後留著、內容不卸載（切回那一格就回到內頁），滿 3 分鐘沒回來就收起。
 // 只放純邏輯（內頁的描述、計時），node 與瀏覽器都能跑，不碰 DOM、不碰瀏覽記錄（瀏覽記錄在 mobile-nav.mjs）。
 import { guideByKey } from './guides.mjs'
 import { SETTING_SHEET_KEYS } from './mobile-settings.mjs'
 
-export const PAGE_TAB = 'page'   // 第四頁籤在 nav.tab 裡的值
-export const FOURTH_KEEP_MS = 180000   // 離開第四頁籤後保留多久（3 分鐘），用絕對時間判斷：App 在背景時照樣算
+export const PAGE_TAB = 'page'   // 正在看內頁時 nav.tab 的值
+export const FOURTH_KEEP_MS = 180000   // 離開內頁後保留多久（3 分鐘），用絕對時間判斷：App 在背景時照樣算
 
 // ---------- 內頁的描述：{ kind, ... } ----------
-// 設置的某一項：cat＝分類鍵（設備與帳號不算，它有自己的內頁）；沒有這個分類回 null
+// 設定的某一項：cat＝分類鍵（設備與帳號不算，它有自己的內頁）；沒有這個分類回 null
 export const settingPage = key => (SETTING_SHEET_KEYS.includes(key) ? { kind: 'setting', cat: key } : null)
 // 使用指引：guide＝正在看哪一篇（空字串＝篇目列表）
 export const guidePage = (key = '') => ({ kind: 'guide', guide: guideByKey(key) ? key : '' })
@@ -29,7 +29,7 @@ export function normalizePage(raw) {
   }
 }
 export const samePage = (a, b) => JSON.stringify(normalizePage(a)) === JSON.stringify(normalizePage(b))
-// 內頁自己的層（由外往內）：指引單篇的下面是篇目列表、設備細部的下面是設備列表、開新夥伴第 2 步的下面是第 1 步；返回鍵一層一層退，退到頭才收起第四頁籤
+// 內頁自己的層（由外往內）：指引單篇的下面是篇目列表、設備細部的下面是設備列表、開新夥伴第 2 步的下面是第 1 步；返回鍵一層一層退，退到頭才收起內頁
 export function pageLayers(raw) {
   const p = normalizePage(raw)
   if (!p) return []
@@ -39,10 +39,10 @@ export function pageLayers(raw) {
   return [p]
 }
 
-// ---------- 第四頁籤的狀態：{ page, from, leftAt } ----------
-// from＝從哪個頁籤進來的（退到頭回那裡）；leftAt＝切到前三頁的時間（0＝正在看或還沒離開過）
-export const openFourth = (page, from = 'list') => ({ page: normalizePage(page), from: typeof from === 'string' && from && from !== PAGE_TAB ? from : 'list', leftAt: 0 })
-// 換了大分頁：切到第四頁籤就取消計時；從第四頁籤切走才開始算（已經在算的不重算）
+// ---------- 內頁的狀態：{ page, from, leftAt } ----------
+// from＝從哪個分頁進來的（內頁蓋在那一格上，退到頭回那裡）；leftAt＝切到別的分頁的時間（0＝正在看或還沒離開過）
+export const openFourth = (page, from = 'chats') => ({ page: normalizePage(page), from: typeof from === 'string' && from && from !== PAGE_TAB ? from : 'chats', leftAt: 0 })
+// 換了大分頁：切到內頁就取消計時；從內頁切走才開始算（已經在算的不重算）
 export function fourthOnTab(fourth, tab, now) {
   if (!fourth) return null
   if (tab === PAGE_TAB) return fourth.leftAt ? { ...fourth, leftAt: 0 } : fourth
@@ -53,12 +53,6 @@ export const fourthExpired = (fourth, now, keep = FOURTH_KEEP_MS) => !!fourth &&
 export const fourthMsLeft = (fourth, now, keep = FOURTH_KEEP_MS) => (fourth?.leftAt > 0 ? Math.max(0, keep - (now - fourth.leftAt)) : Infinity)
 
 // ---------- 換內頁前先問一句 ----------
-// 開新夥伴正在填第 2 步、還沒送出（draft＝true）時，要換成別的內頁就先問；選離開才換。單純切到前三頁不問（內容會保留 3 分鐘），再進開新夥伴也不問（接著填）
+// 開新夥伴正在填第 2 步、還沒送出（draft＝true）時，要換成別的內頁就先問；選離開才換。單純切到別的分頁不問（內容會保留 3 分鐘），再進開新夥伴也不問（接著填）
 export const LEAVE_ASK_TEXT = { title: '還沒送出', lead: '開新夥伴還沒送出，要離開嗎？', leave: '離開', stay: '留下' }
-export const NOTICE_NEXT = { kind: 'notice' }   // 「換成通知」也算換內頁：佔著第四格的內頁要先問
-export const needsLeaveAsk = (fourth, next, { draft = false } = {}) => !!draft && fourth?.page?.kind === 'launch' && (next?.kind === 'notice' || (!!normalizePage(next) && normalizePage(next).kind !== 'launch'))
-// 第四格現在顯示什麼：有內頁＝'page'，沒有（fourth 為 null）＝'notice'（預設）
-export const fourthView = fourth => (fourth?.page ? 'page' : 'notice')
-// 設置裡的「看通知」入口文字
-export const NOTICE_ENTRY_LABEL = '看通知'
-export const NOTICE_ENTRY_SUB = '系統與各設備寄來的通知'
+export const needsLeaveAsk = (fourth, next, { draft = false } = {}) => !!draft && fourth?.page?.kind === 'launch' && !!normalizePage(next) && normalizePage(next).kind !== 'launch'

@@ -157,7 +157,7 @@ export async function runAcctSwitch(transport, node, email, { onUpdate = () => {
   return emit({ phase: 'failed', text: '等太久了，那台電腦沒有回應；稍後再看它的帳號清單。', done: true })
 }
 
-// 第四頁籤「設備與帳號」內頁上方的兩個分頁（#650）；預設「設備」
+// 「設備與帳號」內頁上方的兩個分頁（#650）；預設「設備」
 export const ACCT_TABS = Object.freeze([{ key: 'devices', label: '設備' }, { key: 'accounts', label: '帳號' }])
 export const acctTabOf = v => (v === 'accounts' ? 'accounts' : 'devices')
 

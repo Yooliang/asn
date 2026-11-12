@@ -60,7 +60,7 @@ test('入口：手機群組分組永遠顯示並有建立／加入；電腦群�
   assert.match(m, /<div class="m-group m-rooms" v-if="roomRows\.length">/)
   assert.ok(m.indexOf('m-group m-rooms') < m.indexOf('v-for="g in groups"'), '群組對話排在設備分組之前')
   assert.doesNotMatch(m, /m-rooms-actions|m-rooms-empty/, '名單裡不再有建立／加入按鈕與空提示')
-  const plus = m.slice(m.indexOf('m-plus-wrap'), m.indexOf('</header>'))
+  const plus = m.slice(m.indexOf('m-plus-wrap'), m.indexOf('</header>', m.indexOf('m-plus-wrap')))
   assert.match(plus, /pickPlus\('create'\)/); assert.match(plus, /pickPlus\('join'\)/); assert.match(plus, /pickPlus\('launch'\)/)
   assert.match(plus, /建立群組/); assert.match(plus, /加入群組／貼邀請碼/); assert.match(plus, /開新夥伴/)
   assert.match(read('ui', 'm.js'), /pickPlus = op => \{[^}]*groupFlow\.openCreate\(\)[^}]*groupFlow\.openJoin\(\)[^}]*openLaunch\(''\)/)

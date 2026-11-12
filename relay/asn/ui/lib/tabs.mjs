@@ -6,7 +6,7 @@ import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-orde
 import { modelVendorKey } from './vendor-icons.mjs'
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）。
-// 「通知」排第一（方案 A）：系統通知不再出現在名單與對話分頁，只在這個頁籤看（像手機的第四格）
+// 「通知」排第一（方案 A）：系統通知不再出現在名單與對話分頁，只在這個頁籤看（像手機的「通知」分頁）
 export const FIXED_TABS = [
   { key: 'notice', label: '通知' },
   { key: 'groups', label: '群組' },

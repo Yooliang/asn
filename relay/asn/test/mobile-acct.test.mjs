@@ -18,8 +18,8 @@ test('哪些設備卡有「切換 Claude 帳號」：別台電腦才有；本機
   assert.deepEqual(acctButtonDevices(null, 'S'), [])
 })
 
-test('導覽：設備與帳號是第四頁籤上的一頁（#461）；舊的 acct 浮層記錄讀回來轉成它', () => {
-  assert.deepEqual(pageNav(acctPage()), { tab: PAGE_TAB, sheet: '', page: { kind: 'acct', node: '' } })
+test('導覽：設備與帳號是一個內頁（#461）；舊的 acct 浮層記錄讀回來轉成它', () => {
+  assert.deepEqual(pageNav(acctPage()), { tab: PAGE_TAB, sheet: '', chat: false, page: { kind: 'acct', node: '' } })
   assert.deepEqual(normalizeNav({ tab: 'chats', sheet: 'acct' }), pageNav(acctPage()))
   assert.deepEqual(normalizeNav(pageNav(acctPage('W'))), pageNav(acctPage('W')))
 })
@@ -105,23 +105,23 @@ test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.ok(m[1].includes(`android::${c}`), `手機指令清單要有 ${c}`)
 })
 
-test('入口改成低調的「選項」小按鈕，按下在第四頁籤整頁顯示（#461：不再借用對話分頁），不是浮層', () => {
+test('入口改成低調的「選項」小按鈕，按下當內頁整頁顯示（#461：不再借用對話分頁），不是浮層', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.equal(ACCT_TEXT.button, '選項')
   assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
-  // 導覽：第四頁籤的標題＝頁標題「設備與帳號」（#268）；對話分頁的標籤永遠是「對話」（設備卡上的按鈕仍叫「選項」）
+  // 導覽：內頁的標題＝頁標題（#268）；分頁列的四個字固定（設備卡上的按鈕仍叫「選項」）
   assert.equal(pageTitle(acctPage()), '設備', '預設標題；畫面上依分頁換成「設備」或「帳號」（m.js 的 acctTitle）')
-  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備')
+  assert.equal(tabLabel(PAGE_TAB), '', '內頁不佔分頁')
   assert.equal(tabLabel('chats'), '對話')
   assert.equal(tabLabel('list'), '夥伴')
-  assert.equal(tabLabel('me'), '設置')
+  assert.equal(tabLabel('me'), '設定')
   assert.match(html, /\{\{ tabLabel\(t\) \}\}/, '分頁列標籤走 tabLabel')
-  // 畫面：在第四頁籤裡，有返回鍵；對話分頁不再被借用
-  const fourth = html.slice(html.indexOf('<section class="m-pg m-fourth"'), html.indexOf('<!-- /第四頁籤 -->'))
+  // 畫面：在內頁裡，有返回鍵；對話分頁不再被借用
+  const fourth = html.slice(html.indexOf('<section class="m-pg m-fourth"'), html.indexOf('<!-- /內頁 -->'))
   assert.match(fourth, /v-if="fourthPage\.kind === 'acct'"/)
   assert.match(fourth, /acctSw\.phase === 'confirm'/)
   assert.match(fourth, /aria-label="返回"[^>]*@click="back"/)   // 標題列返回鍵＝系統返回鍵：細部頁先回列表，列表才收起
-  const chat = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)[0]
+  const chat = /<section class="m-pg" :class="nav\.chat[\s\S]*?<!-- 設定 -->/.exec(html)[0]
   assert.doesNotMatch(chat, /acctSw|m-keep/)
   assert.doesNotMatch(html, /<div class="m-ops"[^>]*acct/)
   assert.doesNotMatch(html, /<section class="m-sheet"[^>]*acct/)
