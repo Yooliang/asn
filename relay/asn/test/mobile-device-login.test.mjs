@@ -6,9 +6,11 @@ import { DEVICE_LOGIN_UI, LOGIN_TEXT, VENDORS, VENDOR_HOSTS, fetchView, requestV
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('入口先關著；開了也只有支援的種類、對象是別台電腦才有按鈕', () => {
-  assert.equal(DEVICE_LOGIN_UI, false)
-  assert.equal(showLoginButton('codex', { kind: 'remote' }), false, '預設關')
+test('入口開了（只有 Codex）；只有支援的種類、對象是別台電腦才有按鈕', () => {
+  assert.equal(DEVICE_LOGIN_UI, true)
+  assert.equal(showLoginButton('codex', { kind: 'remote' }), true, '預設開')
+  assert.equal(showLoginButton('codex', { kind: 'remote' }, false), false, '關掉就沒有')
+  assert.equal(showLoginButton('codex', undefined), false, '沒有登入動作（例如本機、離線、已登入）就沒有')
   assert.equal(showLoginButton('codex', { kind: 'remote' }, true), true)
   assert.equal(showLoginButton('codex', { kind: 'local' }, true), false)
   assert.equal(showLoginButton('claude', { kind: 'remote' }, true), false, 'Claude 走原本的安裝並登入')
@@ -44,7 +46,6 @@ test('發出請求時回 untrusted：同一句說明', () => {
 test('未確認指紋的電腦：回 untrusted，說明要先在這支手機看一次那台的終端、照畫面確認指紋', () => {
   assert.equal(LOGIN_TEXT.untrusted, '這支手機還沒有確認過這台電腦的指紋。請先在這支手機看一次那台的終端，照畫面確認指紋。')
   assert.deepEqual(fetchView({ state: 'untrusted' }), { stage: 'done', ok: false, text: LOGIN_TEXT.untrusted })
-  assert.equal(DEVICE_LOGIN_UI, false, '入口還是關的')
   const acct = read('../src-tauri/src/account.rs')
   const f = acct.slice(acct.indexOf('pub async fn setup_device_fetch('), acct.indexOf('\n}\n', acct.indexOf('pub async fn setup_device_fetch(')))
   assert.match(f, /known\.peer\(&pending\.req\.t_node\)\.filter\(\|p\| p\.confirmed_at\.is_some\(\)\)/, '只認確認過的')
@@ -147,4 +148,10 @@ test('登入網址主機清單：JS 與 Rust（device_relay.rs）一模一樣', 
   assert.deepEqual(js, rust, '主機相同')
   assert.equal(safeLoginUrl('https://accounts.x.ai/device', 'grok'), 'https://accounts.x.ai/device')
   assert.equal(safeLoginUrl('https://auth.openai.com/x', 'grok'), '')
+})
+
+test('接線：手機設備細部頁的登入按鈕看 v.login（只登入的動作），不看安裝的 v.action', () => {
+  const html = read('../ui/m.html')
+  assert.ok(html.includes('showLoginButton(v.key, v.login)'))
+  assert.ok(!html.includes('showLoginButton(v.key, v.action)'))
 })

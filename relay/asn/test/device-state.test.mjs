@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CORE_VENDORS, REPORT_FRESH_MS, STATE, STATE_TEXT, installAction, isPhoneDevice, reportFreshness, vendorState } from '../ui/lib/device-state.mjs'
+import { CORE_VENDORS, LOGIN_VENDOR_KEYS, REPORT_FRESH_MS, STATE, STATE_TEXT, installAction, isPhoneDevice, loginAction, reportFreshness, vendorState } from '../ui/lib/device-state.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 
 const NOW = Date.parse('2026-11-02T12:00:00Z')
@@ -178,4 +178,29 @@ test('帳號回報該不該重讀：沒讀過要讀；失敗過了一分鐘要�
   assert.equal(shouldRetryReport({ read: true, failedAt: 1_000_000 }, 1_059_999), false, '失敗不到 60 秒')
   assert.equal(shouldRetryReport({ read: true, failedAt: 1_000_000 }, 1_060_000), true, '失敗滿 60 秒')
   assert.equal(shouldRetryReport({ read: true, failedAt: Number.NaN }, 5), true, '失敗時間不明：讀')
+})
+
+test('從手機替這台登入的按鈕：只有 Codex、只給別台電腦、要確定已安裝沒登入（或登入失效）、要在線', () => {
+  assert.deepEqual(LOGIN_VENDOR_KEYS, ['codex'])
+  const ok = { vendor: 'codex', online: true, asnOnline: true }
+  for (const state of [STATE.INSTALLED_LOGGED_OUT, STATE.LOGIN_FAILED]) assert.deepEqual(loginAction({ ...ok, state }), { kind: 'remote' }, state)
+  for (const state of [STATE.LOGGED_IN, STATE.NOT_INSTALLED, STATE.UNKNOWN_INSTALL, STATE.LOGGED_OUT, STATE.NO_REPORT, '']) assert.equal(loginAction({ ...ok, state }), null, state)
+  const st = STATE.INSTALLED_LOGGED_OUT
+  assert.equal(loginAction({ ...ok, state: st, isSelf: true }), null, '本機不從手機登入')
+  assert.equal(loginAction({ ...ok, state: st, phone: true }), null, '手機不給')
+  assert.equal(loginAction({ ...ok, state: st, online: false }), null, '離線不給')
+  assert.equal(loginAction({ ...ok, state: st, asnOnline: false }), null, '對方 ASN 沒在線不給')
+  for (const vendor of ['claude', 'grok', 'gemini', 'agy', '']) assert.equal(loginAction({ ...ok, vendor, state: st }), null, vendor)
+})
+
+test('設備樹：別台已裝未登入的 Codex 有「從手機替這台登入」；本機、回報過期、離線、ASN 沒在線的沒有', () => {
+  assert.deepEqual(vend(dev(tree(), '工作機'), 'codex').login, { kind: 'remote' })
+  assert.equal(vend(dev(tree(), '工作機'), 'claude').login, undefined, 'Claude 不走這個')
+  assert.equal(vend(dev(tree(), '家用機'), 'codex').login, undefined, '本機')
+  const stale = tree({ reports: { [W]: { error: '', asnOnline: true, reportedAt: ago(REPORT_FRESH_MS * 3), accounts: [] } } })
+  assert.equal(vend(dev(stale, '工作機'), 'codex').login, undefined, '回報過期')
+  const asnOff = tree({ reports: { [W]: { error: '', asnOnline: false, reportedAt: ago(60 * 1000), accounts: [] } } })
+  assert.equal(vend(dev(asnOff, '工作機'), 'codex').login, undefined, 'ASN 沒在線')
+  const loggedIn = tree({ reports: { [W]: { error: '', asnOnline: true, reportedAt: ago(60 * 1000), accounts: [{ vendor: 'codex', email: 'c@x.test', plan: '', current: true }] } } })
+  assert.equal(vend(dev(loggedIn, '工作機'), 'codex').login, undefined, '已登入')
 })

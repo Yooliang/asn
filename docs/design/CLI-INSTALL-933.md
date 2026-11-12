@@ -143,6 +143,8 @@ Grok 的規則：實測結果若 `grok.exe` **沒有有效的 Authenticode 簽�
 - Rust `agent_setup/remote.rs`：照 `kind` 分派到各家流程，三道本機把關不變。
 
 ### PR-7 畫面（電腦＋手機）
+> 0.2.17 先開「手機替電腦登入 Codex」（只登入，不安裝）：手機入口 `DEVICE_LOGIN_UI` 打開，後台 Codex 最低版本改成 0.2.17（`20261113400000_setup_device_login_codex.sql`）。Grok 等驗證過的安裝（PR-9）、各家的安裝畫面（`AGENT_INSTALL_UI`）之後再開。
+
 - 共用文字與狀態模組：在 `ui/lib/agent-install.mjs` 擴充成四家，手機 `mobile-setup.mjs` 共用。
 - 電腦：「設定 → 設備 → 這台」各家一列：
   - 狀態：未安裝、已安裝未登入、已登入、失敗。

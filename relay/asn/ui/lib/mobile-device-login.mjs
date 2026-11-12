@@ -4,8 +4,8 @@
 import { setupErrorText } from './mobile-setup.mjs'
 import { loginLinkHost } from './secret-ask.mjs'
 
-/** 入口還沒開（電腦端與後台要一起放行，入口在之後的 PR 打開） */
-export const DEVICE_LOGIN_UI = false
+/** 入口開了（0.2.17，只開 Codex）：後台另有版本閘門，只交給 0.2.17 以上的電腦 */
+export const DEVICE_LOGIN_UI = true
 export const POLL_MS = 3000
 export const VENDORS = Object.freeze({ codex: 'Codex' })
 /** 各家登入頁的主機（完全相等才收；要和 Rust 的 device_relay.rs 的 CODEX／GROK_LOGIN_HOSTS 完全一致，有測試比對）：網址交給畫面之前，除了共同規則（https、ASCII、沒帳密、埠 443、官方網域）還要是這一家的 */
