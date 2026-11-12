@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { SEND_LABEL, SEND_LABEL_TERM, composeTermHint } from '../ui/lib/compose.mjs'
 import { ENTER_DELAY_MS } from '../ui/lib/term-remote-input.mjs'
-import { createLineSender } from '../ui/lib/term-line.mjs'
+import { createLineSender, stripControls } from '../ui/lib/term-line.mjs'
 import { createTermViewSession } from '../ui/lib/term-view.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -42,7 +42,7 @@ test('打字元件：整句送出後隔一下再送 Enter；開始前先排著�
   assert.ok(ENTER_DELAY_MS > 0 && ENTER_DELAY_MS < 1000)
   assert.match(input, /const typeLine = \(text, multi\) => \{\s*void send\(text, multi\)\.then\(ok => \{\s*if \(!ok\) \{ emit\('unsent', text\); return \}\s*setTimeout\(\(\) => \{ void send\('\\r', false\) \}, ENTER_DELAY_MS\)/, '整句沒送出就交還；送出了才按 Enter')
   assert.match(input, /watch\(phase, p => \{ if \(p === 'typing'\) flush\(\) \}\)/, '開始打字了才送排著的那句')
-  assert.match(input, /if \(pasteLines\(t\) > 1\) \{ lineAsk = true; askPaste\.value = t \}/, '多行先問')
+  assert.match(input, /if \(pasteLines\(t\) > 1\) \{ yieldAsk\(\); lineAsk = true; askPaste\.value = t \}/, '多行先問（前一段還在問就先交還）')
   assert.match(input, /emits: \['back', 'status', 'unsent'\]/)
   const fin = input.slice(input.indexOf('    const finish = text => {'), input.indexOf('    const start = async'))
   assert.match(fin, /if \(left\) emit\('unsent', left\)/, '結束時還沒送的交還')
@@ -77,7 +77,7 @@ test('本機：按送出就打進這個終端（送給本機畫面的編號）�
   assert.deepEqual(r.unsent, [])
 })
 
-test('本機：多行先問；按取消不送、字交還；按貼上才整段送＋Enter', async () => {
+test('本機：多行先問；按取消不送、字交還；按送出才整段送＋Enter', async () => {
   const r = await localRig()
   r.lines.sendLine('a\nb')
   await sleep(10)
@@ -164,4 +164,35 @@ test('smoke 的多行檢查用共用的按鈕字（改字時 smoke 不會再找�
   assert.match(smoke, /askBtn\(\$\{JSON\.stringify\(PASTE_TEXT\.yes\)\}\)/)
   assert.match(smoke, /askBtn\(\$\{JSON\.stringify\(PASTE_TEXT\.no\)\}\)/)
   assert.doesNotMatch(smoke, /askBtn\('貼上'\)/)
+})
+test('輸入框送來的字先去掉控制字元：ESC、Ctrl+C 之類不會被當成按鍵送出，Tab 和換行留著（看別台、看本機同一套）', async () => {
+  const ESC = String.fromCharCode(27), ETX = String.fromCharCode(3), DEL = String.fromCharCode(127), CSI = String.fromCharCode(0x9b)
+  assert.equal(stripControls(`a${ESC}[2Jb${ETX}c${DEL}d${CSI}e`), 'a[2Jbcde')
+  assert.equal(stripControls('x\ty\nz'), 'x\ty\nz', 'Tab 與換行留著')
+  assert.equal(stripControls('中文 ok'), '中文 ok')
+  const ask = { value: null }, sent = []
+  const lines = createLineSender({ send: async (d, p) => { sent.push([d, p]); return true }, askPaste: ask, emit: () => {} })
+  lines.sendLine(`ls${ESC}${ETX}\t-l`)
+  await new Promise(r => setTimeout(r, ENTER_DELAY_MS + 50))
+  assert.deepEqual(sent, [['ls\t-l', false], ['\r', false]], '單行送出前去掉控制字元，Enter 照送')
+  sent.length = 0
+  lines.sendLine(ETX + ESC)
+  await new Promise(r => setTimeout(r, ENTER_DELAY_MS + 50))
+  assert.deepEqual(sent, [], '只有控制字元：什麼都不送，連 Enter 也不按')
+  lines.sendLine(`a${ESC}\nb`)
+  assert.equal(ask.value, 'a\nb', '多行先問的那段也已去掉控制字元')
+  // 兩條路都走 createLineSender：看別台與看本機
+  assert.match(read('../ui/lib/term-remote-input.mjs'), /createLineSender\(/)
+  assert.match(read('../ui/lib/term-view.mjs'), /createLineSender\(/)
+})
+
+test('前一段多行還在等確認時又送一段：前一段交還給輸入框，不被蓋掉', () => {
+  const ask = { value: null }, sent = [], unsent = []
+  const lines = createLineSender({ send: async (d, p) => { sent.push([d, p]); return true }, askPaste: ask, emit: (ev, t) => { if (ev === 'unsent') unsent.push(t) } })
+  lines.sendLine('a1\na2')
+  assert.equal(ask.value, 'a1\na2')
+  lines.sendLine('b1\nb2')
+  assert.equal(ask.value, 'b1\nb2', '問的是新的這段')
+  assert.deepEqual(unsent, ['a1\na2'], '前一段交還給輸入框')
+  assert.equal(sent.length, 0, '都還沒確認，什麼都沒送')
 })

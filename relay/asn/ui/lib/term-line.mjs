@@ -11,6 +11,11 @@ export function pasteLines(text) {
   return s ? s.split('\n').length : 0
 }
 
+/** 輸入框送來的字先去掉控制字元：只留一般文字、Tab 與換行（ESC、Ctrl+C 之類不會被當成按鍵打進終端） */
+export function stripControls(text) {
+  return String(text ?? '').replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '')
+}
+
 /**
  * @param {object} o
  * @param {(data: string, paste: boolean) => Promise<boolean>} o.send  送字：回送出去了沒
@@ -32,10 +37,11 @@ export function createLineSender({ send, askPaste, emit, ready = () => true, end
   const flush = () => {
     if (queued === null || !ready()) return
     const t = queued; queued = null
-    if (pasteLines(t) > 1) { lineAsk = true; askPaste.value = t } else typeLine(t, false)
+    // 前一段多行還在等確認時又送一段：前一段先交還給輸入框，不要被這段蓋掉
+    if (pasteLines(t) > 1) { yieldAsk(); lineAsk = true; askPaste.value = t } else typeLine(t, false)
   }
   const sendLine = text => {
-    const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+    const t = stripControls(String(text ?? '').replace(/\r\n?/g, '\n')).replace(/\n+$/, '')
     if (!t) return
     if (queued !== null) emit('unsent', queued)
     queued = t
