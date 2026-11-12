@@ -679,7 +679,7 @@ export const mpaneProbeSource = ({ single }) => `(async () => {
     if (!shown(list) || shown(chat)) return { ok: false, why: '按返回名單後應只剩名單' };
     if (list.getBoundingClientRect().right > W + 1 || !noScroll()) return { ok: false, why: '名單單獨顯示時超出視窗寬 ' + W };
     // 從名單再開一次設定的帳號：應切回右窗格、看得到帳號卡
-    const gear = [...list.querySelectorAll('.rtab')].find(e => e.getAttribute('aria-label') === '設定');
+    const gear = [...list.querySelectorAll('.top-tabs .ttab')].find(e => e.getAttribute('aria-label') === '設定');   // 0.2.18：齒輪拿掉，改成上方的「設定」分頁
     if (!gear) return { ok: false, why: '名單找不到設定分頁' };
     gear.click(); await sleep(300);
     const acct = [...list.querySelectorAll('.cat-list .buddy')].find(e => e.textContent.includes('帳號'));
@@ -789,8 +789,47 @@ export const mtabsProbeSource = () => `(async () => {
   if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切回設定沒有回到「關於」內頁' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 電腦版四個大分頁（0.2.18）：名單上方「對話／夥伴／通知／設定」，和手機同樣的字與順序；開窗停在夥伴（本機那台），左邊直排的設備頁籤只在夥伴裡、
+// 不再有通知、群組、指引、齒輪；對話分頁最上面有建立／加入群組；設定最後一列是使用指引，點進去有「‹ 設定」回來；點夥伴回到剛才的設備頁籤
+export const DTABS_PROBE = { dtabs: true }
+export const dtabsProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
+  const tops = () => [...document.querySelectorAll('.top-tabs .ttab')];
+  for (let i = 0; i < 60 && tops().length < 4; i++) await sleep(100);
+  const t = tops(), byLabel = l => t.find(e => e.querySelector('span').textContent.trim() === l);
+  const order = t.map(e => e.querySelector('span').textContent.trim()).join('|');
+  if (order !== '對話|夥伴|通知|設定') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
+  if (!byLabel('夥伴').classList.contains('on')) return { ok: false, why: '開窗應該停在「夥伴」' };
+  const rail = document.querySelector('.rail');
+  if (!shown(rail)) return { ok: false, why: '夥伴分頁沒有左邊的設備頁籤' };
+  if (rail.querySelector('.rtab-notice, .rtab-groups, [aria-label="設定"], [aria-label="指引"]')) return { ok: false, why: '左邊直排頁籤還有通知、群組、指引或齒輪' };
+  const devOn = rail.querySelector('.rtab.on');
+  const devKey = devOn ? devOn.getAttribute('aria-label') : '';
+  if (!devKey) return { ok: false, why: '夥伴分頁沒有選中的設備頁籤' };
+  byLabel('對話').click(); await sleep(300);
+  if (document.querySelector('.rail')) return { ok: false, why: '對話分頁不該有左邊的設備頁籤' };
+  const chats = document.querySelector('.chat-list');
+  if (!shown(chats)) return { ok: false, why: '對話分頁沒有顯示對話清單' };
+  const acts = [...chats.querySelectorAll('.gl-actions .gs-btn')].map(e => e.textContent.trim()).join('|');
+  if (acts !== '建立群組|加入群組') return { ok: false, why: '對話分頁最上面應有建立／加入群組：' + acts };
+  byLabel('設定').click(); await sleep(300);
+  const entry = document.querySelector('.cat-list .guide-entry');
+  if (!shown(entry) || !entry.textContent.includes('使用指引')) return { ok: false, why: '設定清單最後沒有「使用指引」' };
+  entry.click(); await sleep(300);
+  if (!byLabel('設定').classList.contains('on')) return { ok: false, why: '使用指引應該算在「設定」底下' };
+  const back = document.querySelector('.guide-list .guide-back');
+  if (!shown(back) || !document.querySelector('.guide-list .guide-item')) return { ok: false, why: '使用指引沒有篇目或沒有「‹ 設定」' };
+  back.click(); await sleep(300);
+  if (!shown(document.querySelector('.cat-list'))) return { ok: false, why: '按「‹ 設定」沒有回到設定清單' };
+  byLabel('夥伴').click(); await sleep(300);
+  const again = document.querySelector('.rail .rtab.on');
+  if (!again || again.getAttribute('aria-label') !== devKey) return { ok: false, why: '點夥伴沒有回到剛才的設備頁籤' };
+  if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '視窗出現橫向捲動' };
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -942,7 +981,7 @@ const noticeMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-0000000000a2', from_node: 'R', from_agent: 'ASN 通知', kind: 'notice:waiting', body: '工作機：夥伴 demo 正在等你確認。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
   { id: '00000000-0000-4000-8000-0000000000a3', from_node: 'Q', from_agent: 'ASN 通知', kind: 'notice:device_key', body: '辦公室：這台的設備金鑰剛換過。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 60_000).toISOString() },
 ]
-// 電腦版左側「通知」頁籤（方案 A）：鈴鐺頁籤在最上面、右上角有未讀數；點開是通知清單（分類小籤、新的在前）；名單裡沒有「通知」；
+// 電腦版「通知」大分頁（方案 A；0.2.18 起是名單上方第三個分頁，和手機一樣）：右上角有未讀數；點開是通知清單（分類小籤、新的在前）；名單裡沒有「通知」；
 // 通知內文一律純文字（內文夾 <b> 標籤要原樣顯示、不能變成元素）；畫面不能橫向捲動。
 // mode：'merged'＝點第一則、右邊顯示內容；'split'＝點第一則改開「通知」對話視窗；'narrow'＝窄視窗只顯示右邊，有「‹ 通知」返回鈕
 const DNOTICE_ME = { merged: { winMode: 'merged' }, split: {}, narrow: { winMode: 'merged' } }
@@ -953,14 +992,17 @@ export const dnoticeProbeSource = ({ dnotice }) => `(async () => {
   const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
   const mode = ${JSON.stringify(dnotice)}, W = window.innerWidth;
   const noScroll = () => document.documentElement.scrollWidth <= W + 1 && document.body.scrollWidth <= W + 1;
-  const badge = () => { const c = document.querySelector('.rail .rtab-notice .rtab-count'); return c ? c.textContent.trim() : '' };
+  const badge = () => { const c = document.querySelector('.top-tabs .ttab-notice .rtab-count'); return c ? c.textContent.trim() : '' };
   let bell = null;
   for (let i = 0; i < 60 && badge() !== '4'; i++) await sleep(100);
-  bell = document.querySelector('.rail .rtab-notice');
-  if (!bell) return { ok: false, why: '左邊沒有「通知」頁籤' };
+  bell = document.querySelector('.top-tabs .ttab-notice');
+  if (!bell) return { ok: false, why: '上方沒有「通知」分頁' };
   if (badge() !== '4') return { ok: false, why: '通知頁籤的未讀數應是 4，實際：' + (badge() || '沒有') };
-  const rail = [...document.querySelectorAll('.rail .rtab')].filter(shown).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-  if (rail[0] !== bell) return { ok: false, why: '通知頁籤應排在左邊最上面' };
+  const tops = [...document.querySelectorAll('.top-tabs .ttab')].filter(shown).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+  const order = tops.map(e => e.querySelector('span').textContent.trim()).join('|');
+  if (order !== '對話|夥伴|通知|設定') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
+  if (tops[2] !== bell) return { ok: false, why: '通知應是上方第三個分頁（和手機一樣）' };
+  if (document.querySelector('.rail .rtab-notice, .rail .rtab-groups')) return { ok: false, why: '左邊直排頁籤還有通知或群組' };
   if ([...document.querySelectorAll('.content .buddy')].some(b => b.textContent.trim().startsWith('通知'))) return { ok: false, why: '名單裡還有「通知」' };
   bell.click(); await sleep(300);
   const rows = [...document.querySelectorAll('.notice-list .nt-row')];
@@ -1480,10 +1522,10 @@ export const SCENARIOS = [
   { name: 'm-notice-legacy', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-412.png' },
   { name: 'm-notice-legacy-360', page: 'm.html', width: 360, state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-360.png' },
   { name: 'm-notice-legacy-lastchat', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'lastchat' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.lastchat, shot: 'm-notice-legacy-lastchat-412.png' },
-  // 電腦版左側「通知」頁籤（方案 A）：整合模式右邊顯示內容、分離模式開通知對話視窗、窄視窗（360）只顯示右邊並有「‹ 通知」返回鈕
-  { name: 'list-notice-merged', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dnotice: 'merged' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.merged, shot: 'list-notice-merged.png' },
-  { name: 'list-notice-split', page: 'list.html', width: 360, height: 660, state: { signedIn: true, dnotice: 'split' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.split, shot: 'list-notice-split.png' },
-  { name: 'list-notice-narrow', page: 'list.html', width: 360, height: 640, state: { signedIn: true, dnotice: 'narrow' }, ready: '#app.win .rail .rtab-notice', probe: DNOTICE_PROBES.narrow, shot: 'list-notice-narrow-360.png' },
+  // 電腦版「通知」大分頁（方案 A）：整合模式右邊顯示內容、分離模式開通知對話視窗、窄視窗（360）只顯示右邊並有「‹ 通知」返回鈕
+  { name: 'list-notice-merged', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dnotice: 'merged' }, ready: '#app.win .top-tabs .ttab-notice', probe: DNOTICE_PROBES.merged, shot: 'list-notice-merged.png' },
+  { name: 'list-notice-split', page: 'list.html', width: 360, height: 660, state: { signedIn: true, dnotice: 'split' }, ready: '#app.win .top-tabs .ttab-notice', probe: DNOTICE_PROBES.split, shot: 'list-notice-split.png' },
+  { name: 'list-notice-narrow', page: 'list.html', width: 360, height: 640, state: { signedIn: true, dnotice: 'narrow' }, ready: '#app.win .top-tabs .ttab-notice', probe: DNOTICE_PROBES.narrow, shot: 'list-notice-narrow-360.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -1492,6 +1534,7 @@ export const SCENARIOS = [
   { name: 'toast', page: 'toast.html', state: { signedIn: true }, ready: '#app' },
   { name: 'setup-progress', page: 'setup-progress.html', state: { signedIn: true }, ready: '#app .sp' },
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
+  { name: 'list-tabs', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: DTABS_PROBE, shot: 'list-tabs.png' },
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true, mtab: 'list' }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
   // 固定 6 顆大按鈕（#539）：閒置 Claude、離線 Claude、ACP 工作者，各自依序都在、反灰正確、反灰有 20 字內的原因

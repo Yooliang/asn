@@ -4,7 +4,7 @@
 import { GUIDES, guideByKey } from './guides.mjs'
 
 export const GUIDE_ENTRY_LABEL = '使用指引'
-export const GUIDE_ENTRY_SUB = '名字、群組、常見問題，和電腦版的說明'
+export const GUIDE_ENTRY_SUB = '名字、群組、常見問題等各功能的說明'   // 手機、電腦設定裡的同一列（0.2.18 起電腦也用這兩個字）
 
 // 每一篇在手機上的標示：desktop＝整篇講電腦上的操作；part＝一部分是電腦才有的；phone＝手機也適用
 export const GUIDE_FIT = {

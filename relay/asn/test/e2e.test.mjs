@@ -18,9 +18,9 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   const reqs = r.relay.reqs
   assert.ok(reqs.every(q => q.key === FAKE_KEY), '每個請求都帶 x-relay-key')
   assert.ok(reqs.some(q => q.action === 'list'))
-  assert.ok(reqs.some(q => q.action === 'room_list' && q.method === 'GET' && !q.body), '群組頁籤只用唯讀 GET room_list')
+  assert.ok(reqs.some(q => q.action === 'room_list' && q.method === 'GET' && !q.body), '對話分頁也列群組，room_list 仍是唯讀 GET')
   assert.ok(!reqs.some(q => q.action?.startsWith('room_') && q.method !== 'GET'), '群組沒有任何寫入')
-  if (shotCaptureSupported) assert.ok(r.files.some(f => f.startsWith('tabs-groups')), '有群組頁籤截圖')
+  if (shotCaptureSupported) assert.ok(r.files.some(f => f.startsWith('tabs-chats')), '有對話頁籤截圖')
   assert.ok(reqs.some(q => q.action === 'inbox' && q.agent === 'H-ASN'), '用 inbox&agent=<視窗名> 收信')
   assert.ok(reqs.some(q => q.action === 'ack' && q.agent === 'H-ASN' && q.body.ids.includes(U(1))), '收到後 ack')
   assert.equal(r.relay.mails[0].acked, true)

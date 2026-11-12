@@ -45,7 +45,7 @@ test('整合模式：各最多一個分頁，點另一項是換內容（分頁�
   open('setting', 'look')
   open('setting', 'notify')
   assert.deepEqual(st, { tabs: ['W/a', '@guide', '@setting'], active: '@setting' })
-  assert.equal(panelTabItem('setting', panel.setting).nick, '設定：通知')
+  assert.equal(panelTabItem('setting', panel.setting).nick, '設定：提醒與聲音')
   open('guide', 'bridge')
   assert.equal(st.active, '@guide', '點到另一種就切過去')
   assert.equal(st.tabs.length, 3)

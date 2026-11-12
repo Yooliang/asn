@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_CHAT_MAX, ACTIVE_CHAT_WINDOW_MS, RECENT_MAX, RECENT_WINDOW_MS, activeChats, lastTrafficAt, recentActivity } from '../ui/lib/recent.mjs'
+import { ACTIVE_CHAT_MAX, ACTIVE_CHAT_WINDOW_MS, RECENT_MAX, RECENT_WINDOW_MS, activeChats, chatListRows, chatRowsUnread, filterChatRows, lastTrafficAt, recentActivity } from '../ui/lib/recent.mjs'
 
 const ui = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 const read = (...p) => fs.readFileSync(path.join(ui, ...p), 'utf8').replace(/\r\n/g, '\n')
@@ -64,9 +64,31 @@ test('接線守門：活動中的對話在「對話」分頁（不在夥伴名�
   assert.doesNotMatch(list, /m-recent|recentRows|chatRows/, '夥伴名單不再有「最近有活動」')
   assert.ok(list.indexOf('m-group m-rooms') > 0 && list.indexOf('m-group m-rooms') < list.indexOf('v-for="g in groups"'), '群組對話 → 設備分組')
   const js = read('m.js')
-  assert.match(js, /activeChats\(\{ friends: activeFriends\(friends\.value\)\.filter\(f => !isNoticeFriend\(f\) && !isMergedAway\(f\)\)/, '不含已封存、通知、已併進通知的舊列')
-  assert.match(js, /lastId: lastChat\.value \}\)/)
+  assert.match(js, /const chatAll = computed\(\(\) => chatListRows\(\{ friends: activeFriends\(friends\.value\)\.filter\(f => !isNoticeFriend\(f\) && !isMergedAway\(f\)\)/, '不含已封存、通知、已併進通知的舊列')
+  assert.match(js, /lastId: lastChat\.value \}\)\)/)
   assert.match(js, /rooms: hub\.rows\(\{ plainText: plain \}\)/, '群組不套夥伴頁的搜尋字')
-  assert.match(js, /friendMatchesQuery\(\{ nick: x\.room\.name \}, q, plain\) : friendMatchesQuery\(x\.friend, q, plain\)/, '搜尋比對規則和夥伴頁一樣')
+  assert.match(js, /const chatRows = computed\(\(\) => filterChatRows\(chatAll\.value, normalizeSearchQuery\(chatQuery\.value\), \(f, q\) => friendMatchesQuery\(f, q, plain\)\)\)/, '搜尋比對規則和夥伴頁一樣')
+  assert.match(js, /const unreadTotal = computed\(\(\) => chatRowsUnread\(chatAll\.value\)\)/, '對話分頁的紅點和清單用同一份（有紅點就一定找得到）')
   assert.doesNotMatch(js, /recentRows/)
+})
+
+test('對話分頁真正列出的清單（chatListRows，手機電腦共用）：活動中的對話 → 有未讀但久沒往來的夥伴 → 所有群組（久沒動靜的排最後）；紅點和清單同一份；搜尋', () => {
+  logs['L/act'] = [{ k: 'them', t: NOW - H(1) }]
+  logs['L/oldUnread'] = [{ k: 'them', t: NOW - H(24 * 60) }]
+  logs['L/oldRead'] = [{ k: 'them', t: NOW - H(24 * 60) }]
+  const friends = [{ ...F('L/act'), unread: 0 }, { ...F('L/oldUnread'), unread: 2 }, { ...F('L/oldRead'), unread: 0 }, { ...F('L/never'), unread: 1 }]
+  const rooms = [{ chatId: 'room:new', at: NOW - H(2), name: '新群', unread: 1 }, { chatId: 'room:old', at: NOW - H(24 * 90), name: '舊群', unread: 0 }, { chatId: 'room:older', at: NOW - H(24 * 200), name: '更舊的群', unread: 3 }]
+  const rows = chatListRows({ friends, logOf, rooms, now: NOW })
+  assert.deepEqual(rows.map(x => x.id), ['L/act', 'room:new', 'L/oldUnread', 'L/never', 'room:old', 'room:older'], '有未讀的夥伴就算久沒往來也列；群組一個都不少，久沒動靜的排最後')
+  assert.ok(!rows.some(x => x.id === 'L/oldRead'), '久沒往來又沒未讀的夥伴不列')
+  assert.equal(chatRowsUnread(rows), 2 + 1 + 1 + 3, '紅點＝清單上的未讀加總：有紅點就一定找得到')
+  for (const x of rows) if ((x.kind === 'room' ? x.room.unread : x.friend.unread) > 0) assert.ok(rows.includes(x))
+  assert.equal(chatRowsUnread([]), 0); assert.equal(chatRowsUnread(null), 0); assert.equal(chatRowsUnread([{ kind: 'room', room: { unread: 'x' } }]), 0)
+  // 搜尋：夥伴比名字、群組比群組名（比對規則由呼叫端給，跟名單一樣）；沒有搜尋字就全部
+  const m = (f, q) => String(f.nick).toLowerCase().includes(q)
+  assert.deepEqual(filterChatRows(rows, '舊群', m).map(x => x.id), ['room:old'])
+  assert.deepEqual(filterChatRows(rows, 'l/old', m).map(x => x.id), ['L/oldUnread'])
+  assert.equal(filterChatRows(rows, '', m), rows)
+  // 最後使用的那一位（手機）照樣在
+  assert.ok(chatListRows({ friends, logOf, rooms: [], now: NOW, lastId: 'L/oldRead' }).some(x => x.id === 'L/oldRead'))
 })

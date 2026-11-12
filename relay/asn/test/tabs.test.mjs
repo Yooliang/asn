@@ -3,7 +3,7 @@ import { groupsUnread } from '../ui/lib/tabs.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { AD_CONTACT_URL, ADS, AD_MS, AD_PAGE_MS, adImageSrc, adPageUrl, pickAds, DEVICE_TAB_MAX, FIXED_TABS, adClickable, goAd, normalizeTab, openAdWith, prevAd, adUrls, deviceItems, deviceTabs, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote } from '../ui/lib/tabs.mjs'
+import { AD_CONTACT_URL, ADS, AD_MS, AD_PAGE_MS, adImageSrc, adPageUrl, pickAds, DEVICE_TAB_MAX, FIXED_TABS, TOP_TABS, topOf, adClickable, goAd, normalizeTab, openAdWith, prevAd, adUrls, deviceItems, deviceTabs, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote } from '../ui/lib/tabs.mjs'
 
 const F = (node, device, nick, status = 'online', unread = 0) => ({ id: `${node}/${nick}`, node, device, nick, status, unread })
 
@@ -70,10 +70,13 @@ test('deviceItems：只取該設備、線上忙碌在前離線在後、可搜尋
   assert.equal(shortOf('abc'), 'A')
 })
 
-test('固定頁籤：通知（第一個）、群組、指引、設定；舊版的通知紀錄頁籤（notices）或不認得的頁籤一律忽略', () => {
-  assert.deepEqual(FIXED_TABS.map(t => t.key), ['notice', 'groups', 'guide', 'settings'])
-  assert.equal(normalizeTab('notice'), 'notice')
-  assert.deepEqual(FIXED_TABS.map(t => t.label), ['通知', '群組', '指引', '設定'])
+test('四個大分頁「對話／夥伴／通知／設定」（0.2.18，和手機一樣）；固定畫面：對話、通知、使用指引、設定；舊的「群組」換成「對話」；舊版的通知紀錄頁籤（notices）或不認得的頁籤一律忽略', () => {
+  assert.deepEqual(TOP_TABS.map(t => t.label), ['對話', '夥伴', '通知', '設定'])
+  assert.deepEqual(TOP_TABS.map(t => t.key), ['chats', 'partners', 'notice', 'settings'])
+  assert.deepEqual(FIXED_TABS.map(t => t.key), ['chats', 'notice', 'guide', 'settings'])
+  assert.equal(normalizeTab('notice'), 'notice'); assert.equal(normalizeTab('chats'), 'chats')
+  assert.equal(normalizeTab('groups'), 'chats', '舊的群組頁籤併進對話')
+  assert.deepEqual(['chats', 'notice', 'guide', 'settings', 'H', ''].map(topOf), ['chats', 'notice', 'settings', 'settings', 'partners', 'partners'], '使用指引在設定底下；設備頁籤屬於夥伴')
   assert.equal(normalizeTab('guide'), 'guide')
   assert.equal(normalizeTab('notices'), '')
   for (const v of ['', null, undefined, 3, 'zzz']) assert.equal(normalizeTab(v), '', String(v))
@@ -305,14 +308,42 @@ test('守門：廣告不用任何 AdSense／外部廣告程式碼；點廣告一
   assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
 })
 
-test('群組頁籤的紅點：所有群組未讀加總；沒有未讀、壞資料都是 0；畫面接到這個值', () => {
+test('群組的未讀：所有群組未讀加總；沒有未讀、壞資料都是 0；「對話」分頁的紅點算進去', () => {
   assert.equal(groupsUnread([{ unread: 2 }, { unread: 0 }, { unread: 3 }]), 5)
   assert.equal(groupsUnread([{ unread: 0 }, {}]), 0)
   assert.equal(groupsUnread([null, { unread: 'x' }]), 0)
   assert.equal(groupsUnread(null), 0)
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
-  assert.match(html, /<span class="red" v-if="t\.key === 'groups' && groupsUnreadN"><\/span>/)
-  assert.match(js, /const groupsUnreadN = computed\(\(\) => groupsUnread\(roomRows\.value\)\)/)
-  assert.match(js, /FIXED_TABS, groupsUnreadN,/, '要交給畫面')
+  assert.match(html, /<span class="red" v-if="\(t\.key === 'chats' && chatsUnreadN\) \|\| \(t\.key === 'partners' && partnersUnread\)"><\/span>/)
+  assert.match(js, /const chatsUnreadN = computed\(\(\) => chatRowsUnread\(chatAll\.value\)\)/, '對話分頁的紅點和清單用同一份（群組的未讀也在裡面）')
+  assert.match(js, /const partnersUnread = computed\(\(\) => dev\.value\.all\.some\(d => d\.unread\)\)/, '任一台設備有未讀，夥伴分頁也亮紅點')
+  assert.match(js, /FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread,/, '要交給畫面')
+})
+
+test('電腦版「對話」分頁（0.2.18）：活動中的對話＋所有群組（很久沒動靜的排最後，原本的群組頁籤併進來）；搜尋和名單同一套比對；夥伴分頁回到剛才的設備頁籤', () => {
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  assert.match(js, /chatListRows\(\{ friends: activeFriends\(friendsAct\.value\)\.filter\(f => !isNoticeFriend\(f\) && !isMergedAway\(f\)\), logOf: id => core\.viewOf\(id\) \?\? \[\], rooms: roomRows\.value/, '不含已封存、通知、已併進通知的舊列；群組全部列出（chatListRows）')
+  assert.match(js, /filterChatRows\(chatAll\.value, normalizeSearchQuery\(chatQuery\.value\), \(f, q\) => friendMatchesQuery\(f, q, plain\)\)/)
+  assert.match(js, /function goTop\(key\) \{[\s\S]*?keys\.includes\(lastDevTab\) \? lastDevTab : keys\[0\]/, '點夥伴回到上次看的設備頁籤')
+  // 畫面：上方四個分頁；左邊直排只有設備頁籤（只在夥伴裡）；設定最後一列是使用指引，指引上方有「‹ 設定」
+  assert.match(html, /<nav class="top-tabs" role="tablist" aria-label="大分頁">\s*<button v-for="t in TOP_TABS"/)
+  assert.match(html, /<nav class="rail" role="tablist" aria-label="設備頁籤" v-if="isDevice">/)
+  assert.doesNotMatch(html, /v-for="t in FIXED_TABS"|rail-gap|rtab-groups|tab === 'groups'/, '左邊不再有通知、群組、指引、齒輪')
+  assert.match(html, /<div class="list chat-list" v-else-if="tab === 'chats'">[\s\S]*?groupFlow\.openCreate\(\)[\s\S]*?groupFlow\.openJoin\(\)[\s\S]*?v-for="x in chatRows"/)
+  assert.match(html, /<button class="pane-back guide-back" type="button" @click="tab = 'settings'">‹ 設定<\/button>/)
+  assert.match(html, /class="buddy guide-item guide-entry" type="button" @click="tab = 'guide'"/)
+})
+
+test('電腦版設定的「使用指引」列和手機用同一組字（GUIDE_ENTRY_LABEL／GUIDE_ENTRY_SUB）；指引裡不再提左邊的群組頁籤，設定分類叫「提醒與聲音」', async () => {
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(html, /<span class="b-nick">\{\{ GUIDE_ENTRY_LABEL \}\}<\/span><\/span><span class="b-psm">\{\{ GUIDE_ENTRY_SUB \}\}<\/span>/)
+  const { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB } = await import('../ui/lib/mobile-guides.mjs')
+  assert.equal(GUIDE_ENTRY_LABEL, '使用指引'); assert.doesNotMatch(GUIDE_ENTRY_SUB, /電腦版|手機/, '兩邊共用，不寫是哪一邊')
+  const { GUIDES } = await import('../ui/lib/guides.mjs')
+  const all = JSON.stringify(GUIDES)
+  assert.doesNotMatch(all, /左邊的「群組」|「群組」頁籤/, '群組頁籤已併進對話分頁')
+  assert.match(all, /上方的「對話」分頁，最上面有「建立群組」「加入群組」/)
+  assert.doesNotMatch(all, /「設定」頁可調通知/, '設定分類叫「提醒與聲音」')
 })

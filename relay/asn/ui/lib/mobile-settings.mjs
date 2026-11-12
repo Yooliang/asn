@@ -5,8 +5,8 @@ import { deviceSummary } from './device-tree.mjs'
 
 // 手機有的分類（順序即畫面順序，與電腦版一致）：個人（大頭貼、名字、設備名稱、狀態）、設備、帳號、雲端代理、通知（震動）、更新、關於（版本）
 export const MOBILE_SETTING_KEYS = ['me', 'devices', 'accounts', 'cloud', 'notify', 'update', 'about']
-// 手機上改名的分類（只改標題，鍵不變，存檔與瀏覽記錄照舊有效）：notify 在電腦版叫「通知」，手機已有「通知」分頁，這裡叫「提醒」
-export const MOBILE_CAT_TITLE = { notify: '提醒' }
+// 手機上改名的分類（只改標題，鍵不變，存檔與瀏覽記錄照舊有效）：目前沒有（notify 原本在手機叫「提醒」，0.2.18 起兩邊都叫「提醒與聲音」）
+export const MOBILE_CAT_TITLE = {}   // 0.2.18 起電腦版的 notify 也改叫「提醒與聲音」（不和「通知」分頁撞名），手機不用再另外改名
 // 認得的電腦（指紋、忘記）已併進設備頁：每台設備的詳情、底部的舊設備紀錄
 const catOf = key => { const c = SETTING_CATS.find(x => x.key === key); return c && MOBILE_CAT_TITLE[key] ? { ...c, title: MOBILE_CAT_TITLE[key] } : c }
 // 設備、帳號（#268、#650）不是設定的一般分類頁：兩列都開同一頁（acct，上方「設備｜帳號」切換，各帶預設分頁），跟名單設備卡「選項」進去的是同一頁，入口並存

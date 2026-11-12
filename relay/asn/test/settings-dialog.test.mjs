@@ -13,7 +13,7 @@ const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8'
 
 test('分類：十三類（設備與帳號拆成設備、帳號；雲端代理自己一類，跟手機一樣）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
   assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '雲端代理', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '雲端代理', '外觀', '分頁與分組', '提醒與聲音', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')

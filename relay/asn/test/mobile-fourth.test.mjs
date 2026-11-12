@@ -50,7 +50,7 @@ test('頁籤列：永遠四個「對話／夥伴／通知／設定」；內頁�
   assert.equal(pageHost(null), ''); assert.equal(pageHost(openFourth(guidePage(), 'me')), 'me'); assert.equal(pageHost(openFourth(acctPage('W'), 'list')), 'list')
   assert.equal(shownTab(PAGE_TAB, openFourth(guidePage(), 'me')), 'me', '在內頁上標著設定'); assert.equal(shownTab('notice', null), 'notice'); assert.equal(shownTab(PAGE_TAB, null), HOME_TAB)
   assert.equal(tabIndex(shownTab(PAGE_TAB, openFourth(guidePage(), 'me'))), 3)
-  assert.equal(pageTitle(settingPage('notify')), '提醒', '設定的 notify 分類改叫「提醒」')
+  assert.equal(pageTitle(settingPage('notify')), '提醒與聲音', '設定的 notify 分類叫「提醒與聲音」（不和通知分頁撞名）')
   assert.equal(pageTitle(acctPage('W')), '設備')
   assert.equal(pageTitle(guidePage()), '使用指引')
   assert.notEqual(pageTitle(guidePage('faq')), '使用指引', '單篇用那一篇的標題'); assert.ok(pageTitle(guidePage('faq')))

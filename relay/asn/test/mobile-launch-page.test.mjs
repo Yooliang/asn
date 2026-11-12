@@ -112,7 +112,7 @@ test('第 2 步還沒送出時換別的內頁先問：選留下不換、選離�
   // 單純切到別的分頁：不問，內容留著
   h.r.goTab('me'); h.flush()
   assert.equal(h.nav.tab, 'me'); assert.equal(h.nav.sheet, ''); assert.deepEqual(h.st.fourth.page, launchPage(2))
-  // 在設定點「提醒」：先問
+  // 在設定點「提醒與聲音」：先問
   const open = () => h.r.openPage(settingPage('notify'))
   assert.equal(leave.ask(settingPage('notify'), open), 'asked')
   assert.equal(h.nav.sheet, 'leave'); assert.ok(lst.ask)

@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { FIXED_TABS } from '../ui/lib/tabs.mjs'
+import { FIXED_TABS, TOP_TABS } from '../ui/lib/tabs.mjs'
 import {
   NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB,
   filterNoticeRows, noticeCategory, noticeLines, noticeRest, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs,
@@ -93,9 +93,9 @@ test('withoutNoticeTabs：拿掉通知對話與通知內容分頁，其他照順
   assert.deepEqual(withoutNoticeTabs(null), [])
 })
 
-test('守門：固定頁籤有通知且排第一；名單不再放通知組；通知內容用 {{ }} 不用 v-html', () => {
-  assert.equal(FIXED_TABS[0].key, 'notice')
-  assert.equal(FIXED_TABS[0].label, '通知')
+test('守門：大分頁有「通知」（第三格，和手機一樣）；名單不再放通知組；通知內容用 {{ }} 不用 v-html', () => {
+  assert.deepEqual(TOP_TABS[2], { key: 'notice', label: '通知' })
+  assert.ok(FIXED_TABS.some(t => t.key === 'notice'))
   const js = read('list.js'), html = read('list.html'), css = read('style.css')
   assert.ok(!/withNoticeGroup/.test(js), '電腦版名單不再用 withNoticeGroup')
   assert.match(js, /withoutNoticeItems\(rosterShownGroups\(activeFriends\(friendsAct\.value\), o\)\)/, '名單（含搜尋）拿掉通知對話')

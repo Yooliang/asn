@@ -41,10 +41,10 @@ import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
-import { HOME_TAB, chatNav, chatsUnread, noticeUnread, pageHost, shownTab, tabDot, viewedChatId } from './lib/mobile.mjs'
+import { HOME_TAB, chatNav, noticeUnread, pageHost, shownTab, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
-import { activeChats } from './lib/recent.mjs'
+import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
@@ -54,7 +54,7 @@ import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COP
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
-import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
+import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
@@ -333,12 +333,10 @@ const app = createApp({
     setInterval(() => { recentTick.value = Date.now() }, 60_000)
     // 對話分頁的清單：活動中的對話（夥伴與群組，新到舊；不含已封存、通知）；上方的搜尋框只篩這一頁
     const chatQuery = ref('')
-    const chatRows = computed(() => {
-      // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
-      const rows = activeChats({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value })
-      const q = normalizeSearchQuery(chatQuery.value)   // 比對規則和夥伴頁一樣（friendMatchesQuery：去掉表情代碼、不分大小寫）
-      return q ? rows.filter(x => (x.kind === 'room' ? friendMatchesQuery({ nick: x.room.name }, q, plain) : friendMatchesQuery(x.friend, q, plain))) : rows
-    })
+    // 對話分頁的完整清單（lib/recent.mjs 的 chatListRows：活動中的對話＋最後使用的那一位＋有未讀的夥伴＋所有群組）；分頁紅點用同一份算，搜尋只篩畫面上的
+    // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
+    const chatAll = computed(() => chatListRows({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value }))
+    const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain)))   // 比對規則和夥伴頁一樣
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
@@ -394,7 +392,7 @@ const app = createApp({
       void invoke('invite_pending').then(onInviteCode).catch(() => {})
       void refreshRooms()
     }
-    const unreadTotal = computed(() => totalUnreadWithRooms(chatsUnread(friends.value), rooms.value))   // 對話分頁的紅點：不含通知（通知有自己的分頁紅點）
+    const unreadTotal = computed(() => chatRowsUnread(chatAll.value))   // 對話分頁的紅點：不含通知（通知有自己的分頁紅點）
     const noticeDot = computed(() => noticeUnread(friends.value))
     const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))

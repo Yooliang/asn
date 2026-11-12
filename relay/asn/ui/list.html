@@ -59,8 +59,16 @@
       <span class="upd-text" v-else>更新失敗：{{ upd.error }}</span>
       <button class="aero-btn upd-btn" type="button" v-if="upd.phase !== 'installing'" @click.stop="installUpdate">{{ upd.phase === 'failed' ? '重試' : '更新' }}</button>
     </div>
+    <!-- 四個大分頁（0.2.18，和手機同樣的字、同樣的順序）：對話／夥伴／通知／設定。左邊直排的設備頁籤只在「夥伴」裡 -->
+    <nav class="top-tabs" role="tablist" aria-label="大分頁">
+      <button v-for="t in TOP_TABS" :key="t.key" class="ttab" :class="['ttab-' + t.key, { on: top === t.key }]" type="button" role="tab" :aria-selected="top === t.key" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" @click="goTop(t.key)">
+        <span>{{ t.label }}</span>
+        <span class="red" v-if="(t.key === 'chats' && chatsUnreadN) || (t.key === 'partners' && partnersUnread)"></span>
+        <span class="rtab-count" v-if="t.key === 'notice' && noticeUnreadN" aria-hidden="true">{{ noticeUnreadN > 99 ? '99+' : noticeUnreadN }}</span>
+      </button>
+    </nav>
     <div class="body">
-      <nav class="rail" role="tablist" aria-label="名單分頁">
+      <nav class="rail" role="tablist" aria-label="設備頁籤" v-if="isDevice">
         <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key, empty: d.empty, 'dev-dragging': deviceDrag === d.key, 'dev-drop-before': deviceDrop.over === d.key && !deviceDrop.after, 'dev-drop-after': deviceDrop.over === d.key && deviceDrop.after }" role="tab" :aria-selected="tab === d.key" :title="dimTab === 'device' && d.key !== selfNode ? d.label + '（可拖曳排序，或按 Alt+上／下）' : d.label" :aria-label="d.label" :data-dev="dimTab === 'device' ? d.key : null" :draggable="dimTab === 'device' && d.key !== selfNode" @click="tab = d.key" @dragstart="onDeviceDragStart(d.key, $event)" @dragover="dimTab === 'device' && onDeviceDragOver(d.key, $event)" @drop="dimTab === 'device' && onDeviceDrop(d.key, $event)" @dragend="clearDeviceDrag" @keydown="onDeviceTabKey(d.key, $event)">
           <img v-if="dimTab === 'device' && d.key === selfNode" src="img/logo.svg" alt="">
           <img v-else-if="dimTab === 'engine' && d.vendorKey === 'asn'" src="img/logo.svg" alt="">
@@ -77,17 +85,6 @@
             <li v-for="d in dev.more" :key="d.key"><button :class="{ on: tab === d.key, empty: d.empty }" @click="tab = d.key; moreOpen = false">{{ d.label }}<i class="red" v-if="d.unread"></i></button></li>
           </ul>
         </div>
-        <span class="rail-gap"></span>
-        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key, 'rtab-groups': t.key === 'groups', 'rtab-notice': t.key === 'notice' }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" @click="tab = t.key">
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <g v-if="t.key === 'notice'"><path d="M12 3.2c-3.3 0-5.6 2.5-5.6 5.8v3.6L4.5 16v1.2h15V16l-1.9-3.4V9c0-3.3-2.3-5.8-5.6-5.8z" fill="#f6c845" stroke="#a06a10" stroke-width="1.2" stroke-linejoin="round"/><path d="M9.6 18.4a2.4 2.4 0 0 0 4.8 0z" fill="#f0b040" stroke="#a06a10" stroke-width="1.1"/><path d="M9 6.6c.6-.8 1.5-1.2 2.4-1.3" stroke="#fff6cf" stroke-width="1.2" stroke-linecap="round" fill="none"/></g>
-            <g v-else-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
-            <g v-else-if="t.key === 'guide'"><path d="M4.5 4.5c2.6-.9 5.2-.7 7.5 1v14c-2.3-1.7-4.9-1.9-7.5-1z" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M19.5 4.5c-2.6-.9-5.2-.7-7.5 1v14c2.3-1.7 4.9-1.9 7.5-1z" fill="#e8f3fd" stroke="#1f5d9e"/><path d="M6.5 8.2c1.4-.2 2.7 0 3.6.6M6.5 11.2c1.4-.2 2.7 0 3.6.6M14 8.8c.9-.6 2.2-.8 3.6-.6M14 11.8c.9-.6 2.2-.8 3.6-.6" stroke="#1f5d9e" stroke-width="1" stroke-linecap="round" fill="none"/></g>
-            <g v-else><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="#4a5d73" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="5.6" fill="#dfe8f2" stroke="#4a5d73" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="#fff" stroke="#4a5d73"/></g>
-          </svg>
-          <span class="red" v-if="t.key === 'groups' && groupsUnreadN"></span>
-          <span class="rtab-count" v-if="t.key === 'notice' && noticeUnreadN" aria-hidden="true">{{ noticeUnreadN > 99 ? '99+' : noticeUnreadN }}</span>
-        </button>
       </nav>
       <div class="content" role="tabpanel">
         <template v-if="isDevice">
@@ -130,22 +127,34 @@
             <div class="empty-list" v-if="!shown.length">{{ emptyText }}</div>
           </div>
         </template>
-        <div class="list" v-else-if="tab === 'groups'">
+        <!-- 對話：活動中的對話（夥伴與群組，新到舊）；建立／加入群組在最上面（原本的「群組」頁籤併進來） -->
+        <div class="list chat-list" v-else-if="tab === 'chats'">
+          <div class="search">
+            <input v-model="chatQuery" placeholder="搜尋對話..." aria-label="搜尋對話">
+          </div>
           <div class="gl-actions">
             <button class="gs-btn" type="button" @click.stop="groupFlow.openCreate()">建立群組</button>
             <button class="gs-btn" type="button" @click.stop="groupFlow.openJoin()">加入群組</button>
           </div>
           <ul>
-            <li v-for="r in roomRows" :key="r.id" class="room-item">
-              <button class="room-btn" type="button" @click="openChat(r.chatId)">
-                <span class="dp xs room-av st-online" :style="{ '--h': roomHue(r.name) }" aria-hidden="true"><span>{{ roomInitial(r.name) }}</span></span>
-                <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span><span class="b-psm" v-if="r.last" v-html="emo(r.last)"></span></span>
-                <span class="unread" v-if="r.unread">{{ r.unread }}</span>
+            <li v-for="x in chatRows" :key="x.id" :class="x.kind === 'room' ? 'room-item' : ''" @contextmenu.prevent="x.kind === 'friend' && openBuddyMenu(x.friend, $event)">
+              <button v-if="x.kind === 'room'" class="room-btn" type="button" @click="openChat(x.room.chatId)">
+                <span class="dp xs room-av st-online" :style="{ '--h': roomHue(x.room.name) }" aria-hidden="true"><span>{{ roomInitial(x.room.name) }}</span></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">({{ x.room.count }} 人)</span></span><span class="b-psm" v-if="x.room.last" v-html="emo(x.room.last)"></span></span>
+                <span class="unread" v-if="x.room.unread">{{ x.room.unread }}</span>
+              </button>
+              <button v-else class="buddy" :class="{ offline: x.friend.status === 'offline' }" type="button" @click="openChat(x.id)">
+                <asn-avatar :src="avOf(x.friend)" :friend="x.friend" :status="x.friend.status" :off="x.friend.status === 'offline'"></asn-avatar>
+                <span class="b-text">
+                  <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
+                  <span class="b-psm" v-if="x.last">{{ x.last }}</span>
+                </span>
+                <span class="unread" v-if="x.friend.unread">{{ x.friend.unread }}</span>
               </button>
             </li>
           </ul>
-          <div class="empty-list" v-if="!roomRows.length">{{ hub.st.err ? '讀不到群組。' : '還沒有群組。' }}</div>
-          <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err">自己建立一個，或貼上別人給你的邀請連結加入。</p>
+          <div class="empty-list" v-if="!chatRows.length">{{ chatQuery.trim() ? '找不到符合的對話。' : '還沒有對話。到「夥伴」點一位開始。' }}</div>
+          <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err && !chatQuery.trim()">要和好幾位一起聊，可以建立群組，或貼上別人給你的邀請連結加入。</p>
         </div>
         <div class="list notice-list" v-else-if="tab === 'notice'">
           <div class="nt-head">
@@ -170,6 +179,7 @@
           <div class="empty-list" v-if="!noticeShown.length">{{ noticeAll.length ? '這一類目前沒有通知。' : '目前沒有通知。' }}</div>
         </div>
         <div class="list guide-list" v-else-if="tab === 'guide'">
+          <button class="pane-back guide-back" type="button" @click="tab = 'settings'">‹ 設定</button>
           <ul>
             <li v-for="g in GUIDES" :key="g.key">
               <button class="buddy guide-item" type="button" @click="openPanel('guide', g.key)">
@@ -185,6 +195,13 @@
               <button class="buddy guide-item" type="button" @click="openPanel('setting', c.key)">
                 <svg class="cat-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="c.icon"/></svg>
                 <span class="b-text"><span class="b-line"><span class="b-nick">{{ c.title }}</span></span><span class="b-psm">{{ catSub(c.key) }}</span></span>
+              </button>
+            </li>
+            <!-- 使用指引（原本左邊的「指引」頁籤）：設定的最後一列，點進去是篇目列表，上方「‹ 設定」回來 -->
+            <li>
+              <button class="buddy guide-item guide-entry" type="button" @click="tab = 'guide'">
+                <span class="guide-ic" aria-hidden="true"></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick">{{ GUIDE_ENTRY_LABEL }}</span></span><span class="b-psm">{{ GUIDE_ENTRY_SUB }}</span></span>
               </button>
             </li>
           </ul>
@@ -286,7 +303,7 @@
           </template>
         </div>
       </template>
-      <!-- 通知內容（整合模式）：左邊「通知」頁籤點一則就顯示在這裡；唯讀、沒有輸入列。內容是後台送來的，一律當純文字 -->
+      <!-- 通知內容（整合模式）：「通知」分頁點一則就顯示在這裡；唯讀、沒有輸入列。內容是後台送來的，一律當純文字 -->
       <div class="pane panel-pane notice-pane" v-if="view === 'chat' && ui.active === NOTICE_TAB">
         <template v-if="noticeSelRow">
           <div class="nt-meta">

@@ -19,8 +19,8 @@ test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦�
     assert.equal(r.title, MOBILE_CAT_TITLE[r.key] ?? c.title, '手機只改 notify 的標題'); assert.equal(r.icon, c.icon)
     assert.ok(r.icon.length > 0)
   }
-  assert.equal(mobileSettingTitle('notify'), '提醒', '不和「通知」分頁撞名（#895）'); assert.equal(MOBILE_CAT_TITLE.notify, '提醒'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))
-  assert.equal(SETTING_CATS.find(x => x.key === 'notify').title, '通知', '電腦版的分類標題不動')
+  assert.equal(mobileSettingTitle('notify'), '提醒與聲音', '不和「通知」分頁撞名（#895；0.2.18 起電腦版同名）'); assert.deepEqual(MOBILE_CAT_TITLE, {}, '手機不再另外改名'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))
+  assert.equal(SETTING_CATS.find(x => x.key === 'notify').title, '提醒與聲音', '電腦版同一個名字（0.2.18 起不叫「通知」，免得和通知分頁撞名）')
   assert.equal(mobileSettingTitle('nope'), '')
 })
 

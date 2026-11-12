@@ -54,7 +54,7 @@ test('畫面不顯示成員鍵與代號：樣板的插值裡沒有 key／ref／m
   assert.match(sheet, /\{\{ m\.label \}\}/)
 })
 
-test('入口：手機群組分組永遠顯示並有建立／加入；電腦群組分頁可點進對話；對話標頭有邀請', () => {
+test('入口：手機群組分組永遠顯示並有建立／加入；電腦「對話」分頁的群組可點進對話；對話標頭有邀請', () => {
   const m = read('ui', 'm.html')
   // 手機：建立／加入在右上角「＋」選單；群組對話分組在各設備分組之前，沒有群組就整組不顯示（不放空提示列）
   assert.match(m, /<div class="m-group m-rooms" v-if="roomRows\.length">/)
@@ -70,7 +70,7 @@ test('入口：手機群組分組永遠顯示並有建立／加入；電腦群�
   assert.match(m, /<group-sheet :flow="groupFlow">/)
   assert.match(m, /v-if="opsItems\.length \|\| groupItems\.length"/, '一對一與群組對話的「⋯」')
   const l = read('ui', 'list.html')
-  assert.match(l, /@click="openChat\(r\.chatId\)"/); assert.match(l, /groupFlow\.openCreate\(\)/); assert.match(l, /groupFlow\.openJoin\(\)/)
+  assert.match(l, /@click="openChat\(x\.room\.chatId\)"/, '群組在「對話」分頁裡，點了進那個群組'); assert.match(l, /groupFlow\.openCreate\(\)/); assert.match(l, /groupFlow\.openJoin\(\)/)
   assert.match(l, /@group-menu="op => openGroupMenu\(t\.id, op\)"/); assert.match(l, /<group-sheet :flow="groupFlow">/)
   const mj = read('ui', 'm.js'); const lj = read('ui', 'list.js')
   assert.match(mj, /'邀請別人加入'/); assert.match(sheet + chatpane, /邀請別人加入/)
