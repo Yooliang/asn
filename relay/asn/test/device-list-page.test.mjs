@@ -244,12 +244,14 @@ test('深色模式：新樣式只用主題變數，紅色的「永久移除」�
 })
 
 // ---------- 手機「選項」頁 ----------
-test('手機列表：整列一個大按鈕（高度至少 56px）進細部頁、右邊「›」、左邊排序把手（不拖時不影響捲動）', () => {
+test('手機列表：整列不再一點就進細部；每列 4 顆按鈕（上移、下移、帳號、詳情），左邊保留排序把手（不拖時不影響捲動）', () => {
   const html = read('ui/m.html'), css = read('ui/mobile.css')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-row"/)
-  assert.match(pane, /class="m-dv-go"[^>]*@click="openAcctDevice\(d\.key\)"/)
-  assert.match(pane, /m-dv-chev[^>]*>&rsaquo;</)
+  assert.match(pane, /<div class="m-dv-go">/, '資訊區是一般區塊，點了不開任何東西')
+  assert.doesNotMatch(/<div class="m-dv-go">[\s\S]*?<div class="m-dv-btns/.exec(pane)[0], /@click/)
+  assert.match(pane, /@click="openAcctDevice\(d\.key\)">\{\{ KNOWN_TEXT\.accounts \}\}/)
+  assert.match(pane, /@click="openAcctInfo\(d\.key\)">\{\{ KNOWN_TEXT\.detail \}\}/)
   assert.match(pane, /class="m-dv-grip"[^>]*v-if="!d\.self"/, '本機沒有把手＝固定第一列不可拖')
   assert.match(pane, /@pointerdown="gripDown\(d\.key, \$event\)"[^>]*@pointermove="gripMove"[^>]*@pointerup="gripUp"[^>]*@pointercancel="gripUp"/)
   assert.match(pane, /@keydown="gripKey\(d\.key, \$event\)"/, '把手聚焦後上下鍵也能移動')

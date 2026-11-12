@@ -1,4 +1,4 @@
-// 手機上的「認得的電腦」：看電腦畫面時確認那台的指紋、設定頁列出並忘記。
+// 手機上的「認得的電腦」：看電腦畫面時確認那台的指紋；設備頁（每台的詳情、舊設備紀錄）列出並忘記。
 // 判斷（指紋對不對、記住哪一把）都在 Rust（device_id.rs、android.rs）；這裡只有要顯示的字、整理資料，和「確認、忘記之前先過本人確認」的流程。
 // 本人確認＝生物辨識，沒設就用螢幕鎖（mobile-confirm.mjs 的 confirmWithToken）：先向 Rust 要一次性憑證（android_known_token），
 // 外殼驗證通過才寫憑證檔，再帶著憑證叫 android_known_confirm／android_known_forget；Rust 核對憑證檔才動手。畫面只拿得到憑證字串，寫不了憑證檔。
@@ -6,6 +6,7 @@
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
+import { NAME_MAX as BACKEND_NAME_MAX } from './device-known.mjs'
 
 const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, n)
 
@@ -14,22 +15,35 @@ export const NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再
 /** 這支手機上沒有名字的電腦一律叫這個 */
 export const UNNAMED = '未命名的電腦'
 
-/** 名字最多幾個字（和 Rust 端一致） */
-export const NAME_MAX = 32
+/** 名字最多幾個字（名字存在後台，和後台、電腦版同一個上限） */
+export const NAME_MAX = BACKEND_NAME_MAX
 
 export const TEXT = {
   unnamed: UNNAMED,
   rename: '改名',
   renameSave: '儲存',
   renameCancel: '取消',
-  renameLabel: '這台電腦的名字',
-  renameHint: '只記在這支手機上；留空就是未命名。',
+  renameLabel: '這台設備的名字',
+  renameHint: '所有設備都會顯示這個名字',
+  ownNameLabel: '這支手機的名字',
+  thisPhone: '這支手機',
+  tagConfirmed: '已確認',
+  tagUnconfirmed: '未確認',
+  moveUp: '上移',
+  moveDown: '下移',
+  accounts: '帳號',
+  detail: '詳情',
+  fpLabel: '指紋',
+  neverSeen: '還沒連線過，連上時會記住指紋',
+  firstSeen: t => `第一次見到：${t}`,
+  forgetThis: '忘記這台',
+  oldTitle: n => `舊設備紀錄（${n}）`,
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   methodBody: '請在那台電腦的設定頁按「顯示 QR code」，再用相機掃它；也可以改成用選的。',
   scanButton: '用相機掃電腦上的 QR code',
   scanFallback: '沒辦法掃，改用選的',
-  scanMismatch: '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 認得的電腦把它忘掉，再重新連線。',
+  scanMismatch: '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。',
   scanBad: '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。',
   scanNoCamera: '沒辦法用相機，改用選的。',
   sheetTitle: name => `確認「${name}」的指紋`,
@@ -39,20 +53,15 @@ export const TEXT = {
   wrong: '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。',
   locked: n => `答錯過一次，請 ${n} 分鐘後再確認。`,
   lockedNow: '答錯過一次，請稍後再確認。',
-  blocked: '這台的指紋兩次對不上，可能被換過。請到設定 → 認得的電腦把它忘掉，再重新連線。',
-  noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 認得的電腦把它忘掉，才能重新確認。',
+  blocked: '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。',
+  noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「忘記這台」，才能重新確認。',
   expired: '太久沒選，請重新按「確認指紋」。',
-  settingTitle: '認得的電腦',
-  settingLead: '看過的電腦會記在這支手機上。確認過指紋的電腦，你才能從這支手機替它登入、在它的終端打字。還沒確認的，先按「確認」，對照那台電腦設定頁上的指紋。',
   confirmButton: '確認',
-  none: '還沒有認得的電腦。',
   fp: fp => `指紋 ${fp}`,
   confirmed: '已確認',
   unconfirmed: '還沒確認',
   forget: '忘記',
   forgetNote: '只有你確定是那台重灌、換了電腦，或不想再看它時才按。忘記之後，下次連上去會當成第一次。',
-  noneSummary: '還沒有認得的電腦',
-  summary: n => `${n} 台`,
   notReady: '還沒記住這台電腦，請等畫面出來再按一次。',
   failed: '操作沒有成功，請稍後再試。',
 }
@@ -66,7 +75,7 @@ export const groupFp = fp => (FP16.test(String(fp ?? '')) ? String(fp).match(/.{
 const FP16 = /^[0-9a-f]{16}$/
 const OPTION = /^[0-9a-f]{4}( [0-9a-f]{4}){3}$/
 
-/** 整理名字：控制字元與改變文字方向的字元換成空白、去頭尾空白、最多 32 字（Rust 端還會再整理一次） */
+/** 整理名字（顯示用）：控制字元與改變文字方向的字元換成空白、去頭尾空白、最多 40 字 */
 export const cleanName = s => clean(s, NAME_MAX)
 
 /**
@@ -82,7 +91,10 @@ export function peerOf(started, name = '') {
 /** 要不要顯示「還沒確認指紋」的條 */
 export const needsConfirm = peer => !!peer && peer.confirmed !== true
 
-/** Rust 回的設定頁列表 → 畫面。欄位壞掉的丟掉；指紋只有確認過的才有（沒確認的 fpShow 是空字串，不顯示） */
+/** 第一次見到的時間（毫秒）→ 顯示用文字；沒有或壞掉回空字串 */
+export const firstSeenText = ms => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleString('zh-TW', { hour12: false }) : '')
+
+/** Rust 回的列表 → 畫面。欄位壞掉的丟掉；指紋只有確認過的才有（沒確認的 fpShow 是空字串，不顯示） */
 export function normalizeList(raw) {
   const arr = Array.isArray(raw?.peers) ? raw.peers : []
   return arr
@@ -90,13 +102,16 @@ export function normalizeList(raw) {
     .map(p => {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
-      // name＝本機記的名字（可能是空的，改名輸入框用）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: name || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed }
+      // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
+      return { node: p.node, name, label: name || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
     })
 }
 
-/** 設置分頁那一列的摘要 */
-export const listSummary = n => (Number.isInteger(n) && n > 0 ? TEXT.summary(n) : TEXT.noneSummary)
+/** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
+export function renameErrorText(e) {
+  const s = String(e?.message ?? e ?? '').trim()
+  return /[\u4e00-\u9fff]/.test(s) && s.length <= 120 ? s : TEXT.failed
+}
 
 export function errorText(e) {
   const s = String(e?.message ?? e ?? '')
@@ -187,10 +202,14 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
       if (out === 'not_verified') return 'not_ready'
       throw new Error('unexpected')
     },
-    /** 替這台改名（只記在這支手機；不影響信任，所以不用本人確認）。空字串＝未命名。回有沒有改到 */
+    /**
+     * 替某台設備改名（名字存在後台、所有設備都顯示；包含這支手機自己）。不影響信任，所以不用本人確認；規則與送出都在 Rust（帳號簽章）。
+     * 成功回 { ok, name, changed }，失敗丟 Rust 的中文說明（名字不合規則、登入過期、找不到、改太頻繁…）。沒有節點回 null
+     */
     rename: async (node, name) => {
-      if (!node) return false
-      return (await invoke('android_known_rename', { node, name: cleanName(name) })) === true
+      if (!node) return null
+      const r = await invoke('android_known_rename', { node, name: String(name ?? '').trim() })
+      return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true } : null
     },
   }
 }

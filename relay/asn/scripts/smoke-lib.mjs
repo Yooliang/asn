@@ -391,7 +391,7 @@ export const macctBackProbeSource = () => `(async () => {
   let bad = check('選項進來', await waitView('detail'), 'detail'); if (bad) return bad;
   bad = check('返回一次', await press('list'), 'list'); if (bad) return bad;
   if (!one) {
-    const rows = [...document.querySelectorAll('.m-dv-go')];
+    const rows = [...document.querySelectorAll('.m-dv-accbtn')];
     rows[rows.length - 1].click();
     bad = check('點另一台', await waitView('detail'), 'detail'); if (bad) return bad;
     bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
@@ -405,7 +405,7 @@ export const macctBackProbeSource = () => `(async () => {
   if (!btn) return { ok: false, why: '找不到設置裡的「設備」（' + steps.join('；') + '）' };
   btn.click();
   bad = check('設置進來', await waitView('list'), 'list'); if (bad) return bad;
-  document.querySelector('.m-dv-go').click();
+  document.querySelector('.m-dv-accbtn').click();
   bad = check('設置點一台', await waitView('detail'), 'detail'); if (bad) return bad;
   bad = check('設置返回一次', await press('list'), 'list'); if (bad) return bad;
   bad = check('設置返回收起', await press('closed'), 'closed'); if (bad) return bad;
@@ -437,7 +437,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     await sleep(500);
     const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
     for (let i = 0; i < n; i++) {
-      const go = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i]?.querySelector('.m-dv-go');
+      const go = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i]?.querySelector('.m-dv-accbtn');
       if (!go) break;
       go.click(); await sleep(500);
       const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
@@ -568,7 +568,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
     if ((row.querySelector('b')?.textContent ?? '').includes('這支手機')) continue;
-    const go = row.querySelector('.m-dv-go');
+    const go = row.querySelector('.m-dv-accbtn');
     if (!go) continue;
     go.click(); await sleep(600);
     if ([...document.querySelectorAll('.m-dv-vendor')].some(vis)) { opened = true; break }
@@ -626,7 +626,7 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < n; i++) {
     const row = rows()[i];
     const name = row?.querySelector('b')?.textContent ?? '';
-    const go = row?.querySelector('.m-dv-go');
+    const go = row?.querySelector('.m-dv-accbtn');
     if (!go) continue;
     go.click(); await sleep(500);
     if (name.includes('這支手機')) {

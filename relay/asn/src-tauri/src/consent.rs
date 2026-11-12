@@ -507,7 +507,7 @@ mod tests {
     }
 
     fn body_of<'a>(code: &'a str, name: &str) -> &'a str {
-        let at = code.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("找不到 {name}"));
+        let at = code.find(&format!("pub fn {name}(")).or_else(|| code.find(&format!("pub async fn {name}("))).unwrap_or_else(|| panic!("找不到 {name}"));
         code[at..].split("\n}\n").next().unwrap()
     }
 
@@ -525,7 +525,7 @@ mod tests {
         for name in ["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"] {
             let b = body_of(code, name);
             assert!(b.contains("label_ok(window.label())"), "{name} 要檢查視窗代號");
-            let head = &code[code.find(&format!("pub fn {name}(")).unwrap()..];
+            let head = &code[code.find(&format!("pub fn {name}(")).or_else(|| code.find(&format!("pub async fn {name}("))).unwrap()..];
             assert!(head.split(')').next().unwrap().contains(concat!("window: tau", "ri::WebviewWindow")), "{name} 要收視窗");
         }
         for (i, _) in code.match_indices("consent::") {

@@ -528,7 +528,7 @@ test('手機看電腦終端：四個指令手機也有、打字的指令只有�
   assert.ok(DESKTOP_CMDS.includes('term_view_remote_input'), 'term_view_remote_input 仍是電腦專屬')
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.doesNotMatch(rs, /term_view_remote_input/)
-  const noKnown = rs.replace(/pub fn android_known_(list|challenge|answer|token|confirm|forget|rename|scan_confirm)[\s\S]*?\n\}\n/g, '')
+  const noKnown = rs.replace(/pub (?:async )?fn android_known_(list|challenge|answer|token|confirm|forget|rename|scan_confirm)[\s\S]*?\n\}\n/g, '')
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\), false\)\?/, '手機的 start 要求打字一律拒絕')
@@ -627,7 +627,7 @@ test('憑證：專案沒有檔案外掛、權限沒開檔案存取，網頁自�
 
 test('憑證：Rust 命令先核對憑證才動手，視窗要是主畫面（list）', () => {
   const rs = read('src-tauri', 'src', 'android.rs')
-  const fnBody = n => rs.slice(rs.indexOf(`pub fn ${n}(`)).split('\n}\n')[0]
+  const fnBody = n => rs.slice(Math.max(rs.indexOf(`pub fn ${n}(`), rs.indexOf(`pub async fn ${n}(`))).split('\n}\n')[0]
   const conf = fnBody('android_known_confirm')
   assert.ok(conf.indexOf('take_passed(') < conf.indexOf('consent::redeem(') && conf.indexOf('consent::redeem(') < conf.indexOf('live::confirm('))
   assert.match(conf, /challenge: String/)
