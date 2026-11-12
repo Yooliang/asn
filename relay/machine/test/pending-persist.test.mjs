@@ -91,7 +91,10 @@ test('重啟：還在等的信（waiting）→ 新的橋仍把回覆寄回原寄
     await b1.until(() => fs.existsSync(h.pendingFile) && JSON.parse(fs.readFileSync(h.pendingFile, 'utf8')).pending.some(p => p.state === 'waiting'))
     const raw = fs.readFileSync(h.pendingFile, 'utf8')
     assert.doesNotMatch(raw, /機密內文/)
-    assert.equal(fs.readdirSync(path.dirname(h.pendingFile)).filter(f => f.endsWith('.tmp')).length, 0)
+    // 橋還在跑，存檔是「寫 .tmp → rename」：在寫的那一瞬間數會看到一個暫存檔（正常，馬上被 rename 掉）。
+    // 真正要鎖的是「不留殘檔」：等到資料夾裡沒有 .tmp；寫完沒清的殘檔會一直在，這裡就會逾時失敗
+    const tmps = () => fs.readdirSync(path.dirname(h.pendingFile)).filter(f => f.endsWith('.tmp'))
+    await b1.until(() => tmps().length === 0, 10000, '存檔的暫存檔（.tmp）沒有被清掉')
     await b1.stop()
     const b2 = startBridge(h, st)
     await b2.until(() => /pending restored: 1 \(waiting 1, notified 0\)/.test(b2.log))
