@@ -90,12 +90,15 @@ pub trait Deps {
 }
 
 /// 要不要接、接哪些。`boot`＝現在這次開機的時間（讀不到不接）；`saved_boot`＝存檔記的（舊檔沒有，不接：不知道是不是換了開機）
-pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>, enabled: bool, user_quit: bool) -> Vec<KnownEntry> {
+///
+/// `archived`＝存檔記的「已封存」名字：封存的視窗不接回。本人關掉的視窗在關的時候就已經從存檔拿掉，所以不會在 entries 裡。
+/// 開機當下還沒連上後台，封存名單只有存檔裡上次記下的；之後才封存的（別台操作、還沒同步到）追不到，這時以存檔為準
+pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>, enabled: bool, user_quit: bool, archived: &std::collections::BTreeSet<String>) -> Vec<KnownEntry> {
     let (Some(saved), Some(boot)) = (saved_boot, boot) else { return Vec::new() };
     if !enabled || user_quit || same_boot(saved, boot) {
         return Vec::new();
     }
-    entries.into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi")).collect()
+    entries.into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi") && !archived.contains(&e.name)).collect()
 }
 
 /// 依序接回。一位失敗不擋下一位；未登入與記憶體不足是全體都要等
@@ -421,7 +424,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     let user_quit = mark.exists();
     let _ = std::fs::remove_file(&mark);
     let enabled = !crate::bridge::read_settings(data_dir).auto_resume_off;
-    let entries = pick(known.entries(), known.boot_ms(), boot_ms(now), enabled, user_quit);
+    let entries = pick(known.entries(), known.boot_ms(), boot_ms(now), enabled, user_quit, known.archived_names());
     if entries.is_empty() {
         return;
     }
@@ -598,12 +601,37 @@ mod tests {
         acp.engine = "acp".into();
         let all = vec![entry("甲"), own, acp];
         let names = |v: Vec<KnownEntry>| v.into_iter().map(|e| e.name).collect::<Vec<_>>();
-        assert_eq!(names(pick(all.clone(), Some(1), Some(100_000_000), true, false)), ["甲"]);
-        assert!(pick(all.clone(), Some(100_000_000), Some(100_000_001), true, false).is_empty(), "同一次開機（只是重開 ASN）不接");
-        assert!(pick(all.clone(), None, Some(100_000_000), true, false).is_empty(), "舊檔不知道開機時間，不接");
-        assert!(pick(all.clone(), Some(1), None, true, false).is_empty(), "讀不到開機時間，不接");
-        assert!(pick(all.clone(), Some(1), Some(100_000_000), false, false).is_empty(), "設定關了不接");
-        assert!(pick(all, Some(1), Some(100_000_000), true, true).is_empty(), "使用者自己結束 ASN 之後才重開，不接");
+        let none = std::collections::BTreeSet::new();
+        assert_eq!(names(pick(all.clone(), Some(1), Some(100_000_000), true, false, &none)), ["甲"]);
+        assert!(pick(all.clone(), Some(100_000_000), Some(100_000_001), true, false, &none).is_empty(), "同一次開機（只是重開 ASN）不接");
+        assert!(pick(all.clone(), None, Some(100_000_000), true, false, &none).is_empty(), "舊檔不知道開機時間，不接");
+        assert!(pick(all.clone(), Some(1), None, true, false, &none).is_empty(), "讀不到開機時間，不接");
+        assert!(pick(all.clone(), Some(1), Some(100_000_000), false, false, &none).is_empty(), "設定關了不接");
+        assert!(pick(all, Some(1), Some(100_000_000), true, true, &none).is_empty(), "使用者自己結束 ASN 之後才重開，不接");
+    }
+
+    #[test]
+    fn 關掉的與封存的視窗重開機後不接_沒關的照常接() {
+        let mut k = crate::bridge::known::Known::default();
+        for n in ["沒關", "關掉了", "封存了"] {
+            k.touch(n, "claude", 1000);
+            k.set_facts(n, WindowFacts { session: format!("s-{n}"), cwd: "D:/w".into(), asn_opened: true, perm: vec![], hidden: false });
+        }
+        let names = |v: Vec<KnownEntry>| v.into_iter().map(|e| e.name).collect::<Vec<_>>();
+        let boots = (Some(1), Some(100_000_000));
+        assert_eq!(names(pick(k.entries(), boots.0, boots.1, true, false, k.archived_names())).len(), 3, "都沒處理過：三個都接");
+        // 本人關掉視窗：從認得的清單拿掉
+        k.forget("關掉了");
+        // 封存：視窗還開著、每輪名單都看得到，也不能被記回來
+        k.set_archived(["封存了".to_string()].into_iter().collect());
+        k.touch("封存了", "claude", 2000);
+        k.touch("沒關", "claude", 2000);
+        assert_eq!(names(pick(k.entries(), boots.0, boots.1, true, false, k.archived_names())), ["沒關"]);
+        // 就算清單裡還有封存的名字（開機前存檔沒來得及更新），pick 自己也再擋一次
+        let mut stale = vec![entry("沒關"), entry("封存了")];
+        stale[1].facts.asn_opened = true;
+        let archived: std::collections::BTreeSet<String> = ["封存了".to_string()].into_iter().collect();
+        assert_eq!(names(pick(stale, boots.0, boots.1, true, false, &archived)), ["沒關"]);
     }
 
     #[test]

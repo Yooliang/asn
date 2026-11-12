@@ -3,10 +3,12 @@
 //! 不退回、不 ack（留在後台信箱），群組點名的游標不前進，等它接回來再依序送；等太久才照原本的做法退回並講明。
 //! 本人在收發室跑著的時候關掉的視窗（從名單消失）立刻從存檔拿掉，照原本的做法退回。
 //! 檔案壞了就當沒有（不影響收信）；寫檔一律原子寫入；只留最近 7 天看過、最多 200 個名字。
+//! 本人關掉、或在帳號層封存的夥伴不留在存檔裡（重開機後不接回）：封存名單記在同一個檔案的 archived，見 [`Known::set_archived`]。
 //! #767 共用這份檔案：多記對話編號、資料夾、是不是 ASN 開的、原本的權限與開機時間，重開機後自動接回要用（見 launch::auto_resume）。
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const KNOWN_FILE: &str = "known-windows.json";
 const KEEP_MS: u64 = 7 * 24 * 3_600_000;
@@ -49,6 +51,9 @@ pub struct Known {
     facts: BTreeMap<String, WindowFacts>,
     /// 這份名單是哪一次開機記的（毫秒時間）。舊檔沒有
     boot_ms: Option<u64>,
+    /// 後台記的「已封存」名字（只含我們認得或看得到的名字）。封存的視窗可能還開著、每輪名單都看得到，
+    /// 所以光 forget 不夠：touch／set_facts 看到這裡有的名字一律不記，重開機後接回也要排除（見 launch::auto_resume::pick）
+    archived: BTreeSet<String>,
 }
 
 impl Known {
@@ -71,6 +76,7 @@ impl Known {
             }
         }
         k.boot_ms = v.get("boot_ms").and_then(Value::as_u64);
+        k.archived = v.get("archived").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).filter(|s| !s.is_empty()).take(MAX_NAMES).map(String::from).collect();
         k
     }
 
@@ -80,6 +86,9 @@ impl Known {
 
     /// 看到這個視窗（時間更新不算要存檔：只有新名字、或引擎變了才存，避免每次更新名單都寫檔）
     pub fn touch(&mut self, name: &str, engine: &str, now: u64) {
+        if self.archived.contains(name) {
+            return;
+        }
         match self.names.get_mut(name) {
             Some(e) if e.0 == engine => e.1 = now,
             Some(e) => {
@@ -102,10 +111,29 @@ impl Known {
 
     /// 記下接回要用的資料；有變才存檔
     pub fn set_facts(&mut self, name: &str, facts: WindowFacts) {
+        if self.archived.contains(name) {
+            return;
+        }
         if self.facts.get(name) != Some(&facts) {
             self.facts.insert(name.to_string(), facts);
             self.dirty = true;
         }
+    }
+
+    /// 後台說「已封存」的名字（整份換掉，不是累加：取消封存的名字要拿掉，之後看到它才會重新記）。
+    /// 已封存的名字立刻從認得的清單拿掉；有變才存檔
+    pub fn set_archived(&mut self, now_archived: BTreeSet<String>) {
+        if self.archived != now_archived {
+            self.archived = now_archived;
+            self.dirty = true;
+        }
+        for n in self.archived.clone() {
+            self.forget(&n);
+        }
+    }
+
+    pub fn archived_names(&self) -> &BTreeSet<String> {
+        &self.archived
     }
 
     pub fn boot_ms(&self) -> Option<u64> {
@@ -162,6 +190,9 @@ impl Known {
         if let Some(b) = self.boot_ms {
             body["boot_ms"] = json!(b);
         }
+        if !self.archived.is_empty() {
+            body["archived"] = json!(self.archived.iter().take(MAX_NAMES).collect::<Vec<_>>());
+        }
         crate::write_atomic(file, &body.to_string()).map_err(|e| format!("{}：{e}", file.display()))?;
         self.dirty = false;
         self.saved_at = now;
@@ -171,6 +202,53 @@ impl Known {
 
 pub fn same_boot(a: u64, b: u64) -> bool {
     a.abs_diff(b) <= BOOT_TOLERANCE_MS
+}
+
+/// 本人剛關掉的視窗（名字 → 關掉的時間）。關閉成功到名單掃不到它之間有空檔：這段時間的名單更新若還看得到它，
+/// 不能又把它記回認得的夥伴（重開機後會被接回）。名字在某一輪名單裡消失、或超過 [`JUST_CLOSED_MS`] 就移出；
+/// 120 秒是保底，不然本人馬上喚醒同名的新視窗會一直被略過
+pub const JUST_CLOSED_MS: u64 = 120_000;
+
+#[derive(Default, Debug)]
+pub struct JustClosed {
+    at: BTreeMap<String, u64>,
+}
+
+impl JustClosed {
+    pub fn mark(&mut self, name: &str, now: u64) {
+        self.at.insert(name.to_string(), now);
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.at.contains_key(name)
+    }
+
+    /// 每輪名單更新先呼叫：`is_present`＝這一輪名單裡還看不看得到這個名字
+    pub fn sweep(&mut self, is_present: impl Fn(&str) -> bool, now: u64) {
+        self.at.retain(|n, t| is_present(n.as_str()) && now.saturating_sub(*t) < JUST_CLOSED_MS);
+    }
+}
+
+/// 後台名單（`list` 的回應）裡，這台電腦的「已封存的鍵」命中的名字。鍵是夥伴 ID，或 `n:<節點>/<名字>`（還沒有夥伴 ID 時）。
+/// 回 None＝看不出來（舊後台沒有 archived_keys、名單沒有這台）：呼叫端不要改動現有的封存名單
+pub fn archived_among(list: &Value, node: &str, partners: &BTreeMap<String, String>, names: &[String]) -> Option<BTreeSet<String>> {
+    let member = list.get("members")?.as_array()?.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(node))?;
+    let keys: BTreeSet<String> = member.get("archived_keys")?.as_array()?.iter().filter_map(Value::as_str).map(String::from).collect();
+    let hit = |n: &String| partners.get(n.as_str()).is_some_and(|id| keys.contains(id.as_str())) || keys.contains(format!("n:{node}/{n}").as_str());
+    Some(names.iter().filter(|n| hit(n)).cloned().collect())
+}
+
+/// 本人在別處（本機名單右鍵）封存／取消封存之後，請收發室馬上重查封存名單，不等下一輪定時查。
+/// 全程序共用一個旗標：只是提早查一次，多餘的觸發無害
+static ARCHIVE_REFRESH: AtomicBool = AtomicBool::new(false);
+
+pub fn request_archive_refresh() {
+    ARCHIVE_REFRESH.store(true, Ordering::Relaxed);
+}
+
+/// 取走旗標（有人要求過回 true，並清掉）
+pub fn take_archive_refresh() -> bool {
+    ARCHIVE_REFRESH.swap(false, Ordering::Relaxed)
 }
 
 #[cfg(test)]
@@ -300,5 +378,97 @@ mod tests {
         let back = Known::load(&f, 2000);
         assert_eq!(back.names.len(), MAX_NAMES);
         assert!(!back.contains("夥伴0") && back.contains("夥伴209"));
+    }
+
+    #[test]
+    fn 封存的名字不再被記_存檔讀得回來_取消封存後才會重新記() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(KNOWN_FILE);
+        let mut k = Known::default();
+        k.touch("甲", "claude", 1000);
+        k.touch("乙", "claude", 1000);
+        k.set_facts("乙", WindowFacts { session: "s".into(), asn_opened: true, ..Default::default() });
+        k.set_archived(["乙".to_string()].into_iter().collect());
+        assert!(k.contains("甲") && !k.contains("乙"), "封存的立刻從認得的清單拿掉");
+        assert!(k.entries().iter().all(|e| e.name != "乙"));
+        // 封存的視窗還開著：每輪名單都看得到它，不能又被記回來
+        k.touch("乙", "claude", 2000);
+        k.set_facts("乙", WindowFacts { session: "s".into(), asn_opened: true, ..Default::default() });
+        assert!(!k.contains("乙"));
+        k.save_if_dirty(&f, 2000).unwrap();
+        let mut back = Known::load(&f, 2000);
+        assert!(back.archived_names().contains("乙") && back.contains("甲") && !back.contains("乙"));
+        // 取消封存：名單換掉之後，再看到它才重新記
+        back.set_archived(BTreeSet::new());
+        back.touch("乙", "claude", 3000);
+        assert!(back.contains("乙"));
+    }
+
+    #[test]
+    fn 後台名單的封存鍵對得上夥伴_id_或節點加名字_看不出來就回_none() {
+        let list = json!({ "members": [
+            { "id": "H", "archived_keys": ["p_aaaaaaaaaaaaaaaaaaaa", "n:H/沒有編號"] },
+            { "id": "X", "archived_keys": ["n:X/別台"] },
+            { "id": "舊後台" }
+        ]});
+        let partners: BTreeMap<String, String> = [("有編號".to_string(), "p_aaaaaaaaaaaaaaaaaaaa".to_string())].into_iter().collect();
+        let names: Vec<String> = ["有編號", "沒有編號", "沒封存", "別台"].iter().map(|s| s.to_string()).collect();
+        let got = archived_among(&list, "H", &partners, &names).unwrap();
+        assert_eq!(got.into_iter().collect::<Vec<_>>(), vec!["有編號".to_string(), "沒有編號".to_string()], "別台的封存不算在這台");
+        assert!(archived_among(&list, "舊後台", &partners, &names).is_none(), "舊後台沒有 archived_keys：不改動");
+        assert!(archived_among(&list, "Z", &partners, &names).is_none(), "名單裡沒有這台");
+        assert!(archived_among(&json!({ "error": "x" }), "H", &partners, &names).is_none());
+    }
+
+    #[test]
+    fn 要求重查的旗標取走就清掉() {
+        let _ = take_archive_refresh();
+        request_archive_refresh();
+        assert!(take_archive_refresh());
+        assert!(!take_archive_refresh());
+    }
+
+    /// 照核心每輪名單更新的做法跑一輪：先 sweep，剛關掉的不 touch，其餘照記
+    fn round(k: &mut Known, jc: &mut JustClosed, present: &[&str], now: u64) {
+        jc.sweep(|n| present.contains(&n), now);
+        for n in present {
+            if jc.contains(n) {
+                continue;
+            }
+            k.touch(n, "claude", now);
+        }
+    }
+
+    #[test]
+    fn 剛關掉的視窗_下一輪名單還看得到也不被記回_消失之後再出現才記() {
+        let mut k = Known::default();
+        let mut jc = JustClosed::default();
+        k.touch("甲", "claude", 1000);
+        k.touch("乙", "claude", 1000);
+        // 本人關掉甲：從認得的清單拿掉，記下剛關掉
+        k.forget("甲");
+        jc.mark("甲", 2000);
+        // 下一輪名單（關閉前掃的、視窗還沒消失）還有甲：不記回
+        round(&mut k, &mut jc, &["甲", "乙"], 3000);
+        assert!(!k.contains("甲") && k.contains("乙"));
+        round(&mut k, &mut jc, &["甲", "乙"], 4000);
+        assert!(!k.contains("甲"), "還看得到就一直不記");
+        // 名單裡消失：移出剛關掉的清單
+        round(&mut k, &mut jc, &["乙"], 5000);
+        assert!(!jc.contains("甲") && !k.contains("甲"));
+        // 重新喚醒、又出現了：這時才記回
+        round(&mut k, &mut jc, &["甲", "乙"], 6000);
+        assert!(k.contains("甲"));
+    }
+
+    #[test]
+    fn 剛關掉的名字超過一百二十秒保底移出_本人馬上喚醒同名的也不會一直被略過() {
+        let mut k = Known::default();
+        let mut jc = JustClosed::default();
+        jc.mark("甲", 1000);
+        round(&mut k, &mut jc, &["甲"], 1000 + JUST_CLOSED_MS - 1);
+        assert!(!k.contains("甲"), "還沒到 120 秒");
+        round(&mut k, &mut jc, &["甲"], 1000 + JUST_CLOSED_MS);
+        assert!(k.contains("甲") && !jc.contains("甲"), "滿 120 秒保底移出，照常記");
     }
 }
