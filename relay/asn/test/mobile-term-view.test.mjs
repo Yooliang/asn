@@ -209,14 +209,13 @@ test('確認還在等時切回訊息（那一次作廢），之後才回 ok：�
   assert.deepEqual(calls.map(c => c[0]), ['term_view_remote_start'])
 })
 
-test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設置 → 認得的電腦」確認，名稱和手機畫面一致', async () => {
+test('手機打字被「還沒確認指紋」擋下：Rust 回的白話直接上畫面，寫清楚去「設置 → 設備」的「詳情」確認，分頁名稱和手機畫面一致', async () => {
   const rs = read('../src-tauri/src/view_d.rs')
   const m = /pub const INPUT_NEEDS_CONFIRM: &str = "([^"]+)";/.exec(rs)
   assert.ok(m, '有這句')
-  assert.equal(m[1], '先在「設置 → 認得的電腦」確認這台電腦的指紋，才能在它的終端打字')
+  assert.equal(m[1], '先在「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字')
   const { TAB_LABEL } = await import('../ui/lib/mobile.mjs')
-  const { mobileSettingTitle } = await import('../ui/lib/mobile-settings.mjs')
-  assert.ok(m[1].includes(`「${TAB_LABEL.me} → ${mobileSettingTitle('known')}」`), '分頁名稱與設定分類名稱用畫面上看得到的')
+  assert.ok(m[1].includes(`「${TAB_LABEL.me} → 設備」`), '分頁名稱用畫面上看得到的')
   // 前端不轉碼：開始失敗的話就是 Rust 回的那句
   const { inputStartError } = await import('../ui/lib/term-remote-input.mjs')
   assert.equal(inputStartError(m[1]), m[1])
