@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { identityProviders } from './engines/identity-providers.mjs'
+import { lockPidAlive } from './bridge-lock.mjs'
 
 export { alivePid, processTable, readSession, sessionsDir } from './engines/claude-identity.mjs'
 
@@ -22,7 +23,8 @@ export function machineNode() {
   try { const v = fs.readFileSync(locateHome('node'), 'utf8').trim(); if (v) return v } catch {}
   let ids = []
   try { ids = fs.readdirSync(HOME_DIR).filter(n => /^machine-[A-Za-z0-9_-]+$/.test(n)).map(n => n.slice('machine-'.length)) } catch {}
-  const alive = id => { try { process.kill(Number(fs.readFileSync(locateHome(`machine-${id}`, 'bridge.pid'), 'utf8')), 0); return true } catch (e) { return e.code === 'EPERM' } }
+  // 只看編號是否存活（不叫任何子程序：寄信、收信每次都會走到這裡）
+  const alive = id => lockPidAlive(locateHome(`machine-${id}`, 'bridge.pid'))
   const live = ids.filter(alive)
   if (live.length === 1) return live[0]
   const keyed = ids.filter(id => fs.existsSync(locateHome(`${id}.key`)))

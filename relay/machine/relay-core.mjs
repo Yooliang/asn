@@ -1,8 +1,8 @@
 // 仲介（relay）共用小模組：API 呼叫、ack、Realtime 門鈴、單一執行個體 pid 檔。
 // createCore 目前只有 bridge-aegis.mjs 使用；寄信的 client_id 與重試（withClientId／retrySend）bridge.mjs、send.mjs 也共用。純 Node，無依賴。
-import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { acquireLock } from './bridge-lock.mjs'
 
 export const API_TIMEOUT_MS = 20_000
 export const BELL_HEARTBEAT_MS = 25_000
@@ -73,15 +73,11 @@ export function createCore({ baseUrl, key, anonKey, log, workDir, apiTimeoutMs =
     try { return await Promise.race([work, limit]) } finally { clearTimeout(timer) }
   }
 
-  // 同一個節點只能有一個收信者：pid 檔裡有活著的 pid 就退出（exit 3）
-  function singleInstance() {
-    const lock = path.join(workDir, 'bridge.pid')
-    try {
-      const old = Number(fs.readFileSync(lock, 'utf8'))
-      if (old && old !== process.pid) { try { process.kill(old, 0); console.error(`another bridge is running (pid ${old})`); process.exit(3) } catch (e) { if (e.code === 'EPERM') process.exit(3) } }
-    } catch {}
-    fs.writeFileSync(lock, String(process.pid))
-    process.on('exit', () => { try { if (Number(fs.readFileSync(lock, 'utf8')) === process.pid) fs.unlinkSync(lock) } catch {} })
+  // 同一個節點只能有一個收信者：pid 檔記的橋還在跑（編號活著、且不是寫檔之後才啟動的，見 bridge-lock.mjs）就退出（exit 3）。
+  // 非同步：查程序啟動時間不卡住啟動；呼叫端要 await。
+  async function singleInstance() {
+    const got = await acquireLock(path.join(workDir, 'bridge.pid'))
+    if (!got.ok) { console.error(`another bridge is running (pid ${got.pid})`); process.exit(3) }
   }
 
   // Realtime 門鈴（phoenix channels）；斷線指數退避重連
