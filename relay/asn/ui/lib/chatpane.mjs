@@ -165,7 +165,9 @@ export const ChatPane = {
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
     // 看別台的終端時（電腦版）：輸入框直接打進那個終端（#1288），提示字與按鈕字跟著換
-    const termCompose = computed(() => canRemoteInput.value && !displayOnly.value)
+    // 打字或觀看已經因為離開分頁而結束（狀態列有「重新看」）時退回「傳送」：要不要重新開始由本人按「重新看」決定，不由輸入框代按
+    const viewRestartable = computed(() => Boolean(typingEndedNote.value) || (remoteBar.value?.src === 'view' && remoteBar.value.restartable === true))
+    const termCompose = computed(() => canRemoteInput.value && !displayOnly.value && !viewRestartable.value)
     const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? composeTermHint(termViewName.value) : composePlaceholder(props.winMode)))
     const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
     const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))

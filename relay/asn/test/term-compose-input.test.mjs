@@ -28,15 +28,18 @@ test('接線：終端畫面按送出走 sendToTerm（不寄信）；沒送進去
   assert.match(send, /if \(termCompose\.value\) \{[^}]*sendToTerm\(t\)[^}]*return \}/, '終端模式先走 sendToTerm 並 return，不 emit send')
   assert.ok(send.indexOf('sendToTerm') < send.indexOf("emit('send'"))
   assert.match(pane, /<remote-input [^>]*@unsent="restoreDraft"/)
-  assert.match(pane, /const termCompose = computed\(\(\) => canRemoteInput\.value && !displayOnly\.value\)/, '只有電腦版看別台終端（有打字通道）時')
+  assert.match(pane, /const termCompose = computed\(\(\) => canRemoteInput\.value && !displayOnly\.value && !viewRestartable\.value\)/, '只有電腦版看別台終端（有打字通道）時')
+  // 已結束打字／離開超過寬限（狀態列有「重新看」）時退回「傳送」，不讓輸入框代替本人按「重新看」
+  assert.match(pane, /const viewRestartable = computed\(\(\) => Boolean\(typingEndedNote\.value\) \|\| \(remoteBar\.value\?\.src === 'view' && remoteBar\.value\.restartable === true\)\)/)
 })
 
 test('打字元件：整句送出後隔一下再送 Enter；開始前先排著；多行先問；沒送出就交還', () => {
   assert.ok(ENTER_DELAY_MS > 0 && ENTER_DELAY_MS < 1000)
-  assert.match(input, /const typeLine = \(text, multi\) => \{\s*send\(text, multi\)\s*setTimeout\(\(\) => send\('\\r', false\), ENTER_DELAY_MS\)/)
+  assert.match(input, /const typeLine = \(text, multi\) => \{\s*void send\(text, multi\)\.then\(ok => \{\s*if \(!ok\) \{ emit\('unsent', text\); return \}\s*setTimeout\(\(\) => \{ void send\('\\r', false\) \}, ENTER_DELAY_MS\)/, '整句沒送出就交還；送出了才按 Enter')
   assert.match(input, /watch\(phase, p => \{ if \(p === 'typing'\) flush\(\) \}\)/, '開始打字了才送排著的那句')
   assert.match(input, /if \(pasteLines\(t\) > 1\) \{ lineAsk = true; askPaste\.value = t \}/, '多行先問')
   assert.match(input, /emits: \['back', 'status', 'unsent'\]/)
   const fin = input.slice(input.indexOf('    const finish = text => {'), input.indexOf('    const start = async'))
   assert.match(fin, /if \(left\) emit\('unsent', left\)/, '結束時還沒送的交還')
+  assert.match(input, /if \(lineAsk\) \{ lineAsk = false; const t = askPaste\.value; askPaste\.value = null; if \(t\) emit\('unsent', t\) \}/, '等確認時又貼上：那句交還')
 })

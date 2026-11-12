@@ -6,6 +6,7 @@ export const DTERM_PROBES = {
   watch: { dterm: { kind: 'watch' } },
   typing: { dterm: { kind: 'typing' } },
   multi: { dterm: { kind: 'multi' } },
+  refused: { dterm: { kind: 'refused' } },
 }
 export const DTERM_NODE = 'Q'
 export const DTERM_MEMBERS = [{ id: DTERM_NODE, name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }]
@@ -21,6 +22,29 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
   // multi：輸入框送多行 → 先問一次；按「取消」不送，字放回輸入框；再送一次按「貼上」才送（整段＋Enter）
+  // refused：輸入框送出 → 那台沒允許（打字通道一開始就結束）→ 字放回輸入框，沒有送進任何字
+  if (kind === 'refused') {
+    const core = globalThis.__TAURI__.core, orig = core.invoke;
+    core.invoke = async (cmd, args) => {
+      if (cmd === 'term_view_remote_start' && args && args.scope === 'input') {
+        (globalThis.__smokeCalls ||= []).push([cmd, args]);
+        setTimeout(() => { for (const fn of ((globalThis.__smokeListeners || {})['term-view-remote-end'] || [])) fn({ event: 'term-view-remote-end', payload: { id: 'v2', text: '那邊的人沒有允許' } }) }, 80);
+        return { id: 'v2', expires_s: Math.floor(Date.now() / 1000) + 600 };
+      }
+      return orig(cmd, args);
+    };
+    const ta = document.querySelector('.chatpane .compose-row textarea');
+    const go = ta && ta.closest('form').querySelector('button[type=submit]');
+    if (!ta || !go) return { ok: false, why: '找不到下方的輸入框或送出鈕' };
+    ta.value = 'ls'; ta.dispatchEvent(new Event('input'));
+    await sleep(50);
+    go.click();
+    if (!(await wait(() => ta.value === 'ls'))) return { ok: false, why: '那台沒允許，字沒有放回輸入框：' + JSON.stringify(ta.value) };
+    const sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'term_view_remote_input');
+    if (sent.length) return { ok: false, why: '那台沒允許還送了字：' + JSON.stringify(sent) };
+    core.invoke = orig;
+    return { ok: true, why: '' };
+  }
   if (kind === 'multi') {
     const ta = document.querySelector('.chatpane .compose-row textarea');
     const go = ta && ta.closest('form').querySelector('button[type=submit]');
@@ -163,17 +187,24 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
     const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
     if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
     if (vis('.term-view-lost button').some(b => b.textContent.trim() === '再看一次')) return { ok: false, why: '終端區還有「再看一次」，和狀態列的「重新看」重複' };
+    const goNow = () => (vis('.chatpane .compose-row button[type=submit]')[0] || {}).textContent || '';
+    if (goNow().trim() !== '傳送') return { ok: false, why: '已結束、還沒按「重新看」時輸入框要退回「傳送」：' + goNow() };
+    if ((vis('.chatpane .compose-row textarea')[0] || {}).placeholder?.includes('會直接打進')) return { ok: false, why: '已結束時提示字還是打進終端' };
     await sleep(800);
     if (calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來自動重新發起了（要等本人按「重新看」）：start 次數 ' + starts + ' → ' + calls('term_view_remote_start') };
     if (barOf().includes('打字：') || vis('.term-remote-input').length) return { ok: false, why: '切回來還殘留打字：' + barOf().slice(0, 60) };
     again.click();
     if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有發起' };
+    if (!(await wait(() => goNow().trim() === '送出'))) return { ok: false, why: '按「重新看」後輸入框沒有回到「送出」：' + goNow() };
   }
   if (kind === 'expired') {
     if (!(await wait(() => barOf().includes('已結束觀看（離開超過 5 分鐘）')))) return { ok: false, why: '切回來狀態列沒有「已結束觀看（離開超過 5 分鐘）」：' + barOf().slice(0, 60) };
     const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
     if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
     if (vis('.term-view-lost button').some(b => b.textContent.trim() === '再看一次')) return { ok: false, why: '終端區還有「再看一次」，和狀態列的「重新看」重複' };
+    const goNow = () => (vis('.chatpane .compose-row button[type=submit]')[0] || {}).textContent || '';
+    if (goNow().trim() !== '傳送') return { ok: false, why: '已結束、還沒按「重新看」時輸入框要退回「傳送」：' + goNow() };
+    if ((vis('.chatpane .compose-row textarea')[0] || {}).placeholder?.includes('會直接打進')) return { ok: false, why: '已結束時提示字還是打進終端' };
     again.click();
     if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有重新發起' };
   }

@@ -55,11 +55,13 @@ export const RemoteInput = {
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + phase.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, stoppable: phase.value === 'typing' } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
+    // 回 Promise<boolean>：送出去了沒（沒在打字、沒東西也算沒送）
     const send = (data, paste) => {
-      if (!id || phase.value !== 'typing' || !data) return
-      props.api.send(id, data, paste).then(() => { warn.value = '' }).catch(e => {
+      if (!id || phase.value !== 'typing' || !data) return Promise.resolve(false)
+      return props.api.send(id, data, paste).then(() => { warn.value = ''; return true }).catch(e => {
         console.info('[ASN] 別台打字沒送出', String(e?.message ?? e))
         warn.value = sendError(e)
+        return false
       })
     }
     // 貼上：自己接，不讓 xterm 當成按鍵送；多行先問
@@ -67,15 +69,20 @@ export const RemoteInput = {
       const text = ev.clipboardData?.getData('text/plain') ?? ''
       ev.preventDefault(); ev.stopPropagation()
       if (!text) return
+      // 輸入框那句還在等確認時又貼上別段：那句交還給輸入框，不要被這次蓋掉
+      if (lineAsk) { lineAsk = false; const t = askPaste.value; askPaste.value = null; if (t) emit('unsent', t) }
       if (pasteLines(text) > 1) askPaste.value = text
       else send(text, true)
     }
     // 下方輸入框送來的一整句（#1288）：打進那個視窗再按 Enter。還沒開始打字（等那台同意）就先排著，開始了才送；
     // 多行的先問一次（和貼上同一個框）。沒送出去就結束（那台拒絕、逾時）時，交還給外層放回輸入框
     let queued = null, lineAsk = false
+    // 整句沒送出去就交還給輸入框（不用重打）；整句送出了才按 Enter（Enter 沒送出只提示，不重複放回）
     const typeLine = (text, multi) => {
-      send(text, multi)
-      setTimeout(() => send('\r', false), ENTER_DELAY_MS)
+      void send(text, multi).then(ok => {
+        if (!ok) { emit('unsent', text); return }
+        setTimeout(() => { void send('\r', false) }, ENTER_DELAY_MS)
+      })
     }
     const flush = () => {
       if (queued === null || phase.value !== 'typing') return
