@@ -30,6 +30,11 @@ const NODE_KEY_SEAL_FAIL: &str = "[ASN] 節點金鑰沒辦法用系統金鑰庫�
 const LOGIN_SEAL_FAIL: &str = "[ASN] 登入資料沒辦法用系統金鑰庫加密，暫時維持原樣";
 
 /// 節點金鑰檔綁定的用途與檔名（含節點代號）
+/// 節點金鑰檔的位置（{node}.key）：檔名只在這層與身分／帳號／授權登入出現，其他模組要路徑從這裡拿
+pub fn node_key_path(dir: &Path, node: &str) -> PathBuf {
+    dir.join(format!("{node}.key"))
+}
+
 pub fn node_key_aad(node: &str) -> Vec<u8> {
     format!("asn-node-key-v1:{node}.key").into_bytes()
 }
@@ -76,7 +81,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
 }
 
 /// 換檔後把所在資料夾也同步到磁碟（只有 unix 有這個操作；盡力而為，失敗不影響已換好的檔）
-fn sync_parent(path: &Path) {
+pub(crate) fn sync_parent(path: &Path) {
     #[cfg(unix)]
     {
         if let Some(p) = path.parent() {

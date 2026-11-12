@@ -63,6 +63,10 @@ mod boottime;
 #[cfg(any(target_os = "android", test))]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod known_pick;
+// 手機換一把新的節點金鑰（0.2.17）：只有安卓會跑；電腦版不編進去（測試在電腦上跑假依賴）
+#[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod node_rotate;
 // 手機「記住這台」「忘記」要本人在這支手機上驗證過的一次性憑證（外殼驗證通過才寫憑證檔）
 #[cfg(any(target_os = "android", test))]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -3083,6 +3087,15 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let _ = account::bind_this(&h.state::<App>(), &h.state::<auth::AuthState>()).await;
+                });
+            }
+            // 手機換一把新的節點金鑰（只有安卓；背景、不擋啟動；成功後直接換上，不必重啟。見 node_rotate.rs）
+            #[cfg(target_os = "android")]
+            if let Some(r) = handle.state::<App>().relay.clone() {
+                let node = handle.state::<App>().node.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    node_rotate::run_live(r, identity::relay_home(), node).await;
                 });
             }
             #[cfg(desktop)]
