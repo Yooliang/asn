@@ -183,10 +183,18 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
 // 「⋯」不列永遠用不到的項目（前台／後台、在線的喚醒、一般視窗的重開／移除），喚醒、切換模型排最前；個人訊息照樣顯示「背景工作 N 件」
 // 手機自己是節點 P；夥伴開在另一台電腦 Q（手機只能遠端管理）
 export const MBAR_ME = { lastChat: 'Q/demo', navTab: 'chats' }
+// 對話記錄樣本（後台 relay_chat_history 的格式）：一來一回，含一則長一點的
+const CHAT_MSGS_SAMPLE = [
+  { id: '00000000-0000-4000-8000-000000000001', dir: 'me', body: '幫我看一下 CI 為什麼紅了', created_at: '2026-11-13T01:00:00Z', delivered_at: '2026-11-13T01:00:01Z', acked_at: '2026-11-13T01:00:02Z' },
+  { id: '00000000-0000-4000-8000-000000000002', dir: 'them', body: '看過了，是 e2e 那一項在找舊的截圖名稱，改成新的名字就會過。', created_at: '2026-11-13T01:01:00Z' },
+  { id: '00000000-0000-4000-8000-000000000003', dir: 'me', body: '好，改完推上來', created_at: '2026-11-13T01:02:00Z', delivered_at: '2026-11-13T01:02:01Z' },
+  { id: '00000000-0000-4000-8000-000000000004', dir: 'them', body: '推了，新頭 0531。', created_at: '2026-11-13T01:03:00Z' },
+]
 export const MBAR_MEMBERS = {
   claude: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo', detail: '背景工作 3 件' }] }],
   offline: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', online: false, cwd_label: 'demo' }] }],
   acp: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }],
+  busy: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'busy', cwd_label: 'demo' }] }],
 }
 // lead＝「⋯」前幾項的 [名稱, 反灰]；present／absent＝一定要有／不能有的項目；tasks＝標頭要看到的字（選填）；menu:false＝不打開「⋯」（截對話頁本身）；wake＝點第一項（喚醒）要送出
 export const MCHAT_PROBES = {
@@ -846,6 +854,23 @@ export const skinProbeSource = () => `(async () => {
   const bad = reds.filter(([cls, b]) => redOf(b)(cls) !== 'rgb(179, 38, 30)').map(([cls, b]) => cls + '＝' + redOf(b)(cls));
   host.remove();
   if (bad.length) return { ok: false, why: '危險按鈕在現代底下不是紅色：' + bad.join('、') };
+  // #1421 A：畫面上有的元件才量（各情境畫面不同）
+  for (let i = 0; i < 20 && document.querySelector('.msgs') && !document.querySelector('.msg .m-body.tone-them, .msg .m-body.tone-me'); i++) await sleep(100);
+  const css = (sel, prop, pseudo) => { const el = document.querySelector(sel); return el ? getComputedStyle(el, pseudo).getPropertyValue(prop).trim() : null };
+  const checks = [
+    ['.msg .m-body.tone-them', 'border-top-left-radius', '18px', '對方訊息卡片的圓角'],
+    ['.msg .m-body.tone-me', 'border-top-right-radius', '18px', '自己訊息卡片的圓角'],
+    ['.dp', 'border-top-left-radius', '50%', '頭像要是圓的'],
+    ['.m-chat .compose-main', 'border-top-width', '1px', '手機輸入框的邊框（mobile.css 的 border:0 不能蓋掉）'],
+  ];
+  for (const [sel, prop, want, label] of checks) { const v = css(sel, prop); if (v !== null && v !== want) return { ok: false, why: label + '：' + v } }
+  const dot = document.querySelector('.dp:not(.room-av)');
+  if (dot && getComputedStyle(dot, '::before').content === 'none') return { ok: false, why: '頭像右下沒有狀態點' };
+  // 忙碌／離線的標題列、離線的收件人列：要有自己的底色，不能被現代的一般底色（#f6f5f2／白）蓋掉
+  const plainBg = ['rgb(246, 245, 242)', 'rgb(255, 255, 255)'];
+  for (const [sel, label] of [['.m-chathead.is-busy', '手機標題列忙碌變色'], ['.m-chathead.is-offline', '手機標題列離線變色'], ['.conv-main .to-line.is-offline', '電腦收件人列離線灰底']]) {
+    const v = css(sel, 'background-color'); if (v !== null && plainBg.includes(v)) return { ok: false, why: label + '被現代底色蓋掉：' + v }
+  }
   await sleep(400);
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
@@ -1560,6 +1585,10 @@ export const SCENARIOS = [
   { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
   { name: 'm-modern-list', page: 'm.html', state: { signedIn: true, mbar: 'claude', mchatList: true, skin: 'modern' }, ready: '#app.m .m-chat-list', probe: SKIN_PROBE, shot: 'm-modern-list.png' },
+  // #1421 A：有訊息的對話（卡片圓角、頭像）、離線／忙碌的標題列與收件人列（權重衝突修正）
+  { name: 'list-modern-msgs', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-msgs.png' },
+  { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-msgs.png' },
+  { name: 'm-modern-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-busy.png' },
   { name: 'list-tabs', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: DTABS_PROBE, shot: 'list-tabs.png' },
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true, mtab: 'list' }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
@@ -1636,6 +1665,7 @@ export const tableFor = scenario => {
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
+  if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
   if (scenario.state.mchatList) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...MBAR_ME, navChat: false }) } }   // 上次停在對話清單（不是某一則）
   // 手機開 App 先看「對話」清單（0.2.18）：要從夥伴頁開始的情境（例如點右上角「＋」）用 mtab 指定存檔停在哪一頁
   if (scenario.state.mtab) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ navTab: scenario.state.mtab }) } }

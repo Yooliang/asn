@@ -339,10 +339,24 @@ test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩�
 test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對話、手機對話清單各一，存檔選現代；表達式語法正確', async () => {
   const vm = await import('node:vm')
   const sc = SCENARIOS.filter(s => s.probe?.skinCheck)
-  assert.deepEqual(sc.map(s => s.name), ['list-modern', 'list-modern-chat', 'm-modern', 'm-modern-list'])
+  assert.deepEqual(sc.map(s => s.name), ['list-modern', 'list-modern-chat', 'm-modern', 'm-modern-list', 'list-modern-msgs', 'm-modern-msgs', 'm-modern-busy'])
   assert.equal(probeKind(sc[0].probe), '現代外觀檢查')
   assert.doesNotThrow(() => new vm.Script(probeSource(sc[0].probe)))
   for (const s of sc) { const me = JSON.parse(tableFor(s).store_load.values.me); assert.equal(me.skin, 'modern', s.name); assert.equal(me.mobilePrefs.skin, 'modern', s.name) }
   const kept = JSON.parse(tableFor(SCENARIOS.find(s => s.name === 'm-modern-list')).store_load.values.me)
   assert.equal(kept.navChat, false, '各情境原本的存檔照留')
+})
+
+test('現代外觀補齊（#1421 A）：有訊息、離線、忙碌的情境；檢查量卡片圓角、圓頭像、狀態點、手機輸入框邊框、忙碌／離線變色', async () => {
+  const by = Object.fromEntries(SCENARIOS.map(s => [s.name, s]))
+  for (const n of ['list-modern-msgs', 'm-modern-msgs']) {
+    const msgs = tableFor(by[n]).relay_chat_history.messages
+    assert.ok(msgs.length >= 4 && msgs.some(m => m.dir === 'me') && msgs.some(m => m.dir === 'them'), n + '：對話裡有來回的信')
+  }
+  assert.deepEqual(tableFor(by['m-modern']).relay_chat_history.messages, [], '沒指定 chatMsgs 的情境照舊是空的')
+  assert.equal(by['list-modern-msgs'].state.bar, 'offline', '電腦：離線對話（收件人列灰底）')
+  assert.equal(by['m-modern-msgs'].state.mbar, 'offline', '手機：離線標題列')
+  assert.equal(tableFor(by['m-modern-busy']).relay_list.members[0].agents[0].status, 'busy', '手機：忙碌標題列')
+  const src = probeSource(SCENARIOS.find(s => s.probe?.skinCheck).probe)
+  for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline']) assert.ok(src.includes(must), '檢查要量：' + must)
 })
