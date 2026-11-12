@@ -46,12 +46,22 @@ jobs:
       - name: 安裝 pglite（固定版本，不寫 package 檔）
         run: npm i --no-save --no-package-lock @electric-sql/pglite@0.5.13
 
+      - name: 暫時診斷（#1383，之後拿掉）
+        run: |
+          set +e -x
+          nproc; free -m; cat /sys/fs/cgroup/cpu.max 2>/dev/null; grep -m1 "model name" /proc/cpuinfo
+          echo "const t0=Date.now();process.on('exit',()=>{const c=process.cpuUsage();console.error('WALL',Date.now()-t0,'CPU',((c.user+c.system)/1000).toFixed(0),'RSS',(process.resourceUsage().maxRSS/1024).toFixed(0))})" > /tmp/cpu.mjs
+          node --import file:///tmp/cpu.mjs tests/acct_roster_sql.test.mjs 2>&1 | grep WALL
+          for i in 1 2 3 4; do node --import file:///tmp/cpu.mjs tests/acct_roster_sql.test.mjs 2>&1 | grep WALL & done; wait
+          node --import file:///tmp/cpu.mjs --v8-options >/dev/null
+          node --import file:///tmp/cpu.mjs --single-threaded tests/acct_roster_sql.test.mjs 2>&1 | grep WALL
+
       - name: 測試執行器本身的單元測試
         run: node --test tests/run_root_tests.test.mjs
 
       - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）＋登入網域清單的一致性測試
         timeout-minutes: 35 # 最後一道防線（#1379）：CI 實測約 17 分 20 秒，取約兩倍；#1383 並行做完、時間降下來再調回
-        run: node tools/run-root-tests.mjs _sql login_domains --timeout=180 --require-pglite
+        run: node tools/run-root-tests.mjs acct --timeout=180 --require-pglite
 
 
   # 無視窗橋（asn-bridge，Linux 節點用）：下面的 build 只編 gui 版，這個組合沒人編就會壞了也不知道。
