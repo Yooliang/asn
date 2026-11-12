@@ -90,7 +90,7 @@ test('第 1 層：進入先是設備列表（不再是橫向頁籤）：每台�
   assert.ok(!html.includes('role="tablist"') && !html.includes('role="tab"'))
   assert.match(rows[0], /家用機/)
   assert.match(rows[1], /dv-tag on[^>]*>在線/); assert.match(rows[2], /dv-tag off[^>]*>離線/)
-  for (const r of rows) assert.ok(r.includes('dv-chev'))
+  for (const r of rows) assert.ok(!r.includes('dv-chev') && r.includes('>帳號<') && r.includes('>詳情<'))
 })
 
 test('進入細部頁：指定 dev 才進；沒指定或認不得的鍵都留在列表（不再自動選「這台」）', async () => {
@@ -104,7 +104,7 @@ test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一�
   const html = await render({ catKey: 'devices', dev: 'W' })
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(!html.includes('class="dv-tag kind">電腦<'), '電腦類型標籤多餘，不顯示'); assert.match(html, /class="dv-tag on">在線</)
-  assert.ok(html.includes('帳號最後回報：3 分鐘前'))
+  assert.ok((await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('帳號最後回報：3 分鐘前'), '回報時間搬到詳情頁')
   const cards = [...html.matchAll(/<li class="dv-vendor[^"]*"/g)]
   assert.equal(cards.length, 3)
   for (const k of ['claude', 'grok', 'pi']) assert.ok(html.includes(vendorIconSvg(k)), `${k} 圖示用 vendorIconSvg`)

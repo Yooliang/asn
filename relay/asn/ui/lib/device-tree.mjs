@@ -1,3 +1,4 @@
+import { displayDeviceName } from './device-known.mjs'
 // 設定「設備與帳號」分類：設備 → 廠商 → 帳號 三層（廠商的 accounts 是帳號清單，畫面一個帳號一列）（純邏輯，node 與瀏覽器都能跑）。
 // 設備一律用設備名稱，不顯示節點代號與夥伴 ID；沒回報的顯示「未回報」。
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
@@ -74,7 +75,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const node = d.key
     const isSelf = node === selfNode
     const mine = friends.filter(f => f.node === node)
-    const named = mine.find(f => f.device)?.device ?? ''
+    const named = displayDeviceName(mine.find(f => f.device)?.device ?? '')
     const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
