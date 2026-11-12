@@ -420,7 +420,8 @@ mod tests {
             *e2.lock().unwrap() = Some(Instant::now());
         }));
         let rpc = Rpc::spawn(o).unwrap();
-        tokio::time::timeout(Duration::from_secs(8), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        // 等待上限照「孫行程睡 30 秒」來定，不照機器快慢（CI 忙時開 node＋等管線可能超過 8 秒）
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
         assert!(!rpc.alive(), "行程結束了：alive 要是 false");
         let (end, exit) = (ended_at.lock().unwrap().unwrap(), exit_at.lock().unwrap().unwrap());
         assert!(exit.duration_since(end) >= Duration::from_millis(500), "on_exit 要等管線（有上限），on_end 不等：on_end 比 on_exit 早 {:?}", exit.duration_since(end));
@@ -432,20 +433,30 @@ mod tests {
         if node().is_none() {
             return;
         }
+        let ended_at = Arc::new(Mutex::new(None::<Instant>));
+        let exit_at = Arc::new(Mutex::new(None::<Instant>));
+        let (e2, x2) = (ended_at.clone(), exit_at.clone());
         let (done_tx, done_rx) = oneshot::channel::<()>();
         let done_tx = Mutex::new(Some(done_tx));
-        let o = opts(
+        let mut o = opts(
             "console.log('{\"event\":\"x\"}'); process.exit(0)",
             Arc::new(|_| {}),
             Arc::new(move |_| {
+                *x2.lock().unwrap() = Some(Instant::now());
                 if let Some(t) = done_tx.lock().unwrap().take() {
                     let _ = t.send(());
                 }
             }),
         );
-        let started = Instant::now();
+        // on_end 在行程真正結束時馬上被呼叫：從這裡量到 on_exit，開 node 的時間不算進去，機器忙也不受影響
+        o.on_end = Some(Arc::new(move || {
+            *e2.lock().unwrap() = Some(Instant::now());
+        }));
         let _rpc = Rpc::spawn(o).unwrap();
-        tokio::time::timeout(Duration::from_secs(8), done_rx).await.unwrap().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(3), "正常結束管線很快 EOF，不該等滿上限：{:?}", started.elapsed());
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        let (end, exit) = (ended_at.lock().unwrap().expect("on_end 要被呼叫"), exit_at.lock().unwrap().unwrap());
+        let gap = exit.saturating_duration_since(end);
+        // 正常結束管線很快 EOF：從行程結束到 on_exit 不該等滿任何一個管線的上限（DRAIN_MAX）
+        assert!(gap < DRAIN_MAX, "正常結束管線很快 EOF，不該等滿上限：行程結束到 on_exit 花了 {gap:?}");
     }
 }
