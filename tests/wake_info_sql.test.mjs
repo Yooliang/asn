@@ -7,6 +7,7 @@
 //    - 別租戶的讀者：成員鍵是 x: 對外代號、標示加（主人名）、輸出掃不到節點代號
 //    - 已離開群組的成員不列
 // 3. 還原驗證：拿掉「只在尚未有值時寫入」或「已離開不列」，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,7 +42,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`, C = `${W1}~監看`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -179,3 +180,6 @@ test('還原驗證：拿掉「只在尚未有值時寫入」或「已離開不�
   await left.exec(`update relay.room_members set left_at = now() where room_id = '${room2}' and member = '${B}'`)
   assert.deepEqual((await hostView(left, room2, h2.seq)).wake_info.map(e => e.label), ['財務', '管理'], '拿掉過濾後離開的人還在＝守門測試有效')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

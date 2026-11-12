@@ -4,6 +4,7 @@
 //    只有電腦能建立、雜湊綁死、選項要在清單內、第一個決定為準、本人簽章且節點是這個人的、他人不行、
 //    過期、同視窗一筆、頻率上限、結案就清全文、門鈴只敲本人其他設備。
 // 3. 還原驗證：拿掉雜湊、選項或一次性條件，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -43,7 +44,7 @@ const H = 'a'.repeat(64), H2 = 'b'.repeat(64)
 const OPTS = JSON.stringify([{ n: 1, label: 'Yes' }, { n: 3, label: 'No' }])
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -197,3 +198,6 @@ test('還原驗證：拿掉保護，對應測試要變紅', { skip }, async () =
   // 第一個決定已清掉選項：第二個決定會因為選項空掉而不成功，但已經不是 not_found
   assert.notEqual((await decide(noOnce, c3.id)).error, 'not_found')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

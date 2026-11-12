@@ -1,6 +1,7 @@
 // 推播權杖（migration 20261109100000_push_tokens.sql，#797 PR①）。
 // 靜態：交易內、新表開 RLS、函式只給 service_role、不動既有函式。
 // 實跑（要 pglite）：註冊條件、權杖唯一、取消、要推誰（不在線、權杖 30 天內更新、60 秒一則、停用、兩種情境）、權杖不外流、權限、清除。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +36,7 @@ const PC = 'wrk9b2', PH = 'phn1a1', PH2 = 'phn2b2', OLD = 'phn0c0', OTHER = 'qqq
 const TOK = 'f'.repeat(40) + ':APA91b_tok-1', TOK2 = 'e'.repeat(40) + ':APA91b_tok-2'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -201,3 +202,6 @@ test('清理排程：每天跑一次 prune', { skip }, async () => {
   assert.equal(rows[0].schedule, '51 3 * * *')
   assert.match(rows[0].command, /asn_relay_push_prune\(\)/)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

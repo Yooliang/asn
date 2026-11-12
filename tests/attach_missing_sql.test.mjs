@@ -2,6 +2,7 @@
 // 涵蓋：全綁上＝空；沒綁／過期未綁／不存在／別人的附件＝缺；只回傳 p_ids 裡的編號（去重、依傳入順序）；
 // 與既有 asn_relay_attach_bind 搭配：補綁成功＝齊；綁到別封信的不算綁在這封；兩個請求同時各綁一半，核對看結果不誤判；純讀取。
 // 沒裝 @electric-sql/pglite 時只跑靜態部分。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -34,7 +35,7 @@ const M2 = '00000000-0000-0000-0000-0000000000a2'
 const A = n => `00000000-0000-0000-0000-00000000b${String(n).padStart(3, '0')}`
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   // 表與既有 bind 函式的替身，條件與正式的 asn_relay_attach_bind 相同（未綁定、ready、未過期才綁）
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.attachments(id uuid primary key, owner_node text not null, status text not null default 'ready',
@@ -106,3 +107,6 @@ test('實跑：權限收回，純讀取不改資料', { skip }, async () => {
   assert.deepEqual(acl, { s: true, a: false, u: false })
   await db.close()
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

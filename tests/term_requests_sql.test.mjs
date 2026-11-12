@@ -4,6 +4,7 @@
 //    建立（只有桌面）、雜湊綁死、一次性、手機決定要本人簽章且節點是這個人的、他人／他租戶不行、
 //    answer 的選項必須在桌面給的清單內、過期、同終端一筆、頻率上限、完成後預覽清空、內容清洗。
 // 3. 還原驗證：拿掉雜湊比對或一次性條件，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const H = 'a'.repeat(64), H2 = 'b'.repeat(64)
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -178,3 +179,6 @@ test('還原驗證：拿掉雜湊比對、拿掉一次性條件，對應測試�
   await decide(reuse, { p_id: d.id })
   assert.equal((await decide(reuse, { p_id: d.id })).ok, true, '拿掉狀態條件後可以重複決定＝一次性測試有效')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

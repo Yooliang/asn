@@ -2,6 +2,7 @@
 // 1. 靜態：只加欄位與函式（不改舊值）、新函式只授權 service_role。
 // 2. 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）套用 migration：
 //    平台不在清單就存 null、原因過濾成純文字並限 120 字、只改自己節點、launchers 回新欄位並列出有回報平台的沒開放設備。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +28,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 test('實跑（pglite）：平台只收固定值、原因過濾成純文字、只改自己節點；launchers 回新欄位並列出沒開放但有回報平台的設備', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, name text, machine boolean default true,
       launcher jsonb, launcher_at timestamptz, last_seen_at timestamptz default now());
@@ -54,3 +55,6 @@ test('實跑（pglite）：平台只收固定值、原因過濾成純文字、�
   assert.deepEqual(r.machines.map(m => [m.node, m.platform, m.launcher === null]), [['L', 'linux', true], ['Q', 'linux', true], ['W', null, false]], '沒開放的 Linux 也列出來（launcher 還是 null＝沒開放）；手機不列')
   assert.ok(r.machines.every(m => 'launch_closed_reason' in m))
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

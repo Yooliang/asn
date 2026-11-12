@@ -4,6 +4,7 @@
 //    舊簽章、舊欄位照樣能用；兩個新欄位寫得進、讀得出（asn_relay_acct_list）；壞掉的單獨丟掉；
 //    gemini 的 nodes 有值、current 照回報；兩台讀過同一個帳號只有在用的那台是 current；這台不再回報就拿掉；
 //    claude 的 nodes 照舊從舊表；權限不變；可重跑；回復後函式跟原版逐字相同、欄位拿掉。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -67,7 +68,7 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -171,3 +172,6 @@ test('實跑（pglite）：權限、definer、search_path 跟套之前一樣；�
   assert.ok(!cols.includes('nodes'))
   assert.equal((await db.query('select count(*)::int c from relay.asn_user_accounts')).rows[0].c, 1, '回復不刪資料列')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -1,5 +1,6 @@
 // 0.2 D2（#422）migration（20261028160000_launch_pi_model.sql）：開窗表多存經 pi 的提供者與模型。
 // 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -19,7 +20,7 @@ try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：9 參數版本存提供者與模型、要一起給、格式不對回 bad_pi_model；表上的限制擋單邊值；取走時一起回', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', role text default 'member', tenant_id uuid, launcher jsonb, bell_topic text);
@@ -46,3 +47,6 @@ test('實跑（pglite）：9 參數版本存提供者與模型、要一起給、
   assert.deepEqual(got.map(g => [g.name, g.pi_provider, g.pi_model]), [['a1', 'minimax', 'MiniMax-M3.1-Flash'], ['a2', null, null]])
   assert.deepEqual((await db.query("select public.asn_relay_launch_pending('W') r")).rows[0].r, [], '取走一次就沒了')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

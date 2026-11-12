@@ -5,6 +5,7 @@
 //    - 群組發言：角色節點是 member、p_owner 與本人簽章是 owner；角色節點仍能以 ~owner 身分發言（成員身分不動）
 //    - 仍認 role='owner' 的特權動作（invite、acct_list）對角色節點照舊可用、對一般成員照舊拒絕
 //    - ~owner 的顯示名取租戶的帳號名稱，沒有名稱用「帳號擁有者」，不再有「小良哥」
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -34,7 +35,7 @@ const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function boot({ upTo } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -135,3 +136,6 @@ test('還原驗證：套用前（只到 R6 改名）角色節點的信是 owner�
   await send('ROLE1', 'M', '角色節點說')
   assert.equal((await inbox('M'))[0].trust, 'owner')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

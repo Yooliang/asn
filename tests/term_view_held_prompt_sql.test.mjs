@@ -1,5 +1,6 @@
 // 遠端打字遇到外來訊息的確認框時結束的原因 held_prompt（20261112300000_term_view_held_prompt.sql，#1254 A）。
 // 靜態：只多收 held_prompt，其餘逐字同上一版；回復檔逐字換回。實跑（pglite，沒裝就略過）。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +33,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const ID = '11111111-2222-3333-4444-555555555555'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.term_views(id uuid primary key, to_node text, status text, end_reason text, ended_at timestamptz,
       topic text, d_eph_pub text, d_sig text, t_eph_pub text, t_sig text);
@@ -53,3 +54,6 @@ test('實跑：held_prompt 結束得了、別的亂寫照舊擋；回復檔把�
   await db.exec(`update relay.term_views set status = 'live'`)
   assert.equal((await stop('held_prompt')).error, 'bad_request', '回復後又不收 held_prompt')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

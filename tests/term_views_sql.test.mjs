@@ -1,6 +1,7 @@
 // 別台看畫面的控制面（migration 20261107110000_term_views.sql）。
 // 靜態：沒有畫面欄位、函式只給 service_role、表開 RLS。實跑（要 pglite）：本人、兩台都是本人的、只有被看的能接受、
 // 上限、到期、固定狀態、結束就清金鑰材料、D 不見了 T 看得到。還原驗證：拿掉保護要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -37,7 +38,7 @@ const PUB = 'a'.repeat(43), TSIG = 'b'.repeat(86), DSIG = 'c'.repeat(342)
 const KEYS = { [D]: 'D'.repeat(43), [Z]: 'Z'.repeat(43), [X]: 'X'.repeat(43), [Q]: 'Q'.repeat(43) }
 
 async function boot({ mutate, noKeys = [] } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -258,3 +259,6 @@ test('TOFU：start 回 T 的設備公鑰；pending 帶 D 的設備公鑰；沒�
   const t = await db.query(`select count(*)::int c from information_schema.columns where table_schema = 'relay' and table_name = 'term_views' and column_name like '%sign_pub%'`)
   assert.equal(t.rows[0].c, 0, '公鑰不存兩份，都從 device_keys 查')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（自己 `npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 依序套用 migrations 目錄裡的全部檔案
 //    （改名那支之前的先套，記下改名前的函式清單，再套改名），驗證：新名全部在、舊名包裝在且回傳相同、觸發器仍觸發、
 //    內部呼叫與排程都改成新名、權限只給 service_role、重跑不出錯。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,7 +37,7 @@ const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function boot({ withRename }) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -166,3 +167,6 @@ test('實跑：改名 migration 重跑不出錯、結果不變（新名已存在
   await db.exec(sql)
   assert.equal(await snap(), a)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

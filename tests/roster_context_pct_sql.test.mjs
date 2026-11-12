@@ -2,6 +2,7 @@
 // 1. 靜態檢查：加可空欄位、roster 存它、list 的在線與離線兩段都帶它，授權與權限檢查保留。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用本 migration，
 //    驗：合格數字存進去並四捨五入；壞值當沒帶、不拒絕整份名單；舊機器橋不送＝null；list 帶出；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -26,7 +27,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 test('實跑（pglite）：context_pct 存取、四捨五入、壞值當沒帶、舊報法不壞、list 帶出', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', can_invite boolean default true, can_roster boolean default true,
       name text, kind text, machine text, avatar text, avatar_updated_at timestamptz, last_seen_at timestamptz default now());
@@ -58,3 +59,6 @@ test('實跑（pglite）：context_pct 存取、四捨五入、壞值當沒帶�
   const off = (await list()).offline_agents.find(a => a.name === 'a')
   assert.equal(off.context_pct, 85); assert.equal(off.status, 'offline')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

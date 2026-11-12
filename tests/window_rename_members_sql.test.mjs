@@ -7,6 +7,7 @@
 //    - 衝突（新名已是同群組成員）不覆蓋、兩者都在；別的節點不能動我的視窗；壞名字被擋；重跑不再動；
 //    - 夥伴同步判定的改名（同節點同 session）自動帶到群組；換 session（接班）不帶。
 // 3. 還原驗證：拿掉「更新發言者鍵」、「衝突檢查」、「同 session 條件」，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -43,7 +44,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`, A2 = `${W1}~會計`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -228,3 +229,6 @@ test('還原驗證：拿掉各項保護，對應測試要變紅', { skip }, asyn
     await assert.rejects(() => body(bad), undefined, name + '：拿掉後測試應該變紅')
   }
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

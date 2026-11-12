@@ -4,6 +4,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 tests/fixtures/quota-merge-cases.json 的 cases 每一個、window_pair_cases 每條窗各自判斷；
 //    端到端：同期回升照收、舊視窗重送的舊數字被擋而另一條窗照收、舊版留下的待確認被清掉、回復後回到簡化之前。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -86,7 +87,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -192,3 +193,6 @@ test('實跑：權限與回復——三支函式只有 service_role；回復後�
     ['gemini', 'weekly', JSON.stringify({ left_pct: 0, resets_at: R, read_at: '2026-11-09T11:00:00Z' }), JSON.stringify({ left_pct: 99, resets_at: R, read_at: '2026-11-09T11:59:00Z' }), '2026-11-09T12:00:00Z'])
   assert.equal(r.reason, 'same_period_rise', '回復後又是舊規則')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

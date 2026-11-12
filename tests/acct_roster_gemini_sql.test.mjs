@@ -3,6 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例全部（含 gemini）照預期；權限不變；
 //    gemini 寫入只收 five_hour／weekly；滿額遇滿額、滿額後開始用照收；記著非滿額、來滿額不收；claude／codex 行為不變；
 //    舊的 asn_relay_acct_report 照樣不收 gemini；回復後函式跟原版逐字相同、gemini 列刪掉、約束不再收 gemini；可重跑。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -85,7 +86,7 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -211,3 +212,6 @@ test('實跑（pglite）：可重跑；回復後三支函式跟原版逐字相�
   assert.deepEqual((await rows(db)).map(x => x.vendor), ['claude'])
   await assert.rejects(db.query(`insert into relay.asn_user_accounts (user_id, vendor, account) values ('${U1}', 'gemini', 'g@x.test')`))
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -1,5 +1,6 @@
 // 共用終端服務掛掉的本人通知（20261105110000_mux_down_notice.sql）：靜態檢查與 pglite 實跑。
 // 實跑（有安裝 @electric-sql/pglite 時）：擁有者收到固定內文、reply=no、每節點每小時 6 封、別的節點收不到、停用節點動不到、參數不合格不寄。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -40,7 +41,7 @@ const OWNER_A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const OWNER_B = 'bbbbbbbb-0000-0000-0000-00000000000b'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid, name text);
     create table relay.messages(id uuid default gen_random_uuid() primary key, fanout_id uuid, from_node text, from_agent text, to_node text, body text, expects_reply boolean, created_at timestamptz default now());
@@ -99,3 +100,6 @@ test('實跑（pglite）：節點不存在或停用回 forbidden；參數不合�
   const f = await notice(db, 'F')
   assert.deepEqual([f.ok, f.notify, f.bell_topics], [true, 'failed', []])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -1,6 +1,7 @@
 // 通知集中（20261111100000_notice_center.sql，#848 PR-C 後台）：靜態檢查與 pglite 實跑。
 // 涵蓋：kind 欄位與檢查式、asn_relay_send_notice 的驗證／權限／扇出標記／限流、九支通知函式的內文第一行與寄件名與 kind、
 // 讀信函式多回 kind 與 from_owner、回復檔逐字等於上一版定義。沒裝 @electric-sql/pglite 時只跑靜態部分。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -73,7 +74,7 @@ const T2 = 'cccccccc-0000-0000-0000-000000000002'
 const SEND_NOTICE = 'public.asn_relay_send_notice'
 
 async function boot({ applyMig = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, owner_name text);
     create table relay.nodes(id text primary key, name text, machine text, kind text, platform text, status text default 'active', owner_user uuid,
@@ -381,3 +382,6 @@ test('實跑（pglite）：其他幾種通知正文也不用「這台」——�
 test('靜態：這支 migration 產出的通知正文不准出現「這台」（註解除外）', () => {
   assert.doesNotMatch(mig.replace(/^\s*--.*$/gm, '').replace(/--[^\n']*$/gm, ''), /這台/)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

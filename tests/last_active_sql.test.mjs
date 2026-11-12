@@ -2,6 +2,7 @@
 // 1. 靜態：只加可為 null 的欄位與函式；新函式 security definer、search_path 空、只授權 service_role；asn_relay_list「只多三行」（對照正式庫基準檔）。
 // 2. 實跑（pglite；沒裝略過）：10 秒內第二次不寫、超過 10 秒會寫、解不到夥伴只寫節點、舊名字不會寫到別人、非 service_role 不能呼叫、
 //    list 多出 last_active_at 而舊欄位不變。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -46,7 +47,7 @@ const P1 = 'p_00000000000000000001'
 const P2 = 'p_00000000000000000002'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     alter default privileges in schema public grant execute on functions to anon, authenticated;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', name text, kind text default 'claude', machine text,
@@ -138,3 +139,6 @@ test('實跑：list 多出 last_active_at（節點、在線夥伴、離線夥伴
     assert.deepEqual(strip(n.agents), strip(b.agents))
   }
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

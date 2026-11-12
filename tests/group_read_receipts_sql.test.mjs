@@ -6,6 +6,7 @@
 //    - 別租戶的讀者：只有人數（自己發的才有名單），名單標示加（主人名）、輸出掃不到節點代號與帳號 id
 //    - 回應多帶 reads（讀者這邊最近發的訊息的已讀狀況），沒有新訊息時也更新；系統訊息與開頭紀錄不帶
 // 3. 還原驗證：拿掉「≥」「可見起點」「離開」「排除發言者」任一個，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +39,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`, C = `${W1}~監看`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -197,3 +198,6 @@ test('還原驗證：拿掉「≥」「可見起點」「離開」「排除發�
   room = await room3(db); h = await human(db, room, '一')
   assert.notDeepEqual(rcOf(await host(db, room, h.seq)), [0, 3], '不排除發言者：發言者被算進去＝測試有效')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

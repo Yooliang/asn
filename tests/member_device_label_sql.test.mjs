@@ -6,6 +6,7 @@
 //    - 設備名取不到（或與夥伴名相同）只有夥伴名；真人不變
 //    - 訊息與回覆引用都帶 from_display_label，且與成員清單的 display_label 同一個字串
 // 3. 還原驗證：把自己夥伴的規則改回主人名，或讓外部成員也拿設備名，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +39,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -160,3 +161,6 @@ test('還原驗證：自己夥伴改回主人名、或外部成員也拿設備�
   const seen = (await membersAs(leak, { node: Q2, room: r2, signed: U2 })).members
   assert.match(JSON.stringify(seen), /家用機/, '外部成員拿到設備名＝外洩守門測試有效')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

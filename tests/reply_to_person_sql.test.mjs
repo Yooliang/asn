@@ -2,6 +2,7 @@
 // 1. 靜態檢查：person_view_node 不再回角色節點；asn_relay_send 保底條件齊全、本體除保底外逐字不變、只授權 service_role、不動資料。
 // 2. 實跑檢查（有安裝 @electric-sql/pglite 才跑）：重現「夥伴回信寄到角色節點 XISU、沒人收」→ 套用後「扇出到本人各 ASN 視窗」；
 //    不誤傷：指定了別的視窗名、角色節點上有在線 ASN、寄件人是角色節點自己、別的租戶。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -51,7 +52,7 @@ const T2 = 'bbbbbbbb-0000-0000-0000-000000000002'
 
 // patched=false：套到 20261022090000 為止（再把函式改名成現在的 asn_relay_send），重現修前的行為
 async function setup({ patched }) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text, owner_name text not null default '朋友');
     create table relay.nodes(id text primary key, tenant_id uuid not null, status text default 'active', role text default 'member',
@@ -174,3 +175,6 @@ test('實跑（pglite）：一次性補送 SQL——只動卡在角色節點的�
   await db.exec(oneoff)
   assert.equal((await q('select count(*) n from relay.messages'))[0].n, n, '第二次不重送')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

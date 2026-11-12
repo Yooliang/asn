@@ -1,6 +1,7 @@
 // Claude 外掛狀態回報（20261023090000_mod_status.sql）：
 // 1. 靜態檢查：新增可空欄位、新函式只授權 service_role、函式名用 asn_relay_ 前綴、roster／list 保留原有檢查。
 // 2. 實跑檢查（有安裝 @electric-sql/pglite 時）：set_claude_mod 驗格式與只動自己節點；roster 存 mod_loaded（只收布林）；list 帶出兩處；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +29,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', can_invite boolean default true, can_roster boolean default true,
       name text, kind text, machine text, avatar text, avatar_updated_at timestamptz, last_seen_at timestamptz default now());
@@ -82,3 +83,6 @@ test('實跑（pglite）：roster 存 mod_loaded（只收布林）、舊報法�
   const off = (await list(db)).find(n => n.id === 'H').offline_agents.find(a => a.name === 'a')
   assert.equal(off.mod_loaded, true); assert.equal(off.status, 'offline')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

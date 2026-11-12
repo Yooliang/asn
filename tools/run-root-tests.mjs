@@ -3,7 +3,7 @@
 // 而 `--test-force-exit` 在 Windows 結束時會觸發 libuv 斷言崩潰，造成假的「取消」，所以這裡不用它。
 // 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
 // 結束碼：全過 0；有失敗或逾時 1。逾時的會單獨列出來（不算通過）。
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -43,6 +43,42 @@ export function classify(r) {
   return r.status === 0 ? 'passed' : 'failed'
 }
 
+/** 收掉整個程序樹：測試檔可能生孫程序（假後台、資料庫），只殺直接子程序的話孫程序還握著 stdout 管線，執行器就等不到結束（#1379）。
+ *  Linux／macOS：子程序是自己的程序群組領頭（detached），對 -pid 發 SIGKILL；Windows：taskkill /PID <pid> /T /F（只針對這個 pid，不依名稱殺）。 */
+export function killTree(child) {
+  if (!child.pid) return
+  try {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    else process.kill(-child.pid, 'SIGKILL')
+  } catch { try { child.kill('SIGKILL') } catch { /* 已經結束 */ } }
+}
+
+/** 跑一支測試檔，回傳 { status, signal, stdout, stderr, error? }。
+ *  逾時（timeoutSec + 寬限秒數，給 --test-timeout 先開口）＝收整個程序樹、不等 stdio 關閉、直接回 timeout；計時器一開始就啟動。 */
+export function runOne(file, timeoutSec, { args = ['--test', `--test-timeout=${timeoutSec * 1000}`], graceSec = 10, cwd = root } = {}) {
+  return new Promise(resolve => {
+    let out = ''
+    let err = ''
+    let done = false
+    let timer
+    const finish = r => { if (done) return; done = true; clearTimeout(timer); resolve({ stdout: out, stderr: err, ...r }) }
+    const child = spawn(process.execPath, [...args, file], { cwd, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    child.stdout.setEncoding('utf8').on('data', d => { out += d })
+    child.stderr.setEncoding('utf8').on('data', d => { err += d })
+    // 'exit' 之後只再等一下讓輸出收完就結算，不等 'close'：孫程序握著管線時 close 可能永遠不來
+    child.on('exit', (status, signal) => {
+      if (process.platform !== 'win32') { try { process.kill(-child.pid, 'SIGKILL') } catch { /* 群組已空 */ } } // 正常結束也順手收掉遺留的孫程序
+      setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); finish({ status, signal }) }, 300)
+    })
+    child.on('error', error => finish({ status: null, error }))
+    timer = setTimeout(() => {
+      killTree(child)
+      child.stdout.destroy(); child.stderr.destroy()
+      finish({ status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' } })
+    }, (timeoutSec + graceSec) * 1000)
+  })
+}
+
 async function main() {
   const { filters, timeoutSec, requirePglite } = parseArgs(process.argv.slice(2))
   if (requirePglite) {
@@ -52,9 +88,10 @@ async function main() {
   if (!files.length) { console.error('沒有符合的測試檔'); process.exit(1) }
   const res = { passed: [], failed: [], timeout: [] }
   for (const f of files) {
+    console.log(`開始  ${f}`)
     const t0 = Date.now()
-    const r = spawnSync(process.execPath, ['--test', `--test-timeout=${timeoutSec * 1000}`, path.join('tests', f)], { cwd: root, encoding: 'utf8', timeout: (timeoutSec + 10) * 1000, killSignal: 'SIGKILL' })
-    let kind = classify({ ...r, signal: r.signal === 'SIGKILL' ? 'SIGTERM' : r.signal })
+    const r = await runOne(path.join('tests', f), timeoutSec)
+    let kind = classify(r)
     const pskips = requirePglite ? pgliteSkips((r.stdout ?? '') + (r.stderr ?? '')) : []
     const skipNote = kind === 'passed' && pskips.length ? `，因 pglite 略過 ${pskips.length} 項` : ''
     if (skipNote) kind = 'failed'

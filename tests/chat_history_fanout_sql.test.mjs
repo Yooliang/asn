@@ -2,6 +2,7 @@
 // 1. 靜態：只給 service_role、security definer＋search_path ''、簽章沒變（不另開重載）、同 fanout_id 合成一列、帶寄出節點。
 // 2. 實跑（需要 `npm i --no-save @electric-sql/pglite`，沒裝就略過）：扇出三列只回一列（優先呼叫端自己那份）、ids 含全部、
 //    回傳帶 fanout_id／from_node／from_node_name；沒扇出的信 fanout_id 為 null；別帳號看不到。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,7 +31,7 @@ const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text);
     create table relay.partners(partner_id text, tenant_id uuid);
@@ -103,3 +104,6 @@ test('實跑（pglite）：別帳號、別人的節點仍然 forbidden', { skip 
   const r = (await q('select public.asn_chat_history($1,$2,$3,$4,$5) r', [U2, 'H', 'M', '小文', 10]))[0].r
   assert.deepEqual(r, { error: 'forbidden' })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

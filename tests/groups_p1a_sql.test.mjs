@@ -11,6 +11,7 @@
 //    - 額度：每人每群組每小時 20 則、每則 @ 最多 8 位、別人叫醒我的 AI 每群組每小時 10 次、可關閉
 //    - 典型情境：小良與工作機 AI「財務」→ 邀財務人員 → 升級成群組 → 討論 → 動帳請小良確認
 // 3. 還原驗證：拿掉 trust 重算、拿掉代號映射、拿掉一次性，對應的測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +51,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4', R3 = 'rrr5e6'
 const sha = s => createHash('sha256').update(s).digest('hex')
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -621,3 +622,6 @@ test('還原驗證：拿掉 allow_others 欄位／下載授權補丁 → 上面�
     values ('${id}', '${T1}', '${W1}', 'file', 'application/pdf', 'a.pdf', 10, 'p/a.pdf', 'ready', '${g.id}', 1)`)
   assert.equal((await rpc(db, 'asn_relay_attach_access', { p_node: P1, p_id: id })).error, 'not_found', '補丁拿掉後本人的手機下載不到')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

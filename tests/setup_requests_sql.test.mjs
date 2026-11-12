@@ -2,6 +2,7 @@
 // 1. 靜態：四個 security definer 函式 search_path 空、只授權 service_role；新表開 RLS 沒有 policy。
 // 2. 實跑（pglite，沒裝就略過）：只有本人對自己的在線電腦能建立；一個節點一筆、10 分鐘過期、每小時最多 6 次、失敗後 1 分鐘內不能重送；
 //    ASN 取走時拿到送出者；結果只動 taken 的那一列；手機看得到自己各節點的狀態。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,7 +42,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid);
     create table relay.asn_presence(node text, window_name text default 'w', version text, updated_at timestamptz default now());
@@ -161,3 +162,6 @@ test('實跑：手機看自己帳號下各節點的狀態；別人的節點看�
   const theirs = (await status(U2)).map(n => n.id)
   assert.deepEqual(theirs, ['OTHER'])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

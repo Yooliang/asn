@@ -2,6 +2,7 @@
 // 1. 靜態檢查：RLS、只給 service_role、security definer＋search_path ''、清理排程冪等。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，要測的人自己 `npm i --no-save @electric-sql/pglite`），
 //    在記憶體內的 Postgres 套用 migration（拿掉 pg_cron 那段），逐條跑規則 1～4、冪等、寄信解析；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -53,7 +54,7 @@ try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就
 
 test('實跑（pglite）：規則 1～4、冪等、舊名轉寄期、寄信解析', { skip: PGlite ? false : '沒有安裝 @electric-sql/pglite' }, async () => {
   const mig = sql.replace(/create extension if not exists pg_cron;[\s\S]*?\$\$\);\n/, '')
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active');
     create table relay.messages(id uuid primary key default gen_random_uuid(), from_node text, from_agent text, to_node text, to_agent text, body text);
@@ -110,3 +111,6 @@ test('實跑（pglite）：規則 1～4、冪等、舊名轉寄期、寄信解�
   assert.deepEqual(await sync('NX', []), { error: 'not_found' })
   assert.deepEqual(await sync('N1', []), { partners: [] })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

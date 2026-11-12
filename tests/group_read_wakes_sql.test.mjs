@@ -6,6 +6,7 @@
 //    - 補問不標已讀、不改 reads；系統訊息與開頭紀錄不帶；只帶最近 40 則；看不到的（可見起點之前）不帶
 //    - 別租戶的讀者只看到對外代號（x:），輸出掃不到節點代號與帳號 id；已離開的成員不列
 // 3. 還原驗證：拿掉「已有 wake_info」過濾、「wake_view」、「最近 40 則」，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`, C = `${W1}~監看`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -185,3 +186,6 @@ test('還原驗證：拿掉「已有 wake_info」過濾、wake_view、最近 40 
   const recent = await human(db, room, '最近')
   assert.ok((await peek(db, room, recent.seq)).wakes.some(e => e.seq === first.seq), '拿掉 40 則限制：舊的也被帶出來＝限制測試會紅')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

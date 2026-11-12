@@ -3,6 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 missing_window_cases 端到端；只缺一窗但還沒過重置時間＝保留；只缺一窗而且已過＝拿掉；兩窗都在＝照舊；
 //    另一窗被 older_read 擋掉時過期的那窗照樣拿掉；沒帶 windows 的舊用戶端不動；回復後不再拿掉。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -60,7 +61,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -141,3 +142,6 @@ test('實跑：存著的 resets_at 是壞字串時那一窗保留，而且回報
   assert.deepEqual(rows.map(w => w.name).sort(), ['five_hour', 'weekly'])
   assert.equal(rows.find(w => w.name === 'five_hour').resets_at, 'not-a-time', '壞字串原樣留著')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -1,6 +1,7 @@
 // 雲端代理設定不對的本人通知（20261106130000_node_mismatch_notice.sql，#832）：靜態檢查與 pglite 實跑。
 // 實跑驗：收件人是金鑰所屬節點的擁有者；設定的節點只有同擁有者、啟用中才寫出名字，否則寫「另一個節點」；
 //         代理帶來的字不原樣進信；每節點每小時 1 封；同內容 24 小時不重寄；停用節點、格式不對不寄。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const B = 'bbbbbbbb-0000-0000-0000-00000000000b'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid, name text);
     create table relay.messages(id uuid default gen_random_uuid() primary key, from_node text, from_agent text, to_node text, body text, expects_reply boolean, created_at timestamptz default now());
@@ -97,3 +98,6 @@ test('實跑：停用節點 forbidden；寄送失敗回 failed', { skip }, async
   assert.equal((await notice(db, 'nope', 'g1')).error, 'forbidden')
   assert.equal((await notice(db, 'F', 'g1')).notify, 'failed')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

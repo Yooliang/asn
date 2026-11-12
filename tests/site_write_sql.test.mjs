@@ -5,6 +5,7 @@
 //    anon／authenticated 不能執行、名單外的租戶被擋、停用的節點／租戶被擋、名單內的可寫；
 //    發版／會議／項目的格式檢查、HTML 與個資擋下、只改有帶的欄位、欄位必須存在、頻率上限、寫入記錄。
 // 3. 還原驗證：拿掉名單檢查，「名單外被擋」要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -49,7 +50,7 @@ const W1 = 'wrk9b2', Q2 = 'qqq3c4', OFF = 'off5d6', INV = 'inv7e8', ALIEN = 'aln
 const OWNER_MIG = '20261027210000_site_writer_owner.sql'
 
 async function boot({ mutate, writers = [T1] } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -272,3 +273,6 @@ test('還原驗證：拿掉名單檢查，名單外的租戶就寫得進去（�
   const db = await boot({ mutate: { [MIG]: drop, [OWNER_MIG]: drop } })
   assert.equal((await release(db, REL, Q2)).ok, true)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

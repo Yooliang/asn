@@ -2,6 +2,7 @@
 // 1. 靜態：security definer＋search_path 空、只授權 service_role；新欄位有預設值或可空；回復檔的函式逐字等於通知集中那一版。
 // 2. 實跑（pglite，沒裝就略過）：單一代理慢不通知、60 分鐘才通知；兩個代理同時卡就通知；不存在的代理只記錄；
 //    影子跑記「會不會通知」且每段卡住只記一次；開寄信後補寄；恢復信只寫卡了多久；舊的列不受影響；回復檔跑得回去。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +51,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U = 'aaaaaaaa-0000-0000-0000-00000000000a'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, machine text, kind text, platform text, status text default 'active', owner_user uuid,
       tenant_id uuid, last_seen_at timestamptz, inbox_hold_until timestamptz);
@@ -208,3 +209,6 @@ test('實跑：回復檔跑得回去（新種類紀錄刪掉、舊紀錄留著�
   assert.equal(r.alert, undefined, '上一版沒有 alert 欄')
   assert.equal(r.stuck, 1, '上一版整台只看最舊一封：寄到不存在代理的信也算卡住')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

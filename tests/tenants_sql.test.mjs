@@ -2,6 +2,7 @@
 // 用 PGlite（WebAssembly 版 PostgreSQL，純記憶體的臨時資料庫）真的跑 supabase/sql/01～17 與回退腳本，
 // 驗證：租戶 1 回填、租戶隔離（節點、信、群組、遠端開視窗、邀請）、邀請與帳號流程、停用、額度只送一次、回退與重新上線。
 // PGlite 不在 repo 依賴裡：找不到就整檔跳過。安裝方式 `npm i --no-save @electric-sql/pglite`，或設環境變數 PGLITE_PATH 指到它的 dist/index.js。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -37,7 +38,7 @@ const numbered = () => fs.readdirSync(SQL_DIR).filter((f) => /^\d\d_.*\.sql$/.te
 
 // 小工具：呼叫 public.<fn>(args…)，結果轉成 JS 值
 async function newDb(upTo) {
-  const db = new PGlite();
+  const db = track(new PGlite());
   await db.exec('create role service_role; create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key, email text); create schema irori; create table irori.kv(owner uuid not null, key text not null, value jsonb, primary key (owner, key)); create table irori.usage_quota(owner uuid primary key, granted_usd numeric not null default 0, used_usd numeric not null default 0, unlimited boolean not null default false);');   // irori.kv、irori.usage_quota 是舊的 irori 應用留在同一個資料庫裡的表（11_relay_read、16_tenants 的回填與額度會讀寫它們），repo 的腳本不建，測試要自己補
   for (const f of numbered()) {
     if (upTo && f > upTo) break;
@@ -522,3 +523,6 @@ test('所有 16 新增的函式都只授權 service_role（匿名與登入者不
 });
 
 void ISO;
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

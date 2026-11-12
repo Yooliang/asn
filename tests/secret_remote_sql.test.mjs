@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用 migration：
 //    請求（主人、有效期限範圍、公鑰唯一＝重放保護、同時上限、每小時上限）、待確認（只回公鑰與說明、不含密文、只回自己的）、
 //    回覆（非本人不能回、一次性、過期不能回、拒絕）、取回（只有請求端、只能取一次、取走後密文清掉、過期取不到）、過期自動清。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +51,7 @@ const pub = n => String(n).padStart(43, 'P')
 const CIPHER = 'FAKEcipher_' + 'x'.repeat(200)
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, bell_topic text);
     create function public.asn_user_owns_node(p_user uuid, p_node text) returns boolean language sql stable as
@@ -173,3 +174,6 @@ test('實跑（pglite）：過期自動清——過期一小時後整列刪除�
   assert.equal((await q('select count(*)::int n from relay.secret_requests'))[0].n, 0)
   assert.ok((await request()).id, '列刪除後同一把公鑰才能再用（此時舊請求編號已不存在，舊密文無處可用）')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()
