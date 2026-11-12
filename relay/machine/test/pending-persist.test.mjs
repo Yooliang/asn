@@ -65,11 +65,18 @@ function startBridge(h, st, env = {}) {
   const b = { log: '' }
   child.stderr.on('data', d => b.log += d)
   b.says = (text, from = 'T-對方') => fs.appendFileSync(path.join(h.home, 'inbound.jsonl'), JSON.stringify({ from, text }) + '\n')
-  b.stop = async () => { child.kill(); await new Promise(r => child.once('exit', r)); await sleep(300) }
-  b.until = async (cond, timeout = 15000) => {
+  b.stop = async () => {
+    child.kill(); await new Promise(r => child.once('exit', r)); await sleep(300)
+    // 被強制結束的橋來不及刪 bridge.pid；Windows 的程序編號回收很快，負載高時新的橋會把那個舊編號當成「另一個橋還在跑」而直接退出
+    // （log：another bridge is running）。正常關閉本來就會刪這個鎖，這裡補上，讓重啟不被編號巧合擋住。
+    try { fs.unlinkSync(path.join(path.dirname(h.pendingFile), 'bridge.pid')) } catch {}
+  }
+  // 橋啟動時有一步同步查程序表（bridge.mjs「上一個橋留下的孤兒」檢查；Windows 是 PowerShell Get-CimInstance，橋自己的上限 20 秒），
+  // 重啟的第二個橋一定會做。CI 負載高時這一步可吃掉十幾秒，所以上限給 60 秒；條件一成立就立刻往下，不會變慢。
+  b.until = async (cond, timeout = 60000, what = '') => {
     const t0 = Date.now()
     while (!cond() && Date.now() - t0 < timeout) await sleep(50)
-    assert.ok(cond(), `condition not reached in ${timeout}ms\n--- bridge log ---\n${b.log}`)
+    assert.ok(cond(), `condition not reached in ${timeout}ms${what ? `（${what}）` : ''}\n--- bridge log ---\n${b.log}`)
   }
   return b
 }
@@ -89,7 +96,7 @@ test('重啟：還在等的信（waiting）→ 新的橋仍把回覆寄回原寄
     const b2 = startBridge(h, st)
     await b2.until(() => /pending restored: 1 \(waiting 1, notified 0\)/.test(b2.log))
     b2.says('重啟後的回覆')
-    await b2.until(() => /reply from T-對方 -> W id=/.test(b2.log))
+    await b2.until(() => /reply from T-對方 -> W id=/.test(b2.log), undefined, "等新的橋把重啟後的回覆寄回原寄件人")
     const back = st.sent.filter(s => /重啟後的回覆/.test(s.body))
     assert.equal(back.length, 1); assert.equal(back[0].reply_to, uid(1)); assert.equal(back[0].to_agent, 'W-政策')
     assert.doesNotMatch(back[0].body, /^（遲到/)
