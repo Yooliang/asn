@@ -286,6 +286,11 @@ jobs:
         # 下載 gradle 發行包碰到 5xx／逾時才重試（wrapper 自己只試一次），最多 3 次；編譯錯誤照常立刻紅
         run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "下載 gradle 並編 Kotlin" -- sh ./gradlew --no-daemon --console=plain :app:compileUniversalDebugKotlin
 
+      # 純 Kotlin 的 JVM 單元測試（ExportPath：匯出路徑判斷）。不編 Rust .so、不需要模擬器
+      - name: 跑 Kotlin JVM 單元測試
+        working-directory: relay/asn/src-tauri/gen/android
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "下載 gradle 並跑 JVM 單元測試" -- sh ./gradlew --no-daemon --console=plain :app:testUniversalDebugUnitTest
+
       # 掃 QR code（zxing-android-embedded）的把關：解碼核心要解析成 3.5.4、函式庫不能順便拉進 Google 服務或 Firebase；
       # 合併後的清單不能留函式庫內建的 CaptureActivity、除了主畫面沒有別的 activity 對外開放。印出來讓審 PR 的人直接看。
       # 兩步都只解析相依與合併清單，不編 Rust、不簽章、不上傳。
