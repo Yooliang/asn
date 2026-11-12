@@ -1002,7 +1002,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-remote-typing{background:#7a0d0d;color:#fff;font-weight:700}
 .m-dev{font-size:12px;opacity:.7;margin:0 0 2px}
 
-/* ---------- 左側「通知」頁籤（方案 A）：鈴鐺排在最上面（群組之前），右上角是未讀數；清單、分類、右邊的通知內容 ---------- */
+/* ---------- 「通知」（方案 A；0.2.18 起是上方第三個大分頁）：右上角是未讀數；清單、分類、右邊的通知內容 ---------- */
 .rtab-count{position:absolute;top:-4px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--busy);color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center;box-shadow:0 0 0 1px #fff;pointer-events:none}
 .notice-list{display:flex;flex-direction:column;padding:0}
 .nt-head{flex:none;display:flex;align-items:center;gap:6px;padding:8px 10px 4px;min-width:0}

@@ -2,10 +2,11 @@
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
-import { activeChats } from './lib/recent.mjs'
-import { chatsUnread, lastWords } from './lib/mobile.mjs'
+import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
+import { lastWords } from './lib/mobile.mjs'
+import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB } from './lib/mobile-guides.mjs'
 import { isMergedAway } from './lib/notice.mjs'
-import { ADS, AD_MS, FIXED_TABS, TOP_TABS, topOf, goAd, groupHeading, groupRows, groupsUnread, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, TOP_TABS, topOf, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -1049,7 +1050,7 @@ const onInviteCode = code => { if (typeof code === 'string' && code) { void invo
 await listen('asn:invite', onInviteCode)
 void invoke('invite_pending').then(onInviteCode).catch(() => {})
 
-// ---------- 左側「通知」頁籤（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
+// ---------- 「通知」大分頁（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
 // 整合模式：點一則＝右邊固定的「通知」內容分頁（NOTICE_TAB，沒有輸入列），窄視窗切到右邊並附「‹ 通知」返回鈕；
 // 分離模式：沿用原本唯讀的「通知」對話視窗（NOTICE_ID，對話窗本來就不給通知輸入列與通話鈕）。
 // 通知內容一律當純文字顯示（樣板用 {{ }}，不用 v-html）；這裡不做任何遠端動作
@@ -1085,7 +1086,7 @@ async function openNoticeRow(key) {
   noticeView.opened = []
   sync(); pushLog(NOTICE_ID)
 }
-// 別處要求打開「通知」對話（點右下角提示、舊存檔）：整合模式改成切到左邊的通知頁籤、右邊顯示最新一則
+// 別處要求打開「通知」對話（點右下角提示、舊存檔）：整合模式改成切到「通知」分頁、右邊顯示最新一則
 function openNoticeFromChat() {
   setRailTab('notice')
   return openNoticeRow(ui.mode === 'merged' ? (noticeAll.value[0]?.key ?? '') : '')
@@ -1170,7 +1171,7 @@ async function setMode(to) {
     const closed = from === 'split' ? await invoke('close_chats') : []
     const closedPanels = from === 'split' ? (await invoke('close_panels')).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
     // 指引、設定也跟著轉：分離→整合＝視窗變分頁；整合→分開＝分頁開成視窗。好友的對話照舊交給 switchMode
-    // 「通知」不跟著轉成分頁或視窗（它只從左邊的通知頁籤打開）
+    // 「通知」不跟著轉成分頁或視窗（它只從「通知」分頁打開）
     const { chats: chatTabs, panels: panelTabs } = splitTabs(withoutNoticeTabs(ui.tabs))
     const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) || ui.active === NOTICE_TAB ? '' : ui.active, windowIds: withoutNoticeTabs(closed) })
     ui.mode = to
@@ -1525,16 +1526,15 @@ const app = createApp({
     }
     // 對話分頁：活動中的對話（30 天內有往來的夥伴與群組，新到舊；不含已封存、通知、已併進通知的舊列）；上方的搜尋框只篩這一頁
     const chatQuery = ref('')
-    const chatRows = computed(() => {
+    // 對話分頁的完整清單（lib/recent.mjs 的 chatListRows：活動中的對話＋有未讀的夥伴＋所有群組）；紅點用同一份算，搜尋只篩畫面上的
+    const chatAll = computed(() => {
       void activityTick.value
-      const act = activeChats({ friends: activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => core.viewOf(id) ?? [], rooms: roomRows.value, now: Date.now() })
-      // 群組在電腦版只放在這一頁（原本的「群組」頁籤）：很久沒動靜的群組也要列，排在最後
-      const rows = [...act, ...roomRows.value.filter(r => !act.some(x => x.id === r.chatId)).map(r => ({ kind: 'room', id: r.chatId, at: r.at, room: r }))]
-      const q = normalizeSearchQuery(chatQuery.value)   // 比對規則和名單搜尋一樣（friendMatchesQuery：去掉表情代碼、不分大小寫）
-      return (q ? rows.filter(x => (x.kind === 'room' ? friendMatchesQuery({ nick: x.room.name }, q, plain) : friendMatchesQuery(x.friend, q, plain))) : rows)
-        .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) }))
+      return chatListRows({ friends: activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => core.viewOf(id) ?? [], rooms: roomRows.value, now: Date.now() })
     })
-    const chatsUnreadN = computed(() => chatsUnread(friends.value) + groupsUnread(roomRows.value))   // 「對話」分頁的紅點：夥伴與群組的未讀（不含通知）
+    const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))   // 比對規則和名單搜尋一樣
+      .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) })))
+    const chatsUnreadN = computed(() => chatRowsUnread(chatAll.value))   // 「對話」分頁的紅點：清單上看得到的夥伴與群組的未讀（不含通知、已封存）
+    const partnersUnread = computed(() => dev.value.all.some(d => d.unread))   // 「夥伴」分頁的紅點：任一台設備頁籤有未讀（以前左邊直排一直看得到，現在收進夥伴裡）
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
     // 選到的頁籤不在現在的清單（改了維度、設備消失…）時退回第一個（設備維度的第一個就是本機）
@@ -1542,7 +1542,7 @@ const app = createApp({
     const shown = computed(() => {
       if (!isDevice.value) return []
       const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
-      // 「通知」對話不進名單（連搜尋也不列），只在左邊的「通知」頁籤看
+      // 「通知」對話不進名單（連搜尋也不列），只在「通知」分頁看
       const base = withoutNoticeItems(rosterShownGroups(activeFriends(friendsAct.value), o))
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
       const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items).filter(f => !isNoticeFriend(f))
@@ -2003,7 +2003,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
@@ -2037,7 +2037,7 @@ app.component('settings-panel', SettingsPanel)
 const root = app.mount('#app')
 
 await core.start()
-pushLog(NOTICE_ID)   // 左邊「通知」頁籤讀這份（之後有新通知時 core 的 log 事件會再推）
+pushLog(NOTICE_ID)   // 「通知」分頁讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()
 
 // 還原上次開著的分頁與對話視窗：要等 1 對 1 名單（夥伴 ID 才對得上）與群組列表都載入；名單一直連不上、或群組列表讀取失敗，
@@ -2048,7 +2048,7 @@ async function restoreOpenSession(r) {
   for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = k === 'setting' ? normalizeCatKey(r.panel[k]) : r.panel[k]
   let rooms = []
   if (ui.mode === 'merged') {
-    const saved = withoutNoticeTabs(r.tabs)   // 舊存檔裡的「通知」對話分頁一律不還原（通知只在左邊的通知頁籤看）
+    const saved = withoutNoticeTabs(r.tabs)   // 舊存檔裡的「通知」對話分頁一律不還原（通知只在「通知」分頁看）
     const tabs = orderTabs([...saved, ...ui.tabs.filter(id => !saved.includes(id))], ui.pinnedChat)
     ui.tabs = tabs
     if (!ui.active || !tabs.includes(ui.active)) ui.active = (tabs.includes(r.active) ? r.active : '') || tabs.at(-1) || ''

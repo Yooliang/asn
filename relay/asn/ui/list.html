@@ -63,7 +63,7 @@
     <nav class="top-tabs" role="tablist" aria-label="大分頁">
       <button v-for="t in TOP_TABS" :key="t.key" class="ttab" :class="['ttab-' + t.key, { on: top === t.key }]" type="button" role="tab" :aria-selected="top === t.key" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" @click="goTop(t.key)">
         <span>{{ t.label }}</span>
-        <span class="red" v-if="t.key === 'chats' && chatsUnreadN"></span>
+        <span class="red" v-if="(t.key === 'chats' && chatsUnreadN) || (t.key === 'partners' && partnersUnread)"></span>
         <span class="rtab-count" v-if="t.key === 'notice' && noticeUnreadN" aria-hidden="true">{{ noticeUnreadN > 99 ? '99+' : noticeUnreadN }}</span>
       </button>
     </nav>
@@ -201,7 +201,7 @@
             <li>
               <button class="buddy guide-item guide-entry" type="button" @click="tab = 'guide'">
                 <span class="guide-ic" aria-hidden="true"></span>
-                <span class="b-text"><span class="b-line"><span class="b-nick">使用指引</span></span><span class="b-psm">各功能的操作說明</span></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick">{{ GUIDE_ENTRY_LABEL }}</span></span><span class="b-psm">{{ GUIDE_ENTRY_SUB }}</span></span>
               </button>
             </li>
           </ul>
@@ -303,7 +303,7 @@
           </template>
         </div>
       </template>
-      <!-- 通知內容（整合模式）：左邊「通知」頁籤點一則就顯示在這裡；唯讀、沒有輸入列。內容是後台送來的，一律當純文字 -->
+      <!-- 通知內容（整合模式）：「通知」分頁點一則就顯示在這裡；唯讀、沒有輸入列。內容是後台送來的，一律當純文字 -->
       <div class="pane panel-pane notice-pane" v-if="view === 'chat' && ui.active === NOTICE_TAB">
         <template v-if="noticeSelRow">
           <div class="nt-meta">

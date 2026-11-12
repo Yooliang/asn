@@ -77,7 +77,7 @@ export function withNoticeGroup(groups, friends, { query = '' } = {}) {
 /** 「通知」對話裡這則通知是哪一台設備寄的（氣泡上方顯示「通知 · <設備名>」）；其他對話、自己寄的、沒有設備名＝空字串 */
 export const noticeDevOf = (m, isNotice) => (isNotice === true && m && m.k === 'them' && typeof m.dev === 'string' ? m.dev : '')
 
-// ---------- 電腦版左側「通知」頁籤（方案 A：通知不再出現在名單與對話分頁） ----------
+// ---------- 電腦版「通知」大分頁（方案 A：通知不再出現在名單與對話分頁） ----------
 // 整合模式右邊顯示通知內容用的固定分頁 id（@ 開頭跟指引、設定的面板分頁同一個命名空間，但不在 PANEL_KINDS 裡、不存檔）
 export const NOTICE_TAB = '@notice'
 // 分頁清單裡拿掉「通知」對話與通知內容分頁（還原上次的分頁、存檔時用）

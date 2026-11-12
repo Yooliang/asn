@@ -51,3 +51,28 @@ export function activeChats({ friends = [], logOf = () => [], rooms = [], now = 
   }
   return rows
 }
+
+// 「對話」分頁真正列出的清單（手機與電腦共用，0.2.18）：活動中的對話（activeChats），再補上
+//   - 有未讀、但 30 天內沒往來的夥伴（不然分頁有紅點，清單裡卻找不到）
+//   - 所有群組（很久沒動靜的也列，排在最後；電腦版原本的「群組」頁籤併進來，群組不能少）
+// friends 由呼叫端先去掉已封存、通知、已併進通知的舊列；分頁紅點用 chatRowsUnread(同一份清單)，兩者一定對得上
+export function chatListRows({ friends = [], logOf = () => [], rooms = [], now = Date.now(), lastId = '' } = {}) {
+  const rows = activeChats({ friends, logOf, rooms, now, lastId })
+  const has = new Set(rows.map(r => r.id))
+  const late = []
+  for (const f of Array.isArray(friends) ? friends : []) {
+    if (!f || typeof f.id !== 'string' || f.room || has.has(f.id) || !(Number.isInteger(f.unread) && f.unread > 0)) continue
+    has.add(f.id); late.push({ kind: 'friend', id: f.id, at: lastTrafficAt(logOf(f.id)), friend: f })
+  }
+  const oldRooms = []
+  for (const r of Array.isArray(rooms) ? rooms : []) {
+    if (!r || typeof r.chatId !== 'string' || has.has(r.chatId)) continue
+    has.add(r.chatId); oldRooms.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
+  }
+  const byAt = (a, b) => b.at - a.at
+  return [...rows, ...late.sort(byAt), ...oldRooms.sort(byAt)]
+}
+// 清單上所有對話的未讀加總（「對話」分頁的紅點）
+export const chatRowsUnread = rows => (Array.isArray(rows) ? rows : []).reduce((n, x) => { const u = x?.kind === 'room' ? x.room?.unread : x?.friend?.unread; return n + (Number.isInteger(u) && u > 0 ? u : 0) }, 0)
+// 對話清單的搜尋：比對規則和名單一樣（matches(對象, q)，呼叫端給 friendMatchesQuery 綁好 plain）；群組用名字比
+export const filterChatRows = (rows, q, matches) => (q ? rows.filter(x => matches(x.kind === 'room' ? { nick: x.room.name } : x.friend, q)) : rows)
