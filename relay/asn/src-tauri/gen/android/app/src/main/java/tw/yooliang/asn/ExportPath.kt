@@ -43,6 +43,13 @@ object ExportPath {
   }
 
   /**
+   * 每次匯出都用這個：先確認根資料夾的位置（[isValidExportRoot]），再解開輸入路徑（[resolve]）。
+   * [exportRoot] 傳字面路徑（[expectedExportRoot]），不要事先解開，這樣根資料夾之後被換掉也看得出來。
+   */
+  fun resolveChecked(filesRoot: File, exportRoot: File, path: String): File? =
+    if (isValidExportRoot(filesRoot, exportRoot)) resolve(exportRoot, path) else null
+
+  /**
    * 回傳允許匯出的 canonical 檔案；不允許（跳出根資料夾、不是一般檔、不存在、路徑無法解開）回 null。
    * [exportRoot] 要是已通過 [isValidExportRoot] 的根資料夾。
    */

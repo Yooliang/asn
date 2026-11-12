@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
@@ -33,6 +34,8 @@ class ExportPathTest {
     try {
       Files.createSymbolicLink(link.toPath(), target.toPath())
     } catch (e: Exception) {
+      // CI 一定要能建符號連結，否則這些測試等於沒跑；只有本機才跳過
+      if (!System.getenv("CI").isNullOrEmpty()) fail("CI 上不能建符號連結：" + e.javaClass.simpleName)
       assumeTrue("這個環境不能建符號連結：" + e.javaClass.simpleName, false)
     }
   }
@@ -128,8 +131,48 @@ class ExportPathTest {
     File(real, "received").mkdirs()
     assertTrue(File(filesRoot, ".irori-asn").deleteRecursively())
     symlinkOrSkip(File(filesRoot, ".irori-asn"), real)
-    val r = File(File(filesRoot, ".irori-asn"), "received").canonicalFile
+    val r = ExportPath.expectedExportRoot(filesRoot)
     assertFalse(ExportPath.isValidExportRoot(filesRoot, r))
+    assertNull(ExportPath.resolveChecked(filesRoot, r, File(r, "a.txt").path))
+  }
+
+  @Test fun filesRootBeingSymlinkStillValid() {
+    val link = File(tmp.root, "files-link")
+    symlinkOrSkip(link, filesRoot)
+    val literal = ExportPath.expectedExportRoot(link)
+    assertTrue(ExportPath.isValidExportRoot(link, literal))
+    val f = file(root, "a.txt")
+    assertEquals(f.canonicalFile, ExportPath.resolveChecked(link, literal, File(literal, "a.txt").path))
+  }
+
+  @Test fun receivedSwappedForSymlinkAfterSetupRejected() {
+    val literal = ExportPath.expectedExportRoot(filesRoot)
+    file(root, "a.txt")
+    assertTrue(ExportPath.isValidExportRoot(filesRoot, literal))
+    val elsewhere = File(filesRoot, "elsewhere").apply { mkdirs() }
+    val moved = file(elsewhere, "b.txt")
+    assertTrue(root.deleteRecursively())
+    symlinkOrSkip(File(File(filesRoot, ".irori-asn"), "received"), elsewhere)
+    assertFalse(ExportPath.isValidExportRoot(filesRoot, literal))
+    assertNull(ExportPath.resolveChecked(filesRoot, literal, File(literal, "b.txt").path))
+    assertNull(ExportPath.resolveChecked(filesRoot, literal, moved.path))
+  }
+
+  @Test fun middleFolderSwappedForSymlinkRejected() {
+    val literal = ExportPath.expectedExportRoot(filesRoot)
+    val real = tmp.newFolder("moved-data").canonicalFile
+    val rec = File(real, "received").apply { mkdirs() }
+    file(rec, "a.txt")
+    assertTrue(File(filesRoot, ".irori-asn").deleteRecursively())
+    symlinkOrSkip(File(filesRoot, ".irori-asn"), real)
+    assertFalse(ExportPath.isValidExportRoot(filesRoot, literal))
+    assertNull(ExportPath.resolveChecked(filesRoot, literal, File(literal, "a.txt").path))
+  }
+
+  @Test fun resolveCheckedAllowsNormalFile() {
+    val literal = ExportPath.expectedExportRoot(filesRoot)
+    val f = file(root, "a.txt")
+    assertEquals(f.canonicalFile, ExportPath.resolveChecked(filesRoot, literal, f.path))
   }
 
   @Test fun missingRootJudgedByLocationOnly() {

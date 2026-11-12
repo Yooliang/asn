@@ -18,6 +18,7 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import java.io.File
+import java.io.FileDescriptor
 import java.io.FileInputStream
 
 // 網頁（ui/m.js）能呼叫的系統功能。方法都在 WebView 的背景執行緒上被叫到，要碰畫面的一律丟回主執行緒。
@@ -28,9 +29,9 @@ class AsnBridge(private val activity: MainActivity) {
    * 只有「收到的檔案」可以匯出：Rust 端 relay_attachment_save 存到 `<data_dir>/received`，
    * 安卓的 data_dir 是 `<filesDir>/.irori-asn`（datadir.rs 的 FALLBACK_NAME，守門測試鎖住兩邊一致）。
    * App 私有資料夾裡的其他檔案（金鑰、登入資料、設定）一律不匯出。
-   * 每次匯出前還會用 [ExportPath.isValidExportRoot] 確認這個資料夾的位置正確
+   * 這裡存的是字面路徑（不先解開）；每次匯出都用 [ExportPath.resolveChecked] 重新確認這個資料夾的位置正確
    */
-  private val exportRoot: File = ExportPath.expectedExportRoot(filesRoot).canonicalFile
+  private val exportRoot: File = ExportPath.expectedExportRoot(filesRoot)
 
   /** 震動（對方傳來「震動」時）：兩下短震。網頁自己的 navigator.vibrate 沒有點擊動作就會被擋，所以走這裡 */
   @JavascriptInterface
@@ -47,10 +48,11 @@ class AsnBridge(private val activity: MainActivity) {
   }
 
   /** 把「收到的檔案」資料夾裡的檔案複製到系統「下載/ASN」。成功回給人看的位置，失敗回空字串。
-   *  路徑判斷在 [ExportPath]：先確認匯出根資料夾本身就是 `<filesDir>/.irori-asn/received`，
+   *  路徑判斷在 [ExportPath.resolveChecked]：先確認匯出根資料夾本身就是 `<filesDir>/.irori-asn/received`，
    *  再把輸入路徑解開（canonicalFile：消掉 ..、解開符號連結）後比對，只收根資料夾底下的一般檔。
-   *  打開來源檔之後會再驗：比對已開的檔（fstat）和 canonical 路徑上的檔（lstat，不跟隨符號連結）是不是同一個一般檔
-   *  （裝置與檔案編號相同），並把輸入路徑重新解開再判斷一次；有任何不一致就放棄（檢查與開檔是兩個動作，中間路徑可能變動）。
+   *  開檔用 O_NOFOLLOW 直接取得 descriptor，之後再驗：比對已開的檔（fstat）和 canonical 路徑上的檔（lstat，不跟隨符號連結）
+   *  是不是同一個一般檔（裝置與檔案編號相同），並把輸入路徑重新解開再判斷一次；有任何不一致就放棄
+   *  （檢查與開檔是兩個動作，中間路徑可能變動）。
    *  任何失敗路徑都會刪掉已建立的下載項目，不留 IS_PENDING 的半成品 */
   @JavascriptInterface
   fun exportFile(path: String): String {
@@ -58,14 +60,14 @@ class AsnBridge(private val activity: MainActivity) {
     var done = false
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ""
-      if (!ExportPath.isValidExportRoot(filesRoot, exportRoot)) return ""
-      val src = ExportPath.resolve(exportRoot, path) ?: return ""
+      val src = ExportPath.resolveChecked(filesRoot, exportRoot, path) ?: return ""
       val ext = src.extension.lowercase()
       val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
       val resolver = activity.contentResolver
-      FileInputStream(src).use { input ->
-        // 開檔後再驗：手上這個已開的檔，要和 canonical 路徑上的檔是同一個一般檔；另外輸入路徑重新解開也要還是剛才那個檔
-        if (!openedIsPathFile(input, src) || ExportPath.resolve(exportRoot, path) != src) return ""
+      val fd = Os.open(src.path, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW or OsConstants.O_NONBLOCK, 0)
+      // 立刻交給 FileInputStream：use 結束時由它關掉 descriptor，不會重複關
+      FileInputStream(fd).use { input ->
+        if (!openedIsPathFile(fd, src) || ExportPath.resolveChecked(filesRoot, exportRoot, path) != src) return ""
         val values = ContentValues().apply {
           put(MediaStore.Downloads.DISPLAY_NAME, src.name)
           put(MediaStore.Downloads.MIME_TYPE, mime)
@@ -76,7 +78,7 @@ class AsnBridge(private val activity: MainActivity) {
         uri = created
         resolver.openOutputStream(created)?.use { out -> input.copyTo(out) } ?: return ""
         // 複製完、解除 pending 前再驗一次，不一致就走 finally 的清理
-        if (!openedIsPathFile(input, src) || ExportPath.resolve(exportRoot, path) != src) return ""
+        if (!openedIsPathFile(fd, src) || ExportPath.resolveChecked(filesRoot, exportRoot, path) != src) return ""
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         if (resolver.update(created, values, null, null) < 1) return ""
@@ -100,9 +102,9 @@ class AsnBridge(private val activity: MainActivity) {
     ExportPath.FileId(st.st_dev, st.st_ino, OsConstants.S_ISREG(st.st_mode))
 
   /** 已打開的來源檔，和 canonical 路徑上的檔是不是同一個一般檔（取值在這裡，比對在 [ExportPath.sameRegularFile]） */
-  private fun openedIsPathFile(input: FileInputStream, src: File): Boolean =
+  private fun openedIsPathFile(fd: FileDescriptor, src: File): Boolean =
     try {
-      ExportPath.sameRegularFile(fileId(Os.fstat(input.fd)), fileId(Os.lstat(src.path)))
+      ExportPath.sameRegularFile(fileId(Os.fstat(fd)), fileId(Os.lstat(src.path)))
     } catch (e: Exception) {
       false
     }
