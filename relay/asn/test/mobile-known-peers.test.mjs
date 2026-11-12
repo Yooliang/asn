@@ -346,7 +346,7 @@ test('Rust：金鑰變了的說法帶原本與新的完整指紋、名字用本�
   const rs = read('../src-tauri/src/android.rs')
   // 手機也能打字（#1378）：android.rs 只用範圍檢查打字的上限；要先確認過那台的指紋，判斷在共用核心（view_d），指紋不經過畫面
   assert.equal(rs.split('\n').filter(l => l.includes('Scope::Input')).length, 1)
-  assert.match(rs, /parse_scope\(scope\.as_deref\(\)\)\? == crate::view_handshake::Scope::Input && inputs\.count\(\) >= crate::view_input::MAX_OPEN/)
+  assert.match(rs, /if sc == crate::view_handshake::Scope::Input && !crate::consent::label_ok\(window\.label\(\)\) \{/)
   assert.match(vd, /if phone && scope == Scope::Input && !crate::device_id::phone_input_allowed\(/)
 })
 

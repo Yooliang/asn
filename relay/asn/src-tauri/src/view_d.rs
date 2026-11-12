@@ -92,13 +92,14 @@ async fn report_ended<B: ViewBackend>(b: &B, id: &str, token: &str) {
 
 /// 發起一次觀看。失敗時不留下登記的觀看；回（觀看編號、握手資料、頻道名、那台的資料）
 #[allow(clippy::too_many_arguments)]
-pub async fn begin<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_node: String, partner: String, machine: String, scope: Scope, now_ms: u64) -> Result<Begun, String> {
-    begin_on(b, views, me_node, to_node, partner, machine, scope, now_ms, false).await
+pub async fn begin<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInputs, me_node: &str, to_node: String, partner: String, machine: String, scope: Scope, now_ms: u64) -> Result<Begun, String> {
+    begin_on(b, views, inputs, me_node, to_node, partner, machine, scope, now_ms, false).await
 }
 
-/// 電腦版與手機版共用的發起；phone 為 true 時，金鑰變了給手機用的說法（帶新指紋），要打字還得先確認過指紋
+/// 電腦版與手機版共用的發起；phone 為 true 時，金鑰變了給手機用的說法（帶新指紋），要打字還得先確認過指紋。
+/// 打字在登記觀看的同時占一個打字的位子（[`RemoteInputs::reserve`]，滿了就不發起）；之後任何一步失敗都放掉觀看與位子
 #[allow(clippy::too_many_arguments)]
-async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_node: String, partner: String, machine: String, scope: Scope, now_ms: u64, phone: bool) -> Result<Begun, String> {
+async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInputs, me_node: &str, to_node: String, partner: String, machine: String, scope: Scope, now_ms: u64, phone: bool) -> Result<Begun, String> {
     // 手機要打字：那台的指紋還沒在手機上確認過就先擋，連後台都不打（那台不會收到請求）；拿到那台的公鑰後下面再比一次
     if phone && scope == Scope::Input && !crate::device_id::phone_input_allowed(b.known()?.peer(&to_node)) {
         return Err(INPUT_NEEDS_CONFIRM.into());
@@ -109,10 +110,21 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
     let now_s = (now_ms / 1000) as i64;
     let s = view_remote::session(&id, me_node, &to_node, &partner, scope, now_s);
     views.add(&id)?;
+    // 失敗時放掉這次登記的觀看與打字的位子
+    let release = || {
+        views.remove(&id);
+        inputs.remove(&id);
+    };
+    if scope == Scope::Input {
+        if let Err(e) = inputs.reserve(&id) {
+            views.remove(&id);
+            return Err(e);
+        }
+    }
     let (eph, d_sig) = match view_handshake::d_start(&key, &s, now_s) {
         Ok(v) => v,
         Err(e) => {
-            views.remove(&id);
+            release();
             return Err(e);
         }
     };
@@ -120,7 +132,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
     let started = b.api("term_view_start", body, &token).await.ok();
     let field = |k: &str| started.as_ref().and_then(|v| v.get(k).and_then(Value::as_str).map(str::to_string));
     let (Some(topic), Some(to_pub)) = (field("topic"), field("to_pub")) else {
-        views.remove(&id);
+        release();
         return Err("沒有發起成功，請稍後再試".into());
     };
     // 那台的設備公鑰先和本機記住的比（TOFU）：換了就不開始、通知本人（兩邊都寄 changed）
@@ -133,13 +145,13 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
             (t, t == Tofu::Same && crate::device_id::phone_input_allowed(k.peer(&to_node)), remembered)
         }
         Err(e) => {
-            views.remove(&id);
+            release();
             report_ended(b, &id, &token).await;
             return Err(e);
         }
     };
     if tofu == Tofu::Changed {
-        views.remove(&id);
+        release();
         report_ended(b, &id, &token).await;
         b.alert(&to_node, "changed", &to_pub).await;
         let msg = if phone {
@@ -154,7 +166,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
     }
     // 手機要打字得先確認過那台的指紋，而且確認的就是這次後台給的這把公鑰（Same）
     if phone && scope == Scope::Input && !confirmed {
-        views.remove(&id);
+        release();
         report_ended(b, &id, &token).await;
         return Err(INPUT_NEEDS_CONFIRM.into());
     }
@@ -163,9 +175,9 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
 
 /// 手機的入口：看畫面或打字（#1378）。打字要先確認過那台的指紋；那台照電腦的規則問那邊的人（允許移動設備關著就拒絕）
 #[allow(clippy::too_many_arguments)]
-pub async fn start_view<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_node: String, partner: String, machine: Option<String>, scope: Option<&str>, now_ms: u64) -> Result<Begun, String> {
+pub async fn start_view<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInputs, me_node: &str, to_node: String, partner: String, machine: Option<String>, scope: Option<&str>, now_ms: u64) -> Result<Begun, String> {
     let scope = parse_scope(scope)?;
-    begin_on(b, views, me_node, to_node, partner, clean_machine(machine), scope, now_ms, true).await
+    begin_on(b, views, inputs, me_node, to_node, partner, clean_machine(machine), scope, now_ms, true).await
 }
 
 /// 本人把觀看畫面藏起來（暫停）或叫出來（繼續）
@@ -299,6 +311,8 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
             }
         }
     };
+    // 先收掉打字（之後送字一律不收），再回報後台；打字的送出端停掉時是網路不穩：最後幾個字可能沒送到，要說清楚
+    let stalled = inputs.remove(&id);
     if reason != "viewer_ended" {
         // 對方先結束、到期或出錯：照樣告訴後台這邊結束了（失敗也沒關係，後台到期會清）
         if let Ok(t) = b.token().await {
@@ -308,8 +322,7 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
     drop(stop_tx.take());
     let frames = frames_seen.load(std::sync::atomic::Ordering::Relaxed);
     views.remove(&id);
-    // 打字的送出端停掉時是網路不穩：最後幾個字可能沒送到，要說清楚
-    let reason = if inputs.remove(&id) { "input_stalled".to_string() } else { reason };
+    let reason = if stalled { "input_stalled".to_string() } else { reason };
     sink.emit(END_EVENT, json!({ "id": id, "text": view_remote::end_text(&reason) }));
     sink.log(format!("{} info [ASN] remote-view end reason={reason} frames={frames}", iso_secs(crate::auth::now_ms() as i64)));
 }
@@ -389,7 +402,7 @@ mod tests {
     fn 發起成功_登記觀看_回頻道和那台的資料() {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), KnownPeers::default());
         let v = RemoteViews::default();
-        let got = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("工作\n機".into()), None, NOW)).unwrap();
+        let got = run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), Some("工作\n機".into()), None, NOW)).unwrap();
         assert_eq!(got.topic, "t1");
         assert_eq!(got.session.scope, Scope::View);
         assert_eq!((got.target.node.as_str(), got.target.name.as_str(), got.target.tofu), ("pc", "工作機", Tofu::New), "控制字元被去掉、第一次看到");
@@ -405,7 +418,7 @@ mod tests {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "new-key" })), known_with("pc", "old-key"));
         let v = RemoteViews::default();
         // 後台這次給的名字不能出現在說明裡：只用這支手機自己記住的「工作機」
-        let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("後台給的名字".into()), None, NOW)).err().unwrap();
+        let err = run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), Some("後台給的名字".into()), None, NOW)).err().unwrap();
         let (old_fp, new_fp) = (crate::device_id::fp_grouped("old-key"), crate::device_id::fp_grouped("new-key"));
         assert!(err.contains(&new_fp), "手機看到的話帶新的完整指紋（分組）：{err}");
         assert!(!err.contains(&old_fp), "原本那把還沒確認過：不顯示它的指紋：{err}");
@@ -417,7 +430,7 @@ mod tests {
         let mut k = known_with("pc", "old-key");
         assert!(k.confirm("pc", &crate::device_id::fingerprint("old-key"), NOW));
         let b2 = Fake::new(Some(json!({ "topic": "t1", "to_pub": "new-key" })), k);
-        let err2 = run(start_view(&b2, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap();
+        let err2 = run(start_view(&b2, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap();
         assert!(err2.contains(&old_fp) && err2.contains(&new_fp), "{err2}");
         assert_eq!(b.alerts.lock().unwrap().clone(), vec![("pc".to_string(), "changed".to_string())]);
         assert_eq!(b.actions(), vec!["term_view_start", "term_view_report"]);
@@ -432,7 +445,7 @@ mod tests {
     fn 同一把金鑰照常看() {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), known_with("pc", "same"));
         let v = RemoteViews::default();
-        let got = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        let got = run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
         assert_eq!(got.target.tofu, Tofu::Same);
         assert!(!got.target.confirmed, "記住了但沒確認過");
     }
@@ -442,18 +455,18 @@ mod tests {
         let fp = crate::device_id::fingerprint("same");
         let mut k = known_with("pc", "same");
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), k.clone());
-        let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), None, NOW)).unwrap();
+        let got = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), None, NOW)).unwrap();
         let j = started_view_json(&got);
         assert_eq!((j["confirmed"].clone(), j["node"].clone()), (json!(false), json!("pc")));
         assert!(j.get("fp").is_none() && j.get("fp8").is_none(), "不帶指紋：{j}");
         assert!(!j.to_string().contains(&fp));
         assert!(k.confirm("pc", &fp, NOW));
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), k.clone());
-        let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        let got = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
         assert!(got.target.confirmed && started_view_json(&got)["confirmed"] == json!(true));
         // 第一次看到的：還沒記住，一定是沒確認
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), KnownPeers::default());
-        let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        let got = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
         assert_eq!((got.target.tofu, got.target.confirmed), (Tofu::New, false));
         let j = started_view_json(&got);
         assert!(j.get("fp").is_none() && j.get("fp8").is_none() && !j.to_string().contains(&fp), "{j}");
@@ -473,13 +486,13 @@ mod tests {
         for known in [KnownPeers::default(), known_with("pc", "pk")] {
             let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), known);
             let v = RemoteViews::default();
-            let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).err().unwrap();
+            let err = run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).err().unwrap();
             assert_eq!(err, INPUT_NEEDS_CONFIRM);
             assert!(b.actions().is_empty(), "連後台都不打");
         }
         assert!(INPUT_NEEDS_CONFIRM.contains("「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋"), "寫清楚去哪裡確認");
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), KnownPeers::default());
-        assert_eq!(run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("亂寫"), NOW)).err().unwrap(), "不認得的範圍");
+        assert_eq!(run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("亂寫"), NOW)).err().unwrap(), "不認得的範圍");
         assert_eq!(parse_scope(None).unwrap(), Scope::View);
         assert_eq!(parse_scope(Some("view")).unwrap(), Scope::View);
         assert_eq!(parse_scope(Some("input")).unwrap(), Scope::Input);
@@ -491,7 +504,7 @@ mod tests {
         assert!(k.confirm("pc", &crate::device_id::fingerprint("pk"), NOW));
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), k.clone());
         let v = RemoteViews::default();
-        let got = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), Some("input"), NOW)).unwrap();
+        let got = run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), Some("input"), NOW)).unwrap();
         assert_eq!(got.session.scope, Scope::Input);
         assert!(got.target.confirmed);
         assert_eq!(b.calls.lock().unwrap()[0].1["scope"], "input", "範圍簽在握手裡、送給後台");
@@ -499,15 +512,48 @@ mod tests {
         assert_eq!(v.want(&got.id), Want::Watching);
         // 後台這次給的公鑰和確認過的不同：不開始、通知本人、回報結束
         let b2 = Fake::new(Some(json!({ "topic": "t1", "to_pub": "other" })), k);
-        assert!(run(start_view(&b2, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
+        assert!(run(start_view(&b2, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
         assert_eq!(b2.actions(), vec!["term_view_start", "term_view_report"]);
         assert_eq!(b2.alerts.lock().unwrap().clone(), vec![("pc".to_string(), "changed".to_string())]);
     }
 
     #[test]
+    fn 打字同時只能一個_發起時占位_失敗會放掉_看畫面不占() {
+        let mut k = known_with("pc", "pk");
+        assert!(k.confirm("pc", &crate::device_id::fingerprint("pk"), NOW));
+        let inputs = RemoteInputs::default();
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), k.clone());
+        let got = run(start_view(&b, &RemoteViews::default(), &inputs, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).unwrap();
+        assert_eq!(inputs.count(), 1, "發起成功就占著位子");
+        let err = run(start_view(&b, &RemoteViews::default(), &inputs, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).err().unwrap();
+        assert_eq!(err, crate::view_input::TOO_MANY);
+        assert_eq!(b.actions(), vec!["term_view_start"], "第二次沒打後台");
+        run(start_view(&b, &RemoteViews::default(), &inputs, "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        assert_eq!(inputs.count(), 1, "看畫面不占打字的位子");
+        inputs.remove(&got.id);
+        // 失敗的發起放掉位子：後台沒回頻道、那台金鑰換了
+        let none = Fake::new(None, k.clone());
+        assert!(run(start_view(&none, &RemoteViews::default(), &inputs, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
+        assert_eq!(inputs.count(), 0);
+        let changed = Fake::new(Some(json!({ "topic": "t1", "to_pub": "other" })), k);
+        assert!(run(start_view(&changed, &RemoteViews::default(), &inputs, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
+        assert_eq!(inputs.count(), 0);
+        // 觀看滿了（登記觀看失敗）也不留位子
+        let v = RemoteViews::default();
+        for i in 0..view_remote::MAX_OPEN {
+            v.add(&format!("x{i}")).unwrap();
+        }
+        let mut k2 = known_with("pc", "pk");
+        assert!(k2.confirm("pc", &crate::device_id::fingerprint("pk"), NOW));
+        let b2 = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), k2);
+        assert!(run(start_view(&b2, &v, &inputs, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
+        assert_eq!(inputs.count(), 0);
+    }
+
+    #[test]
     fn 手機看畫面照舊_不用確認指紋() {
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), known_with("pc", "pk"));
-        let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("view"), NOW)).unwrap();
+        let got = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("view"), NOW)).unwrap();
         assert_eq!((got.session.scope, got.target.confirmed), (Scope::View, false));
         assert_eq!(b.calls.lock().unwrap()[0].1["scope"], "view");
     }
@@ -517,7 +563,7 @@ mod tests {
         let b = Fake::new(None, KnownPeers::default());
         let v = RemoteViews::default();
         for _ in 0..(view_remote::MAX_OPEN + 1) {
-            assert_eq!(run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap(), "沒有發起成功，請稍後再試", "失敗不佔名額");
+            assert_eq!(run(start_view(&b, &v, &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).err().unwrap(), "沒有發起成功，請稍後再試", "失敗不佔名額");
         }
     }
 

@@ -1511,13 +1511,11 @@ async fn term_view_remote_start(window: tauri::WebviewWindow, app: State<'_, App
     }
     let machine = view_d::clean_machine(machine);
     // 看畫面或打字（0.2.10）。沒帶是看畫面；其他字一律不收
+    // 打字同時只能一個：view_d 發起時占位（滿了就不發起），失敗會放掉
     let scope = view_d::parse_scope(scope.as_deref())?;
-    if scope == view_handshake::Scope::Input && inputs.count() >= view_input::MAX_OPEN {
-        return Err(view_input::TOO_MANY.into());
-    }
     let relay = relay_of(&app)?;
     let backend = LiveBackend { app: window.app_handle().clone(), relay: relay.clone(), data_dir: app.data_dir.clone() };
-    let view_d::Begun { id, session: s, eph, topic, target } = view_d::begin(&backend, views.inner(), &app.node, to_node, partner, machine, scope, auth::now_ms()).await?;
+    let view_d::Begun { id, session: s, eph, topic, target } = view_d::begin(&backend, views.inner(), inputs.inner(), &app.node, to_node, partner, machine, scope, auth::now_ms()).await?;
     start_remote_view(window.app_handle().clone(), window.label().to_string(), relay, app.data_dir.clone(), views.inner().clone(), inputs.inner().clone(), url, topic, s.clone(), eph, target);
     Ok(view_d::started_json(&id, s.expires_s, scope))
 }

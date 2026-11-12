@@ -2,7 +2,7 @@
 //!
 //! - [`RemoteInputs`]：進行中的打字工作階段（觀看編號 → 送出端）。**只有握手完成才登記**：對方那台接受了
 //!   （那邊的人按過允許，或符合免問的條件）、這台驗過對方的簽章、導出送字的金鑰（`view_input::d_finish`）之後，
-//!   收幀迴圈才 [`RemoteInputs::add`]。沒登記的編號一律不收字。
+//!   收幀迴圈才 [`RemoteInputs::add`]。沒登記的編號一律不收字。發起時先 [`RemoteInputs::reserve`] 占位（同時只能一個），失敗就放掉。
 //! - 結束就不收：對方結束、到期、本人按結束、網路不穩停住（[`RemoteInputs::stall`]），收幀迴圈收尾時 [`RemoteInputs::remove`]。
 //! - [`send`]：字先過按鍵規則，編序號、加密，送到那台；[`resend_loop`]：那台沒確認的補送，太久沒確認就停住、結束這次打字。
 //! - 紀錄只有長度和次數，沒有字的內容。
@@ -18,35 +18,51 @@ pub const NOT_OPEN: &str = "這個畫面現在不能打字";
 /// 補送太久沒確認、停下來時送給畫面的事件（電腦版與手機版相同）
 pub const STALLED_EVENT: &str = "term-view-remote-input-stalled";
 
-type Entry = (Arc<Mutex<DOutbox>>, Sender<Outbound>, bool);
+/// 一個打字的位子：發起時先占位（還沒有送出端）；對方接受、驗過簽章之後才放上送出端
+struct Slot {
+    open: Option<(Arc<Mutex<DOutbox>>, Sender<Outbound>)>,
+    stalled: bool,
+}
 
 /// 進行中的打字（看的那台）：觀看編號 → 送出端。只在本機
 #[derive(Default)]
 pub struct RemoteInputs {
-    open: Mutex<HashMap<String, Entry>>,
+    open: Mutex<HashMap<String, Slot>>,
 }
 
 impl RemoteInputs {
-    /// 握手完成（對方接受、簽章驗過、導出送字的金鑰）之後才登記
+    /// 發起打字時占一個位子：查數量和占位在同一次鎖裡做完，滿了（[`view_input::MAX_OPEN`]）回錯。失敗的發起要 [`RemoteInputs::remove`] 放掉
+    pub fn reserve(&self, id: &str) -> Result<(), String> {
+        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+        if open.len() >= view_input::MAX_OPEN {
+            return Err(view_input::TOO_MANY.to_string());
+        }
+        open.insert(id.to_string(), Slot { open: None, stalled: false });
+        Ok(())
+    }
+    /// 握手完成（對方接受、簽章驗過、導出送字的金鑰）之後才放上送出端。只放進占好的位子（已經放掉的不再登記）
     pub fn add(&self, id: &str, ob: Arc<Mutex<DOutbox>>, tx: Sender<Outbound>) {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), (ob, tx, false));
+        if let Some(slot) = self.open.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
+            slot.open = Some((ob, tx));
+        }
     }
-    /// 開著、沒停住的才給
+    /// 有送出端、沒停住的才給
     pub fn get(&self, id: &str) -> Option<(Arc<Mutex<DOutbox>>, Sender<Outbound>)> {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).get(id).filter(|v| !v.2).map(|v| (v.0.clone(), v.1.clone()))
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).get(id).filter(|v| !v.stalled).and_then(|v| v.open.clone())
     }
+    /// 占著的位子（含還沒接受的）
     pub fn count(&self) -> usize {
         self.open.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
     /// 網路不穩：不再收字
     pub fn stall(&self, id: &str) {
         if let Some(v) = self.open.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
-            v.2 = true;
+            v.stalled = true;
         }
     }
-    /// 收掉。回是不是因為網路不穩停的
+    /// 收掉（放掉位子）。回是不是因為網路不穩停的
     pub fn remove(&self, id: &str) -> bool {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(id).is_some_and(|v| v.2)
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(id).is_some_and(|v| v.stalled)
     }
 }
 
@@ -102,6 +118,7 @@ mod tests {
     /// 登記一筆，回收到的密文（假的頻道：每幅都回確認）
     fn open_one(inputs: &RemoteInputs, id: &str) -> Arc<Mutex<Vec<String>>> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Outbound>(16);
+        inputs.reserve(id).unwrap();
         inputs.add(id, Arc::new(Mutex::new(DOutbox::new(view_input::input_key(&test_key(7)).unwrap(), id))), tx);
         let got = Arc::new(Mutex::new(Vec::new()));
         let g = got.clone();
@@ -112,6 +129,20 @@ mod tests {
             }
         });
         got
+    }
+
+    #[test]
+    fn 占位_同時只能一個_占了還沒接受不收字_放掉才能再占_沒占位的不登記() {
+        let inputs = RemoteInputs::default();
+        inputs.reserve("a").unwrap();
+        assert_eq!(inputs.reserve("b").err().unwrap(), view_input::TOO_MANY, "查數量和占位一起做");
+        assert_eq!(run(send(&inputs, "a", "x", false, NOW)).err().unwrap(), NOT_OPEN, "占了位子但對方還沒接受：不收字");
+        assert!(!inputs.remove("a"));
+        inputs.reserve("b").unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<Outbound>(1);
+        inputs.add("c", Arc::new(Mutex::new(DOutbox::new(view_input::input_key(&test_key(7)).unwrap(), "c"))), tx);
+        assert_eq!(inputs.count(), 1, "沒占位的不登記");
+        assert_eq!(run(send(&inputs, "c", "x", false, NOW)).err().unwrap(), NOT_OPEN);
     }
 
     #[test]

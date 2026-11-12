@@ -536,9 +536,16 @@ test('手機看電腦終端：五個指令手機也有（#1378 起手機也能�
   assert.doesNotMatch(noKnown, /device_id::/, 'android.rs 只有認得的電腦三個命令碰 device_id，不碰設備金鑰')
   const start = rs.split('pub async fn term_view_remote_start')[1].split('\n}\n')[0]
   assert.match(start, /parse_scope\(scope\.as_deref\(\)\)\?/, '手機的 start 先檢查範圍')
-  assert.ok(start.indexOf('parse_scope(') < start.indexOf('relay_of('), '先檢查範圍、打字的上限，再碰任何東西')
-  assert.match(start, /inputs\.count\(\) >= crate::view_input::MAX_OPEN/, '同時只能在一個畫面打字')
-  assert.match(start, /view_d::start_view\(/, '指紋確認、金鑰比對都在共用核心')
+  assert.ok(start.indexOf('parse_scope(') < start.indexOf('relay_of('), '先檢查範圍、用掉打字的憑證，再碰任何東西')
+  // 打字：Rust 用掉本人驗證過的一次性憑證才往下走（看畫面不用）；憑證由參數帶進來
+  assert.match(start, /challenge: Option<String>\)/)
+  assert.match(start, /crate::consent::gate_start\(&app\.data_dir, sc, &to_node, challenge\.as_deref\(\)\)\?/)
+  assert.ok(start.indexOf('consent::gate_start(') < start.indexOf('relay_of('), '先用憑證，再碰後台')
+  assert.doesNotMatch(start, /inputs\.count\(\)/, '打字的上限在共用核心發起時占位，不先查再登記')
+  assert.match(start, /view_d::start_view\(backend\.as_ref\(\), views\.inner\(\), inputs\.inner\(\),/, '指紋確認、金鑰比對、占位都在共用核心')
+  assert.match(rs, /const NOT_SHOWN: &str = "畫面不在前景，這段沒有送出，請回到終端畫面再打";/)
+  const tok = rs.split('pub fn android_known_token(')[1].split('\n}\n')[0]
+  assert.ok(tok.indexOf('Action::Input && !crate::device_id::phone_input_allowed(') > 0 && tok.indexOf('phone_input_allowed(') < tok.indexOf('consent::issue('), '指紋沒確認的電腦不發打字的憑證（不跳本人驗證）')
   assert.match(start, /spawn_view\(backend, sink, views\.inner\(\)\.clone\(\), inputs\.inner\(\)\.clone\(\)/)
 })
 
@@ -549,6 +556,9 @@ test('view_d 的核心：手機要打字先確認過那台的指紋、電腦版 
   const begin = core.split('async fn begin_on<')[1].split('\n}\n')[0]
   assert.ok(begin.indexOf('phone_input_allowed(') >= 0 && begin.indexOf('phone_input_allowed(') < begin.indexOf('"term_view_start"'), '指紋沒確認過的打字，連後台都不打')
   assert.match(begin, /if phone && scope == Scope::Input && !confirmed \{/, '拿到那台的公鑰後再比一次')
+  // 打字的位子在登記觀看時一起占（查和占同一次鎖），之後失敗都放掉
+  assert.ok(begin.indexOf('inputs.reserve(&id)') > begin.indexOf('views.add(&id)?') && begin.indexOf('inputs.reserve(&id)') < begin.indexOf('"term_view_start"'))
+  assert.ok(!/\n\s+views\.remove\(&id\);\n\s+report_ended/.test(begin), '失敗路徑一律走 release（觀看與位子一起放）')
   const desk = lib.split('async fn term_view_remote_start(')[1].split('\n}\n')[0]
   assert.match(desk, /view_d::begin\(/)
   assert.ok(lib.includes('#[cfg(feature = "gui")]\nmod view_d;'))

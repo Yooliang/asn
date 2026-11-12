@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+use crate::view_handshake::Scope;
 
 /// 憑證的有效時間
 pub const TOKEN_TTL: Duration = Duration::from_secs(30);
@@ -29,6 +30,8 @@ pub const MAIN_LABEL: &str = "list";
 const MAX_RECORDS: usize = 64;
 /// 本人沒有在這支手機上驗證過
 pub const NOT_VERIFIED: &str = "not_verified";
+/// 手機開始打字前沒有完成本人驗證（沒帶憑證、用過、過期）：給本人看的話
+pub const INPUT_NOT_VERIFIED: &str = "沒有完成本人驗證，這次沒有開始打字";
 /// 系統亂數取不到
 pub const NO_RANDOM: &str = "系統亂數不可用";
 
@@ -38,6 +41,8 @@ pub enum Action {
     Forget,
     /// 用相機掃電腦畫面上的 QR code 核對指紋（fp_scan.rs）
     Scan,
+    /// 在那台電腦的終端開始打字（#1378）：`term_view_remote_start` 帶 scope=input 時要用掉這個憑證
+    Input,
 }
 
 impl Action {
@@ -46,6 +51,7 @@ impl Action {
             "confirm" => Some(Action::Confirm),
             "forget" => Some(Action::Forget),
             "scan" => Some(Action::Scan),
+            "input" => Some(Action::Input),
             _ => None,
         }
     }
@@ -119,6 +125,18 @@ impl Store {
         true
     }
 
+    /// 手機開始看畫面或打字前：看畫面不用憑證（不碰紀錄）；打字要帶 [`Action::Input`] 的憑證並用得掉
+    /// （本人剛在這支手機驗證過、沒過期、沒用過），否則回 [`INPUT_NOT_VERIFIED`]
+    pub fn gate_start(&mut self, scope: Scope, node: &str, challenge: Option<&str>, now: Duration, marker_taken: impl FnOnce(&str) -> bool) -> Result<(), String> {
+        if scope != Scope::Input {
+            return Ok(());
+        }
+        match challenge {
+            Some(c) if self.redeem(Action::Input, node, c, now, marker_taken) => Ok(()),
+            _ => Err(INPUT_NOT_VERIFIED.to_string()),
+        }
+    }
+
     /// 這台電腦被忘記：它的憑證都作廢
     pub fn drop_node(&mut self, node: &str) {
         self.map.retain(|(_, n), _| n != node);
@@ -178,6 +196,18 @@ pub fn redeem(data_dir: &Path, action: Action, node: &str, challenge: &str) -> b
     ok
 }
 
+/// 手機開始打字前用憑證（[`Store::gate_start`]）：看畫面直接過；打字要用得掉憑證，說明檔不管成不成功都收掉
+pub fn gate_start(data_dir: &Path, scope: Scope, node: &str, challenge: Option<&str>) -> Result<(), String> {
+    if scope != Scope::Input {
+        return Ok(());
+    }
+    let r = store().lock().unwrap_or_else(|e| e.into_inner()).gate_start(scope, node, challenge, crate::boottime::now_boot(), |h| take_marker(data_dir, h));
+    if let Some(c) = challenge {
+        let _ = std::fs::remove_file(desc_path(data_dir, &hash_hex(c)));
+    }
+    r
+}
+
 /// 生物辨識框上的字最多幾個字
 pub const DESC_MAX: usize = 60;
 /// 外殼確認框上名字最多顯示幾個字（外殼 DESC_MAX 60 字的限制；設備名本身最多 40 字，框上截短，指紋永遠在後面）
@@ -207,6 +237,8 @@ pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
         Action::Forget => format!("忘記{name}（{fp}）"),
         // 掃 QR code：最長 2＋34＋3＋1＋9＋1＝50 字，指紋一樣固定在最後
         Action::Scan => format!("核對{name}的指紋（{fp}）"),
+        // 開始打字：最長 2＋34＋2＋1＋9＋1＝49 字
+        Action::Input => format!("在{name}打字（{fp}）"),
     }
 }
 
@@ -406,6 +438,54 @@ mod tests {
     }
 
     #[test]
+    fn 開始打字_沒有憑證拒絕_用過拒絕_過期拒絕_看畫面不受影響() {
+        use crate::view_handshake::Scope;
+        let t = Duration::from_secs(1000);
+        let mut s = Store::default();
+        assert_eq!(Action::parse("input"), Some(Action::Input));
+        assert_eq!(describe(Action::Input, "工作機", FPG), "在「工作機」打字（a93c c519）");
+        // 沒帶憑證
+        assert_eq!(s.gate_start(Scope::Input, "pc", None, t, |_| true).err().unwrap(), INPUT_NOT_VERIFIED);
+        // 本人還沒驗證（憑證檔沒出現）：不算，紀錄留著
+        let c = s.issue(Action::Input, "pc", t, rng(20));
+        assert_eq!(s.gate_start(Scope::Input, "pc", Some(&c), at(t, 1), |_| false).err().unwrap(), INPUT_NOT_VERIFIED);
+        // 驗證過：過，而且只能用一次
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c), at(t, 2), |h| h == hash_hex(&c)).is_ok());
+        assert_eq!(s.gate_start(Scope::Input, "pc", Some(&c), at(t, 3), |_| true).err().unwrap(), INPUT_NOT_VERIFIED, "用過就不算");
+        // 過期
+        let c2 = s.issue(Action::Input, "pc", t, rng(21));
+        assert_eq!(s.gate_start(Scope::Input, "pc", Some(&c2), t + TOKEN_TTL, |_| true).err().unwrap(), INPUT_NOT_VERIFIED, "到期就不算");
+        // 別的動作、別台的憑證不算
+        let c3 = s.issue(Action::Confirm, "pc", t, rng(22));
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c3), at(t, 1), |_| true).is_err());
+        let c4 = s.issue(Action::Input, "pc2", t, rng(23));
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c4), at(t, 1), |_| true).is_err());
+        assert!(s.gate_start(Scope::Input, "pc2", Some(&c4), at(t, 1), |_| true).is_ok(), "那台自己的照常");
+        // 看畫面：不用憑證、不碰紀錄與憑證檔
+        let c5 = s.issue(Action::Input, "pc", at(t, 5), rng(24));
+        let before = s.len();
+        assert!(s.gate_start(Scope::View, "pc", None, at(t, 6), |_| panic!("看畫面不碰憑證檔")).is_ok());
+        assert!(s.gate_start(Scope::View, "pc", Some("亂寫"), at(t, 6), |_| panic!("看畫面不碰憑證檔")).is_ok());
+        assert_eq!(s.len(), before, "看畫面不用掉打字的憑證");
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c5), at(t, 7), |_| true).is_ok());
+    }
+
+    #[test]
+    fn 開始打字_憑證檔要真的在_用過就刪掉() {
+        use crate::view_handshake::Scope;
+        let dir = tempfile::tempdir().unwrap();
+        let t = Duration::from_secs(1000);
+        let mut s = Store::default();
+        let c = s.issue(Action::Input, "pc", t, rng(30));
+        let take = |h: &str| take_marker(dir.path(), h);
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c), at(t, 1), take).is_err(), "憑證檔還沒寫：不算");
+        std::fs::create_dir_all(dir.path().join(MARKER_DIR)).unwrap();
+        std::fs::write(dir.path().join(MARKER_DIR).join(hash_hex(&c)), b"").unwrap();
+        assert!(s.gate_start(Scope::Input, "pc", Some(&c), at(t, 2), take).is_ok());
+        assert!(!dir.path().join(MARKER_DIR).join(hash_hex(&c)).exists(), "用掉就刪");
+    }
+
+    #[test]
     fn 雜湊_和標準答案一致_小寫六十四碼() {
         assert_eq!(hash_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         assert!(is_hash(&hash_hex("x")));
@@ -533,7 +613,17 @@ mod tests {
             // 比照 device_id.rs 的 owner_at：async 的命令也要認得
             let (start, len) = ["\npub async fn ", "\npub fn "].iter().filter_map(|p| before.rfind(p).map(|at| (at, p.len()))).max().unwrap();
             let owner: String = before[start + len..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-            assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&owner.as_str()), "{owner} 不能碰憑證");
+            assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm", "term_view_remote_start"].contains(&owner.as_str()), "{owner} 不能碰憑證");
+        }
+        // 開始打字（#1378）：先檢查視窗、用掉 input 憑證，才發起；憑證由參數帶進來，沒有「已驗證」這類布林參數
+        let at = code.find("pub async fn term_view_remote_start(").expect("有手機的發起");
+        let start = code[at..].split("\n}\n").next().unwrap();
+        let sig = start.split(") ->").next().unwrap();
+        assert!(sig.contains("challenge: Option<String>") && !sig.contains("bool"), "{sig}");
+        let g = start.find("consent::gate_start(").expect("發起前用掉打字的憑證");
+        assert!(start.find("consent::label_ok(window.label())").expect("要檢查視窗") < g);
+        for later in ["relay_of(", "view_d::start_view("] {
+            assert!(g < start.find(later).unwrap(), "先用憑證，再 {later}");
         }
         for name in ["android_known_challenge", "android_known_answer", "android_known_list"] {
             assert!(!body_of(code, name).contains("consent::"), "{name}");
