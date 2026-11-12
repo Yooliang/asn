@@ -2,6 +2,7 @@
 // 探測在頁面裡執行；這個檔案只產生探測原始碼，字串裡不寫反斜線。
 // kind：'watch'＝只能看；'typing'＝在下方輸入框打字按「送出」，直接打進那個終端（#1288；狀態列要用醒目的紅色警示）
 import { TERM_GRACE_MS } from '../ui/lib/term-grace.mjs'
+import { PASTE_TEXT } from '../ui/lib/term-view.mjs'
 export const DTERM_PROBES = {
   watch: { dterm: { kind: 'watch' } },
   typing: { dterm: { kind: 'typing' } },
@@ -21,7 +22,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   entry.click();
   const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
-  // multi：輸入框送多行 → 先問一次；按「取消」不送，字放回輸入框；再送一次按「貼上」才送（整段＋Enter）
+  // multi：輸入框送多行 → 先問一次；按「取消」不送，字放回輸入框；再送一次按「送出」才送（整段＋Enter）。兩顆鈕的字取自 PASTE_TEXT（本機和看別台同字，#1378）
   // refused：輸入框送出 → 那台沒允許（打字通道一開始就結束）→ 字放回輸入框，沒有送進任何字
   if (kind === 'refused') {
     const core = globalThis.__TAURI__.core, orig = core.invoke;
@@ -55,7 +56,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     ta.value = two; ta.dispatchEvent(new Event('input'));
     await sleep(50);
     go.click();
-    const no = await wait(() => askBtn('取消'));
+    const no = await wait(() => askBtn(${JSON.stringify(PASTE_TEXT.no)}));
     if (!no) return { ok: false, why: '多行沒有先問一次' };
     if (sent().length) return { ok: false, why: '還沒確認就送出了：' + JSON.stringify(sent()) };
     no.click();
@@ -63,10 +64,10 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     await sleep(300);
     if (sent().length) return { ok: false, why: '按「取消」還是送出了：' + JSON.stringify(sent()) };
     go.click();
-    const yes = await wait(() => askBtn('貼上'));
+    const yes = await wait(() => askBtn(${JSON.stringify(PASTE_TEXT.yes)}));
     if (!yes) return { ok: false, why: '第二次送多行沒有先問' };
     yes.click();
-    if (!(await wait(() => sent().length >= 2))) return { ok: false, why: '按「貼上」後沒有送出：' + JSON.stringify(sent()) };
+    if (!(await wait(() => sent().length >= 2))) return { ok: false, why: '按「送出」後沒有送出：' + JSON.stringify(sent()) };
     if (sent()[0] !== two || sent()[1] !== String.fromCharCode(13)) return { ok: false, why: '送進終端的不是「整段＋Enter」：' + JSON.stringify(sent()) };
     const paste = (globalThis.__smokeCalls || []).filter(c => c[0] === 'term_view_remote_input')[0][1].paste;
     if (paste !== true) return { ok: false, why: '多行要當成貼上送：paste=' + paste };

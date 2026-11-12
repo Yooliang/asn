@@ -137,3 +137,31 @@ test('多行確認：本機和看別台用同一句、同兩顆鈕（#1378，電
     assert.doesNotMatch(src, /要貼上 /, '舊句子不能留著')
   }
 })
+
+test('每一次送多行都要先問：取消後再送一次照樣問，按送出才整段送＋Enter（#1372 鎖的行為，#1378 抽共用後不能壞）', async () => {
+  const ask = { value: null }, sent = [], unsent = []
+  const lines = createLineSender({ send: async (d, p) => { sent.push([d, p]); return true }, askPaste: ask, emit: (ev, t) => { if (ev === 'unsent') unsent.push(t) } })
+  const two = 'echo a\necho b'
+  for (let round = 1; round <= 3; round++) {
+    lines.sendLine(two)
+    assert.equal(ask.value, two, `第 ${round} 次送多行要先問`)
+    assert.equal(sent.length, 0, `第 ${round} 次還沒確認就不能送`)
+    assert.equal(lines.answer(false), true)
+    assert.equal(ask.value, null)
+    assert.deepEqual(unsent.at(-1), two, `第 ${round} 次取消要把字放回輸入框`)
+  }
+  lines.sendLine(two)
+  assert.equal(ask.value, two, '取消三次後再送仍要問')
+  assert.equal(lines.answer(true), true)
+  await new Promise(r => setTimeout(r, ENTER_DELAY_MS + 50))
+  assert.deepEqual(sent, [[two, true], ['\r', false]], '按送出才送整段（當成貼上）再按 Enter')
+  lines.sendLine(two)
+  assert.equal(ask.value, two, '送出過一次之後，下一次多行照樣要問')
+})
+
+test('smoke 的多行檢查用共用的按鈕字（改字時 smoke 不會再找舊字）', () => {
+  const smoke = read('../scripts/smoke-desk-term.mjs')
+  assert.match(smoke, /askBtn\(\$\{JSON\.stringify\(PASTE_TEXT\.yes\)\}\)/)
+  assert.match(smoke, /askBtn\(\$\{JSON\.stringify\(PASTE_TEXT\.no\)\}\)/)
+  assert.doesNotMatch(smoke, /askBtn\('貼上'\)/)
+})
