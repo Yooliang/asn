@@ -59,8 +59,9 @@ test('paint：先白底、再畫深色格；用的是 2d 內容的矩形，不�
 test('設定頁與樞紐：顯示 QR code 的按鈕在指紋旁、只用 canvas（沒有 v-html）、操作登記、Rust 命令只叫唯讀的那個', () => {
   assert.ok(SETTING_OPS.includes('known-qr'))
   const panel = read('../ui/lib/settings-panel.mjs')
-  const card = panel.slice(panel.indexOf('aria-label="認得的電腦"'), panel.indexOf('aria-label="收發信功能"'))
-  assert.match(card, /KNOWN\.ownFp\(st\.known\.ownFp\)[^\n]*@click="act\('known-qr', !st\.known\.qr\)">\{\{ st\.known\.qr \? QR_TEXT\.hide : QR_TEXT\.show \}\}/)
+  assert.ok(!panel.includes('aria-label="認得的電腦"'), '舊的卡片已併進設備詳情')
+  const card = panel.slice(panel.indexOf('<div class="dv-info"'), panel.indexOf("<div :class=\"['dv-body'")) + panel.slice(panel.indexOf('<details class="dv-old-rec"'), panel.indexOf('</details>', panel.indexOf('<details class="dv-old-rec"')))
+  assert.match(card, /<template v-if="curDev\.self">[\s\S]*KNOWN\.ownFp\(st\.known\.ownFp\)[^\n]*@click="act\('known-qr', !st\.known\.qr\)">\{\{ st\.known\.qr \? QR_TEXT\.hide : QR_TEXT\.show \}\}/)
   assert.match(card, /<fp-qr-canvas :qr="st\.known\.qr"><\/fp-qr-canvas>/)
   assert.match(card, /\{\{ QR_TEXT\.note \}\}/)
   assert.doesNotMatch(card + read('../ui/lib/fp-qr.mjs').replace(/^\s*\/\/.*$/gm, ''), /v-html|innerHTML|toDataURL|insertAdjacentHTML/)

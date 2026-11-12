@@ -133,6 +133,24 @@ pub fn encode_component(s: &str) -> String {
     out
 }
 
+/// 設備改名沒登入時的話
+pub const DEVICE_RENAME_LOGIN: &str = "要先登入 ASN 帳號才能改設備名稱";
+/// 設備改名的錯誤（後台的狀態碼）換成給人看的話；不含金鑰、不含名字
+pub fn device_rename_error(e: &str) -> String {
+    let has = |c: &str| e.contains(&format!("HTTP {c}"));
+    if has("400") {
+        "名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼）".into()
+    } else if has("401") {
+        "登入過期了，請重新登入後再改".into()
+    } else if has("404") {
+        "找不到這台設備，或後台還不支援改名".into()
+    } else if has("429") {
+        "改名太頻繁，請過一分鐘再試".into()
+    } else {
+        "改名沒成功，請稍後再試".into()
+    }
+}
+
 /// 本人簽章標頭（與 supabase/functions/_shared/owner_sign.ts 的 SIGN_HEADER 同一個）
 pub const SIGN_HEADER: &str = "x-asn-user";
 pub const MAX_BODY: usize = 20000;
@@ -968,6 +986,12 @@ impl Relay {
         let body = build_succeed_body(predecessor, node, name)?;
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法指定接班")?;
         self.api_signed("partner_succeed", Some(body), Some(t)).await
+    }
+    /// 設備改名（#1388）：本人替自己的任一台設備改名，一定要本人簽章（後台核對送請求的這台和要改的那台都是本人的）。
+    /// 沒憑證直接回錯，不打後台。成功回 { ok, name, changed }；失敗回給人看的話
+    pub async fn device_rename(&self, node: &str, name: &str, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or(DEVICE_RENAME_LOGIN)?;
+        self.api_signed("device_rename", Some(json!({ "node": node, "name": name })), Some(t)).await.map_err(|e| device_rename_error(&e))
     }
     /// 可被接班的夥伴清單（#153）：同樣要登入憑證
     pub async fn partner_list(&self, token: Option<&str>) -> Result<Value, String> {

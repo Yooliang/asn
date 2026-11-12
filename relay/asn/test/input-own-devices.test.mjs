@@ -11,8 +11,8 @@ test('列表：按過允許才算 confirmed；只有明確的 true', () => {
 
 test('設定頁：預設勾著時，還沒按過允許的那台寫「第一次還是會問」；按過的寫紅條照樣會出現', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(src, /v-if="p\.inputNoAsk && !p\.inputConfirmed">\{\{ KNOWN\.inputFirstAsk \}\}/)
-  assert.match(src, /v-if="p\.inputNoAsk && p\.inputConfirmed" class="pair-warn">\{\{ KNOWN\.inputNoAskWarn \}\}/)
+  assert.match(src, /v-if="curKnown\.inputNoAsk && !curKnown\.inputConfirmed">\{\{ KNOWN\.inputFirstAsk \}\}/)
+  assert.match(src, /v-if="curKnown\.inputNoAsk && curKnown\.inputConfirmed" class="pair-warn">\{\{ KNOWN\.inputNoAskWarn \}\}/)
   assert.match(KNOWN.inputFirstAsk, /第一次/)
   assert.match(KNOWN.inputNoAskWarn, /紅條/)
   assert.match(KNOWN.inputNoAskWarn, /結束/)

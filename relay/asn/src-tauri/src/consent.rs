@@ -189,8 +189,8 @@ fn desc_path(data_dir: &Path, hash: &str) -> std::path::PathBuf {
     data_dir.join(MARKER_DIR).join(format!("{hash}.{DESC_EXT}"))
 }
 
-/// 框上顯示的電腦名字：只認本人自己取的名字；電腦自己報上來的名字不進框（回空字串＝「未命名的電腦」）。
-/// 名字旗標只在 device_id.rs 碰（守門測試），這裡轉呼叫
+/// 框上顯示的電腦名字：後台的設備名（#1388：每台只有一個名字，本人可以從任一台改）。名字不可信，所以框上一律緊接指紋；
+/// 像指紋或含「指紋」的名字回空字串（＝「未命名的電腦」＋指紋）。判斷在 device_id.rs，這裡轉呼叫
 pub fn prompt_name(peer: &crate::device_id::KnownPeer) -> &str {
     crate::device_id::owner_given_name(peer)
 }
@@ -316,10 +316,11 @@ mod tests {
     }
 
     #[test]
-    fn 框上的名字_只有本人取的才用_電腦自己報的一律當未命名() {
-        assert_eq!(prompt_name(&peer("本人取的", true)), "本人取的");
-        assert_eq!(prompt_name(&peer("電腦自報", false)), "");
-        let t = describe(Action::Confirm, prompt_name(&peer("電腦自報", false)), FPG);
+    fn 框上的名字_用後台的設備名_像指紋的當未命名() {
+        assert_eq!(prompt_name(&peer("工作機", true)), "工作機");
+        assert_eq!(prompt_name(&peer("工作機", false)), "工作機", "舊的本機小名旗標不再影響");
+        assert_eq!(prompt_name(&peer("a93cc519", false)), "");
+        let t = describe(Action::Confirm, prompt_name(&peer("我的指紋 a93c c519", false)), FPG);
         assert_eq!(t, "記住未命名的電腦（a93c c519）");
     }
 

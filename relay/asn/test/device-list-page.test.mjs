@@ -131,7 +131,7 @@ test('進入先看全部設備的列表：由上到下一台一列，名稱／�
   assert.equal(rows.length, 3, '列表三台（被永久移除的不在列表）')
   assert.match(rows[0], /家用機[\s\S]*dv-tag me[^>]*>這台/)
   assert.match(rows[1], /工作機[\s\S]*dv-tag on[^>]*>在線/); assert.ok(!rows[1].includes('>電腦<'), '電腦標籤多餘不顯示')
-  for (const r of rows) assert.match(r, /class="dv-chev"[^>]*>›</)
+  for (const r of rows) assert.ok(!r.includes('dv-chev') && !r.includes('dv-row-go" type="button"'), '不再整列點擊／右箭頭')
   assert.ok(!html.includes('dv-vendor') && !html.includes('w@b.c'), '列表不含廠商與帳號內容')
   assert.ok(!html.includes('永久移除的機器'), '被永久移除的不出現在列表')
 })
@@ -141,8 +141,8 @@ test('列表裡被隱藏的設備：淡色（hid）、標「已隱藏」；本�
   const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
   assert.match(rows[2], /class="dv-row[^"]*\bhid\b/); assert.match(rows[2], /dv-tag hid[^>]*>已隱藏/)
   assert.doesNotMatch(rows[1], /\bhid\b/)
-  assert.ok(!/draggable="true"/.test(rows[0]) && !rows[0].includes('dv-row-move'))
-  assert.match(rows[1], /draggable="true"/); assert.match(rows[1], /dv-row-move/)
+  assert.ok(!/draggable="true"/.test(rows[0]) && !rows[0].includes('設備順序'))
+  assert.match(rows[1], /draggable="true"/); assert.match(rows[1], /aria-label="設備順序"/)
 })
 
 test('鍵盤可用的上移／下移：第一台別台不能上移、最後一台不能下移；按鈕有名稱', async () => {
@@ -158,7 +158,7 @@ test('鍵盤可用的上移／下移：第一台別台不能上移、最後一�
 
 test('滑鼠拖放與整列點擊：整列 @click 進細部頁（按鈕區不觸發）、dragstart／dragover／drop 送 device-reorder', () => {
   const t = SettingsPanel.template
-  assert.match(t, /@click="onRow\(d\.key, \$event\)"/)
+  assert.ok(!t.includes('onRow') && !/<li[^>]*dv-row[^>]*@click=/.test(t), '整列不再能點，只有按鈕動作')
   assert.match(t, /@dragstart="dragStart\(d\.key, \$event\)"/); assert.match(t, /@drop="drop\(d\.key, \$event\)"/)
   assert.match(read('ui/lib/settings-panel.mjs'), /act\('device-reorder', \{ drag: dragKey\.value, target: key, after: overKey\.value === key && overAfter\.value \}\)/)
   assert.ok(SETTING_OPS.includes('device-reorder') && read('ui/list.js').includes("case 'device-reorder'"))
@@ -178,16 +178,16 @@ test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋原本的
 })
 
 test('被隱藏設備的細部頁：標「已隱藏」，頂部有「顯示回名單」與「永久移除」，廠商與帳號內容仍在', async () => {
-  const html = await render({ dev: 'G' })
+  const html = await render({ dev: 'G', devView: 'info' })
   assert.match(html, /dv-tag off[^>]*>已隱藏/)
   assert.match(html, /class="dv-hid-act"[\s\S]*>顯示回名單<[\s\S]*>永久移除</)
-  assert.ok(html.includes('dv-vendor') && html.includes('G@b.c'))
+  assert.ok((await render({ dev: 'G' })).includes('G@b.c'), '帳號頁仍有廠商與帳號')
   assert.ok(SettingsPanel.template.includes("act('device-show', curDev.key)"))
   assert.ok(!html.includes('確定永久移除'), '還沒按永久移除前不顯示確認')
 })
 
 test('永久移除要二次確認：確認區寫明對話與帳號資料不會被刪，有「確定移除」「取消」；確定才送 device-remove', async () => {
-  const html = await render({ dev: 'G', askRemove: true })
+  const html = await render({ dev: 'G', devView: 'info', askRemove: true })
   assert.ok(html.includes('確定永久移除「舊電腦」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。'))
   assert.match(html, /role="alert"/); assert.match(html, />確定移除</); assert.match(html, />取消</)
   assert.ok(!html.includes('>顯示回名單<'), '確認時收起其他動作')
@@ -309,8 +309,8 @@ test('安卓編譯：只動 ui 與 JS，沒有新增 Rust 呼叫給手機', () =
 })
 
 test('細部頁：離線但沒被自動隱藏的設備（還有夥伴或未讀）也有「永久移除」，沒有「顯示回名單」；在線的設備沒有', async () => {
-  const off = await render({ dev: 'X' }, { devices: [dev('X', '未命名設備', { online: false, onlineText: '離線', hidden: false })], accounts: ACCT })
+  const off = await render({ dev: 'X', devView: 'info' }, { devices: [dev('X', '未命名設備', { online: false, onlineText: '離線', hidden: false })], accounts: ACCT })
   assert.ok(off.includes('>永久移除<') && !off.includes('>顯示回名單<'))
-  const on = await render({ dev: 'X' }, { devices: [dev('X', '在線機', { online: true, hidden: false })], accounts: ACCT })
+  const on = await render({ dev: 'X', devView: 'info' }, { devices: [dev('X', '在線機', { online: true, hidden: false })], accounts: ACCT })
   assert.ok(!on.includes('>永久移除<'))
 })

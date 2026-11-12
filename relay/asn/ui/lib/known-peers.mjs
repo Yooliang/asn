@@ -4,15 +4,10 @@ const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009
 
 /** 沒有名字的電腦一律叫這個，旁邊照樣顯示完整指紋讓本人核對 */
 export const UNNAMED = '未命名的電腦'
-export const NAME_MAX = 32
+export const NAME_MAX = 40
 
 export const TEXT = {
   unnamed: UNNAMED,
-  rename: '改名',
-  renameSave: '儲存',
-  renameCancel: '取消',
-  renameLabel: '這台電腦的名字',
-  renameHint: '只記在這台；留空就是未命名。',
   title: '認得的電腦',
   lead: '別台電腦第一次連到這台（例如看畫面）時，這台會記住它的設備金鑰並通知你。之後它的金鑰換了，這台會拒絕連線並再通知你。',
   none: '還沒有認得的電腦。',
@@ -44,7 +39,7 @@ export function normalizeView(raw) {
   return {
     peers: arr(raw?.peers).filter(p => typeof p?.node === 'string' && p.node).map(p => ({
       node: p.node,
-      name: clean(p.name, NAME_MAX).trim(),   // 本機記的名字（可能是空的，改名輸入框用）
+      name: clean(p.name, NAME_MAX).trim(),   // 後台的設備名（可能是空的）
       label: clean(p.name, NAME_MAX).trim() || UNNAMED,   // 畫面上顯示的
       fingerprint: clean(p.fingerprint, 32),
       inputNoAsk: p.input_no_ask === true,

@@ -33,7 +33,7 @@
       </div>
       <div class="me-info">
         <div class="me-row">
-          <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱（也是對外的名字）" @change="commitNick" @keydown.enter="$event.target.blur()">
+          <input class="ghost nick-input" v-model="nickText" maxlength="40" aria-label="這台設備的名字" @change="commitNick" @keydown.enter="$event.target.blur()">
           <select class="ghost status-sel" v-model="me.status" aria-label="我的狀態">
             <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
           </select>
