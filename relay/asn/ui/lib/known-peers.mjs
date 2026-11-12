@@ -1,3 +1,4 @@
+import { displayDeviceName } from './device-known.mjs'
 // 設定頁「認得的電腦」（#597 別台看畫面，0.2.8 改版：不再手動配對）。判斷都在 Rust（device_id.rs），這裡只整理要顯示的東西。
 // 兩台第一次連線時各自記住對方的設備金鑰；之後金鑰換了就拒絕並通知本人。這裡只能看、只能「忘記」，不能新增。
 const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').slice(0, n)
@@ -40,7 +41,7 @@ export function normalizeView(raw) {
     peers: arr(raw?.peers).filter(p => typeof p?.node === 'string' && p.node).map(p => ({
       node: p.node,
       name: clean(p.name, NAME_MAX).trim(),   // 後台的設備名（可能是空的）
-      label: clean(p.name, NAME_MAX).trim() || UNNAMED,   // 畫面上顯示的
+      label: displayDeviceName(clean(p.name, NAME_MAX)) || UNNAMED,   // 畫面上顯示的（像指紋的名字當未命名）
       fingerprint: clean(p.fingerprint, 32),
       inputNoAsk: p.input_no_ask === true,
       inputConfirmed: p.input_confirmed === true,

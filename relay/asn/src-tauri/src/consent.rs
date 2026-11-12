@@ -180,8 +180,8 @@ pub fn redeem(data_dir: &Path, action: Action, node: &str, challenge: &str) -> b
 
 /// 生物辨識框上的字最多幾個字
 pub const DESC_MAX: usize = 60;
-/// 框上電腦名字最多幾個字
-const NAME_SHOW_MAX: usize = crate::device_id::OWNER_NAME_MAX;
+/// 外殼確認框上名字最多顯示幾個字（外殼 DESC_MAX 60 字的限制；設備名本身最多 40 字，框上截短，指紋永遠在後面）
+const NAME_SHOW_MAX: usize = 32;
 /// 說明檔的副檔名：`<consent>/<憑證雜湊>.desc`
 pub const DESC_EXT: &str = "desc";
 

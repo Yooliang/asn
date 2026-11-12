@@ -9,6 +9,12 @@ const HEX8 = /(?=[a-f]{0,7}[0-9])[0-9a-f]{8}/i
 const HEX44 = /(?=[a-f\s\u3000]{0,8}[0-9])[0-9a-f]{4}[\s\u3000][0-9a-f]{4}/i
 const looksLikeFingerprint = s => HEX8.test(s) || HEX44.test(s)
 
+/** 顯示用（#1388）：後台給的名字不可信，含「指紋」或像指紋的名字當成沒有名字（呼叫端改顯示「未命名」，指紋另外顯示）。和 Rust 的 display_name_ok 同一套 */
+export const displayDeviceName = name => {
+  const s = String(name ?? '').trim()
+  return s && !s.includes('指紋') && !looksLikeFingerprint(s) ? s : ''
+}
+
 /** 設備名檢查：合規回空字串，不合規回中文提示 */
 export function deviceNameError(name) {
   const raw = String(name ?? '')
@@ -22,11 +28,11 @@ export function deviceNameError(name) {
 }
 
 /**
- * 設備列表（devs＋已永久移除）和認得的電腦對起來：列的 key 就是紀錄的 node。
- * 回 { byNode: { node: 紀錄 }, old: 不在任何一列裡的紀錄 }
+ * 設備列表（畫面上畫出來的列）和認得的電腦對起來：列的 key 就是紀錄的 node。
+ * 回 { byNode: { node: 紀錄 }, old: 不在任何一列裡的紀錄（含已永久移除的設備，要有地方能取消授權或忘記） }
  */
-export function joinKnown(devs, removedDevs, peers) {
-  const inList = new Set([...(devs ?? []), ...(removedDevs ?? [])].map(d => d?.key).filter(Boolean))
+export function joinKnown(devs, peers) {
+  const inList = new Set((devs ?? []).map(d => d?.key).filter(Boolean))
   const byNode = {}, old = []
   for (const p of Array.isArray(peers) ? peers : []) {
     if (!p?.node) continue

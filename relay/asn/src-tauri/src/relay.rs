@@ -139,11 +139,11 @@ pub const DEVICE_RENAME_LOGIN: &str = "要先登入 ASN 帳號才能改設備名
 pub fn device_rename_error(e: &str) -> String {
     let has = |c: &str| e.contains(&format!("HTTP {c}"));
     if has("400") {
-        "名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼）".into()
+        "名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼），也不能是系統保留的名字".into()
     } else if has("401") {
         "登入過期了，請重新登入後再改".into()
     } else if has("404") {
-        "找不到這台設備，或後台還不支援改名".into()
+        "目前不能改名，請稍後再試，或把各台 ASN 更新到最新版".into()
     } else if has("429") {
         "改名太頻繁，請過一分鐘再試".into()
     } else {
@@ -1507,6 +1507,19 @@ pub fn build_group_body(action: &str, raw: &Value) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 設備改名的錯誤_換成給人看的話_不含名字與金鑰() {
+        assert!(device_rename_error("device_rename HTTP 400 bad_request").contains("系統保留的名字"));
+        assert!(device_rename_error("device_rename HTTP 401 unauthorized").contains("重新登入"));
+        assert_eq!(device_rename_error("device_rename HTTP 404 not_found"), "目前不能改名，請稍後再試，或把各台 ASN 更新到最新版");
+        assert!(device_rename_error("device_rename HTTP 429 rate_limited").contains("一分鐘"));
+        assert_eq!(device_rename_error("device_rename 連線失敗：逾時"), "改名沒成功，請稍後再試");
+        for e in ["HTTP 400", "HTTP 404", "HTTP 429", "x"] {
+            let t = device_rename_error(e);
+            assert!(!t.contains("後台") && !t.contains("HTTP"), "{t}");
+        }
+    }
+
     use super::*;
 
     /// 本機一個一次性的假後端：放掉的埠等 delay 毫秒後才綁起來，每個連線回 status，記下連線數

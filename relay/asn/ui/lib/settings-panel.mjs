@@ -28,7 +28,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -118,16 +118,17 @@ export const SettingsPanel = {
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
     const renaming = ref(false), renameText = ref('')
     const renameErr = computed(() => (renameText.value.trim() === '' ? '' : deviceNameError(renameText.value)))
-    const renameStart = () => { renameText.value = curDev.value?.label ?? ''; renaming.value = true }
-    const renameCancel = () => { renaming.value = false; renameText.value = '' }
+    const renameStart = () => { renameText.value = curDev.value?.label ?? ''; renaming.value = true; act('device-rename-clear') }
+    const renameCancel = () => { renaming.value = false; renameText.value = ''; act('device-rename-clear') }
     const renameSave = () => {
       const node = curDev.value?.key
       if (!node || deviceNameError(renameText.value)) return
       act('device-rename', { node, name: renameText.value.trim() })
-      renameCancel()
+      renaming.value = false; renameText.value = ''   // 失敗的話錯誤顯示在名字下面（renameError），不在這裡清
     }
     const peers = computed(() => (props.st.known && Array.isArray(props.st.known.peers) ? props.st.known.peers : []).map(p => ({ ...p, id: p.node })))   // id＝節點（畫面不直接寫 node）
-    const joined = computed(() => joinKnown(devs.value, removedDevs.value, peers.value))
+    // 只算畫面上真的畫出來的設備；已永久移除的（畫面沒有列）歸到「舊設備紀錄」，才找得到地方取消授權或忘記
+    const joined = computed(() => joinKnown(devs.value, peers.value))
     const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
     const oldPeers = computed(() => joined.value.old)
     const mmEmail = ref('')
@@ -367,6 +368,7 @@ export const SettingsPanel = {
                 <b class="dv-curname">{{ curDev.label }}</b>
                 <button class="aero-btn" type="button" v-if="!renaming" :disabled="st.known && st.known.busy" @click="renameStart">改名</button>
               </div>
+              <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
               <form class="pair-rename" v-if="renaming" @submit.prevent="renameSave">
                 <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
                 <small>所有設備都會顯示這個名字</small>
@@ -386,11 +388,11 @@ export const SettingsPanel = {
               <small v-else>還沒連線過，連上時會記住指紋</small>
               <p v-if="curKnown && curKnown.firstSeen">{{ KNOWN.firstSeen(curKnown.firstSeen) }}</p>
               <template v-if="curKnown">
-                <label class="chk"><input type="checkbox" :checked="curKnown.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: curKnown.id, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
+                <label class="chk"><input type="checkbox" :checked="curKnown.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.inputNoAsk" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
                 <small v-if="curKnown.inputNoAsk && curKnown.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
                 <small v-if="curKnown.inputNoAsk && !curKnown.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
-                <template v-if="curDev.phone">
-                  <label class="chk"><input type="checkbox" :checked="curKnown.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: curKnown.id, on: $event.target.checked })" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
+                <template v-if="curDev.phone || curKnown.loginOk">
+                  <label class="chk"><input type="checkbox" :checked="curKnown.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.loginOk" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
                   <small v-if="curKnown.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
                 </template>
               </template>

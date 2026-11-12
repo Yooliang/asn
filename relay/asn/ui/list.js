@@ -402,7 +402,7 @@ function closeLaunchNotice() { launchNotice.open = false }
 const beingViewed = ref([])
 const stopBeingViewed = id => invoke('term_viewed_stop', { id }).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「認得的電腦」（#597）：判斷都在 Rust，這裡只讀本機紀錄。第一次記住和金鑰換了的通知由 Rust 寄信，不在這裡
-const known = reactive({ peers: [], busy: false, error: '', shown: false, ownFp: '', qr: null })
+const known = reactive({ peers: [], busy: false, error: '', renameError: '', shown: false, ownFp: '', qr: null })
 // 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對
 async function loadOwnFp() {
   try { known.ownFp = String(await invoke('device_own_fingerprint') ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
@@ -434,13 +434,20 @@ async function setKnownLoginOk(node, on) {
 // 替某台設備改名（名字只有一個、存在後台）：規則與送出都在 Rust，成功後重讀設備列表與認得的電腦
 async function renameDevice(node, name) {
   known.busy = true
+  let r
   try {
-    const r = await invoke('device_rename', { node, name: String(name ?? '') })
-    known.error = ''
-    await core.refreshRoster()
-    await refreshKnown()
-    return r
-  } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e ?? '')); known.error = String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試。'; return null } finally { known.busy = false }
+    r = await invoke('device_rename', { node, name: String(name ?? '') })
+    known.renameError = ''
+  } catch (e) {
+    console.info('[ASN] 改名沒成功', String(e?.message ?? e ?? ''))
+    known.renameError = String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試。'
+    known.busy = false
+    return null
+  }
+  known.busy = false
+  // 只有改名本身失敗才算失敗；之後重讀名單失敗只記 log（下一輪名單會帶到新名字）
+  try { await core.refreshRoster(); await refreshKnown() } catch (e) { console.info('[ASN] 改名後重讀名單沒成功', String(e?.message ?? e ?? '')) }
+  return r
 }
 async function forgetKnown(node) {
   known.busy = true
@@ -1523,7 +1530,8 @@ const app = createApp({
     // 左上角的名字＝這台設備的後台名字（和設定「設備」的詳情同一個）；改它就是 device_rename。
     // 視窗名／收發室位址不動，me.nick 也不動（對話裡的「我」照舊）。名單還沒讀到這台的名字就先顯示視窗名
     const nickText = ref(selfDeviceName.value)
-    watch(selfDeviceName, n => { nickText.value = n })
+    const nickFocus = ref(false)   // 正在改左上角的名字：名單刷新不要蓋掉輸入中的字
+    watch(selfDeviceName, n => { if (!nickFocus.value) nickText.value = n })
     const commitNick = async () => {
       const want = String(nickText.value ?? '').trim()
       const cur = selfDeviceName.value
@@ -1533,7 +1541,7 @@ const app = createApp({
       if (bad) { restore(); nickErr.value = bad; setTimeout(() => { nickErr.value = '' }, 5000); return }
       const r = await renameDevice(info.node, want)
       if (r) { nickErr.value = ''; nickText.value = String(r.name ?? want) }
-      else { restore(); nickErr.value = known.error; setTimeout(() => { nickErr.value = '' }, 5000) }
+      else { restore(); nickErr.value = known.renameError; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
@@ -1907,6 +1915,7 @@ const app = createApp({
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'known-forget': if (value) await forgetKnown(value); break
         case 'device-rename': if (value?.node) await renameDevice(value.node, value.name); break
+        case 'device-rename-clear': known.renameError = ''; break
         case 'known-qr': await toggleOwnQr(value === true); break
         case 'known-input-no-ask': if (value?.node) await setKnownNoAsk(value.node, value.on); break
         case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
@@ -1971,7 +1980,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, groupsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, groupsUnreadN, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
