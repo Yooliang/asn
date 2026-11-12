@@ -437,6 +437,9 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-chat .term-view.term-remote{flex:1 1 0;min-height:0;overflow:hidden}
 .m-chat .compose-row{flex:none}
 .m-chat .term-view.term-remote .term-view-screen{padding:2px}
+/* 狀態改放最下面的狀態列後，終端區貼滿（不用電腦版的四周留白） */
+.m-chat .term-view.term-desk{padding:0}
+.m-chat .term-view.term-desk .term-view-screen{border-radius:0;margin-bottom:0}
 .m-chat .term-remote .term-remote-bar{margin:1px 6px;padding:0 6px;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
 .m-peer-strip{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
 .m-peer-strip-tx{font-size:14px;overflow-wrap:anywhere}

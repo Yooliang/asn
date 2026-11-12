@@ -85,6 +85,8 @@ export function inScrollableX(target) {
   const el = target?.closest?.(SCROLLX_SELECTOR)
   return !!el && Number(el.scrollWidth) > Number(el.clientWidth) + 1
 }
+// 終端畫面（看別台電腦的終端）：手指在上面橫向滑是要讓終端自己捲，不換分頁；沒有可捲內容也不換（整個區域不接手）
+export const SCROLL_TERM_SELECTOR = '.term-view-screen'
 export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker, .m-dv-grip'
 
 // ---------- 名單 ----------

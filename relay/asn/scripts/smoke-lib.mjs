@@ -752,7 +752,7 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.dterm ? '電腦版看別台終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? '手機看終端檢查' : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeKind = probe => (probe.dterm ? '電腦版看別台終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
 export const probeSource = probe => (probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
@@ -1103,6 +1103,7 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
 import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
 import { mtermviewFollowProbeSource } from './smoke-term-follow.mjs'
+import { mtermBarProbeSource, mtermSwipeProbeSource } from './smoke-term-swipe.mjs'
 import { DTERM_ME, DTERM_MEMBERS, DTERM_NODE, DTERM_PROBES, dtermProbeSource } from './smoke-desk-term.mjs'
 export const MTERMVIEW_PROBES = {
   cursor: { mtermview: true, cursor: true },
@@ -1117,6 +1118,10 @@ export const MTERMVIEW_PROBES = {
   composer: { mtermview: true, composer: true, kb: false },
   composerKb: { mtermview: true, composer: true, kb: true },
   follow: { mtermview: true, follow: true },
+  // 提示在最下面的狀態列、終端上方沒有那一條（0.2.17）；終端區內水平拖動不換分頁、區外照舊換頁
+  // 旗標不能叫 bar：smoke-ui.test.mjs 用 probe.bar 篩大按鈕情境（#539）
+  statusLine: { mtermview: true, statusLine: true },
+  swipe: { mtermview: true, swipe: true },
 }
 export const MTERMVIEW_TEXT = [
   'Claude Code v2.1.0  Opus  ~/demo',
@@ -1221,7 +1226,7 @@ export const mtermComposerProbeSource = ({ kb }) => `(async () => {
   if (bad) return { ok: false, why: bad };
   return { ok: true, why: '' };
 })()`
-export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb, follow }) => follow ? mtermviewFollowProbeSource() : composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
+export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb, follow, statusLine, swipe }) => statusLine ? mtermBarProbeSource() : swipe ? mtermSwipeProbeSource() : follow ? mtermviewFollowProbeSource() : composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => e && e.offsetParent !== null;
   let sw = null;
@@ -1262,7 +1267,7 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   if (!vis(conv())) return { ok: false, why: '一開始應該先顯示訊息列表' };
   sw.click();
   let bar = null;
-  for (let i = 0; i < 80 && !(bar && bar.textContent.includes('正在看')); i++) { await sleep(100); bar = document.querySelector('.term-remote-bar') }
+  for (let i = 0; i < 80 && !(bar && bar.textContent.includes('正在看')); i++) { await sleep(100); bar = document.querySelector('.m-chat .typing') }   // 0.2.17：提示在最下面的狀態列
   if (!bar || !bar.textContent.includes('正在看')) return { ok: false, why: '點「終端」後沒出現「正在看」：' + (document.querySelector('.term-remote')?.textContent || '').slice(0, 80) };
   let rows = '';
   for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
@@ -1279,8 +1284,7 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   if (!(th > 0) || th < window.innerHeight * 0.4 - 1) return { ok: false, why: '終端高度不到螢幕的四成（輸入框回來後橫向 412 高約 46%）：' + Math.round(th) + ' / ' + window.innerHeight };
   const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
   if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
-  const bs = getComputedStyle(bar);
-  if (bar.getBoundingClientRect().height > parseFloat(bs.lineHeight) * 1.5 + 2) return { ok: false, why: '「正在看」那行沒有縮成一行' };
+  if (document.querySelector('.m-chat .term-remote .term-remote-bar')) return { ok: false, why: '終端上方不該再有提示條（已移到最下面的狀態列）' };
   if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（小良哥 11-10）' };
   if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「對話」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
@@ -1330,7 +1334,8 @@ export const mtermviewGateProbeSource = gate => `(async () => {
     if (sw.getAttribute('aria-label') !== '終端') return { ok: false, why: '取消後回到對話，按鈕應該寫「終端」' };
     return { ok: true, why: '' };
   }
-  if (!area || !area.textContent.includes('這支手機沒有設定螢幕鎖，請先設定再查看終端')) return { ok: false, why: '沒設螢幕鎖要顯示提示：' + (area?.textContent || '').slice(0, 80) };
+  const nbar = document.querySelector('.m-chat .typing');
+  if (!area || !nbar || !nbar.textContent.includes('這支手機沒有設定螢幕鎖，請先設定再查看終端')) return { ok: false, why: '沒設螢幕鎖要顯示提示（在最下面的狀態列）：' + (nbar?.textContent || '').slice(0, 80) };
   if (document.querySelector('.term-view-screen .xterm')) return { ok: false, why: '沒設螢幕鎖不該開終端畫面' };
   return { ok: true, why: '' };
 })()`
@@ -1411,6 +1416,10 @@ export const SCENARIOS = [
   { name: 'm-term-composer-kb-360', page: 'm.html', width: 360, height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.composerKb, shot: 'm-term-composer-kb-360.png' },
   // 鍵盤開著（視窗高 420）、40 列假畫面、游標在倒數第 2 列：游標那一列要完整看得到；使用者捲到頂後來新畫面不拉回去
   { name: 'm-term-follow', page: 'm.html', height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.follow, shot: 'm-term-follow-412.png' },
+  { name: 'm-term-status', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.statusLine, shot: 'm-term-status-412.png' },
+  { name: 'm-term-status-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.statusLine, shot: 'm-term-status-360.png' },
+  { name: 'm-term-swipe', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.swipe, shot: 'm-term-swipe-412.png' },
+  { name: 'm-term-swipe-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.swipe, shot: 'm-term-swipe-360.png' },
   { name: 'm-term-follow-360', page: 'm.html', width: 360, height: 420, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.follow, shot: 'm-term-follow-360.png' },
   // 電腦版看別台終端：狀態列（視窗最下面）放「正在看…」或打字中的警示，黑色畫面和訊息框等寬、四周同樣間距；寬窗與窄窗各一
   { name: 'list-term-view', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-term-view-1100.png' },
