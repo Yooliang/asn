@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mobile.css">
 <link rel="stylesheet" href="group.css">
+<link rel="stylesheet" href="modern.css">
+<script src="skin-boot.js"></script>
 </head>
 <body class="m-body">
 <!-- 開機畫面：放在 #app 外面，Vue 掛上去之前就看得到，掛上後由 m.js 移除（#app 在掛上前整個藏起來，不會露出樣板原文） -->
@@ -567,6 +569,15 @@
                     </template>
                     <p class="m-err" v-if="cloudSt.msg" role="status">{{ cloudSt.msg }}</p>
                   </div>
+                </template>
+                <template v-else-if="settingCat === 'look'">
+                      <!-- 外觀（0.2.18）：復古 Aero／現代二選一，同一份畫面只換樣式與圖示；選了馬上換，不用重開 -->
+                      <div class="m-card m-form skin-pick" role="radiogroup" aria-label="外觀">
+                        <label v-for="k in SKINS" :key="k" class="m-check skin-opt" :class="{ on: prefs.skin === k }">
+                          <span class="skin-mini" :class="'skin-mini-' + k" aria-hidden="true"><i></i><b></b></span>
+                          <input type="radio" name="skin" :value="k" v-model="prefs.skin"> {{ SKIN_LABEL[k] }}
+                        </label>
+                      </div>
                 </template>
                 <template v-else-if="settingCat === 'notify'">
                       <div class="m-card m-form">

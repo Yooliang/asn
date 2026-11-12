@@ -3,6 +3,7 @@
 import { FRAME_LABEL, CLOSE_LABEL, notifySummary } from './prefs.mjs'
 import { MODE_LABEL, DP_LABEL, TOOLBAR_LABEL, BUBBLE_LABEL } from './merge.mjs'
 import { DIMS } from './dims.mjs'
+import { SKIN_SHORT } from './skin.mjs'
 import { deviceSummary } from './device-tree.mjs'
 import { AUTO_LABEL, STT_LANG_LABEL } from './voice-prefs.mjs'
 
@@ -53,7 +54,7 @@ export function catSummary(key, s = {}) {
     case 'cloud':
       return '讓雲端 AI 代理加入好友名單'
     case 'look':
-      return join([FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[s.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[s.bubble] ?? ''}`])
+      return join([SKIN_SHORT[s.skin] ?? SKIN_SHORT.aero, FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[s.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[s.bubble] ?? ''}`])
     case 'tabs':
       return `分頁依${dimLabel(s.tabDim)}、分組依${dimLabel(s.groupDim)}`
     case 'notify':
