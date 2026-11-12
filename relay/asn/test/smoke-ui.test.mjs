@@ -358,5 +358,5 @@ test('現代外觀補齊（#1421 A）：有訊息、離線、忙碌的情境；�
   assert.equal(by['m-modern-msgs'].state.mbar, 'offline', '手機：離線標題列')
   assert.equal(tableFor(by['m-modern-busy']).relay_list.members[0].agents[0].status, 'busy', '手機：忙碌標題列')
   const src = probeSource(SCENARIOS.find(s => s.probe?.skinCheck).probe)
-  for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline']) assert.ok(src.includes(must), '檢查要量：' + must)
+  for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline', '.ad-wrap', '.ad-art i', '.ad-new']) assert.ok(src.includes(must), '檢查要量：' + must)
 })
