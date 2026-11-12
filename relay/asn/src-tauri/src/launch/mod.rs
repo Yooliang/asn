@@ -14,6 +14,7 @@ pub(crate) mod claude_screen;
 #[cfg(desktop)]
 mod screen_watch;
 mod resume;
+pub(crate) mod opening;
 pub mod auto_resume;
 pub mod mux_watch;
 #[cfg(all(feature = "gui", not(test)))]

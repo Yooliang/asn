@@ -67,6 +67,7 @@ impl Core {
         }
         for n in &closed {
             self.just_closed.mark(n, now);
+            release_opening_of(&self.known, n);
             self.known.forget(n);
             self.seen_run.remove(n);
             self.missing.remove(n);
@@ -83,5 +84,55 @@ impl Core {
             self.log
                 .line(&format!("known-windows.json save failed: {e}"));
         }
+    }
+}
+
+/// 本人關掉視窗：解除它的「正在開」登記（對話編號從存檔記的資料找，沒有就只解除名字）。
+/// 關掉之後馬上喚醒同一位不會被剛剛的登記擋住；要在 forget 之前呼叫（forget 會把對話編號一起拿掉）
+fn release_opening_of(known: &known::Known, name: &str) {
+    let session = known
+        .entries()
+        .into_iter()
+        .find(|e| e.name == name)
+        .map(|e| e.facts.session)
+        .unwrap_or_default();
+    crate::launch::opening::release(&session, name);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 關閉成功就解除登記_關掉後馬上喚醒同一位不會被擋() {
+        let mut k = known::Known::default();
+        k.touch("archive-test-名字", "claude", 1000);
+        k.set_facts(
+            "archive-test-名字",
+            known::WindowFacts {
+                session: "archive-test-sid".into(),
+                asn_opened: true,
+                ..Default::default()
+            },
+        );
+        assert!(crate::launch::opening::claim(
+            "archive-test-sid",
+            "archive-test-名字"
+        ));
+        assert!(
+            !crate::launch::opening::claim("archive-test-sid", "archive-test-名字"),
+            "登記中會擋"
+        );
+        release_opening_of(&k, "archive-test-名字");
+        assert!(
+            crate::launch::opening::claim("archive-test-sid", "archive-test-名字"),
+            "關閉之後解除了，喚醒不被擋"
+        );
+        crate::launch::opening::release("archive-test-sid", "archive-test-名字");
+        // 存檔沒有這位：只解除名字
+        assert!(crate::launch::opening::claim("", "archive-test-沒記到"));
+        release_opening_of(&k, "archive-test-沒記到");
+        assert!(crate::launch::opening::claim("", "archive-test-沒記到"));
+        crate::launch::opening::release("", "archive-test-沒記到");
     }
 }
