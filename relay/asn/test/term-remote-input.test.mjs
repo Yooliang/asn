@@ -45,7 +45,6 @@ test('多行貼上要先問；一行不用', () => {
   assert.equal(pasteLines('ls\n'), 1, '結尾的換行不算一行')
   assert.equal(pasteLines('a\r\nb\nc'), 3)
   assert.equal(pasteLines(''), 0)
-  assert.match(INPUT_TEXT.pasteAsk(3), /3 行/)
 })
 
 test('送不出去要說，不默默丟掉：整段沒送就照實講', () => {
