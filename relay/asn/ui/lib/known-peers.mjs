@@ -14,6 +14,15 @@ export const TEXT = {
   none: '還沒有認得的電腦。',
   forget: '忘記這台',
   forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
+  forgetTitle: '忘記這台設備？',
+  forgetYes: '忘記',
+  forgetCancel: '取消',
+  // 忘記前的確認句：沒名字就不寫名字、沒指紋就不寫括號（指紋取畫面上分組顯示的前兩組）
+  forgetConfirm: (label, fp) => {
+    const name = String(label ?? '').trim()
+    const g = String(fp ?? '').replace(/\s+/g, '').slice(0, 8).replace(/(.{4})(?=.)/, '$1 ')
+    return `忘記${name && name !== UNNAMED ? `「${name}」` : '這台設備'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
+  },
   firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',
   ownFp: fp => `這台電腦的指紋：${groupFp(fp)}`,
@@ -32,6 +41,18 @@ export function errorText(e) {
   const s = String(e?.message ?? e ?? '')
   for (const [k, t] of ERR) if (s.includes(k)) return t
   return '操作沒有成功，請稍後再試。'
+}
+
+/**
+ * 「忘記」先確認：ask 記下要忘記的那筆（box.value），yes 才送 known-forget、no 只關掉。
+ * box 是 { value }（元件裡用 ref）；forget(id) 由設定頁接成 act('known-forget', id)。
+ */
+export function createForgetConfirm({ box, forget }) {
+  return {
+    ask: rec => { if (rec?.id) box.value = { id: rec.id, text: TEXT.forgetConfirm(rec.label, rec.fingerprint) } },
+    yes: () => { const r = box.value; box.value = null; if (r) forget(r.id) },
+    no: () => { box.value = null },
+  }
 }
 
 /** Rust 回的列表 → 畫面。欄位壞掉的丟掉 */

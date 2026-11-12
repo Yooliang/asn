@@ -2,7 +2,8 @@
 // 元件只顯示「狀態快照」（st）並用 act 事件下指令；狀態與所有動作都在名單視窗的樞紐（list.js）——
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
-import { TEXT as KNOWN, groupFp } from './known-peers.mjs'
+import { TEXT as KNOWN, groupFp, createForgetConfirm } from './known-peers.mjs'
+import { AsnDialog } from './dialog.mjs'
 import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mjs'
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
@@ -33,7 +34,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas },
+  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'acct' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -133,6 +134,9 @@ export const SettingsPanel = {
     const joined = computed(() => { const j = joinKnown(devs.value, peers.value); return devs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
     const oldPeers = computed(() => joined.value.old)
+    // 忘記前先確認：誤按會讓那台下次連線要重新確認指紋
+    const forgetBox = ref(null)
+    const forget = createForgetConfirm({ box: forgetBox, forget: id => act('known-forget', id) })
     const mmEmail = ref('')
     const mmKey = ref('')
     const addMinimax = () => {
@@ -141,7 +145,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers,
+    return { KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -352,7 +356,7 @@ export const SettingsPanel = {
               <div class="pair-row" v-for="p in oldPeers" :key="p.id">
                 <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
                 <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
-                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.id)">忘記</button></span>
+                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="forget.ask(p)">忘記</button></span>
               </div>
             </details>
           </template>
@@ -411,7 +415,7 @@ export const SettingsPanel = {
               </div>
               <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
               <template v-if="curKnown">
-                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', curKnown.id)">{{ KNOWN.forget }}</button></span>
+                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</button></span>
                 <small>{{ KNOWN.forgetNote }}</small>
               </template>
               <p class="pair-warn" v-if="st.known && st.known.error" role="alert">{{ st.known.error }}</p>
@@ -711,5 +715,12 @@ export const SettingsPanel = {
           <small v-if="st.uiLogMsg" role="status">{{ st.uiLogMsg }}</small>
         </section>
       </template>
+      <asn-dialog v-if="forgetBox" :title="KNOWN.forgetTitle" initial-focus=".forget-cancel" @close="forget.no">
+        <p class="launch-notice-body">{{ forgetBox.text }}</p>
+        <div class="partner-actions">
+          <button class="aero-btn forget-cancel" type="button" @click="forget.no">{{ KNOWN.forgetCancel }}</button>
+          <button class="aero-btn dv-danger" type="button" @click="forget.yes">{{ KNOWN.forgetYes }}</button>
+        </div>
+      </asn-dialog>
     </div>`,
 }

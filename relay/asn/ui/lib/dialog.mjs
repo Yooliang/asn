@@ -7,13 +7,13 @@
 export const closesDialog = e => e?.key === 'Escape' && !e.defaultPrevented
 
 export const AsnDialog = {
-  props: { title: { type: String, required: true } },
+  props: { title: { type: String, required: true }, initialFocus: { type: String, default: '' } },   // initialFocus：開啟時先 focus 的子元素（CSS 選擇器）；沒給或找不到就 focus 對話框本身
   emits: ['close'],
   setup(props, { emit }) {
     const { onMounted, onBeforeUnmount, ref } = globalThis.Vue
     const box = ref(null)
     const onKey = e => { if (closesDialog(e)) { e.preventDefault(); emit('close') } }
-    onMounted(() => { document.addEventListener('keydown', onKey, true); box.value?.focus() })
+    onMounted(() => { document.addEventListener('keydown', onKey, true); (box.value?.querySelector(props.initialFocus || ':not(*)') ?? box.value)?.focus() })
     onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true))
     return { box }
   },
