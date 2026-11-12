@@ -241,6 +241,9 @@ function moreManageRow(item, slots) {
  * 通話、前台／後台（有「終端」鈕時不列）、子代理、工作項目、納入管理。群組只有群組那三項。
  * ctx：{ ops（loadOpsContext 的結果）, selfNode, slots（barSlots 的結果依 key 做成的物件）, term（有「終端」鈕）, subLabel }
  */
+/** 「更多」裡由 pickMore 自己處理的 key（通話、前台／後台、子代理、工作項目、切換模型）；其餘的 p: 開頭交給 pickOps、沒有前綴的經 ops 事件交給名單視窗。測試與 pickMore 共用這一份。 */
+export const MORE_OWN_KEYS = Object.freeze(['call', 'window', 'subs', 'tasks', 'p:model'])
+
 export function moreMenuItems(friend, ctx = {}) {
   if (!friend) return []
   const slots = ctx.slots ?? {}
@@ -452,11 +455,14 @@ export const ActionBar = {
       ? (isRoom.value ? groupAll.value : opsAll.value)
       : moreMenuItems(props.friend, { ops: opsCtx, selfNode: props.selfNode, slots: slot.value, term: termReady.value, subLabel: subView.value.label })))
     function pickMore(key) {
-      if (key === 'call') { startCall(); return }
-      if (key === 'window') { onWindow(); return }
-      if (key === 'subs') { toggleSubs(); return }
-      if (key === 'tasks') { onTasks(); return }
-      if (key === 'p:model') { onModel(); return }
+      if (MORE_OWN_KEYS.includes(key)) {
+        if (key === 'call') startCall()
+        else if (key === 'window') onWindow()
+        else if (key === 'subs') toggleSubs()
+        else if (key === 'tasks') onTasks()
+        else onModel()
+        return
+      }
       void pickOps(key)
     }
     const consoleView = computed(() => consoleButtonView(cons.visible))

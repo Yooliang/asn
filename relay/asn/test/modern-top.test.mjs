@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { barSlots, chatGroupItems, groupMenuItems, moreMenuItems, nameplateView } from '../ui/lib/actionbar.mjs'
+import { MORE_OWN_KEYS, barSlots, chatGroupItems, groupMenuItems, managePanelItems, moreMenuItems, nameplateView, opsMenuItems } from '../ui/lib/actionbar.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
 
@@ -99,4 +99,29 @@ test('樣板：名牌列在 .actionbar 之外；list.html 新節點與選取態'
   assert.match(html, /class="room-btn" :class="\{ on: ui\.mode === 'merged' && view === 'chat' && ui\.active === x\.room\.chatId \}"/)
   assert.ok([...html.matchAll(/on: ui\.mode === 'merged' && view === 'chat' && ui\.active === /g)].length >= 3)
   assert.match(html, /<div class="tabbar" role="tablist"/, '分頁列結構照舊（只在現代下用 CSS 收起）')
+})
+
+test('更多：每個 key 都接得住（pickMore 自己處理的，或 pickOps 能分派的），不會點了沒反應', () => {
+  const cases = {
+    一對一在線: F('H', '小文'),
+    一對一離線: F('H', '小離', { status: 'offline' }),
+    雲端代理: F('H', '雲端', { engine: 'cloud' }),
+    群組: F('H', '正見群', { room: true, nick: '正見群' }),
+  }
+  for (const [label, f] of Object.entries(cases)) {
+    const items = build(f)
+    assert.ok(items.length > 0, `${label} 有項目`)
+    // pickOps 實際能分派的：沒有前綴的經 ops 事件交給名單視窗（邀請、加 AI、成員與設定）；p: 開頭的要在管理選單裡，或是第 2 格的喚醒
+    const panel = new Set(managePanelItems(f, ops, f.room === true ? [] : opsMenuItems(f), { selfNode: 'H' }).map(i => i.key))
+    const wake = barSlots(f, { selfNode: 'H', api: true, callable: true, ops, subagents: true, tasks: true, manageCount: 5 })[1].wake === true
+    for (const it of items) {
+      if (MORE_OWN_KEYS.includes(it.key)) continue
+      if (!it.key.startsWith('p:')) { assert.ok(['invite', 'addai', 'manage'].includes(it.key), `${label}：${it.key} 沒前綴卻不是群組／邀請項目`); continue }
+      const ok = panel.has(it.key) || (it.key === 'p:resume' && wake)
+      assert.ok(ok, `${label}：「${it.label}」(${it.key}) 接不住，點了不會有反應`)
+    }
+  }
+  assert.ok(MORE_OWN_KEYS.includes('p:model') && !MORE_OWN_KEYS.includes('p:info'))
+  const src = read('ui', 'lib', 'actionbar.mjs')
+  assert.match(src, /if \(MORE_OWN_KEYS\.includes\(key\)\)/, 'pickMore 用同一份常數')
 })
