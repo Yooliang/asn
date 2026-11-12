@@ -188,7 +188,8 @@ test('貼上：單行直接送、多行要先問；摘要寫行數與字數', ()
   assert.equal(pasteNeedsConfirm('ls -la\n'), false, '只有結尾換行還算單行')
   assert.equal(pasteNeedsConfirm('a\nb'), true)
   assert.equal(pasteNeedsConfirm('a\r\nb'), true)
-  assert.equal(pasteSummary('一\n二\n三'), '要貼上 3 行、5 個字，送進這位夥伴的終端？')
+  assert.equal(pasteSummary('一\n二\n三'), '要送出 3 行、5 個字到這位夥伴的終端嗎？')
+  assert.equal(pasteSummary('一\n二\n三', '小乙'), '要送出 3 行、5 個字到「小乙」的終端嗎？')
 })
 
 test('守門：貼上由元件自己接手（多行確認），不讓 xterm 自己處理', () => {

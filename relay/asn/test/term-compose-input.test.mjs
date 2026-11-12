@@ -125,3 +125,15 @@ test('本機接線：按鈕字與提示字和看別台相同；送出走本機�
   assert.match(view, /emits: \['unsent'\]/)
   assert.ok(!/confirm\(|window\.confirm/.test(view), '沒有瀏覽器確認框')
 })
+
+test('多行確認：本機和看別台用同一句、同兩顆鈕（#1378，電腦手機一致）', () => {
+  const view = read('../ui/lib/term-view.mjs'), remote = read('../ui/lib/term-remote-input.mjs')
+  // 兩邊都只用 term-view.mjs 的 pasteSummary 和 PASTE_TEXT，不各寫一句
+  assert.match(view, /pasteNote\.value = pasteSummary\(text, props\.name\)/)
+  assert.match(remote, /\{\{ pasteSummary\(askPaste, name\) \}\}/)
+  for (const src of [view, remote]) {
+    assert.match(src, /\{\{ PASTE_TEXT\.yes \}\}/)
+    assert.match(src, /\{\{ PASTE_TEXT\.no \}\}/)
+    assert.doesNotMatch(src, /要貼上 /, '舊句子不能留著')
+  }
+})

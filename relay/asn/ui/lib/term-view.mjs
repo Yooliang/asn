@@ -68,12 +68,16 @@ export function pasteNeedsConfirm(text) {
   return /[\r\n]/.test(String(text ?? '').replace(/[\r\n]+$/, ''))
 }
 
-/** 貼上確認列的文字：幾行、幾個字 */
-export function pasteSummary(text) {
+/** 多行送出前的確認字：幾行、幾個字、送到哪位夥伴。本機、別台、電腦、手機都用這一句（#1378） */
+export function pasteSummary(text, name = '') {
   const t = String(text ?? '')
   const lines = t.replace(/[\r\n]+$/, '').split(/\r\n|\r|\n/).length
-  return `要貼上 ${lines} 行、${[...t].length} 個字，送進這位夥伴的終端？`
+  const who = String(name ?? '').trim()
+  return `要送出 ${lines} 行、${[...t].length} 個字到${who ? `「${who}」` : '這位夥伴'}的終端嗎？`
 }
+
+/** 多行確認的兩顆鈕：本機和別台同字 */
+export const PASTE_TEXT = { yes: '送出', no: '取消' }
 
 // 貼上的按鍵：回 false 就是 xterm 不處理，瀏覽器照常貼上（走原本的貼上確認）；否則 xterm 會把 Ctrl+V 送成控制字元並擋掉貼上
 export function termKeyHandler(e) {
@@ -387,14 +391,14 @@ export const TermView = {
       if (!text) return
       lines.yieldAsk()   // 輸入框那句還在等確認時又貼上別段：那句交還給輸入框
       if ([...text].length > PASTE_MAX_CHARS) { inputError.value = '一次貼太多了，請分段貼上。'; return }
-      if (pasteNeedsConfirm(text)) { pendingPaste.value = text; pasteNote.value = pasteSummary(text); return }
+      if (pasteNeedsConfirm(text)) { pendingPaste.value = text; pasteNote.value = pasteSummary(text, props.name); return }
       typed(text, true)
     }
     // 下方輸入框送來的一整句（#1378）：和看別台同一套（term-line.mjs）——打進去再按 Enter、多行先問（用貼上的確認列）、沒送出就交還。
     // 本機不用等誰同意：畫面開著就送；沒開著（還在開、已斷線）直接交還
     const lineAsk = {
       get value() { return pendingPaste.value || null },
-      set value(t) { pendingPaste.value = t || ''; if (t) pasteNote.value = pasteSummary(t) },
+      set value(t) { pendingPaste.value = t || ''; if (t) pasteNote.value = pasteSummary(t, props.name) },
     }
     const lines = createLineSender({
       send: (data, paste) => { inputError.value = ''; return session ? session.sendText(data, paste) : Promise.resolve(false) },
@@ -472,7 +476,7 @@ export const TermView = {
     })
     onMounted(() => { if (props.active || props.keep) start() })
     onBeforeUnmount(stop)
-    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, sendLine, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
+    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, sendLine, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST, PASTE_TEXT }
   },
   template: `
 <div class="term-view">
@@ -480,7 +484,7 @@ export const TermView = {
   <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @wheel.passive="onPullUp" @click="focusTerm" @paste.capture="onPaste"></div>
   <p class="term-view-loading" v-if="histLoading" role="status">讀取更早的內容…</p>
   <button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">{{ TERM_VIEW_LATEST }}</button>
-  <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">送出</button><button class="aero-btn" type="button" @click="cancelPaste">取消</button></p>
+  <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">{{ PASTE_TEXT.yes }}</button><button class="aero-btn" type="button" @click="cancelPaste">{{ PASTE_TEXT.no }}</button></p>
   <p class="term-view-lost" v-if="inputError" role="status">{{ inputError }}</p>
   <p class="term-view-lost" v-if="lostText" role="status">{{ lostText }}<button class="aero-btn" type="button" @click="retry">重試</button></p>
 </div>`,

@@ -2,7 +2,7 @@
 // 按下去就直接發起（11-08 起這台不再確認本人），那台會請那邊的人同意（或那邊的人設過不用每次問）。
 // 打的字在 Rust 端編序號、加密、補送；畫面這邊只把 xterm 收到的按鍵交給 remoteInputApi.send。
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
-import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
+import { frameToWrite, loadXterm, xtermOptions, pasteSummary, PASTE_TEXT } from './term-view.mjs'
 import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBarState, startError } from './term-remote.mjs'
 import { ENTER_DELAY_MS, createLineSender, pasteLines } from './term-line.mjs'
 export { ENTER_DELAY_MS, pasteLines }
@@ -18,9 +18,6 @@ export const INPUT_TEXT = {
   stop: '結束打字',
   back: '改回只能看',
   again: '再開一次',
-  pasteAsk: n => `要貼上 ${n} 行嗎？貼上之後那個視窗可能會一次執行好幾行。`,
-  paste: '貼上',
-  cancel: '取消',
   sendFailed: '這段沒有送出，請再試一次。',
 }
 
@@ -119,7 +116,7 @@ export const RemoteInput = {
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
     onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = takeLeft(); if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
+    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
   },
   template: `
 <div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">
@@ -129,9 +126,9 @@ export const RemoteInput = {
   </p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <p class="term-view-lost" role="alert" v-if="barInline && warn">{{ warn }}</p>
-  <p class="term-view-ask" role="alert" v-if="askPaste">{{ TEXT.pasteAsk(pasteLines(askPaste)) }}
-    <button class="aero-btn" type="button" @click="pasteYes">{{ TEXT.paste }}</button>
-    <button class="aero-btn" type="button" @click="pasteNo">{{ TEXT.cancel }}</button>
+  <p class="term-view-ask" role="alert" v-if="askPaste">{{ pasteSummary(askPaste, name) }}
+    <button class="aero-btn" type="button" @click="pasteYes">{{ PASTE_TEXT.yes }}</button>
+    <button class="aero-btn" type="button" @click="pasteNo">{{ PASTE_TEXT.no }}</button>
   </p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="phase === 'waiting' || phase === 'typing'"></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}
