@@ -127,7 +127,7 @@ export const ChatPane = {
     const restartView = () => { typingEndedNote.value = ''; rvEl.value?.again?.() }
     watch(remoteTyping, on => { if (on) typingEndedNote.value = '' })
     watch(remoteLive, a => {
-      if (props.viewActive !== null) { if (!a) remoteOn.value = false; return }
+      if (props.viewActive !== null) { if (!a) { remoteOn.value = false; remoteTyping.value = false } return }   // 手機：打字一起結束，回來不自動重新開始打字
       if (!a) { if (remoteTyping.value) { typingEndedNote.value = TYPING_ENDED_TEXT; remoteTyping.value = false } else if (remoteShown.value) graceView.leave(); return }
       if (graceView.back() === 'kept') nextTick(() => rvEl.value?.refit?.())
     })
@@ -136,7 +136,7 @@ export const ChatPane = {
     const showMsgs = () => { remoteOn.value = false }
     watch(remoteShown, on => { if (!on) { remoteBar.value = null; typingEndedNote.value = ''; graceView.cancel() } })
     onBeforeUnmount(() => graceView.cancel())   // 關掉分頁時寬限計時一起收掉，不留到期後才跑的回呼
-    const showTerm = () => { remoteOn.value = true }
+    const showTerm = () => { remoteOn.value = true; remoteTyping.value = false }   // 每次切到終端都先只看；要打字由本人從輸入框送出才開始
     async function probeRemote() {
       const f = props.friend
       if (!props.remoteViewApi || !f?.node || f.node === props.selfNode || !remoteLive.value) return

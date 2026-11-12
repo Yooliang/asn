@@ -8,15 +8,69 @@ import { injectSource, tableFor, SCENARIOS, mtermviewFrames } from '../scripts/s
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 const tag = (src, start) => { const i = src.indexOf(start); assert.ok(i >= 0, `找不到 ${start}`); return src.slice(i, src.indexOf('</chat-pane>', i)) }
 
-test('m.html：對話分頁的 chat-pane 給看畫面三樣，不給打字', () => {
+test('m.html：對話分頁的 chat-pane 給看畫面三樣，打字只接手機那一份（#1378）', () => {
   const html = read('../ui/m.html')
   const t = tag(html, '<chat-pane v-if="chatFriend"')
   assert.match(t, /:view-active="nav\.tab === 'chats'"/)
   assert.match(t, /:self-node="selfNode"/)
   assert.match(t, /:remote-view-api="mobileRemoteViewApi"/)
-  assert.doesNotMatch(t, /remote-input-api/, '手機只能看')
-  assert.doesNotMatch(tag(html, '<chat-pane v-if="noticeChat"'), /remote-view-api/, '通知分頁不看終端')
+  // remote-input-api 只准接 mobileRemoteInputApi（發起前會先過本人確認）
+  const inputs = [...html.matchAll(/:remote-input-api="([^"]*)"/g)].map(m => m[1])
+  assert.deepEqual(inputs, ['mobileRemoteInputApi'], '只有對話分頁那一個、只接手機那一份')
+  assert.match(t, /:remote-input-api="mobileRemoteInputApi"/)
+  assert.doesNotMatch(tag(html, '<chat-pane v-if="noticeChat"'), /remote-view-api|remote-input-api/, '通知分頁不看終端也不打字')
   assert.match(read('../ui/m.js'), /mobileRemoteViewApi/)
+  assert.match(read('../ui/m.js'), /import \{ mobileRemoteInputApi, mobileRemoteViewApi \} from '\.\/lib\/mobile-remote-view\.mjs'/)
+})
+
+test('mobileRemoteInputApi：每次開始打字都先本人確認；ok 才送 start（scope 帶 input），cancel／no_lock／作廢的一次什麼都不送', async () => {
+  const { makeMobileRemoteInputApi, CANCELLED } = await import('../ui/lib/mobile-remote-view.mjs')
+  const { NO_LOCK_TEXT } = await import('../ui/lib/mobile-confirm.mjs')
+  const make = results => {
+    const calls = [], asks = [], sent = []
+    const api = makeMobileRemoteInputApi({ confirm: async () => { asks.push(1); return results.shift() }, invoke: async (cmd, args) => { calls.push([cmd, args]); return { id: 'i1', expires_s: 1 } }, send: async (...a) => { sent.push(a) } })
+    return { api, calls, asks, sent }
+  }
+  const ok = make(['ok', 'ok'])
+  assert.deepEqual(await ok.api.start('H', '小乙', '家用機'), { id: 'i1', expires_s: 1 })
+  await ok.api.start('H', '小乙', '')
+  assert.deepEqual(ok.calls, [['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: '家用機', scope: 'input' }], ['term_view_remote_start', { toNode: 'H', partner: '小乙', machine: null, scope: 'input' }]])
+  assert.equal(ok.asks.length, 2, '每次都重新確認，不記住上一次')
+  await ok.api.send('i1', 'ls\r', false)
+  assert.deepEqual(ok.sent, [['i1', 'ls\r', false]], '送字交給 Rust 的命令（只送到登記過的工作階段）')
+  const cancel = make(['cancel'])
+  await assert.rejects(cancel.api.start('H', '小乙'), e => e.code === CANCELLED && e.message === '')
+  assert.deepEqual(cancel.calls, [], '取消：什麼都不送')
+  const noLock = make(['no_lock'])
+  await assert.rejects(noLock.api.start('H', '小乙'), e => e.code === 'no_lock' && e.message === NO_LOCK_TEXT)
+  assert.deepEqual(noLock.calls, [], '沒設螢幕鎖：也不送')
+  for (const weird of [undefined, 'OK', 'yes', true]) {
+    const w = make([weird])
+    await assert.rejects(w.api.start('H', '小乙'))
+    assert.deepEqual(w.calls, [], `確認回 ${weird} 一律當沒過`)
+  }
+  // 確認還在等時畫面收掉（那一次作廢），之後才回 ok：不送 start（那台不跳允許框）
+  let answer
+  const calls = []
+  const late = makeMobileRemoteInputApi({ confirm: () => new Promise(r => { answer = r }), invoke: async (cmd, args) => { calls.push([cmd, args]); return { id: 'i1' } } })
+  let current = true
+  const p = late.start('H', '小乙', '家用機', { wanted: () => current })
+  current = false
+  answer('ok')
+  await assert.rejects(p, e => e.code === CANCELLED)
+  assert.deepEqual(calls, [], '作廢的那一次就算回 ok 也不送 start')
+  // 確認沒回來之前，底層一定還沒被呼叫
+  const order = []
+  let ans2
+  const seq = makeMobileRemoteInputApi({ confirm: () => { order.push('confirm'); return new Promise(r => { ans2 = r }) }, invoke: async cmd => { order.push(cmd); return { id: 'i2' } } })
+  const q = seq.start('H', '小乙', '家用機')
+  await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(order, ['confirm'], '確認還沒回來：不呼叫底層')
+  ans2('ok')
+  await q
+  assert.deepEqual(order, ['confirm', 'term_view_remote_start'])
+  // 打字元件把「這一次還算不算數」交給 start
+  assert.match(read('../ui/lib/term-remote-input.mjs'), /props\.api\.start\(props\.node, props\.name, props\.machine, \{ wanted: \(\) => alive \}\)/)
 })
 
 test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同一份', () => {
@@ -33,7 +87,8 @@ test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同
   assert.ok(row.indexOf('m-term-switch') > row.indexOf('class="tool icon mic"') && row.indexOf('m-term-switch') < row.indexOf('<div class="picker"'), '切換鈕放在這排最後面')
   assert.equal((src.match(/m-term-switch/g) || []).length, 1, '頂端不能再有一列切換')
   assert.match(src, /'is-term': mSwitch && remoteShown/, '看終端時收起輸入框')
-  assert.match(src, /if \(props\.viewActive !== null\) \{ if \(!a\) remoteOn\.value = false; return \}/, '離開對話分頁就結束觀看（手機沒有寬限，只有電腦版有）')
+  assert.match(src, /if \(props\.viewActive !== null\) \{ if \(!a\) \{ remoteOn\.value = false; remoteTyping\.value = false \} return \}/, '離開對話分頁就結束觀看與打字（手機沒有寬限，只有電腦版有）；回來不自動重新開始打字')
+  assert.match(src, /const showTerm = \(\) => \{ remoteOn\.value = true; remoteTyping\.value = false \}/, '切到終端先只看，打字要本人從輸入框送出才開始')
   assert.match(src, /:active="remoteLive"/)
 })
 
@@ -117,10 +172,21 @@ test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生
     assert.equal([...code.matchAll(/\bremoteViewApi\b/g)].length, 0, `${f} 直接用了 remoteViewApi`)
     assert.doesNotMatch(code, /from '\.\/lib\/tauri\.mjs'[^\n]*\bremoteViewApi\b/, `${f} 不能從 tauri.mjs 匯入 remoteViewApi`)
   }
+  // 打字也一樣（#1378）：m.js、m.html、mobile*.mjs 不准引用電腦版的 remoteInputApi（大寫 I 的 mobileRemoteInputApi 不會被比到）
+  for (const f of ['../ui/m.js', '../ui/m.html', ...mobileLibs]) {
+    const code = strip(read(f))
+    assert.equal([...code.matchAll(/\bremoteInputApi\b/g)].length, 0, `${f} 直接用了 remoteInputApi`)
+    assert.doesNotMatch(code, /\.\.\.remoteInputApi/, `${f} 不能展開 remoteInputApi`)
+  }
   // 手機那一份的發起不能是電腦版的 start（電腦版不過生物辨識）
   const mob = read('../ui/lib/mobile-remote-view.mjs')
   assert.doesNotMatch(mob, /start:\s*remoteViewApi\.start/)
   assert.doesNotMatch(mob, /\.\.\.remoteViewApi/, '不能整包展開電腦版的介面（會帶進電腦版的 start）')
+  assert.doesNotMatch(mob, /start:\s*remoteInputApi\.start/, '打字的發起也不能是電腦版的 start')
+  assert.doesNotMatch(mob, /\.\.\.remoteInputApi/, '不能整包展開電腦版的打字介面')
+  const inputApi = mob.replace(/\r\n/g, '\n').split('export function makeMobileRemoteInputApi(')[1].split('\n}\n')[0]
+  assert.match(inputApi, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return invoke\('term_view_remote_start', \{[^}]*scope: 'input' \}\)/, '打字的發起前一定先本人確認；作廢就不送；ok 才送')
+  assert.match(inputApi, /confirm = \(\) => confirmViewer\(\)/)
   assert.match(mob, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認；確認回來時那一次已作廢就不送；ok 才送')
   assert.match(mob, /confirm = \(\) => confirmViewer\(\)/, '預設的確認就是 PR③ 的 confirmViewer')
 })

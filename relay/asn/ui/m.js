@@ -46,7 +46,7 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
-import { mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
+import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
@@ -1324,7 +1324,7 @@ const app = createApp({
     }
 
     return {
-      mobileRemoteViewApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（只能看，案 A：對話頁頂端「訊息／終端」）；發起先過生物辨識，不能用電腦版的 remoteViewApi
+      mobileRemoteViewApi, mobileRemoteInputApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（案 A：對話頁「訊息／終端」切換）、在下方輸入框打字（#1378）；發起先過生物辨識，不能用電腦版的 remoteViewApi／remoteInputApi
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),

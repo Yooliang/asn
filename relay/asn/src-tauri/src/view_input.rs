@@ -9,7 +9,9 @@
 //! - 字交給窗格之前還會經過 `LiveTerms::view_input`（按鍵規則、貼上清理、接手窗格不給、資料夾授權），和本機看畫面打字同一個入口。
 #![cfg_attr(not(test), allow(dead_code))]
 use crate::view_handshake::{self, Eph, Session, SessionKey};
-use crate::view_stream::{DReceiver, End};
+use crate::view_frame::DReceiver;
+#[cfg(desktop)]
+use crate::view_stream::End;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
 use ring::aead;
@@ -133,6 +135,7 @@ pub enum InputEnd {
 }
 
 impl InputEnd {
+    #[cfg(desktop)]
     pub fn end(self) -> End {
         match self {
             InputEnd::Idle => End::InputIdle,
@@ -291,7 +294,7 @@ impl DOutbox {
     /// 排一段字：太長的切成幾幅（不從字中間切，順序不變）。回要馬上送的密文。
     /// **整段成功或整段不收：** 太快、太長、總量到上限都回錯，序號和等確認的佇列都不動（不會只送前半段，後面靜默丟掉）
     pub fn push(&mut self, data: &str, paste: bool, now_ms: u64) -> Result<Vec<String>, String> {
-        let parts = crate::launch::term_view::split_chunks(data, MAX_DATA_BYTES);
+        let parts = crate::term_frame::split_chunks(data, MAX_DATA_BYTES);
         if parts.is_empty() {
             return Err("沒有要送的字".into());
         }

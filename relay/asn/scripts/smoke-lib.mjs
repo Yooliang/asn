@@ -1274,7 +1274,7 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   if (!rows.includes('測試通過')) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rows.slice(0, 60) };
   await sleep(300);
   if (vis(conv())) return { ok: false, why: '看終端時訊息列表應該收起來' };
-  if (document.querySelector('.term-remote-switch')) return { ok: false, why: '手機只能看，不該有「打字」切換鈕' };
+  if (document.querySelector('.term-remote-switch')) return { ok: false, why: '不該有「打字」切換鈕（打字走下方輸入框）' };
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
   if (sw.getAttribute('aria-label') !== '對話') return { ok: false, why: '看終端時按鈕應該寫「對話」：' + sw.getAttribute('aria-label') };
   if (plain()) return { ok: false, why: '看終端時切換鈕' + plain() };

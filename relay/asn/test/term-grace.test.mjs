@@ -96,7 +96,7 @@ test('狀態列：結束的說明是 warn；離開超過寬限的那一條帶「
 
 test('接線：只有電腦版（viewActive 沒給）走寬限，手機照舊離開就結束', () => {
   const pane = read('../ui/lib/chatpane.mjs')
-  assert.match(pane, /if \(props\.viewActive !== null\) \{ if \(!a\) remoteOn\.value = false; return \}/, '手機：離開分頁就結束觀看')
+  assert.match(pane, /if \(props\.viewActive !== null\) \{ if \(!a\) \{ remoteOn\.value = false; remoteTyping\.value = false \} return \}/, '手機：離開分頁就結束觀看與打字，回來不自動重新開始打字')
   assert.match(pane, /if \(remoteTyping\.value\) \{ typingEndedNote\.value = TYPING_ENDED_TEXT; remoteTyping\.value = false \} else if \(remoteShown\.value\) graceView\.leave\(\)/, '打字中離開馬上結束打字並留「已結束打字」，只看才開寬限')
   assert.match(pane, /:ended-note="typingEndedNote"/, '切回來停在已結束，不自動重新發起')
   assert.match(pane, /graceView\.back\(\) === 'kept'\) nextTick\(\(\) => rvEl\.value\?\.refit\?\.\(\)\)/, '寬限內切回來重畫一次')

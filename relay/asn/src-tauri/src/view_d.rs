@@ -1,20 +1,20 @@
 //! 看別台電腦的畫面，看的那台（D）的共用核心：電腦版與手機版的 tauri 命令都呼叫這裡。
 //!
 //! - [`begin`]：用設備金鑰簽、向後台發起、比對那台的設備公鑰（TOFU，換了就不開始並通知本人）。電腦版與手機版共用。
-//! - [`start_view`]：手機用的入口，**只看畫面**，要求打字（scope=input）一律拒絕。
-//! - [`spawn_view`]：只看畫面的收幀迴圈（手機用；電腦版因為還有打字，另有自己的迴圈）。每 15 秒回報、不簽章，只收不送。
+//! - [`start_view`]：手機用的入口。看畫面或打字（#1378）；要打字，那台的指紋要先在手機上確認過，那台也照電腦的規則問那邊的人。
+//! - [`spawn_view`]：手機的收幀迴圈（電腦版另有自己的迴圈）。每 15 秒回報、不簽章。看畫面只收不送；
+//!   打字的工作階段在對方接受、驗過簽章之後才登記送出端（`view_d_input`），送字與補送都在那裡，這個檔不送。
 //! - 後端（權杖、設備金鑰、後台、認得的電腦）與畫面（送畫面、送結束）都用 trait 注入，所以單元測試不用網路也不用視窗。
 //! - 紀錄只有長度和次數，沒有畫面內容。
 use crate::device_id::{DeviceKey, KnownPeers, Tofu};
 use crate::view_frame::Frame;
 use crate::view_handshake::{self, Eph, Scope, Session};
+use crate::view_d_input::RemoteInputs;
 use crate::view_remote::{self, RemoteViews, Want};
 use serde_json::{json, Value};
 use std::future::Future;
 use std::sync::Arc;
 
-/// 手機只能看，不能打字
-pub const INPUT_NOT_ON_MOBILE: &str = "手機只能看畫面，不能打字";
 /// 手機要在那台電腦打字，要先確認過它的指紋
 pub const INPUT_NEEDS_CONFIRM: &str = "要先確認這台電腦的指紋，才能在手機上打字";
 /// 回報連續失敗超過這麼久就放棄（和電腦版 view_stream 同值，測試鎖住）
@@ -78,16 +78,12 @@ pub fn clean_machine(machine: Option<String>) -> String {
     machine.unwrap_or_default().chars().filter(|c| !c.is_control()).take(64).collect()
 }
 
-/// 看畫面或打字。沒帶是看畫面；其他字一律不收；`allow_input` 為 false（手機）時要求打字一律拒絕
-pub fn parse_scope(raw: Option<&str>, allow_input: bool) -> Result<Scope, String> {
-    let scope = match raw {
-        None => Scope::View,
-        Some(x) => Scope::parse(x).ok_or("不認得的範圍")?,
-    };
-    if scope == Scope::Input && !allow_input {
-        return Err(INPUT_NOT_ON_MOBILE.into());
+/// 看畫面或打字。沒帶是看畫面；其他字一律不收
+pub fn parse_scope(raw: Option<&str>) -> Result<Scope, String> {
+    match raw {
+        None => Ok(Scope::View),
+        Some(x) => Scope::parse(x).ok_or_else(|| "不認得的範圍".to_string()),
     }
-    Ok(scope)
 }
 
 async fn report_ended<B: ViewBackend>(b: &B, id: &str, token: &str) {
@@ -103,6 +99,10 @@ pub async fn begin<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to
 /// 電腦版與手機版共用的發起；phone 為 true 時，金鑰變了給手機用的說法（帶新指紋），要打字還得先確認過指紋
 #[allow(clippy::too_many_arguments)]
 async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_node: String, partner: String, machine: String, scope: Scope, now_ms: u64, phone: bool) -> Result<Begun, String> {
+    // 手機要打字：那台的指紋還沒在手機上確認過就先擋，連後台都不打（那台不會收到請求）；拿到那台的公鑰後下面再比一次
+    if phone && scope == Scope::Input && !crate::device_id::phone_input_allowed(b.known()?.peer(&to_node)) {
+        return Err(INPUT_NEEDS_CONFIRM.into());
+    }
     let token = b.token().await?;
     let key = b.key().await?;
     let id = view_remote::new_session_id()?;
@@ -152,7 +152,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
         };
         return Err(msg);
     }
-    // 手機要打字得先確認過那台的指紋（現在手機只能看；之後開放打字時這裡照樣擋）
+    // 手機要打字得先確認過那台的指紋，而且確認的就是這次後台給的這把公鑰（Same）
     if phone && scope == Scope::Input && !confirmed {
         views.remove(&id);
         report_ended(b, &id, &token).await;
@@ -161,10 +161,10 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_
     Ok(Begun { id, session: s, eph, topic, target: Target { node: to_node, name: machine, sign_pub: to_pub, tofu, confirmed } })
 }
 
-/// 手機的入口：只看畫面。要求打字（scope=input）在做任何事之前就拒絕
+/// 手機的入口：看畫面或打字（#1378）。打字要先確認過那台的指紋；那台照電腦的規則問那邊的人（允許移動設備關著就拒絕）
 #[allow(clippy::too_many_arguments)]
 pub async fn start_view<B: ViewBackend>(b: &B, views: &RemoteViews, me_node: &str, to_node: String, partner: String, machine: Option<String>, scope: Option<&str>, now_ms: u64) -> Result<Begun, String> {
-    let scope = parse_scope(scope, false)?;
+    let scope = parse_scope(scope)?;
     begin_on(b, views, me_node, to_node, partner, clean_machine(machine), scope, now_ms, true).await
 }
 
@@ -197,13 +197,14 @@ pub fn started_view_json(begun: &Begun) -> Value {
     v
 }
 
-/// 只看畫面的背景：每 15 秒回報一次（不簽章、不確認本人）；拿到對方的公鑰就導出金鑰、開接收頻道；結束就收掉、告訴畫面。
-/// 接收頻道只收不送，收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面
-pub fn spawn_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, url: String, begun: Begun) {
-    crate::rt::spawn(run_view(b, sink, views, url, begun));
+/// 手機的背景：每 15 秒回報一次（不簽章、不確認本人）；拿到對方的公鑰就導出金鑰、開頻道；結束就收掉、告訴畫面。
+/// 收到的畫面經 view_remote::receive（解密、擋重放、再過濾）才交給畫面。看畫面只收不送；
+/// 打字的工作階段在對方接受、驗過簽章、導出送字的金鑰之後才登記送出端（[`crate::view_d_input::RemoteInputs`]），結束時收掉
+pub fn spawn_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, inputs: Arc<RemoteInputs>, url: String, begun: Begun) {
+    crate::rt::spawn(run_view(b, sink, views, inputs, url, begun));
 }
 
-async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, url: String, begun: Begun) {
+async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, inputs: Arc<RemoteInputs>, url: String, begun: Begun) {
     let Begun { id, session: s, eph, topic, target } = begun;
     let mut eph = Some(eph);
     let mut stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
@@ -228,9 +229,17 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
                     view_remote::Step::Ended(r) => break r,
                     view_remote::Step::Accepted { t_eph, t_sig } if eph.is_some() => {
                         let Some(e) = eph.take() else { break "failed".to_string() };
-                        let mut rx = match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
-                            Ok(rx) => rx,
-                            Err(_) => break "rejected".to_string(),
+                        let now_s = (now_ms / 1000) as i64;
+                        // 打字：同一次握手另外導出送字的金鑰（只有打字的工作階段才有送出端）。走到這裡表示那台已經接受（那邊的人按過允許或符合免問）
+                        let (mut rx, outbox) = match s.scope {
+                            Scope::View => match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, now_s) {
+                                Ok(rx) => (rx, None),
+                                Err(_) => break "rejected".to_string(),
+                            },
+                            Scope::Input => match crate::view_input::d_finish(&target.sign_pub, e, &s, &t_eph, &t_sig, now_s) {
+                                Ok((rx, ob)) => (rx, Some(Arc::new(std::sync::Mutex::new(ob)))),
+                                Err(_) => break "rejected".to_string(),
+                            },
                         };
                         // 第一次看到這台：T 的簽章驗過才記住（first 通知只有 T 寄）；記不住就不看
                         if target.tofu == Tofu::New && !matches!(b.see(&target.node, &target.name, &target.sign_pub, now_ms), Ok(Tofu::New | Tofu::Same)) {
@@ -238,13 +247,26 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
                         }
                         let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                         stop_tx = Some(tx);
+                        // 打字才有送出端（要回條）；看畫面只收不送
+                        let send = outbox.as_ref().map(|ob| {
+                            let (otx, orx) = tokio::sync::mpsc::channel::<crate::bell::Outbound>(16);
+                            inputs.add(&id, ob.clone(), otx);
+                            let (sink3, id3) = (sink.clone(), id.clone());
+                            crate::rt::spawn(crate::view_d_input::resend_loop(views.clone(), inputs.clone(), id.clone(), move || sink3.emit(crate::view_d_input::STALLED_EVENT, json!({ "id": id3 }))));
+                            orx
+                        });
+                        let ack_to = outbox.clone();
                         let (sink2, views2, id2, seen) = (sink.clone(), views.clone(), id.clone(), frames_seen.clone());
-                        crate::rt::spawn(crate::bell::run_channel(url.clone(), topic.clone(), false, None::<tokio::sync::mpsc::Receiver<crate::bell::Outbound>>, async move { let _ = stop.await; }, move |ev| {
+                        crate::rt::spawn(crate::bell::run_channel(url.clone(), topic.clone(), send.is_some(), send, async move { let _ = stop.await; }, move |ev| {
                             let crate::bell::Event::Broadcast { event, payload } = ev else { return };
                             let Some(w) = view_remote::frame_wire(event, payload) else { return };
                             match view_remote::receive(&mut rx, &w) {
                                 view_remote::Show::Frame(f) => {
                                     seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    // 打字：那台已經交給窗格到第幾號，之前的不用再補送
+                                    if let (Some(ob), Some(a)) = (&ack_to, f.ack) {
+                                        ob.lock().unwrap_or_else(|e| e.into_inner()).ack(a);
+                                    }
                                     if views2.want(&id2) == Want::Watching {
                                         sink2.emit(FRAME_EVENT, frame_payload(&id2, &f));
                                     }
@@ -286,6 +308,8 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
     drop(stop_tx.take());
     let frames = frames_seen.load(std::sync::atomic::Ordering::Relaxed);
     views.remove(&id);
+    // 打字的送出端停掉時是網路不穩：最後幾個字可能沒送到，要說清楚
+    let reason = if inputs.remove(&id) { "input_stalled".to_string() } else { reason };
     sink.emit(END_EVENT, json!({ "id": id, "text": view_remote::end_text(&reason) }));
     sink.log(format!("{} info [ASN] remote-view end reason={reason} frames={frames}", iso_secs(crate::auth::now_ms() as i64)));
 }
@@ -444,15 +468,47 @@ mod tests {
     }
 
     #[test]
-    fn 要求打字一律拒絕_什麼都不做() {
+    fn 手機要求打字_那台指紋沒確認過_連後台都不打() {
+        // 沒記住、記住了但沒確認：都擋，那台不會收到請求
+        for known in [KnownPeers::default(), known_with("pc", "pk")] {
+            let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), known);
+            let v = RemoteViews::default();
+            let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).err().unwrap();
+            assert_eq!(err, INPUT_NEEDS_CONFIRM);
+            assert!(b.actions().is_empty(), "連後台都不打");
+        }
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), KnownPeers::default());
+        assert_eq!(run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("亂寫"), NOW)).err().unwrap(), "不認得的範圍");
+        assert_eq!(parse_scope(None).unwrap(), Scope::View);
+        assert_eq!(parse_scope(Some("view")).unwrap(), Scope::View);
+        assert_eq!(parse_scope(Some("input")).unwrap(), Scope::Input);
+    }
+
+    #[test]
+    fn 手機要求打字_確認過的同一把才發起_金鑰換了照樣不開始() {
+        let mut k = known_with("pc", "pk");
+        assert!(k.confirm("pc", &crate::device_id::fingerprint("pk"), NOW));
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), k.clone());
         let v = RemoteViews::default();
-        let err = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).err().unwrap();
-        assert_eq!(err, INPUT_NOT_ON_MOBILE);
-        assert!(b.actions().is_empty(), "連後台都不打");
-        assert_eq!(run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), None, Some("亂寫"), NOW)).err().unwrap(), "不認得的範圍");
-        assert_eq!(parse_scope(Some("view"), false).unwrap(), Scope::View);
-        assert_eq!(parse_scope(Some("input"), true).unwrap(), Scope::Input, "電腦版照舊可以打字");
+        let got = run(start_view(&b, &v, "phone", "pc".into(), "夥伴".into(), Some("工作機".into()), Some("input"), NOW)).unwrap();
+        assert_eq!(got.session.scope, Scope::Input);
+        assert!(got.target.confirmed);
+        assert_eq!(b.calls.lock().unwrap()[0].1["scope"], "input", "範圍簽在握手裡、送給後台");
+        assert_eq!(started_view_json(&got)["scope"], "input");
+        assert_eq!(v.want(&got.id), Want::Watching);
+        // 後台這次給的公鑰和確認過的不同：不開始、通知本人、回報結束
+        let b2 = Fake::new(Some(json!({ "topic": "t1", "to_pub": "other" })), k);
+        assert!(run(start_view(&b2, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW)).is_err());
+        assert_eq!(b2.actions(), vec!["term_view_start", "term_view_report"]);
+        assert_eq!(b2.alerts.lock().unwrap().clone(), vec![("pc".to_string(), "changed".to_string())]);
+    }
+
+    #[test]
+    fn 手機看畫面照舊_不用確認指紋() {
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), known_with("pc", "pk"));
+        let got = run(start_view(&b, &RemoteViews::default(), "phone", "pc".into(), "夥伴".into(), None, Some("view"), NOW)).unwrap();
+        assert_eq!((got.session.scope, got.target.confirmed), (Scope::View, false));
+        assert_eq!(b.calls.lock().unwrap()[0].1["scope"], "view");
     }
 
     #[test]

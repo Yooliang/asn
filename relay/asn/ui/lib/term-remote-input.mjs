@@ -96,7 +96,8 @@ export const RemoteInput = {
           term.write(frameToWrite(f))
         })
         offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        const r = await props.api.start(props.node, props.name, props.machine)
+        // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
+        const r = await props.api.start(props.node, props.name, props.machine, { wanted: () => alive })
         id = r.id
         if (!alive) { stop(); return }
         phase.value = 'waiting'
