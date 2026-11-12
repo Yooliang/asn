@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatsUnread, initialNav, noticeUnread, normalizeNav, pageHost, pageNav, shownTab, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, opsNav, noticeUnread, normalizeNav, pageHost, pageNav, shownTab, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -256,4 +256,28 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.match(notice, /<chat-pane v-if="noticeChat" :friend="noticeChat"/); assert.doesNotMatch(notice, /@send|call-api|dict-api/)
   assert.match(js, /const noticeShown = computed\(\(\) => nav\.tab === 'notice' && !nav\.sheet && !!noticeChat\.value\)/)
   assert.match(js, /window\.addEventListener\('popstate', e => \{[\s\S]*?fourthNav\.onPop\(e\.state\)/)
+})
+
+test('從夥伴分頁點橫幅的「換班接手」：先退回對話分頁、進那一則，「⋯」選單的記錄等導覽結束才推（不會搶在前面）', async () => {
+  const h = harness('list')
+  assert.equal(h.r.openChat(), true)
+  let opened = false
+  const done = h.r.whenSettled().then(() => { opened = true; h.r.go(opsNav()) })
+  await Promise.resolve()
+  assert.equal(opened, false, '還在退記錄（popstate 還沒回來）時不能推選單')
+  h.flush()
+  await done
+  assert.equal(h.nav.tab, 'chats'); assert.equal(h.nav.sheet, 'ops'); assert.equal(h.nav.chat, true)
+  assert.deepEqual(h.stack(), [initialNav(), chatNav(), opsNav()], '選單蓋在那一則對話上；返回鍵先關選單、再回對話清單')
+  h.press(); assert.equal(h.nav.sheet, ''); assert.equal(h.nav.chat, true)
+  h.press(); assert.equal(h.nav.chat, false); assert.equal(h.nav.tab, 'chats')
+  // 已經在對話分頁：不用等，立刻就能推
+  const c = harness()
+  c.r.openChat()
+  let ok = false
+  await c.r.whenSettled().then(() => { ok = true })
+  assert.equal(ok, true); assert.deepEqual(c.stack(), [initialNav(), chatNav()])
+  // 畫面接線：bannerHandover 等導覽結束才開選單
+  const js = read('ui', 'm.js')
+  assert.match(/async function bannerHandover\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1], /openChat\(b\.id\)\n\s*await fourthNav\.whenSettled\(\)[\s\S]*openOps\(\)/)
 })

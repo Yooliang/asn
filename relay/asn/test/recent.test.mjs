@@ -66,5 +66,7 @@ test('接線守門：活動中的對話在「對話」分頁（不在夥伴名�
   const js = read('m.js')
   assert.match(js, /activeChats\(\{ friends: activeFriends\(friends\.value\)\.filter\(f => !isNoticeFriend\(f\) && !isMergedAway\(f\)\)/, '不含已封存、通知、已併進通知的舊列')
   assert.match(js, /lastId: lastChat\.value \}\)/)
+  assert.match(js, /rooms: hub\.rows\(\{ plainText: plain \}\)/, '群組不套夥伴頁的搜尋字')
+  assert.match(js, /friendMatchesQuery\(\{ nick: x\.room\.name \}, q, plain\) : friendMatchesQuery\(x\.friend, q, plain\)/, '搜尋比對規則和夥伴頁一樣')
   assert.doesNotMatch(js, /recentRows/)
 })

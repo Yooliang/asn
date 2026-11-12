@@ -26,6 +26,10 @@ export function pageTitle(raw) {
 export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   // 退掉記錄後要接著做的事（history.go／back 是非同步的，等 popstate 回來才做）：{ tab, chat } 切到某分頁（chat＝進那一則對話）、{ page } 換一個內頁、{ close, tab } 收起後切到某分頁
   let pending = null
+  // 等導覽結束的人（whenSettled）：pending 清空、畫面切好之後才叫，例如要在那一則對話上再推「⋯」選單的記錄
+  let waiters = []
+  const settle = () => { if (pending) return; const w = waiters; waiters = []; for (const f of w) f() }
+  const whenSettled = () => (pending ? new Promise(r => waiters.push(r)) : Promise.resolve())
   // 內頁實際在瀏覽記錄裡佔幾筆（取代那一層前要確認底下真有一層，否則取代會把唯一一層換掉，返回鍵就直接收起整頁）
   let layers = 0
   const setNav = n => {
@@ -108,6 +112,7 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
       setNav(n)
       if (then.page) openPage(then.page)
       else if (then.tab) switchTab(then.tab, { chat: !!then.chat })
+      settle()
       return
     }
     if (n.tab === PAGE_TAB) {   // 退回內頁的上一層（或從浮層退回內頁）；內頁已經收起又退到它的舊記錄＝照記錄重開
@@ -131,7 +136,7 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     st.fourth = null
     return true
   }
-  return { go, goTab, openChat, openPage, pushLayer, closePage, onPop, check, state, depth, busy: () => !!pending }
+  return { go, goTab, openChat, openPage, pushLayer, closePage, onPop, check, state, depth, whenSettled, busy: () => !!pending }
 }
 
 // 換內頁前先問一句（例如開新夥伴第 2 步還沒送出）：needs(next) 說要不要問；要問就開一層底部浮層（sheet: 'leave'，系統返回鍵＝留下）。

@@ -45,6 +45,7 @@ import { HOME_TAB, chatNav, chatsUnread, noticeUnread, pageHost, shownTab, tabDo
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { activeChats } from './lib/recent.mjs'
+import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError } from './lib/device-known.mjs'
@@ -333,9 +334,10 @@ const app = createApp({
     // 對話分頁的清單：活動中的對話（夥伴與群組，新到舊；不含已封存、通知）；上方的搜尋框只篩這一頁
     const chatQuery = ref('')
     const chatRows = computed(() => {
-      const rows = activeChats({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: roomRows.value, now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value })
-      const q = chatQuery.value.trim().toLowerCase()
-      return q ? rows.filter(x => String(x.kind === 'room' ? x.room.name : x.friend.nick ?? '').toLowerCase().includes(q)) : rows
+      // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
+      const rows = activeChats({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value })
+      const q = normalizeSearchQuery(chatQuery.value)   // 比對規則和夥伴頁一樣（friendMatchesQuery：去掉表情代碼、不分大小寫）
+      return q ? rows.filter(x => (x.kind === 'room' ? friendMatchesQuery({ nick: x.room.name }, q, plain) : friendMatchesQuery(x.friend, q, plain))) : rows
     })
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
@@ -449,6 +451,7 @@ const app = createApp({
       const b = banner.value; banner.value = null
       if (!b) return
       openChat(b.id)
+      await fourthNav.whenSettled()   // 從別的分頁來要先退回對話分頁再進那一則（等 popstate）；「⋯」選單的記錄要推在那一則上面，不能搶先
       await Vue.nextTick()
       await loadLaunchers()
       openOps()
@@ -1195,7 +1198,7 @@ const app = createApp({
       } finally { backfilling = false }
     }
     const refreshAll = async () => { refreshing.value = true; try { await Promise.all([core.refreshRoster(), core.pull('manual')]) } finally { refreshing.value = false } }
-    // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。夥伴與對話清單共用一組（通知、設定頁沒有）
+    // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。只在夥伴頁（對話清單、通知、設定頁沒有）
     function makePtr() {
       const ptr = reactive({ h: 0, ratio: 0, phase: 'idle', dragging: false, el: null })
       let y0 = null
