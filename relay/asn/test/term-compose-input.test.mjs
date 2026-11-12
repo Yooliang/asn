@@ -4,10 +4,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { SEND_LABEL, SEND_LABEL_TERM, composeTermHint } from '../ui/lib/compose.mjs'
 import { ENTER_DELAY_MS } from '../ui/lib/term-remote-input.mjs'
+import { createLineSender } from '../ui/lib/term-line.mjs'
+import { createTermViewSession } from '../ui/lib/term-view.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const pane = read('../ui/lib/chatpane.mjs')
-const input = read('../ui/lib/term-remote-input.mjs')
+// 送一整句的邏輯（Enter 延遲、排隊、多行先問、交還）抽到 term-line.mjs，看別台和看本機共用（#1378）
+const input = read('../ui/lib/term-remote-input.mjs') + read('../ui/lib/term-line.mjs')
+const view = read('../ui/lib/term-view.mjs')
 
 test('按鈕字跟著模式：對話寫「傳送」、終端寫「送出」；提示字寫會打進誰的終端', () => {
   assert.equal(SEND_LABEL, '傳送')
@@ -28,7 +32,8 @@ test('接線：終端畫面按送出走 sendToTerm（不寄信）；沒送進去
   assert.match(send, /if \(termCompose\.value\) \{[^}]*sendToTerm\(t\)[^}]*return \}/, '終端模式先走 sendToTerm 並 return，不 emit send')
   assert.ok(send.indexOf('sendToTerm') < send.indexOf("emit('send'"))
   assert.match(pane, /<remote-input [^>]*@unsent="restoreDraft"/)
-  assert.match(pane, /const termCompose = computed\(\(\) => canRemoteInput\.value && !displayOnly\.value && !viewRestartable\.value\)/, '只有電腦版看別台終端（有打字通道）時')
+  assert.match(pane, /const remoteCompose = computed\(\(\) => canRemoteInput\.value && !displayOnly\.value && !viewRestartable\.value\)/, '電腦版看別台終端（有打字通道）時')
+  assert.match(pane, /const termCompose = computed\(\(\) => remoteCompose\.value \|\| localCompose\.value\)/, '或看本機終端時（#1378）')
   // 已結束打字／離開超過寬限（狀態列有「重新看」）時退回「傳送」，不讓輸入框代替本人按「重新看」
   assert.match(pane, /const viewRestartable = computed\(\(\) => Boolean\(typingEndedNote\.value\) \|\| \(remoteBar\.value\?\.src === 'view' && remoteBar\.value\.restartable === true\)\)/)
 })
@@ -42,4 +47,81 @@ test('打字元件：整句送出後隔一下再送 Enter；開始前先排著�
   const fin = input.slice(input.indexOf('    const finish = text => {'), input.indexOf('    const start = async'))
   assert.match(fin, /if \(left\) emit\('unsent', left\)/, '結束時還沒送的交還')
   assert.match(input, /if \(lineAsk\) \{ lineAsk = false; const t = askPaste\.value; askPaste\.value = null; if \(t\) emit\('unsent', t\) \}/, '等確認時又貼上：那句交還')
+})
+
+// ---- #1378：看本機夥伴的終端，下方輸入框按「送出」直接打進終端（不跳確認框），和看別台同一套 ----
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+// 看本機的送字：走本機畫面的 session（termViewApi.input → term_view_input）
+async function localRig({ fail = false } = {}) {
+  const sent = [], errors = [], unsent = []
+  const session = createTermViewSession({
+    sendInput: async (id, data, paste) => { if (fail) throw new Error('視窗不在前景'); sent.push([id, data, paste]) },
+    onInputError: e => errors.push(e),
+    open: async () => 7,
+    close: async () => {},
+    listen: async () => () => {},
+    createTerm: async () => ({ write() {}, resize() {}, dispose() {} }),
+  })
+  await session.start()
+  const ask = { value: null }
+  const lines = createLineSender({ send: (d, p) => session.sendText(d, p), askPaste: ask, emit: (ev, t) => { if (ev === 'unsent') unsent.push(t) } })
+  return { session, sent, errors, unsent, ask, lines }
+}
+
+test('本機：按送出就打進這個終端（送給本機畫面的編號），隔一下再送 Enter，不用等誰同意', async () => {
+  const r = await localRig()
+  r.lines.sendLine('ls -la\n')
+  await sleep(ENTER_DELAY_MS + 60)
+  assert.deepEqual(r.sent, [[7, 'ls -la', false], [7, '\r', false]])
+  assert.deepEqual(r.unsent, [])
+})
+
+test('本機：多行先問；按取消不送、字交還；按貼上才整段送＋Enter', async () => {
+  const r = await localRig()
+  r.lines.sendLine('a\nb')
+  await sleep(10)
+  assert.equal(r.ask.value, 'a\nb', '先問')
+  assert.deepEqual(r.sent, [])
+  assert.equal(r.lines.answer(false), true)
+  assert.deepEqual(r.unsent, ['a\nb'], '取消：交還給輸入框')
+  r.lines.sendLine('a\nb')
+  assert.equal(r.lines.answer(true), true)
+  await sleep(ENTER_DELAY_MS + 60)
+  assert.deepEqual(r.sent, [[7, 'a\nb', true], [7, '\r', false]])
+})
+
+test('本機：送不出去就放回輸入框（不按 Enter），畫面上也說', async () => {
+  const r = await localRig({ fail: true })
+  r.lines.sendLine('echo hi')
+  await sleep(ENTER_DELAY_MS + 60)
+  assert.deepEqual(r.unsent, ['echo hi'])
+  assert.equal(r.errors.length, 1)
+  assert.equal(r.errors[0].message, '視窗不在前景')
+})
+
+test('本機：畫面關了之後送字回「沒送出」', async () => {
+  const r = await localRig()
+  r.session.stop()
+  assert.equal(await r.session.sendText('x'), false)
+})
+
+test('本機接線：按鈕字與提示字和看別台相同；送出走本機畫面，不呼叫別台開始、不出確認', () => {
+  // 同一個 termCompose 決定按鈕字與提示字，本機也在裡面
+  assert.match(pane, /const localCompose = computed\(\(\) => termShown\.value && Boolean\(props\.termViewApi\?\.input\) && !displayOnly\.value\)/)
+  assert.match(pane, /const sendLabel = computed\(\(\) => \(termCompose\.value \? SEND_LABEL_TERM : SEND_LABEL\)\)/)
+  const fn = pane.slice(pane.indexOf('    function sendToTerm(text) {'), pane.indexOf('\n    }\n', pane.indexOf('    function sendToTerm(text) {')))
+  const local = fn.split('\n').find(l => l.includes('if (localCompose.value)'))
+  assert.ok(local, 'sendToTerm 有本機分支')
+  assert.match(local, /tvEl\.value\.sendLine\(text\)/, '交給本機畫面')
+  assert.match(local, /return \}$/, '本機分支先 return，不走別台')
+  assert.ok(!/remoteTyping|rinEl|start|confirm/.test(local), '本機不開別台打字通道、不跳確認')
+  assert.ok(fn.indexOf('if (localCompose.value)') < fn.indexOf('remoteTyping.value = true'))
+  assert.match(pane, /<term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft"/, '沒送進去的字放回輸入框')
+  // 本機畫面：同一套送字邏輯、送字走 session.sendText（termViewApi.input）；點進黑色區直接打字照舊
+  assert.match(view, /import \{ createLineSender \} from '\.\/term-line\.mjs'/)
+  assert.match(view, /send: \(data, paste\) => \{[^}]*session\.sendText\(data, paste\)/)
+  assert.ok(view.includes('t.onData(d => typed(d, false, ime.recent()))'), '原本點進終端直接打字不動')
+  assert.match(view, /emits: \['unsent'\]/)
+  assert.ok(!/confirm\(|window\.confirm/.test(view), '沒有瀏覽器確認框')
 })

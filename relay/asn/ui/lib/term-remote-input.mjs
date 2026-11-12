@@ -4,11 +4,11 @@
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBarState, startError } from './term-remote.mjs'
+import { ENTER_DELAY_MS, createLineSender, pasteLines } from './term-line.mjs'
+export { ENTER_DELAY_MS, pasteLines }
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
-/** 一整句送進去後隔多久按 Enter（分開送，免得那個視窗把整句連 Enter 當成貼上） */
-export const ENTER_DELAY_MS = 120
 export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那邊的人要同意；2 分鐘沒打字會自動結束）'
 
 export const INPUT_TEXT = {
@@ -26,12 +26,6 @@ export const INPUT_TEXT = {
 
 /** 可以打字的 xterm 設定：和本機看畫面一樣，只是不關輸入 */
 export const inputXtermOptions = size => ({ ...xtermOptions(size), disableStdin: false })
-
-/** 貼上的文字有幾行；一行以內不用問 */
-export function pasteLines(text) {
-  const s = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
-  return s ? s.split('\n').length : 0
-}
 
 /** 送字失敗的話：Rust 端回的已經是白話、也寫了這段沒有送出（例如「打太快了，這段沒有送出，請再試一次」）；空的用通用的 */
 export function sendError(e) {
@@ -69,36 +63,18 @@ export const RemoteInput = {
       const text = ev.clipboardData?.getData('text/plain') ?? ''
       ev.preventDefault(); ev.stopPropagation()
       if (!text) return
-      // 輸入框那句還在等確認時又貼上別段：那句交還給輸入框，不要被這次蓋掉
-      if (lineAsk) { lineAsk = false; const t = askPaste.value; askPaste.value = null; if (t) emit('unsent', t) }
+      yieldAsk()   // 輸入框那句還在等確認時又貼上別段：那句交還給輸入框
       if (pasteLines(text) > 1) askPaste.value = text
       else send(text, true)
     }
     // 下方輸入框送來的一整句（#1288）：打進那個視窗再按 Enter。還沒開始打字（等那台同意）就先排著，開始了才送；
-    // 多行的先問一次（和貼上同一個框）。沒送出去就結束（那台拒絕、逾時）時，交還給外層放回輸入框
-    let queued = null, lineAsk = false
-    // 整句沒送出去就交還給輸入框（不用重打）；整句送出了才按 Enter（Enter 沒送出只提示，不重複放回）
-    const typeLine = (text, multi) => {
-      void send(text, multi).then(ok => {
-        if (!ok) { emit('unsent', text); return }
-        setTimeout(() => { void send('\r', false) }, ENTER_DELAY_MS)
-      })
-    }
-    const flush = () => {
-      if (queued === null || phase.value !== 'typing') return
-      const t = queued; queued = null
-      if (pasteLines(t) > 1) { lineAsk = true; askPaste.value = t } else typeLine(t, false)
-    }
-    const sendLine = text => {
-      const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
-      if (!t) return
-      if (queued !== null) emit('unsent', queued)
-      queued = t
-      if (phase.value === 'ended') void start(); else flush()
-    }
+    // 多行的先問一次（和貼上同一個框）。沒送出去就結束（那台拒絕、逾時）時，交還給外層放回輸入框。邏輯和看本機共用（term-line.mjs）
+    const { sendLine, flush, yieldAsk, answer, takeLeft } = createLineSender({
+      send, askPaste, emit, ready: () => phase.value === 'typing', ended: () => phase.value === 'ended', restart: () => { void start() },
+    })
     watch(phase, p => { if (p === 'typing') flush() })
-    const pasteYes = () => { const t = askPaste.value; askPaste.value = null; if (lineAsk) { lineAsk = false; typeLine(t, true) } else send(t, true) }
-    const pasteNo = () => { const t = askPaste.value; askPaste.value = null; if (lineAsk) { lineAsk = false; emit('unsent', t) } }
+    const pasteYes = () => { if (answer(true)) return; const t = askPaste.value; askPaste.value = null; send(t, true) }
+    const pasteNo = () => { if (!answer(false)) askPaste.value = null }
     const cleanup = () => {
       clearTimeout(warnTimer)
       offFrame?.(); offEnd?.(); offFrame = offEnd = null
@@ -108,8 +84,7 @@ export const RemoteInput = {
     }
     const finish = text => {
       cleanup(); phase.value = 'ended'; note.value = text; id = ''
-      const left = queued ?? (lineAsk ? askPaste.value : null)
-      queued = null; lineAsk = false; askPaste.value = null
+      const left = takeLeft(); askPaste.value = null
       if (left) emit('unsent', left)
     }
     const start = async () => {
@@ -143,7 +118,7 @@ export const RemoteInput = {
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = queued ?? (lineAsk ? askPaste.value : null); queued = null; if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
+    onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = takeLeft(); if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
     return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
   },
   template: `

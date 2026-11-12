@@ -167,7 +167,11 @@ export const ChatPane = {
     // 看別台的終端時（電腦版）：輸入框直接打進那個終端（#1288），提示字與按鈕字跟著換
     // 打字或觀看已經因為離開分頁而結束（狀態列有「重新看」）時退回「傳送」：要不要重新開始由本人按「重新看」決定，不由輸入框代按
     const viewRestartable = computed(() => Boolean(typingEndedNote.value) || (remoteBar.value?.src === 'view' && remoteBar.value.restartable === true))
-    const termCompose = computed(() => canRemoteInput.value && !displayOnly.value && !viewRestartable.value)
+    const remoteCompose = computed(() => canRemoteInput.value && !displayOnly.value && !viewRestartable.value)
+    // 看本機夥伴的終端時（電腦版，#1378）：一樣直接打進那個終端，按鈕字與提示字和看別台相同；本機不用對方同意，沒有確認框、寬限與重新看
+    const tvEl = ref(null)
+    const localCompose = computed(() => termShown.value && Boolean(props.termViewApi?.input) && !displayOnly.value)
+    const termCompose = computed(() => remoteCompose.value || localCompose.value)
     const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? composeTermHint(termViewName.value) : composePlaceholder(props.winMode)))
     const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
     const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))
@@ -220,6 +224,7 @@ export const ChatPane = {
     // 終端畫面：整句打進那個終端。還沒在打字就先開始（第一次那台會跳確認框），字由打字元件排著、開始了才送
     function sendToTerm(text) {
       draft.value = ''; pickerOpen.value = false
+      if (localCompose.value) { nextTick(() => { if (tvEl.value?.sendLine) tvEl.value.sendLine(text); else restoreDraft(text) }); return }
       if (!typingShown.value) remoteTyping.value = true
       nextTick(() => { if (rinEl.value?.sendLine) rinEl.value.sendLine(text); else restoreDraft(text) })
     }
@@ -466,7 +471,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { sendLabel, restoreDraft, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -474,7 +479,7 @@ export const ChatPane = {
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
+  <term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
   <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
   <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">

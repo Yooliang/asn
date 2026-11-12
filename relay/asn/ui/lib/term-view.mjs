@@ -4,6 +4,7 @@
 import { viewHint } from './partner-notice.mjs'
 import { installWideChars } from './term-width.mjs'
 import { HISTORY_LINES, atBottom, createHistory, historyScrollTop, historyToWrite, scrollWantsHistory, wheelWantsHistory } from './term-history.mjs'
+import { createLineSender } from './term-line.mjs'
 /** 畫面上提示多久查一次 */
 export const HINT_POLL_MS = 3_000
 const { ref, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
@@ -206,6 +207,14 @@ export function createTermViewSession(deps) {
       .catch(e => deps.onInputError?.({ message: String(e?.message ?? e), lost_bytes: 0 }))
     return true
   }
+  // 下方輸入框送來的字（#1378）：和按鍵排同一條隊、照順序送，但要知道送出去了沒（沒送出就放回輸入框）→ Promise<boolean>
+  const sendText = (data, paste = false) => {
+    if (stopped || viewId === null || !deps.sendInput || !data) return Promise.resolve(false)
+    const id = viewId
+    const done = inputChain.then(() => (stopped ? false : Promise.resolve(deps.sendInput(id, data, !!paste, false)).then(() => true)))
+    inputChain = done.catch(e => deps.onInputError?.({ message: String(e?.message ?? e), lost_bytes: 0 }))
+    return done.catch(() => false)
+  }
   const stop = () => {
     if (stopped) return
     stopped = true
@@ -246,7 +255,7 @@ export function createTermViewSession(deps) {
       lost(String(e?.message ?? e))
     }
   }
-  return { start, stop, input, wantHistory, backToBottom, frozen: () => hist.frozen(), historyState: () => hist.state(), flushed: () => chain, inputFlushed: () => inputChain, viewId: () => viewId }
+  return { start, stop, input, sendText, wantHistory, backToBottom, frozen: () => hist.frozen(), historyState: () => hist.state(), flushed: () => chain, inputFlushed: () => inputChain, viewId: () => viewId }
 }
 
 let xtermLoad = null
@@ -289,7 +298,8 @@ export const TermView = {
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
     keep: { type: Boolean, default: false },    // 電腦版：離開分頁時畫面與連線都留著（不停止、不關閉），切回來重畫一次；沒有時間上限（本機沒有對方的紅條、不用同意）
   },
-  setup(props) {
+  emits: ['unsent'],   // 下方輸入框送來的那句沒送進去（多行按了取消、送失敗、畫面沒開著），交還給外層放回輸入框
+  setup(props, { emit }) {
     const host = ref(null), lostText = ref(''), inputError = ref(''), pendingPaste = ref(''), pasteNote = ref(''), askHint = ref(''), behind = ref(false), histLoading = ref(false)
     // 夥伴停在要你回答的地方：本機的同意框這時不跳，改在畫面上方提示
     let hintTimer = 0
@@ -360,7 +370,7 @@ export const TermView = {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(apply))
       else apply()
     }
-    const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; pendingPaste.value = '' }
+    const stop = () => { if (session) { session.stop(); session = null } xtermRef = null; const left = lines.takeLeft(); pendingPaste.value = ''; if (left) emit('unsent', left) }
     const typed = (data, paste = false, ime = false) => {
       if (!session || !data) return
       inputError.value = ''
@@ -375,12 +385,27 @@ export const TermView = {
       ev.preventDefault()
       ev.stopPropagation()
       if (!text) return
+      lines.yieldAsk()   // 輸入框那句還在等確認時又貼上別段：那句交還給輸入框
       if ([...text].length > PASTE_MAX_CHARS) { inputError.value = '一次貼太多了，請分段貼上。'; return }
       if (pasteNeedsConfirm(text)) { pendingPaste.value = text; pasteNote.value = pasteSummary(text); return }
       typed(text, true)
     }
-    const confirmPaste = () => { const t = pendingPaste.value; pendingPaste.value = ''; typed(t, true); xtermRef?.focus() }
-    const cancelPaste = () => { pendingPaste.value = ''; xtermRef?.focus() }
+    // 下方輸入框送來的一整句（#1378）：和看別台同一套（term-line.mjs）——打進去再按 Enter、多行先問（用貼上的確認列）、沒送出就交還。
+    // 本機不用等誰同意：畫面開著就送；沒開著（還在開、已斷線）直接交還
+    const lineAsk = {
+      get value() { return pendingPaste.value || null },
+      set value(t) { pendingPaste.value = t || ''; if (t) pasteNote.value = pasteSummary(t) },
+    }
+    const lines = createLineSender({
+      send: (data, paste) => { inputError.value = ''; return session ? session.sendText(data, paste) : Promise.resolve(false) },
+      askPaste: lineAsk, emit,
+    })
+    const sendLine = text => {
+      if (!session || session.viewId() === null) { const t = String(text ?? ''); if (t.trim()) emit('unsent', t); return }
+      lines.sendLine(text)
+    }
+    const confirmPaste = () => { if (!lines.answer(true)) { const t = pendingPaste.value; pendingPaste.value = ''; typed(t, true) } xtermRef?.focus() }
+    const cancelPaste = () => { if (!lines.answer(false)) pendingPaste.value = ''; xtermRef?.focus() }
     const focusTerm = () => xtermRef?.focus()
     // 電腦版 keep：分頁不在畫面上就請後台暫停讀取窗格。舊版後台沒有這個指令：呼叫失敗就吞掉，畫面照常（只是後台照舊一直讀）
     let hidden = false, pauseWarned = false
@@ -447,7 +472,7 @@ export const TermView = {
     })
     onMounted(() => { if (props.active || props.keep) start() })
     onBeforeUnmount(stop)
-    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
+    return { askHint, host, lostText, inputError, pendingPaste, pasteNote, onScroll, onPaste, confirmPaste, cancelPaste, sendLine, focusTerm, retry: start, behind, histLoading, jumpLatest, onPullUp, TERM_VIEW_LATEST }
   },
   template: `
 <div class="term-view">
