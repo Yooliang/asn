@@ -32,5 +32,5 @@ test('設定頁：勾選框在手機的詳情頁，送 known-login-ok（手機�
 
 test('設定頁：按了勾選框先放回目前存的狀態，確認框按「先不要」後不會留著打勾（要按允許、重讀後才打勾）', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(src, /act\('known-login-ok', \{ node: p\.node, on: \$event\.target\.checked \}\); \$event\.target\.checked = p\.loginOk"/)
+  assert.match(src, /act\('known-login-ok', \{ node: curKnown\.id, on: \$event\.target\.checked \}\); \$event\.target\.checked = curKnown\.loginOk"/)
 })
