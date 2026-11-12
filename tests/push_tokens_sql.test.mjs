@@ -1,7 +1,7 @@
 // 推播權杖（migration 20261109100000_push_tokens.sql，#797 PR①）。
 // 靜態：交易內、新表開 RLS、函式只給 service_role、不動既有函式。
 // 實跑（要 pglite）：註冊條件、權杖唯一、取消、要推誰（不在線、權杖 30 天內更新、60 秒一則、停用、兩種情境）、權杖不外流、權限、清除。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +27,7 @@ test('靜態：交易內、新表開 RLS、只給 service_role、不改既有函
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111', U2 = '22222222-2222-2222-2222-222222222222'

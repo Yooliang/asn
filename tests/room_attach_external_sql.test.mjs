@@ -5,7 +5,7 @@
 //    - 一對一附件：別的帳號下載不到（照舊）
 //    - 退出群組後下載不到
 // 3. 還原驗證：把附件查詢改回「同租戶才行」，跨租戶那個測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -25,7 +25,7 @@ test('靜態：migration 在交易內、不刪資料、不開放給 anon／authe
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111' // 小良（主持人）

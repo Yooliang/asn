@@ -1,7 +1,7 @@
 // #468 migration 20261028210000_partner_op_resume_pi.sql：pi 夥伴也能喚醒。
 // 1. 靜態：與正式庫現行定義（基準檔）比只差 engine 判斷那一行；不動權限、不動資料表。
 // 2. 實跑（pglite；沒裝略過）：pi 有對話編號就收下並帶 session；沒有回 no_session；claude 照常；其他引擎照樣 not_claude；在線的照樣 already_online。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -23,7 +23,7 @@ test('靜態：只差 resume 的引擎判斷一行（claude → claude 或 pi）
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'

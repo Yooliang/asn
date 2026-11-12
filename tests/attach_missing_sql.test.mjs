@@ -2,7 +2,7 @@
 // 涵蓋：全綁上＝空；沒綁／過期未綁／不存在／別人的附件＝缺；只回傳 p_ids 裡的編號（去重、依傳入順序）；
 // 與既有 asn_relay_attach_bind 搭配：補綁成功＝齊；綁到別封信的不算綁在這封；兩個請求同時各綁一半，核對看結果不誤判；純讀取。
 // 沒裝 @electric-sql/pglite 時只跑靜態部分。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：只授權 service_role、search_path 空、純讀取；排在依�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const M1 = '00000000-0000-0000-0000-0000000000a1'
 const M2 = '00000000-0000-0000-0000-0000000000a2'

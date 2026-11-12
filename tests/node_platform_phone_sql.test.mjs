@@ -2,7 +2,7 @@
 // 1. 靜態：三個既有函式只多加行、原有的行逐字不變（逐行比對）；回復腳本把它們換回原文；新函式只授權 service_role。
 // 2. 實跑（pglite，沒裝就略過）：只改自己節點的 platform 且不碰機器橋的 launch_closed_reason；手機不能被要求安裝並登入；
 //    收信卡住監控不看手機；平台是空的（舊版）照舊當電腦。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -43,7 +43,7 @@ test('靜態：新函式只授權 service_role、security definer、search_path 
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U1 = '11111111-1111-1111-1111-111111111111'
 

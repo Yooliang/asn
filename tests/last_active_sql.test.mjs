@@ -2,7 +2,7 @@
 // 1. 靜態：只加可為 null 的欄位與函式；新函式 security definer、search_path 空、只授權 service_role；asn_relay_list「只多三行」（對照正式庫基準檔）。
 // 2. 實跑（pglite；沒裝略過）：10 秒內第二次不寫、超過 10 秒會寫、解不到夥伴只寫節點、舊名字不會寫到別人、非 service_role 不能呼叫、
 //    list 多出 last_active_at 而舊欄位不變。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -40,7 +40,7 @@ test('asn_relay_list：與正式庫現行定義比，只多三行 last_active_at
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const P1 = 'p_00000000000000000001'

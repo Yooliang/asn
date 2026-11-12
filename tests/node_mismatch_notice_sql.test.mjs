@@ -1,7 +1,7 @@
 // 雲端代理設定不對的本人通知（20261106130000_node_mismatch_notice.sql，#832）：靜態檢查與 pglite 實跑。
 // 實跑驗：收件人是金鑰所屬節點的擁有者；設定的節點只有同擁有者、啟用中才寫出名字，否則寫「另一個節點」；
 //         代理帶來的字不原樣進信；每節點每小時 1 封；同內容 24 小時不重寄；停用節點、格式不對不寄。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -34,7 +34,7 @@ test('靜態：relay 動作先驗證內容，節點取自金鑰，參數只有�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const B = 'bbbbbbbb-0000-0000-0000-00000000000b'

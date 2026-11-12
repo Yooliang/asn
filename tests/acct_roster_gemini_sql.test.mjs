@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例全部（含 gemini）照預期；權限不變；
 //    gemini 寫入只收 five_hour／weekly；滿額遇滿額、滿額後開始用照收；記著非滿額、來滿額不收；claude／codex 行為不變；
 //    舊的 asn_relay_acct_report 照樣不收 gemini；回復後函式跟原版逐字相同、gemini 列刪掉、約束不再收 gemini；可重跑。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -79,7 +79,7 @@ test('共用案例檔：有 gemini 的滿額案例與基本案例；claude、cod
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

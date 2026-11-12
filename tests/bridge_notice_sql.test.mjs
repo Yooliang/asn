@@ -1,7 +1,7 @@
 // 通知集中 PR-D（20261111110000_bridge_notice.sql，#848）：橋通知由後台以「ASN 通知」寄出。
 // 涵蓋：授權、只能回覆寄給本節點 24 小時內的信、收件人取自原信、原信是通知不回、跨帳號回 cross_account、
 // 內文清控制字元與長度、第一行加設備名、kind 寫在每一列、每封原信最多 3 封、每小時 120 封。沒裝 @electric-sql/pglite 時只跑靜態部分。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -22,7 +22,7 @@ test('靜態：只授權 service_role；security definer、search_path 空；排
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 const B = 'bbbbbbbb-0000-0000-0000-00000000000b'

@@ -3,7 +3,7 @@
 // 2. 實跑（需要 @electric-sql/pglite）：讀（沒設過 null）、寫、驗證（壞值 bad_request）、
 //    內容相同不動（rev／at 不變）、rev 較舊或一樣不覆蓋（stale）、2 秒內連寫不同內容 rate_limited、
 //    別人的帳號互不影響、不影響 ai_wake_limit。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,7 +36,7 @@ test('靜態：鎖定版 migration 讀帳號那一列時有 for update，且簽�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111' // 主持人

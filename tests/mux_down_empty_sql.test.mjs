@@ -1,6 +1,6 @@
 // 終端服務停了也要通知（20261112200000_mux_down_empty.sql）：p_count = 0 用新句型，1～100 一字不改。
 // 靜態：security definer＋search_path 空、只授權 service_role；回復檔逐字等於通知集中那一版。實跑（pglite，沒裝就略過）。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +35,7 @@ test('靜態：兩支函式、security definer、search_path 空、只授權 ser
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 

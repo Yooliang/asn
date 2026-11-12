@@ -1,6 +1,6 @@
 // 遠端打字遇到外來訊息的確認框時結束的原因 held_prompt（20261112300000_term_view_held_prompt.sql，#1254 A）。
 // 靜態：只多收 held_prompt，其餘逐字同上一版；回復檔逐字換回。實跑（pglite，沒裝就略過）。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：只多收 held_prompt；security definer、search_path 空、只�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const ID = '11111111-2222-3333-4444-555555555555'
 

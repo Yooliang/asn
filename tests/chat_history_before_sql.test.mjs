@@ -2,7 +2,7 @@
 // 1. 靜態：先 drop 六參數舊版再建七參數版（不並存）、p_before 預設 null、授權只給 service_role、其餘條件沒被動到。
 // 2. 實跑（需要 `npm i --no-save @electric-sql/pglite`，沒裝就略過）：舊呼叫（五參數、沒帶 before）結果不變；
 //    帶 before 只回更早的最近 N 則；before 剛好等於某則的時間不含那則；before 之前沒信回空；扇出群組照樣一列；函式只剩一個。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -24,7 +24,7 @@ test('靜態：drop 舊簽章再建新簽章、p_before 預設 null、授權只�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'

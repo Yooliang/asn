@@ -2,7 +2,7 @@
 // 1. 靜態檢查：RLS、只給 service_role、security definer＋search_path ''、清理排程冪等。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，要測的人自己 `npm i --no-save @electric-sql/pglite`），
 //    在記憶體內的 Postgres 套用 migration（拿掉 pg_cron 那段），逐條跑規則 1～4、冪等、寄信解析；沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +50,7 @@ test('清理排程：冪等（先 unschedule）；舊名 90 天、夥伴 180 天
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 test('實跑（pglite）：規則 1～4、冪等、舊名轉寄期、寄信解析', { skip: PGlite ? false : '沒有安裝 @electric-sql/pglite' }, async () => {
   const mig = sql.replace(/create extension if not exists pg_cron;[\s\S]*?\$\$\);\n/, '')

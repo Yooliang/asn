@@ -1,7 +1,7 @@
 // 允許移動設備查看終端（migration 20261109120000_mobile_view_platform.sql）：設備公鑰登記平台。
 // 靜態：交易內、只加 platform 欄、函式只給 service_role、兩個簽名都在（避免同名多載歧義）、有回復檔。
 // 實跑（要 pglite）：平台只收兩個值、第一次登記後不能改、舊版不帶照常、換新公鑰才能換平台、pending 帶 from_platform（null 當 desktop）、mobile_off 原因。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +27,7 @@ test('靜態：交易內、只加 platform 欄、函式只給 service_role、新
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

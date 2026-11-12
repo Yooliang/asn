@@ -5,7 +5,7 @@
 //    - 真人沒有 online／engine 欄位；既有欄位（label、display_label…）不變
 //    - 外部帳號的讀者也拿得到 AI 的 online／engine，但輸出裡掃不到別人的節點代號與設備名
 // 3. 還原驗證：把 3 分鐘改成 3 小時、或讓真人也帶欄位，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +29,7 @@ test('靜態：在交易內、不刪資料、不授權 anon／authenticated、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

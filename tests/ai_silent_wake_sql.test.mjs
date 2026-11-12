@@ -6,7 +6,7 @@
 //    - 發言時的檢查（room_ai_chain_blocked）也把靠判斷叫醒的輪算進去
 //    - wake_set 回傳存下的版本（先到先得，輸的人拿到第一份）；lim 標記讀出來是 limited:true；別租戶讀者只看到 x: 代號、不含節點代號
 // 3. 還原驗證：拿掉「wake_info 有通過者也算一輪」、「截止序號」，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +29,7 @@ test('靜態：在交易內、不刪資料、新函式只授權 service_role、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例檔 confirm_sequences 每一步都跟電腦端一致（asn_relay_acct_window_decide）；
 //    端到端：過期之後同一個新重置時間連續 3 次、隔滿 10 分鐘才收；交錯送兩組不誤收；待確認不外洩到 roster；回復後回到原狀。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -69,7 +69,7 @@ test('共用案例檔：待確認序列格式完整', () => {
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

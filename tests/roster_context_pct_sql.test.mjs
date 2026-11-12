@@ -2,7 +2,7 @@
 // 1. 靜態檢查：加可空欄位、roster 存它、list 的在線與離線兩段都帶它，授權與權限檢查保留。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用本 migration，
 //    驗：合格數字存進去並四捨五入；壞值當沒帶、不拒絕整份名單；舊機器橋不送＝null；list 帶出；沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -21,7 +21,7 @@ test('靜態：加可空欄位、roster 存 context_pct、list 兩段都帶、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

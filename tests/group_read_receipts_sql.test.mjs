@@ -6,7 +6,7 @@
 //    - 別租戶的讀者：只有人數（自己發的才有名單），名單標示加（主人名）、輸出掃不到節點代號與帳號 id
 //    - 回應多帶 reads（讀者這邊最近發的訊息的已讀狀況），沒有新訊息時也更新；系統訊息與開頭紀錄不帶
 // 3. 還原驗證：拿掉「≥」「可見起點」「離開」「排除發言者」任一個，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：在交易內、不刪資料、不授權前台、整批共用成�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

@@ -2,7 +2,7 @@
 // 1. 靜態：只授權 service_role、security definer、search_path 空、寄件名以「收發室」結尾、回復檔只 drop 函式。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：擁有者收得到固定內文（只有設備名與信件編號，沒有視窗名）、reply=no、
 //    每節點每小時上限 3 封、別的節點的擁有者收不到、停用或不存在的節點動不到、asn_relay_send 回錯誤時回 failed。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：只授權 service_role、寄件名以收發室結尾、reply=no�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const OWNER_A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const OWNER_B = 'bbbbbbbb-0000-0000-0000-00000000000b'

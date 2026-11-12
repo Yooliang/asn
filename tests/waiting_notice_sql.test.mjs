@@ -1,6 +1,6 @@
 // 夥伴卡在框上的通知（20261104140000_waiting_notice.sql）：靜態檢查與 pglite 實跑。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：擁有者收到固定內文、reply=no、每節點每小時 1 封、沒有擁有者不寄。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -33,7 +33,7 @@ test('靜態：relay 動作先驗證內容，節點取自金鑰', () => {
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const OWNER_A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const OWNER_B = 'bbbbbbbb-0000-0000-0000-00000000000b'

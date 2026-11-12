@@ -1,7 +1,7 @@
 // 手機換節點金鑰的伺服器端（migration 20261113300000_node_key_rotate.sql）。
 // 靜態：交易內、security definer、search_path 空、只給 service_role；回復檔還原上一版 asn_relay_auth。
 // 實跑（要 pglite）：換鑰成功、冪等重送、24 小時 3 次上限、舊金鑰寬限（用過新金鑰後失效、過期失效）、壞雜湊、權限、回復。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -31,7 +31,7 @@ test('靜態：回復檔還原只認現用雜湊的 asn_relay_auth、移除新�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

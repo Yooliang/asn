@@ -3,7 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`），在記憶體內的 Postgres 套用 account_me 與本 migration，
 //    驗：新位址 u:xxx 與舊寫法 XISU/u:xxx 的回信都送到本人（扇出給在線的 ASN）；別人的代號 unknown_to_node；
 //    inbox 多出 sender_display／sender_device／sender_engine，舊欄位的值不變；沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：人代號位址只認 u: 加十二位十六進位、且必須等�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

@@ -11,7 +11,7 @@
 //    - 額度：每人每群組每小時 20 則、每則 @ 最多 8 位、別人叫醒我的 AI 每群組每小時 10 次、可關閉
 //    - 典型情境：小良與工作機 AI「財務」→ 邀財務人員 → 升級成群組 → 討論 → 動帳請小良確認
 // 3. 還原驗證：拿掉 trust 重算、拿掉代號映射、拿掉一次性，對應的測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -37,7 +37,7 @@ test('靜態：三支 migration 都在交易內、不刪資料；人的動作只
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111' // 小良（主持人）

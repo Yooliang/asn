@@ -2,7 +2,7 @@
 // 1. 靜態：只給 service_role、security definer＋search_path ''、簽章沒變（不另開重載）、同 fanout_id 合成一列、帶寄出節點。
 // 2. 實跑（需要 `npm i --no-save @electric-sql/pglite`，沒裝就略過）：扇出三列只回一列（優先呼叫端自己那份）、ids 含全部、
 //    回傳帶 fanout_id／from_node／from_node_name；沒扇出的信 fanout_id 為 null；別帳號看不到。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -22,7 +22,7 @@ test('靜態：授權、簽章不變、同 fanout_id 一列、帶寄出節點名
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'

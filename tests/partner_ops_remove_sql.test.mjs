@@ -2,7 +2,7 @@
 // 1. 靜態檢查：只擴大動作清單、不改舊值；函式本體與上一版（20261023100000 restart）只差在動作清單多了 remove。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）先套原本的 partner_ops，再套這一版：
 //    remove 收得下、舊動作照常、不認得的動作照樣擋。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -22,7 +22,7 @@ test('靜態：只在動作清單加 remove，其餘與上一版一字不差；�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

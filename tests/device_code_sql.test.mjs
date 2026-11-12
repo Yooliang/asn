@@ -2,7 +2,7 @@
 // 靜態檢查＋pglite 實跑（`npm i --no-save @electric-sql/pglite`，沒裝就略過實跑）。
 // 實跑驗：start 頻率限制；approve 建節點（代號規則、擁有者歸屬）；poll 核准前等待、核准後一次性交出（金鑰雜湊才寫入）、之後作廢；
 //         錯碼限次（暴力猜短碼）；到期；未領取就到期的節點作廢；舊節點與其他動作不受影響。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -23,7 +23,7 @@ test('靜態：只授權 service_role、security definer、開 RLS、不存明�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

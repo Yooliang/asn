@@ -1,6 +1,6 @@
 // 寄給本人的信，手機沒開 App 時也留一列（20261104190000_owner_mail_phone.sql）。
 // 回復檔是正式庫上一版的函式：其他節點的行為用它跑同一組情境對照。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -17,7 +17,7 @@ test('靜態：只換一支函式，不動資料表與權限', () => {
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'
 const O = 'bbbbbbbb-0000-0000-0000-000000000001'

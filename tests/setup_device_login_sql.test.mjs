@@ -3,7 +3,7 @@
 //    非 claude 種類的最低版本先是 9999.0.0（還不交）；回復腳本放回原文。
 // 2. 實跑（pglite）：網址規則對 login_link_cases.json 的正反例；兩參數的舊呼叫照舊是 claude；裝置碼型的請求本文每個欄位都檢查；
 //    版本不夠新不交；電腦取請求時多帶請求本文、簽章與手機設備公鑰；密文放一次就鎖、只能放自己節點的；手機取一次就清、只能取自己的；過期清掉。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -65,7 +65,7 @@ test('靜態：回復腳本把三個函式與 link 約束換回原文，drop 新
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑：網址規則對共用正反例（加上兩個新主機的正反例）', { skip }, async () => {

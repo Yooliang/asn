@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    舊用戶端回報與 roster 不變；grok 只收每週、minimax 只收 5 小時與每週；舊的 asn_relay_acct_report 不收 minimax；
 //    沒開代碼查不到；開了查得到且不含 email；撤銷、重開後舊代碼失效；只有本人能開；超過 30 天不回；次數限制；回復後回到原狀。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -58,7 +58,7 @@ test('靜態：既有函式只改明列的片段；只授權 service_role；回�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

@@ -2,7 +2,7 @@
 // 涵蓋：重複送回第一次的 id 並標 duplicate、不多寄一列；跨節點同 id 不算重複；舊客戶端（不帶 client_id）行為不變；
 // 寄信失敗不記 client_id（重試照常寄）；扇出時 client_id 只記在回傳的那一列；語音旗標照舊；權限；lookup。
 // 沒裝 @electric-sql/pglite 時只跑靜態部分。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,7 +30,7 @@ test('靜態：兩支新函式只授權 service_role、search_path 空；排在 
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const C1 = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const C2 = '1a8fad5b-d9cb-469f-a165-70867728950e'

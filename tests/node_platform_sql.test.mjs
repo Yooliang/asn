@@ -2,7 +2,7 @@
 // 1. 靜態：只加欄位與函式（不改舊值）、新函式只授權 service_role。
 // 2. 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）套用 migration：
 //    平台不在清單就存 null、原因過濾成純文字並限 120 字、只改自己節點、launchers 回新欄位並列出有回報平台的沒開放設備。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -22,7 +22,7 @@ test('靜態：只加可為 null 的欄位與檢查條件；新函式 security d
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'

@@ -7,7 +7,7 @@
 //    - 帳號設定可調（asn_account_settings：預設 20、0～200、其他 bad_request（20261029120000 放寬））
 //    - 跨租戶群組用「主持人」帳號的設定，不是發言者的
 // 3. 還原驗證：拿掉 room_post 的上限檢查、或拿掉「真人發言重置」，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +29,7 @@ test('靜態：在交易內、不刪資料、只授權 service_role；room_post 
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111' // 主持人

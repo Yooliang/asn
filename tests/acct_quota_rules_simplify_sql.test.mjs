@@ -4,7 +4,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 tests/fixtures/quota-merge-cases.json 的 cases 每一個、window_pair_cases 每條窗各自判斷；
 //    端到端：同期回升照收、舊視窗重送的舊數字被擋而另一條窗照收、舊版留下的待確認被清掉、回復後回到簡化之前。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -78,7 +78,7 @@ test('共用案例檔：只剩三個原因代碼；每個代碼、每個廠牌�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

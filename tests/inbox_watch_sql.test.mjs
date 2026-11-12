@@ -2,7 +2,7 @@
 // 1. 靜態：security definer＋search_path 空、只授權 service_role、新表開 RLS 且沒有 policy、排程可重跑。
 // 2. 實跑（pglite，沒裝就略過）：門檻、影子跑不寄信、開寄信後補寄、不重複、24 小時再提醒、恢復、手機／不在線／額度扣住的節點不看、
 //    擁有者查不到或單一節點出錯不影響其他節點、每節點每小時最多 3 封。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -37,7 +37,7 @@ test('靜態：排程可重跑（先取消同名排程再建）、先用 false �
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

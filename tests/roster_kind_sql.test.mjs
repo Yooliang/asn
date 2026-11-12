@@ -2,7 +2,7 @@
 // 靜態檢查＋pglite 實跑（`npm i --no-save @electric-sql/pglite`，沒裝就略過實跑）。
 // 驗：舊報法不帶三欄＝kind window／receivable true／model 空；新欄位存取與壞值當預設；list 兩段都帶；
 //     投遞到 receivable=false 的條目回 not_receivable，其他（視窗、沒登記的名字）照舊；send 包裝不改簽名、舊呼叫照常。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -20,7 +20,7 @@ test('靜態：三欄有預設、roster 存、list 兩段都帶、send 包裝只
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 

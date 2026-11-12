@@ -5,7 +5,7 @@
 //    依序套用第一期與第二期 migration：改名後寄舊名改投新名、名字有人用不改投、過了轉寄期／別台不改投、
 //    指定接班（沿用夥伴 ID、併 session、信上欄位改指、前任視窗還開著拒絕、沒簽章／不是你的拒絕）、跨設備接班、
 //    往來記錄以帳號＋夥伴 ID 查（改名前後都拿得到、別租戶的夥伴 ID 不認）、名單帶 partner_id。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -46,7 +46,7 @@ test('靜態：指定接班要本人簽章——簽章的人要擁有呼叫的�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'

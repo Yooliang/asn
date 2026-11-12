@@ -2,7 +2,7 @@
 // 1. 靜態：只給 service_role、security definer＋search_path ''、RLS 開且沒有 policy、本人簽章與擁有關係、只往前（greatest）、函式用 asn_relay_ 新名。
 // 2. 實跑：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用這支：
 //    簽章／擁有關係、壞格式整批不寫、只往前、帳號之間互不看見、多台設備合併、鍵數上限、未來時間夾住。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +32,7 @@ test('靜態：要本人簽章並擁有呼叫節點；寫入只往前（greatest
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

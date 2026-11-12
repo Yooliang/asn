@@ -1,7 +1,7 @@
 // Claude 外掛狀態回報（20261023090000_mod_status.sql）：
 // 1. 靜態檢查：新增可空欄位、新函式只授權 service_role、函式名用 asn_relay_ 前綴、roster／list 保留原有檢查。
 // 2. 實跑檢查（有安裝 @electric-sql/pglite 時）：set_claude_mod 驗格式與只動自己節點；roster 存 mod_loaded（只收布林）；list 帶出兩處；沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -23,7 +23,7 @@ test('靜態：加可空欄位、新函式 asn_relay_ 前綴且只授權 service
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

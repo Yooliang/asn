@@ -4,6 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 
 const rd = f => fs.readFileSync(new URL(`../supabase/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const SETUP = rd('migrations/20261102140000_setup_requests.sql')
@@ -27,11 +28,11 @@ test('靜態：回復腳本放回上一版的原文', () => {
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 async function boot(down = false) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec('create role service_role; create role anon; create role authenticated; create schema relay;')
   await db.exec(grab(SETUP, 'create or replace function relay.setup_version_ok('))
   await db.exec(grab(PREV, FN))
@@ -55,3 +56,5 @@ test('實跑：回復後 codex 又不交，claude 照舊', { skip }, async () =>
   assert.equal(await ok('0.2.17', 'codex'), false)
   assert.equal(await ok('0.2.2', 'claude'), true)
 })
+
+closeAtEnd()

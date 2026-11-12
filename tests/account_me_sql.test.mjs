@@ -2,7 +2,7 @@
 // 1. 靜態檢查：只給 service_role、security definer＋search_path ''、新欄位全部可空、舊參數呼叫相容。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，要測的人自己 `npm i --no-save @electric-sql/pglite`），
 //    在記憶體內的 Postgres 套用 migration，逐條跑「以人寄出、扇出、各自 ack、AI 看到同一個人、往來記錄、附件跟著走」；沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +38,7 @@ test('往來記錄只認帳號名下的節點、限 90 天、最多 200 則', ()
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 
 const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'

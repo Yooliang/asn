@@ -2,7 +2,7 @@
 // 1. 靜態：只加欄位、表與函式；新函式 security definer、search_path 空、只授權 service_role；asn_relay_list「只多兩行」（對照正式庫基準檔）。
 // 2. 實跑（pglite；沒裝略過）：只能改自己節點上的夥伴、改名後仍對得上、格式與大小在資料庫再擋一次、頻率限制、移除、
 //    停用節點不能改、取圖限同租戶、list 多出 avatar_updated_at 而舊欄位不變。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -45,7 +45,7 @@ test('asn_relay_list：與正式庫現行定義比，只多兩行 avatar_updated
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'

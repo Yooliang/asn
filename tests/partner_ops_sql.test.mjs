@@ -3,7 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用 migration：
 //    下令（簽章、擁有關係、同租戶、名單、保護名單、開放、改名撞名、模型字元、忙碌、每小時上限）、取走（只拿自己節點、逾時標失敗、帶下令設備名）、
 //    回報（只改自己節點、taken 才能改、4KB 上限）、查進度（只回自己租戶）。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +38,7 @@ test('靜態：下令要本人簽章——簽章的人擁有呼叫節點與目�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+try { PGlite = await fastPGlite() } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'
