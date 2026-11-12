@@ -122,6 +122,7 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
     if (!(await wait(() => barOf().includes('已結束打字')))) return { ok: false, why: '切回來狀態列沒有「已結束打字」：' + barOf().slice(0, 60) };
     const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
     if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
+    if (vis('.term-view-lost button').some(b => b.textContent.trim() === '再看一次')) return { ok: false, why: '終端區還有「再看一次」，和狀態列的「重新看」重複' };
     await sleep(800);
     if (calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來自動重新發起了（要等本人按「重新看」）：start 次數 ' + starts + ' → ' + calls('term_view_remote_start') };
     if (barOf().includes('打字：') || vis('.term-remote-input').length) return { ok: false, why: '切回來還殘留打字：' + barOf().slice(0, 60) };
@@ -132,6 +133,7 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
     if (!(await wait(() => barOf().includes('已結束觀看（離開超過 5 分鐘）')))) return { ok: false, why: '切回來狀態列沒有「已結束觀看（離開超過 5 分鐘）」：' + barOf().slice(0, 60) };
     const again = vis('.chatpane .typing button').find(b => b.textContent.trim() === '重新看');
     if (!again) return { ok: false, why: '狀態列沒有「重新看」按鈕' };
+    if (vis('.term-view-lost button').some(b => b.textContent.trim() === '再看一次')) return { ok: false, why: '終端區還有「再看一次」，和狀態列的「重新看」重複' };
     again.click();
     if (!(await wait(() => calls('term_view_remote_start') === starts + 1))) return { ok: false, why: '按「重新看」沒有重新發起' };
   }
