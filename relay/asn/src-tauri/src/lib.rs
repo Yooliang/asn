@@ -1882,6 +1882,21 @@ fn term_view_close(views: State<'_, Arc<TermViews>>, view_id: u64) {
     }
 }
 
+/// 分頁不在畫面上就暫停讀取窗格（連線和畫面留著），切回來再恢復；恢復後會補推最新的一幅。找不到這個觀看就什麼都不做
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn term_view_set(views: State<'_, Arc<TermViews>>, view_id: u64, paused: bool) {
+    if let Some((_, _, st)) = views
+        .open
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&view_id)
+    {
+        st.paused.store(paused, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// 在畫面裡打字（#597 D）：只有開著的畫面、而且是開它的那個視窗、而且視窗在前景才收；字先過 `check_input`，
 /// 排進佇列由送字的執行緒一次一支送出（積壓太多回錯，不丟字）。`paste` 為真＝貼上（讓終端依程式的模式處理）。
 /// 只有這個 Tauri 命令一個入口：不接後台、不接 CLI，沒有任何 relay 動作碰得到（守門測試）
@@ -2934,7 +2949,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, device_known_list, device_known_forget, device_known_rename, device_known_input_no_ask, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_known_rename, device_known_input_no_ask, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,

@@ -135,6 +135,7 @@ export const ChatPane = {
     const mToggle = computed(() => mTermToggle(remoteShown.value))
     const showMsgs = () => { remoteOn.value = false }
     watch(remoteShown, on => { if (!on) { remoteBar.value = null; typingEndedNote.value = ''; graceView.cancel() } })
+    onBeforeUnmount(() => graceView.cancel())   // 關掉分頁時寬限計時一起收掉，不留到期後才跑的回呼
     const showTerm = () => { remoteOn.value = true }
     async function probeRemote() {
       const f = props.friend

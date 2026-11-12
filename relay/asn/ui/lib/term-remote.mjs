@@ -270,7 +270,7 @@ export const RemoteView = {
     const refit = () => { if (term) { term.refresh?.(0, Math.max(0, (term.rows || 1) - 1)); keepCursorVisible() } }
     onMounted(() => { if (props.active && !props.endedNote) void start() })
     onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup(); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, again: start, expire, refit, TEXT: REMOTE_TEXT }
+    return { host, phase, note, soon, again: start, expire, refit, expired, TEXT: REMOTE_TEXT }
   },
   template: `
 <div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
@@ -278,6 +278,6 @@ export const RemoteView = {
   <p class="term-remote-bar" role="status" v-else-if="barInline && phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
-  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}<button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button></p>
+  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}<button class="aero-btn" type="button" v-if="barInline || !expired" @click="again">{{ TEXT.again }}</button></p>
 </div>`,
 }

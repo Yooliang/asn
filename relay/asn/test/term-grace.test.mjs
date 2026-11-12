@@ -121,6 +121,12 @@ test('接線：TermView 的 keep 不因分頁離開而停止或關閉，切回�
   assert.match(src, /keep: \{ type: Boolean, default: false \}/)
   assert.match(src, /props\.keep \? true : props\.active/, 'keep 時分頁狀態不進重開的條件')
   assert.match(src, /if \(props\.keep \|\| props\.active\) start\(\); else stop\(\)/)
-  assert.match(src, /watch\(\(\) => props\.active, a => \{ if \(a && props\.keep\) refit\(\) \}\)/)
+  assert.match(src, /watch\(\(\) => props\.active, a => \{\s*\r?\n\s*if \(!props\.keep\) return/, '分頁在不在畫面上只有 keep 才管（暫停讀取另見 term-view-pause.test.mjs）')
   assert.match(src, /onMounted\(\(\) => \{ if \(props\.active \|\| props\.keep\) start\(\) \}\)/)
+})
+
+test('電腦版離開分頁而結束：只留狀態列的「重新看」，終端區不再放「再看一次」；關掉分頁時寬限計時一起收掉', () => {
+  const rd = read
+  assert.match(rd('../ui/lib/term-remote.mjs'), /v-if="barInline \|\| !expired" @click="again"/)
+  assert.match(rd('../ui/lib/chatpane.mjs'), /onBeforeUnmount\(\(\) => graceView\.cancel\(\)\)/)
 })
