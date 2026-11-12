@@ -44,6 +44,7 @@ import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
 import { HOME_TAB, chatNav, noticeUnread, pageHost, shownTab, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
+import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
@@ -217,6 +218,7 @@ if (screen.value === 'main') {
   watch(devPrefs, () => devSync.noteLocal(), { deep: true })
   devSync.start()
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
+  watch(() => prefs.skin, v => applySkin(v), { immediate: true })   // 外觀（lib/skin.mjs）：選了馬上換
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
   // 重開 App 回到上次的大分頁（對話／夥伴／通知／設定）；上次正在看某一則對話就直接回到那一則
@@ -571,7 +573,7 @@ const app = createApp({
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.sheetName || vp.cur.name) : ''))
     const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
-    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
+    const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設定 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
@@ -1351,7 +1353,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

@@ -4,6 +4,7 @@ import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
 import { lastWords } from './lib/mobile.mjs'
+import { applySkin, normalizeSkin } from './lib/skin.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB } from './lib/mobile-guides.mjs'
 import { isMergedAway } from './lib/notice.mjs'
 import { ADS, AD_MS, FIXED_TABS, TOP_TABS, topOf, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
@@ -158,6 +159,8 @@ if (!info.shot) devSync.start()
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
+const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到 localStorage，其他視窗跟著換
+watch(skin, v => applySkin(v))
 const frame = ref(normalizeFrame(savedMe.frame))   // 視窗外框：自訂（預設，含舊存檔）／Windows 原生；Rust 端開視窗時讀同一份存檔
 await initFrame()
 // 關閉視窗時：縮到系統匣（預設，含舊存檔）／結束程式；登入時自動啟動以系統上的真實設定為準（不存檔）。程式在 tray.rs
@@ -1200,8 +1203,8 @@ await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoo
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
-const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+watch([me, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
@@ -1623,7 +1626,7 @@ const app = createApp({
     const catSub = key => catSummary(key, {
       devices: visibleRows(deviceTree.value),
       hasUpload: selfHasUpload.value, nowPlayingOn: showNowPlaying.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
-      frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
+      skin: skin.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       notify: notifyPrefs.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
       closeTo: closeTo.value, trayOk: trayOk.value, autostartSupported: autostart.supported, autostartOn: autostart.on,
       maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
@@ -1870,7 +1873,7 @@ const app = createApp({
     const settingsState = computed(() => ({
       nowPlaying: { on: showNowPlaying.value, current: nowPlaying.value },
       status: me.status, hasUpload: selfHasUpload.value, avBusy: avBusy.value, avMsg: avMsg.value,
-      notify: notifyPrefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
+      notify: notifyPrefs.value, skin: skin.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
       devices: deviceTree.value, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
@@ -1903,6 +1906,7 @@ const app = createApp({
         case 'dpMode': ui.dpMode = normalizeDpMode(value); break
         case 'toolbar': ui.toolbar = TOOLBARS.includes(value) ? value : ui.toolbar; break
         case 'bubble': ui.bubble = normalizeBubble(value); break
+        case 'skin': skin.value = normalizeSkin(value); break
         case 'tabDim': setTabDim(value); break
         case 'groupDim': dims.groupDim = value; break
         case 'voice-save': await saveVoice(value); break

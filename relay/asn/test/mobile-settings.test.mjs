@@ -8,8 +8,8 @@ import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { normalizeNav, pageNav, tabNav } from '../ui/lib/mobile.mjs'
 
 test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦版的分類定義', () => {
-  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'notify', 'update', 'about'])   // #268、#650：設備與帳號拆成兩列，順序與電腦版一致；#756：雲端代理獨立一列
-  assert.deepEqual(SETTING_SHEET_KEYS, ['me', 'cloud', 'notify', 'update', 'about'])
+  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'look', 'notify', 'update', 'about'])   // 0.2.18：外觀（復古 Aero／現代）在雲端代理之後，和電腦版同一個順序   // #268、#650：設備與帳號拆成兩列，順序與電腦版一致；#756：雲端代理獨立一列
+  assert.deepEqual(SETTING_SHEET_KEYS, ['me', 'cloud', 'look', 'notify', 'update', 'about'])
   assert.ok(!MOBILE_SETTING_KEYS.includes('known'), '認得的電腦已併進設備頁')
   const rows = mobileSettingRows({})
   assert.deepEqual(rows.map(r => r.key), MOBILE_SETTING_KEYS)
