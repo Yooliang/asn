@@ -2,6 +2,7 @@
 // 每項測試結束就關掉這項測試開的資料庫，keepUntilEnd 標起來的留到整支跑完。
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { track, keepUntilEnd, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 
 let PGlite = null
@@ -25,6 +26,11 @@ test('實跑（pglite）：每個新資料庫都是乾淨的、彼此不共用�
 test('實跑（pglite）：有帶參數的 new PGlite(...) 照原樣交給 PGlite', { skip }, async () => {
   const db = track(new PGlite({}))
   assert.deepEqual((await db.query('select 1 as one')).rows, [{ one: 1 }])
+})
+
+test('實跑（pglite）：經執行器跑時，空資料庫匯出檔放在整批共用的快取目錄（各支讀同一份）', { skip: skip || (process.env.ROOT_TESTS_SHARED_DIR ? false : '沒經執行器跑（沒有 ROOT_TESTS_SHARED_DIR）') }, () => {
+  const names = fs.readdirSync(process.env.ROOT_TESTS_SHARED_DIR)
+  assert.ok(names.some(n => /^pglite-seed-.*\.tar$/.test(n)), names.join(', '))
 })
 
 let sharedDb

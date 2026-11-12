@@ -4,6 +4,7 @@
 // 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒] [--jobs=並行數]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
 // 並行數：--jobs=N ＞ 環境變數 ROOT_TESTS_JOBS ＞ CPU 數（os.availableParallelism()）。--jobs=1 就是一支一支跑。
 // 每支各給一個自己的暫存目錄（TMPDIR／TEMP／TMP 指過去），跑完刪掉；測試檔彼此不共用暫存位置。
+// 另有一個整批共用的快取目錄（環境變數 ROOT_TESTS_SHARED_DIR）：只放建一次後只讀的檔（PGlite 空資料庫匯出檔），跑完刪掉。
 // 輸出：每支開始印一行「開始」，結束時把該支的結果與（失敗時的）輸出一次印成一組，並行時不會交錯。
 // 結束碼：全過 0；有失敗或逾時 1。逾時的會單獨列出來（不算通過）。
 import { spawn, spawnSync } from 'node:child_process'
@@ -143,11 +144,14 @@ export async function runAll(files, { jobs = 1, timeoutSec = 60, requirePglite =
   const res = { passed: [], failed: [], timeout: [] }
   const times = []
   const queue = [...files]
+  // 整批共用的快取目錄：只放「建一次、之後只讀」的東西（例如 PGlite 空資料庫的匯出檔，見 tests/_pglite_close.mjs），跑完刪掉
+  const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-rrt-shared-'))
+  const runEnv = { ...baseEnv, ROOT_TESTS_SHARED_DIR: sharedDir }
   const worker = async () => {
     for (let f = queue.shift(); f !== undefined; f = queue.shift()) {
       log(`開始  ${f}`)
       const t0 = Date.now()
-      const { tmp, env } = isolatedEnv(f, baseEnv)
+      const { tmp, env } = isolatedEnv(f, runEnv)
       let r
       try {
         r = await runOne(path.join(dir, f), timeoutSec, { cwd, env, ...(runArgs ? { args: runArgs } : {}), ...(graceSec != null ? { graceSec } : {}) })
@@ -161,7 +165,7 @@ export async function runAll(files, { jobs = 1, timeoutSec = 60, requirePglite =
       log(formatResult(f, kind, secs, r, pskips))
     }
   }
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, files.length)) }, worker))
+  try { await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, files.length)) }, worker)) } finally { removeQuietly(sharedDir) }
   return { res, times, code: res.failed.length || res.timeout.length ? 1 : 0 }
 }
 

@@ -223,3 +223,17 @@ test('隔離：每支拿到自己的暫存目錄（os.tmpdir() 各不相同）�
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('共用快取目錄：各支拿到同一個 ROOT_TESTS_SHARED_DIR，整批跑完就刪掉', async () => {
+  const body = "console.log('SHARED=' + process.env.ROOT_TESTS_SHARED_DIR)\nprocess.exit(1)"
+  const dir = fakeDir({ 'a.test.mjs': body, 'b.test.mjs': body })
+  try {
+    const out = []
+    await runAll(['a.test.mjs', 'b.test.mjs'], { jobs: 2, timeoutSec: 30, cwd: dir, dir: '.', runArgs: [], log: s => out.push(s) })
+    const shared = (out.join('\n').match(/SHARED=.*$/gm) ?? []).map(s => s.slice(7).trim())
+    assert.equal(shared.length, 2, out.join('\n'))
+    assert.equal(shared[0], shared[1])
+    assert.match(path.basename(shared[0]), /^asn-rrt-shared-/)
+    assert.equal(fs.existsSync(shared[0]), false, '跑完要刪掉')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
