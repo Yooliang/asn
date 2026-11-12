@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskDetail, taskList, taskRun } from './status'
+import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskDetail, taskEntries, taskList, agentRun, agentsWithin, AGENT_LIST_MS } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 type StatusDoc0 = { waitingTool?: string; detail?: string }
@@ -148,47 +148,115 @@ test('背景工作列表：只取 id／說明／類型，不存指令，壞格�
   expect(taskList('壞' as never)).toEqual([])
 })
 
-// #1368：status 分成在跑（run）與閒置（idle）；件數只算在跑的，閒置另外寫「・閒置 M 件」
-test('背景工作狀態：在跑／閒置／沒看過的值／沒帶 status', () => {
+// #1368：子代理／teammate 的在跑／閒置看 $.agent.list()；background_tasks 其餘一律算在跑
+const BG = [
+  { id: 'a1', type: 'subagent', status: 'running', description: '查資料' },
+  { id: 'tsk-9', type: 'teammate', status: 'running', description: '隊友' },
+  { id: 'b1', type: 'shell', status: 'running', description: '建置' },
+  { id: 'm1', type: 'monitor', status: 'running', description: '看日誌' },
+]
+const AGENTS = [
+  { id: 'a1', description: '查資料', type: 'Explore', status: 'running' },
+  { id: 'r-7', teammateId: 'tm-7', description: '隊友', type: 'teammate', status: 'idle', name: 'bob' },
+  { id: 'a2', description: '等核准', type: 'general-purpose', status: 'waiting' },
+  { id: 'a3', description: '排隊中', type: 'general-purpose', status: 'pending' },
+  { id: 'a4', description: '做完了', type: 'general-purpose', status: 'completed' },
+  { id: 'a5', description: '失敗', type: 'general-purpose', status: 'failed' },
+  { id: 'a6', description: '被停掉', type: 'general-purpose', status: 'killed' },
+]
+
+test('子代理狀態：running／waiting／pending 在跑、idle 閒置、completed／failed／killed 不列；沒看過的值算在跑並記一筆', () => {
   const seen: string[] = []
   const note = (s: string) => void seen.push(s)
-  for (const s of ['running', 'pending', 'paused', 'waiting']) expect(taskRun(s, note)).toBe('run')
-  for (const s of ['idle', 'completed', 'failed', 'killed', 'stopped']) expect(taskRun(s, note)).toBe('idle')
+  for (const s of ['running', 'waiting', 'pending']) expect(agentRun(s, note)).toBe('run')
+  expect(agentRun('idle', note)).toBe('idle')
+  for (const s of ['completed', 'failed', 'killed']) expect(agentRun(s, note)).toBe('gone')
   expect(seen).toEqual([])
-  expect(taskRun('sleepy', note)).toBe('run')
-  expect(seen).toEqual(['sleepy'])
-  for (const s of [undefined, null, '', 3, {}]) expect(taskRun(s, note)).toBe('run')
-  expect(seen).toEqual(['sleepy']) // 沒帶 status 的舊資料不記
-  const out = taskList([
-    { id: 'a', status: 'running', description: '建置' },
-    { id: 'b', status: 'idle', description: '舊監看' },
-    { id: 'c', description: '沒帶狀態' },
-    { id: 'd', status: 'completed', description: '跑完了' },
-  ])
-  expect(out.map(t => t.st)).toEqual(['run', 'idle', 'run', 'idle'])
-  expect(JSON.stringify(out)).not.toContain('completed')
+  expect(agentRun('sleepy', note)).toBe('run')
+  expect(agentRun(undefined, note)).toBe('run')
+  expect(seen.length).toBe(2)
+  expect(seen[0]).toContain('sleepy')
 })
 
-test('背景工作說明：件數只算在跑的，閒置接在後面', () => {
-  expect(taskDetail([{ status: 'running' }, { status: 'running' }])).toBe('背景工作 2 件')
-  expect(taskDetail([{ status: 'running' }, { status: 'idle' }, {}])).toBe('背景工作 2 件・閒置 1 件')
-  expect(taskDetail([{ status: 'idle' }, { status: 'completed' }])).toBe('背景工作 0 件・閒置 2 件')
-  expect(taskDetail([{ status: '新的值' }, null, 'x'])).toBe('背景工作 3 件')
-  const many = Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, status: i < 25 ? 'idle' : 'running' }))
-  expect(taskDetail(many)).toBe('背景工作 5 件・閒置 25 件')
-  const all = finalState('answer', { background_tasks: [{ id: 'i', status: 'idle' }] })
-  expect(all).toEqual({ state: 'background', detail: '背景工作 0 件・閒置 1 件', tasks: [{ id: 'i', desc: '', st: 'idle' }] })
+test('agent.list 正常：running／waiting／idle／completed 混合，background_tasks 的子代理與 teammate 改由它涵蓋、不重複計數', () => {
+  const f = finalState('answer', { background_tasks: BG, agents: AGENTS })
+  // 在跑：a1、a2、a3（agent.list）＋ b1、m1（background_tasks 其餘）＝5；閒置：r-7＝1；a4～a6 不列
+  expect(f.state).toBe('background')
+  expect(f.detail).toBe('背景工作 5 件・閒置 1 件')
+  expect(f.tasks?.map(t => [t.id, t.st])).toEqual([['a1', 'run'], ['a2', 'run'], ['a3', 'run'], ['b1', 'run'], ['m1', 'run'], ['r-7', 'idle']])
+  expect(f.tasks?.find(t => t.id === 'a1')?.kind).toBe('Explore')
+  expect(JSON.stringify(f.tasks)).not.toContain('tsk-9')
+  expect(taskDetail(taskEntries(BG, AGENTS))).toBe('背景工作 5 件・閒置 1 件')
 })
 
-test('有閒置的背景工作：狀態仍是 background，狀態檔寫出閒置字樣與 st', async ($, on) => {
+test('agent.list 回 idle 的子代理：不會同時又被 background_tasks 算進在跑', () => {
+  const f = finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running', description: '查資料' }], agents: [{ id: 'a1', description: '查資料', type: 'Explore', status: 'idle' }] })
+  expect(f).toEqual({ state: 'background', detail: '背景工作 0 件・閒置 1 件', tasks: [{ id: 'a1', desc: '查資料', kind: 'Explore', st: 'idle' }] })
+})
+
+test('拿不到 agent.list：background_tasks 全部算在跑（子代理、teammate 也不扣），件數不為 0', () => {
+  const f = finalState('answer', { background_tasks: BG })
+  expect(f.detail).toBe('背景工作 4 件')
+  expect(f.tasks?.every(t => t.st === 'run')).toBe(true)
+  expect(f.tasks?.map(t => t.id)).toEqual(['a1', 'tsk-9', 'b1', 'm1'])
+  // agent.list 拿到了但兩邊對不上（合起來一件都沒有）：也退回，不顯示 0 件
+  expect(finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running' }], agents: [] }).detail).toBe('背景工作 1 件')
+  // background_tasks 是空的：不管 agent.list 說什麼都不是 background（state 判斷不變）
+  expect(finalState('answer', { background_tasks: [], agents: [{ id: 'x', status: 'idle' }] }).state).toBe('idle')
+})
+
+test('取 agent.list：正常回陣列；丟錯、不存在、逾時、格式不對都退回並記原因', async () => {
+  const notes: string[] = []
+  const note = (s: string) => void notes.push(s)
+  const never = () => new Promise<never>(() => undefined)
+  expect(await agentsWithin(async () => AGENTS, never, note)).toEqual(AGENTS)
+  expect(await agentsWithin(async () => AGENTS, () => Promise.reject(new Error('沒有計時')), note)).toEqual(AGENTS)
+  expect(await agentsWithin(() => Promise.reject(new Error('refused')), never, note)).toBeUndefined()
+  expect(await agentsWithin(() => (undefined as unknown as { list: () => unknown }).list(), never, note)).toBeUndefined()
+  expect(await agentsWithin(never, async () => undefined, note)).toBeUndefined()
+  expect(await agentsWithin(async () => ({ x: 1 }), never, note)).toBeUndefined()
+  expect(notes.length).toBe(4)
+  expect(notes[0]).toContain('refused')
+  expect(notes[2]).toContain('逾時')
+  expect(AGENT_LIST_MS).toBe(300)
+})
+
+test('Stop 時 agent.list 正常：狀態檔寫出在跑／閒置分開的件數', async ($, on) => {
   const r = await rig($, on)
+  on('agent.list', () => ({ value: AGENTS }) as never)
   await start($)
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'm1', type: 'monitor', status: 'idle', description: '看日誌' }, { id: 'b1', type: 'shell', status: 'running', description: '建置' }], session_crons: [] } as never)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
-  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件・閒置 1 件' })
-  expect(r.last()?.tasks).toEqual([{ id: 'm1', desc: '看日誌', kind: 'monitor', st: 'idle' }, { id: 'b1', desc: '建置', kind: 'shell', st: 'run' }])
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 5 件・閒置 1 件' })
+  expect(r.last()?.tasks?.filter(t => t.st === 'idle').map(t => t.id)).toEqual(['r-7'])
+})
+
+test('Stop 時 agent.list 丟錯：退回 background_tasks 全部算在跑', async ($, on) => {
+  const r = await rig($, on)
+  on('agent.list', () => {
+    throw new Error('壞了')
+  })
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 4 件' })
+  expect(r.last()?.tasks?.every(t => t.st === 'run')).toBe(true)
+})
+
+test('Stop 時 agent.list 逾時：不卡住，退回 background_tasks 全部算在跑', async ($, on) => {
+  const r = await rig($, on)
+  on('agent.list', () => new Promise(() => undefined) as never)
+  on('clock.sleep', () => ({ value: undefined }) as never)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: BG, session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 4 件' })
 })
 
 test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、下一輪沒有就拿掉', async ($, on) => {
