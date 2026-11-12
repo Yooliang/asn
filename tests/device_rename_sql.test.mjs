@@ -12,6 +12,8 @@ const DOWN = rd('sql/rollback/20261113500000_device_rename_down.sql')
 const SELF = rd('migrations/20261021000100_node_self_name.sql')
 const CLOUD = rd('migrations/20261106120000_cloud_node_rename.sql')
 const OWNS = rd('migrations/20261021060000_owner_signed.sql')
+const LOGIN = rd('migrations/20261021030000_account_login.sql')
+const RELAYFN = rd('migrations/20261020000200_relay_functions.sql')
 const grab = (src, start) => { const i = src.indexOf(start); assert.ok(i >= 0, start); return src.slice(i, src.indexOf('$function$;', i) + '$function$;'.length) }
 const body = f => f.slice(f.indexOf('as $function$'))
 
@@ -47,8 +49,10 @@ const T2 = 'bbbbbbbb-2222-2222-2222-222222222222'
 async function boot({ down = false } = {}) {
   const db = new PGlite()
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
-    create table relay.tenants(id uuid primary key, owner_user uuid);
-    create table relay.nodes(id text primary key, name text, owner_user uuid, tenant_id uuid, status text default 'active', created_via text);
+    create table relay.tenants(id uuid primary key, owner_user uuid, status text default 'active', id_prefix text);
+    create table relay.nodes(id text primary key, name text, owner_user uuid, tenant_id uuid, status text default 'active', created_via text,
+      machine text, key_hash text, bell_topic text, device_id text, last_seen_at timestamptz, role text default 'member', kind text, can_invite boolean);
+    create function relay.asn_ensure_tenant(p_user uuid, p_x text) returns relay.tenants language sql as $$ select * from relay.tenants where owner_user = p_user $$;
     create table relay.room_members(room_id text, member text, display_name text, primary key (room_id, member));
     create table relay.account_events(id bigint generated always as identity primary key, at timestamptz default now(),
       user_id uuid, event text not null, node text, detail jsonb);
@@ -62,6 +66,9 @@ async function boot({ down = false } = {}) {
   await db.exec(grab(SELF, 'create or replace function public.irori_relay_set_self_name(').replace('public.irori_relay_set_self_name', 'public.asn_relay_set_self_name'))
   await db.exec(CLOUD)
   await db.exec(OWNS.slice(OWNS.indexOf('create or replace function public.asn_user_owns_node'), OWNS.indexOf('grant execute on function public.asn_user_owns_node')))
+  await db.exec(grab(LOGIN, 'create or replace function public.asn_node_create('))
+  await db.exec(grab(RELAYFN, 'CREATE OR REPLACE FUNCTION public.irori_relay_update(').replace('public.irori_relay_update(', 'public.asn_relay_update('))
+  await db.exec("update relay.nodes set device_id = 'dev-pc-0123456789abcdef', role = 'owner' where id = 'pc'")
   await db.exec(MIG)
   if (down) await db.exec(DOWN)
   const q = async (t, a) => (await db.query(t, a)).rows
@@ -137,9 +144,39 @@ test('實跑：cloud_node_rename 改名後也標成本人取的', { skip }, asyn
   assert.equal((await cloud(U1, 'pc', 'x')).error, 'not_found', '電腦照舊不走這條')
 })
 
+test('實跑：同一台重新登入（node_create 同 device_id）本人改過名就保留；沒改過照舊用登入時的名字', { skip }, async () => {
+  const { q, rename, nameOf } = await boot()
+  const login = async name => (await q("select public.asn_node_create($1, $2, 'M', 'dev-pc-0123456789abcdef', 'h2', 'b2') r", [U1, name]))[0].r
+  assert.equal((await login('登入名一')).rotated, true)
+  assert.equal((await nameOf('pc')).name, '登入名一', '沒改過名：照舊')
+  await rename(U1, 'ph', 'pc', '家裡的電腦')
+  assert.equal((await login('登入名二')).rotated, true)
+  assert.deepEqual(await nameOf('pc'), { name: '家裡的電腦', name_by_owner: true })
+  assert.deepEqual((await q("select machine, key_hash from relay.nodes where id = 'pc'"))[0], { machine: 'M', key_hash: 'h2' }, '其他欄位照舊更新')
+})
+
+test('實跑：舊後台 update 動作（relay_update）本人改過名就不改名字，machine 照舊', { skip }, async () => {
+  const { q, rename, nameOf } = await boot()
+  const upd = async (id, machine, name) => (await q('select public.asn_relay_update($1, $2, $3, $4) r', ['pc', id, machine, name]))[0].r
+  assert.equal((await upd('ph', null, '舊動作改的')).ok, true)
+  assert.equal((await nameOf('ph')).name, '舊動作改的', '沒改過名：照舊')
+  await rename(U1, 'pc', 'ph', 'Oppo 手機')
+  assert.equal((await upd('ph', 'M2', '舊動作再改')).ok, true)
+  assert.deepEqual(await nameOf('ph'), { name: 'Oppo 手機', name_by_owner: true })
+  assert.equal((await q("select machine from relay.nodes where id = 'ph'"))[0].machine, 'M2')
+})
+
+test('靜態：回復腳本把 node_create、relay_update 換回原文', () => {
+  assert.ok(DOWN.includes(grab(LOGIN, 'create or replace function public.asn_node_create(')), 'node_create 原文')
+  assert.ok(DOWN.includes(grab(RELAYFN, 'CREATE OR REPLACE FUNCTION public.irori_relay_update(').replace('public.irori_relay_update(', 'public.asn_relay_update(')), 'relay_update 原文')
+  assert.ok(DOWN.indexOf('function public.asn_node_create(') < DOWN.indexOf('drop column if exists name_by_owner'), '換回原文在拿掉欄位之前')
+})
+
 test('實跑：回復後 set_self_name 照舊覆蓋、沒有改名函式與欄位', { skip }, async () => {
   const { q, self } = await boot({ down: true })
   assert.deepEqual(await self('pc', '視窗名'), { ok: true })
+  assert.equal((await q("select public.asn_node_create($1, '回復後登入', 'M', 'dev-pc-0123456789abcdef', 'h3', 'b3') r", [U1]))[0].r.rotated, true)
+  assert.equal((await q('select public.asn_relay_update($1, $2, null, $3) r', ['pc', 'ph', '回復後']))[0].r.ok, true)
   assert.equal((await q("select count(*)::int n from pg_proc where proname = 'asn_device_rename'"))[0].n, 0)
   assert.equal((await q("select count(*)::int n from information_schema.columns where table_name = 'nodes' and column_name = 'name_by_owner'"))[0].n, 0)
 })
