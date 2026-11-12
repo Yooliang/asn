@@ -50,7 +50,7 @@ jobs:
         run: node --test tests/run_root_tests.test.mjs
 
       - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）＋登入網域清單的一致性測試
-        timeout-minutes: 21 # 最後一道防線（#1379）：全部 95 支逐檔跑，本機實測約 10 分鐘（每支 PGlite 啟動約 1 秒，多數檔有好幾項測試），取兩倍向上取整
+        timeout-minutes: 35 # 最後一道防線（#1379）：CI 實測約 17 分 20 秒，取約兩倍；#1383 並行做完、時間降下來再調回
         run: node tools/run-root-tests.mjs _sql login_domains --timeout=180 --require-pglite
 
 
