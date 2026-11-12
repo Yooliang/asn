@@ -100,45 +100,64 @@ function noteInfo(text: string): void {
 }
 
 /** Stop 時取 agent.list，最多等 AGENT_LIST_MS；不存在、丟錯、逾時、不是陣列都回 undefined（退回舊做法）並記一筆原因。
- * sleep 失敗（拿不到計時）時改用 setTimeout 計時，不讓 Stop 一直等。 */
+ * 上限一定有效：agent.list、$.clock.sleep、setTimeout 三者一起比，任一個上限先到就算逾時；結束後清掉 setTimeout。
+ * sleep 失敗只是少一個計時，不算逾時；setTimeout 不能用時就靠 sleep。 */
 export async function agentsWithin(list: () => unknown, sleep: (ms: number) => Promise<unknown>, note: (s: string) => void = noteInfo): Promise<readonly unknown[] | undefined> {
   const TIMEOUT = Symbol('timeout')
-  const fallbackTimer = () => new Promise<symbol>(r => setTimeout(() => r(TIMEOUT), AGENT_LIST_MS))
-  const timer = Promise.resolve()
+  const never = new Promise<never>(() => undefined)
+  const bySleep = Promise.resolve()
     .then(() => sleep(AGENT_LIST_MS))
-    .then(() => TIMEOUT, fallbackTimer)
+    .then(() => TIMEOUT, () => never)
+  let handle: ReturnType<typeof setTimeout> | undefined
+  const byTimer = new Promise<symbol>(r => {
+    try {
+      handle = setTimeout(() => r(TIMEOUT), AGENT_LIST_MS)
+    } catch {
+      /* 沒有 setTimeout：只靠 sleep */
+    }
+  })
   try {
-    const r = await Promise.race([Promise.resolve().then(list), timer])
+    const r = await Promise.race([Promise.resolve().then(list), bySleep, byTimer])
     if (r === TIMEOUT) return void note('[asn] 子代理清單逾時，背景工作全部當作在跑')
     if (!Array.isArray(r)) return void note('[asn] 子代理清單格式不對，背景工作全部當作在跑')
     return r
   } catch (err) {
     note(`[asn] 子代理清單拿不到，背景工作全部當作在跑：${err instanceof Error ? err.message : String(err)}`.slice(0, 200))
     return undefined
+  } finally {
+    try {
+      if (handle !== undefined) clearTimeout(handle)
+    } catch {
+      /* 吞掉 */
+    }
   }
 }
 
 type Entry = { o: Record<string, unknown>; desc: string; kind: string; st: TaskRun }
 const objOf = (t: unknown): Record<string, unknown> | undefined => (t && typeof t === 'object' && !Array.isArray(t) ? (t as Record<string, unknown>) : undefined)
 
-/** background_tasks＋agent.list → 每件工作（在跑的排前面）。agents 為 undefined＝退回舊做法 */
+/** background_tasks＋agent.list → 每件工作（在跑的排前面）。agents 為 undefined＝退回舊做法。
+ * 差額補算：background_tasks 裡 subagent／teammate 有 B 筆，agent.list 裡列得出來的（在跑＋閒置，不含已結束）有 A 筆；
+ * B > A 時（id 對不上、漏列、或 agent.list 說已結束但 background_tasks 還在跑），從 background_tasks 補 B − A 筆算在跑，
+ * 優先補 id 不在 agent.list 裡的，不夠再補其餘的。件數因此不會比 background_tasks 少。 */
 export function taskEntries(bg: readonly unknown[] | undefined, agents?: readonly unknown[]): Entry[] {
-  const tasks = Array.isArray(bg) ? bg : []
-  const fromBg = (keepAgents: boolean): Entry[] =>
-    tasks.flatMap(t => {
-      const o = objOf(t)
-      if (!o) return []
-      const kind = str(o.type).trim()
-      return !keepAgents && AGENT_KINDS.has(kind) ? [] : [{ o, desc: str(o.description), kind, st: 'run' as const }]
-    })
-  if (!Array.isArray(agents)) return fromBg(true)
-  const fromAgents = agents.flatMap(a => {
+  const tasks = (Array.isArray(bg) ? bg : []).flatMap(t => {
+    const o = objOf(t)
+    return o ? [{ o, desc: str(o.description), kind: str(o.type).trim(), st: 'run' as const }] : []
+  })
+  if (!Array.isArray(agents)) return tasks
+  const fromAgents: Entry[] = agents.flatMap(a => {
     const o = objOf(a)
     if (!o) return []
     const st = agentRun(o.status)
     return st === 'gone' ? [] : [{ o, desc: str(o.description), kind: str(o.type).trim() || 'subagent', st }]
   })
-  const all = [...fromAgents, ...fromBg(false)]
+  const bgAgents = tasks.filter(e => AGENT_KINDS.has(e.kind))
+  const others = tasks.filter(e => !AGENT_KINDS.has(e.kind))
+  const listed = new Set(fromAgents.map(e => str(e.o.id)).filter(Boolean))
+  const shortfall = Math.max(0, bgAgents.length - fromAgents.length)
+  const extra = [...bgAgents.filter(e => !listed.has(str(e.o.id))), ...bgAgents.filter(e => listed.has(str(e.o.id)))].slice(0, shortfall)
+  const all = [...fromAgents, ...extra, ...others]
   return [...all.filter(e => e.st === 'run'), ...all.filter(e => e.st === 'idle')]
 }
 

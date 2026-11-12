@@ -515,7 +515,7 @@ export const ActionBar = {
     </div>
     <div class="ab-wrap">
       <button class="abtn" type="button" data-slot="tasks" :class="{ on: tasks.open }" :aria-disabled="slot.tasks.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="tasks.open" aria-label="工作項目" :title="slot.tasks.ok ? TASKS_TIP : slot.tasks.reason" @click="onTasks">
-        <span class="ab-icon"><img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-badge" v-if="slot.tasks.count > 0 || slot.tasks.idle > 0" :aria-label="'正在跑 ' + slot.tasks.count + ' 件'">{{ slot.tasks.count }}</span></span><span class="ab-name">工作項目 ▾<small class="ab-idle" v-if="slot.tasks.idle > 0">閒置 {{ slot.tasks.idle }}</small></span>
+        <span class="ab-icon"><img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-badge" v-if="slot.tasks.count > 0" :aria-label="'正在跑 ' + slot.tasks.count + ' 件'">{{ slot.tasks.count }}</span></span><span class="ab-name">工作項目 ▾<small class="ab-idle" v-if="slot.tasks.idle > 0" :aria-label="'閒置 ' + slot.tasks.idle + ' 件'">閒置 {{ slot.tasks.idle }}</small></span>
       </button>
       <ul class="ab-menu ab-subs ab-tasks" v-if="tasks.open" role="menu">
         <li class="menu-note" v-if="tasks.loading && !tasks.q">檢查中…</li>

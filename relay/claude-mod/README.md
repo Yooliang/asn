@@ -53,8 +53,8 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
   - `detail`：人看得懂的短字串，例如 `背景工作 2 件`、`背景工作 1 件・閒置 2 件`、`背景工作 0 件・閒置 1 件`（#1368：件數只算在跑的，閒置另外寫）、`ScheduleWakeup 13:20`、`AskUserQuestion：<問題前 80 字>`、`中斷`、`出錯`、`已結束`
   - `at`：寫檔時間（epoch 毫秒）；`turnId`：目前這一輪；`plugin`：`asn@<plugin.json 的 version>`
   - `tasks`（選填，#539 之三）：`state` 為 `background` 時寫，`[{ id, desc, kind?, st }]`，最多 20 筆，在跑的排前面。`command`（指令全文）與 `last_assistant_message` 不存；說明壓成一行、遮掉像金鑰的字串、截到 60 字。ASN 對話頁「工作項目」按鈕讀它列出本機的背景工作。
-    - `st` 只有 `run`（在跑）與 `idle`（閒置）兩種（#1368）。Stop hook 的 `background_tasks` 只放 status 為 running／pending 的工作，teammate 一輪結束後 status 仍是 running，所以閒置要另外看：Stop 時呼叫 `$.agent.list()`（最多等 300ms），用 Claude Code 自己換算好的 status：`running`／`waiting`／`pending` 算在跑、`idle` 算閒置、`completed`／`failed`／`killed` 不列不計，沒看過的值算在跑並用 `console.info` 記一筆。
-    - 對應方式：`background_tasks` 裡 `type` 為 `subagent`、`teammate` 的整批改由 `agent.list` 涵蓋（teammate 的任務代號和 `agent.list` 的 id 對不上，所以只看 type）；其餘（shell、monitor、workflow…）照舊取 `id`、`description`、`type`，一律算在跑。子代理／teammate 那幾筆的 `id`、`desc`、`kind` 取自 `agent.list` 的 `id`、`description`、`type`。
+    - `st` 只有 `run`（在跑）與 `idle`（閒置）兩種（#1368）。Stop hook 的 `background_tasks` 只放 status 為 running／pending 的工作，teammate 一輪結束後 status 仍是 running，所以閒置要另外看：Stop 時（有背景工作才）呼叫 `$.agent.list()`（最多等 300ms；`agent.list`、`$.clock.sleep`、`setTimeout` 一起比，任一個上限先到就算逾時），用 Claude Code 自己換算好的 status：`running`／`waiting`／`pending` 算在跑、`idle` 算閒置、`completed`／`failed`／`killed` 不列不計，沒看過的值算在跑並用 `console.info` 記一筆。
+    - 對應方式：`background_tasks` 裡 `type` 為 `subagent`、`teammate` 的整批改由 `agent.list` 涵蓋（teammate 的任務代號和 `agent.list` 的 id 對不上，所以只看 type）；`background_tasks` 裡這兩種的筆數比 `agent.list` 列得出來的（在跑＋閒置）多時，差額從 `background_tasks` 補算成在跑（優先補 id 不在 `agent.list` 裡的），件數不會比 `background_tasks` 少；其餘（shell、monitor、workflow…）照舊取 `id`、`description`、`type`，一律算在跑。子代理／teammate 那幾筆的 `id`、`desc`、`kind` 取自 `agent.list` 的 `id`、`description`、`type`。
     - 退回舊做法：`$.agent.list` 不存在、丟錯、逾時或格式不對，或合起來一件都沒有時，`background_tasks` 全部算在跑（子代理、teammate 也不扣），件數不少算；`console.info` 記一筆原因。
     - `state` 與自動回信的判斷不看這些：有 `background_tasks`（不論在跑或閒置）照樣是 `background`。
 - **狀態轉換**（只看主迴圈，子代理輪次一律忽略）：

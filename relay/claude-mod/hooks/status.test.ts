@@ -259,6 +259,63 @@ test('Stop 時 agent.list 逾時：不卡住，退回 background_tasks 全部算
   expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 4 件' })
 })
 
+test('取 agent.list：sleep 和 list 都不回時，setTimeout 上限照樣有效', async () => {
+  const notes: string[] = []
+  const never = () => new Promise<never>(() => undefined)
+  const t0 = Date.now()
+  expect(await agentsWithin(never, never, s => void notes.push(s))).toBeUndefined()
+  const took = Date.now() - t0
+  expect(took >= AGENT_LIST_MS - 20).toBe(true)
+  expect(took < AGENT_LIST_MS + 1000).toBe(true)
+  expect(notes.length).toBe(1)
+  expect(notes[0]).toContain('逾時')
+})
+
+test('agent.list 涵蓋得比 background_tasks 少：差額補算成在跑，不會被吃掉', () => {
+  // background_tasks 有子代理 a1、a9 與 teammate tsk-9（3 筆）；agent.list 只列得出 a1（閒置）與 a8（已結束，不算）→ 差 2 筆
+  const bg = [
+    { id: 'a1', type: 'subagent', status: 'running', description: '查資料' },
+    { id: 'a9', type: 'subagent', status: 'running', description: '漏列的' },
+    { id: 'tsk-9', type: 'teammate', status: 'running', description: '隊友' },
+    { id: 'b1', type: 'shell', status: 'running', description: '建置' },
+  ]
+  const agents = [
+    { id: 'a1', description: '查資料', type: 'Explore', status: 'idle' },
+    { id: 'a8', description: '做完了', type: 'Explore', status: 'completed' },
+  ]
+  const f = finalState('answer', { background_tasks: bg, agents })
+  // 在跑：補的 a9、tsk-9（id 不在 agent.list 裡的優先）＋ shell b1＝3；閒置：a1＝1
+  expect(f.detail).toBe('背景工作 3 件・閒置 1 件')
+  expect(f.tasks?.map(t => [t.id, t.st])).toEqual([['a9', 'run'], ['tsk-9', 'run'], ['b1', 'run'], ['a1', 'idle']])
+  // 差額不夠用 id 對不上的補時，拿其餘的補：background_tasks 2 筆子代理，agent.list 全部已結束
+  const g = finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent' }, { id: 'a2', type: 'subagent' }], agents: [{ id: 'a1', status: 'completed' }, { id: 'a2', status: 'killed' }] })
+  expect(g.detail).toBe('背景工作 2 件')
+  // agent.list 涵蓋得夠多時不補
+  expect(finalState('answer', { background_tasks: [{ id: 'a1', type: 'subagent' }], agents: [{ id: 'x1', status: 'running' }, { id: 'x2', status: 'idle' }] }).detail).toBe('背景工作 1 件・閒置 1 件')
+})
+
+test('沒有背景工作時（background_tasks 空）不呼叫 agent.list', async ($, on) => {
+  const r = await rig($, on)
+  let calls = 0
+  on('agent.list', () => {
+    calls++
+    return { value: [{ id: 'a1', status: 'idle' }] } as never
+  })
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(calls).toBe(0)
+  expect(r.last()?.state).toBe('idle')
+  // 對照：有背景工作時才會呼叫
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  await r.flush()
+  expect(calls).toBe(1)
+})
+
 test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、下一輪沒有就拿掉', async ($, on) => {
   const r = await rig($, on)
   await start($)

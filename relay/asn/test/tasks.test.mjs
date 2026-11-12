@@ -56,8 +56,8 @@ test('接線：功能列查 tasksQuery、徽章顯示件數、header 用 headerP
   const bar = read('ui/lib/actionbar.mjs')
   assert.match(bar, /tasks: Boolean\(props\.api\?\.tasksQuery\)/)
   assert.match(bar, /props\.api\.tasksQuery\(\{ name: name\.value \}\)/)
-  assert.match(bar, /class="ab-badge" v-if="slot\.tasks\.count > 0 \|\| slot\.tasks\.idle > 0"[^>]*>\{\{ slot\.tasks\.count \}\}/, '有閒置時也顯示，數字只算在跑的')
-  assert.match(bar, /<small class="ab-idle" v-if="slot\.tasks\.idle > 0">閒置 \{\{ slot\.tasks\.idle \}\}<\/small>/)
+  assert.match(bar, /class="ab-badge" v-if="slot\.tasks\.count > 0" :aria-label="'正在跑 ' \+ slot\.tasks\.count \+ ' 件'">\{\{ slot\.tasks\.count \}\}/, '紅數字只算在跑的；只有閒置時不畫 0')
+  assert.match(bar, /<small class="ab-idle" v-if="slot\.tasks\.idle > 0" :aria-label="'閒置 ' \+ slot\.tasks\.idle \+ ' 件'">閒置 \{\{ slot\.tasks\.idle \}\}<\/small>/)
   assert.match(bar, /function onTasks\(\) \{\n\s*if \(!slot\.value\.tasks\.ok\) return/, '反灰時點了不查、不打開')
   const pane = read('ui/lib/chatpane.mjs')
   assert.match(pane, /<span class="to-psm" v-if="toPsm" v-html="emo\(toPsm\)"><\/span>/)
@@ -116,4 +116,16 @@ test('列表畫面（#1368）：先列在跑的，閒置收在後面一段、段
   assert.match(bar, /v-for="it in taskList\.idle"[^\n]*<span class="ab-sub-kind">\{\{ taskList\.idleTag \}\}<\/span>/)
   assert.match(bar, /taskView\(tasks\.q, slot\.value\.tasks\.count, slot\.value\.tasks\.idle\)/)
   assert.match(bar, /v-if="!taskList\.items\.length && !taskList\.more && !taskList\.idle\.length && !taskList\.idleMore"/, '只有閒置時不顯示「目前沒有背景工作」')
+})
+
+test('大按鈕（#1368）：只有閒置、沒有在跑時不畫紅色「0」，只留小字「閒置 M」', () => {
+  const bar = read('ui/lib/actionbar.mjs')
+  const badgeIf = /class="ab-badge" v-if="([^"]+)"/.exec(bar)[1]
+  const idleIf = /class="ab-idle" v-if="([^"]+)"/.exec(bar)[1]
+  const show = (expr, tasks) => Function('slot', `return (${expr})`)({ tasks })
+  const onlyIdle = { count: 0, idle: 2 }
+  assert.equal(show(badgeIf, onlyIdle), false, '在跑 0、閒置 2：不畫紅數字')
+  assert.equal(show(idleIf, onlyIdle), true, '小字照樣顯示')
+  assert.deepEqual([show(badgeIf, { count: 3, idle: 1 }), show(idleIf, { count: 3, idle: 1 })], [true, true])
+  assert.deepEqual([show(badgeIf, { count: 2, idle: 0 }), show(idleIf, { count: 2, idle: 0 })], [true, false])
 })
