@@ -5,7 +5,7 @@
 //    - 群組發言：角色節點是 member、p_owner 與本人簽章是 owner；角色節點仍能以 ~owner 身分發言（成員身分不動）
 //    - 仍認 role='owner' 的特權動作（invite、acct_list）對角色節點照舊可用、對一般成員照舊拒絕
 //    - ~owner 的顯示名取租戶的帳號名稱，沒有名稱用「帳號擁有者」，不再有「小良哥」
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：交易內、只改函式、不動權限與資料表；inbox 與 r
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'

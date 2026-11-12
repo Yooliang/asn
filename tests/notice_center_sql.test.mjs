@@ -1,7 +1,7 @@
 // 通知集中（20261111100000_notice_center.sql，#848 PR-C 後台）：靜態檢查與 pglite 實跑。
 // 涵蓋：kind 欄位與檢查式、asn_relay_send_notice 的驗證／權限／扇出標記／限流、九支通知函式的內文第一行與寄件名與 kind、
 // 讀信函式多回 kind 與 from_owner、回復檔逐字等於上一版定義。沒裝 @electric-sql/pglite 時只跑靜態部分。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -65,7 +65,7 @@ test('靜態：回復檔每個函式區塊都逐字等於某個舊 migration 裡
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 const B = 'bbbbbbbb-0000-0000-0000-00000000000b'

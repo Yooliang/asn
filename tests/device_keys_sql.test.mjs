@@ -1,6 +1,6 @@
 // 設備金鑰與 TOFU 通知（0.2.8 改版：migrations 20261107100000_device_keys.sql、20261107130000_device_key_alert.sql）。
 // 靜態：交易內、函式只給 service_role、表開 RLS、沒有配對的殘留。實跑（要 pglite）：公鑰上傳、通知的文字與限流、只寄給同一個本人。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：交易內、函式只給 service_role、表開 RLS、沒有配對
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111', U2 = '22222222-2222-2222-2222-222222222222'

@@ -6,7 +6,7 @@
 //    兩欄寫入後讀得出；舊格式（不帶）照樣能寫且預設 false；型別不對整份退回且不寫；恢復後旗標消失；
 //    既有欄位（email、plan、current、額度、重置時間、gemini）都還在；權限與改前相同。
 //    寄信函式：收件人一定是節點擁有者的人代號、只收固定欄位、超過限流被拒、不是自己的節點被拒、欄位不合不寄。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -86,7 +86,7 @@ test('靜態：寄信函式獨立成一支、只一個函式、無收件人參�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

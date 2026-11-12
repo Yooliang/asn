@@ -1,6 +1,6 @@
 // #443／#444 第 2 步 migration（20261028140000_launcher_pi_models.sql）：asn_relay_set_launcher 多收選填的 pi_models。
 // 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -15,7 +15,7 @@ test('靜態：只改 asn_relay_set_launcher，不動權限', () => {
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：pi_models 只留合格的 { provider, model }、最多 200 筆、太大只丟 pi_models；舊格式照常；其餘檢查不變', { skip }, async () => {

@@ -34,8 +34,13 @@ jobs:
   # 版本固定 0.5.13（本機實際跑過的版本）；--no-save --no-package-lock：不產生、不改任何 package 檔。
   # --require-pglite：pglite 載不到就直接失敗；任何一支有子測試「因為 pglite」被略過也算失敗，不讓「略過」看起來像「通過」。
   #   （tenants_sql 有 3 項因舊 irori 額度邏輯固定略過，原因跟 pglite 無關，不算。）
+  # #1383：分 2 台機器同時跑（--shard，依檔案大小平均分），每台再依 CPU 數多支並行（4 核就 4 支）；印出 CPU 數與每支耗時、最慢 10 支。
   sql-tests:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false # 一份失敗不要把另一份取消，兩份的失敗都看得到
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -47,11 +52,12 @@ jobs:
         run: npm i --no-save --no-package-lock @electric-sql/pglite@0.5.13
 
       - name: 測試執行器本身的單元測試
+        if: matrix.shard == 1
         run: node --test tests/run_root_tests.test.mjs
 
       - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）＋登入網域清單的一致性測試
-        timeout-minutes: 35 # 最後一道防線（#1379）：CI 實測約 17 分 20 秒，取約兩倍；#1383 並行做完、時間降下來再調回
-        run: node tools/run-root-tests.mjs _sql login_domains --timeout=180 --require-pglite
+        timeout-minutes: 10 # 最後一道防線（#1379）：#1383 分 2 份＋每份 4 支並行後 CI 實測這一步 1 分 30 秒～2 分（原本一支一支跑約 10～17 分）；留足 CI 機器忙時的餘裕
+        run: node tools/run-root-tests.mjs _sql login_domains --timeout=180 --require-pglite --shard=${{ matrix.shard }}/2
 
 
   # 無視窗橋（asn-bridge，Linux 節點用）：下面的 build 只編 gui 版，這個組合沒人編就會壞了也不知道。

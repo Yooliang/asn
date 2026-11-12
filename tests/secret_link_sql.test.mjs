@@ -2,7 +2,7 @@
 // 1. 靜態：新函式 security definer＋search_path 空、只授權 service_role；欄位有檢查約束；簽章與網域檢查在函式裡。
 // 2. 實跑（pglite，沒裝就略過）：帶網址的請求一定要本人簽章且擁有請求端節點；網址只收官方登入網域的 https；
 //    待確認清單回 link（沒有就 null）；舊的五參數請求函式照常運作；欄位的檢查約束擋得住直接寫入。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -37,7 +37,7 @@ test('靜態：帶網址的請求要本人簽章並擁有請求端節點；網�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

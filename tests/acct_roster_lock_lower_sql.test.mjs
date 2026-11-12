@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    函式本體跟 20261029100000 版只差排序那一處（pg_get_functiondef 比對）；回復後跟 20261029100000 版逐字相同；權限不變；
 //    大小寫混合的 email 兩種順序送進來結果相同（目前整份 bad_request、什麼都不寫）；全小寫兩種順序結果相同。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -42,7 +42,7 @@ test('靜態：編號在 20261029100000 之後；只換寫入函式、只改排�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

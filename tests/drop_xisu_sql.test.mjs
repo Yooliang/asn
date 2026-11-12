@@ -2,7 +2,7 @@
 // 1. 靜態：不用 cascade／truncate、先備份再改寫再刪、整支一個交易、寄信函式除 XISU 寫死邏輯外與前一版逐字相同。
 // 2. 實跑（pglite，帶真實外鍵）：刪除前後本人往來記錄筆數不變、歷史列都還在（改寫到接手設備）、備份表完整、
 //    沒有外鍵錯誤、回信路徑正確（寄給 XISU／XISU/u:xxx／u:xxx／照收信欄位回信都扇出給本人）、可重跑。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -44,7 +44,7 @@ test('靜態：asn_relay_send 與 20261023140000 的差異只有 XISU 寫死邏�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

@@ -2,7 +2,7 @@
 // 1. 靜態：security definer＋search_path 空、只授權 service_role；新欄位有預設值或可空；回復檔的函式逐字等於通知集中那一版。
 // 2. 實跑（pglite，沒裝就略過）：單一代理慢不通知、60 分鐘才通知；兩個代理同時卡就通知；不存在的代理只記錄；
 //    影子跑記「會不會通知」且每段卡住只記一次；開寄信後補寄；恢復信只寫卡了多久；舊的列不受影響；回復檔跑得回去。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -46,7 +46,7 @@ test('靜態：回復檔的函式逐字等於通知集中那一版；換回檢�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U = 'aaaaaaaa-0000-0000-0000-00000000000a'
 

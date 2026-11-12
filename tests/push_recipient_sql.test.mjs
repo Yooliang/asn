@@ -1,7 +1,7 @@
 // 推播收件人查詢（migration 20261109110000_push_recipient.sql，#797 PR②）。
 // 靜態：交易內、只新增兩個只讀函式、只給 service_role、不改既有函式、不回權杖或信件內容。
 // 實跑（要 pglite）：寄給本人的信回信上的收件人；不是這台寄的信回空；夥伴等待通知的收件人是節點擁有者；停用節點回空；權限。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -25,7 +25,7 @@ test('靜態：交易內、只新增兩個只讀函式、只給 service_role、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111', U2 = '22222222-2222-2222-2222-222222222222'

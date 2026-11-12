@@ -2,7 +2,7 @@
 // 1. 靜態：只動 asn_relay_roster；與正式庫現行定義比只多那一段 update（含一行註解），其餘一個字不動；不刪不改資料表、不改授權。
 // 2. 實跑（pglite；沒裝略過）：有帶就寫、未來時間當現在、30 天前不寫、10 秒內不重複、只往後不往前、別台同名與舊名字不寫、
 //    壞值不拒絕整份名單、舊版沒帶的照舊。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +27,7 @@ test('靜態：只多一段 update relay.partners，其餘與正式庫現行定�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const P1 = 'p_00000000000000000001'

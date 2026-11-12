@@ -1,7 +1,7 @@
 // 別台打字的控制面（migration 20261108100000_term_view_scope.sql）：觀看分 view／input 兩種。
 // 靜態：只加 scope 欄、沒有放內容的欄位、函式只給 service_role、沒有任何「同意」欄位（同意只在 T 本機）。
 // 實跑（要 pglite）：預設 view、topic 前綴、分 scope 上限、到期、壞 scope、舊簽名照舊、pending 帶 scope、通知文字分 scope、權限。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -25,7 +25,7 @@ test('靜態：只加 scope 欄；沒有同意或內容欄位；函式只給 ser
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111', U2 = '22222222-2222-2222-2222-222222222222'

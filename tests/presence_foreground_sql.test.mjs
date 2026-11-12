@@ -1,7 +1,7 @@
 // #1281：在線列多一欄 fg_at（最後一次前景），推播判斷只看它（migration 20261112700000_presence_foreground.sql）。
 // 靜態：交易內、只給 service_role、簽章只剩一個、push_targets 只看 fg_at、回復檔還原。
 // 實跑（要 pglite）：true／false／不帶旗標的寫法、回填、push_targets 與名單顯示各看各的。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,7 +41,7 @@ test('靜態：回復檔還原 5 參數版、push_targets 看 updated_at、drop 
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

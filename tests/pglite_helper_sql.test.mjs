@@ -1,0 +1,69 @@
+// tests/_pglite_close.mjs 的加速版 PGlite（#1383）：從同一份空資料庫匯出檔載入的各個資料庫要彼此獨立、跟 initdb 剛建好的一樣乾淨；
+// 每項測試結束就關掉這項測試開的資料庫，keepUntilEnd 標起來的留到整支跑完。
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { track, keepUntilEnd, closeAtEnd, fastPGlite, isPgliteMissing } from './_pglite_close.mjs'
+
+let PGlite = null
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
+const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
+
+test('實跑（pglite）：每個新資料庫都是乾淨的、彼此不共用狀態', { skip }, async () => {
+  const a = track(new PGlite())
+  const b = track(new PGlite())
+  await a.exec("create table t(x int); insert into t values (1); create role r1; create schema s1;")
+  assert.deepEqual((await a.query('select x from t')).rows, [{ x: 1 }])
+  const c = track(new PGlite())
+  for (const db of [b, c]) {
+    assert.equal((await db.query("select to_regclass('public.t') r")).rows[0].r, null, '別的資料庫建的表不會出現')
+    assert.equal((await db.query("select count(*)::int n from pg_namespace where nspname = 's1'")).rows[0].n, 0)
+    assert.equal((await db.query("select count(*)::int n from pg_tables where schemaname = 'public'")).rows[0].n, 0, '公開結構是空的')
+  }
+  assert.equal((await b.query('select current_database() d')).rows[0].d, 'postgres')
+})
+
+test('實跑（pglite）：有帶參數的 new PGlite(...) 照原樣交給 PGlite', { skip }, async () => {
+  const db = track(new PGlite({}))
+  assert.deepEqual((await db.query('select 1 as one')).rows, [{ one: 1 }])
+})
+
+test('實跑（pglite）：經執行器跑時，空資料庫匯出檔放在整批共用的快取目錄（各支讀同一份）', { skip: skip || (process.env.ROOT_TESTS_SHARED_DIR ? false : '沒經執行器跑（沒有 ROOT_TESTS_SHARED_DIR）') }, () => {
+  const names = fs.readdirSync(process.env.ROOT_TESTS_SHARED_DIR)
+  assert.ok(names.some(n => /^pglite-seed-.*\.tar$/.test(n)), names.join(', '))
+})
+
+let sharedDb
+let firstTestDb
+test('實跑（pglite）：關閉時機——準備一個共用的、一個只在這項測試用的', { skip }, async () => {
+  sharedDb = keepUntilEnd(track(new PGlite()))
+  firstTestDb = track(new PGlite())
+  await sharedDb.exec('create table kept(x int)')
+  await firstTestDb.query('select 1')
+})
+
+test('實跑（pglite）：上一項測試的資料庫已關掉；keepUntilEnd 的還能用', { skip }, async () => {
+  assert.equal(firstTestDb.closed, true, '上一項測試開的要在它結束時關掉')
+  assert.equal(sharedDb.closed, false)
+  await sharedDb.exec('insert into kept values (1)')
+  assert.equal((await sharedDb.query('select count(*)::int n from kept')).rows[0].n, 1)
+})
+
+closeAtEnd()
+
+test('只有「沒裝 PGlite」才略過；其他載入錯誤要讓整支失敗（不能無聲略過變假綠）', () => {
+  const missing = Object.assign(new Error("Cannot find package '@electric-sql/pglite' imported from x"), { code: 'ERR_MODULE_NOT_FOUND' })
+  assert.equal(isPgliteMissing(missing), true)
+  assert.equal(isPgliteMissing(Object.assign(new Error("Cannot find module '@electric-sql/pglite'"), { code: 'MODULE_NOT_FOUND' })), true)
+  assert.equal(isPgliteMissing(Object.assign(new Error("Cannot find package 'other-dep'"), { code: 'ERR_MODULE_NOT_FOUND' })), false, '是 PGlite 自己缺相依套件：不算沒裝')
+  assert.equal(isPgliteMissing(new Error('WebAssembly.compile(): expected magic word')), false, 'wasm 壞掉不算沒裝')
+  assert.equal(isPgliteMissing(Object.assign(new Error('ENOENT pglite.data'), { code: 'ENOENT' })), false, '少了資料檔不算沒裝')
+  assert.equal(isPgliteMissing(undefined), false)
+})
+
+test('呼叫端不再用 try/catch 吞掉 fastPGlite 的錯誤', async () => {
+  const fs = await import('node:fs'), path = await import('node:path')
+  const dir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+  const bad = fs.readdirSync(dir).filter(f => f.endsWith('.mjs')).filter(f => /try\s*\{\s*PGlite\s*=\s*await fastPGlite\(\)/.test(fs.readFileSync(path.join(dir, f), 'utf8')))
+  assert.deepEqual(bad, [])
+})

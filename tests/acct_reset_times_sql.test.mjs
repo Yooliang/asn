@@ -4,7 +4,7 @@
 //    舊簽章、舊欄位照樣能用；兩個新欄位寫得進、讀得出（asn_relay_acct_list）；壞掉的單獨丟掉；
 //    gemini 的 nodes 有值、current 照回報；兩台讀過同一個帳號只有在用的那台是 current；這台不再回報就拿掉；
 //    claude 的 nodes 照舊從舊表；權限不變；可重跑；回復後函式跟原版逐字相同、欄位拿掉。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -61,7 +61,7 @@ test('靜態：編號在最新之後；三支函式簽章不變；寫入只多 g
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

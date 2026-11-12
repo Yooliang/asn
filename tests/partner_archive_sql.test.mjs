@@ -3,7 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 先套用夥伴 ID migration 再套用這支：
 //    封存／取消封存（簽章、擁有關係、同租戶、保護名單、夥伴 ID 與「節點＋名字」兩種鍵）、名單帶 archived、
 //    自動解除（離線封存後重新回報、寄信來；在線封存時重新回報不解除）。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +50,7 @@ test('靜態：名單函式除了多帶 archived 之外，與上一版（線上�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

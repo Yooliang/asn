@@ -1,6 +1,6 @@
 // 橋的回信寄件匣存檔壞了，通知本人（20261112900000_outbox_bad_notice.sql，Yooliang/asn#1249）。
 // 靜態：security definer＋search_path 空、只授權 service_role、固定內文、限頻參數、down 檔。實跑（pglite，沒裝就略過）。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -26,7 +26,7 @@ test('靜態：一支函式、security definer、search_path 空、只授權 ser
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 

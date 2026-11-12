@@ -2,7 +2,7 @@
 // 用 PGlite（WebAssembly 版 PostgreSQL，純記憶體的臨時資料庫）真的跑 supabase/sql/01～17 與回退腳本，
 // 驗證：租戶 1 回填、租戶隔離（節點、信、群組、遠端開視窗、邀請）、邀請與帳號流程、停用、額度只送一次、回退與重新上線。
 // PGlite 不在 repo 依賴裡：找不到就整檔跳過。安裝方式 `npm i --no-save @electric-sql/pglite`，或設環境變數 PGLITE_PATH 指到它的 dist/index.js。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, keepUntilEnd, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -173,7 +173,7 @@ async function ctx() {
     assert.equal(regs[id].id, id, JSON.stringify(regs[id]));
     await db.exec(`update relay.nodes set can_invite = true where id = '${id}'`);
   }
-  live = db;
+  live = keepUntilEnd(db); // 後面的測試共用，整支跑完才關
   return db;
 }
 

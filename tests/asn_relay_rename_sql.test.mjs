@@ -3,7 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（自己 `npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 依序套用 migrations 目錄裡的全部檔案
 //    （改名那支之前的先套，記下改名前的函式清單，再套改名），驗證：新名全部在、舊名包裝在且回傳相同、觸發器仍觸發、
 //    內部呼叫與排程都改成新名、權限只給 service_role、重跑不出錯。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,7 +30,7 @@ test('靜態：整支在交易內；改名先檢查新名是否已存在；包�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'

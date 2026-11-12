@@ -6,7 +6,7 @@
 //    - 補問不標已讀、不改 reads；系統訊息與開頭紀錄不帶；只帶最近 40 則；看不到的（可見起點之前）不帶
 //    - 別租戶的讀者只看到對外代號（x:），輸出掃不到節點代號與帳號 id；已離開的成員不列
 // 3. 還原驗證：拿掉「已有 wake_info」過濾、「wake_view」、「最近 40 則」，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +29,7 @@ test('靜態：在交易內、不刪資料、不授權前台、時間戳夠新�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

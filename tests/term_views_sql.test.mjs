@@ -1,7 +1,7 @@
 // 別台看畫面的控制面（migration 20261107110000_term_views.sql）。
 // 靜態：沒有畫面欄位、函式只給 service_role、表開 RLS。實跑（要 pglite）：本人、兩台都是本人的、只有被看的能接受、
 // 上限、到期、固定狀態、結束就清金鑰材料、D 不見了 T 看得到。還原驗證：拿掉保護要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +27,7 @@ test('靜態：沒有放內容的欄位、函式只給 service_role、表開 RLS
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111', U2 = '22222222-2222-2222-2222-222222222222'

@@ -5,7 +5,7 @@
 //    anon／authenticated 不能執行、名單外的租戶被擋、停用的節點／租戶被擋、名單內的可寫；
 //    發版／會議／項目的格式檢查、HTML 與個資擋下、只改有帶的欄位、欄位必須存在、頻率上限、寫入記錄。
 // 3. 還原驗證：拿掉名單檢查，「名單外被擋」要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +39,7 @@ test('靜態：交易內、不刪資料、名單是空的、函式只給 service
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

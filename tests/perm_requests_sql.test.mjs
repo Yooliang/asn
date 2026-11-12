@@ -4,7 +4,7 @@
 //    只有電腦能建立、雜湊綁死、選項要在清單內、第一個決定為準、本人簽章且節點是這個人的、他人不行、
 //    過期、同視窗一筆、頻率上限、結案就清全文、門鈴只敲本人其他設備。
 // 3. 還原驗證：拿掉雜湊、選項或一次性條件，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +32,7 @@ test('靜態：交易內、函式只給 service_role、表開 RLS、不動別的
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

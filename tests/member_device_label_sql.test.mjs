@@ -6,7 +6,7 @@
 //    - 設備名取不到（或與夥伴名相同）只有夥伴名；真人不變
 //    - 訊息與回覆引用都帶 from_display_label，且與成員清單的 display_label 同一個字串
 // 3. 還原驗證：把自己夥伴的規則改回主人名，或讓外部成員也拿設備名，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ test('靜態：在交易內、不刪資料、不授權 anon／authenticated、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    共用案例 missing_window_cases 端到端；只缺一窗但還沒過重置時間＝保留；只缺一窗而且已過＝拿掉；兩窗都在＝照舊；
 //    另一窗被 older_read 擋掉時過期的那窗照樣拿掉；沒帶 windows 的舊用戶端不動；回復後不再拿掉。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -52,7 +52,7 @@ test('共用案例檔：missing_window_cases 五種情況都在（還沒過保�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'

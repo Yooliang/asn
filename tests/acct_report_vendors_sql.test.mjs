@@ -3,7 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：先套原本的帳號切換 migration（函式名換成 asn_relay_），
 //    證明舊版只收 claude（重現）；套新版後 claude／codex 都收、其他廠商與多餘欄位被擋或丟掉；
 //    切換不能拿 codex 帳號當目標；舊式只含 claude 的回報照舊能用。沒裝就略過。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +29,7 @@ test('靜態：編號排在改名 migration 之後，且舊定義是這支的基
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'

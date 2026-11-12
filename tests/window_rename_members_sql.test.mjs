@@ -7,7 +7,7 @@
 //    - 衝突（新名已是同群組成員）不覆蓋、兩者都在；別的節點不能動我的視窗；壞名字被擋；重跑不再動；
 //    - 夥伴同步判定的改名（同節點同 session）自動帶到群組；換 session（接班）不帶。
 // 3. 還原驗證：拿掉「更新發言者鍵」、「衝突檢查」、「同 session 條件」，對應測試要變紅。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -33,7 +33,7 @@ test('靜態：在交易內、不刪資料、新函式只授權 service_role、�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

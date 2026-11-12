@@ -2,7 +2,7 @@
 // 1. 靜態：四個 security definer 函式 search_path 空、只授權 service_role；新表開 RLS 沒有 policy。
 // 2. 實跑（pglite，沒裝就略過）：只有本人對自己的在線電腦能建立；一個節點一筆、10 分鐘過期、每小時最多 6 次、失敗後 1 分鐘內不能重送；
 //    ASN 取走時拿到送出者；結果只動 taken 的那一列；手機看得到自己各節點的狀態。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +35,7 @@ test('靜態：建立請求只收本人（p_user）且節點要是本人的；�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'

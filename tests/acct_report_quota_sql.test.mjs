@@ -2,7 +2,7 @@
 // 1. 靜態：編號比 20261024190000 大、只動 asn_relay_acct_report 與新工具函式、只授權 service_role、沒有權杖類字樣。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；pglite 測試不要加 --test-force-exit）：
 //    重現——舊版把額度欄位丟掉；新版保留合格欄位、壞欄位單獨丟掉、codex 不收額度、舊式回報照舊。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +32,7 @@ test('靜態：額度只對 claude 那幾列呼叫，且報告函式其餘驗證
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'

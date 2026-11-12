@@ -1,30 +1,65 @@
-// 跑根目錄 tests/*.test.mjs：一支一支跑、每支各自逾時（#284）。
+// 跑根目錄 tests/*.test.mjs：每支測試檔一個獨立程序、各自逾時（#284），多支並行（#1383）。
 // 為什麼不直接 `node --test tests/*.test.mjs`：整批一次丟出去，其中一支卡住（沒關假後台、連不到資料庫…）整批就掛著不動，也看不出是哪一支；
 // 而 `--test-force-exit` 在 Windows 結束時會觸發 libuv 斷言崩潰，造成假的「取消」，所以這裡不用它。
-// 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
+// 用法：node tools/run-root-tests.mjs [檔名片段…] [--timeout=秒] [--jobs=並行數] [--shard=i/n]   例：node tools/run-root-tests.mjs tenants roadmap --timeout=30
+// 並行數：--jobs=N ＞ 環境變數 ROOT_TESTS_JOBS ＞ CPU 數（os.availableParallelism()）。--jobs=1 就是一支一支跑。
+// 每支各給一個自己的暫存目錄（TMPDIR／TEMP／TMP 指過去），跑完刪掉；測試檔彼此不共用暫存位置。
+// 另有一個整批共用的快取目錄（環境變數 ROOT_TESTS_SHARED_DIR）：只放建一次後只讀的檔（PGlite 空資料庫匯出檔），跑完刪掉。
+// 輸出：每支開始印一行「開始」，結束時把該支的結果與（失敗時的）輸出一次印成一組，並行時不會交錯。
 // 結束碼：全過 0；有失敗或逾時 1。逾時的會單獨列出來（不算通過）。
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 參數 → { filters, timeoutSec, requirePglite }；--timeout 不是正整數就用預設 60；
+/** 正整數字串 → 數字，否則 null */
+function posInt(s) {
+  const n = Number(s)
+  return s !== '' && s != null && Number.isInteger(n) && n > 0 ? n : null
+}
+
+/** 參數 → { filters, timeoutSec, requirePglite, jobs, shard }；--timeout 不是正整數就用預設 60；--jobs 不是正整數就當沒給（null）；
+ *  --shard=i/n＝把挑到的測試檔分成 n 份、只跑第 i 份（CI 分到幾台機器同時跑）；格式不對是 'invalid'（main 直接失敗，不默默全跑或全不跑）；
  *  --require-pglite＝pglite 載不到就整批不跑、直接失敗，且任何子測試因為 pglite 被略過也算失敗（CI 用，見 asn-linux-build.yml）。
  *  只看「因為 pglite」的略過：tenants_sql 有 3 項因舊 irori 額度邏輯而固定略過，跟 pglite 無關，不算。 */
 export function parseArgs(argv) {
   const filters = []
   let timeoutSec = 60
   let requirePglite = false
+  let jobs = null
+  let shard = null
   for (const a of argv) {
     const m = /^--timeout=(.*)$/.exec(a)
-    if (m) { const n = Number(m[1]); if (Number.isInteger(n) && n > 0) timeoutSec = n; continue }
+    if (m) { const n = posInt(m[1]); if (n) timeoutSec = n; continue }
+    const j = /^--jobs=(.*)$/.exec(a)
+    if (j) { jobs = posInt(j[1]); continue }
+    const sh = /^--shard=(.*)$/.exec(a)
+    if (sh) { shard = parseShard(sh[1]); continue }
     if (a === '--require-pglite') { requirePglite = true; continue }
     if (!a.startsWith('--')) filters.push(a.toLowerCase())
   }
-  return { filters, timeoutSec, requirePglite }
+  return { filters, timeoutSec, requirePglite, jobs, shard }
+}
+
+function parseShard(s) {
+  const m = /^(\d+)\/(\d+)$/.exec(s)
+  if (!m) return 'invalid'
+  const index = posInt(m[1])
+  const total = posInt(m[2])
+  return index && total && index <= total ? { index, total } : 'invalid'
+}
+
+/** 並行數：參數 ＞ 環境變數 ROOT_TESTS_JOBS ＞ CPU 數；壞值略過；至少 1 */
+export function resolveJobs(argJobs, env = process.env, cpus = availableCpus()) {
+  return argJobs ?? posInt(env.ROOT_TESTS_JOBS) ?? Math.max(1, cpus | 0)
+}
+
+function availableCpus() {
+  return typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length
 }
 
 /** node --test 輸出裡「因為 pglite 而略過」的子測試那幾行（tap：「ok N - 名稱 # SKIP 原因」；spec：「﹣ 名稱 … # 原因」），原因提到 pglite 才算 */
@@ -37,10 +72,36 @@ export function pickFiles(names, filters = []) {
   return names.filter(f => f.endsWith('.test.mjs')).sort().filter(f => !filters.length || filters.some(k => f.toLowerCase().includes(k)))
 }
 
+/** 開跑順序：檔案大的先跑（測試項目多、通常跑得久），免得最慢那支最後才開始、拖長整體時間；同大小照檔名 */
+export function scheduleOrder(files, sizeOf) {
+  return files.map(f => [f, sizeOf(f)]).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([f]) => f)
+}
+
+/** 分份：大檔先、每支丟給目前檔案總大小最小的那份（同大小給編號小的），各份工作量相近；回傳第 index 份（照開跑順序）。
+ *  同一批檔案、同樣的 total，每份拿到的檔案固定，n 份合起來剛好是全部、不重複。 */
+export function shardFiles(files, sizeOf, index, total) {
+  const load = Array(total).fill(0)
+  const mine = []
+  for (const f of scheduleOrder(files, sizeOf)) {
+    let k = 0
+    for (let i = 1; i < total; i++) if (load[i] < load[k]) k = i
+    load[k] += sizeOf(f)
+    if (k === index - 1) mine.push(f)
+  }
+  return mine
+}
+
 /** 一支的結果：passed／failed／timeout */
 export function classify(r) {
   if (r.error?.code === 'ETIMEDOUT' || r.signal === 'SIGTERM') return 'timeout'
   return r.status === 0 ? 'passed' : 'failed'
+}
+
+/** 失敗時要印的輸出：先挑 not ok／統計／Error 那幾行（最多 12 行）；一行都沒挑到就印最後 20 行，不讓失敗原因整個消失 */
+export function failureExcerpt(out) {
+  const lines = String(out ?? '').split(/\r?\n/)
+  const picked = lines.filter(l => /not ok|ℹ (pass|fail)|Error|error/.test(l)).slice(0, 12)
+  return picked.length ? picked : lines.filter(l => l.trim()).slice(-20)
 }
 
 /** 收掉整個程序樹：測試檔可能生孫程序（假後台、資料庫），只殺直接子程序的話孫程序還握著 stdout 管線，執行器就等不到結束（#1379）。
@@ -55,14 +116,14 @@ export function killTree(child) {
 
 /** 跑一支測試檔，回傳 { status, signal, stdout, stderr, error? }。
  *  逾時（timeoutSec + 寬限秒數，給 --test-timeout 先開口）＝收整個程序樹、不等 stdio 關閉、直接回 timeout；計時器一開始就啟動。 */
-export function runOne(file, timeoutSec, { args = ['--test', `--test-timeout=${timeoutSec * 1000}`], graceSec = 10, cwd = root } = {}) {
+export function runOne(file, timeoutSec, { args = ['--test', `--test-timeout=${timeoutSec * 1000}`], graceSec = 10, cwd = root, env = process.env } = {}) {
   return new Promise(resolve => {
     let out = ''
     let err = ''
     let done = false
     let timer
     const finish = r => { if (done) return; done = true; clearTimeout(timer); resolve({ stdout: out, stderr: err, ...r }) }
-    const child = spawn(process.execPath, [...args, file], { cwd, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [...args, file], { cwd, env, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     child.stdout.setEncoding('utf8').on('data', d => { out += d })
     child.stderr.setEncoding('utf8').on('data', d => { err += d })
     // 'exit' 之後只再等一下讓輸出收完就結算，不等 'close'：孫程序握著管線時 close 可能永遠不來
@@ -79,31 +140,84 @@ export function runOne(file, timeoutSec, { args = ['--test', `--test-timeout=${t
   })
 }
 
+/** 這支測試自己的暫存目錄：TMPDIR（Linux／macOS）、TEMP／TMP（Windows）都指過去，os.tmpdir() 就會落在這裡 */
+function isolatedEnv(file, baseEnv) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `asn-rrt-${path.basename(file).replace(/\W+/g, '_').slice(0, 40)}-`))
+  return { tmp, env: { ...baseEnv, TMPDIR: tmp, TEMP: tmp, TMP: tmp } }
+}
+
+function removeQuietly(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }) } catch { /* Windows 上偶爾還被佔用，留給系統清 */ }
+}
+
+/** 一支結束後要印的那一組文字（一次印出，並行時不會跟別支交錯） */
+export function formatResult(f, kind, secs, r, pskips = []) {
+  const skipNote = pskips.length ? `，因 pglite 略過 ${pskips.length} 項` : ''
+  const label = kind === 'passed' ? '過' : kind === 'timeout' ? '逾時' : '失敗'
+  const lines = [`${label}  ${f}  (${secs.toFixed(1)}s${skipNote})`]
+  if (pskips.length) lines.push(...pskips.slice(0, 12).map(l => '    ' + l))
+  if (kind !== 'passed') {
+    lines.push(`  ┌─ ${f} 的輸出（節錄）`)
+    lines.push(...failureExcerpt((r.stdout ?? '') + (r.stderr ?? '')).map(l => '  │ ' + l))
+    lines.push(`  └─ ${f}`)
+  }
+  return lines.join('\n')
+}
+
+/** 跑一批測試檔，最多 jobs 支同時跑。回傳 { res: {passed, failed, timeout}, times: [[檔名, 秒]], code }。
+ *  dir：測試檔所在目錄（相對 cwd）；log：印一整組文字的函式；runArgs：交給 runOne 的 node 參數（測試用）。 */
+export async function runAll(files, { jobs = 1, timeoutSec = 60, requirePglite = false, cwd = root, dir = 'tests', log = s => console.log(s), runArgs, graceSec, baseEnv = process.env } = {}) {
+  const res = { passed: [], failed: [], timeout: [] }
+  const times = []
+  const queue = [...files]
+  // 整批共用的快取目錄：只放「建一次、之後只讀」的東西（例如 PGlite 空資料庫的匯出檔，見 tests/_pglite_close.mjs），跑完刪掉
+  const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-rrt-shared-'))
+  const runEnv = { ...baseEnv, ROOT_TESTS_SHARED_DIR: sharedDir }
+  const worker = async () => {
+    for (let f = queue.shift(); f !== undefined; f = queue.shift()) {
+      log(`開始  ${f}`)
+      const t0 = Date.now()
+      const { tmp, env } = isolatedEnv(f, runEnv)
+      let r
+      try {
+        r = await runOne(path.join(dir, f), timeoutSec, { cwd, env, ...(runArgs ? { args: runArgs } : {}), ...(graceSec != null ? { graceSec } : {}) })
+      } finally { removeQuietly(tmp) }
+      let kind = classify(r)
+      const pskips = requirePglite && kind === 'passed' ? pgliteSkips((r.stdout ?? '') + (r.stderr ?? '')) : []
+      if (pskips.length) kind = 'failed'
+      const secs = (Date.now() - t0) / 1000
+      res[kind].push(f)
+      times.push([f, secs])
+      log(formatResult(f, kind, secs, r, pskips))
+    }
+  }
+  try { await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, files.length)) }, worker)) } finally { removeQuietly(sharedDir) }
+  return { res, times, code: res.failed.length || res.timeout.length ? 1 : 0 }
+}
+
 async function main() {
-  const { filters, timeoutSec, requirePglite } = parseArgs(process.argv.slice(2))
+  const { filters, timeoutSec, requirePglite, jobs: argJobs, shard } = parseArgs(process.argv.slice(2))
+  if (shard === 'invalid') { console.error('--shard 要寫成 i/n（1 ≤ i ≤ n），例如 --shard=1/2'); process.exit(1) }
   if (requirePglite) {
     try { await import('@electric-sql/pglite') } catch (e) { console.error(`--require-pglite：載不到 @electric-sql/pglite（${e.code ?? e.message}），不跑`); process.exit(1) }
   }
-  const files = pickFiles(fs.readdirSync(path.join(root, 'tests')), filters)
-  if (!files.length) { console.error('沒有符合的測試檔'); process.exit(1) }
-  const res = { passed: [], failed: [], timeout: [] }
-  for (const f of files) {
-    console.log(`開始  ${f}`)
-    const t0 = Date.now()
-    const r = await runOne(path.join('tests', f), timeoutSec)
-    let kind = classify(r)
-    const pskips = requirePglite ? pgliteSkips((r.stdout ?? '') + (r.stderr ?? '')) : []
-    const skipNote = kind === 'passed' && pskips.length ? `，因 pglite 略過 ${pskips.length} 項` : ''
-    if (skipNote) kind = 'failed'
-    res[kind].push(f)
-    console.log(`${kind === 'passed' ? '過' : kind === 'timeout' ? '逾時' : '失敗'}  ${f}  (${((Date.now() - t0) / 1000).toFixed(1)}s${skipNote})`)
-    if (skipNote) console.log(pskips.slice(0, 12).map(l => '    ' + l).join('\n'))
-    if (kind !== 'passed') console.log(((r.stdout ?? '') + (r.stderr ?? '')).split('\n').filter(l => /not ok|ℹ (pass|fail)|Error|error/.test(l)).slice(0, 12).map(l => '    ' + l).join('\n'))
-  }
-  console.log(`\n共 ${files.length} 支：過 ${res.passed.length}、失敗 ${res.failed.length}、逾時 ${res.timeout.length}`)
-  if (res.failed.length) console.log('失敗：' + res.failed.join('、'))
-  if (res.timeout.length) console.log('逾時：' + res.timeout.join('、'))
-  process.exit(res.failed.length || res.timeout.length ? 1 : 0)
+  const testsDir = path.join(root, 'tests')
+  const picked = pickFiles(fs.readdirSync(testsDir), filters)
+  if (!picked.length) { console.error('沒有符合的測試檔'); process.exit(1) }
+  const sizeOf = f => { try { return fs.statSync(path.join(testsDir, f)).size } catch { return 0 } }
+  const files = shard ? shardFiles(picked, sizeOf, shard.index, shard.total) : scheduleOrder(picked, sizeOf)
+  if (!files.length) { console.log(`第 ${shard.index}/${shard.total} 份沒有分到測試檔`); process.exit(0) }
+  const jobs = resolveJobs(argJobs)
+  const shardNote = shard ? `，第 ${shard.index}/${shard.total} 份（全部 ${picked.length} 支）` : ''
+  console.log(`共 ${files.length} 支${shardNote}，並行 ${jobs} 支（CPU ${availableCpus()}；可用 --jobs=N 或環境變數 ROOT_TESTS_JOBS 改）`)
+  const t0 = Date.now()
+  const { res, times, code } = await runAll(files, { jobs, timeoutSec, requirePglite })
+  const slow = [...times].sort((a, b) => b[1] - a[1]).slice(0, 10)
+  console.log(`\n最慢 ${slow.length} 支：` + slow.map(([f, s]) => `${f} ${s.toFixed(1)}s`).join('、'))
+  console.log(`共 ${files.length} 支：過 ${res.passed.length}、失敗 ${res.failed.length}、逾時 ${res.timeout.length}；總耗時 ${((Date.now() - t0) / 1000).toFixed(1)}s（並行 ${jobs}）`)
+  if (res.failed.length) console.log('失敗：' + res.failed.sort().join('、'))
+  if (res.timeout.length) console.log('逾時：' + res.timeout.sort().join('、'))
+  process.exit(code)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main()

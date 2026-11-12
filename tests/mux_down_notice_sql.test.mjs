@@ -1,6 +1,6 @@
 // 共用終端服務掛掉的本人通知（20261105110000_mux_down_notice.sql）：靜態檢查與 pglite 實跑。
 // 實跑（有安裝 @electric-sql/pglite 時）：擁有者收到固定內文、reply=no、每節點每小時 6 封、別的節點收不到、停用節點動不到、參數不合格不寄。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +35,7 @@ test('靜態：relay 動作先驗證內容，節點取自金鑰，參數只有�
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const OWNER_A = 'bbbbbbbb-0000-0000-0000-00000000000a'
 const OWNER_B = 'bbbbbbbb-0000-0000-0000-00000000000b'

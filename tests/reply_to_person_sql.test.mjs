@@ -2,7 +2,7 @@
 // 1. 靜態檢查：person_view_node 不再回角色節點；asn_relay_send 保底條件齊全、本體除保底外逐字不變、只授權 service_role、不動資料。
 // 2. 實跑檢查（有安裝 @electric-sql/pglite 才跑）：重現「夥伴回信寄到角色節點 XISU、沒人收」→ 套用後「扇出到本人各 ASN 視窗」；
 //    不誤傷：指定了別的視窗名、角色節點上有在線 ASN、寄件人是角色節點自己、別的租戶。
-import { track, closeAtEnd } from './_pglite_close.mjs'
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -43,7 +43,7 @@ test('靜態：asn_relay_send 除了保底區塊與改名，與 20261022090000 �
 })
 
 let PGlite = null
-try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const U1 = '11111111-1111-1111-1111-111111111111'
