@@ -1,11 +1,11 @@
 {
-  "version": "0.2.17",
-  "notes": "- 新功能：手機可以替電腦登入 Codex（只登入，不會幫你安裝）。電腦要先升到 0.2.17，升級後請在電腦設定裡重新勾一次「允許這支手機替這台登入」。\n- 新功能（電腦版）：看別台夥伴的終端時，下方輸入框打的字會直接送進那個終端，原本的「打字」按鈕拿掉了；按鈕在對話畫面寫「傳送」，在終端畫面寫「送出」。\n- 改善：電腦版切到別的分頁再切回來，終端畫面會保留；你打字打到一半離開，回來要自己按「重新看」才會接上。\n- 改善：電腦版終端分頁在背景時暫停讀取，比較省資源。\n- 改善：手機看終端時，提示移到下方狀態列；在終端上左右滑不會切到別的分頁。\n- 改善：手機「認得的電腦」頁可以直接確認指紋。\n- 改善：「我的帳號」卡片的時間移到帳號後面，正在讀額度的那台電腦在設備按鈕上標藍線。\n- 改善：手機上的節點金鑰和登入資料改用系統金鑰庫加密保存，也可以換一把新的節點金鑰。\n- 修正：重開機接回時，你自己關掉或封存的視窗不會再被接回來。\n- 修正：同一段對話不會再開成兩個視窗。\n- 已知問題：手機看終端時還不能打字，0.2.18 會補上。\n- 已知問題：電腦版看本機的終端時，還不能用下方輸入框打字，0.2.18 會補上。",
-  "pub_date": "2026-11-12T13:11:27.133Z",
+  "version": "0.2.18",
+  "notes": "- 改善：分頁改成「對話／夥伴／通知／設定」，電腦和手機的字和順序一樣。電腦版：通知、群組、使用指引、齒輪都從左邊移到上方的分頁，群組併進「對話」，使用指引移到「設定 → 使用指引」，設備頁籤留在「夥伴」裡；任一台有未讀時，「夥伴」分頁也會亮紅點。手機：開 App 先看「對話」清單，點一則才進去（上次正在看的那一則會直接打開）；通知固定在第三格；「設置」改名「設定」。\n- 改善：設定裡管震動、聲音和 App 關著時通知的分類，電腦原本叫「通知」、手機叫「提醒」，現在都叫「提醒與聲音」。\n- 新功能：設定 →「外觀」可以選「復古 Aero（原本的樣子）」或「現代（預覽）」。選了所有視窗馬上換，不用重開；預設是復古 Aero，升級後樣子不變。現代外觀目前先換配色（米白底、青綠主色），對話畫面依設計稿重排在 0.2.19。\n- 新功能：手機看別台電腦的終端時，可以用下方輸入框打字（0.2.17 的已知問題）。\n- 新功能：電腦版看本機夥伴的終端時，下方輸入框送出的字會直接打進終端（0.2.17 的已知問題）。\n- 改善：輸入框送進終端前會先去掉控制字元；多行內容在等確認時，前一段不會被後一段蓋掉。\n- 改善：每台設備（電腦、手機、雲端代理）只有一個名字，所有地方顯示同一個。你可以從任何一台自己的設備替另一台改名，改過的名字不會在對方重新啟動時被蓋回去。\n- 改善：「認得的電腦」併進設定的設備頁，每台設備的指紋、QR code、改名、允許的項目和忘記都在同一個地方。\n- 改善：電腦版在設定 → 設備按「忘記」時，會先跳確認框，按「取消」就不會忘記。\n- 修正：電腦重開機後，橋不會再把別的程序誤認成「另一個橋還在跑」。\n- 改善：手機匯出到「下載」時檢查得更仔細。",
+  "pub_date": "2026-11-12T21:12:32.298Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlvMEhMYXhBZnVjekw2V1R4L2RCUlFMeEdqR2JWRlNENEdQZ2tsQTZ6YTVVY0E1aDJtR2xyU09ZNUdPT2Q4UDhtTEFTeWgzc0tXYi9zVDk5bGxTV0FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDYzOTQ3CWZpbGU6QVNOXzAuMi4xN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE3CktRTUQvWGY5L0lpTEpvalREYWdla29lZEtOeFpLVEJGT2VQalE0UjQxU2l5ZGdEN1h2WFc0M29wSHRNZ05HN2NjbmxSM3BEY0txWis5bENrYStkM0NnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.17_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnc1OU9SeWpONFZWTStaSENhL3c5OU0wNUJQOWNLR0RiZW9sejdGMWU2a2FlL1N4WDlZNmVJbVZLc01BaWc3TC8veGJVc3FEVHZRQkJnTnlSWGFxc0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NTE1MDgyCWZpbGU6QVNOXzAuMi4xOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE4CkxIQmNTMHhSdkVvQWhDWG9xVHJKSkI1Q1o4YmpScGE1YjhHS3RqaVEvcUlacXkyUkFpVWlJb1lzTTl4eG91ZndVSGZ2VzMyczRqM0xQeFBVK0ZFekN3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.18_x64-setup.exe"
     }
   }
 }
