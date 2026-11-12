@@ -31,6 +31,7 @@ import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from '
 import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
 import { sendBridgeNotice } from './bridge-notice.mjs'
+import { acquireLock } from './bridge-lock.mjs'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'H').trim()
 const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
@@ -582,13 +583,9 @@ process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown)
 process.on('uncaughtException', e => log(`uncaught: ${e.stack ?? e}`))
 process.on('unhandledRejection', e => log(`unhandled: ${e?.stack ?? e}`))
 
-// single instance per node: a live pid in bridge.pid means another bridge is running
+// single instance per node: bridge.pid 記編號＋程序啟動時間，兩者都對得上才算另一個橋在跑（#1373，見 bridge-lock.mjs）
 const LOCK = path.join(WORK_DIR, 'bridge.pid')
-try {
-  const old = Number(fs.readFileSync(LOCK, 'utf8'))
-  if (old && old !== process.pid) { try { process.kill(old, 0); console.error(`another bridge is running (pid ${old})`); process.exit(3) } catch (e) { if (e.code === 'EPERM') process.exit(3) } }
-} catch {}
-fs.writeFileSync(LOCK, String(process.pid))
+{ const got = acquireLock(LOCK); if (!got.ok) { console.error(`another bridge is running (pid ${got.pid})`); process.exit(3) } }
 // 上一個橋留下的孤兒（收發室、工作者）先收掉，免得兩組同時收信（見 self-update.mjs）
 const LAST = path.join(WORK_DIR, 'bridge.last')
 try {
@@ -597,7 +594,6 @@ try {
   for (const pid of orphans) log(`killed orphan pid=${pid} left by previous bridge pid=${lastPid}: ${await killTree(pid) ? 'ok' : 'failed'}`)
 } catch (e) { if (e.code !== 'ENOENT') log(`orphan check failed: ${e.message}`) }
 fs.writeFileSync(LAST, String(process.pid))
-process.on('exit', () => { try { if (Number(fs.readFileSync(LOCK, 'utf8')) === process.pid) fs.unlinkSync(LOCK) } catch {} })
 
 log(`bridge starting node=${NODE_ID} mailbox=${MAILBOX_NAME}`)
 for (const e of engines) e.start({ onSent, onFail, onReply })

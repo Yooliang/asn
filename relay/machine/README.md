@@ -45,7 +45,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
      否則**不 ack、留在 inbox**，等 ASN 視窗的本人處理，不再丟給隨便一個 session。
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
-4. 單一執行個體：`~/.asn/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
+4. 單一執行個體：`~/.asn/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。`bridge.pid` 只記編號（ASN 內建橋共用這個格式）；Node 橋另寫 `bridge.pid.start` 記自己的程序啟動時間，編號活著但啟動時間對不上＝編號已被別的程序回收，當殘留檔覆寫（#1373，見 `bridge-lock.mjs`）。沒有這份記錄或查不到啟動時間時，照舊只看編號。
 
 > 重要：同一把節點金鑰只能有**一個**收信者。H 節點啟用本橋之後，工頭 session 若還掛著已封存的 channel 外掛（`archive/relay-channel/`）要拿掉，
 > 否則兩邊搶同一個 inbox、互相 ack。
