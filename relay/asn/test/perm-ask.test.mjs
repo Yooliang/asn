@@ -53,7 +53,7 @@ test('結果：沒有最終結果就繼續等；失敗要說', () => {
 })
 
 test('導覽', () => {
-  assert.deepEqual(permReqNav(), { tab: 'chats', sheet: 'permreq' })
+  assert.deepEqual(permReqNav(), { tab: 'chats', sheet: 'permreq', chat: true }, '蓋在點進去的那一則對話上')
   assert.deepEqual(normalizeNav({ sheet: 'permreq', tab: 'x' }), permReqNav())
 })
 

@@ -71,7 +71,7 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
 // 遮罩檢查（#536）：steps＝依序點的 [選擇器, 文字]，mask＝遮罩選擇器，cover＝必須被遮罩蓋住的區塊
 export const MASK_PROBES = {
   desktop: { steps: [['.actionbar .abtn[aria-label="管理"]', ''], ['.ab-ops button:not(.off)', '詳情']], mask: '.dlg-back', cover: ['.me .me-dp', '.me-info', '.rail', '.list-pane .content', '.tabbar'] },
-  mobile: { steps: [['.m-plus-wrap .m-icon-btn', ''], ['.m-plus-menu button', '建立群組']], mask: '.gs-back', cover: ['.m-head .m-me', '.m-head .m-plus-wrap', '.m-search'] },
+  mobile: { steps: [['.m-plus-wrap .m-icon-btn', ''], ['.m-plus-menu button', '建立群組']], mask: '.gs-back', cover: ['section[aria-label="夥伴"] .m-head .m-me', '.m-head .m-plus-wrap', 'section[aria-label="夥伴"] .m-search'] },   // 0.2.18：對話分頁也有標頭與搜尋框，指定夥伴頁那一份
 }
 // 夥伴分頁情境：名單上有一個在線的 Claude 視窗，整合模式開著它的對話分頁（大按鈕區有「管理」）
 export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }]
@@ -296,7 +296,7 @@ export const mattachProbeSource = ({ mattach }) => `(async () => {
   if (call[1]?.payload?.room !== 'g1') return { ok: false, why: '附件沒有帶群組代號：' + JSON.stringify(call[1]?.payload?.room) };
   return { ok: true, why: '' };
 })()`
-// 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「帳號」）
+// 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設定點進「帳號」）
 // #374：兩條改成額度條（「5 小時」「剩 40%」各自一段）；absent＝那一組裡不能出現的字
 const CLAUDE_BARS = ['Claude', '5 小時', '剩 40%', '每週', '剩 72%']
 export const QUOTA_PROBES = {
@@ -372,8 +372,8 @@ export const mcardsProbeSource = ({ open }) => `(async () => {
   if (Array.from(foot.textContent.trim()).length > 20) return { ok: false, why: '說明超過 20 字' };
   return { ok: true, why: '' };
 })()`
-// 手機「設備與帳號」返回（修返回鍵退不回設備列表）：從夥伴列表某台設備旁「選項」進來（直接開那台細部）或從設置進來（先看列表），
-// 按系統返回鍵一層一層退：細部 → 設備列表 → 收起整頁；兩種進法、一台或多台設備都要。列表＝有 .m-dv-list，細部＝第四頁籤開著但沒有列表
+// 手機「設備與帳號」返回（修返回鍵退不回設備列表）：從夥伴列表某台設備旁「選項」進來（直接開那台細部）或從設定進來（先看列表），
+// 按系統返回鍵一層一層退：細部 → 設備列表 → 收起整頁；兩種進法、一台或多台設備都要。列表＝有 .m-dv-list，細部＝內頁開著但沒有列表
 export const MACCT_BACK_PROBE = { macctBack: true }
 export const macctBackProbeSource = () => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -397,18 +397,18 @@ export const macctBackProbeSource = () => `(async () => {
     bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
   }
   bad = check('返回收起', await press('closed'), 'closed'); if (bad) return bad;
-  // 二、從設置進來：先看列表，點一台，返回
-  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '設置' || b.getAttribute('aria-label') === '設置');
+  // 二、從設定進來：先看列表，點一台，返回
+  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '設定' || b.getAttribute('aria-label') === '設定');
   if (go) { go.click(); await sleep(300) }
   let btn = null;
   for (let i = 0; i < 30 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備」（' + steps.join('；') + '）' };
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」（' + steps.join('；') + '）' };
   btn.click();
-  bad = check('設置進來', await waitView('list'), 'list'); if (bad) return bad;
+  bad = check('設定進來', await waitView('list'), 'list'); if (bad) return bad;
   document.querySelector('.m-dv-accbtn').click();
-  bad = check('設置點一台', await waitView('detail'), 'detail'); if (bad) return bad;
-  bad = check('設置返回一次', await press('list'), 'list'); if (bad) return bad;
-  bad = check('設置返回收起', await press('closed'), 'closed'); if (bad) return bad;
+  bad = check('設定點一台', await waitView('detail'), 'detail'); if (bad) return bad;
+  bad = check('設定返回一次', await press('list'), 'list'); if (bad) return bad;
+  bad = check('設定返回收起', await press('closed'), 'closed'); if (bad) return bad;
   return { ok: true, why: steps.join('；') };
 })()`
 const MACCT_ME = { navTab: 'list' }
@@ -416,7 +416,7 @@ const MACCT_MEMBERS = {
   one: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
   two: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
 }
-// 手機設置頁排版（#930）：設置 → 設備／帳號，412、360 寬與大字型（字放大 1.3 倍，模擬手機系統的大字型）各一張。
+// 手機設定頁排版（#930）：設定 → 設備／帳號，412、360 寬與大字型（字放大 1.3 倍，模擬手機系統的大字型）各一張。
 // 檢查：分頁鈕的字沒被切、每列三行都在列內、「這支手機」的圓點和別列對齊、設備頁沒有額度註腳；
 // 帳號頁註腳在、沒有「這台沒有存這個帳號」、切換鈕右緣對齊且字沒被切
 export const MLAYOUT_PROBES = {
@@ -430,7 +430,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   const tab = ${JSON.stringify(tab)};
   let btn = null;
   for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
   btn.click();
   // 帳號頁的「切換到…」要先讀過各台的帳號回報（點進那台細部才讀）：逐台點進去再返回
   if (tab === 'accounts') {
@@ -563,7 +563,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   const W = window.innerWidth;
   let btn = null;
   for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
   btn.click(); await sleep(500);
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
@@ -617,7 +617,7 @@ export const mnoselfProbeSource = () => `(async () => {
   const vis = e => e && e.offsetParent !== null;
   let btn = null;
   for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
   btn.click(); await sleep(500);
   const rows = () => [...document.querySelectorAll('.m-dv-row')].filter(vis);
   const n = rows().length;
@@ -752,8 +752,45 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設置頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 手機四個分頁（0.2.18）：開 App 先看「對話」清單；點一則進到對話、「‹」回清單；設定裡打開「關於」是蓋在設定那一格上的內頁，
+// 切到夥伴再切回設定還在（內頁跟著那一格，不另佔一格）；分頁列的字與順序和電腦版一樣
+export const MTABS_PROBE = { mtabs: true }
+export const mtabsProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const inView = e => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.left > -2 && r.right < innerWidth + 2 };
+  let tabs = [];
+  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
+  const labels = tabs.map(b => b.textContent.trim()).join('|');
+  if (labels !== '對話|夥伴|通知|設定') return { ok: false, why: '分頁的字或順序不對：' + labels };
+  if (!tabs[0].classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」' };
+  const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
+  let row = null;
+  for (let i = 0; i < 60 && !row; i++) { row = sec().querySelector('.m-chat-list .m-buddy, .m-buddy'); if (!row) await sleep(100) }
+  if (!row || !sec().classList.contains('m-chat-list')) return { ok: false, why: '對話分頁沒有顯示對話清單' };
+  if (!row.textContent.includes('demo')) return { ok: false, why: '清單裡沒有上次那一位：' + row.textContent.trim().slice(0, 30) };
+  row.click(); await sleep(500);
+  if (!sec().classList.contains('m-chat') || !inView(sec().querySelector('.chatpane'))) return { ok: false, why: '點了沒有進到對話' };
+  if (!tabs[0].classList.contains('on')) return { ok: false, why: '進到對話時分頁列應該還標著「對話」' };
+  const back = sec().querySelector('[aria-label="回對話清單"]');
+  if (!back) return { ok: false, why: '對話上方沒有回清單的鍵' };
+  back.click(); await sleep(500);
+  if (!sec().classList.contains('m-chat-list')) return { ok: false, why: '按「‹」沒有回到對話清單' };
+  tabs[3].click(); await sleep(500);
+  const about = [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
+  if (!about) return { ok: false, why: '設定裡找不到「關於」' };
+  about.click(); await sleep(600);
+  const page = document.querySelector('.m-fourth');
+  if (!inView(page)) return { ok: false, why: '「關於」內頁沒有出現在畫面上' };
+  if (!tabs[3].classList.contains('on')) return { ok: false, why: '在內頁上分頁列應該標著「設定」' };
+  if (document.querySelectorAll('.m-tabs button').length !== 4) return { ok: false, why: '內頁不該多出一個分頁' };
+  tabs[1].click(); await sleep(600);
+  if (inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切到夥伴後內頁還蓋在畫面上' };
+  tabs[3].click(); await sleep(600);
+  if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切回設定沒有回到「關於」內頁' };
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -782,7 +819,7 @@ function cardsRoster(now = SMOKE_NOW) {
       windows: [{ name: 'five_hour', left_pct: 55, resets_at: toMinute(now + 2 * 3600_000), read_at: old, read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: toMinute(now + 4 * 24 * 3600_000), read_at: old, read_node: 'P' }] },
     { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: old, seen_node: 'P', nodes: [] }] }
 }
-// #930 手機設置頁排版：這支手機＋兩台電腦（工作機的回報是舊的，第三行會是「還沒收到這台的回報」）；
+// #930 手機設定頁排版：這支手機＋兩台電腦（工作機的回報是舊的，第三行會是「還沒收到這台的回報」）；
 // 辦公室有兩個 Claude 帳號、ASN 在線（可以切換）；工作機也存了兩個但 ASN 不在線（按鈕停用、左邊有說明字），第 8 點的對齊才看得到
 function layoutRoster(now = SMOKE_NOW) {
   const r = resetRoster(now)
@@ -820,7 +857,7 @@ export const mcloudProbeSource = () => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   let btn = null;
   for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備」' };
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
   btn.click();
   await sleep(500);
   // 不點進任何一台：進設備頁時就會把各台的帳號回報讀進來（#930），讀到之後雲端節點才標得出來；最多等 3 秒
@@ -897,9 +934,9 @@ export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async (
   if (m) return { ok: false, why: '畫面出現議題編號：' + m[0] };
   return { ok: true, why: '' };
 })()`
-// 手機第四格「通知」（#895，PR-H）：四個頁籤固定；通知分頁顯示系統通知對話（唯讀）、紅點在第四格。
-// view: 'tab'＝存檔停在第四格，看到通知內容（不會有紅點，因為正在看）；'dot'＝存檔停在設置，第四格亮紅點。412、360 寬與大字型（1.3 倍）各一張
-const MNOTICE_ME = { tab: { navTab: 'page' }, dot: { navTab: 'me' } }
+// 手機「通知」分頁（#895，PR-H；0.2.18 起是固定的第三格）：四個頁籤固定「對話／夥伴／通知／設定」；通知分頁顯示系統通知對話（唯讀）、紅點在通知那一格。
+// view: 'tab'＝存檔停在通知，看到通知內容（不會有紅點，因為正在看）；'dot'＝存檔停在設定，通知那一格亮紅點。412、360 寬與大字型（1.3 倍）各一張
+const MNOTICE_ME = { tab: { navTab: 'notice' }, dot: { navTab: 'me' } }
 const noticeMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-0000000000a1', from_node: 'Q', from_agent: '額度通知收發室', kind: 'notice:quota', body: '辦公室：Claude 額度剩 18%，約 2 小時後重置。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 9 * 60_000).toISOString() },
   { id: '00000000-0000-4000-8000-0000000000a2', from_node: 'R', from_agent: 'ASN 通知', kind: 'notice:waiting', body: '工作機：夥伴 demo 正在等你確認。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
@@ -991,7 +1028,7 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
     await sleep(300);
   }
   const labels = tabs.map(b => b.querySelector('span')?.textContent.trim());
-  if (labels.join('|') !== '夥伴|對話|設置|通知') return { ok: false, why: '四個頁籤的字不對：' + labels.join('、') };
+  if (labels.join('|') !== '對話|夥伴|通知|設定') return { ok: false, why: '四個頁籤的字不對：' + labels.join('、') };
   // 四個字都要完整顯示：沒被省略、沒被切、沒有橫向溢出
   const nav = document.querySelector('.m-tabs');
   if (nav.scrollWidth > nav.clientWidth + 1) return { ok: false, why: '頁籤列橫向溢出：' + nav.scrollWidth + ' > ' + nav.clientWidth };
@@ -1003,16 +1040,16 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
     if (t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」的字被切' };
     if (sp.scrollWidth > sp.clientWidth + 1) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」被省略號截斷' };
   }
-  const dot = tabs[3].querySelector('i.red');
+  const dot = tabs[2].querySelector('i.red');
   if (view === 'dot') {
-    if (!dot || !vis(dot)) return { ok: false, why: '通知有未讀，第四格卻沒有紅點' };
-    if (tabs[1].querySelector('i.red')) return { ok: false, why: '對話分頁不該因為通知未讀而亮紅點' };
-    const d = dot.getBoundingClientRect(), b = tabs[3].getBoundingClientRect();
-    if (d.right > b.right + 0.5 || d.left < b.left - 0.5) return { ok: false, why: '紅點跑出第四格' };
+    if (!dot || !vis(dot)) return { ok: false, why: '通知有未讀，通知那一格卻沒有紅點' };
+    if (tabs[0].querySelector('i.red')) return { ok: false, why: '對話分頁不該因為通知未讀而亮紅點' };
+    const d = dot.getBoundingClientRect(), b = tabs[2].getBoundingClientRect();
+    if (d.right > b.right + 0.5 || d.left < b.left - 0.5) return { ok: false, why: '紅點跑出通知那一格' };
     return { ok: true, why: '' };
   }
   if (dot) return { ok: false, why: '正在看通知，紅點應該清掉' };
-  if (!tabs[3].classList.contains('on')) return { ok: false, why: '存檔停在第四格，第四格卻沒選中' };
+  if (!tabs[2].classList.contains('on')) return { ok: false, why: '存檔停在通知，通知那一格卻沒選中' };
   const pane = document.querySelector('.m-notice');
   if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
   const msgs = [...pane.querySelectorAll('.msg')].filter(vis);
@@ -1023,7 +1060,7 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
   if (pane.querySelector('.tool.call, .tool.icon.call')) return { ok: false, why: '通知不該有通話鈕' };
   return { ok: true, why: '' };
 })()`
-// 手機舊「○○收發室」聯絡人列不再出現在夥伴頁／對話頁、改集中在第四格「通知」（#895 驗收，重現 11-06 截圖）：
+// 手機舊「○○收發室」聯絡人列不再出現在夥伴頁／對話頁、改集中在「通知」分頁（#895 驗收，重現 11-06 截圖）：
 // 「30家用」節點底下本機存檔裡留著五個舊系統寄件人（沒 kind、各有信），後台另來一封新式通知（kind）與一封舊名無 kind 的信，外加兩位正常夥伴。
 // view: 'list'＝存檔停在夥伴頁；'lastchat'＝最後使用的對話是某個舊收發室列（升級前的狀態），對話頁不該還開著它
 const LEGACY_SENDERS = [
@@ -1064,27 +1101,28 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
   for (let i = 0; i < 80 && !(nicks().includes('小工') && nicks().includes('alpha')); i++) await sleep(100);
   for (let i = 0; i < 80 && document.querySelector('.m-banner'); i++) await sleep(100);   // 新通知的橫幅幾秒後自己消失
   await sleep(600);
-  // 1) 夥伴頁（第一格）：正常夥伴在、沒有任何舊系統寄件人列
+  // 1) 夥伴頁（第二格）：正常夥伴在、沒有任何舊系統寄件人列
   const names = nicks();
   for (const n of ['demo', '小工', 'alpha']) if (!names.includes(n)) return { ok: false, why: '夥伴頁少了正常夥伴「' + n + '」：' + names.join('、') };
   const bad = names.filter(legacyName);
   if (bad.length) return { ok: false, why: '夥伴頁還列著系統寄件人：' + [...new Set(bad)].join('、') };
   const listText = pg('夥伴').textContent;
   for (const s of SENDERS) if (listText.includes(s)) return { ok: false, why: '夥伴頁的文字裡還出現「' + s + '」' };
-  if (!names.includes('通知')) return { ok: false, why: '夥伴頁最上面該有單一「通知」對話列：' + names.join('、') };
-  // 2) 對話頁（第二格）：沒有舊收發室的對話（列、標題、內容都不能有）
-  tabs[1].click();
+  if (names.includes('通知')) return { ok: false, why: '夥伴頁不該再有「通知」列（通知有自己的分頁）：' + names.join('、') };
+  // 2) 對話頁（第一格）：清單與內容都沒有舊收發室的對話（列、標題、內容都不能有）
+  tabs[0].click();
   await sleep(700);
   const chat = pg('對話');
-  if (chat.querySelectorAll('.m-buddy').length) return { ok: false, why: '對話頁出現對話列' };
+  const rows = [...chat.querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
+  if (rows.some(legacyName)) return { ok: false, why: '對話清單列著系統寄件人：' + rows.join('、') };
   const title = chat.querySelector('.m-head .m-title')?.textContent.trim() || '';
   if (legacyName(title)) return { ok: false, why: '對話頁開著舊系統寄件人的對話：「' + title + '」' };
   for (const s of SENDERS) if (chat.textContent.includes(s)) return { ok: false, why: '對話頁的文字裡還出現「' + s + '」' };
-  for (const w of MARKS) if (chat.textContent.includes(w)) return { ok: false, why: '對話頁顯示了通知內容「' + w + '」（通知只該在第四格）' };
-  // 3) 第四格「通知」：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
-  tabs[3].click();
+  for (const w of MARKS) if (chat.textContent.includes(w)) return { ok: false, why: '對話頁顯示了通知內容「' + w + '」（通知只該在通知分頁）' };
+  // 3) 「通知」分頁（第三格）：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
+  tabs[2].click();
   await sleep(900);
-  if (!tabs[3].classList.contains('on')) return { ok: false, why: '點第四格後沒有選中通知' };
+  if (!tabs[2].classList.contains('on')) return { ok: false, why: '點通知那一格後沒有選中通知' };
   const pane = document.querySelector('.m-notice');
   if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
   const text = pane.textContent;
@@ -1347,7 +1385,7 @@ export const SCENARIOS = [
   { name: 'list', page: 'list.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'list-roster', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: true }, ready: '#app.win .dv-my .dv-acct' },
   { name: 'list-roster-missing', page: 'list.html', state: { signedIn: true, devicesPage: true }, ready: '#app.win .dv-set' },
-  // Gemini 額度（#374 之三）：有額度時兩條都顯示、沒資料時寫提示；Claude 那一組照舊。手機從設置點進「帳號」看同一區
+  // Gemini 額度（#374 之三）：有額度時兩條都顯示、沒資料時寫提示；Claude 那一組照舊。手機從設定點進「帳號」看同一區
   { name: 'list-roster-gemini', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'gemini' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.gemini },
   { name: 'list-roster-gemini-empty', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'geminiEmpty' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.geminiEmpty },
   { name: 'm-roster-gemini', page: 'm.html', state: { signedIn: true, mroster: true }, ready: '#app.m .m-row-btn', probe: QUOTA_PROBES.mobile },
@@ -1357,7 +1395,7 @@ export const SCENARIOS = [
   { name: 'm-acct-cards', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-cards.png' },
   { name: 'm-acct-back-one', page: 'm.html', state: { signedIn: true, macct: 'one' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
   { name: 'm-acct-back-two', page: 'm.html', state: { signedIn: true, macct: 'two' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
-  // 手機設置頁排版（#930）：412、360 寬與大字型各一張
+  // 手機設定頁排版（#930）：412、360 寬與大字型各一張
   { name: 'm-layout-devices', page: 'm.html', state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devices, shot: 'm-layout-devices-412.png' },
   { name: 'm-layout-devices-360', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devices, shot: 'm-layout-devices-360.png' },
   { name: 'm-layout-devices-big', page: 'm.html', width: 360, state: { signedIn: true, mlayout: true }, ready: '#app.m .m-row-btn', probe: MLAYOUT_PROBES.devicesBig, shot: 'm-layout-devices-big.png' },
@@ -1386,7 +1424,7 @@ export const SCENARIOS = [
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },
   { name: 'm-devsheet', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-412.png' },
   { name: 'm-devsheet-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-360.png' },
-  // 手機第四格「通知」（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及第四格的未讀紅點。412、360 寬與大字型各一張
+  // 手機「通知」分頁（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及通知那一格的未讀紅點。412、360 寬與大字型各一張
   // 手機開新夥伴的運行選項（#931）：名稱與預設跟電腦版同一份目錄，另有「前台或背景」的說明。412、360 寬與大字型各一張
   { name: 'm-launch', page: 'm.html', state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-412.png' },
   { name: 'm-launch-360', page: 'm.html', width: 360, state: { signedIn: true, mlaunch: true }, ready: '#app.m .m-plus-wrap', probe: MLAUNCH_PROBES.base, shot: 'm-launch-360.png' },
@@ -1437,7 +1475,7 @@ export const SCENARIOS = [
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
-  // 舊「○○收發室」列併進通知（#895 驗收）：夥伴頁／對話頁沒有收發室、第四格看得到每位寄件人的信；412、360 寬各一張。
+  // 舊「○○收發室」列併進通知（#895 驗收）：夥伴頁／對話頁沒有收發室、通知分頁看得到每位寄件人的信；412、360 寬各一張。
   // lastchat 變體：存檔最後開著的對話是舊收發室列（升級前的狀態），對話頁不該還開著它
   { name: 'm-notice-legacy', page: 'm.html', state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-412.png' },
   { name: 'm-notice-legacy-360', page: 'm.html', width: 360, state: { signedIn: true, mnoticeLegacy: 'list' }, ready: '#app.m .m-buddy', probe: MNOTICE_LEGACY_PROBES.list, shot: 'm-notice-legacy-360.png' },
@@ -1455,7 +1493,7 @@ export const SCENARIOS = [
   { name: 'setup-progress', page: 'setup-progress.html', state: { signedIn: true }, ready: '#app .sp' },
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
-  { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
+  { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true, mtab: 'list' }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
   // 固定 6 顆大按鈕（#539）：閒置 Claude、離線 Claude、ACP 工作者，各自依序都在、反灰正確、反灰有 20 字內的原因
   { name: 'list-bar-fixed', page: 'list.html', state: { signedIn: true, bar: 'claude' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.claude },
   { name: 'list-bar-fixed-offline', page: 'list.html', state: { signedIn: true, bar: 'offline' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.offline },
@@ -1464,6 +1502,7 @@ export const SCENARIOS = [
   { name: 'list-bar-tasks', page: 'list.html', state: { signedIn: true, bar: 'tasks' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.tasks },
   // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
   // 手機對話頁（不放按鈕列）：412 寬，Claude 視窗、ACP 工作者、離線 Claude；上方沒有按鈕列、「⋯」不列永遠用不到的項目（在線：切換模型、詳情在前；離線：喚醒、切換模型在前；內建通道才有重開、移除）、標頭留著背景工作件數
+  { name: 'm-tabs', page: 'm.html', state: { signedIn: true, mbar: 'claude', mchatList: true }, ready: '#app.m .m-chat-list', probe: MTABS_PROBE, shot: 'm-tabs.png' },
   { name: 'm-chat-plain', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.plain, shot: 'm-chat.png' },
   { name: 'm-chat-claude', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.claude, shot: 'm-chat-ops.png' },
   { name: 'm-chat-acp', page: 'm.html', state: { signedIn: true, mbar: 'acp' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.acp },
@@ -1528,6 +1567,9 @@ export const tableFor = scenario => {
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
+  if (scenario.state.mchatList) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...MBAR_ME, navChat: false }) } }   // 上次停在對話清單（不是某一則）
+  // 手機開 App 先看「對話」清單（0.2.18）：要從夥伴頁開始的情境（例如點右上角「＋」）用 mtab 指定存檔停在哪一頁
+  if (scenario.state.mtab) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ navTab: scenario.state.mtab }) } }
   if (scenario.state.roster) t.acct_roster = ROSTERS[scenario.state.roster] ?? ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
   if (scenario.state.macct) {
     t.relay_list = { members: MACCT_MEMBERS[scenario.state.macct] }

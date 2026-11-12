@@ -45,12 +45,12 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 
 /* 頁面骨架：最上面分頁列、其下標題列、中間可捲動（對話輸入區貼齊底部） */
 .m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
-/* 三個大分頁並排（夥伴／對話／設置），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
+/* 四個大分頁並排（對話／夥伴／通知／設定），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
 .m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
 .m-pager{display:flex;width:calc(var(--pages,3) * 100%);height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
 .m-pager.dragging{transition:none}
 .m-pg{flex:0 0 calc(100% / var(--pages,3));width:calc(100% / var(--pages,3));min-width:0;min-height:0;display:flex;flex-direction:column}
-/* 第四頁籤（#461）上的內頁：設置的某一項、使用指引各一塊，撐滿這一頁 */
+/* 內頁（#461）：設定的某一項、使用指引各一塊，撐滿這一頁 */
 .m-pgin{flex:1;min-height:0;display:flex;flex-direction:column}
 @media (prefers-reduced-motion:reduce){.m-pager{transition:none}}
 /* 對話：第二個大分頁本身（最後使用的那一位），和其他兩頁一起左右翻 */
@@ -77,8 +77,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-tabs button::after{content:"";position:absolute;left:0;right:0;top:-2px;bottom:-2px}
 .m-tabs button.on{color:var(--accent);background:var(--panel)}
 .m-tabs .red{top:6px;right:calc(50% - 30px)}
-/* 第四頁籤的標題是內頁的標題，可能比較長：一行放不下就省略 */
-.m-tabs button.is-page span{display:block;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 /* 名單 */
 .m-search{position:sticky;top:0;z-index:2;padding:8px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
 .m-search input{width:100%;min-height:44px;border:1px solid var(--line);border-radius:22px;padding:0 16px;background:var(--panel);user-select:text;-webkit-user-select:text}
@@ -392,7 +390,7 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 .m-chat .gc-list{max-height:46%}
 .m-room-note{padding:6px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
 
-/* 設置分頁的「使用指引」入口與滿版指引頁 */
+/* 設定分頁的「使用指引」入口與滿版指引頁 */
 .m-row-btn{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:6px 4px;border:0;background:none;text-align:left;color:inherit;cursor:pointer}
 .m-row-btn:active{background:#e6f1fc}
 .m-row-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -467,3 +465,7 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-known-edit .m-input{font:inherit;padding:8px 10px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}
 .m-known-row .m-row-tx{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
 .m-peer-body{font-size:15px;line-height:1.5;text-align:left;color:inherit}
+/* 內頁（0.2.18）：蓋在進來的那個分頁上，跟著那一格一起滑 */
+.m-pager{position:relative}
+.m-pg.m-fourth{position:absolute;top:0;bottom:0;left:calc(var(--host,0) * 100% / var(--pages,4));z-index:3;background:var(--bg,#fff)}
+.m-chathead .m-back{margin-right:-4px}

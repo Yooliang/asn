@@ -246,7 +246,7 @@ test('深色模式：新樣式只用主題變數，紅色的「永久移除」�
 // ---------- 手機「選項」頁 ----------
 test('手機列表：整列不再一點就進細部；每列 4 顆按鈕（上移、下移、帳號、詳情），左邊保留排序把手（不拖時不影響捲動）', () => {
   const html = read('ui/m.html'), css = read('ui/mobile.css')
-  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
+  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-row"/)
   assert.match(pane, /<div class="m-dv-go">/, '資訊區是一般區塊，點了不開任何東西')
   assert.doesNotMatch(/<div class="m-dv-go">[\s\S]*?<div class="m-dv-btns/.exec(pane)[0], /@click/)
@@ -269,11 +269,11 @@ test('手機列表：整列不再一點就進細部；每列 4 顆按鈕（上�
 
 test('手機細部頁：標題列返回鍵先回列表（頁內不再另放「‹ 返回」，#374）；從夥伴列表「選項」進來直接開那一台', () => {
   const html = read('ui/m.html'), js = read('ui/m.js')
-  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
+  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.doesNotMatch(pane, /class="m-dv-back"/, '只留標題列那一個返回')
   assert.match(pane, /<button class="m-icon-btn" type="button" aria-label="返回" @click="back">/)
   assert.match(pane, /v-else-if="acctSw\.phase === 'pick'"/)
-  assert.match(js, /const acctBackToList = \(\) => back\(\)/, '#461：細部是第四頁籤上的一層，「‹ 返回」、標題列返回、系統返回鍵都退一筆記錄')
+  assert.match(js, /const acctBackToList = \(\) => back\(\)/, '#461：細部是內頁的一層，「‹ 返回」、標題列返回、系統返回鍵都退一筆記錄')
   assert.match(js, /fourthNav\.pushLayer\(acctPage\(key\), \{ replace: stale \}\)/, '點一台進細部＝多一層')
   assert.match(js, /acctSw\.node = g\.node; acctSw\.page = 'detail'/)
   assert.match(js, /const acctCur = computed\(\(\) => \(acctSw\.page === 'detail' \?/, '細部頁的那台不在了就退回列表')
@@ -281,7 +281,7 @@ test('手機細部頁：標題列返回鍵先回列表（頁內不再另放「�
 
 test('手機被隱藏設備：細部頁兩個動作；永久移除走獨立的確認畫面（rm）；確認字與電腦版相同；恢復', () => {
   const html = read('ui/m.html'), js = read('ui/m.js')
-  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
+  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.match(pane, /v-if="acctCanRemove"[\s\S]*?acctShowBack[\s\S]*?DEVICE_TEXT\.showBack[\s\S]*?acctAskRemove[\s\S]*?DEVICE_TEXT\.remove/)
   assert.match(pane, /acctSw\.phase === 'rm'[\s\S]*?acctRemoveText[\s\S]*?acctRemoveNow[\s\S]*?DEVICE_TEXT\.removeYes[\s\S]*?DEVICE_TEXT\.cancel/)
   assert.ok(!/@click="acctRemoveNow"/.test(pane.split("phase === 'rm'")[0]), '確認畫面之前沒有直接移除的入口')

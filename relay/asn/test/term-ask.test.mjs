@@ -72,7 +72,7 @@ test('錯誤字樣：後台代碼翻成中文，不認得的給通用一句', ()
 })
 
 test('導覽：termreq 是合法的底部浮層，重整後還原', () => {
-  assert.deepEqual(termReqNav(), { tab: 'chats', sheet: 'termreq' })
+  assert.deepEqual(termReqNav(), { tab: 'chats', sheet: 'termreq', chat: true }, '蓋在點進去的那一則對話上')
   assert.deepEqual(normalizeNav({ sheet: 'termreq', tab: 'x' }), termReqNav())
 })
 

@@ -1,14 +1,14 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, pageNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
+import { EDGE_PX, TABS, chatNav, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, pageNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
 import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, sideloadLastText, SIDELOAD_LAST_TEXT, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 import { launchPage } from '../ui/lib/mobile-fourth.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
 
-test('開新夥伴兩頁（#461：第四頁籤上的兩層）：第 2 頁 step: 2，其他值都當第 1 頁；舊的 sheet=launch 記錄轉成第四頁籤，壞 step 退回第 1 頁', () => {
+test('開新夥伴兩頁（#461：內頁的兩層）：第 2 頁 step: 2，其他值都當第 1 頁；舊的 sheet=launch 記錄轉成內頁，壞 step 退回第 1 頁', () => {
   assert.deepEqual(launchPage(2), { kind: 'launch', step: 2 })
   for (const bad of [undefined, 0, 1, 3, '2', null, {}]) assert.deepEqual(launchPage(bad), { kind: 'launch', step: 1 }, String(bad))
   assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me', step: 2 }), pageNav(launchPage(2)))
@@ -16,16 +16,20 @@ test('開新夥伴兩頁（#461：第四頁籤上的兩層）：第 2 頁 step: 
   assert.deepEqual(normalizeNav({ sheet: 'ops', step: 2 }), opsNav(), '別的浮層不帶 step')
 })
 
-test('導覽：夥伴／對話／設置三個分頁、「⋯」選單等浮層（開新夥伴在第四頁籤）；瀏覽記錄裡的壞資料一律退回名單', () => {
-  assert.deepEqual(initialNav(), { tab: 'list', sheet: '' })
-  assert.deepEqual(meNav(), { tab: 'me', sheet: '' })
-  assert.deepEqual(opsNav(), { tab: 'chats', sheet: 'ops' })
+test('導覽：對話／夥伴／通知／設定四個分頁、「⋯」選單等浮層（開新夥伴是內頁）；瀏覽記錄裡的壞資料一律退回對話清單', () => {
+  assert.deepEqual(initialNav(), { tab: 'chats', sheet: '', chat: false }, '開 App 先看對話清單')
+  assert.deepEqual(meNav(), { tab: 'me', sheet: '', chat: false })
+  assert.deepEqual(opsNav(), { tab: 'chats', sheet: 'ops', chat: true }, '「⋯」選單蓋在點進去的那一則對話上')
+  assert.deepEqual(chatNav(), { tab: 'chats', sheet: '', chat: true })
   assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), pageNav(launchPage()))
   assert.deepEqual(normalizeNav({ sheet: 'ops', tab: 'list' }), opsNav())
   assert.deepEqual(normalizeNav({ sheet: 'other' }), initialNav())
   assert.deepEqual(normalizeNav({ tab: 'me' }), meNav())
-  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'chats' }), tabNav('chats'), '舊的對話層不再有：只留分頁')
+  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'chats' }), tabNav('chats'), '更舊的對話層（chat 是對象 id）不還原：只留分頁')
+  assert.deepEqual(normalizeNav({ chat: true, tab: 'chats' }), chatNav(), '點進一則對話的記錄照樣還原')
+  assert.deepEqual(normalizeNav({ chat: true, tab: 'list' }), tabNav('list'), '只有對話分頁有 chat 這一層')
   assert.deepEqual(normalizeNav({ tab: 'chats' }), tabNav('chats'))
+  assert.deepEqual(normalizeNav({ tab: 'notice' }), tabNav('notice'))
   for (const bad of [null, undefined, 5, 'x', { tab: 'settings' }, { chat: 7 }, []]) assert.deepEqual(normalizeNav(bad), initialNav(), String(bad))
 })
 
@@ -212,8 +216,8 @@ test('廠商徽章：pi 只是執行殼，顯示背後模型的廠商；對不�
   assert.equal(vendorBadgeHtml({ engine: 'grok', model: 'anthropic/claude-sonnet-4' }), vendorBadgeHtml({ engine: 'grok' }), '只有 pi 看模型')
 })
 
-test('大分頁：夥伴／對話／設置／通知四個固定，順序固定，名稱純中文', () => {
-  assert.deepEqual(TABS, ['list', 'chats', 'me', 'page']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設置', '通知'])
+test('大分頁：對話／夥伴／通知／設定四個固定，順序固定（和電腦版一樣），名稱純中文', () => {
+  assert.deepEqual(TABS, ['chats', 'list', 'notice', 'me']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['對話', '夥伴', '通知', '設定'])
   assert.deepEqual(TABS.map(tabIndex), [0, 1, 2, 3]); assert.equal(tabIndex('亂寫'), 0)
 })
 
@@ -237,7 +241,7 @@ test('滑動吸附：拖過一定比例或夠快才換頁；到頭不能再換�
   assert.equal(swipeTarget({ index: 1, dx: -50, dt: 60, width: W }), 2, '很快的短滑（甩）也換頁')
   assert.equal(swipeTarget({ index: 1, dx: -10, dt: 10, width: W }), 1, '太短的不算')
   assert.equal(swipeTarget({ index: 0, dx: 200, dt: 100, width: W }), 0, '最左邊再往右滑還是第一頁')
-  assert.equal(swipeTarget({ index: 2, dx: -200, dt: 100, width: W }), 3, '第三頁往左滑是第四格（通知）'); assert.equal(swipeTarget({ index: 3, dx: -200, dt: 100, width: W, count: TABS.length }), 3, '最右邊再往左滑還是最後一頁')
+  assert.equal(swipeTarget({ index: 2, dx: -200, dt: 100, width: W }), 3, '第三頁往左滑是第四頁（設定）'); assert.equal(swipeTarget({ index: 3, dx: -200, dt: 100, width: W, count: TABS.length }), 3, '最右邊再往左滑還是最後一頁')
   assert.equal(pagerShift(1, 100), 100); assert.equal(pagerShift(0, 100), 30); assert.equal(pagerShift(3, -100), -30); assert.equal(pagerShift(0, -100), -100)
   assert.equal(indicatorPos(1, 0, W), 1); assert.equal(indicatorPos(1, -W / 2, W), 1.5, '往左拖半頁，指示條走到一半')
   assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(3, -500, W), 3)

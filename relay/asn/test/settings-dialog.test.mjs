@@ -219,14 +219,14 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
 })
 
-test('守門：手機設置頁——分類列表在上、使用指引在列表後；登出在「個人」內頁最下面（#1093）；帳號在名字下（個人頁）、版本在關於頁', () => {
+test('守門：手機設定頁——分類列表在上、使用指引在列表後；登出在「個人」內頁最下面（#1093）；帳號在名字下（個人頁）、版本在關於頁', () => {
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-  const a = html.indexOf('<section class="m-pg" aria-label="設置">')
-  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁在第四頁籤裡
+  const a = html.indexOf('<section class="m-pg" aria-label="設定">')
+  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁是內頁
   const list = html.slice(a, b)
   const listAt = list.indexOf('v-for="r in settingRows"'), guideAt = list.indexOf('openGuides')
   assert.ok(listAt > 0 && guideAt > listAt, '列表 → 使用指引')
-  assert.ok(!list.includes('doLogout') && !list.includes('m-logout') && !list.includes('登出'), '#1093：設置列表不再有登出鈕')
+  assert.ok(!list.includes('doLogout') && !list.includes('m-logout') && !list.includes('登出'), '#1093：設定列表不再有登出鈕')
   const detail = html.slice(b, html.indexOf('</section>', b))
   // 登出鈕在「個人」內頁（settingCat === 'me' 那一塊）最下面、自成一塊；其他分類頁沒有
   const me = detail.slice(detail.indexOf("settingCat === 'me'"), detail.indexOf("settingCat === 'notify'"))

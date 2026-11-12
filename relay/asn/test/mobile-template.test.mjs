@@ -56,10 +56,10 @@ test('m.html：開新夥伴第 1 頁只有電腦與「下一步」，第 2 頁�
   assert.ok(!p2.includes('<legend>電腦</legend>'), '第 2 頁不再選電腦')
 })
 
-test('m.html：設置分頁只列分類（每列一行摘要）加使用指引；各項設定（含登出）都在分類頁裡', () => {
-  const a = html.indexOf('<section class="m-pg" aria-label="設置">')
-  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁在第四頁籤裡
-  assert.ok(a > 0 && b > a, '找不到設置分頁或分類頁')
+test('m.html：設定分頁只列分類（每列一行摘要）加使用指引；各項設定（含登出）都在分類頁裡', () => {
+  const a = html.indexOf('<section class="m-pg" aria-label="設定">')
+  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁是內頁
+  assert.ok(a > 0 && b > a, '找不到設定分頁或分類頁')
   const list = html.slice(a, b)
   assert.match(list, /v-for="r in settingRows"/); assert.match(list, /openSetting\(r\.key\)/); assert.match(list, /r\.summary/)
   assert.match(list, /openGuides/)
@@ -94,4 +94,13 @@ test('m.html：「最後一個自行安裝版」提示只掛在 sideloadLast（�
   const tag = html.slice(html.lastIndexOf('<div', i), html.indexOf('</div>', i))
   assert.match(tag, /v-if="sideloadLast"/)
   assert.ok(!tag.includes('<button'), '常駐，不給關')
+})
+
+test('守門：分頁名統一叫「設定」（0.2.18）——畫面、提示字與 Rust 的提示都不再寫「設置」', () => {
+  const root = new URL('../', import.meta.url)
+  const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === 'vendor' ? [] : walk(new URL(e.name + '/', dir))) : [new URL(e.name, dir)]))
+  const files = [...walk(new URL('ui/', root)), ...walk(new URL('src-tauri/src/', root))].filter(u => /\.(m?js|html|css|rs)$/.test(u.pathname))
+  assert.ok(files.length > 50)
+  const bad = files.filter(u => fs.readFileSync(u, 'utf8').includes('設置')).map(u => u.pathname.split('/relay/asn/')[1])
+  assert.deepEqual(bad, [])
 })

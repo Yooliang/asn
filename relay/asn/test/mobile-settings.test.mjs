@@ -1,4 +1,4 @@
-// 手機「設置」分類列表（#262，對應電腦版 #67）：分類、摘要文字、導覽狀態。
+// 手機「設定」分類列表（#262，對應電腦版 #67）：分類、摘要文字、導覽狀態。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MOBILE_CAT_TITLE, MOBILE_SETTING_KEYS, SETTING_SHEET_KEYS, mobileCatSummary, mobileSettingRows, mobileSettingTitle } from '../ui/lib/mobile-settings.mjs'
@@ -19,7 +19,7 @@ test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦�
     assert.equal(r.title, MOBILE_CAT_TITLE[r.key] ?? c.title, '手機只改 notify 的標題'); assert.equal(r.icon, c.icon)
     assert.ok(r.icon.length > 0)
   }
-  assert.equal(mobileSettingTitle('notify'), '提醒', '不和第四格的「通知」分頁撞名（#895）'); assert.equal(MOBILE_CAT_TITLE.notify, '提醒'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))
+  assert.equal(mobileSettingTitle('notify'), '提醒', '不和「通知」分頁撞名（#895）'); assert.equal(MOBILE_CAT_TITLE.notify, '提醒'); assert.ok(!mobileSettingRows({}).some(r => r.title === '通知'))
   assert.equal(SETTING_CATS.find(x => x.key === 'notify').title, '通知', '電腦版的分類標題不動')
   assert.equal(mobileSettingTitle('nope'), '')
 })
@@ -39,20 +39,21 @@ test('摘要：每列一行目前值；欄位缺少不丟錯', () => {
   for (const r of mobileSettingRows()) assert.equal(typeof r.summary, 'string')
 })
 
-test('導覽：分類頁是第四頁籤上的一頁（#461）；沒有的分類、壞資料退回設置分頁', () => {
+test('導覽：分類頁是內頁（#461，蓋在設定分頁上）；沒有的分類、壞資料退回設定分頁', () => {
   assert.deepEqual(settingPage('update'), { kind: 'setting', cat: 'update' })
   assert.equal(settingPage('nope'), null)
-  assert.deepEqual(normalizeNav({ sheet: 'setting', cat: 'about' }), pageNav(settingPage('about')), '舊的滿版層記錄轉成第四頁籤')
+  assert.deepEqual(normalizeNav({ sheet: 'setting', cat: 'about' }), pageNav(settingPage('about')), '舊的滿版層記錄轉成內頁')
   for (const bad of [{ sheet: 'setting' }, { sheet: 'setting', cat: 'devices' }, { sheet: 'setting', cat: 5 }]) assert.deepEqual(normalizeNav(bad), tabNav('me'), JSON.stringify(bad))
 })
 
-test('設備與帳號（#268）：設置列表點了開名單設備卡「選項」的同一頁，不是設置的滿版頁；兩個入口並存', () => {
-  assert.equal(settingPage('devices'), null, '沒有設置的一般分類頁')
-  assert.equal(settingPage('accounts'), null, '帳號也沒有設置的一般分類頁')
+test('設備與帳號（#268）：設定列表點了開名單設備卡「選項」的同一頁，不是設定的滿版頁；兩個入口並存', () => {
+  assert.equal(settingPage('devices'), null, '沒有設定的一般分類頁')
+  assert.equal(settingPage('accounts'), null, '帳號也沒有設定的一般分類頁')
   const js = readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
   assert.match(js, /const openSetting = key => \{ if \(ACCT_SETTING_KEYS\.includes\(key\)\) void openAcct\(\{ tab: key \}\); else askBeforeLeave\(settingPage\(key\), \(\) => fourthNav\.openPage\(settingPage\(key\)\)\) \}/)
   assert.match(js, /devices: acctDevs\.value, accountCount:/, '摘要用同一份設備列表與帳號數')
-  assert.match(js, /tabLabelOf\(t, fourthTitle\.value\)/, '第四頁籤的標籤跟頁標題一致')
+  assert.match(js, /const tabLabel = t => tabLabelOf\(t\)/, '分頁列四個字固定；內頁標題在內頁自己的頂端（fourthTitle）')
+  assert.match(js, /const fourthTitle = computed\(/)
   const html = readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   assert.match(html, /@click="openAcct\(g\)"/, '設備卡的入口還在')
 })

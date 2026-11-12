@@ -33,7 +33,7 @@ test('單篇：內容就是電腦版那一份（同一個物件），不存在�
   assert.equal(phoneGuide(undefined), null)
 })
 
-test('導覽：第四頁籤上的一頁（#461）；壞的篇目鍵退回篇目列表；舊記錄轉成第四頁籤', () => {
+test('導覽：內頁（#461）；壞的篇目鍵退回篇目列表；舊記錄轉成內頁', () => {
   assert.deepEqual(guidePage(), { kind: 'guide', guide: '' })
   assert.deepEqual(guidePage('faq'), { kind: 'guide', guide: 'faq' })
   assert.deepEqual(guidePage('../x'), { kind: 'guide', guide: '' })
@@ -41,14 +41,14 @@ test('導覽：第四頁籤上的一頁（#461）；壞的篇目鍵退回篇目�
   assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 5 }), pageNav(guidePage()))
 })
 
-test('頁面：指引是設置分頁的一個項目、在第四頁籤上獨立一頁有返回；內文只用文字插值，手機頁面不用 v-html 顯示指引', () => {
+test('頁面：指引是設定分頁的一個項目、是獨立的內頁有返回；內文只用文字插值，手機頁面不用 v-html 顯示指引', () => {
   const html = read('ui', 'm.html')
   assert.match(html, /<div class="m-pgin m-guide" v-else-if="fourthPage\.kind === 'guide'">/)
   const sheet = /<div class="m-pgin m-guide"[\s\S]*?<\/section>/.exec(html)[0]
   assert.match(sheet, /aria-label="返回"[^>]*@click="back"/, '左上返回')
   assert.doesNotMatch(sheet, /v-html/, '指引頁不用 v-html')
   assert.match(sheet, /<guide-doc :guide="guideOpen\.guide">/)
-  assert.match(html, /@click="openGuides"/, '設置分頁有入口')
+  assert.match(html, /@click="openGuides"/, '設定分頁有入口')
   const doc = read('ui', 'lib', 'guide-doc.mjs')
   assert.doesNotMatch(doc, /v-html/, '內文元件沿用電腦版的守門：不用 v-html')
   assert.match(read('ui', 'm.js'), /app\.component\('guide-doc', GuideDoc\)/)

@@ -1,4 +1,4 @@
-// 手機版（安卓）主程式：三個大分頁——夥伴、對話（最後使用的那一位）、設置。和電腦版共用 AsnCore（收寄信、記錄）、ChatPane（對話版面）與 Rust 端指令；
+// 手機版（安卓）主程式：四個大分頁——對話、夥伴、通知、設定。和電腦版共用 AsnCore（收寄信、記錄）、ChatPane（對話版面）與 Rust 端指令；
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
@@ -22,7 +22,7 @@ import { HELD_HINT, heldTitle, isHeldOptions } from './lib/held.mjs'
 import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS, ruleSegments as permSegs } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
-import { restoreMobileTab } from './lib/session.mjs'
+import { restoreMobileChat, restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { groupMenuItems } from './lib/actionbar.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
@@ -40,11 +40,12 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
-import { NOTICE_ID, isNoticeFriend, withNoticeGroup } from './lib/notice.mjs'
-import { chatsUnread, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
+import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
+import { HOME_TAB, chatNav, chatsUnread, noticeUnread, pageHost, shownTab, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
-import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
+import { activeChats } from './lib/recent.mjs'
+import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError } from './lib/device-known.mjs'
@@ -58,10 +59,9 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
-import { NOTICE_ENTRY_LABEL, NOTICE_ENTRY_SUB } from './lib/mobile-fourth.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
-import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, NOTICE_NEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
+import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
@@ -143,12 +143,13 @@ async function startLogin(key) {
 }
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 
-let savedTab = 'list'   // 上次離開時的大分頁（讀存檔後才知道）
+let savedTab = HOME_TAB   // 上次離開時的大分頁（讀存檔後才知道）
+let savedChat = false   // 上次離開時正在看對話分頁裡的某一則（重開直接回到那一則）
 const nav = reactive(initialNav())
-// 第四頁籤（#461）：設備與帳號、設置的某一項、使用指引。null＝沒有；{ page, from, leftAt }（lib/mobile-fourth.mjs）
+// 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴，蓋在進來的那個分頁上。null＝沒有；{ page, from, leftAt }（lib/mobile-fourth.mjs）
 const fourthSt = reactive({ fourth: null })
 const fourthNav = createMobileNav({ history, nav, st: fourthSt })
-const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它；存在手機本機設定，重開 App 仍記得）
+const lastChat = ref('')   // 最後使用的那一位（對話分頁點進去的那一則；存在手機本機設定，重開 App 仍記得）
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
@@ -218,9 +219,10 @@ if (screen.value === 'main') {
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
-  // 重開 App 回到上次的大分頁（名單／對話／設置）；對話那頁的對象就是 lastChat
+  // 重開 App 回到上次的大分頁（對話／夥伴／通知／設定）；上次正在看某一則對話就直接回到那一則
 savedTab = restoreMobileTab(saved.navTab)
-watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? (fourthSt.fourth ? fourthSt.fourth.from : PAGE_TAB) : nav.tab }) }, { deep: true })
+savedChat = restoreMobileChat(saved.navTab, saved.navChat)
+watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: shownTab(nav.tab, fourthSt.fourth), navChat: nav.tab === 'chats' && !!nav.chat }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
   // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。
@@ -233,7 +235,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-    isChatVisible: async id => document.visibilityState === 'visible' && viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: lastChat.value }) === id,   // 正在看的那一位（對話分頁那位，或第四格的通知）才算「看得到」（不算未讀）
+    isChatVisible: async id => document.visibilityState === 'visible' && viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: lastChat.value }) === id,   // 正在看的那一位（對話分頁點進去的那位，或通知分頁）才算「看得到」（不算未讀）
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms, backlogAfterMs: 5 * 60_000,
     log: m => console.info('[ASN]', m),
   })
@@ -244,7 +246,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   core.on('log', id => { pushLog(id); refreshLast(id) })
   core.on('avatars', () => { avatars.value = core.avatarMap() })
   core.on('notify', n => {
-    const plan = notifyPlan(n, { openId: viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: lastChat.value }), foreground: document.visibilityState === 'visible', prefs })
+    const plan = notifyPlan(n, { openId: viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: lastChat.value }), foreground: document.visibilityState === 'visible', prefs })
     if (plan.vibrate) { if (bridge) bridge.vibrate(plan.vibrate); else navigator.vibrate?.(plan.vibrate) }
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
@@ -259,16 +261,17 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync(); refreshPushSt()
-    if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
-    else if (viewedChatId({ tab: nav.tab, fourth: fourthSt.fourth, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
+    if (nav.tab === 'chats' && nav.chat && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
+    else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
-// ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景）；分頁與第四頁籤的規則在 lib/mobile-nav.mjs ----------
+// ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（對話清單層再按才退到背景）；分頁與內頁的規則在 lib/mobile-nav.mjs ----------
 history.replaceState(initialNav(), '')
-// 回到上次的大分頁：名單那層先放著，再推一筆，系統返回鍵還是回到名單
-if (savedTab !== 'list') fourthNav.go(tabNav(savedTab))
+// 回到上次的大分頁：對話清單那層先放著，再推一筆，系統返回鍵還是回到對話清單
+if (savedTab !== HOME_TAB) fourthNav.go(tabNav(savedTab))
+else if (savedChat && lastChat.value) fourthNav.go(chatNav())   // 上次正在看某一則：直接回到那一則（返回鍵回對話清單）
 let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
   if (keyBackGuard()) return
@@ -279,7 +282,7 @@ window.addEventListener('popstate', e => {
 const go = next => fourthNav.go(next)
 // 切大分頁（點頁籤、左右滑）：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄；浮層開著時不動
 const goTab = t => fourthNav.goTab(t)
-// 第四頁籤離開後的 3 分鐘：切走時排一個計時器到點檢查；App 在背景時計時器可能不跑，回到前景再用絕對時間檢查一次
+// 內頁離開後的 3 分鐘：切走時排一個計時器到點檢查；App 在背景時計時器可能不跑，回到前景再用絕對時間檢查一次
 let fourthTimer = 0
 let fourthKeepMs = () => FOURTH_KEEP_MS   // setup 裡接上：金鑰還在畫面上時較長
 let checkFourth = () => fourthNav.check()
@@ -308,7 +311,7 @@ const PtrZone = {
   </div>`,
 }
 
-// 左右滑動切換大分頁的手勢狀態（夥伴／對話／設置的橫向翻頁）
+// 左右滑動切換大分頁的手勢狀態（對話／夥伴／通知／設定的橫向翻頁）
 const sw = reactive({ mode: '', locked: '', x0: 0, y0: 0, t0: 0, dx: 0, shift: 0, width: 360, dragging: false })
 
 const app = createApp({
@@ -316,7 +319,7 @@ const app = createApp({
     // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（搜尋字同樣適用）
     const groups = computed(() => {
       const o = { query: query.value, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, plainText: plain }
-      return withNoticeGroup(withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items)), friends.value, { query: query.value })
+      return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))   // 通知有自己的分頁，不再列在夥伴名單最上面
     })
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
     // 資料與動作都在 lib/room-hub.mjs（電腦版共用）；發言與讀取走 Rust 指令並帶本人簽章
@@ -328,7 +331,14 @@ const app = createApp({
     // 最近有活動：24 小時內有往來的夥伴與群組（名單最上面；同一位在設備分組照常出現）
     const recentTick = ref(Date.now())
     setInterval(() => { recentTick.value = Date.now() }, 60_000)
-    const recentRows = computed(() => recentActivity({ friends: groups.value.filter(g => g.kind !== 'archived').flatMap(g => g.items), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: roomRows.value, now: Math.max(recentTick.value, Date.now()) }))
+    // 對話分頁的清單：活動中的對話（夥伴與群組，新到舊；不含已封存、通知）；上方的搜尋框只篩這一頁
+    const chatQuery = ref('')
+    const chatRows = computed(() => {
+      // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
+      const rows = activeChats({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value })
+      const q = normalizeSearchQuery(chatQuery.value)   // 比對規則和夥伴頁一樣（friendMatchesQuery：去掉表情代碼、不分大小寫）
+      return q ? rows.filter(x => (x.kind === 'room' ? friendMatchesQuery({ nick: x.room.name }, q, plain) : friendMatchesQuery(x.friend, q, plain))) : rows
+    })
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
@@ -336,7 +346,7 @@ const app = createApp({
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
     async function refreshRooms() {
       await hub.refresh()
-      if (isRoomChat(lastChat.value) && nav.tab === 'chats') await showRoom()
+      if (isRoomChat(lastChat.value) && nav.tab === 'chats' && nav.chat) await showRoom()
     }
     roomsHook.refresh = refreshRooms
     // 讀這個群組新的訊息（接在已有的後面）與待主持人確認的卡片；在看的時候順便標已讀
@@ -384,7 +394,7 @@ const app = createApp({
       void invoke('invite_pending').then(onInviteCode).catch(() => {})
       void refreshRooms()
     }
-    const unreadTotal = computed(() => totalUnreadWithRooms(chatsUnread(friends.value), rooms.value))   // 對話分頁的紅點：不含通知（通知有自己的第四格紅點）
+    const unreadTotal = computed(() => totalUnreadWithRooms(chatsUnread(friends.value), rooms.value))   // 對話分頁的紅點：不含通知（通知有自己的分頁紅點）
     const noticeDot = computed(() => noticeUnread(friends.value))
     const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))
@@ -400,40 +410,40 @@ const app = createApp({
     const chatFriend = computed(() => chatState.value.friend)
     const chatEmptyText = computed(() => chatState.value.text)
     const chatLog = computed(() => (isRoomChat(lastChat.value) ? hub.view(roomIdOf(lastChat.value)) : logs[lastChat.value]) ?? [])
-    // 點名單上的群組：成為「最後使用」並切到對話分頁
-    function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; goTab('chats') }
+    // 點群組：成為「最後使用」，切到對話分頁並進那一則
+    function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; fourthNav.openChat() }
 
-    // 點夥伴（或橫幅）：那位成為「最後使用」，並切到對話分頁
+    // 點夥伴（或橫幅）：那位成為「最後使用」，切到對話分頁並進那一則
     function openChat(id) {
       const f = core.friends.get(id); if (!f) return
       lastChat.value = id
       banner.value = null
-      goTab('chats')
+      fourthNav.openChat()
     }
     const pushLog = id => { logs[id] = core.viewOf(id) }
     const loadOlder = id => core.loadOlder(id)   // 對話往上捲到頂：載入更舊的信
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value
-      if (isRoomChat(id)) { if (nav.tab === 'chats') void showRoom(); return }
-      if (nav.tab !== 'chats' || !id || !core?.friends.get(id)) return
+      if (isRoomChat(id)) { if (nav.tab === 'chats' && nav.chat) void showRoom(); return }
+      if (nav.tab !== 'chats' || !nav.chat || !id || !core?.friends.get(id)) return
       core.markRead(id)
       pushLog(id)
       void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
     }
-    watch([() => nav.tab, () => nav.sheet, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
-    // 第四格的「通知」對話（PR-H）：唯讀，沒有輸入列與通話鈕（chat-pane 看 friend.isNotice 自己隱藏）。正在看它（含收到新通知的當下）就標已讀
+    watch([() => nav.tab, () => nav.chat, () => nav.sheet, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
+    // 通知分頁的「通知」對話（PR-H）：唯讀，沒有輸入列與通話鈕（chat-pane 看 friend.isNotice 自己隱藏）。正在看它（含收到新通知的當下）就標已讀
     const noticeChat = computed(() => friends.value.find(isNoticeFriend) ?? null)
     const noticeLog = computed(() => logs[NOTICE_ID] ?? [])
-    const noticeShown = computed(() => nav.tab === PAGE_TAB && !fourthSt.fourth && !nav.sheet && !!noticeChat.value)
+    const noticeShown = computed(() => nav.tab === 'notice' && !nav.sheet && !!noticeChat.value)
     function showNotice() { if (!noticeShown.value) return; core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
     watch([noticeShown, () => noticeChat.value?.unread, () => noticeLog.value.length], showNotice, { immediate: true })
     const back = () => history.back()
-    // 第四頁籤：目前的內頁與標題（頁籤列上的字就是內頁的標題）
+    // 內頁：目前的內頁與標題（標題在內頁自己的頂端）
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
     const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : fourthPage.value?.kind === 'acct' ? acctTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
-    const tabLabel = t => tabLabelOf(t, fourthTitle.value)
-    // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤（雲端代理的金鑰還在畫面上時先問）
+    const tabLabel = t => tabLabelOf(t)
+    // 內頁的「關閉」：整個收起內頁，回到底下那個分頁（雲端代理的金鑰還在畫面上時先問）
     const closePage = () => askBeforeLeave(null, () => fourthNav.closePage())
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
     // 橫幅上的「換班接手」：開啟那位的對話，直接帶到「換班接手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
@@ -441,6 +451,7 @@ const app = createApp({
       const b = banner.value; banner.value = null
       if (!b) return
       openChat(b.id)
+      await fourthNav.whenSettled()   // 從別的分頁來要先退回對話分頁再進那一則（等 popstate）；「⋯」選單的記錄要推在那一則上面，不能搶先
       await Vue.nextTick()
       await loadLaunchers()
       openOps()
@@ -462,10 +473,10 @@ const app = createApp({
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text, opts); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
-    // ---------- 使用指引：設置分頁的一個項目，點進去是第四頁籤上的一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
+    // ---------- 使用指引：設定分頁的一個項目，點進去是蓋在設定分頁上的內頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (fourthPage.value?.kind === 'guide' ? phoneGuide(fourthPage.value.guide) : null))
-    // 設置分頁＝分類列表（每列一行目前值），點一列在第四頁籤打開該項（左上返回回設置）
+    // 設定分頁＝分類列表（每列一行目前值），點一列在設定分頁上打開該項的內頁（左上返回回設定）
     // ---------- 認得的電腦：看電腦畫面時確認指紋（頂端條＋底部浮層）、設備頁（每台的詳情、舊設備紀錄）確認與忘記。確認、忘記前都先過本人確認（生物辨識或螢幕鎖） ----------
     const kp = reactive({ list: [], loaded: false, error: '', busy: false })
     const loadKnown = async () => {
@@ -565,7 +576,7 @@ const app = createApp({
     const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
-    // 設置 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
+    // 設定 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
     const rel = reactive(initialReleases())
     const loadRel = async (force = false) => {
       if (rel.phase === 'loading') return
@@ -598,7 +609,6 @@ const app = createApp({
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
-    const openNotice = () => askBeforeLeave(NOTICE_NEXT, () => fourthNav.openNotice())   // 設置裡的「看通知」：第四格換成通知（佔著的內頁照離開規則先問）
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
     const leaveSt = reactive({ ask: null })
@@ -648,13 +658,13 @@ const app = createApp({
       if (!c.cwds.includes(lch.cwd)) lch.cwd = c.cwds[0] ?? ''
       if (!lch.name.trim()) lch.name = defaultPartnerName(friends.value, lch.profile)
     }
-    // 開新夥伴在第四頁籤：第 1 步選電腦、第 2 步（多一層，返回鍵回第 1 步）選模型與資料夾、名字、第一句話。
+    // 開新夥伴是內頁：第 1 步選電腦、第 2 步（多一層，返回鍵回第 1 步）選模型與資料夾、名字、第一句話。
     // 畫面收起（關閉或 3 分鐘到了）不影響背景的開窗：lch 留在這裡，trackLaunch 照常追蹤，開好時跳橫幅
     const openLaunch = node => askBeforeLeave(launchPage(), () => openLaunchNow(node))   // 金鑰還在畫面上時先問
     function openLaunchNow(node) {
       const isLaunch = fourthPage.value?.kind === 'launch'
-      // 還在開：回到進度畫面；第四頁籤上的開新夥伴還在填：切過去接著填（都不重來）
-      if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(PAGE_TAB); else fourthNav.openPage(launchPage()); return }
+      // 還在開：回到進度畫面；內頁的開新夥伴還在填：切過去接著填（都不重來）
+      if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(pageHost(fourthSt.fourth)); else fourthNav.openPage(launchPage()); return }
       if (nav.sheet) return
       Object.assign(lch, initialLaunch(), { vphase: 'sending' })
       if (!fourthNav.openPage(launchPage())) return
@@ -726,7 +736,7 @@ const app = createApp({
       })
       for (const [node, r] of Object.entries(acctPrefetched)) put(node, r)   // 一分鐘內沒重讀的（或只重讀了失敗的）：先前讀到的結果補上
     }
-    // 從夥伴列表設備旁的「選項」或設置列表進來；開新夥伴第 2 步還沒送出時先問一句
+    // 從夥伴列表設備旁的「選項」或設定列表進來；開新夥伴第 2 步還沒送出時先問一句
     const openAcct = g => askBeforeLeave(acctPage(), () => void openAcctNow(g))
     async function openAcctNow(g) {
       if (nav.sheet) return
@@ -847,9 +857,9 @@ const app = createApp({
     const loginClose = () => loginReset()
     // App 進背景：顯示中的代碼清掉，結束這一輪
     document.addEventListener('visibilitychange', () => { if (document.hidden && loginSt.stage === 'show') loginEnd(LOGIN_TEXT.expired) })
-    // 返回：細部頁回列表＝退一筆記錄（細部是第四頁籤上的一層；退回列表時 acctSw 由下面的監看整理）。細部頁頂端的「‹ 返回」、標題列返回鍵、系統返回鍵都一樣
+    // 返回：細部頁回列表＝退一筆記錄（細部是內頁的一層；退回列表時 acctSw 由下面的監看整理）。細部頁頂端的「‹ 返回」、標題列返回鍵、系統返回鍵都一樣
     const acctBackToList = () => back()
-    // 第四頁籤的內頁換了：設備與帳號的列表／細部跟著記錄走；離開設備與帳號就讓還在跑的讀取與切換不再更新畫面
+    // 內頁換了：設備與帳號的列表／細部跟著記錄走；離開設備與帳號就讓還在跑的讀取與切換不再更新畫面
     watch(fourthPage, (p, old) => {
       if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset(); loginReset() } return }
       if (p.node) { acctSw.node = p.node; acctSw.page = 'detail'; return }
@@ -941,13 +951,13 @@ const app = createApp({
         void trackLaunch({ id: r.id, node: lch.node, name })
       } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
     }
-    // 開好了「開始對話」：收起第四頁籤並直接切到對話分頁看那一位（同一次退記錄裡做完，不靠計時）
+    // 開好了「開始對話」：收起內頁並直接切到對話分頁、進那一位（同一次退記錄裡做完，不靠計時）
     function openLaunched() {
       const id = lch.friendId
       if (!id) return
       if (!core.friends.get(id)) { closeLaunch(); return }
       lastChat.value = id; banner.value = null
-      fourthNav.closePage('chats')
+      fourthNav.closePage(HOME_TAB, { chat: true })
     }
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、換班接手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
@@ -1188,7 +1198,7 @@ const app = createApp({
       } finally { backfilling = false }
     }
     const refreshAll = async () => { refreshing.value = true; try { await Promise.all([core.refreshRoster(), core.pull('manual')]) } finally { refreshing.value = false } }
-    // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。夥伴與對話兩頁各一組（設置頁沒有）
+    // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。只在夥伴頁（對話清單、通知、設定頁沒有）
     function makePtr() {
       const ptr = reactive({ h: 0, ratio: 0, phase: 'idle', dragging: false, el: null })
       let y0 = null
@@ -1217,12 +1227,13 @@ const app = createApp({
     }
     const pf = makePtr()
 
-    // 左右滑動切換大分頁。夥伴／對話／設置三頁並排，手指拖動時整排跟著動，放開吸附到最近的一頁。
+    // 左右滑動切換大分頁。對話／夥伴／通知／設定四頁並排，手指拖動時整排跟著動，放開吸附到最近的一頁。
     // 邊緣 24px 留給系統的返回手勢；輸入框、工具列、放大照片上不接手；水平位移要明顯大於垂直（2 倍）才算，所以上下捲動與文字選取不會被誤判。
-    // 頁數跟著目前的分頁清單（有第四頁籤時四頁）；第四頁籤上的內頁不是浮層，照常能滑
+    // 頁數固定四頁；內頁蓋在進來的那一格上，跟著那一格一起滑
     const tabs = computed(() => tabList(fourthSt.fourth))
     const pages = computed(() => tabs.value.length)
-    const idx = computed(() => tabIndex(nav.tab, tabs.value))
+    const curTab = computed(() => shownTab(nav.tab, fourthSt.fourth))   // 分頁列標著哪一格（在內頁上＝內頁蓋著的那一格）
+    const idx = computed(() => tabIndex(curTab.value, tabs.value))
     const pagerStyle = computed(() => ({ transform: `translate3d(calc(${-idx.value * 100 / pages.value}% + ${sw.shift}px), 0, 0)` }))
     const indicator = computed(() => indicatorPos(idx.value, sw.mode === 'pager' ? sw.shift : 0, sw.width, pages.value))
     function swipeStart(e, mode) {
@@ -1328,7 +1339,7 @@ const app = createApp({
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
-      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, pages, TAB_LABEL, tabLabel, fourthPage, fourthTitle, closePage, myName, meForChat, lastOf,
+      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, curTab, pages, TAB_LABEL, tabLabel, fourthPage, pageHost: computed(() => pageHost(fourthSt.fourth)), fourthTitle, closePage, myName, meForChat, lastOf,
       pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
@@ -1338,11 +1349,11 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      chatRows, chatQuery, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      settingRows, settingCat, settingTitle, openSetting, openNotice, noticeChat, noticeLog, tabHasDot, NOTICE_ENTRY_LABEL, NOTICE_ENTRY_SUB, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

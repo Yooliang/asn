@@ -303,10 +303,10 @@ test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓�
   assert.match(js, /BACKFILL_GAP_MS/)
 })
 
-test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁列＋底線指示條；邊緣留給系統、輸入與工具列不接手', () => {
+test('四個大分頁：對話／夥伴／通知／設定，橫向翻頁、頂部分頁列＋底線指示條；邊緣留給系統、輸入與工具列不接手', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]).concat([...html.matchAll(/<section class="m-pg m-chat" [^>]*aria-label="([^"]+)">/g)].map(m => m[1])).sort(), ['夥伴', '設置', '對話'].sort())   // 對話分頁的標籤固定（#461：設備與帳號改在第四頁籤）
-  assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/, '上方分頁三個（有第四頁籤時四個），可點')
+  assert.deepEqual([...html.matchAll(/<section class="m-pg(?: m-chat m-notice)?"(?: :class="[^"]*")? aria-label="([^"]+)">/g)].map(m => m[1]), ['對話', '夥伴', '通知', '設定'])   // 四個分頁的標籤固定、順序固定（內頁另外蓋在進來的那一格上）
+  assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/, '上方分頁四個，可點')
   assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
   // 分頁列在最上方（pager 之前），不留底部列；視覺高 32px、可點範圍 36px；輸入區貼底並讓出安全區
   assert.ok(html.indexOf('<nav class="m-tabs"') > html.indexOf('<section class="m-page"') && html.indexOf('<nav class="m-tabs"') < html.indexOf('class="m-pager-wrap"'), '分頁列在 pager 之上')
@@ -330,10 +330,10 @@ test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁�
   assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width, count: pages\.value \}\)/)
   assert.match(css, /\.m-ind\{[^}]*z-index:2/, '指示條要在分頁按鈕上面（不然被選中的底色蓋住）')
   assert.match(js, /if \(sw\.locked === 'h'\) \{ y0 = null/, '左右滑動時不觸發下拉重整')
-  // 返回：對話 → 回到分頁；非夥伴的分頁 → 回夥伴
+  // 返回：對話 → 回到清單；非對話的分頁 → 回對話分頁（底）
   assert.match(js, /const goTab = t => fourthNav\.goTab\(t\)/)
-  assert.match(read('ui', 'lib', 'mobile-nav.mjs'), /function switchTab\(t\) \{[\s\S]*?if \(nav\.tab === 'list'\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === 'list'\) history\.back\(\)/)
-  // 設置頁沒有下拉重整；舊的 goMe／goList 都不見了
+  assert.match(read('ui', 'lib', 'mobile-nav.mjs'), /function switchTab\(t, \{ chat = false \} = \{\}\) \{[\s\S]*?if \(nav\.tab === HOME_TAB\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === HOME_TAB\) \{ if \(chat\) pending = \{ tab: HOME_TAB, chat: true \}; history\.back\(\) \}/)
+  // 設定頁沒有下拉重整；舊的 goMe／goList 都不見了
   assert.doesNotMatch(js, /goMe|goList/)
 })
 
@@ -380,7 +380,7 @@ test('名單頁：群組標題沒有開新夥伴按鈕、標題列沒有重新�
   assert.doesNotMatch(css, /\.m-chathead \.m-icon-btn/, '返回鍵不另外放大，與「＋」同尺寸')
   // 下拉重整：觸控事件接在名單捲動區；動畫只用 transform／opacity；用我們自己的機器人（與 logo.svg 同一份圖形）
   assert.match(html, /<ptr-zone :ptr="pf\.ptr"><\/ptr-zone>\s*<div class="m-scroll" :ref="el => \(pf\.ptr\.el = el\)" @touchstart\.passive="pf\.start" @touchmove="pf\.move" @touchend="pf\.end" @touchcancel="pf\.end"/, 'pf 下拉重整接在夥伴頁的捲動區')
-  assert.equal(html.split('<ptr-zone').length - 1, 1, '只有夥伴頁有下拉重整（對話頁是單一對話、設置頁沒有）')
+  assert.equal(html.split('<ptr-zone').length - 1, 1, '只有夥伴頁有下拉重整（對話、通知、設定頁沒有）')
   assert.match(js, /class="m-ptr"/); assert.match(js, /ptr\.phase/)
   assert.match(js, /shouldRefreshOnRelease\(ptr\.h, refreshing\.value\)/); assert.match(js, /refreshAll\(\)/)
   assert.match(js, /if \(e\.cancelable\) e\.preventDefault\(\)/)

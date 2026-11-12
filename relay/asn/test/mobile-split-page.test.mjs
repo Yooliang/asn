@@ -11,10 +11,10 @@ import { settingPage, normalizePage, acctPage } from '../ui/lib/mobile-fourth.mj
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('設置清單：「設備」「帳號」兩列，各帶預設分頁進同一頁；摘要各寫各的', () => {
+test('設定清單：「設備」「帳號」兩列，各帶預設分頁進同一頁；摘要各寫各的', () => {
   assert.deepEqual(MOBILE_SETTING_KEYS.slice(0, 3), ['me', 'devices', 'accounts'])
   assert.deepEqual(ACCT_SETTING_KEYS, ['devices', 'accounts'])
-  assert.ok(!SETTING_SHEET_KEYS.includes('devices') && !SETTING_SHEET_KEYS.includes('accounts'), '它們不是設置的一般分類頁')
+  assert.ok(!SETTING_SHEET_KEYS.includes('devices') && !SETTING_SHEET_KEYS.includes('accounts'), '它們不是設定的一般分類頁')
   assert.equal(settingPage('devices'), null)
   assert.equal(settingPage('accounts'), null)
   assert.equal(normalizePage({ kind: 'setting', cat: 'accounts' }), null)
@@ -28,7 +28,7 @@ test('設置清單：「設備」「帳號」兩列，各帶預設分頁進同�
 test('頁標題跟著分頁：設備或帳號；看某台細部時是設備；畫面上沒有「設備與帳號」', () => {
   const js = read('ui/m.js'), html = read('ui/m.html')
   assert.match(js, /const acctTitle = computed\(\(\) => acctPageTitle\(acctCur\.value \? 'devices' : acctSw\.tab\)\)/)
-  assert.match(js, /fourthPage\.value\?\.kind === 'acct' \? acctTitle\.value/, '第四頁籤的標籤也跟著')
+  assert.match(js, /fourthPage\.value\?\.kind === 'acct' \? acctTitle\.value/, '內頁的標題也跟著')
   assert.ok(!html.includes('設備與帳號）') || true)
   assert.doesNotMatch(html.replace(/<!--[\s\S]*?-->/g, ''), /設備與帳號/, '樣板（不含註解）沒有「設備與帳號」')
 })
@@ -92,7 +92,7 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.ok(!html.includes('ROSTER_TEXT.usedOn') && !html.includes('切換到{{'), '拿掉「用在：」與「切換到…」')
   assert.match(js, /const acctDevPress = \(b, a\) => \{ if \(b\.current \|\| !b\.target \|\| !b\.target\.enabled\) return; void acctSwitchOn\(b\.node, a\.account\) \}/, '使用中或不能切的按了不做事，其他走原本的切換')
   for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-devs', 'm-dv-dev']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
-  // 畫面上沒有「設備與帳號」當作設置列的名稱（頁標題仍是這個內頁的名字）
+  // 畫面上沒有「設備與帳號」當作設定列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))
 })
 

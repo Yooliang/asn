@@ -15,8 +15,8 @@ use serde_json::{json, Value};
 use std::future::Future;
 use std::sync::Arc;
 
-/// 手機要在那台電腦打字，要先確認過它的指紋。寫清楚去哪裡確認：手機「設置」分頁的「設備」，該台電腦的「詳情」（0.2.18 設備頁整併後的位置，node 測試鎖住）
-pub const INPUT_NEEDS_CONFIRM: &str = "先在「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字";
+/// 手機要在那台電腦打字，要先確認過它的指紋。寫清楚去哪裡確認：手機「設定」分頁的「設備」，該台電腦的「詳情」（0.2.18 設備頁整併後的位置，node 測試鎖住）
+pub const INPUT_NEEDS_CONFIRM: &str = "先在「設定 → 設備」打開這台電腦的「詳情」，確認它的指紋，才能在它的終端打字";
 /// 回報連續失敗超過這麼久就放棄（和電腦版 view_stream 同值，測試鎖住）
 pub const LOST_AFTER_MS: u64 = 90_000;
 /// 畫面事件名（電腦版與手機版相同，前端 remoteViewApi.listen 聽這兩個）
@@ -490,7 +490,7 @@ mod tests {
             assert_eq!(err, INPUT_NEEDS_CONFIRM);
             assert!(b.actions().is_empty(), "連後台都不打");
         }
-        assert!(INPUT_NEEDS_CONFIRM.contains("「設置 → 設備」打開這台電腦的「詳情」，確認它的指紋"), "寫清楚去哪裡確認");
+        assert!(INPUT_NEEDS_CONFIRM.contains("「設定 → 設備」打開這台電腦的「詳情」，確認它的指紋"), "寫清楚去哪裡確認");
         let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "pk" })), KnownPeers::default());
         assert_eq!(run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("亂寫"), NOW)).err().unwrap(), "不認得的範圍");
         assert_eq!(parse_scope(None).unwrap(), Scope::View);

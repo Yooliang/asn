@@ -36,3 +36,18 @@ export function recentActivity({ friends = [], logOf = () => [], rooms = [], now
   }
   return rows.sort((a, b) => b.at - a.at).slice(0, Math.max(0, max))
 }
+
+// 手機「對話」分頁的清單（0.2.18）：活動中的對話＝最近 30 天內有往來的夥伴與群組（最多 60 則），依最後活動時間新到舊。
+// 最後使用的那一位（lastId）就算沒有往來也排進來（at＝0 排在最後），點進去的捷徑不會不見。
+export const ACTIVE_CHAT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+export const ACTIVE_CHAT_MAX = 60
+export function activeChats({ friends = [], logOf = () => [], rooms = [], now = Date.now(), lastId = '' } = {}) {
+  const rows = recentActivity({ friends, logOf, rooms, now, windowMs: ACTIVE_CHAT_WINDOW_MS, max: ACTIVE_CHAT_MAX })
+  if (typeof lastId === 'string' && lastId && !rows.some(r => r.id === lastId)) {
+    const f = (Array.isArray(friends) ? friends : []).find(x => x?.id === lastId && !x.room)
+    const r = (Array.isArray(rooms) ? rooms : []).find(x => x?.chatId === lastId)
+    if (f) rows.push({ kind: 'friend', id: f.id, at: 0, friend: f })
+    else if (r) rows.push({ kind: 'room', id: r.chatId, at: 0, room: r })
+  }
+  return rows
+}
