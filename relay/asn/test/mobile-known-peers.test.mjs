@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { TEXT, fpSuffix, groupFp, makeKnownPeers, needsConfirm, normalizeList, peerOf, errorText } from '../ui/lib/mobile-known-peers.mjs'
+import { TEXT, NAME_MAX, fpSuffix, groupFp, makeKnownPeers, needsConfirm, normalizeList, peerOf, errorText, renameErrorText } from '../ui/lib/mobile-known-peers.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const FP = '0123456789abcdef'
@@ -16,13 +16,21 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.cancel, '取消')
   assert.equal(TEXT.wrong, '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。')
   assert.equal(TEXT.locked(7), '答錯過一次，請 7 分鐘後再確認。')
-  assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 認得的電腦把它忘掉，再重新連線。')
-  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 認得的電腦把它忘掉，才能重新確認。')
+  assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。')
+  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「忘記這台」，才能重新確認。')
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
   assert.equal(TEXT.confirmed, '已確認')
-  assert.equal(TEXT.unconfirmed, '還沒確認')
-  assert.equal(TEXT.settingTitle, '認得的電腦')
+  assert.equal(TEXT.unconfirmed, '未確認')
+  assert.equal(TEXT.tagConfirmed, '已確認')
+  assert.equal(TEXT.tagUnconfirmed, '未確認')
+  assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
+  assert.equal(TEXT.neverSeen, '還沒連線過，連上時會記住指紋')
+  assert.equal(TEXT.forgetThis, '忘記這台')
+  assert.equal(TEXT.oldTitle(2), '舊設備紀錄（2）')
+  assert.equal(TEXT.renameHint, '所有設備都會顯示這個名字')
+  assert.equal(TEXT.ownNameLabel, '這支手機的名字')
+  assert.deepEqual([TEXT.moveUp, TEXT.moveDown, TEXT.accounts, TEXT.detail], ['上移', '下移', '帳號', '詳情'])
   assert.equal(TEXT.fp('0123 4567 89ab cdef'), '指紋 0123 4567 89ab cdef')
   assert.equal(groupFp('0123456789abcdef'), '0123 4567 89ab cdef', '核對用完整 16 碼分組')
   assert.equal(groupFp('01234567'), '')
@@ -49,10 +57,11 @@ test('peerOf：只要節點；不帶、不收指紋；沒確認、壞資料', ()
 })
 
 test('normalizeList：沒確認的不顯示指紋；確認過的才顯示分組指紋；壞的丟掉、不帶公鑰', () => {
-  const raw = { peers: [{ node: 'a', name: '甲\n機', confirmed: true, sign_pub: 'SECRET', fp: FP }, { node: 'b', name: '乙', confirmed: false, fp: 'abcdef0123456789', fp8: 'abcdef01' }, { name: 'x' }, { node: 'c', confirmed: true, fp: 'zz' }] }
+  const raw = { peers: [{ node: 'a', name: '甲\n機', confirmed: true, sign_pub: 'SECRET', fp: FP, first_seen_ms: 1700000000000 }, { node: 'b', name: '乙', confirmed: false, fp: 'abcdef0123456789', fp8: 'abcdef01' }, { name: 'x' }, { node: 'c', confirmed: true, fp: 'zz' }] }
   const l = normalizeList(raw)
-  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false }, { node: 'c', name: '', label: '未命名的電腦', fpShow: '', confirmed: true }])
-  assert.equal(normalizeList({ peers: [{ node: 'z', name: '長'.repeat(50) }] })[0].name.length, 32, '名字最多 32 字')
+  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true, firstSeen: new Date(1700000000000).toLocaleString('zh-TW', { hour12: false }) }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false, firstSeen: '' }, { node: 'c', name: '', label: '未命名的電腦', fpShow: '', confirmed: true, firstSeen: '' }])
+  assert.equal(NAME_MAX, 40)
+  assert.equal(normalizeList({ peers: [{ node: 'z', name: '長'.repeat(50) }] })[0].name.length, 40, '名字最多 40 字（和後台一致）')
   assert.doesNotMatch(JSON.stringify(l), /SECRET|abcd/)
   assert.deepEqual(normalizeList(null), [])
 })
@@ -153,21 +162,23 @@ test('忘記：先要憑證、過本人確認才叫 android_known_forget（帶�
   assert.deepEqual(f.calls, [FTOK, ['confirm', TOKEN]])
 })
 
-test('改名：不用本人確認；名字先整理（去控制字元、最多 32 字）；沒有節點不送', async () => {
-  let f = fake('ok')
-  assert.equal(await f.api.rename('pc', '  家\n用機 '), true)
-  assert.deepEqual(f.calls, [['android_known_rename', { node: 'pc', name: '家 用機' }]], '不跳生物辨識、不要憑證')
+test('改名：走後台（android_known_rename），不用本人確認；回 { ok, name, changed }；沒有節點不送；後台的中文錯誤原樣顯示', async () => {
+  let f = fake('ok', { android_known_rename: { ok: true, name: '家用機', changed: true } })
+  assert.deepEqual(await f.api.rename('pc', '  家用機 '), { ok: true, name: '家用機', changed: true })
+  assert.deepEqual(f.calls, [['android_known_rename', { node: 'pc', name: '家用機' }]], '不跳生物辨識、不要憑證，名字只去頭尾空白（規則由 Rust 與後台判斷）')
+  f = fake('ok', { android_known_rename: { ok: true, name: 'x', changed: false } })
+  assert.equal((await f.api.rename('pc', 'x')).changed, false)
   f = fake('ok', { android_known_rename: false })
-  assert.equal(await f.api.rename('pc', 'x'), false)
+  assert.equal(await f.api.rename('pc', 'x'), null)
   f = fake('ok')
-  assert.equal(await f.api.rename('', 'x'), false)
+  assert.equal(await f.api.rename('', 'x'), null)
   assert.deepEqual(f.calls, [])
-  f = fake('ok')
-  await f.api.rename('pc', '長'.repeat(80))
-  assert.equal(f.calls[0][1].name.length, 32)
-  f = fake('ok')
-  await f.api.rename('pc', '')
-  assert.deepEqual(f.calls, [['android_known_rename', { node: 'pc', name: '' }]], '空的＝未命名')
+  f = fake('ok', { android_known_rename: '改太頻繁了，請稍後再試' })
+  assert.equal(await f.api.rename('pc', 'x'), null, '不是物件的回覆不當成功')
+  f = makeKnownPeers({ confirm: async () => 'ok', invoke: async () => { throw '登入過期了，請重新登入' } })
+  await assert.rejects(() => f.rename('pc', 'x'), e => renameErrorText(e) === '登入過期了，請重新登入')
+  assert.equal(renameErrorText(new Error('boom /data/x')), TEXT.failed, '英文的內部訊息不顯示')
+  assert.equal(renameErrorText('名字不合規則'), '名字不合規則')
 })
 
 test('出題帶本機記的名字：有欄位（可為空字串）就用它，沒有欄位才是 null（畫面退回原名字）', async () => {
@@ -181,18 +192,85 @@ test('出題帶本機記的名字：有欄位（可為空字串）就用它，�
   for (const k of ['rename', 'renameSave', 'renameCancel', 'renameLabel', 'renameHint']) assert.doesNotMatch(TEXT[k], /[A-Za-z]{3,}/, k)
 })
 
-test('m.html：改名只用文字節點與輸入框（不走 v-html）；沒名字顯示 label；浮層標題用本機名字', () => {
+test('m.html：改名表單只用文字節點與輸入框（不走 v-html）；走新的改名流程；沒名字顯示 label；浮層標題用本機名字', () => {
   const html = read('../ui/m.html')
-  const list = html.slice(html.indexOf('class="m-known-list"'), html.indexOf('{{ KNOWN_TEXT.forgetNote }}'))
-  assert.doesNotMatch(list, /v-html/)
-  assert.match(list, /<b>\{\{ p\.label \}\}<\/b>/)
-  assert.match(list, /@click="renameStart\(p\)">\{\{ KNOWN_TEXT\.rename \}\}/)
-  assert.match(list, /v-model="kp\.editText"/)
-  assert.match(list, /@click="renameCancel">\{\{ KNOWN_TEXT\.renameCancel \}\}/)
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  const own = html.slice(html.indexOf('class="m-dv-own"'), html.indexOf('<ul class="m-dv-list"'))
+  for (const part of [info, own]) {
+    assert.ok(part.length > 200)
+    assert.doesNotMatch(part, /v-html/)
+    assert.match(part, /v-model="dn\.text"/)
+    assert.match(part, /:maxlength="NAME_MAX"/)
+    assert.match(part, /\{\{ KNOWN_TEXT\.renameHint \}\}/)
+    assert.match(part, /\{\{ dnHint \}\}/, '輸入時即時提示')
+    assert.match(part, /@click="devRenameCancel">\{\{ KNOWN_TEXT\.renameCancel \}\}/)
+    assert.match(part, /\{\{ KNOWN_TEXT\.renameSave \}\}/)
+    assert.match(part, /\{\{ dn\.err \}\}/, '後台的錯誤顯示出來')
+  }
   const js = read('../ui/m.js')
-  assert.match(js, /knownPeers\.rename\(node, kp\.editText\)/)
+  assert.match(js, /await knownPeers\.rename\(node, dn\.text\)/)
+  assert.doesNotMatch(js, /knownPeers\.rename\(node, kp\.editText\)|renameStart\(p\)|kp\.editText/, '舊的只記在手機的改名不在了')
+  assert.match(js, /await Promise\.allSettled\(\[core\.refreshRoster\(\), loadKnown\(\)\]\)/, '成功後重讀名單與認得的電腦')
+  assert.match(js, /dn\.err = renameErrorText\(e\)/)
+  assert.match(js, /deviceNameError\(dn\.text\)/)
   assert.match(js, /vp\.sheetName = ch\.localName === null \? cur\.name : \(ch\.localName \|\| KNOWN_TEXT\.unnamed\)/)
   assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
+})
+
+test('m.html：這支手機的名字在設備頁最上面（設備列表之前），改名用自己的節點', () => {
+  const html = read('../ui/m.html')
+  const pane = html.slice(html.indexOf("acctSw.tab === 'devices'"))
+  assert.ok(pane.indexOf('class="m-dv-own"') > 0 && pane.indexOf('class="m-dv-own"') < pane.indexOf('class="m-dv-list"'))
+  const own = pane.slice(pane.indexOf('class="m-dv-own"'), pane.indexOf('class="m-dv-list"'))
+  assert.match(own, /\{\{ KNOWN_TEXT\.ownNameLabel \}\}/)
+  assert.match(own, /\{\{ selfDev \? selfDev\.label : '' \}\}/, '顯示後台記的名字（自己那一列的名字）')
+  assert.match(own, /dn\.node !== info\.node/)
+  assert.match(own, /v-if="dn\.node === info\.node"/, '用這支手機自己的節點改名')
+  assert.match(own, /@click="devRenameStart\(selfDev\)">\{\{ KNOWN_TEXT\.rename \}\}/)
+  assert.match(read('../ui/m.js'), /const selfDev = computed\(\(\) => acctAllDevs\.value\.find\(d => d\.self\) \?\? null\)/)
+})
+
+test('m.html：設備列每列剛好 4 顆操作按鈕（上移、下移、帳號、詳情）；有認得紀錄的電腦標「已確認」或「未確認」（文字，不只靠顏色）', () => {
+  const html = read('../ui/m.html')
+  const row = html.slice(html.indexOf('<li v-for="d in acctDevs"'), html.indexOf('</li>', html.indexOf('<li v-for="d in acctDevs"')))
+  const group = row.slice(row.indexOf('class="m-dv-btns m-dv-rowbtns"'))
+  assert.equal((group.match(/<button /g) ?? []).length, 4)
+  const labels = [...group.matchAll(/\{\{ KNOWN_TEXT\.(\w+) \}\}<\/button>/g)].map(m => m[1])
+  assert.deepEqual(labels, ['moveUp', 'moveDown', 'accounts', 'detail'])
+  assert.match(row, /@click="acctMove\(d\.key, -1\)"/)
+  assert.match(row, /@click="acctMove\(d\.key, 1\)"/)
+  assert.match(row, /class="m-dv-grip"/, '排序把手還在')
+  assert.match(row, /joined\.byNode\[d\.key\]\.confirmed">\{\{ KNOWN_TEXT\.tagConfirmed \}\}/)
+  assert.match(row, /v-else-if="!d\.self && joined\.byNode\[d\.key\]">\{\{ KNOWN_TEXT\.tagUnconfirmed \}\}/)
+  assert.doesNotMatch(row, /fpShow|\.fp\b/, '列上不顯示指紋')
+  assert.match(html, /v-if="joined\.old\.length"/)
+})
+
+test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「還沒確認」與確認按鈕；沒紀錄的電腦說還沒連線過；忘記這台；不走 v-html', () => {
+  const html = read('../ui/m.html')
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  assert.doesNotMatch(info, /v-html/)
+  const fpRefs = [...info.matchAll(/fpShow/g)].length
+  assert.equal(fpRefs, 2, '指紋只出現在「已確認」那一段（判斷＋顯示）')
+  const confirmedBranch = /v-else-if="curKnown && curKnown\.confirmed"[\s\S]*?<\/p>/.exec(info)[0]
+  assert.match(confirmedBranch, /curKnown\.fpShow/)
+  const unconfirmedBranch = /v-else-if="curKnown"><span[\s\S]*?<\/p>/.exec(info)[0]
+  assert.doesNotMatch(unconfirmedBranch, /fp/i, '沒確認的不顯示也不碰指紋')
+  assert.match(unconfirmedBranch, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '確認按鈕只在沒確認時出現')
+  assert.equal((info.match(/confirmKnown\(/g) ?? []).length, 1)
+  assert.match(info, /\{\{ KNOWN_TEXT\.neverSeen \}\}/)
+  assert.match(info, /\{\{ KNOWN_TEXT\.firstSeen\(curKnown\.firstSeen\) \}\}/)
+  assert.match(info, /@click="forgetKnown\(curKnown\.node\)">\{\{ KNOWN_TEXT\.forgetThis \}\}/)
+  assert.match(info, /acctCanRemove/, '隱藏與永久移除也在詳情')
+  assert.ok(info.indexOf('curKnown.firstSeen') < info.indexOf('forgetKnown('), '忘記這台在最下面')
+  assert.match(info, /<template v-if="acctCur\.self"><\/template>/, '手機自己沒有可顯示的指紋命令，不顯示')
+  const old = html.slice(html.indexOf('class="m-dv-old"'), html.indexOf('<!-- /舊設備紀錄 -->'))
+  assert.doesNotMatch(old, /v-html/)
+  assert.match(old, /<b>\{\{ p\.label \}\}<\/b>/)
+  assert.match(old, /v-if="p\.confirmed && p\.fpShow"/, '舊紀錄的指紋也只有確認過的才畫')
+  assert.doesNotMatch(old, /confirmKnown/, '舊紀錄只能忘記')
+  assert.match(old, /@click="forgetKnown\(p\.node\)">\{\{ KNOWN_TEXT\.forget \}\}/)
+  assert.doesNotMatch(html, /settingCat === 'known'/)
 })
 
 test('守門：android_known_confirm／forget 前一定先 gate（要憑證、過本人確認）；先回答、再本人確認、最後才記住；只有 mobile-known-peers.mjs 叫這些命令', () => {
@@ -231,7 +309,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(html, /v-if="chatFriend && peerStrip"/)
   assert.match(html, /@click="openMethodSheet">\{\{ KNOWN_TEXT\.stripButton \}\}/)
   assert.match(html, /@remote-started="onRemoteStarted" @remote-ended="onRemoteEnded"/)
-  assert.match(html, /@click="forgetKnown\(p\.node\)">\{\{ KNOWN_TEXT\.forget \}\}/)
+  assert.match(html, /@click="forgetKnown\(curKnown\.node\)">\{\{ KNOWN_TEXT\.forgetThis \}\}/)
   const js = read('../ui/m.js')
   assert.match(js, /knownPeers\.challenge\(cur\)/)
   assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
@@ -303,7 +381,7 @@ test('守門：四選一的答案、選項不進日誌、事件；畫面層不�
 test('掃 QR code 的文字：照規格、繁體中文', () => {
   assert.equal(TEXT.scanButton, '用相機掃電腦上的 QR code')
   assert.equal(TEXT.scanFallback, '沒辦法掃，改用選的')
-  assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 認得的電腦把它忘掉，再重新連線。')
+  assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。')
   assert.equal(TEXT.scanBad, '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。')
   assert.equal(TEXT.scanNoCamera, '沒辦法用相機，改用選的。')
   assert.match(TEXT.methodBody, /顯示 QR code/)
@@ -397,17 +475,17 @@ test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、�
   assert.doesNotMatch(js, /console\.\w+\([^)]*(scan\w*Text|decoded)/)
 })
 
-test('認得的電腦頁：說明文字照規格；只有還沒確認的那列有「確認」按鈕，按下去走和提示條同一個開浮層的入口', () => {
+test('詳情的確認：只有還沒確認的才有「確認」按鈕，按下去走和提示條同一個開浮層的入口', () => {
   assert.equal(TEXT.confirmButton, '確認')
-  assert.equal(TEXT.settingLead, '看過的電腦會記在這支手機上。確認過指紋的電腦，你才能從這支手機替它登入、在它的終端打字。還沒確認的，先按「確認」，對照那台電腦設定頁上的指紋。')
   const html = read('../ui/m.html')
-  const list = html.slice(html.indexOf('class="m-known-list"'), html.indexOf('{{ KNOWN_TEXT.forgetNote }}'))
-  assert.match(list, /v-if="!p\.confirmed"[^>]*@click="confirmKnown\(p\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
-  assert.equal((list.match(/confirmKnown\(p\)/g) ?? []).length, 1)
-  // 提示條與設定頁按鈕最後都開同一個選方法浮層（openMethodSheet）
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  assert.match(info, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
+  assert.equal((info.match(/confirmKnown\(curKnown\)/g) ?? []).length, 1)
+  assert.doesNotMatch(html.slice(html.indexOf('class="m-dv-old"'), html.indexOf('<!-- /舊設備紀錄 -->')), /confirmKnown/)
+  // 提示條與詳情按鈕最後都開同一個選方法浮層（openMethodSheet）
   assert.match(html, /class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet"/)
   const js = read('../ui/m.js')
-  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\)[^\n]* \}/, '設定頁的確認呼叫同一個 openMethodSheet')
+  assert.match(js, /const confirmKnown = p => \{[^\n]*openMethodSheet\(\)[^\n]* \}/, '詳情的確認呼叫同一個 openMethodSheet')
   assert.match(js, /if \(!p\?\.node \|\| p\.confirmed/, '已確認的不處理')
   assert.doesNotMatch(js, /confirmKnown[^\n]*android_known/, '不另寫一套確認流程')
 })
@@ -440,14 +518,14 @@ test('還原邏輯（模擬）：A 在看，從設定頁確認 B，成功、取�
   assert.equal(vp.cur.node, 'C', '提示條路徑不動')
 })
 
-test('設定頁確認留下的提示：成功路徑已清；離開或重進設定頁時只清設定頁開的那種，終端提示條的不碰', () => {
+test('詳情確認留下的提示：成功路徑已清；離開或重進詳情時只清詳情開的那種，終端提示條的不碰', () => {
   const js = read('../ui/m.js')
   assert.match(js, /if \(r === 'done'\) \{[^\n]*vp\.note = ''/, '掃描成功清提示')
   assert.match(js, /if \(r === 'done'\) \{ markConfirmed\(cur\); vp\.note = ''/, '四選一成功清提示')
   assert.match(js, /openMethodSheet\(\); vp\.noteOwn = true \}/, '只有設定頁的確認標記為自己的提示')
   assert.match(js, /const openMethodSheet = \(\) => \{ if \(!vp\.cur \|\| vp\.busy\) return; vp\.noteOwn = false;/, '提示條開的確認取消標記')
   assert.match(js, /const vpReset = \(\) => \{ vpPrev = null; vp\.noteOwn = false;/, '開始／結束看電腦取消標記')
-  assert.match(js, /watch\(settingCat, \(c, old\) => \{ if \(\(c === 'known' \|\| old === 'known'\) && vp\.noteOwn\) \{ vp\.note = ''; vp\.noteOwn = false \} \}\)/, '離開或重進才清、且只清自己的')
+  assert.match(js, /watch\(\(\) => acctSw\.page === 'detail' && acctSw\.sub === 'info', \(now, was\) => \{ if \(now !== was\) \{ if \(vp\.noteOwn\) \{ vp\.note = ''; vp\.noteOwn = false \}/, '離開或重進詳情才清、且只清自己的')
 })
 
 test('設定頁確認的就是正在看的那台：成功後原本對象一併標已確認（還原後提示條不再跳出）；失敗提示只在設定頁顯示', () => {
@@ -469,4 +547,14 @@ test('設定頁確認的就是正在看的那台：成功後原本對象一併�
   const html = read('../ui/m.html')
   assert.match(html, /v-if="chatFriend && vp\.note && !vp\.noteOwn"/, '終端提示條不顯示設定頁的提示')
   assert.match(html, /v-if="vp\.note && vp\.noteOwn" role="alert"/, '設定頁只顯示自己的提示')
+})
+
+test('#1393 審查：改名沒拿到成功回覆要顯示失敗、名單沒讀到不全歸舊紀錄、提示字改新位置、像指紋的名字當未命名', async () => {
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(js, /const r = await knownPeers\.rename\(node, dn\.text\)\s*if \(!r\) \{ dn\.err = KNOWN_TEXT\.failed; return \}/)
+  assert.match(js, /return acctAllDevs\.value\.length \? j : \{ \.\.\.j, old: \[\] \}/)
+  const { LOGIN_TEXT } = await import('../ui/lib/mobile-device-login.mjs')
+  assert.ok(LOGIN_TEXT.confirmNeed.includes('「設定 → 設備」') && !LOGIN_TEXT.confirmNeed.includes('認得的電腦'))
+  const { normalizeList } = await import('../ui/lib/mobile-known-peers.mjs')
+  assert.equal(normalizeList({ peers: [{ node: 'pc', name: '工作機 a93cc519', confirmed: false }] })[0].label, '未命名的電腦')
 })

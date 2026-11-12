@@ -47,7 +47,8 @@ import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
-import { TEXT as KNOWN_TEXT, errorText as knownErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
+import { joinKnown, deviceNameError } from './lib/device-known.mjs'
+import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
@@ -465,8 +466,8 @@ const app = createApp({
     const guides = phoneGuideList()
     const guideOpen = computed(() => (fourthPage.value?.kind === 'guide' ? phoneGuide(fourthPage.value.guide) : null))
     // 設置分頁＝分類列表（每列一行目前值），點一列在第四頁籤打開該項（左上返回回設置）
-    // ---------- 認得的電腦：看電腦畫面時確認指紋（頂端條＋底部浮層）、設置分頁列出與忘記。確認、忘記前都先過本人確認（生物辨識或螢幕鎖） ----------
-    const kp = reactive({ list: [], loaded: false, error: '', busy: false, editNode: '', editText: '' })
+    // ---------- 認得的電腦：看電腦畫面時確認指紋（頂端條＋底部浮層）、設備頁（每台的詳情、舊設備紀錄）確認與忘記。確認、忘記前都先過本人確認（生物辨識或螢幕鎖） ----------
+    const kp = reactive({ list: [], loaded: false, error: '', busy: false })
     const loadKnown = async () => {
       try { kp.list = await knownPeers.list(); kp.loaded = true; kp.error = '' } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); kp.error = knownErrorText(e) }
     }
@@ -475,14 +476,23 @@ const app = createApp({
       kp.busy = true; kp.error = ''
       try { await knownPeers.forget(node); await loadKnown() } catch (e) { console.info('[ASN] 忘記這台沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
     }
-    // 改名：只改這支手機上記的名字（不用生物辨識）。輸入框的內容只當文字，送出前由 Rust 再整理一次
-    const renameStart = p => { if (kp.busy) return; Object.assign(kp, { editNode: p.node, editText: p.name, error: '' }) }
-    const renameCancel = () => { Object.assign(kp, { editNode: '', editText: '' }) }
-    const renameSave = async () => {
-      const node = kp.editNode
-      if (!node || kp.busy) return
-      kp.busy = true; kp.error = ''
-      try { await knownPeers.rename(node, kp.editText); renameCancel(); await loadKnown() } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
+    // 改名（這支手機自己、電腦、別的手機、雲端代理都一樣）：名字存在後台，所有設備都顯示；規則與送出都在 Rust（帳號簽章）。
+    // 輸入框的內容只當文字；成功後重讀名單（名字跟著變）與認得的電腦；失敗顯示後台回的中文說明
+    const dn = reactive({ node: '', text: '', busy: false, err: '' })
+    const dnBad = computed(() => deviceNameError(dn.text))
+    const dnHint = computed(() => (dn.text.trim() === '' ? '' : dnBad.value))   // 還沒打字時不先罵人
+    const devRenameStart = d => { if (dn.busy || !d?.key) return; Object.assign(dn, { node: d.key, text: d.label ?? '', err: '' }) }
+    const devRenameCancel = () => { if (dn.busy) return; Object.assign(dn, { node: '', text: '', err: '' }) }
+    const devRenameSave = async () => {
+      const node = dn.node
+      if (!node || dn.busy || deviceNameError(dn.text)) return
+      dn.busy = true; dn.err = ''
+      try {
+        const r = await knownPeers.rename(node, dn.text)
+        if (!r) { dn.err = KNOWN_TEXT.failed; return }   // 沒拿到成功的回覆：編輯框留著、顯示失敗，不讓人以為改好了
+        Object.assign(dn, { node: '', text: '', err: '' })
+        await Promise.allSettled([core.refreshRoster(), loadKnown()])
+      } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); dn.err = renameErrorText(e) } finally { dn.busy = false }
     }
     // 正在看的那台電腦：開始看時 Rust 回它的指紋與有沒有確認；結束或切回訊息就清掉
     const vp = reactive({ cur: null, method: false, sheet: false, busy: false, error: '', ch: null, note: '', sheetName: '', noteOwn: false })
@@ -511,7 +521,7 @@ const app = createApp({
     // 確認成功：目前對象與（設定頁確認時暫存的）原本對象若是同一台，兩邊都標已確認，還原後提示條才不會又跳出來
     const markConfirmed = cur => { if (vp.cur === cur) vp.cur = { ...cur, confirmed: true }; if (vpPrev?.cur?.node === cur.node) vpPrev = { cur: { ...vpPrev.cur, confirmed: true } } }
     const closeMethodSheet = () => { vp.method = false }
-    // 設定頁「認得的電腦」每列的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
+    // 設備「詳情」裡的「確認」：把那台當成正在看的電腦，開同一個選方法浮層（之後的掃描、四選一、本人確認全走上面同一條路）
     const confirmKnown = p => { if (!p?.node || p.confirmed || vp.busy) return; const prev = vpPrev ?? { cur: vp.cur }; vpReset(); vpPrev = prev; vp.cur = knownPeerOf({ node: p.node, confirmed: false }, p.label); openMethodSheet(); vp.noteOwn = true }
     // 選方法、四選一、掃描都收掉且沒在忙（成功、取消、失敗、掃描結束都會走到這）→ 把目前對象還原成設定頁開啟前的那台；終端提示條開的沒有暫存，不動
     watch(() => !vp.method && !vp.sheet && !vp.busy, idle => { if (idle && vpPrev) { vp.cur = vpPrev.cur; vpPrev = null } })
@@ -552,7 +562,7 @@ const app = createApp({
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.sheetName || vp.cur.name) : ''))
     const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
-    const settingRows = computed(() => mobileSettingRows({ knownCount: kp.list.length, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
+    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設置 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
@@ -564,9 +574,6 @@ const app = createApp({
     }
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
-    watch(settingCat, c => { if (c === 'known') void loadKnown() })
-    // 離開或重進「認得的電腦」頁：清掉設定頁開的確認留下的失敗提示（成功時 scanPeer／choosePeer 已清）
-    watch(settingCat, (c, old) => { if ((c === 'known' || old === 'known') && vp.noteOwn) { vp.note = ''; vp.noteOwn = false } })
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({
@@ -663,7 +670,7 @@ const app = createApp({
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
-    const acctSw = reactive({ phase: 'pick', page: 'list', tab: 'devices', node: '', picked: '', reports: {}, view: null, removedOpen: false })
+    const acctSw = reactive({ phase: 'pick', page: 'list', sub: 'accounts', tab: 'devices', node: '', picked: '', reports: {}, view: null, removedOpen: false })
     // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；
     // 讀不到沿用上一次讀成功的，從沒成功過才是 null（畫面退回各台自己回報的）
     const acctRoster = ref(null)
@@ -677,6 +684,11 @@ const app = createApp({
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
     const acctRemoved = computed(() => removedRows(acctAllDevs.value))
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
+    // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
+    const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
+    // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
+    const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
+    const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）
     const acctTitle = computed(() => acctPageTitle(acctCur.value ? 'devices' : acctSw.tab))   // 標題跟著分頁（看某台細部時是「設備」）
@@ -719,7 +731,8 @@ const app = createApp({
     async function openAcctNow(g) {
       if (nav.sheet) return
       acctEpoch++; acctToken++   // 重新打開：之前還在跑的讀取與切換不再更新這個畫面（切換的結果改用提示說）
-      Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, removedOpen: false, tab: acctTabOf(g?.tab) })
+      Object.assign(acctSw, { phase: 'pick', page: 'list', sub: 'accounts', picked: '', view: null, reports: {}, removedOpen: false, tab: acctTabOf(g?.tab) })
+      if (g?.tab === 'devices' || !g?.tab) void loadKnown()
       // 從夥伴列表某台設備旁的「選項」進來：直接開那一台的細部頁（底下墊一層列表，返回鍵回列表）；從別處進來先看列表
       if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
       if (!fourthNav.openPage(acctPage(acctSw.node))) return
@@ -731,9 +744,17 @@ const app = createApp({
     function openAcctDevice(key) {
       if (acctSw.phase !== 'pick') return
       const stale = !!fourthPage.value?.node   // 細部那台不見了（畫面退回列表）又點另一台：取代那一層，不多留一筆
-      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'
+      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'; acctSw.sub = 'accounts'
       fourthNav.pushLayer(acctPage(key), { replace: stale })
       return loadAcct(key)
+    }
+    // 設備列的「詳情」：同一層細部頁，換成詳情內容（名字、指紋、第一次見到、隱藏與移除、忘記這台）；不讀帳號
+    function openAcctInfo(key) {
+      if (acctSw.phase !== 'pick') return
+      const stale = !!fourthPage.value?.node
+      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'; acctSw.sub = 'info'
+      fourthNav.pushLayer(acctPage(key), { replace: stale })
+      void loadKnown()
     }
     // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
     const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
@@ -833,8 +854,10 @@ const app = createApp({
       if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset(); loginReset() } return }
       if (p.node) { acctSw.node = p.node; acctSw.page = 'detail'; return }
       if (old?.kind === 'acct' && old.node) acctToken++   // 細部退回列表：進行中的切換不再更新畫面
-      Object.assign(acctSw, { phase: 'pick', page: 'list', node: '', picked: '' })
+      Object.assign(acctSw, { phase: 'pick', page: 'list', sub: 'accounts', node: '', picked: '' })
     })
+    // 離開或重進詳情：清掉詳情裡開確認留下的失敗提示（成功時 scanPeer／choosePeer 已清）、收掉沒送出的改名
+    watch(() => acctSw.page === 'detail' && acctSw.sub === 'info', (now, was) => { if (now !== was) { if (vp.noteOwn) { vp.note = ''; vp.noteOwn = false }; kp.error = ''; if (!dn.busy) Object.assign(dn, { node: '', text: '', err: '' }) } })
     // 被隱藏的設備：顯示回名單／永久移除（要先看過二次確認）／恢復
     const acctShowBack = () => { if (acctCur.value) showHiddenDevice(acctCur.value.key) }
     const acctAskRemove = () => { if (acctSw.phase === 'pick' && acctCanRemove.value) acctSw.phase = 'rm' }
@@ -1311,7 +1334,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, kp, forgetKnown, renameStart, renameCancel, renameSave, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,

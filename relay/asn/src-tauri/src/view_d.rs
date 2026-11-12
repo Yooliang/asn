@@ -385,7 +385,7 @@ mod tests {
         let (old_fp, new_fp) = (crate::device_id::fp_grouped("old-key"), crate::device_id::fp_grouped("new-key"));
         assert!(err.contains(&new_fp), "手機看到的話帶新的完整指紋（分組）：{err}");
         assert!(!err.contains(&old_fp), "原本那把還沒確認過：不顯示它的指紋：{err}");
-        assert!(err.contains("設定 → 認得的電腦"), "{err}");
+        assert!(err.contains("「設備」裡那台的「詳情」按「忘記這台」"), "{err}");
         assert!(err.contains("「工作機」") && !err.contains("後台給的名字"), "名字用本機記住的：{err}");
         assert_eq!(err, view_remote::phone_key_changed_text("工作機", None, &new_fp));
         assert!(view_remote::phone_key_changed_text("", None, &new_fp).starts_with("這台電腦的金鑰"), "本機沒記名字就寫這台電腦");

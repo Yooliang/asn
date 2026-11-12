@@ -83,7 +83,7 @@ pub fn ask_text(who: &Who, window: &str) -> String {
         ""
     };
     // 按了允許之後會不會再問（0.2.15）：設成每次都問的就照樣每次問
-    let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到設定 → 認得的電腦取消勾選。" };
+    let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到「設定 → 設備」那台的「詳情」取消勾選。" };
     format!("{name}（指紋 {fp}）要在這台的「{window}」打字。名字可以從任何一台設備改，請看指紋認是哪一台。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？")
 }
 
@@ -327,7 +327,7 @@ mod tests {
         assert!(!w.first && !w.typed_before && !w.always_ask);
         let t = ask_text(&w, "小乙");
         assert!(t.contains("還沒在這裡打過字") && t.contains("請用指紋確認"), "{t}");
-        assert!(t.contains("這台以後要在這裡打字就不會再問你") && t.contains("設定 → 認得的電腦"), "{t}");
+        assert!(t.contains("這台以後要在這裡打字就不會再問你") && t.contains("設定 → 設備"), "{t}");
         k.confirm_input("d", PUB);
         let t = ask_text(&who_of(&k, "d", "家用機", PUB, Tofu::Same), "小乙");
         assert!(!t.contains("還沒在這裡打過字"), "按過允許的不再提醒");

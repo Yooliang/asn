@@ -507,7 +507,7 @@ mod tests {
     }
 
     fn body_of<'a>(code: &'a str, name: &str) -> &'a str {
-        let at = code.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("找不到 {name}"));
+        let at = code.find(&format!("pub fn {name}(")).or_else(|| code.find(&format!("pub async fn {name}("))).unwrap_or_else(|| panic!("找不到 {name}"));
         code[at..].split("\n}\n").next().unwrap()
     }
 
@@ -525,13 +525,14 @@ mod tests {
         for name in ["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"] {
             let b = body_of(code, name);
             assert!(b.contains("label_ok(window.label())"), "{name} 要檢查視窗代號");
-            let head = &code[code.find(&format!("pub fn {name}(")).unwrap()..];
+            let head = &code[code.find(&format!("pub fn {name}(")).or_else(|| code.find(&format!("pub async fn {name}("))).unwrap()..];
             assert!(head.split(')').next().unwrap().contains(concat!("window: tau", "ri::WebviewWindow")), "{name} 要收視窗");
         }
         for (i, _) in code.match_indices("consent::") {
             let before = &code[..i];
-            let start = before.rfind("\npub fn ").unwrap();
-            let owner: String = before[start + 8..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            // 比照 device_id.rs 的 owner_at：async 的命令也要認得
+            let (start, len) = ["\npub async fn ", "\npub fn "].iter().filter_map(|p| before.rfind(p).map(|at| (at, p.len()))).max().unwrap();
+            let owner: String = before[start + len..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
             assert!(["android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&owner.as_str()), "{owner} 不能碰憑證");
         }
         for name in ["android_known_challenge", "android_known_answer", "android_known_list"] {

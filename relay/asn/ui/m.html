@@ -267,17 +267,35 @@
                 </div>
               </section>
               <template v-if="acctSw.tab === 'devices'">
+              <!-- 這支手機的名字：後台記的名字，所有設備都顯示這個；改名走後台（android_known_rename） -->
+              <section class="m-dv-own" role="region" :aria-label="KNOWN_TEXT.ownNameLabel">
+                <div class="m-dv-nameline"><span class="m-dv-own-l">{{ KNOWN_TEXT.ownNameLabel }}</span><b class="m-dv-curname">{{ selfDev ? selfDev.label : '' }}</b><button class="m-btn" type="button" v-if="selfDev && dn.node !== info.node" :disabled="dn.busy" @click="devRenameStart(selfDev)">{{ KNOWN_TEXT.rename }}</button></div>
+                <form class="m-known-edit" v-if="dn.node === info.node" @submit.prevent="devRenameSave">
+                  <input class="m-input" type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="dn.text" :aria-label="KNOWN_TEXT.ownNameLabel" />
+                  <small class="m-fine">{{ KNOWN_TEXT.renameHint }}</small>
+                  <small class="m-err" v-if="dnHint" role="alert">{{ dnHint }}</small>
+                  <small class="m-err" v-if="dn.err" role="alert">{{ dn.err }}</small>
+                  <span class="m-dv-btns"><button class="m-btn" type="submit" :disabled="dn.busy || !!dnBad">{{ KNOWN_TEXT.renameSave }}</button><button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameCancel">{{ KNOWN_TEXT.renameCancel }}</button></span>
+                </form>
+              </section>
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
               <ul class="m-dv-list" aria-label="設備" v-else>
                 <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after }">
                   <button type="button" class="m-dv-grip" v-if="!d.self" :aria-label="'拖曳調整 ' + d.label + ' 的順序，或按上下鍵'" @pointerdown="gripDown(d.key, $event)" @pointermove="gripMove" @pointerup="gripUp" @pointercancel="gripUp" @keydown="gripKey(d.key, $event)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg></button>
                   <span class="m-dv-grip-gap" v-else aria-hidden="true"></span>
-                  <button type="button" class="m-dv-go" @click="openAcctDevice(d.key)">
+                  <div class="m-dv-go">
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
-                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span><span class="m-dv-line" v-if="d.stateLine">{{ d.stateLine }}</span></span>
+                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · {{ KNOWN_TEXT.thisPhone }}</template></span><span class="m-dv-line" v-if="d.stateLine">{{ d.stateLine }}</span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
-                    <span class="m-dv-chev" aria-hidden="true">&rsaquo;</span>
-                  </button>
+                    <span class="m-dv-tag ok" v-if="!d.self && joined.byNode[d.key] && joined.byNode[d.key].confirmed">{{ KNOWN_TEXT.tagConfirmed }}</span>
+                    <span class="m-dv-tag warn" v-else-if="!d.self && joined.byNode[d.key]">{{ KNOWN_TEXT.tagUnconfirmed }}</span>
+                  </div>
+                  <div class="m-dv-btns m-dv-rowbtns" role="group" :aria-label="d.label + ' 的操作'">
+                    <button type="button" class="m-btn" :disabled="d.self || !(acctFlags[d.key] && acctFlags[d.key].up)" :aria-label="'上移 ' + d.label" @click="acctMove(d.key, -1)">{{ KNOWN_TEXT.moveUp }}</button>
+                    <button type="button" class="m-btn" :disabled="d.self || !(acctFlags[d.key] && acctFlags[d.key].down)" :aria-label="'下移 ' + d.label" @click="acctMove(d.key, 1)">{{ KNOWN_TEXT.moveDown }}</button>
+                    <button type="button" class="m-btn m-dv-accbtn" :aria-label="'查看 ' + d.label + ' 的帳號'" @click="openAcctDevice(d.key)">{{ KNOWN_TEXT.accounts }}</button>
+                    <button type="button" class="m-btn" :aria-label="'查看 ' + d.label + ' 的詳情'" @click="openAcctInfo(d.key)">{{ KNOWN_TEXT.detail }}</button>
+                  </div>
                 </li>
               </ul>
               <div class="m-dv-removed" v-if="acctRemoved.length">
@@ -286,6 +304,18 @@
                   <li v-for="d in acctRemoved" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="acctRestore(d.key)">{{ DEVICE_TEXT.restore }}</button></li>
                 </ul>
               </div>
+              <details class="m-dv-old" v-if="joined.old.length">
+                <summary>{{ KNOWN_TEXT.oldTitle(joined.old.length) }}</summary>
+                <ul class="m-known-list">
+                  <li class="m-known-row" v-for="p in joined.old" :key="p.node">
+                    <span class="m-row-tx"><b>{{ p.label }}</b><small><span class="m-dv-tag ok" v-if="p.confirmed">{{ KNOWN_TEXT.tagConfirmed }}</span><template v-if="p.confirmed && p.fpShow"> {{ KNOWN_TEXT.fp(p.fpShow) }}</template></small><small v-if="p.firstSeen">{{ KNOWN_TEXT.firstSeen(p.firstSeen) }}</small></span>
+                    <button class="m-btn" type="button" :disabled="kp.busy" @click="forgetKnown(p.node)">{{ KNOWN_TEXT.forget }}</button>
+                  </li>
+                </ul>
+                <p class="m-fine">{{ KNOWN_TEXT.forgetNote }}</p>
+              </details>
+              <!-- /舊設備紀錄 -->
+              <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
               </template>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
               <p class="m-fine m-dv-foot" v-if="acctSw.tab === 'accounts'">{{ ACCT_TEXT.quotaNote }}</p>
@@ -299,11 +329,34 @@
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                 </div>
-                <div class="m-dv-hid-act" v-if="acctCanRemove">
-                  <button type="button" class="m-dv-refresh" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
-                  <button type="button" class="m-dv-refresh m-dv-danger" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                <div class="m-dv-info" v-if="acctSw.sub === 'info'">
+                  <div class="m-dv-nameline"><b class="m-dv-curname">{{ acctCur.label }}</b><button class="m-btn" type="button" v-if="dn.node !== acctCur.key" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ KNOWN_TEXT.rename }}</button></div>
+                  <form class="m-known-edit" v-if="dn.node === acctCur.key" @submit.prevent="devRenameSave">
+                    <input class="m-input" type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="dn.text" :aria-label="KNOWN_TEXT.renameLabel" />
+                    <small class="m-fine">{{ KNOWN_TEXT.renameHint }}</small>
+                    <small class="m-err" v-if="dnHint" role="alert">{{ dnHint }}</small>
+                    <small class="m-err" v-if="dn.err" role="alert">{{ dn.err }}</small>
+                    <span class="m-dv-btns"><button class="m-btn" type="submit" :disabled="dn.busy || !!dnBad">{{ KNOWN_TEXT.renameSave }}</button><button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameCancel">{{ KNOWN_TEXT.renameCancel }}</button></span>
+                  </form>
+                  <template v-if="acctCur.self"></template>
+                  <p class="m-dv-fprow" v-else-if="curKnown && curKnown.confirmed"><span class="m-dv-tag ok">{{ KNOWN_TEXT.tagConfirmed }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
+                  <p class="m-dv-fprow" v-else-if="curKnown"><span class="m-dv-tag warn">{{ KNOWN_TEXT.unconfirmed }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
+                  <p class="m-fine" v-else-if="(acctCur.kindLabel || acctCur.kind) === '電腦'">{{ KNOWN_TEXT.neverSeen }}</p>
+                  <p class="m-fine" v-if="curKnown && curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>
+                  <div class="m-dv-hid-act" v-if="acctCanRemove">
+                    <button type="button" class="m-dv-refresh" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
+                    <button type="button" class="m-dv-refresh m-dv-danger" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                  </div>
+                  <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
+                  <template v-if="curKnown">
+                    <button class="m-btn m-dv-danger" type="button" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
+                    <p class="m-fine">{{ KNOWN_TEXT.forgetNote }}</p>
+                  </template>
+                  <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
+                  <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                 </div>
-                <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
+                <!-- /詳情 -->
+                <template v-else>
                 <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
                 <div class="m-dv-body" :class="{ off: !acctCur.online }">
                   <div class="m-dv-empty" v-if="!acctCur.vendors.length"><span>{{ acctRep && acctRep.loading ? '讀取中…' : (acctCur.empty || '這台設備還沒有回報任何廠商') }}</span></div>
@@ -375,6 +428,7 @@
                     </li>
                   </ul>
                 </div>
+                </template>
               </section>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
               <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
@@ -527,29 +581,6 @@
                       <header><span class="m-rel-ver">{{ e.version }}</span><span class="m-rel-tag" v-if="e.tag === 'current'">目前版本</span><span class="m-rel-date" v-if="e.date">{{ e.date }}</span></header>
                       <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
                     </article>
-                  </div>
-                </template>
-                <template v-else-if="settingCat === 'known'">
-                  <div class="m-card m-known">
-                    <p class="m-note">{{ KNOWN_TEXT.settingLead }}</p>
-                    <p class="m-note" v-if="kp.loaded && !kp.list.length">{{ KNOWN_TEXT.none }}</p>
-                    <ul class="m-known-list" v-if="kp.list.length">
-                      <li class="m-known-row" v-for="p in kp.list" :key="p.node">
-                        <span class="m-row-tx"><b>{{ p.label }}</b><small><template v-if="p.fpShow">{{ KNOWN_TEXT.fp(p.fpShow) }}　</template>{{ p.confirmed ? KNOWN_TEXT.confirmed : KNOWN_TEXT.unconfirmed }}</small></span>
-                        <button class="m-btn" type="button" v-if="!p.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(p)">{{ KNOWN_TEXT.confirmButton }}</button>
-                        <button class="m-btn" type="button" :disabled="kp.busy" @click="renameStart(p)">{{ KNOWN_TEXT.rename }}</button>
-                        <button class="m-btn" type="button" :disabled="kp.busy" @click="forgetKnown(p.node)">{{ KNOWN_TEXT.forget }}</button>
-                        <form class="m-known-edit" v-if="kp.editNode === p.node" @submit.prevent="renameSave">
-                          <input class="m-input" type="text" maxlength="32" autocomplete="off" v-model="kp.editText" :aria-label="KNOWN_TEXT.renameLabel" />
-                          <small class="m-fine">{{ KNOWN_TEXT.renameHint }}</small>
-                          <button class="m-btn" type="submit" :disabled="kp.busy">{{ KNOWN_TEXT.renameSave }}</button>
-                          <button class="m-btn" type="button" :disabled="kp.busy" @click="renameCancel">{{ KNOWN_TEXT.renameCancel }}</button>
-                        </form>
-                      </li>
-                    </ul>
-                    <p class="m-note" v-if="kp.list.length">{{ KNOWN_TEXT.forgetNote }}</p>
-                    <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
-                    <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                   </div>
                 </template>
                 <template v-else-if="settingCat === 'about'">

@@ -537,12 +537,19 @@ pub fn android_known_forget(window: tauri::WebviewWindow, app: State<'_, App>, n
     Ok(gone)
 }
 
-/// 本人替這台電腦改名（只改這支手機上記的名字；不用生物辨識，因為不影響信任）。名字先整理過（去控制字元、最多 32 字，空的＝未命名）。
-/// 只有這個命令能改手機上的名字（守門測試）。回有沒有這台
+/// 本人在手機上替自己的任一台設備改名（#1388：每台只有一個名字，存在後台，所有設備同步；這支手機自己也可以改）。
+/// 送後台 device_rename（節點金鑰＋本人簽章，沒登入不送）；成功後把手機記住的名字一併換成新的。不用生物辨識：名字不影響信任，辨識靠指紋。
+/// 回後台的 { ok, name, changed }。只有這個命令和電腦版的 device_rename 能改名（守門測試）
 #[tauri::command]
-pub fn android_known_rename(window: tauri::WebviewWindow, app: State<'_, App>, node: String, name: String) -> Result<bool, String> {
+pub async fn android_known_rename(window: tauri::WebviewWindow, app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, node: String, name: String) -> Result<serde_json::Value, String> {
     if !crate::consent::label_ok(window.label()) {
-        return Ok(false);
+        return Err(crate::consent::NOT_VERIFIED.to_string());
     }
-    crate::device_id::live::rename_peer(&app.data_dir, &node, &name)
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let v = r.device_rename(&node, &name, token.as_deref()).await?;
+    if let Some(n) = v.get("name").and_then(serde_json::Value::as_str) {
+        let _ = crate::device_id::live::rename_peer(&app.data_dir, &node, n);
+    }
+    Ok(v)
 }

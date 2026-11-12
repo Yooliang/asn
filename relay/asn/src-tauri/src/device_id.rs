@@ -22,7 +22,7 @@ pub const SCOPE_VIEW: &str = "view";
 pub const SCOPE_INPUT: &str = "input";
 /// 這台目前不能讓別台看畫面（設定沒開，或金鑰只靠檔案權限保護）
 pub const NOT_VIEWABLE_HERE: &str = "這台目前不能讓別台看畫面";
-pub const KEY_CHANGED: &str = "這台電腦的設備金鑰變了，已拒絕連線。如果是你重裝了那台，請到設定頁「認得的電腦」按忘記再連一次";
+pub const KEY_CHANGED: &str = "這台電腦的設備金鑰變了，已拒絕連線。如果是你重裝了那台，請到「設定 → 設備」那台的「詳情」按「忘記這台」再連一次";
 
 /// 這台的金鑰有沒有保護到可以讓別台看：Windows（DPAPI），或設備私鑰已經由系統金鑰庫保護（Linux）。只靠檔案權限的一律不行
 pub fn can_be_viewed_here(dir: &Path) -> bool {
@@ -348,7 +348,7 @@ pub fn fp_grouped(sign_pub: &str) -> String {
 /// 手機設定頁「認得的電腦」的列表：名字、節點、有沒有確認過；**只有確認過的才帶完整指紋 fp**（沒確認的電腦，畫面不能知道它的指紋，不然四選一就沒意義）。**不含公鑰**
 pub fn phone_known_view(k: &KnownPeers) -> serde_json::Value {
     serde_json::json!({ "peers": k.peers.iter().map(|p| {
-        let mut v = serde_json::json!({ "node": p.node, "name": p.name, "confirmed": p.confirmed_at.is_some() });
+        let mut v = serde_json::json!({ "node": p.node, "name": p.name, "confirmed": p.confirmed_at.is_some(), "first_seen_ms": p.first_seen_ms });
         if p.confirmed_at.is_some() {
             v["fp"] = serde_json::json!(fingerprint(&p.sign_pub));
         }
@@ -888,7 +888,8 @@ mod tests {
         let v = phone_known_view(&k);
         let p = &v["peers"][0];
         assert_eq!((p["name"].as_str(), p["node"].as_str(), p["confirmed"].as_bool()), (Some("工作機"), Some("pc"), Some(false)));
-        assert_eq!(p.as_object().unwrap().len(), 3, "沒確認的：只有 node／name／confirmed");
+        assert_eq!(p.as_object().unwrap().len(), 4, "沒確認的：只有 node／name／confirmed／first_seen_ms");
+        assert_eq!(p["first_seen_ms"].as_u64(), Some(1));
         assert!(p.get("fp").is_none() && p.get("fp8").is_none());
         let fp = fingerprint("pk2");
         assert!(k.confirm("pc2", &fp, 5));
@@ -1122,7 +1123,7 @@ mod tests {
         for o in a.options.iter().chain(b.options.iter()) {
             assert!(!text.contains(o.as_str()), "列表不能有選項 {o}");
         }
-        assert_eq!(phone_known_view(&k)["peers"][0].as_object().unwrap().len(), 3);
+        assert_eq!(phone_known_view(&k)["peers"][0].as_object().unwrap().len(), 4, "node、name、confirmed、first_seen_ms（沒確認不帶指紋）");
     }
 
     /// 這個位置落在哪個方法裡（縮排四格的 fn）
