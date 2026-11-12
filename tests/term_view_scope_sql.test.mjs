@@ -1,6 +1,7 @@
 // 別台打字的控制面（migration 20261108100000_term_view_scope.sql）：觀看分 view／input 兩種。
 // 靜態：只加 scope 欄、沒有放內容的欄位、函式只給 service_role、沒有任何「同意」欄位（同意只在 T 本機）。
 // 實跑（要 pglite）：預設 view、topic 前綴、分 scope 上限、到期、壞 scope、舊簽名照舊、pending 帶 scope、通知文字分 scope、權限。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -34,7 +35,7 @@ const PUB = 'a'.repeat(43), TSIG = 'b'.repeat(86), DSIG = 'c'.repeat(342)
 const KEYS = { [D]: 'D'.repeat(43), [Z]: 'Z'.repeat(43), [X]: 'X'.repeat(43), [Q]: 'Q'.repeat(43) }
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -170,3 +171,5 @@ test('發起：同一台 T 的發起先上鎖，再查上限（同時發起不�
   assert.ok(lock < body.indexOf("'busy'"), '鎖在上限檢查之前')
 })
 
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

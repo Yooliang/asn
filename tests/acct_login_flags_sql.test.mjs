@@ -6,6 +6,7 @@
 //    兩欄寫入後讀得出；舊格式（不帶）照樣能寫且預設 false；型別不對整份退回且不寫；恢復後旗標消失；
 //    既有欄位（email、plan、current、額度、重置時間、gemini）都還在；權限與改前相同。
 //    寄信函式：收件人一定是節點擁有者的人代號、只收固定欄位、超過限流被拒、不是自己的節點被拒、欄位不合不寄。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -93,7 +94,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -295,3 +296,6 @@ test('實跑（pglite）：寄信函式——權限：definer、search_path 空�
   await db.exec(down2)
   assert.equal(await overloads(db, 'asn_relay_login_alert'), 0)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

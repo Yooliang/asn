@@ -1,6 +1,7 @@
 // #468 migration 20261028210000_partner_op_resume_pi.sql：pi 夥伴也能喚醒。
 // 1. 靜態：與正式庫現行定義（基準檔）比只差 engine 判斷那一行；不動權限、不動資料表。
 // 2. 實跑（pglite；沒裝略過）：pi 有對話編號就收下並帶 session；沒有回 no_session；claude 照常；其他引擎照樣 not_claude；在線的照樣 already_online。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +30,7 @@ const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const SID = '0f9e8d7c-1111-4222-8333-444455556666'
 
 test('實跑（pglite）：pi 帶對話編號收下；沒有編號 no_session；claude 照常；codex 照樣 not_claude；在線 already_online', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, launcher jsonb, bell_topic text, last_seen_at timestamptz default now());
     create table relay.partners(partner_id text primary key, tenant_id uuid, node text, current_name text, current_session text, engine text, updated_at timestamptz default now());
@@ -59,3 +60,6 @@ test('實跑（pglite）：pi 帶對話編號收下；沒有編號 no_session；
   assert.equal((await op('小乙')).error, 'not_claude', '其他引擎照樣不開放')
   assert.equal((await op('在線pi')).error, 'already_online')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

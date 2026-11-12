@@ -1,5 +1,6 @@
 // #443／#444 第 2 步 migration（20261028140000_launcher_pi_models.sql）：asn_relay_set_launcher 多收選填的 pi_models。
 // 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -18,7 +19,7 @@ try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：pi_models 只留合格的 { provider, model }、最多 200 筆、太大只丟 pi_models；舊格式照常；其餘檢查不變', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create schema relay; create table relay.nodes(id text primary key, status text default 'active', can_invite boolean default false, can_roster boolean default true, launcher jsonb, launcher_at timestamptz);
     insert into relay.nodes(id) values ('W');`)
   await db.exec(sql)
@@ -39,3 +40,6 @@ test('實跑（pglite）：pi_models 只留合格的 { provider, model }、最�
   assert.deepEqual(await set(null), { ok: true })
   assert.equal(await get(), null)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

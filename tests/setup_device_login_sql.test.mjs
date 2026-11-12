@@ -3,6 +3,7 @@
 //    非 claude 種類的最低版本先是 9999.0.0（還不交）；回復腳本放回原文。
 // 2. 實跑（pglite）：網址規則對 login_link_cases.json 的正反例；兩參數的舊呼叫照舊是 claude；裝置碼型的請求本文每個欄位都檢查；
 //    版本不夠新不交；電腦取請求時多帶請求本文、簽章與手機設備公鑰；密文放一次就鎖、只能放自己節點的；手機取一次就清、只能取自己的；過期清掉。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -68,7 +69,7 @@ try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑：網址規則對共用正反例（加上兩個新主機的正反例）', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   // 和約束、函式一樣：長度 12～2048 且符合規則
   const ok = async u => (await db.query(`select char_length($1) between 12 and 2048 and $1 ~ '${RULE}' as m`, [u])).rows[0].m
   const expand = s => s.replace(/<A\*(\d+)>/g, (_, n) => 'a'.repeat(Number(n)))
@@ -88,7 +89,7 @@ const now = () => Math.floor(Date.now() / 1000)
 const payload = (o = {}) => JSON.stringify({ v: 'asn-device-login-req-v1', rid: RID, t_node: 'PC', p_node: 'PH', vendor: 'codex', p_eph_pub: PUB, exp: now() + 600, ...o })
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, machine text, kind text, status text default 'active', owner_user uuid, last_seen_at timestamptz,
       platform text, launch_closed_reason text, inbox_hold_until timestamptz, tenant_id uuid);
@@ -217,3 +218,6 @@ test('實跑：資料表約束擋得住直接寫入不完整的裝置碼型列',
   await assert.rejects(db.query("insert into relay.setup_requests(node, requested_by, kind, rid) values ('PC', $1, 'claude', $2)", [U1, RID]), /setup_requests_device_ck/)
   await assert.rejects(db.query("insert into relay.setup_requests(node, requested_by, kind) values ('PC', $1, 'gemini')", [U1]), /setup_requests_kind_check/)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

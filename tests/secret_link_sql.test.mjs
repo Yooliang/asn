@@ -2,6 +2,7 @@
 // 1. 靜態：新函式 security definer＋search_path 空、只授權 service_role；欄位有檢查約束；簽章與網域檢查在函式裡。
 // 2. 實跑（pglite，沒裝就略過）：帶網址的請求一定要本人簽章且擁有請求端節點；網址只收官方登入網域的 https；
 //    待確認清單回 link（沒有就 null）；舊的五參數請求函式照常運作；欄位的檢查約束擋得住直接寫入。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -47,7 +48,7 @@ const pub = n => String(n).padStart(43, 'P')
 const LINK = 'https://claude.ai/oauth/authorize?client_id=C&state=S&code_challenge=H&redirect_uri=R'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, bell_topic text);
     create function public.asn_user_owns_node(p_user uuid, p_node text) returns boolean language sql stable as
@@ -149,3 +150,6 @@ test('實跑（pglite）：帶網址的請求仍受公鑰唯一、同時上限�
   assert.ok((await reqLink({ pub: pub(4) })).id)
   assert.equal((await reqLink({ pub: pub(5) })).error, 'too_many', '同時等待最多 3 筆')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

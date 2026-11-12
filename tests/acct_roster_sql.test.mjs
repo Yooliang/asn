@@ -2,6 +2,7 @@
 // 1. 靜態：編號排在最新之後、舊的 asn_relay_acct_report／asn_relay_acct_quota／relay.asn_accounts 一字不動、只授權 service_role、沒有權杖類字樣。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例 tests/fixtures/quota-merge-cases-legacy.json 全跑、
 //    權限、擁有者寫入／沒認領不寫／租戶不符不寫、舊四欄轉兩窗、兩台逐窗合併、A 讀不到 B、沒簽章 forbidden、30 天保留、上限、舊函式原文不變。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -61,7 +62,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -269,3 +270,6 @@ test('實跑（pglite）：舊的 asn_relay_acct_report／asn_relay_acct_quota �
   assert.deepEqual(await oldReport(db, 'W', [{ ...C, windows: [win('weekly', 5, null)] }]), { ok: true, count: 1 })
   assert.deepEqual((await db.query(`select accounts from relay.asn_accounts where node = 'W'`)).rows[0].accounts, [C])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

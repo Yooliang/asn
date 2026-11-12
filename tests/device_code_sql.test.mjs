@@ -2,6 +2,7 @@
 // 靜態檢查＋pglite 實跑（`npm i --no-save @electric-sql/pglite`，沒裝就略過實跑）。
 // 實跑驗：start 頻率限制；approve 建節點（代號規則、擁有者歸屬）；poll 核准前等待、核准後一次性交出（金鑰雜湊才寫入）、之後作廢；
 //         錯碼限次（暴力猜短碼）；到期；未領取就到期的節點作廢；舊節點與其他動作不受影響。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -31,7 +32,7 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const T2 = 'aaaaaaaa-0000-0000-0000-000000000002'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, id_prefix text, status text default 'active');
     create table relay.nodes(id text primary key, name text, key_hash text not null, bell_topic text not null, kind text, role text default 'member',
@@ -130,3 +131,6 @@ test('實跑：輪詢太快回 slow_down；節點上限 20 個', { skip }, async
   await db.exec(`insert into relay.nodes(id, name, key_hash, bell_topic, tenant_id, owner_user) select 't1-f' || g, 'x', 'h' || g, 'b' || g, '${T1}', '${U1}' from generate_series(1, 19) g`)
   assert.deepEqual(await approve(db, U1, 'usr1'), { error: 'too_many' })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

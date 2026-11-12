@@ -7,6 +7,7 @@
 //    - 帳號設定可調（asn_account_settings：預設 20、0～200、其他 bad_request（20261029120000 放寬））
 //    - 跨租戶群組用「主持人」帳號的設定，不是發言者的
 // 3. 還原驗證：拿掉 room_post 的上限檢查、或拿掉「真人發言重置」，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~w1`, C = `${W1}~w2`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -269,3 +270,6 @@ test('還原驗證：拿掉「真人發言重置」，真人發言後仍被擋',
   await human(db, room, '真人再說')
   assert.equal((await aiPost(db, room, A, 'y', [B])).wake_limited, true, '拿掉重置後仍被擋＝重置測試會紅')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -2,6 +2,7 @@
 // 1. 靜態：編號比 20261024190000 大、只動 asn_relay_acct_report 與新工具函式、只授權 service_role、沒有權杖類字樣。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；pglite 測試不要加 --test-force-exit）：
 //    重現——舊版把額度欄位丟掉；新版保留合格欄位、壞欄位單獨丟掉、codex 不收額度、舊式回報照舊。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,7 +37,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'
 async function setup(withQuota) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', bell_topic text, unique (tenant_id, id));
@@ -90,3 +91,6 @@ test('實跑（pglite）：舊式回報（不帶額度）、壞 email、超過 2
     assert.deepEqual(await rep(db, bad), { error: 'bad_request' })
   }
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

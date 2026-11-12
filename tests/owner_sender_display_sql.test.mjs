@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`），在記憶體內的 Postgres 套用 account_me 與本 migration，
 //    驗：新位址 u:xxx 與舊寫法 XISU/u:xxx 的回信都送到本人（扇出給在線的 ASN）；別人的代號 unknown_to_node；
 //    inbox 多出 sender_display／sender_device／sender_engine，舊欄位的值不變；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -33,7 +34,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text, owner_name text not null default '朋友');
     create table relay.nodes(id text primary key, tenant_id uuid not null, status text default 'active', role text default 'member',
@@ -172,3 +173,6 @@ test('實跑（pglite）：帳號層的名字——讀、改、預設值、不�
   const m2 = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r.find(x => x.body === '改名後')
   assert.deepEqual([m2.sender_display, m2.sender_device], ['啟良', '手機'])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

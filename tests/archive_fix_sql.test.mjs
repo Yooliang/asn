@@ -2,6 +2,7 @@
 // 1. 靜態檢查：只改 asn_relay_list、只授權 service_role、拿掉新增部分後與上一版（20261023090000）逐字相同。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：重現「夥伴已不在名單、封存鍵是夥伴 ID」——名單成員帶 archived_keys；
 //    成員的 archived 旗標夥伴 ID 與 n:節點/名字 兩種鍵都能命中；別的租戶／別的節點的封存不外洩。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const PID = 'p_fdddfe7beb8947ba8643'
 const PID2 = 'p_0123456789abcdef0123'
 
 async function setup(m) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', can_invite boolean default true, can_roster boolean default true,
       name text, kind text, machine text, avatar text, avatar_updated_at timestamptz, last_seen_at timestamptz default now());
@@ -82,3 +83,6 @@ test('實跑（pglite）：成員的 archived 旗標——夥伴 ID 鍵與 n: �
   const flags = Object.fromEntries([...h.agents, ...h.offline_agents].map(a => [a.name, a.archived]))
   assert.deepEqual(flags, { asn: true, 小文: true, 路人: false }, '小文有夥伴 ID，但封存記的是 n: 鍵，舊版會漏')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

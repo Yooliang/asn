@@ -3,6 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    舊用戶端回報與 roster 不變；grok 只收每週、minimax 只收 5 小時與每週；舊的 asn_relay_acct_report 不收 minimax；
 //    沒開代碼查不到；開了查得到且不含 email；撤銷、重開後舊代碼失效；只有本人能開；超過 30 天不回；次數限制；回復後回到原狀。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -69,7 +70,7 @@ const CODE = 'a'.repeat(64)
 const CODE2 = 'b'.repeat(64)
 
 async function setup({ apply = true } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -209,3 +210,6 @@ test('實跑：可重跑；回復後代碼與 minimax 消失、grok 的窗清空
   assert.equal((await report(db, 'W', [CLAUDE])).ok, true)
   await assert.rejects(db.exec(`insert into relay.asn_user_accounts(user_id, vendor, account) values ('${U1}', 'minimax', 'z@x.test')`))
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

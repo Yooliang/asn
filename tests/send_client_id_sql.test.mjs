@@ -2,6 +2,7 @@
 // 涵蓋：重複送回第一次的 id 並標 duplicate、不多寄一列；跨節點同 id 不算重複；舊客戶端（不帶 client_id）行為不變；
 // 寄信失敗不記 client_id（重試照常寄）；扇出時 client_id 只記在回傳的那一列；語音旗標照舊；權限；lookup。
 // 沒裝 @electric-sql/pglite 時只跑靜態部分。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +36,7 @@ const C1 = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const C2 = '1a8fad5b-d9cb-469f-a165-70867728950e'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.messages(id uuid primary key default gen_random_uuid(), fanout_id uuid, from_node text, from_agent text, to_node text, to_agent text,
       body text, voice boolean not null default false);
@@ -137,3 +138,6 @@ test('實跑：回復檔乾淨移除兩支函式、索引與欄位', { skip }, a
   assert.equal(Number((await q(`select count(*) n from pg_proc where proname in ('asn_relay_send_idem', 'asn_relay_send_lookup')`))[0].n), 0)
   assert.equal(Number((await q(`select count(*) n from information_schema.columns where table_name = 'messages' and column_name = 'client_id'`))[0].n), 0)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

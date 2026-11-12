@@ -1,5 +1,6 @@
 // 橋的回信寄件匣存檔壞了，通知本人（20261112900000_outbox_bad_notice.sql，Yooliang/asn#1249）。
 // 靜態：security definer＋search_path 空、只授權 service_role、固定內文、限頻參數、down 檔。實跑（pglite，沒裝就略過）。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,7 +31,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 
 async function boot(sql) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, status text default 'active', owner_user uuid);
     create table relay.sent(node text, topic text, body text, max_n int, win text);
@@ -97,3 +98,6 @@ test('實跑：down 檔跑下去函式就不見', { skip }, async () => {
   assert.equal(n, 0)
   await assert.rejects(() => call('H'), /does not exist/)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

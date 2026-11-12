@@ -2,6 +2,7 @@
 // 1. 靜態檢查：只給 service_role、security definer＋search_path ''、新欄位全部可空、舊參數呼叫相容。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，要測的人自己 `npm i --no-save @electric-sql/pglite`），
 //    在記憶體內的 Postgres 套用 migration，逐條跑「以人寄出、扇出、各自 ack、AI 看到同一個人、往來記錄、附件跟著走」；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -43,7 +44,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text);
     create table relay.nodes(id text primary key, tenant_id uuid not null, status text default 'active', role text default 'member',
@@ -235,3 +236,6 @@ test('實跑（pglite）：附件跟著扇出——複本查得到、帳號名�
   assert.equal((await q('select public.irori_relay_attach_access($1,$2) r', ['W', att2.id]))[0].r.path, 'p/b.webp')
   assert.deepEqual((await q('select public.irori_relay_attach_access($1,$2) r', ['X', att2.id]))[0].r, { error: 'not_found' })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

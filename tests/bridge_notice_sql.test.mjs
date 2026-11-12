@@ -1,6 +1,7 @@
 // 通知集中 PR-D（20261111110000_bridge_notice.sql，#848）：橋通知由後台以「ASN 通知」寄出。
 // 涵蓋：授權、只能回覆寄給本節點 24 小時內的信、收件人取自原信、原信是通知不回、跨帳號回 cross_account、
 // 內文清控制字元與長度、第一行加設備名、kind 寫在每一列、每封原信最多 3 封、每小時 120 封。沒裝 @electric-sql/pglite 時只跑靜態部分。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -29,7 +30,7 @@ const T1 = 'cccccccc-0000-0000-0000-000000000001'
 const FN = 'public.asn_relay_send_bridge_notice'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, owner_name text);
     create table relay.nodes(id text primary key, name text, machine text, kind text, platform text, status text default 'active', owner_user uuid,
@@ -168,3 +169,6 @@ test('實跑（pglite）：同一封原信最多回 3 封；每小時 120 封；
   await q(`update relay.messages set created_at = now() - interval '2 hours' where from_node = 'H' and kind = 'notice:bridge'`)
   assert.equal((await call(q, 'H', await orig(q, 'P', 'H'), 'x')).notify, 'sent', '過了一小時重新計')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

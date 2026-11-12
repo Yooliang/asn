@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用 account_me、owner_sender_display 與本 migration，
 //    驗：只帶 p_node 的舊呼叫行為不變（仍回最舊 50 封）；帶排除清單時略過那些視窗的信、後面的新信進得來；
 //    to_agent 為空的信永遠保留；排除的信不被設 delivered_at、不被 ack；沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +29,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text, owner_name text not null default '朋友');
     create table relay.nodes(id text primary key, tenant_id uuid not null, status text default 'active', role text default 'member',
@@ -94,3 +95,6 @@ test('實跑（pglite）：空陣列＝不排除；排除清單只影響這一�
   assert.equal((await q(`select jsonb_array_length(public.irori_relay_inbox('H', array['H-ASN'])) n`))[0].n, 1)
   assert.equal((await q(`select jsonb_array_length(public.irori_relay_inbox('H')) n`))[0].n, 2)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

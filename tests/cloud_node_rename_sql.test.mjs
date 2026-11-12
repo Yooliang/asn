@@ -2,6 +2,7 @@
 // 靜態檢查＋pglite 實跑（`npm i --no-save @electric-sql/pglite`，沒裝就略過實跑）。
 // 實跑驗：只改自己名下的雲端節點；別人的、電腦、已撤銷、不存在一律 not_found；名字規則；群組顯示名只在等於舊名時跟著改；
 //         bot 成員不動；同名不寫紀錄；有寫 account_events。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -25,7 +26,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, owner_user uuid, status text default 'active', created_via text);
     create table relay.room_members(room_id text, member text, display_name text, primary key (room_id, member));
@@ -66,3 +67,6 @@ test('實跑：群組顯示名等於舊名才跟著改；空的與自訂的不�
   assert.deepEqual(await call(U1, 'c1', '雲端'), { ok: true, name: '雲端', changed: false }, '同名不改')
   assert.equal((await db.query('select count(*)::int as n from relay.account_events')).rows[0].n, 1, '同名不寫紀錄')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

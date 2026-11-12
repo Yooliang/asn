@@ -2,6 +2,7 @@
 // 1. 靜態：只加可空欄位與一支函式、只授權 service_role、security definer、search_path 空、回復檔拿掉兩者。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：只動得到自己的節點、值被夾在 now() 到 now()+8 天、可以清成 null、停用或不存在的節點動不到；
 //    暫停開始時寄一封給擁有者（內文、reply=no），延長或重複設值不再寄，設備名不合或擁有者核對不過只設時間不寄，每小時最多 3 封。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +36,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const OWNER = 'bbbbbbbb-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid, name text);
     create table relay.messages(id uuid default gen_random_uuid() primary key, fanout_id uuid, from_node text, from_agent text, to_node text, body text, expects_reply boolean, created_at timestamptz default now());
@@ -131,3 +132,6 @@ test('實跑（pglite）：寄信失敗回 notify=failed 但時間照設；到�
   assert.equal((await set(db, 'H', ahead(1), 1)).notify, 'sent')
   assert.equal((await msgs(db, 'H')).length, 2)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

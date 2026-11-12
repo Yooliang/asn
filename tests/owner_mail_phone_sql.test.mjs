@@ -1,5 +1,6 @@
 // 寄給本人的信，手機沒開 App 時也留一列（20261104190000_owner_mail_phone.sql）。
 // 回復檔是正式庫上一版的函式：其他節點的行為用它跑同一組情境對照。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -23,7 +24,7 @@ const O = 'bbbbbbbb-0000-0000-0000-000000000001'
 const ALIAS = 'u:bbbbbbbb0000'
 
 async function setup(sql) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text, owner_name text);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, role text, platform text, bell_topic text, created_at timestamptz default now());
@@ -121,3 +122,6 @@ test('其他節點行為不變：沒有手機時，新舊函式結果逐項相�
   }
   assert.deepEqual(await scenario(mig), await scenario(down))
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

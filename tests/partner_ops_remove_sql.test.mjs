@@ -2,6 +2,7 @@
 // 1. 靜態檢查：只擴大動作清單、不改舊值；函式本體與上一版（20261023100000 restart）只差在動作清單多了 remove。
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）先套原本的 partner_ops，再套這一版：
 //    remove 收得下、舊動作照常、不認得的動作照樣擋。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,7 +29,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 test('實跑（pglite）：remove 收得下並寫進資料表；restart、close 照常；不認得的動作照樣擋', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, launcher jsonb, bell_topic text, last_seen_at timestamptz default now());
     create table relay.partners(partner_id text primary key, tenant_id uuid, node text, current_name text, current_session text, engine text, updated_at timestamptz default now());
@@ -55,3 +56,6 @@ test('實跑（pglite）：remove 收得下並寫進資料表；restart、close 
   assert.equal((await op('小文', 'bogus')).error, 'bad_request')
   await assert.rejects(db.query("insert into relay.partner_ops(tenant_id, requested_by, node, name, op) values ($1,'P','H','x','bogus')", [T1]), /partner_ops_op_check/, '資料表的檢查條件也擋')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

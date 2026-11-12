@@ -5,6 +5,7 @@
 //    依序套用第一期與第二期 migration：改名後寄舊名改投新名、名字有人用不改投、過了轉寄期／別台不改投、
 //    指定接班（沿用夥伴 ID、併 session、信上欄位改指、前任視窗還開著拒絕、沒簽章／不是你的拒絕）、跨設備接班、
 //    往來記錄以帳號＋夥伴 ID 查（改名前後都拿得到、別租戶的夥伴 ID 不認）、名單帶 partner_id。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -53,7 +54,7 @@ const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, kind text, machine text,
       last_seen_at timestamptz, avatar text, avatar_updated_at timestamptz);
@@ -234,3 +235,6 @@ test('實跑（pglite）：名單 irori_relay_list 的 agents 帶 partner_id；�
   assert.deepEqual((await one('select public.irori_relay_partner_list($1,$2) r', [U2, 'N1'])).r, { error: 'forbidden' })
   assert.deepEqual((await one('select public.irori_relay_partner_list($1,$2) r', [null, 'N1'])).r, { error: 'forbidden' })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

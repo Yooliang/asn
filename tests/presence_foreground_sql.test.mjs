@@ -1,6 +1,7 @@
 // #1281：在線列多一欄 fg_at（最後一次前景），推播判斷只看它（migration 20261112700000_presence_foreground.sql）。
 // 靜態：交易內、只給 service_role、簽章只剩一個、push_targets 只看 fg_at、回復檔還原。
 // 實跑（要 pglite）：true／false／不帶旗標的寫法、回填、push_targets 與名單顯示各看各的。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -66,7 +67,7 @@ const SEED = `
 
 // upTo：只套到這支 migration 之前（測升級回填用）
 async function boot(upTo = null) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(SETUP)
   for (const f of files) { if (upTo && f >= upTo) break; await db.exec(read(f)) }
   await db.exec(SEED)
@@ -213,3 +214,6 @@ test('回復檔實跑：套 up 再套 down，回到舊狀態（5 參數版可呼
   await db.exec(read(MIG))
   assert.ok((await row(db, PH)).fg_at, 'up 再套一次：fg_at 回填')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

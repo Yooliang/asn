@@ -7,6 +7,7 @@
 //    - 看不到加入前訊息的人：被引用的訊息在他加入之前就讀不到引用（不外洩）
 //    - 別租戶的原作者對讀者是 x: 對外代號，不含節點代號
 // 3. 還原驗證：拿掉「自動 @」或「加入前不外洩」的判斷，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,7 +42,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -168,3 +169,6 @@ test('還原驗證：拿掉自動 @ 或加入前不外洩的判斷，對應測�
   const r2 = await human(leak, room2, '回覆舊訊息', { reply: early.seq })
   assert.ok(msgOf(await readAs(leak, { node: Q2, room: room2, signed: U2 }), r2.seq).reply_to, '拿掉判斷後引用就外洩了＝守門測試有效')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

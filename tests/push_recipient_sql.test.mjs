@@ -1,6 +1,7 @@
 // 推播收件人查詢（migration 20261109110000_push_recipient.sql，#797 PR②）。
 // 靜態：交易內、只新增兩個只讀函式、只給 service_role、不改既有函式、不回權杖或信件內容。
 // 實跑（要 pglite）：寄給本人的信回信上的收件人；不是這台寄的信回空；夥伴等待通知的收件人是節點擁有者；停用節點回空；權限。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +33,7 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001', T2 = 'bbbbbbbb-0000-0000-0000
 const PC = 'wrk9b2', PH = 'phn1a1', OTHER = 'qqq3c4', GONE = 'gon5e5'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -88,3 +89,6 @@ test('權限：anon、authenticated 碰不到', { skip }, async () => {
     await db.exec('reset role')
   }
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

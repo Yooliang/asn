@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 先套用夥伴 ID migration 再套用這支：
 //    封存／取消封存（簽章、擁有關係、同租戶、保護名單、夥伴 ID 與「節點＋名字」兩種鍵）、名單帶 archived、
 //    自動解除（離線封存後重新回報、寄信來；在線封存時重新回報不解除）。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -58,7 +59,7 @@ const T1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, kind text, machine text,
       avatar text, avatar_updated_at timestamptz, last_seen_at timestamptz default now());
@@ -171,3 +172,6 @@ test('實跑（pglite）：解除的觸發器壞掉也不影響寄信', { skip }
   await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','小文','P','小良','hi')`)
   assert.equal((await q('select count(*)::int c from relay.messages'))[0].c, 1)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

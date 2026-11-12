@@ -2,6 +2,7 @@
 // 1. 靜態：先 drop 六參數舊版再建七參數版（不並存）、p_before 預設 null、授權只給 service_role、其餘條件沒被動到。
 // 2. 實跑（需要 `npm i --no-save @electric-sql/pglite`，沒裝就略過）：舊呼叫（五參數、沒帶 before）結果不變；
 //    帶 before 只回更早的最近 N 則；before 剛好等於某則的時間不含那則；before 之前沒信回空；扇出群組照樣一列；函式只剩一個。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -32,7 +33,7 @@ const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text);
     create table relay.partners(partner_id text, tenant_id uuid);
@@ -106,3 +107,6 @@ test('實跑（pglite）：帶 before 仍受權限檢查（別人的節點 forbi
   const r = (await q('select public.asn_chat_history($1,$2,$3,$4,$5,null,$6) r', [U2, 'H', 'M', '小文', 10, A(5)]))[0].r
   assert.deepEqual(r, { error: 'forbidden' })
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -1,5 +1,6 @@
 // 終端服務停了也要通知（20261112200000_mux_down_empty.sql）：p_count = 0 用新句型，1～100 一字不改。
 // 靜態：security definer＋search_path 空、只授權 service_role；回復檔逐字等於通知集中那一版。實跑（pglite，沒裝就略過）。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const A = 'aaaaaaaa-0000-0000-0000-00000000000a'
 
 async function boot(sql) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, status text default 'active', owner_user uuid);
     create table relay.sent(node text, topic text, body text);
@@ -79,3 +80,6 @@ test('實跑：監看看不到終端服務的通知＝固定句型；查不到�
   assert.deepEqual(await last(), { topic: 'mux_blind', body: '30家用：ASN 看不到終端服務的狀態\n已經約 5 分鐘看不到，這段期間夥伴的窗格出事時不會自動接回。請重開 ASN；重開後還是這樣，請回報。' })
   assert.equal((await blindCall('沒有這台')).error, 'forbidden')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

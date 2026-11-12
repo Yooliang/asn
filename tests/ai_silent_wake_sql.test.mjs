@@ -6,6 +6,7 @@
 //    - 發言時的檢查（room_ai_chain_blocked）也把靠判斷叫醒的輪算進去
 //    - wake_set 回傳存下的版本（先到先得，輸的人拿到第一份）；lim 標記讀出來是 limited:true；別租戶讀者只看到 x: 代號、不含節點代號
 // 3. 還原驗證：拿掉「wake_info 有通過者也算一輪」、「截止序號」，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`, C = `${W1}~監看`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -194,3 +195,6 @@ test('還原驗證：拿掉「wake_info 有通過者也算一輪」或「截止�
   const a1 = await aiPost(db, room, A, '一', [B]); await aiPost(db, room, B, '二', [A])
   assert.notEqual((await chain(db, { room, seq: a1.seq })).count, 0, '拿掉截止序號後會多算自己與後面的（原樣是 0）＝截止測試會紅')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

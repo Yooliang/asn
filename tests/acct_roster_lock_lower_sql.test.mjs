@@ -3,6 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
 //    函式本體跟 20261029100000 版只差排序那一處（pg_get_functiondef 比對）；回復後跟 20261029100000 版逐字相同；權限不變；
 //    大小寫混合的 email 兩種順序送進來結果相同（目前整份 bad_request、什麼都不寫）；全小寫兩種順序結果相同。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -48,7 +49,7 @@ const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', owner_user uuid, bell_topic text, unique (tenant_id, id));
@@ -123,3 +124,6 @@ test('實跑（pglite）：大小寫混合的 email 兩種順序結果相同（�
   assert.deepEqual(strip(lower[0].saved), strip(lower[1].saved))
   assert.deepEqual(strip(lower[0].saved).map(x => [x[0], x[1], x[4][0][1]]), [['claude', 'a@x.test', 20], ['claude', 'b@x.test', 30], ['codex', 'c@x.test', 40]])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

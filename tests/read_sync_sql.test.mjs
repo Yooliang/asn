@@ -2,6 +2,7 @@
 // 1. 靜態：只給 service_role、security definer＋search_path ''、RLS 開且沒有 policy、本人簽章與擁有關係、只往前（greatest）、函式用 asn_relay_ 新名。
 // 2. 實跑：有安裝 @electric-sql/pglite 時（`npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用這支：
 //    簽章／擁有關係、壞格式整批不寫、只往前、帳號之間互不看見、多台設備合併、鍵數上限、未來時間夾住。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +39,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid);
     create function public.asn_user_owns_node(p_user uuid, p_node text) returns boolean language sql stable as
@@ -92,3 +93,6 @@ test('實跑（pglite）：壞格式整批不寫；未來時間夾住；鍵數�
   const m = (await sync('PH', U1, [])).marks
   assert.ok(!('bulk2' in m) && 'bulk3' in m, '超過 90 天沒更新的清掉')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -3,6 +3,7 @@
 // 2. 實跑檢查：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）在記憶體內的 Postgres 套用 migration：
 //    下令（簽章、擁有關係、同租戶、名單、保護名單、開放、改名撞名、模型字元、忙碌、每小時上限）、取走（只拿自己節點、逾時標失敗、帶下令設備名）、
 //    回報（只改自己節點、taken 才能改、4KB 上限）、查進度（只回自己租戶）。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -47,7 +48,7 @@ const T2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 const LAUNCHER = '{"profiles":[{"id":"claude"}],"cwd_allow":["x"]}'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, launcher jsonb, bell_topic text, last_seen_at timestamptz default now());
     create table relay.partners(partner_id text primary key, tenant_id uuid, node text, current_name text, current_session text, engine text, updated_at timestamptz default now());
@@ -218,3 +219,6 @@ test('實跑（pglite）：查進度——要簽章、只回自己租戶、逾�
   assert.deepEqual((await list(U1, [a.id])).ops.map(o => [o.status, o.detail]), [['failed', 'expired']])
   await db.close?.()
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

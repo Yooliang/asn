@@ -2,6 +2,7 @@
 // 1. 靜態：只加可為 null 的欄位與函式（不改舊值）、新函式 security definer、search_path 空、只授權 service_role、沒有舊名包裝。
 // 2. 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）套用 migration：
 //    格式不對的丟掉、排序去重、最多 64 個、空陣列存 '{}'、null 當空、只改自己節點、寫入時間。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -27,7 +28,7 @@ try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 test('實跑（pglite）：格式過濾、排序去重、最多 64 個、只改自己節點、寫入時間；沒回報過的節點維持 null', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', name text);
     insert into relay.nodes(id, name) values ('A','桌機'), ('B','舊版設備'), ('X','停用'); update relay.nodes set status = 'revoked' where id = 'X';`)
@@ -77,7 +78,7 @@ test('靜態（限流版）：只換函式、security definer、search_path 空�
 })
 
 test('實跑（pglite，限流版）：同清單一小時內不寫、清單變了就寫、超過一小時同清單會寫、不存在／停用回 forbidden；權限沒放寬；回復後每次都寫', { skip }, async () => {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', name text);
     insert into relay.nodes(id, name) values ('A','桌機'), ('B','另一台'), ('X','停用'); update relay.nodes set status = 'revoked' where id = 'X';`)
@@ -142,3 +143,6 @@ test('實跑（pglite，限流版）：同清單一小時內不寫、清單變�
   assert.ok((await row('A')).used_legacy_env_at > t3, '回復後同清單也寫')
   assert.equal(await can('anon'), false, '回復後權限一樣')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

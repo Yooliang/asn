@@ -3,6 +3,7 @@
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：先套原本的帳號切換 migration（函式名換成 asn_relay_），
 //    證明舊版只收 claude（重現）；套新版後 claude／codex 都收、其他廠商與多餘欄位被擋或丟掉；
 //    切換不能拿 codex 帳號當目標；舊式只含 claude 的回報照舊能用。沒裝就略過。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -33,7 +34,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
 const T = 'aaaaaaaa-0000-0000-0000-000000000001'
 async function setup(m) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key);
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', role text default 'member', bell_topic text, unique (tenant_id, id));
@@ -77,3 +78,6 @@ test('實跑（pglite）：切換只認 claude 帳號，不能拿 codex 帳號�
   assert.deepEqual(await sw('c@x.test'), { error: 'unknown_account' })
   assert.ok((await sw('a@x.test')).id)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

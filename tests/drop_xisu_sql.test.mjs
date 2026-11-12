@@ -2,6 +2,7 @@
 // 1. 靜態：不用 cascade／truncate、先備份再改寫再刪、整支一個交易、寄信函式除 XISU 寫死邏輯外與前一版逐字相同。
 // 2. 實跑（pglite，帶真實外鍵）：刪除前後本人往來記錄筆數不變、歷史列都還在（改寫到接手設備）、備份表完整、
 //    沒有外鍵錯誤、回信路徑正確（寄給 XISU／XISU/u:xxx／u:xxx／照收信欄位回信都扇出給本人）、可重跑。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -50,7 +51,7 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.tenants(id uuid primary key, owner_user uuid, character_node text, owner_name text not null default '朋友');
     create table relay.nodes(id text primary key, tenant_id uuid not null, status text default 'active', role text default 'member',
@@ -199,3 +200,6 @@ test('實跑（pglite）：可重跑；沒有可接手設備時整個交易失�
   assert.equal((await env2.q(`select count(*) n from relay.nodes where id = 'XISU'`))[0].n, 1, '失敗要整個還原')
   assert.equal((await env2.q(`select count(*) n from relay.nodes`))[0].n, before)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

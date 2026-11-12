@@ -2,6 +2,7 @@
 // 靜態檢查＋pglite 實跑（`npm i --no-save @electric-sql/pglite`，沒裝就略過實跑）。
 // 驗：舊報法不帶三欄＝kind window／receivable true／model 空；新欄位存取與壞值當預設；list 兩段都帶；
 //     投遞到 receivable=false 的條目回 not_receivable，其他（視窗、沒登記的名字）照舊；send 包裝不改簽名、舊呼叫照常。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -24,7 +25,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 async function setup() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', can_invite boolean default true, can_roster boolean default true,
       name text, kind text, machine text, avatar text, avatar_updated_at timestamptz, claude_mod jsonb, claude_mod_at timestamptz,
@@ -80,3 +81,6 @@ test('實跑：投遞拒收 receivable=false；視窗、沒登記的名字、不
   await roster(db, [{ name: 'srv', receivable: true }])
   assert.ok((await send(db, 'S', 'srv')).id)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

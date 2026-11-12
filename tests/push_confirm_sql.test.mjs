@@ -1,6 +1,7 @@
 // 推播新增「需要你確認」（migration 20261113200000_push_confirm.sql）。
 // 靜態：push_targets 與上一版（20261112700000）逐字相同，只差允許的種類清單；回復檔還原上一版；新函式只給 service_role。
 // 實跑（要 pglite）：confirm 種類可用、未知種類拒絕、前景規則與 owner_mail 一致、節點名查詢、權限、回復。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -74,7 +75,7 @@ const SEED = `
       ('${PH}', '手機', 'k2', 'bell-ph', 'member', '${T1}', '${U1}', 'active', '手機', 'android'),
       ('${GONE}', '停用的', 'k4', 'bell-g', 'member', '${T1}', '${U1}', 'disabled', '電腦', 'windows');`
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(SETUP)
   for (const f of files) await db.exec(read(f))
   await db.exec(SEED)
@@ -142,3 +143,6 @@ test('回復檔實跑：confirm 被拒、node_name 消失、owner_mail 照常、
   await clearSent(db)
   assert.equal((await targets(db, 'confirm')).targets.length, 1)
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

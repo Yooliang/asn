@@ -5,6 +5,7 @@
 //    - 真人沒有 online／engine 欄位；既有欄位（label、display_label…）不變
 //    - 外部帳號的讀者也拿得到 AI 的 online／engine，但輸出裡掃不到別人的節點代號與設備名
 // 3. 還原驗證：把 3 分鐘改成 3 小時、或讓真人也帶欄位，對應測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -39,7 +40,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -156,3 +157,6 @@ test('實跑：pi 視窗帶 provider（提供者小寫）；沒有斜線、字�
   await db.exec(`update relay.roster set engine = 'claude', model = 'anthropic/claude-x' where node = '${W1}' and name = '財務'`)
   assert.ok(!('provider' in byName((await membersAs(db, { node: P1, room: r, signed: U1 })).members, '財務')), '只有 pi 才帶')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

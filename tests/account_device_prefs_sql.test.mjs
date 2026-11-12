@@ -3,6 +3,7 @@
 // 2. 實跑（需要 @electric-sql/pglite）：讀（沒設過 null）、寫、驗證（壞值 bad_request）、
 //    內容相同不動（rev／at 不變）、rev 較舊或一樣不覆蓋（stale）、2 秒內連寫不同內容 rate_limited、
 //    別人的帳號互不影響、不影響 ai_wake_limit。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -46,7 +47,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~w1`, C = `${W1}~w2`
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -132,3 +133,6 @@ test('實跑：兩個帳號互不影響；空陣列也能存（把全部清掉�
   const e = await put(db, { order: [], shown: [], removed: [], rev: 3000 }, U2)
   assert.deepEqual(e.prefs.order, []); assert.deepEqual((await get(db, U1)).prefs.order, ['a1', 'b2'])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

@@ -5,6 +5,7 @@
 //    - 一對一附件：別的帳號下載不到（照舊）
 //    - 退出群組後下載不到
 // 3. 還原驗證：把附件查詢改回「同租戶才行」，跨租戶那個測試要變紅。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -38,7 +39,7 @@ const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4', R3 = 'rrr5e6'
 const sha = s => createHash('sha256').update(s).digest('hex')
 
 async function boot({ mutate } = {}) {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -133,3 +134,6 @@ test('還原驗證：附件查詢改回「同租戶才行」→ 外部成員下�
   assert.equal((await access(db, P1)).path, 'p/a.pdf')
   assert.equal((await access(db, Q2)).error, 'not_found', '被改回去：外部成員下載不到（正式版本不是這樣）')
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

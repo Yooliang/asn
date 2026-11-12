@@ -2,6 +2,7 @@
 // 1. 靜態：三個既有函式只多加行、原有的行逐字不變（逐行比對）；回復腳本把它們換回原文；新函式只授權 service_role。
 // 2. 實跑（pglite，沒裝就略過）：只改自己節點的 platform 且不碰機器橋的 launch_closed_reason；手機不能被要求安裝並登入；
 //    收信卡住監控不看手機；平台是空的（舊版）照舊當電腦。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -47,7 +48,7 @@ const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 const U1 = '11111111-1111-1111-1111-111111111111'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, name text, machine text, kind text, status text default 'active', owner_user uuid, last_seen_at timestamptz,
       platform text, launch_closed_reason text, inbox_hold_until timestamptz);
@@ -109,3 +110,6 @@ test('實跑：收信卡住監控不看手機（platform 是 android／ios；原
   assert.equal(r.nodes, 2, '只看 PC 與平台是空的 OLD')
   assert.deepEqual((await q('select node from relay.inbox_watch order by node')).map(x => x.node), ['OLD', 'PC'])
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

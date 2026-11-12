@@ -2,6 +2,7 @@
 // 1. 靜態：只加欄位、表與函式；新函式 security definer、search_path 空、只授權 service_role；asn_relay_list「只多兩行」（對照正式庫基準檔）。
 // 2. 實跑（pglite；沒裝略過）：只能改自己節點上的夥伴、改名後仍對得上、格式與大小在資料庫再擋一次、頻率限制、移除、
 //    停用節點不能改、取圖限同租戶、list 多出 avatar_updated_at 而舊欄位不變。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -55,7 +56,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
 const WEBP = 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAw'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     alter default privileges in schema public grant execute on functions to anon, authenticated;
     create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', name text, kind text default 'claude', machine text,
@@ -165,3 +166,6 @@ test('實跑：list 的夥伴多出 avatar_updated_at（在線、離線），沒
   const again = (await list()).find(n => n.id === 'H')
   assert.deepEqual(Object.keys(strip(again.agents[0])).sort(), Object.keys(strip(before.agents[0])).sort())
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()

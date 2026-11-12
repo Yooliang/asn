@@ -1,5 +1,6 @@
 // 設備金鑰與 TOFU 通知（0.2.8 改版：migrations 20261107100000_device_keys.sql、20261107130000_device_key_alert.sql）。
 // 靜態：交易內、函式只給 service_role、表開 RLS、沒有配對的殘留。實跑（要 pglite）：公鑰上傳、通知的文字與限流、只寄給同一個本人。
+import { track, closeAtEnd } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,7 +37,7 @@ const D = 'wrk9b2', Z = 'hom7a1', Q = 'qqq3c4'
 const FP = '0123456789abcdef'
 
 async function boot() {
-  const db = new PGlite()
+  const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
     create schema storage;
@@ -102,3 +103,6 @@ test('權限：anon、authenticated 碰不到通知函式和表', { skip }, asyn
     await db.exec('reset role')
   }
 })
+
+// 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
+closeAtEnd()
