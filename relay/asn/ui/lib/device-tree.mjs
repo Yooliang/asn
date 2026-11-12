@@ -12,7 +12,7 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceStateLine, installAction, isCloudNode, isPhoneDevice, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceStateLine, installAction, isCloudNode, isPhoneDevice, loginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -143,7 +143,9 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       // 這一家在這台的狀態（已登入／登入失效／已安裝還沒登入／沒登入／未安裝／還沒收到回報）：給「設備」頁用，帳號頁不看
       const st = vendorState({ isSelf, rep, accounts: list, installed: installedOf(k), now })
       const action = installAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state })
-      return { key: k, label: vendorLabel(k), state: st.state, stateText: st.text, ...(st.reason ? { stateReason: st.reason } : {}), ...(action ? { action } : {}), ...note, ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
+      // 從手機替這台登入（只登入、不安裝）：別台電腦上已裝未登入的 Codex
+      const login = loginAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state })
+      return { key: k, label: vendorLabel(k), state: st.state, stateText: st.text, ...(st.reason ? { stateReason: st.reason } : {}), ...(action ? { action } : {}), ...(login ? { login } : {}), ...note, ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })
     // 主要幾家 AI 這台沒用到的：本機偵測得到就說未安裝；別台看啟動器有沒有回報，沒回報就老實說不確定
     const have = new Set(vendors.map(v => v.key))

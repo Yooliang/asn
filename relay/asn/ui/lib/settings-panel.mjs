@@ -504,7 +504,7 @@ export const SettingsPanel = {
             <label class="chk"><input type="checkbox" :checked="p.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
             <small v-if="p.inputNoAsk && p.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
             <small v-if="p.inputNoAsk && !p.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
-            <label class="chk"><input type="checkbox" :checked="p.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
+            <label class="chk"><input type="checkbox" :checked="p.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: p.node, on: $event.target.checked }); $event.target.checked = p.loginOk" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
             <small v-if="p.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
             <form class="pair-rename" v-if="renameNode === p.node" @submit.prevent="renameSave">
               <input type="text" maxlength="32" autocomplete="off" v-model="renameText" :aria-label="KNOWN.renameLabel" />

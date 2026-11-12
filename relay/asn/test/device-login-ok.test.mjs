@@ -28,3 +28,8 @@ test('設定頁：勾選框在每一台底下，送 known-login-ok', () => {
   const src = read('../ui/lib/settings-panel.mjs')
   assert.match(src, /act\('known-login-ok', \{ node: p\.node, on: \$event\.target\.checked \}\)/)
 })
+
+test('設定頁：按了勾選框先放回目前存的狀態，確認框按「先不要」後不會留著打勾（要按允許、重讀後才打勾）', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
+  assert.match(src, /act\('known-login-ok', \{ node: p\.node, on: \$event\.target\.checked \}\); \$event\.target\.checked = p\.loginOk"/)
+})

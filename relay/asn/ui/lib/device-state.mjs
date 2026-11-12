@@ -177,6 +177,21 @@ export function installAction({ vendor, isSelf = false, phone = false, online = 
   return { kind: 'remote' }
 }
 
+/** 手機能替別台電腦登入的廠商（裝置碼型；Grok 等驗證過的安裝上線後再加） */
+export const LOGIN_VENDOR_KEYS = Object.freeze(['codex'])
+
+/**
+ * 這家 AI 在這台設備上有沒有「從手機替這台登入」可以按（只登入，不安裝）。
+ * → null（沒有）或 { kind: 'remote' }。
+ * 只給別台電腦：在線、ASN 在線、確定已安裝但沒登入（或登入失效）。不知道有沒有裝、未安裝、已登入、沒收到回報的都不給
+ */
+export function loginAction({ vendor, isSelf = false, phone = false, online = false, asnOnline = true, state = '' } = {}) {
+  if (!LOGIN_VENDOR_KEYS.includes(vendor) || isSelf || phone) return null
+  if (![STATE.INSTALLED_LOGGED_OUT, STATE.LOGIN_FAILED].includes(state)) return null
+  if (!online || asnOnline !== true) return null
+  return { kind: 'remote' }
+}
+
 /** 主要幾家 AI：設備卡上就算這台沒用到也要列出「未安裝／不確定」 */
 export const CORE_VENDORS = Object.freeze(['claude', 'codex', 'grok'])
 

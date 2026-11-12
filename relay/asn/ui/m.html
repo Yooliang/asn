@@ -350,7 +350,7 @@
                             <div class="m-dv-sbtns" v-if="setupSt.stage === 'done'"><button type="button" class="m-btn" @click="setupClose">{{ SETUP_TEXT.close }}</button></div>
                           </div>
                         </div>
-                        <div class="m-dv-setup" v-if="LOGIN_VENDORS[v.key] && ((showLoginButton(v.key, v.action) && loginSt.stage === 'idle') || (loginSt.node === acctCur.key && loginSt.vendor === v.key && loginSt.stage !== 'idle'))">
+                        <div class="m-dv-setup" v-if="LOGIN_VENDORS[v.key] && ((showLoginButton(v.key, v.login) && loginSt.stage === 'idle') || (loginSt.node === acctCur.key && loginSt.vendor === v.key && loginSt.stage !== 'idle'))">
                           <button type="button" class="m-btn" v-if="loginSt.stage === 'idle'" @click="loginAsk(acctCur.key, v.key)">{{ LOGIN_TEXT.button(LOGIN_VENDORS[v.key]) }}</button>
                           <div class="m-dv-confirm" role="alertdialog" :aria-label="LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key])" v-else-if="loginSt.stage === 'confirm'">
                             <b>{{ LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key]) }}</b>
