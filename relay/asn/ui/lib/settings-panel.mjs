@@ -3,6 +3,7 @@
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { TEXT as KNOWN, groupFp } from './known-peers.mjs'
+import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mjs'
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
@@ -27,12 +28,12 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'known-rename', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
   components: { LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas },
-  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
+  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'acct' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -51,9 +52,10 @@ export const SettingsPanel = {
     const removedDevs = computed(() => removedRows(allDevs.value))
     const flags = computed(() => moveFlags(devs.value, devs.value.find(d => d.self)?.key))
     const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? null)
-    const open = key => { picked.value = key; askRemove.value = false }
-    const backToList = () => { picked.value = ''; askRemove.value = false }
-    const onRow = (key, ev) => { if (ev?.target?.closest?.('.dv-row-move')) return; open(key) }
+    const view = ref(props.devView === 'info' ? 'info' : 'acct')   // 選了某台之後看哪一頁：acct＝帳號、info＝詳情
+    const open = key => { picked.value = key; view.value = 'acct'; askRemove.value = false; renaming.value = false }
+    const openInfo = key => { picked.value = key; view.value = 'info'; askRemove.value = false; renaming.value = false }
+    const backToList = () => { picked.value = ''; view.value = 'acct'; askRemove.value = false; renaming.value = false }
     const removeNow = () => { const k = curDev.value?.key; if (!k) return; act('device-remove', k); backToList() }
     // 滑鼠拖放：拖到某列的上半＝插在前面、下半＝插在後面；放開時交給樞紐存順序
     const dragKey = ref(''), overKey = ref(''), overAfter = ref(false)
@@ -113,11 +115,23 @@ export const SettingsPanel = {
       act(b.target.op, b.target.value)
     }
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
-    // 認得的電腦：改名的輸入（只在這個元件裡，存的時候才交給樞紐）
-    const renameNode = ref(''), renameText = ref('')
-    const renameStart = p => { renameNode.value = p.node; renameText.value = p.name }
-    const renameCancel = () => { renameNode.value = ''; renameText.value = '' }
-    const renameSave = () => { const node = renameNode.value; if (!node) return; act('known-rename', { node, name: renameText.value }); renameCancel() }
+    // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
+    const renaming = ref(false), renameText = ref('')
+    const renameErr = computed(() => (renameText.value.trim() === '' ? '' : deviceNameError(renameText.value)))
+    const renameStart = () => { renameText.value = curDev.value?.label ?? ''; renaming.value = true; act('device-rename-clear') }
+    const renameCancel = () => { renaming.value = false; renameText.value = ''; act('device-rename-clear') }
+    const renameSave = () => {
+      const node = curDev.value?.key
+      if (!node || deviceNameError(renameText.value)) return
+      act('device-rename', { node, name: renameText.value.trim() })
+      renaming.value = false; renameText.value = ''   // 失敗的話錯誤顯示在名字下面（renameError），不在這裡清
+    }
+    const peers = computed(() => (props.st.known && Array.isArray(props.st.known.peers) ? props.st.known.peers : []).map(p => ({ ...p, id: p.node })))   // id＝節點（畫面不直接寫 node）
+    // 只算畫面上真的畫出來的設備；已永久移除的（畫面沒有列）歸到「舊設備紀錄」，才找得到地方取消授權或忘記
+    // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」（和手機版一致）
+    const joined = computed(() => { const j = joinKnown(devs.value, peers.value); return devs.value.length ? j : { ...j, old: [] } })
+    const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
+    const oldPeers = computed(() => joined.value.old)
     const mmEmail = ref('')
     const mmKey = ref('')
     const addMinimax = () => {
@@ -126,10 +140,10 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN, QR_TEXT, groupFp, renameNode, renameText, renameStart, renameCancel, renameSave,
+    return { KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -320,15 +334,26 @@ export const SettingsPanel = {
           <template v-if="!curDev">
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
-              <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></button>
+              <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
+                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag fp" v-if="d.phone && joined.byNode[d.key]" :aria-label="KNOWN.fingerprint">{{ shortFp(joined.byNode[d.key].fingerprint) }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></span>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
                 </span>
-                <span class="dv-chev" aria-hidden="true">&rsaquo;</span>
+                <span class="dv-row-move dv-row-act" role="group" aria-label="設備內容">
+                  <button class="aero-btn" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'" @click.stop="open(d.key)">帳號</button>
+                  <button class="aero-btn" type="button" :aria-label="'查看 ' + d.label + ' 的詳情'" @click.stop="openInfo(d.key)">詳情</button>
+                </span>
               </li>
             </ul>
+            <details class="dv-old-rec" v-if="oldPeers.length">
+              <summary>舊設備紀錄（{{ oldPeers.length }}）</summary>
+              <div class="pair-row" v-for="p in oldPeers" :key="p.id">
+                <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
+                <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
+                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.id)">忘記</button></span>
+              </div>
+            </details>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.label">
             <div class="dv-dev-h">
@@ -339,19 +364,58 @@ export const SettingsPanel = {
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
-            <div class="dv-hid-act" v-if="canRemoveRow(curDev)">
-              <template v-if="!askRemove">
-                <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
-                <button class="aero-btn dv-danger" type="button" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
+            <div class="dv-info" v-if="view === 'info'">
+              <div class="dv-nameline">
+                <b class="dv-curname">{{ curDev.label }}</b>
+                <button class="aero-btn" type="button" v-if="!renaming" :disabled="st.known && st.known.busy" @click="renameStart">改名</button>
+              </div>
+              <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
+              <form class="pair-rename" v-if="renaming" @submit.prevent="renameSave">
+                <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
+                <small>所有設備都會顯示這個名字</small>
+                <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
+                <span class="pair-btns"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
+              </form>
+              <template v-if="curDev.self">
+                <p v-if="st.known && st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b> <button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-qr', !st.known.qr)">{{ st.known.qr ? QR_TEXT.hide : QR_TEXT.show }}</button></p>
+                <div class="fp-qr-box" v-if="st.known && st.known.ownFp && st.known.qr">
+                  <fp-qr-canvas :qr="st.known.qr"></fp-qr-canvas>
+                  <small>{{ QR_TEXT.note }}</small>
+                </div>
               </template>
-              <template v-else>
-                <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.label) }}</p>
-                <button class="aero-btn dv-danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
-                <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
+              <template v-else-if="curKnown">
+                <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(curKnown.fingerprint) }}</code>
               </template>
+              <small v-else>還沒連線過，連上時會記住指紋</small>
+              <p v-if="curKnown && curKnown.firstSeen">{{ KNOWN.firstSeen(curKnown.firstSeen) }}</p>
+              <template v-if="curKnown">
+                <label class="chk"><input type="checkbox" :checked="curKnown.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.inputNoAsk" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
+                <small v-if="curKnown.inputNoAsk && curKnown.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
+                <small v-if="curKnown.inputNoAsk && !curKnown.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
+                <template v-if="curDev.phone || curKnown.loginOk">
+                  <label class="chk"><input type="checkbox" :checked="curKnown.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.loginOk" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
+                  <small v-if="curKnown.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
+                </template>
+              </template>
+              <div class="dv-hid-act" v-if="canRemoveRow(curDev)">
+                <template v-if="!askRemove">
+                  <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
+                  <button class="aero-btn dv-danger" type="button" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
+                </template>
+                <template v-else>
+                  <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.label) }}</p>
+                  <button class="aero-btn dv-danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
+                  <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
+                </template>
+              </div>
+              <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
+              <template v-if="curKnown">
+                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', curKnown.id)">{{ KNOWN.forget }}</button></span>
+                <small>{{ KNOWN.forgetNote }}</small>
+              </template>
+              <p class="pair-warn" v-if="st.known && st.known.error" role="alert">{{ st.known.error }}</p>
             </div>
-            <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
-            <div :class="['dv-body', { off: !curDev.online }]">
+            <div :class="['dv-body', { off: !curDev.online }]" v-else>
               <div class="dv-empty" v-if="!curVendors.length"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h13v9H3zM1 18h17M19 8h3v11h-3z"></path></svg><span>{{ curDev.empty || '這台設備還沒有回報任何廠商' }}</span></div>
               <ul class="dv-vendors" v-else>
                 <li :class="['dv-vendor', 'v-' + v.key]" v-for="v in curVendors" :key="v.key">
@@ -489,33 +553,6 @@ export const SettingsPanel = {
           <small v-if="st.guard.blocked" class="autostart-blocked">{{ st.guard.blocked }}</small>
           <small v-if="st.guard.paused" class="guard-paused" role="status">{{ st.guard.paused }} <button class="aero-btn" type="button" :disabled="st.guard.busy" @click="act('guard-resume')">恢復自動重開</button></small>
         </template>
-        <section class="set-card" aria-label="認得的電腦" v-if="st.known">
-          <h3 class="set-h">{{ KNOWN.title }}</h3>
-          <small>{{ KNOWN.lead }}</small>
-          <p v-if="st.known.ownFp"><b>{{ KNOWN.ownFp(st.known.ownFp) }}</b> <button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-qr', !st.known.qr)">{{ st.known.qr ? QR_TEXT.hide : QR_TEXT.show }}</button></p>
-          <div class="fp-qr-box" v-if="st.known.ownFp && st.known.qr">
-            <fp-qr-canvas :qr="st.known.qr"></fp-qr-canvas>
-            <small>{{ QR_TEXT.note }}</small>
-          </div>
-          <small v-if="!st.known.peers.length">{{ KNOWN.none }}</small>
-          <div class="pair-row" v-for="p in st.known.peers" :key="p.node">
-            <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
-            <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
-            <label class="chk"><input type="checkbox" :checked="p.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: p.node, on: $event.target.checked })" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
-            <small v-if="p.inputNoAsk && p.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
-            <small v-if="p.inputNoAsk && !p.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
-            <label class="chk"><input type="checkbox" :checked="p.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: p.node, on: $event.target.checked }); $event.target.checked = p.loginOk" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
-            <small v-if="p.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
-            <form class="pair-rename" v-if="renameNode === p.node" @submit.prevent="renameSave">
-              <input type="text" maxlength="32" autocomplete="off" v-model="renameText" :aria-label="KNOWN.renameLabel" />
-              <small>{{ KNOWN.renameHint }}</small>
-              <span class="pair-btns"><button class="aero-btn" type="submit" :disabled="st.known.busy">{{ KNOWN.renameSave }}</button><button class="aero-btn" type="button" @click="renameCancel">{{ KNOWN.renameCancel }}</button></span>
-            </form>
-            <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="renameStart(p)">{{ KNOWN.rename }}</button><button class="aero-btn" type="button" :disabled="st.known.busy" @click="act('known-forget', p.node)">{{ KNOWN.forget }}</button></span>
-          </div>
-          <small v-if="st.known.peers.length">{{ KNOWN.forgetNote }}</small>
-          <p class="pair-warn" v-if="st.known.error" role="alert">{{ st.known.error }}</p>
-        </section>
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <label class="chk"><input type="checkbox" :checked="st.bridge.autoResume" :disabled="st.bridge.busy" @change="act('bridge-auto-resume', $event.target.checked)" aria-label="電腦重開後自動接回夥伴" /><span>電腦重開後自動接回夥伴</span></label>

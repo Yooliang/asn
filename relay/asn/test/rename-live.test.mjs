@@ -51,7 +51,11 @@ test('applyRename：info、核心、暱稱一起換，不需要重載', () => {
 })
 
 test('守門：改名流程不得 location.reload()，且走 applyRename、info 是響應式', () => {
-  for (const f of ['list.js', 'm.js']) {
+  // 電腦版左上角的名字改成設備改名（device_rename），不再動視窗名
+  const desk = fs.readFileSync(path.join(ui, 'list.js'), 'utf8')
+  assert.ok(!desk.includes("invoke('set_window_name'") && !/location\.reload/.test(desk.slice(desk.indexOf('const commitNick'), desk.indexOf('const commitNick') + 900)))
+  assert.match(desk, /await renameDevice\(info\.node, want\)/)
+  for (const f of ['m.js']) {
     const src = fs.readFileSync(path.join(ui, f), 'utf8')
     const lines = src.split(/\r?\n/)
     const i = lines.findIndex(l => l.includes("invoke('set_window_name', { name: want })"))

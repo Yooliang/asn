@@ -24,12 +24,13 @@ test('列表：只有明確的 true 才算允許；沒帶（舊版）就是不�
   assert.match(KNOWN.loginOkWarn, /只勾你自己的手機/)
 })
 
-test('設定頁：勾選框在每一台底下，送 known-login-ok', () => {
+test('設定頁：勾選框在手機的詳情頁，送 known-login-ok（手機才能勾；已經勾過的不論哪一台都看得到、取消得掉）', () => {
   const src = read('../ui/lib/settings-panel.mjs')
-  assert.match(src, /act\('known-login-ok', \{ node: p\.node, on: \$event\.target\.checked \}\)/)
+  assert.match(src, /act\('known-login-ok', \{ node: curKnown\.id, on: \$event\.target\.checked \}\)/)
+  assert.match(src, /<template v-if="curDev\.phone \|\| curKnown\.loginOk">\s*<label class="chk"><input type="checkbox" :checked="curKnown\.loginOk"/)
 })
 
 test('設定頁：按了勾選框先放回目前存的狀態，確認框按「先不要」後不會留著打勾（要按允許、重讀後才打勾）', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(src, /act\('known-login-ok', \{ node: p\.node, on: \$event\.target\.checked \}\); \$event\.target\.checked = p\.loginOk"/)
+  assert.match(src, /act\('known-login-ok', \{ node: curKnown\.id, on: \$event\.target\.checked \}\); \$event\.target\.checked = curKnown\.loginOk"/)
 })

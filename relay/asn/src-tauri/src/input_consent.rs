@@ -40,12 +40,16 @@ fn clean(s: &str, max: usize) -> String {
     s.chars().map(|c| if bad(c) { ' ' } else { c }).collect::<String>().trim().chars().take(max).collect()
 }
 
-/// 框上要顯示的「誰」：和本機記住的一樣（Same）就用本機記住的名字；其他情況（第一次）才用後台給的，並標示第一次連線
+/// 框上要顯示的「誰」：名字一律是後台的設備名（#1388：每台只有一個名字）。這次請求帶的就是後台現在的名字，優先用它；
+/// 沒帶才用本機最近一次記下的。和本機記住的公鑰不一樣（第一次）就標示第一次連線。
+/// 名字不可信：像指紋或含「指紋」的名字當成沒有名字（顯示「未命名的電腦」＋完整指紋），名字後面一律接指紋
 pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str, tofu: Tofu) -> Who {
     let local = if tofu == Tofu::Same { known.peer(node).map(|p| p.name.as_str()) } else { None };
     let peer = if tofu == Tofu::Same { known.peer(node) } else { None };
+    let raw = if backend_name.trim().is_empty() { local.unwrap_or("") } else { backend_name };
+    let name = clean(raw, NAME_MAX);
     Who {
-        name: clean(local.unwrap_or(backend_name), NAME_MAX),
+        name: if crate::device_id::display_name_ok(&name) { name } else { String::new() },
         fp8: fingerprint(sign_pub).chars().take(8).collect(),
         fp_full: fp_grouped(sign_pub),
         first: local.is_none(),
@@ -80,7 +84,7 @@ pub fn ask_text(who: &Who, window: &str) -> String {
     };
     // 按了允許之後會不會再問（0.2.15）：設成每次都問的就照樣每次問
     let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到設定 → 認得的電腦取消勾選。" };
-    format!("{name}（指紋 {fp}）要在這台的「{window}」打字。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？")
+    format!("{name}（指紋 {fp}）要在這台的「{window}」打字。名字可以從任何一台設備改，請看指紋認是哪一台。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？")
 }
 
 /// 紅條（有人在看／在打字）上的「誰」：名字＋指紋前 8 碼，第一次連線另外標示。畫面會在外面加「」
@@ -452,13 +456,19 @@ mod tests {
     }
 
     #[test]
-    fn 已記住的電腦_框上用本機記住的名字_不用後台這次給的() {
-        let w = who_of(&known_d(), "d", "假裝是工作機", PUB, Tofu::Same);
-        assert_eq!((w.name.as_str(), w.first), ("家用機", false));
+    fn 已記住的電腦_框上用後台現在的設備名_沒帶才用本機記下的_像指紋的當未命名() {
+        // #1388：每台只有一個名字（後台），本人在任一台改名後這裡就跟著換；辨識靠後面的指紋
+        let w = who_of(&known_d(), "d", "改過名的工作機", PUB, Tofu::Same);
+        assert_eq!((w.name.as_str(), w.first), ("改過名的工作機", false));
         let t = ask_text(&w, "小乙");
-        assert!(t.contains("「家用機」"));
-        assert!(!t.contains("假裝是工作機"), "後台給的名字不能出現在框上");
+        assert!(t.contains("「改過名的工作機」（指紋 "), "{t}");
         assert!(!t.contains("第一次連線"));
+        assert_eq!(who_of(&known_d(), "d", "  ", PUB, Tofu::Same).name, "家用機", "請求沒帶名字：用本機記下的");
+        for fake in ["工作機 a93cc519", "假的指紋", "工作機（a93c c519）"] {
+            let w = who_of(&known_d(), "d", fake, PUB, Tofu::Same);
+            assert_eq!(w.name, "", "{fake}");
+            assert!(bar_label(&w).starts_with("未命名的電腦（指紋 "), "{fake}");
+        }
     }
 
     #[test]
@@ -494,11 +504,10 @@ mod tests {
     }
 
     #[test]
-    fn 紅條上的誰_用本機記住的名字和指紋_第一次連線標示() {
-        let same = who_of(&known_d(), "d", "假裝是工作機", PUB, Tofu::Same);
+    fn 紅條上的誰_設備名和指紋_第一次連線標示() {
+        let same = who_of(&known_d(), "d", "工作機", PUB, Tofu::Same);
         let t = bar_label(&same);
-        assert_eq!(t, format!("家用機（指紋 {}）", same.fp8));
-        assert!(!t.contains("假裝是工作機"));
+        assert_eq!(t, format!("工作機（指紋 {}）", same.fp8));
         let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
         assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
         assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false, typed_before: false, always_ask: false }), "未命名的電腦（指紋 0123 4567 89ab cdef）");
