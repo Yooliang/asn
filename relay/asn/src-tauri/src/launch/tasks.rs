@@ -4,6 +4,8 @@
 //! 視窗名字 → sessions/<pid>.json 找 sessionId（同子代理查詢）→ 讀狀態檔。全程只讀檔、不啟動子程序。
 //! 狀態檔是別的程式寫的：只取看得懂的字串欄位、再截一次長度；檔太大、壞檔、sessionId 不符、過期一律當沒有。
 //! 舊版外掛沒有 tasks：只從 detail「背景工作 N 件」讀件數，列表空著。
+//! #1368：每筆多一個 st（run＝在跑／idle＝閒置，白名單，其他或缺一律當在跑）；回傳 count 只算在跑的、idle 另給閒置件數
+//! （新版外掛 detail 是「背景工作 N 件・閒置 M 件」；沒有「閒置」那段就是 0）。
 use super::console;
 use crate::bridge::roster::{valid_sid, MOD_BUSY_MAX_AGE_MS};
 use serde::Deserialize;
@@ -26,6 +28,17 @@ pub struct TaskItem {
     pub id: String,
     pub description: String,
     pub kind: String,
+    /// "run"＝在跑、"idle"＝閒置；只有這兩種
+    pub st: String,
+}
+
+const ST_RUN: &str = "run";
+const ST_IDLE: &str = "idle";
+
+/// 狀態檔每筆的 st → 只認 "idle"，其他（含沒寫、不是字串）一律當在跑
+fn run_state(v: Option<&Value>) -> String {
+    let st = if v.and_then(Value::as_str) == Some(ST_IDLE) { ST_IDLE } else { ST_RUN };
+    st.to_string()
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -48,9 +61,19 @@ fn plain(v: Option<&Value>, max: usize, ok: impl Fn(char) -> bool) -> String {
     s.to_string()
 }
 
-/// detail「背景工作 N 件」→ N（舊版外掛只有件數）
+/// detail「背景工作 N 件」→ N（舊版外掛只有件數；新版的 N 只算在跑的）
 pub fn count_from_detail(detail: &str) -> Option<usize> {
-    let rest = detail.split("背景工作").nth(1)?.trim_start();
+    number_after(detail, "背景工作")
+}
+
+/// detail「・閒置 M 件」→ M（#1368；沒有這段就是 None）
+pub fn idle_from_detail(detail: &str) -> Option<usize> {
+    number_after(detail, "閒置")
+}
+
+/// detail 裡「<label> N 件」的 N
+fn number_after(detail: &str, label: &str) -> Option<usize> {
+    let rest = detail.split(label).nth(1)?.trim_start();
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     if digits.is_empty() || !rest[digits.len()..].trim_start().starts_with('件') {
         return None;
@@ -67,14 +90,15 @@ pub fn parse_tasks(v: &Value) -> Vec<TaskItem> {
             let id = plain(o.get("id"), MAX_ID_CHARS, |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'));
             let description = clip(o.get("desc").and_then(Value::as_str).unwrap_or(""), MAX_DESC_CHARS);
             let kind = plain(o.get("kind"), MAX_KIND_CHARS, |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ' '));
-            (!id.is_empty() || !description.is_empty() || !kind.is_empty()).then_some(TaskItem { id, description, kind })
+            let st = run_state(o.get("st"));
+            (!id.is_empty() || !description.is_empty() || !kind.is_empty()).then_some(TaskItem { id, description, kind, st })
         })
         .take(MAX_ITEMS)
         .collect()
 }
 
 fn none(known: bool) -> Value {
-    json!({ "ok": true, "known": known, "count": 0, "items": [] })
+    json!({ "ok": true, "known": known, "count": 0, "idle": 0, "items": [] })
 }
 
 /// 讀 `<status>/<sid>.json`；不採用（不存在、太大、壞檔、sessionId 不符、過期、不是 background）回 None
@@ -111,8 +135,12 @@ pub(super) fn query_with(sessions: &Path, status: &Path, name: &str, is_alive: i
         .unwrap_or("");
     let Some(v) = read_status(status, sid, now_ms) else { return none(true) };
     let items = parse_tasks(&v);
-    let said = v.get("detail").and_then(Value::as_str).and_then(count_from_detail).unwrap_or(0);
-    json!({ "ok": true, "known": true, "count": said.max(items.len()), "items": items })
+    let detail = v.get("detail").and_then(Value::as_str).unwrap_or("");
+    let said = count_from_detail(detail).unwrap_or(0);
+    let said_idle = idle_from_detail(detail).unwrap_or(0);
+    let idle_items = items.iter().filter(|t| t.st == ST_IDLE).count();
+    let run_items = items.len() - idle_items;
+    json!({ "ok": true, "known": true, "count": said.max(run_items), "idle": said_idle.max(idle_items), "items": items })
 }
 
 fn status_dir() -> PathBuf {
@@ -184,11 +212,11 @@ mod tests {
             { "id": "b3" },
         ] });
         let r = parse_tasks(&v);
-        assert_eq!(r[0], TaskItem { id: "b1".into(), description: "跑 測試 第二行".into(), kind: "shell".into() });
+        assert_eq!(r[0], TaskItem { id: "b1".into(), description: "跑 測試 第二行".into(), kind: "shell".into(), st: "run".into() });
         assert_eq!(r[1].id, "", "路徑符號的代號不收");
         assert_eq!(r[1].kind, "");
         assert_eq!(r[1].description.chars().count(), MAX_DESC_CHARS + 1);
-        assert_eq!(r[2], TaskItem { id: "b3".into(), description: "".into(), kind: "".into() });
+        assert_eq!(r[2], TaskItem { id: "b3".into(), description: "".into(), kind: "".into(), st: "run".into() });
         assert_eq!(r.len(), 3);
         assert!(parse_tasks(&json!({ "tasks": "壞" })).is_empty());
         assert!(parse_tasks(&json!({})).is_empty());
@@ -197,12 +225,60 @@ mod tests {
     }
 
     #[test]
+    fn 閒置件數從說明文字讀() {
+        assert_eq!(count_from_detail("背景工作 1 件・閒置 2 件"), Some(1));
+        assert_eq!(idle_from_detail("背景工作 1 件・閒置 2 件"), Some(2));
+        assert_eq!(count_from_detail("背景工作 0 件・閒置 3 件"), Some(0));
+        assert_eq!(idle_from_detail("背景工作 0 件・閒置 3 件"), Some(3));
+        assert_eq!(idle_from_detail("背景工作 2 件"), None);
+        assert_eq!(idle_from_detail("閒置中"), None);
+    }
+
+    #[test]
+    fn 每筆的在跑閒置只收兩種值_其他或缺當在跑() {
+        let v = json!({ "tasks": [
+            { "id": "a", "st": "idle" },
+            { "id": "b", "st": "run" },
+            { "id": "c" },
+            { "id": "d", "st": "completed" },
+            { "id": "e", "st": 1 },
+            { "id": "f", "st": "IDLE" },
+        ] });
+        let st: Vec<String> = parse_tasks(&v).into_iter().map(|t| t.st).collect();
+        assert_eq!(st, vec!["idle", "run", "run", "run", "run", "run"]);
+    }
+
+    #[test]
+    fn 新版外掛_件數只算在跑的_閒置另給() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = doc("abc-123", json!([{ "id": "b1", "desc": "建置", "st": "run" }, { "id": "m1", "desc": "看日誌", "st": "idle" }, { "id": "m2", "desc": "舊監看", "st": "idle" }]));
+        v["detail"] = json!("背景工作 1 件・閒置 2 件");
+        let (s, st) = setup(d.path(), "abc-123", Some(v));
+        let r = query_with(&s, &st, "小幫手", |_| true, NOW);
+        assert_eq!(r["count"], 1);
+        assert_eq!(r["idle"], 2);
+        assert_eq!(r["items"][0]["st"], "run");
+        assert_eq!(r["items"][1]["st"], "idle");
+        assert_eq!(r["items"].as_array().unwrap().len(), 3);
+        // 全部閒置
+        let d2 = tempfile::tempdir().unwrap();
+        let mut v2 = doc("abc-123", json!([{ "id": "m1", "st": "idle" }]));
+        v2["detail"] = json!("背景工作 0 件・閒置 1 件");
+        let (s2, st2) = setup(d2.path(), "abc-123", Some(v2));
+        let r2 = query_with(&s2, &st2, "小幫手", |_| true, NOW);
+        assert_eq!(r2["count"], 0);
+        assert_eq!(r2["idle"], 1);
+    }
+
+    #[test]
     fn 依視窗名字讀狀態檔的列表() {
         let d = tempfile::tempdir().unwrap();
         let (s, st) = setup(d.path(), "abc-123", Some(doc("abc-123", json!([{ "id": "b1", "desc": "建置", "kind": "shell" }, { "id": "b2", "desc": "查資料" }]))));
         let r = query_with(&s, &st, "小幫手", |_| true, NOW);
         assert_eq!(r["count"], 2);
+        assert_eq!(r["idle"], 0, "沒有 st 的舊資料都當在跑");
         assert_eq!(r["items"][0]["description"], "建置");
+        assert_eq!(r["items"][0]["st"], "run");
         assert_eq!(r["items"][1]["kind"], "");
         // 找不到的名字、視窗已不在：安靜地回 0 件
         assert_eq!(query_with(&s, &st, "別人", |_| true, NOW)["count"], 0);
@@ -218,6 +294,7 @@ mod tests {
         let (s, st) = setup(d.path(), "abc-123", Some(v));
         let r = query_with(&s, &st, "小幫手", |_| true, NOW);
         assert_eq!(r["count"], 2);
+        assert_eq!(r["idle"], 0);
         assert_eq!(r["items"].as_array().unwrap().len(), 0);
     }
 

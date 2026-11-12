@@ -1,11 +1,11 @@
 import { expect, test } from 'claude-code/testing'
-import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
+import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskDetail, taskList, taskRun } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 type StatusDoc0 = { waitingTool?: string; detail?: string }
 const SID = 'sess-1'
 const PATH = 'C:/Users/u/.asn/status/sess-1.json'
-type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string }[] }
+type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string; st: string }[] }
 
 const rig = async ($: any, on: any, opts: { failWrite?: boolean } = {}) => {
   const writes: { path: string; doc: Doc }[] = []
@@ -120,7 +120,7 @@ test('有 background_tasks→background（Stop 先到）', async ($, on) => {
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
   expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 2 件' })
-  expect(r.last()?.tasks).toEqual([{ id: '1', desc: '' }, { id: '2', desc: '' }])
+  expect(r.last()?.tasks).toEqual([{ id: '1', desc: '', st: 'run' }, { id: '2', desc: '', st: 'run' }])
 })
 
 // background_tasks 每筆的欄位（Claude Code 型別 BackgroundTaskSummary）：id、type、status、description，shell 才有 command（不存）
@@ -134,7 +134,7 @@ test('背景工作列表：只取 id／說明／類型，不存指令，壞格�
     { id: '../../x', description: '路徑符號的代號不收' },
     { type: 'workflow', name: 'w', description: '沒有代號也列' },
   ])
-  expect(out[0]).toEqual({ id: 'b1', desc: 'npm test 全套', kind: 'shell' })
+  expect(out[0]).toEqual({ id: 'b1', desc: 'npm test 全套', kind: 'shell', st: 'run' })
   expect(JSON.stringify(out)).not.toContain('curl')
   expect(JSON.stringify(out)).not.toContain('sk-abc')
   expect(out[1].desc).toBe(`${'跑'.repeat(60)}…`)
@@ -142,10 +142,53 @@ test('背景工作列表：只取 id／說明／類型，不存指令，壞格�
   expect(out[2].desc).not.toContain('hunter2')
   expect(out[2].desc).not.toContain('ghp_0123')
   expect(out[2].desc).toContain('跑看看')
-  expect(out.slice(3)).toEqual([{ id: '', desc: '路徑符號的代號不收' }, { id: '', desc: '沒有代號也列', kind: 'workflow' }])
+  expect(out.slice(3)).toEqual([{ id: '', desc: '路徑符號的代號不收', st: 'run' }, { id: '', desc: '沒有代號也列', kind: 'workflow', st: 'run' }])
   expect(taskList(Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, description: 'x' }))).length).toBe(MAX_TASKS)
   expect(taskList(undefined as never)).toEqual([])
   expect(taskList('壞' as never)).toEqual([])
+})
+
+// #1368：status 分成在跑（run）與閒置（idle）；件數只算在跑的，閒置另外寫「・閒置 M 件」
+test('背景工作狀態：在跑／閒置／沒看過的值／沒帶 status', () => {
+  const seen: string[] = []
+  const note = (s: string) => void seen.push(s)
+  for (const s of ['running', 'pending', 'paused', 'waiting']) expect(taskRun(s, note)).toBe('run')
+  for (const s of ['idle', 'completed', 'failed', 'killed', 'stopped']) expect(taskRun(s, note)).toBe('idle')
+  expect(seen).toEqual([])
+  expect(taskRun('sleepy', note)).toBe('run')
+  expect(seen).toEqual(['sleepy'])
+  for (const s of [undefined, null, '', 3, {}]) expect(taskRun(s, note)).toBe('run')
+  expect(seen).toEqual(['sleepy']) // 沒帶 status 的舊資料不記
+  const out = taskList([
+    { id: 'a', status: 'running', description: '建置' },
+    { id: 'b', status: 'idle', description: '舊監看' },
+    { id: 'c', description: '沒帶狀態' },
+    { id: 'd', status: 'completed', description: '跑完了' },
+  ])
+  expect(out.map(t => t.st)).toEqual(['run', 'idle', 'run', 'idle'])
+  expect(JSON.stringify(out)).not.toContain('completed')
+})
+
+test('背景工作說明：件數只算在跑的，閒置接在後面', () => {
+  expect(taskDetail([{ status: 'running' }, { status: 'running' }])).toBe('背景工作 2 件')
+  expect(taskDetail([{ status: 'running' }, { status: 'idle' }, {}])).toBe('背景工作 2 件・閒置 1 件')
+  expect(taskDetail([{ status: 'idle' }, { status: 'completed' }])).toBe('背景工作 0 件・閒置 2 件')
+  expect(taskDetail([{ status: '新的值' }, null, 'x'])).toBe('背景工作 3 件')
+  const many = Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, status: i < 25 ? 'idle' : 'running' }))
+  expect(taskDetail(many)).toBe('背景工作 5 件・閒置 25 件')
+  const all = finalState('answer', { background_tasks: [{ id: 'i', status: 'idle' }] })
+  expect(all).toEqual({ state: 'background', detail: '背景工作 0 件・閒置 1 件', tasks: [{ id: 'i', desc: '', st: 'idle' }] })
+})
+
+test('有閒置的背景工作：狀態仍是 background，狀態檔寫出閒置字樣與 st', async ($, on) => {
+  const r = await rig($, on)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'm1', type: 'monitor', status: 'idle', description: '看日誌' }, { id: 'b1', type: 'shell', status: 'running', description: '建置' }], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件・閒置 1 件' })
+  expect(r.last()?.tasks).toEqual([{ id: 'm1', desc: '看日誌', kind: 'monitor', st: 'idle' }, { id: 'b1', desc: '建置', kind: 'shell', st: 'run' }])
 })
 
 test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、下一輪沒有就拿掉', async ($, on) => {
@@ -155,7 +198,7 @@ test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、�
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: '建置', command: 'cargo build' }], session_crons: [] } as never)
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
-  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件', tasks: [{ id: 'b1', desc: '建置', kind: 'shell' }] })
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件', tasks: [{ id: 'b1', desc: '建置', kind: 'shell', st: 'run' }] })
   await $.turn.start({ text: 'again', turnId: 't2' })
   await r.flush()
   expect(r.last()?.tasks).toBeUndefined()

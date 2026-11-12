@@ -50,9 +50,9 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
 - **路徑**：`~/.asn/status/<sessionId>.json`（`~` 取 `USERPROFILE`，沒有再取 `HOME`；資料夾不存在會自動建）。
 - **格式**：`{ "sessionId", "state", "detail", "at", "turnId", "plugin" }`
   - `state`：`busy`｜`idle`｜`waiting_user`｜`background`｜`scheduled`
-  - `detail`：人看得懂的短字串，例如 `背景工作 2 件`、`ScheduleWakeup 13:20`、`AskUserQuestion：<問題前 80 字>`、`中斷`、`出錯`、`已結束`
+  - `detail`：人看得懂的短字串，例如 `背景工作 2 件`、`背景工作 1 件・閒置 2 件`、`背景工作 0 件・閒置 1 件`（#1368：件數只算在跑的，閒置另外寫）、`ScheduleWakeup 13:20`、`AskUserQuestion：<問題前 80 字>`、`中斷`、`出錯`、`已結束`
   - `at`：寫檔時間（epoch 毫秒）；`turnId`：目前這一輪；`plugin`：`asn@<plugin.json 的 version>`
-  - `tasks`（選填，#539 之三）：`state` 為 `background` 時寫，`[{ id, desc, kind? }]`，最多 20 筆。取自 Stop hook `background_tasks` 每筆的 `id`、`description`、`type`；`command`（指令全文）與 `last_assistant_message` 不存。說明壓成一行、遮掉像金鑰的字串、截到 60 字。ASN 對話頁「工作項目」按鈕讀它列出本機的背景工作。
+  - `tasks`（選填，#539 之三）：`state` 為 `background` 時寫，`[{ id, desc, kind?, st }]`，最多 20 筆。取自 Stop hook `background_tasks` 每筆的 `id`、`description`、`type`、`status`；`st` 只有 `run`（在跑）與 `idle`（閒置）兩種（#1368）：`status` 為 `idle`／`completed`／`failed`／`killed`／`stopped` 算閒置，`running`／`pending`／`paused`／`waiting`、沒帶 status 的、沒看過的值都算在跑（沒看過的值會用 `console.info` 記一筆，只記 status 本身）。Claude Code 的 `BackgroundTaskSummary.status` 型別是字串，任務狀態列舉為 pending／running／completed／failed／killed／paused；`state` 與自動回信的判斷不看 `st`，有背景工作（不論在跑或閒置）照樣是 `background`。`command`（指令全文）與 `last_assistant_message` 不存。說明壓成一行、遮掉像金鑰的字串、截到 60 字。ASN 對話頁「工作項目」按鈕讀它列出本機的背景工作。
 - **狀態轉換**（只看主迴圈，子代理輪次一律忽略）：
   - `session.start` → `idle`；`turn.start` → `busy`。
   - `AskUserQuestion` 呼叫前 → `waiting_user`，使用者答完回來 → `busy`。純觀察，不改也不擋該工具。

@@ -30,7 +30,9 @@ export type StatusDoc = {
 
 export type QuestionPrompt = { question: string; options: string[] }
 
-export type TaskItem = { id: string; desc: string; kind?: string }
+// st：這件背景工作現在在不在跑（#1368）。只有兩種值；'idle'＝已經停下、可以收掉，其餘都是 'run'
+export type TaskRun = 'run' | 'idle'
+export type TaskItem = { id: string; desc: string; kind?: string; st: TaskRun }
 
 // 外掛控制檔（control.ts）的執行結果：id 原樣回傳，detail 為中文且 ≤200 字（op:'command' 成功時放指令輸出，≤1500 字）
 export type ControlResult = { id: string; ok: boolean; detail: string }
@@ -69,6 +71,26 @@ function clip(s: string, n: number): string {
   const cs = [...s]
   return cs.length > n ? `${cs.slice(0, n).join('')}…` : s
 }
+// BackgroundTaskSummary.status 在 Claude Code 型別裡只是字串；它的任務狀態列舉是
+// pending／running／completed／failed／killed／paused（2.1.322 只把 running、pending 放進 background_tasks）。
+// 確定已經停下的算閒置；仍在進行或暫停中的算在跑；沒看過的值也當在跑（寧可多算），並記一筆讓人知道有新值。
+const IDLE_STATUS: ReadonlySet<string> = new Set(['idle', 'completed', 'failed', 'killed', 'stopped'])
+const RUN_STATUS: ReadonlySet<string> = new Set(['running', 'pending', 'paused', 'waiting'])
+export function taskRun(status: unknown, note: (s: string) => void = noteUnknownStatus): TaskRun {
+  if (typeof status !== 'string' || status === '') return 'run'
+  if (IDLE_STATUS.has(status)) return 'idle'
+  if (!RUN_STATUS.has(status)) note(status)
+  return 'run'
+}
+function noteUnknownStatus(status: string): void {
+  try {
+    console.info('[asn] 背景工作狀態沒看過，當作在跑：', [...status].slice(0, 40).join(''))
+  } catch {
+    /* 吞掉 */
+  }
+}
+const statusOf = (t: unknown): unknown => (t && typeof t === 'object' && !Array.isArray(t) ? (t as Record<string, unknown>).status : undefined)
+
 export function taskList(bg: readonly unknown[] | undefined): TaskItem[] {
   if (!Array.isArray(bg)) return []
   const out: TaskItem[] = []
@@ -80,7 +102,8 @@ export function taskList(bg: readonly unknown[] | undefined): TaskItem[] {
     const desc = clip(maskSecrets(str(o.description).replace(/\s+/g, ' ').trim()), MAX_DESC)
     const kind = TASK_KIND_RE.test(str(o.type).trim()) ? str(o.type).trim() : ''
     if (!id && !desc && !kind) continue
-    out.push(kind ? { id, desc, kind } : { id, desc })
+    const st = taskRun(o.status)
+    out.push(kind ? { id, desc, kind, st } : { id, desc, st })
   }
   return out
 }
@@ -151,12 +174,20 @@ export function cronDetail(crons: readonly CronLike[]): string {
   return `排程 ${crons.length} 件`
 }
 
+// 「背景工作 N 件」N 只算在跑的；有閒置的接「・閒置 M 件」（全部閒置時是「背景工作 0 件・閒置 M 件」）。
+// 件數算全部，不受列表只存 MAX_TASKS 筆影響；不明的狀態算在跑（taskList 已經記過一筆，這裡不重複記）
+export function taskDetail(bg: readonly unknown[]): string {
+  const idle = bg.filter(t => taskRun(statusOf(t), () => undefined) === 'idle').length
+  const run = bg.length - idle
+  return idle > 0 ? `背景工作 ${run} 件・閒置 ${idle} 件` : `背景工作 ${run} 件`
+}
+
 // 一輪結束後的狀態。reason 不是 answer 一律 idle（中斷／出錯），不看 Stop 的資料。
 export function finalState(reason: string, stop: StopInfo | undefined): { state: WinState; detail: string; tasks?: TaskItem[] } {
   if (reason === 'aborted') return { state: 'idle', detail: '中斷' }
   if (reason === 'error') return { state: 'idle', detail: '出錯' }
   const bg = stop?.background_tasks ?? []
-  if (bg.length > 0) return { state: 'background', detail: `背景工作 ${bg.length} 件`, tasks: taskList(bg) }
+  if (bg.length > 0) return { state: 'background', detail: taskDetail(bg), tasks: taskList(bg) }
   const cr = stop?.session_crons ?? []
   if (cr.length > 0) return { state: 'scheduled', detail: cronDetail(cr) }
   return { state: 'idle', detail: '' }
