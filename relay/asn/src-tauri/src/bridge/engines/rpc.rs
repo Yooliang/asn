@@ -386,10 +386,12 @@ mod tests {
         );
         let started = Instant::now();
         let _rpc = Rpc::spawn(o).unwrap();
-        tokio::time::timeout(Duration::from_secs(8), done_rx).await.expect("管線被佔住也不能卡死 on_exit").unwrap();
+        // 上限照「孫行程睡 30 秒」來定，不照機器快慢：CI 忙時光是開 node 和等管線就可能超過 6 秒（#1397 實測 6.3 秒）。
+        // 只要明顯早於 30 秒，就證明沒有等到孫行程結束；等待本身改成等 on_exit 被呼叫，上限給足
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("管線被佔住也不能卡死 on_exit").unwrap();
         let took = started.elapsed();
         assert!(took >= Duration::from_millis(500), "要真的有等（等管線讀完的上限）：{took:?}");
-        assert!(took < Duration::from_secs(6), "但不能等到孫行程結束（30 秒）：{took:?}");
+        assert!(took < Duration::from_secs(20), "但不能等到孫行程結束（30 秒）：{took:?}");
     }
 
     /// 等讀取只延後「結案這一輪」（fail_all／on_exit）；行程一結束，「還活著嗎」和 PID 帳本（on_end）要馬上處理，
