@@ -1,11 +1,11 @@
 {
-  "version": "0.2.16",
-  "notes": "- 新功能：手機看電腦的終端前，可以先確認那台電腦的指紋。第一次看到的電腦會標「還沒確認」，可以對照四組指紋，或用相機掃電腦設定頁上的 QR code 核對；電腦的金鑰變了會清楚告訴你。手機設定頁也會列出認得的電腦。\n- 改善：手機要記住或忘記一台電腦時，要先通過指紋或螢幕鎖驗證。\n- 改善：沒有名字的電腦顯示「未命名的電腦」，你可以在電腦和手機的「認得的電腦」裡自己幫它取名。\n- 新功能：需要你本人確認的畫面（權限框、外來訊息框、要在你電腦的終端機裡打字或替你回答權限框之前的確認），手機 App 關著時也會跳出「ASN 需要你確認」的通知，內文會寫是哪一台電腦（修正 0.2.15 的已知問題）。\n- 新功能：設定 →「視窗與系統匣」多一個開關「ASN 意外關閉時自動重新開啟」，預設關。只在 ASN 意外關閉時重開，你自己按結束不會重開。目前只有 Windows。\n- 修正：Claude 的額度不會再記到別的帳號底下（包括切換帳號之後，原本就開著的視窗）。\n- 修正：Claude 已經沒有的額度（例如最高方案拿掉的 5 小時限制）過了重置時間就不再顯示舊數字。\n- 修正：Gemini 閒置的視窗不會再用舊的額度數字蓋掉比較新的數字。\n- 改善：額度判斷改成以來源為準，不再因為數字看起來不合理而擋下真實的讀數。\n- 改善：名單上只顯示、沒有接管的視窗，狀態寫「執行中・僅顯示」，也不再提供封存。\n- 改善：後台已經不認得的舊好友，改成在本機封存，不再顯示「不用封存」。\n- 修正：手機的設備詳情，詳情區塊和設備按鈕不會再橫排疊在一起。",
-  "pub_date": "2026-11-12T04:35:11.200Z",
+  "version": "0.2.17",
+  "notes": "- 新功能：手機可以替電腦登入 Codex（只登入，不會幫你安裝）。電腦要先升到 0.2.17，升級後請在電腦設定裡重新勾一次「允許這支手機替這台登入」。\n- 新功能（電腦版）：看別台夥伴的終端時，下方輸入框打的字會直接送進那個終端，原本的「打字」按鈕拿掉了；按鈕在對話畫面寫「傳送」，在終端畫面寫「送出」。\n- 改善：電腦版切到別的分頁再切回來，終端畫面會保留；你打字打到一半離開，回來要自己按「重新看」才會接上。\n- 改善：電腦版終端分頁在背景時暫停讀取，比較省資源。\n- 改善：手機看終端時，提示移到下方狀態列；在終端上左右滑不會切到別的分頁。\n- 改善：手機「認得的電腦」頁可以直接確認指紋。\n- 改善：「我的帳號」卡片的時間移到帳號後面，正在讀額度的那台電腦在設備按鈕上標藍線。\n- 改善：手機上的節點金鑰和登入資料改用系統金鑰庫加密保存，也可以換一把新的節點金鑰。\n- 修正：重開機接回時，你自己關掉或封存的視窗不會再被接回來。\n- 修正：同一段對話不會再開成兩個視窗。\n- 已知問題：手機看終端時還不能打字，0.2.18 會補上。\n- 已知問題：電腦版看本機的終端時，還不能用下方輸入框打字，0.2.18 會補上。",
+  "pub_date": "2026-11-12T13:11:27.133Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNFRWRnOFgxRXNqcVBxUWduYmpOYVdtd2RUWXljRDdMVXRxRzloSFkycS9ZK215WFVDQ3k1Q0pOaHpxdkRqM045RWhrLzBtK3BZMzRsR1kxcUNPREEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDA1MDkxCWZpbGU6QVNOXzAuMi4xNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE2CmJUclpKbXozSzNTOTNaVERjV21KZFluZlZNMWQwRU0weTlyU0FOczY5M2wvZUZWK1ZjSithVUNGUDZlbnJIcDVHL0w1YkJDM3F0WTdtQU5ha3pFT0RBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.16_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlvMEhMYXhBZnVjekw2V1R4L2RCUlFMeEdqR2JWRlNENEdQZ2tsQTZ6YTVVY0E1aDJtR2xyU09ZNUdPT2Q4UDhtTEFTeWgzc0tXYi9zVDk5bGxTV0FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDYzOTQ3CWZpbGU6QVNOXzAuMi4xN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE3CktRTUQvWGY5L0lpTEpvalREYWdla29lZEtOeFpLVEJGT2VQalE0UjQxU2l5ZGdEN1h2WFc0M29wSHRNZ05HN2NjbmxSM3BEY0txWis5bENrYStkM0NnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.17_x64-setup.exe"
     }
   }
 }
