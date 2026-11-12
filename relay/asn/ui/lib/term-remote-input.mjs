@@ -7,6 +7,8 @@ import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBa
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
+/** 一整句送進去後隔多久按 Enter（分開送，免得那個視窗把整句連 Enter 當成貼上） */
+export const ENTER_DELAY_MS = 120
 export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那邊的人要同意；2 分鐘沒打字會自動結束）'
 
 export const INPUT_TEXT = {
@@ -46,7 +48,7 @@ export const RemoteInput = {
     active: { type: Boolean, default: true },
     barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
-  emits: ['back', 'status'],
+  emits: ['back', 'status', 'unsent'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: warn.value, main: { waiting: INPUT_TEXT.waiting, active: phase.value === 'typing' ? INPUT_TEXT.typing(props.machine || props.node, props.name) : '' }, danger: true }))
@@ -68,8 +70,28 @@ export const RemoteInput = {
       if (pasteLines(text) > 1) askPaste.value = text
       else send(text, true)
     }
-    const pasteYes = () => { const t = askPaste.value; askPaste.value = null; send(t, true) }
-    const pasteNo = () => { askPaste.value = null }
+    // 下方輸入框送來的一整句（#1288）：打進那個視窗再按 Enter。還沒開始打字（等那台同意）就先排著，開始了才送；
+    // 多行的先問一次（和貼上同一個框）。沒送出去就結束（那台拒絕、逾時）時，交還給外層放回輸入框
+    let queued = null, lineAsk = false
+    const typeLine = (text, multi) => {
+      send(text, multi)
+      setTimeout(() => send('\r', false), ENTER_DELAY_MS)
+    }
+    const flush = () => {
+      if (queued === null || phase.value !== 'typing') return
+      const t = queued; queued = null
+      if (pasteLines(t) > 1) { lineAsk = true; askPaste.value = t } else typeLine(t, false)
+    }
+    const sendLine = text => {
+      const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+      if (!t) return
+      if (queued !== null) emit('unsent', queued)
+      queued = t
+      if (phase.value === 'ended') void start(); else flush()
+    }
+    watch(phase, p => { if (p === 'typing') flush() })
+    const pasteYes = () => { const t = askPaste.value; askPaste.value = null; if (lineAsk) { lineAsk = false; typeLine(t, true) } else send(t, true) }
+    const pasteNo = () => { const t = askPaste.value; askPaste.value = null; if (lineAsk) { lineAsk = false; emit('unsent', t) } }
     const cleanup = () => {
       clearTimeout(warnTimer)
       offFrame?.(); offEnd?.(); offFrame = offEnd = null
@@ -77,7 +99,12 @@ export const RemoteInput = {
       host.value?.removeEventListener('paste', onPaste, true)
       term?.dispose?.(); term = null
     }
-    const finish = text => { cleanup(); phase.value = 'ended'; note.value = text; id = ''; askPaste.value = null }
+    const finish = text => {
+      cleanup(); phase.value = 'ended'; note.value = text; id = ''
+      const left = queued ?? (lineAsk ? askPaste.value : null)
+      queued = null; lineAsk = false; askPaste.value = null
+      if (left) emit('unsent', left)
+    }
     const start = async () => {
       cleanup()
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''
@@ -109,8 +136,8 @@ export const RemoteInput = {
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
-    onBeforeUnmount(() => { alive = false; stop(); cleanup(); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
+    onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = queued ?? (lineAsk ? askPaste.value : null); queued = null; if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
+    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, pasteYes, pasteNo, pasteLines, TEXT: INPUT_TEXT }
   },
   template: `
 <div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">

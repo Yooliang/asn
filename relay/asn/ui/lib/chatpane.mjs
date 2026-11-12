@@ -2,7 +2,7 @@
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先跳脫才進 v-html（訊息內文走 markdown.mjs，自帶跳脫與白名單淨化）。
 import { renderMarkdown, handleLinkClick } from './markdown.mjs'
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
-import { composeHintTitle, composePlaceholder } from './compose.mjs'
+import { SEND_LABEL, SEND_LABEL_TERM, composeHintTitle, composePlaceholder, composeTermHint } from './compose.mjs'
 import { foldBarArrow, SIDE_FOLD_LOCK_TIP, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
@@ -164,8 +164,11 @@ export const ChatPane = {
     })
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
-    const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : composePlaceholder(props.winMode)))
-    const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : composeHintTitle(props.winMode)))
+    // 看別台的終端時（電腦版）：輸入框直接打進那個終端（#1288），提示字與按鈕字跟著換
+    const termCompose = computed(() => canRemoteInput.value && !displayOnly.value)
+    const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? composeTermHint(termViewName.value) : composePlaceholder(props.winMode)))
+    const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
+    const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
     const classes = computed(() => paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar }))
     const side = computed(() => sideOf(props.dpMode))
@@ -212,7 +215,20 @@ export const ChatPane = {
     watch(() => props.log, () => { if (!keep) scrollDown(); nextTick(checkTop) })   // 載入中的更新由載入完成後補償位置，不跳到底
     watch(() => props.friend?.id, () => { armed = true; nextTick(checkTop) })
     watch(() => props.active, a => { if (a) { scrollDown(); nextTick(() => { composeEl.value && composeEl.value.focus(); checkTop() }) } })
+    // 終端畫面：整句打進那個終端。還沒在打字就先開始（第一次那台會跳確認框），字由打字元件排著、開始了才送
+    function sendToTerm(text) {
+      draft.value = ''; pickerOpen.value = false
+      if (!typingShown.value) remoteTyping.value = true
+      nextTick(() => { if (rinEl.value?.sendLine) rinEl.value.sendLine(text); else restoreDraft(text) })
+    }
+    // 沒送進終端的字放回輸入框（輸入框已經有新的字就接在後面，不蓋掉）
+    function restoreDraft(text) {
+      const t = String(text ?? '')
+      if (!t) return
+      draft.value = draft.value.trim() ? t + '\n' + draft.value : t
+    }
     function send() {
+      if (termCompose.value) { const t = draft.value.trim(); if (t) sendToTerm(t); return }
       let text = draft.value.trim(); if (!text || displayOnly.value) return
       const rep = replying.value
       if (rep) text = composeReply(rep, text)   // 引用行＋自動 @ 原作者＋使用者打的字
@@ -448,7 +464,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { sendLabel, restoreDraft, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -457,9 +473,8 @@ export const ChatPane = {
   <div class="chatpane-body">
   <div class="chatpane-main">
   <term-view v-if="termShown" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
-  <p class="term-remote-switch" v-if="canRemoteInput && !typingShown"><button class="aero-btn" type="button" :title="INPUT_TIP" @click="remoteTyping = true">{{ INPUT_LABEL }}</button></p>
   <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
-  <remote-input v-if="typingShown" ref="rinEl" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
+  <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
@@ -576,7 +591,7 @@ export const ChatPane = {
           <li class="mention-more" v-if="mentionMore" aria-hidden="true">{{ MENTION_MORE_HINT }} ▾</li>
         </ul>
         <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
-        <button class="aero-btn" type="submit" :disabled="displayOnly || !draft.trim()">傳送</button>
+        <button class="aero-btn" type="submit" :disabled="displayOnly || !draft.trim()">{{ sendLabel }}</button>
       </form>
     </div>
   </div>
