@@ -39,6 +39,7 @@
           <select class="ghost status-sel" v-model="me.status" aria-label="我的狀態">
             <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
           </select>
+          <span class="me-this">這台電腦</span>
         </div>
         <div class="me-psm-row">
           <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
@@ -93,6 +94,7 @@
           <div class="search">
             <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
             <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
@@ -104,7 +106,7 @@
               </button>
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
-                  <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
+                  <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending, on: ui.mode === 'merged' && view === 'chat' && ui.active === c.id }" @click="openChat(c.id)">
                     <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'"></asn-avatar>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="!c.isNotice && statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
@@ -133,6 +135,7 @@
         <div class="list chat-list" v-else-if="tab === 'chats'">
           <div class="search">
             <input v-model="chatQuery" placeholder="搜尋對話..." aria-label="搜尋對話">
+            <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
           <div class="gl-actions">
             <button class="gs-btn" type="button" @click.stop="groupFlow.openCreate()">建立群組</button>
@@ -140,12 +143,12 @@
           </div>
           <ul>
             <li v-for="x in chatRows" :key="x.id" :class="x.kind === 'room' ? 'room-item' : ''" @contextmenu.prevent="x.kind === 'friend' && openBuddyMenu(x.friend, $event)">
-              <button v-if="x.kind === 'room'" class="room-btn" type="button" @click="openChat(x.room.chatId)">
+              <button v-if="x.kind === 'room'" class="room-btn" :class="{ on: ui.mode === 'merged' && view === 'chat' && ui.active === x.room.chatId }" type="button" @click="openChat(x.room.chatId)">
                 <span class="dp xs room-av st-online" :style="{ '--h': roomHue(x.room.name) }" aria-hidden="true"><span>{{ roomInitial(x.room.name) }}</span></span>
                 <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">({{ x.room.count }} 人)</span></span><span class="b-psm" v-if="x.room.last" v-html="emo(x.room.last)"></span></span>
                 <span class="unread" v-if="x.room.unread">{{ x.room.unread }}</span>
               </button>
-              <button v-else class="buddy" :class="{ offline: x.friend.status === 'offline' }" type="button" @click="openChat(x.id)">
+              <button v-else class="buddy" :class="{ offline: x.friend.status === 'offline', on: ui.mode === 'merged' && view === 'chat' && ui.active === x.id }" type="button" @click="openChat(x.id)">
                 <asn-avatar :src="avOf(x.friend)" :friend="x.friend" :status="x.friend.status" :off="x.friend.status === 'offline'"></asn-avatar>
                 <span class="b-text">
                   <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>

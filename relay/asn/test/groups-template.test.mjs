@@ -73,7 +73,7 @@ test('入口：手機群組分組永遠顯示並有建立／加入；電腦「�
   assert.match(l, /@click="openChat\(x\.room\.chatId\)"/, '群組在「對話」分頁裡，點了進那個群組'); assert.match(l, /groupFlow\.openCreate\(\)/); assert.match(l, /groupFlow\.openJoin\(\)/)
   assert.match(l, /@group-menu="op => openGroupMenu\(t\.id, op\)"/); assert.match(l, /<group-sheet :flow="groupFlow">/)
   const mj = read('ui', 'm.js'); const lj = read('ui', 'list.js')
-  assert.match(mj, /'邀請別人加入'/); assert.match(sheet + chatpane, /邀請別人加入/)
+  assert.match(mj, /chatGroupItems\(f\)/); assert.match(read('ui', 'lib', 'actionbar.mjs'), /label: '邀請別人加入'/, '手機的邀請項目由共用的 chatGroupItems 提供（#1421）'); assert.match(sheet + chatpane, /邀請別人加入/)
   assert.match(lj, /listen\('asn:invite'/); assert.match(mj, /listen\('asn:invite'/)
 })
 
@@ -98,7 +98,7 @@ test('頁面腳本語法正確（list.js、m.js、chat.js 與群組模組）：�
 test('加我的另一個 AI 入口＋群組附件放行：選單項目、聚焦區塊、旗標不再整個群組禁用', () => {
   assert.match(read('ui', 'lib', 'actionbar.mjs'), /key: 'addai', label: '加我的另一個 AI'/)
   assert.match(read('ui', 'list.js'), /what === 'addai'\) groupFlow\.openManage\(rid, \{ focusAdd: true \}\)/)
-  assert.match(read('ui', 'm.js'), /if \(f\.room\) return groupMenuItems\(f\)/, '手機群組選單跟電腦版同一份（含加我的另一個 AI）'); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
+  assert.match(read('ui', 'm.js'), /return chatGroupItems\(f\)/, '手機群組選單跟電腦版同一份（含加我的另一個 AI；#1421 起經共用函式 chatGroupItems）'); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
   assert.match(read('ui', 'lib', 'group-sheet.mjs'), /<h3 class="gs-h"[^>]*>加我的另一個 AI<\/h3>/)
   assert.doesNotMatch(read('ui', 'lib', 'mobile-rooms.mjs'), /attachments: false/, '假夥伴不再寫死 attachments:false（只有 external 才隱藏附件鈕）')
   assert.match(read('ui', 'list.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/); assert.match(read('ui', 'm.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/)
