@@ -21,7 +21,7 @@ test('認得的電腦：欄位壞的丟掉，名字清掉控制字元', () => {
 test('認得的電腦：只能看和忘記，錯誤不露出內部訊息', () => {
   assert.equal(TEXT.forget, '忘記這台')
   assert.equal(errorText(new Error('/home/x/device_known.json 讀不到')), '操作沒有成功，請稍後再試。')
-  assert.equal(errorText('認得的電腦紀錄壞了'), '認得的電腦紀錄壞了，請告訴開發團隊。')
+  assert.equal(errorText('記住的設備紀錄壞了'), '記住的設備紀錄壞了，請告訴開發團隊。')
 })
 
 test('設備改名：名字只有一個（後台）、最多 40 字；只有 device_rename 與設定頁的 device-rename，舊的本機改名全拿掉', async () => {

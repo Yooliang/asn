@@ -378,15 +378,15 @@ impl KnownPeers {
     /// 讀不到檔案就是一台都不認得；**檔案壞了回錯誤，不當成空的：** 當成空的就等於全部重新信任
     pub fn load(dir: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(dir.join(KNOWN_FILE)) {
-            Ok(t) => serde_json::from_str(&t).map_err(|_| "認得的電腦紀錄壞了".to_string()),
+            Ok(t) => serde_json::from_str(&t).map_err(|_| "記住的設備紀錄壞了".to_string()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(KnownPeers::default()),
-            Err(e) => Err(format!("讀認得的電腦失敗：{e}")),
+            Err(e) => Err(format!("讀記住的設備失敗：{e}")),
         }
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        write_private(&dir.join(KNOWN_FILE), text.as_bytes()).map_err(|e| format!("存認得的電腦失敗：{e}"))
+        write_private(&dir.join(KNOWN_FILE), text.as_bytes()).map_err(|e| format!("存記住的設備失敗：{e}"))
     }
 
     pub fn peer(&self, node: &str) -> Option<&KnownPeer> {

@@ -14,7 +14,7 @@ export const TEXT = {
   none: '還沒有認得的電腦。',
   forget: '忘記這台',
   forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
-  firstSeen: t => `第一次記住：${t}`,
+  firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',
   ownFp: fp => `這台電腦的指紋：${groupFp(fp)}`,
   inputNoAsk: '這台要在這裡打字時，不用每次問我',
@@ -24,7 +24,7 @@ export const TEXT = {
   loginOkWarn: '勾了之後，這支手機可以要求這台登入別家的 CLI；登入網址和代碼只會加密送到那支手機。只勾你自己的手機。',
 }
 
-const ERR = [['紀錄壞了', '認得的電腦紀錄壞了，請告訴開發團隊。']]
+const ERR = [['紀錄壞了', '記住的設備紀錄壞了，請告訴開發團隊。']]
 /** 給人核對的完整指紋：每 4 個字一組（和手機上顯示的一樣） */
 export const groupFp = fp => String(fp ?? '').replace(/\s+/g, '').match(/.{1,4}/g)?.join(' ') ?? ''
 
