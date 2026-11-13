@@ -80,6 +80,10 @@ pub trait Deps {
     fn launch(&self, entry: &KnownEntry) -> Result<(), String>;
     /// 開了卻一直沒上線：解除「正在開」的登記（見 opening.rs），本人之後手動喚醒才不會被擋。預設什麼都不做
     fn unclaim(&self, _entry: &KnownEntry) {}
+    /// 沒看到上線，但命令列接續這段對話的程序還活著（還在啟動）：不解除登記，讓它自然到期。預設沒有
+    fn still_starting(&self, _entry: &KnownEntry) -> bool {
+        false
+    }
     /// 開出來的視窗上線了（有活著的同名 session 檔）
     fn appeared(&self, name: &str) -> bool;
     /// 這一輪接回的原因（寫進結果給畫面顯示）。預設空＝重開機
@@ -89,37 +93,6 @@ pub trait Deps {
     /// 接回失敗、視窗又是隱藏的：把它顯示出來讓本人看得到（回有沒有成功）。只有隱藏的視窗才會被呼叫
     fn reveal(&self, entry: &KnownEntry) -> bool;
     fn report(&self, status: &Status);
-}
-
-/// 命令列是不是接續這段對話：`--resume <編號>`、`-r <編號>`、`--resume=<編號>`、`--session-id <編號>`（引號與大小寫以外逐字相同）。
-/// 只回有沒有，不回傳也不記錄命令列內容
-#[cfg(any(feature = "gui", test))]
-fn cmdline_resumes(cmdline: &str, session: &str) -> bool {
-    if session.is_empty() {
-        return false;
-    }
-    let toks: Vec<&str> = cmdline.split_whitespace().map(|t| t.trim_matches('"')).collect();
-    toks.iter().enumerate().any(|(i, t)| match *t {
-        "--resume" | "-r" | "--session-id" => toks.get(i + 1).is_some_and(|v| *v == session),
-        _ => t.strip_prefix("--resume=").is_some_and(|v| v == session),
-    })
-}
-
-/// 程序表裡有沒有「活著、而且命令列接續這段對話」的 Claude 程序（只看 claude／node 的程序，不逐一讀所有程序的命令列）。
-/// 讀不到命令列的程序當作不是
-#[cfg(any(feature = "gui", test))]
-fn process_resumes(procs: &[super::switch::Proc], alive: &dyn Fn(u32) -> bool, cmdline: &dyn Fn(u32) -> Option<String>, session: &str) -> bool {
-    procs.iter().filter(|p| p.name.starts_with("claude") || p.name == "node.exe" || p.name == "node").any(|p| alive(p.pid) && cmdline(p.pid).is_some_and(|c| cmdline_resumes(&c, session)))
-}
-
-#[cfg(feature = "gui")]
-fn process_resumes_real(session: &str) -> bool {
-    use super::switch::{Os, RealOs};
-    if !crate::bridge::roster::valid_sid(session) {
-        return false;
-    }
-    let os = RealOs;
-    process_resumes(&os.processes(), &|p| os.alive(p), &|p| os.cmdline(p), session)
 }
 
 /// 要不要接、接哪些。`boot`＝現在這次開機的時間（讀不到不接）；`saved_boot`＝存檔記的（舊檔沒有，不接：不知道是不是換了開機）
@@ -212,7 +185,8 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
             deps.sleep(APPEAR_POLL_MS);
             up = deps.appeared(&e.name);
         }
-        if !up {
+        // 程序還活著＝只是啟動得慢：保留「正在開」登記，手動喚醒才不會再開第二個；程序也沒了才解除
+        if !up && !deps.still_starting(e) {
             deps.unclaim(e);
         }
         if up {
@@ -428,10 +402,13 @@ impl Deps for RealDeps {
     }
     fn live(&self, name: &str, session: &str) -> bool {
         // session 檔要等 Claude 起來才寫：剛開的視窗還沒有檔，所以再看程序（命令列接續這段對話的活程序）。查不到程序就只看 session 檔
-        self.live_session(name, Some(session)) || process_resumes_real(session)
+        self.live_session(name, Some(session)) || super::live_process::real_resumes(session)
     }
     fn unclaim(&self, e: &KnownEntry) {
         super::opening::release(&e.facts.session, &e.name);
+    }
+    fn still_starting(&self, e: &KnownEntry) -> bool {
+        super::live_process::real_resumes(&e.facts.session)
     }
     fn launch(&self, e: &KnownEntry) -> Result<(), String> {
         let mut config = super::config::load_launch_config()?;
@@ -555,6 +532,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::launch::live_process::{cmdline_resumes, process_resumes};
     use crate::bridge::known::WindowFacts;
     use std::cell::{Cell, RefCell};
 
@@ -583,7 +561,6 @@ mod tests {
         reveal_ok: bool,
         released: RefCell<Vec<String>>,
         /// 這些名字的視窗程序還活著（命令列帶 --resume），只是 session 檔還沒寫出來
-        #[allow(dead_code)]
         starting: Vec<String>,
     }
 
@@ -638,6 +615,9 @@ mod tests {
         fn unclaim(&self, e: &KnownEntry) {
             self.released.borrow_mut().push(e.name.clone());
             crate::launch::opening::release(&e.facts.session, &e.name);
+        }
+        fn still_starting(&self, e: &KnownEntry) -> bool {
+            self.starting.contains(&e.name)
         }
         fn reveal(&self, e: &KnownEntry) -> bool {
             self.revealed.borrow_mut().push(e.name.clone());
