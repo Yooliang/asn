@@ -310,6 +310,61 @@ export const groupProbeSource = ({ group }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
+// 群組頂端「N 人離線」（#1460）：現代外觀才有。want＝{ count, names }：按鈕出現、人數、點開列名單、Esc 關閉、點外面關閉；want.none＝不該出現（全員在線，或復古外觀被藏起來）
+export const GROUP_OFFLINE_ROOM = { ...GROUP_ROOM, members: [
+  { key: '~u:me', name: '我', member_kind: 'human', kind: 'owner', mine: true },
+  { key: 'P~財務', name: '財務', member_kind: 'ai', kind: 'window', mine: true, engine: 'claude', online: true },
+  { key: 'P~審稿', name: '審稿', member_kind: 'ai', kind: 'window', mine: true, engine: 'gemini', online: false },
+  { key: 'x:r2bbbbbb', name: '報表', member_kind: 'ai', kind: 'ai', mine: false, engine: 'gpt', online: false },
+] }
+export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線' }
+export const gofflineProbeSource = ({ goffline }) => `(async () => {
+  const want = ${JSON.stringify(goffline)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null || getComputedStyle(e).position === 'fixed');
+  const rows = () => [...document.querySelectorAll('.offline-menu .menu-note')].map(e => e.textContent.trim());
+  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  let btn = null;
+  for (let i = 0; i < 30 && !btn; i++) { btn = vis(".mbar .mbtn-offline")[0] || null; if (!btn) await sleep(100) }
+  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: '' };
+  if (!btn) return { ok: false, why: '現代外觀的群組頂端沒有「N 人離線」' };
+  if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
+  if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
+  btn.click(); await sleep(250);
+  if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
+  if (btn.getAttribute('aria-expanded') !== 'true') return { ok: false, why: '打開後 aria-expanded 不是 true' };
+  esc(); await sleep(200);
+  if (rows().length) return { ok: false, why: 'Esc 關不掉名單' };
+  btn.click(); await sleep(250);
+  if (!rows().length) return { ok: false, why: '第二次點不開名單' };
+  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await sleep(200);
+  if (rows().length) return { ok: false, why: '點外面關不掉名單' };
+  return { ok: true, why: '' };
+})()`
+export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
+  const want = ${JSON.stringify(mgoffline)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
+  const rows = () => [...document.querySelectorAll('.m-offline-menu li')].map(e => e.textContent.trim());
+  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  for (let i = 0; i < 40 && !document.querySelector('.m-chathead .m-plate'); i++) await sleep(100);
+  await sleep(500);
+  const btn = vis('.m-plate-head .m-offline-btn')[0] || null;
+  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: '' };
+  if (!btn) return { ok: false, why: '現代外觀的群組名牌頭沒有「N 人離線」' };
+  if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
+  if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
+  btn.click(); await sleep(250);
+  if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
+  esc(); await sleep(200);
+  if (rows().length) return { ok: false, why: 'Esc 關不掉名單' };
+  btn.click(); await sleep(250);
+  const back = document.querySelector('.m-head-offline .m-plus-back');
+  if (!back) return { ok: false, why: '第二次點不開名單' };
+  back.click(); await sleep(200);
+  if (rows().length) return { ok: false, why: '點外面關不掉名單' };
+  return { ok: true, why: '' };
+})()`
 // 手機群組對話：上方沒有按鈕列，右上角「⋯」打開是群組的三項（邀請、加 AI、成員與設定），沒有「輸入邀請碼加入」
 export const MGROUP_ME = { lastChat: 'room:g1', navTab: 'chats' }
 export const mgroupProbeSource = ({ mgroup }) => `(async () => {
@@ -1071,8 +1126,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1815,6 +1870,12 @@ export const SCENARIOS = [
   // 手機群組附件（0.1.111）：沒有外部成員、有外部成員的群組都看得到「傳照片」「傳送檔案」且送得出去
   { name: 'm-group-attach', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
+  { name: 'list-group-offline-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_WANT }, shot: 'list-group-offline-modern.png' },
+  { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
+  { name: 'list-group-offline-aero', page: 'list.html', state: { signedIn: true, groupTab: true, offline: true }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
+  { name: 'm-group-offline-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_WANT }, shot: 'm-group-offline-modern.png' },
+  { name: 'm-group-online-modern', page: 'm.html', state: { signedIn: true, mgroup: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true } } },
+  { name: 'm-group-offline-aero', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
   { name: 'list-aero-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar', shot: 'list-aero-chat.png' },
   // 工作管理員（0.2.21）：Aero 與現代各一張；兩個同名視窗標「重複」、只能看的列沒有停止鈕，並實際打開停止確認框
@@ -1866,14 +1927,14 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }   // 那台開放遠端管理：切換模型、管理可按
   }
   if (scenario.state.mgroup) {
-    t.relay_rooms = { rooms: [scenario.state.external ? { ...GROUP_ROOM, external: true } : GROUP_ROOM] }
+    t.relay_rooms = { rooms: [scenario.state.external ? { ...GROUP_ROOM, external: true } : scenario.state.offline ? GROUP_OFFLINE_ROOM : GROUP_ROOM] }
     t.relay_send_attachment = { seq: 1 }
     t.android_room_read = { messages: [] }
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MGROUP_ME) } }
   }
   if (scenario.state.groupTab) {
-    t.relay_rooms = { rooms: [GROUP_ROOM] }
+    t.relay_rooms = { rooms: [scenario.state.offline ? GROUP_OFFLINE_ROOM : GROUP_ROOM] }
     t.relay_room_read = { messages: [] }
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }

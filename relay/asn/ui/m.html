@@ -171,6 +171,11 @@
                 <!-- 現代外觀（#1421 B 之三）：置中名牌＋右邊「看終端」；點名牌開「⋯」選單。復古 Aero 下這兩顆不顯示（mobile.css），照舊是下面的頭像、名字、「⋯」 -->
                 <button class="m-plate" type="button" :class="{ 'is-offline': chatPlate.offline }" :aria-label="(opsItems.length || groupItems.length) ? chatPlate.aria + '，更多操作' : chatPlate.aria" :disabled="!opsItems.length && !groupItems.length" @click="openOps"><img class="m-plate-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="28" height="28"><b class="m-plate-name" v-html="emo(chatPlate.name)"></b><small class="m-plate-sub" v-if="chatPlate.sub">{{ chatPlate.sub }}</small></button>
                 <button class="m-icon-btn m-head-term" type="button" v-if="headTerm" :class="{ on: chatPaneEl && chatPaneEl.remoteShown }" :aria-label="headTerm.label" :title="headTerm.label" @click="toggleHeadTerm"><img :src="headTerm.icon" alt="" width="20" height="20"></button>
+                <div class="m-head-offline" v-if="chatOffline">
+                  <button class="m-offline-btn" type="button" aria-haspopup="true" :aria-expanded="offlineOpen" :aria-label="chatOffline.aria" :title="chatOffline.title" @click="offlineOpen = !offlineOpen">{{ chatOffline.label }}</button>
+                  <div class="m-plus-back" v-if="offlineOpen" @click="offlineOpen = false"></div>
+                  <ul class="m-plus-menu m-offline-menu" v-if="offlineOpen" role="group" aria-label="離線的成員"><li v-for="n in chatOffline.names" :key="n">{{ n }}</li></ul>
+                </div>
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
                 <div class="m-head-tx">
                   <div class="m-title" v-html="emo(chatFriend.nick)"></div>
