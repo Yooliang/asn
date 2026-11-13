@@ -16,7 +16,9 @@ export function sortReleases(rows) {
   for (const r of Array.isArray(rows) ? rows : []) {
     if (!r || typeof r.version !== 'string' || !VERSION_RE.test(r.version)) continue
     const lines = Array.isArray(r.lines) ? r.lines.filter(l => typeof l === 'string' && l.trim()).map(l => l.trim()) : []
-    out.push({ version: r.version, date: typeof r.date === 'string' ? r.date : '', lines })
+    const e = { version: r.version, date: typeof r.date === 'string' ? r.date : '', lines }
+    if (Array.isArray(r.platforms)) e.platforms = r.platforms.filter(p => typeof p === 'string')   // 發佈平台（官網、Play…）：手機的新版提示用，電腦版不顯示；沒這欄就不帶
+    out.push(e)
   }
   return out.sort((a, b) => compareVersions(b.version, a.version))
 }

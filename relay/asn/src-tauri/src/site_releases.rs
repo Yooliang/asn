@@ -29,7 +29,14 @@ fn clean_date(v: &str) -> String {
     if ok { v.to_string() } else { String::new() }
 }
 
-/// PostgREST 回的陣列 → [{ version, date, lines }]；壞的列直接略過。順序保留（資料庫已依日期新到舊排好，前端再依版本排一次）
+/// 發佈平台（官網、Play、家用機…）：只收字串、各自限長、最多 10 個；null、缺欄、非陣列一律當空陣列（不讓整列掉）
+fn clean_platforms(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(|s| s.trim().chars().take(20).collect::<String>()).filter(|s| !s.is_empty()).take(10).collect())
+        .unwrap_or_default()
+}
+
+/// PostgREST 回的陣列 → [{ version, date, lines, platforms }]；壞的列直接略過。順序保留（資料庫已依日期新到舊排好，前端再依版本排一次）
 pub fn parse_releases(body: &Value) -> Result<Vec<Value>, String> {
     let rows = body.as_array().ok_or("回應不是陣列")?;
     let mut out = Vec::new();
@@ -41,13 +48,13 @@ pub fn parse_releases(body: &Value) -> Result<Vec<Value>, String> {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(Value::as_str).map(|s| s.trim().chars().take(MAX_ITEM_CHARS).collect::<String>()).filter(|s| !s.is_empty()).take(MAX_ITEMS).collect())
             .unwrap_or_default();
-        out.push(json!({ "version": version, "date": date, "lines": lines }));
+        out.push(json!({ "version": version, "date": date, "lines": lines, "platforms": clean_platforms(r.get("platforms")) }));
     }
     Ok(out)
 }
 
 pub fn request_url() -> String {
-    format!("https://{PROJECT_REF}.supabase.co/rest/v1/asn_site_releases?select=version,released_on,items&order=released_on.desc,version.desc&limit={MAX_ROWS}")
+    format!("https://{PROJECT_REF}.supabase.co/rest/v1/asn_site_releases?select=version,released_on,items,platforms&order=released_on.desc,version.desc&limit={MAX_ROWS}")
 }
 
 async fn fetch() -> Result<Vec<Value>, String> {
