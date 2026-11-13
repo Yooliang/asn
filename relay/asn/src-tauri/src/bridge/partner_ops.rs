@@ -1423,8 +1423,9 @@ impl PartnerOps {
             return failed("這位夥伴已經在線上");
         }
         // 視窗剛開、session 檔還沒寫出來：只有程序表看得到（命令列帶 --resume 這段對話的活程序，和自動接回用同一個判斷）
-        if crate::launch::live_process::os_resumes(os, sid) {
-            return failed("這位夥伴已經在線上或正在啟動，請稍候");
+        if let Some(pids) = crate::launch::live_process::resuming_pids(os, sid) {
+            let started = crate::launch::live_process::earliest_started_ms(os, &pids);
+            return failed(crate::launch::live_process::resume_block_hint(self.env.now_ms(), started));
         }
         // 3. 找對話紀錄，從裡面取原本的工作資料夾；不是 Claude 的就看是不是 pi 的對話檔（#468）
         let Some(cwd) = find_transcript_cwd(&self.dirs.projects, sid) else {

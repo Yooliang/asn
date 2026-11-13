@@ -2508,6 +2508,28 @@ fn add_resuming_process(r: &Rig, pid: u32, sid: &str, alive: bool) {
 }
 
 #[test]
+fn 喚醒守門_有帶_resume_的活程序已啟動超過五分鐘_提示可能卡住() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    r.os().started.lock().unwrap().insert(400, NOW - 6 * 60_000);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("可能卡住了"), "{}", res.detail);
+    assert!(res.detail.contains("工作管理員"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不能開窗");
+    assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不動任何程序");
+}
+
+#[test]
+fn 喚醒守門_有帶_resume_的活程序才啟動一分鐘_維持原句() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    r.os().started.lock().unwrap().insert(400, NOW - 60_000);
+    let res = resume(&r, "離線夥伴", SID);
+    assert!(res.detail.contains("已經在線上或正在啟動"), "{}", res.detail);
+}
+
+#[test]
 fn 喚醒守門_session檔與登記都空_但有帶_resume_的活程序_不開第二個() {
     let r = resume_rig(Opt::default());
     add_resuming_process(&r, 400, SID, true);
