@@ -587,7 +587,7 @@ const app = createApp({
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.sheetName || vp.cur.name) : ''))
     const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
-    const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
+    const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, playView: playView.value, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設定 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）

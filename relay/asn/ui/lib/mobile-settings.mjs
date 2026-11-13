@@ -3,6 +3,7 @@
 import { SETTING_CATS, catSummary } from './settings-cats.mjs'
 import { SKIN_SHORT, normalizeSkin } from './skin.mjs'
 import { deviceSummary } from './device-tree.mjs'
+import { PLAY_LATEST_TEXT, playNewText } from './play-update.mjs'
 
 // 手機有的分類（順序即畫面順序，與電腦版一致）：個人（大頭貼、名字、設備名稱、狀態）、設備、帳號、雲端代理、外觀（復古 Aero／現代）、提醒與聲音（震動）、更新、關於（版本）
 export const MOBILE_SETTING_KEYS = ['me', 'devices', 'accounts', 'cloud', 'look', 'notify', 'update', 'about']   // look＝外觀（0.2.18：復古 Aero／現代，手機只有這一項）
@@ -16,6 +17,12 @@ export const SETTING_SHEET_KEYS = MOBILE_SETTING_KEYS.filter(k => !ACCT_SETTING_
 // 這些分類點進去是內頁（內頁描述見 lib/mobile-fourth.mjs 的 settingPage）
 
 const onOff = v => (v ? '開' : '關')
+
+// 不能自己更新的版本（Play 安裝）：「更新」列的摘要與更新頁讀同一個判斷（playUpdateView）；讀不到或沒有 Play 版本維持原句
+function playUpdateSummary(v) {
+  if (v?.kind === 'new' && v.version) return playNewText(v.version)
+  return v?.kind === 'latest' ? PLAY_LATEST_TEXT : '這個版本不提供自動檢查'
+}
 
 // 一行目前值摘要。s＝目前設定的快照（欄位缺少時用保守的預設，不丟錯）
 export function mobileCatSummary(key, s = {}) {
@@ -35,7 +42,7 @@ export function mobileCatSummary(key, s = {}) {
     case 'notify':
       return `對方傳震動時震動：${onOff(s.vibrateNudge)}、新訊息輕震：${onOff(s.vibrateMsg)}`
     case 'update':
-      return s.updateEnabled === false ? '這個版本不提供自動檢查' : catSummary('update', { autoCheck: s.autoUpdate })
+      return s.updateEnabled === false ? playUpdateSummary(s.playView) : catSummary('update', { autoCheck: s.autoUpdate })
     case 'about':
       return catSummary('about', { version: s.version })
     default:

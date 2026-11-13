@@ -62,3 +62,12 @@ test('畫面接線：更新頁、設定列、分頁紅點', () => {
   assert.match(html, /到 Play 商店更新|PLAY_BUTTON_LABEL/)
   assert.match(html, /rowHasDot\(r\.key\)/)
 })
+test('設定列表「更新」列摘要：跟更新頁同一個判斷（有新版／已是最新／讀不到維持原句），自動更新版不變', async () => {
+  const { mobileCatSummary } = await import('../ui/lib/mobile-settings.mjs')
+  const s = playView => mobileCatSummary('update', { updateEnabled: false, playView })
+  assert.equal(s(playUpdateView(ok(rows), '0.2.10')), '有新版本 0.2.14')
+  assert.equal(s(playUpdateView(ok(rows), '0.2.14')), '已是最新版本')
+  assert.equal(s({ kind: 'unknown' }), '這個版本不提供自動檢查')
+  assert.equal(s(undefined), '這個版本不提供自動檢查')
+  assert.equal(mobileCatSummary('update', { updateEnabled: true, autoUpdate: true, playView: { kind: 'new', version: '9.9.9' } }), mobileCatSummary('update', { updateEnabled: true, autoUpdate: true }))
+})
