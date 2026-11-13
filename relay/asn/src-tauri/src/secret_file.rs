@@ -60,7 +60,13 @@ pub fn seal_node_key_from(v: Option<&str>) -> bool {
     }
 }
 
-/// Windows 的 DPAPI（目前使用者）做成 [`Aead`]：entropy＝AAD（綁檔名與節點）。`sealing`＝要不要加密（解密永遠可以）
+/// Windows 的 DPAPI 用的 entropy：AAD 轉小寫。Windows 的檔名不分大小寫，同一個金鑰檔可能被寫成不同大小寫的節點代號讀到
+/// （例如環境變數 ASN_RELAY_ID 打的大小寫和檔名不同），entropy 不能因此對不上。安卓的金鑰庫照舊用原本的 AAD（已加密的檔不受影響）
+pub fn dpapi_entropy(aad: &[u8]) -> Vec<u8> {
+    aad.to_ascii_lowercase()
+}
+
+/// Windows 的 DPAPI（目前使用者）做成 [`Aead`]：entropy＝AAD（綁檔名與節點，不分大小寫）。`sealing`＝要不要加密（解密永遠可以）
 #[cfg(windows)]
 pub struct DpapiAead {
     pub sealing: bool,
@@ -69,10 +75,10 @@ pub struct DpapiAead {
 #[cfg(windows)]
 impl Aead for DpapiAead {
     fn seal(&self, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, String> {
-        crate::auth::dpapi_protect(plain, aad)
+        crate::auth::dpapi_protect(plain, &dpapi_entropy(aad))
     }
     fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, String> {
-        crate::auth::dpapi_unprotect(sealed, aad)
+        crate::auth::dpapi_unprotect(sealed, &dpapi_entropy(aad))
     }
     fn sealing(&self) -> bool {
         self.sealing
@@ -913,6 +919,23 @@ mod tests {
         std::fs::copy(&f, &g).unwrap();
         assert!(matches!(read_node_key(&g, "w2", Some(&off)), Err(ReadErr::Unseal(_))), "entropy 綁節點：改名就解不開");
         assert_eq!(files(d.path()), vec!["w1.key".to_string(), "w2.key".to_string()], "沒有留暫存檔");
+    }
+
+    #[test]
+    fn dpapi_entropy_不分大小寫_只動英文字母() {
+        assert_eq!(dpapi_entropy(&node_key_aad("H")), dpapi_entropy(&node_key_aad("h")));
+        assert_eq!(dpapi_entropy(&node_key_aad("t5-AB12cd34")), node_key_aad("t5-ab12cd34"));
+        assert_ne!(dpapi_entropy(&node_key_aad("aa")), dpapi_entropy(&node_key_aad("bb")), "不同節點還是不同");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_dpapi_節點代號大小寫不同也解得開() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("Hx.key");
+        let on = DpapiAead { sealing: true };
+        assert!(write_node_key(&f, "Hx", KEY, Some(&on)));
+        assert_eq!(read_node_key(&f, "hX", Some(&DpapiAead { sealing: false })).unwrap(), KEY, "Windows 檔名不分大小寫，讀的人代號大小寫不同也要解得開");
     }
 
     #[cfg(windows)]

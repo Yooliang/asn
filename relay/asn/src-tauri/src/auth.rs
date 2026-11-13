@@ -445,7 +445,10 @@ pub(crate) fn dpapi_protect(plain: &[u8], entropy: &[u8]) -> Result<Vec<u8>, Str
         return Err("Windows 加密失敗".into());
     }
     let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
-    unsafe { LocalFree(out.pbData as _) };
+    unsafe {
+        std::ptr::write_bytes(out.pbData, 0, out.cbData as usize);   // 系統配的緩衝放回去前先清零
+        LocalFree(out.pbData as _)
+    };
     Ok(v)
 }
 
@@ -462,7 +465,10 @@ pub(crate) fn dpapi_unprotect(sealed: &[u8], entropy: &[u8]) -> Result<Vec<u8>, 
         return Err("Windows 解密失敗（可能不是這個使用者存的）".into());
     }
     let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
-    unsafe { LocalFree(out.pbData as _) };
+    unsafe {
+        std::ptr::write_bytes(out.pbData, 0, out.cbData as usize);   // 解出來的明文：系統配的緩衝放回去前先清零
+        LocalFree(out.pbData as _)
+    };
     Ok(v)
 }
 

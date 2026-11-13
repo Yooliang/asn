@@ -39,3 +39,18 @@ test('實際跑：金鑰檔是加密的 → 結束並印出說明，不送出；
   const pr = run(p)
   assert.equal(pr.status, 0, pr.stderr); assert.equal(pr.stdout, 'plain-key', '明文檔照舊')
 })
+
+test('守門：relay/machine 讀節點金鑰統一走 identity.mjs（readMachineKey／keyFromFileText），不直接讀 <節點>.key（anon.key 不是秘密，不在此限）', () => {
+  const skip = new Set(['identity.mjs'])
+  const bad = []
+  for (const f of fs.readdirSync(MACHINE).filter(n => n.endsWith('.mjs') && !skip.has(n))) {
+    const src = fs.readFileSync(path.join(MACHINE, f), 'utf8')
+    for (const line of src.split('\n')) {
+      if (/readFileSync\([^)]*\.key[`'"]/.test(line) && !/anon\.key/.test(line)) bad.push(`${f}: ${line.trim().slice(0, 80)}`)
+    }
+  }
+  assert.deepEqual(bad, [], '直接讀金鑰檔的地方要改走 readMachineKey')
+  for (const f of ['bridge.mjs', 'bridge-aegis.mjs', 'tools-provision.mjs', 'tools-roster-once.mjs', 'tools-roundtrip.mjs']) assert.match(fs.readFileSync(path.join(MACHINE, f), 'utf8'), /readMachineKey\(/, f)
+  assert.match(fs.readFileSync(path.join(MACHINE, 'register.mjs'), 'utf8'), /return keyFromFileText\(text\)/)
+  for (const f of ['bridge.mjs', 'bridge-aegis.mjs']) assert.match(fs.readFileSync(path.join(MACHINE, f), 'utf8'), /if \(e\?\.message === SEALED_KEY_MSG\) \{ console\.error\(e\.message\); process\.exit\(2\) \}/, f + '：加密的金鑰檔印說明並停下')
+})
