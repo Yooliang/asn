@@ -1,10 +1,10 @@
-// 手機的內頁（#461；0.2.18 起蓋在進來的那個分頁上，不再佔第四格）：出現與收起的時機（含 3 分鐘，用假時鐘）、換內頁、返回鍵一層一層退、舊瀏覽記錄的轉換、畫面接線。
+// 手機的內頁（#461；#1429 起和 0.2.17 一樣暫時佔第四格）：出現與收起的時機（含 3 分鐘，用假時鐘）、換內頁、返回鍵一層一層退、舊瀏覽記錄的轉換、畫面接線。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
+import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, fourthOnNotice, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, opsNav, noticeUnread, normalizeNav, pageHost, pageNav, shownTab, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -41,15 +41,14 @@ test('內頁描述：設定分類、指引、設備與帳號；壞資料一律 n
   assert.deepEqual(pageLayers(null), [])
 })
 
-test('頁籤列：永遠四個「對話／夥伴／通知／設定」；內頁不佔分頁，分頁列標著它蓋著的那一格', () => {
+test('頁籤列：永遠四個「夥伴／對話／設定／通知」（#1429）；有內頁時第四格暫時換成內頁、字換成內頁的標題', () => {
   assert.deepEqual(tabList(null), TABS)
-  assert.deepEqual(tabList(openFourth(settingPage('notify'), 'me')), TABS)
-  assert.deepEqual(TABS, ['chats', 'list', 'notice', 'me'])
-  assert.deepEqual(TABS.map(t => tabLabel(t)), ['對話', '夥伴', '通知', '設定'])
-  assert.equal(tabLabel(PAGE_TAB), '', '內頁不是分頁，沒有分頁字')
-  assert.equal(pageHost(null), ''); assert.equal(pageHost(openFourth(guidePage(), 'me')), 'me'); assert.equal(pageHost(openFourth(acctPage('W'), 'list')), 'list')
-  assert.equal(shownTab(PAGE_TAB, openFourth(guidePage(), 'me')), 'me', '在內頁上標著設定'); assert.equal(shownTab('notice', null), 'notice'); assert.equal(shownTab(PAGE_TAB, null), HOME_TAB)
-  assert.equal(tabIndex(shownTab(PAGE_TAB, openFourth(guidePage(), 'me'))), 3)
+  assert.deepEqual(TABS, ['list', 'chats', 'me', 'notice'])
+  assert.deepEqual(TABS.map(t => tabLabel(t)), ['夥伴', '對話', '設定', '通知'])
+  const withPage = tabList(openFourth(guidePage(), 'me'))
+  assert.deepEqual(withPage, ['list', 'chats', 'me', PAGE_TAB], '有內頁時第四格（通知那一格）換成內頁')
+  assert.equal(tabIndex(PAGE_TAB, withPage), 3); assert.equal(tabIndex('me', withPage), 2, '設定還是第三格')
+  assert.equal(tabLabel(PAGE_TAB, '使用指引'), '使用指引', '第四格的字是內頁的標題'); assert.equal(tabLabel(PAGE_TAB), '通知', '沒給標題就是通知')
   assert.equal(pageTitle(settingPage('notify')), '提醒與聲音', '設定的 notify 分類叫「提醒與聲音」（不和通知分頁撞名）')
   assert.equal(pageTitle(acctPage('W')), '設備')
   assert.equal(pageTitle(guidePage()), '使用指引')
@@ -71,30 +70,57 @@ test('計時：切走才開始算（已在算不重算）、切回取消；滿 3
   assert.equal(fourthOnTab(null, 'list', 1), null)
 })
 
-test('進內頁就蓋在目前的分頁上；切到別的分頁開始計時；未滿 3 分鐘切回那一格就回到內頁；超過 3 分鐘收起', () => {
+test('進內頁：第四格換成內頁並切過去；滑走再滑回來還是內頁；離開滿 3 分鐘第四格變回通知（#1429）', () => {
   const h = harness('me')
-  assert.equal(h.st.fourth, null)
+  assert.equal(h.st.fourth, null); assert.deepEqual(tabList(h.st.fourth), TABS)
   assert.equal(h.r.openPage(settingPage('notify')), true)
   assert.equal(h.nav.tab, PAGE_TAB); assert.deepEqual(h.st.fourth.page, settingPage('notify')); assert.equal(h.st.fourth.from, 'me'); assert.equal(h.st.fourth.leftAt, 0)
-  assert.equal(shownTab(h.nav.tab, h.st.fourth), 'me', '分頁列照樣標著設定')
-  h.r.goTab('me'); assert.equal(h.nav.tab, PAGE_TAB, '在內頁上點它蓋著的那一格不動')
-  // 點「夥伴」：內頁留著、開始計時
-  h.r.goTab('list'); h.flush()
-  assert.equal(h.nav.tab, 'list'); assert.ok(h.st.fourth, '內頁留著'); assert.equal(h.st.fourth.leftAt, h.clock.t)
-  assert.deepEqual(h.stack(), [initialNav(), tabNav('list')], '內頁的記錄退掉了，返回鍵照夥伴分頁的規則（回對話清單）')
+  assert.deepEqual(tabList(h.st.fourth), ['list', 'chats', 'me', PAGE_TAB], '第四格是內頁'); assert.equal(tabIndex(h.nav.tab, tabList(h.st.fourth)), 3, '停在第四格')
+  h.r.goTab(PAGE_TAB); assert.equal(h.nav.tab, PAGE_TAB, '在內頁上點第四格不動')
+  // 滑到設定（左邊一格）：內頁留著、開始計時
+  h.r.goTab('me'); h.flush()
+  assert.equal(h.nav.tab, 'me'); assert.ok(h.st.fourth, '內頁留著'); assert.equal(h.st.fourth.leftAt, h.clock.t)
+  assert.deepEqual(tabList(h.st.fourth), ['list', 'chats', 'me', PAGE_TAB], '離開了第四格還是內頁')
+  assert.deepEqual(h.stack(), [initialNav(), tabNav('me')], '內頁的記錄退掉了，返回鍵照設定分頁的規則（回對話清單）')
   h.clock.t += FOURTH_KEEP_MS - 1000
   assert.equal(h.r.check(), false); assert.ok(h.st.fourth)
-  h.r.goTab('me')
-  assert.equal(h.nav.tab, PAGE_TAB, '切回設定＝回到內頁'); assert.equal(h.st.fourth.leftAt, 0, '切回來就取消計時')
+  // 滑回第四格：回到內頁、取消計時
+  h.r.goTab(PAGE_TAB)
+  assert.equal(h.nav.tab, PAGE_TAB, '滑回第四格＝回到內頁'); assert.equal(h.st.fourth.leftAt, 0, '回來就取消計時')
+  assert.deepEqual(h.stack(), [initialNav(), tabNav('me'), pageNav(settingPage('notify'))], '內頁的記錄推回去了')
   h.clock.t += FOURTH_KEEP_MS * 5
   assert.equal(h.r.check(), false, '正在看的不會收')
-  // 再切走（滑到通知），超過 3 分鐘收起
-  h.r.goTab('notice'); h.flush()
-  assert.equal(h.nav.tab, 'notice')
+  // 再滑走（到夥伴），滿 3 分鐘：第四格變回通知
+  h.r.goTab('list'); h.flush()
+  assert.equal(h.nav.tab, 'list')
   h.clock.t += FOURTH_KEEP_MS
   assert.equal(h.r.check(), true); assert.equal(h.st.fourth, null, '到期後沒有內頁')
-  assert.deepEqual(tabList(h.st.fourth), TABS, '分頁仍是四個')
-  h.r.goTab('me'); assert.equal(h.nav.tab, 'me', '到期後點設定看到的是設定分類列表')
+  assert.deepEqual(tabList(h.st.fourth), TABS, '第四格變回通知'); assert.equal(tabLabel(tabList(h.st.fourth)[3]), '通知')
+  h.r.goTab('notice'); h.flush(); assert.equal(h.nav.tab, 'notice', '到期後點第四格看到的是通知')
+})
+
+test('離開內頁的 3 分鐘內有新通知進來：第四格馬上變回通知；正在看內頁時不搶（#1429）', () => {
+  const h = harness('me')
+  h.r.openPage(guidePage())
+  assert.equal(h.r.noticeArrived(), false, '正在看內頁時來通知：不動'); assert.ok(h.st.fourth); assert.equal(h.nav.tab, PAGE_TAB)
+  h.r.goTab('chats'); h.flush()
+  h.clock.t += 30_000
+  assert.equal(h.r.noticeArrived(), true, '離開後來通知：變回通知')
+  assert.equal(h.st.fourth, null); assert.deepEqual(tabList(h.st.fourth), TABS)
+  assert.equal(h.nav.tab, 'chats', '人還在原本的分頁，不被拉走')
+  assert.equal(h.r.noticeArrived(), false, '沒有內頁時什麼都不做')
+  assert.equal(fourthOnNotice(null), null); assert.equal(fourthOnNotice(openFourth(guidePage(), 'me')).page.kind, 'guide', '還沒離開（leftAt＝0）留著')
+})
+
+test('程式切到通知（例如點了通知提示）而第四格正被內頁佔著：內頁收起，第四格變回通知', () => {
+  const h = harness('me')
+  h.r.openPage(settingPage('about'))
+  h.r.goTab('notice'); h.flush()
+  assert.equal(h.st.fourth, null); assert.equal(h.nav.tab, 'notice')
+  const g = harness('me')
+  g.r.openPage(settingPage('about')); g.r.goTab('list'); g.flush()
+  g.r.goTab('notice'); g.flush()
+  assert.equal(g.st.fourth, null, '從別的分頁切到通知也一樣'); assert.equal(g.nav.tab, 'notice')
 })
 
 test('App 在背景：用絕對時間判斷，回到前景時已超過就收起', () => {
@@ -113,7 +139,7 @@ test('換別的內頁：換掉內容、從目前的分頁重新算（計時歸�
   h.clock.t += 60000
   assert.ok(h.st.fourth.leftAt > 0)
   h.r.openPage(acctPage('W'))   // 從夥伴列表某台設備的「選項」進來
-  assert.equal(h.nav.tab, PAGE_TAB); assert.deepEqual(h.st.fourth.page, acctPage('W')); assert.equal(h.st.fourth.from, 'list', '改蓋在夥伴分頁上'); assert.equal(h.st.fourth.leftAt, 0)
+  assert.equal(h.nav.tab, PAGE_TAB); assert.deepEqual(h.st.fourth.page, acctPage('W')); assert.equal(h.st.fourth.from, 'list', '從夥伴分頁進來'); assert.equal(h.st.fourth.leftAt, 0)
   h.r.goTab('me'); h.flush()
   assert.equal(h.st.fourth.leftAt, h.clock.t, '重新計時')
   h.clock.t += FOURTH_KEEP_MS - 1
@@ -141,13 +167,13 @@ test('返回鍵：指引單篇 → 篇目列表 → 收起；從列表點進一�
   h.press(); assert.equal(h.st.fourth, null); assert.equal(h.nav.tab, 'me')
 })
 
-test('離開再回來：內頁的層照原樣推回，返回鍵還是一層一層退；退到頭回內頁蓋著的那一格', () => {
+test('離開再回來：內頁的層照原樣推回，返回鍵還是一層一層退；退到頭回進來的那個分頁', () => {
   const h = harness('me')
   h.r.openPage(guidePage())
   h.r.pushLayer(guidePage('faq'))
   h.r.goTab(HOME_TAB); h.flush()
   assert.equal(h.nav.tab, HOME_TAB); assert.deepEqual(h.stack(), [initialNav()])
-  h.r.goTab('me')
+  h.r.goTab(PAGE_TAB)   // 滑回第四格
   assert.deepEqual(h.stack(), [initialNav(), pageNav(guidePage()), pageNav(guidePage('faq'))])
   h.press(); assert.deepEqual(h.st.fourth.page, guidePage())
   h.press(); h.flush()
@@ -216,7 +242,7 @@ test('舊的存檔或瀏覽記錄（sheet＝acct／setting／guide）轉成內�
   // 瀏覽記錄退到一筆舊格式的記錄：照它打開內頁
   const h = harness()
   h.r.onPop({ tab: 'chats', sheet: 'acct' })
-  assert.equal(h.nav.tab, PAGE_TAB); assert.deepEqual(h.st.fourth.page, acctPage()); assert.equal(h.nav.page, undefined, 'nav 裡不放內頁描述'); assert.equal(pageHost(h.st.fourth), HOME_TAB, '照記錄重開的蓋在對話分頁上')
+  assert.equal(h.nav.tab, PAGE_TAB); assert.deepEqual(h.st.fourth.page, acctPage()); assert.equal(h.nav.page, undefined, 'nav 裡不放內頁描述'); assert.equal(h.st.fourth.from, HOME_TAB, '照記錄重開的，退到頭回對話分頁')
 })
 
 test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格上（跟著一起滑）；通知是自己的分頁；頁數不寫死', () => {
@@ -227,16 +253,17 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.match(css, /\.m-pager\{[^}]*width:calc\(var\(--pages,3\) \* 100%\)/); assert.match(css, /\.m-pg\{[^}]*flex:0 0 calc\(100% \/ var\(--pages,3\)\)/); assert.match(css, /\.m-ind\{[^}]*width:calc\(100% \/ var\(--pages,3\)\)/)
   assert.doesNotMatch(js, /\* 100 \/ 3\}/, 'pager 不再寫死頁數')
   assert.match(js, /\* 100 \/ pages\.value\}%/)
-  assert.match(js, /const curTab = computed\(\(\) => shownTab\(nav\.tab, fourthSt\.fourth\)\)/)
+  assert.match(js, /const curTab = computed\(\(\) => nav\.tab\)/)
+  assert.match(js, /const pageSlot = computed\(\(\) => tabs\.value\.indexOf\(PAGE_TAB\)\)/)
   assert.match(js, /const idx = computed\(\(\) => tabIndex\(curTab\.value, tabs\.value\)\)/)
   assert.match(js, /indicatorPos\(idx\.value, sw\.mode === 'pager' \? sw\.shift : 0, sw\.width, pages\.value\)/)
   assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width, count: pages\.value \}\)/)
   assert.match(js, /pagerShift\(idx\.value, dx, pages\.value\)/)
-  // 分頁順序：對話、夥伴、通知、設定，內頁在最後（蓋在 host 那一格上）
-  const pos = ['<section class="m-pg" :class="nav.chat', '<section class="m-pg" aria-label="夥伴">', '<section class="m-pg m-chat m-notice" aria-label="通知">', '<section class="m-pg" aria-label="設定">', '<section class="m-pg m-fourth"'].map(x => html.indexOf(x))
-  assert.ok(pos.every(p => p > 0), JSON.stringify(pos)); assert.deepEqual([...pos].sort((a, b) => a - b), pos, '順序：對話、夥伴、通知、設定、內頁')
+  // 分頁順序（#1429）：夥伴、對話、設定、通知，內頁在最後（蓋在 host 那一格上）；DOM 順序＝滑動的順序，要和 TABS 一致
+  const pos = ['<section class="m-pg" aria-label="夥伴">', '<section class="m-pg" :class="nav.chat', '<section class="m-pg" aria-label="設定">', '<section class="m-pg m-chat m-notice" aria-label="通知">', '<section class="m-pg m-fourth"'].map(x => html.indexOf(x))
+  assert.ok(pos.every(p => p > 0), JSON.stringify(pos)); assert.deepEqual([...pos].sort((a, b) => a - b), pos, '順序：夥伴、對話、設定、通知、內頁')
   const fourth = html.slice(html.indexOf('<section class="m-pg m-fourth"'), html.indexOf('<!-- /內頁 -->'))
-  assert.match(fourth, /^<section class="m-pg m-fourth" v-if="fourthPage && pageHost" :style="\{ '--host': tabs\.indexOf\(pageHost\) \}" :aria-label="fourthTitle">/)
+  assert.match(fourth, /^<section class="m-pg m-fourth" v-if="fourthPage && pageSlot >= 0" :style="\{ '--host': pageSlot \}" :aria-label="fourthTitle">/, '內頁蓋在第四格（通知那一格）上，跟著 pager 一起滑')
   for (const k of ['acct', 'setting', 'guide', 'launch']) assert.match(fourth, new RegExp(`fourthPage\\.kind === '${k}'`))
   assert.match(css, /\.m-pg\.m-fourth\{position:absolute;top:0;bottom:0;left:calc\(var\(--host,0\) \* 100% \/ var\(--pages,4\)\);z-index:3;/, '內頁蓋在 host 那一格上，跟著 pager 一起滑')
   assert.match(css, /\.m-pager\{position:relative\}/)
@@ -244,7 +271,7 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.doesNotMatch(html, /class="m-sheet m-(set|guide)"/)
   assert.doesNotMatch(html, /is-page|openNotice|NOTICE_ENTRY/, '設定裡不再有「看通知」入口（通知有自己的分頁）')
   // 對話分頁：不放內頁的東西
-  const chat = html.slice(html.indexOf('<section class="m-pg" :class="nav.chat'), html.indexOf('<section class="m-pg" aria-label="夥伴">'))
+  const chat = html.slice(html.indexOf('<section class="m-pg" :class="nav.chat'), html.indexOf('<section class="m-pg" aria-label="設定">'))   // #1429 起對話後面接設定
   assert.match(chat, /aria-label="對話"/); assert.doesNotMatch(chat, /acctSw|m-keep|ACCT_PAGE_TITLE/)
   assert.doesNotMatch(js, /sheet !== 'acct'|sheet === 'acct'/, '已讀與提示判斷不再排除設備與帳號')
   assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(\{ tab: nav\.tab, chat: nav\.chat, lastChat: lastChat\.value \}\) === id/)

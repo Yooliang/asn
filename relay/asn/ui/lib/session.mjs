@@ -8,7 +8,7 @@ import { normalizePinned, orderTabs } from './ctabs.mjs'
 export const SESSION_VERSION = 1
 const MAX_TABS = 60
 const MAX_ID = 200
-const MOBILE_TABS = ['chats', 'list', 'notice', 'me']   // 與 mobile.mjs 的 TABS 相同（守門測試比對）
+const MOBILE_TABS = ['list', 'chats', 'me', 'notice']   // 與 mobile.mjs 的 TABS 相同（守門測試比對）
 
 const str = v => (typeof v === 'string' && v.length > 0 && v.length <= MAX_ID ? v : '')
 const isPending = id => id.startsWith('pending:')
@@ -149,7 +149,7 @@ export function trailingThrottle(fn, ms, timers = { set: (f, ms) => setTimeout(f
   return call
 }
 
-/** 手機版重開要回到哪個大分頁（對話／夥伴／通知／設定）；舊版存的第四格（'page'，平時是通知）回通知；壞值回對話 */
+/** 手機版重開要回到哪個大分頁（夥伴／對話／設定／通知；存的是分頁鍵不是位置，順序改了舊值照樣認得）；舊版存的第四格（'page'，平時是通知）回通知；壞值回對話 */
 export const restoreMobileTab = raw => (MOBILE_TABS.includes(raw) ? raw : raw === 'page' ? 'notice' : 'chats')
 /** 重開時對話分頁要不要直接進上次那一則：存著 navChat 就照它；0.2.17 以前沒有這一格，存著「對話」就是正在看那一則（當時對話分頁就是那一則） */
 export const restoreMobileChat = (navTab, navChat) => navTab === 'chats' && (typeof navChat === 'boolean' ? navChat : navChat === undefined)

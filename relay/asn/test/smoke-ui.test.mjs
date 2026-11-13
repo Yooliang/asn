@@ -321,7 +321,7 @@ test('手機四個分頁情境（0.2.18）：開 App 在對話清單、點進對
   assert.equal(probeKind(sc[0].probe), '手機四個分頁檢查')
   assert.doesNotThrow(() => new vm.Script(probeSource(sc[0].probe)))
   const src = probeSource(sc[0].probe)
-  for (const w of ["'對話|夥伴|通知|設定'", '回對話清單', '.m-fourth', '切回設定沒有回到']) assert.ok(src.includes(w), w)
+  for (const w of ["'夥伴|對話|設定|通知'", '回對話清單', '.m-fourth', '切回設定沒有回到']) assert.ok(src.includes(w), w)
   const me = JSON.parse(tableFor(sc[0]).store_load.values.me)
   assert.equal(me.navTab, 'chats'); assert.equal(me.navChat, false, '上次停在清單，不是某一則')
 })
@@ -333,7 +333,7 @@ test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩�
   assert.equal(probeKind(sc[0].probe), '電腦版四個大分頁檢查')
   const src = probeSource(sc[0].probe)
   assert.doesNotThrow(() => new vm.Script(src))
-  for (const w of ["'對話|夥伴|通知|設定'", '.rtab-notice, .rtab-groups', '建立群組|加入群組', '.guide-back', '點夥伴沒有回到剛才的設備頁籤']) assert.ok(src.includes(w), w)
+  for (const w of ["'夥伴|對話|設定|通知'", '.rtab-notice, .rtab-groups', '建立群組|加入群組', '.guide-back', '點夥伴沒有回到剛才的設備頁籤']) assert.ok(src.includes(w), w)
 })
 
 test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對話、手機對話清單各一，存檔選現代；表達式語法正確', async () => {

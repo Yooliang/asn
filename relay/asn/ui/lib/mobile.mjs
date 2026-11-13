@@ -1,5 +1,5 @@
 // 手機版（ui/m.html）的純邏輯：單欄導覽、名單分組、提示規則、安卓外殼橋。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-// 手機四個大分頁：對話、夥伴、通知、設定。沒有多視窗、系統匣。
+// 手機四個大分頁：夥伴、對話、設定、通知（#1429，小良哥 2026-11-13 定；原本是對話、夥伴、通知、設定）。沒有多視窗、系統匣。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
@@ -10,25 +10,25 @@ import { DEFAULT_SKIN, normalizeSkin } from './skin.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
-// 四個固定分頁（0.2.18，和電腦版同樣的字、同樣的順序）：對話（chats）、夥伴（list）、通知（notice）、設定（me）。
+// 四個固定分頁（和電腦版同樣的字、同樣的順序；#1429 起）：夥伴（list）、對話（chats）、設定（me）、通知（notice）。
 // 對話分頁先列出活動中的對話（夥伴與群組），點一則才進到對話內容（chat＝true，多一層瀏覽記錄，返回回清單）。
-// 'page'＝內頁（設備與帳號、設定的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs）：蓋在進來的那個分頁上（分頁列照樣標著那一格），不另外佔一格。
+// 'page'＝內頁（設備與帳號、設定的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs）：暫時佔用第四格（通知那一格），分頁字換成內頁的標題，
+// 能左右滑過去、滑回來；離開滿 3 分鐘、或這段時間有新通知進來，第四格就變回「通知」（0.2.17 的做法，#1429 改回來）。
 // 每往下一層（對話清單→其他分頁、對話清單→一則對話、分頁→內頁、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，對話清單層再按才退到背景。
-export const TABS = ['chats', 'list', 'notice', 'me']
+export const TABS = ['list', 'chats', 'me', 'notice']
 export const TAB_LABEL = { chats: '對話', list: '夥伴', notice: NOTICE_LABEL, me: '設定' }
 export const HOME_TAB = 'chats'   // 底層分頁：開 App 的第一頁，切到其他分頁推一筆記錄，切回來＝上一頁
-// 分頁列上的字：四個固定（內頁不佔分頁，標題在內頁自己的頂端）
-export const tabLabel = t => TAB_LABEL[t] ?? ''
-// 目前有哪些分頁：永遠四個（pager 的頁數、指示條、左右滑的範圍都是 4）；參數留著是為了呼叫端不用改
-export const tabList = () => TABS
-// 內頁蓋在哪一個分頁上（分頁列要標哪一格、pager 停在哪一頁）：沒有內頁回空字串
-export const pageHost = fourth => (fourth?.page && TABS.includes(fourth.from) ? fourth.from : '')
-// 分頁列標著哪一格：在內頁上就是內頁蓋著的那一格
-export const shownTab = (tab, fourth) => (tab === PAGE_TAB ? pageHost(fourth) || HOME_TAB : tab)
+export const FOURTH_SLOT = 'notice'   // 內頁暫時佔用的那一格（第四格）
+// 分頁列上的字：前三個固定；第四格有內頁時用內頁的標題（pageTitle），沒有內頁就是「通知」
+export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitle ?? '') || NOTICE_LABEL : TAB_LABEL[t] ?? '')
+// 目前有哪些分頁：永遠四個（pager 的頁數、指示條、左右滑的範圍都是 4）；有內頁時第四格是內頁（PAGE_TAB），沒有就是通知
+export const tabList = fourth => (fourth?.page ? TABS.map(t => (t === FOURTH_SLOT ? PAGE_TAB : t)) : TABS)
 // 通知分頁的未讀紅點：通知對話有未讀就亮；對話分頁的紅點不算通知的未讀
 export const noticeUnread = friends => { const f = (Array.isArray(friends) ? friends : []).find(isNoticeFriend); return Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0 }
 export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
-export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'chats' ? chats > 0 : t === 'notice' ? notice > 0 : false)
+// 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，小良哥定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
+// 通知的紅點掛在第四格（內頁佔著第四格時照樣亮在那一格）
+export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'list' ? chats > 0 : t === 'notice' || t === PAGE_TAB ? notice > 0 : false)
 // 正在看的對話（標已讀、算「看得到」用）：對話分頁要點進那一則（chat）才算；通知分頁看的是通知
 export const viewedChatId = ({ tab, chat = false, lastChat }) => (tab === 'chats' && chat ? lastChat || '' : tab === 'notice' ? NOTICE_ID : '')
 export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單

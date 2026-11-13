@@ -217,8 +217,8 @@ test('廠商徽章：pi 只是執行殼，顯示背後模型的廠商；對不�
   assert.equal(vendorBadgeHtml({ engine: 'grok', model: 'anthropic/claude-sonnet-4' }), vendorBadgeHtml({ engine: 'grok' }), '只有 pi 看模型')
 })
 
-test('大分頁：對話／夥伴／通知／設定四個固定，順序固定（和電腦版一樣），名稱純中文', () => {
-  assert.deepEqual(TABS, ['chats', 'list', 'notice', 'me']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['對話', '夥伴', '通知', '設定'])
+test('大分頁：夥伴／對話／設定／通知四個固定（#1429），順序固定（和電腦版一樣），名稱純中文', () => {
+  assert.deepEqual(TABS, ['list', 'chats', 'me', 'notice']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設定', '通知'])
   assert.deepEqual(TABS.map(tabIndex), [0, 1, 2, 3]); assert.equal(tabIndex('亂寫'), 0)
 })
 

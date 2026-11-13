@@ -86,7 +86,7 @@ test('3 分鐘到了收起、卸載畫面時，背景的開窗照常；再進「
   assert.match(track, /while \(lch\.id === t\.id && Date\.now\(\) < stop\)/)
   assert.doesNotMatch(track.replace(/if \(!\(nav\.tab === PAGE_TAB && fourthPage\.value\?\.kind === 'launch'\)\) banner\.value =/, ''), /fourth|nav\./, '追蹤不受內頁影響')
   assert.match(track, /if \(!\(nav\.tab === PAGE_TAB && fourthPage\.value\?\.kind === 'launch'\)\) banner\.value =/)
-  assert.match(js, /if \(launchInProgress\(lch\) \|\| \(isLaunch && lch\.phase === 'form'\)\) \{ if \(isLaunch\) goTab\(pageHost\(fourthSt\.fourth\)\); else fourthNav\.openPage\(launchPage\(\)\); return \}/, '還在開：接著顯示進度；還在填：接著填')
+  assert.match(js, /if \(launchInProgress\(lch\) \|\| \(isLaunch && lch\.phase === 'form'\)\) \{ if \(isLaunch\) goTab\(PAGE_TAB\); else fourthNav\.openPage\(launchPage\(\)\); return \}/, '還在開：接著顯示進度；還在填：接著填')
   const blk = html.slice(html.indexOf('<div class="m-pgin m-lch"'), html.indexOf('<!-- /內頁 -->'))
   assert.match(blk, /v-if="lch\.phase === 'form' && !lchStep2"[\s\S]*v-else-if="lch\.phase === 'form'"[\s\S]*<template v-else>[\s\S]*lch\.text/)
 })

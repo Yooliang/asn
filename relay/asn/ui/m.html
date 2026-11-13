@@ -50,7 +50,7 @@
     <!-- 一句話的提示（底部，幾秒後自己消失，點一下就關）：例如離開進行中的畫面後，帳號切換完成或失敗 -->
     <div class="m-toast" v-if="toast" role="status" @click="toast = ''">{{ toast }}</div>
 
-    <!-- 四個大分頁：對話／夥伴／通知／設定（和電腦版同樣的字、同樣的順序）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；內頁蓋在進來的那一格上；下拉重整只在夥伴頁 -->
+    <!-- 四個大分頁：夥伴／對話／設定／通知（#1429；和電腦版同樣的字、同樣的順序；section 的先後就是滑動的順序，要和 TABS 一致）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；內頁蓋在進來的那一格上；下拉重整只在夥伴頁 -->
     <section class="m-page" :style="{ '--pages': pages }">
       <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
         <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
@@ -65,6 +65,74 @@
       <div class="m-upd m-upd-last" v-if="sideloadLast" role="note"><span class="m-upd-tx">{{ sideloadLast }}</span></div>
       <div class="m-pager-wrap" @touchstart.passive="swipeStart($event, 'pager')" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd">
         <div class="m-pager" :class="{ dragging: sw.dragging }" :style="pagerStyle">
+
+          <!-- 夥伴：依設備分組的全部夥伴（群組在最上面），廠商小徽章、最後一句話 -->
+          <section class="m-pg" aria-label="夥伴">
+            <header class="m-head">
+              <button class="m-me" type="button" aria-label="設定" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
+              <div class="m-head-tx">
+                <div class="m-title">{{ myName }}</div>
+                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.nick">・{{ me.nick }}</template><template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
+              </div>
+              <div class="m-plus-wrap">
+                <button class="m-icon-btn" type="button" aria-label="新增" aria-haspopup="menu" :aria-expanded="plusOpen" @click="plusOpen = !plusOpen"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
+                <div class="m-plus-back" v-if="plusOpen" @click="plusOpen = false"></div>
+                <div class="m-plus-menu" v-if="plusOpen" role="menu">
+                  <button type="button" role="menuitem" @click="pickPlus('create')">建立群組</button>
+                  <button type="button" role="menuitem" @click="pickPlus('join')">加入群組／貼邀請碼</button>
+                  <button type="button" role="menuitem" @click="pickPlus('launch')">開新夥伴</button>
+                </div>
+              </div>
+            </header>
+            <ptr-zone :ptr="pf.ptr"></ptr-zone>
+            <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
+              <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
+              <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+              <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
+              <div class="m-group m-rooms" v-if="roomRows.length">
+                <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
+                  <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
+                </button>
+                <ul v-show="!collapsed[ROOM_GROUP_KEY]">
+                  <li v-for="r in roomRows" :key="r.id">
+                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
+                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                      <span class="b-text">
+                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
+                        <span class="b-last" v-if="r.last">{{ r.last }}</span>
+                      </span>
+                      <span class="unread" v-if="r.unread">{{ r.unread }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+              <div v-for="g in groups" :key="g.key" class="m-group">
+                <div class="m-ghead-row" v-if="g.kind !== 'notice'">
+                  <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
+                    <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
+                  </button>
+                  <button class="m-ghead-act" type="button" v-if="acctKeys.has(g.key)" :aria-label="ACCT_TEXT.button + '：' + g.label" @click="openAcct(g)">{{ ACCT_TEXT.button }}</button>
+                </div>
+                <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
+                  <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
+                    <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
+                      <span class="m-av-wrap">
+                        <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false"></asn-avatar>
+                      </span>
+                      <span class="b-text">
+                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                        <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
+                        <span class="b-last" v-if="lastOf(c.id)">{{ lastOf(c.id) }}</span>
+                      </span>
+                      <span class="unread" v-if="c.unread">{{ c.unread }}</span>
+                    </button>
+                    <button class="m-unarchive" type="button" v-if="g.kind === 'archived'" :aria-label="'取消封存 ' + c.nick" @click="setArchived(c, false)">取消封存</button>
+                  </li>
+                </ul>
+              </div>
+              <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
+            </div>
+          </section>
 
           <!-- 對話：先列出活動中的對話（夥伴與群組，新到舊），點一則才進到對話內容（多一層，返回或再點一次「對話」分頁回清單）；對話內容上方不放按鈕列，管理項目都在右上角「⋯」 -->
           <section class="m-pg" :class="nav.chat ? ['m-chat', { shake, 'is-room': chatFriend && chatFriend.room }] : 'm-chat-list'" aria-label="對話">
@@ -140,84 +208,6 @@
             </template>
           </section>
 
-          <!-- 夥伴：依設備分組的全部夥伴（群組在最上面），廠商小徽章、最後一句話 -->
-          <section class="m-pg" aria-label="夥伴">
-            <header class="m-head">
-              <button class="m-me" type="button" aria-label="設定" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
-              <div class="m-head-tx">
-                <div class="m-title">{{ myName }}</div>
-                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.nick">・{{ me.nick }}</template><template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
-              </div>
-              <div class="m-plus-wrap">
-                <button class="m-icon-btn" type="button" aria-label="新增" aria-haspopup="menu" :aria-expanded="plusOpen" @click="plusOpen = !plusOpen"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
-                <div class="m-plus-back" v-if="plusOpen" @click="plusOpen = false"></div>
-                <div class="m-plus-menu" v-if="plusOpen" role="menu">
-                  <button type="button" role="menuitem" @click="pickPlus('create')">建立群組</button>
-                  <button type="button" role="menuitem" @click="pickPlus('join')">加入群組／貼邀請碼</button>
-                  <button type="button" role="menuitem" @click="pickPlus('launch')">開新夥伴</button>
-                </div>
-              </div>
-            </header>
-            <ptr-zone :ptr="pf.ptr"></ptr-zone>
-            <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
-              <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
-              <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
-              <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
-              <div class="m-group m-rooms" v-if="roomRows.length">
-                <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
-                  <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
-                </button>
-                <ul v-show="!collapsed[ROOM_GROUP_KEY]">
-                  <li v-for="r in roomRows" :key="r.id">
-                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
-                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
-                      <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
-                        <span class="b-last" v-if="r.last">{{ r.last }}</span>
-                      </span>
-                      <span class="unread" v-if="r.unread">{{ r.unread }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
-              <div v-for="g in groups" :key="g.key" class="m-group">
-                <div class="m-ghead-row" v-if="g.kind !== 'notice'">
-                  <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
-                    <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
-                  </button>
-                  <button class="m-ghead-act" type="button" v-if="acctKeys.has(g.key)" :aria-label="ACCT_TEXT.button + '：' + g.label" @click="openAcct(g)">{{ ACCT_TEXT.button }}</button>
-                </div>
-                <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
-                  <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
-                    <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
-                      <span class="m-av-wrap">
-                        <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false"></asn-avatar>
-                      </span>
-                      <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
-                        <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
-                        <span class="b-last" v-if="lastOf(c.id)">{{ lastOf(c.id) }}</span>
-                      </span>
-                      <span class="unread" v-if="c.unread">{{ c.unread }}</span>
-                    </button>
-                    <button class="m-unarchive" type="button" v-if="g.kind === 'archived'" :aria-label="'取消封存 ' + c.nick" @click="setArchived(c, false)">取消封存</button>
-                  </li>
-                </ul>
-              </div>
-              <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
-            </div>
-          </section>
-
-          <!-- 通知：「通知」對話（唯讀：沒有輸入列、沒有通話鈕、沒有上線狀態） -->
-          <section class="m-pg m-chat m-notice" aria-label="通知">
-            <header class="m-head m-chathead">
-              <div class="m-head-tx"><div class="m-title">通知</div></div>
-            </header>
-            <chat-pane v-if="noticeChat" :friend="noticeChat" :me="meForChat" :log="noticeLog" :friend-av="avOf(noticeChat)" :me-av="meAv"
-              :no-bar="true" dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :hint-names="friends" :load-older="loadOlder"></chat-pane>
-            <div class="m-scroll" v-else><div class="empty-list">還沒有通知。</div></div>
-          </section>
-
           <!-- 設定 -->
           <section class="m-pg" aria-label="設定">
             <header class="m-head">
@@ -238,8 +228,18 @@
             </div>
           </section>
 
-          <!-- 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴。蓋在進來的那個分頁上（分頁列照樣標著那一格），跟著那一格一起滑；切走後留著（內容不卸載），切回那一格就回到內頁，3 分鐘沒回來才收起 -->
-          <section class="m-pg m-fourth" v-if="fourthPage && pageHost" :style="{ '--host': tabs.indexOf(pageHost) }" :aria-label="fourthTitle">
+          <!-- 通知：「通知」對話（唯讀：沒有輸入列、沒有通話鈕、沒有上線狀態） -->
+          <section class="m-pg m-chat m-notice" aria-label="通知">
+            <header class="m-head m-chathead">
+              <div class="m-head-tx"><div class="m-title">通知</div></div>
+            </header>
+            <chat-pane v-if="noticeChat" :friend="noticeChat" :me="meForChat" :log="noticeLog" :friend-av="avOf(noticeChat)" :me-av="meAv"
+              :no-bar="true" dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :hint-names="friends" :load-older="loadOlder"></chat-pane>
+            <div class="m-scroll" v-else><div class="empty-list">還沒有通知。</div></div>
+          </section>
+
+          <!-- 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴。暫時佔用第四格（蓋在通知上，分頁字換成內頁的標題），跟其他頁一樣滑；切走後留著（內容不卸載），切回第四格就回到內頁，3 分鐘沒回來、或這段時間有新通知進來，第四格就變回通知（#1429） -->
+          <section class="m-pg m-fourth" v-if="fourthPage && pageSlot >= 0" :style="{ '--host': pageSlot }" :aria-label="fourthTitle">
             <template v-if="fourthPage.kind === 'acct'">
               <!-- 設備與帳號（替電腦切換 Claude 帳號）：先看設備列表，點一台進細部（多一層，返回鍵回列表）；選帳號 → 確認 → 送出並等對方電腦回報 -->
               <header class="m-head m-chathead">

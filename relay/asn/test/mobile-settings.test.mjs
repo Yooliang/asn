@@ -52,7 +52,7 @@ test('設備與帳號（#268）：設定列表點了開名單設備卡「選項�
   const js = readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
   assert.match(js, /const openSetting = key => \{ if \(ACCT_SETTING_KEYS\.includes\(key\)\) void openAcct\(\{ tab: key \}\); else askBeforeLeave\(settingPage\(key\), \(\) => fourthNav\.openPage\(settingPage\(key\)\)\) \}/)
   assert.match(js, /devices: acctDevs\.value, accountCount:/, '摘要用同一份設備列表與帳號數')
-  assert.match(js, /const tabLabel = t => tabLabelOf\(t\)/, '分頁列四個字固定；內頁標題在內頁自己的頂端（fourthTitle）')
+  assert.match(js, /const tabLabel = t => tabLabelOf\(t, fourthTitle\.value\)/, '第四格有內頁時，分頁字是內頁的標題（fourthTitle，#1429）')
   assert.match(js, /const fourthTitle = computed\(/)
   const html = readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   assert.match(html, /@click="openAcct\(g\)"/, '設備卡的入口還在')

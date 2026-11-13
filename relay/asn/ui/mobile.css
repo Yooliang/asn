@@ -45,7 +45,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 
 /* 頁面骨架：最上面分頁列、其下標題列、中間可捲動（對話輸入區貼齊底部） */
 .m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
-/* 四個大分頁並排（對話／夥伴／通知／設定），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
+/* 四個大分頁並排（夥伴／對話／設定／通知），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
 .m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
 .m-pager{display:flex;width:calc(var(--pages,3) * 100%);height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
 .m-pager.dragging{transition:none}

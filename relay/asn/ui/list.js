@@ -1536,7 +1536,7 @@ const app = createApp({
     })
     const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))   // 比對規則和名單搜尋一樣
       .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) })))
-    const chatsUnreadN = computed(() => chatRowsUnread(chatAll.value))   // 「對話」分頁的紅點：清單上看得到的夥伴與群組的未讀（不含通知、已封存）
+    const chatsUnreadN = computed(() => chatRowsUnread(chatAll.value))   // 對話清單上看得到的夥伴與群組的未讀（不含通知、已封存）；#1429 起紅點掛在「夥伴」分頁，不掛「對話」
     const partnersUnread = computed(() => dev.value.all.some(d => d.unread))   // 「夥伴」分頁的紅點：任一台設備頁籤有未讀（以前左邊直排一直看得到，現在收進夥伴裡）
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
