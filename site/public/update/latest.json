@@ -1,11 +1,11 @@
 {
-  "version": "0.2.19",
-  "notes": "- 改善：四個大分頁的順序改成「夥伴｜對話｜設定｜通知」，電腦和手機一樣。聊天的未讀紅點改亮在「夥伴」。\n- 改善：手機打開設定裡的某一項、使用指引或開新視窗時，第四格「通知」會暫時換成那一頁（跟 0.2.17 一樣），離開 3 分鐘後或有新通知時換回「通知」。\n- 改善：手機「對話」分頁改回直接打開最後在聊的那一則（0.2.18 改成先看清單）。「夥伴」頁最上面多一組「未讀」，只列有未讀的夥伴和群組，最新的在前面，讀完就離開這一組。\n- 改善：現代外觀照設計稿重排：頭像改成圓形加狀態點、訊息改成圓角卡片、分頁改成膠囊、手機清單改成圓角列；對話頂端改成置中的名牌（頭像、名字、哪台電腦、狀態），其他動作收進「更多」或點名牌打開的選單；輸入框改成一列膠囊，表情、通話、照片、檔案等收進左邊的「＋」；電腦版的用戶區移到左欄底部；廣告框改成白底圓角卡片。選復古 Aero 的話畫面不變。\n- 改善：「工作項目」分開「正在跑」和「閒置」，按鈕上的數字只算正在跑的，閒置的另外標出來、排在後面。",
-  "pub_date": "2026-11-13T08:14:43.599Z",
+  "version": "0.2.20",
+  "notes": "- 新功能：手機（Play 安裝）有新版時，「設定」分頁和裡面的「更新」會亮紅點；「更新」頁會顯示新版號，按「到 Play 商店更新」就能去更新。\n- 改善：設定的「關於」補上簡介、這台設備的名稱，以及官網、版本紀錄、隱私權政策、使用指引的連結，電腦和手機內容一樣。\n- 修正：重開機後夥伴視窗還在自動接回時，手動按「喚醒」不會再多開出一個同名視窗（之前兩個視窗都收不到信）。\n- 改善：電腦版看得懂加密保存的節點金鑰，為之後預設加密做準備；這版預設照舊不加密，升級後不用重新登入。",
+  "pub_date": "2026-11-13T14:12:18.757Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVFZzZwc3pvMklRTzhhYVRPMjJaVzRIR3N1OVVCbDljMFJjSWtYSjRQSTV5RCtsRGNEUjRJTm5oNlQyVGIzaGJtTUZqd3krUHU5Y2FLN1F2NUlHN2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NTQ2MTk0CWZpbGU6QVNOXzAuMi4xOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjE5CjdlRW5ld1dqT2FsUkhKMWVobUxCSnhvK2hvRVZGZjZsZUM3MkxxRmRxQ0hNbWRxSStJUCtsWGVabWJyZHFtZjJ1SFZFSjBncnp2UzJzTmErR01JOERBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.19_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBocVFnaFczdlZvd0I2QVoxWmR3ZGpmMmR5Q1FnU0dKSGlTRk8rTTJFRmtDcFMxcVBwY2R0U05PcytZYzh3R1BCTHpCaTRwaGV5Njg5RmVVZFZlQ0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NTc2MTkzCWZpbGU6QVNOXzAuMi4yMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIwCjZrN2Z4eG5OZjZlZm1kMVJDVFQyRC83SkZZOEVqRDBka1ZFUFpoakppN1FRaEZtT0R6S1dhcDcybEVvOXN5RTZ2dUhicW54Um1jMnVzeGVoUlJneEJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.20_x64-setup.exe"
     }
   }
 }
