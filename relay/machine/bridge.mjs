@@ -36,6 +36,7 @@ import { acquireLock } from './bridge-lock.mjs'
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'H').trim()
 const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
 import { HOME_DIR, locateHome } from './home.mjs'
+import { SEALED_KEY_MSG, readMachineKey } from './identity.mjs'
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
 const DEFAULT_AGENT = (envGet(process.env, 'RELAY_DEFAULT_AGENT') || '').trim()   // 沒指定收件視窗的信交給誰；空＝不丟給任何 session（留在信箱，等 ASN 視窗的本人處理）
@@ -67,7 +68,14 @@ function readSecret(env, file) {
   if (v) return v
   try { return fs.readFileSync(locateHome(file), 'utf8').trim() } catch { return '' }
 }
-const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
+// 節點金鑰統一走 identity.mjs 的 readMachineKey（ASN_RELAY_KEY 優先；金鑰檔已經加密保存時印出說明並停下，不帶錯的金鑰連後台）
+function loadNodeKey() {
+  try { return readMachineKey(NODE_ID) } catch (e) {
+    if (e?.message === SEALED_KEY_MSG) { console.error(e.message); process.exit(2) }
+    return ''
+  }
+}
+const KEY = loadNodeKey()
 const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 

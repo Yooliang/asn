@@ -2,9 +2,10 @@
 // 用法：node tools-provision.mjs <新代號> [顯示名]
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { HOME_DIR } from './home.mjs'
+import { readMachineKey } from './identity.mjs'
 const URL_ = 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 const dir = HOME_DIR
-const hkey = fs.readFileSync(path.join(dir, 'H.key'), 'utf8').trim()
+const hkey = readMachineKey('H')   // ASN_RELAY_KEY 優先；金鑰檔加密保存時丟明確錯誤
 const id = process.argv[2], name = process.argv[3] || id
 const inv = await (await fetch(`${URL_}?action=invite`, { method: 'POST', headers: { 'x-relay-key': hkey, 'content-type': 'application/json' }, body: JSON.stringify({ note: 'bridge test node' }) })).json()
 if (!inv.invite) { console.log('invite failed', JSON.stringify({ ...inv, invite: undefined })); process.exit(1) }

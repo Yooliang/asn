@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { keyFromFileText } from './identity.mjs'
 
 export const DEFAULT_URL = 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 export const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
@@ -68,8 +69,11 @@ async function call(fetchImpl, url, { method = 'POST', key, body } = {}) {
   }
 }
 
+// 已存的金鑰：金鑰檔已經加密保存（ak1:）時丟 identity.mjs 的明確錯誤（不當成「沒有金鑰」而重新註冊、也不送出）
 export function readSavedKey(id, home) {
-  try { return fs.readFileSync(path.join(homeDirOf(home), `${id}.key`), 'utf8').trim() } catch { return '' }
+  let text = ''
+  try { text = fs.readFileSync(path.join(homeDirOf(home), `${id}.key`), 'utf8') } catch { return '' }
+  return keyFromFileText(text)
 }
 
 // 確認已存的金鑰還有效（whoami）。回傳 { ok, node? }

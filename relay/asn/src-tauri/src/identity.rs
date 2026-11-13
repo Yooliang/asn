@@ -81,7 +81,8 @@ pub fn read_key(relay_home: &Path, node: &str, env_key: Option<String>) -> Resul
     read_key_with(relay_home, node, env_key, aead.as_deref())
 }
 
-/// 讀節點金鑰：手機（aead 有值）的金鑰檔是金鑰庫加密的，舊的明文檔讀出後順手改存成加密的（secret_file.rs）；電腦版原樣讀
+/// 讀節點金鑰：手機的金鑰檔是金鑰庫加密的；Windows 0.2.20 起讀得懂 DPAPI 加密的（要不要改存成加密看 secret_file.rs 的開關）；
+/// 舊的明文檔照舊讀出。Linux 原樣讀
 pub fn read_key_with(relay_home: &Path, node: &str, env_key: Option<String>, aead: Option<&dyn crate::android_keywrap::Aead>) -> Result<String, String> {
     if let Some(k) = env_key.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
         return Ok(k);

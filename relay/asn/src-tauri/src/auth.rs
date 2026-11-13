@@ -431,36 +431,54 @@ pub struct Dpapi;
 #[cfg(windows)]
 const DPAPI_ENTROPY: &[u8] = b"asn-login-v1";
 
+/// Windows 的 DPAPI（目前使用者）：加密。`entropy` 綁用途（登入資料、某個節點的金鑰檔），換別的 entropy 就解不開
+#[cfg(windows)]
+pub(crate) fn dpapi_protect(plain: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
+    let input = CRYPT_INTEGER_BLOB { cbData: plain.len() as u32, pbData: plain.as_ptr() as *mut u8 };
+    let ent = CRYPT_INTEGER_BLOB { cbData: entropy.len() as u32, pbData: entropy.as_ptr() as *mut u8 };
+    let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+    // CRYPTPROTECT_UI_FORBIDDEN = 1
+    let ok = unsafe { CryptProtectData(&input, std::ptr::null(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
+    if ok == 0 || out.pbData.is_null() {
+        return Err("Windows 加密失敗".into());
+    }
+    let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
+    unsafe {
+        std::ptr::write_bytes(out.pbData, 0, out.cbData as usize);   // 系統配的緩衝放回去前先清零
+        LocalFree(out.pbData as _)
+    };
+    Ok(v)
+}
+
+/// Windows 的 DPAPI（目前使用者）：解密，`entropy` 要和加密時相同
+#[cfg(windows)]
+pub(crate) fn dpapi_unprotect(sealed: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
+    let input = CRYPT_INTEGER_BLOB { cbData: sealed.len() as u32, pbData: sealed.as_ptr() as *mut u8 };
+    let ent = CRYPT_INTEGER_BLOB { cbData: entropy.len() as u32, pbData: entropy.as_ptr() as *mut u8 };
+    let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+    let ok = unsafe { CryptUnprotectData(&input, std::ptr::null_mut(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
+    if ok == 0 || out.pbData.is_null() {
+        return Err("Windows 解密失敗（可能不是這個使用者存的）".into());
+    }
+    let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
+    unsafe {
+        std::ptr::write_bytes(out.pbData, 0, out.cbData as usize);   // 解出來的明文：系統配的緩衝放回去前先清零
+        LocalFree(out.pbData as _)
+    };
+    Ok(v)
+}
+
 #[cfg(windows)]
 impl Protector for Dpapi {
     fn protect(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
-        use windows_sys::Win32::Foundation::LocalFree;
-        use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
-        let input = CRYPT_INTEGER_BLOB { cbData: plain.len() as u32, pbData: plain.as_ptr() as *mut u8 };
-        let ent = CRYPT_INTEGER_BLOB { cbData: DPAPI_ENTROPY.len() as u32, pbData: DPAPI_ENTROPY.as_ptr() as *mut u8 };
-        let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
-        // CRYPTPROTECT_UI_FORBIDDEN = 1
-        let ok = unsafe { CryptProtectData(&input, std::ptr::null(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
-        if ok == 0 || out.pbData.is_null() {
-            return Err("Windows 加密失敗".into());
-        }
-        let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
-        unsafe { LocalFree(out.pbData as _) };
-        Ok(v)
+        dpapi_protect(plain, DPAPI_ENTROPY)
     }
     fn unprotect(&self, sealed: &[u8]) -> Result<Vec<u8>, String> {
-        use windows_sys::Win32::Foundation::LocalFree;
-        use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
-        let input = CRYPT_INTEGER_BLOB { cbData: sealed.len() as u32, pbData: sealed.as_ptr() as *mut u8 };
-        let ent = CRYPT_INTEGER_BLOB { cbData: DPAPI_ENTROPY.len() as u32, pbData: DPAPI_ENTROPY.as_ptr() as *mut u8 };
-        let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
-        let ok = unsafe { CryptUnprotectData(&input, std::ptr::null_mut(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
-        if ok == 0 || out.pbData.is_null() {
-            return Err("Windows 解密失敗（可能不是這個使用者存的）".into());
-        }
-        let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
-        unsafe { LocalFree(out.pbData as _) };
-        Ok(v)
+        dpapi_unprotect(sealed, DPAPI_ENTROPY)
     }
 }
 
