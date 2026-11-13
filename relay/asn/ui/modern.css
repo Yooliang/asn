@@ -286,3 +286,13 @@
 /* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}
+
+/* ---------- 工作管理員（0.2.21）：現代外觀的表格與提示，只換顏色、圓角與邊線，結構與 Aero 相同 ---------- */
+:root[data-skin="modern"] .tm-scroll{border-color:var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="modern"] .tm-table th{background:var(--panel-soft);color:var(--muted);font-weight:600}
+:root[data-skin="modern"] .tm-table td{border-top-color:var(--line)}
+:root[data-skin="modern"] .tm-table tr.dup td{background:#fdf3ef}
+:root[data-skin="modern"] .tm-tag{background:var(--modern-soft);color:var(--accent)}
+:root[data-skin="modern"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
+:root[data-skin="modern"] .tm-warn{border:1px solid #ecd9a0;border-radius:12px;background:#fffbe6;color:#6b5400}
+:root[data-skin="modern"] .tm-facts{border-radius:12px;background:var(--panel-soft)}

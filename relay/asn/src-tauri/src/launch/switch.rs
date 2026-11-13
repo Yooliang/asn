@@ -381,6 +381,10 @@ pub(crate) trait Os {
     fn started_ms(&self, _pid: u32) -> Option<u64> {
         None
     }
+    /// 程序目前的工作集大小（位元組，只讀；工作管理員用）。查不到＝None。預設查不到，現有的假 Os 不用改
+    fn memory_bytes(&self, _pid: u32) -> Option<u64> {
+        None
+    }
     /// 對該 pid 的主控台視窗送關閉訊息；有送出才回 true
     fn close_window(&self, pid: u32) -> bool;
     /// ASN 自己開的 WezTerm（對照表裡的）：（GUI 程序編號, 開的時候量到的建立時間）。預設沒有，現有的假 Os 不用改
@@ -790,6 +794,9 @@ impl Os for RealOs {
     fn started_ms(&self, pid: u32) -> Option<u64> {
         crate::heartbeat::process_started_ms(pid)
     }
+    fn memory_bytes(&self, pid: u32) -> Option<u64> {
+        winapi::working_set_of(pid)
+    }
     fn close_window(&self, pid: u32) -> bool {
         winapi::post_close(pid)
     }
@@ -820,6 +827,12 @@ impl Os for RealOs {
     }
     fn processes(&self) -> Vec<Proc> {
         Vec::new()
+    }
+    fn memory_bytes(&self, pid: u32) -> Option<u64> {
+        // Linux：讀 /proc/<pid>/status 的 VmRSS（單位 kB）；其他平台查不到
+        let text = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        let kb: u64 = text.lines().find_map(|l| l.strip_prefix("VmRSS:"))?.split_whitespace().next()?.parse().ok()?;
+        kb.checked_mul(1024)
     }
     fn alive(&self, _pid: u32) -> bool {
         false
@@ -976,6 +989,26 @@ pub(crate) mod winapi {
             CloseHandle(snap);
         }
         out
+    }
+
+    /// 程序目前的工作集大小（位元組，只讀）；開不了程序或查不到回 None
+    pub fn working_set_of(pid: u32) -> Option<u64> {
+        use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+        if pid == 0 {
+            return None;
+        }
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            let ok = GetProcessMemoryInfo(h, &mut c, c.cb) != 0;
+            CloseHandle(h);
+            ok.then_some(c.WorkingSetSize as u64)
+        }
     }
 
     /// 結束單一程序（呼叫端負責只傳允許清單內的 pid）

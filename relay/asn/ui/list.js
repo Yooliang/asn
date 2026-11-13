@@ -60,6 +60,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { createTaskManager, initialState as initialTaskState } from './lib/task-manager.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
@@ -746,6 +747,8 @@ async function refreshOpsCtx() {
 // 前台／後台（或 ACP 模式）與切換模型＝barSlots 的第 2、3 格；其餘＝partnerMenuItems（key 去掉 p: 前綴）。
 // 右鍵沒有大按鈕列，所以第 2 格不換成喚醒（wake:false），喚醒留在右鍵選單裡；對話頁的「管理」則拿掉喚醒（在第 2 格）
 const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
+// 工作管理員（設定 → 設備 → 這台電腦）：清單只在頁面開著時每 5 秒更新；「停止」走既有的關閉流程（lib/task-manager.mjs）
+const taskMgr = createTaskManager({ api: transport, getFriends: () => friends.value, getSelfNode: () => info.node, getOpsCtx: () => buddyOpsCtx.value, refreshOps: refreshOpsCtx, sendMail: (id, text) => core.send(id, text), state: reactive(initialTaskState()) })
 const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value, info.node).map(i => ({ ...i, key: i.key.slice(2) })))
 const opDlg = reactive({ open: false, op: '', friend: null, item: null, taken: [] })
 function openPartnerOp(it) {
@@ -1876,6 +1879,7 @@ const app = createApp({
       notify: notifyPrefs.value, skin: skin.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
+      taskMgr: taskMgr.view(),
       devices: deviceTree.value, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
       install: installView(agentInstall.state),
       accounts: {
@@ -1973,6 +1977,12 @@ const app = createApp({
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
+        case 'tm-open': taskMgr.open(); break
+        case 'tm-close': taskMgr.close(); break
+        case 'tm-ask': taskMgr.ask(String(value ?? '')); break
+        case 'tm-cancel': taskMgr.cancel(); break
+        case 'tm-confirm': await taskMgr.confirm(); break
+        case 'tm-wake': await taskMgr.wake(String(value ?? '')); break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
         default: break
@@ -1980,6 +1990,7 @@ const app = createApp({
     }
     // 分離模式的指引、設定視窗：開起來先問一聲（hello），樞紐回目前要顯示哪一篇與設定快照；之後設定一變就推新快照
     watch(() => ui.panel.setting, k => {
+      if (normalizeCatKey(k) !== 'devices') taskMgr.close()   // 離開「設備」頁就不再更新工作管理員
       if (k === 'usage') void usage.refresh()
       if (k) void accounts.refreshQuota()   // 打開設定頁（或換頁籤）時重讀額度
       if (['devices', 'accounts'].includes(normalizeCatKey(k))) void accounts.refreshRoster()   // 打開「設備」或「帳號」時讀一次帳號列表（#374）
