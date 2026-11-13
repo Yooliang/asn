@@ -1008,6 +1008,36 @@ export const mpaneWidenProbeSource = () => `(async () => {
 // 手機四個分頁（0.2.18；#1429 改順序與第四格；#1438 對話分頁直接是那一則）：開 App 先看「對話」＝上次那一則（沒有清單）；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
 // 切到夥伴、再點第四格回到內頁；分頁列的字與順序和電腦版一樣
 export const MTABS_PROBE = { mtabs: true }
+// 手機對話頂端左上的「返回」（0.2.21 小良哥拍板加回來）：一對一、群組都有；現代外觀名牌照樣置中、不和返回鈕重疊；按下去切到「夥伴」分頁
+export const MCHAT_BACK_PROBE = { mchatBack: true }
+export const mchatBackProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const sec = () => document.querySelector('section.m-pg.m-chat');
+  let back = null;
+  for (let i = 0; i < 60 && !back; i++) { back = sec()?.querySelector('.m-chathead .m-back'); if (!back || back.offsetParent === null) { back = null; await sleep(100) } }
+  if (!back) return { ok: false, why: '對話頂端左邊沒有「返回」鈕' };
+  if (!/夥伴/.test(back.getAttribute('aria-label') || '')) return { ok: false, why: '返回鈕的說明要寫回夥伴：' + back.getAttribute('aria-label') };
+  const head = back.closest('.m-chathead');
+  const b = back.getBoundingClientRect(), h = head.getBoundingClientRect();
+  if (b.left > h.left + h.width / 3) return { ok: false, why: '返回鈕要在頂端左邊' };
+  const plate = head.querySelector('.m-plate');
+  if (plate && plate.offsetParent !== null) {
+    const p = plate.getBoundingClientRect();
+    if (Math.abs((p.left + p.right) / 2 - (h.left + h.right) / 2) > 4) return { ok: false, why: '名牌沒有置中：差 ' + Math.round((p.left + p.right) / 2 - (h.left + h.right) / 2) + 'px' };
+    if (b.right > p.left) return { ok: false, why: '返回鈕和名牌重疊' };
+  } else {
+    const pic = head.querySelector('.m-pic');
+    if (pic && b.right > pic.getBoundingClientRect().left + 1) return { ok: false, why: '返回鈕和頭像重疊' };
+  }
+  if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
+  const before = history.length;
+  back.click();
+  let on = '';
+  for (let i = 0; i < 40 && on !== '夥伴'; i++) { await sleep(100); on = document.querySelector('.m-tabs button.on span')?.textContent.trim() || '' }
+  if (on !== '夥伴') return { ok: false, why: '按返回沒有切到夥伴分頁，現在是 ' + on };
+  if (!document.querySelector('section.m-pg[aria-label="夥伴"] .m-buddy')) return { ok: false, why: '夥伴分頁沒有內容' };
+  return { ok: true, why: '' };
+})()`
 export const mtabsProbeSource = () => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const inView = e => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.left > -2 && r.right < innerWidth + 2 };
@@ -1254,8 +1284,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2035,6 +2065,9 @@ export const SCENARIOS = [
   { name: 'list-bar-tasks', page: 'list.html', state: { signedIn: true, bar: 'tasks' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.tasks },
   // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
   // 手機對話頁（不放按鈕列）：412 寬，Claude 視窗、ACP 工作者、離線 Claude；上方沒有按鈕列、「⋯」不列永遠用不到的項目（在線：切換模型、詳情在前；離線：喚醒、切換模型在前；內建通道才有重開、移除）、標頭留著背景工作件數
+  { name: 'm-chat-back', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_BACK_PROBE, shot: 'm-chat-back.png' },
+  { name: 'm-chat-back-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_BACK_PROBE, shot: 'm-chat-back-modern.png' },
+  { name: 'm-chat-back-group-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_BACK_PROBE, shot: 'm-chat-back-group-modern.png' },
   { name: 'm-tabs', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MTABS_PROBE, shot: 'm-tabs.png' },
   // #1438：夥伴頁最上面的「未讀」（Aero 與現代各一）、對話分頁還沒有最後一則時的提示
   { name: 'm-unread', page: 'm.html', state: { signedIn: true, munread: true, mtab: 'list' }, ready: '#app.m .m-unread', probe: MUNREAD_PROBE, shot: 'm-unread.png' },
