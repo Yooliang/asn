@@ -620,11 +620,8 @@
                   </div>
                   <div class="m-card m-form m-set-list m-about-links">
                     <ul class="m-guide-list">
-                      <li v-for="l in about.links" :key="l.key">
-                        <button class="m-row-btn" type="button" @click="openAboutLink(l.url)"><span class="m-row-tx"><b>{{ l.label }}</b></span><span class="m-caret" aria-hidden="true">↗</span></button>
-                      </li>
-                      <li>
-                        <button class="m-row-btn m-about-guide" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ about.guideLabel }}</b></span><span class="m-caret" aria-hidden="true">▸</span></button>
+                      <li v-for="l in about.items" :key="l.key">
+                        <button class="m-row-btn" :class="'m-about-' + l.key" type="button" @click="aboutAct(l)"><span class="m-row-tx"><b>{{ l.label }}</b></span><span class="m-caret" aria-hidden="true">{{ l.kind === 'link' ? '↗' : '▸' }}</span></button>
                       </li>
                     </ul>
                   </div>

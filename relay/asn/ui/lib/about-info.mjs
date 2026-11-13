@@ -7,14 +7,18 @@ export const ABOUT_INTRO = 'ASN（Agent Sync Network）是讓你的 AI 夥伴和
 export const ABOUT_MAKER = '出品：Yooliang'
 
 const SITE = 'https://asnmessenger.web.app'
-// 外部連結（用系統瀏覽器開；Rust 端 open_link 只放行 http／https）。「使用指引」不在這裡：它開 App 裡的指引頁。
-export const ABOUT_LINKS = [
-  { key: 'site', label: '官網', url: `${SITE}/` },
-  { key: 'log', label: '版本紀錄', url: `${SITE}/log` },
-  { key: 'privacy', label: '隱私權政策', url: `${SITE}/privacy` },
+// 「關於」的連結列，照順序：官網、版本紀錄、隱私權政策、使用指引。
+// kind 'link'＝外部連結（用系統瀏覽器開；Rust 端 open_link 只放行 http／https）；
+// 'update'＝切到 App 內設定的「更新」頁（版本紀錄在那裡）；'guide'＝開 App 內的使用指引頁。
+export const ABOUT_ITEMS = [
+  { key: 'site', kind: 'link', label: '官網', url: `${SITE}/` },
+  { key: 'update', kind: 'update', label: '版本紀錄' },
+  { key: 'privacy', kind: 'link', label: '隱私權政策', url: `${SITE}/privacy` },
+  { key: 'guide', kind: 'guide', label: GUIDE_ENTRY_LABEL },
 ]
+// 只有外部連結（官網、隱私權政策）才開瀏覽器
+export const ABOUT_LINKS = ABOUT_ITEMS.filter(i => i.kind === 'link')
 export const ABOUT_URLS = ABOUT_LINKS.map(l => l.url)
-export const ABOUT_GUIDE_LABEL = GUIDE_ENTRY_LABEL
 
 /** 只放行「關於」頁上的那幾個網址（防止設定訊息被拿去開別的網址） */
 export const isAboutUrl = url => ABOUT_URLS.includes(url)
@@ -26,8 +30,7 @@ export function aboutView({ deviceName = '' } = {}) {
     title: ABOUT_TITLE,
     intro: ABOUT_INTRO,
     deviceLine: name ? `這台設備：${name}` : '',
-    links: ABOUT_LINKS,
-    guideLabel: ABOUT_GUIDE_LABEL,
+    items: ABOUT_ITEMS,
     maker: ABOUT_MAKER,
   }
 }

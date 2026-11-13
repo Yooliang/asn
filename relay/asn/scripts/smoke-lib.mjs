@@ -851,6 +851,22 @@ export const dtabsProbeSource = () => `(async () => {
 })()`
 // 外觀「現代」（0.2.18）：存檔選了現代，畫面一開就是現代（<html data-skin="modern">、主色變青綠），而且沒有橫向捲動；截圖給人看整體樣子
 export const SKIN_PROBE = { skinCheck: true }
+// 電腦版「關於」區（#1439）：簡介、版本、四個按鈕（官網、版本紀錄、隱私權政策、使用指引）、記錄、出品都在，且不撐破設定窗寬度
+export const ABOUT_PROBE = { aboutCheck: true }
+export const aboutProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let intro = null;
+  for (let i = 0; i < 60 && !intro; i++) { intro = document.querySelector('.settings .about-intro'); if (!intro) await sleep(200); }
+  if (!intro) return { ok: false, why: '設定的「關於」沒有出現' };
+  const root = intro.closest('.settings');
+  const text = root.textContent;
+  const missing = ['Agent Sync Network', '版本 ', '官網', '版本紀錄', '隱私權政策', '使用指引', '檢視記錄', 'Yooliang'].filter(w => !text.includes(w));
+  if (missing.length) return { ok: false, why: '「關於」少了：' + missing.join('、') };
+  const btns = [...root.querySelectorAll('.about-links button')].map(b => b.textContent.trim());
+  if (btns.join('|') !== '官網|版本紀錄|隱私權政策|使用指引') return { ok: false, why: '連結按鈕不對：' + btns.join('|') };
+  if (root.scrollWidth > root.clientWidth + 1) return { ok: false, why: '「關於」內容超出設定窗寬度' };
+  return { ok: true, why: '' };
+})()`
 export const SKIN_KEYS_PROBE = { skinCheck: true, keys: true }
 export const skinProbeSource = (probe = {}) => `(async () => {
   const KEYS = ${JSON.stringify(probe.keys === true)};
@@ -961,8 +977,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1703,6 +1719,8 @@ export const SCENARIOS = [
   { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
   { name: 'list-aero-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar', shot: 'list-aero-chat.png' },
+  { name: 'list-aero-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-aero-about.png' },
+  { name: 'list-modern-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true, skin: 'modern' }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-modern-about.png' },
   { name: 'list-modern-term', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-modern-term.png' },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -1712,6 +1730,7 @@ export const EXCLUDED_PAGES = {
 
 // 這個情境的完整假回應表（引導情境不預設「已引導」，讓引導畫面出現）
 // 帳號列表（#374）情境：整合模式、上次開著「設定：帳號」，開機就會讀 acct_roster
+export const ABOUT_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'about' }, windows: [], panelWindows: [] } }
 export const ROSTER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'accounts' }, windows: [], panelWindows: [] } }
 export const ROSTER_SAMPLE = {
   now: '2026-10-29T00:00:00Z',
@@ -1730,6 +1749,7 @@ export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
   const t = fakeTable(scenario.state)
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
+  if (scenario.state.aboutPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ABOUT_ME) } }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
   if (scenario.state.partnerTab) { t.relay_list = { members: PARTNER_MEMBERS }; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } } }
   if (scenario.state.bar) {

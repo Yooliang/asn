@@ -31,7 +31,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -712,8 +712,11 @@ export const SettingsPanel = {
         <small class="about-device" v-if="about.deviceLine">{{ about.deviceLine }}</small>
         <section class="set-card about-links" aria-label="連結">
           <div class="upd-row">
-            <button class="aero-btn" type="button" v-for="l in about.links" :key="l.key" @click="act('open-link', l.url)">{{ l.label }}</button>
-            <button class="aero-btn about-guide" type="button" @click="act('open-guide')">{{ about.guideLabel }}</button>
+            <template v-for="l in about.items" :key="l.key">
+              <button class="aero-btn" :class="'about-' + l.key" type="button" v-if="l.kind === 'link'" @click="act('open-link', l.url)">{{ l.label }}</button>
+              <button class="aero-btn" :class="'about-' + l.key" type="button" v-else-if="l.kind === 'update'" @click="act('open-update')">{{ l.label }}</button>
+              <button class="aero-btn" :class="'about-' + l.key" type="button" v-else @click="act('open-guide')">{{ l.label }}</button>
+            </template>
           </div>
         </section>
         <section class="set-card" aria-label="記錄">

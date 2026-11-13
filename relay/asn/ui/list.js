@@ -1974,6 +1974,7 @@ const app = createApp({
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
         case 'open-link': if (isAboutUrl(value)) { try { await invoke('open_link', { url: value }) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
+        case 'open-update': await openPanel('setting', 'update'); break   // 版本紀錄在 App 內設定的「更新」
         case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
         case 'avatar-remove': await removeAvatar(); break
