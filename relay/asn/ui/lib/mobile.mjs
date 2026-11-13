@@ -45,6 +45,7 @@ export const tabNav = t => ({ tab: normalizeTab(t), sheet: '', chat: false })
 export const chatNav = () => ({ tab: 'chats', sheet: '', chat: true })   // 對話分頁裡點進某一則
 export const meNav = () => tabNav('me')
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops', chat: true })
+export const offlineNav = () => ({ tab: 'chats', sheet: 'offline', chat: true })   // 群組的「N 人離線」名單（#1460）
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret', chat: true })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq', chat: true })
 export const permReqNav = () => ({ tab: 'chats', sheet: 'permreq', chat: true })
@@ -53,6 +54,7 @@ export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', chat: false, page: n
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'ops') return opsNav()
+  if (raw?.sheet === 'offline') return offlineNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.sheet === 'permreq') return permReqNav()
