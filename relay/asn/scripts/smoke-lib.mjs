@@ -322,6 +322,8 @@ export const GROUP_OFFLINE_LONG_ROOM = { ...GROUP_OFFLINE_ROOM, name: LONG_ROOM_
 export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線' }
 // 長群組名字：按鈕左緣要在名牌右緣之右（不蓋名牌），且整顆按鈕在視窗內
 export const GOFFLINE_LONG_WANT = { ...GOFFLINE_WANT, fit: true }
+// 名牌置中：一對一、沒有離線鈕的群組，名牌中心與 .mbar 中心相差不得超過 4px
+export const GOFFLINE_NONE_CENTER = { none: true, center: true }
 export const gofflineProbeSource = ({ goffline }) => `(async () => {
   const want = ${JSON.stringify(goffline)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -330,7 +332,14 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
   const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   let btn = null;
   for (let i = 0; i < 30 && !btn; i++) { btn = vis(".mbar .mbtn-offline")[0] || null; if (!btn) await sleep(100) }
-  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: '' };
+  if (want.center) {
+    const pl = document.querySelector('.mbar .mbar-plate'), bar = document.querySelector('.mbar');
+    if (!pl || !bar) return { ok: false, why: '找不到名牌或標題列' };
+    const p = pl.getBoundingClientRect(), m = bar.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
+    window.__center = { plateCenter: (p.left + p.right) / 2, barCenter: (m.left + m.right) / 2, diff };
+    if (Math.abs(diff) > 4) return { ok: false, why: '名牌沒有置中：名牌中心 ' + (p.left + p.right) / 2 + '、標題列中心 ' + (m.left + m.right) / 2 + '、差 ' + diff };
+  }
+  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__center ? '名牌中心差 ' + window.__center.diff : '' };
   if (!btn) return { ok: false, why: '現代外觀的群組頂端沒有「N 人離線」' };
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
@@ -1891,7 +1900,8 @@ export const SCENARIOS = [
   { name: 'list-group-offline-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_WANT }, shot: 'list-group-offline-modern.png' },
   { name: 'list-group-offline-long-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_WANT }, shot: 'list-group-offline-long-modern.png' },
   { name: 'm-group-offline-long-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_LONG_WANT }, shot: 'm-group-offline-long-modern.png' },
-  { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
+  { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
+  { name: 'list-modern-msgs-center', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
   { name: 'list-group-offline-aero', page: 'list.html', state: { signedIn: true, groupTab: true, offline: true }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
   { name: 'm-group-offline-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_WANT }, shot: 'm-group-offline-modern.png' },
   { name: 'm-group-online-modern', page: 'm.html', state: { signedIn: true, mgroup: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true } } },
