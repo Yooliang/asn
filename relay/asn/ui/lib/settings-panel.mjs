@@ -24,6 +24,7 @@ import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, used
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
+import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFetchLine, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
@@ -31,7 +32,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake',
 ]
 
 export const SettingsPanel = {
@@ -39,7 +40,7 @@ export const SettingsPanel = {
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'acct' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
-    const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
+    const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const fileEl = ref(null)
     // 舊的分類鍵（accounts）併進 devices
     const cat = computed(() => normalizeCatKey(props.catKey))
@@ -58,7 +59,12 @@ export const SettingsPanel = {
     const view = ref(props.devView === 'info' ? 'info' : 'acct')   // 選了某台之後看哪一頁：acct＝帳號、info＝詳情
     const open = key => { picked.value = key; view.value = 'acct'; askRemove.value = false; renaming.value = false }
     const openInfo = key => { picked.value = key; view.value = 'info'; askRemove.value = false; renaming.value = false }
-    const backToList = () => { picked.value = ''; view.value = 'acct'; askRemove.value = false; renaming.value = false }
+    // 工作管理員：只有這台電腦有；進來才開始每 5 秒更新，離開（返回、換頁、關掉設定）就停（樞紐收到 tm-close）
+    const openTasks = key => { picked.value = key; view.value = 'tasks'; askRemove.value = false; renaming.value = false; act('tm-open') }
+    const backToList = () => { if (view.value === 'tasks') act('tm-close'); picked.value = ''; view.value = 'acct'; askRemove.value = false; renaming.value = false }
+    onBeforeUnmount(() => { if (view.value === 'tasks') act('tm-close') })
+    // 停在工作管理員時這台電腦從清單消失：退回清單並停掉每 5 秒更新
+    watch(() => view.value === 'tasks' && !curDev.value?.self, gone => { if (gone) backToList() })
     const removeNow = () => { const k = curDev.value?.key; if (!k) return; act('device-remove', k); backToList() }
     // 滑鼠拖放：拖到某列的上半＝插在前面、下半＝插在後面；放開時交給樞紐存順序
     const dragKey = ref(''), overKey = ref(''), overAfter = ref(false)
@@ -147,7 +153,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { TM, TM_COLUMNS, openTasks, KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -370,8 +376,55 @@ export const SettingsPanel = {
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
+              <button class="aero-btn dv-tasks" type="button" v-if="curDev.self && st.taskMgr && view !== 'tasks'" @click="openTasks(curDev.key)">{{ TM.entry }}</button>
             </div>
-            <div class="dv-info" v-if="view === 'info'">
+            <div class="tm" v-if="view === 'tasks' && st.taskMgr">
+              <div class="tm-bar">
+                <b class="tm-sum">這台電腦上 ASN 管的程式共 {{ st.taskMgr.total }} 個</b>
+                <span class="tm-tag dup" v-if="st.taskMgr.dupCount">{{ st.taskMgr.dupCount }} 組名字重複</span>
+                <span class="tm-auto">{{ TM.auto }}</span>
+              </div>
+              <p class="tm-warn" v-if="st.taskMgr.dupBanner" role="alert">{{ st.taskMgr.dupBanner }}</p>
+              <p class="tm-err" v-if="st.taskMgr.error" role="alert">{{ st.taskMgr.error }}</p>
+              <small v-if="!st.taskMgr.loaded && !st.taskMgr.error">{{ TM.refreshing }}</small>
+              <small v-if="st.taskMgr.empty">{{ TM.empty }}</small>
+              <div class="tm-scroll" v-if="st.taskMgr.rows.length">
+                <table class="tm-table">
+                  <thead><tr><th v-for="c in TM_COLUMNS" :key="c" scope="col">{{ c }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="r in st.taskMgr.rows" :key="r.key" :class="{ dup: r.dup, view: r.viewOnly }" :data-kind="r.kind">
+                      <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small></td>
+                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td>{{ r.source }}</td>
+                      <td class="tm-act">
+                        <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
+                        <small class="tm-viewonly" v-else :title="r.why">{{ TM.viewOnly }}</small>
+                        <small class="tm-why" v-if="!r.viewOnly && !r.canStop && r.why">{{ r.why }}</small>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="tm-line" v-if="st.taskMgr.note" role="status">{{ st.taskMgr.note }}</p>
+              <details class="tm-known" v-if="st.taskMgr.known.length">
+                <summary>認得但目前沒在跑（{{ st.taskMgr.known.length }}）</summary>
+                <ul>
+                  <li v-for="k in st.taskMgr.known" :key="k.name"><span class="tm-kname">{{ k.name }}</span><small>{{ k.engine }}</small><button class="aero-btn" type="button" v-if="k.canWake" :disabled="st.taskMgr.busy" @click="act('tm-wake', k.name)">{{ TM.wake }}</button><small v-else-if="k.why">{{ k.why }}</small></li>
+                </ul>
+                <small>重開機後會自動接回的名字；要接回請按「喚醒」，不在這裡停止。</small>
+              </details>
+              <p class="tm-line" v-if="st.taskMgr.wakeNote" role="status">{{ st.taskMgr.wakeNote }}</p>
+              <small class="tm-hint" v-for="h in st.taskMgr.hints" :key="h">{{ h }}</small>
+              <asn-dialog v-if="st.taskMgr.confirm" :title="st.taskMgr.confirm.title" @close="act('tm-cancel')">
+                <div class="tm-facts"><p v-for="l in st.taskMgr.confirm.lines" :key="l">{{ l }}</p></div>
+                <p class="launch-notice-body" v-for="n in st.taskMgr.confirm.notes" :key="n">{{ n }}</p>
+                <p class="partner-err" v-if="st.taskMgr.confirm.result" role="alert">{{ st.taskMgr.confirm.result }}</p>
+                <div class="partner-actions">
+                  <button class="aero-btn" type="button" :disabled="st.taskMgr.confirm.busy" @click="act('tm-cancel')">{{ TM.cancel }}</button>
+                  <button class="aero-btn danger tm-confirm" type="button" :disabled="st.taskMgr.confirm.busy" @click="act('tm-confirm')">{{ st.taskMgr.confirm.busy ? TM.stopping : st.taskMgr.confirm.ok }}</button>
+                </div>
+              </asn-dialog>
+            </div>
+            <div class="dv-info" v-else-if="view === 'info'">
               <div class="dv-nameline">
                 <b class="dv-curname">{{ curDev.label }}</b>
                 <button class="aero-btn" type="button" v-if="!renaming" :disabled="st.known && st.known.busy" @click="renameStart">改名</button>

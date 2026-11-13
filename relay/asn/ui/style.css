@@ -1053,3 +1053,31 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .skin-mini-modern b{left:8px;right:8px;top:18px;bottom:8px;background:#fff;border:1px solid #e4e2dc;border-radius:8px}
 /* #1421 B：現代外觀才用的新節點，復古 Aero 一律不顯示（版面與像素不變）；現代的樣式在 modern.css 檔尾 */
 .mbar,.me-this,.search-plus{display:none}
+
+/* 設定「設備」→ 這台電腦 → 工作管理員（0.2.21）：表格一列一個程式，名字旁「重複」標記，最右一欄是「停止」 */
+.tm{display:flex;flex-direction:column;gap:8px;min-width:0}
+.tm-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.tm-sum{color:var(--fg)}
+.tm-auto{margin-left:auto;font-size:11px;color:var(--muted)}
+.tm-tag{padding:1px 8px;border-radius:10px;font-size:11px;background:var(--panel-head);color:var(--muted)}
+.tm-tag.dup{border:1px solid #d79a95;background:#fff4f3;color:#b3261e}
+.tm-warn{margin:0;padding:6px 10px;border:1px solid #e0c36b;border-radius:6px;background:#fff7dc;color:#6b4f00;font-size:12px}
+.tm-err{margin:0;color:#b3261e;font-size:12px}
+.tm-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.tm-table{width:100%;border-collapse:collapse;font-size:12px}
+.tm-table th{padding:6px 8px;text-align:left;font-weight:600;color:var(--muted);background:var(--panel-head);white-space:nowrap}
+.tm-table td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:top;color:var(--fg)}
+.tm-table tr.dup td{background:#fff7f2}
+.tm-table tr.view td{color:var(--muted)}
+.tm-name{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:120px}
+.tm-dupnote{flex:1 0 100%;color:#b3261e}
+.tm-act{white-space:nowrap}
+.tm-why,.tm-viewonly{display:block;color:var(--muted);white-space:normal;max-width:180px}
+.tm-line{margin:0;font-size:12px;color:var(--fg)}
+.tm-known ul{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.tm-known li{display:flex;align-items:center;gap:8px}
+.tm-hint{display:block;color:var(--muted)}
+.tm-facts{padding:8px 10px;border-radius:6px;background:var(--panel-head);margin-bottom:8px}
+.tm-facts p{margin:2px 0;font-size:12px}
+@media (prefers-color-scheme:dark){.tm-tag.dup{background:#3a1f1d;color:#ff9a90;border-color:#7a3b36}.tm-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-err,.tm-dupnote{color:#ff9a90}.tm-table tr.dup td{background:#2c2220}}
+.tm-table td:not(.tm-name):not(.tm-act){white-space:nowrap}

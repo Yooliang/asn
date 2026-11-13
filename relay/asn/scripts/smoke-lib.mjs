@@ -545,6 +545,62 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
 })()`
 // 帳號卡片的設備按鈕（小良哥 11-09）：用過這個帳號的每台一顆；使用中＝黃色、選中（aria-pressed）、有勾與「使用中」（不能只靠顏色）、
 // 不停用但按了不做事（不發出任何切換指令）；「用在：」一行與「切換到…」按鈕都拿掉；按鈕不超出卡片；手機不能切換自己
+// 工作管理員（0.2.21）：設定 → 設備 → 這台電腦 → 工作管理員。兩個同名的 asn真（重複）、一般視窗、pi、內建工作者、自己開的前景程式、終端服務、ASN 本體
+export const TASKMGR_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'devices' }, windows: [], panelWindows: [] } }
+export const TASKMGR_MEMBERS = [{ id: 'P', agents: [
+  { name: 'asn真', status: 'idle', cwd_label: 'asn' }, { name: '西川', status: 'busy', cwd_label: 'asn' },
+  { name: '小東', status: 'idle', engine: 'pi', cwd_label: 'pi' }, { name: '小雙', status: 'idle', engine: 'gemini', cwd_label: 'agy' },
+] }]
+export const taskmgrSnapshot = (now = Date.now()) => ({
+  now_ms: now,
+  rows: [
+    { kind: 'claude', name: 'asn真', engine: 'claude', pid: 18420, memory_bytes: 412 * 1024 * 1024, started_ms: now - (3 * 60 + 12) * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's1', term_id: null, live: true, inside: null },
+    { kind: 'claude', name: 'asn真', engine: 'claude', pid: 21096, memory_bytes: 380 * 1024 * 1024, started_ms: now - 41 * 60_000, status: 'idle', detail: null, by_asn: false, cwd: 'G:\\Yooliang\\asn', session_id: 's2', term_id: null, live: true, inside: null },
+    { kind: 'claude', name: '西川', engine: 'claude', pid: 3001, memory_bytes: 520 * 1024 * 1024, started_ms: now - 5 * 3600_000, status: 'busy', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's3', term_id: null, live: true, inside: null },
+    { kind: 'pi', name: '小東', engine: 'pi', pid: 4002, memory_bytes: 210 * 1024 * 1024, started_ms: now - 90 * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\work', session_id: null, term_id: null, live: true, inside: null },
+    { kind: 'process', name: 'pi #5120（前景）', engine: 'pi', pid: 5120, memory_bytes: null, started_ms: null, status: 'running', detail: null, by_asn: null, cwd: '', session_id: null, term_id: null, live: true, inside: null },
+    { kind: 'mux', name: '終端服務', engine: '', pid: 6000, memory_bytes: 98 * 1024 * 1024, started_ms: now - 2 * 86400_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: 2 },
+    { kind: 'asn', name: 'ASN', engine: 'asn', pid: 7000, memory_bytes: 310 * 1024 * 1024, started_ms: now - 6 * 3600_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: null },
+  ],
+  known: [{ name: '阿福', engine: 'claude', cwd: 'G:\\work' }],
+})
+export const TASKMGR_PROBES = { taskmgr: { taskmgr: true } }
+export const taskmgrProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.offsetParent !== null;
+  const waitFor = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
+  const self = await waitFor(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
+  if (!self) return { ok: false, why: '設備列表裡找不到「這台」' };
+  [...self.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號').click();
+  const entry = await waitFor(() => [...document.querySelectorAll('.dv-dev-h .dv-tasks')].find(vis));
+  if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
+  entry.click();
+  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 8 ? r : null });
+  if (!rows) return { ok: false, why: '工作管理員沒有列出 8 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
+  const heads = [...document.querySelectorAll('.tm-table th')].map(h => h.textContent.trim()).join('、');
+  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
+  const dups = [...document.querySelectorAll('.tm-table tbody tr.dup')];
+  if (dups.length !== 2) return { ok: false, why: '「重複」列應該有 2 列，實際 ' + dups.length };
+  if (!dups.every(r => r.querySelector('.tm-tag.dup')?.textContent.trim() === '重複')) return { ok: false, why: '重複的列沒有「重複」標記' };
+  if (!dups.every(r => r.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到'))) return { ok: false, why: '重複的列沒有寫出後果' };
+  const banner = document.querySelector('.tm-warn');
+  if (!banner || !banner.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '頂部提示沒有寫出後果' };
+  const kindRow = k => document.querySelector('.tm-table tbody tr[data-kind="' + k + '"]');
+  for (const k of ['process', 'mux', 'asn']) { const r = kindRow(k); if (!r) return { ok: false, why: '沒有 ' + k + ' 那一列' }; if (r.querySelector('.tm-stop')) return { ok: false, why: '只能看的列（' + k + '）不該有停止鈕' } }
+  const text = document.querySelector('.tm').textContent;
+  if (!text.includes('—')) return { ok: false, why: '拿不到的欄位沒有顯示「—」' };
+  if (!text.includes('3 小時 12 分') || !text.includes('412 MB') || !text.includes('18420')) return { ok: false, why: '欄位內容不對（開了多久／記憶體／程序編號）' };
+  if (!document.querySelector('.tm-known summary')?.textContent.includes('認得但目前沒在跑（1）')) return { ok: false, why: '沒有「認得但目前沒在跑」折疊區' };
+  if (dups[1].querySelector('.tm-stop')) return { ok: false, why: '自己開的那一列（編號 21096）不該有停止鈕' };
+  const stop = await waitFor(() => { const b = dups[0].querySelector('.tm-stop'); return b && !b.disabled ? b : null });
+  if (!stop) return { ok: false, why: '重複那一列的停止鈕不能按（' + (dups[0].querySelector('.tm-why')?.textContent || '') + '）' };
+  stop.click();
+  const dlg = await waitFor(() => document.querySelector('.dlg-back .dlg .tm-confirm'));
+  if (!dlg) return { ok: false, why: '按下停止後沒有出現確認框' };
+  const body = document.querySelector('.dlg').textContent;
+  if (!body.includes('程序編號 18420') || !body.includes('不受影響') || !body.includes('停止這個視窗')) return { ok: false, why: '確認框內容不對：' + body.slice(0, 120) };
+  return { ok: true };
+})()`
 export const DEVBTN_PROBES = { desktop: { devbtn: 'desktop' }, mobile: { devbtn: 'mobile', open: '帳號' } }
 export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1015,8 +1071,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1761,6 +1817,9 @@ export const SCENARIOS = [
   { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
   { name: 'list-aero-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar', shot: 'list-aero-chat.png' },
+  // 工作管理員（0.2.21）：Aero 與現代各一張；兩個同名視窗標「重複」、只能看的列沒有停止鈕，並實際打開停止確認框
+  { name: 'list-taskmgr-aero', page: 'list.html', width: 1100, height: 760, state: { signedIn: true, taskmgr: true }, ready: '#app.win .dv-set', probe: TASKMGR_PROBES.taskmgr, shot: 'list-taskmgr-aero.png' },
+  { name: 'list-taskmgr-modern', page: 'list.html', width: 1100, height: 760, state: { signedIn: true, taskmgr: true, skin: 'modern' }, ready: '#app.win .dv-set', probe: TASKMGR_PROBES.taskmgr, shot: 'list-taskmgr-modern.png' },
   { name: 'list-aero-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-aero-about.png' },
   { name: 'list-modern-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true, skin: 'modern' }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-modern-about.png' },
   { name: 'list-modern-term', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-modern-term.png' },
@@ -1926,6 +1985,12 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: scenario.state.mcloud === 'android' ? [{ node: 'P', platform: 'android', launcher: null }] : [] }
     t.android_acct_roster = ROSTER_SAMPLE
     t.android_acct_list = mcloudAcctList()
+  }
+  if (scenario.state.taskmgr) {
+    t.relay_list = { members: TASKMGR_MEMBERS }
+    t.relay_launchers = { machines: [{ node: 'P', online: true, launcher: { profiles: [] } }] }   // 這台開放遠端管理：停止才能按
+    t.task_manager_list = taskmgrSnapshot()
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   // 外觀「現代」（0.2.18）：存檔裡的外觀（電腦 me.skin、手機 me.mobilePrefs.skin）設成 skin，其他存檔照各情境
