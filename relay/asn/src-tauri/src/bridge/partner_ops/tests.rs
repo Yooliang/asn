@@ -2515,7 +2515,8 @@ fn 喚醒守門_有帶_resume_的活程序已啟動超過五分鐘_提示可能�
     let res = resume(&r, "離線夥伴", SID);
     assert_eq!(res.status, "failed", "{}", res.detail);
     assert!(res.detail.contains("可能卡住了"), "{}", res.detail);
-    assert!(res.detail.contains("工作管理員"), "{}", res.detail);
+    assert!(res.detail.contains("先關掉那個終端"), "{}", res.detail);
+    assert!(!res.detail.contains("工作管理員"), "{}", res.detail);
     assert!(r.launched().is_empty(), "不能開窗");
     assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不動任何程序");
 }

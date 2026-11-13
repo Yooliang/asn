@@ -50,7 +50,7 @@ pub(crate) const STUCK_AFTER_MS: u64 = 5 * 60 * 1000;
 /// 已經在線上或正在啟動的提示
 pub(crate) const STARTING_HINT: &str = "這位夥伴已經在線上或正在啟動，請稍候";
 /// 啟動太久的提示
-pub(crate) const STUCK_HINT: &str = "可能卡住了，到工作管理員停止它";
+pub(crate) const STUCK_HINT: &str = "可能卡住了，先關掉那個終端再喚醒";
 
 /// 依程序的啟動時間挑提示：啟動滿 5 分鐘 → 可能卡住；未滿或查不到啟動時間 → 原句（純函式）
 pub(crate) fn resume_block_hint(now_ms: u64, started_ms: Option<u64>) -> &'static str {
@@ -86,6 +86,7 @@ mod tests {
     fn 啟動滿五分鐘_提示可能卡住() {
         assert_eq!(resume_block_hint(NOW, Some(NOW - STUCK_AFTER_MS)), STUCK_HINT);
         assert_eq!(resume_block_hint(NOW, Some(NOW - 3_600_000)), STUCK_HINT);
+        assert!(STUCK_HINT.contains("可能卡住了") && STUCK_HINT.contains("先關掉那個終端") && !STUCK_HINT.contains("工作管理員"));
     }
 
     #[test]
