@@ -3,13 +3,13 @@ use super::*;
 #[test]
 fn 整理後只留版本_日期_條列() {
     let body = json!([
-        { "version": "0.1.100", "released_on": "2026-10-28", "items": ["新增：甲", " 修正：乙 ", ""], "commit_sha": "abc1234", "notes": "不該帶出去" },
+        { "version": "0.1.100", "released_on": "2026-10-28", "items": ["新增：甲", " 修正：乙 ", ""], "platforms": ["官網", "Play"], "commit_sha": "abc1234", "notes": "不該帶出去" },
         { "version": "0.1.99", "released_on": null, "items": [] },
     ]);
     let r = parse_releases(&body).unwrap();
     assert_eq!(r.len(), 2);
-    assert_eq!(r[0], json!({ "version": "0.1.100", "date": "2026-10-28", "lines": ["新增：甲", "修正：乙"] }));
-    assert_eq!(r[1], json!({ "version": "0.1.99", "date": "", "lines": [] }));
+    assert_eq!(r[0], json!({ "version": "0.1.100", "date": "2026-10-28", "lines": ["新增：甲", "修正：乙"], "platforms": ["官網", "Play"] }));
+    assert_eq!(r[1], json!({ "version": "0.1.99", "date": "", "lines": [], "platforms": [] }));
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn 壞的列略過_不信任資料庫給的形狀() {
         "不是物件",
     ]);
     let r = parse_releases(&body).unwrap();
-    assert_eq!(r, vec![json!({ "version": "0.1.7", "date": "", "lines": ["ok"] })]);
+    assert_eq!(r, vec![json!({ "version": "0.1.7", "date": "", "lines": ["ok"], "platforms": [] })]);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn 不是陣列就是錯() {
 #[test]
 fn 網址只查公開表的三個欄位() {
     let u = request_url();
-    assert_eq!(u, format!("https://etccgmkrosbzpltudlgt.supabase.co/rest/v1/asn_site_releases?select=version,released_on,items&order=released_on.desc,version.desc&limit={MAX_ROWS}"));
+    assert_eq!(u, format!("https://etccgmkrosbzpltudlgt.supabase.co/rest/v1/asn_site_releases?select=version,released_on,items,platforms&order=released_on.desc,version.desc&limit={MAX_ROWS}"));
     assert!(!u.contains("commit_sha") && !u.contains("notes"));
 }
 
@@ -70,4 +70,21 @@ fn 快取十分鐘內直接用_過期就重抓() {
 #[test]
 fn 內建公開金鑰對得上固定專案() {
     assert!(identity::BUILTIN_ANON.iter().any(|(r, _)| *r == PROJECT_REF));
+}
+
+#[test]
+fn 平台欄位_null_缺欄_非陣列都當空陣列_整列不掉() {
+    let body = json!([
+        { "version": "0.2.18", "items": ["a"], "platforms": null },
+        { "version": "0.2.17", "items": ["a"] },
+        { "version": "0.2.16", "items": ["a"], "platforms": "Play" },
+        { "version": "0.2.15", "items": ["a"], "platforms": {"Play": true} },
+        { "version": "0.2.14", "items": ["a"], "platforms": ["Play", 1, null, " ", "官網"] },
+    ]);
+    let r = parse_releases(&body).unwrap();
+    assert_eq!(r.len(), 5);
+    for row in &r[..4] {
+        assert_eq!(row["platforms"], json!([]));
+    }
+    assert_eq!(r[4]["platforms"], json!(["Play", "官網"]));
 }

@@ -17,6 +17,7 @@ import { aegisConfig } from './aegis-config.mjs'
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'AEGIS').trim()
 const BASE_URL = envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 import { HOME_DIR, locateHome } from './home.mjs'
+import { SEALED_KEY_MSG, readMachineKey } from './identity.mjs'
 const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 // Aegis 專屬設定：新名 ASN_AEGIS_* 優先，舊名 IRORI_AEGIS_* 照認（aegis-config.mjs）
 const { url: AEGIS_URL, fromMember: FROM_MEMBER, allow: ALLOW, selfMember: SELF_MEMBER, defaultMember: DEFAULT_MEMBER, askTimeoutMs: ASK_TIMEOUT_MS, retryMs: RETRY_MS } = aegisConfig(process.env)
@@ -34,7 +35,14 @@ function readSecret(env, file) {
   if (v) return v
   try { return fs.readFileSync(locateHome(file), 'utf8').trim() } catch { return '' }
 }
-const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
+// 節點金鑰統一走 identity.mjs 的 readMachineKey（ASN_RELAY_KEY 優先；金鑰檔已經加密保存時印出說明並停下，不帶錯的金鑰連後台）
+function loadNodeKey() {
+  try { return readMachineKey(NODE_ID) } catch (e) {
+    if (e?.message === SEALED_KEY_MSG) { console.error(e.message); process.exit(2) }
+    return ''
+  }
+}
+const KEY = loadNodeKey()
 const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 

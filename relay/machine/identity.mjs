@@ -51,10 +51,20 @@ export function findCaller(what = '寄信', providers = identityProviders) {
   throw new Fail(2, `拒絕：找不到呼叫者所屬的 Claude 視窗（只有在 Claude 視窗裡執行才能${what}）${first?.tableError ? `；讀行程表失敗：${first.tableError}` : ''}\n除錯：加 --whoami 看父行程鏈與 session 對照`)
 }
 
+// 機器金鑰檔已經被 ASN 加密保存（Windows 0.2.20 起可以打開、0.2.21 起預設；Rust 的 secret_file.rs，開頭是 ak1:）：Node 解不開。
+// 不把它當金鑰送出去（後台只會回 401），直接說清楚要怎麼辦。不提供任何「解密給 Node」的路
+export const SEALED_PREFIX = 'ak1:'
+export const SEALED_KEY_MSG = '這台電腦的節點金鑰已經加密保存，Node 腳本讀不到。請改用 asn-cli（Windows 在 %LOCALAPPDATA%\\ASN\\asn-cli.exe），或設環境變數 ASN_RELAY_KEY'
+export function keyFromFileText(text) {
+  const key = String(text ?? '').trim()
+  if (key.startsWith(SEALED_PREFIX)) throw new Fail(1, SEALED_KEY_MSG)
+  return key
+}
+
 // 機器金鑰：ASN_RELAY_KEY（舊名 IRORI_RELAY_KEY）優先，否則 ~/.asn/<節點>.key（橋用的同一把）
 export function readMachineKey(node) {
   let key = (envGet(process.env, 'RELAY_KEY') || '').trim()
-  if (!key) { try { key = fs.readFileSync(locateHome(`${node}.key`), 'utf8').trim() } catch {} }
+  if (!key) { let text = ''; try { text = fs.readFileSync(locateHome(`${node}.key`), 'utf8') } catch {} key = keyFromFileText(text) }
   if (!key) throw new Fail(1, `找不到機器金鑰 ${path.join(HOME_DIR, node + '.key')}`)
   return key
 }

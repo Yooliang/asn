@@ -1,6 +1,10 @@
 //! 手機上的節點金鑰（`<節點>.key`）與登入資料（`login.bin`）改用系統金鑰庫加密保存（0.2.17）。
 //!
-//! - 只有安卓建置會拿到金鑰庫（[`platform_aead`]）；電腦版拿到 `None`，兩個檔案的讀寫維持原樣。
+//! - 安卓建置拿到金鑰庫（[`platform_aead`]）；登入資料只在安卓走這裡。
+//! - Windows 電腦版（0.2.20 起，desk-node-key-protect）拿到 DPAPI（目前使用者，entropy＝節點金鑰檔的 AAD），只用在節點金鑰：
+//!   0.2.20 **只讀得懂已加密的檔，預設不加密**（[`SEAL_NODE_KEY_DEFAULT`]；環境變數 `ASN_SEAL_NODE_KEY=1` 可以先打開來試），
+//!   免得裝回 0.2.19 以前的候選包時，舊版把加密檔當金鑰、斷線要重新認領。0.2.21 把預設翻成加密。
+//!   其他電腦系統（Linux）拿到 `None`，維持原樣（明文、權限 600）。
 //! - 核心邏輯都是「路徑＋`&dyn Aead`」的純函式，測試在任何平台都能用假的金鑰庫跑。
 //! - 檔案格式：[`PREFIX`]（`ak1:`，和設備金鑰同一個）＋金鑰庫加密後的位元組；各檔案用自己的 AAD，換成別的檔名或別的節點就解不開。
 //! - 讀到沒有前綴的舊檔（舊版存的明文）：照舊讀出，順手改存成加密的（寫成同資料夾的暫存檔、寫完同步、再換名蓋掉原檔，
@@ -25,6 +29,7 @@ pub const UNREADABLE_SUFFIX: &str = ".unreadable";
 /// 登入資料的檔名（放在資料夾裡）
 pub const LOGIN_FILE: &str = "login.bin";
 /// 節點金鑰解不開時回給畫面的話（走重新登入／重新配對）
+#[cfg(target_os = "android")]
 pub const NODE_KEY_UNSEAL_MSG: &str = "這支手機上的節點金鑰解不開（系統金鑰庫裡的金鑰可能已重置），請重新登入並重新配對這支手機";
 const NODE_KEY_SEAL_FAIL: &str = "[ASN] 節點金鑰沒辦法用系統金鑰庫加密，暫時維持原樣";
 const LOGIN_SEAL_FAIL: &str = "[ASN] 登入資料沒辦法用系統金鑰庫加密，暫時維持原樣";
@@ -39,13 +44,59 @@ pub fn node_key_aad(node: &str) -> Vec<u8> {
     format!("asn-node-key-v1:{node}.key").into_bytes()
 }
 
-/// 這個系統的靜態加密後端：安卓＝金鑰庫那把；其他系統沒有（維持原樣）
+/// 電腦上節點金鑰解不開時回給畫面的話（DPAPI 只認同一個 Windows 使用者：換了使用者、資料夾搬到別台、密碼被強制重設都會這樣）
+#[cfg(not(target_os = "android"))]
+pub const NODE_KEY_UNSEAL_MSG: &str = "這台電腦上的節點金鑰解不開（可能換了 Windows 使用者，或密碼被重設過），請在 ASN 重新登入，讓這台電腦重新取得金鑰";
+
+/// Windows 電腦版預設要不要把節點金鑰改存成加密：0.2.20 是 false（只讀得懂），0.2.21 翻成 true
+pub const SEAL_NODE_KEY_DEFAULT: bool = false;
+/// 先打開來試（或在 0.2.21 之後關掉）：`ASN_SEAL_NODE_KEY=1` 加密、`=0` 不加密；其他值或沒設照預設
+pub const SEAL_NODE_KEY_ENV: &str = "ASN_SEAL_NODE_KEY";
+pub fn seal_node_key_from(v: Option<&str>) -> bool {
+    match v.map(str::trim) {
+        Some("1") => true,
+        Some("0") => false,
+        _ => SEAL_NODE_KEY_DEFAULT,
+    }
+}
+
+/// Windows 的 DPAPI 用的 entropy：AAD 轉小寫。Windows 的檔名不分大小寫，同一個金鑰檔可能被寫成不同大小寫的節點代號讀到
+/// （例如環境變數 ASN_RELAY_ID 打的大小寫和檔名不同），entropy 不能因此對不上。安卓的金鑰庫照舊用原本的 AAD（已加密的檔不受影響）
+pub fn dpapi_entropy(aad: &[u8]) -> Vec<u8> {
+    aad.to_ascii_lowercase()
+}
+
+/// Windows 的 DPAPI（目前使用者）做成 [`Aead`]：entropy＝AAD（綁檔名與節點，不分大小寫）。`sealing`＝要不要加密（解密永遠可以）
+#[cfg(windows)]
+pub struct DpapiAead {
+    pub sealing: bool,
+}
+
+#[cfg(windows)]
+impl Aead for DpapiAead {
+    fn seal(&self, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, String> {
+        crate::auth::dpapi_protect(plain, &dpapi_entropy(aad))
+    }
+    fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, String> {
+        crate::auth::dpapi_unprotect(sealed, &dpapi_entropy(aad))
+    }
+    fn sealing(&self) -> bool {
+        self.sealing
+    }
+}
+
+/// 這個系統的靜態加密後端（只用在節點金鑰；手機的登入資料直接用金鑰庫）：
+/// 安卓＝金鑰庫那把；Windows＝DPAPI（0.2.20 預設只解不加）；其他系統沒有（維持原樣）
 pub fn platform_aead() -> Option<Box<dyn Aead>> {
     #[cfg(target_os = "android")]
     {
         Some(crate::android_keywrap::android_aead())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(windows, not(target_os = "android")))]
+    {
+        Some(Box::new(DpapiAead { sealing: seal_node_key_from(std::env::var(SEAL_NODE_KEY_ENV).ok().as_deref()) }))
+    }
+    #[cfg(all(not(windows), not(target_os = "android")))]
     {
         None
     }
@@ -248,6 +299,10 @@ fn read_secret_hooked(path: &Path, aad: &[u8], aead: Option<&dyn Aead>, seal_fai
     if let Some(body) = raw.strip_prefix(PREFIX) {
         return a.open(aad, body).map_err(ReadErr::Unseal);
     }
+    // 只負責讀得懂（電腦版 0.2.20 預設）：明文照舊讀出，不改存
+    if !a.sealing() {
+        return Ok(raw);
+    }
     if !raw.iter().all(|b| b.is_ascii_whitespace()) {
         match migrate_plain(path, aad, &raw, a, hook) {
             Ok(true) => {}
@@ -276,7 +331,7 @@ pub fn read_node_key(path: &Path, node: &str, aead: Option<&dyn Aead>) -> Result
 /// 把節點金鑰以加密形式原子寫進 `path`。回 true＝已寫好（呼叫端不必再寫明文）；
 /// false＝沒有金鑰庫，或加密／寫入失敗（記一行 log），呼叫端走原本的明文寫法
 pub fn write_node_key(path: &Path, node: &str, key: &str, aead: Option<&dyn Aead>) -> bool {
-    let Some(a) = aead else { return false };
+    let Some(a) = aead.filter(|a| a.sealing()) else { return false };   // 沒有金鑰庫，或只讀得懂（不加密）：呼叫端寫明文
     let _g = lock();
     match write_sealed(path, &node_key_aad(node), key.as_bytes(), a) {
         Ok(()) => true,
@@ -467,7 +522,10 @@ mod tests {
         assert_eq!(read_node_key(&f, "n1", Some(&ks)), Err(ReadErr::Unseal(KEY_LOST.to_string())));
         let e = crate::identity::read_key_with(d.path(), "n1", None, Some(&ks)).unwrap_err();
         assert_eq!(e, NODE_KEY_UNSEAL_MSG);
+        #[cfg(target_os = "android")]
         assert!(e.contains("重新配對"));
+        #[cfg(not(target_os = "android"))]
+        assert!(e.contains("重新登入"), "電腦版：重新登入就會重新取得金鑰");
         assert_eq!(std::fs::read(&f).unwrap(), before, "不自動刪、不改");
         assert_eq!(read_node_key(&d.path().join("none.key"), "none", Some(&ks)), Err(ReadErr::Missing));
     }
@@ -492,8 +550,10 @@ mod tests {
         assert_eq!(std::fs::read(&f).unwrap(), KEY.as_bytes(), "不改檔");
         assert!(!write_node_key(&f, "n1", "X", None));
         assert_eq!(std::fs::read(&f).unwrap(), KEY.as_bytes());
-        #[cfg(not(target_os = "android"))]
-        assert!(platform_aead().is_none(), "電腦版沒有這一層");
+        #[cfg(all(not(target_os = "android"), not(windows)))]
+        assert!(platform_aead().is_none(), "Linux 電腦版沒有這一層");
+        #[cfg(all(windows, not(target_os = "android")))]
+        assert!(platform_aead().is_some(), "Windows 有 DPAPI（0.2.20 起，預設只讀得懂）");
     }
 
     // account 模組只在有畫面的建置裡（headless 沒有）
@@ -765,5 +825,126 @@ mod tests {
         let auth = include_str!("auth.rs");
         let ds = auth.split("pub fn default_store(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(ds.contains("SealedLoginStore"), "手機的登入存檔走金鑰庫");
+    }
+
+    // ---------- 電腦版（desk-node-key-protect，0.2.20）：只讀得懂、預設不加密 ----------
+
+    /// 只負責讀得懂的假金鑰庫（電腦版 0.2.20 預設）
+    struct ReadOnly(Strict);
+    impl Aead for ReadOnly {
+        fn seal(&self, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, String> {
+            self.0.seal(aad, plain)
+        }
+        fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, String> {
+            self.0.open(aad, sealed)
+        }
+        fn sealing(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn 只讀得懂_明文檔照舊讀出_不改存_不留暫存檔() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("n1.key");
+        std::fs::write(&f, KEY).unwrap();
+        let a = ReadOnly(Strict::default());
+        assert_eq!(read_node_key(&f, "n1", Some(&a)).unwrap(), KEY);
+        assert_eq!(std::fs::read(&f).unwrap(), KEY.as_bytes(), "檔案原封不動（裝回舊版照樣能用）");
+        assert_eq!(a.0.seals.load(Ordering::SeqCst), 0, "沒有加密過");
+        assert_eq!(files(d.path()), vec!["n1.key".to_string()]);
+    }
+
+    #[test]
+    fn 只讀得懂_已加密的檔照樣解得開_換節點解不開() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("n1.key");
+        let s = Strict::default();
+        assert!(write_node_key(&f, "n1", KEY, Some(&s)), "先用會加密的寫一份（例如 0.2.21 或先打開開關的時候）");
+        assert!(std::fs::read(&f).unwrap().starts_with(PREFIX));
+        let a = ReadOnly(s);
+        assert_eq!(read_node_key(&f, "n1", Some(&a)).unwrap(), KEY, "關掉開關後照樣讀得懂");
+        let g = d.path().join("n2.key");
+        std::fs::copy(&f, &g).unwrap();
+        assert!(matches!(read_node_key(&g, "n2", Some(&a)), Err(ReadErr::Unseal(_))), "改名成別的節點就解不開");
+    }
+
+    #[test]
+    fn 只讀得懂_寫新金鑰時回false_呼叫端寫明文() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("n1.key");
+        let a = ReadOnly(Strict::default());
+        assert!(!write_node_key(&f, "n1", KEY, Some(&a)));
+        assert!(!f.exists(), "沒有寫任何東西，交給呼叫端照舊寫明文");
+        assert_eq!(a.0.seals.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 加密開關_預設不加密_環境變數1開0關_其他值照預設() {
+        assert!(!SEAL_NODE_KEY_DEFAULT, "0.2.20 預設不加密（0.2.21 再翻）");
+        assert_eq!(SEAL_NODE_KEY_ENV, "ASN_SEAL_NODE_KEY");
+        assert!(seal_node_key_from(Some("1")));
+        assert!(seal_node_key_from(Some(" 1 ")));
+        assert!(!seal_node_key_from(Some("0")));
+        for v in [None, Some(""), Some("yes"), Some("true"), Some("2")] {
+            assert_eq!(seal_node_key_from(v), SEAL_NODE_KEY_DEFAULT, "{v:?}");
+        }
+        assert!(Strict::default().sealing(), "手機的金鑰庫照舊會加密（trait 預設）");
+    }
+
+    #[test]
+    fn 電腦解不開時的說明_寫電腦_叫人重新登入() {
+        if cfg!(target_os = "android") {
+            return;
+        }
+        assert!(NODE_KEY_UNSEAL_MSG.contains("這台電腦"));
+        assert!(NODE_KEY_UNSEAL_MSG.contains("重新登入"));
+        assert!(!NODE_KEY_UNSEAL_MSG.contains("手機"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_dpapi_加密讀回_綁節點_檔案裡沒有明文() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("w1.key");
+        std::fs::write(&f, KEY).unwrap();
+        let on = DpapiAead { sealing: true };
+        assert_eq!(read_node_key(&f, "w1", Some(&on)).unwrap(), KEY, "舊的明文讀出");
+        let raw = std::fs::read(&f).unwrap();
+        assert!(raw.starts_with(PREFIX), "改存成加密");
+        assert!(!raw.windows(KEY.len()).any(|w| w == KEY.as_bytes()), "檔案裡沒有明文");
+        let off = DpapiAead { sealing: false };
+        assert_eq!(read_node_key(&f, "w1", Some(&off)).unwrap(), KEY, "關掉開關照樣讀得懂");
+        let g = d.path().join("w2.key");
+        std::fs::copy(&f, &g).unwrap();
+        assert!(matches!(read_node_key(&g, "w2", Some(&off)), Err(ReadErr::Unseal(_))), "entropy 綁節點：改名就解不開");
+        assert_eq!(files(d.path()), vec!["w1.key".to_string(), "w2.key".to_string()], "沒有留暫存檔");
+    }
+
+    #[test]
+    fn dpapi_entropy_不分大小寫_只動英文字母() {
+        assert_eq!(dpapi_entropy(&node_key_aad("H")), dpapi_entropy(&node_key_aad("h")));
+        assert_eq!(dpapi_entropy(&node_key_aad("t5-AB12cd34")), node_key_aad("t5-ab12cd34"));
+        assert_ne!(dpapi_entropy(&node_key_aad("aa")), dpapi_entropy(&node_key_aad("bb")), "不同節點還是不同");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_dpapi_節點代號大小寫不同也解得開() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("Hx.key");
+        let on = DpapiAead { sealing: true };
+        assert!(write_node_key(&f, "Hx", KEY, Some(&on)));
+        assert_eq!(read_node_key(&f, "hX", Some(&DpapiAead { sealing: false })).unwrap(), KEY, "Windows 檔名不分大小寫，讀的人代號大小寫不同也要解得開");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_平台後端_預設只讀得懂() {
+        // 不改環境變數（測試會並行）：沒設 ASN_SEAL_NODE_KEY 時照預設
+        if std::env::var(SEAL_NODE_KEY_ENV).is_err() {
+            let a = platform_aead().expect("Windows 有 DPAPI 後端");
+            assert_eq!(a.sealing(), SEAL_NODE_KEY_DEFAULT);
+        }
     }
 }

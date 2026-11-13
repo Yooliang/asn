@@ -53,6 +53,7 @@ import { joinKnown, deviceNameError } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
+import { PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, openPlayStore, playNewText as playNewTextOf, playUpdateVersion, playUpdateView } from './lib/play-update.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
@@ -60,6 +61,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
@@ -397,7 +399,9 @@ const app = createApp({
     }
     const unreadTotal = computed(() => chatRowsUnread(unreadRows.value))   // 「夥伴」分頁的紅點（#1429）：和夥伴頁最上面的「未讀」那一組同一份（#1438）
     const noticeDot = computed(() => noticeUnread(friends.value))
-    const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
+    // Play 安裝的版本（不能自己下載更新）：版本紀錄裡 Play 上最新的版本比自己新 → 「設定」分頁與設定列表的「更新」那列亮紅點（#1437）
+    const playNewVersion = computed(() => (upd.enabled ? '' : playUpdateVersion(rel, info.version)))
+    const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value, update: playNewVersion.value !== '' })
     // 內頁佔著第四格、人已經離開它（3 分鐘計時中）時有新通知進來：第四格馬上變回「通知」（#1429）。雲端代理的金鑰還在內頁上時不動（金鑰只顯示一次）
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
     // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
@@ -584,7 +588,7 @@ const app = createApp({
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.sheetName || vp.cur.name) : ''))
     const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
-    const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
+    const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, playView: playView.value, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設定 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
@@ -596,6 +600,11 @@ const app = createApp({
     }
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
+    const playView = computed(() => (upd.enabled ? { kind: 'unknown' } : playUpdateView(rel, info.version)))
+    const playNewText = computed(() => (playView.value.kind === 'new' ? playNewTextOf(playView.value.version) : ''))
+    const rowHasDot = key => key === 'update' && playNewVersion.value !== ''
+    const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent；Android 會用 Play App 開這個 https 網址）
+    watch(() => upd.enabled, en => { if (en === false && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({
@@ -619,6 +628,9 @@ const app = createApp({
     document.addEventListener('visibilitychange', () => { if (!document.hidden) cloud.onVisible() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
+    const about = computed(() => aboutView({ deviceName: info.window_name }))
+    const openAboutLink = url => { if (isAboutUrl(url)) invoke('open_link', { url }).catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
+    const aboutAct = l => (l.kind === 'link' ? openAboutLink(l.url) : l.kind === 'update' ? openSetting('update') : openGuides())   // 官網、隱私權政策開瀏覽器；版本紀錄＝「更新」頁、使用指引＝指引頁，都在 App 內
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
@@ -1361,11 +1373,11 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      chatRows, chatQuery, unreadRows, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      chatRows, chatQuery, unreadRows, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

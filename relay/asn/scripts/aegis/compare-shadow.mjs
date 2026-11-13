@@ -194,8 +194,10 @@ async function main() {
     return 0
   }
   const keyFile = o.keyFile || defaultKeyFile(o.tester)
-  let key
-  try { key = fs.readFileSync(keyFile, 'utf8').trim() } catch { console.error(`讀不到寄件節點金鑰檔：${keyFile}`); return 2 }
+  // ASN_RELAY_KEY 優先（和 asn-cli、relay/machine 一樣）；沒設才讀金鑰檔。金鑰檔已經加密保存（ak1:）時這支腳本解不開
+  let key = (process.env.ASN_RELAY_KEY || '').trim()
+  if (!key) try { key = fs.readFileSync(keyFile, 'utf8').trim() } catch { console.error(`讀不到寄件節點金鑰檔：${keyFile}`); return 2 }
+  if (key.startsWith('ak1:')) { console.error(`寄件節點金鑰檔已經加密保存（${keyFile}），這支腳本讀不到；請改設環境變數 ASN_RELAY_KEY，或改用沒有加密的那台的金鑰檔`); return 2 }
   const rows = await runCompare(o, { api: makeApi(o.url, key) })
   console.log(renderTable(rows, o))
   return rows.every(r => r.result.ok) ? 0 : 1
