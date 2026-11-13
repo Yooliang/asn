@@ -34,7 +34,8 @@ export const isNewNotice = (prev, next) => Number.isFinite(prev) && Number.isFin
 export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
 // 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，小良哥定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
 // 通知的紅點掛在第四格（內頁佔著第四格時照樣亮在那一格）
-export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'list' ? chats > 0 : t === 'notice' || t === PAGE_TAB ? notice > 0 : false)
+// 「設定」分頁（me）：Play 上有新版（update＝true，lib/play-update.mjs 判斷）時亮
+export const tabDot = (t, { chats = 0, notice = 0, update = false } = {}) => (t === 'list' ? chats > 0 : t === 'notice' || t === PAGE_TAB ? notice > 0 : t === 'me' ? update === true : false)
 // 正在看的對話（標已讀、算「看得到」用）：對話分頁就是最後那一則（#1438 改回 0.2.17：不再先列清單）；通知分頁看的是通知。chat 參數留著不用
 export const viewedChatId = ({ tab, lastChat }) => (tab === 'chats' ? lastChat || '' : tab === 'notice' ? NOTICE_ID : '')
 export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單

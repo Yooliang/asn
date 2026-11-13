@@ -53,6 +53,7 @@ import { joinKnown, deviceNameError } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
+import { PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, openPlayStore, playNewText as playNewTextOf, playUpdateVersion, playUpdateView } from './lib/play-update.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
@@ -397,7 +398,9 @@ const app = createApp({
     }
     const unreadTotal = computed(() => chatRowsUnread(unreadRows.value))   // 「夥伴」分頁的紅點（#1429）：和夥伴頁最上面的「未讀」那一組同一份（#1438）
     const noticeDot = computed(() => noticeUnread(friends.value))
-    const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
+    // Play 安裝的版本（不能自己下載更新）：版本紀錄裡 Play 上最新的版本比自己新 → 「設定」分頁與設定列表的「更新」那列亮紅點（#1437）
+    const playNewVersion = computed(() => (upd.enabled ? '' : playUpdateVersion(rel, info.version)))
+    const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value, update: playNewVersion.value !== '' })
     // 內頁佔著第四格、人已經離開它（3 分鐘計時中）時有新通知進來：第四格馬上變回「通知」（#1429）。雲端代理的金鑰還在內頁上時不動（金鑰只顯示一次）
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
     // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
@@ -596,6 +599,11 @@ const app = createApp({
     }
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
+    const playView = computed(() => (upd.enabled ? { kind: 'unknown' } : playUpdateView(rel, info.version)))
+    const playNewText = computed(() => (playView.value.kind === 'new' ? playNewTextOf(playView.value.version) : ''))
+    const rowHasDot = key => key === 'update' && playNewVersion.value !== ''
+    const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent）；market:// 不在它的允許清單內會被拒，自動退回 https 的 Play 網址（Android 會交給 Play App）
+    watch(() => upd.enabled, en => { if (en === false && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({
@@ -1365,7 +1373,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
