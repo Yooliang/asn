@@ -72,7 +72,14 @@ export function chatListRows({ friends = [], logOf = () => [], rooms = [], now =
   const byAt = (a, b) => b.at - a.at
   return [...rows, ...late.sort(byAt), ...oldRooms.sort(byAt)]
 }
-// 清單上所有對話的未讀加總（「對話」分頁的紅點）
+// 手機夥伴頁最上面的「未讀」（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的排最前面；讀完就離開這一組；全部讀完整組不顯示。
+// 「夥伴」分頁的紅點（#1429）用同一份算（m.js 的 unreadRows → chatRowsUnread）：這一組有東西紅點就亮，空了就消失，兩邊一定對得上。
+// 來源是 chatListRows（不含已封存、通知、已併進通知的舊列；有未讀但很久沒往來的夥伴也在裡面）
+export const UNREAD_GROUP_KEY = 'unread'
+export const UNREAD_GROUP_LABEL = '未讀'
+export const rowUnread = x => { const u = x?.kind === 'room' ? x.room?.unread : x?.friend?.unread; return Number.isInteger(u) && u > 0 ? u : 0 }
+export const unreadChatRows = rows => (Array.isArray(rows) ? rows : []).filter(x => rowUnread(x) > 0).sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+// 清單上所有對話的未讀加總（「夥伴」分頁的紅點，#1429 起）
 export const chatRowsUnread = rows => (Array.isArray(rows) ? rows : []).reduce((n, x) => { const u = x?.kind === 'room' ? x.room?.unread : x?.friend?.unread; return n + (Number.isInteger(u) && u > 0 ? u : 0) }, 0)
 // 對話清單的搜尋：比對規則和名單一樣（matches(對象, q)，呼叫端給 friendMatchesQuery 綁好 plain）；群組用名字比
 export const filterChatRows = (rows, q, matches) => (q ? rows.filter(x => matches(x.kind === 'room' ? { nick: x.room.name } : x.friend, q)) : rows)
