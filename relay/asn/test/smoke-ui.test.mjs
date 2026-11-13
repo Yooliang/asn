@@ -339,7 +339,7 @@ test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩�
 test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對話、手機對話清單各一，存檔選現代；表達式語法正確', async () => {
   const vm = await import('node:vm')
   const sc = SCENARIOS.filter(s => s.probe?.skinCheck)
-  assert.deepEqual(sc.map(s => s.name), ['list-modern', 'list-modern-chat', 'm-modern', 'm-modern-list', 'list-modern-msgs', 'm-modern-msgs', 'm-modern-busy'])
+  assert.deepEqual(sc.map(s => s.name), ['list-modern', 'list-modern-chat', 'm-modern', 'm-modern-list', 'list-modern-msgs', 'm-modern-msgs', 'm-modern-busy', 'm-modern-term'])
   assert.equal(probeKind(sc[0].probe), '現代外觀檢查')
   assert.doesNotThrow(() => new vm.Script(probeSource(sc[0].probe)))
   for (const s of sc) { const me = JSON.parse(tableFor(s).store_load.values.me); assert.equal(me.skin, 'modern', s.name); assert.equal(me.mobilePrefs.skin, 'modern', s.name) }
@@ -358,5 +358,5 @@ test('現代外觀補齊（#1421 A）：有訊息、離線、忙碌的情境；�
   assert.equal(by['m-modern-msgs'].state.mbar, 'offline', '手機：離線標題列')
   assert.equal(tableFor(by['m-modern-busy']).relay_list.members[0].agents[0].status, 'busy', '手機：忙碌標題列')
   const src = probeSource(SCENARIOS.find(s => s.probe?.skinCheck).probe)
-  for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline', '.ad-wrap', '.ad-art i', '.ad-new']) assert.ok(src.includes(must), '檢查要量：' + must)
+  for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline', '.ad-wrap', '.ad-art i', '.ad-new', '.m-plate-head', '.m-head-term', '.m-term-switch']) assert.ok(src.includes(must), '檢查要量：' + must)
 })

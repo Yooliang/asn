@@ -879,6 +879,28 @@ export const skinProbeSource = () => `(async () => {
   for (const [sel, label] of [['.m-chathead.is-busy', '手機標題列忙碌變色'], ['.m-chathead.is-offline', '手機標題列離線變色'], ['.conv-main .to-line.is-offline', '電腦收件人列離線灰底']]) {
     const v = css(sel, 'background-color'); if (v !== null && plainBg.includes(v)) return { ok: false, why: label + '被現代底色蓋掉：' + v }
   }
+  // 手機對話頂端（#1421 B 之三）：左返回、中間名牌、右看終端（36px 圓鈕）；原本的頭像、名字、「⋯」收起；下方工具列的終端切換收起
+  const ph = document.querySelector('.m-plate-head');
+  if (ph) {
+    const vis = e => e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+    const plate = ph.querySelector('.m-plate');
+    if (!vis(plate)) return { ok: false, why: '現代的對話頂端沒有名牌' };
+    for (const sel of ['.m-pic', '.m-head-tx', '.m-head-more']) if (vis(ph.querySelector(':scope > ' + sel))) return { ok: false, why: '現代的對話頂端還留著 ' + sel };
+    const hr = ph.getBoundingClientRect(), pr = plate.getBoundingClientRect();
+    if (Math.abs((pr.left + pr.right) / 2 - (hr.left + hr.right) / 2) > 4) return { ok: false, why: '名牌沒有置中' };
+    const back = ph.querySelector('.m-back');
+    if (Math.round(back.getBoundingClientRect().width) !== 36) return { ok: false, why: '返回鈕不是 36px：' + back.getBoundingClientRect().width };
+    const term = ph.querySelector('.m-head-term');
+    if (term) {
+      if (Math.round(term.getBoundingClientRect().width) !== 36) return { ok: false, why: '看終端鈕不是 36px' };
+      if (vis(document.querySelector('.m-chat .m-term-switch'))) return { ok: false, why: '下方工具列的終端切換應該收起（搬到頂端了）' };
+      term.click(); await sleep(400);
+      if (!term.classList.contains('on')) return { ok: false, why: '點頂端的看終端沒有切到終端' };
+      term.click(); await sleep(300);
+    }
+    const head = ph.closest('.m-chathead');
+    if (head.classList.contains('is-offline') && !plate.classList.contains('is-offline') && !plate.closest('.is-room')) return { ok: false, why: '離線時名牌沒有跟著變灰' };
+  }
   // 廣告框（#1421）：現代下是白底細灰框圓角卡片，不留 Aero 的藍框藍底、漸層彩球、斜緞帶
   const adw = document.querySelector('.ad-wrap');
   if (adw) {
@@ -1611,6 +1633,8 @@ export const SCENARIOS = [
   { name: 'list-modern-msgs', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-msgs.png' },
   { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-msgs.png' },
   { name: 'm-modern-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-busy.png' },
+  // #1421 B 之三：可以看終端的夥伴，頂端右邊有「看終端」圓鈕
+  { name: 'm-modern-term', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'modern' }, ready: '#app.m .m-head-term', probe: SKIN_PROBE, shot: 'm-modern-term.png' },
   { name: 'list-tabs', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: DTABS_PROBE, shot: 'list-tabs.png' },
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true, mtab: 'list' }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
