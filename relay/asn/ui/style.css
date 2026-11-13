@@ -1081,3 +1081,5 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-facts p{margin:2px 0;font-size:12px}
 @media (prefers-color-scheme:dark){.tm-tag.dup{background:#3a1f1d;color:#ff9a90;border-color:#7a3b36}.tm-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-err,.tm-dupnote{color:#ff9a90}.tm-table tr.dup td{background:#2c2220}}
 .tm-table td:not(.tm-name):not(.tm-act){white-space:nowrap}
+/* #1461 線條圖示（lib/line-icons.mjs）只給現代外觀；復古 Aero 一律不顯示，照舊用原本的圖（版面與像素不變） */
+.lic{display:none}

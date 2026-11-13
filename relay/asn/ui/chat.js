@@ -1,4 +1,5 @@
 // 單一好友的對話視窗（分開模式）：只顯示，狀態與動作都交給名單視窗裡的樞紐（用事件溝通）。版面在 lib/chatpane.mjs。
+import { LineIcon } from './lib/line-icons.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, selfAvatarSrc } from './lib/avatar.mjs'
@@ -63,5 +64,6 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('line-icon', LineIcon)
 app.mount('#app')
 blockContextMenu(document)

@@ -1,5 +1,6 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
+import { LineIcon } from './lib/line-icons.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
@@ -2052,6 +2053,7 @@ app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)
 app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
+app.component('line-icon', LineIcon)
 app.component('settings-panel', SettingsPanel)
 const root = app.mount('#app')
 

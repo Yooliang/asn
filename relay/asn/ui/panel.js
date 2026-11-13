@@ -2,6 +2,7 @@
 //   ?kind=guide  ＝ 指引視窗：asn:panel 事件告訴它現在顯示哪一篇
 //   ?kind=setting＝ 設定視窗：asn:panel 告訴它顯示哪一類，asn:settings 送來設定快照，改了什麼用 asn:set 送回樞紐
 // 設定值、金鑰、存檔都不在這扇視窗；唯一在這裡做的事是把選的圖裁成大頭貼（純畫面運算），裁好再交給樞紐上傳。
+import { LineIcon } from './lib/line-icons.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
@@ -48,6 +49,7 @@ const app = createApp({
   },
 })
 app.component('guide-doc', GuideDoc)
+app.component('line-icon', LineIcon)
 app.component('settings-panel', SettingsPanel)
 app.mount('#app')
 blockContextMenu(document)

@@ -1049,6 +1049,25 @@ export const dtabsProbeSource = () => `(async () => {
 })()`
 // 外觀「現代」（0.2.18）：存檔選了現代，畫面一開就是現代（<html data-skin="modern">、主色變青綠），而且沒有橫向捲動；截圖給人看整體樣子
 export const SKIN_PROBE = { skinCheck: true }
+// #1461：現代外觀打開電腦的「更多」或手機的「⋯」，每一項前面都有線條圖示（同一個 key 同一個圖）；移除是紅色。探測完選單留著，截圖看得到
+export const MENU_ICONS_PROBE = { menuIcons: true }
+export const menuIconsProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const mobile = !!document.querySelector('#app.m');
+  let opener = null;
+  for (let i = 0; i < 60 && !opener; i++) { opener = document.querySelector(mobile ? '.m-chathead .m-plate:not(:disabled)' : '.mbar-more .mbtn'); if (!opener || opener.offsetParent === null) { opener = null; await sleep(100) } }
+  if (!opener) return { ok: false, why: mobile ? '找不到名牌（點了開「⋯」）' : '找不到「更多」鈕' };
+  if (!opener.querySelector('svg.lic') && !mobile) return { ok: false, why: '「更多」鈕沒有用線條的三個點' };
+  opener.click();
+  let rows = [];
+  for (let i = 0; i < 40 && !rows.length; i++) { await sleep(100); rows = [...document.querySelectorAll(mobile ? '.m-ops-panel .m-ops-item' : '.more-menu [role="menuitem"]')] }
+  if (!rows.length) return { ok: false, why: '選單沒有打開' };
+  const bad = rows.filter(b => { const ic = b.querySelector(':scope > svg.lic'); return !ic || getComputedStyle(ic).display === 'none' });
+  if (bad.length) return { ok: false, why: '這幾項沒有圖示：' + bad.map(b => b.textContent.trim().slice(0, 12)).join('、') };
+  const rm = rows.find(b => /移除/.test(b.textContent));
+  if (rm && getComputedStyle(rm.querySelector('svg.lic')).color !== 'rgb(179, 38, 30)') return { ok: false, why: '「移除」的圖示應該是紅色：' + getComputedStyle(rm.querySelector('svg.lic')).color };
+  return { ok: true, why: '' };
+})()`
 // 電腦版「關於」區（#1439）：簡介、版本、四個按鈕（官網、版本紀錄、隱私權政策、使用指引）、記錄、出品都在，且不撐破設定窗寬度
 export const ABOUT_PROBE = { aboutCheck: true }
 export const aboutProbeSource = () => `(async () => {
@@ -1175,11 +1194,26 @@ export const skinProbeSource = (probe = {}) => `(async () => {
     }
   }
   await sleep(400);
+  // #1461 線條圖示：現代外觀看得到線條圖示；輸入框的「＋」打開後，工具列每一顆只看到線條、看不到原本的彩色圖
+  const hiddenLic = [...document.querySelectorAll('svg.lic')].find(s => s.parentElement && s.parentElement.offsetParent !== null && getComputedStyle(s).display === 'none');
+  if (hiddenLic) return { ok: false, why: '現代外觀的線條圖示被藏起來了：' + hiddenLic.dataset.icon };
+  const plus = document.querySelector('.mc-plus');
+  if (plus && plus.offsetParent !== null) {
+    if (!plus.querySelector('svg.lic')) return { ok: false, why: '輸入框的「＋」沒有用線條圖示' };
+    plus.click(); await sleep(250);
+    for (const b of document.querySelectorAll('.toolbar .tool')) {
+      if (b.offsetParent === null) continue;
+      const name = b.getAttribute('aria-label') || '';
+      if ([...b.querySelectorAll(':scope > svg:not(.lic), :scope > img')].some(x => getComputedStyle(x).display !== 'none')) return { ok: false, why: '工具列「' + name + '」還看得到原本的彩色圖' };
+      if (!b.querySelector(':scope > svg.lic')) return { ok: false, why: '工具列「' + name + '」沒有線條圖示' };
+    }
+    plus.click(); await sleep(150);
+  }
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1895,6 +1929,8 @@ export const SCENARIOS = [
   { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_KEYS_PROBE, shot: 'm-modern-msgs.png' },
   { name: 'm-modern-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-busy.png' },
   // #1421 B 之三：可以看終端的夥伴，頂端右邊有「看終端」圓鈕
+  { name: 'list-modern-more', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: MENU_ICONS_PROBE, shot: 'list-modern-more.png' },
+  { name: 'm-modern-ops', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: MENU_ICONS_PROBE, shot: 'm-modern-ops.png' },
   { name: 'm-modern-term', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'modern' }, ready: '#app.m .m-head-term', probe: SKIN_PROBE, shot: 'm-modern-term.png' },
   { name: 'list-tabs', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: DTABS_PROBE, shot: 'list-tabs.png' },
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },

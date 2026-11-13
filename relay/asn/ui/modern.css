@@ -308,3 +308,29 @@
 :root[data-skin="modern"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
 :root[data-skin="modern"] .tm-warn{border:1px solid #ecd9a0;border-radius:12px;background:#fffbe6;color:#6b5400}
 :root[data-skin="modern"] .tm-facts{border-radius:12px;background:var(--panel-soft)}
+/* ---------- #1461 線條圖示（0.2.21）：24×24、線寬 1.75、圓頭圓角，顏色跟著字色；一般灰、選中主色、危險紅 ---------- */
+:root[data-skin="modern"] .lic{display:inline-block;flex:none;vertical-align:middle}
+/* 輸入框上方工具列：藏原本的彩色圖，換成線條 */
+:root[data-skin="modern"] .toolbar .tool > svg:not(.lic),:root[data-skin="modern"] .toolbar .m-term-switch > img{display:none}
+:root[data-skin="modern"] .toolbar .tool{color:var(--muted)}
+:root[data-skin="modern"] .toolbar .tool:hover:not(:disabled){color:var(--fg)}
+:root[data-skin="modern"] .toolbar .tool[aria-expanded="true"],:root[data-skin="modern"] .toolbar .tool[aria-pressed="true"]{color:var(--accent)}
+:root[data-skin="modern"] .toolbar .tool.dict.rec,:root[data-skin="modern"] .toolbar .tool.mic.rec{color:#b3261e}
+/* 電腦「更多」與手機「⋯」：每一項前面一個圖示，兩邊同一個 key 同一個圖（MENU_ICON） */
+:root[data-skin="modern"] .more-menu button{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:10px;align-items:center}
+:root[data-skin="modern"] .more-menu button > .mi-ic{grid-row:1 / span 2}
+:root[data-skin="modern"] .more-menu button > :not(.mi-ic){grid-column:2}
+:root[data-skin="modern"] .mi-ic{color:var(--muted)}
+:root[data-skin="modern"] .mi-ic.danger{color:#b3261e}
+:root[data-skin="modern"] .ab-menu button.off .mi-ic,:root[data-skin="modern"] .m-ops-item.off .mi-ic{color:#c9c6be}
+:root[data-skin="modern"] .m-ops-item:has(> .mi-ic){display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:12px;align-items:center;justify-items:start}
+:root[data-skin="modern"] .m-ops-item > .mi-ic{grid-row:1 / span 2}
+:root[data-skin="modern"] .m-ops-item:has(> .mi-ic) > :not(.mi-ic){grid-column:2}
+/* 設定列表（電腦與手機）與「使用指引」：藏原本的藍色線條與 CSS 畫的書本 */
+:root[data-skin="modern"] .guide-item > .cat-ic,:root[data-skin="modern"] .guide-item > .guide-ic,:root[data-skin="modern"] .m-row-btn > .m-row-ic{display:none}
+:root[data-skin="modern"] .cat-lic{width:22px;height:22px;color:var(--muted)}
+:root[data-skin="modern"] .m-row-lic{color:var(--muted)}
+/* 手機四大分頁：字的左邊放圖示，選中的那一格跟字一起變主色 */
+:root[data-skin="modern"] .m-tabs button{display:flex;align-items:center;justify-content:center;gap:5px}
+/* 搜尋、新增、返回：形狀照舊，線寬統一 1.75、改灰 */
+:root[data-skin="modern"] .search-ic svg circle,:root[data-skin="modern"] .search-ic svg path,:root[data-skin="modern"] .search-plus svg path,:root[data-skin="modern"] .m-icon-btn .m-ic path{stroke-width:1.75}

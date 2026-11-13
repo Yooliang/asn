@@ -7,6 +7,7 @@
 // 反灰一律用 aria-disabled（不用原生 disabled）：滑鼠停上去看得到 title 的原因、鍵盤 Tab 停得到；點了在 handler 裡擋掉。
 import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
+import { itemIcon, isDangerItem } from './line-icons.mjs'
 import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
 import { idleCountOf, taskCountOf, taskView } from './tasks.mjs'
@@ -382,17 +383,17 @@ export const MoreMenuButton = {
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
     const view = computed(() => sharedWhy(props.items))
-    return { open, btn, pop, pos, toggle, pick, view }
+    return { open, btn, pop, pos, toggle, pick, view, iconOf: itemIcon, iconDanger: it => isDangerItem(it) }
   },
   template: `
 <div class="mbar-more">
   <button class="mbtn" type="button" ref="btn" data-slot="more" :class="{ on: open }" aria-haspopup="true" :aria-expanded="open" :aria-label="label" :title="label" @click="toggle">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>
+    <line-icon name="more"></line-icon>
   </button>
   <teleport to="body">
     <ul class="ab-menu ab-ops more-menu" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
       <li class="menu-note menu-shared" v-for="n in view.notes" :key="n" role="note">{{ n }}</li>
-      <template v-for="it in view.rows" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'more-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false && it.why" :id="'more-why-' + it.key">{{ it.why }}</small></button></li></template>
+      <template v-for="it in view.rows" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'more-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><line-icon class="mi-ic" :class="{ danger: iconDanger(it) }" :name="iconOf(it)" :size="18"></line-icon><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false && it.why" :id="'more-why-' + it.key">{{ it.why }}</small></button></li></template>
     </ul>
   </teleport>
 </div>`,
@@ -726,8 +727,7 @@ export const ActionBar = {
   </div>
   <div class="mbar-acts">
     <button class="mbtn" type="button" data-slot="term" v-if="termReady" :class="{ on: termOn }" :aria-pressed="String(termOn)" :aria-label="termBtn.label" :title="termTip" @click="onWindow">
-      <svg v-if="!termOn" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="m7.5 10 3 2.5-3 2.5M13 15h4"/></svg>
-      <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3.5V16.5H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"/></svg>
+      <line-icon :name="termOn ? 'msg' : 'term'"></line-icon>
     </button>
     <offline-menu-button v-if="isRoom" :names="offlineNames"></offline-menu-button>
     <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
