@@ -203,3 +203,18 @@
 :root[data-skin="modern"] .list-pane > .me .me-psm-row,:root[data-skin="modern"] .list-pane > .me .me-np{display:none}
 /* 換大頭貼的選單從用戶區往上彈（用戶區在最底下，往下彈會被裁掉） */
 :root[data-skin="modern"] .list-pane > .me .av-menu{top:auto;bottom:calc(100% + 4px)}
+
+/* ---------- 廣告框（#1421，小良哥決定保留）：白底細灰框的圓角卡片；彩球改成淡色平面圓、緞帶改成小膠囊標籤 ---------- */
+:root[data-skin="modern"] .ad-wrap{margin:6px 10px 8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:none}
+/* .ad 填滿外框：外框已有邊和圓角，裡面不再畫一圈（上面「名單」那段的 .ad 邊框在這裡收掉） */
+:root[data-skin="modern"] .ad{border:0;border-radius:0;background:var(--panel)}
+:root[data-skin="modern"] .ad.link:hover{filter:none;background:var(--modern-hover)}
+:root[data-skin="modern"] .ad-tx b{color:var(--fg);font-weight:600}
+:root[data-skin="modern"] .ad-tx small{color:var(--muted)}
+:root[data-skin="modern"] .ad-tx em{color:var(--accent);font-weight:600}
+:root[data-skin="modern"] .ad-art i{background:hsl(var(--h) 40% 86%);filter:none}
+:root[data-skin="modern"] .ad-art i:nth-child(2){background:hsl(var(--h) 35% 78%)}
+:root[data-skin="modern"] .ad-art i:nth-child(3){background:hsl(var(--h) 30% 92%)}
+:root[data-skin="modern"] .ad-new{top:6px;right:8px;left:auto;width:auto;padding:0 7px;transform:none;border-radius:999px;background:var(--modern-soft);color:var(--accent);font:600 10px/16px var(--font-ui);letter-spacing:.04em;text-shadow:none;box-shadow:none}
+:root[data-skin="modern"] .ad-dots i{background:#d9d6cf}
+:root[data-skin="modern"] .ad-dots i.on{background:var(--accent)}

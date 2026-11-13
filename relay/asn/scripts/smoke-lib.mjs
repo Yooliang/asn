@@ -871,6 +871,18 @@ export const skinProbeSource = () => `(async () => {
   for (const [sel, label] of [['.m-chathead.is-busy', '手機標題列忙碌變色'], ['.m-chathead.is-offline', '手機標題列離線變色'], ['.conv-main .to-line.is-offline', '電腦收件人列離線灰底']]) {
     const v = css(sel, 'background-color'); if (v !== null && plainBg.includes(v)) return { ok: false, why: label + '被現代底色蓋掉：' + v }
   }
+  // 廣告框（#1421）：現代下是白底細灰框圓角卡片，不留 Aero 的藍框藍底、漸層彩球、斜緞帶
+  const adw = document.querySelector('.ad-wrap');
+  if (adw) {
+    const w = getComputedStyle(adw);
+    if (w.backgroundColor !== 'rgb(255, 255, 255)' || w.borderTopColor === 'rgb(155, 184, 214)' || w.borderTopLeftRadius !== '14px') return { ok: false, why: '廣告框外層還是 Aero：' + w.backgroundColor + ' ' + w.borderTopColor + ' ' + w.borderTopLeftRadius };
+    const ad = adw.querySelector('.ad:not([style*="display: none"])');
+    if (ad && getComputedStyle(ad).backgroundImage !== 'none') return { ok: false, why: '廣告底色還是漸層' };
+    const ball = adw.querySelector('.ad-art i');
+    if (ball && getComputedStyle(ball).backgroundImage !== 'none') return { ok: false, why: '廣告的彩球還是漸層' };
+    const tag = adw.querySelector('.ad-new');
+    if (tag && getComputedStyle(tag).transform !== 'none') return { ok: false, why: '廣告的緞帶還是斜的' };
+  }
   await sleep(400);
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
