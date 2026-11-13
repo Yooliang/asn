@@ -420,6 +420,24 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   if (!back) return { ok: false, why: '第二次點不開名單' };
   back.click(); await sleep(200);
   if (rows().length) return { ok: false, why: '點外面關不掉名單' };
+  // #1466：名單開著時按返回鍵（m.js 接的是 window 的 popstate）要先關名單，仍停在對話頁
+  const onTab = () => (document.querySelector('.m-tabs button.on') || {}).textContent;
+  const tab0 = onTab();
+  btn.click(); await sleep(250);
+  if (!rows().length) return { ok: false, why: '返回鍵檢查：名單沒打開' };
+  window.dispatchEvent(new PopStateEvent('popstate', { state: history.state })); await sleep(300);
+  if (rows().length) return { ok: false, why: '名單開著按返回鍵，名單沒有先關' };
+  if (onTab() !== tab0 || !document.querySelector('.m-chat .chatpane')) return { ok: false, why: '名單開著按返回鍵，離開了對話頁' };
+  // 名單開著時分頁列要點得到：點另一個分頁＝名單收起並切過去
+  btn.click(); await sleep(250);
+  if (!rows().length) return { ok: false, why: '分頁檢查：名單沒打開' };
+  const other = [...document.querySelectorAll('.m-tabs button')].find(b => !b.classList.contains('on'));
+  if (!other) return { ok: false, why: '找不到其他分頁' };
+  const r = other.getBoundingClientRect(), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  if (!hit || !other.contains(hit)) return { ok: false, why: '名單開著時分頁列被蓋住：點到 ' + (hit ? hit.className || hit.tagName : '無') };
+  other.click(); await sleep(600);
+  if (rows().length) return { ok: false, why: '點分頁後名單沒有收起' };
+  if (onTab() === tab0) return { ok: false, why: '名單開著點分頁，沒有切過去' };
   return { ok: true, why: window.__cm || '' };
 })()`
 // 手機群組對話：上方沒有按鈕列，右上角「⋯」打開是群組的三項（邀請、加 AI、成員與設定），沒有「輸入邀請碼加入」

@@ -276,9 +276,11 @@ history.replaceState(initialNav(), '')
 // 回到上次的大分頁：對話清單那層先放著，再推一筆，系統返回鍵還是回到對話清單
 if (savedTab !== HOME_TAB) fourthNav.go(tabNav(savedTab))
 // 上次停在對話分頁：對話分頁本身就是最後那一則（#1438），不必再推一層
+let offlineBackGuard = () => false   // setup 裡接上（群組的「N 人離線」名單開著時，返回鍵先關名單，#1466）
 let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
   if (keyBackGuard()) return
+  if (offlineBackGuard()) return
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）；切頁時程式自己退的記錄不算
   if (callOn.value && !fourthNav.busy()) { void liveCall?.end(); history.pushState(fourthNav.state(), ''); return }
   fourthNav.onPop(e.state)
@@ -425,6 +427,14 @@ const app = createApp({
     const offlineOpen = ref(false)
     watch([chatOffline, () => chatFriend.value?.id], () => { offlineOpen.value = false })
     window.addEventListener('keydown', e => { if (e.key === 'Escape' && offlineOpen.value) offlineOpen.value = false })
+    // 返回鍵（同「通話中返回＝掛斷」「金鑰返回」的做法）：名單開著先關名單，補回被退掉的那筆記錄，畫面仍停在對話頁；有別的浮層推進來時名單先收起，免得吃掉浮層自己的返回
+    offlineBackGuard = () => {
+      if (!offlineOpen.value || fourthNav.busy()) return false
+      offlineOpen.value = false
+      history.pushState(fourthNav.state(), '')
+      return true
+    }
+    watch([() => nav.sheet, () => nav.tab], ([s]) => { if (s || offlineOpen.value) offlineOpen.value = false })   // 點分頁列切走：名單跟著收起（#1466）
     const headTerm = computed(() => { const p = chatPaneEl.value; return p && p.mSwitch ? p.mToggle : null })
     function toggleHeadTerm() { const p = chatPaneEl.value; if (!p || !p.mSwitch) return; if (p.remoteShown) p.showMsgs(); else p.showTerm() }
     const chatLog = computed(() => (isRoomChat(lastChat.value) ? hub.view(roomIdOf(lastChat.value)) : logs[lastChat.value]) ?? [])
