@@ -17,6 +17,7 @@ import { phoneOpsRows } from './mobile-ops.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
+import { offlineView } from './group-offline.mjs'
 import { placeMenu } from './menu-place.mjs'
 import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP, termButtonView } from './term-entry.mjs'
 
@@ -397,6 +398,45 @@ export const MoreMenuButton = {
 </div>`,
 }
 
+/**
+ * 群組頂端的「N 人離線」（#1460，現代外觀）：放在一對一時「看終端」的位置；點開列出是哪幾位離線（只是名單，不能點選）。
+ * 彈出框的外觀、定位與「更多」選單同一套（搬到 body、position:fixed），Esc 或點外面都會關。
+ */
+export const OfflineMenuButton = {
+  name: 'OfflineMenuButton',
+  props: { names: { type: Array, default: () => [] } },
+  setup(props) {
+    const { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } = globalThis.Vue
+    const open = ref(false)
+    const btn = ref(null), pop = ref(null)
+    const pos = reactive({ x: 0, y: 0, ready: false })
+    const view = computed(() => offlineView(props.names))
+    async function place() {
+      await nextTick()
+      if (!btn.value || !pop.value) return
+      const r = btn.value.getBoundingClientRect()
+      const p = placeMenu({ x: r.right, y: r.bottom + 4 }, { w: pop.value.offsetWidth, h: pop.value.offsetHeight }, { w: window.innerWidth, h: window.innerHeight })
+      Object.assign(pos, { x: p.x, y: p.y, ready: true })
+    }
+    function toggle() { open.value = !open.value; pos.ready = false; if (open.value) void place() }
+    const onDoc = e => { if (open.value && !btn.value?.contains(e.target) && !pop.value?.contains(e.target)) open.value = false }
+    const onKey = e => { if (e.key === 'Escape' && open.value) { open.value = false; btn.value?.focus() } }
+    watch(view, v => { if (!v) open.value = false })
+    onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
+    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
+    return { open, btn, pop, pos, toggle, view }
+  },
+  template: `
+<div class="mbar-offline" v-if="view">
+  <button class="mbtn mbtn-offline" type="button" ref="btn" data-slot="offline" :class="{ on: open }" aria-haspopup="true" :aria-expanded="open" :aria-label="view.aria" :title="view.title" @click="toggle">{{ view.label }}</button>
+  <teleport to="body">
+    <ul class="ab-menu ab-ops more-menu offline-menu" v-if="open" ref="pop" role="group" aria-label="離線的成員" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
+      <li class="menu-note" v-for="n in view.names" :key="n">{{ n }}</li>
+    </ul>
+  </teleport>
+</div>`,
+}
+
 const CALL_TIP = '語音通話：用說的跟這位夥伴對話，回信會念出來（再按掛斷）'
 const MODEL_TIP = '切換這個代理使用的模型'
 const TASKS_TIP = '看這個代理正在跑的背景工作'
@@ -404,7 +444,7 @@ const WAKE_TIP = '叫醒這個夥伴，接回原本的對話'
 
 export const ActionBar = {
   name: 'ActionBar',
-  components: { AsnDialog, PartnerOpDialog, OpsMenuButton, MoreMenuButton, AsnAvatar },
+  components: { AsnDialog, PartnerOpDialog, OpsMenuButton, MoreMenuButton, OfflineMenuButton, AsnAvatar },
   props: {
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
@@ -450,6 +490,7 @@ export const ActionBar = {
     const showSubs = computed(() => slot.value.subs.ok)
     // 現代外觀頂部（#1421）：名牌、「終端」圓鈕、「更多」選單；Aero 下整列藏起來，資料與 handler 都沿用上面這組
     const plate = computed(() => nameplateView(props.friend))
+    const offlineNames = computed(() => (isRoom.value && Array.isArray(props.friend?.offline) ? props.friend.offline : []))
     const termReady = computed(() => !lite.value && slot.value.window?.term === true)
     const moreItems = computed(() => (lite.value || !props.api || !props.friend
       ? (isRoom.value ? groupAll.value : opsAll.value)
@@ -599,7 +640,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, plate, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -688,6 +729,7 @@ export const ActionBar = {
       <svg v-if="!termOn" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="m7.5 10 3 2.5-3 2.5M13 15h4"/></svg>
       <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3.5V16.5H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"/></svg>
     </button>
+    <offline-menu-button v-if="isRoom" :names="offlineNames"></offline-menu-button>
     <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
   </div>
 </div>`,

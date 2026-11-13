@@ -154,6 +154,7 @@
 :root[data-skin="modern"] .actionbar .ab-note{position:absolute;z-index:20;left:50%;top:58px;transform:translateX(-50%);padding:3px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12px}
 /* 三欄：名牌置中；視窗窄時左欄讓到最小、右欄留給兩顆圓鈕，名牌往左靠而不被蓋住 */
 :root[data-skin="modern"] .mbar{position:relative;z-index:6;flex:none;display:grid;grid-template-columns:minmax(12px,1fr) auto minmax(104px,1fr);align-items:center;height:60px;padding:0 16px;background:var(--panel-soft)}
+:root[data-skin="modern"] .mbar:has(.mbar-offline){grid-template-columns:minmax(12px,1fr) minmax(0,auto) minmax(max-content,1fr);column-gap:8px}
 :root[data-skin="modern"] .mbar-plate{grid-column:2;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;padding:4px 14px 4px 5px;background:var(--panel);border:1px solid #e6e4df;border-radius:999px;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
 :root[data-skin="modern"] .mbar-plate .dp.xs{width:22px;height:22px}
 :root[data-skin="modern"] .mbar-plate .dp.xs>span{font-size:10px}
@@ -170,6 +171,17 @@
 :root[data-skin="modern"] .mbtn{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer;font:inherit}
 :root[data-skin="modern"] .mbtn:hover{background:var(--modern-hover)}
 :root[data-skin="modern"] .mbtn.on{border-color:var(--accent);color:var(--accent)}
+:root[data-skin="modern"] .mbtn.mbtn-offline{width:auto;min-width:36px;padding:0 14px;border-radius:999px;font-size:12.5px;white-space:nowrap;color:var(--fg)}
+:root[data-skin="modern"] .mbar-offline{display:flex}
+:root[data-skin="modern"] .offline-menu .menu-note{padding:8px 14px;font-size:13px;color:var(--fg)}
+:root[data-skin="modern"] .m-chat.is-room .m-plate-head:has(.m-head-offline){grid-template-columns:minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr)}
+:root[data-skin="modern"] .m-chat.is-room .m-plate-head:has(.m-head-offline) .m-back{justify-self:start}
+:root[data-skin="modern"] .m-plate-head .m-head-offline{grid-row:1;grid-column:3;justify-self:end;position:relative;display:block}
+:root[data-skin="modern"] .m-offline-btn{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);font:inherit;font-size:12.5px;white-space:nowrap;cursor:pointer}
+:root[data-skin="modern"] .m-offline-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="modern"] .m-offline-menu{list-style:none;margin:0;padding:0;top:42px;min-width:160px}
+:root[data-skin="modern"] .m-offline-menu li{padding:12px 16px;font-size:15px;border-bottom:1px solid rgba(0,0,0,.07)}
+:root[data-skin="modern"] .m-offline-menu li:last-child{border-bottom:0}
 :root[data-skin="modern"] .mbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* 窄視窗（一次只看一個窗格）：分頁列藏起來，只留「‹ 名單」返回鈕那一小列；沒有它就回不去名單 */
 :root[data-skin="modern"] .shell.only-chat .tabbar{display:flex;height:40px;margin-bottom:0;padding:6px 8px 0;align-items:center;background:var(--panel-soft)}

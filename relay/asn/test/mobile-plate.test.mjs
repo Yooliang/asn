@@ -31,7 +31,7 @@ test('接線：名牌點了開「⋯」選單（沒有項目時不能按）；�
 })
 
 test('復古 Aero 不變：名牌與看終端在 mobile.css 預設不顯示；顯示只寫在 modern.css、全部限定現代', () => {
-  assert.match(css, /\.m-chathead \.m-plate,\.m-chathead \.m-head-term\{display:none\}/)
+  assert.match(css, /\.m-chathead \.m-plate,\.m-chathead \.m-head-term,\.m-chathead \.m-head-offline\{display:none\}/)
   assert.doesNotMatch(css, /m-plate-head/, 'mobile.css 不排名牌的版面')
   const rules = modern.split('\n').filter(l => /m-plate|m-head-term|m-head-more|m-term-switch/.test(l) && l.includes('{'))
   assert.ok(rules.length >= 8, '現代有名牌的規則')
