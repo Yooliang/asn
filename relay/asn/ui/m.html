@@ -819,10 +819,13 @@
     <div class="m-ops" v-if="nav.sheet === 'permreq' && pq.cur">
       <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="permShownTitle">
         <h2 class="m-ops-h">{{ permShownTitle }}</h2>
+        <!-- #1445 危險提示：放在本文框外面、標題下面的固定位置；字只從電腦端給的代碼查表，絕不從本文推斷；沒比中就什麼都不顯示（不寫「安全」） -->
+        <div class="m-perm-warn" v-if="permRisk" role="alert"><b class="m-perm-warn-h">{{ permRisk.title }}</b><ul v-if="permRisk.lines.length"><li v-for="l in permRisk.lines" :key="l">{{ l }}</li></ul><p v-for="n in permRisk.notes" :key="n">{{ n }}</p></div>
         <div class="m-term-preview m-perm-text"><template v-for="(g, i) in permSegs(pq.cur.text)" :key="i"><hr class="m-perm-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></div>
+        <p class="m-note m-perm-trunc" v-if="permTrunc">{{ permTrunc }}</p>
         <p class="m-note" v-if="permHeld">{{ HELD_HINT }}</p>
-        <p class="m-note" v-else-if="!pq.cur.options.length">{{ PERMREQ_TEXT.viewOnly }}</p>
-        <p class="m-note" v-else-if="!pq.cur.complete">{{ PERMREQ_TEXT.incomplete }}</p>
+        <p class="m-note" v-else-if="!pq.cur.options.length && !pq.cur.full.length">{{ PERMREQ_TEXT.viewOnly }}</p>
+        <p class="m-note" v-else-if="!pq.cur.complete && !pq.cur.full.length">{{ PERMREQ_TEXT.incomplete }}</p>
         <p class="m-note" v-else-if="pq.cur.text.includes('Type something')">{{ PERMREQ_TEXT.noType }}</p>
         <p class="m-err" v-if="pq.error" role="alert">{{ pq.error }}</p>
         <template v-if="pq.result">
@@ -832,7 +835,10 @@
         <p class="m-note" v-else-if="pq.waiting" role="status">{{ PERMREQ_TEXT.waiting }}</p>
         <template v-else>
           <div class="m-term-opts" role="group" :aria-label="PERMREQ_TEXT.optionLabel">
-            <button type="button" class="m-btn m-term-opt" v-for="o in pq.cur.options" :key="o.n" :disabled="pq.busy || !pq.armed" @click="decidePermReq(o.n)">{{ o.label }}</button>
+            <!-- #1445：要按住的（o.hold）按滿一秒才送；放開、手指移開、被打斷都取消。其他的點一下就送 -->
+            <button type="button" class="m-btn m-term-opt" v-for="o in permOpts" :key="o.n" :class="{ 'm-hold': o.hold, holding: permHold.state.key === o.n, 'm-opt-deny': o.kind === 'deny' }" :disabled="pq.busy || !pq.armed" :aria-describedby="o.hold ? 'perm-hold-tip-' + o.n : null"
+              @click="permPress(o)" @pointerdown="permHoldStart(o)" @pointerup="permHold.cancel()" @pointerleave="permHold.cancel()" @pointercancel="permHold.cancel()" @contextmenu.prevent
+              @keydown="permHoldKey(o, $event)" @keyup="permHold.keyUp($event)"><span class="m-hold-fill" v-if="o.hold" aria-hidden="true"></span><span class="m-opt-t">{{ o.label }}</span><small class="m-hold-tip" v-if="o.hold" :id="'perm-hold-tip-' + o.n">{{ PERMREQ_TEXT.holdTip }}</small></button>
           </div>
           <button type="button" class="m-btn m-ops-cancel" :disabled="pq.busy" @click="laterPermReq">{{ PERMREQ_TEXT.later }}</button>
         </template>

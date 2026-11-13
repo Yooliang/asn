@@ -191,7 +191,14 @@ mod live {
                 Action::Create { name, hash } => {
                     let Some(o) = offers.iter().find(|o| o.name == name && o.hash == hash) else { continue };
                     let options: Vec<Value> = o.options.iter().map(|x| json!({ "n": x.n, "label": x.label })).collect();
-                    let body = json!({ "window_name": o.name, "prompt_text": o.text, "complete": o.complete, "options": options, "hash": o.hash });
+                    let mut body = json!({ "window_name": o.name, "prompt_text": o.text, "complete": o.complete, "options": options, "hash": o.hash });
+                    // #1445：權限框另外帶完整選項、危險代碼、截斷前字數（舊後台不認得這幾欄，會照舊只收上面那些）
+                    if !o.options_full.is_empty() {
+                        let full: Vec<Value> = o.options_full.iter().map(|x| json!({ "n": x.n, "label": x.label, "kind": crate::launch::claude_screen::option_kind_code(x.kind) })).collect();
+                        body["options_full"] = json!(full);
+                        body["risk"] = json!({ "codes": o.risk.codes, "uncertain": o.risk.uncertain });
+                        body["full_len"] = json!(o.full_len);
+                    }
                     match relay.api("perm_req_create", Some(body)).await.ok().and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string)) {
                         Some(id) => {
                             tracker.created(&name, &id, now);

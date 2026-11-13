@@ -129,8 +129,24 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     let top = lines[..cursor].iter().rposition(|l| is_rule(l) && l.trim().starts_with('─'));
     let start = top.map_or(0, |t| t + 1);
     let kept: Vec<String> = lines[start..end].iter().map(|l| clean_prompt_line(l)).collect();
-    let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES;
+    // Claude Code 自己把長內容收起來（「… +12 lines」「(ctrl+o to expand)」這類）：畫面上本來就不完整（#1445 asn真 審查必修 2）
+    let elided = kept.iter().any(|l| is_elision_line(l));
+    let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES && !elided;
     Some(PromptText { text: kept.join("\n"), complete, bind: String::new() })
+}
+
+/// Claude Code 收起長內容時留的記號：「… +N lines」「... +N lines」，或「ctrl+o to expand」這類展開提示。
+/// 認不準就當收起來（只會讓手機多一層小心，不會少）
+fn is_elision_line(line: &str) -> bool {
+    let t = line.trim();
+    let after = t.strip_prefix('…').or_else(|| t.strip_prefix("...")).map(str::trim_start);
+    let plus_lines = after.is_some_and(|a| {
+        let a = a.strip_prefix('+').unwrap_or("");
+        let digits = a.chars().take_while(char::is_ascii_digit).count();
+        digits > 0 && a[digits..].trim_start().starts_with("line")
+    });
+    let lc = t.to_ascii_lowercase();
+    plus_lines || lc.contains("to expand)") || lc.contains("ctrl+o to expand") || lc.contains("ctrl+r to expand")
 }
 
 /// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
@@ -168,6 +184,68 @@ pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption>
         ClaudeScreenKind::Question if complete => screen.options.clone(),
         _ => Vec::new(),
     }
+}
+
+/// 選項的種類（#1445）：手機用來決定要不要按住一秒；舊手機看不到警告時，電腦端用它決定舊的選項只給拒絕。
+/// 只有權限框才判斷，而且選項是從底部的選項區依位置解析出來的（`menu_at_bottom`），本文裡像選項的行不算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionKind {
+    /// 只放行這一次：編號 1、字就是 Claude 固定的「Yes」
+    AllowOnce,
+    /// 其他以「Yes」開頭的（以後都允許、改成自動模式等）：影響不只這一次
+    AllowAlways,
+    /// 拒絕：權限框判斷出來的那一項
+    Deny,
+    /// 認不出的
+    Other,
+}
+
+pub fn option_kind_code(k: OptionKind) -> &'static str {
+    match k {
+        OptionKind::AllowOnce => "allow_once",
+        OptionKind::AllowAlways => "allow_always",
+        OptionKind::Deny => "deny",
+        OptionKind::Other => "other",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullOption {
+    /// 畫面上的數字鍵（和 `phone_options` 同一套編號）
+    pub n: u32,
+    pub label: String,
+    pub kind: OptionKind,
+}
+
+/// 選項的字上限（和後台相同）
+const FULL_LABEL_MAX: usize = 200;
+
+/// 權限框的完整原始選項（#1445：小良哥要求照原本的選項顯示）。只有權限框有，其他框回空的（手機照舊用 `phone_options`）。
+/// 種類只靠「這是認得的權限框」加上 Claude 固定的字與位置判斷；夥伴寫的字不會變成放行類：
+/// - 編號 1 而且字恰好是「Yes」（而且權限框判斷的「允許這一次」就是它）才算 AllowOnce；
+/// - 權限框判斷的拒絕那一項算 Deny；
+/// - 其他以「Yes」開頭的一律算 AllowAlways（寧可多要求按住）。
+pub fn phone_options_full(screen: &ClaudeScreen) -> Vec<FullOption> {
+    if screen.kind != ClaudeScreenKind::Permission {
+        return Vec::new();
+    }
+    screen
+        .options
+        .iter()
+        .map(|o| {
+            let kind = if o.n == 1 && o.label == "Yes" && screen.allow_once == Some(1) {
+                OptionKind::AllowOnce
+            } else if Some(o.n) == screen.deny {
+                OptionKind::Deny
+            } else if o.label.starts_with("Yes") {
+                OptionKind::AllowAlways
+            } else {
+                OptionKind::Other
+            };
+            // cap_chars 截斷時會補一個「…」，所以少留一個字
+            FullOption { n: o.n, label: cap_chars(&strip_unsafe(&o.label), FULL_LABEL_MAX - 1), kind }
+        })
+        .collect()
 }
 
 /// 這個狀態代號的內容要不要傳到手機（`status_code` 的值）
@@ -690,6 +768,35 @@ fn question_above(lines: &[&str], above: usize) -> String {
 mod tests {
     use super::*;
     use ClaudeScreenKind as K;
+
+    #[test]
+    fn 真實的長指令權限框_框比畫面高_算不完整_選項種類照固定字判斷() {
+        // #1445 實測（asn真 要求）：claude 2.1.323 的權限框把長指令整段列出，沒有收起記號；框比畫面高，頂端實線不在畫面裡
+        let text = include_str!("../../tests/fixtures/term-screens/claude-permission-long-bash.txt").replace("\r\n", "\n");
+        let s = classify(&text).expect("認得出權限框");
+        assert_eq!(s.kind, K::Permission);
+        let p = permission_text(&text).unwrap();
+        assert!(!p.complete, "看不到框的頂端：不完整");
+        assert!(!p.text.lines().any(is_elision_line), "這個版本的框裡沒有收起記號");
+        let kinds: Vec<&str> = phone_options_full(&s).iter().map(|o| option_kind_code(o.kind)).collect();
+        assert_eq!(kinds, vec!["allow_once", "allow_always", "allow_always", "deny"], "「don’t ask again」「switch to auto mode」都算不再詢問");
+        // 舊手機只給拒絕（不完整）
+        let old: Vec<u32> = phone_options(&s, p.complete).iter().map(|o| o.n).collect();
+        assert_eq!(old, vec![4]);
+    }
+
+    #[test]
+    fn 權限框裡_claude_自己收起長內容的記號_算不完整() {
+        let rule = "─".repeat(60);
+        let page = |mid: &str| format!("{rule}\n Bash command\n{mid}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n");
+        assert!(permission_text(&page(" mkdir x")).unwrap().complete, "平常的指令是完整的");
+        for mid in [" for f in a b c; do\n … +12 lines (ctrl+o to expand)", "   ... +3 lines", " echo x\n   (ctrl+r to expand)", " … +1 line"] {
+            assert!(!permission_text(&page(mid)).unwrap().complete, "{mid:?}");
+        }
+        for ok in ["echo '1 … 2'", "echo +3 lines", "echo …"] {
+            assert!(!is_elision_line(ok), "{ok:?} 不是收起的記號");
+        }
+    }
 
     macro_rules! fixture {
         ($name:literal) => {

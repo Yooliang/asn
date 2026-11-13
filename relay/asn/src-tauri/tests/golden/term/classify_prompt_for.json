@@ -71,6 +71,12 @@
     "grok": "None",
     "pi": "None"
   },
+  "fixture/claude-permission-long-bash.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
   "fixture/claude-permission-webfetch.txt": {
     "agy": "None",
     "claude": "None",

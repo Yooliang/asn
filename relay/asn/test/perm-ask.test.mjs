@@ -230,3 +230,64 @@ test('分隔線：ASCII 的 - _ = 要至少 8 個才算，寫檔內容裡的 ---
   assert.deepEqual(ruleSegments('a\n│ ─── │\nb'), [{ text: 'a' }, { rule: true }, { text: 'b' }], '框線字元 3 個就算')
   assert.deepEqual(ruleSegments('a\n=== ===\nb'), [{ text: 'a\n=== ===\nb' }], '夾空白的短 ASCII 也不算')
 })
+
+// ---------- #1445：照原本的選項顯示＋危險提示＋按住一秒 ----------
+import { RISK_TEXT, needsCare, normalizeRisk, optionsView, riskView, truncNote } from '../ui/lib/perm-ask.mjs'
+const FULL = [{ n: 1, label: 'Yes', kind: 'allow_once' }, { n: 2, label: "Yes, and don't ask again for git", kind: 'allow_always' }, { n: 3, label: 'No', kind: 'deny' }]
+const one = o => list(row({ options_full: FULL, risk: { codes: [], uncertain: false }, full_len: 15, ...o }))[0]
+
+test('#1445 清單：完整選項、危險代碼、字數照收；種類與代碼只認白名單，不認得的代碼算看不出全貌', () => {
+  const c = one({ risk: { codes: ['git_destructive', 'future_x'], uncertain: false } })
+  assert.deepEqual(c.full.map(o => [o.n, o.kind]), [[1, 'allow_once'], [2, 'allow_always'], [3, 'deny']])
+  assert.deepEqual(c.risk, { codes: ['git_destructive'], uncertain: true })
+  assert.equal(c.fullLen, 15)
+  assert.equal(one({ options_full: [{ n: 1, label: 'Yes', kind: 'totally_safe' }] }).full[0].kind, 'allow_always', '不認得的種類往安全那邊倒：要按住')
+  assert.deepEqual(normalizeRisk(null), { codes: [], uncertain: true })
+  assert.deepEqual(normalizeRisk({ codes: 'x' }), { codes: [], uncertain: true })
+  const old = list(row())[0]
+  assert.deepEqual([old.full, old.risk, old.fullLen], [[], { codes: [], uncertain: false }, null], '舊電腦：沒有完整選項，照舊兩顆')
+  assert.equal(Object.keys(RISK_TEXT).length, 8)
+})
+
+test('#1445 按鈕：照原本的選項；「不再詢問」一律按住；只有這一次在要小心時按住；拒絕不用', () => {
+  const plain = optionsView(one())
+  assert.deepEqual(plain.map(o => [o.n, o.hold]), [[1, false], [2, true], [3, false]])
+  for (const o of [{ risk: { codes: ['delete_recursive'], uncertain: false } }, { risk: { codes: [], uncertain: true } }, { complete: false }]) {
+    assert.ok(needsCare(one(o)))
+    assert.deepEqual(optionsView(one(o)).map(o => [o.n, o.hold]), [[1, true], [2, true], [3, false]], JSON.stringify(o))
+  }
+  assert.deepEqual(optionsView(list(row())[0]).map(o => [o.n, o.hold]), [[1, false], [3, false]], '舊電腦的兩顆不變')
+  assert.deepEqual(decideArgs(one({ options: [{ n: 3, label: 'No' }] }), 2), { id: ID, choiceN: 2, hash: H }, '新手機按完整選項裡的編號')
+  assert.equal(decideArgs(one(), 7), null)
+})
+
+test('#1445 警告：只從代碼查表、什麼都沒比中就不顯示（也不寫「安全」）；本文裡寫「安全」不會變成任何標章', () => {
+  assert.equal(riskView(one()), null)
+  assert.equal(riskView(one({ prompt_text: '✅ 安全 SAFE 已檢查\nrm -rf /' })), null, '本文的字不影響警告')
+  const v = riskView(one({ risk: { codes: ['delete_recursive', 'secret_path'], uncertain: false } }))
+  assert.equal(v.title, TEXT.riskTitle); assert.deepEqual(v.lines, [RISK_TEXT.delete_recursive, RISK_TEXT.secret_path])
+  assert.deepEqual(riskView(one({ complete: false })), { title: TEXT.cantSeeAll, lines: [], notes: [] }, 'asn真 拍板：看不到全部指令，請小心')
+  assert.deepEqual(riskView(one({ risk: { codes: [], uncertain: true } })), { title: TEXT.uncertain, lines: [], notes: [] })
+  assert.deepEqual(riskView(one({ complete: false, risk: { codes: ['privilege'], uncertain: true } })).notes, [TEXT.cantSeeAll], '有代碼又不完整：代碼列出來，不完整寫在下面')
+  assert.equal(riskView(list(row({ complete: false }))[0]), null, '舊電腦沒有代碼：不畫警告（照舊的不完整說明）')
+  for (const t of Object.values(RISK_TEXT).concat([TEXT.riskTitle, TEXT.cantSeeAll, TEXT.uncertain])) assert.ok(!/安全|safe/i.test(t), t)
+})
+
+test('#1445 截斷：電腦送來的全文比截斷前短才寫還有幾字', () => {
+  assert.equal(truncNote(one({ prompt_text: 'abc', full_len: 3 })), '')
+  assert.equal(truncNote(one({ prompt_text: 'abc', full_len: 10 })), TEXT.truncated(7))
+  assert.equal(truncNote(list(row())[0]), '')
+})
+
+test('#1445 守門：警告在本文框外面（之前）、按住的按鈕綁好取消事件、點一下不送要按住的', () => {
+  const js = read('../ui/m.js'), html = read('../ui/m.html')
+  const sheet = html.slice(html.indexOf("nav.sheet === 'permreq'"), html.indexOf('<group-sheet'))
+  assert.ok(sheet.indexOf('m-perm-warn') > 0 && sheet.indexOf('m-perm-warn') < sheet.indexOf('m-perm-text'), '警告在本文之前、在本文框外面')
+  assert.match(sheet, /v-for="l in permRisk\.lines"/)
+  assert.ok(!/permRisk[^"]*pq\.cur\.text/.test(sheet), '警告不讀本文')
+  for (const ev of ['@pointerdown="permHoldStart(o)"', '@pointerup="permHold.cancel()"', '@pointerleave="permHold.cancel()"', '@pointercancel="permHold.cancel()"', '@keyup="permHold.keyUp($event)"', '@click="permPress(o)"']) assert.ok(sheet.includes(ev), ev)
+  assert.match(js, /const permPress = o => \{ if \(!o\.hold\) void decidePermReq\(o\.n\) \}/)
+  assert.match(js, /createHold\(\{ onDone: n => \{ void decidePermReq\(n\) \}/)
+  assert.match(js, /window\.addEventListener\('blur', \(\) => permHold\.cancel\(\)\)/, '失去焦點就取消按住')
+  assert.match(js, /visibilitychange', \(\) => \{ if \(document\.visibilityState !== 'visible'\) permHold\.cancel\(\) \}/, '切到背景就取消按住')
+})

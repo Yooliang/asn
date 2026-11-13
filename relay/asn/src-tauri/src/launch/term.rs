@@ -2060,19 +2060,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
     fn phone_offer_with(&self, name: &str, session_pid: Option<u32>) -> Result<PhoneOffer, String> {
-        let (_, screen, p) = self.phone_checked(name, session_pid)?;
-        Ok(phone_offer(name, &screen, p))
+        let (snap, screen, p) = self.phone_checked(name, session_pid)?;
+        Ok(phone_offer(name, &screen, p, Some(&snap.cwd)))
     }
 
     /// 手機按了一個選項。送之前全部重查：框還在、內容和選項沒變、這個數字還在選項裡。只送一個數字鍵，不帶 Enter
     fn phone_answer_with(&self, name: &str, hash: &str, n: u32, session_pid: Option<u32>) -> Result<(), String> {
         let (snap, screen, p) = self.phone_checked(name, session_pid)?;
         let want = prompt_hash(&p);
-        let offer = phone_offer(name, &screen, p);
+        let offer = phone_offer(name, &screen, p, Some(&snap.cwd));
         if offer.hash != hash {
             return Err("提示內容變了，沒有送出".into());
         }
-        if !(1..=9).contains(&n) || !offer.options.iter().any(|o| o.n == n) {
+        // 新手機按的是完整選項裡的編號（#1445），舊手機按的是舊的選項；兩份都是畫面上的數字鍵
+        if !(1..=9).contains(&n) || !(offer.options.iter().any(|o| o.n == n) || offer.options_full.iter().any(|o| o.n == n)) {
             return Err("這個提示沒有這個選項".into());
         }
         if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
@@ -3147,15 +3148,36 @@ pub struct PhoneOffer {
     pub name: String,
     pub text: String,
     pub complete: bool,
+    /// 舊手機用的選項（0.2.20 以前只看這個）：權限框有危險、看不出全貌或不完整時只給拒絕（#1445 調查員二審第 1 點）
     pub options: Vec<super::claude_screen::ClaudeOption>,
+    /// 新手機用：權限框的完整原始選項與種類（#1445）。其他框是空的
+    pub options_full: Vec<super::claude_screen::FullOption>,
+    /// 電腦端用完整內容判斷的危險代碼（#1445）。只有權限框會判斷
+    pub risk: super::perm_risk::Risk,
+    /// 截斷前的字數（只給手機顯示「後面還有幾字」，不拿來判斷任何事）
+    pub full_len: usize,
     pub hash: String,
 }
 
-fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super::claude_screen::PromptText) -> PhoneOffer {
-    let too_long = p.text.chars().count() > PHONE_TEXT_MAX;
+/// `cwd`＝這個視窗的工作資料夾（判斷寫到資料夾外面用；讀不到給 None）
+fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super::claude_screen::PromptText, cwd: Option<&str>) -> PhoneOffer {
+    use super::claude_screen::ClaudeScreenKind as K;
+    let full_len = p.text.chars().count();
+    let too_long = full_len > PHONE_TEXT_MAX;
     let text: String = p.text.chars().take(PHONE_TEXT_MAX).collect();
     let complete = p.complete && !too_long;
-    let options = super::claude_screen::phone_options(screen, complete);
+    let permission = screen.kind == K::Permission;
+    // 危險字用截斷前的完整文字判斷；確認框本身沒畫完整（p.complete 是 false）也算看不出全貌
+    let risk = if permission {
+        let mut r = super::perm_risk::assess(&p.text, screen.options.len(), cwd.filter(|c| !c.is_empty()));
+        r.uncertain |= !p.complete;
+        r
+    } else {
+        super::perm_risk::Risk::default()
+    };
+    let options_full = super::claude_screen::phone_options_full(screen);
+    // 舊手機看不到警告：有危險、看不出全貌或不完整時，舊的選項只給拒絕（和以前內容不完整時一樣）
+    let options = super::claude_screen::phone_options(screen, complete && risk.is_clear());
     // 全文和選項都綁進雜湊：選項變了也算內容變了
     let opts: Vec<String> = options.iter().map(|o| format!("{}:{}", o.n, o.label)).collect();
     let mut basis = format!("{text}\u{0}{}\u{0}{complete}", opts.join("\u{0}"));
@@ -3164,8 +3186,14 @@ fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super
         basis.push('\u{0}');
         basis.push_str(&p.bind);
     }
+    // 權限框（#1445）：完整選項、危險代碼、截斷前字數也綁進來，中途改了答不出去。其他框不加，雜湊和以前一樣
+    if permission {
+        let full: Vec<String> = options_full.iter().map(|o| format!("{}:{}:{}", o.n, super::claude_screen::option_kind_code(o.kind), o.label)).collect();
+        // 截斷前全文的雜湊也綁進來（asn真 審查非必修）：手機只看到前 16000 字，後面變了也要算內容變了
+        basis.push_str(&format!("\u{0}full\u{0}{}\u{0}risk\u{0}{}\u{0}{}\u{0}len\u{0}{full_len}\u{0}all\u{0}{}", full.join("\u{1}"), risk.codes.join(","), risk.uncertain, crate::term_remote::hash_hex(&p.text)));
+    }
     let hash = crate::term_remote::hash_hex(&basis);
-    PhoneOffer { name: name.to_string(), text, complete, options, hash }
+    PhoneOffer { name: name.to_string(), text, complete, options, options_full, risk, full_len, hash }
 }
 
 /// 給本機畫面的提醒：只有視窗名與固定代號，沒有畫面內容
@@ -7699,16 +7727,46 @@ mod tests {
         }
 
         #[test]
-        fn 手機_內容不完整只能拒絕() {
+        fn 手機_內容不完整_舊手機只能拒絕_新手機照原本的選項並標看不出全貌() {
             let rig = permission_rig();
             *rig.runner.inner.screen.borrow_mut() = " rm -rf a\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n".into();
             let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
             assert!(!o.complete);
             let ns: Vec<u32> = o.options.iter().map(|x| x.n).collect();
-            assert_eq!(ns, vec![2]);
-            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
+            assert_eq!(ns, vec![2], "舊手機看不到警告：只給拒絕");
+            // #1445（asn真 拍板）：新手機照原本的選項顯示，放行類要按住；電腦端標看不出全貌與危險代碼
+            let full: Vec<(u32, &str)> = o.options_full.iter().map(|x| (x.n, crate::launch::claude_screen::option_kind_code(x.kind))).collect();
+            assert_eq!(full, vec![(1, "allow_once"), (2, "deny")]);
+            assert!(o.risk.uncertain, "確認框沒畫完整");
+            assert!(o.risk.codes.contains(&"delete_recursive"));
             rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["2"]);
+            // 新手機按完整選項裡的編號也送得出去（雜湊和畫面重查照舊）
+            rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2", "1"]);
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 3, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
+        }
+
+        #[test]
+        fn 手機_完整的權限框_平常的指令_舊手機兩顆_有危險時舊手機只能拒絕_雜湊綁住新欄位() {
+            let rig = permission_rig();
+            let rule = "─".repeat(60);
+            let page = |cmd: &str| format!("{rule}\n Bash command\n {cmd}\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for this command\n   3. No\n");
+            *rig.runner.inner.screen.borrow_mut() = page("mkdir c1dir");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(o.complete && o.risk.is_clear(), "{:?}", o.risk);
+            assert_eq!(o.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![1, 3], "舊手機照舊：只有這一次、拒絕");
+            let kinds: Vec<&str> = o.options_full.iter().map(|x| crate::launch::claude_screen::option_kind_code(x.kind)).collect();
+            assert_eq!(kinds, vec!["allow_once", "allow_always", "deny"]);
+            assert_eq!(o.full_len, page("mkdir c1dir").lines().skip(1).collect::<Vec<_>>().join("\n").chars().count());
+            *rig.runner.inner.screen.borrow_mut() = page("git push --force");
+            let d = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(d.risk.codes, vec!["git_destructive"]);
+            assert_eq!(d.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![3], "有危險：舊手機只給拒絕");
+            assert_ne!(d.hash, o.hash);
+            // 選項區上面塞假的選項列：看不出全貌
+            *rig.runner.inner.screen.borrow_mut() = page("echo x\n ❯ 1. No");
+            assert!(rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).map(|x| x.risk.uncertain).unwrap_or(true), "本文有像選項的行");
         }
 
         #[test]

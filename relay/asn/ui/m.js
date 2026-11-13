@@ -20,7 +20,8 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
 import { HELD_HINT, heldTitle, isHeldOptions } from './lib/held.mjs'
-import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS, ruleSegments as permSegs } from './lib/perm-ask.mjs'
+import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS, ruleSegments as permSegs, optionsView as pqOptionsView, riskView as pqRiskView, truncNote as pqTruncNote } from './lib/perm-ask.mjs'
+import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
@@ -1172,6 +1173,18 @@ const app = createApp({
       catch (e) { pq.error = pqError(e); pq.busy = false }
     }
     const laterPermReq = () => { if (pq.cur) pqDismissed.add(pq.cur.id); history.back() }
+    // #1445：照原本的選項顯示、危險提示（只從電腦端的代碼查表，不從本文推斷）、要小心的放行類按住一秒才算
+    const permOpts = computed(() => pqOptionsView(pq.cur))
+    const permRisk = computed(() => pqRiskView(pq.cur))
+    const permTrunc = computed(() => pqTruncNote(pq.cur))
+    const permHold = createHold({ onDone: n => { void decidePermReq(n) }, vibrate: ms => { if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(ms) }, state: reactive({ key: null }) })   // 沒真的點過畫面時瀏覽器不准震，也不要叫
+    watch(() => [pq.cur?.id, pq.busy, pq.waiting], () => permHold.cancel())
+    // 按住到一半 App 被切走、失去焦點：取消（不能在背景按滿送出；asn真 審查）
+    window.addEventListener('blur', () => permHold.cancel())
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') permHold.cancel() })
+    const permPress = o => { if (!o.hold) void decidePermReq(o.n) }   // 點一下只算不用按住的；要按住的放開時的 click 不算
+    function permHoldStart(o) { if (o.hold && !pq.busy && pq.armed) permHold.start(o.n) }
+    function permHoldKey(o, e) { if (o.hold && !pq.busy && pq.armed && permHold.keyDown(o.n, e)) e.preventDefault() }
     watch(() => nav.sheet, s => { if (s !== 'permreq' && pq.cur) pqClose() })
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pqWatchStart(); pqAutoArm() } else { pqWatchStop(); clearTimeout(pqAutoTimer); pqAutoTimer = 0 } void checkPermReqs() })
     setInterval(() => { void checkPermReqs() }, PQ_POLL_MS)
@@ -1376,7 +1389,7 @@ const app = createApp({
       pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
-      pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
+      pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatOffline, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,

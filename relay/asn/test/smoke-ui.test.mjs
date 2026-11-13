@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('section[aria-label="夥伴"] .m-head .m-me'), '手機：夥伴頁左上的頭像（0.2.18 起對話頁也有標頭，指定夥伴頁那一份）')
@@ -391,4 +391,18 @@ test('現代外觀補齊（#1421 A）：有訊息、離線、忙碌的情境；�
   assert.equal(tableFor(by['m-modern-busy']).relay_list.members[0].agents[0].status, 'busy', '手機：忙碌標題列')
   const src = probeSource(SCENARIOS.find(s => s.probe?.skinCheck).probe)
   for (const must of ['border-top-left-radius', "'18px'", "'50%'", '::before', '.m-chat .compose-main', '.m-chathead.is-busy', '.m-chathead.is-offline', '.conv-main .to-line.is-offline', '.ad-wrap', '.ad-art i', '.ad-new', '.m-plate-head', '.m-head-term', '.m-term-switch']) assert.ok(src.includes(must), '檢查要量：' + must)
+})
+
+test('手機確認框危險提示情境（#1445）：危險（本文很長）、不完整、平常各一；表達式語法正確；檢查警告位置、按住一秒', async () => {
+  const vm = await import('node:vm')
+  const sc = SCENARIOS.filter(s => s.probe?.mpermDanger)
+  assert.deepEqual(sc.map(s => s.probe.mpermDanger), ['danger', 'incomplete', 'plain'])
+  assert.equal(probeKind(sc[0].probe), '手機確認框危險提示檢查')
+  for (const s of sc) {
+    const src = probeSource(s.probe)
+    assert.doesNotThrow(() => new vm.Script(src), s.name)
+    for (const w of ['一開框警告就要看得到', '要按住的按鈕點一下就送出了', '按住不到一秒就送出了', '按滿一秒沒有送出']) assert.ok(src.includes(w), w)
+    const reqs = tableFor(s).android_perm_req_list.requests
+    assert.equal(reqs[0].options_full.length, 3, s.name)
+  }
 })

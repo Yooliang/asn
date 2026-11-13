@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { handlePermReqAction, parseCreate, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS, type PermReqDeps, TEXT_MAX } from "./perm_request.ts";
+import { handlePermReqAction, parseCreate, parseRisk, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS, type PermReqDeps, RISK_CODES, TEXT_MAX } from "./perm_request.ts";
 
 const H = "a".repeat(64);
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -17,7 +17,7 @@ const ok = { window_name: "小乙", prompt_text: "Do you want to proceed?\nrm x"
 const me = { id: "wrk9b2" };
 
 Deno.test("建立：只留認得的欄位，多餘的丟掉", () => {
-  assertEquals(parseCreate({ ...ok, command: "calc.exe", token: "SECRET" }), ok);
+  assertEquals(parseCreate({ ...ok, command: "calc.exe", token: "SECRET" }), { ...ok, options_full: null, risk: null, full_len: null });
 });
 
 Deno.test("建立：壞參數一律拒絕", () => {
@@ -101,4 +101,39 @@ Deno.test("建立成功（新增一筆）才通知推播一次；busy／錯誤�
   assertEquals((await handlePermReqAction({ ...busy.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "perm_req_create", ok as never, null)).status, 409);
   assertEquals((await handlePermReqAction({ ...m.deps, onCreated: (id: string) => ids.push(id) }, { id: "W" }, "perm_req_create", {} as never, null)).status, 400);
   assertEquals(ids, [ID]);
+});
+
+// ---------- #1445：完整選項、危險代碼、截斷前字數 ----------
+const full = [{ n: 1, label: "Yes", kind: "allow_once" }, { n: 2, label: "Yes, and don't ask again", kind: "allow_always" }, { n: 3, label: "No", kind: "deny" }];
+
+Deno.test("#1445 建立：完整選項、危險代碼照收；種類不認得當 allow_always（要按住）；字數只收整數", () => {
+  const c = parseCreate({ ...ok, options_full: full, risk: { codes: ["delete_recursive"], uncertain: false }, full_len: 120 })!;
+  assertEquals(c.options_full, full);
+  assertEquals(c.risk, { codes: ["delete_recursive"], uncertain: false });
+  assertEquals(c.full_len, 120);
+  assertEquals(parseCreate({ ...ok, options_full: [{ ...full[0], kind: "trust_me" }, full[2]] })!.options_full![0].kind, "allow_always", "不認得的種類往安全那邊倒：要按住");
+  for (const bad of [
+    { ...ok, options_full: [] }, { ...ok, options_full: "x" }, { ...ok, options_full: [full[0], full[0]] }, { ...ok, options_full: [{ n: 0, label: "x", kind: "deny" }] },
+    { ...ok, options_full: [full[0]] }, // 舊選項的 3 不在完整選項裡
+    { ...ok, options_full: full, full_len: -1 }, { ...ok, options_full: full, full_len: 1.5 },
+  ]) assertEquals(parseCreate(bad as never), null, JSON.stringify(bad).slice(0, 80));
+});
+
+Deno.test("#1445 危險代碼：白名單以外的丟掉並標 uncertain，不整筆拒收；最多 8 個、不重複；壞格式當看不出全貌", () => {
+  assertEquals(RISK_CODES.length, 8);
+  assertEquals(parseRisk({ codes: ["git_destructive", "new_code_2027"], uncertain: false }), { codes: ["git_destructive"], uncertain: true });
+  assertEquals(parseRisk({ codes: ["privilege", "privilege"], uncertain: true }), { codes: ["privilege"], uncertain: true });
+  assertEquals(parseRisk({ codes: "rm" }), { codes: [], uncertain: true });
+  assertEquals(parseRisk(null), { codes: [], uncertain: true });
+  assertEquals(parseRisk({ codes: [], uncertain: false }), { codes: [], uncertain: false });
+  assertEquals(parseCreate({ ...ok, options_full: full, risk: { codes: ["SAFE"] } })!.risk, { codes: [], uncertain: true }, "夥伴想塞「安全」也只會變成更小心");
+});
+
+Deno.test("#1445 建立：新欄位帶給資料庫的九個參數版本（舊格式就是 null）", async () => {
+  const m = mk({ id: ID, expires_at: "t", bell_topics: [] });
+  await handlePermReqAction(m.deps, me, "perm_req_create", { ...ok, options_full: full, risk: { codes: [], uncertain: true }, full_len: 9 }, null);
+  assertEquals([m.calls[0].args.p_options_full, m.calls[0].args.p_risk, m.calls[0].args.p_full_len], [full, { codes: [], uncertain: true }, 9]);
+  const o = mk({ id: ID, expires_at: "t", bell_topics: [] });
+  await handlePermReqAction(o.deps, me, "perm_req_create", ok, null);
+  assertEquals([o.calls[0].args.p_options_full, o.calls[0].args.p_risk, o.calls[0].args.p_full_len], [null, null, null]);
 });

@@ -18,7 +18,33 @@ const OPTIONS_MAX = 9;
 const DETAIL_MAX = 200;
 const NOT_DONE: Reply = { status: 404, body: { error: "not_found" } };
 
-export type PermCreate = { window_name: string; prompt_text: string; complete: boolean; options: { n: number; label: string }[]; hash: string };
+/** 權限框的危險代碼（#1445）：要和電腦端 perm_risk::CODES、migration 20261114100000 的白名單一致 */
+export const RISK_CODES = ["delete_recursive", "git_destructive", "disk_system", "remote_exec", "secret_path", "privilege", "db_destructive", "outside_cwd"];
+const RISK_MAX = 8;
+const KINDS = ["allow_once", "allow_always", "deny", "other"];
+const FULL_LEN_MAX = 10_000_000;
+
+export type FullOption = { n: number; label: string; kind: string };
+export type Risk = { codes: string[]; uncertain: boolean };
+export type PermCreate = {
+  window_name: string; prompt_text: string; complete: boolean; options: { n: number; label: string }[]; hash: string;
+  /** #1445：權限框的完整原始選項；沒有就是舊格式（其他框、舊電腦） */
+  options_full: FullOption[] | null; risk: Risk | null; full_len: number | null;
+};
+
+/** 危險代碼：白名單以外的丟掉並標 uncertain（不整筆拒收，asn真 拍板）；格式不對也當看不出全貌 */
+export function parseRisk(r: Json | null | undefined): Risk {
+  if (!r || typeof r !== "object" || Array.isArray(r)) return { codes: [], uncertain: true };
+  let uncertain = r.uncertain === true;
+  const codes: string[] = [];
+  if (Array.isArray(r.codes)) {
+    for (const c of r.codes) {
+      if (typeof c === "string" && RISK_CODES.includes(c)) { if (!codes.includes(c) && codes.length < RISK_MAX) codes.push(c); }
+      else uncertain = true;
+    }
+  } else if (r.codes !== undefined) uncertain = true;
+  return { codes, uncertain };
+}
 
 /** 電腦建立請求的參數檢查：只留認得的欄位，多餘的一律丟掉 */
 export function parseCreate(b: Json): PermCreate | null {
@@ -34,7 +60,26 @@ export function parseCreate(b: Json): PermCreate | null {
     if (!o || typeof o !== "object" || !Number.isInteger(o.n) || o.n < 1 || o.n > 9 || typeof o.label !== "string" || o.label.trim().length === 0) return null;
     opts.push({ n: o.n, label: o.label.slice(0, LABEL_MAX) });
   }
-  return { window_name: name, prompt_text: text, complete, options: opts, hash };
+  let full: FullOption[] | null = null, risk: Risk | null = null, fullLen: number | null = null;
+  if (b.options_full !== undefined && b.options_full !== null) {
+    const of = b.options_full;
+    if (!Array.isArray(of) || of.length === 0 || of.length > OPTIONS_MAX) return null;
+    full = [];
+    for (const o of of) {
+      if (!o || typeof o !== "object" || !Number.isInteger(o.n) || o.n < 1 || o.n > 9 || typeof o.label !== "string" || o.label.trim().length === 0) return null;
+      if (full.some(x => x.n === o.n)) return null;
+      // 不認得的種類當「不再詢問」（要按住）：以後電腦端新增放行類的種類，舊後台也不會把它變成點一下就放行（調查員二審）
+      full.push({ n: o.n, label: o.label.slice(0, LABEL_MAX), kind: KINDS.includes(o.kind) ? o.kind : "allow_always" });
+    }
+    // 舊手機用的選項，編號要是完整選項的子集（兩份都是畫面上的數字鍵）
+    if (opts.some(o => !full!.some(x => x.n === o.n))) return null;
+    risk = parseRisk(b.risk);
+    if (b.full_len !== undefined && b.full_len !== null) {
+      if (!Number.isInteger(b.full_len) || b.full_len < 0 || b.full_len > FULL_LEN_MAX) return null;
+      fullLen = b.full_len;
+    }
+  }
+  return { window_name: name, prompt_text: text, complete, options: opts, hash, options_full: full, risk, full_len: fullLen };
 }
 
 async function call(deps: PermReqDeps, fn: string, args: Record<string, unknown>): Promise<{ data: Json } | Reply> {
@@ -54,6 +99,8 @@ export async function handlePermReqAction(deps: PermReqDeps, me: { id: string },
     if (!c) return fail("bad_request");
     const r = await call(deps, "asn_relay_perm_req_create", {
       p_node: me.id, p_window_name: c.window_name, p_prompt_text: c.prompt_text, p_complete: c.complete, p_options: c.options, p_hash: c.hash,
+      // #1445：新欄位一律帶（舊格式就是 null）；要先上 migration 20261114100000 才有這個九個參數的版本
+      p_options_full: c.options_full, p_risk: c.risk, p_full_len: c.full_len,
     });
     if (isReply(r)) return r;
     const topics = Array.isArray(r.data.bell_topics) ? r.data.bell_topics.filter((t: unknown) => typeof t === "string") : [];

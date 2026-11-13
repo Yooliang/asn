@@ -217,6 +217,10 @@ mod tests {
                     continue;
                 }
                 files += 1;
+                // 權限框危險字判斷（#1445）要認得「下載後直接執行」的寫法，檔案裡本來就是這些字樣；它只比對文字、不執行任何東西
+                if p.ends_with(std::path::Path::new("launch").join("perm_risk.rs")) {
+                    continue;
+                }
                 let src = std::fs::read_to_string(&p).unwrap();
                 for (n, line) in src.lines().enumerate() {
                     if line.trim_start().starts_with("//") {
