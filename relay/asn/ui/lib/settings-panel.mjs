@@ -17,6 +17,7 @@ import { accountLine, INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete } fro
 import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
+import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
@@ -30,7 +31,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -106,6 +107,7 @@ export const SettingsPanel = {
       return out
     }
     const act = (op, value) => emit('act', op, value)
+    const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
     // 帳號卡片的設備按鈕：使用中的按了不做事；其他的就是原本的「切換到那台」（同一個指令、確認框照舊）
     const selfKey = computed(() => allDevs.value.find(d => d.self)?.key ?? '')
     const devName = node => allDevs.value.find(d => d.key === node)?.label ?? ''
@@ -147,7 +149,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
-      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
+      fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL,
@@ -705,7 +707,15 @@ export const SettingsPanel = {
         </div>
       </template>
       <template v-if="catKey === 'about'">
+        <p class="about-intro">{{ about.intro }}</p>
         <small class="ver-line">版本 {{ st.version }}</small>
+        <small class="about-device" v-if="about.deviceLine">{{ about.deviceLine }}</small>
+        <section class="set-card about-links" aria-label="連結">
+          <div class="upd-row">
+            <button class="aero-btn" type="button" v-for="l in about.links" :key="l.key" @click="act('open-link', l.url)">{{ l.label }}</button>
+            <button class="aero-btn about-guide" type="button" @click="act('open-guide')">{{ about.guideLabel }}</button>
+          </div>
+        </section>
         <section class="set-card" aria-label="記錄">
           <b>記錄</b>
           <small>出問題時可以看這份記錄</small>
@@ -714,6 +724,7 @@ export const SettingsPanel = {
           </div>
           <small v-if="st.uiLogMsg" role="status">{{ st.uiLogMsg }}</small>
         </section>
+        <small class="about-maker">{{ about.maker }}</small>
       </template>
       <asn-dialog v-if="forgetBox" :title="KNOWN.forgetTitle" initial-focus=".forget-cancel" @close="forget.no">
         <p class="launch-notice-body">{{ forgetBox.text }}</p>

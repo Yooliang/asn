@@ -613,9 +613,22 @@
                   </div>
                 </template>
                 <template v-else-if="settingCat === 'about'">
-                  <div class="m-card m-form">
-                        <p class="m-ver">ASN {{ info.version }}</p>
+                  <div class="m-card m-form m-about">
+                    <p class="m-about-intro">{{ about.intro }}</p>
+                    <p class="m-ver">版本 {{ info.version }}</p>
+                    <p class="m-ver m-about-device" v-if="about.deviceLine">{{ about.deviceLine }}</p>
                   </div>
+                  <div class="m-card m-form m-set-list m-about-links">
+                    <ul class="m-guide-list">
+                      <li v-for="l in about.links" :key="l.key">
+                        <button class="m-row-btn" type="button" @click="openAboutLink(l.url)"><span class="m-row-tx"><b>{{ l.label }}</b></span><span class="m-caret" aria-hidden="true">↗</span></button>
+                      </li>
+                      <li>
+                        <button class="m-row-btn m-about-guide" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ about.guideLabel }}</b></span><span class="m-caret" aria-hidden="true">▸</span></button>
+                      </li>
+                    </ul>
+                  </div>
+                  <p class="m-ver m-about-maker">{{ about.maker }}</p>
                 </template>
               </div>
             </div>

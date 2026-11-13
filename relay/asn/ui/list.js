@@ -14,6 +14,7 @@ import { buildLogView } from './lib/changelog.mjs'
 import { initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
 import { openUiLog } from './lib/view-log.mjs'
+import { isAboutUrl } from './lib/about-info.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
@@ -1893,7 +1894,7 @@ const app = createApp({
       piSetup: piSetupView(piSetup.raw, piSetup),
       quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       claudeModAuto: claudeModAuto.value,
-      version: info.version, uiLogMsg: uiLogMsg.value,
+      version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
       logNote: releasesNote(releases), logRetry: releases.phase === 'error',
     }))
@@ -1972,6 +1973,8 @@ const app = createApp({
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
+        case 'open-link': if (isAboutUrl(value)) { try { await invoke('open_link', { url: value }) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
+        case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL

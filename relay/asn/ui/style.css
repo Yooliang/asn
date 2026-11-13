@@ -604,6 +604,10 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 
 .titlebar .ver { opacity: .7; font-weight: normal; }
 .settings .ver-line { display: block; margin-top: 12px; color: #6b7a8c; }
+.settings .about-intro { margin: 0; line-height: 1.6; }
+.settings .about-device, .settings .about-maker { display: block; margin-top: 4px; color: #6b7a8c; }
+.settings .about-links { margin-top: 12px; }
+.settings .about-maker { margin-top: 12px; }
 
 /* 截圖標註畫面（對話區全區浮層） */
 .annot{position:fixed;inset:0;z-index:var(--z-mask);display:flex;flex-direction:column;background:rgba(10,24,40,.9);color:#fff}

@@ -60,6 +60,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
@@ -617,6 +618,8 @@ const app = createApp({
     document.addEventListener('visibilitychange', () => { if (!document.hidden) cloud.onVisible() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
+    const about = computed(() => aboutView({ deviceName: info.window_name }))
+    const openAboutLink = url => { if (isAboutUrl(url)) invoke('open_link', { url }).catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
@@ -1359,7 +1362,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      chatRows, chatQuery, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      chatRows, chatQuery, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,

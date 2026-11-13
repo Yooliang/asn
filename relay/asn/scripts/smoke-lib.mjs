@@ -790,6 +790,11 @@ export const mtabsProbeSource = () => `(async () => {
   about.click(); await sleep(600);
   const page = document.querySelector('.m-fourth');
   if (!inView(page)) return { ok: false, why: '「關於」內頁沒有出現在畫面上' };
+  // #1439：「關於」有簡介、版本、連結（官網、版本紀錄、隱私權政策、使用指引）、出品；內容不撐破畫面寬度
+  const aboutText = page.textContent;
+  const aboutMissing = ['Agent Sync Network', '版本 ', '官網', '版本紀錄', '隱私權政策', '使用指引', 'Yooliang'].filter(w => !aboutText.includes(w));
+  if (aboutMissing.length) return { ok: false, why: '「關於」少了：' + aboutMissing.join('、') };
+  if (page.scrollWidth > page.clientWidth + 1) return { ok: false, why: '「關於」內容超出畫面寬度' };
   // #1429：內頁暫時佔第四格（通知那一格），分頁字換成內頁的標題、選中第四格；分頁還是四個
   let cur = [...document.querySelectorAll('.m-tabs button')];
   if (cur.length !== 4) return { ok: false, why: '內頁不該多出一個分頁' };
