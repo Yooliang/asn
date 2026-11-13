@@ -263,7 +263,7 @@ test('舊的存檔或瀏覽記錄（sheet＝acct／setting／guide）轉成內�
 test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格上（跟著一起滑）；通知是自己的分頁；頁數不寫死', () => {
   const html = read('ui', 'm.html'), js = read('ui', 'm.js'), css = read('ui', 'mobile.css')
   // 頁籤列與 pager 跟著分頁清單；標著哪一格看 curTab（在內頁上＝內頁蓋著的那一格）
-  assert.match(html, /<button v-for="t in tabs" :key="t" type="button" role="tab" :class="\{ on: curTab === t \}" :aria-selected="curTab === t" @click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span><i class="red" v-if="tabHasDot\(t\)">/)
+  assert.match(html, /<button v-for="t in tabs" :key="t" type="button" role="tab" :class="\{ on: curTab === t \}" :aria-selected="curTab === t" @click="goTab\(t\)"><line-icon class="m-tab-ic" :name="tabIcon\(t\)" :size="18"><\/line-icon><span>\{\{ tabLabel\(t\) \}\}<\/span><i class="red" v-if="tabHasDot\(t\)">/)
   assert.match(html, /<section class="m-page" :style="\{ '--pages': pages \}">/)
   assert.match(css, /\.m-pager\{[^}]*width:calc\(var\(--pages,3\) \* 100%\)/); assert.match(css, /\.m-pg\{[^}]*flex:0 0 calc\(100% \/ var\(--pages,3\)\)/); assert.match(css, /\.m-ind\{[^}]*width:calc\(100% \/ var\(--pages,3\)\)/)
   assert.doesNotMatch(js, /\* 100 \/ 3\}/, 'pager 不再寫死頁數')

@@ -11,7 +11,8 @@ export const TERM_BACK_TIP = '回到訊息'
 export const TERM_BTN_TERM = { label: '終端', icon: 'img/ab-term.svg' }
 export const TERM_BTN_MSG = { label: '訊息', icon: 'img/ab-window.svg' }
 /** 手機對話頁的切換鈕（一顆、放在下方圖示列最後面；小良哥 11-10）：寫「按了會去哪裡」——看對話時是「終端」、看終端時是「對話」。不做選中樣式 */
-export const M_TERM_TOGGLE = { toTerm: { label: '終端', icon: TERM_BTN_TERM.icon }, toChat: { label: '對話', icon: TERM_BTN_MSG.icon } }
+// line＝現代外觀用的線條圖示（lib/line-icons.mjs），Aero 照舊用 icon 的圖檔
+export const M_TERM_TOGGLE = { toTerm: { label: '終端', icon: TERM_BTN_TERM.icon, line: 'term' }, toChat: { label: '對話', icon: TERM_BTN_MSG.icon, line: 'msg' } }
 /** shown：終端正開著 → 回這顆按鈕要顯示的（按了會去的地方） */
 export const mTermToggle = shown => (shown === true ? M_TERM_TOGGLE.toChat : M_TERM_TOGGLE.toTerm)
 /** shown：終端畫面是不是正開著。回這一格要顯示的字與圖示（按了會去的地方） */

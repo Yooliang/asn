@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('section[aria-label="夥伴"] .m-head .m-me'), '手機：夥伴頁左上的頭像（0.2.18 起對話頁也有標頭，指定夥伴頁那一份）')
@@ -366,6 +366,17 @@ test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對�
   for (const s of sc) { const me = JSON.parse(tableFor(s).store_load.values.me); assert.equal(me.skin, 'modern', s.name); assert.equal(me.mobilePrefs.skin, 'modern', s.name) }
   const kept = JSON.parse(tableFor(SCENARIOS.find(s => s.name === 'm-modern-list')).store_load.values.me)
   assert.equal(kept.navTab, 'list', '各情境原本的存檔照留（#1438 起這一張看夥伴頁）')
+})
+
+test('選單圖示情境（#1461）：電腦「更多」、手機「⋯」各一，存檔選現代；表達式語法正確，檢查每一項有線條圖示、移除是紅色', async () => {
+  const vm = await import('node:vm')
+  const sc = SCENARIOS.filter(s => s.probe?.menuIcons)
+  assert.deepEqual(sc.map(s => s.name), ['list-modern-more', 'm-modern-ops'])
+  assert.equal(probeKind(sc[0].probe), '選單圖示檢查')
+  const src = probeSource(sc[0].probe)
+  assert.doesNotThrow(() => new vm.Script(src))
+  for (const w of ['.mbar-more .mbtn', '.m-chathead .m-plate:not(:disabled)', '這幾項沒有圖示', 'rgb(179, 38, 30)']) assert.ok(src.includes(w), w)
+  for (const s of sc) assert.equal(JSON.parse(tableFor(s).store_load.values.me).skin, 'modern', s.name)
 })
 
 test('現代外觀補齊（#1421 A）：有訊息、離線、忙碌的情境；檢查量卡片圓角、圓頭像、狀態點、手機輸入框邊框、忙碌／離線變色', async () => {

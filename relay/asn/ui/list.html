@@ -189,7 +189,7 @@
           <ul>
             <li v-for="g in GUIDES" :key="g.key">
               <button class="buddy guide-item" type="button" @click="openPanel('guide', g.key)">
-                <span class="guide-ic" aria-hidden="true"></span>
+                <span class="guide-ic" aria-hidden="true"></span><line-icon class="cat-lic" name="guide"></line-icon>
                 <span class="b-text"><span class="b-line"><span class="b-nick">{{ g.title }}</span></span></span>
               </button>
             </li>
@@ -199,14 +199,14 @@
           <ul>
             <li v-for="c in SETTING_CATS" :key="c.key">
               <button class="buddy guide-item" type="button" @click="openPanel('setting', c.key)">
-                <svg class="cat-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="c.icon"/></svg>
+                <svg class="cat-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="c.icon"/></svg><line-icon class="cat-lic" :name="c.key"></line-icon>
                 <span class="b-text"><span class="b-line"><span class="b-nick">{{ c.title }}</span></span><span class="b-psm">{{ catSub(c.key) }}</span></span>
               </button>
             </li>
             <!-- 使用指引（原本左邊的「指引」頁籤）：設定的最後一列，點進去是篇目列表，上方「‹ 設定」回來 -->
             <li>
               <button class="buddy guide-item guide-entry" type="button" @click="tab = 'guide'">
-                <span class="guide-ic" aria-hidden="true"></span>
+                <span class="guide-ic" aria-hidden="true"></span><line-icon class="cat-lic" name="guide"></line-icon>
                 <span class="b-text"><span class="b-line"><span class="b-nick">{{ GUIDE_ENTRY_LABEL }}</span></span><span class="b-psm">{{ GUIDE_ENTRY_SUB }}</span></span>
               </button>
             </li>

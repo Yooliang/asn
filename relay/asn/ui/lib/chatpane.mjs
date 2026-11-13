@@ -570,34 +570,42 @@ export const ChatPane = {
         <span class="tool-group">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <line-icon name="emoji"></line-icon>
           </button>
         </span>
         <button class="tool icon call" type="button" v-if="showCallBtn && !displayOnly" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6.6 3.5l2.4-.6 1.7 4.2-1.9 1.6a11.5 11.5 0 0 0 5.5 5.5l1.6-1.9 4.2 1.7-.6 2.4a2.6 2.6 0 0 1-2.6 2C10.1 18.4 5.6 13.9 4.6 6.1a2.6 2.6 0 0 1 2-2.6z" fill="#2f9a45" stroke="#1f6b2f" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          <line-icon name="call"></line-icon>
         </button>
         <button class="tool icon dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <line-icon name="dict"></line-icon>
           <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
         </button>
         <button class="tool icon" type="button" v-if="!isRoom" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <line-icon name="nudge"></line-icon>
         </button>
         <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <line-icon name="photo"></line-icon>
         </button>
         <input ref="fileEl" type="file" accept="image/*" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
         <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <line-icon name="file"></line-icon>
         </button>
         <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
         <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <line-icon name="shot"></line-icon>
         </button>
         <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <line-icon name="mic"></line-icon>
         </button>
         <!-- 對話／終端切換（手機）：一顆、放在這排最後面；字與圖示寫按了會去哪裡，不做選中樣式；沒有終端可看的夥伴不顯示 -->
-        <button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle.label" :title="mToggle.label" @click="remoteShown ? showMsgs() : showTerm()"><img :src="mToggle.icon" alt="" width="22" height="22"></button>
+        <button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle.label" :title="mToggle.label" @click="remoteShown ? showMsgs() : showTerm()"><img :src="mToggle.icon" alt="" width="22" height="22"><line-icon :name="mToggle.line" :size="22"></line-icon></button>
         <div class="picker" v-if="pickerOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
@@ -616,15 +624,15 @@ export const ChatPane = {
         </ul>
         <!-- 現代外觀的單列膠囊（#1421 B2）：「＋」開上方那排工具、語音輸入放右邊（手機的 dict 或電腦的 mic，擇一）；復古 Aero 下這幾顆整個不顯示 -->
         <button class="mc-plus" type="button" @click="plusOpen = !plusOpen" @keydown.esc="plusOpen = false" :aria-expanded="plusOpen" aria-label="附件與更多" title="附件與更多">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <line-icon name="plus"></line-icon>
         </button>
         <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
         <button class="mc-dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <line-icon name="dict"></line-icon>
           <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
         </button>
         <button class="mc-dict mc-mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice && !showDictBtn" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <line-icon name="mic"></line-icon>
         </button>
         <button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly || !draft.trim()">{{ sendLabel }}</button>
       </form>
