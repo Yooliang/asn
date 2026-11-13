@@ -1212,8 +1212,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1624,6 +1624,53 @@ export const mpermreqProbeSource = () => `(async () => {
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
   return { ok: true, why: '' };
 })()`
+// #1445：手機確認框照原本的選項顯示＋危險提示＋按住一秒。三種：危險（本文很長）、確認框不完整、平常的指令
+const PERM_FULL = [{ n: 1, label: 'Yes', kind: 'allow_once' }, { n: 2, label: "Yes, and don't ask again for git push commands", kind: 'allow_always' }, { n: 3, label: 'No', kind: 'deny' }]
+export const permDangerRows = kind => {
+  const long = Array.from({ length: 80 }, (_, i) => `  第 ${i + 1} 行：git push --force origin main`).join('\n')
+  const base = { id: '11111111-2222-3333-4444-555555555556', node: 'Q', window_name: 'demo', body_hash: 'c'.repeat(64), expires_at: new Date(Date.now() + 600000).toISOString(), options_full: PERM_FULL }
+  if (kind === 'danger') return [{ ...base, prompt_text: ` Bash command\n${long}\n ✅ 安全 SAFE（夥伴自己寫的字）\n Do you want to proceed?`, complete: true, options: [{ n: 3, label: 'No' }], risk: { codes: ['git_destructive'], uncertain: false }, full_len: 20000 }]
+  if (kind === 'incomplete') return [{ ...base, prompt_text: ' git push --force …\n Do you want to proceed?', complete: false, options: [{ n: 3, label: 'No' }], risk: { codes: [], uncertain: true }, full_len: 40 }]
+  return [{ ...base, prompt_text: ' Bash command\n mkdir c1dir\n Do you want to proceed?', complete: true, options: [{ n: 1, label: 'Yes' }, { n: 3, label: 'No' }], risk: { codes: [], uncertain: false }, full_len: 40 }]
+}
+export const permDangerProbeSource = kind => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let panel = null;
+  for (let i = 0; i < 80 && !panel; i++) { panel = document.querySelector('.m-ops-panel .m-perm-text')?.closest('.m-ops-panel'); if (!panel) { for (const fn of ((globalThis.__smokeListeners || {})['relay-bell'] || [])) fn({ event: 'relay-bell', payload: null }); await sleep(250) } }
+  if (!panel) return { ok: false, why: '權限框沒有跳出來' };
+  await sleep(900);   // 等 ARM_MS
+  const kind = ${JSON.stringify(kind)};
+  const warn = panel.querySelector('.m-perm-warn');
+  const btns = [...panel.querySelectorAll('.m-term-opt')];
+  if (btns.length !== 3) return { ok: false, why: '應該照原本的選項顯示三顆，實際 ' + btns.length };
+  const holds = btns.map(b => b.classList.contains('m-hold'));
+  if (kind === 'plain') {
+    if (warn) return { ok: false, why: '平常的指令不該有警告' };
+    if (panel.textContent.includes('安全')) return { ok: false, why: '畫面不該出現「安全」' };
+    if (JSON.stringify(holds) !== '[false,true,false]') return { ok: false, why: '平常的指令只有「不再詢問」要按住：' + JSON.stringify(holds) };
+  } else {
+    if (!warn) return { ok: false, why: '沒有警告區塊' };
+    const r = warn.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > window.innerHeight) return { ok: false, why: '一開框警告就要看得到：' + Math.round(r.top) + '～' + Math.round(r.bottom) };
+    if (warn.compareDocumentPosition(panel.querySelector('.m-perm-text')) !== Node.DOCUMENT_POSITION_FOLLOWING) return { ok: false, why: '警告要在本文之前（本文框外面）' };
+    if (kind === 'danger' && !warn.textContent.includes('git')) return { ok: false, why: '警告沒有寫出 git 那一條' };
+    if (kind === 'incomplete' && !warn.textContent.includes('看不到全部指令')) return { ok: false, why: '不完整時要寫看不到全部指令' };
+    if (JSON.stringify(holds) !== '[true,true,false]') return { ok: false, why: '要小心時放行類都要按住：' + JSON.stringify(holds) };
+    if (kind === 'danger' && !panel.textContent.includes('後面還有')) return { ok: false, why: '截斷的字數提示不見了' };
+  }
+  // 要按住的那一顆：點一下不送；按住不到一秒放開不送；按滿一秒才送
+  const decided = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'android_perm_req_decide');
+  const hb = btns[1];
+  hb.click(); await sleep(200);
+  if (decided().length) return { ok: false, why: '要按住的按鈕點一下就送出了' };
+  hb.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await sleep(400);
+  hb.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); await sleep(900);
+  if (decided().length) return { ok: false, why: '按住不到一秒就送出了' };
+  hb.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await sleep(1300);
+  if (decided().length !== 1) return { ok: false, why: '按滿一秒沒有送出' };
+  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
+  return { ok: true, why: '' };
+})()`
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
 // 看終端時輸入框要在：可見、可聚焦、在畫面內；終端區的底不超過輸入框的頂（不重疊）；不橫向溢出；切回對話也正常
 export const mtermComposerProbeSource = ({ kb }) => `(async () => {
@@ -1862,6 +1909,9 @@ export const SCENARIOS = [
   { name: 'm-notice-tab-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'tab' }, ready: '#app.m .m-notice .msg', probe: MNOTICE_PROBES.tabBig, shot: 'm-notice-tab-big.png' },
   // 手機看別台電腦夥伴的終端（PR④，只能看）：「訊息／終端」切換、終端畫面占滿訊息區、不能打字。412、360 寬與大字型各一張
   // 手機權限框的分隔線：指令前後各四行線、行首有框線 → 只剩一條細線、沒有整行分隔字元、不橫向溢出。412 寬
+  { name: 'm-perm-danger', page: 'm.html', state: { signedIn: true, mpermreq: true, permKind: 'danger' }, ready: '#app.m .m-pager .m-search', probe: { mpermDanger: 'danger' }, shot: 'm-perm-danger.png' },
+  { name: 'm-perm-incomplete', page: 'm.html', state: { signedIn: true, mpermreq: true, permKind: 'incomplete' }, ready: '#app.m .m-pager .m-search', probe: { mpermDanger: 'incomplete' }, shot: 'm-perm-incomplete.png' },
+  { name: 'm-perm-plain', page: 'm.html', state: { signedIn: true, mpermreq: true, permKind: 'plain', skin: 'modern' }, ready: '#app.m .m-pager .m-search', probe: { mpermDanger: 'plain' }, shot: 'm-perm-plain-modern.png' },
   { name: 'm-perm-rules', page: 'm.html', state: { signedIn: true, mpermreq: true }, ready: '#app.m .m-pager .m-search', probe: { mpermreq: true }, shot: 'm-perm-rules-412.png' },
   { name: 'm-term-view', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-412.png' },
   { name: 'm-term-view-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.base, shot: 'm-term-view-360.png' },
@@ -2122,7 +2172,8 @@ export const tableFor = scenario => {
   if (scenario.state.mpermreq) {
     t.relay_list = { members: MBAR_MEMBERS.claude }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
-    t.android_perm_req_list = { requests: mpermreqRows(), recent: [] }
+    t.android_perm_req_list = { requests: scenario.state.permKind ? permDangerRows(scenario.state.permKind) : mpermreqRows(), recent: [] }
+    if (scenario.state.permKind) t.android_perm_req_decide = { ok: true, status: 'decided' }
   }
   if (scenario.state.mnoself) {
     t.relay_list = { members: MACCT_MEMBERS.two }

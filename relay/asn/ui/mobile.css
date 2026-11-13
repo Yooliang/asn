@@ -151,6 +151,20 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-perm-rule{border:0;border-top:1px solid var(--line,#ccc);height:0;margin:6px 0}
 .m-term-opts{display:flex;flex-direction:column;gap:6px;margin:6px 0}
 .m-term-opt.on{outline:2px solid var(--accent,#1b6ac9)}
+/* #1445 確認框的危險提示：本文框外面、標題下面，紅色左邊線＋淡紅底；只從電腦端的代碼畫出來 */
+.m-perm-warn{margin:4px 0 8px;padding:8px 10px;border-left:4px solid #b3261e;border-radius:6px;background:#fdeceb;color:#5c1410;font-size:14px;line-height:1.45}
+.m-perm-warn-h{display:block;font-weight:700;color:#b3261e}
+.m-perm-warn ul{margin:4px 0 0;padding-left:20px}
+.m-perm-warn p{margin:4px 0 0}
+.m-perm-trunc{font-size:12px}
+/* 按住一秒：底色從左到右填滿（1 秒），放開就退回；按住期間不讓頁面捲動或跳出長按選單 */
+.m-term-opt{position:relative;overflow:hidden}
+.m-term-opt.m-hold{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;gap:2px}
+.m-term-opt .m-opt-t,.m-term-opt .m-hold-tip{position:relative}
+.m-hold-fill{position:absolute;inset:0;width:0;background:rgba(179,38,30,.22);transition:width .12s linear;pointer-events:none}
+.m-term-opt.holding .m-hold-fill{width:100%;transition:width 1s linear}
+.m-hold-tip{font-size:11px;font-weight:400;opacity:.75}
+@media (prefers-reduced-motion:reduce){.m-term-opt.holding .m-hold-fill{transition:none;width:100%}}
 .m-dv-vh{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 12px;background:var(--panel-soft);border-bottom:1px solid var(--line);color:var(--title-fg)}
 .m-dv-vi{flex:none;display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;line-height:0}
 .m-dv-vi svg{width:22px;height:22px}

@@ -801,9 +801,11 @@ mod tests {
         let key_owners = ["identity.rs", "account.rs", "device_login.rs", "secret_file.rs"];
         // 允許提到 login.bin 的：登入（預設存檔）、金鑰庫偵測（keystore，只看前綴）、這個模組
         let login_owners = ["auth.rs", "keystore.rs", "secret_file.rs"];
+        // 只比對文字、不讀寫任何檔的：權限框危險字判斷（#1445）要認得指令裡提到的金鑰檔名與 login.bin。只准這一個檔，路徑寫死
+        let text_only = ["launch/perm_risk.rs"];
         for p in all {
             let rel = p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
-            if rel.contains("tests") {
+            if rel.contains("tests") || text_only.contains(&rel.as_str()) {
                 continue;
             }
             let text = std::fs::read_to_string(&p).unwrap();

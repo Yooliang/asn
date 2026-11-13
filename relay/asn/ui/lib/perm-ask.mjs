@@ -31,12 +31,76 @@ export function normalizeList(raw, nameOf = () => '', nowMs = Date.now()) {
       ? r.options.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200) }))
       : []
     if (typeof r.prompt_text !== 'string') continue   // 選項可以是空的：多選、一次多題看得到但不能按
+    // #1445：權限框的完整原始選項（新電腦＋新後台才有）。種類只認四種，其他當 other
+    const full = Array.isArray(r.options_full)
+      ? r.options_full.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200), kind: KINDS.includes(o.kind) ? o.kind : 'other' }))
+      : []
     out.push({
       id: r.id, hash: r.body_hash, deviceName: clean(nameOf(r.node), 60) || '某台電腦', window: clean(r.window_name, 64),
       text: clean(r.prompt_text, TEXT_MAX), complete: r.complete === true, options,
+      full, risk: full.length ? normalizeRisk(r.risk) : { codes: [], uncertain: false },
+      fullLen: Number.isInteger(r.full_len) && r.full_len >= 0 ? r.full_len : null,
     })
   }
   return out
+}
+
+// ---------- #1445：照原本的選項顯示＋危險提示（設計稿 asn-security/design-1445-phone-perm-danger.md） ----------
+const KINDS = ['allow_once', 'allow_always', 'deny', 'other']
+/** 危險代碼 → 畫面上的一句話。**警告只從這張表畫出來，絕不從本文推斷**；不認得的代碼不顯示字，但算看不出全貌 */
+export const RISK_TEXT = {
+  delete_recursive: '會一次刪掉整個資料夾',
+  git_destructive: '會改寫或丟掉 git 的歷史紀錄',
+  disk_system: '會動到磁碟或系統（格式化、關機、改登錄檔等）',
+  remote_exec: '會從網路下載程式並直接執行',
+  secret_path: '會讀寫金鑰或憑證所在的位置',
+  privilege: '會提高權限或放寬檔案權限',
+  db_destructive: '會刪掉資料庫的資料',
+  outside_cwd: '會改到這個視窗工作資料夾以外的檔案',
+}
+/** 電腦端的危險判斷結果 → { codes, uncertain }。格式不對當看不出全貌（寧可多一層小心） */
+export function normalizeRisk(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return { codes: [], uncertain: true }
+  let uncertain = r.uncertain === true
+  const codes = []
+  for (const c of Array.isArray(r.codes) ? r.codes : []) {
+    if (typeof c === 'string' && Object.hasOwn(RISK_TEXT, c)) { if (!codes.includes(c)) codes.push(c) } else uncertain = true
+  }
+  if (r.codes !== undefined && !Array.isArray(r.codes)) uncertain = true
+  return { codes, uncertain }
+}
+
+/** 這一筆要不要額外小心：有危險代碼、看不出全貌、確認框沒畫完整 */
+export const needsCare = cur => !!cur && (cur.risk.codes.length > 0 || cur.risk.uncertain || !cur.complete)
+
+/** 要畫的選項：有完整選項就照原本的顯示（新電腦），沒有就是舊的兩顆。每一顆標要不要按住一秒：
+ *  - 「不再詢問」這類（allow_always）一律要按住；
+ *  - 只有這一次（allow_once）在要小心時要按住；
+ *  - 拒絕與認不出的不用。 */
+export function optionsView(cur) {
+  if (!cur) return []
+  if (!cur.full.length) return cur.options.map(o => ({ ...o, kind: 'other', hold: false }))
+  const care = needsCare(cur)
+  return cur.full.map(o => ({ ...o, hold: o.kind === 'allow_always' || (o.kind === 'allow_once' && care) }))
+}
+
+/** 警告區塊（放在本文框外面、標題下面）。什麼都沒比中回 null（不顯示任何東西，也不寫「安全」） */
+export function riskView(cur) {
+  if (!cur || !cur.full.length) return null
+  const lines = cur.risk.codes.map(c => RISK_TEXT[c])
+  const notes = []
+  if (!cur.complete) notes.push(TEXT.cantSeeAll)
+  else if (cur.risk.uncertain) notes.push(TEXT.uncertain)
+  if (!lines.length && !notes.length) return null
+  // 沒有比中的代碼、只有「看不到全部／看不出全貌」：那句話本身當標題，不再多一行「請小心」
+  return lines.length ? { title: TEXT.riskTitle, lines, notes } : { title: notes[0], lines, notes: notes.slice(1) }
+}
+
+/** 截斷的字數提示：電腦送來的全文比截斷前短時，寫還有幾字沒顯示 */
+export function truncNote(cur) {
+  if (!cur || !Number.isInteger(cur.fullLen)) return ''
+  const shown = [...cur.text].length
+  return cur.fullLen > shown ? TEXT.truncated(cur.fullLen - shown) : ''
 }
 
 /** 下一筆：跳過「先不處理」的 */
@@ -44,7 +108,7 @@ export const nextToAsk = (list, dismissed) => list.find(r => !dismissed.has(r.id
 
 /** 手機按了一個選項：回給 android_perm_req_decide 的參數；不在清單裡回 null（不送） */
 export function decideArgs(cur, n) {
-  if (!cur || !cur.options.some(o => o.n === n)) return null
+  if (!cur || !(cur.options.some(o => o.n === n) || (cur.full ?? []).some(o => o.n === n))) return null
   return { id: cur.id, choiceN: n, hash: cur.hash }
 }
 
@@ -95,6 +159,12 @@ export const TEXT = {
   noReply: '電腦沒有回應，沒有送出',
   unknown: '電腦還沒有回報。請到電腦上確認',
   close: '關閉',
+  // #1445
+  riskTitle: '注意：這個指令可能有風險',
+  cantSeeAll: '看不到全部指令，請小心',
+  uncertain: '看不出這個指令的全貌（有編碼或拼接），請到電腦上確認',
+  holdTip: '按住一秒',
+  truncated: n => `（後面還有 ${n} 字沒有顯示，危險字是用完整內容判斷的）`,
 }
 
 // 詢問內容是從終端畫面抄來的，裡面整排「────」在窄螢幕會折成好幾行。整行都是分隔線的換成一條細線。

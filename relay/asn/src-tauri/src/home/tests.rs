@@ -296,7 +296,8 @@ fn 守門_舊資料夾名只在_home_rs_出現_其他程式一律經單一解析
                 walk(&p, out);
             } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
                 let name = p.to_string_lossy().replace('\\', "/");
-                if name.ends_with("/home.rs") || name.ends_with("/home/tests.rs") {
+                // launch/perm_risk.rs 只比對權限框的指令文字（#1445：指令提到舊資料夾就算碰到金鑰位置），不是在用這個資料夾
+                if name.ends_with("/home.rs") || name.ends_with("/home/tests.rs") || name.ends_with("/launch/perm_risk.rs") {
                     continue;
                 }
                 for (i, line) in fs::read_to_string(&p).unwrap().lines().enumerate() {
