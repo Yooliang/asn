@@ -322,3 +322,29 @@ test('從夥伴分頁點橫幅的「換班接手」：先退回對話分頁（#1
   const js = read('ui', 'm.js')
   assert.match(/async function bannerHandover\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1], /openChat\(b\.id\)\n\s*await fourthNav\.whenSettled\(\)[\s\S]*openOps\(\)/)
 })
+
+test('系統返回鍵（#1438 對話分頁直接是那一則之後；#1442）：各分頁按返回回到對話分頁、對話分頁是底；點夥伴開對話不多推一層；在對話分頁再點「對話」不動', () => {
+  // 夥伴、設定、通知：按一次回對話分頁（不是某一則上面的另一層），再按就退到背景（記錄已經到底）
+  for (const t of ['list', 'me', 'notice']) {
+    const h = harness(t)
+    assert.deepEqual(h.stack(), [initialNav(), tabNav(t)], t)
+    h.press()
+    assert.equal(h.nav.tab, HOME_TAB, t); assert.equal(h.nav.chat, false, t); assert.equal(h.depth(), 0, `${t}：回到底`)
+  }
+  // 對話分頁本身：記錄只有一筆，返回鍵交給系統（退到背景）
+  const c = harness()
+  assert.equal(c.depth(), 0); c.press(); assert.equal(c.nav.tab, HOME_TAB); assert.equal(c.depth(), 0)
+  // 從夥伴頁點一位：只切到對話分頁，記錄退回底（不多推「進那一則」）；返回鍵不會停在同一頁
+  const p = harness('list')
+  assert.equal(p.r.openChat(), true); p.flush()
+  assert.equal(p.nav.tab, HOME_TAB); assert.equal(p.nav.chat, false); assert.deepEqual(p.stack(), [initialNav()])
+  // 已經在對話分頁上再點「對話」：什麼都不推
+  p.r.goTab(HOME_TAB); p.flush(); assert.deepEqual(p.stack(), [initialNav()])
+  // 從設定點橫幅開對話也一樣
+  const s = harness('me')
+  s.r.openChat(); s.flush(); assert.deepEqual(s.stack(), [initialNav()]); assert.equal(s.nav.tab, HOME_TAB)
+  // 內頁開著時點一則：收起內頁再到對話分頁，一樣不多一層
+  const g = harness('me')
+  g.r.openPage(guidePage()); g.r.openChat(); g.flush()
+  assert.equal(g.st.fourth?.page ? g.nav.tab : HOME_TAB, HOME_TAB); assert.equal(g.nav.chat, false); assert.equal(g.depth(), 0)
+})

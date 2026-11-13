@@ -22,7 +22,7 @@ import { HELD_HINT, heldTitle, isHeldOptions } from './lib/held.mjs'
 import { ARM_MS as PQ_ARM_MS, POLL_MS as PQ_POLL_MS, RESULT_EVERY_MS as PQ_RESULT_MS, RESULT_TRIES as PQ_RESULT_TRIES, TEXT as PERMREQ_TEXT, askTitle as pqAskTitle, WATCH_MS as PQ_WATCH_MS, decideArgs as pqDecideArgs, errorText as pqError, normalizeList as pqList, nextToAsk as pqNext, resultOf as pqResult, stillPending as pqStill, watchOutcome as pqWatchOutcome, AUTOCLOSE_MS as PQ_AUTOCLOSE_MS, ruleSegments as permSegs } from './lib/perm-ask.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
-import { restoreMobileChat, restoreMobileTab } from './lib/session.mjs'
+import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { offlineView } from './lib/group-offline.mjs'
@@ -46,7 +46,7 @@ import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, vie
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
-import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, chatRowsUnread, filterChatRows, unreadChatRows } from './lib/recent.mjs'
+import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
@@ -148,7 +148,6 @@ async function startLogin(key) {
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 
 let savedTab = HOME_TAB   // 上次離開時的大分頁（讀存檔後才知道）
-let savedChat = false   // 上次離開時正在看對話分頁裡的某一則（重開直接回到那一則）
 const nav = reactive(initialNav())
 // 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴，暫時佔用第四格（#1429）。null＝沒有；{ page, from, leftAt }（lib/mobile-fourth.mjs）
 const fourthSt = reactive({ fourth: null })
@@ -226,7 +225,6 @@ if (screen.value === 'main') {
   lastChat.value = normalizeLastChat(saved.lastChat)
   // 重開 App 回到上次的大分頁（夥伴／對話／設定／通知，存的是分頁鍵）；上次正在看某一則對話就直接回到那一則
 savedTab = restoreMobileTab(saved.navTab)
-savedChat = restoreMobileChat(saved.navTab, saved.navChat)
 watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === 'chats' && !!nav.chat }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
@@ -276,7 +274,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
 history.replaceState(initialNav(), '')
 // 回到上次的大分頁：對話清單那層先放著，再推一筆，系統返回鍵還是回到對話清單
 if (savedTab !== HOME_TAB) fourthNav.go(tabNav(savedTab))
-// 上次停在對話分頁：對話分頁本身就是最後那一則（#1438），不必再推一層（savedChat 只是舊存檔的相容，留著不用）
+// 上次停在對話分頁：對話分頁本身就是最後那一則（#1438），不必再推一層
 let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
   if (keyBackGuard()) return
@@ -336,14 +334,12 @@ const app = createApp({
     // 最近有活動：24 小時內有往來的夥伴與群組（名單最上面；同一位在設備分組照常出現）
     const recentTick = ref(Date.now())
     setInterval(() => { recentTick.value = Date.now() }, 60_000)
-    // 對話分頁的清單：活動中的對話（夥伴與群組，新到舊；不含已封存、通知）；上方的搜尋框只篩這一頁
-    const chatQuery = ref('')
-    // 對話分頁的完整清單（lib/recent.mjs 的 chatListRows：活動中的對話＋最後使用的那一位＋有未讀的夥伴＋所有群組）；分頁紅點用同一份算，搜尋只篩畫面上的
-    // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
+    // 有往來的對話（lib/recent.mjs 的 chatListRows：活動中的對話＋最後使用的那一位＋有未讀的夥伴＋所有群組）；夥伴頁「未讀」與「夥伴」分頁的紅點都從這一份算
     const chatAll = computed(() => chatListRows({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value }))
-    const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain)))   // 比對規則和夥伴頁一樣
     // 夥伴頁最上面的「未讀」（#1438）：只放有未讀的夥伴與群組，最新的在前；「夥伴」分頁的紅點用同一份算（不套搜尋字，兩邊一定對得上）
     const unreadRows = computed(() => unreadChatRows(chatAll.value))
+    // 夥伴頁有搜尋字時藏起「未讀」那一組（#1442）：它不套搜尋字（和紅點同一份），搜尋時留著會像是沒篩到；紅點照舊
+    const unreadShown = computed(() => showUnreadGroup(unreadRows.value, normalizeSearchQuery(query.value)))
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
@@ -980,13 +976,13 @@ const app = createApp({
         void trackLaunch({ id: r.id, node: lch.node, name })
       } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
     }
-    // 開好了「開始對話」：收起內頁並直接切到對話分頁、進那一位（同一次退記錄裡做完，不靠計時）
+    // 開好了「開始對話」：收起內頁並直接切到對話分頁（對話分頁就是那一位，#1438）；不再多推「進那一則」的記錄，返回鍵不會多按一次（#1442）
     function openLaunched() {
       const id = lch.friendId
       if (!id) return
       if (!core.friends.get(id)) { closeLaunch(); return }
       lastChat.value = id; banner.value = null
-      fourthNav.closePage(HOME_TAB, { chat: true })
+      fourthNav.closePage(HOME_TAB)
     }
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、換班接手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
@@ -1379,7 +1375,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatOffline, offlineOpen, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      chatRows, chatQuery, unreadRows, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,

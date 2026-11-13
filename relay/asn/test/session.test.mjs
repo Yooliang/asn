@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { normalizeSession, resolveRef, restoreMobileChat, restoreMobileTab, restoreSession, sameSession, snapshotSession, trailingThrottle } from '../ui/lib/session.mjs'
+import { normalizeSession, resolveRef, restoreMobileTab, restoreSession, sameSession, snapshotSession, trailingThrottle } from '../ui/lib/session.mjs'
 import { TABS } from '../ui/lib/mobile.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -90,11 +90,6 @@ test('手機：回到上次的大分頁；壞值回對話；四個分頁與手�
   for (const t of TABS) assert.equal(restoreMobileTab(t), t)
   for (const b of [undefined, '', 'x', 3, null]) assert.equal(restoreMobileTab(b), 'chats')
   assert.equal(restoreMobileTab('page'), 'notice')
-  // 對話分頁要不要直接進上次那一則：存著 navChat 照它；0.2.17 以前沒有這一格，存著對話就是正在看那一則
-  assert.equal(restoreMobileChat('chats', true), true); assert.equal(restoreMobileChat('chats', false), false)
-  assert.equal(restoreMobileChat('chats', undefined), true, '舊存檔：當時對話分頁就是那一則')
-  for (const t of ['list', 'notice', 'me', 'page', undefined]) assert.equal(restoreMobileChat(t, true), false, String(t))
-  assert.equal(restoreMobileChat('chats', 'yes'), false, '壞值不進')
 })
 
 test('接線守門：電腦版存與還原、手機版存與還原、Rust 視窗清單', () => {
@@ -104,7 +99,7 @@ test('接線守門：電腦版存與還原、手機版存與還原、Rust 視窗
   assert.ok(l.includes('planRestore(sess.saved'), '開機要還原')
   assert.ok(l.includes("invoke('open_windows')"), '分開模式要問 Rust 有哪些視窗開著')
   assert.ok(l.includes('trailingThrottle(') && l.includes("'pagehide'"), '節流寫入並在離開時補寫')
-  assert.ok(m.includes('restoreMobileTab(saved.navTab)') && m.includes('navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === \'chats\' && !!nav.chat') && m.includes('restoreMobileChat(saved.navTab, saved.navChat)'), '手機版要存要還原大分頁')
+  assert.ok(m.includes('restoreMobileTab(saved.navTab)') && m.includes('navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === \'chats\' && !!nav.chat'), '手機版要存要還原大分頁')
   assert.ok(!m.includes('fourthNav.go(chatNav())'), '#1438：對話分頁本身就是最後那一則，重開時不再多推一層（回到對話分頁＝回到那一則）')
   assert.ok(w.includes('pub fn open_windows') && lib.includes('wins::open_windows'), 'Rust 端要註冊 open_windows')
 })

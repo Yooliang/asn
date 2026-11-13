@@ -151,5 +151,3 @@ export function trailingThrottle(fn, ms, timers = { set: (f, ms) => setTimeout(f
 
 /** 手機版重開要回到哪個大分頁（夥伴／對話／設定／通知；存的是分頁鍵不是位置，順序改了舊值照樣認得）；舊版存的第四格（'page'，平時是通知）回通知；壞值回對話 */
 export const restoreMobileTab = raw => (MOBILE_TABS.includes(raw) ? raw : raw === 'page' ? 'notice' : 'chats')
-/** 重開時對話分頁要不要直接進上次那一則：存著 navChat 就照它；0.2.17 以前沒有這一格，存著「對話」就是正在看那一則（當時對話分頁就是那一則） */
-export const restoreMobileChat = (navTab, navChat) => navTab === 'chats' && (typeof navChat === 'boolean' ? navChat : navChat === undefined)

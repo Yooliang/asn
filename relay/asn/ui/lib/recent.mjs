@@ -81,5 +81,7 @@ export const rowUnread = x => { const u = x?.kind === 'room' ? x.room?.unread : 
 export const unreadChatRows = rows => (Array.isArray(rows) ? rows : []).filter(x => rowUnread(x) > 0).sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
 // 清單上所有對話的未讀加總（「夥伴」分頁的紅點，#1429 起）
 export const chatRowsUnread = rows => (Array.isArray(rows) ? rows : []).reduce((n, x) => { const u = x?.kind === 'room' ? x.room?.unread : x?.friend?.unread; return n + (Number.isInteger(u) && u > 0 ? u : 0) }, 0)
-// 對話清單的搜尋：比對規則和名單一樣（matches(對象, q)，呼叫端給 friendMatchesQuery 綁好 plain）；群組用名字比
+// 對話清單的搜尋（電腦版「對話」分頁）：比對規則和名單一樣（matches(對象, q)，呼叫端給 friendMatchesQuery 綁好 plain）；群組用名字比
 export const filterChatRows = (rows, q, matches) => (q ? rows.filter(x => matches(x.kind === 'room' ? { nick: x.room.name } : x.friend, q)) : rows)
+// 夥伴頁最上面的「未讀」要不要顯示：有未讀、而且夥伴頁沒有搜尋字（q＝整理過的搜尋字）。它不套搜尋字，搜尋時藏起來（#1442）
+export const showUnreadGroup = (rows, q) => Array.isArray(rows) && rows.length > 0 && !q

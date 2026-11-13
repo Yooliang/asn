@@ -89,7 +89,7 @@
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
               <!-- 未讀（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
-              <div class="m-group m-recent m-unread" v-if="unreadRows.length">
+              <div class="m-group m-recent m-unread" v-if="unreadShown">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[UNREAD_GROUP_KEY]" @click="collapsed[UNREAD_GROUP_KEY] = !collapsed[UNREAD_GROUP_KEY]">
                   <span class="m-caret" :class="{ open: !collapsed[UNREAD_GROUP_KEY] }">▸</span>{{ UNREAD_GROUP_LABEL }}（{{ unreadRows.length }}）
                 </button>
