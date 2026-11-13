@@ -21,6 +21,10 @@ pub const KEY_LOST: &str = "手機金鑰庫裡找不到這台的包裝金鑰";
 pub trait Aead: Send + Sync {
     fn seal(&self, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, String>;
     fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, String>;
+    /// 要不要把明文檔改存成加密、新寫的檔要不要加密。false＝只負責「讀得懂已加密的檔」（電腦版 0.2.20 預設，見 secret_file.rs）
+    fn sealing(&self) -> bool {
+        true
+    }
 }
 
 pub struct KeyWrap<A: Aead>(pub A);
