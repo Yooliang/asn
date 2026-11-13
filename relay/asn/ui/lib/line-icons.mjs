@@ -2,6 +2,8 @@
 // 電腦和手機都讀這一份；同一個動作在電腦的「更多」和手機的「⋯」用同一個 key（見 MENU_ICON）。
 // 規格：24×24、線寬 1.75、圓頭圓角、不填色（「更多」的三個點是唯一的填色）；顏色跟著 currentColor 走。
 // 圖形存成 [標籤, 屬性] 的資料，畫面用 render 函式畫，不用 v-html。
+import { ADOPT_LABEL, SELF_PULL_LABEL } from './partner-ops.mjs'
+import { WINDOW_LABEL } from './actionbar.mjs'   // 互相引用沒關係：只在 itemIcon 被呼叫時才讀
 
 /** 圖示本體：key → [[標籤, 屬性], …]（標籤只有 path、circle、rect） */
 export const ICONS = {
@@ -99,14 +101,16 @@ const bareKey = key => String(key ?? '').replace(/^p:/, '')
 
 /**
  * 一個選單項目 { key, label } 該畫哪個圖示：
- *   前台／後台（window）看字：要「後台隱藏」畫朝下的箭頭，其餘朝上；
- *   換班接手（handover）遇到可以接手的終端時字會換成「接手」或「接進收發室」，畫「接手」的圖。
+ *   前台／後台（window）：字是 WINDOW_LABEL.hide（按了會收到後台）畫朝下的箭頭，其餘朝上；
+ *   換班接手（handover）遇到可以接手的終端時字會換成 ADOPT_LABEL 或 SELF_PULL_LABEL，畫「接手」的圖。
+ *   都和那幾個文字常數比對（選單字尾可能多一個「…」），不看字頭，改文案時跟著常數走。
  */
 export function itemIcon(item) {
   const k = bareKey(item?.key)
   const label = String(item?.label ?? '')
-  if (k === 'window') return label.includes('後台') ? 'win_dn' : 'win_up'
-  if (k === 'handover' && label.startsWith('接')) return 'adopt'
+  const is = text => label === text || label === `${text}…`
+  if (k === 'window') return is(WINDOW_LABEL.hide) ? 'win_dn' : 'win_up'
+  if (k === 'handover' && (is(ADOPT_LABEL) || is(SELF_PULL_LABEL))) return 'adopt'
   return MENU_ICON[k] ?? ''
 }
 

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ALIAS, ICONS, MENU_ICON, TAB_ICON, hasIcon, iconShapes, isDangerItem, itemIcon, tabIcon } from '../ui/lib/line-icons.mjs'
-import { MENU_KEYS } from '../ui/lib/partner-ops.mjs'
+import { ADOPT_LABEL, MENU_KEYS, OP_LABEL, SELF_PULL_LABEL } from '../ui/lib/partner-ops.mjs'
 import { MORE_OWN_KEYS, WINDOW_LABEL, chatGroupItems } from '../ui/lib/actionbar.mjs'
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { TABS } from '../ui/lib/mobile.mjs'
@@ -46,9 +46,11 @@ test('選單：夥伴管理的每一項、群組三項、電腦獨有的幾項�
   // 前台／後台看字；換班接手遇到可接手的終端時字會換成「接手」或「接進收發室」
   assert.equal(itemIcon({ key: 'window', label: WINDOW_LABEL.hide }), 'win_dn')
   assert.equal(itemIcon({ key: 'window', label: WINDOW_LABEL.show }), 'win_up')
-  assert.equal(itemIcon({ key: 'p:handover', label: '接手…' }), 'adopt')
-  assert.equal(itemIcon({ key: 'p:handover', label: '接進收發室' }), 'adopt')
-  assert.equal(itemIcon({ key: 'p:handover', label: '換班接手…' }), 'handover')
+  // 和文字常數比對，不看字頭：選單字尾可能多一個「…」
+  for (const l of [ADOPT_LABEL, `${ADOPT_LABEL}…`, SELF_PULL_LABEL, `${SELF_PULL_LABEL}…`]) assert.equal(itemIcon({ key: 'p:handover', label: l }), 'adopt', l)
+  for (const l of [OP_LABEL.handover, `${OP_LABEL.handover}…`, '接續別的東西']) assert.equal(itemIcon({ key: 'p:handover', label: l }), 'handover', l)
+  assert.equal(itemIcon({ key: 'window', label: `${WINDOW_LABEL.hide}…` }), 'win_dn')
+  assert.equal(itemIcon({ key: 'window', label: WINDOW_LABEL.idle }), 'win_up', '「前台／後台」這種中性字不算收到後台')
   assert.equal(itemIcon({ key: 'resume', label: '喚醒' }), 'wake')
   assert.equal(itemIcon({ key: 'manage', label: '成員與設定' }), 'members')
   assert.equal(itemIcon({ key: 'nope' }), '')
