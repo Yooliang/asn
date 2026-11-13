@@ -93,8 +93,8 @@ test('withoutNoticeTabs：拿掉通知對話與通知內容分頁，其他照順
   assert.deepEqual(withoutNoticeTabs(null), [])
 })
 
-test('守門：大分頁有「通知」（第三格，和手機一樣）；名單不再放通知組；通知內容用 {{ }} 不用 v-html', () => {
-  assert.deepEqual(TOP_TABS[2], { key: 'notice', label: '通知' })
+test('守門：大分頁有「通知」（最後一格，和手機一樣，#1429）；名單不再放通知組；通知內容用 {{ }} 不用 v-html', () => {
+  assert.deepEqual(TOP_TABS[3], { key: 'notice', label: '通知' })
   assert.ok(FIXED_TABS.some(t => t.key === 'notice'))
   const js = read('list.js'), html = read('list.html'), css = read('style.css')
   assert.ok(!/withNoticeGroup/.test(js), '電腦版名單不再用 withNoticeGroup')

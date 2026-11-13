@@ -70,9 +70,9 @@ test('deviceItems：只取該設備、線上忙碌在前離線在後、可搜尋
   assert.equal(shortOf('abc'), 'A')
 })
 
-test('四個大分頁「對話／夥伴／通知／設定」（0.2.18，和手機一樣）；固定畫面：對話、通知、使用指引、設定；舊的「群組」換成「對話」；舊版的通知紀錄頁籤（notices）或不認得的頁籤一律忽略', () => {
-  assert.deepEqual(TOP_TABS.map(t => t.label), ['對話', '夥伴', '通知', '設定'])
-  assert.deepEqual(TOP_TABS.map(t => t.key), ['chats', 'partners', 'notice', 'settings'])
+test('四個大分頁「夥伴／對話／設定／通知」（0.2.18，和手機一樣；#1429 改順序）；固定畫面：對話、通知、使用指引、設定；舊的「群組」換成「對話」；舊版的通知紀錄頁籤（notices）或不認得的頁籤一律忽略', () => {
+  assert.deepEqual(TOP_TABS.map(t => t.label), ['夥伴', '對話', '設定', '通知'])
+  assert.deepEqual(TOP_TABS.map(t => t.key), ['partners', 'chats', 'settings', 'notice'])
   assert.deepEqual(FIXED_TABS.map(t => t.key), ['chats', 'notice', 'guide', 'settings'])
   assert.equal(normalizeTab('notice'), 'notice'); assert.equal(normalizeTab('chats'), 'chats')
   assert.equal(normalizeTab('groups'), 'chats', '舊的群組頁籤併進對話')
@@ -315,8 +315,10 @@ test('群組的未讀：所有群組未讀加總；沒有未讀、壞資料都�
   assert.equal(groupsUnread(null), 0)
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
-  assert.match(html, /<span class="red" v-if="\(t\.key === 'chats' && chatsUnreadN\) \|\| \(t\.key === 'partners' && partnersUnread\)"><\/span>/)
-  assert.match(js, /const chatsUnreadN = computed\(\(\) => chatRowsUnread\(chatAll\.value\)\)/, '對話分頁的紅點和清單用同一份（群組的未讀也在裡面）')
+  // #1429：聊天的紅點掛在「夥伴」（和設備頁籤的未讀一起），「對話」分頁不掛紅點
+  assert.match(html, /<span class="red" v-if="t\.key === 'partners' && \(chatsUnreadN \|\| partnersUnread\)"><\/span>/)
+  assert.doesNotMatch(html, /t\.key === 'chats' && chatsUnreadN/, '對話分頁不再掛紅點')
+  assert.match(js, /const chatsUnreadN = computed\(\(\) => chatRowsUnread\(chatAll\.value\)\)/, '夥伴分頁的聊天紅點和對話清單用同一份（群組的未讀也在裡面）')
   assert.match(js, /const partnersUnread = computed\(\(\) => dev\.value\.all\.some\(d => d\.unread\)\)/, '任一台設備有未讀，夥伴分頁也亮紅點')
   assert.match(js, /FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread,/, '要交給畫面')
 })

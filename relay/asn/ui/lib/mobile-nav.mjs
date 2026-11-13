@@ -1,13 +1,14 @@
-// 手機的分頁切換與瀏覽記錄（系統返回鍵＝瀏覽器上一頁）：四個固定分頁「對話／夥伴／通知／設定」，內頁蓋在進來的那個分頁上（lib/mobile-fourth.mjs）。
+// 手機的分頁切換與瀏覽記錄（系統返回鍵＝瀏覽器上一頁）：四個固定分頁「夥伴／對話／設定／通知」，內頁暫時佔用第四格（lib/mobile-fourth.mjs）。
 // 規則：
 //   - 對話分頁是底；切到其他分頁推一筆記錄，其他分頁之間互換不增加記錄，切回對話＝上一頁（回到離開時的樣子：清單或那一則對話）。
 //   - 對話分頁裡點進一則對話推一筆（chat＝true），返回回清單；在那則對話上再點一次「對話」分頁也回清單。從別的分頁點夥伴／群組：先回對話分頁，再進那一則。
-//   - 進內頁（設備與帳號、設定的某一項、使用指引、開新夥伴）：蓋在目前的分頁上，內頁的每一層各推一筆（指引單篇、設備細部、開新夥伴第 2 步各多一層）。
+//   - 進內頁（設備與帳號、設定的某一項、使用指引、開新夥伴）：第四格換成這個內頁並切過去，內頁的每一層各推一筆（指引單篇、設備細部、開新夥伴第 2 步各多一層）。
 //   - 在內頁按返回：先退內頁自己的層，退到頭就收起內頁，回到底下那個分頁。
-//   - 從內頁切到別的分頁：先把它那幾筆記錄退掉（之後的返回鍵照分頁的規則走），內頁與內容留著，開始計時；切回那一格再把那幾層推回去。3 分鐘沒回來就收起（回到那一格時看到的是分頁本身）。
+//   - 從內頁切到別的分頁：先把它那幾筆記錄退掉（之後的返回鍵照分頁的規則走），內頁與內容留著，開始計時；切回第四格再把那幾層推回去。
+//     3 分鐘沒回來、或這段時間有新通知進來（noticeArrived），第四格變回「通知」。
 // 不碰 DOM：history（pushState／replaceState／back／go）、nav（畫面用的導覽狀態）、st（st.fourth＝內頁）與時鐘都由呼叫端給，node 測試用假的。
-import { HOME_TAB, TABS, chatNav, normalizeNav, pageHost, pageNav, tabNav } from './mobile.mjs'
-import { PAGE_TAB, fourthExpired, fourthOnTab, normalizePage, openFourth, pageLayers } from './mobile-fourth.mjs'
+import { FOURTH_SLOT, HOME_TAB, TABS, chatNav, normalizeNav, pageNav, tabNav } from './mobile.mjs'
+import { PAGE_TAB, fourthExpired, fourthOnNotice, fourthOnTab, normalizePage, openFourth, pageLayers } from './mobile-fourth.mjs'
 import { mobileSettingTitle } from './mobile-settings.mjs'
 import { GUIDE_ENTRY_LABEL, phoneGuide } from './mobile-guides.mjs'
 import { acctPageTitle } from './mobile-acct.mjs'
@@ -65,11 +66,13 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   }
   const leavePage = then => { pending = then; history.go(-depth()) }
   // 點頁籤、左右滑：浮層（開新夥伴、⋯ 選單、要密碼…）開著時不動
+  // t＝PAGE_TAB 是第四格的內頁（有內頁時才有）；程式要切到「通知」（例如點了通知的提示）而第四格正被內頁佔著：內頁收起，第四格變回通知
   function goTab(t) {
-    if (pending || nav.sheet || !TABS.includes(t)) return
-    const host = pageHost(st.fourth)
-    if (nav.tab === PAGE_TAB) { if (t !== host) leavePage({ tab: t }); return }
-    if (t === host) { showPage(); return }   // 這一格底下還留著內頁：回到內頁
+    if (pending || nav.sheet) return
+    if (t === PAGE_TAB) { if (nav.tab !== PAGE_TAB && st.fourth?.page) showPage(); return }   // 切回第四格的內頁
+    if (!TABS.includes(t)) return
+    if (nav.tab === PAGE_TAB) { leavePage(t === FOURTH_SLOT ? { close: true, tab: t } : { tab: t }); return }
+    if (t === FOURTH_SLOT && st.fourth) st.fourth = null
     if (t === nav.tab) { if (t === HOME_TAB && nav.chat) switchTab(HOME_TAB); return }   // 在一則對話上再點「對話」：回清單
     switchTab(t)
   }
@@ -80,7 +83,7 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     else switchTab(HOME_TAB, { chat: true })
     return true
   }
-  // 進一個內頁：蓋在目前的分頁上（計時歸零）。回 false＝沒打開（浮層開著、描述不合法）
+  // 進一個內頁：第四格換成它並切過去（計時歸零），從目前的分頁進來。回 false＝沒打開（浮層開著、描述不合法）
   function openPage(raw) {
     const p = normalizePage(raw)
     if (!p || pending || nav.sheet) return false
@@ -136,7 +139,13 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     st.fourth = null
     return true
   }
-  return { go, goTab, openChat, openPage, pushLayer, closePage, onPop, check, state, depth, whenSettled, busy: () => !!pending }
+  // 有新通知進來（m.js 看通知的未讀數變多時叫）：已經離開內頁就馬上把第四格讓回給通知；正在看內頁時不動。回 true＝變回通知了
+  function noticeArrived() {
+    if (!st.fourth || nav.tab === PAGE_TAB) return false
+    st.fourth = fourthOnNotice(st.fourth)
+    return st.fourth === null
+  }
+  return { go, goTab, openChat, openPage, pushLayer, closePage, onPop, check, noticeArrived, state, depth, whenSettled, busy: () => !!pending }
 }
 
 // 換內頁前先問一句（例如開新夥伴第 2 步還沒送出）：needs(next) 說要不要問；要問就開一層底部浮層（sheet: 'leave'，系統返回鍵＝留下）。

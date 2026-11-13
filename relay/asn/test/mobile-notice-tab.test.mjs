@@ -1,9 +1,9 @@
-// 手機「通知」分頁（#895 PR-H；0.2.18 起是固定的第三格，不再和內頁共用一格）：永遠是通知、內頁不會取代它、雲端金鑰 30 分鐘、舊狀態還原、未讀紅點、看得到才標已讀。
+// 手機「通知」分頁（#895 PR-H；0.2.18 起是固定的一格，不再和內頁共用一格；#1429 起在最後）：永遠是通知、內頁不會取代它、雲端金鑰 30 分鐘、舊狀態還原、未讀紅點、看得到才標已讀。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { FOURTH_KEEP_MS, PAGE_TAB, guidePage, launchPage, needsLeaveAsk, openFourth, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatsUnread, initialNav, noticeUnread, normalizeNav, pageNav, tabDot, tabLabel, tabNav, totalUnread, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatsUnread, initialNav, noticeUnread, normalizeNav, pageNav, tabDot, tabLabel, tabList, tabNav, totalUnread, viewedChatId } from '../ui/lib/mobile.mjs'
 import { restoreMobileTab } from '../ui/lib/session.mjs'
 import { NOTICE_ID } from '../ui/lib/notice.mjs'
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
@@ -29,8 +29,8 @@ function harness(saved = HOME_TAB) {
   return { r, nav, st, clock, flush, press, depth: () => idx }
 }
 
-test('「通知」是固定的第三格：四個分頁「對話／夥伴／通知／設定」，通知佔一筆瀏覽記錄、不會到期', () => {
-  assert.deepEqual(TABS, ['chats', 'list', 'notice', 'me'])
+test('「通知」是固定的最後一格（#1429）：四個分頁「夥伴／對話／設定／通知」，通知佔一筆瀏覽記錄、不會到期', () => {
+  assert.deepEqual(TABS, ['list', 'chats', 'me', 'notice'])
   assert.equal(tabLabel('notice'), '通知')
   const h = harness('me')
   h.r.goTab('notice')
@@ -45,17 +45,19 @@ test('「通知」是固定的第三格：四個分頁「對話／夥伴／通�
   h.press(); assert.equal(h.nav.tab, HOME_TAB, '通知按返回回對話清單（和其他分頁同一套規則）')
 })
 
-test('內頁不會取代通知：從設定打開內頁、3 分鐘到期，通知分頁一直都在', () => {
+test('內頁暫時取代第四格的通知（#1429，和 0.2.17 一樣）：從設定打開內頁、離開滿 3 分鐘，第四格變回通知', () => {
   const h = harness('me')
   assert.equal(h.r.openPage(settingPage('about')), true)
-  assert.equal(pageTitle(h.st.fourth.page), '關於'); assert.equal(h.st.fourth.from, 'me', '蓋在設定上，不是通知那一格')
-  h.r.goTab('notice'); h.flush()
-  assert.equal(h.nav.tab, 'notice', '內頁開著時照樣能切到通知'); assert.ok(h.st.fourth, '內頁留著')
+  assert.equal(pageTitle(h.st.fourth.page), '關於'); assert.equal(h.st.fourth.from, 'me', '從設定進來')
+  assert.deepEqual(tabList(h.st.fourth), ['list', 'chats', 'me', PAGE_TAB], '第四格換成內頁'); assert.equal(tabLabel(PAGE_TAB, pageTitle(h.st.fourth.page)), '關於')
+  h.r.goTab('me'); h.flush()
+  assert.equal(h.nav.tab, 'me'); assert.ok(h.st.fourth, '內頁留著')
   h.clock.t += FOURTH_KEEP_MS - 1
   assert.equal(h.r.check(), false)
   h.clock.t += 1
   assert.equal(h.r.check(), true); assert.equal(h.st.fourth, null)
-  assert.equal(h.nav.tab, 'notice', '收起內頁不影響正在看的通知')
+  assert.deepEqual(tabList(h.st.fourth), TABS, '第四格變回通知'); assert.equal(h.nav.tab, 'me', '人還在設定')
+  h.r.goTab('notice'); assert.equal(h.nav.tab, 'notice')
 })
 
 test('關閉內頁（關閉鈕、返回鍵退到頭）都回到內頁底下的分頁', () => {
@@ -78,7 +80,7 @@ test('雲端金鑰在畫面上時 30 分鐘才收起（呼叫端給 keep）', ()
   assert.equal(h.r.check(CLOUD_KEEP), true); assert.equal(h.st.fourth, null)
 })
 
-test('離開前先問：開新夥伴第 2 步還沒送出時，換成別的內頁要問；切分頁（含通知）不問', () => {
+test('離開前先問：開新夥伴第 2 步還沒送出時，換成別的內頁要問；切分頁不問', () => {
   const launching = openFourth(launchPage(2), 'list')
   assert.equal(needsLeaveAsk(launching, settingPage('about'), { draft: true }), true)
   assert.equal(needsLeaveAsk(launching, settingPage('about'), { draft: false }), false)
@@ -88,9 +90,9 @@ test('離開前先問：開新夥伴第 2 步還沒送出時，換成別的內�
   assert.equal(needsLeaveAsk(null, guidePage(), { draft: true }), false)
   const h = harness('list')
   h.r.openPage(launchPage()); h.r.pushLayer(launchPage(2))
-  h.r.goTab('notice'); h.flush()
-  assert.equal(h.nav.tab, 'notice'); assert.deepEqual(h.st.fourth.page, launchPage(2), '開新夥伴的進度留著')
-  h.r.goTab('list'); assert.equal(h.nav.tab, PAGE_TAB, '切回夥伴就回到開新夥伴第 2 步'); assert.deepEqual(h.st.fourth.page, launchPage(2))
+  h.r.goTab('chats'); h.flush()
+  assert.equal(h.nav.tab, 'chats'); assert.deepEqual(h.st.fourth.page, launchPage(2), '開新夥伴的進度留著')
+  h.r.goTab(PAGE_TAB); assert.equal(h.nav.tab, PAGE_TAB, '滑回第四格就回到開新夥伴第 2 步'); assert.deepEqual(h.st.fourth.page, launchPage(2))
 })
 
 test('舊的存檔與瀏覽記錄不會壞：navTab 舊值照舊、page（舊第四格）還原成通知、壞資料落回對話', () => {
@@ -112,14 +114,14 @@ test('設定裡的 notify 分類改叫「提醒與聲音」（手機、電腦一
   assert.ok(!SETTING_CATS.some(c => c.title === '通知'), '電腦版的設定分類也不叫「通知」')
 })
 
-test('未讀紅點：通知有未讀通知分頁亮（內頁開著也亮）；對話分頁的紅點不算通知', () => {
+test('未讀紅點：通知有未讀第四格亮（內頁佔著也亮）；聊天的紅點掛在夥伴、不掛對話（#1429），而且不算通知', () => {
   const friends = [{ id: 'a', unread: 2 }, { id: NOTICE_ID, isNotice: true, unread: 3 }, { id: 'b', unread: 0 }]
   assert.equal(noticeUnread(friends), 3); assert.equal(totalUnread(friends), 5); assert.equal(chatsUnread(friends), 2)
   assert.equal(tabDot('notice', { chats: 2, notice: 3 }), true)
   assert.equal(tabDot('notice', { chats: 2, notice: 0 }), false)
-  assert.equal(tabDot('chats', { chats: 2, notice: 0 }), true); assert.equal(tabDot('chats', { chats: 0, notice: 3 }), false)
-  assert.equal(tabDot('list', { chats: 9, notice: 9 }), false); assert.equal(tabDot('me', { chats: 9, notice: 9 }), false)
-  assert.equal(tabDot(PAGE_TAB, { chats: 9, notice: 9 }), false, '內頁不是分頁，沒有紅點')
+  assert.equal(tabDot('list', { chats: 2, notice: 0 }), true, '聊天有未讀：紅點在夥伴'); assert.equal(tabDot('list', { chats: 0, notice: 3 }), false, '只有通知未讀：夥伴不亮')
+  assert.equal(tabDot('chats', { chats: 9, notice: 9 }), false, '對話分頁不再掛紅點'); assert.equal(tabDot('me', { chats: 9, notice: 9 }), false)
+  assert.equal(tabDot(PAGE_TAB, { chats: 9, notice: 3 }), true, '內頁佔著第四格時，通知的紅點亮在那一格'); assert.equal(tabDot(PAGE_TAB, { chats: 9, notice: 0 }), false)
   assert.equal(noticeUnread([]), 0); assert.equal(noticeUnread(null), 0); assert.equal(noticeUnread([{ id: NOTICE_ID, isNotice: true, unread: -1 }]), 0)
 })
 

@@ -296,7 +296,7 @@ html.toast-page,html.toast-page body{background:transparent}
 .body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#dcebf9,#eef5fd)}
 .rail{flex:none;width:38px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;overflow:visible;border-right:1px solid var(--line)}
 .rail-gap{flex:1;min-height:8px}
-/* 名單上方的四個大分頁（0.2.18）：對話／夥伴／通知／設定，和手機同樣的字、同樣的順序；選中的白底、和下面的內容連成一片 */
+/* 名單上方的四個大分頁（0.2.18；#1429 改順序）：夥伴／對話／設定／通知，和手機同樣的字、同樣的順序；選中的白底、和下面的內容連成一片 */
 .top-tabs{flex:none;display:flex;gap:2px;padding:4px 6px 0;border-bottom:1px solid var(--line);background:linear-gradient(#e9f2fb,#dcebf9)}
 .ttab{position:relative;flex:1;min-width:0;height:28px;padding:0 4px;border:1px solid transparent;border-bottom:0;border-radius:5px 5px 0 0;background:transparent;color:var(--title-fg);font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
 .ttab:hover{border-color:#a9c6e6;background:linear-gradient(#ffffff,#e4f0fc)}

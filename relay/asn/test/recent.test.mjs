@@ -57,10 +57,10 @@ test('對話分頁的清單：30 天內有往來的夥伴與群組、新到舊�
 
 test('接線守門：活動中的對話在「對話」分頁（不在夥伴名單裡）；夥伴名單是群組對話 → 設備分組；清單不含已封存與通知', () => {
   const m = read('m.html')
-  const chats = m.slice(m.indexOf('aria-label="對話">'), m.indexOf('<section class="m-pg" aria-label="夥伴">'))
+  const chats = m.slice(m.indexOf('aria-label="對話">'), m.indexOf('<section class="m-pg" aria-label="設定">'))   // #1429 起對話後面接設定
   assert.match(chats, /<div class="m-group m-recent" v-if="chatRows\.length">/)
   assert.match(chats, /<li v-for="x in chatRows" :key="x\.id">/)
-  const list = m.slice(m.indexOf('<section class="m-pg" aria-label="夥伴">'), m.indexOf('<section class="m-pg m-chat m-notice"'))
+  const list = m.slice(m.indexOf('<section class="m-pg" aria-label="夥伴">'), m.indexOf('<section class="m-pg" :class="nav.chat'))   // #1429 起夥伴是第一頁、後面接對話
   assert.doesNotMatch(list, /m-recent|recentRows|chatRows/, '夥伴名單不再有「最近有活動」')
   assert.ok(list.indexOf('m-group m-rooms') > 0 && list.indexOf('m-group m-rooms') < list.indexOf('v-for="g in groups"'), '群組對話 → 設備分組')
   const js = read('m.js')

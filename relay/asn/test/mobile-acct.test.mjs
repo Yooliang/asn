@@ -111,7 +111,7 @@ test('入口改成低調的「選項」小按鈕，按下當內頁整頁顯示�
   assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
   // 導覽：內頁的標題＝頁標題（#268）；分頁列的四個字固定（設備卡上的按鈕仍叫「選項」）
   assert.equal(pageTitle(acctPage()), '設備', '預設標題；畫面上依分頁換成「設備」或「帳號」（m.js 的 acctTitle）')
-  assert.equal(tabLabel(PAGE_TAB), '', '內頁不佔分頁')
+  assert.equal(tabLabel(PAGE_TAB, '設備'), '設備', '內頁佔著第四格時，分頁字是內頁的標題（#1429）')
   assert.equal(tabLabel('chats'), '對話')
   assert.equal(tabLabel('list'), '夥伴')
   assert.equal(tabLabel('me'), '設定')

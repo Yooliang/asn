@@ -5,13 +5,13 @@ import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 
-// 名單上方的四個大分頁（0.2.18，和手機同樣的字、同樣的順序）：對話＝活動中的對話（夥伴與群組）；夥伴＝依設備分組的全部夥伴（左邊直排的設備頁籤在這一頁裡）；
+// 名單上方的四個大分頁（0.2.18，和手機同樣的字、同樣的順序；#1429 起順序是夥伴、對話、設定、通知）：對話＝活動中的對話（夥伴與群組）；夥伴＝依設備分組的全部夥伴（左邊直排的設備頁籤在這一頁裡）；
 // 通知＝系統通知（方案 A：不出現在名單與對話分頁）；設定＝設定分類（使用指引是其中一列）。
 export const TOP_TABS = [
-  { key: 'chats', label: '對話' },
   { key: 'partners', label: '夥伴' },
-  { key: 'notice', label: '通知' },
+  { key: 'chats', label: '對話' },
   { key: 'settings', label: '設定' },
+  { key: 'notice', label: '通知' },
 ]
 // 不是設備頁籤的畫面（tab 的值）：對話、通知、使用指引（設定裡的一列）、設定
 export const FIXED_TABS = [

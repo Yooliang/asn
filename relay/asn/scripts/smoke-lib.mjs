@@ -760,8 +760,8 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-// 手機四個分頁（0.2.18）：開 App 先看「對話」清單；點一則進到對話、「‹」回清單；設定裡打開「關於」是蓋在設定那一格上的內頁，
-// 切到夥伴再切回設定還在（內頁跟著那一格，不另佔一格）；分頁列的字與順序和電腦版一樣
+// 手機四個分頁（0.2.18；#1429 改順序與第四格）：開 App 先看「對話」清單；點一則進到對話、「‹」回清單；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
+// 切到夥伴、再點第四格回到內頁；分頁列的字與順序和電腦版一樣
 export const MTABS_PROBE = { mtabs: true }
 export const mtabsProbeSource = () => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -769,8 +769,9 @@ export const mtabsProbeSource = () => `(async () => {
   let tabs = [];
   for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
   const labels = tabs.map(b => b.textContent.trim()).join('|');
-  if (labels !== '對話|夥伴|通知|設定') return { ok: false, why: '分頁的字或順序不對：' + labels };
-  if (!tabs[0].classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」' };
+  if (labels !== '夥伴|對話|設定|通知') return { ok: false, why: '分頁的字或順序不對：' + labels };
+  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
+  if (!tab('對話').classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」（順序改了，預設停的頁不變）' };
   const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
   let row = null;
   for (let i = 0; i < 60 && !row; i++) { row = sec().querySelector('.m-chat-list .m-buddy, .m-buddy'); if (!row) await sleep(100) }
@@ -778,26 +779,33 @@ export const mtabsProbeSource = () => `(async () => {
   if (!row.textContent.includes('demo')) return { ok: false, why: '清單裡沒有上次那一位：' + row.textContent.trim().slice(0, 30) };
   row.click(); await sleep(500);
   if (!sec().classList.contains('m-chat') || !inView(sec().querySelector('.chatpane'))) return { ok: false, why: '點了沒有進到對話' };
-  if (!tabs[0].classList.contains('on')) return { ok: false, why: '進到對話時分頁列應該還標著「對話」' };
+  if (!tab('對話').classList.contains('on')) return { ok: false, why: '進到對話時分頁列應該還標著「對話」' };
   const back = sec().querySelector('[aria-label="回對話清單"]');
   if (!back) return { ok: false, why: '對話上方沒有回清單的鍵' };
   back.click(); await sleep(500);
   if (!sec().classList.contains('m-chat-list')) return { ok: false, why: '按「‹」沒有回到對話清單' };
-  tabs[3].click(); await sleep(500);
+  tab('設定').click(); await sleep(500);
   const about = [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
   if (!about) return { ok: false, why: '設定裡找不到「關於」' };
   about.click(); await sleep(600);
   const page = document.querySelector('.m-fourth');
   if (!inView(page)) return { ok: false, why: '「關於」內頁沒有出現在畫面上' };
-  if (!tabs[3].classList.contains('on')) return { ok: false, why: '在內頁上分頁列應該標著「設定」' };
-  if (document.querySelectorAll('.m-tabs button').length !== 4) return { ok: false, why: '內頁不該多出一個分頁' };
-  tabs[1].click(); await sleep(600);
+  // #1429：內頁暫時佔第四格（通知那一格），分頁字換成內頁的標題、選中第四格；分頁還是四個
+  let cur = [...document.querySelectorAll('.m-tabs button')];
+  if (cur.length !== 4) return { ok: false, why: '內頁不該多出一個分頁' };
+  const fourthLabel = () => [...document.querySelectorAll('.m-tabs button')][3]?.querySelector('span')?.textContent.trim();
+  if (fourthLabel() !== '關於') return { ok: false, why: '第四格應該換成內頁「關於」，實際：' + fourthLabel() };
+  if (!cur[3].classList.contains('on')) return { ok: false, why: '在內頁上分頁列應該標著第四格' };
+  const pg = document.querySelector('.m-fourth').getBoundingClientRect();
+  if (Math.abs(pg.left) > 2) return { ok: false, why: '內頁沒有停在畫面上（第四格）' };
+  tab('夥伴').click(); await sleep(600);
   if (inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切到夥伴後內頁還蓋在畫面上' };
-  tabs[3].click(); await sleep(600);
-  if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切回設定沒有回到「關於」內頁' };
+  if (fourthLabel() !== '關於') return { ok: false, why: '離開內頁後第四格應該還是「關於」（3 分鐘內）' };
+  [...document.querySelectorAll('.m-tabs button')][3].click(); await sleep(600);
+  if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '點第四格沒有回到「關於」內頁' };
   return { ok: true, why: '' };
 })()`
-// 電腦版四個大分頁（0.2.18）：名單上方「對話／夥伴／通知／設定」，和手機同樣的字與順序；開窗停在夥伴（本機那台），左邊直排的設備頁籤只在夥伴裡、
+// 電腦版四個大分頁（0.2.18）：名單上方「夥伴／對話／設定／通知」（#1429 改順序），和手機同樣的字與順序；開窗停在夥伴（本機那台），左邊直排的設備頁籤只在夥伴裡、
 // 不再有通知、群組、指引、齒輪；對話分頁最上面有建立／加入群組；設定最後一列是使用指引，點進去有「‹ 設定」回來；點夥伴回到剛才的設備頁籤
 export const DTABS_PROBE = { dtabs: true }
 export const dtabsProbeSource = () => `(async () => {
@@ -807,7 +815,7 @@ export const dtabsProbeSource = () => `(async () => {
   for (let i = 0; i < 60 && tops().length < 4; i++) await sleep(100);
   const t = tops(), byLabel = l => t.find(e => e.querySelector('span').textContent.trim() === l);
   const order = t.map(e => e.querySelector('span').textContent.trim()).join('|');
-  if (order !== '對話|夥伴|通知|設定') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
+  if (order !== '夥伴|對話|設定|通知') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
   if (!byLabel('夥伴').classList.contains('on')) return { ok: false, why: '開窗應該停在「夥伴」' };
   const rail = document.querySelector('.rail');
   if (!shown(rail)) return { ok: false, why: '夥伴分頁沒有左邊的設備頁籤' };
@@ -1032,7 +1040,7 @@ export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async (
   if (m) return { ok: false, why: '畫面出現議題編號：' + m[0] };
   return { ok: true, why: '' };
 })()`
-// 手機「通知」分頁（#895，PR-H；0.2.18 起是固定的第三格）：四個頁籤固定「對話／夥伴／通知／設定」；通知分頁顯示系統通知對話（唯讀）、紅點在通知那一格。
+// 手機「通知」分頁（#895，PR-H；0.2.18 起是固定的一格，#1429 起在最後）：四個頁籤固定「夥伴／對話／設定／通知」；通知分頁顯示系統通知對話（唯讀）、紅點在通知那一格。
 // view: 'tab'＝存檔停在通知，看到通知內容（不會有紅點，因為正在看）；'dot'＝存檔停在設定，通知那一格亮紅點。412、360 寬與大字型（1.3 倍）各一張
 const MNOTICE_ME = { tab: { navTab: 'notice' }, dot: { navTab: 'me' } }
 const noticeMails = (now = Date.now()) => [
@@ -1040,7 +1048,7 @@ const noticeMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-0000000000a2', from_node: 'R', from_agent: 'ASN 通知', kind: 'notice:waiting', body: '工作機：夥伴 demo 正在等你確認。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
   { id: '00000000-0000-4000-8000-0000000000a3', from_node: 'Q', from_agent: 'ASN 通知', kind: 'notice:device_key', body: '辦公室：這台的設備金鑰剛換過。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 60_000).toISOString() },
 ]
-// 電腦版「通知」大分頁（方案 A；0.2.18 起是名單上方第三個分頁，和手機一樣）：右上角有未讀數；點開是通知清單（分類小籤、新的在前）；名單裡沒有「通知」；
+// 電腦版「通知」大分頁（方案 A；0.2.18 起是名單上方的大分頁，#1429 起在最後，和手機一樣）：右上角有未讀數；點開是通知清單（分類小籤、新的在前）；名單裡沒有「通知」；
 // 通知內文一律純文字（內文夾 <b> 標籤要原樣顯示、不能變成元素）；畫面不能橫向捲動。
 // mode：'merged'＝點第一則、右邊顯示內容；'split'＝點第一則改開「通知」對話視窗；'narrow'＝窄視窗只顯示右邊，有「‹ 通知」返回鈕
 const DNOTICE_ME = { merged: { winMode: 'merged' }, split: {}, narrow: { winMode: 'merged' } }
@@ -1059,8 +1067,8 @@ export const dnoticeProbeSource = ({ dnotice }) => `(async () => {
   if (badge() !== '4') return { ok: false, why: '通知頁籤的未讀數應是 4，實際：' + (badge() || '沒有') };
   const tops = [...document.querySelectorAll('.top-tabs .ttab')].filter(shown).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
   const order = tops.map(e => e.querySelector('span').textContent.trim()).join('|');
-  if (order !== '對話|夥伴|通知|設定') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
-  if (tops[2] !== bell) return { ok: false, why: '通知應是上方第三個分頁（和手機一樣）' };
+  if (order !== '夥伴|對話|設定|通知') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
+  if (tops[3] !== bell) return { ok: false, why: '通知應是上方最後一個分頁（和手機一樣，#1429）' };
   if (document.querySelector('.rail .rtab-notice, .rail .rtab-groups')) return { ok: false, why: '左邊直排頁籤還有通知或群組' };
   if ([...document.querySelectorAll('.content .buddy')].some(b => b.textContent.trim().startsWith('通知'))) return { ok: false, why: '名單裡還有「通知」' };
   bell.click(); await sleep(300);
@@ -1129,7 +1137,8 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
     await sleep(300);
   }
   const labels = tabs.map(b => b.querySelector('span')?.textContent.trim());
-  if (labels.join('|') !== '對話|夥伴|通知|設定') return { ok: false, why: '四個頁籤的字不對：' + labels.join('、') };
+  if (labels.join('|') !== '夥伴|對話|設定|通知') return { ok: false, why: '四個頁籤的字不對：' + labels.join('、') };
+  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
   // 四個字都要完整顯示：沒被省略、沒被切、沒有橫向溢出
   const nav = document.querySelector('.m-tabs');
   if (nav.scrollWidth > nav.clientWidth + 1) return { ok: false, why: '頁籤列橫向溢出：' + nav.scrollWidth + ' > ' + nav.clientWidth };
@@ -1141,16 +1150,16 @@ export const mnoticeProbeSource = ({ view, big }) => `(async () => {
     if (t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」的字被切' };
     if (sp.scrollWidth > sp.clientWidth + 1) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」被省略號截斷' };
   }
-  const dot = tabs[2].querySelector('i.red');
+  const dot = tab('通知').querySelector('i.red');
   if (view === 'dot') {
     if (!dot || !vis(dot)) return { ok: false, why: '通知有未讀，通知那一格卻沒有紅點' };
-    if (tabs[0].querySelector('i.red')) return { ok: false, why: '對話分頁不該因為通知未讀而亮紅點' };
-    const d = dot.getBoundingClientRect(), b = tabs[2].getBoundingClientRect();
+    if (tab('對話').querySelector('i.red')) return { ok: false, why: '對話分頁不該因為通知未讀而亮紅點' };
+    const d = dot.getBoundingClientRect(), b = tab('通知').getBoundingClientRect();
     if (d.right > b.right + 0.5 || d.left < b.left - 0.5) return { ok: false, why: '紅點跑出通知那一格' };
     return { ok: true, why: '' };
   }
   if (dot) return { ok: false, why: '正在看通知，紅點應該清掉' };
-  if (!tabs[2].classList.contains('on')) return { ok: false, why: '存檔停在通知，通知那一格卻沒選中' };
+  if (!tab('通知').classList.contains('on')) return { ok: false, why: '存檔停在通知，通知那一格卻沒選中' };
   const pane = document.querySelector('.m-notice');
   if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
   const msgs = [...pane.querySelectorAll('.msg')].filter(vis);
@@ -1197,12 +1206,13 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
   let tabs = [];
   for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
   if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
+  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
   const pg = label => document.querySelector('section.m-pg[aria-label="' + label + '"]');
   const nicks = () => [...pg('夥伴').querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
   for (let i = 0; i < 80 && !(nicks().includes('小工') && nicks().includes('alpha')); i++) await sleep(100);
   for (let i = 0; i < 80 && document.querySelector('.m-banner'); i++) await sleep(100);   // 新通知的橫幅幾秒後自己消失
   await sleep(600);
-  // 1) 夥伴頁（第二格）：正常夥伴在、沒有任何舊系統寄件人列
+  // 1) 夥伴頁：正常夥伴在、沒有任何舊系統寄件人列
   const names = nicks();
   for (const n of ['demo', '小工', 'alpha']) if (!names.includes(n)) return { ok: false, why: '夥伴頁少了正常夥伴「' + n + '」：' + names.join('、') };
   const bad = names.filter(legacyName);
@@ -1210,8 +1220,8 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
   const listText = pg('夥伴').textContent;
   for (const s of SENDERS) if (listText.includes(s)) return { ok: false, why: '夥伴頁的文字裡還出現「' + s + '」' };
   if (names.includes('通知')) return { ok: false, why: '夥伴頁不該再有「通知」列（通知有自己的分頁）：' + names.join('、') };
-  // 2) 對話頁（第一格）：清單與內容都沒有舊收發室的對話（列、標題、內容都不能有）
-  tabs[0].click();
+  // 2) 對話頁：清單與內容都沒有舊收發室的對話（列、標題、內容都不能有）
+  tab('對話').click();
   await sleep(700);
   const chat = pg('對話');
   const rows = [...chat.querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
@@ -1220,10 +1230,10 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
   if (legacyName(title)) return { ok: false, why: '對話頁開著舊系統寄件人的對話：「' + title + '」' };
   for (const s of SENDERS) if (chat.textContent.includes(s)) return { ok: false, why: '對話頁的文字裡還出現「' + s + '」' };
   for (const w of MARKS) if (chat.textContent.includes(w)) return { ok: false, why: '對話頁顯示了通知內容「' + w + '」（通知只該在通知分頁）' };
-  // 3) 「通知」分頁（第三格）：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
-  tabs[2].click();
+  // 3) 「通知」分頁：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
+  tab('通知').click();
   await sleep(900);
-  if (!tabs[2].classList.contains('on')) return { ok: false, why: '點通知那一格後沒有選中通知' };
+  if (!tab('通知').classList.contains('on')) return { ok: false, why: '點通知那一格後沒有選中通知' };
   const pane = document.querySelector('.m-notice');
   if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
   const text = pane.textContent;
