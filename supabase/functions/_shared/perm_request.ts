@@ -33,7 +33,7 @@ export type PermCreate = {
 };
 
 /** 危險代碼：白名單以外的丟掉並標 uncertain（不整筆拒收，asn真 拍板）；格式不對也當看不出全貌 */
-export function parseRisk(r: Json): Risk {
+export function parseRisk(r: Json | null | undefined): Risk {
   if (!r || typeof r !== "object" || Array.isArray(r)) return { codes: [], uncertain: true };
   let uncertain = r.uncertain === true;
   const codes: string[] = [];
@@ -68,7 +68,8 @@ export function parseCreate(b: Json): PermCreate | null {
     for (const o of of) {
       if (!o || typeof o !== "object" || !Number.isInteger(o.n) || o.n < 1 || o.n > 9 || typeof o.label !== "string" || o.label.trim().length === 0) return null;
       if (full.some(x => x.n === o.n)) return null;
-      full.push({ n: o.n, label: o.label.slice(0, LABEL_MAX), kind: KINDS.includes(o.kind) ? o.kind : "other" });
+      // 不認得的種類當「不再詢問」（要按住）：以後電腦端新增放行類的種類，舊後台也不會把它變成點一下就放行（調查員二審）
+      full.push({ n: o.n, label: o.label.slice(0, LABEL_MAX), kind: KINDS.includes(o.kind) ? o.kind : "allow_always" });
     }
     // 舊手機用的選項，編號要是完整選項的子集（兩份都是畫面上的數字鍵）
     if (opts.some(o => !full!.some(x => x.n === o.n))) return null;

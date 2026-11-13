@@ -106,12 +106,12 @@ Deno.test("建立成功（新增一筆）才通知推播一次；busy／錯誤�
 // ---------- #1445：完整選項、危險代碼、截斷前字數 ----------
 const full = [{ n: 1, label: "Yes", kind: "allow_once" }, { n: 2, label: "Yes, and don't ask again", kind: "allow_always" }, { n: 3, label: "No", kind: "deny" }];
 
-Deno.test("#1445 建立：完整選項、危險代碼照收；種類不認得當 other；字數只收整數", () => {
+Deno.test("#1445 建立：完整選項、危險代碼照收；種類不認得當 allow_always（要按住）；字數只收整數", () => {
   const c = parseCreate({ ...ok, options_full: full, risk: { codes: ["delete_recursive"], uncertain: false }, full_len: 120 })!;
   assertEquals(c.options_full, full);
   assertEquals(c.risk, { codes: ["delete_recursive"], uncertain: false });
   assertEquals(c.full_len, 120);
-  assertEquals(parseCreate({ ...ok, options_full: [{ ...full[0], kind: "trust_me" }, full[2]] })!.options_full![0].kind, "other");
+  assertEquals(parseCreate({ ...ok, options_full: [{ ...full[0], kind: "trust_me" }, full[2]] })!.options_full![0].kind, "allow_always", "不認得的種類往安全那邊倒：要按住");
   for (const bad of [
     { ...ok, options_full: [] }, { ...ok, options_full: "x" }, { ...ok, options_full: [full[0], full[0]] }, { ...ok, options_full: [{ n: 0, label: "x", kind: "deny" }] },
     { ...ok, options_full: [full[0]] }, // 舊選項的 3 不在完整選項裡

@@ -91,7 +91,8 @@ begin
         return jsonb_build_object('error', 'bad_request');
       end if;
       v_seen := v_seen || (v_o->>'n')::int;
-      v_kind := case when v_o->>'kind' in ('allow_once', 'allow_always', 'deny', 'other') then v_o->>'kind' else 'other' end;
+      -- 不認得的種類當「不再詢問」（手機要按住）：失敗時往安全那邊倒
+      v_kind := case when v_o->>'kind' in ('allow_once', 'allow_always', 'deny', 'other') then v_o->>'kind' else 'allow_always' end;
       v_full := v_full || jsonb_build_array(jsonb_build_object('n', (v_o->>'n')::int, 'label', left(regexp_replace(v_o->>'label', '[[:cntrl:]]', ' ', 'g'), 200), 'kind', v_kind));
     end loop;
     -- 舊手機用的選項，編號要是完整選項的子集（兩份都是畫面上的數字鍵）

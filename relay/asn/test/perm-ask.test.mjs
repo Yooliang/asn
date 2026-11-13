@@ -241,7 +241,7 @@ test('#1445 清單：完整選項、危險代碼、字數照收；種類與代�
   assert.deepEqual(c.full.map(o => [o.n, o.kind]), [[1, 'allow_once'], [2, 'allow_always'], [3, 'deny']])
   assert.deepEqual(c.risk, { codes: ['git_destructive'], uncertain: true })
   assert.equal(c.fullLen, 15)
-  assert.equal(one({ options_full: [{ n: 1, label: 'Yes', kind: 'totally_safe' }] }).full[0].kind, 'other')
+  assert.equal(one({ options_full: [{ n: 1, label: 'Yes', kind: 'totally_safe' }] }).full[0].kind, 'allow_always', '不認得的種類往安全那邊倒：要按住')
   assert.deepEqual(normalizeRisk(null), { codes: [], uncertain: true })
   assert.deepEqual(normalizeRisk({ codes: 'x' }), { codes: [], uncertain: true })
   const old = list(row())[0]

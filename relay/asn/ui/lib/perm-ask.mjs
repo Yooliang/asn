@@ -31,9 +31,9 @@ export function normalizeList(raw, nameOf = () => '', nowMs = Date.now()) {
       ? r.options.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200) }))
       : []
     if (typeof r.prompt_text !== 'string') continue   // 選項可以是空的：多選、一次多題看得到但不能按
-    // #1445：權限框的完整原始選項（新電腦＋新後台才有）。種類只認四種，其他當 other
+    // #1445：權限框的完整原始選項（新電腦＋新後台才有）。種類只認四種，不認得的當「不再詢問」（要按住；以後新增的放行類不會變成點一下）
     const full = Array.isArray(r.options_full)
-      ? r.options_full.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200), kind: KINDS.includes(o.kind) ? o.kind : 'other' }))
+      ? r.options_full.filter(o => o && Number.isInteger(o.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string').map(o => ({ n: o.n, label: clean(o.label, 200), kind: KINDS.includes(o.kind) ? o.kind : 'allow_always' }))
       : []
     out.push({
       id: r.id, hash: r.body_hash, deviceName: clean(nameOf(r.node), 60) || '某台電腦', window: clean(r.window_name, 64),

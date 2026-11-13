@@ -102,14 +102,14 @@ test('危險代碼：不認得的丟掉並標 uncertain，照常收下；格式�
   assert.deepEqual(await risk('f', JSON.stringify({ codes: [], uncertain: false })), { codes: [], uncertain: false })
 })
 
-test('完整選項：舊選項要是子集、編號不重複、種類不認得當 other；壞的拒絕', { skip }, async () => {
+test('完整選項：舊選項要是子集、編號不重複、種類不認得當 allow_always；壞的拒絕', { skip }, async () => {
   const db = await boot()
   assert.equal((await create9(db, { p_options: JSON.stringify([{ n: 4, label: 'x' }]) })).error, 'bad_request', '舊選項的 4 不在完整選項裡')
   assert.equal((await create9(db, { p_options_full: '[]' })).error, 'bad_request')
   assert.equal((await create9(db, { p_options_full: JSON.stringify([{ n: 3, label: 'No', kind: 'deny' }, { n: 3, label: 'No', kind: 'deny' }]) })).error, 'bad_request')
   assert.equal((await create9(db, { p_full_len: -1 })).error, 'bad_request')
   const c = await create9(db, { p_options_full: JSON.stringify([{ n: 1, label: 'Yes', kind: 'definitely_safe' }, { n: 3, label: 'No', kind: 'deny' }]) })
-  assert.equal((await row(db, c.id)).options_full[0].kind, 'other')
+  assert.equal((await row(db, c.id)).options_full[0].kind, 'allow_always', '不認得的種類往安全那邊倒：要按住')
 })
 
 test('舊的六個參數照舊能用（舊 relay），新欄位是空的', { skip }, async () => {
