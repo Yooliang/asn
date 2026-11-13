@@ -129,8 +129,24 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     let top = lines[..cursor].iter().rposition(|l| is_rule(l) && l.trim().starts_with('─'));
     let start = top.map_or(0, |t| t + 1);
     let kept: Vec<String> = lines[start..end].iter().map(|l| clean_prompt_line(l)).collect();
-    let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES;
+    // Claude Code 自己把長內容收起來（「… +12 lines」「(ctrl+o to expand)」這類）：畫面上本來就不完整（#1445 asn真 審查必修 2）
+    let elided = kept.iter().any(|l| is_elision_line(l));
+    let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES && !elided;
     Some(PromptText { text: kept.join("\n"), complete, bind: String::new() })
+}
+
+/// Claude Code 收起長內容時留的記號：「… +N lines」「... +N lines」，或「ctrl+o to expand」這類展開提示。
+/// 認不準就當收起來（只會讓手機多一層小心，不會少）
+fn is_elision_line(line: &str) -> bool {
+    let t = line.trim();
+    let after = t.strip_prefix('…').or_else(|| t.strip_prefix("...")).map(str::trim_start);
+    let plus_lines = after.is_some_and(|a| {
+        let a = a.strip_prefix('+').unwrap_or("");
+        let digits = a.chars().take_while(char::is_ascii_digit).count();
+        digits > 0 && a[digits..].trim_start().starts_with("line")
+    });
+    let lc = t.to_ascii_lowercase();
+    plus_lines || lc.contains("to expand)") || lc.contains("ctrl+o to expand") || lc.contains("ctrl+r to expand")
 }
 
 /// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
@@ -752,6 +768,19 @@ fn question_above(lines: &[&str], above: usize) -> String {
 mod tests {
     use super::*;
     use ClaudeScreenKind as K;
+
+    #[test]
+    fn 權限框裡_claude_自己收起長內容的記號_算不完整() {
+        let rule = "─".repeat(60);
+        let page = |mid: &str| format!("{rule}\n Bash command\n{mid}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n");
+        assert!(permission_text(&page(" mkdir x")).unwrap().complete, "平常的指令是完整的");
+        for mid in [" for f in a b c; do\n … +12 lines (ctrl+o to expand)", "   ... +3 lines", " echo x\n   (ctrl+r to expand)", " … +1 line"] {
+            assert!(!permission_text(&page(mid)).unwrap().complete, "{mid:?}");
+        }
+        for ok in ["echo '1 … 2'", "echo +3 lines", "echo …"] {
+            assert!(!is_elision_line(ok), "{ok:?} 不是收起的記號");
+        }
+    }
 
     macro_rules! fixture {
         ($name:literal) => {

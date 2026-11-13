@@ -1178,6 +1178,9 @@ const app = createApp({
     const permTrunc = computed(() => pqTruncNote(pq.cur))
     const permHold = createHold({ onDone: n => { void decidePermReq(n) }, vibrate: ms => { if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(ms) }, state: reactive({ key: null }) })   // 沒真的點過畫面時瀏覽器不准震，也不要叫
     watch(() => [pq.cur?.id, pq.busy, pq.waiting], () => permHold.cancel())
+    // 按住到一半 App 被切走、失去焦點：取消（不能在背景按滿送出；asn真 審查）
+    window.addEventListener('blur', () => permHold.cancel())
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') permHold.cancel() })
     const permPress = o => { if (!o.hold) void decidePermReq(o.n) }   // 點一下只算不用按住的；要按住的放開時的 click 不算
     function permHoldStart(o) { if (o.hold && !pq.busy && pq.armed) permHold.start(o.n) }
     function permHoldKey(o, e) { if (o.hold && !pq.busy && pq.armed && permHold.keyDown(o.n, e)) e.preventDefault() }

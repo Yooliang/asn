@@ -121,6 +121,17 @@ test('舊的六個參數照舊能用（舊 relay），新欄位是空的', { ski
   assert.equal((await decide(db, c.id, { p_choice_n: 1 })).status, 'decided')
 })
 
+test('舊格式經 relay 進來時新欄位是 JSON 的 null：當成沒帶，照常建立（asn真 審查必修 3）', { skip }, async () => {
+  const db = await boot()
+  const c = await create9(db, { p_options: JSON.stringify([{ n: 1, label: 'Yes' }, { n: 3, label: 'No' }]), p_options_full: 'null', p_risk: 'null', p_full_len: null })
+  assert.ok(c.id, JSON.stringify(c))
+  const r = await row(db, c.id)
+  assert.equal(r.options_full, null); assert.equal(r.risk, null); assert.equal(r.full_len, null)
+  // 有完整選項但危險代碼是 JSON null：照常收下、當看不出全貌
+  const c2 = await create9(db, { p_window_name: '小丙', p_risk: 'null' })
+  assert.deepEqual((await row(db, c2.id)).risk, { codes: [], uncertain: true })
+})
+
 test('權限：anon、authenticated 不能呼叫新版建立函式', { skip }, async () => {
   const db = await boot()
   for (const role of ['anon', 'authenticated']) {

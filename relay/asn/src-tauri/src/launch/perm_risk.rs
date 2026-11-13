@@ -58,16 +58,31 @@ pub fn assess(text: &str, option_rows: usize, cwd: Option<&str>) -> Risk {
         }
         // git 改寫或丟掉歷史
         if let Some(g) = low.iter().position(|t| t == "git" || t.ends_with("/git") || t.ends_with("git.exe")) {
-            let sub = &toks[g + 1..];
+            // 子命令之前的全域選項：帶值的（-C <dir>、-c k=v、--git-dir <d> 等）連值一起跳過，其他 - 開頭的單獨跳過（asn真 審查必修 1）
+            let rest = &toks[g + 1..];
+            let mut i = 0;
+            while i < rest.len() {
+                let t = rest[i];
+                if matches!(t, "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env" | "--exec-path" | "--list-cmds") {
+                    i += 2;
+                } else if t.starts_with('-') {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            let first = rest.get(i).map(|t| t.to_lowercase()).unwrap_or_default();
+            let sub = rest.get(i + 1..).unwrap_or(&[]);
             let subl: Vec<String> = sub.iter().map(|t| t.to_lowercase()).collect();
             let s = |w: &str| subl.iter().any(|t| t == w);
-            let first = subl.iter().find(|t| !t.starts_with('-')).map(String::as_str).unwrap_or("");
-            let destructive = match first {
-                "push" => s("--force") || s("-f") || subl.iter().any(|t| t.starts_with("--force-with-lease") || t.starts_with("--force-if-includes") || t.starts_with('+')) || s("--delete") || s("--mirror") || s("--prune"),
+            // 合在一起的短旗標（-uf、-fd、-Df）：逐字元看（大小寫有意義，用原字）
+            let short = |c: char| sub.iter().any(|t| t.starts_with('-') && !t.starts_with("--") && t[1..].chars().all(|x| x.is_ascii_alphabetic()) && t[1..].contains(c));
+            let destructive = match first.as_str() {
+                "push" => s("--force") || short('f') || subl.iter().any(|t| t.starts_with("--force-with-lease") || t.starts_with("--force-if-includes") || t.starts_with('+')) || s("--delete") || short('d') || s("--mirror") || s("--prune"),
                 "reset" => s("--hard") || s("--merge") || s("--keep"),
-                "clean" => subl.iter().any(|t| t.starts_with('-') && !t.starts_with("--") && t.contains('f')) || s("--force"),
-                "branch" => sub.iter().any(|t| *t == "-D" || *t == "--delete") && sub.iter().any(|t| *t == "-D" || *t == "--force" || *t == "-f"),
-                "checkout" | "restore" => s("--") && subl.iter().any(|t| t == "." || t == "*") || s("--force") || s("-f"),
+                "clean" => short('f') || s("--force"),
+                "branch" => (short('D') || (s("--delete") || short('d')) && (s("--force") || short('f'))) || s("--delete") && s("--force"),
+                "checkout" | "restore" => s("--") && subl.iter().any(|t| t == "." || t == "*") || s("--force") || short('f'),
                 "filter-branch" | "filter-repo" => true,
                 "update-ref" => s("-d"),
                 "reflog" => s("expire") || s("delete"),
@@ -320,6 +335,38 @@ mod tests {
         }
         for c in ["git push origin main", "git reset HEAD file", "git branch -d feat", "git status", "git checkout main", "git commit -m \"$(cat <<'EOF'\nfix\nEOF\n)\""] {
             miss(c, "git_destructive");
+        }
+    }
+
+    #[test]
+    fn git_全域選項與合在一起的短旗標_照樣比中() {
+        // asn真 審查必修 1：子命令前面有 -C <dir>、-c k=v 等帶值的全域選項；短旗標合在一起
+        for c in [
+            "git -C D:/work/proj push --force",
+            "git -C ../x push -f origin main",
+            "git -c user.name=x reset --hard",
+            "git --git-dir .git --work-tree . clean -fdx",
+            "git --no-pager -C repo branch -D old",
+            "git push -uf origin main",
+            "git -C repo push -fu origin main",
+            "git clean -xfd",
+            "git branch -Df old",
+            "git checkout -qf main",
+        ] {
+            hit(c, "git_destructive");
+        }
+        for c in ["git -C repo push origin main", "git -c core.pager=less log", "git -C repo branch -d merged", "git push -u origin feat", "git --git-dir .git status"] {
+            miss(c, "git_destructive");
+        }
+    }
+
+    #[test]
+    fn 這個模組只比對文字_不碰檔案或程序() {
+        // asn真 審查非必修：原始碼守門把這個檔列為只比對文字的例外，所以這裡自己守住
+        let src = include_str!("perm_risk.rs");
+        let body = src.split("#[cfg(test)]").next().unwrap();
+        for banned in ["std::fs", "std::process", "Command", "std::net", "File::", "OpenOptions"] {
+            assert!(!body.contains(banned), "perm_risk.rs 不能用 {banned}");
         }
     }
 

@@ -288,4 +288,6 @@ test('#1445 守門：警告在本文框外面（之前）、按住的按鈕綁�
   for (const ev of ['@pointerdown="permHoldStart(o)"', '@pointerup="permHold.cancel()"', '@pointerleave="permHold.cancel()"', '@pointercancel="permHold.cancel()"', '@keyup="permHold.keyUp($event)"', '@click="permPress(o)"']) assert.ok(sheet.includes(ev), ev)
   assert.match(js, /const permPress = o => \{ if \(!o\.hold\) void decidePermReq\(o\.n\) \}/)
   assert.match(js, /createHold\(\{ onDone: n => \{ void decidePermReq\(n\) \}/)
+  assert.match(js, /window\.addEventListener\('blur', \(\) => permHold\.cancel\(\)\)/, '失去焦點就取消按住')
+  assert.match(js, /visibilitychange', \(\) => \{ if \(document\.visibilityState !== 'visible'\) permHold\.cancel\(\) \}/, '切到背景就取消按住')
 })

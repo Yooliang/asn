@@ -3189,7 +3189,8 @@ fn phone_offer(name: &str, screen: &super::claude_screen::ClaudeScreen, p: super
     // 權限框（#1445）：完整選項、危險代碼、截斷前字數也綁進來，中途改了答不出去。其他框不加，雜湊和以前一樣
     if permission {
         let full: Vec<String> = options_full.iter().map(|o| format!("{}:{}:{}", o.n, super::claude_screen::option_kind_code(o.kind), o.label)).collect();
-        basis.push_str(&format!("\u{0}full\u{0}{}\u{0}risk\u{0}{}\u{0}{}\u{0}len\u{0}{full_len}", full.join("\u{1}"), risk.codes.join(","), risk.uncertain));
+        // 截斷前全文的雜湊也綁進來（asn真 審查非必修）：手機只看到前 16000 字，後面變了也要算內容變了
+        basis.push_str(&format!("\u{0}full\u{0}{}\u{0}risk\u{0}{}\u{0}{}\u{0}len\u{0}{full_len}\u{0}all\u{0}{}", full.join("\u{1}"), risk.codes.join(","), risk.uncertain, crate::term_remote::hash_hex(&p.text)));
     }
     let hash = crate::term_remote::hash_hex(&basis);
     PhoneOffer { name: name.to_string(), text, complete, options, options_full, risk, full_len, hash }

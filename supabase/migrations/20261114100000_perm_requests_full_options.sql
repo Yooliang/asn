@@ -54,6 +54,13 @@ declare
   v_kind text;
   c_known constant text[] := array['delete_recursive','git_destructive','disk_system','remote_exec','secret_path','privilege','db_destructive','outside_cwd'];
 begin
+  -- relay 舊格式（其他框、舊電腦）會把 null 傳成 JSON 的 null：當成沒帶，不能回 bad_request（asn真 審查必修 3）
+  if jsonb_typeof(p_options_full) = 'null' then
+    p_options_full := null;
+  end if;
+  if jsonb_typeof(p_risk) = 'null' then
+    p_risk := null;
+  end if;
   select tenant_id, owner_user into v_t, v_owner from relay.nodes where id = p_node and status = 'active';
   if not found then
     return jsonb_build_object('error', 'not_found');
