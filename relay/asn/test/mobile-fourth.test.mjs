@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, fourthOnNotice, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, isNewNotice, noticeLastAt, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -110,6 +110,21 @@ test('離開內頁的 3 分鐘內有新通知進來：第四格馬上變回通�
   assert.equal(h.nav.tab, 'chats', '人還在原本的分頁，不被拉走')
   assert.equal(h.r.noticeArrived(), false, '沒有內頁時什麼都不做')
   assert.equal(fourthOnNotice(null), null); assert.equal(fourthOnNotice(openFourth(guidePage(), 'me')).page.kind, 'guide', '還沒離開（leftAt＝0）留著')
+})
+
+test('判斷新通知看最新一則的時間，不看未讀數：名單重載（通知列先不見再出現、未讀 0→N）不算；標已讀不算（#1430 審查）', () => {
+  const N = (lastAt, unread = 0) => ({ id: 'notice', isNotice: true, lastAt, unread })
+  assert.equal(noticeLastAt([N(500, 2)]), 500); assert.equal(noticeLastAt([]), null); assert.equal(noticeLastAt(null), null); assert.equal(noticeLastAt([N(0, 3)]), null, '沒有時間＝還沒收過')
+  // 依序是 watch 看到的值：舊值、新值
+  const fired = seq => seq.slice(1).map((n, i) => isNewNotice(seq[i], n))
+  assert.deepEqual(fired([noticeLastAt([N(500, 2)]), noticeLastAt([]), noticeLastAt([N(500, 2)])]), [false, false], '名單重載：500 → 沒有 → 500，不算新通知')
+  assert.deepEqual(fired([null, 500]), [false], '剛載入（沒有 → 有）不算')
+  assert.deepEqual(fired([500, 500]), [false], '標成已讀：時間不變，不算')
+  assert.deepEqual(fired([500, 900]), [true], '真的來了一則新的：算')
+  assert.deepEqual(fired([900, 500]), [false])
+  const js = read('ui', 'm.js')
+  assert.match(js, /watch\(\(\) => noticeLastAt\(friends\.value\), \(n, o\) => \{ if \(isNewNotice\(o, n\) && !cloudSt\.created && !lchStep2\.value\) fourthNav\.noticeArrived\(\) \}\)/, '接線：看時間；雲端金鑰還在、開新夥伴第 2 步沒送出時不動')
+  assert.doesNotMatch(js, /watch\(noticeDot/, '不再看未讀數')
 })
 
 test('程式切到通知（例如點了通知提示）而第四格正被內頁佔著：內頁收起，第四格變回通知', () => {

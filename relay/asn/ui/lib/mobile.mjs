@@ -25,6 +25,11 @@ export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitl
 export const tabList = fourth => (fourth?.page ? TABS.map(t => (t === FOURTH_SLOT ? PAGE_TAB : t)) : TABS)
 // 通知分頁的未讀紅點：通知對話有未讀就亮；對話分頁的紅點不算通知的未讀
 export const noticeUnread = friends => { const f = (Array.isArray(friends) ? friends : []).find(isNoticeFriend); return Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0 }
+// 通知最新一則的時間（毫秒）：判斷「有新通知進來」用。看時間不看未讀數：名單重載時通知那一列可能先不見再出現（未讀數 0→N），那不是新通知；
+// 標成已讀也不會讓時間變。沒有通知那一列回 null
+export const noticeLastAt = friends => { const f = (Array.isArray(friends) ? friends : []).find(isNoticeFriend); return Number.isFinite(f?.lastAt) && f.lastAt > 0 ? f.lastAt : null }
+// 前後兩次的時間：兩次都有、而且變新了，才算新通知（從沒有變成有＝名單剛載入或重載，不算）
+export const isNewNotice = (prev, next) => Number.isFinite(prev) && Number.isFinite(next) && next > prev
 export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
 // 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，小良哥定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
 // 通知的紅點掛在第四格（內頁佔著第四格時照樣亮在那一格）

@@ -41,7 +41,7 @@ import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
-import { HOME_TAB, chatNav, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
+import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
@@ -147,7 +147,7 @@ const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 let savedTab = HOME_TAB   // 上次離開時的大分頁（讀存檔後才知道）
 let savedChat = false   // 上次離開時正在看對話分頁裡的某一則（重開直接回到那一則）
 const nav = reactive(initialNav())
-// 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴，蓋在進來的那個分頁上。null＝沒有；{ page, from, leftAt }（lib/mobile-fourth.mjs）
+// 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴，暫時佔用第四格（#1429）。null＝沒有；{ page, from, leftAt }（lib/mobile-fourth.mjs）
 const fourthSt = reactive({ fourth: null })
 const fourthNav = createMobileNav({ history, nav, st: fourthSt })
 const lastChat = ref('')   // 最後使用的那一位（對話分頁點進去的那一則；存在手機本機設定，重開 App 仍記得）
@@ -398,7 +398,8 @@ const app = createApp({
     const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
     // 內頁佔著第四格、人已經離開它（3 分鐘計時中）時有新通知進來：第四格馬上變回「通知」（#1429）。雲端代理的金鑰還在內頁上時不動（金鑰只顯示一次）
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
-    watch(noticeDot, (n, o) => { if (n > o && !cloudSt.created && !lchStep2.value) fourthNav.noticeArrived() })
+    // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
+    watch(() => noticeLastAt(friends.value), (n, o) => { if (isNewNotice(o, n) && !cloudSt.created && !lchStep2.value) fourthNav.noticeArrived() })
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
@@ -475,7 +476,7 @@ const app = createApp({
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text, opts); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
-    // ---------- 使用指引：設定分頁的一個項目，點進去是蓋在設定分頁上的內頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
+    // ---------- 使用指引：設定分頁的一個項目，點進去是暫佔第四格的內頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (fourthPage.value?.kind === 'guide' ? phoneGuide(fourthPage.value.guide) : null))
     // 設定分頁＝分類列表（每列一行目前值），點一列在設定分頁上打開該項的內頁（左上返回回設定）

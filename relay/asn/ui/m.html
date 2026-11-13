@@ -50,7 +50,7 @@
     <!-- 一句話的提示（底部，幾秒後自己消失，點一下就關）：例如離開進行中的畫面後，帳號切換完成或失敗 -->
     <div class="m-toast" v-if="toast" role="status" @click="toast = ''">{{ toast }}</div>
 
-    <!-- 四個大分頁：夥伴／對話／設定／通知（#1429；和電腦版同樣的字、同樣的順序；section 的先後就是滑動的順序，要和 TABS 一致）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；內頁蓋在進來的那一格上；下拉重整只在夥伴頁 -->
+    <!-- 四個大分頁：夥伴／對話／設定／通知（#1429；和電腦版同樣的字、同樣的順序；section 的先後就是滑動的順序，要和 TABS 一致）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；內頁暫時佔第四格；下拉重整只在夥伴頁 -->
     <section class="m-page" :style="{ '--pages': pages }">
       <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
         <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
