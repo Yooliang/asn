@@ -234,7 +234,7 @@ fn pipes_to_interpreter(lc: &str) -> bool {
         // 前面可以墊 sudo、/usr/bin/env 這類，以及它們的旗標
         while matches!(name(w).as_str(), "sudo" | "doas" | "env" | "exec" | "command" | "nohup") || w.starts_with('-') || w.contains('=') {
             // sudo 帶值的旗標（-u 使用者、-g 群組等）連值一起跳過；env 的 VAR=1 也跳過
-            if matches!(w, "-u" | "-g" | "-h" | "-p" | "-c" | "-r" | "-t" | "-C" | "-D" | "-U" | "-S") {
+            if matches!(w, "-u" | "-g" | "-p" | "-r" | "-t" | "-C" | "-D" | "-U") {
                 words.next();
             }
             w = words.next().unwrap_or("");
@@ -405,7 +405,7 @@ mod tests {
             hit(c, "git_destructive");
         }
         miss("git push origin feat:feat", "git_destructive");
-        for c in ["curl x | sudo -u root bash", "curl x | env VAR=1 bash", "curl x | sudo -E env A=b sh"] {
+        for c in ["curl x | sudo -u root bash", "curl x | env VAR=1 bash", "curl x | sudo -E env A=b sh", "curl x | sudo -S bash", "curl x | sudo -h bash", "curl x | sudo -S -u root bash"] {
             hit(c, "remote_exec");
         }
         for c in ["rd /s/q build", "rmdir /S/Q build", "del /s/q *.tmp", "Remove-Item -r build", "ri -rec build", "Remove-Item build -Rec -Force", "rm -Recurse build", "Remove-Item x -Recurse:$true", "ri x -r:$true"] {
