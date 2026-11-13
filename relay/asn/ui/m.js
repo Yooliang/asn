@@ -24,7 +24,7 @@ import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdo
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileChat, restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
-import { chatGroupItems } from './lib/actionbar.mjs'
+import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
 import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
@@ -412,6 +412,12 @@ const app = createApp({
     })
     const chatFriend = computed(() => chatState.value.friend)
     const chatEmptyText = computed(() => chatState.value.text)
+    // 現代外觀的對話頂端（#1421 B 之三）：置中名牌（頭像、名字、哪台電腦・狀態，和電腦頂部共用 nameplateView）；
+    // 點名牌開「⋯」選單；右邊「看終端」直接切對話窗格裡同一顆切換（chatPaneEl 是 <chat-pane> 的元件實例）。復古 Aero 不顯示這兩樣（mobile.css）
+    const chatPlate = computed(() => (chatFriend.value ? nameplateView(chatFriend.value) : null))
+    const chatPaneEl = ref(null)
+    const headTerm = computed(() => { const p = chatPaneEl.value; return p && p.mSwitch ? p.mToggle : null })
+    function toggleHeadTerm() { const p = chatPaneEl.value; if (!p || !p.mSwitch) return; if (p.remoteShown) p.showMsgs(); else p.showTerm() }
     const chatLog = computed(() => (isRoomChat(lastChat.value) ? hub.view(roomIdOf(lastChat.value)) : logs[lastChat.value]) ?? [])
     // 點群組：成為「最後使用」，切到對話分頁並進那一則
     function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; fourthNav.openChat() }
@@ -1350,7 +1356,7 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       chatRows, chatQuery, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,

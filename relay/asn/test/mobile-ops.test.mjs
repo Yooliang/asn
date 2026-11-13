@@ -120,7 +120,7 @@ test('接線：對話分頁先列活動中的對話、點進去才是單一對�
   assert.match(html, /<li v-for="x in chatRows" :key="x\.id">/, '清單是 chatRows（活動中的對話）')
   assert.match(html, /aria-label="回對話清單" @click="goTab\('chats'\)"/, '對話上方有回清單的鍵（再點一次「對話」分頁）')
   assert.match(html, /<chat-pane v-if="chatFriend"/); assert.match(html, /\{\{ chatEmptyText \}\}/)
-  assert.match(html, /<button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
+  assert.match(html, /<button class="m-icon-btn m-head-more" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
   assert.match(html, /<circle[\s\S]*?<circle[\s\S]*?<circle/, '「⋯」是三個點的 SVG（與其他圖示按鈕同一套）')
   // 選單是 position:fixed 的最外層元素，不放在 pager 裡（pager 有 transform 與 overflow:hidden，會裁掉）
   assert.ok(html.indexOf('class="m-ops"') > html.indexOf('<nav class="m-tabs"'), '選單在三個分頁之外')
