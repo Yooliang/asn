@@ -214,6 +214,14 @@ export const munreadProbeSource = () => `(async () => {
   tab('夥伴').click(); await sleep(800);
   if (JSON.stringify(rows()) !== JSON.stringify([['demo', '2']])) return { ok: false, why: '讀完的那一列要離開「未讀」：' + JSON.stringify(rows()) };
   if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '還有 demo 沒讀，紅點要留著' };
+  // #1442：夥伴頁有搜尋字時藏起「未讀」，紅點照舊；清掉搜尋字再出現
+  const box = document.querySelector('section.m-pg[aria-label="夥伴"] .m-search input');
+  if (!box) return { ok: false, why: '夥伴頁沒有搜尋框' };
+  box.value = 'demo'; box.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);
+  if (grp()) return { ok: false, why: '有搜尋字時「未讀」應該藏起來' };
+  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '搜尋時紅點不該消失' };
+  box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);
+  if (!grp()) return { ok: false, why: '清掉搜尋字後「未讀」要回來' };
   return { ok: true, why: '' };
 })()`
 export const MCHAT_EMPTY_PROBE = { mchatEmpty: true }

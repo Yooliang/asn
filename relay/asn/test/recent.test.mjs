@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACTIVE_CHAT_MAX, ACTIVE_CHAT_WINDOW_MS, RECENT_MAX, RECENT_WINDOW_MS, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, activeChats, chatListRows, chatRowsUnread, filterChatRows, lastTrafficAt, recentActivity, rowUnread, unreadChatRows } from '../ui/lib/recent.mjs'
+import { ACTIVE_CHAT_MAX, ACTIVE_CHAT_WINDOW_MS, RECENT_MAX, RECENT_WINDOW_MS, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, activeChats, chatListRows, chatRowsUnread, filterChatRows, lastTrafficAt, recentActivity, rowUnread, showUnreadGroup, unreadChatRows } from '../ui/lib/recent.mjs'
 
 const ui = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 const read = (...p) => fs.readFileSync(path.join(ui, ...p), 'utf8').replace(/\r\n/g, '\n')
@@ -78,7 +78,7 @@ test('接線守門（#1438）：對話分頁直接是最後那一則、沒有清
   assert.doesNotMatch(chats, /m-recent|v-for="x in chatRows"|m-search/, '對話分頁不再列清單（直接是那一則）')
   assert.match(chats, /<chat-pane v-if="chatFriend"/); assert.match(chats, /\{\{ chatEmptyText \}\}/, '沒有最後一則：提示到夥伴挑一位')
   const list = m.slice(m.indexOf('<section class="m-pg" aria-label="夥伴">'), m.indexOf('<section class="m-pg m-chat" :class="{ shake'))   // #1429 起夥伴是第一頁、後面接對話
-  assert.match(list, /<div class="m-group m-recent m-unread" v-if="unreadRows\.length">/, '「未讀」全部讀完整組不顯示')
+  assert.match(list, /<div class="m-group m-recent m-unread" v-if="unreadShown">/, '「未讀」全部讀完、或夥伴頁有搜尋字時整組不顯示（#1442）')
   assert.match(list, /\{\{ UNREAD_GROUP_LABEL \}\}（\{\{ unreadRows\.length \}\}）/)
   assert.match(list, /<li v-for="x in unreadRows" :key="x\.id">/)
   assert.match(list, /<span class="unread" v-if="x\.friend\.unread">\{\{ x\.friend\.unread \}\}<\/span>/); assert.match(list, /<span class="unread" v-if="x\.room\.unread">\{\{ x\.room\.unread \}\}<\/span>/)
@@ -89,7 +89,8 @@ test('接線守門（#1438）：對話分頁直接是最後那一則、沒有清
   assert.match(js, /const chatAll = computed\(\(\) => chatListRows\(\{ friends: activeFriends\(friends\.value\)\.filter\(f => !isNoticeFriend\(f\) && !isMergedAway\(f\)\)/, '不含已封存、通知、已併進通知的舊列')
   assert.match(js, /lastId: lastChat\.value \}\)\)/)
   assert.match(js, /rooms: hub\.rows\(\{ plainText: plain \}\)/, '群組不套夥伴頁的搜尋字')
-  assert.match(js, /const chatRows = computed\(\(\) => filterChatRows\(chatAll\.value, normalizeSearchQuery\(chatQuery\.value\), \(f, q\) => friendMatchesQuery\(f, q, plain\)\)\)/, '搜尋比對規則和夥伴頁一樣')
+  assert.doesNotMatch(js, /chatQuery|chatRows|filterChatRows|savedChat|restoreMobileChat/, '0.2.18 對話清單的死碼清掉了（#1442）')
+  assert.match(js, /const unreadShown = computed\(\(\) => showUnreadGroup\(unreadRows\.value, normalizeSearchQuery\(query\.value\)\)\)/, '夥伴頁有搜尋字時藏起「未讀」（#1442）')
   assert.match(js, /const unreadRows = computed\(\(\) => unreadChatRows\(chatAll\.value\)\)/, '「未讀」不套夥伴頁的搜尋字（紅點和這一組一定對得上）')
   assert.match(js, /const unreadTotal = computed\(\(\) => chatRowsUnread\(unreadRows\.value\)\)/, '夥伴分頁的紅點和「未讀」用同一份')
   assert.doesNotMatch(js, /recentRows/)
@@ -112,6 +113,12 @@ test('對話分頁真正列出的清單（chatListRows，手機電腦共用）�
   assert.deepEqual(filterChatRows(rows, '舊群', m).map(x => x.id), ['room:old'])
   assert.deepEqual(filterChatRows(rows, 'l/old', m).map(x => x.id), ['L/oldUnread'])
   assert.equal(filterChatRows(rows, '', m), rows)
+  // 夥伴頁「未讀」：有未讀、沒有搜尋字才顯示（#1442）；紅點不受影響（unreadTotal 照算）
+  assert.equal(showUnreadGroup(unreadChatRows(rows), ''), true)
+  assert.equal(showUnreadGroup(unreadChatRows(rows), 'demo'), false, '有搜尋字就藏')
+  assert.equal(showUnreadGroup([], ''), false, '沒有未讀不顯示')
+  assert.equal(showUnreadGroup(null, ''), false)
+  assert.equal(chatRowsUnread(unreadChatRows(rows)), 7, '搜尋時紅點照舊')
   // 最後使用的那一位（手機）照樣在
   assert.ok(chatListRows({ friends, logOf, rooms: [], now: NOW, lastId: 'L/oldRead' }).some(x => x.id === 'L/oldRead'))
 })
