@@ -411,15 +411,49 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
     window.__cm = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
     console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell }));
   }
+  const idx = () => (window.navigation ? navigation.currentEntry.index : history.length);
+  const onTab = () => (document.querySelector('.m-tabs button.on') || {}).textContent;
+  const tab0 = onTab(), base = idx();
   btn.click(); await sleep(250);
   if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
-  esc(); await sleep(200);
-  if (rows().length) return { ok: false, why: 'Esc 關不掉名單' };
-  btn.click(); await sleep(250);
+  // 名單是蓋在對話上的一層浮層（和「⋯」選單同一套）：開＝記錄多一層，退掉＝回到原深度，各種關法都不能殘留（#1466）。
+  // 實機的返回鍵＝瀏覽器上一頁（history.back()），對話分頁是記錄的底，所以不能靠自己丟 popstate 事件
+  const closed = async (how) => {
+    await sleep(350);
+    if (rows().length) return how + '：名單沒有收起';
+    if (idx() !== base) return how + '：記錄深度是 ' + idx() + '，應該回到 ' + base + '（殘留了一筆）';
+    if (onTab() !== tab0 || !document.querySelector('.m-chat .chatpane')) return how + '：離開了對話頁';
+    return '';
+  };
+  const open = async (how) => {
+    btn.click(); await sleep(300);
+    if (!rows().length) return how + '：名單沒打開';
+    if (idx() !== base + 1) return how + '：開名單後記錄深度是 ' + idx() + '，應該多一層（' + (base + 1) + '）';
+    return '';
+  };
+  let bad = '';
+  if (idx() !== base + 1) return { ok: false, why: '開名單後記錄深度是 ' + idx() + '，應該多一層（' + (base + 1) + '）' };
+  esc(); bad = await closed('Esc'); if (bad) return { ok: false, why: bad };
+  bad = await open('點外面前'); if (bad) return { ok: false, why: bad };
   const back = document.querySelector('.m-head-offline .m-plus-back');
-  if (!back) return { ok: false, why: '第二次點不開名單' };
-  back.click(); await sleep(200);
-  if (rows().length) return { ok: false, why: '點外面關不掉名單' };
+  if (!back) return { ok: false, why: '點外面：找不到背板' };
+  back.click(); bad = await closed('點外面'); if (bad) return { ok: false, why: bad };
+  bad = await open('再按一次按鈕前'); if (bad) return { ok: false, why: bad };
+  btn.click(); bad = await closed('再按一次按鈕'); if (bad) return { ok: false, why: bad };
+  bad = await open('返回鍵前'); if (bad) return { ok: false, why: bad };
+  history.back(); bad = await closed('系統返回鍵（history.back）'); if (bad) return { ok: false, why: bad };
+  // 名單開著時分頁列要點得到：點另一個分頁＝名單收起（退掉那一筆）並切過去；之後返回鍵回到對話頁，不殘留名單
+  bad = await open('分頁前'); if (bad) return { ok: false, why: bad };
+  const other = [...document.querySelectorAll('.m-tabs button')].find(b => !b.classList.contains('on'));
+  if (!other) return { ok: false, why: '找不到其他分頁' };
+  const r = other.getBoundingClientRect(), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  if (!hit || !other.contains(hit)) return { ok: false, why: '名單開著時分頁列被蓋住：點到 ' + (hit ? hit.className || hit.tagName : '無') };
+  other.click(); await sleep(600);
+  if (rows().length) return { ok: false, why: '點分頁後名單沒有收起' };
+  if (onTab() === tab0) return { ok: false, why: '名單開著點分頁，沒有切過去' };
+  if (idx() !== base + 1) return { ok: false, why: '點分頁後記錄深度是 ' + idx() + '，應該是 ' + (base + 1) + '（切走一層，名單那筆不能殘留）' };
+  history.back(); await sleep(500);
+  if (idx() !== base || onTab() !== tab0 || rows().length) return { ok: false, why: '切走再按返回鍵：沒有回到原本的對話頁（深度 ' + idx() + '）' };
   return { ok: true, why: window.__cm || '' };
 })()`
 // 手機群組對話：上方沒有按鈕列，右上角「⋯」打開是群組的三項（邀請、加 AI、成員與設定），沒有「輸入邀請碼加入」

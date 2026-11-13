@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, fourthOnNotice, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, isNewNotice, noticeLastAt, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, isNewNotice, noticeLastAt, offlineNav, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -347,4 +347,24 @@ test('系統返回鍵（#1438 對話分頁直接是那一則之後；#1442）：
   const g = harness('me')
   g.r.openPage(guidePage()); g.r.openChat(); g.flush()
   assert.equal(g.st.fourth?.page ? g.nav.tab : HOME_TAB, HOME_TAB); assert.equal(g.nav.chat, false); assert.equal(g.depth(), 0)
+})
+
+test('群組「N 人離線」名單（#1466）：是蓋在對話上的一層浮層（同「⋯」選單），返回鍵退那一筆就收起；對話分頁是底，記錄只多一層、退完回到原深度', () => {
+  const h = harness()
+  h.r.go(offlineNav())
+  assert.equal(h.nav.sheet, 'offline'); assert.equal(h.depth(), 1, '開名單＝多推一筆記錄')
+  assert.deepEqual(normalizeNav({ sheet: 'offline', tab: 'list' }), offlineNav())
+  h.press()
+  assert.equal(h.nav.sheet, ''); assert.equal(h.nav.tab, 'chats'); assert.equal(h.depth(), 0, '返回鍵只退名單那一筆，回到底，不多不少')
+  // 點分頁列：先退掉名單那一筆，再切過去（切到別的分頁會推一筆，所以深度是 1，不是 2）
+  h.r.go(offlineNav())
+  h.r.goTab('me'); h.flush()
+  assert.equal(h.nav.sheet, ''); assert.equal(h.nav.tab, 'me'); assert.deepEqual(h.stack(), [initialNav(), tabNav('me')], '名單那一筆沒有殘留')
+  // 點的是目前這個分頁：只退名單
+  const c = harness()
+  c.r.go(offlineNav()); c.r.goTab('chats'); c.flush()
+  assert.equal(c.nav.sheet, ''); assert.equal(c.depth(), 0)
+  // 其他浮層開著時分頁列照舊不動
+  const o = harness(); o.r.go(opsNav()); o.r.goTab('me'); o.flush()
+  assert.equal(o.nav.sheet, 'ops'); assert.equal(o.depth(), 1)
 })

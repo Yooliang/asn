@@ -70,7 +70,10 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   // 點頁籤、左右滑：浮層（開新夥伴、⋯ 選單、要密碼…）開著時不動
   // t＝PAGE_TAB 是第四格的內頁（有內頁時才有）；程式要切到「通知」（例如點了通知的提示）而第四格正被內頁佔著：內頁收起，第四格變回通知
   function goTab(t) {
-    if (pending || nav.sheet) return
+    if (pending) return
+    // 群組的離線名單開著（點頁籤）：先退掉名單的那一筆記錄，退完再照一般規則切過去（記錄不殘留）
+    if (nav.sheet === 'offline') { if (t !== nav.tab && t !== PAGE_TAB) pending = { goTab: t }; history.back(); return }
+    if (nav.sheet) return
     if (t === PAGE_TAB) { if (nav.tab !== PAGE_TAB && st.fourth?.page) showPage(); return }   // 切回第四格的內頁
     if (!TABS.includes(t)) return
     if (nav.tab === PAGE_TAB) { leavePage(t === FOURTH_SLOT ? { close: true, tab: t } : { tab: t }); return }
@@ -116,7 +119,8 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
       pending = null
       if (then.close) st.fourth = null
       setNav(n)
-      if (then.page) openPage(then.page)
+      if (then.goTab) goTab(then.goTab)
+      else if (then.page) openPage(then.page)
       else if (then.tab) switchTab(then.tab, { chat: !!then.chat })
       settle()
       return

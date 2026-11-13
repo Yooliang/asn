@@ -172,8 +172,8 @@
                 <button class="m-plate" type="button" :class="{ 'is-offline': chatPlate.offline }" :aria-label="(opsItems.length || groupItems.length) ? chatPlate.aria + '，更多操作' : chatPlate.aria" :disabled="!opsItems.length && !groupItems.length" @click="openOps"><img class="m-plate-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="28" height="28"><b class="m-plate-name" v-html="emo(chatPlate.name)"></b><small class="m-plate-sub" v-if="chatPlate.sub">{{ chatPlate.sub }}</small></button>
                 <button class="m-icon-btn m-head-term" type="button" v-if="headTerm" :class="{ on: chatPaneEl && chatPaneEl.remoteShown }" :aria-label="headTerm.label" :title="headTerm.label" @click="toggleHeadTerm"><line-icon :name="headTerm.line"></line-icon></button>
                 <div class="m-head-offline" v-if="chatOffline">
-                  <button class="m-offline-btn" type="button" aria-haspopup="true" :aria-expanded="offlineOpen" :aria-label="chatOffline.aria" :title="chatOffline.title" @click="offlineOpen = !offlineOpen">{{ chatOffline.label }}</button>
-                  <div class="m-plus-back" v-if="offlineOpen" @click="offlineOpen = false"></div>
+                  <button class="m-offline-btn" type="button" aria-haspopup="true" :aria-expanded="offlineOpen" :aria-label="chatOffline.aria" :title="chatOffline.title" @click="toggleOffline">{{ chatOffline.label }}</button>
+                  <div class="m-plus-back" v-if="offlineOpen" @click="closeOffline"></div>
                   <ul class="m-plus-menu m-offline-menu" v-if="offlineOpen" role="group" aria-label="離線的成員"><li v-for="n in chatOffline.names" :key="n">{{ n }}</li></ul>
                 </div>
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
