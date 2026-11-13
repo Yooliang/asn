@@ -121,7 +121,7 @@ test('入口改成低調的「選項」小按鈕，按下當內頁整頁顯示�
   assert.match(fourth, /v-if="fourthPage\.kind === 'acct'"/)
   assert.match(fourth, /acctSw\.phase === 'confirm'/)
   assert.match(fourth, /aria-label="返回"[^>]*@click="back"/)   // 標題列返回鍵＝系統返回鍵：細部頁先回列表，列表才收起
-  const chat = /<section class="m-pg" :class="nav\.chat[\s\S]*?<!-- 設定 -->/.exec(html)[0]
+  const chat = /<section class="m-pg m-chat" :class="\{ shake[\s\S]*?<!-- 設定 -->/.exec(html)[0]   // #1438：對話分頁直接就是那一則
   assert.doesNotMatch(chat, /acctSw|m-keep/)
   assert.doesNotMatch(html, /<div class="m-ops"[^>]*acct/)
   assert.doesNotMatch(html, /<section class="m-sheet"[^>]*acct/)

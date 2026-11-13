@@ -113,12 +113,12 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
 })
 
 // ---------- 頁面接線 ----------
-test('接線：對話分頁先列活動中的對話、點進去才是單一對話（0.2.18）；「⋯」只在有選單項目時出現；選單在分頁外層、觸控目標 ≥ 44px', () => {
+test('接線：對話分頁直接就是最後那一則（#1438，回到 0.2.17）、沒有最後一則時顯示提示；「⋯」只在有選單項目時出現；選單在分頁外層、觸控目標 ≥ 44px', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.match(html, /<section class="m-pg" :class="nav\.chat \? \['m-chat', \{ shake, 'is-room': chatFriend && chatFriend\.room \}\] : 'm-chat-list'" aria-label="對話">\n\s*<template v-if="nav\.chat">/, '第一頁是對話：點進一則（nav.chat）才是對話本身；內頁不借用它，標籤固定叫「對話」')
+  assert.match(html, /<section class="m-pg m-chat" :class="\{ shake, 'is-room': chatFriend && chatFriend\.room \}" aria-label="對話">/, '對話分頁直接就是那一則（不再先列清單、不看 nav.chat）')
+  assert.doesNotMatch(html, /m-chat-list|v-for="x in chatRows"|aria-label="回對話清單"/, '對話分頁沒有清單、也沒有回清單的鍵')
+  assert.match(html, /<div class="m-scroll" v-else><div class="empty-list">\{\{ chatEmptyText \}\}<\/div><\/div>/, '還沒有最後一則：顯示提示')
   assert.doesNotMatch(html, /m-threads|m-thread|threads|threadTimeText/, '舊的對話列表程式不再用')
-  assert.match(html, /<li v-for="x in chatRows" :key="x\.id">/, '清單是 chatRows（活動中的對話）')
-  assert.match(html, /aria-label="回對話清單" @click="goTab\('chats'\)"/, '對話上方有回清單的鍵（再點一次「對話」分頁）')
   assert.match(html, /<chat-pane v-if="chatFriend"/); assert.match(html, /\{\{ chatEmptyText \}\}/)
   assert.match(html, /<button class="m-icon-btn m-head-more" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
   assert.match(html, /<circle[\s\S]*?<circle[\s\S]*?<circle/, '「⋯」是三個點的 SVG（與其他圖示按鈕同一套）')

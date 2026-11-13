@@ -45,7 +45,7 @@ import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, vie
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
-import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
+import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, chatRowsUnread, filterChatRows, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
@@ -264,7 +264,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync(); refreshPushSt()
-    if (nav.tab === 'chats' && nav.chat && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
+    if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
     else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
@@ -274,7 +274,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
 history.replaceState(initialNav(), '')
 // 回到上次的大分頁：對話清單那層先放著，再推一筆，系統返回鍵還是回到對話清單
 if (savedTab !== HOME_TAB) fourthNav.go(tabNav(savedTab))
-else if (savedChat && lastChat.value) fourthNav.go(chatNav())   // 上次正在看某一則：直接回到那一則（返回鍵回對話清單）
+// 上次停在對話分頁：對話分頁本身就是最後那一則（#1438），不必再推一層（savedChat 只是舊存檔的相容，留著不用）
 let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
   if (keyBackGuard()) return
@@ -340,6 +340,8 @@ const app = createApp({
     // 群組用沒套夥伴頁搜尋字的那一份（夥伴頁的搜尋框不影響這一頁）
     const chatAll = computed(() => chatListRows({ friends: activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: hub.rows({ plainText: plain }), now: Math.max(recentTick.value, Date.now()), lastId: lastChat.value }))
     const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain)))   // 比對規則和夥伴頁一樣
+    // 夥伴頁最上面的「未讀」（#1438）：只放有未讀的夥伴與群組，最新的在前；「夥伴」分頁的紅點用同一份算（不套搜尋字，兩邊一定對得上）
+    const unreadRows = computed(() => unreadChatRows(chatAll.value))
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
@@ -347,7 +349,7 @@ const app = createApp({
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
     async function refreshRooms() {
       await hub.refresh()
-      if (isRoomChat(lastChat.value) && nav.tab === 'chats' && nav.chat) await showRoom()
+      if (isRoomChat(lastChat.value) && nav.tab === 'chats') await showRoom()
     }
     roomsHook.refresh = refreshRooms
     // 讀這個群組新的訊息（接在已有的後面）與待主持人確認的卡片；在看的時候順便標已讀
@@ -394,7 +396,7 @@ const app = createApp({
       void invoke('invite_pending').then(onInviteCode).catch(() => {})
       void refreshRooms()
     }
-    const unreadTotal = computed(() => chatRowsUnread(chatAll.value))   // 聊天的未讀（對話清單那一份，不含通知）；#1429 起紅點掛在「夥伴」分頁（tabDot）
+    const unreadTotal = computed(() => chatRowsUnread(unreadRows.value))   // 「夥伴」分頁的紅點（#1429）：和夥伴頁最上面的「未讀」那一組同一份（#1438）
     const noticeDot = computed(() => noticeUnread(friends.value))
     const tabHasDot = t => tabDot(t, { chats: unreadTotal.value, notice: noticeDot.value })
     // 內頁佔著第四格、人已經離開它（3 分鐘計時中）時有新通知進來：第四格馬上變回「通知」（#1429）。雲端代理的金鑰還在內頁上時不動（金鑰只顯示一次）
@@ -435,8 +437,8 @@ const app = createApp({
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value
-      if (isRoomChat(id)) { if (nav.tab === 'chats' && nav.chat) void showRoom(); return }
-      if (nav.tab !== 'chats' || !nav.chat || !id || !core?.friends.get(id)) return
+      if (isRoomChat(id)) { if (nav.tab === 'chats') void showRoom(); return }
+      if (nav.tab !== 'chats' || !id || !core?.friends.get(id)) return
       core.markRead(id)
       pushLog(id)
       void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
@@ -1363,7 +1365,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      chatRows, chatQuery, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      chatRows, chatQuery, unreadRows, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,

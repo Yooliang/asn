@@ -125,11 +125,12 @@ test('未讀紅點：通知有未讀第四格亮（內頁佔著也亮）；聊�
   assert.equal(noticeUnread([]), 0); assert.equal(noticeUnread(null), 0); assert.equal(noticeUnread([{ id: NOTICE_ID, isNotice: true, unread: -1 }]), 0)
 })
 
-test('正在看才算看得到、才標已讀：通知分頁看的是通知；對話分頁要點進那一則', () => {
+test('正在看才算看得到、才標已讀：通知分頁看的是通知；對話分頁就是最後那一則（#1438）', () => {
   assert.equal(viewedChatId({ tab: 'notice', chat: false, lastChat: 'x' }), NOTICE_ID)
   assert.equal(viewedChatId({ tab: PAGE_TAB, chat: false, lastChat: 'x' }), '', '內頁上看不到通知也看不到對話')
   assert.equal(viewedChatId({ tab: 'chats', chat: true, lastChat: 'x' }), 'x')
-  assert.equal(viewedChatId({ tab: 'chats', chat: false, lastChat: 'x' }), '', '對話清單上不算正在看那一位')
+  assert.equal(viewedChatId({ tab: 'chats', chat: false, lastChat: 'x' }), 'x', '對話分頁就是那一則，不必再點進去')
+  assert.equal(viewedChatId({ tab: 'chats', lastChat: '' }), '', '還沒有最後一則')
   assert.equal(viewedChatId({ tab: 'list', chat: false, lastChat: 'x' }), '')
   assert.equal(viewedChatId({ tab: 'me', chat: false, lastChat: '' }), '')
 })

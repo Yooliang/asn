@@ -104,6 +104,7 @@ test('接線守門：電腦版存與還原、手機版存與還原、Rust 視窗
   assert.ok(l.includes('planRestore(sess.saved'), '開機要還原')
   assert.ok(l.includes("invoke('open_windows')"), '分開模式要問 Rust 有哪些視窗開著')
   assert.ok(l.includes('trailingThrottle(') && l.includes("'pagehide'"), '節流寫入並在離開時補寫')
-  assert.ok(m.includes('restoreMobileTab(saved.navTab)') && m.includes('navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === \'chats\' && !!nav.chat') && m.includes('restoreMobileChat(saved.navTab, saved.navChat)') && m.includes('else if (savedChat && lastChat.value) fourthNav.go(chatNav())'), '手機版要存要還原大分頁')
+  assert.ok(m.includes('restoreMobileTab(saved.navTab)') && m.includes('navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === \'chats\' && !!nav.chat') && m.includes('restoreMobileChat(saved.navTab, saved.navChat)'), '手機版要存要還原大分頁')
+  assert.ok(!m.includes('fourthNav.go(chatNav())'), '#1438：對話分頁本身就是最後那一則，重開時不再多推一層（回到對話分頁＝回到那一則）')
   assert.ok(w.includes('pub fn open_windows') && lib.includes('wins::open_windows'), 'Rust 端要註冊 open_windows')
 })

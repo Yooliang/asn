@@ -275,7 +275,7 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width, count: pages\.value \}\)/)
   assert.match(js, /pagerShift\(idx\.value, dx, pages\.value\)/)
   // 分頁順序（#1429）：夥伴、對話、設定、通知，內頁在最後（蓋在 host 那一格上）；DOM 順序＝滑動的順序，要和 TABS 一致
-  const pos = ['<section class="m-pg" aria-label="夥伴">', '<section class="m-pg" :class="nav.chat', '<section class="m-pg" aria-label="設定">', '<section class="m-pg m-chat m-notice" aria-label="通知">', '<section class="m-pg m-fourth"'].map(x => html.indexOf(x))
+  const pos = ['<section class="m-pg" aria-label="夥伴">', '<section class="m-pg m-chat" :class="{ shake', '<section class="m-pg" aria-label="設定">', '<section class="m-pg m-chat m-notice" aria-label="通知">', '<section class="m-pg m-fourth"'].map(x => html.indexOf(x))
   assert.ok(pos.every(p => p > 0), JSON.stringify(pos)); assert.deepEqual([...pos].sort((a, b) => a - b), pos, '順序：夥伴、對話、設定、通知、內頁')
   const fourth = html.slice(html.indexOf('<section class="m-pg m-fourth"'), html.indexOf('<!-- /內頁 -->'))
   assert.match(fourth, /^<section class="m-pg m-fourth" v-if="fourthPage && pageSlot >= 0" :style="\{ '--host': pageSlot \}" :aria-label="fourthTitle">/, '內頁蓋在第四格（通知那一格）上，跟著 pager 一起滑')
@@ -286,7 +286,7 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.doesNotMatch(html, /class="m-sheet m-(set|guide)"/)
   assert.doesNotMatch(html, /is-page|openNotice|NOTICE_ENTRY/, '設定裡不再有「看通知」入口（通知有自己的分頁）')
   // 對話分頁：不放內頁的東西
-  const chat = html.slice(html.indexOf('<section class="m-pg" :class="nav.chat'), html.indexOf('<section class="m-pg" aria-label="設定">'))   // #1429 起對話後面接設定
+  const chat = html.slice(html.indexOf('<section class="m-pg m-chat" :class="{ shake'), html.indexOf('<section class="m-pg" aria-label="設定">'))   // #1429 起對話後面接設定
   assert.match(chat, /aria-label="對話"/); assert.doesNotMatch(chat, /acctSw|m-keep|ACCT_PAGE_TITLE/)
   assert.doesNotMatch(js, /sheet !== 'acct'|sheet === 'acct'/, '已讀與提示判斷不再排除設備與帳號')
   assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && viewedChatId\(\{ tab: nav\.tab, chat: nav\.chat, lastChat: lastChat\.value \}\) === id/)
@@ -300,7 +300,7 @@ test('畫面接線：四個分頁在 pager 裡；內頁蓋在進來的那一格�
   assert.match(js, /window\.addEventListener\('popstate', e => \{[\s\S]*?fourthNav\.onPop\(e\.state\)/)
 })
 
-test('從夥伴分頁點橫幅的「換班接手」：先退回對話分頁、進那一則，「⋯」選單的記錄等導覽結束才推（不會搶在前面）', async () => {
+test('從夥伴分頁點橫幅的「換班接手」：先退回對話分頁（#1438 起對話分頁就是那一則，不再多推一層），「⋯」選單的記錄等導覽結束才推（不會搶在前面）', async () => {
   const h = harness('list')
   assert.equal(h.r.openChat(), true)
   let opened = false
@@ -309,16 +309,15 @@ test('從夥伴分頁點橫幅的「換班接手」：先退回對話分頁、�
   assert.equal(opened, false, '還在退記錄（popstate 還沒回來）時不能推選單')
   h.flush()
   await done
-  assert.equal(h.nav.tab, 'chats'); assert.equal(h.nav.sheet, 'ops'); assert.equal(h.nav.chat, true)
-  assert.deepEqual(h.stack(), [initialNav(), chatNav(), opsNav()], '選單蓋在那一則對話上；返回鍵先關選單、再回對話清單')
-  h.press(); assert.equal(h.nav.sheet, ''); assert.equal(h.nav.chat, true)
-  h.press(); assert.equal(h.nav.chat, false); assert.equal(h.nav.tab, 'chats')
+  assert.equal(h.nav.tab, 'chats'); assert.equal(h.nav.sheet, 'ops')
+  assert.deepEqual(h.stack(), [initialNav(), opsNav()], '選單蓋在對話分頁（就是那一則）上；返回鍵先關選單，就回到對話分頁')
+  h.press(); assert.equal(h.nav.sheet, ''); assert.equal(h.nav.tab, 'chats'); assert.equal(h.depth(), 0, '對話分頁是底，沒有多一層')
   // 已經在對話分頁：不用等，立刻就能推
   const c = harness()
   c.r.openChat()
   let ok = false
   await c.r.whenSettled().then(() => { ok = true })
-  assert.equal(ok, true); assert.deepEqual(c.stack(), [initialNav(), chatNav()])
+  assert.equal(ok, true); assert.deepEqual(c.stack(), [initialNav()], '已經在對話分頁：不多推任何記錄')
   // 畫面接線：bannerHandover 等導覽結束才開選單
   const js = read('ui', 'm.js')
   assert.match(/async function bannerHandover\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1], /openChat\(b\.id\)\n\s*await fourthNav\.whenSettled\(\)[\s\S]*openOps\(\)/)
