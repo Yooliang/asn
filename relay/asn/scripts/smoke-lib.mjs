@@ -319,9 +319,11 @@ export const GROUP_OFFLINE_ROOM = { ...GROUP_ROOM, members: [
 ] }
 export const LONG_ROOM_NAME = '這是一個名字很長很長的專案討論群組'
 export const GROUP_OFFLINE_LONG_ROOM = { ...GROUP_OFFLINE_ROOM, name: LONG_ROOM_NAME }
-export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線' }
+export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線', center: true }
 // 長群組名字：按鈕左緣要在名牌右緣之右（不蓋名牌），且整顆按鈕在視窗內
-export const GOFFLINE_LONG_WANT = { ...GOFFLINE_WANT, fit: true }
+export const GOFFLINE_LONG_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線', fit: true }
+// 窄視窗／手機：名字放不下，名牌要出現省略號
+export const GOFFLINE_LONG_ELL = { ...GOFFLINE_LONG_WANT, ell: true }
 // 名牌置中：一對一、沒有離線鈕的群組，名牌中心與 .mbar 中心相差不得超過 4px
 export const GOFFLINE_NONE_CENTER = { none: true, center: true }
 export const gofflineProbeSource = ({ goffline }) => `(async () => {
@@ -336,10 +338,13 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
     const pl = document.querySelector('.mbar .mbar-plate'), bar = document.querySelector('.mbar');
     if (!pl || !bar) return { ok: false, why: '找不到名牌或標題列' };
     const p = pl.getBoundingClientRect(), m = bar.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
-    window.__center = { plateCenter: (p.left + p.right) / 2, barCenter: (m.left + m.right) / 2, diff };
+    const wnat = (el) => { const o = el.style.width; el.style.width = 'max-content'; const w = el.getBoundingClientRect().width; el.style.width = o; return w };
+    const nat = wnat(pl), wdiff = p.width - nat;
+    window.__center = { plateCenter: (p.left + p.right) / 2, barCenter: (m.left + m.right) / 2, diff, width: p.width, natural: nat, wdiff };
+    if (wdiff > 2) return { ok: false, why: '名牌被撐寬：寬 ' + p.width + '、內容需要 ' + nat + '、多出 ' + wdiff };
     if (Math.abs(diff) > 4) return { ok: false, why: '名牌沒有置中：名牌中心 ' + (p.left + p.right) / 2 + '、標題列中心 ' + (m.left + m.right) / 2 + '、差 ' + diff };
   }
-  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__center ? '名牌中心差 ' + window.__center.diff : '' };
+  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__center ? '名牌中心差 ' + window.__center.diff + '、名牌寬 ' + window.__center.width + '／內容寬 ' + window.__center.natural : '' };
   if (!btn) return { ok: false, why: '現代外觀的群組頂端沒有「N 人離線」' };
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
@@ -348,7 +353,10 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
     if (!p) return { ok: false, why: '找不到名牌' };
     if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
     if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    window.__fit = { btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth };
+    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
+    if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號（名牌寬 ' + p.width + '、視窗 ' + innerWidth + '、按鈕左 ' + b.left + '、名牌右 ' + p.right + '）' };
+    window.__note = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
+    window.__fit = { btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell };
   }
   btn.click(); await sleep(250);
   if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
@@ -359,7 +367,7 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
   if (!rows().length) return { ok: false, why: '第二次點不開名單' };
   document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await sleep(200);
   if (rows().length) return { ok: false, why: '點外面關不掉名單' };
-  return { ok: true, why: '' };
+  return { ok: true, why: window.__note || (window.__center ? '名牌中心差 ' + window.__center.diff + '、名牌寬 ' + window.__center.width + '／內容寬 ' + window.__center.natural : '') };
 })()`
 export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   const want = ${JSON.stringify(mgoffline)};
@@ -370,7 +378,18 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   for (let i = 0; i < 40 && !document.querySelector('.m-chathead .m-plate'); i++) await sleep(100);
   await sleep(500);
   const btn = vis('.m-plate-head .m-offline-btn')[0] || null;
-  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: '' };
+  if (want.center) {
+    const pl = document.querySelector('.m-plate-head .m-plate'), hd = document.querySelector('.m-plate-head');
+    if (!pl || !hd) return { ok: false, why: '找不到名牌或名牌頭' };
+    const p = pl.getBoundingClientRect(), m = hd.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
+    const wnat = (el) => { const o = el.style.width; el.style.width = 'max-content'; const w = el.getBoundingClientRect().width; el.style.width = o; return w };
+    const nat = wnat(pl), wdiff = p.width - nat;
+    window.__cm = '名牌中心差 ' + diff + '、名牌寬 ' + p.width + '／內容寬 ' + nat;
+    console.info('[center-m]', JSON.stringify({ plateCenter: (p.left + p.right) / 2, headCenter: (m.left + m.right) / 2, diff, width: p.width, natural: nat, wdiff }));
+    if (Math.abs(diff) > 4) return { ok: false, why: '名牌沒有置中：名牌中心 ' + (p.left + p.right) / 2 + '、名牌頭中心 ' + (m.left + m.right) / 2 + '、差 ' + diff };
+    if (wdiff > 2) return { ok: false, why: '名牌被撐寬：寬 ' + p.width + '、內容需要 ' + nat + '、多出 ' + wdiff };
+  }
+  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__cm || '' };
   if (!btn) return { ok: false, why: '現代外觀的群組名牌頭沒有「N 人離線」' };
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
@@ -379,7 +398,10 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
     if (!p) return { ok: false, why: '找不到名牌' };
     if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
     if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth }));
+    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
+    if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號' };
+    window.__cm = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
+    console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell }));
   }
   btn.click(); await sleep(250);
   if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
@@ -390,7 +412,7 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   if (!back) return { ok: false, why: '第二次點不開名單' };
   back.click(); await sleep(200);
   if (rows().length) return { ok: false, why: '點外面關不掉名單' };
-  return { ok: true, why: '' };
+  return { ok: true, why: window.__cm || '' };
 })()`
 // 手機群組對話：上方沒有按鈕列，右上角「⋯」打開是群組的三項（邀請、加 AI、成員與設定），沒有「輸入邀請碼加入」
 export const MGROUP_ME = { lastChat: 'room:g1', navTab: 'chats' }
@@ -1087,6 +1109,9 @@ export const skinProbeSource = (probe = {}) => `(async () => {
     for (const sel of ['.m-pic', '.m-head-tx', '.m-head-more']) if (vis(ph.querySelector(':scope > ' + sel))) return { ok: false, why: '現代的對話頂端還留著 ' + sel };
     const hr = ph.getBoundingClientRect(), pr = plate.getBoundingClientRect();
     if (Math.abs((pr.left + pr.right) / 2 - (hr.left + hr.right) / 2) > 4) return { ok: false, why: '名牌沒有置中' };
+    { const o = plate.style.width; plate.style.width = 'max-content'; const nat = plate.getBoundingClientRect().width; plate.style.width = o;
+      console.info('[center-m-1on1]', JSON.stringify({ diff: (pr.left + pr.right) / 2 - (hr.left + hr.right) / 2, width: pr.width, natural: nat }));
+      if (pr.width - nat > 2) return { ok: false, why: '名牌被撐寬：寬 ' + pr.width + '、內容需要 ' + nat }; }
     const back = ph.querySelector('.m-back');   // #1438 起對話分頁沒有返回鈕（直接是那一則）；有的話才量
     if (back && Math.round(back.getBoundingClientRect().width) !== 36) return { ok: false, why: '返回鈕不是 36px：' + back.getBoundingClientRect().width };
     const term = ph.querySelector('.m-head-term');
@@ -1899,12 +1924,13 @@ export const SCENARIOS = [
   { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'list-group-offline-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_WANT }, shot: 'list-group-offline-modern.png' },
   { name: 'list-group-offline-long-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_WANT }, shot: 'list-group-offline-long-modern.png' },
-  { name: 'm-group-offline-long-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_LONG_WANT }, shot: 'm-group-offline-long-modern.png' },
+  { name: 'list-group-offline-long-narrow-modern', page: 'list.html', width: 420, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_ELL }, shot: 'list-group-offline-long-narrow-modern.png' },
+  { name: 'm-group-offline-long-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_LONG_ELL }, shot: 'm-group-offline-long-modern.png' },
   { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
   { name: 'list-modern-msgs-center', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
   { name: 'list-group-offline-aero', page: 'list.html', state: { signedIn: true, groupTab: true, offline: true }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
   { name: 'm-group-offline-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_WANT }, shot: 'm-group-offline-modern.png' },
-  { name: 'm-group-online-modern', page: 'm.html', state: { signedIn: true, mgroup: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true } } },
+  { name: 'm-group-online-modern', page: 'm.html', state: { signedIn: true, mgroup: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true, center: true } } },
   { name: 'm-group-offline-aero', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: { none: true } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
   { name: 'list-aero-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar', shot: 'list-aero-chat.png' },

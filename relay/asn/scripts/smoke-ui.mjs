@@ -98,7 +98,7 @@ async function runScenario(cdp, sc, base) {
   if (check.ok) { await sleep(1000); check = await evalCheck() }   // 掛上後再等一下，讓首次渲染與啟動後的非同步例外跑完
   let probeWhy = ''
   if (check.ok && sc.probe) {
-    try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果' } catch (e) { probeWhy = `執行失敗：${e.message}` }
+    try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果'; else if (v.why) console.log(`    量測 ${sc.name}：${v.why}`) } catch (e) { probeWhy = `執行失敗：${e.message}` }
   }
   // 情境帶 widen：探測完把視窗放寬到那個寬度，再確認自動收起沒有寫進設定（大頭貼欄恢復展開）
   if (check.ok && !probeWhy && sc.widen) {
