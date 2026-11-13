@@ -84,6 +84,17 @@ export const ChatPane = {
       const b = ev.target && ev.target.closest && ev.target.closest('.tool')
       if (b && !b.closest('.tool-group')) plusOpen.value = false
     }
+    // 點「＋」選單以外的任何地方就收起來；只在選單開著時才掛一個監聽，關了、換掉、元件卸載都會移除（不疊加）
+    function onOutsidePress(ev) {
+      const main = composeEl.value && composeEl.value.closest('.compose-main'), t = ev.target
+      if (main && t && t.closest && main.contains(t) && (t.closest('.mc-plus') || t.closest('.toolbar'))) return
+      plusOpen.value = false
+    }
+    watch(plusOpen, on => {
+      document.removeEventListener('pointerdown', onOutsidePress, true)
+      if (on) document.addEventListener('pointerdown', onOutsidePress, true)
+    })
+    onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePress, true))
     const replying = ref(null)   // 正在回覆的那一則：{ author, excerpt, seq, index, mention }
     const msgsEl = ref(null), composeEl = ref(null)
     const isRoom = computed(() => props.friend?.room === true)

@@ -846,7 +846,9 @@ export const dtabsProbeSource = () => `(async () => {
 })()`
 // 外觀「現代」（0.2.18）：存檔選了現代，畫面一開就是現代（<html data-skin="modern">、主色變青綠），而且沒有橫向捲動；截圖給人看整體樣子
 export const SKIN_PROBE = { skinCheck: true }
-export const skinProbeSource = () => `(async () => {
+export const SKIN_KEYS_PROBE = { skinCheck: true, keys: true }
+export const skinProbeSource = (probe = {}) => `(async () => {
+  const KEYS = ${JSON.stringify(probe.keys === true)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 40 && document.documentElement.dataset.skin !== 'modern'; i++) await sleep(100);
   if (document.documentElement.dataset.skin !== 'modern') return { ok: false, why: '存檔選了現代，畫面卻是 ' + (document.documentElement.dataset.skin || '沒有設定') };
@@ -930,13 +932,32 @@ export const skinProbeSource = () => `(async () => {
     const open = tb && getComputedStyle(tb).display !== 'none' && plus.getAttribute('aria-expanded') === 'true' && (vis => vis.length >= 3 && vis.every(t => t.getBoundingClientRect().height > 20))([...tb.querySelectorAll('.tool')].filter(t => getComputedStyle(t).display !== 'none'));
     plus.click(); await sleep(100);
     if (!open) return { ok: false, why: '按「＋」沒有展開工具選單' };
+    // 點外面要收起來：開著選單，在膠囊外（對話區）按一下
+    plus.click(); await sleep(100);
+    if (!(tb && getComputedStyle(tb).display !== 'none')) return { ok: false, why: '「＋」沒有再開起來' };
+    (document.querySelector('.msgs') || document.body).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await sleep(100);
+    if (tb && getComputedStyle(tb).display !== 'none') return { ok: false, why: '點膠囊外面，工具選單沒有收起來' };
+    if (KEYS) {
+      // 鍵盤：Shift+Enter 不送出也不攔（瀏覽器自己換行）；電腦 Enter 送出並清空輸入框、手機 Enter 是換行（不送出、不攔）
+      const ta = cm.querySelector('.composer textarea');
+      const sent = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send').length;
+      const press = (shift) => !ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', shiftKey: shift, bubbles: true, cancelable: true }));
+      ta.focus(); ta.value = '第一行'; ta.dispatchEvent(new Event('input', { bubbles: true })); await sleep(80);
+      const n0 = sent();
+      if (press(true) || ta.value !== '第一行' || sent() !== n0) return { ok: false, why: 'Shift+Enter 應該只換行（不攔、不送出）' };
+      const prevented = press(false); await sleep(250);
+      if (mobile) { if (prevented || ta.value !== '第一行' || sent() !== n0) return { ok: false, why: '手機 Enter 應該是換行（不攔、不送出）' }; }
+      else if (!prevented || ta.value !== '' || sent() !== n0 + 1) return { ok: false, why: '電腦 Enter 沒有送出：輸入框＝「' + ta.value + '」、送出次數 ' + (sent() - n0) };
+      ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   }
   await sleep(400);
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
 export const probeKind = probe => (probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.skinCheck ? skinProbeSource() : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeSource = probe => (probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1644,12 +1665,12 @@ export const SCENARIOS = [
   { name: 'setup-progress', page: 'setup-progress.html', state: { signedIn: true }, ready: '#app .sp' },
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },
-  { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-chat.png' },
+  { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_KEYS_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
   { name: 'm-modern-list', page: 'm.html', state: { signedIn: true, mbar: 'claude', mchatList: true, skin: 'modern' }, ready: '#app.m .m-chat-list', probe: SKIN_PROBE, shot: 'm-modern-list.png' },
   // #1421 A：有訊息的對話（卡片圓角、頭像）、離線／忙碌的標題列與收件人列（權重衝突修正）
   { name: 'list-modern-msgs', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-msgs.png' },
-  { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-msgs.png' },
+  { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_KEYS_PROBE, shot: 'm-modern-msgs.png' },
   { name: 'm-modern-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-busy.png' },
   // #1421 B 之三：可以看終端的夥伴，頂端右邊有「看終端」圓鈕
   { name: 'm-modern-term', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'modern' }, ready: '#app.m .m-head-term', probe: SKIN_PROBE, shot: 'm-modern-term.png' },
@@ -1837,6 +1858,7 @@ export const tableFor = scenario => {
   // 外觀「現代」（0.2.18）：存檔裡的外觀（電腦 me.skin、手機 me.mobilePrefs.skin）設成 skin，其他存檔照各情境
   if (scenario.state.skin) {
     const me = JSON.parse(t.store_load?.values?.me ?? '{}')
+    t.relay_send = t.relay_send ?? { seq: 1 }   // 現代情境的鍵盤檢查會真的送出一則
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...me, skin: scenario.state.skin, mobilePrefs: { ...(me.mobilePrefs ?? {}), skin: scenario.state.skin } }) } }
   }
   return t

@@ -48,3 +48,11 @@ test('「＋」與語音輸入：新鈕沿用原本的 handler 與 disabled 條�
   assert.ok(at('class="mc-plus"') < at('<textarea') && at('<textarea') < at('class="mc-dict"') && at('class="mc-dict"') < at('type="submit"'))
   assert.match(pane, /<div class="toolbar" :class="\{ 'mc-open': plusOpen, 'mc-has-dict': showDictBtn \}" @click="onToolbarClick"/)
 })
+
+test('點選單外面就收起：只在選單開著時掛一個 pointerdown 監聽、先移除再掛、卸載時移除；回覆列與語音提示同時出現時往上疊', () => {
+  assert.match(pane, /watch\(plusOpen, on => \{\n\s+document\.removeEventListener\('pointerdown', onOutsidePress, true\)\n\s+if \(on\) document\.addEventListener\('pointerdown', onOutsidePress, true\)/)
+  assert.match(pane, /onBeforeUnmount\(\(\) => document\.removeEventListener\('pointerdown', onOutsidePress, true\)\)/)
+  assert.equal((pane.match(/addEventListener\('pointerdown', onOutsidePress/g) || []).length, 1)
+  assert.match(modern, /\.compose-main > \.voice-install:has\(~ \.reply-bar\)\{bottom:calc\(100% \+ 8px \+ 36px \+ 6px\)\}/)
+  assert.match(modern, /\.compose-main > \.reply-bar\{box-sizing:border-box;height:36px;/)
+})

@@ -279,7 +279,9 @@
 :root[data-skin="modern"] .compose-main > .toolbar .picker button{height:34px;font-size:18px;border-radius:8px}
 /* 回覆列、語音安裝提示：浮在膠囊正上方（膠囊自己固定一列高） */
 :root[data-skin="modern"] .compose-main > .reply-bar,:root[data-skin="modern"] .compose-main > .voice-install{position:absolute;z-index:5;left:12px;right:12px;bottom:calc(100% + 8px);margin:0;border:1px solid #e6e4df;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
-:root[data-skin="modern"] .compose-main > .reply-bar{padding:6px 12px;background:var(--panel)}
+:root[data-skin="modern"] .compose-main > .reply-bar{box-sizing:border-box;height:36px;padding:0 12px;background:var(--panel)}
+/* 兩個同時出現：語音安裝提示疊在回覆列上方（回覆列固定 36px 高，再留 6px 縫） */
+:root[data-skin="modern"] .compose-main > .voice-install:has(~ .reply-bar){bottom:calc(100% + 8px + 36px + 6px)}
 :root[data-skin="modern"] .compose-main > .voice-install{padding:8px 12px;background:#fffbe6}
 /* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
