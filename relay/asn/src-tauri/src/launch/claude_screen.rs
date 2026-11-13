@@ -170,6 +170,68 @@ pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption>
     }
 }
 
+/// 選項的種類（#1445）：手機用來決定要不要按住一秒；舊手機看不到警告時，電腦端用它決定舊的選項只給拒絕。
+/// 只有權限框才判斷，而且選項是從底部的選項區依位置解析出來的（`menu_at_bottom`），本文裡像選項的行不算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionKind {
+    /// 只放行這一次：編號 1、字就是 Claude 固定的「Yes」
+    AllowOnce,
+    /// 其他以「Yes」開頭的（以後都允許、改成自動模式等）：影響不只這一次
+    AllowAlways,
+    /// 拒絕：權限框判斷出來的那一項
+    Deny,
+    /// 認不出的
+    Other,
+}
+
+pub fn option_kind_code(k: OptionKind) -> &'static str {
+    match k {
+        OptionKind::AllowOnce => "allow_once",
+        OptionKind::AllowAlways => "allow_always",
+        OptionKind::Deny => "deny",
+        OptionKind::Other => "other",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullOption {
+    /// 畫面上的數字鍵（和 `phone_options` 同一套編號）
+    pub n: u32,
+    pub label: String,
+    pub kind: OptionKind,
+}
+
+/// 選項的字上限（和後台相同）
+const FULL_LABEL_MAX: usize = 200;
+
+/// 權限框的完整原始選項（#1445：小良哥要求照原本的選項顯示）。只有權限框有，其他框回空的（手機照舊用 `phone_options`）。
+/// 種類只靠「這是認得的權限框」加上 Claude 固定的字與位置判斷；夥伴寫的字不會變成放行類：
+/// - 編號 1 而且字恰好是「Yes」（而且權限框判斷的「允許這一次」就是它）才算 AllowOnce；
+/// - 權限框判斷的拒絕那一項算 Deny；
+/// - 其他以「Yes」開頭的一律算 AllowAlways（寧可多要求按住）。
+pub fn phone_options_full(screen: &ClaudeScreen) -> Vec<FullOption> {
+    if screen.kind != ClaudeScreenKind::Permission {
+        return Vec::new();
+    }
+    screen
+        .options
+        .iter()
+        .map(|o| {
+            let kind = if o.n == 1 && o.label == "Yes" && screen.allow_once == Some(1) {
+                OptionKind::AllowOnce
+            } else if Some(o.n) == screen.deny {
+                OptionKind::Deny
+            } else if o.label.starts_with("Yes") {
+                OptionKind::AllowAlways
+            } else {
+                OptionKind::Other
+            };
+            // cap_chars 截斷時會補一個「…」，所以少留一個字
+            FullOption { n: o.n, label: cap_chars(&strip_unsafe(&o.label), FULL_LABEL_MAX - 1), kind }
+        })
+        .collect()
+}
+
 /// 這個狀態代號的內容要不要傳到手機（`status_code` 的值）
 pub fn goes_to_phone(code: &str) -> bool {
     code == status_code(ClaudeScreenKind::Permission)
