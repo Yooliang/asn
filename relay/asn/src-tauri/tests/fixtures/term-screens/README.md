@@ -58,7 +58,7 @@
 
 ## #1445 加的
 
-- `claude-permission-long-bash.txt`：2026-11-14 在 40家用，用全新的空資料夾開一次性的 claude 2.1.323（pywinpty＋pyte 讀畫面，窗格 120x45）。
+- `claude-permission-long-bash.txt`：2026-11-14 在測試用的電腦上，用全新的空資料夾開一次性的 claude 2.1.323（pywinpty＋pyte 讀畫面，窗格 120x45）。
   - 讓它跑一條 90 行的 `python -c`（只有 print）。權限框跳出來就按 Esc 拒絕，沒有執行。
   - 權限框裡的指令照原樣全部列出，沒有「… +N lines」這種收起記號。框比畫面高，所以頂端的實線不在畫面裡。
   - 內容只有 print 文字，沒有需要遮掉的東西。第一行開頭的 `u` 是捲動殘留，照原樣保留。

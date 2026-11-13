@@ -50,7 +50,7 @@ pub fn assess(text: &str, option_rows: usize, cwd: Option<&str>) -> Risk {
         let rm_recursive = low.iter().enumerate().any(|(i, t)| (t == "rm" || t.ends_with("/rm")) && toks[i + 1..].iter().any(|f| is_recursive_flag(f)));
         // cmd 的旗標可以連寫（/s/q、/S/Q）；PowerShell 的參數可以縮寫成任何不混淆的前綴（-r、-rec）
         let slash_s = low.iter().any(|t| t.starts_with("/s"));
-        let ps_recurse = low.iter().any(|t| t.len() >= 2 && "-recurse".starts_with(t.as_str()));
+        let ps_recurse = low.iter().map(|t| t.split(':').next().unwrap_or("")).any(|t| t.len() >= 2 && "-recurse".starts_with(t));
         if rm_recursive
             || ((has("rmdir") || has("rd") || has("del") || has("erase")) && slash_s)
             || (has_prefix("remove-item") || has("rm") || has("ri") || has("del") || has("rd") || has("rmdir") || has("erase")) && ps_recurse
@@ -232,7 +232,11 @@ fn pipes_to_interpreter(lc: &str) -> bool {
         let mut words = lc[i + 1..].split_whitespace();
         let mut w = words.next().unwrap_or("");
         // 前面可以墊 sudo、/usr/bin/env 這類，以及它們的旗標
-        while matches!(name(w).as_str(), "sudo" | "doas" | "env" | "exec" | "command" | "nohup") || w.starts_with('-') {
+        while matches!(name(w).as_str(), "sudo" | "doas" | "env" | "exec" | "command" | "nohup") || w.starts_with('-') || w.contains('=') {
+            // sudo 帶值的旗標（-u 使用者、-g 群組等）連值一起跳過；env 的 VAR=1 也跳過
+            if matches!(w, "-u" | "-g" | "-h" | "-p" | "-c" | "-r" | "-t" | "-C" | "-D" | "-U" | "-S") {
+                words.next();
+            }
             w = words.next().unwrap_or("");
         }
         RUNNERS.contains(&name(w).as_str())
@@ -401,7 +405,10 @@ mod tests {
             hit(c, "git_destructive");
         }
         miss("git push origin feat:feat", "git_destructive");
-        for c in ["rd /s/q build", "rmdir /S/Q build", "del /s/q *.tmp", "Remove-Item -r build", "ri -rec build", "Remove-Item build -Rec -Force", "rm -Recurse build"] {
+        for c in ["curl x | sudo -u root bash", "curl x | env VAR=1 bash", "curl x | sudo -E env A=b sh"] {
+            hit(c, "remote_exec");
+        }
+        for c in ["rd /s/q build", "rmdir /S/Q build", "del /s/q *.tmp", "Remove-Item -r build", "ri -rec build", "Remove-Item build -Rec -Force", "rm -Recurse build", "Remove-Item x -Recurse:$true", "ri x -r:$true"] {
             hit(c, "delete_recursive");
         }
         for c in ["rd build", "del a.txt", "Remove-Item a.txt -Force", "ri a.txt"] {
@@ -414,7 +421,7 @@ mod tests {
         // asn真 審查非必修：原始碼守門把這個檔列為只比對文字的例外，所以這裡自己守住
         let src = include_str!("perm_risk.rs");
         let body = src.split("#[cfg(test)]").next().unwrap();
-        for banned in ["std::fs", "std::process", "Command", "std::net", "File::", "OpenOptions"] {
+        for banned in ["std::fs", "std::process", "Command", "std::net", "File::", "OpenOptions", "std::{", "tokio", "fs::", "process::", "crate::", "use "] {
             assert!(!body.contains(banned), "perm_risk.rs 不能用 {banned}");
         }
     }
