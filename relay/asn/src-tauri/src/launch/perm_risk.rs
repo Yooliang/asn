@@ -66,7 +66,8 @@ pub fn assess(text: &str, option_rows: usize, cwd: Option<&str>) -> Risk {
             let mut i = 0;
             while i < rest.len() {
                 let t = rest[i];
-                if matches!(t, "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env" | "--exec-path" | "--list-cmds") {
+                // --exec-path、--list-cmds 不帶另外一個值（只有 --exec-path=… 這種寫法），當一般旗標跳過（asn真 審查非必修）
+                if matches!(t, "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env") {
                     i += 2;
                 } else if t.starts_with('-') {
                     i += 1;
@@ -378,6 +379,7 @@ mod tests {
         ] {
             hit(c, "git_destructive");
         }
+        hit("git --exec-path push --force", "git_destructive");
         for c in ["git -C repo push origin main", "git -c core.pager=less log", "git -C repo branch -d merged", "git push -u origin feat", "git --git-dir .git status"] {
             miss(c, "git_destructive");
         }

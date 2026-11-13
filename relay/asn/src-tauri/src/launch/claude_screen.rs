@@ -770,6 +770,22 @@ mod tests {
     use ClaudeScreenKind as K;
 
     #[test]
+    fn 真實的長指令權限框_框比畫面高_算不完整_選項種類照固定字判斷() {
+        // #1445 實測（asn真 要求）：claude 2.1.323 的權限框把長指令整段列出，沒有收起記號；框比畫面高，頂端實線不在畫面裡
+        let text = include_str!("../../tests/fixtures/term-screens/claude-permission-long-bash.txt").replace("\r\n", "\n");
+        let s = classify(&text).expect("認得出權限框");
+        assert_eq!(s.kind, K::Permission);
+        let p = permission_text(&text).unwrap();
+        assert!(!p.complete, "看不到框的頂端：不完整");
+        assert!(!p.text.lines().any(is_elision_line), "這個版本的框裡沒有收起記號");
+        let kinds: Vec<&str> = phone_options_full(&s).iter().map(|o| option_kind_code(o.kind)).collect();
+        assert_eq!(kinds, vec!["allow_once", "allow_always", "allow_always", "deny"], "「don’t ask again」「switch to auto mode」都算不再詢問");
+        // 舊手機只給拒絕（不完整）
+        let old: Vec<u32> = phone_options(&s, p.complete).iter().map(|o| o.n).collect();
+        assert_eq!(old, vec![4]);
+    }
+
+    #[test]
     fn 權限框裡_claude_自己收起長內容的記號_算不完整() {
         let rule = "─".repeat(60);
         let page = |mid: &str| format!("{rule}\n Bash command\n{mid}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n");

@@ -1,0 +1,45 @@
+u│ print('line-57')
+ │ print('line-58')
+ │ print('line-59')
+ │ print('line-60')
+ │ print('line-61')
+ │ print('line-62')
+ │ print('line-63')
+ │ print('line-64')
+ │ print('line-65')
+ │ print('line-66')
+ │ print('line-67')
+ │ print('line-68')
+ │ print('line-69')
+ │ print('line-70')
+ │ print('line-71')
+ │ print('line-72')
+ │ print('line-73')
+ │ print('line-74')
+ │ print('line-75')
+ │ print('line-76')
+ │ print('line-77')
+ │ print('line-78')
+ │ print('line-79')
+ │ print('line-80')
+ │ print('line-81')
+ │ print('line-82')
+ │ print('line-83')
+ │ print('line-84')
+ │ print('line-85')
+ │ print('line-86')
+ │ print('line-87')
+ │ print('line-88')
+ │ print('line-89')
+ │ print('line-90')
+ │ "
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ This command requires approval
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for: python *
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend
