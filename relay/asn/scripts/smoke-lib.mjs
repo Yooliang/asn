@@ -317,7 +317,11 @@ export const GROUP_OFFLINE_ROOM = { ...GROUP_ROOM, members: [
   { key: 'P~審稿', name: '審稿', member_kind: 'ai', kind: 'window', mine: true, engine: 'gemini', online: false },
   { key: 'x:r2bbbbbb', name: '報表', member_kind: 'ai', kind: 'ai', mine: false, engine: 'gpt', online: false },
 ] }
+export const LONG_ROOM_NAME = '這是一個名字很長很長的專案討論群組'
+export const GROUP_OFFLINE_LONG_ROOM = { ...GROUP_OFFLINE_ROOM, name: LONG_ROOM_NAME }
 export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線' }
+// 長群組名字：按鈕左緣要在名牌右緣之右（不蓋名牌），且整顆按鈕在視窗內
+export const GOFFLINE_LONG_WANT = { ...GOFFLINE_WANT, fit: true }
 export const gofflineProbeSource = ({ goffline }) => `(async () => {
   const want = ${JSON.stringify(goffline)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -330,6 +334,13 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
   if (!btn) return { ok: false, why: '現代外觀的群組頂端沒有「N 人離線」' };
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
+  if (want.fit) {
+    const pl = document.querySelector('.mbar .mbar-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
+    if (!p) return { ok: false, why: '找不到名牌' };
+    if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
+    if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
+    window.__fit = { btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth };
+  }
   btn.click(); await sleep(250);
   if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
   if (btn.getAttribute('aria-expanded') !== 'true') return { ok: false, why: '打開後 aria-expanded 不是 true' };
@@ -354,6 +365,13 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   if (!btn) return { ok: false, why: '現代外觀的群組名牌頭沒有「N 人離線」' };
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
+  if (want.fit) {
+    const pl = document.querySelector('.m-plate-head .m-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
+    if (!p) return { ok: false, why: '找不到名牌' };
+    if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
+    if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
+    console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth }));
+  }
   btn.click(); await sleep(250);
   if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
   esc(); await sleep(200);
@@ -1871,6 +1889,8 @@ export const SCENARIOS = [
   { name: 'm-group-attach', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-chat .chatpane', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'list-group-offline-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_WANT }, shot: 'list-group-offline-modern.png' },
+  { name: 'list-group-offline-long-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_WANT }, shot: 'list-group-offline-long-modern.png' },
+  { name: 'm-group-offline-long-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_LONG_WANT }, shot: 'm-group-offline-long-modern.png' },
   { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
   { name: 'list-group-offline-aero', page: 'list.html', state: { signedIn: true, groupTab: true, offline: true }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
   { name: 'm-group-offline-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_WANT }, shot: 'm-group-offline-modern.png' },
@@ -1927,14 +1947,14 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }   // 那台開放遠端管理：切換模型、管理可按
   }
   if (scenario.state.mgroup) {
-    t.relay_rooms = { rooms: [scenario.state.external ? { ...GROUP_ROOM, external: true } : scenario.state.offline ? GROUP_OFFLINE_ROOM : GROUP_ROOM] }
+    t.relay_rooms = { rooms: [scenario.state.external ? { ...GROUP_ROOM, external: true } : scenario.state.offline ? (scenario.state.longName ? GROUP_OFFLINE_LONG_ROOM : GROUP_OFFLINE_ROOM) : GROUP_ROOM] }
     t.relay_send_attachment = { seq: 1 }
     t.android_room_read = { messages: [] }
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MGROUP_ME) } }
   }
   if (scenario.state.groupTab) {
-    t.relay_rooms = { rooms: [scenario.state.offline ? GROUP_OFFLINE_ROOM : GROUP_ROOM] }
+    t.relay_rooms = { rooms: [scenario.state.offline ? (scenario.state.longName ? GROUP_OFFLINE_LONG_ROOM : GROUP_OFFLINE_ROOM) : GROUP_ROOM] }
     t.relay_room_read = { messages: [] }
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
