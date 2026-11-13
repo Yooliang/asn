@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.mchatBack && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('section[aria-label="夥伴"] .m-head .m-me'), '手機：夥伴頁左上的頭像（0.2.18 起對話頁也有標頭，指定夥伴頁那一份）')
@@ -405,4 +405,15 @@ test('手機確認框危險提示情境（#1445）：危險（本文很長）、
     const reqs = tableFor(s).android_perm_req_list.requests
     assert.equal(reqs[0].options_full.length, 3, s.name)
   }
+})
+
+test('手機對話返回鈕情境（0.2.21）：Aero、現代、現代群組（有「N 人離線」）各一；表達式語法正確；量置中、不重疊、按了到夥伴分頁', async () => {
+  const vm = await import('node:vm')
+  const sc = SCENARIOS.filter(s => s.probe?.mchatBack)
+  assert.deepEqual(sc.map(s => s.name), ['m-chat-back', 'm-chat-back-modern', 'm-chat-back-group-modern'])
+  assert.equal(probeKind(sc[0].probe), '手機對話返回鈕檢查')
+  const src = probeSource(sc[0].probe)
+  assert.doesNotThrow(() => new vm.Script(src))
+  for (const w of ['名牌沒有置中', '返回鈕和名牌重疊', '按返回沒有切到夥伴分頁']) assert.ok(src.includes(w), w)
+  assert.equal(JSON.parse(tableFor(sc[1]).store_load.values.me).skin, 'modern')
 })
