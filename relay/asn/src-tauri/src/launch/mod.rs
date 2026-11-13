@@ -11,6 +11,7 @@ pub(crate) mod pi_setup;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
 pub(crate) mod claude_screen;
+pub(crate) mod perm_risk;
 #[cfg(desktop)]
 mod screen_watch;
 mod resume;
