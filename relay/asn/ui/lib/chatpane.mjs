@@ -78,6 +78,23 @@ export const ChatPane = {
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
+    // 現代外觀：輸入框的「＋」展開上方工具列（復古 Aero 下沒有這個選單）；點了裡面的工具就收起來（表情符號例外：它要接著選）
+    const plusOpen = ref(false)
+    function onToolbarClick(ev) {
+      const b = ev.target && ev.target.closest && ev.target.closest('.tool')
+      if (b && !b.closest('.tool-group')) plusOpen.value = false
+    }
+    // 點「＋」選單以外的任何地方就收起來；只在選單開著時才掛一個監聽，關了、換掉、元件卸載都會移除（不疊加）
+    function onOutsidePress(ev) {
+      const main = composeEl.value && composeEl.value.closest('.compose-main'), t = ev.target
+      if (main && t && t.closest && main.contains(t) && (t.closest('.mc-plus') || t.closest('.toolbar'))) return
+      plusOpen.value = false
+    }
+    watch(plusOpen, on => {
+      document.removeEventListener('pointerdown', onOutsidePress, true)
+      if (on) document.addEventListener('pointerdown', onOutsidePress, true)
+    })
+    onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePress, true))
     const replying = ref(null)   // 正在回覆的那一則：{ author, excerpt, seq, index, mention }
     const msgsEl = ref(null), composeEl = ref(null)
     const isRoom = computed(() => props.friend?.room === true)
@@ -471,7 +488,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -549,7 +566,7 @@ export const ChatPane = {
   </div>
   <div class="compose-row" :class="{ 'is-term': mSwitch && remoteShown }" v-if="!isNotice">
     <div class="compose-main">
-      <div class="toolbar">
+      <div class="toolbar" :class="{ 'mc-open': plusOpen, 'mc-has-dict': showDictBtn }" @click="onToolbarClick" @keydown.esc="plusOpen = false">
         <span class="tool-group">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -597,8 +614,19 @@ export const ChatPane = {
           <li v-for="(o, i) in mention.options" :key="o.label"><button type="button" role="option" :class="{ on: i === mention.idx }" :aria-selected="i === mention.idx" @mousedown.prevent @click="pickMention(o)"><span class="mention-name">{{ o.label }}</span><small class="who-badge" :class="'is-' + o.kind">{{ o.badge }}</small></button></li>
           <li class="mention-more" v-if="mentionMore" aria-hidden="true">{{ MENTION_MORE_HINT }} ▾</li>
         </ul>
+        <!-- 現代外觀的單列膠囊（#1421 B2）：「＋」開上方那排工具、語音輸入放右邊（手機的 dict 或電腦的 mic，擇一）；復古 Aero 下這幾顆整個不顯示 -->
+        <button class="mc-plus" type="button" @click="plusOpen = !plusOpen" @keydown.esc="plusOpen = false" :aria-expanded="plusOpen" aria-label="附件與更多" title="附件與更多">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
-        <button class="aero-btn" type="submit" :disabled="displayOnly || !draft.trim()">{{ sendLabel }}</button>
+        <button class="mc-dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
+        </button>
+        <button class="mc-dict mc-mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice && !showDictBtn" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly || !draft.trim()">{{ sendLabel }}</button>
       </form>
     </div>
   </div>

@@ -269,6 +269,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .composer textarea{flex:1;min-width:0;resize:none;height:64px;border:0;outline:none;background:transparent;border-radius:0;padding:4px 6px;font-size:14px}
 .composer textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer .aero-btn{align-self:stretch;padding:0 18px;font-weight:600}
+/* 現代外觀輸入框膠囊的「＋」與語音輸入鈕（#1421 B2）：復古 Aero 沒有，樣式在 modern.css */
+.mc-plus,.mc-dict{display:none}
 .typing{height:22px;flex:none;padding:3px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);background:var(--panel-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .empty-chat{flex:1;display:grid;place-items:center;color:var(--muted);padding:24px;text-align:center}
 

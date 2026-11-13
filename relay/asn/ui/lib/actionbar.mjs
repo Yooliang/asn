@@ -235,15 +235,15 @@ function moreManageRow(item, slots) {
   return { key, label: item.label, ok: item.ok !== false, reason: item.ok === false ? briefWhy(item.reason) : '' }
 }
 
+/** 「更多」裡由 pickMore 自己處理的 key（通話、前台／後台、子代理、工作項目、切換模型）；其餘的 p: 開頭交給 pickOps、沒有前綴的經 ops 事件交給名單視窗。測試與 pickMore 共用這一份。 */
+export const MORE_OWN_KEYS = Object.freeze(['call', 'window', 'subs', 'tasks', 'p:model'])
+
 /**
  * 電腦版現代外觀「更多」選單的項目。順序與手機「⋯」一致：先是 phoneOpsRows(manageItems)（喚醒、切換模型排最前，離線才有喚醒），
  * 再接 chatGroupItems（邀請別人加入；群組是邀請、加 AI、成員與設定）；分隔線之後才是電腦獨有的：
  * 通話、前台／後台（有「終端」鈕時不列）、子代理、工作項目、納入管理。群組只有群組那三項。
  * ctx：{ ops（loadOpsContext 的結果）, selfNode, slots（barSlots 的結果依 key 做成的物件）, term（有「終端」鈕）, subLabel }
  */
-/** 「更多」裡由 pickMore 自己處理的 key（通話、前台／後台、子代理、工作項目、切換模型）；其餘的 p: 開頭交給 pickOps、沒有前綴的經 ops 事件交給名單視窗。測試與 pickMore 共用這一份。 */
-export const MORE_OWN_KEYS = Object.freeze(['call', 'window', 'subs', 'tasks', 'p:model'])
-
 export function moreMenuItems(friend, ctx = {}) {
   if (!friend) return []
   const slots = ctx.slots ?? {}
