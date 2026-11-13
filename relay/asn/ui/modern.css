@@ -73,7 +73,6 @@
 :root[data-skin="modern"] .chatpane-main{background:var(--panel-soft)}
 :root[data-skin="modern"] .conv,:root[data-skin="modern"] .compose-row{background:var(--panel-soft)}
 :root[data-skin="modern"] .conv-main{border-radius:14px}
-:root[data-skin="modern"] .compose-main{border-radius:22px;padding:0 6px}
 :root[data-skin="modern"] .msgs{padding:14px 18px;gap:10px}
 /* 訊息卡片：四角都是 18px（不留小角）、內距 11/16 */
 :root[data-skin="modern"] .msg .m-body.tone-them,:root[data-skin="modern"] .msg .m-body.tone-me,:root[data-skin="modern"] .msg .m-body.tone-same{padding:11px 16px;border-color:transparent;border-radius:18px}
@@ -121,7 +120,7 @@
 :root[data-skin="modern"] .m-ops{background:rgba(20,22,26,.4)}
 
 /* ---------- 輸入框：邊框加深，現代的淺底上也看得出邊界（約 1.6:1） ---------- */
-:root[data-skin="modern"] .search input,:root[data-skin="modern"] .m-search input,:root[data-skin="modern"] .set-sel,:root[data-skin="modern"] .compose-main{border-color:#c9c6be}
+:root[data-skin="modern"] .search input,:root[data-skin="modern"] .m-search input,:root[data-skin="modern"] .set-sel{border-color:#c9c6be}
 
 /* ---------- 頭像：圓形色塊＋右下狀態點（Aero 是相框顏色＝狀態，改圓後用點表示） ---------- */
 :root[data-skin="modern"] .dp{position:relative;padding:0;border-radius:50%;background:none;box-shadow:none}
@@ -140,9 +139,6 @@
 /* ---------- 權重衝突 ---------- */
 /* 電腦：對方離線時收件人列要是灰的（style.css 的灰底和上面的 .to-line 同權重，被蓋掉了） */
 :root[data-skin="modern"] .conv-main .to-line.is-offline{background:#e7e5e0;border-bottom-color:#d3d0c8;color:#4a4f55}
-/* 手機：mobile.css 的 .m-chat .compose-main{border:0} 把輸入框邊框拿掉了，現代要留膠囊邊框 */
-:root[data-skin="modern"] .m-chat .compose-row{padding:6px 8px 8px}
-:root[data-skin="modern"] .m-chat .compose-main{border:1px solid #c9c6be;border-radius:22px}
 
 /* ---------- 手機訊息卡片（.m-chat）：18px 圓角、內距 10/14、14.5px 字 ---------- */
 :root[data-skin="modern"] .m-chat .msgs{padding:12px 14px;gap:9px}
@@ -238,3 +234,53 @@
 :root[data-skin="modern"] .m-plate.is-offline .m-plate-name,:root[data-skin="modern"] .m-plate.is-offline .m-plate-sub{color:#8a8f96}
 /* 「看終端」搬到頂端右邊了，下方工具列那顆收起來（同一個切換，不重複） */
 :root[data-skin="modern"] .m-chat .m-term-switch{display:none}
+/* ---------- #1421 B2：輸入框膠囊（電腦、手機共用同一個 ChatPane） ----------
+   .compose-main 就是那顆膠囊（單列、52px／手機 50px、細邊＋陰影）；上方的工具列收進「＋」（.mc-plus）展開的小選單，
+   語音輸入另有一顆在右邊（.mc-dict），送出鈕改成實心圓＋向上箭頭（字還在、只是看不見，aria-label 也是 sendLabel）。
+   .composer 在這裡 display:contents，textarea 與按鈕直接排進膠囊；同一個 textarea、同一組 handler，只換排版。
+   膠囊長高（多行）時圓角固定 26px（一行 52px 時剛好是全圓），不會變成怪形狀。 */
+:root[data-skin="modern"] .compose-row{padding:10px 32px 18px}
+:root[data-skin="modern"] .compose-main{position:relative;flex:1;flex-direction:row;align-items:flex-end;gap:6px;box-sizing:border-box;width:100%;max-width:760px;min-height:52px;margin:0 auto;padding:5px 5px 5px 6px;border:1px solid #e6e4df;border-radius:26px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)}
+:root[data-skin="modern"] .m-chat .compose-row{padding:8px 12px 10px;border-top:0;background:var(--panel-soft)}
+:root[data-skin="modern"] .m-chat .compose-main{min-height:50px;max-width:none;padding:4px 4px 4px 5px;border:1px solid #e6e4df;border-radius:25px;background:var(--panel)}
+:root[data-skin="modern"] .compose-main .composer{display:contents}
+:root[data-skin="modern"] .compose-main .composer textarea{flex:1;min-width:0;order:2;align-self:stretch;height:auto;min-height:0;max-height:140px;padding:9px 6px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:22px;field-sizing:content}
+:root[data-skin="modern"] .m-chat .compose-main .composer textarea{font-size:15px;min-height:0;padding:9px 4px}
+/* 左「＋」、右語音輸入：40px 圓鈕 */
+:root[data-skin="modern"] .compose-main .mc-plus,:root[data-skin="modern"] .compose-main .mc-dict{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="modern"] .compose-main .mc-plus{order:1}
+:root[data-skin="modern"] .compose-main .mc-dict{order:3;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
+:root[data-skin="modern"] .compose-main .mc-dict:not(:has(.dict-state)){width:40px}
+:root[data-skin="modern"] .compose-main .mc-dict .dict-state{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px}
+:root[data-skin="modern"] .compose-main .mc-plus:hover,:root[data-skin="modern"] .compose-main .mc-dict:hover:not(:disabled){background:var(--modern-hover)}
+:root[data-skin="modern"] .compose-main .mc-plus[aria-expanded="true"]{background:var(--modern-soft);color:var(--accent)}
+:root[data-skin="modern"] .compose-main .mc-dict.rec{background:#fde3e0;color:#b3261e}
+:root[data-skin="modern"] .compose-main .mc-dict.busy{opacity:.6}
+:root[data-skin="modern"] .compose-main .mc-mic{width:40px}
+:root[data-skin="modern"] .compose-main .mc-dict:disabled{opacity:.45;cursor:default}
+:root[data-skin="modern"] .compose-main .mc-plus:focus-visible,:root[data-skin="modern"] .compose-main .mc-dict:focus-visible,:root[data-skin="modern"] .compose-main .composer .aero-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="modern"] .m-chat.is-room .compose-main .mc-dict,:root[data-skin="modern"] .m-chat .compose-row.is-term .mc-dict{display:none}
+/* 送出鈕：40px 實心主色圓＋白色向上箭頭 */
+:root[data-skin="modern"] .compose-main .composer .aero-btn{order:4;display:block;flex:none;align-self:flex-end;box-sizing:border-box;width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat var(--accent);color:transparent;font-size:0;line-height:0;overflow:hidden;box-shadow:none}
+:root[data-skin="modern"] .compose-main .composer .aero-btn:hover:not(:disabled){background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat #276a61}
+:root[data-skin="modern"] .compose-main .composer .aero-btn:disabled{opacity:.35;cursor:default}
+/* 上方那排工具（表情、通話、震動、照片、檔案、截圖、錄音、對話／終端切換）：平常收起來，按「＋」才在膠囊上方展開成帶文字的小選單；按鈕與 handler 原封不動 */
+:root[data-skin="modern"] .compose-main > .toolbar{display:none}
+:root[data-skin="modern"] .compose-main > .toolbar.mc-open{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;position:absolute;z-index:6;left:0;bottom:calc(100% + 8px);min-width:200px;max-width:100%;padding:6px;overflow:visible;border:1px solid #e6e4df;border-radius:18px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.1)}
+:root[data-skin="modern"] .compose-main > .toolbar .tool-group{display:flex}
+:root[data-skin="modern"] .compose-main > .toolbar .tool{width:100%;min-width:0;min-height:40px;justify-content:flex-start;gap:12px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--fg);font-size:14px;text-align:left}
+:root[data-skin="modern"] .compose-main > .toolbar .tool:hover:not(:disabled){background:var(--modern-hover)}
+:root[data-skin="modern"] .compose-main > .toolbar .tool::after{content:attr(aria-label)}
+:root[data-skin="modern"] .compose-main > .toolbar .tool svg{flex:none;width:20px;height:20px}
+:root[data-skin="modern"] .compose-main > .toolbar .tool img{flex:none;width:20px;height:20px}
+:root[data-skin="modern"] .compose-main > .toolbar .tool.dict,:root[data-skin="modern"] .compose-main > .toolbar:not(.mc-has-dict) .tool.mic{display:none}
+:root[data-skin="modern"] .compose-main > .toolbar .tool.mic.rec{background:#fde3e0;color:#b3261e;animation:none}
+:root[data-skin="modern"] .compose-main > .toolbar .picker{left:0;right:auto;width:max-content;grid-template-columns:repeat(6,36px);border:1px solid #e6e4df;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+:root[data-skin="modern"] .compose-main > .toolbar .picker button{height:34px;font-size:18px;border-radius:8px}
+/* 回覆列、語音安裝提示：浮在膠囊正上方（膠囊自己固定一列高） */
+:root[data-skin="modern"] .compose-main > .reply-bar,:root[data-skin="modern"] .compose-main > .voice-install{position:absolute;z-index:5;left:12px;right:12px;bottom:calc(100% + 8px);margin:0;border:1px solid #e6e4df;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
+:root[data-skin="modern"] .compose-main > .reply-bar{padding:6px 12px;background:var(--panel)}
+:root[data-skin="modern"] .compose-main > .voice-install{padding:8px 12px;background:#fffbe6}
+/* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
+:root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
+:root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}

@@ -913,6 +913,24 @@ export const skinProbeSource = () => `(async () => {
     const tag = adw.querySelector('.ad-new');
     if (tag && getComputedStyle(tag).transform !== 'none') return { ok: false, why: '廣告的緞帶還是斜的' };
   }
+  // #1421 B2：輸入框是單列膠囊（一行 52px／手機 50px、細邊、圓角）、送出鈕 40px 實心主色圓且名字還在、「＋」開得起上方工具選單、看不見的舊工具列不佔位
+  const cm = document.querySelector('.compose-main');
+  if (cm) {
+    const mobile = !!document.querySelector('.m-chat'), cs = getComputedStyle(cm), box = cm.getBoundingClientRect();
+    const wantH = mobile ? 50 : 52;
+    if (Math.abs(box.height - wantH) > 1.5) return { ok: false, why: '輸入框膠囊一行的高度不對：' + box.height + '（要 ' + wantH + '）' };
+    if (cs.borderTopLeftRadius !== (mobile ? '25px' : '26px') || cs.borderTopColor !== 'rgb(230, 228, 223)') return { ok: false, why: '輸入框膠囊的圓角或邊線不對：' + cs.borderTopLeftRadius + ' ' + cs.borderTopColor };
+    const sb = cm.querySelector('.composer .aero-btn[type=submit]'), sbc = sb && getComputedStyle(sb), sbr = sb && sb.getBoundingClientRect();
+    if (!sb || Math.round(sbr.width) !== 40 || Math.round(sbr.height) !== 40 || sbc.backgroundColor !== 'rgb(47, 122, 112)' || sbc.borderTopLeftRadius !== '50%') return { ok: false, why: '送出鈕不是 40px 實心主色圓' };
+    if (!sb.getAttribute('aria-label') || sb.getAttribute('aria-label') !== sb.textContent.trim()) return { ok: false, why: '送出鈕的名字（aria-label）要等於原本的字：' + sb.getAttribute('aria-label') + ' / ' + sb.textContent.trim() };
+    const plus = cm.querySelector('.mc-plus'), tb = cm.querySelector(':scope > .toolbar');
+    if (!plus || getComputedStyle(plus).display === 'none') return { ok: false, why: '輸入框左邊沒有「＋」' };
+    if (tb && getComputedStyle(tb).display !== 'none') return { ok: false, why: '工具列平常應該收起來' };
+    plus.click(); await sleep(150);
+    const open = tb && getComputedStyle(tb).display !== 'none' && plus.getAttribute('aria-expanded') === 'true' && (vis => vis.length >= 3 && vis.every(t => t.getBoundingClientRect().height > 20))([...tb.querySelectorAll('.tool')].filter(t => getComputedStyle(t).display !== 'none'));
+    plus.click(); await sleep(100);
+    if (!open) return { ok: false, why: '按「＋」沒有展開工具選單' };
+  }
   await sleep(400);
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
