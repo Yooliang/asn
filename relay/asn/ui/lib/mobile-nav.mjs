@@ -1,7 +1,8 @@
 // 手機的分頁切換與瀏覽記錄（系統返回鍵＝瀏覽器上一頁）：四個固定分頁「夥伴／對話／設定／通知」，內頁暫時佔用第四格（lib/mobile-fourth.mjs）。
 // 規則：
-//   - 對話分頁是底；切到其他分頁推一筆記錄，其他分頁之間互換不增加記錄，切回對話＝上一頁（回到離開時的樣子：清單或那一則對話）。
-//   - 對話分頁裡點進一則對話推一筆（chat＝true），返回回清單；在那則對話上再點一次「對話」分頁也回清單。從別的分頁點夥伴／群組：先回對話分頁，再進那一則。
+//   - 對話分頁是底；切到其他分頁推一筆記錄，其他分頁之間互換不增加記錄，切回對話＝上一頁。
+//   - 對話分頁直接就是最後在聊的那一則（#1438，回到 0.2.17 的做法，不先列清單）。從別的分頁點夥伴／群組：換成那一位，再回對話分頁（不多推一層）。
+//     nav.chat 只在「⋯」選單等浮層的記錄裡是 true（chatNav 那幾筆），一般不會出現。
 //   - 進內頁（設備與帳號、設定的某一項、使用指引、開新夥伴）：第四格換成這個內頁並切過去，內頁的每一層各推一筆（指引單篇、設備細部、開新夥伴第 2 步各多一層）。
 //   - 在內頁按返回：先退內頁自己的層，退到頭就收起內頁，回到底下那個分頁。
 //   - 從內頁切到別的分頁：先把它那幾筆記錄退掉（之後的返回鍵照分頁的規則走），內頁與內容留著，開始計時；切回第四格再把那幾層推回去。
@@ -53,7 +54,8 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     }
     if (t === nav.tab) return
     if (nav.tab === HOME_TAB) go(tabNav(t))
-    else if (t === HOME_TAB) { if (chat) pending = { tab: HOME_TAB, chat: true }; history.back() }
+    // 退回對話分頁一律記著「導覽中」，等 popstate 回來才算結束（whenSettled）：例如從夥伴頁點橫幅的「換班接手」，選單要等這一步做完才推（#1438 起不再多推一層，也要等）
+    else if (t === HOME_TAB) { pending = chat ? { tab: HOME_TAB, chat: true } : { tab: HOME_TAB }; history.back() }
     else { const n = tabNav(t); history.replaceState(n, ''); setNav(n) }
   }
   // 切到內頁：把內頁的每一層推回記錄
@@ -77,10 +79,11 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     switchTab(t)
   }
   // 打開一則對話（點夥伴、群組、橫幅）：切到對話分頁並進那一則。回 false＝沒動（浮層開著）
+  // #1438：對話分頁直接就是那一則，所以只切到對話分頁（不再多推一層「進那一則」的記錄）
   function openChat() {
     if (pending || nav.sheet) return false
-    if (nav.tab === PAGE_TAB) leavePage({ tab: HOME_TAB, chat: true })
-    else switchTab(HOME_TAB, { chat: true })
+    if (nav.tab === PAGE_TAB) leavePage({ tab: HOME_TAB })
+    else switchTab(HOME_TAB)
     return true
   }
   // 進一個內頁：第四格換成它並切過去（計時歸零），從目前的分頁進來。回 false＝沒打開（浮層開著、描述不合法）

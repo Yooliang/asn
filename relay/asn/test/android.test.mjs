@@ -305,7 +305,7 @@ test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓�
 
 test('四個大分頁：夥伴／對話／設定／通知（#1429），橫向翻頁、頂部分頁列＋底線指示條；邊緣留給系統、輸入與工具列不接手', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.deepEqual([...html.matchAll(/<section class="m-pg(?: m-chat m-notice)?"(?: :class="[^"]*")? aria-label="([^"]+)">/g)].map(m => m[1]), ['夥伴', '對話', '設定', '通知'])   // 四個分頁的標籤固定、順序固定（內頁另外蓋在進來的那一格上）
+  assert.deepEqual([...html.matchAll(/<section class="m-pg(?: m-chat(?: m-notice)?)?"(?: :class="[^"]*")? aria-label="([^"]+)">/g)].map(m => m[1]), ['夥伴', '對話', '設定', '通知'])   // 四個分頁的標籤固定、順序固定（內頁另外蓋在進來的那一格上）
   assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/, '上方分頁四個，可點')
   assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
   // 分頁列在最上方（pager 之前），不留底部列；視覺高 32px、可點範圍 36px；輸入區貼底並讓出安全區
@@ -332,7 +332,7 @@ test('四個大分頁：夥伴／對話／設定／通知（#1429），橫向翻
   assert.match(js, /if \(sw\.locked === 'h'\) \{ y0 = null/, '左右滑動時不觸發下拉重整')
   // 返回：對話 → 回到清單；非對話的分頁 → 回對話分頁（底）
   assert.match(js, /const goTab = t => fourthNav\.goTab\(t\)/)
-  assert.match(read('ui', 'lib', 'mobile-nav.mjs'), /function switchTab\(t, \{ chat = false \} = \{\}\) \{[\s\S]*?if \(nav\.tab === HOME_TAB\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === HOME_TAB\) \{ if \(chat\) pending = \{ tab: HOME_TAB, chat: true \}; history\.back\(\) \}/)
+  assert.match(read('ui', 'lib', 'mobile-nav.mjs'), /function switchTab\(t, \{ chat = false \} = \{\}\) \{[\s\S]*?if \(nav\.tab === HOME_TAB\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === HOME_TAB\) \{ pending = chat \? \{ tab: HOME_TAB, chat: true \} : \{ tab: HOME_TAB \}; history\.back\(\) \}/, '退回對話分頁一律記著導覽中（whenSettled 要等 popstate，#1438）')
   // 設定頁沒有下拉重整；舊的 goMe／goList 都不見了
   assert.doesNotMatch(js, /goMe|goList/)
 })

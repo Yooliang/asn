@@ -183,6 +183,49 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
 // 「⋯」不列永遠用不到的項目（前台／後台、在線的喚醒、一般視窗的重開／移除），喚醒、切換模型排最前；個人訊息照樣顯示「背景工作 N 件」
 // 手機自己是節點 P；夥伴開在另一台電腦 Q（手機只能遠端管理）
 export const MBAR_ME = { lastChat: 'Q/demo', navTab: 'chats' }
+// #1438：夥伴頁最上面的「未讀」—— demo 兩則（較早）、小工一則（較新）
+const UNREAD_MEMBERS = [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }, { name: '小工', status: 'idle', cwd_label: 'work' }] }]
+const unreadMails = (now = Date.now()) => [
+  { id: '00000000-0000-4000-8000-0000000000b1', from_node: 'Q', from_agent: 'demo', body: '第一則', trust: 'member', to_agent: '測試機', created_at: new Date(now - 30 * 60_000).toISOString() },
+  { id: '00000000-0000-4000-8000-0000000000b2', from_node: 'Q', from_agent: 'demo', body: '第二則', trust: 'member', to_agent: '測試機', created_at: new Date(now - 20 * 60_000).toISOString() },
+  { id: '00000000-0000-4000-8000-0000000000b3', from_node: 'Q', from_agent: '小工', body: '新的一則', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
+]
+export const MUNREAD_PROBE = { munread: true }
+export const munreadProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let tabs = [];
+  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
+  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);
+  const grp = () => document.querySelector('section.m-pg[aria-label="夥伴"] .m-unread');
+  const rows = () => [...(grp()?.querySelectorAll('li .m-buddy') || [])].map(b => [b.querySelector('.b-nick')?.textContent.trim(), b.querySelector('.unread')?.textContent.trim()]);
+  for (let i = 0; i < 80 && rows().length < 2; i++) await sleep(100);
+  if (!grp()) return { ok: false, why: '夥伴頁最上面沒有「未讀」' };
+  const head = grp().querySelector('.m-ghead')?.textContent.replace(/\\s+/g, '') || '';
+  if (!head.includes('未讀（2）')) return { ok: false, why: '「未讀」的標題不對：' + head };
+  if (JSON.stringify(rows()) !== JSON.stringify([['小工', '1'], ['demo', '2']])) return { ok: false, why: '「未讀」的順序或數字不對（要最新的在前）：' + JSON.stringify(rows()) };
+  const first = document.querySelector('section.m-pg[aria-label="夥伴"] .m-group');
+  if (first !== grp()) return { ok: false, why: '「未讀」要在夥伴頁最上面' };
+  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '有未讀，「夥伴」分頁卻沒有紅點' };
+  if (tab('對話').querySelector('i.red')) return { ok: false, why: '「對話」分頁不該有紅點（#1429）' };
+  grp().querySelector('li .m-buddy').click(); await sleep(800);
+  const chat = document.querySelector('section.m-pg[aria-label="對話"]');
+  if (!tab('對話').classList.contains('on')) return { ok: false, why: '點了沒有切到對話分頁' };
+  if (!(chat.querySelector('.m-head .m-title')?.textContent || '').includes('小工')) return { ok: false, why: '對話分頁沒有直接開那一位' };
+  tab('夥伴').click(); await sleep(800);
+  if (JSON.stringify(rows()) !== JSON.stringify([['demo', '2']])) return { ok: false, why: '讀完的那一列要離開「未讀」：' + JSON.stringify(rows()) };
+  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '還有 demo 沒讀，紅點要留著' };
+  return { ok: true, why: '' };
+})()`
+export const MCHAT_EMPTY_PROBE = { mchatEmpty: true }
+export const mchatEmptyProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
+  for (let i = 0; i < 60 && !sec()?.querySelector('.empty-list'); i++) await sleep(100);
+  const t = sec()?.querySelector('.empty-list')?.textContent.trim() || '';
+  if (t !== '從夥伴分頁點一位開始對話') return { ok: false, why: '沒有最後一則時的提示不對：' + t };
+  if (sec().querySelector('.m-buddy, .m-chat-list, .chatpane')) return { ok: false, why: '沒有最後一則時不該有清單或對話' };
+  return { ok: true, why: '' };
+})()`
 // 對話記錄樣本（後台 relay_chat_history 的格式）：一來一回，含一則長一點的
 const CHAT_MSGS_SAMPLE = [
   { id: '00000000-0000-4000-8000-000000000001', dir: 'me', body: '幫我看一下 CI 為什麼紅了', created_at: '2026-11-13T01:00:00Z', delivered_at: '2026-11-13T01:00:01Z', acked_at: '2026-11-13T01:00:02Z' },
@@ -760,7 +803,7 @@ export const mpaneWidenProbeSource = () => `(async () => {
   if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
   return { ok: true, why: '' };
 })()`
-// 手機四個分頁（0.2.18；#1429 改順序與第四格）：開 App 先看「對話」清單；點一則進到對話、「‹」回清單；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
+// 手機四個分頁（0.2.18；#1429 改順序與第四格；#1438 對話分頁直接是那一則）：開 App 先看「對話」＝上次那一則（沒有清單）；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
 // 切到夥伴、再點第四格回到內頁；分頁列的字與順序和電腦版一樣
 export const MTABS_PROBE = { mtabs: true }
 export const mtabsProbeSource = () => `(async () => {
@@ -772,18 +815,13 @@ export const mtabsProbeSource = () => `(async () => {
   if (labels !== '夥伴|對話|設定|通知') return { ok: false, why: '分頁的字或順序不對：' + labels };
   const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
   if (!tab('對話').classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」（順序改了，預設停的頁不變）' };
+  // #1438（小良哥選 B）：對話分頁直接就是最後那一則，不先列清單、沒有回清單的鍵
   const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
-  let row = null;
-  for (let i = 0; i < 60 && !row; i++) { row = sec().querySelector('.m-chat-list .m-buddy, .m-buddy'); if (!row) await sleep(100) }
-  if (!row || !sec().classList.contains('m-chat-list')) return { ok: false, why: '對話分頁沒有顯示對話清單' };
-  if (!row.textContent.includes('demo')) return { ok: false, why: '清單裡沒有上次那一位：' + row.textContent.trim().slice(0, 30) };
-  row.click(); await sleep(500);
-  if (!sec().classList.contains('m-chat') || !inView(sec().querySelector('.chatpane'))) return { ok: false, why: '點了沒有進到對話' };
-  if (!tab('對話').classList.contains('on')) return { ok: false, why: '進到對話時分頁列應該還標著「對話」' };
-  const back = sec().querySelector('[aria-label="回對話清單"]');
-  if (!back) return { ok: false, why: '對話上方沒有回清單的鍵' };
-  back.click(); await sleep(500);
-  if (!sec().classList.contains('m-chat-list')) return { ok: false, why: '按「‹」沒有回到對話清單' };
+  for (let i = 0; i < 60 && !inView(sec().querySelector('.chatpane')); i++) await sleep(100);
+  if (!inView(sec().querySelector('.chatpane'))) return { ok: false, why: '對話分頁應該直接是上次那一則' };
+  if (sec().querySelector('.m-chat-list, .m-buddy, .m-search')) return { ok: false, why: '對話分頁不該再列清單' };
+  if (sec().querySelector('[aria-label="回對話清單"]')) return { ok: false, why: '沒有清單了，不該有回清單的鍵' };
+  if (!(sec().querySelector('.m-head .m-title')?.textContent || '').includes('demo')) return { ok: false, why: '對話分頁開的不是上次那一位' };
   tab('設定').click(); await sleep(500);
   const about = [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
   if (!about) return { ok: false, why: '設定裡找不到「關於」' };
@@ -890,8 +928,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
     for (const sel of ['.m-pic', '.m-head-tx', '.m-head-more']) if (vis(ph.querySelector(':scope > ' + sel))) return { ok: false, why: '現代的對話頂端還留著 ' + sel };
     const hr = ph.getBoundingClientRect(), pr = plate.getBoundingClientRect();
     if (Math.abs((pr.left + pr.right) / 2 - (hr.left + hr.right) / 2) > 4) return { ok: false, why: '名牌沒有置中' };
-    const back = ph.querySelector('.m-back');
-    if (Math.round(back.getBoundingClientRect().width) !== 36) return { ok: false, why: '返回鈕不是 36px：' + back.getBoundingClientRect().width };
+    const back = ph.querySelector('.m-back');   // #1438 起對話分頁沒有返回鈕（直接是那一則）；有的話才量
+    if (back && Math.round(back.getBoundingClientRect().width) !== 36) return { ok: false, why: '返回鈕不是 36px：' + back.getBoundingClientRect().width };
     const term = ph.querySelector('.m-head-term');
     if (term) {
       if (Math.round(term.getBoundingClientRect().width) !== 36) return { ok: false, why: '看終端鈕不是 36px' };
@@ -956,8 +994,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1667,7 +1705,7 @@ export const SCENARIOS = [
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },
   { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_KEYS_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
-  { name: 'm-modern-list', page: 'm.html', state: { signedIn: true, mbar: 'claude', mchatList: true, skin: 'modern' }, ready: '#app.m .m-chat-list', probe: SKIN_PROBE, shot: 'm-modern-list.png' },
+  { name: 'm-modern-list', page: 'm.html', state: { signedIn: true, mbar: 'claude', mtab: 'list', skin: 'modern' }, ready: '#app.m section[aria-label="夥伴"] .m-buddy', probe: SKIN_PROBE, shot: 'm-modern-list.png' },
   // #1421 A：有訊息的對話（卡片圓角、頭像）、離線／忙碌的標題列與收件人列（權重衝突修正）
   { name: 'list-modern-msgs', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_PROBE, shot: 'list-modern-msgs.png' },
   { name: 'm-modern-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_KEYS_PROBE, shot: 'm-modern-msgs.png' },
@@ -1685,7 +1723,11 @@ export const SCENARIOS = [
   { name: 'list-bar-tasks', page: 'list.html', state: { signedIn: true, bar: 'tasks' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.tasks },
   // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
   // 手機對話頁（不放按鈕列）：412 寬，Claude 視窗、ACP 工作者、離線 Claude；上方沒有按鈕列、「⋯」不列永遠用不到的項目（在線：切換模型、詳情在前；離線：喚醒、切換模型在前；內建通道才有重開、移除）、標頭留著背景工作件數
-  { name: 'm-tabs', page: 'm.html', state: { signedIn: true, mbar: 'claude', mchatList: true }, ready: '#app.m .m-chat-list', probe: MTABS_PROBE, shot: 'm-tabs.png' },
+  { name: 'm-tabs', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MTABS_PROBE, shot: 'm-tabs.png' },
+  // #1438：夥伴頁最上面的「未讀」（Aero 與現代各一）、對話分頁還沒有最後一則時的提示
+  { name: 'm-unread', page: 'm.html', state: { signedIn: true, munread: true, mtab: 'list' }, ready: '#app.m .m-unread', probe: MUNREAD_PROBE, shot: 'm-unread.png' },
+  { name: 'm-unread-modern', page: 'm.html', state: { signedIn: true, munread: true, mtab: 'list', skin: 'modern' }, ready: '#app.m .m-unread', probe: MUNREAD_PROBE, shot: 'm-unread-modern.png' },
+  { name: 'm-chat-empty', page: 'm.html', state: { signedIn: true, mbar: 'claude', mtab: 'chats' }, ready: '#app.m section[aria-label="對話"] .empty-list', probe: MCHAT_EMPTY_PROBE, shot: 'm-chat-empty.png' },
   { name: 'm-chat-plain', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.plain, shot: 'm-chat.png' },
   { name: 'm-chat-claude', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.claude, shot: 'm-chat-ops.png' },
   { name: 'm-chat-acp', page: 'm.html', state: { signedIn: true, mbar: 'acp' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.acp },
@@ -1753,6 +1795,12 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
+  if (scenario.state.munread) {
+    t.relay_list = { members: UNREAD_MEMBERS }
+    t.relay_inbox = { messages: unreadMails() }
+    t.relay_ack = null
+    t.relay_read_sync = { marks: [] }
+  }
   if (scenario.state.mchatList) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...MBAR_ME, navChat: false }) } }   // 上次停在對話清單（不是某一則）
   // 手機開 App 先看「對話」清單（0.2.18）：要從夥伴頁開始的情境（例如點右上角「＋」）用 mtab 指定存檔停在哪一頁
   if (scenario.state.mtab) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ navTab: scenario.state.mtab }) } }

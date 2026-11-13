@@ -11,7 +11,8 @@ import { DEFAULT_SKIN, normalizeSkin } from './skin.mjs'
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
 // 四個固定分頁（和電腦版同樣的字、同樣的順序；#1429 起）：夥伴（list）、對話（chats）、設定（me）、通知（notice）。
-// 對話分頁先列出活動中的對話（夥伴與群組），點一則才進到對話內容（chat＝true，多一層瀏覽記錄，返回回清單）。
+// 對話分頁直接就是最後在聊的那一則（#1438，小良哥選 B，回到 0.2.17 的做法）；還沒有最後一則時顯示提示，請到「夥伴」挑一位。
+// nav.chat 只在「⋯」選單等浮層開著時是 true（那幾筆記錄沿用 chatNav），一般不會再多推一層。
 // 'page'＝內頁（設備與帳號、設定的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs）：暫時佔用第四格（通知那一格），分頁字換成內頁的標題，
 // 能左右滑過去、滑回來；離開滿 3 分鐘、或這段時間有新通知進來，第四格就變回「通知」（0.2.17 的做法，#1429 改回來）。
 // 每往下一層（對話清單→其他分頁、對話清單→一則對話、分頁→內頁、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，對話清單層再按才退到背景。
@@ -34,8 +35,8 @@ export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeU
 // 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，小良哥定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
 // 通知的紅點掛在第四格（內頁佔著第四格時照樣亮在那一格）
 export const tabDot = (t, { chats = 0, notice = 0 } = {}) => (t === 'list' ? chats > 0 : t === 'notice' || t === PAGE_TAB ? notice > 0 : false)
-// 正在看的對話（標已讀、算「看得到」用）：對話分頁要點進那一則（chat）才算；通知分頁看的是通知
-export const viewedChatId = ({ tab, chat = false, lastChat }) => (tab === 'chats' && chat ? lastChat || '' : tab === 'notice' ? NOTICE_ID : '')
+// 正在看的對話（標已讀、算「看得到」用）：對話分頁就是最後那一則（#1438 改回 0.2.17：不再先列清單）；通知分頁看的是通知。chat 參數留著不用
+export const viewedChatId = ({ tab, lastChat }) => (tab === 'chats' ? lastChat || '' : tab === 'notice' ? NOTICE_ID : '')
 export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單
 export const normalizeTab = t => (TABS.includes(t) ? t : HOME_TAB)
 export const initialNav = () => ({ tab: HOME_TAB, sheet: '', chat: false })
