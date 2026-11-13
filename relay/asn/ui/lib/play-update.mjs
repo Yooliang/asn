@@ -4,7 +4,6 @@ import { compareVersions } from './update.mjs'
 
 export const PLAY_PLATFORM = 'Play'
 export const PLAY_PACKAGE = 'tw.yooliang.asn'
-export const PLAY_MARKET_URL = `market://details?id=${PLAY_PACKAGE}`
 export const PLAY_WEB_URL = `https://play.google.com/store/apps/details?id=${PLAY_PACKAGE}`
 export const PLAY_BUTTON_LABEL = '到 Play 商店更新'
 export const PLAY_LATEST_TEXT = '已是最新版本'
@@ -37,10 +36,7 @@ export function playUpdateView(rel, current) {
   return latestPlayVersion(rel.entries) ? { kind: 'latest' } : { kind: 'unknown' }
 }
 
-// 開 Play 商店：先 market://（直接進 Play App），失敗退回網頁網址。open＝(url) => Promise
+// 開 Play 商店：直接開 https 網址（Android 會用 Play App 開）。open＝(url) => Promise；失敗回 false
 export async function openPlayStore(open) {
-  for (const url of [PLAY_MARKET_URL, PLAY_WEB_URL]) {
-    try { await open(url); return true } catch { /* 試下一個 */ }
-  }
-  return false
+  try { await open(PLAY_WEB_URL); return true } catch { return false }
 }

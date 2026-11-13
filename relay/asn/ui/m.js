@@ -602,7 +602,7 @@ const app = createApp({
     const playView = computed(() => (upd.enabled ? { kind: 'unknown' } : playUpdateView(rel, info.version)))
     const playNewText = computed(() => (playView.value.kind === 'new' ? playNewTextOf(playView.value.version) : ''))
     const rowHasDot = key => key === 'update' && playNewVersion.value !== ''
-    const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent）；market:// 不在它的允許清單內會被拒，自動退回 https 的 Play 網址（Android 會交給 Play App）
+    const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent；Android 會用 Play App 開這個 https 網址）
     watch(() => upd.enabled, en => { if (en === false && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉

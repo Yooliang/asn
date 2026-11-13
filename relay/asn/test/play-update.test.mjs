@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { PLAY_MARKET_URL, PLAY_WEB_URL, latestPlayVersion, openPlayStore, playUpdateVersion, playUpdateView } from '../ui/lib/play-update.mjs'
+import { PLAY_WEB_URL, latestPlayVersion, openPlayStore, playUpdateVersion, playUpdateView } from '../ui/lib/play-update.mjs'
 import { sortReleases } from '../ui/lib/releases.mjs'
 import { tabDot } from '../ui/lib/mobile.mjs'
 
@@ -51,12 +51,11 @@ test('紅點：掛在「設定」分頁，不影響其他分頁', () => {
   assert.equal(tabDot('list', { update: true }), false)
   assert.equal(tabDot('notice', { update: true }), false)
 })
-test('開 Play：先 market://，失敗退回網頁網址；兩個都失敗回 false', async () => {
+test('開 Play：直接開 https 網址；失敗回 false', async () => {
   const seen = []
-  assert.equal(await openPlayStore(async u => { seen.push(u); if (u.startsWith('market')) throw new Error('no') }), true)
-  assert.deepEqual(seen, [PLAY_MARKET_URL, PLAY_WEB_URL])
+  assert.equal(await openPlayStore(async u => { seen.push(u) }), true)
+  assert.deepEqual(seen, ['https://play.google.com/store/apps/details?id=tw.yooliang.asn'])
   assert.equal(await openPlayStore(async () => { throw new Error('no') }), false)
-  assert.equal(PLAY_MARKET_URL, 'market://details?id=tw.yooliang.asn')
 })
 test('畫面接線：更新頁、設定列、分頁紅點', () => {
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
