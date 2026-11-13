@@ -39,7 +39,7 @@ export const SettingsPanel = {
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'acct' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
-    const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
+    const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const fileEl = ref(null)
     // 舊的分類鍵（accounts）併進 devices
     const cat = computed(() => normalizeCatKey(props.catKey))
@@ -62,6 +62,8 @@ export const SettingsPanel = {
     const openTasks = key => { picked.value = key; view.value = 'tasks'; askRemove.value = false; renaming.value = false; act('tm-open') }
     const backToList = () => { if (view.value === 'tasks') act('tm-close'); picked.value = ''; view.value = 'acct'; askRemove.value = false; renaming.value = false }
     onBeforeUnmount(() => { if (view.value === 'tasks') act('tm-close') })
+    // 停在工作管理員時這台電腦從清單消失：退回清單並停掉每 5 秒更新
+    watch(() => view.value === 'tasks' && !curDev.value?.self, gone => { if (gone) backToList() })
     const removeNow = () => { const k = curDev.value?.key; if (!k) return; act('device-remove', k); backToList() }
     // 滑鼠拖放：拖到某列的上半＝插在前面、下半＝插在後面；放開時交給樞紐存順序
     const dragKey = ref(''), overKey = ref(''), overAfter = ref(false)

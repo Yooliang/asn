@@ -139,13 +139,13 @@ test('合併：名單上這台電腦的內建工作者列進來，沒有程序�
   assert.equal(v.engine, 'Gemini')
 })
 
-test('確認框：寫出是哪一個、另一個不受影響、不是 ASN 開的會留下終端機分頁', () => {
+test('確認框：寫出是哪一個、另一個不受影響', () => {
   const rows = markDuplicates([row({ pid: 18420 }), row({ pid: 21096, by_asn: false, started_ms: NOW - 41 * 60_000 })])
   const c = confirmView(rows[1], rows, NOW)
   assert.equal(c.title, '要停止「asn真」的這個視窗嗎？')
   assert.ok(c.lines.some(l => l.includes('程序編號 21096') && l.includes('41 分鐘前開的')))
   assert.ok(c.lines.some(l => l.includes('另一個「asn真」（編號 18420）不受影響')))
-  assert.ok(c.notes.some(n => n.includes('終端機分頁會留下')))
+  assert.ok(!c.notes.some(n => n.includes('不是 ASN 開的')))
   assert.equal(c.ok, '停止這個視窗')
 })
 
@@ -271,4 +271,72 @@ test('冒煙情境：工作管理員 Aero 與現代各一張，探測表達式�
   assert.doesNotThrow(() => new vm.Script(taskmgrProbeSource(TASKMGR_PROBES.taskmgr)))
   const t = tableFor(sc[0])
   assert.ok(t.task_manager_list.rows.filter(r => r.kind === 'claude' && r.name === 'asn真').length >= 2, '至少一組重複')
+})
+
+test('不是 ASN 開的視窗只能看：沒有停止鈕、沒有請求（claude、pi 都一樣）', async () => {
+  const c = ctx([friend(), friend({ agent: '小派', engine: 'pi' })])
+  for (const r of [row({ by_asn: false }), row({ kind: 'pi', engine: 'pi', name: '小派', by_asn: false })]) {
+    assert.equal(stopPlan(r, c).path, PATH.none)
+    assert.equal(stopPlan(r, c).ok, false)
+    assert.equal(stopRequest(r, c), null)
+    const v = viewRow(r, NOW, c)
+    assert.equal(v.viewOnly, true)
+    assert.equal(v.canStop, false)
+    assert.ok(v.why)
+    assert.ok(!/ASN 的 |taskkill|session|pid/i.test(v.why))
+  }
+  // 同名重複裡自己開的那個也只能看；ASN 開的那個照舊可停
+  const [a, b] = markDuplicates([row({ pid: 1 }), row({ pid: 2, by_asn: false })])
+  assert.equal(viewRow(b, NOW, c).viewOnly, true)
+  assert.equal(stopRequest(a, c).path, PATH.dup)
+  // 控制器：詢問不會開確認框
+  const { tm } = setup({ snapshot: { rows: [row({ by_asn: false })], known: [] } })
+  tm.open()
+  await new Promise(r => setTimeout(r, 5))
+  tm.ask(tm.view().rows[0].key)
+  assert.equal(tm.view().confirm, null)
+})
+
+test('喚醒失敗：畫面只有固定一句，細節進 log，不丟出未處理的錯誤', async () => {
+  const logs = []
+  const snapshot = { rows: [], known: [{ name: '西川', engine: 'claude' }] }
+  const state = initialState()
+  const tm = createTaskManager({
+    api: { taskManagerList: async () => snapshot }, getFriends: () => [friend({ agent: '西川', status: 'offline' })], getSelfNode: () => SELF, getOpsCtx: () => OPS_OK, now: () => NOW,
+    runOp: async () => { throw new Error('secret-internal 503') }, setTimer: () => 1, clearTimer: () => {}, state, log: m => logs.push(m),
+  })
+  tm.open()
+  await new Promise(r => setTimeout(r, 5))
+  await tm.wake('西川')
+  assert.equal(tm.view().wakeNote, TEXT.wakeFail)
+  assert.equal(TEXT.wakeFail, '叫醒失敗，請稍後再試')
+  assert.ok(!JSON.stringify(tm.view()).includes('secret-internal'))
+  assert.ok(logs.some(l => l.includes('secret-internal')))
+  assert.equal(tm.view().busy, false)
+})
+
+test('停止失敗：確認框只寫固定一句，不顯示錯誤內文，細節進 log', async () => {
+  const logs = []
+  const state = initialState()
+  const tm = createTaskManager({
+    api: { taskManagerList: async () => ({ rows: [row({ name: '西川' })], known: [] }) }, getFriends: () => [friend({ agent: '西川' })], getSelfNode: () => SELF, getOpsCtx: () => OPS_OK, now: () => NOW,
+    runOp: async () => { throw new Error('secret-internal C:\path') }, setTimer: () => 1, clearTimer: () => {}, state, log: m => logs.push(m),
+  })
+  tm.open()
+  await new Promise(r => setTimeout(r, 5))
+  tm.ask(tm.view().rows[0].key)
+  await tm.confirm()
+  const c = tm.view().confirm
+  assert.equal(c.result, TEXT.stopFail)
+  assert.equal(TEXT.stopFail, '停止失敗，請稍後再試')
+  assert.ok(!JSON.stringify(c).includes('secret-internal'))
+  assert.ok(logs.some(l => l.includes('secret-internal')))
+})
+
+test('這台電腦從設備清單消失時，設定頁退出工作管理員並通知停止更新；返回鈕不再有沒用到的文字', () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const panel = fs.readFileSync(path.join(root, 'ui/lib/settings-panel.mjs'), 'utf8')
+  assert.match(panel, /watch\(\(\) => view\.value === 'tasks' && !curDev\.value\?\.self, gone => \{ if \(gone\) backToList\(\) \}\)/)
+  assert.match(panel, /const backToList = \(\) => \{ if \(view\.value === 'tasks'\) act\('tm-close'\)/)
+  assert.ok(!('back' in TEXT))
 })

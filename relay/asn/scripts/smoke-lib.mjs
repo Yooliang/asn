@@ -591,13 +591,14 @@ export const taskmgrProbeSource = () => `(async () => {
   if (!text.includes('—')) return { ok: false, why: '拿不到的欄位沒有顯示「—」' };
   if (!text.includes('3 小時 12 分') || !text.includes('412 MB') || !text.includes('18420')) return { ok: false, why: '欄位內容不對（開了多久／記憶體／程序編號）' };
   if (!document.querySelector('.tm-known summary')?.textContent.includes('認得但目前沒在跑（1）')) return { ok: false, why: '沒有「認得但目前沒在跑」折疊區' };
-  const stop = await waitFor(() => { const b = dups[1].querySelector('.tm-stop'); return b && !b.disabled ? b : null });
-  if (!stop) return { ok: false, why: '重複那一列的停止鈕不能按（' + (dups[1].querySelector('.tm-why')?.textContent || '') + '）' };
+  if (dups[1].querySelector('.tm-stop')) return { ok: false, why: '自己開的那一列（編號 21096）不該有停止鈕' };
+  const stop = await waitFor(() => { const b = dups[0].querySelector('.tm-stop'); return b && !b.disabled ? b : null });
+  if (!stop) return { ok: false, why: '重複那一列的停止鈕不能按（' + (dups[0].querySelector('.tm-why')?.textContent || '') + '）' };
   stop.click();
   const dlg = await waitFor(() => document.querySelector('.dlg-back .dlg .tm-confirm'));
   if (!dlg) return { ok: false, why: '按下停止後沒有出現確認框' };
   const body = document.querySelector('.dlg').textContent;
-  if (!body.includes('程序編號 21096') || !body.includes('不受影響') || !body.includes('停止這個視窗')) return { ok: false, why: '確認框內容不對：' + body.slice(0, 120) };
+  if (!body.includes('程序編號 18420') || !body.includes('不受影響') || !body.includes('停止這個視窗')) return { ok: false, why: '確認框內容不對：' + body.slice(0, 120) };
   return { ok: true };
 })()`
 export const DEVBTN_PROBES = { desktop: { devbtn: 'desktop' }, mobile: { devbtn: 'mobile', open: '帳號' } }

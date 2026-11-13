@@ -17,7 +17,6 @@ export const DASH = '—'
 export const TEXT = {
   title: '工作管理員',
   entry: '工作管理員',
-  back: '‹ 設備',
   refreshing: '更新中…',
   auto: '每 5 秒自動更新',
   loadFail: '暫時讀不到程式清單，稍後會再試',
@@ -34,6 +33,8 @@ export const TEXT = {
   closeNote: '「停止」走的是現有的「關閉視窗」。',
   wake: '喚醒',
   noPlace: '還沒在名單上，稍後再試',
+  wakeFail: '叫醒失敗，請稍後再試',
+  stopFail: '停止失敗，請稍後再試',
 }
 
 export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源', '操作']
@@ -121,6 +122,7 @@ export function mergeRows(snapshot, friends, selfNode) {
 export const PATH = { close: 'close', dup: 'dup', term: 'term', none: '' }
 
 const VIEW_ONLY_WHY = {
+  own: '這個視窗是你自己開的，ASN 只能看，不能從這裡停止',
   process: '這是你自己開的程式，ASN 只能看，不能從這裡停止',
   mux: '終端服務停掉會一起帶走底下所有視窗，所以不提供停止',
   asn: 'ASN 自己的程式，不能從這裡停止',
@@ -138,6 +140,7 @@ export function stopPlan(row, ctx = {}) {
   if (k === 'terminal') {
     return row.by_asn === false ? { path: PATH.none, ok: false, reason: '這個終端窗格是你自己開的，ASN 只能看' } : { path: PATH.term, ok: Boolean(row.term_id), reason: row.term_id ? '' : '找不到這個終端' }
   }
+  if ((k === 'claude' || k === 'pi') && row.by_asn === false) return { path: PATH.none, ok: false, reason: VIEW_ONLY_WHY.own }
   if (k === 'claude' || k === 'pi' || k === 'acp') {
     const path = k === 'claude' && row.dup ? PATH.dup : PATH.close
     const friend = findFriend(ctx.friends, ctx.selfNode, row.name)
@@ -207,7 +210,6 @@ export function confirmView(r, rows, now) {
     for (const o of other) lines.push(`另一個「${name}」（編號 ${o.pid}）不受影響。`)
   }
   const notes = ['只會關掉這一個視窗，對話紀錄還在，之後可以「喚醒」接回。']
-  if ((r.kind === 'claude' || r.kind === 'pi') && !r.by_asn) notes.push('這個視窗不是 ASN 開的，終端機分頁會留下。')
   return { ...base, title: `要停止「${name}」的這個視窗嗎？`, lines, notes }
 }
 
@@ -294,7 +296,7 @@ export function createTaskManager(deps) {
       }
     } catch (e) {
       log(`[工作管理員] 停止失敗：${e?.message ?? e}`)
-      c.result = `沒有成功：${String(e?.message ?? e).slice(0, 80) || '請稍後再試'}`
+      c.result = TEXT.stopFail
     } finally {
       state.busy = false
       c.busy = false
@@ -312,6 +314,9 @@ export function createTaskManager(deps) {
     try {
       const v = await runOp(api, f, 'resume', {}, {})
       state.wakeNote = v?.text ?? ''
+    } catch (e) {
+      log(`[工作管理員] 叫醒失敗：${e?.message ?? e}`)
+      state.wakeNote = TEXT.wakeFail
     } finally { state.busy = false }
     void refresh()
   }
