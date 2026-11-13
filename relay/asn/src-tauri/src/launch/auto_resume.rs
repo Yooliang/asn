@@ -582,11 +582,14 @@ mod tests {
         revealed: RefCell<Vec<String>>,
         reveal_ok: bool,
         released: RefCell<Vec<String>>,
+        /// 這些名字的視窗程序還活著（命令列帶 --resume），只是 session 檔還沒寫出來
+        #[allow(dead_code)]
+        starting: Vec<String>,
     }
 
     impl Fake {
         fn new() -> Fake {
-            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]) }
+            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]), starting: vec![] }
         }
     }
 
@@ -634,6 +637,7 @@ mod tests {
         }
         fn unclaim(&self, e: &KnownEntry) {
             self.released.borrow_mut().push(e.name.clone());
+            crate::launch::opening::release(&e.facts.session, &e.name);
         }
         fn reveal(&self, e: &KnownEntry) -> bool {
             self.revealed.borrow_mut().push(e.name.clone());
@@ -702,6 +706,33 @@ mod tests {
         let st = run(vec![entry("甲"), entry("乙")], &f);
         assert_eq!(st.resumed, ["乙"]);
         assert_eq!(*f.released.borrow(), ["甲"], "只有沒上線的解除，本人之後手動喚醒才不會被擋");
+    }
+
+    #[test]
+    fn 等了九十秒沒上線_但程序還活著_不解除登記_同一位再登記仍被擋() {
+        let mut f = Fake::new();
+        f.never_appears = vec!["慢熱甲".into()];
+        f.starting = vec!["慢熱甲".into()];
+        let e = entry("慢熱甲");
+        assert!(crate::launch::opening::claim(&e.facts.session, &e.name), "開窗時登記");
+        let st = run(vec![e.clone()], &f);
+        assert!(f.released.borrow().is_empty(), "程序還活著：保留登記，讓它自然到期");
+        assert!(!crate::launch::opening::claim(&e.facts.session, "別名"), "同一個對話編號再登記要被擋");
+        assert!(!crate::launch::opening::claim("another-sid", &e.name), "同一個名字再登記要被擋");
+        assert_eq!(st.failed.len(), 1, "照舊列為沒看到上線");
+        crate::launch::opening::release(&e.facts.session, &e.name);
+    }
+
+    #[test]
+    fn 等了九十秒沒上線_程序也沒了_照舊解除登記() {
+        let mut f = Fake::new();
+        f.never_appears = vec!["慢熱乙".into()];
+        let e = entry("慢熱乙");
+        assert!(crate::launch::opening::claim(&e.facts.session, &e.name));
+        run(vec![e.clone()], &f);
+        assert_eq!(*f.released.borrow(), ["慢熱乙"]);
+        assert!(crate::launch::opening::claim(&e.facts.session, &e.name), "解除後再登記得到");
+        crate::launch::opening::release(&e.facts.session, &e.name);
     }
 
     #[test]

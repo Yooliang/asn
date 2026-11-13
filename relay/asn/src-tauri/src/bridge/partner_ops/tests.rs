@@ -2496,3 +2496,35 @@ fn 讀狀態檔_半份和空檔算正在寫_沒檔和內容不對算沒有外掛
     assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Live(_)), "完整的");
     assert!(matches!(r.ops.read_status("../壞", pid), StatusRead::Gone), "視窗編號不合法");
 }
+
+/// 在程序表裡加一個命令列帶 `--resume <sid>` 的 claude 程序（視窗剛開、session 檔還沒寫出來的樣子）
+fn add_resuming_process(r: &Rig, pid: u32, sid: &str, alive: bool) {
+    let os = r.os();
+    os.table.lock().unwrap().push(p(pid, 100, "claude.exe"));
+    os.cmd.lock().unwrap().insert(pid, format!(r#""C:\Program Files\Claude\claude.exe" --dangerously-skip-permissions -n "離線夥伴" --resume {sid}"#));
+    if alive {
+        os.alive.lock().unwrap().insert(pid);
+    }
+}
+
+#[test]
+fn 喚醒守門_session檔與登記都空_但有帶_resume_的活程序_不開第二個() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("已經在線上或正在啟動"), "{}", res.detail);
+    assert!(!res.detail.contains(SID), "訊息不放內部識別碼：{}", res.detail);
+    assert!(r.launched().is_empty(), "不能開窗");
+    assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不動任何程序");
+}
+
+#[test]
+fn 喚醒守門_帶_resume_的程序已結束或是別的對話_照常開() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, false);
+    add_resuming_process(&r, 401, "sid-other-9", true);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
