@@ -21,7 +21,8 @@ test('名牌的字和電腦頂部共用 nameplateView：名字、哪台電腦・
 
 test('接線：名牌點了開「⋯」選單（沒有項目時不能按）；看終端切的是對話窗格裡同一顆切換', () => {
   assert.match(head, /<button class="m-plate" type="button" :class="\{ 'is-offline': chatPlate\.offline \}"[^>]*:disabled="!opsItems\.length && !groupItems\.length" @click="openOps">/)
-  assert.match(head, /<b class="m-plate-name" v-html="emo\(chatPlate\.name\)"><\/b><small class="m-plate-sub" v-if="chatPlate\.sub">\{\{ chatPlate\.sub \}\}<\/small>/, '名字照舊過 emo（表情符號）；副標是純文字')
+  assert.match(head, /<b class="m-plate-name" v-html="emo\(chatPlate\.name\)"><\/b><small class="m-plate-sub" v-if="chatPlate\.sub"><template v-if="prefs\.skin === 'line' && chatPlate\.busy">\{\{ chatPlate\.machine \}\}\{\{ chatPlate\.machine \? '・' : '' \}\}<span class="l-busy">\{\{ chatPlate\.state \}\}<\/span><\/template><template v-else>\{\{ chatPlate\.sub \}\}<\/template><\/small>/, '名字照舊過 emo（表情符號）；副標是純文字（LINE 外觀忙碌時「忙碌」包成黃色小標籤，#1517）')
+  assert.doesNotMatch(head, /m-plate-sub[^>]*v-html/, '副標不走 v-html')
   assert.match(head, /<button class="m-icon-btn m-head-term" type="button" v-if="headTerm"[^>]*@click="toggleHeadTerm">/)
   assert.match(html, /<chat-pane v-if="chatFriend" :friend="chatFriend"[\s\S]*?ref="chatPaneEl"><\/chat-pane>/)
   assert.match(js, /const headTerm = computed\(\(\) => \{ const p = chatPaneEl\.value; return p && p\.mSwitch \? p\.mToggle : null \}\)/, '只有能看終端（和下方切換鈕同一個條件）才出現')

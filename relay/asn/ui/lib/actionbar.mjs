@@ -222,7 +222,8 @@ export function nameplateView(friend) {
   const machine = room ? '' : String(friend?.device || friend?.machine || friend?.nodeName || '')
   const state = room ? '群組' : (PLATE_STATUS[friend?.status] ?? '')
   const sub = [machine, state].filter(Boolean).join('・')
-  return { name, sub, room, offline: !room && friend?.status === 'offline', initial: [...name][0] ?? '', aria: `${name}${sub ? '，' + sub : ''}` }
+  // machine／state／busy：LINE 外觀把「忙碌」包成黃色小標籤用（#1517 之 4）；其他外觀照舊只用 sub
+  return { name, sub, machine, state, busy: !room && friend?.status === 'busy', room, offline: !room && friend?.status === 'offline', initial: [...name][0] ?? '', aria: `${name}${sub ? '，' + sub : ''}` }
 }
 
 /** 「更多」裡「管理」那段的一列：key 加 p: 前綴（接回「管理」選單原本的 handler）；切換模型、喚醒的能不能按看電腦大按鈕那一格。 */
@@ -729,7 +730,7 @@ export const ActionBar = {
     <asn-avatar class="mbar-av" v-if="!plate.room" :src="avatar" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
     <span class="mbar-av mbar-room" v-else aria-hidden="true">{{ plate.initial }}</span>
     <b class="mbar-name">{{ plate.name }}</b>
-    <small class="mbar-sub" v-if="plate.sub">{{ plate.sub }}</small>
+    <small class="mbar-sub" v-if="plate.sub"><template v-if="skin === 'line' && plate.busy">{{ plate.machine }}{{ plate.machine ? '・' : '' }}<span class="l-busy">{{ plate.state }}</span></template><template v-else>{{ plate.sub }}</template></small>
     <small class="mbar-count" v-if="skin === 'line' && isRoom && friend.psm">{{ friend.psm }}</small>
   </div>
   <div class="mbar-acts">
