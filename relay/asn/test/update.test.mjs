@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CHECK_MS, autoCheckFromSaved, compareVersions, firstLine, initialUpdateState, isNewer, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress } from '../ui/lib/update.mjs'
+import { CHECK_MS, autoCheckFromSaved, compareVersions, firstLine, initialUpdateState, isNewer, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress } from '../ui/lib/update.mjs'
 import { PLATFORM, patchDownloadLink, buildLatestJson, changelogFirstSection, installerName, installerUrl, parseArgs, pickNotes } from '../scripts/release-lib.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -41,6 +41,14 @@ test('下載進度文字', () => {
   assert.equal(progressText(1048576 * 20, 1048576 * 10), '下載中 100%（20.0 / 10.0 MB）')
   assert.equal(progressText(1048576 * 3, null), '下載中 3.0 MB')
   assert.equal(progressText(NaN, null), '下載中…')
+  // 進度條填多少（#1526）：跟文字的百分比同一個算法；總大小不明回 null
+  assert.equal(progressPct(0, 1048576 * 10), 0)
+  assert.equal(progressPct(1048576 * 0.4, 1048576 * 10), 4)
+  assert.equal(progressPct(1048576 * 6, 1048576 * 10), 60)
+  assert.equal(progressPct(1048576 * 20, 1048576 * 10), 100)
+  assert.equal(progressPct(1048576 * 3, null), null)
+  assert.equal(progressPct(NaN, 10), null)
+  assert.equal(progressPct(-1, 10), null)
 })
 
 test('通知列狀態機：有新版 → 按更新 → 進度 → 失敗可重試；安裝中不被重新檢查蓋掉', () => {

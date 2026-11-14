@@ -57,9 +57,13 @@
       <button class="aero-btn upd-btn" type="button" @click.stop="goLogin">{{ RELOGIN_BAR_ACTION }}</button>
       <button class="aero-btn upd-btn" type="button" @click.stop="dismissReloginBar">{{ RELOGIN_BAR_DISMISS }}</button>
     </div>
-    <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
+    <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed', dl: upd.phase === 'installing' }">
       <span class="upd-text" v-if="upd.phase === 'available'">{{ updateNoticeText(upd.info) }}</span>
-      <span class="upd-text" v-else-if="upd.phase === 'installing'">{{ progressText(upd.done, upd.total) }}</span>
+      <!-- 下載中（#1526）：直角進度條，依百分比往右填滿，文字（%、MB）疊在上面；左右和下方那排分頁對齊（樣式在 style.css 與各外觀） -->
+      <div class="upd-prog" v-else-if="upd.phase === 'installing'" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="progressPct(upd.done, upd.total) ?? undefined" :aria-valuetext="progressText(upd.done, upd.total)">
+        <div class="upd-fill" :style="{ width: (progressPct(upd.done, upd.total) ?? 0) + '%' }"></div>
+        <span class="upd-text">{{ progressText(upd.done, upd.total) }}</span>
+      </div>
       <span class="upd-text" v-else>更新失敗：{{ upd.error }}</span>
       <button class="aero-btn upd-btn" type="button" v-if="upd.phase !== 'installing'" @click.stop="installUpdate">{{ upd.phase === 'failed' ? '重試' : '更新' }}</button>
     </div>

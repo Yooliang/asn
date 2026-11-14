@@ -40,6 +40,9 @@ export const progressText = (done, total) => {
   return `下載中 ${mb(done)} MB`
 }
 
+// 進度條要填多少（0～100 的整數）：總大小不明時回 null（只顯示文字、不畫填滿）
+export const progressPct = (done, total) => (Number.isFinite(done) && done >= 0 && Number.isFinite(total) && total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : null)
+
 // 通知列的狀態機：idle（沒新版）／available（有新版，等按更新）／installing（下載與安裝中）／failed（失敗，顯示原因，可再按更新重試）
 export const initialUpdateState = () => ({ phase: 'idle', info: null, done: 0, total: null, error: '' })
 export const withAvailable = (st, info) => (st.phase === 'installing' ? st : info ? { phase: 'available', info, done: 0, total: null, error: '' } : initialUpdateState())
