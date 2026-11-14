@@ -9,7 +9,7 @@ export const LINE_LOOK_ME = { winMode: 'merged', dpMode: 'left', bubble: 'none',
 export const LINE_GROUP_MSGS = [
   { seq: 1, from: 'P~測試機', at: '2026-11-13T01:00:00Z', body: '大家早，今天的測試已經跑完了。', relation: 'other', from_kind: 'ai' },
   { seq: 2, from: 'me', at: '2026-11-13T01:01:00Z', body: '好，我來看結果', relation: 'mine' },
-  { seq: 3, from: 'P~測試機', at: '2026-11-13T01:02:00Z', body: '', relation: 'system', from_kind: 'system' },
+  { seq: 3, from: 'P~測試機', at: '2026-11-13T01:02:00Z', body: '測試機加入了群組', relation: 'system', from_kind: 'system' },
 ]
 // 第二張：一對一對話樣本（relay_chat_history 的格式）：自己一則（對方讀過）、對方連發兩則、自己一則（只送達）
 export const LINE_CHAT_MSGS = [
@@ -30,6 +30,10 @@ export const LINE_PROBES = {
   mobileList: { skinCheck: true, line: 'm-list' },
   deskSettings: { skinCheck: true, line: 'desk-settings' },
   mobileSettings: { skinCheck: true, line: 'm-settings' },
+  deskRows: { skinCheck: true, line: 'desk-rows' },
+  mobileRows: { skinCheck: true, line: 'm-rows' },
+  deskCompose: { skinCheck: true, line: 'desk-compose' },
+  mobileCompose: { skinCheck: true, line: 'm-compose' },
 }
 
 export const lineProbeSource = kind => `(async () => {
@@ -100,6 +104,105 @@ export const lineProbeSource = kind => `(async () => {
       const top = document.elementFromPoint(...at(fab));
       if (!top || !fab.contains(top)) return { ok: false, why: 'LINE 外觀：' + '新增鈕被別的東西蓋住了：' + (top && top.className) };
     }
+    if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
+    return { ok: true, why: '' };
+  }
+
+
+  // ---- 第三張：清單列右上時間與右下未讀圓、輸入列收尾（真的點擊與輸入）----
+  if (kind === 'desk-rows' || kind === 'm-rows') {
+    const mobile = kind === 'm-rows';
+    if (!mobile) {
+      const tab = await wait(() => [...document.querySelectorAll('.top-tabs .ttab')].find(b => (b.getAttribute('aria-label') || '').startsWith('對話')));
+      if (!tab) return { ok: false, why: 'LINE 外觀：' + '找不到左欄「對話」' };
+      await real({ click: at(tab) });
+    }
+    const rowsOf = () => [...document.querySelectorAll(mobile ? '.m-unread .m-buddy' : '.chat-list .buddy, .chat-list .room-btn')].filter(b => b.querySelector('.unread'));
+    const rows = await wait(() => rowsOf().length >= 1 && rowsOf(), 60);
+    if (!rows) return { ok: false, why: 'LINE 外觀：' + '清單上找不到有未讀的列' };
+    await sleep(300);
+    for (const row of rows) {
+      const t = row.querySelector('.l-time'), u = row.querySelector('.unread');
+      if (!t) return { ok: false, why: 'LINE 外觀：' + '有往來的列右上要有最後時間（.l-time）' };
+      if (!/^((上午|下午) [0-9]{1,2}:[0-9]{2}|昨天)$/.test(t.textContent.trim())) return { ok: false, why: 'LINE 外觀：' + '清單時間要寫成「下午 3:52」或「昨天」：' + t.textContent };
+      if (!/^[0-9]+$/.test(u.textContent.trim())) return { ok: false, why: 'LINE 外觀：' + '未讀圓圈裡是數字：' + u.textContent };
+      const rr = row.getBoundingClientRect(), tr = t.getBoundingClientRect(), ur = u.getBoundingClientRect();
+      if (rr.right - tr.right > 20 || tr.top - rr.top > 20 || tr.top < rr.top) return { ok: false, why: 'LINE 外觀：' + '時間要在列的右上角：' + [rr.right - tr.right, tr.top - rr.top].join() };
+      if (rr.right - ur.right > 20 || rr.bottom - ur.bottom > 20 || ur.top < tr.bottom - 1) return { ok: false, why: 'LINE 外觀：' + '未讀圓圈要在時間正下方（右下）：' + [rr.right - ur.right, rr.bottom - ur.bottom].join() };
+      if (Math.abs(ur.height - 20) > 1 || ur.width < 19 || parseFloat(cs(u, 'border-top-left-radius')) < 9 || cs(u, 'background-color') === 'rgba(0, 0, 0, 0)') return { ok: false, why: 'LINE 外觀：' + '未讀要是實心圓：' + ur.width + 'x' + ur.height + ' ' + cs(u, 'background-color') };
+      const nick = row.querySelector('.b-nick').getBoundingClientRect();
+      if (nick.right > tr.left + 1 && nick.bottom > tr.top && nick.top < tr.bottom) return { ok: false, why: 'LINE 外觀：' + '名字被右上角的時間蓋住' };
+    }
+    if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
+    return { ok: true, why: '' };
+  }
+
+  if (kind === 'desk-compose' || kind === 'm-compose') {
+    const main = await wait(() => document.querySelector('.compose-main .composer textarea') && document.querySelector('.compose-main'));
+    if (!main) return { ok: false, why: 'LINE 外觀：' + '找不到輸入列' };
+    await sleep(500);
+    const ta = main.querySelector('.composer textarea'), plus = main.querySelector('.mc-plus'), photo = main.querySelector('.lc-photo'), emo = main.querySelector('.lc-emo'), send = main.querySelector('.composer .aero-btn');
+    if (!plus || !photo || !emo || !send) return { ok: false, why: 'LINE 外觀：' + '輸入列缺「＋」、圖片、表情或送出鈕' };
+    // 排列：左邊「＋」「圖片」，中間輸入框，表情在框內右側
+    const R = e => e.getBoundingClientRect(), pr = R(plus), hr = R(photo), tr = R(ta), er = R(emo);
+    if (!(pr.right <= hr.left + 1 && hr.right <= tr.left + 1)) return { ok: false, why: 'LINE 外觀：' + '「＋」、圖片要依序在輸入框左邊' };
+    if (!(er.left >= tr.left && er.right <= tr.right + 1 && er.top >= tr.top - 1 && er.bottom <= tr.bottom + 1)) return { ok: false, why: 'LINE 外觀：' + '表情鈕要在輸入框裡面的右側：' + [er.left - tr.left, tr.right - er.right].join() };
+    if (er.left < tr.left + tr.width / 2) return { ok: false, why: 'LINE 外觀：' + '表情鈕要靠框的右邊' };
+    if (parseFloat(cs(ta, 'border-top-left-radius')) < 14) return { ok: false, why: 'LINE 外觀：' + '輸入框要是圓角：' + cs(ta, 'border-top-left-radius') };
+    for (const b of [plus, photo, emo]) { const r = R(b); if (r.width < 30 || r.height < 30) return { ok: false, why: 'LINE 外觀：' + '按鈕太小：' + r.width + 'x' + r.height }; const top = document.elementFromPoint(...at(b)); if (!top || !b.contains(top)) return { ok: false, why: 'LINE 外觀：' + '按鈕被別的東西蓋住：' + (top && top.className) } }
+    const mic = main.querySelector('.mc-dict');
+    if (mic && cs(mic, 'display') !== 'none' && R(mic).left < tr.right - 1) return { ok: false, why: 'LINE 外觀：' + '麥克風要在最右邊、輸入框外' };
+    // 沒有字：送出鈕不出現，輸入框一行高
+    if (cs(send, 'display') !== 'none') return { ok: false, why: 'LINE 外觀：' + '沒有字，送出鈕不該出現' };
+    const oneH = R(ta).height;
+    if (oneH < 36 || oneH > 44) return { ok: false, why: 'LINE 外觀：' + '一行時輸入框高度不對：' + oneH };
+    // 真的輸入：一行、三行、七行（最多長到 6 行，之後框內捲動）
+    await real({ click: at(ta) });
+    await real({ text: '第1行' });
+    if (!(await wait(() => cs(send, 'display') !== 'none', 20))) return { ok: false, why: 'LINE 外觀：' + '有字了，送出鈕要出現' };
+    if (Math.abs(R(ta).height - oneH) > 1) return { ok: false, why: 'LINE 外觀：' + '一行字高度不該變：' + R(ta).height };
+    for (let i = 2; i <= 3; i++) { await real({ shiftEnter: true }); await real({ text: '第' + i + '行' }) }
+    await sleep(200);
+    const h3 = R(ta).height;
+    if (Math.abs(h3 - 84) > 2) return { ok: false, why: 'LINE 外觀：' + '三行時高度應約 84：' + h3 };
+    for (let i = 4; i <= 7; i++) { await real({ shiftEnter: true }); await real({ text: '第' + i + '行' }) }
+    await sleep(250);
+    const h7 = R(ta), nLines = ta.value.split(String.fromCharCode(10)).length;
+    if (nLines !== 7) return { ok: false, why: 'LINE 外觀：' + '應該輸入了七行：' + nLines };
+    if (Math.abs(h7.height - 150) > 2) return { ok: false, why: 'LINE 外觀：' + '七行時高度要停在六行（約 150）：' + h7.height };
+    if (!(ta.scrollHeight > ta.clientHeight + 4) || cs(ta, 'overflow-y') !== 'auto') return { ok: false, why: 'LINE 外觀：' + '超過六行要在框內捲動：' + ta.scrollHeight + ' / ' + ta.clientHeight + ' ' + cs(ta, 'overflow-y') };
+    const er7 = R(emo), tr7 = R(ta);
+    if (er7.bottom > tr7.bottom + 1 || er7.top < tr7.top) return { ok: false, why: 'LINE 外觀：' + '多行時表情鈕要還在框內（貼框底）' };
+    // 表情：點框內的表情鈕，選一個，字進輸入框、選單收起
+    const before = ta.value.length;
+    await real({ click: at(emo) });
+    const pick = await wait(() => document.querySelector('.compose-main .lc-picker'));
+    if (!pick) return { ok: false, why: 'LINE 外觀：' + '點框內的表情鈕沒有出現表情選單' };
+    await real({ click: at(pick.querySelector('button')) });
+    if (!(await wait(() => ta.value.length > before && !document.querySelector('.compose-main .lc-picker'), 20))) return { ok: false, why: 'LINE 外觀：' + '選了表情，字要進輸入框、選單收起：' + before + ' → ' + ta.value.length };
+    // 圖片：點圖片鈕，要打開既有的選檔（hidden 的 image input 收到 click）
+    const fileIn = [...main.querySelectorAll('input[type="file"]')].find(i => i.accept === 'image/*');
+    let opened = 0; const stop = ev => { ev.preventDefault(); opened++ };
+    fileIn.addEventListener('click', stop);
+    await real({ click: at(photo) });
+    fileIn.removeEventListener('click', stop);
+    if (opened !== 1) return { ok: false, why: 'LINE 外觀：' + '按圖片鈕沒有打開選檔：' + opened };
+    // 「＋」選單：原本的按鈕都收在裡面、看得到、可按
+    await real({ click: at(plus) });
+    const menu = await wait(() => document.querySelector('.compose-main > .toolbar.mc-open'));
+    if (!menu) return { ok: false, why: 'LINE 外觀：' + '按「＋」沒有展開選單' };
+    const items = [...menu.querySelectorAll('.tool')].filter(b => cs(b, 'display') !== 'none');
+    const labels = items.map(b => b.getAttribute('aria-label'));
+    for (const want of ['表情符號', '傳照片', '傳送檔案', '傳送震動']) if (!labels.includes(want)) return { ok: false, why: 'LINE 外觀：' + '「＋」選單裡少了「' + want + '」：' + labels.join() };
+    for (const b of items) { const r = R(b); if (r.width < 20 || r.height < 20 || b.offsetParent === null) return { ok: false, why: 'LINE 外觀：' + '選單項目看不到：' + b.getAttribute('aria-label') }; if (b.disabled) return { ok: false, why: 'LINE 外觀：' + '選單項目不能按：' + b.getAttribute('aria-label') } }
+    await real({ key: 'Escape' });
+    // 清空：送出鈕消失、高度回到一行
+    ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!(await wait(() => cs(send, 'display') === 'none' && Math.abs(R(ta).height - oneH) <= 1, 20))) return { ok: false, why: 'LINE 外觀：' + '清空後送出鈕要消失、高度回一行：' + cs(send, 'display') + ' ' + R(ta).height };
+    // 收尾：再打幾行字，讓截圖看得到多行的輸入框與送出鈕
+    await real({ click: at(ta) });
+    for (let i = 1; i <= 4; i++) { if (i > 1) await real({ shiftEnter: true }); await real({ text: '多行輸入第' + i + '行' }) }
+    await sleep(250);
     if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
     return { ok: true, why: '' };
   }

@@ -115,6 +115,7 @@
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="!c.isNotice && statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                     </span>
+                    <span class="l-time" v-if="skin === 'line' && listTimeText(c.lastAt)">{{ listTimeText(c.lastAt) }}</span>
                     <span class="unread" v-if="c.unread">{{ c.unread }}</span>
                   </button>
                 </li>
@@ -149,6 +150,7 @@
               <button v-if="x.kind === 'room'" class="room-btn" :class="{ on: ui.mode === 'merged' && view === 'chat' && ui.active === x.room.chatId }" type="button" @click="openChat(x.room.chatId)">
                 <span class="dp xs room-av st-online" :style="{ '--h': roomHue(x.room.name) }" aria-hidden="true"><span>{{ roomInitial(x.room.name) }}</span></span>
                 <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">({{ x.room.count }} 人)</span></span><span class="b-psm" v-if="x.room.last" v-html="emo(x.room.last)"></span></span>
+                <span class="l-time" v-if="skin === 'line' && listTimeText(x.at)">{{ listTimeText(x.at) }}</span>
                 <span class="unread" v-if="x.room.unread">{{ x.room.unread }}</span>
               </button>
               <button v-else class="buddy" :class="{ offline: x.friend.status === 'offline', on: ui.mode === 'merged' && view === 'chat' && ui.active === x.id }" type="button" @click="openChat(x.id)">
@@ -157,6 +159,7 @@
                   <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
                   <span class="b-psm" v-if="x.last">{{ x.last }}</span>
                 </span>
+                <span class="l-time" v-if="skin === 'line' && listTimeText(x.at || x.friend.lastAt)">{{ listTimeText(x.at || x.friend.lastAt) }}</span>
                 <span class="unread" v-if="x.friend.unread">{{ x.friend.unread }}</span>
               </button>
             </li>
