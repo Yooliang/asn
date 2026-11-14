@@ -581,6 +581,11 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .pv-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:6px 10px 12px}
 .pv-body img{max-width:100%;max-height:100%;object-fit:contain;background:#fff}
 .pv-body img.pv-thumb{opacity:.75;image-rendering:auto}
+/* 看大圖縮放（#1498）：觸控交給程式處理（不讓瀏覽器捲動或整頁縮放）；放大後可以拖 */
+.pv-body{overflow:hidden}
+.pv-body img.pv-img{touch-action:none;user-select:none;-webkit-user-select:none;cursor:zoom-in;transform-origin:center center;will-change:transform}
+.pv-body img.pv-img.zoomed{cursor:grab}
+.pv-body img.pv-img.zoomed:active{cursor:grabbing}
 .pv-msg{color:#fff;font-size:13px;text-align:center;overflow-wrap:anywhere}
 .filecard{display:flex;align-items:center;gap:8px;max-width:300px;padding:6px 10px;border:1px solid #9bb8d6;border-radius:4px;background:#f4f8fc;cursor:pointer;text-align:left}
 .filecard:hover:not(:disabled){border-color:var(--accent);background:#eaf3fc}
