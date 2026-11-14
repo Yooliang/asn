@@ -73,6 +73,22 @@ const connect = url => new Promise((resolve, reject) => {
   })
 })
 
+// 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵
+async function realInput(S, payload) {
+  let req
+  try { req = JSON.parse(payload) } catch { return }
+  if (Array.isArray(req.click)) {
+    const [x, y] = req.click
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+    await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (typeof req.key === 'string') {
+    const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
+    await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })
+    await S('Input.dispatchKeyEvent', { type: 'keyUp', key: req.key, code: req.key, windowsVirtualKeyCode: code })
+  }
+}
+
 const argText = a => a.value !== undefined ? (typeof a.value === 'string' ? a.value : JSON.stringify(a.value)) : (a.description ?? a.type)
 
 async function runScenario(cdp, sc, base) {
@@ -85,7 +101,10 @@ async function runScenario(cdp, sc, base) {
     if (d.method === 'Runtime.exceptionThrown') { const x = d.params.exceptionDetails; errors.push(`未捕捉例外：${x.exception?.description ?? x.text}`) }
     else if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') errors.push(`console.error：${d.params.args.map(argText).join(' ')}`)
     else if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') errors.push(`瀏覽器錯誤：${d.params.entry.text} ${d.params.entry.url ?? ''}`.trim())
+    // 探測要「真的」滑鼠或按鍵（不是在頁面裡造事件）：頁面呼叫 __smokeInput(JSON)，這裡用偵錯協定送真的輸入
+    else if (d.method === 'Runtime.bindingCalled' && d.params.name === '__smokeInput') realInput(S, d.params.payload).catch(e => errors.push(`送真的輸入失敗：${e?.message ?? e}`))
   })
+  await S('Runtime.addBinding', { name: '__smokeInput' })
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
   await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: sc.height ?? 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
   await S('Page.addScriptToEvaluateOnNewDocument', { source: injectSource(tableFor(sc)) })

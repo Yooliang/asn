@@ -82,7 +82,7 @@
           <span v-else class="mono">{{ d.short }}</span>
           <span class="red" v-if="d.unread"></span>
         </button>
-        <div class="more-wrap" v-if="dev.more.length">
+        <div class="more-wrap" ref="moreWrap" v-if="dev.more.length">
           <button class="rtab dev" :class="{ on: moreOn }" role="tab" :aria-selected="moreOn" title="更多" aria-label="更多" @click="moreOpen = !moreOpen">
             <span class="mono">⋯</span><span class="red" v-if="moreUnreadN"></span>
           </button>
