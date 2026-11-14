@@ -1,11 +1,11 @@
 {
-  "version": "0.2.21",
-  "notes": "- 新功能：電腦版「設定 → 設備 → 這台電腦」右上角多了「工作管理員」，列出這台電腦上 ASN 管的終端和夥伴：名字、程序編號、記憶體、開了多久、狀態。同名視窗開了兩個會標「重複」，可以從這裡關掉多的那個。\n- 改善：夥伴還在啟動時按「喚醒」，等太久會提示「可能卡住了，先關掉那個終端再喚醒」。\n- 改善：現代外觀的群組對話右上角會顯示有幾個人離線，點一下列出是誰；全員在線時不顯示。手機上名單改成浮層，按返回鍵先關名單。\n- 改善：現代外觀換成線條圖示，電腦和手機用同一套。\n- 改善：手機「夥伴」頁搜尋時會先藏起「未讀」那一組；從「開始對話」進去不會再多一層頁面。\n- 改善：手機對話頂端加回「返回」鈕，按了回到「夥伴」分頁。\n- 改善：手機的確認框照電腦終端原本的選項顯示（例如「只有這一次」「不再詢問」「不要」）。指令看起來有風險時，會在標題下方提示，例如刪除整個資料夾、碰到金鑰檔、下載後直接執行。「不再詢問」和要小心時的「只有這一次」要按住一秒才會送出。",
-  "pub_date": "2026-11-14T03:17:51.559Z",
+  "version": "0.2.22",
+  "notes": "- 新功能：設定 →「外觀」多了第三種「LINE 風格」：深色左欄、底部導覽，對話區有頭像、時間和已讀，清單列會顯示時間和未讀數。選復古 Aero 或現代的話，畫面不變。\n- 改善：設備頁精簡，每台只留名字和在線狀態，確認狀態改成指紋小圖示；在線但沒收到回報的設備，列上會標「沒回報」。\n- 改善：手機（Play 安裝）有新版時，回到 App 或資料放久了會重新檢查，紅點會亮起來。\n- 改善：群組點名改由內建通道轉交給夥伴；沒有回覆的當成看過不回，轉交失敗時通知會寫出原因。\n- 修正：卡在自動接回中的夥伴視窗，現在可以在工作管理員裡停掉。\n- 改善：設備的「⋯」小選單點外面、按 Esc 或切換分頁都會收起。",
+  "pub_date": "2026-11-14T12:12:30.052Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhxV2RvWDFFTStJQVlZdXRFM25iMmVZMnlVY0tRM1NEVTRRUXpYTWJ6U2RqNi9aYWxFd1VmSDI0RTJSNm1XNlZHb2pyU1MvbkYxc0QzS0V6SndFa1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjE1ODAxCWZpbGU6QVNOXzAuMi4yMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIxCktmZk01aGRHSW55dXNVL1R3Zk9LKythTGpQOUlpeU5NN0xEbWJQSFNqcWhRNy80K2pTcWxrQzVIaFhZL1R0c1VvMlI2d2tSY0QxS2V1cGxSODF0NEFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.21_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndtVDNUc3ZjRlBTZDE5R2NXWm1aQTBQeHR6bHFsbjJ4MGlWY290Z2lKOGRZUWRpL2FYOU1aeExlWjJEaWVyNW9sWFR0R1ZUZVJkSXd1M3BpdGF5YlFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjU1NTA1CWZpbGU6QVNOXzAuMi4yMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIyCk5yZDVFWnU4aFRPU2N4UGREOXpsNXk4Y25pd1B2S0t3a3NoTy93ci93OUw4Sk9yK2kvZ0hVbWE3bWlWVlNCMDhVc3ZHd0NnNFU0L1dXdVVJdGdPYkNnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.22_x64-setup.exe"
     }
   }
 }
