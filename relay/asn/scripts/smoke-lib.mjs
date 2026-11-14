@@ -772,7 +772,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   if (tab === 'devices') {
     const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
     if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
-    if (!rows.some(r => (r.querySelector('.m-dv-line')?.textContent ?? '').includes('還沒收到這台的回報'))) return { ok: false, why: '沒有一列有第三行「還沒收到這台的回報」' };
+    if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情）' };
     const list = R(document.querySelector('.m-dv-list'));
     for (const row of rows) {
       const rr = R(row);
@@ -784,6 +784,16 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     const dots = rows.map(r => R(r.querySelector('.m-dv-dot')).left);
     if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
     if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
+    // #1499：「還沒收到這台的回報」搬到詳情，仍然要看得到（真的點「詳情」進去找）
+    const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
+    if (!info) return { ok: false, why: '找不到工作機的「詳情」' };
+    info.scrollIntoView({ block: 'center' }); await sleep(150);
+    { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
+    let st = null;
+    for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.m-dv-state')].find(vis) || null; if (!st) await sleep(100) }
+    if (!st || !st.textContent.includes('還沒收到這台的回報')) return { ok: false, why: '工作機的詳情裡看不到「還沒收到這台的回報」' };
+    const box = R(st.closest('.m-dv-info') || st.parentElement);
+    if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };
   } else {
     if (!foot) return { ok: false, why: '帳號頁沒有額度註腳' };
     if (document.querySelector('.m-dv-my')?.textContent.includes('這台沒有存這個帳號')) return { ok: false, why: '還有「這台沒有存這個帳號」' };
@@ -1457,7 +1467,7 @@ function cardsRoster(now = SMOKE_NOW) {
       windows: [{ name: 'five_hour', left_pct: 55, resets_at: toMinute(now + 2 * 3600_000), read_at: old, read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: toMinute(now + 4 * 24 * 3600_000), read_at: old, read_node: 'P' }] },
     { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: old, seen_node: 'P', nodes: [] }] }
 }
-// #930 手機設定頁排版：這支手機＋兩台電腦（工作機的回報是舊的，第三行會是「還沒收到這台的回報」）；
+// #930 手機設定頁排版：這支手機＋兩台電腦（工作機的回報是舊的；#1499 起狀態那一行搬到詳情，列上不再出現）；
 // 辦公室有兩個 Claude 帳號、ASN 在線（可以切換）；工作機也存了兩個但 ASN 不在線（按鈕停用、左邊有說明字），第 8 點的對齊才看得到
 function layoutRoster(now = SMOKE_NOW) {
   const r = resetRoster(now)
