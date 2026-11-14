@@ -2,9 +2,9 @@
 //!
 //! - 安卓建置拿到金鑰庫（[`platform_aead`]）；登入資料只在安卓走這裡。
 //! - Windows 電腦版（0.2.20 起，desk-node-key-protect）拿到 DPAPI（目前使用者，entropy＝節點金鑰檔的 AAD），只用在節點金鑰：
-//!   0.2.20 只讀得懂已加密的檔、預設不加密（免得裝回 0.2.19 以前的候選包時，舊版把加密檔當金鑰、斷線要重新認領）；
-//!   **0.2.21 起預設加密**（[`SEAL_NODE_KEY_DEFAULT`]）。環境變數 `ASN_SEAL_NODE_KEY=0` 可以關掉（已加密的檔照樣讀得懂，只是不再改存），
-//!   降回 0.2.20 也讀得懂；降回 0.2.19 以前會斷線、要重新登入（發版說明有寫）。
+//!   0.2.20、0.2.21 只讀得懂已加密的檔、預設不加密（免得裝回 0.2.19 以前的候選包時，舊版把加密檔當金鑰、斷線要重新認領）；
+//!   **0.2.22 起預設加密**（[`SEAL_NODE_KEY_DEFAULT`]）。環境變數 `ASN_SEAL_NODE_KEY=0` 可以關掉（已加密的檔照樣讀得懂，只是不再改存），
+//!   降回 0.2.20 也讀得懂、降回 0.2.21 一樣讀得懂；降回 0.2.19 以前會斷線、要重新登入（發版說明有寫）。
 //!   其他電腦系統（Linux）拿到 `None`，維持原樣（明文、權限 600）。
 //! - 核心邏輯都是「路徑＋`&dyn Aead`」的純函式，測試在任何平台都能用假的金鑰庫跑。
 //! - 檔案格式：[`PREFIX`]（`ak1:`，和設備金鑰同一個）＋金鑰庫加密後的位元組；各檔案用自己的 AAD，換成別的檔名或別的節點就解不開。
@@ -49,9 +49,9 @@ pub fn node_key_aad(node: &str) -> Vec<u8> {
 #[cfg(not(target_os = "android"))]
 pub const NODE_KEY_UNSEAL_MSG: &str = "這台電腦上的節點金鑰解不開（可能換了 Windows 使用者，或密碼被重設過），請在 ASN 重新登入，讓這台電腦重新取得金鑰";
 
-/// Windows 電腦版預設要不要把節點金鑰改存成加密：0.2.20 是 false（只讀得懂），0.2.21 起 true
+/// Windows 電腦版預設要不要把節點金鑰改存成加密：0.2.20、0.2.21 是 false（只讀得懂），0.2.22 起 true
 pub const SEAL_NODE_KEY_DEFAULT: bool = true;
-/// 開關：`ASN_SEAL_NODE_KEY=1` 加密、`=0` 不加密（只讀得懂）；其他值或沒設照預設（0.2.21 起加密）
+/// 開關：`ASN_SEAL_NODE_KEY=1` 加密、`=0` 不加密（只讀得懂）；其他值或沒設照預設（0.2.22 起加密）
 pub const SEAL_NODE_KEY_ENV: &str = "ASN_SEAL_NODE_KEY";
 pub fn seal_node_key_from(v: Option<&str>) -> bool {
     match v.map(str::trim) {
@@ -554,7 +554,7 @@ mod tests {
         #[cfg(all(not(target_os = "android"), not(windows)))]
         assert!(platform_aead().is_none(), "Linux 電腦版沒有這一層");
         #[cfg(all(windows, not(target_os = "android")))]
-        assert!(platform_aead().is_some(), "Windows 有 DPAPI（0.2.20 起；0.2.21 起預設加密）");
+        assert!(platform_aead().is_some(), "Windows 有 DPAPI（0.2.20 起；0.2.22 起預設加密）");
     }
 
     // account 模組只在有畫面的建置裡（headless 沒有）
@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn 加密開關_預設加密_環境變數1開0關_其他值照預設() {
-        assert!(SEAL_NODE_KEY_DEFAULT, "0.2.21 起預設加密（0.2.20 是 false）");
+        assert!(SEAL_NODE_KEY_DEFAULT, "0.2.22 起預設加密（0.2.20、0.2.21 是 false）");
         assert_eq!(SEAL_NODE_KEY_ENV, "ASN_SEAL_NODE_KEY");
         assert!(seal_node_key_from(Some("1")));
         assert!(seal_node_key_from(Some(" 1 ")));
@@ -946,7 +946,7 @@ mod tests {
         if std::env::var(SEAL_NODE_KEY_ENV).is_err() {
             let a = platform_aead().expect("Windows 有 DPAPI 後端");
             assert_eq!(a.sealing(), SEAL_NODE_KEY_DEFAULT);
-            assert!(a.sealing(), "0.2.21 起 Windows 預設改存加密");
+            assert!(a.sealing(), "0.2.22 起 Windows 預設改存加密");
         }
     }
 }

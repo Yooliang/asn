@@ -168,7 +168,7 @@ fn tree(p: &Path, out: &mut Vec<(String, u64)>) {
 fn peek_印一行_json_count_與_messages_preview_截_80_字_只呼叫_inbox_peek_不_ack_不寫任何檔() {
     let fake = peek_backend(200);
     let f = fx(&fake.url(), Some("T-視窗甲"));
-    // 0.2.21 起 Windows 預設加密：明文的節點金鑰第一次被讀到時會改存成加密（身分那一層做的，不是 recv）。
+    // 0.2.22 起 Windows 預設加密：明文的節點金鑰第一次被讀到時會改存成加密（身分那一層做的，不是 recv）。
     // 先讓它改存好，下面才是在量「peek 本身不寫任何檔」
     let kf = f.home.join(".asn").join("T.key");
     let aead = crate::secret_file::platform_aead();

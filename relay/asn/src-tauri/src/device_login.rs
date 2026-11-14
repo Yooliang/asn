@@ -304,7 +304,7 @@ mod tests {
     }
 
 
-    /// 讀回這台電腦存的節點金鑰（0.2.21 起 Windows 預設加密：檔案是 ak1: 開頭的密文，要經 secret_file 解開；其他平台是明文）
+    /// 讀回這台電腦存的節點金鑰（0.2.22 起 Windows 預設加密：檔案是 ak1: 開頭的密文，要經 secret_file 解開；其他平台是明文）
     fn stored_key(dir: &std::path::Path, node: &str) -> String {
         let f = dir.join(format!("{node}.key"));
         let raw = std::fs::read(&f).unwrap();

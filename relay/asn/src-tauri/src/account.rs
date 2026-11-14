@@ -168,7 +168,7 @@ pub fn write_node_files(relay_home: &Path, node: &str, key: &str, restrict: impl
     write_node_files_with(relay_home, node, key, restrict, aead.as_deref())
 }
 
-/// 手機（aead 有值）：金鑰以金鑰庫加密、原子寫入；加密不了就退回下面原本的明文寫法
+/// 有金鑰庫（aead 有值：手機的金鑰庫，0.2.22 起 Windows 電腦版的 DPAPI）：金鑰加密、原子寫入；加密不了就退回下面原本的明文寫法
 pub fn write_node_files_with(relay_home: &Path, node: &str, key: &str, restrict: impl Fn(&Path) -> bool, aead: Option<&dyn crate::android_keywrap::Aead>) -> Result<(), String> {
     if !identity::valid_id(node) || key.trim().is_empty() {
         return Err("後台回的節點資料格式不對".into());
@@ -616,7 +616,7 @@ mod tests {
     }
 
 
-    /// 讀回這台電腦存的節點金鑰（0.2.21 起 Windows 預設加密：檔案是 ak1: 開頭的密文，要經 secret_file 解開；其他平台是明文）
+    /// 讀回這台電腦存的節點金鑰（0.2.22 起 Windows 預設加密：檔案是 ak1: 開頭的密文，要經 secret_file 解開；其他平台是明文）
     fn stored_key(dir: &std::path::Path, node: &str) -> String {
         let f = dir.join(format!("{node}.key"));
         let raw = std::fs::read(&f).unwrap();
