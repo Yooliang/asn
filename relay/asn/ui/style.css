@@ -781,6 +781,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-tag.kind{color:var(--link)}
 .dv-tag.on{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .dv-tag.off{color:var(--muted)}
+.dv-tag.warn{background:#fff3d6;color:#7a4b00;border:1px solid #d9a441}   /* 沒回報（#1499）：要處理的樣子，不是離線的灰 */
 .dv-tag.hid{border:1px solid var(--line);background:none}
 .dv-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel);overflow:hidden}
 .dv-row{display:flex;align-items:center;gap:8px;position:relative;padding:0 10px 0 0;border-bottom:1px solid var(--line);background:var(--panel)}

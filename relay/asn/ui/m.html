@@ -305,6 +305,7 @@
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
                     <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · {{ KNOWN_TEXT.thisPhone }}</template></span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
+                    <span class="m-dv-tag warn noreport" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span>
                     <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
                   </div>
                   <div class="m-dv-btns m-dv-rowbtns" role="group" :aria-label="d.label + ' 的操作'">

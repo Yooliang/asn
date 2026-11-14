@@ -205,6 +205,16 @@ const SHORT_TEXT = Object.freeze({
 })
 
 /**
+ * 這台在線（或是本機）卻還沒收到它的回報：設備列上要一眼看得出來（#1499：狀態那一行搬到詳情後，列上留「沒回報」小標記）。
+ * 條件跟 deviceStateLine 回「還沒收到這台的回報」完全一樣
+ */
+export const NO_REPORT_TAG = '沒回報'
+export function deviceNoReport({ vendors = [], missing = [], phone = false, online = true, self = false, cloud = null } = {}) {
+  if (phone || cloud === true || (!self && !online)) return false
+  return [...vendors, ...missing].some(v => v.state === STATE.NO_REPORT)
+}
+
+/**
  * 設備列表每一列的一行摘要，例如「Claude 已登入、Codex 未安裝」。
  * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）
  */

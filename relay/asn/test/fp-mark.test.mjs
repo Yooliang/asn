@@ -66,3 +66,21 @@ test('接線：電腦版只有手機那幾列畫圖示；兩邊都註冊元件�
   assert.doesNotMatch(read('ui/m.html'), /:on="|tagConfirmed|tagUnconfirmed/)
   assert.doesNotMatch(read('ui/style.css') + read('ui/mobile.css'), /\.dv-line\{|\.m-dv-line\{|\.dv-tag\.fp\{/)
 })
+
+test('沒回報（#1499 審查）：在線卻還沒收到回報，列上留「沒回報」小標記；條件跟狀態行的「還沒收到這台的回報」一樣', async () => {
+  const { deviceNoReport, deviceStateLine, STATE } = await import('../ui/lib/device-state.mjs')
+  const v = state => [{ label: 'Claude', state }]
+  for (const c of [
+    { vendors: v(STATE.NO_REPORT) },
+    { vendors: v(STATE.NO_REPORT), self: true, online: false },
+    { vendors: v(STATE.LOGGED_IN) },
+    { vendors: v(STATE.NO_REPORT), online: false },
+    { vendors: v(STATE.NO_REPORT), phone: true },
+    { vendors: v(STATE.NO_REPORT), cloud: true },
+  ]) assert.equal(deviceNoReport(c), deviceStateLine(c) === '還沒收到這台的回報', JSON.stringify(c))
+  assert.equal(deviceNoReport({ vendors: v(STATE.NO_REPORT) }), true)
+  for (const [f, cls] of [['ui/m.html', 'm-dv-tag warn noreport'], ['ui/lib/settings-panel.mjs', 'dv-tag warn noreport']]) {
+    assert.ok(read(f).includes(`<span class="${cls}" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span>`), f)
+  }
+  assert.match(read('ui/style.css'), /\.dv-tag\.warn\{background:#fff3d6/)
+})

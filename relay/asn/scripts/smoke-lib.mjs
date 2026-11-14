@@ -773,10 +773,12 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
     if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
     if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情）' };
+    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const tag = w && w.querySelector('.noreport'); if (!tag || tag.textContent.trim() !== '沒回報' || !vis(tag)) return { ok: false, why: '工作機沒有回報，列上要看得到「沒回報」標記' } }
+    if (rows.filter(r => r.querySelector('.noreport')).length !== 1) return { ok: false, why: '只有沒回報的那台要有「沒回報」標記' };
     const list = R(document.querySelector('.m-dv-list'));
     for (const row of rows) {
       const rr = R(row);
-      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .m-dv-line')) {
+      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .noreport')) {
         const t = textRect(e);
         if (t.bottom > rr.bottom + 0.5 || t.bottom > list.bottom + 0.5) return { ok: false, why: '「' + (row.querySelector('b')?.textContent ?? '') + '」那列的「' + e.textContent.trim() + '」被切' };
       }
