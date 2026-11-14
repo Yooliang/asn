@@ -697,6 +697,7 @@ export const TASKMGR_MEMBERS = [{ id: 'P', agents: [
   { name: 'asn真', status: 'idle', cwd_label: 'asn' }, { name: '西川', status: 'busy', cwd_label: 'asn' },
   { name: '小東', status: 'idle', engine: 'pi', cwd_label: 'pi' }, { name: '小雙', status: 'idle', engine: 'gemini', cwd_label: 'agy' },
 ] }]
+export const TASKMGR_RESUMING_SID = '11111111-2222-4333-8444-555555555555'
 export const taskmgrSnapshot = (now = Date.now()) => ({
   now_ms: now,
   rows: [
@@ -704,6 +705,7 @@ export const taskmgrSnapshot = (now = Date.now()) => ({
     { kind: 'claude', name: 'asn真', engine: 'claude', pid: 21096, memory_bytes: 380 * 1024 * 1024, started_ms: now - 41 * 60_000, status: 'idle', detail: null, by_asn: false, cwd: 'G:\\Yooliang\\asn', session_id: 's2', term_id: null, live: true, inside: null },
     { kind: 'claude', name: '西川', engine: 'claude', pid: 3001, memory_bytes: 520 * 1024 * 1024, started_ms: now - 5 * 3600_000, status: 'busy', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's3', term_id: null, live: true, inside: null },
     { kind: 'pi', name: '小東', engine: 'pi', pid: 4002, memory_bytes: 210 * 1024 * 1024, started_ms: now - 90 * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\work', session_id: null, term_id: null, live: true, inside: null },
+    { kind: 'resuming', name: '小乙', engine: 'claude', pid: 23100, memory_bytes: 96 * 1024 * 1024, started_ms: now - 8 * 60_000, status: 'stuck', detail: null, by_asn: true, cwd: 'G:\\work', session_id: TASKMGR_RESUMING_SID, term_id: '7', live: true, inside: null },
     { kind: 'process', name: 'pi #5120（前景）', engine: 'pi', pid: 5120, memory_bytes: null, started_ms: null, status: 'running', detail: null, by_asn: null, cwd: '', session_id: null, term_id: null, live: true, inside: null },
     { kind: 'mux', name: '終端服務', engine: '', pid: 6000, memory_bytes: 98 * 1024 * 1024, started_ms: now - 2 * 86400_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: 2 },
     { kind: 'asn', name: 'ASN', engine: 'asn', pid: 7000, memory_bytes: 310 * 1024 * 1024, started_ms: now - 6 * 3600_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: null },
@@ -745,6 +747,38 @@ export const taskmgrProbeSource = () => `(async () => {
   if (!dlg) return { ok: false, why: '按下停止後沒有出現確認框' };
   const body = document.querySelector('.dlg').textContent;
   if (!body.includes('程序編號 18420') || !body.includes('不受影響') || !body.includes('停止這個視窗')) return { ok: false, why: '確認框內容不對：' + body.slice(0, 120) };
+  // 卡在接回中的夥伴視窗：有「停止」鈕 → 確認框文字正確 → 確認後只呼叫 term_stop（帶終端編號與對話編號）
+  const dlgOpen = () => document.querySelector('.dlg-back .dlg .tm-confirm');
+  const cancel = [...document.querySelectorAll('.dlg .partner-actions button')].find(b => b.textContent.trim() === '取消');
+  if (!cancel) return { ok: false, why: '確認框沒有「取消」鈕' };
+  cancel.click();
+  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '按取消後確認框沒有關' };
+  const rrow = () => kindRow('resuming');
+  if (!rrow()) return { ok: false, why: '沒有「接回中」那一列' };
+  const rtext = rrow().textContent;
+  if (!rtext.includes('小乙') || !rtext.includes('可能卡住了') || !rtext.includes('ASN 開的') || !rtext.includes('23100')) return { ok: false, why: '接回中那一列的內容不對：' + rtext.slice(0, 120) };
+  if (rtext.includes('11111111')) return { ok: false, why: '接回中那一列不該顯示對話編號' };
+  const askResuming = async () => {
+    const b = await waitFor(() => { const x = rrow() && rrow().querySelector('.tm-stop'); return x && !x.disabled ? x : null });
+    if (!b || b.textContent.trim() !== '停止') return false;
+    b.click();
+    return Boolean(await waitFor(dlgOpen));
+  };
+  if (!(await askResuming())) return { ok: false, why: '接回中那一列沒有能按的「停止」鈕，或按了沒有確認框' };
+  const rbody = document.querySelector('.dlg').textContent;
+  if (!rbody.includes('關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。')) return { ok: false, why: '接回中的確認框文字不對：' + rbody.slice(0, 160) };
+  if (dlgOpen().textContent.trim() !== '停止') return { ok: false, why: '接回中的確認鈕應寫「停止」：' + dlgOpen().textContent.trim() };
+  if (rbody.includes('11111111')) return { ok: false, why: '確認框不該顯示對話編號' };
+  dlgOpen().click();
+  const stopCall = await waitFor(() => (globalThis.__smokeCalls || []).find(c => c[0] === 'term_stop'));
+  if (!stopCall) return { ok: false, why: '確認後沒有呼叫 term_stop' };
+  const want = JSON.stringify({ req: { id: '7', resuming_sid: ${JSON.stringify(TASKMGR_RESUMING_SID)} } });
+  if (JSON.stringify(stopCall[1]) !== want) return { ok: false, why: 'term_stop 的參數不對：' + JSON.stringify(stopCall[1]) };
+  const others = (globalThis.__smokeCalls || []).map(c => c[0]).filter(c => /^(partner_op|term_(send|start))/.test(c));
+  if (others.length) return { ok: false, why: '停止接回中的視窗不該呼叫別的動作：' + others.join('、') };
+  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '確認後確認框沒有關' };
+  // 再開一次確認框，畫面截圖停在這裡
+  if (!(await askResuming())) return { ok: false, why: '停止完成後再按「停止」沒有開出確認框' };
   return { ok: true };
 })()`
 export const DEVBTN_PROBES = { desktop: { devbtn: 'desktop' }, mobile: { devbtn: 'mobile', open: '帳號' } }
@@ -2269,6 +2303,7 @@ export const tableFor = scenario => {
     t.relay_list = { members: TASKMGR_MEMBERS }
     t.relay_launchers = { machines: [{ node: 'P', online: true, launcher: { profiles: [] } }] }   // 這台開放遠端管理：停止才能按
     t.task_manager_list = taskmgrSnapshot()
+    t.term_stop = null   // 假後台：停止「接回中」那一列會呼叫它，參數記在 __smokeCalls
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }

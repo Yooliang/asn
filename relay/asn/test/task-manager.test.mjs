@@ -340,3 +340,56 @@ test('這台電腦從設備清單消失時，設定頁退出工作管理員並�
   assert.match(panel, /const backToList = \(\) => \{ if \(view\.value === 'tasks'\) act\('tm-close'\)/)
   assert.ok(!('back' in TEXT))
 })
+
+// ---------- 卡在接回中的夥伴視窗（resuming） ----------
+
+const SID_R = '11111111-2222-4333-8444-555555555555'
+const resuming = (o = {}) => ({ kind: 'resuming', name: '小乙', engine: 'claude', pid: 502, memory_bytes: 400 * 1024 * 1024, started_ms: NOW - 6 * 60_000, status: 'stuck', by_asn: true, cwd: 'G:/w', session_id: SID_R, term_id: '7', live: true, ...o })
+
+test('接回中：停止走 term_stop，多帶對話編號給電腦端再驗', () => {
+  const c = ctx([])
+  const r = resuming()
+  assert.deepEqual(stopPlan(r, c), { path: PATH.term, ok: true, reason: '' })
+  assert.deepEqual(stopRequest(r, c), { path: PATH.term, req: { id: '7', resuming_sid: SID_R } })
+  // 一般終端面板的請求不變
+  assert.deepEqual(stopRequest({ kind: 'terminal', by_asn: true, term_id: 't-7', pid: 9, live: true }, c), { path: PATH.term, req: { id: 't-7' } })
+  // 缺終端編號或對話編號：不能停
+  assert.equal(stopRequest(resuming({ term_id: null }), c), null)
+  assert.equal(stopRequest(resuming({ session_id: null }), c), null)
+})
+
+test('接回中：列的來源、狀態與按鈕文字', () => {
+  const c = ctx([])
+  const young = viewRow(resuming({ status: 'resuming' }), NOW, c)
+  const stuck = viewRow(resuming(), NOW, c)
+  assert.equal(young.status, '接回中')
+  assert.equal(stuck.status, '可能卡住了')
+  assert.equal(stuck.source, 'ASN 開的')
+  assert.equal(stuck.canStop, true)
+  assert.equal(stuck.viewOnly, false)
+  assert.equal(stuck.name, '小乙')
+  assert.ok(!JSON.stringify(stuck).includes(SID_R), '畫面不顯示對話編號')
+})
+
+test('接回中：確認框文字固定，按鈕寫「停止」', () => {
+  const r = resuming()
+  const c = confirmView(r, [r], NOW)
+  assert.deepEqual(c.notes, ['關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。'])
+  assert.equal(c.ok, '停止')
+  assert.ok(!JSON.stringify(c).includes(SID_R) && !JSON.stringify(c).includes('"7"'))
+})
+
+test('接回中：控制器按確認走 termStop（帶 resuming_sid），不走 close／寄信', async () => {
+  const { tm, calls } = setup({ snapshot: { rows: [resuming()], known: [] }, friends: [] })
+  tm.open()
+  await new Promise(r => setTimeout(r, 5))
+  const v = tm.view().rows[0]
+  assert.equal(v.canStop, true)
+  tm.ask(v.key)
+  assert.equal(tm.view().confirm.notes[0], '關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。')
+  await tm.confirm()
+  assert.deepEqual(calls.term, [{ id: '7', resuming_sid: SID_R }])
+  assert.deepEqual(calls.runOp, [])
+  assert.deepEqual(calls.mail, [])
+  assert.equal(tm.view().confirm, null)
+})

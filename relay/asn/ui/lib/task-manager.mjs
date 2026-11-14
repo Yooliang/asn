@@ -5,6 +5,7 @@
 //   一般視窗／pi／內建工作者 → 夥伴管理的 close（和名單右鍵「關閉視窗」同一條，要登入、要開放遠端管理）
 //   同名重複的視窗 → 以本人身分寄 /asn-close-dup <pid> 給同一個視窗（和對話頁的「關掉第 N 個」同一條）
 //   終端面板 → 既有的 term_stop
+//   卡在接回中的夥伴視窗（ASN 開的、已沒有對話紀錄檔可對）→ 同樣走 term_stop，多帶對話編號，電腦端會把條件再驗一次
 //   自己開的前景程式、終端服務、ASN 本體 → 只能看
 // node 與瀏覽器都能跑；畫面文字純繁體中文，除了程序編號（本頁的欄位）不顯示任何內部識別碼。
 import { menuItems, partnerEngine, isProcessEntry } from './partner-ops.mjs'
@@ -45,7 +46,7 @@ export const engineText = e => {
   return ENGINE_TEXT[k] ?? (k || DASH)
 }
 
-const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', thinking: '忙碌', running: '執行中', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止', offline: '離線' }
+const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', thinking: '忙碌', running: '執行中', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止', offline: '離線', resuming: '接回中', stuck: '可能卡住了' }
 export const statusText = s => STATUS_TEXT[String(s ?? '').trim().toLowerCase()] ?? DASH
 
 // ---------- 格式化 ----------
@@ -140,6 +141,10 @@ export function stopPlan(row, ctx = {}) {
   if (k === 'terminal') {
     return row.by_asn === false ? { path: PATH.none, ok: false, reason: '這個終端窗格是你自己開的，ASN 只能看' } : { path: PATH.term, ok: Boolean(row.term_id), reason: row.term_id ? '' : '找不到這個終端' }
   }
+  if (k === 'resuming') {
+    const ok = Boolean(row.term_id && row.session_id)
+    return { path: PATH.term, ok, reason: ok ? '' : '找不到這個終端' }
+  }
   if ((k === 'claude' || k === 'pi') && row.by_asn === false) return { path: PATH.none, ok: false, reason: VIEW_ONLY_WHY.own }
   if (k === 'claude' || k === 'pi' || k === 'acp') {
     const path = k === 'claude' && row.dup ? PATH.dup : PATH.close
@@ -157,7 +162,7 @@ export function stopRequest(row, ctx = {}) {
   const plan = stopPlan(row, ctx)
   if (!plan.ok) return null
   if (plan.path === PATH.dup) return { path: PATH.dup, friendId: `${ctx.selfNode}/${row.name}`, text: dupCloseText(row.pid) }
-  if (plan.path === PATH.term) return { path: PATH.term, req: { id: row.term_id } }
+  if (plan.path === PATH.term) return { path: PATH.term, req: row.kind === 'resuming' ? { id: row.term_id, resuming_sid: row.session_id } : { id: row.term_id } }
   return { path: PATH.close, friend: findFriend(ctx.friends, ctx.selfNode, row.name), op: 'close' }
 }
 
@@ -167,6 +172,7 @@ const sourceText = r => {
   switch (r.kind) {
     case 'claude': case 'pi': return r.by_asn ? 'ASN 開的' : '自己開的'
     case 'acp': return 'ASN 內建'
+    case 'resuming': return 'ASN 開的'
     case 'terminal': return r.by_asn === false ? '自己開的（已接手）' : 'ASN 開的終端'
     case 'process': return '自己開的'
     case 'mux': return 'ASN 的終端服務'
@@ -204,6 +210,7 @@ export function confirmView(r, rows, now) {
   const facts = [r.pid > 0 ? `程序編號 ${r.pid}` : '', openedAgo(r.started_ms, now), statusText(r.status) === DASH ? '' : statusText(r.status)].filter(Boolean).join(' · ')
   const lines = [facts, r.cwd ? `資料夾：${r.cwd}` : ''].filter(Boolean)
   if (r.kind === 'terminal') return { ...base, title: `要關閉這個${engineText(r.engine)}終端嗎？`, lines, notes: ['只會關掉這個終端，裡面正在跑的程式會結束。'], ok: '關閉這個終端' }
+  if (r.kind === 'resuming') return { ...base, title: `要停止「${name}」這個還在接回的終端嗎？`, lines, notes: ['關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。'], ok: TEXT.stop }
   if (r.kind === 'acp') return { ...base, title: `要停止「${name}」嗎？`, lines, notes: ['只停止它這一次的執行，名單上會顯示「已停止」；按「重開」或重啟 ASN 就會恢復。'], ok: '停止' }
   if (r.dup) {
     const other = rows.filter(x => x.kind === 'claude' && x.name === name && x.pid !== r.pid)
