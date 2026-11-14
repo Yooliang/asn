@@ -58,7 +58,7 @@ import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorT
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, openPlayStore, playNewText as playNewTextOf, playUpdateVersion, playUpdateView } from './lib/play-update.mjs'
-import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
+import { RETRY_LABEL, createReleasesRefresher, initialReleases, loadReleases, releasesNote, releasesStale, stampReleases } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
@@ -76,6 +76,7 @@ import { GuideDoc } from './lib/guide-doc.mjs'
 import { loginUnsealedNote } from './lib/mobile-login-seal.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
+let fgListener = null   // 版本紀錄的重讀（#1501）掛在這裡：外殼的前景事件與 visibilitychange 都會走到 tellFg，不另掛一套監聽
 const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
@@ -233,7 +234,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
   // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。
   // 前景時每 30 秒再告知一次（續命）：Rust 的前景告知 90 秒就過期，背景時網頁計時器被凍住不會續命，所以「進背景」的告知就算遺失也只會多撐一下
-  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}) }
+  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}); try { fgListener?.(fg === true) } catch {} }
   window.__asnFgEvent = tellFg
   document.addEventListener('visibilitychange', () => tellFg(document.visibilityState === 'visible'))
   tellFg(document.visibilityState === 'visible')
@@ -605,19 +606,29 @@ const app = createApp({
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設定 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
     const rel = reactive(initialReleases())
+    let relBusy = false
     const loadRel = async (force = false) => {
-      if (rel.phase === 'loading') return
-      rel.phase = 'loading'
-      Object.assign(rel, await loadReleases(f => invoke('site_releases', { force: f === true }), { force }))
+      if (relBusy || rel.phase === 'loading') return
+      relBusy = true
+      const prev = { ...rel }
+      if (prev.phase !== 'ok') rel.phase = 'loading'   // 已有資料的重讀不閃成「讀取中」（紅點不能跟著閃掉）
+      // force 預設 false：Rust 端讀成功的只留 10 分鐘，比我們的 30 分鐘過期短，所以重讀不會拿到比 30 分鐘更舊的快取
+      const res = await loadReleases(f => invoke('site_releases', { force: f === true }), { force })
+      Object.assign(rel, stampReleases(prev, res, Date.now()))
+      relBusy = false
     }
+    // 不能自己更新的版本（Play）：啟動讀、資料過期（30 分鐘）時回前景／進設定分頁／進更新頁再讀、讀失敗退避重試（30 秒、2 分、5 分、15 分，之後每 30 分；背景不試）
+    const relRefresh = createReleasesRefresher({ getRel: () => rel, load: () => loadRel(), isForeground: () => document.visibilityState === 'visible', enabled: () => upd.enabled === false })
+    fgListener = fg => relRefresh.onForeground(fg)
     const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
     const relNote = computed(() => releasesNote(rel))
     const playView = computed(() => (upd.enabled ? { kind: 'unknown' } : playUpdateView(rel, info.version)))
     const playNewText = computed(() => (playView.value.kind === 'new' ? playNewTextOf(playView.value.version) : ''))
     const rowHasDot = key => key === 'update' && playNewVersion.value !== ''
     const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent；Android 會用 Play App 開這個 https 網址）
-    watch(() => upd.enabled, en => { if (en === false && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
-    watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
+    watch(() => upd.enabled, en => { if (en === false) void relRefresh.run() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
+    watch(settingCat, c => { if (c === 'update' && releasesStale(rel, Date.now())) void loadRel() })   // 更新頁（兩種版本都有）：過期或沒讀過才讀
+    watch(() => nav.tab, t => { if (t === 'me') relRefresh.check() })   // 進設定大分頁：過期才讀（只有 Play 版需要；check 內會看 enabled）
     // 雲端代理（#756）：進這一頁才讀清單、每 20 秒更新（看代理是否上線）；離開這一頁金鑰與剪貼簿都清掉
     const cloud = createMobileCloud({
       api: cloudApi, status: authApi.status, reactive,

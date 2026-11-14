@@ -41,3 +41,71 @@ export const releasesNote = rel =>
     : rel?.phase === 'loading' ? LOADING_TEXT
       : rel?.phase === 'ok' && !(rel.entries?.length) ? EMPTY_TEXT
         : ''
+
+// ---- 重讀時機（#1501）：手機（Play 版）的紅點全靠這份清單，只在啟動讀一次會讓「一直開著的 App」永遠看不到新版 ----
+export const RELEASES_MAX_AGE_MS = 30 * 60_000   // 讀成功的資料超過 30 分鐘就算過期
+export const RELEASES_COOLOFF_MS = 30_000        // 剛失敗過不連著再讀（切分頁、切前景都會觸發檢查）
+export const RELEASES_RETRY_MS = [30_000, 120_000, 300_000, 900_000]   // 讀失敗的背景重試：30 秒、2 分、5 分、15 分，之後每 30 分
+export const RELEASES_RETRY_TAIL_MS = 30 * 60_000
+
+// 第 n 次失敗後（n ≥ 1）隔多久再試；n 小於 1 當 1
+export const retryDelayMs = failCount => {
+  const n = Math.max(1, Math.floor(Number(failCount)) || 1)
+  return RELEASES_RETRY_MS[n - 1] ?? RELEASES_RETRY_TAIL_MS
+}
+
+// 現在該不該重讀：讀取中不讀；還沒讀過、讀失敗要讀（剛失敗的 30 秒內先不連讀）；讀成功的過了 maxAgeMs 才讀
+export function releasesStale(rel, nowMs, maxAgeMs = RELEASES_MAX_AGE_MS) {
+  const phase = rel?.phase
+  if (phase === 'loading') return false
+  if (phase !== 'ok' && phase !== 'idle' && phase !== 'error') return false
+  if (rel.failedAt > 0 && nowMs - rel.failedAt < RELEASES_COOLOFF_MS) return false
+  if (phase === 'ok') return !(rel.loadedAt > 0) || nowMs - rel.loadedAt >= maxAgeMs
+  return true
+}
+
+// 讀完一次，把結果跟時間戳合併成新的 rel（不改傳入的物件）：
+// 成功 → 記 loadedAt、清失敗紀錄；失敗 → 記 failedAt、失敗次數加一；已經有舊資料時失敗不把舊資料丟掉（紅點照舊，只是下次再試）
+export function stampReleases(prev, result, nowMs) {
+  const before = prev ?? initialReleases()
+  if (result?.phase === 'ok') return { ...result, loadedAt: nowMs, failedAt: 0, failCount: 0 }
+  const failCount = (before.failCount || 0) + 1
+  const kept = before.phase === 'ok' || (before.entries?.length > 0 && before.loadedAt > 0)
+  return kept
+    ? { ...before, phase: 'ok', failedAt: nowMs, failCount }
+    : { ...(result ?? {}), phase: 'error', entries: [], loadedAt: 0, failedAt: nowMs, failCount }
+}
+
+// 重讀的調度（純邏輯，計時器與時鐘都從外面傳入，測試用假的）。
+// load＝讀一次並更新 rel 的函式（要自己擋重複讀）；getRel＝取目前 rel；isForeground／enabled＝App 在前景／這個版本需要自動重讀
+// check()：過期就讀；onForeground(fg)：回前景時 check（並把退避計時重新掛上），進背景時停計時；stop()：清計時器
+export function createReleasesRefresher({ getRel, load, now = () => Date.now(), isForeground = () => true, enabled = () => true, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let timer = null
+  const clear = () => { if (timer !== null) { clearTimer(timer); timer = null } }
+  const schedule = ms => {
+    clear()
+    timer = setTimer(() => { timer = null; if (enabled() && isForeground()) void run() }, ms)   // 在背景不試：回前景時 onForeground 會補上
+  }
+  const settle = () => {
+    const rel = getRel()
+    if (rel?.failCount > 0) schedule(retryDelayMs(rel.failCount))
+    else clear()
+  }
+  async function run() {
+    clear()
+    await load()
+    settle()
+  }
+  const check = () => {
+    if (!enabled() || !releasesStale(getRel(), now())) return false
+    void run()
+    return true
+  }
+  const onForeground = fg => {
+    if (fg !== true) { clear(); return false }
+    if (check()) return true
+    if (enabled() && timer === null && getRel()?.failCount > 0 && getRel()?.phase !== 'loading') schedule(retryDelayMs(getRel().failCount))
+    return false
+  }
+  return { check, onForeground, run, stop: clear, pending: () => timer !== null }
+}

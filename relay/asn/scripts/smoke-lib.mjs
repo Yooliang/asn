@@ -1439,8 +1439,8 @@ export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(prob
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1739,6 +1739,31 @@ const legacyMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-00000000c002', from_node: LEGACY_NODE, from_agent: 'H-收發室', body: 'H 設備：舊寄件名、沒有類別的新信。', trust: 'member', to_agent: '測試機', created_at: new Date(now - 60_000).toISOString() },
 ]
 const legacyMe = view => (view === 'lastchat' ? { navTab: 'list', lastChat: `${LEGACY_NODE}/${LEGACY_SENDERS[0].agent}` } : { navTab: 'list' })
+// 手機（Play 版，沒有自動更新）設定分頁的新版紅點（#1501）：啟動讀到的舊清單沒有新版→紅點不亮；清單過期（時鐘撥快 31 分鐘）後外殼告知回前景（__asnFgEvent，外殼真實的介面）→ 重讀到新版→「設定」那一格亮紅點
+export const MRELEASE_PROBE = { mrelease: true }
+export const mreleaseProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let tabs = [];
+  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
+  if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
+  const me = () => tabs.find(b => b.querySelector('span')?.textContent.trim() === '設定');
+  for (let i = 0; i < 40 && (globalThis.__smokeRelReads || 0) < 1; i++) await sleep(100);
+  await sleep(400);
+  if ((globalThis.__smokeRelReads || 0) !== 1) return { ok: false, why: '啟動應該讀一次版本紀錄，實際 ' + (globalThis.__smokeRelReads || 0) };
+  if (me().querySelector('i.red')) return { ok: false, why: '舊清單沒有新版，「設定」不該有紅點' };
+  if (typeof window.__asnFgEvent !== 'function') return { ok: false, why: '外殼的前景事件入口不見了' };
+  window.__asnFgEvent(true);
+  await sleep(500);
+  if ((globalThis.__smokeRelReads || 0) !== 1) return { ok: false, why: '清單還沒過期，回前景不該重讀' };
+  const real = Date.now; Date.now = () => real() + 31 * 60000;
+  window.__asnFgEvent(true);
+  let dot = null;
+  for (let i = 0; i < 40 && !dot; i++) { await sleep(100); dot = me().querySelector('i.red') }
+  if ((globalThis.__smokeRelReads || 0) !== 2) return { ok: false, why: '清單過期後回前景應該重讀一次，實際共 ' + (globalThis.__smokeRelReads || 0) };
+  if (!dot) return { ok: false, why: '重讀到新版後，「設定」那一格沒有紅點' };
+  return { ok: true, why: '' };
+})()`
+
 export const MNOTICE_LEGACY_PROBES = { list: { mnoticeLegacy: true, view: 'list' }, lastchat: { mnoticeLegacy: true, view: 'lastchat' } }
 export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -2178,6 +2203,7 @@ export const SCENARIOS = [
   { name: 'list-term-typing-360', page: 'list.html', width: 360, state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.typing, shot: 'list-term-typing-360.png' },
   { name: 'list-term-multi', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.multi, shot: 'list-term-multi-1100.png' },
   { name: 'list-term-refused', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.refused, shot: 'list-term-refused-1100.png' },
+  { name: 'm-release-dot', page: 'm.html', state: { signedIn: true, mrelease: true }, ready: '#app.m .m-tabs', probe: MRELEASE_PROBE, shot: 'm-release-dot-412.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },
   { name: 'm-notice-dot-big', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dotBig, shot: 'm-notice-dot-big.png' },
@@ -2392,6 +2418,11 @@ export const tableFor = scenario => {
     t.show_toast = null   // 新通知會跳右下角提示
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(DNOTICE_ME[scenario.state.dnotice]) } }
   }
+  if (scenario.state.mrelease) {
+    const rows = v => [{ version: v, date: '', lines: [], platforms: ['官網', 'Play'] }]
+    t.site_releases = []
+    t.__releasesSeq = [rows('0.0.0'), rows('99.0.0')]
+  }
   if (scenario.state.mnoticeLegacy) {
     t.relay_list = { members: legacyMembers() }
     t.relay_inbox = { messages: legacyMails() }
@@ -2502,6 +2533,8 @@ export const injectSource = table => `(() => {
         if (cmd === 'term_view_close') { clearInterval(tv.timer); return null }
         if (cmd === 'term_view_set') { const was = tv.paused; tv.paused = !!(args && args.paused); if (was && !tv.paused) tvSend(); return null }
       }
+      // 版本紀錄（#1501）：表裡的 __releasesSeq 是一串回應，第 n 次讀回第 n 筆（不夠就一直回最後一筆）；__smokeRelReads 記讀了幾次
+      if (cmd === 'site_releases' && Array.isArray(T.__releasesSeq)) { const i = globalThis.__smokeRelReads = (globalThis.__smokeRelReads || 0) + 1; return JSON.parse(JSON.stringify(T.__releasesSeq[Math.min(i, T.__releasesSeq.length) - 1])) }
       const ev = T.__emitOn && T.__emitOn[cmd];
       if (Array.isArray(ev)) ev.forEach((e, i) => setTimeout(() => { for (const fn of ((globalThis.__smokeListeners || {})[e.event] || [])) fn({ event: e.event, payload: JSON.parse(JSON.stringify(e.payload)) }) }, 50 * (i + 1)));
       const v = T[cmd];
