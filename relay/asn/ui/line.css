@@ -30,6 +30,11 @@
 /* ---------- 名單：本人資訊、上方四個大分頁、左邊設備頁籤、清單 ---------- */
 :root[data-skin="line"] .me{background:transparent}
 :root[data-skin="line"] .upd-bar{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:none}
+/* 下載中（#1526）：拿掉圓角卡片，只留一條直角進度條；左右內距 8px 跟分頁列一樣 */
+:root[data-skin="line"] .upd-bar.dl{padding:6px 8px 0;background:transparent;border:0;border-radius:0}
+:root[data-skin="line"] .upd-prog{height:20px;border:1px solid var(--line);background:var(--panel)}
+:root[data-skin="line"] .upd-fill{background:rgba(34,177,76,.25)}
+:root[data-skin="line"] .upd-prog > .upd-text{line-height:18px;color:var(--fg)}
 :root[data-skin="line"] .top-tabs{background:transparent;padding:6px 8px;gap:6px}
 :root[data-skin="line"] .ttab{height:30px;border:0;border-radius:999px;background:transparent;color:var(--muted)}
 :root[data-skin="line"] .ttab:hover{background:var(--ls-hover);color:var(--fg)}

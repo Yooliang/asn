@@ -662,6 +662,11 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .logout-ask .av-btns{flex-wrap:wrap}
 .upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upd-btn{flex:none}
+/* 下載中（#1526）：整條換成直角進度條；左右內距跟 .top-tabs 一樣（6px），進度條的左右緣就和分頁對齊 */
+.upd-bar.dl{padding:4px 6px;background:transparent;border-bottom:0}
+.upd-prog{position:relative;flex:1;min-width:0;height:18px;box-sizing:border-box;border:1px solid #9bb3cc;border-radius:0;background:#fff;overflow:hidden}
+.upd-fill{position:absolute;left:0;top:0;bottom:0;border-radius:0;background:linear-gradient(#d4f1c6,#9bd884);transition:width .2s linear}
+.upd-prog > .upd-text{position:relative;display:block;padding:0 6px;line-height:16px;text-align:center;color:#1d2b3a}
 .settings .upd-set{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .settings .chlog{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .chlog-none{margin:0;font-size:12px;opacity:.7}
