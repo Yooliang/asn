@@ -62,3 +62,31 @@ export function lineRows(log, { now = Date.now(), friendNick = '' } = {}) {
   }
   return out
 }
+
+/**
+ * 清單列右上角的最後往來時間（#1449 第三張）：今天「下午 3:52」、昨天「昨天」、六天內「星期三」、更早「11/10」（跨年「2025/12/31」）。
+ * 沒有時間（0、空、不是時間）回空字串，畫面就不顯示。
+ */
+export function listTimeText(t, now = Date.now()) {
+  const n = num(t)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const d = new Date(n), today = new Date(num(now))
+  const days = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000)
+  if (days <= 0) return clockLabel(n)
+  if (days === 1) return '昨天'
+  if (days < 7) return `星期${WEEK[d.getDay()]}`
+  return d.getFullYear() === today.getFullYear() ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+export const COMPOSE_MAX_LINES = 6
+
+/**
+ * 輸入框隨字數變高（#1449 13b）：內容高度（scrollHeight，含上下內距）→ 實際高度與是否要內部捲動。
+ * lineH＝一行的高度、extra＝上下內距與邊框（scrollHeight 不含邊框時另外加 border）。最少一行、最多 maxLines 行，超過就固定高度並捲動。
+ */
+export function composeFieldHeight(scrollH, { lineH = 22, extra = 18, border = 0, maxLines = COMPOSE_MAX_LINES } = {}) {
+  const min = lineH + extra + border, max = maxLines * lineH + extra + border
+  const want = (Number.isFinite(scrollH) ? scrollH : min) + border
+  const height = Math.min(max, Math.max(min, Math.ceil(want)))
+  return { height, scroll: want > max }
+}

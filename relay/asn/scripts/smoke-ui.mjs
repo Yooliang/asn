@@ -88,6 +88,12 @@ async function realInput(S, payload) {
     await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
     await new Promise(r => setTimeout(r, ms))
     await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  } else if (typeof req.text === 'string') {
+    await S('Input.insertText', { text: req.text })   // 真的打字（插入文字）
+  } else if (req.shiftEnter === true) {
+    const k = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 8 }   // Shift+Enter：輸入框換行
+    await S('Input.dispatchKeyEvent', { type: 'keyDown', text: '\r', ...k })
+    await S('Input.dispatchKeyEvent', { type: 'keyUp', ...k })
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })

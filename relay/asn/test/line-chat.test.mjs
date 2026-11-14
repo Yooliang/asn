@@ -98,3 +98,79 @@ test('標題列：返回、人數、通話鍵只在 LINE；通話鍵走既有的
   assert.match(list, /:title="skin === 'line' \? t\.label : null"/, '其他外觀不多 title 屬性')
   assert.match(m, /:data-line-chat="lineChat \? '' : null"/, '不在 LINE 對話頁時屬性不存在')
 })
+
+// ---- #1449 第三張：清單時間、輸入框高度、輸入列與清單列的節點守門 ----
+import { listTimeText, composeFieldHeight, COMPOSE_MAX_LINES } from '../ui/lib/line-chat.mjs'
+import { roomPseudoFriend } from '../ui/lib/mobile-rooms.mjs'
+
+test('listTimeText：今天「下午 3:52」、昨天、一週內星期、更早月/日、跨年帶年份；沒有時間回空字串', () => {
+  const now = at(2026, 11, 14, 16, 0)   // 星期六
+  assert.equal(listTimeText(at(2026, 11, 14, 15, 52), now), '下午 3:52')
+  assert.equal(listTimeText(at(2026, 11, 14, 0, 1), now), '上午 12:01')
+  assert.equal(listTimeText(at(2026, 11, 13, 23, 59), now), '昨天')
+  assert.equal(listTimeText(at(2026, 11, 11, 9, 0), now), '星期三')
+  assert.equal(listTimeText(at(2026, 11, 8, 9, 0), now), '星期日')
+  assert.equal(listTimeText(at(2026, 11, 7, 9, 0), now), '11/7', '滿七天改寫日期')
+  assert.equal(listTimeText(at(2025, 12, 31, 9, 0), now), '2025/12/31')
+  assert.equal(listTimeText(0, now), '')
+  assert.equal(listTimeText(undefined, now), '')
+  assert.equal(listTimeText('不是時間', now), '')
+  assert.equal(listTimeText(at(2026, 10, 31, 23, 0), at(2026, 11, 1, 8, 0)), '昨天', '跨月的昨天')
+})
+
+test('composeFieldHeight：最少一行、隨內容變高、最多六行後固定並捲動', () => {
+  const o = { lineH: 22, extra: 18 }
+  assert.deepEqual(composeFieldHeight(40, o), { height: 40, scroll: false })
+  assert.deepEqual(composeFieldHeight(0, o), { height: 40, scroll: false }, '空的（量不到）也是一行')
+  assert.deepEqual(composeFieldHeight(NaN, o), { height: 40, scroll: false })
+  assert.deepEqual(composeFieldHeight(84, o), { height: 84, scroll: false }, '三行')
+  assert.deepEqual(composeFieldHeight(150, o), { height: 150, scroll: false }, '剛好六行不捲')
+  assert.deepEqual(composeFieldHeight(172, o), { height: 150, scroll: true }, '七行停在六行')
+  assert.deepEqual(composeFieldHeight(2000, o), { height: 150, scroll: true })
+  assert.equal(COMPOSE_MAX_LINES, 6)
+  assert.deepEqual(composeFieldHeight(84, { ...o, border: 2 }), { height: 86, scroll: false }, '邊框算進高度')
+  assert.deepEqual(composeFieldHeight(172, { ...o, border: 2 }), { height: 152, scroll: true })
+})
+
+test('輸入列：圖片鈕、框內表情鈕只在 LINE 輸出；原本的按鈕一顆不少、沿用既有 handler 與 disabled 條件', () => {
+  const pane = read('ui/lib/chatpane.mjs')
+  for (const cls of ['lc-photo', 'lc-emo', 'picker lc-picker']) {
+    const hits = linesWith(pane, new RegExp(`class="${cls}"`))
+    assert.equal(hits.length, 1, cls)
+    assert.match(hits[0], /v-if="isLine/, `${cls} 只在 LINE 才輸出`)
+  }
+  assert.match(linesWith(pane, /class="lc-photo"/)[0], /@click="fileEl && fileEl\.click\(\)" :disabled="photoBusy"/, '圖片鈕沿用既有的選檔 input 與 disabled 條件')
+  assert.match(linesWith(pane, /class="lc-emo"/)[0], /pickerOpen = !pickerOpen/, '表情鈕沿用 pickerOpen')
+  assert.match(pane, /<div class="picker" v-if="pickerOpen && \(!isLine \|\| plusOpen\)"/, '非 LINE 時選單的條件等於原本的 pickerOpen')
+  // 原本工具列上的按鈕一顆都沒拿掉（LINE 下都收在「＋」選單裡）
+  for (const label of ['表情符號', '通話', '語音輸入', '傳送震動', '傳照片', '傳送檔案', '截圖']) assert.ok(pane.includes(`aria-label="${label}"`), `原本的「${label}」還在`)
+  assert.match(pane, /@click="startShot"/); assert.match(pane, /@click="nudge"/); assert.match(pane, /@click="startCall"/); assert.match(pane, /@click="dictClick"/); assert.match(pane, /@click="micClick"/)
+  // 送出鈕的樣板一個字不動（「有字才出現」純靠 line.css 的 :placeholder-shown）；輸入框高度只在 LINE 才寫 style
+  assert.match(pane, /<button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly \|\| !draft\.trim\(\)">/)
+  assert.match(read('ui/line.css'), /\.composer:has\(textarea:placeholder-shown\) \.aero-btn\{display:none\}/)
+  assert.match(pane, /if \(!isLine\.value\) \{ if \(el\.style\.height \|\| el\.style\.overflowY\)/, '其他外觀不寫輸入框的 style')
+  const css = read('ui/line.css')
+  assert.doesNotMatch(css, /\.toolbar \.tool\s*\{[^}]*display:\s*none/, 'LINE 的 CSS 不一刀切藏工具列按鈕（之後新增的按鈕才不會被藏起來）')
+})
+
+test('清單列：最後時間只在 LINE 才輸出，來源是既有的 lastAt／at，未讀圓圈仍是原本的 .unread', () => {
+  const list = read('ui/list.html'), m = read('ui/m.html')
+  const lt = linesWith(list, /class="l-time"/), mt = linesWith(m, /class="l-time"/)
+  assert.equal(lt.length, 3); assert.equal(mt.length, 4)
+  for (const l of lt) assert.match(l, /v-if="skin === 'line' && listTimeText\(/)
+  for (const l of mt) assert.match(l, /v-if="prefs\.skin === 'line' && listTimeText\(/)
+  assert.equal(linesWith(list, /class="unread" v-if="(c|x\.room|x\.friend)\.unread"/).length, 3, '電腦清單的未讀徽章沒被改')
+  assert.equal(linesWith(m, /class="unread" v-if="(c|r|x\.room|x\.friend)\.unread"/).length, 4, '手機清單的未讀徽章沒被改')
+})
+
+test('標題列人數：電腦與手機都顯示同一份 psm（「N 位成員」），離線人數兩邊都走 offlineView', () => {
+  assert.equal(roomPseudoFriend({ chatId: 'g1', name: '測試群', count: 3 }).psm, '3 位成員')
+  const bar = read('ui/lib/actionbar.mjs'), m = read('ui/m.html'), mjs = read('ui/m.js')
+  assert.match(linesWith(bar, /class="mbar-count"/)[0], /\{\{ friend\.psm \}\}/)
+  assert.match(linesWith(m, /class="m-plate-count"/)[0], /\{\{ chatFriend\.psm \}\}/)
+  assert.match(bar, /offlineView\(props\.names\)/); assert.match(mjs, /offlineView\(chatFriend\.value\.offline\)/)
+})
+
+test('LINE 外觀：空白的系統提示不畫成一條小橫槓', () => {
+  assert.match(read('ui/line.css'), /\[data-skin="line"\] \.sys:empty\{display:none\}/)
+})

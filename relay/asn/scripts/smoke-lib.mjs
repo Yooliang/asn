@@ -2276,6 +2276,10 @@ export const SCENARIOS = [
   { name: 'm-line-nav', page: 'm.html', state: { signedIn: true, mbar: 'claude', mtab: 'list', skin: 'line' }, ready: '#app.m section[aria-label="夥伴"] .m-buddy', probe: LINE_PROBES.mobileNav, shot: 'm-line-nav.png' },
   { name: 'm-line-chat', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileChat, shot: 'm-line-chat.png' },
   { name: 'm-line-settings', page: 'm.html', state: { signedIn: true, skin: 'line' }, ready: '#app.m .m-pager .m-search', probe: LINE_PROBES.mobileSettings, shot: 'm-line-settings.png' },
+  { name: 'list-line-rows', page: 'list.html', width: 900, height: 640, state: { signedIn: true, munread: true, skin: 'line' }, ready: '#app.win .top-tabs .ttab', probe: LINE_PROBES.deskRows, shot: 'list-line-rows.png' },
+  { name: 'm-line-rows', page: 'm.html', state: { signedIn: true, munread: true, mtab: 'list', skin: 'line' }, ready: '#app.m .m-unread', probe: LINE_PROBES.mobileRows, shot: 'm-line-rows.png' },
+  { name: 'list-line-compose', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, lineMsgs: true, skin: 'line' }, ready: '#app.win .chat-area .compose-main', probe: LINE_PROBES.deskCompose, shot: 'list-line-compose.png' },
+  { name: 'm-line-compose', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileCompose, shot: 'm-line-compose.png' },
   { name: 'list-modern-term', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-modern-term.png' },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -2352,6 +2356,7 @@ export const tableFor = scenario => {
   if (scenario.state.munread) {
     t.relay_list = { members: UNREAD_MEMBERS }
     t.relay_inbox = { messages: unreadMails() }
+    t.show_toast = null   // 電腦版收到新信會跳通知
     t.relay_ack = null
     t.relay_read_sync = { marks: [] }
   }

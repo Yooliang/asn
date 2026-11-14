@@ -105,6 +105,7 @@
                           <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
                           <span class="b-last" v-if="lastOf(x.id)">{{ lastOf(x.id) }}</span>
                         </span>
+                        <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(x.at || x.friend.lastAt)">{{ listTimeText(x.at || x.friend.lastAt) }}</span>
                         <span class="unread" v-if="x.friend.unread">{{ x.friend.unread }}</span>
                       </template>
                       <template v-else>
@@ -113,6 +114,7 @@
                           <span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">{{ x.room.count }} 位成員</span></span>
                           <span class="b-last" v-if="x.room.last">{{ x.room.last }}</span>
                         </span>
+                        <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(x.at)">{{ listTimeText(x.at) }}</span>
                         <span class="unread" v-if="x.room.unread">{{ x.room.unread }}</span>
                       </template>
                     </button>
@@ -132,6 +134,7 @@
                         <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
                         <span class="b-last" v-if="r.last">{{ r.last }}</span>
                       </span>
+                      <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(r.at)">{{ listTimeText(r.at) }}</span>
                       <span class="unread" v-if="r.unread">{{ r.unread }}</span>
                     </button>
                   </li>
@@ -155,6 +158,7 @@
                         <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                         <span class="b-last" v-if="lastOf(c.id)">{{ lastOf(c.id) }}</span>
                       </span>
+                      <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(c.lastAt)">{{ listTimeText(c.lastAt) }}</span>
                       <span class="unread" v-if="c.unread">{{ c.unread }}</span>
                     </button>
                     <button class="m-unarchive" type="button" v-if="g.kind === 'archived'" :aria-label="'取消封存 ' + c.nick" @click="setArchived(c, false)">取消封存</button>

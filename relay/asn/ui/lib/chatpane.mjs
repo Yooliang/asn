@@ -34,7 +34,7 @@ import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
 import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
-import { clockLabel, lineRows, sentStateText } from './line-chat.mjs'
+import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
@@ -274,6 +274,18 @@ export const ChatPane = {
     }
     const afterMenu = () => nextTick(() => { syncMore(); menuEl.value?.querySelector('button.on')?.scrollIntoView({ block: 'nearest' }) })
     const bodyHtml = text => (isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text))
+    // LINE 外觀：輸入框隨字數變高，最多 6 行後內部捲動（算法在 line-chat.mjs 的 composeFieldHeight）；其他外觀不碰 style
+    function fitCompose() {
+      const el = composeEl.value
+      if (!el) return
+      if (!isLine.value) { if (el.style.height || el.style.overflowY) { el.style.height = ''; el.style.overflowY = '' } return }
+      const cs = getComputedStyle(el), px = k => parseFloat(cs[k]) || 0
+      el.style.height = '0px'
+      const r = composeFieldHeight(el.scrollHeight, { lineH: px('lineHeight') || 22, extra: px('paddingTop') + px('paddingBottom'), border: px('borderTopWidth') + px('borderBottomWidth') })
+      el.style.height = r.height + 'px'; el.style.overflowY = r.scroll ? 'auto' : 'hidden'
+    }
+    watch([draft, isLine], () => nextTick(fitCompose), { flush: 'post' })
+    onMounted(() => nextTick(fitCompose))
     function onDraftInput() {
       if (!isRoom.value) return
       const q = mentionQuery(draft.value, composeEl.value?.selectionStart)
@@ -627,7 +639,7 @@ export const ChatPane = {
         </button>
         <!-- 對話／終端切換（手機）：一顆、放在這排最後面；字與圖示寫按了會去哪裡，不做選中樣式；沒有終端可看的夥伴不顯示 -->
         <button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle.label" :title="mToggle.label" @click="remoteShown ? showMsgs() : showTerm()"><img :src="mToggle.icon" alt="" width="22" height="22"><line-icon :name="mToggle.line" :size="22"></line-icon></button>
-        <div class="picker" v-if="pickerOpen" role="menu">
+        <div class="picker" v-if="pickerOpen && (!isLine || plusOpen)" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
       </div>
@@ -647,7 +659,13 @@ export const ChatPane = {
         <button class="mc-plus" type="button" @click="plusOpen = !plusOpen" @keydown.esc="plusOpen = false" :aria-expanded="plusOpen" aria-label="附件與更多" title="附件與更多">
           <line-icon name="plus"></line-icon>
         </button>
+        <!-- LINE 外觀（#1449 第三張）：「＋」旁攤開一顆圖片鈕（同一個選檔 input 與 pickPhoto），表情鈕放在輸入框內右側（同一個 pickerOpen）；其他外觀不輸出 -->
+        <button class="lc-photo" type="button" v-if="isLine" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）"><line-icon name="photo"></line-icon></button>
         <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
+        <button class="lc-emo" type="button" v-if="isLine" @click="plusOpen = false; pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" :disabled="displayOnly" aria-label="表情符號" title="表情符號"><line-icon name="emoji"></line-icon></button>
+        <div class="picker lc-picker" v-if="isLine && pickerOpen && !plusOpen" role="menu">
+          <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
+        </div>
         <button class="mc-dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
           <line-icon name="dict"></line-icon>
           <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>

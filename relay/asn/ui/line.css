@@ -251,17 +251,29 @@
    語音輸入另有一顆在右邊（.mc-dict），送出鈕改成實心圓＋向上箭頭（字還在、只是看不見，aria-label 也是 sendLabel）。
    .composer 在這裡 display:contents，textarea 與按鈕直接排進膠囊；同一個 textarea、同一組 handler，只換排版。
    膠囊長高（多行）時圓角固定 26px（一行 52px 時剛好是全圓），不會變成怪形狀。 */
-:root[data-skin="line"] .compose-row{padding:10px 32px 18px}
-:root[data-skin="line"] .compose-main{position:relative;flex:1;flex-direction:row;align-items:flex-end;gap:6px;box-sizing:border-box;width:100%;max-width:760px;min-height:52px;margin:0 auto;padding:5px 5px 5px 6px;border:1px solid #e6e4df;border-radius:26px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)}
-:root[data-skin="line"] .m-chat .compose-row{padding:8px 12px 10px;border-top:0;background:var(--panel-soft)}
-:root[data-skin="line"] .m-chat .compose-main{min-height:50px;max-width:none;padding:4px 4px 4px 5px;border:1px solid #e6e4df;border-radius:25px;background:var(--panel)}
+:root[data-skin="line"] .compose-row{padding:8px 12px;border-top:1px solid #e6e4df;background:var(--panel)}
+:root[data-skin="line"] .compose-main{position:relative;flex:1;flex-direction:row;align-items:flex-end;gap:6px;box-sizing:border-box;width:100%;max-width:none;min-height:0;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+:root[data-skin="line"] .m-chat .compose-row{padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));border-top:1px solid #e6e4df;background:var(--panel)}
+:root[data-skin="line"] .m-chat .compose-main{min-height:0;max-width:none;padding:0;border:0;border-radius:0;background:transparent}
 :root[data-skin="line"] .compose-main .composer{display:contents}
-:root[data-skin="line"] .compose-main .composer textarea{flex:1;min-width:0;order:2;align-self:stretch;height:auto;min-height:0;max-height:140px;padding:9px 6px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:22px;field-sizing:content}
-:root[data-skin="line"] .m-chat .compose-main .composer textarea{font-size:15px;min-height:0;padding:9px 4px}
+:root[data-skin="line"] .compose-main .composer textarea{flex:1;min-width:0;order:3;align-self:flex-end;box-sizing:border-box;height:40px;min-height:40px;max-height:150px;margin:0;padding:9px 42px 9px 14px;border:0;border-radius:20px;background:#eef0f3;font-size:14px;line-height:22px;resize:none;overflow-y:hidden}
+:root[data-skin="line"] .m-chat .compose-main .composer textarea{font-size:15px;min-height:40px;padding:9px 42px 9px 14px}
 /* 左「＋」、右語音輸入：40px 圓鈕 */
-:root[data-skin="line"] .compose-main .mc-plus,:root[data-skin="line"] .compose-main .mc-dict{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="line"] .compose-main .mc-plus,:root[data-skin="line"] .compose-main .lc-photo,:root[data-skin="line"] .compose-main .mc-dict{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer;font:inherit}
 :root[data-skin="line"] .compose-main .mc-plus{order:1}
-:root[data-skin="line"] .compose-main .mc-dict{order:3;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
+:root[data-skin="line"] .compose-main .lc-photo{order:2}
+:root[data-skin="line"] .compose-main .lc-photo:hover:not(:disabled){background:var(--ls-hover)}
+:root[data-skin="line"] .compose-main .lc-photo:disabled{opacity:.45;cursor:default}
+/* 表情鈕在輸入框內右側：排在 textarea 後面，用負外距疊到框裡（框的右內距已留位置）；多行時貼框底 */
+:root[data-skin="line"] .compose-main .lc-emo{order:4;position:relative;z-index:1;display:grid;place-items:center;flex:none;width:34px;height:34px;margin:0 0 3px -42px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer}
+:root[data-skin="line"] .compose-main .lc-emo:hover:not(:disabled){background:rgba(0,0,0,.06)}
+:root[data-skin="line"] .compose-main .lc-emo[aria-expanded="true"]{color:var(--accent)}
+:root[data-skin="line"] .compose-main .lc-emo:disabled{opacity:.45;cursor:default}
+:root[data-skin="line"] .compose-main .lc-picker{left:auto;right:12px;bottom:calc(100% + 8px);width:max-content;grid-template-columns:repeat(6,36px);border:1px solid #e6e4df;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+:root[data-skin="line"] .compose-main .lc-picker button{height:34px;font-size:18px;border-radius:8px}
+:root[data-skin="line"] .m-chat .compose-main .lc-picker{left:12px;width:auto;grid-template-columns:repeat(6,1fr)}
+:root[data-skin="line"] .compose-main .lc-photo:focus-visible,:root[data-skin="line"] .compose-main .lc-emo:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="line"] .compose-main .mc-dict{order:5;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
 :root[data-skin="line"] .compose-main .mc-dict:not(:has(.dict-state)){width:40px}
 :root[data-skin="line"] .compose-main .mc-dict .dict-state{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px}
 :root[data-skin="line"] .compose-main .mc-plus:hover,:root[data-skin="line"] .compose-main .mc-dict:hover:not(:disabled){background:var(--ls-hover)}
@@ -273,7 +285,8 @@
 :root[data-skin="line"] .compose-main .mc-plus:focus-visible,:root[data-skin="line"] .compose-main .mc-dict:focus-visible,:root[data-skin="line"] .compose-main .composer .aero-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 :root[data-skin="line"] .m-chat.is-room .compose-main .mc-dict,:root[data-skin="line"] .m-chat .compose-row.is-term .mc-dict{display:none}
 /* 送出鈕：40px 實心主色圓＋白色向上箭頭 */
-:root[data-skin="line"] .compose-main .composer .aero-btn{order:4;display:block;flex:none;align-self:flex-end;box-sizing:border-box;width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat var(--accent);color:transparent;font-size:0;line-height:0;overflow:hidden;box-shadow:none}
+:root[data-skin="line"] .compose-main .composer .aero-btn{order:6;display:block;flex:none;align-self:flex-end;box-sizing:border-box;width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat var(--accent);color:transparent;font-size:0;line-height:0;overflow:hidden;box-shadow:none}
+:root[data-skin="line"] .compose-main .composer:has(textarea:placeholder-shown) .aero-btn{display:none}
 :root[data-skin="line"] .compose-main .composer .aero-btn:hover:not(:disabled){background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat #276a61}
 :root[data-skin="line"] .compose-main .composer .aero-btn:disabled{opacity:.35;cursor:default}
 /* 上方那排工具（表情、通話、震動、照片、檔案、截圖、錄音、對話／終端切換）：平常收起來，按「＋」才在膠囊上方展開成帶文字的小選單；按鈕與 handler 原封不動 */
@@ -380,6 +393,7 @@
 /* 系統提示：置中的灰藍小膠囊；催促（nudge）維持醒目的顏色 */
 :root[data-skin="line"] .sys{display:block;width:fit-content;max-width:92%;margin:4px auto;padding:3px 14px;border:0;border-radius:999px;background:#5d7399;color:#fff;font-size:12.5px;text-align:center}
 :root[data-skin="line"] .sys.nudge{background:#fff;color:var(--busy)}
+:root[data-skin="line"] .sys:empty{display:none}
 
 /* ---------- 清單：大頭貼圓形 48px、名字加粗 15px、最後一句灰字單行 ---------- */
 :root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn{gap:12px;padding:8px 12px}
@@ -391,6 +405,12 @@
 :root[data-skin="line"] .b-psm{font-size:13px;color:var(--muted)}
 :root[data-skin="line"] .m-av-wrap,:root[data-skin="line"] .m-av-wrap .dp{width:48px;height:48px}
 :root[data-skin="line"] .m-buddy{gap:12px}
+/* 清單列右欄（#1449 第三張）：右上最後往來時間（.l-time，只在 LINE 才輸出）、右下綠色未讀圓圈（既有的 .unread，數字沿用）。
+   兩顆都絕對定位在列的右側，名字與最後一句留右內距不被蓋住；列沒有時間或沒有未讀就那一顆不出現。 */
+:root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn,:root[data-skin="line"] .m-buddy{position:relative}
+:root[data-skin="line"] .l-time{position:absolute;top:12px;right:12px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;pointer-events:none}
+:root[data-skin="line"] .buddy .unread,:root[data-skin="line"] .room-btn .unread,:root[data-skin="line"] .m-buddy .unread{position:absolute;right:12px;bottom:12px;box-sizing:border-box;min-width:20px;height:20px;margin:0;padding:0 6px;border-radius:10px;font-size:12px;font-weight:600;line-height:20px;text-align:center;background:var(--accent);color:#fff}
+:root[data-skin="line"] .buddy:has(> .l-time) > .b-text,:root[data-skin="line"] .room-btn:has(> .l-time) > .b-text,:root[data-skin="line"] .m-buddy:has(> .l-time) > .b-text,:root[data-skin="line"] .buddy:has(> .unread) > .b-text,:root[data-skin="line"] .room-btn:has(> .unread) > .b-text,:root[data-skin="line"] .m-buddy:has(> .unread) > .b-text{padding-right:58px}
 
 /* ---------- 搜尋框：灰底圓角，放大鏡在框內左側；電腦清單的「＋」改成懸浮鈕 ---------- */
 :root[data-skin="line"] .search input,:root[data-skin="line"] .m-search input{border:0;border-radius:999px;background-color:#eef0f3;padding-left:38px;
