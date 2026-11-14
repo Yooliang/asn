@@ -53,6 +53,7 @@ export const ChatPane = {
     dpLocked: { type: Boolean, default: false },     // 窗太窄被自動收起：展開鈕反灰
     dpCollapsed: { type: Boolean, default: false },  // 側欄收合（只對 left／right 有意義）
     active: { type: Boolean, default: true },      // 整合模式下只有目前分頁是 true；變成 true 時捲到底並聚焦輸入框
+    camera: { type: Boolean, default: false },     // 手機：輸入列放相機鈕（#1490），按了直接開系統相機拍照傳出；電腦不放
     winMode: { type: String, default: 'split' },   // split｜merged：整合模式用較短的輸入提示
     photoApi: { type: Object, default: null },     // photoApi.fetch 回 {data_url}、photoApi.save 回路徑：放大看與另存（Rust 端，金鑰不在前端）；沒給就不能放大
     shotApi: { type: Object, default: null },      // 截圖（lib/tauri.mjs 的 shotApi）；沒給或這個系統不支援就沒有截圖鈕
@@ -313,6 +314,25 @@ export const ChatPane = {
       } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
     }
     function pickPhoto(ev) { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; void sendFile(f) }
+    // ---- 拍照（#1490，只有手機）：<input capture> 交給 WebView，由系統的相機 App 拍好交回（wry 走 ACTION_IMAGE_CAPTURE）；拍好就跟選圖一樣送出 ----
+    // 取消或沒允許相機時不會有照片：選檔欄位的 cancel 事件、或回到 App 後等一下還沒拿到照片，就用白話說明；輸入列不會卡住
+    const camEl = ref(null), camWait = ref(false)
+    const CAMERA_MISS = '沒有拍到照片：可能取消了，或沒有允許 ASN 使用相機。要拍照請到手機的「設定 → 應用程式 → ASN → 權限」打開相機；也可以改按「傳照片」從相簿選。'
+    let camAt = 0, camTimer = 0
+    function openCamera() {
+      if (!camEl.value || photoBusy.value) return
+      camWait.value = true; camAt = Date.now(); photoMsg.value = ''
+      camEl.value.click()
+    }
+    function pickCamera(ev) { camWait.value = false; clearTimeout(camTimer); pickPhoto(ev) }
+    function cameraMissed() { if (!camWait.value) return; camWait.value = false; clearTimeout(camTimer); photoMsg.value = CAMERA_MISS }
+    // 相機或權限框關掉、回到 ASN：等一下（照片交回來的 change 會先到）還沒拿到就說明
+    function cameraBack() {
+      if (!camWait.value || document.visibilityState === 'hidden' || Date.now() - camAt < 500) return
+      clearTimeout(camTimer); camTimer = setTimeout(cameraMissed, 1500)
+    }
+    onMounted(() => { if (!props.camera) return; window.addEventListener('focus', cameraBack); document.addEventListener('visibilitychange', cameraBack) })
+    onBeforeUnmount(() => { clearTimeout(camTimer); window.removeEventListener('focus', cameraBack); document.removeEventListener('visibilitychange', cameraBack) })
     // 貼上圖片：先進標註畫面（可以直接按「傳送」不畫），不再直接送出
     function onPaste(ev) {
       const item = [...(ev.clipboardData?.items ?? [])].find(i => i.kind === 'file' && /^image\//.test(i.type))
@@ -488,7 +508,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, camEl, openCamera, pickCamera, cameraMissed }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -591,6 +611,11 @@ export const ChatPane = {
           <line-icon name="photo"></line-icon>
         </button>
         <input ref="fileEl" type="file" accept="image/*" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
+        <button class="tool icon cam" type="button" v-if="camera" @click="openCamera" :disabled="photoBusy" aria-label="拍照" title="拍照傳出（開手機的相機）">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7.5h3.2l1.5-2.4h6.6l1.5 2.4H20a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1z" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.6" fill="#fff" stroke="#2f7d3c" stroke-width="1.6"/></svg>
+          <line-icon name="camera"></line-icon>
+        </button>
+        <input ref="camEl" v-if="camera" type="file" accept="image/*" capture="environment" hidden @change="pickCamera" @cancel="cameraMissed" aria-hidden="true" tabindex="-1">
         <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
           <line-icon name="file"></line-icon>

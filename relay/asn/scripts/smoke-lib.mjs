@@ -79,6 +79,37 @@ export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idl
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
 // 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
+// 拍照（#1490）：手機的對話輸入列有「拍照」鈕（三種外觀都有），按下去開的是帶 capture 的選檔（WebView 交給系統相機），拍好就送出；電腦沒有這顆鈕
+export const cameraProbeSource = mode => `(async () => {
+  try {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const vis = e => e && e.getClientRects().length > 0;
+  let pane = null;
+  for (let i = 0; i < 60 && !pane; i++) { pane = [...document.querySelectorAll('.chatpane')].find(vis) || null; if (!pane) await sleep(100) }
+  if (!pane) return { ok: false, why: '找不到對話' };
+  await sleep(300);
+  let btn = pane.querySelector('button.cam');
+  if (${JSON.stringify(mode)} === 'desk') return btn ? { ok: false, why: '電腦版不該有拍照鈕' } : { ok: true, why: '' };
+  // 現代外觀：附件類的鈕收在「＋」選單裡，先真的點開
+  const plus = pane.querySelector('button.mc-plus');
+  if (!vis(btn) && vis(plus)) { globalThis.__smokeInput(JSON.stringify({ click: at(plus) })); await sleep(400); btn = pane.querySelector('button.cam') }
+  if (!vis(btn)) return { ok: false, why: '手機的輸入列沒有拍照鈕' };
+  if (btn.getAttribute('aria-label') !== '拍照') return { ok: false, why: '拍照鈕的說明不對' };
+  const input = pane.querySelector('input[type="file"][capture]');
+  if (!input || input.getAttribute('capture') !== 'environment' || input.getAttribute('accept') !== 'image/*' || input.multiple) return { ok: false, why: '拍照的選檔欄位要是 accept=image/* capture=environment、單張' };
+  globalThis.__smokeCalls = [];
+  globalThis.__smokeChooser = undefined;
+  globalThis.__smokeInput(JSON.stringify({ choose: [...at(btn), 'ok1.png'] }));
+  for (let i = 0; i < 60 && globalThis.__smokeChooser === undefined; i++) await sleep(100);
+  if (!globalThis.__smokeChooser) return { ok: false, why: '按拍照鈕沒有打開選檔（相機）' };
+  if (globalThis.__smokeChooser.mode !== 'selectSingle') return { ok: false, why: '拍照應該只拍一張：' + globalThis.__smokeChooser.mode };
+  let sent = [];
+  for (let i = 0; i < 60; i++) { sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send_attachment'); if (sent.length) break; await sleep(100) }
+  if (sent.length !== 1) return { ok: false, why: '拍好的照片沒有送出' };
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 export const devMoreProbeSource = () => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1331,8 +1362,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.camera ? '拍照鈕檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.camera ? cameraProbeSource(probe.camera) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2091,6 +2122,9 @@ export const SCENARIOS = [
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dev-more', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more.png' },
   { name: 'list-dev-more-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true, skin: 'modern' }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more-modern.png' },
+  { name: 'm-camera', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, camera: true }, ready: '#app.m .m-chat .chatpane', probe: { camera: 'phone' }, shot: 'm-camera.png' },
+  { name: 'm-camera-modern', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, camera: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { camera: 'phone' }, shot: 'm-camera-modern.png' },
+  { name: 'list-no-camera', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, camera: true }, ready: '#app.win .actionbar', probe: { camera: 'desk' } },
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },
   { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_KEYS_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
@@ -2207,6 +2241,7 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
+  if (scenario.state.camera) t.relay_send_attachment = { id: '00000000-0000-4000-8000-0000000000c1', attachment_id: '00000000-0000-4000-8000-0000000000c2', name: 'photo.webp', bytes: 120 }   // 拍照（#1490）：送出回成功
   if (scenario.state.munread) {
     t.relay_list = { members: UNREAD_MEMBERS }
     t.relay_inbox = { messages: unreadMails() }

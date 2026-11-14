@@ -50,6 +50,7 @@ const cleanup = () => {
   killTree(child?.pid)
   try { server.close() } catch { /* 已關 */ }
   if (profile) { try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) } catch { /* 暫存而已 */ } }
+  try { fs.rmSync(SMOKE_FILES, { recursive: true, force: true }) } catch { /* 還沒建或已刪：暫存而已 */ }
 }
 process.on('exit', cleanup)
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130) })
@@ -73,6 +74,15 @@ const connect = url => new Promise((resolve, reject) => {
   })
 })
 
+// 選檔用的測試檔（#1497）：兩張正常的 1×1 PNG、一張壞掉的（內容不是圖）
+const SMOKE_FILES = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-smoke-files-'))
+const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+fs.writeFileSync(path.join(SMOKE_FILES, 'ok1.png'), PNG_1X1)
+fs.writeFileSync(path.join(SMOKE_FILES, 'ok2.png'), PNG_1X1)
+fs.writeFileSync(path.join(SMOKE_FILES, 'bad.png'), Buffer.from('這不是圖片，只是一段文字。'))
+// 等「選檔對話框打開」的回呼（choose 用；偵錯協定的 Page.fileChooserOpened 依序交給它們）
+const chooserWaiters = []
+
 // 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵
 async function realInput(S, payload) {
   let req
@@ -82,6 +92,20 @@ async function realInput(S, payload) {
     await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
     await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (Array.isArray(req.choose)) {
+    // { choose: [x, y, 檔名] }：在那個位置真的點一下，攔下因此打開的選檔對話框（含相機的 capture 欄位），像使用者選了這個檔；
+    // 回報對話框的模式到 window.__smokeChooser（frame、mode），沒打開就記成 null。檔名只能指 smoke 自備的測試檔
+    const [x, y, name] = req.choose
+    await S('Page.setInterceptFileChooserDialog', { enabled: true })
+    const opened = new Promise(resolve => { chooserWaiters.push(resolve); setTimeout(() => resolve(null), 3000) })
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+    await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+    const ev = await opened
+    chooserWaiters.length = 0
+    await S('Runtime.evaluate', { expression: `window.__smokeChooser = ${JSON.stringify(ev ? { mode: ev.mode } : null)}` })
+    if (ev && name) await S('DOM.setFileInputFiles', { backendNodeId: ev.backendNodeId, files: [path.join(SMOKE_FILES, path.basename(String(name)))] })
+    await S('Page.setInterceptFileChooserDialog', { enabled: false })
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })
@@ -102,6 +126,7 @@ async function runScenario(cdp, sc, base) {
     else if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') errors.push(`console.error：${d.params.args.map(argText).join(' ')}`)
     else if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') errors.push(`瀏覽器錯誤：${d.params.entry.text} ${d.params.entry.url ?? ''}`.trim())
     // 探測要「真的」滑鼠或按鍵（不是在頁面裡造事件）：頁面呼叫 __smokeInput(JSON)，這裡用偵錯協定送真的輸入
+    else if (d.method === 'Page.fileChooserOpened') { const w = chooserWaiters.shift(); if (w) w(d.params) }
     else if (d.method === 'Runtime.bindingCalled' && d.params.name === '__smokeInput') realInput(S, d.params.payload).catch(e => errors.push(`送真的輸入失敗：${e?.message ?? e}`))
   })
   await S('Runtime.addBinding', { name: '__smokeInput' })
