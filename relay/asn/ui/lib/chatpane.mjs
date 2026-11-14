@@ -10,6 +10,7 @@ import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from 
 import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
+import { createZoom, zoomStyle } from './photo-zoom.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
@@ -342,6 +343,10 @@ export const ChatPane = {
     function annotCancel() { annot.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
     // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；另存時由系統對話框選位置 ----
     const viewer = ref(null)
+    // 看大圖縮放（#1498）：每次打開、關掉都回到原本大小
+    const zoom = reactive({ s: 1, x: 0, y: 0 })
+    const zoomer = createZoom(zoom)
+    const pvStyle = computed(() => zoomStyle(zoom))
     const expired = p => photoExpired(p)
     // 一般檔案不預覽：點了先跳出「另存新檔」選位置（取消就不下載），結果顯示在底下那一行
     const savedHere = ref(false)
@@ -358,6 +363,7 @@ export const ChatPane = {
     async function openPhoto(p) {
       if (!props.photoApi || photoExpired(p)) return
       if (p.kind === 'file') return saveFile(p)
+      zoomer.reset()
       viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: '', msg: '載入中…', busy: false }
       try {
         const r = await props.photoApi.fetch(p.id)
@@ -373,7 +379,7 @@ export const ChatPane = {
         if (path) { v.msg = `已存到：${path}`; v.saved = true } else v.msg = ''
       } catch (e) { v.msg = e.message } finally { v.busy = false }
     }
-    const closeViewer = () => { viewer.value = null }
+    const closeViewer = () => { viewer.value = null; zoomer.reset() }
     function insertEmo(code) {
       draft.value = (draft.value ? draft.value + ' ' : '') + code
       pickerOpen.value = false
@@ -488,7 +494,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -674,7 +680,7 @@ export const ChatPane = {
       <button class="aero-btn" type="button" @click="closeViewer">關閉</button>
     </div>
     <div class="pv-body" @click.self="closeViewer">
-      <img v-if="viewer.src" :src="viewer.src" :alt="viewer.title">
+      <img v-if="viewer.src" class="pv-img" :class="{ zoomed: zoom.s > 1 }" :style="pvStyle" :src="viewer.src" :alt="viewer.title" draggable="false" title="滾輪或雙指縮放，放大後可以拖曳；雙擊放大或還原" @wheel="zoomer.onWheel" @dblclick="zoomer.onDblClick" @pointerdown="zoomer.onPointerDown" @pointermove="zoomer.onPointerMove" @pointerup="zoomer.onPointerUp" @pointercancel="zoomer.onPointerUp">
       <img v-else-if="viewer.thumb" class="pv-thumb" :src="viewer.thumb" alt="">
       <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}<button v-if="viewer.saved" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></div>
     </div>

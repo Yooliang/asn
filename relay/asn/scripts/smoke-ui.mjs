@@ -73,7 +73,8 @@ const connect = url => new Promise((resolve, reject) => {
   })
 })
 
-// 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵
+// 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵；
+// 另有 wheel、drag、dblclick（滑鼠）與 pinch、tap2（觸控），格式見下面各段
 async function realInput(S, payload) {
   let req
   try { req = JSON.parse(payload) } catch { return }
@@ -82,6 +83,41 @@ async function realInput(S, payload) {
     await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
     await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (Array.isArray(req.wheel)) {
+    // { wheel: [x, y, deltaY] }：在那個位置轉一次滾輪（負數＝往前）
+    const [x, y, deltaY] = req.wheel
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await S('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY })
+  } else if (Array.isArray(req.drag)) {
+    // { drag: [x0, y0, x1, y1] }：按住左鍵從起點拖到終點（分幾步移動）
+    const [x0, y0, x1, y1] = req.drag
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0, y: y0 })
+    await S('Input.dispatchMouseEvent', { type: 'mousePressed', x: x0, y: y0, button: 'left', buttons: 1, clickCount: 1 })
+    for (let i = 1; i <= 5; i++) await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0 + (x1 - x0) * i / 5, y: y0 + (y1 - y0) * i / 5, button: 'left', buttons: 1 })
+    await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x1, y: y1, button: 'left', buttons: 0, clickCount: 1 })
+  } else if (Array.isArray(req.dblclick)) {
+    // { dblclick: [x, y] }：滑鼠雙擊
+    const [x, y] = req.dblclick
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    for (const clickCount of [1, 2]) {
+      await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount })
+      await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount })
+    }
+  } else if (Array.isArray(req.pinch)) {
+    // { pinch: [cx, cy, d0, d1] }：兩指以 (cx, cy) 為中心左右排開，指距從 d0 變成 d1
+    const [cx, cy, d0, d1] = req.pinch
+    const at = d => [{ x: cx - d / 2, y: cy, id: 1 }, { x: cx + d / 2, y: cy, id: 2 }]
+    await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(d0) })
+    for (let i = 1; i <= 6; i++) await S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(d0 + (d1 - d0) * i / 6) })
+    await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  } else if (Array.isArray(req.tap2)) {
+    // { tap2: [x, y] }：手指快速點兩下
+    const [x, y] = req.tap2
+    for (let i = 0; i < 2; i++) {
+      await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+      await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      if (!i) await new Promise(r => setTimeout(r, 80))
+    }
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })

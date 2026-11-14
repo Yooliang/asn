@@ -79,6 +79,64 @@ export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idl
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
 // 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
+// 看大圖縮放（#1498）：一則帶照片的信；大圖用 800×600 的 svg（縮圖是 1×1 的 webp）
+export const PHOTO_ZOOM_ID = '00000000-0000-4000-8000-0000000000aa'
+export const PHOTO_ZOOM_MSGS = [
+  { id: '00000000-0000-4000-8000-000000000011', dir: 'them', body: '〔照片〕貓.webp', created_at: '2026-11-13T01:00:00Z',
+    attachments: [{ id: PHOTO_ZOOM_ID, kind: 'image', name: '貓.webp', mime: 'image/webp', bytes: 120000, width: 800, height: 600, thumb: 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', expires_at: '2099-01-01T00:00:00Z' }] },
+]
+export const PHOTO_ZOOM_FULL = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='%2399bbdd'/><circle cx='400' cy='300' r='200' fill='%23ffcc66'/></svg>"
+// mode＝'mouse'（滾輪、拖曳、雙擊）或 'touch'（雙指捏合、點兩下）；最後關掉再打開要回到原本大小。全部用真的輸入（__smokeInput）
+export const photoZoomProbeSource = mode => `(async () => {
+  try {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(400) };
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const pv = () => document.querySelector('.photo-viewer img.pv-img');
+  const w = () => pv().getBoundingClientRect().width;
+  const near = (a, b) => Math.abs(a - b) <= Math.max(2, b * 0.04);
+  async function openIt() {
+    let btn = null;
+    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.chatpane button.photo')].find(e => e.getClientRects().length); if (!btn) await sleep(100) }
+    if (!btn) return '對話裡找不到照片';
+    btn.scrollIntoView({ block: 'center' }); await sleep(150);
+    await real({ click: at(btn) });
+    for (let i = 0; i < 40; i++) { const img = pv(); if (img && img.complete && img.naturalWidth) return ''; await sleep(100) }
+    return '點照片沒有打開大圖';
+  }
+  let bad = await openIt();
+  if (bad) return { ok: false, why: bad };
+  const w0 = w();
+  if (w0 < 50) return { ok: false, why: '大圖太小：' + w0 };
+  if (${JSON.stringify(mode)} === 'touch') {
+    await real({ pinch: [...at(pv()), 80, 200] });
+    if (!(w() > w0 * 2)) return { ok: false, why: '雙指捏合沒有放大：' + w0 + ' → ' + w() };
+    await real({ tap2: at(pv()) });
+    if (!near(w(), w0)) return { ok: false, why: '放大時點兩下沒有還原：' + w() };
+    await real({ tap2: at(pv()) });
+    if (!near(w(), w0 * 2.5)) return { ok: false, why: '點兩下沒有放大到 2.5 倍：' + w() };
+  } else {
+    await real({ wheel: [...at(pv()), -400] });
+    if (!(w() > w0 * 1.4)) return { ok: false, why: '滾輪沒有放大：' + w0 + ' → ' + w() };
+    const c1 = at(pv());
+    await real({ drag: [c1[0], c1[1], c1[0] + 60, c1[1] + 30] });
+    const c2 = at(pv());
+    if (!(c2[0] - c1[0] > 40)) return { ok: false, why: '放大後拖曳沒有跟著移動：' + c1 + ' → ' + c2 };
+    await real({ dblclick: at(pv()) });
+    if (!near(w(), w0)) return { ok: false, why: '放大時雙擊沒有還原：' + w() };
+    await real({ dblclick: at(pv()) });
+    if (!near(w(), w0 * 2.5)) return { ok: false, why: '雙擊沒有放大到 2.5 倍：' + w() };
+  }
+  const close = [...document.querySelectorAll('.photo-viewer .pv-bar button')].find(b => b.textContent.trim() === '關閉');
+  if (!close) return { ok: false, why: '找不到「關閉」' };
+  await real({ click: at(close) });
+  if (document.querySelector('.photo-viewer')) return { ok: false, why: '按「關閉」沒有關掉' };
+  bad = await openIt();
+  if (bad) return { ok: false, why: '再開一次：' + bad };
+  if (!near(w(), w0)) return { ok: false, why: '關掉再打開沒有回到原本大小：' + w0 + ' → ' + w() };
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 export const devMoreProbeSource = () => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1331,8 +1389,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.photoZoom ? '看大圖縮放檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2091,6 +2149,8 @@ export const SCENARIOS = [
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dev-more', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more.png' },
   { name: 'list-dev-more-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true, skin: 'modern' }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more-modern.png' },
+  { name: 'list-photo-zoom', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', photoMsg: true }, ready: '#app.win .actionbar', probe: { photoZoom: 'mouse' }, shot: 'list-photo-zoom.png' },
+  { name: 'm-photo-zoom', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true }, ready: '#app.m .m-chat .chatpane', probe: { photoZoom: 'touch' }, shot: 'm-photo-zoom.png' },
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },
   { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_KEYS_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
@@ -2207,6 +2267,7 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
+  if (scenario.state.photoMsg) { t.relay_chat_history = { messages: PHOTO_ZOOM_MSGS }; t.relay_attachment_fetch = { name: '貓.webp', mime: 'image/webp', data_url: PHOTO_ZOOM_FULL } }   // 看大圖縮放（#1498）
   if (scenario.state.munread) {
     t.relay_list = { members: UNREAD_MEMBERS }
     t.relay_inbox = { messages: unreadMails() }
