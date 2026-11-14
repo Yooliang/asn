@@ -305,7 +305,7 @@
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
                     <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · {{ KNOWN_TEXT.thisPhone }}</template></span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
-                    <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :on="phoneFpMark(joined.byNode[d.key]).on" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
+                    <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
                   </div>
                   <div class="m-dv-btns m-dv-rowbtns" role="group" :aria-label="d.label + ' 的操作'">
                     <button type="button" class="m-btn" :disabled="d.self || !(acctFlags[d.key] && acctFlags[d.key].up)" :aria-label="'上移 ' + d.label" @click="acctMove(d.key, -1)">{{ KNOWN_TEXT.moveUp }}</button>
@@ -325,7 +325,7 @@
                 <summary>{{ KNOWN_TEXT.oldTitle(joined.old.length) }}</summary>
                 <ul class="m-known-list">
                   <li class="m-known-row" v-for="p in joined.old" :key="p.node">
-                    <span class="m-row-tx"><b>{{ p.label }}</b><small><fp-mark v-if="p.confirmed" :on="true" :label="phoneFpMark(p).label"></fp-mark><template v-if="p.confirmed && p.fpShow"> {{ KNOWN_TEXT.fp(p.fpShow) }}</template></small><small v-if="p.firstSeen">{{ KNOWN_TEXT.firstSeen(p.firstSeen) }}</small></span>
+                    <span class="m-row-tx"><b>{{ p.label }}</b><small><fp-mark v-if="p.confirmed" kind="confirmed" :label="phoneFpMark(p).label"></fp-mark><template v-if="p.confirmed && p.fpShow"> {{ KNOWN_TEXT.fp(p.fpShow) }}</template></small><small v-if="p.firstSeen">{{ KNOWN_TEXT.firstSeen(p.firstSeen) }}</small></span>
                     <button class="m-btn" type="button" :disabled="kp.busy" @click="forgetKnown(p.node)">{{ KNOWN_TEXT.forget }}</button>
                   </li>
                 </ul>
@@ -356,8 +356,8 @@
                     <span class="m-dv-btns"><button class="m-btn" type="submit" :disabled="dn.busy || !!dnBad">{{ KNOWN_TEXT.renameSave }}</button><button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameCancel">{{ KNOWN_TEXT.renameCancel }}</button></span>
                   </form>
                   <template v-if="acctCur.self"></template>
-                  <p class="m-dv-fprow" v-else-if="curKnown && curKnown.confirmed"><fp-mark :on="true" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
-                  <p class="m-dv-fprow" v-else-if="curKnown"><fp-mark :on="false" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
+                  <p class="m-dv-fprow" v-else-if="curKnown && curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
+                  <p class="m-dv-fprow" v-else-if="curKnown"><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
                   <p class="m-fine" v-else-if="(acctCur.kindLabel || acctCur.kind) === '電腦'">{{ KNOWN_TEXT.neverSeen }}</p>
                   <p class="m-fine m-dv-state" v-if="acctCur.stateLine">{{ acctCur.stateLine }}</p>
                   <p class="m-fine" v-if="curKnown && curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>

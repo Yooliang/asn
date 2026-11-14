@@ -336,4 +336,5 @@
 :root[data-skin="modern"] .search-ic svg circle,:root[data-skin="modern"] .search-ic svg path,:root[data-skin="modern"] .search-plus svg path,:root[data-skin="modern"] .m-icon-btn .m-ic path{stroke-width:1.75}
 /* 指紋小圖示（#1499）：現代外觀用線條版，不加底圈 */
 :root[data-skin="modern"] .fpm{background:none;border:0;box-shadow:none;width:22px;height:22px}
-:root[data-skin="modern"] .fpm svg{stroke-width:1.75}
+:root[data-skin="modern"] .fpm > svg:first-child{stroke-width:1.75}
+:root[data-skin="modern"] .fpm.unconfirmed{background:none}

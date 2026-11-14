@@ -193,7 +193,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-segbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
-.m-dv-line{display:block;font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
 /* 帳號卡片的設備按鈕（手機）：一排可換行；使用中的黃色、選中、有勾與「使用中」，深淺色都看得清楚 */
 .m-dv-acct>.m-dv-devs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
 .m-dv-devb{display:flex;flex-direction:column;align-items:flex-start;gap:2px}

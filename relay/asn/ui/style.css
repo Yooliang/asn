@@ -793,14 +793,19 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-row.drop-after{box-shadow:inset 0 -3px 0 var(--accent)}
 .dv-row-go{flex:1;min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 0 10px 12px;color:var(--fg);font:inherit;text-align:left}
 .dv-row-move{display:inline-flex;gap:6px;flex:none}
-.dv-tag.fp{font-family:Consolas,monospace}
-/* 設備列的指紋小圖示（#1499）：彩色＝手機核對過／電腦記住了，灰色＝還沒；復古 Aero 加一圈淺色底讓它在灰底上看得清楚。長按出現的說明是 .fpm-tip */
+/* 設備列的指紋小圖示（#1499，lib/fp-mark.mjs）：復古 Aero 加一圈淺色底讓它在灰底上看得清楚。長按出現的說明是 .fpm-tip（放在圖示左邊，最上面那列也不會被切掉） */
 .fpm{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;border-radius:50%;background:linear-gradient(#fff,#e8eef5);border:1px solid #b9c6d4;box-shadow:inset 0 1px 0 #fff;vertical-align:middle;cursor:help;-webkit-touch-callout:none;user-select:none}
-.fpm svg{display:block;stroke-width:2}
-.fpm.on{color:var(--online);border-color:color-mix(in srgb,var(--online) 55%,#b9c6d4)}
-.fpm.off{color:var(--offline);opacity:.85}
+.fpm svg{display:block}
+.fpm > svg:first-child{stroke-width:2}
+/* 四種狀態顏色和形狀都不同（不能只靠顏色）：確認過＝綠＋勾；手機未確認＝琥珀＋「!」；電腦記住了＝中性藍；電腦沒記住＝灰＋「!」 */
+.fpm.confirmed{color:var(--online);border-color:color-mix(in srgb,var(--online) 55%,#b9c6d4)}
+.fpm.unconfirmed{color:#b86e00;border-color:#e3b25a;background:linear-gradient(#fffaf0,#fdecc8)}
+.fpm.remembered{color:#2f6fb5;border-color:#9dbbe0}
+.fpm.unknown{color:#6f7b88}
+.fpm-badge{position:absolute;right:-4px;bottom:-4px;color:inherit}
+.fpm-badge .fpm-badge-bg{fill:#fff;stroke:currentColor;stroke-width:1.2}
+.fpm-tip{position:absolute;right:calc(100% + 6px);top:50%;transform:translateY(-50%);z-index:50;white-space:nowrap;padding:4px 8px;border-radius:6px;background:#1f2a36;color:#fff;font-size:12px;line-height:1.3;pointer-events:none}
 .fpm:focus-visible{outline:2px solid #3b82c4;outline-offset:1px}
-.fpm-tip{position:absolute;bottom:calc(100% + 6px);right:-4px;z-index:50;white-space:nowrap;padding:4px 8px;border-radius:6px;background:#1f2a36;color:#fff;font-size:12px;line-height:1.3;pointer-events:none}
 .m-dv-fprow .fpm{margin-right:6px}
 .dv-nameline{display:flex;align-items:center;gap:8px}
 .dv-old-rec{margin-top:12px}
@@ -828,7 +833,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-vicon svg{width:20px;height:20px}
 .dv-via{color:var(--muted, inherit);opacity:.75;font-weight:400}
 /* 設備列的一行 AI 狀態（獨佔一行）、廠商標頭的狀態標籤、帳號頁「用在哪幾台」與「切換到…」（174 的 C） */
-.dv-line{flex:1 0 100%;color:var(--muted);font-size:12px;line-height:1.4}
 .dv-state{margin-left:auto;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:400;background:var(--panel-head);color:var(--muted)}
 .dv-state.st-logged_in{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .dv-state.st-login_failed{background:color-mix(in srgb,var(--away) 25%,transparent);color:#8a5a00}

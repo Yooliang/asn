@@ -108,8 +108,9 @@ export const fpMarkProbeSource = mode => `(async () => {
     if (/已確認|未確認|已登入|未安裝|還沒收到/.test(t)) return { ok: false, why: '列上還有膠囊或狀態那一行：' + t.trim().slice(0, 60) };
     if (r.querySelector(phone ? '.m-dv-line' : '.dv-line')) return { ok: false, why: '列上還有狀態那一行' };
   }
-  const expect = phone ? [['辦公室', 'on', '已確認指紋'], ['工作機', 'off', '尚未確認指紋']] : [['小良的手機', 'on', '已記住指紋 '], ['舊手機', 'off', '還沒記住指紋']];
-  for (const [name, cls, label] of expect) {
+  const expect = phone ? [['辦公室', 'confirmed', '已確認指紋', 'check'], ['工作機', 'unconfirmed', '尚未確認指紋', 'alert']] : [['小良的手機', 'remembered', '已記住指紋 ', ''], ['舊手機', 'unknown', '還沒記住指紋', 'alert']];
+  const colors = new Set();
+  for (const [name, cls, label, badge] of expect) {
     const r = row(name);
     if (!r) return { ok: false, why: '找不到「' + name + '」那一列' };
     const m = r.querySelector('.fpm');
@@ -118,7 +119,13 @@ export const fpMarkProbeSource = mode => `(async () => {
     const al = m.getAttribute('aria-label') || '';
     if (!al.startsWith(label) || m.getAttribute('title') !== al) return { ok: false, why: name + ' 的說明不對：' + al };
     if (m.getBoundingClientRect().width < 16) return { ok: false, why: name + ' 的指紋圖示太小或沒畫出來' };
+    const b = m.querySelector('.fpm-badge');
+    if (!!badge !== !!b) return { ok: false, why: name + (badge ? ' 少了角落的記號（不能只靠顏色）' : ' 不該有角落的記號') };
+    if (badge === 'alert' && b.querySelectorAll('path').length !== 2) return { ok: false, why: name + ' 的記號應該是「!」' };
+    if (badge === 'check' && b.querySelectorAll('path').length !== 1) return { ok: false, why: name + ' 的記號應該是勾' };
+    colors.add(getComputedStyle(m).color);
   }
+  if (colors.size !== 2) return { ok: false, why: '兩種狀態的顏色要不同' };
   if (!phone) {
     const pc = row('辦公室');
     if (pc && pc.querySelector('.fpm')) return { ok: false, why: '電腦那一列不該有指紋圖示（電腦版只有手機有指紋）' };
