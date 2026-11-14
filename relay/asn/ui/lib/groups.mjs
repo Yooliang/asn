@@ -161,7 +161,7 @@ export function speakerAvatarSeed(from) {
 // 群組成員 → 一對一夥伴（#1515）：成員鍵（節點~視窗）換成夥伴 id（節點/視窗）的寫法跟大頭貼種子同一套（speakerAvatarSeed），
 // 換得過去、而且在自己的夥伴名單裡才回 id；真人、別人名下的 AI（~… 或 x:… 代號）、格式不對、名單裡沒有＝null（畫面改說 MEMBER_NOT_FRIEND）。
 // friends：夥伴名單，可以是 Map／Set（看 has）或陣列（元素是夥伴物件或 id 字串）
-export const MEMBER_NOT_FRIEND = '他不在你的夥伴名單裡，沒辦法直接開對話。'
+export const MEMBER_NOT_FRIEND = '對方不在你的夥伴名單裡，沒辦法直接開對話。'
 export function memberFriendId(key, friends) {
   if (typeof key !== 'string' || !key) return null
   const id = speakerAvatarSeed(key)
