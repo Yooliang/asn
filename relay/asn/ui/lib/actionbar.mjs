@@ -457,9 +457,11 @@ export const ActionBar = {
     blocked: { type: Object, default: null },     // 簡版（ASN 直接開的終端分頁，#904）：{ 格子 key: 反灰原因 }；有給就不向任何後端查詢，列出的格子一律反灰並顯示原因
     piModelsFor: { type: Function, default: null },   // 別台電腦的 pi 模型清單（名單視窗的 remotePiModelsFor）；沒給＝別台的 pi 退回輸入框
     avatar: { type: String, default: '' },   // 現代外觀頂部名牌的大頭貼網址（由對話區給）；沒給就用預設頭像
+    skin: { type: String, default: '' },        // LINE 外觀（0.2.22）：只有 line 才多輸出返回鍵、人數、通話鍵
+    showBack: { type: Boolean, default: false },   // 窄視窗單窗格時才有返回鍵（LINE 外觀）
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops', 'term'],
+  emits: ['call', 'ops', 'term', 'back'],
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -719,17 +721,20 @@ export const ActionBar = {
   </asn-dialog>
 </div>
 <div class="mbar" v-if="showBar" role="toolbar" aria-label="對話標頭">
+  <button class="mbar-back" type="button" v-if="skin === 'line' && showBack" aria-label="返回名單" title="返回名單" @click="$emit('back')"><line-icon name="back" :size="22"></line-icon></button>
   <div class="mbar-plate" :class="{ 'is-offline': plate.offline, 'is-room': plate.room }" role="group" :aria-label="plate.aria">
     <asn-avatar class="mbar-av" v-if="!plate.room" :src="avatar" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
     <span class="mbar-av mbar-room" v-else aria-hidden="true">{{ plate.initial }}</span>
     <b class="mbar-name">{{ plate.name }}</b>
     <small class="mbar-sub" v-if="plate.sub">{{ plate.sub }}</small>
+    <small class="mbar-count" v-if="skin === 'line' && isRoom && friend.psm">{{ friend.psm }}</small>
   </div>
   <div class="mbar-acts">
     <button class="mbtn" type="button" data-slot="term" v-if="termReady" :class="{ on: termOn }" :aria-pressed="String(termOn)" :aria-label="termBtn.label" :title="termTip" @click="onWindow">
       <line-icon :name="termOn ? 'msg' : 'term'"></line-icon>
     </button>
     <offline-menu-button v-if="isRoom" :names="offlineNames"></offline-menu-button>
+    <button class="mbtn mbtn-call" type="button" v-if="skin === 'line' && !isRoom && api && callable" data-slot="line-call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall"><line-icon name="call"></line-icon></button>
     <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
   </div>
 </div>`,
