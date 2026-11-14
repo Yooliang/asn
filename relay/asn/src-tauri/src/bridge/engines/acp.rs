@@ -624,7 +624,9 @@ impl Engine for AcpEngine {
         // 要不要把回覆寄回：和橋同一條規則——抬頭的 reply=yes|no 是寄件人明說的，有就只看它；
         // reply=?（舊信沒有欄位）才退回看內文標記。寄件人是收發室的系統信照舊不寄回
         let no_reply = !wants_reply(head_reply(text), &body) || crate::notice_name::is_system_notice_name(&agent);
-        w.enqueue(Job { id: id.to_string(), text: text.to_string(), sender_node: node, sender_agent: agent, no_reply });
+        // 群組訊息（#1366）：可以不回。這一輪沒文字＝看過不回，不當失敗；有文字照舊貼回群組
+        let room = crate::bridge::rooms::is_room_text(text);
+        w.enqueue(Job { id: id.to_string(), text: text.to_string(), sender_node: node, sender_agent: agent, no_reply, room });
         Ok(())
     }
 }

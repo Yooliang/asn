@@ -9,6 +9,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const ROOM_HINT: &str = "這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。";
+/// 交給內建通道（ACP 工作者）的群組訊息多加這一行（#1366）：它的「這一輪最後的回答」就是回覆，不知道可以不回；
+/// 它也常把群組訊息當成要動手做事，想寫檔或執行指令就被政策擋下。說清楚：不一定要回、不要動手，有話直接回一段文字
+pub const ACP_ROOM_NOTE: &str = "（這是群組訊息：跟你無關就不用回，回空白就好；不要為了這則訊息寫檔或執行指令，有話要說就直接回一段文字。）";
+/// 這段轉交文字是不是群組訊息（收發室寫的抬頭「[群組 …]」開頭）。內建通道靠它分辨：群組訊息這一輪沒文字＝看過不回，不是失敗
+pub fn is_room_text(text: &str) -> bool {
+    text.starts_with("[群組 ")
+}
 /// 轉交點名訊息時附的上下文：前面最近幾則
 pub const CONTEXT_COUNT: usize = 5;
 
@@ -89,7 +96,13 @@ pub fn room_text_waited(room_name: &str, msg: &Value, attach_cmd: Option<&str>, 
     let body = msg.get("body").and_then(Value::as_str).unwrap_or("");
     let hint = if has_relation(msg) { format!("{ROOM_HINT}{RELATION_HINT}") } else { ROOM_HINT.to_string() };
     let rank_line = wake_of(msg).filter(|w| w.total >= 2).map(|w| format!("{}\n", wake_line(&w, waited_ms))).unwrap_or_default();
-    let note = if super::mail::sends_own_mail(engine_id) { format!("{}\n", super::mail::RESPONSIVE_NOTE) } else { String::new() };
+    let note = if super::mail::sends_own_mail(engine_id) {
+        format!("{}\n", super::mail::RESPONSIVE_NOTE)
+    } else if engine_id == "acp" {
+        format!("{ACP_ROOM_NOTE}\n")
+    } else {
+        String::new()
+    };
     format!("{}\n{}\n{}{}{}", room_header(room_name, msg), hint, rank_line, note, body_with_notes(&super::mail::escape_body(body), msg.get("attachments"), attach_cmd))
 }
 
@@ -495,10 +508,16 @@ mod tests {
             assert_eq!(lines.len(), 5);
         }
         // 自動回信的轉接器：橋代寄那一輪的回答，不給提醒（文字與 room_text 相同）
-        for eng in ["respond", "codex", "gemini", "acp"] {
+        for eng in ["respond", "codex", "gemini"] {
             assert_eq!(room_text_waited("G", &plain, None, 0, eng), room_text("G", &plain, None), "{eng}");
             assert!(!room_text_waited("G", &plain, None, 0, eng).contains(RESPONSIVE_NOTE));
         }
+        // 內建通道（#1366）：不給「保持能回應」，改給「不一定要回、不要動手」那一行，放在同一個位置（說明行之後、內文之前）
+        let acp = room_text_waited("G", &plain, None, 0, "acp");
+        assert!(!acp.contains(RESPONSIVE_NOTE));
+        let lines: Vec<&str> = acp.lines().collect();
+        assert_eq!(lines[2], ACP_ROOM_NOTE, "{acp}");
+        assert!(is_room_text(&acp) && !is_room_text("[RELAY 來信] trust=member from=W/甲"));
     }
     /// #499：與 relay/machine/test/room-body-escape.test.mjs 讀同一份向量（relay/shared/test-vectors/room-body-escape.json）
     #[test]
