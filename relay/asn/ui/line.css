@@ -273,7 +273,7 @@
 :root[data-skin="line"] .compose-main .lc-picker button{height:34px;font-size:18px;border-radius:8px}
 :root[data-skin="line"] .m-chat .compose-main .lc-picker{left:12px;width:auto;grid-template-columns:repeat(6,1fr)}
 :root[data-skin="line"] .compose-main .lc-photo:focus-visible,:root[data-skin="line"] .compose-main .lc-emo:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-:root[data-skin="line"] .compose-main .mc-dict{order:5;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
+:root[data-skin="line"] .compose-main .mc-dict{order:7;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
 :root[data-skin="line"] .compose-main .mc-dict:not(:has(.dict-state)){width:40px}
 :root[data-skin="line"] .compose-main .mc-dict .dict-state{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px}
 :root[data-skin="line"] .compose-main .mc-plus:hover,:root[data-skin="line"] .compose-main .mc-dict:hover:not(:disabled){background:var(--ls-hover)}
@@ -365,7 +365,9 @@
 /* ---------- 對話底色：整片淡藍純色（不加雲紋）；輸入框膠囊維持白色 ---------- */
 :root[data-skin="line"] .chatpane-main,:root[data-skin="line"] .conv,:root[data-skin="line"] .conv-main,:root[data-skin="line"] .msgs,
 :root[data-skin="line"] .compose-row,:root[data-skin="line"] .mbar,:root[data-skin="line"] .m-chat,:root[data-skin="line"] .m-chat .msgs,
-:root[data-skin="line"] .m-chat .compose-row,:root[data-skin="line"] .m-chat .conv-main{background:var(--line-bg)}
+:root[data-skin="line"] .m-chat .conv-main{background:var(--line-bg)}
+/* #1517 之 2：輸入區整條白底（手機原本被上面的藍底蓋過） */
+:root[data-skin="line"] .compose-row,:root[data-skin="line"] .m-chat .compose-row,:root[data-skin="line"] .compose-main,:root[data-skin="line"] .m-chat .compose-main{background:#fff}
 /* 淡藍底上的灰字（名字、時間、狀態、「沒有更早的了」）要用較深的藍灰才讀得到 */
 :root[data-skin="line"] .msgs{--muted:var(--line-bg-ink);--msg-st-muted:var(--line-bg-ink);--msg-st-read:#14507a}
 :root[data-skin="line"] .older-note{text-align:center;color:var(--line-bg-ink);font-size:12.5px}
@@ -408,7 +410,7 @@
 /* 清單列右欄（#1449 第三張）：右上最後往來時間（.l-time，只在 LINE 才輸出）、右下綠色未讀圓圈（既有的 .unread，數字沿用）。
    兩顆都絕對定位在列的右側，名字與最後一句留右內距不被蓋住；列沒有時間或沒有未讀就那一顆不出現。 */
 :root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn,:root[data-skin="line"] .m-buddy{position:relative}
-:root[data-skin="line"] .l-time{position:absolute;top:12px;right:12px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;pointer-events:none}
+:root[data-skin="line"] .buddy > .l-time,:root[data-skin="line"] .room-btn > .l-time,:root[data-skin="line"] .m-buddy > .l-time{position:absolute;top:12px;right:12px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;pointer-events:none}
 :root[data-skin="line"] .buddy .unread,:root[data-skin="line"] .room-btn .unread,:root[data-skin="line"] .m-buddy .unread{position:absolute;right:12px;bottom:12px;box-sizing:border-box;min-width:20px;height:20px;margin:0;padding:0 6px;border-radius:10px;font-size:12px;font-weight:600;line-height:20px;text-align:center;background:var(--accent);color:#fff}
 :root[data-skin="line"] .buddy:has(> .l-time) > .b-text,:root[data-skin="line"] .room-btn:has(> .l-time) > .b-text,:root[data-skin="line"] .m-buddy:has(> .l-time) > .b-text,:root[data-skin="line"] .buddy:has(> .unread) > .b-text,:root[data-skin="line"] .room-btn:has(> .unread) > .b-text,:root[data-skin="line"] .m-buddy:has(> .unread) > .b-text{padding-right:58px}
 
@@ -473,7 +475,7 @@
 :root[data-skin="line"] .msg.mine .l-meta{order:0;align-items:flex-end}
 :root[data-skin="line"] .l-meta .l-st{font-weight:600}
 :root[data-skin="line"] .l-meta .l-st.st-read,:root[data-skin="line"] .l-meta .l-st.st-replied,:root[data-skin="line"] .l-meta .l-rd.all{color:#14507a}
-:root[data-skin="line"] .l-meta .spk{align-self:flex-start;margin:2px 0 0;padding:0;border:0;background:transparent;color:var(--line-bg-ink);cursor:pointer}
+:root[data-skin="line"] .l-meta .spk{order:-1;align-self:flex-start;margin:0 0 2px;padding:0;border:0;background:transparent;color:var(--line-bg-ink);cursor:pointer}
 :root[data-skin="line"] .l-meta .spk.on{color:var(--accent)}
 :root[data-skin="line"] .msg.l-cont{margin-top:-6px}
 :root[data-skin="line"] .msg.l-cont .m-av{visibility:hidden}
@@ -515,3 +517,14 @@
 :root[data-skin="line"] .m-chat .m-plate-head > .m-head-more .m-ic{width:24px;height:24px}
 /* 通話鈕搬到標題列了，輸入框「＋」選單裡那個收起來（同一個動作，不留兩個入口） */
 :root[data-skin="line"] .compose-main > .toolbar .tool.call{display:none}
+/* #1517 之 2：麥克風在框外最右側（上面 .mc-dict 排 7，送出鈕 6 在它前面，有字才出現） */
+/* #1517 之 3：打字時（輸入框有焦點或有字）左邊的「＋」和圖片鈕收成「＞」，按了再展開（.lc-typing 由 chatpane 只在 LINE 加） */
+:root[data-skin="line"] .compose-main .lc-more{display:none;order:1;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer}
+:root[data-skin="line"] .compose-main.lc-typing .lc-more{display:grid}
+:root[data-skin="line"] .compose-main.lc-typing .mc-plus,:root[data-skin="line"] .compose-main.lc-typing .lc-photo{display:none}
+:root[data-skin="line"] .compose-main .lc-more:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .compose-main .lc-more:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* #1517 之 4：標題列一律跟對話區同一個藍底，忙碌時不整條變黃；只把「忙碌」包成黃色小標籤（.l-busy 只在 LINE 輸出） */
+:root[data-skin="line"] .m-chathead,:root[data-skin="line"] .m-chathead.is-busy,:root[data-skin="line"] .m-chathead.is-offline{background:var(--line-bg);border-bottom-color:transparent;color:var(--fg)}
+:root[data-skin="line"] .m-chathead.is-busy .m-title,:root[data-skin="line"] .m-chathead.is-busy .m-conn,:root[data-skin="line"] .m-chathead.is-busy .m-icon-btn{color:inherit}
+:root[data-skin="line"] .l-busy{display:inline-block;margin-left:1px;padding:0 6px;border-radius:999px;background:#ffd54a;color:#3a2a00;font-weight:600;line-height:1.5}

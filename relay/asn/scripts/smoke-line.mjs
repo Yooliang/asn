@@ -184,6 +184,9 @@ export const lineProbeSource = kind => `(async () => {
     const fileIn = [...main.querySelectorAll('input[type="file"]')].find(i => i.accept === 'image/*');
     let opened = 0; const stop = ev => { ev.preventDefault(); opened++ };
     fileIn.addEventListener('click', stop);
+    // #1517 之 3：輸入框有字時「＋」和圖片鈕收成「＞」，先按「＞」展開再點圖片鈕
+    const more = main.querySelector('.lc-more');
+    if (more && more.getClientRects().length && getComputedStyle(more).display !== 'none') await real({ click: at(more) });
     await real({ click: at(photo) });
     fileIn.removeEventListener('click', stop);
     if (opened !== 1) return { ok: false, why: 'LINE 外觀：' + '按圖片鈕沒有打開選檔：' + opened };
