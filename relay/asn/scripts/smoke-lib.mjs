@@ -213,6 +213,20 @@ export const lineUiProbeSource = ({ lineUi }) => `(async () => {
   await real({ click: at(more) });
   if (!vis(plus) || !vis(photo)) return { ok: false, why: '按「＞」沒有展開「＋」和圖片鈕' };
   if (document.activeElement !== ta) return { ok: false, why: '按「＞」不該讓輸入框失去焦點' };
+  // 送出後一律收回展開狀態：下一句一開始打字又收成「＞」（#1524 審查）。電腦按 Enter 送（焦點留在輸入框），手機點送出鈕
+  if (phone) {
+    const send = [...pane.querySelectorAll('button[type="submit"]')].find(vis);
+    if (!send) return { ok: false, why: '有字時找不到送出鈕' };
+    await real({ click: at(send) });
+  } else await real({ key: 'Enter' });
+  if (ta.value !== '') return { ok: false, why: '送出後輸入框沒有清空' };
+  if (document.activeElement !== ta) await real({ click: at(ta) });
+  await real({ text: '再一句' });
+  if (vis(plus) || vis(photo) || !vis(more)) return { ok: false, why: '送出後下一句開始打字，沒有再收成「＞」' };
+  // 用鍵盤按「＞」（空白鍵）：展開後焦點要移到「＋」，不能掉到整頁
+  more.focus();
+  await real({ key: ' ' });
+  if (!vis(plus) || document.activeElement !== plus) return { ok: false, why: '用鍵盤按「＞」展開後，焦點應該在「＋」上（現在在 ' + (document.activeElement && (document.activeElement.className || document.activeElement.tagName)) + '）' };
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
