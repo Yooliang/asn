@@ -79,6 +79,68 @@ export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idl
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
 // 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
+// 設備頁精簡（#1499）：列上只留名字和「電腦／手機・在線／離線」，「已確認／未確認」換成指紋小圖示。
+// desk＝電腦版設定的設備頁（兩支手機：一支記住了指紋、一支還沒）；phone＝手機設定的設備頁（兩台電腦：一台確認過、一台還沒，長按看說明）
+export const FPMARK_MEMBERS = {
+  desk: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'M1', name: '小良的手機', agents: [{ name: 'm1', status: 'idle', cwd_label: 'm' }] }, { id: 'M2', name: '舊手機', agents: [{ name: 'm2', status: 'idle', cwd_label: 'm' }] }],
+  phone: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+}
+export const fpMarkProbeSource = mode => `(async () => {
+  try {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(400) };
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const vis = e => e && e.getClientRects().length > 0;
+  const phone = ${JSON.stringify(mode)} === 'phone';
+  if (phone) {
+    let btn = null;
+    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+    if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
+    await real({ click: at(btn) }); await sleep(300);
+  }
+  const rowSel = phone ? '.m-dv-row' : '.dv-row';
+  let rows = [];
+  for (let i = 0; i < 60; i++) { rows = [...document.querySelectorAll(rowSel)].filter(vis); if (rows.length >= 3) break; await sleep(100) }
+  if (rows.length < 3) return { ok: false, why: '設備列不夠：' + rows.length };
+  const row = name => rows.find(r => (r.querySelector(phone ? 'b' : '.dv-name')?.textContent ?? '').trim() === name);
+  for (const r of rows) {
+    const t = r.textContent;
+    if (/已確認|未確認|已登入|未安裝|還沒收到/.test(t)) return { ok: false, why: '列上還有膠囊或狀態那一行：' + t.trim().slice(0, 60) };
+    if (r.querySelector(phone ? '.m-dv-line' : '.dv-line')) return { ok: false, why: '列上還有狀態那一行' };
+  }
+  const expect = phone ? [['辦公室', 'confirmed', '已確認指紋', 'check'], ['工作機', 'unconfirmed', '尚未確認指紋', 'alert']] : [['小良的手機', 'remembered', '已記住指紋 ', ''], ['舊手機', 'unknown', '還沒記住指紋', 'alert']];
+  const colors = new Set();
+  for (const [name, cls, label, badge] of expect) {
+    const r = row(name);
+    if (!r) return { ok: false, why: '找不到「' + name + '」那一列' };
+    const m = r.querySelector('.fpm');
+    if (!m) return { ok: false, why: name + ' 沒有指紋圖示' };
+    if (!m.classList.contains(cls)) return { ok: false, why: name + ' 的指紋圖示應該是 ' + cls };
+    const al = m.getAttribute('aria-label') || '';
+    if (!al.startsWith(label) || m.getAttribute('title') !== al) return { ok: false, why: name + ' 的說明不對：' + al };
+    if (m.getBoundingClientRect().width < 16) return { ok: false, why: name + ' 的指紋圖示太小或沒畫出來' };
+    const b = m.querySelector('.fpm-badge');
+    if (!!badge !== !!b) return { ok: false, why: name + (badge ? ' 少了角落的記號（不能只靠顏色）' : ' 不該有角落的記號') };
+    if (badge === 'alert' && b.querySelectorAll('path').length !== 2) return { ok: false, why: name + ' 的記號應該是「!」' };
+    if (badge === 'check' && b.querySelectorAll('path').length !== 1) return { ok: false, why: name + ' 的記號應該是勾' };
+    colors.add(getComputedStyle(m).color);
+  }
+  if (colors.size !== 2) return { ok: false, why: '兩種狀態的顏色要不同' };
+  if (!phone) {
+    const pc = row('辦公室');
+    if (pc && pc.querySelector('.fpm')) return { ok: false, why: '電腦那一列不該有指紋圖示（電腦版只有手機有指紋）' };
+    const al = row('小良的手機').querySelector('.fpm').getAttribute('aria-label');
+    if (!/已記住指紋 [0-9a-f]{4} [0-9a-f]{4}$/.test(al)) return { ok: false, why: '電腦版的說明要帶 8 碼指紋：' + al };
+  } else {
+    // 長按出現說明
+    const m = row('工作機').querySelector('.fpm');
+    await real({ hold: [...at(m), 700] }); await sleep(500);   // 按住 700 毫秒才放開，等它放開
+    const tip = m.querySelector('.fpm-tip');
+    if (!tip || tip.textContent.trim() !== '尚未確認指紋') return { ok: false, why: '長按指紋圖示沒有出現說明' };
+  }
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 export const devMoreProbeSource = () => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -710,11 +772,13 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   if (tab === 'devices') {
     const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
     if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
-    if (!rows.some(r => (r.querySelector('.m-dv-line')?.textContent ?? '').includes('還沒收到這台的回報'))) return { ok: false, why: '沒有一列有第三行「還沒收到這台的回報」' };
+    if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情）' };
+    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const tag = w && w.querySelector('.noreport'); if (!tag || tag.textContent.trim() !== '沒回報' || !vis(tag)) return { ok: false, why: '工作機沒有回報，列上要看得到「沒回報」標記' } }
+    if (rows.filter(r => r.querySelector('.noreport')).length !== 1) return { ok: false, why: '只有沒回報的那台要有「沒回報」標記' };
     const list = R(document.querySelector('.m-dv-list'));
     for (const row of rows) {
       const rr = R(row);
-      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .m-dv-line')) {
+      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .noreport')) {
         const t = textRect(e);
         if (t.bottom > rr.bottom + 0.5 || t.bottom > list.bottom + 0.5) return { ok: false, why: '「' + (row.querySelector('b')?.textContent ?? '') + '」那列的「' + e.textContent.trim() + '」被切' };
       }
@@ -722,6 +786,16 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     const dots = rows.map(r => R(r.querySelector('.m-dv-dot')).left);
     if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
     if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
+    // #1499：「還沒收到這台的回報」搬到詳情，仍然要看得到（真的點「詳情」進去找）
+    const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
+    if (!info) return { ok: false, why: '找不到工作機的「詳情」' };
+    info.scrollIntoView({ block: 'center' }); await sleep(150);
+    { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
+    let st = null;
+    for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.m-dv-state')].find(vis) || null; if (!st) await sleep(100) }
+    if (!st || !st.textContent.includes('還沒收到這台的回報')) return { ok: false, why: '工作機的詳情裡看不到「還沒收到這台的回報」' };
+    const box = R(st.closest('.m-dv-info') || st.parentElement);
+    if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };
   } else {
     if (!foot) return { ok: false, why: '帳號頁沒有額度註腳' };
     if (document.querySelector('.m-dv-my')?.textContent.includes('這台沒有存這個帳號')) return { ok: false, why: '還有「這台沒有存這個帳號」' };
@@ -1365,8 +1439,8 @@ export const skinProbeSource = (probe = {}) => `(async () => {
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -1395,7 +1469,7 @@ function cardsRoster(now = SMOKE_NOW) {
       windows: [{ name: 'five_hour', left_pct: 55, resets_at: toMinute(now + 2 * 3600_000), read_at: old, read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: toMinute(now + 4 * 24 * 3600_000), read_at: old, read_node: 'P' }] },
     { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: old, seen_node: 'P', nodes: [] }] }
 }
-// #930 手機設定頁排版：這支手機＋兩台電腦（工作機的回報是舊的，第三行會是「還沒收到這台的回報」）；
+// #930 手機設定頁排版：這支手機＋兩台電腦（工作機的回報是舊的；#1499 起狀態那一行搬到詳情，列上不再出現）；
 // 辦公室有兩個 Claude 帳號、ASN 在線（可以切換）；工作機也存了兩個但 ASN 不在線（按鈕停用、左邊有說明字），第 8 點的對齊才看得到
 function layoutRoster(now = SMOKE_NOW) {
   const r = resetRoster(now)
@@ -2125,6 +2199,10 @@ export const SCENARIOS = [
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dev-more', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more.png' },
   { name: 'list-dev-more-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, manyDevices: true, skin: 'modern' }, ready: '#app.win .rail .more-wrap', probe: DEVMORE_PROBE, shot: 'list-dev-more-modern.png' },
+  { name: 'list-dev-fpmark', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark.png' },
+  { name: 'list-dev-fpmark-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk', skin: 'modern' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark-modern.png' },
+  { name: 'm-dev-fpmark', page: 'm.html', state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { fpMark: 'phone' }, shot: 'm-dev-fpmark.png' },
+  { name: 'm-dev-fpmark-modern', page: 'm.html', state: { signedIn: true, fpMark: 'phone', skin: 'modern' }, ready: '#app.m .m-row-btn', probe: { fpMark: 'phone' }, shot: 'm-dev-fpmark-modern.png' },
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },
   { name: 'list-modern-chat', page: 'list.html', width: 900, height: 640, state: { signedIn: true, partnerTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: SKIN_KEYS_PROBE, shot: 'list-modern-chat.png' },
   { name: 'm-modern', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: SKIN_PROBE, shot: 'm-modern-chat.png' },
@@ -2213,6 +2291,18 @@ export const tableFor = scenario => {
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
   if (scenario.state.aboutPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ABOUT_ME) } }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
+  if (scenario.state.fpMark === 'desk') {   // 設備頁精簡（#1499）：電腦版
+    t.relay_list = { members: FPMARK_MEMBERS.desk }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }
+    t.relay_launchers = { machines: [{ node: 'M1', platform: 'android', launcher: null }, { node: 'M2', platform: 'android', launcher: null }] }
+    t.device_known_list = { peers: [{ node: 'M1', name: '小良的手機', fingerprint: '3fa2c91b7d0e4a5f8c6b2d1e0f9a8b7c', first_seen_ms: 1763000000000 }] }
+  }
+  if (scenario.state.fpMark === 'phone') {   // 設備頁精簡（#1499）：手機
+    t.relay_list = { members: FPMARK_MEMBERS.phone }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } }
+    t.android_launchers = { machines: [{ node: 'P', platform: 'android', launcher: null }] }
+    t.android_known_list = { peers: [{ node: 'Q', name: '辦公室', confirmed: true, fp: '3fa2c91b7d0e4a5f8c6b2d1e0f9a8b7c', first_seen_ms: 1763000000000 }, { node: 'R', name: '工作機', confirmed: false, first_seen_ms: 1763000000000 }] }
+  }
   if (scenario.state.manyDevices) t.relay_list = { members: MANY_DEVICES }
   if (scenario.state.partnerTab) { t.relay_list = { members: PARTNER_MEMBERS }; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } } }
   if (scenario.state.bar) {

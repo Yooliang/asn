@@ -20,10 +20,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「忘記這台」，才能重新確認。')
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
-  assert.equal(TEXT.confirmed, '已確認')
-  assert.equal(TEXT.unconfirmed, '未確認')
-  assert.equal(TEXT.tagConfirmed, '已確認')
-  assert.equal(TEXT.tagUnconfirmed, '未確認')
+  for (const k of ['confirmed', 'unconfirmed', 'tagConfirmed', 'tagUnconfirmed']) assert.equal(TEXT[k], undefined, `${k} 換成指紋圖示（#1499）後不用了`)
   assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
   assert.equal(TEXT.neverSeen, '還沒連線過，連上時會記住指紋')
   assert.equal(TEXT.forgetThis, '忘記這台')
@@ -240,8 +237,9 @@ test('m.html：設備列每列剛好 4 顆操作按鈕（上移、下移、帳�
   assert.match(row, /@click="acctMove\(d\.key, -1\)"/)
   assert.match(row, /@click="acctMove\(d\.key, 1\)"/)
   assert.match(row, /class="m-dv-grip"/, '排序把手還在')
-  assert.match(row, /joined\.byNode\[d\.key\]\.confirmed">\{\{ KNOWN_TEXT\.tagConfirmed \}\}/)
-  assert.match(row, /v-else-if="!d\.self && joined\.byNode\[d\.key\]">\{\{ KNOWN_TEXT\.tagUnconfirmed \}\}/)
+  // #1499：「已確認／未確認」的膠囊換成指紋小圖示（彩色／灰色），說明寫在 aria-label 與滑過、長按的提示
+  assert.match(row, /<fp-mark v-if="!d\.self && phoneFpMark\(joined\.byNode\[d\.key\]\)" :kind="phoneFpMark\(joined\.byNode\[d\.key\]\)\.kind" :label="phoneFpMark\(joined\.byNode\[d\.key\]\)\.label"><\/fp-mark>/)
+  assert.doesNotMatch(row, /tagConfirmed|tagUnconfirmed|m-dv-line|stateLine/, '列上不放膠囊與狀態那一行')
   assert.doesNotMatch(row, /fpShow|\.fp\b/, '列上不顯示指紋')
   assert.match(html, /v-if="joined\.old\.length"/)
 })
@@ -254,8 +252,10 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
   assert.equal(fpRefs, 2, '指紋只出現在「已確認」那一段（判斷＋顯示）')
   const confirmedBranch = /v-else-if="curKnown && curKnown\.confirmed"[\s\S]*?<\/p>/.exec(info)[0]
   assert.match(confirmedBranch, /curKnown\.fpShow/)
-  const unconfirmedBranch = /v-else-if="curKnown"><span[\s\S]*?<\/p>/.exec(info)[0]
-  assert.doesNotMatch(unconfirmedBranch, /fp/i, '沒確認的不顯示也不碰指紋')
+  const unconfirmedBranch = /v-else-if="curKnown"><fp-mark[\s\S]*?<\/p>/.exec(info)[0]
+  assert.doesNotMatch(unconfirmedBranch, /fpShow|fingerprint/, '沒確認的不顯示也不碰指紋（只有灰色的指紋圖示）')
+  assert.match(unconfirmedBranch, /<fp-mark kind="unconfirmed"/)
+  assert.match(info, /<p class="m-fine m-dv-state" v-if="acctCur\.stateLine">\{\{ acctCur\.stateLine \}\}<\/p>/, '狀態那一行搬到詳情（#1499）')
   assert.match(unconfirmedBranch, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '確認按鈕只在沒確認時出現')
   assert.equal((info.match(/confirmKnown\(/g) ?? []).length, 1)
   assert.match(info, /\{\{ KNOWN_TEXT\.neverSeen \}\}/)

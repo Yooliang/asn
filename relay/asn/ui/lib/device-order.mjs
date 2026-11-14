@@ -110,6 +110,8 @@ export const DEVICE_TEXT = {
   removeYes: '確定移除',
   cancel: '取消',
   hiddenTag: '已隱藏',
+  noReportTag: '沒回報',   // #1499：這台在線卻還沒收到回報，列上一眼看得出來；整句在詳情
+  noReportTip: '還沒收到這台的回報，打開「詳情」看說明',
   restore: '恢復',
   empty: '還沒有設備。',
   moveUp: '上移',

@@ -4,6 +4,7 @@
 import { AsnCore } from './lib/core.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
+import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { READ_VISIBLE_POLL_MS } from './lib/read-sync.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
@@ -1391,7 +1392,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatOffline, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
@@ -1409,6 +1410,7 @@ app.component('group-sheet', GroupSheet)
 app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
+app.component('fp-mark', FpMark)
 app.component('ptr-zone', PtrZone)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切

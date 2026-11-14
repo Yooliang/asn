@@ -334,3 +334,6 @@
 :root[data-skin="modern"] .m-tabs button{display:flex;align-items:center;justify-content:center;gap:5px}
 /* 搜尋、新增、返回：形狀照舊，線寬統一 1.75、改灰 */
 :root[data-skin="modern"] .search-ic svg circle,:root[data-skin="modern"] .search-ic svg path,:root[data-skin="modern"] .search-plus svg path,:root[data-skin="modern"] .m-icon-btn .m-ic path{stroke-width:1.75}
+/* 指紋小圖示（#1499）：現代外觀用線條版，不加底圈 */
+:root[data-skin="modern"] .fpm{background:none;border:0;box-shadow:none;width:22px;height:22px}
+:root[data-skin="modern"] .fpm > svg:first-child{stroke-width:1.75}

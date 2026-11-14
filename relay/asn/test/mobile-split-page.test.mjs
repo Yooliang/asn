@@ -82,7 +82,7 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.match(html, /v-for="t in ACCT_TABS"/)
   assert.match(html, /v-if="acctSw\.tab === 'accounts' && acctMy"/, '我的帳號只在帳號分頁')
   assert.match(html, /<template v-if="acctSw\.tab === 'devices'">/, '設備列表只在設備分頁')
-  assert.match(html, /class="m-dv-line" v-if="d\.stateLine"/)
+  assert.match(html, /class="m-fine m-dv-state" v-if="acctCur\.stateLine"/, '狀態那一行在詳情（#1499 從列上搬過去）')
   // 帳號卡片的設備按鈕（原本的「用在：」一行和「切換到…」按鈕合在一起）：按了走原本的切換流程，使用中的按了不做事
   assert.match(html, /v-for="b in acctDevButtons\(v\.key, a\)"/)
   assert.match(html, /:disabled="!b\.current && !\(b\.target && b\.target\.enabled\)" @click="acctDevPress\(b, a\)"/, '不能按的要反灰')
@@ -91,7 +91,7 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.match(html, /:aria-pressed="b\.current \? 'true' : 'false'"/, '使用中的是選中的樣子')
   assert.ok(!html.includes('ROSTER_TEXT.usedOn') && !html.includes('切換到{{'), '拿掉「用在：」與「切換到…」')
   assert.match(js, /const acctDevPress = \(b, a\) => \{ if \(b\.current \|\| !b\.target \|\| !b\.target\.enabled\) return; void acctSwitchOn\(b\.node, a\.account\) \}/, '使用中或不能切的按了不做事，其他走原本的切換')
-  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-line', 'm-dv-devs', 'm-dv-dev']) assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
+  for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-devs', 'm-dv-dev'])assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
   // 畫面上沒有「設備與帳號」當作設定列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))
 })

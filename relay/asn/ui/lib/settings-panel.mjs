@@ -3,6 +3,7 @@
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { TEXT as KNOWN, groupFp, createForgetConfirm } from './known-peers.mjs'
+import { FpMark, deskFpMark } from './fp-mark.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mjs'
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
@@ -36,7 +37,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas },
+  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'acct' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -153,7 +154,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { TM, TM_COLUMNS, openTasks, KNOWN, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
@@ -348,7 +349,7 @@ export const SettingsPanel = {
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag fp" v-if="d.phone && joined.byNode[d.key]" :aria-label="KNOWN.fingerprint">{{ shortFp(joined.byNode[d.key].fingerprint) }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></span>
+                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark></span>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
@@ -447,6 +448,7 @@ export const SettingsPanel = {
                 <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(curKnown.fingerprint) }}</code>
               </template>
               <small v-else>還沒連線過，連上時會記住指紋</small>
+              <p class="dv-state" v-if="curDev.stateLine">{{ curDev.stateLine }}</p>
               <p v-if="curKnown && curKnown.firstSeen">{{ KNOWN.firstSeen(curKnown.firstSeen) }}</p>
               <template v-if="curKnown">
                 <label class="chk"><input type="checkbox" :checked="curKnown.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.inputNoAsk" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
