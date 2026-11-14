@@ -385,9 +385,9 @@ mod tests {
     #[test]
     fn 喚醒提示_三種情況() {
         let os = mux_fake(600_000);
-        assert_eq!(resume_block_hint(&os, &[mux_partner()], SID, NOW), STUCK_IN_TASKMGR_HINT, "滿 5 分鐘＋符合：指向工作管理員");
-        assert_eq!(resume_block_hint(&os, &[], SID, NOW), live_process::STUCK_HINT, "滿 5 分鐘但不符合：維持原句");
-        assert_eq!(resume_block_hint(&mux_fake(60_000), &[mux_partner()], SID, NOW), live_process::STARTING_HINT, "未滿 5 分鐘：請稍候");
+        assert_eq!(resume_block_hint(&os, &[mux_partner()], &[], SID, NOW), STUCK_IN_TASKMGR_HINT, "滿 5 分鐘＋符合：指向工作管理員");
+        assert_eq!(resume_block_hint(&os, &[], &[], SID, NOW), live_process::STUCK_HINT, "滿 5 分鐘但不符合：維持原句");
+        assert_eq!(resume_block_hint(&mux_fake(60_000), &[mux_partner()], &[], SID, NOW), live_process::STARTING_HINT, "未滿 5 分鐘：請稍候");
     }
 
     #[test]
