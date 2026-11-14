@@ -9,12 +9,12 @@ const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').r
 const fakeDoc = () => ({ documentElement: { dataset: {} } })
 const fakeStore = (init = {}) => { const m = new Map(Object.entries(init)); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), m } }
 
-test('兩個選項、預設復古 Aero（舊使用者升級後樣子不變）、壞值退回預設', () => {
-  assert.deepEqual(SKINS, ['aero', 'modern'])
-  assert.deepEqual(SKINS.map(k => SKIN_LABEL[k]), ['復古 Aero（原本的樣子）', '現代'])
+test('三個選項（0.2.22 起多 LINE 風格）、預設復古 Aero（舊使用者升級後樣子不變）、壞值退回預設', () => {
+  assert.deepEqual(SKINS, ['aero', 'modern', 'line'])
+  assert.deepEqual(SKINS.map(k => SKIN_LABEL[k]), ['復古 Aero（原本的樣子）', '現代', 'LINE 風格'])
   assert.equal(DEFAULT_SKIN, 'aero')
   for (const v of [undefined, null, '', 'neon', 3, {}]) assert.equal(normalizeSkin(v), 'aero', String(v))
-  assert.equal(normalizeSkin('modern'), 'modern')
+  assert.equal(normalizeSkin('modern'), 'modern'); assert.equal(normalizeSkin('line'), 'line')
 })
 
 test('套用：寫到 <html data-skin>，並記到 localStorage（其他視窗、下次開啟一開始就是這一套）；壞值當復古 Aero；沒有 localStorage 也不會壞', () => {
@@ -53,7 +53,7 @@ test('樣式表：modern.css 每一條規則都限定在 :root[data-skin="modern
   const boot = read('ui/skin-boot.js')
   assert.match(boot, /localStorage\.getItem\('asnSkin'\)/); assert.match(boot, /addEventListener\('storage'/)
   assert.match(boot, /ev\.listen\('asn:skin'/, '跨視窗另有 Tauri 事件當保險（storage 事件不是每個平台都送）')
-  assert.match(boot, /var pick = function \(v\) \{ return v === 'modern' \? 'modern' : 'aero' \}/, '只認白名單裡的值')
+  assert.match(boot, /var pick = function \(v\) \{ return v === 'modern' \|\| v === 'line' \? v : 'aero' \}/, '只認白名單裡的值（aero／modern／line）')
   assert.doesNotMatch(boot, /setItem|fetch|invoke/, '開機腳本只讀不寫')
 })
 

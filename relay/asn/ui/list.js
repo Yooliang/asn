@@ -5,7 +5,7 @@ import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
 import { lastWords } from './lib/mobile.mjs'
-import { applySkin, normalizeSkin } from './lib/skin.mjs'
+import { applySkin, normalizeSkin, effectiveLook } from './lib/skin.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB } from './lib/mobile-guides.mjs'
 import { isMergedAway } from './lib/notice.mjs'
 import { ADS, AD_MS, FIXED_TABS, TOP_TABS, topOf, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
@@ -293,6 +293,8 @@ const pinnedChat = normalizePinned(savedMe.pinnedChat)
 // 窄視窗只顯示一個窗格時（#1192），使用者按了「返回名單」＝true；從名單開對話或設定就回到 false（切到右邊）。不存檔
 const pane = reactive({ showList: false })
 const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, panel: { guide: '', setting: '' } })
+// 實際生效的頭像模式與文字底色（LINE 風格固定、其他外觀照使用者的值）。只用來「讀」；存檔與設定頁仍是 ui.dpMode／ui.bubble 自己的值，不會被洗掉
+const lookNow = computed(() => effectiveLook(skin.value, { dpMode: ui.dpMode, bubble: ui.bubble }))
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
@@ -345,7 +347,7 @@ const sync = () => {
   asnMap.value = s.asn ?? {}
   conn.value = s.conn
   connWhy.value = s.connWhy ?? ''
-  emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
+  emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: lookNow.value.dpMode, bubble: lookNow.value.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })   // 獨立對話視窗讀這份：已經是依外觀算好的有效值
 }
 // 名單的活躍度（#347）：名單每次更新、再加每 30 秒（讓 8 小時門檻與離線去抖會自己到期）算一輪；狀態放在普通 Map，畫面靠 activityTick 重算
 let activityPrev = new Map()
@@ -2021,7 +2023,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,

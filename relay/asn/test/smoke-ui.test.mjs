@@ -359,7 +359,7 @@ test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩�
 
 test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對話、手機夥伴頁各一，存檔選現代；表達式語法正確', async () => {
   const vm = await import('node:vm')
-  const sc = SCENARIOS.filter(s => s.probe?.skinCheck)
+  const sc = SCENARIOS.filter(s => s.probe?.skinCheck && !s.probe.line)
   assert.deepEqual(sc.map(s => s.name), ['list-modern', 'list-modern-chat', 'm-modern', 'm-modern-list', 'list-modern-msgs', 'm-modern-msgs', 'm-modern-busy', 'm-modern-term'])
   assert.equal(probeKind(sc[0].probe), '現代外觀檢查')
   assert.doesNotThrow(() => new vm.Script(probeSource(sc[0].probe)))
