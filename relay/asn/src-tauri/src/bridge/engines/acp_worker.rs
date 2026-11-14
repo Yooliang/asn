@@ -224,6 +224,8 @@ pub struct Job {
     pub sender_node: String,
     pub sender_agent: String,
     pub no_reply: bool,
+    /// 群組訊息（#1366）：可以不回，這一輪沒有文字不算失敗
+    pub room: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -841,6 +843,11 @@ impl Worker {
                 let text = res.text.trim().to_string();
                 if job.no_reply {
                     self.log(format!("不需回覆的信 {} 處理完（{} 字，不寄回）", job.id, text.chars().count()));
+                    ev(EngineEvent::Replied(job.id.clone()));
+                } else if text.is_empty() && job.room {
+                    // 群組訊息不一定要回：沒文字＝看過、不回（被政策擋下的動作照樣記在 log，不貼群組）
+                    let denied = if res.denied.is_empty() { String::new() } else { format!("；被政策擋下的動作：{}", res.denied.iter().take(3).map(|d| d.summary.clone()).collect::<Vec<_>>().join("；")) };
+                    self.log(format!("群組訊息 {} 看過、不回（沒有回覆文字{denied}）", job.id));
                     ev(EngineEvent::Replied(job.id.clone()));
                 } else if text.is_empty() {
                     let why = if res.denied.is_empty() { String::new() } else { format!("（它想做的事被政策拒絕了：{}）", res.denied.iter().take(3).map(|d| d.summary.clone()).collect::<Vec<_>>().join("；")) };

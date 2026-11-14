@@ -2278,3 +2278,40 @@ async fn 通道信_重送一次還沒做完_通知寄件人_不再重送() {
     let log = bridge_log(&h);
     assert!(!log.contains("resent after restart"), "第二次重開不再重送：{log}");
 }
+
+// ---- #1366：群組點名交給內建通道，這一輪沒有文字（想做的事被政策擋下、或判斷跟它無關）：當成「看過、不回」，不算轉交失敗、不貼通知
+
+#[tokio::test]
+async fn 群組點名交給通道_這一輪沒有回覆文字_當成看過不回_不貼沒轉交的通知() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"execute": "deny"}}))])), &[], "acp", &[]).await;
+    room_for(&h, vec![(2, "@@RUN dir")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    h.wait("這一輪結束", |h| h.log_text().contains("看過、不回") || h.core.log.recent().iter().any(|l| l.contains("forward failed"))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let log = h.core.log.recent();
+    assert!(!log.iter().any(|l| l.contains("forward failed")), "不算轉交失敗：{log:?}");
+    assert!(h.fr.st.lock().unwrap().room_posts.is_empty(), "群組不該收到「沒有轉交給…」的通知");
+}
+
+#[tokio::test]
+async fn 群組點名交給通道_有回覆文字照舊貼回群組() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    room_for(&h, vec![(2, "請回一行")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("回覆貼進群組", |h| !h.fr.st.lock().unwrap().room_posts.is_empty()).await;
+    let p = h.fr.st.lock().unwrap().room_posts[0].clone();
+    assert!(!p.to_string().contains("（收發室）"), "是它的回覆，不是通知：{p}");
+}
+
+#[tokio::test]
+async fn 群組訊息交給通道時_提示它不一定要回_不要寫檔或執行指令() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    room_for(&h, vec![(2, "@@ECHO_PROMPT")]);
+    h.core.pull_rooms(now()).await;
+    h.wait("交出去了", |h| h.core.log.recent().iter().any(|l| l.contains("handed room=R1 #2"))).await;
+    let text = crate::bridge::rooms::room_text_waited("專案群", &json!({"seq": 2, "from": "W~W-政策", "trust": "member", "body": "x"}), None, 0, "acp");
+    assert!(text.contains(crate::bridge::rooms::ACP_ROOM_NOTE), "{text}");
+    let claude = crate::bridge::rooms::room_text_waited("專案群", &json!({"seq": 2, "from": "W~W-政策", "trust": "member", "body": "x"}), None, 0, "claude");
+    assert!(!claude.contains(crate::bridge::rooms::ACP_ROOM_NOTE), "Claude 視窗不加這行");
+}
