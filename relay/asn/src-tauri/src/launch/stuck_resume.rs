@@ -8,11 +8,14 @@
 //! 2. 有活的 claude／node 程序，命令列帶 `--resume <這個編號>`；
 //! 3. 那些程序往上找，都找得到這一列的終端服務（或 ASN 自己的視窗），編號與建立時間和對照表記的一樣；
 //! 4. 這個編號目前沒有活的 session 檔（有就是一般夥伴，走原本的關閉）。
+//!    對話中途換了新編號（/clear、compact）時，session 檔記的是新編號、命令列仍是舊的；
+//!    所以接續程序（含它們的祖先與子孫）只要有任何一個是活 session 檔的程序，也當作一般夥伴。
 //!
 //! 停止只呼叫終端服務既有的兩支（關共用服務裡的窗格、收自己的視窗），不在這裡另開任何結束程序的路。
 //! 動手之前把四條再驗一次。
 use super::live_process;
 use super::switch::{self, Os, Proc};
+use std::collections::HashSet;
 
 /// 終端對照表裡的一列夥伴視窗（claude）：只留判斷與停止要用的欄位
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +33,13 @@ pub(crate) struct PartnerRef {
     /// 開窗時記下的建立時間（Unix 毫秒）；沒有就一律不認
     pub started_ms: Option<u64>,
     pub cwd: String,
+}
+
+/// 一個活的 session 檔：對話編號（讀不到就是 None）與程序編號
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LiveSess {
+    pub sid: Option<String>,
+    pub pid: u32,
 }
 
 /// 判斷成立的結果
@@ -58,10 +68,14 @@ pub(crate) enum NotStuck {
 /// 動手前驗證不過、或已經在線上時給使用者的固定文案
 pub(crate) const ALREADY_ONLINE: &str = "這位夥伴已經在線上，請改用一般的關閉";
 pub(crate) const NO_LONGER_STUCK: &str = "這個視窗已經不是卡在接回中的狀態，請重新整理清單";
+/// 自己開的視窗裡還有其他分頁或窗格時，不整個關掉
+pub(crate) const OTHER_TABS_IN_WINDOW: &str = "這個視窗裡還有其他分頁，請到那個視窗自己關掉";
 /// 手動喚醒被擋、而且符合卡住條件時的提示
 pub(crate) const STUCK_IN_TASKMGR_HINT: &str = "可能卡住了，到工作管理員停止它";
 
-/// 這個程序是不是這一列的終端服務（或自己視窗）底下：編號與建立時間都要和對照表記的一樣
+/// 這個程序是不是這一列的終端服務（或自己視窗）底下：編號與建立時間都要和對照表記的一樣。
+/// 限制：共用服務時只證明「在這個服務底下」，不證明「在這一列的窗格裡」（服務底下所有窗格的祖先都是同一個服務）。
+/// 可以接受的原因：同一個對話編號有兩列以上的對照表已經先擋掉；要比到窗格層級得另外向服務查窗格的程序，這裡不多開查詢
 fn anchored(os: &dyn Os, table: &[Proc], p: &PartnerRef, pid: u32) -> bool {
     let Some(was) = p.started_ms else {
         return false;
@@ -78,9 +92,20 @@ fn top_pid(table: &[Proc], pids: &[u32]) -> u32 {
     pids.iter().copied().find(|p| !switch::ancestors(table, *p).iter().any(|a| pids.contains(a))).unwrap_or(pids[0])
 }
 
-/// 四條都驗：成立回 [`Stuck`]。`partners` 是終端對照表裡的夥伴列，`live_sids` 是現在有活 session 檔的對話編號
-pub(crate) fn identify(os: &dyn Os, partners: &[PartnerRef], live_sids: &[String], sid: &str, now_ms: u64) -> Result<Stuck, NotStuck> {
-    if live_sids.iter().any(|s| s == sid) {
+/// 接續程序、它們的祖先、它們的子孫裡，有沒有任何一個是活 session 檔的程序（對話換了新編號時靠這條認出來）
+fn touches_live_session(os: &dyn Os, table: &[Proc], pids: &[u32], live: &[LiveSess]) -> bool {
+    let mut related: HashSet<u32> = HashSet::new();
+    for p in pids {
+        related.insert(*p);
+        related.extend(switch::ancestors(table, *p));
+        related.extend(super::taskmgr::tree_pids(table, *p, &|x| os.started_ms(x)));
+    }
+    live.iter().any(|l| l.pid != 0 && related.contains(&l.pid))
+}
+
+/// 四條都驗：成立回 [`Stuck`]。`partners` 是終端對照表裡的夥伴列，`live` 是現在有活 session 檔的（對話編號, 程序編號）
+pub(crate) fn identify(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSess], sid: &str, now_ms: u64) -> Result<Stuck, NotStuck> {
+    if live.iter().any(|l| l.sid.as_deref() == Some(sid)) {
         return Err(NotStuck::Online);
     }
     let mut rows = partners.iter().filter(|p| p.session_id == sid);
@@ -91,6 +116,9 @@ pub(crate) fn identify(os: &dyn Os, partners: &[PartnerRef], live_sids: &[String
     let mut pids = live_process::resuming_pids(os, sid).ok_or(NotStuck::Other)?;
     pids.sort_unstable();
     let table = os.processes();
+    if touches_live_session(os, &table, &pids, live) {
+        return Err(NotStuck::Online);
+    }
     if !pids.iter().all(|p| anchored(os, &table, partner, *p)) {
         return Err(NotStuck::Other);
     }
@@ -104,12 +132,14 @@ pub(crate) trait StopHost {
     fn stop_partner(&self, id: &str) -> Result<(), String>;
     /// 收掉 ASN 自己開的視窗
     fn stop_gui(&self, gui_pid: u32) -> Result<(), String>;
+    /// 對照表裡這個終端編號那一列現在記的對話編號；列不見了就是 None
+    fn partner_session(&self, id: &str) -> Option<String>;
 }
 
 /// 停止「卡住的接回」：先把四條再驗一次，成立才呼叫既有的 stop_partner／stop_gui。
 /// `id` 是畫面給的終端編號，必須和驗出來的那一列一致，否則拒絕
-pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[PartnerRef], live_sids: &[String], id: &str, sid: &str, now_ms: u64) -> Result<(), String> {
-    let s = match identify(os, partners, live_sids, sid, now_ms) {
+pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[PartnerRef], live: &[LiveSess], id: &str, sid: &str, now_ms: u64) -> Result<(), String> {
+    let s = match identify(os, partners, live, sid, now_ms) {
         Ok(s) => s,
         Err(NotStuck::Online) => return Err(ALREADY_ONLINE.into()),
         Err(NotStuck::Other) => return Err(NO_LONGER_STUCK.into()),
@@ -118,31 +148,46 @@ pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[Partne
         return Err(NO_LONGER_STUCK.into());
     }
     if s.partner.mux {
+        // 驗證到停止之間對照表可能變動：停之前再核對這一列記的還是這個對話編號
+        if host.partner_session(&s.partner.id).as_deref() != Some(sid) {
+            return Err(NO_LONGER_STUCK.into());
+        }
         host.stop_partner(&s.partner.id)
     } else {
+        // 收自己的視窗會連整個視窗一起關：裡面除了這批接續程序（與它們的外層殼）還有別的程序，就不動
+        let table = os.processes();
+        let mut ended: HashSet<u32> = HashSet::new();
+        for p in &s.pids {
+            ended.extend(super::taskmgr::tree_pids(&table, *p, &|x| os.started_ms(x)));
+            ended.extend(switch::ancestors(&table, *p).into_iter().take_while(|a| *a != s.partner.gui_pid));
+        }
+        let ended: Vec<u32> = ended.into_iter().collect();
+        if switch::wez_has_others(os, s.partner.gui_pid, &ended) {
+            return Err(OTHER_TABS_IN_WINDOW.into());
+        }
         host.stop_gui(s.partner.gui_pid)
     }
 }
 
 /// 手動喚醒被「已有程序在接回」擋下時的提示：滿 5 分鐘而且符合卡住條件 → 指向工作管理員；
 /// 滿 5 分鐘但不符合（不是 ASN 開的、對不上）→ 原本的「先關掉那個終端」；未滿 5 分鐘 → 請稍候。
-/// 喚醒走到這裡時 session 檔已經確認沒有活的，所以 `live_sids` 給空的
-pub(crate) fn resume_block_hint(os: &dyn Os, partners: &[PartnerRef], sid: &str, now_ms: u64) -> &'static str {
+/// `live` 是現在有活 session 檔的（對話編號, 程序編號），判斷與工作管理員一致
+pub(crate) fn resume_block_hint(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSess], sid: &str, now_ms: u64) -> &'static str {
     let started = live_process::resuming_pids(os, sid).and_then(|p| live_process::earliest_started_ms(os, &p));
     let base = live_process::resume_block_hint(now_ms, started);
-    if base == live_process::STUCK_HINT && identify(os, partners, &[], sid, now_ms).is_ok_and(|s| s.stuck) {
+    if base == live_process::STUCK_HINT && identify(os, partners, live, sid, now_ms).is_ok_and(|s| s.stuck) {
         return STUCK_IN_TASKMGR_HINT;
     }
     base
 }
 
-/// 本機現在有活 session 檔的 Claude 對話編號；讀不到名單回 None（呼叫端不能當成「沒有」）
+/// 本機現在有活 session 檔的 Claude 對話（編號與程序編號）；讀不到名單回 None（呼叫端不能當成「沒有」）
 #[cfg(desktop)]
-pub(crate) fn live_claude_sids(now_ms: u64) -> Option<Vec<String>> {
+pub(crate) fn live_claude_sessions(now_ms: u64) -> Option<Vec<LiveSess>> {
     use crate::bridge::roster;
     let home = crate::identity::home_dir();
     let wins = roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), crate::heartbeat::session_alive, 0, "", now_ms)?;
-    Some(wins.into_iter().filter_map(|w| w.session_id).collect())
+    Some(wins.into_iter().map(|w| LiveSess { sid: w.session_id, pid: w.pid }).collect())
 }
 
 #[cfg(all(feature = "gui", desktop))]
@@ -153,13 +198,16 @@ impl StopHost for super::term::LiveTerms {
     fn stop_gui(&self, gui_pid: u32) -> Result<(), String> {
         super::term::LiveTerms::stop_gui(self, gui_pid)
     }
+    fn partner_session(&self, id: &str) -> Option<String> {
+        self.partner_refs().into_iter().find(|p| p.id == id).map(|p| p.session_id)
+    }
 }
 
 /// `term_stop` 帶了「接回中」的對話編號時走這裡：現讀對照表與 session 檔，驗過才停
 #[cfg(all(feature = "gui", desktop))]
 pub(crate) fn stop_real(terms: &super::term::LiveTerms, id: &str, sid: &str) -> Result<(), String> {
     let now = crate::heartbeat::now_ms();
-    let live = live_claude_sids(now).ok_or_else(|| "讀不到本機視窗清單，請稍後再試".to_string())?;
+    let live = live_claude_sessions(now).ok_or_else(|| "讀不到本機視窗清單，請稍後再試".to_string())?;
     let partners: Vec<PartnerRef> = terms.partner_by_session(sid).into_iter().collect();
     stop_verified(&switch::RealOs, terms, &partners, &live, id, sid, now)
 }
@@ -174,6 +222,10 @@ mod tests {
     const SID: &str = "11111111-2222-4333-8444-555555555555";
     const MUX: u32 = 500;
     const MUX_AT: u64 = 1_000;
+
+    fn live(sid: &str, pid: u32) -> LiveSess {
+        LiveSess { sid: Some(sid.to_string()), pid }
+    }
 
     fn p(pid: u32, ppid: u32, name: &str) -> Proc {
         Proc { pid, ppid, name: name.into() }
@@ -242,7 +294,7 @@ mod tests {
         assert_eq!(identify(&os, &[], &[], SID, NOW), Err(NotStuck::Other), "對照表沒有這一列");
         let two = [mux_partner(), PartnerRef { id: "8".into(), ..mux_partner() }];
         assert_eq!(identify(&os, &two, &[], SID, NOW), Err(NotStuck::Other), "同編號兩列不猜");
-        assert_eq!(identify(&os, &ok, &[SID.to_string()], SID, NOW), Err(NotStuck::Online), "session 檔出現");
+        assert_eq!(identify(&os, &ok, &[live(SID, 777)], SID, NOW), Err(NotStuck::Online), "session 檔出現");
         let mut none = mux_fake(600_000);
         none.cmd.clear();
         assert_eq!(identify(&none, &ok, &[], SID, NOW), Err(NotStuck::Other), "沒有活的接回程序");
@@ -280,6 +332,8 @@ mod tests {
     #[derive(Default)]
     struct Spy {
         calls: RefCell<Vec<String>>,
+        /// true＝對照表那一列已經換成別的對話編號
+        drifted: bool,
     }
     impl StopHost for Spy {
         fn stop_partner(&self, id: &str) -> Result<(), String> {
@@ -289,6 +343,9 @@ mod tests {
         fn stop_gui(&self, gui_pid: u32) -> Result<(), String> {
             self.calls.borrow_mut().push(format!("gui:{gui_pid}"));
             Ok(())
+        }
+        fn partner_session(&self, _id: &str) -> Option<String> {
+            Some(if self.drifted { "別的對話".to_string() } else { SID.to_string() })
         }
     }
 
@@ -316,7 +373,7 @@ mod tests {
     fn 停止前再驗_不成立一律拒絕_不呼叫任何停止() {
         let spy = Spy::default();
         let os = mux_fake(600_000);
-        assert_eq!(stop_verified(&os, &spy, &[mux_partner()], &[SID.to_string()], "7", SID, NOW), Err(ALREADY_ONLINE.to_string()), "session 檔又出現");
+        assert_eq!(stop_verified(&os, &spy, &[mux_partner()], &[live(SID, 777)], "7", SID, NOW), Err(ALREADY_ONLINE.to_string()), "session 檔又出現");
         assert_eq!(stop_verified(&os, &spy, &[], &[], "7", SID, NOW), Err(NO_LONGER_STUCK.to_string()));
         assert_eq!(stop_verified(&os, &spy, &[mux_partner()], &[], "8", SID, NOW), Err(NO_LONGER_STUCK.to_string()), "畫面給的編號和驗出來的不是同一列");
         let mut moved = mux_fake(600_000);
@@ -331,5 +388,59 @@ mod tests {
         assert_eq!(resume_block_hint(&os, &[mux_partner()], SID, NOW), STUCK_IN_TASKMGR_HINT, "滿 5 分鐘＋符合：指向工作管理員");
         assert_eq!(resume_block_hint(&os, &[], SID, NOW), live_process::STUCK_HINT, "滿 5 分鐘但不符合：維持原句");
         assert_eq!(resume_block_hint(&mux_fake(60_000), &[mux_partner()], SID, NOW), live_process::STARTING_HINT, "未滿 5 分鐘：請稍候");
+    }
+
+    #[test]
+    fn 對話換了新編號_程序是活session檔的程序_一律不算卡住() {
+        let os = mux_fake(600_000);
+        let ok = [mux_partner()];
+        let other = "99999999-2222-4333-8444-555555555555";
+        assert_eq!(identify(&os, &ok, &[live(other, 502)], SID, NOW), Err(NotStuck::Online), "同一個程序、session 檔記新編號");
+        assert_eq!(identify(&os, &ok, &[live(other, 503)], SID, NOW), Err(NotStuck::Online), "子程序是活 session 檔的程序");
+        assert_eq!(identify(&os, &ok, &[live(other, 501)], SID, NOW), Err(NotStuck::Online), "祖先（外層殼）是活 session 檔的程序");
+        assert_eq!(identify(&os, &ok, &[LiveSess { sid: None, pid: 502 }], SID, NOW), Err(NotStuck::Online), "session 檔沒有編號也看程序");
+        let mut deep = mux_fake(600_000);
+        deep.table.push(p(504, 503, "node.exe"));
+        assert_eq!(identify(&deep, &ok, &[live(other, 504)], SID, NOW), Err(NotStuck::Online), "後代是活 session 檔的程序");
+        assert!(identify(&os, &ok, &[live(other, 999)], SID, NOW).is_ok(), "不相干的活視窗不影響");
+        assert!(identify(&os, &ok, &[LiveSess { sid: None, pid: 0 }], SID, NOW).is_ok(), "程序編號 0 不算");
+    }
+
+    #[test]
+    fn 對話換了新編號_停止被拒絕_不呼叫任何停止() {
+        let (os, spy) = (mux_fake(600_000), Spy::default());
+        let other = "99999999-2222-4333-8444-555555555555";
+        assert_eq!(stop_verified(&os, &spy, &[mux_partner()], &[live(other, 502)], "7", SID, NOW), Err(ALREADY_ONLINE.to_string()));
+        assert!(spy.calls.borrow().is_empty());
+        assert_ne!(resume_block_hint(&os, &[mux_partner()], &[live(other, 502)], SID, NOW), STUCK_IN_TASKMGR_HINT, "喚醒提示也不指向工作管理員");
+    }
+
+    fn own_window_fake() -> (Fake, PartnerRef) {
+        let mut os = mux_fake(600_000);
+        os.table = vec![p(600, 1, switch::WEZ_GUI), p(601, 600, "powershell.exe"), p(602, 601, "claude.exe")];
+        os.cmd = HashMap::from([(602, format!("claude.exe --resume {SID}"))]);
+        os.started = HashMap::from([(600, 2_000), (602, NOW - 600_000)]);
+        os.wez = vec![(600, 2_000)];
+        let own = PartnerRef { id: "9".into(), name: "小乙".into(), session_id: SID.into(), mux: false, gui_pid: 600, started_ms: Some(2_000), cwd: String::new() };
+        (os, own)
+    }
+
+    #[test]
+    fn 自己的視窗裡還有其他分頁_拒絕且不收視窗() {
+        let (mut os, own) = own_window_fake();
+        os.table.push(p(603, 600, "powershell.exe"));
+        let spy = Spy::default();
+        assert_eq!(stop_verified(&os, &spy, &[own.clone()], &[], "9", SID, NOW), Err(OTHER_TABS_IN_WINDOW.to_string()));
+        assert!(spy.calls.borrow().is_empty(), "有其他分頁時不能呼叫 stop_gui");
+        let (os2, _) = own_window_fake();
+        stop_verified(&os2, &spy, &[own], &[], "9", SID, NOW).unwrap();
+        assert_eq!(*spy.calls.borrow(), vec!["gui:600".to_string()], "只有這個接回的殼與程序時照常收");
+    }
+
+    #[test]
+    fn 停止前對照表那一列已換成別的對話_拒絕() {
+        let (os, spy) = (mux_fake(600_000), Spy { drifted: true, ..Spy::default() });
+        assert_eq!(stop_verified(&os, &spy, &[mux_partner()], &[], "7", SID, NOW), Err(NO_LONGER_STUCK.to_string()));
+        assert!(spy.calls.borrow().is_empty());
     }
 }

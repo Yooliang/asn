@@ -123,9 +123,9 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
     // 每一列附上「它在哪個終端服務底下」，最後用來數終端服務裡有幾個視窗
     let mut listed: Vec<(TaskRow, Option<u32>)> = Vec::new();
     // 卡在接回中的夥伴視窗：四個條件都成立才列（判斷與停止前的再驗證共用 stuck_resume::identify）
-    let live_sids: Vec<String> = src.claude.iter().filter_map(|w| w.session_id.clone()).collect();
+    let live: Vec<stuck_resume::LiveSess> = src.claude.iter().map(|w| stuck_resume::LiveSess { sid: w.session_id.clone(), pid: w.pid }).collect();
     let mut seen_sids: HashSet<&str> = HashSet::new();
-    let resuming: Vec<stuck_resume::Stuck> = src.partners.iter().filter(|p| seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live_sids, &p.session_id, src.now_ms).ok()).collect();
+    let resuming: Vec<stuck_resume::Stuck> = src.partners.iter().filter(|p| seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live, &p.session_id, src.now_ms).ok()).collect();
     // 這些程序（和它們的子程序）不再列成「自己開的」
     let resuming_skip: HashSet<u32> = resuming.iter().flat_map(|s| s.pids.iter().flat_map(|p| tree_pids(&table, *p, &|x| os.started_ms(x)))).collect();
 
@@ -515,6 +515,17 @@ mod tests {
         let mut none = resuming_os(600_000);
         none.cmd.clear();
         assert!(!has_resuming(&none, &resuming_src()), "沒有帶 --resume 的活程序");
+    }
+
+    #[test]
+    fn 對話換了新編號_同一個程序不列成接回中() {
+        // session 檔記新編號、程序是同一個（命令列仍帶舊編號）：只列成一般視窗
+        let o = resuming_os(600_000);
+        let mut s = resuming_src();
+        s.claude = vec![Window::claude("小乙", Some("idle".into()), "G:/w", 502, NOW, Some("99999999-2222-4333-8444-555555555555".into()))];
+        let snap = build(&o, &s);
+        assert!(snap.rows.iter().all(|r| r.kind != "resuming"), "不能同一個程序列兩次");
+        assert!(snap.rows.iter().any(|r| r.kind == "claude" && r.pid == 502));
     }
 
     #[test]

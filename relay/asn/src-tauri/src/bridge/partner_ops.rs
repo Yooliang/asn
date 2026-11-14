@@ -1440,7 +1440,12 @@ impl PartnerOps {
         // 視窗剛開、session 檔還沒寫出來：只有程序表看得到（命令列帶 --resume 這段對話的活程序，和自動接回用同一個判斷）
         // 滿 5 分鐘而且是 ASN 開的、卡在接回中的那種：提示改成到工作管理員停止（判斷與工作管理員共用 stuck_resume）
         if crate::launch::live_process::resuming_pids(os, sid).is_some() {
-            return failed(crate::launch::stuck_resume::resume_block_hint(os, &self.env.session_partners(sid), sid, self.env.now_ms()));
+            let live: Vec<crate::launch::stuck_resume::LiveSess> = console::read_sessions(&self.dirs.sessions)
+                .iter()
+                .filter(|s| self.session_live(s))
+                .map(|s| crate::launch::stuck_resume::LiveSess { sid: s.get("sessionId").and_then(Value::as_str).map(str::to_string), pid: s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).unwrap_or(0) })
+                .collect();
+            return failed(crate::launch::stuck_resume::resume_block_hint(os, &self.env.session_partners(sid), &live, sid, self.env.now_ms()));
         }
         // 3. 找對話紀錄，從裡面取原本的工作資料夾；不是 Claude 的就看是不是 pi 的對話檔（#468）
         let Some(cwd) = find_transcript_cwd(&self.dirs.projects, sid) else {
