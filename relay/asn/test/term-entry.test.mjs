@@ -91,7 +91,7 @@ test('聊天頁接線：舊夥伴的那行小字在大按鈕下方，只在確�
 test('大按鈕接線：第 2 格按下發 term，開著時有 on 與 aria-pressed、提示是回到訊息', () => {
   const ab = read('ui', 'lib', 'actionbar.mjs')
   assert.match(ab, /function onWindow\(\) \{[\s\S]{0,200}if \(slot\.value\.window\.term\) \{ emit\('term'\); return \}/)
-  assert.match(ab, /emits: \['call', 'ops', 'term'\]/)
+  assert.match(ab, /emits: \['call', 'ops', 'term', 'back'\]/)
   assert.match(ab, /data-slot="window" :class="\{ on: slot\.window\.term && termOn \}" :aria-pressed="slot\.window\.term \? String\(termOn\) : null"/)
   assert.match(ab, /term: !lite\.value && props\.term\?\.ready === true/, '終端分頁的簡版不放')
   assert.ok(TERM_TIP.includes('ASN 裡') && TERM_BACK_TIP === '回到訊息')

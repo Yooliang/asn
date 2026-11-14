@@ -54,7 +54,7 @@ test('設定頁摘要：LINE 外觀寫實際生效的頭像與底色，其他外
 test('設定頁：LINE 外觀下頭像模式與文字底色停用並附說明，其他外觀不停用', () => {
   const panel = read('ui/lib/settings-panel.mjs')
   assert.equal((panel.match(/:disabled="st\.skin === 'line'"/g) || []).length, 2)
-  assert.equal((panel.match(/<small class="set-note" v-if="st\.skin === 'line'">/g) || []).length, 2)
+  assert.equal((panel.match(/<small class="set-note" id="set-note-(dp|bubble)" v-if="st\.skin === 'line'">/g) || []).length, 2)
   assert.match(panel, /LINE 風格固定頭像在訊息旁/)
   // 停用時選單顯示「實際生效的值」（頭像在訊息旁、底色自動），不是使用者存的值；存檔的值不動，切回其他外觀仍顯示原值
   assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.dpMode"/); assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.bubble"/)
@@ -111,4 +111,17 @@ test('LINE 情境：電腦清單、一對一、群組、設定；手機清單、
   assert.equal(lookMe.dpMode, 'left'); assert.equal(lookMe.bubble, 'none'); assert.equal(lookMe.session.panel.setting, 'look')
   const groupMsgs = tableFor(sc.find(s => s.name === 'list-line-group')).relay_room_read.messages
   assert.ok(groupMsgs.some(m => m.relation === 'mine') && groupMsgs.some(m => m.relation === 'system'))
+})
+
+test('設定頁：LINE 下停用的選單，說明另放帶 id 的元素、select 用 aria-describedby 指過去，不包在 label 裡（螢幕閱讀器不會把說明念成標籤）', () => {
+  const panel = read('ui/lib/settings-panel.mjs')
+  for (const [label, id] of [['頭像模式', 'set-note-dp'], ['文字底色', 'set-note-bubble']]) {
+    const i = panel.indexOf(`<label>${label}\n`)
+    assert.ok(i > 0, `找不到 ${label} 那一列`)
+    const end = panel.indexOf('</label>', i)
+    const inside = panel.slice(i, end)
+    assert.doesNotMatch(inside, /<small class="set-note"/, `${label}：說明不該在 label 裡`)
+    assert.match(inside, new RegExp(String.raw`:aria-describedby="st\.skin === 'line' \? '${id}' : null"`), `${label}：select 要指向說明（只在 LINE 才有，其他外觀不多屬性）`)
+    assert.match(panel.slice(end, end + 260), new RegExp(String.raw`<small class="set-note" id="${id}" v-if="st\.skin === 'line'">`), `${label}：說明在 label 後面、帶 id、只在 LINE 出現`)
+  }
 })

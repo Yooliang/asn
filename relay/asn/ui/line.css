@@ -414,3 +414,84 @@
 /* ---------- 設定頁：LINE 風格下停用的選項旁邊那句說明 ---------- */
 :root[data-skin="line"] .set-note{display:block;margin-top:4px;font-size:12.5px;line-height:1.5;color:var(--muted)}
 :root[data-skin="line"] .set-sel:disabled{opacity:.55;cursor:default}
+/* =====================================================================
+   LINE 風格（二）（0.2.22，#1449 第二張）：要搬元件的部分。
+   電腦深色左側圖示欄、手機底部導覽、對話區（頭像在左、連續訊息省略頭像與名字、名字在泡泡上方、時間與已讀在泡泡旁、日期膠囊）、標題列。
+   新節點都只在外觀是 LINE 時才輸出（lib/chatpane.mjs、lib/actionbar.mjs、list.html、m.html），這裡只管它們的樣子。
+   ===================================================================== */
+
+/* ---------- 電腦：最左邊一條 60px 深色圖示欄（夥伴、對話、設定、通知）；選中的有淺底與左側亮色細條，滑過顯示名稱（title），窄視窗也只留圖示 ---------- */
+:root[data-skin="line"] .list-pane{position:relative;box-sizing:border-box;padding-left:60px}
+:root[data-skin="line"] .shell.merged > .list-pane{width:360px}
+:root[data-skin="line"] .shell.merged.only-list > .list-pane{width:auto}
+:root[data-skin="line"] .top-tabs{position:absolute;z-index:4;left:0;top:0;bottom:0;width:60px;box-sizing:border-box;flex-direction:column;align-items:center;gap:6px;padding:14px 0;border:0;background:#2b2f38}
+:root[data-skin="line"] .ttab{position:relative;flex:none;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;background:transparent;color:#9aa3b2}
+:root[data-skin="line"] .ttab:hover{background:rgba(255,255,255,.08);color:#fff}
+:root[data-skin="line"] .ttab.on{margin:0;background:rgba(255,255,255,.14);color:#fff}
+:root[data-skin="line"] .ttab.on::before{content:"";position:absolute;left:-8px;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--line-green)}
+:root[data-skin="line"] .ttab > span:not([class]){display:none}
+:root[data-skin="line"] .ttab > .red{top:7px;right:8px}
+:root[data-skin="line"] .ttab > .rtab-count{top:2px;right:-2px}
+:root[data-skin="line"] .ttab:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+
+/* ---------- 手機：底部導覽（圖示在上、文字在下；選中亮色；未讀紅點照舊掛在「夥伴」）。進到對話頁時整條收起來 ---------- */
+:root[data-skin="line"] .m-tabs{order:99;height:58px;border-top:1px solid var(--line);border-bottom:0;background:var(--panel)}
+:root[data-skin="line"] .m-tabs button{height:58px;flex-direction:column;gap:2px;font-size:11.5px;font-weight:600}
+:root[data-skin="line"] .m-tabs .m-tab-ic{width:24px;height:24px}
+:root[data-skin="line"] .m-tabs .red{top:7px;right:calc(50% - 22px)}
+:root[data-skin="line"] .m-ind{top:0;bottom:auto;height:3px;border:0;border-radius:0 0 3px 3px;background:var(--accent);background-clip:border-box;clip-path:inset(0 30% 0 30%)}
+:root[data-skin="line"] .m-page[data-line-chat] .m-tabs{display:none}
+
+/* ---------- 對話區：日期膠囊、名字在泡泡上方、時間與已讀在泡泡旁、連續訊息省略頭像與名字 ---------- */
+:root[data-skin="line"] .l-day{display:block;width:fit-content;max-width:92%;margin:6px auto;padding:3px 14px;border-radius:999px;background:#5d7399;color:#fff;font-size:12.5px;text-align:center}
+:root[data-skin="line"] .l-name{margin:0 0 2px 2px;font-size:12.5px;line-height:1.3;color:var(--line-bg-ink)}
+:root[data-skin="line"] .l-name .who-dev{color:var(--line-bg-ink)}
+:root[data-skin="line"] .l-line{display:flex;align-items:flex-end;gap:6px;min-width:0}
+:root[data-skin="line"] .msg.mine .l-line{justify-content:flex-end}
+:root[data-skin="line"] .l-line > .m-body{flex:0 1 auto;min-width:0}
+:root[data-skin="line"] .l-meta{flex:none;order:2;display:flex;flex-direction:column;align-items:flex-start;gap:1px;font-size:11.5px;line-height:1.25;color:var(--line-bg-ink);white-space:nowrap}
+:root[data-skin="line"] .msg.mine .l-meta{order:0;align-items:flex-end}
+:root[data-skin="line"] .l-meta .l-st{font-weight:600}
+:root[data-skin="line"] .l-meta .l-st.st-read,:root[data-skin="line"] .l-meta .l-st.st-replied,:root[data-skin="line"] .l-meta .l-rd.all{color:#14507a}
+:root[data-skin="line"] .l-meta .spk{align-self:flex-start;margin:2px 0 0;padding:0;border:0;background:transparent;color:var(--line-bg-ink);cursor:pointer}
+:root[data-skin="line"] .l-meta .spk.on{color:var(--accent)}
+:root[data-skin="line"] .msg.l-cont{margin-top:-6px}
+:root[data-skin="line"] .msg.l-cont .m-av{visibility:hidden}
+:root[data-skin="line"] .msg.l-cont .m-body::before{display:none}
+:root[data-skin="line"] .msg.l-cont .m-body.tone-them,:root[data-skin="line"] .m-chat .msg.l-cont .m-body.tone-them{border-top-left-radius:17px}
+:root[data-skin="line"] .msg.l-cont .m-body.tone-me,:root[data-skin="line"] .msg.l-cont .m-body.tone-same,:root[data-skin="line"] .m-chat .msg.l-cont .m-body.tone-me,:root[data-skin="line"] .m-chat .msg.l-cont .m-body.tone-same{border-top-right-radius:17px}
+
+/* ---------- 標題列（電腦）：返回在左（只有窄視窗單窗格才有）、名字靠左後接人數、右側依序「N 人離線」「看終端」「通話」「⋯」 ---------- */
+:root[data-skin="line"] .mbar,:root[data-skin="line"] .mbar:has(.mbar-offline){display:flex;gap:8px;padding:0 14px 0 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+:root[data-skin="line"] .mbar-back{flex:none;display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--fg);cursor:pointer}
+:root[data-skin="line"] .mbar-back:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .mbar-back:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="line"] .mbar-plate,:root[data-skin="line"] .mbar-plate.is-offline{grid-column:auto;flex:1 1 auto;justify-content:flex-start;padding:0 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
+:root[data-skin="line"] .mbar-plate .mbar-av{display:none}
+:root[data-skin="line"] .mbar-name{font-size:16px;font-weight:700}
+:root[data-skin="line"] .mbar-plate.is-room .mbar-sub{display:none}
+:root[data-skin="line"] .mbar-count{flex:none;font-size:13px;color:var(--muted)}
+:root[data-skin="line"] .mbar-acts{grid-column:auto;flex:none;gap:4px}
+:root[data-skin="line"] .mbtn{border:0;background:transparent;color:var(--fg)}
+:root[data-skin="line"] .mbtn:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .mbtn.mbtn-offline{border:1px solid var(--line);background:var(--panel)}
+:root[data-skin="line"] .mbtn.mbtn-call[aria-disabled="true"]{opacity:.45;cursor:default}
+:root[data-skin="line"] .shell.only-chat:has(.mbar-back) .tabbar{display:none}
+
+/* ---------- 標題列（手機） ---------- */
+:root[data-skin="line"] .m-chat .m-plate-head,:root[data-skin="line"] .m-chat.is-room .m-plate-head:has(.m-head-offline){display:flex;grid-template-columns:none;gap:2px;padding:6px 8px 6px 4px}
+:root[data-skin="line"] .m-chat .m-plate-head .m-back{flex:none;width:40px;height:40px;border:0;background:transparent;color:var(--fg)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate,:root[data-skin="line"] .m-chat .m-plate-head .m-plate.is-offline{flex:1 1 auto;justify-self:auto;justify-content:flex-start;min-width:0;height:40px;padding:0 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate-pic{display:none}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate-name{font-size:17px;font-weight:700}
+:root[data-skin="line"] .m-chat.is-room .m-plate-head .m-plate-sub{display:none}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate.is-offline .m-plate-name{color:var(--fg)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate.is-offline .m-plate-sub{color:var(--muted)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-plate-count{flex:none;font-size:14px;color:var(--muted)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-head-term,:root[data-skin="line"] .m-chat .m-plate-head .m-head-call,:root[data-skin="line"] .m-chat .m-plate-head > .m-head-more{display:grid;place-items:center;flex:none;width:40px;height:40px;margin:0;border:0;border-radius:50%;background:transparent;color:var(--fg)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-head-term.on{background:var(--ls-soft);color:var(--accent)}
+:root[data-skin="line"] .m-chat .m-plate-head .m-head-call:disabled{opacity:.45}
+:root[data-skin="line"] .m-chat .m-plate-head .m-head-offline{flex:none;justify-self:auto}
+:root[data-skin="line"] .m-chat .m-plate-head > .m-head-more .m-ic{width:24px;height:24px}
+/* 通話鈕搬到標題列了，輸入框「＋」選單裡那個收起來（同一個動作，不留兩個入口） */
+:root[data-skin="line"] .compose-main > .toolbar .tool.call{display:none}

@@ -67,3 +67,12 @@ test('設定接線：電腦「設定 → 外觀」最上面二選一、存在 me
   assert.match(m, /watch\(\(\) => prefs\.skin, v => applySkin\(v\), \{ immediate: true \}\)/)
   assert.match(mh, /<template v-else-if="settingCat === 'look'">[\s\S]*?v-model="prefs\.skin"/)
 })
+
+test('skin-boot.js 認得的外觀清單與 lib/skin.mjs 的 SKINS 一致（兩份各自維護，加外觀漏改一邊就會紅）', () => {
+  const boot = read('ui/skin-boot.js')
+  const m = boot.match(/var pick = function \(v\) \{ return ([^}]*?) \? v : '(\w+)' \}/)
+  assert.ok(m, '找不到 pick 函式')
+  const known = [...m[1].matchAll(/v === '(\w+)'/g)].map(x => x[1])
+  assert.equal(m[2], DEFAULT_SKIN, '壞值的預設外觀與 DEFAULT_SKIN 一致')
+  assert.deepEqual([...new Set([...known, m[2]])].sort(), [...SKINS].sort())
+})

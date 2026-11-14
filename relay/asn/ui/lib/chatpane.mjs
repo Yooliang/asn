@@ -34,6 +34,7 @@ import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
 import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
+import { clockLabel, lineRows, sentStateText } from './line-chat.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
@@ -73,9 +74,11 @@ export const ChatPane = {
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
     groupMenu: { type: Boolean, default: false },   // 電腦版：對話上方大按鈕區的「群組」（邀請、輸入邀請碼、加 AI、成員與設定）與一對一「管理」裡的邀請；手機版有自己的「⋯」，不開這個
+    skin: { type: String, default: '' },           // 外觀（lib/skin.mjs）：只有 line 才多輸出 LINE 版面要的節點；其他外觀的畫面一個節點都不變
+    showBack: { type: Boolean, default: false },   // LINE 外觀標題列的「返回」（只在窄視窗單窗格時由名單視窗給 true）
     piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     // 現代外觀：輸入框的「＋」展開上方工具列（復古 Aero 下沒有這個選單）；點了裡面的工具就收起來（表情符號例外：它要接著選）
@@ -203,6 +206,9 @@ export const ChatPane = {
     const foldLocked = computed(() => props.dpLocked && collapsed.value)
     const foldTip = computed(() => (foldLocked.value ? SIDE_FOLD_LOCK_TIP : collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
+    // LINE 外觀：每則的「連續訊息／日期膠囊」旗標（lib/line-chat.mjs）；其他外觀不算
+    const isLine = computed(() => props.skin === 'line')
+    const lrows = computed(() => (isLine.value ? lineRows(props.log, { friendNick: props.friend?.nick }) : []))
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
     // ---- 往上捲自動載入更舊的信：捲到距頂端 120px 內就向樞紐要；載入後停在原本看的那一則 ----
     const older = reactive({})   // 好友 id → 'loading'｜'done'（沒有更早的了）
@@ -488,11 +494,11 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
+    return { isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
@@ -522,13 +528,15 @@ export const ChatPane = {
       <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
+          <div class="l-day" v-if="isLine && lrows[i] && lrows[i].pill">{{ lrows[i].pill }}</div>
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
-          <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me', 'act-on': actAt === i }]" @click="tapMsg(i, $event)">
+          <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me', 'act-on': actAt === i, 'l-cont': isLine && lrows[i] && lrows[i].cont }]" @click="tapMsg(i, $event)">
             <div class="m-av m-av-spk" :class="{ 'is-off': spkOff(m) }" v-if="m.av"><asn-avatar :src="speakerAv(m)" :vendor="m.kind === 'ai' ? spkVendorKey(m) : ''" :status="spkOff(m) ? 'offline' : 'online'" :hue="friend.hue"></asn-avatar></div>
             <div class="m-av m-av-spk m-av-me" v-if="isRoom && m.k === 'me'"><div class="dp xs" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div></div>
             <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><asn-avatar :src="friendAv" :friend="isRoom ? null : friend" :status="friend.status" :hue="friend.hue"></asn-avatar></div>
             <div class="m-main">
-              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-dev" v-if="noticeDevOf(m, isNotice)"> · {{ plain(noticeDevOf(m, isNotice)) }}</span><span class="who-badge" :class="'is-' + m.kind" v-if="m.badge && !(m.kind === 'ai' && m.av)">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span><span v-if="isRoom && m.k === 'me' && readLabel(m.rd)" class="read-n" :class="{ all: m.rd.n >= m.rd.total }" :title="readTitle(m.rd)">{{ readLabel(m.rd) }}</span>
+              <div class="l-name" v-if="isLine && m.k === 'them' && !(lrows[i] && lrows[i].cont)"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ plain(m.who || friend.nick) }}<span class="who-dev" v-if="noticeDevOf(m, isNotice)"> · {{ plain(noticeDevOf(m, isNotice)) }}</span><span class="who-badge" :class="'is-' + m.kind" v-if="m.badge && !(m.kind === 'ai' && m.av)">{{ m.badge }}</span></div>
+              <div class="who" v-if="!isLine"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-dev" v-if="noticeDevOf(m, isNotice)"> · {{ plain(noticeDevOf(m, isNotice)) }}</span><span class="who-badge" :class="'is-' + m.kind" v-if="m.badge && !(m.kind === 'ai' && m.av)">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span><span v-if="isRoom && m.k === 'me' && readLabel(m.rd)" class="read-n" :class="{ all: m.rd.n >= m.rd.total }" :title="readTitle(m.rd)">{{ readLabel(m.rd) }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
@@ -536,7 +544,20 @@ export const ChatPane = {
               </div>
               <div class="m-dev" v-if="m.dev && !noticeDevOf(m, isNotice)">{{ plain(m.dev) }}</div>
               <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
-              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
+              <div class="l-line" v-if="isLine">
+                <div class="l-meta">
+                  <span class="l-st" v-if="sentStateText(m, isRoom)" :class="[isRoom ? 'l-rd' : 'st-' + msgTier(m), { all: isRoom && m.rd && m.rd.n >= m.rd.total }]" :title="isRoom ? readTitle(m.rd) : msgStatusTip(m)" :aria-label="isRoom ? readLabel(m.rd) : msgStatusTip(m)">{{ sentStateText(m, isRoom) }}</span>
+                  <span class="l-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span>
+                  <span class="l-voice" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span>
+                  <time class="l-time">{{ clockLabel(m.t) }}</time>
+                  <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
+                    <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                    <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
+                  </button>
+                </div>
+                <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
+              </div>
+              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="!isLine && shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
               <div class="dup-act" v-if="shownBody(m).dup.length" aria-label="關掉重複的視窗">
                 <button v-for="w in shownBody(m).dup" :key="w.pid" class="dup-close" type="button" :disabled="dupPressed(m, i) || displayOnly" @click="closeDup(m, i, w)" :title="dupCloseLabel(w.n)">{{ dupCloseLabel(w.n) }}</button>
               </div>

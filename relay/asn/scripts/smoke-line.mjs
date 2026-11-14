@@ -11,7 +11,19 @@ export const LINE_GROUP_MSGS = [
   { seq: 2, from: 'me', at: '2026-11-13T01:01:00Z', body: '好，我來看結果', relation: 'mine' },
   { seq: 3, from: 'P~測試機', at: '2026-11-13T01:02:00Z', body: '', relation: 'system', from_kind: 'system' },
 ]
+// 第二張：一對一對話樣本（relay_chat_history 的格式）：自己一則（對方讀過）、對方連發兩則、自己一則（只送達）
+export const LINE_CHAT_MSGS = [
+  { id: '00000000-0000-4000-8000-0000000000a1', dir: 'me', body: '幫我看一下 CI 為什麼紅了', created_at: '2026-11-13T01:00:00Z', delivered_at: '2026-11-13T01:00:01Z', acked_at: '2026-11-13T01:00:02Z' },
+  { id: '00000000-0000-4000-8000-0000000000a2', dir: 'them', body: '看過了，是截圖名稱的問題。', created_at: '2026-11-13T01:01:00Z' },
+  { id: '00000000-0000-4000-8000-0000000000a3', dir: 'them', body: '改成新的名字就會過。', created_at: '2026-11-13T01:01:30Z' },
+  { id: '00000000-0000-4000-8000-0000000000a4', dir: 'me', body: '好，改完推上來', created_at: '2026-11-13T01:02:00Z', delivered_at: '2026-11-13T01:02:01Z' },
+]
 export const LINE_PROBES = {
+  deskNav: { skinCheck: true, line: 'desk-nav' },
+  deskChat: { skinCheck: true, line: 'desk-chat' },
+  deskNarrow: { skinCheck: true, line: 'desk-narrow' },
+  mobileNav: { skinCheck: true, line: 'm-nav' },
+  mobileChat: { skinCheck: true, line: 'm-chat' },
   deskMsgs: { skinCheck: true, line: 'msgs' },
   deskList: { skinCheck: true, line: 'desk-list' },
   mobileMsgs: { skinCheck: true, line: 'msgs' },
@@ -88,6 +100,129 @@ export const lineProbeSource = kind => `(async () => {
       const top = document.elementFromPoint(...at(fab));
       if (!top || !fab.contains(top)) return { ok: false, why: 'LINE 外觀：' + '新增鈕被別的東西蓋住了：' + (top && top.className) };
     }
+    if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
+    return { ok: true, why: '' };
+  }
+
+  // ---- 第二張：深色左欄、底部導覽、對話區、標題列（真的點擊）----
+  const vis = el => !!el && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden';
+  if (kind === 'desk-nav') {
+    const bar = await wait(() => document.querySelector('.top-tabs'));
+    if (!bar) return { ok: false, why: 'LINE 外觀：' + '找不到左側圖示欄' };
+    const br = bar.getBoundingClientRect(), pr = document.querySelector('.list-pane').getBoundingClientRect();
+    if (cs(bar, 'background-color') !== 'rgb(43, 47, 56)' || Math.abs(br.width - 60) > 1 || cs(bar, 'flex-direction') !== 'column') return { ok: false, why: 'LINE 外觀：' + '左欄要是約 60px 寬的深色直排：' + cs(bar, 'background-color') + ' ' + br.width };
+    if (Math.abs(br.left - pr.left) > 1 || br.height < pr.height - 2) return { ok: false, why: 'LINE 外觀：' + '左欄沒有貼在名單欄最左邊、撐滿高度' };
+    const btns = [...bar.querySelectorAll('.ttab')];
+    const name = b => b.getAttribute('aria-label').replace(/（.*/, '');
+    const want = ['夥伴', '對話', '設定', '通知'];
+    if (btns.map(name).join() !== want.join()) return { ok: false, why: 'LINE 外觀：' + '左欄順序要是 夥伴、對話、設定、通知：' + btns.map(name).join() };
+    for (const b of btns) {
+      if (b.getAttribute('title') !== name(b)) return { ok: false, why: 'LINE 外觀：' + '圖示要有滑過提示（title）：' + name(b) };
+      if (!b.querySelector('svg.lic')) return { ok: false, why: 'LINE 外觀：' + '左欄按鈕沒有線條圖示：' + name(b) };
+      const lab = [...b.children].find(x => x.tagName === 'SPAN' && !x.className);
+      if (lab && vis(lab)) return { ok: false, why: 'LINE 外觀：' + '左欄只留圖示，文字要收起來：' + name(b) };
+      const r = b.getBoundingClientRect(); if (r.width < 36 || r.height < 36 || r.left < br.left || r.right > br.right) return { ok: false, why: 'LINE 外觀：' + '左欄按鈕大小或位置不對' };
+    }
+    const onBtn = () => btns.filter(b => b.classList.contains('on')).map(name);
+    if (onBtn().join() !== '夥伴') return { ok: false, why: 'LINE 外觀：' + '一開始選中的應該是夥伴：' + onBtn().join() };
+    const mark = getComputedStyle(btns[0], '::before');
+    if (mark.content === 'none' || parseFloat(mark.width) < 2) return { ok: false, why: 'LINE 外觀：' + '選中的那顆沒有亮色細條' };
+    await real({ click: at(btns[2]) });
+    if (!(await wait(() => onBtn().join() === '設定', 20))) return { ok: false, why: 'LINE 外觀：' + '點左欄「設定」沒有切到設定分頁：' + onBtn().join() };
+    await real({ click: at(btns[0]) });
+    if (!(await wait(() => onBtn().join() === '夥伴', 20))) return { ok: false, why: 'LINE 外觀：' + '點左欄「夥伴」沒有切回：' + onBtn().join() };
+    return { ok: true, why: '' };
+  }
+
+  if (kind === 'desk-chat' || kind === 'm-chat') {
+    const mobile = kind === 'm-chat';
+    const msgs = await wait(() => document.querySelectorAll('.msgs .msg').length >= 4 && document.querySelector('.msgs'));
+    if (!msgs) return { ok: false, why: 'LINE 外觀：' + '對話裡應該有四則訊息：' + document.querySelectorAll('.msgs .msg').length };
+    await sleep(300);
+    const all = [...msgs.querySelectorAll('.msg')];
+    const them = all.filter(m => !m.classList.contains('mine'));
+    if (them.length !== 2 || !them[1].classList.contains('l-cont') || them[0].classList.contains('l-cont')) return { ok: false, why: 'LINE 外觀：' + '對方連發兩則，只有第二則是連續訊息：' + them.map(m => m.className).join(' | ') };
+    const av = m => m.querySelector('.m-av');
+    if (!vis(av(them[0]))) return { ok: false, why: 'LINE 外觀：' + '對方第一則要有頭像' };
+    if (vis(av(them[1]))) return { ok: false, why: 'LINE 外觀：' + '對方連續的第二則不該顯示頭像' };
+    if (Math.abs(av(them[1]).getBoundingClientRect().width - av(them[0]).getBoundingClientRect().width) > 1) return { ok: false, why: 'LINE 外觀：' + '省略頭像要留空位對齊' };
+    const names = msgs.querySelectorAll('.l-name');
+    if (names.length !== 1 || names[0].textContent.trim() !== 'demo') return { ok: false, why: 'LINE 外觀：' + '名字只在對方連續的第一則上方出現一次：' + names.length };
+    if (names[0].getBoundingClientRect().bottom > them[0].querySelector('.m-body').getBoundingClientRect().top + 1) return { ok: false, why: 'LINE 外觀：' + '名字要在泡泡上方' };
+    if (msgs.querySelector('.who')) return { ok: false, why: 'LINE 外觀：' + '原本的名字列不該出現' };
+    const times = [...msgs.querySelectorAll('.l-time')].map(t => t.textContent.trim());
+    if (times.length !== 4 || times.some(t => !/^(上午|下午) [0-9]{1,2}:[0-9]{2}$/.test(t))) return { ok: false, why: 'LINE 外觀：' + '時間要寫成「下午 3:52」：' + times.join(',') };
+    const st = [...msgs.querySelectorAll('.msg.mine .l-st')].map(x => x.textContent.trim());
+    if (st.join() !== '已讀,✓') return { ok: false, why: 'LINE 外觀：' + '一對一：對方讀過顯示「已讀」、只送達顯示 ✓：' + st.join() };
+    if (msgs.querySelector('.msg-st, .read-n')) return { ok: false, why: 'LINE 外觀：' + '原本的 ✓✓ 符號不該出現' };
+    // 位置：自己的時間在泡泡左側、對方的時間在泡泡右側，貼在泡泡底邊
+    for (const m of all) {
+      const body = m.querySelector('.m-body').getBoundingClientRect(), meta = m.querySelector('.l-meta').getBoundingClientRect();
+      if (m.classList.contains('mine') ? meta.right > body.left + 1 : meta.left < body.right - 1) return { ok: false, why: 'LINE 外觀：' + '時間／已讀的位置不對（自己的在泡泡左、對方的在泡泡右）' };
+      if (meta.bottom < body.bottom - 8 || meta.bottom > body.bottom + 4) return { ok: false, why: 'LINE 外觀：' + '時間要貼在泡泡底邊旁' };
+    }
+    // 樣本是固定的舊日期，所以第一則上方一定有日期膠囊（不是「今天」）；同一天只有一個
+    const pill = msgs.querySelector('.l-day');
+    if (!pill || !/^(昨天|[0-9]{4}[/][0-9]{1,2}[/][0-9]{1,2}（.）)$/.test(pill.textContent.trim()) || msgs.querySelectorAll('.l-day').length !== 1) return { ok: false, why: 'LINE 外觀：' + '同一天只有一個日期膠囊：' + (pill && pill.textContent) };
+    if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
+    if (mobile) {
+      const page = document.querySelector('.m-page'), tabs = document.querySelector('.m-tabs');
+      if (!page.hasAttribute('data-line-chat') || cs(tabs, 'display') !== 'none') return { ok: false, why: 'LINE 外觀：' + '進到對話頁，底部導覽要收起來：' + cs(tabs, 'display') };
+      const back = document.querySelector('.m-plate-head .m-back');
+      if (!vis(back)) return { ok: false, why: 'LINE 外觀：' + '手機標題列要有返回鍵' };
+      const plate = document.querySelector('.m-plate-head .m-plate').getBoundingClientRect();
+      if (plate.left > innerWidth / 3) return { ok: false, why: 'LINE 外觀：' + '名字要靠左：' + plate.left };
+      await real({ click: at(back) });
+      if (!(await wait(() => !page.hasAttribute('data-line-chat') && cs(tabs, 'display') !== 'none' && tabs.getBoundingClientRect().bottom > innerHeight - 4, 30))) return { ok: false, why: 'LINE 外觀：' + '離開對話頁後，底部導覽要回來並貼在畫面最下面' };
+      return { ok: true, why: '' };
+    }
+    // 標題列：名字靠左、寬視窗沒有返回鍵、通話鍵走既有的通話入口
+    const bar = document.querySelector('.mbar'), plate = bar.querySelector('.mbar-plate').getBoundingClientRect(), br = bar.getBoundingClientRect();
+    if (plate.left - br.left > 60) return { ok: false, why: 'LINE 外觀：' + '標題列的名字要靠左：' + (plate.left - br.left) };
+    if (document.querySelector('.mbar-back')) return { ok: false, why: 'LINE 外觀：' + '寬視窗不該有返回鍵' };
+    const call = bar.querySelector('.mbtn-call'), more = bar.querySelector('.mbar-more .mbtn');
+    if (!vis(call) || !more) return { ok: false, why: 'LINE 外觀：' + '標題列右側要有通話鍵與「⋯」' };
+    if (call.getBoundingClientRect().right > more.getBoundingClientRect().left) return { ok: false, why: 'LINE 外觀：' + '通話鍵要在「⋯」左邊' };
+    globalThis.__smokeCalls = []; globalThis.__smokeMissing.length = 0;
+    await real({ click: at(call) });
+    const hit = () => (globalThis.__smokeCalls || []).some(c => c[0] === 'stt_status') || globalThis.__smokeMissing.includes('stt_status');
+    if (!(await wait(hit, 20))) return { ok: false, why: 'LINE 外觀：' + '按標題列的通話鍵，沒有走到既有的通話流程（沒有向語音功能查狀態）' };
+    return { ok: true, why: '' };
+  }
+
+  if (kind === 'desk-narrow') {
+    const bar = await wait(() => document.querySelector('.mbar'));
+    if (!bar) return { ok: false, why: 'LINE 外觀：' + '窄視窗找不到標題列' };
+    const back = bar.querySelector('.mbar-back');
+    if (!vis(back)) return { ok: false, why: 'LINE 外觀：' + '窄視窗單窗格，標題列要有返回鍵' };
+    if (back.getBoundingClientRect().left > bar.getBoundingClientRect().left + 24) return { ok: false, why: 'LINE 外觀：' + '返回鍵要在最左邊' };
+    if (back.getAttribute('aria-label') !== '返回名單') return { ok: false, why: 'LINE 外觀：' + '返回鍵要有文字說明' };
+    if (vis(document.querySelector('.shell.only-chat .tabbar'))) return { ok: false, why: 'LINE 外觀：' + '返回鍵搬進標題列後，上面那一列不該還在' };
+    await real({ click: at(back) });
+    if (!(await wait(() => document.querySelector('.shell.only-list') && vis(document.querySelector('.top-tabs')), 20))) return { ok: false, why: 'LINE 外觀：' + '按返回鍵沒有回到名單' };
+    return { ok: true, why: '' };
+  }
+
+  if (kind === 'm-nav') {
+    const tabs = await wait(() => document.querySelector('.m-tabs'));
+    if (!tabs) return { ok: false, why: 'LINE 外觀：' + '找不到手機分頁列' };
+    const r = tabs.getBoundingClientRect();
+    if (r.bottom < innerHeight - 4 || r.height < 50) return { ok: false, why: 'LINE 外觀：' + '分頁列要貼在畫面最下面：' + r.bottom + ' / ' + innerHeight };
+    const btns = [...tabs.querySelectorAll('button')];
+    if (btns.map(b => b.textContent.trim()).join() !== '夥伴,對話,設定,通知') return { ok: false, why: 'LINE 外觀：' + '分頁順序要是 夥伴、對話、設定、通知：' + btns.map(b => b.textContent.trim()).join() };
+    for (const b of btns) {
+      const ic = b.querySelector('svg.lic'), tx = b.querySelector('span');
+      if (!ic || !tx) return { ok: false, why: 'LINE 外觀：' + '每個分頁要有圖示與文字' };
+      if (ic.getBoundingClientRect().bottom > tx.getBoundingClientRect().top + 1) return { ok: false, why: 'LINE 外觀：' + '圖示要在文字上面' };
+    }
+    const onTab = () => btns.filter(b => b.classList.contains('on')).map(b => b.textContent.trim()).join();
+    if (onTab() !== '夥伴') return { ok: false, why: 'LINE 外觀：' + '一開始選中的應該是夥伴：' + onTab() };
+    const dot = tabs.querySelector('.red');
+    if (dot && btns.indexOf(dot.closest('button')) !== 0) return { ok: false, why: 'LINE 外觀：' + '未讀紅點要掛在「夥伴」' };
+    await real({ click: at(btns[2]) });
+    if (!(await wait(() => onTab() === '設定', 20))) return { ok: false, why: 'LINE 外觀：' + '點底部「設定」沒有切過去：' + onTab() };
+    await real({ click: at(btns[0]) });
+    if (!(await wait(() => onTab() === '夥伴', 20))) return { ok: false, why: 'LINE 外觀：' + '點底部「夥伴」沒有切回：' + onTab() };
     if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
     return { ok: true, why: '' };
   }
