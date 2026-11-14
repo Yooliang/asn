@@ -8,7 +8,7 @@ import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
-import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
+import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle, queueStepText, queueSummary, sendInOrder } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
@@ -302,17 +302,34 @@ export const ChatPane = {
     }
     // ---- 照片：選圖／貼上 → 前端壓縮（長邊 2048、webp、≤ 5 MB）→ 發 photo 事件（樞紐經 Rust 上傳寄出）；輸入框裡的字當說明 ----
     const fileEl = ref(null), photoBusy = ref(false), photoMsg = ref('')
-    async function sendFile(file) {
-      if (!file || photoBusy.value) return
-      photoBusy.value = true; photoMsg.value = '處理中…'
+    // 送一張並等結果：外層（名單視窗、手機、對話視窗）送完呼叫 done({ ok, error })；太久沒回就當沒送出（#1497）
+    const ATTACH_WAIT_MS = 180_000
+    const attachAndWait = (photo, caption) => new Promise(resolve => {
+      let over = false
+      const done = r => { if (over) return; over = true; clearTimeout(t); resolve(r ?? { ok: true }) }
+      const t = setTimeout(() => done({ ok: false, error: '等太久沒有結果，請看對話裡有沒有出現' }), ATTACH_WAIT_MS)
+      emit('attach', photo, caption, done)
+    })
+    // 一次選多張（#1497）：依序一張一張處理、送出，顯示「傳送中 2／5…」；一張失敗不影響其他張，送完說明哪幾張沒傳出。
+    // 輸入框裡的字當說明，掛在第一張「送成功」的上面（前面幾張被擋下就往後順延）；一張都沒送成就還給輸入框。
+    // 每一張的大小、格式檢查照原本的規則（attachmentFromFile、Rust 端）
+    async function sendFiles(files) {
+      const list = [...(files ?? [])].filter(Boolean)
+      if (!list.length || photoBusy.value) return
+      photoBusy.value = true; savedHere.value = false
+      let caption = draft.value.trim()
+      draft.value = ''; pickerOpen.value = false
       try {
-        const photo = await attachmentFromFile(file)
-        const caption = draft.value.trim()
-        emit('attach', photo, caption)
-        draft.value = ''; pickerOpen.value = false; photoMsg.value = ''
-      } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
+        const r = await sendInOrder(list, async file => {
+          const res = await attachAndWait(await attachmentFromFile(file), caption)
+          if (res?.ok !== false) caption = ''   // 說明已經跟著這張出去了
+          return res
+        }, (i, n) => { photoMsg.value = queueStepText(i, n) })
+        photoMsg.value = queueSummary(r)
+        if (caption && !draft.value) draft.value = caption   // 說明沒有跟著任何一張出去：還給輸入框
+      } finally { photoBusy.value = false }
     }
-    function pickPhoto(ev) { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; void sendFile(f) }
+    function pickPhoto(ev) { const fs = [...(ev.target.files ?? [])]; ev.target.value = ''; void sendFiles(fs) }
     // 貼上圖片：先進標註畫面（可以直接按「傳送」不畫），不再直接送出
     function onPaste(ev) {
       const item = [...(ev.clipboardData?.items ?? [])].find(i => i.kind === 'file' && /^image\//.test(i.type))
@@ -322,6 +339,7 @@ export const ChatPane = {
     const shotOk = ref(false), annot = ref(null)   // annot：{ blob, name, busy, msg }
     function openAnnot(blob, from) {
       if (!blob || annot.value) return
+      if (photoBusy.value) { photoMsg.value = '還在傳前面選的照片，傳完再貼。'; return }   // 不插隊（#1497）
       annot.value = { blob, name: from === 'paste' ? 'paste.png' : shotFileName(), busy: false, msg: '' }
     }
     async function startShot() {
@@ -331,6 +349,7 @@ export const ChatPane = {
     }
     async function annotDone({ blob, caption }) {
       const a = annot.value; if (!a || a.busy) return
+      if (photoBusy.value) { a.msg = '還在傳前面選的照片，傳完再按傳送。'; return }   // 不插隊（#1497）
       a.busy = true; a.msg = ''
       try {
         const photo = await imageFromBlob(blob, a.name)
@@ -586,16 +605,16 @@ export const ChatPane = {
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <line-icon name="nudge"></line-icon>
         </button>
-        <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
+        <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（一次可以選多張，最多 10 張；也可以直接貼上圖片）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <line-icon name="photo"></line-icon>
         </button>
-        <input ref="fileEl" type="file" accept="image/*" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
+        <input ref="fileEl" type="file" accept="image/*" multiple hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
+        <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內；一次可以選多個）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
           <line-icon name="file"></line-icon>
         </button>
-        <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
+        <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" multiple hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
         <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
           <line-icon name="shot"></line-icon>

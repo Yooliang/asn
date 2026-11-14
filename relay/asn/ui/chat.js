@@ -51,6 +51,17 @@ const app = createApp({
       Promise.resolve(listen('asn:older', r => { if (r?.id === fid) done(r) })).then(u => { un = typeof u === 'function' ? u : null })
       emit('asn:cmd', { op: 'older', id: fid })
     })
+    // 傳附件：請名單視窗的樞紐代送，等它回報這一張的結果（一次選多張時一張一張等，#1497）
+    let attachSeq = 0
+    const attach = async (photo, caption, done) => {
+      const token = `${Date.now().toString(36)}-${++attachSeq}`
+      let un = null, timer = null, over = false
+      const finish = r => { if (over) return; over = true; clearTimeout(timer); if (un) un(); if (typeof done === 'function') done(r) }
+      timer = setTimeout(() => finish({ ok: false, error: '等太久沒有結果，請看對話裡有沒有出現' }), 170_000)
+      try { const u = await listen('asn:attach-done', r => { if (r?.token === token) finish({ ok: r.ok !== false, error: r.error ?? '' }) }); un = typeof u === 'function' ? u : null } catch { /* 聽不到就只能等逾時 */ }
+      if (over && un) un()
+      emit('asn:cmd', { op: 'attach', id, photo, caption, token })   // 先掛好再送，回報不會比監聽早到
+    }
     return {
       cards,
       groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
@@ -58,7 +69,7 @@ const app = createApp({
       termViewApi, callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true, replySeq: opts?.replySeq }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
-      attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),
+      attach,
       toggleDp: () => emit('asn:cmd', { op: 'dp' }),
     }
   },

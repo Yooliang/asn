@@ -1153,7 +1153,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'group-menu') await openGroupMenu(c.id, c.what)
   else if (c.op === 'group-decide') await decideCard(c.id, c.cardId, c.approve === true)
   else if (c.op === 'nudge') { if (!isRoomChat(c.id)) await core.nudge(c.id) }
-  else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
+  else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption, r => { if (c.token) emit('asn:attach-done', { id: c.id, token: c.token, ...r }) })
   else if (c.op === 'older') { const r = isRoomChat(c.id) ? { more: false, added: 0 } : await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
 })
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
@@ -1163,7 +1163,16 @@ const sendMsg = async (id, text, opts) => {
   await sendTo(id, text, opts)
 }
 const nudgeTo = id => (isRoomChat(id) ? undefined : core.nudge(id))
-const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); pushLog(id); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+// 送一張附件；done（選填）收 { ok, error }：對話框一次選多張時，等這張的結果再送下一張（#1497）
+const sendAttachTo = async (id, item, caption, done) => {
+  let r
+  try {
+    if (isRoomChat(id)) { const ok = await hub.postAttachment(roomIdOf(id), item, caption); pushLog(id); r = ok ? { ok: true } : { ok: false, error: hub.st.note || '沒有傳出去' } }
+    else { r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+  } catch (e) { r = { ok: false, error: String(e?.message ?? e) } }
+  if (typeof done === 'function') done({ ok: r.ok !== false, error: r.error ?? '' })
+  return r
+}
 const activateTab = id => { ui.active = id; core.markRead(id); sync(); if (isRoomChat(id) && openedRooms.has(id)) void hub.read(roomIdOf(id)).then(() => { pushLog(id); sync() }) }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過；切到群組分頁＝現在看著它，有未讀就標已讀
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }

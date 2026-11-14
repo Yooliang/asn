@@ -496,7 +496,16 @@ const app = createApp({
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text, opts); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
-    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    // 送一張附件；done（選填）收 { ok, error }：一次選多張時等這張的結果再送下一張（#1497）
+    const sendAttachTo = async (id, item, caption, done) => {
+      let r
+      try {
+        if (isRoomChat(id)) { const ok = await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); r = ok ? { ok: true } : { ok: false, error: hub.st.note || '沒有傳出去' } }
+        else { r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+      } catch (e) { r = { ok: false, error: String(e?.message ?? e) } }
+      if (typeof done === 'function') done({ ok: r.ok !== false, error: r.error ?? '' })
+      return r
+    }
     // ---------- 使用指引：設定分頁的一個項目，點進去是暫佔第四格的內頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (fourthPage.value?.kind === 'guide' ? phoneGuide(fourthPage.value.guide) : null))
