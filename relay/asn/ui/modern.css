@@ -51,6 +51,10 @@
 /* 搜尋鈕、「＋」：圓鈕 */
 :root[data-skin="modern"] .search-ic{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--muted)}
 :root[data-skin="modern"] .search-ic:hover{border-color:var(--line);background:var(--modern-hover);color:var(--fg)}
+:root[data-skin="modern"] .search-box input{padding-right:42px}
+:root[data-skin="modern"] .search-in{right:4px;width:30px;height:30px;margin-top:-15px;border-radius:50%;color:var(--muted)}
+:root[data-skin="modern"] .search-in:hover{background:var(--modern-hover);color:var(--fg)}
+:root[data-skin="modern"] .search-in svg circle,:root[data-skin="modern"] .search-in svg path{stroke-width:1.75}
 :root[data-skin="modern"] .plus-btn{width:28px;height:28px}
 :root[data-skin="modern"] .g-head{background:transparent;color:var(--muted);font-weight:600}
 :root[data-skin="modern"] .buddy,:root[data-skin="modern"] .room-btn{border-radius:10px}

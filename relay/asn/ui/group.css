@@ -90,8 +90,6 @@
 .gc-wait{font-size:12px;color:var(--muted)}
 /* 電腦版對話上方的「⋯」 */
 /* 群組分頁（電腦）與名單上的入口 */
-.gl-actions{display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line)}
-.gl-actions .gs-btn{padding:4px 10px;font-size:12px}
 .gl-empty-hint{padding:8px 12px;font-size:12px;color:var(--muted);line-height:1.5}
 .room-btn{display:flex;align-items:center;gap:7px;width:100%;border:0;background:none;text-align:left;padding:5px 8px 5px 12px;cursor:pointer}
 .room-btn:hover{background:#e6f1fc}
