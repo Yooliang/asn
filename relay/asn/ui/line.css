@@ -1,0 +1,416 @@
+/* 外觀「LINE 風格」（0.2.22，lib/skin.mjs）：<html data-skin="line"> 時才生效，所有規則都在 :root[data-skin="line"] 底下
+   （只有設定頁的外觀縮圖 .skin-mini-line 例外：它要在別的外觀的設定頁也看得到）。沒選時整份不作用。
+   自成一套、不改 modern.css：前半是從「現代」複製來的共通底座（視窗外框、按鈕、對話框、提示、登入等與版面無關的規則，色票換成 LINE 色系），
+   後半才是 LINE 專屬。這一張只做靠樣式能換的部分；要改畫面結構的（深色左欄、底部導覽、時間／已讀位置、標題列、輸入列重排…）留給後續。 */
+/* 設定頁外觀縮圖：淡藍底、白色對方泡泡、綠色自己泡泡 */
+.skin-mini-line{background:#a9bde2}
+.skin-mini-line i{left:8px;top:8px;width:58px;height:14px;background:#fff;border-radius:7px}
+.skin-mini-line b{right:8px;top:30px;width:50px;height:14px;background:#9be685;border-radius:7px}
+:root[data-skin="line"]{
+  --glass-top:#f4f6f9; --glass-bottom:#f4f6f9; --glass-edge:transparent;
+  --title-fg:#22252a;
+  --panel:#ffffff; --panel-soft:#f4f6f9; --panel-head:#eef0f3; --line:#e4e7ec;
+  --fg:#22252a; --muted:#6b7078; --link:#1f9d55;
+  --accent:#1f9d55; --msg-st-read:#1f9d55; --msg-st-muted:#9aa0a6;
+  --ls-hover:#f0f2f5; --ls-soft:#dff3e6;
+  --online:#3aa76d;
+  /* 字體以微軟正黑體為首（設計稿） */
+  --font-ui:"Microsoft JhengHei UI","Microsoft JhengHei","Noto Sans TC","PingFang TC",system-ui,sans-serif;
+}
+
+/* ---------- 電腦版：視窗外框、標題列 ---------- */
+:root[data-skin="line"] .win{background:var(--panel-soft);border:1px solid #d9d6cf;box-shadow:none}
+:root[data-skin="line"] .titlebar{text-shadow:none;font-weight:600}
+:root[data-skin="line"] .brand{font-style:normal;letter-spacing:.02em}
+:root[data-skin="line"] .tb{border-color:transparent;background:transparent;box-shadow:none;color:var(--muted)}
+:root[data-skin="line"] .tb:hover{background:var(--ls-hover);border-color:transparent}
+:root[data-skin="line"] .tb.close:hover{background:#d9534f;color:#fff}
+:root[data-skin="line"] .tb svg{filter:none}
+
+/* ---------- 名單：本人資訊、上方四個大分頁、左邊設備頁籤、清單 ---------- */
+:root[data-skin="line"] .me{background:transparent}
+:root[data-skin="line"] .upd-bar{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:none}
+:root[data-skin="line"] .top-tabs{background:transparent;padding:6px 8px;gap:6px}
+:root[data-skin="line"] .ttab{height:30px;border:0;border-radius:999px;background:transparent;color:var(--muted)}
+:root[data-skin="line"] .ttab:hover{background:var(--ls-hover);color:var(--fg)}
+:root[data-skin="line"] .ttab.on{margin-bottom:0;background:var(--ls-soft);color:var(--accent)}
+:root[data-skin="line"] .body{background:var(--panel-soft)}
+:root[data-skin="line"] .rail{border-right:1px solid var(--line)}
+:root[data-skin="line"] .rtab:hover{border-color:transparent;background:var(--ls-hover)}
+:root[data-skin="line"] .rtab.on{border-color:var(--line);background:var(--panel);box-shadow:none}
+:root[data-skin="line"] .rtab > svg,:root[data-skin="line"] .rtab > img{filter:none}
+:root[data-skin="line"] .rtab .mono{color:var(--accent);text-shadow:none}
+:root[data-skin="line"] .content{background:var(--panel)}
+:root[data-skin="line"] .search{gap:8px;padding:8px 10px;border-bottom:0;background:var(--panel)}
+:root[data-skin="line"] .search input{height:36px;border:1px solid var(--line);border-radius:999px;background:var(--panel-soft);padding:0 14px}
+/* 搜尋鈕、「＋」：圓鈕 */
+:root[data-skin="line"] .search-ic{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--muted)}
+:root[data-skin="line"] .search-ic:hover{border-color:var(--line);background:var(--ls-hover);color:var(--fg)}
+:root[data-skin="line"] .plus-btn{width:28px;height:28px}
+:root[data-skin="line"] .g-head{background:transparent;color:var(--muted);font-weight:600}
+:root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn{border-radius:10px}
+:root[data-skin="line"] .buddy:hover,:root[data-skin="line"] .room-btn:hover{background:var(--ls-hover);border-color:transparent}
+:root[data-skin="line"] .unread,:root[data-skin="line"] .rtab-count{background:var(--accent);box-shadow:none}
+:root[data-skin="line"] .c-foot{background:transparent}
+:root[data-skin="line"] .ad{border:1px solid var(--line);border-radius:12px;box-shadow:none}
+
+/* ---------- 按鈕、對話框 ---------- */
+:root[data-skin="line"] .aero-btn,:root[data-skin="line"] .gs-btn,:root[data-skin="line"] .pane-back,:root[data-skin="line"] .upd-btn,:root[data-skin="line"] .login-btn{
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:none;color:var(--fg);text-shadow:none}
+:root[data-skin="line"] .aero-btn:hover,:root[data-skin="line"] .gs-btn:hover,:root[data-skin="line"] .pane-back:hover,:root[data-skin="line"] .upd-btn:hover,:root[data-skin="line"] .login-btn:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .dlg{border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 12px 32px rgba(0,0,0,.14)}
+:root[data-skin="line"] .dlg-head{background:transparent;border-bottom:1px solid var(--line);text-shadow:none}
+:root[data-skin="line"] .set-card{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="line"] .set-sel{border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+
+/* ---------- 對話：分頁列、工具列、訊息、輸入框 ---------- */
+:root[data-skin="line"] .ctab{border-color:transparent;background:transparent}
+:root[data-skin="line"] .ctab:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .ctab.on{border-color:var(--line);background:var(--panel)}
+:root[data-skin="line"] .toolbar,:root[data-skin="line"] .tb-bottom .toolbar{background:var(--panel)}
+:root[data-skin="line"] .tool:hover{border-color:transparent;background:var(--ls-hover)}
+:root[data-skin="line"] .to-line{background:var(--panel)}
+:root[data-skin="line"] .chatpane-main{background:var(--panel-soft)}
+:root[data-skin="line"] .conv,:root[data-skin="line"] .compose-row{background:var(--panel-soft)}
+:root[data-skin="line"] .conv-main{border-radius:14px}
+:root[data-skin="line"] .msgs{padding:14px 18px;gap:10px}
+/* 訊息卡片：四角都是 18px（不留小角）、內距 11/16 */
+:root[data-skin="line"] .msg .m-body.tone-them,:root[data-skin="line"] .msg .m-body.tone-me,:root[data-skin="line"] .msg .m-body.tone-same{padding:11px 16px;border-color:transparent;border-radius:18px}
+:root[data-skin="line"] .msg .m-body.tone-them{background:var(--line-them)}
+:root[data-skin="line"] .msg .m-body.tone-me,:root[data-skin="line"] .msg .m-body.tone-same{background:var(--line-me);color:#1d3b36}
+:root[data-skin="line"] .msg.mine .m-body{color:#1d3b36}
+:root[data-skin="line"] .sys{color:var(--muted)}
+
+/* ---------- 手機 ---------- */
+:root[data-skin="line"] body.m-body{background:var(--panel-soft)}
+:root[data-skin="line"] .m-tabs{background:var(--panel);border-bottom:1px solid var(--line)}
+/* 手機四大分頁：膠囊。原本的底線指示條改成跟著滑動的膠囊底色（拖動時一樣跟手） */
+:root[data-skin="line"] .m-tabs{height:40px}
+:root[data-skin="line"] .m-tabs button{z-index:3;height:40px;background:transparent;color:var(--muted)}
+:root[data-skin="line"] .m-tabs button.on{background:transparent;color:var(--accent)}
+:root[data-skin="line"] .m-ind{top:0;bottom:0;height:auto;box-sizing:border-box;border:5px solid transparent;border-left-width:8px;border-right-width:8px;border-radius:999px;background:var(--ls-soft);background-clip:padding-box}
+/* 標題列：忙碌／離線時保留 mobile.css 的變色（頂端狀態提示），只有一般狀態換底色 */
+:root[data-skin="line"] .m-head:not(.is-busy):not(.is-offline){background:var(--panel-soft)}
+:root[data-skin="line"] .m-title{text-shadow:none}
+:root[data-skin="line"] .m-head:not(.m-chathead) .m-title{font-size:22px;font-weight:700}
+:root[data-skin="line"] .m-scroll{background:var(--panel-soft)}
+:root[data-skin="line"] .m-chat{background:var(--panel-soft)}
+:root[data-skin="line"] .m-chat .conv-main,:root[data-skin="line"] .m-chat .compose-main{background:var(--panel)}
+:root[data-skin="line"] .m-search{background:var(--panel-soft);border-bottom:0}
+:root[data-skin="line"] .m-search input{background:var(--panel);border-color:var(--line)}
+/* 手機清單列：圓頭像 44px、圓角列、按下時淡青綠 */
+:root[data-skin="line"] .m-buddy{width:calc(100% - 16px);margin:0 8px;border-top-color:transparent;border-radius:16px}
+:root[data-skin="line"] .m-buddy:active{background:var(--ls-soft)}
+:root[data-skin="line"] .m-av-wrap,:root[data-skin="line"] .m-av-wrap .dp{width:44px;height:44px}
+:root[data-skin="line"] .m-card{margin:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+:root[data-skin="line"] .m-btn{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:none;color:var(--fg)}
+:root[data-skin="line"] .m-pg.m-fourth{background:var(--panel-soft)}
+
+/* ---------- 危險動作：紅色要留著（上面把一般按鈕換成白底，權重比原本的紅色高，這裡再蓋回來） ---------- */
+:root[data-skin="line"] .aero-btn.danger,:root[data-skin="line"] .gs-btn.danger,:root[data-skin="line"] .aero-btn.dv-danger{border-color:#c4463d;background:#fff4f3;color:#b3261e;font-weight:600}
+:root[data-skin="line"] .aero-btn.danger:hover,:root[data-skin="line"] .gs-btn.danger:hover,:root[data-skin="line"] .aero-btn.dv-danger:hover{border-color:#8c1d16;background:#fde3e0}
+:root[data-skin="line"] .logout-set .logout-btn{border-color:#d79a95;color:#b3261e}
+:root[data-skin="line"] .m-btn.m-danger{border-color:#d79a95;color:#b3261e}
+:root[data-skin="line"] .m-btn.m-dv-danger{border-color:#b3261e;background:#b3261e;color:#fff}
+
+/* ---------- 浮層、提示、右下角通知：不留 Aero 的藍色漸層與藍框 ---------- */
+:root[data-skin="line"] .m-sheet{background:var(--panel-soft)}
+:root[data-skin="line"] .m-banner{border:1px solid var(--line);background:var(--panel);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+:root[data-skin="line"] .toast,:root[data-skin="line"] .sp{border:1px solid #d9d6cf;background:var(--panel-soft);box-shadow:none}
+:root[data-skin="line"] .m-ops{background:rgba(20,22,26,.4)}
+
+/* ---------- 輸入框：邊框加深，現代的淺底上也看得出邊界（約 1.6:1） ---------- */
+:root[data-skin="line"] .search input,:root[data-skin="line"] .m-search input,:root[data-skin="line"] .set-sel{border-color:#c9c6be}
+
+/* ---------- 頭像：圓形色塊＋右下狀態點（Aero 是相框顏色＝狀態，改圓後用點表示） ---------- */
+:root[data-skin="line"] .dp{position:relative;padding:0;border-radius:50%;background:none;box-shadow:none}
+:root[data-skin="line"] .dp>span{border-radius:50%;background:hsl(var(--h,210) 32% 50%);text-shadow:none;font-weight:600}
+:root[data-skin="line"] .dp::before{content:"";position:absolute;z-index:1;right:-1px;bottom:-1px;box-sizing:border-box;width:13px;height:13px;border:2px solid var(--panel);border-radius:50%;background:var(--frame);pointer-events:none}
+:root[data-skin="line"] .dp.xs::before{width:11px;height:11px}
+:root[data-skin="line"] .dp.xl::before{right:4px;bottom:4px;width:24px;height:24px;border-width:3px}
+:root[data-skin="line"] .room-av::before{display:none}
+/* 廠商小圖讓出右下角給狀態點，移到右上 */
+:root[data-skin="line"] .avb-v{top:-5px;bottom:auto}
+:root[data-skin="line"] .avb.xs .avb-v{top:-4px}
+:root[data-skin="line"] .avb.xl .avb-v{top:-6px}
+/* 手機標題列的大頭貼（img，掛不了點）：圓形，外圈細線仍是狀態色 */
+:root[data-skin="line"] .m-pic{border-width:2px;border-radius:50%;box-shadow:none}
+
+/* ---------- 權重衝突 ---------- */
+/* 電腦：對方離線時收件人列要是灰的（style.css 的灰底和上面的 .to-line 同權重，被蓋掉了） */
+:root[data-skin="line"] .conv-main .to-line.is-offline{background:#e7e5e0;border-bottom-color:#d3d0c8;color:#4a4f55}
+
+/* ---------- 手機訊息卡片（.m-chat）：18px 圓角、內距 10/14、14.5px 字 ---------- */
+:root[data-skin="line"] .m-chat .msgs{padding:12px 14px;gap:9px}
+:root[data-skin="line"] .m-chat .msg .m-body.tone-them,:root[data-skin="line"] .m-chat .msg .m-body.tone-me,:root[data-skin="line"] .m-chat .msg .m-body.tone-same{padding:10px 14px;border-radius:18px;font-size:14.5px;line-height:1.55}
+/* #1421 B：電腦頂部與左欄 */
+/* 頂部：一列 60px，中間置中名牌，右上「終端」「更多」兩顆 36px 圓鈕；原本的大按鈕區、收件人列、分頁列在現代下都收起來（功能搬進「更多」） */
+/* 大按鈕區不能 display:none：模型、子代理、工作項目的下拉清單和「已封存」的結果訊息還長在它裡面，只收起按鈕、把清單改成從頂部右上角往下展開（對話區 .chatpane 是定位基準） */
+:root[data-skin="line"] .conv-main .to-line,:root[data-skin="line"] .tabbar{display:none}
+:root[data-skin="line"] .actionbar{position:static;display:block;height:0;min-height:0;margin:0;padding:0;border:0;overflow:visible;background:none}
+:root[data-skin="line"] .actionbar .abtn{display:none}
+:root[data-skin="line"] .actionbar .ab-wrap{position:static;display:block;height:0}
+:root[data-skin="line"] .actionbar .ab-wrap > .ab-menu{position:absolute;z-index:20;left:auto;right:16px;top:56px;margin:0;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14)}
+:root[data-skin="line"] .actionbar .ab-note{position:absolute;z-index:20;left:50%;top:58px;transform:translateX(-50%);padding:3px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12px}
+/* 三欄：名牌置中；視窗窄時左欄讓到最小、右欄留給兩顆圓鈕，名牌往左靠而不被蓋住 */
+:root[data-skin="line"] .mbar{position:relative;z-index:6;flex:none;display:grid;grid-template-columns:minmax(12px,1fr) auto minmax(104px,1fr);align-items:center;height:60px;padding:0 16px;background:var(--panel-soft)}
+:root[data-skin="line"] .mbar:has(.mbar-offline){grid-template-columns:minmax(12px,1fr) minmax(0,auto) minmax(max-content,1fr);column-gap:8px}
+:root[data-skin="line"] .mbar-plate{grid-column:2;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;padding:4px 14px 4px 5px;background:var(--panel);border:1px solid #e6e4df;border-radius:999px;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
+:root[data-skin="line"] .mbar-plate .dp.xs{width:22px;height:22px}
+:root[data-skin="line"] .mbar-plate .dp.xs>span{font-size:10px}
+:root[data-skin="line"] .mbar-plate .dp.xs::before{width:9px;height:9px;border-width:1.5px}
+:root[data-skin="line"] .mbar-plate .avb-v{display:none}
+:root[data-skin="line"] .mbar-room{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;font-weight:600}
+:root[data-skin="line"] .mbar-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--fg)}
+:root[data-skin="line"] .mbar-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#6b706c;white-space:nowrap}
+/* 離線：名牌的狀態字與頭像變灰（原本收件人列的離線灰底，改由名牌承擔） */
+:root[data-skin="line"] .mbar-plate.is-offline{background:#efeeea}
+:root[data-skin="line"] .mbar-plate.is-offline .mbar-name,:root[data-skin="line"] .mbar-plate.is-offline .mbar-sub{color:#8a8f96}
+:root[data-skin="line"] .mbar-acts{grid-column:3;justify-self:end;display:flex;gap:8px}
+:root[data-skin="line"] .mbar-more{display:flex}
+:root[data-skin="line"] .mbtn{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="line"] .mbtn:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .mbtn.on{border-color:var(--accent);color:var(--accent)}
+:root[data-skin="line"] .mbtn.mbtn-offline{width:auto;min-width:36px;padding:0 14px;border-radius:999px;font-size:12.5px;white-space:nowrap;color:var(--fg)}
+:root[data-skin="line"] .mbar-offline{display:flex}
+:root[data-skin="line"] .offline-menu .menu-note{padding:8px 14px;font-size:13px;color:var(--fg)}
+:root[data-skin="line"] .m-chat.is-room .m-plate-head:has(.m-head-offline){grid-template-columns:minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr)}
+:root[data-skin="line"] .m-chat.is-room .m-plate-head:has(.m-head-offline) .m-back{justify-self:start}
+:root[data-skin="line"] .m-plate-head .m-head-offline{grid-row:1;grid-column:3;justify-self:end;position:relative;display:block}
+:root[data-skin="line"] .m-offline-btn{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);font:inherit;font-size:12.5px;white-space:nowrap;cursor:pointer}
+:root[data-skin="line"] .m-offline-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="line"] .m-offline-menu{list-style:none;margin:0;padding:0;top:42px;min-width:160px}
+:root[data-skin="line"] .m-offline-menu li{padding:12px 16px;font-size:15px;border-bottom:1px solid rgba(0,0,0,.07)}
+:root[data-skin="line"] .m-offline-menu li:last-child{border-bottom:0}
+:root[data-skin="line"] .mbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* 窄視窗（一次只看一個窗格）：分頁列藏起來，只留「‹ 名單」返回鈕那一小列；沒有它就回不去名單 */
+:root[data-skin="line"] .shell.only-chat .tabbar{display:flex;height:40px;margin-bottom:0;padding:6px 8px 0;align-items:center;background:var(--panel-soft)}
+:root[data-skin="line"] .shell.only-chat .tabbar .ctab{display:none}
+:root[data-skin="line"] .shell.only-chat .tabbar .pane-back{align-self:center;margin:0;height:30px;border-radius:999px}
+
+/* 左欄：對話清單的選取態（白底卡片＋陰影、14px 圓角） */
+:root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn{border-radius:14px}
+:root[data-skin="line"] .buddy.on,:root[data-skin="line"] .room-btn.on{background:var(--panel);border-color:transparent;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
+/* 搜尋列旁的「＋」（開新視窗）：36px 圓鈕，和搜尋鈕一樣大；原本在用戶區裡的那顆藏起來 */
+:root[data-skin="line"] .search-plus{position:relative;display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer}
+:root[data-skin="line"] .search-plus:hover{background:var(--ls-hover)}
+:root[data-skin="line"] .search .search-ic{width:36px;height:36px;border-radius:50%}
+:root[data-skin="line"] .list-pane > .me .plus-btn{display:none}
+
+/* 左欄底部用戶區：移到最下面（廣告框在它正上方），32px 頭像、名字、「在線・這台電腦」 */
+:root[data-skin="line"] .list-pane > .me{order:99;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #e6e4df;border-bottom:0;background:var(--panel)}
+:root[data-skin="line"] .list-pane > .me .me-dp{width:32px;height:32px}
+:root[data-skin="line"] .list-pane > .me .me-dp > span{font-size:12px}
+:root[data-skin="line"] .list-pane > .me .me-info{gap:1px}
+:root[data-skin="line"] .list-pane > .me .me-row{flex-wrap:wrap;gap:0 4px}
+:root[data-skin="line"] .list-pane > .me .nick-input{flex:1 1 100%;font-size:13.5px;font-weight:600;padding:0 3px}
+:root[data-skin="line"] .list-pane > .me .status-sel{appearance:none;-webkit-appearance:none;field-sizing:content;max-width:none;padding:0 0 0 3px;border:0;background:transparent;font-size:12px;color:#6b706c;cursor:pointer}
+:root[data-skin="line"] .list-pane > .me .me-this{display:inline;font-size:12px;color:#6b706c}
+:root[data-skin="line"] .list-pane > .me .me-this::before{content:"・"}
+/* 個人訊息與正在播放：設計稿的用戶區只有兩行，藏起來（「＋」搬去搜尋列了） */
+:root[data-skin="line"] .list-pane > .me .me-psm-row,:root[data-skin="line"] .list-pane > .me .me-np{display:none}
+/* 換大頭貼的選單從用戶區往上彈（用戶區在最底下，往下彈會被裁掉） */
+:root[data-skin="line"] .list-pane > .me .av-menu{top:auto;bottom:calc(100% + 4px)}
+
+/* ---------- 廣告框（#1421，小良哥決定保留）：白底細灰框的圓角卡片；彩球改成淡色平面圓、緞帶改成小膠囊標籤 ---------- */
+:root[data-skin="line"] .ad-wrap{margin:6px 10px 8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:none}
+/* .ad 填滿外框：外框已有邊和圓角，裡面不再畫一圈（上面「名單」那段的 .ad 邊框在這裡收掉） */
+:root[data-skin="line"] .ad{border:0;border-radius:0;background:var(--panel)}
+:root[data-skin="line"] .ad.link:hover{filter:none;background:var(--ls-hover)}
+:root[data-skin="line"] .ad-tx b{color:var(--fg);font-weight:600}
+:root[data-skin="line"] .ad-tx small{color:var(--muted)}
+:root[data-skin="line"] .ad-tx em{color:var(--accent);font-weight:600}
+:root[data-skin="line"] .ad-art i{background:hsl(var(--h) 40% 86%);filter:none}
+:root[data-skin="line"] .ad-art i:nth-child(2){background:hsl(var(--h) 35% 78%)}
+:root[data-skin="line"] .ad-art i:nth-child(3){background:hsl(var(--h) 30% 92%)}
+:root[data-skin="line"] .ad-new{top:6px;right:8px;left:auto;width:auto;padding:0 7px;transform:none;border-radius:999px;background:var(--ls-soft);color:var(--accent);font:600 10px/16px var(--font-ui);letter-spacing:.04em;text-shadow:none;box-shadow:none}
+:root[data-skin="line"] .ad-dots i{background:#d9d6cf}
+:root[data-skin="line"] .ad-dots i.on{background:var(--accent)}
+
+/* ---------- #1421 B 之三：手機對話頂端（左返回、中間名牌、右看終端；其他動作點名牌開「⋯」選單） ---------- */
+:root[data-skin="line"] .m-plate-head{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:8px;padding:6px 12px}
+:root[data-skin="line"] .m-plate-head > .m-pic,:root[data-skin="line"] .m-plate-head > .m-head-tx,:root[data-skin="line"] .m-plate-head > .m-head-more{display:none}
+:root[data-skin="line"] .m-plate-head .m-back,:root[data-skin="line"] .m-plate-head .m-head-term{grid-row:1;display:grid;place-items:center;width:36px;height:36px;margin:0;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--muted)}
+:root[data-skin="line"] .m-plate-head .m-back{grid-column:1}
+:root[data-skin="line"] .m-plate-head .m-back .m-ic{width:20px;height:20px}
+:root[data-skin="line"] .m-plate-head .m-head-term{grid-column:3}
+:root[data-skin="line"] .m-plate-head .m-head-term.on{border-color:var(--accent);background:var(--ls-soft)}
+:root[data-skin="line"] .m-plate-head .m-plate{grid-row:1;grid-column:2;justify-self:center;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;height:40px;padding:4px 14px 4px 5px;border:1px solid #e6e4df;border-radius:999px;background:var(--panel);box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06);color:var(--fg);font:inherit;cursor:pointer}
+:root[data-skin="line"] .m-plate:disabled{cursor:default}
+:root[data-skin="line"] .m-plate-pic{--frame:var(--online);flex:none;width:28px;height:28px;border:2px solid var(--frame);border-radius:50%;object-fit:cover;background:#fff}
+:root[data-skin="line"] .m-plate-pic.st-busy{--frame:var(--busy)} :root[data-skin="line"] .m-plate-pic.st-away{--frame:var(--away)} :root[data-skin="line"] .m-plate-pic.st-offline,:root[data-skin="line"] .m-plate-pic.st-stopped{--frame:var(--offline);filter:grayscale(.65)}
+:root[data-skin="line"] .m-plate-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}
+:root[data-skin="line"] .m-plate-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--muted)}
+/* 離線：名牌變灰（標題列本身的灰底照舊在 mobile.css 的 .m-chathead.is-offline） */
+:root[data-skin="line"] .m-plate.is-offline{background:#efeeea}
+:root[data-skin="line"] .m-plate.is-offline .m-plate-name,:root[data-skin="line"] .m-plate.is-offline .m-plate-sub{color:#8a8f96}
+/* 「看終端」搬到頂端右邊了，下方工具列那顆收起來（同一個切換，不重複） */
+:root[data-skin="line"] .m-chat .m-term-switch{display:none}
+/* ---------- #1421 B2：輸入框膠囊（電腦、手機共用同一個 ChatPane） ----------
+   .compose-main 就是那顆膠囊（單列、52px／手機 50px、細邊＋陰影）；上方的工具列收進「＋」（.mc-plus）展開的小選單，
+   語音輸入另有一顆在右邊（.mc-dict），送出鈕改成實心圓＋向上箭頭（字還在、只是看不見，aria-label 也是 sendLabel）。
+   .composer 在這裡 display:contents，textarea 與按鈕直接排進膠囊；同一個 textarea、同一組 handler，只換排版。
+   膠囊長高（多行）時圓角固定 26px（一行 52px 時剛好是全圓），不會變成怪形狀。 */
+:root[data-skin="line"] .compose-row{padding:10px 32px 18px}
+:root[data-skin="line"] .compose-main{position:relative;flex:1;flex-direction:row;align-items:flex-end;gap:6px;box-sizing:border-box;width:100%;max-width:760px;min-height:52px;margin:0 auto;padding:5px 5px 5px 6px;border:1px solid #e6e4df;border-radius:26px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)}
+:root[data-skin="line"] .m-chat .compose-row{padding:8px 12px 10px;border-top:0;background:var(--panel-soft)}
+:root[data-skin="line"] .m-chat .compose-main{min-height:50px;max-width:none;padding:4px 4px 4px 5px;border:1px solid #e6e4df;border-radius:25px;background:var(--panel)}
+:root[data-skin="line"] .compose-main .composer{display:contents}
+:root[data-skin="line"] .compose-main .composer textarea{flex:1;min-width:0;order:2;align-self:stretch;height:auto;min-height:0;max-height:140px;padding:9px 6px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:22px;field-sizing:content}
+:root[data-skin="line"] .m-chat .compose-main .composer textarea{font-size:15px;min-height:0;padding:9px 4px}
+/* 左「＋」、右語音輸入：40px 圓鈕 */
+:root[data-skin="line"] .compose-main .mc-plus,:root[data-skin="line"] .compose-main .mc-dict{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="line"] .compose-main .mc-plus{order:1}
+:root[data-skin="line"] .compose-main .mc-dict{order:3;grid-auto-flow:column;gap:4px;width:auto;min-width:40px}
+:root[data-skin="line"] .compose-main .mc-dict:not(:has(.dict-state)){width:40px}
+:root[data-skin="line"] .compose-main .mc-dict .dict-state{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px}
+:root[data-skin="line"] .compose-main .mc-plus:hover,:root[data-skin="line"] .compose-main .mc-dict:hover:not(:disabled){background:var(--ls-hover)}
+:root[data-skin="line"] .compose-main .mc-plus[aria-expanded="true"]{background:var(--ls-soft);color:var(--accent)}
+:root[data-skin="line"] .compose-main .mc-dict.rec{background:#fde3e0;color:#b3261e}
+:root[data-skin="line"] .compose-main .mc-dict.busy{opacity:.6}
+:root[data-skin="line"] .compose-main .mc-mic{width:40px}
+:root[data-skin="line"] .compose-main .mc-dict:disabled{opacity:.45;cursor:default}
+:root[data-skin="line"] .compose-main .mc-plus:focus-visible,:root[data-skin="line"] .compose-main .mc-dict:focus-visible,:root[data-skin="line"] .compose-main .composer .aero-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="line"] .m-chat.is-room .compose-main .mc-dict,:root[data-skin="line"] .m-chat .compose-row.is-term .mc-dict{display:none}
+/* 送出鈕：40px 實心主色圓＋白色向上箭頭 */
+:root[data-skin="line"] .compose-main .composer .aero-btn{order:4;display:block;flex:none;align-self:flex-end;box-sizing:border-box;width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat var(--accent);color:transparent;font-size:0;line-height:0;overflow:hidden;box-shadow:none}
+:root[data-skin="line"] .compose-main .composer .aero-btn:hover:not(:disabled){background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat #276a61}
+:root[data-skin="line"] .compose-main .composer .aero-btn:disabled{opacity:.35;cursor:default}
+/* 上方那排工具（表情、通話、震動、照片、檔案、截圖、錄音、對話／終端切換）：平常收起來，按「＋」才在膠囊上方展開成帶文字的小選單；按鈕與 handler 原封不動 */
+:root[data-skin="line"] .compose-main > .toolbar{display:none}
+:root[data-skin="line"] .compose-main > .toolbar.mc-open{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;position:absolute;z-index:6;left:0;bottom:calc(100% + 8px);min-width:200px;max-width:100%;padding:6px;overflow:visible;border:1px solid #e6e4df;border-radius:18px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.1)}
+:root[data-skin="line"] .compose-main > .toolbar .tool-group{display:flex}
+:root[data-skin="line"] .compose-main > .toolbar .tool{width:100%;min-width:0;min-height:40px;justify-content:flex-start;gap:12px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--fg);font-size:14px;text-align:left}
+:root[data-skin="line"] .compose-main > .toolbar .tool:hover:not(:disabled){background:var(--ls-hover)}
+:root[data-skin="line"] .compose-main > .toolbar .tool::after{content:attr(aria-label)}
+:root[data-skin="line"] .compose-main > .toolbar .tool svg{flex:none;width:20px;height:20px}
+:root[data-skin="line"] .compose-main > .toolbar .tool img{flex:none;width:20px;height:20px}
+:root[data-skin="line"] .compose-main > .toolbar .tool.dict,:root[data-skin="line"] .compose-main > .toolbar:not(.mc-has-dict) .tool.mic{display:none}
+:root[data-skin="line"] .compose-main > .toolbar .tool.mic.rec{background:#fde3e0;color:#b3261e;animation:none}
+:root[data-skin="line"] .compose-main > .toolbar .picker{left:0;right:auto;width:max-content;grid-template-columns:repeat(6,36px);border:1px solid #e6e4df;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+:root[data-skin="line"] .compose-main > .toolbar .picker button{height:34px;font-size:18px;border-radius:8px}
+/* 回覆列、語音安裝提示：浮在膠囊正上方（膠囊自己固定一列高） */
+:root[data-skin="line"] .compose-main > .reply-bar,:root[data-skin="line"] .compose-main > .voice-install{position:absolute;z-index:5;left:12px;right:12px;bottom:calc(100% + 8px);margin:0;border:1px solid #e6e4df;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
+:root[data-skin="line"] .compose-main > .reply-bar{box-sizing:border-box;height:36px;padding:0 12px;background:var(--panel)}
+/* 兩個同時出現：語音安裝提示疊在回覆列上方（回覆列固定 36px 高，再留 6px 縫） */
+:root[data-skin="line"] .compose-main > .voice-install:has(~ .reply-bar){bottom:calc(100% + 8px + 36px + 6px)}
+:root[data-skin="line"] .compose-main > .voice-install{padding:8px 12px;background:#fffbe6}
+/* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
+:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
+:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}
+
+/* ---------- 工作管理員（0.2.21）：現代外觀的表格與提示，只換顏色、圓角與邊線，結構與 Aero 相同 ---------- */
+:root[data-skin="line"] .tm-scroll{border-color:var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="line"] .tm-table th{background:var(--panel-soft);color:var(--muted);font-weight:600}
+:root[data-skin="line"] .tm-table td{border-top-color:var(--line)}
+:root[data-skin="line"] .tm-table tr.dup td{background:#fdf3ef}
+:root[data-skin="line"] .tm-tag{background:var(--ls-soft);color:var(--accent)}
+:root[data-skin="line"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
+:root[data-skin="line"] .tm-warn{border:1px solid #ecd9a0;border-radius:12px;background:#fffbe6;color:#6b5400}
+:root[data-skin="line"] .tm-facts{border-radius:12px;background:var(--panel-soft)}
+/* ---------- #1461 線條圖示（0.2.21）：24×24、線寬 1.75、圓頭圓角，顏色跟著字色；一般灰、選中主色、危險紅 ---------- */
+:root[data-skin="line"] .lic{display:inline-block;flex:none;vertical-align:middle}
+/* 輸入框上方工具列：藏原本的彩色圖，換成線條 */
+:root[data-skin="line"] .toolbar .tool > svg:not(.lic),:root[data-skin="line"] .toolbar .m-term-switch > img{display:none}
+:root[data-skin="line"] .toolbar .tool{color:var(--muted)}
+:root[data-skin="line"] .toolbar .tool:hover:not(:disabled){color:var(--fg)}
+:root[data-skin="line"] .toolbar .tool[aria-expanded="true"],:root[data-skin="line"] .toolbar .tool[aria-pressed="true"]{color:var(--accent)}
+:root[data-skin="line"] .toolbar .tool.dict.rec,:root[data-skin="line"] .toolbar .tool.mic.rec{color:#b3261e}
+/* 電腦「更多」與手機「⋯」：每一項前面一個圖示，兩邊同一個 key 同一個圖（MENU_ICON） */
+:root[data-skin="line"] .more-menu button{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:10px;align-items:center}
+:root[data-skin="line"] .more-menu button > .mi-ic{grid-row:1 / span 2}
+:root[data-skin="line"] .more-menu button > :not(.mi-ic){grid-column:2}
+:root[data-skin="line"] .mi-ic{color:var(--muted)}
+:root[data-skin="line"] .mi-ic.danger{color:#b3261e}
+:root[data-skin="line"] .ab-menu button.off .mi-ic,:root[data-skin="line"] .m-ops-item.off .mi-ic{color:#c9c6be}
+:root[data-skin="line"] .m-ops-item:has(> .mi-ic){display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:12px;align-items:center;justify-items:start}
+:root[data-skin="line"] .m-ops-item > .mi-ic{grid-row:1 / span 2}
+:root[data-skin="line"] .m-ops-item:has(> .mi-ic) > :not(.mi-ic){grid-column:2}
+/* 設定列表（電腦與手機）與「使用指引」：藏原本的藍色線條與 CSS 畫的書本 */
+:root[data-skin="line"] .guide-item > .cat-ic,:root[data-skin="line"] .guide-item > .guide-ic,:root[data-skin="line"] .m-row-btn > .m-row-ic{display:none}
+:root[data-skin="line"] .cat-lic{width:22px;height:22px;color:var(--muted)}
+:root[data-skin="line"] .m-row-lic{color:var(--muted)}
+/* 手機四大分頁：字的左邊放圖示，選中的那一格跟字一起變主色 */
+:root[data-skin="line"] .m-tabs button{display:flex;align-items:center;justify-content:center;gap:5px}
+/* 搜尋、新增、返回：形狀照舊，線寬統一 1.75、改灰 */
+:root[data-skin="line"] .search-ic svg circle,:root[data-skin="line"] .search-ic svg path,:root[data-skin="line"] .search-plus svg path,:root[data-skin="line"] .m-icon-btn .m-ic path{stroke-width:1.75}
+
+/* =====================================================================
+   LINE 風格專屬（0.2.22，#1449 第一張）：只做「靠樣式就能換」的部分。
+   對話淡藍純色底、對方白泡泡（靠頭像那側有小尖角）、自己亮綠泡泡、泡泡最大寬、系統提示膠囊、
+   清單大頭貼與名字、搜尋框、懸浮新增鈕、空白狀態、細分隔線與較大字級。
+   深色左欄、底部導覽、已讀／時間搬位置、標題列、輸入列重排、清單右欄等要改畫面結構的，留給第二、第三張。
+   ===================================================================== */
+/* 色票變數：自己的泡泡顏色寫成 --line-me（小良哥拍板亮綠 #9be685；之後要換只改這一個） */
+:root[data-skin="line"]{
+  --line-me:#9be685; --line-them:#ffffff; --line-bg:#a9bde2; --line-bg-ink:#34445f; --line-green:#22b14c;
+}
+/* 基準字級：電腦 15px、手機 16px（比現代大一級） */
+:root[data-skin="line"] body{font-size:15px}
+:root[data-skin="line"] body.m-body{font-size:16px}
+
+/* ---------- 對話底色：整片淡藍純色（不加雲紋）；輸入框膠囊維持白色 ---------- */
+:root[data-skin="line"] .chatpane-main,:root[data-skin="line"] .conv,:root[data-skin="line"] .conv-main,:root[data-skin="line"] .msgs,
+:root[data-skin="line"] .compose-row,:root[data-skin="line"] .mbar,:root[data-skin="line"] .m-chat,:root[data-skin="line"] .m-chat .msgs,
+:root[data-skin="line"] .m-chat .compose-row,:root[data-skin="line"] .m-chat .conv-main{background:var(--line-bg)}
+/* 淡藍底上的灰字（名字、時間、狀態、「沒有更早的了」）要用較深的藍灰才讀得到 */
+:root[data-skin="line"] .msgs{--muted:var(--line-bg-ink);--msg-st-muted:var(--line-bg-ink);--msg-st-read:#14507a}
+:root[data-skin="line"] .older-note{text-align:center;color:var(--line-bg-ink);font-size:12.5px}
+
+/* ---------- 泡泡：圓角 17px、靠頭像那側上角有小尖角；對方白、自己亮綠；最大寬約 68% ---------- */
+:root[data-skin="line"] .msg .m-body.tone-them,:root[data-skin="line"] .msg .m-body.tone-me,:root[data-skin="line"] .msg .m-body.tone-same,
+:root[data-skin="line"] .m-chat .msg .m-body.tone-them,:root[data-skin="line"] .m-chat .msg .m-body.tone-me,:root[data-skin="line"] .m-chat .msg .m-body.tone-same{
+  position:relative;padding:8px 13px;border-radius:17px;font-size:15px;line-height:1.5;color:#1b1f24}
+:root[data-skin="line"] .msg .m-body.tone-them,:root[data-skin="line"] .m-chat .msg .m-body.tone-them{background:var(--line-them);border-top-left-radius:4px}
+:root[data-skin="line"] .msg .m-body.tone-me,:root[data-skin="line"] .msg .m-body.tone-same,
+:root[data-skin="line"] .m-chat .msg .m-body.tone-me,:root[data-skin="line"] .m-chat .msg .m-body.tone-same{background:var(--line-me);border-top-right-radius:4px}
+:root[data-skin="line"] .msg.mine .m-body{color:#1b1f24}
+:root[data-skin="line"] .msg .m-body.tone-them::before,:root[data-skin="line"] .msg .m-body.tone-me::before,:root[data-skin="line"] .msg .m-body.tone-same::before{
+  content:"";position:absolute;top:0;width:9px;height:11px;pointer-events:none}
+:root[data-skin="line"] .msg .m-body.tone-them::before{left:-8px;background:var(--line-them);clip-path:polygon(100% 0,100% 100%,0 0)}
+:root[data-skin="line"] .msg .m-body.tone-me::before,:root[data-skin="line"] .msg .m-body.tone-same::before{right:-8px;background:var(--line-me);clip-path:polygon(0 0,100% 0,0 100%)}
+:root[data-skin="line"] .msg .m-main,:root[data-skin="line"] .dp-inline .m-main{max-width:68%}
+/* 程式碼、表格、照片、檔案卡片可以撐滿 */
+:root[data-skin="line"] .msg .m-main:has(pre.md-code),:root[data-skin="line"] .dp-inline .msg .m-main:has(pre.md-code){max-width:100%}
+:root[data-skin="line"] .msg .m-main:has(table),:root[data-skin="line"] .dp-inline .msg .m-main:has(table){max-width:100%}
+:root[data-skin="line"] .msg .m-main:has(.filecard),:root[data-skin="line"] .dp-inline .msg .m-main:has(.filecard){max-width:100%}
+:root[data-skin="line"] .msg .m-main:has(.photos),:root[data-skin="line"] .dp-inline .msg .m-main:has(.photos){max-width:100%}
+/* 自己的頭像不顯示（群組裡原本會顯示） */
+:root[data-skin="line"] .msg .m-av-me{display:none}
+/* 系統提示：置中的灰藍小膠囊；催促（nudge）維持醒目的顏色 */
+:root[data-skin="line"] .sys{display:block;width:fit-content;max-width:92%;margin:4px auto;padding:3px 14px;border:0;border-radius:999px;background:#5d7399;color:#fff;font-size:12.5px;text-align:center}
+:root[data-skin="line"] .sys.nudge{background:#fff;color:var(--busy)}
+
+/* ---------- 清單：大頭貼圓形 48px、名字加粗 15px、最後一句灰字單行 ---------- */
+:root[data-skin="line"] .buddy,:root[data-skin="line"] .room-btn{gap:12px;padding:8px 12px}
+:root[data-skin="line"] .buddy .dp.xs,:root[data-skin="line"] .room-btn .dp.xs{width:48px;height:48px}
+:root[data-skin="line"] .buddy .dp.xs>span,:root[data-skin="line"] .room-btn .dp.xs>span{font-size:18px}
+:root[data-skin="line"] .buddy .dp.xs::before,:root[data-skin="line"] .room-btn .dp.xs::before{width:14px;height:14px}
+:root[data-skin="line"] .b-nick{font-size:15px;font-weight:600;color:var(--fg)}
+:root[data-skin="line"] .buddy.offline .b-nick{color:var(--muted)}
+:root[data-skin="line"] .b-psm{font-size:13px;color:var(--muted)}
+:root[data-skin="line"] .m-av-wrap,:root[data-skin="line"] .m-av-wrap .dp{width:48px;height:48px}
+:root[data-skin="line"] .m-buddy{gap:12px}
+
+/* ---------- 搜尋框：灰底圓角，放大鏡在框內左側；電腦清單的「＋」改成懸浮鈕 ---------- */
+:root[data-skin="line"] .search input,:root[data-skin="line"] .m-search input{border:0;border-radius:999px;background-color:#eef0f3;padding-left:38px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa3b2' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5L20 20'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:12px 50%;background-size:20px 20px}
+:root[data-skin="line"] .search-ic:not(.plus-btn){display:none}
+:root[data-skin="line"] .m-search{background:var(--panel)}
+:root[data-skin="line"] .content{position:relative}
+:root[data-skin="line"] .search-plus{position:absolute;z-index:5;right:16px;bottom:16px;width:52px;height:52px;border:0;background:var(--line-green);color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.22)}
+:root[data-skin="line"] .search-plus:hover{background:#1c9a41}
+:root[data-skin="line"] .search-plus svg{width:22px;height:22px}
+
+/* ---------- 空白狀態：置中淡色圖示加一句話（文案不改） ---------- */
+:root[data-skin="line"] .empty-list{padding:56px 16px;font-size:14px;color:var(--muted)}
+:root[data-skin="line"] .empty-list::before{content:"";display:block;width:56px;height:56px;margin:0 auto 12px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c3cad6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5h16v11H9l-5 4z'/%3E%3C/svg%3E") center/contain no-repeat}
+
+/* ---------- 分隔線更細更淡 ---------- */
+:root[data-skin="line"]{--line:#ebedf0}
+:root[data-skin="line"] .m-buddy{border-top-color:transparent}
+
+/* ---------- 設定頁：LINE 風格下停用的選項旁邊那句說明 ---------- */
+:root[data-skin="line"] .set-note{display:block;margin-top:4px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+:root[data-skin="line"] .set-sel:disabled{opacity:.55;cursor:default}

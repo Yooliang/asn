@@ -584,7 +584,7 @@ export const SettingsPanel = {
         </div>
       </template>
       <template v-if="catKey === 'look'">
-        <!-- 外觀（0.2.18）：復古 Aero／現代二選一，兩套是同一份畫面，只換樣式與圖示；切換馬上生效、不用重開 -->
+        <!-- 外觀（0.2.18）：復古 Aero／現代，0.2.22 起加 LINE 風格（三選一），兩套是同一份畫面，只換樣式與圖示；切換馬上生效、不用重開 -->
         <fieldset class="skin-pick" aria-label="外觀">
           <legend>外觀</legend>
           <label v-for="k in SKINS" :key="k" class="skin-opt" :class="{ on: (st.skin || 'aero') === k }">
@@ -599,13 +599,15 @@ export const SettingsPanel = {
           <select class="set-sel" :value="st.mode" @change="act('mode', $event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
         </label>
         <label>頭像模式
-          <select class="set-sel" :value="st.dpMode" @change="act('dpMode', $event.target.value)" aria-label="頭像模式"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
+          <select class="set-sel" :value="st.dpMode" :disabled="st.skin === 'line'" @change="act('dpMode', $event.target.value)" aria-label="頭像模式"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
+          <small class="set-note" v-if="st.skin === 'line'">LINE 風格固定頭像在訊息旁，這裡先不能改；換回其他外觀就能再調，原本的選擇還在。</small>
         </label>
         <label>工具列位置
           <select class="set-sel" :value="st.toolbar" @change="act('toolbar', $event.target.value)" aria-label="工具列位置"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
         </label>
         <label>文字底色
-          <select class="set-sel" :value="st.bubble" @change="act('bubble', $event.target.value)" aria-label="文字底色"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
+          <select class="set-sel" :value="st.bubble" :disabled="st.skin === 'line'" @change="act('bubble', $event.target.value)" aria-label="文字底色"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
+          <small class="set-note" v-if="st.skin === 'line'">LINE 風格的訊息底色固定（對方白色、自己綠色），換回其他外觀就能再調。</small>
         </label>
       </template>
       <template v-if="catKey === 'window'">

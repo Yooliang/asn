@@ -1157,7 +1157,7 @@ export const aboutProbeSource = () => `(async () => {
   return { ok: true, why: '' };
 })()`
 export const SKIN_KEYS_PROBE = { skinCheck: true, keys: true }
-export const skinProbeSource = (probe = {}) => `(async () => {
+export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(probe.line) : `(async () => {
   const KEYS = ${JSON.stringify(probe.keys === true)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 40 && document.documentElement.dataset.skin !== 'modern'; i++) await sleep(100);
@@ -1639,6 +1639,7 @@ export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
 })()`
 // ---- 手機看別台電腦夥伴的終端（PR④，只能看）：對話頁頂端「訊息／終端」切換 ----
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
+import { LINE_GROUP_MSGS, LINE_LOOK_ME, LINE_PROBES, lineProbeSource } from './smoke-line.mjs'
 import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
 import { mtermviewFollowProbeSource } from './smoke-term-follow.mjs'
 import { mtermBarProbeSource, mtermSwipeProbeSource } from './smoke-term-swipe.mjs'
@@ -2100,6 +2101,15 @@ export const SCENARIOS = [
   { name: 'list-taskmgr-modern', page: 'list.html', width: 1100, height: 760, state: { signedIn: true, taskmgr: true, skin: 'modern' }, ready: '#app.win .dv-set', probe: TASKMGR_PROBES.taskmgr, shot: 'list-taskmgr-modern.png' },
   { name: 'list-aero-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-aero-about.png' },
   { name: 'list-modern-about', page: 'list.html', width: 900, height: 640, state: { signedIn: true, aboutPage: true, skin: 'modern' }, ready: '#app.win .settings', probe: ABOUT_PROBE, shot: 'list-modern-about.png' },
+  // 外觀「LINE 風格」（0.2.22，#1449 第一張）：淡藍底、白色對方泡泡有尾巴、自己泡泡＝--line-me、清單、設定頁三選一（真的點擊，要有 __smokeInput）
+  { name: 'list-line-msgs', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'line' }, ready: '#app.win .actionbar', probe: LINE_PROBES.deskMsgs, shot: 'list-line-msgs.png' },
+  { name: 'list-line-group', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, groupMsgs: true, skin: 'line' }, ready: '#app.win .actionbar', probe: LINE_PROBES.deskMsgs, shot: 'list-line-group.png' },
+  { name: 'list-line-list', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', skin: 'line' }, ready: '#app.win .buddy', probe: LINE_PROBES.deskList, shot: 'list-line-list.png' },
+  { name: 'list-line-settings', page: 'list.html', width: 900, height: 640, state: { signedIn: true, lookPage: true, skin: 'line' }, ready: '#app.win .skin-pick', probe: LINE_PROBES.deskSettings, shot: 'list-line-settings.png' },
+  { name: 'm-line-msgs', page: 'm.html', state: { signedIn: true, mbar: 'offline', chatMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileMsgs, shot: 'm-line-msgs.png' },
+  { name: 'm-line-group', page: 'm.html', state: { signedIn: true, mgroup: true, groupMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileMsgs, shot: 'm-line-group.png' },
+  { name: 'm-line-list', page: 'm.html', state: { signedIn: true, mbar: 'claude', mtab: 'list', skin: 'line' }, ready: '#app.m section[aria-label="夥伴"] .m-buddy', probe: LINE_PROBES.mobileList, shot: 'm-line-list.png' },
+  { name: 'm-line-settings', page: 'm.html', state: { signedIn: true, skin: 'line' }, ready: '#app.m .m-pager .m-search', probe: LINE_PROBES.mobileSettings, shot: 'm-line-settings.png' },
   { name: 'list-modern-term', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-modern-term.png' },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -2157,6 +2167,8 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
+  if (scenario.state.groupMsgs) { t.relay_room_read = { messages: LINE_GROUP_MSGS }; t.android_room_read = { messages: LINE_GROUP_MSGS } }   // 群組裡放對方、自己、系統提示各一則（LINE 外觀看泡泡）
+  if (scenario.state.lookPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(LINE_LOOK_ME) } }   // 電腦「設定 → 外觀」（存檔的頭像模式／底色是 left／none）
   if (scenario.state.munread) {
     t.relay_list = { members: UNREAD_MEMBERS }
     t.relay_inbox = { messages: unreadMails() }
