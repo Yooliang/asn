@@ -21,7 +21,7 @@ test('拍照走 <input capture>（系統相機 App 拍好交回），單張、�
   const pane = read('ui/lib/chatpane.mjs')
   assert.match(pane, /<input ref="camEl" v-if="camera" type="file" accept="image\/\*" capture="environment" hidden @change="pickCamera" @cancel="cameraMissed"/)
   const block = pane.slice(pane.indexOf('const camEl = ref(null)'), pane.indexOf('// ---- 截圖'))
-  assert.match(block, /function pickCamera\(ev\) \{ camWait\.value = false; clearTimeout\(camTimer\); pickPhoto\(ev\) \}/, '拍好走跟選圖一樣的送出')
+  assert.match(block, /function pickCamera\(ev\) \{ camWait\.value = false; clearTimeout\(camTimer\); if \(photoMsg\.value === CAMERA_MISS\) photoMsg\.value = ''; pickPhoto\(ev\) \}/, '拍好走跟選圖一樣的送出')
   assert.match(block, /CAMERA_MISS = '沒有拍到照片：可能取消了，或沒有允許 ASN 使用相機。/)
   assert.match(block, /window\.addEventListener\('focus', cameraBack\)/)
   assert.match(block, /window\.removeEventListener\('focus', cameraBack\); document\.removeEventListener\('visibilitychange', cameraBack\)/, '關掉對話時拆掉監聽')

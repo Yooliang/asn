@@ -324,7 +324,8 @@ export const ChatPane = {
       camWait.value = true; camAt = Date.now(); photoMsg.value = ''
       camEl.value.click()
     }
-    function pickCamera(ev) { camWait.value = false; clearTimeout(camTimer); pickPhoto(ev) }
+    // 照片比 1.5 秒的等待晚到（大照片）：先前跳出的「沒有拍到照片」一起清掉
+    function pickCamera(ev) { camWait.value = false; clearTimeout(camTimer); if (photoMsg.value === CAMERA_MISS) photoMsg.value = ''; pickPhoto(ev) }
     function cameraMissed() { if (!camWait.value) return; camWait.value = false; clearTimeout(camTimer); photoMsg.value = CAMERA_MISS }
     // 相機或權限框關掉、回到 ASN：等一下（照片交回來的 change 會先到）還沒拿到就說明
     function cameraBack() {
