@@ -457,6 +457,34 @@ export const gjumpProbeSource = ({ gjump }) => `(async () => {
   if (!isGroup()) return { ok: false, why: '沒有開在群組上' };
   await sleep(300);
   if (want.shotOnly) return { ok: true, why: '' };
+  // 審查重現（#1516）：跳過去 → 從夥伴頁換到別人 → 返回 → 再從夥伴頁點回審稿：畫面要停在審稿，不能被舊的跳轉標記拉回群組
+  if (want.stale) {
+    const showing = name => !isGroup() && (document.querySelector('.m-chathead')?.textContent || '').includes(name);
+    const tabBtn = () => [...document.querySelectorAll('button')].find(b => vis(b) && b.getAttribute('role') === 'tab' && b.textContent.trim() === '夥伴');
+    const row = name => [...document.querySelectorAll('section[aria-label="夥伴"] button')].find(b => vis(b) && (b.querySelector('.b-nick')?.textContent || '').trim() === name);
+    const n0 = spk('.who-name', '審稿');
+    if (!n0) return { ok: false, why: '找不到審稿的名字' };
+    await real(n0);
+    for (let i = 0; i < 20 && !showing('審稿'); i++) await sleep(100);
+    if (!showing('審稿')) return { ok: false, why: '第一步沒跳到審稿' };
+    let t = tabBtn(); if (!t) return { ok: false, why: '找不到「夥伴」分頁' };
+    await real(t);
+    let r = row('財務'); if (!r) return { ok: false, why: '夥伴頁找不到財務' };
+    await real(r);
+    for (let i = 0; i < 20 && !showing('財務'); i++) await sleep(100);
+    if (!showing('財務')) return { ok: false, why: '從夥伴頁點財務沒有進到財務' };
+    history.back(); await sleep(700);
+    if (isGroup()) return { ok: false, why: '換過別人之後按返回，被拉回群組' };
+    t = tabBtn(); if (!t) return { ok: false, why: '第二次找不到「夥伴」分頁' };
+    await real(t);
+    r = row('審稿'); if (!r) return { ok: false, why: '夥伴頁找不到審稿' };
+    await real(r);
+    await sleep(500);
+    if (isGroup()) return { ok: false, why: '從夥伴頁點審稿卻進了群組（舊的跳轉標記沒清掉）' };
+    if (!showing('審稿')) return { ok: false, why: '從夥伴頁點審稿沒有停在審稿' };
+    if (history.state && history.state.jumpFrom) return { ok: false, why: '記錄上還留著跳轉標記' };
+    return { ok: true, why: '' };
+  }
   // 1. 點發言者的名字
   const n1 = spk('.who-name', '審稿');
   if (!n1) return { ok: false, why: '找不到群組訊息上「審稿」的名字' };
@@ -2354,6 +2382,7 @@ export const SCENARIOS = [
   { name: 'list-gjump', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: false } }, shot: 'list-gjump.png' },
   { name: 'm-gjump', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: false } }, shot: 'm-gjump.png' },
   { name: 'list-gjump-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: true } }, shot: 'list-gjump-modern.png' },
+  { name: 'm-gjump-stale', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', stale: true } }, shot: 'm-gjump-stale.png' },
   { name: 'm-gjump-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: true } }, shot: 'm-gjump-modern.png' },
   { name: 'list-gjump-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true, skin: 'line' }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: false } }, shot: 'list-gjump-line.png' },
   { name: 'm-gjump-line', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: false } }, shot: 'm-gjump-line.png' },

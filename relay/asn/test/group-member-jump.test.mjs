@@ -37,12 +37,17 @@ test('電腦：整合模式的分頁走 openChat；分離模式的對話視窗�
   assert.match(read('ui/chat.html'), /<chat-pane :open-member="openMember"/)
 })
 
-test('手機：跳之前在群組那一筆記錄記 jumpFrom／jumpTo，返回時只在還停在那一位才換回群組並拿掉標記；名單開著先退掉名單那一筆', () => {
+test('手機：跳之前在群組那一筆記錄記 jumpFrom／jumpTo、記憶體記 memberJump；返回時三個條件都成立才換回群組，標記用一次就拿掉；名單開著先退掉名單那一筆', () => {
   const js = read('ui/m.js')
-  assert.match(js, /history\.replaceState\(\{ \.\.\.\(history\.state \?\? \{\}\), jumpFrom: from, jumpTo: id \}, ''\)/)
-  assert.match(js, /if \(j && lastChat\.value === j\.jumpTo\) \{ lastChat\.value = j\.jumpFrom; const \{ jumpFrom, jumpTo, \.\.\.rest \} = j; history\.replaceState\(rest, ''\) \}/)
-  assert.ok(js.indexOf('const j = e.state') < js.indexOf('fourthNav.onPop(e.state)'), '先換回群組再交給導覽')
-  assert.match(js, /if \(nav\.sheet === 'offline'\) \{ afterOffline = jump; closeOffline\(\) \} else jump\(\)/)
+  assert.match(js, /history\.replaceState\(\{ \.\.\.\(history\.state \?\? \{\}\), jumpFrom: from, jumpTo: id \}, ''\)\n?\s*memberJump = \{ from, to: id \}/)
+  // 換到 from／to 以外的人，記憶體裡的這一次就作廢（審查 #1516：之後的返回鍵不能把人拉回群組）
+  assert.match(js, /watch\(lastChat, v => \{ if \(memberJump && v !== memberJump\.from && v !== memberJump\.to\) memberJump = null \}\)/)
+  assert.match(js, /const back = !fourthNav\.busy\(\) && memberJump && memberJump\.from === j\.jumpFrom && memberJump\.to === j\.jumpTo && lastChat\.value === memberJump\.to/, '程式自己退記錄（busy）不算；要跟記憶體那一次一致')
+  const pop = js.slice(js.indexOf('const j = e.state'), js.indexOf('fourthNav.onPop(e.state)'))
+  assert.ok(pop.indexOf("history.replaceState(rest, '')") < pop.indexOf('if (back)'), '標記不管有沒有用到都拿掉')
+  assert.match(pop, /if \(back\) \{ memberJump = null; lastChat\.value = jumpFrom \}/)
+  assert.match(js, /if \(offlineClosing \|\| fourthNav\.busy\(\)\) return true[^\n]*\n\s*afterOffline = jump; closeOffline\(\)/, '名單收不起來時不留著等')
+  assert.match(read('ui/m.html'), /@click="pickOffline\(it\)" @keydown\.enter\.prevent="pickOffline\(it\)" @keydown\.space\.prevent="pickOffline\(it\)"/)
   assert.match(js, /if \(openMember\(it\.key\) === false\) \{ closeOffline\(\); roomNote\.value = MEMBER_NOT_FRIEND \}/)
   assert.match(read('ui/m.html'), /:open-member="openMember" :skin="prefs\.skin"/)
 })

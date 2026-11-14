@@ -76,8 +76,8 @@ export const ChatPane = {
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
     groupMenu: { type: Boolean, default: false },   // 電腦版：對話上方大按鈕區的「群組」（邀請、輸入邀請碼、加 AI、成員與設定）與一對一「管理」裡的邀請；手機版有自己的「⋯」，不開這個
     skin: { type: String, default: '' },           // 外觀（lib/skin.mjs）：只有 line 才多輸出 LINE 版面要的節點；其他外觀的畫面一個節點都不變
-    showBack: { type: Boolean, default: false },
-    openMember: { type: Function, default: null },   // 群組：點成員（發言者的名字、頭像、「N 人離線」名單）跳到跟他的一對一（#1515）；回 false＝不在夥伴名單裡   // LINE 外觀標題列的「返回」（只在窄視窗單窗格時由名單視窗給 true）
+    showBack: { type: Boolean, default: false },   // LINE 外觀標題列的「返回」（只在窄視窗單窗格時由名單視窗給 true）
+    openMember: { type: Function, default: null },   // 群組：點成員（發言者的名字、頭像、「N 人離線」名單）跳到跟他的一對一（#1515）；回 false＝不在夥伴名單裡
     piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back'],

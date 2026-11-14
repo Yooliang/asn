@@ -158,6 +158,9 @@ const nav = reactive(initialNav())
 const fourthSt = reactive({ fourth: null })
 const fourthNav = createMobileNav({ history, nav, st: fourthSt })
 const lastChat = ref('')   // 最後使用的那一位（對話分頁點進去的那一則；存在手機本機設定，重開 App 仍記得）
+// 從群組點成員跳過去（#1515）：記在記憶體裡的 { from（群組）, to（那一位） }。換到這兩位以外的人就作廢，返回鍵不會再把人拉回群組
+let memberJump = null
+watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
@@ -286,9 +289,15 @@ window.addEventListener('popstate', e => {
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）；切頁時程式自己退的記錄不算
   if (callOn.value && !fourthNav.busy()) { void liveCall?.end(); history.pushState(fourthNav.state(), ''); return }
   // 從群組點成員跳過去的一對一（#1515），按返回回到原本的群組：跳之前在群組那一筆記錄記了 jumpFrom／jumpTo。
-  // 只有「現在還停在跳過去的那一位」才換回群組（中間自己換到別人就不動），用過就從記錄拿掉
+  // 三個條件都成立才換回群組：不是程式自己在退記錄（切頁、開對話）、記憶體裡的這一次跳轉還有效（沒換過別人）、跟記錄上的標記一致；
+  // 標記只用一次：不管有沒有換回，都從記錄上拿掉，之後再退到這一筆不會被錯拉回群組
   const j = e.state && typeof e.state.jumpFrom === 'string' && e.state.jumpFrom ? e.state : null
-  if (j && lastChat.value === j.jumpTo) { lastChat.value = j.jumpFrom; const { jumpFrom, jumpTo, ...rest } = j; history.replaceState(rest, '') }
+  if (j) {
+    const back = !fourthNav.busy() && memberJump && memberJump.from === j.jumpFrom && memberJump.to === j.jumpTo && lastChat.value === memberJump.to
+    const { jumpFrom, jumpTo, ...rest } = j
+    history.replaceState(rest, '')
+    if (back) { memberJump = null; lastChat.value = jumpFrom }
+  }
   fourthNav.onPop(e.state)
 })
 const go = next => fourthNav.go(next)
@@ -454,11 +463,15 @@ const app = createApp({
         const from = lastChat.value
         if (from === id) return
         history.replaceState({ ...(history.state ?? {}), jumpFrom: from, jumpTo: id }, '')
+        memberJump = { from, to: id }
         lastChat.value = id
         banner.value = null
         go(tabNav(HOME_TAB))
       }
-      if (nav.sheet === 'offline') { afterOffline = jump; closeOffline() } else jump()
+      if (nav.sheet === 'offline') {
+        if (offlineClosing || fourthNav.busy()) return true   // 名單正在收（或導覽中）：這一下不跳，也不留著等
+        afterOffline = jump; closeOffline()
+      } else jump()
       return true
     }
     // 「N 人離線」名單的一列（只有帶成員鍵的能點）：不在夥伴名單就收起名單、在對話上方說明

@@ -181,7 +181,7 @@
                 <div class="m-head-offline" v-if="chatOffline">
                   <button class="m-offline-btn" type="button" aria-haspopup="true" :aria-expanded="offlineOpen" :aria-label="chatOffline.aria" :title="chatOffline.title" @click="toggleOffline">{{ chatOffline.label }}</button>
                   <div class="m-plus-back" v-if="offlineOpen" @click="closeOffline"></div>
-                  <ul class="m-plus-menu m-offline-menu" v-if="offlineOpen" role="group" aria-label="離線的成員"><li v-for="it in chatOffline.items" :key="it.key || it.label" :class="{ 'mem-pick': it.key }" :role="it.key ? 'button' : null" :tabindex="it.key ? 0 : null" :aria-label="it.key ? '開啟和 ' + it.label + ' 的對話' : null" @click="pickOffline(it)" @keydown.enter.prevent="pickOffline(it)">{{ it.label }}</li></ul>
+                  <ul class="m-plus-menu m-offline-menu" v-if="offlineOpen" role="group" aria-label="離線的成員"><li v-for="it in chatOffline.items" :key="it.key || it.label" :class="{ 'mem-pick': it.key }" :role="it.key ? 'button' : null" :tabindex="it.key ? 0 : null" :aria-label="it.key ? '開啟和 ' + it.label + ' 的對話' : null" @click="pickOffline(it)" @keydown.enter.prevent="pickOffline(it)" @keydown.space.prevent="pickOffline(it)">{{ it.label }}</li></ul>
                 </div>
                 <button class="m-icon-btn m-head-call" type="button" v-if="prefs.skin === 'line' && chatPaneEl && chatPaneEl.showCallBtn && !chatPaneEl.displayOnly" :disabled="chatPaneEl.callActive || chatPaneEl.dictPhase !== 'idle'" aria-label="通話" title="通話" @click="chatPaneEl.startCall()"><line-icon name="call" :size="22"></line-icon></button>
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
