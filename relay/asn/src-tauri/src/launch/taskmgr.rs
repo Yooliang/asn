@@ -77,6 +77,9 @@ pub(crate) struct TermIn {
 /// 清單的原料（呼叫端讀好交進來，這裡只整理）
 pub(crate) struct Sources {
     pub claude: Vec<Window>,
+    /// 本機 Claude session 名單是不是真的讀到了（讀到而且是空的＝true；目錄讀不到＝false）。
+    /// false 時 `claude` 空只代表「不知道」，不能拿來證明「沒有 session 檔」，所以一律不列 resuming（避免把健康夥伴誤列成卡住）
+    pub claude_ok: bool,
     pub pi: Vec<Window>,
     pub procs: Vec<ProcAgent>,
     pub terms: Vec<TermIn>,
@@ -125,7 +128,8 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
     // 卡在接回中的夥伴視窗：四個條件都成立才列（判斷與停止前的再驗證共用 stuck_resume::identify）
     let live: Vec<stuck_resume::LiveSess> = src.claude.iter().map(|w| stuck_resume::LiveSess { sid: w.session_id.clone(), pid: w.pid }).collect();
     let mut seen_sids: HashSet<&str> = HashSet::new();
-    let resuming: Vec<stuck_resume::Stuck> = src.partners.iter().filter(|p| seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live, &p.session_id, src.now_ms).ok()).collect();
+    // 名單讀不到時不判斷（stop_real 同：讀不到就拒絕）
+    let resuming: Vec<stuck_resume::Stuck> = if !src.claude_ok { vec![] } else { src.partners.iter().filter(|p| seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live, &p.session_id, src.now_ms).ok()).collect() };
     // 這些程序（和它們的子程序）不再列成「自己開的」
     let resuming_skip: HashSet<u32> = resuming.iter().flat_map(|s| s.pids.iter().flat_map(|p| tree_pids(&table, *p, &|x| os.started_ms(x)))).collect();
 
@@ -269,7 +273,11 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     use crate::bridge::{engines, known, procscan, roster};
     let home = crate::identity::home_dir();
     let now = crate::heartbeat::now_ms();
-    let claude = roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), crate::heartbeat::session_alive, 0, "", now).ok_or_else(|| "讀不到本機視窗清單".to_string())?;
+    // 判斷「讀不到」：read_local_with 在 sessions 目錄存在卻讀不開時回 None（目錄不存在＝還沒有任何 session，回空清單）。
+    // 這裡 None 直接回錯、整張清單不出；claude_ok 仍照實填，讓 build 不依賴呼叫端的這個處理
+    let claude_read = roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), crate::heartbeat::session_alive, 0, "", now);
+    let claude_ok = claude_read.is_some();
+    let claude = claude_read.ok_or_else(|| "讀不到本機視窗清單".to_string())?;
     let pi = engines::pi::read_windows(&engines::pi::windows_dir(&home), now, crate::heartbeat::pid_alive);
     // 已登記成視窗的程序不再列成「自己開的」（同名單的做法）
     let skip: Vec<u32> = claude.iter().chain(pi.iter()).map(|w| w.pid).filter(|p| *p != 0).collect();
@@ -277,7 +285,7 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let known_entries = known::Known::load(&work_dir.join(known::KNOWN_FILE), now).entries();
     let mailbox = crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室"));
     let protected = vec![mailbox, asn_window.to_string()];
-    let src = Sources { claude, pi, procs, terms, partners, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
+    let src = Sources { claude, claude_ok, pi, procs, terms, partners, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
     serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())
 }
 
@@ -331,7 +339,7 @@ mod tests {
     }
 
     fn src(claude: Vec<Window>) -> Sources {
-        Sources { claude, pi: vec![], procs: vec![], terms: vec![], partners: vec![], known: vec![], protected: vec![], own_pid: 0, now_ms: NOW }
+        Sources { claude, claude_ok: true, pi: vec![], procs: vec![], terms: vec![], partners: vec![], known: vec![], protected: vec![], own_pid: 0, now_ms: NOW }
     }
 
     fn claude(name: &str, pid: u32) -> Window {
@@ -480,6 +488,15 @@ mod tests {
         assert_eq!(r.session_id.as_deref(), Some(SID));
         let mux = snap.rows.iter().find(|r| r.kind == "mux").unwrap();
         assert_eq!(mux.inside, Some(1), "算在終端服務底下");
+    }
+
+    #[test]
+    fn 視窗名單讀不到時_四條都成立也不列接回中() {
+        let o = resuming_os(600_000);
+        let mut s = resuming_src();
+        assert!(has_resuming(&o, &s), "名單讀到且為空：照常列");
+        s.claude_ok = false;
+        assert!(!has_resuming(&o, &s), "名單讀不到：不能當成沒有 session 檔");
     }
 
     #[test]
