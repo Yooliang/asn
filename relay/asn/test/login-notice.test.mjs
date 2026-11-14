@@ -53,7 +53,7 @@ test('接線守門：登入畫面只在這台有金鑰時講收發信照常；�
   assert.match(panel, /<template v-if="autostartOn"> \{\{ LOGOUT_STOP_AUTOSTART_NOTE \}\}/, '有設開機自動啟動要提')
   assert.match(panel, /invoke\('autostart_get'\)/)
   assert.match(panel, /@click="ask"/, '按「登出」先說明，不直接登出')
-  assert.match(read('ui/lib/tauri.mjs'), /logout: \(stop = false\) => invoke\('auth_logout', \{ stop: stop === true \}\)/)
+  assert.match(read('ui/lib/tauri.mjs'), /logout: \(stop = false\) => \{ shownPhotos\.clear\(\); return invoke\('auth_logout', \{ stop: stop === true \}\) \}/)
   const rs = read('src-tauri/src/account.rs')
   assert.match(rs, /handle: AppHandle, stop: Option<bool>\) -> Result<\(\), String> \{/)
   assert.match(rs, /if stop == Some\(true\) \{\s*stop_soon\(&app, handle\);\s*\} else \{\s*restart_soon\(&app, handle\);/, '沒選就照舊重新啟動、收發信照常')

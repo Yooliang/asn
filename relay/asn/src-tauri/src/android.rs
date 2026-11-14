@@ -38,11 +38,12 @@ fn unique_in(dir: &std::path::Path, fname: &str) -> PathBuf {
 
 /// 另存：手機上沒有「另存新檔」對話框。下載後存進私有的「收到的檔案」，回完整路徑，畫面再請外殼匯出到「下載」。
 #[tauri::command]
-pub async fn relay_attachment_save(app: State<'_, App>, id: String, name: Option<String>) -> Result<Option<String>, String> {
+pub async fn relay_attachment_save(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, handle: AppHandle, id: String, name: Option<String>) -> Result<Option<String>, String> {
     let r = relay_of(&app)?;
+    let cache = crate::attach_cache_of(&handle, &app, &auth);
     let dir = app.data_dir.join("received");
     std::fs::create_dir_all(&dir).map_err(|e| format!("建不了資料夾：{e}"))?;
-    let saved = attach::save_as(&r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), |fname, _ext| Some(unique_in(&dir, fname))).await?;
+    let saved = attach::save_as(cache.as_ref(), &r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), |fname, _ext| Some(unique_in(&dir, fname))).await?;
     Ok(saved.map(|p| p.display().to_string()))
 }
 

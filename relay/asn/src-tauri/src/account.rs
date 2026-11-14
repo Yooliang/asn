@@ -264,6 +264,7 @@ pub async fn auth_login(app: State<'_, App>, auth: State<'_, AuthState>, handle:
     let c = ctx()?;
     let st = auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::open_in_browser(&handle, u)).await?;
     set_login_skipped(&app.data_dir, false)?;   // 登入了就不再是「暫時不登入」
+    crate::clear_attach_cache(&handle);   // 換人登入看不到上一個帳號的附件快取（#1493）
     // 記住這次的登入方式與帳號頭像（下載失敗不擋登入；檔案裡沒有任何權杖）
     let avatar = match auth.session_avatar_url() {
         Some(u) => crate::lastlogin::fetch_avatar(&c.client, &u).await,
@@ -294,6 +295,7 @@ pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle
         }
     }
     auth.sign_out()?;
+    crate::clear_attach_cache(&handle);   // 附件快取整個清空（#1493）
     set_login_skipped(&app.data_dir, false)?;
     if stop == Some(true) {
         stop_soon(&app, handle);
