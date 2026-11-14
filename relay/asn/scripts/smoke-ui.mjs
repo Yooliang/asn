@@ -82,6 +82,12 @@ async function realInput(S, payload) {
     await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
     await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (Array.isArray(req.hold)) {
+    // { hold: [x, y, ms] }：手指按住 ms 毫秒再放開（長按）
+    const [x, y, ms] = req.hold
+    await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+    await new Promise(r => setTimeout(r, ms))
+    await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })

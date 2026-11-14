@@ -142,7 +142,11 @@ test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這�
     self: { claude: [{ email: 's@b.c', plan: 'max', current: true }], codex: { loggedIn: false, text: '' } },
   })
   const html = await render('devices', state(tree, null))
-  assert.ok(html.includes('Claude 已登入、OpenAI（Codex） 未安裝、Grok 未安裝'), html.match(/dv-line[^<]*<?[^>]*>[^<]*/)?.[0])
+  // #1499：列上只留名字和「電腦／手機・在線／離線」，狀態那一行搬到「詳情」
+  assert.equal(tree.find(d => d.key === S).stateLine, 'Claude 已登入、OpenAI（Codex） 未安裝、Grok 未安裝')
+  assert.ok(!html.includes('Claude 已登入') && !html.includes('dv-line'), '列上不放狀態那一行')
+  const src = (await import('node:fs')).readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
+  assert.match(src, /<p class="dv-state" v-if="curDev\.stateLine">\{\{ curDev\.stateLine \}\}<\/p>/, '詳情裡有狀態那一行')
   assert.ok(!html.includes('邀請雲端代理'), '設備列表頁不放雲端代理（自己一類）')
   globalThis.Vue = Vue
   const detail = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state(tree, null), catKey: 'devices', meAv: '', dev: W }) }))
