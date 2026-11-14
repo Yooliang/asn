@@ -9,7 +9,7 @@ import { AsnCore } from '../ui/lib/core.mjs'
 import {
   FILE_ACCEPT, FILE_MAX_BYTES, FILE_TYPES, fileMimeOf, noticeOf,
   PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, THUMB_MAX_CHARS, cleanPhotoName, expiresAt, fitSize, formatBytes, friendlyPhotoError, isThumb,
-  normalizePhotos, photoExpired, recentPhotos, photoText, photoTitle, stripPhotoLines, webpName,
+  normalizePhotos, photoExpired, recentPhotos, shownPhotos, expiryMs, photoText, photoTitle, stripPhotoLines, webpName,
 } from '../ui/lib/photo.mjs'
 import { FAKE_KEY, startFakeRelay, U } from './fake-relay.mjs'
 import { httpTransport, memStore } from './helpers.mjs'
@@ -328,4 +328,32 @@ test('看大圖：最近看過的記 5 張，超過丟最久沒看的；再看�
   const pane = read('ui/lib/chatpane.mjs')
   const open = pane.slice(pane.indexOf('async function openPhoto'), pane.indexOf('async function saveViewer'))
   assert.ok(open.indexOf('recentShown.get') < open.indexOf('photoApi.fetch') && open.includes('recentShown.set'), '先看記住的，沒有才跟 Rust 要')
+})
+
+test('看大圖記住的圖：登入、登出、Rust 通知快取清空時都丟掉；到期時間交給 Rust（#1493）', () => {
+  shownPhotos.set('a', 'u'); shownPhotos.clear()
+  assert.equal(shownPhotos.size, 0)
+  assert.equal(expiryMs({ expires_at: '2026-12-14T00:00:00.000Z' }), Date.parse('2026-12-14T00:00:00.000Z'))
+  assert.equal(expiryMs({ expires_at: 'x' }), null)
+  assert.equal(expiryMs({}), null)
+  const t = read('ui/lib/tauri.mjs')
+  for (const k of ['login', 'logout']) {
+    const line = t.split(/\r?\n/).find(l => l.trimStart().startsWith(`${k}:`))
+    assert.ok(line && line.indexOf('shownPhotos.clear()') >= 0 && line.indexOf('shownPhotos.clear()') < line.indexOf('invoke('), `${k} 要先清記住的圖`)
+  }
+  assert.match(t, /listen\('attach-cache-cleared', \(\) => shownPhotos\.clear\(\)\)/)
+  assert.match(read('ui/lib/chatpane.mjs'), /const recentShown = shownPhotos/)
+  assert.match(read('ui/lib/chatpane.mjs'), /photoApi\.fetch\(p\.id, expiryMs\(p\)\)/)
+  assert.match(read('ui/m.js'), /relay_attachment_fetch', \{ id, expiresAt \}/)
+  // Rust：登入、登出都清附件快取；看圖與另存都先對帳號
+  const acct = read('src-tauri/src/account.rs')
+  for (const f of ['pub async fn auth_login', 'pub async fn auth_logout']) {
+    const start = acct.indexOf(f)
+    const body = acct.slice(start, acct.slice(start).search(/\r?\n\}/) + start)
+    assert.ok(body.includes('crate::clear_attach_cache(&handle)'), `${f} 沒清附件快取`)
+  }
+  const lib = read('src-tauri/src/lib.rs')
+  assert.match(lib, /ATTACH_CACHE_CLEARED: &str = "attach-cache-cleared"/)
+  assert.ok((lib.match(/attach_cache_of\(&handle, &app, &auth\)/g) ?? []).length >= 2)
+  assert.match(read('src-tauri/src/android.rs'), /attach_cache_of\(&handle, &app, &auth\)/)
 })

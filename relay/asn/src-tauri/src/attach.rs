@@ -413,7 +413,7 @@ pub async fn save_as(
     }
     let name = suggest_name(hint);
     let Some(chosen) = pick(&name, filter_ext(&name)) else { return Ok(None) };
-    let d = crate::attach_cache::fetch(cache, relay, http, id).await?;
+    let d = crate::attach_cache::fetch(cache, relay, http, id, None).await?;
     let path = final_path(&chosen, &d.mime)?;
     std::fs::write(&path, &d.bytes).map_err(|e| format!("存檔失敗：{e}"))?;
     Ok(Some(path))
@@ -963,9 +963,9 @@ mod tests {
         let cache = AttachCache::new(t.path().join("n1"));
         let http = reqwest::Client::new();
         let n = || log.lock().unwrap().len();
-        let a = fetch(Some(&cache), &relay_at(port), &http, ID).await.unwrap();
+        let a = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
         assert_eq!(n(), 2, "第一次：要網址＋下載");
-        let b = fetch(Some(&cache), &relay_at(port), &http, ID).await.unwrap();
+        let b = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
         assert_eq!(n(), 2, "第二次：完全不連線");
         assert_eq!((a.bytes, b.bytes, b.name.as_str()), (file.clone(), file.clone(), "cat.webp"));
         let want = t.path().join("out").join("cat.webp");
@@ -976,15 +976,15 @@ mod tests {
         assert_eq!(std::fs::read(&want).unwrap(), file);
         // 快取裡的檔被改壞：丟掉重抓一次
         std::fs::write(t.path().join("n1").join(format!("{ID}.bin")), vec![b'x'; 64]).unwrap();
-        let c = fetch(Some(&cache), &relay_at(port), &http, ID).await.unwrap();
+        let c = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
         assert_eq!((n(), c.bytes), (4, file.clone()));
         // 沒有快取（找不到快取資料夾）：照舊每次下載
-        fetch(None, &relay_at(port), &http, ID).await.unwrap();
+        fetch(None, &relay_at(port), &http, ID, None).await.unwrap();
         assert_eq!(n(), 6);
         // 下載失敗不寫快取
         let (bad, _) = serve(|_, _| (410, br#"{"error":"expired"}"#.to_vec(), "application/json"));
         let other = "00000000-0000-0000-0000-000000000099";
-        assert!(fetch(Some(&cache), &relay_at(bad), &http, other).await.is_err());
+        assert!(fetch(Some(&cache), &relay_at(bad), &http, other, None).await.is_err());
         assert!(!t.path().join("n1").join(format!("{other}.bin")).exists());
     }
 

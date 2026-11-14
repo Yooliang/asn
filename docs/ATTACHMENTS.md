@@ -95,8 +95,10 @@ bucket `attachments`：**私有**、單檔上限 25 MB、`allowed_mime_types` �
 - **附件快取（#1493，電腦與手機都有）**：放大看與另存都先讀本機副本（`src-tauri/src/attach_cache.rs`），沒有才換網址下載；同一張第二次打開不再連線。
   - 位置：系統的 App 快取資料夾底下的 `attach-cache/<節點>/`（電腦＝`%LOCALAPPDATA%\tw.yooliang.asn`，手機＝App 的 cache，不在下載資料夾）。檔名只用附件編號（uuid，小寫），寄件人給的檔名只寫在旁邊的說明檔。
   - 只存下載後通過大小、型別、檔頭檢查的檔；讀出來時再驗一次，不對就刪掉重抓。
-  - 上限 200 MB，超過先刪最久沒看的；存進來超過 30 天的刪掉（同後台保存期限）；登出、登入時整個清空。
-  - 前端另外在記憶體記住最近看過的 5 張（`recentPhotos`），同一個畫面再點同一張不必再跨到 Rust。
+  - 上限 200 MB，超過先刪最久沒看的。保留到附件本身的到期時間（畫面從信件的 `expires_at` 帶來），最多存進來起算 30 天。
+  - 帳號隔離：`attach-cache/.owner` 記著帳號的雜湊（不留 email 原文）。每次用快取前先對，換人登入、登入過期被登出都會整個清空；下載途中帳號換了就不寫回。登出、登入指令也直接清空。
+  - 同一個行程內讀寫排隊（一把鎖），暫存檔名帶隨機尾碼；先寫暫存檔再改名。連結、junction 一律不跟著走。Linux／macOS 資料夾 0700、檔案 0600。
+  - 前端在記憶體記住最近看過的 5 張（`shownPhotos`），同一個畫面再點同一張不必再跨到 Rust。登入、登出、Rust 發 `attach-cache-cleared` 事件時清掉（電腦版每個視窗各自清）。
 - **Claude 視窗（收發室橋轉交）**：橋把信轉給視窗時，在內文後面加一行 `〔照片〕檔名（image/webp，183 KB，1536×2048）下載：node "…/attach.mjs" --id <編號>`，與內文一起放在既有的外部資料區塊內（`<<<MAIL … MAIL>>>`）。`recv.mjs` 的 JSON 行同樣把這行附在 `body` 後面，並多一個 `attachments` 欄位。
 - **雲端代理**：`inbox.mjs` 顯示同樣的一行，`attach.mjs` 下載；`inbox.jsonl` 保存原始的 `attachments`（不含縮圖）。
 - 下載腳本（`relay/machine/attach.mjs`、`relay/cloud-agent/attach.mjs`）：`--id <編號> [--out <路徑>]`，向 `attach_url` 換網址再下載，預設存到工作資料夾的 `attachments/`，檔案權限 600，不覆蓋既有檔案，下載後檢查大小與 webp 檔頭，印出本機路徑。網址只接受與收發室同一主機。
