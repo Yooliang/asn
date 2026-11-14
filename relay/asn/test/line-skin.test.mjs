@@ -56,6 +56,12 @@ test('設定頁：LINE 外觀下頭像模式與文字底色停用並附說明，
   assert.equal((panel.match(/:disabled="st\.skin === 'line'"/g) || []).length, 2)
   assert.equal((panel.match(/<small class="set-note" v-if="st\.skin === 'line'">/g) || []).length, 2)
   assert.match(panel, /LINE 風格固定頭像在訊息旁/)
+  // 停用時選單顯示「實際生效的值」（頭像在訊息旁、底色自動），不是使用者存的值；存檔的值不動，切回其他外觀仍顯示原值
+  assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.dpMode"/); assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.bubble"/)
+  const st = { skin: 'line', dpMode: 'left', bubble: 'none' }
+  assert.deepEqual([effectiveLook(st.skin, st).dpMode, effectiveLook(st.skin, st).bubble], ['inline', 'auto'])
+  assert.deepEqual(st, { skin: 'line', dpMode: 'left', bubble: 'none' }, '快照沒被改')
+  for (const k of ['modern', 'aero']) assert.deepEqual([effectiveLook(k, { ...st, skin: k }).dpMode, effectiveLook(k, { ...st, skin: k }).bubble], ['left', 'none'], `切回${k}仍顯示原值`)
 })
 
 test('skin-boot.js：認得 line，壞值回復古 Aero（在假的視窗裡真的跑一次）', () => {

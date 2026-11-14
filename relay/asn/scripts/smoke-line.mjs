@@ -118,16 +118,19 @@ export const lineProbeSource = kind => `(async () => {
   // desk-settings
   if (!(await wait(() => radios().length === 3))) return { ok: false, why: 'LINE 外觀：' + '電腦外觀頁不是三選一：' + radios().length };
   const sel = label => document.querySelector('.set-sel[aria-label="' + label + '"]');
-  const dp0 = sel('頭像模式') && sel('頭像模式').value, bub0 = sel('文字底色') && sel('文字底色').value;
   if (!sel('頭像模式') || !sel('文字底色')) return { ok: false, why: 'LINE 外觀：' + '找不到頭像模式／文字底色選單' };
-  if (dp0 !== 'left' || bub0 !== 'none') return { ok: false, why: 'LINE 外觀：' + '存檔的頭像模式／文字底色應該是 left／none（LINE 不能改寫它們）：' + dp0 + '／' + bub0 };
+  // 存檔的值是 left／none；LINE 下停用的選單顯示「實際生效的值」（頭像在訊息旁、底色自動），切回其他外觀仍顯示並保留存檔的原值
+  const SAVED = ['left', 'none'], EFFECTIVE = ['inline', 'auto'];
+  const shown = () => [sel('頭像模式').value, sel('文字底色').value];
   const disabled = () => sel('頭像模式').disabled && sel('文字底色').disabled;
   const notes = () => document.querySelectorAll('.set-note').length;
+  if (shown().join() !== EFFECTIVE.join()) return { ok: false, why: 'LINE 外觀：' + '停用的選單要顯示實際生效的值（頭像在訊息旁、底色自動）：' + shown().join('／') };
   if (!disabled() || notes() < 2) return { ok: false, why: 'LINE 外觀：' + 'LINE 外觀下，頭像模式與文字底色要停用並附說明：' + disabled() + ' ' + notes() };
   for (const v of ['modern', 'aero', 'line']) {
     const w = await pickSkin(v); if (w) return { ok: false, why: 'LINE 外觀：' + w };
     await sleep(300);
-    if (sel('頭像模式').value !== dp0 || sel('文字底色').value !== bub0) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，頭像模式／文字底色被改了：' + sel('頭像模式').value + '／' + sel('文字底色').value };
+    const want = v === 'line' ? EFFECTIVE : SAVED;
+    if (shown().join() !== want.join()) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，頭像模式／文字底色顯示 ' + shown().join('／') + '，應該是 ' + want.join('／') };
     if (v === 'line' ? !disabled() || notes() < 2 : (sel('頭像模式').disabled || sel('文字底色').disabled || notes() > 0)) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，停用狀態不對' };
   }
   return { ok: true, why: '' };
