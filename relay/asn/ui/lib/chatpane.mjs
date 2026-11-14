@@ -311,17 +311,22 @@ export const ChatPane = {
       emit('attach', photo, caption, done)
     })
     // 一次選多張（#1497）：依序一張一張處理、送出，顯示「傳送中 2／5…」；一張失敗不影響其他張，送完說明哪幾張沒傳出。
-    // 輸入框裡的字當第一張的說明。每一張的大小、格式檢查照原本的規則（attachmentFromFile、Rust 端）
+    // 輸入框裡的字當說明，掛在第一張「送成功」的上面（前面幾張被擋下就往後順延）；一張都沒送成就還給輸入框。
+    // 每一張的大小、格式檢查照原本的規則（attachmentFromFile、Rust 端）
     async function sendFiles(files) {
       const list = [...(files ?? [])].filter(Boolean)
       if (!list.length || photoBusy.value) return
-      photoBusy.value = true
-      const caption = draft.value.trim()
+      photoBusy.value = true; savedHere.value = false
+      let caption = draft.value.trim()
       draft.value = ''; pickerOpen.value = false
       try {
-        const r = await sendInOrder(list, async (file, i) => attachAndWait(await attachmentFromFile(file), i === 0 ? caption : ''), (i, n) => { photoMsg.value = queueStepText(i, n) })
+        const r = await sendInOrder(list, async file => {
+          const res = await attachAndWait(await attachmentFromFile(file), caption)
+          if (res?.ok !== false) caption = ''   // 說明已經跟著這張出去了
+          return res
+        }, (i, n) => { photoMsg.value = queueStepText(i, n) })
         photoMsg.value = queueSummary(r)
-        if (r.failed.length === r.sent + r.failed.length && caption && !draft.value) draft.value = caption   // 全部沒送出：把說明還給輸入框
+        if (caption && !draft.value) draft.value = caption   // 說明沒有跟著任何一張出去：還給輸入框
       } finally { photoBusy.value = false }
     }
     function pickPhoto(ev) { const fs = [...(ev.target.files ?? [])]; ev.target.value = ''; void sendFiles(fs) }
@@ -334,6 +339,7 @@ export const ChatPane = {
     const shotOk = ref(false), annot = ref(null)   // annot：{ blob, name, busy, msg }
     function openAnnot(blob, from) {
       if (!blob || annot.value) return
+      if (photoBusy.value) { photoMsg.value = '還在傳前面選的照片，傳完再貼。'; return }   // 不插隊（#1497）
       annot.value = { blob, name: from === 'paste' ? 'paste.png' : shotFileName(), busy: false, msg: '' }
     }
     async function startShot() {
@@ -343,6 +349,7 @@ export const ChatPane = {
     }
     async function annotDone({ blob, caption }) {
       const a = annot.value; if (!a || a.busy) return
+      if (photoBusy.value) { a.msg = '還在傳前面選的照片，傳完再按傳送。'; return }   // 不插隊（#1497）
       a.busy = true; a.msg = ''
       try {
         const photo = await imageFromBlob(blob, a.name)
