@@ -102,7 +102,7 @@ async function runScenario(cdp, sc, base) {
     else if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') errors.push(`console.error：${d.params.args.map(argText).join(' ')}`)
     else if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') errors.push(`瀏覽器錯誤：${d.params.entry.text} ${d.params.entry.url ?? ''}`.trim())
     // 探測要「真的」滑鼠或按鍵（不是在頁面裡造事件）：頁面呼叫 __smokeInput(JSON)，這裡用偵錯協定送真的輸入
-    else if (d.method === 'Runtime.bindingCalled' && d.params.name === '__smokeInput') void realInput(S, d.params.payload)
+    else if (d.method === 'Runtime.bindingCalled' && d.params.name === '__smokeInput') realInput(S, d.params.payload).catch(e => errors.push(`送真的輸入失敗：${e?.message ?? e}`))
   })
   await S('Runtime.addBinding', { name: '__smokeInput' })
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
