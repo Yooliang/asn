@@ -6,6 +6,7 @@ import { avatarSrc, selfAvatarSrc } from './lib/avatar.mjs'
 import { normalizeLook } from './lib/merge.mjs'
 import { effectiveLook, initSkin, normalizeSkin } from './lib/skin.mjs'
 import { plain } from './lib/text.mjs'
+import { memberFriendId } from './lib/groups.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -55,7 +56,15 @@ const app = createApp({
       Promise.resolve(listen('asn:older', r => { if (r?.id === fid) done(r) })).then(u => { un = typeof u === 'function' ? u : null })
       emit('asn:cmd', { op: 'older', id: fid })
     })
+    // 群組裡點成員（#1515）：在夥伴名單裡就請名單視窗照從名單點進去一樣開；不在名單回 false（畫面自己說明）
+    const openMember = key => {
+      const id = memberFriendId(key, snap.value?.friends ?? [])
+      if (!id) return false
+      emit('asn:cmd', { op: 'open-chat', id })
+      return true
+    }
     return {
+      openMember,
       cards,
       groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
       groupDecide: (cardId, approve) => emit('asn:cmd', { op: 'group-decide', id, cardId, approve }),

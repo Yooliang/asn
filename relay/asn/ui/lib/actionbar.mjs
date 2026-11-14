@@ -406,7 +406,8 @@ export const MoreMenuButton = {
 export const OfflineMenuButton = {
   name: 'OfflineMenuButton',
   props: { names: { type: Array, default: () => [] } },
-  setup(props) {
+  emits: ['pick'],
+  setup(props, { emit }) {
     const { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } = globalThis.Vue
     const open = ref(false)
     const btn = ref(null), pop = ref(null)
@@ -425,14 +426,16 @@ export const OfflineMenuButton = {
     watch(view, v => { if (!v) open.value = false })
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
-    return { open, btn, pop, pos, toggle, view }
+    // 點名單裡的人（#1515）：先收起名單，再交給上層跳到跟他的一對一（不在夥伴名單的由上層說明）
+    function pick(it) { if (!it?.key) return; open.value = false; emit('pick', it.key) }
+    return { open, btn, pop, pos, toggle, view, pick }
   },
   template: `
 <div class="mbar-offline" v-if="view">
   <button class="mbtn mbtn-offline" type="button" ref="btn" data-slot="offline" :class="{ on: open }" aria-haspopup="true" :aria-expanded="open" :aria-label="view.aria" :title="view.title" @click="toggle">{{ view.label }}</button>
   <teleport to="body">
     <ul class="ab-menu ab-ops more-menu offline-menu" v-if="open" ref="pop" role="group" aria-label="離線的成員" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
-      <li class="menu-note" v-for="n in view.names" :key="n">{{ n }}</li>
+      <li class="menu-note" v-for="it in view.items" :key="it.key || it.label" :class="{ 'mem-pick': it.key }" :role="it.key ? 'button' : null" :tabindex="it.key ? 0 : null" :aria-label="it.key ? '開啟和 ' + it.label + ' 的對話' : null" @click="pick(it)" @keydown.enter.prevent="pick(it)" @keydown.space.prevent="pick(it)">{{ it.label }}</li>
     </ul>
   </teleport>
 </div>`,
@@ -461,7 +464,7 @@ export const ActionBar = {
     showBack: { type: Boolean, default: false },   // 窄視窗單窗格時才有返回鍵（LINE 外觀）
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops', 'term', 'back'],
+  emits: ['call', 'ops', 'term', 'back', 'member'],   // member：點了群組「N 人離線」名單裡的人（#1515）
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -733,7 +736,7 @@ export const ActionBar = {
     <button class="mbtn" type="button" data-slot="term" v-if="termReady" :class="{ on: termOn }" :aria-pressed="String(termOn)" :aria-label="termBtn.label" :title="termTip" @click="onWindow">
       <line-icon :name="termOn ? 'msg' : 'term'"></line-icon>
     </button>
-    <offline-menu-button v-if="isRoom" :names="offlineNames"></offline-menu-button>
+    <offline-menu-button v-if="isRoom" :names="offlineNames" @pick="k => $emit('member', k)"></offline-menu-button>
     <button class="mbtn mbtn-call" type="button" v-if="skin === 'line' && !isRoom && api && callable" data-slot="line-call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall"><line-icon name="call"></line-icon></button>
     <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
   </div>

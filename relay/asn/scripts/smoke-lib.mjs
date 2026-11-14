@@ -434,6 +434,110 @@ export const GROUP_OFFLINE_ROOM = { ...GROUP_ROOM, members: [
   { key: 'P~審稿', name: '審稿', member_kind: 'ai', kind: 'window', mine: true, engine: 'gemini', online: false },
   { key: 'x:r2bbbbbb', name: '報表', member_kind: 'ai', kind: 'ai', mine: false, engine: 'gpt', online: false },
 ] }
+// 群組裡點成員跳一對一（#1515）：審稿（P~審稿）在夥伴名單裡、報表（x:…）是別人的 AI 不在。兩人各說一句
+export const GJUMP_MEMBERS = [{ id: 'P', name: '測試機', agents: [{ name: '審稿', status: 'offline', cwd_label: 'r' }, { name: '財務', status: 'idle', cwd_label: 'f' }] }]
+export const GJUMP_MSGS = [
+  { seq: 1, from: 'P~審稿', at: '2026-11-13T01:00:00Z', body: '審稿這邊看完了。', relation: 'mine_ai', from_kind: 'ai', from_name: '審稿' },
+  { seq: 2, from: 'x:r2bbbbbb', at: '2026-11-13T01:01:00Z', body: '報表也好了。', relation: 'other', from_kind: 'ai', from_name: '報表' },
+]
+// mode＝desk／phone；list＝也測「N 人離線」名單（只有現代外觀有那顆鈕）；shotOnly＝只截圖不點（逐像素比對用）
+export const gjumpProbeSource = ({ gjump }) => `(async () => {
+  try {
+  const want = ${JSON.stringify(gjump)};
+  const phone = want.mode === 'phone';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const real = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); globalThis.__smokeInput(JSON.stringify({ click: at(el) })); await sleep(500) };
+  const pane = () => [...document.querySelectorAll('.chatpane')].find(vis) || null;
+  const isGroup = () => { const p = pane(); return !!p && [...p.querySelectorAll('.m-body')].some(b => b.textContent.includes('審稿這邊看完了')) };
+  const isFriend = () => { const p = pane(); return !!p && !isGroup() && (phone ? (document.querySelector('.m-chathead')?.textContent || '').includes('審稿') : (p.querySelector('.to-line')?.textContent || '').includes('審稿')) };
+  const spk = (cls, name) => [...(pane()?.querySelectorAll(cls) || [])].find(e => vis(e) && (cls === '.m-av-spk' ? e.closest('.msg')?.textContent.includes(name) : e.textContent.trim() === name));
+  for (let i = 0; i < 60 && !isGroup(); i++) await sleep(100);
+  if (!isGroup()) return { ok: false, why: '沒有開在群組上' };
+  await sleep(300);
+  if (want.shotOnly) return { ok: true, why: '' };
+  // 審查重現（#1516）：跳過去 → 從夥伴頁換到別人 → 返回 → 再從夥伴頁點回審稿：畫面要停在審稿，不能被舊的跳轉標記拉回群組
+  if (want.stale) {
+    const showing = name => !isGroup() && (document.querySelector('.m-chathead')?.textContent || '').includes(name);
+    const tabBtn = () => [...document.querySelectorAll('button')].find(b => vis(b) && b.getAttribute('role') === 'tab' && b.textContent.trim() === '夥伴');
+    const row = name => [...document.querySelectorAll('section[aria-label="夥伴"] button')].find(b => vis(b) && (b.querySelector('.b-nick')?.textContent || '').trim() === name);
+    const n0 = spk('.who-name', '審稿');
+    if (!n0) return { ok: false, why: '找不到審稿的名字' };
+    await real(n0);
+    for (let i = 0; i < 20 && !showing('審稿'); i++) await sleep(100);
+    if (!showing('審稿')) return { ok: false, why: '第一步沒跳到審稿' };
+    let t = tabBtn(); if (!t) return { ok: false, why: '找不到「夥伴」分頁' };
+    await real(t);
+    let r = row('財務'); if (!r) return { ok: false, why: '夥伴頁找不到財務' };
+    await real(r);
+    for (let i = 0; i < 20 && !showing('財務'); i++) await sleep(100);
+    if (!showing('財務')) return { ok: false, why: '從夥伴頁點財務沒有進到財務' };
+    history.back(); await sleep(700);
+    if (isGroup()) return { ok: false, why: '換過別人之後按返回，被拉回群組' };
+    t = tabBtn(); if (!t) return { ok: false, why: '第二次找不到「夥伴」分頁' };
+    await real(t);
+    r = row('審稿'); if (!r) return { ok: false, why: '夥伴頁找不到審稿' };
+    await real(r);
+    await sleep(500);
+    if (isGroup()) return { ok: false, why: '從夥伴頁點審稿卻進了群組（舊的跳轉標記沒清掉）' };
+    if (!showing('審稿')) return { ok: false, why: '從夥伴頁點審稿沒有停在審稿' };
+    if (history.state && history.state.jumpFrom) return { ok: false, why: '記錄上還留著跳轉標記' };
+    return { ok: true, why: '' };
+  }
+  // 1. 點發言者的名字
+  const n1 = spk('.who-name', '審稿');
+  if (!n1) return { ok: false, why: '找不到群組訊息上「審稿」的名字' };
+  if (n1.getAttribute('role') !== 'button' || !/開啟和 審稿 的對話/.test(n1.getAttribute('aria-label') || '')) return { ok: false, why: '名字沒有 role=button 或 aria-label' };
+  await real(n1);
+  for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
+  if (!isFriend()) return { ok: false, why: '點名字沒有跳到跟審稿的一對一' };
+  const back = async () => {
+    if (phone) { history.back(); await sleep(600); return }
+    // 復古 Aero 點上面的對話分頁；現代外觀沒有分頁列，點左邊名單的群組
+    const find = () => [...document.querySelectorAll('.ctab, .room-btn')].find(e => vis(e) && e.textContent.includes('測試群'));
+    let tab = find();
+    if (!tab) { const t = [...document.querySelectorAll('.ttab-chats')].find(vis); if (t) { await real(t); tab = find() } }
+    if (tab) await real(tab);
+  };
+  await back();
+  for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
+  if (!isGroup()) return { ok: false, why: phone ? '按返回沒有回到群組' : '切回群組分頁失敗' };
+  if (phone && history.state && history.state.jumpFrom) return { ok: false, why: '回到群組後記錄上還留著跳轉標記' };
+  // 2. 點發言者的頭像
+  const a1 = spk('.m-av-spk', '審稿');
+  if (!a1) return { ok: false, why: '找不到審稿的頭像' };
+  await real(a1);
+  for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
+  if (!isFriend()) return { ok: false, why: '點頭像沒有跳到跟審稿的一對一' };
+  await back();
+  for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
+  if (!isGroup()) return { ok: false, why: '第二次沒回到群組' };
+  // 3. 不在夥伴名單的人：不跳、出現說明
+  const n2 = spk('.who-name', '報表');
+  if (!n2) return { ok: false, why: '找不到「報表」的名字' };
+  await real(n2);
+  if (!isGroup()) return { ok: false, why: '點了不在名單的人卻跳走了' };
+  if (!(pane()?.textContent || '').includes('不在你的夥伴名單')) return { ok: false, why: '點了不在名單的人沒有說明' };
+  // 4. 「N 人離線」名單（現代外觀）
+  if (want.list) {
+    const btn = [...document.querySelectorAll(phone ? '.m-plate-head .m-offline-btn' : '.mbar .mbtn-offline')].find(vis);
+    if (!btn) return { ok: false, why: '找不到「N 人離線」' };
+    await real(btn);
+    const row = [...document.querySelectorAll(phone ? '.m-offline-menu li' : '.offline-menu .menu-note')].find(e => vis(e) && e.textContent.trim() === '審稿');
+    if (!row || row.getAttribute('role') !== 'button') return { ok: false, why: '名單裡的審稿不能點' };
+    await real(row);
+    for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
+    if (!isFriend()) return { ok: false, why: '點名單裡的人沒有跳過去' };
+    if (document.querySelector(phone ? '.m-offline-menu' : '.offline-menu')) return { ok: false, why: '跳過去後名單還開著' };
+    await back();
+    for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
+    if (!isGroup()) return { ok: false, why: '從名單跳過去後' + (phone ? '按一次返回' : '切回') + '沒回到群組（記錄層數不對）' };
+    if (phone && document.querySelector('.m-offline-menu')) return { ok: false, why: '返回後名單又出現（名單那一筆沒退乾淨）' };
+  }
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 export const LONG_ROOM_NAME = '這是一個名字很長很長的專案討論群組'
 export const GROUP_OFFLINE_LONG_ROOM = { ...GROUP_OFFLINE_ROOM, name: LONG_ROOM_NAME }
 export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線', center: true }
@@ -1439,8 +1543,8 @@ export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(prob
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2275,6 +2379,17 @@ export const SCENARIOS = [
   { name: 'list-group-offline-long-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_WANT }, shot: 'list-group-offline-long-modern.png' },
   { name: 'list-group-offline-long-narrow-modern', page: 'list.html', width: 420, height: 640, state: { signedIn: true, groupTab: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_LONG_ELL }, shot: 'list-group-offline-long-narrow-modern.png' },
   { name: 'm-group-offline-long-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, longName: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mgoffline: GOFFLINE_LONG_ELL }, shot: 'm-group-offline-long-modern.png' },
+  { name: 'list-gjump', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: false } }, shot: 'list-gjump.png' },
+  { name: 'm-gjump', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: false } }, shot: 'm-gjump.png' },
+  { name: 'list-gjump-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: true } }, shot: 'list-gjump-modern.png' },
+  { name: 'm-gjump-stale', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', stale: true } }, shot: 'm-gjump-stale.png' },
+  { name: 'm-gjump-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: true } }, shot: 'm-gjump-modern.png' },
+  { name: 'list-gjump-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true, skin: 'line' }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', list: false } }, shot: 'list-gjump-line.png' },
+  { name: 'm-gjump-line', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', list: false } }, shot: 'm-gjump-line.png' },
+  { name: 'list-gjump-shot', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', shotOnly: true } }, shot: 'list-gjump-shot.png' },
+  { name: 'm-gjump-shot', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', shotOnly: true } }, shot: 'm-gjump-shot.png' },
+  { name: 'list-gjump-shot-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { gjump: { mode: 'desk', shotOnly: true } }, shot: 'list-gjump-shot-modern.png' },
+  { name: 'm-gjump-shot-modern', page: 'm.html', state: { signedIn: true, mgroup: true, offline: true, gjump: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { gjump: { mode: 'phone', shotOnly: true } }, shot: 'm-gjump-shot-modern.png' },
   { name: 'list-group-online-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, groupTab: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
   { name: 'list-modern-msgs-center', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline', chatMsgs: true, skin: 'modern' }, ready: '#app.win .actionbar', probe: { goffline: GOFFLINE_NONE_CENTER } },
   { name: 'list-group-offline-aero', page: 'list.html', state: { signedIn: true, groupTab: true, offline: true }, ready: '#app.win .actionbar', probe: { goffline: { none: true } } },
@@ -2377,6 +2492,10 @@ export const tableFor = scenario => {
   }
   if (scenario.state.lineMsgs) t.relay_chat_history = { messages: LINE_CHAT_MSGS }   // LINE 外觀（二）：自己、對方連發兩則、自己
   if (scenario.state.chatMsgs) t.relay_chat_history = { messages: CHAT_MSGS_SAMPLE }   // 對話裡放幾則來回的信（看訊息卡片）
+  if (scenario.state.gjump) {   // 群組點成員跳一對一（#1515）：夥伴名單有審稿；群組裡審稿、報表各說一句
+    t.relay_list = { members: GJUMP_MEMBERS }
+    t.relay_room_read = { messages: GJUMP_MSGS }; t.android_room_read = { messages: GJUMP_MSGS }
+  }
   if (scenario.state.groupMsgs) { t.relay_room_read = { messages: LINE_GROUP_MSGS }; t.android_room_read = { messages: LINE_GROUP_MSGS } }   // 群組裡放對方、自己、系統提示各一則（LINE 外觀看泡泡）
   if (scenario.state.lookPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(LINE_LOOK_ME) } }   // 電腦「設定 → 外觀」（存檔的頭像模式／底色是 left／none）
   if (scenario.state.munread) {

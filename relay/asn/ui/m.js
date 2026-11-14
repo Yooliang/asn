@@ -64,7 +64,7 @@ import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
-import { copyText, createGroupApi } from './lib/groups.mjs'
+import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
@@ -158,6 +158,9 @@ const nav = reactive(initialNav())
 const fourthSt = reactive({ fourth: null })
 const fourthNav = createMobileNav({ history, nav, st: fourthSt })
 const lastChat = ref('')   // 最後使用的那一位（對話分頁點進去的那一則；存在手機本機設定，重開 App 仍記得）
+// 從群組點成員跳過去（#1515）：記在記憶體裡的 { from（群組）, to（那一位） }。換到這兩位以外的人就作廢，返回鍵不會再把人拉回群組
+let memberJump = null
+watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
@@ -285,6 +288,16 @@ window.addEventListener('popstate', e => {
   if (keyBackGuard()) return
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）；切頁時程式自己退的記錄不算
   if (callOn.value && !fourthNav.busy()) { void liveCall?.end(); history.pushState(fourthNav.state(), ''); return }
+  // 從群組點成員跳過去的一對一（#1515），按返回回到原本的群組：跳之前在群組那一筆記錄記了 jumpFrom／jumpTo。
+  // 三個條件都成立才換回群組：不是程式自己在退記錄（切頁、開對話）、記憶體裡的這一次跳轉還有效（沒換過別人）、跟記錄上的標記一致；
+  // 標記只用一次：不管有沒有換回，都從記錄上拿掉，之後再退到這一筆不會被錯拉回群組
+  const j = e.state && typeof e.state.jumpFrom === 'string' && e.state.jumpFrom ? e.state : null
+  if (j) {
+    const back = !fourthNav.busy() && memberJump && memberJump.from === j.jumpFrom && memberJump.to === j.jumpTo && lastChat.value === memberJump.to
+    const { jumpFrom, jumpTo, ...rest } = j
+    history.replaceState(rest, '')
+    if (back) { memberJump = null; lastChat.value = jumpFrom }
+  }
   fourthNav.onPop(e.state)
 })
 const go = next => fourthNav.go(next)
@@ -433,12 +446,39 @@ const app = createApp({
     const offlineOpen = computed(() => nav.sheet === 'offline')
     function closeOffline() { if (nav.sheet !== 'offline' || offlineClosing || fourthNav.busy()) return; offlineClosing = true; history.back() }
     function toggleOffline() { if (offlineOpen.value) closeOffline(); else if (!nav.sheet && !fourthNav.busy()) go(offlineNav()) }
-    watch(() => nav.sheet, s => { if (s !== 'offline') offlineClosing = false })
+    let afterOffline = null   // 名單裡點了人：等名單那一筆記錄退掉（popstate 回來）再跳，不留多餘的記錄（#1515）
+    watch(() => nav.sheet, s => { if (s !== 'offline') { offlineClosing = false; if (afterOffline) { const f = afterOffline; afterOffline = null; f() } } })
     watch([() => !!chatOffline.value, () => chatFriend.value?.id], () => closeOffline())
     window.addEventListener('keydown', e => { if (e.key === 'Escape') closeOffline() })
     const headTerm = computed(() => { const p = chatPaneEl.value; return p && p.mSwitch ? p.mToggle : null })
     function toggleHeadTerm() { const p = chatPaneEl.value; if (!p || !p.mSwitch) return; if (p.remoteShown) p.showMsgs(); else p.showTerm() }
     const chatLog = computed(() => (isRoomChat(lastChat.value) ? hub.view(roomIdOf(lastChat.value)) : logs[lastChat.value]) ?? [])
+    // 群組裡點成員（#1515）：在夥伴名單裡就換成那一位，推一筆對話分頁的記錄（返回鍵回到群組，見 popstate）；
+    // 名單開著先退掉名單那一筆再跳。不在名單回 false（呼叫端說明）
+    function openMember(key) {
+      const id = memberFriendId(key, core?.friends)
+      if (!id) return false
+      const jump = () => {
+        if (fourthNav.busy() || nav.tab !== HOME_TAB) return
+        const from = lastChat.value
+        if (from === id) return
+        history.replaceState({ ...(history.state ?? {}), jumpFrom: from, jumpTo: id }, '')
+        memberJump = { from, to: id }
+        lastChat.value = id
+        banner.value = null
+        go(tabNav(HOME_TAB))
+      }
+      if (nav.sheet === 'offline') {
+        if (offlineClosing || fourthNav.busy()) return true   // 名單正在收（或導覽中）：這一下不跳，也不留著等
+        afterOffline = jump; closeOffline()
+      } else jump()
+      return true
+    }
+    // 「N 人離線」名單的一列（只有帶成員鍵的能點）：不在夥伴名單就收起名單、在對話上方說明
+    function pickOffline(it) {
+      if (!it?.key) return
+      if (openMember(it.key) === false) { closeOffline(); roomNote.value = MEMBER_NOT_FRIEND }
+    }
     // 點群組：成為「最後使用」，切到對話分頁並進那一則
     function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; fourthNav.openChat() }
 
@@ -1410,7 +1450,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      openMember, pickOffline, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
