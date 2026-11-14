@@ -1,11 +1,11 @@
 {
-  "version": "0.2.22",
-  "notes": "- 新功能：設定 →「外觀」多了第三種「LINE 風格」：深色左欄、底部導覽，對話區有頭像、時間和已讀，清單列會顯示時間和未讀數。選復古 Aero 或現代的話，畫面不變。\n- 改善：設備頁精簡，每台只留名字和在線狀態，確認狀態改成指紋小圖示；在線但沒收到回報的設備，列上會標「沒回報」。\n- 改善：手機（Play 安裝）有新版時，回到 App 或資料放久了會重新檢查，紅點會亮起來。\n- 改善：群組點名改由內建通道轉交給夥伴；沒有回覆的當成看過不回，轉交失敗時通知會寫出原因。\n- 修正：卡在自動接回中的夥伴視窗，現在可以在工作管理員裡停掉。\n- 改善：設備的「⋯」小選單點外面、按 Esc 或切換分頁都會收起。",
-  "pub_date": "2026-11-14T12:12:30.052Z",
+  "version": "0.2.23",
+  "notes": "- 新功能：手機對話輸入列多一個「拍照」鈕，拍好直接傳出。\n- 新功能：一次可以選多張圖或多個檔案，依序傳出，顯示進度。\n- 新功能：看大圖可以縮放（手機雙指或點兩下；電腦滾輪、拖曳、雙擊）。\n- 新功能：群組裡點成員（離線名單、發言者的名字或頭像）就跳到跟他的一對一對話。\n- 改善：看過的圖不再每次重新下載。\n- 修正：LINE 外觀的時間不再疊在右上角；輸入區改成白底，打字時左邊收成「＞」；標題列維持藍色，忙碌只用黃色小標籤標示。",
+  "pub_date": "2026-11-14T22:20:41.860Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndtVDNUc3ZjRlBTZDE5R2NXWm1aQTBQeHR6bHFsbjJ4MGlWY290Z2lKOGRZUWRpL2FYOU1aeExlWjJEaWVyNW9sWFR0R1ZUZVJkSXd1M3BpdGF5YlFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjU1NTA1CWZpbGU6QVNOXzAuMi4yMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIyCk5yZDVFWnU4aFRPU2N4UGREOXpsNXk4Y25pd1B2S0t3a3NoTy93ci93OUw4Sk9yK2kvZ0hVbWE3bWlWVlNCMDhVc3ZHd0NnNFU0L1dXdVVJdGdPYkNnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.22_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk0dXcrTEFDc3lDOVhFaUxNUWxOZVdwQVNFZzlxNlByRDRZM20vN0tWRUZMa0grTlBHOUthRFdRK3dodFZTd1ZKQ3dIZGxwMEdGZnc2eUtPcjZwL2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjgzNjQ4CWZpbGU6QVNOXzAuMi4yM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIzCk5ieTZVbHh3d2s1Zksxczdhdjk3bUlFZTRrWmFEUDNGa0ZSYTZiODh3RGkvc3I0bTlJYnpMbDc4a09LVkM4N09uTTBJc0lCZmtLWGlNSk5MRTRoT0NRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.23_x64-setup.exe"
     }
   }
 }
