@@ -21,16 +21,21 @@ test('電腦：記住了＝remembered（不是 confirmed）、說明帶 8 碼；
   assert.equal(FP_MARK_TEXT.deskOff, '還沒記住指紋')
 })
 
-test('四種狀態顏色與形狀都不同：綠色只給確認過；未確認不是離線的灰；沒確認、沒記住有「!」，確認過有勾', () => {
+test('有顏色的彼此不同、灰色的一定帶記號：綠色只給確認過；沒確認、沒記住是灰＋「!」，確認過有勾', () => {
   assert.deepEqual(FP_KINDS, ['confirmed', 'unconfirmed', 'remembered', 'unknown'])
   const css = read('ui/style.css')
-  const color = k => (rule(css, `.fpm.${k}`).match(/(?:^|;)color:([^;]+)/) ?? [])[1]
-  assert.equal(color('confirmed'), 'var(--online)')
-  for (const k of ['unconfirmed', 'remembered', 'unknown']) {
-    assert.ok(color(k) && color(k) !== 'var(--online)', `${k} 不能用綠色`)
-    assert.notEqual(color(k), 'var(--offline)', `${k} 不能跟「離線」同色`)
+  // .fpm.unconfirmed,.fpm.unknown 合寫一條：兩個選擇器都找得到同一個顏色
+  const color = k => {
+    for (const [, sel, body] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      if (sel.split(',').map(x => x.trim()).includes(`.fpm.${k}`)) { const m = body.match(/(?:^|;)color:([^;]+)/); if (m) return m[1] }
+    }
+    return undefined
   }
-  assert.equal(new Set(FP_KINDS.map(color)).size, 4, '四種顏色都不同')
+  const GRAY = ['unconfirmed', 'unknown'], COLORED = ['confirmed', 'remembered']
+  assert.equal(color('confirmed'), 'var(--online)')
+  assert.equal(new Set(COLORED.map(color)).size, COLORED.length, '有顏色的彼此不同')
+  assert.ok(GRAY.every(k => color(k) === color('unknown')), '沒確認、沒記住都是同一個灰（小良哥：沒通過就是灰色）')
+  for (const k of GRAY) assert.ok(!COLORED.map(color).includes(color(k)), `${k} 是灰色，不跟有顏色的混`)
   assert.doesNotMatch(rule(css, '.fpm.unknown') + rule(css, '.fpm.unconfirmed'), /opacity/, '不做成反灰（看起來像沒作用）')
   // 形狀：記號跟著狀態走（不只靠顏色）
   const src = read('ui/lib/fp-mark.mjs')
