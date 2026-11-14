@@ -57,10 +57,11 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
 }
 
 // 某頁籤裡的好友：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
+// key 是 null＝不分頁、全部（LINE 外觀電腦版沒有左邊的頁籤欄，名單直接用分組，#1527）
 export function pageItems(friends, dim, key, match = () => true) {
   const of = f => (dim === 'status' ? levelOf(f) : dim === 'engine' ? displayVendorKey(f) : (f.node ?? ''))
   // 組內排序固定：活躍、閒置、離線，同級照名字；不看忙閒，免得一忙一閒就換位置
-  return friends.filter(f => !isAsnWindow(f) && of(f) === key && match(f)).sort((a, b) => activityRank(levelOf(a)) - activityRank(levelOf(b)) || a.nick.localeCompare(b.nick, 'zh-Hant'))
+  return friends.filter(f => !isAsnWindow(f) && (key === null || of(f) === key) && match(f)).sort((a, b) => activityRank(levelOf(a)) - activityRank(levelOf(b)) || a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名

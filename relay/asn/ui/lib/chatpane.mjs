@@ -214,6 +214,8 @@ export const ChatPane = {
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
     // LINE 外觀：每則的「連續訊息／日期膠囊」旗標（lib/line-chat.mjs）；其他外觀不算
     const isLine = computed(() => props.skin === 'line')
+    // LINE 電腦版（#1527）：工具列固定成輸入框上方的一排圖示（表情、附件／圖片、截圖、通話…），輸入框左邊不再有「＋」和圖片鈕，所以也不用「＞」收合
+    const lineRow = computed(() => isLine.value && !props.noBar)
     const lrows = computed(() => (isLine.value ? lineRows(props.log, { friendNick: props.friend?.nick }) : []))
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
     // ---- 往上捲自動載入更舊的信：捲到距頂端 120px 內就向樞紐要；載入後停在原本看的那一則 ----
@@ -294,7 +296,7 @@ export const ChatPane = {
     // LINE 外觀（#1517 之 3）：打字時左邊的「＋」和圖片鈕收成「＞」，按了再展開；離開輸入框或清空就收回。其他外觀不碰。
     // 「打字時」：手機（noBar）＝輸入框有焦點（鍵盤叫出來了）或有字；電腦打開對話就自動聚焦輸入框，所以只看有沒有字
     const composeFocus = ref(false), lcToolsOpen = ref(false)
-    const lcTyping = computed(() => isLine.value && (draft.value !== '' || (props.noBar && composeFocus.value)) && !lcToolsOpen.value)
+    const lcTyping = computed(() => isLine.value && !lineRow.value && (draft.value !== '' || (props.noBar && composeFocus.value)) && !lcToolsOpen.value)
     // 送出（或清空）就收回展開狀態：下一句一開始打字又收成「＞」，跟 LINE 一樣（#1524 審查）
     watch(draft, v => { if (v === '') lcToolsOpen.value = false })
     // 按「＞」展開；用鍵盤按的（click 的 detail 是 0）把焦點交給「＋」，免得焦點停在已經藏起來的「＞」上
@@ -583,7 +585,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -675,7 +677,7 @@ export const ChatPane = {
     </div>
   </div>
   <div class="compose-row" :class="{ 'is-term': mSwitch && remoteShown }" v-if="!isNotice">
-    <div class="compose-main" :class="{ 'lc-typing': lcTyping }">
+    <div class="compose-main" :class="{ 'lc-typing': lcTyping, 'lc-row': lineRow }">
       <div class="toolbar" :class="{ 'mc-open': plusOpen, 'mc-has-dict': showDictBtn }" @click="onToolbarClick" @keydown.esc="plusOpen = false">
         <span class="tool-group">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
@@ -721,7 +723,7 @@ export const ChatPane = {
         </button>
         <!-- 對話／終端切換（手機）：一顆、放在這排最後面；字與圖示寫按了會去哪裡，不做選中樣式；沒有終端可看的夥伴不顯示 -->
         <button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle.label" :title="mToggle.label" @click="remoteShown ? showMsgs() : showTerm()"><img :src="mToggle.icon" alt="" width="22" height="22"><line-icon :name="mToggle.line" :size="22"></line-icon></button>
-        <div class="picker" v-if="pickerOpen && (!isLine || plusOpen)" role="menu">
+        <div class="picker" v-if="pickerOpen && (!isLine || plusOpen || lineRow)" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
       </div>
@@ -746,7 +748,7 @@ export const ChatPane = {
         <button class="lc-photo" type="button" v-if="isLine" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）"><line-icon name="photo"></line-icon></button>
         <textarea ref="composeEl" v-model="draft" @focus="onComposeFocus" @blur="onComposeBlur" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
         <button class="lc-emo" type="button" v-if="isLine" @click="plusOpen = false; pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" :disabled="displayOnly" aria-label="表情符號" title="表情符號"><line-icon name="emoji"></line-icon></button>
-        <div class="picker lc-picker" v-if="isLine && pickerOpen && !plusOpen" role="menu">
+        <div class="picker lc-picker" v-if="isLine && !lineRow && pickerOpen && !plusOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
         <button class="mc-dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">

@@ -533,3 +533,32 @@
 :root[data-skin="line"] .m-chathead,:root[data-skin="line"] .m-chathead.is-busy,:root[data-skin="line"] .m-chathead.is-offline{background:var(--line-bg);border-bottom-color:transparent;color:var(--fg)}
 :root[data-skin="line"] .m-chathead.is-busy .m-title,:root[data-skin="line"] .m-chathead.is-busy .m-conn,:root[data-skin="line"] .m-chathead.is-busy .m-icon-btn{color:inherit}
 :root[data-skin="line"] .l-busy{display:inline-block;margin-left:1px;padding:0 6px;border-radius:999px;background:#ffd54a;color:#3a2a00;font-weight:600;line-height:1.5}
+/* =====================================================================
+   LINE 外觀電腦版修正（#1527，小良哥 11-15）：只動 #app.win（電腦的名單視窗與分開的對話視窗），手機不動。
+   ===================================================================== */
+/* 2. 自己的卡片放到名單最上面（像 LINE 的「個人資料」）：不再排到最底下；換大頭貼的選單照預設往下彈 */
+:root[data-skin="line"] #app.win .list-pane > .me{order:0;padding:12px 14px;border-top:0;border-bottom:1px solid #e6e4df}
+:root[data-skin="line"] #app.win .list-pane > .me .me-dp{width:40px;height:40px}
+:root[data-skin="line"] #app.win .list-pane > .me .av-menu{top:calc(100% + 4px);bottom:auto}
+/* 1. 名單沒有左邊的設備頁籤欄：分組標題直接是第一層，可收合 */
+:root[data-skin="line"] #app.win .list .g-head{padding:8px 14px 4px}
+/* 3、4. 對話區整片白底、拿掉內層框；只留訊息區一條直向捲動，不出現橫向捲動 */
+:root[data-skin="line"] #app.win .chatpane-main,:root[data-skin="line"] #app.win .conv,:root[data-skin="line"] #app.win .conv-main,:root[data-skin="line"] #app.win .msgs{background:#fff}
+:root[data-skin="line"] #app.win .conv{padding:0;gap:0;overflow:hidden}
+:root[data-skin="line"] #app.win .conv-main{border:0;border-radius:0;overflow:hidden}
+:root[data-skin="line"] #app.win .msgs{overflow-x:hidden;--muted:#8a8f99;--msg-st-muted:#8a8f99;--msg-st-read:#2f6fb5}
+:root[data-skin="line"] #app.win .msg .m-body.tone-them{background:#eef0f3}
+:root[data-skin="line"] #app.win .msg .m-body.tone-them::before{background:#eef0f3}
+/* 5. 輸入區：上面一排按鈕（表情、通話、附件／圖片、截圖…），下面一整塊白色輸入框；輸入框左邊的「＋」、圖片鈕、框內的表情鈕和「＞」都不要 */
+:root[data-skin="line"] #app.win .compose-row{padding:0;border-top:1px solid #e6e4df;background:#fff}
+:root[data-skin="line"] #app.win .compose-main.lc-row{flex-direction:column;align-items:stretch;gap:0;background:#fff}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:2px;position:relative;padding:6px 8px 0;border:0;background:transparent}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .tool{width:34px;height:34px;min-height:34px;justify-content:center;gap:0;padding:0;border-radius:8px;color:var(--muted)}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .tool::after{content:none}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .tool[aria-expanded="true"]{background:var(--ls-soft);color:var(--accent)}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .tool.mic{display:none}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .picker{bottom:calc(100% + 4px);top:auto}
+:root[data-skin="line"] #app.win .compose-main.lc-row .composer{display:flex;align-items:flex-end;gap:6px;padding:4px 8px 8px}
+:root[data-skin="line"] #app.win .compose-main.lc-row .composer textarea{order:0;height:56px;min-height:56px;padding:6px;border-radius:0;background:#fff}
+:root[data-skin="line"] #app.win .compose-main.lc-row .mc-plus,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-photo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-emo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-more{display:none}
+:root[data-skin="line"] #app.win .compose-main.lc-row > .reply-bar,:root[data-skin="line"] #app.win .compose-main.lc-row > .voice-install{bottom:calc(100% + 8px)}

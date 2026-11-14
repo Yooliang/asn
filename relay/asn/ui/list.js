@@ -1575,12 +1575,14 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
+      // LINE 外觀（#1527）：沒有左邊的設備頁籤欄，名單不分頁、全部夥伴直接用分組（例如「Claude (7/20)」），每組可收合
+      const flat = skin.value === 'line'
+      const o = { tabDim: dims.tabDim, tabKey: flat ? null : tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
       // 「通知」對話不進名單（連搜尋也不列），只在「通知」分頁看
       const base = withoutNoticeItems(rosterShownGroups(activeFriends(friendsAct.value), o))
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
       const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items).filter(f => !isNoticeFriend(f))
-      return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
+      return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => flat || !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))

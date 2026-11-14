@@ -75,4 +75,8 @@ test('分組與分頁：依活躍度分三組，組內照名字，不看忙閒',
   assert.deepEqual(tabs.map(t => `${t.key}:${t.total}`), ['active:2', 'idle:1', 'offline:1'])
   assert.deepEqual(pageItems(fr, 'status', 'active').map(f => f.nick), ['a', 'b'])
   assert.deepEqual(pageItems(fr, 'device', 'H').map(f => f.nick), ['a', 'b', 'c', 'd'], '設備頁內：活躍在前、離線在後，同級照名字')
+  // 不分頁（key＝null，LINE 電腦版 #1527）：每台設備的都在，排序跟頁內一樣
+  const two = [...fr, ...withActivity([{ id: 'Q/e', node: 'Q', nick: 'e', status: 'online' }], new Map([['Q/e', { level: 'active' }]]))]
+  assert.deepEqual(pageItems(two, 'device', null).map(f => f.nick), ['a', 'b', 'e', 'c', 'd'])
+  assert.deepEqual(pageItems(two, 'device', 'H').map(f => f.nick), ['a', 'b', 'c', 'd'], '有給 key 時照舊只取那一頁')
 })
