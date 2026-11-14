@@ -8,7 +8,7 @@ import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
-import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
+import { FILE_ACCEPT, expiryMs, formatBytes, photoExpired, photoTitle, shownPhotos } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
@@ -36,6 +36,8 @@ import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
+// 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
+const recentShown = shownPhotos
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
 
 export const ChatPane = {
@@ -358,9 +360,12 @@ export const ChatPane = {
     async function openPhoto(p) {
       if (!props.photoApi || photoExpired(p)) return
       if (p.kind === 'file') return saveFile(p)
-      viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: '', msg: '載入中…', busy: false }
+      const seen = recentShown.get(p.id)
+      viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: seen || '', msg: seen ? '' : '載入中…', busy: false }
+      if (seen) return
       try {
-        const r = await props.photoApi.fetch(p.id)
+        const r = await props.photoApi.fetch(p.id, expiryMs(p))
+        recentShown.set(p.id, r.data_url)
         if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
       } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = e.message }
     }

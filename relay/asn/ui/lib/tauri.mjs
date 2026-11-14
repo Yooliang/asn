@@ -1,4 +1,5 @@
 // Tauri 前端小橋：invoke／事件。錯誤一律包成 Error(字串)，讓 AsnCore 用 e.message 處理。
+import { shownPhotos } from './photo.mjs'
 const T = globalThis.__TAURI__
 
 export const invoke = async (cmd, args) => {
@@ -7,6 +8,8 @@ export const invoke = async (cmd, args) => {
 export const listen = (evt, fn) => T.event.listen(evt, e => fn(e.payload))
 export const emit = (evt, payload) => T.event.emit(evt, payload)
 export const ctl = op => invoke('win_ctl', { op })
+// 附件快取清空了（換帳號、登入、登出）：這個視窗記著的大圖也丟掉（#1493）
+if (T?.event) void listen('attach-cache-cleared', () => shownPhotos.clear()).catch(() => {})
 
 // 給 AsnCore 的 transport：HTTP 與金鑰都在 Rust 端，這裡拿不到金鑰
 export const transport = {
@@ -72,7 +75,7 @@ export const transport = {
 }
 // 照片放大與另存（對話視窗各自呼叫，不經樞紐）：Rust 端換短效下載網址、下載、檢查
 export const photoApi = {
-  fetch: id => invoke('relay_attachment_fetch', { id }),   // → { name, mime, data_url }
+  fetch: (id, expiresAt = null) => invoke('relay_attachment_fetch', { id, expiresAt }),   // → { name, mime, data_url }；expiresAt＝附件到期（毫秒），快取只存到那時
   save: (id, name) => invoke('relay_attachment_save', { id, name }),   // Rust 端跳出「另存新檔」對話框：→ 存檔路徑；使用者按取消 → null（不下載）
   reveal: () => invoke('relay_attachment_reveal'),          // 開啟「剛存檔的那個資料夾」（路徑 Rust 記著，前端不帶參數）
 }
@@ -121,9 +124,9 @@ export const shotApi = {
 // 帳號登入：權杖與節點金鑰都只在 Rust 端，這裡只拿得到狀態與文字
 export const authApi = {
   status: () => invoke('auth_status'),                       // → { signed_in, email }
-  login: provider => invoke('auth_login', { provider }),     // 開系統瀏覽器登入，等回呼（最久 5 分鐘）→ 狀態
+  login: provider => { shownPhotos.clear(); return invoke('auth_login', { provider }) },     // 開系統瀏覽器登入，等回呼（最久 5 分鐘）→ 狀態
   cancel: () => invoke('auth_cancel'),
-  logout: (stop = false) => invoke('auth_logout', { stop: stop === true }),   // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面（收發信照常）；stop＝true 是本人選了「一併停止」：登出後直接結束 ASN
+  logout: (stop = false) => { shownPhotos.clear(); return invoke('auth_logout', { stop: stop === true }) },   // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面（收發信照常）；stop＝true 是本人選了「一併停止」：登出後直接結束 ASN
   accountInfo: () => invoke('auth_account_info'),            // → { email, created, node_count, this_node_mine }
   setAccountName: name => invoke('auth_account_name_set', { name }),   // 改帳號名稱（我的名字，所有設備共用）→ 存好的名字
   getAiWakeLimit: () => invoke('auth_ai_wake_limit_get'),   // 帳號設定：AI 之間互相叫醒的上限（0～200，預設 20）

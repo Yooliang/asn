@@ -399,8 +399,9 @@ pub fn final_path(chosen: &Path, mime: &str) -> Result<PathBuf, String> {
 
 /// 另存新檔：先問使用者存哪（pick 收「預設檔名、篩選副檔名」，回選好的路徑；按取消回 None），
 /// 選好才換網址、下載、檢查、寫檔；取消＝完全不連線、不寫檔，回 Ok(None)。
-/// 只會寫 pick 回的那一個路徑（final_path 只修正檔名與副檔名）。
+/// 只會寫 pick 回的那一個路徑（final_path 只修正檔名與副檔名）。cache＝附件快取（#1493），有副本就不再下載
 pub async fn save_as(
+    cache: Option<&crate::attach_cache::AttachCache>,
     relay: &Relay,
     http: &reqwest::Client,
     id: &str,
@@ -412,7 +413,7 @@ pub async fn save_as(
     }
     let name = suggest_name(hint);
     let Some(chosen) = pick(&name, filter_ext(&name)) else { return Ok(None) };
-    let d = download(relay, http, id).await?;
+    let d = crate::attach_cache::fetch(cache, relay, http, id, None).await?;
     let path = final_path(&chosen, &d.mime)?;
     std::fs::write(&path, &d.bytes).map_err(|e| format!("存檔失敗：{e}"))?;
     Ok(Some(path))
@@ -625,7 +626,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let want = dir.path().join("我的報告.pdf");
             let w2 = want.clone();
-            let r = save_as(&relay_at(port), &reqwest::Client::new(), ID, name, move |n, f| {
+            let r = save_as(None, &relay_at(port), &reqwest::Client::new(), ID, name, move |n, f| {
                 assert_eq!(f, filter_ext(n));
                 Some(w2)
             })
@@ -643,7 +644,7 @@ mod tests {
     #[tokio::test]
     async fn 另存_按取消_完全不連線_不寫檔() {
         // 埠 1 沒人聽：只要有任何連線嘗試就會變成 Err
-        let r = save_as(&relay_at(1), &reqwest::Client::new(), ID, "報告.pdf", |n, f| {
+        let r = save_as(None, &relay_at(1), &reqwest::Client::new(), ID, "報告.pdf", |n, f| {
             assert_eq!(n, "報告.pdf");
             assert_eq!(f, Some("pdf"));
             None
@@ -652,7 +653,7 @@ mod tests {
         assert_eq!(r, Ok(None));
         // 編號格式不對：連對話框都不開
         let called = std::cell::Cell::new(false);
-        let r = save_as(&relay_at(1), &reqwest::Client::new(), "bad", "a.pdf", |_, _| { called.set(true); None }).await;
+        let r = save_as(None, &relay_at(1), &reqwest::Client::new(), "bad", "a.pdf", |_, _| { called.set(true); None }).await;
         assert!(r.is_err() && !called.get());
     }
 
@@ -670,7 +671,7 @@ mod tests {
         *port_cell.lock().unwrap() = port;
         let dir = tempfile::tempdir().unwrap();
         let chosen = dir.path().join("x.exe");
-        let p = save_as(&relay_at(port), &reqwest::Client::new(), ID, "a.pdf", move |_, _| Some(chosen)).await.unwrap().unwrap();
+        let p = save_as(None, &relay_at(port), &reqwest::Client::new(), ID, "a.pdf", move |_, _| Some(chosen)).await.unwrap().unwrap();
         assert_eq!(p.file_name().unwrap(), "x.exe.pdf");
         assert_eq!(std::fs::read(&p).unwrap(), pdf);
         assert!(!dir.path().join("x.exe").exists());
@@ -940,9 +941,51 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let want = dir.path().join("cat.webp");
         let w = want.clone();
-        let p = save_as(&relay_at(port), &reqwest::Client::new(), ID, "cat.webp", move |_, _| Some(w)).await.unwrap();
+        let p = save_as(None, &relay_at(port), &reqwest::Client::new(), ID, "cat.webp", move |_, _| Some(w)).await.unwrap();
         assert_eq!(p.as_deref(), Some(want.as_path()));
         assert_eq!(std::fs::read(&want).unwrap(), webp(64));
+    }
+
+    #[tokio::test]
+    async fn 快取_同一個附件第二次打開_不再要網址也不再下載_另存也用快取() {
+        use crate::attach_cache::{fetch, AttachCache};
+        let file = webp(64);
+        let f2 = file.clone();
+        let port_cell = Arc::new(Mutex::new(0u16));
+        let pc = port_cell.clone();
+        let (port, log) = serve(move |r, _| {
+            let port = *pc.lock().unwrap();
+            if r.path.starts_with("/storage/dl") { return (200, f2.clone(), "image/webp"); }
+            (200, format!(r#"{{"url":"http://127.0.0.1:{port}/storage/dl?t=1","name":"cat.webp","mime":"image/webp","bytes":64}}"#).into_bytes(), "application/json")
+        });
+        *port_cell.lock().unwrap() = port;
+        let t = tempfile::tempdir().unwrap();
+        let cache = AttachCache::new(t.path().join("n1"));
+        let http = reqwest::Client::new();
+        let n = || log.lock().unwrap().len();
+        let a = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
+        assert_eq!(n(), 2, "第一次：要網址＋下載");
+        let b = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
+        assert_eq!(n(), 2, "第二次：完全不連線");
+        assert_eq!((a.bytes, b.bytes, b.name.as_str()), (file.clone(), file.clone(), "cat.webp"));
+        let want = t.path().join("out").join("cat.webp");
+        std::fs::create_dir_all(want.parent().unwrap()).unwrap();
+        let w = want.clone();
+        save_as(Some(&cache), &relay_at(port), &http, ID, "cat.webp", move |_, _| Some(w)).await.unwrap();
+        assert_eq!(n(), 2, "另存也讀快取");
+        assert_eq!(std::fs::read(&want).unwrap(), file);
+        // 快取裡的檔被改壞：丟掉重抓一次
+        std::fs::write(t.path().join("n1").join(format!("{ID}.bin")), vec![b'x'; 64]).unwrap();
+        let c = fetch(Some(&cache), &relay_at(port), &http, ID, None).await.unwrap();
+        assert_eq!((n(), c.bytes), (4, file.clone()));
+        // 沒有快取（找不到快取資料夾）：照舊每次下載
+        fetch(None, &relay_at(port), &http, ID, None).await.unwrap();
+        assert_eq!(n(), 6);
+        // 下載失敗不寫快取
+        let (bad, _) = serve(|_, _| (410, br#"{"error":"expired"}"#.to_vec(), "application/json"));
+        let other = "00000000-0000-0000-0000-000000000099";
+        assert!(fetch(Some(&cache), &relay_at(bad), &http, other, None).await.is_err());
+        assert!(!t.path().join("n1").join(format!("{other}.bin")).exists());
     }
 
     #[tokio::test]

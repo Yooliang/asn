@@ -116,7 +116,7 @@ const acctTransport = {
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
-  fetch: id => invoke('relay_attachment_fetch', { id }),
+  fetch: (id, expiresAt = null) => invoke('relay_attachment_fetch', { id, expiresAt }),
   save: async (id, name) => savePhotoOnPhone(await invoke('relay_attachment_save', { id, name }), bridge),
   reveal: async () => bridge?.openDownloads(),
 }

@@ -16,6 +16,8 @@ mod account;
 mod android_update;
 mod appdir;
 mod attach;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+mod attach_cache;
 mod auth;
 mod avatar;
 mod bell;
@@ -2453,12 +2455,50 @@ async fn relay_send_attachment(app: State<'_, App>, auth: State<'_, auth::AuthSt
     attach::send_attachment_signed(&r, &reqwest::Client::new(), &payload, token.as_deref()).await
 }
 
-/// 放大看：換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
+/// 附件快取清空了：通知所有視窗把記在記憶體裡的圖丟掉（ui/lib/photo.mjs 的 shownPhotos）
+#[cfg(feature = "gui")]
+pub(crate) const ATTACH_CACHE_CLEARED: &str = "attach-cache-cleared";
+
+/// 這台、這個節點的附件快取（#1493）：放在系統的 App 快取資料夾底下（電腦＝%LOCALAPPDATA%\tw.yooliang.asn，手機＝App 的 cache）。
+/// 用之前先對帳號（.owner）：跟上次不同就整個清空，任何換帳號的路（含登入過期被登出）都涵蓋。
+/// 找不到快取資料夾、或對帳號失敗就不用快取（照舊每次下載）
+#[cfg(feature = "gui")]
+pub(crate) fn attach_cache_of(handle: &AppHandle, app: &App, auth: &auth::AuthState) -> Option<attach_cache::AttachCache> {
+    let root = handle.path().app_cache_dir().ok()?;
+    let st = auth.status();
+    let key = attach_cache::owner_key(st.email.as_deref().filter(|_| st.signed_in));
+    match attach_cache::ensure_owner(&root, &key) {
+        Ok(cleared) => {
+            if cleared {
+                let _ = handle.emit(ATTACH_CACHE_CLEARED, ());
+            }
+        }
+        Err(e) => {
+            elog!("{e}");
+            return None;
+        }
+    }
+    Some(attach_cache::AttachCache::new(attach_cache::dir_for(&root, &app.node)).with_owner(&root, &key))
+}
+
+/// 登出、登入時清空整個附件快取：換人登入看不到上一個帳號的圖。清不掉只記 log，不擋登入登出
+#[cfg(feature = "gui")]
+pub(crate) fn clear_attach_cache(handle: &AppHandle) {
+    // 每個視窗的畫面都記著最近看過的圖：一起通知丟掉（電腦版有好幾個視窗）
+    let _ = handle.emit(ATTACH_CACHE_CLEARED, ());
+    let Ok(root) = handle.path().app_cache_dir() else { return };
+    if let Err(e) = attach_cache::clear_all(&root) {
+        elog!("{e}");
+    }
+}
+
+/// 放大看：先讀附件快取；沒有才換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
 #[cfg(feature = "gui")]
 #[tauri::command]
-async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value, String> {
+async fn relay_attachment_fetch(app: State<'_, App>, auth: State<'_, auth::AuthState>, handle: AppHandle, id: String, expires_at: Option<u64>) -> Result<Value, String> {
     let r = relay_of(&app)?;
-    let d = attach::download(&r, &reqwest::Client::new(), &id).await?;
+    let cache = attach_cache_of(&handle, &app, &auth);
+    let d = attach_cache::fetch(cache.as_ref(), &r, &reqwest::Client::new(), &id, expires_at).await?;
     if d.mime != "image/webp" {
         return Err("這不是圖片，請改用「另存」".into());
     }
@@ -2478,6 +2518,7 @@ struct SaveDir(std::sync::Mutex<Option<PathBuf>>);
 #[tauri::command]
 async fn relay_attachment_save(
     app: State<'_, App>,
+    auth: State<'_, auth::AuthState>,
     dir_state: State<'_, SaveDir>,
     handle: AppHandle,
     id: String,
@@ -2498,7 +2539,8 @@ async fn relay_attachment_save(
         b = b.add_filter("所有檔案", &["*"]);
         b.blocking_save_file().and_then(|f| f.into_path().ok())
     };
-    let saved = attach::save_as(&r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), pick).await?;
+    let cache = attach_cache_of(&handle, &app, &auth);
+    let saved = attach::save_as(cache.as_ref(), &r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), pick).await?;
     Ok(saved.map(|p| {
         if let (Some(parent), Ok(mut g)) = (p.parent(), dir_state.0.lock()) {
             *g = Some(parent.to_path_buf());
