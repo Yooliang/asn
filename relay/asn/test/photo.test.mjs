@@ -9,7 +9,7 @@ import { AsnCore } from '../ui/lib/core.mjs'
 import {
   FILE_ACCEPT, FILE_MAX_BYTES, FILE_TYPES, fileMimeOf, noticeOf,
   PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, THUMB_MAX_CHARS, cleanPhotoName, expiresAt, fitSize, formatBytes, friendlyPhotoError, isThumb,
-  normalizePhotos, photoExpired, photoText, photoTitle, stripPhotoLines, webpName,
+  normalizePhotos, photoExpired, recentPhotos, photoText, photoTitle, stripPhotoLines, webpName,
 } from '../ui/lib/photo.mjs'
 import { FAKE_KEY, startFakeRelay, U } from './fake-relay.mjs'
 import { httpTransport, memStore } from './helpers.mjs'
@@ -314,4 +314,18 @@ test('另存：取消不顯示已存、存好顯示位置並出現「開啟資�
   assert.ok(pane.includes('if (path) {'), '取消（null）不顯示已存到')
   assert.ok(pane.includes('開啟資料夾') && pane.includes('revealSaved'))
   assert.ok(!pane.includes('下載\\ASN'), '介面文字不再說自動存到下載\\ASN')
+})
+
+test('看大圖：最近看過的記 5 張，超過丟最久沒看的；再看一次算最近（#1493）', () => {
+  const r = recentPhotos()
+  for (const i of [1, 2, 3, 4, 5]) r.set(`id${i}`, `u${i}`)
+  assert.equal(r.get('id1'), 'u1')   // id1 變成最近看的
+  r.set('id6', 'u6')
+  assert.equal(r.size, 5)
+  assert.equal(r.get('id2'), null, 'id2 最久沒看，被丟掉')
+  assert.equal(r.get('id1'), 'u1')
+  assert.equal(r.get('nope'), null)
+  const pane = read('ui/lib/chatpane.mjs')
+  const open = pane.slice(pane.indexOf('async function openPhoto'), pane.indexOf('async function saveViewer'))
+  assert.ok(open.indexOf('recentShown.get') < open.indexOf('photoApi.fetch') && open.includes('recentShown.set'), '先看記住的，沒有才跟 Rust 要')
 })

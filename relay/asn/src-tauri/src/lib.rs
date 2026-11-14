@@ -16,6 +16,8 @@ mod account;
 mod android_update;
 mod appdir;
 mod attach;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+mod attach_cache;
 mod auth;
 mod avatar;
 mod bell;
@@ -2453,12 +2455,30 @@ async fn relay_send_attachment(app: State<'_, App>, auth: State<'_, auth::AuthSt
     attach::send_attachment_signed(&r, &reqwest::Client::new(), &payload, token.as_deref()).await
 }
 
-/// 放大看：換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
+/// 這台、這個節點的附件快取（#1493）：放在系統的 App 快取資料夾底下（電腦＝%LOCALAPPDATA%\tw.yooliang.asn，手機＝App 的 cache）。
+/// 找不到快取資料夾就不用快取（照舊每次下載）
+#[cfg(feature = "gui")]
+pub(crate) fn attach_cache_of(handle: &AppHandle, app: &App) -> Option<attach_cache::AttachCache> {
+    let root = handle.path().app_cache_dir().ok()?;
+    Some(attach_cache::AttachCache::new(attach_cache::dir_for(&root, &app.node)))
+}
+
+/// 登出、登入時清空整個附件快取：換人登入看不到上一個帳號的圖。清不掉只記 log，不擋登入登出
+#[cfg(feature = "gui")]
+pub(crate) fn clear_attach_cache(handle: &AppHandle) {
+    let Ok(root) = handle.path().app_cache_dir() else { return };
+    if let Err(e) = attach_cache::clear_all(&root) {
+        elog!("{e}");
+    }
+}
+
+/// 放大看：先讀附件快取；沒有才換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
 #[cfg(feature = "gui")]
 #[tauri::command]
-async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value, String> {
+async fn relay_attachment_fetch(app: State<'_, App>, handle: AppHandle, id: String) -> Result<Value, String> {
     let r = relay_of(&app)?;
-    let d = attach::download(&r, &reqwest::Client::new(), &id).await?;
+    let cache = attach_cache_of(&handle, &app);
+    let d = attach_cache::fetch(cache.as_ref(), &r, &reqwest::Client::new(), &id).await?;
     if d.mime != "image/webp" {
         return Err("這不是圖片，請改用「另存」".into());
     }
@@ -2498,7 +2518,8 @@ async fn relay_attachment_save(
         b = b.add_filter("所有檔案", &["*"]);
         b.blocking_save_file().and_then(|f| f.into_path().ok())
     };
-    let saved = attach::save_as(&r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), pick).await?;
+    let cache = attach_cache_of(&handle, &app);
+    let saved = attach::save_as(cache.as_ref(), &r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), pick).await?;
     Ok(saved.map(|p| {
         if let (Some(parent), Ok(mut g)) = (p.parent(), dir_state.0.lock()) {
             *g = Some(parent.to_path_buf());

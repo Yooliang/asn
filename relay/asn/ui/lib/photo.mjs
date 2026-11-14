@@ -8,6 +8,7 @@ export const PHOTO_PICK_MAX = 30 * 1024 * 1024   // 選進來的原圖上限（�
 export const THUMB_EDGE = 256
 export const THUMB_MAX_CHARS = 12000
 export const PHOTO_KEEP_DAYS = 30
+export const VIEWER_RECENT_MAX = 5           // 看大圖：同一次開著 App 時記住最近幾張（#1493；本機副本在 Rust 的附件快取）
 export const PHOTO_LABEL = '〔照片〕'
 export const FILE_LABEL = '〔檔案〕'
 export const MAX_PHOTOS = 4
@@ -92,6 +93,24 @@ export function photoExpired(p, now = Date.now()) {
   if (p?.expired) return true
   const t = Date.parse(p?.expires_at ?? '')
   return Number.isFinite(t) && t <= now
+}
+
+// 最近看過的大圖（附件編號 → data URL），最多 max 張，超過丟最久沒看的。只放在記憶體，關掉 App 就沒了
+export function recentPhotos(max = VIEWER_RECENT_MAX) {
+  const m = new Map()
+  return {
+    get(id) {
+      if (!m.has(id)) return null
+      const v = m.get(id)
+      m.delete(id); m.set(id, v)
+      return v
+    },
+    set(id, v) {
+      m.delete(id); m.set(id, v)
+      while (m.size > max) m.delete(m.keys().next().value)
+    },
+    get size() { return m.size },
+  }
 }
 
 export function expiresAt(now = Date.now()) { return new Date(now + PHOTO_KEEP_DAYS * 86400_000).toISOString() }
