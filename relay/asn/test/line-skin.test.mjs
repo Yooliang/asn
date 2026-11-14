@@ -97,7 +97,7 @@ test('line.css：每條規則都限定在 LINE 底下（縮圖除外）；九個
 
 test('LINE 情境：電腦清單、一對一、群組、設定；手機清單、一對一、群組、設定；存檔選 LINE，探測語法正確、設定頁用真的點擊', () => {
   const sc = SCENARIOS.filter(s => s.probe?.line)
-  assert.deepEqual(sc.map(s => s.name), ['list-line-msgs', 'list-line-group', 'list-line-list', 'list-line-settings', 'm-line-msgs', 'm-line-group', 'm-line-list', 'm-line-settings'])
+  assert.deepEqual(sc.map(s => s.name), ['list-line-msgs', 'list-line-group', 'list-line-list', 'list-line-settings', 'm-line-msgs', 'm-line-group', 'm-line-list', 'list-line-nav', 'list-line-chat', 'list-line-narrow', 'm-line-nav', 'm-line-chat', 'm-line-settings'])
   for (const s of sc) {
     const me = JSON.parse(tableFor(s).store_load.values.me)
     assert.equal(me.skin, 'line', s.name); assert.equal(me.mobilePrefs.skin, 'line', s.name)
