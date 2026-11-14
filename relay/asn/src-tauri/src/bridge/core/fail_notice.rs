@@ -13,13 +13,40 @@ const WORKER_FAIL_WARN_AT: u32 = 3;
 /// 之後每多這麼多次再警告一次
 const WORKER_FAIL_WARN_EVERY: u32 = 10;
 
-/// 不寫 @：不點名任何人，通知不會指定叫醒誰。逾時只知道沒等到回報，信可能已經到了，說法不能講死
-fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool) -> String {
+/// 失敗原因 → 貼在群組的一句白話（#1366）。只放固定的分類，不放原文：原文可能帶檔案路徑、API 錯誤內容，群組裡不必看到。
+/// 認不出來回 None（照舊的說法）
+fn room_fail_reason(why: &str) -> Option<&'static str> {
+    let w = why.to_lowercase();
+    let has = |k: &str| why.contains(k) || w.contains(k);
+    if has("需要登入") || has("登入失效") {
+        Some("需要重新登入")
+    } else if has("額度用完") || Core::is_payment_error(why) {
+        Some("額度用完了")
+    } else if has("太久沒有動靜") {
+        Some("處理太久沒有動靜，已中止")
+    } else if has("想做不被允許的事") || has("被政策拒絕") {
+        Some("它想寫檔或執行指令，被擋下了")
+    } else if has("沒有產出回覆文字") {
+        Some("它沒有產出回覆")
+    } else if has("沒有在跑") || has("被關閉") || has("被停止") || has("正在關閉") || has("起不來") || has("中途結束") {
+        Some("它的工作者沒在跑")
+    } else if has("前面還排著") {
+        Some("前面排太多信，這則先沒收")
+    } else {
+        None
+    }
+}
+
+/// 不寫 @：不點名任何人，通知不會指定叫醒誰。逾時只知道沒等到回報，信可能已經到了，說法不能講死。
+/// why＝失敗原因（認得的分類會寫出來，#1366）；認不出來就照舊說「沒有轉交」
+fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool, why: &str) -> String {
     let name = target.replace('@', "");
     let what = if reply_blocked {
         format!("{name} 收到了，但它的回覆被內容過濾擋下，沒有回到群組。")
     } else if timed_out {
         format!("可能沒有轉交給 {name}。")
+    } else if let Some(r) = room_fail_reason(why) {
+        format!("轉交給 {name} 沒有成功：{r}。")
     } else {
         format!("沒有轉交給 {name}，對方還沒看到。")
     };
@@ -45,12 +72,34 @@ mod notice_tests {
 
     #[test]
     fn 群組失敗通知三種說法_沒轉交_可能沒轉交_收到了但回覆被擋下() {
-        let a = room_notice_text(5, "@甲", 0, false, false);
+        let a = room_notice_text(5, "@甲", 0, false, false, "");
         assert!(a.contains("沒有轉交給 甲，對方還沒看到") && !a.contains('@'), "{a}");
-        assert!(room_notice_text(5, "甲", 0, true, false).contains("可能沒有轉交給 甲"));
-        let c = room_notice_text(5, "甲", 2, false, true);
+        assert!(room_notice_text(5, "甲", 0, true, false, "").contains("可能沒有轉交給 甲"));
+        let c = room_notice_text(5, "甲", 2, false, true, "");
         assert!(c.contains("甲 收到了，但它的回覆被內容過濾擋下，沒有回到群組") && !c.contains("對方還沒看到") && !c.contains("沒有轉交"), "{c}");
         assert!(c.contains("另有 2 則情況相同"));
+    }
+
+    #[test]
+    fn 群組失敗通知帶出原因_只寫固定的白話分類_不寫原文() {
+        let cases = [
+            ("Gemini審查 需要登入：帳號登入失效或還沒登入。請登入 agy", "需要重新登入"),
+            ("Gemini審查 的額度用完了（或被限流），請稍後再試。", "額度用完了"),
+            ("Gemini審查 處理這封信太久沒有動靜（超過 5 分鐘），已中止這一輪。", "處理太久沒有動靜"),
+            ("Gemini審查 想做不被允許的事：寫入檔案（D:/Github/x/asn-gemini-review/a.html）（…）", "它想寫檔或執行指令，被擋下了"),
+            ("Gemini審查 沒有產出回覆文字（它想做的事被政策拒絕了：執行指令：dir）", "它想寫檔或執行指令，被擋下了"),
+            ("Gemini審查 沒有產出回覆文字", "它沒有產出回覆"),
+            ("Gemini審查 工作者目前沒有在跑：…", "它的工作者沒在跑"),
+            ("前面還排著 3 封信，這封先不收", "前面排太多信"),
+        ];
+        for (why, want) in cases {
+            let t = room_notice_text(7, "Gemini審查", 0, false, false, why);
+            assert!(t.contains("轉交給 Gemini審查 沒有成功") && t.contains(want), "{why} → {t}");
+            assert!(!t.contains("D:/") && !t.contains("dir") && !t.contains("agy"), "不寫原文：{t}");
+        }
+        // 認不出來的（例如 API 502）照舊的說法，也不寫原文
+        let t = room_notice_text(7, "甲", 0, false, false, "這一輪出錯：API error ... code 502");
+        assert!(t.contains("沒有轉交給 甲，對方還沒看到") && !t.contains("502"), "{t}");
     }
 
     #[test]
@@ -101,7 +150,7 @@ impl Core {
             self.log.line(&format!("room failure notice skipped id={id}: posted recently for {}", p.target));
             return;
         };
-        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why))).await;
+        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why), why)).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
             self.room_fail_notices.insert(key, (self.now, 0));
