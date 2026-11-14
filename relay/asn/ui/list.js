@@ -36,7 +36,7 @@ import { ActionBar } from './lib/actionbar.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
-import { copyText, createGroupApi, roomHue, roomInitial } from './lib/groups.mjs'
+import { copyText, createGroupApi, memberFriendId, roomHue, roomInitial } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
@@ -1103,6 +1103,13 @@ function openNoticeFromChat() {
   return openNoticeRow(ui.mode === 'merged' ? (noticeAll.value[0]?.key ?? '') : '')
 }
 
+// 群組裡點成員（#1515）：換成一對一夥伴 id，在夥伴名單裡就照從名單點進去一樣開（整合模式開分頁、分離模式開視窗）；不在名單回 false（畫面自己說明）
+function openMember(key) {
+  const id = memberFriendId(key, core.friends)
+  if (!id) return false
+  void openChat(id)
+  return true
+}
 async function openChat(id) {
   if (isRoomChat(id)) return openRoomChat(id)
   if (id === NOTICE_ID || id === NOTICE_TAB) return openNoticeFromChat()
@@ -1157,6 +1164,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'group-decide') await decideCard(c.id, c.cardId, c.approve === true)
   else if (c.op === 'nudge') { if (!isRoomChat(c.id)) await core.nudge(c.id) }
   else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
+  else if (c.op === 'open-chat') { if (typeof c.id === 'string' && core.friends.has(c.id)) await openChat(c.id) }   // 分離模式的對話視窗點了群組成員（#1515）；id 已在對話視窗換好，這裡再確認在名單裡
   else if (c.op === 'older') { const r = isRoomChat(c.id) ? { more: false, added: 0 } : await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
 })
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
@@ -2029,7 +2037,7 @@ const app = createApp({
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      openMember, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,

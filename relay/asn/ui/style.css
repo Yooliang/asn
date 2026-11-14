@@ -1095,3 +1095,9 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-table td:not(.tm-name):not(.tm-act){white-space:nowrap}
 /* #1461 線條圖示（lib/line-icons.mjs）只給現代外觀；復古 Aero 一律不顯示，照舊用原本的圖（版面與像素不變） */
 .lic{display:none}
+/* 群組裡點成員跳一對一（#1515）：名字、頭像只多滑過的游標與鍵盤焦點框，靜止時畫面完全不變；「N 人離線」名單能點的列滑過有底色 */
+.can-jump{cursor:pointer}
+.can-jump:focus-visible{outline:2px solid #3b82c4;outline-offset:1px;border-radius:4px}
+.mem-pick{cursor:pointer}
+.mem-pick:hover,.mem-pick:focus-visible{background:rgba(59,130,196,.12)}
+.mem-pick:focus-visible{outline:2px solid #3b82c4;outline-offset:-2px}
