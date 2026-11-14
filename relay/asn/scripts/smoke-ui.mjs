@@ -50,6 +50,7 @@ const cleanup = () => {
   killTree(child?.pid)
   try { server.close() } catch { /* 已關 */ }
   if (profile) { try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) } catch { /* 暫存而已 */ } }
+  try { fs.rmSync(SMOKE_FILES, { recursive: true, force: true }) } catch { /* 還沒建或已刪：暫存而已 */ }
 }
 process.on('exit', cleanup)
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130) })
@@ -73,6 +74,13 @@ const connect = url => new Promise((resolve, reject) => {
   })
 })
 
+// 選檔用的測試檔（#1497）：兩張正常的 1×1 PNG、一張壞掉的（內容不是圖）
+const SMOKE_FILES = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-smoke-files-'))
+const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+fs.writeFileSync(path.join(SMOKE_FILES, 'ok1.png'), PNG_1X1)
+fs.writeFileSync(path.join(SMOKE_FILES, 'ok2.png'), PNG_1X1)
+fs.writeFileSync(path.join(SMOKE_FILES, 'bad.png'), Buffer.from('這不是圖片，只是一段文字。'))
+
 // 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵
 async function realInput(S, payload) {
   let req
@@ -82,6 +90,15 @@ async function realInput(S, payload) {
     await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
     await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (Array.isArray(req.files)) {
+    // { files: [selector, 檔名…] }：像使用者在選檔對話框選了這些檔（偵錯協定 DOM.setFileInputFiles，會觸發 change）。
+    // 檔名指 smoke 自備的測試檔（SMOKE_FILES），不能指到別的地方
+    const [selector, ...names] = req.files
+    const files = names.map(n => path.join(SMOKE_FILES, path.basename(String(n))))
+    const { root } = await S('DOM.getDocument', { depth: 0 })
+    const { nodeId } = await S('DOM.querySelector', { nodeId: root.nodeId, selector })
+    if (!nodeId) throw new Error(`找不到選檔欄位 ${selector}`)
+    await S('DOM.setFileInputFiles', { nodeId, files })
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })

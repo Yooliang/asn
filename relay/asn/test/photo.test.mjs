@@ -315,3 +315,47 @@ test('另存：取消不顯示已存、存好顯示位置並出現「開啟資�
   assert.ok(pane.includes('開啟資料夾') && pane.includes('revealSaved'))
   assert.ok(!pane.includes('下載\\ASN'), '介面文字不再說自動存到下載\\ASN')
 })
+
+test('一次選多張（#1497）：依序送、一張失敗不連累其他張、超過上限的不送並說明', async () => {
+  const { sendInOrder, queueSummary, queueStepText, PICK_MULTI_MAX } = await import('../ui/lib/photo.mjs')
+  const order = [], steps = []
+  const files = ['a.png', 'b.png', 'c.png', 'd.png'].map(name => ({ name }))
+  let running = 0
+  const r = await sendInOrder(files, async (f, i) => {
+    running++; assert.equal(running, 1, '一次只送一張'); order.push(f.name)
+    await new Promise(res => setTimeout(res, 5)); running--
+    if (f.name === 'b.png') throw new Error('檔案太大了（照片上限 5 MB、檔案上限 25 MB）。')
+    if (f.name === 'c.png') return { ok: false, error: 'rate_limited' }
+    return { ok: true }
+  }, (i, n) => steps.push(queueStepText(i, n)))
+  assert.deepEqual(order, ['a.png', 'b.png', 'c.png', 'd.png'], '照選的順序')
+  assert.deepEqual(steps, ['傳送中 1／4…', '傳送中 2／4…', '傳送中 3／4…', '傳送中 4／4…'])
+  assert.equal(r.sent, 2)
+  assert.deepEqual(r.failed.map(f => f.name), ['b.png', 'c.png'])
+  assert.match(r.failed[1].error, /頻繁/, '後台的代碼轉成白話')
+  assert.equal(queueSummary(r), '2 張已傳出，2 張沒有傳出：b.png（檔案太大了（照片上限 5 MB、檔案上限 25 MB）。）、c.png（傳得太頻繁了，請稍後再試。）')
+  // 全部成功：不留訊息；只選一張失敗：照舊只寫原因
+  assert.equal(queueSummary({ sent: 3, failed: [], skipped: 0 }), '')
+  assert.equal(queueStepText(0, 1), '處理中…')
+  assert.equal(queueSummary({ sent: 0, failed: [{ name: 'x', error: '壞了' }], skipped: 0 }), '壞了')
+  // 超過上限：前 PICK_MULTI_MAX 張照送，其他不送
+  const many = Array.from({ length: PICK_MULTI_MAX + 3 }, (_, i) => ({ name: `${i}.png` }))
+  let n = 0
+  const m = await sendInOrder(many, async () => { n++ })
+  assert.equal(n, PICK_MULTI_MAX)
+  assert.equal(m.skipped, 3)
+  assert.match(queueSummary(m), new RegExp(`一次最多 ${PICK_MULTI_MAX} 張，另外 3 張沒有送出`))
+})
+
+test('一次選多張接線：兩個選檔都能多選；外層送完回報結果（名單、手機、對話視窗）', () => {
+  const pane = read('ui/lib/chatpane.mjs')
+  assert.equal((pane.match(/type="file"[^>]*multiple/g) ?? []).length, 2)
+  assert.match(pane, /emit\('attach', photo, caption, done\)/)
+  assert.match(pane, /i === 0 \? caption : ''/, '說明只放第一張')
+  assert.match(read('ui/list.html'), /@attach="\(p, cap, done\) => sendAttachTo\(t\.id, p, cap, done\)"/)
+  assert.match(read('ui/m.html'), /@attach="\(p, cap, done\) => sendAttachTo\(chatFriend\.id, p, cap, done\)"/)
+  for (const f of ['ui/list.js', 'ui/m.js']) assert.match(read(f), /if \(typeof done === 'function'\) done\(\{ ok: r\.ok !== false, error: r\.error \?\? '' \}\)/, f)
+  assert.match(read('ui/list.js'), /emit\('asn:attach-done', \{ id: c\.id, token: c\.token, \.\.\.r \}\)/)
+  const chat = read('ui/chat.js')
+  assert.ok(chat.indexOf("await listen('asn:attach-done'") < chat.indexOf("emit('asn:cmd', { op: 'attach', id, photo, caption, token })"), '先掛好監聽再送')
+})

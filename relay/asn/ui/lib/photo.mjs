@@ -8,6 +8,7 @@ export const PHOTO_PICK_MAX = 30 * 1024 * 1024   // 選進來的原圖上限（�
 export const THUMB_EDGE = 256
 export const THUMB_MAX_CHARS = 12000
 export const PHOTO_KEEP_DAYS = 30
+export const PICK_MULTI_MAX = 10              // 一次最多選幾張（#1497）；多的不送並說明
 export const PHOTO_LABEL = '〔照片〕'
 export const FILE_LABEL = '〔檔案〕'
 export const MAX_PHOTOS = 4
@@ -120,4 +121,38 @@ export function friendlyPhotoError(msg) {
   if (/unsupported_type/.test(e)) return 'ASN 不收這種檔案。'
   if (/rate_limited/.test(e)) return '傳得太頻繁了，請稍後再試。'
   return e || '照片沒有傳出去。'
+}
+
+// ---- 一次選多張（#1497）：依序一張一張送；一張失敗只記下來，接著送下一張 ----
+// items＝選到的檔；sendOne(item, i) 送一張（失敗丟錯或回 { ok: false, error }）；onStep(i, n) 開始第 i 張時呼叫
+// → { sent, failed: [{ name, error }], skipped }（skipped＝超過 PICK_MULTI_MAX 沒送的張數）
+export async function sendInOrder(items, sendOne, onStep = () => {}, max = PICK_MULTI_MAX) {
+  const list = [...(items ?? [])].filter(Boolean)
+  const todo = list.slice(0, max)
+  const failed = []
+  let sent = 0
+  for (let i = 0; i < todo.length; i++) {
+    onStep(i, todo.length)
+    try {
+      const r = await sendOne(todo[i], i)
+      if (r && r.ok === false) throw new Error(r.error || '沒有傳出去')
+      sent++
+    } catch (e) {
+      failed.push({ name: String(todo[i]?.name ?? `第 ${i + 1} 張`), error: friendlyPhotoError(e?.message ?? e) })
+    }
+  }
+  return { sent, failed, skipped: list.length - todo.length }
+}
+
+// 送到第幾張的提示
+export const queueStepText = (i, n) => (n > 1 ? `傳送中 ${i + 1}／${n}…` : '處理中…')
+
+// 送完的一句：全部成功回空字串（不留訊息）；一張的照舊只寫原因；多張寫幾張成功、哪幾張失敗、為什麼
+export function queueSummary({ sent, failed, skipped }) {
+  const n = sent + failed.length
+  const more = skipped > 0 ? `一次最多 ${PICK_MULTI_MAX} 張，另外 ${skipped} 張沒有送出，請再選一次。` : ''
+  if (!failed.length) return more
+  if (n === 1) return failed[0].error + (more ? ' ' + more : '')
+  const list = failed.map(f => `${f.name}（${f.error}）`).join('、')
+  return `${sent} 張已傳出，${failed.length} 張沒有傳出：${list}${more ? ' ' + more : ''}`
 }
