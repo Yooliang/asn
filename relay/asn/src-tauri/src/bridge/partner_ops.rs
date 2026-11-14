@@ -136,6 +136,10 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn launch_pi_session(&self, config: &LaunchConfig, name: &str, cwd: &str, session_file: &str) -> Result<u32, String> {
         crate::launch::local::start_pi_session(config, name, cwd, session_file)
     }
+    /// 終端對照表裡記著這個對話編號的夥伴視窗列（同編號兩列以上＝空）。喚醒被擋時用它分辨「是不是 ASN 開的、卡住的接回」。預設沒有
+    fn session_partners(&self, _session: &str) -> Vec<crate::launch::stuck_resume::PartnerRef> {
+        Vec::new()
+    }
 }
 
 pub(crate) struct SystemOpsEnv {
@@ -169,6 +173,17 @@ impl OpsEnv for SystemOpsEnv {
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         use super::launcher::LaunchEnv;
         super::launcher::SystemEnv::new(self.data_dir.clone()).config(true)
+    }
+    fn session_partners(&self, session: &str) -> Vec<crate::launch::stuck_resume::PartnerRef> {
+        #[cfg(desktop)]
+        {
+            crate::launch::term::partner_by_session(session).into_iter().collect()
+        }
+        #[cfg(not(desktop))]
+        {
+            let _ = session;
+            Vec::new()
+        }
     }
     fn tell(&self, name: &str, text: &str) -> Result<(), String> {
         // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
@@ -1423,9 +1438,14 @@ impl PartnerOps {
             return failed("這位夥伴已經在線上");
         }
         // 視窗剛開、session 檔還沒寫出來：只有程序表看得到（命令列帶 --resume 這段對話的活程序，和自動接回用同一個判斷）
-        if let Some(pids) = crate::launch::live_process::resuming_pids(os, sid) {
-            let started = crate::launch::live_process::earliest_started_ms(os, &pids);
-            return failed(crate::launch::live_process::resume_block_hint(self.env.now_ms(), started));
+        // 滿 5 分鐘而且是 ASN 開的、卡在接回中的那種：提示改成到工作管理員停止（判斷與工作管理員共用 stuck_resume）
+        if crate::launch::live_process::resuming_pids(os, sid).is_some() {
+            let live: Vec<crate::launch::stuck_resume::LiveSess> = console::read_sessions(&self.dirs.sessions)
+                .iter()
+                .filter(|s| self.session_live(s))
+                .map(|s| crate::launch::stuck_resume::LiveSess { sid: s.get("sessionId").and_then(Value::as_str).map(str::to_string), pid: s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).unwrap_or(0) })
+                .collect();
+            return failed(crate::launch::stuck_resume::resume_block_hint(os, &self.env.session_partners(sid), &live, sid, self.env.now_ms()));
         }
         // 3. 找對話紀錄，從裡面取原本的工作資料夾；不是 Claude 的就看是不是 pi 的對話檔（#468）
         let Some(cwd) = find_transcript_cwd(&self.dirs.projects, sid) else {

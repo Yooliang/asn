@@ -54,10 +54,16 @@ pub(crate) const STUCK_HINT: &str = "可能卡住了，先關掉那個終端再�
 
 /// 依程序的啟動時間挑提示：啟動滿 5 分鐘 → 可能卡住；未滿或查不到啟動時間 → 原句（純函式）
 pub(crate) fn resume_block_hint(now_ms: u64, started_ms: Option<u64>) -> &'static str {
-    match started_ms {
-        Some(s) if now_ms.saturating_sub(s) >= STUCK_AFTER_MS => STUCK_HINT,
-        _ => STARTING_HINT,
+    if is_stuck(now_ms, started_ms) {
+        STUCK_HINT
+    } else {
+        STARTING_HINT
     }
+}
+
+/// 啟動滿 5 分鐘、程序還在＝可能卡住；查不到啟動時間不算（純函式，工作管理員與喚醒提示共用）
+pub(crate) fn is_stuck(now_ms: u64, started_ms: Option<u64>) -> bool {
+    started_ms.is_some_and(|s| now_ms.saturating_sub(s) >= STUCK_AFTER_MS)
 }
 
 /// 這段對話的活程序裡最早啟動的那個的啟動時間（任何一個查不到就不採用它）

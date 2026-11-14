@@ -894,7 +894,9 @@ async fn task_manager_list(app: State<'_, App>, terms: State<'_, Arc<launch::ter
     let (work_dir, node) = (app.work_dir.clone(), app.node.clone());
     let asn_window = app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default();
     let term_rows: Vec<launch::taskmgr::TermIn> = terms.list().into_iter().map(|t| launch::taskmgr::TermIn { id: t.id, profile: t.profile, pid: t.pid, started_ms: t.started_ms, cwd: t.cwd, adopted: t.adopted }).collect();
-    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows)).await.map_err(|e| e.to_string())?
+    // 對照表裡的夥伴視窗：只用來找「卡在接回中」的（判斷全在 taskmgr::build）
+    let partners = terms.partner_refs();
+    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows, partners)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "gui")]
@@ -1983,6 +1985,11 @@ fn term_env_notice() -> Option<String> {
 #[tauri::command]
 async fn term_stop(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermStopReq) -> Result<(), String> {
     let terms = terms.inner().clone();
+    // 工作管理員停「卡在接回中」的夥伴視窗：帶了對話編號才走這條窄路，後端先把四個條件再驗一次（見 launch::stuck_resume），
+    // 成立才呼叫既有的 stop_partner／stop_gui；其他一律照舊
+    if let Some(sid) = req.resuming_sid.clone() {
+        return launch::blocking_timeout(move || launch::stuck_resume::stop_real(&terms, &req.id, &sid)).await;
+    }
     launch::blocking_timeout(move || terms.stop(&req.id)).await
 }
 

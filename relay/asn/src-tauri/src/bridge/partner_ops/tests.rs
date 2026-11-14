@@ -106,9 +106,14 @@ struct FakeEnv {
     pi_launch_registers: AtomicBool,
     /// 「正在開」登記（測試自己一份，不碰全程序共用的）
     opening: Mutex<crate::launch::opening::Opening>,
+    /// 終端對照表裡記著對話編號的夥伴視窗列（喚醒提示用）
+    partners: Mutex<Vec<crate::launch::stuck_resume::PartnerRef>>,
 }
 
 impl OpsEnv for FakeEnv {
+    fn session_partners(&self, session: &str) -> Vec<crate::launch::stuck_resume::PartnerRef> {
+        self.partners.lock().unwrap().iter().filter(|p| p.session_id == session).cloned().collect()
+    }
     fn claim_opening(&self, session: &str, name: &str) -> bool {
         self.opening.lock().unwrap().claim(session, name, NOW)
     }
@@ -338,6 +343,7 @@ fn rig(o: Opt) -> Rig {
         pi_launch_fail: AtomicBool::new(false),
         pi_launch_registers: AtomicBool::new(true),
         opening: Mutex::new(Default::default()),
+        partners: Mutex::new(Vec::new()),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -2519,6 +2525,50 @@ fn 喚醒守門_有帶_resume_的活程序已啟動超過五分鐘_提示可能�
     assert!(!res.detail.contains("工作管理員"), "{}", res.detail);
     assert!(r.launched().is_empty(), "不能開窗");
     assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不動任何程序");
+}
+
+/// 讓 400 號程序掛在終端服務 4100 底下（建立時間 1000），對照表也記著這一列：ASN 開的、卡在接回中的樣子
+fn anchor_resuming_to_mux(r: &Rig) {
+    let os = r.os();
+    {
+        let mut t = os.table.lock().unwrap();
+        t.push(p(4100, 1, crate::launch::switch::MUX_SERVER));
+        for x in t.iter_mut().filter(|x| x.pid == 400) {
+            x.ppid = 4100;
+        }
+    }
+    os.started.lock().unwrap().insert(4100, 1000);
+    *r.env.partners.lock().unwrap() = vec![crate::launch::stuck_resume::PartnerRef { id: "7".into(), name: "離線夥伴".into(), session_id: SID.into(), mux: true, gui_pid: 4100, started_ms: Some(1000), cwd: String::new() }];
+}
+
+#[test]
+fn 喚醒守門_ASN開的卡住接回_滿五分鐘_提示到工作管理員停止() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    r.os().started.lock().unwrap().insert(400, NOW - 6 * 60_000);
+    anchor_resuming_to_mux(&r);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert_eq!(res.detail, "可能卡住了，到工作管理員停止它");
+    assert!(r.launched().is_empty() && r.terminated().is_empty(), "不開窗、不動程序");
+}
+
+#[test]
+fn 喚醒守門_ASN開的接回_未滿五分鐘_維持請稍候() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    r.os().started.lock().unwrap().insert(400, NOW - 60_000);
+    anchor_resuming_to_mux(&r);
+    assert!(resume(&r, "離線夥伴", SID).detail.contains("已經在線上或正在啟動"));
+}
+
+#[test]
+fn 喚醒守門_滿五分鐘但不是對照表裡的視窗_維持先關掉那個終端() {
+    let r = resume_rig(Opt::default());
+    add_resuming_process(&r, 400, SID, true);
+    r.os().started.lock().unwrap().insert(400, NOW - 6 * 60_000);
+    let res = resume(&r, "離線夥伴", SID);
+    assert!(res.detail.contains("先關掉那個終端") && !res.detail.contains("工作管理員"), "{}", res.detail);
 }
 
 #[test]

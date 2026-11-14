@@ -1621,6 +1621,27 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         it.next().is_none().then_some(first)
     }
 
+    /// 對照表裡的夥伴視窗（claude）列：有對話編號、有名字的才算。只讀，給工作管理員找「卡在接回中」的視窗
+    pub fn partner_refs(&self) -> Vec<super::stuck_resume::PartnerRef> {
+        let g = self.inner.lock().unwrap();
+        g.sessions
+            .iter()
+            .filter(|s| s.kind == super::win_term::KIND_CLAUDE)
+            .filter_map(|s| {
+                let sid = s.session_id.clone().filter(|x| !x.is_empty())?;
+                let name = partner_label(&s.id, &s.title)?.to_string();
+                Some(super::stuck_resume::PartnerRef { id: s.id.clone(), name, session_id: sid, mux: s.window.mux, gui_pid: s.window.gui_pid, started_ms: s.window.started_ms, cwd: s.cwd.clone() })
+            })
+            .collect()
+    }
+
+    /// 記著這個對話編號的夥伴視窗列；沒有、或同一個編號對到兩列以上（不猜）＝None。只讀
+    pub fn partner_by_session(&self, sid: &str) -> Option<super::stuck_resume::PartnerRef> {
+        let mut hits = self.partner_refs().into_iter().filter(|p| p.session_id == sid);
+        let first = hits.next()?;
+        hits.next().is_none().then_some(first)
+    }
+
     /// 夥伴清單的「前台／背景」在 mux 視窗上的查詢：前台＝看畫面的 GUI 開著
     pub fn console_query_mux(&self, id: &str) -> serde_json::Value {
         serde_json::json!({ "ok": true, "can_toggle": true, "visible": self.viewing(id) })
@@ -3458,6 +3479,9 @@ pub struct TermReadReq {
 #[derive(Debug, serde::Deserialize)]
 pub struct TermStopReq {
     pub id: String,
+    /// 工作管理員停「卡在接回中」的視窗時才帶：後端會把條件再驗一次，不成立就拒絕
+    #[serde(default)]
+    pub resuming_sid: Option<String>,
 }
 
 #[cfg(feature = "gui")]
@@ -3648,6 +3672,19 @@ pub(crate) fn mux_partner_in(mux: (u32, u64), name: &str) -> Option<String> {
     #[cfg(not(all(feature = "gui", not(test))))]
     {
         let _ = (mux, name);
+        None
+    }
+}
+
+/// 記著這個對話編號的夥伴視窗列（見 TermService::partner_by_session）；沒有畫面的建置、測試＝None
+pub(crate) fn partner_by_session(sid: &str) -> Option<super::stuck_resume::PartnerRef> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().and_then(|t| t.partner_by_session(sid))
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        let _ = sid;
         None
     }
 }
@@ -6957,6 +6994,26 @@ mod tests {
             assert!(rig.svc.view(&id).is_err());
             assert!(view_spawns(&rig.runner).is_empty());
             assert!(rig.svc.partner_in_mux((42, 1000), "小乙").is_none(), "第 1 階段的視窗沒有共用終端可以找");
+        }
+
+        #[test]
+        fn 依對話編號找夥伴列_只讀_同編號兩列以上不算() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            let r = rig.svc.partner_by_session("sid-1").expect("對照表有這一列");
+            assert_eq!((r.id.as_str(), r.name.as_str(), r.session_id.as_str(), r.mux, r.gui_pid, r.started_ms), (id.as_str(), "小乙", "sid-1", true, MUX_PID, Some(1000)));
+            assert!(rig.svc.partner_by_session("sid-2").is_none(), "沒有這個編號");
+            assert!(rig.svc.partner_by_session("").is_none());
+            assert_eq!(rig.svc.partner_refs().len(), 1);
+            let dup = {
+                let g = rig.svc.inner.lock().unwrap();
+                let s = &g.sessions[0];
+                Session { id: "99".into(), profile: s.profile.clone(), window: s.window.clone(), pane_id: s.pane_id, workspace: s.workspace.clone(), title: "ASN:99 小丙".into(), cwd: s.cwd.clone(), send_granted: s.send_granted, kind: s.kind.clone(), session_id: s.session_id.clone(), exit_nonce: None }
+            };
+            rig.svc.inner.lock().unwrap().sessions.push(dup);
+            assert_eq!(rig.svc.partner_refs().len(), 2);
+            assert!(rig.svc.partner_by_session("sid-1").is_none(), "同一個編號對到兩列：不猜");
+            assert!(rig.runner.killed().is_empty() && kill_panes(&rig.runner) == 0, "只讀，不動任何東西");
         }
 
         #[test]
