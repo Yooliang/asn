@@ -511,3 +511,5 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 /* 現代外觀的對話頂端（#1421 B 之三）：名牌與「看終端」只在 modern.css 顯示；復古 Aero 照舊是頭像、名字、「⋯」 */
 .m-chathead .m-plate,.m-chathead .m-head-term,.m-chathead .m-head-offline{display:none}
 .m-row-dot{position:static;flex:none}
+/* 名單列長按叫選單（#1479）：不要選字、不要跳系統的長按選單 */
+.m-buddy{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

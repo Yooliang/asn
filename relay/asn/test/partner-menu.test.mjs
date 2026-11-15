@@ -62,7 +62,7 @@ test('入口寫錯就報錯；反灰原因縮短搬家後 actionbar 照舊轉出
 
 test('四個入口只負責畫出來：手機 m.js 用 buildPartnerMenu，不再自己組', () => {
   const m = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
-  assert.match(m, /buildPartnerMenu\(chatFriend\.value, opsCtx\.value, 'phone'\)/)
+  assert.match(m, /buildPartnerMenu\(opsFriend\.value, opsCtx\.value, 'phone'\)/)
   assert.doesNotMatch(m, /phoneOpsRows\(/)
   const bar = fs.readFileSync(new URL('../ui/lib/actionbar.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(bar, /phoneOpsRows\(|manageItems\(/, 'actionbar 不再直接組管理段')

@@ -2,6 +2,7 @@
 // 電腦版（名單、釘選、終端列、對話上方、側欄大頭、訊息旁、群組發言者）與手機名單都用這一個元件，樣式只有 style.css 的 .avb 一套。
 // 這個檔在 node 也要能載入（測試），所以不取用 Vue；元件只用 props 與 computed 寫法的物件。
 
+import { PinDot } from './pin-dot.mjs'
 import { vendorBadgeHtml, vendorIconSvg, withUniqueIds } from './vendor-icons.mjs'
 
 export const AVATAR_SIZES = Object.freeze(['xs', 'sm', 'xl'])
@@ -18,6 +19,7 @@ let seq = 0   // 每個頭像自己的尾碼（只在建立元件時取一次，
 
 export const AsnAvatar = {
   name: 'AsnAvatar',
+  components: { PinDot },
   props: {
     src: { type: String, default: '' },          // 頭像圖；沒有就看 glyph
     glyph: { type: String, default: '' },        // 沒有圖時放的字（例如終端的 >_）
@@ -27,6 +29,7 @@ export const AsnAvatar = {
     status: { type: String, default: 'online' }, // 外框顏色（online／busy／away／offline）
     off: { type: Boolean, default: null },       // 整顆灰階；沒給就看 status 是不是離線
     hue: { type: Number, default: null },
+    pinned: { type: Boolean, default: false },   // 釘選的對話：右下角疊藍色圖釘小圓圈（#1479）
   },
   data() { return { uid: `av${++seq}` } },
   computed: {
@@ -35,5 +38,5 @@ export const AsnAvatar = {
     badge() { return withUniqueIds(avatarBadgeHtml({ friend: this.friend, vendor: this.vendor }), this.uid) },
     hueStyle() { return Number.isFinite(this.hue) ? { '--h': this.hue } : null },
   },
-  template: `<span class="avb" :class="[sizeClass, { off: isOff }]"><span class="dp" :class="[sizeClass, 'st-' + status]" :style="hueStyle"><span v-if="src"><img :src="src" alt=""></span><span v-else-if="glyph" class="term-glyph" aria-hidden="true">{{ glyph }}</span><span v-else></span></span><span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge"></span></span>`,
+  template: `<span class="avb" :class="[sizeClass, { off: isOff }]"><span class="dp" :class="[sizeClass, 'st-' + status]" :style="hueStyle"><span v-if="src"><img :src="src" alt=""></span><span v-else-if="glyph" class="term-glyph" aria-hidden="true">{{ glyph }}</span><span v-else></span></span><span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge"></span><pin-dot v-if="pinned"></pin-dot></span>`,
 }

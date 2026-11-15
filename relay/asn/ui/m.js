@@ -7,6 +7,9 @@ import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
 import { listTimeText } from './lib/line-chat.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
+import { PinDot } from './lib/pin-dot.mjs'
+import { createRowPress, rowPressBind } from './lib/row-press.mjs'
+import { isPinned, pinMenuLabel, renamedChatId as renamedPinId, togglePin } from './lib/chat-pins.mjs'
 import { READ_VISIBLE_POLL_MS } from './lib/read-sync.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
@@ -53,7 +56,7 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
-import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
+import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
@@ -361,6 +364,36 @@ const app = createApp({
     const unreadRows = computed(() => unreadChatRows(chatAll.value))
     // 夥伴頁有搜尋字時藏起「未讀」那一組（#1442）：它不套搜尋字（和紅點同一份），搜尋時留著會像是沒篩到；紅點照舊
     const unreadShown = computed(() => showUnreadGroup(unreadRows.value, normalizeSearchQuery(query.value)))
+    // 釘選（#1479）：存在手機本機設定 mobilePrefs.chatPins（格式就是之後帳號層同步用的那一份）。夥伴頁最上面多一組「釘選」，依釘選時間由早到晚；
+    // 釘選的對話不管有沒有近期往來都列（不從 chatListRows 篩），找不到的（夥伴已不在名單、群組已退出）就不列
+    const PIN_GROUP_KEY = 'pinned', PIN_GROUP_LABEL = '釘選'
+    const isChatPinned = id => isPinned(prefs.chatPins, id)
+    function togglePinChat(id) {
+      const r = togglePin(prefs.chatPins, id)
+      if (r.ok) prefs.chatPins = r.state
+      else showToast(r.text)   // 滿 50 個：底部一句話說明，不動原本的釘選
+    }
+    const pinnedRowsM = computed(() => {
+      const fr = new Map(activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)).map(f => [f.id, f]))
+      const rm = new Map(hub.rows({ plainText: plain }).map(r => [r.chatId, r]))
+      const out = []
+      for (const p of prefs.chatPins.pins) {
+        const f = fr.get(p.id), r = rm.get(p.id)
+        if (f) out.push({ kind: 'friend', id: f.id, at: lastTrafficAt(core?.logOf(f.id) ?? []), friend: f })
+        else if (r) out.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
+      }
+      return out
+    })
+    const topGroups = computed(() => {
+      const searching = Boolean(normalizeSearchQuery(query.value))
+      return [
+        { key: PIN_GROUP_KEY, label: PIN_GROUP_LABEL, cls: 'm-pinned', rows: pinnedRowsM.value, shown: pinnedRowsM.value.length > 0 && !searching },
+        { key: UNREAD_GROUP_KEY, label: UNREAD_GROUP_LABEL, cls: 'm-unread', rows: unreadRows.value, shown: unreadShown.value },
+      ].filter(g => g.shown)
+    })
+    // 名單列長按（電腦版是右鍵）：叫出那一列的選單（名稱、釘選、一對一的管理項目／群組的三項）。選單沿用對話頁「⋯」那一份（opsRows）
+    const rowPress = createRowPress({ onLong: id => openRowMenu(id) })
+    const rowPressOf = id => rowPressBind(rowPress, id)
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
@@ -392,12 +425,12 @@ const app = createApp({
     watch(() => nav.sheet, s => { if (s !== 'group' && groupFlow.state.view) groupFlow.close() })
     // 對話標頭「⋯」多出的項目：一對一對話「邀請別人加入」；群組再加「成員與設定」
     const groupItems = computed(() => {
-      const f = chatFriend.value
+      const f = opsFriend.value
       if (!f) return []
       return chatGroupItems(f)   // 跟電腦版「群組」按鈕、現代外觀的「更多」同一份（#539 之四、#1421）
     })
     function pickGroup(key) {
-      const f = chatFriend.value
+      const f = opsFriend.value
       if (!f) return
       history.back()   // 先收起「⋯」選單，再開群組對話框
       setTimeout(() => {
@@ -1077,29 +1110,59 @@ const app = createApp({
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、換班接手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
-    const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
+    // 選單對象：預設是對話頁上那一位；從名單長按叫出來時是被按的那一列（opsTargetId，選單收起就清掉）
+    const opsTargetId = ref('')
+    const rowFriendOf = id => {
+      if (isRoomChat(id)) { const row = roomRowOf(roomIdOf(id)); return row ? roomPseudoFriend(row) : null }
+      return friends.value.find(x => x.id === id) ?? null
+    }
+    const opsFriend = computed(() => (opsTargetId.value ? rowFriendOf(opsTargetId.value) : chatFriend.value))
+    const opsItems = computed(() => (opsFriend.value ? manageItems(opsFriend.value, opsCtx.value) : []))
     // 選單畫面上的列：手機對話頁上方沒有按鈕列，管理項目都在這裡；喚醒、切換模型排最前面，其餘順序和電腦版一致。
     // 這位夥伴永遠用不到的不列（在線的喚醒、一般視窗的重開／移除…），暫時不能用的反灰寫原因（規則在 mobile-ops.mjs phoneOpApplies）
-    const opsRows = computed(() => buildPartnerMenu(chatFriend.value, opsCtx.value, 'phone'))   // 四個入口共用的組選單函式（#1559，lib/partner-menu.mjs）
+    const opsRows = computed(() => buildPartnerMenu(opsFriend.value, opsCtx.value, 'phone'))   // 四個入口共用的組選單函式（#1559，lib/partner-menu.mjs）
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
-    const opsAcp = computed(() => acpSwitchChoices(chatFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
-    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value), { hasList: opsAcp.value.models.length > 0 }))
-    const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
+    const opsAcp = computed(() => acpSwitchChoices(opsFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
+    const opsText = computed(() => opDialogText(ops.phase, opsFriend.value?.agent || opsFriend.value?.nick || '', opsFriend.value?.device || '', dialogEngine(opsFriend.value), { hasList: opsAcp.value.models.length > 0 }))
+    const opsTitle = computed(() => (ops.phase === 'menu' ? (opsFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
-    const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(chatFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
+    const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(opsFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
     // pi 的模型下拉選單（#443／#444）：那台開放遠端管理時，啟動設定摘要會帶它的 pi 能用的模型；沒有就退回輸入框並說明
     const opsPiChoices = computed(() => {
-      const f = chatFriend.value
+      const f = opsFriend.value
       if (partnerEngine(f) !== 'pi') return { groups: [], selected: '' }
       return piModelChoices(cleanPiModels(lchData.machines?.[f.node]?.launcher?.pi_models), f.model)
     })
-    const opsPiNote = computed(() => (partnerEngine(chatFriend.value) === 'pi' && !opsPiChoices.value.groups.length ? PI_MODEL_REMOTE_NOTE : ''))
+    const opsPiNote = computed(() => (partnerEngine(opsFriend.value) === 'pi' && !opsPiChoices.value.groups.length ? PI_MODEL_REMOTE_NOTE : ''))
     const opsRuns = ref({})   // 對話頁頂端的進度，依夥伴位址分開存（#928）：{ [friend.id]: { op, view } }
     const opsBanner = computed(() => runBanner(runFor(opsRuns.value, chatFriend.value?.id)))
     let opsToken = 0
+    // 名單列長按／右鍵叫出選單：蓋在目前的分頁上（不切到對話頁），對象是被按的那一列
+    // 長按放開手指時，有些環境會補一個 click，落在剛長出來的選單上（可能正好是某一項或背景）：選單剛開、手指剛放開的零點四秒內，選單裡的 click 不算數（#1479）
+    let rowMenuAt = 0
+    const ROW_MENU_GUARD_MS = 400
+    const opsClickGuard = e => { if (opsTargetId.value && Date.now() - Math.max(rowMenuAt, rowPress.lastAt()) < ROW_MENU_GUARD_MS) { e.stopPropagation(); e.preventDefault() } }
+    function openRowMenu(id) {
+      if (nav.sheet || fourthNav.busy() || !rowFriendOf(id)) return
+      opsTargetId.value = id
+      rowMenuAt = Date.now()
+      Object.assign(ops, { phase: 'menu', newName: rowFriendOf(id)?.agent ?? '', note: '', ack: false, model: '', error: '', view: null })
+      opsToken++
+      go({ tab: nav.tab, sheet: 'ops', chat: nav.chat })
+      void loadLaunchers()
+    }
+    watch(() => nav.sheet, s => { if (s !== 'ops') opsTargetId.value = '' })
+    const opsPinLabel = computed(() => (opsTargetId.value ? pinMenuLabel(prefs.chatPins, opsTargetId.value) : ''))
+    function pickPin() {
+      const id = opsTargetId.value
+      if (!id) return
+      history.back()
+      togglePinChat(id)
+    }
     function openOps() {
       if ((!opsItems.value.length && !groupItems.value.length) || nav.sheet) return
+      opsTargetId.value = ''
       Object.assign(ops, { phase: 'menu', newName: chatFriend.value?.agent ?? '', note: '', ack: false, model: '', error: '', view: null })
       opsToken++
       go(opsNav())
@@ -1109,7 +1172,7 @@ const app = createApp({
       const item = opsItems.value.find(i => i.key === op)
       if (!item || !item.ok) return
       ops.error = ''
-      if (op === 'archive' || op === 'unarchive') { history.back(); void setArchived(chatFriend.value, op === 'archive'); return }
+      if (op === 'archive' || op === 'unarchive') { history.back(); void setArchived(opsFriend.value, op === 'archive'); return }
       if (opStep(op) === 'run') void submitOp(op)
       else {
         if (op === 'model' && opsPiChoices.value.groups.length) ops.model = opsPiChoices.value.selected
@@ -1118,7 +1181,7 @@ const app = createApp({
       }
     }
     async function submitOp(op) {
-      const f = chatFriend.value
+      const f = opsFriend.value
       if (!f) return
       const item = opsItems.value.find(i => i.key === op)
       const input = { newName: ops.newName, model: ops.model, note: ops.note, ack: ops.ack }
@@ -1139,7 +1202,8 @@ const app = createApp({
         await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
         const next = renamedChatId(f, op, input, v)
         if (next) opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
-        if (next && core.friends.get(next)) lastChat.value = next
+        if (next) prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
+        if (next && lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
       }
     }
     // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明（對話頁在進度條上顯示）
@@ -1489,7 +1553,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      openMember, pickOffline, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
@@ -1499,6 +1563,7 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.component('asn-avatar', AsnAvatar)
+app.component('pin-dot', PinDot)
 app.component('group-sheet', GroupSheet)
 app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)

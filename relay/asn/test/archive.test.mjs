@@ -99,7 +99,7 @@ test('接線：電腦版右鍵與手機「⋯」只用 manageItems；已封存�
   assert.match(lhtml, /@contextmenu\.prevent="g\.kind !== 'archived' && openDeviceMenu/, '已封存群組標題沒有設備選單')
   assert.match(m, /rosterGroups\(activeFriends\(friends\.value\), o\)/, '手機名單只放沒封存的')
   assert.match(m, /collapsed = reactive\(\{ \[ARCHIVE_GROUP_KEY\]: true \}\)/)
-  assert.match(m, /op === 'archive' \|\| op === 'unarchive'\) \{ history\.back\(\); void setArchived\(chatFriend\.value, op === 'archive'\)/)
+  assert.match(m, /op === 'archive' \|\| op === 'unarchive'\) \{ history\.back\(\); void setArchived\(opsFriend\.value, op === 'archive'\)/)
   assert.match(mhtml, /v-if="g\.kind === 'archived'" :aria-label="'取消封存 ' \+ c\.nick" @click="setArchived\(c, false\)"/, '手機已封存群組每列有取消封存')
   assert.match(read('ui/lib/tauri.mjs'), /partnerArchive: body => invoke\('relay_partner_archive', \{ body \}\)/)
   assert.match(m, /partnerArchive: body => invoke\('android_partner_archive', \{ body \}\)/)

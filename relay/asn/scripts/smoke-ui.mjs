@@ -93,6 +93,15 @@ async function realInput(S, payload) {
     await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
     await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } else if (Array.isArray(req.move)) {
+    // { move: [x, y] }：滑鼠移到那個位置（不按）
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: req.move[0], y: req.move[1] })
+  } else if (Array.isArray(req.rightClick)) {
+    // { rightClick: [x, y] }：滑鼠右鍵點一下（叫出右鍵選單）
+    const [x, y] = req.rightClick
+    await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'right', buttons: 2, clickCount: 1 })
+    await S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'right', buttons: 0, clickCount: 1 })
   } else if (Array.isArray(req.hold)) {
     // { hold: [x, y, ms] }：手指按住 ms 毫秒再放開（長按）
     const [x, y, ms] = req.hold
