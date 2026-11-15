@@ -1342,6 +1342,18 @@ impl view_stream::TPort for LiveTPort {
                 } else {
                     k.d.as_str()
                 };
+                // 手機遠端打字的貼上：結尾的換行拿掉（#1512 B）。放在貼上模式裡不會送出，只會留在輸入欄；要送出另外按 Enter。
+                // 只動手機這條路（#1561 asn真 審查必修②）：電腦看別台、電腦本機看終端的貼上照原樣
+                let tail_trimmed;
+                let d = if k.p && self.mobile {
+                    tail_trimmed = launch::term_view::trim_paste_tail(d);
+                    if tail_trimmed.is_empty() {
+                        continue;
+                    }
+                    tail_trimmed
+                } else {
+                    d
+                };
                 // 一段字和緊接著的 Enter 分開交：同一輪收進來的字會一口氣交出去，間隔由這頭補（#1512 B）
                 if !k.p && launch::term_view::is_enter_key(d) {
                     let wait = launch::term_view::enter_wait_ms(self.last_text_at, auth::now_ms());

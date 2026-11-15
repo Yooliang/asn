@@ -5,7 +5,7 @@
 import { frameToWrite, loadXterm, xtermOptions, pasteSummary, PASTE_TEXT } from './term-view.mjs'
 import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBarState, startError } from './term-remote.mjs'
 import { ENTER_DELAY_MS, createLineSender, pasteLines } from './term-line.mjs'
-import { KEYS_TEXT, droppedGrew } from './term-keys.mjs'
+import { KEYS_TEXT, droppedGrew, createKeyChain } from './term-keys.mjs'
 export { ENTER_DELAY_MS, pasteLines }
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -80,11 +80,15 @@ export const RemoteInput = {
     const { sendLine, flush, yieldAsk, answer, takeLeft } = createLineSender({
       send, askPaste, emit, ready: () => phase.value === 'typing', ended: () => phase.value === 'ended', restart: () => { void start() },
     })
-    // 按鍵列的一顆：跟打字同一條路（那台交給窗格前照樣重讀畫面）。輸入框那句排在前面時，等它的 Enter 送完再送
-    const flushKeys = () => { const ks = keyQueue; keyQueue = []; ks.forEach(k => { void send(k, false) }) }
+    // 按鍵列的一顆：跟打字同一條路（那台交給窗格前照樣重讀畫面）。輸入框那句排在前面時，等它的 Enter 送完再送。
+    // 按鍵串成一條：前一顆送出、確認回來了才送下一顆，順序不看 IPC 誰先到（「↓」「Enter」反過來就選錯項，#1561 asn真 審查必修）；
+    // 有一顆沒送出，後面排著的全部不送（不能少了「↓」還按 Enter）。結束打字時也一併作廢
+    const keyChain = createKeyChain(seq => send(seq, false))
+    const chainKey = seq => keyChain.push(seq)
+    const flushKeys = () => { const ks = keyQueue; keyQueue = []; ks.forEach(chainKey) }
     const sendKey = seq => {
       if (!seq) return
-      if (phase.value === 'typing') { void send(seq, false); return }
+      if (phase.value === 'typing') { void chainKey(seq); return }
       keyQueue.push(seq)
       if (phase.value === 'ended') void start()
     }
@@ -103,7 +107,7 @@ export const RemoteInput = {
       cleanup(); phase.value = 'ended'; note.value = text; id = ''
       const left = takeLeft(); askPaste.value = null
       if (left) emit('unsent', left)
-      keyQueue = []   // 排著的按鍵不留到下一次（按鍵不像整句可以放回輸入框）
+      keyQueue = []; keyChain.cancel()   // 排著的、串著還沒送的按鍵都不留到下一次（按鍵不像整句可以放回輸入框）
     }
     const start = async () => {
       cleanup()

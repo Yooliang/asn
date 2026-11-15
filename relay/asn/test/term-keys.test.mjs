@@ -60,9 +60,49 @@ test('守門：按鍵列只走打字的同一條路（remoteInputApi.send 經 Re
   assert.doesNotMatch(press, /invoke|api\.send/, '不直接呼叫後端')
   const rin = fs.readFileSync(path.join(root, 'ui/lib/term-remote-input.mjs'), 'utf8').replace(/\r\n/g, '\n')
   const sk = rin.split('const sendKey = seq => {')[1].split('\n    }\n')[0]
-  assert.match(sk, /send\(seq, false\)/, '按鍵一律當打字（不走貼上）')
+  assert.match(sk, /chainKey\(seq\)/, '按鍵串成一條送')
+  assert.doesNotMatch(sk, /void send\(/, '不直接連發')
+  assert.match(rin, /const keyChain = createKeyChain\(seq => send\(seq, false\)\)/, '按鍵一律當打字（不走貼上）')
+  assert.match(rin, /const flushKeys = \(\) => \{ const ks = keyQueue; keyQueue = \[\]; ks\.forEach\(chainKey\) \}/, '排著的也串成一條')
   // 登入網址只用 open_link 開，開之前再比一次網域
   const open = chat.split('const openLogin = u => {')[1].split('\n')[0]
   assert.match(open, /findLoginUrls\(u\?\.url\)\.length/)
   assert.match(open, /'open_link'/)
+})
+
+test('按鍵串成一條：前一顆確認回來才送下一顆，順序不看誰先回（#1561 必修①）', async () => {
+  const { createKeyChain } = await import('../ui/lib/term-keys.mjs')
+  const started = [], done = []
+  // 第一顆回得最慢、第二顆最快：還是要照按的順序一顆一顆送
+  const delays = { down: 40, enter: 1, one: 5 }
+  const chain = createKeyChain(seq => { started.push(seq); return new Promise(r => setTimeout(() => { done.push(seq); r(true) }, delays[seq])) })
+  chain.push('down'); chain.push('enter')
+  await chain.push('one')
+  assert.deepEqual(started, ['down', 'enter', 'one'])
+  assert.deepEqual(done, ['down', 'enter', 'one'], '前一顆沒回來，下一顆不會開始')
+})
+
+test('按鍵串成一條：有一顆沒送出（或出錯），後面排著的都不送；之後新按的照常', async () => {
+  const { createKeyChain } = await import('../ui/lib/term-keys.mjs')
+  const sent = []
+  const chain = createKeyChain(async seq => { sent.push(seq); if (seq === 'bad') return false; if (seq === 'boom') throw new Error('x'); return true })
+  chain.push('a'); chain.push('bad'); chain.push('enter')
+  await chain.push('more')
+  assert.deepEqual(sent, ['a', 'bad'], '「bad」沒送出：後面的 Enter 不送')
+  await chain.push('next')
+  assert.deepEqual(sent, ['a', 'bad', 'next'], '失敗之後新按的照常送')
+  chain.push('boom'); await chain.push('after')
+  assert.deepEqual(sent, ['a', 'bad', 'next', 'boom'], '丟錯也算沒送出')
+})
+
+test('按鍵串成一條：結束打字時排著還沒送的作廢', async () => {
+  const { createKeyChain } = await import('../ui/lib/term-keys.mjs')
+  const sent = []
+  let release
+  const chain = createKeyChain(seq => { sent.push(seq); return seq === 'slow' ? new Promise(r => { release = r }) : Promise.resolve(true) })
+  chain.push('slow'); const last = chain.push('enter')
+  await new Promise(r => setTimeout(r, 5))
+  chain.cancel(); release(true)
+  await last
+  assert.deepEqual(sent, ['slow'])
 })

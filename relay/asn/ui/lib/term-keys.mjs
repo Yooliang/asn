@@ -68,6 +68,28 @@ export function findLoginUrls(text) {
   return out
 }
 
+/**
+ * 按鍵串成一條送（#1561 asn真 審查必修）：前一顆送出、確認回來了（send 的 Promise 結束）才送下一顆，順序不看 IPC 誰先到。
+ * send 回 false（沒送出）或丟錯：後面已經排進來的全部不送（不能少了「↓」還按 Enter）。cancel()：排著還沒送的全部作廢（結束打字時）。
+ * push 回的 Promise 在這一顆處理完（送了、或被作廢）時結束
+ */
+export function createKeyChain(send) {
+  let tail = Promise.resolve(), gen = 0
+  return {
+    push(seq) {
+      const g = gen
+      tail = tail.then(async () => {
+        if (g !== gen) return
+        let ok = false
+        try { ok = await send(seq) } catch { ok = false }
+        if (!ok) gen++
+      })
+      return tail
+    },
+    cancel() { gen++ },
+  }
+}
+
 /** 那台回報的「按鍵被拿掉的次數」變大了沒（第一次看到大於 0 也算） */
 export function droppedGrew(prev, next) {
   const a = Number(prev) || 0, b = Number(next)

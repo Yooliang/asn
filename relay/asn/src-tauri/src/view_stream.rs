@@ -901,6 +901,11 @@ mod tests {
         assert!(gap < send, "等完才交");
         assert!(port.find("remote_input_guard(").unwrap() < send, "交之前照樣重讀畫面（單鍵也一樣，不另開入口）");
         assert!(port.contains("self.keys_dropped += 1"), "拿掉了要記");
+        // 貼上結尾換行只在手機遠端打字拿掉（#1561 必修②）；共用的 view_input 不拿
+        assert!(port.contains("let d = if k.p && self.mobile {") && port.contains("trim_paste_tail(d)"), "只有手機的貼上才拿掉結尾換行");
+        let term = include_str!("launch/term.rs").replace("\r\n", "\n");
+        let vi = term.split("pub fn view_input(").nth(1).unwrap().split("pub fn remote_input_guard").next().unwrap();
+        assert!(!vi.contains("trim_paste_tail"), "本機看終端共用的入口不動貼上的內容");
         assert!(lib.contains(r#""keys_dropped": f.keys_dropped"#), "D 收到的幀把這個數字交給畫面");
     }
 
