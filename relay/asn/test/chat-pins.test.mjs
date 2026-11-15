@@ -231,7 +231,7 @@ test('接線：電腦版對話名單依釘選排序、右鍵一對一與群組�
   assert.match(js, /chatPins: chatPins\.value/, '存進 asn-me.json')
   assert.match(js, /const pinnedExtra = computed/, '沒有近期往來的釘選照樣列出')
   assert.match(js, /sortPinned\(\[\.\.\.chatRows\.value, \.\.\.pinnedExtra\.value\], chatPins\.value\)/)
-  assert.match(js, /else if \(r\) out\.push\(\{ kind: 'room'/, '群組從群組清單補')
+  assert.match(js, /pinnedTargets\(chatPins\.value/, '釘選對得到的對話（含群組）從夥伴與群組清單補')
   assert.doesNotMatch(js, /unpinChat\(chatPins/, '找不到的對話不動釘選紀錄')
   assert.match(js, /groupMenuItems\(\{ room: true \}\)/, '群組那三項')
   assert.match(js, /renamedPinId\(chatPins\.value/, '改名後釘選跟著搬')

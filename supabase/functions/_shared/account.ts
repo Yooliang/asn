@@ -5,7 +5,7 @@
 import { parseSelfName } from "./node_name.ts";
 import { isReservedSender } from "./reserved_sender.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "node_setup_code_fetch", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "node_setup_request", "node_setup_status", "node_setup_code_fetch", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename", "account_name", "account_settings", "account_device_prefs", "account_chat_pins"]);
 
 export interface AuthUser {
   id: string;
@@ -75,6 +75,7 @@ const ERR_STATUS: Record<string, number> = {
   asn_outdated: 409,
   unsupported_platform: 409,
   rate_limited: 429,
+  too_large: 413,
 };
 
 const NODE_KEY = /^[A-Za-z0-9_-]{1,32}$/;
@@ -95,6 +96,34 @@ export function cleanDevicePrefs(v: unknown): { order: string[]; shown: string[]
   if (!order || !shown || !removed) return null;
   if (typeof o.rev !== "number" || !Number.isSafeInteger(o.rev) || o.rev < 0) return null;
   return { order, shown, removed, rev: o.rev };
+}
+
+const CHAT_PINS_MAX = 50;
+const CHAT_UNPINNED_MAX = 200;
+const CHAT_ID_MAX = 200;
+// deno-lint-ignore no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+function cleanChatPinList(v: unknown, max: number): { id: string; at: number }[] | null {
+  if (!Array.isArray(v) || v.length > max) return null;
+  const out: { id: string; at: number }[] = [];
+  for (const e of v) {
+    if (!e || typeof e !== "object" || Array.isArray(e)) return null;
+    const { id, at } = e as Record<string, unknown>;
+    if (typeof id !== "string" || id.length === 0 || id.length > CHAT_ID_MAX || CONTROL_CHARS.test(id)) return null;
+    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0 || at > Number.MAX_SAFE_INTEGER) return null;
+    out.push({ id, at: Math.floor(at) });
+  }
+  return out;
+}
+/** 對話釘選：pins（最多 50）／unpinned（最多 200）各筆 { id, at }＋rev（遞增版本號，0～2^53 的整數）；
+ *  id 只擋空字串、控制字元、超過 200 字（中文與空白放行，不比用戶端嚴）；多餘欄位丟掉，任何一項不合格就整份拒絕（回 null） */
+export function cleanChatPins(v: unknown): { pins: { id: string; at: number }[]; unpinned: { id: string; at: number }[]; rev: number } | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const pins = cleanChatPinList(o.pins, CHAT_PINS_MAX), unpinned = cleanChatPinList(o.unpinned, CHAT_UNPINNED_MAX);
+  if (!pins || !unpinned) return null;
+  if (typeof o.rev !== "number" || !Number.isSafeInteger(o.rev) || o.rev < 0) return null;
+  return { pins, unpinned, rev: o.rev };
 }
 
 function mapError(code: string): Reply {
@@ -204,6 +233,23 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: d?.stale === true ? { prefs: d.prefs ?? null, stale: true } : { prefs: d?.prefs ?? null } };
+  }
+
+  // 對話釘選同步（migration 20261116100000_account_chat_pins.sql）：pins／unpinned／rev（遞增版本號）。
+  // body 帶 pins ＝寫（rev 必須是現有 rev＋1，否則不寫入、回現有的並帶 stale，由用戶端合併後重送）；沒帶＝讀（沒設過為 null）。
+  // 回應：{ pins, stale? }；rate_limited ＝ 429、too_large ＝ 413。一律要本人的登入憑證。
+  if (action === "account_chat_pins") {
+    const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    let pins: Record<string, unknown> | null = null;
+    if (o.pins !== undefined && o.pins !== null) {
+      pins = cleanChatPins(o.pins);
+      if (!pins) return { status: 400, body: { error: "bad_request" } };
+    }
+    const { data, error } = await deps.rpc("asn_account_chat_pins", { p_user: user.id, p_pins: pins });
+    if (error) { console.error("account_chat_pins", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: d?.stale === true ? { pins: d.pins ?? null, stale: true } : { pins: d?.pins ?? null } };
   }
 
   // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found

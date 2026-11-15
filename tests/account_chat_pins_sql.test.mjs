@@ -6,6 +6,7 @@ import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { mergePins, normalizePins, pinChat } from '../relay/asn/ui/lib/chat-pins.mjs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261116100000_account_chat_pins.sql'
@@ -93,17 +94,6 @@ test('實跑：rev＋1 才覆蓋；2 秒內連續寫不同內容 rate_limited，
   assert.deepEqual(ok.pins.pins, [E('w1/w2')]); assert.equal(ok.pins.rev, 1001)
 })
 
-// 用戶端合併的最小版（同一個 id 看 pins／unpinned 誰的 at 新，at 相同釘選勝）；真正的 mergePins 在 relay/asn/ui/lib/chat-pins.mjs（尚未進 main）
-function mergeMin(a, b) {
-  const pin = new Map(), un = new Map()
-  for (const [list, m] of [[a.pins, pin], [b.pins, pin], [a.unpinned, un], [b.unpinned, un]]) for (const e of list) m.set(e.id, Math.max(m.get(e.id) ?? 0, e.at))
-  const pins = [], unpinned = []
-  for (const id of new Set([...pin.keys(), ...un.keys()])) {
-    if (!un.has(id) || pin.get(id) >= un.get(id)) pins.push({ id, at: pin.get(id) }); else unpinned.push({ id, at: un.get(id) })
-  }
-  return { pins: pins.sort((x, y) => x.at - y.at), unpinned }
-}
-const strip = v => ({ pins: v.pins, unpinned: v.unpinned })
 
 test('實跑：rev 比對再寫入：現有 5 時送 9（跳號）、5、4、0 都 stale 不寫入；送 6 成功', { skip }, async () => {
   const db = await boot()
@@ -143,16 +133,17 @@ test('實跑：還沒有現有那份時：送 1 成功、送 7 也成功、送 0
 test('實跑：兩台輪流「讀 → 改 → 寫」：A 先寫成功，B 拿到 stale、合併後以伺服器 rev＋1 重送，兩邊的釘選都在', { skip }, async () => {
   const db = await boot()
   const base = await put(db, S(1, [E('w1/甲', T0)]))
-  const start = strip(base.pins)
-  // A、B 都從同一份開始，各自釘不同的對話（本機 rev 都是 2）
-  const a = { pins: [...start.pins, E('w1/乙', T0 + 10)], unpinned: [], rev: 2 }
-  const b = { pins: [...start.pins, E('room:群 組', T0 + 20)], unpinned: [], rev: 2 }
+  const start = normalizePins(base.pins)
+  // A、B 都從同一份開始，各自釘不同的對話（用真正的 pinChat，本機 rev 都是 2）
+  const a = pinChat(start, 'w1/乙', T0 + 10).state
+  const b = pinChat(start, 'room:群 組', T0 + 20).state
+  assert.equal(a.rev, 2); assert.equal(b.rev, 2)
   await sleep(2100)
   assert.equal((await put(db, a)).pins.rev, 2, 'A 先寫成功')
   await sleep(2100)
   const rb = await put(db, b)
   assert.equal(rb.stale, true, 'B 寫到 stale'); assert.equal(rb.pins.rev, 2)
-  const merged = mergeMin(strip(rb.pins), b)
+  const merged = mergePins(rb.pins, b)   // 用真正的 mergePins 合併
   await sleep(2100)
   const rb2 = await put(db, { ...merged, rev: rb.pins.rev + 1 })
   assert.equal(rb2.stale, undefined); assert.equal(rb2.pins.rev, 3)

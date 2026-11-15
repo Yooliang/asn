@@ -9,7 +9,8 @@ import { listTimeText } from './lib/line-chat.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
 import { createRowPress, rowPressBind } from './lib/row-press.mjs'
-import { isPinned, pinMenuLabel, renamedChatId as renamedPinId, togglePin } from './lib/chat-pins.mjs'
+import { isPinned, pinMenuLabel, pinnedTargets, renamedChatId as renamedPinId, togglePin } from './lib/chat-pins.mjs'
+import { createPinsSync } from './lib/pins-sync.mjs'
 import { READ_VISIBLE_POLL_MS } from './lib/read-sync.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
@@ -234,6 +235,10 @@ if (screen.value === 'main') {
   watch(devPrefs, () => devSync.noteLocal(), { deep: true })
   devSync.start()
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
+  // 對話釘選同步到帳號層（lib/pins-sync.mjs）：有登入才同步，後台 rev 是遞增版本號（寫入要＝現有＋1），衝突時在這裡合併重送；沒登入就只存本機
+  const pinsSync = createPinsSync({ getPins: () => prefs.chatPins, setPins: s => { prefs.chatPins = s }, api: { get: authApi.getChatPins, set: authApi.setChatPins }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
+  watch(() => prefs.chatPins, () => pinsSync.noteLocal(), { deep: true })
+  pinsSync.start()
   watch(() => prefs.skin, v => applySkin(v), { immediate: true })   // 外觀（lib/skin.mjs）：選了馬上換
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
@@ -373,21 +378,17 @@ const app = createApp({
       if (r.ok) prefs.chatPins = r.state
       else showToast(r.text)   // 滿 50 個：底部一句話說明，不動原本的釘選
     }
+    // 搜尋時照搜尋條件過濾、仍排最上面（跟電腦版一致，#1479）；封存優先：已封存的不顯示（activeFriends 已排除），釘選紀錄照留
     const pinnedRowsM = computed(() => {
-      const fr = new Map(activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)).map(f => [f.id, f]))
-      const rm = new Map(hub.rows({ plainText: plain }).map(r => [r.chatId, r]))
-      const out = []
-      for (const p of prefs.chatPins.pins) {
-        const f = fr.get(p.id), r = rm.get(p.id)
-        if (f) out.push({ kind: 'friend', id: f.id, at: lastTrafficAt(core?.logOf(f.id) ?? []), friend: f })
-        else if (r) out.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
-      }
-      return out
+      const out = pinnedTargets(prefs.chatPins, activeFriends(friends.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), hub.rows({ plainText: plain })).map(t => (t.friend
+        ? { kind: 'friend', id: t.friend.id, at: lastTrafficAt(core?.logOf(t.friend.id) ?? []), friend: t.friend }
+        : { kind: 'room', id: t.room.chatId, at: Number.isFinite(t.room.at) ? t.room.at : 0, room: t.room }))
+      const q = normalizeSearchQuery(query.value)
+      return q ? out.filter(x => friendMatchesQuery(x.kind === 'room' ? { nick: x.room.name } : x.friend, q, plain)) : out   // 比對規則和名單搜尋一樣（跟電腦版對話分頁搜尋同一條）
     })
     const topGroups = computed(() => {
-      const searching = Boolean(normalizeSearchQuery(query.value))
       return [
-        { key: PIN_GROUP_KEY, label: PIN_GROUP_LABEL, cls: 'm-pinned', rows: pinnedRowsM.value, shown: pinnedRowsM.value.length > 0 && !searching },
+        { key: PIN_GROUP_KEY, label: PIN_GROUP_LABEL, cls: 'm-pinned', rows: pinnedRowsM.value, shown: pinnedRowsM.value.length > 0 },
         { key: UNREAD_GROUP_KEY, label: UNREAD_GROUP_LABEL, cls: 'm-unread', rows: unreadRows.value, shown: unreadShown.value },
       ].filter(g => g.shown)
     })

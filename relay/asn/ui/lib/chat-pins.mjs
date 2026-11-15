@@ -99,6 +99,23 @@ export function sortPinned(rows, state, idOf = r => r?.id) {
 /** 只取釘選的那幾列（手機最上面的「釘選」組）：依釘選時間由舊到新 */
 export const pinnedRows = (rows, state, idOf = r => r?.id) => sortPinned(rows, state, idOf).filter(r => isPinned(state, idOf(r)))
 
+/**
+ * 釘選對得到的對話：依釘選時間由早到晚，每筆 { id, friend } 或 { id, room }。
+ * friends 請傳「沒封存」的夥伴（封存優先：已封存的就算釘選了也不顯示，但釘選紀錄照留，解除封存後自然回到最上面）；
+ * 夥伴與群組都找不到的（夥伴已不在名單、群組已退出）也不列，紀錄一樣留著。
+ */
+export function pinnedTargets(state, friends, rooms) {
+  const fr = new Map((Array.isArray(friends) ? friends : []).map(f => [f.id, f]))
+  const rm = new Map((Array.isArray(rooms) ? rooms : []).map(r => [r.chatId, r]))
+  const out = []
+  for (const p of state?.pins ?? []) {
+    const friend = fr.get(p.id), room = rm.get(p.id)
+    if (friend) out.push({ id: p.id, friend })
+    else if (room) out.push({ id: p.id, room })
+  }
+  return out
+}
+
 /** 合併兩份（本機與帳號層）：同一個 id 看 pins／unpinned 誰的 at 新，at 相同釘選勝；rev 取大的再加一 */
 export function mergePins(a, b) {
   const x = normalizePins(a)

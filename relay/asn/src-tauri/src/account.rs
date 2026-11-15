@@ -465,6 +465,52 @@ pub async fn auth_device_prefs_set(auth: State<'_, AuthState>, prefs: Value) -> 
     Ok(json!({ "prefs": v.get("prefs").cloned().unwrap_or(Value::Null), "stale": v.get("stale").and_then(Value::as_bool).unwrap_or(false) }))
 }
 
+/// 對話釘選同步（帳號層）：pins（最多 50）／unpinned（最多 200）各筆 { id, at }，rev 是遞增版本號；規則與後台 asn_account_chat_pins 一致
+/// （id 非空、最多 200 字、不含控制字元；at 是正整數）。不合格整份拒絕
+pub fn clean_chat_pins(v: &Value) -> Result<Value, String> {
+    fn list(v: Option<&Value>, max: usize) -> Result<Vec<Value>, String> {
+        let arr = v.and_then(Value::as_array).ok_or("釘選設定格式不對")?;
+        if arr.len() > max {
+            return Err("釘選設定太多".into());
+        }
+        let mut out: Vec<Value> = vec![];
+        for e in arr {
+            let id = e.get("id").and_then(Value::as_str).ok_or("釘選設定格式不對")?;
+            let at = e.get("at").and_then(Value::as_i64).filter(|a| (1..=9_007_199_254_740_991).contains(a)).ok_or("釘選設定格式不對")?;
+            if id.is_empty() || id.chars().count() > 200 || id.chars().any(|c| c < ' ' || c == '\u{7f}') {
+                return Err("釘選設定格式不對".into());
+            }
+            out.push(json!({ "id": id, "at": at }));
+        }
+        Ok(out)
+    }
+    let rev = v.get("rev").and_then(Value::as_i64).filter(|r| (0..=9_007_199_254_740_991).contains(r)).ok_or("釘選設定缺少版本")?;
+    Ok(json!({ "pins": list(v.get("pins"), 50)?, "unpinned": list(v.get("unpinned"), 200)?, "rev": rev }))
+}
+
+/// 讀帳號層的對話釘選（後台 account_chat_pins 動作，要本人登入憑證）；後台沒設過回 null
+#[tauri::command]
+pub async fn auth_chat_pins_get(auth: State<'_, AuthState>) -> Result<Value, String> {
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_chat_pins", None, json!({})).await?;
+    Ok(json!({ "pins": v.get("pins").cloned().unwrap_or(Value::Null) }))
+}
+
+/// 寫帳號層的對話釘選：回 { pins, stale, rate_limited }；stale＝rev 不是後台現有的＋1、沒有寫入，pins 是後台現有那份（前端合併後以它的 rev＋1 重送）；
+/// rate_limited＝兩秒內剛寫過，前端稍後再試（不當成錯誤）
+#[tauri::command]
+pub async fn auth_chat_pins_set(auth: State<'_, AuthState>, pins: Value) -> Result<Value, String> {
+    let pins = clean_chat_pins(&pins)?;
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    match call(&c.client, &c.relay_url, &token, "account_chat_pins", None, json!({ "pins": pins })).await {
+        Ok(v) => Ok(json!({ "pins": v.get("pins").cloned().unwrap_or(Value::Null), "stale": v.get("stale").and_then(Value::as_bool).unwrap_or(false), "rate_limited": false })),
+        Err(e) if e.code == "rate_limited" => Ok(json!({ "pins": Value::Null, "stale": false, "rate_limited": true })),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// 登入後自動處理金鑰（使用者不用按任何鈕）：
 /// - 這台已有節點金鑰 → node_claim 綁到帳號；失敗（含舊租戶還沒被認領）都不擋使用，回 pending，下次啟動再試
 /// - 沒有節點金鑰 → node_create 建新節點、存好金鑰（呼叫端稍後重新啟動）
@@ -562,6 +608,29 @@ mod tests {
         assert!(clean_device_prefs(&base(&|v| v["rev"] = json!(-1))).is_err());
         assert!(clean_device_prefs(&base(&|v| v["rev"] = json!("1"))).is_err());
         assert!(clean_device_prefs(&base(&|v| { v.as_object_mut().unwrap().remove("rev"); })).is_err());
+    }
+
+    #[test]
+    fn 對話釘選驗證() {
+        let ok = json!({ "pins": [{ "id": "工作機/財務 助理", "at": 1761350000000i64, "x": 1 }, { "id": "room:群 組", "at": 5 }], "unpinned": [{ "id": "a1/w2", "at": 7 }], "rev": 3, "extra": 1 });
+        assert_eq!(
+            clean_chat_pins(&ok).unwrap(),
+            json!({ "pins": [{ "id": "工作機/財務 助理", "at": 1761350000000i64 }, { "id": "room:群 組", "at": 5 }], "unpinned": [{ "id": "a1/w2", "at": 7 }], "rev": 3 })
+        );
+        let base = |f: &dyn Fn(&mut Value)| { let mut v = ok.clone(); f(&mut v); v };
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!("a"))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!(["a"]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!([{ "id": "", "at": 1 }]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!([{ "id": "a\nb", "at": 1 }]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!([{ "id": "x".repeat(201), "at": 1 }]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!([{ "id": "a", "at": 0 }]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!([{ "id": "a", "at": "1" }]))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!((0..51).map(|i| json!({ "id": format!("n{i}"), "at": 1 })).collect::<Vec<_>>()))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["pins"] = json!((0..50).map(|i| json!({ "id": format!("n{i}"), "at": 1 })).collect::<Vec<_>>()))).is_ok());
+        assert!(clean_chat_pins(&base(&|v| v["unpinned"] = json!((0..201).map(|i| json!({ "id": format!("n{i}"), "at": 1 })).collect::<Vec<_>>()))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["rev"] = json!(-1))).is_err());
+        assert!(clean_chat_pins(&base(&|v| v["rev"] = json!("1"))).is_err());
+        assert!(clean_chat_pins(&base(&|v| { v.as_object_mut().unwrap().remove("rev"); })).is_err());
     }
 
     #[test]
