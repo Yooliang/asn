@@ -120,7 +120,7 @@ test('接線：名單右鍵用 menuItems（不另寫判斷、不重複切換模�
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
   // #539：右鍵和對話上方「管理」用同一份 partnerMenuItems（內部是 manageItems；切換模型改由 barSlots 的那一格負責）
   assert.match(js, /const buddyOpsCtx = computed\(\(\) => \(\{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\)/)
-  assert.match(js, /buddyOpItems = computed\(\(\) => partnerMenuItems\(buddyMenuFriend\.value, buddyOpsCtx\.value, info\.node\)/)
+  assert.match(js, /buddyOpItems = computed\(\(\) => partnerMenuItems\(buddyMenuFriend\.value, buddyOpsCtx\.value\)/)
   assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:aria-disabled="it\.ok \? 'false' : 'true'"[\s\S]*?:title="it\.reason" @click="openPartnerOp\(it\)"/)
   assert.match(html, /<partner-op-dialog v-if="opDlg\.open"/)
   assert.match(js, /app\.component\('partner-op-dialog', PartnerOpDialog\)/)

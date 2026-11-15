@@ -224,41 +224,23 @@ export function moreMenuItems(friend, ctx = {}) {
   if (w && !ctx.term && !w.term && !w.wake && partnerEngine(friend) !== 'acp') own.push(slotRow('window', w.label, w))
   if (slots.subs) own.push(slotRow('subs', ctx.subLabel || BAR_LABEL.subs, slots.subs))
   if (slots.tasks) own.push(slotRow('tasks', slots.tasks.count > 0 ? `${BAR_LABEL.tasks}（${slots.tasks.count}）` : BAR_LABEL.tasks, slots.tasks))
-  if (manage.length) {
-    const a = adoptItem(friend, ctx.selfNode)
-    own.push({ key: a.key, label: a.label, ok: a.ok, reason: briefWhy(a.reason) })
-  }
   const head = [...manage, ...shared]
   return [...head, ...own.map((i, n) => (n === 0 && head.length ? { ...i, sep: true } : i))]
 }
 
-// 「把這台電腦上開著的終端納入管理…」（小良哥 #753、#757 用詞）：放在夥伴管理那段、封存之前。
-// 點了打開接手清單（adopt 對話框，候選窗格、接手、允許代答／代送都沿用）；對方已經是 ASN 開的終端、或不在這台電腦時反灰並寫原因。
-export const ADOPT_LABEL = '把這台電腦上開著的終端納入管理…'
-export const ADOPT_TIP = '你自己在終端開的 grok、claude、agy、pi 或 codex，可以交給 ASN 看狀態、提醒你回答；預設只能看，要代送文字得另外允許。'
-export function adoptItem(friend, selfNode = '') {
-  const why = friend?.entryKind === 'term' ? '這個夥伴已經由 ASN 管理' : (!selfNode || friend?.node !== selfNode) ? '只能在那台電腦上納入管理' : ''
-  return { key: 'p:adopt', label: ADOPT_LABEL, tip: ADOPT_TIP, ok: why === '', reason: why }
-}
-// 插在封存／取消封存之前；沒有封存項目就放最後
-function withAdoptItem(items, adopt) {
-  const i = items.findIndex(x => x.key === 'p:archive' || x.key === 'p:unarchive')
-  return i < 0 ? [...items, adopt] : [...items.slice(0, i), adopt, ...items.slice(i)]
-}
+// 「把這台電腦上開著的終端納入管理」不在夥伴選單裡（#1557 搬到「設定 → 設備 → 這台電腦 → 工作管理員」，task-manager.mjs）：它跟點到的那位夥伴無關
 
 /**
- * 名單右鍵的管理段：共用清單（buildPartnerMenu 的 context：詳情、改名、關閉視窗、換班接手、喚醒、重開、移除、封存）加「納入管理」。
+ * 名單右鍵的管理段：共用清單（buildPartnerMenu 的 context：詳情、改名、關閉視窗、換班接手、喚醒（只在離線時）、重開、移除、封存）。
  * 切換模型、前台／後台不在這裡（右鍵各有自己那一格）。key 加「p:」前綴；反灰原因縮成 20 字內。不是 AI 夥伴回空陣列。
  */
-export function partnerMenuItems(friend, ctx = {}, selfNode = '') {
-  const items = buildPartnerMenu(friend, ctx, 'context')
-  return items.length ? withAdoptItem(items, adoptItem(friend, selfNode)) : []
+export function partnerMenuItems(friend, ctx = {}) {
+  return buildPartnerMenu(friend, ctx, 'context')
 }
 
-/** 「管理」選單的完整項目：共用清單（buildPartnerMenu 的 panel：拿掉喚醒，已在第 2 格）＋「納入管理」＋分隔線＋邀請等（extra＝opsMenuItems）。local.selfNode＝這台的節點。 */
-export function managePanelItems(friend, ctx = {}, extra = [], local = {}) {
-  const base = buildPartnerMenu(friend, ctx, 'panel')
-  const partner = base.length ? withAdoptItem(base, adoptItem(friend, local.selfNode)) : []
+/** 「管理」選單的完整項目：共用清單（buildPartnerMenu 的 panel：拿掉喚醒，已在第 2 格）＋分隔線＋邀請等（extra＝opsMenuItems）。 */
+export function managePanelItems(friend, ctx = {}, extra = []) {
+  const partner = buildPartnerMenu(friend, ctx, 'panel')
   const rest = extra.map((i, n) => ({ ...i, ok: true, reason: '', sep: n === 0 && partner.length > 0 }))
   return [...partner, ...rest]
 }
@@ -444,7 +426,7 @@ export const ActionBar = {
     const subView = computed(() => subagentView(subs.q))
     const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count, slot.value.tasks.idle))
     const lite = computed(() => Boolean(props.blocked))
-    const opsAll = computed(() => (lite.value ? props.ops.map(i => ({ ...i, ok: true, reason: '' })) : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
+    const opsAll = computed(() => (lite.value ? props.ops.map(i => ({ ...i, ok: true, reason: '' })) : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
@@ -535,7 +517,6 @@ export const ActionBar = {
       const it = key === 'p:resume' ? (wakeItem.wake ? wakeItem : null) : opsAll.value.find(i => i.key === key)
       if (!it?.ok) return   // 反灰的項目：點了什麼都不做
       const op = key.slice(2)
-      if (op === 'adopt') { emit('ops', 'adopt'); return }   // 接手清單在名單視窗裡，經 group-menu 通道請它打開
       if (op === 'archive' || op === 'unarchive') {
         const r = await runArchive(props.api, props.friend, op === 'archive')
         archiveNote.value = r.text

@@ -1,10 +1,10 @@
 // 夥伴選單收成一份（#1559）：電腦名單右鍵、對話頁 Aero「管理」、現代／LINE「更多」、手機「⋯」的管理段都從 buildPartnerMenu 組。
 // 能不能按、為什麼變灰照舊由 partner-ops.mjs（menuItems）與 archive.mjs（封存）判斷；這裡只決定「這個入口放哪幾項、什麼順序、
 // 用不到的藏起來還是變灰、說明寫長句還是 20 字內」。各入口只負責畫出來。
-// 「把這台電腦上開著的終端納入管理…」不是夥伴自己的操作，不在這份清單裡：電腦版的入口（actionbar.mjs 的 withAdoptItem）在後面另外附加。
+// 「把這台電腦上開著的終端納入管理」不是夥伴自己的操作，不在任何夥伴選單裡（#1557 搬到工作管理員，task-manager.mjs）。
 import { REASON } from './partner-ops.mjs'
 import { manageItems } from './archive.mjs'
-import { phoneOpsRows } from './mobile-ops.mjs'
+import { phoneOpApplies, phoneOpsRows } from './mobile-ops.mjs'
 
 // ---------- 反灰原因（20 字內） ----------
 export const WHY_MAX = 20
@@ -51,16 +51,17 @@ function moreRow(item, slots) {
   return { key, label: item.label, ok: item.ok !== false, reason: item.ok === false ? briefWhy(item.reason) : '' }
 }
 
-// 右鍵與 Aero「管理」：每一種夥伴都列全部項目（用不到的變灰），拿掉「切換模型」（大按鈕與右鍵各有自己那一格）
+// 右鍵與 Aero「管理」：其他項目每一種夥伴都列（用不到的變灰），拿掉「切換模型」（大按鈕與右鍵各有自己那一格）。
+// 喚醒只在用得到時才列（#1557：離線、而且不是內建通道的工作者；在線時不再顯示灰色的「不需要喚醒」），規則跟手機、「更多」同一條（phoneOpApplies）
 function deskRows(friend, ctx) {
   return manageItems(friend, ctx)
-    .filter(i => i.key !== 'model')
+    .filter(i => i.key !== 'model' && (i.key !== 'resume' || phoneOpApplies('resume', friend)))
     .map(i => ({ key: `p:${i.key}`, label: `${i.label}${NO_DOTS.includes(i.key) ? '' : '…'}`, ok: i.ok, reason: i.ok ? '' : briefWhy(i.reason) }))
 }
 
 /**
  * 這個入口的管理段：回 [{ key, label, ok, reason }]，順序就是畫面上的順序。不是 AI 夥伴回空陣列。
- * - context：全部項目（喚醒也在，用不到的變灰）、key 加 p:、名稱加「…」、說明 20 字內
+ * - context：全部項目（用不到的變灰；喚醒只在離線時才列）、key 加 p:、名稱加「…」、說明 20 字內
  * - panel：同 context，但拿掉喚醒（Aero 的喚醒在大按鈕第 2 格）
  * - more：跟手機同一組（用不到的藏起來，喚醒、切換模型排最前），key 加 p:、說明 20 字內；切換模型、喚醒看大按鈕那一格（opts.slots）
  * - phone：用不到的藏起來，喚醒、切換模型排最前，說明是完整長句，key 不加前綴

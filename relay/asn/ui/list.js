@@ -762,13 +762,12 @@ async function refreshOpsCtx() {
 const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
 // 工作管理員（設定 → 設備 → 這台電腦）：清單只在頁面開著時每 5 秒更新；「停止」走既有的關閉流程（lib/task-manager.mjs）
 const taskMgr = createTaskManager({ api: transport, getFriends: () => friends.value, getSelfNode: () => info.node, getOpsCtx: () => buddyOpsCtx.value, refreshOps: refreshOpsCtx, sendMail: (id, text) => core.send(id, text), state: reactive(initialTaskState()) })
-const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value, info.node).map(i => ({ ...i, key: i.key.slice(2) })))
+const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value).map(i => ({ ...i, key: i.key.slice(2) })))
 const opDlg = reactive({ open: false, op: '', friend: null, item: null, taken: [] })
 function openPartnerOp(it) {
   const f = buddyMenuFriend.value
   if (!f || !it?.ok) return   // 反灰的項目：點了不送出任何動作，選單也不收起（可以接著讀說明）
   closeBuddyMenu()
-  if (it.key === 'adopt') { void adoptLoad(); return }   // 「把這台電腦上開著的終端納入管理…」：和對話上方「管理」同一個接手清單
   if (it.key === 'archive' || it.key === 'unarchive') { void setArchived(f, it.key === 'archive'); return }
   Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it, taken: friends.value.filter(x => x && x.node === f.node && x.agent).map(x => String(x.agent)) })
 }
@@ -1041,7 +1040,6 @@ async function openRoomChat(id) {
 // 對話上方「群組」與「管理」的選單動作：邀請別人加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
   await invoke('show_main').catch(() => {})
-  if (what === 'adopt') { await adoptLoad(); return }   // 對話窗「管理」→「把這台電腦上開著的終端納入管理…」
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)
@@ -2025,6 +2023,7 @@ const app = createApp({
         case 'tm-cancel': taskMgr.cancel(); break
         case 'tm-confirm': await taskMgr.confirm(); break
         case 'tm-wake': await taskMgr.wake(String(value ?? '')); break
+        case 'tm-adopt': void adoptLoad(); break   // 工作管理員「納入管理」（#1557）：打開跟以前同一個接手清單，安全檢查照舊
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
         default: break

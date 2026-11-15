@@ -16,7 +16,7 @@ const surfacesAfter = (friend, ctx) => ({
   phone: [...buildPartnerMenu(friend, ctx, 'phone'), ...chatGroupItems(friend)].map(row),
 })
 
-test('對照表：夥伴種類 × 狀態 × 電腦 × 登入／設定 × 四個入口，跟合併前（main 8a5d8034）的輸出逐格相同', () => {
+test('對照表：夥伴種類 × 狀態 × 電腦 × 登入／設定 × 四個入口，逐格跟對照表相同（#1559 用合併前的輸出產生；#1557 更新喚醒與納入管理那幾格，見 PR）', () => {
   const all = cases()
   assert.equal(all.length, Object.keys(MATRIX).length, '情境數跟對照表一樣')
   let diffs = []
@@ -40,7 +40,7 @@ test('對照表涵蓋得夠：每個入口都有亮的、灰的，右鍵與「�
   assert.equal(new Set(MENU_SURFACES.map(s => JSON.stringify(one[s]))).size, 4)
 })
 
-test('共用清單不放「納入管理」：只有電腦版的入口在後面另外附加', () => {
+test('夥伴選單一律沒有「納入管理」（#1557 搬到工作管理員）', () => {
   for (const c of cases()) {
     for (const s of MENU_SURFACES) {
       const keys = buildPartnerMenu(c.friend, c.ctx, s, { slots: slotsOf(c.friend, c.ctx) }).map(i => i.key)
@@ -49,9 +49,9 @@ test('共用清單不放「納入管理」：只有電腦版的入口在後面�
   }
   const f = { node: SELF, agent: 'c', nick: 'c', status: 'idle' }
   const ctx = { machines: { P: { online: true, launcher: {} } }, loaded: true, signedIn: true }
-  assert.ok(partnerMenuItems(f, ctx, SELF).some(i => i.key === 'p:adopt'), '名單右鍵照舊有')
-  assert.ok(managePanelItems(f, ctx, [], { selfNode: SELF }).some(i => i.key === 'p:adopt'), 'Aero「管理」照舊有')
-  assert.ok(moreMenuItems(f, { ops: ctx, selfNode: SELF, slots: slotsOf(f, ctx) }).some(i => i.key === 'p:adopt'), '「更多」照舊有')
+  assert.ok(!partnerMenuItems(f, ctx).some(i => i.key === 'p:adopt'), '名單右鍵沒有')
+  assert.ok(!managePanelItems(f, ctx, []).some(i => i.key === 'p:adopt'), 'Aero「管理」沒有')
+  assert.ok(!moreMenuItems(f, { ops: ctx, selfNode: SELF, slots: slotsOf(f, ctx) }).some(i => i.key === 'p:adopt'), '「更多」沒有')
 })
 
 test('入口寫錯就報錯；反灰原因縮短搬家後 actionbar 照舊轉出同一個函式', () => {
