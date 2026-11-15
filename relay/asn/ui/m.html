@@ -90,16 +90,16 @@
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
               <!-- 未讀（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
-              <div class="m-group m-recent m-unread" v-if="unreadShown">
-                <button class="m-ghead" type="button" :aria-expanded="!collapsed[UNREAD_GROUP_KEY]" @click="collapsed[UNREAD_GROUP_KEY] = !collapsed[UNREAD_GROUP_KEY]">
-                  <span class="m-caret" :class="{ open: !collapsed[UNREAD_GROUP_KEY] }">▸</span>{{ UNREAD_GROUP_LABEL }}（{{ unreadRows.length }}）
+              <div class="m-group m-recent" :class="grp.cls" v-for="grp in topGroups" :key="grp.key">
+                <button class="m-ghead" type="button" :aria-expanded="!collapsed[grp.key]" @click="collapsed[grp.key] = !collapsed[grp.key]">
+                  <span class="m-caret" :class="{ open: !collapsed[grp.key] }">▸</span>{{ grp.label }}（{{ grp.rows.length }}）
                 </button>
-                <ul v-show="!collapsed[UNREAD_GROUP_KEY]">
-                  <li v-for="x in unreadRows" :key="x.id">
-                    <button class="m-buddy" :class="{ offline: x.kind === 'friend' && x.friend.status === 'offline' }" type="button" @click="x.kind === 'room' ? openRoom(x.room.chatId) : openChat(x.id)">
+                <ul v-show="!collapsed[grp.key]">
+                  <li v-for="x in grp.rows" :key="x.id">
+                    <button class="m-buddy" :class="{ offline: x.kind === 'friend' && x.friend.status === 'offline' }" type="button" v-bind="rowPressOf(x.id)" @click="x.kind === 'room' ? openRoom(x.room.chatId) : openChat(x.id)">
                       <template v-if="x.kind === 'friend'">
                         <span class="m-av-wrap">
-                          <asn-avatar size="sm" :src="avOf(x.friend)" :friend="x.friend" :status="x.friend.status" :off="false"></asn-avatar>
+                          <asn-avatar size="sm" :src="avOf(x.friend)" :friend="x.friend" :status="x.friend.status" :off="false" :pinned="isChatPinned(x.id)"></asn-avatar>
                         </span>
                         <span class="b-text">
                           <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
@@ -109,7 +109,7 @@
                         <span class="unread" v-if="x.friend.unread">{{ x.friend.unread }}</span>
                       </template>
                       <template v-else>
-                        <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                        <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span><pin-dot v-if="isChatPinned(x.id)"></pin-dot></span>
                         <span class="b-text">
                           <span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">{{ x.room.count }} 位成員</span></span>
                           <span class="b-last" v-if="x.room.last">{{ x.room.last }}</span>
@@ -128,8 +128,8 @@
                 </button>
                 <ul v-show="!collapsed[ROOM_GROUP_KEY]">
                   <li v-for="r in roomRows" :key="r.id">
-                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
-                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                    <button class="m-buddy" type="button" v-bind="rowPressOf(r.chatId)" @click="openRoom(r.chatId)">
+                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span><pin-dot v-if="isChatPinned(r.chatId)"></pin-dot></span>
                       <span class="b-text">
                         <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
                         <span class="b-last" v-if="r.last">{{ r.last }}</span>
@@ -149,9 +149,9 @@
                 </div>
                 <ul v-show="g.kind === 'notice' || !collapsed[g.key]">
                   <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
-                    <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
+                    <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" v-bind="rowPressOf(c.id)" @click="openChat(c.id)">
                       <span class="m-av-wrap">
-                        <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false"></asn-avatar>
+                        <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false" :pinned="isChatPinned(c.id)"></asn-avatar>
                       </span>
                       <span class="b-text">
                         <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
@@ -734,10 +734,11 @@
     </div>
 
     <!-- 「⋯」選單：底部浮層，放在三個分頁之外（分頁排有 transform 與裁切，放裡面會被裁掉）；項目與可按條件全部來自 menuItems -->
-    <div class="m-ops" v-if="nav.sheet === 'ops'" @click.self="back">
+    <div class="m-ops" v-if="nav.sheet === 'ops'" @click.capture="opsClickGuard" @click.self="back">
       <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="opsTitle">
         <h2 class="m-ops-h">{{ opsTitle }}</h2>
         <template v-if="ops.phase === 'menu'">
+          <button v-if="opsTargetId" type="button" class="m-ops-item" @click="pickPin"><line-icon class="mi-ic" name="pin"></line-icon><span class="m-opt-t">{{ opsPinLabel }}</span></button>
           <p class="m-ops-shared" v-for="n in opsView.notes" :key="n" role="note">{{ n }}</p>
           <button v-for="i in opsView.rows" :key="i.key" type="button" class="m-ops-item" :class="{ off: !i.ok }" :aria-disabled="i.ok ? 'false' : 'true'" :aria-describedby="i.ok ? null : 'ops-why-' + i.key" @click="pickOp(i.key)"><line-icon class="mi-ic" :class="{ danger: isDangerItem(i) }" :name="itemIcon(i)"></line-icon><span class="m-opt-t">{{ i.label }}</span><small class="m-opt-why" :id="'ops-why-' + i.key" v-if="!i.ok && i.why">{{ i.why }}</small></button>
           <!-- 群組／邀請排在管理項目之後：喚醒、切換模型最常用，放最前面 -->

@@ -134,7 +134,7 @@ test('接線：對話分頁直接就是最後那一則（#1438，回到 0.2.17�
   assert.match(css, /\.m-ops-panel\{[^}]*max-height:\d+dvh[^}]*overflow-y:auto/, '選單可捲動、不超出螢幕')
   assert.match(css, /\.m-ops-item\{[^}]*min-height:(4[4-9]|[5-9]\d)px/, '選單項目觸控目標 ≥ 44px')
   assert.match(css, /\.m-ops-panel\{[^}]*env\(safe-area-inset-bottom/, '不被手勢列蓋住')
-  assert.match(js, /const opsItems = computed\(\(\) => \(chatFriend\.value \? manageItems\(chatFriend\.value, opsCtx\.value\) : \[\]\)\)/, '選單項目只用 manageItems（menuItems 加封存）')
+  assert.match(js, /const opsItems = computed\(\(\) => \(opsFriend\.value \? manageItems\(opsFriend\.value, opsCtx\.value\) : \[\]\)\)/, '選單項目只用 manageItems（menuItems 加封存）')
   assert.match(js, /nonWindowNodes: \[info\.node\]/, '手機自己的視窗不顯示')
 })
 

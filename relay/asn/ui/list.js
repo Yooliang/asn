@@ -73,7 +73,9 @@ import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoti
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
-import { WINDOW_LABEL, barSlots, consoleBlock, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
+import { WINDOW_LABEL, barSlots, consoleBlock, groupMenuItems, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
+import { isPinned as chatIsPinned, normalizePins, pinMenuLabel, renamedChatId as renamedPinId, sortPinned, togglePin } from './lib/chat-pins.mjs'
+import { PinDot } from './lib/pin-dot.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, customRunOptions, launchModelChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
@@ -156,6 +158,18 @@ const meStore = store('me')
 const savedMe = (await meStore.load()) ?? {}
 // 設備頁籤的手動順序與手動顯示的隱藏設備（asn-me.json 的 deviceOrder／deviceShown；舊存檔沒有＝維持自動規則）。目前只存本機，手機各自存自己的
 const devPrefs = reactive(deviceFieldsFromSaved(savedMe))
+// 對話釘選（#1479）：目前只存本機（asn-me.json 的 chatPins），格式就是之後帳號層同步要用的那一份 { pins, unpinned, rev }
+const chatPins = ref(normalizePins(savedMe.chatPins))
+const pinNote = ref('')
+const isChatPinned = id => chatIsPinned(chatPins.value, id)
+let pinNoteTimer = null
+function togglePinChat(id) {
+  const r = togglePin(chatPins.value, id)
+  if (r.ok) chatPins.value = r.state
+  pinNote.value = r.ok ? '' : r.text   // 滿 50 個：在名單上方說明，不動原本的釘選
+  clearTimeout(pinNoteTimer)
+  if (pinNote.value) pinNoteTimer = setTimeout(() => { pinNote.value = '' }, 6000)
+}
 // 設備順序同步到帳號層（lib/device-sync.mjs）：有登入才同步，整份以 rev 較新的為準；沒登入或後台還沒部署就只用本機檔。--shot 截圖模式不動
 const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
 watch(devPrefs, () => devSync.noteLocal(), { deep: true })
@@ -861,6 +875,38 @@ async function submitModelDlg() {
 async function copyModelManual() {
   try { await navigator.clipboard.writeText(modelDlg.manual); modelDlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
 }
+const buddyMenuTitle = computed(() => plain(buddyMenuFriend.value?.nick ?? ''))   // 右鍵選單最上面：對話名稱
+const buddyPinLabel = computed(() => (buddyMenuFriend.value ? pinMenuLabel(chatPins.value, buddyMenuFriend.value.id) : '釘選'))
+function buddyMenuTogglePin() {
+  const c = buddyMenuFriend.value
+  closeBuddyMenu()
+  if (c) togglePinChat(c.id)
+}
+// 群組列的右鍵選單（#1479）：名稱、釘選、邀請別人加入／加我的另一個 AI／成員與設定
+const roomMenu = ref(null)
+const roomMenuPos = reactive({ x: 0, y: 0 })
+const roomMenuEl = ref(null)
+const roomMenuItems = computed(() => groupMenuItems({ room: true }))
+const roomPinLabel = computed(() => (roomMenu.value ? pinMenuLabel(chatPins.value, roomMenu.value.chatId) : '釘選'))
+function closeRoomMenu() { roomMenu.value = null }
+async function openRoomMenu(room, e) {
+  closeBuddyMenu(); closeLaunchPicker()
+  const origin = { x: e?.clientX ?? 0, y: e?.clientY ?? 0 }
+  Object.assign(roomMenuPos, origin)
+  roomMenu.value = { chatId: room.chatId, name: room.name }
+  await nextTick()
+  const r = roomMenuEl.value?.getBoundingClientRect()
+  if (r) Object.assign(roomMenuPos, placeMenu(origin, { w: r.width, h: r.height }, viewSize()))
+}
+function roomMenuTogglePin() { const m = roomMenu.value; closeRoomMenu(); if (m) togglePinChat(m.chatId) }
+function roomMenuPick(key) { const m = roomMenu.value; closeRoomMenu(); if (m) void openGroupMenu(m.chatId, key) }
+// 夥伴改名完成：釘選跟著換成新的對話位址（#1479）
+function onPartnerOpDone(d) {
+  const f = opDlg.friend
+  if (d?.op !== 'rename' || !f) return
+  const next = friendId(f.node, String(d.newName ?? '').trim())
+  if (next && next !== f.id) chatPins.value = renamedPinId(chatPins.value, f.id, next)
+}
 function buddyMenuOpenChat() {
   const c = buddyMenuFriend.value
   closeBuddyMenu()
@@ -1234,8 +1280,8 @@ await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoo
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, ghRefs, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
-const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, ghRefs, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
@@ -1573,6 +1619,7 @@ const app = createApp({
     })
     const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))   // 比對規則和名單搜尋一樣
       .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) })))
+    const chatRowsPinned = computed(() => sortPinned(chatRows.value, chatPins.value))   // 釘選的排最上面，依釘選時間由早到晚；其餘照原順序（#1479）
     const chatsUnreadN = computed(() => chatRowsUnread(chatAll.value))   // 對話清單上看得到的夥伴與群組的未讀（不含通知、已封存）；#1429 起紅點掛在「夥伴」分頁，不掛「對話」
     const partnersUnread = computed(() => dev.value.all.some(d => d.unread))   // 「夥伴」分頁的紅點：任一台設備頁籤有未讀（以前左邊直排一直看得到，現在收進夥伴裡）
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
@@ -1709,10 +1756,11 @@ const app = createApp({
       const el = e.target instanceof Element ? e.target : null
       if (chatTabMenu.value && !el?.closest('.ctab-menu')) closeChatTabMenu()
       if (buddyMenu.value && !el?.closest('.buddy-menu')) closeBuddyMenu()
+      if (roomMenu.value && !el?.closest('.room-menu')) closeRoomMenu()
       if (launchPicker.value && !el?.closest('.launch-picker') && !el?.closest('.search-ic')) closeLaunchPicker()
       if (deviceMenu.value && !el?.closest('.device-menu')) closeDeviceMenu()
     }, true)
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu(); if (e.key === 'Escape' && roomMenu.value) closeRoomMenu() })
     // Esc：先收二級選單，再按一次才關主選單
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !buddyMenu.value) return
@@ -1721,7 +1769,7 @@ const app = createApp({
       else closeBuddyMenu()
       e.preventDefault(); e.stopPropagation()
     }, true)
-    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker(); if (deviceMenu.value) closeDeviceMenu() })
+    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (roomMenu.value) closeRoomMenu(); if (launchPicker.value) closeLaunchPicker(); if (deviceMenu.value) closeDeviceMenu() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
     const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))
@@ -2059,7 +2107,7 @@ const app = createApp({
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
@@ -2087,6 +2135,7 @@ app.component('action-bar', ActionBar)
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)
+app.component('pin-dot', PinDot)
 app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)

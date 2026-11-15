@@ -334,7 +334,7 @@ test('電腦版「對話」分頁（0.2.18）：活動中的對話＋所有群�
   assert.match(html, /<nav class="rail" role="tablist" aria-label="設備頁籤" v-if="isDevice && skin !== 'line'">/, '設備頁籤欄只在 LINE 外觀不輸出（#1527）')
   assert.doesNotMatch(html, /v-for="t in FIXED_TABS"|rail-gap|rtab-groups|tab === 'groups'/, '左邊不再有通知、群組、指引、齒輪')
   // 建立／加入群組只在「＋」選單裡（#1531 拿掉對話分頁搜尋框下面重複的兩顆鈕）
-  const chatsTpl = html.match(/<div class="list chat-list" v-else-if="tab === 'chats'">[\s\S]*?v-for="x in chatRows"/)?.[0] ?? ''
+  const chatsTpl = html.match(/<div class="list chat-list" v-else-if="tab === 'chats'">[\s\S]*?v-for="x in chatRowsPinned"/)?.[0] ?? ''
   assert.ok(chatsTpl && !chatsTpl.includes('groupFlow.openCreate') && !chatsTpl.includes('groupFlow.openJoin') && !chatsTpl.includes('gl-actions'), '對話分頁搜尋框下面不再有建立／加入群組鈕')
   assert.match(html, /<ul class="av-menu launch-picker"[\s\S]*?groupFlow\.openCreate\(\)[\s\S]*?groupFlow\.openJoin\(\)[\s\S]*?<\/ul>/, '「＋」選單裡有建立／加入群組')
   // 「夥伴」的放大鏡在搜尋框裡，點了一樣是把游標放進搜尋框（#1531）

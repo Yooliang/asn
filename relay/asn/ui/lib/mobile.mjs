@@ -7,6 +7,7 @@ import { NOTICE_ID, NOTICE_LABEL, isMergedAway, isNoticeFriend } from './notice.
 import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 import { DEFAULT_SKIN, normalizeSkin } from './skin.mjs'
+import { EMPTY_PINS, normalizePins } from './chat-pins.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
@@ -171,8 +172,8 @@ export const PULL_TEXT = { idle: '', pull: '下拉重新整理', ready: '放開�
 export const shouldRefreshOnRelease = (h, loading) => !loading && h >= PTR_THRESHOLD
 
 // ---------- 提示 ----------
-export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: DEFAULT_SKIN, ghRefs: false }
-export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false, push: raw?.push !== false, skin: normalizeSkin(raw?.skin), ghRefs: raw?.ghRefs === true })   // skin＝外觀（lib/skin.mjs）；ghRefs＝把 #編號 連到 ASN 的 GitHub 議題（#1530，預設關）
+export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: DEFAULT_SKIN, ghRefs: false, chatPins: EMPTY_PINS }
+export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false, push: raw?.push !== false, skin: normalizeSkin(raw?.skin), ghRefs: raw?.ghRefs === true, chatPins: normalizePins(raw?.chatPins) })   // skin＝外觀（lib/skin.mjs）；ghRefs＝把 #編號 連到 ASN 的 GitHub 議題（#1530，預設關）
 export const NUDGE_VIBRATE_MS = 300
 export const MSG_VIBRATE_MS = 60
 

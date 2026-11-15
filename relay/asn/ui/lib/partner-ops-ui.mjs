@@ -170,7 +170,7 @@ export const PartnerOpDialog = {
       st.view = progressView(null, { op: props.op })
       const v = await runPartnerOp(props.api, props.friend, props.op, form, { onUpdate: x => { if (!closed) st.view = x }, cancelled: () => closed })
       st.busy = false
-      if (v?.phase === 'done') emit('done', { op: props.op, view: v })
+      if (v?.phase === 'done') emit('done', { op: props.op, view: v, newName: form.newName })
     }
     function close() { closed = true; emit('close') }
     onMounted(() => {
