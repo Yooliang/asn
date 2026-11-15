@@ -4,7 +4,7 @@ import { LineIcon } from './lib/line-icons.mjs'
 import { listTimeText } from './lib/line-chat.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
-import { chatListRows, chatRowsUnread, filterChatRows } from './lib/recent.mjs'
+import { chatListRows, chatRowsUnread, filterChatRows, lastTrafficAt } from './lib/recent.mjs'
 import { lastWords } from './lib/mobile.mjs'
 import { applySkin, normalizeSkin, effectiveLook } from './lib/skin.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB } from './lib/mobile-guides.mjs'
@@ -1619,7 +1619,21 @@ const app = createApp({
     })
     const chatRows = computed(() => filterChatRows(chatAll.value, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))   // 比對規則和名單搜尋一樣
       .map(x => (x.kind === 'room' ? x : { ...x, last: lastWords(core.viewOf(x.id) ?? []) })))
-    const chatRowsPinned = computed(() => sortPinned(chatRows.value, chatPins.value))   // 釘選的排最上面，依釘選時間由早到晚；其餘照原順序（#1479）
+    // 釘選的對話永遠列在最上面，不受「近期有往來」限制（#1479）：清單裡沒有的，從夥伴名單／群組清單補一列；兩邊都找不到（已不存在）先不顯示，釘選紀錄照留
+    const pinnedExtra = computed(() => {
+      const have = new Set(chatAll.value.map(x => x.id))
+      const fr = new Map(activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)).map(f => [f.id, f]))
+      const rm = new Map(roomRows.value.map(r => [r.chatId, r]))
+      const out = []
+      for (const p of chatPins.value.pins) {
+        if (have.has(p.id)) continue
+        const f = fr.get(p.id), r = rm.get(p.id)
+        if (f) out.push({ kind: 'friend', id: f.id, at: lastTrafficAt(core.viewOf(f.id) ?? []), friend: f, last: lastWords(core.viewOf(f.id) ?? []) })
+        else if (r) out.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
+      }
+      return filterChatRows(out, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))
+    })
+    const chatRowsPinned = computed(() => sortPinned([...chatRows.value, ...pinnedExtra.value], chatPins.value))   // 釘選的排最上面，依釘選時間由早到晚；其餘照原順序
     const chatsUnreadN = computed(() => chatRowsUnread(chatAll.value))   // 對話清單上看得到的夥伴與群組的未讀（不含通知、已封存）；#1429 起紅點掛在「夥伴」分頁，不掛「對話」
     const partnersUnread = computed(() => dev.value.all.some(d => d.unread))   // 「夥伴」分頁的紅點：任一台設備頁籤有未讀（以前左邊直排一直看得到，現在收進夥伴裡）
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))

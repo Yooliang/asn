@@ -126,6 +126,27 @@ export const chatPinsDeskSource = () => `(async () => {
   await sleep(500);
   if (JSON.stringify(rows().map(nameOf)) !== JSON.stringify(order0)) return { ok: false, why: '取消釘選後順序要回原狀：' + rows().map(nameOf).join('、') };
   if (rows().some(li => li.querySelector('.pin-dot'))) return { ok: false, why: '取消釘選後還有徽章' };
+  // 2b. 最近沒往來的夥伴：在「夥伴」分頁按右鍵釘選，「對話」分頁照樣把它排在最上面（不受近期往來限制）
+  const topTab = n => [...document.querySelectorAll('.top-tabs .ttab')].find(t => txt(t).startsWith(n));
+  await real({ click: at(topTab('夥伴')) }, 700);
+  if (rows().some(li => nameOf(li) === '閒置')) return { ok: false, why: '閒置的夥伴不該出現在對話分頁（沒有近期往來）' };
+  const devTab = [...document.querySelectorAll('button.rtab.dev')].filter(vis).find(e => txt(e).startsWith('辦'));
+  if (devTab) await real({ click: at(devTab) }, 700);   // 夥伴在「辦公室」那台的分頁
+  const idle = await waitFor(() => [...document.querySelectorAll('.list li')].filter(vis).find(li => txt(li.querySelector('.b-nick')) === '閒置'));
+  if (!idle) return { ok: false, why: '夥伴分頁找不到「閒置」這位夥伴' };
+  const im = await rightClick(idle);
+  if (!im) return { ok: false, why: '夥伴分頁按右鍵沒有跳出選單' };
+  if (!(await clickMenu(im, '釘選'))) return { ok: false, why: '夥伴分頁的右鍵選單找不到「釘選」' };
+  await sleep(400);
+  await real({ click: at(topTab('對話')) }, 700);
+  const r1 = rows();
+  if (nameOf(r1[0]) !== '閒置') return { ok: false, why: '釘選的夥伴沒有往來，也要排在對話分頁最上面，實際第一列是 ' + nameOf(r1[0]) + '（順序：' + r1.map(nameOf).join('、') + '）' };
+  if (!r1[0].querySelector('.pin-dot')) return { ok: false, why: '沒有往來的釘選夥伴那一列沒有徽章' };
+  const im2 = await rightClick(r1[0]);
+  if (!im2 || menuLabels(im2)[1] !== '取消釘選') return { ok: false, why: '這一列的右鍵選單要有「取消釘選」' };
+  if (!(await clickMenu(im2, '取消釘選'))) return { ok: false, why: '找不到「取消釘選」可以按' };
+  await sleep(500);
+  if (rows().some(li => nameOf(li) === '閒置')) return { ok: false, why: '取消釘選後，沒有往來的夥伴要從對話分頁消失' };
   // 3. 群組列：原本沒有右鍵選單
   const room = rows().find(li => li.classList.contains('room-item'));
   if (!room) return { ok: false, why: '對話分頁沒有群組列' };
@@ -157,6 +178,6 @@ export default {
     desk('list-chat-pins'), desk('list-chat-pins-modern', 'modern'), desk('list-chat-pins-line', 'line'),
   ],
   table: scenario => (scenario.state?.chatPins
-    ? { relay_rooms: { rooms: [ROOM] }, relay_room_read: { messages: [] }, android_room_read: { messages: [] }, relay_group: { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null } }
+    ? { ...(scenario.page === 'list.html' ? { relay_list: { members: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }, { name: '小工', status: 'idle', cwd_label: 'work' }, { name: '閒置', status: 'idle', cwd_label: 'idle' }] }] } } : {}), relay_rooms: { rooms: [ROOM] }, relay_room_read: { messages: [] }, android_room_read: { messages: [] }, relay_group: { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null } }
     : undefined),
 }
