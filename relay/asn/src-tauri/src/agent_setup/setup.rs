@@ -191,6 +191,9 @@ pub struct Steps<'a> {
     /// PATH 上有沒有別的方式裝的 claude（只找路徑、不執行）。沒有原生安裝的 claude.exe 但 PATH 上有，就不再裝一份
     pub on_path: &'a dyn Fn() -> Option<String>,
     pub login: &'a dyn Fn(&dyn Phone, &dyn Fn(Step)) -> Outcome,
+    /// 這台本機有沒有「登入已經失效」的證據（#1512 C）：有就回原因（只進 log）。只看本機，手機送來的任何東西都不算；
+    /// `claude auth status` 說已登入時，只有這裡回 Some 才繼續用手機重新登入，否則照舊「已經登入好了」
+    pub relogin_evidence: &'a dyn Fn() -> Option<&'static str>,
 }
 
 /// 核心流程：先看現況，沒裝好才安裝，沒登入才用手機登入
@@ -237,7 +240,18 @@ fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: S
     if (s.cancelled)() {
         return Finish::Cancelled;
     }
-    match (s.state)() {
+    let state = (s.state)();
+    // 已登入，但這台本機看到登入已經失效（#1512 C）：照樣用手機重新登入。證據只看本機，只在已登入時才問
+    let relogin = matches!(state, LoginState::In)
+        && match (s.relogin_evidence)() {
+            Some(why) => {
+                elog!("Claude 顯示已登入，但這台電腦看到登入已經失效（{why}），改用手機重新登入");
+                true
+            }
+            None => false,
+        };
+    match state {
+        LoginState::In if relogin => {}
         // 說法要和實際相符：本來就好才說「什麼都沒動」，剛裝完的要說裝了、沿用現有的登入
         LoginState::In if installed_now => return Finish::InstalledKeptLogin(version),
         LoginState::In => return Finish::AlreadyReady(version),
@@ -262,7 +276,10 @@ pub type TokenFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 /// 開始安裝並登入 Claude Code（只有 Windows 有完整流程）。已經有一個在跑就**直接回錯**，不開執行緒也不送事件；
 /// 否則在新的執行緒裡跑，立刻回來，結束時呼叫 `done` 一次。
-pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Done) + Send + 'static) -> Result<(), String> {
+/// 本機的登入失效證據（見 `Steps::relogin_evidence`）。桌面按鈕不給（回 None），手機觸發的那一條才給
+pub type EvidenceFn = Arc<dyn Fn() -> Option<&'static str> + Send + Sync>;
+
+pub fn start_claude(relay: Arc<Relay>, token: TokenFn, relogin_evidence: EvidenceFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Done) + Send + 'static) -> Result<(), String> {
     let busy = Busy::take(&BUSY)?;
     CANCEL.store(false, Ordering::SeqCst);
     let spawned = std::thread::Builder::new().name("asn-agent-setup".into()).spawn(move || {
@@ -276,6 +293,7 @@ pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + 
             cancelled: &is_cancelled,
             on_path: &|| super::claude_install::find_on_path().map(|p| p.to_string_lossy().into_owned()),
             login: &|p, r| super::claude_login::login_here(p, r),
+            relogin_evidence: &|| relogin_evidence(),
         };
         done(run_with(&steps, &phone, &report));
     });
@@ -330,6 +348,10 @@ mod tests {
                 calls.login.set(calls.login.get() + 1);
                 rep(Step::UrlSent);
                 login.borrow_mut().take().unwrap()
+            },
+            relogin_evidence: &|| {
+                EVIDENCE_ASKED.with(|n| n.set(n.get() + 1));
+                EVIDENCE.with(|e| e.get())
             },
         };
         let r = run_with(&steps, &NoPhone, &|e| ev.borrow_mut().push(e));
@@ -445,6 +467,49 @@ mod tests {
         assert_eq!(r, Finish::Ready("2.1.309".into()));
         assert_eq!((c.install.get(), c.login.get()), (1, 1));
         assert_eq!(ev, vec![Event::Checking, Event::Installing(None), Event::Installed("2.1.309".into()), Event::Login(Step::UrlSent)]);
+    }
+
+    thread_local! {
+        /// 假的「本機失效證據」（#1512 C）：每個測試自己設；預設沒有
+        static EVIDENCE: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static EVIDENCE_ASKED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    fn with_evidence<T>(e: Option<&'static str>, f: impl FnOnce() -> T) -> (T, u32) {
+        EVIDENCE.with(|c| c.set(e));
+        EVIDENCE_ASKED.with(|n| n.set(0));
+        let r = f();
+        let asked = EVIDENCE_ASKED.with(|n| n.get());
+        EVIDENCE.with(|c| c.set(None));
+        (r, asked)
+    }
+
+    #[test]
+    fn 已登入但本機有失效證據_照樣用手機重新登入_不重裝() {
+        let ((r, _, c), asked) = with_evidence(Some("對話紀錄判定登入失效"), || run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::In, Outcome::Verified));
+        assert_eq!(r, Finish::Ready("2.1.316".into()));
+        assert_eq!((c.install.get(), c.login.get()), (0, 1), "只登入、不安裝");
+        assert_eq!(asked, 1);
+        // 重新登入沒成功：照實回報，不說已經好了
+        let ((r, _, _), _) = with_evidence(Some("夥伴視窗的畫面要求重新登入"), || run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::In, Outcome::TimedOut));
+        assert_eq!(r, Finish::TimedOut);
+    }
+
+    #[test]
+    fn 已登入而本機沒有失效證據_照舊什麼都不動() {
+        let ((r, _, c), asked) = with_evidence(None, || run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::In, Outcome::Failed("不該登入".into())));
+        assert_eq!(r, Finish::AlreadyReady("2.1.316".into()));
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        assert_eq!(asked, 1, "已登入時才問證據");
+    }
+
+    #[test]
+    fn 沒登入或看不出登入狀態時_不問證據_照原本的規則() {
+        let ((_, _, c), asked) = with_evidence(Some("x"), || run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::Out, Outcome::Verified));
+        assert_eq!((c.login.get(), asked), (1, 0), "沒登入本來就登入，不用證據");
+        let ((r, _, c), asked) = with_evidence(Some("x"), || run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::Unknown("讀不到".into()), Outcome::Verified));
+        assert!(matches!(r, Finish::Failed(_)), "看不出登入狀態：就算有證據也不登入（不蓋掉現有的登入）");
+        assert_eq!((c.login.get(), asked), (0, 0));
     }
 
     #[test]

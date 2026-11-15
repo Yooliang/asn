@@ -435,6 +435,8 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     };
     let notifier = login_watch::RelayNotifier { relay: relay.clone() };
     let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx, &notifier)).await.unwrap_or(false);
+    // 讀畫面認出夥伴視窗要求重新登入（#1512 C）：也算登入失效，手機的設備頁才會出現「重新登入 Claude」（只是入口，放不放行仍由本機決定）
+    let login_failed = login_failed || claude_screen_says_login();
     acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed, write).await
 }
 // ---------- 額度來源與查詢代碼（todo-next-193） ----------
@@ -581,6 +583,29 @@ fn agent_setup_cancel() {
 /// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
+/// 手機要求「替這台登入 Claude」、而 Claude 顯示已登入時，這台本機有沒有登入已經失效的證據（#1512 C）。
+/// 只看本機：對話紀錄的失效判定（login_watch，要是新的判定），或讀畫面認出夥伴視窗要求重新登入（「Please run /login」）。
+/// 回的原因只進 log
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn claude_relogin_evidence() -> Option<&'static str> {
+    if login_watch::failed_recently(heartbeat::now_ms() as i64) {
+        return Some("對話紀錄判定登入失效");
+    }
+    if claude_screen_says_login() {
+        return Some("夥伴視窗的畫面要求重新登入");
+    }
+    None
+}
+
+/// 讀畫面（背景工作最新的判斷）有沒有夥伴視窗停在「要重新登入」（Please run /login）
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn claude_screen_says_login() -> bool {
+    let login = launch::claude_screen::status_code(launch::claude_screen::ClaudeScreenKind::Login);
+    launch::term::partner_notices().iter().any(|n| n.code == login)
+}
+
 async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
     use agent_setup::remote::{gate, Gate};
     // #933：別家的裝置碼型登入走另一條路（同樣先過本機把關）
@@ -615,6 +640,8 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::Setu
     let started = agent_setup::setup::start_claude(
         relay.clone(),
         agent_setup_token_fn(&handle),
+        // 已登入時要不要重新登入（#1512 C）：只看這台本機的失效證據，手機的請求裡沒有、也不能有這個選項
+        Arc::new(claude_relogin_evidence),
         move |e| wins::progress_emit(&h1, e.to_json()),
         move |d| {
             let _ = tx.send(d);
@@ -814,6 +841,8 @@ async fn agent_setup_start(app: State<'_, App>, auth: State<'_, auth::AuthState>
     let started = agent_setup::setup::start_claude(
         relay,
         token,
+        // 本人在這台電腦前按的：照舊（已登入就不動）
+        Arc::new(|| None),
         move |e| wins::progress_emit(&h1, e.to_json()),
         move |r| {
             wins::progress_emit(&h2, r.to_json());

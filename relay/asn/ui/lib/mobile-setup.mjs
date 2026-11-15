@@ -27,6 +27,19 @@ export const SETUP_TEXT = Object.freeze({
   unknown: '送不出去，請稍後再試',
 })
 
+// 從手機要別台「重新登入 Claude」（#1512 C）：送的是同一個要求（不安裝的那台會照舊略過安裝），差別只在按鈕與確認字。
+// 要不要真的重新登入由那台電腦決定：Claude 顯示已登入時，只有那台本機看到登入已經失效才會換新的登入
+export const RELOGIN_TEXT = Object.freeze({
+  button: '重新登入 Claude',
+  confirmTitle: label => `要讓「${label}」重新登入 Claude 嗎？`,
+  confirmBody: '這台電腦回報 Claude 的登入失效了。確認後，那台電腦會把登入網址送到這支手機，由你在手機上打開網址、貼回授權碼。那台電腦自己沒看到登入失效的話，不會動現有的登入。',
+  confirmNeed: SETUP_TEXT.confirmNeed,
+  yes: '確認重新登入',
+})
+
+/** 設備細部頁要不要出現「重新登入 Claude」：只有 Claude 區、而且 reloginAction 說可以（那台回報登入失效）。只登入不安裝，所以不看 AGENT_INSTALL_UI */
+export const showReloginButton = (vendorKey, relogin) => vendorKey === 'claude' && relogin?.kind === 'remote'
+
 // 後台錯誤代碼（Rust 端的錯誤字串形如 `setup:asn_outdated`）→ 中文
 const ERR = [
   ['unsupported_platform', '手機不能安裝 Claude Code'],

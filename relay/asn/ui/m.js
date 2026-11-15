@@ -36,7 +36,7 @@ import { cleanPiModels } from './lib/pi-models.mjs'
 import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
-import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
+import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton, showReloginButton } from './lib/mobile-setup.mjs'
 import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft, showLoginButton } from './lib/mobile-device-login.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
@@ -881,11 +881,12 @@ const app = createApp({
     const acctDevButtons = (vendor, a) => deviceButtons(a?.usedOn, acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), info.node, n => acctDevs.value.find(d => d.key === n)?.label ?? '')
     const acctDevPress = (b, a) => { if (b.current || !b.target || !b.target.enabled) return; void acctSwitchOn(b.node, a.account) }
     // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
-    const setupSt = reactive({ node: '', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' })
+    // mode：'install'＝安裝並登入、'relogin'＝重新登入（#1512 C；送的是同一個要求，只差按鈕與確認字）
+    const setupSt = reactive({ node: '', mode: 'install', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' })
     let setupTimer = null
     const setupStop = () => { clearInterval(setupTimer); setupTimer = null }
-    const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' }) }
-    const setupAsk = node => { setupReset(); Object.assign(setupSt, { node, stage: 'confirm' }) }
+    const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', mode: 'install', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' }) }
+    const setupAsk = (node, mode = 'install') => { setupReset(); Object.assign(setupSt, { node, mode: mode === 'relogin' ? 'relogin' : 'install', stage: 'confirm' }) }
     const setupNo = () => { if (setupSt.stage === 'confirm') setupReset() }
     const setupPoll = async () => {
       const node = setupSt.node
@@ -1472,7 +1473,7 @@ const app = createApp({
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,

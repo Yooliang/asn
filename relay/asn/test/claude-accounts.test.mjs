@@ -286,3 +286,9 @@ test('守門：電腦版每分鐘檢查、只在設備分類開著時重讀；�
   assert.match(src, /setInterval\(\(\) => \{ if \(devicesOpen\(\)\) void accounts\.retryReports\(otherDeviceNodes\(\)\) \}, REPORT_RETRY_MS\)/)
   assert.match(src, /onSignedIn = \(\) => void accounts\.retryReports\(otherDeviceNodes\(\), \{ force: true \}\)/)
 })
+
+test('上次確認可用（#1512 C）：只顯示 Rust 給的毫秒數，沒有或不合理就不顯示', async () => {
+  const { usableAtText, USABLE_AT_LABEL } = await import('../ui/lib/claude-accounts.mjs')
+  assert.equal(usableAtText({ usable_at_ms: Date.UTC(2026, 10, 15, 8, 5) }, 'Asia/Taipei'), `${USABLE_AT_LABEL}：2026/11/15 16:05`)
+  for (const a of [{}, null, { usable_at_ms: 0 }, { usable_at_ms: -1 }, { usable_at_ms: 'x' }, { usable_at_ms: 1e20 }]) assert.equal(usableAtText(a, 'Asia/Taipei'), '', JSON.stringify(a))
+})

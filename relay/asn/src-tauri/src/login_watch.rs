@@ -455,7 +455,27 @@ pub fn tick_real(now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier) -> 
     let m = g.get_or_insert_with(Default::default);
     m.injected = worker_events(std::mem::take(&mut *WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner())));
     m.injected.extend(worker_reply_events(std::mem::take(&mut *WORKER_REPLIES.lock().unwrap_or_else(|e| e.into_inner()))));
-    m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"))
+    let failed = m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"));
+    note_verdict(failed, now_ms);
+    failed
+}
+
+/// 最近一次判定的結果與時間（#1512 C）：只給「手機要求重新登入時，這台本機有沒有失效證據」用，不另外讀檔
+static LAST_VERDICT: Mutex<Option<(bool, i64)>> = Mutex::new(None);
+/// 判定結果多久內算數：帳號回報大約每分鐘一輪，超過就當不知道（不放行）
+pub const VERDICT_FRESH_MS: i64 = 10 * 60_000;
+
+fn note_verdict(failed: bool, now_ms: i64) {
+    *LAST_VERDICT.lock().unwrap_or_else(|e| e.into_inner()) = Some((failed, now_ms));
+}
+
+/// 這台本機最近一次判定是登入失效，而且判定是新的（`VERDICT_FRESH_MS` 內）。沒判定過、太舊、或判定沒失效都回 false
+pub fn failed_recently(now_ms: i64) -> bool {
+    verdict_says_failed(*LAST_VERDICT.lock().unwrap_or_else(|e| e.into_inner()), now_ms)
+}
+
+fn verdict_says_failed(v: Option<(bool, i64)>, now_ms: i64) -> bool {
+    matches!(v, Some((true, at)) if at <= now_ms && now_ms - at <= VERDICT_FRESH_MS)
 }
 
 #[cfg(test)]
@@ -465,6 +485,17 @@ mod tests {
     use std::path::Path;
 
     const MIN: i64 = 60_000;
+
+    #[test]
+    fn 重新登入的本機證據_只有新的失效判定才算() {
+        let now = 1_000 * MIN;
+        assert!(!verdict_says_failed(None, now), "沒判定過：不算");
+        assert!(!verdict_says_failed(Some((false, now)), now), "判定沒失效：不算");
+        assert!(verdict_says_failed(Some((true, now - MIN)), now));
+        assert!(verdict_says_failed(Some((true, now - VERDICT_FRESH_MS)), now));
+        assert!(!verdict_says_failed(Some((true, now - VERDICT_FRESH_MS - 1)), now), "太舊：不算");
+        assert!(!verdict_says_failed(Some((true, now + MIN)), now), "時間在未來：不算");
+    }
     /// 設計文件第一節那筆真實格式（時間戳另帶）
     fn auth_line(ts: &str) -> String {
         format!(r#"{{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","timestamp":"{ts}","message":{{"model":"<synthetic>","content":[{{"type":"text","text":"Login expired · Please run /login"}}]}}}}"#)
