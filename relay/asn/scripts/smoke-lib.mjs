@@ -4,8 +4,57 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetWhen } from '../ui/lib/account-quota.mjs'
-import { CHAT_PANE_MIN_W, SIDE_OPEN_W } from '../ui/lib/merge.mjs'
 import { LAUNCH_DISPLAY_NOTE, launchRun, launchVendors } from '../ui/lib/mobile-launch.mjs'
+import { findProbe, loadProbes, withProbeScenarios, withProbeTables } from './smoke-registry.mjs'
+export { aboutProbeSource } from './smoke-probes/aboutCheck.mjs'
+export { barProbeSource } from './smoke-probes/bar.mjs'
+export { cameraProbeSource } from './smoke-probes/camera.mjs'
+export { devbtnProbeSource } from './smoke-probes/devbtn.mjs'
+export { devMoreProbeSource } from './smoke-probes/devMore.mjs'
+export { devSelProbeSource } from './smoke-probes/devSel.mjs'
+export { dnoticeProbeSource } from './smoke-probes/dnotice.mjs'
+export { dtabsProbeSource } from './smoke-probes/dtabs.mjs'
+export { fpMarkProbeSource } from './smoke-probes/fpMark.mjs'
+export { gjumpProbeSource } from './smoke-probes/gjump.mjs'
+export { gofflineProbeSource } from './smoke-probes/goffline.mjs'
+export { groupProbeSource } from './smoke-probes/group.mjs'
+export { lineDeskProbeSource } from './smoke-probes/lineDesk.mjs'
+export { lineMProbeSource } from './smoke-probes/lineM.mjs'
+export { lineTimesProbeSource } from './smoke-probes/lineTimes.mjs'
+export { lineUiProbeSource } from './smoke-probes/lineUi.mjs'
+export { listTrimProbeSource } from './smoke-probes/listTrim.mjs'
+export { macctBackProbeSource } from './smoke-probes/macctBack.mjs'
+export { mattachProbeSource } from './smoke-probes/mattach.mjs'
+export { mcardsProbeSource } from './smoke-probes/mcards.mjs'
+export { mchatProbeSource } from './smoke-probes/mchat.mjs'
+export { mchatBackProbeSource } from './smoke-probes/mchatBack.mjs'
+export { mchatEmptyProbeSource } from './smoke-probes/mchatEmpty.mjs'
+export { mcloudProbeSource } from './smoke-probes/mcloud.mjs'
+export { mdevsheetProbeSource } from './smoke-probes/mdevsheet.mjs'
+export { menuIconsProbeSource } from './smoke-probes/menuIcons.mjs'
+export { mgofflineProbeSource } from './smoke-probes/mgoffline.mjs'
+export { mgroupProbeSource } from './smoke-probes/mgroup.mjs'
+export { mlaunchProbeSource } from './smoke-probes/mlaunch.mjs'
+export { mlayoutProbeSource } from './smoke-probes/mlayout.mjs'
+export { mnoselfProbeSource } from './smoke-probes/mnoself.mjs'
+export { mnoticeProbeSource } from './smoke-probes/mnotice.mjs'
+import { LEGACY_SENDERS } from './smoke-probes/mnoticeLegacy.mjs'
+export { mnoticeLegacyProbeSource } from './smoke-probes/mnoticeLegacy.mjs'
+export { MPANE_CHAT_MIN, MPANE_CONV_MIN, mpaneChatProbeSource, mpaneProbeSource, mpaneWidenProbeSource } from './smoke-probes/mpane.mjs'
+export { permDangerProbeSource } from './smoke-probes/mpermDanger.mjs'
+export { mpermreqProbeSource } from './smoke-probes/mpermreq.mjs'
+export { mreleaseProbeSource } from './smoke-probes/mrelease.mjs'
+export { mtabsProbeSource } from './smoke-probes/mtabs.mjs'
+export { mtermComposerProbeSource, mtermviewGateProbeSource, mtermviewProbeSource } from './smoke-probes/mtermview.mjs'
+export { multiPhotoProbeSource } from './smoke-probes/multiPhoto.mjs'
+export { munreadProbeSource } from './smoke-probes/munread.mjs'
+export { photoBackProbeSource } from './smoke-probes/photoBack.mjs'
+export { photoZoomProbeSource } from './smoke-probes/photoZoom.mjs'
+export { quotaProbeSource } from './smoke-probes/quota.mjs'
+export { skinProbeSource } from './smoke-probes/skinCheck.mjs'
+import { TASKMGR_RESUMING_SID } from './smoke-probes/taskmgr.mjs'
+export { TASKMGR_RESUMING_SID, taskmgrProbeSource } from './smoke-probes/taskmgr.mjs'
+export { UPD_DL_TOTAL, updDlProbeSource } from './smoke-probes/updDl.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
 export const parseSmokeArgs = argv => {
@@ -79,195 +128,6 @@ export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idl
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
 // 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
-// 手機設備頁（#1539）：每列平常不顯示按鈕，點一下那一列才展開它的「上移／下移／帳號／詳情」。全部用真觸控：
-// 手指滑過列不會展開；點一下展開（只有那一列、有明顯底色）；展開的按鈕按得到（下移真的換了順序）；點別列換過去；再點同一列收起；拖拉把手不會展開
-export const devSelProbeSource = () => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 400) };
-  const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(150); await real({ hold: [...at(el), 60] }) };
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-  await real({ click: at(btn) });
-  const rows = () => [...document.querySelectorAll('.m-dv-row')].filter(vis);
-  for (let i = 0; i < 60 && rows().length < 3; i++) await sleep(100);
-  if (rows().length < 3) return { ok: false, why: '設備列少於 3 列' };
-  const row = name => rows().find(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === name);
-  const names = () => rows().map(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim());
-  const opened = () => rows().filter(r => vis(r.querySelector('.m-dv-rowbtns')));
-  const sel = () => rows().filter(r => r.classList.contains('sel'));
-  if (opened().length || sel().length) return { ok: false, why: '一開始就有列展開了按鈕' };
-  await real({ touch: true }, 100);
-  // 一、手指滑過列（捲動）：不能展開
-  const office = row('辦公室');
-  office.scrollIntoView({ block: 'center' }); await sleep(150);
-  // 捲動的是設備清單外層那個可以捲的容器；先記下位置，滑完要真的有捲動，不然這一步等於沒測（觸控沒送出也會是綠的）
-  let scroller = office.parentElement;
-  while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
-  if (!scroller) return { ok: false, why: '設備清單沒有可以捲動的外層，測不到「捲動不會展開」（情境的高度要再小一點）' };
-  const top0 = scroller.scrollTop, rowTop0 = office.getBoundingClientRect().top;
-  { const c = at(office.querySelector('.m-dv-go')); await real({ gesture: [c[0], c[1], 0, -90] }, 600) }
-  if (!(scroller.scrollTop > top0 + 4) || !(office.getBoundingClientRect().top < rowTop0 - 4)) return { ok: false, why: '手指往上滑沒有真的捲動：scrollTop ' + top0 + ' → ' + scroller.scrollTop };
-  if (opened().length || sel().length) return { ok: false, why: '手指滑過列（捲動）就展開了按鈕' };
-  // 二、點一下：只有那一列展開，而且有明顯底色
-  await tap(row('辦公室').querySelector('.m-dv-go'));
-  if (opened().length !== 1 || opened()[0] !== row('辦公室')) return { ok: false, why: '點一下辦公室沒有（只）展開它的按鈕：' + opened().map(r => r.querySelector('b').textContent).join('、') };
-  const bgSel = getComputedStyle(row('辦公室')).backgroundColor, bgOther = getComputedStyle(row('工作機')).backgroundColor;
-  if (bgSel === bgOther) return { ok: false, why: '選中的那一列沒有不同的底色：' + bgSel };
-  if (row('辦公室').querySelector('.m-dv-go').getAttribute('aria-expanded') !== 'true') return { ok: false, why: '選中的那一列 aria-expanded 不是 true' };
-  const labels = [...row('辦公室').querySelectorAll('.m-dv-rowbtns button')].filter(vis).map(b => b.textContent.trim());
-  if (labels.join('、') !== '上移、下移、帳號、詳情') return { ok: false, why: '展開的按鈕不是上移、下移、帳號、詳情：' + labels.join('、') };
-  // 三、展開的按鈕按得到：按「下移」，辦公室換到工作機後面，而且還是選中的
-  const before = names().join('、');
-  await tap([...row('辦公室').querySelectorAll('.m-dv-rowbtns button')].find(b => b.textContent.trim() === '下移'));
-  if (names().join('、') === before) return { ok: false, why: '按「下移」順序沒變：' + before };
-  if (names().indexOf('辦公室') < names().indexOf('工作機')) return { ok: false, why: '按「下移」後辦公室應該在工作機後面：' + names().join('、') };
-  if (opened().length !== 1 || opened()[0] !== row('辦公室')) return { ok: false, why: '按了「下移」之後展開的列不對' };
-  // 四、點別列：換成展開那一列
-  await tap(row('工作機').querySelector('.m-dv-go'));
-  if (opened().length !== 1 || opened()[0] !== row('工作機')) return { ok: false, why: '點別列沒有換過去：' + opened().map(r => r.querySelector('b').textContent).join('、') };
-  // 五、再點同一列：收起
-  await tap(row('工作機').querySelector('.m-dv-go'));
-  if (opened().length || sel().length) return { ok: false, why: '再點同一列沒有收起' };
-  // 六、拖拉把手：不會展開
-  const grip = row('工作機').querySelector('.m-dv-grip');
-  if (grip) { const c = at(grip); await real({ gesture: [c[0], c[1], 0, 60] }, 600) }
-  if (opened().length || sel().length) return { ok: false, why: '拖拉把手就展開了按鈕' };
-  // 七、按展開的「詳情」進去再返回：回到清單時是收起的
-  await tap(row('工作機').querySelector('.m-dv-go'));
-  await tap([...row('工作機').querySelectorAll('.m-dv-rowbtns button')].find(b => b.textContent.trim() === '詳情'));
-  let back = null;
-  for (let i = 0; i < 30 && !back; i++) { back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis) || null; if (!back) await sleep(100) }
-  if (!back || rows().length) return { ok: false, why: '按「詳情」沒有進到那台的頁面' };
-  await tap(back);
-  for (let i = 0; i < 30 && rows().length < 3; i++) await sleep(100);
-  if (opened().length || sel().length) return { ok: false, why: '從詳情返回清單時還是展開的' };
-  // 留一列展開給截圖看
-  await tap(row('工作機').querySelector('.m-dv-go'));
-  await real({ touch: false }, 100);
-  if (opened().length !== 1) return { ok: false, why: '最後點一下沒有展開' };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-// LINE 手機（#1536）：part＝'table'（一對一，含寬表格）或 'group'（群組）。全部在頁面裡量：
-// 每個泡泡右緣、每個時間都在螢幕內，訊息區沒有橫向捲動；表格在泡泡裡，用手指真的滑得動；一般長句的泡泡放寬到約 80%；
-// 標題列藍底、跟對話區同色、中間沒有細線；輸入列的圖片鈕在沒有滑鼠游標的裝置上點過之後不留灰色圓底
-export const lineMProbeSource = part => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 350) };
-  const R = e => e.getBoundingClientRect();
-  let pane = null;
-  for (let i = 0; i < 60 && !pane; i++) { pane = [...document.querySelectorAll('.m-chat .chatpane')].find(vis) || null; if (!pane) await sleep(100) }
-  if (!pane) return { ok: false, why: '找不到對話' };
-  const msgs = pane.querySelector('.msgs');
-  for (let i = 0; i < 60 && msgs.querySelectorAll('.msg .m-body').length < 2; i++) await sleep(100);
-  await sleep(300);
-  const W = innerWidth;
-  // 標題列：藍底、跟對話區同色、跟對話區之間沒有線
-  const head = [...document.querySelectorAll('.m-chat .m-chathead')].find(vis);
-  if (!head) return { ok: false, why: '找不到標題列' };
-  const hb = getComputedStyle(head).backgroundColor, cb = getComputedStyle(pane.querySelector('.conv-main') || msgs).backgroundColor;
-  if (hb !== 'rgb(169, 189, 226)' || hb !== cb) return { ok: false, why: '標題列不是藍底或跟對話區不同色：' + hb + ' ／ ' + cb };
-  const pn = pane.closest('.pane') || pane;
-  if (parseFloat(getComputedStyle(pn).borderTopWidth) > 0) return { ok: false, why: '標題列下面還有一條線：' + getComputedStyle(pn).borderTopWidth + ' ' + getComputedStyle(pn).borderTopColor };
-  // 每個泡泡、每個時間都在螢幕內；訊息區、整頁都沒有橫向捲動
-  for (const b of msgs.querySelectorAll('.msg .m-body')) if (vis(b) && (R(b).right > W + 0.5 || R(b).left < -0.5)) return { ok: false, why: '泡泡跑出螢幕：右緣 ' + Math.round(R(b).right) + ' ／ 螢幕 ' + W };
-  for (const t of msgs.querySelectorAll('.msg .l-time')) if (vis(t) && (R(t).right > W + 0.5 || R(t).left < -0.5 || R(t).width < 1)) return { ok: false, why: '時間看不到：' + t.textContent + ' 在 ' + Math.round(R(t).left) + '～' + Math.round(R(t).right) };
-  if (msgs.scrollWidth > msgs.clientWidth + 1) return { ok: false, why: '訊息區出現橫向捲動：' + msgs.scrollWidth + ' ／ ' + msgs.clientWidth };
-  if (document.documentElement.scrollWidth > W + 1) return { ok: false, why: '整頁出現橫向捲動' };
-  if (${JSON.stringify(part)} === 'head') return { ok: true, why: '' };   // 只看標題列（上面已經量過藍底、同色、沒有線）
-  if (${JSON.stringify(part)} === 'table') {
-    const wrap = msgs.querySelector('.md-tablewrap');
-    if (!vis(wrap)) return { ok: false, why: '找不到表格' };
-    if (!(wrap.scrollWidth > wrap.clientWidth + 20)) return { ok: false, why: '表格沒有比泡泡寬，測不到左右滑：' + wrap.scrollWidth + ' ／ ' + wrap.clientWidth };
-    const bub = wrap.closest('.m-body');
-    if (R(wrap).right > R(bub).right + 0.5) return { ok: false, why: '表格超出泡泡' };
-    wrap.scrollIntoView({ block: 'center' }); await sleep(200);
-    const c = at(wrap);
-    await real({ gesture: [c[0] + 60, c[1], -160, 0] }, 900);
-    if (!(wrap.scrollLeft > 20)) return { ok: false, why: '用手指滑表格沒有左右捲動：scrollLeft=' + wrap.scrollLeft };
-    if (msgs.scrollLeft !== 0 || document.documentElement.scrollLeft !== 0) return { ok: false, why: '滑表格時整個訊息區跟著橫移' };
-    // 一般長句的泡泡：泡泡本身（不含旁邊的時間）要比原本 68% 的上限明顯寬（多 30px 以上），也不超過這一列的 80%。
-    // 不寫死下限比例：窄螢幕（360）時泡泡已經頂到「扣掉頭像和時間」的可用寬度，字型不同（CI 的 Linux 字型）折行點也會差一個字
-    const row = [...msgs.querySelectorAll('.msg')].find(m => !m.querySelector('table') && (m.querySelector('.m-body')?.textContent || '').length > 25 && !m.classList.contains('mine'));
-    if (!row) return { ok: false, why: '找不到長句的泡泡' };
-    const bw = R(row.querySelector('.m-body')).width, rw = R(row).width;
-    const meta = row.querySelector('.l-meta'), metaW = meta ? R(meta).width + 6 : 0, oldMax = rw * 0.68 - metaW;
-    if (bw > rw * 0.8 + 1) return { ok: false, why: '長句泡泡本身超過這一列的 80%：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
-    if (bw < oldMax + 30) return { ok: false, why: '長句泡泡沒有比原本（68% 扣掉時間＝' + Math.round(oldMax) + 'px）明顯寬：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
-  }
-  const main = pane.querySelector('.compose-main'), ta = main && main.querySelector('.composer textarea');
-  const send = main && main.querySelector('.composer .aero-btn'), mic = main && main.querySelector('.mc-dict');
-  const others = () => [...main.querySelectorAll('button')].filter(b => vis(b) && b !== mic && b !== send);
-  if (${JSON.stringify(part)} === 'dict') {
-    // 聽寫：真點麥克風 → 聆聽中。不出現「聆聽中…」字樣、麥克風變紅、按鈕大小不變、旁邊的東西不動
-    if (!vis(mic)) return { ok: false, why: '找不到麥克風（語音輸入）' };
-    const before = R(mic), place = [ta, ...others()].map(e => [e, R(e).left, R(e).width]);
-    const color0 = getComputedStyle(mic).color;
-    const rgb = c => c.slice(c.indexOf('(') + 1, c.indexOf(')')).split(',').map(x => Number(x.trim()));
-    // 準備中（等麥克風權限）：真點麥克風，先停在準備中，麥克風淡紅
-    await real({ click: at(mic) }, 400);
-    if (!mic.classList.contains('busy')) return { ok: false, why: '真點麥克風沒有進入準備中' };
-    const pale = getComputedStyle(mic).color, p = rgb(pale);
-    if (!(p[0] > 200 && p[1] > 130 && p[1] < 200 && p[2] > 120 && p[2] < 200)) return { ok: false, why: '準備中麥克風不是淡紅：' + pale };
-    if (parseFloat(getComputedStyle(mic).opacity) < 0.99) return { ok: false, why: '準備中麥克風變透明了（應該是淡紅、不是變淡）' };
-    { const r = R(mic); if (Math.abs(r.width - before.width) > 0.5 || Math.abs(r.height - before.height) > 0.5) return { ok: false, why: '準備中麥克風大小變了' } }
-    for (const [e, l, w] of place) if (Math.abs(R(e).left - l) > 0.5 || Math.abs(R(e).width - w) > 0.5) return { ok: false, why: '準備中旁邊的元素被擠動了：' + (e.getAttribute('aria-label') || e.className) };
-    if ([...main.querySelectorAll('*')].some(e => vis(e) && e.children.length === 0 && e.textContent.includes('準備中'))) return { ok: false, why: '輸入列看得到「準備中」' };
-    // 允許麥克風 → 開始聽：正紅
-    globalThis.__asnCallEvent && globalThis.__asnCallEvent(JSON.stringify({ t: 'perm', granted: true }));
-    await sleep(400);
-    if (!mic.classList.contains('rec')) return { ok: false, why: '允許麥克風後沒有進入聆聽中' };
-    const label = mic.querySelector('.dict-state');
-    if (vis(label) && label.textContent.trim()) return { ok: false, why: '聆聽中還看得到字樣：' + label.textContent.trim() };
-    if ([...main.querySelectorAll('*')].some(e => vis(e) && e.children.length === 0 && e.textContent.includes('聆聽中'))) return { ok: false, why: '輸入列看得到「聆聽中」' };
-    const after = R(mic);
-    if (Math.abs(after.width - before.width) > 0.5 || Math.abs(after.height - before.height) > 0.5) return { ok: false, why: '麥克風大小變了：' + Math.round(before.width) + ' → ' + Math.round(after.width) };
-    for (const [e, l, w] of place) if (Math.abs(R(e).left - l) > 0.5 || Math.abs(R(e).width - w) > 0.5) return { ok: false, why: '聆聽中旁邊的元素被擠動了：' + (e.getAttribute('aria-label') || e.className) };
-    const red = getComputedStyle(mic).color;
-    if (red === color0) return { ok: false, why: '聆聽中麥克風沒有變色：' + red };
-    const m = red.slice(red.indexOf('(') + 1, red.indexOf(')')).split(',').map(x => Number(x.trim()));
-    if (!(m[0] > 180 && m[1] < 110 && m[2] < 110)) return { ok: false, why: '聆聽中麥克風不是紅色：' + red };
-    if (red === pale) return { ok: false, why: '準備中和聆聽中的顏色一樣：' + red };
-    return { ok: true, why: '' };
-  }
-  if (${JSON.stringify(part)} === 'send') {
-    // 送出鈕最右、麥克風在它左邊；沒打字時最右邊是麥克風（真點輸入框、真打字）
-    if (!vis(mic) || !ta) return { ok: false, why: '找不到麥克風或輸入框' };
-    const rightmost = () => [...main.querySelectorAll('button')].filter(vis).sort((a, b) => R(b).right - R(a).right)[0];
-    if (vis(send)) return { ok: false, why: '還沒打字就出現送出鈕' };
-    if (rightmost() !== mic) return { ok: false, why: '沒打字時最右邊不是麥克風：' + (rightmost().getAttribute('aria-label') || rightmost().className) };
-    await real({ click: at(ta) });
-    await real({ text: '晚點再看' });
-    if (!vis(send)) return { ok: false, why: '打了字送出鈕沒有出現' };
-    if (rightmost() !== send) return { ok: false, why: '打字後最右邊不是送出鈕：' + (rightmost().getAttribute('aria-label') || rightmost().className) };
-    const gap = R(send).left - R(mic).right;
-    if (gap < -0.5 || gap > 12) return { ok: false, why: '麥克風不在送出鈕緊鄰的左邊：間距 ' + Math.round(gap) };
-    if (getComputedStyle(send).backgroundColor === 'rgba(0, 0, 0, 0)') return { ok: false, why: '送出鈕不是綠色' };
-    return { ok: true, why: '' };
-  }
-  // 圖片鈕：當成沒有滑鼠游標的手機，真的點一下（攔下選圖、不選檔），點完不能留下灰色圓底
-  const ph = pane.querySelector('.compose-main .lc-photo');
-  if (!vis(ph)) return { ok: false, why: '找不到輸入列的圖片鈕' };
-  await real({ touch: true }, 100);
-  globalThis.__smokeChooser = undefined;
-  globalThis.__smokeInput(JSON.stringify({ choose: [...at(ph), ''] }));
-  for (let i = 0; i < 60 && globalThis.__smokeChooser === undefined; i++) await sleep(100);
-  if (!globalThis.__smokeChooser) return { ok: false, why: '點圖片鈕沒有打開選圖' };
-  await sleep(200);
-  const pbg = getComputedStyle(ph).backgroundColor, noHover = matchMedia('(hover: none)').matches;
-  await real({ touch: false }, 100);
-  if (!noHover) return { ok: false, why: '沒有切成觸控手機（hover 不是 none），測不到點過之後的樣子' };
-  if (pbg !== 'rgba(0, 0, 0, 0)' && pbg !== 'transparent') return { ok: false, why: '點過圖片鈕之後留下灰色圓底：' + pbg };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
 // LINE 手機（#1536）：一則很寬的表格（對方的回覆，markdown）、一句長的文字（看泡泡最大寬度）、自己一句長的
 export const LINE_TABLE_MSGS = [
   { id: '00000000-0000-4000-8000-0000000000e1', dir: 'me', body: '幫我整理這週三台電腦的測試結果，列成表格給我看', created_at: '2026-11-15T01:00:00Z', delivered_at: '2026-11-15T01:00:01Z', acked_at: '2026-11-15T01:00:02Z' },
@@ -275,140 +135,6 @@ export const LINE_TABLE_MSGS = [
   { id: '00000000-0000-4000-8000-0000000000e3', dir: 'them', body: ['| 電腦 | 版本 | 情境數 | 通過 | 失敗 | 花費時間 | 備註 |', '|---|---|---|---|---|---|---|', '| 工作機 | 0.2.23 | 207 | 207 | 0 | 12 分 30 秒 | 全綠，沒有雜訊 |', '| 40家用 | 0.2.23 | 207 | 206 | 1 | 13 分 05 秒 | 終端計時那張是雜訊 |', '| 30家用 | 0.2.22 | 193 | 193 | 0 | 11 分 48 秒 | 還沒更新到新版 |'].join(String.fromCharCode(10)), created_at: '2026-11-15T01:01:30Z' },
   { id: '00000000-0000-4000-8000-0000000000e4', dir: 'them', body: '好', created_at: '2026-11-15T01:01:40Z' },
 ]
-// LINE 電腦版（#1527）：真點擊走一遍——沒有設備頁籤欄、自己的卡片在名單最上面（點大頭貼出選單）、收合／展開分組、點夥伴開對話、
-// 對話區只有訊息區一條直向捲動、沒有橫向捲動、用輸入框上方的按鈕區送出表情和圖片。mode＝'wide'（900）或 'narrow'（500，開對話會換成只顯示對話）
-export const lineDeskProbeSource = mode => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async req => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(350) };
-  const R = e => e.getBoundingClientRect();
-  const hscroll = () => document.documentElement.scrollWidth > innerWidth + 1;
-  // 窄視窗一開始停在對話，先按標題列的「返回名單」
-  const back = [...document.querySelectorAll('.mbar-back')].find(vis);
-  if (back) await real({ click: at(back) });
-  if (vis(document.querySelector('.rail'))) return { ok: false, why: '還有左邊的設備頁籤欄' };
-  const me = document.querySelector('.list-pane > .me'), search = document.querySelector('.content .search');
-  if (!vis(me) || !vis(search)) return { ok: false, why: '找不到自己的卡片或搜尋框' };
-  if (R(me).bottom > R(search).top + 1) return { ok: false, why: '自己的卡片要在名單最上面' };
-  // 點自己的大頭貼＝換大頭貼（打開選圖），跟原本一樣；這裡只攔下選檔對話框、不選檔
-  globalThis.__smokeChooser = undefined;
-  globalThis.__smokeInput(JSON.stringify({ choose: [...at(me.querySelector('.me-dp')), ''] }));
-  for (let i = 0; i < 60 && globalThis.__smokeChooser === undefined; i++) await sleep(100);
-  if (!globalThis.__smokeChooser) return { ok: false, why: '點自己的大頭貼沒有打開換大頭貼的選圖' };
-  const head = [...document.querySelectorAll('.list .g-head')].find(vis);
-  if (!head) return { ok: false, why: '名單沒有分組標題' };
-  if (!/[(（][0-9]/.test(head.textContent)) return { ok: false, why: '分組標題沒有人數：' + head.textContent.trim() };
-  const ul = head.nextElementSibling;
-  if (!vis(ul)) return { ok: false, why: '分組一開始就是收合的' };
-  await real({ click: at(head) });
-  if (vis(ul)) return { ok: false, why: '點分組標題沒有收合' };
-  await real({ click: at(head) });
-  if (!vis(ul)) return { ok: false, why: '再點一次沒有展開' };
-  const buddy = [...ul.querySelectorAll('.buddy')].find(vis);
-  if (!buddy) return { ok: false, why: '分組裡沒有夥伴' };
-  await real({ click: at(buddy) });
-  let ta = null;
-  for (let i = 0; i < 40 && !ta; i++) { ta = [...document.querySelectorAll('.compose-main.lc-row textarea')].find(vis) || null; if (!ta) await sleep(100) }
-  if (!ta) return { ok: false, why: '點夥伴沒有打開對話（或輸入列不是按鈕區版）' };
-  await sleep(300);
-  const pane = ta.closest('.chatpane'), main = ta.closest('.compose-main'), row = main.querySelector(':scope > .toolbar'), msgs = pane.querySelector('.msgs');
-  if (hscroll()) return { ok: false, why: '視窗出現橫向捲動' };
-  if (msgs.scrollWidth > msgs.clientWidth + 1) return { ok: false, why: '對話區出現橫向捲動' };
-  if (getComputedStyle(msgs).overflowY !== 'auto') return { ok: false, why: '訊息區不是直向捲動' };
-  for (const el of [pane.querySelector('.conv'), pane.querySelector('.conv-main')]) if (['auto', 'scroll'].includes(getComputedStyle(el).overflowY) || ['auto', 'scroll'].includes(getComputedStyle(el).overflowX)) return { ok: false, why: '訊息區外層也會捲動（' + el.className + '）' };
-  const tool = name => [...row.querySelectorAll('.tool')].find(b => vis(b) && b.getAttribute('aria-label') === name);
-  const emo = tool('表情符號');
-  if (!emo) return { ok: false, why: '按鈕區沒有表情鈕' };
-  await real({ click: at(emo) });
-  const pk = [...row.querySelectorAll('.picker')].find(vis);
-  if (!pk) return { ok: false, why: '按表情鈕沒有出現表情選單' };
-  const first = pk.querySelector('button'), code = first.getAttribute('title');
-  await real({ click: at(first) });
-  if (!ta.value.includes(code)) return { ok: false, why: '點了表情沒有放進輸入框' };
-  globalThis.__smokeCalls = [];
-  if (document.activeElement !== ta) await real({ click: at(ta) });
-  await real({ key: 'Enter' });
-  const sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send');
-  if (sent.length !== 1 || !JSON.stringify(sent[0][1]).includes(JSON.stringify(code).slice(1, -1))) return { ok: false, why: '表情沒有送出' };
-  const ph = tool('傳照片');
-  if (!ph) return { ok: false, why: '按鈕區沒有圖片鈕' };
-  globalThis.__smokeChooser = undefined;
-  globalThis.__smokeInput(JSON.stringify({ choose: [...at(ph), 'ok1.png'] }));
-  for (let i = 0; i < 60 && globalThis.__smokeChooser === undefined; i++) await sleep(100);
-  if (!globalThis.__smokeChooser) return { ok: false, why: '按圖片鈕沒有打開選檔' };
-  let up = [];
-  for (let i = 0; i < 60; i++) { up = (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send_attachment'); if (up.length) break; await sleep(100) }
-  if (up.length !== 1) return { ok: false, why: '選了圖片沒有送出' };
-  await sleep(300);
-  if (hscroll()) return { ok: false, why: '送出後視窗出現橫向捲動' };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-// 下載中（#1526）：按通知列的「更新」（真點擊），再推下載進度事件到 pct%；進度條要直角、依百分比填滿、文字（%、MB）保留、左右和分頁對齊
-export const UPD_DL_TOTAL = Math.round(38.3 * 1048576)
-export const updDlProbeSource = pct => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0;
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const T = ${UPD_DL_TOTAL}, pct = ${pct};
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.upd-bar .upd-btn')].find(b => vis(b) && b.textContent.trim() === '更新') || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到通知列的「更新」' };
-  globalThis.__smokeInput(JSON.stringify({ click: at(btn) })); await sleep(300);
-  const bar = document.querySelector('.upd-bar.dl'), prog = bar && bar.querySelector('.upd-prog');
-  if (!vis(prog)) return { ok: false, why: '按「更新」後沒有出現進度條' };
-  if (bar.querySelector('.upd-btn')) return { ok: false, why: '下載中不該有按鈕' };
-  const emit = done => { for (const fn of ((globalThis.__smokeListeners || {})['update-progress'] || [])) fn({ event: 'update-progress', payload: { done, total: T } }) };
-  if (pct > 0) { emit(Math.ceil(T / 100)); await sleep(100) }
-  const done = Math.ceil(T * pct / 100);
-  emit(done); await sleep(500);
-  const fill = prog.querySelector('.upd-fill'), text = prog.querySelector('.upd-text');
-  const want = '下載中 ' + pct + '%（' + (done / 1048576).toFixed(1) + ' / 38.3 MB）';
-  if (!text || text.textContent.trim() !== want) return { ok: false, why: '進度文字不對：' + (text && text.textContent.trim()) + '（應該是 ' + want + '）' };
-  if (text.scrollWidth > text.clientWidth + 1) return { ok: false, why: '進度文字被截掉' };
-  if (prog.getAttribute('aria-valuenow') !== String(pct)) return { ok: false, why: '進度條的 aria-valuenow 不是 ' + pct };
-  const fw = fill.getBoundingClientRect().width, inner = prog.clientWidth;
-  if (Math.abs(fw - inner * pct / 100) > 1) return { ok: false, why: '填滿寬度不對：' + Math.round(fw) + ' ／ ' + inner + '（' + pct + '%）' };
-  for (const [el, name] of [[bar, '通知列'], [prog, '進度條'], [fill, '填滿']]) if (getComputedStyle(el).borderTopLeftRadius !== '0px' || getComputedStyle(el).borderBottomRightRadius !== '0px') return { ok: false, why: name + '不是直角' };
-  const P = prog.getBoundingClientRect();
-  const tabs = [...document.querySelectorAll('.top-tabs .ttab')].filter(vis);
-  if (tabs.length < 2) return { ok: false, why: '找不到分頁' };
-  const a = tabs[0].getBoundingClientRect(), b = tabs[tabs.length - 1].getBoundingClientRect();
-  if (Math.abs(a.top - b.top) < 1) {
-    if (Math.abs(P.left - a.left) > 1 || Math.abs(P.right - b.right) > 1) return { ok: false, why: '進度條左右沒和分頁對齊：進度條 ' + Math.round(P.left) + '～' + Math.round(P.right) + '、分頁 ' + Math.round(a.left) + '～' + Math.round(b.right) };
-  } else {
-    // LINE：分頁是左側直排圖示欄，進度條對齊右邊名單欄的左右（各留 8px，跟名單欄的內距一樣）
-    const rail = document.querySelector('.top-tabs').getBoundingClientRect(), pane = document.querySelector('.list-pane').getBoundingClientRect();
-    if (Math.abs(P.left - (rail.right + 8)) > 1 || Math.abs(P.right - (pane.right - 8)) > 1) return { ok: false, why: '進度條沒對齊名單欄：' + Math.round(P.left) + '～' + Math.round(P.right) + '、名單欄 ' + Math.round(rail.right) + '～' + Math.round(pane.right) };
-  }
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-// 一次選多張（#1497）：在傳照片的選檔欄位一次選三張（中間那張壞掉）→ 依序送出兩張、壞的那張說明沒傳出，另外兩張不受影響
-export const multiPhotoProbeSource = () => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let input = null;
-  for (let i = 0; i < 60 && !input; i++) { input = [...document.querySelectorAll('.chatpane input[type="file"][accept="image/*"]')].find(e => e.closest('.chatpane').getClientRects().length) || null; if (!input) await sleep(100) }
-  if (!input) return { ok: false, why: '找不到傳照片的選檔欄位' };
-  if (!input.multiple) return { ok: false, why: '傳照片的選檔欄位不能多選' };
-  input.setAttribute('data-smoke-pick', '1');
-  globalThis.__smokeCalls = [];
-  globalThis.__smokeInput(JSON.stringify({ files: ['.chatpane input[data-smoke-pick="1"]', 'ok1.png', 'bad.png', 'ok2.png'] }));
-  const sends = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send_attachment');
-  let txt = '';
-  for (let i = 0; i < 100; i++) { txt = [...document.querySelectorAll('.chatpane')].map(e => e.textContent).join(' '); if (/張已傳出/.test(txt)) break; await sleep(100) }
-  const n = sends().length;
-  if (n !== 2) return { ok: false, why: '應該送出 2 張，實際 ' + n + ' 張' };
-  const names = sends().map(c => c[1] && c[1].payload && c[1].payload.name);
-  if (names[0] !== 'ok1.webp' || names[1] !== 'ok2.webp') return { ok: false, why: '送出的順序不對：' + names.join('、') };
-  if (!/2 張已傳出，1 張沒有傳出：bad\\.png/.test(txt)) return { ok: false, why: '送完沒有說明哪一張沒傳出：' + txt.slice(0, 120) };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
 // 看大圖縮放（#1498）：一則帶照片的信；大圖用 800×600 的 svg（縮圖是 1×1 的 webp）
 export const PHOTO_ZOOM_ID = '00000000-0000-4000-8000-0000000000aa'
 export const PHOTO_ZOOM_MSGS = [
@@ -416,352 +142,12 @@ export const PHOTO_ZOOM_MSGS = [
     attachments: [{ id: PHOTO_ZOOM_ID, kind: 'image', name: '貓.webp', mime: 'image/webp', bytes: 120000, width: 800, height: 600, thumb: 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', expires_at: '2099-01-01T00:00:00Z' }] },
 ]
 export const PHOTO_ZOOM_FULL = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='%2399bbdd'/><circle cx='400' cy='300' r='200' fill='%23ffcc66'/></svg>"
-// mode＝'mouse'（滾輪、拖曳、雙擊）或 'touch'（雙指捏合、點兩下）；最後關掉再打開要回到原本大小。全部用真的輸入（__smokeInput）
-// 手機看大圖按返回鍵（#1537）：看圖是蓋在對話上的一層浮層（跟離線名單同一套）。開＝記錄多一筆；系統返回鍵（history.back，實機的返回鍵就是這個）
-// 只關掉看圖、留在同一個對話；用「關閉」鈕、Esc 關掉要把那一筆退掉（記錄深度回到原本），之後再按返回才照原本的行為離開對話。縮放中按返回也直接關
-export const photoBackProbeSource = () => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(400) };
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const idx = () => (window.navigation ? navigation.currentEntry.index : history.length);
-  const pv = () => document.querySelector('.photo-viewer');
-  const img = () => document.querySelector('.photo-viewer img.pv-img');
-  const onTab = () => (document.querySelector('.m-tabs button.on') || {}).textContent;
-  const chatName = () => { const e = document.querySelector('.m-chat .m-plate-name, .m-chat .m-title'); return e ? e.textContent.trim() : '' };
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-chat .chatpane button.photo')].find(e => e.getClientRects().length); if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '對話裡找不到照片' };
-  btn.scrollIntoView({ block: 'center' }); await sleep(200);
-  const base = idx(), tab0 = onTab(), name0 = chatName();
-  const open = async how => {
-    await real({ click: at(btn) });
-    for (let i = 0; i < 40 && !(img() && img().complete && img().naturalWidth); i++) await sleep(100);
-    if (!pv()) return how + '：點照片沒有打開大圖';
-    if (idx() !== base + 1) return how + '：開大圖後記錄深度是 ' + idx() + '，應該多一筆（' + (base + 1) + '）';
-    if (!history.state || history.state.sheet !== 'photo') return how + '：開大圖的那筆記錄不是看圖：' + JSON.stringify(history.state);
-    return '';
-  };
-  const closed = async how => {
-    for (let i = 0; i < 20 && pv(); i++) await sleep(100);
-    await sleep(300);
-    if (pv()) return how + '：大圖沒有關掉';
-    if (idx() !== base) return how + '：記錄深度是 ' + idx() + '，應該回到 ' + base + '（殘留了一筆）';
-    if (onTab() !== tab0 || !document.querySelector('.m-chat .chatpane') || chatName() !== name0) return how + '：離開了原本的對話（分頁 ' + onTab() + '、對話 ' + chatName() + '）';
-    if (!history.state || history.state.sheet) return how + '：記錄還停在浮層：' + JSON.stringify(history.state);
-    return '';
-  };
-  let bad = await open('第一次'); if (bad) return { ok: false, why: bad };
-  history.back(); bad = await closed('系統返回鍵'); if (bad) return { ok: false, why: bad };
-  bad = await open('按關閉前'); if (bad) return { ok: false, why: bad };
-  const x = [...pv().querySelectorAll('button')].find(b => b.textContent.trim() === '關閉');
-  if (!x) return { ok: false, why: '大圖上找不到「關閉」' };
-  await real({ click: at(x) }); bad = await closed('按「關閉」'); if (bad) return { ok: false, why: bad };
-  bad = await open('按 Esc 前'); if (bad) return { ok: false, why: bad };
-  await real({ key: 'Escape' }); bad = await closed('按 Esc'); if (bad) return { ok: false, why: bad };
-  bad = await open('縮放前'); if (bad) return { ok: false, why: bad };
-  const w0 = img().getBoundingClientRect().width;
-  await real({ pinch: [...at(img()), 80, 200] });
-  if (!(img().getBoundingClientRect().width > w0 * 1.5)) return { ok: false, why: '雙指捏合沒有放大，縮放中返回的情況沒測到' };
-  history.back(); bad = await closed('縮放中按系統返回鍵'); if (bad) return { ok: false, why: bad };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-export const photoZoomProbeSource = mode => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(400) };
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const pv = () => document.querySelector('.photo-viewer img.pv-img');
-  const w = () => pv().getBoundingClientRect().width;
-  const near = (a, b) => Math.abs(a - b) <= Math.max(2, b * 0.04);
-  async function openIt() {
-    let btn = null;
-    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.chatpane button.photo')].find(e => e.getClientRects().length); if (!btn) await sleep(100) }
-    if (!btn) return '對話裡找不到照片';
-    btn.scrollIntoView({ block: 'center' }); await sleep(150);
-    await real({ click: at(btn) });
-    for (let i = 0; i < 40; i++) { const img = pv(); if (img && img.complete && img.naturalWidth) return ''; await sleep(100) }
-    return '點照片沒有打開大圖';
-  }
-  let bad = await openIt();
-  if (bad) return { ok: false, why: bad };
-  const w0 = w();
-  if (w0 < 50) return { ok: false, why: '大圖太小：' + w0 };
-  if (${JSON.stringify(mode)} === 'touch') {
-    await real({ pinch: [...at(pv()), 80, 200] });
-    if (!(w() > w0 * 2)) return { ok: false, why: '雙指捏合沒有放大：' + w0 + ' → ' + w() };
-    await real({ tap2: at(pv()) });
-    if (!near(w(), w0)) return { ok: false, why: '放大時點兩下沒有還原：' + w() };
-    await real({ tap2: at(pv()) });
-    if (!near(w(), w0 * 2.5)) return { ok: false, why: '點兩下沒有放大到 2.5 倍：' + w() };
-  } else {
-    await real({ wheel: [...at(pv()), -400] });
-    if (!(w() > w0 * 1.4)) return { ok: false, why: '滾輪沒有放大：' + w0 + ' → ' + w() };
-    const c1 = at(pv());
-    await real({ drag: [c1[0], c1[1], c1[0] + 60, c1[1] + 30] });
-    const c2 = at(pv());
-    if (!(c2[0] - c1[0] > 40)) return { ok: false, why: '放大後拖曳沒有跟著移動：' + c1 + ' → ' + c2 };
-    await real({ dblclick: at(pv()) });
-    if (!near(w(), w0)) return { ok: false, why: '放大時雙擊沒有還原：' + w() };
-    await real({ dblclick: at(pv()) });
-    if (!near(w(), w0 * 2.5)) return { ok: false, why: '雙擊沒有放大到 2.5 倍：' + w() };
-  }
-  const close = [...document.querySelectorAll('.photo-viewer .pv-bar button')].find(b => b.textContent.trim() === '關閉');
-  if (!close) return { ok: false, why: '找不到「關閉」' };
-  await real({ click: at(close) });
-  if (document.querySelector('.photo-viewer')) return { ok: false, why: '按「關閉」沒有關掉' };
-  bad = await openIt();
-  if (bad) return { ok: false, why: '再開一次：' + bad };
-  if (!near(w(), w0)) return { ok: false, why: '關掉再打開沒有回到原本大小：' + w0 + ' → ' + w() };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-// LINE 外觀（#1517 之 1）：每則時間各自貼在自己泡泡的底部旁邊——對方在泡泡右邊、自己在泡泡左邊，「已讀」疊在時間上面；時間彼此不重疊、也不能跑到畫面角落
-// LINE 外觀（#1517 之 2～4）：part＝'compose'（白底、灰框、表情在框內、麥克風最右、打字時收成「＞」，真點擊＋真打字）或 'busy'（標題列不變黃、「忙碌」是黃色小標籤）
-export const lineUiProbeSource = ({ lineUi }) => `(async () => {
-  try {
-  const want = ${JSON.stringify(lineUi)};
-  const phone = want.mode === 'phone';
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async req => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(350) };
-  const R = e => e.getBoundingClientRect();
-  let pane = null;
-  for (let i = 0; i < 60 && !pane; i++) { pane = [...document.querySelectorAll('.chatpane')].find(vis) || null; if (!pane) await sleep(100) }
-  if (!pane) return { ok: false, why: '找不到對話' };
-  await sleep(400);
-  if (want.part === 'busy') {
-    const pill = [...document.querySelectorAll(phone ? '.m-chathead .l-busy' : '.mbar .l-busy')].find(vis);
-    if (!pill || pill.textContent.trim() !== '忙碌') return { ok: false, why: '標題列沒有「忙碌」黃色小標籤' };
-    if (getComputedStyle(pill).backgroundColor !== 'rgb(255, 213, 74)') return { ok: false, why: '「忙碌」標籤不是黃色：' + getComputedStyle(pill).backgroundColor };
-    if (phone) {
-      const head = document.querySelector('.m-chathead'), conv = pane.querySelector('.conv-main') || pane;
-      const hb = getComputedStyle(head).backgroundColor, cb = getComputedStyle(conv).backgroundColor;
-      if (hb !== cb) return { ok: false, why: '忙碌時標題列底色跟對話區不同：' + hb + ' ／ ' + cb };
-    }
-    return { ok: true, why: '' };
-  }
-  const main = pane.querySelector('.compose-main'), ta = main && main.querySelector('textarea');
-  if (!ta) return { ok: false, why: '找不到輸入框' };
-  // 電腦版（#1527）：按鈕區固定在輸入框上方，打字不收合、沒有「＞」（手機才有）
-  if (!phone) {
-    const bar = main.querySelector(':scope > .toolbar');
-    if (!vis(bar) || vis(main.querySelector('.lc-more')) || vis(main.querySelector('.mc-plus'))) return { ok: false, why: '電腦版應該是上方按鈕區、沒有「＋」和「＞」' };
-    await real({ click: at(ta) });
-    await real({ text: '哈囉' });
-    if (!vis(bar) || vis(main.querySelector('.lc-more'))) return { ok: false, why: '電腦版打字後按鈕區不該收起來' };
-    await real({ key: 'Enter' });
-    if (ta.value !== '') return { ok: false, why: '電腦版按 Enter 沒有送出' };
-    return { ok: true, why: '' };
-  }
-  const row = main.closest('.compose-row') || main;
-  for (const [el, name] of [[row, '輸入區'], [main, '輸入列']]) if (getComputedStyle(el).backgroundColor !== 'rgb(255, 255, 255)') return { ok: false, why: name + '不是白底：' + getComputedStyle(el).backgroundColor };
-  const tbg = getComputedStyle(ta).backgroundColor;
-  if (tbg === 'rgb(255, 255, 255)' || tbg === 'rgba(0, 0, 0, 0)') return { ok: false, why: '輸入框不是淺灰：' + tbg };
-  if (parseFloat(getComputedStyle(ta).borderTopLeftRadius) < 14) return { ok: false, why: '輸入框不是圓角' };
-  const emo = main.querySelector('.lc-emo'), t = R(ta);
-  if (!vis(emo)) return { ok: false, why: '找不到表情鈕' };
-  { const e = R(emo); if (e.left < t.left || e.right > t.right + 1 || e.top < t.top - 1 || e.bottom > t.bottom + 1) return { ok: false, why: '表情鈕不在輸入框裡' } }
-  const plus = main.querySelector('.mc-plus'), photo = main.querySelector('.lc-photo'), more = main.querySelector('.lc-more');
-  if (!vis(plus) || !vis(photo) || vis(more)) return { ok: false, why: '還沒打字時應該看得到「＋」和圖片鈕、看不到「＞」' };
-  await real({ click: at(ta) });
-  if (document.activeElement !== ta) return { ok: false, why: '點輸入框沒有取得焦點' };
-  // 手機：有焦點就收；電腦打開對話本來就聚焦輸入框，要等有字才收
-  if (phone && (vis(plus) || vis(photo) || !vis(more))) return { ok: false, why: '輸入框有焦點時「＋」和圖片鈕沒有收成「＞」' };
-  if (!phone && (!vis(plus) || vis(more))) return { ok: false, why: '電腦還沒打字就收起來了' };
-  await real({ text: '哈囉' });
-  if (vis(plus) || vis(photo) || !vis(more)) return { ok: false, why: '打字後「＋」和圖片鈕應該收成「＞」' };
-  const mic = [...main.querySelectorAll('.mc-dict')].find(vis);
-  if (mic) {
-    const m = R(mic);
-    for (const b of [...main.querySelectorAll('button')].filter(vis)) if (b !== mic && R(b).right > m.right + 1) return { ok: false, why: '麥克風不在最右邊（' + (b.getAttribute('aria-label') || b.className) + ' 在它右邊）' };
-    if (m.left < t.right - 1) return { ok: false, why: '麥克風不在輸入框外' };
-  }
-  await real({ click: at(more) });
-  if (!vis(plus) || !vis(photo)) return { ok: false, why: '按「＞」沒有展開「＋」和圖片鈕' };
-  if (document.activeElement !== ta) return { ok: false, why: '按「＞」不該讓輸入框失去焦點' };
-  // 送出後一律收回展開狀態：下一句一開始打字又收成「＞」（#1524 審查）。電腦按 Enter 送（焦點留在輸入框），手機點送出鈕
-  if (phone) {
-    const send = [...pane.querySelectorAll('button[type="submit"]')].find(vis);
-    if (!send) return { ok: false, why: '有字時找不到送出鈕' };
-    await real({ click: at(send) });
-  } else await real({ key: 'Enter' });
-  if (ta.value !== '') return { ok: false, why: '送出後輸入框沒有清空' };
-  if (document.activeElement !== ta) await real({ click: at(ta) });
-  await real({ text: '再一句' });
-  if (vis(plus) || vis(photo) || !vis(more)) return { ok: false, why: '送出後下一句開始打字，沒有再收成「＞」' };
-  // 用鍵盤按「＞」（空白鍵）：展開後焦點要移到「＋」，不能掉到整頁
-  more.focus();
-  await real({ key: ' ' });
-  if (!vis(plus) || document.activeElement !== plus) return { ok: false, why: '用鍵盤按「＞」展開後，焦點應該在「＋」上（現在在 ' + (document.activeElement && (document.activeElement.className || document.activeElement.tagName)) + '）' };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-export const lineTimesProbeSource = () => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.getClientRects().length > 0;
-  let pane = null;
-  for (let i = 0; i < 60 && !pane; i++) { pane = [...document.querySelectorAll('.chatpane')].find(vis) || null; if (!pane) await sleep(100) }
-  if (!pane) return { ok: false, why: '找不到對話' };
-  await sleep(400);
-  const msgs = [...pane.querySelectorAll('.msg')].filter(m => vis(m) && m.querySelector('.l-time') && m.querySelector('.m-body'));
-  if (msgs.length < 3) return { ok: false, why: '有時間的訊息不夠：' + msgs.length };
-  const R = e => e.getBoundingClientRect();
-  const seen = [];
-  for (const m of msgs) {
-    const t = R(m.querySelector('.l-time')), b = R(m.querySelector('.m-body')), box = R(m);
-    const mine = m.classList.contains('mine');
-    const label = (mine ? '自己' : '對方') + '「' + m.querySelector('.m-body').textContent.trim().slice(0, 8) + '」';
-    if (t.top < box.top - 1 || t.bottom > box.bottom + 1) return { ok: false, why: label + '的時間不在這則訊息裡（跑到 ' + Math.round(t.left) + ',' + Math.round(t.top) + '）' };
-    if (Math.abs(t.bottom - b.bottom) > 6) return { ok: false, why: label + '的時間沒貼在泡泡底部：時間底 ' + Math.round(t.bottom) + '、泡泡底 ' + Math.round(b.bottom) };
-    if (mine ? !(t.right <= b.left + 1 && b.left - t.right < 24) : !(t.left >= b.right - 1 && t.left - b.right < 24)) return { ok: false, why: label + '的時間不在泡泡' + (mine ? '左' : '右') + '邊：時間 ' + Math.round(t.left) + '～' + Math.round(t.right) + '、泡泡 ' + Math.round(b.left) + '～' + Math.round(b.right) };
-    const st = m.querySelector('.l-st');
-    if (st && vis(st)) { const s = R(st); if (s.bottom > t.top + 1) return { ok: false, why: label + '的「' + st.textContent.trim() + '」沒有疊在時間上面' } }
-    for (const o of seen) if (!(t.right <= o.left || t.left >= o.right || t.bottom <= o.top || t.top >= o.bottom)) return { ok: false, why: '兩則訊息的時間疊在一起' };
-    seen.push(t);
-  }
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
 // 設備頁精簡（#1499）：列上只留名字和「電腦／手機・在線／離線」，「已確認／未確認」換成指紋小圖示。
 // desk＝電腦版設定的設備頁（兩支手機：一支記住了指紋、一支還沒）；phone＝手機設定的設備頁（兩台電腦：一台確認過、一台還沒，長按看說明）
 export const FPMARK_MEMBERS = {
   desk: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'M1', name: '小良的手機', agents: [{ name: 'm1', status: 'idle', cwd_label: 'm' }] }, { id: 'M2', name: '舊手機', agents: [{ name: 'm2', status: 'idle', cwd_label: 'm' }] }],
   phone: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
 }
-export const fpMarkProbeSource = mode => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(400) };
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const vis = e => e && e.getClientRects().length > 0;
-  const phone = ${JSON.stringify(mode)} === 'phone';
-  if (phone) {
-    let btn = null;
-    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-    if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-    await real({ click: at(btn) }); await sleep(300);
-  }
-  const rowSel = phone ? '.m-dv-row' : '.dv-row';
-  let rows = [];
-  for (let i = 0; i < 60; i++) { rows = [...document.querySelectorAll(rowSel)].filter(vis); if (rows.length >= 3) break; await sleep(100) }
-  if (rows.length < 3) return { ok: false, why: '設備列不夠：' + rows.length };
-  const row = name => rows.find(r => (r.querySelector(phone ? 'b' : '.dv-name')?.textContent ?? '').trim() === name);
-  for (const r of rows) {
-    const t = r.textContent;
-    if (/已確認|未確認|已登入|未安裝|還沒收到/.test(t)) return { ok: false, why: '列上還有膠囊或狀態那一行：' + t.trim().slice(0, 60) };
-    if (r.querySelector(phone ? '.m-dv-line' : '.dv-line')) return { ok: false, why: '列上還有狀態那一行' };
-  }
-  const expect = phone ? [['辦公室', 'confirmed', '已確認指紋', 'check'], ['工作機', 'unconfirmed', '尚未確認指紋', 'alert']] : [['小良的手機', 'remembered', '已記住指紋 ', ''], ['舊手機', 'unknown', '還沒記住指紋', 'alert']];
-  const colors = new Set();
-  for (const [name, cls, label, badge] of expect) {
-    const r = row(name);
-    if (!r) return { ok: false, why: '找不到「' + name + '」那一列' };
-    const m = r.querySelector('.fpm');
-    if (!m) return { ok: false, why: name + ' 沒有指紋圖示' };
-    if (!m.classList.contains(cls)) return { ok: false, why: name + ' 的指紋圖示應該是 ' + cls };
-    const al = m.getAttribute('aria-label') || '';
-    if (!al.startsWith(label) || m.getAttribute('title') !== al) return { ok: false, why: name + ' 的說明不對：' + al };
-    if (m.getBoundingClientRect().width < 16) return { ok: false, why: name + ' 的指紋圖示太小或沒畫出來' };
-    const b = m.querySelector('.fpm-badge');
-    if (!!badge !== !!b) return { ok: false, why: name + (badge ? ' 少了角落的記號（不能只靠顏色）' : ' 不該有角落的記號') };
-    if (badge === 'alert' && b.querySelectorAll('path').length !== 2) return { ok: false, why: name + ' 的記號應該是「!」' };
-    if (badge === 'check' && b.querySelectorAll('path').length !== 1) return { ok: false, why: name + ' 的記號應該是勾' };
-    colors.add(getComputedStyle(m).color);
-  }
-  if (colors.size !== 2) return { ok: false, why: '兩種狀態的顏色要不同' };
-  if (!phone) {
-    const pc = row('辦公室');
-    if (pc && pc.querySelector('.fpm')) return { ok: false, why: '電腦那一列不該有指紋圖示（電腦版只有手機有指紋）' };
-    const al = row('小良的手機').querySelector('.fpm').getAttribute('aria-label');
-    if (!/已記住指紋 [0-9a-f]{4} [0-9a-f]{4}$/.test(al)) return { ok: false, why: '電腦版的說明要帶 8 碼指紋：' + al };
-  } else {
-    // 長按出現說明
-    const m = row('工作機').querySelector('.fpm');
-    await real({ hold: [...at(m), 700] }); await sleep(500);   // 按住 700 毫秒才放開，等它放開
-    const tip = m.querySelector('.fpm-tip');
-    if (!tip || tip.textContent.trim() !== '尚未確認指紋') return { ok: false, why: '長按指紋圖示沒有出現說明' };
-  }
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-// 拍照（#1490）：手機的對話輸入列有「拍照」鈕（三種外觀都有），按下去開的是帶 capture 的選檔（WebView 交給系統相機），拍好就送出；電腦沒有這顆鈕
-export const cameraProbeSource = mode => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const vis = e => e && e.getClientRects().length > 0;
-  let pane = null;
-  for (let i = 0; i < 60 && !pane; i++) { pane = [...document.querySelectorAll('.chatpane')].find(vis) || null; if (!pane) await sleep(100) }
-  if (!pane) return { ok: false, why: '找不到對話' };
-  await sleep(300);
-  let btn = pane.querySelector('button.cam');
-  if (${JSON.stringify(mode)} === 'desk') return btn ? { ok: false, why: '電腦版不該有拍照鈕' } : { ok: true, why: '' };
-  // 現代外觀：附件類的鈕收在「＋」選單裡，先真的點開
-  const plus = pane.querySelector('button.mc-plus');
-  if (!vis(btn) && vis(plus)) { globalThis.__smokeInput(JSON.stringify({ click: at(plus) })); await sleep(400); btn = pane.querySelector('button.cam') }
-  if (!vis(btn)) return { ok: false, why: '手機的輸入列沒有拍照鈕' };
-  if (btn.getAttribute('aria-label') !== '拍照') return { ok: false, why: '拍照鈕的說明不對' };
-  const input = pane.querySelector('input[type="file"][capture]');
-  if (!input || input.getAttribute('capture') !== 'environment' || input.getAttribute('accept') !== 'image/*' || input.multiple) return { ok: false, why: '拍照的選檔欄位要是 accept=image/* capture=environment、單張' };
-  globalThis.__smokeCalls = [];
-  globalThis.__smokeChooser = undefined;
-  globalThis.__smokeInput(JSON.stringify({ choose: [...at(btn), 'ok1.png'] }));
-  for (let i = 0; i < 60 && globalThis.__smokeChooser === undefined; i++) await sleep(100);
-  if (!globalThis.__smokeChooser) return { ok: false, why: '按拍照鈕沒有打開選檔（相機）' };
-  if (globalThis.__smokeChooser.mode !== 'selectSingle') return { ok: false, why: '拍照應該只拍一張：' + globalThis.__smokeChooser.mode };
-  let sent = [];
-  for (let i = 0; i < 60; i++) { sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send_attachment'); if (sent.length) break; await sleep(100) }
-  if (sent.length !== 1) return { ok: false, why: '拍好的照片沒有送出' };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
-export const devMoreProbeSource = () => `(async () => {
-  try {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const real = req => { globalThis.__smokeInput(JSON.stringify(req)); return sleep(350) };
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = document.querySelector('.rail .more-wrap > .rtab'); if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '設備多於 6 台，左邊應該有「⋯」' };
-  const open = () => !!document.querySelector('.rail .more-pop');
-  await real({ click: at(btn) });
-  if (!open()) return { ok: false, why: '按「⋯」沒有打開小清單' };
-  if (document.querySelectorAll('.rail .more-pop li').length < 1) return { ok: false, why: '小清單是空的' };
-  // 1. 點旁邊（名單區）
-  const pane = document.querySelector('.content');
-  const pr = pane.getBoundingClientRect();
-  await real({ click: [Math.round(pr.right - 40), Math.round(pr.bottom - 40)] });
-  if (open()) return { ok: false, why: '點旁邊，小清單沒有收起來' };
-  // 2. 再打開，按 Esc
-  await real({ click: at(btn) });
-  if (!open()) return { ok: false, why: '第二次按「⋯」沒有打開' };
-  await real({ key: 'Escape' });
-  if (open()) return { ok: false, why: '按 Esc，小清單沒有收起來' };
-  // 3. 再打開，點上面的分頁切到「設定」，再切回「夥伴」
-  await real({ click: at(btn) });
-  if (!open()) return { ok: false, why: '第三次按「⋯」沒有打開' };
-  const tabs = [...document.querySelectorAll('.top-tabs .ttab')];
-  await real({ click: at(tabs.find(t => t.textContent.trim() === '設定')) });
-  await real({ click: at(tabs.find(t => t.textContent.trim() === '夥伴')) });
-  if (open()) return { ok: false, why: '切到別的分頁再回來，小清單不該還開著' };
-  btn = document.querySelector('.rail .more-wrap > .rtab');   // 切分頁時左邊那排重新畫過，要重新找
-  if (!btn) return { ok: false, why: '切回夥伴後找不到「⋯」' };
-  // 4. 再打開，按「⋯」本身要收起（原本的開關照舊）；點清單裡的一台會切過去並收起
-  await real({ click: at(btn) });
-  await real({ click: at(btn) });
-  if (open()) return { ok: false, why: '再按一次「⋯」應該收起' };
-  await real({ click: at(btn) });
-  const item = document.querySelector('.rail .more-pop li button');
-  await real({ click: at(item) });
-  if (open()) return { ok: false, why: '點清單裡的一台，小清單要收起' };
-  if (!btn.classList.contains('on')) return { ok: false, why: '點清單裡的一台，應該切到那台（「⋯」標成目前所在）' };
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '探測出錯：' + e.message } }
-})()`
 export const PARTNER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'P/demo' }], active: { id: 'P/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
 
 // 在頁面內執行（await）：依序點開對話框，再檢查遮罩蓋滿視窗、指定區塊的左上角點下去會落在遮罩上
@@ -807,64 +193,6 @@ export const BAR_PROBES = {
   // 有背景工作：工作項目可按、徽章 3；按下去列出 2 件＋「還有 1 件」；header 不再有「背景工作 N 件」
   tasks: { bar: [['call', '通話', false], ['window', '後台隱藏', false], ['model', '切換模型', false], ['subs', '子代理', false], ['tasks', '工作項目', false], ['manage', '管理', false]], badge: '3', taskItems: ['建置', '跑測試', '還有 1 件沒列出'], header: 'demo' },
 }
-export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(async () => {
-  const want = ${JSON.stringify(bar)}, wantWake = ${JSON.stringify(wake === true)};
-  const wantBadge = ${JSON.stringify(badge ?? null)}, wantItems = ${JSON.stringify(taskItems ?? null)}, wantHeader = ${JSON.stringify(header ?? null)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let why = '';
-  for (let i = 0; i < 60; i++) {
-    const bars = [...document.querySelectorAll('.actionbar')].filter(b => b.offsetParent !== null);
-    const btns = bars.length === 1 ? [...bars[0].querySelectorAll('.abtn')] : [];
-    const off = b => b.getAttribute('aria-disabled') === 'true';
-    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\\s*▾\\s*$/, '').trim() || '', off(b)]);
-    why = bars.length !== 1 ? '看得到的功能列有 ' + bars.length + ' 條' : JSON.stringify(got) === JSON.stringify(want) ? '' : '按鈕不符：' + JSON.stringify(got);
-    if (!why) {
-      const bad = btns.find(b => off(b) && !b.title);
-      if (btns.some(b => b.hasAttribute('disabled'))) why = '反灰不能用 disabled（滑鼠、Tab 讀不到原因）';
-      else if (bad) why = bad.dataset.slot + ' 反灰卻沒有原因';
-      else if (btns.some(b => off(b) && b.title.length > 20)) why = '反灰原因超過 20 字';
-      else {
-        // 反灰的選單鈕點了不能打開選單
-        for (const b of btns.filter(b => off(b) && b.getAttribute('aria-haspopup'))) {
-          b.click(); await sleep(150);
-          if (b.getAttribute('aria-expanded') === 'true' || document.querySelector('.ab-menu')) return { ok: false, why: b.dataset.slot + ' 反灰卻點得開' };
-        }
-        // 工作項目（#539 之三）：徽章數字、header 拿掉件數、按下去的列表
-        const tb = btns.find(b => b.dataset.slot === 'tasks');
-        const badgeText = tb?.querySelector('.ab-badge')?.textContent.trim() ?? '';
-        if (wantBadge !== null && badgeText !== wantBadge) return { ok: false, why: '工作項目徽章是「' + badgeText + '」，應為「' + wantBadge + '」' };
-        if (wantHeader !== null) {
-          const h = document.querySelector('.to-psm')?.textContent.trim() ?? '';
-          if (h !== wantHeader) return { ok: false, why: 'header 個人訊息是「' + h + '」，應為「' + wantHeader + '」' };
-        }
-        // 第 2 格：喚醒時是喚醒圖示、點了開「喚醒」對話框，「管理」選單裡沒有喚醒；不是喚醒時是視窗圖示
-        const wb = btns.find(b => b.dataset.slot === 'window');
-        const wimg = wb?.querySelector('img')?.getAttribute('src') ?? '';
-        if (wantWake) {
-          if (wimg !== 'img/ab-wake.svg') return { ok: false, why: '喚醒的圖示是「' + wimg + '」' };
-          const mg = btns.find(b => b.dataset.slot === 'manage');
-          mg.click(); await sleep(200);
-          const left = [...document.querySelectorAll('.ab-menu .mi-t')].map(e => e.textContent.trim()).filter(t => /喚醒/.test(t));
-          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); await sleep(150);
-          if (left.length) return { ok: false, why: '「管理」裡還有喚醒' };
-          wb.click();
-          let dlg = null;
-          for (let j = 0; j < 30 && !dlg; j++) { await sleep(100); dlg = document.querySelector('.dlg[role="dialog"][aria-label="喚醒"]') }
-          if (!dlg) return { ok: false, why: '點了喚醒沒有開喚醒對話框' };
-        } else if (wb && wimg !== 'img/ab-window.svg') return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
-        if (wantItems) {
-          tb.click();
-          let items = [];
-          for (let j = 0; j < 30; j++) { await sleep(100); items = [...document.querySelectorAll('.ab-tasks li')].map(e => e.querySelector('.ab-sub-text')?.textContent.trim() ?? e.textContent.trim()); if (JSON.stringify(items) === JSON.stringify(wantItems)) break }
-          if (JSON.stringify(items) !== JSON.stringify(wantItems)) return { ok: false, why: '工作項目列表不符：' + JSON.stringify(items) };
-        }
-        return { ok: true, why: '' };
-      }
-    }
-    await sleep(100);
-  }
-  return { ok: false, why };
-})()`
 
 // 手機對話頁（不放按鈕列）：上方沒有任何按鈕列（手機版、電腦版的都沒有），管理項目都在右上角「⋯」；
 // 「⋯」不列永遠用不到的項目（前台／後台、在線的喚醒、一般視窗的重開／移除），喚醒、切換模型排最前；個人訊息照樣顯示「背景工作 N 件」
@@ -878,49 +206,7 @@ const unreadMails = (now = Date.now()) => [
   { id: '00000000-0000-4000-8000-0000000000b3', from_node: 'Q', from_agent: '小工', body: '新的一則', trust: 'member', to_agent: '測試機', created_at: new Date(now - 5 * 60_000).toISOString() },
 ]
 export const MUNREAD_PROBE = { munread: true }
-export const munreadProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let tabs = [];
-  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
-  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);
-  const grp = () => document.querySelector('section.m-pg[aria-label="夥伴"] .m-unread');
-  const rows = () => [...(grp()?.querySelectorAll('li .m-buddy') || [])].map(b => [b.querySelector('.b-nick')?.textContent.trim(), b.querySelector('.unread')?.textContent.trim()]);
-  for (let i = 0; i < 80 && rows().length < 2; i++) await sleep(100);
-  if (!grp()) return { ok: false, why: '夥伴頁最上面沒有「未讀」' };
-  const head = grp().querySelector('.m-ghead')?.textContent.replace(/\\s+/g, '') || '';
-  if (!head.includes('未讀（2）')) return { ok: false, why: '「未讀」的標題不對：' + head };
-  if (JSON.stringify(rows()) !== JSON.stringify([['小工', '1'], ['demo', '2']])) return { ok: false, why: '「未讀」的順序或數字不對（要最新的在前）：' + JSON.stringify(rows()) };
-  const first = document.querySelector('section.m-pg[aria-label="夥伴"] .m-group');
-  if (first !== grp()) return { ok: false, why: '「未讀」要在夥伴頁最上面' };
-  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '有未讀，「夥伴」分頁卻沒有紅點' };
-  if (tab('對話').querySelector('i.red')) return { ok: false, why: '「對話」分頁不該有紅點（#1429）' };
-  grp().querySelector('li .m-buddy').click(); await sleep(800);
-  const chat = document.querySelector('section.m-pg[aria-label="對話"]');
-  if (!tab('對話').classList.contains('on')) return { ok: false, why: '點了沒有切到對話分頁' };
-  if (!(chat.querySelector('.m-head .m-title')?.textContent || '').includes('小工')) return { ok: false, why: '對話分頁沒有直接開那一位' };
-  tab('夥伴').click(); await sleep(800);
-  if (JSON.stringify(rows()) !== JSON.stringify([['demo', '2']])) return { ok: false, why: '讀完的那一列要離開「未讀」：' + JSON.stringify(rows()) };
-  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '還有 demo 沒讀，紅點要留著' };
-  // #1442：夥伴頁有搜尋字時藏起「未讀」，紅點照舊；清掉搜尋字再出現
-  const box = document.querySelector('section.m-pg[aria-label="夥伴"] .m-search input');
-  if (!box) return { ok: false, why: '夥伴頁沒有搜尋框' };
-  box.value = 'demo'; box.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);
-  if (grp()) return { ok: false, why: '有搜尋字時「未讀」應該藏起來' };
-  if (!tab('夥伴').querySelector('i.red')) return { ok: false, why: '搜尋時紅點不該消失' };
-  box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);
-  if (!grp()) return { ok: false, why: '清掉搜尋字後「未讀」要回來' };
-  return { ok: true, why: '' };
-})()`
 export const MCHAT_EMPTY_PROBE = { mchatEmpty: true }
-export const mchatEmptyProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
-  for (let i = 0; i < 60 && !sec()?.querySelector('.empty-list'); i++) await sleep(100);
-  const t = sec()?.querySelector('.empty-list')?.textContent.trim() || '';
-  if (t !== '從夥伴分頁點一位開始對話') return { ok: false, why: '沒有最後一則時的提示不對：' + t };
-  if (sec().querySelector('.m-buddy, .m-chat-list, .chatpane')) return { ok: false, why: '沒有最後一則時不該有清單或對話' };
-  return { ok: true, why: '' };
-})()`
 // 對話記錄樣本（後台 relay_chat_history 的格式）：一來一回，含一則長一點的
 const CHAT_MSGS_SAMPLE = [
   { id: '00000000-0000-4000-8000-000000000001', dir: 'me', body: '幫我看一下 CI 為什麼紅了', created_at: '2026-11-13T01:00:00Z', delivered_at: '2026-11-13T01:00:01Z', acked_at: '2026-11-13T01:00:02Z' },
@@ -942,69 +228,11 @@ export const MCHAT_PROBES = {
   offlineMenu: { mchat: { lead: [['喚醒', false], ['切換模型', true]], absent: ['重開', '移除'] } },
   offline: { mchat: { lead: [['喚醒', false], ['切換模型', true]], absent: ['重開', '移除'], wake: true } },
 }
-export const mchatProbeSource = ({ mchat }) => `(async () => {
-  const want = ${JSON.stringify({ lead: [], present: [], absent: [], tasks: '', menu: true, wake: false, ...mchat })};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
-  for (let i = 0; i < 60 && !document.querySelector('.m-chat .chatpane'); i++) await sleep(100);
-  await sleep(300);
-  const bars = shown('.m-chat .actionbar, .m-chat .m-abar, .m-chat .m-abar-row, .m-chat .m-abtn, .m-chat .abtn');
-  if (bars.length) return { ok: false, why: '手機對話頁還有按鈕列：' + bars.map(e => e.className).join('、') };
-  if (want.tasks) {
-    const conn = document.querySelector('.m-chathead .m-conn')?.textContent ?? '';
-    if (!conn.includes(want.tasks)) return { ok: false, why: '標頭沒有「' + want.tasks + '」：' + conn };
-  }
-  const dots = document.querySelector('.m-chathead .m-icon-btn[aria-label="更多操作"]');
-  if (!dots) return { ok: false, why: '找不到「⋯」' };
-  if (!want.menu) return { ok: true, why: '' };
-  dots.click();
-  let rows = [];
-  for (let i = 0; i < 30; i++) { await sleep(100); rows = [...document.querySelectorAll('.m-ops-panel .m-ops-item')]; if (rows.length) break }
-  const items = rows.map(b => [b.querySelector('.m-opt-t')?.textContent.trim() ?? '', b.getAttribute('aria-disabled') === 'true']);
-  if (!items.length) return { ok: false, why: '「⋯」選單是空的' };
-  if (JSON.stringify(items.slice(0, want.lead.length)) !== JSON.stringify(want.lead)) return { ok: false, why: '「⋯」前幾項不符：' + JSON.stringify(items) };
-  const names = items.map(x => x[0]);
-  const lack = want.present.filter(t => !names.includes(t));
-  if (lack.length) return { ok: false, why: '「⋯」少了：' + lack.join('、') };
-  const bad = items.filter(([t]) => /前台|後台/.test(t) || want.absent.includes(t));
-  if (bad.length) return { ok: false, why: '「⋯」不該有：' + bad.map(x => x[0]).join('、') };
-  if (want.wake) {
-    rows[0].click();
-    let run = null;
-    for (let j = 0; j < 30 && !run; j++) { await sleep(100); run = document.querySelector('.m-ops-run') }
-    if (!run) return { ok: false, why: '點了喚醒沒有送出（對話頁頂端沒有進度）' };
-    if (document.querySelector('.m-ops-panel')) return { ok: false, why: '喚醒送出後「⋯」選單沒有收起' };
-  }
-  return { ok: true, why: '' };
-})()`
 
 // 群組分頁（#539 之二）：按鈕列有「群組」，選單是三項（#539 收尾拿掉「輸入邀請碼加入」）；「管理」不再有這些（沒有管理也可以）
 export const GROUP_ITEMS = ['邀請別人加入', '加我的另一個 AI', '成員與設定']
 export const GROUP_ROOM = { id: 'g1', name: '測試群', members: [{ member: 'P~測試機', name: '測試機' }], mine: [{ member: 'P~測試機', unread: 0 }], last_seq: 0, created_at: '2026-10-29T00:00:00Z' }
 export const GROUP_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'room:g1' }], active: { id: 'room:g1' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
-export const groupProbeSource = ({ group }) => `(async () => {
-  const want = ${JSON.stringify(group)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
-  const menuText = () => [...document.querySelectorAll('.ab-menu')].flatMap(m => [...m.querySelectorAll('.mi-t')].map(e => e.textContent.trim()));
-  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = shown('.actionbar .abtn[data-slot="group"]')[0] || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '群組分頁沒有「群組」按鈕' };
-  if (btn.hasAttribute('disabled')) return { ok: false, why: '「群組」按鈕不能用 disabled' };
-  btn.click(); await sleep(200);
-  const got = menuText();
-  if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
-  esc(); await sleep(150);
-  const mg = shown('.actionbar .abtn[data-slot="manage"]')[0];
-  if (mg) {
-    mg.click(); await sleep(200);
-    const left = menuText().filter(t => want.includes(t));
-    esc();
-    if (left.length) return { ok: false, why: '「管理」裡還有：' + left.join('、') };
-  }
-  return { ok: true, why: '' };
-})()`
 // 群組頂端「N 人離線」（#1460）：現代外觀才有。want＝{ count, names }：按鈕出現、人數、點開列名單、Esc 關閉、點外面關閉；want.none＝不該出現（全員在線，或復古外觀被藏起來）
 export const GROUP_OFFLINE_ROOM = { ...GROUP_ROOM, members: [
   { key: '~u:me', name: '我', member_kind: 'human', kind: 'owner', mine: true },
@@ -1018,104 +246,6 @@ export const GJUMP_MSGS = [
   { seq: 1, from: 'P~審稿', at: '2026-11-13T01:00:00Z', body: '審稿這邊看完了。', relation: 'mine_ai', from_kind: 'ai', from_name: '審稿' },
   { seq: 2, from: 'x:r2bbbbbb', at: '2026-11-13T01:01:00Z', body: '報表也好了。', relation: 'other', from_kind: 'ai', from_name: '報表' },
 ]
-// mode＝desk／phone；list＝也測「N 人離線」名單（只有現代外觀有那顆鈕）；shotOnly＝只截圖不點（逐像素比對用）
-export const gjumpProbeSource = ({ gjump }) => `(async () => {
-  try {
-  const want = ${JSON.stringify(gjump)};
-  const phone = want.mode === 'phone';
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); globalThis.__smokeInput(JSON.stringify({ click: at(el) })); await sleep(500) };
-  const pane = () => [...document.querySelectorAll('.chatpane')].find(vis) || null;
-  const isGroup = () => { const p = pane(); return !!p && [...p.querySelectorAll('.m-body')].some(b => b.textContent.includes('審稿這邊看完了')) };
-  const isFriend = () => { const p = pane(); return !!p && !isGroup() && (phone ? (document.querySelector('.m-chathead')?.textContent || '').includes('審稿') : (p.querySelector('.to-line')?.textContent || '').includes('審稿')) };
-  const spk = (cls, name) => [...(pane()?.querySelectorAll(cls) || [])].find(e => vis(e) && (cls === '.m-av-spk' ? e.closest('.msg')?.textContent.includes(name) : e.textContent.trim() === name));
-  for (let i = 0; i < 60 && !isGroup(); i++) await sleep(100);
-  if (!isGroup()) return { ok: false, why: '沒有開在群組上' };
-  await sleep(300);
-  if (want.shotOnly) return { ok: true, why: '' };
-  // 審查重現（#1516）：跳過去 → 從夥伴頁換到別人 → 返回 → 再從夥伴頁點回審稿：畫面要停在審稿，不能被舊的跳轉標記拉回群組
-  if (want.stale) {
-    const showing = name => !isGroup() && (document.querySelector('.m-chathead')?.textContent || '').includes(name);
-    const tabBtn = () => [...document.querySelectorAll('button')].find(b => vis(b) && b.getAttribute('role') === 'tab' && b.textContent.trim() === '夥伴');
-    const row = name => [...document.querySelectorAll('section[aria-label="夥伴"] button')].find(b => vis(b) && (b.querySelector('.b-nick')?.textContent || '').trim() === name);
-    const n0 = spk('.who-name', '審稿');
-    if (!n0) return { ok: false, why: '找不到審稿的名字' };
-    await real(n0);
-    for (let i = 0; i < 20 && !showing('審稿'); i++) await sleep(100);
-    if (!showing('審稿')) return { ok: false, why: '第一步沒跳到審稿' };
-    let t = tabBtn(); if (!t) return { ok: false, why: '找不到「夥伴」分頁' };
-    await real(t);
-    let r = row('財務'); if (!r) return { ok: false, why: '夥伴頁找不到財務' };
-    await real(r);
-    for (let i = 0; i < 20 && !showing('財務'); i++) await sleep(100);
-    if (!showing('財務')) return { ok: false, why: '從夥伴頁點財務沒有進到財務' };
-    history.back(); await sleep(700);
-    if (isGroup()) return { ok: false, why: '換過別人之後按返回，被拉回群組' };
-    t = tabBtn(); if (!t) return { ok: false, why: '第二次找不到「夥伴」分頁' };
-    await real(t);
-    r = row('審稿'); if (!r) return { ok: false, why: '夥伴頁找不到審稿' };
-    await real(r);
-    await sleep(500);
-    if (isGroup()) return { ok: false, why: '從夥伴頁點審稿卻進了群組（舊的跳轉標記沒清掉）' };
-    if (!showing('審稿')) return { ok: false, why: '從夥伴頁點審稿沒有停在審稿' };
-    if (history.state && history.state.jumpFrom) return { ok: false, why: '記錄上還留著跳轉標記' };
-    return { ok: true, why: '' };
-  }
-  // 1. 點發言者的名字
-  const n1 = spk('.who-name', '審稿');
-  if (!n1) return { ok: false, why: '找不到群組訊息上「審稿」的名字' };
-  if (n1.getAttribute('role') !== 'button' || !/開啟和 審稿 的對話/.test(n1.getAttribute('aria-label') || '')) return { ok: false, why: '名字沒有 role=button 或 aria-label' };
-  await real(n1);
-  for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
-  if (!isFriend()) return { ok: false, why: '點名字沒有跳到跟審稿的一對一' };
-  const back = async () => {
-    if (phone) { history.back(); await sleep(600); return }
-    // 復古 Aero 點上面的對話分頁；現代外觀沒有分頁列，點左邊名單的群組
-    const find = () => [...document.querySelectorAll('.ctab, .room-btn')].find(e => vis(e) && e.textContent.includes('測試群'));
-    let tab = find();
-    if (!tab) { const t = [...document.querySelectorAll('.ttab-chats')].find(vis); if (t) { await real(t); tab = find() } }
-    if (tab) await real(tab);
-  };
-  await back();
-  for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
-  if (!isGroup()) return { ok: false, why: phone ? '按返回沒有回到群組' : '切回群組分頁失敗' };
-  if (phone && history.state && history.state.jumpFrom) return { ok: false, why: '回到群組後記錄上還留著跳轉標記' };
-  // 2. 點發言者的頭像
-  const a1 = spk('.m-av-spk', '審稿');
-  if (!a1) return { ok: false, why: '找不到審稿的頭像' };
-  await real(a1);
-  for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
-  if (!isFriend()) return { ok: false, why: '點頭像沒有跳到跟審稿的一對一' };
-  await back();
-  for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
-  if (!isGroup()) return { ok: false, why: '第二次沒回到群組' };
-  // 3. 不在夥伴名單的人：不跳、出現說明
-  const n2 = spk('.who-name', '報表');
-  if (!n2) return { ok: false, why: '找不到「報表」的名字' };
-  await real(n2);
-  if (!isGroup()) return { ok: false, why: '點了不在名單的人卻跳走了' };
-  if (!(pane()?.textContent || '').includes('不在你的夥伴名單')) return { ok: false, why: '點了不在名單的人沒有說明' };
-  // 4. 「N 人離線」名單（現代外觀）
-  if (want.list) {
-    const btn = [...document.querySelectorAll(phone ? '.m-plate-head .m-offline-btn' : '.mbar .mbtn-offline')].find(vis);
-    if (!btn) return { ok: false, why: '找不到「N 人離線」' };
-    await real(btn);
-    const row = [...document.querySelectorAll(phone ? '.m-offline-menu li' : '.offline-menu .menu-note')].find(e => vis(e) && e.textContent.trim() === '審稿');
-    if (!row || row.getAttribute('role') !== 'button') return { ok: false, why: '名單裡的審稿不能點' };
-    await real(row);
-    for (let i = 0; i < 20 && !isFriend(); i++) await sleep(100);
-    if (!isFriend()) return { ok: false, why: '點名單裡的人沒有跳過去' };
-    if (document.querySelector(phone ? '.m-offline-menu' : '.offline-menu')) return { ok: false, why: '跳過去後名單還開著' };
-    await back();
-    for (let i = 0; i < 20 && !isGroup(); i++) await sleep(100);
-    if (!isGroup()) return { ok: false, why: '從名單跳過去後' + (phone ? '按一次返回' : '切回') + '沒回到群組（記錄層數不對）' };
-    if (phone && document.querySelector('.m-offline-menu')) return { ok: false, why: '返回後名單又出現（名單那一筆沒退乾淨）' };
-  }
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
 export const LONG_ROOM_NAME = '這是一個名字很長很長的專案討論群組'
 export const GROUP_OFFLINE_LONG_ROOM = { ...GROUP_OFFLINE_ROOM, name: LONG_ROOM_NAME }
 export const GOFFLINE_WANT = { count: 2, names: ['審稿', '報表'], label: '2 人離線', center: true }
@@ -1125,165 +255,8 @@ export const GOFFLINE_LONG_WANT = { count: 2, names: ['審稿', '報表'], label
 export const GOFFLINE_LONG_ELL = { ...GOFFLINE_LONG_WANT, ell: true }
 // 名牌置中：一對一、沒有離線鈕的群組，名牌中心與 .mbar 中心相差不得超過 4px
 export const GOFFLINE_NONE_CENTER = { none: true, center: true }
-export const gofflineProbeSource = ({ goffline }) => `(async () => {
-  const want = ${JSON.stringify(goffline)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null || getComputedStyle(e).position === 'fixed');
-  const rows = () => [...document.querySelectorAll('.offline-menu .menu-note')].map(e => e.textContent.trim());
-  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  let btn = null;
-  for (let i = 0; i < 30 && !btn; i++) { btn = vis(".mbar .mbtn-offline")[0] || null; if (!btn) await sleep(100) }
-  if (want.center) {
-    const pl = document.querySelector('.mbar .mbar-plate'), bar = document.querySelector('.mbar');
-    if (!pl || !bar) return { ok: false, why: '找不到名牌或標題列' };
-    const p = pl.getBoundingClientRect(), m = bar.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
-    const wnat = (el) => { const o = el.style.width; el.style.width = 'max-content'; const w = el.getBoundingClientRect().width; el.style.width = o; return w };
-    const nat = wnat(pl), wdiff = p.width - nat;
-    window.__center = { plateCenter: (p.left + p.right) / 2, barCenter: (m.left + m.right) / 2, diff, width: p.width, natural: nat, wdiff };
-    if (wdiff > 2) return { ok: false, why: '名牌被撐寬：寬 ' + p.width + '、內容需要 ' + nat + '、多出 ' + wdiff };
-    if (Math.abs(diff) > 4) return { ok: false, why: '名牌沒有置中：名牌中心 ' + (p.left + p.right) / 2 + '、標題列中心 ' + (m.left + m.right) / 2 + '、差 ' + diff };
-  }
-  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__center ? '名牌中心差 ' + window.__center.diff + '、名牌寬 ' + window.__center.width + '／內容寬 ' + window.__center.natural : '' };
-  if (!btn) return { ok: false, why: '現代外觀的群組頂端沒有「N 人離線」' };
-  if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
-  if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
-  if (want.fit) {
-    const pl = document.querySelector('.mbar .mbar-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
-    if (!p) return { ok: false, why: '找不到名牌' };
-    if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
-    if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
-    if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號（名牌寬 ' + p.width + '、視窗 ' + innerWidth + '、按鈕左 ' + b.left + '、名牌右 ' + p.right + '）' };
-    window.__note = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
-    window.__fit = { btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell };
-  }
-  btn.click(); await sleep(250);
-  if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
-  if (btn.getAttribute('aria-expanded') !== 'true') return { ok: false, why: '打開後 aria-expanded 不是 true' };
-  esc(); await sleep(200);
-  if (rows().length) return { ok: false, why: 'Esc 關不掉名單' };
-  btn.click(); await sleep(250);
-  if (!rows().length) return { ok: false, why: '第二次點不開名單' };
-  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await sleep(200);
-  if (rows().length) return { ok: false, why: '點外面關不掉名單' };
-  return { ok: true, why: window.__note || (window.__center ? '名牌中心差 ' + window.__center.diff + '、名牌寬 ' + window.__center.width + '／內容寬 ' + window.__center.natural : '') };
-})()`
-export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
-  const want = ${JSON.stringify(mgoffline)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
-  const rows = () => [...document.querySelectorAll('.m-offline-menu li')].map(e => e.textContent.trim());
-  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  for (let i = 0; i < 40 && !document.querySelector('.m-chathead .m-plate'); i++) await sleep(100);
-  await sleep(500);
-  const btn = vis('.m-plate-head .m-offline-btn')[0] || null;
-  if (want.center) {
-    const pl = document.querySelector('.m-plate-head .m-plate'), hd = document.querySelector('.m-plate-head');
-    if (!pl || !hd) return { ok: false, why: '找不到名牌或名牌頭' };
-    const p = pl.getBoundingClientRect(), m = hd.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
-    const wnat = (el) => { const o = el.style.width; el.style.width = 'max-content'; const w = el.getBoundingClientRect().width; el.style.width = o; return w };
-    const nat = wnat(pl), wdiff = p.width - nat;
-    window.__cm = '名牌中心差 ' + diff + '、名牌寬 ' + p.width + '／內容寬 ' + nat;
-    console.info('[center-m]', JSON.stringify({ plateCenter: (p.left + p.right) / 2, headCenter: (m.left + m.right) / 2, diff, width: p.width, natural: nat, wdiff }));
-    if (Math.abs(diff) > 4) return { ok: false, why: '名牌沒有置中：名牌中心 ' + (p.left + p.right) / 2 + '、名牌頭中心 ' + (m.left + m.right) / 2 + '、差 ' + diff };
-    if (wdiff > 2) return { ok: false, why: '名牌被撐寬：寬 ' + p.width + '、內容需要 ' + nat + '、多出 ' + wdiff };
-  }
-  if (want.none) return btn ? { ok: false, why: '不該出現「離線」按鈕，卻看得到' } : { ok: true, why: window.__cm || '' };
-  if (!btn) return { ok: false, why: '現代外觀的群組名牌頭沒有「N 人離線」' };
-  if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
-  if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
-  if (want.fit) {
-    const pl = document.querySelector('.m-plate-head .m-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
-    if (!p) return { ok: false, why: '找不到名牌' };
-    if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
-    if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
-    if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號' };
-    window.__cm = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
-    console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell }));
-  }
-  const idx = () => (window.navigation ? navigation.currentEntry.index : history.length);
-  const onTab = () => (document.querySelector('.m-tabs button.on') || {}).textContent;
-  const tab0 = onTab(), base = idx();
-  btn.click(); await sleep(250);
-  if (JSON.stringify(rows()) !== JSON.stringify(want.names)) return { ok: false, why: '離線名單不符：' + JSON.stringify(rows()) };
-  // 名單是蓋在對話上的一層浮層（和「⋯」選單同一套）：開＝記錄多一層，退掉＝回到原深度，各種關法都不能殘留（#1466）。
-  // 實機的返回鍵＝瀏覽器上一頁（history.back()），對話分頁是記錄的底，所以不能靠自己丟 popstate 事件
-  const closed = async (how) => {
-    await sleep(350);
-    if (rows().length) return how + '：名單沒有收起';
-    if (idx() !== base) return how + '：記錄深度是 ' + idx() + '，應該回到 ' + base + '（殘留了一筆）';
-    if (onTab() !== tab0 || !document.querySelector('.m-chat .chatpane')) return how + '：離開了對話頁';
-    return '';
-  };
-  const open = async (how) => {
-    btn.click(); await sleep(300);
-    if (!rows().length) return how + '：名單沒打開';
-    if (idx() !== base + 1) return how + '：開名單後記錄深度是 ' + idx() + '，應該多一層（' + (base + 1) + '）';
-    return '';
-  };
-  let bad = '';
-  if (idx() !== base + 1) return { ok: false, why: '開名單後記錄深度是 ' + idx() + '，應該多一層（' + (base + 1) + '）' };
-  esc(); bad = await closed('Esc'); if (bad) return { ok: false, why: bad };
-  bad = await open('點外面前'); if (bad) return { ok: false, why: bad };
-  const back = document.querySelector('.m-head-offline .m-plus-back');
-  if (!back) return { ok: false, why: '點外面：找不到背板' };
-  back.click(); bad = await closed('點外面'); if (bad) return { ok: false, why: bad };
-  bad = await open('再按一次按鈕前'); if (bad) return { ok: false, why: bad };
-  btn.click(); bad = await closed('再按一次按鈕'); if (bad) return { ok: false, why: bad };
-  bad = await open('返回鍵前'); if (bad) return { ok: false, why: bad };
-  history.back(); bad = await closed('系統返回鍵（history.back）'); if (bad) return { ok: false, why: bad };
-  // 名單開著時分頁列要點得到：點另一個分頁＝名單收起（退掉那一筆）並切過去；之後返回鍵回到對話頁，不殘留名單
-  bad = await open('分頁前'); if (bad) return { ok: false, why: bad };
-  const other = [...document.querySelectorAll('.m-tabs button')].find(b => !b.classList.contains('on'));
-  if (!other) return { ok: false, why: '找不到其他分頁' };
-  const r = other.getBoundingClientRect(), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
-  if (!hit || !other.contains(hit)) return { ok: false, why: '名單開著時分頁列被蓋住：點到 ' + (hit ? hit.className || hit.tagName : '無') };
-  other.click(); await sleep(600);
-  if (rows().length) return { ok: false, why: '點分頁後名單沒有收起' };
-  if (onTab() === tab0) return { ok: false, why: '名單開著點分頁，沒有切過去' };
-  if (idx() !== base + 1) return { ok: false, why: '點分頁後記錄深度是 ' + idx() + '，應該是 ' + (base + 1) + '（切走一層，名單那筆不能殘留）' };
-  history.back(); await sleep(500);
-  if (idx() !== base || onTab() !== tab0 || rows().length) return { ok: false, why: '切走再按返回鍵：沒有回到原本的對話頁（深度 ' + idx() + '）' };
-  return { ok: true, why: window.__cm || '' };
-})()`
 // 手機群組對話：上方沒有按鈕列，右上角「⋯」打開是群組的三項（邀請、加 AI、成員與設定），沒有「輸入邀請碼加入」
 export const MGROUP_ME = { lastChat: 'room:g1', navTab: 'chats' }
-export const mgroupProbeSource = ({ mgroup }) => `(async () => {
-  const want = ${JSON.stringify(mgroup)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = document.querySelector('.m-chathead .m-icon-btn[aria-label="更多操作"]'); if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '群組對話沒有「⋯」' };
-  const bars = [...document.querySelectorAll('.m-chat .actionbar, .m-chat .m-abar-row, .m-chat .abtn')].filter(e => e.offsetParent !== null);
-  if (bars.length) return { ok: false, why: '群組對話還有按鈕列' };
-  btn.click();
-  let got = [];
-  for (let i = 0; i < 30; i++) { await sleep(100); got = [...document.querySelectorAll('.m-ops-panel .m-ops-item .m-opt-t')].map(e => e.textContent.trim()); if (got.length) break }
-  if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
-  return { ok: true, why: '' };
-})()`
-// 手機群組附件：群組（含有外部成員的群組）看得到「傳照片」「傳送檔案」，選一個檔案會送出 room 附件
-export const mattachProbeSource = ({ mattach }) => `(async () => {
-  const want = ${JSON.stringify(mattach)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const labels = () => [...document.querySelectorAll('.m-chat .toolbar>.tool')].filter(b => b.offsetParent !== null).map(b => b.getAttribute('aria-label'));
-  for (let i = 0; i < 60 && !document.querySelector('.m-chat .toolbar .tool'); i++) await sleep(100);
-  const got = labels().filter(l => l === '傳照片' || l === '傳送檔案');
-  if (JSON.stringify(got) !== JSON.stringify(want.labels)) return { ok: false, why: '群組工具列的附件鈕不符：' + JSON.stringify(got) };
-  const bad = labels().filter(l => /語音|麥克風|聽寫/.test(l || ''));
-  if (want.labels.length && bad.length) return { ok: false, why: '群組不該有語音鈕：' + bad.join('、') };
-  if (!want.labels.length) return { ok: true, why: '' };
-  const input = document.querySelector('.m-chat .toolbar input[type=file]:not([accept="image/*"])');
-  if (!input) return { ok: false, why: '找不到傳送檔案的 input' };
-  const dt = new DataTransfer(); dt.items.add(new File(['hello'], 'a.txt', { type: 'text/plain' }));
-  input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
-  let call = null;
-  for (let i = 0; i < 40 && !call; i++) { await sleep(100); call = (globalThis.__smokeCalls || []).find(c => c[0] === 'relay_send_attachment') }
-  if (!call) return { ok: false, why: '選了檔案沒有送出附件' };
-  if (call[1]?.payload?.room !== 'g1') return { ok: false, why: '附件沒有帶群組代號：' + JSON.stringify(call[1]?.payload?.room) };
-  return { ok: true, why: '' };
-})()`
 // 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設定點進「帳號」）
 // #374：兩條改成額度條（「5 小時」「剩 40%」各自一段）；absent＝那一組裡不能出現的字
 const CLAUDE_BARS = ['Claude', '5 小時', '剩 40%', '每週', '剩 72%']
@@ -1292,114 +265,12 @@ export const QUOTA_PROBES = {
   geminiEmpty: { quota: '.dv-my', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '開 Gemini 視窗後才讀得到'] } },
   mobile: { quota: '.m-dv-my', open: '帳號', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
 }
-export const quotaProbeSource = ({ quota, open = '', want, absent = {} }) => `(async () => {
-  const sel = ${JSON.stringify(quota)}, open = ${JSON.stringify(open)}, want = ${JSON.stringify(want)}, absent = ${JSON.stringify(absent)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  if (open) {
-    let btn = null;
-    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!btn) await sleep(100) }
-    if (!btn) return { ok: false, why: '找不到「' + open + '」' };
-    btn.click();
-  }
-  let why = '';
-  for (let i = 0; i < 60; i++) {
-    const box = document.querySelector(sel);
-    why = box ? '' : '找不到「我的帳號」區';
-    if (box) for (const [v, parts] of Object.entries(want)) {
-      const el = box.querySelector('[data-vendor="' + v + '"]');
-      const text = el ? el.textContent.replace(/\\s+/g, ' ') : '';
-      let at = 0;
-      for (const p of parts) { const k = text.indexOf(p, at); if (k < 0) { why = (el ? v + ' 少了「' + p + '」：' + text : '沒有 ' + v + ' 這一組'); break } at = k + p.length }
-      if (!why) for (const p of absent[v] ?? []) if (text.includes(p)) { why = v + ' 不該出現「' + p + '」：' + text; break }
-      if (why) break;
-    }
-    if (!why) return { ok: true, why: '' };
-    await sleep(100);
-  }
-  return { ok: false, why };
-})()`
 // 手機「設備與帳號」帳號卡（#374）：每張固定三行（帳號＋右邊固定位置的「使用中」／「切換」、方案、額度）；
 // 方案寫 Max 這類、沒有底線；額度兩條各有重置時間；舊資料寫「資料較舊」且不是斜體；頁內沒有第二個返回；說明在最下面
 export const MCARDS_PROBE = { mcards: true, open: '帳號' }
-export const mcardsProbeSource = ({ open }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const open = ${JSON.stringify(open)};
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到「' + open + '」' };
-  btn.click();
-  let cards = [];
-  for (let i = 0; i < 60 && cards.length < 2; i++) { cards = [...document.querySelectorAll('.m-dv-my .m-dv-acct')].filter(c => c.offsetParent !== null); if (cards.length < 2) await sleep(100) }
-  if (cards.length < 2) return { ok: false, why: '帳號卡少於 2 張：' + cards.length };
-  await sleep(300);
-  const rect = (c, sel) => { const e = c.querySelector(sel); return e ? e.getBoundingClientRect() : null };
-  let right = null;
-  for (const c of cards) {
-    const mail = rect(c, '.m-dv-mail'), act = rect(c, '.m-dv-act'), plan = rect(c, '.m-dv-planrow'), quota = rect(c, '.m-dv-quota');
-    const name = (c.closest('[data-vendor]')?.dataset.vendor ?? '') + ' ' + (c.querySelector('.m-dv-mail')?.textContent.trim() ?? '');
-    if (!mail || !act || !plan || !quota) return { ok: false, why: name + ' 不是三行卡片（少了某一行）' };
-    if (Math.abs((act.top + act.bottom) / 2 - (mail.top + mail.bottom) / 2) > Math.max(mail.height, act.height) / 2) return { ok: false, why: name + ' 的使用中／切換不在第一行' };
-    if (plan.top < mail.bottom - 1 || quota.top < plan.bottom - 1) return { ok: false, why: name + ' 三行順序不對' };
-    if (right === null) right = act.right; else if (Math.abs(act.right - right) > 1) return { ok: false, why: name + ' 的使用中／切換位置跟別張不一樣' };
-    const planText = c.querySelector('.m-dv-plan')?.textContent.trim() ?? '';
-    if (!planText || /_/.test(planText)) return { ok: false, why: name + ' 的方案寫成「' + planText + '」' };
-    if (getComputedStyle(c.querySelector('.m-dv-quota')).fontStyle === 'italic') return { ok: false, why: name + ' 的額度是斜體' };
-  }
-  const claude = cards.find(c => c.closest('[data-vendor="claude"]'));
-  if (!claude) return { ok: false, why: '沒有 Claude 帳號卡' };
-  if (claude.querySelector('.m-dv-plan')?.textContent.trim() !== 'Max') return { ok: false, why: 'claude_max 沒寫成 Max' };
-  const bars = [...claude.querySelectorAll('.m-dv-bar')];
-  if (bars.length !== 2) return { ok: false, why: 'Claude 額度條是 ' + bars.length + ' 條' };
-  if (bars.some(b => !(b.querySelector('.m-dv-br')?.textContent.trim() ?? '').endsWith('重置'))) return { ok: false, why: 'Claude 額度條沒有各自的重置時間' };
-  if (!cards.some(c => c.textContent.includes('資料較舊'))) return { ok: false, why: '舊資料那張沒寫「資料較舊」' };
-  if (document.querySelector('.m-fourth .m-dv-back')) return { ok: false, why: '頁內還有第二個返回' };
-  const foot = document.querySelector('.m-fourth .m-dv-foot');
-  if (!foot) return { ok: false, why: '最下面沒有說明' };
-  const last = [...foot.parentElement.children].filter(e => e.offsetParent !== null).at(-1);
-  if (last !== foot) return { ok: false, why: '說明不在最下面' };
-  if (Array.from(foot.textContent.trim()).length > 20) return { ok: false, why: '說明超過 20 字' };
-  return { ok: true, why: '' };
-})()`
 // 手機「設備與帳號」返回（修返回鍵退不回設備列表）：從夥伴列表某台設備旁「選項」進來（直接開那台細部）或從設定進來（先看列表），
 // 按系統返回鍵一層一層退：細部 → 設備列表 → 收起整頁；兩種進法、一台或多台設備都要。列表＝有 .m-dv-list，細部＝內頁開著但沒有列表
 export const MACCT_BACK_PROBE = { macctBack: true }
-export const macctBackProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = sel => [...document.querySelectorAll(sel)].some(e => e.offsetParent !== null);
-  const view = () => !vis('.m-fourth') ? 'closed' : vis('.m-dv-list') ? 'list' : 'detail';
-  const waitView = async want => { for (let i = 0; i < 30 && view() !== want; i++) await sleep(100); await sleep(150); return view() };
-  const press = async want => { history.back(); return waitView(want) };
-  const one = document.querySelectorAll('.m-ghead-act').length < 2;
-  const steps = [];
-  const check = (label, got, want) => { steps.push(label + '=' + got); return got === want ? null : { ok: false, why: label + '：應為 ' + want + '，實際 ' + got + '（' + steps.join('；') + '）' } };
-  // 一、夥伴列表某台設備旁的「選項」
-  const opt = [...document.querySelectorAll('.m-ghead-act')][0];
-  if (!opt) return { ok: false, why: '夥伴列表找不到設備旁的「選項」' };
-  opt.click();
-  let bad = check('選項進來', await waitView('detail'), 'detail'); if (bad) return bad;
-  bad = check('返回一次', await press('list'), 'list'); if (bad) return bad;
-  if (!one) {
-    const rows = [...document.querySelectorAll('.m-dv-row')];
-    rows[rows.length - 1].querySelector('.m-dv-go').click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
-    rows[rows.length - 1].querySelector('.m-dv-accbtn').click();
-    bad = check('點另一台', await waitView('detail'), 'detail'); if (bad) return bad;
-    bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
-  }
-  bad = check('返回收起', await press('closed'), 'closed'); if (bad) return bad;
-  // 二、從設定進來：先看列表，點一台，返回
-  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '設定' || b.getAttribute('aria-label') === '設定');
-  if (go) { go.click(); await sleep(300) }
-  let btn = null;
-  for (let i = 0; i < 30 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」（' + steps.join('；') + '）' };
-  btn.click();
-  bad = check('設定進來', await waitView('list'), 'list'); if (bad) return bad;
-  { const r0 = document.querySelector('.m-dv-row'); r0.querySelector('.m-dv-go').click(); await sleep(150); r0.querySelector('.m-dv-accbtn').click() }   // 先點那一列展開按鈕（#1539）
-  bad = check('設定點一台', await waitView('detail'), 'detail'); if (bad) return bad;
-  bad = check('設定返回一次', await press('list'), 'list'); if (bad) return bad;
-  bad = check('設定返回收起', await press('closed'), 'closed'); if (bad) return bad;
-  return { ok: true, why: steps.join('；') };
-})()`
 const MACCT_ME = { navTab: 'list' }
 const MACCT_MEMBERS = {
   one: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
@@ -1414,89 +285,6 @@ export const MLAYOUT_PROBES = {
   devicesBig: { mlayout: true, tab: 'devices', big: true },
   accountsBig: { mlayout: true, tab: 'accounts', big: true },
 }
-export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const tab = ${JSON.stringify(tab)};
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-  btn.click();
-  // 帳號頁的「切換到…」要先讀過各台的帳號回報（點進那台細部才讀）：逐台點進去再返回
-  if (tab === 'accounts') {
-    await sleep(500);
-    const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
-    for (let i = 0; i < n; i++) {
-      const row = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i];
-      if (row) { row.querySelector('.m-dv-go').click(); await sleep(150) }   // 先點那一列展開按鈕（#1539）
-      const go = row?.querySelector('.m-dv-accbtn');
-      if (!go) break;
-      go.click(); await sleep(500);
-      const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
-      if (back) { back.click(); await sleep(400) }
-    }
-  }
-  let seg = null;
-  for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="' + tab + '"]'); if (!seg) await sleep(100) }
-  if (!seg) return { ok: false, why: '找不到「' + tab + '」分頁鈕' };
-  seg.click();
-  await sleep(600);
-  if (${big ? 'true' : 'false'}) {
-    const els = [...document.querySelectorAll('#app *')];
-    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
-    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
-    await sleep(300);
-  }
-  const vis = e => e && e.offsetParent !== null;
-  const R = e => e.getBoundingClientRect();
-  const textRect = e => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect() };
-  for (const b of document.querySelectorAll('.m-dv-segbtn')) {
-    const t = textRect(b), r = R(b);
-    if (t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '分頁鈕「' + b.textContent.trim() + '」的字被切' };
-  }
-  const foot = [...document.querySelectorAll('.m-dv-foot')].find(vis);
-  if (tab === 'devices') {
-    const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
-    if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
-    if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情）' };
-    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const tag = w && w.querySelector('.noreport'); if (!tag || tag.textContent.trim() !== '沒回報' || !vis(tag)) return { ok: false, why: '工作機沒有回報，列上要看得到「沒回報」標記' } }
-    if (rows.filter(r => r.querySelector('.noreport')).length !== 1) return { ok: false, why: '只有沒回報的那台要有「沒回報」標記' };
-    const list = R(document.querySelector('.m-dv-list'));
-    for (const row of rows) {
-      const rr = R(row);
-      for (const e of row.querySelectorAll('.m-dv-rn b, .m-dv-rs, .noreport')) {
-        const t = textRect(e);
-        if (t.bottom > rr.bottom + 0.5 || t.bottom > list.bottom + 0.5) return { ok: false, why: '「' + (row.querySelector('b')?.textContent ?? '') + '」那列的「' + e.textContent.trim() + '」被切' };
-      }
-    }
-    const dots = rows.map(r => R(r.querySelector('.m-dv-dot')).left);
-    if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
-    if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
-    // #1499：「還沒收到這台的回報」搬到詳情，仍然要看得到（真的點「詳情」進去找）
-    // 先真的點工作機那一列，展開它的按鈕（#1539）
-    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const g = w && w.querySelector('.m-dv-go'); if (g) { g.scrollIntoView({ block: 'center' }); await sleep(150); const r = R(g); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })); await sleep(300) } }
-    const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
-    if (!info) return { ok: false, why: '找不到工作機的「詳情」' };
-    info.scrollIntoView({ block: 'center' }); await sleep(150);
-    { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
-    let st = null;
-    for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.m-dv-state')].find(vis) || null; if (!st) await sleep(100) }
-    if (!st || !st.textContent.includes('還沒收到這台的回報')) return { ok: false, why: '工作機的詳情裡看不到「還沒收到這台的回報」' };
-    const box = R(st.closest('.m-dv-info') || st.parentElement);
-    if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };
-  } else {
-    if (!foot) return { ok: false, why: '帳號頁沒有額度註腳' };
-    if (document.querySelector('.m-dv-my')?.textContent.includes('這台沒有存這個帳號')) return { ok: false, why: '還有「這台沒有存這個帳號」' };
-    // 帳號卡片的設備按鈕（原本的「切換到…」按鈕併進來）：字不被切、按鈕與說明字都不超出卡片
-    const devs = [...document.querySelectorAll('.m-dv-my .m-dv-dev')].filter(vis);
-    if (!devs.length) return { ok: false, why: '沒有設備按鈕可以檢查' };
-    for (const b of devs) if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
-    for (const c of [...document.querySelectorAll('.m-dv-acct')].filter(c => c.querySelector('.m-dv-dev'))) {
-      const box = R(c);
-      for (const e of [...c.querySelectorAll('.m-dv-dev, .m-dv-devb small')].filter(vis)) if (R(e).right > box.right + 0.5 || R(e).left < box.left - 0.5) return { ok: false, why: '「' + e.textContent.trim() + '」超出帳號卡' };
-    }
-  }
-  return { ok: true, why: '' };
-})()`
 // 帳號卡片的設備按鈕（小良哥 11-09）：用過這個帳號的每台一顆；使用中＝黃色、選中（aria-pressed）、有勾與「使用中」（不能只靠顏色）、
 // 不停用但按了不做事（不發出任何切換指令）；「用在：」一行與「切換到…」按鈕都拿掉；按鈕不超出卡片；手機不能切換自己
 // 工作管理員（0.2.21）：設定 → 設備 → 這台電腦 → 工作管理員。兩個同名的 asn真（重複）、一般視窗、pi、內建工作者、自己開的前景程式、終端服務、ASN 本體
@@ -1505,7 +293,6 @@ export const TASKMGR_MEMBERS = [{ id: 'P', agents: [
   { name: 'asn真', status: 'idle', cwd_label: 'asn' }, { name: '西川', status: 'busy', cwd_label: 'asn' },
   { name: '小東', status: 'idle', engine: 'pi', cwd_label: 'pi' }, { name: '小雙', status: 'idle', engine: 'gemini', cwd_label: 'agy' },
 ] }]
-export const TASKMGR_RESUMING_SID = '11111111-2222-4333-8444-555555555555'
 export const taskmgrSnapshot = (now = Date.now()) => ({
   now_ms: now,
   rows: [
@@ -1521,673 +308,36 @@ export const taskmgrSnapshot = (now = Date.now()) => ({
   known: [{ name: '阿福', engine: 'claude', cwd: 'G:\\work' }],
 })
 export const TASKMGR_PROBES = { taskmgr: { taskmgr: true } }
-export const taskmgrProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const waitFor = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
-  const self = await waitFor(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
-  if (!self) return { ok: false, why: '設備列表裡找不到「這台」' };
-  [...self.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號').click();
-  const entry = await waitFor(() => [...document.querySelectorAll('.dv-dev-h .dv-tasks')].find(vis));
-  if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
-  entry.click();
-  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 8 ? r : null });
-  if (!rows) return { ok: false, why: '工作管理員沒有列出 8 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
-  const heads = [...document.querySelectorAll('.tm-table th')].map(h => h.textContent.trim()).join('、');
-  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
-  const dups = [...document.querySelectorAll('.tm-table tbody tr.dup')];
-  if (dups.length !== 2) return { ok: false, why: '「重複」列應該有 2 列，實際 ' + dups.length };
-  if (!dups.every(r => r.querySelector('.tm-tag.dup')?.textContent.trim() === '重複')) return { ok: false, why: '重複的列沒有「重複」標記' };
-  if (!dups.every(r => r.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到'))) return { ok: false, why: '重複的列沒有寫出後果' };
-  const banner = document.querySelector('.tm-warn');
-  if (!banner || !banner.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '頂部提示沒有寫出後果' };
-  const kindRow = k => document.querySelector('.tm-table tbody tr[data-kind="' + k + '"]');
-  for (const k of ['process', 'mux', 'asn']) { const r = kindRow(k); if (!r) return { ok: false, why: '沒有 ' + k + ' 那一列' }; if (r.querySelector('.tm-stop')) return { ok: false, why: '只能看的列（' + k + '）不該有停止鈕' } }
-  const text = document.querySelector('.tm').textContent;
-  if (!text.includes('—')) return { ok: false, why: '拿不到的欄位沒有顯示「—」' };
-  if (!text.includes('3 小時 12 分') || !text.includes('412 MB') || !text.includes('18420')) return { ok: false, why: '欄位內容不對（開了多久／記憶體／程序編號）' };
-  if (!document.querySelector('.tm-known summary')?.textContent.includes('認得但目前沒在跑（1）')) return { ok: false, why: '沒有「認得但目前沒在跑」折疊區' };
-  if (dups[1].querySelector('.tm-stop')) return { ok: false, why: '自己開的那一列（編號 21096）不該有停止鈕' };
-  const stop = await waitFor(() => { const b = dups[0].querySelector('.tm-stop'); return b && !b.disabled ? b : null });
-  if (!stop) return { ok: false, why: '重複那一列的停止鈕不能按（' + (dups[0].querySelector('.tm-why')?.textContent || '') + '）' };
-  stop.click();
-  const dlg = await waitFor(() => document.querySelector('.dlg-back .dlg .tm-confirm'));
-  if (!dlg) return { ok: false, why: '按下停止後沒有出現確認框' };
-  const body = document.querySelector('.dlg').textContent;
-  if (!body.includes('程序編號 18420') || !body.includes('不受影響') || !body.includes('停止這個視窗')) return { ok: false, why: '確認框內容不對：' + body.slice(0, 120) };
-  // 卡在接回中的夥伴視窗：有「停止」鈕 → 確認框文字正確 → 確認後只呼叫 term_stop（帶終端編號與對話編號）
-  const dlgOpen = () => document.querySelector('.dlg-back .dlg .tm-confirm');
-  const cancel = [...document.querySelectorAll('.dlg .partner-actions button')].find(b => b.textContent.trim() === '取消');
-  if (!cancel) return { ok: false, why: '確認框沒有「取消」鈕' };
-  cancel.click();
-  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '按取消後確認框沒有關' };
-  const rrow = () => kindRow('resuming');
-  if (!rrow()) return { ok: false, why: '沒有「接回中」那一列' };
-  const rtext = rrow().textContent;
-  if (!rtext.includes('小乙') || !rtext.includes('可能卡住了') || !rtext.includes('ASN 開的') || !rtext.includes('23100')) return { ok: false, why: '接回中那一列的內容不對：' + rtext.slice(0, 120) };
-  if (rtext.includes('11111111')) return { ok: false, why: '接回中那一列不該顯示對話編號' };
-  const askResuming = async () => {
-    const b = await waitFor(() => { const x = rrow() && rrow().querySelector('.tm-stop'); return x && !x.disabled ? x : null });
-    if (!b || b.textContent.trim() !== '停止') return false;
-    b.click();
-    return Boolean(await waitFor(dlgOpen));
-  };
-  if (!(await askResuming())) return { ok: false, why: '接回中那一列沒有能按的「停止」鈕，或按了沒有確認框' };
-  const rbody = document.querySelector('.dlg').textContent;
-  if (!rbody.includes('關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。')) return { ok: false, why: '接回中的確認框文字不對：' + rbody.slice(0, 160) };
-  if (dlgOpen().textContent.trim() !== '停止') return { ok: false, why: '接回中的確認鈕應寫「停止」：' + dlgOpen().textContent.trim() };
-  if (rbody.includes('11111111')) return { ok: false, why: '確認框不該顯示對話編號' };
-  dlgOpen().click();
-  const stopCall = await waitFor(() => (globalThis.__smokeCalls || []).find(c => c[0] === 'term_stop'));
-  if (!stopCall) return { ok: false, why: '確認後沒有呼叫 term_stop' };
-  const want = JSON.stringify({ req: { id: '7', resuming_sid: ${JSON.stringify(TASKMGR_RESUMING_SID)} } });
-  if (JSON.stringify(stopCall[1]) !== want) return { ok: false, why: 'term_stop 的參數不對：' + JSON.stringify(stopCall[1]) };
-  const others = (globalThis.__smokeCalls || []).map(c => c[0]).filter(c => /^(partner_op|term_(send|start))/.test(c));
-  if (others.length) return { ok: false, why: '停止接回中的視窗不該呼叫別的動作：' + others.join('、') };
-  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '確認後確認框沒有關' };
-  // 再開一次確認框，畫面截圖停在這裡
-  if (!(await askResuming())) return { ok: false, why: '停止完成後再按「停止」沒有開出確認框' };
-  return { ok: true };
-})()`
 export const DEVBTN_PROBES = { desktop: { devbtn: 'desktop' }, mobile: { devbtn: 'mobile', open: '帳號' } }
-export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const mobile = ${JSON.stringify(devbtn)} === 'mobile', open = ${JSON.stringify(open)};
-  if (open) {
-    let row = null;
-    for (let i = 0; i < 60 && !row; i++) { row = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!row) await sleep(100) }
-    if (!row) return { ok: false, why: '找不到「' + open + '」' };
-    row.click();
-  }
-  const sel = mobile ? '.m-dv-my .m-dv-dev' : '.dv-my .dv-devbtn';
-  let btns = [];
-  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('on'))) break; await sleep(100) }
-  const on = btns.filter(b => b.classList.contains('on'));
-  for (const b of btns) { const t = b.textContent.trim(); const bad = ['✓', '使用中', '（這台）'].find(w => t.includes(w)); if (bad) return { ok: false, why: '設備按鈕「' + t + '」不該有「' + bad + '」，只寫設備名' } }
-  if (!on.length) return { ok: false, why: '沒有使用中的設備按鈕（共 ' + btns.length + ' 顆）' };
-  for (const b of on) {
-    const t = b.textContent.trim();
-    if (b.getAttribute('aria-pressed') !== 'true') return { ok: false, why: '「' + t + '」不是選中的樣子（aria-pressed）' };
-    if (b.disabled) return { ok: false, why: '使用中的「' + t + '」被停用了' };
-    const rgb = (getComputedStyle(b).backgroundColor.match(/[0-9]+/g) || []).map(Number);
-    if (!(rgb[0] > 200 && rgb[1] > 170 && rgb[2] < 140)) return { ok: false, why: '使用中的「' + t + '」不是黃色：' + getComputedStyle(b).backgroundColor };
-  }
-  const box = document.querySelector(mobile ? '.m-dv-my' : '.dv-my');
-  if (box.textContent.includes('用在：')) return { ok: false, why: '還有「用在：」那一行' };
-  // 卡片與裡面的東西都不超出窗格（窄的時候額度條原本會把卡片撐出去）：卡片在「我的帳號」區內、卡片裡看得到的元素都在卡片內
-  const area = box.getBoundingClientRect();
-  for (const c of [...box.querySelectorAll(mobile ? '.m-dv-acct' : '.dv-acct')].filter(vis)) {
-    const k = c.getBoundingClientRect(), who = c.querySelector(mobile ? '.m-dv-mail' : '.dv-mail')?.textContent.trim() ?? '';
-    if (k.right > area.right + 0.5 || k.left < area.left - 0.5) return { ok: false, why: who + ' 的帳號卡超出窗格' };
-    for (const e of [...c.querySelectorAll('*')].filter(vis)) { const r = e.getBoundingClientRect(); if (r.width && (r.right > k.right + 0.5 || r.left < k.left - 0.5)) return { ok: false, why: who + ' 的「' + (e.textContent.trim().slice(0, 20) || e.className) + '」超出帳號卡' } }
-  }
-  if ([...box.querySelectorAll('button')].some(b => vis(b) && b.textContent.includes('切換到'))) return { ok: false, why: '還有「切換到…」按鈕' };
-  for (const b of btns) {
-    const c = b.closest(mobile ? '.m-dv-acct' : '.dv-acct');
-    const r = b.getBoundingClientRect(), k = c.getBoundingClientRect();
-    if (r.right > k.right + 0.5 || r.left < k.left - 0.5) return { ok: false, why: '「' + b.textContent.trim() + '」超出帳號卡' };
-    if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
-  }
-  if (!mobile) {
-    // 開放查詢是卡片右上 tag 列（和方案、使用中同一排）的標示，不在下方按鈕列
-    for (const c of [...box.querySelectorAll('.dv-acct')].filter(vis)) {
-      const tag = c.querySelector('.dv-side .dv-shared'), row = c.querySelector('.dv-share');
-      if (row && row.textContent.includes('開放查詢')) return { ok: false, why: '「開放查詢」還在下方按鈕列' };
-      if (!tag) continue;
-      if (tag.textContent.trim() !== '開放查詢') return { ok: false, why: '開放查詢 tag 的字不對：' + tag.textContent.trim() };
-      const tr = tag.getBoundingClientRect(), k = c.getBoundingClientRect(), q = c.querySelector('.dv-quota').getBoundingClientRect();
-      if (tr.bottom > q.top + 0.5) return { ok: false, why: '開放查詢 tag 不在卡片上方的 tag 列' };
-      if (tr.right > k.right + 0.5) return { ok: false, why: '開放查詢 tag 超出卡片' };
-    }
-    if (![...box.querySelectorAll('.dv-side .dv-shared')].some(vis)) return { ok: false, why: '情境資料有開放分享的帳號，卻沒有看到「開放查詢」tag' };
-  }
-  const before = (globalThis.__smokeCalls || []).length;
-  on[0].click();
-  await sleep(600);
-  const sw = (globalThis.__smokeCalls || []).slice(before).map(c => c[0]).filter(c => /switch/i.test(c));
-  if (sw.length) return { ok: false, why: '按使用中的按鈕發出了切換：' + sw.join('、') };
-  if (document.querySelector('.m-sheet.open, .acct-confirm, [role="alertdialog"]')) return { ok: false, why: '按使用中的按鈕跳出了確認畫面' };
-  return { ok: true, why: '' };
-})()`
 // 手機設備細部頁（設備 → 點某台電腦）：整個詳情區塊與底下的廠商卡片、關閉鈕、註腳不能互疊、不能超出視窗、卡片不被水平切掉
 export const MDEVSHEET_PROBES = { mobile: { mdevsheet: true } }
-export const mdevsheetProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const W = window.innerWidth;
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-  btn.click(); await sleep(500);
-  let opened = false;
-  for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
-    if ((row.querySelector('b')?.textContent ?? '').includes('這支手機')) continue;
-    row.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
-    const go = row.querySelector('.m-dv-accbtn');
-    if (!go) continue;
-    go.click(); await sleep(600);
-    if ([...document.querySelectorAll('.m-dv-vendor')].some(vis)) { opened = true; break }
-    const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis);
-    if (back) { back.click(); await sleep(400) }
-  }
-  if (!opened) return { ok: false, why: '找不到有廠商卡片的電腦細部頁' };
-  const R = e => e.getBoundingClientRect();
-  const head = [...document.querySelectorAll('.m-dv .m-dv-dh')].find(vis);
-  const sec = head && head.parentElement;
-  if (!sec) return { ok: false, why: '找不到設備詳情區塊' };
-  const sr = R(sec);
-  if (sr.left < -0.5 || sr.right > W + 0.5) return { ok: false, why: '詳情區塊超出視窗：' + Math.round(sr.left) + '～' + Math.round(sr.right) + '（視窗寬 ' + W + '）' };
-  if (document.documentElement.scrollWidth > W + 1) return { ok: false, why: '頁面出現橫向捲動：' + document.documentElement.scrollWidth + '（視窗寬 ' + W + '）' };
-  if (sec.scrollWidth > sec.clientWidth + 1) return { ok: false, why: '詳情區塊內容被水平切掉：' + sec.scrollWidth + '／' + sec.clientWidth };
-  const cards = [...document.querySelectorAll('.m-dv-vendor')].filter(vis);
-  for (const c of cards) {
-    const r = R(c), name = c.querySelector('b')?.textContent.trim() ?? '';
-    if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5) return { ok: false, why: '「' + name + '」卡片超出詳情區塊：' + Math.round(r.left) + '～' + Math.round(r.right) + '，區塊 ' + Math.round(sr.left) + '～' + Math.round(sr.right) };
-    if (r.right > W + 0.5) return { ok: false, why: '「' + name + '」卡片右邊超出視窗：' + Math.round(r.right) + '／' + W };
-    if (c.scrollWidth > c.clientWidth + 1) return { ok: false, why: '「' + name + '」卡片內容被水平切掉' };
-    const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 20, window.innerHeight - 1));
-    if (r.top + 20 < window.innerHeight && r.top + 20 > 0 && hit && !c.contains(hit)) return { ok: false, why: '「' + name + '」卡片上面蓋著別的東西：' + (hit.className || hit.tagName) };
-  }
-  const close = [...document.querySelectorAll('.m-dv .m-ops-cancel')].find(b => vis(b) && b.textContent.includes('關閉'));
-  const foot = [...document.querySelectorAll('.m-dv .m-dv-foot')].find(vis);
-  const hit = (r, a, b) => !(a.right <= b.left + 0.5 || a.left >= b.right - 0.5 || a.bottom <= b.top + 0.5 || a.top >= b.bottom - 0.5);
-  for (const [label, e] of [['關閉鈕', close], ['額度註腳', foot]]) {
-    if (!e) continue;
-    const r = R(e);
-    for (const c of cards) if (hit(r, r, R(c))) return { ok: false, why: label + '與「' + (c.querySelector('b')?.textContent.trim() ?? '') + '」卡片互疊' };
-    if (hit(r, r, sr)) return { ok: false, why: label + '壓在詳情區塊上' };
-    if (r.right > W + 0.5 || r.left < -0.5) return { ok: false, why: label + '超出視窗' };
-  }
-  if (close) {
-    close.scrollIntoView({ block: 'center' }); await sleep(200);
-    const r = R(close), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    if (!top || !close.contains(top)) return { ok: false, why: '關閉鈕中心點到的不是它：' + (top ? (top.className || top.tagName) : '無') };
-  }
-  return { ok: true, why: '' };
-})()`
 // #930 帳號永遠不能切到這支手機自己：noplat＝這支手機的平台還沒讀到（設備樹會先把它當成電腦）；android＝讀到了
 export const MNOSELF_PROBES = { noplat: { mnoself: 'noplat' }, android: { mnoself: 'android' } }
-export const mnoselfProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-  btn.click(); await sleep(500);
-  const rows = () => [...document.querySelectorAll('.m-dv-row')].filter(vis);
-  const n = rows().length;
-  if (n < 3) return { ok: false, why: '設備列少於 3 列：' + n };
-  let sawSelf = false;
-  for (let i = 0; i < n; i++) {
-    const row = rows()[i];
-    const name = row?.querySelector('b')?.textContent ?? '';
-    row?.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
-    const go = row?.querySelector('.m-dv-accbtn');
-    if (!go) continue;
-    go.click(); await sleep(500);
-    if (name.includes('這支手機')) {
-      sawSelf = true;
-      if ([...document.querySelectorAll('.m-dv-sw')].some(vis)) return { ok: false, why: '「這支手機」的細部頁出現切換鈕' };
-    }
-    const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis);
-    if (back) { back.click(); await sleep(400) }
-  }
-  if (!sawSelf) return { ok: false, why: '設備列表沒有「這支手機」' };
-  let seg = null;
-  for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="accounts"]'); if (!seg) await sleep(100) }
-  if (!seg) return { ok: false, why: '找不到「帳號」分頁鈕' };
-  seg.click(); await sleep(600);
-  const devs = [...document.querySelectorAll('.m-dv-my .m-dv-dev')].filter(vis);
-  const names = devs.map(b => b.textContent.trim()).join('、') || '（沒有按鈕）';
-  if (devs.some(b => (b.textContent.includes('這支手機') || b.textContent.includes('測試機')) && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '帳號頁可以把帳號切到這支手機：' + names };
-  if (!devs.some(b => b.textContent.includes('辦公室') && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
-  return { ok: true, why: '' };
-})()`
 // 整合模式窄視窗（#1192）：兩個窗格放不下時一次只顯示一個，右窗格開著時要有「返回名單」回到名單；放得下就維持左右並排。
 // single=true：這個寬度必須是單窗格；single=false：必須是兩窗格且右邊夠寬。共通：不橫向捲動、標題不直排、帳號卡看得到
 export const MPANE_PROBES = { single: { mpane: true, single: true }, double: { mpane: true, single: false } }
-export const MPANE_CHAT_MIN = CHAT_PANE_MIN_W   // 跟斷點用同一個常數（200）
-export const mpaneProbeSource = ({ single }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
-  const W = window.innerWidth, wantSingle = ${single ? 'true' : 'false'};
-  const list = document.querySelector('.shell > .list-pane'), chat = document.querySelector('.shell > .chat-area');
-  if (!list || !chat) return { ok: false, why: '找不到名單或對話窗格' };
-  const noScroll = () => document.documentElement.scrollWidth <= W + 1 && document.body.scrollWidth <= W + 1;
-  if (!noScroll()) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + document.documentElement.scrollWidth };
-  const both = shown(list) && shown(chat);
-  if (wantSingle && both) return { ok: false, why: '寬 ' + W + ' 應該一次只顯示一個窗格，但名單 ' + Math.round(list.getBoundingClientRect().width) + 'px、右邊 ' + Math.round(chat.getBoundingClientRect().width) + 'px 同時顯示' };
-  if (!wantSingle && !both) return { ok: false, why: '寬 ' + W + ' 應該左右並排，但只顯示一個窗格' };
-  if (!shown(chat)) return { ok: false, why: '開著設定時右窗格沒顯示' };
-  const cw = chat.getBoundingClientRect().width;
-  if (cw < ${MPANE_CHAT_MIN}) return { ok: false, why: '右窗格只有 ' + Math.round(cw) + 'px（至少 ${MPANE_CHAT_MIN}）' };
-  const h = document.querySelector('.panel-pane .panel-h');
-  if (!h) return { ok: false, why: '找不到設定標題' };
-  const lh = parseFloat(getComputedStyle(h).lineHeight) || parseFloat(getComputedStyle(h).fontSize) * 1.3;
-  if (h.getBoundingClientRect().height > lh * 2 + 2) return { ok: false, why: '設定標題高 ' + Math.round(h.getBoundingClientRect().height) + 'px，被擠成直排' };
-  const card = document.querySelector('.panel-pane .dv-acct');
-  if (!card || !shown(card) || card.getBoundingClientRect().width < 120) return { ok: false, why: '帳號卡看不到或太窄：' + (card ? Math.round(card.getBoundingClientRect().width) : '不存在') };
-  if (wantSingle) {
-    const back = chat.querySelector('button[aria-label="返回名單"]');
-    if (!back || !shown(back)) return { ok: false, why: '單窗格顯示右邊時沒有「返回名單」按鈕' };
-    if (back.disabled) return { ok: false, why: '返回名單按鈕不能按' };
-    back.click(); await sleep(400);
-    if (!shown(list) || shown(chat)) return { ok: false, why: '按返回名單後應只剩名單' };
-    if (list.getBoundingClientRect().right > W + 1 || !noScroll()) return { ok: false, why: '名單單獨顯示時超出視窗寬 ' + W };
-    // 從名單再開一次設定的帳號：應切回右窗格、看得到帳號卡
-    const gear = [...list.querySelectorAll('.top-tabs .ttab')].find(e => e.getAttribute('aria-label') === '設定');   // 0.2.18：齒輪拿掉，改成上方的「設定」分頁
-    if (!gear) return { ok: false, why: '名單找不到設定分頁' };
-    gear.click(); await sleep(300);
-    const acct = [...list.querySelectorAll('.cat-list .buddy')].find(e => e.textContent.includes('帳號'));
-    if (!acct) return { ok: false, why: '設定清單找不到帳號' };
-    acct.click(); await sleep(500);
-    if (!shown(chat) || shown(list) || !shown(chat.querySelector('.dv-acct'))) return { ok: false, why: '從名單開帳號後應只顯示右窗格與帳號卡' };
-  }
-  return { ok: true, why: '' };
-})()`
 // 整合模式窄視窗、右邊開著對話（#1227 後續）：量右窗格各層寬度，輸入框、傳送鈕要完整看得到。
 // 左右並排（single=false）時：對話區（.conv-main）至少 CHAT_CONV_MIN 寬、輸入框與傳送鈕在右窗格內、不橫向溢出；
 // 單窗格（single=true）時：只顯示右邊，同樣檢查輸入框完整可見。
 export const MPANE_CHAT_PROBES = { single: { mpane: true, chat: true, single: true, folded: true }, double: { mpane: true, chat: true, single: false, folded: true }, wide: { mpane: true, chat: true, single: false, folded: false } }
-export const MPANE_CONV_MIN = 160
-export const mpaneChatProbeSource = ({ single, folded }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
-  const W = window.innerWidth, wantSingle = ${single ? 'true' : 'false'};
-  const R = e => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), r: Math.round(r.right) } };
-  const q = s => document.querySelector(s);
-  let box = null;
-  for (let i = 0; i < 40 && !(box = q('.chat-area .compose-main textarea')); i++) await sleep(100);
-  await sleep(300);
-  const list = q('.shell > .list-pane'), chat = q('.shell > .chat-area');
-  const m = { W, list: R(list), chat: R(chat), side: R(q('.chat-area .dp-side')), main: R(q('.chat-area .chatpane-main')), conv: R(q('.chat-area .conv-main')), compose: R(q('.chat-area .compose-main')), ta: R(box), send: R(q('.chat-area .composer .aero-btn')), doc: document.documentElement.scrollWidth };
-  if (${JSON.stringify(process.env.ASN_MEASURE || '')}) return { ok: false, why: 'MEASURE ' + JSON.stringify(m) };
-  if (!list || !chat) return { ok: false, why: '找不到名單或對話窗格' };
-  if (!box) return { ok: false, why: '右邊沒有輸入框：' + JSON.stringify(m) };
-  const both = shown(list) && shown(chat);
-  if (wantSingle && both) return { ok: false, why: '寬 ' + W + ' 應該一次只顯示一個窗格：' + JSON.stringify(m) };
-  if (!wantSingle && !both) return { ok: false, why: '寬 ' + W + ' 應該左右並排：' + JSON.stringify(m) };
-  if (document.documentElement.scrollWidth > W + 1 || document.body.scrollWidth > W + 1) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + JSON.stringify(m) };
-  const send = q('.chat-area .composer .aero-btn');
-  const cr = chat.getBoundingClientRect();
-  for (const [name, e] of [['輸入框', box], ['傳送鈕', send]]) {
-    if (!shown(e)) return { ok: false, why: name + '看不到：' + JSON.stringify(m) };
-    const r = e.getBoundingClientRect();
-    if (r.left < cr.left - 1 || r.right > cr.right + 1 || r.right > W + 1) return { ok: false, why: name + '被截掉（超出右窗格 ' + Math.round(cr.left) + '~' + Math.round(cr.right) + '）：' + JSON.stringify(m) };
-  }
-  if (box.getBoundingClientRect().width < 60) return { ok: false, why: '輸入框只剩 ' + Math.round(box.getBoundingClientRect().width) + 'px：' + JSON.stringify(m) };
-  // 大頭貼欄被自動收起（右窗格放不下展開的欄）時展開鈕反灰並寫原因；放得下時照舊可按
-  const strip = q('.chat-area .dp-fold-strip'), foldBtn = strip || q('.chat-area .dp-fold-bar');
-  if (!foldBtn) return { ok: false, why: '找不到大頭貼欄的收合鈕' };
-  if (${folded ? 'true' : 'false'}) {
-    if (!strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄應該被自動收起' };
-    if (!strip.disabled) return { ok: false, why: '自動收起時展開鈕應該反灰' };
-    const cs = getComputedStyle(strip);
-    if (!(parseFloat(cs.opacity) < 1) || cs.cursor === 'pointer') return { ok: false, why: '自動收起時展開鈕要看得出反灰：opacity ' + cs.opacity + '、cursor ' + cs.cursor };
-    strip.click(); await sleep(300);   // 反灰的鈕按了不能改設定（放寬後的 widen 探測會確認欄恢復展開）
-    if (!q('.chat-area .dp-fold-strip')) return { ok: false, why: '點反灰的展開鈕後欄不該展開' };
-    if (strip.title !== '視窗太窄，放寬就會恢復' || strip.getAttribute('aria-label') !== '視窗太窄，放寬就會恢復') return { ok: false, why: '展開鈕提示不對：' + strip.title + ' / ' + strip.getAttribute('aria-label') };
-  } else {
-    if (strip) return { ok: false, why: '寬 ' + W + ' 大頭貼欄不該被收起' };
-    const cs = getComputedStyle(foldBtn);
-    if (cs.opacity !== '1' || cs.cursor !== 'pointer') return { ok: false, why: '可按的收合鈕 opacity 要 1、cursor 要 pointer：' + cs.opacity + ' / ' + cs.cursor };
-    if (foldBtn.disabled || foldBtn.title.includes('視窗太窄')) return { ok: false, why: '放得下時收合鈕應該可按、沒有「視窗太窄」提示：' + foldBtn.title };
-  }
-  const conv = q('.chat-area .conv-main');
-  if (!conv || conv.getBoundingClientRect().width < ${MPANE_CONV_MIN}) return { ok: false, why: '對話區只有 ' + (conv ? Math.round(conv.getBoundingClientRect().width) : 0) + 'px（至少 ${MPANE_CONV_MIN}）：' + JSON.stringify(m) };
-  return { ok: true, why: '' };
-})()`
-// 放寬視窗後（smoke-ui 把寬度改成 sc.widen 再跑這個）：自動收起沒有寫進設定，所以大頭貼欄要恢復展開、收合鈕可按
-export const mpaneWidenProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  await sleep(500);
-  const side = document.querySelector('.chat-area .dp-side'), bar = document.querySelector('.chat-area .dp-fold-bar');
-  if (!side) return { ok: false, why: '找不到大頭貼欄' };
-  if (document.querySelector('.chat-area .dp-fold-strip')) return { ok: false, why: '放寬到 ' + window.innerWidth + ' 後大頭貼欄還是收起（自動收起不該寫進設定）' };
-  if (Math.round(side.getBoundingClientRect().width) !== ${SIDE_OPEN_W}) return { ok: false, why: '大頭貼欄寬 ' + side.getBoundingClientRect().width + '，應該恢復展開的 ${SIDE_OPEN_W}' };
-  if (!bar || bar.disabled) return { ok: false, why: '放寬後收合鈕應該可按' };
-  return { ok: true, why: '' };
-})()`
 // 手機四個分頁（0.2.18；#1429 改順序與第四格；#1438 對話分頁直接是那一則）：開 App 先看「對話」＝上次那一則（沒有清單）；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
 // 切到夥伴、再點第四格回到內頁；分頁列的字與順序和電腦版一樣
 export const MTABS_PROBE = { mtabs: true }
 // 手機對話頂端左上的「返回」（0.2.21 小良哥拍板加回來）：一對一、群組都有；現代外觀名牌照樣置中、不和返回鈕重疊；按下去切到「夥伴」分頁
 export const MCHAT_BACK_PROBE = { mchatBack: true }
-export const mchatBackProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const sec = () => document.querySelector('section.m-pg.m-chat');
-  let back = null;
-  for (let i = 0; i < 60 && !back; i++) { back = sec()?.querySelector('.m-chathead .m-back'); if (!back || back.offsetParent === null) { back = null; await sleep(100) } }
-  if (!back) return { ok: false, why: '對話頂端左邊沒有「返回」鈕' };
-  if (!/夥伴/.test(back.getAttribute('aria-label') || '')) return { ok: false, why: '返回鈕的說明要寫回夥伴：' + back.getAttribute('aria-label') };
-  const head = back.closest('.m-chathead');
-  const b = back.getBoundingClientRect(), h = head.getBoundingClientRect();
-  if (b.left > h.left + h.width / 3) return { ok: false, why: '返回鈕要在頂端左邊' };
-  const plate = head.querySelector('.m-plate');
-  if (plate && plate.offsetParent !== null) {
-    const p = plate.getBoundingClientRect();
-    if (Math.abs((p.left + p.right) / 2 - (h.left + h.right) / 2) > 4) return { ok: false, why: '名牌沒有置中：差 ' + Math.round((p.left + p.right) / 2 - (h.left + h.right) / 2) + 'px' };
-    if (b.right > p.left) return { ok: false, why: '返回鈕和名牌重疊' };
-  } else {
-    const pic = head.querySelector('.m-pic');
-    if (pic && b.right > pic.getBoundingClientRect().left + 1) return { ok: false, why: '返回鈕和頭像重疊' };
-  }
-  if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
-  const before = history.length;
-  back.click();
-  let on = '';
-  for (let i = 0; i < 40 && on !== '夥伴'; i++) { await sleep(100); on = document.querySelector('.m-tabs button.on span')?.textContent.trim() || '' }
-  if (on !== '夥伴') return { ok: false, why: '按返回沒有切到夥伴分頁，現在是 ' + on };
-  if (!document.querySelector('section.m-pg[aria-label="夥伴"] .m-buddy')) return { ok: false, why: '夥伴分頁沒有內容' };
-  return { ok: true, why: '' };
-})()`
-export const mtabsProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const inView = e => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.left > -2 && r.right < innerWidth + 2 };
-  let tabs = [];
-  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
-  const labels = tabs.map(b => b.textContent.trim()).join('|');
-  if (labels !== '夥伴|對話|設定|通知') return { ok: false, why: '分頁的字或順序不對：' + labels };
-  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
-  if (!tab('對話').classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」（順序改了，預設停的頁不變）' };
-  // #1438（小良哥選 B）：對話分頁直接就是最後那一則，不先列清單、沒有回清單的鍵
-  const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
-  for (let i = 0; i < 60 && !inView(sec().querySelector('.chatpane')); i++) await sleep(100);
-  if (!inView(sec().querySelector('.chatpane'))) return { ok: false, why: '對話分頁應該直接是上次那一則' };
-  if (sec().querySelector('.m-chat-list, .m-buddy, .m-search')) return { ok: false, why: '對話分頁不該再列清單' };
-  if (sec().querySelector('[aria-label="回對話清單"]')) return { ok: false, why: '沒有清單了，不該有回清單的鍵' };
-  if (!(sec().querySelector('.m-head .m-title')?.textContent || '').includes('demo')) return { ok: false, why: '對話分頁開的不是上次那一位' };
-  tab('設定').click(); await sleep(500);
-  const about = [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
-  if (!about) return { ok: false, why: '設定裡找不到「關於」' };
-  about.click(); await sleep(600);
-  const page = document.querySelector('.m-fourth');
-  if (!inView(page)) return { ok: false, why: '「關於」內頁沒有出現在畫面上' };
-  // #1439：「關於」有簡介、版本、連結（官網、版本紀錄、隱私權政策、使用指引）、出品；內容不撐破畫面寬度
-  const aboutText = page.textContent;
-  const aboutMissing = ['Agent Sync Network', '版本 ', '官網', '版本紀錄', '隱私權政策', '使用指引', 'Yooliang'].filter(w => !aboutText.includes(w));
-  if (aboutMissing.length) return { ok: false, why: '「關於」少了：' + aboutMissing.join('、') };
-  if (page.scrollWidth > page.clientWidth + 1) return { ok: false, why: '「關於」內容超出畫面寬度' };
-  // #1429：內頁暫時佔第四格（通知那一格），分頁字換成內頁的標題、選中第四格；分頁還是四個
-  let cur = [...document.querySelectorAll('.m-tabs button')];
-  if (cur.length !== 4) return { ok: false, why: '內頁不該多出一個分頁' };
-  const fourthLabel = () => [...document.querySelectorAll('.m-tabs button')][3]?.querySelector('span')?.textContent.trim();
-  if (fourthLabel() !== '關於') return { ok: false, why: '第四格應該換成內頁「關於」，實際：' + fourthLabel() };
-  if (!cur[3].classList.contains('on')) return { ok: false, why: '在內頁上分頁列應該標著第四格' };
-  const pg = document.querySelector('.m-fourth').getBoundingClientRect();
-  if (Math.abs(pg.left) > 2) return { ok: false, why: '內頁沒有停在畫面上（第四格）' };
-  tab('夥伴').click(); await sleep(600);
-  if (inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切到夥伴後內頁還蓋在畫面上' };
-  if (fourthLabel() !== '關於') return { ok: false, why: '離開內頁後第四格應該還是「關於」（3 分鐘內）' };
-  [...document.querySelectorAll('.m-tabs button')][3].click(); await sleep(600);
-  if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '點第四格沒有回到「關於」內頁' };
-  return { ok: true, why: '' };
-})()`
-// 電腦版四個大分頁（0.2.18）：名單上方「夥伴／對話／設定／通知」（#1429 改順序），和手機同樣的字與順序；開窗停在夥伴（本機那台），左邊直排的設備頁籤只在夥伴裡、
-// 不再有通知、群組、指引、齒輪；對話分頁最上面有建立／加入群組；設定最後一列是使用指引，點進去有「‹ 設定」回來；點夥伴回到剛才的設備頁籤
-// 電腦版名單頂端精簡（#1531）：①「夥伴」的放大鏡在搜尋框裡面，真點它游標要進搜尋框（原本獨立那顆的功能）；
-// ②「對話」搜尋框下面沒有建立／加入群組鈕，真點「＋」選單裡的「建立群組…」「加入群組…」各自打開對應的視窗。LINE 外觀框內放大鏡是底圖，不放按鈕
-export const listTrimProbeSource = probe => `(async () => {
-  try {
-  const line = ${JSON.stringify(probe.listTrim === 'line')};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
-  const real = async req => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(350) };
-  const R = e => e.getBoundingClientRect();
-  const tab = l => [...document.querySelectorAll('.top-tabs .ttab')].find(e => (e.querySelector('span') && e.querySelector('span').textContent.trim() === l) || (e.getAttribute('aria-label') || '').startsWith(l));
-  await sleep(300);
-  const input = document.querySelector('.content .search-box input[aria-label="搜尋聯絡人"]');
-  if (!vis(input)) return { ok: false, why: '夥伴分頁找不到搜尋框' };
-  if ([...document.querySelectorAll('.content .search > .search-ic')].some(vis)) return { ok: false, why: '搜尋框右邊還有一顆獨立的放大鏡' };
-  const mag = document.querySelector('.content .search-box .search-in');
-  if (line) {
-    if (vis(mag)) return { ok: false, why: 'LINE 外觀不該另外放放大鏡鈕（框內左側是底圖）' };
-  } else {
-    if (!vis(mag)) return { ok: false, why: '搜尋框裡沒有放大鏡' };
-    const a = R(input), b = R(mag);
-    if (b.left < a.left || b.right > a.right || b.top < a.top || b.bottom > a.bottom) return { ok: false, why: '放大鏡不在搜尋框裡：框 ' + [a.left, a.top, a.right, a.bottom].map(Math.round) + '，放大鏡 ' + [b.left, b.top, b.right, b.bottom].map(Math.round) };
-    if (a.right - b.right > 8) return { ok: false, why: '放大鏡沒有靠框的右側：差 ' + Math.round(a.right - b.right) + 'px' };
-    input.blur(); await sleep(100);
-    if (document.activeElement === input) return { ok: false, why: '測試前搜尋框不該有游標' };
-    await real({ click: at(mag) });
-    if (document.activeElement !== input) return { ok: false, why: '點框內的放大鏡，游標沒有進搜尋框（現在在 ' + (document.activeElement && (document.activeElement.className || document.activeElement.tagName)) + '）' };
-    await real({ text: 'zz' });
-    if (input.value !== 'zz') return { ok: false, why: '點放大鏡後打字沒有進搜尋框：' + JSON.stringify(input.value) };
-    input.value = ''; input.dispatchEvent(new Event('input'));
-  }
-  await real({ click: at(tab('對話')) });
-  const chats = document.querySelector('.chat-list');
-  if (!vis(chats)) return { ok: false, why: '對話分頁沒有顯示' };
-  if (chats.querySelector('.gl-actions') || [...chats.querySelectorAll('button')].some(b => /^(建立|加入)群組$/.test(b.textContent.trim()))) return { ok: false, why: '對話分頁搜尋框下面還有建立／加入群組鈕' };
-  for (const [item, want] of [['建立群組…', '建立'], ['加入群組…', '加入']]) {
-    const plus = [...document.querySelectorAll('.chat-list .search-plus, .me .plus-btn')].find(vis);
-    if (!plus) return { ok: false, why: '找不到「＋」' };
-    await real({ click: at(plus) });
-    const menu = document.querySelector('.launch-picker');
-    if (!vis(menu)) return { ok: false, why: '點「＋」沒有打開選單' };
-    const btn = [...menu.querySelectorAll('button')].find(b => b.textContent.trim() === item);
-    if (!vis(btn)) return { ok: false, why: '「＋」選單裡沒有「' + item + '」' };
-    const hit = document.elementFromPoint(...at(btn));
-    if (hit !== btn && !btn.contains(hit)) return { ok: false, why: '「' + item + '」被別的東西蓋住：' + (hit && (hit.className || hit.tagName)) + ' @' + at(btn) };
-    await real({ click: at(btn) });
-    for (let i = 0; i < 20 && !vis(document.querySelector('.gs-panel')); i++) await sleep(100);
-    const panel = document.querySelector('.gs-panel');
-    const title = panel && panel.querySelector('.gs-title') ? panel.querySelector('.gs-title').textContent.trim() : '';
-    if (!vis(panel) || !title.includes(want)) return { ok: false, why: '點「' + item + '」沒有打開對應的視窗：' + JSON.stringify(title) };
-    if (vis(document.querySelector('.launch-picker'))) return { ok: false, why: '選了「' + item + '」選單沒有收起' };
-    await real({ click: at(panel.querySelector('.gs-x')) });
-    if (vis(document.querySelector('.gs-panel'))) return { ok: false, why: '關不掉「' + item + '」的視窗' };
-  }
-  await real({ click: at(tab('夥伴')) });
-  return { ok: true, why: '' };
-  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
-})()`
 export const DTABS_PROBE = { dtabs: true }
-export const dtabsProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
-  const tops = () => [...document.querySelectorAll('.top-tabs .ttab')];
-  for (let i = 0; i < 60 && tops().length < 4; i++) await sleep(100);
-  const t = tops(), byLabel = l => t.find(e => e.querySelector('span').textContent.trim() === l);
-  const order = t.map(e => e.querySelector('span').textContent.trim()).join('|');
-  if (order !== '夥伴|對話|設定|通知') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
-  if (!byLabel('夥伴').classList.contains('on')) return { ok: false, why: '開窗應該停在「夥伴」' };
-  const rail = document.querySelector('.rail');
-  if (!shown(rail)) return { ok: false, why: '夥伴分頁沒有左邊的設備頁籤' };
-  if (rail.querySelector('.rtab-notice, .rtab-groups, [aria-label="設定"], [aria-label="指引"]')) return { ok: false, why: '左邊直排頁籤還有通知、群組、指引或齒輪' };
-  const devOn = rail.querySelector('.rtab.on');
-  const devKey = devOn ? devOn.getAttribute('aria-label') : '';
-  if (!devKey) return { ok: false, why: '夥伴分頁沒有選中的設備頁籤' };
-  byLabel('對話').click(); await sleep(300);
-  if (document.querySelector('.rail')) return { ok: false, why: '對話分頁不該有左邊的設備頁籤' };
-  const chats = document.querySelector('.chat-list');
-  if (!shown(chats)) return { ok: false, why: '對話分頁沒有顯示對話清單' };
-  // 建立／加入群組只留在「＋」選單裡（#1531）：搜尋框下面不再有重複的兩顆鈕
-  if (chats.querySelector('.gl-actions') || [...chats.querySelectorAll('button')].some(b => /^(建立|加入)群組$/.test(b.textContent.trim()))) return { ok: false, why: '對話分頁搜尋框下面還有建立／加入群組鈕' };
-  byLabel('設定').click(); await sleep(300);
-  const entry = document.querySelector('.cat-list .guide-entry');
-  if (!shown(entry) || !entry.textContent.includes('使用指引')) return { ok: false, why: '設定清單最後沒有「使用指引」' };
-  entry.click(); await sleep(300);
-  if (!byLabel('設定').classList.contains('on')) return { ok: false, why: '使用指引應該算在「設定」底下' };
-  const back = document.querySelector('.guide-list .guide-back');
-  if (!shown(back) || !document.querySelector('.guide-list .guide-item')) return { ok: false, why: '使用指引沒有篇目或沒有「‹ 設定」' };
-  back.click(); await sleep(300);
-  if (!shown(document.querySelector('.cat-list'))) return { ok: false, why: '按「‹ 設定」沒有回到設定清單' };
-  byLabel('夥伴').click(); await sleep(300);
-  const again = document.querySelector('.rail .rtab.on');
-  if (!again || again.getAttribute('aria-label') !== devKey) return { ok: false, why: '點夥伴沒有回到剛才的設備頁籤' };
-  if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '視窗出現橫向捲動' };
-  return { ok: true, why: '' };
-})()`
 // 外觀「現代」（0.2.18）：存檔選了現代，畫面一開就是現代（<html data-skin="modern">、主色變青綠），而且沒有橫向捲動；截圖給人看整體樣子
 export const SKIN_PROBE = { skinCheck: true }
 // #1461：現代外觀打開電腦的「更多」或手機的「⋯」，每一項前面都有線條圖示（同一個 key 同一個圖）；移除是紅色。探測完選單留著，截圖看得到
 export const MENU_ICONS_PROBE = { menuIcons: true }
-export const menuIconsProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const mobile = !!document.querySelector('#app.m');
-  let opener = null;
-  for (let i = 0; i < 60 && !opener; i++) { opener = document.querySelector(mobile ? '.m-chathead .m-plate:not(:disabled)' : '.mbar-more .mbtn'); if (!opener || opener.offsetParent === null) { opener = null; await sleep(100) } }
-  if (!opener) return { ok: false, why: mobile ? '找不到名牌（點了開「⋯」）' : '找不到「更多」鈕' };
-  if (!opener.querySelector('svg.lic') && !mobile) return { ok: false, why: '「更多」鈕沒有用線條的三個點' };
-  opener.click();
-  let rows = [];
-  for (let i = 0; i < 40 && !rows.length; i++) { await sleep(100); rows = [...document.querySelectorAll(mobile ? '.m-ops-panel .m-ops-item' : '.more-menu [role="menuitem"]')] }
-  if (!rows.length) return { ok: false, why: '選單沒有打開' };
-  const bad = rows.filter(b => { const ic = b.querySelector(':scope > svg.lic'); return !ic || getComputedStyle(ic).display === 'none' });
-  if (bad.length) return { ok: false, why: '這幾項沒有圖示：' + bad.map(b => b.textContent.trim().slice(0, 12)).join('、') };
-  const rm = rows.find(b => /移除/.test(b.textContent));
-  if (rm && getComputedStyle(rm.querySelector('svg.lic')).color !== 'rgb(179, 38, 30)') return { ok: false, why: '「移除」的圖示應該是紅色：' + getComputedStyle(rm.querySelector('svg.lic')).color };
-  return { ok: true, why: '' };
-})()`
 // 電腦版「關於」區（#1439）：簡介、版本、四個按鈕（官網、版本紀錄、隱私權政策、使用指引）、記錄、出品都在，且不撐破設定窗寬度
 export const ABOUT_PROBE = { aboutCheck: true }
-export const aboutProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let intro = null;
-  for (let i = 0; i < 60 && !intro; i++) { intro = document.querySelector('.settings .about-intro'); if (!intro) await sleep(200); }
-  if (!intro) return { ok: false, why: '設定的「關於」沒有出現' };
-  const root = intro.closest('.settings');
-  const text = root.textContent;
-  const missing = ['Agent Sync Network', '版本 ', '官網', '版本紀錄', '隱私權政策', '使用指引', '檢視記錄', 'Yooliang'].filter(w => !text.includes(w));
-  if (missing.length) return { ok: false, why: '「關於」少了：' + missing.join('、') };
-  const btns = [...root.querySelectorAll('.about-links button')].map(b => b.textContent.trim());
-  if (btns.join('|') !== '官網|版本紀錄|隱私權政策|使用指引') return { ok: false, why: '連結按鈕不對：' + btns.join('|') };
-  if (root.scrollWidth > root.clientWidth + 1) return { ok: false, why: '「關於」內容超出設定窗寬度' };
-  return { ok: true, why: '' };
-})()`
 export const SKIN_KEYS_PROBE = { skinCheck: true, keys: true }
-export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(probe.line) : `(async () => {
-  const KEYS = ${JSON.stringify(probe.keys === true)};
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  for (let i = 0; i < 40 && document.documentElement.dataset.skin !== 'modern'; i++) await sleep(100);
-  if (document.documentElement.dataset.skin !== 'modern') return { ok: false, why: '存檔選了現代，畫面卻是 ' + (document.documentElement.dataset.skin || '沒有設定') };
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toLowerCase();
-  if (accent !== '#2f7a70') return { ok: false, why: '現代的主色沒有套上：' + accent };
-  const on = document.querySelector('.top-tabs .ttab.on, .m-tabs button.on');
-  if (on && getComputedStyle(on).color !== 'rgb(47, 122, 112)') return { ok: false, why: '選中的分頁不是主色：' + getComputedStyle(on).color };
-  // 危險動作（忘記這台、移除帳號、登出、退出群組…）的紅色在現代底下還要在：放幾顆同樣 class 的按鈕量顏色
-  const host = document.createElement('div'); host.className = 'logout-set'; document.body.appendChild(host);
-  const reds = [];
-  for (const cls of ['aero-btn danger', 'aero-btn dv-danger', 'gs-btn danger', 'aero-btn logout-btn', 'm-btn m-danger', 'm-btn m-dv-danger']) { const b = document.createElement('button'); b.className = cls; b.textContent = '移除'; host.appendChild(b); reds.push([cls, b]) }
-  const redOf = b => { const c = getComputedStyle(b); return cls => (cls === 'm-btn m-dv-danger' ? c.backgroundColor : c.color) };
-  const bad = reds.filter(([cls, b]) => redOf(b)(cls) !== 'rgb(179, 38, 30)').map(([cls, b]) => cls + '＝' + redOf(b)(cls));
-  host.remove();
-  if (bad.length) return { ok: false, why: '危險按鈕在現代底下不是紅色：' + bad.join('、') };
-  // #1421 A：畫面上有的元件才量（各情境畫面不同）
-  for (let i = 0; i < 20 && document.querySelector('.msgs') && !document.querySelector('.msg .m-body.tone-them, .msg .m-body.tone-me'); i++) await sleep(100);
-  const css = (sel, prop, pseudo) => { const el = document.querySelector(sel); return el ? getComputedStyle(el, pseudo).getPropertyValue(prop).trim() : null };
-  const checks = [
-    ['.msg .m-body.tone-them', 'border-top-left-radius', '18px', '對方訊息卡片的圓角'],
-    ['.msg .m-body.tone-me', 'border-top-right-radius', '18px', '自己訊息卡片的圓角'],
-    ['.dp', 'border-top-left-radius', '50%', '頭像要是圓的'],
-    ['.m-chat .compose-main', 'border-top-width', '1px', '手機輸入框的邊框（mobile.css 的 border:0 不能蓋掉）'],
-  ];
-  for (const [sel, prop, want, label] of checks) { const v = css(sel, prop); if (v !== null && v !== want) return { ok: false, why: label + '：' + v } }
-  const dot = document.querySelector('.dp:not(.room-av)');
-  if (dot && getComputedStyle(dot, '::before').content === 'none') return { ok: false, why: '頭像右下沒有狀態點' };
-  // 忙碌／離線的標題列、離線的收件人列：要有自己的底色，不能被現代的一般底色（#f6f5f2／白）蓋掉
-  const plainBg = ['rgb(246, 245, 242)', 'rgb(255, 255, 255)'];
-  for (const [sel, label] of [['.m-chathead.is-busy', '手機標題列忙碌變色'], ['.m-chathead.is-offline', '手機標題列離線變色'], ['.conv-main .to-line.is-offline', '電腦收件人列離線灰底']]) {
-    const v = css(sel, 'background-color'); if (v !== null && plainBg.includes(v)) return { ok: false, why: label + '被現代底色蓋掉：' + v }
-  }
-  // 手機對話頂端（#1421 B 之三）：左返回、中間名牌、右看終端（36px 圓鈕）；原本的頭像、名字、「⋯」收起；下方工具列的終端切換收起
-  const ph = document.querySelector('.m-plate-head');
-  if (ph) {
-    const vis = e => e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
-    const plate = ph.querySelector('.m-plate');
-    if (!vis(plate)) return { ok: false, why: '現代的對話頂端沒有名牌' };
-    for (const sel of ['.m-pic', '.m-head-tx', '.m-head-more']) if (vis(ph.querySelector(':scope > ' + sel))) return { ok: false, why: '現代的對話頂端還留著 ' + sel };
-    const hr = ph.getBoundingClientRect(), pr = plate.getBoundingClientRect();
-    if (Math.abs((pr.left + pr.right) / 2 - (hr.left + hr.right) / 2) > 4) return { ok: false, why: '名牌沒有置中' };
-    { const o = plate.style.width; plate.style.width = 'max-content'; const nat = plate.getBoundingClientRect().width; plate.style.width = o;
-      console.info('[center-m-1on1]', JSON.stringify({ diff: (pr.left + pr.right) / 2 - (hr.left + hr.right) / 2, width: pr.width, natural: nat }));
-      if (pr.width - nat > 2) return { ok: false, why: '名牌被撐寬：寬 ' + pr.width + '、內容需要 ' + nat }; }
-    const back = ph.querySelector('.m-back');   // #1438 起對話分頁沒有返回鈕（直接是那一則）；有的話才量
-    if (back && Math.round(back.getBoundingClientRect().width) !== 36) return { ok: false, why: '返回鈕不是 36px：' + back.getBoundingClientRect().width };
-    const term = ph.querySelector('.m-head-term');
-    if (term) {
-      if (Math.round(term.getBoundingClientRect().width) !== 36) return { ok: false, why: '看終端鈕不是 36px' };
-      if (vis(document.querySelector('.m-chat .m-term-switch'))) return { ok: false, why: '下方工具列的終端切換應該收起（搬到頂端了）' };
-      term.click(); await sleep(400);
-      if (!term.classList.contains('on')) return { ok: false, why: '點頂端的看終端沒有切到終端' };
-      term.click(); await sleep(300);
-    }
-    const head = ph.closest('.m-chathead');
-    if (head.classList.contains('is-offline') && !plate.classList.contains('is-offline') && !plate.closest('.is-room')) return { ok: false, why: '離線時名牌沒有跟著變灰' };
-  }
-  // 廣告框（#1421）：現代下是白底細灰框圓角卡片，不留 Aero 的藍框藍底、漸層彩球、斜緞帶
-  const adw = document.querySelector('.ad-wrap');
-  if (adw) {
-    const w = getComputedStyle(adw);
-    if (w.backgroundColor !== 'rgb(255, 255, 255)' || w.borderTopColor === 'rgb(155, 184, 214)' || w.borderTopLeftRadius !== '14px') return { ok: false, why: '廣告框外層還是 Aero：' + w.backgroundColor + ' ' + w.borderTopColor + ' ' + w.borderTopLeftRadius };
-    const ad = adw.querySelector('.ad:not([style*="display: none"])');
-    if (ad && getComputedStyle(ad).backgroundImage !== 'none') return { ok: false, why: '廣告底色還是漸層' };
-    const ball = adw.querySelector('.ad-art i');
-    if (ball && getComputedStyle(ball).backgroundImage !== 'none') return { ok: false, why: '廣告的彩球還是漸層' };
-    const tag = adw.querySelector('.ad-new');
-    if (tag && getComputedStyle(tag).transform !== 'none') return { ok: false, why: '廣告的緞帶還是斜的' };
-  }
-  // #1421 B2：輸入框是單列膠囊（一行 52px／手機 50px、細邊、圓角）、送出鈕 40px 實心主色圓且名字還在、「＋」開得起上方工具選單、看不見的舊工具列不佔位
-  const cm = document.querySelector('.compose-main');
-  if (cm) {
-    const mobile = !!document.querySelector('.m-chat'), cs = getComputedStyle(cm), box = cm.getBoundingClientRect();
-    const wantH = mobile ? 50 : 52;
-    if (Math.abs(box.height - wantH) > 1.5) return { ok: false, why: '輸入框膠囊一行的高度不對：' + box.height + '（要 ' + wantH + '）' };
-    if (cs.borderTopLeftRadius !== (mobile ? '25px' : '26px') || cs.borderTopColor !== 'rgb(230, 228, 223)') return { ok: false, why: '輸入框膠囊的圓角或邊線不對：' + cs.borderTopLeftRadius + ' ' + cs.borderTopColor };
-    const sb = cm.querySelector('.composer .aero-btn[type=submit]'), sbc = sb && getComputedStyle(sb), sbr = sb && sb.getBoundingClientRect();
-    if (!sb || Math.round(sbr.width) !== 40 || Math.round(sbr.height) !== 40 || sbc.backgroundColor !== 'rgb(47, 122, 112)' || sbc.borderTopLeftRadius !== '50%') return { ok: false, why: '送出鈕不是 40px 實心主色圓' };
-    if (!sb.getAttribute('aria-label') || sb.getAttribute('aria-label') !== sb.textContent.trim()) return { ok: false, why: '送出鈕的名字（aria-label）要等於原本的字：' + sb.getAttribute('aria-label') + ' / ' + sb.textContent.trim() };
-    const plus = cm.querySelector('.mc-plus'), tb = cm.querySelector(':scope > .toolbar');
-    if (!plus || getComputedStyle(plus).display === 'none') return { ok: false, why: '輸入框左邊沒有「＋」' };
-    if (tb && getComputedStyle(tb).display !== 'none') return { ok: false, why: '工具列平常應該收起來' };
-    plus.click(); await sleep(150);
-    const open = tb && getComputedStyle(tb).display !== 'none' && plus.getAttribute('aria-expanded') === 'true' && (vis => vis.length >= 3 && vis.every(t => t.getBoundingClientRect().height > 20))([...tb.querySelectorAll('.tool')].filter(t => getComputedStyle(t).display !== 'none'));
-    plus.click(); await sleep(100);
-    if (!open) return { ok: false, why: '按「＋」沒有展開工具選單' };
-    // 點外面要收起來：開著選單，在膠囊外（對話區）按一下
-    plus.click(); await sleep(100);
-    if (!(tb && getComputedStyle(tb).display !== 'none')) return { ok: false, why: '「＋」沒有再開起來' };
-    (document.querySelector('.msgs') || document.body).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    await sleep(100);
-    if (tb && getComputedStyle(tb).display !== 'none') return { ok: false, why: '點膠囊外面，工具選單沒有收起來' };
-    if (KEYS) {
-      // 鍵盤：Shift+Enter 不送出也不攔（瀏覽器自己換行）；電腦 Enter 送出並清空輸入框、手機 Enter 是換行（不送出、不攔）
-      const ta = cm.querySelector('.composer textarea');
-      const sent = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'relay_send').length;
-      const press = (shift) => !ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', shiftKey: shift, bubbles: true, cancelable: true }));
-      ta.focus(); ta.value = '第一行'; ta.dispatchEvent(new Event('input', { bubbles: true })); await sleep(80);
-      const n0 = sent();
-      if (press(true) || ta.value !== '第一行' || sent() !== n0) return { ok: false, why: 'Shift+Enter 應該只換行（不攔、不送出）' };
-      const prevented = press(false); await sleep(250);
-      if (mobile) { if (prevented || ta.value !== '第一行' || sent() !== n0) return { ok: false, why: '手機 Enter 應該是換行（不攔、不送出）' }; }
-      else if (!prevented || ta.value !== '' || sent() !== n0 + 1) return { ok: false, why: '電腦 Enter 沒有送出：輸入框＝「' + ta.value + '」、送出次數 ' + (sent() - n0) };
-      ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
-  await sleep(400);
-  // #1461 線條圖示：現代外觀看得到線條圖示；輸入框的「＋」打開後，工具列每一顆只看到線條、看不到原本的彩色圖
-  const hiddenLic = [...document.querySelectorAll('svg.lic')].find(s => s.parentElement && s.parentElement.offsetParent !== null && getComputedStyle(s).display === 'none');
-  if (hiddenLic) return { ok: false, why: '現代外觀的線條圖示被藏起來了：' + hiddenLic.dataset.icon };
-  const plus = document.querySelector('.mc-plus');
-  if (plus && plus.offsetParent !== null) {
-    if (!plus.querySelector('svg.lic')) return { ok: false, why: '輸入框的「＋」沒有用線條圖示' };
-    plus.click(); await sleep(250);
-    for (const b of document.querySelectorAll('.toolbar .tool')) {
-      if (b.offsetParent === null) continue;
-      const name = b.getAttribute('aria-label') || '';
-      if ([...b.querySelectorAll(':scope > svg:not(.lic), :scope > img')].some(x => getComputedStyle(x).display !== 'none')) return { ok: false, why: '工具列「' + name + '」還看得到原本的彩色圖' };
-      if (!b.querySelector(':scope > svg.lic')) return { ok: false, why: '工具列「' + name + '」沒有線條圖示' };
-    }
-    plus.click(); await sleep(150);
-  }
-  if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
-  return { ok: true, why: '' };
-})()`
-export const probeKind = probe => (probe.devSel ? '手機設備列點選才展開檢查' : probe.lineM ? 'LINE 手機泡泡與標題列檢查' : probe.photoBack ? '手機看大圖返回鍵檢查' : probe.listTrim ? '電腦版名單頂端精簡檢查' : probe.lineDesk ? 'LINE 電腦版名單與輸入區檢查' : probe.updDl !== undefined ? '下載中進度條檢查' : probe.lineUi ? 'LINE 輸入列與標題列檢查' : probe.lineTimes ? 'LINE 訊息時間位置檢查' : probe.camera ? '拍照鈕檢查' : probe.multiPhoto ? '一次選多張檢查' : probe.photoZoom ? '看大圖縮放檢查' : probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.devSel ? devSelProbeSource() : probe.lineM ? lineMProbeSource(probe.lineM) : probe.photoBack ? photoBackProbeSource() : probe.listTrim ? listTrimProbeSource(probe) : probe.lineDesk ? lineDeskProbeSource(probe.lineDesk) : probe.updDl !== undefined ? updDlProbeSource(probe.updDl) : probe.lineUi ? lineUiProbeSource(probe) : probe.lineTimes ? lineTimesProbeSource() : probe.camera ? cameraProbeSource(probe.camera) : probe.multiPhoto ? multiPhotoProbeSource() : probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 探測登記表（#1540）：每個探測一個檔，放在 scripts/smoke-probes/，載入時自動收集；情境的 probe 對不到任何登記就是遮罩檢查
+export const PROBES = await loadProbes()
+export const probeEntry = probe => findProbe(PROBES, probe)
+export const probeKind = probe => { const e = probeEntry(probe); return e ? (typeof e.kind === 'function' ? e.kind(probe) : e.kind) : '遮罩檢查' }
+export const probeSource = probe => { const e = probeEntry(probe); return e ? e.source(probe) : maskProbeSource(probe) }
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2250,31 +400,6 @@ const mcloudAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
   G: { asn_online: false, reported_at: '', accounts: [] },
 }, fallback: null })
 export const MCLOUD_PROBE = { mcloud: true }
-export const mcloudProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let btn = null;
-  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
-  btn.click();
-  await sleep(500);
-  // 不點進任何一台：進設備頁時就會把各台的帳號回報讀進來（#930），讀到之後雲端節點才標得出來；最多等 3 秒
-  const tagged = () => [...document.querySelectorAll('.m-dv-row .m-dv-rs')].filter(e => e.textContent.includes('雲端')).length;
-  for (let i = 0; i < 30 && tagged() < 3; i++) await sleep(100);
-  await sleep(300);
-  const rows = [...document.querySelectorAll('.m-dv-row')].filter(e => e.offsetParent !== null).map(r => ({ name: r.querySelector('.m-dv-rn b')?.textContent.trim() ?? '', kind: r.querySelector('.m-dv-rs')?.textContent.trim() ?? '' }));
-  const row = name => rows.find(r => r.name === name);
-  for (const name of ['牧陽 Aegis', '日本VM', 'Grok 雲端']) {
-    const r = row(name);
-    if (!r) return { ok: false, why: '找不到「' + name + '」那列（各自一列）：' + rows.map(x => x.name).join('／') };
-    if (!r.kind.startsWith('雲端')) return { ok: false, why: '「' + name + '」沒標雲端：' + r.kind };
-  }
-  const pc = row('辦公室');
-  if (!pc || pc.kind.includes('雲端')) return { ok: false, why: '實體電腦不該標雲端：' + (pc?.kind ?? '找不到') };
-  const me = rows.find(r => r.kind.includes('這支手機'));
-  if (!me) return { ok: false, why: '找不到這支手機那列' };
-  if (!me.kind.startsWith('手機') || me.kind.includes('雲端')) return { ok: false, why: '這支手機要是「手機」、不標雲端：' + me.kind };
-  return { ok: true, why: '' };
-})()`
 // 手機「開新夥伴」第 2 步的運行選項：夥伴 → ＋ → 開新夥伴 → 選辦公室 → 下一步；412、360 寬與大字型（1.3 倍）各一張。
 // 辦公室回報的啟動設定只有 Claude；選項名稱、預設都要跟電腦版同一份目錄（model-catalog）算出來的一樣，並看得到「前台或背景」的說明
 const MLAUNCH_LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:/work'] }
@@ -2283,54 +408,6 @@ export const MLAUNCH_PROBES = {
   base: { mlaunch: true, big: false, labels: MLAUNCH_RUN.options.map(o => o.label), selected: MLAUNCH_RUN.options.find(o => o.key === MLAUNCH_RUN.selected)?.label ?? '', note: LAUNCH_DISPLAY_NOTE },
 }
 MLAUNCH_PROBES.big = { ...MLAUNCH_PROBES.base, big: true }
-export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const want = ${JSON.stringify({ labels, selected, note })};
-  const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
-  const plus = await wait(() => document.querySelector('.m-plus-wrap .m-icon-btn'));
-  if (!plus) return { ok: false, why: '找不到名單頁的「新增」鈕' };
-  plus.click();
-  const item = await wait(() => [...document.querySelectorAll('.m-plus-menu button')].find(b => b.textContent.includes('開新夥伴')));
-  if (!item) return { ok: false, why: '新增選單沒有「開新夥伴」' };
-  item.click();
-  const dev = await wait(() => [...document.querySelectorAll('.m-lch .m-opt')].find(b => b.textContent.includes('辦公室') && !b.disabled));
-  if (!dev) return { ok: false, why: '第 1 步找不到可選的「辦公室」：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
-  dev.click();
-  await sleep(100);
-  const next = [...document.querySelectorAll('.m-lch .m-btn-big')].find(b => b.textContent.includes('下一步'));
-  if (!next || next.disabled) return { ok: false, why: '「下一步」不能按' };
-  next.click();
-  const fs = await wait(() => [...document.querySelectorAll('.m-lch fieldset')].find(f => f.querySelector('legend')?.textContent.trim() === '運行'));
-  if (!fs) return { ok: false, why: '第 2 步沒有「運行」選項：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
-  if (${big ? 'true' : 'false'}) {
-    const els = [...document.querySelectorAll('#app *')];
-    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
-    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
-  }
-  await sleep(400);
-  const opts = [...fs.querySelectorAll('.m-opt')];
-  const labels = opts.map(o => o.querySelector('.m-opt-t')?.textContent.trim() ?? '');
-  if (labels.join('|') !== want.labels.join('|')) return { ok: false, why: '運行選項不對：' + labels.join('、') + '（應為 ' + want.labels.join('、') + '）' };
-  const on = opts.filter(o => o.getAttribute('aria-pressed') === 'true').map(o => o.querySelector('.m-opt-t').textContent.trim());
-  if (on.join('|') !== want.selected) return { ok: false, why: '預設選到的不對：' + on.join('、') + '（應為 ' + want.selected + '）' };
-  const note = document.querySelector('.m-lch-display');
-  if (!vis(note) || note.textContent.trim() !== want.note) return { ok: false, why: '沒看到前台或背景的說明：' + (note?.textContent ?? '沒有') };
-  fs.scrollIntoView({ block: 'start' });
-  await sleep(200);
-  const bad = [];
-  for (const e of [...fs.querySelectorAll('.m-opt, .m-opt-t, .m-opt-why'), note]) {
-    if (e.scrollWidth > e.clientWidth + 1) bad.push(e.textContent.trim().slice(0, 20));
-    const r = e.getBoundingClientRect();
-    if (r.left < -0.5 || r.right > window.innerWidth + 0.5) bad.push('超出畫面：' + e.textContent.trim().slice(0, 20));
-  }
-  if (bad.length) return { ok: false, why: '字被切或超出畫面：' + bad.join('、') };
-  const de = document.documentElement;
-  if (de.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1) return { ok: false, why: '頁面有橫向捲動：' + de.scrollWidth + ' > ' + window.innerWidth };
-  const m = /#\\d+/.exec(document.querySelector('#app').innerText);
-  if (m) return { ok: false, why: '畫面出現議題編號：' + m[0] };
-  return { ok: true, why: '' };
-})()`
 // 手機「通知」分頁（#895，PR-H；0.2.18 起是固定的一格，#1429 起在最後）：四個頁籤固定「夥伴／對話／設定／通知」；通知分頁顯示系統通知對話（唯讀）、紅點在通知那一格。
 // view: 'tab'＝存檔停在通知，看到通知內容（不會有紅點，因為正在看）；'dot'＝存檔停在設定，通知那一格亮紅點。412、360 寬與大字型（1.3 倍）各一張
 const MNOTICE_ME = { tab: { navTab: 'notice' }, dot: { navTab: 'me' } }
@@ -2345,132 +422,12 @@ const noticeMails = (now = Date.now()) => [
 const DNOTICE_ME = { merged: { winMode: 'merged' }, split: {}, narrow: { winMode: 'merged' } }
 const dnoticeMails = (now = Date.now()) => [...noticeMails(now), { id: '00000000-0000-4000-8000-0000000000a4', from_node: 'Q', from_agent: 'ASN 通知', kind: 'notice:login', body: '辦公室有新的登入\n登入的設備 <b>不認得</b> 的話請到設定檢查', trust: 'member', to_agent: '測試機', created_at: new Date(now - 30_000).toISOString() }]
 export const DNOTICE_PROBES = { merged: { dnotice: 'merged' }, split: { dnotice: 'split' }, narrow: { dnotice: 'narrow' } }
-export const dnoticeProbeSource = ({ dnotice }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const shown = e => { if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0 };
-  const mode = ${JSON.stringify(dnotice)}, W = window.innerWidth;
-  const noScroll = () => document.documentElement.scrollWidth <= W + 1 && document.body.scrollWidth <= W + 1;
-  const badge = () => { const c = document.querySelector('.top-tabs .ttab-notice .rtab-count'); return c ? c.textContent.trim() : '' };
-  let bell = null;
-  for (let i = 0; i < 60 && badge() !== '4'; i++) await sleep(100);
-  bell = document.querySelector('.top-tabs .ttab-notice');
-  if (!bell) return { ok: false, why: '上方沒有「通知」分頁' };
-  if (badge() !== '4') return { ok: false, why: '通知頁籤的未讀數應是 4，實際：' + (badge() || '沒有') };
-  const tops = [...document.querySelectorAll('.top-tabs .ttab')].filter(shown).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-  const order = tops.map(e => e.querySelector('span').textContent.trim()).join('|');
-  if (order !== '夥伴|對話|設定|通知') return { ok: false, why: '上方大分頁的字或順序不對：' + order };
-  if (tops[3] !== bell) return { ok: false, why: '通知應是上方最後一個分頁（和手機一樣，#1429）' };
-  if (document.querySelector('.rail .rtab-notice, .rail .rtab-groups')) return { ok: false, why: '左邊直排頁籤還有通知或群組' };
-  if ([...document.querySelectorAll('.content .buddy')].some(b => b.textContent.trim().startsWith('通知'))) return { ok: false, why: '名單裡還有「通知」' };
-  bell.click(); await sleep(300);
-  const rows = [...document.querySelectorAll('.notice-list .nt-row')];
-  if (rows.length !== 4) return { ok: false, why: '通知清單應有 4 則，實際 ' + rows.length };
-  const chips = [...document.querySelectorAll('.notice-list .nt-chip')].map(e => e.textContent.trim()).join('／');
-  if (chips !== '全部／卡住／登入／額度／安全／其他') return { ok: false, why: '分類小籤不對：' + chips };
-  const first = rows[0];
-  if (!first.textContent.includes('辦公室有新的登入')) return { ok: false, why: '最新的一則不在最上面：' + first.textContent.trim().slice(0, 30) };
-  if (first.querySelector('b')) return { ok: false, why: '通知內文被當成 HTML（出現 <b> 元素）' };
-  if (!first.textContent.includes('<b>不認得</b>')) return { ok: false, why: '摘要沒有原樣顯示角括號' };
-  if (!first.querySelector('.nt-dot')) return { ok: false, why: '未讀的通知沒有紅點' };
-  if (!document.querySelector('.notice-list .nt-head') || !document.querySelector('.notice-list .nt-all')) return { ok: false, why: '找不到通知標頭或「全部標為已讀」' };
-  const chip = t => [...document.querySelectorAll('.notice-list .nt-chip')].find(e => e.textContent.trim() === t);
-  chip('登入').click(); await sleep(200);
-  const loginRows = document.querySelectorAll('.notice-list .nt-row').length;
-  if (loginRows !== 1) return { ok: false, why: '「登入」分類應只剩 1 則，實際 ' + loginRows };
-  chip('全部').click(); await sleep(200);
-  if (!noScroll()) return { ok: false, why: '寬 ' + W + ' 出現橫向捲動：' + document.documentElement.scrollWidth };
-  document.querySelector('.notice-list .nt-row').click(); await sleep(500);
-  if (mode === 'split') {
-    const calls = (globalThis.__smokeCalls || []).filter(c => c[0] === 'open_chat');
-    if (!calls.some(c => c[1] && c[1].id === 'notice:me')) return { ok: false, why: '分離模式點通知應打開「通知」對話視窗' };
-    if (document.querySelector('.notice-pane')) return { ok: false, why: '分離模式不該有右邊的通知內容' };
-    return noScroll() ? { ok: true, why: '' } : { ok: false, why: '點開後出現橫向捲動' };
-  }
-  const pane = document.querySelector('.notice-pane');
-  if (!shown(pane)) return { ok: false, why: '右邊沒有顯示通知內容' };
-  const body = pane.querySelector('.nt-body');
-  if (!body || body.querySelector('b') || !body.textContent.includes('<b>不認得</b>')) return { ok: false, why: '通知內容沒有用純文字顯示' };
-  if (pane.querySelector('textarea, .compose-row')) return { ok: false, why: '通知內容不該有輸入列' };
-  if (document.querySelector('.chat-stack .compose-row')) return { ok: false, why: '通知被開成一般對話分頁' };
-  if (badge() !== '3') return { ok: false, why: '點開一則後未讀數應剩 3，實際：' + (badge() || '沒有') };
-  if (mode === 'narrow') {
-    const list = document.querySelector('.shell > .list-pane');
-    if (shown(list)) return { ok: false, why: '窄視窗點開通知後應只顯示右邊' };
-    const back = document.querySelector('.chat-area .pane-back');
-    if (!shown(back) || back.textContent.replace(/\\s+/g, '') !== '‹通知') return { ok: false, why: '返回鈕應寫「‹ 通知」，實際：' + (back ? back.textContent.trim() : '沒有') };
-    back.click(); await sleep(400);
-    if (!shown(list) || !document.querySelector('.notice-list')) return { ok: false, why: '按返回後應回到通知清單' };
-    if (!noScroll()) return { ok: false, why: '通知清單單獨顯示時出現橫向捲動' };
-    document.querySelector('.notice-list .nt-row').click(); await sleep(400);
-    if (shown(list) || !shown(document.querySelector('.notice-pane'))) return { ok: false, why: '再點一次應切回右邊的通知內容' };
-  }
-  return noScroll() ? { ok: true, why: '' } : { ok: false, why: '點開後出現橫向捲動：' + document.documentElement.scrollWidth };
-})()`
 export const MNOTICE_PROBES = {
   tab: { mnotice: true, view: 'tab', big: false },
   dot: { mnotice: true, view: 'dot', big: false },
   tabBig: { mnotice: true, view: 'tab', big: true },
   dotBig: { mnotice: true, view: 'dot', big: true },
 }
-export const mnoticeProbeSource = ({ view, big }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const view = ${JSON.stringify(view)};
-  let tabs = [];
-  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
-  if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
-  for (let i = 0; i < 80 && document.querySelector('.m-banner'); i++) await sleep(100);   // 新通知的橫幅幾秒後自己消失，不要蓋住頁籤列
-  await sleep(600);
-  if (${big ? 'true' : 'false'}) {
-    const els = [...document.querySelectorAll('#app *')];
-    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
-    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
-    await sleep(300);
-  }
-  const labels = tabs.map(b => b.querySelector('span')?.textContent.trim());
-  if (labels.join('|') !== '夥伴|對話|設定|通知') return { ok: false, why: '四個頁籤的字不對：' + labels.join('、') };
-  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
-  // 四個字都要完整顯示：沒被省略、沒被切、沒有橫向溢出
-  const nav = document.querySelector('.m-tabs');
-  if (nav.scrollWidth > nav.clientWidth + 1) return { ok: false, why: '頁籤列橫向溢出：' + nav.scrollWidth + ' > ' + nav.clientWidth };
-  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
-  for (const b of tabs) {
-    const sp = b.querySelector('span'), r = b.getBoundingClientRect();
-    const rg = document.createRange(); rg.selectNodeContents(sp); const t = rg.getBoundingClientRect();
-    if (t.left < r.left - 0.5 || t.right > r.right + 0.5) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」的字超出按鈕：' + Math.round(t.width) + ' > ' + Math.round(r.width) };
-    if (t.bottom > r.bottom + 0.5 || t.top < r.top - 0.5) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」的字被切' };
-    if (sp.scrollWidth > sp.clientWidth + 1) return { ok: false, why: '頁籤「' + sp.textContent.trim() + '」被省略號截斷' };
-  }
-  const dot = tab('通知').querySelector('i.red');
-  if (view === 'dot') {
-    if (!dot || !vis(dot)) return { ok: false, why: '通知有未讀，通知那一格卻沒有紅點' };
-    if (tab('對話').querySelector('i.red')) return { ok: false, why: '對話分頁不該因為通知未讀而亮紅點' };
-    const d = dot.getBoundingClientRect(), b = tab('通知').getBoundingClientRect();
-    if (d.right > b.right + 0.5 || d.left < b.left - 0.5) return { ok: false, why: '紅點跑出通知那一格' };
-    return { ok: true, why: '' };
-  }
-  if (dot) return { ok: false, why: '正在看通知，紅點應該清掉' };
-  if (!tab('通知').classList.contains('on')) return { ok: false, why: '存檔停在通知，通知那一格卻沒選中' };
-  const pane = document.querySelector('.m-notice');
-  if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
-  const msgs = [...pane.querySelectorAll('.msg')].filter(vis);
-  if (msgs.length < 3) return { ok: false, why: '通知訊息少於 3 則：' + msgs.length };
-  const text = pane.textContent;
-  for (const w of ['Claude 額度剩 18%', '正在等你確認', '設備金鑰剛換過']) if (!text.includes(w)) return { ok: false, why: '通知內容缺「' + w + '」' };
-  if (pane.querySelector('textarea, .compose-row')) return { ok: false, why: '通知是唯讀，不該有輸入列' };
-  if (pane.querySelector('.tool.call, .tool.icon.call')) return { ok: false, why: '通知不該有通話鈕' };
-  return { ok: true, why: '' };
-})()`
-// 手機舊「○○收發室」聯絡人列不再出現在夥伴頁／對話頁、改集中在「通知」分頁（#895 驗收，重現 11-06 截圖）：
-// 「30家用」節點底下本機存檔裡留著五個舊系統寄件人（沒 kind、各有信），後台另來一封新式通知（kind）與一封舊名無 kind 的信，外加兩位正常夥伴。
-// view: 'list'＝存檔停在夥伴頁；'lastchat'＝最後使用的對話是某個舊收發室列（升級前的狀態），對話頁不該還開著它
-const LEGACY_SENDERS = [
-  { agent: '終端服務收發室', text: '終端服務：設備 30家用 的終端已就緒。' },
-  { agent: '登入通知收發室', text: '登入通知：你的帳號剛在新設備登入。' },
-  { agent: '等待確認收發室', text: '等待確認：夥伴 demo 正在等你確認。' },
-  { agent: '額度通知收發室', text: '額度通知：Claude 額度剩 25%。' },
-  { agent: 'H-收發室', text: 'H 設備：本機服務已重新啟動。' },
-]
 const LEGACY_NODE = 'Q'
 const LEGACY_T = Date.parse('2026-11-05T08:00:00Z')
 const legacyMembers = () => [
@@ -2488,89 +445,12 @@ const legacyMails = (now = Date.now()) => [
 const legacyMe = view => (view === 'lastchat' ? { navTab: 'list', lastChat: `${LEGACY_NODE}/${LEGACY_SENDERS[0].agent}` } : { navTab: 'list' })
 // 手機（Play 版，沒有自動更新）設定分頁的新版紅點（#1501）：啟動讀到的舊清單沒有新版→紅點不亮；清單過期（時鐘撥快 31 分鐘）後外殼告知回前景（__asnFgEvent，外殼真實的介面）→ 重讀到新版→「設定」那一格亮紅點
 export const MRELEASE_PROBE = { mrelease: true }
-export const mreleaseProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let tabs = [];
-  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
-  if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
-  const me = () => tabs.find(b => b.querySelector('span')?.textContent.trim() === '設定');
-  for (let i = 0; i < 40 && (globalThis.__smokeRelReads || 0) < 1; i++) await sleep(100);
-  await sleep(400);
-  if ((globalThis.__smokeRelReads || 0) !== 1) return { ok: false, why: '啟動應該讀一次版本紀錄，實際 ' + (globalThis.__smokeRelReads || 0) };
-  if (me().querySelector('i.red')) return { ok: false, why: '舊清單沒有新版，「設定」不該有紅點' };
-  if (typeof window.__asnFgEvent !== 'function') return { ok: false, why: '外殼的前景事件入口不見了' };
-  window.__asnFgEvent(true);
-  await sleep(500);
-  if ((globalThis.__smokeRelReads || 0) !== 1) return { ok: false, why: '清單還沒過期，回前景不該重讀' };
-  const real = Date.now; Date.now = () => real() + 31 * 60000;
-  window.__asnFgEvent(true);
-  let dot = null;
-  for (let i = 0; i < 40 && !dot; i++) { await sleep(100); dot = me().querySelector('i.red') }
-  if ((globalThis.__smokeRelReads || 0) !== 2) return { ok: false, why: '清單過期後回前景應該重讀一次，實際共 ' + (globalThis.__smokeRelReads || 0) };
-  if (!dot) return { ok: false, why: '重讀到新版後，「設定」那一格沒有紅點' };
-  return { ok: true, why: '' };
-})()`
 
 export const MNOTICE_LEGACY_PROBES = { list: { mnoticeLegacy: true, view: 'list' }, lastchat: { mnoticeLegacy: true, view: 'lastchat' } }
-export const mnoticeLegacyProbeSource = ({ view }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  const view = ${JSON.stringify(view)};
-  const SENDERS = ${JSON.stringify(LEGACY_SENDERS.map(s => s.agent))};
-  const MARKS = ${JSON.stringify([...LEGACY_SENDERS.map(s => s.text.slice(0, 8)), '設備金鑰剛換過', '舊寄件名、沒有類別'])};
-  const legacyName = t => { const s = String(t || '').trim(); return s.endsWith('收發室') || s === 'ASN 通知' };
-  let tabs = [];
-  for (let i = 0; i < 60 && tabs.length < 4; i++) { tabs = [...document.querySelectorAll('.m-tabs button')]; if (tabs.length < 4) await sleep(100) }
-  if (tabs.length !== 4) return { ok: false, why: '頁籤應該固定四個，實際 ' + tabs.length };
-  const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
-  const pg = label => document.querySelector('section.m-pg[aria-label="' + label + '"]');
-  const nicks = () => [...pg('夥伴').querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
-  for (let i = 0; i < 80 && !(nicks().includes('小工') && nicks().includes('alpha')); i++) await sleep(100);
-  for (let i = 0; i < 80 && document.querySelector('.m-banner'); i++) await sleep(100);   // 新通知的橫幅幾秒後自己消失
-  await sleep(600);
-  // 1) 夥伴頁：正常夥伴在、沒有任何舊系統寄件人列
-  const names = nicks();
-  for (const n of ['demo', '小工', 'alpha']) if (!names.includes(n)) return { ok: false, why: '夥伴頁少了正常夥伴「' + n + '」：' + names.join('、') };
-  const bad = names.filter(legacyName);
-  if (bad.length) return { ok: false, why: '夥伴頁還列著系統寄件人：' + [...new Set(bad)].join('、') };
-  const listText = pg('夥伴').textContent;
-  for (const s of SENDERS) if (listText.includes(s)) return { ok: false, why: '夥伴頁的文字裡還出現「' + s + '」' };
-  if (names.includes('通知')) return { ok: false, why: '夥伴頁不該再有「通知」列（通知有自己的分頁）：' + names.join('、') };
-  // 2) 對話頁：清單與內容都沒有舊收發室的對話（列、標題、內容都不能有）
-  tab('對話').click();
-  await sleep(700);
-  const chat = pg('對話');
-  const rows = [...chat.querySelectorAll('.m-buddy .b-nick')].map(e => e.textContent.trim());
-  if (rows.some(legacyName)) return { ok: false, why: '對話清單列著系統寄件人：' + rows.join('、') };
-  const title = chat.querySelector('.m-head .m-title')?.textContent.trim() || '';
-  if (legacyName(title)) return { ok: false, why: '對話頁開著舊系統寄件人的對話：「' + title + '」' };
-  for (const s of SENDERS) if (chat.textContent.includes(s)) return { ok: false, why: '對話頁的文字裡還出現「' + s + '」' };
-  for (const w of MARKS) if (chat.textContent.includes(w)) return { ok: false, why: '對話頁顯示了通知內容「' + w + '」（通知只該在通知分頁）' };
-  // 3) 「通知」分頁：每位系統寄件人的信都看得到，唯讀，版面不超出畫面寬度
-  tab('通知').click();
-  await sleep(900);
-  if (!tab('通知').classList.contains('on')) return { ok: false, why: '點通知那一格後沒有選中通知' };
-  const pane = document.querySelector('.m-notice');
-  if (!pane || !vis(pane)) return { ok: false, why: '看不到通知分頁的內容' };
-  const text = pane.textContent;
-  for (const w of MARKS) if (!text.includes(w)) return { ok: false, why: '通知裡找不到「' + w + '」' };
-  if (pane.querySelector('textarea, .compose-row')) return { ok: false, why: '通知是唯讀，不該有輸入列' };
-  const W = window.innerWidth;
-  if (document.documentElement.scrollWidth > W + 1 || document.body.scrollWidth > W + 1) return { ok: false, why: '整頁橫向溢出：' + document.documentElement.scrollWidth + ' > ' + W };
-  if (pane.scrollWidth > pane.clientWidth + 1) return { ok: false, why: '通知內容橫向溢出：' + pane.scrollWidth + ' > ' + pane.clientWidth };
-  for (const e of pane.querySelectorAll('.msg, .msg *')) {
-    const r = e.getBoundingClientRect();
-    if (r.width > 0 && (r.right > W + 1 || r.left < -1)) return { ok: false, why: '通知內容超出畫面寬度：' + (e.className || e.tagName) + ' ' + Math.round(r.left) + '~' + Math.round(r.right) + ' / ' + W };
-  }
-  return { ok: true, why: '' };
-})()`
 // ---- 手機看別台電腦夥伴的終端（PR④，只能看）：對話頁頂端「訊息／終端」切換 ----
 // 手機是節點 P，夥伴開在另一台電腦 Q；手機端的 Rust 指令之後才有，這裡用假資料驗畫面
-import { LINE_CHAT_MSGS, LINE_GROUP_MSGS, LINE_LOOK_ME, LINE_PROBES, lineProbeSource } from './smoke-line.mjs'
-import { mtermviewCursorProbeSource } from './smoke-term-cursor.mjs'
-import { mtermviewFollowProbeSource } from './smoke-term-follow.mjs'
-import { mtermBarProbeSource, mtermSwipeProbeSource } from './smoke-term-swipe.mjs'
-import { DTERM_ME, DTERM_ME2, DTERM_MEMBERS, DTERM_MEMBERS2, DTERM_NODE, DTERM_PROBES, DTERM_TAB_PROBES, LTERM_ME, LTERM_MEMBERS, LTERM_PROBES, dtermProbeSource, dtermTabProbeSource, ltermPauseProbeSource } from './smoke-desk-term.mjs'
+import { LINE_CHAT_MSGS, LINE_GROUP_MSGS, LINE_LOOK_ME, LINE_PROBES } from './smoke-line.mjs'
+import { DTERM_ME, DTERM_ME2, DTERM_MEMBERS, DTERM_MEMBERS2, DTERM_NODE, DTERM_PROBES, DTERM_TAB_PROBES, LTERM_ME, LTERM_MEMBERS, LTERM_PROBES } from './smoke-desk-term.mjs'
 export const MTERMVIEW_PROBES = {
   cursor: { mtermview: true, cursor: true },
   base: { mtermview: true, big: false },
@@ -2603,27 +483,6 @@ export const MTERMVIEW_TEXT = [
 // 手機權限框（詢問內容從終端抄來，整排分隔線要變成一條細線）：指令前後各四行線、行首有框線；中段再夾一組四行線
 export const MPERMREQ_TEXT = '│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ Bash command\n│ npm test --silent\n│ Run the unit tests\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\n│ ──────────────────────────────\nDo you want to proceed?\n❯ 1. Yes\n  2. No'
 export const mpermreqRows = () => [{ id: '11111111-2222-3333-4444-555555555555', node: 'Q', window_name: 'demo', prompt_text: MPERMREQ_TEXT, complete: true, options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }], body_hash: 'a'.repeat(64), expires_at: new Date(Date.now() + 600_000).toISOString() }]
-export const mpermreqProbeSource = () => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let box = null;
-  for (let i = 0; i < 80 && !box; i++) { box = document.querySelector('.m-perm-text'); if (!box) { for (const fn of ((globalThis.__smokeListeners || {})['relay-bell'] || [])) fn({ event: 'relay-bell', payload: null }); await sleep(250) } }
-  if (!box) return { ok: false, why: '權限框沒有跳出來' };
-  await sleep(300);
-  const ALL = '│┃║| ─━═-_=', RULE = '─━═-_=';
-  const lines = box.innerText.split(String.fromCharCode(10));
-  const ruleOnly = lines.filter(l => [...l].every(c => ALL.includes(c) || c === String.fromCharCode(9)) && [...l].filter(c => RULE.includes(c)).length >= 3);
-  if (ruleOnly.length) return { ok: false, why: '還有整行是分隔線的文字：' + ruleOnly[0].slice(0, 20) };
-  const hrs = box.querySelectorAll('hr.m-perm-rule');
-  if (hrs.length !== 1) return { ok: false, why: '分隔線應該剛好一條（前後的拿掉、中間四行合成一條），實際 ' + hrs.length };
-  if (hrs[0].getBoundingClientRect().height > 3) return { ok: false, why: '分隔線太粗' };
-  if (!box.textContent.includes('npm test --silent')) return { ok: false, why: '指令文字不見了' };
-  if (!box.textContent.includes('Do you want to proceed?')) return { ok: false, why: '問題文字不見了' };
-  const panel = box.closest('.m-ops-panel');
-  const bad = [box, panel].find(e => e && e.scrollWidth > e.clientWidth + 1);
-  if (bad) return { ok: false, why: '卡片橫向溢出：' + bad.className };
-  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
-  return { ok: true, why: '' };
-})()`
 // #1445：手機確認框照原本的選項顯示＋危險提示＋按住一秒。三種：危險（本文很長）、確認框不完整、平常的指令
 const PERM_FULL = [{ n: 1, label: 'Yes', kind: 'allow_once' }, { n: 2, label: "Yes, and don't ask again for git push commands", kind: 'allow_always' }, { n: 3, label: 'No', kind: 'deny' }]
 export const permDangerRows = kind => {
@@ -2633,228 +492,10 @@ export const permDangerRows = kind => {
   if (kind === 'incomplete') return [{ ...base, prompt_text: ' git push --force …\n Do you want to proceed?', complete: false, options: [{ n: 3, label: 'No' }], risk: { codes: [], uncertain: true }, full_len: 40 }]
   return [{ ...base, prompt_text: ' Bash command\n mkdir c1dir\n Do you want to proceed?', complete: true, options: [{ n: 1, label: 'Yes' }, { n: 3, label: 'No' }], risk: { codes: [], uncertain: false }, full_len: 40 }]
 }
-export const permDangerProbeSource = kind => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  let panel = null;
-  for (let i = 0; i < 80 && !panel; i++) { panel = document.querySelector('.m-ops-panel .m-perm-text')?.closest('.m-ops-panel'); if (!panel) { for (const fn of ((globalThis.__smokeListeners || {})['relay-bell'] || [])) fn({ event: 'relay-bell', payload: null }); await sleep(250) } }
-  if (!panel) return { ok: false, why: '權限框沒有跳出來' };
-  await sleep(900);   // 等 ARM_MS
-  const kind = ${JSON.stringify(kind)};
-  const warn = panel.querySelector('.m-perm-warn');
-  const btns = [...panel.querySelectorAll('.m-term-opt')];
-  if (btns.length !== 3) return { ok: false, why: '應該照原本的選項顯示三顆，實際 ' + btns.length };
-  const holds = btns.map(b => b.classList.contains('m-hold'));
-  if (kind === 'plain') {
-    if (warn) return { ok: false, why: '平常的指令不該有警告' };
-    if (panel.textContent.includes('安全')) return { ok: false, why: '畫面不該出現「安全」' };
-    if (JSON.stringify(holds) !== '[false,true,false]') return { ok: false, why: '平常的指令只有「不再詢問」要按住：' + JSON.stringify(holds) };
-  } else {
-    if (!warn) return { ok: false, why: '沒有警告區塊' };
-    const r = warn.getBoundingClientRect();
-    if (r.top < 0 || r.bottom > window.innerHeight) return { ok: false, why: '一開框警告就要看得到：' + Math.round(r.top) + '～' + Math.round(r.bottom) };
-    if (warn.compareDocumentPosition(panel.querySelector('.m-perm-text')) !== Node.DOCUMENT_POSITION_FOLLOWING) return { ok: false, why: '警告要在本文之前（本文框外面）' };
-    if (kind === 'danger' && !warn.textContent.includes('git')) return { ok: false, why: '警告沒有寫出 git 那一條' };
-    if (kind === 'incomplete' && !warn.textContent.includes('看不到全部指令')) return { ok: false, why: '不完整時要寫看不到全部指令' };
-    if (JSON.stringify(holds) !== '[true,true,false]') return { ok: false, why: '要小心時放行類都要按住：' + JSON.stringify(holds) };
-    if (kind === 'danger' && !panel.textContent.includes('後面還有')) return { ok: false, why: '截斷的字數提示不見了' };
-  }
-  // 要按住的那一顆：點一下不送；按住不到一秒放開不送；按滿一秒才送
-  const decided = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'android_perm_req_decide');
-  const hb = btns[1];
-  hb.click(); await sleep(200);
-  if (decided().length) return { ok: false, why: '要按住的按鈕點一下就送出了' };
-  hb.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await sleep(400);
-  hb.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); await sleep(900);
-  if (decided().length) return { ok: false, why: '按住不到一秒就送出了' };
-  hb.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await sleep(1300);
-  if (decided().length !== 1) return { ok: false, why: '按滿一秒沒有送出' };
-  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
-  return { ok: true, why: '' };
-})()`
 export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
-// 看終端時輸入框要在：可見、可聚焦、在畫面內；終端區的底不超過輸入框的頂（不重疊）；不橫向溢出；切回對話也正常
-export const mtermComposerProbeSource = ({ kb }) => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  let sw = null;
-  for (let i = 0; i < 80 && !sw; i++) { sw = document.querySelector('.m-term-switch'); if (!sw) await sleep(100) }
-  if (!sw) return { ok: false, why: '對話頁沒有「對話／終端」切換鈕' };
-  const H = window.innerHeight, W = window.innerWidth;
-  sw.click();
-  let rows = '';
-  for (let i = 0; i < 80 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
-  if (!rows.includes('測試通過')) return { ok: false, why: '終端畫面沒有出現假畫面的字' };
-  await sleep(300);
-  const ta = document.querySelector('.m-chat .composer textarea');
-  const form = document.querySelector('.m-chat .composer');
-  if (!vis(ta) || !vis(form)) return { ok: false, why: '看終端時輸入框被藏起來了' };
-  if (${kb ? 'true' : 'false'}) { ta.focus(); await sleep(300) }
-  const check = (tag) => {
-    const f = form.getBoundingClientRect(), t = ta.getBoundingClientRect();
-    const term = document.querySelector('.m-chat .term-remote').getBoundingClientRect();
-    if (!(f.height > 20 && t.height > 20)) return tag + '輸入框高度太小：' + Math.round(t.height);
-    if (f.top < -0.5 || f.bottom > window.innerHeight + 0.5 || f.left < -0.5 || f.right > window.innerWidth + 0.5) return tag + '輸入框跑出畫面：' + [f.left, f.top, f.right, f.bottom].map(Math.round).join(',') + ' / ' + window.innerWidth + 'x' + window.innerHeight;
-    if (!(term.height > 40)) return tag + '終端區被擠扁：' + Math.round(term.height);
-    if (term.bottom > f.top + 0.5) return tag + '終端區蓋到輸入框：終端底 ' + Math.round(term.bottom) + ' > 輸入框頂 ' + Math.round(f.top);
-    if (term.top < -0.5) return tag + '終端區頂端跑出畫面：' + Math.round(term.top);
-    const s = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect();
-    if (s.bottom > f.top + 0.5) return tag + '終端畫面溢出到輸入框：' + Math.round(s.bottom) + ' > ' + Math.round(f.top);
-    if (document.documentElement.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1) return tag + '整頁橫向溢出';
-    if (document.documentElement.scrollHeight > window.innerHeight + 1) return tag + '整頁縱向溢出：' + document.documentElement.scrollHeight + ' > ' + window.innerHeight;
-    const sr = sw.getBoundingClientRect();
-    if (sr.right > window.innerWidth + 0.5 || sr.left < -0.5 || sr.bottom > window.innerHeight + 0.5) return tag + '切換鈕跑出畫面';
-    return '';
-  };
-  let bad = check('看終端：');
-  if (bad) return { ok: false, why: bad };
-  ta.focus();
-  if (document.activeElement !== ta) return { ok: false, why: '輸入框無法取得焦點' };
-  const stopSend = e => { e.preventDefault() };
-  form.addEventListener('submit', stopSend);
-  const setVal = v => { ta.value = v; ta.dispatchEvent(new Event('input', { bubbles: true })) };
-  setVal('你好');
-  await sleep(100);
-  if (ta.value !== '你好') return { ok: false, why: '輸入框打不了字' };
-  const btn = form.querySelector('button[type=submit]');
-  if (!btn || btn.disabled) return { ok: false, why: '打了字之後傳送鈕沒有啟用' };
-  setVal('');
-  form.removeEventListener('submit', stopSend);
-  await sleep(100);
-  bad = check('打字後：');
-  if (bad) return { ok: false, why: bad };
-  // 切回對話：訊息列表回來、輸入框仍在、不溢出
-  sw.click();
-  await sleep(500);
-  if (!vis(document.querySelector('.m-chat .conv'))) return { ok: false, why: '切回對話後訊息列表沒回來' };
-  if (!vis(ta)) return { ok: false, why: '切回對話後輸入框不見了' };
-  const f2 = form.getBoundingClientRect();
-  if (f2.bottom > window.innerHeight + 0.5 || document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '切回對話後版面跑掉' };
-  // 再切到終端，讓截圖停在終端畫面
-  sw.click();
-  rows = '';
-  for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
-  if (${kb ? 'true' : 'false'}) ta.focus();
-  await sleep(300);
-  bad = check('再切到終端：');
-  if (bad) return { ok: false, why: bad };
-  return { ok: true, why: '' };
-})()`
-export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb, follow, statusLine, swipe }) => statusLine ? mtermBarProbeSource() : swipe ? mtermSwipeProbeSource() : follow ? mtermviewFollowProbeSource() : composer ? mtermComposerProbeSource({ kb }) : cursor ? mtermviewCursorProbeSource() : gate ? mtermviewGateProbeSource(gate) : `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  let sw = null;
-  for (let i = 0; i < 80 && !sw; i++) { sw = document.querySelector('.m-term-switch'); if (!sw) await sleep(100) }
-  if (!sw) return { ok: false, why: '對話頁沒有「對話／終端」切換鈕' };
-  if (${big ? 'true' : 'false'}) {
-    const els = [...document.querySelectorAll('#app *')];
-    const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
-    els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
-    await sleep(300);
-  }
-  // 小良哥 11-10：合成一顆、放在這排最後面、不做選中樣式；字寫「按了會去哪裡」（看對話時「終端」、看終端時「對話」）
-  if (document.querySelectorAll('.m-term-switch').length !== 1 || sw.tagName !== 'BUTTON') return { ok: false, why: '對話／終端切換應該只有一顆按鈕' };
-  const btns = [sw];
-  const plain = () => {
-    if (sw.hasAttribute('aria-pressed')) return '有 aria-pressed（不要選中狀態）';
-    if (sw.classList.contains('on')) return '有選中樣式（.on）';
-    return '';
-  };
-  const lastInRow = () => {
-    const kids = [...sw.parentElement.children].filter(e => e.tagName === 'BUTTON' || e.classList.contains('tool-group')).filter(e => getComputedStyle(e).display !== 'none');
-    return kids[kids.length - 1] === sw;
-  };
-  if (!sw.closest('.compose-row .toolbar')) return { ok: false, why: '切換鈕應該在下方圖示列' };
-  if (!lastInRow()) return { ok: false, why: '切換鈕應該放在這排按鈕的最後面' };
-  if (sw.getAttribute('aria-label') !== '終端') return { ok: false, why: '看對話時按鈕應該寫「終端」：' + sw.getAttribute('aria-label') };
-  if (plain()) return { ok: false, why: '看對話時切換鈕' + plain() };
-  if (${stayChat ? 'true' : 'false'}) {
-    const r = sw.getBoundingClientRect();
-    if (r.width < 43.5 || r.height < 43.5 || r.left < -0.5 || r.right > window.innerWidth + 0.5) return { ok: false, why: '切換鈕跑出畫面或太小' };
-    if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
-    return { ok: true, why: '' };
-  }
-  // 兩個圖示都要整顆在畫面內、夠大好按（電腦版的 44px 觸控下限）
-  const inView = () => btns.every(b => { const r = b.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5 && r.left >= -0.5 && r.right <= window.innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5 });
-  if (!inView()) return { ok: false, why: '切換圖示跑出畫面或太小' };
-  const conv = () => document.querySelector('.m-chat .conv');
-  if (!vis(conv())) return { ok: false, why: '一開始應該先顯示訊息列表' };
-  sw.click();
-  let bar = null;
-  for (let i = 0; i < 80 && !(bar && bar.textContent.includes('正在看')); i++) { await sleep(100); bar = document.querySelector('.m-chat .typing') }   // 0.2.17：提示在最下面的狀態列
-  if (!bar || !bar.textContent.includes('正在看')) return { ok: false, why: '點「終端」後沒出現「正在看」：' + (document.querySelector('.term-remote')?.textContent || '').slice(0, 80) };
-  let rows = '';
-  for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
-  if (!rows.includes('測試通過')) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rows.slice(0, 60) };
-  await sleep(300);
-  if (vis(conv())) return { ok: false, why: '看終端時訊息列表應該收起來' };
-  if (document.querySelector('.term-remote-switch')) return { ok: false, why: '不該有「打字」切換鈕（打字走下方輸入框）' };
-  if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
-  if (sw.getAttribute('aria-label') !== '對話') return { ok: false, why: '看終端時按鈕應該寫「對話」：' + sw.getAttribute('aria-label') };
-  if (plain()) return { ok: false, why: '看終端時切換鈕' + plain() };
-  if (!lastInRow()) return { ok: false, why: '看終端時切換鈕應該還在這排最後面' };
-  // 終端至少半個螢幕高（橫向 412 高時曾被擠成 0）；「正在看」縮成一行；輸入框收起、切換圖示仍在畫面內
-  const th = document.querySelector('.m-chat .term-remote').getBoundingClientRect().height;
-  if (!(th > 0) || th < window.innerHeight * 0.4 - 1) return { ok: false, why: '終端高度不到螢幕的四成（輸入框回來後橫向 412 高約 46%）：' + Math.round(th) + ' / ' + window.innerHeight };
-  const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
-  if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
-  if (document.querySelector('.m-chat .term-remote .term-remote-bar')) return { ok: false, why: '終端上方不該再有提示條（已移到最下面的狀態列）' };
-  if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（小良哥 11-10）' };
-  if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
-  // 切回「對話」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
-  sw.click();
-  await sleep(500);
-  if (!vis(conv())) return { ok: false, why: '切回「訊息」後訊息列表沒回來' };
-  if (document.querySelector('.term-view-screen')) return { ok: false, why: '切回「訊息」後終端畫面還在' };
-  const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
-  if (!calls.includes('term_view_remote_start')) return { ok: false, why: '沒呼叫 term_view_remote_start' };
-  if ((globalThis.__smokeConfirms || []).length < 1) return { ok: false, why: '發起前沒有先跳本人確認' };
-  if (!calls.includes('term_view_remote_stop')) return { ok: false, why: '切回訊息沒呼叫 term_view_remote_stop' };
-  if (sw.getAttribute('aria-label') !== '終端') return { ok: false, why: '切回對話後按鈕應該寫「終端」' };
-  sw.click();
-  rows = '';
-  for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
-  if (!rows.includes('測試通過')) return { ok: false, why: '再切回「終端」後畫面沒出來' };
-  await sleep(300);
-  return { ok: true, why: '' };
-})()`
-// 本人確認沒過（PR③ 的閘門）：取消＝什麼都不送、靜默回到訊息；沒設螢幕鎖＝顯示提示、也不送。兩種都不能出現任何 start 呼叫
-export const mtermviewGateProbeSource = gate => `(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const vis = e => e && e.offsetParent !== null;
-  let sw = null;
-  for (let i = 0; i < 80 && !sw; i++) { sw = document.querySelector('.m-term-switch'); if (!sw) await sleep(100) }
-  if (!sw) return { ok: false, why: '對話頁沒有「對話／終端」切換鈕' };
-  sw.click();
-  for (let i = 0; i < 30 && (globalThis.__smokeConfirms || []).length < 1; i++) await sleep(100);
-  if ((globalThis.__smokeConfirms || []).length < 1) return { ok: false, why: '點「終端」沒有先跳本人確認' };
-  if (${JSON.stringify(gate)} === 'late') {
-    sw.click();   // 確認還在等（1.5 秒後才回 ok）就切回訊息（這時按鈕寫「對話」）
-    await sleep(2500);  // 等確認回 ok
-    const late = (globalThis.__smokeCalls || []).map(c => c[0]);
-    if (late.includes('term_view_remote_start')) return { ok: false, why: '已經切回訊息，晚回來的 ok 還是送了 term_view_remote_start' };
-    if (!vis(document.querySelector('.m-chat .conv'))) return { ok: false, why: '切回訊息後訊息列表應該在' };
-    if (document.querySelector('.term-remote')) return { ok: false, why: '切回訊息後不該有終端區' };
-    return { ok: true, why: '' };
-  }
-  await sleep(800);
-  const calls = (globalThis.__smokeCalls || []).map(c => c[0]);
-  if (calls.includes('term_view_remote_start')) return { ok: false, why: '確認沒過，卻呼叫了 term_view_remote_start' };
-  const conv = document.querySelector('.m-chat .conv');
-  const area = document.querySelector('.term-remote');
-  if (${JSON.stringify(gate)} === 'cancel') {
-    if (!vis(conv)) return { ok: false, why: '取消後應該靜默回到訊息列表' };
-    if (area) return { ok: false, why: '取消後不該留著終端區：' + area.textContent.slice(0, 60) };
-    if (sw.getAttribute('aria-label') !== '終端') return { ok: false, why: '取消後回到對話，按鈕應該寫「終端」' };
-    return { ok: true, why: '' };
-  }
-  const nbar = document.querySelector('.m-chat .typing');
-  if (!area || !nbar || !nbar.textContent.includes('這支手機沒有設定螢幕鎖，請先設定再查看終端')) return { ok: false, why: '沒設螢幕鎖要顯示提示（在最下面的狀態列）：' + (nbar?.textContent || '').slice(0, 80) };
-  if (document.querySelector('.term-view-screen .xterm')) return { ok: false, why: '沒設螢幕鎖不該開終端畫面' };
-  return { ok: true, why: '' };
-})()`
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
-export const SCENARIOS = [
+const BASE_SCENARIOS = [
   { name: 'm-signed-out', page: 'm.html', state: { signedIn: false, needsLogin: true }, ready: '#app.m .m-login' },
   { name: 'm-signed-in', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search' },
   { name: 'list', page: 'list.html', state: { signedIn: true }, ready: '#app.win' },
@@ -3111,6 +752,8 @@ export const SCENARIOS = [
   { name: 'm-line-compose', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileCompose, shot: 'm-line-compose.png' },
   { name: 'list-modern-term', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-modern-term.png' },
 ]
+// 探測檔自帶的情境（#1540）接在後面：新增情境不用改上面這張表
+export const SCENARIOS = withProbeScenarios(BASE_SCENARIOS, PROBES)
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
 export const EXCLUDED_PAGES = {
   'shot.html': '截圖框選覆蓋層：由 Rust 端帶截圖資料開啟，沒有獨立的啟動流程，另有 shot 測試',
@@ -3135,7 +778,7 @@ const ROSTERS = { gemini: ROSTER_GEMINI, geminiEmpty: ROSTER_GEMINI_EMPTY, reset
 export const shotPath = (name, env = process.env) => path.join(env.ASN_SMOKE_SHOTS || path.join(os.tmpdir(), 'asn-smoke-shots'), name)
 export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
-  const t = fakeTable(scenario.state)
+  let t = fakeTable(scenario.state)
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
   if (scenario.state.aboutPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ABOUT_ME) } }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
@@ -3315,6 +958,8 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
+  // 探測檔自帶的假後台欄位（#1540）：table(scenario, t) 回傳要蓋上去的欄位，沒有就回 undefined
+  t = withProbeTables(t, scenario, PROBES)
   // 外觀「現代」（0.2.18）：存檔裡的外觀（電腦 me.skin、手機 me.mobilePrefs.skin）設成 skin，其他存檔照各情境
   if (scenario.state.skin) {
     const me = JSON.parse(t.store_load?.values?.me ?? '{}')
