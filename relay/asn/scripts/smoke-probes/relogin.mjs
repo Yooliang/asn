@@ -24,7 +24,7 @@ export const reloginProbeSource = () => `(async () => {
     return !!(await wait(() => [...document.querySelectorAll('.m-dv-vendor')].some(vis)));
   };
   if (!(await openDevice('辦公室'))) return { ok: false, why: '打不開「辦公室」的細部頁' };
-  const relogin = await wait(() => [...document.querySelectorAll('.m-dv-relogin')].find(vis));
+  const relogin = await wait(() => [...document.querySelectorAll('.m-dv-relogin')].find(vis), 200);   // 帳號回報讀回來才有入口：全套並行跑時比較慢，多等一點
   if (!relogin) return { ok: false, why: '那台回報 Claude 登入失效，細部頁卻沒有「重新登入 Claude」' };
   if (relogin.textContent.trim() !== '重新登入 Claude') return { ok: false, why: '按鈕的字不對：' + relogin.textContent };
   if ([...document.querySelectorAll('.m-dv-setup .m-btn')].filter(vis).some(b => b.textContent.includes('安裝並登入'))) return { ok: false, why: '安裝入口的總開關關著，不該出現「從手機安裝並登入」' };
@@ -57,6 +57,8 @@ export default {
     const q = list?.values?.Q
     if (!q) return undefined
     const accounts = q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a))
-    return { android_acct_list: { ...list, values: { ...list.values, Q: { ...q, accounts } } }, setup_remote_request: { ok: true }, setup_remote_status: { nodes: [] } }
+    // 回報時間用跑這個情境的當下算（全套跑完要二十幾分鐘，載入時算的時間到這裡已經過舊，入口照規則就不給）
+    const reportedAt = new Date(Math.floor((Date.now() - 5 * 60_000) / 60_000) * 60_000).toISOString()
+    return { android_acct_list: { ...list, values: { ...list.values, Q: { ...q, reported_at: reportedAt, accounts } } }, setup_remote_request: { ok: true }, setup_remote_status: { nodes: [] } }
   },
 }
