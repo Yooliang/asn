@@ -79,6 +79,79 @@ export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idl
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
 // 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
+// 手機設備頁（#1539）：每列平常不顯示按鈕，點一下那一列才展開它的「上移／下移／帳號／詳情」。全部用真觸控：
+// 手指滑過列不會展開；點一下展開（只有那一列、有明顯底色）；展開的按鈕按得到（下移真的換了順序）；點別列換過去；再點同一列收起；拖拉把手不會展開
+export const devSelProbeSource = () => `(async () => {
+  try {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 400) };
+  const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(150); await real({ hold: [...at(el), 60] }) };
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
+  await real({ click: at(btn) });
+  const rows = () => [...document.querySelectorAll('.m-dv-row')].filter(vis);
+  for (let i = 0; i < 60 && rows().length < 3; i++) await sleep(100);
+  if (rows().length < 3) return { ok: false, why: '設備列少於 3 列' };
+  const row = name => rows().find(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === name);
+  const names = () => rows().map(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim());
+  const opened = () => rows().filter(r => vis(r.querySelector('.m-dv-rowbtns')));
+  const sel = () => rows().filter(r => r.classList.contains('sel'));
+  if (opened().length || sel().length) return { ok: false, why: '一開始就有列展開了按鈕' };
+  await real({ touch: true }, 100);
+  // 一、手指滑過列（捲動）：不能展開
+  const office = row('辦公室');
+  office.scrollIntoView({ block: 'center' }); await sleep(150);
+  // 捲動的是設備清單外層那個可以捲的容器；先記下位置，滑完要真的有捲動，不然這一步等於沒測（觸控沒送出也會是綠的）
+  let scroller = office.parentElement;
+  while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+  if (!scroller) return { ok: false, why: '設備清單沒有可以捲動的外層，測不到「捲動不會展開」（情境的高度要再小一點）' };
+  const top0 = scroller.scrollTop, rowTop0 = office.getBoundingClientRect().top;
+  { const c = at(office.querySelector('.m-dv-go')); await real({ gesture: [c[0], c[1], 0, -90] }, 600) }
+  if (!(scroller.scrollTop > top0 + 4) || !(office.getBoundingClientRect().top < rowTop0 - 4)) return { ok: false, why: '手指往上滑沒有真的捲動：scrollTop ' + top0 + ' → ' + scroller.scrollTop };
+  if (opened().length || sel().length) return { ok: false, why: '手指滑過列（捲動）就展開了按鈕' };
+  // 二、點一下：只有那一列展開，而且有明顯底色
+  await tap(row('辦公室').querySelector('.m-dv-go'));
+  if (opened().length !== 1 || opened()[0] !== row('辦公室')) return { ok: false, why: '點一下辦公室沒有（只）展開它的按鈕：' + opened().map(r => r.querySelector('b').textContent).join('、') };
+  const bgSel = getComputedStyle(row('辦公室')).backgroundColor, bgOther = getComputedStyle(row('工作機')).backgroundColor;
+  if (bgSel === bgOther) return { ok: false, why: '選中的那一列沒有不同的底色：' + bgSel };
+  if (row('辦公室').querySelector('.m-dv-go').getAttribute('aria-expanded') !== 'true') return { ok: false, why: '選中的那一列 aria-expanded 不是 true' };
+  const labels = [...row('辦公室').querySelectorAll('.m-dv-rowbtns button')].filter(vis).map(b => b.textContent.trim());
+  if (labels.join('、') !== '上移、下移、帳號、詳情') return { ok: false, why: '展開的按鈕不是上移、下移、帳號、詳情：' + labels.join('、') };
+  // 三、展開的按鈕按得到：按「下移」，辦公室換到工作機後面，而且還是選中的
+  const before = names().join('、');
+  await tap([...row('辦公室').querySelectorAll('.m-dv-rowbtns button')].find(b => b.textContent.trim() === '下移'));
+  if (names().join('、') === before) return { ok: false, why: '按「下移」順序沒變：' + before };
+  if (names().indexOf('辦公室') < names().indexOf('工作機')) return { ok: false, why: '按「下移」後辦公室應該在工作機後面：' + names().join('、') };
+  if (opened().length !== 1 || opened()[0] !== row('辦公室')) return { ok: false, why: '按了「下移」之後展開的列不對' };
+  // 四、點別列：換成展開那一列
+  await tap(row('工作機').querySelector('.m-dv-go'));
+  if (opened().length !== 1 || opened()[0] !== row('工作機')) return { ok: false, why: '點別列沒有換過去：' + opened().map(r => r.querySelector('b').textContent).join('、') };
+  // 五、再點同一列：收起
+  await tap(row('工作機').querySelector('.m-dv-go'));
+  if (opened().length || sel().length) return { ok: false, why: '再點同一列沒有收起' };
+  // 六、拖拉把手：不會展開
+  const grip = row('工作機').querySelector('.m-dv-grip');
+  if (grip) { const c = at(grip); await real({ gesture: [c[0], c[1], 0, 60] }, 600) }
+  if (opened().length || sel().length) return { ok: false, why: '拖拉把手就展開了按鈕' };
+  // 七、按展開的「詳情」進去再返回：回到清單時是收起的
+  await tap(row('工作機').querySelector('.m-dv-go'));
+  await tap([...row('工作機').querySelectorAll('.m-dv-rowbtns button')].find(b => b.textContent.trim() === '詳情'));
+  let back = null;
+  for (let i = 0; i < 30 && !back; i++) { back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis) || null; if (!back) await sleep(100) }
+  if (!back || rows().length) return { ok: false, why: '按「詳情」沒有進到那台的頁面' };
+  await tap(back);
+  for (let i = 0; i < 30 && rows().length < 3; i++) await sleep(100);
+  if (opened().length || sel().length) return { ok: false, why: '從詳情返回清單時還是展開的' };
+  // 留一列展開給截圖看
+  await tap(row('工作機').querySelector('.m-dv-go'));
+  await real({ touch: false }, 100);
+  if (opened().length !== 1) return { ok: false, why: '最後點一下沒有展開' };
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 // LINE 手機（#1536）：part＝'table'（一對一，含寬表格）或 'group'（群組）。全部在頁面裡量：
 // 每個泡泡右緣、每個時間都在螢幕內，訊息區沒有橫向捲動；表格在泡泡裡，用手指真的滑得動；一般長句的泡泡放寬到約 80%；
 // 標題列藍底、跟對話區同色、中間沒有細線；輸入列的圖片鈕在沒有滑鼠游標的裝置上點過之後不留灰色圓底
@@ -1306,8 +1379,9 @@ export const macctBackProbeSource = () => `(async () => {
   let bad = check('選項進來', await waitView('detail'), 'detail'); if (bad) return bad;
   bad = check('返回一次', await press('list'), 'list'); if (bad) return bad;
   if (!one) {
-    const rows = [...document.querySelectorAll('.m-dv-accbtn')];
-    rows[rows.length - 1].click();
+    const rows = [...document.querySelectorAll('.m-dv-row')];
+    rows[rows.length - 1].querySelector('.m-dv-go').click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
+    rows[rows.length - 1].querySelector('.m-dv-accbtn').click();
     bad = check('點另一台', await waitView('detail'), 'detail'); if (bad) return bad;
     bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
   }
@@ -1320,7 +1394,7 @@ export const macctBackProbeSource = () => `(async () => {
   if (!btn) return { ok: false, why: '找不到設定裡的「設備」（' + steps.join('；') + '）' };
   btn.click();
   bad = check('設定進來', await waitView('list'), 'list'); if (bad) return bad;
-  document.querySelector('.m-dv-accbtn').click();
+  { const r0 = document.querySelector('.m-dv-row'); r0.querySelector('.m-dv-go').click(); await sleep(150); r0.querySelector('.m-dv-accbtn').click() }   // 先點那一列展開按鈕（#1539）
   bad = check('設定點一台', await waitView('detail'), 'detail'); if (bad) return bad;
   bad = check('設定返回一次', await press('list'), 'list'); if (bad) return bad;
   bad = check('設定返回收起', await press('closed'), 'closed'); if (bad) return bad;
@@ -1352,7 +1426,9 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     await sleep(500);
     const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
     for (let i = 0; i < n; i++) {
-      const go = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i]?.querySelector('.m-dv-accbtn');
+      const row = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i];
+      if (row) { row.querySelector('.m-dv-go').click(); await sleep(150) }   // 先點那一列展開按鈕（#1539）
+      const go = row?.querySelector('.m-dv-accbtn');
       if (!go) break;
       go.click(); await sleep(500);
       const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
@@ -1396,6 +1472,8 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
     if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
     // #1499：「還沒收到這台的回報」搬到詳情，仍然要看得到（真的點「詳情」進去找）
+    // 先真的點工作機那一列，展開它的按鈕（#1539）
+    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const g = w && w.querySelector('.m-dv-go'); if (g) { g.scrollIntoView({ block: 'center' }); await sleep(150); const r = R(g); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })); await sleep(300) } }
     const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
     if (!info) return { ok: false, why: '找不到工作機的「詳情」' };
     info.scrollIntoView({ block: 'center' }); await sleep(150);
@@ -1585,6 +1663,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
     if ((row.querySelector('b')?.textContent ?? '').includes('這支手機')) continue;
+    row.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
     const go = row.querySelector('.m-dv-accbtn');
     if (!go) continue;
     go.click(); await sleep(600);
@@ -1643,6 +1722,7 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < n; i++) {
     const row = rows()[i];
     const name = row?.querySelector('b')?.textContent ?? '';
+    row?.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
     const go = row?.querySelector('.m-dv-accbtn');
     if (!go) continue;
     go.click(); await sleep(500);
@@ -2106,8 +2186,8 @@ export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(prob
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.lineM ? 'LINE 手機泡泡與標題列檢查' : probe.photoBack ? '手機看大圖返回鍵檢查' : probe.listTrim ? '電腦版名單頂端精簡檢查' : probe.lineDesk ? 'LINE 電腦版名單與輸入區檢查' : probe.updDl !== undefined ? '下載中進度條檢查' : probe.lineUi ? 'LINE 輸入列與標題列檢查' : probe.lineTimes ? 'LINE 訊息時間位置檢查' : probe.camera ? '拍照鈕檢查' : probe.multiPhoto ? '一次選多張檢查' : probe.photoZoom ? '看大圖縮放檢查' : probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.lineM ? lineMProbeSource(probe.lineM) : probe.photoBack ? photoBackProbeSource() : probe.listTrim ? listTrimProbeSource(probe) : probe.lineDesk ? lineDeskProbeSource(probe.lineDesk) : probe.updDl !== undefined ? updDlProbeSource(probe.updDl) : probe.lineUi ? lineUiProbeSource(probe) : probe.lineTimes ? lineTimesProbeSource() : probe.camera ? cameraProbeSource(probe.camera) : probe.multiPhoto ? multiPhotoProbeSource() : probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.devSel ? '手機設備列點選才展開檢查' : probe.lineM ? 'LINE 手機泡泡與標題列檢查' : probe.photoBack ? '手機看大圖返回鍵檢查' : probe.listTrim ? '電腦版名單頂端精簡檢查' : probe.lineDesk ? 'LINE 電腦版名單與輸入區檢查' : probe.updDl !== undefined ? '下載中進度條檢查' : probe.lineUi ? 'LINE 輸入列與標題列檢查' : probe.lineTimes ? 'LINE 訊息時間位置檢查' : probe.camera ? '拍照鈕檢查' : probe.multiPhoto ? '一次選多張檢查' : probe.photoZoom ? '看大圖縮放檢查' : probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.devSel ? devSelProbeSource() : probe.lineM ? lineMProbeSource(probe.lineM) : probe.photoBack ? photoBackProbeSource() : probe.listTrim ? listTrimProbeSource(probe) : probe.lineDesk ? lineDeskProbeSource(probe.lineDesk) : probe.updDl !== undefined ? updDlProbeSource(probe.updDl) : probe.lineUi ? lineUiProbeSource(probe) : probe.lineTimes ? lineTimesProbeSource() : probe.camera ? cameraProbeSource(probe.camera) : probe.multiPhoto ? multiPhotoProbeSource() : probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2918,6 +2998,9 @@ export const SCENARIOS = [
   { name: 'm-photo-back-line', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back-line.png' },
   { name: 'list-dev-fpmark', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark.png' },
   { name: 'list-dev-fpmark-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk', skin: 'modern' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark-modern.png' },
+  { name: 'm-dev-select', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select.png' },
+  { name: 'm-dev-select-modern', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone', skin: 'modern' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select-modern.png' },
+  { name: 'm-dev-select-line', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone', skin: 'line' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select-line.png' },
   { name: 'm-dev-fpmark', page: 'm.html', state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { fpMark: 'phone' }, shot: 'm-dev-fpmark.png' },
   { name: 'm-dev-fpmark-modern', page: 'm.html', state: { signedIn: true, fpMark: 'phone', skin: 'modern' }, ready: '#app.m .m-row-btn', probe: { fpMark: 'phone' }, shot: 'm-dev-fpmark-modern.png' },
   { name: 'list-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: SKIN_PROBE, shot: 'list-modern.png' },

@@ -585,3 +585,4 @@
 /* 7. 綠色送出鈕在最右邊、麥克風在它左邊；沒打字時送出鈕不出現，最右邊就是麥克風 */
 :root[data-skin="line"] .m-chat .compose-main .mc-dict{order:6}
 :root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}
+:root[data-skin="line"] .m-dv-row.sel{background:var(--ls-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */

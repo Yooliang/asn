@@ -114,6 +114,10 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .m-dv-rowbtns{flex-basis:100%;padding:0 12px 10px 48px}
 .m-dv-rowbtns .m-btn{min-height:40px;padding:0 12px}
+/* 點一列才展開它的按鈕（#1539）：選中的那一列有明顯底色；指紋圖示在按鈕外面、跟名字同一行靠右 */
+.m-dv-row.sel{background:#e3effb;box-shadow:inset 3px 0 0 var(--accent)}
+.m-dv-row > .fpm{align-self:center;margin:0 12px 0 0}
+.m-dv-go:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .m-dv-tag.ok{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .m-dv-tag.warn{background:#fff3d6;color:#7a4b00;border:1px solid #d9a441}
 @media (prefers-color-scheme:dark){.m-dv-tag.warn{background:#3b2d0c;color:#f2c66b;border-color:#8a6a22}}

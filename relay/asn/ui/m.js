@@ -18,6 +18,7 @@ import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
 import { PUSH_TEXT, createPushSync, pushSettingView } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
+import { createTapGuard, toggleSelected } from './lib/tap-select.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
@@ -985,6 +986,11 @@ const app = createApp({
     const acctRestore = key => { devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, key) }
     // 排序：每列左邊有「排序把手」，只有按住把手才會拖（把手 touch-action:none），其餘地方照常捲動、點一下進細部頁；把手聚焦後也能用上下鍵移動
     const acctDrag = reactive({ key: '', over: '', after: false })
+    // 點一列才展開它的按鈕（#1539：小良哥「滑動畫面的時候會按到按鈕」）。捲動、拖拉、長按都不算點（lib/tap-select.mjs）；點同一列收起，點別列換過去
+    const devSel = ref('')
+    const devTap = createTapGuard()
+    const devRowTap = (key, e) => { if (devTap.isTap(e)) devSel.value = toggleSelected(devSel.value, key) }
+    watch(() => [acctSw.phase, acctSw.tab, acctSw.page], () => { devSel.value = '' })   // 離開設備清單（進帳號、詳情、切到帳號分頁）就收起
     const acctOrderKeys = () => acctAllDevs.value.map(d => d.key)
     const acctVisibleKeys = () => acctDevs.value.map(d => d.key)
     function acctMove(key, dir) { devPrefs.deviceOrder = moveDevice(acctOrderKeys(), key, dir, { selfNode: info.node, visible: acctVisibleKeys() }) }
@@ -1466,7 +1472,7 @@ const app = createApp({
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
