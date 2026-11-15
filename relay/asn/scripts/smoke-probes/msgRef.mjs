@@ -86,6 +86,11 @@ export const msgRefProbeSource = ({ msgRef }) => `(async () => {
   if (why) return { ok: false, why: '點 #3850：' + why };
   if (!msgOf(3870) || !msgOf(3871)) return { ok: false, why: '補載的跟原本的沒有接上' };
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
+  // 截圖前等畫面停下來（#1576）：標亮動畫 1.4 秒、平滑捲動都跑完，第 3850 則的位置連續 3 次量到一樣；不然截圖每次拍到淡出、捲動的不同階段
+  if (!(await wait(() => !document.querySelector('.msg.flash'), 30))) return { ok: false, why: '標亮一直沒有結束' };
+  let lastTop = null, same = 0;
+  for (let i = 0; i < 40 && same < 3; i++) { await sleep(100); const top = msgOf(3850)?.getBoundingClientRect().top; same = top === lastTop ? same + 1 : 0; lastTop = top }
+  if (same < 3) return { ok: false, why: '跳到第 3850 則之後畫面一直在捲' };
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
