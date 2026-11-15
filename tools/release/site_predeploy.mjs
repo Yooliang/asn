@@ -7,6 +7,10 @@
 // 另外還會讀 update/android.json 的 git 歷史：以前指過的每個手機 APK（帶 sha256、bytes）也算「要保留」的檔案。
 // 它們是別台電腦發的、不進 git，目前清單已不指到，卻還有人在下載；本機沒有就先從線上補，不然這次部署會把它們蓋掉（0.1.103 就這樣掉過）。
 // 線上也已經沒有的（早就掉了）不擋部署，只記在 skipped；本機或線上有的一律補齊並核對。
+// 安裝檔清單（update/latest.json、update/android.json）的網址一律要寫官網 update/ 底下（#1585 甲案：檔案放 GitHub Release，
+// 官網路徑由 firebase.json 轉址過去）。以前遇到別的主機會靜默略過、不補也不核對，等於帶著沒檢查的網址部署；現在直接擋下。
+// android.json 還要過舊版 App 的白名單（relay/asn/src-tauri/src/android_update.rs 的 url_allowed）：不然舊的自行安裝版會整份拒絕。
+// android.json 的 git 歷史改不了：歷史上有不合格的只記警告（skipped），不擋部署。下載區（downloads.json）本來就有別站的檔（SKILL.md），不在此限。
 // 用法：node tools/release/site_predeploy.mjs [--site <site 資料夾>] [--base <網站網址>]
 import fs from 'node:fs'
 import path from 'node:path'
@@ -35,6 +39,38 @@ export function androidHistory(siteDir) {
     }
     return out
   } catch { return [] }
+}
+
+/** 安裝檔清單的網址不合格的原因；合格回空字串。android＝要過舊版 App 白名單（跟 android_update.rs 的 url_allowed 同一套） */
+export function installerUrlProblem(url, base = DEFAULT_BASE, { android = false } = {}) {
+  if (typeof url !== 'string' || !url) return '沒有網址'
+  const prefix = `${base}/update/`
+  if (!url.startsWith(prefix)) return `不是官網 update/ 底下的網址（安裝檔一律寫官網路徑，轉到 GitHub Release 交給 firebase.json）：${url}`
+  const rest = url.slice(prefix.length)
+  if (!rest || rest.includes('..')) return `路徑不對：${url}`
+  if (android && (url.length > 300 || /[\s\\"'<>@?#]/.test(url) || [...url].some(c => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f))) return `舊版 App 的白名單不收這個網址（不能有 @ ? # 空白與控制字元、最長 300 字）：${url}`
+  return ''
+}
+
+/** 安裝檔清單逐一檢查：errors＝這次的清單（要擋部署）；warnings＝android.json 歷史上的（改不了，只記下來） */
+export function installerUrlProblems(siteDir, base = DEFAULT_BASE, history = androidHistory(siteDir)) {
+  const pub = path.join(siteDir, 'public')
+  const errors = [], warnings = []
+  const latest = readJson(path.join(pub, 'update', 'latest.json'))
+  for (const [k, p] of Object.entries(latest?.platforms ?? {})) {
+    const why = installerUrlProblem(p?.url, base)
+    if (why) errors.push(`update/latest.json 的 ${k}：${why}`)
+  }
+  const android = readJson(path.join(pub, 'update', 'android.json'))
+  if (android) {
+    const why = installerUrlProblem(android.url, base, { android: true })
+    if (why) errors.push(`update/android.json：${why}`)
+  }
+  for (const h of history) {
+    const why = installerUrlProblem(h.url, base, { android: true })
+    if (why) warnings.push(`update/android.json 的歷史：${why}`)
+  }
+  return { errors, warnings }
 }
 
 export function wantedFiles(siteDir, base = DEFAULT_BASE, history = androidHistory(siteDir)) {
@@ -68,7 +104,11 @@ function check(buf, want, label) {
 export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {}, history } = {}) {
   const pub = path.join(siteDir, 'public')
   const result = { present: [], fetched: [], skipped: [] }
-  for (const want of wantedFiles(siteDir, base, history)) {
+  const hist = history ?? androidHistory(siteDir)
+  const urls = installerUrlProblems(siteDir, base, hist)
+  if (urls.errors.length) throw new Error(`部署前檢查失敗：安裝檔清單的網址不對\n${urls.errors.map(e => `  - ${e}`).join('\n')}`)
+  for (const w of urls.warnings) { result.skipped.push(w); log(`注意：${w}`) }
+  for (const want of wantedFiles(siteDir, base, hist)) {
     const file = path.join(pub, ...want.rel.split('/'))
     if (fs.existsSync(file)) {
       // 本機有：有 sha／大小的就核對，不符就擋（不覆蓋，免得把別人的檔案換掉）
