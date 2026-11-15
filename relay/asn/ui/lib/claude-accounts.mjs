@@ -18,7 +18,8 @@ export const loginFailed = a => a?.login_failed === true
 // 上次確認可用（#1512 C）：切走前核對成功的時間。Rust 只給毫秒數（usable_at_ms），沒有就不顯示
 export const USABLE_AT_LABEL = '上次確認可用'
 export function usableAtText(a, tz) {
-  const ms = Number(a?.usable_at_ms)
+  // 本機的帳號清單帶毫秒（usable_at_ms）；別台經後台回報的帶 UTC 字串（usable_at，#1512 C2）
+  const ms = a?.usable_at_ms != null ? Number(a.usable_at_ms) : typeof a?.usable_at === 'string' ? Date.parse(a.usable_at) : NaN
   if (!Number.isFinite(ms) || ms <= 0) return ''
   const d = new Date(ms)
   if (Number.isNaN(d.getTime())) return ''

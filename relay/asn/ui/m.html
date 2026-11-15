@@ -401,6 +401,7 @@
                             </span>
                             <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span><span class="m-dv-failed" v-if="a.loginFailed">{{ LOGIN_FAILED_LABEL }}</span><span class="m-dv-incomplete" v-if="a.incomplete && !a.current">{{ INCOMPLETE_LABEL }}</span></span>
                             <span class="m-dv-why" v-if="a.incomplete && !a.current">{{ INCOMPLETE_REASON }}</span>
+                            <span class="m-dv-usable" v-if="a.usableAt">{{ a.usableAt }}</span>
                             <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }" v-if="a.quota">
                               <span class="m-dv-bars" v-if="a.quota.bars && a.quota.bars.length">
                                 <span class="m-dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">

@@ -292,3 +292,14 @@ test('上次確認可用（#1512 C）：只顯示 Rust 給的毫秒數，沒有�
   assert.equal(usableAtText({ usable_at_ms: Date.UTC(2026, 10, 15, 8, 5) }, 'Asia/Taipei'), `${USABLE_AT_LABEL}：2026/11/15 16:05`)
   for (const a of [{}, null, { usable_at_ms: 0 }, { usable_at_ms: -1 }, { usable_at_ms: 'x' }, { usable_at_ms: 1e20 }]) assert.equal(usableAtText(a, 'Asia/Taipei'), '', JSON.stringify(a))
 })
+
+test('上次確認可用（#1512 C2）：別台經後台回報的是 UTC 字串，一樣顯示成當地時間；設備頁的列帶出這行', async () => {
+  const { usableAtText, USABLE_AT_LABEL } = await import('../ui/lib/claude-accounts.mjs')
+  assert.equal(usableAtText({ usable_at: '2026-11-15T08:05:00Z' }, 'Asia/Taipei'), `${USABLE_AT_LABEL}：2026/11/15 16:05`)
+  assert.equal(usableAtText({ usable_at: '不是時間' }, 'Asia/Taipei'), '')
+  assert.equal(usableAtText({ usable_at: 12345 }, 'Asia/Taipei'), '', '型別不對不顯示')
+  const tree = fs.readFileSync(new URL('../ui/lib/device-tree.mjs', import.meta.url), 'utf8')
+  assert.match(tree, /\.\.\.\(k === 'claude' && usableAtText\(a\) \? \{ usableAt: usableAtText\(a\) \} : \{\}\)/, '只有 Claude 的列帶')
+  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  assert.match(html, /<span class="m-dv-usable" v-if="a\.usableAt">\{\{ a\.usableAt \}\}<\/span>/)
+})
