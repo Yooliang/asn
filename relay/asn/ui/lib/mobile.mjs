@@ -87,6 +87,8 @@ export function pagerShift(index, dx, count = TABS.length) {
   if ((index <= 0 && dx > 0) || (index >= count - 1 && dx < 0)) return dx * EDGE_RESIST
   return dx
 }
+// 滑頁轉場（mobile.css 的 .m-pager，0.28 秒）結束的保險：transitionend 沒來（被打斷、減少動態效果時沒有轉場）也在這之後拿掉 will-change（#1565）
+export const PAGER_SETTLE_MS = 500
 // 放開時吸附到哪一頁：拖過寬度的一定比例，或夠快（px/ms）
 export function swipeTarget({ index, dx, dt, width, count = TABS.length }) {
   const v = dt > 0 ? Math.abs(dx) / dt : 0

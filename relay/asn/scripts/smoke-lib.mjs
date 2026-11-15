@@ -1025,6 +1025,19 @@ export const mountCheckSource = (ready, expectedPath) => `(() => {
   return { ok: true, why: '' };
 })()`
 
+// 截圖前等手機滑頁停下來（#1565）：探測一切到別的分頁就回結果的話，截圖會拍到 0.28 秒轉場的半途，每次停在不同格。
+// 停下來＝pager 沒有進行中的動畫、而且已經拿掉 will-change（轉場結束才拿掉）；再等兩格畫面讓內頁重畫到整像素。沒有 pager 的頁面直接過
+export const PAGER_SETTLE_WAIT_MS = 3000
+export const pagerSettleSource = () => `(async () => {
+  const p = document.querySelector('.m-pager');
+  if (!p) return { ok: true, why: '' };
+  const still = () => !p.getAnimations().length && getComputedStyle(p).willChange === 'auto';
+  for (let t = 0; t < ${PAGER_SETTLE_WAIT_MS} && !still(); t += 50) await new Promise(r => setTimeout(r, 50));
+  if (!still()) return { ok: false, why: '截圖前滑頁一直沒停下來：' + getComputedStyle(p).willChange + '、動畫 ' + p.getAnimations().length + ' 個' };
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  return { ok: true, why: '' };
+})()`
+
 export const selectScenarios = (only, all = SCENARIOS) => {
   if (!only.length) return all
   const bad = only.filter(n => !all.some(s => s.name === n))

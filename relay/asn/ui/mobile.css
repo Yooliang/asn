@@ -47,8 +47,10 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
 /* 四個大分頁並排（夥伴／對話／設定／通知），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
 .m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
-.m-pager{display:flex;width:calc(var(--pages,3) * 100%);height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
+.m-pager{display:flex;width:calc(var(--pages,3) * 100%);height:100%;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
 .m-pager.dragging{transition:none}
+/* will-change 只在拖動與轉場期間（#1565）：一直開著，內頁會停在轉場途中的小數位移、字偏半像素變糊；停下來就拿掉，重畫到整像素 */
+.m-pager.dragging,.m-pager.moving{will-change:transform}
 .m-pg{flex:0 0 calc(100% / var(--pages,3));width:calc(100% / var(--pages,3));min-width:0;min-height:0;display:flex;flex-direction:column}
 /* 內頁（#461）：設定的某一項、使用指引各一塊，撐滿這一頁 */
 .m-pgin{flex:1;min-height:0;display:flex;flex-direction:column}
