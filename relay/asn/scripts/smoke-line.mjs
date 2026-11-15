@@ -394,7 +394,7 @@ export const lineProbeSource = kind => `(async () => {
   const SAVED = ['left', 'none'], EFFECTIVE = ['inline', 'auto'];
   const shown = () => [sel('頭像模式').value, sel('文字底色').value];
   const disabled = () => sel('頭像模式').disabled && sel('文字底色').disabled;
-  const notes = () => document.querySelectorAll('.set-note').length;
+  const notes = () => document.querySelectorAll('.set-note[id^="set-note-"]').length;   // 只數 LINE 那兩行說明（頭像、底色）；外觀頁還有別的說明（#1530 的 GitHub 開關）
   if (shown().join() !== EFFECTIVE.join()) return { ok: false, why: 'LINE 外觀：' + '停用的選單要顯示實際生效的值（頭像在訊息旁、底色自動）：' + shown().join('／') };
   if (!disabled() || notes() < 2) return { ok: false, why: 'LINE 外觀：' + 'LINE 外觀下，頭像模式與文字底色要停用並附說明：' + disabled() + ' ' + notes() };
   for (const v of ['modern', 'aero', 'line']) {

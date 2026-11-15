@@ -76,7 +76,8 @@ export const ChatPane = {
     hideBusyWarn: { type: Boolean, default: false },  // 手機版：對方忙碌時不顯示黃色說明條（標題列已改黃底）
     callApi: { type: Object, default: null },      // 手機版的通話（lib/mobile-call.mjs 的 createMobileCall 工廠，另帶 phaseText）；電腦版不給，通話走 voice.newCall
     dictApi: { type: Object, default: null },     // 手機版的語音輸入（{ newDictation({ hints, onText }) }，工廠見 lib/mobile-dictation.mjs）；沒給或這支手機沒有語音辨識服務就沒有語音輸入鈕
-    loadOlder: { type: Function, default: null },  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
+    loadOlder: { type: Function, default: null },
+    ghRefs: { type: Boolean, default: false },   // 設定「把訊息裡的 #編號 連到 ASN 的 GitHub 議題」（#1530，預設關）  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
@@ -307,8 +308,8 @@ export const ChatPane = {
       mentionMore.value = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4
     }
     const afterMenu = () => nextTick(() => { syncMore(); menuEl.value?.querySelector('button.on')?.scrollIntoView({ block: 'nearest' }) })
-    // 訊息裡的 #N（#1530）：群組裡依已載入的範圍判斷是群組訊息還是 GitHub；一對一一律 GitHub
-    const refCtx = computed(() => (isRoom.value ? { room: true, ...refRange(props.log, props.friend?.lastSeq) } : { room: false }))
+    // 訊息裡的 #N（#1530）：群組裡依已載入的範圍判斷是不是群組訊息；不是的話，開關打開才當 GitHub，沒開就是普通文字
+    const refCtx = computed(() => (isRoom.value ? { room: true, ...refRange(props.log, props.friend?.lastSeq), github: props.ghRefs } : { room: false, github: props.ghRefs }))
     const bodyHtml = text => linkRefs(isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text), refCtx.value)
     // LINE 外觀：輸入框隨字數變高，最多 6 行後內部捲動（算法在 line-chat.mjs 的 composeFieldHeight）；其他外觀不碰 style
     function fitCompose() {
@@ -556,12 +557,12 @@ export const ChatPane = {
       if (ref.kind === 'github') globalThis.__TAURI__?.core?.invoke?.('open_link', { url: githubUrl(ref.n) })?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
       else void jumpToSeq(ref.n)
     }
-    // 長按（手機）顯示提示；長按放開後的那次點擊不算
+    // 長按（手指才算；滑鼠按久一點照樣是點擊）顯示提示；長按放開後的那次點擊不算
     let pressTimer = null, pressAt = null, pressed = false
     const onRefDown = ev => {
       const r = refOf(ev?.target)
       clearTimeout(pressTimer); pressed = false
-      if (!r) return
+      if (!r || ev.pointerType !== 'touch') return
       pressAt = [ev.clientX, ev.clientY]
       pressTimer = setTimeout(() => { pressed = true; noteFor(refTip(r.kind, r.n), 3000) }, 500)
     }
@@ -730,9 +731,9 @@ export const ChatPane = {
                     <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                   </button>
                 </div>
-                <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
+                <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @keydown.space="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
               </div>
-              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="!isLine && shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
+              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="!isLine && shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @keydown.space="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
               <div class="dup-act" v-if="shownBody(m).dup.length" aria-label="關掉重複的視窗">
                 <button v-for="w in shownBody(m).dup" :key="w.pid" class="dup-close" type="button" :disabled="dupPressed(m, i) || displayOnly" @click="closeDup(m, i, w)" :title="dupCloseLabel(w.n)">{{ dupCloseLabel(w.n) }}</button>
               </div>

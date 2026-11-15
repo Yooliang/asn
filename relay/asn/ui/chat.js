@@ -26,6 +26,7 @@ const app = createApp({
     // 外觀：開窗時讀一次，之後別的視窗改了會改 <html data-skin>（skin-boot.js），這裡跟著看；LINE 固定頭像在旁、底色自動（只在讀的時候覆寫，不寫回）
     const skin = ref(initSkin())
     new MutationObserver(() => { skin.value = normalizeSkin(document.documentElement.dataset.skin) }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-skin'] })
+    const ghRefs = computed(() => snap.value?.ui?.ghRefs === true)   // 把 #編號 連到 GitHub 議題（#1530）：名單視窗的設定
     const look = computed(() => effectiveLook(skin.value, normalizeLook(snap.value?.ui)))   // 頭像模式／文字底色／收合：由樞紐（設定頁）決定
     const avatars = ref({})   // 各設備上傳的大頭貼（節點 → data URL），由樞紐推送
     const friendAv = computed(() => (f.value ? avatarSrc(f.value, { avatars: avatars.value }) : ''))
@@ -80,7 +81,7 @@ const app = createApp({
       cards,
       groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
       groupDecide: (cardId, approve) => emit('asn:cmd', { op: 'group-decide', id, cardId, approve }),
-      skin, termViewApi, callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      skin, ghRefs, termViewApi, callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true, replySeq: opts?.replySeq }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach,

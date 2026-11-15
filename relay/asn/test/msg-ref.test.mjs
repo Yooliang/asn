@@ -1,18 +1,22 @@
 // 訊息裡的編號可以點（#1530）：判斷是群組訊息還是 GitHub 編號的純函式、把 #N 包成可點標記、點到的標記取回編號。
+// GitHub 連結要設定「把 #編號 連到 ASN 的 GitHub 議題」打開才有（預設關，asn真 #3942）；群組訊息編號大家都有。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderMarkdown } from '../ui/lib/markdown.mjs'
 import { markMentions } from '../ui/lib/mention.mjs'
-import { GITHUB_ISSUES, githubUrl, groupCue, linkRefs, refKind, refOf, refRange, refTip } from '../ui/lib/msg-ref.mjs'
+import fs from 'node:fs'
+import { GH_REFS_LABEL, GH_REFS_NOTE, GITHUB_ISSUES, githubUrl, groupCue, linkRefs, refKind, refOf, refRange, refTip } from '../ui/lib/msg-ref.mjs'
+import { DEFAULT_PREFS, normalizePrefs } from '../ui/lib/mobile.mjs'
 
 const refs = html => [...String(html).matchAll(/<span class="msg-ref" role="link" tabindex="0" data-ref="(group|github)" data-n="(\d+)" title="([^"]*)">#(\d+)<\/span>/g)].map(m => ({ kind: m[1], n: Number(m[2]), title: m[3], text: m[4] }))
-const room = { room: true, lo: 3880, hi: 3931 }
+const room = { room: true, lo: 3880, hi: 3931, github: true }   // 開關打開的情況；關閉的另外測
+const roomOff = { room: true, lo: 3880, hi: 3931 }
 const render = (md, ctx) => linkRefs(renderMarkdown(md), ctx)
 
-test('refKind：一對一一律 GitHub；群組裡範圍內＝群組、範圍外＝GitHub；有「回 #N」「#N 則」一律群組', () => {
+test('refKind（開關打開）：一對一一律 GitHub；群組裡範圍內＝群組、範圍外＝GitHub；有「回 #N」「#N 則」一律群組', () => {
   // 一對一：不管範圍、不管提示字
-  assert.equal(refKind({ n: 3900, room: false, lo: 3880, hi: 3931 }), 'github')
-  assert.equal(refKind({ n: 3900, room: false, lo: 3880, hi: 3931, cue: true }), 'github')
+  assert.equal(refKind({ n: 3900, room: false, lo: 3880, hi: 3931, github: true }), 'github')
+  assert.equal(refKind({ n: 3900, room: false, lo: 3880, hi: 3931, cue: true, github: true }), 'github')
   // 範圍內（含兩端）
   for (const n of [3880, 3900, 3931]) assert.equal(refKind({ n, ...room }), 'group', String(n))
   // 範圍外（比已載入最舊的還舊、比最新的還新）
@@ -20,8 +24,50 @@ test('refKind：一對一一律 GitHub；群組裡範圍內＝群組、範圍外
   // 「回 #N」：範圍外也當群組
   assert.equal(refKind({ n: 1512, ...room, cue: true }), 'group')
   // 沒有載入任何一則＝沒有範圍
-  assert.equal(refKind({ n: 5, room: true, lo: null, hi: null }), 'github')
+  assert.equal(refKind({ n: 5, room: true, lo: null, hi: null, github: true }), 'github')
   assert.equal(refKind({ n: 5, room: true, lo: null, hi: null, cue: true }), 'group')
+})
+
+test('refKind（開關關閉＝預設）：群組規則照樣算；其他都不是可點的編號', () => {
+  assert.equal(refKind({ n: 2, room: false }), null, '一對一寫「第 #2 點」不連到議題')
+  assert.equal(refKind({ n: 3900, room: false, lo: 3880, hi: 3931, cue: true }), null)
+  assert.equal(refKind({ n: 3900, ...roomOff }), 'group')
+  assert.equal(refKind({ n: 1512, ...roomOff }), null)
+  assert.equal(refKind({ n: 1512, ...roomOff, cue: true }), 'group')
+  assert.equal(refKind({ n: 1512, ...roomOff, github: 'yes' }), null, '只認 true')
+})
+
+test('linkRefs（開關關閉）：一對一的 #N 維持普通文字；群組裡只有符合群組規則的可點', () => {
+  assert.equal(render('第 #2 點跟 #1512', { room: false }), renderMarkdown('第 #2 點跟 #1512'))
+  const got = refs(render('看 #3923 跟 #1512；回 #1200 說的', roomOff))
+  assert.deepEqual(got.map(r => [r.kind, r.n]), [['group', 3923], ['group', 1200]])
+  assert.match(render('看 #3923 跟 #1512', roomOff), /跟 #1512/)
+})
+
+test('設定：預設關；電腦存在 me.ghRefs、手機存在 mobilePrefs.ghRefs；整合、分開、手機的對話都吃這個開關；文字白話', () => {
+  assert.equal(DEFAULT_PREFS.ghRefs, false)
+  assert.equal(normalizePrefs({}).ghRefs, false); assert.equal(normalizePrefs({ ghRefs: true }).ghRefs, true); assert.equal(normalizePrefs({ ghRefs: 1 }).ghRefs, false)
+  const rd = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
+  const list = rd('list.js')
+  assert.match(list, /const ghRefs = ref\(savedMe\.ghRefs === true\)/)
+  assert.match(list, /ghRefs: ghRefs\.value, tabDim:/, '存檔')
+  assert.match(list, /case 'gh-refs': ghRefs\.value = value === true; break/)
+  assert.match(list, /collapsed: ui\.collapsed, ghRefs: ghRefs\.value \} \}\)/, '分開模式的對話視窗經 asn:state 拿到')
+  assert.match(rd('list.html'), /<chat-pane [^>]*:gh-refs="ghRefs"/)
+  assert.match(rd('chat.js'), /const ghRefs = computed\(\(\) => snap\.value\?\.ui\?\.ghRefs === true\)/)
+  assert.match(rd('chat.html'), /<chat-pane [^>]*:gh-refs="ghRefs"/)
+  assert.match(rd('m.html'), /<chat-pane [^>]*:gh-refs="prefs\.ghRefs"/)
+  assert.match(rd('m.html'), /<input type="checkbox" v-model="prefs\.ghRefs"> \{\{ GH_REFS_LABEL \}\}/)
+  assert.match(rd('lib/settings-panel.mjs'), /:checked="st\.ghRefs === true" @change="act\('gh-refs', \$event\.target\.checked\)"/)
+  assert.match(rd('lib/chatpane.mjs'), /ghRefs: \{ type: Boolean, default: false \}/)
+  assert.equal(GH_REFS_LABEL, '把訊息裡的 #編號 連到 ASN 的 GitHub 議題')
+  assert.match(GH_REFS_NOTE, /一般不用開/)
+})
+
+test('長按只算手指；空白鍵跟 Enter 一樣能開', () => {
+  const pane = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  assert.match(pane, /if \(!r \|\| ev\.pointerType !== 'touch'\) return/)
+  assert.equal((pane.match(/@keydown\.enter="onRefKey" @keydown\.space="onRefKey"/g) || []).length, 2)
 })
 
 test('groupCue：「回 #N」「回覆 #N」「#N 則」才算', () => {
@@ -55,8 +101,8 @@ test('linkRefs：範圍內、範圍外、「回 #N」、「#N 則」在群組裡
   assert.ok(got.every(r => r.text === String(r.n)))
 })
 
-test('linkRefs：一對一對話一律 GitHub（含「回 #N」）', () => {
-  const got = refs(render('回 #3923，另外 #1512', { room: false, lo: 3880, hi: 3931 }))
+test('linkRefs：一對一對話（開關打開）一律 GitHub（含「回 #N」）', () => {
+  const got = refs(render('回 #3923，另外 #1512', { room: false, lo: 3880, hi: 3931, github: true }))
   assert.deepEqual(got.map(r => [r.kind, r.n]), [['github', 3923], ['github', 1512]])
   assert.equal(refTip('github', 1512), '開啟 GitHub #1512')
 })
