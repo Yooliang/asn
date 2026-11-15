@@ -577,10 +577,11 @@
 :root[data-skin="line"] .m-chat > .pane{border-top:0}
 /* 4. 輸入列圖示鈕的灰色圓底：是 :hover 的底色。手機點過之後 WebView 會一直留著 :hover，看起來像停在按下的狀態；手機的對話頁（.m-chat）沒有滑鼠游標，不畫 :hover 底色 */
 :root[data-skin="line"] .m-chat .compose-main .lc-photo:hover:not(:disabled),:root[data-skin="line"] .m-chat .compose-main .mc-plus:hover:not([aria-expanded="true"]),:root[data-skin="line"] .m-chat .compose-main .mc-dict:hover:not(:disabled):not(.rec),:root[data-skin="line"] .m-chat .compose-main .lc-more:hover,:root[data-skin="line"] .m-chat .compose-main .lc-emo:hover:not(:disabled){background:transparent}
-/* 6. 聽寫聆聽中：不顯示「聆聽中…」字樣，只把麥克風變紅；按鈕固定 40px，旁邊的輸入框和按鈕不會被擠動 */
+/* 6. 聽寫：不顯示「準備中…」「聆聽中…」字樣，準備中淡紅、聆聽中正紅；按鈕固定 40px，旁邊的輸入框和按鈕不會被擠動 */
 :root[data-skin="line"] .m-chat .compose-main .mc-dict{width:40px;min-width:40px}
 :root[data-skin="line"] .m-chat .compose-main .mc-dict .dict-state{display:none}
 :root[data-skin="line"] .m-chat .compose-main .mc-dict.rec{background:transparent;color:#e0352b}
+:root[data-skin="line"] .m-chat .compose-main .mc-dict.busy{opacity:1;background:transparent;color:#f3a29b}   /* 準備中（等麥克風權限）：淡紅，按下去馬上有反應；開始聽才變正紅（#1541 審查） */
 /* 7. 綠色送出鈕在最右邊、麥克風在它左邊；沒打字時送出鈕不出現，最右邊就是麥克風 */
 :root[data-skin="line"] .m-chat .compose-main .mc-dict{order:6}
 :root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}

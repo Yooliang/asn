@@ -134,8 +134,20 @@ export const lineMProbeSource = part => `(async () => {
     if (!vis(mic)) return { ok: false, why: '找不到麥克風（語音輸入）' };
     const before = R(mic), place = [ta, ...others()].map(e => [e, R(e).left, R(e).width]);
     const color0 = getComputedStyle(mic).color;
-    await real({ click: at(mic) }, 500);
-    if (!mic.classList.contains('rec')) return { ok: false, why: '真點麥克風沒有進入聆聽中' };
+    const rgb = c => c.slice(c.indexOf('(') + 1, c.indexOf(')')).split(',').map(x => Number(x.trim()));
+    // 準備中（等麥克風權限）：真點麥克風，先停在準備中，麥克風淡紅
+    await real({ click: at(mic) }, 400);
+    if (!mic.classList.contains('busy')) return { ok: false, why: '真點麥克風沒有進入準備中' };
+    const pale = getComputedStyle(mic).color, p = rgb(pale);
+    if (!(p[0] > 200 && p[1] > 130 && p[1] < 200 && p[2] > 120 && p[2] < 200)) return { ok: false, why: '準備中麥克風不是淡紅：' + pale };
+    if (parseFloat(getComputedStyle(mic).opacity) < 0.99) return { ok: false, why: '準備中麥克風變透明了（應該是淡紅、不是變淡）' };
+    { const r = R(mic); if (Math.abs(r.width - before.width) > 0.5 || Math.abs(r.height - before.height) > 0.5) return { ok: false, why: '準備中麥克風大小變了' } }
+    for (const [e, l, w] of place) if (Math.abs(R(e).left - l) > 0.5 || Math.abs(R(e).width - w) > 0.5) return { ok: false, why: '準備中旁邊的元素被擠動了：' + (e.getAttribute('aria-label') || e.className) };
+    if ([...main.querySelectorAll('*')].some(e => vis(e) && e.children.length === 0 && e.textContent.includes('準備中'))) return { ok: false, why: '輸入列看得到「準備中」' };
+    // 允許麥克風 → 開始聽：正紅
+    globalThis.__asnCallEvent && globalThis.__asnCallEvent(JSON.stringify({ t: 'perm', granted: true }));
+    await sleep(400);
+    if (!mic.classList.contains('rec')) return { ok: false, why: '允許麥克風後沒有進入聆聽中' };
     const label = mic.querySelector('.dict-state');
     if (vis(label) && label.textContent.trim()) return { ok: false, why: '聆聽中還看得到字樣：' + label.textContent.trim() };
     if ([...main.querySelectorAll('*')].some(e => vis(e) && e.children.length === 0 && e.textContent.includes('聆聽中'))) return { ok: false, why: '輸入列看得到「聆聽中」' };
@@ -146,6 +158,7 @@ export const lineMProbeSource = part => `(async () => {
     if (red === color0) return { ok: false, why: '聆聽中麥克風沒有變色：' + red };
     const m = red.slice(red.indexOf('(') + 1, red.indexOf(')')).split(',').map(x => Number(x.trim()));
     if (!(m[0] > 180 && m[1] < 110 && m[2] < 110)) return { ok: false, why: '聆聽中麥克風不是紅色：' + red };
+    if (red === pale) return { ok: false, why: '準備中和聆聽中的顏色一樣：' + red };
     return { ok: true, why: '' };
   }
   if (${JSON.stringify(part)} === 'send') {
@@ -3230,8 +3243,8 @@ export const injectSource = table => `(() => {
   const T = ${JSON.stringify(table)};
   const missing = (globalThis.__smokeMissing = []);
   // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
-  // 語音輸入（#1536）：表裡的 __dict＝true 就給一個假的通話外殼（麥克風已允許、開始聽之後一直停在聆聽中、不回結果），手機輸入列才會有麥克風
-  if (T.__dict) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, callAvailable: () => true, callMicState: () => 'granted', callRequestMic() {}, callListen() { (globalThis.__smokeDict ||= []).push('listen') }, callStopListen() {}, callEnd() {}, callSpeak() {}, callStopSpeak() {} });
+  // 語音輸入（#1536）：表裡的 __dict＝true 就給一個假的通話外殼（還沒允許麥克風：按下去先停在準備中，探測用 __asnCallEvent 送「允許」才開始聽；開始聽之後一直停在聆聽中、不回結果），手機輸入列才會有麥克風
+  if (T.__dict) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, callAvailable: () => true, callMicState: () => 'ask', callRequestMic() { (globalThis.__smokeDict ||= []).push('ask') }, callListen() { (globalThis.__smokeDict ||= []).push('listen') }, callStopListen() {}, callEnd() {}, callSpeak() {}, callStopSpeak() {} });
   if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), T.__confirmDelay || 30) } };
   const tv = T.__tvLive ? (globalThis.__smokeTv = { paused: false, timer: 0, seq: 0, sent: 0, id: 7 }) : null;
   const tvSend = () => {
