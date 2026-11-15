@@ -1,0 +1,11 @@
+# synthetic：不是真實畫面。已經設好自動繼續時，「Wait here…」換成「Don’t continue automatically」：手機不給這個選單按鈕（#1512）
+  ⎿  You've hit your limit · resets 3pm (Asia/Taipei)
+
+────────────────────────────────────────────────────────────────────────────────
+  What do you want to do?
+
+  ❯ 1. Stop and wait for limit to reset
+    2. Don’t continue automatically
+    3. Switch to usage credits
+
+  Enter to confirm · Esc to cancel

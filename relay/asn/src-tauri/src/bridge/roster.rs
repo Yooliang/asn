@@ -215,6 +215,7 @@ fn screen_label(code: &str) -> Option<&'static str> {
         "bypass_warning" => "卡在略過權限警告",
         "login" => "需要登入",
         "usage_limit" => "額度用完",
+        "usage_menu" => "額度用完：等你選",
         "question" | "question_view" => "等你回答：問題",
         "attention" => "需要人工確認",
         "held_message" => "等你確認：外來訊息",
@@ -1050,7 +1051,7 @@ mod tests {
             (ws[0].status.clone(), ws[0].detail.clone())
         };
         assert_eq!(run(), (Some("busy".to_string()), None), "沒有檔案");
-        for (code, label) in [("permission", "等你回答：權限"), ("trust", "等你回答：信任資料夾"), ("bypass_warning", "卡在略過權限警告"), ("login", "需要登入"), ("usage_limit", "額度用完"), ("attention", "需要人工確認"), ("held_message", "等你確認：外來訊息")] {
+        for (code, label) in [("permission", "等你回答：權限"), ("trust", "等你回答：信任資料夾"), ("bypass_warning", "卡在略過權限警告"), ("login", "需要登入"), ("usage_limit", "額度用完"), ("usage_menu", "額度用完：等你選"), ("attention", "需要人工確認"), ("held_message", "等你確認：外來訊息")] {
             put(json!({"sessionId":"s1","code":code,"at":NOW}));
             assert_eq!(run(), (Some("busy".to_string()), Some(label.to_string())), "只改說明，不改狀態");
         }

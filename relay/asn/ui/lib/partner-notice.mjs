@@ -8,6 +8,7 @@ const NOTICES = {
   bypass_warning: name => ({ title: '夥伴在等你確認', body: `「${name}」第一次開啟，要你同意它的權限設定，請到它的視窗確認。` }),
   login: name => ({ title: '夥伴需要登入', body: `「${name}」需要登入才能繼續，請到它的視窗登入。` }),
   usage_limit: name => ({ title: '夥伴的額度用完了', body: `「${name}」的額度用完了，要等額度恢復才能繼續。` }),
+  usage_menu: name => ({ title: '夥伴的額度用完了', body: `「${name}」的額度用完了，在問接下來要怎麼做。手機上可以選「停下來等」或「在這裡等」，付費的選項請到它的視窗選。` }),
   question: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選一個答案，請到它的視窗回答。` }),
   question_view: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選答案，請到它的視窗回答。` }),
   attention: name => ({ title: '夥伴需要你看一下', body: `「${name}」停在一個選單，請到它的視窗確認。` }),
@@ -47,6 +48,7 @@ const VIEW_HINTS = {
   trust: '它在問要不要信任這個資料夾：直接在下面的畫面回答。',
   bypass_warning: '它在等你確認權限設定：直接在下面的畫面回答。',
   attention: '它停在一個選單：直接在下面的畫面回答。',
+  usage_menu: '它的額度用完了，在問接下來要怎麼做：直接在下面的畫面選。',
   held_message: '它收到一則外來訊息，在等你決定要不要放行：請用跳出的提示框，或到它自己的終端視窗處理；這裡打的字不會送出。',
 }
 export function viewHint(list, name) {

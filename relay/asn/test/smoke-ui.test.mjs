@@ -444,3 +444,11 @@ test('設備「⋯」小清單收起情境（0.2.22）：Aero、現代各一，8
   assert.match(runner, /Runtime\.addBinding', \{ name: '__smokeInput' \}/)
   assert.match(runner, /Input\.dispatchMouseEvent/)
 })
+
+test('額度選單（#1512 A）：冒煙用的手機文字和按鈕字，跟電腦端 claude_screen.rs 送出的固定字一致', async () => {
+  const { USAGE_MENU_TEXT, USAGE_MENU_LABELS } = await import('../scripts/smoke-probes/usageMenu.mjs')
+  const rs = fs.readFileSync(path.join(root, 'src-tauri/src/launch/claude_screen.rs'), 'utf8')
+  const constOf = name => JSON.parse(rs.match(new RegExp(`pub const ${name}: &str = ("[^"]*");`))[1])
+  assert.equal(USAGE_MENU_TEXT, constOf('PHONE_USAGE_TEXT'))
+  assert.deepEqual(USAGE_MENU_LABELS, [constOf('PHONE_USAGE_STOP'), constOf('PHONE_USAGE_WAIT')])
+})

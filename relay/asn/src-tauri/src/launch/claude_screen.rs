@@ -18,6 +18,9 @@ pub enum ClaudeScreenKind {
     Login,
     /// 額度用完。只標狀態
     UsageLimit,
+    /// 額度用完後 Claude 問「What do you want to do?」的選單（#1512）。手機只給「停下來等」「在這裡等、恢復後自動繼續」兩項；
+    /// 付費類（改用額度點數、加值、升級方案）一律不給手機
+    UsageMenu,
     /// AI 用選項框問的單選題（AskUserQuestion）：按數字鍵就送出
     Question,
     /// 選項框，但手機不能按：多選、一次多題，或正停在自由輸入那一列
@@ -66,6 +69,12 @@ const BYPASS_YES: &str = "Yes, I accept";
 const LOGIN_MENU: &str = "Select login method";
 const LOGIN_EXPIRED: &str = "Please run /login";
 const USAGE_LIMIT: &str = "You've hit your limit";
+/// 額度用完的選單（#1512，claude 2.1.325）：標題、頁尾和兩個不花錢的選項都是 Claude 固定的字。
+/// 選項的順序因帳號而異（付費類可能排第一），所以認字、不認編號
+const USAGE_MENU_TITLE: &str = "What do you want to do?";
+const USAGE_MENU_FOOTER: &str = "Enter to confirm";
+const USAGE_STOP: &str = "Stop and wait for limit to reset";
+const USAGE_WAIT: &str = "Wait here, then continue automatically";
 /// 輸入框上方往回看幾行，找登入失效與額度訊息
 const NOTICE_LOOKBACK: usize = 8;
 /// 底部認不出的選單游標往上看幾行（真的選單底下可能還有預覽）
@@ -79,6 +88,7 @@ pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
         ClaudeScreenKind::BypassWarning => "bypass_warning",
         ClaudeScreenKind::Login => "login",
         ClaudeScreenKind::UsageLimit => "usage_limit",
+        ClaudeScreenKind::UsageMenu => "usage_menu",
         ClaudeScreenKind::Question => "question",
         ClaudeScreenKind::QuestionView => "question_view",
         ClaudeScreenKind::Attention => "attention",
@@ -159,6 +169,10 @@ pub const PHONE_DENY: &str = "拒絕";
 /// 外來訊息確認框的兩顆按鈕字。沒有「以後都放行」這類選項
 pub const PHONE_HELD_DENY: &str = "不放行";
 pub const PHONE_HELD_DELIVER: &str = "放行這一則";
+/// 額度用完選單的兩顆按鈕字與手機上顯示的固定文字（#1512）：不送畫面原文（重置時間、付費選項都不送）
+pub const PHONE_USAGE_STOP: &str = "停下來，等額度恢復";
+pub const PHONE_USAGE_WAIT: &str = "在這裡等，額度恢復後自動繼續";
+pub const PHONE_USAGE_TEXT: &str = "額度用完了，Claude 在問接下來要怎麼做。\n付費相關的選項（改用額度點數、加值、升級方案）只能在電腦上選。";
 
 pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption> {
     match screen.kind {
@@ -182,7 +196,24 @@ pub fn phone_options(screen: &ClaudeScreen, complete: bool) -> Vec<ClaudeOption>
             })
             .collect(),
         ClaudeScreenKind::Question if complete => screen.options.clone(),
+        // 認字給按鈕，編號照畫面上的；其他選項（付費類、「不要自動繼續」等）一律不給
+        ClaudeScreenKind::UsageMenu => screen
+            .options
+            .iter()
+            .filter_map(|o| usage_phone_label(&o.label).map(|label| ClaudeOption { n: o.n, label: label.to_string() }))
+            .collect(),
         _ => Vec::new(),
+    }
+}
+
+/// 額度選單裡手機可以按的選項 → 按鈕字；其他回 None
+fn usage_phone_label(label: &str) -> Option<&'static str> {
+    if label == USAGE_STOP {
+        Some(PHONE_USAGE_STOP)
+    } else if label.starts_with(USAGE_WAIT) {
+        Some(PHONE_USAGE_WAIT)
+    } else {
+        None
     }
 }
 
@@ -254,6 +285,7 @@ pub fn goes_to_phone(code: &str) -> bool {
         || code == status_code(ClaudeScreenKind::Question)
         || code == status_code(ClaudeScreenKind::QuestionView)
         || code == status_code(ClaudeScreenKind::HeldMessage)
+        || code == status_code(ClaudeScreenKind::UsageMenu)
 }
 
 /// 選項列開頭的游標符號換成空格：游標在哪一列不算內容。**雜湊就是從這份文字算的**，建請求和送字前重查
@@ -271,6 +303,8 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
         ClaudeScreenKind::Permission => permission_text(screen),
         // 外來訊息只顯示整理過的摘要（寄件名、前幾行），不放畫面原文
         ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true, bind: held_bind(screen) }),
+        // 額度選單：手機只看固定文字；選單本身（游標不算）綁進雜湊，選項或重置時間變了就答不出去
+        ClaudeScreenKind::UsageMenu => Some(PromptText { text: PHONE_USAGE_TEXT.to_string(), complete: true, bind: usage_menu_bind(screen)? }),
         ClaudeScreenKind::Question | ClaudeScreenKind::QuestionView => {
             let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
@@ -607,16 +641,27 @@ struct Menu {
     above: usize,
 }
 
+/// 額度選單綁進雜湊的內容：選單所在區塊（標題上面那條分隔線以下到畫面底），每行去掉開頭的空白和游標（游標在哪一列不算內容）。只綁不顯示
+fn usage_menu_bind(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
+    let start = lines[..end].iter().rposition(|l| l.trim() == USAGE_MENU_TITLE)?;
+    let top = lines[..start].iter().rposition(|l| is_rule(l)).map_or(start, |i| i + 1);
+    Some(lines[top..end].iter().map(|l| clean_prompt_line(l).trim_start().trim_start_matches(CURSOR).trim_start().to_string()).collect::<Vec<_>>().join("\n"))
+}
+
 fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
     // 用來判斷的是最底下的區塊：往上跳過頁尾與分隔線，碰到別的內容就算不是選單
     let mut last = lines.len();
     let mut footers = 0;
+    let mut confirm_footer = false;
     while last > 0 {
         let t = lines[last - 1].trim();
         if t.is_empty() || is_rule(t) {
             last -= 1;
         } else if FOOTER_PREFIXES.iter().any(|f| t.starts_with(f)) {
             footers += 1;
+            confirm_footer |= t.starts_with(USAGE_MENU_FOOTER);
             last -= 1;
         } else {
             break;
@@ -638,10 +683,10 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
     let cursors_in_block = lines[block_start..last].iter().filter(|l| l.trim_start().starts_with(CURSOR)).count();
     let kind_ok = cursors_in_block == 1;
     let context = lines[block_start..menu.above].join("\n");
-    Some(judge(menu, kind_ok, &context))
+    Some(judge(menu, kind_ok, &context, confirm_footer))
 }
 
-fn judge(m: Menu, single_cursor: bool, context: &str) -> ClaudeScreen {
+fn judge(m: Menu, single_cursor: bool, context: &str, confirm_footer: bool) -> ClaudeScreen {
     let labels: Vec<&str> = m.options.iter().map(|o| o.label.as_str()).collect();
     let n_of = |want: &str| m.options.iter().find(|o| o.label == want).map(|o| o.n);
     let attention = |m: Menu| screen(ClaudeScreenKind::Attention, &m.question, m.options, m.cursor, None, None);
@@ -654,6 +699,11 @@ fn judge(m: Menu, single_cursor: bool, context: &str) -> ClaudeScreen {
     }
     if labels.contains(&BYPASS_YES) && labels.contains(&TRUST_NO) && context.contains("Bypass Permissions mode") {
         return screen(ClaudeScreenKind::BypassWarning, &m.question, m.options, m.cursor, None, None);
+    }
+    // 額度用完的選單（#1512）：標題完全相同、頁尾是「Enter to confirm」、有編號，「停下來等」「在這裡等」各恰好一項
+    let count = |f: &dyn Fn(&str) -> bool| m.options.iter().filter(|o| f(&o.label)).count();
+    if m.numbered && confirm_footer && m.question == USAGE_MENU_TITLE && count(&|l| l == USAGE_STOP) == 1 && count(&|l| l.starts_with(USAGE_WAIT)) == 1 {
+        return screen(ClaudeScreenKind::UsageMenu, &m.question, m.options, m.cursor, None, None);
     }
     if context.contains(LOGIN_MENU) || m.question.contains(LOGIN_MENU) {
         return screen(ClaudeScreenKind::Login, &m.question, m.options, m.cursor, None, None);
@@ -783,6 +833,72 @@ mod tests {
         // 舊手機只給拒絕（不完整）
         let old: Vec<u32> = phone_options(&s, p.complete).iter().map(|o| o.n).collect();
         assert_eq!(old, vec![4]);
+    }
+
+    fn limit_menu(name: &str) -> String {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/term-screens/");
+        std::fs::read_to_string(format!("{dir}{name}")).unwrap().replace("\r\n", "\n")
+    }
+
+    fn phone_pairs(s: &ClaudeScreen) -> Vec<(u32, String)> {
+        phone_options(s, true).into_iter().map(|o| (o.n, o.label)).collect()
+    }
+
+    #[test]
+    fn 額度選單_真實畫面_認得出來_手機只給停下來等與在這裡等_文字是固定的() {
+        // #1512：依 11-14 截圖逐字轉錄（claude 2.1.32x，工作機）
+        let text = limit_menu("claude-limit-menu.real.txt");
+        let s = classify(&text).expect("認得出選單");
+        assert_eq!(s.kind, K::UsageMenu);
+        assert_eq!(status_code(s.kind), "usage_menu");
+        assert!(goes_to_phone("usage_menu") && !goes_to_phone("usage_limit"), "只標狀態的額度訊息照舊不上手機");
+        assert_eq!(s.options.len(), 3);
+        assert_eq!(phone_pairs(&s), vec![(1, PHONE_USAGE_STOP.to_string()), (2, PHONE_USAGE_WAIT.to_string())], "付費的第 3 項不給");
+        assert!(phone_options_full(&s).is_empty());
+        let p = phone_text(&text).unwrap();
+        assert_eq!(p.text, PHONE_USAGE_TEXT, "手機只看固定文字，不送畫面原文");
+        assert!(p.complete);
+        // 選單本身綁進雜湊（不顯示）：重置時間、付費選項都在，游標不算，上方的對話不算
+        assert!(p.bind.contains("at Nov 16, 12am") && p.bind.contains("Switch to usage credits"), "{}", p.bind);
+        assert!(!p.bind.contains('❯') && !p.bind.contains("weekly limit"), "{}", p.bind);
+        let moved = text.replace("❯ 1. Stop", "  1. Stop").replace("    2. Wait", "  ❯ 2. Wait");
+        assert_eq!(classify(&moved).unwrap().cursor, 1);
+        assert_eq!(phone_text(&moved).unwrap().bind, p.bind, "游標移動不改雜湊");
+    }
+
+    #[test]
+    fn 額度選單_付費選項排在前面_認字不認編號_用畫面上的編號() {
+        let s = classify(&limit_menu("claude-limit-menu-paid-first.synthetic.txt")).unwrap();
+        assert_eq!(s.kind, K::UsageMenu);
+        assert_eq!(phone_pairs(&s), vec![(3, PHONE_USAGE_STOP.to_string()), (4, PHONE_USAGE_WAIT.to_string())]);
+    }
+
+    #[test]
+    fn 額度選單_對不上的一律不給按鈕() {
+        // 已經設好自動繼續：沒有「Wait here」，只剩停下來和付費 → 需要人工確認
+        let armed = classify(&limit_menu("claude-limit-menu-auto-armed.synthetic.txt")).unwrap();
+        assert_eq!(armed.kind, K::Attention);
+        assert!(phone_options(&armed, true).is_empty());
+        let real = limit_menu("claude-limit-menu.real.txt");
+        let not_menu = |t: String, why: &str| {
+            let k = classify(&t).map(|s| s.kind);
+            assert_ne!(k, Some(K::UsageMenu), "{why}");
+            assert!(k.is_none_or(|k| !goes_to_phone(status_code(k))), "{why}：不上手機");
+        };
+        not_menu(real.replace("What do you want to do?", "What do you want to do next?"), "標題不同");
+        not_menu(real.replace("Enter to confirm · Esc to cancel", "Enter to select · Esc to cancel"), "頁尾不同");
+        not_menu(real.replace("  Enter to confirm · Esc to cancel", ""), "沒有頁尾");
+        not_menu(real.replace("Stop and wait for limit to reset", "Stop and wait for limit to reset now"), "「停下來等」字不同");
+        not_menu(real.replace("2. Wait here, then", "2. Please wait here, then"), "「在這裡等」字不同");
+        not_menu(real.replace("    3. Switch", "  ❯ 3. Switch"), "兩個游標");
+        not_menu(real.replace("3. Switch to usage credits", "3. Stop and wait for limit to reset"), "「停下來等」有兩項");
+        // 模型回覆裡引用整段選單、下面還有輸入框：不是選單
+        let rule = "─".repeat(80);
+        let quoted = format!("{real}\n\n● 上面是額度用完時的選單。\n{rule}\n❯ \n{rule}\n  ? for shortcuts");
+        not_menu(quoted, "模型引用選單文字");
+        // 工具輸出裡出現選單文字、上面是執行中：不是選單
+        let tool = format!("● Bash(cat menu.txt)\n  ⎿  What do you want to do?\n     ❯ 1. Stop and wait for limit to reset\n       2. Wait here, then continue automatically at 3pm\n     Enter to confirm · Esc to cancel\n\n✻ Running… (3s)\n{rule}\n❯ \n{rule}\n  ? for shortcuts");
+        not_menu(tool, "工具輸出");
     }
 
     #[test]

@@ -23,6 +23,9 @@
 | claude-login-method.txt | 未登入：選登入方式 | 「Select login method」 |
 | claude-login-expired.synthetic.txt | 登入失效（合成） | 「Please run /login」 |
 | claude-usage-limit.synthetic.txt | 額度用完（合成） | 「You've hit your limit · resets」 |
+| claude-limit-menu.real.txt | 額度用完後的選單（**依 11-14 截圖逐字轉錄**，#1512） | 標題「What do you want to do?」、「Stop and wait for limit to reset」「Wait here, then continue automatically at …」、頁尾「Enter to confirm」；付費的「Switch to usage credits」排第 3 |
+| claude-limit-menu-paid-first.synthetic.txt | 同上，付費選項排在前面（合成） | 認字不認編號：手機給第 3、4 項 |
+| claude-limit-menu-auto-armed.synthetic.txt | 同上，已設好自動繼續（合成） | 沒有「Wait here」→ 需要人工確認、不給按鈕 |
 | claude-idle-auto-mode.txt | 閒置（auto 模式） | 空輸入框＋狀態列 |
 | claude-idle-manual-mode.txt | 閒置（manual 模式） | 狀態列「manual mode on」 |
 | claude-running.txt | 執行中 | 「✻ …」動態字樣、沒有「done」 |

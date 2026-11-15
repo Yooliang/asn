@@ -9,7 +9,7 @@ import { createPartnerNoticePoller, nextNotices, noticeStillFor, noticeText, per
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 test('每個代號都有固定的字，不認得的代號或內容不顯示', () => {
-  for (const code of ['permission', 'trust', 'bypass_warning', 'login', 'usage_limit', 'attention']) {
+  for (const code of ['permission', 'trust', 'bypass_warning', 'login', 'usage_limit', 'usage_menu', 'attention']) {
     const t = noticeText({ code, name: '甲' })
     assert.ok(t.title && t.body.includes('「甲」'), code)
   }
