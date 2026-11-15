@@ -177,12 +177,10 @@ pub async fn launch_prefs_get(data_dir: PathBuf) -> Result<Value, String> {
     .await
 }
 
-/// 沒存過（或值不合法）就填上實際生效的上限；存過的照原樣。不寫回檔案
+/// 給畫面顯示的「目前生效值」另外放在 maxPerHourEffective（不碰存檔裡的任何欄位、不寫回檔案）
 pub fn with_effective_max(prefs: Value, file: Option<u32>) -> Value {
     let mut p = if prefs.is_object() { prefs } else { serde_json::json!({}) };
-    if config::pref_max_per_hour(&p).is_none() {
-        p["maxPerHour"] = serde_json::json!(config::effective_max_per_hour(&p, file));
-    }
+    p["maxPerHourEffective"] = serde_json::json!(config::effective_max_per_hour(&p, file));
     p
 }
 
@@ -208,14 +206,14 @@ mod tests {
 
     #[test]
     fn 設定頁讀到的上限跟實際擋的同一個來源() {
-        // 沒存過：填 launcher.json 寫的；連那個也沒有就是 6
-        assert_eq!(with_effective_max(json!({ "cwdAllow": ["D:\\w"] }), Some(3)), json!({ "cwdAllow": ["D:\\w"], "maxPerHour": 3 }));
-        assert_eq!(with_effective_max(json!({}), None), json!({ "maxPerHour": 6 }));
-        assert_eq!(with_effective_max(serde_json::Value::Null, None), json!({ "maxPerHour": 6 }));
-        // 存過合法的值：照原樣，不被 launcher.json 蓋掉
-        assert_eq!(with_effective_max(json!({ "maxPerHour": 2 }), Some(9)), json!({ "maxPerHour": 2 }));
-        // 存的值不合法：換成實際生效的
-        assert_eq!(with_effective_max(json!({ "maxPerHour": 99 }), Some(4)), json!({ "maxPerHour": 4 }));
+        // 沒改過：生效值是 launcher.json 寫的；連那個也沒有就是 6。生效值放在另一個欄位，存檔原有的欄位一個都不動
+        assert_eq!(with_effective_max(json!({ "cwdAllow": ["D:\\w"] }), Some(3)), json!({ "cwdAllow": ["D:\\w"], "maxPerHourEffective": 3 }));
+        assert_eq!(with_effective_max(json!({}), None), json!({ "maxPerHourEffective": 6 }));
+        assert_eq!(with_effective_max(serde_json::Value::Null, None), json!({ "maxPerHourEffective": 6 }));
+        // 舊程式寫的 maxPerHour:6 不算：生效值是 launcher.json 的 10，舊欄位原樣留著（前端不再讀它）
+        assert_eq!(with_effective_max(json!({ "maxPerHour": 6 }), Some(10)), json!({ "maxPerHour": 6, "maxPerHourEffective": 10 }));
+        // 設定頁改過：生效值就是它
+        assert_eq!(with_effective_max(json!({ "maxPerHourSet": 2 }), Some(9)), json!({ "maxPerHourSet": 2, "maxPerHourEffective": 2 }));
     }
 
     #[test]

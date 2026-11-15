@@ -200,12 +200,13 @@ pub fn check_launch(config: &LaunchConfig, req: &mut LaunchReq<'_>, recent: &[u6
     Ok(())
 }
 
-/// 每小時開新夥伴上限只有一個來源（#1548）：設定頁存在 launch-prefs.json 的 `maxPerHour`（1～20 的整數）優先；
-/// 沒存過或值不合法，才用 launcher.json 的 `max_per_hour`（同樣夾在 1～20），再沒有就是 6。
+/// 每小時開新夥伴上限只有一個來源（#1548）：順序是 launch-prefs.json 的 `maxPerHourSet`（使用者在設定頁真的改過才有，1～20 的整數）
+/// → launcher.json 的 `max_per_hour`（同樣夾在 1～20）→ 6。
+/// 舊版的 `maxPerHour` 一律不看：舊程式開過一次新夥伴就會把預設的 6 寫進存檔，分不出是不是本人選的，拿它來算會悄悄蓋掉 launcher.json 手寫的值。
 /// 目前只有「別的設備替這台開」會被擋（bridge/launcher.rs）；自己在這台開不受影響。
 pub const DEFAULT_MAX_PER_HOUR: u32 = 6;
 pub fn pref_max_per_hour(prefs: &Value) -> Option<u32> {
-    prefs.get("maxPerHour").and_then(Value::as_u64).filter(|n| (1..=20).contains(n)).map(|n| n as u32)
+    prefs.get("maxPerHourSet").and_then(Value::as_u64).filter(|n| (1..=20).contains(n)).map(|n| n as u32)
 }
 /// launcher.json 手寫的上限；沒有檔、不是 JSON、沒寫都回 None（讀檔失敗不影響開窗，那邊 load_launch_config_from 自己會報）
 pub fn file_max_per_hour(path: &Path) -> Option<u32> {
@@ -276,21 +277,47 @@ mod max_per_hour_tests {
     use serde_json::json;
 
     #[test]
-    fn 設定頁的值優先_沒存過才用launcher檔_再沒有是6() {
-        assert_eq!(effective_max_per_hour(&json!({ "maxPerHour": 2 }), Some(9)), 2);
+    fn 設定頁改過的值優先_沒改過才用launcher檔_再沒有是6() {
+        assert_eq!(effective_max_per_hour(&json!({ "maxPerHourSet": 2 }), Some(9)), 2);
         assert_eq!(effective_max_per_hour(&json!({}), Some(9)), 9);
         assert_eq!(effective_max_per_hour(&json!({}), None), DEFAULT_MAX_PER_HOUR);
         assert_eq!(effective_max_per_hour(&Value::Null, None), 6);
     }
 
     #[test]
-    fn 設定頁的值不合法就當沒存過() {
-        for bad in [json!({ "maxPerHour": 0 }), json!({ "maxPerHour": 21 }), json!({ "maxPerHour": -3 }), json!({ "maxPerHour": "5" }), json!({ "maxPerHour": 2.5 })] {
+    fn 舊存檔的maxPerHour一律當沒設過_不蓋掉launcher檔() {
+        // 舊程式開過一次新夥伴就寫進 6：升級後手寫在 launcher.json 的 10 照樣生效
+        assert_eq!(pref_max_per_hour(&json!({ "maxPerHour": 6 })), None);
+        assert_eq!(effective_max_per_hour(&json!({ "maxPerHour": 6, "cwdAllow": [] }), Some(10)), 10);
+        assert_eq!(effective_max_per_hour(&json!({ "maxPerHour": 6 }), None), 6);
+        // 設定頁改成 3 之後才是 3
+        assert_eq!(effective_max_per_hour(&json!({ "maxPerHour": 6, "maxPerHourSet": 3 }), Some(10)), 3);
+    }
+
+    #[test]
+    fn 設定頁的值不合法就當沒設過() {
+        for bad in [json!({ "maxPerHourSet": 0 }), json!({ "maxPerHourSet": 21 }), json!({ "maxPerHourSet": -3 }), json!({ "maxPerHourSet": "5" }), json!({ "maxPerHourSet": 2.5 }), json!({ "maxPerHourSet": true })] {
             assert_eq!(pref_max_per_hour(&bad), None, "{bad}");
             assert_eq!(effective_max_per_hour(&bad, Some(4)), 4, "{bad}");
         }
-        assert_eq!(pref_max_per_hour(&json!({ "maxPerHour": 1 })), Some(1));
-        assert_eq!(pref_max_per_hour(&json!({ "maxPerHour": 20 })), Some(20));
+        assert_eq!(pref_max_per_hour(&json!({ "maxPerHourSet": 1 })), Some(1));
+        assert_eq!(pref_max_per_hour(&json!({ "maxPerHourSet": 20 })), Some(20));
+    }
+
+    #[test]
+    fn 實際檔案_舊存檔6加launcher檔10是10_設定頁改3是3_launcher檔不受影響() {
+        let d = tempfile::tempdir().unwrap();
+        let launcher = d.path().join("launcher.json");
+        let text = "{\"profiles\":{},\"max_per_hour\":10}";
+        std::fs::write(&launcher, text).unwrap();
+        // 舊存檔：舊程式寫的 maxPerHour:6
+        crate::launch::prefs::launch_prefs_set_sync(d.path(), json!({ "cwdAllow": [], "maxPerHour": 6 })).unwrap();
+        let read = || crate::launch::prefs::launch_prefs_get_sync(d.path()).unwrap();
+        assert_eq!(effective_max_per_hour(&read(), file_max_per_hour(&launcher)), 10);
+        // 設定頁改成 3（前端只寫 maxPerHourSet）
+        crate::launch::prefs::launch_prefs_set_sync(d.path(), json!({ "cwdAllow": [], "maxPerHourSet": 3 })).unwrap();
+        assert_eq!(effective_max_per_hour(&read(), file_max_per_hour(&launcher)), 3);
+        assert_eq!(std::fs::read_to_string(&launcher).unwrap(), text, "launcher.json 一個字都不動");
     }
 
     #[test]

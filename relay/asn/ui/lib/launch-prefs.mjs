@@ -4,13 +4,26 @@ export const LAUNCH_PREFS_KEY = 'launch'
 // 每小時上限的說明（#1548）：只擋「別的設備（手機、別台電腦）替這台開」，自己在這台開不受影響；值跟 launcher.json 同一個來源（Rust 的 effective_max_per_hour）
 export const LAUNCH_MAX_NOTE = '只限制從別的設備（手機或別台電腦）替這台開的新夥伴，一小時內最多幾個；超過時對方會看到「這個小時已經開了 N 個視窗，超過上限」，下一個小時就能再開。自己在這台電腦上開不受影響。'
 
+// 每小時上限（#1548）：存檔只有使用者在設定頁真的改過才寫 maxPerHourSet（1～20 的整數）。
+// 舊版的 maxPerHour 一律不算：舊程式開過一次新夥伴就會把預設的 6 寫進存檔，拿它來算會悄悄蓋掉 launcher.json 手寫的值。
+// 畫面顯示的 maxPerHour＝實際生效的值：maxPerHourSet → 後台算好的 maxPerHourEffective（launcher.json 或 6）→ 6
+export const maxPerHourOf = v => (Number.isInteger(v) && v >= 1 && v <= 20 ? v : null)
+export const clampMaxPerHour = v => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(Math.max(n, 1), 20) : 6 }
+
 export function normalizeLaunchPrefs(raw) {
   const o = raw && typeof raw === 'object' ? raw : {}
   const recent = Array.isArray(o.recentCwd) ? o.recentCwd.filter(p => typeof p === 'string').slice(0, 12) : []
   const cwdAllow = Array.isArray(o.cwdAllow) ? o.cwdAllow.filter(p => typeof p === 'string') : []
-  const maxPerHour = Number.isInteger(o.maxPerHour) ? Math.min(Math.max(o.maxPerHour, 1), 20) : 6
+  const maxPerHourSet = maxPerHourOf(o.maxPerHourSet)
+  const maxPerHour = maxPerHourSet ?? maxPerHourOf(o.maxPerHourEffective) ?? 6
   const launchDisplay = o.launchDisplay === 'background' ? 'background' : 'foreground'
-  return { recentCwd: recent, cwdAllow, maxPerHour, showAdvanced: Boolean(o.showAdvanced), launchDisplay }
+  return { recentCwd: recent, cwdAllow, maxPerHour, maxPerHourSet, showAdvanced: Boolean(o.showAdvanced), launchDisplay }
+}
+
+/** 寫回存檔的那份：不寫顯示用的 maxPerHour（也不寫舊版的那個鍵）；maxPerHourSet 只有設定頁改過才有 */
+export function launchPrefsToSave(p) {
+  const { maxPerHour, maxPerHourSet, ...rest } = p
+  return { ...rest, cwdAllow: [...(p.cwdAllow ?? [])], ...(maxPerHourOf(maxPerHourSet) ? { maxPerHourSet } : {}) }
 }
 
 export function bumpRecentCwd(prefs, cwd) {

@@ -59,7 +59,7 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
-import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
+import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
@@ -561,7 +561,7 @@ function defaultCwdAllowFromCli() {
 // 以前改個上限、或開新夥伴記最近的資料夾，就會把建議資料夾當成白名單存下去（#1548）。存不進去要讓人看得到
 const launchMsg = ref('')
 async function saveLaunchPrefs() {
-  const prefs = { ...launchPrefs, cwdAllow: [...launchPrefs.cwdAllow], maxPerHour: launchPrefs.maxPerHour ?? 6 }
+  const prefs = launchPrefsToSave(launchPrefs)   // 上限只寫設定頁改過的 maxPerHourSet；開新夥伴、記最近的資料夾都不寫上限
   try { await transport.launchPrefsSet(prefs); launchMsg.value = '' } catch (e) { console.info('[ASN] launch prefs', e.message); launchMsg.value = `啟動設定沒有存成功：${e?.message ?? e}` }
 }
 function setLaunchCwdText(text) {
@@ -2066,7 +2066,7 @@ const app = createApp({
         case 'check-update': await checkUpdate(true); break
         case 'releases-retry': await reloadReleases(true); break
         case 'usage-refresh': await usage.refresh(); break
-        case 'launch-max': launchPrefs.maxPerHour = normalizeLaunchPrefs({ maxPerHour: Math.round(Number(value)) }).maxPerHour; await saveLaunchPrefs(); break   // 夾在 1～20（跟 Rust 認的範圍一樣），不然存了也不算數
+        case 'launch-max': launchPrefs.maxPerHourSet = launchPrefs.maxPerHour = clampMaxPerHour(value); await saveLaunchPrefs(); break   // 只有這裡寫 maxPerHourSet；夾在 1～20（跟 Rust 認的範圍一樣），不然存了也不算數
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
         case 'quota-hook-ask': quotaHook.confirm = true; quotaHook.msg = ''; break
         case 'quota-hook-cancel': quotaHook.confirm = false; break
