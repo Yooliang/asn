@@ -1236,6 +1236,10 @@ struct LiveTPort {
     typed: u64,
     /// 看的那台是移動設備（後台登記的平台）：本機關掉「允許移動設備查看終端」時，進行中的也要結束
     mobile: bool,
+    /// 上一段一般的字交給窗格的時間：緊接著的 Enter 要隔 ENTER_GAP_MS 再交（#1512 B）
+    last_text_at: Option<u64>,
+    /// 這次打字有幾批按鍵因為畫面需要人確認而被拿掉（跟著畫面幀告訴 D，#1512 B）
+    keys_dropped: u64,
 }
 
 #[cfg(feature = "gui")]
@@ -1267,7 +1271,7 @@ impl view_stream::TPort for LiveTPort {
         let id = self.terms.partner_term_id(&self.window)?;
         let text = self.terms.view_text(&id)?;
         let m = self.terms.view_meta_cached(&id, launch::term::REMOTE_META_MAX_AGE)?;
-        Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows, ack: None })
+        Ok(view_stream::Frame { text, cursor_x: m.cursor_x, cursor_y: m.cursor_y, cols: m.cols, rows: m.rows, ack: None, keys_dropped: None })
     }
     fn ctl(&mut self) -> Result<view_stream::Ctl, String> {
         let v = tauri::async_runtime::block_on(self.relay.api("term_view_pending", Some(serde_json::json!({}))))?;
@@ -1294,6 +1298,9 @@ impl view_stream::TPort for LiveTPort {
     fn log(&mut self, line: &str) {
         // 寫到機器資料夾的 ui.log（和其他紀錄、設定頁「開啟記錄」同一份），不寫 data_dir（#961）
         let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+    }
+    fn keys_dropped(&mut self) -> Option<u64> {
+        (self.keys_dropped > 0).then_some(self.keys_dropped)
     }
     fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {
         let Some(inp) = self.input.clone() else { return Ok(None) };
@@ -1335,14 +1342,25 @@ impl view_stream::TPort for LiveTPort {
                 } else {
                     k.d.as_str()
                 };
+                // 一段字和緊接著的 Enter 分開交：同一輪收進來的字會一口氣交出去，間隔由這頭補（#1512 B）
+                if !k.p && launch::term_view::is_enter_key(d) {
+                    let wait = launch::term_view::enter_wait_ms(self.last_text_at, auth::now_ms());
+                    if wait > 0 {
+                        std::thread::sleep(std::time::Duration::from_millis(wait));
+                    }
+                }
                 if self.terms.view_input(&pane, d, k.p).is_err() {
                     let line = format!("view {}: input refused typed={}", self.id, self.typed);
                     view_stream::TPort::log(self, &line);
                     return Err(view_stream::End::InputStopped);
                 }
                 self.typed += d.chars().count() as u64;
+                if k.p || launch::term_view::is_text_key(d) {
+                    self.last_text_at = Some(auth::now_ms());
+                }
             }
             if stripped {
+                self.keys_dropped += 1;
                 let line = format!("view {}: input text_only (認不出的選單：只交文字，不交 Enter 和方向鍵)", self.id);
                 view_stream::TPort::log(self, &line);
             }
@@ -1470,7 +1488,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             }
                             _ => None,
                         };
-                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out, input, typed: 0, mobile };
+                        let mut port = LiveTPort { app: app.clone(), relay: relay.clone(), terms: terms.clone(), data_dir: data_dir.clone(), id: id.clone(), who, window: session.window.clone(), stop, out, input, typed: 0, mobile, last_text_at: None, keys_dropped: 0 };
                         let relay2 = relay.clone();
                         std::thread::spawn(move || {
                             let end = view_stream::run_t(&session, session_key, &mut port);
@@ -1647,7 +1665,7 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                                             ob.lock().unwrap_or_else(|e| e.into_inner()).ack(a);
                                         }
                                         if views2.want(&id2) == view_remote::Want::Watching {
-                                            let _ = app2.emit_to(label2.as_str(), "term-view-remote-frame", serde_json::json!({ "id": id2, "text": f.text, "meta": { "cursor_x": f.cursor_x, "cursor_y": f.cursor_y, "cols": f.cols, "rows": f.rows } }));
+                                            let _ = app2.emit_to(label2.as_str(), "term-view-remote-frame", serde_json::json!({ "id": id2, "text": f.text, "meta": { "cursor_x": f.cursor_x, "cursor_y": f.cursor_y, "cols": f.cols, "rows": f.rows, "keys_dropped": f.keys_dropped } }));
                                         }
                                     }
                                     view_remote::Show::Skip => {}

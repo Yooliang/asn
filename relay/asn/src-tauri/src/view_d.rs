@@ -586,7 +586,7 @@ mod tests {
         assert_eq!(iso_secs(0), "1970-01-01T00:00:00Z");
         assert_eq!(iso_secs(1_800_000_000_000), crate::claude_quota::iso_secs(1_800_000_000_000));
         assert_eq!((FRAME_EVENT, END_EVENT), ("term-view-remote-frame", "term-view-remote-end"));
-        let f = Frame { text: "x".into(), cursor_x: 1, cursor_y: 2, cols: 80, rows: 24, ack: None };
+        let f = Frame { text: "x".into(), cursor_x: 1, cursor_y: 2, cols: 80, rows: 24, ack: None, keys_dropped: None };
         assert_eq!(frame_payload("i", &f), json!({ "id": "i", "text": "x", "meta": { "cursor_x": 1, "cursor_y": 2, "cols": 80, "rows": 24 } }));
         assert_eq!(started_json("i", 5, Scope::View), json!({ "id": "i", "expires_s": 5, "scope": "view" }));
     }

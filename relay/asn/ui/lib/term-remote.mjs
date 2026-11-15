@@ -154,7 +154,7 @@ export const RemoteView = {
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
   // started：發起成功（帶 Rust 回的資料，手機用來顯示那台的確認狀態）；ended：這次觀看結束或被收掉
-  emits: ['cancel', 'status', 'started', 'ended'],
+  emits: ['cancel', 'status', 'started', 'ended', 'screen'],   // screen：最新一幅的字與欄數（#1512 B：複製畫面文字、找登入網址用）
   setup(props, { emit }) {
     const host = ref(null), phase = ref(props.endedNote ? 'ended' : 'starting'), note = ref(props.endedNote), soon = ref(false)
     const expired = ref(Boolean(props.endedNote))   // 電腦版：離開分頁而結束（狀態列要有「重新看」）
@@ -231,6 +231,7 @@ export const RemoteView = {
           const c = Number(f.meta?.cols), r = Number(f.meta?.rows)
           if (Number.isInteger(c) && Number.isInteger(r) && c > 0 && r > 0 && (term.cols !== c || term.rows !== r) && typeof term.resize === 'function') term.resize(c, r)
           term.write(frameToWrite(f), keepCursorVisible)   // 寫完（游標位置更新後）再調捲動位置
+          emit('screen', { text: String(f.text ?? ''), cols: c > 0 ? c : 0 })
         }, wanted)
         if (!offF) return
         offFrame = offF

@@ -1109,7 +1109,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 貼上是文字不是按鍵：ESC 等控制字元拿掉，才不會跳出貼上模式變成按鍵（打字不經過這裡）
         let cleaned;
         let data = if paste {
-            cleaned = super::term_view::sanitize_paste(data);
+            // 結尾的換行拿掉（#1512 B）：放在貼上模式裡不會送出，只會留在輸入欄；要送出另外按 Enter
+            cleaned = super::term_view::trim_paste_tail(&super::term_view::sanitize_paste(data)).to_string();
             if cleaned.is_empty() {
                 return Err("貼上的內容沒有可以送的字".into());
             }
@@ -6565,6 +6566,23 @@ mod tests {
             let t = typed(&rig);
             assert_eq!(t[t.len() - 2], (true, "\x1b[A".to_string()));
             assert_eq!(t[t.len() - 1], (true, "\x03".to_string()));
+        }
+
+        #[test]
+        fn 畫面裡打字_貼上結尾的換行拿掉_要送出另外按_enter() {
+            // #1512 B：貼回 code 時結尾帶了換行，放在貼上模式裡不會送出、只會留在輸入欄；拿掉，送出由另外一顆 Enter 負責
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "abc123-code\r\n", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "abc123-code".to_string())), "貼上模式、結尾沒有換行");
+            rig.svc.view_input(&id, "第一行\n第二行\n", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "第一行\n第二行".to_string())), "中間的換行留著");
+            let before = typed(&rig).len();
+            assert!(rig.svc.view_input(&id, "\r\n", true).is_err(), "只有換行：沒東西可貼，不送");
+            assert_eq!(typed(&rig).len(), before);
+            // Enter 是另外一顆、不走貼上模式
+            rig.svc.view_input(&id, "\r", false).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(true, "\r".to_string())));
         }
 
         #[test]

@@ -476,6 +476,14 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-chat .term-view.term-desk{padding:0}
 .m-chat .term-view.term-desk .term-view-screen{border-radius:0;margin-bottom:0}
 .m-chat .term-remote .term-remote-bar{margin:1px 6px;padding:0 6px;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
+/* 看別台終端時的按鍵列與「複製畫面文字」（#1512 B）：終端下面、輸入框上面，兩排；按鍵至少 40px 高好按，一排放不下就換行，不橫向溢出 */
+.m-chat .m-term-keys{flex:none;display:flex;flex-direction:column;gap:4px;padding:4px 6px;border-top:1px solid var(--line,#d9dee5);background:var(--panel,#f6f8fb)}
+.m-chat .m-term-keyrow{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.m-chat .m-term-key{flex:1 1 0;min-width:40px;min-height:40px;padding:0 6px;border:1px solid var(--line,#c9d1dc);border-radius:8px;background:#fff;color:inherit;font:inherit;font-size:15px;font-weight:600}
+.m-chat .m-term-key:disabled{opacity:.45}
+.m-chat .m-term-copy,.m-chat .m-term-login{min-height:36px;padding:0 10px;border:1px solid var(--line,#c9d1dc);border-radius:8px;background:#fff;color:inherit;font:inherit;font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m-chat .m-term-login{color:#1a5fb4;border-color:#9bb8e0}
+.m-chat .m-term-copied{font-size:12px;color:#2f7d32}
 .m-peer-strip{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
 .m-peer-strip-tx{font-size:14px;overflow-wrap:anywhere}
 .m-peer-strip-btn{flex:none}

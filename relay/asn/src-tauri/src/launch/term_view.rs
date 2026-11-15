@@ -36,6 +36,32 @@ pub fn sanitize_paste(text: &str) -> String {
         .collect()
 }
 
+/// 貼上的字結尾的換行拿掉（#1512 B）：放在貼上模式裡的換行不會送出，只會留在輸入欄（「貼回 code 後 Enter 怪怪的」原因之二）。
+/// 要送出由 Enter 另外按（輸入框送出、按鍵列的 Enter 都是另外一顆，不在貼上模式裡）
+pub fn trim_paste_tail(text: &str) -> &str {
+    text.trim_end_matches(['\r', '\n'])
+}
+
+/// 遠端打字時一段字和緊接著的 Enter 之間至少隔多久（#1512 B）。手機那邊雖然隔了 120ms 才送 Enter，
+/// 但同一輪收進來的字會一口氣交給窗格，間隔就沒了，那個視窗可能把整句連 Enter 當成貼上（「貼回 code 後 Enter 怪怪的」原因之一）。
+/// 改由電腦這頭負責：交 Enter 之前，上一段字交出去還不到這麼久就先等
+pub const ENTER_GAP_MS: u64 = 150;
+
+/// 這一顆是不是 Enter（單獨的換行）
+pub fn is_enter_key(d: &str) -> bool {
+    matches!(d, "\r" | "\n" | "\r\n")
+}
+
+/// 這一段是不是一般的字（不是方向鍵、Esc 這類控制序列，也不是單獨的 Enter）
+pub fn is_text_key(d: &str) -> bool {
+    !d.starts_with('\u{1b}') && d.chars().any(|c| !c.is_control())
+}
+
+/// 交這顆 Enter 之前還要等幾毫秒：上一段字交出去的時間（沒有就不等）到現在還不到 ENTER_GAP_MS，就等到滿
+pub fn enter_wait_ms(last_text_at: Option<u64>, now: u64) -> u64 {
+    last_text_at.map_or(0, |t| ENTER_GAP_MS.saturating_sub(now.saturating_sub(t)))
+}
+
 /// 讀歷史預設行數
 pub const HISTORY_DEFAULT_LINES: u32 = 200;
 /// 讀歷史回傳文字的位元組上限（超過就留最後的整行）
@@ -656,5 +682,42 @@ mod tests {
         assert_eq!(sanitize_paste("\x1b\x03\x7f"), "", "只有控制字元就是空的");
         // 貼上清過之後，檢查打字用的 check_input 不會再碰到 ESC
         assert!(!sanitize_paste("\x1b[A\x1bOP").contains('\x1b'));
+    }
+}
+
+#[cfg(test)]
+mod enter_gap_tests {
+    use super::*;
+
+    #[test]
+    fn 貼上的結尾換行拿掉_中間的換行留著() {
+        assert_eq!(trim_paste_tail("abc123\r\n"), "abc123");
+        assert_eq!(trim_paste_tail("abc\n\n\r"), "abc");
+        assert_eq!(trim_paste_tail("第一行\n第二行\n"), "第一行\n第二行");
+        assert_eq!(trim_paste_tail("沒有換行"), "沒有換行");
+        assert_eq!(trim_paste_tail("\r\n"), "");
+    }
+
+    #[test]
+    fn enter_前要等_上一段字交出去不到_150ms_就等到滿() {
+        assert_eq!(enter_wait_ms(None, 1000), 0, "前面沒有字：不用等");
+        assert_eq!(enter_wait_ms(Some(1000), 1000), ENTER_GAP_MS, "同一輪剛交出去：等滿");
+        assert_eq!(enter_wait_ms(Some(1000), 1100), 50);
+        assert_eq!(enter_wait_ms(Some(1000), 1150), 0);
+        assert_eq!(enter_wait_ms(Some(1000), 5000), 0, "手機那邊隔很久才按：不用再等");
+        assert_eq!(enter_wait_ms(Some(2000), 1000), ENTER_GAP_MS, "時間倒退：照樣等滿，不會溢位");
+    }
+
+    #[test]
+    fn 哪些算_enter_哪些算一般的字() {
+        for k in ["\r", "\n", "\r\n"] {
+            assert!(is_enter_key(k) && !is_text_key(k), "{k:?}");
+        }
+        for k in ["abc", "1", "貼回的 code", "a\r"] {
+            assert!(is_text_key(k), "{k:?}");
+        }
+        for k in ["\u{1b}[A", "\u{1b}[B", "\u{1b}", "\t"] {
+            assert!(!is_text_key(k) && !is_enter_key(k), "{k:?}");
+        }
     }
 }
