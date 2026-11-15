@@ -6,9 +6,14 @@
 --     p_key 用白名單鎖住，目前只允許 'chat_pins'；寫入後整份 features 序列化超過 64KB（65536 bytes）就拒絕、不寫入。
 --     只給函式擁有者（security definer 的 public 函式）呼叫，不授權任何角色。
 --   public.asn_account_chat_pins(p_user, p_pins)：讀（p_pins 為空）與寫，只授權 service_role；寫入走 relay.account_pref_put('chat_pins', …)。
--- 衝突處理：整份以 rev 較新的為準；寫入的 rev 必須比現有的大，否則不覆蓋、回傳現有的並標 stale。
---   兩台各自釘不同的對話時，由用戶端拿到 stale 回來的那份自己合併（同一個 id 看 pins／unpinned 誰的 at 新，at 相同釘選勝），伺服器不合併。
--- 內容完全相同的寫入不動任何東西（不更新 rev、不算一次寫入）。
+-- rev 是遞增版本號（不是時間戳）：寫入前必須先讀到最新那份，寫入的 rev 必須是「現有 rev＋1」（比對再寫入）。
+--   現有的比寫入的 rev 小、一樣、或跳號（更大）一律不寫入，回傳現有的並標 stale。
+--   還沒有現有那份（或現有那份不是物件）時，接受 rev ≥ 1（沒有東西可蓋，0.2.26 本機累積的 rev 第一次上傳不必先改號）；rev ＝ 0 拒絕（bad_rev）。
+-- 衝突處理：兩台各自釘不同的對話時，後寫的那台會拿到 stale 與伺服器現有那份；
+--   用戶端用 mergePins 合併（同一個 id 看 pins／unpinned 誰的 at 新，at 相同釘選勝），再以伺服器 rev＋1 重送。
+--   重送最多 3 次；遇到冷卻（rate_limited）延後重試，不立刻連打。伺服器不合併。
+-- 內容完全相同的寫入不動任何東西（不更新 rev、不算一次寫入）：這個捷徑放在 rev 比對之前，
+--   所以內容一樣時不論 rev 是多少都回現有的（不標 stale）；用戶端合併後內容若已等於伺服器的，就不必再送。
 -- 頻率限制：現有的 at 距今不到 2 秒、而且內容不同，回 rate_limited（Edge 轉 429）。
 -- 伺服器只做結構檢查，不比用戶端嚴：pins 最多 50 筆、unpinned 最多 200 筆；每筆 id 是非空字串、最多 200 字、不含控制字元（中文與空白都放行）；at 是正數；rev 是 0～2^53 的整數。
 -- 不動 asn_account_device_prefs 與 asn_account_settings，舊版用戶端與舊版 Edge 完全不受影響。
@@ -16,7 +21,9 @@
 --       （features 裡的 chat_pins 鍵留著，不影響任何舊功能）。
 begin;
 
--- 共用寫入。回傳：{ value: 現在存著的 } ｜ { value, stale: true } ｜ { error: bad_request|not_found|rate_limited|too_large }
+-- 共用寫入。檢查順序：白名單 → 格式 → 鎖 → 內容相同捷徑 → rev 比對（stale）→ 冷卻 → 大小。
+-- 內容相同捷徑在 rev 比對之前：內容已經一樣，重送沒有意義也不該被當成衝突；其餘情況一定要先過 rev 比對，才輪到冷卻與大小。
+-- 回傳：{ value: 現在存著的 } ｜ { value, stale: true } ｜ { error: bad_request|not_found|rate_limited|too_large }
 -- bad_request 會多帶 reason，方便 Edge 與測試辨認是哪一種。
 create or replace function relay.account_pref_put(p_user uuid, p_key text, p_val jsonb)
  returns jsonb language plpgsql security definer set search_path to ''
@@ -63,14 +70,17 @@ begin
     if (v_cur - 'rev' - 'at') = (v_new - 'rev' - 'at') then
       return jsonb_build_object('value', v_cur);
     end if;
-    -- 對方的比較新（或一樣新）：不覆蓋，讓用戶端去合併
-    if coalesce((v_cur ->> 'rev')::numeric, 0) >= v_rev then
+    -- 比對再寫入：只接受現有 rev＋1；更小、一樣、跳號都不寫，回現有的讓用戶端合併後重送
+    if v_rev <> coalesce((v_cur ->> 'rev')::numeric, 0) + 1 then
       return jsonb_build_object('value', v_cur, 'stale', true);
     end if;
     -- 太頻繁
     if v_now - coalesce((v_cur ->> 'at')::bigint, 0) < 2000 then
       return jsonb_build_object('error', 'rate_limited');
     end if;
+  elsif v_rev < 1 then
+    -- 還沒有現有那份：rev ≥ 1 都收（本機累積的號碼不用改），0 拒絕
+    return jsonb_build_object('error', 'bad_request', 'reason', 'bad_rev');
   end if;
 
   -- 整份 features 寫入後不能超過上限；超過就不寫（原值不變）

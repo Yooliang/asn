@@ -83,14 +83,92 @@ test('實跑：內容相同不動；rev 一樣或較舊但內容不同不覆蓋�
   assert.equal(equal.stale, true); assert.deepEqual((await get(db)).pins.pins, [E('w1/財務')])
 })
 
-test('實跑：rev 較新才覆蓋；2 秒內連續寫不同內容 rate_limited，過了 2 秒才行', { skip }, async () => {
+test('實跑：rev＋1 才覆蓋；2 秒內連續寫不同內容 rate_limited，過了 2 秒才行', { skip }, async () => {
   const db = await boot()
   await put(db, S(1000))
-  assert.deepEqual(await put(db, S(2000, [E('w1/w2')])), { error: 'rate_limited' })
+  assert.deepEqual(await put(db, S(1001, [E('w1/w2')])), { error: 'rate_limited' })
   assert.deepEqual((await get(db)).pins.pins, [E('w1/財務')], '被擋的沒寫進去')
   await sleep(2100)
-  const ok = await put(db, S(2000, [E('w1/w2')]))
-  assert.deepEqual(ok.pins.pins, [E('w1/w2')]); assert.equal(ok.pins.rev, 2000)
+  const ok = await put(db, S(1001, [E('w1/w2')]))
+  assert.deepEqual(ok.pins.pins, [E('w1/w2')]); assert.equal(ok.pins.rev, 1001)
+})
+
+// 用戶端合併的最小版（同一個 id 看 pins／unpinned 誰的 at 新，at 相同釘選勝）；真正的 mergePins 在 relay/asn/ui/lib/chat-pins.mjs（尚未進 main）
+function mergeMin(a, b) {
+  const pin = new Map(), un = new Map()
+  for (const [list, m] of [[a.pins, pin], [b.pins, pin], [a.unpinned, un], [b.unpinned, un]]) for (const e of list) m.set(e.id, Math.max(m.get(e.id) ?? 0, e.at))
+  const pins = [], unpinned = []
+  for (const id of new Set([...pin.keys(), ...un.keys()])) {
+    if (!un.has(id) || pin.get(id) >= un.get(id)) pins.push({ id, at: pin.get(id) }); else unpinned.push({ id, at: un.get(id) })
+  }
+  return { pins: pins.sort((x, y) => x.at - y.at), unpinned }
+}
+const strip = v => ({ pins: v.pins, unpinned: v.unpinned })
+
+test('實跑：rev 比對再寫入：現有 5 時送 9（跳號）、5、4、0 都 stale 不寫入；送 6 成功', { skip }, async () => {
+  const db = await boot()
+  await put(db, S(5))
+  const before = await features(db)
+  for (const rev of [9, 5, 4, 0]) {
+    const r = await put(db, S(rev, [E('w1/w2', T0 + 1)]))
+    assert.equal(r.stale, true, `rev=${rev}`); assert.deepEqual(r.pins.pins, [E('w1/財務')]); assert.equal(r.pins.rev, 5)
+  }
+  assert.deepEqual(await features(db), before, 'stale 不寫入')
+  await sleep(2100)
+  const ok = await put(db, S(6, [E('w1/w2', T0 + 1)]))
+  assert.equal(ok.stale, undefined); assert.equal(ok.pins.rev, 6); assert.deepEqual(ok.pins.pins, [E('w1/w2', T0 + 1)])
+})
+
+test('實跑：內容相同的捷徑在 rev 比對之前（跳號也只是回現有的，不標 stale）', { skip }, async () => {
+  const db = await boot()
+  const w = await put(db, S(5))
+  assert.deepEqual(await put(db, S(99)), { pins: w.pins })
+})
+
+test('實跑：還沒有現有那份時：送 1 成功、送 7 也成功、送 0 被拒', { skip }, async () => {
+  for (const [rev, okExpected] of [[1, true], [7, true], [0, false]]) {
+    const db = await boot()
+    const r = await put(db, S(rev))
+    if (okExpected) assert.equal(r.pins.rev, rev)
+    else { assert.deepEqual(r, { error: 'bad_request', reason: 'bad_rev' }); assert.deepEqual(await features(db), {}) }
+  }
+  const db = await boot()
+  assert.deepEqual(await rawPut(db, 'chat_pins', { pins: [], unpinned: [], rev: 0 }), { error: 'bad_request', reason: 'bad_rev' })
+  // 現有那份不是物件：當作還沒有，送 0 仍被拒、送 3 成功
+  await db.exec(`update relay.tenants set features = '{"chat_pins": "壞掉"}' where id = '${T1}'`)
+  assert.equal((await put(db, S(0))).reason, 'bad_rev')
+  assert.equal((await put(db, S(3))).pins.rev, 3)
+})
+
+test('實跑：兩台輪流「讀 → 改 → 寫」：A 先寫成功，B 拿到 stale、合併後以伺服器 rev＋1 重送，兩邊的釘選都在', { skip }, async () => {
+  const db = await boot()
+  const base = await put(db, S(1, [E('w1/甲', T0)]))
+  const start = strip(base.pins)
+  // A、B 都從同一份開始，各自釘不同的對話（本機 rev 都是 2）
+  const a = { pins: [...start.pins, E('w1/乙', T0 + 10)], unpinned: [], rev: 2 }
+  const b = { pins: [...start.pins, E('room:群 組', T0 + 20)], unpinned: [], rev: 2 }
+  await sleep(2100)
+  assert.equal((await put(db, a)).pins.rev, 2, 'A 先寫成功')
+  await sleep(2100)
+  const rb = await put(db, b)
+  assert.equal(rb.stale, true, 'B 寫到 stale'); assert.equal(rb.pins.rev, 2)
+  const merged = mergeMin(strip(rb.pins), b)
+  await sleep(2100)
+  const rb2 = await put(db, { ...merged, rev: rb.pins.rev + 1 })
+  assert.equal(rb2.stale, undefined); assert.equal(rb2.pins.rev, 3)
+  assert.deepEqual(rb2.pins.pins.map(p => p.id), ['w1/甲', 'w1/乙', 'room:群 組'])
+  assert.deepEqual((await get(db)).pins.pins.map(p => p.id), ['w1/甲', 'w1/乙', 'room:群 組'])
+})
+
+test('實跑：B 離線改很多次、rev 衝很大，直接送一定 stale，不會蓋掉 A 的', { skip }, async () => {
+  const db = await boot()
+  const a = await put(db, S(3, [E('w1/甲', T0), E('w1/乙', T0 + 1)]))
+  await sleep(2100)
+  for (const rev of [4 + 1, 50, 9_007_199_254_740_991]) {
+    const r = await put(db, S(rev, [E('w1/丙', T0 + 5)]))
+    assert.equal(r.stale, true, `rev=${rev}`); assert.deepEqual(r.pins, a.pins)
+  }
+  assert.deepEqual((await get(db)).pins, a.pins)
 })
 
 test('實跑：共用寫入的 key 白名單只放 chat_pins，其他一律拒絕且 features 不變', { skip }, async () => {
