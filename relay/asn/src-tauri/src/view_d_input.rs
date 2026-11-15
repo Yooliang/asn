@@ -157,14 +157,18 @@ mod tests {
         run(async {
             let inputs = RemoteInputs::default();
             let got = open_one(&inputs, "s1");
-            send(&inputs, "s1", "ls\r", false, NOW).await.unwrap();
+            // 明文用一段夠長、不會碰巧出現在隨機密文裡的標記（#1555：原本只比兩個字元 "ls"，密文偶爾剛好含有就假紅）
+            const MARK: &str = "asn-plaintext-marker-1555-q7Zk";
+            let plain = format!("{MARK}\r");
+            send(&inputs, "s1", &plain, false, NOW).await.unwrap();
             tokio::task::yield_now().await;
             let wires = got.lock().unwrap().clone();
             assert_eq!(wires.len(), 1);
-            assert!(!wires[0].contains("ls"), "送出去的是密文");
+            assert!(!wires[0].contains(MARK), "送出去的是密文：不含整段明文標記");
+            assert_ne!(wires[0], plain, "送出去的不是明文本身");
             let mut t = TInput::new(view_input::input_key(&test_key(7)).unwrap(), "s1", NOW);
             t.push(&wires[0], NOW);
-            assert_eq!(t.take(NOW).unwrap().iter().map(|k| k.d.clone()).collect::<String>(), "ls\r");
+            assert_eq!(t.take(NOW).unwrap().iter().map(|k| k.d.clone()).collect::<String>(), plain, "那台解得開，解出來等於明文");
             // 別的編號照樣不收
             assert_eq!(send(&inputs, "s2", "x", false, NOW).await.err().unwrap(), NOT_OPEN);
         });
