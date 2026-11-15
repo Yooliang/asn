@@ -2,6 +2,8 @@ node_modules/
 dist/
 ui/vendor/
 src-tauri/target/
+# 測試在專案資料夾底下開的暫存資料夾（tempfile::tempdir_in(CARGO_MANIFEST_DIR)，避開中文的暫存路徑）；測試中途當掉時可能留下
+src-tauri/.tmp*/
 # Tauri 產生的權限結構檔不進 git；安卓專案（src-tauri/gen/android，含我們改過的外殼）要進 git，它自己的 .gitignore 會擋掉建置輸出
 src-tauri/gen/schemas/
 src-tauri/resources/
