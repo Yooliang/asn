@@ -44,7 +44,7 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; extra?: true; login_failed?: true; login_incomplete?: true; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; extra?: true; login_failed?: true; login_incomplete?: true; usable_at?: string; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // five_reset_at／week_reset_at（#374，選填）：兩條各自的重置時間（reset_at 是舊的、兩條共用一個，照收）。
@@ -111,6 +111,16 @@ export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
 export const REPORT_VENDORS = new Set(["claude", "codex", "grok", "gemini", "minimax"]);
 // 舊的 asn_relay_acct_report／relay.asn_accounts 不收 gemini、minimax（有一筆就整份退回），呼叫前要先拿掉（#1515）
 export const LEGACY_VENDORS = new Set(["claude", "codex", "grok"]);
+// 上次確認可用（#1512 C2）：只收 claude、UTC 到秒的 ISO 字串、在合理範圍內（2020 年以後、不超過現在 10 分鐘）；
+// 不合格只丟掉這一欄、不退回整份（電腦時鐘不準不能害帳號回報整份被擋）
+export const USABLE_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+export function parseUsableAt(v: unknown, now = Date.now()): string | null {
+  if (typeof v !== "string" || !USABLE_AT_RE.test(v)) return null;
+  const t = Date.parse(v);
+  if (Number.isNaN(t) || t < Date.UTC(2020, 0, 1) || t > now + 10 * 60_000) return null;
+  // 日期本身要存在（例如 02-30 會被 Date.parse 進位成別天）：換回字串要一樣
+  return new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z") === v ? v : null;
+}
 export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
   const out: ReportedAccount[] = [];
@@ -132,8 +142,9 @@ export function parseReport(b: Json): ReportedAccount[] | null {
     const allowed = VENDOR_WINDOWS[a.vendor];
     const cleaned = allowed ? parsed.filter((w) => allowed.has(w.name)) : parsed;
     const windows = cleaned.length ? { windows: cleaned } : {};
+    const usable = a.vendor === "claude" ? parseUsableAt(a.usable_at) : null;
     // 額外帳號（只有 Claude）：不在這台的帳號庫，不能切換，所以不進舊表，只進帳號列表
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.extra === true && a.vendor === "claude" ? { extra: true as const } : {}), ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.extra === true && a.vendor === "claude" ? { extra: true as const } : {}), ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(usable ? { usable_at: usable } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;
 }

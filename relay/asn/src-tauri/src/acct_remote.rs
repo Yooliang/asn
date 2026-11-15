@@ -82,6 +82,10 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
             if a.login_incomplete {
                 row["login_incomplete"] = json!(true);
             }
+            // 上次確認可用（#1512 C2）：只有時間，UTC、到秒（後台只認這個格式）；沒有就不帶
+            if let Some(ms) = a.usable_at_ms {
+                row["usable_at"] = json!(crate::claude_quota::iso_secs(ms));
+            }
             if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
                 if let Some(v) = q.five_hour_pct {
                     o.insert("five_hour_pct".into(), json!(v));
@@ -1134,6 +1138,16 @@ mod tests {
         let r = decide(&mut m, U, true, |e| claude_accounts::switch_to(&h, e).map(|o| o.notice).map_err(|e| e.to_string()));
         assert_eq!(r, Some(("failed", claude_accounts::INCOMPLETE_LOGIN_MSG.to_string())));
         assert_eq!(std::fs::read(h.join(".claude").join(".credentials.json")).unwrap(), before);
+    }
+
+    #[test]
+    fn 回報_上次確認可用_有才帶_utc_到秒() {
+        // #1512 C2：後台只收「YYYY-MM-DDTHH:MM:SSZ」
+        let mut ok = acct("b@x.test", false);
+        ok.usable_at_ms = Some(1_763_193_900_123);
+        let v = build_report(&[acct("a@x.test", true), ok], None);
+        assert!(v["accounts"][0].get("usable_at").is_none(), "沒記過：不帶");
+        assert_eq!(v["accounts"][1]["usable_at"], json!("2025-11-15T08:05:00Z"));
     }
 
     #[test]

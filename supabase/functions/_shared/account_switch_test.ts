@@ -1,6 +1,6 @@
 // 執行：cd supabase/functions && deno test -A _shared/
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { ACCT_ACTIONS, type AcctDeps, cleanEmail, handleAcctAction, parseReport, parseSwitch } from "./account_switch.ts";
+import { ACCT_ACTIONS, type AcctDeps, cleanEmail, handleAcctAction, parseReport, parseSwitch, parseUsableAt } from "./account_switch.ts";
 
 type Call = { fn: string; args: Record<string, unknown> };
 function fakeDeps(answer: (c: Call) => unknown = () => ({ id: "11111111-1111-1111-1111-111111111111", bell_topic: "bell-W" })) {
@@ -160,3 +160,25 @@ Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 
 Deno.test("動作清單與分派一致", () => {
   assertEquals([...ACCT_ACTIONS].sort(), ["acct_list", "acct_login_alert", "acct_report", "acct_roster", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
 });
+
+Deno.test("上次確認可用（#1512 C2）：只收 claude、UTC 到秒的 ISO、合理範圍；不合格只丟這一欄，不退回整份", () => {
+  const NOW = Date.UTC(2026, 10, 15, 9, 0, 0);
+  assertEquals(parseUsableAt("2026-11-15T08:05:00Z", NOW), "2026-11-15T08:05:00Z");
+  assertEquals(parseUsableAt("2026-11-15T09:09:59Z", NOW), "2026-11-15T09:09:59Z", "電腦時鐘快一點（10 分鐘內）照收");
+  for (const bad of [1763194000000, true, null, undefined, {}, "", "2026-11-15", "2026-11-15T08:05:00", "2026-11-15T08:05:00.123Z", "2026-11-15T08:05:00+08:00",
+    "2026-02-30T08:00:00Z", "2019-12-31T23:59:59Z", "2026-11-15T09:10:01Z", "2026-11-15T08:05:00Z ", "abc"]) {
+    assertEquals(parseUsableAt(bad, NOW), null, JSON.stringify(bad));
+  }
+  const ok = "2020-01-02T03:04:05Z";
+  const r = parseReport({ accounts: [
+    { vendor: "claude", email: "a@x.test", current: true, usable_at: ok },
+    { vendor: "claude", email: "b@x.test", usable_at: "壞掉的時間" },
+    { vendor: "codex", email: "c@x.test", usable_at: ok },
+  ] });
+  assertEquals(r, [
+    { vendor: "claude", email: "a@x.test", plan: "", current: true, usable_at: ok },
+    { vendor: "claude", email: "b@x.test", plan: "", current: false },
+    { vendor: "codex", email: "c@x.test", plan: "", current: false },
+  ], "壞的只丟這一欄、整份照收；別家不帶");
+});
+
