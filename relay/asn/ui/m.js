@@ -28,8 +28,9 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, phoneOpsRows, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
+import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { offlineView } from './lib/group-offline.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
@@ -1076,7 +1077,7 @@ const app = createApp({
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
     // 選單畫面上的列：手機對話頁上方沒有按鈕列，管理項目都在這裡；喚醒、切換模型排最前面，其餘順序和電腦版一致。
     // 這位夥伴永遠用不到的不列（在線的喚醒、一般視窗的重開／移除…），暫時不能用的反灰寫原因（規則在 mobile-ops.mjs phoneOpApplies）
-    const opsRows = computed(() => phoneOpsRows(opsItems.value, chatFriend.value))
+    const opsRows = computed(() => buildPartnerMenu(chatFriend.value, opsCtx.value, 'phone'))   // 四個入口共用的組選單函式（#1559，lib/partner-menu.mjs）
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
     const opsAcp = computed(() => acpSwitchChoices(chatFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
