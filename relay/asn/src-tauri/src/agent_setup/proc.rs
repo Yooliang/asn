@@ -366,6 +366,29 @@ mod tests {
         assert_eq!(p.wait(Duration::from_secs(5)), Some(0));
     }
 
+    /// run_capture 逾時要收掉整棵（#1548 用它問各家 CLI 的版本，npm 的 .cmd 殼底下還有一層 node）：
+    /// 外層批次檔開內層，內層一直寫檔；逾時回錯之後檔案不再變大，才算整棵都收掉。
+    /// 暫存資料夾開在專案資料夾底下：批次檔裡的路徑是用系統字碼頁讀的，使用者名稱有中文的暫存路徑會讓內層根本跑不起來（測不到要測的東西）
+    #[cfg(windows)]
+    #[test]
+    fn run_capture逾時能殺掉整棵() {
+        let d = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        assert!(d.path().to_string_lossy().is_ascii(), "這個測試要純英文路徑：{}", d.path().display());
+        let beat = d.path().join("beat.txt");
+        let inner = d.path().join("inner.cmd");
+        let outer = d.path().join("outer.cmd");
+        let script = |lines: &[String]| lines.join("\r\n") + "\r\n";
+        std::fs::write(&inner, script(&["@echo off".into(), ":loop".into(), format!("echo x>>\"{}\"", beat.display()), "ping -n 2 127.0.0.1 >NUL".into(), "goto loop".into()])).unwrap();
+        std::fs::write(&outer, script(&["@echo off".into(), format!("cmd /c \"{}\"", inner.display())])).unwrap();
+        let r = run_capture(&outer, &[], Duration::from_secs(3));
+        assert_eq!(r.err().as_deref(), Some("指令跑太久，已結束它"));
+        assert!(beat.exists(), "內層真的有跑起來");
+        std::thread::sleep(Duration::from_millis(500));
+        let before = std::fs::metadata(&beat).unwrap().len();
+        std::thread::sleep(Duration::from_millis(2500));
+        assert_eq!(std::fs::metadata(&beat).unwrap().len(), before, "逾時後內層還在寫檔：整棵沒有收掉");
+    }
+
     #[cfg(windows)]
     #[test]
     fn 真的子程序逾時能殺掉整棵() {

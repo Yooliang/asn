@@ -168,8 +168,20 @@ pub async fn partner_console_set(req: PartnerConsoleReq) -> Result<Value, String
     blocking_timeout(move || console::partner_console_set(req)).await
 }
 
+/// 給設定頁讀：沒存過每小時上限時填上實際生效的那個值（launcher.json 寫的或 6），畫面跟真正擋的同一個來源（#1548）
 pub async fn launch_prefs_get(data_dir: PathBuf) -> Result<Value, String> {
-    blocking_timeout(move || launch_prefs_get_sync(&data_dir)).await
+    blocking_timeout(move || {
+        let prefs = launch_prefs_get_sync(&data_dir)?;
+        Ok(with_effective_max(prefs, config::file_max_per_hour(&config::launcher_config_path())))
+    })
+    .await
+}
+
+/// 給畫面顯示的「目前生效值」另外放在 maxPerHourEffective（不碰存檔裡的任何欄位、不寫回檔案）
+pub fn with_effective_max(prefs: Value, file: Option<u32>) -> Value {
+    let mut p = if prefs.is_object() { prefs } else { serde_json::json!({}) };
+    p["maxPerHourEffective"] = serde_json::json!(config::effective_max_per_hour(&p, file));
+    p
 }
 
 pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), String> {
@@ -189,6 +201,20 @@ pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>, token: Opt
 #[cfg(test)]
 mod tests {
     use super::config::{canonical_launch_cwd, valid_partner_name};
+    use super::with_effective_max;
+    use serde_json::json;
+
+    #[test]
+    fn 設定頁讀到的上限跟實際擋的同一個來源() {
+        // 沒改過：生效值是 launcher.json 寫的；連那個也沒有就是 6。生效值放在另一個欄位，存檔原有的欄位一個都不動
+        assert_eq!(with_effective_max(json!({ "cwdAllow": ["D:\\w"] }), Some(3)), json!({ "cwdAllow": ["D:\\w"], "maxPerHourEffective": 3 }));
+        assert_eq!(with_effective_max(json!({}), None), json!({ "maxPerHourEffective": 6 }));
+        assert_eq!(with_effective_max(serde_json::Value::Null, None), json!({ "maxPerHourEffective": 6 }));
+        // 舊程式寫的 maxPerHour:6 不算：生效值是 launcher.json 的 10，舊欄位原樣留著（前端不再讀它）
+        assert_eq!(with_effective_max(json!({ "maxPerHour": 6 }), Some(10)), json!({ "maxPerHour": 6, "maxPerHourEffective": 10 }));
+        // 設定頁改過：生效值就是它
+        assert_eq!(with_effective_max(json!({ "maxPerHourSet": 2 }), Some(9)), json!({ "maxPerHourSet": 2, "maxPerHourEffective": 2 }));
+    }
 
     #[test]
     fn 夥伴名字格式() {

@@ -59,7 +59,7 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
-import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
+import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
@@ -557,10 +557,12 @@ async function loadLaunchPrefs() {
 function defaultCwdAllowFromCli() {
   return cwdChoices({ allow: [], recent: launchPrefs.recentCwd })
 }
+// 存的是 launchPrefs.cwdAllow（使用者真的改過的白名單），不是文字框：白名單是空的時候文字框先顯示「建議資料夾」，
+// 以前改個上限、或開新夥伴記最近的資料夾，就會把建議資料夾當成白名單存下去（#1548）。存不進去要讓人看得到
+const launchMsg = ref('')
 async function saveLaunchPrefs() {
-  const cwdAllow = launchCwdText.value.split('\n').map(s => s.trim()).filter(Boolean)
-  const prefs = { ...launchPrefs, cwdAllow, maxPerHour: launchPrefs.maxPerHour ?? 6 }
-  try { await transport.launchPrefsSet(prefs) } catch (e) { console.info('[ASN] launch prefs', e.message) }
+  const prefs = launchPrefsToSave(launchPrefs)   // 上限只寫設定頁改過的 maxPerHourSet；開新夥伴、記最近的資料夾都不寫上限
+  try { await transport.launchPrefsSet(prefs); launchMsg.value = '' } catch (e) { console.info('[ASN] launch prefs', e.message); launchMsg.value = `啟動設定沒有存成功：${e?.message ?? e}` }
 }
 function setLaunchCwdText(text) {
   launchCwdText.value = text
@@ -1982,7 +1984,7 @@ const app = createApp({
       install: installView(agentInstall.state),
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
-        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
+        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, mod: accounts.state.mod, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
@@ -1991,7 +1993,7 @@ const app = createApp({
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
-      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
+      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
       quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       claudeModAuto: claudeModAuto.value,
@@ -2064,7 +2066,7 @@ const app = createApp({
         case 'check-update': await checkUpdate(true); break
         case 'releases-retry': await reloadReleases(true); break
         case 'usage-refresh': await usage.refresh(); break
-        case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
+        case 'launch-max': launchPrefs.maxPerHourSet = launchPrefs.maxPerHour = clampMaxPerHour(value); await saveLaunchPrefs(); break   // 只有這裡寫 maxPerHourSet；夾在 1～20（跟 Rust 認的範圍一樣），不然存了也不算數
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
         case 'quota-hook-ask': quotaHook.confirm = true; quotaHook.msg = ''; break
         case 'quota-hook-cancel': quotaHook.confirm = false; break

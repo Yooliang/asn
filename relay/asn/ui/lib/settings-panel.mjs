@@ -27,6 +27,7 @@ import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
+import { LAUNCH_MAX_NOTE } from './launch-prefs.mjs'
 import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFetchLine, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
@@ -155,7 +156,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
@@ -731,9 +732,11 @@ export const SettingsPanel = {
           <label>每小時開新夥伴上限
             <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
           </label>
+          <small class="set-note" id="set-note-launch-max">{{ LAUNCH_MAX_NOTE }}</small>
           <label>工作資料夾白名單（一行一個）
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
+          <small class="acct-warn" v-if="st.launch.msg" role="alert">{{ st.launch.msg }}</small>
         <details class="set-adv" v-if="st.askpass">
           <summary>進階</summary>
           <section class="set-card" aria-label="密碼小幫手">

@@ -209,7 +209,11 @@ impl SystemEnv {
         } else {
             vec![]
         };
-        build_remote_config(&file, if consent { crate::launch::profiles::bootstrap_config() } else { None }, extra, consent)
+        let mut cfg = build_remote_config(&file, if consent { crate::launch::profiles::bootstrap_config() } else { None }, extra, consent)?;
+        // 每小時上限只有一個來源（#1548）：設定頁改過的 maxPerHourSet 優先，沒改過才用 launcher.json／預設（舊的 maxPerHour 不看）（launch/config.rs 的 effective_max_per_hour）
+        let prefs = crate::launch::prefs::launch_prefs_get_sync(&self.data_dir).unwrap_or(Value::Null);
+        cfg.max_per_hour = crate::launch::config::effective_max_per_hour(&prefs, Some(cfg.max_per_hour));
+        Ok(cfg)
     }
 }
 
