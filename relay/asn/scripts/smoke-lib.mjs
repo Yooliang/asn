@@ -120,11 +120,14 @@ export const lineMProbeSource = part => `(async () => {
     await real({ gesture: [c[0] + 60, c[1], -160, 0] }, 900);
     if (!(wrap.scrollLeft > 20)) return { ok: false, why: '用手指滑表格沒有左右捲動：scrollLeft=' + wrap.scrollLeft };
     if (msgs.scrollLeft !== 0 || document.documentElement.scrollLeft !== 0) return { ok: false, why: '滑表格時整個訊息區跟著橫移' };
-    // 一般長句的泡泡：泡泡本身（不含旁邊的時間）放寬到這一列的 72%～80%
+    // 一般長句的泡泡：泡泡本身（不含旁邊的時間）要比原本 68% 的上限明顯寬（多 30px 以上），也不超過這一列的 80%。
+    // 不寫死下限比例：窄螢幕（360）時泡泡已經頂到「扣掉頭像和時間」的可用寬度，字型不同（CI 的 Linux 字型）折行點也會差一個字
     const row = [...msgs.querySelectorAll('.msg')].find(m => !m.querySelector('table') && (m.querySelector('.m-body')?.textContent || '').length > 25 && !m.classList.contains('mine'));
     if (!row) return { ok: false, why: '找不到長句的泡泡' };
     const bw = R(row.querySelector('.m-body')).width, rw = R(row).width;
-    if (bw > rw * 0.8 + 1 || bw < rw * 0.72) return { ok: false, why: '長句泡泡本身的寬度不在這一列的 72%～80%：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
+    const meta = row.querySelector('.l-meta'), metaW = meta ? R(meta).width + 6 : 0, oldMax = rw * 0.68 - metaW;
+    if (bw > rw * 0.8 + 1) return { ok: false, why: '長句泡泡本身超過這一列的 80%：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
+    if (bw < oldMax + 30) return { ok: false, why: '長句泡泡沒有比原本（68% 扣掉時間＝' + Math.round(oldMax) + 'px）明顯寬：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
   }
   const main = pane.querySelector('.compose-main'), ta = main && main.querySelector('.composer textarea');
   const send = main && main.querySelector('.composer .aero-btn'), mic = main && main.querySelector('.mc-dict');
