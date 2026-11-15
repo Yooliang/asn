@@ -11,7 +11,7 @@ const fakeStore = (init = {}) => { const m = new Map(Object.entries(init)); retu
 
 test('三個選項（0.2.22 起多 LINE 風格）、預設復古 Aero（舊使用者升級後樣子不變）、壞值退回預設', () => {
   assert.deepEqual(SKINS, ['aero', 'modern', 'line'])
-  assert.deepEqual(SKINS.map(k => SKIN_LABEL[k]), ['復古 Aero（原本的樣子）', '現代', 'LINE 風格'])
+  assert.deepEqual(SKINS.map(k => SKIN_LABEL[k]), ['復古 Aero', '現代', 'LINE 風格'])
   assert.equal(DEFAULT_SKIN, 'aero')
   for (const v of [undefined, null, '', 'neon', 3, {}]) assert.equal(normalizeSkin(v), 'aero', String(v))
   assert.equal(normalizeSkin('modern'), 'modern'); assert.equal(normalizeSkin('line'), 'line')
