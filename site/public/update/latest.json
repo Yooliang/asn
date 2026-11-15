@@ -1,11 +1,11 @@
 {
-  "version": "0.2.23",
-  "notes": "- 新功能：手機對話輸入列多一個「拍照」鈕，拍好直接傳出。\n- 新功能：一次可以選多張圖或多個檔案，依序傳出，顯示進度。\n- 新功能：看大圖可以縮放（手機雙指或點兩下；電腦滾輪、拖曳、雙擊）。\n- 新功能：群組裡點成員（離線名單、發言者的名字或頭像）就跳到跟他的一對一對話。\n- 改善：看過的圖不再每次重新下載。\n- 修正：LINE 外觀的時間不再疊在右上角；輸入區改成白底，打字時左邊收成「＞」；標題列維持藍色，忙碌只用黃色小標籤標示。",
-  "pub_date": "2026-11-14T22:20:41.860Z",
+  "version": "0.2.24",
+  "notes": "- 新功能：電腦版下載新版時改成直角進度條。\n- 改善：LINE 外觀電腦版：拿掉設備欄、自己的卡片放第一個、對話區白底、按鈕區移到輸入框上方。\n- 改善：LINE 外觀手機版：表格在泡泡裡左右滑、泡泡加寬、標題列藍底沒有白線、語音輸入時只讓麥克風變色、送出鈕在最右邊。\n- 改善：手機設備頁點一下才展開按鈕，捲動時不會誤按。\n- 改善：電腦版名單頂端精簡（拿掉重複的群組鈕、放大鏡放進搜尋框）。\n- 修正：手機看大圖時按返回，只關掉看圖。\n- 改善：外觀選項「復古 Aero」拿掉後面的說明文字。",
+  "pub_date": "2026-11-15T07:14:23.563Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk0dXcrTEFDc3lDOVhFaUxNUWxOZVdwQVNFZzlxNlByRDRZM20vN0tWRUZMa0grTlBHOUthRFdRK3dodFZTd1ZKQ3dIZGxwMEdGZnc2eUtPcjZwL2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjgzNjQ4CWZpbGU6QVNOXzAuMi4yM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjIzCk5ieTZVbHh3d2s1Zksxczdhdjk3bUlFZTRrWmFEUDNGa0ZSYTZiODh3RGkvc3I0bTlJYnpMbDc4a09LVkM4N09uTTBJc0lCZmtLWGlNSk5MRTRoT0NRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.23_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjY3YWcxSHNKYjQvd3U5N3l3UzVmRHVUSlZhdXdTRkFRNjIzZ0RubzNPSWJOU0tnS1I0ZFNURlZpcVZvUWpBeVVnT3h4Zk8vWExpUEN5ak5PVGlXQnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NzI1MzE1CWZpbGU6QVNOXzAuMi4yNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI0CmpaVmhMQ2J4bW14NUMvazlzQWovQmtqb0paOFNMSTM2L21TaTZ1aXQ1WlRsaTRzMFo0VWFHVVdVZEZ0dWd4c3pNcUt5ZjZkdVBXMGZGYklaOTVlSEJBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.24_x64-setup.exe"
     }
   }
 }
