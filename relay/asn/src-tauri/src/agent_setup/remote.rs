@@ -116,9 +116,8 @@ mod tests {
         assert!(args(body).contains("Arc::new(|| None)"), "桌面按鈕：照舊，已登入就不動");
         let lib_lf = lib.replace("\r\n", "\n");
         let ev = lib_lf.split("fn claude_relogin_evidence() -> Option<&'static str> {").nth(1).expect("有證據函式").split("\n}\n").next().unwrap();
-        assert!(ev.contains("login_watch::failed_recently(") && ev.contains("claude_screen_says_login()"), "只看本機：對話紀錄的失效判定、讀畫面");
-        let scr = lib_lf.split("fn claude_screen_says_login() -> bool {").nth(1).expect("有讀畫面的判斷").split("\n}\n").next().unwrap();
-        assert!(scr.contains("launch::term::partner_notices()") && scr.len() < 400, "讀畫面只看背景工作判斷好的結果");
+        assert!(ev.contains("login_watch::failed_recently("), "只看本機對話紀錄的失效判定");
+        assert!(!ev.contains("claude_screen") && !ev.contains("partner_notices"), "讀畫面只拿來顯示入口，不當放行的證據");
         assert!(ev.len() < 1200, "只取到證據函式本身");
         for bad in ["ask.", "SetupAsk", "relay.", "payload", "requested_by"] {
             assert!(!ev.contains(bad), "證據不能來自手機的請求：{bad}");
