@@ -4,6 +4,13 @@
     "predeploy": ["node ../tools/release/site_predeploy.mjs"],
     "cleanUrls": true,
     "trailingSlash": false,
+    "redirects": [
+      {
+        "regex": "^/update/(?P<file>ASN_(?P<ver>\\d+\\.\\d+\\.\\d+)_(?:x64-setup\\.exe(?:\\.sig)?|android\\.apk))$",
+        "destination": "https://github.com/Yooliang/asn/releases/download/v:ver/:file",
+        "type": 302
+      }
+    ],
     "rewrites": [
       { "source": "/i/**", "destination": "/i/index.html" },
       { "source": "/.well-known/assetlinks.json", "destination": "/wk/assetlinks.json" }

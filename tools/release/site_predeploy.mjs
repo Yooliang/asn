@@ -1,12 +1,11 @@
 // 官網部署前檢查（site/firebase.json 的 hosting.predeploy 會呼叫）。
-// Firebase 每次部署都把整個網站換成「這台電腦」上的內容；安裝檔與下載檔不進 git，所以換一台電腦部署就會把別人發的檔案弄不見。
-// 這裡先讀三份清單，指到本站的每個檔案：本機沒有就從線上目前的版本下載補上並核對，核對不符或下載失敗就讓部署失敗，不帶著缺檔部署。
-//   update/latest.json       電腦版更新：platforms.*.url（沒有 sha256；下載時比對伺服器回的大小）
-//   update/android.json      手機更新：url，帶 sha256 與 bytes
-//   download/downloads.json  下載區：files.*.url，帶 sha256 與 size
-// 另外還會讀 update/android.json 的 git 歷史：以前指過的每個手機 APK（帶 sha256、bytes）也算「要保留」的檔案。
-// 它們是別台電腦發的、不進 git，目前清單已不指到，卻還有人在下載；本機沒有就先從線上補，不然這次部署會把它們蓋掉（0.1.103 就這樣掉過）。
-// 線上也已經沒有的（早就掉了）不擋部署，只記在 skipped；本機或線上有的一律補齊並核對。
+// 安裝檔（電腦版 exe、.sig、手機 APK）從 #1585 起不放官網：放在 GitHub Release v<版本>，官網的 update/ASN_<版本>_… 由 firebase.json 302 轉過去
+// （Firebase 免費方案不准再上傳新的 .exe）。所以這裡：
+//   1. 官網目錄的 update/ 底下不准有安裝檔（exe、sig、apk），有就擋：會被轉址蓋過、白佔空間，新的 exe 也上傳不了
+//   2. 這次的 update/latest.json、update/android.json 指的安裝檔，轉到 GitHub 之後真的下載得到：
+//      電腦版的 .sig 要等於 latest.json 裡的簽章、安裝檔要回 200；手機 APK 要回 200、大小等於 android.json 記的。下載不到就擋（不帶著壞連結部署）
+//   3. 下載區（download/downloads.json：收發室橋的 zip，不是安裝檔）照舊：Firebase 每次部署都把整個網站換成這台電腦上的內容，
+//      zip 不進 git，本機沒有就從線上目前的版本補上並核對，核對不符或下載失敗就擋
 // 安裝檔清單（update/latest.json、update/android.json）的網址一律要寫官網 update/ 底下（#1585 甲案：檔案放 GitHub Release，
 // 官網路徑由 firebase.json 轉址過去）。以前遇到別的主機會靜默略過、不補也不核對，等於帶著沒檢查的網址部署；現在直接擋下。
 // android.json 還要過舊版 App 的白名單（relay/asn/src-tauri/src/android_update.rs 的 url_allowed）：不然舊的自行安裝版會整份拒絕。
@@ -17,6 +16,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { INSTALLER_FILE_RE, githubUrlForSite } from './github_release.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_SITE = path.resolve(here, '..', '..', 'site')
@@ -62,13 +62,15 @@ export function installerUrlProblems(siteDir, base = DEFAULT_BASE, history = and
   const pub = path.join(siteDir, 'public')
   const errors = [], warnings = []
   const latest = readJson(path.join(pub, 'update', 'latest.json'))
+  // 檔名也要是轉址認得的那幾種（firebase.json 的 redirects、github_release.mjs 的 INSTALLER_FILE_RE），不然轉不到 GitHub
+  const nameWhy = url => (INSTALLER_FILE_RE.test(decodeURIComponent(String(url).slice(`${base}/update/`.length))) ? '' : `檔名不是 ASN_<版本>_x64-setup.exe／ASN_<版本>_android.apk（firebase.json 的轉址只認這兩種）：${url}`)
   for (const [k, p] of Object.entries(latest?.platforms ?? {})) {
-    const why = installerUrlProblem(p?.url, base)
+    const why = installerUrlProblem(p?.url, base) || nameWhy(p?.url)
     if (why) errors.push(`update/latest.json 的 ${k}：${why}`)
   }
   const android = readJson(path.join(pub, 'update', 'android.json'))
   if (android) {
-    const why = installerUrlProblem(android.url, base, { android: true })
+    const why = installerUrlProblem(android.url, base, { android: true }) || nameWhy(android.url)
     if (why) errors.push(`update/android.json：${why}`)
   }
   for (const h of history) {
@@ -78,26 +80,61 @@ export function installerUrlProblems(siteDir, base = DEFAULT_BASE, history = and
   return { errors, warnings }
 }
 
-export function wantedFiles(siteDir, base = DEFAULT_BASE, history = androidHistory(siteDir)) {
+// 要從線上補回的檔：只剩下載區（安裝檔改放 GitHub，不補）。[{ rel（相對 public/）、sha256?、size? }]
+export function wantedFiles(siteDir, base = DEFAULT_BASE) {
   const pub = path.join(siteDir, 'public')
   const out = new Map()
   const add = (url, extra = {}) => {
-    if (typeof url !== 'string' || !url.startsWith(`${base}/`)) return
+    if (typeof url !== 'string' || !url.startsWith(`${base}/`)) return   // 下載區本來就有別站的檔（SKILL.md），不管
     const rel = decodeURIComponent(new URL(url).pathname.slice(1))
     if (!rel || rel.split('/').includes('..')) return
     out.set(rel, { ...out.get(rel), ...extra, rel })
   }
-  const latest = readJson(path.join(pub, 'update', 'latest.json'))
-  for (const p of Object.values(latest?.platforms ?? {})) {
-    add(p?.url)
-    if (p?.url) add(`${p.url}.sig`, { optional: true })   // 簽章也放在旁邊；線上沒有就算了（更新用 latest.json 裡的簽章字串）
-  }
-  for (const h of history) add(h.url, { sha256: h.sha256, size: h.bytes, history: true })   // 歷史 APK：本機和線上都沒有的不擋
-  const android = readJson(path.join(pub, 'update', 'android.json'))
-  if (android?.url) add(android.url, { sha256: android.sha256, size: android.bytes })
   const dl = readJson(path.join(pub, 'download', 'downloads.json'))
   for (const f of Object.values(dl?.files ?? {})) add(f?.url, { sha256: f?.sha256, size: f?.size })
   return [...out.values()]
+}
+
+/** 官網目錄 update/ 底下的安裝檔（不該有）：相對 public/ 的路徑 */
+export function installersInPublic(siteDir) {
+  const dir = path.join(siteDir, 'public', 'update')
+  let names = []
+  try { names = fs.readdirSync(dir) } catch { return [] }
+  return names.filter(n => /\.(exe|sig|apk)$/i.test(n)).map(n => `update/${n}`).sort()
+}
+
+/** 這次的清單指的安裝檔，轉到 GitHub 之後真的下載得到：回錯誤說明的陣列（空＝都在） */
+export async function githubProblems(siteDir, { fetchFn = fetch } = {}) {
+  const pub = path.join(siteDir, 'public')
+  const errors = []
+  const get = async (url, method = 'GET') => {
+    try { return await fetchFn(url, { method, redirect: 'follow', headers: { 'accept-encoding': 'identity' } }) } catch (e) { return { ok: false, status: `連不上（${e.message}）` } }
+  }
+  const latest = readJson(path.join(pub, 'update', 'latest.json'))
+  for (const [k, p] of Object.entries(latest?.platforms ?? {})) {
+    const exe = githubUrlForSite(p?.url), sig = githubUrlForSite(`${p?.url}.sig`)
+    if (!exe || !sig) { errors.push(`update/latest.json 的 ${k}：認不得的安裝檔網址 ${p?.url}`); continue }
+    const r = await get(sig)
+    if (!r.ok) { await r.body?.cancel?.(); errors.push(`GitHub 上沒有 ${sig}（HTTP ${r.status}）：先用 tools/release/github_release.mjs 發這一版`); continue }
+    const text = Buffer.from(await r.arrayBuffer()).toString('utf8').trim()
+    if (text !== String(p.signature ?? '').trim()) errors.push(`GitHub 上的 ${sig} 跟 latest.json 的簽章不一樣`)
+    const h = await get(exe, 'HEAD')
+    await h.body?.cancel?.()
+    if (!h.ok) errors.push(`GitHub 上沒有 ${exe}（HTTP ${h.status}）`)
+  }
+  const android = readJson(path.join(pub, 'update', 'android.json'))
+  if (android?.url) {
+    const apk = githubUrlForSite(android.url)
+    if (!apk) errors.push(`update/android.json：認不得的安裝檔網址 ${android.url}`)
+    else {
+      const h = await get(apk, 'HEAD')
+      await h.body?.cancel?.()
+      const len = Number(h.headers?.get?.('content-length'))
+      if (!h.ok) errors.push(`GitHub 上沒有 ${apk}（HTTP ${h.status}）`)
+      else if (Number.isInteger(android.bytes) && Number.isInteger(len) && len > 0 && len !== android.bytes) errors.push(`GitHub 上的 ${apk} 大小 ${len}，android.json 記的是 ${android.bytes}`)
+    }
+  }
+  return errors
 }
 
 function check(buf, want, label) {
@@ -105,7 +142,7 @@ function check(buf, want, label) {
   if (Number.isInteger(want.size) && buf.length !== want.size) throw new Error(`${label}：大小 ${buf.length} 位元組，清單寫的是 ${want.size}`)
 }
 
-// 回傳 { present, fetched, skipped }；任何一個檔案補不起來就丟錯（訊息寫明是哪個檔）
+// 回傳 { present, fetched, skipped }；官網目錄有安裝檔、GitHub 上找不到這版、下載區的檔補不起來，都丟錯（訊息寫明是哪個檔）
 export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {}, history } = {}) {
   const pub = path.join(siteDir, 'public')
   const result = { present: [], fetched: [], skipped: [] }
@@ -113,7 +150,11 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
   const urls = installerUrlProblems(siteDir, base, hist)
   if (urls.errors.length) throw new Error(`部署前檢查失敗：安裝檔清單的網址不對\n${urls.errors.map(e => `  - ${e}`).join('\n')}`)
   for (const w of urls.warnings) { result.skipped.push(w); log(`注意：${w}`) }
-  for (const want of wantedFiles(siteDir, base, hist)) {
+  const local = installersInPublic(siteDir)
+  if (local.length) throw new Error(`部署前檢查失敗：官網目錄不該再放安裝檔（改放 GitHub Release，官網路徑由 firebase.json 轉址）：\n${local.map(r => `  - ${r}`).join('\n')}`)
+  const gh = await githubProblems(siteDir, { fetchFn })
+  if (gh.length) throw new Error(`部署前檢查失敗：安裝檔在 GitHub Release 上找不到或對不上\n${gh.map(e => `  - ${e}`).join('\n')}`)
+  for (const want of wantedFiles(siteDir, base)) {
     const file = path.join(pub, ...want.rel.split('/'))
     if (fs.existsSync(file)) {
       // 本機有：有 sha／大小的就核對，不符就擋（不覆蓋，免得把別人的檔案換掉）
@@ -126,7 +167,6 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
     try { res = await fetchFn(url, { headers: { 'accept-encoding': 'identity' } }) } catch (e) { throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，從線上下載也失敗（${e.message}）`) }
     if (!res.ok) {
       await res.body?.cancel?.() // 不讀的回應要丟棄，否則連線一直開著，程序結束不了、部署卡住
-      if ((want.optional || want.history) && res.status === 404) { result.skipped.push(want.rel); continue }
       throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，線上也拿不到（HTTP ${res.status}）`)
     }
     const buf = Buffer.from(await res.arrayBuffer())
