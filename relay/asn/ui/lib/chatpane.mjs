@@ -462,6 +462,8 @@ export const ChatPane = {
     const closeViewer = () => { viewer.value = null; zoomer.reset() }
     // 看大圖開了／關了告訴外面（手機用來推、退一筆瀏覽記錄，讓系統返回鍵只關掉看圖，#1537）；電腦不接
     watch(() => !!viewer.value, open => emit('viewer', open))
+    // 看圖開著時窗格被拆掉（例如那位夥伴剛好被移除）：watch 不會再跑，補送一次「關」，手機才會把看圖那一筆記錄退掉（#1542 審查）
+    onBeforeUnmount(() => { if (viewer.value) emit('viewer', false) })
     function insertEmo(code) {
       draft.value = (draft.value ? draft.value + ' ' : '') + code
       pickerOpen.value = false

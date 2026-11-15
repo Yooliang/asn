@@ -363,6 +363,7 @@ test('手機看大圖（#1537）：跟離線名單同一套浮層；開＝多一
   const pane = read('ui', 'lib', 'chatpane.mjs'), js = read('ui', 'm.js'), html = read('ui', 'm.html')
   assert.match(pane, /watch\(\(\) => !!viewer\.value, open => emit\('viewer', open\)\)/)
   assert.match(pane, /emits: \[[^\]]*'viewer'\]/)
+  assert.match(pane, /onBeforeUnmount\(\(\) => \{ if \(viewer\.value\) emit\('viewer', false\) \}\)/, '看圖開著時窗格被拆掉也要送「關」，不留多的記錄')
   assert.match(js, /function onPhotoViewer\(open\) \{[\s\S]*?if \(open\) \{ if \(nav\.tab === HOME_TAB && !nav\.sheet && !fourthNav\.busy\(\)\) go\(photoNav\(\)\) \}[\s\S]*?else if \(nav\.sheet === 'photo' && !fourthNav\.busy\(\)\) history\.back\(\)/)
   assert.match(js, /watch\(\(\) => nav\.sheet, s => \{ if \(s !== 'photo' && photoShown\) chatPaneEl\.value\?\.closeViewer\?\.\(\) \}\)/)
   assert.match(html, /<chat-pane v-if="chatFriend"[\s\S]*?@viewer="onPhotoViewer" ref="chatPaneEl"><\/chat-pane>/)
