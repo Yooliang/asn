@@ -33,6 +33,9 @@ export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async (
   if (on.join('|') !== want.selected) return { ok: false, why: '預設選到的不對：' + on.join('、') + '（應為 ' + want.selected + '）' };
   const note = document.querySelector('.m-lch-display');
   if (!vis(note) || note.textContent.trim() !== want.note) return { ok: false, why: '沒看到前台或背景的說明：' + (note?.textContent ?? '沒有') };
+  // 滑頁停下來後 pager 不留 will-change（#1565）：留著的話內頁停在轉場途中的小數位移、字偏半像素，截圖每次不一樣
+  const pager = document.querySelector('.m-pager');
+  if (!(await wait(() => pager && getComputedStyle(pager).willChange === 'auto', 20))) return { ok: false, why: '滑頁停下來後 pager 還留著 will-change：' + (pager ? getComputedStyle(pager).willChange : '找不到 pager') };
   fs.scrollIntoView({ block: 'start' });
   await sleep(200);
   const bad = [];
