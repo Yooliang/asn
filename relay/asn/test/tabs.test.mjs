@@ -331,7 +331,7 @@ test('電腦版「對話」分頁（0.2.18）：活動中的對話＋所有群�
   assert.match(js, /function goTop\(key\) \{[\s\S]*?keys\.includes\(lastDevTab\) \? lastDevTab : keys\[0\]/, '點夥伴回到上次看的設備頁籤')
   // 畫面：上方四個分頁；左邊直排只有設備頁籤（只在夥伴裡）；設定最後一列是使用指引，指引上方有「‹ 設定」
   assert.match(html, /<nav class="top-tabs" role="tablist" aria-label="大分頁">\s*<button v-for="t in TOP_TABS"/)
-  assert.match(html, /<nav class="rail" role="tablist" aria-label="設備頁籤" v-if="isDevice">/)
+  assert.match(html, /<nav class="rail" role="tablist" aria-label="設備頁籤" v-if="isDevice && skin !== 'line'">/, '設備頁籤欄只在 LINE 外觀不輸出（#1527）')
   assert.doesNotMatch(html, /v-for="t in FIXED_TABS"|rail-gap|rtab-groups|tab === 'groups'/, '左邊不再有通知、群組、指引、齒輪')
   assert.match(html, /<div class="list chat-list" v-else-if="tab === 'chats'">[\s\S]*?groupFlow\.openCreate\(\)[\s\S]*?groupFlow\.openJoin\(\)[\s\S]*?v-for="x in chatRows"/)
   assert.match(html, /<button class="pane-back guide-back" type="button" @click="tab = 'settings'">‹ 設定<\/button>/)

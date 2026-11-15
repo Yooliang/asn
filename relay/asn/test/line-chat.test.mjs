@@ -141,7 +141,7 @@ test('輸入列：圖片鈕、框內表情鈕只在 LINE 輸出；原本的按�
   }
   assert.match(linesWith(pane, /class="lc-photo"/)[0], /@click="fileEl && fileEl\.click\(\)" :disabled="photoBusy"/, '圖片鈕沿用既有的選檔 input 與 disabled 條件')
   assert.match(linesWith(pane, /class="lc-emo"/)[0], /pickerOpen = !pickerOpen/, '表情鈕沿用 pickerOpen')
-  assert.match(pane, /<div class="picker" v-if="pickerOpen && \(!isLine \|\| plusOpen\)"/, '非 LINE 時選單的條件等於原本的 pickerOpen')
+  assert.match(pane, /<div class="picker" v-if="pickerOpen && \(!isLine \|\| plusOpen \|\| lineRow\)"/, '非 LINE 時選單的條件等於原本的 pickerOpen（LINE 電腦版的按鈕區直接開，#1527）')
   // 原本工具列上的按鈕一顆都沒拿掉（LINE 下都收在「＋」選單裡）
   for (const label of ['表情符號', '通話', '語音輸入', '傳送震動', '傳照片', '傳送檔案', '截圖']) assert.ok(pane.includes(`aria-label="${label}"`), `原本的「${label}」還在`)
   assert.match(pane, /@click="startShot"/); assert.match(pane, /@click="nudge"/); assert.match(pane, /@click="startCall"/); assert.match(pane, /@click="dictClick"/); assert.match(pane, /@click="micClick"/)

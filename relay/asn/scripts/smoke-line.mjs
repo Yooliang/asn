@@ -56,10 +56,18 @@ export const lineProbeSource = kind => `(async () => {
   if (kind === 'msgs') {
     const msgs = await wait(() => document.querySelector('.msgs') && document.querySelector('.msg .m-body.tone-them') && document.querySelector('.msgs'));
     if (!msgs) return { ok: false, why: 'LINE 外觀：' + '沒有出現對方的訊息泡泡（tone-them）；頭像模式或底色沒有被 LINE 固定成「頭像在旁、自動」？' };
-    if (cs(msgs, 'background-color') !== BG) return { ok: false, why: 'LINE 外觀：' + '對話區底色不是淡藍純色：' + cs(msgs, 'background-color') };
+    // 電腦版（#1527）：對話區整片白底、沒有內層框、對方泡泡淺灰；手機照舊淡藍底、對方白泡泡
+    const desk = !!document.querySelector('#app.win');
+    const wantBg = desk ? 'rgb(255, 255, 255)' : BG, wantThem = desk ? 'rgb(238, 240, 243)' : 'rgb(255, 255, 255)';
+    if (cs(msgs, 'background-color') !== wantBg) return { ok: false, why: 'LINE 外觀：' + '對話區底色不是' + (desk ? '白色' : '淡藍純色') + '：' + cs(msgs, 'background-color') };
+    if (desk) {
+      const cm = msgs.closest('.conv-main');
+      if (cs(cm, 'border-top-width') !== '0px' || cs(cm, 'border-top-left-radius') !== '0px') return { ok: false, why: 'LINE 外觀：' + '電腦版對話區還有內層框' };
+      if (msgs.scrollWidth > msgs.clientWidth + 1) return { ok: false, why: 'LINE 外觀：' + '對話區出現橫向捲動' };
+    }
     if (cs(msgs, 'background-image') !== 'none') return { ok: false, why: 'LINE 外觀：' + '對話區底色不該有圖（純色）：' + cs(msgs, 'background-image') };
     const them = document.querySelector('.msg .m-body.tone-them');
-    if (cs(them, 'background-color') !== 'rgb(255, 255, 255)') return { ok: false, why: 'LINE 外觀：' + '對方泡泡不是白色：' + cs(them, 'background-color') };
+    if (cs(them, 'background-color') !== wantThem) return { ok: false, why: 'LINE 外觀：' + '對方泡泡不是' + (desk ? '淺灰' : '白色') + '：' + cs(them, 'background-color') };
     const tail = getComputedStyle(them, '::before');
     if (tail.content === 'none' || tail.clipPath === 'none' || parseFloat(tail.width) < 4) return { ok: false, why: 'LINE 外觀：' + '對方泡泡沒有尾巴（::before）' };
     const mine = document.querySelector('.msg .m-body.tone-me');
@@ -137,7 +145,27 @@ export const lineProbeSource = kind => `(async () => {
     return { ok: true, why: '' };
   }
 
-  if (kind === 'desk-compose' || kind === 'm-compose') {
+  // 電腦版（#1527）：輸入框上方一排按鈕（表情、附件／圖片…），下面一整塊白色輸入框；左邊沒有「＋」、圖片鈕，框內沒有表情鈕，也沒有「＞」
+  if (kind === 'desk-compose') {
+    const main = await wait(() => document.querySelector('.compose-main.lc-row .composer textarea') && document.querySelector('.compose-main.lc-row'));
+    if (!main) return { ok: false, why: 'LINE 外觀：' + '電腦版找不到按鈕區版的輸入列' };
+    await sleep(300);
+    const R = e => e.getBoundingClientRect(), vis = e => !!e && e.getClientRects().length > 0 && cs(e, 'display') !== 'none';
+    const ta = main.querySelector('.composer textarea'), row = main.querySelector(':scope > .toolbar');
+    if (!vis(row)) return { ok: false, why: 'LINE 外觀：' + '輸入框上方沒有按鈕區' };
+    for (const sel of ['.mc-plus', '.lc-photo', '.lc-emo', '.lc-more']) if (vis(main.querySelector(sel))) return { ok: false, why: 'LINE 外觀：' + '電腦版輸入框旁不該有 ' + sel };
+    const tools = [...row.querySelectorAll('.tool')].filter(vis), lab = b => b.getAttribute('aria-label');
+    for (const need of ['表情符號', '傳照片', '傳送檔案']) if (!tools.some(b => lab(b) === need)) return { ok: false, why: 'LINE 外觀：' + '按鈕區少了「' + need + '」' };
+    const top0 = R(tools[0]).top;
+    if (tools.some(b => Math.abs(R(b).top - top0) > 1)) return { ok: false, why: 'LINE 外觀：' + '按鈕區的按鈕不在同一排' };
+    if (R(row).bottom > R(ta).top + 1) return { ok: false, why: 'LINE 外觀：' + '按鈕區要在輸入框上方' };
+    if (cs(ta, 'background-color') !== 'rgb(255, 255, 255)' || cs(main.closest('.compose-row'), 'background-color') !== 'rgb(255, 255, 255)') return { ok: false, why: 'LINE 外觀：' + '輸入區不是一整塊白色' };
+    if (R(ta).width < R(main).width - 90) return { ok: false, why: 'LINE 外觀：' + '輸入框沒有撐滿整塊：' + R(ta).width + ' / ' + R(main).width };
+    if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: 'LINE 外觀：' + '視窗出現橫向捲動' };
+    return { ok: true, why: '' };
+  }
+
+  if (kind === 'm-compose') {
     const main = await wait(() => document.querySelector('.compose-main .composer textarea') && document.querySelector('.compose-main'));
     if (!main) return { ok: false, why: 'LINE 外觀：' + '找不到輸入列' };
     await sleep(500);
