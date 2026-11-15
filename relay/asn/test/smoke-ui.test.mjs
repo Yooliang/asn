@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.devMore && !s.probe.devSel && !s.probe.lineM && !s.probe.photoBack && !s.probe.listTrim && !s.probe.lineDesk && s.probe.updDl === undefined && !s.probe.lineUi && !s.probe.lineTimes && !s.probe.camera && !s.probe.multiPhoto && !s.probe.photoZoom && !s.probe.gjump && !s.probe.fpMark && !s.probe.mchatBack && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr && !s.probe.mrelease)
+  const mask = SCENARIOS.filter(s => s.probe && !probeEntry(s.probe))   // 對不到任何登記的探測（#1540）就是遮罩檢查
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('section[aria-label="夥伴"] .m-head .m-me'), '手機：夥伴頁左上的頭像（0.2.18 起對話頁也有標頭，指定夥伴頁那一份）')
