@@ -189,9 +189,23 @@ test('安裝檔網址的規則：官網 update/ 底下；android 還要過舊版
   ]
   for (const u of bad) assert.notEqual(installerUrlProblem(u, BASE), '', String(u))
   // 舊版 App 白名單另外不收的：只擋 android（電腦版的更新外掛沒有這層白名單）
-  for (const u of [`${BASE}/update/x.apk?v=1`, `${BASE}/update/x.apk#a`, `${BASE}/update/u@x.apk`, `${BASE}/update/a b.apk`, `${BASE}/update/${'a'.repeat(300)}.apk`]) {
+  for (const u of [`${BASE}/update/x.apk?v=1`, `${BASE}/update/x.apk#a`, `${BASE}/update/u@x.apk`, `${BASE}/update/a b.apk`, `${BASE}/update/${'a'.repeat(300)}.apk`,
+    `${BASE}/update/a"b.apk`, `${BASE}/update/a'b.apk`, `${BASE}/update/a<b.apk`, `${BASE}/update/a\b.apk`, `${BASE}/update/a\u0001b.apk`, `${BASE}/update/a\u007fb.apk`]) {
     assert.notEqual(installerUrlProblem(u, BASE, { android: true }), '', u)
   }
+})
+
+test('跟 Rust 一樣算：長度是 UTF-8 位元組、U+0080～U+009F 也是控制字元', () => {
+  // 100 個「測」：字數 100、UTF-8 是 300 位元組，加上前綴一定超過 300 位元組（Rust 的 url.len() 會擋）；字數算法會放行
+  const zh = `${BASE}/update/${'測'.repeat(100)}.apk`
+  assert.ok(zh.length <= 300 && Buffer.byteLength(zh, 'utf8') > 300, '這個例子要剛好卡在字數與位元組之間')
+  assert.notEqual(installerUrlProblem(zh, BASE, { android: true }), '')
+  // 少一點、位元組數在 300 以內的中文檔名照樣收
+  assert.equal(installerUrlProblem(`${BASE}/update/${'測'.repeat(10)}.apk`, BASE, { android: true }), '')
+  // U+0085（NEL）、U+009F：Rust 的 char::is_control 算控制字元
+  for (const c of ['\u0080', '\u0085', '\u009f']) assert.notEqual(installerUrlProblem(`${BASE}/update/a${c}b.apk`, BASE, { android: true }), '', `U+${c.charCodeAt(0).toString(16)}`)
+  // U+00A0 不是控制字元（Rust 也放行），這裡也不擋
+  assert.equal(installerUrlProblem(`${BASE}/update/a\u00a0b.apk`, BASE, { android: true }), '')
 })
 
 test('白名單跟舊版 App（android_update.rs 的 url_allowed）同一套：前綴與禁止的字元', () => {

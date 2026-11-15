@@ -41,6 +41,11 @@ export function androidHistory(siteDir) {
   } catch { return [] }
 }
 
+// 跟 android_update.rs 的 url_allowed 逐條對齊：長度看 UTF-8 位元組（Rust 的 url.len()）；控制字元照 Rust 的 char::is_control，
+// 也就是 U+0000～U+001F、U+007F～U+009F；另外擋空白 \ " ' < >，update/ 後面不能有 .. @ ? #
+const RUST_CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+const androidAllowed = url => Buffer.byteLength(url, 'utf8') <= 300 && !RUST_CONTROL.test(url) && !/[ \\"'<>@?#]/.test(url)
+
 /** 安裝檔清單的網址不合格的原因；合格回空字串。android＝要過舊版 App 白名單（跟 android_update.rs 的 url_allowed 同一套） */
 export function installerUrlProblem(url, base = DEFAULT_BASE, { android = false } = {}) {
   if (typeof url !== 'string' || !url) return '沒有網址'
@@ -48,7 +53,7 @@ export function installerUrlProblem(url, base = DEFAULT_BASE, { android = false 
   if (!url.startsWith(prefix)) return `不是官網 update/ 底下的網址（安裝檔一律寫官網路徑，轉到 GitHub Release 交給 firebase.json）：${url}`
   const rest = url.slice(prefix.length)
   if (!rest || rest.includes('..')) return `路徑不對：${url}`
-  if (android && (url.length > 300 || /[\s\\"'<>@?#]/.test(url) || [...url].some(c => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f))) return `舊版 App 的白名單不收這個網址（不能有 @ ? # 空白與控制字元、最長 300 字）：${url}`
+  if (android && !androidAllowed(url)) return `舊版 App 的白名單不收這個網址（不能有 @ ? # 空白、引號、角括號、反斜線與控制字元，最長 300 位元組）：${url}`
   return ''
 }
 
