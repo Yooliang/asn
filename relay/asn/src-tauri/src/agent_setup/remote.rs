@@ -115,6 +115,8 @@ mod tests {
         assert!(args(rbody).contains("Arc::new(claude_relogin_evidence)"), "手機觸發：證據函式");
         assert!(args(body).contains("Arc::new(|| None)"), "桌面按鈕：照舊，已登入就不動");
         let lib_lf = lib.replace("\r\n", "\n");
+        // 屬性要掛在 run_remote_setup 自己身上（#1563 調查員審查：新加的函式不能插在它的說明與屬性中間）
+        assert!(lib_lf.contains("結果回報到手機\n#[cfg(feature = \"gui\")]\n#[cfg(desktop)]\nasync fn run_remote_setup("), "run_remote_setup 的說明與屬性緊貼著它");
         let ev = lib_lf.split("fn claude_relogin_evidence() -> Option<&'static str> {").nth(1).expect("有證據函式").split("\n}\n").next().unwrap();
         assert!(ev.contains("login_watch::failed_recently("), "只看本機對話紀錄的失效判定");
         assert!(!ev.contains("claude_screen") && !ev.contains("partner_notices"), "讀畫面只拿來顯示入口，不當放行的證據");

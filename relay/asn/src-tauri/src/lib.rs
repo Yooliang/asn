@@ -580,9 +580,6 @@ fn agent_setup_plan() -> &'static str {
 fn agent_setup_cancel() {
     agent_setup::setup::request_cancel();
 }
-/// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
-#[cfg(feature = "gui")]
-#[cfg(desktop)]
 /// 手機要求「替這台登入 Claude」、而 Claude 顯示已登入時，這台本機有沒有登入已經失效的證據（#1512 C）。
 /// 只認對話紀錄的失效判定（login_watch，要是新的判定）。讀畫面的結果只拿來顯示入口與標籤，不當放行的證據。
 /// 回的原因只進 log
@@ -600,6 +597,9 @@ fn claude_screen_says_login() -> bool {
     launch::term::partner_notices().iter().any(|n| n.code == login)
 }
 
+/// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
 async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
     use agent_setup::remote::{gate, Gate};
     // #933：別家的裝置碼型登入走另一條路（同樣先過本機把關）
