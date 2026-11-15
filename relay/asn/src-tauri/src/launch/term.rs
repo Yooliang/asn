@@ -2151,11 +2151,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             now = moved.ok_or(USAGE_HALF)?;
         }
         send(AnswerKey::Enter)?;
-        // 送完再讀一次：同一個選單還在就不算成功
+        // 送完再讀一次：選單不見了（或換成別的選單）才算成功；同一個選單還在不算，讀不到也不算（讀不到不等於成功，#1553 asn真 審查必修）
         std::thread::sleep(wait);
         match recheck() {
-            Ok(Some((_, hash))) if hash == want => Err(USAGE_STILL.into()),
-            _ => Ok(()),
+            Ok(None) => Ok(()),
+            Ok(Some((_, hash))) if hash != want => Ok(()),
+            Ok(Some(_)) => Err(USAGE_STILL.into()),
+            Err(_) => Err(USAGE_UNSURE.into()),
         }
     }
 
@@ -2761,6 +2763,8 @@ const USAGE_CHANGED: &str = "選單的內容變了，沒有按 Enter，什麼都
 const USAGE_HALF: &str = "游標沒有停在你選的那一項，所以沒有按 Enter，什麼都沒有選。請到那台電腦的畫面上處理";
 /// 額度選單：按了 Enter，同一個選單還在
 const USAGE_STILL: &str = "已經按下，但選單還在畫面上，請到那台電腦的畫面上確認";
+/// 額度選單：按了 Enter 之後讀不到畫面，不知道結果
+const USAGE_UNSURE: &str = "已經按下，請到電腦上確認結果";
 /// 額度選單每走一格後，每次重讀前等多久、最多讀幾次
 const USAGE_STEP_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
 const USAGE_STEP_TRIES: usize = 8;
@@ -7855,11 +7859,18 @@ mod tests {
             assert!(check(0, 1, bounce, &keys).unwrap_err().contains("沒有按 Enter"));
             // 按了 Enter 之後同一個選單還在：不算成功
             assert!(check(0, 0, vec![Some((0, "h"))], &[enter]).unwrap_err().contains("還在畫面上"));
+            // 按了 Enter 之後換成別的選單（雜湊不同）：算成功
+            check(0, 0, vec![Some((0, "別的"))], &[enter]).unwrap();
             // 重讀失敗（例如視窗不在了）：不按 Enter
             let before = sent(&rig).len();
             let mut err: Re = Box::new(|| Err("這個夥伴已經結束".to_string()));
             assert!(rig.svc.usage_send_with(&snap, "h", 0, 1, &mut *err, z).unwrap_err().contains("沒有按 Enter"));
             assert_eq!(sent(&rig)[before..].to_vec(), vec![down.to_string()]);
+            // 按了 Enter 之後讀不到畫面：不算成功（讀不到不等於成功），請本人到電腦上確認
+            let before = sent(&rig).len();
+            let mut err: Re = Box::new(|| Err("這個夥伴已經結束".to_string()));
+            assert_eq!(rig.svc.usage_send_with(&snap, "h", 0, 0, &mut *err, z).unwrap_err(), USAGE_UNSURE);
+            assert_eq!(sent(&rig)[before..].to_vec(), vec![enter.to_string()]);
         }
 
         #[test]
