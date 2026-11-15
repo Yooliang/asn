@@ -84,7 +84,7 @@ export const ChatPane = {
     openMember: { type: Function, default: null },   // 群組：點成員（發言者的名字、頭像、「N 人離線」名單）跳到跟他的一對一（#1515）；回 false＝不在夥伴名單裡
     piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back', 'viewer'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     // 現代外觀：輸入框的「＋」展開上方工具列（復古 Aero 下沒有這個選單）；點了裡面的工具就收起來（表情符號例外：它要接著選）
@@ -460,6 +460,10 @@ export const ChatPane = {
       } catch (e) { v.msg = e.message } finally { v.busy = false }
     }
     const closeViewer = () => { viewer.value = null; zoomer.reset() }
+    // 看大圖開了／關了告訴外面（手機用來推、退一筆瀏覽記錄，讓系統返回鍵只關掉看圖，#1537）；電腦不接
+    watch(() => !!viewer.value, open => emit('viewer', open))
+    // 看圖開著時窗格被拆掉（例如那位夥伴剛好被移除）：watch 不會再跑，補送一次「關」，手機才會把看圖那一筆記錄退掉（#1542 審查）
+    onBeforeUnmount(() => { if (viewer.value) emit('viewer', false) })
     function insertEmo(code) {
       draft.value = (draft.value ? draft.value + ' ' : '') + code
       pickerOpen.value = false

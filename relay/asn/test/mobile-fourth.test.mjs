@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { FOURTH_KEEP_MS, PAGE_TAB, acctPage, fourthOnNotice, launchPage, needsLeaveAsk, fourthExpired, fourthMsLeft, fourthOnTab, guidePage, normalizePage, openFourth, pageLayers, settingPage } from '../ui/lib/mobile-fourth.mjs'
 import { createMobileNav, pageTitle } from '../ui/lib/mobile-nav.mjs'
-import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, isNewNotice, noticeLastAt, offlineNav, opsNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
+import { HOME_TAB, TABS, chatNav, chatsUnread, initialNav, isNewNotice, noticeLastAt, offlineNav, opsNav, photoNav, noticeUnread, normalizeNav, pageNav, tabDot, tabIndex, tabLabel, tabList, tabNav, viewedChatId } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -347,6 +347,26 @@ test('系統返回鍵（#1438 對話分頁直接是那一則之後；#1442）：
   const g = harness('me')
   g.r.openPage(guidePage()); g.r.openChat(); g.flush()
   assert.equal(g.st.fourth?.page ? g.nav.tab : HOME_TAB, HOME_TAB); assert.equal(g.nav.chat, false); assert.equal(g.depth(), 0)
+})
+
+test('手機看大圖（#1537）：跟離線名單同一套浮層；開＝多一筆記錄，返回鍵退那一筆＝只關掉看圖、留在同一個對話；用關閉鈕關掉也要退掉那一筆', () => {
+  const h = harness()
+  h.r.go(photoNav())
+  assert.equal(h.nav.sheet, 'photo'); assert.equal(h.nav.chat, true); assert.equal(h.depth(), 1, '開大圖＝多推一筆記錄')
+  assert.deepEqual(normalizeNav({ sheet: 'photo', tab: 'list' }), photoNav(), '記錄裡讀回來的看圖層照樣認得')
+  h.press()
+  assert.equal(h.nav.sheet, ''); assert.equal(h.nav.tab, 'chats'); assert.equal(h.depth(), 0, '返回鍵只退看圖那一筆，回到底，不多不少')
+  // 看圖開著時點分頁列、左右滑：照其他浮層的規矩不動（大圖蓋滿畫面）
+  const o = harness(); o.r.go(photoNav()); o.r.goTab('me'); o.flush()
+  assert.equal(o.nav.sheet, 'photo'); assert.equal(o.depth(), 1)
+  // 接線：對話窗格告訴外面看圖開了／關了；手機開＝推 photoNav、關＝退那一筆；記錄退掉了（返回鍵）就叫窗格關掉看圖
+  const pane = read('ui', 'lib', 'chatpane.mjs'), js = read('ui', 'm.js'), html = read('ui', 'm.html')
+  assert.match(pane, /watch\(\(\) => !!viewer\.value, open => emit\('viewer', open\)\)/)
+  assert.match(pane, /emits: \[[^\]]*'viewer'\]/)
+  assert.match(pane, /onBeforeUnmount\(\(\) => \{ if \(viewer\.value\) emit\('viewer', false\) \}\)/, '看圖開著時窗格被拆掉也要送「關」，不留多的記錄')
+  assert.match(js, /function onPhotoViewer\(open\) \{[\s\S]*?if \(open\) \{ if \(nav\.tab === HOME_TAB && !nav\.sheet && !fourthNav\.busy\(\)\) go\(photoNav\(\)\) \}[\s\S]*?else if \(nav\.sheet === 'photo' && !fourthNav\.busy\(\)\) history\.back\(\)/)
+  assert.match(js, /watch\(\(\) => nav\.sheet, s => \{ if \(s !== 'photo' && photoShown\) chatPaneEl\.value\?\.closeViewer\?\.\(\) \}\)/)
+  assert.match(html, /<chat-pane v-if="chatFriend"[\s\S]*?@viewer="onPhotoViewer" ref="chatPaneEl"><\/chat-pane>/)
 })
 
 test('群組「N 人離線」名單（#1466）：是蓋在對話上的一層浮層（同「⋯」選單），返回鍵退那一筆就收起；對話分頁是底，記錄只多一層、退完回到原深度', () => {

@@ -46,6 +46,7 @@ export const chatNav = () => ({ tab: 'chats', sheet: '', chat: true })   // 對�
 export const meNav = () => tabNav('me')
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops', chat: true })
 export const offlineNav = () => ({ tab: 'chats', sheet: 'offline', chat: true })   // 群組的「N 人離線」名單（#1460）
+export const photoNav = () => ({ tab: 'chats', sheet: 'photo', chat: true })   // 對話裡看大圖（#1537）：系統返回鍵只關掉看圖
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret', chat: true })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq', chat: true })
 export const permReqNav = () => ({ tab: 'chats', sheet: 'permreq', chat: true })
@@ -55,6 +56,7 @@ export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', chat: false, page: n
 export function normalizeNav(raw) {
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'offline') return offlineNav()
+  if (raw?.sheet === 'photo') return photoNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.sheet === 'permreq') return permReqNav()
