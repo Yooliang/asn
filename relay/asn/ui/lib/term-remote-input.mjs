@@ -5,6 +5,7 @@
 import { frameToWrite, loadXterm, xtermOptions, pasteSummary, PASTE_TEXT } from './term-view.mjs'
 import { FRAME_EVENT, END_EVENT, WARN_BEFORE_MS, REMOTE_TEXT, openTerm, remoteBarState, startError } from './term-remote.mjs'
 import { ENTER_DELAY_MS, createLineSender, pasteLines } from './term-line.mjs'
+import { KEYS_TEXT, droppedGrew, createKeyChain } from './term-keys.mjs'
 export { ENTER_DELAY_MS, pasteLines }
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
@@ -47,12 +48,14 @@ export const RemoteInput = {
     active: { type: Boolean, default: true },
     barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
-  emits: ['back', 'status', 'unsent'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層
+  emits: ['back', 'status', 'unsent', 'screen'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: warn.value, main: { waiting: INPUT_TEXT.waiting, active: phase.value === 'typing' ? INPUT_TEXT.typing(props.machine || props.node, props.name) : '' }, danger: true }))
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + phase.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, stoppable: phase.value === 'typing' } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
+    // 按鍵列（#1512 B）：還沒開始打字就先排著，開始了才依序送；那台回報拿掉幾批按鍵的數字（變大就告訴本人）
+    let keyQueue = [], lastDropped = 0
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
     // 回 Promise<boolean>：送出去了沒（沒在打字、沒東西也算沒送）
     const send = (data, paste) => {
@@ -77,7 +80,20 @@ export const RemoteInput = {
     const { sendLine, flush, yieldAsk, answer, takeLeft } = createLineSender({
       send, askPaste, emit, ready: () => phase.value === 'typing', ended: () => phase.value === 'ended', restart: () => { void start() },
     })
+    // 按鍵列的一顆：跟打字同一條路（那台交給窗格前照樣重讀畫面）。輸入框那句排在前面時，等它的 Enter 送完再送。
+    // 按鍵串成一條：前一顆送出、確認回來了才送下一顆，順序不看 IPC 誰先到（「↓」「Enter」反過來就選錯項，#1561 asn真 審查必修）；
+    // 有一顆沒送出，後面排著的全部不送（不能少了「↓」還按 Enter）。結束打字時也一併作廢
+    const keyChain = createKeyChain(seq => send(seq, false))
+    const chainKey = seq => keyChain.push(seq)
+    const flushKeys = () => { const ks = keyQueue; keyQueue = []; ks.forEach(chainKey) }
+    const sendKey = seq => {
+      if (!seq) return
+      if (phase.value === 'typing') { void chainKey(seq); return }
+      keyQueue.push(seq)
+      if (phase.value === 'ended') void start()
+    }
     watch(phase, p => { if (p === 'typing') flush() })
+    watch(phase, p => { if (p === 'typing' && keyQueue.length) setTimeout(flushKeys, ENTER_DELAY_MS + 50) })
     const pasteYes = () => { if (answer(true)) return; const t = askPaste.value; askPaste.value = null; send(t, true) }
     const pasteNo = () => { if (!answer(false)) askPaste.value = null }
     const cleanup = () => {
@@ -91,10 +107,11 @@ export const RemoteInput = {
       cleanup(); phase.value = 'ended'; note.value = text; id = ''
       const left = takeLeft(); askPaste.value = null
       if (left) emit('unsent', left)
+      keyQueue = []; keyChain.cancel()   // 排著的、串著還沒送的按鍵都不留到下一次（按鍵不像整句可以放回輸入框）
     }
     const start = async () => {
       cleanup()
-      phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''
+      phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
         const Terminal = await loadXterm()
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
@@ -102,6 +119,8 @@ export const RemoteInput = {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'typing') phase.value = 'typing'
           term.write(frameToWrite(f))
+          emit('screen', { text: String(f.text ?? ''), cols: Number(f.meta?.cols) || 0 })
+          if (droppedGrew(lastDropped, f.meta?.keys_dropped)) { lastDropped = Number(f.meta.keys_dropped); warn.value = KEYS_TEXT.dropped }
         })
         offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
@@ -125,7 +144,7 @@ export const RemoteInput = {
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
     onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = takeLeft(); if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
+    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, sendKey, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
   },
   template: `
 <div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">

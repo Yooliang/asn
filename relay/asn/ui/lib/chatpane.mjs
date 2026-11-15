@@ -17,6 +17,7 @@ import { TermView } from './term-view.mjs'
 import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
 import { GRACE_AGAIN_LABEL, TYPING_ENDED_TEXT, createGrace } from './term-grace.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
+import { TERM_KEYS, KEYS_TEXT, joinWrapped, findLoginUrls } from './term-keys.mjs'
 import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
@@ -259,6 +260,30 @@ export const ChatPane = {
       if (!typingShown.value) remoteTyping.value = true
       nextTick(() => { if (rinEl.value?.sendLine) rinEl.value.sendLine(text); else restoreDraft(text) })
     }
+    // 手機看別台終端時的按鍵列、複製畫面文字、登入網址（#1512 B）。按鍵跟輸入框同一條路：還沒在打字就先開始，開始了才送；
+    // 那台交給窗格前照樣重讀畫面，停在需要人確認的畫面時數字、Enter、方向鍵會被拿掉（會告訴本人），這裡不另開繞過檢查的入口
+    const remoteScreen = ref({ text: '', cols: 0 })
+    const onRemoteScreen = s => { if (s && typeof s.text === 'string') remoteScreen.value = s }
+    watch(remoteShown, on => { if (!on) remoteScreen.value = { text: '', cols: 0 } })
+    const keyRowShown = computed(() => props.noBar && remoteShown.value)
+    const keysUsable = computed(() => remoteCompose.value)
+    const pressKey = k => {
+      if (!keysUsable.value || !k?.seq) return
+      if (!typingShown.value) remoteTyping.value = true
+      nextTick(() => rinEl.value?.sendKey?.(k.seq))
+    }
+    const screenPlain = computed(() => joinWrapped(remoteScreen.value.text, remoteScreen.value.cols))
+    const loginUrls = computed(() => findLoginUrls(screenPlain.value))
+    const copyNote = ref('')
+    let copyTimer = 0
+    const copyScreen = async () => {
+      clearTimeout(copyTimer)
+      try { await navigator.clipboard.writeText(screenPlain.value); copyNote.value = KEYS_TEXT.copied } catch (e) { console.info('[ASN] 複製畫面文字失敗', String(e?.message ?? e)); copyNote.value = KEYS_TEXT.copyFailed }
+      copyTimer = setTimeout(() => { copyNote.value = '' }, 2500)
+    }
+    // 登入網址在這台開（手機走系統瀏覽器的 Intent、電腦走預設瀏覽器）；Rust 端 open_link 再驗一次協定
+    const openLogin = u => { if (findLoginUrls(u?.url).length) globalThis.__TAURI__?.core?.invoke?.('open_link', { url: u.url })?.catch?.(e => console.info('[ASN] 開啟登入網址失敗', String(e?.message ?? e))) }
+    onBeforeUnmount(() => clearTimeout(copyTimer))
     // 沒送進終端的字放回輸入框（輸入框已經有新的字就接在後面，不蓋掉）
     function restoreDraft(text) {
       const t = String(text ?? '')
@@ -589,7 +614,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -598,8 +623,18 @@ export const ChatPane = {
   <div class="chatpane-body">
   <div class="chatpane-main">
   <term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
-  <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')"></remote-view>
-  <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="active" @back="remoteTyping = false"></remote-input>
+  <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')" @screen="onRemoteScreen"></remote-view>
+  <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" @back="remoteTyping = false" @screen="onRemoteScreen"></remote-input>
+  <div class="m-term-keys" v-if="keyRowShown" role="group" :aria-label="KEYS_TEXT.row">
+    <div class="m-term-keyrow">
+      <button v-for="k in TERM_KEYS" :key="k.id" type="button" class="m-term-key" :class="'k-' + k.id" :aria-label="k.aria" :disabled="!keysUsable" @click="pressKey(k)">{{ k.label }}</button>
+    </div>
+    <div class="m-term-keyrow m-term-tools">
+      <button type="button" class="m-term-copy" @click="copyScreen">{{ KEYS_TEXT.copy }}</button>
+      <button v-for="u in loginUrls" :key="u.url" type="button" class="m-term-login" @click="openLogin(u)">{{ KEYS_TEXT.openLogin(u.host) }}</button>
+      <span class="m-term-copied" role="status" v-if="copyNote">{{ copyNote }}</span>
+    </div>
+  </div>
   <div class="conv" v-show="!paneTermShown">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>

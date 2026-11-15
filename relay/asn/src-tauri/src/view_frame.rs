@@ -27,6 +27,10 @@ pub struct Frame {
     /// 打字時：已經交給窗格到第幾號（D 用來確認、補送）。看畫面時沒有
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ack: Option<u64>,
+    /// 打字時：這次打字到現在，有幾批按鍵因為畫面需要人確認而被拿掉（只交了文字，#1512 B）。D 看到數字變大就告訴本人。
+    /// 從來沒拿掉過、看畫面時沒有；舊的一端不認得這欄，照樣解得開
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys_dropped: Option<u64>,
 }
 
 /// AAD：session id、方向、序號。方向只有 T→D
@@ -121,7 +125,7 @@ mod tests {
     const SECRET: &str = "SECRET-PASSWORD-123";
 
     fn frame(text: &str) -> Frame {
-        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40, ack: None }
+        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40, ack: None, keys_dropped: None }
     }
     fn pair() -> (SessionKey, SessionKey) {
         (test_key(7), test_key(7))

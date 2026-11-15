@@ -89,6 +89,10 @@ pub trait TPort {
     fn input(&mut self, _now_ms: u64) -> Result<Option<u64>, End> {
         Ok(None)
     }
+    /// 打字的工作階段：到現在有幾批按鍵被拿掉（畫面需要人確認，只交了文字，#1512 B）。沒拿掉過、看畫面時回 None
+    fn keys_dropped(&mut self) -> Option<u64> {
+        None
+    }
 }
 
 /// T 傳畫面，跑到該停為止。金鑰在這裡被消耗，回來就沒了。一定會收掉「正在被看」
@@ -168,7 +172,7 @@ fn pump(s: &Session, key: &SessionKey, port: &mut impl TPort) -> End {
         // 控制面還沒查到過就不傳；暫停時不讀窗格
         if ctl_seen && !paused {
             let frame = match port.frame() {
-                Ok(f) => Frame { text: filter_frame(&f.text), ack, ..f },
+                Ok(f) => Frame { text: filter_frame(&f.text), ack, keys_dropped: port.keys_dropped(), ..f },
                 Err(_) => {
                     finish(&mut |l| port.log(l), "read_failed", sent, bytes);
                     return End::Failed;
@@ -320,7 +324,7 @@ mod tests {
         Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope: crate::view_handshake::Scope::View, expires_s: (START_MS / 1000 + 600) as i64 }
     }
     fn frame(text: &str) -> Frame {
-        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40, ack: None }
+        Frame { text: text.to_string(), cursor_x: 1, cursor_y: 2, cols: 120, rows: 40, ack: None, keys_dropped: None }
     }
 
     #[derive(Default)]
@@ -874,6 +878,35 @@ mod tests {
         assert!(!j.contains("ack"), "{j}");
         let back: Frame = serde_json::from_str(r#"{"text":"x","cursor_x":1,"cursor_y":2,"cols":120,"rows":40}"#).unwrap();
         assert_eq!(back, f, "舊的幀照樣解得開");
+    }
+
+    #[test]
+    fn 按鍵被拿掉的次數跟著畫面幀_沒拿掉過就沒有這一欄_舊的幀照樣解得開() {
+        let mut f = frame("x");
+        assert!(!serde_json::to_string(&f).unwrap().contains("keys_dropped"), "沒拿掉過：沒有這一欄（舊的一端看到的跟以前一樣）");
+        f.keys_dropped = Some(2);
+        let j = serde_json::to_string(&f).unwrap();
+        assert!(j.contains(r#""keys_dropped":2"#), "{j}");
+        assert_eq!(serde_json::from_str::<Frame>(&j).unwrap(), f);
+    }
+
+    #[test]
+    fn 守門_遠端打字_enter_前補間隔_拿掉按鍵要記下來告訴_d() {
+        // #1512 B：同一輪收進來的字一口氣交給窗格，字和 Enter 之間的間隔要由電腦這頭補；畫面需要人確認時拿掉的按鍵要記下來，跟著畫面幀告訴 D
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let port = lib.split("    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {").nth(1).expect("有 LiveTPort::input");
+        let port = &port[..port.find("\n    }\n").unwrap()];
+        let gap = port.find("enter_wait_ms(").expect("Enter 前算要等多久");
+        let send = port.find(".view_input(&pane, d, k.p)").expect("交給窗格");
+        assert!(gap < send, "等完才交");
+        assert!(port.find("remote_input_guard(").unwrap() < send, "交之前照樣重讀畫面（單鍵也一樣，不另開入口）");
+        assert!(port.contains("self.keys_dropped += 1"), "拿掉了要記");
+        // 貼上結尾換行只在手機遠端打字拿掉（#1561 必修②）；共用的 view_input 不拿
+        assert!(port.contains("let d = if k.p && self.mobile {") && port.contains("trim_paste_tail(d)"), "只有手機的貼上才拿掉結尾換行");
+        let term = include_str!("launch/term.rs").replace("\r\n", "\n");
+        let vi = term.split("pub fn view_input(").nth(1).unwrap().split("pub fn remote_input_guard").next().unwrap();
+        assert!(!vi.contains("trim_paste_tail"), "本機看終端共用的入口不動貼上的內容");
+        assert!(lib.contains(r#""keys_dropped": f.keys_dropped"#), "D 收到的幀把這個數字交給畫面");
     }
 
     #[test]

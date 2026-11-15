@@ -43,7 +43,7 @@ test('打字元件：整句送出後隔一下再送 Enter；開始前先排著�
   assert.match(input, /const typeLine = \(text, multi\) => \{\s*void send\(text, multi\)\.then\(ok => \{\s*if \(!ok\) \{ emit\('unsent', text\); return \}\s*setTimeout\(\(\) => \{ void send\('\\r', false\) \}, ENTER_DELAY_MS\)/, '整句沒送出就交還；送出了才按 Enter')
   assert.match(input, /watch\(phase, p => \{ if \(p === 'typing'\) flush\(\) \}\)/, '開始打字了才送排著的那句')
   assert.match(input, /if \(pasteLines\(t\) > 1\) \{ yieldAsk\(\); lineAsk = true; askPaste\.value = t \}/, '多行先問（前一段還在問就先交還）')
-  assert.match(input, /emits: \['back', 'status', 'unsent'\]/)
+  assert.match(input, /emits: \['back', 'status', 'unsent', 'screen'\]/)
   const fin = input.slice(input.indexOf('    const finish = text => {'), input.indexOf('    const start = async'))
   assert.match(fin, /if \(left\) emit\('unsent', left\)/, '結束時還沒送的交還')
   assert.match(input, /if \(lineAsk\) \{ lineAsk = false; const t = askPaste\.value; askPaste\.value = null; if \(t\) emit\('unsent', t\) \}/, '等確認時又貼上：那句交還')

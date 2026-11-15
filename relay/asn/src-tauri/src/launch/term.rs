@@ -6568,6 +6568,16 @@ mod tests {
         }
 
         #[test]
+        fn 畫面裡打字_貼上結尾的換行照原樣_只有手機遠端打字那條路才拿掉() {
+            // #1561 asn真 審查必修②：view_input 是本機看終端、遠端打字共用的入口，這裡不動貼上的內容（電腦本機貼上照原樣）；
+            // 結尾換行只在手機遠端打字那條路拿掉（lib.rs 的 LiveTPort::input，看 self.mobile）
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            rig.svc.view_input(&id, "abc123-code\r\n", true).unwrap();
+            assert_eq!(typed(&rig).last(), Some(&(false, "abc123-code\r\n".to_string())), "貼上照原樣");
+        }
+
+        #[test]
         fn 畫面裡打字_不是按鍵的序列_不認得的編號_mux_換過_都不送() {
             let (rig, paths) = mux_rig();
             let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();

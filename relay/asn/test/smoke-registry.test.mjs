@@ -90,7 +90,7 @@ test('新增探測只要加一個檔：自動收集、帶自己的情境與假�
   }
 })
 
-test('拆檔時搬家的探測都沒有自帶情境或假後台欄位；之後新加的才用新格式（#1512 A 的 usageMenu）', () => {
-  assert.deepEqual(PROBES.filter(e => e.table || e.scenarios).map(e => e.key), ['usageMenu'])
+test('拆檔時搬家的探測都沒有自帶情境或假後台欄位；之後新加的才用新格式（#1512 A 的 usageMenu、B 的 termKeys）', () => {
+  assert.deepEqual(PROBES.filter(e => e.table || e.scenarios).map(e => e.key), ['termKeys', 'usageMenu'])
   assert.equal(typeof tableFor(SCENARIOS[0]), 'object')
 })
