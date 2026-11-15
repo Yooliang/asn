@@ -569,8 +569,8 @@
    ===================================================================== */
 /* 1. 有表格的訊息：.l-line 是直排 flex 的子項，原本照內容撐寬（表格多寬它就多寬），泡泡跑出螢幕；限制在 .m-main 裡，表格在泡泡裡左右滑（.md-tablewrap 本來就是 overflow-x:auto） */
 :root[data-skin="line"] .l-line{max-width:100%}
-/* 2. 手機一般泡泡最大寬度 68% → 80%（表格、程式碼、檔案卡、照片照舊 100%） */
-:root[data-skin="line"] .m-chat .msg .m-main{max-width:80%}
+/* 2. 手機一般泡泡最大寬度放寬到約 80%：.m-main 裡除了泡泡還有旁邊的時間（約 49px）和間距 6px，所以多給 56px，泡泡本身才有八成寬（表格、程式碼、檔案卡、照片照舊 100%） */
+:root[data-skin="line"] .m-chat .msg .m-main{max-width:min(100%,calc(80% + 56px))}
 /* 3. 對話頁（一對一、群組）的標題列一律藍底（設定的子頁也用 .m-chathead，不動）：原本 .m-head:not(.is-busy):not(.is-offline) 的淺灰比 .m-chathead 的藍底權重高，群組（和在線的一對一）都被蓋成淺灰 */
 :root[data-skin="line"] .m-chat .m-head.m-chathead:not(.is-busy):not(.is-offline){background:var(--line-bg)}
 /* 5. 標題列下面那條白色細線是對話區 .pane 的上框線：拿掉，標題列跟對話區的藍色連成一片 */

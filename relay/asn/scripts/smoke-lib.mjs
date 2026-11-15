@@ -108,6 +108,7 @@ export const lineMProbeSource = part => `(async () => {
   for (const t of msgs.querySelectorAll('.msg .l-time')) if (vis(t) && (R(t).right > W + 0.5 || R(t).left < -0.5 || R(t).width < 1)) return { ok: false, why: '時間看不到：' + t.textContent + ' 在 ' + Math.round(R(t).left) + '～' + Math.round(R(t).right) };
   if (msgs.scrollWidth > msgs.clientWidth + 1) return { ok: false, why: '訊息區出現橫向捲動：' + msgs.scrollWidth + ' ／ ' + msgs.clientWidth };
   if (document.documentElement.scrollWidth > W + 1) return { ok: false, why: '整頁出現橫向捲動' };
+  if (${JSON.stringify(part)} === 'head') return { ok: true, why: '' };   // 只看標題列（上面已經量過藍底、同色、沒有線）
   if (${JSON.stringify(part)} === 'table') {
     const wrap = msgs.querySelector('.md-tablewrap');
     if (!vis(wrap)) return { ok: false, why: '找不到表格' };
@@ -119,11 +120,11 @@ export const lineMProbeSource = part => `(async () => {
     await real({ gesture: [c[0] + 60, c[1], -160, 0] }, 900);
     if (!(wrap.scrollLeft > 20)) return { ok: false, why: '用手指滑表格沒有左右捲動：scrollLeft=' + wrap.scrollLeft };
     if (msgs.scrollLeft !== 0 || document.documentElement.scrollLeft !== 0) return { ok: false, why: '滑表格時整個訊息區跟著橫移' };
-    // 一般長句的泡泡：放寬到約 80%（比原本 68% 寬，不超過 80%）
+    // 一般長句的泡泡：泡泡本身（不含旁邊的時間）放寬到這一列的 72%～80%
     const row = [...msgs.querySelectorAll('.msg')].find(m => !m.querySelector('table') && (m.querySelector('.m-body')?.textContent || '').length > 25 && !m.classList.contains('mine'));
     if (!row) return { ok: false, why: '找不到長句的泡泡' };
-    const mw = R(row.querySelector('.m-main')).width, rw = R(row).width;
-    if (mw > rw * 0.8 + 1 || mw < rw * 0.7) return { ok: false, why: '長句泡泡寬度不在 70%～80%：' + Math.round(mw) + ' ／ ' + Math.round(rw) };
+    const bw = R(row.querySelector('.m-body')).width, rw = R(row).width;
+    if (bw > rw * 0.8 + 1 || bw < rw * 0.72) return { ok: false, why: '長句泡泡本身的寬度不在這一列的 72%～80%：' + Math.round(bw) + ' ／ ' + Math.round(rw) };
   }
   const main = pane.querySelector('.compose-main'), ta = main && main.querySelector('.composer textarea');
   const send = main && main.querySelector('.composer .aero-btn'), mic = main && main.querySelector('.mc-dict');
@@ -3000,6 +3001,8 @@ export const SCENARIOS = [
   { name: 'm-line-table-412', page: 'm.html', width: 412, state: { signedIn: true, mbar: 'offline', lineTable: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'table' }, shot: 'm-line-table-412.png' },
   { name: 'm-line-dict', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, lineDict: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'dict' }, shot: 'm-line-dict.png' },
   { name: 'm-line-send', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, lineDict: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'send' }, shot: 'm-line-send.png' },
+  { name: 'm-line-head-online', page: 'm.html', state: { signedIn: true, mbar: 'claude', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'head' }, shot: 'm-line-head-online.png' },
+  { name: 'm-line-head-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'head' }, shot: 'm-line-head-busy.png' },
   { name: 'm-line-group-head', page: 'm.html', state: { signedIn: true, mgroup: true, groupMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'group' }, shot: 'm-line-group-head.png' },
   { name: 'm-line-chat', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: LINE_PROBES.mobileChat, shot: 'm-line-chat.png' },
   { name: 'm-line-settings', page: 'm.html', state: { signedIn: true, skin: 'line' }, ready: '#app.m .m-pager .m-search', probe: LINE_PROBES.mobileSettings, shot: 'm-line-settings.png' },
