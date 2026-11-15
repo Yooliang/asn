@@ -20,6 +20,8 @@ const CRED: &str = ".credentials.json";
 const FRAG: &str = "account.json";
 /// 切走時查不到帳號（逾時、連不上）的權杖先放這裡，跟正式那份同一個資料夾；切換不會拿它來用，切回這個帳號時再查一次
 const QUAR: &str = ".credentials.unverified.json";
+/// 「上次確認可用」（#1512 C）：切走前核對成功的時間（毫秒，十進位數字），單獨一個小檔。只有時間，不含任何權杖或帳號內容
+const USABLE_AT: &str = "usable-at";
 const KEY: &str = "oauthAccount";
 /// 切換到「存的登入不完整」的帳號時回給使用者的話（本機與遠端切換同一句）
 pub const INCOMPLETE_LOGIN_MSG: &str = "這個帳號存的登入不完整，請重新登入一次再加入";
@@ -76,6 +78,9 @@ pub struct AccountInfo {
     pub saved: bool,
     /// 存的登入不完整（權杖檔沒有 refreshToken）：不能切換過去。只是布林，不含任何權杖內容
     pub login_incomplete: bool,
+    /// 上次確認可用的時間（毫秒）：切走前核對成功時記下（#1512 C）。沒記過、讀不懂是 None。只是時間
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usable_at_ms: Option<i64>,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -456,7 +461,22 @@ fn info_of(frag: &str, email: &str, cred_file: &Path, current: bool) -> AccountI
             .unwrap_or_default()
     });
     let login_incomplete = !std::fs::read(cred_file).map(|b| has_refresh_token(&b)).unwrap_or(false);
-    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true, login_incomplete }
+    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true, login_incomplete, usable_at_ms: None }
+}
+
+/// 帳號庫裡這個帳號的「上次確認可用」：只讀那個小檔，內容要是合理的毫秒數（1 到 13 位數字）才算
+fn read_usable_at(dir: &Path) -> Option<i64> {
+    let t = std::fs::read_to_string(dir.join(USABLE_AT)).ok()?;
+    let t = t.trim();
+    if t.is_empty() || t.len() > 13 || !t.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    t.parse::<i64>().ok().filter(|v| *v > 0)
+}
+
+/// 記下「上次確認可用」：只寫時間。寫不成功不影響任何事（呼叫端不看結果）
+fn write_usable_at(dir: &Path, now_ms: i64) -> std::io::Result<()> {
+    write_atomic(&dir.join(USABLE_AT), now_ms.to_string().as_bytes())
 }
 
 pub fn list(home: &Path) -> Vec<AccountInfo> {
@@ -465,7 +485,9 @@ pub fn list(home: &Path) -> Vec<AccountInfo> {
         .into_iter()
         .map(|s| {
             let is_cur = cur.as_ref().is_some_and(|(f, u)| *u == s.uuid || email_of_fragment(f).as_deref() == Some(s.email.as_str()));
-            info_of(&s.frag, &s.email, &s.dir.join(CRED), is_cur)
+            let mut info = info_of(&s.frag, &s.email, &s.dir.join(CRED), is_cur);
+            info.usable_at_ms = read_usable_at(&s.dir);
+            info
         })
         .collect()
 }
@@ -618,6 +640,8 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
                 write_atomic(&owner.dir.join(CRED), c)?;
                 write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
                 let _ = std::fs::remove_file(owner.dir.join(QUAR)); // 已有核對過的新權杖，舊的隔離檔沒用了
+                // 上次確認可用（#1512 C）：只記時間；寫失敗不影響切換（不用 ?，不改切換的流程）
+                let _ = write_usable_at(&owner.dir, crate::auth::now_ms() as i64);
                 elog!("切走前核對 {}：{what}，已回存", owner.email);
             } else if matches!(l, Lookup::Timeout | Lookup::Failed) {
                 // 查不到不代表不對：先隔離，切回這個帳號時再查（#591）
@@ -1379,6 +1403,67 @@ mod tests {
         assert_eq!(read(cred_path(h)), cred("B1"), "切換照常完成");
         assert!(read(cj_path(h)).contains("b@x.test"));
         read(dir_of(h, "a@x.test").join(CRED))
+    }
+
+    /// 切走前核對完，被切走的那個帳號的「上次確認可用」小檔內容（沒有就 None）
+    fn usable_after(l: Lookup) -> (Option<String>, Option<i64>) {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        switch_impl(h, "b@x.test", Fault::None, &|_| l.clone()).expect("切換照常完成");
+        let raw = std::fs::read_to_string(dir_of(h, "a@x.test").join(USABLE_AT)).ok();
+        let listed = list(h).into_iter().find(|a| a.email == "a@x.test").unwrap().usable_at_ms;
+        (raw, listed)
+    }
+
+    #[test]
+    fn 上次確認可用_只在切走前核對相符時記下_只有時間() {
+        let before = crate::auth::now_ms() as i64;
+        let (raw, listed) = usable_after(Lookup::Account { uuid: "u-a".into(), email: "a@x.test".into() });
+        let raw = raw.expect("相符：記下時間");
+        assert!(raw.bytes().all(|b| b.is_ascii_digit()), "小檔只有數字（毫秒）：{raw}");
+        let t: i64 = raw.parse().unwrap();
+        assert!(t >= before && t <= crate::auth::now_ms() as i64);
+        assert_eq!(listed, Some(t), "帳號清單帶出這個時間");
+        for l in [Lookup::Account { uuid: "u-b".into(), email: "b@x.test".into() }, Lookup::Unauthorized, Lookup::Timeout, Lookup::Failed] {
+            let (raw, listed) = usable_after(l.clone());
+            assert_eq!((raw, listed), (None, None), "{l:?}：沒核對成功就不記");
+        }
+    }
+
+    #[test]
+    fn 上次確認可用_寫不進去也照樣切換() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        // 小檔的位置被一個資料夾占住：寫不進去
+        std::fs::create_dir_all(dir_of(h, "a@x.test").join(USABLE_AT).join("x")).unwrap();
+        let ok = Lookup::Account { uuid: "u-a".into(), email: "a@x.test".into() };
+        let out = switch_impl(h, "b@x.test", Fault::None, &|_| ok.clone()).expect("寫不進去不影響切換");
+        assert_eq!(out.email, "b@x.test");
+        assert_eq!(read(cred_path(h)), cred("B1"));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "回存照常");
+        assert_eq!(list(h).into_iter().find(|a| a.email == "a@x.test").unwrap().usable_at_ms, None);
+    }
+
+    #[test]
+    fn 上次確認可用_小檔內容不對就當沒有() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        for (body, want) in [("1763000000000", Some(1763000000000)), (" 1763000000000\n", Some(1763000000000)), ("", None), ("0", None), ("-5", None), ("12345678901234", None), ("abc", None), ("{\"token\":\"x\"}", None)] {
+            std::fs::write(p.join(USABLE_AT), body).unwrap();
+            assert_eq!(read_usable_at(p), want, "{body:?}");
+        }
+        std::fs::remove_file(p.join(USABLE_AT)).unwrap();
+        assert_eq!(read_usable_at(p), None, "沒有小檔");
     }
 
     #[test]

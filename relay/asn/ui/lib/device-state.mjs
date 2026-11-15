@@ -192,6 +192,18 @@ export function loginAction({ vendor, isSelf = false, phone = false, online = fa
   return { kind: 'remote' }
 }
 
+/**
+ * 從手機要別台電腦「重新登入 Claude」（#1512 C）：只給別台電腦、在線、ASN 在線，而且那台回報 Claude 登入失效。
+ * → null 或 { kind: 'remote' }。這只是入口、不是把關：真正放不放行由那台電腦決定（本機開關、ASN 登入著同一個人，
+ * 以及 Claude 顯示已登入時要有本機的失效證據）。不受 AGENT_INSTALL_UI 影響：只登入、不安裝
+ */
+export function reloginAction({ vendor, isSelf = false, phone = false, online = false, asnOnline = true, state = '' } = {}) {
+  if (vendor !== 'claude' || isSelf || phone) return null
+  if (state !== STATE.LOGIN_FAILED) return null
+  if (!online || asnOnline !== true) return null
+  return { kind: 'remote' }
+}
+
 /** 主要幾家 AI：設備卡上就算這台沒用到也要列出「未安裝／不確定」 */
 export const CORE_VENDORS = Object.freeze(['claude', 'codex', 'grok'])
 

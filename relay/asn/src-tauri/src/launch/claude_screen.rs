@@ -68,6 +68,14 @@ const TRUST_YES: &str = "Yes, I trust this folder";
 const BYPASS_YES: &str = "Yes, I accept";
 const LOGIN_MENU: &str = "Select login method";
 const LOGIN_EXPIRED: &str = "Please run /login";
+/// 登入失效那一行（#1512 C 收緊）：Claude Code 把錯誤掛在 ⎿ 底下，原樣是「<固定開頭> · Please run /login」。
+/// 開頭只認這幾種（字串取自 claude.exe 內嵌文字）；● 開頭的是模型自己的回覆，一律不算
+const LOGIN_ERROR_HEADS: [&str; 3] = ["Login expired", "OAuth token revoked", "API Error"];
+const LOGIN_ERROR_TAIL: &str = " · Please run /login";
+
+fn is_login_error(body: &str) -> bool {
+    body.ends_with(LOGIN_ERROR_TAIL) && LOGIN_ERROR_HEADS.iter().any(|h| body.starts_with(h))
+}
 const USAGE_LIMIT: &str = "You've hit your limit";
 /// 額度用完的選單（#1512，claude 2.1.325）：標題、頁尾和兩個不花錢的選項都是 Claude 固定的字。
 /// 選項的順序因帳號而異（付費類可能排第一），所以認字、不認編號
@@ -620,7 +628,7 @@ fn notice_above_input(lines: &[&str]) -> Option<ClaudeScreen> {
         let body = t.trim_start_matches(['●', '⎿', ' ']);
         if body.starts_with(USAGE_LIMIT) {
             Some(ClaudeScreenKind::UsageLimit)
-        } else if body.ends_with(LOGIN_EXPIRED) {
+        } else if t.starts_with('⎿') && is_login_error(body) {
             Some(ClaudeScreenKind::Login)
         } else {
             None
@@ -1282,6 +1290,28 @@ mod tests {
                 assert_eq!((s.kind, s.allow_once, s.deny), (K::Attention, None, None), "{text}");
             }
         }
+    }
+
+    #[test]
+    fn 登入失效_只認掛在錯誤符號底下的固定錯誤字_模型回覆寫的不算() {
+        let page = |line: &str| format!("{line}\n──────────────\n❯ \n──────────────\n  ? for shortcuts\n");
+        for ok in ["  ⎿  Login expired · Please run /login", "  ⎿  OAuth token revoked · Please run /login", "  ⎿  API Error: 401 Invalid API key · Please run /login"] {
+            assert_eq!(kind(&page(ok)), Some(K::Login), "{ok}");
+        }
+        for bad in [
+            "● 你的登入好像過期了，Please run /login",
+            "● Login expired · Please run /login",
+            "● API Error: 401 · Please run /login",
+            "  ⎿  隨便寫的字 · Please run /login",
+            "  ⎿  Please run /login",
+            "  ⎿  Login expired · Please run /login 然後再試",
+            "  ⎿  login expired · please run /login",
+        ] {
+            assert_ne!(kind(&page(bad)), Some(K::Login), "{bad}");
+        }
+        // 模型回覆的最後一行（緊貼輸入框）寫成這樣：不認成要登入
+        let reply = "● 我幫你查了錯誤訊息，原文是：\n  Login expired · Please run /login\n● Please run /login";
+        assert_ne!(kind(&page(reply)), Some(K::Login));
     }
 
     #[test]

@@ -62,13 +62,29 @@ test('入口預設關：手機版看不到「從手機安裝並登入」，畫�
   assert.equal(AGENT_INSTALL_UI, false)
   assert.equal(showSetupButton('claude', { kind: 'remote' }), false)
   const html = read('ui/m.html')
-  assert.match(html, /v-if="v\.key === 'claude' && \(\(showSetupButton\(v\.key, v\.action\) && setupSt\.stage === 'idle'\)/)
-  assert.equal((html.match(/setupAsk\(/g) ?? []).length, 1, '送出要求的入口只有這一顆按鈕')
+  assert.match(html, /v-if="v\.key === 'claude' && \(\(\(showSetupButton\(v\.key, v\.action\) \|\| showReloginButton\(v\.key, v\.relogin\)\) && setupSt\.stage === 'idle'\)/)
+  // 入口兩顆（#1512 C 多了「重新登入 Claude」），都只進確認
+  assert.equal((html.match(/setupAsk\(/g) ?? []).length, 2, '送出要求的入口只有安裝與重新登入兩顆按鈕')
+  assert.match(html, /v-if="showReloginButton\(v\.key, v\.relogin\)" @click="setupAsk\(acctCur\.key, 'relogin'\)"/)
+})
+
+test('重新登入 Claude（#1512 C）：只看那台回報登入失效，不受安裝入口的總開關影響；這只是入口，放不放行由那台電腦決定', async () => {
+  const { showReloginButton, RELOGIN_TEXT } = await import('../ui/lib/mobile-setup.mjs')
+  const { reloginAction, STATE } = await import('../ui/lib/device-state.mjs')
+  assert.equal(showReloginButton('claude', { kind: 'remote' }), true, '不看 AGENT_INSTALL_UI')
+  assert.equal(showReloginButton('codex', { kind: 'remote' }), false)
+  assert.equal(showReloginButton('claude', null), false)
+  const base = { vendor: 'claude', online: true, asnOnline: true, state: STATE.LOGIN_FAILED }
+  assert.deepEqual(reloginAction(base), { kind: 'remote' })
+  for (const [k, v] of [['isSelf', true], ['phone', true], ['online', false], ['asnOnline', false], ['vendor', 'codex']]) assert.equal(reloginAction({ ...base, [k]: v }), null, k)
+  for (const s of Object.values(STATE).filter(s => s !== STATE.LOGIN_FAILED)) assert.equal(reloginAction({ ...base, state: s }), null, s)
+  assert.match(RELOGIN_TEXT.confirmBody, /沒看到登入失效的話，不會動現有的登入/)
+  assert.equal(RELOGIN_TEXT.confirmNeed, SETUP_TEXT.confirmNeed, '一樣要那台打開允許、登入同一個 ASN 帳號')
 })
 
 test('接線守門：先確認才送出、送出只在「確認安裝」、離開頁面就停止輪詢、手機註冊了兩個指令、文字是人話', () => {
   const js = read('ui/m.js'), html = read('ui/m.html'), lib = read('src-tauri/src/lib.rs'), acct = read('src-tauri/src/account.rs')
-  assert.match(js, /const setupAsk = node => \{ setupReset\(\); Object\.assign\(setupSt, \{ node, stage: 'confirm' \}\) \}/, '按鈕只進確認，不送出')
+  assert.match(js, /const setupAsk = \(node, mode = 'install'\) => \{ setupReset\(\); Object\.assign\(setupSt, \{ node, mode: mode === 'relogin' \? 'relogin' : 'install', stage: 'confirm' \}\) \}/, '按鈕只進確認，不送出')
   const calls = js.match(/invoke\('setup_remote_request'/g) ?? []
   assert.equal(calls.length, 1, '只有一處送出')
   const yes = js.slice(js.indexOf('const setupYes'), js.indexOf('const setupClose'))

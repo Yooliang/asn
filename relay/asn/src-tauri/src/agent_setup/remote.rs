@@ -106,6 +106,24 @@ mod tests {
         assert_eq!(lib.matches("agent_setup::setup::start_claude(").count(), 2, "start_claude 只有桌面按鈕與手機觸發兩處");
         // 沒有任何路徑把手機請求的本機開關繞過去
         assert!(rbody.contains("agent_setup::switch::remote_allowed(&app.data_dir)"));
+        // #1512 C：已登入時要不要重新登入只看本機證據。手機觸發的那一條給證據函式（不帶任何請求的內容），桌面按鈕給「沒有」
+        // 呼叫的參數：從 start_claude( 到第一個回報用的 move 閉包為止
+        let args = |s: &str| -> String {
+            let a = &s[s.find("agent_setup::setup::start_claude(").unwrap()..];
+            a[..a.find("move |e|").unwrap()].to_string()
+        };
+        assert!(args(rbody).contains("Arc::new(claude_relogin_evidence)"), "手機觸發：證據函式");
+        assert!(args(body).contains("Arc::new(|| None)"), "桌面按鈕：照舊，已登入就不動");
+        let lib_lf = lib.replace("\r\n", "\n");
+        // 屬性要掛在 run_remote_setup 自己身上（#1563 調查員審查：新加的函式不能插在它的說明與屬性中間）
+        assert!(lib_lf.contains("結果回報到手機\n#[cfg(feature = \"gui\")]\n#[cfg(desktop)]\nasync fn run_remote_setup("), "run_remote_setup 的說明與屬性緊貼著它");
+        let ev = lib_lf.split("fn claude_relogin_evidence() -> Option<&'static str> {").nth(1).expect("有證據函式").split("\n}\n").next().unwrap();
+        assert!(ev.contains("login_watch::failed_recently("), "只看本機對話紀錄的失效判定");
+        assert!(!ev.contains("claude_screen") && !ev.contains("partner_notices"), "讀畫面只拿來顯示入口，不當放行的證據");
+        assert!(ev.len() < 1200, "只取到證據函式本身");
+        for bad in ["ask.", "SetupAsk", "relay.", "payload", "requested_by"] {
+            assert!(!ev.contains(bad), "證據不能來自手機的請求：{bad}");
+        }
     }
 
     #[test]

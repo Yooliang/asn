@@ -416,13 +416,16 @@
                           </li>
                         </ul>
                         <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>
-                        <div class="m-dv-setup" v-if="v.key === 'claude' && ((showSetupButton(v.key, v.action) && setupSt.stage === 'idle') || (setupSt.node === acctCur.key && setupSt.stage !== 'idle'))">
-                          <button type="button" class="m-btn" v-if="setupSt.stage === 'idle'" @click="setupAsk(acctCur.key)">{{ SETUP_TEXT.button }}</button>
-                          <div class="m-dv-confirm" role="alertdialog" :aria-label="SETUP_TEXT.confirmTitle(acctCur.label)" v-else-if="setupSt.stage === 'confirm'">
-                            <b>{{ SETUP_TEXT.confirmTitle(acctCur.label) }}</b>
-                            <p>{{ SETUP_TEXT.confirmBody }}</p>
-                            <p class="m-fine">{{ SETUP_TEXT.confirmNeed }}</p>
-                            <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="setupYes">{{ SETUP_TEXT.yes }}</button><button type="button" class="m-btn" @click="setupNo">{{ SETUP_TEXT.no }}</button></div>
+                        <div class="m-dv-setup" v-if="v.key === 'claude' && (((showSetupButton(v.key, v.action) || showReloginButton(v.key, v.relogin)) && setupSt.stage === 'idle') || (setupSt.node === acctCur.key && setupSt.stage !== 'idle'))">
+                          <template v-if="setupSt.stage === 'idle'">
+                            <button type="button" class="m-btn m-dv-relogin" v-if="showReloginButton(v.key, v.relogin)" @click="setupAsk(acctCur.key, 'relogin')">{{ RELOGIN_TEXT.button }}</button>
+                            <button type="button" class="m-btn" v-else @click="setupAsk(acctCur.key)">{{ SETUP_TEXT.button }}</button>
+                          </template>
+                          <div class="m-dv-confirm" role="alertdialog" :aria-label="(setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmTitle(acctCur.label)" v-else-if="setupSt.stage === 'confirm'">
+                            <b>{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmTitle(acctCur.label) }}</b>
+                            <p>{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmBody }}</p>
+                            <p class="m-fine">{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmNeed }}</p>
+                            <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="setupYes">{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).yes }}</button><button type="button" class="m-btn" @click="setupNo">{{ SETUP_TEXT.no }}</button></div>
                           </div>
                           <div class="m-dv-prog" role="status" aria-live="polite" v-else>
                             <b :class="{ ok: setupSt.stage === 'done' && setupSt.ok, bad: setupSt.stage === 'done' && !setupSt.ok }">{{ setupSt.text }}</b>

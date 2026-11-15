@@ -804,7 +804,7 @@ mod tests {
     const U: &str = "11111111-2222-3333-4444-555555555555";
 
     fn acct(email: &str, current: bool) -> AccountInfo {
-        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG-SECRET".into(), current, saved: true, login_incomplete: false }
+        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG-SECRET".into(), current, saved: true, login_incomplete: false, usable_at_ms: None }
     }
 
     #[test]
