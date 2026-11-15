@@ -168,8 +168,22 @@ pub async fn partner_console_set(req: PartnerConsoleReq) -> Result<Value, String
     blocking_timeout(move || console::partner_console_set(req)).await
 }
 
+/// 給設定頁讀：沒存過每小時上限時填上實際生效的那個值（launcher.json 寫的或 6），畫面跟真正擋的同一個來源（#1548）
 pub async fn launch_prefs_get(data_dir: PathBuf) -> Result<Value, String> {
-    blocking_timeout(move || launch_prefs_get_sync(&data_dir)).await
+    blocking_timeout(move || {
+        let prefs = launch_prefs_get_sync(&data_dir)?;
+        Ok(with_effective_max(prefs, config::file_max_per_hour(&config::launcher_config_path())))
+    })
+    .await
+}
+
+/// 沒存過（或值不合法）就填上實際生效的上限；存過的照原樣。不寫回檔案
+pub fn with_effective_max(prefs: Value, file: Option<u32>) -> Value {
+    let mut p = if prefs.is_object() { prefs } else { serde_json::json!({}) };
+    if config::pref_max_per_hour(&p).is_none() {
+        p["maxPerHour"] = serde_json::json!(config::effective_max_per_hour(&p, file));
+    }
+    p
 }
 
 pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), String> {
@@ -189,6 +203,20 @@ pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>, token: Opt
 #[cfg(test)]
 mod tests {
     use super::config::{canonical_launch_cwd, valid_partner_name};
+    use super::with_effective_max;
+    use serde_json::json;
+
+    #[test]
+    fn 設定頁讀到的上限跟實際擋的同一個來源() {
+        // 沒存過：填 launcher.json 寫的；連那個也沒有就是 6
+        assert_eq!(with_effective_max(json!({ "cwdAllow": ["D:\\w"] }), Some(3)), json!({ "cwdAllow": ["D:\\w"], "maxPerHour": 3 }));
+        assert_eq!(with_effective_max(json!({}), None), json!({ "maxPerHour": 6 }));
+        assert_eq!(with_effective_max(serde_json::Value::Null, None), json!({ "maxPerHour": 6 }));
+        // 存過合法的值：照原樣，不被 launcher.json 蓋掉
+        assert_eq!(with_effective_max(json!({ "maxPerHour": 2 }), Some(9)), json!({ "maxPerHour": 2 }));
+        // 存的值不合法：換成實際生效的
+        assert_eq!(with_effective_max(json!({ "maxPerHour": 99 }), Some(4)), json!({ "maxPerHour": 4 }));
+    }
 
     #[test]
     fn 夥伴名字格式() {

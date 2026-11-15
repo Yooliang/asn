@@ -200,6 +200,23 @@ pub fn check_launch(config: &LaunchConfig, req: &mut LaunchReq<'_>, recent: &[u6
     Ok(())
 }
 
+/// 每小時開新夥伴上限只有一個來源（#1548）：設定頁存在 launch-prefs.json 的 `maxPerHour`（1～20 的整數）優先；
+/// 沒存過或值不合法，才用 launcher.json 的 `max_per_hour`（同樣夾在 1～20），再沒有就是 6。
+/// 目前只有「別的設備替這台開」會被擋（bridge/launcher.rs）；自己在這台開不受影響。
+pub const DEFAULT_MAX_PER_HOUR: u32 = 6;
+pub fn pref_max_per_hour(prefs: &Value) -> Option<u32> {
+    prefs.get("maxPerHour").and_then(Value::as_u64).filter(|n| (1..=20).contains(n)).map(|n| n as u32)
+}
+/// launcher.json 手寫的上限；沒有檔、不是 JSON、沒寫都回 None（讀檔失敗不影響開窗，那邊 load_launch_config_from 自己會報）
+pub fn file_max_per_hour(path: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let j: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    j.get("max_per_hour").and_then(Value::as_u64).map(|n| n.clamp(1, 20) as u32)
+}
+pub fn effective_max_per_hour(prefs: &Value, file: Option<u32>) -> u32 {
+    pref_max_per_hour(prefs).or(file).unwrap_or(DEFAULT_MAX_PER_HOUR)
+}
+
 pub fn expand_vars(s: &str, env: &std::collections::HashMap<String, String>) -> String {
     let mut out = String::new();
     let mut rest = s;
@@ -251,6 +268,45 @@ pub fn build_spawn_spec(config: &LaunchConfig, req: &LaunchReq<'_>) -> Result<(S
         .map(|a| a.replace("{name}", req.name))
         .collect();
     Ok((command, args, PathBuf::from(&req.cwd)))
+}
+
+#[cfg(test)]
+mod max_per_hour_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn 設定頁的值優先_沒存過才用launcher檔_再沒有是6() {
+        assert_eq!(effective_max_per_hour(&json!({ "maxPerHour": 2 }), Some(9)), 2);
+        assert_eq!(effective_max_per_hour(&json!({}), Some(9)), 9);
+        assert_eq!(effective_max_per_hour(&json!({}), None), DEFAULT_MAX_PER_HOUR);
+        assert_eq!(effective_max_per_hour(&Value::Null, None), 6);
+    }
+
+    #[test]
+    fn 設定頁的值不合法就當沒存過() {
+        for bad in [json!({ "maxPerHour": 0 }), json!({ "maxPerHour": 21 }), json!({ "maxPerHour": -3 }), json!({ "maxPerHour": "5" }), json!({ "maxPerHour": 2.5 })] {
+            assert_eq!(pref_max_per_hour(&bad), None, "{bad}");
+            assert_eq!(effective_max_per_hour(&bad, Some(4)), 4, "{bad}");
+        }
+        assert_eq!(pref_max_per_hour(&json!({ "maxPerHour": 1 })), Some(1));
+        assert_eq!(pref_max_per_hour(&json!({ "maxPerHour": 20 })), Some(20));
+    }
+
+    #[test]
+    fn launcher檔的上限夾在1到20_沒檔或壞檔回None() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("launcher.json");
+        assert_eq!(file_max_per_hour(&p), None);
+        std::fs::write(&p, "\u{feff}{\"profiles\":{},\"max_per_hour\":50}").unwrap();
+        assert_eq!(file_max_per_hour(&p), Some(20));
+        std::fs::write(&p, "{\"profiles\":{},\"max_per_hour\":3}").unwrap();
+        assert_eq!(file_max_per_hour(&p), Some(3));
+        std::fs::write(&p, "{\"profiles\":{}}").unwrap();
+        assert_eq!(file_max_per_hour(&p), None);
+        std::fs::write(&p, "not json").unwrap();
+        assert_eq!(file_max_per_hour(&p), None);
+    }
 }
 
 #[cfg(test)]

@@ -10,6 +10,8 @@ pub struct ToolDetectRow {
     pub login_available: bool,
     pub install_blurb: String,
     pub login_blurb: String,
+    /// `--version` 讀到的版本號（只收數字與點）；沒裝、讀不到或看不懂都是空字串（#1548：設定頁的版本以前從來沒有值）
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

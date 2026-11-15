@@ -1,6 +1,9 @@
 // 啟動設定（本機存檔）：最近用過的工作資料夾、進階覆寫。
 export const LAUNCH_PREFS_KEY = 'launch'
 
+// 每小時上限的說明（#1548）：只擋「別的設備（手機、別台電腦）替這台開」，自己在這台開不受影響；值跟 launcher.json 同一個來源（Rust 的 effective_max_per_hour）
+export const LAUNCH_MAX_NOTE = '只限制從別的設備（手機或別台電腦）替這台開的新夥伴，一小時內最多幾個；超過時對方會看到「這個小時已經開了 N 個視窗，超過上限」，下一個小時就能再開。自己在這台電腦上開不受影響。'
+
 export function normalizeLaunchPrefs(raw) {
   const o = raw && typeof raw === 'object' ? raw : {}
   const recent = Array.isArray(o.recentCwd) ? o.recentCwd.filter(p => typeof p === 'string').slice(0, 12) : []
