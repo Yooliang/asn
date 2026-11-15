@@ -91,7 +91,7 @@ test('#884 shouldRestoreForeground 逐條：剛開沒輸出（讀畫面在跑、
   // alerts 只有別人的 trust：不是我
   assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: '別人', code: 'trust' }], name: me }), false)
   // alerts 有我、但狀態不是 trust：不切
-  for (const code of ['permission', 'attention', 'question', 'login', 'usage_limit', 'bypass_warning']) {
+  for (const code of ['permission', 'attention', 'question', 'login', 'usage_limit', 'usage_menu', 'bypass_warning']) {
     assert.equal(shouldRestoreForeground({ watching: true, alerts: [{ name: me, code }], name: me }), false, code)
   }
   // 別人是 trust、我是別的狀態：不切

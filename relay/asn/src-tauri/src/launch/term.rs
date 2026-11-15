@@ -2067,8 +2067,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 手機要看的框：權限框或選項框（#853）。其他畫面一律拿不到文字
     fn phone_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
         let (snap, text) = self.partner_screen_checked(name, session_pid)?;
-        let screen = super::claude_screen::classify(&text).filter(|s| super::claude_screen::goes_to_phone(super::claude_screen::status_code(s.kind))).ok_or("這個提示已經不在畫面上")?;
-        let prompt = super::claude_screen::phone_text(&text).ok_or("這個提示已經不在畫面上")?;
+        let screen = super::claude_screen::classify(&text).filter(|s| super::claude_screen::goes_to_phone(super::claude_screen::status_code(s.kind))).ok_or(PROMPT_GONE)?;
+        let prompt = super::claude_screen::phone_text(&text).ok_or(PROMPT_GONE)?;
         Ok((snap, screen, prompt))
     }
 
@@ -2100,8 +2100,65 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage {
             return self.held_send(name, session_pid, &snap, screen.cursor, &want, n);
         }
+        if screen.kind == super::claude_screen::ClaudeScreenKind::UsageMenu {
+            // 額度選單（#1512）：手機只拿得到「停下來等」「在這裡等」兩項（上面已核對 n 在選項裡），付費類按不到
+            let target = screen.options.iter().position(|o| o.n == n).ok_or("這個提示沒有這個選項")?;
+            let mut recheck = || -> Result<Option<(usize, String)>, String> {
+                match self.phone_checked(name, session_pid) {
+                    Ok((s2, sc, p2)) if sc.kind == super::claude_screen::ClaudeScreenKind::UsageMenu => Ok(Some((sc.cursor, phone_offer(name, &sc, p2, Some(&s2.cwd)).hash))),
+                    // 選單不在了（選到了、換成別的畫面）
+                    Ok(_) => Ok(None),
+                    Err(e) if e == PROMPT_GONE => Ok(None),
+                    Err(e) => Err(e),
+                }
+            };
+            return self.usage_send_with(&snap, &offer.hash, screen.cursor, target, &mut recheck, USAGE_STEP_WAIT);
+        }
         let dir = self.dir()?;
         self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &n.to_string())
+    }
+
+    /// 額度選單的送鍵（#1512）。不送數字鍵（數字對到哪一項、會不會直接送出都要看 Claude 的版本，對錯了可能直接選到付費那項），
+    /// 改用方向鍵一次走一格，每走一格都重讀畫面：還是同一個選單（雜湊相同，游標不算）、游標真的動了才走下一格。
+    /// 游標停在要的那一項才按 Enter。中途選單不見、內容變了、游標不動，都不按 Enter。`recheck` 回 None＝選單已經不在畫面上
+    fn usage_send_with(&self, snap: &SessionSnap, want: &str, cursor: usize, target: usize, recheck: &mut dyn FnMut() -> Result<Option<(usize, String)>, String>, wait: std::time::Duration) -> Result<(), String> {
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let send = |k: AnswerKey| -> Result<(), String> { w.send_bytes(&snap.window.sock, snap.pane_id, &encode_keys(&[k])?) };
+        let mut now = cursor;
+        let mut moves = 0;
+        while now != target {
+            if moves >= USAGE_MAX_MOVES {
+                return Err(USAGE_HALF.into());
+            }
+            send(if target > now { AnswerKey::Down } else { AnswerKey::Up })?;
+            moves += 1;
+            let mut moved = None;
+            for _ in 0..USAGE_STEP_TRIES {
+                std::thread::sleep(wait);
+                match recheck() {
+                    Ok(Some((c, hash))) if hash == want => {
+                        if c != now {
+                            moved = Some(c);
+                            break;
+                        }
+                    }
+                    Ok(Some(_)) => return Err(USAGE_CHANGED.into()),
+                    // 選單不見了、重讀失敗：不知道發生了什麼，不按 Enter
+                    Ok(None) | Err(_) => return Err(USAGE_HALF.into()),
+                }
+            }
+            now = moved.ok_or(USAGE_HALF)?;
+        }
+        send(AnswerKey::Enter)?;
+        // 送完再讀一次：選單不見了（或換成別的選單）才算成功；同一個選單還在不算，讀不到也不算（讀不到不等於成功，#1553 asn真 審查必修）
+        std::thread::sleep(wait);
+        match recheck() {
+            Ok(None) => Ok(()),
+            Ok(Some((_, hash))) if hash != want => Ok(()),
+            Ok(Some(_)) => Err(USAGE_STILL.into()),
+            Err(_) => Err(USAGE_UNSURE.into()),
+        }
     }
 
     /// 外來訊息確認框的送鍵：只有本人按下的兩個入口（本機提示框、手機提示框）呼叫，呼叫前已重查過一次（框還在、雜湊相同）。
@@ -2699,6 +2756,22 @@ fn prompt_hash(p: &super::claude_screen::PromptText) -> String {
         crate::term_remote::hash_hex(&format!("{}\u{0}{}", p.text, p.bind))
     }
 }
+
+/// 額度選單送鍵時畫面已經不一樣（#1512）
+const USAGE_CHANGED: &str = "選單的內容變了，沒有按 Enter，什麼都沒有選。請再看一次手機上的提示，或到那台電腦的畫面上處理";
+/// 額度選單：游標沒有停在要的那一項，不按 Enter
+const USAGE_HALF: &str = "游標沒有停在你選的那一項，所以沒有按 Enter，什麼都沒有選。請到那台電腦的畫面上處理";
+/// 額度選單：按了 Enter，同一個選單還在
+const USAGE_STILL: &str = "已經按下，但選單還在畫面上，請到那台電腦的畫面上確認";
+/// 額度選單：按了 Enter 之後讀不到畫面，不知道結果
+const USAGE_UNSURE: &str = "已經按下，請到電腦上確認結果";
+/// 額度選單每走一格後，每次重讀前等多久、最多讀幾次
+const USAGE_STEP_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
+const USAGE_STEP_TRIES: usize = 8;
+/// 額度選單最多走幾格（選單最多 9 項）
+const USAGE_MAX_MOVES: usize = 9;
+/// 核對時提示已經不在畫面上
+const PROMPT_GONE: &str = "這個提示已經不在畫面上";
 
 /// 外來訊息確認框送鍵時畫面已經不一樣
 const HELD_CHANGED: &str = "畫面已經變了，請到那台電腦的畫面上處理";
@@ -3754,7 +3827,8 @@ pub fn remote_guard_of(profile: &str, text: &str) -> RemoteGuard {
     if super::claude_screen::is_held_message(text) {
         return RemoteGuard::HeldPrompt;
     }
-    if profile == super::win_term::KIND_CLAUDE && super::claude_screen::classify(text).is_some_and(|s| s.kind == super::claude_screen::ClaudeScreenKind::Attention) {
+    // 額度選單（#1512）也只交文字：裡面有付費選項，遠端打字不能用數字或方向鍵加 Enter 選到它
+    if profile == super::win_term::KIND_CLAUDE && super::claude_screen::classify(text).is_some_and(|s| matches!(s.kind, super::claude_screen::ClaudeScreenKind::Attention | super::claude_screen::ClaudeScreenKind::UsageMenu)) {
         return RemoteGuard::TextOnly;
     }
     RemoteGuard::Normal
@@ -3775,6 +3849,8 @@ mod remote_guard_tests {
         assert_eq!(remote_guard_of("claude", perm), RemoteGuard::Normal, "認得的權限框照常（本人在別台打字回答）");
         let idle = include_str!("../../tests/fixtures/term-screens/claude-idle-manual-mode.txt");
         assert_eq!(remote_guard_of("claude", idle), RemoteGuard::Normal);
+        let usage = include_str!("../../tests/fixtures/term-screens/claude-limit-menu.real.txt").replace("\r\n", "\n");
+        assert_eq!(remote_guard_of("claude", &usage), RemoteGuard::TextOnly, "額度選單（#1512）裡有付費選項：遠端打字只交文字");
     }
 
     #[test]
@@ -7702,6 +7778,99 @@ mod tests {
             assert!(rig.svc.held_send_with(&snap, 1, "h", 2, &mut *at(1, "h"), z).is_err());
             assert!(rig.svc.held_send_with(&snap, 0, "h", 3, &mut *at(1, "h"), z).is_err());
             assert_eq!(sent(&rig).len(), before);
+        }
+
+        /// 額度選單的真實樣本（#1512，依 11-14 截圖逐字轉錄）
+        fn usage_screen() -> String {
+            include_str!("../../tests/fixtures/term-screens/claude-limit-menu.real.txt").replace("\r\n", "\n")
+        }
+
+        #[test]
+        fn 額度選單_手機只拿到固定文字和兩個不花錢的選項_付費那項按不到() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = usage_screen();
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert_eq!(o.text, crate::launch::claude_screen::PHONE_USAGE_TEXT, "只送固定文字");
+            for raw in ["Nov 16", "Switch to usage credits", "weekly limit", "What do you want"] {
+                assert!(!o.text.contains(raw), "畫面原文不送：{raw}");
+            }
+            let opts: Vec<(u32, &str)> = o.options.iter().map(|x| (x.n, x.label.as_str())).collect();
+            assert_eq!(opts, vec![(1, "停下來，等額度恢復"), (2, "在這裡等，額度恢復後自動繼續")]);
+            assert!(o.complete && o.options_full.is_empty());
+            // 選項 3（付費）：不在選項裡，什麼都不送
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 3, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
+            assert!(sent(&rig).is_empty());
+            // 重置時間變了（換了一個選單）：雜湊不同，不送
+            *rig.runner.inner.screen.borrow_mut() = usage_screen().replace("at Nov 16, 12am", "at Nov 23, 12am");
+            assert!(rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert!(sent(&rig).is_empty());
+            // 游標在哪不算內容：游標移到第 2 項，雜湊照舊
+            *rig.runner.inner.screen.borrow_mut() = usage_screen().replace("❯ 1. Stop", "  1. Stop").replace("    2. Wait", "  ❯ 2. Wait");
+            assert_eq!(rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap().hash, o.hash);
+            // 這個假畫面不會動：選 1 → 游標本來就在第 1 項 → 只按 Enter（不送數字）→ 選單還在，回報「還在」（不算成功）
+            *rig.runner.inner.screen.borrow_mut() = usage_screen();
+            let e = rig.svc.phone_answer_with("小乙", &o.hash, 1, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("還在畫面上"), "{e}");
+            assert_eq!(sent(&rig), vec!["\r"]);
+            // 選 2：送向下；假畫面的游標不動 → 不按 Enter
+            let e = rig.svc.phone_answer_with("小乙", &o.hash, 2, Some(SESSION_PID)).unwrap_err();
+            assert!(e.contains("沒有按 Enter"), "{e}");
+            assert_eq!(sent(&rig)[1..].to_vec(), vec!["\u{1b}[B".to_string()]);
+        }
+
+        #[test]
+        fn 額度選單_用方向鍵一格一格走_每格都重讀_游標到位且內容沒變才按_enter() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = usage_screen();
+            let (snap, _) = rig.svc.partner_screen_checked("小乙", Some(SESSION_PID)).unwrap();
+            let z = std::time::Duration::ZERO;
+            type Re = Box<dyn FnMut() -> Result<Option<(usize, String)>, String>>;
+            /// 依序回這些結果，用完之後回「選單不見了」
+            fn seq(v: Vec<Option<(usize, &'static str)>>) -> Re {
+                let mut it = v.into_iter().map(|x| x.map(|(c, h)| (c, h.to_string())));
+                Box::new(move || Ok(it.next().unwrap_or(None)))
+            }
+            let (down, up, enter) = ("\u{1b}[B", "\u{1b}[A", "\r");
+            let check = |cursor: usize, target: usize, re: Vec<Option<(usize, &'static str)>>, want_keys: &[&str]| {
+                let before = sent(&rig).len();
+                let r = rig.svc.usage_send_with(&snap, "h", cursor, target, &mut *seq(re), z);
+                assert_eq!(sent(&rig)[before..].to_vec(), want_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>());
+                r
+            };
+            // 游標本來就在要的那一項：只按 Enter，之後選單不見＝成功
+            check(0, 0, vec![None], &[enter]).unwrap();
+            // 往下一格：游標到了、內容相同才按 Enter
+            check(0, 1, vec![Some((1, "h"))], &[down, enter]).unwrap();
+            // 游標晚一點才動：等到再按
+            check(0, 1, vec![Some((0, "h")), Some((0, "h")), Some((1, "h"))], &[down, enter]).unwrap();
+            // 付費排前面時（停下來等是第 3 項）：走兩格，每格都等游標動了才走下一格
+            check(0, 2, vec![Some((1, "h")), Some((2, "h"))], &[down, down, enter]).unwrap();
+            // 往上
+            check(2, 1, vec![Some((1, "h"))], &[up, enter]).unwrap();
+            // 游標一直不動：不按 Enter
+            assert!(check(0, 1, vec![Some((0, "h")); USAGE_STEP_TRIES], &[down]).unwrap_err().contains("沒有按 Enter"));
+            // 內容變了（換了選項、重置時間變了）：不按 Enter
+            assert!(check(0, 1, vec![Some((1, "別的"))], &[down]).unwrap_err().contains("沒有按 Enter"));
+            // 走到一半選單不見了：不知道選到什麼，不按 Enter
+            assert!(check(0, 2, vec![Some((1, "h")), None], &[down, down]).unwrap_err().contains("沒有按 Enter"));
+            // 游標跳來跳去一直到不了：走到上限就停，不按 Enter
+            let bounce: Vec<_> = (0..USAGE_MAX_MOVES).map(|i| Some((if i % 2 == 0 { 2 } else { 0 }, "h"))).collect();
+            let keys: Vec<&str> = (0..USAGE_MAX_MOVES).map(|i| if i % 2 == 0 { down } else { up }).collect();
+            assert!(check(0, 1, bounce, &keys).unwrap_err().contains("沒有按 Enter"));
+            // 按了 Enter 之後同一個選單還在：不算成功
+            assert!(check(0, 0, vec![Some((0, "h"))], &[enter]).unwrap_err().contains("還在畫面上"));
+            // 按了 Enter 之後換成別的選單（雜湊不同）：算成功
+            check(0, 0, vec![Some((0, "別的"))], &[enter]).unwrap();
+            // 重讀失敗（例如視窗不在了）：不按 Enter
+            let before = sent(&rig).len();
+            let mut err: Re = Box::new(|| Err("這個夥伴已經結束".to_string()));
+            assert!(rig.svc.usage_send_with(&snap, "h", 0, 1, &mut *err, z).unwrap_err().contains("沒有按 Enter"));
+            assert_eq!(sent(&rig)[before..].to_vec(), vec![down.to_string()]);
+            // 按了 Enter 之後讀不到畫面：不算成功（讀不到不等於成功），請本人到電腦上確認
+            let before = sent(&rig).len();
+            let mut err: Re = Box::new(|| Err("這個夥伴已經結束".to_string()));
+            assert_eq!(rig.svc.usage_send_with(&snap, "h", 0, 0, &mut *err, z).unwrap_err(), USAGE_UNSURE);
+            assert_eq!(sent(&rig)[before..].to_vec(), vec![enter.to_string()]);
         }
 
         #[test]

@@ -41,6 +41,24 @@
     "grok": "None",
     "pi": "None"
   },
+  "fixture/claude-limit-menu-auto-armed.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-limit-menu-paid-first.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-limit-menu.real.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
   "fixture/claude-login-expired.synthetic.txt": {
     "agy": "None",
     "claude": "None",

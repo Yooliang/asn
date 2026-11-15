@@ -1,0 +1,12 @@
+# synthetic：不是真實畫面。照 claude.exe 2.1.325 內嵌程式的組法：有些帳號付費選項排在最前面；字串取自執行檔（#1512）
+  ⎿  You've hit your limit · resets 3pm (Asia/Taipei)
+
+────────────────────────────────────────────────────────────────────────────────
+  What do you want to do?
+
+  ❯ 1. Add funds to continue with usage credits
+    2. Upgrade your plan
+    3. Stop and wait for limit to reset
+    4. Wait here, then continue automatically when the limit resets
+
+  Enter to confirm · Esc to cancel
