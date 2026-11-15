@@ -1,11 +1,11 @@
 {
-  "version": "0.2.24",
-  "notes": "- 新功能：電腦版下載新版時改成直角進度條。\n- 改善：LINE 外觀電腦版：拿掉設備欄、自己的卡片放第一個、對話區白底、按鈕區移到輸入框上方。\n- 改善：LINE 外觀手機版：表格在泡泡裡左右滑、泡泡加寬、標題列藍底沒有白線、語音輸入時只讓麥克風變色、送出鈕在最右邊。\n- 改善：手機設備頁點一下才展開按鈕，捲動時不會誤按。\n- 改善：電腦版名單頂端精簡（拿掉重複的群組鈕、放大鏡放進搜尋框）。\n- 修正：手機看大圖時按返回，只關掉看圖。\n- 改善：外觀選項「復古 Aero」拿掉後面的說明文字。",
-  "pub_date": "2026-11-15T07:14:23.563Z",
+  "version": "0.2.25",
+  "notes": "- 新功能：Claude 額度用完時，手機會出現「停下來，等額度恢復」「在這裡等，額度恢復後自動繼續」兩顆按鈕，不用再到電腦前面選（付費選項不會出現在手機上）\n- 新功能：手機看別台終端時多一排按鍵（1、2、3、↑、↓、Esc、Enter），可以複製畫面文字，畫面上的登入網址可以直接點開\n- 新功能：Claude 登入失效時，手機設備頁會出現「重新登入 Claude」，在手機上就能登回去\n- 新功能：設備頁顯示每個 Claude 帳號「上次確認可用」的時間\n- 修正：手機貼回登入碼後按 Enter 的行為怪怪的問題\n- 修正：手機從輸入框打字進別台終端，一直停在「等那台電腦回應」的問題",
+  "pub_date": "2026-11-15T15:44:15.006Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjY3YWcxSHNKYjQvd3U5N3l3UzVmRHVUSlZhdXdTRkFRNjIzZ0RubzNPSWJOU0tnS1I0ZFNURlZpcVZvUWpBeVVnT3h4Zk8vWExpUEN5ak5PVGlXQnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NzI1MzE1CWZpbGU6QVNOXzAuMi4yNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI0CmpaVmhMQ2J4bW14NUMvazlzQWovQmtqb0paOFNMSTM2L21TaTZ1aXQ1WlRsaTRzMFo0VWFHVVdVZEZ0dWd4c3pNcUt5ZjZkdVBXMGZGYklaOTVlSEJBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.24_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVMVjNIYy9UdlQyamVCUlIwYUdwM1dURy91YWVmcUZNRi9jUnNHckRPd0pTSzJhdzRUeDA1dWt6YmVzWUYxZDQ1enpNNzZPc1NXWUNlT1dIVXFVSndJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NzU1NTU2CWZpbGU6QVNOXzAuMi4yNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI1CmQ3cnVOSkE0bnNBOW1RQWtjTDVLL0JBejZmREJ6VzgveUdwNDBzSTRzVGxvN0pSUHRyR0lEcE8wTFY5SjFiY1dmL1pHOXdGdVBndTBTVldpY0E4b0JnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.25_x64-setup.exe"
     }
   }
 }
