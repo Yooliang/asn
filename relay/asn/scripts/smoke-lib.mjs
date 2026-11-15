@@ -1673,6 +1673,64 @@ export const mtabsProbeSource = () => `(async () => {
 })()`
 // 電腦版四個大分頁（0.2.18）：名單上方「夥伴／對話／設定／通知」（#1429 改順序），和手機同樣的字與順序；開窗停在夥伴（本機那台），左邊直排的設備頁籤只在夥伴裡、
 // 不再有通知、群組、指引、齒輪；對話分頁最上面有建立／加入群組；設定最後一列是使用指引，點進去有「‹ 設定」回來；點夥伴回到剛才的設備頁籤
+// 電腦版名單頂端精簡（#1531）：①「夥伴」的放大鏡在搜尋框裡面，真點它游標要進搜尋框（原本獨立那顆的功能）；
+// ②「對話」搜尋框下面沒有建立／加入群組鈕，真點「＋」選單裡的「建立群組…」「加入群組…」各自打開對應的視窗。LINE 外觀框內放大鏡是底圖，不放按鈕
+export const listTrimProbeSource = probe => `(async () => {
+  try {
+  const line = ${JSON.stringify(probe.listTrim === 'line')};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
+  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  const real = async req => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(350) };
+  const R = e => e.getBoundingClientRect();
+  const tab = l => [...document.querySelectorAll('.top-tabs .ttab')].find(e => (e.querySelector('span') && e.querySelector('span').textContent.trim() === l) || (e.getAttribute('aria-label') || '').startsWith(l));
+  await sleep(300);
+  const input = document.querySelector('.content .search-box input[aria-label="搜尋聯絡人"]');
+  if (!vis(input)) return { ok: false, why: '夥伴分頁找不到搜尋框' };
+  if ([...document.querySelectorAll('.content .search > .search-ic')].some(vis)) return { ok: false, why: '搜尋框右邊還有一顆獨立的放大鏡' };
+  const mag = document.querySelector('.content .search-box .search-in');
+  if (line) {
+    if (vis(mag)) return { ok: false, why: 'LINE 外觀不該另外放放大鏡鈕（框內左側是底圖）' };
+  } else {
+    if (!vis(mag)) return { ok: false, why: '搜尋框裡沒有放大鏡' };
+    const a = R(input), b = R(mag);
+    if (b.left < a.left || b.right > a.right || b.top < a.top || b.bottom > a.bottom) return { ok: false, why: '放大鏡不在搜尋框裡：框 ' + [a.left, a.top, a.right, a.bottom].map(Math.round) + '，放大鏡 ' + [b.left, b.top, b.right, b.bottom].map(Math.round) };
+    if (a.right - b.right > 8) return { ok: false, why: '放大鏡沒有靠框的右側：差 ' + Math.round(a.right - b.right) + 'px' };
+    input.blur(); await sleep(100);
+    if (document.activeElement === input) return { ok: false, why: '測試前搜尋框不該有游標' };
+    await real({ click: at(mag) });
+    if (document.activeElement !== input) return { ok: false, why: '點框內的放大鏡，游標沒有進搜尋框（現在在 ' + (document.activeElement && (document.activeElement.className || document.activeElement.tagName)) + '）' };
+    await real({ text: 'zz' });
+    if (input.value !== 'zz') return { ok: false, why: '點放大鏡後打字沒有進搜尋框：' + JSON.stringify(input.value) };
+    input.value = ''; input.dispatchEvent(new Event('input'));
+  }
+  await real({ click: at(tab('對話')) });
+  const chats = document.querySelector('.chat-list');
+  if (!vis(chats)) return { ok: false, why: '對話分頁沒有顯示' };
+  if (chats.querySelector('.gl-actions') || [...chats.querySelectorAll('button')].some(b => /^(建立|加入)群組$/.test(b.textContent.trim()))) return { ok: false, why: '對話分頁搜尋框下面還有建立／加入群組鈕' };
+  for (const [item, want] of [['建立群組…', '建立'], ['加入群組…', '加入']]) {
+    const plus = [...document.querySelectorAll('.chat-list .search-plus, .me .plus-btn')].find(vis);
+    if (!plus) return { ok: false, why: '找不到「＋」' };
+    await real({ click: at(plus) });
+    const menu = document.querySelector('.launch-picker');
+    if (!vis(menu)) return { ok: false, why: '點「＋」沒有打開選單' };
+    const btn = [...menu.querySelectorAll('button')].find(b => b.textContent.trim() === item);
+    if (!vis(btn)) return { ok: false, why: '「＋」選單裡沒有「' + item + '」' };
+    const hit = document.elementFromPoint(...at(btn));
+    if (hit !== btn && !btn.contains(hit)) return { ok: false, why: '「' + item + '」被別的東西蓋住：' + (hit && (hit.className || hit.tagName)) + ' @' + at(btn) };
+    await real({ click: at(btn) });
+    for (let i = 0; i < 20 && !vis(document.querySelector('.gs-panel')); i++) await sleep(100);
+    const panel = document.querySelector('.gs-panel');
+    const title = panel && panel.querySelector('.gs-title') ? panel.querySelector('.gs-title').textContent.trim() : '';
+    if (!vis(panel) || !title.includes(want)) return { ok: false, why: '點「' + item + '」沒有打開對應的視窗：' + JSON.stringify(title) };
+    if (vis(document.querySelector('.launch-picker'))) return { ok: false, why: '選了「' + item + '」選單沒有收起' };
+    await real({ click: at(panel.querySelector('.gs-x')) });
+    if (vis(document.querySelector('.gs-panel'))) return { ok: false, why: '關不掉「' + item + '」的視窗' };
+  }
+  await real({ click: at(tab('夥伴')) });
+  return { ok: true, why: '' };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
+})()`
 export const DTABS_PROBE = { dtabs: true }
 export const dtabsProbeSource = () => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1693,8 +1751,8 @@ export const dtabsProbeSource = () => `(async () => {
   if (document.querySelector('.rail')) return { ok: false, why: '對話分頁不該有左邊的設備頁籤' };
   const chats = document.querySelector('.chat-list');
   if (!shown(chats)) return { ok: false, why: '對話分頁沒有顯示對話清單' };
-  const acts = [...chats.querySelectorAll('.gl-actions .gs-btn')].map(e => e.textContent.trim()).join('|');
-  if (acts !== '建立群組|加入群組') return { ok: false, why: '對話分頁最上面應有建立／加入群組：' + acts };
+  // 建立／加入群組只留在「＋」選單裡（#1531）：搜尋框下面不再有重複的兩顆鈕
+  if (chats.querySelector('.gl-actions') || [...chats.querySelectorAll('button')].some(b => /^(建立|加入)群組$/.test(b.textContent.trim()))) return { ok: false, why: '對話分頁搜尋框下面還有建立／加入群組鈕' };
   byLabel('設定').click(); await sleep(300);
   const entry = document.querySelector('.cat-list .guide-entry');
   if (!shown(entry) || !entry.textContent.includes('使用指引')) return { ok: false, why: '設定清單最後沒有「使用指引」' };
@@ -1875,8 +1933,8 @@ export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(prob
   if (document.documentElement.scrollWidth > innerWidth + 1) return { ok: false, why: '出現橫向捲動' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.lineDesk ? 'LINE 電腦版名單與輸入區檢查' : probe.updDl !== undefined ? '下載中進度條檢查' : probe.lineUi ? 'LINE 輸入列與標題列檢查' : probe.lineTimes ? 'LINE 訊息時間位置檢查' : probe.camera ? '拍照鈕檢查' : probe.multiPhoto ? '一次選多張檢查' : probe.photoZoom ? '看大圖縮放檢查' : probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.lineDesk ? lineDeskProbeSource(probe.lineDesk) : probe.updDl !== undefined ? updDlProbeSource(probe.updDl) : probe.lineUi ? lineUiProbeSource(probe) : probe.lineTimes ? lineTimesProbeSource() : probe.camera ? cameraProbeSource(probe.camera) : probe.multiPhoto ? multiPhotoProbeSource() : probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.listTrim ? '電腦版名單頂端精簡檢查' : probe.lineDesk ? 'LINE 電腦版名單與輸入區檢查' : probe.updDl !== undefined ? '下載中進度條檢查' : probe.lineUi ? 'LINE 輸入列與標題列檢查' : probe.lineTimes ? 'LINE 訊息時間位置檢查' : probe.camera ? '拍照鈕檢查' : probe.multiPhoto ? '一次選多張檢查' : probe.photoZoom ? '看大圖縮放檢查' : probe.gjump ? '群組點成員跳一對一檢查' : probe.fpMark ? '設備列指紋圖示檢查' : probe.devMore ? '設備「更多」收起檢查' : probe.mchatBack ? '手機對話返回鈕檢查' : probe.mpermDanger ? '手機確認框危險提示檢查' : probe.menuIcons ? '選單圖示檢查' : probe.aboutCheck ? '電腦版關於區檢查' : probe.taskmgr ? '工作管理員檢查' : probe.munread ? '手機夥伴頁未讀檢查' : probe.mchatEmpty ? '手機對話分頁空白提示檢查' : probe.skinCheck ? '現代外觀檢查' : probe.dtabs ? '電腦版四個大分頁檢查' : probe.mtabs ? '手機四個分頁檢查' : probe.dterm || probe.dtermTab || probe.ltermPause ? '電腦版看終端檢查' : probe.dnotice ? '電腦版通知頁籤檢查' : probe.mpermreq ? '手機權限框分隔線檢查' : probe.mpane ? '整合模式窄視窗檢查' : probe.devbtn ? '帳號設備按鈕檢查' : probe.mtermview ? (probe.statusLine ? '手機看終端狀態列檢查' : probe.swipe ? '手機看終端左右滑檢查' : '手機看終端檢查') : probe.mlaunch ? '手機開新夥伴檢查' : probe.mrelease ? '手機新版紅點重讀檢查' : probe.mnoticeLegacy ? '手機舊收發室列併進通知檢查' : probe.mnotice ? '手機通知分頁檢查' : probe.mdevsheet ? '手機設備詳情排版檢查' : probe.mnoself ? '手機不能切到本機檢查' : probe.mcloud ? '手機設備列雲端標示檢查' : probe.mlayout ? '手機設定頁排版檢查' : probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgoffline ? '手機群組離線人數檢查' : probe.goffline ? '電腦群組離線人數檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.listTrim ? listTrimProbeSource(probe) : probe.lineDesk ? lineDeskProbeSource(probe.lineDesk) : probe.updDl !== undefined ? updDlProbeSource(probe.updDl) : probe.lineUi ? lineUiProbeSource(probe) : probe.lineTimes ? lineTimesProbeSource() : probe.camera ? cameraProbeSource(probe.camera) : probe.multiPhoto ? multiPhotoProbeSource() : probe.photoZoom ? photoZoomProbeSource(probe.photoZoom) : probe.gjump ? gjumpProbeSource(probe) : probe.fpMark ? fpMarkProbeSource(probe.fpMark) : probe.devMore ? devMoreProbeSource() : probe.mchatBack ? mchatBackProbeSource() : probe.mpermDanger ? permDangerProbeSource(probe.mpermDanger) : probe.menuIcons ? menuIconsProbeSource() : probe.aboutCheck ? aboutProbeSource() : probe.taskmgr ? taskmgrProbeSource() : probe.munread ? munreadProbeSource() : probe.mchatEmpty ? mchatEmptyProbeSource() : probe.skinCheck ? skinProbeSource(probe) : probe.dtabs ? dtabsProbeSource() : probe.mtabs ? mtabsProbeSource() : probe.ltermPause ? ltermPauseProbeSource() : probe.dtermTab ? dtermTabProbeSource(probe.dtermTab) : probe.dterm ? dtermProbeSource(probe.dterm) : probe.dnotice ? dnoticeProbeSource(probe) : probe.mpermreq ? mpermreqProbeSource(probe) : probe.mpane ? (probe.chat ? mpaneChatProbeSource(probe) : mpaneProbeSource(probe)) : probe.devbtn ? devbtnProbeSource(probe) : probe.mtermview ? mtermviewProbeSource(probe) : probe.mlaunch ? mlaunchProbeSource(probe) : probe.mrelease ? mreleaseProbeSource(probe) : probe.mnoticeLegacy ? mnoticeLegacyProbeSource(probe) : probe.mnotice ? mnoticeProbeSource(probe) : probe.mdevsheet ? mdevsheetProbeSource(probe) : probe.mnoself ? mnoselfProbeSource(probe) : probe.mcloud ? mcloudProbeSource(probe) : probe.mlayout ? mlayoutProbeSource(probe) : probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgoffline ? mgofflineProbeSource(probe) : probe.goffline ? gofflineProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -2698,6 +2756,10 @@ export const SCENARIOS = [
   { name: 'm-modern-ops', page: 'm.html', state: { signedIn: true, mbar: 'claude', skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: MENU_ICONS_PROBE, shot: 'm-modern-ops.png' },
   { name: 'm-modern-term', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'modern' }, ready: '#app.m .m-head-term', probe: SKIN_PROBE, shot: 'm-modern-term.png' },
   { name: 'list-tabs', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: DTABS_PROBE, shot: 'list-tabs.png' },
+  // #1531：電腦版名單頂端精簡，三種外觀各一張（真點框內放大鏡、真點「＋」選單裡的建立／加入群組）
+  { name: 'list-trim', page: 'list.html', width: 420, height: 720, state: { signedIn: true }, ready: '#app.win .top-tabs .ttab', probe: { listTrim: 'aero' }, shot: 'list-trim.png' },
+  { name: 'list-trim-modern', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'modern' }, ready: '#app.win .top-tabs .ttab', probe: { listTrim: 'modern' }, shot: 'list-trim-modern.png' },
+  { name: 'list-trim-line', page: 'list.html', width: 420, height: 720, state: { signedIn: true, skin: 'line' }, ready: '#app.win .top-tabs .ttab', probe: { listTrim: 'line' }, shot: 'list-trim-line.png' },
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true, mtab: 'list' }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
   // 固定 6 顆大按鈕（#539）：閒置 Claude、離線 Claude、ACP 工作者，各自依序都在、反灰正確、反灰有 20 字內的原因

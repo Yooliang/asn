@@ -94,6 +94,12 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
 .search-ic{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--line);border-radius:3px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
 .search-ic:hover{border-color:var(--accent);background:linear-gradient(#f2f9ff,#bfe0fb)}
+/* 搜尋框＋框內放大鏡（#1531）：框照舊撐滿，右側留位置給放大鏡；點放大鏡一樣是把游標放進框裡 */
+.search-box{position:relative;display:flex;flex:1;min-width:0;min-height:26px;align-items:center}
+.search-box input{padding-right:30px}
+.search-in{position:absolute;top:50%;right:3px;width:22px;height:22px;margin-top:-11px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
+.search-in:hover{color:var(--accent)}
+.search-in:focus-visible{outline:2px solid var(--accent);outline-offset:0}
 .buddy-menu,.launch-picker,.device-menu,.av-menu.buddy-menu,.av-menu.launch-picker,.av-menu.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
 /* 二級選單：放在主選單外面（fixed），比主選單高一層；位置由 lib/menu-place.mjs 算 */
 .buddy-subpop,.av-menu.buddy-subpop{z-index:63;list-style:none;padding:2px 0;width:max-content}

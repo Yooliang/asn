@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.devMore && !s.probe.lineDesk && s.probe.updDl === undefined && !s.probe.lineUi && !s.probe.lineTimes && !s.probe.camera && !s.probe.multiPhoto && !s.probe.photoZoom && !s.probe.gjump && !s.probe.fpMark && !s.probe.mchatBack && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr && !s.probe.mrelease)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.devMore && !s.probe.listTrim && !s.probe.lineDesk && s.probe.updDl === undefined && !s.probe.lineUi && !s.probe.lineTimes && !s.probe.camera && !s.probe.multiPhoto && !s.probe.photoZoom && !s.probe.gjump && !s.probe.fpMark && !s.probe.mchatBack && !s.probe.mpermDanger && !s.probe.menuIcons && !s.probe.munread && !s.probe.mchatEmpty && !s.probe.aboutCheck && !s.probe.mtabs && !s.probe.dtabs && !s.probe.skinCheck && !s.probe.dterm && !s.probe.dtermTab && !s.probe.ltermPause && !s.probe.mpane && !s.probe.mpermreq && !s.probe.mdevsheet && !s.probe.mtermview && !s.probe.bar && !s.probe.group && !s.probe.mchat && !s.probe.mgroup && !s.probe.goffline && !s.probe.mgoffline && !s.probe.quota && !s.probe.mcards && !s.probe.mattach && !s.probe.macctBack && !s.probe.mlayout && !s.probe.mnoself && !s.probe.mcloud && !s.probe.mnotice && !s.probe.mnoticeLegacy && !s.probe.mlaunch && !s.probe.devbtn && !s.probe.dnotice && !s.probe.taskmgr && !s.probe.mrelease)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('section[aria-label="夥伴"] .m-head .m-me'), '手機：夥伴頁左上的頭像（0.2.18 起對話頁也有標頭，指定夥伴頁那一份）')
@@ -347,14 +347,26 @@ test('手機夥伴頁「未讀」與對話分頁空白提示的情境（#1438）
   assert.equal(JSON.parse(tableFor(em[0]).store_load.values.me).lastChat, undefined, '沒有最後一則')
 })
 
-test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩設備頁籤、對話有建立／加入群組、使用指引在設定底下；表達式語法正確', async () => {
+test('電腦版四個大分頁情境（0.2.18）：字與順序、左邊只剩設備頁籤、對話分頁沒有重複的建立／加入群組鈕（#1531）、使用指引在設定底下；表達式語法正確', async () => {
   const vm = await import('node:vm')
   const sc = SCENARIOS.filter(s => s.probe?.dtabs)
   assert.deepEqual(sc.map(s => s.name), ['list-tabs'])
   assert.equal(probeKind(sc[0].probe), '電腦版四個大分頁檢查')
   const src = probeSource(sc[0].probe)
   assert.doesNotThrow(() => new vm.Script(src))
-  for (const w of ["'夥伴|對話|設定|通知'", '.rtab-notice, .rtab-groups', '建立群組|加入群組', '.guide-back', '點夥伴沒有回到剛才的設備頁籤']) assert.ok(src.includes(w), w)
+  for (const w of ["'夥伴|對話|設定|通知'", '.rtab-notice, .rtab-groups', '對話分頁搜尋框下面還有建立／加入群組鈕', '.guide-back', '點夥伴沒有回到剛才的設備頁籤']) assert.ok(src.includes(w), w)
+})
+
+test('電腦版名單頂端精簡情境（#1531）：三種外觀各一；真點框內放大鏡、真點「＋」選單裡的建立／加入群組；表達式語法正確', async () => {
+  const vm = await import('node:vm')
+  const sc = SCENARIOS.filter(s => s.probe?.listTrim)
+  assert.deepEqual(sc.map(s => [s.name, s.probe.listTrim, s.state.skin ?? 'aero']), [['list-trim', 'aero', 'aero'], ['list-trim-modern', 'modern', 'modern'], ['list-trim-line', 'line', 'line']])
+  for (const s of sc) {
+    assert.equal(probeKind(s.probe), '電腦版名單頂端精簡檢查')
+    const src = probeSource(s.probe)
+    assert.doesNotThrow(() => new vm.Script(src))
+    for (const w of ["real({ click: at(mag) })", "real({ click: at(plus) })", "real({ click: at(btn) })", "['建立群組…', '建立'], ['加入群組…', '加入']", '點框內的放大鏡，游標沒有進搜尋框', '搜尋框右邊還有一顆獨立的放大鏡']) assert.ok(src.includes(w), w)
+  }
 })
 
 test('現代外觀情境（0.2.18）：電腦名單、電腦對話、手機對話、手機夥伴頁各一，存檔選現代；表達式語法正確', async () => {

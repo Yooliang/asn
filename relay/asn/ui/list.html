@@ -99,8 +99,11 @@
       <div class="content" role="tabpanel">
         <template v-if="isDevice">
           <div class="search">
-            <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
-            <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            <!-- 放大鏡放進搜尋框右側（#1531）：點了一樣是把游標放進搜尋框（focusSearch）；LINE 外觀照舊用框內左側的底圖，這顆不顯示 -->
+            <span class="search-box">
+              <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
+              <button class="search-in" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            </span>
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
@@ -139,15 +142,11 @@
             <div class="empty-list" v-if="!shown.length">{{ emptyText }}</div>
           </div>
         </template>
-        <!-- 對話：活動中的對話（夥伴與群組，新到舊）；建立／加入群組在最上面（原本的「群組」頁籤併進來） -->
+        <!-- 對話：活動中的對話（夥伴與群組，新到舊）；建立／加入群組在「＋」選單裡（#1531 拿掉了搜尋框下面重複的兩顆鈕） -->
         <div class="list chat-list" v-else-if="tab === 'chats'">
           <div class="search">
             <input v-model="chatQuery" placeholder="搜尋對話..." aria-label="搜尋對話">
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
-          </div>
-          <div class="gl-actions">
-            <button class="gs-btn" type="button" @click.stop="groupFlow.openCreate()">建立群組</button>
-            <button class="gs-btn" type="button" @click.stop="groupFlow.openJoin()">加入群組</button>
           </div>
           <ul>
             <li v-for="x in chatRows" :key="x.id" :class="x.kind === 'room' ? 'room-item' : ''" @contextmenu.prevent="x.kind === 'friend' && openBuddyMenu(x.friend, $event)">
@@ -432,7 +431,7 @@
       <button class="aero-btn primary" type="button" @click="accounts.dismissDone(accounts.state.done[0].id)">知道了</button>
     </div>
   </asn-dialog>
-  <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
+  <ul class="av-menu launch-picker" ref="launchPickerEl" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="openPartnerDlg()">新增夥伴…</button></li>
     <!-- 「終端」段只在有終端等你回答時出現，不留空標題（#392） -->
     <template v-if="termWaitCount">

@@ -715,12 +715,17 @@ const searchInput = ref(null)
 function focusSearch() { searchInput.value?.focus?.() }
 const launchPicker = ref(false)
 const launchPickerPos = reactive({ x: 0, y: 0 })
-function openLaunchPicker(e) {
+const launchPickerEl = ref(null)
+async function openLaunchPicker(e) {
   closeBuddyMenu()
   const r = e?.currentTarget?.getBoundingClientRect?.()
-  launchPickerPos.x = r ? r.right - 4 : (e?.clientX ?? 0)
-  launchPickerPos.y = r ? r.bottom + 2 : (e?.clientY ?? 0)
+  const origin = { x: r ? r.right - 4 : (e?.clientX ?? 0), y: r ? r.bottom + 2 : (e?.clientY ?? 0) }
+  Object.assign(launchPickerPos, origin)
   launchPicker.value = true
+  // 「＋」靠視窗右緣：右邊放不下就往左展開、夾在視窗內（#1531：建立／加入群組只剩這個入口，選單不能有一半在視窗外）
+  await nextTick()
+  const m = launchPickerEl.value?.getBoundingClientRect()
+  if (m && launchPicker.value) Object.assign(launchPickerPos, placeMenu(origin, { w: m.width, h: m.height }, { w: window.innerWidth, h: window.innerHeight }))
 }
 function closeLaunchPicker() { launchPicker.value = false }
 const buddyMenu = ref('')
@@ -2056,7 +2061,7 @@ const app = createApp({
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, remotePiModelsFor, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
-      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
+      searchInput, focusSearch, launchPicker, launchPickerPos, launchPickerEl, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
