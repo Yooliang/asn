@@ -12,9 +12,10 @@ import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-swit
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
 import { idleCountOf, taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
-import { REASON, WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
-import { manageItems, runArchive } from './archive.mjs'
-import { phoneOpsRows } from './mobile-ops.mjs'
+import { WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
+import { runArchive } from './archive.mjs'
+import { WHY_MAX, briefWhy, buildPartnerMenu } from './partner-menu.mjs'
+export { WHY_MAX, briefWhy }   // 反灰原因縮短搬到 partner-menu.mjs（#1559），這裡照舊轉出
 import { AsnAvatar } from './avatar-badge.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
@@ -33,32 +34,6 @@ export function sameFriend(a, b) {
   return a === b || (Boolean(a.id) && a.id === b.id)
 }
 
-// ---------- 反灰原因（20 字內） ----------
-export const WHY_MAX = 20
-const BRIEF = new Map([
-  [REASON.closed, '這台電腦沒開放遠端管理'],
-  [REASON.deviceOffline, '電腦不在線，叫不醒'],
-  [REASON.cloud, '雲端代理，沒有視窗可管'],
-  [REASON.otherEngine, '這個引擎暫不開放管理'],
-  [REASON.restartOnlyAcp, '只用在內建通道的工作者'],
-  [REASON.removeOnlyAcp, '只用在內建通道的工作者'],
-])
-const BRIEF_RE = [
-  [/^這是這台電腦上自己開的/, '自己開的程式，只能顯示'],
-  [/^這個 pi 視窗已離線/, 'pi 視窗已離線'],
-  [/^這個內建通道的工作者已離線/, '工作者已離線'],
-  [/^這個視窗已離線，要先喚醒/, '視窗已離線，要先喚醒'],
-  [/^查不到這台電腦的設定/, '查不到這台電腦的設定'],
-  [/^查不到登入狀態/, '查不到登入狀態'],
-  [/不需要喚醒；要重新啟動/, '不用喚醒，請用「重開」'],
-]
-/** 反灰的說明縮成 20 字內（大按鈕提示、管理選單、名單右鍵共用）；已經夠短的原樣，認得的長句換成短說法，其餘截斷。 */
-export function briefWhy(reason) {
-  const s = String(reason ?? '').trim()
-  if (s.length <= WHY_MAX) return s
-  const hit = BRIEF.get(s) ?? BRIEF_RE.find(([re]) => re.test(s))?.[1]
-  return hit ?? `${s.slice(0, WHY_MAX - 1)}…`
-}
 
 /** 「前台／後台」在查詢之前就已經知道不能用的原因（能用回空字串）；判斷與 canOfferConsole 完全相同。 */
 export function consoleBlock(friend, selfNode) {
@@ -226,23 +201,12 @@ export function nameplateView(friend) {
   return { name, sub, machine, state, busy: !room && friend?.status === 'busy', room, offline: !room && friend?.status === 'offline', initial: [...name][0] ?? '', aria: `${name}${sub ? '，' + sub : ''}` }
 }
 
-/** 「更多」裡「管理」那段的一列：key 加 p: 前綴（接回「管理」選單原本的 handler）；切換模型、喚醒的能不能按看電腦大按鈕那一格。 */
-function moreManageRow(item, slots) {
-  const key = `p:${item.key}`
-  if (item.key === 'model' && slots.model) return { key, label: item.label, ok: slots.model.ok, reason: slots.model.ok ? '' : briefWhy(slots.model.reason) }
-  if (item.key === 'resume') {
-    const w = slots.window
-    const ok = Boolean(item.ok && w?.wake && w.ok)
-    return { key, label: item.label, ok, reason: ok ? '' : briefWhy(item.reason || w?.reason || '現在不能喚醒') }
-  }
-  return { key, label: item.label, ok: item.ok !== false, reason: item.ok === false ? briefWhy(item.reason) : '' }
-}
 
 /** 「更多」裡由 pickMore 自己處理的 key（通話、前台／後台、子代理、工作項目、切換模型）；其餘的 p: 開頭交給 pickOps、沒有前綴的經 ops 事件交給名單視窗。測試與 pickMore 共用這一份。 */
 export const MORE_OWN_KEYS = Object.freeze(['call', 'window', 'subs', 'tasks', 'p:model'])
 
 /**
- * 電腦版現代外觀「更多」選單的項目。順序與手機「⋯」一致：先是 phoneOpsRows(manageItems)（喚醒、切換模型排最前，離線才有喚醒），
+ * 電腦版現代外觀「更多」選單的項目。順序與手機「⋯」一致：先是 buildPartnerMenu 的 more 段（跟手機同一組：喚醒、切換模型排最前，離線才有喚醒），
  * 再接 chatGroupItems（邀請別人加入；群組是邀請、加 AI、成員與設定）；分隔線之後才是電腦獨有的：
  * 通話、前台／後台（有「終端」鈕時不列）、子代理、工作項目、納入管理。群組只有群組那三項。
  * ctx：{ ops（loadOpsContext 的結果）, selfNode, slots（barSlots 的結果依 key 做成的物件）, term（有「終端」鈕）, subLabel }
@@ -252,7 +216,7 @@ export function moreMenuItems(friend, ctx = {}) {
   const slots = ctx.slots ?? {}
   const shared = chatGroupItems(friend).map(i => ({ ...i, ok: true, reason: '' }))
   if (friend.room === true) return shared
-  const manage = phoneOpsRows(manageItems(friend, ctx.ops ?? {}), friend).map(i => moreManageRow(i, slots))
+  const manage = buildPartnerMenu(friend, ctx.ops ?? {}, 'more', { slots })
   const slotRow = (key, label, s) => ({ key, label, ok: s?.ok === true, reason: s?.ok === true ? '' : briefWhy(s?.reason ?? '') })
   const own = []
   if (slots.call) own.push(slotRow('call', BAR_LABEL.call, slots.call))
@@ -283,21 +247,18 @@ function withAdoptItem(items, adopt) {
 }
 
 /**
- * 夥伴管理項目（「管理」選單與名單右鍵共用同一份）：沿用 manageItems（詳情、改名、關閉視窗、換班接手、喚醒、重開、移除、封存）加「納入管理」；
- * 拿掉「切換模型」（大按鈕與右鍵各有自己那一格）；前台／後台也不在這裡。喚醒只有離線時可按（照 menuItems）。
- * key 加「p:」前綴；反灰原因縮成 20 字內。不是 AI 夥伴回空陣列。
+ * 名單右鍵的管理段：共用清單（buildPartnerMenu 的 context：詳情、改名、關閉視窗、換班接手、喚醒、重開、移除、封存）加「納入管理」。
+ * 切換模型、前台／後台不在這裡（右鍵各有自己那一格）。key 加「p:」前綴；反灰原因縮成 20 字內。不是 AI 夥伴回空陣列。
  */
-const NO_DOTS = ['close', 'archive', 'unarchive', 'resume']
 export function partnerMenuItems(friend, ctx = {}, selfNode = '') {
-  const all = manageItems(friend, ctx).filter(i => i.key !== 'model')
-  if (!all.length) return []
-  const items = all.map(i => ({ key: `p:${i.key}`, label: `${i.label}${NO_DOTS.includes(i.key) ? '' : '…'}`, ok: i.ok, reason: i.ok ? '' : briefWhy(i.reason) }))
-  return withAdoptItem(items, adoptItem(friend, selfNode))
+  const items = buildPartnerMenu(friend, ctx, 'context')
+  return items.length ? withAdoptItem(items, adoptItem(friend, selfNode)) : []
 }
 
-/** 「管理」選單的完整項目：夥伴管理（partnerMenuItems，拿掉喚醒：已在第 2 格）＋分隔線＋邀請等（extra＝opsMenuItems）。local.selfNode＝這台的節點。 */
+/** 「管理」選單的完整項目：共用清單（buildPartnerMenu 的 panel：拿掉喚醒，已在第 2 格）＋「納入管理」＋分隔線＋邀請等（extra＝opsMenuItems）。local.selfNode＝這台的節點。 */
 export function managePanelItems(friend, ctx = {}, extra = [], local = {}) {
-  const partner = partnerMenuItems(friend, ctx, local.selfNode).filter(i => i.key !== 'p:resume')
+  const base = buildPartnerMenu(friend, ctx, 'panel')
+  const partner = base.length ? withAdoptItem(base, adoptItem(friend, local.selfNode)) : []
   const rest = extra.map((i, n) => ({ ...i, ok: true, reason: '', sep: n === 0 && partner.length > 0 }))
   return [...partner, ...rest]
 }

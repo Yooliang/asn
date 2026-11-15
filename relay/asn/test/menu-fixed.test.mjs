@@ -94,7 +94,7 @@ test('接線：三處選單都用 aria-disabled＋說明小字，不靠隱藏；
   assert.match(tog, /buddyConsole\.state !== 'toggle'\) return/, '反灰的前景／背景切換什麼都不做')
   // 手機
   assert.match(mhtml, /v-for="i in opsView\.rows"/)
-  assert.match(mjs, /const opsRows = computed\(\(\) => phoneOpsRows\(opsItems\.value, chatFriend\.value\)\)/, '手機「⋯」依這位夥伴篩掉永遠用不到的項目')
+  assert.match(mjs, /const opsRows = computed\(\(\) => buildPartnerMenu\(chatFriend\.value, opsCtx\.value, 'phone'\)\)/, '手機「⋯」依這位夥伴篩掉永遠用不到的項目（#1559：跟電腦版共用 buildPartnerMenu，phone 入口內部用 phoneOpsRows）')
   assert.match(mjs, /function pickOp\(op\) \{\s*\n\s*const item = opsItems\.value\.find\(i => i\.key === op\)\s*\n\s*if \(!item \|\| !item\.ok\) return/, '手機點反灰項目不送出')
 })
 
