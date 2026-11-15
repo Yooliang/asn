@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { mpaneWidenProbeSource, findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, findBrowser, injectSource, mountCheckSource, pagerSettleSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -222,8 +222,13 @@ async function runScenario(cdp, sc, base) {
     await sleep(300)
   }
   // 情境帶 shot（#374）：探測完存一張截圖（ASN_SMOKE_SHOTS 指定的資料夾，沒指定放暫存資料夾）；存不了只記一筆，不算失敗
-  let shot = ''
+  let shot = '', settleWhy = ''
   if (check.ok && sc.shot) {
+    // 手機頁：等滑頁停下來再截（#1565），沒停下來算失敗
+    try {
+      const v = (await S('Runtime.evaluate', { expression: pagerSettleSource(), awaitPromise: true, returnByValue: true })).result.value
+      if (!v?.ok) settleWhy = v?.why || '等滑頁停下來時沒有回結果'
+    } catch (e) { settleWhy = `等滑頁停下來時執行失敗：${e.message}` }
     try {
       const { data } = await S('Page.captureScreenshot', { format: 'png' })
       shot = shotPath(sc.shot)
@@ -237,6 +242,7 @@ async function runScenario(cdp, sc, base) {
   const problems = [...errors]
   if (!check.ok) problems.unshift(`沒有掛上：${check.why}`)
   if (probeWhy) problems.push(`${probeKind(sc.probe)}：${probeWhy}`)
+  if (settleWhy) problems.push(`截圖前：${settleWhy}`)
   return { problems, missing, shot }
 }
 
