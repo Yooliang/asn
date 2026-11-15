@@ -38,6 +38,7 @@ import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
 import { MEMBER_NOT_FRIEND } from './groups.mjs'
+import { githubUrl, linkRefs, refOf, refRange, refTip } from './msg-ref.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 // 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
@@ -221,7 +222,7 @@ export const ChatPane = {
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
     // ---- 往上捲自動載入更舊的信：捲到距頂端 120px 內就向樞紐要；載入後停在原本看的那一則 ----
     const older = reactive({})   // 好友 id → 'loading'｜'done'（沒有更早的了）
-    let armed = true, keep = null   // armed：上次失敗後要先離開頂端才再試；keep：載入前的 scrollTop／scrollHeight（載入完成後補償）
+    let armed = true, keep = null, holdUntil = 0   // holdUntil：跳到某一則的捲動期間不自動載入更舊的（#1530）；armed：上次失敗後要先離開頂端才再試；keep：載入前的 scrollTop／scrollHeight（載入完成後補償）
     const noteText = computed(() => olderNote(older[props.friend?.id], props.log.length > 0))
     function applyKeep() {
       const el = msgsEl.value
@@ -230,7 +231,7 @@ export const ChatPane = {
     }
     async function checkTop() {
       const el = msgsEl.value, f = props.friend
-      if (!el || !f || !props.loadOlder || keep) return
+      if (!el || !f || !props.loadOlder || keep || Date.now() < holdUntil) return
       if (!wantsOlder({ top: el.scrollTop, state: older[f.id], armed, visible: el.clientHeight > 0, hasLog: props.log.length > 0 })) return
       const id = f.id
       older[id] = 'loading'
@@ -306,7 +307,9 @@ export const ChatPane = {
       mentionMore.value = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4
     }
     const afterMenu = () => nextTick(() => { syncMore(); menuEl.value?.querySelector('button.on')?.scrollIntoView({ block: 'nearest' }) })
-    const bodyHtml = text => (isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text))
+    // 訊息裡的 #N（#1530）：群組裡依已載入的範圍判斷是群組訊息還是 GitHub；一對一一律 GitHub
+    const refCtx = computed(() => (isRoom.value ? { room: true, ...refRange(props.log, props.friend?.lastSeq) } : { room: false }))
+    const bodyHtml = text => linkRefs(isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text), refCtx.value)
     // LINE 外觀：輸入框隨字數變高，最多 6 行後內部捲動（算法在 line-chat.mjs 的 composeFieldHeight）；其他外觀不碰 style
     function fitCompose() {
       const el = composeEl.value
@@ -511,7 +514,7 @@ export const ChatPane = {
     // 手機沒有滑過：點訊息切換下方的回覆與叫醒順序（點到連結、按鈕、引用不算）
     const actAt = ref(-1)
     function tapMsg(i, e) {
-      if (e?.target?.closest?.('a,button,input,textarea,.quote')) return
+      if (e?.target?.closest?.('a,button,input,textarea,.quote,.msg-ref')) return
       actAt.value = actAt.value === i ? -1 : i
     }
     const cancelReply = () => { replying.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
@@ -528,6 +531,44 @@ export const ChatPane = {
       el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1400)
     }
     let jumpTimer = null
+    const noteFor = (text, ms = 3500) => { clearTimeout(jumpTimer); jumpNote.value = text; jumpTimer = setTimeout(() => { jumpNote.value = '' }, ms) }
+    const flashEl = el => { holdUntil = Date.now() + 1500; el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1400) }
+    // ---- 訊息裡的編號（#1530）：GitHub 開網頁；群組訊息跳到那一則並標亮，還沒載入就先往前載入 ----
+    const seqEl = n => { const at = props.log.findIndex(m => m?.seq === n); return at >= 0 ? msgsEl.value?.querySelector(`[data-i="${at}"]`) : null }
+    async function jumpToSeq(n) {
+      let el = seqEl(n)
+      if (el) { clearTimeout(jumpTimer); jumpNote.value = ''; flashEl(el); return }
+      const { hi } = refRange(props.log, props.friend?.lastSeq)
+      if (hi && n > hi) { noteFor(`群組裡還沒有第 ${n} 則。`); return }
+      if (!props.loadOlder || !props.friend) { noteFor('這則太舊，載不到。'); return }
+      clearTimeout(jumpTimer); jumpNote.value = `正在往前載入第 ${n} 則…`
+      // 補載進來的記錄更新不要把畫面拉到底（跟往上捲載入一樣借用 keep；別的載入正在用就不動它）
+      const box = msgsEl.value, mine = !keep && !!box
+      if (mine) keep = { top: box.scrollTop, h: box.scrollHeight }
+      let r
+      try { r = await props.loadOlder(props.friend.id, { toSeq: n }) } catch { r = { error: true } }
+      await nextTick(); await new Promise(res => requestAnimationFrame(() => res()))
+      if (mine) keep = null
+      el = seqEl(n)
+      if (el) { clearTimeout(jumpTimer); jumpNote.value = ''; flashEl(el) } else noteFor(r?.error ? '載入失敗，請稍後再試。' : '這則太舊，載不到。')
+    }
+    const openRef = ref => {
+      if (ref.kind === 'github') globalThis.__TAURI__?.core?.invoke?.('open_link', { url: githubUrl(ref.n) })?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
+      else void jumpToSeq(ref.n)
+    }
+    // 長按（手機）顯示提示；長按放開後的那次點擊不算
+    let pressTimer = null, pressAt = null, pressed = false
+    const onRefDown = ev => {
+      const r = refOf(ev?.target)
+      clearTimeout(pressTimer); pressed = false
+      if (!r) return
+      pressAt = [ev.clientX, ev.clientY]
+      pressTimer = setTimeout(() => { pressed = true; noteFor(refTip(r.kind, r.n), 3000) }, 500)
+    }
+    const onRefMove = ev => { if (pressAt && Math.hypot(ev.clientX - pressAt[0], ev.clientY - pressAt[1]) > 10) { clearTimeout(pressTimer); pressAt = null } }
+    const onRefUp = () => { clearTimeout(pressTimer); pressAt = null }
+    const onRefMenu = ev => { if (refOf(ev?.target)) ev.preventDefault() }
+    const onRefKey = ev => { const r = refOf(ev?.target); if (r) { ev.preventDefault(); openRef(r) } }
     watch(() => props.friend?.id, () => { replying.value = null; jumpNote.value = '' })
     const spkOf = m => props.friend?.spk?.[m.fk] ?? null   // 後台給的成員狀態 { vendor, off }；舊後台沒有就是 null（當在線、廠商不明）
     const spkOff = m => spkOf(m)?.off === true
@@ -599,7 +640,11 @@ export const ChatPane = {
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
-    const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
+    const onBodyClick = ev => {
+      const r = refOf(ev?.target)
+      if (r) { ev.preventDefault?.(); if (pressed) { pressed = false; return } openRef(r); return }
+      handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
+    }
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     // ---- 群組：點成員跳一對一（#1515）。只有群組裡別人的訊息、而且有成員鍵（fk）才能點；自己的訊息不能點 ----
@@ -614,7 +659,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -685,9 +730,9 @@ export const ChatPane = {
                     <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                   </button>
                 </div>
-                <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
+                <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
               </div>
-              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="!isLine && shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
+              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="!isLine && shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick" @keydown.enter="onRefKey" @pointerdown="onRefDown" @pointermove="onRefMove" @pointerup="onRefUp" @pointercancel="onRefUp" @contextmenu="onRefMenu"></div>
               <div class="dup-act" v-if="shownBody(m).dup.length" aria-label="關掉重複的視窗">
                 <button v-for="w in shownBody(m).dup" :key="w.pid" class="dup-close" type="button" :disabled="dupPressed(m, i) || displayOnly" @click="closeDup(m, i, w)" :title="dupCloseLabel(w.n)">{{ dupCloseLabel(w.n) }}</button>
               </div>

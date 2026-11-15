@@ -500,7 +500,8 @@ const app = createApp({
       fourthNav.openChat()
     }
     const pushLog = id => { logs[id] = core.viewOf(id) }
-    const loadOlder = id => core.loadOlder(id)   // 對話往上捲到頂：載入更舊的信
+    // 對話往上捲到頂：載入更舊的信；群組訊息編號點了、那一則還沒載入（opts.toSeq，#1530）：往前補載到那一則
+    const loadOlder = (id, opts) => (isRoomChat(id) && Number.isInteger(opts?.toSeq) ? hub.loadBack(roomIdOf(id), opts.toSeq) : core.loadOlder(id))
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value

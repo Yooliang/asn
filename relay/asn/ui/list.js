@@ -364,7 +364,9 @@ const pushLog = id => {
   logs[id] = l; emit('asn:log', { id, log: l })
   if (room) emit('asn:room', { id, cards: hub.st.cards[roomIdOf(id)] ?? [], note: hub.st.note })
 }
-const loadOlder = id => (isRoomChat(id) ? Promise.resolve({ more: false, added: 0 }) : core.loadOlder(id))
+// 群組訊息編號（#1530）點了、那一則還沒載入：opts.toSeq＝要往前補載到哪一則；補完推一次記錄（分開模式的對話視窗經 asn:log 先收到）
+const roomBack = async (id, seq) => { const r = await hub.loadBack(roomIdOf(id), seq); pushLog(id); return r }
+const loadOlder = (id, opts) => (isRoomChat(id) ? (Number.isInteger(opts?.toSeq) ? roomBack(id, opts.toSeq) : Promise.resolve({ more: false, added: 0 })) : core.loadOlder(id))
 const tabFriend = id => friends.value.find(f => f.id === id) ?? roomFriends.value.find(f => f.id === id)   // 對話往上捲到頂：載入更舊的信（分開模式的對話視窗經事件請樞紐代跑）
 
 // 設備大頭貼：節點 → data URL。好友顯示用哪張由 avatar.mjs 的規則決定（AI 視窗一律自動產生；名單外的寄件人用他那台設備的圖）
@@ -1170,7 +1172,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'nudge') { if (!isRoomChat(c.id)) await core.nudge(c.id) }
   else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption, r => { if (c.token) emit('asn:attach-done', { id: c.id, token: c.token, ...r }) })
   else if (c.op === 'open-chat') { if (typeof c.id === 'string' && core.friends.has(c.id)) await openChat(c.id) }   // 分離模式的對話視窗點了群組成員（#1515）；id 已在對話視窗換好，這裡再確認在名單裡
-  else if (c.op === 'older') { const r = isRoomChat(c.id) ? { more: false, added: 0 } : await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
+  else if (c.op === 'older') { const r = await loadOlder(c.id, Number.isInteger(c.toSeq) ? { toSeq: c.toSeq } : undefined); emit('asn:older', { id: c.id, ...r }) }
 })
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
 // 對話窗的送出：群組走群組發言（本人簽章），其餘照舊寄信給夥伴

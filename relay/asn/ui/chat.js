@@ -49,12 +49,13 @@ const app = createApp({
     }
     const selfNode = computed(() => snap.value?.selfNode ?? '')
     // 往上捲到頂載入更舊的信：請名單視窗的樞紐代跑，等它回報（它補進記錄的更新會先經 asn:log 到這裡）
-    const loadOlder = fid => new Promise(resolve => {
+    // opts.toSeq：群組訊息編號點了、往前補載到那一則（#1530）
+    const loadOlder = (fid, opts) => new Promise(resolve => {
       let un = null, timer = null
       const done = r => { clearTimeout(timer); if (un) un(); resolve(r) }
       timer = setTimeout(() => done({ more: true, added: 0, error: true }), 60_000)
       Promise.resolve(listen('asn:older', r => { if (r?.id === fid) done(r) })).then(u => { un = typeof u === 'function' ? u : null })
-      emit('asn:cmd', { op: 'older', id: fid })
+      emit('asn:cmd', { op: 'older', id: fid, ...(Number.isInteger(opts?.toSeq) ? { toSeq: opts.toSeq } : {}) })
     })
     // 群組裡點成員（#1515）：在夥伴名單裡就請名單視窗照從名單點進去一樣開；不在名單回 false（畫面自己說明）
     const openMember = key => {
