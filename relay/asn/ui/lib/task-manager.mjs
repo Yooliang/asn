@@ -36,6 +36,9 @@ export const TEXT = {
   noPlace: '還沒在名單上，稍後再試',
   wakeFail: '叫醒失敗，請稍後再試',
   stopFail: '停止失敗，請稍後再試',
+  // 納入管理（#1557，從夥伴選單搬來）：自己開的、還沒交給 ASN 的那一列放這顆；按了打開跟以前同一個接手清單
+  adopt: '納入管理',
+  adoptTip: '你自己在終端開的 grok、claude、agy、pi 或 codex，可以交給 ASN 看狀態、提醒你回答；預設只能看，要代送文字得另外允許。',
 }
 
 export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源', '操作']
@@ -181,6 +184,9 @@ const sourceText = r => {
   }
 }
 
+// 還沒被管理的終端（#1557）：自己開的 Claude／pi 視窗、自己開的前景程式。已接手的終端（terminal、by_asn:false）已經在管，不給
+export const canAdopt = r => r?.kind === 'process' || ((r?.kind === 'claude' || r?.kind === 'pi') && r.by_asn === false)
+
 const nameText = r => (r.kind === 'terminal' ? `${engineText(r.engine)} 終端` : r.name)
 
 export function viewRow(r, now, ctx) {
@@ -200,6 +206,7 @@ export function viewRow(r, now, ctx) {
     viewOnly: plan.path === PATH.none,
     why: plan.ok ? '' : plan.reason,
     dupNote: r.dup ? TEXT.dupRisk : '',
+    canAdopt: canAdopt(r),
   }
 }
 

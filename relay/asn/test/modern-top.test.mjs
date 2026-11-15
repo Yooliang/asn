@@ -36,11 +36,12 @@ test('更多：離線有喚醒、在線沒有', () => {
   assert.ok(!keys(build(F('H', '小文'))).includes('p:console'), '前台／後台不在管理那段（手機也不列）')
 })
 
-test('更多：電腦獨有的項目都在分隔線之後（通話、前台／後台、子代理、工作項目、納入管理）', () => {
+test('更多：電腦獨有的項目都在分隔線之後（通話、前台／後台、子代理、工作項目；納入管理 #1557 搬到工作管理員）', () => {
   const items = build(F('H', '小文'))
   const at = items.findIndex(i => i.sep)
   assert.ok(at > 0, '有分隔線')
-  assert.deepEqual(keys(items).slice(at), ['call', 'window', 'subs', 'tasks', 'p:adopt'])
+  assert.deepEqual(keys(items).slice(at), ['call', 'window', 'subs', 'tasks'])
+  assert.ok(!keys(items).includes('p:adopt'))
   assert.ok(items.slice(0, at).every(i => !['call', 'window', 'subs', 'tasks', 'p:adopt'].includes(i.key)), '分隔線之前沒有電腦獨有的')
   assert.equal(items.filter(i => i.sep).length, 1)
 })

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { MENU_KEYS } from '../ui/lib/partner-ops.mjs'
+import { phoneOpApplies } from '../ui/lib/mobile-ops.mjs'
 import { consoleBlock, canOfferConsole, managePanelItems, partnerMenuItems, wakeButtonView } from '../ui/lib/actionbar.mjs'
 import { canOfferModelSwitch, modelSwitchBlock } from '../ui/lib/model-switch.mjs'
 
@@ -60,15 +61,13 @@ test('前台／後台與切換模型：原因與啟用條件共用同一個判�
   assert.match(modelSwitchBlock(acp, { selfNode: 'H', engine: 'gemini' }), /內建通道/)
 })
 
-test('對話上方「管理」：右鍵的 partnerMenuItems 拿掉喚醒（在第 2 格；不含前後景切換、切換模型），納入管理在封存之前；反灰說明 20 字內', () => {
+test('對話上方「管理」：右鍵的 partnerMenuItems 拿掉喚醒（在第 2 格；不含前後景切換、切換模型）；右鍵的喚醒只在離線時列、兩邊都沒有納入管理（#1557）；反灰說明 20 字內', () => {
   for (const [name, f] of Object.entries(KINDS)) {
     const items = managePanelItems(f, ctx, [], { selfNode: 'H' })
     const fixed = FIXED.filter(k => k !== 'model' && k !== 'resume').map(k => `p:${k}`)
-    const at = fixed.findIndex(k => /archive/.test(k))
-    const want = at < 0 ? [...fixed, 'p:adopt'] : [...fixed.slice(0, at), 'p:adopt', ...fixed.slice(at)]
-    assert.deepEqual(items.map(i => i.key), want, name)
-    assert.deepEqual(items, partnerMenuItems(f, ctx, 'H').filter(i => i.key !== 'p:resume'), `${name}：管理＝右鍵拿掉喚醒`)
-    assert.ok(partnerMenuItems(f, ctx, 'H').some(i => i.key === 'p:resume'), `${name}：右鍵保留喚醒（沒有大按鈕列）`)
+    assert.deepEqual(items.map(i => i.key), fixed, name)
+    assert.deepEqual(items, partnerMenuItems(f, ctx).filter(i => i.key !== 'p:resume'), `${name}：管理＝右鍵拿掉喚醒`)
+    assert.equal(partnerMenuItems(f, ctx).some(i => i.key === 'p:resume'), phoneOpApplies('resume', f), `${name}：右鍵的喚醒只在用得到時才列（離線、不是內建通道；#1557）`)
     for (const i of items) assert.ok(i.reason.length <= 20, `${name} ${i.key}：${i.reason}`)
     assert.ok(!items.some(i => i.key === 'p:console' || i.key === 'p:model'), name)
   }

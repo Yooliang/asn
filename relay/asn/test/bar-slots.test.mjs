@@ -115,7 +115,7 @@ test('長原因縮成 20 字內：認得的換短說法，其餘截斷', () => {
 test('接線：名單右鍵用 barSlots 的第 2、3 格與 partnerMenuItems；ACP／pi 的切換模型開夥伴管理對話框', () => {
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
   assert.match(js, /const s = barSlots\(c, \{ selfNode: info\.node, api: true, wake: false, console: buddyConsole, ops: buddyOpsCtx\.value, modelQuery: buddyModel\.show \? buddyModel : null \}\)/)
-  assert.match(js, /if \(it\.key === 'adopt'\) \{ void adoptLoad\(\); return \}/)
+  assert.doesNotMatch(js, /it\.key === 'adopt'/, '#1557：右鍵沒有納入管理（搬到工作管理員）')
   assert.match(html, /@click="openPartnerOp\(buddyModelItem\)"/)
   assert.match(bar, /if \(modelViaPartnerOp\(props\.friend\)\) \{[^\n]*Object\.assign\(opDlg, \{ open: true, item: \{ key: 'model'/)
   assert.match(bar, /:pi-models="piModels"/)

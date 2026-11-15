@@ -123,8 +123,8 @@ test('一對一「管理」選單（#539 瘦身）：沒有前後景切換、切
   const ctx = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: true } } }
   const inv = opsMenuItems(f)
   const it = managePanelItems(f, ctx, inv, { selfNode: 'H' })
-  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:restart', 'p:remove', 'p:adopt', 'p:archive', 'invite'])
-  assert.deepEqual(it.map(i => i.ok), [true, true, true, true, false, false, true, true, true], '在線：重開、移除不適用')
+  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:restart', 'p:remove', 'p:archive', 'invite'])   // #1557：納入管理搬到工作管理員
+  assert.deepEqual(it.map(i => i.ok), [true, true, true, true, false, false, true, true], '在線：重開、移除不適用')
   for (const i of it) { assert.equal(Boolean(i.reason), !i.ok, i.key); assert.ok(i.reason.length <= 20, `${i.key}：${i.reason}`) }
   const off = managePanelItems({ ...f, status: 'offline' }, ctx, inv, { selfNode: 'H' })
   assert.equal(off.some(i => i.key === 'p:resume'), false, '離線時喚醒在第 2 格，不在管理')
