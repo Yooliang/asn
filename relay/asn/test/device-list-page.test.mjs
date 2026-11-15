@@ -244,12 +244,16 @@ test('深色模式：新樣式只用主題變數，紅色的「永久移除」�
 })
 
 // ---------- 手機「選項」頁 ----------
-test('手機列表：整列不再一點就進細部；每列 4 顆按鈕（上移、下移、帳號、詳情），左邊保留排序把手（不拖時不影響捲動）', () => {
+test('手機列表：整列不再一點就進細部；點一列才展開它的 4 顆按鈕（上移、下移、帳號、詳情，#1539），左邊保留排序把手（不拖時不影響捲動）', () => {
   const html = read('ui/m.html'), css = read('ui/mobile.css')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-row"/)
-  assert.match(pane, /<div class="m-dv-go">/, '資訊區是一般區塊，點了不開任何東西')
-  assert.doesNotMatch(/<div class="m-dv-go">[\s\S]*?<div class="m-dv-btns/.exec(pane)[0], /@click/)
+  // 資訊區是按鈕，點了只選中這一列（展開它的按鈕），不開任何頁面（#1539）
+  const go = /<button type="button" class="m-dv-go"[^>]*>/.exec(pane)?.[0] ?? ''
+  assert.match(go, /@click="devRowTap\(d\.key, \$event\)"/, '點資訊區＝選中這一列')
+  assert.match(go, /@pointerdown="devTap\.down\(\$event\)"[^>]*@pointermove="devTap\.move\(\$event\)"[^>]*@pointercancel="devTap\.cancel\(\)"/, '分得出點擊和捲動')
+  assert.doesNotMatch(go, /openAcct/, '點資訊區不直接進細部或帳號')
+  assert.match(pane, /<div class="m-dv-btns m-dv-rowbtns" v-if="devSel === d\.key"/, '只有選中的那一列有按鈕')
   assert.match(pane, /@click="openAcctDevice\(d\.key\)">\{\{ KNOWN_TEXT\.accounts \}\}/)
   assert.match(pane, /@click="openAcctInfo\(d\.key\)">\{\{ KNOWN_TEXT\.detail \}\}/)
   assert.match(pane, /class="m-dv-grip"[^>]*v-if="!d\.self"/, '本機沒有把手＝固定第一列不可拖')

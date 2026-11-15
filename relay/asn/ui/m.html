@@ -304,17 +304,19 @@
               </section>
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
               <ul class="m-dv-list" aria-label="設備" v-else>
-                <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after }">
+                <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after, sel: devSel === d.key }">
                   <button type="button" class="m-dv-grip" v-if="!d.self" :aria-label="'拖曳調整 ' + d.label + ' 的順序，或按上下鍵'" @pointerdown="gripDown(d.key, $event)" @pointermove="gripMove" @pointerup="gripUp" @pointercancel="gripUp" @keydown="gripKey(d.key, $event)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg></button>
                   <span class="m-dv-grip-gap" v-else aria-hidden="true"></span>
-                  <div class="m-dv-go">
+                  <!-- 點這一塊選中這一列、展開它的按鈕（#1539）；捲動、拖拉、長按指紋圖示都不算點 -->
+                  <button type="button" class="m-dv-go" :aria-expanded="devSel === d.key ? 'true' : 'false'" :aria-label="d.label + '，' + (devSel === d.key ? '收起操作' : '顯示操作')" @pointerdown="devTap.down($event)" @pointermove="devTap.move($event)" @pointercancel="devTap.cancel()" @click="devRowTap(d.key, $event)">
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
                     <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · {{ KNOWN_TEXT.thisPhone }}</template></span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                     <span class="m-dv-tag warn noreport" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span>
-                    <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
-                  </div>
-                  <div class="m-dv-btns m-dv-rowbtns" role="group" :aria-label="d.label + ' 的操作'">
+                  </button>
+                  <!-- 指紋圖示放在按鈕外面（它自己可以聚焦、長按看說明，不能包在按鈕裡） -->
+                  <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
+                  <div class="m-dv-btns m-dv-rowbtns" v-if="devSel === d.key" role="group" :aria-label="d.label + ' 的操作'">
                     <button type="button" class="m-btn" :disabled="d.self || !(acctFlags[d.key] && acctFlags[d.key].up)" :aria-label="'上移 ' + d.label" @click="acctMove(d.key, -1)">{{ KNOWN_TEXT.moveUp }}</button>
                     <button type="button" class="m-btn" :disabled="d.self || !(acctFlags[d.key] && acctFlags[d.key].down)" :aria-label="'下移 ' + d.label" @click="acctMove(d.key, 1)">{{ KNOWN_TEXT.moveDown }}</button>
                     <button type="button" class="m-btn m-dv-accbtn" :aria-label="'查看 ' + d.label + ' 的帳號'" @click="openAcctDevice(d.key)">{{ KNOWN_TEXT.accounts }}</button>

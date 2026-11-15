@@ -346,3 +346,4 @@
 /* 指紋小圖示（#1499）：現代外觀用線條版，不加底圈 */
 :root[data-skin="modern"] .fpm{background:none;border:0;box-shadow:none;width:22px;height:22px}
 :root[data-skin="modern"] .fpm > svg:first-child{stroke-width:1.75}
+:root[data-skin="modern"] .m-dv-row.sel{background:var(--modern-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */
