@@ -251,8 +251,11 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .m-body.md-on th,.m-body.md-on td{border:1px solid rgba(74,93,115,.3);padding:3px 8px;text-align:left;white-space:nowrap}
 .m-body.md-on th{background:rgba(0,0,0,.06);font-weight:700}
 .m-body.md-on .al-c{text-align:center}.m-body.md-on .al-r{text-align:right}
-.m-body.md-on a{color:#1a5fb4;text-decoration:underline;overflow-wrap:anywhere;cursor:pointer}
-@media (prefers-color-scheme:dark){.m-body.md-on a{color:#7db7ff}.m-body.md-on code,.m-body.md-on pre.md-code{background:rgba(255,255,255,.1)}}
+.m-body.md-on a,.m-body.md-on .msg-ref{color:#1a5fb4;text-decoration:underline;overflow-wrap:anywhere;cursor:pointer}
+/* 訊息裡的編號（#1530）：長按顯示提示，不要選字、不要跳系統選單 */
+.m-body.md-on .msg-ref{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;border-radius:3px}
+.m-body.md-on .msg-ref:focus-visible{outline:2px solid currentColor;outline-offset:1px}
+@media (prefers-color-scheme:dark){.m-body.md-on a,.m-body.md-on .msg-ref{color:#7db7ff}.m-body.md-on code,.m-body.md-on pre.md-code{background:rgba(255,255,255,.1)}}
 .msg-st{margin-left:4px;font-size:11px;letter-spacing:-2px;color:var(--msg-st-muted);cursor:default}
 .msg-st.st-read,.msg-st.st-replied{color:var(--msg-st-read)}
 @media (prefers-color-scheme:dark){

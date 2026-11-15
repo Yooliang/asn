@@ -2,7 +2,7 @@
 // 不碰 DOM；後台的呼叫經 invoke（Rust 指令）與 groupApi。發言與主持人確認都要本人簽章，由 Rust 端帶憑證，這裡拿不到。
 // reactive 由頁面帶進來（Vue 的 reactive），測試用預設的原物件。
 import { confirmCards } from './groups.mjs'
-import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
+import { ROOM_BACK_MAX, ROOM_FIRST_LOAD, ROOM_KEEP_MAX, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
 // 後台回的 unmatched：內文裡 @ 了但對不到任何群組成員的名字；舊後台沒有這個欄位＝空。回要顯示的一句話（沒有就空字串）
@@ -54,6 +54,35 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       st.note = ''
       return true
     } catch (e) { st.note = roomErrorText(e?.message) || ROOM_LOAD_FAIL_TEXT; return false } finally { reading.delete(id) }
+  }
+
+  // 點了群組訊息編號（#1530）、那一則還沒載入：從那一則的前一則往後讀，一直接到已載入最舊的那則（每次最多 200 則）。
+  // 不標已讀；比已載入最舊的舊太多（超過 ROOM_BACK_MAX 則）就不讀。回 { found, tooOld?, error? }
+  async function loadBack(id, seq) {
+    const room = raw(id)
+    const has = () => (st.logs[id] ?? []).some(e => e?.seq === seq)
+    if (!Number.isInteger(seq) || seq < 1 || !room) return { found: false }
+    if (has()) return { found: true }
+    const ident = identityOf(id)
+    if (!ident.key) return { found: false }
+    const log = st.logs[id] ?? []
+    const oldest = log.length ? log[0].seq : (Number.isInteger(room.last_seq) ? room.last_seq + 1 : seq + 1)   // 讀到這一則之前為止（讀之前先定好，補進來的不會改它）
+    if (seq >= oldest) return { found: false }
+    if (oldest - seq > ROOM_BACK_MAX) return { found: false, tooOld: true }
+    const mine = (room.mine ?? []).map(m => m?.member)
+    let since = seq - 1
+    try {
+      while (since < oldest - 1) {
+        const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: Math.min(200, oldest - 1 - since), mark: false })
+        const got = roomLog(r?.messages, mine, room.members, { photos })
+        if (!got.length) break
+        st.logs[id] = mergeRoomLog(st.logs[id] ?? [], got, ROOM_KEEP_MAX)
+        const top = Math.max(...got.map(e => e.seq))
+        if (!(top > since)) break
+        since = top
+      }
+    } catch { return { found: has(), error: true } }
+    return has() ? { found: true } : { found: false, tooOld: true }
   }
 
   // 沒有新訊息時：自己發的訊息還有人沒讀，就問一次後台「已讀 N」有沒有變（不標已讀、只讀最後一則之後＝不會有訊息內容）
@@ -130,5 +159,5 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     } catch (e) { st.note = groupErrorText(e?.message); await loadCards(id); return false } finally { st.deciding = false }
   }
 
-  return { st, raw, rows, rowOf, identityOf, refresh, read, loadCards, open, view, post, postAttachment, decide }
+  return { st, raw, rows, rowOf, identityOf, refresh, read, loadBack, loadCards, open, view, post, postAttachment, decide }
 }

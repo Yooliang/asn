@@ -9,6 +9,8 @@ export const ROOM_EMPTY_HINT = '還沒有群組。你可以自己建立一個，
 export const ROOM_POLL_MS = 60_000
 export const ROOM_FIRST_LOAD = 50        // 第一次打開一個群組，讀最近幾則
 export const ROOM_KEEP = 300             // 畫面上最多留幾則
+export const ROOM_BACK_MAX = 1000        // 點群組訊息編號（#1530）時最多往前補載幾則；更舊的就說載不到
+export const ROOM_KEEP_MAX = ROOM_KEEP + ROOM_BACK_MAX   // 往前補載過之後，畫面上最多留幾則（重開群組才回到 ROOM_KEEP）
 export const ROOM_BODY_MAX = 20_000
 
 // 對話分頁記的「最後使用」可以是夥伴 id，也可以是 room:<群組代號>
@@ -81,7 +83,7 @@ export function memberIdentity(room, selfNode, windowName) {
 // 對話分頁用的假夥伴：沿用 ChatPane，群組標頭顯示群組名與人數
 export function roomPseudoFriend(row) {
   // external＝有別的帳號的成員（不能傳附件）
-  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true, mentionable: row.mentionable ?? [], spk: row.spk ?? {}, offline: row.offline ?? [] }
+  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true, mentionable: row.mentionable ?? [], spk: row.spk ?? {}, offline: row.offline ?? [], lastSeq: Number.isInteger(row.lastSeq) ? row.lastSeq : 0 }   // lastSeq：判斷訊息裡的 #N 是不是群組訊息（#1530）
 }
 
 // 後台的訊息 → 對話記錄（ChatPane 的格式）。自己的成員身分發的算 me；who＝每則上的發言者名字
@@ -178,10 +180,11 @@ export function roomLog(messages, myKeys, members, { photos = false } = {}) {
   return out
 }
 // 合併新讀到的與已有的（依序號去重、排序、只留最近 ROOM_KEEP 則）
-export function mergeRoomLog(oldLog, incoming) {
+// 往前補載過的（已經超過 ROOM_KEEP 則）不在這裡被剪掉，免得正在看的那則被新訊息擠掉；上限 ROOM_KEEP_MAX
+export function mergeRoomLog(oldLog, incoming, keep = Math.max(ROOM_KEEP, Math.min(oldLog?.length ?? 0, ROOM_KEEP_MAX))) {
   const bySeq = new Map()
   for (const e of [...(oldLog ?? []), ...(incoming ?? [])]) bySeq.set(e.seq, e)
-  return [...bySeq.values()].sort((a, b) => a.seq - b.seq).slice(-ROOM_KEEP)
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq).slice(-keep)
 }
 export const roomTopSeq = log => (log?.length ? log[log.length - 1].seq : 0)
 // 該從哪一則之後讀：已有記錄就接著讀；第一次只讀最近 ROOM_FIRST_LOAD 則

@@ -142,7 +142,7 @@ test('守門：對話區只有一般訊息內文走 Markdown；震動、系統�
   assert.match(pane, /<div v-if="m\.k === 'sys'" class="sys"[^>]*>\{\{ m\.text \}\}<\/div>/)
   // 內文走 renderMarkdown；模板只有這一處
   assert.equal((pane.match(/v-html="bodyHtml\(/g) || []).length, 2)   // 兩處都走 bodyHtml：一般外觀的泡泡、LINE 外觀把泡泡與時間包成同一列的泡泡（LINE 才輸出）
-  assert.match(pane, /const bodyHtml = text => \(isRoom\.value \? markMentions\(renderMarkdown\(text\), .*\) : renderMarkdown\(text\)\)/)   // 群組的 @ 小標記是在 renderMarkdown 輸出之後才加，內文不會繞過跳脫與淨化
+  assert.match(pane, /const bodyHtml = text => linkRefs\(isRoom\.value \? markMentions\(renderMarkdown\(text\), .*\) : renderMarkdown\(text\), refCtx\.value\)/)   // 群組的 @ 小標記與 #N 編號標記（#1530）都是在 renderMarkdown 輸出之後才加，內文不會繞過跳脫與淨化
   assert.match(pane, /v-if="shownBody\(m\)\.text" v-html="bodyHtml\(shownBody\(m\)\.text\)" @click="onBodyClick"/)   // 對方回信先拿掉結束通話記號（call-end.mjs）再走 Markdown
   // 照片、檔案區塊沒有 v-html
   const at = pane.indexOf('<div class="photos"')
