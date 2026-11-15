@@ -1,6 +1,6 @@
 -- 帳號設定：對話釘選同步（#1479 第二部分，0.2.27）。電腦版與手機版共用同一份釘選。
 -- 存在 relay.tenants.features 的 chat_pins，不新增資料表：
---   { "pins": [{id, at}…], "unpinned": [{id, at}…], "rev": 毫秒時間戳, "at": 伺服器寫入時間(毫秒) }
+--   { "pins": [{id, at}…], "unpinned": [{id, at}…], "rev": 遞增版本號, "at": 伺服器寫入時間(毫秒) }
 -- 兩支新函式：
 --   relay.account_pref_put(p_user, p_key, p_val)：帳號層偏好的共用寫入（鎖帳號那一列、比 rev、2 秒冷卻、只換 features 裡的一個鍵）。
 --     p_key 用白名單鎖住，目前只允許 'chat_pins'；寫入後整份 features 序列化超過 64KB（65536 bytes）就拒絕、不寫入。
@@ -17,7 +17,7 @@
 -- 頻率限制：現有的 at 距今不到 2 秒、而且內容不同，回 rate_limited（Edge 轉 429）。
 -- 伺服器只做結構檢查，不比用戶端嚴：pins 最多 50 筆、unpinned 最多 200 筆；每筆 id 是非空字串、最多 200 字、不含控制字元（中文與空白都放行）；at 是正數；rev 是 0～2^53 的整數。
 -- 不動 asn_account_device_prefs 與 asn_account_settings，舊版用戶端與舊版 Edge 完全不受影響。
--- 回復：drop function public.asn_account_chat_pins(uuid, jsonb); drop function relay.account_pref_put(uuid, text, jsonb);
+-- 回復：drop function public.asn_account_chat_pins(uuid, jsonb); drop function relay.account_pref_put(uuid, text, jsonb); drop function relay.chat_pins_list_ok(jsonb, int);
 --       （features 裡的 chat_pins 鍵留著，不影響任何舊功能）。
 begin;
 

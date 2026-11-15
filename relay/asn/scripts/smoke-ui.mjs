@@ -83,7 +83,7 @@ fs.writeFileSync(path.join(SMOKE_FILES, 'bad.png'), Buffer.from('這不是圖片
 // 等「選檔對話框打開」的回呼（choose 用；偵錯協定的 Page.fileChooserOpened 依序交給它們）
 const chooserWaiters = []
 
-// 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵；
+// 真的輸入：{ click: [x, y] } 在那個位置按下放開滑鼠左鍵；{ key: 'Escape' } 按下放開一個鍵；{ key: 'Backspace' } 按下刪除鍵（先在頁面裡全選再按＝清空）；{ text } 真的打字；
 // 另有 wheel、drag、dblclick（滑鼠）與 pinch、tap2（觸控），格式見下面各段
 async function realInput(S, payload) {
   let req
@@ -113,6 +113,11 @@ async function realInput(S, payload) {
   } else if (req.shiftEnter === true) {
     const k = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 8 }   // Shift+Enter：輸入框換行
     await S('Input.dispatchKeyEvent', { type: 'keyDown', text: '\r', ...k })
+    await S('Input.dispatchKeyEvent', { type: 'keyUp', ...k })
+  } else if (req.key === 'Backspace') {
+    // { key: 'Backspace' }：按一下刪除鍵（真的按鍵；先全選再按就是清空輸入框）
+    const k = { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 }
+    await S('Input.dispatchKeyEvent', { type: 'keyDown', ...k })
     await S('Input.dispatchKeyEvent', { type: 'keyUp', ...k })
   } else if (Array.isArray(req.wheel)) {
     // { wheel: [x, y, deltaY] }：在那個位置轉一次滾輪（負數＝往前）
