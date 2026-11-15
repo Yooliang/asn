@@ -564,3 +564,23 @@
 :root[data-skin="line"] #app.win .compose-main.lc-row .composer textarea{order:0;height:56px;min-height:56px;padding:6px;border-radius:0;background:#fff}
 :root[data-skin="line"] #app.win .compose-main.lc-row .mc-plus,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-photo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-emo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-more{display:none}
 :root[data-skin="line"] #app.win .compose-main.lc-row > .reply-bar,:root[data-skin="line"] #app.win .compose-main.lc-row > .voice-install{bottom:calc(100% + 8px)}
+/* =====================================================================
+   LINE 外觀手機修正（#1536，小良哥 11-15）
+   ===================================================================== */
+/* 1. 有表格的訊息：.l-line 是直排 flex 的子項，原本照內容撐寬（表格多寬它就多寬），泡泡跑出螢幕；限制在 .m-main 裡，表格在泡泡裡左右滑（.md-tablewrap 本來就是 overflow-x:auto） */
+:root[data-skin="line"] .l-line{max-width:100%}
+/* 2. 手機一般泡泡最大寬度 68% → 80%（表格、程式碼、檔案卡、照片照舊 100%） */
+:root[data-skin="line"] .m-chat .msg .m-main{max-width:80%}
+/* 3. 對話頁（一對一、群組）的標題列一律藍底（設定的子頁也用 .m-chathead，不動）：原本 .m-head:not(.is-busy):not(.is-offline) 的淺灰比 .m-chathead 的藍底權重高，群組（和在線的一對一）都被蓋成淺灰 */
+:root[data-skin="line"] .m-chat .m-head.m-chathead:not(.is-busy):not(.is-offline){background:var(--line-bg)}
+/* 5. 標題列下面那條白色細線是對話區 .pane 的上框線：拿掉，標題列跟對話區的藍色連成一片 */
+:root[data-skin="line"] .m-chat > .pane{border-top:0}
+/* 4. 輸入列圖示鈕的灰色圓底：是 :hover 的底色。手機點過之後 WebView 會一直留著 :hover，看起來像停在按下的狀態；手機的對話頁（.m-chat）沒有滑鼠游標，不畫 :hover 底色 */
+:root[data-skin="line"] .m-chat .compose-main .lc-photo:hover:not(:disabled),:root[data-skin="line"] .m-chat .compose-main .mc-plus:hover:not([aria-expanded="true"]),:root[data-skin="line"] .m-chat .compose-main .mc-dict:hover:not(:disabled):not(.rec),:root[data-skin="line"] .m-chat .compose-main .lc-more:hover,:root[data-skin="line"] .m-chat .compose-main .lc-emo:hover:not(:disabled){background:transparent}
+/* 6. 聽寫聆聽中：不顯示「聆聽中…」字樣，只把麥克風變紅；按鈕固定 40px，旁邊的輸入框和按鈕不會被擠動 */
+:root[data-skin="line"] .m-chat .compose-main .mc-dict{width:40px;min-width:40px}
+:root[data-skin="line"] .m-chat .compose-main .mc-dict .dict-state{display:none}
+:root[data-skin="line"] .m-chat .compose-main .mc-dict.rec{background:transparent;color:#e0352b}
+/* 7. 綠色送出鈕在最右邊、麥克風在它左邊；沒打字時送出鈕不出現，最右邊就是麥克風 */
+:root[data-skin="line"] .m-chat .compose-main .mc-dict{order:6}
+:root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}

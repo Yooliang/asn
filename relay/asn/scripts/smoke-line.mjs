@@ -77,7 +77,9 @@ export const lineProbeSource = kind => `(async () => {
     }
     // 泡泡最大寬約 68%（純文字的泡泡）
     const main = them.closest('.m-main'), pw = msgs.clientWidth;
-    if (main.getBoundingClientRect().width > pw * 0.69 + 1) return { ok: false, why: 'LINE 外觀：' + '泡泡超過欄寬的 68%：' + main.getBoundingClientRect().width + ' / ' + pw };
+    // 手機 80%（#1536 放寬），電腦照舊 68%
+    const capW = document.querySelector('#app.m') ? 0.81 : 0.69;
+    if (main.getBoundingClientRect().width > pw * capW + 1) return { ok: false, why: 'LINE 外觀：' + '泡泡超過欄寬的 ' + Math.round((capW - 0.01) * 100) + '%：' + main.getBoundingClientRect().width + ' / ' + pw };
     // 系統提示是置中的灰藍小膠囊
     const sys = document.querySelector('.sys');
     if (sys) {

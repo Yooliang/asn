@@ -163,6 +163,16 @@ async function realInput(S, payload) {
     await S('Runtime.evaluate', { expression: `window.__smokeChooser = ${JSON.stringify(ev ? { mode: ev.mode } : null)}` })
     if (ev && name) await S('DOM.setFileInputFiles', { backendNodeId: ev.backendNodeId, files: [path.join(SMOKE_FILES, path.basename(String(name)))] })
     await S('Page.setInterceptFileChooserDialog', { enabled: false })
+  } else if (Array.isArray(req.gesture)) {
+    // { gesture: [x, y, dx, dy] }：手指按在 (x, y)，分十步滑 (dx, dy) 再放開（瀏覽器真的捲動，跟手機滑表格一樣）；dx 負數＝往左滑（內容往右捲）
+    const [x, y, dx, dy = 0] = req.gesture
+    await S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })   // 先開觸控（只影響這一頁），觸控事件才會變成捲動
+    await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+    for (let i = 1; i <= 10; i++) { await S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx * i / 10, y: y + dy * i / 10, id: 1 }] }); await new Promise(r => setTimeout(r, 16)) }
+    await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  } else if (typeof req.touch === 'boolean') {
+    // { touch: true }：把這一頁當成觸控手機（沒有滑鼠游標：(hover: none)、(pointer: coarse)）；{ touch: false } 改回來。只影響這一頁
+    await S('Emulation.setTouchEmulationEnabled', { enabled: req.touch, maxTouchPoints: req.touch ? 5 : 1 })
   } else if (typeof req.key === 'string') {
     const code = { Escape: 27, Enter: 13 }[req.key] ?? 0
     await S('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: req.key, code: req.key, windowsVirtualKeyCode: code })
