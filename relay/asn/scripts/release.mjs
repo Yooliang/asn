@@ -1,4 +1,6 @@
-// 發版：bump 版本 → prep → tauri build（帶更新簽章環境變數）→ 產生 latest.json → 安裝檔與 .sig 複製到官網 update 目錄。
+// 發版：bump 版本 → prep → tauri build（帶更新簽章環境變數）→ 產生 latest.json（寫進官網 update 目錄）→ 安裝檔與 .sig 放到 src-tauri/target/release-publish/。
+// 安裝檔不再放官網（#1585：Firebase 免費方案不准再上傳新的 .exe）：提交、推上去之後用 tools/release/github_release.mjs 發到 GitHub Release v<版本>，
+// 官網的 update/ASN_<版本>_x64-setup.exe 由 site/firebase.json 302 轉過去；latest.json 與首頁照舊寫官網路徑。
 // 只在本機產檔，不部署（部署官網由人做）。用法：
 //   npm run release -- --notes "這版改了什麼"      正式發版（版本加一、寫進 site/public/update/）
 //   npm run release -- --dry-run                   演練：不改版本號，產物放 target/release-dry/，不碰官網目錄
@@ -80,11 +82,13 @@ if (!fs.existsSync(sigFile)) fail(`沒產出簽章檔：${sigFile}（確認 taur
 
 const latest = buildLatestJson({ version, notes, pubDate: new Date(), signature: fs.readFileSync(sigFile, 'utf8') })
 
-const out = opts.dryRun ? path.join(root, 'src-tauri', 'target', 'release-dry') : siteUpdate
+// 安裝檔與 .sig 放在 target 底下等著發到 GitHub（不進官網目錄）；latest.json 寫進官網目錄（演練時三個都放 release-dry）
+const out = opts.dryRun ? path.join(root, 'src-tauri', 'target', 'release-dry') : path.join(root, 'src-tauri', 'target', 'release-publish')
+const latestDir = opts.dryRun ? out : siteUpdate
 fs.mkdirSync(out, { recursive: true })
 fs.copyFileSync(exe, path.join(out, name))
 fs.copyFileSync(sigFile, path.join(out, `${name}.sig`))
-fs.writeFileSync(path.join(out, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
+fs.writeFileSync(path.join(latestDir, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
 if (!opts.dryRun) {   // 官網首頁的下載按鈕連到這版安裝檔（讀 latest.json 的網址規則，不寫死版號）
   const indexFile = path.join(siteUpdate, '..', 'index.html')
   const html = fs.readFileSync(indexFile, 'utf8')
@@ -93,7 +97,14 @@ if (!opts.dryRun) {   // 官網首頁的下載按鈕連到這版安裝檔（讀 
   if (patched !== html) fs.writeFileSync(indexFile, patched)
 }
 console.log(`已產生：${out}`)
-console.log(`  ${name}、${name}.sig、latest.json`)
-console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號、site/public/update/latest.json 與 site/public/index.html（下載按鈕連結），再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
+console.log(`  ${name}、${name}.sig${opts.dryRun ? '、latest.json' : `（latest.json 在 ${latestDir}）`}`)
+if (opts.dryRun) console.log('演練完成：沒有改版本號，也沒有動官網目錄。')
+else {
+  console.log('下一步（照順序，任何一步失敗就停，不要部署官網）：')
+  console.log('  1. 提交版本號、site/public/update/latest.json 與 site/public/index.html（下載按鈕連結），推上 GitHub')
+  console.log(`  2. 在 repo 根目錄：node tools/release/github_release.mjs --version ${version} --exe "${path.join(out, name)}" --sig "${path.join(out, `${name}.sig`)}"`)
+  console.log(`     （建草稿 → 上傳 → 登入下載比對 → 轉正式 → 匿名下載比對；安裝檔放在 GitHub Release v${version}）`)
+  console.log('  3. 部署官網：在 site/ 底下 firebase deploy --only hosting（部署前檢查會確認 GitHub 上真的有這版、官網目錄沒有安裝檔）')
+}
 // 官網的藍圖與開發日誌從 2026-10-27 起讀資料庫（public.asn_site_releases 等），這支腳本不寫官網頁面；發版記錄用 asn-cli site release 寫入（#400，限官網寫入名單上的帳號）
 if (!opts.dryRun) console.log(`提醒：用 asn-cli site release --version ${version} --date <YYYY-MM-DD> --commit <短碼> --item "…" --platform 官網 加這一版，再用 asn-cli site item --key … --status released --version ${version} 更新待辦（用法見 site/README.md），官網的藍圖與開發日誌才會出現。`)
