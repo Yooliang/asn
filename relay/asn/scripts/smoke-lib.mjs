@@ -104,7 +104,13 @@ export const devSelProbeSource = () => `(async () => {
   // 一、手指滑過列（捲動）：不能展開
   const office = row('辦公室');
   office.scrollIntoView({ block: 'center' }); await sleep(150);
+  // 捲動的是設備清單外層那個可以捲的容器；先記下位置，滑完要真的有捲動，不然這一步等於沒測（觸控沒送出也會是綠的）
+  let scroller = office.parentElement;
+  while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+  if (!scroller) return { ok: false, why: '設備清單沒有可以捲動的外層，測不到「捲動不會展開」（情境的高度要再小一點）' };
+  const top0 = scroller.scrollTop, rowTop0 = office.getBoundingClientRect().top;
   { const c = at(office.querySelector('.m-dv-go')); await real({ gesture: [c[0], c[1], 0, -90] }, 600) }
+  if (!(scroller.scrollTop > top0 + 4) || !(office.getBoundingClientRect().top < rowTop0 - 4)) return { ok: false, why: '手指往上滑沒有真的捲動：scrollTop ' + top0 + ' → ' + scroller.scrollTop };
   if (opened().length || sel().length) return { ok: false, why: '手指滑過列（捲動）就展開了按鈕' };
   // 二、點一下：只有那一列展開，而且有明顯底色
   await tap(row('辦公室').querySelector('.m-dv-go'));
