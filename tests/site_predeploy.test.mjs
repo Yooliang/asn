@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { githubProblems, installerUrlProblem, installerUrlProblems, installersInPublic, predeploy, wantedFiles } from '../tools/release/site_predeploy.mjs'
+import { githubProblems, installerUrlProblem, installerUrlProblems, installersInPublic, legacyProblems, loadLegacy, predeploy, wantedFiles } from '../tools/release/site_predeploy.mjs'
 import { INSTALLER_FILE_RE, githubUrl, githubUrlForSite } from '../tools/release/github_release.mjs'
 
 const BASE = 'https://asnmessenger.web.app'
@@ -55,7 +55,7 @@ test('官網目錄 update/ 底下有安裝檔（exe、sig、apk 任一）：擋�
     const dir = makeSite({ zip: true, put: [rel] })
     assert.deepEqual(installersInPublic(dir), [rel])
     const calls = []
-    await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] }), e => /官網目錄不該再放安裝檔/.test(e.message) && e.message.includes(rel))
+    await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] }), e => /官網目錄不該再放安裝檔/.test(e.message) && e.message.includes(rel))
     assert.deepEqual(calls, [], rel)
   }
   assert.deepEqual(installersInPublic(makeSite()), [], 'latest.json、android.json 不算')
@@ -65,7 +65,7 @@ test('官網目錄 update/ 底下有安裝檔（exe、sig、apk 任一）：擋�
 test('GitHub 上都在、.sig 等於 latest.json 的簽章、APK 大小一致：通過；只問 GitHub 這三個網址與下載區', async () => {
   const dir = makeSite({ zip: true })
   const calls = []
-  const r = await predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] })
+  const r = await predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] })
   assert.deepEqual(r.fetched, [])
   assert.deepEqual(r.present, ['download/asn-windows.zip'])
   assert.deepEqual(calls.map(c => [c[0], c[1]]), [
@@ -78,37 +78,70 @@ test('GitHub 上都在、.sig 等於 latest.json 的簽章、APK 大小一致：
 
 test('GitHub 上還沒有這一版：擋下，提示先用 github_release.mjs 發', async () => {
   const dir = makeSite({ zip: true })
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(SITE_ZIP), history: [] }), e => /GitHub Release 上找不到或對不上/.test(e.message) && /github_release\.mjs/.test(e.message))
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(SITE_ZIP), history: [] }), e => /GitHub Release 上找不到或對不上/.test(e.message) && /github_release\.mjs/.test(e.message))
 })
 
 test('GitHub 上的 .sig 跟 latest.json 的簽章不一樣：擋下', async () => {
   const dir = makeSite({ zip: true })
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...ALL, [githubUrl('0.1.98', 'ASN_0.1.98_x64-setup.exe.sig')]: 'other' }), history: [] }), /跟 latest\.json 的簽章不一樣/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...ALL, [githubUrl('0.1.98', 'ASN_0.1.98_x64-setup.exe.sig')]: 'other' }), history: [] }), /跟 latest\.json 的簽章不一樣/)
 })
 
 test('GitHub 上 .sig 在、安裝檔不在：擋下', async () => {
   const dir = makeSite({ zip: true })
   const { [githubUrl('0.1.98', 'ASN_0.1.98_x64-setup.exe')]: _, ...rest } = ALL
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(rest), history: [] }), /GitHub 上沒有 .*ASN_0\.1\.98_x64-setup\.exe（HTTP 404）/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(rest), history: [] }), /GitHub 上沒有 .*ASN_0\.1\.98_x64-setup\.exe（HTTP 404）/)
 })
 
 test('GitHub 上的 APK 大小跟 android.json 不同：擋下', async () => {
   const dir = makeSite({ zip: true })
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...ALL, [githubUrl('0.1.96', 'ASN_0.1.96_android.apk')]: 'longer apk bytes!!' }), history: [] }), /android\.json 記的是/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...ALL, [githubUrl('0.1.96', 'ASN_0.1.96_android.apk')]: 'longer apk bytes!!' }), history: [] }), /android\.json 記的是/)
 })
 
 test('GitHub 連不上：擋下（不帶著沒檢查過的連結部署）', async () => {
   const dir = makeSite({ zip: true })
   const fetchFn = async url => { if (url.startsWith('https://github.com/')) throw new Error('ECONNRESET'); return fakeFetch(SITE_ZIP)(url) }
   assert.ok((await githubProblems(dir, { fetchFn })).some(e => /連不上/.test(e)))
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn, history: [] }), /連不上/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn, history: [] }), /連不上/)
 })
 
 test('404 的回應內容要丟棄，否則連線一直開著、部署卡住', async () => {
   const dir = makeSite({ zip: true })
   const cancelled = { n: 0 }
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(SITE_ZIP, [], { cancelled }), history: [] }))
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(SITE_ZIP, [], { cancelled }), history: [] }))
   assert.ok(cancelled.n >= 2, `丟棄了 ${cancelled.n} 個`)
+})
+
+// ---- 2b. 舊版安裝檔（legacy-installers.json）都要已經在 GitHub 上：firebase.json 一部署，舊連結都轉過去 ----
+const OLD = [{ version: '0.2.9', assets: [{ name: 'ASN_0.2.9_x64-setup.exe', size: 11 }, { name: 'ASN_0.2.9_x64-setup.exe.sig', size: 3 }] }, { version: '0.1.95', assets: [{ name: 'ASN_0.1.95_android.apk', size: 7 }] }]
+const OLD_ONLINE = { [githubUrl('0.2.9', 'ASN_0.2.9_x64-setup.exe')]: 'x'.repeat(11), [githubUrl('0.2.9', 'ASN_0.2.9_x64-setup.exe.sig')]: 'sig', [githubUrl('0.1.95', 'ASN_0.1.95_android.apk')]: 'apk1234' }
+
+test('舊版安裝檔都在 GitHub、大小也對：放行；每個檔都用 HEAD 問、跟著轉址', async () => {
+  const calls = []
+  const r = await predeploy({ legacy: OLD, siteDir: makeSite({ zip: true }), base: BASE, fetchFn: fakeFetch({ ...ALL, ...OLD_ONLINE }, calls), history: [] })
+  assert.deepEqual(r.fetched, [])
+  const heads = calls.filter(c => Object.keys(OLD_ONLINE).includes(c[1]))
+  assert.equal(heads.length, 3)
+  for (const c of heads) { assert.equal(c[0], 'HEAD'); assert.equal(c[2].redirect, 'follow') }
+})
+
+test('舊版安裝檔有一個還沒搬（404）或大小不對：擋下，提示先跑 github_legacy --apply、--verify', async () => {
+  const { [githubUrl('0.1.95', 'ASN_0.1.95_android.apk')]: _, ...missing } = OLD_ONLINE
+  await assert.rejects(predeploy({ legacy: OLD, siteDir: makeSite({ zip: true }), base: BASE, fetchFn: fakeFetch({ ...ALL, ...missing }), history: [] }),
+    e => /舊版安裝檔還沒全部搬到 GitHub/.test(e.message) && /github_legacy\.mjs --apply，再跑 --verify/.test(e.message) && /ASN_0\.1\.95_android\.apk：HTTP 404/.test(e.message))
+  const wrong = { ...OLD_ONLINE, [githubUrl('0.2.9', 'ASN_0.2.9_x64-setup.exe')]: 'short' }
+  assert.deepEqual(await legacyProblems(OLD, { fetchFn: fakeFetch(wrong) }), [`${githubUrl('0.2.9', 'ASN_0.2.9_x64-setup.exe')}：大小 5，清單是 11`])
+})
+
+test('舊版安裝檔：連不上也算沒過；沒有大小也算沒過', async () => {
+  const boom = async () => { throw new Error('ECONNRESET') }
+  assert.equal((await legacyProblems(OLD, { fetchFn: boom })).length, 3)
+  const noLen = async () => ({ ok: true, status: 200, headers: { get: () => null } })
+  assert.ok((await legacyProblems(OLD, { fetchFn: noLen })).every(e => /大小 不明/.test(e)))
+})
+
+test('預設用的就是 repo 裡那份 41 個檔的清單', () => {
+  const m = loadLegacy()
+  assert.equal(m.flatMap(r => r.assets).length, 41)
 })
 
 // ---- 3. 下載區照舊：缺檔從線上補、對不起來就擋 ----
@@ -118,7 +151,7 @@ test('要從線上補的只剩下載區（安裝檔不補）；別站的檔不�
 
 test('下載區缺檔：從線上補回並核對', async () => {
   const dir = makeSite()
-  const r = await predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] })
+  const r = await predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] })
   assert.deepEqual(r.fetched, ['download/asn-windows.zip'])
   assert.ok(fs.readFileSync(path.join(dir, 'public', 'download', 'asn-windows.zip')).equals(ZIP))
   assert.deepEqual(installersInPublic(dir), [], '不會補回任何安裝檔')
@@ -126,21 +159,21 @@ test('下載區缺檔：從線上補回並核對', async () => {
 
 test('下載區：線上補回來的內容不符就擋、不留下壞檔；線上也沒有就擋', async () => {
   const dir = makeSite()
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...GH, [`${BASE}/download/asn-windows.zip`]: 'tampered' }), history: [] }), /asn-windows\.zip.*(sha256|大小)/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch({ ...GH, [`${BASE}/download/asn-windows.zip`]: 'tampered' }), history: [] }), /asn-windows\.zip.*(sha256|大小)/)
   assert.ok(!fs.existsSync(path.join(dir, 'public', 'download', 'asn-windows.zip')))
-  await assert.rejects(predeploy({ siteDir: makeSite(), base: BASE, fetchFn: fakeFetch(GH), history: [] }), /asn-windows\.zip.*404/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: makeSite(), base: BASE, fetchFn: fakeFetch(GH), history: [] }), /asn-windows\.zip.*404/)
 })
 
 test('下載區：本機有檔但不符就擋、不覆蓋', async () => {
   const dir = makeSite()
   fs.mkdirSync(path.join(dir, 'public', 'download'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'public', 'download', 'asn-windows.zip'), 'old different bytes')
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] }), /本機的 download\/asn-windows\.zip/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] }), /本機的 download\/asn-windows\.zip/)
   assert.equal(fs.readFileSync(path.join(dir, 'public', 'download', 'asn-windows.zip'), 'utf8'), 'old different bytes')
 })
 
 test('下載區清單還沒產生（downloads.json 不存在）：不當成錯誤', async () => {
-  const r = await predeploy({ siteDir: makeSite({ manifest: false }), base: BASE, fetchFn: fakeFetch(ALL), history: [] })
+  const r = await predeploy({ legacy: [], siteDir: makeSite({ manifest: false }), base: BASE, fetchFn: fakeFetch(ALL), history: [] })
   assert.deepEqual(r.fetched, [])
 })
 
@@ -153,10 +186,10 @@ test('下載區：要求不壓縮；伺服器還是回壓縮就略過長度比�
     return { ok: true, status: 200, headers: { get: k => (url.includes('asn-windows.zip') ? headers(k, buf) : (k === 'content-length' ? String(buf.length) : null)) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length) }
   }
   const br = (k, b) => ({ 'content-encoding': 'br', 'content-length': String(b.length - 5) })[k] ?? null
-  const r = await predeploy({ siteDir: makeSite(), base: BASE, fetchFn: withHeaders(br), history: [] })
+  const r = await predeploy({ legacy: [], siteDir: makeSite(), base: BASE, fetchFn: withHeaders(br), history: [] })
   assert.deepEqual(r.fetched, ['download/asn-windows.zip'])
   const cut = (k, b) => ({ 'content-encoding': 'identity', 'content-length': String(b.length + 100) })[k] ?? null
-  await assert.rejects(predeploy({ siteDir: makeSite(), base: BASE, fetchFn: withHeaders(cut), history: [] }), /伺服器說/)
+  await assert.rejects(predeploy({ legacy: [], siteDir: makeSite(), base: BASE, fetchFn: withHeaders(cut), history: [] }), /伺服器說/)
 })
 
 // ---- 4. firebase.json：掛著部署前檢查、轉址規則跟程式同一套 ----
@@ -235,7 +268,7 @@ test('電腦版清單指到 GitHub（不是官網路徑）：擋下部署、說�
   const dir = makeSite({ zip: true })
   writeJson(dir, 'update/latest.json', { version: '0.2.27', platforms: { 'windows-x86_64': { signature: 'x', url: 'https://github.com/Yooliang/asn/releases/download/v0.2.27/ASN_0.2.27_x64-setup.exe' } } })
   const calls = []
-  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] }), e => /安裝檔清單的網址不對/.test(e.message) && /update\/latest\.json 的 windows-x86_64/.test(e.message) && /github\.com/.test(e.message))
+  await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL, calls), history: [] }), e => /安裝檔清單的網址不對/.test(e.message) && /update\/latest\.json 的 windows-x86_64/.test(e.message) && /github\.com/.test(e.message))
   assert.deepEqual(calls, [])
 })
 
@@ -243,7 +276,7 @@ test('手機清單不合格（別站、或舊版 App 白名單不收）：擋下
   for (const url of ['https://github.com/Yooliang/asn/releases/download/v0.1.96/ASN_0.1.96_android.apk', `${BASE}/update/ASN_0.1.96_android.apk?x=1`]) {
     const dir = makeSite({ zip: true })
     writeJson(dir, 'update/android.json', { version: '0.1.96', url, sha256: sha(APK), bytes: APK.length })
-    await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] }), e => /update\/android\.json：/.test(e.message), url)
+    await assert.rejects(predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [] }), e => /update\/android\.json：/.test(e.message), url)
   }
 })
 
@@ -252,7 +285,7 @@ test('android.json 歷史上有不合格的網址：改不了，只記警告、�
   const bad = { url: 'https://example.com/old.apk', sha256: 'x', bytes: 1 }
   assert.deepEqual(installerUrlProblems(dir, BASE, [bad]).errors, [])
   const logs = []
-  const r = await predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [bad], log: m => logs.push(m) })
+  const r = await predeploy({ legacy: [], siteDir: dir, base: BASE, fetchFn: fakeFetch(ALL), history: [bad], log: m => logs.push(m) })
   assert.ok(r.skipped.some(s => s.includes('update/android.json 的歷史') && s.includes('example.com')), JSON.stringify(r.skipped))
   assert.ok(logs.some(m => m.startsWith('注意：')))
 })
@@ -265,6 +298,6 @@ test('目前 repo 裡的兩份安裝檔清單與 android.json 歷史都合格', 
 })
 
 test('不是 git 倉庫（或沒有歷史）時不出事', async () => {
-  const r = await predeploy({ siteDir: makeSite({ zip: true }), fetchFn: fakeFetch(ALL) })
+  const r = await predeploy({ legacy: [], siteDir: makeSite({ zip: true }), fetchFn: fakeFetch(ALL) })
   assert.deepEqual(r.skipped, [])
 })

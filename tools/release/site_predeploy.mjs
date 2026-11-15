@@ -4,6 +4,8 @@
 //   1. 官網目錄的 update/ 底下不准有安裝檔（exe、sig、apk），有就擋：會被轉址蓋過、白佔空間，新的 exe 也上傳不了
 //   2. 這次的 update/latest.json、update/android.json 指的安裝檔，轉到 GitHub 之後真的下載得到：
 //      電腦版的 .sig 要等於 latest.json 裡的簽章、安裝檔要回 200；手機 APK 要回 200、大小等於 android.json 記的。下載不到就擋（不帶著壞連結部署）
+//   2b. 舊版安裝檔（tools/release/legacy-installers.json 的 41 個）也要都在 GitHub 上：firebase.json 一部署，所有舊的 exe、sig、apk 連結都轉到 GitHub，
+//      還沒搬就全部 404。每個檔送一次 HEAD（跟著轉址走），全部 200、大小也對才放行；不然擋，請先跑 github_legacy --apply、--verify
 //   3. 下載區（download/downloads.json：收發室橋的 zip，不是安裝檔）照舊：Firebase 每次部署都把整個網站換成這台電腦上的內容，
 //      zip 不進 git，本機沒有就從線上目前的版本補上並核對，核對不符或下載失敗就擋
 // 安裝檔清單（update/latest.json、update/android.json）的網址一律要寫官網 update/ 底下（#1585 甲案：檔案放 GitHub Release，
@@ -16,7 +18,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { INSTALLER_FILE_RE, githubUrlForSite } from './github_release.mjs'
+import { INSTALLER_FILE_RE, githubUrl, githubUrlForSite } from './github_release.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_SITE = path.resolve(here, '..', '..', 'site')
@@ -115,7 +117,7 @@ export async function githubProblems(siteDir, { fetchFn = fetch } = {}) {
     const exe = githubUrlForSite(p?.url), sig = githubUrlForSite(`${p?.url}.sig`)
     if (!exe || !sig) { errors.push(`update/latest.json 的 ${k}：認不得的安裝檔網址 ${p?.url}`); continue }
     const r = await get(sig)
-    if (!r.ok) { await r.body?.cancel?.(); errors.push(`GitHub 上沒有 ${sig}（HTTP ${r.status}）：先用 tools/release/github_release.mjs 發這一版`); continue }
+    if (!r.ok) { await r.body?.cancel?.(); errors.push(`GitHub 上沒有 ${sig}（HTTP ${r.status}）：新版先用 tools/release/github_release.mjs 發；舊版（legacy-installers.json 裡的）先跑 tools/release/github_legacy.mjs --apply`); continue }
     const text = Buffer.from(await r.arrayBuffer()).toString('utf8').trim()
     if (text !== String(p.signature ?? '').trim()) errors.push(`GitHub 上的 ${sig} 跟 latest.json 的簽章不一樣`)
     const h = await get(exe, 'HEAD')
@@ -142,8 +144,32 @@ function check(buf, want, label) {
   if (Number.isInteger(want.size) && buf.length !== want.size) throw new Error(`${label}：大小 ${buf.length} 位元組，清單寫的是 ${want.size}`)
 }
 
+export const LEGACY_MANIFEST = path.join(here, 'legacy-installers.json')
+export const loadLegacy = (file = LEGACY_MANIFEST) => JSON.parse(fs.readFileSync(file, 'utf8'))
+
+/** 舊版安裝檔都已經在 GitHub 上：每個檔 HEAD 一次（跟著轉址），回錯誤說明的陣列（空＝都在）；同時最多問 limit 個 */
+export async function legacyProblems(legacy, { fetchFn = fetch, limit = 6 } = {}) {
+  const jobs = legacy.flatMap(r => (r.assets ?? []).map(a => ({ url: githubUrl(r.version, a.name), size: a.size })))
+  const errors = []
+  let i = 0
+  const worker = async () => {
+    while (i < jobs.length) {
+      const j = jobs[i++]
+      let res
+      try { res = await fetchFn(j.url, { method: 'HEAD', redirect: 'follow', headers: { 'accept-encoding': 'identity' } }) } catch (e) { errors.push(`${j.url}：連不上（${e.message}）`); continue }
+      await res.body?.cancel?.()
+      const raw = res.headers?.get?.('content-length')
+      const len = raw == null || raw === '' ? NaN : Number(raw)   // 沒有大小＝不明，不當成 0
+      if (!res.ok) errors.push(`${j.url}：HTTP ${res.status}`)
+      else if (!Number.isInteger(len) || len !== j.size) errors.push(`${j.url}：大小 ${Number.isInteger(len) ? len : '不明'}，清單是 ${j.size}`)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker))
+  return errors.sort()
+}
+
 // 回傳 { present, fetched, skipped }；官網目錄有安裝檔、GitHub 上找不到這版、下載區的檔補不起來，都丟錯（訊息寫明是哪個檔）
-export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {}, history } = {}) {
+export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {}, history, legacy = loadLegacy() } = {}) {
   const pub = path.join(siteDir, 'public')
   const result = { present: [], fetched: [], skipped: [] }
   const hist = history ?? androidHistory(siteDir)
@@ -154,6 +180,8 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
   if (local.length) throw new Error(`部署前檢查失敗：官網目錄不該再放安裝檔（改放 GitHub Release，官網路徑由 firebase.json 轉址）：\n${local.map(r => `  - ${r}`).join('\n')}`)
   const gh = await githubProblems(siteDir, { fetchFn })
   if (gh.length) throw new Error(`部署前檢查失敗：安裝檔在 GitHub Release 上找不到或對不上\n${gh.map(e => `  - ${e}`).join('\n')}`)
+  const old = await legacyProblems(legacy, { fetchFn })
+  if (old.length) throw new Error(`部署前檢查失敗：舊版安裝檔還沒全部搬到 GitHub（firebase.json 一部署，舊連結都會轉過去，沒搬的會 404）。先跑 node tools/release/github_legacy.mjs --apply，再跑 --verify：\n${old.map(e => `  - ${e}`).join('\n')}`)
   for (const want of wantedFiles(siteDir, base)) {
     const file = path.join(pub, ...want.rel.split('/'))
     if (fs.existsSync(file)) {

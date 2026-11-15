@@ -61,6 +61,14 @@ test('公開後匿名下載不對：退回草稿並報錯（latest.json 還沒�
   assert.equal(g.state.rel.draft, true)
 })
 
+test('匿名下載不對、退回草稿也失敗：兩個錯都報出來，原本的不被蓋掉', async () => {
+  const g = fakeGitHub(null, { publicOverride: { [EXE_NAME]: Buffer.from('cdn served something else') } })
+  const inner = g.gh
+  g.gh = args => { if (args[1] === 'edit' && args.includes('--draft=true')) throw new Error('HTTP 502'); return inner(args) }
+  await assert.rejects(run(g), e => /匿名下載 ASN_0\.2\.26_x64-setup\.exe 不對/.test(e.message) && /退回草稿也失敗（HTTP 502）/.test(e.message) && /請人工退回草稿/.test(e.message))
+  assert.equal(g.state.rel.draft, false)
+})
+
 test('草稿登入下載回來不一樣：不轉正式', async () => {
   const g = fakeGitHub()
   g.ghDownload = (version, name, dir) => fs.writeFileSync(path.join(dir, name), 'corrupted')

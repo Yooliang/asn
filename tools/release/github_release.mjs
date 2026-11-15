@@ -97,8 +97,10 @@ export async function publishRelease({ version, files, notes = '', target, gh, g
     let ok = false, why = ''
     try { ok = sha256(await download(fetchFn, githubUrl(version, w.name))) === w.sha256; if (!ok) why = 'sha256 不一樣' } catch (e) { why = e.message }
     if (!ok) {
-      gh(['release', 'edit', tag, '--repo', REPO, '--draft=true'])
-      throw new Error(`${tag} 公開後匿名下載 ${w.name} 不對（${why}）：已退回草稿，不要部署官網`)
+      const first = `${tag} 公開後匿名下載 ${w.name} 不對（${why}）`
+      // 退回草稿也失敗時，兩個錯都要報（原本的不能被蓋掉）
+      try { gh(['release', 'edit', tag, '--repo', REPO, '--draft=true']) } catch (e) { throw new Error(`${first}；而且退回草稿也失敗（${e?.message ?? e}）：${tag} 現在還是正式版，請人工退回草稿，不要部署官網`) }
+      throw new Error(`${first}：已退回草稿，不要部署官網`)
     }
   }
   log(`${tag} 匿名下載比對一致：${want.map(w => w.name).join('、')}`)
