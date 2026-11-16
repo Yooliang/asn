@@ -320,3 +320,36 @@ Deno.test("node_setup_request（#933）：這台已經有進行中的請求時�
   const odd = fake({}, () => ({ ok: true, already: true, state: "pending", kind: 5 }));
   assertEquals((await handleAccountAction(odd.deps, "node_setup_request", bearer, null, { node: "NEWPC" })).body, { ok: true, already: true, state: "pending" });
 });
+
+Deno.test("node_setup_request（#1593）：帶節點金鑰就用金鑰認出手機並傳 p_requester_phone；沒帶、認不出、不是 claude、body 自填都不傳", async () => {
+  const KEY = "phone-node-key-value";
+  const reply = (fn: string) => fn === "asn_relay_auth" ? [{ id: "PHONE1", bell_topic: "b", role: "member", can_invite: false, tenant_id: null }] : { ok: true, already: false, state: "pending" };
+  const f = fake({}, reply);
+  const r = await handleAccountAction(f.deps, "node_setup_request", bearer, KEY, { node: "NEWPC", mode: "relogin", p_requester_phone: "evil", requester_phone: "evil", phone: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals(f.calls[0], { fn: "asn_relay_auth", args: { p_key_hash: "hash-" + [...KEY].reverse().join("") } });
+  assertEquals(f.calls[1], { fn: "asn_setup_request", args: { p_user: UID, p_node: "NEWPC", p_mode: "relogin", p_requester_phone: "PHONE1" } });
+  assertEquals(f.calls.length, 2);
+  // 沒帶金鑰：不查、不傳，body 自填的不收
+  const n = fake({}, reply);
+  await handleAccountAction(n.deps, "node_setup_request", bearer, null, { node: "NEWPC", p_requester_phone: "PHONE1" });
+  assertEquals(n.calls, [{ fn: "asn_setup_request", args: { p_user: UID, p_node: "NEWPC" } }]);
+  // 金鑰認不出來（空清單）、查詢出錯、回傳格式怪：都不傳，也不報錯
+  for (const bad of [[], null, [{ id: 5 }], [{ id: "a b" }], [{}]]) {
+    const g = fake({}, (fn) => fn === "asn_relay_auth" ? bad : { ok: true });
+    const res = await handleAccountAction(g.deps, "node_setup_request", bearer, KEY, { node: "NEWPC" });
+    assertEquals(res.status, 200, JSON.stringify(bad));
+    assertEquals(g.calls[g.calls.length - 1].args, { p_user: UID, p_node: "NEWPC" }, JSON.stringify(bad));
+  }
+  const e = fake({ rpc: async (fn, args) => fn === "asn_relay_auth" ? { data: null, error: { message: "x" } } : { data: { ok: true }, error: null } });
+  assertEquals((await handleAccountAction(e.deps, "node_setup_request", bearer, KEY, { node: "NEWPC" })).status, 200);
+  // 不是 claude 種類：不查金鑰
+  const k = fake({}, reply);
+  await handleAccountAction(k.deps, "node_setup_request", bearer, KEY, { node: "NEWPC", kind: "agy" });
+  assertEquals(k.calls.map((c) => c.fn), ["asn_setup_request"]);
+  assertEquals("p_requester_phone" in k.calls[0].args, false);
+  // 金鑰長度不合格：當沒帶
+  const s = fake({}, reply);
+  await handleAccountAction(s.deps, "node_setup_request", bearer, "short", { node: "NEWPC" });
+  assertEquals(s.calls.map((c) => c.fn), ["asn_setup_request"]);
+});

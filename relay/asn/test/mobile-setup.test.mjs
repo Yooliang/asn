@@ -187,3 +187,13 @@ test('接線守門：先確認才送出、送出只在「確認安裝」、離�
   assert.match(acct, /pub async fn setup_remote_status[\s\S]*?"node_setup_status"/)
   for (const t of Object.values(SETUP_TEXT).map(x => (typeof x === 'function' ? x('示範電腦') : x))) assert.doesNotMatch(t, /setup|install|asn_|https?:\/\//i, t)
 })
+
+test('手機送出重新登入／安裝請求時帶本機節點金鑰（#1593：後台靠它認出是哪支手機），金鑰還沒有就照舊不帶', () => {
+  const acct = read('src-tauri/src/account.rs')
+  const fn = acct.slice(acct.indexOf('pub async fn setup_remote_request'), acct.indexOf('fn setup_request_body'))
+  assert.ok(fn.includes('identity::resolve().ok().map(|i| i.key)'), '從本機身分取節點金鑰，取不到就是沒有')
+  assert.ok(fn.includes('"node_setup_request", node_key.as_deref(), body'), '金鑰交給 call 的 node_key 參數')
+  assert.doesNotMatch(fn, /"node_setup_request", None/, '不再固定不帶')
+  // 其他的手機端帳號呼叫不帶（只有需要的才帶）
+  assert.ok(acct.includes('"node_setup_status", None'))
+})
