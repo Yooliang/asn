@@ -3,6 +3,7 @@
 import { barSlots, managePanelItems, moreMenuItems, opsMenuItems, partnerMenuItems, chatGroupItems } from '../ui/lib/actionbar.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
+import { CLOSED_REASONS } from '../ui/lib/partner-ops.mjs'
 
 export const SELF = 'P'
 
@@ -36,6 +37,9 @@ const CTXS = {
   closed: { machines: machines({ P: { online: true, launcher: null }, Q: { online: true, launcher: null } }), loaded: true, signedIn: true, checking: false, authError: '', loadError: '' },
   machineOffline: { machines: machines({ P: { online: false, launcher: { profiles: [] } }, Q: { online: false, launcher: { profiles: [] } } }), loaded: true, signedIn: true, checking: false, authError: '', loadError: '' },
 }
+// 那台自己回報了不開放的原因（#1611）：launcher 仍是 null，另帶 launch_closed_reason；只對 claude 的 idle／離線各一份（見 cases 尾端）
+const closedWith = reason => ({ machines: machines({ P: { online: true, launcher: null, launch_closed_reason: reason }, Q: { online: true, launcher: null, launch_closed_reason: reason } }), loaded: true, signedIn: true, checking: false, authError: '', loadError: '' })
+const CLOSED_WHY_CTXS = { closedNoConsent: closedWith(CLOSED_REASONS.noConsent), closedNoProfile: closedWith(CLOSED_REASONS.noProfile), closedNoCwd: closedWith(CLOSED_REASONS.noCwd) }
 const FULL = ['claude', 'pi', 'gemini', 'grokLocal', 'processGrok', 'processGemini']
 
 export function cases() {
@@ -48,6 +52,12 @@ export function cases() {
           out.push({ name: `${kind}|${status}|${node}|${ctxName}`, friend, ctx: CTXS[ctxName] })
         }
       }
+    }
+  }
+  for (const status of ['idle', 'offline']) {
+    for (const [ctxName, ctx] of Object.entries(CLOSED_WHY_CTXS)) {
+      const friend = { id: `${SELF}/claude`, node: SELF, agent: 'claude', nick: 'claude', status }
+      out.push({ name: `claude|${status}|${SELF}|${ctxName}`, friend, ctx })
     }
   }
   return out

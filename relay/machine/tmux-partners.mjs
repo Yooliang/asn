@@ -13,7 +13,7 @@ import path from 'node:path'
 import { findBin, runTmux, sessionName } from './tmux-window.mjs'
 
 export const UNSUPPORTED = '這類夥伴不支援這個操作'
-export const CONSENT_OFF = '這台電腦沒有開啟「允許遠端開視窗與管理視窗」'
+export const CONSENT_OFF = '這台電腦沒有開啟「允許我的其他設備替這台開新視窗」'
 export const PROTECTED = 'ASN 通知與 ASN 自己的視窗不能操作'
 export const NOT_OURS = '這個視窗不是這台機器橋用 tmux 開的，請在那台電腦自己關'
 export const REGISTRY_BAD = '這台記錄 tmux 視窗的檔案讀不懂，為了安全不關任何視窗'

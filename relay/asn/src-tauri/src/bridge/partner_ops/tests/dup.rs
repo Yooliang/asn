@@ -62,7 +62,7 @@ fn 只剩一個或_pid_不在同名名單裡_一律不動() {
 fn 沒開遠端管理_不關() {
     let r = dup_rig(Opt { allow_first: 0, ..Opt::default() });
     let (good, text) = r.ops.close_dup("目標", 240);
-    assert!(!good && text.contains("允許遠端"), "{text}");
+    assert!(!good && text.contains(CONSENT_OFF), "{text}");
     assert!(r.terminated().is_empty());
 }
 

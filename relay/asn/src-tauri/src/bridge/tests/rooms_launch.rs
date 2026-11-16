@@ -939,6 +939,9 @@ async fn 遠端開視窗_取走_開視窗_出現在名單_回報_ok_名單附摘
     assert!(last["agents"].as_array().unwrap().iter().any(|a| a["name"] == "T-英雄-2"), "新視窗要出現在名單上");
     let cwd_norm = crate::launch::cwds::norm_path(&canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy()).unwrap();
     assert_eq!(last["launcher"], json!({"profiles": [{"id": "claude", "label": "Claude（互動視窗）", "engine": "claude", "mode": "window"}], "cwd_allow": [cwd_norm], "max_per_hour": 6}));
+    // 開放中：原因要送 null（才會清掉後台舊值），平台照送
+    assert_eq!(last["launch_closed_reason"], Value::Null);
+    assert_eq!(last["platform"], json!(crate::relay::platform_name()));
     assert!(!rosters.iter().any(|r| r.to_string().contains("fake\\\\claude") || r.to_string().contains("remote-control")), "名單不含指令");
     // 紀錄
     let log = std::fs::read_to_string(l.h.work.path().join("launch.log")).unwrap();
@@ -989,6 +992,16 @@ async fn 遠端開視窗_開不起來回報_failed_本機沒有啟動設定回�
     assert_eq!(results(&l.h)[1], json!({"id": uid(2), "status": "failed", "detail": launcher::NO_CONFIG}));
     l.h.core.refresh_roster(T0 + 2).await;
     assert_eq!(l.h.fr.rosters().last().unwrap()["launcher"], Value::Null, "沒有設定就送 null，仲介會清掉，別台不顯示開新夥伴");
+    // 同一份名單帶平台與說清楚的原因（兩鍵一起送；launcher 仍是 null）
+    let last = l.h.fr.rosters().last().unwrap().clone();
+    assert_eq!(last["launch_closed_reason"], json!(launcher::CLOSED_NO_CONSENT));
+    assert_eq!(last["platform"], json!(crate::relay::platform_name()));
+    // 原因不明（launcher.json 壞掉等）：原因送 null，前端顯示泛用說法
+    *l.env.config_err.lock().unwrap() = Some("launcher.json 壞了".into());
+    l.h.core.refresh_roster(T0 + 3).await;
+    let last = l.h.fr.rosters().last().unwrap().clone();
+    assert_eq!(last["launch_closed_reason"], Value::Null);
+    assert_eq!(last["platform"], json!(crate::relay::platform_name()));
 }
 
 #[tokio::test]
