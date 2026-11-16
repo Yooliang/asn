@@ -213,6 +213,8 @@ async function runScenario(cdp, sc, base) {
   await S('Runtime.addBinding', { name: '__smokeInput' })
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
   await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: sc.height ?? 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
+  // 情境帶 reducedMotion（#1592）：用偵錯協定把「減少動態」開起來，交替動畫停住、畫面固定，截圖才每次一樣
+  if (sc.reducedMotion) await S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
   await S('Page.addScriptToEvaluateOnNewDocument', { source: injectSource(tableFor(sc)) })
   await S('Page.navigate', { url: `${base}/${sc.page}` })
   const expr = mountCheckSource(sc.ready, pathOf(sc.page))

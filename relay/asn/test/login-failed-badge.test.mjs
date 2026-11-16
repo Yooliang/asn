@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
-import { INCOMPLETE_LABEL, LOGIN_FAILED_LABEL, loginFailed } from '../ui/lib/claude-accounts.mjs'
+import { CURRENT_FAILED_ARIA, CURRENT_LABEL, INCOMPLETE_LABEL, LOGIN_FAILED_LABEL, loginFailed } from '../ui/lib/claude-accounts.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const NOW = Date.parse('2026-10-31T12:00:00Z')
@@ -46,9 +46,29 @@ test('只有 Claude 帳號會標登入失效（其他廠牌帶了也不理）', 
   assert.equal(d.vendors.find(v => v.key === 'grok').accounts[0].loginFailed, undefined)
 })
 
-test('手機頁接線：登入失效的標籤對著 loginFailed，不受「使用中」影響（使用中的帳號才是壞的那個）；樣式為紅色', () => {
+test('手機頁接線（#1592）：沒有獨立的紅色「登入失效」標籤，改成「使用中」那一格交替顯示', () => {
   const html = read('ui', 'm.html')
-  assert.match(html, /<span class="m-dv-failed" v-if="a\.loginFailed">\{\{ LOGIN_FAILED_LABEL \}\}<\/span>/)
-  assert.match(read('ui', 'm.js'), /LOGIN_FAILED_LABEL,/)
-  assert.match(read('ui', 'mobile.css'), /\.m-dv-failed\{[^}]*#b3261e/)
+  assert.doesNotMatch(html, /m-dv-failed/)
+  assert.doesNotMatch(read('ui', 'mobile.css'), /\.m-dv-failed/)
+  // 同一格：使用中才有；登入失效時加 failed、兩個字節點都 aria-hidden，整格用 aria-label 讀出兩個狀態
+  assert.match(html, /<span class="m-dv-cur" :class="\{ failed: a\.loginFailed \}" v-if="a\.current"/)
+  assert.match(html, /:aria-label="a\.loginFailed \? CURRENT_FAILED_ARIA : null"/)
+  assert.match(html, /<span class="m-dv-cur-a" :aria-hidden="a\.loginFailed \? 'true' : null">\{\{ CURRENT_LABEL \}\}<\/span>/)
+  assert.match(html, /<span class="m-dv-cur-b" v-if="a\.loginFailed" aria-hidden="true">\{\{ LOGIN_FAILED_LABEL \}\}<\/span>/)
+  assert.match(read('ui', 'm.js'), /CURRENT_LABEL, CURRENT_FAILED_ARIA/)
+  // 文字都在 lib，不寫死在 html
+  assert.equal(CURRENT_FAILED_ARIA, '使用中，登入失效')
+  assert.equal(CURRENT_LABEL, '使用中')
+})
+
+test('手機頁樣式（#1592）：純 CSS 交替、兩字疊同一格不推版面、減少動態時固定顯示紅色「登入失效」', () => {
+  const css = read('ui', 'mobile.css')
+  assert.match(css, /\.m-dv-cur\.failed\{[^}]*display:inline-grid[^}]*animation:m-dv-cur-bg 2s/)
+  assert.match(css, /\.m-dv-cur\.failed>span\{grid-area:1\/1\}/)
+  assert.match(css, /@keyframes m-dv-cur-a\{/)
+  assert.match(css, /@keyframes m-dv-cur-b\{/)
+  const rm = css.match(/@media \(prefers-reduced-motion:reduce\)\{\.m-dv-cur\.failed[^\r\n]*/)?.[0] ?? ''
+  assert.match(rm, /\.m-dv-cur\.failed\{animation:none;background:#b3261e\}/)
+  assert.match(rm, /\.m-dv-cur-a\{animation:none;opacity:0\}/)
+  assert.match(rm, /\.m-dv-cur-b\{animation:none;opacity:1\}/)
 })

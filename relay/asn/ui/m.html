@@ -396,10 +396,10 @@
                           <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.email">
                             <span class="m-dv-mail">{{ a.email }}</span>
                             <span class="m-dv-act">
-                              <span class="m-dv-cur" v-if="a.current">使用中</span>
+                              <span class="m-dv-cur" :class="{ failed: a.loginFailed }" v-if="a.current" :role="a.loginFailed ? 'img' : null" :aria-label="a.loginFailed ? CURRENT_FAILED_ARIA : null"><span class="m-dv-cur-a" :aria-hidden="a.loginFailed ? 'true' : null">{{ CURRENT_LABEL }}</span><span class="m-dv-cur-b" v-if="a.loginFailed" aria-hidden="true">{{ LOGIN_FAILED_LABEL }}</span></span>
                               <button type="button" class="m-dv-sw" v-else-if="v.key === 'claude' && (v.switchable || v.switchHint) && acctCanSwitchTo(acctCur.key)" :disabled="!v.switchable || a.incomplete" @click="startAcctSwitch(a.email)">切換</button>
                             </span>
-                            <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span><span class="m-dv-failed" v-if="a.loginFailed">{{ LOGIN_FAILED_LABEL }}</span><span class="m-dv-incomplete" v-if="a.incomplete && !a.current">{{ INCOMPLETE_LABEL }}</span></span>
+                            <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span><span class="m-dv-incomplete" v-if="a.incomplete && !a.current">{{ INCOMPLETE_LABEL }}</span></span>
                             <span class="m-dv-why" v-if="a.incomplete && !a.current">{{ INCOMPLETE_REASON }}</span>
                             <span class="m-dv-usable" v-if="a.usableAt">{{ a.usableAt }}</span>
                             <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }" v-if="a.quota">

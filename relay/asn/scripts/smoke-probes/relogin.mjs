@@ -17,6 +17,7 @@ export const LOGIN_OK = '這台電腦的 Claude 目前登入正常，不需要�
 
 export const reloginProbeSource = (kind = 'base') => `(async () => {
   const KIND = ${JSON.stringify(kind)};
+  const MODE = KIND === 'anim' ? 'anim' : 'still';
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
@@ -39,6 +40,25 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
     return !!(await wait(() => [...document.querySelectorAll('.m-dv-vendor')].some(vis)));
   };
   if (!(await openDevice('辦公室'))) return { ok: false, why: '打不開「辦公室」的細部頁' };
+  // 使用中又登入失效（#1592）：右上同一格交替，沒有獨立的紅色標籤
+  const cur = await wait(() => [...document.querySelectorAll('.m-dv-cur.failed')].find(vis), 200);
+  if (!cur) return { ok: false, why: '辦公室目前帳號登入失效，右上那一格卻沒有「使用中／登入失效」交替格' };
+  if (document.querySelector('.m-dv-failed')) return { ok: false, why: '還有獨立的紅色「登入失效」標籤' };
+  if (cur.getAttribute('aria-label') !== '使用中，登入失效') return { ok: false, why: 'aria-label 不對：' + cur.getAttribute('aria-label') };
+  const ta = cur.querySelector('.m-dv-cur-a'), tb = cur.querySelector('.m-dv-cur-b');
+  if (!ta || !tb || ta.textContent.trim() !== '使用中' || tb.textContent.trim() !== '登入失效') return { ok: false, why: '交替的兩個字不對' };
+  if (ta.getAttribute('aria-hidden') !== 'true' || tb.getAttribute('aria-hidden') !== 'true') return { ok: false, why: '交替的兩個字要 aria-hidden' };
+  const ra = ta.getBoundingClientRect(), rb = tb.getBoundingClientRect(), rc = cur.getBoundingClientRect();
+  if (Math.abs(ra.left - rb.left) > 0.5 || Math.abs(ra.top - rb.top) > 0.5) return { ok: false, why: '兩個字沒有疊在同一格' };
+  if (rc.width + 0.5 < Math.max(ta.scrollWidth, tb.scrollWidth)) return { ok: false, why: '格寬比較寬的字還窄：' + rc.width };
+  const cs = e => getComputedStyle(e);
+  if (MODE === 'anim') {
+    // 沒開減少動態：三個元素都在跑動畫（交替由 CSS 做，不靠計時器）
+    if (![cur, ta, tb].every(e => cs(e).animationName !== 'none' && cs(e).animationDuration === '2s')) return { ok: false, why: '沒有開減少動態時，交替動畫沒在跑：' + [cur, ta, tb].map(e => cs(e).animationName).join('/') };
+  } else {
+    // 開了減少動態：不交替，固定顯示紅色「登入失效」
+    if (cs(cur).animationName !== 'none' || cs(ta).opacity !== '0' || cs(tb).opacity !== '1' || cs(cur).backgroundColor !== 'rgb(179, 38, 30)') return { ok: false, why: '減少動態時沒有固定顯示紅色「登入失效」：' + cs(cur).backgroundColor + ' a=' + cs(ta).opacity + ' b=' + cs(tb).opacity };
+  }
   const relogin = await wait(() => [...document.querySelectorAll('.m-dv-relogin')].find(vis), 200);   // 帳號回報讀回來才有入口：全套並行跑時比較慢，多等一點
   if (!relogin) return { ok: false, why: '那台回報 Claude 登入失效，細部頁卻沒有「重新登入 Claude」' };
   if (relogin.textContent.trim() !== '重新登入 Claude') return { ok: false, why: '按鈕的字不對：' + relogin.textContent };
@@ -109,6 +129,11 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
 
 const CASES = [
   { name: 'm-relogin', kind: 'base', shot: 'm-relogin.png' },
+  // 沒開減少動態：不截圖（動畫畫面每次不同），只驗交替動畫真的在跑（#1592 B）
+  { name: 'm-relogin-anim', kind: 'anim' },
+  // 兩種外觀各一張（減少動態＝固定畫面）
+  { name: 'm-relogin-modern', kind: 'base', skin: 'modern', shot: 'm-relogin-modern.png' },
+  { name: 'm-relogin-line', kind: 'base', skin: 'line', shot: 'm-relogin-line.png' },
   { name: 'm-relogin-failed', kind: 'failed', shot: 'm-relogin-failed.png' },
   { name: 'm-relogin-wait', kind: 'wait', shot: 'm-relogin-wait.png' },
   { name: 'm-relogin-noreply', kind: 'noreply', shot: 'm-relogin-noreply.png' },
@@ -129,7 +154,8 @@ export default {
   key: 'relogin',
   kind: '手機重新登入 Claude 檢查',
   source: probe => reloginProbeSource(typeof probe.relogin === 'string' ? probe.relogin : 'base'),
-  scenarios: CASES.map(c => ({ name: c.name, page: 'm.html', state: { signedIn: true, mlayout: true, relogin: c.kind }, ready: '#app.m .m-row-btn', probe: { relogin: c.kind }, shot: c.shot })),
+  // 除了 anim，都開減少動態：截圖固定，交替格固定顯示紅色「登入失效」
+  scenarios: CASES.map(c => ({ name: c.name, page: 'm.html', state: { signedIn: true, mlayout: true, relogin: c.kind, ...(c.skin ? { skin: c.skin } : {}) }, ready: '#app.m .m-row-btn', probe: { relogin: c.kind }, ...(c.shot ? { shot: c.shot } : {}), ...(c.kind === 'anim' ? {} : { reducedMotion: true }) })),
   // 辦公室（Q）回報目前的 Claude 帳號登入失效；送出要求與查狀態都只記下來
   table: (scenario, t) => {
     if (!scenario.state?.relogin) return undefined
