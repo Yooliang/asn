@@ -37,10 +37,45 @@ fn room_fail_reason(why: &str) -> Option<&'static str> {
     }
 }
 
+/// 工作者這一輪被上游擋下（#1366）：原因同時有「(code 5xx)」與「HTML response」（上游回了一整頁 HTML 錯誤頁）才算，回那個狀態碼。
+/// 只看 502 這個數字會誤認（例如內容剛好提到 502），所以兩個特徵都要有。真實的前綴：`API error (attempt 1): request failed (code 502): HTML response`
+fn upstream_5xx(why: &str) -> Option<u16> {
+    if !why.to_lowercase().contains("html response") {
+        return None;
+    }
+    why.match_indices("(code ").find_map(|(i, m)| {
+        let digits: String = why[i + m.len()..].chars().take(4).collect();
+        let (code, rest) = digits.split_at(digits.char_indices().nth(3).map(|(j, _)| j).unwrap_or(digits.len()));
+        (code.len() == 3 && code.starts_with('5') && code.bytes().all(|b| b.is_ascii_digit()) && rest.starts_with(')')).then(|| code.parse().ok()).flatten()
+    })
+}
+
+/// 工作者實際用的那家（名單上的引擎名，例如 ACP 工作者回報 gemini）→ 群組裡寫的名字；認不得就照原樣，沒有就是「AI 服務」
+fn vendor_display(engine: Option<&str>) -> String {
+    match engine.map(|e| e.trim().to_lowercase()).as_deref() {
+        Some("gemini") | Some("agy") => "Gemini".into(),
+        Some("grok") => "Grok".into(),
+        Some("claude") => "Claude".into(),
+        Some("codex") => "Codex".into(),
+        Some("pi") => "pi".into(),
+        Some(e) if !e.is_empty() => engine.unwrap().trim().to_string(),
+        _ => "AI 服務".into(),
+    }
+}
+
 /// 不寫 @：不點名任何人，通知不會指定叫醒誰。逾時只知道沒等到回報，信可能已經到了，說法不能講死。
-/// why＝失敗原因（認得的分類會寫出來，#1366）；認不出來就照舊說「沒有轉交」
-fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool, why: &str) -> String {
+/// why＝失敗原因（認得的分類會寫出來，#1366）；認不出來就照舊說「沒有轉交」。
+/// vendor＝收件工作者實際用的那家（名單上的引擎名）：上游回 5xx 時寫進說明，例如「Gemini 那邊暫時出錯（502）」
+fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool, why: &str, vendor: Option<&str>) -> String {
     let name = target.replace('@', "");
+    let more = if skipped > 0 { format!("這段時間另有 {skipped} 則情況相同。") } else { String::new() };
+    if !reply_blocked && !timed_out {
+        if let Some(code) = upstream_5xx(why) {
+            // 信有轉交到，是工作者這一輪被上游擋下：不能寫「沒有轉交」（#1366，西川的調查）
+            let v = vendor_display(vendor);
+            return format!("{ROOM_NOTICE_HEAD}{seq} {name} 收到了，但 {v} 那邊暫時出錯（{code}），這一輪沒有處理，請稍後再點名。{more}");
+        }
+    }
     let what = if reply_blocked {
         format!("{name} 收到了，但它的回覆被內容過濾擋下，沒有回到群組。")
     } else if timed_out {
@@ -72,10 +107,10 @@ mod notice_tests {
 
     #[test]
     fn 群組失敗通知三種說法_沒轉交_可能沒轉交_收到了但回覆被擋下() {
-        let a = room_notice_text(5, "@甲", 0, false, false, "");
+        let a = room_notice_text(5, "@甲", 0, false, false, "", None);
         assert!(a.contains("沒有轉交給 甲，對方還沒看到") && !a.contains('@'), "{a}");
-        assert!(room_notice_text(5, "甲", 0, true, false, "").contains("可能沒有轉交給 甲"));
-        let c = room_notice_text(5, "甲", 2, false, true, "");
+        assert!(room_notice_text(5, "甲", 0, true, false, "", None).contains("可能沒有轉交給 甲"));
+        let c = room_notice_text(5, "甲", 2, false, true, "", None);
         assert!(c.contains("甲 收到了，但它的回覆被內容過濾擋下，沒有回到群組") && !c.contains("對方還沒看到") && !c.contains("沒有轉交"), "{c}");
         assert!(c.contains("另有 2 則情況相同"));
     }
@@ -93,13 +128,69 @@ mod notice_tests {
             ("前面還排著 3 封信，這封先不收", "前面排太多信"),
         ];
         for (why, want) in cases {
-            let t = room_notice_text(7, "Gemini審查", 0, false, false, why);
+            let t = room_notice_text(7, "Gemini審查", 0, false, false, why, None);
             assert!(t.contains("轉交給 Gemini審查 沒有成功") && t.contains(want), "{why} → {t}");
             assert!(!t.contains("D:/") && !t.contains("dir") && !t.contains("agy"), "不寫原文：{t}");
         }
         // 認不出來的（例如 API 502）照舊的說法，也不寫原文
-        let t = room_notice_text(7, "甲", 0, false, false, "這一輪出錯：API error ... code 502");
+        let t = room_notice_text(7, "甲", 0, false, false, "這一輪出錯：API error ... code 502", None);
         assert!(t.contains("沒有轉交給 甲，對方還沒看到") && !t.contains("502"), "{t}");
+    }
+
+    /// 西川查到的真實寫法（#1366）：前綴固定，後面接上游回的一整頁 HTML
+    const REAL_502: &str = "API error (attempt 1): request failed (code 502): HTML response: <!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>…</body></html>";
+
+    #[test]
+    fn 上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
+        assert_eq!(upstream_5xx(REAL_502), Some(502));
+        assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): HTML response"), Some(503));
+        assert_eq!(upstream_5xx("API ERROR (attempt 1): request failed (code 500): html Response"), Some(500), "大小寫不影響");
+        let t = room_notice_text(9, "Gemini審查", 0, false, false, REAL_502, Some("gemini"));
+        assert_eq!(t, "（收發室）群組訊息 #9 Gemini審查 收到了，但 Gemini 那邊暫時出錯（502），這一輪沒有處理，請稍後再點名。");
+        assert!(!t.contains("沒有轉交") && !t.contains("對方還沒看到") && !t.contains("DOCTYPE"), "{t}");
+        // 廠商照工作者實際的那家；找不到工作者就寫「AI 服務」
+        assert!(room_notice_text(9, "審稿", 0, false, false, REAL_502, Some("grok")).contains("但 Grok 那邊暫時出錯（502）"));
+        assert!(room_notice_text(9, "審稿", 0, false, false, REAL_502, Some("agy")).contains("但 Gemini 那邊"));
+        assert!(room_notice_text(9, "審稿", 0, false, false, REAL_502, None).contains("但 AI 服務 那邊暫時出錯（502）"));
+        assert!(room_notice_text(9, "審稿", 2, false, false, REAL_502, Some("gemini")).ends_with("請稍後再點名。這段時間另有 2 則情況相同。"));
+    }
+
+    #[test]
+    fn 只有5xx加HTML兩個特徵都有才算上游出錯_其他失敗原因照舊顯示() {
+        // 只看數字不算：沒有 HTML 錯誤頁、或不是 5xx、或 502 只是內容裡的字
+        for why in [
+            "API error (attempt 1): request failed (code 502)",
+            "API error (attempt 1): request failed (code 404): HTML response",
+            "API error (attempt 1): request failed (code 429): HTML response",
+            "這一輪出錯：API error ... code 502",
+            "回覆裡提到 502 Bad Gateway 和 HTML response",
+            "request failed (code 5021): HTML response",
+            "request failed (code 50x): HTML response",
+        ] {
+            assert_eq!(upstream_5xx(why), None, "{why}");
+            let t = room_notice_text(7, "甲", 0, false, false, why, Some("gemini"));
+            assert!(!t.contains("那邊暫時出錯"), "{why} → {t}");
+        }
+        // 其他認得的原因照舊顯示；不是 5xx 的 HTML 錯誤頁照舊說「沒有轉交」
+        let t = room_notice_text(7, "Gemini審查", 0, false, false, "Gemini審查 需要登入：帳號登入失效或還沒登入", Some("gemini"));
+        assert!(t.contains("轉交給 Gemini審查 沒有成功：需要重新登入。"), "{t}");
+        let t = room_notice_text(7, "甲", 0, false, false, "API error (attempt 1): request failed (code 404): HTML response", Some("gemini"));
+        assert!(t.contains("沒有轉交給 甲，對方還沒看到") && t.contains("需要對方處理請重新點名"), "{t}");
+        // 逾時、回覆被擋下的說法優先，不因為原因裡有 5xx 改寫
+        assert!(room_notice_text(7, "甲", 0, true, false, REAL_502, Some("gemini")).contains("可能沒有轉交給 甲"));
+        assert!(room_notice_text(7, "甲", 0, false, true, REAL_502, Some("gemini")).contains("收到了，但它的回覆被內容過濾擋下"));
+    }
+
+    #[test]
+    fn 廠商名稱的寫法() {
+        assert_eq!(vendor_display(Some("gemini")), "Gemini");
+        assert_eq!(vendor_display(Some("Gemini ")), "Gemini");
+        assert_eq!(vendor_display(Some("codex")), "Codex");
+        assert_eq!(vendor_display(Some("claude")), "Claude");
+        assert_eq!(vendor_display(Some("pi")), "pi");
+        assert_eq!(vendor_display(Some("deepseek")), "deepseek", "認不得的照原樣");
+        assert_eq!(vendor_display(Some("")), "AI 服務");
+        assert_eq!(vendor_display(None), "AI 服務");
     }
 
     #[test]
@@ -150,7 +241,8 @@ impl Core {
             self.log.line(&format!("room failure notice skipped id={id}: posted recently for {}", p.target));
             return;
         };
-        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why), why)).await;
+        let vendor = self.worker_vendor(&p.target);
+        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why), why, vendor.as_deref())).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
             self.room_fail_notices.insert(key, (self.now, 0));
@@ -169,6 +261,13 @@ impl Core {
         if posted {
             self.room_fail_notices.insert(key, (self.now, 0));
         }
+    }
+
+    /// 收件工作者實際用的那家：名單上這個名字的引擎名（ACP 工作者回報的 gemini 等），沒有就用引擎代號；找不到這個工作者回 None
+    fn worker_vendor(&self, target: &str) -> Option<String> {
+        let ws = self.engines.as_ref()?.windows();
+        let w = ws.iter().find(|w| w.name == target)?;
+        Some(w.engine_label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| w.engine.clone()))
     }
 
     /// 這個群組、這個對象現在能不能貼通知：冷卻中回 None 並記一則；能貼就回冷卻期間略過了幾則

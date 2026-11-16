@@ -222,6 +222,23 @@ async fn 群組_轉交失敗在群組留說明不留對應_worker_掛了游標�
 }
 
 #[tokio::test]
+async fn 群組_工作者這一輪被上游5xx擋下_通知寫那邊暫時出錯_不寫沒有轉交() {
+    // #1366：信有轉交到，是工作者這一輪被上游回了 502 的 HTML 錯誤頁。真實的前綴照西川查到的寫
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
+    h.core.pull("test", T0).await;
+    let id = fwd(&h.said())[0].0.clone();
+    h.core.on_worker_line(res(&format!("FAIL {id} API error (attempt 1): request failed (code 502): HTML response: <html>502 Bad Gateway</html>")), T0 + 1000).await;
+    let p = posts(&h);
+    assert_eq!(p.len(), 1);
+    let body = p[0]["body"].as_str().unwrap();
+    // 這個測試台沒有載入引擎名單，找不到工作者實際的那家就寫「AI 服務」（有名單時寫 Gemini 等，見 fail_notice.rs 的單元測試）
+    assert!(body.contains("#2 T-視窗甲 收到了，但 AI 服務 那邊暫時出錯（502），這一輪沒有處理，請稍後再點名。"), "{body}");
+    assert!(!body.contains("沒有轉交") && !body.contains("html") && !body.contains('@'), "{body}");
+    assert!(h.core.log.has("forward-fail kind=room"), "失敗次數照舊記");
+}
+
+#[tokio::test]
 async fn 群組_轉交失敗通知有冷卻_通知本身被退不再通知_轉交逾時也通知() {
     let mut h = harness(&[("T-視窗甲", "idle")]).await;
     let me = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
