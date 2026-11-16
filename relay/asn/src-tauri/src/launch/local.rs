@@ -818,37 +818,95 @@ mod tests {
         json!({ "pid": pid, "name": name, "kind": "interactive", "startedAt": 起點 + pid })
     }
 
-    /// 程序建立時間：和 session 的 startedAt 同一刻（同一個程序）
-    fn 同一刻(pid: u32) -> Option<u64> {
-        Some(起點 + u64::from(pid) - 2_000)
+    /// 假作業系統：只給程序表與命令列（程序一律活著），判活走共用的 live_process::live_claude_pid，不碰真的程序表
+    struct 假系統 {
+        procs: Vec<super::super::switch::Proc>,
+        cmd: Vec<(u32, String)>,
     }
 
-    /// 開之前的查法：console::resolve_live_partner（partner_console_query 同一個 resolve_pid＋建立時間核對）
-    fn 查同名(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool) -> Option<u32> {
-        查同名_建立時間(engine, name, sessions, alive, &同一刻)
+    impl super::super::switch::Os for 假系統 {
+        fn cmdline(&self, pid: u32) -> Option<String> {
+            self.cmd.iter().find(|(p, _)| *p == pid).map(|(_, c)| c.clone())
+        }
+        fn processes(&self) -> Vec<super::super::switch::Proc> {
+            self.procs.clone()
+        }
+        fn alive(&self, _pid: u32) -> bool {
+            true
+        }
+        fn close_window(&self, _pid: u32) -> bool {
+            false
+        }
+        fn terminate(&self, _pid: u32) -> Result<(), String> {
+            Ok(())
+        }
     }
 
-    fn 查同名_建立時間(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool, created: &dyn Fn(u32) -> Option<u64>) -> Option<u32> {
+    fn 程序(pid: u32, name: &str, cmd: Option<&str>) -> (super::super::switch::Proc, Option<(u32, String)>) {
+        (super::super::switch::Proc { pid, ppid: 1, name: name.into() }, cmd.map(|c| (pid, c.to_string())))
+    }
+
+    fn 假環境(items: Vec<(super::super::switch::Proc, Option<(u32, String)>)>) -> 假系統 {
+        假系統 { procs: items.iter().map(|(p, _)| p.clone()).collect(), cmd: items.into_iter().filter_map(|(_, c)| c).collect() }
+    }
+
+    /// 開之前的查法：console::resolve_live_partner（partner_console_query 同一個 resolve_pid＋共用判活）。
+    /// 判活注入假環境（正式程式接 real_is_claude），所以不依賴這台電腦真的程序表
+    fn 查同名_環境(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool, os: &假系統) -> Option<u32> {
         let src = super::super::console_resolve::Sources { sessions, ..Default::default() };
-        super::super::console::resolve_live_partner(engine, name, &src, alive, created)
+        let table = super::super::switch::Os::processes(os);
+        super::super::console::resolve_live_partner(engine, name, &src, alive, &|p| super::super::live_process::live_claude_pid(os, &table, p))
+    }
+
+    /// 一般情況：pid 對應的程序是互動中的 claude
+    fn 查同名(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool) -> Option<u32> {
+        let ids: Vec<u32> = sessions.iter().filter_map(|s| s.get("pid").and_then(Value::as_u64)).filter_map(|p| u32::try_from(p).ok()).collect();
+        let os = 假環境(ids.iter().map(|p| 程序(*p, "claude.exe", Some("claude.exe --dangerously-skip-permissions"))).collect());
+        查同名_環境(engine, name, sessions, alive, &os)
     }
 
     #[test]
-    fn pid被重用或查不到建立時間_當作不在_照常開新的() {
+    fn 手開接回舊對話的視窗_startedAt比程序建立早很多_仍算活() {
+        // 舊規則比對 startedAt 與程序建立時間，差超過容差就判不活而重複開窗；現在只看程序是不是互動中的 claude
+        let ss = vec![json!({ "pid": 8936, "name": "B4正式", "kind": "interactive", "startedAt": 起點 - 3_600_000 })];
+        assert_eq!(查同名("claude", "B4正式", ss, &|_| true), Some(8936));
+    }
+
+    #[test]
+    fn pid被別的程式重用_當作不在_照常開新的() {
         let ss = || vec![工作階段(8936, "B4正式")];
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|p| 同一刻(p)), Some(8936), "名字對、pid 活著、建立時間也對");
-        // 程序是 session 之後很久才建立的（pid 被無關程序重用），或早了很多
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 + 3_600_000)), None);
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 - 3_600_000)), None);
-        // 不對稱容差：程序比 startedAt 早 30 秒（啟動慢）算同一個，晚 30 秒不算
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 - 30_000)), Some(8936));
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 + 30_000)), None);
-        // 拿不到建立時間：不確定就當作不在
-        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| None), None);
+        for (name, cmd) in [("notepad.exe", None), ("chrome.exe", Some("chrome.exe --type=renderer"))] {
+            let os = 假環境(vec![程序(8936, name, cmd)]);
+            assert_eq!(查同名_環境("claude", "B4正式", ss(), &|_| true, &os), None, "{name} 不是 claude");
+        }
+        // 程序表裡找不到、命令列也讀不到：不算 claude
+        assert_eq!(查同名_環境("claude", "B4正式", ss(), &|_| true, &假環境(vec![])), None);
         assert!(existing_partner_reply(None, || panic!("對不上就不該去切前景")).is_none());
-        // 對不上的舊記錄不擋住真正活著的同名夥伴
+    }
+
+    #[test]
+    fn pid被Claude_Desktop或一次性呼叫接手_當作不在() {
+        let ss = || vec![工作階段(8936, "B4正式")];
+        for cmd in [
+            r#""C:\Users\x\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe" --type=renderer"#,
+            r#""C:\Users\x\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe""#,
+            "claude.exe --type=gpu-process",
+            "claude.exe -p 你好",
+            "claude.exe --print hi",
+        ] {
+            let os = 假環境(vec![程序(8936, "claude.exe", Some(cmd))]);
+            assert_eq!(查同名_環境("claude", "B4正式", ss(), &|_| true, &os), None, "{cmd}");
+        }
+        // node 版互動視窗仍算活
+        let os = 假環境(vec![程序(8936, "node.exe", Some(r#"node.exe C:\x\claude\cli.js --resume abc"#))]);
+        assert_eq!(查同名_環境("claude", "B4正式", ss(), &|_| true, &os), Some(8936));
+    }
+
+    #[test]
+    fn 對不上的舊記錄不擋住真正活著的同名夥伴() {
         let two = vec![工作階段(100, "B4正式"), 工作階段(200, "B4正式")];
-        assert_eq!(查同名_建立時間("claude", "B4正式", two, &|_| true, &|p| if p == 100 { 同一刻(p) } else { Some(1) }), Some(100));
+        let os = 假環境(vec![程序(100, "claude.exe", Some("claude.exe")), 程序(200, "notepad.exe", None)]);
+        assert_eq!(查同名_環境("claude", "B4正式", two, &|_| true, &os), Some(100));
     }
 
     #[test]
