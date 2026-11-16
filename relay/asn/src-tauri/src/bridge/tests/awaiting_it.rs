@@ -53,7 +53,8 @@ async fn 寄信給卡住的夥伴_直接回說明並_ack_不暫存() {
     assert!(h.said().is_empty(), "不能交給 worker：{:?}", h.said());
     let sent = h.fr.sent();
     assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!(sent[0]["body"], "[收發室] 轉交給 T-卡住 沒有成功：視窗開著，但還沒進到對話（可能在等你按確認）。信沒有送達，請到那台電腦的視窗看清楚後自己選，再寄一次。");
+    // 寄回時 send_back 會拿掉開頭的「[收發室] 」（和「找不到」那句一樣，見 dev_prefix::without_old_head）
+    assert_eq!(sent[0]["body"], "轉交給 T-卡住 沒有成功：視窗開著，但還沒進到對話（可能在等你按確認）。信沒有送達，請到那台電腦的視窗看清楚後自己選，再寄一次。");
     assert_eq!(h.fr.acked(), vec![uid(1)], "處理完了要 ack，不留在信箱");
     assert!(h.core.pending.is_empty());
 }
