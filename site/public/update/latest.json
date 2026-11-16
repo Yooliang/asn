@@ -1,11 +1,11 @@
 {
-  "version": "0.2.26",
-  "notes": "- 新功能：對話可以釘選。手機長按、電腦按右鍵，選單最上面就有「釘選」。釘選的對話一直排在最上面，頭像上有藍色圖釘（目前只存在這台裝置，跨裝置同步下一版上）\n- 新功能：訊息裡的群組訊息編號可以點，點了跳到那一則；設定裡打開之後，#編號也能直接連到 GitHub\n- 改善：手機在列表長按，會叫出跟對話頁「⋯」同一份選單\n- 改善：「喚醒」只在夥伴離線時出現；「納入管理」移到工作管理員\n- 修正：手機滑頁停下來後，字不會再偏半像素、變模糊",
-  "pub_date": "2026-11-15T22:04:53.464Z",
+  "version": "0.2.27",
+  "notes": "- 新功能：對話釘選跨裝置同步。電腦版和手機版共用同一份釘選，在一台釘選，另一台也跟著排到最上面\n- 改善：手機按「重新登入 Claude」改成確認是你本人就能用，不用先開「允許從手機安裝」；只登入，不安裝任何東西。按下去以後一定會告訴你結果（登入正常不需要、等電腦來取、成功或失敗的原因）\n- 改善：手機設備頁上，使用中的帳號登入失效時，「使用中」和「登入失效」會在同一格交替顯示\n- 修正：啟動設定裡的版本號、每小時啟動上限、空白的資料夾名單、外掛狀態，現在都會正確顯示並生效",
+  "pub_date": "2026-11-16T04:41:51.695Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNqakNWM3RmV2pEYlQ0Wi8xOXZaZDVCcXdjZ3B5My9zbnJVSXowcnpsWnVtTDdWNEp1bkd4YVp2UzBzMXhOaDF2TTN6ZmxGSWl3WFA5aFFvMVBLYlFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Nzc4ODc4CWZpbGU6QVNOXzAuMi4yNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI2Cm9QbEoySkZPeFdjVFJrMmZteFlFTmxVQ1pPZlRuRitEQS8yRDlzdkN3eHBMOHZVMmFMRkdDeUdsSVg0SXZIT2t2TGxvdGxOUzlzNy9qYzYxQlorR0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.26_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpKb1hoWnY4TWl0NUJlSXlPUldSbmtGRDhhQkNCcTY5TUdZemY2MXc2WGczNEs1bE5WS2VTbXl4NUpTYUlJNVpQckpTRktobGJWWDJmYkZFZ0FsbndjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODAxNjcxCWZpbGU6QVNOXzAuMi4yN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI3CjhWaUxqayswck9vUnhmNHZwSjM5d25aaVA4eFhlYWgrQWl3VzB5TGRDemg1S3FoSFZ4QmdmM2M2M21YMDJYbyt0U2c4RkFNODVXWW4wUS9qaEZsMkFRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.27_x64-setup.exe"
     }
   }
 }
