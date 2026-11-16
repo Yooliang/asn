@@ -88,6 +88,11 @@ h2 { font-size: 26px; margin: 0 0 6px; }
 
 .download { padding: 26px; text-align: center; }
 .download p { margin: 8px 0 16px; color: var(--ink-soft); }
+.dl-keep { margin: 22px auto 0; max-width: 640px; text-align: left; border-top: 1px solid var(--line); padding-top: 14px; }
+.dl-keep h3 { font-size: 16px; margin: 0 0 6px; }
+.dl-keep p { margin: 0 0 8px; }
+.dl-keep ol { margin: 0 0 12px; padding-left: 1.4em; color: var(--ink-soft); }
+.dl-keep img { display: block; width: 100%; height: auto; }
 
 /* 文件頁 */
 .doc { margin: 34px auto 10px; padding: 28px clamp(18px, 4vw, 44px) 34px; }

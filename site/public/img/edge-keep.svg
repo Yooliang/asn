@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 230" width="640" height="230" role="img" aria-labelledby="t d">
+  <title id="t">下載被擋時怎麼保留</title>
+  <desc id="d">示意圖：在下載清單裡那個檔案右邊按「…」，選「保留」，再按「仍要保留」。</desc>
+  <style>
+    text { font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; fill: #15324f; }
+    .soft { fill: #3f5f80; }
+    .num { fill: #fff; font-weight: 700; font-size: 13px; }
+    .hi { fill: none; stroke: #e0662e; stroke-width: 2.5; }
+  </style>
+  <rect x="0.5" y="0.5" width="639" height="229" rx="10" fill="#f7fbff" stroke="#8fb8dc"/>
+
+  <!-- 1. 下載清單裡的那一列 -->
+  <text x="20" y="30" font-size="14" font-weight="700">1. 下載清單</text>
+  <rect x="20" y="42" width="190" height="74" rx="8" fill="#fff" stroke="#c9d9ea"/>
+  <text x="32" y="66" font-size="13">ASN_x64-setup.exe</text>
+  <text x="32" y="88" font-size="12" class="soft">這個檔案不常被下載…</text>
+  <circle cx="186" cy="64" r="13" fill="#eef4fb"/>
+  <text x="178" y="69" font-size="16" font-weight="700">…</text>
+  <circle cx="186" cy="64" r="16" class="hi"/>
+  <circle cx="202" cy="44" r="10" fill="#e0662e"/><text x="198" y="49" class="num">1</text>
+
+  <!-- 箭頭 -->
+  <path d="M220 80 h26" stroke="#8fb8dc" stroke-width="2" marker-end="url(#a)"/>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8fb8dc"/></marker></defs>
+
+  <!-- 2. 選單裡的「保留」 -->
+  <text x="256" y="30" font-size="14" font-weight="700">2. 選「保留」</text>
+  <rect x="256" y="42" width="140" height="104" rx="8" fill="#fff" stroke="#c9d9ea"/>
+  <text x="272" y="68" font-size="13" class="soft">刪除</text>
+  <rect x="264" y="80" width="124" height="28" rx="6" fill="#eef4fb"/>
+  <text x="272" y="99" font-size="13" font-weight="700">保留</text>
+  <rect x="264" y="80" width="124" height="28" rx="6" class="hi"/>
+  <text x="272" y="132" font-size="13" class="soft">回報…</text>
+  <circle cx="390" cy="80" r="10" fill="#e0662e"/><text x="386" y="85" class="num">2</text>
+
+  <path d="M406 80 h26" stroke="#8fb8dc" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- 3. 再按「仍要保留」 -->
+  <text x="442" y="30" font-size="14" font-weight="700">3. 按「仍要保留」</text>
+  <rect x="442" y="42" width="178" height="120" rx="8" fill="#fff" stroke="#c9d9ea"/>
+  <text x="456" y="66" font-size="12" class="soft">確定要保留這個檔案嗎？</text>
+  <text x="456" y="98" font-size="12" class="soft">▸ 顯示更多</text>
+  <rect x="454" y="118" width="96" height="30" rx="6" fill="#eef4fb"/>
+  <text x="464" y="138" font-size="13" font-weight="700">仍要保留</text>
+  <rect x="454" y="118" width="96" height="30" rx="6" class="hi"/>
+  <circle cx="548" cy="118" r="10" fill="#e0662e"/><text x="544" y="123" class="num">3</text>
+
+  <text x="20" y="200" font-size="12" class="soft">示意圖：實際畫面會因 Edge 版本略有不同。有的版本要先按「顯示更多」，「仍要保留」才會出現。</text>
+</svg>
