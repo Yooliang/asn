@@ -90,7 +90,7 @@ test('新增探測只要加一個檔：自動收集、帶自己的情境與假�
   }
 })
 
-test('拆檔時搬家的探測都沒有自帶情境或假後台欄位；之後新加的才用新格式（#1512 A 的 usageMenu、B 的 termKeys、C 的 relogin、C2 的 usableAt、#1530 的 msgRef、#1557 的 tmAdopt、#1605 的 newComputerGuide、#1630 的 elevated、#1632 的 stuckTerm、#1635 的 awaiting）', () => {
-  assert.deepEqual(PROBES.filter(e => e.table || e.scenarios).map(e => e.key), ['awaiting', 'chatPins', 'elevated', 'launchSet', 'msgRef', 'newComputerGuide', 'pinScroll', 'pinsSync', 'relogin', 'stuckTerm', 'termKeys', 'tmAdopt', 'usableAt', 'usageMenu'])
+test('拆檔時搬家的探測都沒有自帶情境或假後台欄位；之後新加的才用新格式（#1512 A 的 usageMenu、B 的 termKeys、C 的 relogin、C2 的 usableAt、#1530 的 msgRef、#1557 的 tmAdopt、#1605 的 newComputerGuide、#1630 的 elevated、#1632 的 stuckTerm、#1645 的 drelogin、#1635 的 awaiting）', () => {
+  assert.deepEqual(PROBES.filter(e => e.table || e.scenarios).map(e => e.key), ['awaiting', 'chatPins', 'drelogin', 'elevated', 'launchSet', 'msgRef', 'newComputerGuide', 'pinScroll', 'pinsSync', 'relogin', 'stuckTerm', 'termKeys', 'tmAdopt', 'usableAt', 'usageMenu'])
   assert.equal(typeof tableFor(SCENARIOS[0]), 'object')
 })

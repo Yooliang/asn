@@ -13,7 +13,7 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, isPhoneDevice, loginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, isPhoneDevice, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -112,7 +112,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const installedOf = k => (installedKeys.has(k) ? true : (installedKnown ? false : null))
     const accts = {}
     if (isSelf) {
-      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), quota: quotaView(a, now) }))
+      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), ...(loginFailed(a) ? { loginFailed: true } : {}), quota: quotaView(a, now) }))
       if (accts.claude.length) keys.add('claude')
       accts.grok = (self.grok ?? []).map(a => ({ email: a.email, plan: '', current: a.current === true }))
       if (accts.grok.length) keys.add('grok')
@@ -147,7 +147,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       // 從手機替這台登入（只登入、不安裝）：別台電腦上已裝未登入的 Codex
       const login = loginAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state })
       // 從手機要別台重新登入 Claude（#1512 C）：那台回報登入失效時才有入口
-      const relogin = reloginAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state })
+      const relogin = reloginAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state }) ?? localReloginAction({ vendor: k, isSelf, phone, state: st.state })
       return { key: k, label: vendorLabel(k), state: st.state, stateText: st.text, ...(st.reason ? { stateReason: st.reason } : {}), ...(action ? { action } : {}), ...(login ? { login } : {}), ...(relogin ? { relogin } : {}), ...note, ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })
     // 主要幾家 AI 這台沒用到的：本機偵測得到就說未安裝；別台看啟動器有沒有回報，沒回報就老實說不確定

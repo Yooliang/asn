@@ -64,7 +64,7 @@ const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
 export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS }) {
   const s = reactive({
-    list: [], grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
+    list: [], loginFailed: false, grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     allowSwitch: true,   // 「允許切換帳號」（#371）：讓手機或別台設備替這台切換
     remote: { node: '', vendor: 'claude', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
@@ -84,6 +84,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
     try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
+    try { s.loginFailed = (await invoke('claude_login_failed')) === true } catch { s.loginFailed = false }   // 本機的登入失效判定（#1645，只讀）；舊版 Rust 沒有這個指令就當沒失效
     await refreshQuota()
   }
   // 只重讀這台各帳號上次記下的額度（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。

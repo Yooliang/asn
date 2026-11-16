@@ -601,6 +601,15 @@ fn claude_relogin_evidence() -> Option<&'static str> {
     login_watch::failed_recently(heartbeat::now_ms() as i64).then_some("對話紀錄判定登入失效")
 }
 
+/// 這台本機的 Claude 是不是剛被判定登入失效（只讀，#1645）：和手機要求重新登入時看的是同一個判定（login_watch，要是新的判定）。
+/// 給電腦版設備頁決定要不要出現本機的「重新登入 Claude」；沒判定過、太舊、沒失效都回 false
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn claude_login_failed() -> bool {
+    claude_relogin_evidence().is_some()
+}
+
 /// 讀畫面（背景工作最新的判斷）有沒有夥伴視窗停在「要重新登入」（Please run /login）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -3169,11 +3178,11 @@ pub fn run() {
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
             quota_readers_get, quota_readers_set, quota_minimax_add, quota_minimax_remove, quota_share_create, quota_share_revoke,
-            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
+            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, claude_login_failed, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::setup_progress_snapshot, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
+            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status, account::setup_remote_request, account::setup_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
             site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, guard::guard_get, guard::guard_set, guard::guard_resume, tray::autostart_set, updater::update_check, updater::update_install,
         ]);

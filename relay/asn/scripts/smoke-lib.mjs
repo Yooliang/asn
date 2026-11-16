@@ -103,6 +103,7 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
   acct_remote_list: { accounts: [] },
   claude_accounts_list: [],
   claude_account_current: null,
+  claude_login_failed: false,
   codex_account_current: null,
   claude_mod_status: null,
   android_launchers: [],
