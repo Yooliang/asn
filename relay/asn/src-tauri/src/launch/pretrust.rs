@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 /// 機器資料夾（ui.log 所在）；啟動時設定一次，沒設就只寫 stderr
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn set_log_dir(dir: &Path) {
     let _ = LOG_DIR.set(dir.to_path_buf());
 }
@@ -68,9 +69,13 @@ pub(crate) fn run_in(dir: &Path, cwd: &Path, log_dir: Option<&Path>) {
     if let Err(why) = ensure_in(dir, cwd) {
         let line = failure_line(&why);
         elog!("{line}");
+        // ui.log 只有有畫面的版本才有（無視窗的橋只寫 stderr）
+        #[cfg(feature = "gui")]
         if let Some(d) = log_dir {
             let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
         }
+        #[cfg(not(feature = "gui"))]
+        let _ = log_dir;
     }
 }
 
@@ -173,6 +178,7 @@ mod tests {
         assert!(!crate::launch::resume::is_claude_command("codex") && !crate::launch::resume::is_claude_command("cmd.exe"));
     }
 
+    #[cfg(feature = "gui")]
     #[test]
     fn 寫不進去時回原因並在_ui_log_留一行() {
         let tmp = tempfile::tempdir().unwrap();
@@ -181,13 +187,16 @@ mod tests {
         let blocker = tmp.path().join("not-a-dir");
         fs::write(&blocker, "x").unwrap();
         assert!(ensure_in(&blocker, work.path()).is_err());
+        // 正式的 log 資料夾（機器資料夾）一定存在；ui_log::append 不建父資料夾，測試要先建好
         let logs = tmp.path().join("logs");
+        fs::create_dir_all(&logs).unwrap();
         run_in(&blocker, work.path(), Some(&logs));
         let text = fs::read_to_string(crate::ui_log::path(&logs)).unwrap();
         assert!(text.contains("開夥伴前沒能把工作資料夾標成已信任："), "{text}");
         assert!(!text.contains(&*work.path().to_string_lossy()), "記錄不寫工作資料夾路徑");
     }
 
+    #[cfg(feature = "gui")]
     #[test]
     fn 成功時不寫_ui_log() {
         let home = tempfile::tempdir().unwrap();

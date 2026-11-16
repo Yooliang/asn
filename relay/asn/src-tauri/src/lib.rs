@@ -3071,6 +3071,7 @@ pub fn run() {
     launch::term::start_screen_watch(terms.clone(), &work_dir);
     #[cfg(desktop)]
     launch::term::set_ui_log_dir(&work_dir);
+    #[cfg(desktop)]
     launch::pretrust::set_log_dir(&work_dir);
     #[cfg(windows)]
     auth::set_dpapi_log_dir(&exit_log_dir);
