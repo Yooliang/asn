@@ -69,6 +69,10 @@ test('手機頁樣式（#1592）：純 CSS 交替、兩字疊同一格不推版�
   assert.match(css, /@keyframes m-dv-cur-b\{/)
   const rm = css.match(/@media \(prefers-reduced-motion:reduce\)\{\.m-dv-cur\.failed[^\r\n]*/)?.[0] ?? ''
   assert.match(rm, /\.m-dv-cur\.failed\{animation:none;background:#b3261e\}/)
-  assert.match(rm, /\.m-dv-cur-a\{animation:none;opacity:0\}/)
-  assert.match(rm, /\.m-dv-cur-b\{animation:none;opacity:1\}/)
+  assert.match(rm, /\.m-dv-cur\.failed>\.m-dv-cur-a\{animation:none;opacity:0\}/)
+  assert.match(rm, /\.m-dv-cur\.failed>\.m-dv-cur-b\{animation:none;opacity:1\}/)
+  // 沒失效的「使用中」也會渲染 .m-dv-cur-a：任何帶 animation 的 a／b 規則，選擇器都必須限定在 .failed 底下
+  const rules = [...css.matchAll(/([^{}]*\.m-dv-cur-[ab][^{}]*)\{[^}]*animation[^}]*\}/g)].map(m => m[1].trim().replace(/^.*\{/, ''))
+  assert.ok(rules.length >= 4)
+  for (const sel of rules) assert.match(sel, /\.m-dv-cur\.failed>\.m-dv-cur-[ab]/, `${sel} 沒限定在 .failed 底下`)
 })

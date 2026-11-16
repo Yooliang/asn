@@ -59,6 +59,11 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
     // 開了減少動態：不交替，固定顯示紅色「登入失效」
     if (cs(cur).animationName !== 'none' || cs(ta).opacity !== '0' || cs(tb).opacity !== '1' || cs(cur).backgroundColor !== 'rgb(179, 38, 30)') return { ok: false, why: '減少動態時沒有固定顯示紅色「登入失效」：' + cs(cur).backgroundColor + ' a=' + cs(ta).opacity + ' b=' + cs(tb).opacity };
   }
+  // 使用中但沒有失效的卡（辦公室另有一個使用中的 Codex 帳號）：維持單純的「使用中」，交替動畫不能跑、字不能變透明
+  const plain = await wait(() => [...document.querySelectorAll('.m-dv-cur:not(.failed)')].find(vis), 100);
+  if (!plain) return { ok: false, why: '找不到使用中但沒失效的帳號卡（驗證用的 Codex 帳號）' };
+  const pa = plain.querySelector('.m-dv-cur-a');
+  if (!pa || cs(pa).animationName !== 'none' || cs(pa).opacity !== '1' || cs(plain).animationName !== 'none' || plain.querySelector('.m-dv-cur-b') || plain.hasAttribute('aria-label')) return { ok: false, why: '沒失效的「使用中」不該有交替：a 動畫=' + (pa && cs(pa).animationName) + ' 透明度=' + (pa && cs(pa).opacity) + ' 格動畫=' + cs(plain).animationName };
   const relogin = await wait(() => [...document.querySelectorAll('.m-dv-relogin')].find(vis), 200);   // 帳號回報讀回來才有入口：全套並行跑時比較慢，多等一點
   if (!relogin) return { ok: false, why: '那台回報 Claude 登入失效，細部頁卻沒有「重新登入 Claude」' };
   if (relogin.textContent.trim() !== '重新登入 Claude') return { ok: false, why: '按鈕的字不對：' + relogin.textContent };
@@ -162,7 +167,7 @@ export default {
     const list = t.android_acct_list
     const q = list?.values?.Q
     if (!q) return undefined
-    const accounts = q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a))
+    const accounts = [...q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a)), { vendor: 'codex', email: 'codex@example.com', plan: '', current: true }]
     // 回報時間用跑這個情境的當下算（全套跑完要二十幾分鐘，載入時算的時間到這裡已經過舊，入口照規則就不給）
     const reportedAt = new Date(Math.floor((Date.now() - 5 * 60_000) / 60_000) * 60_000).toISOString()
     const kind = typeof scenario.state.relogin === 'string' ? scenario.state.relogin : 'base'

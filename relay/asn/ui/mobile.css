@@ -219,13 +219,13 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 /* 使用中又登入失效（#1592）：同一格「使用中」（主色）與「登入失效」（紅）約 2 秒交替。兩個字疊在同一個格子，格寬取較寬的那個，交替不會推動旁邊；純 CSS，不靠計時器 */
 .m-dv-cur.failed{display:inline-grid;text-align:center;animation:m-dv-cur-bg 2s steps(1,end) infinite}
 .m-dv-cur.failed>span{grid-area:1/1}
-.m-dv-cur-a{animation:m-dv-cur-a 2s steps(1,end) infinite}
-.m-dv-cur-b{animation:m-dv-cur-b 2s steps(1,end) infinite}
+.m-dv-cur.failed>.m-dv-cur-a{animation:m-dv-cur-a 2s steps(1,end) infinite}
+.m-dv-cur.failed>.m-dv-cur-b{animation:m-dv-cur-b 2s steps(1,end) infinite}
 @keyframes m-dv-cur-bg{0%{background:var(--accent)}50%{background:#b3261e}}
 @keyframes m-dv-cur-a{0%{opacity:1}50%{opacity:0}}
 @keyframes m-dv-cur-b{0%{opacity:0}50%{opacity:1}}
 /* 減少動態：不交替，固定顯示「登入失效」（紅） */
-@media (prefers-reduced-motion:reduce){.m-dv-cur.failed{animation:none;background:#b3261e}.m-dv-cur-a{animation:none;opacity:0}.m-dv-cur-b{animation:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.m-dv-cur.failed{animation:none;background:#b3261e}.m-dv-cur.failed>.m-dv-cur-a{animation:none;opacity:0}.m-dv-cur.failed>.m-dv-cur-b{animation:none;opacity:1}}
 .m-dv-incomplete{padding:2px 9px;border:1px solid #a86f00;border-radius:4px;font-size:12px;color:#a86f00}
 .m-dv-why{display:block;font-size:12px;color:#a86f00}
 /* 上次確認可用（#1512 C2）：一般說明，不是警告 */
