@@ -170,33 +170,18 @@ fn mux_target(req: &PartnerConsoleReq) -> Option<(u32, String)> {
     Some((pid, super::term::mux_partner_in(mux, &req.name)?))
 }
 
-/// 程序建立時間最多比 session 檔的 startedAt 早多少仍算同一個程序（毫秒）。
-/// startedAt 是 Claude 啟動完成後才寫的，所以程序一定比它早建立；啟動慢的機器（例如防毒在掃描）可能要超過十幾秒。
-pub(crate) const SESSION_PROC_EARLY_MS: u64 = 60_000;
-/// 程序建立時間最多比 startedAt 晚多少仍算同一個程序（毫秒）：理論上不會晚，預留時鐘誤差。
-pub(crate) const SESSION_PROC_LATE_MS: u64 = 5_000;
-
-/// 這個 pid 的程序真的是 session 檔記的那個（嚴格版，只給「開新夥伴前先查」用）：
-/// 兩邊的時間都要拿得到，而且程序建立時間落在 [startedAt − 早, startedAt + 晚] 內；拿不到或對不上一律當作不是，寧可照常開新的。
-/// （和 `roster::same_process` 不同：它查不到就當同一個，是為了不誤砍活視窗；這裡的誤判代價是「永遠開不出來」。）
-pub(crate) fn session_matches_process(started_at_ms: u64, created_ms: Option<u64>) -> bool {
-    match created_ms {
-        Some(c) if started_at_ms > 0 => c >= started_at_ms.saturating_sub(SESSION_PROC_EARLY_MS) && c <= started_at_ms.saturating_add(SESSION_PROC_LATE_MS),
-        _ => false,
-    }
-}
-
 /// 純邏輯：同名而且還活著的夥伴 pid。和 `partner_console_query` 同一個 `resolve_pid`，
-/// 只是把「活著」收緊成「程序在，而且（有 session 記錄的）真的是那個工作階段」。
-/// `created` 查程序建立時間（Unix 毫秒），由外面傳進來。沒有 session 記錄的來源（pi 登記檔）只看程序在不在。
-pub(crate) fn resolve_live_partner(engine: &str, name: &str, src: &super::console_resolve::Sources, alive: &dyn Fn(u32) -> bool, created: &dyn Fn(u32) -> Option<u64>) -> Option<u32> {
+/// 只是把「活著」收緊成「程序在，而且（有 session 記錄的）是互動中的 Claude 程序」。
+/// 判斷用共用規則（`live_process`，不看 startedAt，手開、接回舊對話的視窗也算活）；`is_claude` 由外面傳進來，正式接 `real_is_claude`、測試接假環境。
+/// 沒有 session 記錄的來源（pi 登記檔）只看程序在不在。
+pub(crate) fn resolve_live_partner(engine: &str, name: &str, src: &super::console_resolve::Sources, alive: &dyn Fn(u32) -> bool, is_claude: &dyn Fn(u32) -> bool) -> Option<u32> {
     use super::console_resolve::{resolve_pid, Ask};
     let strict = |pid: u32| {
         if !alive(pid) {
             return false;
         }
         match src.sessions.iter().find(|s| s.get("pid").and_then(Value::as_u64) == Some(u64::from(pid))) {
-            Some(s) => session_matches_process(s.get("startedAt").and_then(Value::as_u64).unwrap_or(0), created(pid)),
+            Some(_) => is_claude(pid),
             None => true,
         }
     };
@@ -204,7 +189,7 @@ pub(crate) fn resolve_live_partner(engine: &str, name: &str, src: &super::consol
 }
 
 /// 這台電腦上同名而且還活著的夥伴 pid（開新夥伴前先查，避免開出兩個同名的）。
-/// 辨識和 `partner_console_query` 同一套（`resolve_pid`），再核對程序建立時間防 pid 重用（見 [`resolve_live_partner`]）。
+/// 辨識和 `partner_console_query` 同一套（`resolve_pid`），再核對是互動中的 Claude 程序防 pid 重用（見 [`resolve_live_partner`]）。
 /// mux 窗格裡的 claude 也走這條：窗格已結束、程序不在就不算活著。非 Windows 查不到＝None。
 /// `partner_console_query` 本身沒有收緊：它只用來找視窗，pid 被重用最多是找不到視窗，不會害人開不出來。
 pub(crate) fn live_partner_pid(engine: &str, name: &str) -> Option<u32> {
@@ -212,7 +197,7 @@ pub(crate) fn live_partner_pid(engine: &str, name: &str) -> Option<u32> {
     {
         let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: None, kind: None, pid: None };
         let src = load_sources(&req);
-        resolve_live_partner(engine, name, &src, &win::pid_alive, &crate::heartbeat::process_started_ms)
+        resolve_live_partner(engine, name, &src, &win::pid_alive, &super::live_process::real_is_claude)
     }
     #[cfg(not(windows))]
     {

@@ -48,6 +48,13 @@ test('夥伴操作與命令列呼叫者判活：走共用判斷，不再用 same
   assert.match(env, /live_process::real_is_claude/)
 })
 
+test('開新夥伴前先查同名活夥伴：判活走共用判斷，不再比對 startedAt 與程序建立時間', () => {
+  const c = src('launch/console.rs').split('#[cfg(test)]')[0]
+  assert.doesNotMatch(c, /session_matches_process|SESSION_PROC_|same_process/)
+  assert.match(c, /is_claude: &dyn Fn\(u32\) -> bool/)
+  assert.match(c, /live_process::real_is_claude/)
+})
+
 test('判活：命令列檢查排除 Claude Desktop 與一次性呼叫；錯誤字與程序表只抓一次', () => {
   const lp = src('launch/live_process.rs').split('#[cfg(test)]')[0]
   assert.match(lp, /fn interactive_cmdline\(/)
