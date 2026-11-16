@@ -3,6 +3,7 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
+import { closedReasonOf } from './partner-launch-ui.mjs'
 
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
@@ -22,12 +23,19 @@ export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會�
 export const QUEUE_GIVE_UP_MS = 15 * 60 * 1000   // 改名、切換模型遇到視窗忙碌，外掛會排隊等閒置（電腦端最多等 10 分鐘），處理中的上限放寬
 export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 換班接手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
 
+// 那台電腦自己回報的「不開放遠端開新視窗」原因句（launch_closed_reason）：逐字要與 src-tauri/src/bridge/launcher.rs 的 CLOSED_NO_* 相同（test 有對照）
+export const CLOSED_REASONS = Object.freeze({
+  noConsent: '到那台的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」',
+  noProfile: '那台還找不到 Claude，裝好後請重開 ASN',
+  noCwd: '到那台的 設定 → 工作資料夾白名單 加上資料夾',
+})
+
 export const REASON = {
   needLogin: '要先登入，才能管理夥伴視窗',
   unknown: '還沒查到這台電腦的設定，請稍後再試',
   checking: '查詢中，請稍候…',
   offline: '這台電腦或這個視窗不在線',
-  closed: '這台電腦沒有開放遠端管理視窗（要到電腦的設定打開「允許遠端開視窗與管理視窗」）',
+  closed: '這台電腦沒有開放遠端管理視窗（要到電腦的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」）',
   deviceOffline: '電腦現在不在線，叫不醒（要讓電腦的 ASN 開著）',
   notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或 ASN 服務還不支援，請先更新',
@@ -238,9 +246,17 @@ function gateReason(key, friend, ctx) {
   if (machine && machine.online === false) return REASON.offline
   if (key !== 'info') {
     if (!ctx.loaded) return loadBlock(ctx)   // 沒查到設定時也不能確定開放了沒
-    if (!machine?.launcher) return REASON.closed
+    if (!machine?.launcher) return closedWhy(machine)
   }
   return ''
+}
+
+/** 那台沒開放遠端管理時的說明：認得的原因句照用；別的文字加前綴；沒帶（舊電腦）就是泛用說法 */
+export function closedWhy(machine) {
+  const r = typeof machine?.launch_closed_reason === 'string' ? machine.launch_closed_reason.trim() : ''
+  if (!r) return REASON.closed
+  if (Object.values(CLOSED_REASONS).includes(r)) return r
+  return closedReasonOf(machine, REASON.closed)
 }
 
 // 離線 Claude 視窗的「喚醒」：要有登入、電腦在線且開放遠端管理
@@ -250,7 +266,7 @@ function resumeReason(friend, ctx) {
   if (ctx.supported === false) return REASON.unsupported
   if (!ctx.loaded) return loadBlock(ctx)
   if (!machine || machine.online !== true) return REASON.deviceOffline
-  if (!machine.launcher) return REASON.closed
+  if (!machine.launcher) return closedWhy(machine)
   return ''
 }
 

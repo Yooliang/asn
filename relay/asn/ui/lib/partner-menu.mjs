@@ -2,7 +2,7 @@
 // 能不能按、為什麼變灰照舊由 partner-ops.mjs（menuItems）與 archive.mjs（封存）判斷；這裡只決定「這個入口放哪幾項、什麼順序、
 // 用不到的藏起來還是變灰、說明寫長句還是 20 字內」。各入口只負責畫出來。
 // 「把這台電腦上開著的終端納入管理」不是夥伴自己的操作，不在任何夥伴選單裡（#1557 搬到工作管理員，task-manager.mjs）。
-import { REASON } from './partner-ops.mjs'
+import { REASON, CLOSED_REASONS } from './partner-ops.mjs'
 import { manageItems } from './archive.mjs'
 import { phoneOpApplies, phoneOpsRows } from './mobile-ops.mjs'
 
@@ -10,6 +10,9 @@ import { phoneOpApplies, phoneOpsRows } from './mobile-ops.mjs'
 export const WHY_MAX = 20
 const BRIEF = new Map([
   [REASON.closed, '這台電腦沒開放遠端管理'],
+  [CLOSED_REASONS.noConsent, '那台沒勾開新視窗的允許'],
+  [CLOSED_REASONS.noProfile, '那台還找不到 Claude'],
+  [CLOSED_REASONS.noCwd, '那台白名單是空的'],
   [REASON.deviceOffline, '電腦不在線，叫不醒'],
   [REASON.cloud, '雲端代理，沒有視窗可管'],
   [REASON.otherEngine, '這個引擎暫不開放管理'],
