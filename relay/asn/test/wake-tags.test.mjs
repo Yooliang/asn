@@ -67,3 +67,13 @@ test('離線（#1656）：applyWakes 把離線名單帶進標籤；畫面灰色�
   assert.equal((hub.match(/offlineKeysOf\(/g) ?? []).length, 2, '兩處套用')
   assert.match(hub, /const offlineKeysOf = room => new Set\(offlineNames\(room\?\.members\)\.map\(n => n\.key\)\)/)
 })
+
+test('離線（#1656）：訊息自帶 wake_info 時，roomLog 也依成員當下的離線狀態標 offline（往上載舊訊息、重開群組都走這一條）', () => {
+  const members = [{ key: 'W~甲', name: '甲', kind: 'window', online: true }, { key: 'N~乙', name: '乙', kind: 'window', online: false }]
+  const wake_info = [{ key: 'W~甲', label: '甲', rank: 1, hold: false }, { key: 'N~乙', label: '乙', rank: 0, hold: true }]
+  const log = roomLog([M(3, { wake_info })], ['P'], members)
+  assert.deepEqual(log[0].wake, [{ label: '甲', off: false }, { label: '乙', off: true, offline: true }])
+  const on = roomLog([M(3, { wake_info })], ['P'], members.map(m => ({ ...m, online: true })))
+  assert.deepEqual(on[0].wake, [{ label: '甲', off: false }, { label: '乙', off: true }], '都在線就不標')
+  assert.deepEqual(roomLog([M(3, { wake_info })], ['P'], undefined)[0].wake.map(t => t.offline), [undefined, undefined], '讀不到成員不炸、不標')
+})

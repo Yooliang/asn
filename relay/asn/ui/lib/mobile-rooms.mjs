@@ -167,6 +167,7 @@ export function roomLog(messages, myKeys, members, { photos = false } = {}) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
   const labels = speakerLabels(list, members)
+  const offKeys = new Set(offlineNames(members).map(n => n.key))   // 訊息自帶的 wake_info 也要標離線（#1656）
   const out = []
   for (const m of list) {
     const pics = photos ? normalizePhotos(m.attachments) : []
@@ -176,7 +177,7 @@ export function roomLog(messages, myKeys, members, { photos = false } = {}) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true, ...(pics.length ? { photos: pics } : {}) })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info, offKeys), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true, ...(pics.length ? { photos: pics } : {}) })
   }
   return out
 }
