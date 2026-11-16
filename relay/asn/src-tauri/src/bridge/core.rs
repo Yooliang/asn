@@ -318,6 +318,8 @@ const NOTICE_TTL_MS: u64 = 600_000;
 const OWNER_RECEIPT_GRACE_MS: u64 = 180_000;
 /// 同一寄件人對同一節點在這段時間內只說明一次
 const OWNER_RECEIPT_GAP_MS: u64 = 600_000;
+/// 視窗是系統管理員身分開的、收發室轉不進去時回給寄件人的原因（接在「轉交給 X 沒有成功：」後面）
+pub(super) const ELEVATED_WHY: &str = "這個視窗是用系統管理員身分開的，收發室沒辦法把信轉進去。請用一般方式（不要用系統管理員）重開這個視窗。";
 const NO_MOD_NOTICE: &str = "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去";
 const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，中間經過的伺服器看不到）";
 
@@ -332,6 +334,8 @@ pub struct Core {
     created: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>,
     /// pid → 是不是 claude 程序；名單判活用（活著而且是 claude，和 live_process 同一條規則）。測試預設一律是，要測的自己換
     claude_check: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// 這個視窗是不是比 ASN 自己高權限（系統管理員身分開的，收發室轉不進去）；正式查作業系統，測試換假的
+    elevated_check: crate::launch::integrity::ElevatedCheck,
     /// 已經記過 log 的「重複視窗」組（只存視窗名組成的鍵）；同一組不每輪都記，重複消失後再出現會再記一次
     sync_dup_told: HashSet<String>,
     now: u64,
@@ -571,7 +575,7 @@ impl Core {
         let (outbox, outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
-            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
+            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
@@ -715,6 +719,11 @@ impl Core {
     #[cfg(test)]
     pub fn set_claude_check(&mut self, f: Arc<dyn Fn(u32) -> bool + Send + Sync>) {
         self.claude_check = f;
+    }
+    /// 換掉「視窗是不是比 ASN 高權限」的判斷（測試用；正式用 launch::integrity::real_checker）
+    #[cfg(test)]
+    pub fn set_elevated_check(&mut self, f: crate::launch::integrity::ElevatedCheck) {
+        self.elevated_check = f;
     }
     /// 目前用的「是不是 claude 程序」判斷（遠端開視窗的名單也用同一份，測試換掉時一起換）
     pub fn claude_check(&self) -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
@@ -1064,6 +1073,10 @@ impl Core {
     fn forwardable(&self, name: &str) -> bool {
         self.roster.iter().any(|w| w.name == name) || (self.cfg.extra_allow.iter().any(|n| n == name) && self.online_names().contains(name))
     }
+    /// 這個名字的視窗是用比 ASN 高的權限開的（收發室 worker 轉不進去）。名單上沒有或讀不到層級＝false（照舊）
+    fn is_elevated(&self, name: &str) -> bool {
+        self.agent_of(name).is_some_and(|w| w.elevated)
+    }
     fn agent_of(&self, name: &str) -> Option<&Window> {
         self.roster.iter().find(|w| w.name == name)
     }
@@ -1246,6 +1259,7 @@ impl Core {
         }
         if let Some(mut l) = claude {
             roster::apply_mod_status(&mut l, &self.cfg.status_dir, now);
+            roster::apply_elevated(&mut l, &*self.elevated_check);
             let live: Vec<String> = l.iter().filter_map(|w| w.session_id.clone()).collect();
             roster::cleanup_mod_status(&self.cfg.status_dir, &live, now);
             roster::cleanup_mod_status(&self.cfg.status_dir.with_file_name(roster::SCREEN_DIR), &live, now);
@@ -1798,6 +1812,14 @@ impl Core {
                 _ => no_mod_notice = true,
             }
         }
+        // 視窗是系統管理員身分開的、收發室（一般權限）轉不進去：不交給 worker，直接回寄件人原因（走一般的轉交失敗通知，信 ack 掉）
+        if self.via_worker(&target) && !self.is_respond(&target) && self.is_elevated(&target) {
+            self.log.line(&format!("id={} to={target}: window is elevated (higher integrity than ASN), not handed to the worker", m.id));
+            self.note_if_notice(&m.id, &m.body, m.is_system_notice());
+            self.pending.push(p);
+            self.on_fail(&m.id, ELEVATED_WHY).await;
+            return None;
+        }
         // 收發室 worker 額度還沒重置：先扣住（不送 worker、不 ack），重置後依序重送
         if self.quota_active(self.now) && self.via_worker(&target) && !self.probing && !self.is_respond(&target) {
             // 已達扣住上限的信不收：回傳收件視窗名，下一輪拉信排除它，才拉得到信箱裡其他視窗的信
@@ -2070,6 +2092,9 @@ impl Core {
     fn fail_notice_text(target: &str, why: &str) -> String {
         if Self::reply_blocked(why) {
             return format!("[收發室] {target} 收到信了，但它的回覆被內容過濾擋下，沒有回到你這裡。可以請它再回一次。");
+        }
+        if why == ELEVATED_WHY {
+            return format!("[收發室] 轉交給 {target} 沒有成功：{why}");
         }
         format!("[收發室] 轉交給 {target} 失敗：{}", Self::short_fail_reason(why))
     }
@@ -2539,6 +2564,13 @@ impl Core {
         p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone(), member: member.to_string() });
         self.pending.push(p);
         self.persist();
+        // 視窗是系統管理員身分開的、worker 轉不進去：群組貼一則說明（沿用群組失敗通知的冷卻），這則算處理完
+        if self.via_worker(&target) && !self.is_respond(&target) && self.is_elevated(&target) {
+            self.log.line(&format!("room={room_id} #{seq} to={target}: window is elevated (higher integrity than ASN), not handed to the worker"));
+            self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""), false);
+            self.on_fail(&id, ELEVATED_WHY).await;
+            return true;
+        }
         let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）
         // 自動回信的 worker 由橋代寄回答：不附「保持能回應」的提醒（與個人信同一個判斷）
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };

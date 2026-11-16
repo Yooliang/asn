@@ -69,6 +69,10 @@ fn vendor_display(engine: Option<&str>) -> String {
 fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply_blocked: bool, why: &str, vendor: Option<&str>) -> String {
     let name = target.replace('@', "");
     let more = if skipped > 0 { format!("這段時間另有 {skipped} 則情況相同。") } else { String::new() };
+    if why == ELEVATED_WHY {
+        // 對方是系統管理員身分開的視窗：重新點名也一樣轉不進去，不叫人重點名
+        return format!("{ROOM_NOTICE_HEAD}{seq} 轉交給 {name} 沒有成功：{why}{more}");
+    }
     if !reply_blocked && !timed_out {
         if let Some(code) = upstream_5xx(why) {
             // 信有轉交到，是工作者這一輪被上游擋下：不能寫「沒有轉交」（#1366，西川的調查）

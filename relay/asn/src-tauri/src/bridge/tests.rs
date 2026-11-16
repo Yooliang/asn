@@ -452,6 +452,8 @@ fn new_core(fr: &FakeRelay, work: &std::path::Path, sessions: &std::path::Path, 
     // CI（Linux 讀 /proc）剛好有 5100 之類的行程時，session 檔的 startedAt（T0）比它早，視窗就被當成 pid 重用而排除。
     // 要測 pid 重用的測試自己再 set_created（例如 self_pull_it、這個檔裡 pid 5002 那條）
     c.set_created(Arc::new(|_| None));
+    // 假的「視窗是不是系統管理員身分開的」：一律不是（不去查這台機器上真的同號程序）；要測的測試自己再 set_elevated_check
+    c.set_elevated_check(Arc::new(|_| false));
     c
 }
 
@@ -2214,6 +2216,7 @@ mod wait_it;
 mod respond_it;
 mod rooms_launch;
 mod self_pull_it;
+mod elevated_it;
 
 
 // ---- 信箱行頭堵塞（寄給別人的新信被一整頁「橋不處理」的舊信擋在後面）----------------------------------------

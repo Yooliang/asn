@@ -1001,13 +1001,16 @@ async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Opt
 async fn local_windows() -> Result<Value, String> {
     let home = identity::home_dir();
     let list = tokio::task::spawn_blocking(move || {
-        bridge::roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), heartbeat::session_alive, 0, "", heartbeat::now_ms())
+        let mut l = bridge::roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), heartbeat::session_alive, 0, "", heartbeat::now_ms())?;
+        // 標出比 ASN 高權限（系統管理員身分開的）的視窗：名單上顯示「收不到信」
+        bridge::roster::apply_elevated(&mut l, &*launch::integrity::real_checker());
+        Some(l)
     })
     .await
     .map_err(|e| e.to_string())?
     // 讀不到要明說（回錯誤）：前端把「本機沒有這個視窗」當成已關閉，不能把讀失敗當成空清單
     .ok_or_else(|| "讀不到本機視窗清單".to_string())?;
-    Ok(Value::Array(list.iter().map(|w| serde_json::json!({ "name": w.name, "status": w.status, "detail": w.detail, "context_pct": w.context_pct })).collect()))
+    Ok(Value::Array(list.iter().map(|w| serde_json::json!({ "name": w.name, "status": w.status, "detail": w.detail, "context_pct": w.context_pct, "elevated": w.elevated })).collect()))
 }
 
 /// 工作管理員（0.2.21）：這台電腦上 ASN 管的程式清單。只讀，不結束任何程序；「停止」走既有的關閉流程
