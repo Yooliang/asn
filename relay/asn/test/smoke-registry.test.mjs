@@ -90,7 +90,26 @@ test('新增探測只要加一個檔：自動收集、帶自己的情境與假�
   }
 })
 
-test('拆檔時搬家的探測都沒有自帶情境或假後台欄位；之後新加的才用新格式（#1512 A 的 usageMenu、B 的 termKeys、C 的 relogin、C2 的 usableAt、#1530 的 msgRef、#1557 的 tmAdopt、#1605 的 newComputerGuide、#1630 的 elevated、#1632 的 stuckTerm、#1645 的 drelogin、#1635 的 awaiting）', () => {
-  assert.deepEqual(PROBES.filter(e => e.table || e.scenarios).map(e => e.key), ['awaiting', 'chatPins', 'drelogin', 'elevated', 'launchSet', 'msgRef', 'newComputerGuide', 'pinScroll', 'pinsSync', 'relogin', 'stuckTerm', 'termKeys', 'tmAdopt', 'usableAt', 'usageMenu'])
+// 拆檔（#1540）時搬家過來的舊探測：沒有自帶情境（scenarios）也沒有假後台欄位（table）。
+// 這份名單只會變少、不會變多；新增探測一律用新格式（自帶 scenarios 或 table），不用改這裡。
+const LEGACY = new Set([
+  'aboutCheck', 'bar', 'camera', 'devMore', 'devSel', 'devbtn',
+  'dnotice', 'dtabs', 'dterm', 'dtermTab', 'fpMark', 'gjump',
+  'goffline', 'group', 'lineDesk', 'lineM', 'lineTimes', 'lineUi',
+  'listTrim', 'ltermPause', 'macctBack', 'mattach', 'mcards', 'mchat',
+  'mchatBack', 'mchatEmpty', 'mcloud', 'mdevsheet', 'menuIcons', 'mgoffline',
+  'mgroup', 'mlaunch', 'mlayout', 'mnoself', 'mnotice', 'mnoticeLegacy',
+  'mpane', 'mpermDanger', 'mpermreq', 'mrelease', 'mtabs', 'mtermview',
+  'multiPhoto', 'munread', 'photoBack', 'photoZoom', 'quota', 'skinCheck',
+  'taskmgr', 'updDl',
+])
+
+test('沒有自帶情境或假後台欄位的探測只限拆檔時的舊名單；新增探測要用新格式', () => {
+  const keys = new Set(PROBES.map(e => e.key))
+  const legacyNow = PROBES.filter(e => !e.table && !e.scenarios).map(e => e.key)
+  const added = legacyNow.filter(k => !LEGACY.has(k))
+  assert.deepEqual(added, [], `這些探測沒有自帶 scenarios 或 table：${added.join('、')}。新增的探測要自帶 scenarios 或 table（新格式）`)
+  const dead = [...LEGACY].filter(k => !keys.has(k))
+  assert.deepEqual(dead, [], `LEGACY 名單裡這些探測已不存在：${dead.join('、')}。請把它們從 LEGACY 拿掉`)
   assert.equal(typeof tableFor(SCENARIOS[0]), 'object')
 })
