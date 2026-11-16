@@ -90,6 +90,8 @@ import { loginUnsealedNote } from './lib/mobile-login-seal.mjs'
 const { createApp, reactive, ref, computed, watch } = Vue
 let fgListener = null   // 版本紀錄的重讀（#1501）掛在這裡：外殼的前景事件與 visibilitychange 都會走到 tellFg，不另掛一套監聽
 const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
+import { AWAITING_LABEL } from './lib/awaiting.mjs'
+const friendStatusText = f => (f?.awaiting === true ? AWAITING_LABEL : STATUS[f?.status])
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 const bridge = androidBridge(window)
@@ -1620,7 +1622,7 @@ const app = createApp({
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
       pf, sw, pagerStyle, pagerMoved, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, curTab, pages, TAB_LABEL, tabLabel, fourthPage, pageSlot, fourthTitle, closePage, myName, meForChat, lastOf,
       pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
-      listTimeText, nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
+      listTimeText, nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, friendStatusText, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,

@@ -2217,6 +2217,7 @@ mod respond_it;
 mod rooms_launch;
 mod self_pull_it;
 mod elevated_it;
+mod awaiting_it;
 
 
 // ---- 信箱行頭堵塞（寄給別人的新信被一整頁「橋不處理」的舊信擋在後面）----------------------------------------

@@ -1635,6 +1635,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             .collect()
     }
 
+    /// 對照表裡所有的夥伴視窗（claude）列，有名字就算（對話編號可以是空的：新開的對話沒有）。只讀，找「等你按確認」的視窗用
+    pub fn partner_rows(&self) -> Vec<super::stuck_resume::PartnerRef> {
+        let g = self.inner.lock().unwrap();
+        g.sessions
+            .iter()
+            .filter(|s| s.kind == super::win_term::KIND_CLAUDE)
+            .filter_map(|s| {
+                let name = partner_label(&s.id, &s.title)?.to_string();
+                let sid = s.session_id.clone().unwrap_or_default();
+                Some(super::stuck_resume::PartnerRef { id: s.id.clone(), name, session_id: sid, mux: s.window.mux, gui_pid: s.window.gui_pid, started_ms: s.window.started_ms, cwd: s.cwd.clone() })
+            })
+            .collect()
+    }
+
     /// 記著這個對話編號的夥伴視窗列；沒有、或同一個編號對到兩列以上（不猜）＝None。只讀
     pub fn partner_by_session(&self, sid: &str) -> Option<super::stuck_resume::PartnerRef> {
         let mut hits = self.partner_refs().into_iter().filter(|p| p.session_id == sid);
@@ -3555,6 +3569,9 @@ pub struct TermStopReq {
     /// 工作管理員停「卡在接回中」的視窗時才帶：後端會把條件再驗一次，不成立就拒絕
     #[serde(default)]
     pub resuming_sid: Option<String>,
+    /// 工作管理員停「視窗開著、在等你按確認」的視窗時才帶夥伴名：後端會把條件再驗一次，不成立就拒絕
+    #[serde(default)]
+    pub awaiting_name: Option<String>,
 }
 
 #[cfg(feature = "gui")]
@@ -3746,6 +3763,18 @@ pub(crate) fn mux_partner_in(mux: (u32, u64), name: &str) -> Option<String> {
     {
         let _ = (mux, name);
         None
+    }
+}
+
+/// 對照表裡所有的夥伴視窗列（見 TermService::partner_rows）；沒有畫面的建置、測試＝空
+pub(crate) fn partner_rows() -> Vec<super::stuck_resume::PartnerRef> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().map(|t| t.partner_rows()).unwrap_or_default()
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        Vec::new()
     }
 }
 

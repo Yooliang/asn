@@ -789,7 +789,7 @@ async function refreshOpsCtx() {
 // 右鍵沒有大按鈕列，所以第 2 格不換成喚醒（wake:false），喚醒留在右鍵選單裡；對話頁的「管理」則拿掉喚醒（在第 2 格）
 const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
 // 工作管理員（設定 → 設備 → 這台電腦）：清單只在頁面開著時每 5 秒更新；「停止」走既有的關閉流程（lib/task-manager.mjs）
-const taskMgr = createTaskManager({ api: transport, getFriends: () => friends.value, getSelfNode: () => info.node, getOpsCtx: () => buddyOpsCtx.value, refreshOps: refreshOpsCtx, sendMail: (id, text) => core.send(id, text), state: reactive(initialTaskState()) })
+const taskMgr = createTaskManager({ api: transport, getFriends: () => friends.value, getSelfNode: () => info.node, getOpsCtx: () => buddyOpsCtx.value, refreshOps: refreshOpsCtx, openChat: id => void openChat(id), sendMail: (id, text) => core.send(id, text), state: reactive(initialTaskState()) })
 const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value).map(i => ({ ...i, key: i.key.slice(2) })))
 const opDlg = reactive({ open: false, op: '', friend: null, item: null, taken: [] })
 function openPartnerOp(it) {
@@ -2149,6 +2149,7 @@ const app = createApp({
         case 'tm-ask': taskMgr.ask(String(value ?? '')); break
         case 'tm-cancel': taskMgr.cancel(); break
         case 'tm-confirm': await taskMgr.confirm(); break
+        case 'tm-view': taskMgr.openScreen(String(value ?? '')); break   // 視窗開著、在等你按確認的夥伴（#1635）：打開它的對話頁看終端
         case 'tm-wake': await taskMgr.wake(String(value ?? '')); break
         case 'tm-adopt': void adoptLoad(); break   // 工作管理員「納入管理」（#1557）：打開跟以前同一個接手清單，安全檢查照舊
         case 'avatar-remove': await removeAvatar(); break

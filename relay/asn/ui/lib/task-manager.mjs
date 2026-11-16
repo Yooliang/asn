@@ -6,6 +6,7 @@
 //   同名重複的視窗 → 以本人身分寄 /asn-close-dup <pid> 給同一個視窗（和對話頁的「關掉第 N 個」同一條）
 //   終端面板 → 既有的 term_stop
 //   卡在接回中的夥伴視窗（ASN 開的、已沒有對話紀錄檔可對）→ 同樣走 term_stop，多帶對話編號，電腦端會把條件再驗一次
+//   視窗開著、卡在第一次確認畫面還沒進到對話的夥伴（awaiting，#1635）→ 同樣走 term_stop，多帶夥伴名，電腦端會把條件再驗一次；另有「看畫面」打開它的對話頁（那裡有終端）
 //   自己開的前景程式、終端服務、ASN 本體 → 只能看
 // node 與瀏覽器都能跑；畫面文字純繁體中文，除了程序編號（本頁的欄位）不顯示任何內部識別碼。
 import { menuItems, partnerEngine, isProcessEntry } from './partner-ops.mjs'
@@ -36,6 +37,8 @@ export const TEXT = {
   noPlace: '還沒在名單上，稍後再試',
   wakeFail: '叫醒失敗，請稍後再試',
   stopFail: '停止失敗，請稍後再試',
+  view: '看畫面',
+  viewTip: '打開這位夥伴的對話頁，按「終端」看它停在哪個畫面；ASN 不會代你按任何確認',
   // 納入管理（#1557，從夥伴選單搬來）：自己開的、還沒交給 ASN 的那一列放這顆；按了打開跟以前同一個接手清單
   adopt: '納入管理',
   adoptTip: '你自己在終端開的 grok、claude、agy、pi 或 codex，可以交給 ASN 看狀態、提醒你回答；預設只能看，要代送文字得另外允許。',
@@ -49,7 +52,7 @@ export const engineText = e => {
   return ENGINE_TEXT[k] ?? (k || DASH)
 }
 
-const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', thinking: '忙碌', running: '執行中', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止', offline: '離線', resuming: '接回中', stuck: '可能卡住了' }
+const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', thinking: '忙碌', running: '執行中', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止', offline: '離線', resuming: '接回中', stuck: '可能卡住了', awaiting: '等你按確認' }
 export const statusText = s => STATUS_TEXT[String(s ?? '').trim().toLowerCase()] ?? DASH
 
 // ---------- 格式化 ----------
@@ -148,6 +151,10 @@ export function stopPlan(row, ctx = {}) {
     const ok = Boolean(row.term_id && row.session_id)
     return { path: PATH.term, ok, reason: ok ? '' : '找不到這個終端' }
   }
+  if (k === 'awaiting') {
+    const ok = Boolean(row.term_id && row.name)
+    return { path: PATH.term, ok, reason: ok ? '' : '找不到這個終端' }
+  }
   if ((k === 'claude' || k === 'pi') && row.by_asn === false) return { path: PATH.none, ok: false, reason: VIEW_ONLY_WHY.own }
   if (k === 'claude' || k === 'pi' || k === 'acp') {
     const path = k === 'claude' && row.dup ? PATH.dup : PATH.close
@@ -165,7 +172,7 @@ export function stopRequest(row, ctx = {}) {
   const plan = stopPlan(row, ctx)
   if (!plan.ok) return null
   if (plan.path === PATH.dup) return { path: PATH.dup, friendId: `${ctx.selfNode}/${row.name}`, text: dupCloseText(row.pid) }
-  if (plan.path === PATH.term) return { path: PATH.term, req: row.kind === 'resuming' ? { id: row.term_id, resuming_sid: row.session_id } : { id: row.term_id } }
+  if (plan.path === PATH.term) return { path: PATH.term, req: row.kind === 'resuming' ? { id: row.term_id, resuming_sid: row.session_id } : row.kind === 'awaiting' ? { id: row.term_id, awaiting_name: row.name } : { id: row.term_id } }
   return { path: PATH.close, friend: findFriend(ctx.friends, ctx.selfNode, row.name), op: 'close' }
 }
 
@@ -175,7 +182,7 @@ const sourceText = r => {
   switch (r.kind) {
     case 'claude': case 'pi': return r.by_asn ? 'ASN 開的' : '自己開的'
     case 'acp': return 'ASN 內建'
-    case 'resuming': return 'ASN 開的'
+    case 'resuming': case 'awaiting': return 'ASN 開的'
     case 'terminal': return r.by_asn === false ? '自己開的（已接手）' : 'ASN 開的終端'
     case 'process': return '自己開的'
     case 'mux': return 'ASN 的終端服務'
@@ -207,6 +214,7 @@ export function viewRow(r, now, ctx) {
     why: plan.ok ? '' : plan.reason,
     dupNote: r.dup ? TEXT.dupRisk : '',
     canAdopt: canAdopt(r),
+    canView: r.kind === 'awaiting' && Boolean(r.name),   // 看畫面：打開對話頁（那裡有終端）
   }
 }
 
@@ -218,6 +226,7 @@ export function confirmView(r, rows, now) {
   const lines = [facts, r.cwd ? `資料夾：${r.cwd}` : ''].filter(Boolean)
   if (r.kind === 'terminal') return { ...base, title: `要關閉這個${engineText(r.engine)}終端嗎？`, lines, notes: ['只會關掉這個終端，裡面正在跑的程式會結束。'], ok: '關閉這個終端' }
   if (r.kind === 'resuming') return { ...base, title: `要停止「${name}」這個還在接回的終端嗎？`, lines, notes: ['關掉這個還在接回的終端。對話紀錄不會受影響，之後可以再按喚醒。'], ok: TEXT.stop }
+  if (r.kind === 'awaiting') return { ...base, title: `要停止「${name}」這個還在等確認的視窗嗎？`, lines, notes: ['關掉這個還沒進到對話的視窗。對話紀錄不會受影響，之後可以再開或喚醒。'], ok: TEXT.stop }
   if (r.kind === 'acp') return { ...base, title: `要停止「${name}」嗎？`, lines, notes: ['只停止它這一次的執行，名單上會顯示「已停止」；按「重開」或重啟 ASN 就會恢復。'], ok: '停止' }
   if (r.dup) {
     const other = rows.filter(x => x.kind === 'claude' && x.name === name && x.pid !== r.pid)
@@ -237,7 +246,7 @@ export const initialState = () => ({ open: false, loading: false, error: '', sna
  *   refreshOps()（重查登入與電腦設定）、sendMail(friendId, text)（以本人身分寄信）、now()、setTimer／clearTimer、runOp（測試可換）
  */
 export function createTaskManager(deps) {
-  const { api, getFriends, getSelfNode, getOpsCtx, refreshOps = async () => {}, sendMail, now = Date.now, setTimer = (f, ms) => setInterval(f, ms), clearTimer = t => clearInterval(t), runOp = runPartnerOp, state = initialState(), log = m => console.info('[ASN]', m) } = deps
+  const { api, getFriends, getSelfNode, getOpsCtx, refreshOps = async () => {}, openChat = () => {}, sendMail, now = Date.now, setTimer = (f, ms) => setInterval(f, ms), clearTimer = t => clearInterval(t), runOp = runPartnerOp, state = initialState(), log = m => console.info('[ASN]', m) } = deps
   let timer = null
   let inflight = false
   const ctx = () => ({ friends: getFriends(), selfNode: getSelfNode(), ops: getOpsCtx(), asn: getOpsCtx()?.asn })
@@ -319,6 +328,15 @@ export function createTaskManager(deps) {
     void refresh()
   }
 
+  /** 「看畫面」：打開這位夥伴的對話頁（名單上那一筆「等你在那台電腦按確認」），終端在那裡看；名單上還沒有就請稍後再試 */
+  function openScreen(name) {
+    const f = (Array.isArray(getFriends()) ? getFriends() : []).find(x => x && x.node === getSelfNode() && x.awaiting === true && x.awaitName === name)
+    if (!f) { state.wakeNote = TEXT.noPlace; return false }
+    state.wakeNote = ''
+    openChat(f.id)
+    return true
+  }
+
   async function wake(name) {
     const f = findFriend(getFriends(), getSelfNode(), name)
     if (!f || state.busy) return
@@ -357,5 +375,5 @@ export function createTaskManager(deps) {
     }
   }
 
-  return { state, open, close, refresh, ask, cancel, confirm, wake, view }
+  return { state, open, close, refresh, ask, cancel, confirm, wake, openScreen, view }
 }

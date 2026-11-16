@@ -1,6 +1,7 @@
 // 「僅顯示」條目：本機程序掃描出來的代理（名單標 kind＝process、receivable＝false），只能看、不能收信。
 // 頁首不顯示忙碌、輸入框與傳送鈕禁用、通話鈕不提供；就算舊資料或競態仍送出，後台回 409 也轉成白話。
 import { engineKey, engineLabel } from './tabs.mjs'
+import { AWAITING_SEND_ERROR } from './awaiting.mjs'
 
 export const DISPLAY_ONLY_TAG = '僅顯示，無法收信'
 export const DISPLAY_ONLY_ERROR = '這位夥伴只能顯示，不能收信'
@@ -8,6 +9,7 @@ export const DISPLAY_ONLY_ERROR = '這位夥伴只能顯示，不能收信'
 export const isDisplayOnly = f => Boolean(f) && (f.receivable === false || f.entryKind === 'process')
 
 export function displayOnlyHint(f) {
+  if (f?.awaiting === true) return AWAITING_SEND_ERROR   // 視窗開著、還沒進到對話的夥伴（#1635）
   const k = engineKey(f)
   const name = k === 'other' ? '程式' : engineLabel(k)
   return `這是這台電腦上自己開的 ${name}：ASN 只能顯示，不能傳訊息給它`

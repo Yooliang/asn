@@ -188,7 +188,7 @@
                 <div class="m-head-tx">
                   <div class="m-title" v-html="emo(chatFriend.nick)"></div>
                   <div class="m-conn" v-if="chatFriend.room">{{ chatFriend.psm }}</div>
-                  <div class="m-conn" v-else>{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
+                  <div class="m-conn" v-else>{{ friendStatusText(chatFriend) }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
                 </div>
                 <button class="m-icon-btn m-head-more" type="button" aria-label="更多操作" v-if="opsItems.length || groupItems.length" @click="openOps"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="5" cy="12" r="2.4" fill="currentColor"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><circle cx="19" cy="12" r="2.4" fill="currentColor"/></svg></button>
               </template>

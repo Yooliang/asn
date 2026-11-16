@@ -22,6 +22,8 @@ pub(crate) mod integrity;
 #[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
 pub(crate) mod stuck_resume;
 pub(crate) mod stuck_notice;
+#[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
+pub(crate) mod awaiting;
 pub mod auto_resume;
 pub mod mux_watch;
 #[cfg(all(feature = "gui", not(test)))]
