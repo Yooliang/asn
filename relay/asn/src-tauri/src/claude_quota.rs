@@ -679,7 +679,7 @@ mod tests {
     }
 
     fn acct(email: &str, current: bool) -> AccountInfo {
-        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false, usable_at_ms: None }
+        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false, usable_at_ms: None, plan_from: "" }
     }
 
     fn quota_two(r5: Option<&str>, rw: Option<&str>) -> Quota {

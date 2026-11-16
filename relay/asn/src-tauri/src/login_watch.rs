@@ -90,10 +90,59 @@ pub fn parse_line(line: &str) -> Option<Ev> {
     Some(Ev { kind: Kind::Reply, ts })
 }
 
+/// 無法辨識的錯誤代碼（缺值、含非英數底線字元、太長）一律記成這個
+pub const UNKNOWN_CODE: &str = "（無法辨識）";
+/// 錯誤代碼最長字數
+const CODE_MAX: usize = 40;
+/// 同一個代碼最多每隔這麼久記一行
+pub const CODE_LOG_EVERY_MS: i64 = 3_600_000;
+/// 同時追蹤的代碼種類上限（超過的併進「無法辨識」）
+const CODE_KINDS_MAX: usize = 32;
+
+/// 有 `isApiErrorMessage` 但不是登入類的行：回錯誤短代碼（只含英數與底線、有長度上限，不合格回 [`UNKNOWN_CODE`]）。
+/// 只為了記錄，不參與任何登入判定；其他行回 None。不碰訊息內容。
+pub fn other_error_code(line: &str) -> Option<String> {
+    if !line.contains("isApiErrorMessage") {
+        return None;
+    }
+    let l: Line = serde_json::from_str(line).ok()?;
+    if l.kind.as_deref() != Some("assistant") || l.is_api_error != Some(true) {
+        return None;
+    }
+    match l.error.as_deref() {
+        Some(e) if LOGIN_ERRORS.contains(&e) => None,
+        Some(e) if !e.is_empty() && e.chars().count() <= CODE_MAX && e.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') => Some(e.to_string()),
+        _ => Some(UNKNOWN_CODE.to_string()),
+    }
+}
+
+/// 非登入類錯誤代碼的記錄節流：同一個代碼每小時最多一行，行內帶距上次記錄累計的次數
+#[derive(Default)]
+pub struct CodeLog {
+    seen: HashMap<String, (i64, u32)>, // 代碼 → (上次記錄的時間, 這之後累計次數)
+}
+
+impl CodeLog {
+    /// 看到一個代碼；該記一行就回那一行（固定句型，只有代碼與次數）
+    pub fn observe(&mut self, code: &str, now_ms: i64) -> Option<String> {
+        let key = if self.seen.contains_key(code) || self.seen.len() < CODE_KINDS_MAX { code } else { UNKNOWN_CODE };
+        let e = self.seen.entry(key.to_string()).or_insert((i64::MIN, 0));
+        e.1 = e.1.saturating_add(1);
+        if e.0 != i64::MIN && now_ms.saturating_sub(e.0) < CODE_LOG_EVERY_MS {
+            return None;
+        }
+        let n = e.1;
+        *e = (now_ms, 0);
+        Some(format!("Claude 回報錯誤代碼 {key}（累計 {n} 次）"))
+    }
+}
+
 // ---------- 增量讀檔 ----------
 #[derive(Default)]
 pub struct Tailer {
     files: HashMap<PathBuf, (u64, i64, u64)>, // 路徑 → (長度, mtime, 已讀到的位置)
+    /// 這次讀到的非登入類錯誤代碼（只給記錄用，由 [`Monitor::tick`] 取走）
+    other_codes: Vec<String>,
 }
 
 impl Tailer {
@@ -137,8 +186,11 @@ impl Tailer {
                 body = body.iter().position(|&b| b == b'\n').map(|i| &body[i + 1..]).unwrap_or(&[]);
             }
             for raw in body.split(|&b| b == b'\n') {
-                if let Some(ev) = std::str::from_utf8(raw).ok().and_then(parse_line) {
+                let Ok(text) = std::str::from_utf8(raw) else { continue };
+                if let Some(ev) = parse_line(text) {
                     out.push(ev);
+                } else if let Some(code) = other_error_code(text) {
+                    self.other_codes.push(code);
                 }
             }
             self.files.insert(path, (len, mt, offset + end as u64));
@@ -365,6 +417,10 @@ pub struct Monitor {
     homes: HashMap<PathBuf, (Watch, Tailer)>,
     /// 橋的收發室 worker 自己遇到的登入錯誤（它不一定留對話紀錄）：下一輪輪詢時併進每個家目錄的事件，用完就清
     injected: Vec<Ev>,
+    /// 非登入類錯誤代碼的節流（只影響記錄，不影響判定）
+    code_log: CodeLog,
+    /// 該寫進 ui.log 的錯誤代碼行（由 [`tick_real`] 取走）
+    code_lines: Vec<String>,
 }
 
 impl Monitor {
@@ -378,6 +434,9 @@ impl Monitor {
             let (w, t) = self.homes.entry(r.clone()).or_default();
             w.on_account(&ctx.email, now_ms);
             let mut evs = t.poll(std::slice::from_ref(r), now_ms);
+            for code in std::mem::take(&mut t.other_codes) {
+                self.code_lines.extend(self.code_log.observe(&code, now_ms));
+            }
             evs.extend(self.injected.iter().copied());
             let cred = std::fs::metadata(r.join(CRED_FILE)).ok().map(|m| crate::usage::mtime_ms(&m));
             if let Some(a) = w.feed_with(&evs, now_ms, cred) {
@@ -457,7 +516,25 @@ pub fn tick_real(now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier) -> 
     m.injected.extend(worker_reply_events(std::mem::take(&mut *WORKER_REPLIES.lock().unwrap_or_else(|e| e.into_inner()))));
     let failed = m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"));
     note_verdict(failed, now_ms);
+    for line in std::mem::take(&mut m.code_lines) {
+        ui_note(&line, now_ms);
+    }
     failed
+}
+
+/// 機器資料夾（ui.log 所在）；啟動時設定一次，沒設就只寫 stderr
+static LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+pub fn set_log_dir(dir: &std::path::Path) {
+    let _ = LOG_DIR.set(dir.to_path_buf());
+}
+/// 記一行到 ui.log（沒設資料夾就只寫 stderr）
+fn ui_note(line: &str, now_ms: i64) {
+    match LOG_DIR.get() {
+        Some(d) => {
+            let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now_ms))]);
+        }
+        None => elog!("{line}"),
+    }
 }
 
 /// 最近一次判定的結果與時間（#1512 C）：只給「手機要求重新登入時，這台本機有沒有失效證據」用，不另外讀檔
@@ -986,5 +1063,86 @@ mod tests {
         assert_eq!(logs, vec!["登入失效通知未送出（首次）：rate_limited".to_string()]);
         m.tick(&[dir.path().to_path_buf()], now + MIN, &ctx(), &|_| 0, &Fail, |s| logs.push(s));
         assert_eq!(logs.len(), 1, "不重試轟炸：失效期間不再送");
+    }
+
+    // ---------- 非登入類錯誤代碼記錄 ----------
+    #[test]
+    fn 錯誤代碼_登入判定不變_只認登入類() {
+        let ts = iso(now_ms());
+        // 非登入類：parse_line 一樣是 None（判定不變），只多出代碼
+        for e in ["rate_limit", "server_error", "billing_error"] {
+            let l = err_line(e, &ts);
+            assert!(parse_line(&l).is_none(), "{e} 不算登入錯誤");
+            assert_eq!(other_error_code(&l).as_deref(), Some(e));
+        }
+        // 登入類照舊算、不進代碼記錄
+        for e in LOGIN_ERRORS {
+            let l = err_line(e, &ts);
+            assert_eq!(parse_line(&l).map(|x| x.kind), Some(Kind::LoginError));
+            assert!(other_error_code(&l).is_none());
+        }
+        assert_eq!(LOGIN_ERRORS, ["authentication_failed", "oauth_org_not_allowed"]);
+        // 真的回覆、使用者行：沒有代碼
+        assert!(other_error_code(&reply_line(&ts)).is_none());
+    }
+
+    #[test]
+    fn 錯誤代碼_奇怪字元與超長記成無法辨識() {
+        let ts = iso(now_ms());
+        assert_eq!(other_error_code(&err_line("bad code!", &ts)).as_deref(), Some(UNKNOWN_CODE));
+        assert_eq!(other_error_code(&err_line("a@b.test", &ts)).as_deref(), Some(UNKNOWN_CODE));
+        assert_eq!(other_error_code(&err_line(&"x".repeat(CODE_MAX + 1), &ts)).as_deref(), Some(UNKNOWN_CODE));
+        assert_eq!(other_error_code(&err_line(&"x".repeat(CODE_MAX), &ts)).as_deref(), Some("x".repeat(CODE_MAX).as_str()));
+        assert_eq!(other_error_code(&err_line("", &ts)).as_deref(), Some(UNKNOWN_CODE));
+        let no_err = auth_line(&ts).replace(r#""error":"authentication_failed","#, "");
+        assert_eq!(other_error_code(&no_err).as_deref(), Some(UNKNOWN_CODE));
+    }
+
+    #[test]
+    fn 錯誤代碼_節流_同代碼每小時一行_帶累計次數() {
+        let mut c = CodeLog::default();
+        let t = 10 * CODE_LOG_EVERY_MS;
+        assert_eq!(c.observe("rate_limit", t).unwrap(), "Claude 回報錯誤代碼 rate_limit（累計 1 次）");
+        assert!(c.observe("rate_limit", t + 1).is_none());
+        assert!(c.observe("rate_limit", t + CODE_LOG_EVERY_MS - 1).is_none());
+        assert_eq!(c.observe("rate_limit", t + CODE_LOG_EVERY_MS).unwrap(), "Claude 回報錯誤代碼 rate_limit（累計 3 次）");
+        // 別的代碼各算各的
+        assert!(c.observe("server_error", t + 5).is_some());
+    }
+
+    #[test]
+    fn 錯誤代碼_種類上限_超過併進無法辨識() {
+        let mut c = CodeLog::default();
+        for i in 0..CODE_KINDS_MAX {
+            assert!(c.observe(&format!("e{i}"), 0).is_some());
+        }
+        let l = c.observe("one_more", 0).unwrap();
+        assert!(l.contains(UNKNOWN_CODE) && !l.contains("one_more"), "{l}");
+    }
+
+    #[test]
+    fn 錯誤代碼_走完整流程_判定不變_記錄只有代碼() {
+        let now = now_ms();
+        let dir = tempfile::tempdir().unwrap();
+        let mut lines: Vec<String> = (0..3).map(|i| err_line("rate_limit", &iso(now - (3 - i) * MIN)).replace("Login expired · Please run /login", SECRET)).collect();
+        lines.push(err_line("weird code", &iso(now - MIN)));
+        write(dir.path(), "a/s.jsonl", &lines);
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        let mut logs = vec![];
+        let failed = m.tick(&[dir.path().to_path_buf()], now, &ctx(), &|_| 0, &cap, |s| logs.push(s));
+        assert!(!failed, "非登入類錯誤不算失效");
+        assert!(cap.0.lock().unwrap().is_empty() && logs.is_empty());
+        assert_eq!(m.code_lines.len(), 2, "同代碼只一行：{:?}", m.code_lines);
+        assert!(m.code_lines[0].contains("rate_limit（累計 3 次）"), "{:?}", m.code_lines);
+        assert!(m.code_lines[1].contains(UNKNOWN_CODE));
+        assert!(!format!("{:?}", m.code_lines).contains("SECRET") && !format!("{:?}", m.code_lines).contains("Login"));
+    }
+
+    #[test]
+    fn 錯誤代碼_靜態守門_登入類清單不變且記錄不寫別的欄位() {
+        let src = include_str!("login_watch.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(src.contains(r#"pub const LOGIN_ERRORS: [&str; 2] = ["authentication_failed", "oauth_org_not_allowed"];"#));
+        assert!(src.contains(r#"format!("Claude 回報錯誤代碼 {key}（累計 {n} 次）")"#));
     }
 }

@@ -81,6 +81,38 @@ pub struct AccountInfo {
     /// 上次確認可用的時間（毫秒）：切走前核對成功時記下（#1512 C）。沒記過、讀不懂是 None。只是時間
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usable_at_ms: Option<i64>,
+    /// `plan` 取自哪個欄位（只給記錄用，不上報、不進介面）：`PLAN_FROM_*` 之一，沒有值是 `PLAN_FROM_NONE`
+    #[serde(skip)]
+    pub plan_from: &'static str,
+}
+
+/// 方案取自哪裡的標記（既有讀取分支的結果，沒有新增任何讀取）
+pub const PLAN_FROM_NONE: &str = "無";
+const PLAN_FROM_CRED: &str = "credentials";
+const PLAN_KEYS: [&str; 3] = ["subscriptionType", "organizationType", "billingType"];
+
+/// 使用中帳號方案變動的記錄狀態：記住上次的值，只有值變了才產生一行
+#[derive(Default)]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub struct PlanLog {
+    last: Option<String>,
+}
+
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+impl PlanLog {
+    /// 觀察目前方案；第一次回「初始」行，之後只有值變了才回一行。行內只有方案值與欄位名，不含帳號與其他欄位
+    pub fn observe(&mut self, plan: &str, from: &str) -> Option<String> {
+        let new: String = plan.chars().filter(|c| !c.is_control()).take(30).collect();
+        let shown = |s: &str| if s.is_empty() { "（空）".to_string() } else { s.to_string() };
+        let from = if new.is_empty() { PLAN_FROM_NONE } else { from };
+        let line = match &self.last {
+            None => format!("Claude 使用中帳號的方案初始：{}（取自 {from}）", shown(&new)),
+            Some(old) if *old == new => return None,
+            Some(old) => format!("Claude 使用中帳號的方案：{} → {}（取自 {from}）", shown(old), shown(&new)),
+        };
+        self.last = Some(new);
+        Some(line)
+    }
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -452,16 +484,18 @@ pub fn current_login(home: &Path) -> Option<AccountInfo> {
 
 fn info_of(frag: &str, email: &str, cred_file: &Path, current: bool) -> AccountInfo {
     let a: serde_json::Value = serde_json::from_str(frag).unwrap_or_default();
-    let plan = ["subscriptionType", "organizationType", "billingType"].iter().map(|k| field(&a, k)).find(|p| !p.is_empty()).unwrap_or_else(|| {
+    let (plan, plan_from) = PLAN_KEYS.iter().map(|k| (field(&a, k), *k)).find(|(p, _)| !p.is_empty()).unwrap_or_else(|| {
         // 方案也可能只在權杖檔的 subscriptionType；只取這一個字串欄位，其餘不讀出來
-        std::fs::read_to_string(cred_file)
+        let p = std::fs::read_to_string(cred_file)
             .ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
             .and_then(|v| v.pointer("/claudeAiOauth/subscriptionType").and_then(|x| x.as_str().map(String::from)))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let from = if p.is_empty() { PLAN_FROM_NONE } else { PLAN_FROM_CRED };
+        (p, from)
     });
     let login_incomplete = !std::fs::read(cred_file).map(|b| has_refresh_token(&b)).unwrap_or(false);
-    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true, login_incomplete, usable_at_ms: None }
+    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true, login_incomplete, usable_at_ms: None, plan_from }
 }
 
 /// 帳號庫裡這個帳號的「上次確認可用」：只讀那個小檔，內容要是合理的毫秒數（1 到 13 位數字）才算
@@ -1879,5 +1913,47 @@ mod tests {
         let t = String::from_utf8(o.stdout).unwrap().to_lowercase();
         assert!(!t.contains("everyone") && !t.contains("\\users") && !t.contains("authenticated users"), "{t}");
         assert!(t.contains(&std::env::var("USERNAME").unwrap().to_lowercase()), "{t}");
+    }
+
+    // ---------- 方案來源與變動記錄 ----------
+    fn plan_of(frag: &str, cred: Option<&str>) -> (String, &'static str) {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(".credentials.json");
+        if let Some(c) = cred {
+            fs::write(&f, c).unwrap();
+        }
+        let i = info_of(frag, "a@x.test", &f, true);
+        (i.plan, i.plan_from)
+    }
+
+    #[test]
+    fn 方案來源_依序標出取到值的欄位() {
+        let c = cred("p"); // 權杖檔 subscriptionType=max
+        assert_eq!(plan_of(r#"{"subscriptionType":"pro","organizationType":"o","billingType":"b"}"#, Some(&c)), ("pro".into(), "subscriptionType"));
+        assert_eq!(plan_of(r#"{"subscriptionType":"","organizationType":"claude_team","billingType":"b"}"#, Some(&c)), ("claude_team".into(), "organizationType"));
+        assert_eq!(plan_of(r#"{"billingType":"stripe"}"#, Some(&c)), ("stripe".into(), "billingType"));
+        assert_eq!(plan_of(r#"{"emailAddress":"a@x.test"}"#, Some(&c)), ("max".into(), "credentials"));
+        assert_eq!(plan_of(r#"{"emailAddress":"a@x.test"}"#, None), (String::new(), PLAN_FROM_NONE));
+        assert_eq!(plan_of(r#"{}"#, Some(r#"{"claudeAiOauth":{"subscriptionType":""}}"#)), (String::new(), PLAN_FROM_NONE));
+    }
+
+    #[test]
+    fn 方案記錄_值不變不記_變了記一行_不含帳號與權杖() {
+        let mut p = PlanLog::default();
+        assert_eq!(p.observe("max", "subscriptionType").unwrap(), "Claude 使用中帳號的方案初始：max（取自 subscriptionType）");
+        assert!(p.observe("max", "credentials").is_none(), "值沒變（只有來源變）不記");
+        assert_eq!(p.observe("pro", "organizationType").unwrap(), "Claude 使用中帳號的方案：max → pro（取自 organizationType）");
+        assert_eq!(p.observe("", PLAN_FROM_NONE).unwrap(), "Claude 使用中帳號的方案：pro → （空）（取自 無）");
+        assert!(p.observe("", PLAN_FROM_NONE).is_none());
+        assert_eq!(p.observe("max", "credentials").unwrap(), "Claude 使用中帳號的方案：（空） → max（取自 credentials）");
+        // 走真正的 info_of：記錄行不含 email、權杖
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(".credentials.json");
+        fs::write(&f, cred("Z")).unwrap();
+        let i = info_of(&cj("u1", "secret@x.test"), "secret@x.test", &f, true);
+        let line = PlanLog::default().observe(&i.plan, i.plan_from).unwrap();
+        assert!(!line.contains("secret@x.test") && !line.contains("FAKE-") && !line.contains("Org "), "{line}");
+        // 不進上報與介面的序列化
+        assert!(!serde_json::to_string(&i).unwrap().contains("plan_from"));
     }
 }
