@@ -1,11 +1,15 @@
 // 電腦版看別台電腦夥伴的終端：狀態文字在視窗最下面的狀態列（不在終端上方），黑色畫面和下面的訊息框等寬、四周留同一組間距。
 // 探測在頁面裡執行；這個檔案只產生探測原始碼，字串裡不寫反斜線。
-// kind：'watch'＝只能看；'typing'＝在下方輸入框打字按「送出」，直接打進那個終端（#1288；狀態列要用醒目的紅色警示）
+// kind：'watch'＝只能看；'typing'＝在下方輸入框打字按「送出」，直接打進那個終端（#1288；狀態列要用醒目的紅色警示）；
+// 'compose'＝用真的點擊在對話與終端間切換，終端模式輸入列拿掉「＋」等工具、切回對話照舊（#1642）
 import { TERM_GRACE_MS } from '../ui/lib/term-grace.mjs'
 import { PASTE_TEXT } from '../ui/lib/term-view.mjs'
+import { SEND_LABEL, SEND_LABEL_TERM } from '../ui/lib/compose.mjs'
+import { TERM_BTN_MSG, TERM_BTN_TERM } from '../ui/lib/term-entry.mjs'
 export const DTERM_PROBES = {
   watch: { dterm: { kind: 'watch' } },
   typing: { dterm: { kind: 'typing' } },
+  compose: { dterm: { kind: 'compose' } },
   multi: { dterm: { kind: 'multi' } },
   refused: { dterm: { kind: 'refused' } },
 }
@@ -19,6 +23,48 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   const kind = ${JSON.stringify(kind)};
   const entry = await wait(() => [...document.querySelectorAll('.actionbar button')].find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
   if (!entry) return { ok: false, why: '按鈕列沒有「終端」' };
+  // compose（#1642）：用真的點擊在對話與終端之間來回切，輸入列的工具（＋、表情、震動、傳照片、傳檔案、截圖、通話）只在對話模式出現；終端模式只留輸入框、送出鈕和麥克風
+  if (kind === 'compose') {
+    const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
+    const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+    const tap = async el => { el.scrollIntoView({ block: 'nearest' }); await sleep(80); globalThis.__smokeInput(JSON.stringify({ click: at(el) })); await sleep(300) };
+    const row = () => document.querySelector('.chatpane .compose-row');
+    const tools = () => [...row().querySelectorAll('.mc-plus, .lc-more, .lc-photo, .lc-emo, .toolbar .tool:not(.mic):not(.dict)')].filter(vis);
+    const mic = () => [...row().querySelectorAll('.mc-mic, .mc-dict, .toolbar .tool.mic, .toolbar .tool.dict')].filter(vis);
+    const send = () => row().querySelector('form button[type=submit]');
+    const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
+    const names = list => list.map(e => (e.getAttribute('aria-label') || e.className)).join('、');
+    // 看得到的那顆切換鈕：一般外觀在下方按鈕列，現代外觀按鈕列整排藏起來、換成標頭的圖示鈕，所以只挑看得到的
+    const barBtn = label => [...document.querySelectorAll('.chatpane button')].find(b => vis(b) && [b.getAttribute('aria-label'), b.title, b.textContent].some(s => (s || '').trim() === label));
+    const modeOf = async (want, why) => {
+      const ok = await wait(() => row() && send() && vis(send()) && send().textContent.trim() === want);
+      return ok ? '' : why + '：送出鈕的字是「' + (send() ? send().textContent.trim() : '沒有') + '」，要「' + want + '」';
+    };
+    if (!row() || !row().querySelector('textarea')) return { ok: false, why: '找不到下方的輸入列' };
+    // 對話模式：工具都在（＋或那一排）
+    let bad = await modeOf(${JSON.stringify(SEND_LABEL)}, '一開始不是對話模式');
+    if (bad) return { ok: false, why: bad };
+    if (tools().length === 0) return { ok: false, why: '對話模式看不到輸入列的工具（＋或工具列）' };
+    // 切到終端：只留輸入框、送出鈕、麥克風
+    const toTerm = await wait(() => barBtn(${JSON.stringify(TERM_BTN_TERM.label)}));
+    if (!toTerm) return { ok: false, why: '看得到的地方沒有「' + ${JSON.stringify(TERM_BTN_TERM.label)} + '」切換鈕' };
+    await tap(toTerm);
+    if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
+    bad = await modeOf(${JSON.stringify(SEND_LABEL_TERM)}, '切到終端後不是終端模式');
+    if (bad) return { ok: false, why: bad };
+    if (tools().length) return { ok: false, why: '終端模式還看得到輸入列的工具：' + names(tools()) };
+    if (row().querySelector('.picker')) return { ok: false, why: '終端模式還有表情選單' };
+    if (!vis(row().querySelector('textarea'))) return { ok: false, why: '終端模式看不到輸入框' };
+    if (mic().length === 0) return { ok: false, why: '終端模式看不到麥克風' };
+    // 切回對話：工具照舊
+    const back = await wait(() => barBtn(${JSON.stringify(TERM_BTN_MSG.label)}));
+    if (!back) return { ok: false, why: '終端模式下按鈕列沒有「' + ${JSON.stringify(TERM_BTN_MSG.label)} + '」可以切回對話' };
+    await tap(back);
+    bad = await modeOf(${JSON.stringify(SEND_LABEL)}, '切回後不是對話模式');
+    if (bad) return { ok: false, why: bad };
+    if (tools().length === 0) return { ok: false, why: '切回對話後輸入列的工具沒有回來' };
+    return { ok: true, why: '' };
+  }
   entry.click();
   const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };

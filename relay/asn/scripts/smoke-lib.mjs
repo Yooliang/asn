@@ -591,6 +591,8 @@ const BASE_SCENARIOS = [
   { name: 'list-term-typing-360', page: 'list.html', width: 360, state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.typing, shot: 'list-term-typing-360.png' },
   { name: 'list-term-multi', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.multi, shot: 'list-term-multi-1100.png' },
   { name: 'list-term-refused', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.refused, shot: 'list-term-refused-1100.png' },
+  { name: 'list-term-compose', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.compose, shot: 'list-term-compose-1100.png' },
+  { name: 'list-term-compose-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.compose, shot: 'list-term-compose-modern.png' },
   { name: 'm-release-dot', page: 'm.html', state: { signedIn: true, mrelease: true }, ready: '#app.m .m-tabs', probe: MRELEASE_PROBE, shot: 'm-release-dot-412.png' },
   { name: 'm-notice-dot', page: 'm.html', state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-412.png' },
   { name: 'm-notice-dot-360', page: 'm.html', width: 360, state: { signedIn: true, mnotice: 'dot' }, ready: '#app.m .m-tabs i.red', probe: MNOTICE_PROBES.dot, shot: 'm-notice-dot-360.png' },

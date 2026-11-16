@@ -41,7 +41,7 @@ test('樣板：送出鈕的 aria-label 綁 sendLabel、字照舊；Enter／Shift
 })
 
 test('「＋」與語音輸入：新鈕沿用原本的 handler 與 disabled 條件；Tab 順序＝＋、輸入框、語音、送出', () => {
-  assert.match(form, /<button class="mc-plus" type="button" @click="plusOpen = !plusOpen"[^>]*:aria-expanded="plusOpen" aria-label="附件與更多"/)
+  assert.match(form, /<button class="mc-plus" type="button" v-if="!termCompose" @click="plusOpen = !plusOpen"[^>]*:aria-expanded="plusOpen" aria-label="附件與更多"/)
   assert.match(form, /class="mc-dict"[^>]*v-if="showDictBtn" @click="dictClick" :disabled="callActive"[^>]*aria-label="語音輸入" :title="dictTip"/)
   assert.match(form, /class="mc-dict mc-mic"[^>]*v-if="voice && !showDictBtn" @click="micClick"[^>]*:aria-label="micTip"/)
   const at = s => form.indexOf(s)

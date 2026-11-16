@@ -221,6 +221,8 @@ export const ChatPane = {
     const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? composeTermHint(termViewName.value) : composePlaceholder(props.winMode)))
     const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
     const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))
+    // 終端模式（#1642）：輸入列只留輸入框、送出和麥克風，「＋」與表情、震動、傳照片、傳檔案、截圖都不顯示；切進終端時把已展開的選單收起來，切回對話照舊
+    watch(termCompose, on => { if (on) { plusOpen.value = false; pickerOpen.value = false } })
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
     const classes = computed(() => paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar }))
     const side = computed(() => sideOf(props.dpMode))
@@ -677,7 +679,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -782,13 +784,13 @@ export const ChatPane = {
   <div class="compose-row" :class="{ 'is-term': mSwitch && remoteShown }" v-if="!isNotice">
     <div class="compose-main" :class="{ 'lc-typing': lcTyping, 'lc-row': lineRow }">
       <div class="toolbar" :class="{ 'mc-open': plusOpen, 'mc-has-dict': showDictBtn }" @click="onToolbarClick" @keydown.esc="plusOpen = false">
-        <span class="tool-group">
+        <span class="tool-group" v-if="!termCompose">
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
             <line-icon name="emoji"></line-icon>
           </button>
         </span>
-        <button class="tool icon call" type="button" v-if="showCallBtn && !displayOnly" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
+        <button class="tool icon call" type="button" v-if="showCallBtn && !displayOnly && !termCompose" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6.6 3.5l2.4-.6 1.7 4.2-1.9 1.6a11.5 11.5 0 0 0 5.5 5.5l1.6-1.9 4.2 1.7-.6 2.4a2.6 2.6 0 0 1-2.6 2C10.1 18.4 5.6 13.9 4.6 6.1a2.6 2.6 0 0 1 2-2.6z" fill="#2f9a45" stroke="#1f6b2f" stroke-width="1.2" stroke-linejoin="round"/></svg>
           <line-icon name="call"></line-icon>
         </button>
@@ -797,26 +799,26 @@ export const ChatPane = {
           <line-icon name="dict"></line-icon>
           <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
         </button>
-        <button class="tool icon" type="button" v-if="!isRoom" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
+        <button class="tool icon" type="button" v-if="!isRoom && !termCompose" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <line-icon name="nudge"></line-icon>
         </button>
-        <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（一次可以選多張，最多 10 張；也可以直接貼上圖片）">
+        <button class="tool icon" type="button" v-if="!termCompose" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（一次可以選多張，最多 10 張；也可以直接貼上圖片）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <line-icon name="photo"></line-icon>
         </button>
         <input ref="fileEl" type="file" accept="image/*" multiple hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon cam" type="button" v-if="camera" @click="openCamera" :disabled="photoBusy" aria-label="拍照" title="拍照傳出（開手機的相機）">
+        <button class="tool icon cam" type="button" v-if="camera && !termCompose" @click="openCamera" :disabled="photoBusy" aria-label="拍照" title="拍照傳出（開手機的相機）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7.5h3.2l1.5-2.4h6.6l1.5 2.4H20a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1z" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.6" fill="#fff" stroke="#2f7d3c" stroke-width="1.6"/></svg>
           <line-icon name="camera"></line-icon>
         </button>
         <input ref="camEl" v-if="camera" type="file" accept="image/*" capture="environment" hidden @change="pickCamera" @cancel="cameraMissed" aria-hidden="true" tabindex="-1">
-        <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內；一次可以選多個）">
+        <button class="tool icon" type="button" v-if="!termCompose" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內；一次可以選多個）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
           <line-icon name="file"></line-icon>
         </button>
         <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" multiple hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
+        <button class="tool icon" type="button" v-if="shotApi && shotOk && !termCompose" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
           <line-icon name="shot"></line-icon>
         </button>
@@ -843,14 +845,14 @@ export const ChatPane = {
           <li class="mention-more" v-if="mentionMore" aria-hidden="true">{{ MENTION_MORE_HINT }} ▾</li>
         </ul>
         <!-- 現代外觀的單列膠囊（#1421 B2）：「＋」開上方那排工具、語音輸入放右邊（手機的 dict 或電腦的 mic，擇一）；復古 Aero 下這幾顆整個不顯示 -->
-        <button class="mc-plus" type="button" @click="plusOpen = !plusOpen" @keydown.esc="plusOpen = false" :aria-expanded="plusOpen" aria-label="附件與更多" title="附件與更多">
+        <button class="mc-plus" type="button" v-if="!termCompose" @click="plusOpen = !plusOpen" @keydown.esc="plusOpen = false" :aria-expanded="plusOpen" aria-label="附件與更多" title="附件與更多">
           <line-icon name="plus"></line-icon>
         </button>
         <!-- LINE 外觀（#1449 第三張）：「＋」旁攤開一顆圖片鈕（同一個選檔 input 與 pickPhoto），表情鈕放在輸入框內右側（同一個 pickerOpen）；其他外觀不輸出 -->
-        <button class="lc-more" type="button" v-if="isLine" @mousedown.prevent @click="openLcTools" aria-label="展開附件與更多" title="展開附件與更多"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="lc-photo" type="button" v-if="isLine" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）"><line-icon name="photo"></line-icon></button>
+        <button class="lc-more" type="button" v-if="isLine && !termCompose" @mousedown.prevent @click="openLcTools" aria-label="展開附件與更多" title="展開附件與更多"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="lc-photo" type="button" v-if="isLine && !termCompose" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）"><line-icon name="photo"></line-icon></button>
         <textarea ref="composeEl" v-model="draft" @focus="onComposeFocus" @blur="onComposeBlur" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
-        <button class="lc-emo" type="button" v-if="isLine" @click="plusOpen = false; pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" :disabled="displayOnly" aria-label="表情符號" title="表情符號"><line-icon name="emoji"></line-icon></button>
+        <button class="lc-emo" type="button" v-if="isLine && !termCompose" @click="plusOpen = false; pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" :disabled="displayOnly" aria-label="表情符號" title="表情符號"><line-icon name="emoji"></line-icon></button>
         <div class="picker lc-picker" v-if="isLine && !lineRow && pickerOpen && !plusOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
