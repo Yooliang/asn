@@ -192,7 +192,7 @@ export function chatGroupItems(friend) {
 
 // ---------- 現代外觀的頂部（#1421）：置中名牌＋右上「終端」「更多」 ----------
 // 名牌的狀態字：離線寫「離線」（現代外觀把原本的收件人列藏起來，離線提示改由名牌承擔）
-const PLATE_STATUS = { online: '在線', busy: '忙碌', running: '執行中', away: '暫離', offline: '離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+const PLATE_STATUS = { online: '在線', busy: '忙碌', running: '執行中', awaiting: '等你按確認', away: '暫離', offline: '離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
 export function nameplateView(friend) {
   const room = friend?.room === true
   const name = String(friend?.nick ?? '')

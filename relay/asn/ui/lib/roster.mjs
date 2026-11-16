@@ -2,6 +2,7 @@
 import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
 import { pctOf } from './context-usage.mjs'
 import { isLegacyNoticeName, isMergedAway, isNoticeFriend } from './notice.mjs'
+import { AWAITING_STATUS, awaitingName, isAwaitingEntry } from './awaiting.mjs'
 
 const PARTNER_ID = /^p_[0-9a-f]{20}$/
 // 後台給的這台電腦的 Claude 外掛狀態（claude_mod：state／version／reason）→ 乾淨的物件；舊後台沒有或格式不對＝null
@@ -104,14 +105,17 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (pid && (isOff ? livePids.has(pid) : pidDone.has(pid))) continue
       if (pid && !isOff) pidDone.add(pid)
       seen.add(a.name)
+      // 認出來的夥伴（aw）由狀態字說明，psm 不重複寫 detail
+      const aw = !(isOff || a.online === false) && isAwaitingEntry(a) ? awaitingName(a.name) : ''   // 視窗開著、還沒進到對話的夥伴（#1635）：名單上是「僅顯示」條目，新版畫面認出來另外標示
       out.push({
-        id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name,
-        psm: hiddenPsm(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
+        id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: aw || (isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name),
+        psm: aw ? '' : hiddenPsm(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
         elevated: !(isOff || a.online === false) && a.elevated === true,   // 視窗是系統管理員身分開的、收發室轉不進去（選填；舊後台沒有＝false）
         activeAt: activeAtOf(a.last_active_at),   // 後台的最後活動時間（選填；舊後台沒有＝null，活躍度退回只看本機往來）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
-        onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status, isProcEntry(a)),
+        onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : aw ? AWAITING_STATUS : statusOf(a.status, isProcEntry(a)),
+        ...(aw ? { awaiting: true, awaitName: aw } : {}),
         archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與交接檔資料夾，不顯示
       })

@@ -35,6 +35,7 @@ import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
 import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only.mjs'
+import { AWAITING_NOTE, AWAITING_NOTE_NO_TERM } from './awaiting.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
 import { MEMBER_NOT_FRIEND } from './groups.mjs'
@@ -43,7 +44,7 @@ import { githubUrl, linkRefs, refOf, refRange, refTip } from './msg-ref.mjs'
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 // 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
 const recentShown = shownPhotos
-const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', awaiting: '等你在那台電腦按確認', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
 
 export const ChatPane = {
   name: 'ChatPane',
@@ -119,11 +120,11 @@ export const ChatPane = {
     // 例外（#1632）：讀畫面看到它卡在「信任資料夾／略過權限同意」的夥伴還沒有 session 檔、名單上是離線，也要給「終端」入口，讓本人自己在 Claude 的畫面上選
     const stuckCode = ref('')
     const termBase = computed(() => termBaseOk({ hasApi: !!props.termViewApi, canOffer: canOfferConsole(props.friend, props.selfNode), status: props.friend?.status, stuck: stuckCode.value }))
-    const termViewName = computed(() => props.friend?.agent || props.friend?.nick || '')
+    const termViewName = computed(() => props.friend?.awaitName || props.friend?.agent || props.friend?.nick || '')   // 視窗開著、還沒進到對話的夥伴（#1635）：名單條目名字不是視窗名，看畫面要用夥伴名
     const termInService = ref(null)   // true／false／null（還沒查或查不到）
     const termEntryView = computed(() => termEntry(termBase.value, termInService.value))
     const canTermView = computed(() => termEntryView.value.term)
-    const stuckNoteText = computed(() => (props.friend?.status === 'offline' ? stuckNote(stuckCode.value, canTermView.value) : ''))
+    const stuckNoteText = computed(() => (props.friend?.awaiting === true ? (canTermView.value ? AWAITING_NOTE : AWAITING_NOTE_NO_TERM) : props.friend?.status === 'offline' ? stuckNote(stuckCode.value, canTermView.value) : ''))
     async function probeStuck() {
       const f = props.friend
       if (!props.termViewApi?.notices || !f || f.status !== 'offline' || !canOfferConsole(f, props.selfNode)) { stuckCode.value = ''; return }
