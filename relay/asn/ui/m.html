@@ -385,6 +385,8 @@
                 <!-- /詳情 -->
                 <template v-else>
                 <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
+                <new-guide-card v-if="guideOn" btn-class="m-btn" :rows="guideRowList" :hint="guideHintView" @act="guideAct" @site="guideSite" @hide="setGuideHidden(true)"></new-guide-card>
+                <div class="ng-reshow-wrap" v-else-if="guideReshow"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
                 <div class="m-dv-body" :class="{ off: !acctCur.online }">
                   <div class="m-dv-empty" v-if="!acctCur.vendors.length"><span>{{ acctRep && acctRep.loading ? '讀取中…' : (acctCur.empty || '這台設備還沒有回報任何廠商') }}</span></div>
                   <ul class="m-dv-vendors" v-else>

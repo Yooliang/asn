@@ -44,6 +44,9 @@ import { CURRENT_FAILED_ARIA, CURRENT_LABEL, INCOMPLETE_LABEL, INCOMPLETE_REASON
 import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupStep, setupLeadOf, showSetupButton, showReloginButton } from './lib/mobile-setup.mjs'
 import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft, showLoginButton } from './lib/mobile-device-login.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
+import { GUIDE_TEXT, GUIDE_VENDORS, guideRows, guideVisible, guideReshowVisible, loadGuideHidden, saveGuideHidden } from './lib/new-computer-guide.mjs'
+import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
+import { STATE } from './lib/device-state.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
@@ -803,15 +806,21 @@ const app = createApp({
     }
     // 開新夥伴是內頁：第 1 步選電腦、第 2 步（多一層，返回鍵回第 1 步）選模型與資料夾、名字、第一句話。
     // 畫面收起（關閉或 3 分鐘到了）不影響背景的開窗：lch 留在這裡，trackLaunch 照常追蹤，開好時跳橫幅
-    const openLaunch = node => askBeforeLeave(launchPage(), () => openLaunchNow(node))   // 金鑰還在畫面上時先問
-    function openLaunchNow(node) {
+    const openLaunch = (node, vendor = '') => askBeforeLeave(launchPage(), () => openLaunchNow(node, vendor))   // 金鑰還在畫面上時先問；vendor＝新手引導卡指定的那一家
+    function openLaunchNow(node, vendor = '') {
       const isLaunch = fourthPage.value?.kind === 'launch'
       // 還在開：回到進度畫面；內頁的開新夥伴還在填：切過去接著填（都不重來）
       if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(PAGE_TAB); else fourthNav.openPage(launchPage()); return }
       if (nav.sheet) return
       Object.assign(lch, initialLaunch(), { vphase: 'sending' })
       if (!fourthNav.openPage(launchPage())) return
-      void loadLaunchers().then(() => { if (node) { pickLaunchDevice(node); nextLaunch() } })   // 從某台電腦進來＝第 1 頁已選好，直接到第 2 頁
+      void loadLaunchers().then(() => fourthNav.whenSettled()).then(() => {   // 從設備細部頁進來時，換頁要等導覽做完，才推第 2 步
+        if (!node) return
+        pickLaunchDevice(node)
+        const v = vendor ? launchVendors(lchData.machines[node]?.launcher).find(x => x.id === vendor) : null
+        if (v) pickLaunchVendor(v)   // 新手引導卡：選好那一家
+        nextLaunch()
+      })   // 從某台電腦進來＝第 1 頁已選好，直接到第 2 頁
     }
     // 第 2 頁才顯示該電腦可用的模型與資料夾；沒選電腦或那台不能開就留在第 1 頁
     const lchStep2 = computed(() => fourthPage.value?.kind === 'launch' && fourthPage.value.step === 2 && !!lch.node && lch.phase === 'form')
@@ -957,6 +966,64 @@ const app = createApp({
       void setupPoll()
     }
     const setupClose = () => setupReset()
+    // ---------- 新手引導卡（#1605）：看某台自己的電腦（設備細部頁），它一個視窗也沒有時，列出四家各一個動作 ----------
+    // 狀態用設備卡已經算好的（vendors／missing 的 state、action、login、relogin），規則與電腦版同一份（lib/new-computer-guide.mjs）；手機沒辦法叫那台電腦重新偵測，所以沒有「重新檢查」
+    const guideHidden = ref(loadGuideHidden())
+    const guideHint = ref({ key: '', text: '' })
+    const guideNode = computed(() => {
+      const d = acctCur.value
+      return d && !d.self && !d.phone && d.cloud !== true && d.online ? d : null
+    })
+    const guideCtx = () => ({ conn: conn.value, rosterLoaded: true, query: '', localWindows: guideNode.value ? activeFriends(friends.value).filter(f => f.node === guideNode.value.key && !isNoticeFriend(f) && !isMergedAway(f)).length : 1, hidden: guideHidden.value })
+    const guideStates = computed(() => {
+      const d = guideNode.value
+      if (!d) return {}
+      const all = [...d.vendors, ...d.missing]
+      const st = k => all.find(v => v.key === k)?.state ?? null
+      const known = s => s && s !== STATE.NO_REPORT && s !== STATE.UNKNOWN_INSTALL
+      // Gemini 不在「主要幾家」裡：有它的設備項目就是裝了；沒有就看另外三家的狀態查到了沒，查到了才說沒裝
+      const gemini = d.vendors.find(v => v.key === 'gemini') ? STATE.INSTALLED_LOGGED_OUT : (['claude', 'codex', 'grok'].every(k => known(st(k))) ? STATE.NOT_INSTALLED : null)
+      return { claude: st('claude'), codex: st('codex'), gemini, grok: st('grok') }
+    })
+    const guideRowList = computed(() => {
+      const d = guideNode.value
+      if (!d) return []
+      const all = [...d.vendors, ...d.missing]
+      const by = k => all.find(v => v.key === k)
+      const remote = { install: {}, login: {} }
+      for (const k of ['claude', 'codex', 'grok']) { remote.install[k] = by(k)?.action?.kind === 'remote'; remote.login[k] = by(k)?.login?.kind === 'remote' || by(k)?.relogin?.kind === 'remote' }
+      return guideRows({ states: guideStates.value, isSelf: false, remote })
+    })
+    const guideOn = computed(() => guideNode.value !== null && guideVisible(guideCtx()))
+    const guideReshow = computed(() => guideNode.value !== null && guideReshowVisible(guideCtx()))
+    const guideHintView = computed(() => {
+      if (guideHint.value.text) return guideHint.value
+      // 要求安裝被拒、過期、沒人接手：說到那台電腦的哪裡打開開關
+      if (setupSt.node === guideNode.value?.key && setupSt.mode === 'install' && setupSt.stage === 'done' && !setupSt.ok) return { key: 'claude', text: GUIDE_TEXT.installSwitch }
+      return null
+    })
+    const setGuideHidden = v => { guideHidden.value = v === true; saveGuideHidden(guideHidden.value) }
+    // 官網：交給系統瀏覽器（open_link 只放行 http／https）；只開引導卡列出的四個網址
+    const guideSite = site => { if (GUIDE_VENDORS.some(v => v.url === site?.url)) invoke('open_link', { url: site.url }).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e))) }
+    async function guideAct(row) {
+      const d = guideNode.value
+      if (!d || !row) return
+      guideHint.value = { key: '', text: '' }
+      if (row.action === 'open') {
+        // 先看那台能不能開；不能就說原因（沒開放時，原因裡就有「允許我的其他設備替這台開新視窗」要去哪裡勾）
+        if (!lchData.loaded) await loadLaunchers()
+        const elig = launchEligibility(d.key, lchCtx.value)
+        if (!elig.ok) { guideHint.value = { key: row.key, text: elig.reason }; return }
+        openLaunch(d.key, row.key)
+        return
+      }
+      if (row.action === 'login') {
+        if (row.key === 'claude') setupAsk(d.key, 'relogin')
+        else if (row.key === 'codex') loginAsk(d.key, 'codex')
+        return
+      }
+      if (row.action === 'install') setupAsk(d.key)
+    }
     // 從手機替電腦登入裝置碼型 CLI（#933 PR-5b，先做 Codex）：按鈕 → 確認 → 送出（這支手機的設備金鑰簽）→ 每 3 秒取一次 →
     // 拿到就顯示「給哪台、哪一家」、開啟登入頁、代碼與倒數（不給複製）→ 之後照狀態顯示結果。網址與代碼只在顯示階段放在這裡，離開、進背景、到期就清
     const loginSt = reactive({ node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, url: '', code: '', exp: 0, name: '', left: 0 })
@@ -1556,6 +1623,7 @@ const app = createApp({
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
@@ -1569,6 +1637,7 @@ const app = createApp({
 app.component('chat-pane', ChatPane)
 app.component('asn-avatar', AsnAvatar)
 app.component('pin-dot', PinDot)
+app.component('new-guide-card', NewGuideCard)
 app.component('group-sheet', GroupSheet)
 app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)

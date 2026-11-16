@@ -139,7 +139,10 @@
                 </template>
               </ul>
             </div>
-            <div class="empty-list" v-if="!shown.length">{{ emptyText }}</div>
+            <new-guide-card v-if="guideOnPartners" :rows="guideRowList" :can-recheck="true" :rechecking="guideRechecking" @recheck="guideRecheck" @act="guideAct" @site="guideSite" @hide="setGuideHidden(true)"></new-guide-card>
+            <div class="empty-list" v-else-if="!shown.length">{{ emptyText }}</div>
+            <p class="ng-note ng-msg" v-if="guideOnPartners && guideMsg" role="alert">{{ guideMsg }}</p>
+            <div class="ng-reshow-wrap" v-if="guideReshowPartners"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
           </div>
         </template>
         <!-- 對話：活動中的對話（夥伴與群組，新到舊）；建立／加入群組在「＋」選單裡（#1531 拿掉了搜尋框下面重複的兩顆鈕） -->
@@ -168,7 +171,10 @@
               </button>
             </li>
           </ul>
-          <div class="empty-list" v-if="!chatRowsPinned.length">{{ chatQuery.trim() ? '找不到符合的對話。' : '還沒有對話。到「夥伴」點一位開始。' }}</div>
+          <new-guide-card v-if="guideOnChats" :rows="guideRowList" :can-recheck="true" :rechecking="guideRechecking" @recheck="guideRecheck" @act="guideAct" @site="guideSite" @hide="setGuideHidden(true)"></new-guide-card>
+            <div class="empty-list" v-else-if="!chatRowsPinned.length">{{ chatQuery.trim() ? '找不到符合的對話。' : '還沒有對話。到「夥伴」點一位開始。' }}</div>
+          <p class="ng-note ng-msg" v-if="guideOnChats && guideMsg" role="alert">{{ guideMsg }}</p>
+          <div class="ng-reshow-wrap" v-if="guideReshowChats"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
           <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err && !chatQuery.trim()">要和好幾位一起聊，可以建立群組，或貼上別人給你的邀請連結加入。</p>
         </div>
         <div class="list notice-list" v-else-if="tab === 'notice'">

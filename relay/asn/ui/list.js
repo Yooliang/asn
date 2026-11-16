@@ -91,6 +91,8 @@ import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.
 import { createQuotaReaders, quotaReadersView } from './lib/quota-readers.mjs'
 import { createAgentInstall, installView } from './lib/agent-install.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
+import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible, loadGuideHidden, localVendorStates, saveGuideHidden, singleFlight } from './lib/new-computer-guide.mjs'
+import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
@@ -360,6 +362,7 @@ const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
+const rosterReady = ref(false)   // 名單讀到過了（新手引導卡要等這個，免得名單還沒到就說這台沒有視窗）
 const connWhy = ref('')   // conn 為 off 時的簡短原因（core.connReason）
 const sync = () => {
   const s = core.snapshot()
@@ -367,6 +370,7 @@ const sync = () => {
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   conn.value = s.conn
+  rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
   emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: lookNow.value.dpMode, bubble: lookNow.value.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed, ghRefs: ghRefs.value } })   // 獨立對話視窗讀這份：已經是依外觀算好的有效值
 }
@@ -495,14 +499,15 @@ async function openLaunchLogFolder() {
 const uiLogMsg = ref('')
 const launchPrefs = reactive(normalizeLaunchPrefs(null))
 const launchCwdText = ref('')
-async function refreshCliTools() {
+// 同一時間只偵測一份（連按「重新檢查」、開對話框同時要求，都共用正在跑的那一份）
+const refreshCliTools = singleFlight(async () => {
   try {
     const r = await transport.cliDetect()
     const map = {}
     for (const t of r?.tools ?? []) map[t.id] = t
     cliTools.value = map
   } catch (e) { console.info('[ASN] cli detect failed', e.message) }
-}
+})
 // #380：被後台擋（401／403）就拉長下次查詢的間隔（最長 5 分鐘），查到恢復 15 秒；記錄只在狀態改變時寫一次
 let launchersDelay = LAUNCHERS_POLL_MS
 let launchersDenied = false
@@ -679,6 +684,7 @@ function pickPartnerModel(m) {
 // 帶 nodeKey 進來（某台設備的入口）預先選那台，但一樣從第 1 頁開始
 function openPartnerDlg(nodeKey = '') {
   closeLaunchPicker()
+  if (!nodeKey || nodeKey === info.node) void refreshCliTools()   // 開這台：順便重新偵測（剛裝好 AI 不用重開 ASN）；不等它，結果回來對話框自己更新
   partnerDlg.open = true
   partnerDlg.node = ''
   partnerDlg.deviceLabel = ''
@@ -1888,7 +1894,8 @@ const app = createApp({
       devices: () => launchDeviceRowsList.value.filter(d => d.key !== info.node && asnMap.value[d.key]),
       nodeLabel: n => launchDeviceRowsList.value.find(d => d.key === n)?.label ?? n,
     })
-    void accounts.refresh()
+    const acctReady = ref(false)   // 帳號讀過一輪了（新手引導卡判斷已登入／沒登入要等它）
+    void accounts.refresh().finally(() => { acctReady.value = true })
     // 設定頁「用量」：打開那一頁才讀本機記錄（Rust 端有快取，不會每次重掃）
     const usage = createUsageUi({ invoke, reactive })
     void accounts.loadTrust()
@@ -1896,6 +1903,55 @@ const app = createApp({
     const agentInstall = createAgentInstall({ invoke, reactive, signedIn: async () => (await authApi.status().catch(() => null))?.signed_in === true })
     void agentInstall.load()
     void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
+    // ---------- 新手引導卡（#1605）：這台電腦一個視窗也沒有時，取代「還沒有視窗」的空白字 ----------
+    // 狀態全沿用既有偵測（ai_cli_detect 的 cliTools＋本機帳號），規則在 lib/new-computer-guide.mjs
+    const guideHidden = ref(loadGuideHidden())
+    const guideMsg = ref('')
+    // 這台電腦的視窗數：跟名單同一套過濾（封存、通知、併進通知的舊列都不算），再加上正在開的
+    const localWindowCount = computed(() => activeFriends(friendsAct.value).filter(f => f.node === info.node && !isNoticeFriend(f) && !isMergedAway(f)).length + launchPending.value.filter(p => p.node === info.node).length)
+    const guideCtx = q => ({ conn: conn.value, rosterLoaded: rosterReady.value, query: q, localWindows: localWindowCount.value, hidden: guideHidden.value })
+    const guideStates = computed(() => localVendorStates({
+      detected: Object.keys(cliTools.value).length > 0, accountsReady: acctReady.value,
+      installed: Object.fromEntries(GUIDE_VENDORS.map(v => [v.key, cliInstalled(cliTools.value, v.tool)])),
+      accounts: { claude: accounts.state.list, grok: accounts.state.grok, codex: accounts.state.codex ? [{ email: codexLine(accounts.state.codex, accounts.state.codexErr), current: true }] : [] },
+    }))
+    const guideRowList = computed(() => guideRows({ states: guideStates.value, installAvail: Object.fromEntries(Object.entries(cliTools.value).map(([id, t]) => [id, t?.install_available === true])) }))
+    // 夥伴頁：這一頁沒有視窗、而且看的是這台電腦那一頁（或不分設備頁）才出現
+    const guideHereTab = computed(() => dims.tabDim !== 'device' || skin.value === 'line' || tab.value === info.node)
+    const guideOnPartners = computed(() => !shown.value.length && guideHereTab.value && guideVisible(guideCtx(query.value)))
+    const guideOnChats = computed(() => !chatRowsPinned.value.length && guideVisible(guideCtx(chatQuery.value)))
+    const guideReshowPartners = computed(() => !shown.value.length && guideHereTab.value && guideReshowVisible(guideCtx(query.value)))
+    const guideReshowChats = computed(() => !chatRowsPinned.value.length && guideReshowVisible(guideCtx(chatQuery.value)))
+    // 「重新檢查」：重新偵測這台裝了哪些 AI（不用重開 ASN）；偵測期間鈕反灰、寫「正在檢查…」
+    const guideRechecking = ref(false)
+    const guideRecheck = async () => { guideRechecking.value = true; try { await refreshCliTools() } finally { guideRechecking.value = false } }
+    const setGuideHidden = v => { guideHidden.value = v === true; saveGuideHidden(guideHidden.value) }
+    // 「開一個視窗」：直接開「開新夥伴」對話框，選好這台電腦與那一家（本機偵測還沒好、不能開時停在第 1 頁）
+    function openGuideWindow(vendor) {
+      openPartnerDlg(info.node)
+      if (partnerDlg.node !== info.node) return
+      const m = dlgModels.value.find(x => x.id === vendor && x.installed)
+      if (m) pickPartnerModel(m)
+      partnerDlg.step = 2
+    }
+    async function guideAct(row) {
+      guideMsg.value = ''
+      const v = GUIDE_VENDORS.find(x => x.key === row?.key)
+      if (!v) return
+      if (row.action === 'open') { openGuideWindow(v.key); return }
+      if (row.action === 'login') {
+        // 登入：跟設定裡同一條路（ai_cli_login 開登入）
+        if (v.key === 'claude') { await agentInstall.openTerminal(); guideMsg.value = agentInstall.state.msg; return }
+        try { await invoke('ai_cli_login', { toolId: v.tool }) } catch (e) { guideMsg.value = String(e?.message ?? e) }
+        return
+      }
+      if (row.action === 'install') { await agentInstall.ask(); await openPanel('setting', 'devices') }   // 安裝並登入：跟設備頁同一個確認窗與進度
+    }
+    // 官網：用系統瀏覽器開（open_link 只放行 http／https）；只開引導卡列出的那四個網址
+    function guideSite(site) {
+      if (!GUIDE_VENDORS.some(v => v.url === site?.url)) return
+      invoke('open_link', { url: site.url }).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e)))
+    }
     // 本機帳號庫清單定期回報給收發室在 Rust 背景工作（report_loop），停在登入畫面也照跑；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
@@ -2129,6 +2185,7 @@ const app = createApp({
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
+      GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, remotePiModelsFor, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
@@ -2156,6 +2213,7 @@ app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)
 app.component('pin-dot', PinDot)
+app.component('new-guide-card', NewGuideCard)
 app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)

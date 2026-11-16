@@ -175,7 +175,7 @@ test('沒經過確認就丟掉金鑰（任何沒先問的離開路徑）：一�
   await n.ui.leave()
   assert.equal(n.s.msg, '')
   assert.match(read('ui/m.js'), /askBeforeLeave = \(next, run\) => \{ leave\.ask\(next, \(\) => \{ cloud\.confirmLeave\(\); run\(\) \}\) \}/)
-  assert.match(read('ui/m.js'), /const openLaunch = node => askBeforeLeave\(launchPage\(\)/, '開新夥伴也先問')
+  assert.match(read('ui/m.js'), /const openLaunch = \(node, vendor = ''\) => askBeforeLeave\(launchPage\(\)/, '開新夥伴也先問')
 })
 
 test('頁面保留時間：預設 3 分鐘；金鑰還在畫面上給 30 分鐘，超過才過期', () => {
