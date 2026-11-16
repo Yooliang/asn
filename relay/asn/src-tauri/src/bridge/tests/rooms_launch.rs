@@ -1013,7 +1013,7 @@ async fn 遠端開視窗_開不起來回報_failed_本機沒有啟動設定回�
 #[tokio::test]
 async fn 遠端開視窗_逾時時讀到信任資料夾或略過權限畫面_回對應說明_沒讀到維持原句() {
     for (code, want) in [("trust", crate::launch::stuck_notice::trust_message("T-卡1")), ("bypass_warning", crate::launch::stuck_notice::bypass_message("T-卡1"))] {
-        let l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.appear = false; e.screens.lock().unwrap().push(("T-卡1".into(), code)); }), (100, 400, 20)).await;
+        let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.appear = false; e.screens.lock().unwrap().push(("T-卡1".into(), code)); }), (100, 400, 20)).await;
         let cwd = l.proj.path().to_path_buf();
         l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-卡1", &cwd, json!({})));
         l.h.core.pull("bell", T0).await;
