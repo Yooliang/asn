@@ -18,7 +18,8 @@ export const OWNER_ONLY_ACTIONS = new Set(["room_create", "room_add", "room_remo
 // 危險操作類別（規格 2.5.1）：被別人點名的 AI 做這些之前，必須先請主持人在群組確認
 export const CONFIRM_KINDS = ["data_change", "deploy", "spend", "external_send", "account_config", "install_software", "other"] as const;
 
-export type RoomMember = { key: string; name: string; role?: string; kind?: string; node_role?: string; label?: string; display_label?: string; member_kind?: string };
+// online：後台成員清單多帶的在線狀態（AI 視窗＝roster.seen_at 在 3 分鐘內；真人沒有這個欄位）。沒給（舊後台、真人）一律當在線（#1656）
+export type RoomMember = { key: string; name: string; role?: string; kind?: string; node_role?: string; label?: string; display_label?: string; member_kind?: string; online?: boolean };
 export type RoomMessage = {
   seq: number; from: string; from_name?: string; trust: string; body: string; mentions: string[]; at: string;
   // 第 1a 期（多租戶群組）新增，舊後台沒有
@@ -108,19 +109,50 @@ export function shouldRespond(
 // 同一封信、同一份成員名單算出的結果固定；沒被叫醒回 null
 export type Wake = { rank: number; total: number; before: string[]; score?: number; hold?: true; fb?: true };
 const isAiMember = (m: RoomMember) => !m.key.startsWith("~") && m.kind !== "owner" && m.kind !== "human" && m.member_kind !== "human";
+// 排順位、決定要叫醒誰時只排在線的（#1656）：離線的人排進去（甚至排第一）只會讓在線的人白等。後台沒給 online（舊後台、真人）＝當在線
+const isOnline = (m: RoomMember) => m.online !== false;
 const wakeSortKey = (m: RoomMember) => m.label || m.name || m.key;
 type WakeMsg = { from: string; trust: string; mentions?: string[]; is_seed?: boolean; from_kind?: string; wake_ok?: boolean };
 const labelCmp = (a: RoomMember, b: RoomMember) => {
   const x = wakeSortKey(a), y = wakeSortKey(b);
   return x < y ? -1 : x > y ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
 };
+/**
+ * 退回叫醒（#1656）：真人發的訊息點名了某些 AI，但被點名的全是離線的 AI（沒有任何在線的 AI、也沒有點名真人）時，
+ * 就改叫醒群組裡在線的 AI（發言者除外），免得「講完沒人回」。條件刻意收窄：
+ * - 只有真人發的訊息（AI 發的不退回，避免 AI 互相叫來叫去；AI 之間另有輪數上限）；開頭紀錄、系統訊息不算
+ * - 每一個被點名的鍵都對得到成員、而且都是離線的 AI（有點名真人、跨租戶對不到的、在線的 AI，都不退回）
+ * - 沒有「純觀察」的成員種類（群組角色只有 owner／admin／member，AI 視窗都是一般成員），所以不另外排除
+ */
+export function fallbackWake(msg: WakeMsg, members: RoomMember[], selfKey = ""): boolean {
+  const mentions = msg.mentions ?? [];
+  if (!mentions.length || msg.is_seed || msg.from_kind === "system") return false;
+  if (!senderIsHuman(msg, members)) return false;
+  return mentions.every((k) => {
+    const m = members.find((x) => x.key === k);
+    // 讀者自己正在讀，就是在線（名單的在線時間可能剛好過期）：被點名的是讀者自己就不退回
+    return !!m && isAiMember(m) && !isOnline(m) && m.key !== selfKey;
+  });
+}
 /** 被這則訊息叫醒的 AI（含讀者自己），依固定規則（顯示標示）排序；讀者自己不在叫醒範圍回 null */
 export function wokenAis(msg: WakeMsg, members: RoomMember[], selfKey: string): RoomMember[] | null {
+  if (msg.from === selfKey) return null;
+  if (fallbackWake(msg, members, selfKey)) {
+    // 被點名的都離線：叫醒在線的 AI（不看 shouldRespond：沒有人被點到；真人發的訊息沒有輪數上限的問題）。讀者自己一定算在線
+    const on = [...new Map(members.filter((m) => isAiMember(m) && (isOnline(m) || m.key === selfKey) && m.key !== msg.from).map((m) => [m.key, m])).values()].sort(labelCmp);
+    return on.some((m) => m.key === selfKey) ? on : null;
+  }
   if (!shouldRespond(msg, selfKey)) return null;
-  const woken = members.filter((m) => m.key === selfKey || (isAiMember(m) && shouldRespond({ ...msg, wake_ok: true }, m.key)));
+  // 讀者自己一定在集合裡（他正在讀，就是在線）；其他 AI 要在線才排。其他人全離線時集合只剩讀者自己，順位 1、不延遲
+  const woken = members.filter((m) => m.key === selfKey || (isAiMember(m) && isOnline(m) && shouldRespond({ ...msg, wake_ok: true }, m.key)));
   const uniq = [...new Map(woken.map((m) => [m.key, m])).values()];
   uniq.sort(labelCmp);
   return uniq.some((m) => m.key === selfKey) ? uniq : null;
+}
+/** 被這則訊息叫醒、但目前離線的 AI（不含讀者自己），依固定規則排序；只用來在叫醒結果裡標出來，不排順位（#1656） */
+export function wokenOffline(msg: WakeMsg, members: RoomMember[], selfKey: string): RoomMember[] {
+  const off = members.filter((m) => m.key !== selfKey && isAiMember(m) && !isOnline(m) && shouldRespond({ ...msg, wake_ok: true }, m.key));
+  return [...new Map(off.map((m) => [m.key, m])).values()].sort(labelCmp);
 }
 /** 排序判斷的分數（以顯示標示為鍵）與門檻；有給就按分數排，沒給＝固定順位 */
 export type WakeScores = { scores: Record<string, number>; min: number; exemptMentioned?: boolean };
@@ -169,7 +201,9 @@ export function wakeInfoOf(msg: WakeMsg, members: RoomMember[], selfKey: string,
   if (!uniq) return null;
   const { passers, held, sc, fb } = splitWoken(uniq, msg, rank, members);
   const ent = (m: RoomMember, r: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank: r, hold, ...(sc(m) === undefined ? {} : { score: Math.round(sc(m)! * 100) / 100 }), ...(fb === m ? { fb: true as const } : {}) });
-  return [...passers.map((m, i) => ent(m, i + 1, false)), ...held.sort(labelCmp).map((m) => ent(m, 0, true))];
+  // 離線的人也列出來（標略過、排最後；畫面依成員當下的在線狀態標「離線」），他們上線讀到這則時照樣會依當時的名單被叫醒
+  const offline = wokenOffline(msg, members, selfKey).filter((m) => !held.includes(m));
+  return [...passers.map((m, i) => ent(m, i + 1, false)), ...held.sort(labelCmp).map((m) => ent(m, 0, true)), ...offline.map((m) => ({ key: m.key, rank: 0, hold: true }))];
 }
 
 // ── AI 發的、沒有 @ 任何人的訊息（#230）：交給排序判斷（Jev）對「發言者以外的 AI 成員」打分，≥ 門檻的才叫醒 ──
@@ -187,7 +221,7 @@ export function isSilentAiMsg(msg: { from: string; body?: string; mentions?: str
 }
 /** 候選：發言者以外、讀者看得到的 AI 成員（真人不列），依固定規則排序 */
 export function silentCandidates(msg: { from: string }, members: RoomMember[]): RoomMember[] {
-  const c = members.filter((m) => isAiMember(m) && m.key !== msg.from);
+  const c = members.filter((m) => isAiMember(m) && isOnline(m) && m.key !== msg.from);
   return [...new Map(c.map((m) => [m.key, m])).values()].sort(labelCmp);
 }
 /** 分數 → 要存的 wake_info：≥ 門檻者依分數高到低（同分固定規則）排順位，其餘略過；沒有保底。scores 為 null＝輪數上限，全部略過並標 lim */
@@ -356,13 +390,17 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
     const silentAi = (m: RoomMessage) => m.from_kind === "ai" && !(m.mentions ?? []).length;
     let messages = (r.data.messages ?? []).map((m: RoomMessage) => ({ ...m, for_me: shouldRespond(m, selfKey) && !silentAi(m) }));
     // 順位（#230）：有 for_me 的信才查成員名單；查不到就不附（橋當作第一順位，照舊立即處理）
-    if (messages.some((m: RoomMessage & { for_me: boolean }) => m.for_me || (silentAi(m) && m.from !== selfKey && !m.is_seed))) {
+    // 退回叫醒（#1656）：點名了別人（不是我）的真人訊息，也要看名單才知道被點名的是不是全離線
+    const maybeFallback = (m: RoomMessage & { for_me: boolean }) => !m.for_me && (m.mentions ?? []).length > 0 && m.from !== selfKey && !m.is_seed && m.from_kind !== "system";
+    if (messages.some((m: RoomMessage & { for_me: boolean }) => m.for_me || (silentAi(m) && m.from !== selfKey && !m.is_seed) || maybeFallback(m))) {
       const mem = await deps.rpc("asn_relay_room_members", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
       const members: RoomMember[] | null = !mem.error && Array.isArray(mem.data?.members) ? mem.data.members : null;
       if (members) {
         const out: (RoomMessage & { for_me: boolean; wake?: Wake })[] = [];
         for (let i = 0; i < messages.length; i++) {
-          const m = messages[i] as RoomMessage & { for_me: boolean };
+          let m = messages[i] as RoomMessage & { for_me: boolean };
+          // 被點名的全離線、我是在線的 AI：這則改叫醒我（排順位照一般規則）
+          if (maybeFallback(m) && fallbackWake(m, members, selfKey) && wokenAis(m, members, selfKey)) m = { ...m, for_me: true };
           if (isSilentAiMsg(m, members)) {
             if (m.from === selfKey) { out.push({ ...m, for_me: false }); continue; }
             const res = await silentAiWake(deps, me.id, agent, room, m, members, selfKey, messages.slice(Math.max(0, i - 6), i));
