@@ -1246,7 +1246,7 @@ async fn 遠端開_codex_與沒列在清單的設定_一律驗不過() {
 #[test]
 fn 守門_遠端啟動的_pi_走_plan() {
     let src = include_str!("../../launch/local.rs");
-    let f = src.split("pub fn start_remote_window").nth(1).unwrap().split("fn maybe_trust_claude_cwd").next().unwrap();
+    let f = src.split("pub fn start_remote_window").nth(1).unwrap().split("pub fn start_pi_session").next().unwrap();
     assert!(f.contains("prof.engine == \"pi\"") && f.contains("super::pi::plan("), "start_remote_window 要有 pi 分支");
     let l = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap().to_string();
     assert!(l.contains("queue_background") && l.contains("pq::build_cfg(env, &req, work_dir)"), "背景夥伴要先用消化端同一套規則驗");
