@@ -47,7 +47,7 @@ test('開放中（有 launcher）不受影響，就算殘留舊原因也照開�
 test('長句講去哪裡改；短句 20 字內', () => {
   assert.match(CLOSED_REASONS.noConsent, /設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」/)
   assert.match(CLOSED_REASONS.noProfile, /找不到 Claude/)
-  assert.match(CLOSED_REASONS.noCwd, /工作資料夾白名單/)
+  assert.match(CLOSED_REASONS.noCwd, /設定 → 啟動設定，在「工作資料夾白名單」加上資料夾/)
   const want = { noConsent: '那台沒勾開新視窗的允許', noProfile: '那台還找不到 Claude', noCwd: '那台白名單是空的' }
   for (const [k, short] of Object.entries(want)) {
     assert.equal(briefWhy(CLOSED_REASONS[k]), short)
@@ -68,8 +68,12 @@ test('跨語言一致：launcher.rs 的原因句常數與前端常數表逐字�
   assert.equal(grab('CLOSED_NO_CWD'), CLOSED_REASONS.noCwd)
   // 電腦端三種失敗要真的對到這三句（分類函式沒被改壞）
   assert.match(rs, /Some\(NO_CONFIG\) => Some\(CLOSED_NO_CONSENT\)/)
-  assert.match(rs, /Some\(NO_REMOTE_PROFILE\) => Some\(CLOSED_NO_PROFILE\)/)
-  assert.match(rs, /Some\(NO_CWD\) => Some\(CLOSED_NO_CWD\)/)
+  assert.match(rs, /Some\(NO_REMOTE_PROFILE\) \| Some\(crate::launch::config::ERR_NO_SETUP\) => Some\(CLOSED_NO_PROFILE\)/)
+  assert.match(rs, /Some\(NO_CWD\) \| Some\(crate::launch::config::ERR_CWD_ALLOW_EMPTY\) => Some\(CLOSED_NO_CWD\)/)
+  // 兩句 loader 的錯誤字要是 config.rs 的常數，且 loader 真的用它們出錯（不是各寫各的字）
+  const cfg = read('src-tauri/src/launch/config.rs')
+  assert.match(cfg, /Err\(ERR_CWD_ALLOW_EMPTY\.into\(\)\)/)
+  assert.match(cfg, /unwrap_or_else\(\|\| ERR_NO_SETUP\.into\(\)\)/)
 })
 
 test('roster 上報：平台與原因兩鍵一起送；launcher 欄仍是摘要或 null（原因不放進去）', () => {

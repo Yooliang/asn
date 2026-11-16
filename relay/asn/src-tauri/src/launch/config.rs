@@ -5,6 +5,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const HOUR_MS: u64 = 3_600_000;
+/// 沒有 launcher.json、也沒偵測到任何 CLI 時 load_launch_config_from 的錯誤字；bridge/launcher.rs 的 closed_reason_of 用常數比對，不靠字串剛好相同
+pub const ERR_NO_SETUP: &str = "這台電腦還沒有可用的啟動設定（請安裝 CLI 或撰寫 launcher.json）";
+/// 合併後的資料夾白名單是空的（loader 這一關）
+pub const ERR_CWD_ALLOW_EMPTY: &str = "工作資料夾白名單 cwd_allow 是空的";
 
 pub fn launcher_config_path() -> PathBuf {
     crate::envc::get_os("ASN_LAUNCHER_FILE")
@@ -83,7 +87,7 @@ pub fn load_launch_config_from(path: &Path, bootstrap: Option<Bootstrap>) -> Res
         return Err(
             file_text
                 .map(|_| "launcher.json 沒有任何 profile".to_string())
-                .unwrap_or_else(|| "這台電腦還沒有可用的啟動設定（請安裝 CLI 或撰寫 launcher.json）".into()),
+                .unwrap_or_else(|| ERR_NO_SETUP.into()),
         );
     }
 
@@ -102,7 +106,7 @@ pub fn load_launch_config_from(path: &Path, bootstrap: Option<Bootstrap>) -> Res
         .unwrap_or_default();
 
     if cwd_allow.is_empty() {
-        return Err("工作資料夾白名單 cwd_allow 是空的".into());
+        return Err(ERR_CWD_ALLOW_EMPTY.into());
     }
 
     let max_per_hour = j
