@@ -9,6 +9,12 @@ const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').r
 
 test('後台錯誤代碼對成人話：太舊要先更新、沒開著、太頻繁、手機不能裝；沒代碼的人話原樣；其他退回通用句', () => {
   assert.match(setupErrorText('setup:asn_outdated'), /版本太舊.*更新/)
+  // #1592：重新登入對 0.2.27 以前的電腦被後台擋下（同一個錯誤代碼），給白話
+  assert.equal(setupErrorText('setup:asn_outdated'), '那台電腦的 ASN 版本太舊，請先在那台電腦更新 ASN')
+  assert.equal(setupErrorText(new Error('setup:asn_outdated')), '那台電腦的 ASN 版本太舊，請先在那台電腦更新 ASN')
+  // 後台 poll 的保險標成失敗時，電腦回的原因直接顯示（人話，原樣）
+  const old = setupView({ state: 'failed', detail: '這台電腦的 ASN 版本太舊，不支援從手機重新登入，請先更新 ASN', replaced: '' }, { now: 1 })
+  assert.deepEqual([old.done, old.ok, old.text], [true, false, '這台電腦的 ASN 版本太舊，不支援從手機重新登入，請先更新 ASN'])
   assert.match(setupErrorText(new Error('setup:asn_offline')), /沒有開著/)
   assert.match(setupErrorText('setup:rate_limited'), /太頻繁/)
   assert.match(setupErrorText('setup:unsupported_platform'), /手機不能安裝/)

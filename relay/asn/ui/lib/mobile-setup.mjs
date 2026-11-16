@@ -51,7 +51,7 @@ export const showReloginButton = (vendorKey, relogin) => vendorKey === 'claude' 
 // 後台錯誤代碼（Rust 端的錯誤字串形如 `setup:asn_outdated`）→ 中文
 const ERR = [
   ['unsupported_platform', '手機不能安裝 Claude Code'],
-  ['asn_outdated', '那台電腦的 ASN 版本太舊，請先在那台電腦把 ASN 更新後再試'],
+  ['asn_outdated', '那台電腦的 ASN 版本太舊，請先在那台電腦更新 ASN'],
   ['asn_offline', '那台電腦的 ASN 目前沒有開著，等它上線再試'],
   ['rate_limited', '要求太頻繁了，請稍候幾分鐘再試'],
   ['not_found', '找不到這台設備（它不在你的帳號底下）'],
