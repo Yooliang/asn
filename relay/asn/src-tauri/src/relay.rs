@@ -17,6 +17,8 @@ pub struct SetupAsk {
     pub kind: String,
     /// 裝置碼型（codex、grok）才有
     pub device: Option<DeviceAsk>,
+    /// install（沒帶＝舊行為：安裝並登入）、relogin（只重新登入，#1592）。其他字串由本機拒絕
+    pub mode: String,
 }
 
 /// 裝置碼型的請求內容：手機簽的本文與簽章、發起的手機、後台這次給的手機公鑰（只用來判斷有沒有變，驗章用本機記住的）
@@ -51,7 +53,11 @@ pub fn setup_ask_of(v: &Value) -> Option<SetupAsk> {
         (Some(rid), Some(payload), Some(sig), Some(p_node)) => Some(DeviceAsk { rid, payload, sig, p_node, p_sign_pub: s("setup_p_sign_pub", 64) }),
         _ => None,
     };
-    Some(SetupAsk { by, kind, device })
+    let mode = match v.get("setup_mode") {
+        None | Some(Value::Null) => "install".to_string(),
+        Some(m) => m.as_str().unwrap_or("").chars().take(16).collect(),
+    };
+    Some(SetupAsk { by, kind, device, mode })
 }
 
 pub struct Relay {
@@ -577,11 +583,17 @@ impl Relay {
     }
     /// 安裝並登入的結果回報到手機：ok、固定句子的原因、重裝說明（後台各留前 200 字）。失敗只記 log
     pub async fn report_setup_result(&self, ok: bool, detail: &str, replaced: Option<&str>) {
+        let _ = self.try_report_setup_result(ok, detail, replaced).await;
+    }
+    /// 同上，回報有沒有送到（#1592：重新登入要把「回報失敗」也寫進 ui.log）。失敗照樣記 log
+    pub async fn try_report_setup_result(&self, ok: bool, detail: &str, replaced: Option<&str>) -> bool {
         let clean = |s: &str| s.chars().filter(|c| !c.is_control()).take(200).collect::<String>();
         let body = json!({ "ok": ok, "detail": clean(detail), "replaced": replaced.map(clean) });
         if let Err(e) = self.api_with("asn_setup_result", Some(body), Duration::from_secs(10)).await {
             elog!("asn_setup_result failed: {e}");
+            return false;
         }
+        true
     }
     /// 遠端更新的結果：ok＝不用更新（已是最新版）；失敗帶原因（後台只留前 200 字）。失敗只記 log
     pub async fn report_update_result(&self, ok: bool, detail: &str) {
@@ -2324,6 +2336,14 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let base = json!({ "setup_requested": true, "setup_requested_by": "u" });
         assert_eq!(setup_ask_of(&json!({ "ok": true })), None);
         assert_eq!(setup_ask_of(&base).unwrap().kind, "claude");
+        assert_eq!(setup_ask_of(&base).unwrap().mode, "install", "沒帶模式＝install");
+        let mut relogin = base.clone();
+        relogin["setup_mode"] = json!("relogin");
+        assert_eq!(setup_ask_of(&relogin).unwrap().mode, "relogin");
+        relogin["setup_mode"] = json!("x".repeat(40));
+        assert_eq!(setup_ask_of(&relogin).unwrap().mode.len(), 16, "太長的截斷，本機會拒絕不認得的模式");
+        relogin["setup_mode"] = json!(5);
+        assert_eq!(setup_ask_of(&relogin).unwrap().mode, "", "不是字串＝不認得，本機會拒絕");
         let full = json!({ "setup_requested": true, "setup_requested_by": "u", "setup_kind": "codex", "setup_rid": "R", "setup_payload": "{}", "setup_sig": "S", "setup_p_node": "PH", "setup_p_sign_pub": "K" });
         let a = setup_ask_of(&full).unwrap();
         assert_eq!(a.kind, "codex");
@@ -2365,7 +2385,7 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let (url, _seen) = fake_server_with(200, r#"{"ok":true,"setup_requested":true,"setup_requested_by":"11111111-1111-1111-1111-111111111111"}"#);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
         assert!(r.report_presence("0.2.2", Duration::from_secs(5)).await);
-        assert_eq!(r.take_setup_request(), Some(SetupAsk { by: "11111111-1111-1111-1111-111111111111".into(), kind: "claude".into(), device: None }), "舊後台沒帶種類＝claude");
+        assert_eq!(r.take_setup_request(), Some(SetupAsk { by: "11111111-1111-1111-1111-111111111111".into(), kind: "claude".into(), device: None, mode: "install".into() }), "舊後台沒帶種類＝claude、沒帶模式＝install");
         assert_eq!(r.take_setup_request(), None, "只取一次，不會重複啟動");
         let (url, seen) = fake_server(200);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());

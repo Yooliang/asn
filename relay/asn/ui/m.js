@@ -41,7 +41,7 @@ import { cleanPiModels } from './lib/pi-models.mjs'
 import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
-import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton, showReloginButton } from './lib/mobile-setup.mjs'
+import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupStep, setupLeadOf, showSetupButton, showReloginButton } from './lib/mobile-setup.mjs'
 import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft, showLoginButton } from './lib/mobile-device-login.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
@@ -919,36 +919,40 @@ const app = createApp({
     const acctDevPress = (b, a) => { if (b.current || !b.target || !b.target.enabled) return; void acctSwitchOn(b.node, a.account) }
     // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
     // mode：'install'＝安裝並登入、'relogin'＝重新登入（#1512 C；送的是同一個要求，只差按鈕與確認字）
-    const setupSt = reactive({ node: '', mode: 'install', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' })
+    const setupSt = reactive({ node: '', mode: 'install', stage: 'idle', since: 0, saw: false, reached: false, fails: 0, lead: '', text: '', note: '', ok: false, msg: '' })
     let setupTimer = null
     const setupStop = () => { clearInterval(setupTimer); setupTimer = null }
-    const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', mode: 'install', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' }) }
+    const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', mode: 'install', stage: 'idle', since: 0, saw: false, reached: false, fails: 0, lead: '', text: '', note: '', ok: false, msg: '' }) }
+    // 失敗的結果一定要看得到：用 role="alert" 顯示，並把設備卡捲到看得見的地方（結果在畫面外，本人會以為沒事）
+    const setupShowFailure = () => { void Vue.nextTick(() => document.querySelector('.m-dv-setup .m-dv-prog')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })) }
+    const setupFinish = (text, ok, note = '') => { setupStop(); Object.assign(setupSt, { stage: 'done', ok, text, note }); if (!ok) setupShowFailure() }
     const setupAsk = (node, mode = 'install') => { setupReset(); Object.assign(setupSt, { node, mode: mode === 'relogin' ? 'relogin' : 'install', stage: 'confirm' }) }
     const setupNo = () => { if (setupSt.stage === 'confirm') setupReset() }
     const setupPoll = async () => {
       const node = setupSt.node
       if (!node || setupSt.stage !== 'waiting') return
-      let st = null
-      try { st = setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } catch { return }   // 查不到這一輪就下一輪再查
+      let res = { ok: true, st: null }
+      try { res = { ok: true, st: setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } } catch { res = { ok: false } }   // 查不到先下一輪再查；連續 3 次就告訴本人
       if (setupSt.node !== node || setupSt.stage !== 'waiting') return
-      if (st) setupSt.saw = true
-      const v = setupView(st, { since: setupSt.since, now: Date.now(), sawRequest: setupSt.saw })
+      const { next, view: v } = setupStep({ since: setupSt.since, saw: setupSt.saw, reached: setupSt.reached, fails: setupSt.fails }, res, Date.now())
+      Object.assign(setupSt, { saw: next.saw, reached: next.reached, fails: next.fails })
+      if (!v) return
+      if (v.done) return setupFinish(v.text, v.ok, v.note)
       Object.assign(setupSt, { text: v.text, note: v.note, ok: v.ok })
-      if (v.done) { setupStop(); setupSt.stage = 'done' }
     }
     const setupYes = async () => {
       if (setupSt.stage !== 'confirm') return
       const node = setupSt.node
       setupSt.stage = 'sending'; setupSt.msg = ''; setupSt.text = SETUP_TEXT.sending
+      let sent = null
       try {
-        await invoke('setup_remote_request', { node })
+        sent = await invoke('setup_remote_request', setupSt.mode === 'relogin' ? { node, mode: 'relogin' } : { node })
       } catch (e) {
         if (setupSt.node !== node) return
-        Object.assign(setupSt, { stage: 'done', ok: false, text: setupErrorText(e), note: '' })
-        return
+        return setupFinish(setupErrorText(e), false)
       }
       if (setupSt.node !== node) return
-      Object.assign(setupSt, { stage: 'waiting', since: Date.now(), text: SETUP_TEXT.pending })
+      Object.assign(setupSt, { stage: 'waiting', since: Date.now(), text: SETUP_TEXT.pending, lead: setupLeadOf(sent) })
       setupTimer = setInterval(() => void setupPoll(), SETUP_POLL_MS)
       void setupPoll()
     }

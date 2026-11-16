@@ -602,6 +602,15 @@ fn claude_screen_says_login() -> bool {
 #[cfg(desktop)]
 async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
     use agent_setup::remote::{gate, Gate};
+    // #1592：重新登入走自己的一條路（不看安裝開關、不安裝）；不認得的模式一律拒絕，不當成安裝
+    if ask.mode == "relogin" {
+        return run_remote_relogin(handle, relay, ask).await;
+    }
+    if ask.mode != "install" {
+        elog!("手機要求的模式不認得，已拒絕");
+        relay.report_setup_result(false, agent_setup::remote::REFUSE_BAD_REQUEST, None).await;
+        return;
+    }
     // #933：別家的裝置碼型登入走另一條路（同樣先過本機把關）
     if ask.kind != "claude" {
         return run_remote_device_login(handle, relay, ask).await;
@@ -655,6 +664,94 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::Setu
         Err(_) => {
             wins::progress_emit(&h2, serde_json::json!({ "phase": "done", "ok": false, "text": "安裝並登入中途中斷" }));
             relay.report_setup_result(false, "安裝並登入中途中斷", None).await
+        }
+    }
+    // 結果留在畫面上幾秒讓人看到，再自己關
+    tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
+    wins::close_setup_progress(&handle, round);
+}
+
+/// 手機請求（重新登入）的紀錄寫進 ui.log（和其他紀錄、設定頁「開啟記錄」同一份）。只寫固定句型與原因類別，不寫網址、授權碼、帳號
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn remote_setup_log(handle: &AppHandle, line: &str) {
+    let _ = ui_log::append(&handle.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+}
+
+/// 重新登入的結果回報到手機；回報沒送到也寫一行到 ui.log
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn report_relogin(handle: &AppHandle, relay: &Relay, ok: bool, text: &str) {
+    if relay.try_report_setup_result(ok, text, None).await {
+        remote_setup_log(handle, if ok { "手機要求重新登入 Claude：已回報成功" } else { "手機要求重新登入 Claude：已回報失敗" });
+    } else {
+        remote_setup_log(handle, "手機要求重新登入 Claude：回報沒有送到");
+    }
+}
+
+/// 手機要這台重新登入 Claude（#1592）：不受「允許從手機安裝並登入」的開關限制，改確認是本人（這台登入著同一個 ASN 帳號）；
+/// 只重新登入，不裝、不更新、不下載任何東西（Claude Code 沒裝好就擋下）。登入網址走既有的「要你確認」請求送到本人的設備。
+/// 收到、把關結果、回報結果、回報失敗各寫一行固定句子到 ui.log
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn run_remote_relogin(handle: AppHandle, relay: Arc<Relay>, ask: relay::SetupAsk) {
+    use agent_setup::remote::{gate_relogin, refuse_tag, Gate, REFUSE_BAD_REQUEST};
+    remote_setup_log(&handle, "手機要求重新登入 Claude：電腦已收到");
+    let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
+    let verdict = if ask.kind == "claude" { gate_relogin(token.as_deref(), &ask.by) } else { Gate::Refuse(REFUSE_BAD_REQUEST) };
+    if let Gate::Refuse(why) = verdict {
+        elog!("手機要求重新登入被拒絕：{why}");
+        remote_setup_log(&handle, &format!("手機要求重新登入 Claude：把關擋下（{}）", refuse_tag(why)));
+        report_relogin(&handle, &relay, false, why).await;
+        return;
+    }
+    remote_setup_log(&handle, "手機要求重新登入 Claude：把關通過，開始確認");
+    if agent_setup::setup::is_busy() {
+        remote_setup_log(&handle, "手機要求重新登入 Claude：這台電腦正在處理別的登入，沒有動作");
+        report_relogin(&handle, &relay, false, "這台電腦正在安裝或登入，請稍後再試").await;
+        return;
+    }
+    // 右下角的常駐進度小窗：人在電腦前看得到、能取消。開不起來就不開始，回報手機
+    let round = match wins::open_setup_progress(&handle) {
+        Ok(r) => r,
+        Err(e) => {
+            elog!("開進度小窗失敗，不重新登入：{e}");
+            remote_setup_log(&handle, "手機要求重新登入 Claude：無法顯示進度，沒有動作");
+            report_relogin(&handle, &relay, false, "這台電腦無法顯示進度，沒有開始重新登入").await;
+            return;
+        }
+    };
+    let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": "正在依你手機的要求重新登入 Claude", "cancellable": true }));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (h1, h2) = (handle.clone(), handle.clone());
+    let started = agent_setup::setup::start_claude_relogin(
+        relay.clone(),
+        agent_setup_token_fn(&handle),
+        // 登入看起來正常時要不要重新登入：只看這台本機的失效證據，手機的請求裡沒有、也不能有這個選項
+        Arc::new(claude_relogin_evidence),
+        move |e| wins::progress_emit(&h1, e.to_json()),
+        move |d| {
+            let _ = tx.send(d);
+        },
+    );
+    if let Err(e) = started {
+        elog!("重新登入無法開始：{e}");
+        remote_setup_log(&handle, "手機要求重新登入 Claude：沒有開始（已經有別的登入在進行）");
+        report_relogin(&handle, &relay, false, &e).await;
+        wins::close_setup_progress(&handle, round);
+        return;
+    }
+    match rx.await {
+        Ok(d) => {
+            wins::progress_emit(&h2, d.to_json());
+            let (ok, text, _) = d.report_fields();
+            remote_setup_log(&handle, &format!("手機要求重新登入 Claude：結果 {}", d.finish.tag()));
+            report_relogin(&handle, &relay, ok, &text).await;
+        }
+        Err(_) => {
+            wins::progress_emit(&h2, serde_json::json!({ "phase": "done", "ok": false, "text": "重新登入中途中斷" }));
+            remote_setup_log(&handle, "手機要求重新登入 Claude：中途中斷");
+            report_relogin(&handle, &relay, false, "重新登入中途中斷").await;
         }
     }
     // 結果留在畫面上幾秒讓人看到，再自己關

@@ -488,6 +488,8 @@ Deno.serve(async (req) => {
       else if (s.data?.requested === true && typeof s.data?.requested_by === "string") {
         setup = { setup_requested: true, setup_requested_by: s.data.requested_by };
         if (typeof s.data.kind === "string" && s.data.kind !== "claude") setup.setup_kind = s.data.kind;
+        // #1592：重新登入多帶 setup_mode（install 不帶，舊版 ASN 看不到這個欄）
+        if (s.data.mode === "relogin") setup.setup_mode = "relogin";
         if (typeof s.data.rid === "string") {
           Object.assign(setup, { setup_rid: s.data.rid, setup_payload: s.data.payload, setup_sig: s.data.sig, setup_p_node: s.data.p_node, setup_p_sign_pub: s.data.p_sign_pub ?? null, setup_expires_at: s.data.expires_at });
         }
