@@ -133,9 +133,11 @@ export const ChatPane = {
         if (sameFriend(props.friend, f)) stuckCode.value = code
       } catch { if (sameFriend(props.friend, f)) stuckCode.value = '' }   // 舊版後端沒有這個命令：照舊不放
     }
-    const stuckTimer = setInterval(() => void probeStuck(), STUCK_POLL_MS)
+    // 計時器與第一次查詢放在掛上之後：伺服器端渲染（測試）不跑 onMounted／onBeforeUnmount，放在 setup 會留下永不清除的計時器
+    let stuckTimer = 0
+    onMounted(() => { void probeStuck(); stuckTimer = setInterval(() => void probeStuck(), STUCK_POLL_MS) })
     onBeforeUnmount(() => clearInterval(stuckTimer))
-    watch(() => [props.friend?.id, props.friend?.status, props.active].join('\n'), () => void probeStuck(), { immediate: true })
+    watch(() => [props.friend?.id, props.friend?.status, props.active].join('\n'), () => void probeStuck())
     const termViewOn = ref(false)
     const termShown = computed(() => termViewOn.value && canTermView.value)
     async function probeTerm() {
