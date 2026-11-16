@@ -108,6 +108,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name,
         psm: hiddenPsm(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
+        elevated: !(isOff || a.online === false) && a.elevated === true,   // 視窗是系統管理員身分開的、收發室轉不進去（選填；舊後台沒有＝false）
         activeAt: activeAtOf(a.last_active_at),   // 後台的最後活動時間（選填；舊後台沒有＝null，活躍度退回只看本機往來）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
         onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status, isProcEntry(a)),

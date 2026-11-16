@@ -35,6 +35,8 @@ pub struct Window {
     pub hidden: Option<bool>,
     /// 名單上的種類：只有本人接進收發室、只能自己收信的視窗是 Some("selfpull")（見 crate::self_windows）；其他都是 None，名單不帶
     pub kind: Option<String>,
+    /// 這個視窗是用比 ASN 更高的權限（系統管理員）開的：收發室 worker 轉不進去（Windows）；讀不到層級、非 Windows 都是 false。名單帶 elevated:true 只在 true 時
+    pub elevated: bool,
 }
 
 impl Window {
@@ -57,6 +59,7 @@ impl Window {
             model: None,
             hidden: None,
             kind: Some(crate::self_windows::KIND.into()),
+            elevated: false,
         }
     }
     pub fn is_self_pull(&self) -> bool {
@@ -68,7 +71,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None, hidden: None, kind: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None, hidden: None, kind: None, elevated: false }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -420,6 +423,13 @@ pub(crate) fn apply_hidden(windows: &mut [Window], os: &dyn crate::launch::conso
     }
 }
 
+/// 標出「比 ASN 自己高權限」的 Claude 視窗（有 pid 的才查；讀不到層級就不標）
+pub fn apply_elevated(windows: &mut [Window], elevated: &dyn Fn(u32) -> bool) {
+    for w in windows.iter_mut().filter(|w| w.engine == "claude" && w.pid != 0) {
+        w.elevated = elevated(w.pid);
+    }
+}
+
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
 /// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
 pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
@@ -446,6 +456,9 @@ pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, laun
             }
             if let Some(h) = w.hidden {
                 o["hidden"] = json!(h); // 可選欄位：主控台視窗是否隱藏；舊後台會丟掉，舊用戶端略過
+            }
+            if w.elevated {
+                o["elevated"] = json!(true); // 可選欄位：視窗是系統管理員身分開的、收發室轉不進去；舊後台會丟掉，舊用戶端略過
             }
             if let Some(k) = &w.kind {
                 o["kind"] = json!(k); // 只能自己收信的視窗（selfpull）；後台收任意小寫種類，仍是可收信的條目

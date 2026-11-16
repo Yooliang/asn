@@ -119,7 +119,7 @@
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending, on: ui.mode === 'merged' && view === 'chat' && ui.active === c.id }" @click="openChat(c.id)">
                     <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'" :pinned="isChatPinned(c.id)"></asn-avatar>
                     <span class="b-text">
-                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="!c.isNotice && statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-ctx danger b-elev" v-if="elevatedBadge(c)" :title="elevatedBadge(c).tip">{{ elevatedBadge(c).text }}</span><span class="b-st" v-if="!c.isNotice && statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                     </span>
                     <span class="l-time" v-if="skin === 'line' && listTimeText(c.lastAt)">{{ listTimeText(c.lastAt) }}</span>

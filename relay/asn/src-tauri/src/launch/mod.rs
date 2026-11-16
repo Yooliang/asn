@@ -17,6 +17,7 @@ mod screen_watch;
 mod resume;
 pub(crate) mod opening;
 pub(crate) mod live_process;
+pub(crate) mod integrity;
 #[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
 pub(crate) mod stuck_resume;
 pub mod auto_resume;

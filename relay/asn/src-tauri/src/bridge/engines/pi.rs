@@ -80,6 +80,7 @@ fn parse_window(path: &Path, stem: &str, now_ms: u64, alive: &impl Fn(u32) -> bo
         model: model_label(&v),
         hidden: None,
         kind: None,
+        elevated: false,
     })
 }
 

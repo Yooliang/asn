@@ -1,5 +1,5 @@
 // 本機視窗直接讀：名單上「這台電腦」的夥伴，狀態以本機現讀的為準（不繞後台，沒有回報與重拉的延遲）。
-// 純函式，瀏覽器與 node 都能跑。locals＝Rust 命令 local_windows 的回傳 [{ name, status, detail, context_pct }]。
+// 純函式，瀏覽器與 node 都能跑。locals＝Rust 命令 local_windows 的回傳 [{ name, status, detail, context_pct, elevated }]。
 import { psmOf, statusOf } from './roster.mjs'
 
 /**
@@ -30,9 +30,10 @@ export function overlayLocal(friends, selfNode, locals, cwdOf = new Map(), seenB
     const psm = psmOf({ cwd_label: cwdOf.get(id) ?? '', detail: w.detail })
     const pct = Number.isFinite(w.context_pct) && w.context_pct >= 0 && w.context_pct <= 100 ? Math.round(w.context_pct) : f.contextPct ?? null
     const psmNext = cwdOf.has(id) || w.detail ? psm : f.psm
-    if (status === f.status && psmNext === f.psm && pct === (f.contextPct ?? null)) continue
+    const elevated = w.elevated === true   // 系統管理員身分開的視窗（收發室轉不進去）；本機沒帶這個欄位＝不是
+    if (status === f.status && psmNext === f.psm && pct === (f.contextPct ?? null) && elevated === (f.elevated === true)) continue
     next ??= new Map(friends)
-    next.set(id, { ...f, status, psm: psmNext, contextPct: pct })
+    next.set(id, { ...f, status, psm: psmNext, contextPct: pct, elevated })
   }
   return next
 }
