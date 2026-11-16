@@ -14,6 +14,9 @@ export const loginIncomplete = a => a?.login_incomplete === true || a?.incomplet
 // 那台電腦目前的 Claude 登入失效（橋接程式從對話紀錄判定後隨帳號回報帶來的布林）：標紅、不用請使用者去猜為什麼視窗全停
 export const LOGIN_FAILED_LABEL = '登入失效'
 export const loginFailed = a => a?.login_failed === true
+// 帳號卡右上那一格：使用中的帳號登入失效時，「使用中」與「登入失效」同一格交替（#1592）；讀螢幕的人聽到兩個狀態，不靠顏色
+export const CURRENT_LABEL = '使用中'
+export const CURRENT_FAILED_ARIA = `${CURRENT_LABEL}，${LOGIN_FAILED_LABEL}`
 
 // 上次確認可用（#1512 C）：切走前核對成功的時間。Rust 只給毫秒數（usable_at_ms），沒有就不顯示
 export const USABLE_AT_LABEL = '上次確認可用'
