@@ -131,7 +131,7 @@ function mapError(code: string): Reply {
 }
 
 /**
- * 處理三個帳號動作。authHeader＝Authorization 標頭；relayKey＝x-relay-key 標頭（只有 node_claim 用）；body＝JSON 內容（可為 null）。
+ * 處理三個帳號動作。authHeader＝Authorization 標頭；relayKey＝x-relay-key 標頭（node_claim 用；node_setup_request 靠它認出發出請求的手機）；body＝JSON 內容（可為 null）。
  * 順序固定：先驗登入憑證，沒過就不碰資料庫。
  */
 export async function handleAccountAction(
@@ -286,6 +286,13 @@ export async function handleAccountAction(
     if (kind !== "claude" || payload !== null || sig !== null || pNode !== null) Object.assign(args, { p_kind: kind, p_payload: payload, p_sig: sig, p_p_node: pNode });
     // 只有 relogin 才多帶 p_mode：安裝照舊的呼叫形狀（資料庫的預設值就是 install），後台還沒有新函式時舊流程不受影響
     if (mode === "relogin") Object.assign(args, { p_mode: mode });
+    // #1593：請求若帶節點金鑰（手機本機帶的），用金鑰認出是哪支手機，登入網址就只送給它。身分只認金鑰解出的節點，body 自填的一律不收；
+    // 節點是不是本人名下、有效的手機（不是電腦）由資料庫函式再檢查，不合格就不記；金鑰沒帶或認不出來＝照舊，不報錯
+    if (kind === "claude" && typeof relayKey === "string" && relayKey.length >= 8 && relayKey.length <= 200) {
+      const auth = await deps.rpc("asn_relay_auth", { p_key_hash: await deps.sha256Hex(relayKey) });
+      const me = !auth.error && Array.isArray(auth.data) ? (auth.data[0] as { id?: unknown } | undefined) : undefined;
+      if (typeof me?.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(me.id)) Object.assign(args, { p_requester_phone: me.id });
+    }
     const { data, error } = await deps.rpc("asn_setup_request", args);
     if (error) { console.error("node_setup_request", error); return { status: 500, body: { error: "internal" } }; }
     const d = data as Record<string, unknown>;
