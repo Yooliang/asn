@@ -3049,6 +3049,8 @@ pub fn run() {
     launch::term::start_screen_watch(terms.clone(), &work_dir);
     #[cfg(desktop)]
     launch::term::set_ui_log_dir(&work_dir);
+    #[cfg(windows)]
+    auth::set_dpapi_log_dir(&exit_log_dir);
     // 共用終端服務（mux）掛掉要有人知道：偵測、通知、接回（#596 第 4 項）。沒開 mux 模式時什麼都不做
     #[cfg(desktop)]
     launch::mux_watch::start(terms.clone(), &work_dir, &term_data_dir);
