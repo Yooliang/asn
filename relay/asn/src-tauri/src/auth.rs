@@ -426,6 +426,34 @@ pub trait Protector: Send + Sync {
     }
 }
 
+/// 登入時 Windows 沒辦法保存登入資料，畫面上看到的話：要讓人看得懂、能照著做；詳細原因只進 ui.log
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const SAVE_FAIL_TEXT: &str = "這台電腦的 Windows 沒辦法保存登入資料。請用平常的方式登入 Windows 再開 ASN（不要用系統管理員或排程啟動）；如果最近被重設過 Windows 密碼，請先用舊密碼登入一次";
+
+/// 寫進 ui.log 的一行：哪個動作失敗、系統回的錯誤碼（只有動作名與碼，沒有任何資料內容）
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn dpapi_err_line(op: &str, code: u32) -> String {
+    format!("Windows {op}失敗 0x{code:08X}")
+}
+
+/// 機器資料夾（ui.log 所在）：加解密失敗的原因要留紀錄，這幾支函式拿不到 app handle，啟動時設定一次
+#[cfg(windows)]
+static DPAPI_LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+pub fn set_dpapi_log_dir(dir: &Path) {
+    let _ = DPAPI_LOG_DIR.set(dir.to_path_buf());
+}
+
+#[cfg(windows)]
+fn dpapi_log(op: &str, code: u32) {
+    let line = dpapi_err_line(op, code);
+    elog!("[ASN] {line}");
+    if let Some(dir) = DPAPI_LOG_DIR.get() {
+        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now_ms() as i64))]);
+    }
+}
+
 #[cfg(windows)]
 pub struct Dpapi;
 #[cfg(windows)]
@@ -434,7 +462,7 @@ const DPAPI_ENTROPY: &[u8] = b"asn-login-v1";
 /// Windows 的 DPAPI（目前使用者）：加密。`entropy` 綁用途（登入資料、某個節點的金鑰檔），換別的 entropy 就解不開
 #[cfg(windows)]
 pub(crate) fn dpapi_protect(plain: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
-    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Foundation::{GetLastError, LocalFree};
     use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
     let input = CRYPT_INTEGER_BLOB { cbData: plain.len() as u32, pbData: plain.as_ptr() as *mut u8 };
     let ent = CRYPT_INTEGER_BLOB { cbData: entropy.len() as u32, pbData: entropy.as_ptr() as *mut u8 };
@@ -442,7 +470,8 @@ pub(crate) fn dpapi_protect(plain: &[u8], entropy: &[u8]) -> Result<Vec<u8>, Str
     // CRYPTPROTECT_UI_FORBIDDEN = 1
     let ok = unsafe { CryptProtectData(&input, std::ptr::null(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
     if ok == 0 || out.pbData.is_null() {
-        return Err("Windows 加密失敗".into());
+        dpapi_log("加密", unsafe { GetLastError() });
+        return Err(SAVE_FAIL_TEXT.into());
     }
     let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
     unsafe {
@@ -455,13 +484,15 @@ pub(crate) fn dpapi_protect(plain: &[u8], entropy: &[u8]) -> Result<Vec<u8>, Str
 /// Windows 的 DPAPI（目前使用者）：解密，`entropy` 要和加密時相同
 #[cfg(windows)]
 pub(crate) fn dpapi_unprotect(sealed: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
-    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Foundation::{GetLastError, LocalFree};
     use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
     let input = CRYPT_INTEGER_BLOB { cbData: sealed.len() as u32, pbData: sealed.as_ptr() as *mut u8 };
     let ent = CRYPT_INTEGER_BLOB { cbData: entropy.len() as u32, pbData: entropy.as_ptr() as *mut u8 };
     let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
     let ok = unsafe { CryptUnprotectData(&input, std::ptr::null_mut(), &ent, std::ptr::null(), std::ptr::null(), 1, &mut out) };
     if ok == 0 || out.pbData.is_null() {
+        // 解密失敗不會上畫面（讀不開當作沒登入），文字照舊，只多記錯誤碼
+        dpapi_log("解密", unsafe { GetLastError() });
         return Err("Windows 解密失敗（可能不是這個使用者存的）".into());
     }
     let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
@@ -788,6 +819,20 @@ mod tests {
         assert!(u.ends_with("&code_challenge=CH&code_challenge_method=s256"));
         assert!(authorize_url("https://x.supabase.co", "facebook", "r", "c").is_err());
         assert!(authorize_url("https://x.supabase.co", "google&evil=1", "r", "c").is_err());
+    }
+
+    #[test]
+    fn 加解密失敗的記錄行_動作名加八位十六進位錯誤碼() {
+        assert_eq!(dpapi_err_line("加密", 0x5), "Windows 加密失敗 0x00000005");
+        assert_eq!(dpapi_err_line("解密", 0x8009000B), "Windows 解密失敗 0x8009000B");
+    }
+
+    #[test]
+    fn 保存失敗給人看的話_不含技術名詞與錯誤碼() {
+        for bad in ["DPAPI", "0x", "Crypt", "GetLastError"] {
+            assert!(!SAVE_FAIL_TEXT.contains(bad), "畫面文字不能帶 {bad}");
+        }
+        assert!(SAVE_FAIL_TEXT.contains("請用平常的方式登入 Windows"));
     }
 
     #[test]
