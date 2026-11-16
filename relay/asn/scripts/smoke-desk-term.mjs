@@ -189,7 +189,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   // (e) 終端上方沒有「打字」按鈕（#1288 拿掉了）；輸入框的提示字與按鈕字換成打進終端的說法
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '終端上方的「打字」按鈕還在（應該拿掉）' };
   const ta2 = document.querySelector('.chatpane .compose-row textarea');
-  if (!ta2 || !ta2.placeholder.includes('送出會向那台電腦要打字權限') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
+  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出會向那台電腦要打字權限') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
   const go2 = ta2.closest('form').querySelector('button[type=submit]');
   if (!go2 || go2.textContent.trim() !== '送出') return { ok: false, why: '終端畫面時按鈕不是「送出」：' + (go2 ? go2.textContent : '') };
   return { ok: true, why: '' };
