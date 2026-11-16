@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 外部下載不穩時的重試（CI 用）：只有輸出看得出是「外部服務的錯誤」（5xx、逾時、連線中斷）才重試，
+# 外部下載不穩時的重試（CI 用）：只有輸出看得出是「外部服務的錯誤」（429 太多請求、5xx、逾時、連線中斷）才重試，
 # 其他失敗一律立刻照原本的結束碼失敗，不放水。最多 3 次，之間退避 15、45 秒；3 次都失敗就紅，訊息寫明是外部服務。
 #
 # 用法：retry-external.sh <說明> [--before '<每次重試前要跑的清理指令>'] -- <指令…>
@@ -10,8 +10,10 @@ before=""
 if [ "${1:-}" = "--before" ]; then before="$2"; shift 2; fi
 [ "${1:-}" = "--" ] && shift
 
-# 看得出是外部服務問題的字樣（英文來自 curl／reqwest／tauri bundler，中文來自產品的取得流程）
-pattern='HTTP[/ ][0-9.]* 5[0-9][0-9]|returned error: 5[0-9][0-9]|response code: 5[0-9][0-9]|status(: | code )5[0-9][0-9]|\b50[0234]\b.*(Bad Gateway|Gateway|Unavailable|Internal Server Error)|Gateway Time-?out|Service Unavailable|(operation|connection|request|connect|read) timed out|Timeout was reached|connection (reset|refused|closed)|error sending request|伺服器回 5[0-9][0-9]|連不上或逾時|下載中斷'
+# 看得出是外部服務問題的字樣（英文來自 curl／reqwest／tauri bundler／Gradle，中文來自產品的取得流程）。
+# 429（Too Many Requests，例如 Gradle 抓 repo.maven.apache.org 被限流）跟 5xx 一樣是對方的問題，要退避重試；其他 4xx（404、401、403…）不重試。
+# 這一行由 tests/retry_external.test.mjs 讀出來，拿真實 log 的寫法逐條比對（會重試的、不會重試的都有）
+pattern='HTTP[/ ][0-9.]* (429|5[0-9][0-9])|returned error: (429|5[0-9][0-9])|response code: (429|5[0-9][0-9])|status(: | code )(429|5[0-9][0-9])|Too Many Requests|\b50[0234]\b.*(Bad Gateway|Gateway|Unavailable|Internal Server Error)|Gateway Time-?out|Service Unavailable|(operation|connection|request|connect|read) timed out|Timeout was reached|connection (reset|refused|closed)|error sending request|伺服器回 (429|5[0-9][0-9])|連不上或逾時|下載中斷'
 
 log="$(mktemp)"
 delays=(15 45)
@@ -26,7 +28,7 @@ for attempt in 1 2 3; do
   fi
   if [ "$attempt" -lt 3 ]; then
     d=${delays[$((attempt - 1))]}
-    echo "::warning::${label}：第 ${attempt} 次碰到外部服務錯誤（5xx／逾時／連線中斷），${d} 秒後重試" >&2
+    echo "::warning::${label}：第 ${attempt} 次碰到外部服務錯誤（429／5xx／逾時／連線中斷），${d} 秒後重試" >&2
     sleep "$d"
   fi
 done
