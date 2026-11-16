@@ -1003,6 +1003,8 @@ export const injectSource = table => `(() => {
       if (cmd === 'site_releases' && Array.isArray(T.__releasesSeq)) { const i = globalThis.__smokeRelReads = (globalThis.__smokeRelReads || 0) + 1; return JSON.parse(JSON.stringify(T.__releasesSeq[Math.min(i, T.__releasesSeq.length) - 1])) }
       const ev = T.__emitOn && T.__emitOn[cmd];
       if (Array.isArray(ev)) ev.forEach((e, i) => setTimeout(() => { for (const fn of ((globalThis.__smokeListeners || {})[e.event] || [])) fn({ event: e.event, payload: JSON.parse(JSON.stringify(e.payload)) }) }, 50 * (i + 1)));
+      // 探測中途換掉某個指令的回應（例如「剛裝好 Claude，再偵測一次」）：頁面設 globalThis.__smokeOverride = { 指令: 值 }
+      if (globalThis.__smokeOverride && Object.prototype.hasOwnProperty.call(globalThis.__smokeOverride, cmd)) return JSON.parse(JSON.stringify(globalThis.__smokeOverride[cmd]));
       const v = T[cmd];
       if (v && typeof v === 'object' && v.by) { const k = args && args[v.by]; return Object.prototype.hasOwnProperty.call(v.values, k) ? v.values[k] : v.fallback }
       return v === undefined ? null : JSON.parse(JSON.stringify(v));

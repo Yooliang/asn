@@ -1129,3 +1129,20 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .pin-note{margin:4px 10px;font-size:12px;color:#8a3b3b}
 .menu-title{padding:6px 14px;font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-bottom:1px solid rgba(0,0,0,.12);cursor:default}
 .room-av-wrap{position:relative;display:inline-flex;flex:none;vertical-align:middle}
+
+/* ---------- 新手引導卡（#1605）：沒有任何夥伴視窗時，名單與手機設備卡上的「選一個開始」。顏色一律用變數，跟著外觀與深色走 ---------- */
+.ng-card{margin:12px 10px;padding:12px 14px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);text-align:left;user-select:text;-webkit-user-select:text}
+.ng-title{margin:0 0 8px;font-size:1.05em;font-weight:700;color:var(--fg)}
+.ng-rows{list-style:none;margin:0;padding:0}
+.ng-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;padding:7px 0;border-top:1px solid var(--line)}
+.ng-row:first-child{border-top:0}
+.ng-name{font-weight:600}
+.ng-act{justify-self:end}
+.ng-checking{color:var(--muted)}
+.ng-note{grid-column:1 / -1;margin:0;color:var(--muted);line-height:1.6;font-size:.95em}
+.ng-hint{color:var(--busy)}
+.ng-link{color:var(--link);text-decoration:underline;cursor:pointer}
+.ng-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.ng-recheck:disabled{opacity:.6;cursor:default}
+.ng-hide,.ng-reshow{margin-top:0;padding:2px 0;border:0;background:none;color:var(--link);text-decoration:underline;cursor:pointer;font-size:.95em}
+.ng-reshow-wrap{padding:8px 14px;text-align:center}
