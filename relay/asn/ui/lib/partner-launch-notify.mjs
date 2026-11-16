@@ -6,7 +6,7 @@ export function backgroundRestoreNoticeText(partnerName) {
   const name = String(partnerName ?? '').trim() || '夥伴'
   return {
     title: '已改為前台顯示',
-    body: `「${name}」背景啟動沒有成功，已改為前台顯示。可能卡在「信任此資料夾」，請到電腦前按一次 Enter；詳細原因可以看記錄檔。`,
+    body: `「${name}」背景啟動沒有成功，已改為前台顯示。可能卡在 Claude 第一次問「是否信任此資料夾」。請到 ASN 打開這個夥伴的終端，選「Yes, I trust this folder」；詳細原因可以看記錄檔。`,
   }
 }
 

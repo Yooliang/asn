@@ -60,3 +60,32 @@ export function restoreTop(memo, { scrollHeight, clientHeight }) {
   if (!memo) return max
   return memo.bottom ? max : Math.min(Math.max(0, memo.top), max)
 }
+
+// ---- 卡在「第一次問」畫面的夥伴（#1632）----
+// 安全上的同意（信任資料夾、略過權限模式）一律由本人在 Claude 自己的畫面上按：ASN 不代按、不寫設定、不送任何按鍵，
+// 只讓本人看得到那個畫面、告訴他要按什麼。這種夥伴還沒有 session 檔，名單上是離線，所以「終端」入口要例外開給它。
+// 選項字樣與 Rust 端 launch/stuck_notice.rs 的逾時訊息一致（test/term-entry.test.mjs 有跨語言一致性測試）。
+export const STUCK_NOTES = {
+  trust: '卡在「是否信任這個資料夾」，打開終端選「Yes, I trust this folder」',
+  bypass_warning: '卡在「是否同意略過權限模式」，打開終端看清楚警告後自己選「Yes, I accept」（不同意選「No, exit」）',
+}
+
+/** 讀畫面的提醒清單裡，這位夥伴是不是卡在信任資料夾／略過權限同意：回 'trust'／'bypass_warning'，不是回 '' */
+export function stuckCodeOf(notices, name) {
+  if (typeof name !== 'string' || name === '') return ''
+  const hit = (Array.isArray(notices) ? notices : []).find(i => i?.name === name && Object.hasOwn(STUCK_NOTES, i?.code))
+  return hit ? hit.code : ''
+}
+
+/** 終端入口的前提（termEntry 的 base）：有終端畫面可用、本機可操作的夥伴；離線的不放，除非讀畫面看到它卡在第一次問的畫面 */
+export function termBaseOk({ hasApi, canOffer, status, stuck }) {
+  if (hasApi !== true || canOffer !== true) return false
+  return status !== 'offline' || Boolean(stuck)
+}
+
+/** 大按鈕下方的小字：卡在第一次問的畫面、而且終端入口真的出現了（在共用終端服務裡）才有 */
+export function stuckNote(stuck, hasTermEntry) {
+  return hasTermEntry === true && Object.hasOwn(STUCK_NOTES, stuck) ? STUCK_NOTES[stuck] : ''
+}
+/** 卡住的夥伴多久重查一次畫面提醒（毫秒）；後端讀畫面自己是 15 秒一輪 */
+export const STUCK_POLL_MS = 15_000

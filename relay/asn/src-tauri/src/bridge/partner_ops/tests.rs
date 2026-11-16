@@ -108,9 +108,14 @@ struct FakeEnv {
     opening: Mutex<crate::launch::opening::Opening>,
     /// 終端對照表裡記著對話編號的夥伴視窗列（喚醒提示用）
     partners: Mutex<Vec<crate::launch::stuck_resume::PartnerRef>>,
+    /// 讀畫面對各名字判斷的畫面代號（逾時訊息用）
+    screens: Mutex<Vec<(String, &'static str)>>,
 }
 
 impl OpsEnv for FakeEnv {
+    fn screen_code(&self, name: &str) -> Option<&'static str> {
+        self.screens.lock().unwrap().iter().find(|(n, _)| n == name).map(|(_, c)| *c)
+    }
     fn session_partners(&self, session: &str) -> Vec<crate::launch::stuck_resume::PartnerRef> {
         self.partners.lock().unwrap().iter().filter(|p| p.session_id == session).cloned().collect()
     }
@@ -344,6 +349,7 @@ fn rig(o: Opt) -> Rig {
         pi_launch_registers: AtomicBool::new(true),
         opening: Mutex::new(Default::default()),
         partners: Mutex::new(Vec::new()),
+        screens: Mutex::new(Vec::new()),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -1193,6 +1199,44 @@ fn 喚醒_新視窗一直沒出現_回未確認() {
     let res = resume(&r, "離線夥伴", SID);
     assert_eq!(res.status, "unconfirmed", "{}", res.detail);
     assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 喚醒逾時_讀到信任資料夾或略過權限畫面_回對應說明_讀不到維持原句() {
+    // 讀不到畫面：原句
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("unconfirmed", WAKE_UNCONFIRMED));
+    // 信任資料夾
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    r.env.screens.lock().unwrap().push(("離線夥伴".into(), "trust"));
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "unconfirmed");
+    assert_eq!(res.detail, crate::launch::stuck_notice::trust_message("離線夥伴"));
+    // 略過權限同意
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    r.env.screens.lock().unwrap().push(("離線夥伴".into(), "bypass_warning"));
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.detail, crate::launch::stuck_notice::bypass_message("離線夥伴"));
+    // 別的夥伴卡住不影響這一位
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    r.env.screens.lock().unwrap().push(("別人".into(), "trust"));
+    assert_eq!(resume(&r, "離線夥伴", SID).detail, WAKE_UNCONFIRMED);
+}
+
+#[test]
+fn 改名重開逾時_讀到卡住的畫面_原句後接說明() {
+    let r = rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    r.env.screens.lock().unwrap().push(("新名字".into(), "trust"));
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert_eq!(res.status, "unconfirmed");
+    assert!(res.detail.contains("一直沒看到同名的新視窗出現"), "{}", res.detail);
+    assert!(res.detail.ends_with(&crate::launch::stuck_notice::trust_message("新名字")), "{}", res.detail);
 }
 
 #[test]

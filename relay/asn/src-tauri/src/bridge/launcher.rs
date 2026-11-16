@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 
 const HOUR_MS: u64 = 3_600_000;
 const MAX_CWD: usize = 50;
-pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter";
+pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上：可能卡在 Claude 第一次的確認畫面（例如「是否信任這個資料夾」）。請到 ASN 打開這個夥伴的終端，看清楚後自己選（直接按 Enter 會選到預設的「No, exit」）";
 pub const NO_CONFIG: &str = "這台電腦還沒有可用的啟動設定";
 pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：pi 可能在問要不要信任這個資料夾，或要登入、選模型，請到那台電腦選一次；也可能是 pi 的 ASN 擴充沒載入";
 pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來：請確認這台電腦的 ASN 還在執行；稍後會自動補上結果";
@@ -81,6 +81,10 @@ pub trait LaunchEnv: Send + Sync {
     /// asn終端服務這次啟動有在使用嗎。預設沒有
     fn term_service_active(&self) -> bool {
         false
+    }
+    /// 讀畫面（背景工作）對這個名字的視窗目前判斷的畫面代號，只認 trust／bypass_warning；逾時訊息用它講清楚卡在哪。預設沒有
+    fn screen_code(&self, _name: &str) -> Option<&'static str> {
+        None
     }
     /// 本機設定裡找得到這個 CLI（tool＝agy 或 grok）嗎：只看設定與檔案／PATH，不下載、不執行。預設找不到
     fn term_cli_found(&self, _config: &LaunchConfig, _tool: &str) -> bool {
@@ -273,6 +277,9 @@ impl LaunchEnv for SystemEnv {
     }
     fn term_service_active(&self) -> bool {
         crate::launch::win_term::term_server_active()
+    }
+    fn screen_code(&self, name: &str) -> Option<&'static str> {
+        crate::launch::stuck_notice::current_code(name)
     }
     fn term_cli_found(&self, config: &LaunchConfig, tool: &str) -> bool {
         crate::launch::term::cli_detectable(config, tool)
@@ -579,7 +586,9 @@ impl Launcher {
             }
             if !unconfirmed && t0.elapsed().as_millis() >= self.confirm_ms as u128 {
                 unconfirmed = true;
-                self.report(&l, "unconfirmed", hint).await;
+                // 讀畫面看到卡在信任資料夾／略過權限同意：講清楚要本人到終端自己選（不代按）；讀不到維持原句
+                let detail = crate::launch::stuck_notice::with_screen(&name, self.env.screen_code(&name), hint);
+                self.report(&l, "unconfirmed", &detail).await;
             }
         }
         self.record(&l, "gave-up", &format!("{} 分鐘內都沒出現在名單上", self.late_ms / 60_000));

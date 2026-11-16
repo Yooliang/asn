@@ -140,6 +140,10 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn session_partners(&self, _session: &str) -> Vec<crate::launch::stuck_resume::PartnerRef> {
         Vec::new()
     }
+    /// 讀畫面（背景工作）對這個名字的視窗目前判斷的畫面代號，只認 trust／bypass_warning；逾時訊息用它講清楚卡在哪。預設沒有
+    fn screen_code(&self, _name: &str) -> Option<&'static str> {
+        None
+    }
 }
 
 pub(crate) struct SystemOpsEnv {
@@ -184,6 +188,9 @@ impl OpsEnv for SystemOpsEnv {
             let _ = session;
             Vec::new()
         }
+    }
+    fn screen_code(&self, name: &str) -> Option<&'static str> {
+        crate::launch::stuck_notice::current_code(name)
     }
     fn tell(&self, name: &str, text: &str) -> Result<(), String> {
         // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
@@ -261,6 +268,8 @@ fn ok(detail: impl Into<String>, result: Option<Value>) -> OpResult {
     OpResult { status: "ok", detail: detail.into(), result }
 }
 /// 喚醒找不到對話紀錄（#593 拆成三句）
+/// 喚醒逾時（讀不到畫面時的原句）
+pub(crate) const WAKE_UNCONFIRMED: &str = "視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）";
 const NO_RECORD: &str = "找不到原本的對話紀錄，只能開新的夥伴";
 const PI_NEVER_TALKED: &str = "這段對話還沒講過話，pi 沒有留下紀錄檔（pi 要等第一句話才會存檔），沒有東西可以接回；請開新的夥伴";
 const PI_NO_AGENT_DIR: &str = "找不到 pi 的設定資料夾，沒辦法接回這段對話；如果 pi 的設定不在預設位置，請設定 PI_CODING_AGENT_DIR 後重開 ASN";
@@ -1372,10 +1381,17 @@ impl PartnerOps {
         });
         match (appeared, found) {
             (true, Some((pid, sid))) => ok("新視窗已出現", Some(json!({ "pid": pid, "session_id": sid, "old_pid": t.pid }))),
-            _ => unconfirmed(match &still_open {
-                None => "原視窗已關閉、新視窗已送出，但一直沒看到同名的新視窗出現".to_string(),
-                Some(n) => format!("{n}；新視窗已送出，但一直沒看到同名的新視窗出現"),
-            }),
+            _ => {
+                let base = match &still_open {
+                    None => "原視窗已關閉、新視窗已送出，但一直沒看到同名的新視窗出現".to_string(),
+                    Some(n) => format!("{n}；新視窗已送出，但一直沒看到同名的新視窗出現"),
+                };
+                // 讀畫面看到新視窗卡在信任資料夾／略過權限同意：接在原句後面講清楚要本人到終端自己選
+                match crate::launch::stuck_notice::message_for(new_name, self.env.screen_code(new_name)) {
+                    Some(m) => unconfirmed(format!("{base}。{m}")),
+                    None => unconfirmed(base),
+                }
+            }
         }
     }
 
@@ -1550,7 +1566,7 @@ impl PartnerOps {
             (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
             _ => {
                 self.env.release_opening(sid, name);
-                unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）")
+                unconfirmed(crate::launch::stuck_notice::with_screen(name, self.env.screen_code(name), WAKE_UNCONFIRMED))
             }
         }
     }
