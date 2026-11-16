@@ -288,6 +288,21 @@ jobs:
             find "$d" -mindepth 1 -maxdepth 1 ! -name '*.zip' -exec rm -rf {} +
           done
 
+      # 相依套件快取（#1622）：Maven Central／Google Maven 下載過的套件留著，下次不用再抓，避免被限流（429）。
+      # 只存 modules-2（相依套件本身與中繼資料），不存編譯產物；鎖檔與 gc 記錄不存。
+      # key 綁 gradle 設定檔（含上一步 cargo check 產生的 tauri 那兩支）與 wrapper 版本：相依一改就換 key；
+      # restore-keys 讓相依小改時先拿舊快取，只補抓新的。PR 存的快取只有同一個 PR 用得到，碰不到 main 的快取
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.gradle/caches/modules-2/files-2.1
+            ~/.gradle/caches/modules-2/metadata-*
+            !~/.gradle/caches/modules-2/*.lock
+            !~/.gradle/caches/modules-2/gc.properties
+          key: gradle-deps-${{ runner.os }}-${{ hashFiles('relay/asn/src-tauri/gen/android/**/*.gradle', 'relay/asn/src-tauri/gen/android/**/*.gradle.kts', 'relay/asn/src-tauri/gen/android/gradle.properties', 'relay/asn/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-deps-${{ runner.os }}-
+
       - name: 編 Kotlin（Android，不含 Rust .so）
         working-directory: relay/asn/src-tauri/gen/android
         # 下載 gradle 發行包碰到 5xx／逾時才重試（wrapper 自己只試一次），最多 3 次；編譯錯誤照常立刻紅
