@@ -1260,9 +1260,9 @@ impl Core {
         self.note_known_windows(now);
         let asn = self.cfg.report_asn_window.then(|| self.relay.window_name());
         // 摘要要讀設定檔、偵測 CLI（會開外部程序），放到背景執行緒，不卡住收信的主迴圈
-        let launcher = match self.launcher.clone() {
-            Some(l) => tokio::task::spawn_blocking(move || l.summary()).await.unwrap_or(Value::Null),
-            None => Value::Null,
+        let (launcher, closed_reason) = match self.launcher.clone() {
+            Some(l) => tokio::task::spawn_blocking(move || (l.summary(), l.closed_reason())).await.unwrap_or((Value::Null, None)),
+            None => (Value::Null, None),
         };
         // 本機執行中的代理（claude -p／pi／codex／gemini…）：僅顯示、不可收信；讀程序放背景執行緒，開關見 procscan::enabled
         // 已登記成可收信視窗的 pi（擴充登記的 pid）不再重複列成僅顯示條目
@@ -1286,6 +1286,9 @@ impl Core {
         let body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
         // 靠舊環境變數名才拿到設定的舊名（只送名字；新版一律帶，沒用到是空陣列）
         let mut body = roster::with_legacy_env(body, (self.legacy_src)());
+        // 平台與「不開放遠端開新視窗」的原因：兩鍵一起送（後台每次整列覆寫）；開放時原因送 null 才會清掉舊值。launcher 欄維持 null 的語意不變
+        body["platform"] = json!(crate::relay::platform_name());
+        body["launch_closed_reason"] = json!(closed_reason);
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {
