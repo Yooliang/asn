@@ -418,6 +418,16 @@ async fn report_accounts(relay: Arc<Relay>, work_dir: std::path::PathBuf) -> Res
 #[cfg(desktop)]
 async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, write: &(impl Fn(String) + Sync)) -> Result<Value, String> {
     let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
+    // 使用中帳號的方案有變動就記一行（用這次回報本來就要送的 list，沒有新增讀取；只記方案值與欄位名）
+    {
+        static PLAN_LOG: std::sync::Mutex<Option<claude_accounts::PlanLog>> = std::sync::Mutex::new(None);
+        if let Some(cur) = list.iter().find(|a| a.current) {
+            let line = PLAN_LOG.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).observe(&cur.plan, cur.plan_from);
+            if let Some(line) = line {
+                write(line);
+            }
+        }
+    }
     // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
     // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
@@ -3076,6 +3086,8 @@ pub fn run() {
     launch::term::set_ui_log_dir(&work_dir);
     #[cfg(desktop)]
     launch::pretrust::set_log_dir(&work_dir);
+    #[cfg(desktop)]
+    login_watch::set_log_dir(&work_dir);
     #[cfg(windows)]
     auth::set_dpapi_log_dir(&exit_log_dir);
     // 共用終端服務（mux）掛掉要有人知道：偵測、通知、接回（#596 第 4 項）。沒開 mux 模式時什麼都不做
