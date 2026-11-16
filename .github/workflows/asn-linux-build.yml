@@ -12,6 +12,7 @@ on:
       - 'supabase/functions/_shared/login_domains.json'
       - 'supabase/functions/_shared/secret_remote.ts'
       - '.github/workflows/asn-linux-build.yml'
+      - '.github/scripts/retry-external.sh'
   pull_request:
     paths:
       - 'relay/asn/**'
@@ -22,6 +23,7 @@ on:
       - 'supabase/functions/_shared/login_domains.json'
       - 'supabase/functions/_shared/secret_remote.ts'
       - '.github/workflows/asn-linux-build.yml'
+      - '.github/scripts/retry-external.sh'
   workflow_dispatch:
 
 # 整支 workflow 只讀（#947）：所有 job 只跑測試、建置與上傳成品，都不需要寫入 repo。
@@ -54,6 +56,11 @@ jobs:
       - name: 測試執行器本身的單元測試
         if: matrix.shard == 1
         run: node --test tests/run_root_tests.test.mjs
+
+      # 外部下載重試的判斷（.github/scripts/retry-external.sh）：429、5xx、逾時才退避重試，其他立刻失敗。用真實 log 的寫法逐條比對（main c259abe0 的 429 曾被判成不重試）
+      - name: CI 外部下載重試判斷的測試
+        if: matrix.shard == 1
+        run: node --test tests/retry_external.test.mjs
 
       - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）＋登入網域清單的一致性測試
         timeout-minutes: 10 # 最後一道防線（#1379）：#1383 分 2 份＋每份 4 支並行後 CI 實測這一步 1 分 30 秒～2 分（原本一支一支跑約 10～17 分）；留足 CI 機器忙時的餘裕
