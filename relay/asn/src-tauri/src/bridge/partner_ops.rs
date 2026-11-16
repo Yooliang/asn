@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 const KNOWN_OPS: [&str; 8] = ["info", "rename", "model", "close", "handover", "resume", "restart", "remove"];
 pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
-pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
+pub(crate) const CONSENT_OFF: &str = super::launcher::TERM_NO_CONSENT; // 與 asn終端的閘門共用同一句
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
 /// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、換班接手；其他操作與 Claude 以外的夥伴一律回這句
 pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
@@ -89,7 +89,7 @@ pub(crate) fn handoff_path(base: &Path, key: &str, now_ms: u64) -> Option<PathBu
 /// 作業系統與本機設定這一側（測試換成假的）
 pub(crate) trait OpsEnv: Send + Sync {
     fn os(&self) -> &dyn Os;
-    /// 本機設定「允許遠端開視窗與管理視窗」現在是開的嗎（每次現讀，不快取）
+    /// 本機設定「允許我的其他設備替這台開新視窗」現在是開的嗎（每次現讀，不快取）
     fn allow_remote(&self) -> bool;
     /// 開視窗（乾淨環境）
     fn launch(&self, plan: &Plan) -> Result<(), String>;
