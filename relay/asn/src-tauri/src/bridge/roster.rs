@@ -533,6 +533,43 @@ pub fn partner_body(windows: &[Window], asn_window: Option<&str>) -> Value {
     json!({ "windows": ws })
 }
 
+/// 會讓後台整批跳過 partner_sync 的重複：同名，或同一段對話（session_id 格式和後端的檢查一樣）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDup {
+    /// 去重用的鍵（只含視窗名，不含 session 編號）
+    pub key: String,
+    /// 給人看的說明（只有視窗名）
+    pub what: String,
+}
+
+/// 找出這批視窗裡會讓 partner_sync 整批被跳過的重複，依視窗名排序；沒有重複回空
+pub fn partner_sync_dups(windows: &[Window]) -> Vec<SyncDup> {
+    let quote = |names: &[String]| names.iter().map(|n| format!("「{n}」")).collect::<String>();
+    let mut out: Vec<SyncDup> = Vec::new();
+    let mut by_sid: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for w in windows {
+        if let Some(s) = w.session_id.as_deref().filter(|s| (8..=80).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) {
+            by_sid.entry(s).or_default().push(w.name.clone());
+        }
+    }
+    for names in by_sid.values().filter(|v| v.len() > 1) {
+        let mut distinct = names.clone();
+        distinct.sort();
+        distinct.dedup();
+        let what = if distinct.len() > 1 { format!("視窗{}用的是同一段對話", quote(&distinct)) } else { format!("有 {} 個視窗「{}」用的是同一段對話", names.len(), distinct[0]) };
+        out.push(SyncDup { key: format!("sid:{}", distinct.join("|")), what });
+    }
+    let mut by_name: BTreeMap<&str, usize> = BTreeMap::new();
+    for w in windows {
+        *by_name.entry(w.name.as_str()).or_default() += 1;
+    }
+    for (n, c) in by_name.into_iter().filter(|(_, c)| *c > 1) {
+        out.push(SyncDup { key: format!("name:{n}"), what: format!("有 {c} 個視窗都叫「{n}」") });
+    }
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    out
+}
+
 /// 夥伴 ID 的格式（與後端 partners_id_check 同）：p_ 加 20 個小寫十六進位字元
 pub fn valid_partner_id(s: &str) -> bool {
     s.len() == 22 && s.starts_with("p_") && s[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))

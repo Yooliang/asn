@@ -69,6 +69,32 @@ fn is_claude_process(os: &dyn super::switch::Os, table: &[super::switch::Proc], 
     }
 }
 
+/// 共用規則：sessions 記錄的 pid 現在是不是一個活著的 claude 程序。
+/// 名單、partner_sync、喚醒與交接的「這個視窗還在不在」都用這一條（程序活著且是 claude；不看 startedAt）
+pub(crate) fn live_claude_pid(os: &dyn super::switch::Os, table: &[super::switch::Proc], pid: u32) -> bool {
+    pid != 0 && os.alive(pid) && is_claude_process(os, table, pid)
+}
+
+/// 用真實作業系統判斷「這個 pid 是不是 claude 程序」（不含存活檢查，呼叫端另外查）。
+/// 程序表短時間內共用一份（名單每輪要問好幾個 pid，不用每個都重抓一次）；非 Windows 查不到程序名，一律當是（維持只看存活）
+#[cfg(windows)]
+pub(crate) fn real_is_claude(pid: u32) -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, Vec<super::switch::Proc>)>> = Mutex::new(None);
+    let os = super::switch::RealOs;
+    let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if g.as_ref().is_none_or(|(at, _)| at.elapsed() > Duration::from_secs(3)) {
+        *g = Some((Instant::now(), super::switch::Os::processes(&os)));
+    }
+    let table = g.as_ref().map(|(_, t)| t.as_slice()).unwrap_or(&[]);
+    is_claude_process(&os, table, pid)
+}
+#[cfg(not(windows))]
+pub(crate) fn real_is_claude(_pid: u32) -> bool {
+    true
+}
+
 /// 要略過的程序：自己、自己的祖先與後代（同一個視窗的外殼與子程序，命令列常帶一樣的 --resume）
 fn related_to(table: &[super::switch::Proc], pid: u32, ignore: Option<u32>) -> bool {
     ignore.is_some_and(|t| pid == t || super::switch::ancestors(table, pid).contains(&t) || super::switch::ancestors(table, t).contains(&pid))
@@ -84,7 +110,7 @@ pub(crate) fn file_holders(os: &dyn super::switch::Os, sessions: &[Value], sessi
     let mut out: Vec<Holder> = Vec::new();
     for s in sessions.iter().filter(|s| s.get("sessionId").and_then(Value::as_str) == Some(session)) {
         let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
-        if pid == 0 || out.iter().any(|h| h.pid == pid) || related_to(&table, pid, ignore) || !os.alive(pid) || !is_claude_process(os, &table, pid) {
+        if pid == 0 || out.iter().any(|h| h.pid == pid) || related_to(&table, pid, ignore) || !live_claude_pid(os, &table, pid) {
             continue;
         }
         let name = s.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
@@ -258,6 +284,21 @@ mod tests {
         // node 跑 claude 的 cli 算
         os.cmd = vec![(13148, r"node.exe C:\x\@anthropic-ai\claude-code\cli.js".into())];
         assert_eq!(session_holders(&os, &sessions, SID, None).len(), 1);
+    }
+
+    #[test]
+    fn 共用判活規則_活著且是_claude_才算_不看_startedAt() {
+        let (mut os, _) = hand_opened();
+        let table = os.processes();
+        assert!(live_claude_pid(&os, &table, 13148), "startedAt 比程序建立時間早很多也算（名單、夥伴同步、喚醒共用這一條）");
+        assert!(!live_claude_pid(&os, &table, 0));
+        assert!(!live_claude_pid(&os, &table, 999), "不存在的 pid");
+        os.procs[1] = proc(13148, 100, "chrome.exe");
+        os.cmd = vec![(13148, "chrome.exe --type=renderer".into())];
+        assert!(!live_claude_pid(&os, &os.processes(), 13148), "同一個 pid 變成別的程式");
+        os.alive.retain(|p| *p != 13148);
+        os.procs[1] = proc(13148, 100, "claude.exe");
+        assert!(!live_claude_pid(&os, &os.processes(), 13148), "已結束");
     }
 
     #[test]

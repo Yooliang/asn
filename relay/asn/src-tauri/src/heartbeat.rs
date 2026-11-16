@@ -141,9 +141,10 @@ pub fn process_start_secs(_pid: u32) -> Option<u64> {
 }
 
 #[cfg(desktop)]
-/// session 檔記的 pid 現在還是「那個視窗的程序」：程序活著，而且不是 session 開始之後才建立的（pid 被重用）
-pub fn session_alive(pid: u32, started_at_ms: u64) -> bool {
-    pid_alive(pid) && crate::bridge::roster::same_process(started_at_ms, process_started_ms(pid))
+/// session 檔記的 pid 現在還是「那個視窗的程序」：程序活著，而且是 claude 程序（和名單、喚醒共用同一條規則，見 live_process）。
+/// 不再用 startedAt 去猜：從舊對話接回的視窗，記錄的 startedAt 會比程序建立時間早很多，那樣會被誤判成 pid 被重用
+pub fn session_alive(pid: u32, _started_at_ms: u64) -> bool {
+    pid_alive(pid) && crate::launch::live_process::real_is_claude(pid)
 }
 
 /// 這個 pid 的執行檔是不是 asn（查不到回 None，呼叫端當作「可能是」）
