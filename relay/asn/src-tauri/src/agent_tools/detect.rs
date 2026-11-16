@@ -35,7 +35,7 @@ fn path_candidates(path: &std::ffi::OsStr, pathext: &str, name: &str) -> Vec<Pat
 /// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）；找不到再看官方安裝程式固定放的位置。
 pub fn resolve_binary(name: &str) -> Option<PathBuf> {
     resolve_on_path(name)
-        .or_else(|| known_home_binary(&crate::identity::home_dir(), name))
+        .or_else(|| known_home_binary_real(name))
         .or_else(|| package_manager_binary(name))
 }
 
@@ -75,12 +75,23 @@ fn find_in_dirs(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
     dirs.iter().flat_map(|d| files.iter().map(move |f| d.join(f))).find(|p| p.is_file())
 }
 
-/// 官方安裝程式把執行檔放在家目錄底下、而且不一定加進 PATH 的工具：Grok 在 ~/.grok/bin（否則偵測與「開新夥伴」永遠說它沒安裝）
-fn known_home_binary(home: &std::path::Path, name: &str) -> Option<PathBuf> {
-    if name != "grok" {
+/// 測試用假的執行檔資料夾時不看真實家目錄（不然這台剛好裝了 claude／grok，測試就分不出「沒有」；同 package_manager_binary）
+fn known_home_binary_real(name: &str) -> Option<PathBuf> {
+    if crate::envc::get("ASN_MOCK_BIN_DIR").is_some() {
         return None;
     }
-    ["grok.exe", "grok"].iter().map(|n| home.join(".grok").join("bin").join(n)).find(|p| p.is_file())
+    known_home_binary(&crate::identity::home_dir(), name)
+}
+
+/// 官方安裝程式把執行檔放在家目錄底下、而且不一定加進 PATH 的工具（否則偵測與「開新夥伴」永遠說它沒安裝）：
+/// Grok 在 ~/.grok/bin；Claude Code 在 ~/.local/bin（Windows 是 claude.exe）
+fn known_home_binary(home: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let (dir, files): (PathBuf, [&str; 2]) = match name {
+        "grok" => (home.join(".grok").join("bin"), ["grok.exe", "grok"]),
+        "claude" => (home.join(".local").join("bin"), ["claude.exe", "claude"]),
+        _ => return None,
+    };
+    files.iter().map(|n| dir.join(n)).find(|p| p.is_file())
 }
 
 fn resolve_on_path(name: &str) -> Option<PathBuf> {
@@ -134,8 +145,29 @@ mod tests {
         let exe = bin.join(if cfg!(windows) { "grok.exe" } else { "grok" });
         std::fs::write(&exe, b"x").unwrap();
         assert_eq!(known_home_binary(&home, "grok"), Some(exe));
-        assert_eq!(known_home_binary(&home, "claude"), None, "只有 grok 有這個固定位置");
+        assert_eq!(known_home_binary(&home, "codex"), None, "只有 grok、claude 有這個固定位置");
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn claude_不在_path_時看家目錄的_local_bin() {
+        let home = std::env::temp_dir().join(format!("asn-detect-claude-home-{}", std::process::id()));
+        let bin = home.join(".local").join("bin");
+        assert_eq!(known_home_binary(&home, "claude"), None, "沒裝＝找不到，不能憑空造出路徑");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join(if cfg!(windows) { "claude.exe" } else { "claude" });
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(known_home_binary(&home, "claude"), Some(exe));
+        assert_eq!(known_home_binary(&home, "grok"), None, "claude 的位置不能讓 grok 也被找到");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn 家目錄的固定位置在_mock_資料夾模式下不看() {
+        let src = include_str!("detect.rs");
+        let body = &src[src.find("fn known_home_binary_real").unwrap()..];
+        let body = &body[..body.find("\n}").unwrap()];
+        assert!(body.contains("ASN_MOCK_BIN_DIR"), "{body}");
     }
 
     #[test]

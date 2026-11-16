@@ -164,6 +164,25 @@ pub fn bootstrap_config() -> Option<(HashMap<String, Profile>, Vec<PathBuf>, u32
 }
 
 #[cfg(test)]
+mod claude_command_tests {
+    use super::*;
+
+    /// 開視窗實際執行的是偵測到的完整路徑（官方安裝程式的 ~/.local/bin 不在 PATH 時，叫裸名字 claude 會找不到）
+    #[test]
+    fn claude_的啟動指令是偵測到的完整路徑() {
+        let profiles = build_default_profiles(&home_dir());
+        match resolve_binary("claude") {
+            Some(exe) => {
+                let c = &profiles["claude"].command;
+                assert_eq!(Path::new(c), exe.as_path());
+                assert!(Path::new(c).is_absolute() || exe.is_absolute(), "{c}");
+            }
+            None => assert!(!profiles.contains_key("claude"), "沒偵測到就不產生 claude 設定"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod pi_tests {
     use super::*;
 

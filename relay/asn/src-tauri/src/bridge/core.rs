@@ -182,7 +182,7 @@ impl Config {
             forward_exact_unverified: std::env::var("ASN_FORWARD_EXACT_UNVERIFIED").is_ok_and(|v| v.trim() == "1"),
             forward_hook,
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
-            claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
+            claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| crate::agent_tools::resolve_binary("claude").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "claude".into())),
             claude_pre: vec![],
             model: crate::envc::get("ASN_MAILBOX_MODEL").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "haiku".into()),
             extra_env: vec![],

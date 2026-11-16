@@ -49,7 +49,9 @@ pub fn open_login_terminal(def: &ToolDef) -> Result<(), String> {
     if def.login_argv.is_empty() {
         return Err("此工具請在官方應用程式內登入".into());
     }
-    let bin = def.binary.as_str();
+    // 偵測得到的可能不在 PATH（官方安裝程式放在 ~/.local/bin）：開終端機要用偵測到的完整路徑，不能再叫裸名字
+    let resolved = super::detect::resolve_binary(&def.binary).map(|p| p.to_string_lossy().into_owned());
+    let bin = resolved.as_deref().unwrap_or(def.binary.as_str());
     let args: Vec<String> = def.login_argv.clone();
     spawn_interactive_terminal(bin, &args)
 }
@@ -83,22 +85,32 @@ fn run_verified(def: &ToolDef) -> Result<String, String> {
     }
 }
 
+/// Windows 登入終端機的指令列：程式路徑一律加引號（可能含空白或中文資料夾），含空白的參數也加
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_login_cmdline(program: &str, args: &[String]) -> String {
+    let mut cmdline = format!("\"{program}\"");
+    for a in args {
+        cmdline.push(' ');
+        if a.contains(' ') {
+            cmdline.push('"');
+            cmdline.push_str(a);
+            cmdline.push('"');
+        } else {
+            cmdline.push_str(a);
+        }
+    }
+    cmdline
+}
+
 fn spawn_interactive_terminal(program: &str, args: &[String]) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let mut cmdline = program.to_string();
-        for a in args {
-            cmdline.push(' ');
-            if a.contains(' ') {
-                cmdline.push('"');
-                cmdline.push_str(a);
-                cmdline.push('"');
-            } else {
-                cmdline.push_str(a);
-            }
-        }
+        use std::os::windows::process::CommandExt;
+        // 整段再包一層引號交給 cmd /k（cmd 會剝掉最外層），路徑有空白也不會被切開；用 raw_arg 避免 Rust 把內層引號跳脫成 \"
         Command::new("cmd")
-            .args(["/C", "start", "", "cmd", "/k", &cmdline])
+            .args(["/C", "start", "", "cmd"])
+            .raw_arg("/k")
+            .raw_arg(format!("\"{}\"", windows_login_cmdline(program, args)))
             .spawn()
             .map_err(|e| format!("無法開啟登入用終端機：{e}"))?;
         Ok(())
@@ -197,6 +209,19 @@ mod tests {
         for ok in ["if confirm < begin {", "on_activity: Arc::new(move || sh_act.x())", "prepare_with(a, &c, true, |_| short.map(String::from))", "runner.run(pi, &[\"install\".to_string(), ext])"] {
             assert!(suspicious(ok).is_none(), "不該抓：{ok}");
         }
+    }
+
+    #[test]
+    fn 登入終端機的指令列_程式路徑加引號_含空白與中文都不被切開() {
+        let args = vec!["auth".to_string(), "login now".to_string()];
+        assert_eq!(windows_login_cmdline(r"C:\Users\牧 陽\.local\bin\claude.exe", &args), r#""C:\Users\牧 陽\.local\bin\claude.exe" auth "login now""#);
+        assert_eq!(windows_login_cmdline("claude", &[]), r#""claude""#);
+    }
+
+    #[test]
+    fn 登入終端機用偵測到的完整路徑_不再叫裸名字() {
+        let src = include_str!("install.rs");
+        assert!(src.contains("resolve_binary(&def.binary)"), "open_login_terminal 要用 resolve_binary 的結果");
     }
 
     /// 守衛（#933 PR-1）：整個 Rust 程式碼裡不能再有「把下載來的腳本直接執行」或 npm 全域安裝。只看程式碼行（略過 `//` 開頭的註解行）
