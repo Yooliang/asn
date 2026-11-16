@@ -73,7 +73,8 @@ fn 身分解析_主要位置缺金鑰與門鈴時回頭找後備位置_遷移搬
     assert_eq!(id.work_dir, primary.join("machine-T"), "工作資料夾仍放主要位置");
 }
 
-// session 檔留著，但那個 pid 已經是別的程序（建立時間晚於 session 開始）：這份不算，往上找或拒絕
+// session 檔留著，但那個 pid 已經是別的程式（不是 claude）：這份不算，往上找或拒絕；
+// 手開、從舊對話接回的視窗（startedAt 比程序建立時間早很多）照常認得
 #[test]
 fn 呼叫者_session_檔的程序已經不是同一個_不算() {
     use super::super::caller::{find_caller, inspect};
@@ -85,11 +86,14 @@ fn 呼叫者_session_檔的程序已經不是同一個_不算() {
     // 同一個程序（建立時間在 session 開始之前）：照常認得
     env.started = Arc::new(move |p| (p == CLAUDE_PID).then_some(started_at - 5_000));
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
-    // 查不到建立時間：照舊認得（和名單同一條規則）
+    // 查不到建立時間：照舊認得
     env.started = Arc::new(|_| None);
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
-    // pid 被別的程序用走了（建立時間在 session 開始很久之後）：不算，找不到就拒絕
+    // 從舊對話接回的手開視窗：程序建立時間比 startedAt 晚很多、但程序是 claude：認得（舊規則 60 秒就判成不是）
     env.started = Arc::new(move |p| (p == CLAUDE_PID).then_some(started_at + 3_600_000));
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗", "是 claude 程序就算，不看 startedAt");
+    // pid 被別的程式用走了（程序已不是 claude）：不算，找不到就拒絕
+    env.is_claude = Arc::new(|p| p != CLAUDE_PID);
     let err = find_caller(&env, "寄信").unwrap_err();
     assert!(err.msg.contains("找不到呼叫者所屬的 Claude 視窗"), "{}", err.msg);
     let ev = inspect(&env);
@@ -99,7 +103,7 @@ fn 呼叫者_session_檔的程序已經不是同一個_不算() {
     env.procs = Arc::new(|| Ok(ProcTable::new()));
     env.socket = Some("sock-1".into());
     assert!(find_caller(&env, "寄信").is_err(), "pid 被用走時，環境變數也對不上");
-    env.started = Arc::new(|_| None);
+    env.is_claude = Arc::new(|_| true);
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "舊視窗");
 }
 

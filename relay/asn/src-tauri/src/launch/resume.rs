@@ -3,7 +3,8 @@
 //! （`custom-title`／`agent-name`，/rename 與 `-n` 都會寫）就是這段對話現在的名字；名字相同的檔取最近修改的那個，
 //! 把它的 sessionId 以 `--resume <sessionId>` 放進啟動參數。找不到就維持原樣（新開）。
 //! 只讀標題那幾行，不解析、不外傳對話內容。這個檔案格式是 Claude Code 的內部格式：認不得就當沒有，退回新開，不會擋啟動。
-//! 守門：同名視窗還開著、或那段對話正被另一個活著的視窗使用時不接續（兩個視窗寫同一段對話會互相覆蓋）。
+//! 守門：同名視窗還開著時不接續（照舊直接新開）；那段對話正被另一個活著的視窗使用（手開、被改過名字的也算）時，
+//! 不再悄悄改開新對話，而是回錯誤請使用者切過去（兩個視窗寫同一段對話會互相覆蓋）。
 use serde_json::Value;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -96,36 +97,49 @@ fn has_session_flags(args: &[String]) -> bool {
     args.iter().any(|a| matches!(a.as_str(), "--resume" | "-r" | "--continue" | "-c" | "--session-id" | "--fork-session") || a.starts_with("--resume=") || a.starts_with("--session-id="))
 }
 
-/// 有同名、或同編號的活視窗就回 true
-fn live_conflict(sessions: &[Value], name: &str, sid: &str, alive: &dyn Fn(u32) -> bool) -> bool {
-    sessions.iter().any(|s| {
-        let same = s.get("name").and_then(Value::as_str) == Some(name) || s.get("sessionId").and_then(Value::as_str) == Some(sid);
-        same && s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).map(alive).unwrap_or(false)
-    })
+/// 有同名的活視窗就回 true（對話編號的衝突改看 live_process::session_holders，不在這裡）
+fn live_conflict(sessions: &[Value], name: &str, alive: &dyn Fn(u32) -> bool) -> bool {
+    sessions.iter().any(|s| s.get("name").and_then(Value::as_str) == Some(name) && s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).map(alive).unwrap_or(false))
 }
 
-/// 在 claude 的啟動參數最前面加 `--resume <sessionId>`；回傳接續的 sessionId（沒加就是 None）。
-/// `config_dir`＝Claude 設定資料夾（有 projects 與 sessions 兩個子資料夾）。
-pub(super) fn apply_resume(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str, config_dir: &Path, alive: &dyn Fn(u32) -> bool) -> Option<String> {
+/// 這段對話已經有活著的視窗開著時給使用者看的說明
+fn sid_conflict_error(holders: &[super::live_process::Holder]) -> String {
+    let which = super::live_process::holder_name(holders).map(|n| format!("（{n}）")).unwrap_or_default();
+    format!("這段對話已經有視窗開著{which}，請直接切過去；要開新的夥伴，請換一個名字，或先關掉那個視窗")
+}
+
+/// 在 claude 的啟動參數最前面加 `--resume <sessionId>`；回傳接續的 sessionId（沒加就是 Ok(None)）。
+/// 同名視窗還活著就不接續（Ok(None)，照舊）；那段對話已被別的活視窗用著則回 Err（說明給使用者看），不悄悄改開新對話。
+/// `config_dir`＝Claude 設定資料夾（有 projects 與 sessions 兩個子資料夾）；`holders`＝查某段對話現在有哪些活視窗在用。
+pub(super) fn apply_resume(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str, config_dir: &Path, alive: &dyn Fn(u32) -> bool, holders: &dyn Fn(&str) -> Vec<super::live_process::Holder>) -> Result<Option<String>, String> {
     if !(engine == "claude" || engine.is_empty()) || !is_claude_command(command) || has_session_flags(args) {
-        return None;
+        return Ok(None);
     }
-    let sid = find_latest_session(&config_dir.join("projects"), cwd, name)?;
-    if live_conflict(&super::console::read_sessions(&config_dir.join("sessions")), name, &sid, alive) {
-        return None;
+    let Some(sid) = find_latest_session(&config_dir.join("projects"), cwd, name) else { return Ok(None) };
+    if live_conflict(&super::console::read_sessions(&config_dir.join("sessions")), name, alive) {
+        return Ok(None);
+    }
+    let held = holders(&sid);
+    if !held.is_empty() {
+        return Err(sid_conflict_error(&held));
     }
     args.splice(0..0, ["--resume".to_string(), sid.clone()]);
-    Some(sid)
+    Ok(Some(sid))
 }
 
-/// 真實環境：Claude 設定資料夾與程序存活判斷
-pub(super) fn apply_resume_real(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str) -> Option<String> {
-    let dir = super::console::sessions_dir()?.parent()?.to_path_buf();
+/// 真實環境：Claude 設定資料夾與程序存活判斷。找不到設定資料夾就當沒有舊對話（Ok(None)）
+pub(super) fn apply_resume_real(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str) -> Result<Option<String>, String> {
+    let Some(dir) = super::console::sessions_dir().and_then(|d| d.parent().map(|p| p.to_path_buf())) else { return Ok(None) };
     #[cfg(windows)]
     let alive = |p: u32| super::console::win::pid_alive(p);
     #[cfg(not(windows))]
     let alive = |_p: u32| false;
-    apply_resume(args, command, engine, name, cwd, &dir, &alive)
+    let sessions_dir = dir.join("sessions");
+    let holders = |sid: &str| {
+        let os = super::switch::RealOs;
+        super::live_process::session_holders(&os, &super::switch::Os::processes(&os), &super::console::read_sessions(&sessions_dir), sid, None)
+    };
+    apply_resume(args, command, engine, name, cwd, &dir, &alive, &holders)
 }
 
 #[cfg(test)]
@@ -157,6 +171,15 @@ mod tests {
 
     fn no_alive(_: u32) -> bool {
         false
+    }
+
+    /// 沒有任何視窗佔著對話編號的情況下呼叫 apply_resume，回傳值照舊用 Option 比對（Err 一律當測試失敗）
+    fn ar(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str, dir: &Path, alive: &dyn Fn(u32) -> bool) -> Option<String> {
+        apply_resume(args, command, engine, name, cwd, dir, alive, &|_| Vec::new()).unwrap()
+    }
+
+    fn holder(pid: u32, name: Option<&str>) -> super::super::live_process::Holder {
+        super::super::live_process::Holder { pid, name: name.map(str::to_string) }
     }
 
     #[test]
@@ -220,7 +243,7 @@ mod tests {
         let cwd = "/w/p";
         mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
         let mut a = s(&["--dangerously-skip-permissions", "-n", "小良", "--remote-control", "小良"]);
-        let r = apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive);
+        let r = ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive);
         assert_eq!(r.as_deref(), Some("sess-1"));
         assert_eq!(a, s(&["--resume", "sess-1", "--dangerously-skip-permissions", "-n", "小良", "--remote-control", "小良"]));
     }
@@ -233,22 +256,22 @@ mod tests {
         let base = s(&["-n", "小良"]);
         // 沒有舊對話
         let mut a = base.clone();
-        assert!(apply_resume(&mut a, "claude", "claude", "沒有", cwd, d.path(), &no_alive).is_none());
+        assert!(ar(&mut a, "claude", "claude", "沒有", cwd, d.path(), &no_alive).is_none());
         assert_eq!(a, base);
         // 不是 claude 引擎或指令
-        assert!(apply_resume(&mut a, "claude", "codex", "小良", cwd, d.path(), &no_alive).is_none());
-        assert!(apply_resume(&mut a, "cmd.exe", "claude", "小良", cwd, d.path(), &no_alive).is_none());
+        assert!(ar(&mut a, "claude", "codex", "小良", cwd, d.path(), &no_alive).is_none());
+        assert!(ar(&mut a, "cmd.exe", "claude", "小良", cwd, d.path(), &no_alive).is_none());
         assert_eq!(a, base);
         // 使用者自己的 profile 已經指定接續
         for flag in ["--resume", "-c", "--continue", "--session-id", "-r"] {
             let mut a = s(&[flag, "x"]);
-            assert!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive).is_none(), "{flag}");
+            assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive).is_none(), "{flag}");
             assert_eq!(a, s(&[flag, "x"]));
         }
     }
 
     #[test]
-    fn 同名或同編號的視窗還活著_不接續() {
+    fn 同名的視窗還活著_不接續() {
         let d = tempfile::tempdir().unwrap();
         let cwd = "/w/p";
         mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
@@ -257,15 +280,33 @@ mod tests {
         // 同名但已結束的記錄不擋
         std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"小良","sessionId":"zzz","kind":"interactive"}"#).unwrap();
         let mut a = s(&["-n", "小良"]);
-        assert!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p != 11).is_some());
+        assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p != 11).is_some());
         // 同名活著
         let mut a = s(&["-n", "小良"]);
-        assert!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11).is_none());
-        // 換個名字但同一段對話正被別的視窗開著
-        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"別名","sessionId":"sess-1"}"#).unwrap();
+        assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11).is_none());
+    }
+
+    /// 換個名字但同一段對話正被別的視窗開著：不再悄悄改開新對話，回要使用者看的錯誤（舊程式回 None＝靜默開新，這裡會紅）
+    #[test]
+    fn 同一段對話被別名視窗開著_回錯誤_不靜默開新() {
+        let d = tempfile::tempdir().unwrap();
+        let cwd = "/w/p";
+        mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
         let mut a = s(&["-n", "小良"]);
-        assert!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11).is_none());
-        assert_eq!(a, s(&["-n", "小良"]));
+        let held = |sid: &str| if sid == "sess-1" { vec![holder(11, Some("別名"))] } else { Vec::new() };
+        let e = apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
+        assert_eq!(e, "這段對話已經有視窗開著（別名），請直接切過去；要開新的夥伴，請換一個名字，或先關掉那個視窗");
+        assert_eq!(a, s(&["-n", "小良"]), "不改啟動參數");
+        // 名字取不到就省略括號那段
+        let held = |_: &str| vec![holder(11, None)];
+        let e = apply_resume(&mut s(&["-n", "小良"]), "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
+        assert!(e.contains("這段對話已經有視窗開著，請直接切過去") && e.contains("請換一個名字，或先關掉那個視窗") && !e.contains('（'), "{e}");
+        // 同名活著照舊：不接續、不報錯，直接新開
+        let sd = d.path().join("sessions");
+        std::fs::create_dir_all(&sd).unwrap();
+        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"小良","sessionId":"zzz"}"#).unwrap();
+        let mut a = s(&["-n", "小良"]);
+        assert_eq!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11, &held), Ok(None));
     }
 
     /// 守門：兩條開視窗的路徑（本機 UI、遠端 launch）都要呼叫接續；測試用的隱藏視窗不查真實的對話檔

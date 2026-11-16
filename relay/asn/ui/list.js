@@ -814,6 +814,8 @@ async function setArchived(f, archived) {
   archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
 }
 function closeOpDlg() { opDlg.open = false }
+// 喚醒找不到對話紀錄：關掉操作對話框，改開「新增夥伴」，預選原夥伴所在的電腦
+function launchNewFromOp(e) { closeOpDlg(); openPartnerDlg(e?.node || '') }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
 const buddyConsole = reactive({ state: 'none', visible: true, reason: '' })
 // 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
@@ -2199,7 +2201,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
-      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,

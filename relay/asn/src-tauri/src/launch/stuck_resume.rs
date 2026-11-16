@@ -113,9 +113,9 @@ pub(crate) fn identify(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSess], 
     if rows.next().is_some() {
         return Err(NotStuck::Other);
     }
-    let mut pids = live_process::resuming_pids(os, sid).ok_or(NotStuck::Other)?;
-    pids.sort_unstable();
     let table = os.processes();
+    let mut pids = live_process::resuming_pids(os, &table, sid).ok_or(NotStuck::Other)?;
+    pids.sort_unstable();
     if touches_live_session(os, &table, &pids, live) {
         return Err(NotStuck::Online);
     }
@@ -173,7 +173,7 @@ pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[Partne
 /// 滿 5 分鐘但不符合（不是 ASN 開的、對不上）→ 原本的「先關掉那個終端」；未滿 5 分鐘 → 請稍候。
 /// `live` 是現在有活 session 檔的（對話編號, 程序編號），判斷與工作管理員一致
 pub(crate) fn resume_block_hint(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSess], sid: &str, now_ms: u64) -> &'static str {
-    let started = live_process::resuming_pids(os, sid).and_then(|p| live_process::earliest_started_ms(os, &p));
+    let started = live_process::resuming_pids(os, &os.processes(), sid).and_then(|p| live_process::earliest_started_ms(os, &p));
     let base = live_process::resume_block_hint(now_ms, started);
     if base == live_process::STUCK_HINT && identify(os, partners, live, sid, now_ms).is_ok_and(|s| s.stuck) {
         return STUCK_IN_TASKMGR_HINT;

@@ -4,7 +4,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
+import { ACP_NEWCONV_LABEL, ADOPT_ACK, LAUNCH_NEW_ACTION, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
 
@@ -32,7 +32,10 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
   const sentAt = now()
   let id = ''
   try { id = (await api.partnerOp(buildOpRequest(friend, op, input)))?.id ?? '' } catch (e) {
-    const v = failView(opErrorText(e?.message)); onUpdate(v); return v
+    const v = failView(opErrorText(e?.message))
+    // 後台在送出時就回 no_session（這位夥伴沒有可接回的對話紀錄）：和電腦端回報找不到紀錄一樣，附「開新夥伴」
+    if (op === 'resume' && /HTTP \d+ ?no_session\b/.test(String(e?.message ?? ''))) v.action = { kind: LAUNCH_NEW_ACTION }
+    onUpdate(v); return v
   }
   if (!id) { const v = failView('送出失敗，請稍後再試'); onUpdate(v); return v }
   onUpdate(progressView(null, { op, sentAt, now: now() }))
@@ -121,7 +124,7 @@ export const PartnerOpDialog = {
     selfNode: { type: String, default: '' },   // 這台電腦的節點：「接進收發室」只能接自己這台的視窗
     taken: { type: Array, default: () => [] },  // 名單上這台電腦已經用掉的名字（視窗、pi、夥伴紀錄）：「接進收發室」撞名檢查
   },
-  emits: ['close', 'done'],
+  emits: ['close', 'done', 'launch-new'],
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
@@ -173,6 +176,8 @@ export const PartnerOpDialog = {
       if (v?.phase === 'done') emit('done', { op: props.op, view: v, newName: form.newName })
     }
     function close() { closed = true; emit('close') }
+    // 喚醒找不到對話紀錄時：關掉這個對話框，請畫面開「開新夥伴」（用原夥伴所在的電腦）
+    function launchNew() { closed = true; emit('launch-new', { node: props.friend.node }) }
     onMounted(() => {
       if (isSelfPull) {
         form.newName = ''
@@ -182,7 +187,7 @@ export const PartnerOpDialog = {
       if (pi.loading) void loadPiModels()
     })
     onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, name, pi, piNote, acpModels, isSelfPull }
+    return { text, form, st, submit, close, launchNew, name, pi, piNote, acpModels, isSelfPull }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
@@ -228,7 +233,10 @@ export const PartnerOpDialog = {
     <p class="launch-notice-body" v-for="l in (st.view && st.view.extra) || []" :key="l">{{ l }}</p>
     <dl class="op-rows" v-if="st.view && st.view.rows && st.view.rows.length"><template v-for="r in st.view.rows" :key="r.label"><dt>{{ r.label }}</dt><dd>{{ r.value }}</dd></template></dl>
     <p class="launch-notice-body" v-if="st.view && st.view.rows && !st.view.rows.length">沒有更多資料。</p>
-    <div class="partner-actions"><button class="aero-btn" type="button" @click="close">{{ st.view && st.view.done ? '關閉' : '先關掉（照常進行）' }}</button></div>
+    <div class="partner-actions">
+      <button class="aero-btn primary" type="button" v-if="st.view && st.view.action && st.view.action.kind === 'launch-new'" @click="launchNew">開新夥伴</button>
+      <button class="aero-btn" type="button" @click="close">{{ st.view && st.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+    </div>
   </template>
 </asn-dialog>`,
 }

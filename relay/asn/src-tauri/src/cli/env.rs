@@ -32,7 +32,9 @@ pub struct Env {
     pub procs: Arc<dyn Fn() -> Result<ProcTable, String> + Send + Sync>,
     /// pid 是否還活著
     pub alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
-    /// 程序建立時間（毫秒）；查不到＝None。用來分辨 session 檔記的程序和現在這個 pid 是不是同一個
+    /// 這個 pid 現在是不是 claude 程序（session 檔的 pid 被別的程式用走就不算；和名單、喚醒共用同一條規則）
+    pub is_claude: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// 程序建立時間（毫秒）；查不到＝None。用來核對「接進收發室的視窗」登記的程序還是不是同一個
     pub started: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>,
     /// recv --watch 的輪詢間隔（ASN_RECV_POLL_MS）
     pub poll_ms: u64,
@@ -93,6 +95,7 @@ impl Env {
             send_per_hour: num("ASN_SEND_PER_HOUR", 30) as usize,
             procs: Arc::new(super::caller::process_table),
             alive: Arc::new(crate::heartbeat::pid_alive),
+            is_claude: Arc::new(crate::launch::live_process::real_is_claude),
             started: Arc::new(crate::heartbeat::process_started_ms),
             poll_ms: num("ASN_RECV_POLL_MS", 120_000),
             secret_poll_ms: 2_000,

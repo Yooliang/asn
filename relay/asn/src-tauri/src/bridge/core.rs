@@ -328,8 +328,12 @@ pub struct Core {
     pub parser: Parser,
     pub log: Arc<BridgeLog>,
     alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
-    /// pid → 程序建立時間（毫秒）；拿來分辨 session 檔的 pid 是不是被別的程序重用（測試可換）
+    /// pid → 程序建立時間（毫秒）；自帶視窗（self_windows）判斷 pid 是否被重用用（測試可換）
     created: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>,
+    /// pid → 是不是 claude 程序；名單判活用（活著而且是 claude，和 live_process 同一條規則）。測試預設一律是，要測的自己換
+    claude_check: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// 已經記過 log 的「重複視窗」組（只存視窗名組成的鍵）；同一組不每輪都記，重複消失後再出現會再記一次
+    sync_dup_told: HashSet<String>,
     now: u64,
     pub roster: Vec<Window>,
     pub roster_ok: bool,
@@ -567,7 +571,7 @@ impl Core {
         let (outbox, outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
-            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
+            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
@@ -706,6 +710,23 @@ impl Core {
 
     pub fn set_created(&mut self, f: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>) {
         self.created = f;
+    }
+    /// 換掉「這個 pid 是不是 claude 程序」的判斷（測試用；正式用 live_process::real_is_claude）
+    #[cfg(test)]
+    pub fn set_claude_check(&mut self, f: Arc<dyn Fn(u32) -> bool + Send + Sync>) {
+        self.claude_check = f;
+    }
+    /// 目前用的「是不是 claude 程序」判斷（遠端開視窗的名單也用同一份，測試換掉時一起換）
+    pub fn claude_check(&self) -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
+        self.claude_check.clone()
+    }
+    #[cfg(not(test))]
+    fn default_claude_check() -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
+        Arc::new(crate::launch::live_process::real_is_claude)
+    }
+    #[cfg(test)]
+    fn default_claude_check() -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
+        Arc::new(|_| true)
     }
     pub fn set_launcher(&mut self, l: Arc<Launcher>) {
         self.launcher = Some(l);
@@ -1202,8 +1223,8 @@ impl Core {
     /// 即時監看（每 watch_ms 一次）：只讀本機 sessions 與外掛狀態檔，名字／狀態／說明和上次回報時不同
     /// （心跳只改 at，不算）且距上次回報已過防抖間隔，就立刻整份回報名單（後台再通知別台設備重拉）。回傳有沒有回報。
     pub async fn watch_local(&mut self, now: u64) -> bool {
-        let (alive, created) = (self.alive.clone(), self.created.clone());
-        let Some(l) = roster::read_local_with(&self.cfg.sessions_dir, &self.cfg.status_dir, |p, st| alive(p) && roster::same_process(st, created(p)), self.sink.pid(), &self.cfg.mailbox_name, now) else {
+        let (alive, claude) = (self.alive.clone(), self.claude_check.clone());
+        let Some(l) = roster::read_local_with(&self.cfg.sessions_dir, &self.cfg.status_dir, |p, _| alive(p) && claude(p), self.sink.pid(), &self.cfg.mailbox_name, now) else {
             return false;
         };
         let fp = roster::local_fingerprint(&l);
@@ -1216,8 +1237,8 @@ impl Core {
 
     pub async fn refresh_roster(&mut self, now: u64) {
         self.now = now;
-        let (alive, created) = (self.alive.clone(), self.created.clone());
-        let claude = roster::read_sessions_with(&self.cfg.sessions_dir, |p, st| alive(p) && roster::same_process(st, created(p)), self.sink.pid(), &self.cfg.mailbox_name);
+        let (alive, is_claude) = (self.alive.clone(), self.claude_check.clone());
+        let claude = roster::read_sessions_with(&self.cfg.sessions_dir, |p, _| alive(p) && is_claude(p), self.sink.pid(), &self.cfg.mailbox_name);
         let engine_ok = self.engines.as_ref().map(|e| e.has_result()).unwrap_or(false);
         // Claude 讀不到、其他引擎也還沒有任何結果：名單不動（和以前一樣）
         if claude.is_none() && !engine_ok && self.cfg.respond.is_none() {
@@ -1335,6 +1356,7 @@ impl Core {
         if self.partner_off {
             return;
         }
+        self.note_sync_dups();
         match self.relay.api("partner_sync", Some(roster::partner_body(&self.roster, asn))).await {
             Ok(v) => {
                 self.partner_warned = false;
@@ -1353,6 +1375,24 @@ impl Core {
                     self.log.line(&format!("partner_sync failed: {e} (will keep trying quietly)"));
                     self.partner_warned = true;
                 }
+            }
+        }
+    }
+
+    /// 後台遇到同名或同一段對話的視窗會把這一批整個跳過（沒有回應訊號）。送出前先看這份名單有沒有，有就記一行：
+    /// 寫進 bridge.log，桌面版另外寫進 ui.log（和畫面的記錄同一份）。每一組只記一次，重複消失後再出現才會再記
+    fn note_sync_dups(&mut self) {
+        let groups = roster::partner_sync_dups(&self.roster);
+        self.sync_dup_told.retain(|k| groups.iter().any(|g| &g.key == k));
+        for g in groups {
+            if !self.sync_dup_told.insert(g.key.clone()) {
+                continue;
+            }
+            let line = format!("[ASN] 名單同步：{}，這一輪後台不會更新", g.what);
+            self.log.line(&line);
+            #[cfg(feature = "gui")]
+            {
+                let _ = crate::ui_log::append(&self.cfg.work_dir, &[format!("{} info {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
             }
         }
     }

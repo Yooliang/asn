@@ -568,7 +568,7 @@ async fn 名單回報_帶最後活動時間_收到信的時間與在忙都算_�
 }
 
 #[tokio::test]
-async fn 名單回報_pid_被別的程序重用的_session_檔不列() {
+async fn 名單回報_pid_被別的程式重用_程序已不是_claude_的_session_檔不列() {
     let fr = FakeRelay::start();
     let work = tempfile::tempdir().unwrap();
     let sessions = tempfile::tempdir().unwrap();
@@ -577,12 +577,103 @@ async fn 名單回報_pid_被別的程序重用的_session_檔不列() {
     put(5001, "T-真的");
     put(5002, "T-幽靈");
     let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
-    // 5002 現在是 session 開始一小時之後才建立的別的程序；5001 是同一個
-    core.set_created(Arc::new(move |p| if p == 5002 { Some(st + 3_600_000) } else { Some(st - 1_000) }));
+    // 5002 現在是別的程式（不是 claude）；5001 還是 claude。判斷不再看 startedAt 與程序建立時間
+    core.set_claude_check(Arc::new(|p| p != 5002));
     core.refresh_roster(T0).await;
     let posts = fr.st.lock().unwrap().rosters.clone();
     let names: Vec<String> = posts[0]["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, vec!["T-真的".to_string(), "T-ASN".to_string()], "幽靈 session 檔不列進名單");
+}
+
+/// 從舊對話接回的手開視窗：記錄的 startedAt 比程序建立時間早 10 分鐘（舊規則 60 秒就判成「pid 被重用」而漏掉）
+#[tokio::test]
+async fn 名單回報_從舊對話接回的手開視窗_算活的_夥伴同步帶名字與_session_id() {
+    let fr = FakeRelay::start();
+    fr.st.lock().unwrap().partner_resp = Some(json!({"ok": true, "partners": []}));
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let st = 1_800_000_000_000u64;
+    std::fs::write(sessions.path().join("5001.json"), json!({"pid": 5001, "sessionId": "sess-hand-0001", "name": "T-手開", "cwd": "/x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "startedAt": st}).to_string()).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.set_created(Arc::new(move |_| Some(st + 600_000)));
+    core.refresh_roster(T0).await;
+    let posts = fr.st.lock().unwrap().partner_posts.clone();
+    assert_eq!(posts, vec![json!({"windows": [{"name": "T-手開", "engine": "claude", "session_id": "sess-hand-0001"}, {"name": "T-ASN", "engine": "asn"}]})]);
+    assert!(core.roster.iter().any(|w| w.name == "T-手開" && w.session_id.as_deref() == Some("sess-hand-0001")));
+}
+
+/// 寄信指定手開、從舊對話接回的視窗：收件視窗要在名單上、信要送進去（舊規則會把它當 pid 重用而回「找不到名叫…」）；
+/// 同一個 pid 若已是別的程式，就照常退回
+#[tokio::test]
+async fn 寄信指定手開接回的視窗_送得進去_同號程序不是_claude_就退回() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let st = 1_800_000_000_000u64;
+    std::fs::write(sessions.path().join("5001.json"), json!({"pid": 5001, "sessionId": "sess-hand-0001", "name": "T-手開", "cwd": "/x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "startedAt": st}).to_string()).unwrap();
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.set_created(Arc::new(move |_| Some(st + 600_000)));
+    core.refresh_roster(T0).await;
+    fr.put(mail(1, json!({"to_agent": "T-手開"})));
+    core.pull("test", T0).await;
+    worker_ok(&mut core, &uid(1), T0 + 10).await;
+    assert!(sink.said.lock().unwrap().iter().any(|t| t.contains("內文-1")), "信要送進手開的視窗");
+    // 同一個 pid 現在是別的程式：不在名單上，信退回
+    let fr2 = FakeRelay::start();
+    // 另開一個工作資料夾：同一個資料夾會讀到第一個橋存下的「認得的夥伴」，信會被當成「等它接回來」留著而不退回
+    let work2 = tempfile::tempdir().unwrap();
+    let mut core2 = new_core(&fr2, work2.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core2.set_created(Arc::new(move |_| Some(st + 600_000)));
+    core2.set_claude_check(Arc::new(|_| false));
+    core2.refresh_roster(T0).await;
+    fr2.put(mail(2, json!({"to_agent": "T-手開"})));
+    core2.pull("test", T0).await;
+    assert!(fr2.sent().iter().any(|m| m["body"].as_str().is_some_and(|b| b.contains("找不到名叫「T-手開」"))), "{:?}", fr2.sent());
+}
+
+fn put_dup_sessions(dir: &std::path::Path, second_sid: &str) {
+    put_session_with_id(dir, 5001, "T-甲", "sess-dup-0001");
+    put_session_with_id(dir, 5002, "T-乙", second_sid);
+}
+
+#[tokio::test]
+async fn 名單同步_兩個視窗同_sessionid_記一行只含視窗名的_log_同一組不重複記() {
+    let fr = FakeRelay::start();
+    fr.st.lock().unwrap().partner_resp = Some(json!({"ok": true, "partners": []}));
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_dup_sessions(sessions.path(), "sess-dup-0001");
+    let log = Arc::new(BridgeLog::new(None));
+    let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
+    let mut core = Core::new(cfg(work.path(), sessions.path()), relay, Arc::new(FakeSink::default()), NONCE, log.clone(), Arc::new(|_| true), T0);
+    core.set_created(Arc::new(|_| None));
+    core.refresh_roster(T0).await;
+    assert_eq!(log.count("用的是同一段對話"), 1);
+    let line = log.recent().into_iter().find(|l| l.contains("用的是同一段對話")).unwrap();
+    assert!(line.contains("視窗「T-乙」「T-甲」用的是同一段對話，這一輪後台不會更新"), "{line}");
+    assert!(!line.contains("sess-dup"), "log 不寫 sessionId：{line}");
+    // 第二輪同一組：不再記
+    core.refresh_roster(T0 + 1).await;
+    assert_eq!(log.count("用的是同一段對話"), 1);
+    // 其中一個換了對話（不再重複）後又撞上：再記一次
+    put_dup_sessions(sessions.path(), "sess-other-02");
+    core.refresh_roster(T0 + 2).await;
+    put_dup_sessions(sessions.path(), "sess-dup-0001");
+    core.refresh_roster(T0 + 3).await;
+    assert_eq!(log.count("用的是同一段對話"), 2);
+}
+
+#[test]
+fn 名單同步_重複偵測_同名與同對話各自成組_沒重複不回() {
+    let w = |n: &str, s: Option<&str>| super::roster::Window::claude(n, None, "", 1, 1, s.map(str::to_string));
+    assert!(super::roster::partner_sync_dups(&[w("甲", Some("sess-aaaa-0001")), w("乙", Some("sess-bbbb-0002")), w("丙", None)]).is_empty());
+    let d = super::roster::partner_sync_dups(&[w("甲", Some("sess-aaaa-0001")), w("乙", Some("sess-aaaa-0001")), w("丙", Some("短"))]);
+    assert_eq!(d.len(), 1);
+    assert!(d[0].what.contains("視窗「乙」「甲」用的是同一段對話") &&!d[0].key.contains("sess-"));
+    let d = super::roster::partner_sync_dups(&[w("甲", None), w("甲", None)]);
+    assert_eq!(d.len(), 1);
+    assert!(d[0].what.contains("有 2 個視窗都叫「甲」"));
 }
 
 #[tokio::test]
@@ -2243,8 +2334,10 @@ mod slash_it {
         fn cmdline(&self, _pid: u32) -> Option<String> {
             None
         }
+        // 假的程序表：測試視窗用的 pid（5000～5099）都是 claude；判活（live_claude_pid）要在表裡認得出 claude 才算在線。
+        // 空表會讓所有視窗都被當成「不是 claude 程序」，外掛斜線信與同名檢查就找不到視窗
         fn processes(&self) -> Vec<Proc> {
-            vec![]
+            (5000..5100).map(|pid| Proc { pid, ppid: 1, name: "claude.exe".into() }).collect()
         }
         fn alive(&self, pid: u32) -> bool {
             pid < 90_000

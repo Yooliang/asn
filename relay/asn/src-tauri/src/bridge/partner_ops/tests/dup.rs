@@ -2,20 +2,20 @@
 use super::*;
 
 /// rig 的「目標」(220) 之外，再用 /resume 接同一段對話開一個同名視窗 240（使用者自己開、掛在 Windows Terminal 底下）。
-/// 另外留一個殘檔 250（同名、程序已不在）與一個 pid 被重用的 260（程序是在 session 開始之後才建立）。
+/// 另外留一個殘檔 250（同名、程序已不在）與一個 pid 被重用的 260（現在是別的程式，不是 claude）。
 fn dup_rig(o: Opt) -> Rig {
     let r = rig(o);
     let cwd = r.work.to_string_lossy().to_string();
     write_session(&r.sessions, 240, "sid-220", "目標", "idle", &cwd);
     write_session(&r.sessions, 250, "sid-220", "目標", "idle", &cwd);
-    // 260：session 檔記的開始時間是一小時前，程序卻是現在才建立的
+    // 260：session 檔記的開始時間是一小時前，現在這個 pid 是 chrome
     let j = json!({ "pid": 260, "sessionId": "sid-220", "name": "目標", "status": "idle", "cwd": cwd, "kind": "interactive", "startedAt": NOW - 3_600_000 });
     std::fs::write(r.sessions.join("260.json"), j.to_string()).unwrap();
     let os = r.os();
     os.alive.lock().unwrap().extend([240, 241, 260]);
-    os.table.lock().unwrap().extend([p(240, 100, "claude.exe"), p(241, 240, "node.exe"), p(260, 100, "claude.exe")]);
+    os.table.lock().unwrap().extend([p(240, 100, "claude.exe"), p(241, 240, "node.exe"), p(260, 100, "chrome.exe")]);
     os.cmd.lock().unwrap().insert(240, "claude.exe --resume sid-220".into());
-    os.cmd.lock().unwrap().insert(260, "claude.exe".into());
+    os.cmd.lock().unwrap().insert(260, "chrome.exe".into());
     os.started.lock().unwrap().insert(260, NOW);
     r
 }

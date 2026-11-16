@@ -66,6 +66,7 @@ export function runBanner(run) {
     phase: v.phase, done: v.done === true, text: v.text,
     steps: (v.steps ?? []).map(s => ({ key: s.key, state: s.state, text: s.text, mark: STEP_MARK[s.state] ?? '' })),
     extra: v.extra ?? [],
+    action: v.action ?? null,
   }
 }
 

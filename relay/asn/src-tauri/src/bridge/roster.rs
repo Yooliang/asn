@@ -337,6 +337,8 @@ pub const SAME_PROC_TOLERANCE_MS: u64 = 60_000;
 
 /// pid 對到的程序是不是 session 檔當初記錄的那個：程序是在 session 開始之後才建立的，就是 pid 被別的程序重用了。
 /// 只在「確定不是」時回 false；查不到建立時間、startedAt 不可信一律當同一個（寧可多列一個，也不誤砍活著的視窗）。
+/// 注意：正式程式已不用它判活（名單、夥伴操作、命令列呼叫者都改用 live_process::live_claude_pid）；
+/// 目前只剩它自己的單元測試與讀名單的測試引用，保留作為舊規則的對照。
 pub fn same_process(started_at_ms: u64, created_ms: Option<u64>) -> bool {
     match created_ms {
         Some(c) if started_at_ms >= MIN_EPOCH_MS => c <= started_at_ms.saturating_add(SAME_PROC_TOLERANCE_MS),
@@ -531,6 +533,43 @@ pub fn partner_body(windows: &[Window], asn_window: Option<&str>) -> Value {
         }
     }
     json!({ "windows": ws })
+}
+
+/// 會讓後台整批跳過 partner_sync 的重複：同名，或同一段對話（session_id 格式和後端的檢查一樣）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDup {
+    /// 去重用的鍵（只含視窗名，不含 session 編號）
+    pub key: String,
+    /// 給人看的說明（只有視窗名）
+    pub what: String,
+}
+
+/// 找出這批視窗裡會讓 partner_sync 整批被跳過的重複，依視窗名排序；沒有重複回空
+pub fn partner_sync_dups(windows: &[Window]) -> Vec<SyncDup> {
+    let quote = |names: &[String]| names.iter().map(|n| format!("「{n}」")).collect::<String>();
+    let mut out: Vec<SyncDup> = Vec::new();
+    let mut by_sid: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for w in windows {
+        if let Some(s) = w.session_id.as_deref().filter(|s| (8..=80).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) {
+            by_sid.entry(s).or_default().push(w.name.clone());
+        }
+    }
+    for names in by_sid.values().filter(|v| v.len() > 1) {
+        let mut distinct = names.clone();
+        distinct.sort();
+        distinct.dedup();
+        let what = if distinct.len() > 1 { format!("視窗{}用的是同一段對話", quote(&distinct)) } else { format!("有 {} 個視窗「{}」用的是同一段對話", names.len(), distinct[0]) };
+        out.push(SyncDup { key: format!("sid:{}", distinct.join("|")), what });
+    }
+    let mut by_name: BTreeMap<&str, usize> = BTreeMap::new();
+    for w in windows {
+        *by_name.entry(w.name.as_str()).or_default() += 1;
+    }
+    for (n, c) in by_name.into_iter().filter(|(_, c)| *c > 1) {
+        out.push(SyncDup { key: format!("name:{n}"), what: format!("有 {c} 個視窗都叫「{n}」") });
+    }
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    out
 }
 
 /// 夥伴 ID 的格式（與後端 partners_id_check 同）：p_ 加 20 個小寫十六進位字元
