@@ -10,6 +10,12 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+/// 同名視窗還活著，或這段對話已經有活著的 Claude 視窗在用（共用判斷見 live_process::session_holders）：都不再開第二個
+pub(crate) fn already_live(os: &dyn super::switch::Os, sessions: &[Value], name_live: bool, session: &str) -> bool {
+    name_live || !super::live_process::session_holders(os, sessions, session, None).is_empty()
+}
+
 /// 接回結果，畫面讀（在資料資料夾）
 pub const STATUS_FILE: &str = "auto-resume.json";
 /// 使用者自己結束 ASN 時留的記號（在機器資料夾）：之後才重開機，就不知道視窗還是不是開著，不接回
@@ -374,9 +380,10 @@ struct RealDeps {
 
 #[cfg(feature = "gui")]
 impl RealDeps {
-    fn live_session(&self, name: &str, session: Option<&str>) -> bool {
+    /// 同名視窗還活著（名字的判斷維持原樣，用心跳的存活規則）
+    fn live_name(&self, name: &str) -> bool {
         let live = crate::bridge::roster::read_sessions_with(&self.sessions, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
-        live.iter().any(|w| w.name == name || (session.is_some() && w.session_id.as_deref() == session))
+        live.iter().any(|w| w.name == name)
     }
 }
 
@@ -401,8 +408,8 @@ impl Deps for RealDeps {
         }
     }
     fn live(&self, name: &str, session: &str) -> bool {
-        // session 檔要等 Claude 起來才寫：剛開的視窗還沒有檔，所以再看程序（命令列接續這段對話的活程序）。查不到程序就只看 session 檔
-        self.live_session(name, Some(session)) || super::live_process::real_resumes(session)
+        // 對話編號改用共用判斷（session 記錄＋命令列帶 --resume 的程序，手開、被改過名字的視窗也算）；名字維持原判斷
+        already_live(&super::switch::RealOs, &super::console::read_sessions(&self.sessions), self.live_name(name), session)
     }
     fn unclaim(&self, e: &KnownEntry) {
         super::opening::release(&e.facts.session, &e.name);
@@ -428,7 +435,7 @@ impl Deps for RealDeps {
         super::console::show_partner_window("claude", &e.name, pid)
     }
     fn appeared(&self, name: &str) -> bool {
-        self.live_session(name, None)
+        self.live_name(name)
     }
     fn report(&self, status: &Status) {
         if let Ok(text) = serde_json::to_string(status) {

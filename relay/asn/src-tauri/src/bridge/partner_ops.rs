@@ -796,6 +796,21 @@ impl PartnerOps {
         pid != 0 && os.alive(pid) && roster::same_process(s.get("startedAt").and_then(Value::as_u64).unwrap_or(0), os.started_ms(pid))
     }
 
+    /// 這段對話除了目標視窗之外，還有沒有別的活著的 Claude 視窗（共用判斷，略過目標與它的外殼子程序）
+    fn other_holders(&self, t: &switch::Target) -> Vec<crate::launch::live_process::Holder> {
+        crate::launch::live_process::session_holders(self.env.os(), &console::read_sessions(&self.dirs.sessions), &t.session_id, Some(t.pid))
+    }
+
+    /// 轉交前的守門：還有別的視窗在用同一段對話就回不能交接的說明
+    fn other_window_blocks(&self, t: &switch::Target) -> Option<String> {
+        let others = self.other_holders(t);
+        if others.is_empty() {
+            return None;
+        }
+        let which = crate::launch::live_process::holder_name(&others).map(|n| format!("（{n}）")).unwrap_or_default();
+        Some(format!("這段對話還有另一個視窗{which}開著，請先關掉再交接"))
+    }
+
     /// 剛結束的視窗留下的 sessions/<pid>.json 清掉：強制結束的 claude 來不及自己刪，檔案會一直留著，
     /// 日後 pid 被別的程序重用就會被當成活著的視窗。只刪「檔名 pid＝內容 pid＝剛結束的 pid、sessionId 相同、而且該 pid 已經不在」的那一個檔。
     fn forget_session(&self, t: &switch::Target) {
@@ -1324,11 +1339,16 @@ impl PartnerOps {
             return failed(e);
         }
         self.forget_session(t);
+        // 新視窗開出來之前先量：新視窗（改名時同一段對話）不能算成「另一個視窗」
+        let still_open = self.still_open_note(t);
         if let Some(o) = op {
             self.stage(o, "opening");
         }
         if let Err(e) = self.env.launch(&plan) {
-            return failed(format!("原視窗已關閉，但重開失敗：{e}"));
+            return failed(match &still_open {
+                None => format!("原視窗已關閉，但重開失敗：{e}"),
+                Some(n) => format!("{n}；重開失敗：{e}"),
+            });
         }
         let mut found: Option<(u32, String)> = None;
         let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
@@ -1348,8 +1368,21 @@ impl PartnerOps {
         });
         match (appeared, found) {
             (true, Some((pid, sid))) => ok("新視窗已出現", Some(json!({ "pid": pid, "session_id": sid, "old_pid": t.pid }))),
-            _ => unconfirmed("原視窗已關閉、新視窗已送出，但一直沒看到同名的新視窗出現"),
+            _ => unconfirmed(match &still_open {
+                None => "原視窗已關閉、新視窗已送出，但一直沒看到同名的新視窗出現".to_string(),
+                Some(n) => format!("{n}；新視窗已送出，但一直沒看到同名的新視窗出現"),
+            }),
         }
+    }
+
+    /// 關掉目標之後，這段對話如果還有別的視窗開著就不能說「原視窗已關閉」（以為關乾淨了）：回明說的那一句；沒有就是 None
+    fn still_open_note(&self, t: &switch::Target) -> Option<String> {
+        let others = self.other_holders(t);
+        if others.is_empty() {
+            return None;
+        }
+        let which = crate::launch::live_process::holder_name(&others).map(|n| format!("（{n}）")).unwrap_or_default();
+        Some(format!("這個視窗已結束，但這段對話還有另一個視窗{which}開著"))
     }
 
     fn rename(&self, op: &Op, t: switch::Target) -> OpResult {
@@ -1429,13 +1462,16 @@ impl PartnerOps {
         if (self.protect)(name, 0) {
             return failed(PROTECTED);
         }
-        // 2. 已經有活著的視窗用同一個 sessionId 或同名：不能再開（兩個視窗寫同一段對話會互相覆蓋）
+        // 2. 已經有活著的視窗同名，或用同一個 sessionId：不能再開（兩個視窗寫同一段對話會互相覆蓋）
         let os = self.env.os();
-        let live = console::read_sessions(&self.dirs.sessions).iter().any(|s| {
-            self.session_live(s) && (s.get("name").and_then(Value::as_str) == Some(name) || s.get("sessionId").and_then(Value::as_str) == Some(sid))
-        });
-        if live {
+        let sessions = console::read_sessions(&self.dirs.sessions);
+        if sessions.iter().any(|s| self.session_live(s) && s.get("name").and_then(Value::as_str) == Some(name)) {
             return failed("這位夥伴已經在線上");
+        }
+        // 同一段對話：共用判斷（手開、被改過名字的視窗也算），回傳是哪個視窗
+        let holders = crate::launch::live_process::file_holders(os, &sessions, sid, None);
+        if !holders.is_empty() {
+            return failed(crate::launch::live_process::dup_window_error(&holders));
         }
         // 視窗剛開、session 檔還沒寫出來：只有程序表看得到（命令列帶 --resume 這段對話的活程序，和自動接回用同一個判斷）
         // 滿 5 分鐘而且是 ASN 開的、卡在接回中的那種：提示改成到工作管理員停止（判斷與工作管理員共用 stuck_resume）
@@ -1596,6 +1632,10 @@ impl PartnerOps {
                 return failed(format!("建不起交接檔的資料夾：{e}"));
             }
         }
+        // 同一段對話還有別的視窗開著（手開、被改過名字的也算）：關掉前任再開下一任會變成兩個視窗接同一段對話，先擋下
+        if let Some(why) = self.other_window_blocks(&t) {
+            return failed(why);
+        }
         let transcript = find_transcript(&self.dirs.projects, &t.session_id).map(|(p, _)| p);
         // 1. 請前任寫交接，等檔案出現且大小穩定
         self.stage(op, "handoff");
@@ -1620,6 +1660,9 @@ impl PartnerOps {
             Ok(_) => return failed("這個視窗在等待交接期間換了，請重新操作"),
             Err(e) => return failed(e),
         };
+        if let Some(why) = self.other_window_blocks(&t2) {
+            return failed(why);
+        }
         // 3. 關前任、同名開新對話：不帶 --resume／--continue／--session-id，名字與模型不變
         let prompt = handover_prompt(&t2.name, &op.note, transcript.as_deref(), &path, complete);
         // 模型：前任現在實際在用的（在視窗裡用 /model 換過，啟動參數看不出來，所以先看對話紀錄最後一則回覆的模型），
