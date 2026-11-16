@@ -337,6 +337,8 @@ pub const SAME_PROC_TOLERANCE_MS: u64 = 60_000;
 
 /// pid 對到的程序是不是 session 檔當初記錄的那個：程序是在 session 開始之後才建立的，就是 pid 被別的程序重用了。
 /// 只在「確定不是」時回 false；查不到建立時間、startedAt 不可信一律當同一個（寧可多列一個，也不誤砍活著的視窗）。
+/// 注意：正式程式已不用它判活（名單、夥伴操作、命令列呼叫者都改用 live_process::live_claude_pid）；
+/// 目前只剩它自己的單元測試與讀名單的測試引用，保留作為舊規則的對照。
 pub fn same_process(started_at_ms: u64, created_ms: Option<u64>) -> bool {
     match created_ms {
         Some(c) if started_at_ms >= MIN_EPOCH_MS => c <= started_at_ms.saturating_add(SAME_PROC_TOLERANCE_MS),

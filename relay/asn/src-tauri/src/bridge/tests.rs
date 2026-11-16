@@ -602,6 +602,34 @@ async fn 名單回報_從舊對話接回的手開視窗_算活的_夥伴同步�
     assert!(core.roster.iter().any(|w| w.name == "T-手開" && w.session_id.as_deref() == Some("sess-hand-0001")));
 }
 
+/// 寄信指定手開、從舊對話接回的視窗：收件視窗要在名單上、信要送進去（舊規則會把它當 pid 重用而回「找不到名叫…」）；
+/// 同一個 pid 若已是別的程式，就照常退回
+#[tokio::test]
+async fn 寄信指定手開接回的視窗_送得進去_同號程序不是_claude_就退回() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let st = 1_800_000_000_000u64;
+    std::fs::write(sessions.path().join("5001.json"), json!({"pid": 5001, "sessionId": "sess-hand-0001", "name": "T-手開", "cwd": "/x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "startedAt": st}).to_string()).unwrap();
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.set_created(Arc::new(move |_| Some(st + 600_000)));
+    core.refresh_roster(T0).await;
+    fr.put(mail(1, json!({"to_agent": "T-手開"})));
+    core.pull("test", T0).await;
+    worker_ok(&mut core, &uid(1), T0 + 10).await;
+    assert!(sink.said.lock().unwrap().iter().any(|t| t.contains("內文-1")), "信要送進手開的視窗");
+    // 同一個 pid 現在是別的程式：不在名單上，信退回
+    let fr2 = FakeRelay::start();
+    let mut core2 = new_core(&fr2, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core2.set_created(Arc::new(move |_| Some(st + 600_000)));
+    core2.set_claude_check(Arc::new(|_| false));
+    core2.refresh_roster(T0).await;
+    fr2.put(mail(2, json!({"to_agent": "T-手開"})));
+    core2.pull("test", T0).await;
+    assert!(fr2.sent().iter().any(|m| m["body"].as_str().is_some_and(|b| b.contains("找不到名叫「T-手開」"))), "{:?}", fr2.sent());
+}
+
 fn put_dup_sessions(dir: &std::path::Path, second_sid: &str) {
     put_session_with_id(dir, 5001, "T-甲", "sess-dup-0001");
     put_session_with_id(dir, 5002, "T-乙", second_sid);

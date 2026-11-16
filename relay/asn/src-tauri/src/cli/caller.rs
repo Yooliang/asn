@@ -38,11 +38,11 @@ pub fn read_session(dir: &Path, pid: u32) -> Option<Value> {
     (v.get("pid").and_then(Value::as_u64) == Some(pid as u64)).then_some(v)
 }
 
-/// session 檔記的程序就是現在這個 pid 的程序：程序是在 session 開始之後才建立的，就是 pid 被別的程序用走了，
-/// 這份 session 檔不算（和名單同一條規則，見 bridge::roster::same_process）。查不到建立時間、檔裡沒有 startedAt 照舊算
-fn session_is_current(env: &Env, pid: u32, s: &Value) -> bool {
-    let started_at = s.get("startedAt").and_then(Value::as_u64).unwrap_or(0);
-    crate::bridge::roster::same_process(started_at, (env.started)(pid))
+/// session 檔的 pid 現在還是一個 claude 程序（pid 被別的程式用走了就不算）。
+/// 和名單、喚醒共用同一條規則（見 launch::live_process::live_claude_pid），不再拿 startedAt 去猜：
+/// 從舊對話接回的視窗，記錄的 startedAt 會比程序建立時間早很多
+fn session_is_current(env: &Env, pid: u32) -> bool {
+    (env.is_claude)(pid)
 }
 
 fn session_name(s: &Value) -> String {
@@ -74,7 +74,7 @@ fn pi_window_name(dir: &Path, pid: u32) -> Option<String> {
 fn name_in_use_by_live_window(env: &Env, name: &str) -> bool {
     let claude = std::fs::read_dir(&env.sessions_dir).into_iter().flatten().flatten().any(|e| {
         let Some(pid) = e.file_name().to_str().and_then(|n| n.strip_suffix(".json")).and_then(|s| s.parse::<u32>().ok()) else { return false };
-        read_session(&env.sessions_dir, pid).is_some_and(|s| session_name(&s) == name && (env.alive)(pid) && session_is_current(env, pid, &s))
+        read_session(&env.sessions_dir, pid).is_some_and(|s| session_name(&s) == name && (env.alive)(pid) && session_is_current(env, pid))
     });
     claude
         || std::fs::read_dir(env.relay_home.join("pi-windows")).into_iter().flatten().flatten().any(|e| {
@@ -112,7 +112,7 @@ pub fn inspect(env: &Env) -> Evidence {
                 break;
             }
             let raw = read_session(&env.sessions_dir, pid);
-            let stale = raw.as_ref().is_some_and(|s| !session_is_current(env, pid, s));
+            let stale = raw.is_some() && !session_is_current(env, pid);
             let s = raw.filter(|_| !stale);
             ev.chain.push(ChainItem {
                 pid,
@@ -143,7 +143,7 @@ pub fn inspect(env: &Env) -> Evidence {
             pids.sort_unstable();
             for pid in pids {
                 if let Some(s) = read_session(&env.sessions_dir, pid) {
-                    if s.get("messagingSocketPath").and_then(Value::as_str) == Some(ev.env_socket.as_str()) && (env.alive)(pid) && session_is_current(env, pid, &s) {
+                    if s.get("messagingSocketPath").and_then(Value::as_str) == Some(ev.env_socket.as_str()) && (env.alive)(pid) && session_is_current(env, pid) {
                         ev.via_env = Some(Caller { pid, name: session_name(&s) });
                         break;
                     }

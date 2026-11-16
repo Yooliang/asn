@@ -789,11 +789,12 @@ impl PartnerOps {
         }
     }
 
-    /// sessions/<pid>.json 的這一筆現在還有活著的程序，而且就是它當初記錄的那個（pid 被別的程序重用不算）
+    /// sessions/<pid>.json 的這一筆現在是一個活著的 claude 程序（pid 被別的程式重用不算）。
+    /// 和名單、喚醒的同一段對話判斷共用 live_process::live_claude_pid，不看 startedAt
     fn session_live(&self, s: &Value) -> bool {
         let os = self.env.os();
         let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { return false };
-        pid != 0 && os.alive(pid) && roster::same_process(s.get("startedAt").and_then(Value::as_u64).unwrap_or(0), os.started_ms(pid))
+        crate::launch::live_process::live_claude_pid(os, &os.processes(), pid)
     }
 
     /// 這段對話除了目標視窗之外，還有沒有別的活著的 Claude 視窗（共用判斷，略過目標與它的外殼子程序）

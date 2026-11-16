@@ -1411,6 +1411,7 @@ fn 指令_沒有外掛_過期_換成別人_收發室視窗_都不算有外掛() 
     assert_eq!(r.ops.command_target("幽靈"), None);
     write_session(&r.sessions, 240, "sid-240", "T-收發室", "idle", r.work.to_str().unwrap());
     r.os().alive.lock().unwrap().insert(240);
+    r.os().table.lock().unwrap().push(p(240, 100, "claude.exe"));
     r.status_file("sid-240", json!({ "sessionId": "sid-240", "at": NOW, "state": "idle" }));
     assert_eq!(r.ops.command_target("T-收發室"), None, "收發室視窗不收");
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "idle" }));
@@ -1974,8 +1975,10 @@ fn 換班接手後_前任的_sessions_檔也清掉_新視窗的檔還在() {
 #[test]
 fn 規則3_pid_被別的程序重用_不算活視窗_不動手() {
     let r = rig(Opt::default());
-    // session 在 NOW-1 小時開始，但現在 pid 220 對到的程序是 NOW 才建立的＝別的程序
+    // 現在 pid 220 對到的程序是別的程式（不是 claude）：判活不再看 startedAt，改看程序是不是 claude
     stamp_220(&r, NOW - 3_600_000, Some(NOW));
+    r.os().table.lock().unwrap().iter_mut().filter(|x| x.pid == 220).for_each(|x| x.name = "notepad.exe".into());
+    r.os().cmd.lock().unwrap().insert(220, "notepad.exe".into());
     let res = r.run("close", json!({}));
     assert_eq!(res.status, "failed", "{}", res.detail);
     assert!(res.detail.contains("找不到"), "{}", res.detail);
@@ -1991,6 +1994,67 @@ fn 規則3_程序比_session_更早建立或查不到時間_照常當活視窗_�
         assert_eq!(res.status, "ok", "{created:?}: {}", res.detail);
         assert!(r.terminated().contains(&220));
     }
+}
+
+/// 手開、從舊對話接回的視窗：sessions 記錄的 startedAt 比程序建立時間早 10 分鐘，程序是 claude、命令列沒帶 --resume。
+/// 舊規則（建立時間比 startedAt 晚超過 60 秒就當 pid 被重用）會把它判成不在線
+fn hand_resumed_220(r: &Rig) {
+    stamp_220(r, NOW - 600_000, Some(NOW));
+}
+
+/// 同一個 pid 現在是別的程式（pid 重用）
+fn reuse_220(r: &Rig) {
+    r.os().table.lock().unwrap().iter_mut().filter(|x| x.pid == 220).for_each(|x| x.name = "chrome.exe".into());
+    r.os().cmd.lock().unwrap().insert(220, "chrome.exe".into());
+}
+
+#[test]
+fn 手開接回的視窗_交接找得到目標_不是_claude_的同號程序找不到() {
+    let r = rig(Opt::default());
+    hand_resumed_220(&r);
+    let t = r.ops.find_target("目標").expect("手開接回的視窗要找得到（舊程式回「找不到這個夥伴的 Claude 視窗」）");
+    assert_eq!((t.pid, t.session_id.as_str()), (220, "sid-220"));
+    reuse_220(&r);
+    let e = r.ops.find_target("目標").unwrap_err();
+    assert!(e.contains("找不到這個夥伴的 Claude 視窗"), "{e}");
+}
+
+#[test]
+fn 手開接回的視窗_指令目標找得到_同號程序不是_claude_就不算() {
+    let r = rig(Opt::default());
+    hand_resumed_220(&r);
+    with_mod(&r);
+    assert_eq!(r.ops.command_target("目標").as_deref(), Some("sid-220"));
+    reuse_220(&r);
+    assert_eq!(r.ops.command_target("目標"), None);
+}
+
+#[test]
+fn 手開接回的視窗_同名檢查說已經在線上_同號程序不是_claude_就不擋() {
+    let r = resume_rig(Opt::default());
+    hand_resumed_220(&r);
+    // 舊程式：判成不在線，喚醒同名夥伴照樣開窗
+    let res = resume(&r, "目標", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert_eq!(res.detail, "這位夥伴已經在線上");
+    assert!(r.launched().is_empty());
+    reuse_220(&r);
+    let res = resume(&r, "目標", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+}
+
+#[test]
+fn 手開接回的視窗_同名視窗清單照常列出_仍依開啟時間排序() {
+    let r = rig(Opt::default());
+    hand_resumed_220(&r);
+    let cwd = r.work.to_string_lossy().to_string();
+    write_session(&r.sessions, 240, "sid-220", "目標", "idle", &cwd);
+    r.os().alive.lock().unwrap().insert(240);
+    r.os().table.lock().unwrap().push(p(240, 100, "claude.exe"));
+    r.os().cmd.lock().unwrap().insert(240, "claude.exe --resume sid-220".into());
+    // 220 的 startedAt（NOW-10 分鐘）比 240 的（1240）晚：排序仍照 startedAt，不因為換判活而改變
+    let w = r.ops.dup_windows("目標");
+    assert_eq!(w.iter().map(|w| w.pid).collect::<Vec<_>>(), vec![240, 220], "{w:?}");
 }
 
 // ================================================================================================

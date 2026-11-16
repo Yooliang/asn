@@ -36,3 +36,14 @@ test('開機自動接回：判活走共用判斷，不再用心跳規則比對 s
   assert.match(ar, /already_live\(/)
   assert.doesNotMatch(ar, /w\.session_id\.as_deref\(\) == session/)
 })
+
+test('夥伴操作與命令列呼叫者判活：走共用判斷，不再用 same_process 的 startedAt 規則', () => {
+  const po = src('bridge/partner_ops.rs').split('#[cfg(test)]')[0]
+  assert.match(po, /live_process::live_claude_pid\(/)
+  assert.doesNotMatch(po, /same_process/)
+  const caller = src('cli/caller.rs').split('#[cfg(test)]')[0]
+  assert.doesNotMatch(caller, /same_process/)
+  assert.match(caller, /env\.is_claude/)
+  const env = src('cli/env.rs')
+  assert.match(env, /live_process::real_is_claude/)
+})
