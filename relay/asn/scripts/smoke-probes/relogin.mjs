@@ -43,7 +43,14 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
   // 使用中又登入失效（#1592）：右上同一格交替，沒有獨立的紅色標籤
   const cur = await wait(() => [...document.querySelectorAll('.m-dv-cur.failed')].find(vis), 200);
   if (!cur) return { ok: false, why: '辦公室目前帳號登入失效，右上那一格卻沒有「使用中／登入失效」交替格' };
-  if (document.querySelector('.m-dv-failed')) return { ok: false, why: '還有獨立的紅色「登入失效」標籤' };
+  if (cur.closest('.m-dv-acct').querySelector('.m-dv-failed')) return { ok: false, why: '使用中的帳號只走交替格，不該再有獨立的紅色「登入失效」標籤' };
+  // 沒在使用、但登入失效的帳號（假資料另給一張）：保留獨立的紅標籤，不是交替格
+  const offCard = await wait(() => [...document.querySelectorAll('.m-dv-acct')].filter(vis).find(c => (c.querySelector('.m-dv-mail')?.textContent ?? '').trim() === 'old@example.com'), 100);
+  if (!offCard) return { ok: false, why: '找不到沒在使用、登入失效的帳號卡' };
+  const tag = offCard.querySelector('.m-dv-failed');
+  if (!tag || !vis(tag) || tag.textContent.trim() !== '登入失效') return { ok: false, why: '沒在使用但登入失效的帳號，沒有獨立的紅色「登入失效」標籤' };
+  if (offCard.querySelector('.m-dv-cur') || document.querySelectorAll('.m-dv-failed').length !== 1) return { ok: false, why: '沒在使用的帳號不該有「使用中」交替格，獨立標籤也只該有這一個' };
+  if (getComputedStyle(tag).backgroundColor !== 'rgb(179, 38, 30)') return { ok: false, why: '獨立標籤不是紅底：' + getComputedStyle(tag).backgroundColor };
   if (cur.getAttribute('aria-label') !== '使用中，登入失效') return { ok: false, why: 'aria-label 不對：' + cur.getAttribute('aria-label') };
   const ta = cur.querySelector('.m-dv-cur-a'), tb = cur.querySelector('.m-dv-cur-b');
   if (!ta || !tb || ta.textContent.trim() !== '使用中' || tb.textContent.trim() !== '登入失效') return { ok: false, why: '交替的兩個字不對' };
@@ -167,7 +174,7 @@ export default {
     const list = t.android_acct_list
     const q = list?.values?.Q
     if (!q) return undefined
-    const accounts = [...q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a)), { vendor: 'codex', email: 'codex@example.com', plan: '', current: true }]
+    const accounts = [...q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a)), { vendor: 'claude', email: 'old@example.com', plan: 'pro', current: false, login_failed: true }, { vendor: 'codex', email: 'codex@example.com', plan: '', current: true }]
     // 回報時間用跑這個情境的當下算（全套跑完要二十幾分鐘，載入時算的時間到這裡已經過舊，入口照規則就不給）
     const reportedAt = new Date(Math.floor((Date.now() - 5 * 60_000) / 60_000) * 60_000).toISOString()
     const kind = typeof scenario.state.relogin === 'string' ? scenario.state.relogin : 'base'

@@ -48,8 +48,10 @@ test('只有 Claude 帳號會標登入失效（其他廠牌帶了也不理）', 
 
 test('手機頁接線（#1592）：沒有獨立的紅色「登入失效」標籤，改成「使用中」那一格交替顯示', () => {
   const html = read('ui', 'm.html')
-  assert.doesNotMatch(html, /m-dv-failed/)
-  assert.doesNotMatch(read('ui', 'mobile.css'), /\.m-dv-failed/)
+  // 獨立紅標籤只給「沒在使用」的失效帳號；使用中的走交替格
+  assert.equal((html.match(/m-dv-failed/g) ?? []).length, 1)
+  assert.match(html, /<span class="m-dv-failed" v-if="a\.loginFailed && !a\.current">\{\{ LOGIN_FAILED_LABEL \}\}<\/span>/)
+  assert.match(read('ui', 'mobile.css'), /\.m-dv-failed\{[^}]*background:#b3261e[^}]*color:#fff/)
   // 同一格：使用中才有；登入失效時加 failed、兩個字節點都 aria-hidden，整格用 aria-label 讀出兩個狀態
   assert.match(html, /<span class="m-dv-cur" :class="\{ failed: a\.loginFailed \}" v-if="a\.current"/)
   assert.match(html, /:aria-label="a\.loginFailed \? CURRENT_FAILED_ARIA : null"/)
