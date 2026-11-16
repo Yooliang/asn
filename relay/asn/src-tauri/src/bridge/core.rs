@@ -716,6 +716,10 @@ impl Core {
     pub fn set_claude_check(&mut self, f: Arc<dyn Fn(u32) -> bool + Send + Sync>) {
         self.claude_check = f;
     }
+    /// 目前用的「是不是 claude 程序」判斷（遠端開視窗的名單也用同一份，測試換掉時一起換）
+    pub fn claude_check(&self) -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
+        self.claude_check.clone()
+    }
     #[cfg(not(test))]
     fn default_claude_check() -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
         Arc::new(crate::launch::live_process::real_is_claude)

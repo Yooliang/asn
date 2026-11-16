@@ -206,9 +206,9 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
     let mut core = Core::new(cfg.clone(), relay.clone(), sink, &nonce, log.clone(), alive.clone(), crate::heartbeat::now_ms());
     // 遠端開視窗：視窗名單（本機 session ＋ ASN 自己的視窗名）給「不重名」與「等它出現」用
     let launched_rx = launch_env.map(|env| {
-        let (sessions, mailbox, r2, sink2, alive2) = (cfg.sessions_dir.clone(), cfg.mailbox_name.clone(), relay.clone(), core.sink(), alive.clone());
+        let (sessions, mailbox, r2, sink2, alive2, claude2) = (cfg.sessions_dir.clone(), cfg.mailbox_name.clone(), relay.clone(), core.sink(), alive.clone(), core.claude_check());
         let names: Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync> = Arc::new(move || {
-            let ws = roster::read_sessions_with(&sessions, |p, _| alive2(p) && crate::launch::live_process::real_is_claude(p), sink2.pid(), &mailbox)?;
+            let ws = roster::read_sessions_with(&sessions, |p, _| alive2(p) && claude2(p), sink2.pid(), &mailbox)?;
             Some(ws.into_iter().map(|w| w.name).chain(r2.active_names()).collect())
         });
         let (l, rx) = Launcher::new(relay.clone(), log.clone(), cfg.work_dir.clone(), env, names);

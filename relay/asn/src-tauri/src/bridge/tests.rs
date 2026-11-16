@@ -621,7 +621,9 @@ async fn 寄信指定手開接回的視窗_送得進去_同號程序不是_claud
     assert!(sink.said.lock().unwrap().iter().any(|t| t.contains("內文-1")), "信要送進手開的視窗");
     // 同一個 pid 現在是別的程式：不在名單上，信退回
     let fr2 = FakeRelay::start();
-    let mut core2 = new_core(&fr2, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    // 另開一個工作資料夾：同一個資料夾會讀到第一個橋存下的「認得的夥伴」，信會被當成「等它接回來」留著而不退回
+    let work2 = tempfile::tempdir().unwrap();
+    let mut core2 = new_core(&fr2, work2.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
     core2.set_created(Arc::new(move |_| Some(st + 600_000)));
     core2.set_claude_check(Arc::new(|_| false));
     core2.refresh_roster(T0).await;
@@ -2332,8 +2334,10 @@ mod slash_it {
         fn cmdline(&self, _pid: u32) -> Option<String> {
             None
         }
+        // 假的程序表：測試視窗用的 pid（5000～5099）都是 claude；判活（live_claude_pid）要在表裡認得出 claude 才算在線。
+        // 空表會讓所有視窗都被當成「不是 claude 程序」，外掛斜線信與同名檢查就找不到視窗
         fn processes(&self) -> Vec<Proc> {
-            vec![]
+            (5000..5100).map(|pid| Proc { pid, ppid: 1, name: "claude.exe".into() }).collect()
         }
         fn alive(&self, pid: u32) -> bool {
             pid < 90_000
