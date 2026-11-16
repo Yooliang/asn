@@ -43,7 +43,7 @@ export const GUIDE_TEXT = Object.freeze({
 
 /** 四家，順序固定。tool＝ai_cli_detect 的工具代號；site＝官網（目錄 catalog 沒放網址，這裡是唯一來源） */
 export const GUIDE_VENDORS = Object.freeze([
-  { key: 'claude', label: 'Claude', tool: 'claude', siteName: 'Claude 官網', url: 'https://claude.com/product/claude-code', missing: '找不到 Claude Code。剛裝好的話，請把 ASN 完全結束再重開。' },
+  { key: 'claude', label: 'Claude', tool: 'claude', siteName: 'Claude 官網', url: 'https://claude.com/product/claude-code', missing: '找不到 Claude Code。剛裝好的話，按下面的「重新檢查」。', missingRemote: '找不到 Claude Code。剛裝好的話，請在那台電腦上按「重新檢查」。' },
   { key: 'codex', label: 'Codex', tool: 'codex', siteName: 'Codex 官網', url: 'https://developers.openai.com/codex' },
   { key: 'gemini', label: 'Gemini', tool: 'agy', siteName: 'Gemini 官網', url: 'https://antigravity.google' },
   { key: 'grok', label: 'Grok', tool: 'grok', siteName: 'Grok 官網', url: 'https://docs.x.ai/build/overview' },
@@ -89,7 +89,7 @@ export function guideRows({ states = {}, isSelf = true, installUi = AGENT_INSTAL
     const canInstall = installUi === true && (isSelf ? (installAction({ vendor: v.key, isSelf: true, state: st })?.kind === 'local' || installAvail[v.tool] === true) : remote.install?.[v.key] === true)
     if (st === STATE.NOT_INSTALLED) {
       if (canInstall) return { ...base, action: 'install' }
-      const note = v.missing ?? `還沒裝 ${v.label}，裝好後這裡會出現「開一個視窗」。`
+      const note = (isSelf ? v.missing : v.missingRemote) ?? `還沒裝 ${v.label}，裝好後這裡會出現「開一個視窗」。`
       return { ...base, note, site: { before: '到 ', name: v.siteName, after: ' 下載安裝', url: v.url } }
     }
     // Gemini：ASN 偵測不到有沒有登入，裝了就直接開視窗

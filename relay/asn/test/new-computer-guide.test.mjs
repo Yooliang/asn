@@ -49,7 +49,11 @@ test('空白電腦：四家都沒裝 → 沒有按鈕，每家一句說明加官
   const rows = guideRows({ states: all({}) })
   assert.deepEqual(rows.map(r => r.key), ['claude', 'codex', 'gemini', 'grok'])
   assert.ok(rows.every(r => r.action === null && !r.checking))
-  assert.equal(rows[0].note, '找不到 Claude Code。剛裝好的話，請把 ASN 完全結束再重開。')
+  assert.equal(rows[0].note, '找不到 Claude Code。剛裝好的話，按下面的「重新檢查」。')
+  // 手機看別台：叫人到那台電腦上按（手機沒辦法叫那台重新偵測）；不再叫人重開 ASN
+  const remoteRows = guideRows({ states: all({}), isSelf: false })
+  assert.equal(remoteRows[0].note, '找不到 Claude Code。剛裝好的話，請在那台電腦上按「重新檢查」。')
+  for (const r of [...rows, ...remoteRows]) assert.ok(!/重開|結束/.test(r.note ?? ''), r.note)
   assert.equal(rows[1].note, '還沒裝 Codex，裝好後這裡會出現「開一個視窗」。')
   assert.equal(rows[2].note, '還沒裝 Gemini，裝好後這裡會出現「開一個視窗」。')
   assert.equal(rows[3].note, '還沒裝 Grok，裝好後這裡會出現「開一個視窗」。')
@@ -146,7 +150,7 @@ test('singleFlight：進行中再呼叫回同一個 promise、不重跑；跑完
 test('引導卡的字沒有技術名詞', () => {
   const texts = [
     ...Object.values(GUIDE_TEXT),
-    ...GUIDE_VENDORS.flatMap(v => [v.label, v.siteName, v.missing ?? '']),
+    ...GUIDE_VENDORS.flatMap(v => [v.label, v.siteName, v.missing ?? '', v.missingRemote ?? '']),
     ...guideRows({ states: all({}) }).flatMap(r => [r.note, r.site?.before, r.site?.name, r.site?.after]),
   ].filter(Boolean)
   for (const t of texts) assert.ok(!/CLI|PATH|token|指令|終端機|curl|npm/i.test(t), `技術名詞：${t}`)

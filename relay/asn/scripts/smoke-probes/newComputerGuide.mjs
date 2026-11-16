@@ -68,7 +68,7 @@ export const newComputerGuideProbeSource = ({ kind = 'blank', page = 'partners' 
   }
   if (want.kind === 'blank') {
     if (card().querySelector('button.ng-btn')) return { ok: false, why: '一家都沒裝，不該有動作按鈕' };
-    if ((bad = await expectRow('claude', [], '找不到 Claude Code。剛裝好的話，請把 ASN 完全結束再重開。'))) return { ok: false, why: bad };
+    if ((bad = await expectRow('claude', [], '找不到 Claude Code。剛裝好的話，按下面的「重新檢查」。'))) return { ok: false, why: bad };
     for (const [k, n] of [['codex', 'Codex'], ['gemini', 'Gemini'], ['grok', 'Grok']]) { if ((bad = await expectRow(k, [], '還沒裝 ' + n + '，裝好後這裡會出現「開一個視窗」。'))) return { ok: false, why: bad } }
     for (const [k, n] of [['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini'], ['grok', 'Grok']]) { if (!txt(rowOf(k)).includes('到 ' + n + ' 官網 下載安裝')) return { ok: false, why: k + ' 少了官網說明：' + txt(rowOf(k)) } }
     if (/https?:|curl|irm /.test(txt(card()))) return { ok: false, why: '卡片上不該出現網址或安裝指令文字：' + txt(card()) };
@@ -97,7 +97,7 @@ export const newComputerGuideProbeSource = ({ kind = 'blank', page = 'partners' 
     if ((bad = await checkDlg('Gemini'))) return { ok: false, why: bad };
   }
   if (want.kind === 'recheck') {
-    if ((bad = await expectRow('claude', [], '找不到 Claude Code。剛裝好的話，請把 ASN 完全結束再重開。'))) return { ok: false, why: bad };
+    if ((bad = await expectRow('claude', [], '找不到 Claude Code。剛裝好的話，按下面的「重新檢查」。'))) return { ok: false, why: bad };
     const d0 = calls('ai_cli_detect').length;
     const rb = [...card().querySelectorAll('.ng-recheck')].find(vis);
     if (!rb || txt(rb) !== '重新檢查') return { ok: false, why: '卡片上沒有「重新檢查」鈕：' + txt(rb) };
