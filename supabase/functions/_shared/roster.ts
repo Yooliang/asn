@@ -3,7 +3,7 @@
 // 不因此拒絕整份名單；detail（選填，最多 80 字）同理；資料庫那邊也有同樣的格式檢查（supabase/sql/19_roster_engine.sql）。
 
 import { isReservedSender } from "./reserved_sender.ts";
-export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null; active_at: number | null };
+export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null; active_at: number | null; elevated: true | null };
 
 export const DETAIL_MAX = 80;
 export const MODEL_MAX = 60;
@@ -42,5 +42,7 @@ export function normalizeRosterAgents(agents: Array<Record<string, unknown>>, no
     hidden: typeof a?.hidden === "boolean" ? a.hidden : null,
     // 0.2 E2（#397）：橋回報的最後收信／忙碌時間（毫秒）：只收正整數；舊版橋沒帶或壞值＝null（資料庫只寫進夥伴的最後活動時間，未來的時間當現在）
     active_at: Number.isSafeInteger(a?.active_at) && (a.active_at as number) > 0 ? a.active_at as number : null,
+    // 這個視窗是系統管理員身分開的、收發室轉不進去（#1634，電腦端 #1630／#1633 會送）：只收 true，其他一律 null。只是顯示用的資訊，不能拿來當權限判斷
+    elevated: a?.elevated === true ? true : null,
   }));
 }
