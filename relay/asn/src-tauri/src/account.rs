@@ -38,7 +38,7 @@ impl From<CallErr> for String {
     }
 }
 
-/// 呼叫帳號動作（POST）。token＝登入存取憑證；node_key 只有 node_claim 才帶（x-relay-key）。
+/// 呼叫帳號動作（POST）。token＝登入存取憑證；node_key 只有 node_claim 與手機的 node_setup_request 才帶（x-relay-key）。
 pub async fn call(client: &reqwest::Client, relay_url: &str, token: &str, action: &str, node_key: Option<&str>, body: Value) -> Result<Value, CallErr> {
     let net = |t: &str| CallErr { code: String::new(), text: t.to_string() };
     let mut rb = client
@@ -780,7 +780,9 @@ pub async fn setup_remote_request(app: State<'_, App>, auth: State<'_, AuthState
     let body = setup_request_body(&node, mode.as_deref())?;
     let c = ctx()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
-    call(&c.client, &c.relay_url, &token, "node_setup_request", None, body).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })
+    // #1593：帶上這支手機自己的節點金鑰，後台才認得是哪支手機要登入，登入網址只送回給它；還沒有金鑰就照舊不帶
+    let node_key = identity::resolve().ok().map(|i| i.key).filter(|k| !k.trim().is_empty());
+    call(&c.client, &c.relay_url, &token, "node_setup_request", node_key.as_deref(), body).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })
 }
 
 /// 送給後台的請求本文：install（沒帶）維持舊的樣子，relogin 多帶 mode；不認得的模式不送
