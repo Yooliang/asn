@@ -154,7 +154,7 @@
                         <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false" :pinned="isChatPinned(c.id)"></asn-avatar>
                       </span>
                       <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-ctx danger b-elev" v-if="elevatedBadge(c)" :title="elevatedBadge(c).tip">{{ elevatedBadge(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                         <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                         <span class="b-last" v-if="lastOf(c.id)">{{ lastOf(c.id) }}</span>
                       </span>

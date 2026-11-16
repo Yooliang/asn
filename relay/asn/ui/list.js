@@ -67,6 +67,7 @@ import { createTaskManager, initialState as initialTaskState } from './lib/task-
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
+import { elevatedBadge } from './lib/elevated.mjs'
 import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
@@ -2181,7 +2182,7 @@ const app = createApp({
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,
       reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
-      contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
+      contextLabel, avOf, elevatedBadge, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
