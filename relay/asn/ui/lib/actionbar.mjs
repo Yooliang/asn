@@ -94,6 +94,8 @@ function consoleStateWhy(c = {}) {
 // 第 2 格：ACP 固定反灰；離線的 Claude／pi 是「喚醒」（ctx.wake === false 時不換，名單右鍵用）；其餘前台／後台
 function windowSlot(f, engine, ctx) {
   if (engine === 'acp') return { key: 'window', label: WINDOW_LABEL.acp, ok: false, reason: '內建通道執行，沒有視窗' }
+  // 離線但卡在第一次問的畫面（信任資料夾／略過權限同意，#1632）：視窗其實已經開著，喚醒只會再開一個，這一格改給「終端」讓本人自己選
+  if (ctx.termStuck === true && f.status === 'offline' && !ctx.phone && ctx.wake !== false) return { ...slot('window', ctx.termLabel || TERM_LABEL, ''), term: true }
   const wake = ctx.wake === false ? null : wakeButtonView(f, ctx.ops ?? {})
   if (wake?.show) return { ...slot('window', WAKE_LABEL, wake.ok ? '' : (wake.reason || '現在不能喚醒')), wake: true }
   if (ctx.phone) return slot('window', WINDOW_LABEL.idle, PHONE_WHY.window)
@@ -430,7 +432,7 @@ export const ActionBar = {
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
-      term: !lite.value && props.term?.ready === true, termLabel: props.term?.label || '',
+      term: !lite.value && props.term?.ready === true, termStuck: props.term?.ready === true && props.term?.stuck === true, termLabel: props.term?.label || '',
     }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0, idle: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))

@@ -590,6 +590,8 @@ struct FakeEnv {
     term_cli: std::sync::atomic::AtomicBool,
     term_fail: bool,
     term_started: Mutex<Vec<(String, String, String)>>,
+    /// 讀畫面對各名字判斷的畫面代號（逾時訊息用）
+    screens: Mutex<Vec<(String, &'static str)>>,
 }
 impl FakeEnv {
     fn new(sessions: &Path, allow: &Path) -> Arc<FakeEnv> {
@@ -617,6 +619,7 @@ impl FakeEnv {
             term_cli: std::sync::atomic::AtomicBool::new(false),
             term_fail: false,
             term_started: Mutex::new(vec![]),
+            screens: Mutex::new(vec![]),
         })
     }
     fn with(sessions: &Path, allow: &Path, f: impl FnOnce(&mut FakeEnv)) -> Arc<FakeEnv> {
@@ -626,6 +629,9 @@ impl FakeEnv {
     }
 }
 impl LaunchEnv for FakeEnv {
+    fn screen_code(&self, name: &str) -> Option<&'static str> {
+        self.screens.lock().unwrap().iter().find(|(n, _)| n == name).map(|(_, c)| *c)
+    }
     fn config(&self, _fresh: bool) -> Result<LaunchConfig, String> {
         if let Some(e) = self.config_err.lock().unwrap().clone() {
             return Err(e);
@@ -1002,6 +1008,19 @@ async fn 遠端開視窗_開不起來回報_failed_本機沒有啟動設定回�
     let last = l.h.fr.rosters().last().unwrap().clone();
     assert_eq!(last["launch_closed_reason"], Value::Null);
     assert_eq!(last["platform"], json!(crate::relay::platform_name()));
+}
+
+#[tokio::test]
+async fn 遠端開視窗_逾時時讀到信任資料夾或略過權限畫面_回對應說明_沒讀到維持原句() {
+    for (code, want) in [("trust", crate::launch::stuck_notice::trust_message("T-卡1")), ("bypass_warning", crate::launch::stuck_notice::bypass_message("T-卡1"))] {
+        let l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.appear = false; e.screens.lock().unwrap().push(("T-卡1".into(), code)); }), (100, 400, 20)).await;
+        let cwd = l.proj.path().to_path_buf();
+        l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-卡1", &cwd, json!({})));
+        l.h.core.pull("bell", T0).await;
+        wait_until(|| !results(&l.h).is_empty()).await;
+        let r = results(&l.h);
+        assert_eq!((r[0]["status"].as_str(), r[0]["detail"].as_str()), (Some("unconfirmed"), Some(want.as_str())));
+    }
 }
 
 #[tokio::test]

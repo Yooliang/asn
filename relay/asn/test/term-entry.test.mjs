@@ -75,7 +75,7 @@ test('聊天頁接線：輸入框旁沒有終端圖示，入口只在上面那�
   const pane = read('ui', 'lib', 'chatpane.mjs')
   assert.ok(!pane.includes('看終端畫面'), '輸入框旁的終端圖示拿掉了')
   assert.match(pane, /<action-bar [^>]*:term="termBar"[^>]*@term="toggleTerm"/)
-  assert.match(pane, /: \{ ready: canTermView\.value, on: termShown\.value \}\)\)/, '本機的夥伴：第 2 格照舊是「終端」（別台電腦的夥伴走 REMOTE_LABEL，字也是「終端」）')
+  assert.match(pane, /: \{ ready: canTermView\.value, on: termShown\.value, stuck: Boolean\(stuckNoteText\.value\) \}\)\)/, '本機的夥伴：第 2 格照舊是「終端」（別台電腦的夥伴走 REMOTE_LABEL，字也是「終端」）')
   assert.match(pane, /<term-view v-if="termShown" /)
   assert.match(pane, /const canTermView = computed\(\(\) => termEntryView\.value\.term\)/, '入口看「在不在服務裡」')
   assert.match(pane, /askTermService\(props\.termViewApi, termViewName\.value\)/)
@@ -141,4 +141,69 @@ test('電腦端指令 term_view_available：只回 bool、只讀對照表、名�
   for (const bad of ['wez(', 'pane_exit', 'pane_id', '.sock', 'persist', 'elog', 'println', 'dir()']) {
     assert.ok(!body.includes(bad), `不叫 wezterm、不回不記窗格編號或路徑：${bad}`)
   }
+})
+// ---- 卡在第一次問的畫面（#1632）：離線也給終端入口，本人自己在 Claude 的畫面上選 ----
+import { STUCK_NOTES, stuckCodeOf, stuckNote, termBaseOk } from '../ui/lib/term-entry.mjs'
+import { backgroundRestoreNoticeText } from '../ui/lib/partner-launch-notify.mjs'
+
+test('終端入口前提：離線＋讀畫面標 trust／bypass_warning 才例外放行；沒有標記或別的代號照舊不放', () => {
+  const ok = { hasApi: true, canOffer: true }
+  assert.equal(termBaseOk({ ...ok, status: 'online', stuck: '' }), true, '在線照舊')
+  assert.equal(termBaseOk({ ...ok, status: 'offline', stuck: '' }), false, '離線沒標記：照舊不放')
+  assert.equal(termBaseOk({ ...ok, status: 'offline', stuck: 'trust' }), true)
+  assert.equal(termBaseOk({ ...ok, status: 'offline', stuck: 'bypass_warning' }), true)
+  assert.equal(termBaseOk({ hasApi: false, canOffer: true, status: 'offline', stuck: 'trust' }), false, '沒有終端畫面功能')
+  assert.equal(termBaseOk({ hasApi: true, canOffer: false, status: 'offline', stuck: 'trust' }), false, '別台電腦、內建通道等不能操作的')
+})
+
+test('卡住代號：只認 trust／bypass_warning，名字要對得上', () => {
+  const list = [{ name: '小乙', code: 'trust' }, { name: '小丙', code: 'permission' }, { name: '小丁', code: 'bypass_warning' }]
+  assert.equal(stuckCodeOf(list, '小乙'), 'trust')
+  assert.equal(stuckCodeOf(list, '小丁'), 'bypass_warning')
+  assert.equal(stuckCodeOf(list, '小丙'), '', '權限詢問不算')
+  assert.equal(stuckCodeOf(list, '別人'), '')
+  assert.equal(stuckCodeOf(list, ''), '')
+  assert.equal(stuckCodeOf(null, '小乙'), '')
+})
+
+test('入口＋小字：離線卡在 trust 且在共用終端服務裡才出現；不在服務裡沒有終端也沒有這行小字', () => {
+  const base = termBaseOk({ hasApi: true, canOffer: true, status: 'offline', stuck: 'trust' })
+  assert.equal(termEntry(base, true).term, true)
+  assert.equal(stuckNote('trust', termEntry(base, true).term), STUCK_NOTES.trust)
+  assert.equal(stuckNote('trust', termEntry(base, false).term), '')
+  assert.equal(stuckNote('trust', termEntry(base, null).term), '')
+  assert.equal(stuckNote('', true), '')
+  assert.equal(termEntry(termBaseOk({ hasApi: true, canOffer: true, status: 'offline', stuck: '' }), true).term, false, '離線沒標記：照舊不出現')
+  assert.ok(STUCK_NOTES.trust.includes('打開終端') && STUCK_NOTES.bypass_warning.includes('打開終端'))
+  for (const t of Object.values(STUCK_NOTES)) assert.ok(!/Enter/.test(t), 'ASN 不叫人按 Enter 帶過去')
+})
+
+test('聊天頁接線：離線入口例外與小字', () => {
+  const pane = read('ui', 'lib', 'chatpane.mjs')
+  assert.match(pane, /const termBase = computed\(\(\) => termBaseOk\(\{ hasApi: !!props\.termViewApi, canOffer: canOfferConsole\(props\.friend, props\.selfNode\), status: props\.friend\?\.status, stuck: stuckCode\.value \}\)\)/)
+  assert.match(pane, /stuckCodeOf\(await props\.termViewApi\.notices\(\), termViewName\.value\)/)
+  assert.match(pane, /<p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">\{\{ stuckNoteText \}\}<\/p>/)
+  assert.ok(!/termViewApi\??\.(input|send)\([^)]*(\r|\n|Enter)/.test(pane + read('ui', 'lib', 'term-entry.mjs')), '不替本人送任何按鍵')
+})
+
+test('跨語言一致：前端的小字與逾時通知、Rust 端的句子用同一組選項字樣', () => {
+  const rs = read('src-tauri', 'src', 'launch', 'stuck_notice.rs')
+  const grab = k => rs.match(new RegExp(`${k}: &str = "([^"]+)"`))[1]
+  const [yes, accept, no] = [grab('TRUST_YES'), grab('BYPASS_YES'), grab('BYPASS_NO')]
+  assert.ok(STUCK_NOTES.trust.includes(`「${yes}」`))
+  assert.ok(STUCK_NOTES.bypass_warning.includes(`「${accept}」`) && STUCK_NOTES.bypass_warning.includes(`「${no}」`))
+  assert.ok(backgroundRestoreNoticeText('小乙').body.includes(`「${yes}」`))
+  assert.match(rs, /CODE_TRUST: &str = "trust"/)
+  assert.match(rs, /CODE_BYPASS: &str = "bypass_warning"/)
+})
+test('第 2 格：離線卡在第一次問的畫面時是「終端」不是「喚醒」；沒有 term 的離線夥伴照舊是「喚醒」', () => {
+  const off = ctx => barSlots(friend({ status: 'offline' }), { selfNode: 'H', api: true, ...ctx }).find(s => s.key === 'window')
+  const t = off({ term: true, termStuck: true })
+  assert.equal(t.label, TERM_LABEL)
+  assert.equal(t.term, true)
+  assert.equal(t.ok, true)
+  const w = off({})
+  assert.equal(w.label, '喚醒', '沒有卡住的標記：照舊')
+  assert.ok(!w.term)
+  assert.ok(off({ term: true, termStuck: true, phone: true }).label !== TERM_LABEL, '手機不給這個例外')
 })

@@ -1052,7 +1052,7 @@ async function pollLaunchResults() {
       if (!watching) console.info('[ASN] 讀畫面這次沒在跑，照舊切前台', p.agent)
       const eng = engineForProfile(p.launchProfile || 'claude')
       await transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true })
-      console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
+      console.info('[ASN] 背景啟動卡在「信任此資料夾」，已改為前台顯示，請到 ASN 打開這個夥伴的終端自己選')
       showLaunchNotice(backgroundRestoreNoticeText(p.agent))
     })().catch(() => {})
   }

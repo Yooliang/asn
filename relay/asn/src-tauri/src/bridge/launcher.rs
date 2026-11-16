@@ -82,6 +82,10 @@ pub trait LaunchEnv: Send + Sync {
     fn term_service_active(&self) -> bool {
         false
     }
+    /// 讀畫面（背景工作）對這個名字的視窗目前判斷的畫面代號，只認 trust／bypass_warning；逾時訊息用它講清楚卡在哪。預設沒有
+    fn screen_code(&self, _name: &str) -> Option<&'static str> {
+        None
+    }
     /// 本機設定裡找得到這個 CLI（tool＝agy 或 grok）嗎：只看設定與檔案／PATH，不下載、不執行。預設找不到
     fn term_cli_found(&self, _config: &LaunchConfig, _tool: &str) -> bool {
         false
@@ -273,6 +277,9 @@ impl LaunchEnv for SystemEnv {
     }
     fn term_service_active(&self) -> bool {
         crate::launch::win_term::term_server_active()
+    }
+    fn screen_code(&self, name: &str) -> Option<&'static str> {
+        crate::launch::stuck_notice::current_code(name)
     }
     fn term_cli_found(&self, config: &LaunchConfig, tool: &str) -> bool {
         crate::launch::term::cli_detectable(config, tool)
@@ -579,7 +586,9 @@ impl Launcher {
             }
             if !unconfirmed && t0.elapsed().as_millis() >= self.confirm_ms as u128 {
                 unconfirmed = true;
-                self.report(&l, "unconfirmed", hint).await;
+                // 讀畫面看到卡在信任資料夾／略過權限同意：講清楚要本人到終端自己選（不代按）；讀不到維持原句
+                let detail = crate::launch::stuck_notice::with_screen(&name, self.env.screen_code(&name), hint);
+                self.report(&l, "unconfirmed", &detail).await;
             }
         }
         self.record(&l, "gave-up", &format!("{} 分鐘內都沒出現在名單上", self.late_ms / 60_000));

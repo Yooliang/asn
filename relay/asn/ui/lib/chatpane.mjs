@@ -18,7 +18,7 @@ import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './
 import { GRACE_AGAIN_LABEL, TYPING_ENDED_TEXT, createGrace } from './term-grace.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
 import { TERM_KEYS, KEYS_TEXT, joinWrapped, findLoginUrls } from './term-keys.mjs'
-import { TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, termEntry } from './term-entry.mjs'
+import { STUCK_POLL_MS, TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -116,11 +116,26 @@ export const ChatPane = {
     const isAsn = computed(() => isAsnWindow(props.friend))
     // 終端（#900／#901／#902）：這台電腦上、在共用終端服務裡的夥伴才有入口（上面那排第 2 格「終端」）；
     // 更新前開的舊夥伴照舊是前台／後台，下面常駐一行小字請本人重新開一次。打開時終端占滿訊息區，輸入框留著
-    const termBase = computed(() => !!props.termViewApi && canOfferConsole(props.friend, props.selfNode) && props.friend?.status !== 'offline')
+    // 例外（#1632）：讀畫面看到它卡在「信任資料夾／略過權限同意」的夥伴還沒有 session 檔、名單上是離線，也要給「終端」入口，讓本人自己在 Claude 的畫面上選
+    const stuckCode = ref('')
+    const termBase = computed(() => termBaseOk({ hasApi: !!props.termViewApi, canOffer: canOfferConsole(props.friend, props.selfNode), status: props.friend?.status, stuck: stuckCode.value }))
     const termViewName = computed(() => props.friend?.agent || props.friend?.nick || '')
     const termInService = ref(null)   // true／false／null（還沒查或查不到）
     const termEntryView = computed(() => termEntry(termBase.value, termInService.value))
     const canTermView = computed(() => termEntryView.value.term)
+    const stuckNoteText = computed(() => (props.friend?.status === 'offline' ? stuckNote(stuckCode.value, canTermView.value) : ''))
+    async function probeStuck() {
+      const f = props.friend
+      if (!props.termViewApi?.notices || !f || f.status !== 'offline' || !canOfferConsole(f, props.selfNode)) { stuckCode.value = ''; return }
+      if (!props.active) return
+      try {
+        const code = stuckCodeOf(await props.termViewApi.notices(), termViewName.value)
+        if (sameFriend(props.friend, f)) stuckCode.value = code
+      } catch { if (sameFriend(props.friend, f)) stuckCode.value = '' }   // 舊版後端沒有這個命令：照舊不放
+    }
+    const stuckTimer = setInterval(() => void probeStuck(), STUCK_POLL_MS)
+    onBeforeUnmount(() => clearInterval(stuckTimer))
+    watch(() => [props.friend?.id, props.friend?.status, props.active].join('\n'), () => void probeStuck(), { immediate: true })
     const termViewOn = ref(false)
     const termShown = computed(() => termViewOn.value && canTermView.value)
     async function probeTerm() {
@@ -173,7 +188,7 @@ export const ChatPane = {
       // 正在看的時候一時問不到（null），不要把這一格收掉：收掉會中斷剛開始的觀看
       if (sameFriend(props.friend, f) && !(r === null && remoteOn.value)) remoteAvail.value = r
     }
-    const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value }))
+    const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value, stuck: Boolean(stuckNoteText.value) }))
     const toggleTerm = () => {
       if (canRemote.value) { remoteOn.value = !remoteOn.value; remoteTyping.value = false; return }
       if (canTermView.value) termViewOn.value = !termViewOn.value
@@ -660,12 +675,13 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
   <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
+  <p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">{{ stuckNoteText }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
