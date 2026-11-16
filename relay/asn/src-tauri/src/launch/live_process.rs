@@ -25,16 +25,15 @@ pub(crate) fn process_resumes(procs: &[super::switch::Proc], alive: &dyn Fn(u32)
 
 /// 用給定的作業系統介面查：有沒有活程序在接續這段對話。對話編號格式不合就當沒有
 pub(crate) fn os_resumes(os: &dyn super::switch::Os, session: &str) -> bool {
-    resuming_pids(os, session).is_some()
+    resuming_pids(os, &os.processes(), session).is_some()
 }
 
-/// 接續這段對話的活程序編號；沒有（或對話編號格式不合）回 None
-pub(crate) fn resuming_pids(os: &dyn super::switch::Os, session: &str) -> Option<Vec<u32>> {
+/// 接續這段對話的活程序編號（程序表由呼叫端抓一次傳進來）；沒有（或對話編號格式不合）回 None
+pub(crate) fn resuming_pids(os: &dyn super::switch::Os, table: &[super::switch::Proc], session: &str) -> Option<Vec<u32>> {
     if !crate::bridge::roster::valid_sid(session) {
         return None;
     }
-    let pids: Vec<u32> = os
-        .processes()
+    let pids: Vec<u32> = table
         .iter()
         .filter(|p| p.name.starts_with("claude") || p.name == "node.exe" || p.name == "node")
         .filter(|p| os.alive(p.pid) && os.cmdline(p.pid).is_some_and(|c| cmdline_resumes(&c, session)))
@@ -56,16 +55,74 @@ pub(crate) struct Holder {
     pub name: Option<String>,
 }
 
-/// 這個 pid 是不是 claude 程序：程序名是 claude*，或是 node／bun 而且命令列含 claude。
-/// sessions/<pid>.json 的 pid 可能被別的程式重用；Claude 自己重用同一個 pid 時會覆寫同檔名的記錄，
-/// 所以「活著而且是 claude」就足以認定那一筆還屬於一個 Claude 視窗，不再用 startedAt 去猜
+/// Claude Desktop（Electron）在 Windows 的安裝路徑片段（小寫、反斜線）。Claude Code 原生安裝在 ~\.local\bin、npm 版是 node.exe，都不會落在這些目錄。
+/// 依據：舊版 Squirrel 安裝在 %LOCALAPPDATA%\AnthropicClaude\app-x.y.z\；MSIX 在 \WindowsApps\Claude_<版本>_…\；electron-builder 每人安裝在 %LOCALAPPDATA%\Programs\Claude\
+const DESKTOP_DIRS: [&str; 3] = [r"\anthropicclaude\", r"\windowsapps\claude_", r"\programs\claude\"];
+
+/// 命令列拆成「執行檔」與「參數」：執行檔有引號就取引號內，沒有就取到第一個 .exe 為止（路徑含空白時），再不然取第一個詞。
+/// 參數依雙引號分詞（引號內的空白不拆、引號去掉）
+fn split_cmdline(cmd: &str) -> (String, Vec<String>) {
+    let c = cmd.trim_start();
+    let lower = c.to_ascii_lowercase();
+    let (exe, rest) = if let Some(inner) = c.strip_prefix('"') {
+        let end = inner.find('"').unwrap_or(inner.len());
+        (&inner[..end], inner.get(end + 1..).unwrap_or(""))
+    } else if let Some(i) = lower.find(".exe") {
+        (&c[..i + 4], &c[i + 4..])
+    } else {
+        let end = c.find(char::is_whitespace).unwrap_or(c.len());
+        (&c[..end], &c[end..])
+    };
+    let (mut args, mut cur, mut quoted, mut has) = (Vec::new(), String::new(), false, false);
+    for ch in rest.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                has = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if has {
+                    args.push(std::mem::take(&mut cur));
+                    has = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has = true;
+            }
+        }
+    }
+    if has {
+        args.push(cur);
+    }
+    (exe.to_string(), args)
+}
+
+/// 執行檔路徑在 Claude Desktop 的安裝目錄底下（不分大小寫、斜線反斜線都認；含 Squirrel 的 \app-<版本>\ 目錄）
+fn is_desktop_exe(exe: &str) -> bool {
+    let p = exe.to_lowercase().replace('/', "\\");
+    DESKTOP_DIRS.iter().any(|d| p.contains(d)) || p.match_indices(r"\app-").any(|(i, m)| p[i + m.len()..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// 命令列看起來是不是「互動中的 Claude 視窗」：不是 Claude Desktop 的執行檔、不是 Electron 子程序（--type=）、
+/// 也不是一次性呼叫（-p／--print／--version／-v，只比對獨立參數）。--resume、-n、--remote-control、權限旗標等都是互動視窗會帶的，不影響
+fn interactive_cmdline(cmd: &str) -> bool {
+    let (exe, args) = split_cmdline(cmd);
+    !is_desktop_exe(&exe) && !args.iter().any(|a| a.starts_with("--type=") || matches!(a.as_str(), "-p" | "--print" | "--version" | "-v"))
+}
+
+/// 這個 pid 是不是互動中的 claude 視窗：程序名是 claude*，或是 node／bun 而且命令列含 claude；再加命令列檢查（見 interactive_cmdline）。
+/// 原生 claude.exe 讀不到命令列時照舊算活（不然手開的視窗會漏）；程序表只有程序名、沒有執行檔路徑，所以讀不到命令列就無從認出 Desktop。
+/// sessions/<pid>.json 的 pid 可能被別的程式重用（含 Claude Desktop、claude -p 這類同名程序）；Claude 自己重用同一個 pid 時會覆寫同檔名的記錄，
+/// 所以「活著而且是互動中的 claude」就足以認定那一筆還屬於一個 Claude 視窗，不再用 startedAt 去猜
 fn is_claude_process(os: &dyn super::switch::Os, table: &[super::switch::Proc], pid: u32) -> bool {
-    let cmd_has_claude = || os.cmdline(pid).is_some_and(|c| c.to_lowercase().contains("claude"));
+    let cmd = os.cmdline(pid);
+    let via_cmdline = || cmd.as_deref().is_some_and(|c| c.to_lowercase().contains("claude") && interactive_cmdline(c));
     match table.iter().find(|p| p.pid == pid) {
-        Some(p) if p.name.starts_with("claude") => true,
-        Some(p) if matches!(p.name.as_str(), "node" | "node.exe" | "bun" | "bun.exe") => cmd_has_claude(),
+        Some(p) if p.name.starts_with("claude") => cmd.as_deref().is_none_or(interactive_cmdline),
+        Some(p) if matches!(p.name.as_str(), "node" | "node.exe" | "bun" | "bun.exe") => via_cmdline(),
         Some(_) => false,
-        None => cmd_has_claude(),
+        None => via_cmdline(),
     }
 }
 
@@ -102,15 +159,14 @@ fn related_to(table: &[super::switch::Proc], pid: u32, ignore: Option<u32>) -> b
 
 /// 只看 sessions/<pid>.json：記錄的 sessionId 是這一段、程序還活著、而且是 claude 程序的視窗。
 /// `ignore`＝要略過的視窗（連同它的外殼與子程序），例如正要被關掉的前任
-pub(crate) fn file_holders(os: &dyn super::switch::Os, sessions: &[Value], session: &str, ignore: Option<u32>) -> Vec<Holder> {
+pub(crate) fn file_holders(os: &dyn super::switch::Os, table: &[super::switch::Proc], sessions: &[Value], session: &str, ignore: Option<u32>) -> Vec<Holder> {
     if !crate::bridge::roster::valid_sid(session) {
         return Vec::new();
     }
-    let table = os.processes();
     let mut out: Vec<Holder> = Vec::new();
     for s in sessions.iter().filter(|s| s.get("sessionId").and_then(Value::as_str) == Some(session)) {
         let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
-        if pid == 0 || out.iter().any(|h| h.pid == pid) || related_to(&table, pid, ignore) || !live_claude_pid(os, &table, pid) {
+        if pid == 0 || out.iter().any(|h| h.pid == pid) || related_to(table, pid, ignore) || !live_claude_pid(os, table, pid) {
             continue;
         }
         let name = s.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
@@ -119,15 +175,14 @@ pub(crate) fn file_holders(os: &dyn super::switch::Os, sessions: &[Value], sessi
     out
 }
 
-/// 現在有哪些活著的 Claude 視窗在用這一段對話（沒有＝空）：sessions 記錄（file_holders）加上命令列帶
+/// 現在有哪些活著的 Claude 視窗在用這一段對話（沒有＝空；程序表由呼叫端抓一次傳進來）：sessions 記錄（file_holders）加上命令列帶
 /// `--resume <編號>` 的程序（視窗剛開、記錄還沒寫出來）。手開、被改過名字的視窗也算。
 /// 自動接回、遠端喚醒、換班接手與開同名夥伴共用這一個判斷
-pub(crate) fn session_holders(os: &dyn super::switch::Os, sessions: &[Value], session: &str, ignore: Option<u32>) -> Vec<Holder> {
-    let mut out = file_holders(os, sessions, session, ignore);
-    if let Some(pids) = resuming_pids(os, session) {
-        let table = os.processes();
+pub(crate) fn session_holders(os: &dyn super::switch::Os, table: &[super::switch::Proc], sessions: &[Value], session: &str, ignore: Option<u32>) -> Vec<Holder> {
+    let mut out = file_holders(os, table, sessions, session, ignore);
+    if let Some(pids) = resuming_pids(os, table, session) {
         for pid in pids {
-            if !out.iter().any(|h| h.pid == pid) && !related_to(&table, pid, ignore) {
+            if !out.iter().any(|h| h.pid == pid) && !related_to(table, pid, ignore) {
                 out.push(Holder { pid, name: None });
             }
         }
@@ -265,7 +320,7 @@ mod tests {
         let (os, sessions) = hand_opened();
         // 舊規則（roster::same_process：程序建立時間比 startedAt 晚超過 60 秒就當 pid 被重用）會判成不活
         assert!(!crate::bridge::roster::same_process(NOW - 5 * 60_000, os.started_ms(13148)));
-        let h = session_holders(&os, &sessions, SID, None);
+        let h = session_holders(&os, &os.processes(), &sessions, SID, None);
         assert_eq!(h, vec![Holder { pid: 13148, name: Some("改過的名字".into()) }]);
         assert!(dup_window_error(&h).contains("視窗名「改過的名字」"));
         assert!(!dup_window_error(&[Holder { pid: 1, name: None }]).contains("視窗名"), "名字取不到就省略括號那段");
@@ -276,14 +331,59 @@ mod tests {
         let (mut os, sessions) = hand_opened();
         os.procs[1] = proc(13148, 100, "chrome.exe");
         os.cmd = vec![(13148, "chrome.exe --type=renderer".into())];
-        assert!(session_holders(&os, &sessions, SID, None).is_empty());
+        assert!(session_holders(&os, &os.processes(), &sessions, SID, None).is_empty());
         // node 但命令列不是 claude 也不算
         os.procs[1] = proc(13148, 100, "node.exe");
         os.cmd = vec![(13148, "node.exe server.js".into())];
-        assert!(session_holders(&os, &sessions, SID, None).is_empty());
+        assert!(session_holders(&os, &os.processes(), &sessions, SID, None).is_empty());
         // node 跑 claude 的 cli 算
         os.cmd = vec![(13148, r"node.exe C:\x\@anthropic-ai\claude-code\cli.js".into())];
-        assert_eq!(session_holders(&os, &sessions, SID, None).len(), 1);
+        assert_eq!(session_holders(&os, &os.processes(), &sessions, SID, None).len(), 1);
+    }
+
+    /// 把 13148 換成指定的程序名與命令列（None＝讀不到命令列），回它是不是「活著的互動 claude 視窗」
+    fn live_with(name: &str, cmd: Option<&str>) -> bool {
+        let (mut os, _) = hand_opened();
+        os.procs[1] = proc(13148, 100, name);
+        os.cmd = cmd.map(|c| vec![(13148, c.to_string())]).unwrap_or_default();
+        live_claude_pid(&os, &os.processes(), 13148)
+    }
+
+    #[test]
+    fn claude_desktop_重用_pid_不算在線() {
+        let desktop = r"C:\Users\u\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe";
+        assert!(!live_with("claude.exe", Some(&format!("\"{desktop}\" --type=renderer --lang=zh-TW"))), "Electron 子程序");
+        assert!(!live_with("claude.exe", Some(&format!("\"{desktop}\""))), "Desktop 主程序：路徑在安裝目錄底下");
+        assert!(!live_with("claude.exe", Some(r#""C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__abc\app\claude.exe""#)), "MSIX 安裝");
+        assert!(!live_with("claude.exe", Some(r"C:\Users\u\AppData\Local\Programs\Claude\claude.exe --type=gpu-process")));
+        assert!(!live_with("claude.exe", Some(r"C:\x\claude.exe --type=utility")), "--type= 不論路徑都排除");
+    }
+
+    #[test]
+    fn 一次性呼叫重用_pid_不算在線() {
+        let exe = r"C:\Users\u\.local\bin\claude.exe";
+        assert!(!live_with("claude.exe", Some(&format!("{exe} -p \"hi\""))));
+        assert!(!live_with("claude.exe", Some(&format!("{exe} --print hello"))));
+        assert!(!live_with("claude.exe", Some(&format!("{exe} --version"))));
+        assert!(!live_with("claude.exe", Some(&format!("{exe} -v"))));
+        assert!(!live_with("node.exe", Some(r"node.exe C:\x\@anthropic-ai\claude-code\cli.js -p hi")));
+    }
+
+    #[test]
+    fn 互動視窗_各種啟動參數與讀不到命令列_都算在線() {
+        let exe = r"C:\Users\u\.local\bin\claude.exe";
+        assert!(live_with("claude.exe", Some(&format!("{exe} --resume {SID} -n 夥伴"))));
+        assert!(live_with("claude.exe", Some(&format!("\"{exe}\" -n \"my -p name\" --remote-control --dangerously-skip-permissions --permission-mode auto"))), "引號內的 -p 不算、--permission-mode 不誤中");
+        assert!(live_with("node.exe", Some(r"node.exe C:\Users\u\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js --resume abc -n 夥伴")));
+        assert!(live_with("claude.exe", None), "命令列讀不到：原生 claude 照舊算活");
+        assert!(!live_with("node.exe", None), "node 讀不到命令列無從確認");
+    }
+
+    #[test]
+    fn 殘留記錄的_pid_被_claude_desktop_接手_不算佔著這段對話() {
+        let (mut os, sessions) = hand_opened();
+        os.cmd = vec![(13148, r#""C:\Users\u\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe" --type=renderer"#.into())];
+        assert!(session_holders(&os, &os.processes(), &sessions, SID, None).is_empty());
     }
 
     #[test]
@@ -304,9 +404,9 @@ mod tests {
     #[test]
     fn 程序已結束_或別段對話_不算佔著() {
         let (mut os, sessions) = hand_opened();
-        assert!(session_holders(&os, &sessions, "另一段-sid", None).is_empty());
+        assert!(session_holders(&os, &os.processes(), &sessions, "另一段-sid", None).is_empty());
         os.alive.retain(|p| *p != 13148);
-        assert!(session_holders(&os, &sessions, SID, None).is_empty());
+        assert!(session_holders(&os, &os.processes(), &sessions, SID, None).is_empty());
     }
 
     #[test]
@@ -317,7 +417,7 @@ mod tests {
             cmd: vec![(400, format!("claude.exe -n 夥伴 --resume {SID}"))],
             created: vec![],
         };
-        let h = session_holders(&os, &[], SID, None);
+        let h = session_holders(&os, &os.processes(), &[], SID, None);
         assert_eq!(h, vec![Holder { pid: 400, name: None }]);
     }
 
@@ -329,8 +429,8 @@ mod tests {
         os.alive.push(13149);
         os.cmd.push((13149, format!("node.exe claude-code/cli.js --resume {SID}")));
         os.cmd[0].1 = format!("claude.exe --resume {SID}");
-        assert!(session_holders(&os, &sessions, SID, Some(13148)).is_empty());
-        assert!(!session_holders(&os, &sessions, SID, None).is_empty());
+        assert!(session_holders(&os, &os.processes(), &sessions, SID, Some(13148)).is_empty());
+        assert!(!session_holders(&os, &os.processes(), &sessions, SID, None).is_empty());
     }
 
     #[test]

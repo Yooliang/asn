@@ -2727,6 +2727,31 @@ fn 換班接手_另一個同編號的記錄已不是_claude_程序_照常交接(
     assert_eq!(r.launched().len(), 1);
 }
 
+/// 殘留的 sessions 記錄，pid 被 Claude Desktop（claude.exe，命令列帶 --type=renderer）接手
+fn add_desktop_reuse(r: &Rig, pid: u32, sid: &str) {
+    add_alias_window(r, pid, sid, "殘留視窗", "claude.exe");
+    r.os().cmd.lock().unwrap().insert(pid, r#""C:\Users\u\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe" --type=renderer"#.into());
+}
+
+#[test]
+fn 喚醒守門_殘留記錄的_pid_被_claude_desktop_接手_不擋() {
+    let r = resume_rig(Opt::default());
+    add_desktop_reuse(&r, 13148, SID);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 換班接手_殘留記錄的_pid_被_claude_desktop_接手_照常交接() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    add_desktop_reuse(&r, 13148, "sid-220");
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
 #[test]
 fn 重開後不說原視窗已關閉_當這段對話還有別的視窗() {
     let r = rig(Opt::default());

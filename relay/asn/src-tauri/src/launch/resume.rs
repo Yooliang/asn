@@ -105,7 +105,7 @@ fn live_conflict(sessions: &[Value], name: &str, alive: &dyn Fn(u32) -> bool) ->
 /// 這段對話已經有活著的視窗開著時給使用者看的說明
 fn sid_conflict_error(holders: &[super::live_process::Holder]) -> String {
     let which = super::live_process::holder_name(holders).map(|n| format!("（{n}）")).unwrap_or_default();
-    format!("這段對話已經有視窗開著{which}，請直接切過去；要開新的夥伴，請改用別的名字")
+    format!("這段對話已經有視窗開著{which}，請直接切過去；要開新的夥伴，請換一個名字，或先關掉那個視窗")
 }
 
 /// 在 claude 的啟動參數最前面加 `--resume <sessionId>`；回傳接續的 sessionId（沒加就是 Ok(None)）。
@@ -135,7 +135,10 @@ pub(super) fn apply_resume_real(args: &mut Vec<String>, command: &str, engine: &
     #[cfg(not(windows))]
     let alive = |_p: u32| false;
     let sessions_dir = dir.join("sessions");
-    let holders = |sid: &str| super::live_process::session_holders(&super::switch::RealOs, &super::console::read_sessions(&sessions_dir), sid, None);
+    let holders = |sid: &str| {
+        let os = super::switch::RealOs;
+        super::live_process::session_holders(&os, &super::switch::Os::processes(&os), &super::console::read_sessions(&sessions_dir), sid, None)
+    };
     apply_resume(args, command, engine, name, cwd, &dir, &alive, &holders)
 }
 
@@ -292,12 +295,12 @@ mod tests {
         let mut a = s(&["-n", "小良"]);
         let held = |sid: &str| if sid == "sess-1" { vec![holder(11, Some("別名"))] } else { Vec::new() };
         let e = apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
-        assert!(e.contains("這段對話已經有視窗開著（別名）") && e.contains("請直接切過去"), "{e}");
+        assert_eq!(e, "這段對話已經有視窗開著（別名），請直接切過去；要開新的夥伴，請換一個名字，或先關掉那個視窗");
         assert_eq!(a, s(&["-n", "小良"]), "不改啟動參數");
         // 名字取不到就省略括號那段
         let held = |_: &str| vec![holder(11, None)];
         let e = apply_resume(&mut s(&["-n", "小良"]), "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
-        assert!(e.contains("這段對話已經有視窗開著，請直接切過去") && !e.contains('（'), "{e}");
+        assert!(e.contains("這段對話已經有視窗開著，請直接切過去") && e.contains("請換一個名字，或先關掉那個視窗") && !e.contains('（'), "{e}");
         // 同名活著照舊：不接續、不報錯，直接新開
         let sd = d.path().join("sessions");
         std::fs::create_dir_all(&sd).unwrap();

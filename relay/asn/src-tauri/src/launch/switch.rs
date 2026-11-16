@@ -478,6 +478,7 @@ pub struct SwitchQuery {
     pub own_window: bool,
 }
 
+#[derive(Debug)]
 pub(crate) struct Target {
     pub pid: u32,
     pub session_id: String,

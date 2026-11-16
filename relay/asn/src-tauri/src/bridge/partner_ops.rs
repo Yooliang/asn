@@ -791,15 +791,16 @@ impl PartnerOps {
 
     /// sessions/<pid>.json 的這一筆現在是一個活著的 claude 程序（pid 被別的程式重用不算）。
     /// 和名單、喚醒的同一段對話判斷共用 live_process::live_claude_pid，不看 startedAt
-    fn session_live(&self, s: &Value) -> bool {
-        let os = self.env.os();
+    /// 程序表由呼叫端在入口抓一次傳進來
+    fn session_live(&self, s: &Value, table: &[switch::Proc]) -> bool {
         let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { return false };
-        crate::launch::live_process::live_claude_pid(os, &os.processes(), pid)
+        crate::launch::live_process::live_claude_pid(self.env.os(), table, pid)
     }
 
     /// 這段對話除了目標視窗之外，還有沒有別的活著的 Claude 視窗（共用判斷，略過目標與它的外殼子程序）
     fn other_holders(&self, t: &switch::Target) -> Vec<crate::launch::live_process::Holder> {
-        crate::launch::live_process::session_holders(self.env.os(), &console::read_sessions(&self.dirs.sessions), &t.session_id, Some(t.pid))
+        let os = self.env.os();
+        crate::launch::live_process::session_holders(os, &os.processes(), &console::read_sessions(&self.dirs.sessions), &t.session_id, Some(t.pid))
     }
 
     /// 轉交前的守門：還有別的視窗在用同一段對話就回不能交接的說明
@@ -957,12 +958,13 @@ impl PartnerOps {
     /// 命令列只在確認過的 pid 上讀（看是不是 claude、取啟動參數），絕不拿來找程序。
     fn find_target(&self, name: &str) -> Result<switch::Target, String> {
         let os = self.env.os();
+        let table = os.processes();
         let sessions = console::read_sessions(&self.dirs.sessions);
         let hits: Vec<(u32, String)> = sessions
             .iter()
             .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
             .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
-            .filter(|s| self.session_live(s))
+            .filter(|s| self.session_live(s, &table))
             .filter_map(|s| Some((u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string())))
             .filter(|(p, _)| *p != 0 && os.alive(*p))
             .collect();
@@ -1150,11 +1152,12 @@ impl PartnerOps {
     /// 收發室視窗與 ASN 自己的視窗一律不行。
     pub(crate) fn command_target(&self, name: &str) -> Option<String> {
         let os = self.env.os();
+        let table = os.processes();
         let hits: Vec<(u32, String)> = console::read_sessions(&self.dirs.sessions)
             .iter()
             .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
             .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
-            .filter(|s| self.session_live(s))
+            .filter(|s| self.session_live(s, &table))
             .filter_map(|s| Some((u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string())))
             .filter(|(p, _)| *p != 0 && os.alive(*p))
             .collect();
@@ -1466,20 +1469,21 @@ impl PartnerOps {
         // 2. 已經有活著的視窗同名，或用同一個 sessionId：不能再開（兩個視窗寫同一段對話會互相覆蓋）
         let os = self.env.os();
         let sessions = console::read_sessions(&self.dirs.sessions);
-        if sessions.iter().any(|s| self.session_live(s) && s.get("name").and_then(Value::as_str) == Some(name)) {
+        let table = os.processes();
+        if sessions.iter().any(|s| self.session_live(s, &table) && s.get("name").and_then(Value::as_str) == Some(name)) {
             return failed("這位夥伴已經在線上");
         }
         // 同一段對話：共用判斷（手開、被改過名字的視窗也算），回傳是哪個視窗
-        let holders = crate::launch::live_process::file_holders(os, &sessions, sid, None);
+        let holders = crate::launch::live_process::file_holders(os, &table, &sessions, sid, None);
         if !holders.is_empty() {
             return failed(crate::launch::live_process::dup_window_error(&holders));
         }
         // 視窗剛開、session 檔還沒寫出來：只有程序表看得到（命令列帶 --resume 這段對話的活程序，和自動接回用同一個判斷）
         // 滿 5 分鐘而且是 ASN 開的、卡在接回中的那種：提示改成到工作管理員停止（判斷與工作管理員共用 stuck_resume）
-        if crate::launch::live_process::resuming_pids(os, sid).is_some() {
-            let live: Vec<crate::launch::stuck_resume::LiveSess> = console::read_sessions(&self.dirs.sessions)
+        if crate::launch::live_process::resuming_pids(os, &table, sid).is_some() {
+            let live: Vec<crate::launch::stuck_resume::LiveSess> = sessions
                 .iter()
-                .filter(|s| self.session_live(s))
+                .filter(|s| self.session_live(s, &table))
                 .map(|s| crate::launch::stuck_resume::LiveSess { sid: s.get("sessionId").and_then(Value::as_str).map(str::to_string), pid: s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).unwrap_or(0) })
                 .collect();
             return failed(crate::launch::stuck_resume::resume_block_hint(os, &self.env.session_partners(sid), &live, sid, self.env.now_ms()));

@@ -13,7 +13,7 @@ use std::path::Path;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 /// 同名視窗還活著，或這段對話已經有活著的 Claude 視窗在用（共用判斷見 live_process::session_holders）：都不再開第二個
 pub(crate) fn already_live(os: &dyn super::switch::Os, sessions: &[Value], name_live: bool, session: &str) -> bool {
-    name_live || !super::live_process::session_holders(os, sessions, session, None).is_empty()
+    name_live || !super::live_process::session_holders(os, &os.processes(), sessions, session, None).is_empty()
 }
 
 /// 接回結果，畫面讀（在資料資料夾）

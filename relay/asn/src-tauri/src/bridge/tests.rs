@@ -649,7 +649,7 @@ async fn 名單同步_兩個視窗同_sessionid_記一行只含視窗名的_log_
     core.refresh_roster(T0).await;
     assert_eq!(log.count("用的是同一段對話"), 1);
     let line = log.recent().into_iter().find(|l| l.contains("用的是同一段對話")).unwrap();
-    assert!(line.contains("視窗「T-甲」「T-乙」用的是同一段對話，這一輪後台不會更新"), "{line}");
+    assert!(line.contains("視窗「T-乙」「T-甲」用的是同一段對話，這一輪後台不會更新"), "{line}");
     assert!(!line.contains("sess-dup"), "log 不寫 sessionId：{line}");
     // 第二輪同一組：不再記
     core.refresh_roster(T0 + 1).await;
@@ -668,7 +668,7 @@ fn 名單同步_重複偵測_同名與同對話各自成組_沒重複不回() {
     assert!(super::roster::partner_sync_dups(&[w("甲", Some("sess-aaaa-0001")), w("乙", Some("sess-bbbb-0002")), w("丙", None)]).is_empty());
     let d = super::roster::partner_sync_dups(&[w("甲", Some("sess-aaaa-0001")), w("乙", Some("sess-aaaa-0001")), w("丙", Some("短"))]);
     assert_eq!(d.len(), 1);
-    assert!(d[0].what.contains("視窗「甲」「乙」用的是同一段對話") && !d[0].key.contains("sess-"));
+    assert!(d[0].what.contains("視窗「乙」「甲」用的是同一段對話") &&!d[0].key.contains("sess-"));
     let d = super::roster::partner_sync_dups(&[w("甲", None), w("甲", None)]);
     assert_eq!(d.len(), 1);
     assert!(d[0].what.contains("有 2 個視窗都叫「甲」"));

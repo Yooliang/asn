@@ -47,3 +47,14 @@ test('夥伴操作與命令列呼叫者判活：走共用判斷，不再用 same
   const env = src('cli/env.rs')
   assert.match(env, /live_process::real_is_claude/)
 })
+
+test('判活：命令列檢查排除 Claude Desktop 與一次性呼叫；錯誤字與程序表只抓一次', () => {
+  const lp = src('launch/live_process.rs').split('#[cfg(test)]')[0]
+  assert.match(lp, /fn interactive_cmdline\(/)
+  assert.match(lp, /"--type="|--type=/)
+  assert.match(lp, /anthropicclaude/)
+  assert.match(lp, /"-p" \| "--print" \| "--version" \| "-v"/)
+  assert.match(lp, /table: &\[super::switch::Proc\]/)
+  const r = src('launch/resume.rs').split('#[cfg(test)]')[0]
+  assert.match(r, /請換一個名字，或先關掉那個視窗/)
+})

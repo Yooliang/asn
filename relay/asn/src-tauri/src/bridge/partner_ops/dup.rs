@@ -8,11 +8,12 @@ impl PartnerOps {
     /// 這個名字目前活著的互動式 Claude 視窗（殘檔、pid 被重用的不算），依開啟時間排序
     pub(crate) fn dup_windows(&self, name: &str) -> Vec<DupWin> {
         let os = self.env.os();
+        let table = os.processes();
         let live: Vec<(u32, String, u64)> = console::read_sessions(&self.dirs.sessions)
             .iter()
             .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
             .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
-            .filter(|s| self.session_live(s))
+            .filter(|s| self.session_live(s, &table))
             .filter_map(|s| {
                 let pid = u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?;
                 Some((pid, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string(), s.get("startedAt").and_then(Value::as_u64).unwrap_or(0)))
@@ -22,7 +23,6 @@ impl PartnerOps {
         if live.len() < 2 {
             return live.into_iter().map(|(pid, session_id, started_ms)| DupWin { pid, session_id, started_ms, by_asn: false, remote: false }).collect();
         }
-        let table = os.processes();
         let mut out: Vec<DupWin> = live
             .into_iter()
             .map(|(pid, session_id, started_ms)| DupWin {
