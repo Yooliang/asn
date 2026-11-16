@@ -245,6 +245,25 @@ Deno.test("node_setup_request（#933）：帶種類與裝置碼型本文時照�
   }
 });
 
+Deno.test("node_setup_request（#1592）：mode 只有 install／relogin；沒帶＝照舊的兩參數；relogin 才多帶 p_mode；已有進行中的請求帶回那筆的 mode", async () => {
+  const old = fake({}, () => ({ ok: true }));
+  await handleAccountAction(old.deps, "node_setup_request", bearer, null, { node: "NEWPC", mode: "install" });
+  assertEquals(old.calls[0].args, { p_user: UID, p_node: "NEWPC" }, "install：和舊版手機同一個呼叫形狀");
+  const f = fake({}, () => ({ ok: true, already: false, state: "pending" }));
+  const r = await handleAccountAction(f.deps, "node_setup_request", bearer, null, { node: "NEWPC", mode: "relogin", p_mode: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { ok: true, already: false, state: "pending" });
+  assertEquals(f.calls, [{ fn: "asn_setup_request", args: { p_user: UID, p_node: "NEWPC", p_mode: "relogin" } }]);
+  const a = fake({}, () => ({ ok: true, already: true, state: "taken", kind: "claude", mode: "relogin" }));
+  assertEquals((await handleAccountAction(a.deps, "node_setup_request", bearer, null, { node: "NEWPC", mode: "install" })).body, { ok: true, already: true, state: "taken", kind: "claude", mode: "relogin" });
+  const sig = "C".repeat(86);
+  for (const bad of [{ mode: "update" }, { mode: "" }, { mode: 5 }, { mode: "RELOGIN" }, { mode: "relogin", kind: "codex", payload: "{}", sig, p_node: "PHONE" }, { mode: "relogin", kind: "agy" }]) {
+    const g = fake();
+    assertEquals((await handleAccountAction(g.deps, "node_setup_request", bearer, null, { node: "NEWPC", ...bad })).status, 400, JSON.stringify(bad));
+    assertEquals(g.calls.length, 0);
+  }
+});
+
 Deno.test("node_setup_code_fetch（#933）：只用登入憑證的本人、rid 格式要對；資料庫的錯誤照對照表", async () => {
   const ready = { state: "ready", t_node: "NEWPC", t_sign_pub: "T".repeat(43), t_eph_pub: "B".repeat(43), cipher: "E".repeat(100), t_sig: "D".repeat(86) };
   const f = fake({}, () => ready);

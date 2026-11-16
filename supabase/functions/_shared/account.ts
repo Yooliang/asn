@@ -227,6 +227,10 @@ export async function handleAccountAction(
     if (typeof node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(node)) return { status: 400, body: { error: "bad_request" } };
     const kind = b.kind ?? "claude";
     if (typeof kind !== "string" || !["claude", "codex", "agy", "grok"].includes(kind)) return { status: 400, body: { error: "bad_request" } };
+    // #1592：模式只有 install（安裝並登入，沒帶＝這個）與 relogin（只重新登入，電腦不會安裝任何東西）；重新登入只對 claude
+    const mode = b.mode ?? "install";
+    if (mode !== "install" && mode !== "relogin") return { status: 400, body: { error: "bad_request" } };
+    if (mode === "relogin" && kind !== "claude") return { status: 400, body: { error: "bad_request" } };
     const opt = (v: unknown, re: RegExp, max: number) => v == null ? null : (typeof v === "string" && v.length <= max && re.test(v) ? v : undefined);
     const payload = opt(b.payload, /^[\x20-\x7e]+$/, 1024);
     const sig = opt(b.sig, /^[A-Za-z0-9_-]{86}$/, 86);
@@ -234,13 +238,15 @@ export async function handleAccountAction(
     if (payload === undefined || sig === undefined || pNode === undefined) return { status: 400, body: { error: "bad_request" } };
     const args: Record<string, unknown> = { p_user: user.id, p_node: node };
     if (kind !== "claude" || payload !== null || sig !== null || pNode !== null) Object.assign(args, { p_kind: kind, p_payload: payload, p_sig: sig, p_p_node: pNode });
+    // 只有 relogin 才多帶 p_mode：安裝照舊的呼叫形狀（資料庫的預設值就是 install），後台還沒有新函式時舊流程不受影響
+    if (mode === "relogin") Object.assign(args, { p_mode: mode });
     const { data, error } = await deps.rpc("asn_setup_request", args);
     if (error) { console.error("node_setup_request", error); return { status: 500, body: { error: "internal" } }; }
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     // 這台已經有進行中的請求時，多帶那筆的種類（手機據此說「這台已經有一個進行中的請求」）
     const already = d?.already === true;
-    return { status: 200, body: { ok: true, already, state: d?.state, ...(already && typeof d?.kind === "string" ? { kind: d.kind } : {}) } };
+    return { status: 200, body: { ok: true, already, state: d?.state, ...(already && typeof d?.kind === "string" ? { kind: d.kind } : {}), ...(already && (d?.mode === "install" || d?.mode === "relogin") ? { mode: d.mode } : {}) } };
   }
 
   // #933：手機取回電腦放的密文（本人；只回自己送出的那一筆；取一次就清）。
