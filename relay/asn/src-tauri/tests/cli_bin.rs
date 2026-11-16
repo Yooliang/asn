@@ -99,7 +99,7 @@ fn run_in_window(exe: &str, home: &Path, envs: &[(&str, &str)], args: &[&str]) -
 
 /// Windows：正式判斷要求視窗程序名是 claude*（或 node／bun 且命令列含 claude），測試程式本身不符。
 /// 所以在假家目錄放一份改名成 claude.exe 的 cmd.exe 當視窗，由它啟動命令列：
-/// 1. 視窗先 `set /p` 等測試從標準輸入送一行（這時才知道它的 pid，登記好記錄才放行，沒有競態）；
+/// 1. 視窗先 `set /p` 等測試從標準輸入送一行（這時才知道它的 pid，登記好記錄才放行，沒有競態；這一步的輸出全丟到 nul）；
 /// 2. 放行後它才跑命令列，命令列的父行程就是這個登記過的 claude.exe；
 /// 3. cmd 把子程序的標準輸出入照原樣接過去，結束碼也是子程序的結束碼。
 /// 命令列不含 -p／-v／--type= 等獨立參數，執行檔也不在 Claude Desktop 目錄，所以過得了正式的互動視窗判斷。
@@ -115,7 +115,8 @@ fn run_in_window(exe: &str, home: &Path, envs: &[(&str, &str)], args: &[&str]) -
     }
     let quoted: String = args.iter().map(|a| format!(" \"{a}\"")).collect();
     // /s：外層第一個與最後一個引號一定去掉，裡面的引號原樣保留
-    let line = format!("/d /s /c \"set /p _=& \"{exe}\"{quoted} <nul\"");
+    // 等放行那一步的輸出全丟掉：清空環境後 cmd 的 set /p 會在標準輸出印一行系統訊息，混進命令列的輸出
+    let line = format!("/d /s /c \"(set /p _=) >nul 2>nul & \"{exe}\"{quoted} <nul\"");
     let mut child = prepared(&claude, home, envs).raw_arg(line).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     register_window(home, child.id(), WINDOW_NAME);
     // 記錄寫好才放行；送完就關掉標準輸入
