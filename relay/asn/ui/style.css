@@ -1140,6 +1140,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .ng-act{justify-self:end}
 .ng-checking{color:var(--muted)}
 .ng-note{grid-column:1 / -1;margin:0;color:var(--muted);line-height:1.6;font-size:.95em}
+.ng-edge{font-size:.85em;line-height:1.5;overflow-wrap:anywhere}
 .ng-hint{color:var(--busy)}
 .ng-link{color:var(--link);text-decoration:underline;cursor:pointer}
 .ng-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}

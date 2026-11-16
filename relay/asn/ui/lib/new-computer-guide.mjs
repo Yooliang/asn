@@ -39,6 +39,8 @@ export const GUIDE_TEXT = Object.freeze({
   // 手機：那台電腦沒打開從手機安裝的開關；用設定裡真正的字（agent-install.mjs 的 allowRemote）
   installSwitch: '到那台電腦的 設定 → 設備，勾選「允許從手機替這台安裝並登入」',
   loginHere: '已安裝，還沒登入。請在那台電腦上登入。',
+  // 官網那行下面的小提醒：瀏覽器擋下載時怎麼放行
+  edgeKeep: 'Edge 擋下載的話，按「…」→「保留」→「仍要保留」',
 })
 
 /** 四家，順序固定。tool＝ai_cli_detect 的工具代號；site＝官網（目錄 catalog 沒放網址，這裡是唯一來源） */

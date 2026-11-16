@@ -71,6 +71,7 @@ export const newComputerGuideProbeSource = ({ kind = 'blank', page = 'partners' 
     if ((bad = await expectRow('claude', [], '找不到 Claude Code。剛裝好的話，按下面的「重新檢查」。'))) return { ok: false, why: bad };
     for (const [k, n] of [['codex', 'Codex'], ['gemini', 'Gemini'], ['grok', 'Grok']]) { if ((bad = await expectRow(k, [], '還沒裝 ' + n + '，裝好後這裡會出現「開一個視窗」。'))) return { ok: false, why: bad } }
     for (const [k, n] of [['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini'], ['grok', 'Grok']]) { if (!txt(rowOf(k)).includes('到 ' + n + ' 官網 下載安裝')) return { ok: false, why: k + ' 少了官網說明：' + txt(rowOf(k)) } }
+    for (const k of ['claude', 'codex', 'gemini', 'grok']) { const e = rowOf(k).querySelectorAll('.ng-edge'); if (e.length !== 1 || txt(e[0]) !== 'Edge 擋下載的話，按「…」→「保留」→「仍要保留」') return { ok: false, why: k + ' 官網下面應該有一行 Edge 擋下載的提醒：' + txt(rowOf(k)) } }
     if (/https?:|curl|irm /.test(txt(card()))) return { ok: false, why: '卡片上不該出現網址或安裝指令文字：' + txt(card()) };
     const before = calls('open_link').length;
     const link = rowOf('codex').querySelector('a.ng-link');
@@ -164,6 +165,13 @@ export const newComputerGuidePhoneProbeSource = (open = false) => `(async () => 
   for (const [k, b] of want) { if (JSON.stringify(btns(k)) !== JSON.stringify(b)) return { ok: false, why: k + ' 的按鈕應為 [' + b.join('、') + ']，實際 [' + btns(k).join('、') + ']：' + txt(rowOf(k)) } }
   if (card().querySelector('.ng-recheck')) return { ok: false, why: '手機叫不動那台電腦重新偵測，不該有「重新檢查」' };
   if (!txt(rowOf('grok')).includes('還沒裝 Grok，裝好後這裡會出現「開一個視窗」。') || !txt(rowOf('grok')).includes('到 Grok 官網 下載安裝')) return { ok: false, why: 'Grok 那列說明不對：' + txt(rowOf('grok')) };
+  // 手機：沒裝的 Gemini／Grok 官網下面有 Edge 提醒，而且不超出卡片
+  for (const k of ['gemini', 'grok']) {
+    const e = rowOf(k).querySelectorAll('.ng-edge');
+    if (e.length !== 1 || txt(e[0]) !== 'Edge 擋下載的話，按「…」→「保留」→「仍要保留」') return { ok: false, why: k + ' 手機版官網下面應該有一行 Edge 擋下載的提醒：' + txt(rowOf(k)) };
+    if (e[0].getBoundingClientRect().right > card().getBoundingClientRect().right + 1) return { ok: false, why: k + ' 手機版 Edge 提醒超出卡片' };
+  }
+  if (rowOf('claude').querySelector('.ng-edge')) return { ok: false, why: '已安裝的 Claude 不該有 Edge 提醒' };
   if (OPEN) {
     // 開一個視窗：走手機既有的開新夥伴，選好辦公室與 Claude
     await real({ click: at(rowOf('claude').querySelector('button')) }, 800);

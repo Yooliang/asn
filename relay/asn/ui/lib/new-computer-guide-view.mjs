@@ -22,6 +22,7 @@ export const NewGuideCard = {
         </span>
         <p class="ng-note" v-if="r.note">{{ r.note }}</p>
         <p class="ng-note" v-if="r.site">{{ r.site.before }}<a class="ng-link" href="#" role="link" @click.prevent="$emit('site', r.site)">{{ r.site.name }}</a>{{ r.site.after }}</p>
+        <p class="ng-note ng-edge" v-if="r.site">{{ T.edgeKeep }}</p>
         <p class="ng-note ng-hint" v-if="hint && hint.key === r.key && hint.text" role="alert">{{ hint.text }}</p>
       </li>
     </ul>
