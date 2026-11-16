@@ -39,6 +39,12 @@ pub fn gate(switch_on: bool, token: Option<&str>, requested_by: &str) -> Gate {
     if !switch_on {
         return Gate::Refuse(REFUSE_SWITCH_OFF);
     }
+    gate_relogin(token, requested_by)
+}
+
+/// 重新登入的本機把關（#1592）：不受「允許從手機安裝並登入」開關限制，改用本人身分確認——
+/// 這台登入著 ASN 帳號，而且和送出請求的是同一個人。要安裝或更新任何東西不走這裡（照舊看開關）
+pub fn gate_relogin(token: Option<&str>, requested_by: &str) -> Gate {
     if !is_uuid(requested_by) {
         return Gate::Refuse(REFUSE_BAD_REQUEST);
     }
@@ -49,6 +55,17 @@ pub fn gate(switch_on: bool, token: Option<&str>, requested_by: &str) -> Gate {
         return Gate::Refuse(REFUSE_OTHER_ACCOUNT);
     }
     Gate::Go
+}
+
+/// 把關擋下的原因類別，只給 ui.log 用（固定詞，不帶任何帳號資料）
+pub fn refuse_tag(why: &str) -> &'static str {
+    match why {
+        REFUSE_SWITCH_OFF => "安裝開關沒開",
+        REFUSE_NOT_SIGNED_IN => "這台電腦沒有登入帳號",
+        REFUSE_OTHER_ACCOUNT => "不是同一個帳號",
+        REFUSE_BAD_REQUEST => "請求格式不對",
+        _ => "其他",
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +140,52 @@ mod tests {
         assert!(ev.len() < 1200, "只取到證據函式本身");
         for bad in ["ask.", "SetupAsk", "relay.", "payload", "requested_by"] {
             assert!(!ev.contains(bad), "證據不能來自手機的請求：{bad}");
+        }
+    }
+
+    #[test]
+    fn 重新登入的把關_不看安裝開關_要是本人且同一個帳號() {
+        let t1 = token(U1);
+        assert_eq!(gate_relogin(Some(&t1), U1), Gate::Go);
+        assert_eq!(gate_relogin(Some(&t1), &U1.to_ascii_uppercase()), Gate::Go, "大小寫不影響");
+        assert_eq!(gate_relogin(None, U1), Gate::Refuse(REFUSE_NOT_SIGNED_IN));
+        assert_eq!(gate_relogin(Some(""), U1), Gate::Refuse(REFUSE_NOT_SIGNED_IN));
+        assert_eq!(gate_relogin(Some("亂寫的權杖"), U1), Gate::Refuse(REFUSE_NOT_SIGNED_IN));
+        assert_eq!(gate_relogin(Some(&t1), U2), Gate::Refuse(REFUSE_OTHER_ACCOUNT));
+        assert_eq!(gate_relogin(Some(&t1), "evil"), Gate::Refuse(REFUSE_BAD_REQUEST));
+        assert_eq!(gate_relogin(Some(&t1), ""), Gate::Refuse(REFUSE_BAD_REQUEST));
+        // 安裝那條仍然先看開關，開著時和重新登入的人身分檢查一致
+        for (tok, by) in [(Some(t1.as_str()), U1), (Some(t1.as_str()), U2), (None, U1), (Some(t1.as_str()), "evil")] {
+            assert_eq!(gate(true, tok, by), gate_relogin(tok, by));
+        }
+        assert_eq!(gate(false, Some(&t1), U1), Gate::Refuse(REFUSE_SWITCH_OFF));
+        for s in [REFUSE_SWITCH_OFF, REFUSE_NOT_SIGNED_IN, REFUSE_OTHER_ACCOUNT, REFUSE_BAD_REQUEST] {
+            assert_ne!(refuse_tag(s), "其他", "{s}");
+            assert!(!refuse_tag(s).contains(U1) && !refuse_tag(s).contains('@'));
+        }
+    }
+
+    /// 接線守門（#1592）：重新登入那條路不讀安裝開關、不呼叫安裝的入口，先過本人把關才開始；安裝那條路維持原樣
+    #[test]
+    fn 守門_重新登入不看安裝開關_也不呼叫安裝() {
+        let lib = include_str!("../lib.rs").replace("\r\n", "\n");
+        let start = lib.find("async fn run_remote_relogin(").unwrap();
+        let body = &lib[start..start + lib[start..].find("\n}\n").unwrap()];
+        assert!(!body.contains("remote_allowed") && !body.contains("gate("), "不看安裝開關");
+        assert!(!body.contains("start_claude(") && !body.contains("install"), "不呼叫安裝");
+        let (g, begin) = (body.find("gate_relogin(").unwrap(), body.find("start_claude_relogin(").unwrap());
+        assert!(g < begin, "先過本人把關才開始");
+        assert!(body.contains("ask.kind == \"claude\""), "重新登入只對 Claude");
+        // 入口：模式是 relogin 才走這條；不認得的模式一律拒絕，不當成安裝
+        let remote = lib.find("async fn run_remote_setup(").unwrap();
+        let rbody = &lib[remote..remote + lib[remote..].find("\n}\n").unwrap()];
+        assert!(rbody.contains("ask.mode == \"relogin\"") && rbody.contains("ask.mode != \"install\""));
+        assert_eq!(lib.matches("run_remote_relogin(handle, relay, ask)").count(), 1, "只有手機請求的入口呼叫");
+        // 紀錄只寫固定句型，不帶網址、授權碼、帳號
+        for bad in ["ask.by", "requested_by", "token", "url", "code"] {
+            let log_lines: Vec<&str> = body.lines().filter(|l| l.contains("remote_setup_log(")).collect();
+            assert!(!log_lines.is_empty());
+            assert!(log_lines.iter().all(|l| !l.contains(bad)), "ui.log 的行不能帶 {bad}");
         }
     }
 

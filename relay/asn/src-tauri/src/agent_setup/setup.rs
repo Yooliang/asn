@@ -34,6 +34,8 @@ pub enum Finish {
     Ready(String),
     /// 本來就裝好也登入了，什麼都沒動
     AlreadyReady(String),
+    /// 重新登入的要求（#1592）：這台的 Claude 目前登入正常、沒有失效的證據，什麼都沒動
+    LoginHealthy,
     /// 剛裝好，但這台電腦本來就已經登入：沿用現有的登入，沒有跑登入
     InstalledKeptLogin(String),
     /// 這台沒辦法背景登入，請退回開終端機
@@ -43,6 +45,27 @@ pub enum Finish {
     Declined,
     TimedOut,
     Failed(String),
+}
+
+/// 重新登入的固定句子（#1592）。回報到手機，不帶路徑、帳號、網址
+pub const LOGIN_HEALTHY: &str = "這台電腦的 Claude 目前登入正常，不需要重新登入";
+pub const REFUSE_NOT_INSTALLED: &str = "這台電腦還沒安裝 Claude Code，重新登入不會替你安裝；要安裝請在這台電腦打開「允許從手機安裝並登入」";
+pub const REFUSE_BROKEN: &str = "這台電腦的 Claude Code 看起來壞了，重新登入不會替你重新安裝；請在這台電腦上處理";
+
+impl Finish {
+    /// 結果的類別，固定詞，只給 ui.log 用（不帶版本、路徑、網址、授權碼）
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Finish::Ready(_) => "已重新登入",
+            Finish::AlreadyReady(_) | Finish::LoginHealthy => "登入正常",
+            Finish::InstalledKeptLogin(_) => "沿用現有登入",
+            Finish::NeedTerminal(_) => "需在終端機處理",
+            Finish::Cancelled => "已取消",
+            Finish::Declined => "手機拒絕",
+            Finish::TimedOut => "逾時",
+            Finish::Failed(_) => "失敗",
+        }
+    }
 }
 
 /// 重裝的原因，固定文字（不帶路徑與系統錯誤）
@@ -122,6 +145,7 @@ impl Finish {
         match self {
             Finish::Ready(v) => json!({ "phase": "done", "ok": true, "text": format!("Claude Code {v} 已安裝並登入"), "version": v }),
             Finish::AlreadyReady(v) => json!({ "phase": "done", "ok": true, "already": true, "text": format!("這台電腦已經安裝 Claude Code {v} 並登入，沒有重新安裝或登入"), "version": v }),
+            Finish::LoginHealthy => json!({ "phase": "done", "ok": true, "healthy": true, "text": LOGIN_HEALTHY }),
             Finish::InstalledKeptLogin(v) => json!({ "phase": "done", "ok": true, "kept_login": true, "text": format!("已安裝 Claude Code {v}，沿用這台電腦現有的登入"), "version": v }),
             Finish::NeedTerminal(t) => json!({ "phase": "done", "ok": false, "terminal": true, "text": t }),
             Finish::Cancelled => json!({ "phase": "done", "ok": false, "cancelled": true, "text": "已在這台電腦上取消" }),
@@ -271,6 +295,53 @@ fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: S
     }
 }
 
+/// 重新登入（#1592）：只看現況、只重新登入，不安裝、不更新、不下載任何東西。
+/// 沒裝好（沒有、壞掉）一律擋下並回固定句子；裝好了才看登入狀態：登入正常而且本機沒有失效的證據，回「登入正常，不需要重新登入」；
+/// 沒登入、或登入已失效（本機證據），才用手機重新登入；看不出登入狀態就停下來回報，不蓋掉現有的登入
+pub fn run_relogin_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
+    let done = |finish: Finish| Done { finish, replaced: None, installed: false };
+    report(Event::Checking);
+    if (s.cancelled)() {
+        return done(Finish::Cancelled);
+    }
+    let version = match (s.inspect)() {
+        Existing::Healthy(v) => v,
+        Existing::Missing if (s.on_path)().is_some() => {
+            elog!("重新登入：PATH 上已經有 claude，不處理");
+            return done(Finish::NeedTerminal("這台電腦已經用別的方式裝了 Claude Code，請在終端機登入".to_string()));
+        }
+        Existing::Missing => return done(Finish::Failed(REFUSE_NOT_INSTALLED.to_string())),
+        Existing::Broken(k, detail) => {
+            elog!("重新登入：現有的 claude.exe 不能用，不處理（{k:?}）：{detail}");
+            return done(Finish::Failed(REFUSE_BROKEN.to_string()));
+        }
+    };
+    report(Event::Installed(version.clone()));
+    if (s.cancelled)() {
+        return done(Finish::Cancelled);
+    }
+    match (s.state)() {
+        LoginState::In => match (s.relogin_evidence)() {
+            Some(why) => elog!("重新登入：Claude 顯示已登入，但這台電腦看到登入已經失效（{why}），改用手機重新登入"),
+            None => return done(Finish::LoginHealthy),
+        },
+        LoginState::Unknown(why) => return done(Finish::Failed(format!("{why}。為了不蓋掉現有的登入，沒有繼續；請先在終端機確認登入狀態"))),
+        LoginState::Out => {}
+    }
+    if (s.cancelled)() {
+        return done(Finish::Cancelled);
+    }
+    let finish = match (s.login)(phone, &|st| report(Event::Login(st))) {
+        Outcome::Verified => Finish::Ready(version),
+        Outcome::NeedTerminal(t) => Finish::NeedTerminal(t),
+        Outcome::Declined => Finish::Declined,
+        Outcome::TimedOut => Finish::TimedOut,
+        Outcome::Failed(e) => Finish::Failed(e),
+        Outcome::Cancelled => Finish::Cancelled,
+    };
+    done(finish)
+}
+
 /// 取本人簽章的函式：由視窗程式建立（來源只有它的記憶體）。取不到（沒登入、換新失敗）回 None
 pub type TokenFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
@@ -296,6 +367,29 @@ pub fn start_claude(relay: Arc<Relay>, token: TokenFn, relogin_evidence: Evidenc
             relogin_evidence: &|| relogin_evidence(),
         };
         done(run_with(&steps, &phone, &report));
+    });
+    spawned.map(|_| ()).map_err(|e| format!("無法開始：{e}"))
+}
+
+/// 手機的「重新登入」入口（#1592）：和 `start_claude` 一樣佔同一把鎖、開獨立執行緒，但只走 `run_relogin_with`，
+/// 傳進去的「安裝」動作一律回錯，所以這條路不可能安裝、更新或下載任何東西
+pub fn start_claude_relogin(relay: Arc<Relay>, token: TokenFn, relogin_evidence: EvidenceFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Done) + Send + 'static) -> Result<(), String> {
+    let busy = Busy::take(&BUSY)?;
+    CANCEL.store(false, Ordering::SeqCst);
+    let spawned = std::thread::Builder::new().name("asn-agent-relogin".into()).spawn(move || {
+        let _busy = busy;
+        let get = move || token();
+        let phone = SecretPhone { be: relay.as_ref(), token: &get, cancelled: is_cancelled, poll: Duration::from_secs(2) };
+        let steps = Steps {
+            inspect: &super::claude_install::inspect_here,
+            install: &|| Err("重新登入不會安裝任何東西".to_string()),
+            state: &super::claude_login::login_state_here,
+            cancelled: &is_cancelled,
+            on_path: &|| super::claude_install::find_on_path().map(|p| p.to_string_lossy().into_owned()),
+            login: &|p, r| super::claude_login::login_here(p, r),
+            relogin_evidence: &|| relogin_evidence(),
+        };
+        done(run_relogin_with(&steps, &phone, &report));
     });
     spawned.map(|_| ()).map_err(|e| format!("無法開始：{e}"))
 }
@@ -584,6 +678,118 @@ mod tests {
         assert_eq!(Finish::AlreadyReady("2.1.309".into()).to_json()["already"], true);
         assert!(!Event::Installed("2.1.309".into()).to_json()["text"].as_str().unwrap().contains("登入"), "已就緒的文字不提登入");
         assert_eq!(Finish::Declined.to_json()["ok"], false);
+    }
+
+    /// 重新登入（#1592）的假流程：安裝動作一被呼叫就記一次（而且一律回錯），登入動作也記一次
+    fn run_relogin(existing: Existing, state: LoginState, login: Outcome, on_path: Option<String>) -> (Done, Vec<Event>, Calls) {
+        let calls = Calls::default();
+        let ev = RefCell::new(vec![]);
+        let state = RefCell::new(Some(state));
+        let login = RefCell::new(Some(login));
+        let existing = RefCell::new(Some(existing));
+        let steps = Steps {
+            inspect: &|| existing.borrow_mut().take().unwrap(),
+            install: &|| {
+                calls.install.set(calls.install.get() + 1);
+                Err("不該安裝".to_string())
+            },
+            state: &|| state.borrow_mut().take().unwrap(),
+            cancelled: &|| false,
+            on_path: &|| on_path.clone(),
+            login: &|_, rep| {
+                calls.login.set(calls.login.get() + 1);
+                rep(Step::UrlSent);
+                login.borrow_mut().take().unwrap()
+            },
+            relogin_evidence: &|| {
+                EVIDENCE_ASKED.with(|n| n.set(n.get() + 1));
+                EVIDENCE.with(|e| e.get())
+            },
+        };
+        let r = run_relogin_with(&steps, &NoPhone, &|e| ev.borrow_mut().push(e));
+        (r, ev.into_inner(), calls)
+    }
+
+    #[test]
+    fn 重新登入_沒裝好一律擋下_不安裝也不登入() {
+        let ((d, ev, c), asked) = with_evidence(Some("x"), || run_relogin(Existing::Missing, LoginState::Out, Outcome::Verified, None));
+        assert_eq!(d.finish, Finish::Failed(REFUSE_NOT_INSTALLED.to_string()));
+        assert!(!d.installed && d.replaced.is_none());
+        assert_eq!((c.install.get(), c.login.get(), asked), (0, 0, 0));
+        assert!(!ev.contains(&Event::Installing(None)));
+        assert!(REFUSE_NOT_INSTALLED.contains("這台電腦還沒安裝 Claude Code") && REFUSE_NOT_INSTALLED.contains("允許從手機安裝並登入"));
+        // 壞掉的也不重裝
+        let ((d, _, c), _) = with_evidence(Some("x"), || run_relogin(Existing::Broken(BrokenKind::BadSignature, "x".into()), LoginState::Out, Outcome::Verified, None));
+        assert_eq!(d.finish, Finish::Failed(REFUSE_BROKEN.to_string()));
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        assert!(d.replaced.is_none(), "沒有重裝，就不能有重裝說明");
+        // PATH 上有別的方式裝的：請本人在終端機處理，不動
+        let ((d, _, c), _) = with_evidence(None, || run_relogin(Existing::Missing, LoginState::Out, Outcome::Verified, Some("C:/x/claude.exe".into())));
+        assert!(matches!(d.finish, Finish::NeedTerminal(_)));
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        assert!(!d.to_json().to_string().contains("C:/x"), "路徑不回報");
+    }
+
+    #[test]
+    fn 重新登入_登入正常而且沒有失效證據_回登入正常_什麼都不動() {
+        let ((d, _, c), asked) = with_evidence(None, || run_relogin(Existing::Healthy("2.1.316".into()), LoginState::In, Outcome::Failed("不該登入".into()), None));
+        assert_eq!(d.finish, Finish::LoginHealthy);
+        assert_eq!((c.install.get(), c.login.get(), asked), (0, 0, 1));
+        let (ok, text, replaced) = d.report_fields();
+        assert!(ok && replaced.is_none());
+        assert_eq!(text, "這台電腦的 Claude 目前登入正常，不需要重新登入");
+    }
+
+    #[test]
+    fn 重新登入_有失效證據或沒登入_才用手機登入_而且不安裝() {
+        let ((d, _, c), asked) = with_evidence(Some("對話紀錄判定登入失效"), || run_relogin(Existing::Healthy("2.1.316".into()), LoginState::In, Outcome::Verified, None));
+        assert_eq!(d.finish, Finish::Ready("2.1.316".into()));
+        assert_eq!((c.install.get(), c.login.get(), asked), (0, 1, 1));
+        let ((d, _, c), asked) = with_evidence(None, || run_relogin(Existing::Healthy("2.1.316".into()), LoginState::Out, Outcome::Verified, None));
+        assert_eq!(d.finish, Finish::Ready("2.1.316".into()));
+        assert_eq!((c.install.get(), c.login.get(), asked), (0, 1, 0), "沒登入不用問證據");
+        let ((d, _, c), _) = with_evidence(Some("x"), || run_relogin(Existing::Healthy("2.1.316".into()), LoginState::In, Outcome::TimedOut, None));
+        assert_eq!(d.finish, Finish::TimedOut, "沒成功就照實回報");
+        assert_eq!(c.install.get(), 0);
+    }
+
+    #[test]
+    fn 重新登入_看不出登入狀態就停下來_不蓋掉現有的登入() {
+        let ((d, _, c), _) = with_evidence(Some("x"), || run_relogin(Existing::Healthy("2.1.316".into()), LoginState::Unknown("讀不到".into()), Outcome::Verified, None));
+        assert!(matches!(d.finish, Finish::Failed(_)));
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+    }
+
+    #[test]
+    fn 重新登入_結果類別是固定詞_不帶版本與路徑() {
+        for (f, want) in [
+            (Finish::LoginHealthy, "登入正常"), (Finish::AlreadyReady("2.1.316".into()), "登入正常"), (Finish::Ready("2.1.316".into()), "已重新登入"),
+            (Finish::Failed("C:/x 失敗".into()), "失敗"), (Finish::TimedOut, "逾時"), (Finish::Declined, "手機拒絕"), (Finish::Cancelled, "已取消"),
+            (Finish::NeedTerminal("C:/x".into()), "需在終端機處理"), (Finish::InstalledKeptLogin("2.1.316".into()), "沿用現有登入"),
+        ] {
+            assert_eq!(f.tag(), want);
+            assert!(!f.tag().contains("C:/") && !f.tag().contains("2.1.316"));
+        }
+        let j = Finish::LoginHealthy.to_json();
+        assert_eq!((j["ok"].as_bool(), j["healthy"].as_bool()), (Some(true), Some(true)));
+    }
+
+    /// 重新登入的流程與入口，原始碼裡不能出現呼叫安裝或下載的地方
+    #[test]
+    fn 守門_重新登入的流程不呼叫安裝() {
+        let src = include_str!("setup.rs").replace("\r\n", "\n");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let run = &body[body.find("pub fn run_relogin_with").unwrap()..];
+        let run = &run[..run.find("\n}\n").unwrap()];
+        let start = &body[body.find("pub fn start_claude_relogin").unwrap()..];
+        let start = &start[..start.find("\n}\n").unwrap()];
+        for part in [run, start] {
+            for bad in ["(s.install)", "install_here", "download", "Installing("] {
+                assert!(!part.contains(bad), "{bad}");
+            }
+        }
+        assert!(start.contains("Err(\"重新登入不會安裝任何東西\""), "入口給的安裝動作一律回錯");
+        assert!(start.contains("Busy::take(&BUSY)?") && start.find("Busy::take(&BUSY)?") < start.find("std::thread::Builder::new()"), "先取鎖再開執行緒");
     }
 
     #[test]
