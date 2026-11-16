@@ -355,6 +355,14 @@ const stepsAt = (stage, allDone = false) => {
   const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
   return HANDOVER_STEPS.map((s, i) => ({ ...s, state: allDone || i < at ? 'done' : i === at ? 'active' : 'todo' }))
 }
+// 喚醒找不到對話紀錄：電腦端回報的原句（與 src-tauri/src/bridge/partner_ops.rs 的 NO_RECORD 逐字相同，測試會對照）與後台的代號
+export const NO_RECORD_TEXT = '找不到原本的對話紀錄，只能開新的夥伴'
+export const NO_RECORD_CODE = 'no_session'
+export const LAUNCH_NEW_ACTION = 'launch-new'
+export function isNoRecord(detail) {
+  const d = String(detail ?? '').replace(/\s+/g, ' ').trim()
+  return d === NO_RECORD_TEXT || d === NO_RECORD_CODE
+}
 // 電腦端回報的原因：只留中文說明；'expired'（後台逾時）與看不懂的英文都換成固定句
 function reasonText(detail) {
   const d = String(detail ?? '').replace(/\s+/g, ' ').trim()
@@ -401,7 +409,10 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
       return v
     }
-    case 'failed': return { phase: 'failed', done: true, text: `沒有成功：${reasonText(row.detail)}` }
+    case 'failed':
+      // 喚醒找不到對話紀錄：多給一個「開新夥伴」動作，畫面照它多放一顆按鈕
+      if (op === 'resume' && isNoRecord(row.detail)) return { phase: 'failed', done: true, text: `沒有成功：${NO_RECORD_TEXT}`, action: { kind: LAUNCH_NEW_ACTION } }
+      return { phase: 'failed', done: true, text: `沒有成功：${reasonText(row.detail)}` }
     case 'unconfirmed': {
       const v = { phase: 'unconfirmed', done: true, text: '已經送出，但還沒確認結果；稍後看看名單。' }
       if (op === 'handover') v.extra = handoverExtra(row.result)

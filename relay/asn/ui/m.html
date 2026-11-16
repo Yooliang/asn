@@ -200,6 +200,7 @@
               <p class="m-ops-run-tx">{{ opsBanner.text }}</p>
               <ol class="m-ops-steps" v-if="opsBanner.steps.length"><li v-for="s in opsBanner.steps" :key="s.key" :class="'is-' + s.state"><b aria-hidden="true">{{ s.mark }}</b>{{ s.text }}</li></ol>
               <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.action && opsBanner.action.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</button>
               <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
             </div>
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
