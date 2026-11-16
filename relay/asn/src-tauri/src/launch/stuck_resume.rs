@@ -194,6 +194,47 @@ pub(crate) fn live_claude_sessions(now_ms: u64) -> Option<Vec<LiveSess>> {
     Some(wins.into_iter().map(|w| LiveSess { sid: w.session_id, pid: w.pid }).collect())
 }
 
+/// 讀一個 sessions 資料夾裡「所有」`<pid>.json` 的（對話編號, 程序編號），不判斷程序活不活、也不看是不是互動式。
+/// 只取檔名的程序編號（內容有 pid 欄位就以內容為準）與 sessionId 兩項；檔案讀不開或內容壞掉仍算一個（程序編號取自檔名），寧可多算。
+/// 資料夾不存在＝沒有任何檔（Some 空）；存在卻讀不開＝None（呼叫端不能當成「沒有」）
+pub(crate) fn read_all_session_files(dir: &std::path::Path) -> Option<Vec<LiveSess>> {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
+        Err(_) => return None,
+    };
+    let mut out: Vec<LiveSess> = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(stem) = name.strip_suffix(".json") else { continue };
+        let Ok(file_pid) = stem.parse::<u32>() else { continue };
+        let v: Option<serde_json::Value> = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str(&t).ok());
+        let pid = v.as_ref().and_then(|v| v.get("pid")).and_then(serde_json::Value::as_u64).map(|p| p as u32).unwrap_or(file_pid);
+        let sid = v.as_ref().and_then(|v| v.get("sessionId")).and_then(serde_json::Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+        out.push(LiveSess { sid, pid });
+    }
+    Some(out)
+}
+
+/// 本機「所有」sessions 檔（不論程序活不活）：`~/.claude/sessions` 與 `CLAUDE_CONFIG_DIR\sessions`（有設才讀）合併。
+/// 任何一個資料夾讀不開回 None（呼叫端當「不判斷」）。「等你按確認」要確定這批程序完全沒有檔才成立，所以用這份而不是活檔清單
+#[cfg(desktop)]
+pub(crate) fn all_session_files() -> Option<Vec<LiveSess>> {
+    let home = crate::identity::home_dir();
+    let mut dirs = vec![home.join(".claude").join("sessions")];
+    if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        let extra = std::path::PathBuf::from(d).join("sessions");
+        if !dirs.contains(&extra) {
+            dirs.push(extra);
+        }
+    }
+    let mut all: Vec<LiveSess> = Vec::new();
+    for d in &dirs {
+        all.extend(read_all_session_files(d)?);
+    }
+    Some(all)
+}
+
 #[cfg(all(feature = "gui", desktop))]
 impl StopHost for super::term::LiveTerms {
     fn stop_partner(&self, id: &str) -> Result<(), String> {
@@ -223,6 +264,25 @@ pub(crate) fn stop_real(terms: &super::term::LiveTerms, id: &str, sid: &str) -> 
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn 讀全部檔_不論程序活不活都算_壞檔也算_沒有資料夾是空_讀不開是none() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("10.json"), r#"{"pid":10,"entrypoint":"cli","kind":"interactive","name":"甲","sessionId":"s10","startedAt":1}"#).unwrap();
+        std::fs::write(dir.path().join("11.json"), "{壞掉").unwrap();
+        std::fs::write(dir.path().join("note.txt"), "x").unwrap();
+        let mut got = read_all_session_files(dir.path()).unwrap();
+        got.sort_by_key(|l| l.pid);
+        assert_eq!(got, vec![LiveSess { sid: Some("s10".into()), pid: 10 }, LiveSess { sid: None, pid: 11 }]);
+        // 舊的「活檔」讀法（程序都判不活）什麼都讀不到：這正是「有檔但判不活」被誤當成沒有檔的來源
+        let status = dir.path().join("status");
+        let live = crate::bridge::roster::read_local_with(dir.path(), &status, |_, _| false, 0, "", 1).unwrap();
+        assert!(live.is_empty());
+        assert_eq!(read_all_session_files(&dir.path().join("沒有這個資料夾")), Some(vec![]));
+        // 路徑是檔案不是資料夾：讀目錄失敗但不是「不存在」，回 None
+        assert_eq!(read_all_session_files(&dir.path().join("note.txt")), None);
+    }
+
     use std::collections::HashMap;
 
     const NOW: u64 = 1_800_000_000_000;

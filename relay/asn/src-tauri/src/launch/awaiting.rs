@@ -9,7 +9,7 @@
 //! 1. 終端對照表裡有一列夥伴視窗（claude），名字唯一（同名兩列以上不猜）；
 //! 2. 程序表上有活著的互動式 claude，命令列帶 `-n <名字>` 且和那一列的名字相同（讀不到命令列就不認）；
 //! 3. 那些程序往上找，都找得到這一列的終端服務（或 ASN 自己的視窗），編號與建立時間和對照表記的一樣；
-//! 4. 這些程序（含祖先與子孫）都不是活 sessions 檔的程序；
+//! 4. 這些程序（含祖先與子孫）都不是任何 sessions 檔的程序（不論那個檔判活或判不活：有檔就是進過對話，只是判斷落差，不能叫人停）；
 //! 5. 啟動超過 [`MIN_AGE_MS`]（剛開的視窗還沒來得及寫檔，不算）。
 //!
 //! 只讀程序表與對照表，判斷用的作業系統介面由外面傳進來，測試用假的。
@@ -49,8 +49,9 @@ pub(crate) struct Awaiting {
 }
 
 /// 現在有哪些夥伴視窗是「還沒進到對話、在等本人按確認」。
-/// `live`＝現在有活 sessions 檔的（對話編號, 程序編號），呼叫端必須是真的讀到了才呼叫（讀不到就不要判斷）
-pub(crate) fn identify_all(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSess], now_ms: u64) -> Vec<Awaiting> {
+/// `all_files`＝本機「所有」sessions 檔的（對話編號, 程序編號），不論活不活（見 stuck_resume::all_session_files），
+/// 呼叫端必須是真的讀到了才呼叫（讀不到就不要判斷）
+pub(crate) fn identify_all(os: &dyn Os, partners: &[PartnerRef], all_files: &[LiveSess], now_ms: u64) -> Vec<Awaiting> {
     if partners.is_empty() {
         return Vec::new();
     }
@@ -76,7 +77,7 @@ pub(crate) fn identify_all(os: &dyn Os, partners: &[PartnerRef], live: &[LiveSes
             continue;
         }
         pids.sort_unstable();
-        if stuck_resume::touches_live_session(os, &table, &pids, live) {
+        if stuck_resume::touches_live_session(os, &table, &pids, all_files) {
             continue;
         }
         let Some(started_ms) = live_process::earliest_started_ms(os, &pids) else { continue };
@@ -106,7 +107,7 @@ pub(crate) fn mail_reply(name: &str) -> String {
 /// 現在的「等你按確認」清單（橋每輪名單與寄信回覆共用；測試換假的）
 pub(crate) type AwaitingSource = Arc<dyn Fn(u64) -> Vec<Awaiting> + Send + Sync>;
 
-/// 正式用的來源：現讀 sessions 檔與終端對照表。讀不到 sessions 檔就回空（不判斷）；沒有畫面的建置與測試一律空
+/// 正式用的來源：現讀所有 sessions 檔（不論活不活）與終端對照表。讀不到 sessions 檔就回空（不判斷）；沒有畫面的建置與測試一律空
 pub(crate) fn real_source() -> AwaitingSource {
     Arc::new(real_awaiting)
 }
@@ -114,8 +115,23 @@ pub(crate) fn real_source() -> AwaitingSource {
 fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
     #[cfg(all(feature = "gui", not(test)))]
     {
-        let Some(live) = stuck_resume::live_claude_sessions(now_ms) else { return Vec::new() };
-        identify_all(&switch::RealOs, &super::term::partner_rows(), &live, now_ms)
+        use std::sync::Mutex;
+        // 短快取：名單每輪都會問，同一批結果 5 秒內直接回上次的（只存成功判斷過的結果）
+        static CACHE: Mutex<Option<(u64, Vec<Awaiting>)>> = Mutex::new(None);
+        const CACHE_MS: u64 = 5_000;
+        if let Ok(g) = CACHE.lock() {
+            if let Some((at, list)) = g.as_ref() {
+                if now_ms >= *at && now_ms - *at < CACHE_MS {
+                    return list.clone();
+                }
+            }
+        }
+        let Some(all_files) = stuck_resume::all_session_files() else { return Vec::new() };
+        let list = identify_all(&switch::RealOs, &super::term::partner_rows(), &all_files, now_ms);
+        if let Ok(mut g) = CACHE.lock() {
+            *g = Some((now_ms, list.clone()));
+        }
+        list
     }
     #[cfg(not(all(feature = "gui", not(test))))]
     {
@@ -126,8 +142,8 @@ fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
 
 /// 停止「等你按確認」的視窗：先把條件再驗一次，成立才呼叫既有的 stop_partner／stop_gui。
 /// `id` 是畫面給的終端編號、`name` 是夥伴名，兩者都要和驗出來的那一列一致，否則拒絕
-pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[PartnerRef], live: &[LiveSess], id: &str, name: &str, now_ms: u64) -> Result<(), String> {
-    let found = identify_all(os, partners, live, now_ms).into_iter().find(|a| a.partner.id == id && a.partner.name.trim() == name.trim()).ok_or_else(|| NO_LONGER_AWAITING.to_string())?;
+pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[PartnerRef], all_files: &[LiveSess], id: &str, name: &str, now_ms: u64) -> Result<(), String> {
+    let found = identify_all(os, partners, all_files, now_ms).into_iter().find(|a| a.partner.id == id && a.partner.name.trim() == name.trim()).ok_or_else(|| NO_LONGER_AWAITING.to_string())?;
     if found.partner.mux {
         // 驗證到停止之間對照表可能變動：停之前再核對這一列記的還是這個夥伴
         if host.partner_row_name(&found.partner.id).as_deref().map(str::trim) != Some(name.trim()) {
@@ -154,8 +170,8 @@ pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[Partne
 #[cfg(all(feature = "gui", desktop))]
 pub(crate) fn stop_real(terms: &super::term::LiveTerms, id: &str, name: &str) -> Result<(), String> {
     let now = crate::heartbeat::now_ms();
-    let live = stuck_resume::live_claude_sessions(now).ok_or_else(|| "讀不到本機視窗清單，請稍後再試".to_string())?;
-    stop_verified(&switch::RealOs, terms, &terms.partner_rows(), &live, id, name, now)
+    let all_files = stuck_resume::all_session_files().ok_or_else(|| "讀不到本機視窗清單，請稍後再試".to_string())?;
+    stop_verified(&switch::RealOs, terms, &terms.partner_rows(), &all_files, id, name, now)
 }
 
 #[cfg(test)]
@@ -241,6 +257,14 @@ mod tests {
         assert!(identify_all(&os, &[row("7", "小乙")], &[live(502)], NOW).is_empty(), "同一個程序");
         assert!(identify_all(&os, &[row("7", "小乙")], &[live(501)], NOW).is_empty(), "外層殼");
         assert_eq!(identify_all(&os, &[row("7", "小乙")], &[live(999)], NOW).len(), 1, "不相干的活視窗不影響");
+    }
+
+    #[test]
+    fn 有檔但被判不活的視窗_也當作有檔_不列() {
+        // 呼叫端現在傳「所有檔」：檔裡有這個程序（不管活不活）就不算在等確認；空清單才算
+        let os = mux_fake(600_000);
+        assert!(identify_all(&os, &[row("7", "小乙")], &[LiveSess { sid: None, pid: 502 }], NOW).is_empty(), "壞檔、沒有對話編號的檔也算");
+        assert!(identify_all(&os, &[row("7", "小乙")], &[live(501)], NOW).is_empty(), "祖先有檔");
     }
 
     #[test]
@@ -331,6 +355,15 @@ mod tests {
         let renamed = Spy { renamed: true, ..Spy::default() };
         assert!(stop_verified(&os, &renamed, &ok, &[], "7", "小乙", NOW).is_err(), "對照表那一列換成別人");
         assert!(spy.calls.borrow().is_empty() && renamed.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn 停止前再驗_有檔但判不活的視窗_拒絕且不停() {
+        let spy = Spy::default();
+        let os = mux_fake(600_000);
+        let all = [LiveSess { sid: None, pid: 502 }];
+        assert_eq!(stop_verified(&os, &spy, &[row("7", "小乙")], &all, "7", "小乙", NOW), Err(NO_LONGER_AWAITING.to_string()));
+        assert!(spy.calls.borrow().is_empty());
     }
 
     #[test]
