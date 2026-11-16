@@ -336,6 +336,8 @@ pub struct Core {
     claude_check: Arc<dyn Fn(u32) -> bool + Send + Sync>,
     /// 這個視窗是不是比 ASN 自己高權限（系統管理員身分開的，收發室轉不進去）；正式查作業系統，測試換假的
     elevated_check: crate::launch::integrity::ElevatedCheck,
+    /// 「視窗開著、卡在第一次確認畫面、還沒進到對話」的夥伴清單來源（名單列成僅顯示條目、寄信時回說明）；正式讀程序表與終端對照表，測試換假的
+    awaiting_src: crate::launch::awaiting::AwaitingSource,
     /// 已經記過 log 的「重複視窗」組（只存視窗名組成的鍵）；同一組不每輪都記，重複消失後再出現會再記一次
     sync_dup_told: HashSet<String>,
     now: u64,
@@ -575,7 +577,7 @@ impl Core {
         let (outbox, outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
-            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
+            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), awaiting_src: crate::launch::awaiting::real_source(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
@@ -724,6 +726,11 @@ impl Core {
     #[cfg(test)]
     pub fn set_elevated_check(&mut self, f: crate::launch::integrity::ElevatedCheck) {
         self.elevated_check = f;
+    }
+    /// 換掉「在等本人按確認的夥伴」的來源（測試用；正式用 launch::awaiting::real_source）
+    #[cfg(test)]
+    pub fn set_awaiting_source(&mut self, f: crate::launch::awaiting::AwaitingSource) {
+        self.awaiting_src = f;
     }
     /// 目前用的「是不是 claude 程序」判斷（遠端開視窗的名單也用同一份，測試換掉時一起換）
     pub fn claude_check(&self) -> Arc<dyn Fn(u32) -> bool + Send + Sync> {
@@ -1070,6 +1077,17 @@ impl Core {
         }
     }
 
+    /// 這個名字現在是不是「視窗開著、還沒進到對話」的夥伴（現讀一次；名單上有同名的活視窗時一律不是）。讀程序表放背景執行緒
+    async fn is_awaiting_partner(&self, name: &str) -> bool {
+        if self.agent_of(name).is_some() {
+            return false;
+        }
+        let (src, now) = (self.awaiting_src.clone(), self.now);
+        let list = tokio::task::spawn_blocking(move || src(now)).await.unwrap_or_default();
+        let mut hit = list.iter().filter(|a| a.partner.name.trim() == name.trim());
+        hit.next().is_some() && hit.next().is_none()
+    }
+
     fn forwardable(&self, name: &str) -> bool {
         self.roster.iter().any(|w| w.name == name) || (self.cfg.extra_allow.iter().any(|n| n == name) && self.online_names().contains(name))
     }
@@ -1307,6 +1325,11 @@ impl Core {
         // 主控台視窗表一輪只列一次（EnumWindows，不接上別人的主控台），名單裡所有有視窗的條目共用
         let (mut procs, snap) = tokio::task::spawn_blocking(move || (super::procscan::scan_system_excluding(&registered), crate::launch::console::window_snapshot())).await.unwrap_or_default();
         roster::apply_hidden(&mut self.roster, &snap);
+        // 視窗開著、卡在第一次確認畫面還沒進到對話的夥伴：列成「僅顯示」條目（不新增狀態值，舊版畫面照舊當灰點）；同一個程序不再列成別的掃描條目
+        let (awaiting_src, awaiting_now) = (self.awaiting_src.clone(), now);
+        let awaiting = tokio::task::spawn_blocking(move || awaiting_src(awaiting_now)).await.unwrap_or_default();
+        procs.retain(|p| !awaiting.iter().any(|a| a.pids.contains(&p.pid)));
+        procs.extend(awaiting.iter().map(crate::launch::awaiting::proc_agent));
         let pi_loaded = self.engines.as_ref().is_some_and(|e| e.has("pi"));
         for p in procs.iter_mut() {
             p.hidden = roster::hidden_of(&snap, p.pid);
@@ -1778,7 +1801,9 @@ impl Core {
             if m.is_system_notice() {
                 self.log.line(&format!("id={} target {target} not found; notice to mailbox sender not sent", m.id));
             } else {
-                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
+                // 視窗開著、但卡在第一次確認畫面還沒進到對話：不是「找不到」，直接說明；信不暫存（本人看清楚後自己選，再寄一次）
+                let awaiting = self.is_awaiting_partner(&target).await;
+                let text = awaiting.then(|| crate::launch::awaiting::mail_reply(&target)).or_else(|| self.engine_only_reply(|e| e.unreachable_reply(&target))).unwrap_or_else(|| format!("找不到名叫「{target}」的 session（目前可達：{names}）{}", self.unreachable_note(&target)));
                 self.send_back(&Origin::of(&p), &text, None, None).await;
             }
             self.ack_ids(&[m.id.clone()]).await;

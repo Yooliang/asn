@@ -76,7 +76,7 @@ pub(crate) const STUCK_IN_TASKMGR_HINT: &str = "可能卡住了，到工作管�
 /// 這個程序是不是這一列的終端服務（或自己視窗）底下：編號與建立時間都要和對照表記的一樣。
 /// 限制：共用服務時只證明「在這個服務底下」，不證明「在這一列的窗格裡」（服務底下所有窗格的祖先都是同一個服務）。
 /// 可以接受的原因：同一個對話編號有兩列以上的對照表已經先擋掉；要比到窗格層級得另外向服務查窗格的程序，這裡不多開查詢
-fn anchored(os: &dyn Os, table: &[Proc], p: &PartnerRef, pid: u32) -> bool {
+pub(crate) fn anchored(os: &dyn Os, table: &[Proc], p: &PartnerRef, pid: u32) -> bool {
     let Some(was) = p.started_ms else {
         return false;
     };
@@ -88,12 +88,12 @@ fn anchored(os: &dyn Os, table: &[Proc], p: &PartnerRef, pid: u32) -> bool {
 }
 
 /// 程序樹最上層的那一個：往上找不到同一批程序裡的其他成員
-fn top_pid(table: &[Proc], pids: &[u32]) -> u32 {
+pub(crate) fn top_pid(table: &[Proc], pids: &[u32]) -> u32 {
     pids.iter().copied().find(|p| !switch::ancestors(table, *p).iter().any(|a| pids.contains(a))).unwrap_or(pids[0])
 }
 
 /// 接續程序、它們的祖先、它們的子孫裡，有沒有任何一個是活 session 檔的程序（對話換了新編號時靠這條認出來）
-fn touches_live_session(os: &dyn Os, table: &[Proc], pids: &[u32], live: &[LiveSess]) -> bool {
+pub(crate) fn touches_live_session(os: &dyn Os, table: &[Proc], pids: &[u32], live: &[LiveSess]) -> bool {
     let mut related: HashSet<u32> = HashSet::new();
     for p in pids {
         related.insert(*p);
@@ -134,6 +134,10 @@ pub(crate) trait StopHost {
     fn stop_gui(&self, gui_pid: u32) -> Result<(), String>;
     /// 對照表裡這個終端編號那一列現在記的對話編號；列不見了就是 None
     fn partner_session(&self, id: &str) -> Option<String>;
+    /// 對照表裡這個終端編號那一列的夥伴名（停止「等你按確認」的視窗前再核對用）；預設讀不到
+    fn partner_row_name(&self, _id: &str) -> Option<String> {
+        None
+    }
 }
 
 /// 停止「卡住的接回」：先把四條再驗一次，成立才呼叫既有的 stop_partner／stop_gui。
@@ -197,6 +201,9 @@ impl StopHost for super::term::LiveTerms {
     }
     fn stop_gui(&self, gui_pid: u32) -> Result<(), String> {
         super::term::LiveTerms::stop_gui(self, gui_pid)
+    }
+    fn partner_row_name(&self, id: &str) -> Option<String> {
+        self.partner_rows().into_iter().find(|p| p.id == id).map(|p| p.name)
     }
     fn partner_session(&self, id: &str) -> Option<String> {
         self.partner_refs().into_iter().find(|p| p.id == id).map(|p| p.session_id)

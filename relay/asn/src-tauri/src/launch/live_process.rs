@@ -111,6 +111,16 @@ fn interactive_cmdline(cmd: &str) -> bool {
     !is_desktop_exe(&exe) && !args.iter().any(|a| a.starts_with("--type=") || matches!(a.as_str(), "-p" | "--print" | "--version" | "-v"))
 }
 
+/// 命令列帶的夥伴名：`-n <名字>`、`--name <名字>`、`--name=<名字>`（ASN 開夥伴視窗時一律帶 `-n`）。
+/// 沒帶、值是空的、值看起來是另一個旗標（以 `-` 開頭）都回 None。只回名字，不回傳也不記錄其他參數
+pub(crate) fn cmdline_name(cmd: &str) -> Option<String> {
+    let (_, args) = split_cmdline(cmd);
+    args.iter().enumerate().find_map(|(i, a)| match a.as_str() {
+        "-n" | "--name" => args.get(i + 1).map(|v| v.trim()).filter(|v| !v.is_empty() && !v.starts_with('-')).map(str::to_string),
+        _ => a.strip_prefix("--name=").map(str::trim).filter(|v| !v.is_empty()).map(str::to_string),
+    })
+}
+
 /// 這個 pid 是不是互動中的 claude 視窗：程序名是 claude*，或是 node／bun 而且命令列含 claude；再加命令列檢查（見 interactive_cmdline）。
 /// 原生 claude.exe 讀不到命令列時照舊算活（不然手開的視窗會漏）；程序表只有程序名、沒有執行檔路徑，所以讀不到命令列就無從認出 Desktop。
 /// sessions/<pid>.json 的 pid 可能被別的程式重用（含 Claude Desktop、claude -p 這類同名程序）；Claude 自己重用同一個 pid 時會覆寫同檔名的記錄，
@@ -440,5 +450,16 @@ mod tests {
         assert!(crate::launch::auto_resume::already_live(&os, &sessions, false, SID));
         assert!(!crate::launch::auto_resume::already_live(&os, &sessions, false, "別段-sid"));
         assert!(crate::launch::auto_resume::already_live(&os, &[], true, "別段-sid"), "同名還活著照舊不接回");
+    }
+
+    #[test]
+    fn 命令列的夥伴名_n_name_三種寫法() {
+        assert_eq!(cmdline_name(r#""C:/x y/claude.exe" --dangerously-skip-permissions -n 小乙 --remote-control 小乙"#).as_deref(), Some("小乙"));
+        assert_eq!(cmdline_name(r#"claude.exe -n "小 乙""#).as_deref(), Some("小 乙"));
+        assert_eq!(cmdline_name("claude.exe --name 小乙").as_deref(), Some("小乙"));
+        assert_eq!(cmdline_name("claude.exe --name=小乙").as_deref(), Some("小乙"));
+        for none in ["claude.exe", "claude.exe -n", "claude.exe -n --resume x", "claude.exe -p hi", "claude.exe --name="] {
+            assert_eq!(cmdline_name(none), None, "{none}");
+        }
     }
 }

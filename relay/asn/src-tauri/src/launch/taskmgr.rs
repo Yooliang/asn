@@ -7,6 +7,7 @@
 //! pi 視窗讀擴充的登記檔、終端面板讀 ASN 自己的對照表、其餘程序用程序掃描（只能看）。
 //! 記憶體＝整棵程序樹的工作集合計（Windows 用 GetProcessMemoryInfo、Linux 讀 /proc），拿不到就是 None，畫面顯示「—」。
 //! 作業系統動作全走 `Os` 介面，測試用假的。
+use super::awaiting;
 use super::stuck_resume::{self, PartnerRef};
 use super::switch::{self, Os, Proc};
 use crate::bridge::known::KnownEntry;
@@ -24,7 +25,7 @@ const ROWS_MAX: usize = 200;
 /// term_id、session_id 只給畫面決定「停止」走哪條路，不顯示
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub(crate) struct TaskRow {
-    /// claude／pi／resuming（ASN 開的、卡在接回中的夥伴視窗，沒有 session 檔）／process（自己開的前景程式，只能看）／terminal（終端面板）／mux（終端服務，只能看）／asn（ASN 本體與它自己的視窗，只能看）
+    /// claude／pi／resuming（ASN 開的、卡在接回中的夥伴視窗，沒有 session 檔）／awaiting（ASN 開的、視窗開著但在等你按確認、還沒進到對話）／process（自己開的前景程式，只能看）／terminal（終端面板）／mux（終端服務，只能看）／asn（ASN 本體與它自己的視窗，只能看）
     pub kind: &'static str,
     pub name: String,
     pub engine: String,
@@ -129,9 +130,12 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
     let live: Vec<stuck_resume::LiveSess> = src.claude.iter().map(|w| stuck_resume::LiveSess { sid: w.session_id.clone(), pid: w.pid }).collect();
     let mut seen_sids: HashSet<&str> = HashSet::new();
     // 名單讀不到時不判斷（stop_real 同：讀不到就拒絕）
-    let resuming: Vec<stuck_resume::Stuck> = if !src.claude_ok { vec![] } else { src.partners.iter().filter(|p| seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live, &p.session_id, src.now_ms).ok()).collect() };
+    let resuming: Vec<stuck_resume::Stuck> = if !src.claude_ok { vec![] } else { src.partners.iter().filter(|p| !p.session_id.is_empty() && seen_sids.insert(p.session_id.as_str())).filter_map(|p| stuck_resume::identify(os, &src.partners, &live, &p.session_id, src.now_ms).ok()).collect() };
     // 這些程序（和它們的子程序）不再列成「自己開的」
-    let resuming_skip: HashSet<u32> = resuming.iter().flat_map(|s| s.pids.iter().flat_map(|p| tree_pids(&table, *p, &|x| os.started_ms(x)))).collect();
+    let mut resuming_skip: HashSet<u32> = resuming.iter().flat_map(|s| s.pids.iter().flat_map(|p| tree_pids(&table, *p, &|x| os.started_ms(x)))).collect();
+    // 視窗開著、卡在第一次確認畫面還沒進到對話的夥伴（#1635）：已經列成「接回中」的不重複列；名單讀不到時不判斷
+    let awaiting: Vec<awaiting::Awaiting> = if !src.claude_ok { vec![] } else { awaiting::identify_all(os, &src.partners, &live, src.now_ms).into_iter().filter(|a| !a.pids.iter().any(|p| resuming_skip.contains(p))).collect() };
+    resuming_skip.extend(awaiting.iter().flat_map(|a| a.pids.iter().flat_map(|p| tree_pids(&table, *p, &|x| os.started_ms(x)))));
 
     for w in src.claude.iter().chain(src.pi.iter()) {
         let protected = src.protected.iter().any(|n| *n == w.name);
@@ -172,6 +176,26 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             inside: None,
         };
         listed.push((row, mux_of(s.root_pid)));
+    }
+
+    for a in &awaiting {
+        let row = TaskRow {
+            kind: "awaiting",
+            name: a.partner.name.clone(),
+            engine: "claude".into(),
+            pid: a.root_pid,
+            memory_bytes: tree_memory(os, &table, a.root_pid),
+            started_ms: Some(a.started_ms),
+            status: Some("awaiting".into()),
+            detail: Some(awaiting::DETAIL.into()),
+            by_asn: Some(true),
+            cwd: a.partner.cwd.clone(),
+            session_id: None,
+            term_id: Some(a.partner.id.clone()),
+            live: true,
+            inside: None,
+        };
+        listed.push((row, mux_of(a.root_pid)));
     }
 
     for t in &src.terms {
@@ -256,7 +280,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
     }
     rows.truncate(ROWS_MAX);
 
-    let running: HashSet<&str> = src.claude.iter().chain(src.pi.iter()).map(|w| w.name.as_str()).chain(resuming.iter().map(|s| s.partner.name.as_str())).collect();
+    let running: HashSet<&str> = src.claude.iter().chain(src.pi.iter()).map(|w| w.name.as_str()).chain(resuming.iter().map(|s| s.partner.name.as_str())).chain(awaiting.iter().map(|a| a.partner.name.as_str())).collect();
     let known = src
         .known
         .iter()
@@ -568,5 +592,65 @@ mod tests {
         let live = crate::bridge::roster::read_local_with(dir.path(), &status, |pid, _| pid == 10, 0, "", NOW).unwrap();
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].pid, 10);
+    }
+
+    // ---- 視窗開著、在等你按確認的夥伴（#1635）----
+
+    fn awaiting_os(age_ms: u64) -> FakeOs {
+        let mut o = os(
+            vec![p(500, 1, switch::MUX_SERVER), p(501, 500, "powershell.exe"), p(502, 501, "claude.exe")],
+            &[(500, 9_000), (502, 400)],
+            &[(500, 1_000), (501, NOW - age_ms), (502, NOW - age_ms)],
+        );
+        o.cmd = HashMap::from([(502, "claude.exe --dangerously-skip-permissions -n 小乙".to_string())]);
+        o
+    }
+
+    fn awaiting_src() -> Sources {
+        let mut s = src(vec![]);
+        s.partners = vec![PartnerRef { session_id: String::new(), ..partner("7") }];
+        s
+    }
+
+    #[test]
+    fn 在等確認的夥伴列出一列_附終端編號() {
+        let snap = build(&awaiting_os(120_000), &awaiting_src());
+        let r = snap.rows.iter().find(|r| r.kind == "awaiting").expect("要列出來");
+        assert_eq!((r.name.as_str(), r.pid, r.by_asn, r.term_id.as_deref(), r.session_id.as_deref()), ("小乙", 502, Some(true), Some("7"), None));
+        assert_eq!(r.memory_bytes, Some(400));
+        assert!(snap.rows.iter().all(|r| r.kind != "resuming"));
+        assert_eq!(snap.rows.iter().find(|r| r.kind == "mux").unwrap().inside, Some(1));
+    }
+
+    #[test]
+    fn 在等確認_名單讀不到_剛開不到三十秒_已有session檔_都不列() {
+        let has = |o: &FakeOs, s: &Sources| build(o, s).rows.iter().any(|r| r.kind == "awaiting");
+        let mut s = awaiting_src();
+        s.claude_ok = false;
+        assert!(!has(&awaiting_os(120_000), &s));
+        assert!(!has(&awaiting_os(10_000), &awaiting_src()));
+        let mut live = awaiting_src();
+        live.claude = vec![Window::claude("小乙", Some("idle".into()), "G:/w", 502, NOW, Some("s-1".into()))];
+        assert!(!has(&awaiting_os(120_000), &live));
+    }
+
+    #[test]
+    fn 在等確認的程序不再列成自己開的() {
+        let mut s = awaiting_src();
+        s.procs = vec![ProcAgent { pid: 502, engine: "claude".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false }];
+        s.known = vec![KnownEntry { name: "小乙".into(), engine: "claude".into(), facts: WindowFacts::default() }];
+        let snap = build(&awaiting_os(120_000), &s);
+        assert!(snap.rows.iter().all(|r| r.kind != "process"));
+        assert!(snap.known.is_empty());
+    }
+
+    #[test]
+    fn 已經列成接回中的不重複列成等確認() {
+        let mut o = resuming_os(600_000);
+        let cmd = format!("claude.exe --resume {SID} -n 小乙");
+        o.cmd = HashMap::from([(502, cmd.clone()), (503, cmd)]);
+        let snap = build(&o, &resuming_src());
+        assert_eq!(snap.rows.iter().filter(|r| r.kind == "resuming").count(), 1);
+        assert!(snap.rows.iter().all(|r| r.kind != "awaiting"));
     }
 }

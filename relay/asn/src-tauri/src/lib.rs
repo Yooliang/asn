@@ -1032,7 +1032,7 @@ async fn task_manager_list(app: State<'_, App>, terms: State<'_, Arc<launch::ter
     let asn_window = app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default();
     let term_rows: Vec<launch::taskmgr::TermIn> = terms.list().into_iter().map(|t| launch::taskmgr::TermIn { id: t.id, profile: t.profile, pid: t.pid, started_ms: t.started_ms, cwd: t.cwd, adopted: t.adopted }).collect();
     // 對照表裡的夥伴視窗：只用來找「卡在接回中」的（判斷全在 taskmgr::build）
-    let partners = terms.partner_refs();
+    let partners = terms.partner_rows();
     tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows, partners)).await.map_err(|e| e.to_string())?
 }
 
@@ -2156,6 +2156,10 @@ async fn term_stop(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     // 成立才呼叫既有的 stop_partner／stop_gui；其他一律照舊
     if let Some(sid) = req.resuming_sid.clone() {
         return launch::blocking_timeout(move || launch::stuck_resume::stop_real(&terms, &req.id, &sid)).await;
+    }
+    // 工作管理員停「視窗開著、在等你按確認」的視窗：帶了夥伴名才走這條窄路，同樣先把條件再驗一次（見 launch::awaiting）
+    if let Some(name) = req.awaiting_name.clone() {
+        return launch::blocking_timeout(move || launch::awaiting::stop_real(&terms, &req.id, &name)).await;
     }
     launch::blocking_timeout(move || terms.stop(&req.id)).await
 }
