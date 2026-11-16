@@ -4,6 +4,7 @@
 import { confirmCards } from './groups.mjs'
 import { ROOM_BACK_MAX, ROOM_FIRST_LOAD, ROOM_KEEP_MAX, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
+import { offlineNames } from './group-offline.mjs'
 
 // 後台回的 unmatched：內文裡 @ 了但對不到任何群組成員的名字；舊後台沒有這個欄位＝空。回要顯示的一句話（沒有就空字串）
 export function unmatchedText(r) {
@@ -16,6 +17,8 @@ export function unmatchedText(r) {
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x }) {
   const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
+  // 目前離線的成員鍵（叫醒順序標籤把離線的畫灰色加「離線」，#1656）；讀不到成員就是空集合
+  const offlineKeysOf = room => new Set(offlineNames(room?.members).map(n => n.key))
   const rows = (opts = {}) => roomItems(st.rooms, opts)
   const rowOf = id => rows().find(r => r.id === id) ?? null
   const identityOf = id => memberIdentity(raw(id), selfNode, windowName)
@@ -49,7 +52,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })
       const mine = (room.mine ?? []).map(m => m?.member)
-      st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes)
+      st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes, offlineKeysOf(room))
       if (seen) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true
@@ -94,7 +97,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
       if (wakeWait && !Array.isArray(r?.wakes)) noWakes = true   // 舊後台沒有這個欄位：不再為順序而問
       const cur = st.logs[id] ?? log
-      const next = applyWakes(applyReads(cur, r?.reads), r?.wakes)
+      const next = applyWakes(applyReads(cur, r?.reads), r?.wakes, offlineKeysOf(raw(id)))
       if (next !== cur) { st.logs[id] = next; return true }
     } catch { /* 舊後台或暫時連不上：維持原樣 */ }
     return false

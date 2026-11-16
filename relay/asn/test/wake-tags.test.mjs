@@ -38,7 +38,7 @@ test('對話記錄：人發的與 AI 發的訊息都帶 wake；舊後台沒有�
 test('畫面：ChatPane 在訊息下方畫標籤（桌面與手機共用）；樣式是淺色小字且深色模式有覆寫', () => {
   const pane = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
   assert.match(pane, /class="wake-tags" v-if="m\.wake && m\.wake\.length"/)
-  assert.match(pane, /class="wake-tag" :class="\{ off: w\.off \}"/)
+  assert.match(pane, /class="wake-tag" :class="\{ off: w\.off, offline: w\.offline \}"/)
   assert.ok(pane.indexOf('class="wake-tags"') > pane.indexOf('class="m-body"'), '標籤在內文下方')
   const css = fs.readFileSync(new URL('../ui/group.css', import.meta.url), 'utf8')
   assert.match(css, /\.wake-tags\{[^}]*font-size:11px/)
@@ -46,4 +46,24 @@ test('畫面：ChatPane 在訊息下方畫標籤（桌面與手機共用）；�
   assert.match(css, /\.wake-tag\.off\{color:#a9b4c0;background:rgba\(169,180,192,\.12\)\}/)
   assert.match(css, /prefers-color-scheme:dark\)\{\s*\.wake-tags\{color:#9fb0c3\}\.wake-tag\.off\{color:#6d7e91;background:rgba\(109,126,145,\.14\)\}/)
   for (const h of ['chat.html', 'm.html']) assert.match(fs.readFileSync(new URL('../ui/' + h, import.meta.url), 'utf8'), /group\.css/, h + ' 要載入 group.css')
+})
+
+test('離線（#1656）：被略過、而且成員鍵在離線名單裡的那位多標 offline；在線的略過者（分數低）不標；沒給名單照舊', () => {
+  const info = [{ key: 'W~甲', label: '甲', rank: 1, hold: false }, { key: 'N~乙', label: '乙', rank: 0, hold: true }, { key: 'Q~丙', label: '丙', rank: 0, hold: true }]
+  assert.deepEqual(wakeTags(info, new Set(['N~乙'])), [{ label: '甲', off: false }, { label: '乙', off: true, offline: true }, { label: '丙', off: true }])
+  assert.deepEqual(wakeTags(info), [{ label: '甲', off: false }, { label: '乙', off: true }, { label: '丙', off: true }], '舊呼叫（不給名單）不變')
+  assert.deepEqual(wakeTags([{ key: 'N~乙', label: '乙', rank: 1, hold: false }, { key: 'W~甲', label: '甲', rank: 2, hold: false }], new Set(['N~乙'])).map(t => t.offline), [undefined, undefined], '沒被略過的不標離線')
+  assert.deepEqual(wakeTags([{ label: '乙', rank: 0, hold: true }, { key: 'W~甲', label: '甲', rank: 1, hold: false }], new Set(['N~乙'])).map(t => t.offline), [undefined, undefined], '沒有 key 的舊資料不標')
+})
+
+test('離線（#1656）：applyWakes 把離線名單帶進標籤；畫面灰色加「離線」並有說明；room-hub 兩處都傳目前的離線名單', async () => {
+  const { applyWakes } = await import('../ui/lib/mobile-rooms.mjs')
+  const log = [{ k: 'me', seq: 7, t: 1, wk: false }]
+  const out = applyWakes(log, [{ seq: 7, wake_info: [{ key: 'W~甲', label: '甲', rank: 1, hold: false }, { key: 'N~乙', label: '乙', rank: 0, hold: true }] }], new Set(['N~乙']))
+  assert.deepEqual(out[0].wake, [{ label: '甲', off: false }, { label: '乙', off: true, offline: true }])
+  const pane = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  assert.match(pane, /:title="w\.offline \? '目前離線，上線後會看到' : w\.off \? '不通知' : ''">\{\{ w\.label \}\}<small class="wake-off" v-if="w\.offline">（離線）<\/small>/)
+  const hub = fs.readFileSync(new URL('../ui/lib/room-hub.mjs', import.meta.url), 'utf8')
+  assert.equal((hub.match(/offlineKeysOf\(/g) ?? []).length, 2, '兩處套用')
+  assert.match(hub, /const offlineKeysOf = room => new Set\(offlineNames\(room\?\.members\)\.map\(n => n\.key\)\)/)
 })
