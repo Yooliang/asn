@@ -4,6 +4,7 @@ pub(crate) mod console;
 pub(crate) mod console_resolve;
 pub(crate) mod cwds;
 pub(crate) mod local;
+pub(crate) mod pretrust;
 pub(crate) mod pi;
 pub(crate) mod pi_models;
 pub(crate) mod pi_term;

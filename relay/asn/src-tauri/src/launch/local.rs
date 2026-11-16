@@ -1,7 +1,5 @@
 use super::config::{build_spawn_spec, check_launch, load_launch_config, LaunchReq};
 use super::profiles::LaunchMode;
-use crate::claude_accounts::claude_home;
-use crate::claude_json::{claude_project_key, ensure_project_trusted};
 use crate::launch::LocalLaunchReq;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -43,7 +41,7 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
             return Ok(out);
         }
     }
-    maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
+    super::pretrust::ensure_claude_cwd_trusted(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
         // 還沒有節點金鑰時工作資料夾是空路徑：佇列檔會寫到目前目錄，而且沒有橋會去讀（#859）
@@ -204,8 +202,8 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     if !pi_args.is_empty() && prof.engine != "pi" {
         return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
     }
-    // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude
-    maybe_trust_claude_cwd(if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, cwd);
+    // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude（空 engine 的判斷在 pretrust 裡）
+    super::pretrust::ensure_claude_cwd_trusted(&prof.engine, cwd);
     let req = LaunchReq { profile, name, cwd: cwd.to_string() };
     let (command, mut args, cwd) = build_spawn_spec(config, &req)?;
     // pi：同本機開窗，載入收信擴充、帶名字環境變數（找不到擴充就報錯，不開一個不會收信的 pi）。第一句話由橋在視窗出現後經收發室送進去
@@ -234,7 +232,7 @@ pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cw
     let req = LaunchReq { profile: &profile, name, cwd: strip_verbatim_prefix(&canon.to_string_lossy()) };
     let (command, args, spawn_cwd) = build_spawn_spec(config, &req)?;
     let args = super::auto_resume::resumed_args(&command, &args, session, perm)?;
-    maybe_trust_claude_cwd("claude", &req.cwd);
+    super::pretrust::ensure_claude_cwd_trusted("claude", &req.cwd);
     // 別條路（本人喚醒、開機接回、終端服務中斷接回）剛開了同一位、還沒上線：不開第二個。開失敗要解除，不然本人之後手動喚醒會被擋
     if !super::opening::claim(session, name) {
         return Err(super::opening::BUSY.to_string());
@@ -255,18 +253,6 @@ pub fn start_pi_session(config: &super::config::LaunchConfig, name: &str, cwd: &
     let files = crate::identity::relay_home().join("pi-first");
     let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
     super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid)
-}
-
-/// Claude 引擎：在啟動前把 cwd_allow 內、本次使用的資料夾標成已信任（失敗只記 log，不擋啟動）。
-fn maybe_trust_claude_cwd(engine: &str, cwd: &str) {
-    if engine != "claude" {
-        return;
-    }
-    let home = claude_home();
-    let key = claude_project_key(Path::new(cwd));
-    if let Err(e) = ensure_project_trusted(&home, &key) {
-        elog!("開新夥伴前寫入 Claude 資料夾信任失敗（不影響啟動）：{e}");
-    }
 }
 
 fn now_ms() -> u64 {
@@ -359,6 +345,8 @@ fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path,
 /// 收發室重開／接回的視窗（喚醒、換模型重開、改名的退路、換班接手都經 switch::real_launch 進來，#906）：
 /// 這次執行在用共用終端服務，就開在背景（要看畫面從 ASN 的終端圖示看）；沒有服務、或退回原生主控台，一律前台，免得開了看不到
 pub(super) fn start_window_relaunch(title: &str, command: &str, args: &[String], cwd: &Path) -> Result<u32, String> {
+    // 重開的是原本那段對話的資料夾；Claude 才需要先標成已信任（codex 等其他引擎的指令不是 claude，會略過）
+    super::pretrust::ensure_claude_command_cwd_trusted(command, cwd);
     #[cfg(windows)]
     {
         let (in_term, in_console) = super::win_term::relaunch_hidden(super::win_term::term_server_active());
