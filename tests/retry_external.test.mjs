@@ -23,7 +23,6 @@ const RETRY = [
   "> Could not GET 'https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.5.2/gradle-8.5.2.pom'. Received status code 502 from server: Bad Gateway",
   "> Could not GET 'https://repo.maven.apache.org/maven2/a/b/1/b-1.pom'. > Read timed out",
   "> Could not HEAD 'https://repo.maven.apache.org/maven2/a/b/1/b-1.jar'. > Connect timed out",
-  'Too Many Requests',
   // curl
   'curl: (22) The requested URL returned error: 429',
   'curl: (22) The requested URL returned error: 503',
@@ -51,11 +50,15 @@ const NO_RETRY = [
   'FAILURE: Build failed with an exception.',
   'Tests: 4290 passed, 1 failed',
   'expected 429 rows but got 430',
+  // 單獨一句 Too Many Requests（沒有狀態碼）不算：cargo、Gradle 的單元測試也包在這支裡，有些測試拿它當輸入，真的失敗時不該被多跑兩輪、再寫成外部服務
+  'Too Many Requests',
+  'assertion failed: body == "429 Too Many Requests"',
 ]
 
-test('腳本裡讀得到判斷用的 pattern（改了寫法這個測試要跟著改，不能默默通過）', () => {
+test('腳本裡讀得到判斷用的 pattern（改了寫法這個測試要跟著改，不能默默通過）；只認帶狀態碼的 429，沒有單獨的 Too Many Requests', () => {
   assert.ok(pattern, '找不到 pattern=\'…\' 那一行')
   assert.match(pattern, /429/)
+  assert.ok(!pattern.split('|').includes('Too Many Requests'), '單獨的 Too Many Requests 範圍太寬（測試輸入也會中）')
 })
 
 test('429、5xx、逾時、連線中斷：算外部服務錯誤，要退避重試', { skip: !hasBash && '這台沒有 bash' }, () => {
