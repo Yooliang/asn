@@ -26,6 +26,8 @@ mod datadir;
 mod test_guard;   // 測試隔離守衛：測試碰到真的 ASN 資料夾／mux 就 panic（只在測試編譯）
 mod device_login;
 mod envc;
+#[cfg(all(desktop, feature = "gui"))]
+mod first_run;   // 新裝電腦的預設值（#1617）：只在全新安裝的第一次啟動套用
 mod heartbeat;
 // 本人接進收發室的視窗（只有電腦版有：手機沒有終端程序與本機 session 資料夾）
 #[cfg(desktop)]
@@ -2971,6 +2973,26 @@ pub fn run() {
 
     // 資料資料夾：Windows 是 %APPDATA%\tw.yooliang.asn（舊識別資料夾的內容首次啟動時複製過來，見 datadir.rs）
     let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| datadir::startup(&work_dir, shot.is_some()));
+    // 新裝電腦的預設值（#1617）：要在任何東西寫進 data_dir／work_dir 之前判斷（之後它們就不是空的了）。
+    // 截圖模式與 ASN_DATA 覆蓋（開發、測試用，不是真的安裝）不跑；沒有節點時 work_dir 是空路徑，當作沒有
+    #[cfg(all(desktop, feature = "gui"))]
+    if !is_shot && crate::envc::get_os("ASN_DATA").is_none() {
+        let wd = (!work_dir.as_os_str().is_empty()).then_some(work_dir.as_path());
+        let now = heartbeat::now_ms() as i64;
+        // 家目錄的 ASN 資料夾也要看：沒有節點（wd 是 None）時，舊電腦的 ~/.asn 仍有東西
+        let home = identity::relay_home();
+        let others: Vec<&std::path::Path> = wd.into_iter().chain(std::iter::once(home.as_path())).collect();
+        let o = first_run::run_at_startup(&data_dir, &others, first_run::documents_dir(), now);
+        // 記錄要在決定之後才寫（ui.log 會讓 work_dir 變成非空）；以前就決定過的不再記
+        if let Some(line) = first_run::log_line(&o) {
+            match wd {
+                Some(w) => {
+                    let _ = ui_log::append(w, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now))]);
+                }
+                None => elog!("[ASN] {line}"),
+            }
+        }
+    }
     // 手機：清掉上次當掉留下的金鑰檔／登入資料換檔暫存檔（只認那兩種檔的暫存檔名）
     #[cfg(target_os = "android")]
     {

@@ -633,6 +633,7 @@ export const SettingsPanel = {
         </template>
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
+          <small>新裝的電腦預設打開：你自己的其他設備（手機、別台電腦）可以替這台開新視窗。</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.autoResume" :disabled="st.bridge.busy" @change="act('bridge-auto-resume', $event.target.checked)" aria-label="電腦重開後自動接回夥伴" /><span>電腦重開後自動接回夥伴</span></label>
           <small>重開前還開著、由 ASN 開的夥伴，登入 Windows 後會接回原本的對話。權限和原本相同，收到信就會繼續工作，也會用到額度。關掉就要自己按「喚醒」。</small>
           <template v-if="st.bridge.termServerSupported">
@@ -736,6 +737,7 @@ export const SettingsPanel = {
           <label>工作資料夾白名單（一行一個）
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
+          <small>新裝時預設放「文件」資料夾。</small>
           <small class="acct-warn" v-if="st.launch.msg" role="alert">{{ st.launch.msg }}</small>
         <details class="set-adv" v-if="st.askpass">
           <summary>進階</summary>
