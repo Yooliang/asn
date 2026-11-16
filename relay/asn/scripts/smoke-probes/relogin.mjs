@@ -1,9 +1,20 @@
-// 冒煙探測「手機重新登入 Claude 檢查」（probe.relogin，#1512 C）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
+// 冒煙探測「手機重新登入 Claude 檢查」（probe.relogin，#1512 C、#1592）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 那台電腦回報 Claude 登入失效時，設備細部頁的 Claude 區出現「重新登入 Claude」（安裝入口的總開關關著也有）；
-// 按了只進確認（確認字寫明「那台沒看到失效就不會動現有的登入」），按「確認重新登入」才送出要求（同一個 setup_remote_request，只帶那台的節點）。
-// 另一台沒回報失效的：沒有這顆。全部用真的點擊。探測原始碼是字串，裡面不寫反斜線
+// 按了只進確認（確認字寫明登入網址送到這支手機、登入正常會告訴你不需要重新登入），按「確認重新登入」才送出要求
+// （同一個 setup_remote_request，帶那台的節點與 mode: relogin）。另一台沒回報失效的：沒有這顆。全部用真的點擊（__smokeInput）。
+// 情境（probe.relogin 的值）：
+//   base     送出的要求帶對的欄位，不亂帶
+//   failed   電腦回報失敗（沒安裝 Claude Code）：結果用 role="alert"、加框、捲到看得見，寫出原因與下一步
+//   noreply  電腦一直沒接手：20 秒後顯示「這台電腦沒有回應」並結束（用調快時鐘代替真的等 20 秒，點擊都是真的）
+//   healthy  電腦回報目前登入正常：顯示「不需要重新登入」，不是警示
+//   already  後台說已經有進行中的要求：明說，再顯示它的狀態
+// 探測原始碼是字串，裡面不寫反斜線
 
-export const reloginProbeSource = () => `(async () => {
+export const NOT_INSTALLED = '這台電腦還沒安裝 Claude Code，重新登入不會替你安裝；要安裝請在這台電腦打開「允許從手機安裝並登入」'
+export const LOGIN_OK = '這台電腦的 Claude 目前登入正常，不需要重新登入'
+
+export const reloginProbeSource = (kind = 'base') => `(async () => {
+  const KIND = ${JSON.stringify(kind)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
@@ -11,6 +22,8 @@ export const reloginProbeSource = () => `(async () => {
   const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); await real({ click: at(el) }) };
   const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const sent = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'setup_remote_request');
+  const prog = () => [...document.querySelectorAll('.m-dv-setup .m-dv-prog')].find(vis);
+  const inView = el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight };
   const btn = await wait(() => [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')));
   if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
   await tap(btn);
@@ -32,24 +45,76 @@ export const reloginProbeSource = () => `(async () => {
   const dlg = await wait(() => [...document.querySelectorAll('.m-dv-confirm')].find(vis));
   if (!dlg) return { ok: false, why: '按了沒有進確認' };
   if (sent().length) return { ok: false, why: '按鈕不能直接送出，要先確認' };
-  if (!dlg.textContent.includes('重新登入 Claude 嗎') || !dlg.textContent.includes('不會動現有的登入') || !dlg.textContent.includes('允許從手機替這台安裝並登入')) return { ok: false, why: '確認字沒寫清楚：' + dlg.textContent.slice(0, 80) };
+  const dt = dlg.textContent;
+  if (!dt.includes('重新登入 Claude 嗎') || !dt.includes('那台電腦會把登入網址送到這支手機') || !dt.includes('如果那台目前登入正常，會告訴你不需要重新登入')) return { ok: false, why: '確認字沒寫清楚（要寫登入網址送到這支手機、登入正常會告訴你不需要重新登入）：' + dt.slice(0, 120) };
+  if (dt.includes('允許從手機替這台安裝並登入')) return { ok: false, why: '重新登入不受安裝開關限制，確認字不該要求打開它' };
   const yes = [...dlg.querySelectorAll('.m-btn')].find(b => b.textContent.trim() === '確認重新登入');
   if (!yes) return { ok: false, why: '找不到「確認重新登入」' };
   await tap(yes);
   if (!(await wait(() => sent().length === 1))) return { ok: false, why: '按了確認沒有送出要求（或送了不只一次）：' + sent().length };
   const args = sent()[0][1] || {};
-  if (JSON.stringify(Object.keys(args).sort()) !== JSON.stringify(['node']) || args.node !== 'Q') return { ok: false, why: '要求只帶那台的節點，不帶別的（例如「失效」）：' + JSON.stringify(args) };
+  if (JSON.stringify(Object.keys(args).sort()) !== JSON.stringify(['mode', 'node']) || args.node !== 'Q' || args.mode !== 'relogin') return { ok: false, why: '要求只帶那台的節點與 mode: relogin，不帶別的：' + JSON.stringify(args) };
+  if (KIND === 'failed') {
+    const p = await wait(() => { const e = prog(); return e && e.getAttribute('role') === 'alert' ? e : null }, 80);
+    if (!p) return { ok: false, why: '電腦回報失敗，手機沒有出現 role=alert 的結果：' + (prog()?.outerHTML ?? '沒有結果區').slice(0, 160) };
+    if (!p.textContent.includes('這台電腦還沒安裝 Claude Code') || !p.textContent.includes('打開「允許從手機安裝並登入」')) return { ok: false, why: '失敗的原因與下一步沒寫出來：' + p.textContent };
+    if (!p.classList.contains('fail') || getComputedStyle(p).borderTopWidth === '0px') return { ok: false, why: '失敗的結果沒有加框，不夠醒目' };
+    await sleep(900);
+    if (!inView(p)) return { ok: false, why: '失敗的結果不在看得見的地方' };
+  } else if (KIND === 'noreply') {
+    const waiting = await wait(() => prog(), 30);
+    if (!waiting || waiting.getAttribute('role') !== 'status' || !waiting.textContent.includes('要求已送出')) return { ok: false, why: '剛送出時應該是等電腦接手的狀態（role=status）：' + (waiting?.textContent ?? '沒有結果區') };
+    await sleep(4000);   // 查狀態每 5 秒一次：這時剛好等到下一輪之前，調快時鐘後馬上就會查到
+    if (!prog() || prog().getAttribute('role') !== 'status') return { ok: false, why: '還沒到 20 秒就不該結束：' + (prog()?.textContent ?? '') };
+    // 調快時鐘 21 秒（不真的等）：下一輪查狀態（每 5 秒）就該看到「沒有回應」
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + 21000;
+    // 先把畫面捲到最上面，結果出來後要自己捲回看得見的地方
+    for (let e = prog(); e; e = e.parentElement) if (e.scrollHeight > e.clientHeight + 1) e.scrollTop = 0;
+    const p = await wait(() => { const e = prog(); return e && e.getAttribute('role') === 'alert' ? e : null }, 100);
+    Date.now = realNow;
+    if (!p) return { ok: false, why: '送出 20 秒電腦都沒接手，手機沒有說沒有回應：' + (prog()?.textContent ?? '沒有結果區') };
+    if (!p.textContent.includes('這台電腦沒有回應，請確認它的 ASN 開著，稍後再試')) return { ok: false, why: '沒有回應的說明不對：' + p.textContent };
+    await sleep(900);
+    if (!inView(p)) return { ok: false, why: '失敗的結果不在看得見的地方' };
+    if (![...p.querySelectorAll('.m-btn')].some(b => b.textContent.trim() === '關閉')) return { ok: false, why: '結束後要有「關閉」' };
+  } else if (KIND === 'healthy') {
+    const p = await wait(() => { const e = prog(); return e && e.textContent.includes('不需要重新登入') ? e : null }, 80);
+    if (!p) return { ok: false, why: '電腦回報登入正常，手機沒有說不需要重新登入：' + (prog()?.textContent ?? '沒有結果區') };
+    if (p.getAttribute('role') === 'alert' || p.classList.contains('fail')) return { ok: false, why: '登入正常不是失敗，不該用警示顯示' };
+    if (!p.querySelector('b.ok')) return { ok: false, why: '登入正常應該用成功的樣式' };
+    if (!p.textContent.includes('這台電腦的 Claude 目前登入正常，不需要重新登入')) return { ok: false, why: '文字不對：' + p.textContent };
+  } else if (KIND === 'already') {
+    const p = await wait(() => { const e = prog(); return e && e.textContent.includes('這台電腦已經有一個進行中的要求') ? e : null }, 80);
+    if (!p) return { ok: false, why: '後台說已經有進行中的要求，手機沒有明說：' + (prog()?.textContent ?? '沒有結果區') };
+    if (!(await wait(() => prog() && prog().textContent.includes('已接手'), 80))) return { ok: false, why: '明說之後還要顯示它的狀態（已接手）：' + prog().textContent };
+  }
   if (document.documentElement.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出' };
   return { ok: true, why: '' };
 })()`
 
+const CASES = [
+  { name: 'm-relogin', kind: 'base', shot: 'm-relogin.png' },
+  { name: 'm-relogin-failed', kind: 'failed', shot: 'm-relogin-failed.png' },
+  { name: 'm-relogin-noreply', kind: 'noreply', shot: 'm-relogin-noreply.png' },
+  { name: 'm-relogin-healthy', kind: 'healthy', shot: 'm-relogin-healthy.png' },
+  { name: 'm-relogin-already', kind: 'already', shot: 'm-relogin-already.png' },
+]
+
+// 電腦（Q）對這次要求的回報；沒有就是一直沒接手
+const statusOf = kind => {
+  const at = new Date().toISOString()
+  if (kind === 'failed') return { nodes: [{ id: 'Q', setup: { state: 'failed', detail: NOT_INSTALLED, replaced: null, at } }] }
+  if (kind === 'healthy') return { nodes: [{ id: 'Q', setup: { state: 'done', detail: LOGIN_OK, replaced: null, at } }] }
+  if (kind === 'already') return { nodes: [{ id: 'Q', setup: { state: 'taken', detail: null, replaced: null, at } }] }
+  return { nodes: [] }
+}
+
 export default {
   key: 'relogin',
   kind: '手機重新登入 Claude 檢查',
-  source: () => reloginProbeSource(),
-  scenarios: [
-    { name: 'm-relogin', page: 'm.html', state: { signedIn: true, mlayout: true, relogin: true }, ready: '#app.m .m-row-btn', probe: { relogin: true }, shot: 'm-relogin.png' },
-  ],
+  source: probe => reloginProbeSource(typeof probe.relogin === 'string' ? probe.relogin : 'base'),
+  scenarios: CASES.map(c => ({ name: c.name, page: 'm.html', state: { signedIn: true, mlayout: true, relogin: c.kind }, ready: '#app.m .m-row-btn', probe: { relogin: c.kind }, shot: c.shot })),
   // 辦公室（Q）回報目前的 Claude 帳號登入失效；送出要求與查狀態都只記下來
   table: (scenario, t) => {
     if (!scenario.state?.relogin) return undefined
@@ -59,6 +124,8 @@ export default {
     const accounts = q.accounts.map(a => (a.vendor === 'claude' && a.current ? { ...a, login_failed: true } : a))
     // 回報時間用跑這個情境的當下算（全套跑完要二十幾分鐘，載入時算的時間到這裡已經過舊，入口照規則就不給）
     const reportedAt = new Date(Math.floor((Date.now() - 5 * 60_000) / 60_000) * 60_000).toISOString()
-    return { android_acct_list: { ...list, values: { ...list.values, Q: { ...q, reported_at: reportedAt, accounts } } }, setup_remote_request: { ok: true }, setup_remote_status: { nodes: [] } }
+    const kind = typeof scenario.state.relogin === 'string' ? scenario.state.relogin : 'base'
+    const request = kind === 'already' ? { ok: true, already: true, state: 'taken' } : { ok: true }
+    return { android_acct_list: { ...list, values: { ...list.values, Q: { ...q, reported_at: reportedAt, accounts } } }, setup_remote_request: request, setup_remote_status: statusOf(kind) }
   },
 }

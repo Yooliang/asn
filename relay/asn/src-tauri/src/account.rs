@@ -527,6 +527,17 @@ pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 安裝請求的本文_install_照舊_relogin_多帶_mode_不認得的不送() {
+        use super::setup_request_body;
+        assert_eq!(setup_request_body("PC", None), Ok(serde_json::json!({ "node": "PC" })));
+        assert_eq!(setup_request_body("PC", Some("install")), Ok(serde_json::json!({ "node": "PC" })));
+        assert_eq!(setup_request_body("PC", Some("relogin")), Ok(serde_json::json!({ "node": "PC", "mode": "relogin" })));
+        for bad in ["", "update", "RELOGIN"] {
+            assert_eq!(setup_request_body("PC", Some(bad)), Err("setup:bad_request".to_string()), "{bad}");
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -690,15 +701,26 @@ mod tests {
 }
 
 /// 手機要某台電腦「安裝並登入 Claude Code」（#628／174 的 F）：後台只認登入憑證的本人，對別人的設備一律 not_found。
-/// 錯誤字串形如 `setup:asn_outdated`（後台的錯誤代碼），畫面再對應成人話；連不上等沒有代碼的錯誤直接回人話。→ { ok, already, state }
+/// 錯誤字串形如 `setup:asn_outdated`（後台的錯誤代碼），畫面再對應成人話；連不上等沒有代碼的錯誤直接回人話。→ { ok, already, state, mode? }
+/// `mode`：沒帶或 install＝安裝並登入（舊行為）、relogin＝只重新登入（#1592）；其他值直接拒絕
 #[tauri::command]
-pub async fn setup_remote_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String) -> Result<Value, String> {
+pub async fn setup_remote_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String, mode: Option<String>) -> Result<Value, String> {
     if app.shot.is_some() {
         return Err("--shot 模式不安裝".into());
     }
+    let body = setup_request_body(&node, mode.as_deref())?;
     let c = ctx()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
-    call(&c.client, &c.relay_url, &token, "node_setup_request", None, json!({ "node": node })).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })
+    call(&c.client, &c.relay_url, &token, "node_setup_request", None, body).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })
+}
+
+/// 送給後台的請求本文：install（沒帶）維持舊的樣子，relogin 多帶 mode；不認得的模式不送
+fn setup_request_body(node: &str, mode: Option<&str>) -> Result<Value, String> {
+    match mode {
+        None | Some("install") => Ok(json!({ "node": node })),
+        Some("relogin") => Ok(json!({ "node": node, "mode": "relogin" })),
+        Some(_) => Err("setup:bad_request".to_string()),
+    }
 }
 
 /// 自己帳號下各設備的安裝請求狀態 → { nodes: [{ id, setup: null | { state: pending | taken | done | failed, detail, replaced, at } }] }。

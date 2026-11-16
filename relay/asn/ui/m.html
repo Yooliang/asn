@@ -428,7 +428,8 @@
                             <p class="m-fine">{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmNeed }}</p>
                             <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="setupYes">{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).yes }}</button><button type="button" class="m-btn" @click="setupNo">{{ SETUP_TEXT.no }}</button></div>
                           </div>
-                          <div class="m-dv-prog" role="status" aria-live="polite" v-else>
+                          <div class="m-dv-prog" :class="{ fail: setupSt.stage === 'done' && !setupSt.ok }" :role="setupSt.stage === 'done' && !setupSt.ok ? 'alert' : 'status'" :aria-live="setupSt.stage === 'done' && !setupSt.ok ? 'assertive' : 'polite'" v-else>
+                            <p class="m-fine" v-if="setupSt.lead">{{ setupSt.lead }}</p>
                             <b :class="{ ok: setupSt.stage === 'done' && setupSt.ok, bad: setupSt.stage === 'done' && !setupSt.ok }">{{ setupSt.text }}</b>
                             <p class="m-fine" v-if="setupSt.note">{{ SETUP_TEXT.replaced }}：{{ setupSt.note }}</p>
                             <div class="m-dv-sbtns" v-if="setupSt.stage === 'done'"><button type="button" class="m-btn" @click="setupClose">{{ SETUP_TEXT.close }}</button></div>
