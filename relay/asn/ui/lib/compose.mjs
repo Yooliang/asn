@@ -18,4 +18,6 @@ export function composeHintTitle(winMode) {
 export const SEND_LABEL = '傳送'
 export const SEND_LABEL_TERM = '送出'
 /** 終端畫面時輸入框的提示字 */
+/** 看別台電腦的終端、還沒開始打字：送出才會去要打字權限（#1647）；已經在打字就用下面那句 */
+export const composeRemoteHint = name => `送出會向那台電腦要打字權限（${name || '這位夥伴'} 的終端）`
 export const composeTermHint = name => `輸入的字會直接打進 ${name || '這位夥伴'} 的終端`

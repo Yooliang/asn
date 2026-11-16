@@ -18,6 +18,8 @@ export const INPUT_TEXT = {
   soon: '再 1 分鐘就會結束，要繼續打字請結束後再開一次。',
   stop: '結束打字',
   back: '改回只能看',
+  waitReply: '等那台電腦回應',
+  refused: reason => (reason ? `沒有開始打字：${reason}` : '沒有開始打字，字已放回輸入框'),
   again: '再開一次',
   sendFailed: '這段沒有送出，請再試一次。',
 }
@@ -46,9 +48,10 @@ export const RemoteInput = {
     name: { type: String, required: true },
     machine: { type: String, default: '' },
     active: { type: Boolean, default: true },
+    snap: { type: String, default: null },       // 送出後、對方允許前：保留原本看到的畫面（純文字）當底，上面疊「等那台電腦回應」（#1647）；沒給＝不疊
     barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
-  emits: ['back', 'status', 'unsent', 'screen'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）
+  emits: ['back', 'status', 'unsent', 'screen', 'phase', 'refused'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）
   setup(props, { emit }) {
     const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: warn.value, main: { waiting: INPUT_TEXT.waiting, active: phase.value === 'typing' ? INPUT_TEXT.typing(props.machine || props.node, props.name) : '' }, danger: true }))
@@ -92,7 +95,9 @@ export const RemoteInput = {
       keyQueue.push(seq)
       if (phase.value === 'ended') void start()
     }
+    watch(phase, p => { if (p === 'typing') reached = true })
     watch(phase, p => { if (p === 'typing') flush() })
+    watch(phase, p => emit('phase', p), { immediate: true })
     watch(phase, p => { if (p === 'typing' && keyQueue.length) setTimeout(flushKeys, ENTER_DELAY_MS + 50) })
     const pasteYes = () => { if (answer(true)) return; const t = askPaste.value; askPaste.value = null; send(t, true) }
     const pasteNo = () => { if (!answer(false)) askPaste.value = null }
@@ -103,10 +108,12 @@ export const RemoteInput = {
       host.value?.removeEventListener('paste', onPaste, true)
       term?.dispose?.(); term = null
     }
+    let reached = false   // 有沒有真的進過「可以打字」；沒進過就結束＝對方不允許、逾時或沒開始
     const finish = text => {
       cleanup(); phase.value = 'ended'; note.value = text; id = ''
       const left = takeLeft(); askPaste.value = null
       if (left) emit('unsent', left)
+      if (!reached && alive) emit('refused', text)   // 外層收到就回到只能看、寫明原因（#1647）
       keyQueue = []; keyChain.cancel()   // 排著的、串著還沒送的按鍵都不留到下一次（按鍵不像整句可以放回輸入框）
     }
     const start = async () => {
@@ -158,6 +165,7 @@ export const RemoteInput = {
     <button class="aero-btn" type="button" @click="pasteYes">{{ PASTE_TEXT.yes }}</button>
     <button class="aero-btn" type="button" @click="pasteNo">{{ PASTE_TEXT.no }}</button>
   </p>
+  <div class="term-wait-cover" role="status" v-if="snap !== null && (phase === 'starting' || phase === 'waiting')"><pre class="term-wait-snap">{{ snap }}</pre><p class="term-wait-note">{{ TEXT.waitReply }}</p></div>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="phase === 'waiting' || phase === 'typing'"></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}
     <button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button>
