@@ -26,7 +26,7 @@ export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 換班接手要等前任�
 // 那台電腦自己回報的「不開放遠端開新視窗」原因句（launch_closed_reason）：逐字要與 src-tauri/src/bridge/launcher.rs 的 CLOSED_NO_* 相同（test 有對照）
 export const CLOSED_REASONS = Object.freeze({
   noConsent: '到那台的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」',
-  noProfile: '那台還找不到 Claude，裝好後請重開 ASN',
+  noProfile: '那台還找不到 Claude，裝好後約一分鐘會自動更新',
   noCwd: '到那台的 設定 → 工作資料夾白名單 加上資料夾',
 })
 

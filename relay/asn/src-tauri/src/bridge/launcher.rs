@@ -39,7 +39,7 @@ pub const NO_REMOTE_PROFILE: &str = "沒有可以從遠端開啟的設定（目�
 pub const NO_CWD: &str = "工作資料夾白名單是空的";
 /// 「不開放遠端開新視窗」時給使用者看的原因句（經名單回報的 launch_closed_reason 到別台與手機）；前端 ui/lib/partner-ops.mjs 的 CLOSED_REASONS 要逐字相同
 pub const CLOSED_NO_CONSENT: &str = "到那台的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」";
-pub const CLOSED_NO_PROFILE: &str = "那台還找不到 Claude，裝好後請重開 ASN";
+pub const CLOSED_NO_PROFILE: &str = "那台還找不到 Claude，裝好後約一分鐘會自動更新";
 pub const CLOSED_NO_CWD: &str = "到那台的 設定 → 工作資料夾白名單 加上資料夾";
 
 fn now_ms() -> u64 {
@@ -664,7 +664,7 @@ mod tests {
         let mut b = bootstrap(vec![allow.clone()]);
         b.0.retain(|id, _| id == "codex");
         let r = build_remote_config(&d.path().join("x.json"), Some(b), vec![], true);
-        assert_eq!(closed_reason_of(&r), Some("那台還找不到 Claude，裝好後請重開 ASN"));
+        assert_eq!(closed_reason_of(&r), Some("那台還找不到 Claude，裝好後約一分鐘會自動更新"));
         // 白名單空
         let r = build_remote_config(&d.path().join("x.json"), Some(bootstrap(vec![])), vec![], true);
         assert_eq!(closed_reason_of(&r), Some("到那台的 設定 → 工作資料夾白名單 加上資料夾"));
