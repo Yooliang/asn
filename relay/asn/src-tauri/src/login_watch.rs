@@ -1134,7 +1134,8 @@ mod tests {
         assert!(!failed, "非登入類錯誤不算失效");
         assert!(cap.0.lock().unwrap().is_empty() && logs.is_empty());
         assert_eq!(m.code_lines.len(), 2, "同代碼只一行：{:?}", m.code_lines);
-        assert!(m.code_lines[0].contains("rate_limit（累計 3 次）"), "{:?}", m.code_lines);
+        // 同一個代碼第一次出現就記一行（當下累計 1 次），之後這一小時內的次數先累計，到下一行再一起帶出
+        assert!(m.code_lines[0].contains("rate_limit（累計 1 次）"), "{:?}", m.code_lines);
         assert!(m.code_lines[1].contains(UNKNOWN_CODE));
         assert!(!format!("{:?}", m.code_lines).contains("SECRET") && !format!("{:?}", m.code_lines).contains("Login"));
     }
