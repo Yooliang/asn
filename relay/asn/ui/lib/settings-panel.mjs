@@ -23,6 +23,7 @@ import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
+import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
@@ -34,7 +35,7 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
@@ -159,7 +160,7 @@ export const SettingsPanel = {
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, effectiveLook, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -583,6 +584,28 @@ export const SettingsPanel = {
                       <div class="dv-none" v-else><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path></svg>{{ v.note || '目前未回報任何帳號' }}</div>
                       <small v-if="v.switchHint">{{ v.switchHint }}</small>
                     </template>
+                    <div class="dv-install dv-relogin" v-if="v.key === 'claude' && st.relogin && ((v.relogin && v.relogin.kind) || (st.relogin.target === curDev.key && st.relogin.stage !== 'idle'))">
+                      <template v-if="st.relogin.target !== curDev.key || st.relogin.stage === 'idle'">
+                        <button class="aero-btn" type="button" @click="act('relogin-ask', { node: curDev.key, kind: v.relogin.kind })">{{ DESK_RELOGIN_TEXT.button }}</button>
+                      </template>
+                      <div class="dv-confirm" role="alertdialog" :aria-label="st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label)" v-else-if="st.relogin.stage === 'confirm'">
+                        <b>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label) }}</b>
+                        <p>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localBody : DESK_RELOGIN_TEXT.remoteBody }}</p>
+                        <small v-if="st.relogin.kind !== 'local'">{{ DESK_RELOGIN_TEXT.remoteNeed }}</small>
+                        <span class="dv-ibtns">
+                          <button class="aero-btn" type="button" @click="act('relogin-yes')">{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localYes : DESK_RELOGIN_TEXT.remoteYes }}</button>
+                          <button class="aero-btn" type="button" @click="act('relogin-no')">{{ DESK_RELOGIN_TEXT.no }}</button>
+                        </span>
+                      </div>
+                      <div class="dv-prog" :role="st.relogin.stage === 'done' && !st.relogin.ok ? 'alert' : 'status'" aria-live="polite" v-else>
+                        <p v-if="st.relogin.lead">{{ st.relogin.lead }}</p>
+                        <p>{{ st.relogin.text }}</p>
+                        <p class="note" v-if="st.relogin.note">{{ st.relogin.note }}</p>
+                        <span class="dv-ibtns" v-if="st.relogin.stage === 'done'">
+                          <button class="aero-btn" type="button" @click="act('relogin-close')">{{ DESK_RELOGIN_TEXT.close }}</button>
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </li>
               </ul>

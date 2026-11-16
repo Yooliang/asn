@@ -204,6 +204,16 @@ export function reloginAction({ vendor, isSelf = false, phone = false, online = 
   return { kind: 'remote' }
 }
 
+/**
+ * 電腦版在「本機這一台」重新登入 Claude（#1645）：本人就在這台電腦前，Claude 登入失效時給入口。
+ * → null 或 { kind: 'local' }。別台與手機用上面的 reloginAction；這裡只管本機，所以不看連線狀態。
+ * 本機的入口開官方登入終端，由本人在那裡完成登入，不經手機、不送網址
+ */
+export function localReloginAction({ vendor, isSelf = false, phone = false, state = '' } = {}) {
+  if (vendor !== 'claude' || !isSelf || phone) return null
+  return state === STATE.LOGIN_FAILED ? { kind: 'local' } : null
+}
+
 /** 主要幾家 AI：設備卡上就算這台沒用到也要列出「未安裝／不確定」 */
 export const CORE_VENDORS = Object.freeze(['claude', 'codex', 'grok'])
 

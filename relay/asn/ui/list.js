@@ -91,6 +91,7 @@ import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { createQuotaReaders, quotaReadersView } from './lib/quota-readers.mjs'
 import { createAgentInstall, installView } from './lib/agent-install.mjs'
+import { createReloginFlow, reloginSnap } from './lib/relogin-flow.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
 import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible, loadGuideHidden, localVendorStates, saveGuideHidden, singleFlight } from './lib/new-computer-guide.mjs'
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
@@ -106,7 +107,7 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 // 主視窗的 [ASN] 記錄另外寫進機器資料夾的 ui.log（#339），越早裝越好，啟動過程的失敗也記得到
 installUiLog({ invoke })
 
-const { createApp, reactive, ref, computed, watch, nextTick } = Vue
+const { createApp, reactive, ref, computed, watch, nextTick, onBeforeUnmount } = Vue
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 
@@ -1905,6 +1906,12 @@ const app = createApp({
     // 設備細部頁「安裝並登入 Claude Code」：確認窗、進度（agent-setup 事件，手機要求的那一輪也會來）、取消、結果
     const agentInstall = createAgentInstall({ invoke, reactive, signedIn: async () => (await authApi.status().catch(() => null))?.signed_in === true })
     void agentInstall.load()
+    // 設備細部頁「重新登入 Claude」（#1645）：別台走和手機同一套請求，本機開官方登入終端；本機登入好了才停（每幾秒讀一次帳號）
+    const reloginFlow = createReloginFlow({
+      invoke, reactive,
+      checkLoggedIn: async () => { await accounts.refresh(); const cur = accounts.state.list.find(a => a.current === true); return !!cur && accounts.state.loginFailed !== true },
+    })
+    onBeforeUnmount(() => reloginFlow.stop())
     void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
     // ---------- 新手引導卡（#1605）：這台電腦一個視窗也沒有時，取代「還沒有視窗」的空白字 ----------
     // 狀態全沿用既有偵測（ai_cli_detect 的 cliTools＋本機帳號），規則在 lib/new-computer-guide.mjs
@@ -2004,7 +2011,7 @@ const app = createApp({
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,
       reports: accounts.state.reports, roster: accounts.state.roster,
-      self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
+      self: { claude: accounts.state.list.map(a => (a.current === true && accounts.state.loginFailed === true ? { ...a, login_failed: true } : a)), grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     watch(deviceTree, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
@@ -2045,6 +2052,7 @@ const app = createApp({
       taskMgr: taskMgr.view(),
       devices: deviceTree.value, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
       install: installView(agentInstall.state),
+      relogin: reloginSnap(reloginFlow.state),
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, mod: accounts.state.mod, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
@@ -2097,6 +2105,10 @@ const app = createApp({
         case 'install-terminal': await agentInstall.openTerminal(); break
         case 'install-close': agentInstall.dismiss(); break
         case 'install-allow': await agentInstall.setRemoteAllow(value === true); break
+        case 'relogin-ask': reloginFlow.ask(String(value?.node ?? ''), value?.kind === 'local' ? 'local' : 'remote'); break
+        case 'relogin-yes': await reloginFlow.yes(); break
+        case 'relogin-no': reloginFlow.no(); break
+        case 'relogin-close': reloginFlow.close(); break
         case 'grok-switch': await accounts.grokSwitch(String(value ?? '')); break
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
