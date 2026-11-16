@@ -5,7 +5,9 @@
 // 情境（probe.relogin 的值）：
 //   base     送出的要求帶對的欄位，不亂帶
 //   failed   電腦回報失敗（沒安裝 Claude Code）：結果用 role="alert"、加框、捲到看得見，寫出原因與下一步
-//   noreply  電腦一直沒接手：20 秒後顯示「這台電腦沒有回應」並結束（用調快時鐘代替真的等 20 秒，點擊都是真的）
+//   wait     電腦還沒來取（它跟著 60 秒一次的在線回報才來取）：送出 25 秒時還要說「等這台電腦來取」，不能說沒有回應
+//   noreply  電腦一直沒接手：超過 90 秒才顯示「這台電腦沒有回應」並結束
+//   （等待時間用「注入腳本把這個頁面的 Date.now 往前推」縮短，只在探測自己的頁面生效；點擊都是真的，正式程式沒有任何可改等待時間的入口）
 //   healthy  電腦回報目前登入正常：顯示「不需要重新登入」，不是警示
 //   already  後台說已經有進行中的要求：明說，再顯示它的狀態
 // 探測原始碼是字串，裡面不寫反斜線
@@ -65,19 +67,31 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
     const waiting = await wait(() => prog(), 30);
     if (!waiting || waiting.getAttribute('role') !== 'status' || !waiting.textContent.includes('要求已送出')) return { ok: false, why: '剛送出時應該是等電腦接手的狀態（role=status）：' + (waiting?.textContent ?? '沒有結果區') };
     await sleep(4000);   // 查狀態每 5 秒一次：這時剛好等到下一輪之前，調快時鐘後馬上就會查到
-    if (!prog() || prog().getAttribute('role') !== 'status') return { ok: false, why: '還沒到 20 秒就不該結束：' + (prog()?.textContent ?? '') };
-    // 調快時鐘 21 秒（不真的等）：下一輪查狀態（每 5 秒）就該看到「沒有回應」
+    if (!prog() || prog().getAttribute('role') !== 'status') return { ok: false, why: '還沒到 90 秒就不該結束：' + (prog()?.textContent ?? '') };
+    // 調快時鐘 91 秒（不真的等）：下一輪查狀態（每 5 秒）就該看到「沒有回應」
     const realNow = Date.now.bind(Date);
-    Date.now = () => realNow() + 21000;
+    Date.now = () => realNow() + 91000;
     // 先把畫面捲到最上面，結果出來後要自己捲回看得見的地方
     for (let e = prog(); e; e = e.parentElement) if (e.scrollHeight > e.clientHeight + 1) e.scrollTop = 0;
     const p = await wait(() => { const e = prog(); return e && e.getAttribute('role') === 'alert' ? e : null }, 100);
     Date.now = realNow;
-    if (!p) return { ok: false, why: '送出 20 秒電腦都沒接手，手機沒有說沒有回應：' + (prog()?.textContent ?? '沒有結果區') };
+    if (!p) return { ok: false, why: '送出超過 90 秒電腦都沒接手，手機沒有說沒有回應：' + (prog()?.textContent ?? '沒有結果區') };
     if (!p.textContent.includes('這台電腦沒有回應，請確認它的 ASN 開著，稍後再試')) return { ok: false, why: '沒有回應的說明不對：' + p.textContent };
     await sleep(900);
     if (!inView(p)) return { ok: false, why: '失敗的結果不在看得見的地方' };
     if (![...p.querySelectorAll('.m-btn')].some(b => b.textContent.trim() === '關閉')) return { ok: false, why: '結束後要有「關閉」' };
+  } else if (KIND === 'wait') {
+    const waiting = await wait(() => prog(), 30);
+    if (!waiting) return { ok: false, why: '送出後沒有結果區' };
+    await sleep(4000);
+    // 調快時鐘 25 秒：電腦還沒來取是正常的（它每 60 秒才回報一次），不能說沒有回應
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + 25000;
+    await sleep(2500);   // 等下一輪查狀態（每 5 秒）跑過
+    Date.now = realNow;
+    const p = prog();
+    if (!p || p.getAttribute('role') !== 'status' || !p.textContent.includes('等這台電腦來取（最多約 1 分鐘）')) return { ok: false, why: '送出 25 秒時應該還在等電腦來取，不該結束或說沒有回應：' + (p?.textContent ?? '沒有結果區') };
+    if (p.textContent.includes('沒有回應')) return { ok: false, why: '送出才 25 秒就說沒有回應' };
   } else if (KIND === 'healthy') {
     const p = await wait(() => { const e = prog(); return e && e.textContent.includes('不需要重新登入') ? e : null }, 80);
     if (!p) return { ok: false, why: '電腦回報登入正常，手機沒有說不需要重新登入：' + (prog()?.textContent ?? '沒有結果區') };
@@ -96,6 +110,7 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
 const CASES = [
   { name: 'm-relogin', kind: 'base', shot: 'm-relogin.png' },
   { name: 'm-relogin-failed', kind: 'failed', shot: 'm-relogin-failed.png' },
+  { name: 'm-relogin-wait', kind: 'wait', shot: 'm-relogin-wait.png' },
   { name: 'm-relogin-noreply', kind: 'noreply', shot: 'm-relogin-noreply.png' },
   { name: 'm-relogin-healthy', kind: 'healthy', shot: 'm-relogin-healthy.png' },
   { name: 'm-relogin-already', kind: 'already', shot: 'm-relogin-already.png' },

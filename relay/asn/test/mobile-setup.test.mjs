@@ -93,12 +93,12 @@ test('重新登入 Claude（#1512 C）：只看那台回報登入失效，不受
   assert.match(RELOGIN_TEXT.confirmNeed, /已經裝好 Claude Code（重新登入不會替它安裝）/)
 })
 
-test('等電腦接手：送出 20 秒還沒進到 taken／done／failed 就說沒有回應；接手後不套這條', () => {
+test('等電腦接手：送出 90 秒還沒進到 taken／done／failed 就說沒有回應；接手後不套這條', () => {
   const t0 = 5_000_000
   const view = (st, dt, o = {}) => setupView(st, { since: t0, now: t0 + dt, ...o })
-  assert.equal(PENDING_WAIT_MS, 20000)
+  assert.equal(PENDING_WAIT_MS, 90000)
   for (const st of [null, { state: 'pending' }]) {
-    assert.deepEqual([view(st, PENDING_WAIT_MS).done, view(st, PENDING_WAIT_MS).text !== SETUP_TEXT.noReply], [false, true], '剛好 20 秒還繼續等')
+    assert.deepEqual([view(st, PENDING_WAIT_MS).done, view(st, PENDING_WAIT_MS).text !== SETUP_TEXT.noReply], [false, true], '剛好 90 秒還繼續等')
     const late = view(st, PENDING_WAIT_MS + 1)
     assert.deepEqual([late.done, late.ok, late.text], [true, false, SETUP_TEXT.noReply])
   }
@@ -107,8 +107,8 @@ test('等電腦接手：送出 20 秒還沒進到 taken／done／failed 就說�
   assert.equal(view({ state: 'taken' }, 60_000, { reached: true }).done, false)
   assert.equal(view({ state: 'taken' }, 60_000).done, false, 'taken 本身就是接手')
   assert.equal(view({ state: 'done', detail: 'ok' }, 60_000).done, true)
-  // 看過後來不見、也沒接手，超過 20 秒一樣說沒有回應（比「過期」更早）
-  assert.equal(view(null, 30_000, { sawRequest: true }).text, SETUP_TEXT.noReply)
+  // 看過後來不見、也沒接手，超過 90 秒一樣說沒有回應（比「過期」更早）
+  assert.equal(view(null, 91_000, { sawRequest: true }).text, SETUP_TEXT.noReply)
   assert.equal(view(null, 1000, { sawRequest: true }).text, SETUP_TEXT.expired)
 })
 
@@ -130,13 +130,24 @@ test('每輪查狀態：連續失敗 3 次就說暫時讀不到；中間成功�
   step({ ok: false }); step({ ok: false })
   assert.equal(step({ ok: true, st: { state: 'taken', detail: '', replaced: '' } }).done, false)
   assert.deepEqual([s.fails, s.saw, s.reached], [0, true, true])
-  // 接手之後的 20 秒不再算沒回應；pending 超過 20 秒才算
+  // 接手之後不再算沒回應；pending 超過 90 秒才算
   assert.equal(step({ ok: true, st: { state: 'taken', detail: '', replaced: '' } }, 120_000).done, false)
   s = { since: t0, saw: false, reached: false, fails: 0 }
-  assert.equal(step({ ok: true, st: { state: 'pending', detail: '', replaced: '' } }, 21_000).text, SETUP_TEXT.noReply)
+  assert.equal(step({ ok: true, st: { state: 'pending', detail: '', replaced: '' } }, 91_000).text, SETUP_TEXT.noReply)
   // 查不到的錯誤不會被當成「沒有請求」而結束成過期
   s = { since: t0, saw: true, reached: false, fails: 0 }
   assert.equal(step({ ok: false }, 1000), null)
+})
+
+test('等待時間要大於一個在線回報週期：電腦跟著回報才來取請求，不能把正常開著的電腦誤報成沒有回應', () => {
+  const lib = read('src-tauri/src/lib.rs')
+  const m = lib.match(/env_ms\("ASN_PRESENCE_MS",\s*([0-9_]+)\)/)
+  assert.ok(m, '找不到 ASN_PRESENCE_MS 的預設值：lib.rs 改了寫法，這個測試要跟著改，不能默默通過')
+  const every = Number(m[1].replaceAll('_', ''))
+  assert.ok(every >= 1000, `預設值怪怪的：${m[1]}`)
+  assert.ok(PENDING_WAIT_MS >= every + 20000, `等待 ${PENDING_WAIT_MS} 毫秒不夠：要 >= 回報週期 ${every} + 20 秒餘裕`)
+  assert.match(SETUP_TEXT.pending, /等這台電腦來取（最多約 1 分鐘）/)
+  assert.doesNotMatch(SETUP_TEXT.pending, /20 秒/)
 })
 
 test('後台回已經有進行中的要求：明說，再顯示它的狀態', () => {

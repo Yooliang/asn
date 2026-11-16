@@ -7,8 +7,9 @@ import { AGENT_INSTALL_UI } from './device-state.mjs'
 export const POLL_MS = 5000
 /** 等太久就不再等：後台 10 分鐘沒被電腦接手會自己當作過期；接手後 40 分鐘沒結果也會當作逾時 */
 export const GIVE_UP_MS = 45 * 60 * 1000
-/** 送出後這麼久還沒進到 taken／done／failed，就告訴本人那台電腦沒有回應（#1592） */
-export const PENDING_WAIT_MS = 20 * 1000
+/** 送出後這麼久還沒進到 taken／done／failed，就告訴本人那台電腦沒有回應（#1592）。
+ *  電腦是跟著在線回報（預設每 60 秒，lib.rs 的 ASN_PRESENCE_MS）才來取請求的，中間沒有東西會叫醒它，所以要大於一個回報週期加餘裕；測試鎖住這個關係 */
+export const PENDING_WAIT_MS = 90 * 1000
 /** 查狀態連續失敗幾次就告訴本人，不再靜默吞掉（#1592） */
 export const POLL_FAIL_MAX = 3
 
@@ -21,7 +22,7 @@ export const SETUP_TEXT = Object.freeze({
   no: '先不要',
   close: '關閉',
   sending: '正在送出要求…',
-  pending: '要求已送出，等這台電腦接手',
+  pending: '要求已送出，等這台電腦來取（最多約 1 分鐘）',
   taken: '這台電腦已接手，正在安裝並登入。登入網址送到這支手機後會跳出頁面，請打開網址並貼回授權碼。',
   expired: '這台電腦沒有接手，要求已過期；請確認電腦開著 ASN 並打開了「允許從手機替這台安裝並登入」，再試一次。',
   gaveUp: '等太久了，沒有收到結果。請到那台電腦上看看目前的狀況。',
