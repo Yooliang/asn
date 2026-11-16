@@ -103,6 +103,7 @@
 .wake-tags{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:2px 0 0 12px;font-size:11px;line-height:1.5;color:#6b7b8c}
 .wake-tag{white-space:nowrap;padding:0 7px;border-radius:9px;background:rgba(107,123,140,.14)}
 .wake-tag.off{color:#a9b4c0;background:rgba(169,180,192,.12)}
+.wake-tag .wake-off{font-size:inherit}
 .wake-arrow{color:#98a5b3}
 /* 自己發的群組訊息的已讀人數（#224）：接在時間後面的同一行小字，不增加行高 */
 .read-n{margin-left:6px;font-size:11px;line-height:1;color:#6b7b8c;white-space:nowrap;cursor:default}

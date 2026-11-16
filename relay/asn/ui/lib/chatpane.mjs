@@ -764,7 +764,7 @@ export const ChatPane = {
               </div>
               <div class="m-act" v-if="canReply(m) || (m.wake && m.wake.length)">
                 <button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button>
-                <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>
+                <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off, offline: w.offline }" :title="w.offline ? '目前離線，上線後會看到' : w.off ? '不通知' : ''">{{ w.label }}<small class="wake-off" v-if="w.offline">（離線）</small></span></template></div>
               </div>
               <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>

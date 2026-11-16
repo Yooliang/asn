@@ -101,13 +101,14 @@ const fromLabel = m => {
 // 後台算好的引用（被回覆的那則的作者與摘要）→ 畫面用的 { seq, author, excerpt }；沒有、或原訊息讀者看不到就是 null。作者用同一套標示（同名加「（2）」）
 // 後台存在訊息上的叫醒順序（#231）→ 訊息下方的標籤 [{ label, off }]（依順序，被略過的 off 排最後）。
 // 只有 0～1 位被叫醒且沒人被略過時不顯示（回空陣列）；標示一律過 safeLabel，不會出現節點代號或 x: 代號
-export function wakeTags(info) {
+// offlineKeys：目前離線的成員鍵（group-offline.mjs 的 offlineNames）；被略過、而且那時離線的那位多標 offline（#1656：後台排順位時不排離線的人，畫面灰色加「離線」）
+export function wakeTags(info, offlineKeys = null) {
   if (!Array.isArray(info)) return []
-  const tags = info.filter(e => e && typeof e === 'object').map(e => ({ label: (s => (/^x:/.test(s) ? '' : s) || '成員')(safeLabel(typeof e.label === 'string' ? e.label : '')), off: e.hold === true, rank: Number.isInteger(e.rank) ? e.rank : 0 }))
+  const tags = info.filter(e => e && typeof e === 'object').map(e => ({ label: (s => (/^x:/.test(s) ? '' : s) || '成員')(safeLabel(typeof e.label === 'string' ? e.label : '')), off: e.hold === true, offline: e.hold === true && typeof e.key === 'string' && !!offlineKeys && offlineKeys.has(e.key), rank: Number.isInteger(e.rank) ? e.rank : 0 }))
   const on = tags.filter(t => !t.off).sort((a, b) => a.rank - b.rank)
   const off = tags.filter(t => t.off)
   if (!off.length && on.length < 2) return []
-  return [...on, ...off].map(({ label, off: o }) => ({ label, off: o }))
+  return [...on, ...off].map(({ label, off: o, offline }) => ({ label, off: o, ...(offline ? { offline: true } : {}) }))
 }
 const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_display_label || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
 // 後台的已讀狀況 → 畫面用的 { n, total, by, un }；沒有（舊後台、系統訊息）或格式不對回 null。名單過 safeLabel，不會出現節點代號或 x: 代號
@@ -145,7 +146,7 @@ export const hasPendingReads = log => (Array.isArray(log) ? log.slice(-40) : [])
 // 只對最近 WAKE_WAIT_MS 內發出、還沒有順序的訊息補問；過了這段時間就當作永遠不會有（沒人被叫醒）
 export const WAKE_WAIT_MS = 10 * 60 * 1000
 // 把後台 wakes（最近 40 則中已存下叫醒順序的訊息）套到對話記錄上：只補還沒有順序的（先到先得）；回新陣列（沒有變動回原陣列）
-export function applyWakes(log, wakes) {
+export function applyWakes(log, wakes, offlineKeys = null) {
   if (!Array.isArray(log) || !Array.isArray(wakes) || !wakes.length) return log
   const by = new Map(wakes.filter(e => e && Array.isArray(e.wake_info)).map(e => [e.seq, e.wake_info]))
   if (!by.size) return log
@@ -154,7 +155,7 @@ export function applyWakes(log, wakes) {
     const info = e && (e.k === 'me' || e.k === 'them') && e.wk !== true ? by.get(e.seq) : null
     if (!info) return e
     changed = true
-    return { ...e, wake: wakeTags(info), wk: true }
+    return { ...e, wake: wakeTags(info, offlineKeys), wk: true }
   })
   return changed ? out : log
 }
@@ -166,6 +167,7 @@ export function roomLog(messages, myKeys, members, { photos = false } = {}) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
   const labels = speakerLabels(list, members)
+  const offKeys = new Set(offlineNames(members).map(n => n.key))   // 訊息自帶的 wake_info 也要標離線（#1656）
   const out = []
   for (const m of list) {
     const pics = photos ? normalizePhotos(m.attachments) : []
@@ -175,7 +177,7 @@ export function roomLog(messages, myKeys, members, { photos = false } = {}) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true, ...(pics.length ? { photos: pics } : {}) })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info, offKeys), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true, ...(pics.length ? { photos: pics } : {}) })
   }
   return out
 }
