@@ -445,8 +445,18 @@ pub fn set_dpapi_log_dir(dir: &Path) {
     let _ = DPAPI_LOG_DIR.set(dir.to_path_buf());
 }
 
+/// 同一組（動作、錯誤碼）這次啟動已經記過：登入檔一直解不開時，每次查登入狀態都會再解一次，不要讓 ui.log 一直重複同一行
+#[cfg_attr(not(windows), allow(dead_code))]
+fn dpapi_first_seen(seen: &std::sync::Mutex<std::collections::HashSet<(String, u32)>>, op: &str, code: u32) -> bool {
+    seen.lock().unwrap_or_else(|e| e.into_inner()).insert((op.to_string(), code))
+}
+
 #[cfg(windows)]
 fn dpapi_log(op: &str, code: u32) {
+    static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<(String, u32)>>> = std::sync::LazyLock::new(Default::default);
+    if !dpapi_first_seen(&SEEN, op, code) {
+        return;
+    }
     let line = dpapi_err_line(op, code);
     elog!("[ASN] {line}");
     if let Some(dir) = DPAPI_LOG_DIR.get() {
@@ -825,6 +835,15 @@ mod tests {
     fn 加解密失敗的記錄行_動作名加八位十六進位錯誤碼() {
         assert_eq!(dpapi_err_line("加密", 0x5), "Windows 加密失敗 0x00000005");
         assert_eq!(dpapi_err_line("解密", 0x8009000B), "Windows 解密失敗 0x8009000B");
+    }
+
+    #[test]
+    fn 加解密失敗的記錄_同一組動作與錯誤碼只記一次() {
+        let seen = std::sync::Mutex::new(std::collections::HashSet::new());
+        assert!(dpapi_first_seen(&seen, "解密", 0x8009000B));
+        assert!(!dpapi_first_seen(&seen, "解密", 0x8009000B), "同一組第二次不再記");
+        assert!(dpapi_first_seen(&seen, "解密", 0x5), "錯誤碼不同要記");
+        assert!(dpapi_first_seen(&seen, "加密", 0x8009000B), "動作不同要記");
     }
 
     #[test]
