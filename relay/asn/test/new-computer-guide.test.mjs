@@ -147,6 +147,22 @@ test('singleFlight：進行中再呼叫回同一個 promise、不重跑；跑完
   await assert.rejects(bad(), /x/, '失敗後可以再試')
 })
 
+test('Edge 擋下載的小提醒：只在有官網連結的列，樣板放在官網那行下面，文字逐字相等', () => {
+  assert.equal(GUIDE_TEXT.edgeKeep, 'Edge 擋下載的話，按「…」→「保留」→「仍要保留」')
+  // 沒裝（有官網）的列都有 site；已裝／檢查中的列沒有 site，所以不會顯示
+  assert.ok(guideRows({ states: all({}) }).every(r => r.site))
+  assert.ok(guideRows({ states: all({}), isSelf: false }).every(r => r.site))
+  const partial = guideRows({ states: all({ claude: true, gemini: true }, { claude: [{ email: 'a@b.c', current: true }] }) })
+  assert.deepEqual(partial.map(r => !!r.site), [false, true, false, true])
+  assert.ok(guideRows({ states: {} }).every(r => !r.site))
+  const view = readFileSync(new URL('../ui/lib/new-computer-guide-view.mjs', import.meta.url), 'utf8')
+  const lines = view.split(/\r?\n/)
+  const siteAt = lines.findIndex(l => l.includes('v-if="r.site"') && l.includes('ng-link'))
+  assert.ok(siteAt >= 0)
+  assert.match(lines[siteAt + 1], /v-if="r\.site"/)
+  assert.match(lines[siteAt + 1], /\{\{ T\.edgeKeep \}\}/)
+})
+
 test('引導卡的字沒有技術名詞', () => {
   const texts = [
     ...Object.values(GUIDE_TEXT),
