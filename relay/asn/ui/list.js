@@ -74,7 +74,8 @@ import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { WINDOW_LABEL, barSlots, consoleBlock, groupMenuItems, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
-import { isPinned as chatIsPinned, normalizePins, pinMenuLabel, renamedChatId as renamedPinId, sortPinned, togglePin } from './lib/chat-pins.mjs'
+import { isPinned as chatIsPinned, normalizePins, pinMenuLabel, pinnedTargets, renamedChatId as renamedPinId, sortPinned, togglePin } from './lib/chat-pins.mjs'
+import { createPinsSync } from './lib/pins-sync.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, customRunOptions, launchModelChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
@@ -174,6 +175,10 @@ function togglePinChat(id) {
 const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
 watch(devPrefs, () => devSync.noteLocal(), { deep: true })
 if (!info.shot) devSync.start()
+// 對話釘選同步到帳號層（lib/pins-sync.mjs）：有登入才同步，後台 rev 是遞增版本號（寫入要＝現有＋1），衝突時在這裡合併重送；沒登入或後台還沒部署就只用本機檔。--shot 截圖模式不動
+const pinsSync = createPinsSync({ getPins: () => chatPins.value, setPins: s => { chatPins.value = s }, api: { get: authApi.getChatPins, set: authApi.setChatPins }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
+watch(chatPins, () => pinsSync.noteLocal(), { deep: true })
+if (!info.shot) pinsSync.start()
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
@@ -1624,14 +1629,13 @@ const app = createApp({
     // 釘選的對話永遠列在最上面，不受「近期有往來」限制（#1479）：清單裡沒有的，從夥伴名單／群組清單補一列；兩邊都找不到（已不存在）先不顯示，釘選紀錄照留
     const pinnedExtra = computed(() => {
       const have = new Set(chatAll.value.map(x => x.id))
-      const fr = new Map(activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)).map(f => [f.id, f]))
-      const rm = new Map(roomRows.value.map(r => [r.chatId, r]))
       const out = []
-      for (const p of chatPins.value.pins) {
-        if (have.has(p.id)) continue
-        const f = fr.get(p.id), r = rm.get(p.id)
+      // 封存優先：activeFriends 已把封存的排除，釘選紀錄照留（解除封存就回來）
+      for (const t of pinnedTargets(chatPins.value, activeFriends(friendsAct.value).filter(f => !isNoticeFriend(f) && !isMergedAway(f)), roomRows.value)) {
+        if (have.has(t.id)) continue
+        const f = t.friend, r = t.room
         if (f) out.push({ kind: 'friend', id: f.id, at: lastTrafficAt(core.viewOf(f.id) ?? []), friend: f, last: lastWords(core.viewOf(f.id) ?? []) })
-        else if (r) out.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
+        else out.push({ kind: 'room', id: r.chatId, at: Number.isFinite(r.at) ? r.at : 0, room: r })
       }
       return filterChatRows(out, normalizeSearchQuery(chatQuery.value), (f, q) => friendMatchesQuery(f, q, plain))
     })
