@@ -415,7 +415,9 @@ impl Launcher {
         let now = now_ms();
         check_launch(cfg, &mut req, &[], now)?;
         let lower = name.to_lowercase();
-        if names.iter().any(|n| n.to_lowercase() == lower) || self.inflight.lock().unwrap().contains(&lower) {
+        // 開著、還沒進到對話的同名夥伴也占名字（#1636）。只加在這裡：names 也給 wait_for_window 判斷「開好了沒」用，
+        // 把還沒進到對話的視窗混進去會讓剛開的窗格被誤報成已開啟、開場訊息提早送出
+        if names.iter().any(|n| n.to_lowercase() == lower) || self.inflight.lock().unwrap().contains(&lower) || crate::launch::awaiting::real_holds_name(name, true) {
             return Err(format!("已經有叫「{name}」的視窗"));
         }
         let recent = self.read_history();
@@ -623,6 +625,17 @@ impl Launcher {
 
 #[cfg(test)]
 mod tests {
+    /// #1636：還沒進到對話的夥伴只算進「撞名」，不能混進給 wait_for_window 判斷「開好了沒」的名單
+    #[test]
+    fn 等確認的名字只進撞名檢查_不混進開好了沒的名單() {
+        let bridge = include_str!("mod.rs");
+        let closure = bridge.split("let names: Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync> = Arc::new(move || {").nth(1).expect("有 names 閉包").split("});").next().unwrap();
+        assert!(!closure.contains("awaiting"), "names 閉包不能帶等確認的名字：{closure}");
+        let me = include_str!("launcher.rs");
+        let verify = me.split("fn verify(&self").nth(1).expect("有 verify").split("fn remote_pi_args").next().unwrap();
+        assert!(verify.contains("awaiting::real_holds_name(name, true)"), "verify 的撞名要算等確認的夥伴");
+    }
+
     use super::*;
     use crate::launch::profiles::Profile;
     use std::collections::HashMap;

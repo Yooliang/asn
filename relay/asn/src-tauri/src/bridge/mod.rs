@@ -209,7 +209,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         let (sessions, mailbox, r2, sink2, alive2, claude2) = (cfg.sessions_dir.clone(), cfg.mailbox_name.clone(), relay.clone(), core.sink(), alive.clone(), core.claude_check());
         let names: Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync> = Arc::new(move || {
             let ws = roster::read_sessions_with(&sessions, |p, _| alive2(p) && claude2(p), sink2.pid(), &mailbox)?;
-            Some(ws.into_iter().map(|w| w.name).chain(r2.active_names()).chain(crate::launch::awaiting::real_names()).collect())
+            Some(ws.into_iter().map(|w| w.name).chain(r2.active_names()).collect())
         });
         let (l, rx) = Launcher::new(relay.clone(), log.clone(), cfg.work_dir.clone(), env, names);
         core.set_launcher(l);
