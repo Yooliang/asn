@@ -63,7 +63,7 @@ test('守門：ChatPane 用僅顯示判斷禁用輸入與傳送；core 的 #fail
   assert.ok(pane.includes('displayOnly'))
   assert.ok(pane.includes('class="to-busy to-readonly"'))
   assert.ok(pane.includes(':disabled="displayOnly"'))
-  assert.ok(pane.includes(':disabled="displayOnly || !draft.trim()"'))
+  assert.ok(pane.includes(':disabled="composeLocked || !draft.trim()"'))   // 僅顯示且不在終端打字模式才鎖（#1638）
   const core = fs.readFileSync(path.join(UI, 'lib', 'core.mjs'), 'utf8')
   assert.ok(core.includes('訊息沒有送到：${friendlySendError(e.message)}'))
   const m = fs.readFileSync(path.join(UI, 'm.html'), 'utf8')

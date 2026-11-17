@@ -32,7 +32,7 @@ test('接線：終端畫面按送出走 sendToTerm（不寄信）；沒送進去
   assert.match(send, /if \(termCompose\.value\) \{[^}]*sendToTerm\(t\)[^}]*return \}/, '終端模式先走 sendToTerm 並 return，不 emit send')
   assert.ok(send.indexOf('sendToTerm') < send.indexOf("emit('send'"))
   assert.match(pane, /<remote-input [^>]*@unsent="restoreDraft"/)
-  assert.match(pane, /const remoteCompose = computed\(\(\) => canRemoteInput\.value && !displayOnly\.value && !viewRestartable\.value\)/, '電腦版看別台終端（有打字通道）時')
+  assert.match(pane, /const remoteCompose = computed\(\(\) => remoteComposeOn\(\{ canInput: canRemoteInput\.value, isRoom: isRoom\.value, friend: props\.friend, restartable: viewRestartable\.value \}\)\)/, '電腦版看別台終端（有打字通道）時')
   assert.match(pane, /const termCompose = computed\(\(\) => remoteCompose\.value \|\| localCompose\.value\)/, '或看本機終端時（#1378）')
   // 已結束打字／離開超過寬限（狀態列有「重新看」）時退回「傳送」，不讓輸入框代替本人按「重新看」
   assert.match(pane, /const viewRestartable = computed\(\(\) => Boolean\(typingEndedNote\.value\) \|\| \(remoteBar\.value\?\.src === 'view' && remoteBar\.value\.restartable === true\)\)/)

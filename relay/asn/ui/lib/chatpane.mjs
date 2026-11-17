@@ -34,7 +34,7 @@ import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
-import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only.mjs'
+import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly, remoteComposeOn } from './display-only.mjs'
 import { AWAITING_NOTE, AWAITING_NOTE_NO_TERM } from './awaiting.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
@@ -218,13 +218,15 @@ export const ChatPane = {
     // 看別台的終端時（電腦版）：輸入框直接打進那個終端（#1288），提示字與按鈕字跟著換
     // 打字或觀看已經因為離開分頁而結束（狀態列有「重新看」）時退回「傳送」：要不要重新開始由本人按「重新看」決定，不由輸入框代按
     const viewRestartable = computed(() => Boolean(typingEndedNote.value) || (remoteBar.value?.src === 'view' && remoteBar.value.restartable === true))
-    const remoteCompose = computed(() => canRemoteInput.value && !displayOnly.value && !viewRestartable.value)
+    // 等你按確認的夥伴（#1638）不能收信，但別台／手機的終端打字與按鍵列照常能用
+    const remoteCompose = computed(() => remoteComposeOn({ canInput: canRemoteInput.value, isRoom: isRoom.value, friend: props.friend, restartable: viewRestartable.value }))
+    const composeLocked = computed(() => displayOnly.value && !termCompose.value)   // 輸入框與傳送鈕：僅顯示條目擋住，但終端打字模式（只有等你按確認的夥伴能進）放行
     // 看本機夥伴的終端時（電腦版，#1378）：一樣直接打進那個終端，按鈕字與提示字和看別台相同；本機不用對方同意，沒有確認框、寬限與重新看
     const tvEl = ref(null)
     const localCompose = computed(() => termShown.value && Boolean(props.termViewApi?.input) && !displayOnly.value)
     const termCompose = computed(() => remoteCompose.value || localCompose.value)
-    const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? (remoteCompose.value && inputPhase.value !== 'typing' ? composeRemoteHint(termViewName.value) : composeTermHint(termViewName.value)) : composePlaceholder(props.winMode)))
-    const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
+    const composeHint = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? (remoteCompose.value && inputPhase.value !== 'typing' ? composeRemoteHint(termViewName.value) : composeTermHint(termViewName.value)) : composePlaceholder(props.winMode)))
+    const composeTitle = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
     const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))
     // 終端模式（#1642）：輸入列只留輸入框、送出和麥克風，「＋」與表情、震動、傳照片、傳檔案、截圖都不顯示；切進終端時把已展開的選單收起來，切回對話照舊
     watch(termCompose, on => { if (on) { plusOpen.value = false; pickerOpen.value = false } })
@@ -685,7 +687,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -857,7 +859,7 @@ export const ChatPane = {
         <!-- LINE 外觀（#1449 第三張）：「＋」旁攤開一顆圖片鈕（同一個選檔 input 與 pickPhoto），表情鈕放在輸入框內右側（同一個 pickerOpen）；其他外觀不輸出 -->
         <button class="lc-more" type="button" v-if="isLine" @mousedown.prevent @click="openLcTools" aria-label="展開附件與更多" title="展開附件與更多" v-show="!termCompose"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <button class="lc-photo" type="button" v-if="isLine" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）" v-show="!termCompose"><line-icon name="photo"></line-icon></button>
-        <textarea ref="composeEl" v-model="draft" @focus="onComposeFocus" @blur="onComposeBlur" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
+        <textarea ref="composeEl" v-model="draft" @focus="onComposeFocus" @blur="onComposeBlur" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="composeLocked"></textarea>
         <button class="lc-emo" type="button" v-if="isLine" @click="plusOpen = false; pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" :disabled="displayOnly" aria-label="表情符號" title="表情符號" v-show="!termCompose"><line-icon name="emoji"></line-icon></button>
         <div class="picker lc-picker" v-if="isLine && !lineRow && pickerOpen && !plusOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
@@ -869,7 +871,7 @@ export const ChatPane = {
         <button class="mc-dict mc-mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice && !showDictBtn" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <line-icon name="mic"></line-icon>
         </button>
-        <button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly || !draft.trim()">{{ sendLabel }}</button>
+        <button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="composeLocked || !draft.trim()">{{ sendLabel }}</button>
       </form>
     </div>
   </div>
