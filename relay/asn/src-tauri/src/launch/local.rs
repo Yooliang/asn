@@ -353,6 +353,9 @@ pub(super) fn start_window_relaunch(title: &str, command: &str, args: &[String],
     super::pretrust::ensure_claude_command_cwd_trusted(command, cwd);
     #[cfg(windows)]
     {
+        // ASN 剛啟動時終端設定還在載：先等它載好（有上限，在這個背景執行緒睡），不然會把「還沒載入」當成「關掉」直接開原生主控台（#1698）
+        super::win_term::clear_native_why();
+        super::win_term::wait_term_config_real();
         let (in_term, in_console) = super::win_term::relaunch_hidden(super::win_term::term_server_active());
         start_window_windows(title, command, args, cwd, in_term, in_console).map(|o| o.pid)
     }

@@ -75,6 +75,87 @@ pub(crate) fn term_server_wanted(env_mux: Option<&str>, user_off: bool) -> (bool
 pub(crate) fn set_term_server_state(active: bool, locked: bool) {
     TERM_SERVER_ACTIVE.store(active, Ordering::SeqCst);
     TERM_SERVER_LOCKED.store(locked, Ordering::SeqCst);
+    // live() 裡這是最後一個設定（開關在前面就設好了）：到這裡終端設定才算載入完（#1698）
+    TERM_CONFIG_LOADED.store(true, Ordering::SeqCst);
+}
+
+/// 終端設定（上面兩個開關與服務狀態）載入完了沒：啟動時 term::live() 載完才設 true（#1698）。
+/// 載入之前 [`wezterm_windows`] 還是預設的 false，不能拿來當「使用者關掉了」。
+static TERM_CONFIG_LOADED: AtomicBool = AtomicBool::new(false);
+
+/// 重開（喚醒、接回）時最多等終端設定載入多久（毫秒，#1698）。每個喚醒在自己的背景執行緒各等各的
+pub(crate) const RELAUNCH_WAIT_MS: u64 = 20_000;
+const RELAUNCH_WAIT_STEP_MS: u64 = 100;
+
+/// 這次改用原生主控台的原因（只進 log 與結果的選填欄位，不放畫面）
+pub(crate) const NATIVE_OFF: &str = "設定關掉";
+pub(crate) const NATIVE_NO_SERVICE: &str = "等不到服務";
+
+thread_local! {
+    /// 這個執行緒最近一次開窗是不是退到了原生主控台、為什麼。喚醒在同一個執行緒開完窗就讀（[`take_native_why`]）
+    static NATIVE_WHY: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+fn mark_native(why: &'static str) {
+    NATIVE_WHY.with(|c| c.set(Some(why)));
+}
+
+/// 開窗前清掉上一次的記錄（同一個執行緒會連續開好幾個）
+pub(crate) fn clear_native_why() {
+    NATIVE_WHY.with(|c| c.set(None));
+}
+
+/// 讀出並清掉：這個執行緒最近一次開窗退到原生主控台的原因；開在自帶終端、或沒開過就是 None
+pub(crate) fn take_native_why() -> Option<&'static str> {
+    NATIVE_WHY.with(|c| c.take())
+}
+
+/// 這個建置啟動時會載入終端設定（有畫面的正式版）。無視窗橋與測試不會載，等也等不到，不用等
+pub(crate) const fn config_expected() -> bool {
+    cfg!(all(feature = "gui", not(test)))
+}
+
+/// 終端設定載入完了嗎
+pub(crate) fn term_config_loaded() -> bool {
+    TERM_CONFIG_LOADED.load(Ordering::SeqCst)
+}
+
+/// 等終端設定載入，最多 `limit_ms`：載好回 true；等到上限還沒好回 false。`loaded`、`sleep` 可注入（測試不真的睡）。
+/// `expected`＝false（這個建置根本不會載）就不等，直接回目前的狀態。要等的時候留一行 log（等多久、結果）
+pub(crate) fn wait_term_config(loaded: &dyn Fn() -> bool, sleep: &dyn Fn(u64), expected: bool, limit_ms: u64, log: &dyn Fn(&str)) -> bool {
+    if loaded() {
+        return true;
+    }
+    if !expected {
+        return false;
+    }
+    log("終端服務設定還沒載入（ASN 剛啟動），先等一下再開視窗");
+    let mut waited = 0;
+    while waited < limit_ms {
+        sleep(RELAUNCH_WAIT_STEP_MS);
+        waited += RELAUNCH_WAIT_STEP_MS;
+        if loaded() {
+            log(&format!("終端服務設定載入完成（等了約 {} 毫秒）", waited));
+            return true;
+        }
+    }
+    log(&format!("等了 {} 毫秒終端服務設定還是沒載入，這次改用原生主控台", limit_ms));
+    false
+}
+
+/// 正式：重開前等終端設定（在重開的背景執行緒裡睡，不卡畫面執行緒、不卡別的喚醒）
+pub(crate) fn wait_term_config_real() -> bool {
+    wait_term_config(&term_config_loaded, &|ms| std::thread::sleep(std::time::Duration::from_millis(ms)), config_expected(), RELAUNCH_WAIT_MS, &|s| elog!("{s}"))
+}
+
+/// 開關是關的時候，記下為什麼用原生主控台：設定還沒載入（等不到服務）還是使用者／系統把它關掉了。
+/// 純函式，給 [`open_window_real`] 與測試用
+pub(crate) fn native_reason_when_off(loaded: bool, expected: bool) -> &'static str {
+    if expected && !loaded {
+        NATIVE_NO_SERVICE
+    } else {
+        NATIVE_OFF
+    }
 }
 
 /// 這次啟動有沒有在用伺服器終端（設定頁用來判斷「改了還沒生效」）
@@ -199,10 +280,16 @@ pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool
 /// GUI 已經啟動之後才失敗：不走退路，照實回錯（不另外再開一份）
 pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &WinSpec, noted: &AtomicBool, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
     match host.filter(|h| h.available()) {
-        None => elog!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title),
+        None => {
+            mark_native(NATIVE_NO_SERVICE);
+            elog!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title)
+        }
         Some(h) => match h.open_window(cwd, spec) {
             Ok(pid) => return Ok(Opened { pid, note: None }),
-            Err(WinOpenError::NotStarted(e)) => elog!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title),
+            Err(WinOpenError::NotStarted(e)) => {
+                mark_native(NATIVE_NO_SERVICE);
+                elog!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title)
+            }
             Err(WinOpenError::Started(e)) => {
                 elog!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
                 return Err(format!("{STARTED_BUT_FAILED}：{e}"));
@@ -225,6 +312,12 @@ pub(crate) fn open_window_gated(on: bool, host: Option<&dyn WinTermHost>, cwd: &
 /// 正式：自帶的終端從全域取（沒有畫面的建置、測試一律沒有）；開關見 [`wezterm_windows`]
 pub(crate) fn open_window_real(cwd: &Path, spec: &WinSpec, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
     let host = host();
+    if !wezterm_windows() {
+        // 0.1.113 的舊行為（不提示、不碰自帶終端）照舊，但留一行 log 並記下原因，喚醒的結果欄位看得到（#1698）
+        let why = native_reason_when_off(term_config_loaded(), config_expected());
+        mark_native(why);
+        elog!("開「{}」：用原生主控台（{why}）", spec.title);
+    }
     open_window_gated(wezterm_windows(), host.as_deref(), cwd, spec, &FALLBACK_NOTED, fallback)
 }
 
@@ -367,6 +460,101 @@ mod tests {
         let e = open_window(None, Path::new("D:\\p"), &spec, &noted, &|| Err("開不起來：找不到檔案".into())).unwrap_err();
         assert!(e.contains("開不起來"));
         assert!(!noted.load(Ordering::SeqCst));
+    }
+
+    // ---- #1698：喚醒時終端設定還沒載入，要等，不能當成「關掉」直接退回系統終端
+
+    /// 第 n 次檢查才載好的假狀態；睡眠只計次數不真的睡
+    fn fake_wait(loaded_after: Option<usize>, expected: bool, limit: u64) -> (bool, usize, Vec<String>) {
+        let checks = std::cell::Cell::new(0usize);
+        let sleeps = std::cell::Cell::new(0usize);
+        let logs = std::cell::RefCell::new(Vec::new());
+        let ok = wait_term_config(
+            &|| {
+                let n = checks.get();
+                checks.set(n + 1);
+                loaded_after.is_some_and(|k| sleeps.get() >= k)
+            },
+            &|_ms| sleeps.set(sleeps.get() + 1),
+            expected,
+            limit,
+            &|s| logs.borrow_mut().push(s.to_string()),
+        );
+        (ok, sleeps.get(), logs.into_inner())
+    }
+
+    #[test]
+    fn 設定還沒載入_等到載好就開在自帶終端() {
+        let (ok, sleeps, logs) = fake_wait(Some(3), true, RELAUNCH_WAIT_MS);
+        assert!(ok);
+        assert_eq!(sleeps, 3, "每 100 毫秒看一次，第 3 次睡完就載好了");
+        assert!(logs.iter().any(|l| l.contains("還沒載入")) && logs.iter().any(|l| l.contains("載入完成")), "{logs:?}");
+        // 載好之後開關是開的：照常開在自帶終端，不退原生主控台
+        let h = host(true, Ok(4321));
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &[], false, BTreeMap::new());
+        clear_native_why();
+        let r = open_window_gated(true, Some(&h), Path::new("D:\\proj"), &spec, &noted, &|| Ok(1)).unwrap();
+        assert_eq!(r, Opened { pid: 4321, note: None });
+        assert_eq!(take_native_why(), None, "開在自帶終端就沒有退路原因");
+    }
+
+    #[test]
+    fn 等滿二十秒還沒載入_退回系統終端_留_log_原因是等不到服務() {
+        let (ok, sleeps, logs) = fake_wait(None, true, RELAUNCH_WAIT_MS);
+        assert!(!ok);
+        assert_eq!(sleeps as u64, RELAUNCH_WAIT_MS / 100, "等滿上限才放棄");
+        assert!(logs.last().unwrap().contains("20000") && logs.last().unwrap().contains("原生主控台"), "{logs:?}");
+        assert_eq!(native_reason_when_off(false, true), NATIVE_NO_SERVICE);
+        // 開關還是 false（沒載入）：走原生主控台、有退路原因
+        let h = host(true, Ok(4321));
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &[], false, BTreeMap::new());
+        let r = open_window_gated(false, Some(&h), Path::new("D:\\proj"), &spec, &noted, &|| Ok(77)).unwrap();
+        assert_eq!(r.pid, 77);
+    }
+
+    #[test]
+    fn 設定已經載入而且關掉_不等_原因是設定關掉() {
+        // 已載入：一次都不睡、不留等待的 log
+        let (ok, sleeps, logs) = fake_wait(Some(0), true, RELAUNCH_WAIT_MS);
+        assert!(ok && sleeps == 0 && logs.is_empty(), "{ok} {sleeps} {logs:?}");
+        assert_eq!(native_reason_when_off(true, true), NATIVE_OFF, "載入完了還是關著＝本人或系統關掉的");
+    }
+
+    #[test]
+    fn 這個建置不會載設定_不等() {
+        // 無視窗橋、測試：沒有人會把設定載入，等也是白等
+        let (ok, sleeps, logs) = fake_wait(None, false, RELAUNCH_WAIT_MS);
+        assert!(!ok && sleeps == 0 && logs.is_empty());
+        assert!(!config_expected(), "測試建置不等");
+        assert_eq!(native_reason_when_off(false, false), NATIVE_OFF);
+    }
+
+    #[test]
+    fn 自帶終端找不到或還沒啟動_記下退路原因_開在裡面就沒有() {
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &[], false, BTreeMap::new());
+        for h in [None, Some(host(false, Ok(1))), Some(host(true, Err(WinOpenError::NotStarted("x".into()))))] {
+            clear_native_why();
+            open_window(h.as_ref().map(|x| x as &dyn WinTermHost), Path::new("D:\\p"), &spec, &noted, &|| Ok(9)).unwrap();
+            assert_eq!(take_native_why(), Some(NATIVE_NO_SERVICE));
+            assert_eq!(take_native_why(), None, "讀過就清掉");
+        }
+        clear_native_why();
+        open_window(Some(&host(true, Ok(5))), Path::new("D:\\p"), &spec, &noted, &|| Ok(9)).unwrap();
+        assert_eq!(take_native_why(), None);
+    }
+
+    #[test]
+    fn 重開先等設定再算背景與前景_原始碼守衛() {
+        let local = include_str!("local.rs");
+        let relaunch = local.split("pub(super) fn start_window_relaunch").nth(1).unwrap().split("
+}
+").next().unwrap();
+        let wait = relaunch.find("wait_term_config_real()").expect("重開要先等終端設定（#1698）");
+        let hidden = relaunch.find("relaunch_hidden(").unwrap();
+        assert!(wait < hidden, "relaunch_hidden 讀的服務狀態要等設定載入後才準");
     }
 
     // ---- #611：開關（ASN_TERM_WEZTERM，預設關）
