@@ -20,6 +20,10 @@ export const ROSTER_TEXT = {
   resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
 const STALE_NOTE = '較舊'   // 「我的帳號」卡片上帳號後面的括號：「（11 小時前，較舊）」
+// Claude 的額度只有「用這個帳號登入的視窗」會送來（換帳號前開的舊視窗不收，#1688）：讀數舊了，告訴人怎麼讓它更新
+const STALE_HINT = '用這個帳號開新視窗就會更新'
+const FIVE_HOUR_STALE_MS = 30 * 60_000   // 5 小時那條 30 分鐘沒更新就算舊（#1688）；其他窗沿用 STALE_MS（6 小時）
+const staleMsOf = name => (name === 'five_hour' || windowMinutes(name) === 300 ? FIVE_HOUR_STALE_MS : STALE_MS)
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
 const VENDOR_RANK = { claude: 0, codex: 1, gemini: 2, grok: 3, minimax: 4 }
@@ -125,12 +129,15 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
     return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', stale: true, exhausted: Boolean(out), gone }
   }
   const oldest = oldestOf(live)
-  const stale = now - oldest.read > STALE_MS
+  const staleWins = live.filter(w => now - w.read > staleMsOf(w.name))
+  const stale = staleWins.length > 0
+  const shown = stale ? oldestOf(staleWins) : oldest   // 括號裡的時間寫「舊的那一窗」的，免得新的那窗把舊的蓋掉
+  const staleNote = stale ? `，${STALE_NOTE}${entry?.vendor === 'claude' ? `，${STALE_HINT}` : ''}` : ''
   return {
     known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
-    meta: stamp(oldest.read, oldest.node), listMeta,
+    meta: stamp(shown.read, shown.node), listMeta,
     // 「我的帳號」卡片的新排法：時間放在帳號後面的括號（舊資料在括號裡加「較舊」），讀這筆額度的那台只標在它的設備按鈕上；meta／oldText 留給手機與設備卡
-    ageLabel: agoOf(oldest.read) + (stale ? `，${STALE_NOTE}` : ''), readNodes: readNodesOf(live),
+    ageLabel: agoOf(shown.read) + staleNote, readNodes: readNodesOf(live),
     resetText, bars, oldText: stale ? OLD_TEXT : '',
     stale, exhausted: Boolean(out), gone,
   }
