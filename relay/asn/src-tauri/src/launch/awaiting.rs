@@ -341,7 +341,11 @@ mod tests {
 
     #[test]
     fn 等確認的夥伴占著名字_大小寫看呼叫端() {
-        let list = identify_all(&mux_fake(600_000), &[row("7", "Alice")], &[], NOW);
+        // 大小寫要用英文名比：假的 claude 命令列改成 -n Alice
+        let mut os = mux_fake(600_000);
+        os.cmd.insert(502, r#""C:\claude.exe" -n Alice"#.into());
+        let list = identify_all(&os, &[row("7", "Alice")], &[], NOW);
+        assert_eq!(list.len(), 1, "前提：這位夥伴被認成等確認");
         assert!(holds_name(&list, "Alice", false));
         assert!(holds_name(&list, " Alice ", false), "前後空白不影響");
         assert!(!holds_name(&list, "alice", false), "精確比對時大小寫不同不算");
