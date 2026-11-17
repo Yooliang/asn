@@ -1,11 +1,11 @@
 {
-  "version": "0.2.29",
-  "notes": "- 新功能：電腦版設備頁加「重新登入 Claude」，登入過期時在電腦上就能重登\n- 改善：終端模式下輸入列只留輸入框、送出和麥克風，畫面更乾淨\n- 改善：遠端終端送出後畫面會保留；對方沒同意打字時，自動回到只能看\n- 改善：群組排回覆順位時先排除離線的成員，叫醒順序上離線的人會畫成灰色並標「離線」\n- 改善：ASN 開的夥伴還沒進到對話時，名單、工作管理員和寄信都會講清楚它目前的狀態\n- 改善：用系統管理員身分開的視窗，手機上也看得到標記\n- 修正：釘選徽章不再蓋住搜尋框",
-  "pub_date": "2026-11-17T02:41:45.444Z",
+  "version": "0.2.30",
+  "notes": "- 新功能：手機也能打開還沒進到對話的夥伴的終端畫面\n- 改善：手機看夥伴卡在第一次確認畫面時，會標出是哪一種確認、該選哪一項\n- 改善：還沒進到對話的夥伴也會佔住名字，不會再開出同名的第二個\n- 改善：Gemini 那邊暫時出錯時，會等一下自動再試一次\n- 改善：回信寄不出去或群組貼不進去時，會告訴寄件人或叫它回覆的人，不再默默丟掉",
+  "pub_date": "2026-11-17T18:32:54.236Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhFd3N3K3pvOS9VQzZ5K3BqazlLbkxuR0RoeGlyVHU3NGtGbFF3eitmRDdkZW12dVUwQU96UURDdHVweG1kaGtRb1dEQkJwYm1ZMk40eWpuTEpWekEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODgzMTk2CWZpbGU6QVNOXzAuMi4yOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI5CnJkWWhlWjZmaWlzOXpuUVFxNXNrM3hPSDlLeXE0UGNXL3VZUSthRWw5MjRuZ2xPUXdHL0ExMUN2WmFQN3VJbE9scGkzL0hlZklqWjBFMDhjbHZiekJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.29_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhTbSt0VjBrMEhmc2xlQ0JXdXNubGlSVmRmMldIME9Nc1dnT242ZU4wZEpMSzF5OHNwbGIwcklNOWVNcDFrckYzeUN0czFsMDQxemRlTlZGNFZkQVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTM1NzIwCWZpbGU6QVNOXzAuMi4zMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjMwCkVWbXFkUVlSbU0zNlE5a01RSStOa2pveEMrR0RJRVJLSjB5ZWRPblZ5eTN4N3R0T05HZy9JL1ZEei9sV29vM01MMUZEYVFaenJmMllrellxUzJTNkJBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.30_x64-setup.exe"
     }
   }
 }
