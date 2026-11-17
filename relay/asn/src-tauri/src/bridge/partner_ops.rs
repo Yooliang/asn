@@ -93,6 +93,10 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn allow_remote(&self) -> bool;
     /// 開視窗（乾淨環境）
     fn launch(&self, plan: &Plan) -> Result<(), String>;
+    /// 剛才在這個執行緒開的視窗是不是退到了原生主控台、為什麼（`設定關掉`／`等不到服務`）；開在自帶終端或不知道就是 None（#1698）
+    fn launched_native(&self) -> Option<&'static str> {
+        None
+    }
     fn now_ms(&self) -> u64;
     fn timing(&self) -> Timing;
     /// 等外掛回報的最長時間（外掛會排隊到視窗閒置才執行，預設 10 分鐘）
@@ -160,6 +164,9 @@ impl OpsEnv for SystemOpsEnv {
     }
     fn launch(&self, plan: &Plan) -> Result<(), String> {
         switch::real_launch(plan)
+    }
+    fn launched_native(&self) -> Option<&'static str> {
+        crate::launch::win_term::take_native_why()
     }
     fn now_ms(&self) -> u64 {
         crate::heartbeat::now_ms()
@@ -267,6 +274,8 @@ pub(crate) struct OpResult {
 fn ok(detail: impl Into<String>, result: Option<Value>) -> OpResult {
     OpResult { status: "ok", detail: detail.into(), result }
 }
+/// 喚醒退到系統終端（原生主控台）時，接在「視窗已喚醒」後面給人看的一句（#1698）
+pub(crate) const NATIVE_TERM_NOTE: &str = "（這次用系統終端開的）";
 /// 喚醒找不到對話紀錄（#593 拆成三句）
 /// 喚醒逾時（讀不到畫面時的原句）
 pub(crate) const WAKE_UNCONFIRMED: &str = "視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）";
@@ -1547,6 +1556,8 @@ impl PartnerOps {
             self.env.release_opening(sid, name);
             return failed(format!("開不起來：{e}"));
         }
+        // 開在哪種終端：退到原生主控台時記下原因（#1698）；只進結果的選填欄位與 log，舊版用戶端不認得也不受影響
+        let native = self.env.launched_native();
         // 7. 等名單出現同名視窗才算成功
         let mut found: Option<(u32, String)> = None;
         let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
@@ -1564,7 +1575,11 @@ impl PartnerOps {
             false
         });
         match (appeared, found) {
-            (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
+            (true, Some((pid, session))) => match native {
+                // 結果照舊（pid、session_id 不動），多兩個選填欄位；畫面只補一句「這次用系統終端開的」，原因不放畫面
+                Some(why) => ok(format!("視窗已喚醒{NATIVE_TERM_NOTE}"), Some(json!({ "pid": pid, "session_id": session, "term": "native", "reason": why }))),
+                None => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
+            },
             _ => {
                 self.env.release_opening(sid, name);
                 unconfirmed(crate::launch::stuck_notice::with_screen(name, self.env.screen_code(name), WAKE_UNCONFIRMED))

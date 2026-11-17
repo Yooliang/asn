@@ -84,6 +84,8 @@ struct FakeEnv {
     launched: Mutex<Vec<(String, PathBuf, Vec<String>)>>,
     /// 開視窗後要出現的新工作階段 (pid, sessionId)；None＝一直不出現
     appear: Mutex<Option<(u32, String)>>,
+    /// 開視窗當下退到了原生主控台的原因（None＝開在自帶終端，#1698）
+    native: Mutex<Option<&'static str>>,
     sessions: PathBuf,
     mod_wait: u64,
     mod_probe: u64,
@@ -130,6 +132,9 @@ impl OpsEnv for FakeEnv {
     }
     fn allow_remote(&self) -> bool {
         self.asked.fetch_add(1, Ordering::SeqCst) < self.allow_first.load(Ordering::SeqCst)
+    }
+    fn launched_native(&self) -> Option<&'static str> {
+        *self.native.lock().unwrap()
     }
     fn launch(&self, plan: &Plan) -> Result<(), String> {
         self.launched.lock().unwrap().push((plan.name.clone(), plan.cwd.clone(), plan.argv.clone()));
@@ -332,6 +337,7 @@ fn rig(o: Opt) -> Rig {
         asked: AtomicUsize::new(0),
         launched: Mutex::new(vec![]),
         appear: Mutex::new(Some((501, "sid-new".into()))),
+        native: Mutex::new(None),
         sessions: sessions.clone(),
         mod_wait: o.mod_wait,
         mod_probe: o.mod_probe,
@@ -1163,6 +1169,32 @@ fn 喚醒_成功_原資料夾用第一個_claude_profile_帶_resume_與_n_乾淨
     r.ops.record(&mk_op("resume", json!({ "name": "離線夥伴" })), &ok("視窗已喚醒", None));
     assert!(r.log.recent().join("\n").contains("op=resume"));
     assert_eq!(mk_op("resume", json!({})).what(), "喚醒視窗");
+}
+
+#[test]
+fn 喚醒退到系統終端_結果多選填欄位_畫面補一句_原因不放畫面_舊欄位與舊用戶端照舊_1698() {
+    // 開在自帶終端：結果跟以前一模一樣（沒有新欄位、句子不變）
+    let r = resume_rig(Opt::default());
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "視窗已喚醒"));
+    let v = res.result.unwrap();
+    assert!(v.get("term").is_none() && v.get("reason").is_none(), "沒退路就不帶新欄位：{v}");
+    // 退到系統終端：保留「視窗已喚醒」，多 term／reason 兩個選填欄位，畫面只補一句、原因不在句子裡
+    for why in ["設定關掉", "等不到服務"] {
+        let r = resume_rig(Opt::default());
+        *r.env.native.lock().unwrap() = Some(why);
+        let res = resume(&r, "離線夥伴", SID);
+        assert_eq!(res.status, "ok", "{}", res.detail);
+        assert!(res.detail.starts_with("視窗已喚醒"), "舊的字照留：{}", res.detail);
+        assert_eq!(res.detail, "視窗已喚醒（這次用系統終端開的）");
+        assert!(!res.detail.contains(why), "原因只進結果欄位與 log，不放畫面：{}", res.detail);
+        let v = res.result.unwrap();
+        assert_eq!((v["pid"].as_u64(), v["session_id"].as_str()), (Some(501), Some(SID)), "舊欄位不動");
+        assert_eq!((v["term"].as_str(), v["reason"].as_str()), (Some("native"), Some(why)));
+        // 舊的用戶端只讀 pid、session_id：新欄位是多出來的鍵，讀舊鍵的人不受影響
+        let old_client: (Option<u64>, Option<&str>) = (v.get("pid").and_then(Value::as_u64), v.get("session_id").and_then(Value::as_str));
+        assert_eq!(old_client, (Some(501), Some(SID)));
+    }
 }
 
 #[test]
