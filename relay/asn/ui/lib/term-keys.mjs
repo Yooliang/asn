@@ -24,6 +24,19 @@ export const KEYS_TEXT = Object.freeze({
   dropped: '這個畫面要人確認，不能用按鍵代選：數字、Enter 和方向鍵沒有送出。請到那台電腦上處理。',
 })
 
+/**
+ * 畫面文字去掉終端跳脫序列，只留看得見的字（#1696）：frame.text 是帶顏色的畫面，複製、找網址、判斷折行、畫底圖都要純文字。
+ * CSI 照規格整段吃：參數位元組 0x30–0x3F（含 ; : ? 與冒號子參數，例如 38:2::r:g:b、48:2:r:g:b、58:2::r:g:b）、
+ * 中間位元組 0x20–0x2F、結尾位元組 0x40–0x7E；OSC 到 BEL 或 ST；字元集 ESC ( B 等；落單的 ESC 也拿掉。不會把序列的殘字印出來
+ */
+export function stripAnsi(text) {
+  return String(text ?? '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
+    .replace(/\u001b[()*+][0-~]/g, '')
+    .replace(/\u001b[@-_]?/g, '')
+}
+
 const RULE_ROW = /^[\s─━═╌▔▁-]+$/u
 
 /**
@@ -31,7 +44,7 @@ const RULE_ROW = /^[\s─━═╌▔▁-]+$/u
  * 每列結尾的空白拿掉，最後的空行拿掉。cols 不明（0、不是數字）就不接
  */
 export function joinWrapped(text, cols) {
-  const rows = String(text ?? '').replace(/\r\n?/g, '\n').split('\n')
+  const rows = stripAnsi(text).replace(/\r\n?/g, '\n').split('\n')
   const n = Number(cols)
   const out = []
   let cur = null

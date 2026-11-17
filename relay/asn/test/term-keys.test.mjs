@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TERM_KEYS, KEYS_TEXT, LOGIN_HOSTS, joinWrapped, findLoginUrls, droppedGrew } from '../ui/lib/term-keys.mjs'
+import { TERM_KEYS, KEYS_TEXT, LOGIN_HOSTS, joinWrapped, stripAnsi, findLoginUrls, droppedGrew } from '../ui/lib/term-keys.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -105,4 +105,29 @@ test('按鍵串成一條：結束打字時排著還沒送的作廢', async () =>
   chain.cancel(); release(true)
   await last
   assert.deepEqual(sent, ['slow'])
+})
+
+// #1696：Claude Code 新版的顏色寫法是冒號子參數（38:2::r:g:b，中間空一格色彩空間）；畫面文字不能把序列殘字印出來
+const CC = [
+  '\x1b[38:2::153:153:153m╭──────────────╮\x1b[39m',
+  '\x1b[38:2::255:255:255m\x1b[48:2::55:55:55m 你好 \x1b[39m\x1b[49m\x1b(B\x1b[0;1m粗\x1b[0m',
+  '\x1b[38:2:215:119:87m\x1b[58:2::255:0:0m\x1b[4:3m底線\x1b[59m\x1b[24m\x1b[B\x1b[0;1m完',
+].join('\n')
+test('畫面文字去掉跳脫序列（冒號全彩 38／48／58、分號、字元集、OSC），不留序列的殘字', () => {
+  const plain = stripAnsi(CC)
+  assert.equal(plain, ['╭──────────────╮', ' 你好 粗', '底線完'].join('\n'))
+  assert.doesNotMatch(plain, /\[|\x1b|38:2|0;1m|\(B/)
+  assert.equal(stripAnsi('a\x1b[1;38;2;1;2;3mb\x1b[39mc'), 'abc', '分號寫法照舊')
+  assert.equal(stripAnsi('\x1b]8;;https://claude.ai/x\x07連結\x1b]8;;\x07'), '連結', 'OSC 8')
+  assert.equal(stripAnsi('x\x1b'), 'x', '落單的 ESC 也拿掉')
+  assert.equal(stripAnsi(null), '')
+})
+
+test('帶顏色的畫面接折行：序列不算字寬、不印殘字；登入網址照樣找得到', () => {
+  const url = 'https://claude.ai/oauth/authorize?code=true&client_id=abc'
+  const c = t => '\x1b[38:2::153:153:153m' + t + '\x1b[39m'
+  const rows = [c(url.slice(0, 30)), c(url.slice(30)), c('下一行')]
+  const out = joinWrapped(rows.join('\r\n'), 30)
+  assert.equal(out, url + '\n下一行')
+  assert.deepEqual(findLoginUrls(out).map(x => x.url), [url])
 })
