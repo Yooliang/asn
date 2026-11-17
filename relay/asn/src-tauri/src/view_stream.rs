@@ -49,6 +49,9 @@ pub enum End {
     HeldPrompt,
 }
 
+/// 這台畫面上還有沒處理的打字確認框，沒有開新的：回報這個原因，發起端才看得到一句清楚的話（#1303；舊後台不認得就改回 rejected，見 lib.rs）
+pub const BUSY: &str = "busy";
+
 /// 窗格停在外來訊息的確認框而結束時，回報後台的原因（舊後台不認得就改回 failed，見 lib.rs）
 pub const HELD_PROMPT: &str = "held_prompt";
 

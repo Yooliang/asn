@@ -2,8 +2,11 @@
 //!
 //! - **同意框是 ASN 的視窗（系統對話框），不在終端裡：** 終端裡的提示可能被當成按鍵答掉。問之前先把 ASN 叫到前面。
 //! - [`ASK_SECS`] 秒沒按當不允許（再受這次請求自己的有效期限限制）；按了「不允許」、關掉框也是不允許。系統對話框從外面關不掉：逾時後框還在，那時才按的一律算不允許，並通知本人。
-//! - 同一台同一時間只開一個確認框（[`ConsentSlot`]）；前一個還開著（含逾時後沒關的）就不開第二個，直接不允許。
-//!   系統對話框一直沒叫回呼時，到了請求期限加 [`SLOT_GRACE_SECS`] 也放開位子（舊框按了也不算允許）。
+//! - 同一台同一時間只處理一個確認（[`ConsentSlot`]）。位子綁在「這次等待」上，不綁在框上（#1303）：
+//!   等待結束（本人按了、逾時、請求被撤回、對方已結束）就放開，下一個請求不會被沒人按的舊框卡死。
+//!   系統對話框從外面關不掉，所以留在畫面上的舊框一律作廢（之後按什麼都不算，按「允許」會通知本人已逾時），
+//!   但同時留在畫面上的框最多 [`MAX_OPEN_DIALOGS`] 個（[`OpenDialogs`]）；超過就不再開，回「前一個確認還沒處理」。
+//! - 等待中每 [`POLL_SECS`] 秒查一次請求還在不在；連續 [`GONE_MISSES`] 次查不到就當對方已撤回或已結束，不再等。
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
 //! - 本人可以在這台的設定頁「認得的電腦」對某一台設「打字不用每次問我」，那台就不跳這個框（判斷在呼叫端，存在本機）。
 //! - **框上的名字用本機記住的（[`who_of`]），不用後台這次給的：** 後台給的名字不在簽章裡。只有第一次連線（本機還沒記住）才用後台給的，並在框上標示「第一次連線」；另外附設備指紋前 8 碼讓本人比對設定頁。
@@ -149,6 +152,45 @@ pub const EV_EXPIRED: &str = "input-consent-expired";
 /// 通知桌面畫面：前一個確認框還開著，這次沒有允許
 pub const EV_BUSY: &str = "input-consent-busy";
 
+/// [`ask`] 的結果。只有 `Allow` 能往下走；其餘一律不允許，`Busy` 另外要讓發起端看到原因
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Consent {
+    /// 本人在期限之前明確按了「允許」
+    Allow,
+    /// 按了不允許、取消、關掉、逾時、請求已過期
+    Deny,
+    /// 請求在等待中被撤回，或對方已經結束這次請求（框收不掉、已作廢）
+    Gone,
+    /// 這台畫面上還留著沒處理的確認框，沒有開新的
+    Busy,
+}
+
+/// 等待中多久查一次請求還在不在（秒）
+pub const POLL_SECS: u64 = 5;
+/// 連續幾次查不到才當請求不在了（一次網路失敗不算）
+pub const GONE_MISSES: u32 = 2;
+/// 同時留在畫面上的確認框（含已作廢、沒人按的）最多幾個
+pub const MAX_OPEN_DIALOGS: usize = 3;
+
+/// 下一次最多睡幾秒：[`POLL_SECS`]、[`ASK_SECS`]、這次剩下時間三者取小；0 就是不用等了
+pub fn next_wait_secs(now_s: i64, deadline_s: i64) -> u64 {
+    wait_secs(now_s, deadline_s).min(POLL_SECS)
+}
+
+/// 查詢之後的連續查不到次數：查到了歸零，沒查到加一
+pub fn misses_after(misses: u32, found: bool) -> u32 {
+    if found {
+        0
+    } else {
+        misses.saturating_add(1)
+    }
+}
+
+/// 連續查不到的次數到了，就算請求已不在
+pub fn is_gone(misses: u32) -> bool {
+    misses >= GONE_MISSES
+}
+
 /// 這次結果算不算允許：沒回答（逾時、被撤回）算不允許；只有在期限之前明確按「允許」才算
 pub fn consent_outcome(answer: Option<bool>, now_s: i64, expires_s: i64) -> bool {
     answer == Some(true) && now_s < expires_s
@@ -208,26 +250,68 @@ impl Drop for SlotGuard {
     }
 }
 
+/// 目前還留在畫面上的確認框（含逾時、已作廢但沒人關的）。每個框一張票，框真的被關掉（對話框的回呼）就還；
+/// 回呼一直沒來時，到了放開時間也自動不算。用來擋住「沒人在、一直開新框」把畫面塞滿
+pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64)>>, std::sync::atomic::AtomicU64);
+
+impl OpenDialogs {
+    pub const fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()), std::sync::atomic::AtomicU64::new(1))
+    }
+
+    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框就回 None
+    pub fn open(&'static self, now_s: i64, release_at: i64) -> Option<DialogTicket> {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|&(_, until)| now_s < until);
+        if g.len() >= MAX_OPEN_DIALOGS {
+            return None;
+        }
+        let token = self.1.fetch_add(1, Ordering::SeqCst);
+        g.push((token, release_at));
+        Some(DialogTicket(self, token))
+    }
+}
+
+/// 一個框的票；丟掉（對話框的回呼跑完）就還
+pub struct DialogTicket(&'static OpenDialogs, u64);
+
+impl Drop for DialogTicket {
+    fn drop(&mut self) {
+        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|&(token, _)| token != self.1);
+    }
+}
+
 static SLOT: ConsentSlot = ConsentSlot::new();
+static DIALOGS: OpenDialogs = OpenDialogs::new();
 
 fn now_s() -> i64 {
     (crate::auth::now_ms() / 1000) as i64
 }
 
-/// 問本人。允許回 true；不允許、取消、關掉、逾時、請求已過期、前一個框還開著都回 false。
-/// `expires_s` 是這次請求的有效期限（秒）：超過就不能再算允許
-pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bool {
+/// 問本人。結果見 [`Consent`]。`expires_s` 是這次請求的有效期限（秒）：超過就不能再算允許。
+/// `still_pending` 查這筆請求在後台還在不在：等待中定期查，被撤回或對方已結束就不再等、位子立刻放開（#1303）
+pub async fn ask<F, Fut>(app: &AppHandle, who: &Who, window: &str, expires_s: i64, still_pending: F) -> Consent
+where
+    F: Fn() -> Fut + Send,
+    Fut: std::future::Future<Output = bool> + Send,
+{
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-    let Some(slot) = SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
+    // 位子綁在這次等待上：函式結束（任何一條路）就放開，不等框被關掉
+    let Some(_slot) = SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
-        return false;
+        return Consent::Busy;
+    };
+    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
+        let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
+        return Consent::Busy;
     };
     let start = now_s();
     let wait = wait_secs(start, expires_s);
     if wait == 0 {
         // 收到時就已經過期（多半是這台時鐘比後台快）：不開框、不允許；記一行原因，不記內容
         elog!("[asn] 別台打字的請求收到時已過期，沒有開確認框（現在 {start}，期限 {expires_s}）");
-        return false;
+        return Consent::Deny;
     }
     let deadline_s = start + wait as i64;
     if let Some(w) = app.get_webview_window("list") {
@@ -235,7 +319,7 @@ pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bo
         let _ = w.show();
         let _ = w.set_focus();
     }
-    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let (tx, mut rx) = tokio::sync::oneshot::channel::<bool>();
     let timed_out = Arc::new(AtomicBool::new(false));
     let (cb_app, cb_timed_out, cb_window) = (app.clone(), timed_out.clone(), clean(window, 64));
     app.dialog()
@@ -244,23 +328,50 @@ pub async fn ask(app: &AppHandle, who: &Who, window: &str, expires_s: i64) -> bo
         .kind(MessageDialogKind::Warning)
         .buttons(buttons("不允許"))
         .show_with_result(move |r| {
-            // 位子在框真的被關掉的這一刻才放開（逾時時框還在畫面上，不能放）
-            let _slot = slot;
+            // 票在框真的被關掉的這一刻才還（逾時、作廢時框還在畫面上，不能還）
+            let _ticket = ticket;
             let (allow, notify) = click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s);
             if notify {
-                // 逾時之後才按「允許」：不允許，告訴本人
+                // 逾時、撤回之後才按「允許」：不允許，告訴本人
                 let _ = cb_app.emit_to("list", EV_EXPIRED, serde_json::json!({ "window": cb_window }));
             }
             let _ = tx.send(allow);
         });
-    let answer = match tokio::time::timeout(std::time::Duration::from_secs(wait), rx).await {
-        Ok(Ok(v)) => Some(v),
-        _ => {
-            timed_out.store(true, Ordering::SeqCst);
-            None
+    let mut answer: Option<bool> = None;
+    let mut gone = false;
+    let mut misses = 0u32;
+    loop {
+        let step = next_wait_secs(now_s(), deadline_s);
+        if step == 0 {
+            break;
         }
-    };
-    consent_outcome(answer, now_s(), expires_s)
+        match tokio::time::timeout(std::time::Duration::from_secs(step), &mut rx).await {
+            Ok(Ok(v)) => {
+                answer = Some(v);
+                break;
+            }
+            Ok(Err(_)) => break,
+            Err(_) => {
+                misses = misses_after(misses, still_pending().await);
+                if is_gone(misses) {
+                    gone = true;
+                    break;
+                }
+            }
+        }
+    }
+    if answer.is_none() {
+        // 沒人按就結束等待：框收不掉，作廢它（之後按什麼都不算）；位子在函式結束時放開
+        timed_out.store(true, Ordering::SeqCst);
+    }
+    if gone {
+        return Consent::Gone;
+    }
+    if consent_outcome(answer, now_s(), expires_s) {
+        Consent::Allow
+    } else {
+        Consent::Deny
+    }
 }
 
 #[cfg(test)]
@@ -403,18 +514,74 @@ mod tests {
         assert!(SLOT_GRACE_SECS >= 60);
     }
 
-    /// 接線守門：ask 先佔位子、位子在回呼裡才放、逾時後才按會通知；poller 在 accept 之前重查期限與是否還在等
+    #[test]
+    fn 位子綁在等待上_等待結束放開後下一個請求拿得到() {
+        static S: ConsentSlot = ConsentSlot::new();
+        let first = S.try_take(100, 1_000 + SLOT_GRACE_SECS).expect("第一個請求");
+        assert!(S.try_take(110, 1_000).is_none(), "等待中不開第二個");
+        drop(first);
+        assert!(S.try_take(120, 1_000).is_some(), "等待結束（逾時、撤回、對方結束）一放開，下一個馬上拿得到，不管舊框還在不在");
+    }
+
+    #[test]
+    fn 留在畫面上的框有上限_框關掉或過了放開時間才不算() {
+        static D: OpenDialogs = OpenDialogs::new();
+        let t1 = D.open(0, 100).expect("1");
+        let _t2 = D.open(0, 100).expect("2");
+        let _t3 = D.open(0, 100).expect("3");
+        assert!(D.open(1, 100).is_none(), "畫面上已經有三個沒處理的框：不再開");
+        drop(t1);
+        let t4 = D.open(2, 100).expect("有框被關掉就能再開");
+        assert!(D.open(2, 100).is_none());
+        assert!(D.open(100, 300).is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
+        drop(t4);
+    }
+
+    #[test]
+    fn 撤回_過期_對方結束_等待會停下來() {
+        // 每次最多睡 POLL_SECS，睡醒查一次；剩下的時間比它短就睡剩下的
+        assert_eq!(next_wait_secs(0, 60), POLL_SECS);
+        assert_eq!(next_wait_secs(57, 60), 3);
+        assert_eq!(next_wait_secs(60, 60), 0, "到期限就不等了");
+        assert_eq!(next_wait_secs(90, 60), 0, "已經過期不能是負的");
+        // 查不到要連續兩次才算不在；中間查到一次就重算
+        let mut m = 0;
+        m = misses_after(m, false);
+        assert!(!is_gone(m), "一次查不到可能只是網路不穩");
+        m = misses_after(m, true);
+        assert_eq!(m, 0);
+        m = misses_after(m, false);
+        m = misses_after(m, false);
+        assert!(is_gone(m), "連續兩次查不到：對方撤回或已結束");
+        assert_eq!(misses_after(u32::MAX, false), u32::MAX, "不溢位");
+    }
+
+    #[test]
+    fn 結果只有允許能往下走_忙碌和撤回是各自的結果() {
+        assert_ne!(Consent::Allow, Consent::Deny);
+        assert_ne!(Consent::Busy, Consent::Deny, "忙碌要能讓發起端看到原因，不能和不允許混在一起");
+        assert_ne!(Consent::Gone, Consent::Deny);
+        assert!(consent_outcome(Some(true), 10, 20));
+        assert!(!consent_outcome(None, 10, 20), "撤回、對方結束都沒有答案：不允許");
+        assert!(!consent_outcome(Some(true), 20, 20), "過了期限才按不算");
+    }
+
+    /// 接線守門：ask 先佔位子、位子綁等待不綁框（函式結束就放）、票在回呼裡才還、沒人按就作廢；poller 在 accept 之前重查期限與是否還在等
     #[test]
     fn 守門_確認框佔位子_逾時後按會通知_接受之前重查() {
         let me = include_str!("input_consent.rs").replace("\r\n", "\n");
         let code = me.split("#[cfg(test)]").next().unwrap();
-        let ask = &code[code.find("pub async fn ask(").expect("有 ask")..];
+        let ask = &code[code.find("pub async fn ask<").expect("有 ask")..];
         let (take, show) = (ask.find("SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS))").expect("ask 要先佔位子，放開時間＝期限加寬限"), ask.find("show_with_result(").unwrap());
         assert!(take < show, "先佔位子才開框");
-        let cb = &ask[show..ask.find("let answer =").unwrap()];
-        assert!(cb.contains("let _slot = slot;"), "位子要在回呼裡才放開");
+        assert!(ask.contains("let Some(_slot) = SLOT.try_take("), "位子留在 ask 裡，函式結束就放開，不交給對話框的回呼");
+        let cb = &ask[show..ask.find("let mut answer").unwrap()];
+        assert!(!cb.contains("slot"), "回呼不能再拿位子（#1303：沒人按的框不能卡住位子）");
+        assert!(cb.contains("let _ticket = ticket;"), "票要在回呼裡才還");
         assert!(cb.contains("emit_to(\"list\", EV_EXPIRED"), "逾時後才按要通知本人");
         assert!(cb.contains("click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s)") && cb.contains("tx.send(allow)"), "回呼的判斷走 click_outcome");
+        let tail = &ask[ask.find("let mut answer").unwrap()..];
+        assert!(tail.contains("still_pending().await") && tail.contains("timed_out.store(true, Ordering::SeqCst)"), "等待中要查請求還在不在；沒人按就作廢框");
         assert!(ask[..show].contains("emit_to(\"list\", EV_BUSY"), "前一個框還開著要通知本人");
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
