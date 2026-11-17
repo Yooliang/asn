@@ -520,7 +520,10 @@ async fn agy_上游502前這一輪已經動過手_不整封重送_檔案只寫�
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let mark = h.work.path().join("workers").join("Gemini").join("steps502.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE_UP502 {}", mark.display()))).await;
-    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("上游暫時出錯，這一輪可能做了一半"))).await;
+    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("(code 502)") && b.contains("HTML response") && b.contains("這一輪可能做了一半"))).await;
+    // 原文要留著：群組通知靠它認出是上游出錯（#1366），不能退回「沒有轉交」
+    let body = h.bodies().into_iter().find(|b| b.contains("這一輪可能做了一半")).unwrap();
+    assert!(crate::bridge::engines::acp_policy::upstream_5xx(&body) == Some(502), "{body}");
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     assert_eq!(std::fs::read_to_string(&mark).unwrap().lines().count(), 1, "只動手一次，沒有被重送");
     assert!(!h.log_text().contains("上游暫時出錯（502）：等"), "{}", h.log_text());

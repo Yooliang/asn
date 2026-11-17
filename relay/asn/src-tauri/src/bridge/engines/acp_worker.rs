@@ -670,7 +670,8 @@ impl Worker {
             if e.had_steps || cfg.protocol != "agy-stream" {
                 let what = if up.is_some() { "上游暫時出錯" } else { "網路斷線" };
                 self.log(if e.had_steps { format!("{what}，但這一輪已經有工具步驟：不自動重送") } else { format!("{what}，這類工作者不知道這一輪有沒有動過手：不自動重送") });
-                r = Err(WorkerError::new("agent", format!("{what}，這一輪可能做了一半")));
+                // 上游 5xx：原文（含「(code 502): HTML response」）要留著，群組通知靠它認出是那家暫時出錯（#1366）；後面再補一句可能做了一半
+                r = Err(WorkerError::new("agent", if up.is_some() { format!("{}（這一輪可能做了一半）", e.message) } else { format!("{what}，這一輪可能做了一半") }));
             } else {
                 let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
                 #[cfg(test)]
