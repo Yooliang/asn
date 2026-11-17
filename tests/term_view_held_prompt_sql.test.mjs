@@ -24,7 +24,7 @@ test('靜態：只多收 held_prompt；security definer、search_path 空、只�
   assert.equal(fn(down), fn(prev))
   assert.ok(down.indexOf("update relay.term_views set end_reason = 'failed' where end_reason = 'held_prompt';") < down.indexOf('add constraint term_views_reason_check'), '先改標籤再換回檢查式')
   const ts = rd(fs.readFileSync(new URL('../supabase/functions/_shared/term_view_ctl.ts', import.meta.url), 'utf8'))
-  assert.match(ts, /const STOP_REASONS = \[[^\]]*"held_prompt"\]/, 'Edge 也要收')
+  assert.match(ts, /const STOP_REASONS = \[[^\]]*"held_prompt"[^\]]*\]/, 'Edge 也要收')
 })
 
 let PGlite = null
