@@ -1,6 +1,7 @@
 //! 轉交失敗的通知：群組訊息轉交失敗時在群組留一則不點名的說明；收發室通知本身被退時不再發通知，不會連環。
 //! 失敗次數固定寫 `forward-fail kind=...`，放行時用 log 統計。
 use super::*;
+use crate::bridge::engines::acp_policy::upstream_5xx;   // 判斷方式與自動重試共用（#1673）
 
 /// 私信通知（失敗、逾時、送錯）的開頭
 const MAIL_NOTICE_HEAD: &str = "[收發室] ";
@@ -35,19 +36,6 @@ fn room_fail_reason(why: &str) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-/// 工作者這一輪被上游擋下（#1366）：原因同時有「(code 5xx)」與「HTML response」（上游回了一整頁 HTML 錯誤頁）才算，回那個狀態碼。
-/// 只看 502 這個數字會誤認（例如內容剛好提到 502），所以兩個特徵都要有。真實的前綴：`API error (attempt 1): request failed (code 502): HTML response`
-fn upstream_5xx(why: &str) -> Option<u16> {
-    if !why.to_lowercase().contains("html response") {
-        return None;
-    }
-    why.match_indices("(code ").find_map(|(i, m)| {
-        let digits: String = why[i + m.len()..].chars().take(4).collect();
-        let (code, rest) = digits.split_at(digits.char_indices().nth(3).map(|(j, _)| j).unwrap_or(digits.len()));
-        (code.len() == 3 && code.starts_with('5') && code.bytes().all(|b| b.is_ascii_digit()) && rest.starts_with(')')).then(|| code.parse().ok()).flatten()
-    })
 }
 
 /// 工作者實際用的那家（名單上的引擎名，例如 ACP 工作者回報 gemini）→ 群組裡寫的名字；認不得就照原樣，沒有就是「AI 服務」

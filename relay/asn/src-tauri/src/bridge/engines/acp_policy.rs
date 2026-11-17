@@ -506,6 +506,20 @@ pub fn is_network_error(text: &str) -> bool {
     .any(|k| t.contains(k))
 }
 
+/// 上游回了 5xx 加一整頁 HTML 錯誤頁（#1366、#1673）：兩個特徵都要有才算，回那個狀態碼。
+/// 只看 502 這個數字會誤認（例如內容剛好提到 502）。真實的前綴：`API error (attempt 1): request failed (code 502): HTML response`。
+/// 這類是上游暫時出錯，值得自動再試一次（見 acp_worker）；逾時、內容過濾、驗證錯誤都不是
+pub fn upstream_5xx(why: &str) -> Option<u16> {
+    if !why.to_lowercase().contains("html response") {
+        return None;
+    }
+    why.match_indices("(code ").find_map(|(i, m)| {
+        let digits: String = why[i + m.len()..].chars().take(4).collect();
+        let (code, rest) = digits.split_at(digits.char_indices().nth(3).map(|(j, _)| j).unwrap_or(digits.len()));
+        (code.len() == 3 && code.starts_with('5') && code.bytes().all(|b| b.is_ascii_digit()) && rest.starts_with(')')).then(|| code.parse().ok()).flatten()
+    })
+}
+
 /// 帶分類的錯誤。code：auth／quota／timeout／crash／violation／agent／stopped
 #[derive(Clone, Debug)]
 pub struct WorkerError {
@@ -542,6 +556,18 @@ mod tests {
         assert!(!is_network_error("RESOURCE_EXHAUSTED: quota exceeded for this account"));
         assert!(!is_network_error("fatal: boom"));
         assert!(!is_network_error(""));
+    }
+
+    #[test]
+    fn 上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
+        assert_eq!(upstream_5xx("API error (attempt 1): request failed (code 502): HTML response"), Some(502));
+        assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): html response"), Some(503));
+        assert_eq!(upstream_5xx("request failed (code 502)"), None, "沒有 HTML response");
+        assert_eq!(upstream_5xx("HTML response (code 404)"), None, "不是 5xx");
+        assert_eq!(upstream_5xx("內容提到 502 與 HTML response"), None);
+        assert_eq!(upstream_5xx("UNAUTHENTICATED (code 401): HTML response"), None);
+        assert_eq!(upstream_5xx(""), None);
+        assert!(!is_network_error("API error (attempt 1): request failed (code 502): HTML response"), "502 不是網路斷線，兩種各自判斷");
     }
 
     #[test]
