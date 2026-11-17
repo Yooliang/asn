@@ -165,6 +165,8 @@ async fn 引擎視窗的群組回信貼不進去_通知觸發的人一次_不含
     let body = s[0]["body"].as_str().unwrap();
     assert!(body.contains("pi-demo") && body.contains("群組「專案群」") && body.contains("沒能貼進去"), "{body}");
     assert!(!body.contains("機密內文"), "不含回信內文：{body}");
+    assert!(body.contains("這封不用回覆"), "{body}");
+    assert_eq!(s[0]["expects_reply"].as_bool(), Some(false), "標成不用回信（同 --no-reply），收到的 AI 視窗不會再回一輪");
     // 同一則群組訊息再失敗一次：不再通知
     r.core.on_reply("pi-demo", SECRET, None).await;
     assert_eq!(r.fr.sent().len(), 1, "每則群組訊息只通知一次");

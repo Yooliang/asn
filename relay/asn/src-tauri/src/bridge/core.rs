@@ -2273,7 +2273,8 @@ impl Core {
         let name = if t.name.is_empty() { "群組".to_string() } else { format!("群組「{}」", t.name) };
         // 沒有原信可掛（群組訊息不是信）：空編號會跳過 bridge_notice，走寄信那條，由收發室的信箱寄出，不含回信內文
         let o = Origin { id: String::new(), from_node: node, from_agent: agent };
-        let sent = self.send_back(&o, &format!("收發室：{from} 在{name}的回覆沒能貼進去（{why}）。要它再答請重新點名。"), None, None).await;
+        // 標成不用回信（同 --no-reply）：觸發者多半也是 AI 視窗，收到告知不該再回一輪
+        let sent = self.send_back(&o, &format!("收發室：{from} 在{name}的回覆沒能貼進去（{why}）。要它再答請重新點名。這封不用回覆。"), None, Some(false)).await;
         self.log.line(&format!("room reply from {from} id={id} not posted: notified the trigger sent={sent}"));
     }
 
