@@ -67,7 +67,7 @@ test('帳號列表：每條自己寫重置時間；已過的那條不列；舊�
   const old = rosterQuota(entry([w('five_hour', 3, iso(NOW - H), iso(NOW - 9 * H)), w('weekly', 72, iso(NOW + 2 * D), iso(NOW - 9 * H))]), { now: NOW })
   assert.deepEqual(old.bars.map(b => [b.label, b.reset, b.expired]), [['每週', '週五 10:00 重置', false]])
   assert.equal(old.stale, true)
-  assert.equal(old.oldText, '資料較舊')
+  assert.equal(old.oldText, '資料較舊，用這個帳號開新視窗就會更新')
   assert.deepEqual(rosterQuota(entry([]), { now: NOW }).bars, [])
 })
 
