@@ -111,7 +111,7 @@ test('接線：RemoteView 到期當下 stop 並結束，重新看走原本的發
   assert.match(src, /const expire = \(\) => \{\s*if \(phase\.value === 'ended'\) return\s*gen\+\+; stop\(\); finish\(GRACE_ENDED_TEXT\); expired\.value = true/, '作廢發起中的、stop、寫下結束說明')
   assert.match(src, /restartable: expired\.value/, '狀態列拿到可重新開始的旗標')
   assert.match(src, /expired\.value = false\s*\n?\s*try \{/, '重新開始時清掉旗標')
-  assert.match(src, /return \{ host, phase, note, soon, again: start, expire, refit,/)
+  assert.match(src, /return \{ host, phase, note, soon, stateView, again: start, expire, refit,/)
   assert.match(src, /onMounted\(\(\) => \{ if \(props\.active && !props\.endedNote\) void start\(\) \}\)/, '帶著已結束說明掛上時不發起')
   assert.doesNotMatch(src, /gen === 0 && alive/, '不再在變成可見時自動發起')
 })
