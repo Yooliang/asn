@@ -52,6 +52,11 @@ pub(crate) struct Awaiting {
 /// `all_files`＝本機「所有」sessions 檔的（對話編號, 程序編號），不論活不活（見 stuck_resume::all_session_files），
 /// 呼叫端必須是真的讀到了才呼叫（讀不到就不要判斷）
 pub(crate) fn identify_all(os: &dyn Os, partners: &[PartnerRef], all_files: &[LiveSess], now_ms: u64) -> Vec<Awaiting> {
+    old_enough(identify_starting(os, partners, all_files), now_ms)
+}
+
+/// 條件 1～4 都成立、但不看開了多久（剛開還沒寫檔的也在內）。撞名檢查用這份（#1636）：連按兩次時第二次常落在 30 秒內
+pub(crate) fn identify_starting(os: &dyn Os, partners: &[PartnerRef], all_files: &[LiveSess]) -> Vec<Awaiting> {
     if partners.is_empty() {
         return Vec::new();
     }
@@ -81,12 +86,14 @@ pub(crate) fn identify_all(os: &dyn Os, partners: &[PartnerRef], all_files: &[Li
             continue;
         }
         let Some(started_ms) = live_process::earliest_started_ms(os, &pids) else { continue };
-        if now_ms.saturating_sub(started_ms) < MIN_AGE_MS {
-            continue;
-        }
         out.push(Awaiting { partner: partner.clone(), root_pid: stuck_resume::top_pid(&table, &pids), pids, started_ms });
     }
     out
+}
+
+/// 只留開超過 [`MIN_AGE_MS`] 的（顯示成「等你按確認」用）
+fn old_enough(list: Vec<Awaiting>, now_ms: u64) -> Vec<Awaiting> {
+    list.into_iter().filter(|a| now_ms.saturating_sub(a.started_ms) >= MIN_AGE_MS).collect()
 }
 
 /// 名單上顯示用的名字（去掉控制字元、最多 30 字）
@@ -113,6 +120,11 @@ pub(crate) fn real_source() -> AwaitingSource {
 }
 
 fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
+    old_enough(real_starting(now_ms), now_ms)
+}
+
+/// 現讀「條件 1～4 成立」的夥伴（不看開了多久；5 秒快取）。沒有畫面的建置與測試一律空
+fn real_starting(now_ms: u64) -> Vec<Awaiting> {
     #[cfg(all(feature = "gui", not(test)))]
     {
         use std::sync::Mutex;
@@ -126,8 +138,7 @@ fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
                 }
             }
         }
-        let Some(all_files) = stuck_resume::all_session_files() else { return Vec::new() };
-        let list = identify_all(&switch::RealOs, &super::term::partner_rows(), &all_files, now_ms);
+        let list = fresh_starting();
         if let Ok(mut g) = CACHE.lock() {
             *g = Some((now_ms, list.clone()));
         }
@@ -136,6 +147,19 @@ fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
     #[cfg(not(all(feature = "gui", not(test))))]
     {
         let _ = now_ms;
+        Vec::new()
+    }
+}
+
+/// 不經快取、現讀一次（撞名檢查用：剛開的視窗 5 秒內就要看得到，舊快取可能還是開窗前的空清單）
+fn fresh_starting() -> Vec<Awaiting> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        let Some(all_files) = stuck_resume::all_session_files() else { return Vec::new() };
+        identify_starting(&switch::RealOs, &super::term::partner_rows(), &all_files)
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
         Vec::new()
     }
 }
@@ -154,14 +178,14 @@ pub(crate) fn holds_name(list: &[Awaiting], name: &str, ci: bool) -> bool {
     })
 }
 
-/// 現在「等你按確認」的夥伴名（現讀，5 秒快取；沒有畫面的建置與測試為空）
+/// 現在開著、還沒有 sessions 檔的夥伴名（含剛開不到 30 秒的；不經快取現讀；沒有畫面的建置與測試為空）
 pub(crate) fn real_names() -> Vec<String> {
-    real_awaiting(crate::heartbeat::now_ms()).into_iter().map(|a| a.partner.name.trim().to_string()).collect()
+    fresh_starting().into_iter().map(|a| a.partner.name.trim().to_string()).collect()
 }
 
 /// 這個名字現在是不是被「等你按確認」的夥伴占著（現讀）
 pub(crate) fn real_holds_name(name: &str, ci: bool) -> bool {
-    holds_name(&real_awaiting(crate::heartbeat::now_ms()), name, ci)
+    holds_name(&fresh_starting(), name, ci)
 }
 
 /// 開新夥伴時撞到「等你按確認」的同名夥伴的說明（只講現況與下一步）
@@ -355,12 +379,19 @@ mod tests {
     }
 
     #[test]
-    fn 程序已結束或還沒滿三十秒_不占名字() {
+    fn 程序已結束就不占名字() {
         let mut gone = mux_fake(600_000);
         gone.table.retain(|x| x.pid != 502);
         assert!(!holds_name(&identify_all(&gone, &[row("7", "小乙")], &[], NOW), "小乙", true), "程序不在了就放掉名字");
-        assert!(!holds_name(&identify_all(&mux_fake(1_000), &[row("7", "小乙")], &[], NOW), "小乙", true), "剛開的視窗照舊不算");
         assert!(!holds_name(&[], "小乙", true), "清單空就不占");
+    }
+
+    #[test]
+    fn 剛開五秒的同名視窗也占名字_但還不顯示成等確認() {
+        let os = mux_fake(5_000);
+        assert!(holds_name(&identify_starting(&os, &[row("7", "小乙")], &[]), "小乙", false), "連按兩次的第二次落在 30 秒內也要擋");
+        assert!(identify_all(&os, &[row("7", "小乙")], &[], NOW).is_empty(), "名單上的等確認顯示照舊要滿 30 秒");
+        assert!(!holds_name(&identify_starting(&os, &[row("7", "小乙")], &[live(502)]), "小乙", false), "已經有 sessions 檔的交給既有的同名檢查");
     }
 
     #[test]
