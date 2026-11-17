@@ -15,6 +15,9 @@ export const isDisplayOnly = f => Boolean(f) && (f.receivable === false || f.ent
  */
 export const remoteInputAllowed = f => !isDisplayOnly(f) || f?.awaiting === true
 
+/** 輸入框要不要直接打進別台的終端：能遠端打字、這位夥伴放行（群組照舊），而且不在「重新看」狀態 */
+export const remoteComposeOn = ({ canInput, isRoom, friend, restartable }) => Boolean(canInput) && (Boolean(isRoom) || remoteInputAllowed(friend)) && !restartable
+
 export function displayOnlyHint(f) {
   if (f?.awaiting === true) return AWAITING_SEND_ERROR   // 視窗開著、還沒進到對話的夥伴（#1635）
   const k = engineKey(f)

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { AWAITING_DETAIL, AWAITING_STATUS } from '../ui/lib/awaiting.mjs'
 import { buildFriends } from '../ui/lib/roster.mjs'
-import { isDisplayOnly, remoteInputAllowed } from '../ui/lib/display-only.mjs'
+import { isDisplayOnly, remoteComposeOn, remoteInputAllowed } from '../ui/lib/display-only.mjs'
 import { remoteEntry } from '../ui/lib/term-remote.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
@@ -32,9 +32,25 @@ test('遠端打字／按鍵列：只放行等確認的夥伴，其他僅顯示�
   assert.equal(remoteInputAllowed(null), true)
 })
 
+test('不是等確認的僅顯示條目進不了終端打字模式；等確認的可以', () => {
+  const on = friend => remoteComposeOn({ canInput: true, isRoom: false, friend, restartable: false })
+  // 本機程序掃描出來的一般條目（自己開的 claude／codex 等）：就算能遠端打字也不進終端打字模式
+  assert.equal(on({ node: 'n', receivable: false, entryKind: 'process', status: 'running', engine: 'claude' }), false)
+  assert.equal(on({ node: 'n', receivable: false, entryKind: 'process', status: 'running', engine: 'codex' }), false)
+  assert.equal(on({ node: 'n', entryKind: 'process', status: 'running' }), false, '只標 process 也算僅顯示')
+  assert.equal(on({ node: 'n', receivable: false, entryKind: 'process', awaiting: false }), false, 'awaiting 要明確是 true')
+  assert.equal(on({ node: 'n', receivable: false, entryKind: 'process', status: AWAITING_STATUS }), false, '只看 awaiting 旗標，不靠狀態字')
+  // 等確認的夥伴與一般夥伴可以
+  assert.equal(on(awaitingFriend), true)
+  assert.equal(on({ node: 'n', status: 'online' }), true)
+  // 其他前提不成立時一律不進
+  assert.equal(remoteComposeOn({ canInput: false, isRoom: false, friend: awaitingFriend, restartable: false }), false)
+  assert.equal(remoteComposeOn({ canInput: true, isRoom: false, friend: awaitingFriend, restartable: true }), false)
+})
+
 test('守門：chatpane 的遠端打字用 remoteInputAllowed、寄信路徑不經它，也沒有自動按鍵', () => {
   const src = read('../ui/lib/chatpane.mjs')
-  assert.match(src, /const remoteCompose = computed\(\(\) => canRemoteInput\.value && \(isRoom\.value \|\| remoteInputAllowed\(props\.friend\)\)/)
+  assert.match(src, /const remoteCompose = computed\(\(\) => remoteComposeOn\(\{ canInput: canRemoteInput\.value, isRoom: isRoom\.value, friend: props\.friend, restartable: viewRestartable\.value \}\)\)/)
   assert.match(src, /const composeLocked = computed\(\(\) => displayOnly\.value && !termCompose\.value\)/)
   // 寄信：send() 先走終端、其餘仍被 displayOnly 擋
   assert.match(src, /let text = draft\.value\.trim\(\); if \(!text \|\| displayOnly\.value\) return/)

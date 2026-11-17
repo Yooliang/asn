@@ -34,7 +34,7 @@ import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
-import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly, remoteInputAllowed } from './display-only.mjs'
+import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly, remoteComposeOn } from './display-only.mjs'
 import { AWAITING_NOTE, AWAITING_NOTE_NO_TERM } from './awaiting.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
@@ -219,7 +219,7 @@ export const ChatPane = {
     // 打字或觀看已經因為離開分頁而結束（狀態列有「重新看」）時退回「傳送」：要不要重新開始由本人按「重新看」決定，不由輸入框代按
     const viewRestartable = computed(() => Boolean(typingEndedNote.value) || (remoteBar.value?.src === 'view' && remoteBar.value.restartable === true))
     // 等你按確認的夥伴（#1638）不能收信，但別台／手機的終端打字與按鍵列照常能用
-    const remoteCompose = computed(() => canRemoteInput.value && (isRoom.value || remoteInputAllowed(props.friend)) && !viewRestartable.value)
+    const remoteCompose = computed(() => remoteComposeOn({ canInput: canRemoteInput.value, isRoom: isRoom.value, friend: props.friend, restartable: viewRestartable.value }))
     const composeLocked = computed(() => displayOnly.value && !termCompose.value)   // 輸入框與傳送鈕：僅顯示條目擋住，但終端打字模式（只有等你按確認的夥伴能進）放行
     // 看本機夥伴的終端時（電腦版，#1378）：一樣直接打進那個終端，按鈕字與提示字和看別台相同；本機不用對方同意，沒有確認框、寬限與重新看
     const tvEl = ref(null)
