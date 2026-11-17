@@ -6,6 +6,8 @@
 //!   等待結束（本人按了、逾時、請求被撤回、對方已結束）就放開，下一個請求不會被沒人按的舊框卡死。
 //!   系統對話框從外面關不掉，所以留在畫面上的舊框一律作廢（之後按什麼都不算，按「允許」會通知本人已逾時），
 //!   但同時留在畫面上的框最多 [`MAX_OPEN_DIALOGS`] 個（[`OpenDialogs`]）；超過就不再開，回「前一個確認還沒處理」。
+//!   同一台發起端（設備指紋）對同一個視窗只留一個框（[`dialog_key`]）：它的舊框還在畫面上時，新的請求不疊第二個框，直接回 busy（沿用舊框，不作廢舊的再開新的：框收不掉，疊起來只會讓本人搞不清楚該按哪一個）。
+//!   舊框是作廢的（等待已結束）：本人按任何一顆都不算，更不會記成「按過允許」（記成「按過允許」只發生在 [`Consent::Allow`] 之後，見守門測試）。
 //! - 等待中每 [`POLL_SECS`] 秒查一次請求還在不在；連續 [`GONE_MISSES`] 次查不到就當對方已撤回或已結束，不再等。
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
 //! - 本人可以在這台的設定頁「認得的電腦」對某一台設「打字不用每次問我」，那台就不跳這個框（判斷在呼叫端，存在本機）。
@@ -172,6 +174,11 @@ pub const GONE_MISSES: u32 = 2;
 /// 同時留在畫面上的確認框（含已作廢、沒人按的）最多幾個
 pub const MAX_OPEN_DIALOGS: usize = 3;
 
+/// 「哪一台發起端要打哪一個視窗」：同一組只留一個框。用完整指紋（每台唯一、不是名字）加視窗名
+pub fn dialog_key(who: &Who, window: &str) -> String {
+    format!("{}|{}", who.fp_full, clean(window, 64))
+}
+
 /// 下一次最多睡幾秒：[`POLL_SECS`]、[`ASK_SECS`]、這次剩下時間三者取小；0 就是不用等了
 pub fn next_wait_secs(now_s: i64, deadline_s: i64) -> u64 {
     wait_secs(now_s, deadline_s).min(POLL_SECS)
@@ -252,22 +259,22 @@ impl Drop for SlotGuard {
 
 /// 目前還留在畫面上的確認框（含逾時、已作廢但沒人關的）。每個框一張票，框真的被關掉（對話框的回呼）就還；
 /// 回呼一直沒來時，到了放開時間也自動不算。用來擋住「沒人在、一直開新框」把畫面塞滿
-pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64)>>, std::sync::atomic::AtomicU64);
+pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64, String)>>, std::sync::atomic::AtomicU64);
 
 impl OpenDialogs {
     pub const fn new() -> Self {
         Self(std::sync::Mutex::new(Vec::new()), std::sync::atomic::AtomicU64::new(1))
     }
 
-    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框就回 None
-    pub fn open(&'static self, now_s: i64, release_at: i64) -> Option<DialogTicket> {
+    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框、或同一個 `key`（發起端加視窗）已經有一個框，就回 None
+    pub fn open(&'static self, now_s: i64, release_at: i64, key: &str) -> Option<DialogTicket> {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|&(_, until)| now_s < until);
-        if g.len() >= MAX_OPEN_DIALOGS {
+        g.retain(|(_, until, _)| now_s < *until);
+        if g.len() >= MAX_OPEN_DIALOGS || g.iter().any(|(_, _, k)| k == key) {
             return None;
         }
         let token = self.1.fetch_add(1, Ordering::SeqCst);
-        g.push((token, release_at));
+        g.push((token, release_at, key.to_string()));
         Some(DialogTicket(self, token))
     }
 }
@@ -278,7 +285,7 @@ pub struct DialogTicket(&'static OpenDialogs, u64);
 impl Drop for DialogTicket {
     fn drop(&mut self) {
         let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|&(token, _)| token != self.1);
+        g.retain(|(token, _, _)| *token != self.1);
     }
 }
 
@@ -302,7 +309,7 @@ where
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
         return Consent::Busy;
     };
-    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
+    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS), &dialog_key(who, window)) else {
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
         return Consent::Busy;
     };
@@ -526,15 +533,52 @@ mod tests {
     #[test]
     fn 留在畫面上的框有上限_框關掉或過了放開時間才不算() {
         static D: OpenDialogs = OpenDialogs::new();
-        let t1 = D.open(0, 100).expect("1");
-        let _t2 = D.open(0, 100).expect("2");
-        let _t3 = D.open(0, 100).expect("3");
-        assert!(D.open(1, 100).is_none(), "畫面上已經有三個沒處理的框：不再開");
+        let t1 = D.open(0, 100, "a|w").expect("1");
+        let _t2 = D.open(0, 100, "b|w").expect("2");
+        let _t3 = D.open(0, 100, "c|w").expect("3");
+        assert!(D.open(1, 100, "d|w").is_none(), "畫面上已經有三個沒處理的框：不再開");
         drop(t1);
-        let t4 = D.open(2, 100).expect("有框被關掉就能再開");
-        assert!(D.open(2, 100).is_none());
-        assert!(D.open(100, 300).is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
+        let t4 = D.open(2, 100, "a|w").expect("有框被關掉就能再開");
+        assert!(D.open(2, 100, "e|w").is_none());
+        assert!(D.open(100, 300, "e|w").is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
         drop(t4);
+    }
+
+    /// 同一台發起端對同一個視窗只留一個框；連按不會疊出好幾個，換視窗或換發起端不受影響
+    #[test]
+    fn 同一個發起端同一個視窗只留一個框_連按不疊() {
+        static D: OpenDialogs = OpenDialogs::new();
+        let who = |fp: &str| Who { name: "家用機".into(), fp8: fp.chars().take(8).collect(), fp_full: fp.into(), first: false, typed_before: true, always_ask: false };
+        let k1 = dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小乙");
+        assert_eq!(k1, dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小乙"));
+        assert_ne!(k1, dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小丙"), "換視窗是另一組");
+        assert_ne!(k1, dialog_key(&who("EEEE-FFFF-GGGG-HHHH"), "小乙"), "換發起端是另一組");
+        let first = D.open(0, 100, &k1).expect("第一次");
+        assert!(D.open(5, 100, &k1).is_none(), "舊框還在畫面上（等待中或已作廢）：連按不疊第二個");
+        assert!(D.open(5, 100, &dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小丙")).is_some(), "別的視窗照樣可以");
+        drop(first);
+        assert!(D.open(6, 100, &k1).is_some(), "舊框被關掉之後又能開");
+    }
+
+    /// 作廢的舊框（等待已結束）被按下去：不允許、不會往下走；而且 input_consent 本身絕不碰「記成按過允許」，
+    /// 只有 lib.rs 在 ask 回 Allow、再確認請求還有效之後才叫 confirm_input——否則一個舊框就會變成永久免問
+    #[test]
+    fn 守門_作廢的舊框按允許不算_不會記成按過允許() {
+        // 作廢＝timed_out 已設：按允許、按別的、早按晚按，一律不允許；按允許只多一句「已逾時」的通知
+        for now in [0, 50, 500] {
+            assert_eq!(click_outcome(true, true, now, 1_000), (false, true), "作廢之後按允許：不算，通知本人");
+            assert_eq!(click_outcome(false, true, now, 1_000), (false, false));
+        }
+        let me = include_str!("input_consent.rs").replace("\r\n", "\n");
+        let code = me.split("#[cfg(test)]").next().unwrap();
+        assert!(!code.contains("confirm_input") && !code.contains("input_no_ask"), "同意框這支不能寫入任何免問紀錄");
+        // 回呼的結果丟進已經沒人收的頻道：作廢之後 send 只會失敗（被忽略），ask 早就回去了
+        assert!(code.contains("let _ = tx.send(allow);"));
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
+        assert_eq!(f.matches("device_id::live::confirm_input(").count(), 1, "只有一個地方記按過允許");
+        let (answered, still, confirm) = (f.find("let answered = answer == input_consent::Consent::Allow;").unwrap(), f.find("if !still {").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
+        assert!(answered < still && still < confirm, "要 ask 回 Allow、再重查請求還有效，之後才記");
     }
 
     #[test]
