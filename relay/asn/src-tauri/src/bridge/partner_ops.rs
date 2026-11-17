@@ -573,7 +573,8 @@ impl PartnerOps {
         let claude = console::read_sessions(&self.dirs.sessions).iter().any(|s| same(s.get("name").and_then(Value::as_str)) && s.get("pid").and_then(Value::as_u64).map(|p| os.alive(p as u32)).unwrap_or(false));
         let pi_dir = super::engines::pi::windows_dir(&self.env.pi_home());
         let pi = super::engines::pi::read_windows(&pi_dir, self.env.now_ms(), |p| os.alive(p)).iter().any(|w| same(Some(w.name.as_str())));
-        claude || pi || (self.protect)(name, 0) || name.ends_with("收發室")
+        // 等本人按確認的夥伴視窗（還沒有 sessions 檔）也占著名字（#1636）
+        claude || pi || (self.protect)(name, 0) || name.ends_with("收發室") || crate::launch::awaiting::real_holds_name(name, true)
     }
 
     /// 名單上有這個 pi 視窗（pi 擴充的登記檔，程序還活著），而且同名的 Claude 視窗不存在（同名時不猜，照 Claude 處理）
@@ -761,7 +762,7 @@ impl PartnerOps {
         let os = self.env.os();
         let claude = console::read_sessions(&self.dirs.sessions).iter().any(|s| s.get("name").and_then(Value::as_str) == Some(name) && s.get("pid").and_then(Value::as_u64).map(|p| os.alive(p as u32)).unwrap_or(false));
         let pi = super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some();
-        claude || pi || self.acp_admin().is_some_and(|a| a.has_worker(name))
+        claude || pi || self.acp_admin().is_some_and(|a| a.has_worker(name)) || crate::launch::awaiting::real_holds_name(name, false)
     }
 
     /// 接手使用者自己開的 grok：用名單上的 pid 查 grok 自己的使用中對話登記，唯一才採用，再讓專屬的 Grok 工作者載入同一段對話。

@@ -140,6 +140,35 @@ fn real_awaiting(now_ms: u64) -> Vec<Awaiting> {
     }
 }
 
+/// 開新夥伴／改名前的撞名檢查用（#1636）：這個名字是不是被「等你按確認」的夥伴占著。
+/// 清單來自 identify_all，必須程序還活著才會在裡面，所以視窗一關、程序一結束就自動放掉名字。
+/// `ci`＝不分大小寫（和各處既有的撞名比法一致）
+pub(crate) fn holds_name(list: &[Awaiting], name: &str, ci: bool) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    list.iter().any(|a| {
+        let n = a.partner.name.trim();
+        if ci { n.eq_ignore_ascii_case(name) } else { n == name }
+    })
+}
+
+/// 現在「等你按確認」的夥伴名（現讀，5 秒快取；沒有畫面的建置與測試為空）
+pub(crate) fn real_names() -> Vec<String> {
+    real_awaiting(crate::heartbeat::now_ms()).into_iter().map(|a| a.partner.name.trim().to_string()).collect()
+}
+
+/// 這個名字現在是不是被「等你按確認」的夥伴占著（現讀）
+pub(crate) fn real_holds_name(name: &str, ci: bool) -> bool {
+    holds_name(&real_awaiting(crate::heartbeat::now_ms()), name, ci)
+}
+
+/// 開新夥伴時撞到「等你按確認」的同名夥伴的說明（只講現況與下一步）
+pub(crate) fn name_taken_msg(name: &str) -> String {
+    format!("已經有叫「{name}」的夥伴開著，正在等你按確認；請切過去確認，或先停止它")
+}
+
 /// 停止「等你按確認」的視窗：先把條件再驗一次，成立才呼叫既有的 stop_partner／stop_gui。
 /// `id` 是畫面給的終端編號、`name` 是夥伴名，兩者都要和驗出來的那一列一致，否則拒絕
 pub(crate) fn stop_verified(os: &dyn Os, host: &dyn StopHost, partners: &[PartnerRef], all_files: &[LiveSess], id: &str, name: &str, now_ms: u64) -> Result<(), String> {
@@ -308,6 +337,31 @@ mod tests {
         let j = e.to_json();
         assert_eq!((j["kind"].as_str(), j["receivable"].as_bool(), j["detail"].as_str()), (Some("process"), Some(false), Some(DETAIL)));
         assert_eq!(j["status"].as_str(), Some("running"), "不新增 status 值，舊版畫面照舊當灰點僅顯示");
+    }
+
+    #[test]
+    fn 等確認的夥伴占著名字_大小寫看呼叫端() {
+        let list = identify_all(&mux_fake(600_000), &[row("7", "Alice")], &[], NOW);
+        assert!(holds_name(&list, "Alice", false));
+        assert!(holds_name(&list, " Alice ", false), "前後空白不影響");
+        assert!(!holds_name(&list, "alice", false), "精確比對時大小寫不同不算");
+        assert!(holds_name(&list, "alice", true), "不分大小寫");
+        assert!(!holds_name(&list, "Bob", true), "別的名字不受影響");
+        assert!(!holds_name(&list, "", true), "空名字不算");
+    }
+
+    #[test]
+    fn 程序已結束或還沒滿三十秒_不占名字() {
+        let mut gone = mux_fake(600_000);
+        gone.table.retain(|x| x.pid != 502);
+        assert!(!holds_name(&identify_all(&gone, &[row("7", "小乙")], &[], NOW), "小乙", true), "程序不在了就放掉名字");
+        assert!(!holds_name(&identify_all(&mux_fake(1_000), &[row("7", "小乙")], &[], NOW), "小乙", true), "剛開的視窗照舊不算");
+        assert!(!holds_name(&[], "小乙", true), "清單空就不占");
+    }
+
+    #[test]
+    fn 撞名說明的字() {
+        assert_eq!(name_taken_msg("小乙"), "已經有叫「小乙」的夥伴開著，正在等你按確認；請切過去確認，或先停止它");
     }
 
     #[test]
