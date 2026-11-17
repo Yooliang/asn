@@ -387,6 +387,9 @@ enum WeekMatch {
     Neither,
 }
 
+/// 每週額度一期的長度
+const WEEK_MS: i64 = 7 * 24 * 3_600_000;
+
 /// 這個帳號在額度檔裡存著的每週重置時間（要有每週百分比才算）
 fn stored_week_reset(all: &HashMap<String, Quota>, email: &str) -> Option<i64> {
     all.get(email).filter(|q| q.weekly_pct.is_some()).and_then(|q| merge::stored_resets(q).1)
@@ -394,11 +397,14 @@ fn stored_week_reset(all: &HashMap<String, Quota>, email: &str) -> Option<i64> {
 
 /// 對話紀錄的帳號跟目前登入不同時，用這筆讀數帶的每週重置時間看它屬於誰：
 /// 先比目前登入的帳號（額度檔裡存著的），再比對話紀錄那個帳號（uuid 要對得到 email）。差 10 分鐘內算同一期。
+/// 存著的重置時間已經過了（每週重置後），讀數是下一期（+7 天）也算對上，只推一期；還沒過的不推。
 /// 讀數沒帶每週重置時間、目前登入的帳號還沒有已知的重置時間，都不算對上。
-fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: &str, parsed: &Parsed) -> WeekMatch {
+fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: &str, parsed: &Parsed, now_ms: i64) -> WeekMatch {
     let Some(new_reset) = parsed.week_reset_ms else { return WeekMatch::Neither };
     let all = load_all(home);
-    let same = |r: i64| (new_reset - r).abs() <= merge::SAME_RESET_MS;
+    let near = |r: i64| (new_reset - r).abs() <= merge::SAME_RESET_MS;
+    // 存著的那一期已經過了，舊視窗送來的就是下一期（只往後推一期）
+    let same = |r: i64| near(r) || (r <= now_ms && near(r + WEEK_MS));
     // 目前登入的帳號在額度檔還沒有已知的每週重置時間：無從比對，不記
     let Some(cur_reset) = stored_week_reset(&all, cur_email) else { return WeekMatch::Neither };
     if same(cur_reset) {
@@ -437,7 +443,7 @@ fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, parsed: 
         None => (format!("視窗帳號讀不到：視窗 {win}，對話紀錄 {h_o}，這筆不記"), None),
         Some((cu, ce)) => {
             let head = format!("視窗帳號對不上：視窗 {win}，對話紀錄 {h_o}、目前登入 {} 不同，", owner::short_hash(cu));
-            match week_match(home, &st, ce, &o.account_uuid, parsed) {
+            match week_match(home, &st, ce, &o.account_uuid, parsed, now_ms) {
                 WeekMatch::Current => (format!("{head}每週重置時間對上目前登入，記到目前登入"), Some((ce.clone(), cu.clone()))),
                 WeekMatch::Transcript(e) => (format!("{head}每週重置時間對上對話紀錄那個帳號，記到它"), Some((e, o.account_uuid.clone()))),
                 WeekMatch::Neither => (format!("{head}每週重置時間對不上，這筆不記"), None),

@@ -766,6 +766,29 @@ fn 舊視窗_對話紀錄是甲_目前登入是乙_每週重置時間是甲的_�
 }
 
 #[test]
+fn 舊視窗_目前登入乙存的重置時間已過_讀數是乙的下一期_記到乙() {
+    let (h, _, rb) = switched_setup();
+    // 乙存的那一期（rb）已經過了 1 小時；舊視窗送來的是下一期
+    let now = rb + H;
+    let t = transcript(h.path(), "wa", UA, Some(rb + 30 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((50.0, rb + 7 * DAY))), &t), now), "已過重置、讀數是下一期：記到乙");
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(50), Some(iso_secs(rb + 7 * DAY))));
+    assert!(log(&h).contains("對上目前登入，記到目前登入"), "{}", log(&h));
+}
+
+#[test]
+fn 舊視窗_乙存的重置時間還沒過_讀數卻是加七天_不算同一期_不記() {
+    let (h, _, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(status(None, Some((50.0, rb + 7 * DAY))), &t), NOW + 3 * MIN), "存著的還沒過，不能把別期當同期");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+    assert!(log(&h).contains("每週重置時間對不上，這筆不記"), "{}", log(&h));
+}
+
+#[test]
 fn 舊視窗_每週重置時間對不上任何人或乙沒有已知重置時間_不記_log_有依據只有雜湊() {
     // 對不上任何人
     let (h, _, _) = switched_setup();
