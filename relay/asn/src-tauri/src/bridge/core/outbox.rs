@@ -238,6 +238,22 @@ enum Resend {
     GiveUp(&'static str),
 }
 
+/// 同一時間最多記幾封「已通知回信被拒」的原信；超過就整批清掉（只是少一層去重）
+const REJECT_NOTIFIED_MAX: usize = 1000;
+
+/// 後台明確拒絕寄信（4xx）的白話原因（#1135）：只放固定分類，不放後台原文
+fn reject_reason(err: &str) -> &'static str {
+    if err.contains("not_receivable") {
+        "收件人現在不能收信"
+    } else if err.contains("rate_limited") {
+        "寄得太頻繁"
+    } else if err.contains("too_long") {
+        "回信太長"
+    } else {
+        "後台拒絕"
+    }
+}
+
 fn attach_gone(e: &str) -> bool {
     e.contains("HTTP 400 bad_attachment")
 }
@@ -285,10 +301,55 @@ impl Core {
                 if crate::relay::is_transient_api_err(&e) {
                     self.outbox_store(item).await
                 } else {
+                    self.notify_reply_rejected(from, o, &e).await;
                     ReplyOutcome::Failed
                 }
             }
         }
+    }
+
+    /// 後台明確拒絕（4xx）引擎視窗（內建通道工作者等）的回信：工作者不是一般視窗，沒有人可以告訴，原信又已確認收下，
+    /// 不通知就是默默丟掉（#1135）。改用「待通知項」告訴原寄件人（不含回信內文，通知寄不出去照樣進寄件匣重試、重開不會掉）。
+    /// 同一封原信只通知一次。原信會被重送的（Aegis：寄回成功才 ack）不通知，重送時自然再跑一輪
+    async fn notify_reply_rejected(&mut self, from: &str, o: &Origin, err: &str) {
+        let redelivered = self.ack_wait.contains(&o.id) && !self.channel_wait.contains(&o.id);
+        if !self.is_engine_window(from) || redelivered || o.from_node.is_empty() {
+            return;
+        }
+        if self.reject_notified.len() >= REJECT_NOTIFIED_MAX {
+            self.reject_notified.clear();
+        }
+        if !self.reject_notified.insert(o.id.clone()) {
+            self.log.line(&format!("reply id={} rejected again: sender already notified", o.id));
+            return;
+        }
+        let reason = reject_reason(err);
+        let pending = OutboxItem {
+            client_id: crate::relay::new_client_id(),
+            to_node: o.from_node.clone(),
+            to_agent: o.from_agent.clone(),
+            body: String::new(),
+            reply_to: o.id.clone(),
+            from_agent: from.to_string(),
+            expects_reply: None,
+            attachment_ids: vec![],
+            first_failed_at: self.now,
+            attempts: 0,
+            next_at: self.now,
+            gave_up: None,
+        }
+        .into_pending_notice(reason, self.now);
+        let mut next = self.outbox.items.clone();
+        next.push(pending.clone());
+        while next.iter().filter(|i| i.gave_up.is_some()).count() > OUTBOX_MAX_PENDING {
+            let Some(pos) = next.iter().position(|i| i.gave_up.is_some()) else { break };
+            next.remove(pos);
+        }
+        self.outbox.items = next;
+        if let Err(e) = self.outbox.persist() {
+            self.log.line(&format!("reply outbox save failed (reject notice not persisted) id={}: {e}", o.id));
+        }
+        self.outbox_notify_pending(&pending).await;
     }
 
     fn log_attach_missing(&self, reply_to: &str, resp: &Value) {

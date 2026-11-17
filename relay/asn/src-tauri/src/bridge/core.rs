@@ -295,6 +295,13 @@ struct RoomFwd {
     received_at: u64,
 }
 
+/// 群組訊息的觸發者與群組名（群組回信貼不進去時用，#1135）
+struct RoomTrig {
+    name: String,
+    /// 後台給的發言者代號：`節點~視窗`、`節點`、`~owner`、`u:…`
+    from: String,
+}
+
 /// release_held_item 的結果（額度試送用）：交給 worker 了／沒交成（要算一次沒回應）／這則本身不需要（已處理過、讀不到、超過保留期、名單還沒來）
 enum RelOutcome {
     Delivered,
@@ -364,6 +371,10 @@ pub struct Core {
     room_redo: HashMap<String, (u64, HashSet<String>)>,
     /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
     reply_fail: HashSet<String>,
+    /// 後台明確拒絕引擎工作者的回信、已通知過原寄件人的原信編號（同一封原信只通知一次，#1135；只在記憶體，原信已 ack 不會再來）
+    reject_notified: HashSet<String>,
+    /// 群組訊息 → 觸發它的人與群組名（群組回信貼不進去時告訴對方；只在記憶體，重開後查不到就只記 log，#1135）
+    room_trig: HashMap<String, RoomTrig>,
     /// 回信寄件匣（#1135，見 core/outbox.rs）
     outbox: outbox::Outbox,
     /// 啟動時發現寄件匣存檔壞了（已改名留著）：還欠本人一則通知，第一次 tick 時送一次（見 core/outbox.rs）
@@ -537,6 +548,30 @@ pub struct Core {
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
 const RESPOND_BUSY_GRACE_MS: u64 = 120_000;
 
+/// 群組發言失敗的白話原因（#1135）：只放固定分類，不放後台原文
+fn room_post_reason(err: &str) -> &'static str {
+    if err.contains("HTTP 429") {
+        "發言太頻繁"
+    } else if err.contains(" HTTP 4") {
+        "後台拒絕"
+    } else {
+        "連線或後台暫時有問題"
+    }
+}
+
+/// 群組訊息發言者代號 → 可寄通知的（節點, 視窗）；`~owner`、`u:…` 這類真人帳號沒有節點，回 None
+fn trigger_target(from: &str) -> Option<(String, String)> {
+    let f = from.trim();
+    if f.is_empty() || f.starts_with('~') || f.trim_start_matches('/').starts_with("u:") {
+        return None;
+    }
+    match f.split_once('~') {
+        Some((n, a)) if !n.is_empty() => Some((n.to_string(), a.to_string())),
+        Some(_) => None,
+        None => Some((f.to_string(), String::new())),
+    }
+}
+
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
 fn json_u64(v: Option<&Value>) -> u64 {
     match v {
@@ -578,7 +613,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), awaiting_src: crate::launch::awaiting::real_source(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
@@ -888,6 +923,7 @@ impl Core {
         self.held_items.remove(id);
         self.fwd_items.remove(id);
         self.fwd_rooms.remove(id);
+        self.room_trig.remove(id);
         self.bounce_notices.remove(id);
         if self.exact_ids.remove(id).is_some() {
             self.parser.forget(id);   // 逾時等沒走到 Sent 的結束方式：內文檔與核對紀錄也一起清
@@ -2212,6 +2248,36 @@ impl Core {
         self.tell_window(from, &format!("[收發室] 你剛才的回信沒有寄出去（寄送失敗）：收件人 {to}，回的是信件 {}。要重寄請再傳一次，第一行寫 [RELAY 寄信] to={to} re={} reply=no（要等對方回信就寫 reply=yes）。（這是系統通知，不用回覆。）內文開頭：{head}", o.id, o.id));
     }
 
+    /// 群組回信貼不進去（後台拒絕、寄太快 429、連線或後台出錯）：不默默丟掉，也不自動重貼（#1135）。
+    /// 一般視窗：告訴那個視窗，要重寄請再傳一次。引擎視窗（內建通道工作者）：通知觸發這則回覆的人，每則群組訊息只通知一次。
+    /// 觸發者只有真人帳號或查不到時，只記 log（沒有可寄的節點）
+    async fn tell_room_reply_failed(&mut self, from: &str, id: &str, err: &str) {
+        let why = room_post_reason(err);
+        if !self.is_engine_window(from) {
+            let label = match self.room_trig.get(id) {
+                Some(t) if !t.name.is_empty() => format!("群組「{}」", t.name),
+                _ => "某個群組".to_string(),
+            };
+            self.log.line(&format!("room reply from {from} id={id} not posted: told the window"));
+            self.tell_window(from, &format!("[收發室] 你在{label}的回信沒有送出去（{why}）。要重寄請再傳一次。（這是系統通知，不用回覆。）"));
+            return;
+        }
+        let Some(t) = self.room_trig.remove(id) else {
+            self.log.line(&format!("room reply from {from} id={id} not posted: trigger unknown (or already told), only logged"));
+            return;
+        };
+        let Some((node, agent)) = trigger_target(&t.from) else {
+            self.log.line(&format!("room reply from {from} id={id} not posted: trigger is not an addressable node, only logged"));
+            return;
+        };
+        let name = if t.name.is_empty() { "群組".to_string() } else { format!("群組「{}」", t.name) };
+        // 沒有原信可掛（群組訊息不是信）：空編號會跳過 bridge_notice，走寄信那條，由收發室的信箱寄出，不含回信內文
+        let o = Origin { id: String::new(), from_node: node, from_agent: agent };
+        // 標成不用回信（同 --no-reply）：觸發者多半也是 AI 視窗，收到告知不該再回一輪
+        let sent = self.send_back(&o, &format!("收發室：{from} 在{name}的回覆沒能貼進去（{why}）。要它再答請重新點名。這封不用回覆。"), None, Some(false)).await;
+        self.log.line(&format!("room reply from {from} id={id} not posted: notified the trigger sent={sent}"));
+    }
+
     /// 通知信的編號／視窗記一下（TTL 10 分鐘）：視窗若回了這則通知，那則回覆不是給任何人的，丟掉
     fn tell_window(&mut self, name: &str, text: &str) {
         if self.is_respond(name) {
@@ -2298,9 +2364,12 @@ impl Core {
                 return;
             }
             // 節點本身是成員時以節點發言；視窗是成員時以「節點~視窗」發言
-            let ok = self.post_room(&r, &text).await;
-            if ok {
-                self.corr_note(from, Dir::Replied, from, &format!("群組 {}", r.id), &o.id, &text, &[]);
+            let posted = self.post_room_why(&r, &text).await;
+            let ok = posted.is_ok();
+            match &posted {
+                Ok(()) => self.corr_note(from, Dir::Replied, from, &format!("群組 {}", r.id), &o.id, &text, &[]),
+                // 不能默默丟掉（#1135）：不自動重貼（後台沒有去重，可能貼兩次），只告訴人
+                Err(e) => self.tell_room_reply_failed(from, &o.id, e).await,
             }
             self.log.line(&format!("room reply from {from} -> room={} #{} posted={ok}", r.id, r.seq));
             return;
@@ -2587,6 +2656,7 @@ impl Core {
         }
         let mut p = Pending::new(&id, "", "", &target, self.now, false);
         p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone(), member: member.to_string() });
+        self.room_trig.insert(id.clone(), RoomTrig { name: room_name.clone(), from: msg.get("from").and_then(Value::as_str).unwrap_or("").to_string() });
         self.pending.push(p);
         self.persist();
         // 視窗是系統管理員身分開的、worker 轉不進去：群組貼一則說明（沿用群組失敗通知的冷卻），這則算處理完
@@ -2659,19 +2729,24 @@ impl Core {
 
     /// 回覆貼回群組（429 只記 log，不重試）
     async fn post_room(&self, r: &RoomRef, body: &str) -> bool {
+        self.post_room_why(r, body).await.is_ok()
+    }
+
+    /// 同 post_room，失敗時回後台的錯誤字串（#1135：群組回信貼不進去要告訴人，需要原因）
+    async fn post_room_why(&self, r: &RoomRef, body: &str) -> Result<(), String> {
         let mut b = json!({ "room": r.id, "body": body });
         if !r.window.is_empty() {
             b["from_agent"] = json!(r.window);
         }
         match self.relay.api("room_post", Some(b)).await {
-            Ok(_) => true,
+            Ok(_) => Ok(()),
             Err(e) => {
                 if e.contains("HTTP 429") {
                     self.log.line(&format!("room_post rate-limited room={} (dropped, no retry)", r.id));
                 } else {
                     self.log.line(&format!("room_post failed room={}: {e}", r.id));
                 }
-                false
+                Err(e)
             }
         }
     }

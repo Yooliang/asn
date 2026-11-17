@@ -75,6 +75,8 @@ struct FState {
     /// 接下來 N 次 send 回 send_fail_code（0＝503）；send_fail_store＝失敗前其實已收下（模擬回應在路上掉了）
     send_fail_n: usize,
     send_fail_code: u16,
+    /// send 失敗時回的錯誤碼（空字串＝gateway）
+    send_fail_err: String,
     send_fail_store: bool,
     /// 依 client_id 去重（同 client_id 第二次回 200 duplicate，不再多一封）
     send_dedupe: bool,
@@ -199,7 +201,7 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
                 s.seen_cids.push(cid);
                 s.sent.push(body.clone());
             }
-            (if s.send_fail_code == 0 { 503 } else { s.send_fail_code }, json!({"error": "gateway"}))
+            (if s.send_fail_code == 0 { 503 } else { s.send_fail_code }, json!({"error": if s.send_fail_err.is_empty() { "gateway".to_string() } else { s.send_fail_err.clone() }}))
         }
         "send" if s.send_attach_bad && body["attachment_ids"].as_array().is_some_and(|a| !a.is_empty()) => (400, json!({"error": "bad_attachment"})),
         "send" if s.send_dedupe && body["client_id"].as_str().is_some_and(|c| s.seen_cids.iter().any(|x| x == c)) => (200, json!({"id": uid(900), "duplicate": true})),
@@ -2204,6 +2206,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
 
 mod ack_it;
 mod outbox_it;
+mod reply_fail_it;
 mod aegis_it;
 mod engines_it;
 mod pi_it;
