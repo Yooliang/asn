@@ -6,7 +6,8 @@
 //!   等待結束（本人按了、逾時、請求被撤回、對方已結束）就放開，下一個請求不會被沒人按的舊框卡死。
 //!   系統對話框從外面關不掉，所以留在畫面上的舊框一律作廢（之後按什麼都不算，按「允許」會通知本人已逾時），
 //!   但同時留在畫面上的框最多 [`MAX_OPEN_DIALOGS`] 個（[`OpenDialogs`]）；超過就不再開，回「前一個確認還沒處理」。
-//!   同一台發起端（設備指紋）對同一個視窗只留一個框（[`dialog_key`]）：它的舊框還在畫面上時，新的請求不疊第二個框，直接回 busy（沿用舊框，不作廢舊的再開新的：框收不掉，疊起來只會讓本人搞不清楚該按哪一個）。
+//!   同一台發起端（設備指紋）對同一個視窗只留一個「等待」（[`dialog_key`]、[`Waiting`]）：已有一個在等時，新的請求回 busy，不併行開第二個框；
+//!   那個等待結束（按了、逾時、撤回、對方結束）就不再佔著，舊框就算還留在畫面上，同一組也能開新的等待和新框（只受上面的框數上限管）。
 //!   舊框是作廢的（等待已結束）：本人按任何一顆都不算，更不會記成「按過允許」（記成「按過允許」只發生在 [`Consent::Allow`] 之後，見守門測試）。
 //! - 等待中每 [`POLL_SECS`] 秒查一次請求還在不在；連續 [`GONE_MISSES`] 次查不到就當對方已撤回或已結束，不再等。
 //! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
@@ -259,22 +260,22 @@ impl Drop for SlotGuard {
 
 /// 目前還留在畫面上的確認框（含逾時、已作廢但沒人關的）。每個框一張票，框真的被關掉（對話框的回呼）就還；
 /// 回呼一直沒來時，到了放開時間也自動不算。用來擋住「沒人在、一直開新框」把畫面塞滿
-pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64, String)>>, std::sync::atomic::AtomicU64);
+pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64)>>, std::sync::atomic::AtomicU64);
 
 impl OpenDialogs {
     pub const fn new() -> Self {
         Self(std::sync::Mutex::new(Vec::new()), std::sync::atomic::AtomicU64::new(1))
     }
 
-    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框、或同一個 `key`（發起端加視窗）已經有一個框，就回 None
-    pub fn open(&'static self, now_s: i64, release_at: i64, key: &str) -> Option<DialogTicket> {
+    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框（含已作廢、還留在畫面上的）就回 None
+    pub fn open(&'static self, now_s: i64, release_at: i64) -> Option<DialogTicket> {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|(_, until, _)| now_s < *until);
-        if g.len() >= MAX_OPEN_DIALOGS || g.iter().any(|(_, _, k)| k == key) {
+        g.retain(|&(_, until)| now_s < until);
+        if g.len() >= MAX_OPEN_DIALOGS {
             return None;
         }
         let token = self.1.fetch_add(1, Ordering::SeqCst);
-        g.push((token, release_at, key.to_string()));
+        g.push((token, release_at));
         Some(DialogTicket(self, token))
     }
 }
@@ -285,11 +286,43 @@ pub struct DialogTicket(&'static OpenDialogs, u64);
 impl Drop for DialogTicket {
     fn drop(&mut self) {
         let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|(token, _, _)| *token != self.1);
+        g.retain(|&(token, _)| token != self.1);
+    }
+}
+
+/// 正在等本人回答的「發起端＋視窗」。只鎖等待本身：等待結束（任何一條路）就放開，不管框還在不在畫面上
+pub struct Waiting(std::sync::Mutex<Vec<String>>);
+
+impl Waiting {
+    pub const fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()))
+    }
+
+    /// 這一組已經有人在等就回 None
+    pub fn begin(&'static self, key: &str) -> Option<WaitGuard> {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if g.iter().any(|k| k == key) {
+            return None;
+        }
+        g.push(key.to_string());
+        Some(WaitGuard(self, key.to_string()))
+    }
+}
+
+/// 等待中的憑證；丟掉（等待結束）就放開這一組
+pub struct WaitGuard(&'static Waiting, String);
+
+impl Drop for WaitGuard {
+    fn drop(&mut self) {
+        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = g.iter().position(|k| *k == self.1) {
+            g.remove(i);
+        }
     }
 }
 
 static SLOT: ConsentSlot = ConsentSlot::new();
+static WAITING: Waiting = Waiting::new();
 static DIALOGS: OpenDialogs = OpenDialogs::new();
 
 fn now_s() -> i64 {
@@ -309,7 +342,12 @@ where
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
         return Consent::Busy;
     };
-    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS), &dialog_key(who, window)) else {
+    // 同一台發起端對同一個視窗已經有一個在等：不併行開第二個（等待結束就放開，舊框還在也不影響）
+    let Some(_waiting) = WAITING.begin(&dialog_key(who, window)) else {
+        let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
+        return Consent::Busy;
+    };
+    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
         let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
         return Consent::Busy;
     };
@@ -531,33 +569,51 @@ mod tests {
     }
 
     #[test]
-    fn 留在畫面上的框有上限_框關掉或過了放開時間才不算() {
+    fn 畫面上滿三個框_含作廢的_就回忙碌_有框關掉或過了放開時間才不算() {
         static D: OpenDialogs = OpenDialogs::new();
-        let t1 = D.open(0, 100, "a|w").expect("1");
-        let _t2 = D.open(0, 100, "b|w").expect("2");
-        let _t3 = D.open(0, 100, "c|w").expect("3");
-        assert!(D.open(1, 100, "d|w").is_none(), "畫面上已經有三個沒處理的框：不再開");
+        let t1 = D.open(0, 100).expect("1");
+        let _t2 = D.open(0, 100).expect("2");
+        let _t3 = D.open(0, 100).expect("3");
+        assert!(D.open(1, 100).is_none(), "畫面上已經有三個框（等待結束、作廢的也算）：不再開");
         drop(t1);
-        let t4 = D.open(2, 100, "a|w").expect("有框被關掉就能再開");
-        assert!(D.open(2, 100, "e|w").is_none());
-        assert!(D.open(100, 300, "e|w").is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
+        let t4 = D.open(2, 100).expect("有框被關掉就能再開");
+        assert!(D.open(2, 100).is_none());
+        assert!(D.open(100, 300).is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
         drop(t4);
     }
 
-    /// 同一台發起端對同一個視窗只留一個框；連按不會疊出好幾個，換視窗或換發起端不受影響
+    fn who_fp(fp: &str) -> Who {
+        Who { name: "家用機".into(), fp8: fp.chars().take(8).collect(), fp_full: fp.into(), first: false, typed_before: true, always_ask: false }
+    }
+
+    /// 同一台發起端對同一個視窗只留一個「等待」：連按不會同時開第二個；換視窗或換發起端不受影響
     #[test]
-    fn 同一個發起端同一個視窗只留一個框_連按不疊() {
-        static D: OpenDialogs = OpenDialogs::new();
-        let who = |fp: &str| Who { name: "家用機".into(), fp8: fp.chars().take(8).collect(), fp_full: fp.into(), first: false, typed_before: true, always_ask: false };
-        let k1 = dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小乙");
-        assert_eq!(k1, dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小乙"));
-        assert_ne!(k1, dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小丙"), "換視窗是另一組");
-        assert_ne!(k1, dialog_key(&who("EEEE-FFFF-GGGG-HHHH"), "小乙"), "換發起端是另一組");
-        let first = D.open(0, 100, &k1).expect("第一次");
-        assert!(D.open(5, 100, &k1).is_none(), "舊框還在畫面上（等待中或已作廢）：連按不疊第二個");
-        assert!(D.open(5, 100, &dialog_key(&who("AAAA-BBBB-CCCC-DDDD"), "小丙")).is_some(), "別的視窗照樣可以");
+    fn 同組有等待中的請求時_連按不開第二個() {
+        static W: Waiting = Waiting::new();
+        let k1 = dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙");
+        assert_eq!(k1, dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙"));
+        assert_ne!(k1, dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小丙"), "換視窗是另一組");
+        assert_ne!(k1, dialog_key(&who_fp("EEEE-FFFF-GGGG-HHHH"), "小乙"), "換發起端是另一組");
+        let first = W.begin(&k1).expect("第一次");
+        assert!(W.begin(&k1).is_none(), "同組已經有一個在等：不開第二個");
+        assert!(W.begin(&dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小丙")).is_some(), "別的視窗照樣可以");
         drop(first);
-        assert!(D.open(6, 100, &k1).is_some(), "舊框被關掉之後又能開");
+    }
+
+    /// 舊的等待結束之後，就算它的框還留在畫面上，同一組也能開新的等待和新框（重演 #1303 事故的那條路）
+    #[test]
+    fn 同組舊等待結束_舊框還在畫面上_新請求可以開() {
+        static W: Waiting = Waiting::new();
+        static D: OpenDialogs = OpenDialogs::new();
+        let k = dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙");
+        let wait1 = W.begin(&k).expect("第一次等待");
+        let stale = D.open(0, 1_000).expect("第一個框");
+        drop(wait1); // 等待結束（逾時、撤回…）；框沒人按，票還在，框還在畫面上
+        let wait2 = W.begin(&k).expect("同組新的等待：舊框還在也不擋");
+        let second = D.open(70, 1_000).expect("新框：畫面上只有一個舊框，沒到上限");
+        drop(wait2);
+        drop(second);
+        drop(stale);
     }
 
     /// 作廢的舊框（等待已結束）被按下去：不允許、不會往下走；而且 input_consent 本身絕不碰「記成按過允許」，
