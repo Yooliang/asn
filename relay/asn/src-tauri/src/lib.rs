@@ -1599,7 +1599,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                                 if answer == input_consent::Consent::Busy {
                                     // 這台畫面上還有沒處理的確認框：回報清楚的原因；舊後台不認得 busy 就退回 rejected，不能讓這次掛著
                                     let r = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": view_stream::BUSY }))).await;
-                                    if r.is_err() {
+                                    if view_stream::stop_refused(&r) {
                                         let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                                     }
                                     continue;
