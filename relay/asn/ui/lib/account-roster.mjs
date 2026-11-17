@@ -135,10 +135,10 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   const staleNote = stale ? `，${STALE_NOTE}${entry?.vendor === 'claude' ? `，${STALE_HINT}` : ''}` : ''
   return {
     known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
-    meta: stamp(shown.read, shown.node), listMeta,
+    meta: stamp(oldest.read, oldest.node), listMeta,   // 手機與設備卡的時間照舊標「兩窗裡最舊的」（#527 審查）；只有電腦「我的帳號」括號的 ageLabel 寫過期那一窗的
     // 「我的帳號」卡片的新排法：時間放在帳號後面的括號（舊資料在括號裡加「較舊」），讀這筆額度的那台只標在它的設備按鈕上；meta／oldText 留給手機與設備卡
     ageLabel: agoOf(shown.read) + staleNote, readNodes: readNodesOf(live),
-    resetText, bars, oldText: stale ? OLD_TEXT : '',
+    resetText, bars, oldText: stale ? (entry?.vendor === 'claude' ? `${OLD_TEXT}，${STALE_HINT}` : OLD_TEXT) : '',
     stale, exhausted: Boolean(out), gone,
   }
 }
