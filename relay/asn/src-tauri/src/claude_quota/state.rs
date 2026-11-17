@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 const MAX_BYTES: u64 = 32 * 1024;
 /// 各帳號自己的 log 去重狀態，最多留幾個帳號
 const MAX_OWNED: usize = 20;
+/// 看過的 uuid → email 對應最多留幾筆
+const MAX_KNOWN: usize = 8;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct State {
@@ -32,6 +34,10 @@ pub struct State {
     /// 最近一次「帳號庫可能存錯」寫的 log 內容（同一個原因連續發生只記一次）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logged_lib: Option<String>,
+    /// 看過的視窗登入身分：accountUuid（小寫）→ 正規化 email，最多 `MAX_KNOWN` 筆。
+    /// 換帳號後舊視窗的對話紀錄還是舊帳號的 uuid，要靠這裡才知道那個 uuid 是哪個 email（不查帳號庫）。只存這兩個欄位。
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub known_ids: std::collections::BTreeMap<String, String>,
     /// 各帳號（email）自己的 log 去重狀態；每個只用 logged 那兩欄
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub owned: std::collections::BTreeMap<String, State>,
@@ -42,6 +48,22 @@ pub fn state_path(home: &Path) -> PathBuf {
 }
 
 impl State {
+    /// 記下看過的登入身分（uuid 不分大小寫、存小寫）；超過上限就丟掉別的（不丟剛記的這筆）
+    pub fn remember_identity(&mut self, uuid: &str, email: &str) {
+        let k = uuid.to_ascii_lowercase();
+        if self.known_ids.get(&k).map(String::as_str) == Some(email) {
+            return;
+        }
+        self.known_ids.insert(k.clone(), email.to_string());
+        while self.known_ids.len() > MAX_KNOWN {
+            let Some(drop) = self.known_ids.keys().find(|x| **x != k).cloned() else { break };
+            self.known_ids.remove(&drop);
+        }
+    }
+    /// 這個 uuid 對應的 email（只查看過的登入身分）
+    pub fn email_of_uuid(&self, uuid: &str) -> Option<&str> {
+        self.known_ids.get(&uuid.to_ascii_lowercase()).map(String::as_str)
+    }
     /// 取出（沒有就是空的）某個帳號自己的狀態
     pub fn take_owned(&mut self, email: &str) -> State {
         self.owned.remove(email).unwrap_or_default()

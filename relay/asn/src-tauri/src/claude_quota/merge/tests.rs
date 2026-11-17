@@ -707,8 +707,88 @@ fn 視窗帳號對不上_不記_log_只有雜湊前六碼_同一個原因只記�
     assert!(hook_at(&h, &with_tp(wk(30.0), &t), NOW + 3 * MIN), "一致：收");
     assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
     set_win(h.path(), UB);
-    assert!(!hook_at(&h, &with_tp(wk(31.0), &t), NOW + 4 * MIN));
+    // 每週重置時間跟 A 存著的不同、B 又沒有紀錄：對不上，不記
+    assert!(!hook_at(&h, &with_tp(status(None, Some((31.0, NOW + 6 * DAY))), &t), NOW + 4 * MIN));
     assert_eq!(log(&h).matches("視窗帳號對不上").count(), 2);
+    assert!(log(&h).contains("每週重置時間對不上，這筆不記"), "{}", log(&h));
+}
+
+/// 換帳號後的舊視窗情境：先讓 a 的視窗回報一次（記下 UA→a），再拿 a、b 各自存著的每週期
+fn switched_setup() -> (tempfile::TempDir, i64, i64) {
+    let (h, ra, rb) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra), "b@x.test": rec_wk(40, rb) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((30.0, ra))), NOW + MIN), "換帳號前：a 的視窗回報，記到 a");
+    (h, ra, rb)
+}
+
+#[test]
+fn 換帳號前回報_對話紀錄與目前登入都是甲_記到甲() {
+    let (h, _, _) = switched_setup();
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40), "乙不受影響");
+    assert!(!log(&h).contains("視窗帳號對不上"), "{}", log(&h));
+}
+
+#[test]
+fn 換帳號後新視窗_對話紀錄與目前登入都是乙_記到乙() {
+    let (h, _, rb) = switched_setup();
+    assert!(feed(&h, "wb", UB, NOW + 2 * MIN, 2, status(None, Some((50.0, rb))), NOW + 3 * MIN));
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(50));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(70));
+    assert!(!log(&h).contains("視窗帳號對不上"), "{}", log(&h));
+}
+
+#[test]
+fn 舊視窗_對話紀錄是甲_目前登入是乙_每週重置時間是乙的_記到乙() {
+    let (h, ra, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((50.0, rb))), &t), NOW + 3 * MIN), "重置時間是乙的：記到乙");
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(50));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(70), Some(iso_secs(ra))), "甲不動");
+    let lg = log(&h);
+    assert!(lg.contains("對上目前登入，記到目前登入") && lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
+    assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("@x.test"), "log 不留 uuid、email：{lg}");
+}
+
+#[test]
+fn 舊視窗_對話紀錄是甲_目前登入是乙_每週重置時間是甲的_記到甲() {
+    let (h, ra, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((55.0, ra))), &t), NOW + 3 * MIN), "重置時間是甲的：記到甲");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(45));
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(40), Some(iso_secs(rb))), "乙不動");
+    let lg = log(&h);
+    assert!(lg.contains("對上對話紀錄那個帳號，記到它") && !lg.contains("@x.test") && !lg.contains(UA), "{lg}");
+}
+
+#[test]
+fn 舊視窗_每週重置時間對不上任何人或乙沒有已知重置時間_不記_log_有依據只有雜湊() {
+    // 對不上任何人
+    let (h, _, _) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    let st = status(None, Some((10.0, NOW + 6 * DAY)));
+    assert!(!hook_at(&h, &with_tp(st.clone(), &t), NOW + 3 * MIN));
+    assert!(!hook_at(&h, &with_tp(st, &t), NOW + 4 * MIN));
+    assert_eq!((quota_of(&h, "a@x.test").weekly_pct, quota_of(&h, "b@x.test").weekly_pct), (Some(70), Some(40)));
+    let lg = log(&h);
+    assert_eq!(lg.matches("每週重置時間對不上，這筆不記").count(), 1, "同一原因只記一次：{lg}");
+    assert!(lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
+    assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("@x.test"), "{lg}");
+    // 乙在額度檔還沒有已知的每週重置時間：就算讀數等於甲的也只認「目前登入沒有可比」→ 先比乙（無）直接不記
+    let (h2, ra, _) = two_accounts();
+    seed(&h2, json!({ "a@x.test": rec_wk(70, ra) }));
+    assert!(feed(&h2, "wa", UA, NOW, 1, status(None, Some((30.0, ra))), NOW + MIN));
+    let t2 = transcript(h2.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h2.path(), UB);
+    assert!(!hook_at(&h2, &with_tp(status(None, Some((55.0, ra))), &t2), NOW + 3 * MIN), "乙沒有已知重置時間：不記");
+    assert_eq!(quota_of(&h2, "a@x.test").weekly_pct, Some(70));
+    assert!(load_all(h2.path()).get("b@x.test").is_none());
+    assert!(log(&h2).contains("每週重置時間對不上，這筆不記"));
 }
 
 #[test]
@@ -743,7 +823,8 @@ fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
     assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
     // 對話紀錄是 A（家目錄的帳號）但這個視窗自己是 B：不收，不能拿家目錄那份來湊
     let ta = transcript(h.path(), "wa", UA, Some(NOW + MIN), 2);
-    assert!(!hook_in(h.path(), &cfg, &with_tp(wk(10.0), &ta), NOW + 2 * MIN));
+    // （重置時間跟 B 存著的不同，也沒有 A 的紀錄：對不上）
+    assert!(!hook_in(h.path(), &cfg, &with_tp(status(None, Some((10.0, NOW + 6 * DAY))), &ta), NOW + 2 * MIN));
     assert!(load_all(h.path()).get("a@x.test").is_none());
     // 設定資料夾裡沒有 .claude.json 才退回家目錄那份
     std::fs::remove_file(cfg.join(".claude.json")).unwrap();
