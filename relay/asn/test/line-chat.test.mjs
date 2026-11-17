@@ -146,7 +146,7 @@ test('輸入列：圖片鈕、框內表情鈕只在 LINE 輸出；原本的按�
   for (const label of ['表情符號', '通話', '語音輸入', '傳送震動', '傳照片', '傳送檔案', '截圖']) assert.ok(pane.includes(`aria-label="${label}"`), `原本的「${label}」還在`)
   assert.match(pane, /@click="startShot"/); assert.match(pane, /@click="nudge"/); assert.match(pane, /@click="startCall"/); assert.match(pane, /@click="dictClick"/); assert.match(pane, /@click="micClick"/)
   // 送出鈕的樣板一個字不動（「有字才出現」純靠 line.css 的 :placeholder-shown）；輸入框高度只在 LINE 才寫 style
-  assert.match(pane, /<button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly \|\| !draft\.trim\(\)">/)
+  assert.match(pane, /<button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="composeLocked \|\| !draft\.trim\(\)">/)
   assert.match(read('ui/line.css'), /\.composer:has\(textarea:placeholder-shown\) \.aero-btn\{display:none\}/)
   assert.match(pane, /if \(!isLine\.value\) \{ if \(el\.style\.height \|\| el\.style\.overflowY\)/, '其他外觀不寫輸入框的 style')
   const css = read('ui/line.css')

@@ -8,6 +8,13 @@ export const DISPLAY_ONLY_ERROR = '這位夥伴只能顯示，不能收信'
 
 export const isDisplayOnly = f => Boolean(f) && (f.receivable === false || f.entryKind === 'process')
 
+/**
+ * 看別台電腦的終端時，打字與按鍵列能不能用。「僅顯示」條目照舊不行；
+ * 只有「視窗開著、在等你按確認」的夥伴例外（#1638）：它不能收信，但本人要能在手機或別台電腦上看畫面、自己按鍵。
+ * 只是放行「本人按的鍵」，不代按；寄信（receivable＝false）仍然擋著。
+ */
+export const remoteInputAllowed = f => !isDisplayOnly(f) || f?.awaiting === true
+
 export function displayOnlyHint(f) {
   if (f?.awaiting === true) return AWAITING_SEND_ERROR   // 視窗開著、還沒進到對話的夥伴（#1635）
   const k = engineKey(f)

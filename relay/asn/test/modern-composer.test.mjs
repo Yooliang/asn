@@ -31,7 +31,7 @@ test('modern.css：膠囊（單列 52／手機 50、26／25px 圓角、#e6e4df �
 })
 
 test('樣板：送出鈕的 aria-label 綁 sendLabel、字照舊；Enter／Shift+Enter／@ 選單的 handler 原樣；舊工具鈕與 handler 都還在', () => {
-  assert.match(form, /<button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="displayOnly \|\| !draft\.trim\(\)">\{\{ sendLabel \}\}<\/button>/)
+  assert.match(form, /<button class="aero-btn" type="submit" :aria-label="sendLabel" :disabled="composeLocked \|\| !draft\.trim\(\)">\{\{ sendLabel \}\}<\/button>/)
   assert.match(form, /<form class="composer" @submit\.prevent="send">/)
   assert.match(form, /@keydown="onComposeKey" @keydown\.enter\.exact="onEnter"/, 'Enter 送出、Shift+Enter 沒綁（照預設換行）')
   assert.match(pane, /function onEnter\(ev\) \{\n\s+if \(mention\.value\) \{ ev\.preventDefault\(\); pickMention\(\); return \}\n\s+if \(!props\.enterSends\) return\n\s+ev\.preventDefault\(\)\n\s+send\(\)/)
