@@ -33,6 +33,10 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     // 開窗之前先查這台電腦上有沒有同名而且還活著的夥伴：有就沿用、切到前景，不另開第二個（issue #596）
     if prof.mode != LaunchMode::Background {
         let live = super::console::live_partner_pid(prof.engine.as_str(), &req.name);
+        // 同名夥伴視窗開著、還在等本人按確認（還沒有 sessions 檔，上面查不到）：也不另開第二個（#1636）
+        if live.is_none() && super::awaiting::real_holds_name(&req.name, false) {
+            return Err(super::awaiting::name_taken_msg(&req.name));
+        }
         if let Some(mut out) = existing_partner_reply(live, || super::console::bring_partner_to_front(prof.engine.as_str(), &req.name)) {
             // 對話框填了開場訊息：夥伴已經在跑，不會再收到開場訊息，明說沒送出
             if !req.first_message.trim().is_empty() {
