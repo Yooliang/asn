@@ -776,3 +776,9 @@ test('掃 QR code（電腦版）：QR 的格子只有電腦版有（cfg(desktop)
   assert.match(lock, /name = "qrcode"\nversion = "0\.14\.1"\nsource = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"\nchecksum = "[0-9a-f]{64}"\n/)
   assert.doesNotMatch(read('src-tauri', 'src', 'fp_scan.rs').split('\n#[cfg(test)]')[0].replace(/\/\/.*$/gm, ''), /image::|\.render\(/)
 })
+
+test('最外層按返回鍵縮到背景、不結束（#1678）：只覆寫沒有上一頁時才走到的 onBackPressed，不攔其他返回', () => {
+  const kt = fs.readFileSync(path.join(root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt'), 'utf8').replace(/\r\n/g, '\n').replace(/\/\/[^\n]*/g, '')
+  assert.match(kt, /override fun onBackPressed\(\) \{\s*moveTaskToBack\(true\)\s*\}/)
+  assert.doesNotMatch(kt, /onBackPressedDispatcher|OnBackPressedCallback|finish\(\)|canGoBack|goBack/, '不自己攔返回、不結束，有上一頁時交給 WryActivity')
+})
