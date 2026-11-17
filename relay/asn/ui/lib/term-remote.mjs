@@ -25,14 +25,15 @@ export const REMOTE_TEXT = {
 
 // 等待與結束的說明直接寫在終端那一格裡（#1699）：狀態列在視窗最下面，只看中間那一格會是一片黑，不知道在等什麼、要做什麼
 export const REMOTE_STATE_TEXT = {
-  pendingTitle: '那台還沒同意',
-  pendingHint: '那邊的人可能要按「允許」，同意後畫面就會出來。',
+  // 看畫面不需要對方按「允許」（要按允許的是打字，字在 term-remote-input.mjs），這裡不能寫成在等同意
+  pendingTitle: '正在連到那台……',
+  pendingHint: '連上後畫面就會出來。',
   endedHint: '要再看，請按「再看一次」。',
   restartHint: '要再看，請按視窗最下面的「重新看」。',   // 電腦版離開太久而結束：按鈕在狀態列
 }
 
 /**
- * 終端那一格要寫什麼：發起到收到第一幅之間寫「那台還沒同意」與下一步；結束寫結束的原因（被拒絕、到期等，用 Rust 回的白話）與下一步；
+ * 終端那一格要寫什麼：發起到收到第一幅之間寫「正在連到那台」；結束寫結束的原因（被拒絕、到期等，用 Rust 回的白話）與下一步；
  * 正在看（有畫面了）不寫。回 { title, hint } 或 null
  */
 export function remoteStateView({ phase, note, restartInBar = false } = {}) {

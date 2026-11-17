@@ -164,12 +164,13 @@ test('狀態列與畫面上的固定句不含英文（給人看的字）', async
 })
 
 // #1699：等待或結束時，終端那一格直接寫原因與下一步，不整格黑
-test('終端那一格的說明：等待寫「那台還沒同意」與下一步；結束寫原因與下一步；正在看不寫', async () => {
+test('終端那一格的說明：等待寫「正在連到那台」（看畫面不用對方按允許）；結束寫原因與下一步；正在看不寫', async () => {
   const { remoteStateView, REMOTE_STATE_TEXT } = await import('../ui/lib/term-remote.mjs')
   for (const phase of ['starting', 'waiting']) {
     const v = remoteStateView({ phase })
-    assert.equal(v.title, '那台還沒同意')
-    assert.match(v.hint, /按「允許」/)
+    assert.equal(v.title, '正在連到那台……')
+    assert.equal(v.hint, '連上後畫面就會出來。')
+    assert.doesNotMatch(v.title + v.hint, /允許|同意/, '看畫面不需要對方按允許，不能寫成在等同意')
   }
   assert.equal(remoteStateView({ phase: 'watching' }), null, '有畫面了就不蓋')
   assert.equal(remoteStateView({}), null)
