@@ -29,7 +29,9 @@ pub fn hash6(pubkey: &str) -> String {
     if pubkey.is_empty() {
         "-".to_string()
     } else {
-        crate::claude_quota::owner::short_hash(pubkey)
+        // 不用 claude_quota::owner::short_hash：那是電腦版才有的模組，這個檔手機也要編；演算法相同（sha256 前 3 位元組），測試比對過
+        let d = ring::digest::digest(&ring::digest::SHA256, pubkey.as_bytes());
+        d.as_ref().iter().take(3).map(|b| format!("{b:02x}")).collect()
     }
 }
 

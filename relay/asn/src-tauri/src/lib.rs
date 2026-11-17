@@ -1218,7 +1218,15 @@ impl view_d::ViewBackend for LiveBackend {
         async move { device_id::live::alert(&relay, &peer, &kind, &sign_pub).await }
     }
     fn log(&self, line: String) {
-        let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        // 電腦版寫進機器資料夾的 ui.log；手機沒有這份紀錄與時間函式（claude_quota 只有電腦版編），照其他手機端的 log 寫標準錯誤
+        #[cfg(desktop)]
+        {
+            let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        }
+        #[cfg(not(desktop))]
+        {
+            elog!("{line}");
+        }
     }
 }
 

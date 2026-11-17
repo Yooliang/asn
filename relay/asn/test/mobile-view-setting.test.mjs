@@ -31,5 +31,5 @@ test('Rust：存在 bridge.json 的 mobile_view_off（預設開）；指令有�
 test('守門：進行中的觀看每次都用 view_allowed 重讀本機設定（含移動設備）', () => {
   assert.match(lib, /read_settings\(&self\.data_dir\)\.view_allowed\(self\.mobile\)/)
   assert.match(lib, /accept_request\(&row, &me_node, &known, &key, now_s, allow_mobile\)/)
-  assert.match(lib, /Refused::MobileOff\) => Err\(view_stream::MOBILE_OFF/)
+  assert.match(lib, /Refused::MobileOff\) => \{\s*rej = "mobile_off";\s*Err\(view_stream::MOBILE_OFF/)
 })
