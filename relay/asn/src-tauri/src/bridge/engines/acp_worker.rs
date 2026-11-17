@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, upstream_5xx, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -661,17 +661,25 @@ impl Worker {
         // 網路暫時斷線（連不上 Google 之類）：這一輪還沒有任何工具步驟就斷的，等一下自動再試一次；
         // 已經動過手的（跑過指令、改過檔）不重送，免得做第二次，回「可能做了一半」讓人決定。
         // 登入、額度不在這裡處理（is_network_error 會排除它們）
-        let net_err = r.as_ref().err().filter(|e| e.code == "agent" && is_network_error(&e.message)).cloned();
+        // 上游回 5xx 加 HTML 錯誤頁（502 等，#1673）同樣算暫時的：再試一次，條件與限制（沒動過手、只一次）都和網路斷線一樣；
+        // 還是失敗時保留原本的錯誤原文，群組通知才認得出是「那家暫時出錯（502）」（#1366）
+        let net_err = r.as_ref().err().filter(|e| e.code == "agent" && (is_network_error(&e.message) || upstream_5xx(&e.message).is_some())).cloned();
         if let Some(e) = net_err {
+            let up = upstream_5xx(&e.message);
             // 只有 agy 驅動會記「這一輪有沒有工具步驟」；通用 ACP 驅動不知道，保守起見不自動重送（asn調查員／asn真 #526）
             if e.had_steps || cfg.protocol != "agy-stream" {
-                self.log(if e.had_steps { "網路斷線，但這一輪已經有工具步驟：不自動重送" } else { "網路斷線，這類工作者不知道這一輪有沒有動過手：不自動重送" });
-                r = Err(WorkerError::new("agent", "網路斷線，這一輪可能做了一半"));
+                let what = if up.is_some() { "上游暫時出錯" } else { "網路斷線" };
+                self.log(if e.had_steps { format!("{what}，但這一輪已經有工具步驟：不自動重送") } else { format!("{what}，這類工作者不知道這一輪有沒有動過手：不自動重送") });
+                // 上游 5xx：原文（含「(code 502): HTML response」）要留著，群組通知靠它認出是那家暫時出錯（#1366）；後面再補一句可能做了一半
+                r = Err(WorkerError::new("agent", if up.is_some() { format!("{}（這一輪可能做了一半）", e.message) } else { format!("{what}，這一輪可能做了一半") }));
             } else {
                 let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
                 #[cfg(test)]
                 let wait = test_hooks::net_wait_override(&cfg.name).unwrap_or(wait);
-                self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
+                match up {
+                    Some(code) => self.log(format!("上游暫時出錯（{code}）：等 {} 秒自動再試一次", wait / 1000)),
+                    None => self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000)),
+                }
                 // 先把這一輪的驅動拿掉並停下：agy 回完錯誤到行程真的結束之間有空檔（機器忙時更久），
                 // 不拿掉的話 ensure_driver 會沿用這個快結束的驅動，重試的那一輪會被它的結束結案成 crash（#752、#994）。
                 // 拿掉之後它的結束因為世代不同不會再算到這裡；對話編號已經記下，新驅動照樣接回同一段對話
@@ -691,9 +699,10 @@ impl Worker {
                 let first = if first.is_empty() && d.resume_lost() { preamble_for(&cfg) } else { first.clone() };
                 r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
                 remember(&d);
-                let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
+                let still = r.as_ref().err().map(|e| e.code == "agent" && (is_network_error(&e.message) || upstream_5xx(&e.message).is_some())).unwrap_or(false);
                 self.log(if still { "再試一次仍然斷線" } else { "再試一次後恢復正常" });
-                if still {
+                // 上游 5xx 再試還是 5xx：保留原文（那家暫時出錯的說明靠它），不改寫成「連不上」
+                if still && up.is_none() {
                     let who = if cfg.protocol == "agy-stream" { "Google" } else { "網路" };
                     r = Err(WorkerError::new("agent", format!("{who} 暫時連不上，稍後再試")));
                 }

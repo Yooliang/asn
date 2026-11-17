@@ -497,6 +497,39 @@ async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_�
 }
 
 #[tokio::test]
+async fn agy_上游回5xx加HTML錯誤頁_等一下自動再試一次_成功就當沒事_還是502就保留原文_不改成連不上() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let dir = tempfile::tempdir().unwrap();
+    let m1 = dir.path().join("up1").display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    // 第一封：第一次 502，等一下再試就成功；寄件人只看到正常回覆（#1673）
+    h.put_pull(to_agent(1, "Gemini", &format!("@@UP502_ONCE {m1}"))).await;
+    h.wait("再試後成功", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("UP502_ONCE"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("(code 502)") || b.contains("出錯")), "{:?}", h.bodies());
+    assert!(h.log_text().contains("上游暫時出錯（502）：等") && h.log_text().contains("再試一次後恢復正常"), "{}", h.log_text());
+    // 第二封：每次都 502 → 只再試一次，之後照舊回錯誤原文（群組通知靠 (code 502)＋HTML response 認出來，不能被改寫）
+    h.put_pull(to_agent(2, "Gemini", "@@UP502")).await;
+    h.wait("回錯誤", |h| h.bodies().iter().any(|b| b.contains("(code 502)") && b.contains("HTML response"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert_eq!(h.log_text().matches("上游暫時出錯（502）：等").count(), 2, "每封各再試一次、不是無限重試：{}", h.log_text());
+}
+
+#[tokio::test]
+async fn agy_上游502前這一輪已經動過手_不整封重送_檔案只寫一次() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let mark = h.work.path().join("workers").join("Gemini").join("steps502.txt");
+    h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE_UP502 {}", mark.display()))).await;
+    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("(code 502)") && b.contains("HTML response") && b.contains("這一輪可能做了一半"))).await;
+    // 原文要留著：群組通知靠它認出是上游出錯（#1366），不能退回「沒有轉交」
+    let body = h.bodies().into_iter().find(|b| b.contains("這一輪可能做了一半")).unwrap();
+    assert!(crate::bridge::engines::acp_policy::upstream_5xx(&body) == Some(502), "{body}");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(std::fs::read_to_string(&mark).unwrap().lines().count(), 1, "只動手一次，沒有被重送");
+    assert!(!h.log_text().contains("上游暫時出錯（502）：等"), "{}", h.log_text());
+}
+
+#[tokio::test]
 async fn agy_網路重試時舊行程還沒結束_也要開新的行程重試_不沿用快結束的舊驅動() {
     // 假 agy 回網路錯誤後 3 秒才結束、重試只等 50 毫秒：重試時舊行程一定還活著。
     // 沿用它的話，重試的回覆會來自同一個行程（pid 相同），平常還會被它稍後的結束結案成 crash（#752、#994）
