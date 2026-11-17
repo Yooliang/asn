@@ -548,7 +548,6 @@ pub struct Core {
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
 const RESPOND_BUSY_GRACE_MS: u64 = 120_000;
 
-/// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
 /// 群組發言失敗的白話原因（#1135）：只放固定分類，不放後台原文
 fn room_post_reason(err: &str) -> &'static str {
     if err.contains("HTTP 429") {
@@ -573,6 +572,7 @@ fn trigger_target(from: &str) -> Option<(String, String)> {
     }
 }
 
+/// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
 fn json_u64(v: Option<&Value>) -> u64 {
     match v {
         Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64)).unwrap_or(0),
