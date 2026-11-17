@@ -802,16 +802,30 @@ fn 舊視窗_每週重置時間對不上任何人或乙沒有已知重置時間_
     assert_eq!(lg.matches("每週重置時間對不上，這筆不記").count(), 1, "同一原因只記一次：{lg}");
     assert!(lg.contains(&short_hash(UA)) && lg.contains(&short_hash(UB)), "{lg}");
     assert!(!lg.contains(UA) && !lg.contains(UB) && !lg.contains("@x.test"), "{lg}");
-    // 乙在額度檔還沒有已知的每週重置時間：就算讀數等於甲的也只認「目前登入沒有可比」→ 先比乙（無）直接不記
+    // 乙在額度檔還沒有已知的每週重置時間、讀數也不是甲的那一期：不記
     let (h2, ra, _) = two_accounts();
     seed(&h2, json!({ "a@x.test": rec_wk(70, ra) }));
     assert!(feed(&h2, "wa", UA, NOW, 1, status(None, Some((30.0, ra))), NOW + MIN));
     let t2 = transcript(h2.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
     set_win(h2.path(), UB);
-    assert!(!hook_at(&h2, &with_tp(status(None, Some((55.0, ra))), &t2), NOW + 3 * MIN), "乙沒有已知重置時間：不記");
+    assert!(!hook_at(&h2, &with_tp(status(None, Some((55.0, NOW + 6 * DAY))), &t2), NOW + 3 * MIN), "乙沒有已知重置時間、讀數也不是甲的：不記");
     assert_eq!(quota_of(&h2, "a@x.test").weekly_pct, Some(70));
     assert!(load_all(h2.path()).get("b@x.test").is_none());
     assert!(log(&h2).contains("每週重置時間對不上，這筆不記"));
+}
+
+#[test]
+fn 舊視窗_剛換到乙還沒有已知重置時間_讀數是甲存的那一期_記到甲() {
+    let (h, ra, _) = two_accounts();
+    seed(&h, json!({ "a@x.test": rec_wk(70, ra) }));
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((30.0, ra))), NOW + MIN), "甲的視窗回報過，記下 UA 對應甲");
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((55.0, ra))), &t), NOW + 3 * MIN), "乙沒有已知重置時間：略過乙，讀數是甲的那一期，記到甲");
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(45));
+    assert!(load_all(h.path()).get("b@x.test").is_none());
+    let lg = log(&h);
+    assert!(lg.contains("對上對話紀錄那個帳號，記到它") && !lg.contains("@x.test"), "{lg}");
 }
 
 #[test]

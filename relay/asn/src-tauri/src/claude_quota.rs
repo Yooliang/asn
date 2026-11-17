@@ -398,16 +398,15 @@ fn stored_week_reset(all: &HashMap<String, Quota>, email: &str) -> Option<i64> {
 /// 對話紀錄的帳號跟目前登入不同時，用這筆讀數帶的每週重置時間看它屬於誰：
 /// 先比目前登入的帳號（額度檔裡存著的），再比對話紀錄那個帳號（uuid 要對得到 email）。差 10 分鐘內算同一期。
 /// 存著的重置時間已經過了（每週重置後），讀數是下一期（+7 天）也算對上，只推一期；還沒過的不推。
-/// 讀數沒帶每週重置時間、目前登入的帳號還沒有已知的重置時間，都不算對上。
+/// 讀數沒帶每週重置時間不算對上；目前登入的帳號還沒有已知的重置時間，只是略過比它，仍會比對話紀錄那個帳號。
 fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: &str, parsed: &Parsed, now_ms: i64) -> WeekMatch {
     let Some(new_reset) = parsed.week_reset_ms else { return WeekMatch::Neither };
     let all = load_all(home);
     let near = |r: i64| (new_reset - r).abs() <= merge::SAME_RESET_MS;
     // 存著的那一期已經過了，舊視窗送來的就是下一期（只往後推一期）
     let same = |r: i64| near(r) || (r <= now_ms && near(r + WEEK_MS));
-    // 目前登入的帳號在額度檔還沒有已知的每週重置時間：無從比對，不記
-    let Some(cur_reset) = stored_week_reset(&all, cur_email) else { return WeekMatch::Neither };
-    if same(cur_reset) {
+    // 目前登入的帳號在額度檔還沒有已知的每週重置時間（剛換到它、還沒用它開過視窗）：略過這一步，照樣比對話紀錄那個帳號
+    if stored_week_reset(&all, cur_email).is_some_and(same) {
         return WeekMatch::Current;
     }
     match st.email_of_uuid(transcript_uuid) {
