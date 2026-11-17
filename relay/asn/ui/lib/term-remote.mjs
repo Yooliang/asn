@@ -23,6 +23,25 @@ export const REMOTE_TEXT = {
   failed: '沒有開始。',
 }
 
+// 等待與結束的說明直接寫在終端那一格裡（#1699）：狀態列在視窗最下面，只看中間那一格會是一片黑，不知道在等什麼、要做什麼
+export const REMOTE_STATE_TEXT = {
+  // 看畫面不需要對方按「允許」（要按允許的是打字，字在 term-remote-input.mjs），這裡不能寫成在等同意
+  pendingTitle: '正在連到那台……',
+  pendingHint: '連上後畫面就會出來。',
+  endedHint: '要再看，請按「再看一次」。',
+  restartHint: '要再看，請按視窗最下面的「重新看」。',   // 電腦版離開太久而結束：按鈕在狀態列
+}
+
+/**
+ * 終端那一格要寫什麼：發起到收到第一幅之間寫「正在連到那台」；結束寫結束的原因（被拒絕、到期等，用 Rust 回的白話）與下一步；
+ * 正在看（有畫面了）不寫。回 { title, hint } 或 null
+ */
+export function remoteStateView({ phase, note, restartInBar = false } = {}) {
+  if (phase === 'starting' || phase === 'waiting') return { title: REMOTE_STATE_TEXT.pendingTitle, hint: REMOTE_STATE_TEXT.pendingHint }
+  if (phase === 'ended') return { title: String(note ?? '').trim() || REMOTE_TEXT.failed, hint: restartInBar ? REMOTE_STATE_TEXT.restartHint : REMOTE_STATE_TEXT.endedHint }
+  return null
+}
+
 /**
  * 電腦版把狀態放在視窗最下面的狀態列（手機照舊在終端上方一條）：這裡算出狀態列要顯示的 { text, level }，沒有就回 null。
  * level：info（正在看）、ask（等對方回應）、warn（快到期、結束）、danger（正在打字、送不出去，要醒目）。
@@ -158,6 +177,7 @@ export const RemoteView = {
   setup(props, { emit }) {
     const host = ref(null), phase = ref(props.endedNote ? 'ended' : 'starting'), note = ref(props.endedNote), soon = ref(false)
     const expired = ref(Boolean(props.endedNote))   // 電腦版：離開分頁而結束（狀態列要有「重新看」）
+    const stateView = computed(() => remoteStateView({ phase: phase.value, note: note.value, restartInBar: !props.barInline && expired.value }))
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + expired.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, restartable: expired.value } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
@@ -271,7 +291,7 @@ export const RemoteView = {
     const refit = () => { if (term) { term.refresh?.(0, Math.max(0, (term.rows || 1) - 1)); keepCursorVisible() } }
     onMounted(() => { if (props.active && !props.endedNote) void start() })
     onBeforeUnmount(() => { alive = false; gen++; stop(); cleanup(); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, again: start, expire, refit, expired, TEXT: REMOTE_TEXT }
+    return { host, phase, note, soon, stateView, again: start, expire, refit, expired, TEXT: REMOTE_TEXT }
   },
   template: `
 <div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
@@ -279,6 +299,7 @@ export const RemoteView = {
   <p class="term-remote-bar" role="status" v-else-if="barInline && phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
-  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}<button class="aero-btn" type="button" v-if="barInline || !expired" @click="again">{{ TEXT.again }}</button></p>
+  <div class="term-remote-state" role="status" v-if="stateView && phase !== 'ended'"><p class="term-remote-state-t">{{ stateView.title }}</p><p class="term-remote-state-h">{{ stateView.hint }}</p></div>
+  <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ stateView.title }}　{{ stateView.hint }}<button class="aero-btn" type="button" v-if="barInline || !expired" @click="again">{{ TEXT.again }}</button></p>
 </div>`,
 }

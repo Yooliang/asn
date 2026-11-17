@@ -162,3 +162,32 @@ test('狀態列與畫面上的固定句不含英文（給人看的字）', async
   assert.ok(sentences.length > 12)
   for (const s of sentences) assert.ok(!/[A-Za-z]/.test(s), `固定句不該有英文：${s}`)
 })
+
+// #1699：等待或結束時，終端那一格直接寫原因與下一步，不整格黑
+test('終端那一格的說明：等待寫「正在連到那台」（看畫面不用對方按允許）；結束寫原因與下一步；正在看不寫', async () => {
+  const { remoteStateView, REMOTE_STATE_TEXT } = await import('../ui/lib/term-remote.mjs')
+  for (const phase of ['starting', 'waiting']) {
+    const v = remoteStateView({ phase })
+    assert.equal(v.title, '正在連到那台……')
+    assert.equal(v.hint, '連上後畫面就會出來。')
+    assert.doesNotMatch(v.title + v.hint, /允許|同意/, '看畫面不需要對方按允許，不能寫成在等同意')
+  }
+  assert.equal(remoteStateView({ phase: 'watching' }), null, '有畫面了就不蓋')
+  assert.equal(remoteStateView({}), null)
+  const rejected = '那台沒有接受，可能是現在沒有這個夥伴的畫面，或是那台沒有允許別台看'
+  const e = remoteStateView({ phase: 'ended', note: rejected })
+  assert.equal(e.title, rejected, '被拒絕：寫 Rust 回的原因')
+  assert.equal(e.hint, REMOTE_STATE_TEXT.endedHint)
+  assert.match(e.hint, /再看一次/)
+  assert.equal(remoteStateView({ phase: 'ended', note: '' }).title, REMOTE_TEXT.failed, '沒有原因也不留空白')
+  assert.match(remoteStateView({ phase: 'ended', note: '已結束觀看（離開超過 5 分鐘）', restartInBar: true }).hint, /重新看/, '電腦版離開太久：按鈕在狀態列')
+  // 畫面上的字不能出現內部代號
+  for (const t of [REMOTE_STATE_TEXT.pendingTitle, REMOTE_STATE_TEXT.pendingHint, REMOTE_STATE_TEXT.endedHint, REMOTE_STATE_TEXT.restartHint]) assert.doesNotMatch(t, /rejected|phase|waiting|gone|undefined/i)
+})
+
+test('終端那一格的說明接進樣板：等待時疊在黑格上、結束時寫進原因；樣式有', () => {
+  const src = read('../ui/lib/term-remote.mjs')
+  assert.match(src, /<div class="term-remote-state" role="status" v-if="stateView && phase !== 'ended'">/)
+  assert.match(src, /v-if="phase === 'ended'">\{\{ stateView\.title \}\}/, '結束時兩種版面都寫原因（以前電腦版是空的）')
+  assert.match(read('../ui/style.css'), /\.term-remote-state\{position:absolute;inset:0;/)
+})
