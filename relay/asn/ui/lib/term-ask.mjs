@@ -6,7 +6,7 @@ export const POLL_MS = 30_000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH_RE = /^[0-9a-f]{64}$/
 const CTRL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g   // 控制字元與雙向文字控制（防視覺偽裝）
-export const clean = (s, n) => String(s ?? '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(CTRL_RE, ' ').slice(0, n)
+export const clean = (s, n) => String(s ?? '').replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').replace(CTRL_RE, ' ').slice(0, n)
 
 // 後台錯誤（Rust 端字串形如「term_req_decide HTTP 409 hash_mismatch」）→ 中文
 const ERR = [

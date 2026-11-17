@@ -94,3 +94,7 @@ test('守門：只呼叫兩個指令、只在本人按鈕時決定；預覽與�
   assert.match(and, /build_term_decide_body\(&id, &decision, choice_n, &hash\)\?/, '決定前先檢查欄位')
   assert.ok(TEXT.note.includes('不等於授權這個資料夾'))
 })
+
+test('預覽清掉冒號寫法的顏色碼（38:2::r:g:b），不留殘字（#1696）', () => {
+  assert.equal(clean('\x1b[38:2::153:153:153m提問\x1b[39m\x1b[0;1m？', 200), '提問？')
+})
