@@ -190,7 +190,7 @@ pub(crate) fn real_holds_name(name: &str, ci: bool) -> bool {
 
 /// 開新夥伴時撞到「等你按確認」的同名夥伴的說明（只講現況與下一步）
 pub(crate) fn name_taken_msg(name: &str) -> String {
-    format!("已經有叫「{name}」的夥伴開著，正在等你按確認；請切過去確認，或先停止它")
+    format!("已經有叫「{name}」的夥伴視窗開著，還沒進到對話（可能在等你按確認）；請切過去看，或先停止它")
 }
 
 /// 停止「等你按確認」的視窗：先把條件再驗一次，成立才呼叫既有的 stop_partner／stop_gui。
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn 撞名說明的字() {
-        assert_eq!(name_taken_msg("小乙"), "已經有叫「小乙」的夥伴開著，正在等你按確認；請切過去確認，或先停止它");
+        assert_eq!(name_taken_msg("小乙"), "已經有叫「小乙」的夥伴視窗開著，還沒進到對話（可能在等你按確認）；請切過去看，或先停止它");
     }
 
     #[test]
