@@ -1,11 +1,11 @@
 {
-  "version": "0.2.28",
-  "notes": "- 新功能：新電腦還沒有 AI 夥伴時，「夥伴」「對話」頁會出現一張引導卡，帶你一步步開始；沒裝的 AI 會附官網連結，也提醒 Edge 擋下載時怎麼辦\n- 改善：全新安裝的電腦，預設允許自己的其他設備開新視窗，資料夾名單預設放「文件」\n- 改善：用官方安裝程式裝的 Claude Code，就算沒加進 PATH 也偵測得到、開得了視窗\n- 改善：從手機按「重新登入 Claude」時，登入網址只會送回你按的那支手機\n- 改善：「沒開放遠端管理」會說清楚是哪個原因、要去哪裡改\n- 改善：夥伴卡在第一次的確認畫面時會講清楚，電腦版也能直接打開它的終端\n- 改善：開夥伴前會先信任工作資料夾，喚醒、交接、改名、換模型都不會再卡在信任詢問\n- 改善：用系統管理員身分開的視窗，名單上會標示收不到信，寄信時也會直接說原因\n- 改善：登入時保存失敗，訊息改成看得懂、可以照著做\n- 修正：喚醒和交接時，同一段對話不會再開成兩個視窗\n- 修正：群組裡對方那邊暫時出錯時，會寫「那邊暫時出錯」，不再誤寫成「沒有轉交」",
-  "pub_date": "2026-11-16T23:50:52.005Z",
+  "version": "0.2.29",
+  "notes": "- 新功能：電腦版設備頁加「重新登入 Claude」，登入過期時在電腦上就能重登\n- 改善：終端模式下輸入列只留輸入框、送出和麥克風，畫面更乾淨\n- 改善：遠端終端送出後畫面會保留；對方沒同意打字時，自動回到只能看\n- 改善：群組排回覆順位時先排除離線的成員，叫醒順序上離線的人會畫成灰色並標「離線」\n- 改善：ASN 開的夥伴還沒進到對話時，名單、工作管理員和寄信都會講清楚它目前的狀態\n- 改善：用系統管理員身分開的視窗，手機上也看得到標記\n- 修正：釘選徽章不再蓋住搜尋框",
+  "pub_date": "2026-11-17T02:41:45.444Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9mR09ZZ1FuYm1YTXlRN1dVczRHeVRsTHNIdzN0TWlwRndQbElnV1FzVno0b0tSN2dpNW9rL1NmdE9hSUduU3VSemJ2aFVnMjZwVGprMzhkaUNpOVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODM5ODQwCWZpbGU6QVNOXzAuMi4yOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI4CkhXNncrWjlQS2dWaXJMb3lOVUpsbGZtU1d5bXNncVEwZDBmSUxIK3d5OHJwekhBYWM2dDJzd1VmOVh6MFZVVGNhWDdycXlFUlpWbnlXRXl5NGpONERRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.28_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhFd3N3K3pvOS9VQzZ5K3BqazlLbkxuR0RoeGlyVHU3NGtGbFF3eitmRDdkZW12dVUwQU96UURDdHVweG1kaGtRb1dEQkJwYm1ZMk40eWpuTEpWekEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODgzMTk2CWZpbGU6QVNOXzAuMi4yOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjI5CnJkWWhlWjZmaWlzOXpuUVFxNXNrM3hPSDlLeXE0UGNXL3VZUSthRWw5MjRuZ2xPUXdHL0ExMUN2WmFQN3VJbE9scGkzL0hlZklqWjBFMDhjbHZiekJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.29_x64-setup.exe"
     }
   }
 }
