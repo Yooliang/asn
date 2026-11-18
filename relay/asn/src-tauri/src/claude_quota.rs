@@ -372,33 +372,91 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     // 對話紀錄記的是「這個視窗開的時候的帳號」；ASN 切換帳號後，同一個視窗之後送來的額度可能已經是新帳號的（對話紀錄的身分不會變）。
     // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：uuid 一致才收，不一致或讀不到都不記。
     // 一致時，記到哪個帳號底下直接用同一份 oauthAccount 裡的 email，不查帳號庫（帳號庫可能存錯）。
-    let Some(email) = window_email(home, cfg, input, &o, now_ms) else { return false };
-    hook_owned(home, &email, &o.account_uuid, parsed, read_ms, now_ms)
+    // 不一致時（換帳號後的舊視窗）看這筆讀數的每週重置時間屬於哪個帳號，見 `window_email`。
+    let Some((email, uuid)) = window_email(home, cfg, input, &o, &parsed, now_ms) else { return false };
+    hook_owned(home, &email, &uuid, parsed, read_ms, now_ms)
 }
 
-/// 視窗現在登入的帳號 uuid 跟對話紀錄的身分一致，回同一份 oauthAccount 裡的 email（正規化後）；不一致、讀不到（含沒有 email）都回 None、不記，
-/// 寫一行 log（只有兩邊 uuid 與視窗路徑雜湊的前 6 碼；同一個原因連續發生只記一次）
-fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, now_ms: i64) -> Option<String> {
+/// 不一致時，這筆讀數的每週重置時間對上誰
+enum WeekMatch {
+    /// 目前登入的帳號
+    Current,
+    /// 對話紀錄那個帳號（附它的 email）
+    Transcript(String),
+    /// 對不上任何一邊（或沒有可比的重置時間）
+    Neither,
+}
+
+/// 每週額度一期的長度
+const WEEK_MS: i64 = 7 * 24 * 3_600_000;
+
+/// 這個帳號在額度檔裡存著的每週重置時間（要有每週百分比才算）
+fn stored_week_reset(all: &HashMap<String, Quota>, email: &str) -> Option<i64> {
+    all.get(email).filter(|q| q.weekly_pct.is_some()).and_then(|q| merge::stored_resets(q).1)
+}
+
+/// 對話紀錄的帳號跟目前登入不同時，用這筆讀數帶的每週重置時間看它屬於誰：
+/// 先比目前登入的帳號（額度檔裡存著的），再比對話紀錄那個帳號（uuid 要對得到 email）。差 10 分鐘內算同一期。
+/// 存著的重置時間已經過了（每週重置後），讀數是下一期（+7 天）也算對上，只推一期；還沒過的不推。
+/// 讀數沒帶每週重置時間不算對上；目前登入的帳號還沒有已知的重置時間，只是略過比它，仍會比對話紀錄那個帳號。
+fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: &str, parsed: &Parsed, now_ms: i64) -> WeekMatch {
+    let Some(new_reset) = parsed.week_reset_ms else { return WeekMatch::Neither };
+    let all = load_all(home);
+    let near = |r: i64| (new_reset - r).abs() <= merge::SAME_RESET_MS;
+    // 存著的那一期已經過了，舊視窗送來的就是下一期（只往後推一期）
+    let same = |r: i64| near(r) || (r <= now_ms && near(r + WEEK_MS));
+    // 目前登入的帳號在額度檔還沒有已知的每週重置時間（剛換到它、還沒用它開過視窗）：略過這一步，照樣比對話紀錄那個帳號
+    if stored_week_reset(&all, cur_email).is_some_and(same) {
+        return WeekMatch::Current;
+    }
+    match st.email_of_uuid(transcript_uuid) {
+        Some(e) if stored_week_reset(&all, e).is_some_and(same) => WeekMatch::Transcript(e.to_string()),
+        _ => WeekMatch::Neither,
+    }
+}
+
+/// 這筆讀數該記到哪個帳號：回 (email, 那個帳號的 uuid)；不記回 None。
+/// - 對話紀錄的 uuid 跟目前登入（視窗自己的 `.claude.json` oauthAccount）一致：記到目前登入的 email。
+/// - 不一致（換帳號後，舊視窗的對話紀錄還是舊帳號）：用讀數的每週重置時間看屬於誰（`week_match`），對上目前登入就記到目前登入，
+///   對上對話紀錄那個帳號就記到它，都對不上不記。
+/// - 目前登入讀不到：不記。
+/// 不記的、與不一致時記到哪邊的，都寫一行 log（只有 uuid 與視窗路徑雜湊的前 6 碼；同一個原因連續發生只記一次）。
+/// 順便記下這次看到的登入身分（uuid → email），之後換帳號了還能知道舊 uuid 是誰。
+fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, parsed: &Parsed, now_ms: i64) -> Option<(String, String)> {
     let cur = owner::window_identity(home, cfg);
-    let matched = cur.as_ref().filter(|(u, _)| u.eq_ignore_ascii_case(&o.account_uuid)).map(|(_, e)| e.clone());
     let mut st = state::load(home);
-    if matched.is_some() {
-        if st.logged_window.take().is_some() {
+    let before = st.clone();
+    if let Some((cu, ce)) = &cur {
+        st.remember_identity(cu, ce);
+    }
+    if let Some((cu, ce)) = cur.as_ref().filter(|(u, _)| u.eq_ignore_ascii_case(&o.account_uuid)) {
+        st.logged_window = None;
+        if st != before {
             state::save(home, &st);
         }
-        return matched;
+        return Some((ce.clone(), cu.clone()));
     }
     let win = owner::transcript_of(input).map(|p| owner::short_hash(&p.to_string_lossy())).unwrap_or_default();
-    let line = match cur {
-        Some((c, _)) => format!("視窗帳號對不上：視窗 {win}，對話紀錄 {}、視窗目前登入 {}，這筆不記", owner::short_hash(&o.account_uuid), owner::short_hash(&c)),
-        None => format!("視窗帳號讀不到：視窗 {win}，對話紀錄 {}，這筆不記", owner::short_hash(&o.account_uuid)),
+    let h_o = owner::short_hash(&o.account_uuid);
+    let (line, pick) = match &cur {
+        None => (format!("視窗帳號讀不到：視窗 {win}，對話紀錄 {h_o}，這筆不記"), None),
+        Some((cu, ce)) => {
+            let head = format!("視窗帳號對不上：視窗 {win}，對話紀錄 {h_o}、目前登入 {} 不同，", owner::short_hash(cu));
+            match week_match(home, &st, ce, &o.account_uuid, parsed, now_ms) {
+                WeekMatch::Current => (format!("{head}每週重置時間對上目前登入，記到目前登入"), Some((ce.clone(), cu.clone()))),
+                WeekMatch::Transcript(e) => (format!("{head}每週重置時間對上對話紀錄那個帳號，記到它"), Some((e, o.account_uuid.clone()))),
+                WeekMatch::Neither => (format!("{head}每週重置時間對不上，這筆不記"), None),
+            }
+        }
     };
     if st.logged_window.as_deref() != Some(line.as_str()) {
         merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
         st.logged_window = Some(line);
+    }
+    if st != before {
         state::save(home, &st);
     }
-    None
+    pick
 }
 
 /// 帳號庫可能存錯的警示（只警示，不影響記不記）：多久才再看一次帳號庫（不用每次狀態列都列目錄）
