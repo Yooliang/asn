@@ -48,7 +48,8 @@ import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { TERM_CLOSE_KEY, TERM_CLOSE_NOTE, closeTermRun, termBarBlocked, termCloseTitle, termManageItems, composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { ruleSegments as ruleSegs } from './lib/perm-ask.mjs'
-import { createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
+import { HOLD_TIP, createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
+import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
@@ -1554,6 +1555,14 @@ async function adoptUnlockConfirm() {
 const permissionDlg = reactive({ open: false, name: '', prompt: null, busy: false, error: '' })
 const permissionDlgView = computed(() => permissionView(permissionDlg.prompt, permissionDlg.name))
 function closePermissionDlg() { permissionDlg.open = false }
+// 有危險判斷時的「不再詢問」類：按住一秒才送（比照手機）；放開、移開、視窗失焦、框關了或正在送出都取消
+const permHold = createHold({ onDone: n => { void answerPermission(true, n) }, state: reactive({ key: null }) })
+watch(() => [permissionDlg.open, permissionDlg.busy, permissionDlg.prompt?.choice_hash], () => permHold.cancel())
+window.addEventListener('blur', () => permHold.cancel())
+const permPress = o => { if (!o.hold) void answerPermission(o.kind !== 'deny', o.n) }   // 要按住的，放開時的 click 不算
+const permHoldOk = o => o.hold && !o.disabled && !permissionDlg.busy
+function permHoldStart(o) { if (permHoldOk(o)) permHold.start(o.n) }
+function permHoldKey(o, e) { if (permHoldOk(o) && permHold.keyDown(o.n, e)) e.preventDefault() }
 async function openPermissionDlg(item) {
   if (permissionDlg.open) return
   // 本人正開著它的終端畫面：不跳框搶按鍵，畫面上會有一行提示。下一輪再問，畫面關了就照常跳
@@ -1563,12 +1572,14 @@ async function openPermissionDlg(item) {
     Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
   } catch (e) { console.info('[ASN] 權限詢問讀不到', item.name, String(e?.message ?? e)) }
 }
-async function answerPermission(allow) {
+async function answerPermission(allow, choice = null) {
   const p = permissionDlg.prompt
   if (!p || permissionDlg.busy) return
   permissionDlg.busy = true; permissionDlg.error = ''
   try {
-    await transport.partnerPermissionAnswer(p.name, p.hash, allow)
+    // 照原選項按的：帶選項編號和綁定的雜湊；舊流程（外來訊息、舊版後端）照舊只送允許／拒絕
+    if (choice !== null) await transport.partnerPermissionChoose(p.name, p.choice_hash, choice)
+    else await transport.partnerPermissionAnswer(p.name, p.hash, allow)
     permissionDlg.open = false
   } catch (e) { permissionDlg.error = String(e?.message ?? e) } finally { permissionDlg.busy = false }
 }
@@ -2214,7 +2225,7 @@ const app = createApp({
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
+      ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
       opDlg, closeOpDlg, launchNewFromOp, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,

@@ -2088,9 +2088,33 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 權限詢問的文字，只給本機畫面的命令用（其他畫面、其他代號都拿不到文字）
     fn permission_prompt_with(&self, name: &str, session_pid: Option<u32>) -> Result<PermissionPrompt, String> {
-        let (_, screen, p) = self.permission_checked(name, session_pid)?;
+        let (snap, screen, p) = self.permission_checked(name, session_pid)?;
         let kind = if screen.kind == super::claude_screen::ClaudeScreenKind::HeldMessage { "held_message" } else { "permission" };
-        Ok(PermissionPrompt { name: name.to_string(), hash: prompt_hash(&p), text: p.text, complete: p.complete, kind })
+        let hash = prompt_hash(&p);
+        let (complete, options, risk, choice_hash) = desk_view(&screen, &p, &snap.cwd);
+        Ok(PermissionPrompt { name: name.to_string(), hash, text: p.text, complete, kind, options, risk, choice_hash })
+    }
+
+    /// 本人在本機畫面按了框裡的某一個選項（照原本的選項顯示）。送之前全部重查：框還在、內容與選項沒變、
+    /// 這個數字還在選項裡；不是「拒絕」的選項要看得到完整提示才送。只送一個數字鍵，不帶 Enter
+    fn permission_choose_with(&self, name: &str, hash: &str, n: u32, session_pid: Option<u32>) -> Result<(), String> {
+        let (snap, screen, p) = self.permission_checked(name, session_pid)?;
+        if screen.kind != super::claude_screen::ClaudeScreenKind::Permission {
+            return Err("這個提示沒有這個選項".into());
+        }
+        let (complete, options, _, choice_hash) = desk_view(&screen, &p, &snap.cwd);
+        if choice_hash != hash {
+            return Err("提示內容變了，沒有送出".into());
+        }
+        let opt = options.iter().find(|o| o.n == n).ok_or("這個提示沒有這個選項")?;
+        if opt.kind != "deny" && !complete {
+            return Err("提示的內容沒有完整讀到，請到它的視窗確認".into());
+        }
+        if !(1..=9).contains(&n) {
+            return Err("這個提示沒有這個選項".into());
+        }
+        let dir = self.dir()?;
+        self.wez(&dir).send_bytes(&snap.window.sock, snap.pane_id, &n.to_string())
     }
 
     /// 傳到手機的框：只有文字和選項（#853）。全套檢查和本機相同
@@ -3231,11 +3255,55 @@ pub struct PermissionPrompt {
     pub name: String,
     pub text: String,
     pub hash: String,
-    /// 看得到完整的提示才可以按「允許」
+    /// 看得到完整的提示才可以按「允許」（電腦版的框可以捲動，行數多不算不完整）
     pub complete: bool,
     /// "permission"（權限框）或 "held_message"（外來訊息確認框）
     pub kind: &'static str,
+    /// 權限框的完整原始選項（外來訊息框是空的）
+    pub options: Vec<DeskOption>,
+    /// 危險判斷（沿用手機那一套，只有權限框會判斷）
+    pub risk: DeskRisk,
+    /// 按選項時帶回來的雜湊：綁文字、選項、完整與否
+    pub choice_hash: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DeskOption {
+    pub n: u32,
+    pub label: String,
+    /// allow_once／allow_always／deny／other
+    pub kind: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DeskRisk {
+    pub codes: Vec<&'static str>,
+    pub uncertain: bool,
+}
+
+/// 電腦版確認框要顯示的：是否完整、完整選項、危險判斷、綁定雜湊
+fn desk_view(screen: &super::claude_screen::ClaudeScreen, p: &super::claude_screen::PromptText, cwd: &str) -> (bool, Vec<DeskOption>, DeskRisk, String) {
+    use super::claude_screen::ClaudeScreenKind as K;
+    // 行數多但沒被收起來：框裡可以捲動看完，算完整（上限避免無限長）
+    let complete = p.complete || (p.only_too_long && p.text.lines().count() <= DESK_TEXT_MAX_LINES);
+    let options: Vec<DeskOption> = super::claude_screen::phone_options_full(screen)
+        .into_iter()
+        .map(|o| DeskOption { n: o.n, label: o.label, kind: super::claude_screen::option_kind_code(o.kind) })
+        .collect();
+    let risk = if screen.kind == K::Permission {
+        let mut r = super::perm_risk::assess(&p.text, screen.options.len(), Some(cwd).filter(|c| !c.is_empty()));
+        r.uncertain |= !complete;
+        DeskRisk { codes: r.codes, uncertain: r.uncertain }
+    } else {
+        DeskRisk { codes: Vec::new(), uncertain: false }
+    };
+    let opts: Vec<String> = options.iter().map(|o| format!("{}:{}:{}", o.n, o.kind, o.label)).collect();
+    let basis = format!("{}\u{0}{}\u{0}{complete}\u{0}{}", prompt_hash(p), opts.join("\u{1}"), risk.codes.join(","));
+    (complete, options, risk, crate::term_remote::hash_hex(&basis))
+}
+
+/// 電腦版確認框能捲動看完的行數上限
+const DESK_TEXT_MAX_LINES: usize = 400;
 
 /// 這個視窗名現在活著的 Claude 程序：session 檔的編號活著、建立時間相符，而且只有一份；不是一份就回 None
 #[cfg(feature = "gui")]
@@ -3352,6 +3420,13 @@ pub fn partner_permission_prompt(terms: &LiveTerms, name: &str) -> Result<Permis
 pub fn partner_permission_answer(terms: &LiveTerms, name: &str, hash: &str, allow: bool) -> Result<(), String> {
     screen_watch_required()?;
     terms.permission_answer_with(name, hash, allow, live_session_named(name))
+}
+
+/// 本機畫面的命令用：本人按了框裡的某個選項
+#[cfg(feature = "gui")]
+pub fn partner_permission_choose(terms: &LiveTerms, name: &str, hash: &str, n: u32) -> Result<(), String> {
+    screen_watch_required()?;
+    terms.permission_choose_with(name, hash, n, live_session_named(name))
 }
 
 /// 本機畫面的命令用：開關關著或沒有提示就是空的。不讀畫面，只回背景工作判斷好的結果
@@ -8077,6 +8152,67 @@ mod tests {
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("太長"));
             assert!(sent(&rig).is_empty());
             rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2"]);
+        }
+
+        /// 頂端有實線、本文很長（超過 40 行）的權限框
+        fn long_permission_screen(body: &str) -> String {
+            let rule = "─".repeat(80);
+            let lines: Vec<String> = (1..=60).map(|i| format!(" echo line-{i}")).collect();
+            format!("{rule}
+ Bash command
+ {body}
+{}
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for this command
+   3. No
+", lines.join("
+"))
+        }
+
+        #[test]
+        fn 電腦版框_給完整選項和危險判斷_長提示捲動看完也算完整() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = long_permission_screen("rm -rf build");
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(p.complete, "行數多但沒被收起來，框裡可以捲動看完：{p:?}");
+            assert_eq!(p.options.iter().map(|o| (o.n, o.kind)).collect::<Vec<_>>(), vec![(1, "allow_once"), (2, "allow_always"), (3, "deny")]);
+            assert!(p.risk.codes.contains(&"delete_recursive"), "{:?}", p.risk);
+            // 手機那邊的判斷不變：太長仍不算完整
+            let phone = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(!phone.complete);
+        }
+
+        #[test]
+        fn 電腦版框_按選項只送那個數字_不帶_enter() {
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = long_permission_screen("echo hi");
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            rig.svc.permission_choose_with("小乙", &p.choice_hash, 2, Some(SESSION_PID)).unwrap();
+            rig.svc.permission_choose_with("小乙", &p.choice_hash, 3, Some(SESSION_PID)).unwrap();
+            assert_eq!(sent(&rig), vec!["2", "3"]);
+            assert!(rig.svc.permission_choose_with("小乙", &p.choice_hash, 7, Some(SESSION_PID)).unwrap_err().contains("沒有這個選項"));
+            assert!(rig.svc.permission_choose_with("小乙", "別的雜湊", 1, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            *rig.runner.inner.screen.borrow_mut() = long_permission_screen("echo bye");
+            assert!(rig.svc.permission_choose_with("小乙", &p.choice_hash, 1, Some(SESSION_PID)).unwrap_err().contains("變了"));
+            assert_eq!(sent(&rig), vec!["2", "3"]);
+        }
+
+        #[test]
+        fn 電腦版框_真的讀不完整時只能拒絕() {
+            let rig = permission_rig();
+            // 看不到框的開頭
+            *rig.runner.inner.screen.borrow_mut() = " rm -rf a
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+".into();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(!p.complete);
+            assert!(rig.svc.permission_choose_with("小乙", &p.choice_hash, 1, Some(SESSION_PID)).unwrap_err().contains("完整"));
+            assert!(sent(&rig).is_empty());
+            rig.svc.permission_choose_with("小乙", &p.choice_hash, 2, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["2"]);
         }
 

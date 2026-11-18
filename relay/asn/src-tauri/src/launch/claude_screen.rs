@@ -113,6 +113,8 @@ pub struct PromptText {
     pub text: String,
     /// 看得到提示的開頭，而且沒有超過行數上限。不完整就不能按「允許」
     pub complete: bool,
+    /// 只有行數超過上限（看得到開頭、也沒被收起來）：電腦版的框可以捲動看完，所以另外標出來；手機仍照 `complete` 判斷
+    pub only_too_long: bool,
     /// 不顯示、只綁進雜湊的內容：外來訊息框是整個框的內文（顯示的只是摘要，兩則摘要相同也要分得出來）；其他是空字串
     pub bind: String,
 }
@@ -150,7 +152,8 @@ pub fn permission_text(screen: &str) -> Option<PromptText> {
     // Claude Code 自己把長內容收起來（「… +12 lines」「(ctrl+o to expand)」這類）：畫面上本來就不完整（#1445 asn真 審查必修 2）
     let elided = kept.iter().any(|l| is_elision_line(l));
     let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES && !elided;
-    Some(PromptText { text: kept.join("\n"), complete, bind: String::new() })
+    let only_too_long = top.is_some() && !elided && kept.len() > PROMPT_TEXT_MAX_LINES;
+    Some(PromptText { text: kept.join("\n"), complete, only_too_long, bind: String::new() })
 }
 
 /// Claude Code 收起長內容時留的記號：「… +N lines」「... +N lines」，或「ctrl+o to expand」這類展開提示。
@@ -310,9 +313,9 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
     match classify(screen)?.kind {
         ClaudeScreenKind::Permission => permission_text(screen),
         // 外來訊息只顯示整理過的摘要（寄件名、前幾行），不放畫面原文
-        ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true, bind: held_bind(screen) }),
+        ClaudeScreenKind::HeldMessage => Some(PromptText { text: held_phone_text(&held_view(screen)), complete: true, only_too_long: false, bind: held_bind(screen) }),
         // 額度選單：手機只看固定文字；選單本身（游標不算）綁進雜湊，選項或重置時間變了就答不出去
-        ClaudeScreenKind::UsageMenu => Some(PromptText { text: PHONE_USAGE_TEXT.to_string(), complete: true, bind: usage_menu_bind(screen)? }),
+        ClaudeScreenKind::UsageMenu => Some(PromptText { text: PHONE_USAGE_TEXT.to_string(), complete: true, only_too_long: false, bind: usage_menu_bind(screen)? }),
         ClaudeScreenKind::Question | ClaudeScreenKind::QuestionView => {
             let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
             let end = lines.iter().rposition(|l| !l.trim().is_empty())? + 1;
@@ -320,7 +323,7 @@ pub fn phone_text(screen: &str) -> Option<PromptText> {
             // 自由輸入那一行（「N. Type something.」）手機沒有按鈕，內容也不放（#914）
             let kept: Vec<String> = lines[q.top + 1..q.bottom].iter().filter(|l| !is_free_input_row(l)).map(|l| hide_cursor(&clean_prompt_line(l))).collect();
             let complete = kept.len() <= PROMPT_TEXT_MAX_LINES;
-            Some(PromptText { text: kept.join("\n").trim().to_string(), complete, bind: String::new() })
+            Some(PromptText { text: kept.join("\n").trim().to_string(), complete, only_too_long: false, bind: String::new() })
         }
         _ => None,
     }

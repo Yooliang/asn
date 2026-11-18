@@ -461,13 +461,20 @@
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
 
   <asn-dialog v-if="permissionDlg.open" :title="permissionDlgView.held ? permissionDlgView.title : `「${permissionDlg.name}」在等你同意`" @close="closePermissionDlg">
+    <div class="permission-risk" role="alert" v-if="permissionDlgView.risk"><b>{{ permissionDlgView.risk.lead }}</b><p v-for="l in permissionDlgView.risk.more" :key="l">{{ l }}</p></div>
     <pre class="permission-text"><template v-for="(g, i) in ruleSegs(permissionDlgView.text)" :key="i"><hr class="term-prompt-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></pre>
-    <p class="launch-notice-body" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
+    <p class="launch-notice-body permission-hint" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
     <p class="launch-notice-body model-err" v-if="permissionDlg.error">{{ permissionDlg.error }}</p>
+    <div class="permission-opts" v-if="permissionDlgView.options">
+      <button class="aero-btn permission-opt" :class="{ danger: o.danger, hold: o.hold, holding: permHold.state.key === o.n }" type="button" v-for="o in permissionDlgView.options" :key="o.n" :disabled="permissionDlg.busy || o.disabled" :aria-describedby="o.hold ? 'perm-hold-tip-' + o.n : null"
+        @click="permPress(o)" @pointerdown="permHoldStart(o)" @pointerup="permHold.cancel()" @pointerleave="permHold.cancel()" @pointercancel="permHold.cancel()" @contextmenu="o.hold && $event.preventDefault()" @keydown="permHoldKey(o, $event)" @keyup="permHold.keyUp($event)"><span class="permission-fill" v-if="o.hold" aria-hidden="true"></span><span class="permission-opt-t">{{ o.n }}. {{ o.label }}</span><small class="permission-hold-tip" v-if="o.hold" :id="'perm-hold-tip-' + o.n">{{ HOLD_TIP }}</small></button>
+    </div>
     <div class="partner-actions">
       <button class="aero-btn" type="button" @click="closePermissionDlg">之後再說</button>
-      <button class="aero-btn" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canDeny" @click="answerPermission(false)">{{ permissionDlgView.held ? permissionDlgView.denyLabel : '拒絕' }}</button>
-      <button class="aero-btn primary" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canAllow" @click="answerPermission(true)">{{ permissionDlgView.held ? permissionDlgView.allowLabel : '允許這一次' }}</button>
+      <template v-if="!permissionDlgView.options">
+        <button class="aero-btn" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canDeny" @click="answerPermission(false)">{{ permissionDlgView.held ? permissionDlgView.denyLabel : '拒絕' }}</button>
+        <button class="aero-btn primary" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canAllow" @click="answerPermission(true)">{{ permissionDlgView.held ? permissionDlgView.allowLabel : '允許這一次' }}</button>
+      </template>
     </div>
   </asn-dialog>
   <asn-dialog v-if="launchNotice.open" :title="launchNotice.title" @close="closeLaunchNotice">
