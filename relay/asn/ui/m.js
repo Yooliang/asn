@@ -80,7 +80,7 @@ import { createRoomHub } from './lib/room-hub.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
-import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
+import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
@@ -564,6 +564,7 @@ const app = createApp({
     // 內頁：目前的內頁與標題（標題在內頁自己的頂端）
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
     const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : fourthPage.value?.kind === 'acct' ? acctTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
+    const tabIconOf = t => (t === PAGE_TAB ? pageIcon(fourthPage.value, acctCur.value ? 'devices' : acctSw.tab) : tabIcon(t))   // 第四格有內頁時用內頁自己的圖示（設定的某一項＝設定清單那一列的圖）
     const tabLabel = t => tabLabelOf(t, fourthTitle.value)   // 第四格有內頁時寫內頁的標題
     // 內頁的「關閉」：整個收起內頁，回到底下那個分頁（雲端代理的金鑰還在畫面上時先問）
     const closePage = () => askBeforeLeave(null, () => fourthNav.closePage())
@@ -1615,7 +1616,7 @@ const app = createApp({
     }
 
     return {
-      itemIcon, isDangerItem, tabIcon,
+      itemIcon, isDangerItem, tabIcon, tabIconOf,
       mobileRemoteViewApi, mobileRemoteInputApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（案 A：對話頁「訊息／終端」切換）、在下方輸入框打字（#1378）；發起先過生物辨識，不能用電腦版的 remoteViewApi／remoteInputApi
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
