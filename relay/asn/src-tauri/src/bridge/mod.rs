@@ -64,12 +64,19 @@ pub struct BridgeSettings {
     pub perm_phone_off: bool,
     /// 使用者關掉了「允許移動設備查看終端」。預設是開的，所以記「關」。關掉後，手機看這台的請求一律拒絕，進行中的也會結束
     pub mobile_view_off: bool,
+    /// 使用者關掉了「允許遠端在這台打字」（#1745）。預設是開的，所以記「關」。關掉後，別台要在這台打字一律馬上拒絕，進行中的打字也會結束；看畫面不受影響
+    pub remote_input_off: bool,
 }
 
 impl BridgeSettings {
     /// 別台現在還能不能看（或打字）這台：本機「允許其他設備替這台開新視窗」要開著；看的那台是移動設備時，還要「允許移動設備查看終端」開著
     pub fn view_allowed(&self, mobile_viewer: bool) -> bool {
         self.allow_remote_launch && !(mobile_viewer && self.mobile_view_off)
+    }
+
+    /// 別台現在能不能在這台打字（#1745）：本機「允許遠端在這台打字」要開著（預設開）；看畫面不看這個
+    pub fn input_allowed(&self) -> bool {
+        !self.remote_input_off
     }
 }
 
@@ -99,10 +106,10 @@ fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off") }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off") }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off, "mobile_view_off": s.mobile_view_off }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off, "mobile_view_off": s.mobile_view_off, "remote_input_off": s.remote_input_off }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -381,6 +388,8 @@ pub struct Status {
     pub perm_phone: bool,
     /// 設定：允許移動設備查看終端（設定頁的開關現在的值，預設開）
     pub mobile_view: bool,
+    /// 設定：允許遠端在這台打字（設定頁的開關現在的值，預設開；#1745）
+    pub remote_input: bool,
     /// 設定：沒指定收件人的信交給哪個視窗（空＝交給本人）
     pub unaddressed_to: String,
     pub error: Option<String>,
@@ -425,7 +434,7 @@ impl Manager {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
         let fetch = term_fetch_status();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, remote_input: !s.remote_input_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -531,6 +540,14 @@ impl Manager {
     pub fn set_mobile_view(&self, on: bool) -> Result<Status, String> {
         let mut s = read_settings(&self.data_dir);
         s.mobile_view_off = !on;
+        write_settings(&self.data_dir, s)?;
+        Ok(self.status())
+    }
+
+    /// 打開／關閉「允許遠端在這台打字」（#1745）。只存檔：被打字的這台每次領請求、每次交字前都重讀設定，不用通知背景工作
+    pub fn set_remote_input(&self, on: bool) -> Result<Status, String> {
+        let mut s = read_settings(&self.data_dir);
+        s.remote_input_off = !on;
         write_settings(&self.data_dir, s)?;
         Ok(self.status())
     }

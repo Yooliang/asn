@@ -165,7 +165,7 @@ mod tests {
         let lib = include_str!("lib.rs");
         let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}").next().unwrap();
         let check = f.find("view_seen::check_unseen(").expect("驗章前要查");
-        let verify = f.find("view_stream::accept_request(").expect("有驗章");
+        let verify = f.find("view_stream::accept_request_with(").expect("有驗章");
         let record = f.find("view_seen::record(").expect("接受前要記");
         let accept = f.find("\"term_view_accept\"").expect("有回覆接受");
         assert!(check < verify && verify < record && record < accept, "順序：查 → 驗章 → 記 → 回覆接受");

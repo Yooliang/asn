@@ -139,6 +139,7 @@ pub fn end_text(reason: &str) -> &'static str {
         "rejected" => "那台沒有接受，可能是現在沒有這個夥伴的畫面，或是那台沒有允許別台看",
         "mobile_off" => "這台電腦不允許移動設備查看終端",
         "busy" => "那台有另一個確認還沒處理，請先到那台電腦把它按掉，再重新開始",
+        "input_off" => "這台沒有開啟遠端打字（到那台的「設定 → 視窗與系統匣」，打開「允許遠端在這台打字」）",
         "held_prompt" => "對方畫面出現需要本人確認的框，這次觀看和遠端輸入都已經結束。請在那台電腦的畫面上處理完再重新開始",
         "target_ended" => "那台結束了觀看",
         "expired" => "時間到了，要再看請再按一次",
@@ -220,6 +221,8 @@ mod tests {
         assert_eq!(end_text("mobile_off"), "這台電腦不允許移動設備查看終端");
         assert_eq!(end_text("busy"), "那台有另一個確認還沒處理，請先到那台電腦把它按掉，再重新開始");
         assert_ne!(end_text("busy"), end_text("rejected"), "忙碌要有自己的一句話，不能和沒接受混在一起");
+        assert_eq!(end_text("input_off"), "這台沒有開啟遠端打字（到那台的「設定 → 視窗與系統匣」，打開「允許遠端在這台打字」）");
+        assert_ne!(end_text("input_off"), end_text("rejected"), "沒開啟遠端打字要有自己的一句話");
         assert!(end_text("held_prompt").starts_with("對方畫面出現需要本人確認的框，這次觀看和遠端輸入都已經結束"));
     }
 

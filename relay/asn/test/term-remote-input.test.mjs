@@ -23,12 +23,11 @@ test('守門：送字的命令只在打字的 API；看畫面那份照舊沒有'
   }
 })
 
-test('守門：「打字不用每次問」只有設定頁那條路能改', () => {
-  const hits = uiFiles().filter(f => fs.readFileSync(f, 'utf8').includes('device_known_input_no_ask'))
-  assert.deepEqual(hits.map(f => f.split(/[\\/]/).pop()), ['list.js'])
-  assert.ok(SETTING_OPS.includes('known-input-no-ask'))
+test('守門：遠端打字沒有確認框也沒有每台的「不用問」設定（#1745）', () => {
+  assert.ok(!SETTING_OPS.includes('known-input-no-ask'))
+  assert.equal(uiFiles().filter(f => fs.readFileSync(f, 'utf8').includes('device_known_input_no_ask')).length, 0, '畫面不再有這個命令')
   const lib = read('../src-tauri/src/lib.rs')
-  assert.equal(lib.split('device_id::live::set_input_no_ask(').length - 1, 1, 'Rust 只有一個命令能改')
+  assert.ok(!lib.includes('set_input_no_ask') && !lib.includes('confirm_input') && !lib.includes('input_consent::ask('))
 })
 
 test('打字的畫面：只有這支有按鍵的路；xterm 不關輸入；看畫面那支照舊只能看', () => {
@@ -53,12 +52,6 @@ test('送不出去要說，不默默丟掉：整段沒送就照實講', () => {
   assert.match(INPUT_TEXT.sendFailed, /沒有送出/)
   const rs = read('../src-tauri/src/view_input.rs')
   for (const k of ['TOO_FAST', 'TOO_LONG', 'TOO_MUCH']) assert.match(rs, new RegExp(`pub const ${k}: &str = "[^"]*這段沒有送出`), k + ' 要講清楚這段沒有送出')
-})
-
-test('認得的電腦：打字不用問只認 true，舊資料沒有這欄當要問', () => {
-  const v = normalizeView({ peers: [{ node: 'a', name: 'A', input_no_ask: true }, { node: 'b', name: 'B', input_no_ask: 'yes' }, { node: 'c', name: 'C' }] })
-  assert.deepEqual(v.peers.map(p => p.inputNoAsk), [true, false, false])
-  assert.match(KNOWN.inputNoAskWarn, /紅條/)
 })
 
 test('被打字的紅條比被看醒目，而且寫可以回答權限框', () => {

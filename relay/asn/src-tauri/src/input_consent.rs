@@ -1,22 +1,13 @@
-//! 別台要在這台打字（0.2.10）：問被打字這台的本人。
+//! 別台要在這台打字：紅條上的「誰」（名字＋指紋）與「允許替這台登入」的確認框。
 //!
-//! - **同意框是 ASN 的視窗（系統對話框），不在終端裡：** 終端裡的提示可能被當成按鍵答掉。問之前先把 ASN 叫到前面。
-//! - [`ASK_SECS`] 秒沒按當不允許（再受這次請求自己的有效期限限制）；按了「不允許」、關掉框也是不允許。系統對話框從外面關不掉：逾時後框還在，那時才按的一律算不允許，並通知本人。
-//! - 同一台同一時間只處理一個確認（[`ConsentSlot`]）。位子綁在「這次等待」上，不綁在框上（#1303）：
-//!   等待結束（本人按了、逾時、請求被撤回、對方已結束）就放開，下一個請求不會被沒人按的舊框卡死。
-//!   系統對話框從外面關不掉，所以留在畫面上的舊框一律作廢（之後按什麼都不算，按「允許」會通知本人已逾時），
-//!   但同時留在畫面上的框最多 [`MAX_OPEN_DIALOGS`] 個（[`OpenDialogs`]）；超過就不再開，回「前一個確認還沒處理」。
-//!   同一台發起端（設備指紋）對同一個視窗只留一個「等待」（[`dialog_key`]、[`Waiting`]）：已有一個在等時，新的請求回 busy，不併行開第二個框；
-//!   那個等待結束（按了、逾時、撤回、對方結束）就不再佔著，舊框就算還留在畫面上，同一組也能開新的等待和新框（只受上面的框數上限管）。
-//!   舊框是作廢的（等待已結束）：本人按任何一顆都不算，更不會記成「按過允許」（記成「按過允許」只發生在 [`Consent::Allow`] 之後，見守門測試）。
-//! - 等待中每 [`POLL_SECS`] 秒查一次請求還在不在；連續 [`GONE_MISSES`] 次查不到就當對方已撤回或已結束，不再等。
-//! - **結果只在 Rust 裡用，沒有任何畫面命令能回報「允許」**（守門測試）；只有 lib.rs 的 `start_view_poller` 能叫 [`ask`]。
-//! - 本人可以在這台的設定頁「認得的電腦」對某一台設「打字不用每次問我」，那台就不跳這個框（判斷在呼叫端，存在本機）。
-//! - **框上的名字用本機記住的（[`who_of`]），不用後台這次給的：** 後台給的名字不在簽章裡。只有第一次連線（本機還沒記住）才用後台給的，並在框上標示「第一次連線」；另外附設備指紋前 8 碼讓本人比對設定頁。
+//! 0.2.33 起（#1745）遠端打字不再跳確認框：同一個帳號底下的設備預設直接可以打；要擋，本人在這台設定頁關掉「允許遠端在這台打字」
+//! （bridge.json 的 `remote_input_off`），別台一要打字就馬上被拒（結束原因 `input_off`），進行中的打字也會結束。
+//! 握手的驗章、公鑰比對（TOFU）、金鑰變了的處理都照舊（見 view_stream.rs 的 accept_request_with）。
+//!
+//! - 這裡只剩兩樣：紅條與連線紀錄用的「誰」（[`who_of`]、[`bar_label`]），和設定頁勾「允許這支手機替這台登入」之前的確認框（[`ask_login_ok`]）。
+//! - **框與紅條上的名字用後台現在給的設備名，並接上本機算出的指紋：** 名字不可信，像指紋的當未命名（[`UNNAMED`]），讓本人用指紋核對。
 use crate::device_id::{fingerprint, fp_grouped, KnownPeers, Tofu};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
 
 /// 同意框等多久（秒）
 pub const ASK_SECS: u64 = 60;
@@ -34,10 +25,6 @@ pub struct Who {
     pub fp_full: String,
     /// 本機還沒記住這台（第一次連線）：名字是後台給的
     pub first: bool,
-    /// 本人在這台對這把公鑰按過「允許」打字（0.2.15）
-    pub typed_before: bool,
-    /// 本人在設定頁把這台設成每次都問
-    pub always_ask: bool,
 }
 
 /// 去掉控制字元與改變文字方向的字元，截長度
@@ -51,7 +38,6 @@ fn clean(s: &str, max: usize) -> String {
 /// 名字不可信：像指紋或含「指紋」的名字當成沒有名字（顯示「未命名的電腦」＋完整指紋），名字後面一律接指紋
 pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str, tofu: Tofu) -> Who {
     let local = if tofu == Tofu::Same { known.peer(node).map(|p| p.name.as_str()) } else { None };
-    let peer = if tofu == Tofu::Same { known.peer(node) } else { None };
     let raw = if backend_name.trim().is_empty() { local.unwrap_or("") } else { backend_name };
     let name = clean(raw, NAME_MAX);
     Who {
@@ -59,8 +45,6 @@ pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str
         fp8: fingerprint(sign_pub).chars().take(8).collect(),
         fp_full: fp_grouped(sign_pub),
         first: local.is_none(),
-        typed_before: peer.is_some() && known.input_confirmed(node),
-        always_ask: peer.is_some_and(|p| p.input_always_ask),
     }
 }
 
@@ -74,23 +58,6 @@ fn head_of(who: &Who) -> (&str, &str, bool) {
     } else {
         (who.name.as_str(), who.fp8.as_str(), true)
     }
-}
-
-/// 同意框的話：誰（名字＋指紋）、哪個視窗、能做什麼
-pub fn ask_text(who: &Who, window: &str) -> String {
-    let (name, fp, named) = head_of(who);
-    let name = if named { format!("「{name}」") } else { name.to_string() };
-    let window = clean(window, 64);
-    let first = if who.first {
-        "\n\n這台電腦是第一次連線到這裡，請確認是你自己的電腦。"
-    } else if !who.typed_before {
-        "\n\n這台電腦還沒在這裡打過字，名字可能不準，請用指紋確認是你自己的電腦。"
-    } else {
-        ""
-    };
-    // 按了允許之後會不會再問（0.2.15）：設成每次都問的就照樣每次問
-    let later = if who.always_ask { "" } else { "\n\n按「允許」之後，這台以後要在這裡打字就不會再問你（紅條照樣會出現）；想每次都問，可以到「設定 → 設備」那台的「詳情」取消勾選。" };
-    format!("{name}（指紋 {fp}）要在這台的「{window}」打字。名字可以從任何一台設備改，請看指紋認是哪一台。{first}\n\n允許之後，對方可以在這個視窗打任何字，包括回答權限框。最多 10 分鐘，2 分鐘沒打字就自動結束；你隨時可以在 ASN 按「結束」。{later}\n\n要允許嗎？")
 }
 
 /// 紅條（有人在看／在打字）上的「誰」：名字＋指紋前 8 碼，第一次連線另外標示。畫面會在外面加「」
@@ -150,275 +117,6 @@ pub async fn ask_login_ok(app: &AppHandle, name: &str, sign_pub: &str) -> bool {
     matches!(tokio::time::timeout(std::time::Duration::from_secs(ASK_SECS), rx).await, Ok(Ok(true)))
 }
 
-/// 通知桌面畫面：這次請求已逾時、沒有允許（框是逾時以後才被按的）
-pub const EV_EXPIRED: &str = "input-consent-expired";
-/// 通知桌面畫面：前一個確認框還開著，這次沒有允許
-pub const EV_BUSY: &str = "input-consent-busy";
-
-/// [`ask`] 的結果。只有 `Allow` 能往下走；其餘一律不允許，`Busy` 另外要讓發起端看到原因
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Consent {
-    /// 本人在期限之前明確按了「允許」
-    Allow,
-    /// 按了不允許、取消、關掉、逾時、請求已過期
-    Deny,
-    /// 請求在等待中被撤回，或對方已經結束這次請求（框收不掉、已作廢）
-    Gone,
-    /// 這台畫面上還留著沒處理的確認框，沒有開新的
-    Busy,
-}
-
-/// 等待中多久查一次請求還在不在（秒）
-pub const POLL_SECS: u64 = 5;
-/// 連續幾次查不到才當請求不在了（一次網路失敗不算）
-pub const GONE_MISSES: u32 = 2;
-/// 同時留在畫面上的確認框（含已作廢、沒人按的）最多幾個
-pub const MAX_OPEN_DIALOGS: usize = 3;
-
-/// 「哪一台發起端要打哪一個視窗」：同一組只留一個框。用完整指紋（每台唯一、不是名字）加視窗名
-pub fn dialog_key(who: &Who, window: &str) -> String {
-    format!("{}|{}", who.fp_full, clean(window, 64))
-}
-
-/// 下一次最多睡幾秒：[`POLL_SECS`]、[`ASK_SECS`]、這次剩下時間三者取小；0 就是不用等了
-pub fn next_wait_secs(now_s: i64, deadline_s: i64) -> u64 {
-    wait_secs(now_s, deadline_s).min(POLL_SECS)
-}
-
-/// 查詢之後的連續查不到次數：查到了歸零，沒查到加一；查詢失敗（None，不知道）維持原數，不算查不到也不歸零
-pub fn misses_after(misses: u32, found: Option<bool>) -> u32 {
-    match found {
-        Some(true) => 0,
-        Some(false) => misses.saturating_add(1),
-        None => misses,
-    }
-}
-
-/// 連續查不到的次數到了，就算請求已不在
-pub fn is_gone(misses: u32) -> bool {
-    misses >= GONE_MISSES
-}
-
-/// 這次結果算不算允許：沒回答（逾時、被撤回）算不允許；只有在期限之前明確按「允許」才算
-pub fn consent_outcome(answer: Option<bool>, now_s: i64, expires_s: i64) -> bool {
-    answer == Some(true) && now_s < expires_s
-}
-
-/// 確認框被按下時怎麼算（純函式）：`pressed_allow` 是不是按了「允許」、`timed_out` 是不是已經不等了、
-/// `now_s`／`deadline_s` 是現在與這次的期限。回（算不算允許、要不要告訴本人「已逾時」）。
-/// 逾時或過了期限才按：一律不允許；只有那時按的是「允許」才提示（按「不允許」本來就是不允許，不用多一句）
-pub fn click_outcome(pressed_allow: bool, timed_out: bool, now_s: i64, deadline_s: i64) -> (bool, bool) {
-    let late = timed_out || now_s >= deadline_s;
-    if late {
-        return (false, pressed_allow);
-    }
-    (consent_outcome(Some(pressed_allow), now_s, deadline_s), false)
-}
-
-/// 最多等幾秒：[`ASK_SECS`] 和這次請求剩下的有效時間取小的；已經過期就是 0
-pub fn wait_secs(now_s: i64, expires_s: i64) -> u64 {
-    u64::try_from(expires_s.saturating_sub(now_s)).unwrap_or(0).min(ASK_SECS)
-}
-
-/// 請求過期之後再等多久（秒），就算系統對話框一直沒叫回呼也把位子放掉。過期後按什麼都不算允許，放掉不會讓舊框變得能用
-pub const SLOT_GRACE_SECS: i64 = 120;
-
-/// 一台同一時間只開一個打字確認框。框開著就一直被佔用：框真的被關掉（對話框的回呼）才放開；
-/// 回呼一直沒來時，到了「請求期限＋寬限」也自動放開（逾時本身不放）
-pub struct ConsentSlot(std::sync::Mutex<Option<(u64, i64)>>, std::sync::atomic::AtomicU64);
-
-impl ConsentSlot {
-    pub const fn new() -> Self {
-        Self(std::sync::Mutex::new(None), std::sync::atomic::AtomicU64::new(1))
-    }
-
-    /// 取得位子；已經被佔用、而且還沒到它的放開時間就回 None。`release_at` 是這次的自動放開時間（秒）
-    pub fn try_take(&'static self, now_s: i64, release_at: i64) -> Option<SlotGuard> {
-        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, until)) = *g {
-            if now_s < until {
-                return None;
-            }
-        }
-        let token = self.1.fetch_add(1, Ordering::SeqCst);
-        *g = Some((token, release_at));
-        Some(SlotGuard(self, token))
-    }
-}
-
-/// 佔著位子的憑證；丟掉（drop）就放開。位子已經被後來的請求接手時不動它
-pub struct SlotGuard(&'static ConsentSlot, u64);
-
-impl Drop for SlotGuard {
-    fn drop(&mut self) {
-        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        if g.is_some_and(|(token, _)| token == self.1) {
-            *g = None;
-        }
-    }
-}
-
-/// 目前還留在畫面上的確認框（含逾時、已作廢但沒人關的）。每個框一張票，框真的被關掉（對話框的回呼）就還；
-/// 回呼一直沒來時，到了放開時間也自動不算。用來擋住「沒人在、一直開新框」把畫面塞滿
-pub struct OpenDialogs(std::sync::Mutex<Vec<(u64, i64)>>, std::sync::atomic::AtomicU64);
-
-impl OpenDialogs {
-    pub const fn new() -> Self {
-        Self(std::sync::Mutex::new(Vec::new()), std::sync::atomic::AtomicU64::new(1))
-    }
-
-    /// 領一張票；已經有 [`MAX_OPEN_DIALOGS`] 個還沒過放開時間的框（含已作廢、還留在畫面上的）就回 None
-    pub fn open(&'static self, now_s: i64, release_at: i64) -> Option<DialogTicket> {
-        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|&(_, until)| now_s < until);
-        if g.len() >= MAX_OPEN_DIALOGS {
-            return None;
-        }
-        let token = self.1.fetch_add(1, Ordering::SeqCst);
-        g.push((token, release_at));
-        Some(DialogTicket(self, token))
-    }
-}
-
-/// 一個框的票；丟掉（對話框的回呼跑完）就還
-pub struct DialogTicket(&'static OpenDialogs, u64);
-
-impl Drop for DialogTicket {
-    fn drop(&mut self) {
-        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|&(token, _)| token != self.1);
-    }
-}
-
-/// 正在等本人回答的「發起端＋視窗」。只鎖等待本身：等待結束（任何一條路）就放開，不管框還在不在畫面上
-pub struct Waiting(std::sync::Mutex<Vec<String>>);
-
-impl Waiting {
-    pub const fn new() -> Self {
-        Self(std::sync::Mutex::new(Vec::new()))
-    }
-
-    /// 這一組已經有人在等就回 None
-    pub fn begin(&'static self, key: &str) -> Option<WaitGuard> {
-        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if g.iter().any(|k| k == key) {
-            return None;
-        }
-        g.push(key.to_string());
-        Some(WaitGuard(self, key.to_string()))
-    }
-}
-
-/// 等待中的憑證；丟掉（等待結束）就放開這一組
-pub struct WaitGuard(&'static Waiting, String);
-
-impl Drop for WaitGuard {
-    fn drop(&mut self) {
-        let mut g = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(i) = g.iter().position(|k| *k == self.1) {
-            g.remove(i);
-        }
-    }
-}
-
-static SLOT: ConsentSlot = ConsentSlot::new();
-static WAITING: Waiting = Waiting::new();
-static DIALOGS: OpenDialogs = OpenDialogs::new();
-
-fn now_s() -> i64 {
-    (crate::auth::now_ms() / 1000) as i64
-}
-
-/// 問本人。結果見 [`Consent`]。`expires_s` 是這次請求的有效期限（秒）：超過就不能再算允許。
-/// `still_pending` 查這筆請求在後台還在不在：等待中定期查，被撤回或對方已結束就不再等、位子立刻放開（#1303）
-pub async fn ask<F, Fut>(app: &AppHandle, who: &Who, window: &str, expires_s: i64, still_pending: F) -> Consent
-where
-    F: Fn() -> Fut + Send,
-    Fut: std::future::Future<Output = Option<bool>> + Send,
-{
-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-    // 位子綁在這次等待上：函式結束（任何一條路）就放開，不等框被關掉
-    let Some(_slot) = SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
-        let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
-        return Consent::Busy;
-    };
-    // 同一台發起端對同一個視窗已經有一個在等：不併行開第二個（等待結束就放開，舊框還在也不影響）
-    let Some(_waiting) = WAITING.begin(&dialog_key(who, window)) else {
-        let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
-        return Consent::Busy;
-    };
-    let Some(ticket) = DIALOGS.open(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS)) else {
-        let _ = app.emit_to("list", EV_BUSY, serde_json::json!({ "window": clean(window, 64) }));
-        return Consent::Busy;
-    };
-    let start = now_s();
-    let wait = wait_secs(start, expires_s);
-    if wait == 0 {
-        // 收到時就已經過期（多半是這台時鐘比後台快）：不開框、不允許；記一行原因，不記內容
-        elog!("[asn] 別台打字的請求收到時已過期，沒有開確認框（現在 {start}，期限 {expires_s}）");
-        return Consent::Deny;
-    }
-    let deadline_s = start + wait as i64;
-    if let Some(w) = app.get_webview_window("list") {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
-    let (tx, mut rx) = tokio::sync::oneshot::channel::<bool>();
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let (cb_app, cb_timed_out, cb_window) = (app.clone(), timed_out.clone(), clean(window, 64));
-    app.dialog()
-        .message(ask_text(who, window))
-        .title("ASN：別台要在這台打字")
-        .kind(MessageDialogKind::Warning)
-        .buttons(buttons("不允許"))
-        .show_with_result(move |r| {
-            // 票在框真的被關掉的這一刻才還（逾時、作廢時框還在畫面上，不能還）
-            let _ticket = ticket;
-            let (allow, notify) = click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s);
-            if notify {
-                // 逾時、撤回之後才按「允許」：不允許，告訴本人
-                let _ = cb_app.emit_to("list", EV_EXPIRED, serde_json::json!({ "window": cb_window }));
-            }
-            let _ = tx.send(allow);
-        });
-    let mut answer: Option<bool> = None;
-    let mut gone = false;
-    let mut misses = 0u32;
-    loop {
-        let step = next_wait_secs(now_s(), deadline_s);
-        if step == 0 {
-            break;
-        }
-        match tokio::time::timeout(std::time::Duration::from_secs(step), &mut rx).await {
-            Ok(Ok(v)) => {
-                answer = Some(v);
-                break;
-            }
-            Ok(Err(_)) => break,
-            Err(_) => {
-                misses = misses_after(misses, still_pending().await);
-                if is_gone(misses) {
-                    gone = true;
-                    break;
-                }
-            }
-        }
-    }
-    if answer.is_none() {
-        // 沒人按就結束等待：框收不掉，作廢它（之後按什麼都不算）；位子在函式結束時放開
-        timed_out.store(true, Ordering::SeqCst);
-    }
-    if gone {
-        return Consent::Gone;
-    }
-    if consent_outcome(answer, now_s(), expires_s) {
-        Consent::Allow
-    } else {
-        Consent::Deny
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,262 +151,6 @@ mod tests {
         assert!(!code.contains(".show(move"), "要看按了哪一顆，不能只看 true／false");
     }
 
-    /// 接線守門（0.2.15）：打字免問要同時是記住的那把公鑰（Same）且本人按過允許；沒免問就一定先問，按了允許才記下；
-    /// 紅條照樣顯示誰在打字、有「結束」
-    #[test]
-    fn 守門_自己電腦打字免問的條件與紅條() {
-        let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        let start = lib.find("if a.session.scope == view_handshake::Scope::Input {").expect("打字的分支");
-        let f = &lib[start..start + lib[start..].find("let mobile = a.mobile;").expect("打字分支後面的下一句")];
-        assert!(f.contains("let no_ask = a.tofu == device_id::Tofu::Same && "), "免問一定要是記住的那把公鑰");
-        let (ask, confirm) = (f.find("input_consent::ask(").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
-        assert!(ask < confirm, "先問、按了允許才記下");
-        assert!(f[ask..confirm].contains("continue;"), "不允許就結束，不記");
-        // 重查（期限、對方沒撤回）通過才記：過期或被撤回的請求不能被記成「按過允許」
-        for needle in ["input_consent::consent_outcome(", "view_still_pending("] {
-            let at = f.find(needle).unwrap_or_else(|| panic!("打字分支要有 {needle}"));
-            assert!(ask < at && at < confirm, "{needle} 要在 ask 之後、confirm_input 之前");
-        }
-        let still = f.find("if !still {").expect("重查不過就結束");
-        assert!(still < confirm && f[still..confirm].contains("continue;"), "重查不過就 continue，不記");
-        let html = include_str!("../../ui/list.html");
-        assert!(html.contains("正在這台的夥伴「{{ v.window }}」打字") && html.contains("@click=\"stopBeingViewed(v.id)\">結束</button>"), "紅條有誰在打字、有結束");
-    }
-
-    /// 0.2.15：框上寫清楚按允許之後就不再問；還沒在這裡打過字的要提醒名字可能不準；設成每次都問的不說「不再問」
-    #[test]
-    fn 打字確認框_寫清楚之後不再問_沒打過字的提醒用指紋確認() {
-        let mut k = known_d();
-        let w = who_of(&k, "d", "家用機", PUB, Tofu::Same);
-        assert!(!w.first && !w.typed_before && !w.always_ask);
-        let t = ask_text(&w, "小乙");
-        assert!(t.contains("還沒在這裡打過字") && t.contains("請用指紋確認"), "{t}");
-        assert!(t.contains("這台以後要在這裡打字就不會再問你") && t.contains("設定 → 設備"), "{t}");
-        k.confirm_input("d", PUB);
-        let t = ask_text(&who_of(&k, "d", "家用機", PUB, Tofu::Same), "小乙");
-        assert!(!t.contains("還沒在這裡打過字"), "按過允許的不再提醒");
-        k.set_input_no_ask("d", false);
-        let w = who_of(&k, "d", "家用機", PUB, Tofu::Same);
-        assert!(w.always_ask);
-        assert!(!ask_text(&w, "小乙").contains("不會再問你"), "設成每次都問的不說不再問");
-        // 第一次連線：沿用原本那句，不說「名字可能不準」
-        let t = ask_text(&who_of(&KnownPeers::default(), "d", "家用機", PUB, Tofu::New), "小乙");
-        assert!(t.contains("第一次連線到這裡") && !t.contains("還沒在這裡打過字"));
-    }
-
-    #[test]
-    fn 同意結果_只有期限前按允許才算() {
-        assert!(consent_outcome(Some(true), 99, 100));
-        assert!(!consent_outcome(Some(true), 100, 100), "剛好到期不算");
-        assert!(!consent_outcome(Some(true), 101, 100));
-        assert!(!consent_outcome(None, 0, 100), "沒回答（逾時、被撤回）不算");
-        assert!(!consent_outcome(Some(false), 0, 100));
-    }
-
-    #[test]
-    fn 確認框被按下_逾時或過期後按允許一律不允許_只有按允許才提示() {
-        // 期限內
-        assert_eq!(click_outcome(true, false, 99, 100), (true, false), "期限內按允許：允許");
-        assert_eq!(click_outcome(false, false, 99, 100), (false, false));
-        // 已經不等了（逾時）：按允許也不允許，並提示
-        assert_eq!(click_outcome(true, true, 50, 100), (false, true), "逾時後按允許：不允許、提示");
-        assert_eq!(click_outcome(false, true, 50, 100), (false, false), "逾時後按不允許：不用提示");
-        // 剛好到期、過了期限
-        assert_eq!(click_outcome(true, false, 100, 100), (false, true));
-        assert_eq!(click_outcome(true, false, 10_000, 100), (false, true));
-        for now in [100, 101, 500, i64::MAX] {
-            for timed_out in [false, true] {
-                assert!(!click_outcome(true, timed_out, now, 100).0, "過期後按允許絕不允許：now={now}");
-            }
-        }
-    }
-
-    #[test]
-    fn 最多等幾秒_取六十秒和剩餘時間較小的() {
-        assert_eq!(wait_secs(0, 1000), ASK_SECS);
-        assert_eq!(wait_secs(0, 60), 60);
-        assert_eq!(wait_secs(0, 20), 20);
-        assert_eq!(wait_secs(100, 100), 0);
-        assert_eq!(wait_secs(200, 100), 0, "已過期不能是負的");
-        assert_eq!(wait_secs(i64::MIN, i64::MAX), ASK_SECS, "不溢位");
-    }
-
-    #[test]
-    fn 同時只能開一個確認框_放開前拿不到第二個() {
-        static S: ConsentSlot = ConsentSlot::new();
-        let g = S.try_take(0, 100).expect("第一次拿得到");
-        assert!(S.try_take(10, 200).is_none(), "框還開著，第二個拿不到");
-        assert!(S.try_take(99, 200).is_none());
-        drop(g);
-        let g2 = S.try_take(10, 200).expect("放開之後又拿得到");
-        drop(g2);
-    }
-
-    #[test]
-    fn 確認框的回呼一直沒來_過期加寬限之後位子自動放開_舊的放開不影響新的() {
-        static S: ConsentSlot = ConsentSlot::new();
-        let expires = 1_000;
-        let old = S.try_take(900, expires + SLOT_GRACE_SECS).expect("第一個框");
-        assert!(S.try_take(expires, 5_000).is_none(), "剛過期還在寬限內：不開第二個");
-        assert!(S.try_take(expires + SLOT_GRACE_SECS - 1, 5_000).is_none());
-        let new = S.try_take(expires + SLOT_GRACE_SECS, 5_000).expect("過了寬限：就算舊框的回呼沒來也放開");
-        drop(old);
-        assert!(S.try_take(2_000, 9_000).is_none(), "舊框後來才關：不能把新框的位子放掉");
-        drop(new);
-        assert!(S.try_take(2_000, 9_000).is_some(), "新框關了才放開");
-        assert!(SLOT_GRACE_SECS >= 60);
-    }
-
-    #[test]
-    fn 位子綁在等待上_等待結束放開後下一個請求拿得到() {
-        static S: ConsentSlot = ConsentSlot::new();
-        let first = S.try_take(100, 1_000 + SLOT_GRACE_SECS).expect("第一個請求");
-        assert!(S.try_take(110, 1_000).is_none(), "等待中不開第二個");
-        drop(first);
-        assert!(S.try_take(120, 1_000).is_some(), "等待結束（逾時、撤回、對方結束）一放開，下一個馬上拿得到，不管舊框還在不在");
-    }
-
-    #[test]
-    fn 畫面上滿三個框_含作廢的_就回忙碌_有框關掉或過了放開時間才不算() {
-        static D: OpenDialogs = OpenDialogs::new();
-        let t1 = D.open(0, 100).expect("1");
-        let _t2 = D.open(0, 100).expect("2");
-        let _t3 = D.open(0, 100).expect("3");
-        assert!(D.open(1, 100).is_none(), "畫面上已經有三個框（等待結束、作廢的也算）：不再開");
-        drop(t1);
-        let t4 = D.open(2, 100).expect("有框被關掉就能再開");
-        assert!(D.open(2, 100).is_none());
-        assert!(D.open(100, 300).is_some(), "前三個過了放開時間（回呼一直沒來）也不再算");
-        drop(t4);
-    }
-
-    fn who_fp(fp: &str) -> Who {
-        Who { name: "家用機".into(), fp8: fp.chars().take(8).collect(), fp_full: fp.into(), first: false, typed_before: true, always_ask: false }
-    }
-
-    /// 同一台發起端對同一個視窗只留一個「等待」：連按不會同時開第二個；換視窗或換發起端不受影響
-    #[test]
-    fn 同組有等待中的請求時_連按不開第二個() {
-        static W: Waiting = Waiting::new();
-        let k1 = dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙");
-        assert_eq!(k1, dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙"));
-        assert_ne!(k1, dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小丙"), "換視窗是另一組");
-        assert_ne!(k1, dialog_key(&who_fp("EEEE-FFFF-GGGG-HHHH"), "小乙"), "換發起端是另一組");
-        let first = W.begin(&k1).expect("第一次");
-        assert!(W.begin(&k1).is_none(), "同組已經有一個在等：不開第二個");
-        assert!(W.begin(&dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小丙")).is_some(), "別的視窗照樣可以");
-        drop(first);
-    }
-
-    /// 舊的等待結束之後，就算它的框還留在畫面上，同一組也能開新的等待和新框（重演 #1303 事故的那條路）
-    #[test]
-    fn 同組舊等待結束_舊框還在畫面上_新請求可以開() {
-        static W: Waiting = Waiting::new();
-        static D: OpenDialogs = OpenDialogs::new();
-        let k = dialog_key(&who_fp("AAAA-BBBB-CCCC-DDDD"), "小乙");
-        let wait1 = W.begin(&k).expect("第一次等待");
-        let stale = D.open(0, 1_000).expect("第一個框");
-        drop(wait1); // 等待結束（逾時、撤回…）；框沒人按，票還在，框還在畫面上
-        let wait2 = W.begin(&k).expect("同組新的等待：舊框還在也不擋");
-        let second = D.open(70, 1_000).expect("新框：畫面上只有一個舊框，沒到上限");
-        drop(wait2);
-        drop(second);
-        drop(stale);
-    }
-
-    /// 作廢的舊框（等待已結束）被按下去：不允許、不會往下走；而且 input_consent 本身絕不碰「記成按過允許」，
-    /// 只有 lib.rs 在 ask 回 Allow、再確認請求還有效之後才叫 confirm_input——否則一個舊框就會變成永久免問
-    #[test]
-    fn 守門_作廢的舊框按允許不算_不會記成按過允許() {
-        // 作廢＝timed_out 已設：按允許、按別的、早按晚按，一律不允許；按允許只多一句「已逾時」的通知
-        for now in [0, 50, 500] {
-            assert_eq!(click_outcome(true, true, now, 1_000), (false, true), "作廢之後按允許：不算，通知本人");
-            assert_eq!(click_outcome(false, true, now, 1_000), (false, false));
-        }
-        let me = include_str!("input_consent.rs").replace("\r\n", "\n");
-        let code = me.split("#[cfg(test)]").next().unwrap();
-        assert!(!code.contains("confirm_input") && !code.contains("input_no_ask"), "同意框這支不能寫入任何免問紀錄");
-        // 回呼的結果丟進已經沒人收的頻道：作廢之後 send 只會失敗（被忽略），ask 早就回去了
-        assert!(code.contains("let _ = tx.send(allow);"));
-        let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
-        assert_eq!(f.matches("device_id::live::confirm_input(").count(), 1, "只有一個地方記按過允許");
-        let (answered, still, confirm) = (f.find("let answered = answer == input_consent::Consent::Allow;").unwrap(), f.find("if !still {").unwrap(), f.find("device_id::live::confirm_input(").unwrap());
-        assert!(answered < still && still < confirm, "要 ask 回 Allow、再重查請求還有效，之後才記");
-    }
-
-    #[test]
-    fn 撤回_過期_對方結束_等待會停下來() {
-        // 每次最多睡 POLL_SECS，睡醒查一次；剩下的時間比它短就睡剩下的
-        assert_eq!(next_wait_secs(0, 60), POLL_SECS);
-        assert_eq!(next_wait_secs(57, 60), 3);
-        assert_eq!(next_wait_secs(60, 60), 0, "到期限就不等了");
-        assert_eq!(next_wait_secs(90, 60), 0, "已經過期不能是負的");
-        // 查不到要連續兩次才算不在；中間查到一次就重算
-        let mut m = 0;
-        m = misses_after(m, Some(false));
-        assert!(!is_gone(m), "一次查不到可能只是網路不穩");
-        m = misses_after(m, Some(true));
-        assert_eq!(m, 0);
-        m = misses_after(m, Some(false));
-        m = misses_after(m, Some(false));
-        assert!(is_gone(m), "連續兩次查不到：對方撤回或已結束");
-        assert_eq!(misses_after(u32::MAX, Some(false)), u32::MAX, "不溢位");
-        // 查詢失敗（網路斷、後台回錯）是「不知道」：不算查不到、也不把已經累積的次數歸零，所以怎麼失敗都不會把等待中的框當成被撤回
-        let mut u = 0;
-        for _ in 0..10 {
-            u = misses_after(u, None);
-        }
-        assert!(!is_gone(u), "一直查詢失敗也不撤回");
-        assert_eq!(misses_after(1, None), 1, "不知道不歸零");
-        assert!(is_gone(misses_after(misses_after(misses_after(0, Some(false)), None), Some(false))), "中間失敗不影響連續兩次真的查不到");
-    }
-
-    #[test]
-    fn 接線_held_prompt_退路看_stop_refused_等待中查詢失敗是不知道() {
-        let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        assert!(lib.contains("reason == view_stream::HELD_PROMPT && view_stream::stop_refused(&r)"), "退路要同時看連線失敗與 Ok 但帶 error");
-        assert!(!lib.contains("r.is_err() && reason == view_stream::HELD_PROMPT"), "不能只看 Err");
-        assert!(lib.contains("|| view_seen_pending(&relay, &id)).await"), "等待中用三態的查詢（失敗＝不知道）");
-        assert!(lib.contains("view_seen_pending(relay, id).await == Some(true)"), "按允許後的重查：不知道也不能開始打字");
-    }
-
-    #[test]
-    fn 結果只有允許能往下走_忙碌和撤回是各自的結果() {
-        assert_ne!(Consent::Allow, Consent::Deny);
-        assert_ne!(Consent::Busy, Consent::Deny, "忙碌要能讓發起端看到原因，不能和不允許混在一起");
-        assert_ne!(Consent::Gone, Consent::Deny);
-        assert!(consent_outcome(Some(true), 10, 20));
-        assert!(!consent_outcome(None, 10, 20), "撤回、對方結束都沒有答案：不允許");
-        assert!(!consent_outcome(Some(true), 20, 20), "過了期限才按不算");
-    }
-
-    /// 接線守門：ask 先佔位子、位子綁等待不綁框（函式結束就放）、票在回呼裡才還、沒人按就作廢；poller 在 accept 之前重查期限與是否還在等
-    #[test]
-    fn 守門_確認框佔位子_逾時後按會通知_接受之前重查() {
-        let me = include_str!("input_consent.rs").replace("\r\n", "\n");
-        let code = me.split("#[cfg(test)]").next().unwrap();
-        let ask = &code[code.find("pub async fn ask<").expect("有 ask")..];
-        let (take, show) = (ask.find("SLOT.try_take(now_s(), expires_s.saturating_add(SLOT_GRACE_SECS))").expect("ask 要先佔位子，放開時間＝期限加寬限"), ask.find("show_with_result(").unwrap());
-        assert!(take < show, "先佔位子才開框");
-        assert!(ask.contains("let Some(_slot) = SLOT.try_take("), "位子留在 ask 裡，函式結束就放開，不交給對話框的回呼");
-        let cb = &ask[show..ask.find("let mut answer").unwrap()];
-        assert!(!cb.contains("slot"), "回呼不能再拿位子（#1303：沒人按的框不能卡住位子）");
-        assert!(cb.contains("let _ticket = ticket;"), "票要在回呼裡才還");
-        assert!(cb.contains("emit_to(\"list\", EV_EXPIRED"), "逾時後才按要通知本人");
-        assert!(cb.contains("click_outcome(allowed(&r), cb_timed_out.load(Ordering::SeqCst), now_s(), deadline_s)") && cb.contains("tx.send(allow)"), "回呼的判斷走 click_outcome");
-        let tail = &ask[ask.find("let mut answer").unwrap()..];
-        assert!(tail.contains("still_pending().await") && tail.contains("timed_out.store(true, Ordering::SeqCst)"), "等待中要查請求還在不在；沒人按就作廢框");
-        assert!(ask[..show].contains("emit_to(\"list\", EV_BUSY"), "前一個框還開著要通知本人");
-        let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
-        let accept = f.find("\"term_view_accept\"").expect("有 accept");
-        for needle in ["input_consent::consent_outcome(", "view_still_pending("] {
-            let at = f.find(needle).unwrap_or_else(|| panic!("poller 要呼叫 {needle}"));
-            assert!(at < accept, "{needle} 要在 term_view_accept 之前");
-        }
-    }
-
     #[test]
     fn 允許替這台登入的確認框_有名字與指紋前八碼_寫清楚能做什麼() {
         let t = login_ok_text("我的手機", PUB);
@@ -730,22 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn 同意框的話_寫清楚可以回答權限框() {
-        let t = ask_text(&who_of(&known_d(), "d", "家用機", PUB, Tofu::Same), "小乙");
-        assert!(t.contains("「家用機」（指紋 "), "{t}");
-        assert!(t.contains("要在這台的「小乙」打字"));
-        assert!(t.contains("包括回答權限框"));
-        let blank = Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: true, typed_before: false, always_ask: false };
-        assert!(ask_text(&blank, "小乙").starts_with("未命名的電腦（指紋 0123 4567 89ab cdef）"), "{}", ask_text(&blank, "小乙"));
-    }
-
-    #[test]
     fn 已記住的電腦_框上用後台現在的設備名_沒帶才用本機記下的_像指紋的當未命名() {
         // #1388：每台只有一個名字（後台），本人在任一台改名後這裡就跟著換；辨識靠後面的指紋
         let w = who_of(&known_d(), "d", "改過名的工作機", PUB, Tofu::Same);
         assert_eq!((w.name.as_str(), w.first), ("改過名的工作機", false));
-        let t = ask_text(&w, "小乙");
-        assert!(t.contains("「改過名的工作機」（指紋 "), "{t}");
+        let t = bar_label(&w);
+        assert!(t.starts_with("改過名的工作機（指紋 "), "{t}");
         assert!(!t.contains("第一次連線"));
         assert_eq!(who_of(&known_d(), "d", "  ", PUB, Tofu::Same).name, "家用機", "請求沒帶名字：用本機記下的");
         for fake in ["工作機 a93cc519", "假的指紋", "工作機（a93c c519）"] {
@@ -759,8 +191,8 @@ mod tests {
     fn 第一次連線_才用後台給的名字並標示() {
         let w = who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New);
         assert_eq!((w.name.as_str(), w.first), ("工作機", true));
-        let t = ask_text(&w, "小乙");
-        assert!(t.contains("「工作機」"));
+        let t = bar_label(&w);
+        assert!(t.starts_with("工作機（指紋 "));
         assert!(t.contains("第一次連線"));
         // 本機雖然有紀錄，但比對結果不是 Same（例如呼叫端剛記住）也當第一次，不偷用別的名字
         assert!(who_of(&known_d(), "d", "工作機", PUB, Tofu::New).first);
@@ -771,7 +203,7 @@ mod tests {
         let w = who_of(&known_d(), "d", "", PUB, Tofu::Same);
         assert_eq!(w.fp8, fingerprint(PUB)[..8].to_string());
         assert_eq!(w.fp8.chars().count(), 8);
-        assert!(ask_text(&w, "小乙").contains(&format!("（指紋 {}）", w.fp8)));
+        assert!(bar_label(&w).contains(&format!("（指紋 {}", w.fp8)));
     }
 
     #[test]
@@ -780,7 +212,6 @@ mod tests {
         assert!(!w.name.contains('\u{202e}') && !w.name.contains('\n'), "{:?}", w.name);
         let long = who_of(&KnownPeers::default(), "d", &"長".repeat(100), PUB, Tofu::New);
         assert_eq!(long.name.chars().count(), NAME_MAX);
-        assert!(!ask_text(&w, "小\u{202e}乙").contains('\u{202e}'), "視窗名也清掉");
         for c in ['\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}', '\u{2028}', '\u{2029}'] {
             let n = who_of(&KnownPeers::default(), "d", &format!("家{c}用機"), PUB, Tofu::New).name;
             assert!(!n.contains(c), "{:?} 要去掉：{n:?}", c);
@@ -794,53 +225,17 @@ mod tests {
         assert_eq!(t, format!("工作機（指紋 {}）", same.fp8));
         let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
         assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
-        assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false, typed_before: false, always_ask: false }), "未命名的電腦（指紋 0123 4567 89ab cdef）");
+        assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false }), "未命名的電腦（指紋 0123 4567 89ab cdef）");
     }
 
     #[test]
-    fn 守門_紅條和同意框的誰都不直接用後台給的名字() {
+    fn 守門_紅條的誰不直接用後台給的名字() {
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let f = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
         assert!(!f.contains(concat!("row.get(\"from", "_name\")")), "不能直接從後台的列拿名字");
         let who = f.find("let who = input_consent::bar_label(&asker);").expect("紅條的誰要用 bar_label");
         let asker = f.find("let asker = input_consent::who_of(").expect("要用 who_of 組");
         assert!(asker < who, "先組 who_of 再給紅條");
-        assert!(f.contains("input_consent::ask(&app, &asker,"), "同意框也用同一個 who_of");
-    }
-
-    #[test]
-    fn 守門_只有收到請求時能問_沒有畫面命令能回報允許() {
-        let me = include_str!("input_consent.rs");
-        let code = me.split("\nmod tests {").next().unwrap();
-        assert!(!code.contains(concat!("#[tauri", "::command]")), "這裡不能有畫面命令");
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut callers = Vec::new();
-        for e in walk(&dir) {
-            if e.ends_with("input_consent.rs") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&e).unwrap().replace("\r\n", "\n");
-            let code = src.split("\nmod tests {").next().unwrap();
-            for (i, _) in code.match_indices(concat!("input_consent", "::ask(")) {
-                let before = &code[..i];
-                let f = before.rfind("\nasync fn ").max(before.rfind("\nfn ")).expect("在函式裡");
-                let name: String = before[f..].trim_start_matches('\n').trim_start_matches("async ").trim_start_matches("fn ").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-                callers.push(name);
-            }
-        }
-        assert_eq!(callers, vec!["start_view_poller".to_string()], "只有收到別台的請求時能問");
-    }
-
-    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut out = Vec::new();
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                out.extend(walk(&p));
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                out.push(p);
-            }
-        }
-        out
+        assert!(!f.contains("input_consent::ask("), "遠端打字不再有確認框（#1745）");
     }
 }

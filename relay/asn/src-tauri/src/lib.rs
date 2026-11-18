@@ -1288,14 +1288,6 @@ async fn device_rename(app: State<'_, App>, auth: State<'_, auth::AuthState>, no
     Ok(v)
 }
 
-/// 本人在這台的設定頁勾「這台打字不用每次問我」（0.2.10）。**只有這個本機命令能改**（守門測試）；不送後台、不同步
-#[cfg(feature = "gui")]
-#[cfg(desktop)]
-#[tauri::command]
-fn device_known_input_no_ask(app: State<'_, App>, node: String, on: bool) -> Result<bool, String> {
-    device_id::live::set_input_no_ask(&app.data_dir, &node, on)
-}
-
 /// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步。
 /// 打開前一定先跳確認框（名字＋指紋前 8 碼），本人按「允許」才寫入；取消回 false、什麼都不改。關掉不用問
 #[cfg(feature = "gui")]
@@ -1442,8 +1434,10 @@ impl view_stream::TPort for LiveTPort {
         self.stop.load(std::sync::atomic::Ordering::SeqCst)
     }
     fn allowed(&mut self) -> bool {
-        // 本人在這台關掉「允許其他設備替這台開新視窗」，或（看的是移動設備時）關掉「允許移動設備查看終端」：進行中的觀看也要結束
-        bridge::read_settings(&self.data_dir).view_allowed(self.mobile)
+        // 本人在這台關掉「允許其他設備替這台開新視窗」，或（看的是移動設備時）關掉「允許移動設備查看終端」：進行中的觀看也要結束。
+        // 打字的工作階段另外看「允許遠端在這台打字」（#1745）：關掉就結束，看畫面的不受影響
+        let st = bridge::read_settings(&self.data_dir);
+        st.view_allowed(self.mobile) && (self.input.is_none() || st.input_allowed())
     }
     fn now_ms(&mut self) -> u64 {
         auth::now_ms()
@@ -1470,8 +1464,9 @@ impl view_stream::TPort for LiveTPort {
             }
         };
         if !keys.is_empty() {
-            // 本人在這台關掉「允許其他設備替這台開新視窗」：字不再交給窗格，馬上結束（不等下一次查控制面）
-            if !bridge::read_settings(&self.data_dir).view_allowed(self.mobile) {
+            // 本人在這台關掉「允許其他設備替這台開新視窗」或「允許遠端在這台打字」：字不再交給窗格，馬上結束（不等下一次查控制面）
+            let st = bridge::read_settings(&self.data_dir);
+            if !st.view_allowed(self.mobile) || !st.input_allowed() {
                 let line = format!("view {}: input end not_allowed typed={}", self.id, self.typed);
                 view_stream::TPort::log(self, &line);
                 return Err(view_stream::End::NotAllowed);
@@ -1538,23 +1533,6 @@ impl view_stream::TPort for LiveTPort {
     }
 }
 
-/// 這筆請求還在後台的待處理清單裡嗎？Some(true)＝在、Some(false)＝清單查到了但沒有它、None＝查詢失敗（不知道）。
-/// 查詢失敗不能當成「查不到」：網路一斷就會把還在等的確認框當成對方撤回
-#[cfg(all(desktop, feature = "gui"))]
-async fn view_seen_pending(relay: &Relay, id: &str) -> Option<bool> {
-    let v = relay.api("term_view_pending", Some(serde_json::json!({}))).await.ok()?;
-    if v.get("error").is_some_and(|e| !e.is_null()) {
-        return None;
-    }
-    Some(v.get("requests").and_then(Value::as_array).is_some_and(|rows| rows.iter().any(|r| r.get("id").and_then(Value::as_str) == Some(id))))
-}
-
-/// 按下允許之後的重查：不知道（查詢失敗）也不能開始打字
-#[cfg(all(desktop, feature = "gui"))]
-async fn view_still_pending(relay: &Relay, id: &str) -> bool {
-    view_seen_pending(relay, id).await == Some(true)
-}
-
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
 #[cfg(all(desktop, feature = "gui"))]
 fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
@@ -1572,6 +1550,8 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
             }
             // 移動設備另外看「允許移動設備查看終端」（每一輪都重讀，不用快取）
             let allow_mobile = !settings.mobile_view_off;
+            // 「允許遠端在這台打字」（每一輪都重讀）：關著時，要打字的請求驗章通過後馬上拒絕，不等、不跳框（#1745）
+            let allow_input = settings.input_allowed();
             let Ok(known) = device_id::live::known(&data_dir) else { continue };
             let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { continue };
             let Ok(key) = device_id::live::key_async(&data_dir).await else { continue };
@@ -1594,7 +1574,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         rej = "replay_or_seen";
                         Err(e)
                     }
-                    Ok(()) => match view_stream::accept_request(&row, &me_node, &known, &key, now_s, allow_mobile) {
+                    Ok(()) => match view_stream::accept_request_with(&row, &me_node, &known, &key, now_s, allow_mobile, allow_input) {
                         Err(view_stream::Refused::KeyChanged { node, sign_pub }) => {
                             rej = "key_changed";
                             device_id::live::alert(&relay, &node, "changed", &sign_pub).await;
@@ -1609,6 +1589,10 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             rej = "mobile_off";
                             Err(view_stream::MOBILE_OFF.to_string())
                         }
+                        Err(view_stream::Refused::InputOff) => {
+                            rej = "input_off";
+                            Err(view_stream::INPUT_OFF.to_string())
+                        }
                         Ok(a) => match view_seen::record(&data_dir, &id, a.session.expires_s, now_s) {
                             Ok(()) => Ok(a),
                             Err(e) => {
@@ -1622,8 +1606,12 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                     Err(e) => {
                         hs(row_tofu, "rejected", rej);
                         // 這台不允許移動設備查看：回報固定原因，手機那邊看到一句清楚的話；沒開始看，不跳紅條、不寄通知信
-                        let reason = if e == view_stream::MOBILE_OFF { view_stream::MOBILE_OFF } else { "rejected" };
-                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))).await;
+                        let reason = if e == view_stream::MOBILE_OFF { view_stream::MOBILE_OFF } else if e == view_stream::INPUT_OFF { view_stream::INPUT_OFF } else { "rejected" };
+                        let r = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))).await;
+                        // 舊後台還不認得 input_off：改用 rejected 結束，不能讓這次掛著
+                        if reason == view_stream::INPUT_OFF && view_stream::stop_refused(&r) {
+                            let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                        }
                     }
                     Ok(a) => {
                         if a.tofu == device_id::Tofu::New {
@@ -1640,40 +1628,8 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         // 框上和紅條上的「誰」：後台的設備名（#1388，每台只有一個名字）＋指紋前 8 碼；名字不可信，像指紋的當未命名；第一次連線標示
                         let asker = input_consent::who_of(&known, &a.session.d_node, &a.from_name, &a.from_pub, a.tofu);
                         let who = input_consent::bar_label(&asker);
-                        // 打字（0.2.15）：自己的電腦之間預設不用每次問，但要同時成立：公鑰就是記住的那把（Tofu::Same）、
-                        // 本人在這台對這把公鑰按過「允許」（看畫面記住的不算）、本人沒在設定頁改成每次都問。否則照樣問；按了允許就記下來
-                        let mut ask_note = "-";
-                        if a.session.scope == view_handshake::Scope::Input {
-                            let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
-                            ask_note = if no_ask { "no_ask" } else { "asked" };
-                            if !no_ask {
-                                let answer = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s, || view_seen_pending(&relay, &id)).await;
-                                if answer == input_consent::Consent::Busy {
-                                    // 這台畫面上還有沒處理的確認框：回報清楚的原因；舊後台不認得 busy 就退回 rejected，不能讓這次掛著
-                                    let r = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": view_stream::BUSY }))).await;
-                                    if view_stream::stop_refused(&r) {
-                                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
-                                    }
-                                    continue;
-                                }
-                                let answered = answer == input_consent::Consent::Allow;
-                                // 按下去之後再確認一次：請求還沒過期、對方也沒撤回，才往下走；逾時或撤回之後按允許也不能開始打字
-                                let still = answered && input_consent::consent_outcome(Some(true), (auth::now_ms() / 1000) as i64, a.session.expires_s) && view_still_pending(&relay, &id).await;
-                                if !still {
-                                    hs(Some(a.tofu), "rejected", if answered { "consent_expired" } else { "consent_denied" });
-                                    if answered {
-                                        // 本人按了允許，但請求已經過期或被對方取消：告訴本人這次沒有允許
-                                        let _ = app.emit_to("list", input_consent::EV_EXPIRED, serde_json::json!({}));
-                                    }
-                                    let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
-                                    continue;
-                                }
-                                // 重查都過了才記下「按過允許」：過期或被撤回的請求不能被記成信任
-                                if let Err(e) = device_id::live::confirm_input(&data_dir, &a.session.d_node, &a.from_pub) {
-                                    elog!("記下按過允許失敗（下次還會問）：{e}");
-                                }
-                            }
-                        }
+                        // 打字（#1745）：同一個帳號底下的設備，本機「允許遠端在這台打字」開著（預設）就直接可以打，不問、不等；
+                        // 關著的在 accept_request_with 驗章之後就拒絕了。握手的驗章、公鑰比對（TOFU）、金鑰變了的處理都照舊。紅條照樣顯示誰在打字、有「結束」
                         let mobile = a.mobile;
                         let tofu_a = a.tofu;
                         let view_stream::Accepted { session, t_eph, t_sig, key: session_key, .. } = a;
@@ -1692,7 +1648,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             hs(Some(tofu_a), "rejected", "accept_api_failed");
                             continue;
                         }
-                        hs(Some(tofu_a), "accepted", ask_note);
+                        hs(Some(tofu_a), "accepted", "-");
                         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
                         // 送畫面的頻道，每幅等伺服器回條；這次觀看結束、port 丟掉時一起收掉。
                         // 看畫面：只送不收（收到的一律丟掉）。打字：另外只收 event=input 的字，排進 TInput（解密、排序、上限都在那裡）
@@ -2998,6 +2954,14 @@ fn bridge_set_mobile_view(m: State<'_, bridge::Manager>, on: bool) -> Result<bri
     m.set_mobile_view(on)
 }
 
+/// 打開／關閉「允許遠端在這台打字」（預設開，#1745）。關掉後別台不能在這台打字；看畫面不受影響
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn bridge_set_remote_input(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    m.set_remote_input(on)
+}
+
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -3265,7 +3229,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_known_input_no_ask, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
