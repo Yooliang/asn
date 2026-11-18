@@ -173,7 +173,25 @@ test('有危險判斷時放行類的選項帶紅框，拒絕類不帶；沒危�
   const calm = permissionView({ text: 'mkdir a', complete: true, options: OPTS, risk: { codes: [], uncertain: false }, choice_hash: 'h' })
   assert.deepEqual(calm.options.map(o => o.danger), [false, false, false])
   const html = fs.readFileSync(path.join(here, '..', 'ui', 'list.html'), 'utf8')
-  assert.match(html, /:class="\{ danger: o\.danger \}"/)
+  assert.match(html, /:class="{ danger: o.danger,/)
+})
+
+test('有危險判斷時「不再詢問」類要按住；沒危險、或一般的 Yes／No 點一下就送', () => {
+  const risky = permissionView({ text: 'rm -rf a', complete: true, options: OPTS, risk: { codes: ['delete_recursive'], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(risky.options.map(o => !!o.hold), [false, true, false], '只有不再詢問類')
+  const calm = permissionView({ text: 'mkdir a', complete: true, options: OPTS, risk: { codes: [], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(calm.options.map(o => !!o.hold), [false, false, false])
+  const odd = permissionView({ text: 'x', complete: true, options: OPTS, risk: { codes: [], uncertain: true }, choice_hash: 'h' })
+  assert.ok(odd.options.every(o => !o.hold), '只有看不出全貌不要求按住')
+})
+
+test('守門：按住的選項接了指標與鍵盤事件，點一下不送要按住的', () => {
+  const html = fs.readFileSync(path.join(here, '..', 'ui', 'list.html'), 'utf8')
+  const i = html.indexOf('v-for="o in permissionDlgView.options"')
+  const btn = html.slice(i, html.indexOf('</button>', i))
+  for (const ev of ['@click="permPress(o)"', '@pointerdown="permHoldStart(o)"', '@pointerup="permHold.cancel()"', '@pointerleave="permHold.cancel()"', '@pointercancel="permHold.cancel()"', '@keydown="permHoldKey(o, $event)"', '@keyup="permHold.keyUp($event)"']) assert.ok(btn.includes(ev), ev)
+  const js = fs.readFileSync(path.join(here, '..', 'ui', 'list.js'), 'utf8')
+  assert.match(js, /const permPress = o => \{ if \(!o\.hold\)/)
 })
 
 test('守門：沒有雜湊或選項格式不對就退回舊的兩顆；選項區在畫面裡用文字顯示', () => {

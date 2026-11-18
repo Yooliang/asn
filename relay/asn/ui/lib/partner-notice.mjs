@@ -77,6 +77,7 @@ export function permissionView(p, name = '') {
 }
 
 const NOT_FULL_HINT = '沒有讀到完整的提示內容（可能被夥伴的畫面收起來了），所以先不能在這裡允許。要允許請到它的視窗確認；要拒絕仍可以按下面的選項。'
+export const HOLD_TIP = '按住一秒才會送出'
 const KINDS = new Set(['allow_once', 'allow_always', 'deny', 'other'])
 
 /** 夥伴給的原選項：只收「編號 1~9＋文字」的；不是拒絕的選項要讀到完整提示才能按 */
@@ -87,7 +88,8 @@ function ownOptions(p, complete, danger) {
     .map(o => {
       const kind = KINDS.has(o.kind) ? o.kind : 'other'
       // danger：有比中危險判斷時，放行類的選項畫紅框（拒絕類不變）
-      return { n: o.n, label: o.label, kind, disabled: kind !== 'deny' && !complete, danger: danger && kind !== 'deny' }
+      // hold：有危險判斷時的「不再詢問」類要按住一秒才送（比照手機）；一般的 Yes、No 與沒有危險判斷時都點一下就送
+      return { n: o.n, label: o.label, kind, disabled: kind !== 'deny' && !complete, danger: danger && kind !== 'deny', hold: danger && kind === 'allow_always' }
     })
 }
 

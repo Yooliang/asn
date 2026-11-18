@@ -466,7 +466,8 @@
     <p class="launch-notice-body permission-hint" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
     <p class="launch-notice-body model-err" v-if="permissionDlg.error">{{ permissionDlg.error }}</p>
     <div class="permission-opts" v-if="permissionDlgView.options">
-      <button class="aero-btn permission-opt" :class="{ danger: o.danger }" type="button" v-for="o in permissionDlgView.options" :key="o.n" :disabled="permissionDlg.busy || o.disabled" @click="answerPermission(o.kind !== 'deny', o.n)">{{ o.n }}. {{ o.label }}</button>
+      <button class="aero-btn permission-opt" :class="{ danger: o.danger, hold: o.hold, holding: permHold.state.key === o.n }" type="button" v-for="o in permissionDlgView.options" :key="o.n" :disabled="permissionDlg.busy || o.disabled" :aria-describedby="o.hold ? 'perm-hold-tip-' + o.n : null"
+        @click="permPress(o)" @pointerdown="permHoldStart(o)" @pointerup="permHold.cancel()" @pointerleave="permHold.cancel()" @pointercancel="permHold.cancel()" @contextmenu="o.hold && $event.preventDefault()" @keydown="permHoldKey(o, $event)" @keyup="permHold.keyUp($event)"><span class="permission-fill" v-if="o.hold" aria-hidden="true"></span><span class="permission-opt-t">{{ o.n }}. {{ o.label }}</span><small class="permission-hold-tip" v-if="o.hold" :id="'perm-hold-tip-' + o.n">{{ HOLD_TIP }}</small></button>
     </div>
     <div class="partner-actions">
       <button class="aero-btn" type="button" @click="closePermissionDlg">之後再說</button>

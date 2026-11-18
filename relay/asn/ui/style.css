@@ -130,6 +130,13 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .permission-risk{margin:0 0 8px;padding:7px 10px;border-left:4px solid var(--close);border-radius:3px;background:#fdecea;color:#8f1d15;font-size:12px;line-height:1.5}
 .permission-risk b{display:block;font-weight:700}
 .permission-risk p{margin:2px 0 0}
+.permission-opt{position:relative;overflow:hidden}
+.permission-opt.hold{user-select:none;-webkit-user-select:none}
+.permission-opt .permission-opt-t,.permission-opt .permission-hold-tip{position:relative}
+.permission-hold-tip{margin-left:8px;font-size:11px;font-weight:400;opacity:.75}
+.permission-fill{position:absolute;inset:0;width:0;background:rgba(179,38,30,.22);transition:width .12s linear;pointer-events:none}
+.permission-opt.holding .permission-fill{width:100%;transition:width 1s linear}
+@media (prefers-reduced-motion:reduce){.permission-opt.holding .permission-fill{transition:none;width:100%}}
 .permission-opt.danger:not(:disabled){border-color:var(--close);color:#8f1d15}
 .permission-hint{margin:8px 0 10px}
 .permission-opts{display:flex;flex-direction:column;gap:6px;margin:0 0 8px}
