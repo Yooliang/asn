@@ -13,6 +13,9 @@ const COMMON = `
   const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 500) };
   const waitFor = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const txt = e => (e?.textContent || '').replace(/\\s+/g, ' ').trim();
+  // 釘選徽章就是狀態燈（#1729）：顏色要等於這個頭像的狀態色（在線綠、忙碌紅、離線灰），不再是固定的藍色
+  const statusColor = name => { const e = document.createElement('i'); e.style.background = 'var(--' + name + ')'; document.body.appendChild(e); const c = getComputedStyle(e).backgroundColor; e.remove(); return c };
+  const pinWant = dot => { const dp = dot.parentElement.querySelector('.dp'); let st = 'online'; for (const k of ['busy', 'away', 'offline']) if (dp && dp.classList.contains('st-' + k)) st = k; return statusColor(st) };
 `
 
 export const chatPinsPhoneSource = () => `(async () => {
@@ -54,9 +57,9 @@ export const chatPinsPhoneSource = () => `(async () => {
   if (page().querySelector('.m-group') !== pinnedGroup()) return { ok: false, why: '「釘選」那一組要在夥伴頁最上面' };
   if (JSON.stringify(pinnedNames()) !== JSON.stringify(['demo'])) return { ok: false, why: '「釘選」那一組的內容不對：' + JSON.stringify(pinnedNames()) };
   const pinnedAv = pinnedGroup().querySelector('li .m-buddy .pin-dot');
-  if (!pinnedAv) return { ok: false, why: '釘選的那一列頭像沒有藍色圖釘徽章' };
+  if (!pinnedAv) return { ok: false, why: '釘選的那一列頭像沒有圖釘徽章' };
   const col = getComputedStyle(pinnedAv).backgroundColor;
-  if (col !== 'rgb(47, 127, 224)') return { ok: false, why: '徽章不是藍色：' + col };
+  if (col === 'rgb(47, 127, 224)' || col !== pinWant(pinnedAv)) return { ok: false, why: '徽章顏色要照狀態（不是藍色）：' + col + '，應該是 ' + pinWant(pinnedAv) };
   const r = pinnedAv.getBoundingClientRect(), av = pinnedAv.parentElement.getBoundingClientRect();
   if (!(r.left + r.width / 2 > av.left + av.width * 0.55 && r.top + r.height / 2 > av.top + av.height * 0.55) && !(pinnedAv.matches('.avb-v ~ .pin-dot') && r.top + r.height / 2 > av.top + av.height * 0.55)) return { ok: false, why: '徽章沒有在頭像的下方' };
   if (dots().length < 2) return { ok: false, why: '未讀那一組裡的 demo 也要有徽章（共兩個），實際 ' + dots().length };
@@ -115,7 +118,8 @@ export const chatPinsDeskSource = () => `(async () => {
   if (nameOf(after[0]) !== lastName) return { ok: false, why: '釘選後它要排到最上面，實際第一列是 ' + nameOf(after[0]) + '（順序：' + after.map(nameOf).join('、') + '）' };
   const dot = after[0].querySelector('.pin-dot');
   if (!dot) return { ok: false, why: '釘選的那一列頭像沒有圖釘徽章' };
-  if (getComputedStyle(dot).backgroundColor !== 'rgb(47, 127, 224)') return { ok: false, why: '徽章不是藍色' };
+  const dcol = getComputedStyle(dot).backgroundColor;
+  if (dcol === 'rgb(47, 127, 224)' || dcol !== pinWant(dot)) return { ok: false, why: '徽章顏色要照狀態（不是藍色）：' + dcol + '，應該是 ' + pinWant(dot) };
   if (after.slice(1).some(li => li.querySelector('.pin-dot'))) return { ok: false, why: '沒釘的列不該有徽章' };
   if (JSON.stringify(after.slice(1).map(nameOf)) !== JSON.stringify(order0.filter(n => n !== lastName))) return { ok: false, why: '其餘的列要維持原本順序' };
   // 2. 取消釘選
