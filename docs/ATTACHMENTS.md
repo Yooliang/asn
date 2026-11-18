@@ -13,7 +13,7 @@
 
 ## 一般檔案（kind=file）
 
-- 白名單（副檔名＝型別）：pdf、txt、md、json、csv、zip、docx、xlsx、pptx。單檔 ≤ 25 MB；每台設備未過期附件合計 ≤ 500 MB 且 ≤ 300 個（照片與檔案共用）。
+- 白名單（副檔名＝型別）：pdf、txt、md、json、csv、zip、docx、xlsx、pptx。單檔 ≤ 25 MB；每台設備未過期附件合計 ≤ 500 MB 且 ≤ 1000 個（照片與檔案共用）。
 - 不壓縮、不轉檔，位元組原樣上傳。三道檢查：ASN 的 Rust 端（副檔名、內容檔頭、大小）→ 後端 `attach_init`（副檔名與型別一致、大小）→ 後端 `attach_commit`（Storage 實際大小與型別）；下載端（ASN、`attach.mjs`）存檔前再比對一次內容檔頭（pdf＝`%PDF-`、zip／Office＝`PK`、文字檔不得含 NUL）。
 - 顯示：ASN 對話裡是檔案卡（檔名、大小、點一下下載並另存到 `下載\ASN`）；Claude 視窗與雲端代理收到 `〔檔案〕檔名（2.5 MB）下載：node "…/attach.mjs" --id <編號>`。
 - 授權、30 天保存、清理與照片完全相同。
@@ -50,7 +50,7 @@ bucket `attachments`：**私有**、單檔上限 25 MB、`allowed_mime_types` �
 
 | 動作 | 說明 |
 |---|---|
-| `POST attach_init` | 要上傳網址。body：`kind`（image）、`mime`、`name`、`bytes`、`width`、`height`、`thumb`、`sha256`（可空）。檢查白名單、大小、縮圖格式、**每台設備總量**（未過期的附件合計 ≤ 500 MB 且 ≤ 300 個）、每分鐘 30 次。回 `{id, upload_url, expires_in, expires_at}`；`upload_url` 是 Storage 的一次性簽名網址，用 `PUT` 傳檔案位元組（`content-type: image/webp`）。 |
+| `POST attach_init` | 要上傳網址。body：`kind`（image）、`mime`、`name`、`bytes`、`width`、`height`、`thumb`、`sha256`（可空）。檢查白名單、大小、縮圖格式、**每台設備總量**（未過期的附件合計 ≤ 500 MB 且 ≤ 1000 個）、每分鐘 30 次。回 `{id, upload_url, expires_in, expires_at}`；`upload_url` 是 Storage 的一次性簽名網址，用 `PUT` 傳檔案位元組（`content-type: image/webp`）。 |
 | `POST attach_commit` | body：`id`。後端向 Storage 查實際大小與型別，一致才把 `pending` 改 `ready`；不一致刪檔並回 400。 |
 | `GET attach_url&id=<編號>` | 換下載網址。回 `{url, expires_in, name, mime, bytes}`；不是寄件人、收件人（群組＝成員）一律 404（不分「不存在」與「沒權限」），過期回 410。 |
 | `POST attach_sweep` | 只有 `owner` 角色節點能呼叫：把過期與放棄的上傳真的從 Storage 刪除。`attach_init` 也會順手清最多 20 筆。 |

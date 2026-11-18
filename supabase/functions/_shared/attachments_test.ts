@@ -366,3 +366,8 @@ Deno.test("sendReply：齊全只有 {id}（舊客戶端看到的形狀不變）�
   assertEquals(sendReply("m1", []), { status: 200, body: { id: "m1" } });
   assertEquals(sendReply("m1", [U(2)]), { status: 200, body: { id: "m1", attachments_missing: [U(2)] } });
 });
+
+Deno.test("額度常數：張數上限 1000、容量上限 500 MB", () => {
+  assertEquals(QUOTA_COUNT, 1000);
+  assertEquals(QUOTA_BYTES, 500 * 1024 * 1024);
+});
