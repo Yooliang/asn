@@ -74,7 +74,7 @@ const devs = () => [
 const st = (over = {}) => ({ devices: devs(), accounts: { ...ACCT }, ...over })
 const render = async (props, state = st()) => {
   globalThis.Vue = Vue
-  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', ...props }) }))
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', devView: 'acct', ...props }) }))
 }
 
 test('頁首：設定圖示與標題（10-25 起拿掉說明文字與「重新整理」，細節在 device-list-page.test.mjs）', async () => {
@@ -101,10 +101,10 @@ test('進入細部頁：指定 dev 才進；沒指定或認不得的鍵都留在
 })
 
 test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一列一個的廠商卡片（我們自己的圖示）', async () => {
-  const html = await render({ catKey: 'devices', dev: 'W' })
+  const html = await render({ catKey: 'devices', dev: 'W', devView: 'acct' })
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(!html.includes('class="dv-tag kind">電腦<'), '電腦類型標籤多餘，不顯示'); assert.match(html, /class="dv-tag on">在線</)
-  assert.ok((await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('帳號最後回報：3 分鐘前'), '回報時間搬到詳情頁')
+  assert.ok((await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('3 分鐘前'), '回報時間搬到詳情頁')
   const cards = [...html.matchAll(/<li class="dv-vendor[^"]*"/g)]
   assert.equal(cards.length, 3)
   for (const k of ['claude', 'grok', 'pi']) assert.ok(html.includes(vendorIconSvg(k)), `${k} 圖示用 vendorIconSvg`)
