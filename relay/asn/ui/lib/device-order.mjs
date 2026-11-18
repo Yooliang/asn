@@ -52,6 +52,14 @@ export function reorderDevice(keys, dragKey, targetKey, after, { selfNode } = {}
 
 export const showDevice = (shown, key) => (normalizeKeys(shown).includes(key) ? normalizeKeys(shown) : [...normalizeKeys(shown), key])
 
+// 設備在不在線（設定「設備」頁籤的在線／離線標示，開新夥伴的設備列也用這份）：
+// 本機永遠在線；其餘看有沒有在線的 ASN 視窗（asn），或名單上有沒有任何非離線的視窗
+export function isDeviceOnline(node, friends, { selfNode = '', asn = {} } = {}) {
+  if (node === selfNode) return true
+  if (Array.isArray(asn?.[node]) && asn[node].length > 0) return true
+  return (Array.isArray(friends) ? friends : []).some(f => f.node === node && f.status && f.status !== 'offline')
+}
+
 // 自動隱藏：非本機、沒有任何在線視窗（ASN 視窗也算）、沒有任何未封存的夥伴（ASN 視窗不是夥伴）、沒有未讀。只要一項不成立就不隱藏；手動顯示過的也不隱藏
 export function isDeviceHidden(node, friends, { selfNode, shown = [] } = {}) {
   if (!node || node === selfNode || normalizeKeys(shown).includes(node)) return false
