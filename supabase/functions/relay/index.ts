@@ -248,7 +248,9 @@ Deno.serve(async (req) => {
     if (action !== "attach_url" && req.method !== "POST") return json(405, { error: "method_not_allowed" });
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    const r = await handleAttachAction({ rpc, storage }, me, action, params);
+    // 本人以登入憑證判定（同信件 owner_signed）；只有要上傳網址時才需要驗
+    const signedAttach = action === "attach_init" ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleAttachAction({ rpc, storage }, me, action, params, signedAttach);
     return json(r.status, r.body);
   }
 

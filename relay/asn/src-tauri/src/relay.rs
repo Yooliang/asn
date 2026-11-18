@@ -725,6 +725,12 @@ impl Relay {
         let data: Option<Value> = serde_json::from_str(&text).ok();
         if !status.is_success() {
             let err = data.as_ref().and_then(|d| d.get("error")).and_then(Value::as_str).unwrap_or("");
+            // 後台有分範圍的錯誤（例如附件額度的 scope）：接在代碼後面「代碼:範圍」，其餘錯誤照舊
+            let scope = data.as_ref().and_then(|d| d.get("scope")).and_then(Value::as_str).filter(|s| !s.is_empty() && !err.is_empty());
+            let err = match scope {
+                Some(s) => format!("{err}:{s}"),
+                None => err.to_string(),
+            };
             return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
         }
         Ok(data.unwrap_or(Value::Null))

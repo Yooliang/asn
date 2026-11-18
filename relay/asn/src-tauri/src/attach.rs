@@ -271,7 +271,8 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
         crate::relay::build_send_body(&Value::Object(send), &relay.window_name())?
     };
 
-    let init = relay.api("attach_init", Some(init_body(&photo))).await.map_err(|e| explain(&e))?;
+    // 要上傳網址也帶登入憑證：額度依寄件人分開算，本人以登入憑證判定（同信件的本人簽章）；沒登入就和以前一樣不帶
+    let init = relay.api_signed("attach_init", Some(init_body(&photo)), token).await.map_err(|e| explain(&e))?;
     let id = init.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)).ok_or("ASN 沒有給附件編號")?.to_string();
     let url = init.get("upload_url").and_then(Value::as_str).ok_or("ASN 沒有給上傳網址")?;
     if !same_host(url, relay.base()) {
@@ -309,7 +310,8 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
 /// 後端錯誤代碼 → 給人看的白話（relay.api 的錯誤形如「attach_init HTTP 413 quota_exceeded」）
 pub fn explain(e: &str) -> String {
     let pick = |code: &str, msg: &str| if e.contains(code) { Some(msg.to_string()) } else { None };
-    pick("quota_exceeded", "這台設備的照片空間滿了（保存 30 天後自動清掉），晚點再傳")
+    pick("quota_exceeded:agent", "AI 視窗傳的附件已經佔滿它的空間（保存 30 天後自動清掉），先等舊的過期或請它少傳一些")
+        .or_else(|| pick("quota_exceeded", "這台設備的照片空間滿了（保存 30 天後自動清掉），晚點再傳"))
         .or_else(|| pick("file_too_large", "檔案太大了（照片上限 5 MB、檔案上限 25 MB）"))
         .or_else(|| pick("unsupported_type", "ASN 不收這種檔案"))
         .or_else(|| pick("rate_limited", "傳得太頻繁了，請稍後再試"))
@@ -691,6 +693,8 @@ mod tests {
     #[test]
     fn 錯誤代碼轉白話() {
         assert!(explain("attach_init HTTP 413 quota_exceeded").contains("空間滿了"));
+        assert!(explain("attach_init HTTP 413 quota_exceeded:device").contains("空間滿了"));
+        assert!(explain("attach_init HTTP 413 quota_exceeded:agent").contains("AI 視窗"));
         assert!(explain("attach_init HTTP 413 file_too_large").contains("5 MB"));
         assert!(explain("attach_init HTTP 404").contains("還不支援"));
         assert!(explain("send HTTP 404").contains("send HTTP 404"));
@@ -729,7 +733,7 @@ mod tests {
     // ---- 整段流程對本機假伺服器（只聽 127.0.0.1，不碰真實後端） ----
 
     #[derive(Debug, Clone)]
-    struct Req { method: String, path: String, key: Option<String>, ctype: Option<String>, body: Vec<u8> }
+    struct Req { method: String, path: String, key: Option<String>, user: Option<String>, ctype: Option<String>, body: Vec<u8> }
 
     /// 極簡 HTTP 假伺服器：每個連線讀一個請求、回一個回應；handler 決定內容
     fn serve(handler: impl Fn(&Req, u16) -> (u16, Vec<u8>, &'static str) + Send + Sync + 'static) -> (u16, Arc<Mutex<Vec<Req>>>) {
@@ -764,7 +768,7 @@ mod tests {
                 let mut it = first.split(' ');
                 let (method, path) = (it.next().unwrap_or("").to_string(), it.next().unwrap_or("").to_string());
                 let hdr = |name: &str| head.lines().find_map(|l| { let (k, v) = l.split_once(':')?; if k.eq_ignore_ascii_case(name) { Some(v.trim().to_string()) } else { None } });
-                let req = Req { method, path, key: hdr("x-relay-key"), ctype: hdr("content-type"), body: buf[head_end..head_end + clen].to_vec() };
+                let req = Req { method, path, key: hdr("x-relay-key"), user: hdr("x-asn-user"), ctype: hdr("content-type"), body: buf[head_end..head_end + clen].to_vec() };
                 let n = { let mut g = log2.lock().unwrap(); g.push(req.clone()); g.len() as u16 };
                 let (code, body, ct) = handler(&req, n);
                 let _ = write!(s, "HTTP/1.1 {code} X\r\ncontent-type: {ct}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
@@ -776,6 +780,38 @@ mod tests {
 
     fn relay_at(port: u16) -> Relay {
         Relay::new(format!("http://127.0.0.1:{port}/relay"), "fake-key".into(), "T".into(), "T-ASN".into())
+    }
+
+    #[tokio::test]
+    async fn 寄照片_要上傳網址也帶登入憑證_沒登入就不帶_上傳到儲存端不帶() {
+        for token in [Some("usertoken-9"), None] {
+            let port_cell = Arc::new(Mutex::new(0u16));
+            let pc = port_cell.clone();
+            let (port, log) = serve(move |r, _| {
+                let port = *pc.lock().unwrap();
+                if r.path.starts_with("/storage/up") { return (200, b"{}".to_vec(), "application/json"); }
+                if r.path.contains("action=attach_init") { return (200, format!(r#"{{"id":"{ID}","upload_url":"http://127.0.0.1:{port}/storage/up?token=t"}}"#).into_bytes(), "application/json"); }
+                if r.path.contains("action=attach_commit") { return (200, br#"{"ok":true}"#.to_vec(), "application/json"); }
+                if r.path.contains("action=send") { return (200, br#"{"id":"00000000-0000-0000-0000-000000000099"}"#.to_vec(), "application/json"); }
+                (404, b"{}".to_vec(), "application/json")
+            });
+            *port_cell.lock().unwrap() = port;
+            let r = send_attachment_signed(&relay_at(port), &reqwest::Client::new(), &payload(json!({})), token).await;
+            assert!(r.is_ok(), "{r:?}");
+            let g = log.lock().unwrap();
+            let want = token.map(|t| format!("Bearer {t}"));
+            assert_eq!(g[0].user, want, "attach_init 帶不帶憑證要跟有沒有登入一致");
+            assert_eq!(g[1].user, None, "上傳到儲存端的請求不帶憑證");
+        }
+    }
+
+    #[tokio::test]
+    async fn 寄照片_額度滿了_依範圍說白話() {
+        for (scope, want) in [("agent", "AI 視窗"), ("device", "這台設備")] {
+            let (port, _) = serve(move |_, _| (413, format!(r#"{{"error":"quota_exceeded","scope":"{scope}"}}"#).into_bytes(), "application/json"));
+            let e = send_attachment(&relay_at(port), &reqwest::Client::new(), &payload(json!({}))).await.unwrap_err();
+            assert!(e.contains(want), "{scope}: {e}");
+        }
     }
 
     #[tokio::test]
