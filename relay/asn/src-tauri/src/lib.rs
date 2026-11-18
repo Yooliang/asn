@@ -1637,7 +1637,16 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
                             ask_note = if no_ask { "no_ask" } else { "asked" };
                             if !no_ask {
-                                let answered = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s).await;
+                                let answer = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s, || view_still_pending(&relay, &id)).await;
+                                if answer == input_consent::Consent::Busy {
+                                    // 這台畫面上還有沒處理的確認框：回報清楚的原因；舊後台不認得 busy 就退回 rejected，不能讓這次掛著
+                                    let r = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": view_stream::BUSY }))).await;
+                                    if view_stream::stop_refused(&r) {
+                                        let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
+                                    }
+                                    continue;
+                                }
+                                let answered = answer == input_consent::Consent::Allow;
                                 // 按下去之後再確認一次：請求還沒過期、對方也沒撤回，才往下走；逾時或撤回之後按允許也不能開始打字
                                 let still = answered && input_consent::consent_outcome(Some(true), (auth::now_ms() / 1000) as i64, a.session.expires_s) && view_still_pending(&relay, &id).await;
                                 if !still {

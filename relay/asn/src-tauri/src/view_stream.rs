@@ -49,8 +49,24 @@ pub enum End {
     HeldPrompt,
 }
 
+/// 這台畫面上還有沒處理的打字確認框，沒有開新的：回報這個原因，發起端才看得到一句清楚的話（#1303；舊後台不認得就改回 rejected，見 lib.rs）
+pub const BUSY: &str = "busy";
+
 /// 窗格停在外來訊息的確認框而結束時，回報後台的原因（舊後台不認得就改回 failed，見 lib.rs）
 pub const HELD_PROMPT: &str = "held_prompt";
+
+/// `term_view_stop` 這次有沒有被後台拒絕：連線失敗（Err），或回應內容帶了 `error`（不是 null、不是空字串）都算。
+/// 舊後台不認得新的原因（如 busy）時，回的是成功的 HTTP、內容是 `{"error":"bad_request"}`，不是 Err，所以不能只看 Err（#1303）
+pub fn stop_refused<E>(r: &Result<serde_json::Value, E>) -> bool {
+    match r {
+        Err(_) => true,
+        Ok(body) => match body.get("error") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::String(s)) => !s.is_empty(),
+            Some(_) => true,
+        },
+    }
+}
 
 impl End {
     /// 後台 `term_view_stop` 的原因；不用回報的是 None
@@ -314,6 +330,21 @@ impl NoTransport {
 
 #[cfg(test)]
 mod tests {
+    /// #1303：busy 被舊後台拒絕要退回 rejected；三種情況都要分得出來
+    #[test]
+    fn 結束被後台拒絕_要看內容不只看連線() {
+        let refused: Result<serde_json::Value, String> = Ok(serde_json::json!({ "error": "bad_request" }));
+        assert!(super::stop_refused(&refused), "舊後台不認得：Ok 但帶 error，要退回");
+        let ok: Result<serde_json::Value, String> = Ok(serde_json::json!({ "ok": true }));
+        assert!(!super::stop_refused(&ok), "正常成功：不退回");
+        let down: Result<serde_json::Value, String> = Err("term_view_stop 連線失敗".into());
+        assert!(super::stop_refused(&down), "連線失敗：退回");
+        for body in [serde_json::json!({ "ok": true, "error": null }), serde_json::json!({ "error": "" }), serde_json::Value::Null] {
+            assert!(!super::stop_refused(&Ok::<_, String>(body.clone())), "{body}");
+        }
+        assert!(super::stop_refused(&Ok::<_, String>(serde_json::json!({ "error": "not_found" }))));
+    }
+
     use super::*;
     use crate::view_handshake::test_key;
 
