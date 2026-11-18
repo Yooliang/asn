@@ -367,7 +367,15 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     add_account(h.path(), "a@x.test", UA);
     assert!(feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW));
     let before = quota_of(&h, "a@x.test");
-    let state_before = state_file(&h);
+    // 狀態檔裡「各視窗上次的額度窗組合」（#1730）本來就會因新視窗多記一筆；其餘欄位要完全沒動
+    let without_shapes = |h: &tempfile::TempDir| {
+        let mut v: Value = serde_json::from_str(&state_file(h)).unwrap_or(Value::Null);
+        if let Some(o) = v.as_object_mut() {
+            o.remove("window_shapes");
+        }
+        v
+    };
+    let state_before = without_shapes(&h);
     let dir = h.path().join(".claude").join("projects").join("p");
     // 1. 沒有 assistant 回應（取不到時間戳）
     let no_ts = transcript(h.path(), "nots", UA, None, 1);
@@ -390,7 +398,7 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     }
     assert_eq!(quota_of(&h, "a@x.test"), before, "A 的紀錄完全不變");
     assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
-    assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
+    assert_eq!(without_shapes(&h), state_before, "狀態檔也沒動");
 }
 
 #[test]

@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 pub(crate) mod merge;
 pub(crate) mod owner;
 pub(crate) mod owner_store;
+pub(crate) mod shapes;
 pub(crate) mod state;
 
 pub const MAX_ACCOUNTS: usize = 20;
@@ -362,6 +363,8 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     if input.len() > MAX_INPUT {
         return false;
     }
+    // 只寫 log：這個視窗帶的額度窗組合有變才記一行（#1730），不影響下面任何判斷
+    shapes::note(home, input, now_ms);
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
     if !owner::transcript_given(input) {
         note_legacy(home, now_ms);
