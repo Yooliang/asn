@@ -31,6 +31,17 @@ test('接線：預設開（舊後端沒有欄位也顯示開著）、開關呼�
   assert.ok(!list.includes('input-consent-'), '畫面不再聽確認框的事件')
 })
 
+test('結束原因的白話：告訴對方去哪裡打開，名稱要跟設定頁實際放勾選的那一區一致', () => {
+  const rs = read('../src-tauri/src/view_remote.rs')
+  const text = rs.match(/"input_off" => "([^"]*)"/)?.[1]
+  assert.ok(text, '有 input_off 的白話')
+  assert.ok(text.includes('設定 → 視窗與系統匣') && text.includes('允許遠端在這台打字'), text)
+  const cats = read('../ui/lib/settings-cats.mjs')
+  assert.match(cats, /key: 'window', title: '視窗與系統匣'/)
+  const before = panel.slice(0, panel.indexOf('aria-label="允許遠端在這台打字"'))
+  assert.equal([...before.matchAll(/catKey === '([a-z]+)'/g)].pop()[1], 'window', '勾選框就在「視窗與系統匣」那一區')
+})
+
 test('Rust：存在 bridge.json 的 remote_input_off（預設開）；指令有登記；只有設定頁的命令能改', () => {
   assert.match(bridgeRs, /remote_input: !s\.remote_input_off/)
   assert.match(bridgeRs, /remote_input_off: flag\("remote_input_off"\)/)
