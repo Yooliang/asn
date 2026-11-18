@@ -40,7 +40,8 @@ export const ATTACH_KINDS: Record<string, { mimes: string[]; maxBytes: number }>
   file: { mimes: Object.values(FILE_TYPES), maxBytes: 25 * 1024 * 1024 },
 };
 export const QUOTA_BYTES = 500 * 1024 * 1024; // 每台設備未過期附件合計
-export const QUOTA_COUNT = 300;
+// 每台設備未過期附件的張數上限（照片與檔案共用）
+export const QUOTA_COUNT = 1000;
 export const MAX_PER_MESSAGE = 4;
 export const DOWNLOAD_TTL_SECONDS = 300;
 export const THUMB_MAX_CHARS = 12000;
