@@ -290,6 +290,7 @@ pub fn viewer_is_mobile(registered: Option<&serde_json::Value>, reported: Option
 
 /// T 收到一筆請求：D 的公鑰先和本機記住的比（TOFU），對不上就拒絕；再用那把公鑰驗章，全部驗過才接受。
 /// **這裡不寫檔：** 第一次看到的公鑰由呼叫端在驗章通過之後才記住
+#[cfg(test)]
 pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64, allow_mobile: bool) -> Result<Accepted, Refused> {
     accept_request_with(row, me_node, known, key, now_s, allow_mobile, true)
 }
