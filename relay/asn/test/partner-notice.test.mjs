@@ -133,3 +133,45 @@ test('守門：同意框跳之前先問畫面有沒有開著；畫面元件會�
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(view.includes('term-view-ask') && view.includes('viewHint('))
 })
+
+const OPTS = [
+  { n: 1, label: 'Yes', kind: 'allow_once' },
+  { n: 2, label: 'Yes, and don\'t ask again for this command', kind: 'allow_always' },
+  { n: 3, label: 'No', kind: 'deny' },
+]
+
+test('確認框照 AI 給的原選項顯示，編號與文字都在', () => {
+  const v = permissionView({ text: 'mkdir a', complete: true, options: OPTS, risk: { codes: [], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(v.options.map(o => [o.n, o.label, o.kind, o.disabled]), [[1, 'Yes', 'allow_once', false], [2, OPTS[1].label, 'allow_always', false], [3, 'No', 'deny', false]])
+  assert.equal(v.risk, null, '沒比中就不顯示任何提醒')
+})
+
+test('讀不到完整提示：只有拒絕可按，並講原因；讀得到全文（長提示）就能允許', () => {
+  const cut = permissionView({ text: '一部分', complete: false, options: OPTS, risk: { codes: [], uncertain: true }, choice_hash: 'h' })
+  assert.deepEqual(cut.options.map(o => o.disabled), [true, true, false])
+  assert.match(cut.hint, /沒有讀到完整/)
+  assert.equal(cut.canAllow, false)
+  const long = permissionView({ text: Array.from({ length: 80 }, (_, i) => `line ${i}`).join('\n'), complete: true, options: OPTS, risk: { codes: [], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(long.options.map(o => o.disabled), [false, false, false])
+  assert.equal(long.hint, '')
+})
+
+test('危險指令：上方一行紅字，字只從代碼查表、不讀本文；多帶的欄位不顯示', () => {
+  const v = permissionView({ text: 'rm -rf /；這段文字不能出現在提醒', complete: true, options: OPTS, risk: { codes: ['delete_recursive', 'git_destructive', '亂寫的代碼'], uncertain: false }, choice_hash: 'h' })
+  assert.match(v.risk, /^注意：這個操作可能有風險：會一次刪掉整個資料夾；會改寫或丟掉 git 的歷史紀錄$/)
+  assert.ok(!v.risk.includes('這段文字') && !v.risk.includes('亂寫'))
+  const odd = permissionView({ text: 'x', complete: true, options: OPTS, risk: { codes: [], uncertain: true }, choice_hash: 'h' })
+  assert.match(odd.risk, /看不出/)
+})
+
+test('守門：沒有雜湊或選項格式不對就退回舊的兩顆；選項區在畫面裡用文字顯示', () => {
+  assert.equal(permissionView({ text: 'x', complete: true, options: OPTS }).options, undefined)
+  const bad = permissionView({ text: 'x', complete: true, options: [{ n: 0, label: 'a' }, { n: 12, label: 'b' }, { n: 1, label: '' }], choice_hash: 'h' })
+  assert.equal(bad.options, undefined)
+  const html = fs.readFileSync(path.join(here, '..', 'ui', 'list.html'), 'utf8')
+  const i = html.indexOf('v-if="permissionDlg.open"')
+  const block = html.slice(i, html.indexOf('</asn-dialog>', i))
+  assert.match(block, /permissionDlgView\.risk/)
+  assert.match(block, /v-for="o in permissionDlgView\.options"/)
+  assert.ok(!block.includes('v-html'))
+})

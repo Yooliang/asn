@@ -1563,12 +1563,14 @@ async function openPermissionDlg(item) {
     Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
   } catch (e) { console.info('[ASN] 權限詢問讀不到', item.name, String(e?.message ?? e)) }
 }
-async function answerPermission(allow) {
+async function answerPermission(allow, choice = null) {
   const p = permissionDlg.prompt
   if (!p || permissionDlg.busy) return
   permissionDlg.busy = true; permissionDlg.error = ''
   try {
-    await transport.partnerPermissionAnswer(p.name, p.hash, allow)
+    // 照原選項按的：帶選項編號和綁定的雜湊；舊流程（外來訊息、舊版後端）照舊只送允許／拒絕
+    if (choice !== null) await transport.partnerPermissionChoose(p.name, p.choice_hash, choice)
+    else await transport.partnerPermissionAnswer(p.name, p.hash, allow)
     permissionDlg.open = false
   } catch (e) { permissionDlg.error = String(e?.message ?? e) } finally { permissionDlg.busy = false }
 }

@@ -1,5 +1,6 @@
 // 夥伴卡住的本機提醒（todo-next-162）：後端只給視窗名與固定代號，畫面上的字都在這裡，不顯示任何畫面內容。
 import { HELD_HINT, heldTitle } from './held.mjs'
+import { RISK_TEXT } from './perm-ask.mjs'
 export const NOTICE_POLL_MS = 15_000
 
 const NOTICES = {
@@ -66,7 +67,34 @@ export function permissionView(p, name = '') {
   if (p?.kind === 'held_message') {
     return { held: true, title: heldTitle(name), text, canAllow: p?.complete === true && !!text, canDeny: !!text, hint: HELD_HINT, denyLabel: '不放行', allowLabel: '放行這一則' }
   }
-  return { text, canAllow: p?.complete === true && !!text, canDeny: !!text, hint: p?.complete === true ? '' : '提示太長，這裡顯示不完整。要允許請到它的視窗確認。' }
+  const complete = p?.complete === true && !!text
+  const hint = complete ? '' : NOT_FULL_HINT
+  const options = ownOptions(p, complete)
+  // 有原本的選項就照它顯示（Yes／No 等）；沒有（舊版後端）才用固定的兩顆
+  const base = { text, canAllow: complete, canDeny: !!text, hint }
+  return options.length ? { ...base, options, risk: riskLine(p?.risk, complete) } : base
+}
+
+const NOT_FULL_HINT = '沒有讀到完整的提示內容（可能被夥伴的畫面收起來了），所以先不能在這裡允許。要允許請到它的視窗確認；要拒絕仍可以按下面的選項。'
+const KINDS = new Set(['allow_once', 'allow_always', 'deny', 'other'])
+
+/** 夥伴給的原選項：只收「編號 1~9＋文字」的；不是拒絕的選項要讀到完整提示才能按 */
+function ownOptions(p, complete) {
+  if (!Array.isArray(p?.options) || typeof p?.choice_hash !== 'string') return []
+  return p.options
+    .filter(o => Number.isInteger(o?.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string' && o.label)
+    .map(o => {
+      const kind = KINDS.has(o.kind) ? o.kind : 'other'
+      return { n: o.n, label: o.label, kind, disabled: kind !== 'deny' && !complete }
+    })
+}
+
+/** 上方的紅字提醒：只用後端給的危險代碼查表，不讀提示本文。沒有就是 null（不寫「安全」） */
+function riskLine(r, complete) {
+  const codes = Array.isArray(r?.codes) ? r.codes.filter(c => typeof c === 'string' && Object.hasOwn(RISK_TEXT, c)) : []
+  if (codes.length) return `注意：這個操作可能有風險：${[...new Set(codes)].map(c => RISK_TEXT[c]).join('；')}`
+  if (complete && r?.uncertain === true) return '注意：看不出這個指令的全貌（有編碼或拼接），請到它的視窗確認'
+  return null
 }
 
 /** 定時查；查失敗（舊版後端沒有這個命令）就略過這一輪 */

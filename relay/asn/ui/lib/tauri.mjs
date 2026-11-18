@@ -42,6 +42,7 @@ export const transport = {
   termStart: req => invoke('term_start', { req }),           // { profile: 'grok'|'agy', cwd } → { id }；只在使用者於「開終端…」按「開啟」後呼叫
   termEnvNotice: () => invoke('term_env_notice'),            // 共用終端服務開著、而且使用者環境變數裡有看起來像金鑰的變數時回一句話（只含變數名字），否則 null（只在電腦版）
   partnerPermissionPrompt: name => invoke('partner_permission_prompt', { name }),   // { name, text, hash, complete }
+  partnerPermissionChoose: (name, hash, n) => invoke('partner_permission_choose', { name, hash, n }),
   partnerPermissionAnswer: (name, hash, allow) => invoke('partner_permission_answer', { name, hash, allow }),
   autoResumeStatus: () => invoke('auto_resume_status'),      // 電腦重開後自動接回的結果（#767）；沒有就是 null
   partnerNoticesActive: () => invoke('partner_notices_active'),   // 讀畫面這次實際有沒有在跑（true/false）；查不到由呼叫端當成沒在跑
