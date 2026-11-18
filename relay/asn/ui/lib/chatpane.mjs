@@ -911,17 +911,35 @@ export const ChatPane = {
   </teleport>
   <teleport to="body" v-if="annot"><annotator :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator></teleport>
   <teleport to="body" v-if="viewer">
-  <div class="photo-viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
+  <div class="photo-viewer" :class="{ 'pv-multi': viewer.total > 1 }" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
     <div class="pv-bar">
-      <span class="pv-name">{{ viewer.title }}</span>
-      <button class="aero-btn" type="button" @click="saveViewer" :disabled="viewer.busy || !viewer.src">另存</button>
-      <button class="aero-btn" type="button" @click="closeViewer">關閉</button>
+      <div class="pv-meta">
+        <span class="pv-name" :title="viewer.title">{{ viewer.who || viewer.title }}</span>
+        <span class="pv-sub" v-if="viewer.at">{{ viewer.at }}</span>
+      </div>
+      <span class="pv-count" v-if="viewer.total > 1" role="status">第 {{ viewer.n }}／{{ viewer.total }} 張</span>
+      <button class="aero-btn pv-btn pv-save" type="button" @click="saveViewer" :disabled="viewer.busy || !viewer.src" aria-label="另存" title="另存">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M12 6.2v7.4M8.6 10.6l3.4 3.4 3.4-3.4M7.4 17h9.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <line-icon name="save" :size="22"></line-icon>
+      </button>
+      <button class="aero-btn pv-btn pv-close" type="button" @click="closeViewer" aria-label="關閉" title="關閉（Esc）">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><defs><linearGradient id="pvgr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f09a90"/><stop offset="1" stop-color="#c0392b"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#pvgr)" stroke="#8c2a20" stroke-width="1.2"/><path d="M8.2 8.2l7.6 7.6M15.8 8.2l-7.6 7.6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <line-icon name="x" :size="22"></line-icon>
+      </button>
     </div>
     <div class="pv-body" @click.self="closeViewer">
       <img v-if="viewer.src" class="pv-img" :class="{ zoomed: zoom.s > 1 }" :style="pvStyle" :src="viewer.src" :alt="viewer.title" draggable="false" title="滾輪或雙指縮放，放大後可以拖曳；雙擊放大或還原" @wheel="zoomer.onWheel" @dblclick="zoomer.onDblClick" @pointerdown="zoomer.onPointerDown" @pointermove="zoomer.onPointerMove" @pointerup="zoomer.onPointerUp" @pointercancel="zoomer.onPointerUp">
       <img v-else-if="viewer.thumb" class="pv-thumb" :src="viewer.thumb" alt="">
       <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}<button v-if="viewer.saved" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></div>
     </div>
+    <button class="pv-nav pv-prev" type="button" v-if="viewer.total > 1" :disabled="viewer.n <= 1" aria-label="上一張" title="上一張（←）">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M14 7.5L9.5 12l4.5 4.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <line-icon name="prev" :size="26"></line-icon>
+    </button>
+    <button class="pv-nav pv-next" type="button" v-if="viewer.total > 1" :disabled="viewer.n >= viewer.total" aria-label="下一張" title="下一張（→）">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M10 7.5l4.5 4.5-4.5 4.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <line-icon name="next" :size="26"></line-icon>
+    </button>
   </div>
   </teleport>
 </div>

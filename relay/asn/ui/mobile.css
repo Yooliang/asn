@@ -525,3 +525,17 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-row-dot{position:static;flex:none}
 /* 名單列長按叫選單（#1479）：不要選字、不要跳系統的長按選單 */
 .m-buddy{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* 看大圖（#1728）：手機用左右滑切換。上方列維持原本大小（名字沿用內文字級、另存關閉 44px 好點）；
+   左右箭頭只是提示（不能點、到頭那一側直接藏起來），壓在照片上，兩側各內縮 8px 讓整顆露出來 */
+.m-body .photo-viewer .pv-name{font-size:inherit;font-weight:normal}
+:root[data-skin] .m-body .photo-viewer .pv-btn{width:44px;height:44px;min-width:44px;min-height:44px;padding:0}
+.m-body .photo-viewer .pv-btn svg:not(.lic){width:26px;height:26px}
+:root[data-skin] .m-body .photo-viewer .pv-btn .lic{width:22px;height:22px}
+:root[data-skin] .m-body .photo-viewer .pv-nav{pointer-events:none;width:36px;height:36px}
+.m-body .photo-viewer .pv-nav:disabled{visibility:hidden}
+.m-body .photo-viewer .pv-nav svg:not(.lic){width:32px;height:32px}
+:root[data-skin] .m-body .photo-viewer .pv-nav .lic{width:22px;height:22px}
+.m-body .photo-viewer .pv-prev{left:8px}
+.m-body .photo-viewer .pv-next{right:8px}
+:root[data-skin="modern"] .m-body .photo-viewer .pv-nav{background:rgba(15,22,32,.55)}
+.m-body .photo-viewer.pv-multi .pv-body{padding-left:10px;padding-right:10px}

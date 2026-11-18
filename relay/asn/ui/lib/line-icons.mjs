@@ -55,10 +55,12 @@ export const ICONS = {
   "plus": [["path",{"d":"M12 5v14M5 12h14"}]],
   "pin": [["path",{"d":"M9 4h6l-1 5.5 3 3v1.5h-4.5V20l-1.5 1-1.5-1v-6H6v-1.5l3-3z"}]],
   "back": [["path",{"d":"M15 4.5 7.5 12 15 19.5"}]],
+  "next": [["path",{"d":"M9 4.5 16.5 12 9 19.5"}]],
+  "x": [["path",{"d":"M6 6l12 12M18 6 6 18"}]],
 }
 
 /** 同一個圖的別名（設計稿上註明「和○○同一個圖」的） */
-export const ALIAS = { partners: 'group', chats: 'msg', notice: 'notify', update: 'restart' }
+export const ALIAS = { partners: 'group', chats: 'msg', notice: 'notify', update: 'restart', prev: 'back', save: 'adopt' }
 
 /** 「更多」的三個實心點（唯一用填色的圖示） */
 const DOTS = [5.5, 12, 18.5].map(cx => ['circle', { cx: String(cx), cy: '12', r: '1.4', fill: 'currentColor', stroke: 'none' }])

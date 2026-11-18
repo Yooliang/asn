@@ -587,3 +587,17 @@
 :root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}
 :root[data-skin="line"] .m-dv-row.sel{background:var(--ls-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */
 :root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-4px}
+
+/* ---------- 看大圖的另存、關閉與左右切換（#1728）：LINE 風格＝實心綠圓鈕＋白色線條圖示；關閉是白底圓鈕＋深灰 ×；到頭的那一顆透明度 .35。只用顏色和形狀，不放任何商標字樣 ---------- */
+:root[data-skin="line"] .pv-btn svg:not(.lic),:root[data-skin="line"] .pv-nav svg:not(.lic){display:none}
+:root[data-skin="line"] .pv-btn .lic,:root[data-skin="line"] .pv-nav .lic{display:inline-block}
+:root[data-skin="line"] .photo-viewer .pv-btn{border:0;border-radius:50%;background:var(--accent);color:#fff;box-shadow:none}
+:root[data-skin="line"] .photo-viewer .pv-btn .lic{width:20px;height:20px}
+:root[data-skin="line"] .photo-viewer .pv-btn:hover:not(:disabled){background:#178a49}
+:root[data-skin="line"] .photo-viewer .pv-btn.pv-close{background:#fff;color:#3a3f47}
+:root[data-skin="line"] .photo-viewer .pv-btn.pv-close:hover:not(:disabled){background:#e9ecf0}
+:root[data-skin="line"] .photo-viewer .pv-btn:disabled{opacity:.4}
+:root[data-skin="line"] .photo-viewer .pv-nav{width:44px;height:44px;border:0;background:var(--accent);color:#fff;box-shadow:none}
+:root[data-skin="line"] .photo-viewer .pv-nav:hover:not(:disabled){background:#178a49}
+:root[data-skin="line"] .photo-viewer .pv-nav:disabled{opacity:.35}
+:root[data-skin="line"] .photo-viewer .pv-count{background:rgba(255,255,255,.16)}
