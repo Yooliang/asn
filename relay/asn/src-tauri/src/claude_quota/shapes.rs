@@ -65,6 +65,8 @@ pub(crate) fn note(home: &Path, input: &str, now_ms: i64) {
     let Some(line) = should_log(st.window_shapes.get(&id).map(String::as_str), &id, shapes) else { return };
     merge::append_log(&merge::log_path(home), &format!("{} {line}\n", iso_secs(now_ms)));
     st.window_shapes.insert(id.clone(), combo_text(shapes));
+    // 超過上限丟的是字母順序最前面的代號（不是最舊的）：同時開超過 MAX_WINDOWS 個視窗時，
+    // 它們可能互相擠掉、之後重記一行；只會多幾行 log，不影響任何收或不收的判斷
     while st.window_shapes.len() > MAX_WINDOWS {
         let Some(drop) = st.window_shapes.keys().find(|k| **k != id).cloned() else { break };
         st.window_shapes.remove(&drop);

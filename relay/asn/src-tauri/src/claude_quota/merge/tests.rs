@@ -1141,3 +1141,20 @@ fn 帳號庫正常或沒有帳號庫_不警示() {
     assert!(feed_win(&h, "wa", "a@x.test", UA, NOW + 20 * MIN, 2, wk(60.0), NOW + 21 * MIN));
     assert!(!log(&h).contains(LIB_WARN), "{}", log(&h));
 }
+
+#[test]
+fn 視窗帶的額度窗組合_同視窗同組合只記一行_組合變了才再記一行() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    let count = |h: &tempfile::TempDir| log(h).lines().filter(|l| l.contains("帶的額度窗")).count();
+    // 同一個視窗（同一個 transcript 路徑）連兩筆都是只帶每週：只記一行
+    feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW);
+    feed(&h, "wa", UA, NOW + 5 * MIN, 2, wk(60.0), NOW + 6 * MIN);
+    assert_eq!(count(&h), 1, "{}", log(&h));
+    // 同一個視窗之後兩條都帶：組合變了，再記一行
+    let both = status(Some((10.0, NOW + 3 * H)), Some((60.0, NOW + 3 * DAY)));
+    feed(&h, "wa", UA, NOW + 10 * MIN, 3, both, NOW + 11 * MIN);
+    assert_eq!(count(&h), 2, "{}", log(&h));
+    let lg = log(&h);
+    assert!(lg.contains("five_hour=missing seven_day=num") && lg.contains("five_hour=num seven_day=num"), "{lg}");
+}
