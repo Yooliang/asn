@@ -38,6 +38,9 @@ pub struct State {
     /// 換帳號後舊視窗的對話紀錄還是舊帳號的 uuid，要靠這裡才知道那個 uuid 是哪個 email（不查帳號庫）。只存這兩個欄位。
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub known_ids: std::collections::BTreeMap<String, String>,
+    /// 各視窗（對話紀錄路徑雜湊前 6 碼）上次記過的額度窗組合文字（#1730）；最多留 30 個，只有最上層用
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub window_shapes: std::collections::BTreeMap<String, String>,
     /// 各帳號（email）自己的 log 去重狀態；每個只用 logged 那兩欄
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub owned: std::collections::BTreeMap<String, State>,

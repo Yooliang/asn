@@ -367,7 +367,15 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     add_account(h.path(), "a@x.test", UA);
     assert!(feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW));
     let before = quota_of(&h, "a@x.test");
-    let state_before = state_file(&h);
+    // 狀態檔裡「各視窗上次的額度窗組合」（#1730）本來就會因新視窗多記一筆；其餘欄位要完全沒動
+    let without_shapes = |h: &tempfile::TempDir| {
+        let mut v: Value = serde_json::from_str(&state_file(h)).unwrap_or(Value::Null);
+        if let Some(o) = v.as_object_mut() {
+            o.remove("window_shapes");
+        }
+        v
+    };
+    let state_before = without_shapes(&h);
     let dir = h.path().join(".claude").join("projects").join("p");
     // 1. 沒有 assistant 回應（取不到時間戳）
     let no_ts = transcript(h.path(), "nots", UA, None, 1);
@@ -390,7 +398,7 @@ fn 身分_有帶_transcript_path_卻解不出身分或取不到時間戳_這次�
     }
     assert_eq!(quota_of(&h, "a@x.test"), before, "A 的紀錄完全不變");
     assert_eq!(load_all(h.path()).len(), 1, "沒有多出別的帳號");
-    assert_eq!(state_file(&h), state_before, "狀態檔也沒動");
+    assert_eq!(without_shapes(&h), state_before, "狀態檔也沒動");
 }
 
 #[test]
@@ -1132,4 +1140,21 @@ fn 帳號庫正常或沒有帳號庫_不警示() {
     add_account(h.path(), "b@x.test", UB);
     assert!(feed_win(&h, "wa", "a@x.test", UA, NOW + 20 * MIN, 2, wk(60.0), NOW + 21 * MIN));
     assert!(!log(&h).contains(LIB_WARN), "{}", log(&h));
+}
+
+#[test]
+fn 視窗帶的額度窗組合_同視窗同組合只記一行_組合變了才再記一行() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    let count = |h: &tempfile::TempDir| log(h).lines().filter(|l| l.contains("帶的額度窗")).count();
+    // 同一個視窗（同一個 transcript 路徑）連兩筆都是只帶每週：只記一行
+    feed(&h, "wa", UA, NOW, 1, wk(70.0), NOW);
+    feed(&h, "wa", UA, NOW + 5 * MIN, 2, wk(60.0), NOW + 6 * MIN);
+    assert_eq!(count(&h), 1, "{}", log(&h));
+    // 同一個視窗之後兩條都帶：組合變了，再記一行
+    let both = status(Some((10.0, NOW + 3 * H)), Some((60.0, NOW + 3 * DAY)));
+    feed(&h, "wa", UA, NOW + 10 * MIN, 3, both, NOW + 11 * MIN);
+    assert_eq!(count(&h), 2, "{}", log(&h));
+    let lg = log(&h);
+    assert!(lg.contains("five_hour=missing seven_day=num") && lg.contains("five_hour=num seven_day=num"), "{lg}");
 }
