@@ -108,5 +108,5 @@ test('詳情的欄位：狀態只寫在線與否；系統、ASN 版本有資料�
 test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄的時候工作管理員收掉次要欄位', () => {
   const css = read('../ui/style.css')
   assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
-  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(7\)[^}]*display:none\}\}/)
+  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(7\)[^}]*display:none\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\.settings \.tm-table \.aero-btn\{padding:3px 6px\}\}/)
 })
