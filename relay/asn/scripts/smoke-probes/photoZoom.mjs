@@ -40,7 +40,7 @@ export const photoZoomProbeSource = mode => `(async () => {
     await real({ dblclick: at(pv()) });
     if (!near(w(), w0 * 2.5)) return { ok: false, why: '雙擊沒有放大到 2.5 倍：' + w() };
   }
-  const close = [...document.querySelectorAll('.photo-viewer .pv-bar button')].find(b => b.textContent.trim() === '關閉');
+  const close = [...document.querySelectorAll('.photo-viewer .pv-bar button')].find(b => b.getAttribute('aria-label') === '關閉');
   if (!close) return { ok: false, why: '找不到「關閉」' };
   await real({ click: at(close) });
   if (document.querySelector('.photo-viewer')) return { ok: false, why: '按「關閉」沒有關掉' };

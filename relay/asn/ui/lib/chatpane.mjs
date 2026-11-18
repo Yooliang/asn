@@ -11,6 +11,7 @@ import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQ
 import { FILE_ACCEPT, expiryMs, formatBytes, photoExpired, photoTitle, queueStepText, queueSummary, sendInOrder, shownPhotos } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { createZoom, zoomStyle } from './photo-zoom.mjs'
+import { keyDir, locate, navState, photoSeq, stepIndex, swipeDir } from './photo-nav.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
@@ -503,7 +504,8 @@ export const ChatPane = {
       if (p.kind === 'file') return saveFile(p)
       zoomer.reset()
       const seen = recentShown.get(p.id)
-      viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: seen || '', msg: seen ? '' : '載入中…', busy: false }
+      viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: seen || '', msg: seen ? '' : '載入中…', busy: false, n: 1, total: 1, who: '', at: '' }
+      syncNav()
       if (seen) return
       try {
         const r = await props.photoApi.fetch(p.id, expiryMs(p))
@@ -511,6 +513,40 @@ export const ChatPane = {
         if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
       } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = e.message }
     }
+    // 同一個對話（或群組）的照片串（#1728）：只看這個畫面的 log，依信件時間排；看圖開著時新訊息進來也會跟著更新張數
+    const seqNow = () => photoSeq(props.log, { who: m => (m.k === 'me' ? plain(props.me.nick) : plain(m.who || props.friend.nick)), now: Date.now() })
+    function syncNav() {
+      const v = viewer.value; if (!v) return
+      const seq = seqNow(), i = locate(seq, v.id)
+      if (i < 0) return
+      const st = navState(i, seq.length)
+      v.n = st.n; v.total = st.total; v.who = seq[i].who; v.at = fmtDate(seq[i].t)
+    }
+    watch(() => props.log.length, syncNav)
+    // 切到上一張／下一張：到頭、到尾就停；每次都重新開圖，縮放自然歸零
+    async function stepViewer(dir) {
+      const v = viewer.value; if (!v) return
+      const seq = seqNow(), i = locate(seq, v.id)
+      const j = stepIndex(i, dir, seq.length)
+      if (j < 0 || j === i) return
+      await openPhoto(seq[j].p)
+    }
+    // 手機：左滑下一張（較新）、右滑上一張（較舊）。放大中是平移、雙指是縮放，都不切換
+    let swipe = null
+    function swipeDown(e) {
+      if (e.pointerType === 'mouse') return
+      if (swipe && !e.isPrimary) { swipe.multi = true; return }   // 第二根手指＝雙指縮放；新的一次按下（主指）一律重新開始，免得上一次沒收到放開而卡住
+      swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, s: zoom.s, multi: false }
+    }
+    function swipeUp(e) {
+      const w = swipe; if (!w) return
+      if (e.pointerId !== w.id) return
+      swipe = null
+      if (w.multi) return
+      const dir = swipeDir(e.clientX - w.x, e.clientY - w.y, Math.max(w.s, zoom.s))
+      if (dir) void stepViewer(dir)
+    }
+    const swipeCancel = () => { swipe = null }
     async function saveViewer() {
       const v = viewer.value; if (!v || v.busy || !v.src) return
       v.busy = true
@@ -666,6 +702,11 @@ export const ChatPane = {
     })
     // Esc：先關放大的照片；沒有的話取消語音輸入（準備中／錄音中／辨識中，只有目前看得到的面板處理）
     function onKey(e) {
+      // 大圖開著才攔方向鍵（輸入框裡的方向鍵不攔）；關著時一律不碰
+      if (viewer.value) {
+        const dir = keyDir(e)
+        if (dir) { e.preventDefault(); void stepViewer(dir); return }
+      }
       if (e.key !== 'Escape') return
       if (viewer.value) { closeViewer(); return }
       if (props.active && props.voice && props.voice.state.mic.phase !== 'idle') { e.preventDefault(); void props.voice.cancelMic() }
@@ -692,7 +733,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { confirmNote, consentHint, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { confirmNote, consentHint, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -911,17 +952,35 @@ export const ChatPane = {
   </teleport>
   <teleport to="body" v-if="annot"><annotator :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator></teleport>
   <teleport to="body" v-if="viewer">
-  <div class="photo-viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
+  <div class="photo-viewer" :class="{ 'pv-multi': viewer.total > 1 }" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
     <div class="pv-bar">
-      <span class="pv-name">{{ viewer.title }}</span>
-      <button class="aero-btn" type="button" @click="saveViewer" :disabled="viewer.busy || !viewer.src">另存</button>
-      <button class="aero-btn" type="button" @click="closeViewer">關閉</button>
+      <div class="pv-meta">
+        <span class="pv-name" :title="viewer.title">{{ viewer.who || viewer.title }}</span>
+        <span class="pv-sub" v-if="viewer.at">{{ viewer.at }}</span>
+      </div>
+      <span class="pv-count" v-if="viewer.total > 1" role="status">第 {{ viewer.n }}／{{ viewer.total }} 張</span>
+      <button class="aero-btn pv-btn pv-save" type="button" @click="saveViewer" :disabled="viewer.busy || !viewer.src" aria-label="另存" title="另存">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M12 6.2v7.4M8.6 10.6l3.4 3.4 3.4-3.4M7.4 17h9.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <line-icon name="save" :size="22"></line-icon>
+      </button>
+      <button class="aero-btn pv-btn pv-close" type="button" @click="closeViewer" aria-label="關閉" title="關閉（Esc）">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><defs><linearGradient id="pvgr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f09a90"/><stop offset="1" stop-color="#c0392b"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#pvgr)" stroke="#8c2a20" stroke-width="1.2"/><path d="M8.2 8.2l7.6 7.6M15.8 8.2l-7.6 7.6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <line-icon name="x" :size="22"></line-icon>
+      </button>
     </div>
-    <div class="pv-body" @click.self="closeViewer">
+    <div class="pv-body" @click.self="closeViewer" @pointerdown="swipeDown" @pointerup="swipeUp" @pointercancel="swipeCancel">
       <img v-if="viewer.src" class="pv-img" :class="{ zoomed: zoom.s > 1 }" :style="pvStyle" :src="viewer.src" :alt="viewer.title" draggable="false" title="滾輪或雙指縮放，放大後可以拖曳；雙擊放大或還原" @wheel="zoomer.onWheel" @dblclick="zoomer.onDblClick" @pointerdown="zoomer.onPointerDown" @pointermove="zoomer.onPointerMove" @pointerup="zoomer.onPointerUp" @pointercancel="zoomer.onPointerUp">
       <img v-else-if="viewer.thumb" class="pv-thumb" :src="viewer.thumb" alt="">
       <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}<button v-if="viewer.saved" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></div>
     </div>
+    <button class="pv-nav pv-prev" type="button" v-if="viewer.total > 1" :disabled="viewer.n <= 1" @click="stepViewer(-1)" aria-label="上一張" title="上一張（←）">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M14 7.5L9.5 12l4.5 4.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <line-icon name="prev" :size="26"></line-icon>
+    </button>
+    <button class="pv-nav pv-next" type="button" v-if="viewer.total > 1" :disabled="viewer.n >= viewer.total" @click="stepViewer(1)" aria-label="下一張" title="下一張（→）">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><defs><linearGradient id="pvgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ec5f2"/><stop offset="1" stop-color="#2f78bd"/></linearGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#pvgb)" stroke="#245f96" stroke-width="1.2"/><path d="M10 7.5l4.5 4.5-4.5 4.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <line-icon name="next" :size="26"></line-icon>
+    </button>
   </div>
   </teleport>
 </div>

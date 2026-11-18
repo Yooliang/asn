@@ -38,7 +38,7 @@ export const photoBackProbeSource = () => `(async () => {
   let bad = await open('第一次'); if (bad) return { ok: false, why: bad };
   history.back(); bad = await closed('系統返回鍵'); if (bad) return { ok: false, why: bad };
   bad = await open('按關閉前'); if (bad) return { ok: false, why: bad };
-  const x = [...pv().querySelectorAll('button')].find(b => b.textContent.trim() === '關閉');
+  const x = [...pv().querySelectorAll('button')].find(b => b.getAttribute('aria-label') === '關閉');
   if (!x) return { ok: false, why: '大圖上找不到「關閉」' };
   await real({ click: at(x) }); bad = await closed('按「關閉」'); if (bad) return { ok: false, why: bad };
   bad = await open('按 Esc 前'); if (bad) return { ok: false, why: bad };

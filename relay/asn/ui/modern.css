@@ -350,3 +350,15 @@
 :root[data-skin="modern"] .avb-v~.pin-dot{left:auto;right:-1px}
 :root[data-skin="modern"] .pin-dot{right:-2px;bottom:-2px;width:18px;height:18px;padding:2px;border:2px solid var(--panel);box-shadow:none}
 :root[data-skin="modern"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}
+
+/* ---------- 看大圖的另存、關閉與左右切換（#1728）：現代＝半透明白圓鈕＋白色線條圖示；到頭的那一顆透明度 .35 ---------- */
+:root[data-skin="modern"] .pv-btn svg:not(.lic),:root[data-skin="modern"] .pv-nav svg:not(.lic){display:none}
+:root[data-skin="modern"] .pv-btn .lic,:root[data-skin="modern"] .pv-nav .lic{display:inline-block}
+:root[data-skin="modern"] .photo-viewer .pv-btn{border:0;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;box-shadow:none}
+:root[data-skin="modern"] .photo-viewer .pv-btn .lic{width:20px;height:20px}
+:root[data-skin="modern"] .photo-viewer .pv-btn:hover:not(:disabled){background:#2f7a70}
+:root[data-skin="modern"] .photo-viewer .pv-btn:disabled{opacity:.4}
+:root[data-skin="modern"] .photo-viewer .pv-nav{width:44px;height:44px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.18);color:#fff;box-shadow:none}
+:root[data-skin="modern"] .photo-viewer .pv-nav:hover:not(:disabled){background:#2f7a70;border-color:#2f7a70}
+:root[data-skin="modern"] .photo-viewer .pv-nav:disabled{opacity:.35}
+:root[data-skin="modern"] .photo-viewer .pv-count{background:rgba(255,255,255,.16)}
