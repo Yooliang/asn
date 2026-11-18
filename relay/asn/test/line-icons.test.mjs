@@ -113,3 +113,38 @@ test('每個用到 <line-icon> 的頁面都有註冊元件', () => {
     void page
   }
 })
+
+// ---- #1710：第四格換成設定的某一頁時，分頁列也要有那一頁的圖示（和設定清單同一份對應）----
+import { MOBILE_SETTING_KEYS, mobileSettingRows, settingIcon } from '../ui/lib/mobile-settings.mjs'
+import { guidePage, launchPage, pageIcon, settingPage } from '../ui/lib/mobile-fourth.mjs'
+
+test('第四格圖示：設定清單的每一頁（從來源 MOBILE_SETTING_KEYS 列舉，不寫死）都對得到存在的圖，且和設定清單那一列同一個', () => {
+  const rows = mobileSettingRows({})
+  assert.deepEqual(rows.map(r => r.key), MOBILE_SETTING_KEYS)
+  for (const r of rows) {
+    assert.ok(r.lic, `${r.key} 設定清單沒給圖示`)
+    assert.ok(hasIcon(r.lic), `${r.key}：圖示 ${r.lic} 不存在`)
+    const page = settingPage(r.key) ?? { kind: 'acct' }   // 設備、帳號是同一個內頁，依切換分頁決定
+    const icon = pageIcon(page, r.key === 'accounts' ? 'accounts' : 'devices')
+    assert.equal(icon, r.lic, `${r.key}：分頁列和設定清單要同一個圖示`)
+    assert.equal(settingIcon(r.key), r.lic)
+  }
+})
+
+test('第四格圖示：使用指引、開新夥伴也有圖；沒有內頁或不合法的內頁不畫', () => {
+  for (const p of [guidePage(), guidePage('x'), launchPage(1), launchPage(2)]) assert.ok(hasIcon(pageIcon(p)), JSON.stringify(p))
+  assert.equal(pageIcon(null), '')
+  assert.equal(pageIcon({ kind: 'setting', cat: 'nope' }), '')
+  assert.equal(settingIcon('nope'), '')
+})
+
+test('第四格圖示：新增設定頁卻沒給圖示會紅（拿掉任何一個圖就會被抓到）', () => {
+  for (const k of MOBILE_SETTING_KEYS) assert.ok(hasIcon(settingIcon(k)), `設定頁 ${k} 沒有圖示：到 line-icons.mjs 補一個同名的圖`)
+})
+
+test('第四格圖示：畫面接線，分頁列用 tabIconOf、設定清單用 r.lic，樣式沿用前三格的 m-tab-ic', () => {
+  const m = read('ui/m.html'), js = read('ui/m.js')
+  assert.match(m, /<line-icon class="m-tab-ic" :name="tabIconOf\(t\)" :size="18">/)
+  assert.match(m, /<line-icon class="m-row-lic" :name="r\.lic" :size="24">/)
+  assert.match(js, /const tabIconOf = t => \(t === PAGE_TAB \? pageIcon\(/)
+})

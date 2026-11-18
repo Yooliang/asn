@@ -13,6 +13,8 @@ export const MOBILE_CAT_TITLE = {}   // 0.2.18 起電腦版的 notify 也改叫�
 const catOf = key => { const c = SETTING_CATS.find(x => x.key === key); return c && MOBILE_CAT_TITLE[key] ? { ...c, title: MOBILE_CAT_TITLE[key] } : c }
 // 設備、帳號（#268、#650）不是設定的一般分類頁：兩列都開同一頁（acct，上方「設備｜帳號」切換，各帶預設分頁），跟名單設備卡「選項」進去的是同一頁，入口並存
 export const ACCT_SETTING_KEYS = ['devices', 'accounts']
+// 設定頁的圖示（line-icons.mjs 的 key）：設定清單每一列、分頁列第四格（內頁佔著時）都讀這一個；圖示 key 就是分類鍵本身
+export const settingIcon = key => (MOBILE_SETTING_KEYS.includes(key) ? key : '')
 export const SETTING_SHEET_KEYS = MOBILE_SETTING_KEYS.filter(k => !ACCT_SETTING_KEYS.includes(k))
 // 這些分類點進去是內頁（內頁描述見 lib/mobile-fourth.mjs 的 settingPage）
 
@@ -56,6 +58,6 @@ export const mobileSettingTitle = key => catOf(key)?.title ?? ''
 export function mobileSettingRows(s = {}) {
   return MOBILE_SETTING_KEYS.map(key => {
     const c = catOf(key)
-    return { key, title: c?.title ?? key, icon: c?.icon ?? '', summary: mobileCatSummary(key, s) }
+    return { key, title: c?.title ?? key, icon: c?.icon ?? '', lic: settingIcon(key), summary: mobileCatSummary(key, s) }
   })
 }

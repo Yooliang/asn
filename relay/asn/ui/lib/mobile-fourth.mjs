@@ -4,7 +4,7 @@
 // 同一時間只有一個內頁：進別的內頁就換掉內容。切到別的分頁後留著、內容不卸載，滿 3 分鐘沒回來、或這段時間有新通知進來，就變回「通知」。
 // 只放純邏輯（內頁的描述、計時），node 與瀏覽器都能跑，不碰 DOM、不碰瀏覽記錄（瀏覽記錄在 mobile-nav.mjs）。
 import { guideByKey } from './guides.mjs'
-import { SETTING_SHEET_KEYS } from './mobile-settings.mjs'
+import { SETTING_SHEET_KEYS, settingIcon } from './mobile-settings.mjs'
 
 export const PAGE_TAB = 'page'   // 第四格是內頁、正在看它時 nav.tab 的值
 export const FOURTH_KEEP_MS = 180000   // 離開內頁後保留多久（3 分鐘），用絕對時間判斷：App 在背景時照樣算
@@ -28,6 +28,14 @@ export function normalizePage(raw) {
     case 'launch': return launchPage(raw.step)
     default: return null
   }
+}
+// 分頁列第四格的圖示（line-icons.mjs 的 key）：設定的某一項和設定清單同一個圖；設備與帳號依上方切換（acctTab）；使用指引、開新夥伴各用自己的
+export function pageIcon(raw, acctTab = 'devices') {
+  const p = normalizePage(raw)
+  if (!p) return ''
+  if (p.kind === 'setting') return settingIcon(p.cat)
+  if (p.kind === 'acct') return settingIcon(acctTab === 'accounts' ? 'accounts' : 'devices')
+  return p.kind === 'guide' ? 'guide' : 'plus'
 }
 export const samePage = (a, b) => JSON.stringify(normalizePage(a)) === JSON.stringify(normalizePage(b))
 // 內頁自己的層（由外往內）：指引單篇的下面是篇目列表、設備細部的下面是設備列表、開新夥伴第 2 步的下面是第 1 步；返回鍵一層一層退，退到頭才收起內頁
