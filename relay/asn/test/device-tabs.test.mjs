@@ -9,13 +9,13 @@ import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const dev = (key, label, o = {}) => ({ key, label, self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '', stateLine: '', empty: '', vendors: [], ...o })
 const devices = () => [
-  dev('H', '工作機', { self: true, vendors: [{ key: 'claude', label: 'Claude', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
+  dev('H', '工作機', { self: true, platform: 'windows', stateLine: 'Claude 已登入', vendors: [{ key: 'claude', label: 'Claude', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
   dev('W', '客廳電腦', { vendors: [{ key: 'claude', label: 'Claude', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
   dev('P', '小良的手機', { phone: true, kind: '手機', kindLabel: '手機' }),
   dev('C', '雲端節點', { cloud: true, kindLabel: '雲端', reportedText: '帳號回報讀取失敗', vendors: [{ key: 'grok', label: 'Grok', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
 ]
 const TASKS = { total: 0, dupCount: 0, dupBanner: '', error: '', loaded: true, empty: true, rows: [], known: [], note: '', wakeNote: '', hints: [], confirm: null, busy: false }
-const st = (over = {}) => ({ devices: devices(), accounts: { list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '' }, known: { ownFp: 'AABBCCDDEEFF00112233', qr: null, busy: false, peers: [], error: '', renameError: '' }, taskMgr: TASKS, ...over })
+const st = (over = {}) => ({ version: '0.2.31', devices: devices(), accounts: { list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '' }, known: { ownFp: 'AABBCCDDEEFF00112233', qr: null, busy: false, peers: [], error: '', renameError: '' }, taskMgr: TASKS, ...over })
 const render = async (props, state = st()) => {
   globalThis.Vue = Vue
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', ...props }) }))
@@ -66,7 +66,7 @@ test('「工作管理員」展開時，那排按鈕還在、工作管理員那�
 })
 
 test('詳情：指紋、第一次連線；雲端節點寫「沒有設備指紋」，不寫「還沒連線過」，也不顯示帳號回報讀取失敗', async () => {
-  const me = await render({ dev: 'H' })
+  const me = (await render({ dev: 'H' })).replace(/<!--.*?-->/g, '')
   assert.match(me, /<dt>狀態<\/dt>[\s\S]*<dt>指紋<\/dt>[\s\S]*AABB CCDD EEFF 0011 2233/)
   const cloud = await render({ dev: 'C' })
   assert.ok(cloud.includes('這是雲端節點，沒有設備指紋'))
@@ -91,4 +91,22 @@ test('窄的時候整排不換行、平均排成一列（用面板寬度判斷�
 test('危險鈕：永久移除用 aero-btn danger', () => {
   const src = read('../ui/lib/settings-panel.mjs')
   assert.match(src, /<button class="aero-btn danger" type="button" @click="askRemove = true">/)
+})
+
+test('詳情的欄位：狀態只寫在線與否；系統、ASN 版本有資料才放；帳號的事不寫在狀態裡', async () => {
+  const me = (await render({ dev: 'H' })).replace(/<!--.*?-->/g, '')
+  assert.match(me, /<dt>狀態<\/dt><dd>在線，這台電腦<\/dd>/)
+  assert.ok(!me.includes('Claude 已登入'), '狀態格不寫帳號狀態')
+  assert.match(me, /<dt>系統<\/dt><dd>Windows<\/dd>/)
+  assert.match(me, /<dt>ASN 版本<\/dt><dd>0\.2\.31<\/dd>/)
+  const other = await render({ dev: 'W' })
+  assert.ok(!other.includes('ASN 版本') && !other.includes('<dt>系統</dt>'), '別台沒有 platform 就不放，也不放本機的版本')
+  const mac = st(); mac.devices[1].platform = 'android'
+  assert.match(await render({ dev: 'W' }, mac), /<dt>系統<\/dt><dd>Android<\/dd>/)
+})
+
+test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄的時候工作管理員收掉次要欄位', () => {
+  const css = read('../ui/style.css')
+  assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
+  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(7\)[^}]*display:none\}\}/)
 })

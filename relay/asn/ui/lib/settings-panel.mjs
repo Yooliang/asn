@@ -165,6 +165,8 @@ export const SettingsPanel = {
     const oldPeers = computed(() => joined.value.old)
     // 「帳號」鈕：手機沒有帳號可看，不出這顆
     const hasAcct = computed(() => !!curDev.value && (curDev.value.self || !curDev.value.phone))
+    const PLATFORM_TEXT = { windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS' }
+    const platformText = computed(() => PLATFORM_TEXT[String(curDev.value?.platform ?? '').toLowerCase()] ?? '')
     const reportedAgo = computed(() => curDev.value?.cloud ? '' : String(curDev.value?.reportedText ?? '').replace(/^(帳號)?最後回報：/, ''))
     // 忘記前先確認：誤按會讓那台下次連線要重新確認指紋
     const forgetBox = ref(null)
@@ -177,7 +179,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, reportedAgo, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, reportedAgo, platformText, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
@@ -484,13 +486,15 @@ export const SettingsPanel = {
                 <h3 class="set-h">設備資料</h3>
                 <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
                 <dl class="dv-kv">
-                  <dt>狀態</dt><dd>{{ curDev.onlineText }}<template v-if="curDev.stateLine">，{{ curDev.stateLine }}</template></dd>
+                  <dt>狀態</dt><dd>{{ curDev.onlineText }}<template v-if="curDev.self">，這台電腦</template></dd>
                   <dt>{{ KNOWN.fingerprint }}</dt>
                   <dd v-if="curDev.self && st.known && st.known.ownFp"><code class="pair-fp">{{ groupFp(st.known.ownFp) }}</code></dd>
                   <dd v-else-if="curKnown"><code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(curKnown.fingerprint) }}</code></dd>
                   <dd v-else-if="curDev.cloud">這是雲端節點，沒有設備指紋</dd>
                   <dd v-else>還沒連線過，連上時會記住指紋</dd>
                   <template v-if="curKnown && curKnown.firstSeen"><dt>第一次連線</dt><dd>{{ curKnown.firstSeen }}</dd></template>
+                  <template v-if="platformText"><dt>系統</dt><dd>{{ platformText }}</dd></template>
+                  <template v-if="curDev.self && st.version"><dt>ASN 版本</dt><dd>{{ st.version }}</dd></template>
                   <template v-if="reportedAgo"><dt>最後回報</dt><dd>{{ reportedAgo }}</dd></template>
                 </dl>
               </div>
