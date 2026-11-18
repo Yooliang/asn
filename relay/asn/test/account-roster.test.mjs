@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import {
-  ROSTER_TEXT, ROSTER_POLL_MS, DEVICE_MAX, fetchRoster, nodeLabelOf, rosterLookup, rosterOk, rosterQuota, rosterQuotaFor, rosterView, shortDevice, windowLabel,
+  ROSTER_TEXT, FIVE_ONLY_WEEKLY_TEXT, ROSTER_POLL_MS, DEVICE_MAX, fetchRoster, nodeLabelOf, rosterLookup, rosterOk, rosterQuota, rosterQuotaFor, rosterView, shortDevice, windowLabel,
 } from '../ui/lib/account-roster.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { dialogView } from '../ui/lib/device-acct-dialog.mjs'
@@ -493,4 +493,54 @@ test('手機與設備卡（#1690）：meta 仍標兩窗最舊的；oldText 只�
   assert.equal(fresh.oldText, '')
   const cx = rosterQuota(entry({ vendor: 'codex', windows: [win('w300', 40, 2 * H)] }), { nodeLabel, now: NOW })
   assert.equal(cx.oldText, '資料較舊', '其他廠牌不帶這句')
+})
+
+// #1736：Ultra 沒有 5 小時窗，狀態列只送每週；後台還留著改方案前最後一筆 5 小時
+test('沒有 5 小時窗的帳號（#1736）：舊 5 小時不列、不拖累「資料較舊」；有兩窗的照舊；真的舊還是舊', () => {
+  const MIN = 60_000
+  const q = (windows, o = {}) => rosterQuota(entry({ windows, ...o }), { nodeLabel, now: NOW })
+  const labels = r => r.bars.map(b => b.label)
+  // 只有每週、新的：沒有 5 小時條、不舊
+  const only = q([win('weekly', 72, 5 * MIN)])
+  assert.deepEqual(labels(only), ['每週'])
+  assert.equal(only.stale, false)
+  // 舊的 5 小時（4 小時前，同一台）＋新的每週：5 小時不列、不舊（電腦、手機同一份資料）
+  const old = q([win('five_hour', 91, 4 * H, { resets_at: iso(NOW + H) }), win('weekly', 72, 5 * MIN)])
+  assert.deepEqual(labels(old), ['每週'])
+  assert.equal(old.stale, false)
+  assert.equal(old.oldText, '')
+  assert.equal(old.text, '每週剩 72%')
+  assert.equal(old.parts.length, 1)
+  assert.equal(old.fiveNote, FIVE_ONLY_WEEKLY_TEXT, '5 小時停了：原位寫一行說明，不默默不見')
+  assert.equal(FIVE_ONLY_WEEKLY_TEXT, '這個帳號最近只回報每週額度')
+  // 方案寫 Ultra：即使 5 小時讀數看起來不太舊也不列
+  const ultra = q([win('five_hour', 91, 40 * MIN), win('weekly', 72, 5 * MIN)], { plan: 'claude_ultra' })
+  assert.deepEqual(labels(ultra), ['每週'])
+  assert.equal(ultra.stale, false)
+  assert.equal(ultra.fiveNote, FIVE_ONLY_WEEKLY_TEXT)
+  // 兩窗都在送：不變
+  const both = q([win('five_hour', 40, 5 * MIN), win('weekly', 72, 5 * MIN)])
+  assert.deepEqual(labels(both), ['5 小時', '每週'])
+  assert.equal(both.stale, false)
+  assert.equal('fiveNote' in both, false, '正常帳號不帶說明')
+  assert.equal('fiveNote' in only, false, '本來就沒送 5 小時：不用說明')
+  assert.equal('fiveNote' in q([win('five_hour', 40, 40 * MIN), win('weekly', 72, 5 * MIN)]), false)
+  // 5 小時只比每週舊 35 分鐘（1 小時內）：照舊標舊
+  const near = q([win('five_hour', 40, 40 * MIN), win('weekly', 72, 5 * MIN)])
+  assert.equal(near.stale, true)
+  // 不同電腦讀的舊 5 小時（換帳號前的舊視窗）：照舊標舊
+  const other = q([win('five_hour', 40, 4 * H, { read_node: S }), win('weekly', 72, 5 * MIN)])
+  assert.equal(other.stale, true)
+  // 每週也很舊：還是舊
+  const allOld = q([win('weekly', 72, 8 * H)])
+  assert.equal(allOld.stale, true)
+  // 其他廠牌不動
+  const cx = rosterQuota(entry({ vendor: 'codex', windows: [win('five_hour', 40, 4 * H), win('weekly', 72, 5 * MIN)] }), { nodeLabel, now: NOW })
+  assert.deepEqual(cx.bars.map(b => b.label), ['5 小時', '每週'])
+})
+
+test('「只回報每週額度」說明（#1736）：電腦設備卡與「我的帳號」、手機兩處樣板都有畫', () => {
+  const panel = read('ui/lib/settings-panel.mjs'), html = read('ui/m.html')
+  assert.equal(panel.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 2, '電腦：設備卡一處、我的帳號一處')
+  assert.equal(html.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 2, '手機：兩處帳號卡')
 })

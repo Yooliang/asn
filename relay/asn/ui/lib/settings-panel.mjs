@@ -339,6 +339,7 @@ export const SettingsPanel = {
                         </span>
                       </span>
                       <span v-else>{{ a.quota.text }}</span>
+                      <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
                     </span>
                     <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他的按了改用那台（原本的切換流程）。
                          讀這筆額度的那台，按鈕上方有一條藍色粗線（.read；每顆按鈕的上框一樣高，沒有線的是透明的） -->
@@ -622,6 +623,7 @@ export const SettingsPanel = {
                             <span v-else>{{ a.quota.text }}</span>
                             <span v-if="a.quota.resetLine">・{{ a.quota.resetLine }}</span>
                             <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
+                            <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
                             <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                           <span class="dv-quota stale" v-else-if="v.key === 'codex' || v.key === 'grok'">{{ NO_QUOTA_TEXT }}</span>
