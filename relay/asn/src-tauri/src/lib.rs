@@ -1538,11 +1538,21 @@ impl view_stream::TPort for LiveTPort {
     }
 }
 
-/// 這筆請求還在後台的待處理清單裡嗎？查不到、查失敗都當不在（不能在不確定時開始打字）
+/// 這筆請求還在後台的待處理清單裡嗎？Some(true)＝在、Some(false)＝清單查到了但沒有它、None＝查詢失敗（不知道）。
+/// 查詢失敗不能當成「查不到」：網路一斷就會把還在等的確認框當成對方撤回
+#[cfg(all(desktop, feature = "gui"))]
+async fn view_seen_pending(relay: &Relay, id: &str) -> Option<bool> {
+    let v = relay.api("term_view_pending", Some(serde_json::json!({}))).await.ok()?;
+    if v.get("error").is_some_and(|e| !e.is_null()) {
+        return None;
+    }
+    Some(v.get("requests").and_then(Value::as_array).is_some_and(|rows| rows.iter().any(|r| r.get("id").and_then(Value::as_str) == Some(id))))
+}
+
+/// 按下允許之後的重查：不知道（查詢失敗）也不能開始打字
 #[cfg(all(desktop, feature = "gui"))]
 async fn view_still_pending(relay: &Relay, id: &str) -> bool {
-    let Ok(v) = relay.api("term_view_pending", Some(serde_json::json!({}))).await else { return false };
-    v.get("requests").and_then(Value::as_array).is_some_and(|rows| rows.iter().any(|r| r.get("id").and_then(Value::as_str) == Some(id)))
+    view_seen_pending(relay, id).await == Some(true)
 }
 
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
@@ -1637,7 +1647,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
                             ask_note = if no_ask { "no_ask" } else { "asked" };
                             if !no_ask {
-                                let answer = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s, || view_still_pending(&relay, &id)).await;
+                                let answer = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s, || view_seen_pending(&relay, &id)).await;
                                 if answer == input_consent::Consent::Busy {
                                     // 這台畫面上還有沒處理的確認框：回報清楚的原因；舊後台不認得 busy 就退回 rejected，不能讓這次掛著
                                     let r = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": view_stream::BUSY }))).await;
@@ -1707,7 +1717,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             if let Some(reason) = end.reason() {
                                 let r = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))));
                                 // 舊後台不認得 held_prompt：改用 failed 結束，不能讓這次觀看掛著
-                                if r.is_err() && reason == view_stream::HELD_PROMPT {
+                                if reason == view_stream::HELD_PROMPT && view_stream::stop_refused(&r) {
                                     let _ = tauri::async_runtime::block_on(relay2.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "failed" }))));
                                 }
                             }

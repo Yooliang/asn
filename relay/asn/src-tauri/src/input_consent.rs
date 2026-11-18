@@ -185,12 +185,12 @@ pub fn next_wait_secs(now_s: i64, deadline_s: i64) -> u64 {
     wait_secs(now_s, deadline_s).min(POLL_SECS)
 }
 
-/// 查詢之後的連續查不到次數：查到了歸零，沒查到加一
-pub fn misses_after(misses: u32, found: bool) -> u32 {
-    if found {
-        0
-    } else {
-        misses.saturating_add(1)
+/// 查詢之後的連續查不到次數：查到了歸零，沒查到加一；查詢失敗（None，不知道）維持原數，不算查不到也不歸零
+pub fn misses_after(misses: u32, found: Option<bool>) -> u32 {
+    match found {
+        Some(true) => 0,
+        Some(false) => misses.saturating_add(1),
+        None => misses,
     }
 }
 
@@ -334,7 +334,7 @@ fn now_s() -> i64 {
 pub async fn ask<F, Fut>(app: &AppHandle, who: &Who, window: &str, expires_s: i64, still_pending: F) -> Consent
 where
     F: Fn() -> Fut + Send,
-    Fut: std::future::Future<Output = bool> + Send,
+    Fut: std::future::Future<Output = Option<bool>> + Send,
 {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     // 位子綁在這次等待上：函式結束（任何一條路）就放開，不等框被關掉
@@ -646,14 +646,31 @@ mod tests {
         assert_eq!(next_wait_secs(90, 60), 0, "已經過期不能是負的");
         // 查不到要連續兩次才算不在；中間查到一次就重算
         let mut m = 0;
-        m = misses_after(m, false);
+        m = misses_after(m, Some(false));
         assert!(!is_gone(m), "一次查不到可能只是網路不穩");
-        m = misses_after(m, true);
+        m = misses_after(m, Some(true));
         assert_eq!(m, 0);
-        m = misses_after(m, false);
-        m = misses_after(m, false);
+        m = misses_after(m, Some(false));
+        m = misses_after(m, Some(false));
         assert!(is_gone(m), "連續兩次查不到：對方撤回或已結束");
-        assert_eq!(misses_after(u32::MAX, false), u32::MAX, "不溢位");
+        assert_eq!(misses_after(u32::MAX, Some(false)), u32::MAX, "不溢位");
+        // 查詢失敗（網路斷、後台回錯）是「不知道」：不算查不到、也不把已經累積的次數歸零，所以怎麼失敗都不會把等待中的框當成被撤回
+        let mut u = 0;
+        for _ in 0..10 {
+            u = misses_after(u, None);
+        }
+        assert!(!is_gone(u), "一直查詢失敗也不撤回");
+        assert_eq!(misses_after(1, None), 1, "不知道不歸零");
+        assert!(is_gone(misses_after(misses_after(misses_after(0, Some(false)), None), Some(false))), "中間失敗不影響連續兩次真的查不到");
+    }
+
+    #[test]
+    fn 接線_held_prompt_退路看_stop_refused_等待中查詢失敗是不知道() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        assert!(lib.contains("reason == view_stream::HELD_PROMPT && view_stream::stop_refused(&r)"), "退路要同時看連線失敗與 Ok 但帶 error");
+        assert!(!lib.contains("r.is_err() && reason == view_stream::HELD_PROMPT"), "不能只看 Err");
+        assert!(lib.contains("|| view_seen_pending(&relay, &id)).await"), "等待中用三態的查詢（失敗＝不知道）");
+        assert!(lib.contains("view_seen_pending(relay, id).await == Some(true)"), "按允許後的重查：不知道也不能開始打字");
     }
 
     #[test]
