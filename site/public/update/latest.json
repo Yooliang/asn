@@ -1,11 +1,11 @@
 {
-  "version": "0.2.30",
-  "notes": "- 新功能：手機也能打開還沒進到對話的夥伴的終端畫面\n- 改善：手機看夥伴卡在第一次確認畫面時，會標出是哪一種確認、該選哪一項\n- 改善：還沒進到對話的夥伴也會佔住名字，不會再開出同名的第二個\n- 改善：Gemini 那邊暫時出錯時，會等一下自動再試一次\n- 改善：回信寄不出去或群組貼不進去時，會告訴寄件人或叫它回覆的人，不再默默丟掉",
-  "pub_date": "2026-11-17T18:32:54.236Z",
+  "version": "0.2.31",
+  "notes": "- 修正：換了 Claude 帳號後，之前就開著的視窗額度又會正常記到對的帳號，不再停在舊數字\n- 修正：別台要在這台打字的確認框沒人按時，不會再卡住之後所有的打字\n- 修正：叫醒夥伴時終端服務還沒準備好，會等它一下，不再直接改用系統終端開\n- 修正：終端畫面遇到某些全彩顏色時不再印出亂碼\n- 改善：看別台的終端在等待或被拒時，會直接寫出原因和下一步，不再整格黑掉\n- 改善：手機下方第四個分頁會顯示目前這頁設定自己的圖示\n- 改善：帳號額度的數字太久沒更新時會標出來",
+  "pub_date": "2026-11-18T06:12:09.828Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhTbSt0VjBrMEhmc2xlQ0JXdXNubGlSVmRmMldIME9Nc1dnT242ZU4wZEpMSzF5OHNwbGIwcklNOWVNcDFrckYzeUN0czFsMDQxemRlTlZGNFZkQVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTM1NzIwCWZpbGU6QVNOXzAuMi4zMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjMwCkVWbXFkUVlSbU0zNlE5a01RSStOa2pveEMrR0RJRVJLSjB5ZWRPblZ5eTN4N3R0T05HZy9JL1ZEei9sV29vM01MMUZEYVFaenJmMllrellxUzJTNkJBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.30_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhXZ2FRUTRSbmJWSG1FaVlvZHVEaXJ5SkNvWGlVQlNqZzIvWVl0SVNVazRkQmRzWDhIczAyMWtYT0kwQ2VaTENUc3ZLQlRES2QzZFlBSzVyZkZtcEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTgxMDg4CWZpbGU6QVNOXzAuMi4zMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjMxClNLV01ONzE4WGNNM3Z3aFJLUzZrZHpMcU9kVU9PKzlTMitjV3ZGeFNxODNvdCt3N1p2eUt5R0NQdzB5bXJBUmRUNFRnNnNCMjNqUTM5NHpzN0dINURBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.31_x64-setup.exe"
     }
   }
 }
