@@ -6,9 +6,8 @@ import { LAUNCH_GIVE_UP_MS, REASON, appearedIn, buildLaunchRequest, initialLaunc
 
 const LAUNCHER = { profiles: [{ id: 'claude', label: 'Claude' }, { id: 'gemini', label: 'Gemini' }], cwd_allow: ['D:\\Github\\asn', 'D:\\Github\\irori'], max_per_hour: 6 }
 const BODY = { machines: [{ node: 'H', name: '小良的家用機', launcher: LAUNCHER, online: true }, { node: 'W', name: '公司', launcher: LAUNCHER, online: false }, { node: 'C', name: '關著的', launcher: null, online: true }, { node: 'E', launcher: { profiles: [], cwd_allow: ['x'] }, online: true }, { node: 'D', launcher: { profiles: [{ id: 'claude' }], cwd_allow: [] }, online: true }] }
+const ctx = { machines: machinesByNode(BODY), loaded: true, signedIn: true, friends: [] }
 const F = (node, nick, status = 'online') => ({ id: `${node}/${nick}`, node, agent: nick, nick, status, device: `設備${node}` })
-// 在線看名單（跟設定「設備」頁籤同一份判斷）：H、C、E、D 有在線視窗，W 只有離線視窗
-const ctx = { machines: machinesByNode(BODY), loaded: true, signedIn: true, friends: [F('H', 'a'), F('C', 'a'), F('E', 'a'), F('D', 'a'), F('W', 'a', 'offline')] }
 
 test('電腦能不能開：在線、有開放遠端開視窗、有模型、有資料夾；不能就給中文原因', () => {
   assert.deepEqual(launchEligibility('H', ctx), { ok: true, reason: '' })
@@ -27,7 +26,7 @@ test('沒有本人簽章（沒登入）或還沒查到設定：一律不能開',
 })
 
 test('可選的電腦：不含手機自己；照名單順序；不能開的列原因', () => {
-  const fl = [F('W', 'a', 'offline'), F('H', 'b'), F('P', 'phone'), F('C', 'c')]
+  const fl = [F('W', 'a'), F('H', 'b'), F('P', 'phone'), F('C', 'c')]
   const rows = launchDevices(fl, { selfNode: 'P', nodeOrder: ['H', 'W', 'C'], ...ctx })
   assert.deepEqual(rows.map(r => [r.key, r.ok]), [['H', true], ['W', false], ['C', false]])
   assert.equal(rows[0].label, '設備H'); assert.equal(rows[1].reason, REASON.offline)
@@ -94,7 +93,7 @@ test('新版清單：Grok、Gemini 背景與 pi 視窗都列得出來，模型�
   ], cwd_allow: ['D:\\a'], max_per_hour: 6 }
   const m = launchChoices({ launcher: neu }).models
   assert.deepEqual(m.map(r => [r.profileId, r.label, r.mode]), [['claude', 'Claude（互動視窗）', 'window'], ['gemini', 'Gemini（背景運行、內建通道）', 'background'], ['grok', 'Grok（背景運行、內建通道）', 'background'], ['pi', 'pi（互動視窗）', 'window']])
-  const c = { ...ctx, machines: machinesByNode({ machines: [{ node: 'H', launcher: neu, online: true }] }) }   // friends 沿用 ctx（H 有在線視窗）
+  const c = { ...ctx, machines: machinesByNode({ machines: [{ node: 'H', launcher: neu, online: true }] }) }
   assert.deepEqual(launchEligibility('H', c), { ok: true, reason: '' })
   const ok = { node: 'H', profile: 'grok', cwd: 'D:\\a', name: '小格', first: '' }
   assert.equal(launchFormError(ok, launchEligibility('H', c)), '')

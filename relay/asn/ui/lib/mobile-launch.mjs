@@ -1,14 +1,14 @@
 // 手機版「幫電腦開新夥伴」（遠端開視窗）的純邏輯：哪些電腦能開、為什麼不能、表單檢查、請求內容、進度文字、錯誤翻成中文。
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-import { OFFLINE_REASON, closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
-import { isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
+import { isDeviceRemoved } from './device-order.mjs'
 import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
 
 export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
   unknown: '還沒查到這台電腦的啟動設定，請稍後再試',
-  offline: OFFLINE_REASON,
+  offline: '這台電腦不在線',
   closed: '這台電腦沒有開放遠端開新夥伴，請到電腦的設定打開「允許我的其他設備替這台開新視窗」',
   noModel: '這台電腦還沒有可用的模型',
   noCwd: '這台電腦沒有開放的工作資料夾',
@@ -26,8 +26,8 @@ export function launchEligibility(node, { machines = {}, loaded = false, signedI
   if (!signedIn) return { ok: false, reason: REASON.needLogin }
   if (!loaded) return { ok: false, reason: REASON.unknown }
   const m = machines[node]
-  // 在線判斷跟設定「設備」頁籤同一份（isDeviceOnline）；後台 machines 的 online 不另當門檻
-  if (!isDeviceOnline(node, friends)) return { ok: false, reason: REASON.offline }
+  const online = m ? m.online === true : friends.some(f => f.node === node && f.status !== 'offline')
+  if (!online) return { ok: false, reason: REASON.offline }
   const l = m?.launcher
   if (!l) return { ok: false, reason: closedReasonOf(m, REASON.closed) }
   if (!remoteModelRows(l).length) return { ok: false, reason: REASON.noModel }

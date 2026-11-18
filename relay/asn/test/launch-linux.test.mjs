@@ -5,8 +5,7 @@ import fs from 'node:fs'
 import { LINUX_CLOSED, closedReasonOf, launchDisableReason } from '../ui/lib/partner-launch-ui.mjs'
 import { REASON, launchEligibility } from '../ui/lib/mobile-launch.mjs'
 
-// 在線看名單（跟設定「設備」頁籤同一份）：machines 裡 online 不是 false 的節點，各給一個在線視窗
-const ctx = machines => ({ machines, loaded: true, signedIn: true, friends: Object.entries(machines).map(([node, m]) => ({ node, status: m.online === false ? 'offline' : 'online' })) })
+const ctx = machines => ({ machines, loaded: true, signedIn: true })
 
 test('手機精靈：Linux 沒開放寫設定方法；那台寫了原因照它寫的；舊的機器橋（沒回報平台）照原本的說法', () => {
   assert.equal(launchEligibility('L', ctx({ L: { node: 'L', online: true, launcher: null, platform: 'linux' } })).reason, LINUX_CLOSED)

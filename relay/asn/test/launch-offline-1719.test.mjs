@@ -1,9 +1,8 @@
-// #1719：別台設備離線時，開新夥伴的設備列要灰掉（電腦版、手機版同一份在線判斷＝設定「設備」頁籤的 isDeviceOnline）
+// #1719：別台設備離線時，開新夥伴的設備列要灰掉（在線判斷＝設定「設備」頁籤的 isDeviceOnline）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { OFFLINE_REASON, launchDisableReason } from '../ui/lib/partner-launch-ui.mjs'
-import { REASON, launchEligibility, machinesByNode } from '../ui/lib/mobile-launch.mjs'
 import { isDeviceOnline } from '../ui/lib/device-order.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 
@@ -24,20 +23,27 @@ test('電腦版：有在線的 ASN 視窗（asn）也算在線；本機永遠在
   assert.equal(launchDisableReason('me', { ...base, friends: [] }), '')
 })
 
-test('手機版：離線時不能開並給同一句原因；在線且有設定可開', () => {
-  const machines = machinesByNode({ machines: [{ node: 'A', launcher: LAUNCHER, online: true }, { node: 'B', launcher: LAUNCHER, online: true }] })
-  const ctx = { machines, loaded: true, signedIn: true, friends: [F('A', 'online'), F('B', 'offline')] }
-  assert.deepEqual(launchEligibility('B', ctx), { ok: false, reason: OFFLINE_REASON })
-  assert.equal(REASON.offline, OFFLINE_REASON)
-  assert.deepEqual(launchEligibility('A', ctx), { ok: true, reason: '' })
-})
-
 test('在線判斷跟設定「設備」頁籤是同一份：兩邊對每台設備的結論一致', () => {
   const friends = [F('A', 'online'), F('B', 'offline'), F('C', 'busy')]
   const rows = buildDeviceTree({ friends, selfNode: 'me', launchers: {}, machines: {} })
   for (const r of rows) assert.equal(r.online, isDeviceOnline(r.key, friends, { selfNode: 'me' }), r.key)
   assert.equal(rows.find(r => r.key === 'B').online, false)
   assert.equal(rows.find(r => r.key === 'C').online, true)
+})
+
+test('isDeviceOnline 與原本 device-tree 的寫法對多組資料結論完全一致', () => {
+  const legacy = (node, friends, selfNode, asn) => {
+    const mine = friends.filter(f => f.node === node)
+    return node === selfNode || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
+  }
+  const nostatus = { id: 'N/x', node: 'N', agent: 'x' }
+  const friends = [F('A', 'online'), F('B', 'offline'), F('B', 'offline'), F('C', 'offline'), F('C', 'busy'), nostatus, F('E', ''), { id: 'z', agent: 'x', status: 'online' }]
+  const asns = [{}, { D: [{ v: 1 }] }, { B: [] }, { B: [{ v: 1 }] }, { A: null }]
+  for (const asn of asns) for (const selfNode of ['me', 'B', '']) {
+    for (const node of ['me', 'A', 'B', 'C', 'D', 'N', 'E', 'ghost', '', undefined]) {
+      assert.equal(isDeviceOnline(node, friends, { selfNode, asn }), legacy(node, friends, selfNode, asn), `${node}/${selfNode}/${JSON.stringify(asn)}`)
+    }
+  }
 })
 
 test('畫面接線：電腦版把名單與 ASN 在線資料傳進 launchDisableReason', () => {
