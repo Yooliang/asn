@@ -36,7 +36,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-input-no-ask', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
@@ -501,11 +501,8 @@ export const SettingsPanel = {
                 <!-- 沒有「管理」卡的設備（例如這台）錯誤就顯示在這裡；有管理卡的在管理卡裡，同一句不出現兩次 -->
                 <p class="pair-warn" v-if="st.known && st.known.error && !(curKnown || canRemoveRow(curDev))" role="alert">{{ st.known.error }}</p>
               </div>
-              <div class="set-card" v-if="curKnown">
+              <div class="set-card" v-if="curKnown && (curDev.phone || curKnown.loginOk)">
                 <h3 class="set-h">信任</h3>
-                <label class="chk"><input type="checkbox" :checked="curKnown.inputNoAsk" :disabled="st.known.busy" @change="act('known-input-no-ask', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.inputNoAsk" :aria-label="KNOWN.inputNoAsk" /><span>{{ KNOWN.inputNoAsk }}</span></label>
-                <small v-if="curKnown.inputNoAsk && curKnown.inputConfirmed" class="pair-warn">{{ KNOWN.inputNoAskWarn }}</small>
-                <small v-if="curKnown.inputNoAsk && !curKnown.inputConfirmed">{{ KNOWN.inputFirstAsk }}</small>
                 <template v-if="curDev.phone || curKnown.loginOk">
                   <label class="chk"><input type="checkbox" :checked="curKnown.loginOk" :disabled="st.known.busy" @change="act('known-login-ok', { node: curKnown.id, on: $event.target.checked }); $event.target.checked = curKnown.loginOk" :aria-label="KNOWN.loginOk" /><span>{{ KNOWN.loginOk }}</span></label>
                   <small v-if="curKnown.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
@@ -725,6 +722,8 @@ export const SettingsPanel = {
           <small>手機開著 ASN 時會跳出權限框，可以直接在手機上回答。權限框的內容和選項會經過 ASN 的伺服器、只傳給你登入的設備，回答或過期後就清掉；裡面可能有指令或路徑。關掉就只在這台電腦上問你。</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.mobileView" :disabled="st.bridge.busy" @change="act('bridge-mobile-view', $event.target.checked)" aria-label="允許移動設備查看終端" /><span>允許移動設備查看終端</span></label>
           <small>關掉後，手機就不能看這台電腦上夥伴的終端。</small>
+          <label class="chk"><input type="checkbox" :checked="st.bridge.remoteInput" :disabled="st.bridge.busy" @change="act('bridge-remote-input', $event.target.checked)" aria-label="允許遠端在這台打字" /><span>允許遠端在這台打字</span></label>
+          <small>你登入的其他設備可以直接在這台電腦的夥伴視窗打字，不會再跳出確認；紅條會顯示誰在打字，你隨時可以按「結束」。關掉後，別台就不能在這台打字，看畫面不受影響。</small>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>

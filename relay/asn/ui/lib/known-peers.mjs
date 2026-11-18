@@ -26,9 +26,6 @@ export const TEXT = {
   firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',
   ownFp: fp => `這台電腦的指紋：${groupFp(fp)}`,
-  inputNoAsk: '這台要在這裡打字時，不用每次問我',
-  inputNoAskWarn: '這台打字時不會再跳出「允許」，但紅條照樣會出現，可以按結束。想每次都問，就取消勾選。',
-  inputFirstAsk: '這台第一次在這裡打字時，還是會問你一次。',
   loginOk: '允許這支手機替這台登入（Codex 等）',
   loginOkWarn: '勾了之後，這支手機可以要求這台登入別家的 CLI；登入網址和代碼只會加密送到那支手機。只勾你自己的手機。',
 }
@@ -64,8 +61,6 @@ export function normalizeView(raw) {
       name: clean(p.name, NAME_MAX).trim(),   // 後台的設備名（可能是空的）
       label: displayDeviceName(clean(p.name, NAME_MAX)) || UNNAMED,   // 畫面上顯示的（像指紋的名字當未命名）
       fingerprint: clean(p.fingerprint, 32),
-      inputNoAsk: p.input_no_ask === true,
-      inputConfirmed: p.input_confirmed === true,
       loginOk: p.login_ok === true,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
     })),

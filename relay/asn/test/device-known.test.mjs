@@ -65,10 +65,10 @@ test('守門：檔案裡沒有看不見的字元（零寬、雙向）直接寫�
   assert.doesNotMatch(s, /[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/)
 })
 
-test('詳情的兩個勾選框：送出後把勾選狀態還原成目前的值（按「先不要」不殘留打勾，#1367）', () => {
+test('詳情的勾選框：送出後把勾選狀態還原成目前的值（按「先不要」不殘留打勾，#1367）', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.match(src, /act\('known-login-ok', \{ node: curKnown\.id, on: \$event\.target\.checked \}\); \$event\.target\.checked = curKnown\.loginOk"/)
-  assert.match(src, /act\('known-input-no-ask', \{ node: curKnown\.id, on: \$event\.target\.checked \}\); \$event\.target\.checked = curKnown\.inputNoAsk"/)
+  assert.doesNotMatch(src, /known-input-no-ask|inputNoAsk/, '打字不再問本人（#1745），那顆勾選框已經拿掉')
   assert.doesNotMatch(src, /act\('known-login-ok', \{[^}]*\}\)"/, '每一顆允許登入的勾選框都要還原')
 })
 

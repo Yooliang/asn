@@ -49,8 +49,8 @@ pub enum End {
     HeldPrompt,
 }
 
-/// 這台畫面上還有沒處理的打字確認框，沒有開新的：回報這個原因，發起端才看得到一句清楚的話（#1303；舊後台不認得就改回 rejected，見 lib.rs）
-pub const BUSY: &str = "busy";
+/// 這台關著「允許遠端在這台打字」：別台要打字馬上被拒，D 端看到一句清楚的話（#1745）
+pub const INPUT_OFF: &str = "input_off";
 
 /// 窗格停在外來訊息的確認框而結束時，回報後台的原因（舊後台不認得就改回 failed，見 lib.rs）
 pub const HELD_PROMPT: &str = "held_prompt";
@@ -264,6 +264,9 @@ pub enum Refused {
     Bad(String),
     /// 看的那台是移動設備，而本機關著「允許移動設備查看終端」：呼叫端用 [`MOBILE_OFF`] 這個原因回報，D 才看得到一句清楚的話
     MobileOff,
+    /// 要的是打字，而本機關著「允許遠端在這台打字」（#1745）：驗章與金鑰比對都過了才算這個，呼叫端用 [`INPUT_OFF`] 回報。
+    /// 金鑰對不上、驗章失敗的請求照舊用自己的原因被拒，不會被這個蓋掉
+    InputOff,
 }
 
 /// 本機不允許移動設備查看時，拒絕的結束原因（後台 term_view_stop 的固定原因之一，D 端顯示一句清楚的話）
@@ -288,6 +291,12 @@ pub fn viewer_is_mobile(registered: Option<&serde_json::Value>, reported: Option
 /// T 收到一筆請求：D 的公鑰先和本機記住的比（TOFU），對不上就拒絕；再用那把公鑰驗章，全部驗過才接受。
 /// **這裡不寫檔：** 第一次看到的公鑰由呼叫端在驗章通過之後才記住
 pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64, allow_mobile: bool) -> Result<Accepted, Refused> {
+    accept_request_with(row, me_node, known, key, now_s, allow_mobile, true)
+}
+
+/// 同 [`accept_request`]，另外帶本機「允許遠端在這台打字」的現在值（#1745）：關著時，要打字的請求在公鑰比對與驗章都通過之後才拒絕
+/// （[`Refused::InputOff`]）；金鑰變了或驗章失敗的，照舊用自己的原因拒絕
+pub fn accept_request_with(row: &serde_json::Value, me_node: &str, known: &crate::device_id::KnownPeers, key: &crate::device_id::DeviceKey, now_s: i64, allow_mobile: bool, allow_input: bool) -> Result<Accepted, Refused> {
     let bad = || Refused::Bad("後台回的資料不對".into());
     let get = |k: &str| row.get(k).and_then(serde_json::Value::as_str).ok_or_else(bad);
     let s = Session {
@@ -315,6 +324,9 @@ pub fn accept_request(row: &serde_json::Value, me_node: &str, known: &crate::dev
         return Err(Refused::KeyChanged { node: s.d_node.clone(), sign_pub: from_pub });
     }
     let (t_eph, t_sig, session_key) = crate::view_handshake::t_accept(&from_pub, key, &s, get("d_eph_pub")?, get("d_sig")?, now_s).map_err(Refused::Bad)?;
+    if s.scope == crate::view_handshake::Scope::Input && !allow_input {
+        return Err(Refused::InputOff);
+    }
     let from_name = row.get("from_name").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
     Ok(Accepted { session: s, t_eph, t_sig, key: session_key, from_name, from_pub, tofu, mobile })
 }
@@ -739,7 +751,7 @@ mod tests {
     #[test]
     fn 守門_移動設備被擋要在記住對方和驗章之前() {
         let src = include_str!("view_stream.rs");
-        let f = src.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        let f = src.split("pub fn accept_request_with(").nth(1).unwrap().split("\n}").next().unwrap();
         let block = f.find("Refused::MobileOff").expect("有擋移動設備");
         assert!(block < f.find("known.check(").unwrap() && block < f.find("t_accept(").unwrap(), "先擋，再 TOFU、驗章");
     }
@@ -810,26 +822,77 @@ mod tests {
     }
 
     #[test]
-    fn 守門_打字的確認與免問_電腦和手機同一套規則() {
-        // start_view_poller 打字的分支（問本人、免問、記下按過允許）不看是不是移動設備
+    fn 守門_打字不再問本人_電腦和手機同一套規則() {
+        // start_view_poller 打字的分支（#1745）：不問、不等、不記按過允許；不看是不是移動設備
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
-        let start = lib.find("if a.session.scope == view_handshake::Scope::Input {").expect("打字的分支");
-        let f = &lib[start..start + lib[start..].find("let mobile = a.mobile;").expect("打字分支後面的下一句")];
-        assert!(!f.contains("mobile"), "打字的確認不分設備種類");
-        assert!(f.contains("input_consent::ask(") && f.contains("device_id::live::confirm_input("));
-        // 每次把字交給窗格前都重讀「允許移動設備」（關掉就結束）
+        let poller = lib.split("fn start_view_poller(").nth(1).expect("有 start_view_poller").split("\n}\n").next().unwrap();
+        assert!(!poller.contains("input_consent::ask(") && !poller.contains("confirm_input") && !poller.contains("view_still_pending"), "遠端打字不再有確認框");
+        assert!(poller.contains("accept_request_with(&row, &me_node, &known, &key, now_s, allow_mobile, allow_input)"), "打字開關跟驗章在同一個函式裡先後處理");
+        assert!(poller.contains("let allow_input = settings.input_allowed();"), "每一輪都重讀開關");
+        // 每次把字交給窗格前都重讀「允許移動設備」「允許遠端在這台打字」（關掉就結束）
         let port = lib.split("    fn input(&mut self, now_ms: u64) -> Result<Option<u64>, view_stream::End> {").nth(1).expect("有 LiveTPort::input");
-        assert!(port.contains(".view_allowed(self.mobile)"));
+        assert!(port.contains(".view_allowed(self.mobile)") && port.contains("!st.input_allowed()"));
+        let allowed = lib.split("    fn allowed(&mut self) -> bool {").nth(1).expect("有 LiveTPort::allowed").split("\n    }\n").next().unwrap();
+        assert!(allowed.contains("st.input_allowed()") && allowed.contains("self.input.is_none()"), "進行中的打字也看開關，看畫面的不受影響");
         // 移動設備的範圍不再寫死只能查看
         let me = include_str!("view_stream.rs");
-        let f = me.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        let f = me.split("pub fn accept_request_with(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(!f.contains("Scope::View {"), "accept_request 不依設備種類限制範圍");
+    }
+
+    /// #1745：關著「允許遠端在這台打字」只擋打字，而且排在公鑰比對與驗章之後：
+    /// 金鑰變了、驗章失敗的請求照舊用自己的原因被拒（不管開關開或關），不會被「沒開啟遠端打字」蓋掉
+    #[test]
+    fn 遠端打字開關_只擋打字_金鑰對不上仍然被拒() {
+        use crate::view_handshake::Scope;
+        use serde_json::json;
+        let (dd, td, ed) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let d = crate::device_id::load_or_create(dd.path(), &crate::auth::PlainFile).unwrap();
+        let t = crate::device_id::load_or_create(td.path(), &crate::auth::PlainFile).unwrap();
+        let evil = crate::device_id::load_or_create(ed.path(), &crate::auth::PlainFile).unwrap();
+        let now = 1_800_000_000i64;
+        let row_of = |scope: Scope, signer: &crate::device_id::DeviceKey| {
+            let s = Session { id: "s1".into(), d_node: "d".into(), t_node: "t".into(), window: "小乙".into(), scope, expires_s: now + 60 };
+            let (eph, sig) = crate::view_handshake::d_start(signer, &s, now).unwrap();
+            let mut row = json!({ "id": "s1", "from_node": "d", "from_name": "工作機", "from_pub": signer.public_b64(), "window_name": "小乙", "expires_s": now + 60, "d_eph_pub": eph.public_b64(), "d_sig": sig });
+            if scope == Scope::Input {
+                row["scope"] = json!("input");
+            }
+            row
+        };
+        let known = crate::device_id::KnownPeers::default();
+        // 開關開著（預設）：打字直接接受，不需要任何確認；看畫面也照常
+        for scope in [Scope::View, Scope::Input] {
+            assert_eq!(accept_request_with(&row_of(scope, &d), "t", &known, &t, now, true, true).unwrap().session.scope, scope);
+        }
+        // 開關關著：打字被拒（InputOff），看畫面照常
+        assert!(matches!(accept_request_with(&row_of(Scope::Input, &d), "t", &known, &t, now, true, false), Err(Refused::InputOff)));
+        assert_eq!(accept_request_with(&row_of(Scope::View, &d), "t", &known, &t, now, true, false).unwrap().session.scope, Scope::View);
+        // 預設的 accept_request（開關開著）和舊行為一樣
+        assert!(accept_request(&row_of(Scope::Input, &d), "t", &known, &t, now, true).is_ok());
+        // 本機已經記住 d 的公鑰；另一把金鑰冒名送來：不管開關開或關，都是 KeyChanged，不會變成 InputOff 或被接受
+        let mut known = crate::device_id::KnownPeers::default();
+        known.remember("d", "工作機", &d.public_b64(), 1).unwrap();
+        for allow_input in [true, false] {
+            let r = accept_request_with(&row_of(Scope::Input, &evil), "t", &known, &t, now, true, allow_input);
+            assert!(matches!(r, Err(Refused::KeyChanged { .. })), "金鑰變了照樣拒絕（allow_input={allow_input}）：{:?}", r.as_ref().err());
+        }
+        // 公鑰對得上、但簽章被改過（換了視窗名）：驗章失敗，同樣不是 InputOff
+        for allow_input in [true, false] {
+            let mut forged = row_of(Scope::Input, &d);
+            forged["window_name"] = json!("別的視窗");
+            let r = accept_request_with(&forged, "t", &known, &t, now, true, allow_input);
+            assert!(matches!(r, Err(Refused::Bad(_))), "驗章失敗照樣拒絕（allow_input={allow_input}）：{:?}", r.as_ref().err());
+        }
+        // 本機有記住且金鑰對得上、開關關著：才是 InputOff
+        assert!(matches!(accept_request_with(&row_of(Scope::Input, &d), "t", &known, &t, now, true, false), Err(Refused::InputOff)));
+        assert_eq!(INPUT_OFF, "input_off");
     }
 
     #[test]
     fn 守門_移動設備被擋也在記住對方和驗章之前_查看打字都一樣() {
         let src = include_str!("view_stream.rs");
-        let f = src.split("pub fn accept_request(").nth(1).unwrap().split("\n}").next().unwrap();
+        let f = src.split("pub fn accept_request_with(").nth(1).unwrap().split("\n}").next().unwrap();
         let block = f.find("if mobile && !allow_mobile {").expect("有擋移動設備");
         assert!(block < f.find("known.check(").unwrap() && block < f.find("t_accept(").unwrap(), "先擋，再 TOFU、驗章");
         assert!(!f[..block].contains("scope =="), "擋移動設備不看範圍");
@@ -981,7 +1044,7 @@ mod tests {
         let cases: [(&str, String); 6] = [
             ("term_view_start", fn_body(&include_str!("view_d.rs").replace("\r\n", "\n"), "async fn begin_on<", false).to_string()),
             ("term_view_report", fn_body(&remote, "pub fn step_of(", false).to_string()),
-            ("term_view_pending.requests[]", fn_body(&me, "pub fn accept_request(", false).to_string()),
+            ("term_view_pending.requests[]", fn_body(&me, "pub fn accept_request_with(", false).to_string()),
             ("term_view_pending.active[]", fn_body(&me, "pub fn ctl_from_active(", false).to_string()),
             ("term_view_notice", fn_body(&lib, "    fn notify(&mut self)", true).to_string()),
             ("term_view_pending", fn_body(&lib, "    fn ctl(&mut self)", true).to_string()),
