@@ -586,4 +586,6 @@
 :root[data-skin="line"] .m-chat .compose-main .mc-dict{order:6}
 :root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}
 :root[data-skin="line"] .m-dv-row.sel{background:var(--ls-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */
-:root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-4px}
+:root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-1px}
+:root[data-skin="line"] .pin-dot{right:-2px;bottom:-2px;width:18px;height:18px;padding:2px;border:2px solid var(--panel);box-shadow:none}
+:root[data-skin="line"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}

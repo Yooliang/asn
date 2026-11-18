@@ -29,7 +29,7 @@ export const AsnAvatar = {
     status: { type: String, default: 'online' }, // 外框顏色（online／busy／away／offline）
     off: { type: Boolean, default: null },       // 整顆灰階；沒給就看 status 是不是離線
     hue: { type: Number, default: null },
-    pinned: { type: Boolean, default: false },   // 釘選的對話：右下角疊藍色圖釘小圓圈（#1479）
+    pinned: { type: Boolean, default: false },   // 釘選的對話：狀態燈變成圖釘（#1479、#1729）
   },
   data() { return { uid: `av${++seq}` } },
   computed: {
@@ -38,5 +38,5 @@ export const AsnAvatar = {
     badge() { return withUniqueIds(avatarBadgeHtml({ friend: this.friend, vendor: this.vendor }), this.uid) },
     hueStyle() { return Number.isFinite(this.hue) ? { '--h': this.hue } : null },
   },
-  template: `<span class="avb" :class="[sizeClass, { off: isOff }]"><span class="dp" :class="[sizeClass, 'st-' + status]" :style="hueStyle"><span v-if="src"><img :src="src" alt=""></span><span v-else-if="glyph" class="term-glyph" aria-hidden="true">{{ glyph }}</span><span v-else></span></span><span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge"></span><pin-dot v-if="pinned"></pin-dot></span>`,
+  template: `<span class="avb" :class="[sizeClass, { off: isOff, pinned }]"><span class="dp" :class="[sizeClass, 'st-' + status]" :style="hueStyle"><span v-if="src"><img :src="src" alt=""></span><span v-else-if="glyph" class="term-glyph" aria-hidden="true">{{ glyph }}</span><span v-else></span></span><span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge"></span><pin-dot v-if="pinned" :status="status"></pin-dot></span>`,
 }

@@ -347,4 +347,6 @@
 :root[data-skin="modern"] .fpm{background:none;border:0;box-shadow:none;width:22px;height:22px}
 :root[data-skin="modern"] .fpm > svg:first-child{stroke-width:1.75}
 :root[data-skin="modern"] .m-dv-row.sel{background:var(--modern-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */
-:root[data-skin="modern"] .avb-v~.pin-dot{left:auto;right:-4px}
+:root[data-skin="modern"] .avb-v~.pin-dot{left:auto;right:-1px}
+:root[data-skin="modern"] .pin-dot{right:-2px;bottom:-2px;width:18px;height:18px;padding:2px;border:2px solid var(--panel);box-shadow:none}
+:root[data-skin="modern"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}

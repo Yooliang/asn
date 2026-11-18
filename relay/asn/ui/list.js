@@ -1671,7 +1671,7 @@ const app = createApp({
       if (!isDevice.value) return []
       // LINE 外觀（#1527）：沒有左邊的設備頁籤欄，名單不分頁、全部夥伴直接用分組（例如「Claude (7/20)」），每組可收合
       const flat = skin.value === 'line'
-      const o = { tabDim: dims.tabDim, tabKey: flat ? null : tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
+      const o = { tabDim: dims.tabDim, tabKey: flat ? null : tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain, pins: chatPins.value }
       // 「通知」對話不進名單（連搜尋也不列），只在「通知」分頁看
       const base = withoutNoticeItems(rosterShownGroups(activeFriends(friendsAct.value), o))
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
