@@ -18,7 +18,9 @@ export type StorageDeps = {
   /** 從 Storage 刪檔；成功（含檔案本來就不在）回 true */
   remove(paths: string[]): Promise<boolean>;
 };
-export type AttachDeps = { rpc: Rpc; storage: StorageDeps };
+/** 沒有本人憑證的上傳（AI 桶）的上限；null＝不啟用。測試可由 deps.aiQuota 覆蓋 */
+export type AiQuota = { bytes: number | null; count: number | null };
+export type AttachDeps = { rpc: Rpc; storage: StorageDeps; aiQuota?: AiQuota };
 export type Reply = { status: number; body: Json };
 
 // 一般檔案的白名單：副檔名 → 型別。可執行檔、腳本、安裝檔一律不在裡面。
@@ -42,6 +44,10 @@ export const ATTACH_KINDS: Record<string, { mimes: string[]; maxBytes: number }>
 export const QUOTA_BYTES = 500 * 1024 * 1024; // 每台設備未過期附件合計
 // 每台設備未過期附件的張數上限（照片與檔案共用）
 export const QUOTA_COUNT = 1000;
+// AI 桶上限：設備總量之內，沒有本人憑證的上傳最多佔多少，讓本人至少保有其餘空間。
+// 待本人各設備換到帶憑證的版本後才啟用（目前不啟用：null）；啟用時預定 300 MB／600 個。
+export const AI_QUOTA_BYTES: number | null = null;
+export const AI_QUOTA_COUNT: number | null = null;
 export const MAX_PER_MESSAGE = 4;
 export const DOWNLOAD_TTL_SECONDS = 300;
 export const THUMB_MAX_CHARS = 12000;
@@ -160,20 +166,31 @@ export async function sweepExpired(deps: AttachDeps, limit = 50): Promise<number
 }
 
 export async function handleAttachAction(
-  deps: AttachDeps, me: { id: string; role?: string }, action: string, params: Json,
+  deps: AttachDeps, me: { id: string; role?: string }, action: string, params: Json, signedUser: string | null = null,
 ): Promise<Reply> {
   switch (action) {
     case "attach_init": {
       const c = checkAttachInit(params);
       if (!c.ok) return err(c.error === "file_too_large" ? 413 : 400, c.error);
       const v = c.value;
-      const { data, error } = await deps.rpc("asn_relay_attach_init", {
+      // 本人以登入憑證判定，跟信件 owner_signed 是同一套規則：身分只取自標頭（signedUser），body 裡的同名欄位一律忽略；
+      // 擁有關係由資料庫核對。沒憑證、沒設 AI 上限時，傳的就是原本的 11 個參數
+      const ai = deps.aiQuota ?? { bytes: AI_QUOTA_BYTES, count: AI_QUOTA_COUNT };
+      const base = {
         p_node: me.id, p_kind: v.kind, p_mime: v.mime, p_name: v.name, p_bytes: v.bytes, p_width: v.width, p_height: v.height,
         p_thumb: v.thumb, p_sha256: v.sha256, p_quota_bytes: QUOTA_BYTES, p_quota_count: QUOTA_COUNT,
-      });
+      };
+      const extra: Record<string, unknown> = {
+        ...(signedUser ? { p_signed_user: signedUser } : {}),
+        ...(ai.bytes !== null ? { p_ai_quota_bytes: ai.bytes } : {}),
+        ...(ai.count !== null ? { p_ai_quota_count: ai.count } : {}),
+      };
+      let { data, error } = await deps.rpc("asn_relay_attach_init", { ...base, ...extra });
+      // 後台還沒套用新版函式（找不到這組參數）：去掉新參數重試一次，部署順序顛倒也不壞
+      if (error && Object.keys(extra).length && rpcMissing(error)) ({ data, error } = await deps.rpc("asn_relay_attach_init", base));
       if (error) { console.error(action, error); return err(500, "internal"); }
       if (data?.error === "rate_limited") return err(429, "rate_limited");
-      if (data?.error === "quota_exceeded") return err(413, "quota_exceeded", { used_bytes: data.used_bytes, used_count: data.used_count, quota_bytes: QUOTA_BYTES, quota_count: QUOTA_COUNT });
+      if (data?.error === "quota_exceeded") return err(413, "quota_exceeded", { scope: data.scope === "agent" ? "agent" : "device", used_bytes: data.used_bytes, used_count: data.used_count, quota_bytes: QUOTA_BYTES, quota_count: QUOTA_COUNT });
       if (data?.error === "forbidden") return err(403, "forbidden");
       if (data?.error) return err(400, data.error);
       const url = await deps.storage.signUpload(data.path);

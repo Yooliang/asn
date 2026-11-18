@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  ATTACH_KINDS, type AttachDeps, bindAttachments, checkAttachInit, checkThumb, cleanName, handleAttachAction, parseAttachmentIds,
+  AI_QUOTA_BYTES, AI_QUOTA_COUNT, ATTACH_KINDS, type AttachDeps, bindAttachments, checkAttachInit, checkThumb, cleanName, handleAttachAction, parseAttachmentIds,
   prepareAttachments, reconcileAttachments, sendReply, QUOTA_BYTES, QUOTA_COUNT, sweepExpired, type StorageDeps, THUMB_MAX_CHARS, withAttachments, withRoomAttachments,
 } from "./attachments.ts";
 
@@ -370,4 +370,75 @@ Deno.test("sendReply：齊全只有 {id}（舊客戶端看到的形狀不變）�
 Deno.test("額度常數：張數上限 1000、容量上限 500 MB", () => {
   assertEquals(QUOTA_COUNT, 1000);
   assertEquals(QUOTA_BYTES, 500 * 1024 * 1024);
+});
+
+// ---- #1723 額度依寄件人分開算 ----
+const INIT_BODY = { kind: "image", mime: "image/webp", name: "a.webp", bytes: 5 };
+const INIT_OK = { id: U(7), path: "t/H/x.webp", expires_at: "2026-11-19T00:00:00Z" };
+const initCalls = (calls: Call[]) => calls.filter((c) => c.fn === "asn_relay_attach_init");
+
+Deno.test("attach_init：有本人憑證才帶 p_signed_user；沒憑證、沒設 AI 上限時只傳原本 11 個參數", async () => {
+  const a = fakeDeps({ rpc: () => INIT_OK });
+  await handleAttachAction(a.deps, { id: "H" }, "attach_init", INIT_BODY, U(9));
+  assertEquals(initCalls(a.calls)[0].args.p_signed_user, U(9));
+  const b = fakeDeps({ rpc: () => INIT_OK });
+  await handleAttachAction(b.deps, { id: "H" }, "attach_init", INIT_BODY);
+  const keys = Object.keys(initCalls(b.calls)[0].args).sort();
+  assertEquals(keys.length, 11);
+  assert(!keys.includes("p_signed_user") && !keys.includes("p_ai_quota_bytes") && !keys.includes("p_ai_quota_count"));
+});
+
+Deno.test("attach_init：身分只取自憑證標頭，body 裡偽造的身分欄位一律忽略", async () => {
+  const f = fakeDeps({ rpc: () => INIT_OK });
+  await handleAttachAction(f.deps, { id: "H" }, "attach_init", { ...INIT_BODY, p_signed_user: U(1), signed_user: U(1), sender_kind: "owner", p_ai_quota_bytes: 10_000_000_000 });
+  const args = initCalls(f.calls)[0].args;
+  assert(!("p_signed_user" in args) && !("sender_kind" in args) && !("p_ai_quota_bytes" in args), JSON.stringify(Object.keys(args)));
+});
+
+Deno.test("attach_init：設了 AI 上限就帶 p_ai_quota_*（階段二）；預設常數是不啟用", async () => {
+  assertEquals([AI_QUOTA_BYTES, AI_QUOTA_COUNT], [null, null]);
+  const f = fakeDeps({ rpc: () => INIT_OK });
+  f.deps.aiQuota = { bytes: 300 * 1024 * 1024, count: 600 };
+  await handleAttachAction(f.deps, { id: "H" }, "attach_init", INIT_BODY, null);
+  const args = initCalls(f.calls)[0].args;
+  assertEquals([args.p_ai_quota_bytes, args.p_ai_quota_count], [300 * 1024 * 1024, 600]);
+});
+
+Deno.test("attach_init：後台還沒套用新版函式（PGRST202）→ 去掉新參數重試一次並成功；其他錯誤不重試", async () => {
+  let n = 0;
+  const f = fakeDeps({ rpc: () => (++n === 1 ? { __error: 1 } : INIT_OK) });
+  // fakeDeps 的錯誤是字串 "boom"，rpcMissing 認不得；這裡改用能被認出的錯誤
+  const calls: Call[] = [];
+  const deps: AttachDeps = {
+    storage: f.deps.storage,
+    rpc: (fn, args) => {
+      calls.push({ fn, args });
+      return Promise.resolve(calls.length === 1 ? { data: null, error: { code: "PGRST202", message: "Could not find the function" } } : { data: INIT_OK, error: null });
+    },
+  };
+  const r = await handleAttachAction(deps, { id: "H" }, "attach_init", INIT_BODY, U(9));
+  assertEquals(r.status, 200);
+  assertEquals(initCalls(calls).length, 2);
+  const ic = initCalls(calls);
+  assert("p_signed_user" in ic[0].args && !("p_signed_user" in ic[1].args));
+  // 沒有新參數時找不到函式不重試（直接回 500）
+  const c2: Call[] = [];
+  const d2: AttachDeps = { storage: f.deps.storage, rpc: (fn, args) => { c2.push({ fn, args }); return Promise.resolve({ data: null, error: { code: "PGRST202" } }); } };
+  assertEquals((await handleAttachAction(d2, { id: "H" }, "attach_init", INIT_BODY)).status, 500);
+  assertEquals(c2.length, 1);
+});
+
+Deno.test("attach_init：quota_exceeded 回應帶 scope（agent／device，沒給當 device）", async () => {
+  const q = async (data: unknown) => (await handleAttachAction(fakeDeps({ rpc: () => data }).deps, { id: "H" }, "attach_init", INIT_BODY)).body;
+  assertEquals((await q({ error: "quota_exceeded", scope: "agent", used_bytes: 1, used_count: 2 })).scope, "agent");
+  assertEquals((await q({ error: "quota_exceeded", scope: "device", used_bytes: 1, used_count: 2 })).scope, "device");
+  assertEquals((await q({ error: "quota_exceeded", used_bytes: 1, used_count: 2 })).scope, "device");
+});
+
+Deno.test("relay/index.ts：attach_init 只用憑證標頭驗出的使用者交給 handleAttachAction（不讀 body）", async () => {
+  const src = await read("../relay/index.ts");
+  const i = src.indexOf("ATTACH_ACTIONS.has(action)");
+  const blk = src.slice(i, src.indexOf("action === \"whoami\"", i));
+  assert(blk.includes("signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER))"));
+  assert(/handleAttachAction\(\{ rpc, storage \}, me, action, params, signedAttach\)/.test(blk));
 });
