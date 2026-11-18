@@ -160,15 +160,15 @@ export const displayVendorKey = f => {
 }
 export const engineRank = k => (k === 'other' ? 1e3 : ENGINE_ORDER.includes(k) ? ENGINE_ORDER.indexOf(k) : 100)
 export const engineLabel = k => ENGINE_LABEL[k] ?? (k === 'other' ? '其他' : k.charAt(0).toUpperCase() + k.slice(1))
-export function groupInDevice(items, mode = 'status') {
+export function groupInDevice(items, mode = 'status', cmp = null) {
   if (mode === 'engine') {
     const by = new Map()
     for (const f of items) { const k = displayVendorKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
     const keys = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
     const st = activityRank
     return keys.map(k => ({ key: `engine:${k}`, kind: 'engine', label: engineLabel(k),
-      items: by.get(k).slice().sort((a, b) => st(levelOf(a)) - st(levelOf(b))) }))
+      items: by.get(k).slice().sort(cmp ?? ((a, b) => st(levelOf(a)) - st(levelOf(b)))) }))
   }
-  return STATUS_GROUPS.map(([k, label]) => ({ key: `status:${k}`, kind: 'status', label, items: items.filter(f => levelOf(f) === k).sort((a, b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'zh-Hant')) }))
+  return STATUS_GROUPS.map(([k, label]) => ({ key: `status:${k}`, kind: 'status', label, items: items.filter(f => levelOf(f) === k).sort(cmp ?? ((a, b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'zh-Hant'))) }))
     .filter(g => g.items.length)
 }

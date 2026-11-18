@@ -58,15 +58,16 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
 
 // 某頁籤裡的好友：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
 // key 是 null＝不分頁、全部（LINE 外觀電腦版沒有左邊的頁籤欄，名單直接用分組，#1527）
-export function pageItems(friends, dim, key, match = () => true) {
+export function pageItems(friends, dim, key, match = () => true, cmp = null) {
   const of = f => (dim === 'status' ? levelOf(f) : dim === 'engine' ? displayVendorKey(f) : (f.node ?? ''))
   // 組內排序固定：活躍、閒置、離線，同級照名字；不看忙閒，免得一忙一閒就換位置
-  return friends.filter(f => !isAsnWindow(f) && (key === null || of(f) === key) && match(f)).sort((a, b) => activityRank(levelOf(a)) - activityRank(levelOf(b)) || a.nick.localeCompare(b.nick, 'zh-Hant'))
+  // cmp（#1729）：給了就照它排（釘選在前、再照最新訊息時間）；沒給才用固定的活躍度順序
+  return friends.filter(f => !isAsnWindow(f) && (key === null || of(f) === key) && match(f)).sort(cmp ?? ((a, b) => activityRank(levelOf(a)) - activityRank(levelOf(b)) || a.nick.localeCompare(b.nick, 'zh-Hant')))
 }
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名
 // deviceOrder＝帳號層的設備順序（和「分頁依設備」同一份）：設備分組也照它排，沒列在裡面的接在後面（照設備名）
-export function groupItems(items, groupDim, { selfNode, selfName = '', deviceOrder = [] } = {}) {
+export function groupItems(items, groupDim, { selfNode, selfName = '', deviceOrder = [], cmp = null } = {}) {
   if (groupDim === 'device') {
     const by = new Map()
     for (const f of items) {
@@ -81,5 +82,5 @@ export function groupItems(items, groupDim, { selfNode, selfName = '', deviceOrd
     return applyDeviceOrder(byLabel.map(g => ({ key: g.node, g })), { selfNode, deviceOrder }).map(x => x.g)
       // node 留在組上：設備分組標題旁要用它查那台的 ASN 在線狀態
   }
-  return groupInDevice(items, groupDim)
+  return groupInDevice(items, groupDim, cmp)
 }
