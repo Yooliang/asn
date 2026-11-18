@@ -115,7 +115,7 @@ const devs = () => [
 ]
 const render = async (props, state = { devices: devs(), accounts: ACCT }) => {
   globalThis.Vue = Vue
-  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', ...props }) }))
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', devView: 'acct', ...props }) }))
 }
 
 test('頁首：設定視窗標題已是「設備與帳號」，面板裡不再重複一個標題；說明文字、「重新整理」、「已隱藏的設備」展開區、橫向頁籤都拿掉了', async () => {
@@ -180,7 +180,7 @@ test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋原本的
 test('被隱藏設備的細部頁：標「已隱藏」，頂部有「顯示回名單」與「永久移除」，廠商與帳號內容仍在', async () => {
   const html = await render({ dev: 'G', devView: 'info' })
   assert.match(html, /dv-tag off[^>]*>已隱藏/)
-  assert.match(html, /class="dv-hid-act"[\s\S]*>顯示回名單<[\s\S]*>永久移除</)
+  assert.match(html, /class="dv-card-act"[\s\S]*>顯示回名單<[\s\S]*>永久移除</)
   assert.ok((await render({ dev: 'G' })).includes('G@b.c'), '帳號頁仍有廠商與帳號')
   assert.ok(SettingsPanel.template.includes("act('device-show', curDev.key)"))
   assert.ok(!html.includes('確定永久移除'), '還沒按永久移除前不顯示確認')

@@ -9,7 +9,7 @@ export const taskmgrProbeSource = () => `(async () => {
   const self = await waitFor(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
   if (!self) return { ok: false, why: '設備列表裡找不到「這台」' };
   [...self.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號').click();
-  const entry = await waitFor(() => [...document.querySelectorAll('.dv-dev-h .dv-tasks')].find(vis));
+  const entry = await waitFor(() => [...document.querySelectorAll('.dv-tabs .dv-tasks')].find(vis));
   if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
   entry.click();
   const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 8 ? r : null });
