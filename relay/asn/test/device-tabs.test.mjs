@@ -110,3 +110,16 @@ test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄�
   assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
   assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(7\)[^}]*display:none\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\.settings \.tm-table \.aero-btn\{padding:3px 6px\}\}/)
 })
+
+test('known 的錯誤：沒有管理卡的設備（這台）顯示在設備資料卡下方；有管理卡的只在管理卡出現一次（#1727）', async () => {
+  const err = '現在無法讀取設備紀錄'
+  const withErr = st(); withErr.known.error = err
+  const count = h => h.split(err).length - 1
+  const me = await render({ dev: 'H' }, withErr)
+  assert.equal(count(me), 1, '這台沒有管理卡，錯誤要看得到')
+  assert.ok(me.indexOf(err) > me.indexOf('設備資料'), '在設備資料卡裡')
+  const mid = me.indexOf(err); assert.ok(me.lastIndexOf('<div class="set-card">', mid) < mid && me.indexOf('</dl>') < mid, '在資料表下方')
+  const other = withErr; other.known.peers = [{ node: 'W', name: '客廳電腦', fingerprint: 'AABB', firstSeen: '', inputNoAsk: false, loginOk: false }]
+  assert.equal(count(await render({ dev: 'W' }, other)), 1, '別台有管理卡，只出現一次')
+  assert.equal(count(await render({ dev: 'H' }, st())), 0, '沒錯誤就不出現')
+})

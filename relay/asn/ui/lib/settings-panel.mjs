@@ -497,6 +497,8 @@ export const SettingsPanel = {
                   <template v-if="curDev.self && st.version"><dt>ASN 版本</dt><dd>{{ st.version }}</dd></template>
                   <template v-if="reportedAgo"><dt>最後回報</dt><dd>{{ reportedAgo }}</dd></template>
                 </dl>
+                <!-- 沒有「管理」卡的設備（例如這台）錯誤就顯示在這裡；有管理卡的在管理卡裡，同一句不出現兩次 -->
+                <p class="pair-warn" v-if="st.known && st.known.error && !(curKnown || canRemoveRow(curDev))" role="alert">{{ st.known.error }}</p>
               </div>
               <div class="set-card" v-if="curKnown">
                 <h3 class="set-h">信任</h3>
