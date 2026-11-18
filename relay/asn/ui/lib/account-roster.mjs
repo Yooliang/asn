@@ -23,6 +23,7 @@ const STALE_NOTE = '較舊'   // 「我的帳號」卡片上帳號後面的括�
 // Claude 的額度只有「用這個帳號登入的視窗」會送來（換帳號前開的舊視窗不收，#1688）：讀數舊了，告訴人怎麼讓它更新
 const STALE_HINT = '用這個帳號開新視窗就會更新'
 const FIVE_HOUR_STALE_MS = 30 * 60_000   // 5 小時那條 30 分鐘沒更新就算舊（#1688）；其他窗沿用 STALE_MS（6 小時）
+const FIVE_GONE_MS = 60 * 60_000   // 同一台後來讀到每週、5 小時卻停了這麼久：當作這個帳號已經沒有 5 小時窗（#1736）
 const staleMsOf = name => (name === 'five_hour' || windowMinutes(name) === 300 ? FIVE_HOUR_STALE_MS : STALE_MS)
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
@@ -69,12 +70,20 @@ export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台�
   return node => names.get(node) || (node && node === selfNode ? selfLabel : UNNAMED_DEVICE)
 }
 
+// 沒有 5 小時窗的帳號（Ultra 等，#1736）：Claude 狀態列只送每週，後台還留著改方案前最後一筆 5 小時。
+// 判斷：方案是 Ultra，或同一台電腦後來又讀到每週、但那條 5 小時比每週舊了超過 1 小時（有 5 小時窗的帳號兩條會一起更新；1 小時內仍照舊標舊，#1688）→ 那條 5 小時已經沒有在送，不列、也不拿它算「資料較舊」。
+// 不同電腦讀的不算（那是換帳號前的舊視窗，#1688，照舊標舊）；只動 Claude
+const fiveGone = (entry, w, all) => entry?.vendor === 'claude' && (w.name === 'five_hour') && (
+  /ultra/i.test(String(entry?.plan ?? '')) ||
+  all.some(o => o.name === 'weekly' && o.node === w.node && o.read - w.read > FIVE_GONE_MS))
+
 // 一個帳號可用的額度窗（壞掉的窗略過），照 5 小時、每週、其他由短到長排
 function cleanWindows(entry) {
   if (!Array.isArray(entry?.windows)) return []
   return entry.windows
     .map(w => ({ name: String(w?.name ?? ''), pct: pct(w?.left_pct), reset: time(w?.resets_at), read: time(w?.read_at), node: typeof w?.read_node === 'string' ? w.read_node : '' }))
     .filter(w => w.pct != null && w.read != null)
+    .filter((w, _i, all) => !fiveGone(entry, w, all))
     .sort((a, b) => windowRank(a.name) - windowRank(b.name) || windowMinutes(a.name) - windowMinutes(b.name))
 }
 
