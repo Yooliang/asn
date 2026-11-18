@@ -9,6 +9,7 @@
 use crate::device_id::{DeviceKey, KnownPeers, Tofu};
 use crate::view_frame::Frame;
 use crate::view_handshake::{self, Eph, Scope, Session};
+use crate::view_log;
 use crate::view_d_input::RemoteInputs;
 use crate::view_remote::{self, RemoteViews, Want};
 use serde_json::{json, Value};
@@ -37,6 +38,8 @@ pub trait ViewBackend: Send + Sync + 'static {
     fn see(&self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<Tofu, String>;
     /// 通知本人（公鑰換了）
     fn alert(&self, peer: &str, kind: &str, sign_pub: &str) -> impl Future<Output = ()> + Send;
+    /// 寫一行握手紀錄（#1700，只有雜湊前 6 碼與固定代號，見 view_log）。預設不寫（測試用的假後台）
+    fn log(&self, _line: String) {}
 }
 
 /// 畫面那邊：收到的畫面與結束交給誰
@@ -51,6 +54,8 @@ pub struct Target {
     pub node: String,
     pub name: String,
     pub sign_pub: String,
+    /// 這台自己的設備公鑰雜湊前 6 碼（握手紀錄用，#1700；不是公鑰本身）
+    pub own: String,
     pub tofu: Tofu,
     /// 本人在手機上確認過這把公鑰的指紋（只有記住的同一把才算；第一次看到的一律是 false）
     pub confirmed: bool,
@@ -150,6 +155,9 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInp
             return Err(e);
         }
     };
+    // 握手紀錄（#1700）：看的一端在拿到那台公鑰、比過 TOFU 之後記一行（換了公鑰就是被這一端擋下）
+    let own_pub = key.public_b64();
+    b.log(view_log::line(view_log::Side::Viewer, &id, scope, &own_pub, &to_pub, Some(tofu), if tofu == Tofu::Changed { "rejected" } else { "started" }, if tofu == Tofu::Changed { "key_changed" } else { "-" }));
     if tofu == Tofu::Changed {
         release();
         report_ended(b, &id, &token).await;
@@ -166,11 +174,12 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInp
     }
     // 手機要打字得先確認過那台的指紋，而且確認的就是這次後台給的這把公鑰（Same）
     if phone && scope == Scope::Input && !confirmed {
+        b.log(view_log::line(view_log::Side::Viewer, &id, scope, &own_pub, &to_pub, Some(tofu), "rejected", "input_needs_confirm"));
         release();
         report_ended(b, &id, &token).await;
         return Err(INPUT_NEEDS_CONFIRM.into());
     }
-    Ok(Begun { id, session: s, eph, topic, target: Target { node: to_node, name: machine, sign_pub: to_pub, tofu, confirmed } })
+    Ok(Begun { id, session: s, eph, topic, target: Target { node: to_node, name: machine, sign_pub: to_pub, own: view_log::hash6(&own_pub), tofu, confirmed } })
 }
 
 /// 手機的入口：看畫面或打字（#1378）。打字要先確認過那台的指紋；那台照電腦的規則問那邊的人（允許移動設備關著就拒絕）
@@ -222,6 +231,8 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
     let mut stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
     let frames_seen = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let mut failed_since: Option<u64> = None;
+    let mut shaken = false;   // 握手走完（驗章過、記得住）：握手紀錄用（#1700）
+    let mut why: &str = "";   // 握手停在哪一步的原因代號（結束原因同是 rejected／failed 時分得出來）
     let began_ms = crate::auth::now_ms();
     let reason = loop {
         let want = views.want(&id);
@@ -246,17 +257,26 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
                         let (mut rx, outbox) = match s.scope {
                             Scope::View => match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, now_s) {
                                 Ok(rx) => (rx, None),
-                                Err(_) => break "rejected".to_string(),
+                                Err(_) => {
+                                    why = "t_sig_invalid";
+                                    break "rejected".to_string();
+                                }
                             },
                             Scope::Input => match crate::view_input::d_finish(&target.sign_pub, e, &s, &t_eph, &t_sig, now_s) {
                                 Ok((rx, ob)) => (rx, Some(Arc::new(std::sync::Mutex::new(ob)))),
-                                Err(_) => break "rejected".to_string(),
+                                Err(_) => {
+                                    why = "t_sig_invalid";
+                                    break "rejected".to_string();
+                                }
                             },
                         };
                         // 第一次看到這台：T 的簽章驗過才記住（first 通知只有 T 寄）；記不住就不看
                         if target.tofu == Tofu::New && !matches!(b.see(&target.node, &target.name, &target.sign_pub, now_ms), Ok(Tofu::New | Tofu::Same)) {
+                            why = "see_failed";
                             break "failed".to_string();
                         }
+                        shaken = true;
+                        sink.log(format!("{} info [ASN] {}", iso_secs(crate::auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), "accepted", "-")));
                         let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                         stop_tx = Some(tx);
                         // 打字才有送出端（要回條）；看畫面只收不送
@@ -325,6 +345,12 @@ async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: A
     let reason = if stalled { "input_stalled".to_string() } else { reason };
     sink.emit(END_EVENT, json!({ "id": id, "text": view_remote::end_text(&reason) }));
     sink.log(format!("{} info [ASN] remote-view end reason={reason} frames={frames}", iso_secs(crate::auth::now_ms() as i64)));
+    // 握手沒走完就結束：兩端的原因都在這一行（被拒絕、到期、本人取消、失敗），沒有另一行的話看不出握手停在哪
+    if !shaken {
+        let result = if reason == "viewer_ended" { "cancelled" } else { "rejected" };
+        let end_reason = if why.is_empty() { reason.as_str() } else { why };
+        sink.log(format!("{} info [ASN] {}", iso_secs(crate::auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), result, end_reason)));
+    }
 }
 
 #[cfg(test)]
@@ -350,11 +376,12 @@ mod tests {
         known: KnownPeers,
         calls: Mutex<Vec<(String, Value)>>,
         alerts: Mutex<Vec<(String, String)>>,
+        logs: Mutex<Vec<String>>,
     }
 
     impl Fake {
         fn new(started: Option<Value>, known: KnownPeers) -> Fake {
-            Fake { dir: tempfile::tempdir().unwrap(), started, known, calls: Mutex::new(vec![]), alerts: Mutex::new(vec![]) }
+            Fake { dir: tempfile::tempdir().unwrap(), started, known, calls: Mutex::new(vec![]), alerts: Mutex::new(vec![]), logs: Mutex::new(vec![]) }
         }
         fn actions(&self) -> Vec<String> {
             self.calls.lock().unwrap().iter().map(|c| c.0.clone()).collect()
@@ -384,6 +411,9 @@ mod tests {
             self.alerts.lock().unwrap().push((peer.to_string(), kind.to_string()));
             async {}
         }
+        fn log(&self, line: String) {
+            self.logs.lock().unwrap().push(line);
+        }
     }
 
     fn run<F: Future>(f: F) -> F::Output {
@@ -411,6 +441,36 @@ mod tests {
         let body = b.calls.lock().unwrap()[0].1.clone();
         assert_eq!(body["scope"], "view");
         assert_eq!(body["to_node"], "pc");
+    }
+
+    #[test]
+    fn 握手紀錄_看的一端記一行_雜湊前六碼_tofu_範圍_換金鑰記拒絕與原因_不含完整公鑰_1700() {
+        let own = |b: &Fake| crate::view_log::hash6(&run(b.key()).unwrap().public_b64());
+        // 第一次看到（New）：started
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "PEER_PUB_NEW_AAAA" })), KnownPeers::default());
+        let got = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        let logs = b.logs.lock().unwrap().clone();
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        assert!(logs[0].starts_with("view-handshake side=viewer ") && logs[0].contains("scope=view") && logs[0].contains("tofu=New") && logs[0].contains("result=started"), "{}", logs[0]);
+        assert!(logs[0].contains(&format!("me={}", own(&b))) && logs[0].contains(&format!("peer={}", crate::view_log::hash6("PEER_PUB_NEW_AAAA"))), "{}", logs[0]);
+        assert_eq!(got.target.own, own(&b), "Target 帶自己的雜湊前 6 碼（結束那行用）");
+        assert!(!logs[0].contains("PEER_PUB_NEW_AAAA") && !logs[0].contains(&run(b.key()).unwrap().public_b64()), "完整公鑰不能進 log");
+        // 同一把（Same）
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), known_with("pc", "same"));
+        run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).unwrap();
+        assert!(b.logs.lock().unwrap()[0].contains("tofu=Same"));
+        // 換了金鑰（Changed）：被這一端擋下，記拒絕與原因
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "new-key" })), known_with("pc", "old-key"));
+        assert!(run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, None, NOW)).is_err());
+        let l = b.logs.lock().unwrap().clone();
+        assert_eq!(l.len(), 1);
+        assert!(l[0].contains("tofu=Changed") && l[0].contains("result=rejected") && l[0].contains("reason=key_changed"), "{}", l[0]);
+        assert!(!l[0].contains("old-key") && !l[0].contains("new-key"), "{}", l[0]);
+        // 手機要打字但那台指紋還沒確認：發到後台以前就擋，不算握手
+        let b = Fake::new(Some(json!({ "topic": "t1", "to_pub": "same" })), known_with("pc", "same"));
+        let r = run(start_view(&b, &RemoteViews::default(), &RemoteInputs::default(), "phone", "pc".into(), "夥伴".into(), None, Some("input"), NOW));
+        assert!(r.is_err());
+        assert!(b.logs.lock().unwrap().is_empty(), "還沒發到後台、沒有握手就沒有握手紀錄");
     }
 
     #[test]

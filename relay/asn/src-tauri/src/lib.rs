@@ -84,6 +84,7 @@ mod android_keywrap;
 mod secret_file;
 mod keystore;
 mod view_handshake;
+mod view_log;   // 握手紀錄的一行格式（#1700，兩端共用）
 mod view_frame;
 mod term_frame;
 #[cfg(desktop)]
@@ -1216,6 +1217,17 @@ impl view_d::ViewBackend for LiveBackend {
         let (relay, peer, kind, sign_pub) = (self.relay.clone(), peer.to_string(), kind.to_string(), sign_pub.to_string());
         async move { device_id::live::alert(&relay, &peer, &kind, &sign_pub).await }
     }
+    fn log(&self, line: String) {
+        // 電腦版寫進機器資料夾的 ui.log；手機沒有這份紀錄與時間函式（claude_quota 只有電腦版編），照其他手機端的 log 寫標準錯誤
+        #[cfg(desktop)]
+        {
+            let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        }
+        #[cfg(not(desktop))]
+        {
+            elog!("{line}");
+        }
+    }
 }
 
 /// 手機看畫面時，把畫面與結束送給發起的那個視窗
@@ -1556,22 +1568,49 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
             for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
                 let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else { continue };
                 let now_s = (auth::now_ms() / 1000) as i64;
+                // 握手紀錄（#1700）：被看的一端每筆請求記一行結果（誰、TOFU、範圍、接受或拒絕與原因代號；只有雜湊前 6 碼，不記公鑰與內容）
+                let peer_pub = row.get("from_pub").and_then(Value::as_str).unwrap_or("").to_string();
+                let row_scope = row.get("scope").and_then(Value::as_str).and_then(view_handshake::Scope::parse).unwrap_or(view_handshake::Scope::View);
+                let row_tofu = row.get("from_node").and_then(Value::as_str).filter(|_| !peer_pub.is_empty()).map(|n| known.check(n, &peer_pub));
+                let own_pub = key.public_b64();
+                let hs = |tofu: Option<device_id::Tofu>, result: &str, reason: &str| {
+                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line(view_log::Side::Target, &id, row_scope, &own_pub, &peer_pub, tofu, result, reason))]);
+                };
+                let mut rej: &str = "rejected_other";
                 // 同一筆只能接受一次：驗章前先查，驗過、回覆接受前先記下；記不下來就拒絕（見 view_seen）
                 // D 的設備公鑰先和本機記住的比（TOFU）：換了就拒絕並通知本人；第一次看到的驗章通過才記住，並通知本人（只有 T 寄）
                 let verified = match view_seen::check_unseen(&data_dir, &id, now_s) {
-                    Err(e) => Err(e),
+                    Err(e) => {
+                        rej = "replay_or_seen";
+                        Err(e)
+                    }
                     Ok(()) => match view_stream::accept_request(&row, &me_node, &known, &key, now_s, allow_mobile) {
                         Err(view_stream::Refused::KeyChanged { node, sign_pub }) => {
+                            rej = "key_changed";
                             device_id::live::alert(&relay, &node, "changed", &sign_pub).await;
                             Err(device_id::KEY_CHANGED.to_string())
                         }
-                        Err(view_stream::Refused::Bad(e)) => Err(e),
-                        Err(view_stream::Refused::MobileOff) => Err(view_stream::MOBILE_OFF.to_string()),
-                        Ok(a) => view_seen::record(&data_dir, &id, a.session.expires_s, now_s).map(|()| a),
+                        Err(view_stream::Refused::Bad(e)) => {
+                            // 後台回的資料格式不對，或簽章／握手驗不過：兩種分開記（訊息是自己的固定句子，不進 log）
+                            rej = if e == "後台回的資料不對" { "bad_row" } else { "verify_failed" };
+                            Err(e)
+                        }
+                        Err(view_stream::Refused::MobileOff) => {
+                            rej = "mobile_off";
+                            Err(view_stream::MOBILE_OFF.to_string())
+                        }
+                        Ok(a) => match view_seen::record(&data_dir, &id, a.session.expires_s, now_s) {
+                            Ok(()) => Ok(a),
+                            Err(e) => {
+                                rej = "record_failed";
+                                Err(e)
+                            }
+                        },
                     },
                 };
                 match verified {
                     Err(e) => {
+                        hs(row_tofu, "rejected", rej);
                         // 這台不允許移動設備查看：回報固定原因，手機那邊看到一句清楚的話；沒開始看，不跳紅條、不寄通知信
                         let reason = if e == view_stream::MOBILE_OFF { view_stream::MOBILE_OFF } else { "rejected" };
                         let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": reason }))).await;
@@ -1579,6 +1618,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                     Ok(a) => {
                         if a.tofu == device_id::Tofu::New {
                             if device_id::live::see(&data_dir, &a.session.d_node, &a.from_name, &a.from_pub, auth::now_ms()).is_err() {
+                                hs(Some(a.tofu), "rejected", "see_failed");
                                 let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "rejected" }))).await;
                                 continue;
                             }
@@ -1592,13 +1632,16 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                         let who = input_consent::bar_label(&asker);
                         // 打字（0.2.15）：自己的電腦之間預設不用每次問，但要同時成立：公鑰就是記住的那把（Tofu::Same）、
                         // 本人在這台對這把公鑰按過「允許」（看畫面記住的不算）、本人沒在設定頁改成每次都問。否則照樣問；按了允許就記下來
+                        let mut ask_note = "-";
                         if a.session.scope == view_handshake::Scope::Input {
                             let no_ask = a.tofu == device_id::Tofu::Same && device_id::live::known(&data_dir).map(|k| k.input_no_ask(&a.session.d_node)).unwrap_or(false);
+                            ask_note = if no_ask { "no_ask" } else { "asked" };
                             if !no_ask {
                                 let answered = input_consent::ask(&app, &asker, &a.session.window, a.session.expires_s).await;
                                 // 按下去之後再確認一次：請求還沒過期、對方也沒撤回，才往下走；逾時或撤回之後按允許也不能開始打字
                                 let still = answered && input_consent::consent_outcome(Some(true), (auth::now_ms() / 1000) as i64, a.session.expires_s) && view_still_pending(&relay, &id).await;
                                 if !still {
+                                    hs(Some(a.tofu), "rejected", if answered { "consent_expired" } else { "consent_denied" });
                                     if answered {
                                         // 本人按了允許，但請求已經過期或被對方取消：告訴本人這次沒有允許
                                         let _ = app.emit_to("list", input_consent::EV_EXPIRED, serde_json::json!({}));
@@ -1613,20 +1656,24 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                             }
                         }
                         let mobile = a.mobile;
+                        let tofu_a = a.tofu;
                         let view_stream::Accepted { session, t_eph, t_sig, key: session_key, .. } = a;
                         let input = match session.scope {
                             view_handshake::Scope::View => None,
                             view_handshake::Scope::Input => match view_input::input_key(&session_key) {
                                 Ok(k) => Some(Arc::new(std::sync::Mutex::new(view_input::TInput::new(k, &id, auth::now_ms())))),
                                 Err(_) => {
+                                    hs(Some(tofu_a), "rejected", "input_key_failed");
                                     let _ = relay.api("term_view_stop", Some(serde_json::json!({ "id": id, "reason": "failed" }))).await;
                                     continue;
                                 }
                             },
                         };
                         if relay.api("term_view_accept", Some(serde_json::json!({ "id": id, "t_eph_pub": t_eph, "t_sig": t_sig }))).await.is_err() {
+                            hs(Some(tofu_a), "rejected", "accept_api_failed");
                             continue;
                         }
+                        hs(Some(tofu_a), "accepted", ask_note);
                         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
                         // 送畫面的頻道，每幅等伺服器回條；這次觀看結束、port 丟掉時一起收掉。
                         // 看畫面：只送不收（收到的一律丟掉）。打字：另外只收 event=input 的字，排進 TInput（解密、排序、上限都在那裡）
@@ -1765,6 +1812,8 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         let mut stop_rx: Option<tokio::sync::oneshot::Sender<()>> = None;
         let frames_seen = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let mut failed_since: Option<u64> = None;
+        let mut shaken = false;   // 握手走完（驗章過、記得住）：握手紀錄用（#1700）
+        let mut why: &str = "";   // 握手停在哪一步的原因代號
         let began_ms = auth::now_ms();
         let reason = loop {
             let want = views.want(&id);
@@ -1788,17 +1837,26 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                             let (mut rx, outbox) = match s.scope {
                                 view_handshake::Scope::View => match view_remote::finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
                                     Ok(rx) => (rx, None),
-                                    Err(_) => break "rejected".to_string(),
+                                    Err(_) => {
+                                        why = "t_sig_invalid";
+                                        break "rejected".to_string();
+                                    }
                                 },
                                 view_handshake::Scope::Input => match view_input::d_finish(&target.sign_pub, e, &s, &t_eph, &t_sig, (now_ms / 1000) as i64) {
                                     Ok((rx, ob)) => (rx, Some(Arc::new(std::sync::Mutex::new(ob)))),
-                                    Err(_) => break "rejected".to_string(),
+                                    Err(_) => {
+                                        why = "t_sig_invalid";
+                                        break "rejected".to_string();
+                                    }
                                 },
                             };
                             // 第一次看到這台：T 的簽章驗過才記住（first 通知只有 T 寄）；記不住就不看
                             if target.tofu == device_id::Tofu::New && !matches!(device_id::live::see(&data_dir, &target.node, &target.name, &target.sign_pub, now_ms), Ok(device_id::Tofu::New | device_id::Tofu::Same)) {
+                                why = "see_failed";
                                 break "failed".to_string();
                             }
+                            shaken = true;
+                            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), "accepted", "-"))]);
                             let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                             stop_rx = Some(tx);
                             // 打字才有送出端（要回條）；看畫面只收不送
@@ -1866,6 +1924,12 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         let reason = if inputs.remove(&id) { "input_stalled".to_string() } else { reason };
         let _ = app.emit_to(label.as_str(), "term-view-remote-end", serde_json::json!({ "id": id, "text": view_remote::end_text(&reason) }));
         let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        // 握手沒走完就結束：兩端的原因都在這一行（被拒絕、到期、本人取消、失敗）（#1700）
+        if !shaken {
+            let result = if reason == "viewer_ended" { "cancelled" } else { "rejected" };
+            let end_reason = if why.is_empty() { reason.as_str() } else { why };
+            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), result, end_reason))]);
+        }
     });
 }
 
