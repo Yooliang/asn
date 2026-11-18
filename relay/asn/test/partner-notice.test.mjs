@@ -156,12 +156,24 @@ test('讀不到完整提示：只有拒絕可按，並講原因；讀得到全�
   assert.equal(long.hint, '')
 })
 
-test('危險指令：上方一行紅字，字只從代碼查表、不讀本文；多帶的欄位不顯示', () => {
+test('危險指令：上方警示條，字只從代碼查表、不讀本文；多帶的欄位不顯示', () => {
   const v = permissionView({ text: 'rm -rf /；這段文字不能出現在提醒', complete: true, options: OPTS, risk: { codes: ['delete_recursive', 'git_destructive', '亂寫的代碼'], uncertain: false }, choice_hash: 'h' })
-  assert.match(v.risk, /^注意：這個操作可能有風險：會一次刪掉整個資料夾；會改寫或丟掉 git 的歷史紀錄$/)
-  assert.ok(!v.risk.includes('這段文字') && !v.risk.includes('亂寫'))
+  assert.deepEqual(v.risk, { lead: '注意：會一次刪掉整個資料夾', more: ['會改寫或丟掉 git 的歷史紀錄'], danger: true }, '第一個接在「注意：」後面，其餘逐行')
+  assert.ok(!JSON.stringify(v.risk).includes('這段文字') && !JSON.stringify(v.risk).includes('亂寫'))
+  assert.ok(!v.risk.lead.includes('可能有風險'), '不再連用兩個冒號')
   const odd = permissionView({ text: 'x', complete: true, options: OPTS, risk: { codes: [], uncertain: true }, choice_hash: 'h' })
-  assert.match(odd.risk, /看不出/)
+  assert.match(odd.risk.lead, /^注意：看不出/)
+  assert.equal(odd.risk.danger, false)
+  assert.ok(odd.options.every(o => !o.danger), '只有看不出全貌時不畫紅框')
+})
+
+test('有危險判斷時放行類的選項帶紅框，拒絕類不帶；沒危險都不帶', () => {
+  const risky = permissionView({ text: 'rm -rf a', complete: true, options: OPTS, risk: { codes: ['delete_recursive'], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(risky.options.map(o => o.danger), [true, true, false])
+  const calm = permissionView({ text: 'mkdir a', complete: true, options: OPTS, risk: { codes: [], uncertain: false }, choice_hash: 'h' })
+  assert.deepEqual(calm.options.map(o => o.danger), [false, false, false])
+  const html = fs.readFileSync(path.join(here, '..', 'ui', 'list.html'), 'utf8')
+  assert.match(html, /:class="\{ danger: o\.danger \}"/)
 })
 
 test('守門：沒有雜湊或選項格式不對就退回舊的兩顆；選項區在畫面裡用文字顯示', () => {

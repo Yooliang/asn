@@ -69,31 +69,34 @@ export function permissionView(p, name = '') {
   }
   const complete = p?.complete === true && !!text
   const hint = complete ? '' : NOT_FULL_HINT
-  const options = ownOptions(p, complete)
+  const risk = riskView(p?.risk, complete)
+  const options = ownOptions(p, complete, risk?.danger === true)
   // 有原本的選項就照它顯示（Yes／No 等）；沒有（舊版後端）才用固定的兩顆
   const base = { text, canAllow: complete, canDeny: !!text, hint }
-  return options.length ? { ...base, options, risk: riskLine(p?.risk, complete) } : base
+  return options.length ? { ...base, options, risk } : base
 }
 
 const NOT_FULL_HINT = '沒有讀到完整的提示內容（可能被夥伴的畫面收起來了），所以先不能在這裡允許。要允許請到它的視窗確認；要拒絕仍可以按下面的選項。'
 const KINDS = new Set(['allow_once', 'allow_always', 'deny', 'other'])
 
 /** 夥伴給的原選項：只收「編號 1~9＋文字」的；不是拒絕的選項要讀到完整提示才能按 */
-function ownOptions(p, complete) {
+function ownOptions(p, complete, danger) {
   if (!Array.isArray(p?.options) || typeof p?.choice_hash !== 'string') return []
   return p.options
     .filter(o => Number.isInteger(o?.n) && o.n >= 1 && o.n <= 9 && typeof o.label === 'string' && o.label)
     .map(o => {
       const kind = KINDS.has(o.kind) ? o.kind : 'other'
-      return { n: o.n, label: o.label, kind, disabled: kind !== 'deny' && !complete }
+      // danger：有比中危險判斷時，放行類的選項畫紅框（拒絕類不變）
+      return { n: o.n, label: o.label, kind, disabled: kind !== 'deny' && !complete, danger: danger && kind !== 'deny' }
     })
 }
 
-/** 上方的紅字提醒：只用後端給的危險代碼查表，不讀提示本文。沒有就是 null（不寫「安全」） */
-function riskLine(r, complete) {
-  const codes = Array.isArray(r?.codes) ? r.codes.filter(c => typeof c === 'string' && Object.hasOwn(RISK_TEXT, c)) : []
-  if (codes.length) return `注意：這個操作可能有風險：${[...new Set(codes)].map(c => RISK_TEXT[c]).join('；')}`
-  if (complete && r?.uncertain === true) return '注意：看不出這個指令的全貌（有編碼或拼接），請到它的視窗確認'
+/** 上方的警示條：只用後端給的危險代碼查表，不讀提示本文。沒有就是 null（不寫「安全」）。
+ *  lead＝第一個原因接在「注意：」後面；more＝其餘原因，逐行列在條內；danger＝有比中危險代碼（選項畫紅框用） */
+function riskView(r, complete) {
+  const codes = Array.isArray(r?.codes) ? [...new Set(r.codes.filter(c => typeof c === 'string' && Object.hasOwn(RISK_TEXT, c)))] : []
+  if (codes.length) return { lead: `注意：${RISK_TEXT[codes[0]]}`, more: codes.slice(1).map(c => RISK_TEXT[c]), danger: true }
+  if (complete && r?.uncertain === true) return { lead: '注意：看不出這個指令的全貌（有編碼或拼接），請到它的視窗確認', more: [], danger: false }
   return null
 }
 

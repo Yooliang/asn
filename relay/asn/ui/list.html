@@ -461,12 +461,12 @@
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
 
   <asn-dialog v-if="permissionDlg.open" :title="permissionDlgView.held ? permissionDlgView.title : `「${permissionDlg.name}」在等你同意`" @close="closePermissionDlg">
-    <p class="permission-risk" role="alert" v-if="permissionDlgView.risk">{{ permissionDlgView.risk }}</p>
+    <div class="permission-risk" role="alert" v-if="permissionDlgView.risk"><b>{{ permissionDlgView.risk.lead }}</b><p v-for="l in permissionDlgView.risk.more" :key="l">{{ l }}</p></div>
     <pre class="permission-text"><template v-for="(g, i) in ruleSegs(permissionDlgView.text)" :key="i"><hr class="term-prompt-rule" aria-hidden="true" v-if="g.rule"><template v-else>{{ g.text }}</template></template></pre>
-    <p class="launch-notice-body" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
+    <p class="launch-notice-body permission-hint" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
     <p class="launch-notice-body model-err" v-if="permissionDlg.error">{{ permissionDlg.error }}</p>
     <div class="permission-opts" v-if="permissionDlgView.options">
-      <button class="aero-btn permission-opt" :class="{ primary: o.kind === 'allow_once' }" type="button" v-for="o in permissionDlgView.options" :key="o.n" :disabled="permissionDlg.busy || o.disabled" @click="answerPermission(o.kind !== 'deny', o.n)">{{ o.n }}. {{ o.label }}</button>
+      <button class="aero-btn permission-opt" :class="{ danger: o.danger }" type="button" v-for="o in permissionDlgView.options" :key="o.n" :disabled="permissionDlg.busy || o.disabled" @click="answerPermission(o.kind !== 'deny', o.n)">{{ o.n }}. {{ o.label }}</button>
     </div>
     <div class="partner-actions">
       <button class="aero-btn" type="button" @click="closePermissionDlg">之後再說</button>
