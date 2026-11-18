@@ -1,7 +1,7 @@
 // 手機版（ui/m.html）的純邏輯：單欄導覽、名單分組、提示規則、安卓外殼橋。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 // 手機四個大分頁：夥伴、對話、設定、通知（#1429，小良哥 2026-11-13 定；原本是對話、夥伴、通知、設定）。沒有多視窗、系統匣。
 import { groupItems } from './dims.mjs'
-import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
+import { friendMatchesQuery, normalizeSearchQuery, pinnedRecentOrder, sortFriends } from './search.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
 import { NOTICE_ID, NOTICE_LABEL, isMergedAway, isNoticeFriend } from './notice.mjs'
 import { noticeOf } from './photo.mjs'
@@ -113,10 +113,11 @@ export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="
 // ---------- 名單 ----------
 // 單欄名單：所有設備的夥伴放在同一頁，依設備分組（本機那組在最前），有搜尋字就只留符合的。
 // 組內線上在前、離線在後。回傳 [{ key, label, node, items }]
-export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', deviceOrder = [], plainText = s => s } = {}) {
+export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', deviceOrder = [], plainText = s => s, pins = null } = {}) {
   const q = normalizeSearchQuery(query)
-  const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)))
-  return groupItems(items, 'device', { selfNode, selfName, deviceOrder })
+  const cmp = pins ? pinnedRecentOrder(pins) : null   // #1729：釘選在前，其餘照最新訊息時間
+  const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)), cmp)
+  return groupItems(items, 'device', { selfNode, selfName, deviceOrder, cmp })
 }
 export const totalUnread = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f) && !isMergedAway(f)).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)   // 含「通知」對話的未讀
 

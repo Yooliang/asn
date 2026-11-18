@@ -586,7 +586,9 @@
 :root[data-skin="line"] .m-chat .compose-main .mc-dict{order:6}
 :root[data-skin="line"] .m-chat .compose-main .composer .aero-btn{order:7}
 :root[data-skin="line"] .m-dv-row.sel{background:var(--ls-soft);box-shadow:inset 3px 0 0 var(--accent)}   /* 手機設備頁選中的那一列（#1539） */
-:root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-4px}
+:root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-1px}
+:root[data-skin="line"] .pin-dot{right:-2px;bottom:-2px;width:18px;height:18px;padding:2px;border:2px solid var(--panel);box-shadow:none}
+:root[data-skin="line"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}
 
 /* ---------- 看大圖的另存、關閉與左右切換（#1728）：LINE 風格＝實心綠圓鈕＋白色線條圖示；關閉是白底圓鈕＋深灰 ×；到頭的那一顆透明度 .35。只用顏色和形狀，不放任何商標字樣 ---------- */
 :root[data-skin="line"] .pv-btn svg:not(.lic),:root[data-skin="line"] .pv-nav svg:not(.lic){display:none}
