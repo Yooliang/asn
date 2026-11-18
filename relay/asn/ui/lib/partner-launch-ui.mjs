@@ -1,7 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { isAsnWindow } from './roster.mjs'
-import { applyDeviceOrder, isDeviceRemoved } from './device-order.mjs'
+import { applyDeviceOrder, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
@@ -18,11 +18,15 @@ export function closedReasonOf(machine, fallback) {
   if (machine?.platform === 'linux') return LINUX_CLOSED
   return fallback
 }
-export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLaunchers, remoteMachines = {} }) {
+export const OFFLINE_REASON = '這台設備目前離線，開機並打開 ASN 後才能在上面開夥伴'
+// friends／asn：跟設定「設備」頁籤同一份在線判斷（isDeviceOnline）；沒傳 friends 的舊呼叫端不做在線檢查
+export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLaunchers, remoteMachines = {}, friends, asn = {} }) {
   if (nodeKey === selfNode) {
     if (!partnerModels.some(m => m.installed)) return '這台電腦尚未偵測到可開視窗的 AI 指令'
     return ''
   }
+  // 那台最後一次回報的啟動設定關機後還留著，不能當作設備在線
+  if (Array.isArray(friends) && !isDeviceOnline(nodeKey, friends, { selfNode, asn })) return OFFLINE_REASON
   const remote = remoteLaunchers[nodeKey]
   if (!remote) return closedReasonOf(remoteMachines[nodeKey], '這台設備尚未回報啟動設定')
   if (!remote.profiles?.length) return '這台設備尚未回報啟動設定'

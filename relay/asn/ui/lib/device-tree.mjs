@@ -4,7 +4,7 @@ import { displayDeviceName } from './device-known.mjs'
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
 import { launchDeviceRows } from './partner-launch-ui.mjs'
-import { isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
+import { isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
@@ -81,7 +81,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
     // 手機版（selfIsPhone）的本機一定是手機：不等後台回報的平台（還沒讀到、或舊版沒回報時，不能先顯示成電腦）
     const phone = (isSelf && selfIsPhone) || isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
-    const isOn = isSelf || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
+    const isOn = isDeviceOnline(node, friends, { selfNode, asn })
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
     // 雲端夥伴（#930）：只標記，不改這裡的分組與顯示（之後的 PR 才用它分出「雲端夥伴」）
