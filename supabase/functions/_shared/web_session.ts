@@ -9,6 +9,7 @@
 //   - 網頁來源（Origin 是網頁版的網域）的請求一律走網頁路線；憑證裡沒有 session_id 一律拒絕。電腦與手機的請求缺 session_id 照舊處理。
 //   - 網頁登入的憑證只能走網頁路線，在網頁路線之外一律 403 web_forbidden。
 //   - 跨來源許可只給網頁版的網域（設定 ASN_WEB_ORIGINS，逗號分隔；沒設就是空，誰都不給）。
+//   - 網頁分支只在請求的 Origin 是設定的網頁版網域時才啟用；沒設網域（站點還沒建）或 Origin 不在清單裡，帶瀏覽器代號一律 403，什麼都不寫。
 import { type AuthUser, bearerToken, type Reply } from "./account.ts";
 import { SIGN_HEADER } from "./owner_sign.ts";
 
@@ -247,6 +248,8 @@ export async function gateWebRequest(deps: WebDeps, r: WebRequestInfo): Promise<
   const fromWeb = isWebOrigin(deps.origins, r.origin);
   if (r.hasKey) return fromWeb ? reply(403, WEB_FORBIDDEN) : { kind: "none" }; // 網頁不持有節點金鑰；帶金鑰的網頁來源一律拒絕
   if (!fromWeb && !r.device) return { kind: "none" };
+  // 沒設網頁版網域，或來源不是網頁版網域：網頁分支不啟用。帶瀏覽器代號一律 403，不驗憑證、不寫登入記錄、不建節點、不發通知
+  if (!fromWeb) return reply(403, WEB_FORBIDDEN);
   if (!r.device || !WEB_DEVICE.test(r.device)) return reply(401, "unauthorized");
   const token = bearerToken(r.userHeader);
   if (!token) return reply(401, "unauthorized");

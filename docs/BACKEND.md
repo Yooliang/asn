@@ -62,7 +62,7 @@ supabase/
 
 `ASN_EDGE_TTS_URL`、`ASN_EDGE_TTS_SECRET`：念出訊息（見上）。
 
-`ASN_WEB_ORIGINS`：網頁版的網域（逗號分隔，確切網址，例如 `https://網頁版網域`）。沒設就是空：沒有任何網域被當成網頁來源，也不回任何跨來源許可。見 [AUTH.md](AUTH.md) 的「網頁登入」。
+`ASN_WEB_ORIGINS`：網頁版的網域（逗號分隔，確切網址，例如 `https://網頁版網域`）。沒設就是空：網頁分支整個停用（帶 `x-asn-web` 一律 403，不寫登入記錄、不建節點、不發通知），也不回任何跨來源許可。站點建好、設了網域才打開。見 [AUTH.md](AUTH.md) 的「網頁登入」。
 
 `IRORI_FIREBASE_DB_URL`、`IRORI_FIREBASE_SA`：Firebase 訊號（設計見 `docs/relay/SIGNAL.md`），兩者都設才啟用，未設則該功能關閉。新專案目前未設。
 

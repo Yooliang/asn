@@ -104,12 +104,10 @@ Deno.test("帳號動作（ACCOUNT_ACTIONS）：網頁憑證打進來一律先過
 });
 
 Deno.test("網頁來源沒有 session_id：一律拒絕（401）；走網頁路線（帶瀏覽器代號）也一樣", async () => {
-  for (const origin of [WEB, null]) {
-    const f = fake({ user: { sessionId: null } });
-    const g = await gateWebRequest(f.deps, req({ origin }));
-    assertEquals(g.kind === "reply" ? [g.status, g.body.error] : g.kind, [401, "unauthorized"]);
-    assertEquals(f.calls, [], "不打資料庫");
-  }
+  const f = fake({ user: { sessionId: null } });
+  const g = await gateWebRequest(f.deps, req({ origin: WEB }));
+  assertEquals(g.kind === "reply" ? [g.status, g.body.error] : g.kind, [401, "unauthorized"]);
+  assertEquals(f.calls, [], "不打資料庫");
   const bad = await gateWebRequest(fake({ user: { sessionId: "not-a-uuid" } }).deps, req());
   assertEquals(bad.kind === "reply" ? bad.status : bad.kind, 401);
 });
@@ -125,6 +123,31 @@ Deno.test("電腦與手機的路徑照舊：沒有瀏覽器代號、也不是網
     assertEquals((await gateWebRequest(f.deps, req(o))).kind, "none");
   }
   assertEquals(f.calls, []);
+});
+
+Deno.test("沒設網頁版網域：網頁分支整個停用，帶瀏覽器代號一律 403，不驗憑證、不打資料庫（不寫登入記錄、不建節點、不發通知）", async () => {
+  for (const o of [WEB, null, "https://evil.example.test"]) {
+    for (const action of ["list", "node_create", "web_logout_all"]) {
+      let verified = 0;
+      const f = fake({ origins: [] });
+      const v = f.deps.verifyJwt;
+      f.deps.verifyJwt = (t) => { verified++; return v(t); };
+      const g = await gateWebRequest(f.deps, req({ origin: o, action }));
+      assertEquals(g.kind === "reply" ? [g.status, g.body.error] : g.kind, [403, WEB_FORBIDDEN], `${o}/${action}`);
+      assertEquals([f.calls.length, verified], [0, 0]);
+    }
+  }
+  // 沒帶瀏覽器代號、沒帶金鑰：照舊交給後面的流程
+  assertEquals((await gateWebRequest(fake({ origins: [] }).deps, req({ device: null, origin: null }))).kind, "none");
+});
+
+Deno.test("有設網域，但 Origin 不在清單裡（或根本沒有 Origin）：同樣 403，什麼都不寫", async () => {
+  for (const o of ["https://evil.example.test", WEB + ".evil.test", "http://web.example.test", null]) {
+    const f = fake();
+    const g = await gateWebRequest(f.deps, req({ origin: o }));
+    assertEquals(g.kind === "reply" ? [g.status, g.body.error] : g.kind, [403, WEB_FORBIDDEN], String(o));
+    assertEquals(f.calls, [], String(o));
+  }
 });
 
 Deno.test("網頁來源帶節點金鑰：403（網頁不持有金鑰）", async () => {

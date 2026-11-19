@@ -196,6 +196,6 @@ auth.users（人）  1 ──< N  relay.nodes（設備／代理）   以 nodes.o
 - 網頁節點：`relay.nodes` 裡 `kind='web'`、`platform='web'`，`key_hash` 是 `web:` 開頭的佔位值（比對不到任何金鑰）；每個帳號最多 10 個有效的網頁節點，不佔真設備的名額。
 - 放行清單（`_shared/web_session.ts` 的 `WEB_ALLOWED_ACTIONS`）預設拒絕，不在清單內回 403 `web_forbidden`。守門測試要求每個動作在「放行」或「禁止」兩份清單之一明列。
 - 網頁登入的憑證只能走網頁路線，在網頁路線之外一律 403 `web_forbidden`。
-- 跨來源許可只給網頁版的網域（Edge 設定 `ASN_WEB_ORIGINS`，逗號分隔；沒設就是空，誰都不給）；預檢請求在所有驗證之前處理。
+- 跨來源許可只給網頁版的網域（Edge 設定 `ASN_WEB_ORIGINS`，逗號分隔；沒設就是空，誰都不給）；預檢請求在所有驗證之前處理。網頁分支只在 Origin 是設定的網域時啟用，沒設網域或 Origin 不在清單裡，帶 `x-asn-web` 一律 403。
 - 動作：`web_sessions_list`（登入清單）、`web_logout_all`（登出這個帳號所有網頁）。新的瀏覽器第一次登入，寄一封通知信給本人（`notice:web_login`）。
 - 收信：網頁走獨立路線，不進「在線 ASN」的分送名單；開著網頁不改變手機與電腦的收信與推播。網頁不收登入、等待確認、設備金鑰、看畫面四種通知。
