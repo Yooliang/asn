@@ -420,16 +420,26 @@ jobs:
         id: aptcache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ${{ runner.temp }}/apt-debs
-          key: apt-debs-${{ runner.os }}-${{ hashFiles('.github/apt-build-packages.txt', '.github/scripts/apt-install.sh') }}-${{ steps.aptkey.outputs.week }}
+          path: ${{ runner.temp }}/apt-cache
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/apt-build-packages.txt', '.github/scripts/apt-install.sh') }}-${{ steps.aptkey.outputs.week }}
 
       - name: 安裝系統依賴
+        id: aptinstall
         timeout-minutes: 30
         env:
-          APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-cache/debs
+          APT_LISTS_CACHE: ${{ runner.temp }}/apt-cache
         run: |
           mapfile -t pkgs < <(grep -vE '^\s*(#|$)' "$GITHUB_WORKSPACE/.github/apt-build-packages.txt")
           bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" "${pkgs[@]}"
+
+      # 不論後面哪一步失敗都存（腳本失敗時也會把已下載的 .deb 留在快取目錄）；已命中就不重存
+      - name: 儲存 apt 套件快取
+        if: always() && steps.aptcache.outputs.cache-hit != 'true' && steps.aptinstall.outcome != 'skipped'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-cache
+          key: ${{ steps.aptcache.outputs.cache-primary-key }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -458,19 +468,6 @@ jobs:
         run: npm run test:rust
       # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，金鑰圈用固定測試密碼解鎖。
       # 平常是 ignored，只在這裡明確跑；不碰任何真的帳號或 secrets
-      - name: 安裝系統金鑰庫測試依賴
-        timeout-minutes: 30
-        env:
-          APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
-        run: bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends gnome-keyring dbus-daemon
-      # 兩批套件都裝完就存快取（不等後面的測試，測試紅也不浪費這次下載）；已命中就不重存
-      - name: 儲存 apt 套件快取
-        if: steps.aptcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ${{ runner.temp }}/apt-debs
-          key: ${{ steps.aptcache.outputs.cache-primary-key }}
-
       - name: 系統金鑰庫整合測試（Linux）
         working-directory: relay/asn/src-tauri
         run: |

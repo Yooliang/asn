@@ -11,3 +11,6 @@ libsoup-3.0-dev
 patchelf
 xvfb
 scrot
+# 系統金鑰庫整合測試用（原本是獨立一步，合併後只 update 一次）
+gnome-keyring
+dbus-daemon
