@@ -8,6 +8,7 @@ import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { OLD_TEXT, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
+import { unnamedLabelOf } from './device-known.mjs'
 
 export const ROSTER_TEXT = {
   title: '我的帳號',
@@ -65,9 +66,9 @@ export function shortDevice(label, max = DEVICE_MAX) {
   return chars.length > max ? chars.slice(0, max).join('') : chars.join('')
 }
 
-/** 節點 → 設備名稱：名單裡那台的 device 欄；本機用 selfLabel；對不到寫「未命名設備」 */
+/** 節點 → 設備名稱：名單裡那台的 device 欄；本機用 selfLabel；對不到寫「電腦（代號末 4 碼）」這種辨認線索（#1829） */
 export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台電腦', nodeNames = null } = {}) {
-  return node => deviceNameOf(node, { nodeNames, friends }) || (node && node === selfNode ? selfLabel : UNNAMED_DEVICE)
+  return node => deviceNameOf(node, { nodeNames, friends }) || (node && node === selfNode ? selfLabel : unnamedLabelOf(node, { friends }))
 }
 
 // 沒有 5 小時窗的帳號（Ultra 等，#1736）：Claude 狀態列只送每週，後台還留著改方案前最後一筆 5 小時。
@@ -105,7 +106,7 @@ export function rosterQuota(entry, opts = {}) {
   return fiveNote ? { ...q, fiveNote: FIVE_ONLY_WEEKLY_TEXT } : q
 }
 
-function rosterQuotaInner(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
+function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now = Date.now() } = {}) {
   const wins = cleanWindows(entry)
   // gemini 的 nodes 後台一律回空陣列（20261029130000_acct_roster_gemini：nodes 來自舊表、舊表不收 gemini），
   // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
@@ -227,7 +228,7 @@ function usedOnOf(e, opts) {
     const node = typeof n?.node === 'string' ? n.node : ''
     if (!node || seen.has(node)) continue
     seen.add(node)
-    list.push({ node, label: label(node) || UNNAMED_DEVICE, current: n.current === true })
+    list.push({ node, label: label(node) || unnamedLabelOf(node), current: n.current === true })
   }
   return list.sort((a, b) => Number(b.current) - Number(a.current))   // 使用中的排前面，其餘保持後台給的順序（不依語系排，免得不同機器順序不一樣）
 }
@@ -281,7 +282,7 @@ export function deviceButtons(usedOn, targets, selfNode, nameOf = () => '') {
   const add = (node, label, current) => {
     if (typeof node !== 'string' || !node || out.some(b => b.node === node)) return
     const self = Boolean(selfNode) && node === selfNode
-    const name = label || nameOf(node) || UNNAMED_DEVICE
+    const name = label || nameOf(node) || unnamedLabelOf(node)
     const on = current === true
     out.push({ node, label: name, current: on, self, target: on ? null : byNode.get(node) ?? null })
   }

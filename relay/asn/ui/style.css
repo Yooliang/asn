@@ -864,7 +864,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 /* 設備頁（#1715）：第一行頁標題＋名字＋標籤；第二行「返回」加一排按鈕（按下的那顆有藍底），內容在下面長成卡片 */
 .dv-dev{container-type:inline-size}
 .dv-pt{font-size:18px;font-weight:600;color:var(--title-fg);margin-right:6px}
-.dv-dev-h{align-items:baseline}
+.dv-dev-h{align-items:center}
 .dv-dev-h .dv-name{font-size:18px}
 .dv-tabs{display:flex;align-items:center;flex-wrap:nowrap;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line)}
 .dv-tabs .aero-btn[aria-pressed="true"]{border-color:var(--accent);background:linear-gradient(#cfe6fb,#a9d0f4);color:var(--title-fg);font-weight:600;box-shadow:inset 0 1px 2px rgba(0,60,120,.25)}

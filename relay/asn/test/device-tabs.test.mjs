@@ -24,22 +24,24 @@ const render = async (props, state = st()) => {
 const bar = html => { const m = html.match(/<div class="dv-tabs"[\s\S]*?<\/div>/); assert.ok(m, '有那排按鈕'); return m[0] }
 const labels = html => [...bar(html).matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(m => m[1].trim())
 
-test('頁首：第一行「設定：設備」＋名字＋標籤，第二行才是返回和按鈕', async () => {
+test('頁首收成一行：返回、名字、標籤（#1829）；沒有「設定：設備」那一層，按鈕在下面', async () => {
   const html = await render({ dev: 'H' })
-  assert.match(html, /class="dv-dev-h"[^>]*><span class="dv-pt">設定：設備<\/span><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
+  assert.match(html, /class="dv-dev-h"[^>]*><button class="aero-btn dv-back"[^>]*>‹ 返回<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
+  assert.ok(!html.includes('dv-pt'), '不再有第二層標題')
   assert.ok(html.indexOf('class="dv-tabs"') > html.indexOf('class="dv-name"'), '按鈕在名字那行下面')
 })
 
-test('「返回」跟旁邊的按鈕同一套（aero-btn），放在那排最左', async () => {
-  const b = bar(await render({ dev: 'H' }))
-  assert.match(b, /^<div class="dv-tabs"[^>]*><button class="aero-btn dv-back"[^>]*>‹ 返回<\/button>/)
+test('「返回」在頁首那一行（aero-btn）；改名只在動作區，不在上方那排按鈕（#1829）', async () => {
+  const html = await render({ dev: 'H' })
+  assert.ok(!bar(html).includes('返回') && !bar(html).includes('改名'))
+  assert.equal((html.match(/>改名</g) ?? []).length, 1, '改名只出現一次（動作區）')
 })
 
 test('四種設備各自有哪幾顆鈕', async () => {
-  assert.deepEqual(labels(await render({ dev: 'H' })), ['‹ 返回', '工作管理員', '詳情', 'QR Code', '改名', '帳號'], '這台：五顆')
-  assert.deepEqual(labels(await render({ dev: 'W' })), ['‹ 返回', '詳情', '改名', '帳號'], '別台電腦：沒有工作管理員、沒有 QR')
-  assert.deepEqual(labels(await render({ dev: 'P' })), ['‹ 返回', '詳情', '改名'], '手機：沒有帳號可看')
-  assert.deepEqual(labels(await render({ dev: 'C' })), ['‹ 返回', '詳情', '改名', '帳號'], '雲端節點：沒有指紋，不出 QR')
+  assert.deepEqual(labels(await render({ dev: 'H' })), ['工作管理員', '詳情', 'QR Code', '帳號'], '這台：四顆')
+  assert.deepEqual(labels(await render({ dev: 'W' })), ['詳情', '帳號'], '別台電腦：沒有工作管理員、沒有 QR')
+  assert.deepEqual(labels(await render({ dev: 'P' })), ['詳情'], '手機：沒有帳號可看')
+  assert.deepEqual(labels(await render({ dev: 'C' })), ['詳情', '帳號'], '雲端節點：沒有指紋，不出 QR')
 })
 
 test('沒有指紋或沒有工作管理員資料時，對應的鈕不出', async () => {

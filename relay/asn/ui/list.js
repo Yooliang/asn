@@ -27,7 +27,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
-import { UNNAMED_DEVICE, emo, initial, plain } from './lib/text.mjs'
+import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { QR_TEXT, normalizeQr } from './lib/fp-qr.mjs'
@@ -1131,7 +1131,7 @@ void invoke('invite_pending').then(onInviteCode).catch(() => {})
 const noticeView = reactive({ cat: NOTICE_CAT_ALL, sel: '', opened: [] })   // opened：這次開著期間點開過、但通知對話還沒整個標已讀的那幾則
 let setRailTab = () => {}   // 名單頁籤的 ref 在下面才建立，建立後換成真的
 const noticeFriendNow = computed(() => friends.value.find(isNoticeFriend) ?? null)
-const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened, hideDev: [UNNAMED_DEVICE] }))
+const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened }))
 const noticeShown = computed(() => filterNoticeRows(noticeAll.value, noticeView.cat))
 const noticeUnreadN = computed(() => noticeUnreadCount(noticeAll.value))
 const noticeSelRow = computed(() => noticeAll.value.find(r => r.key === noticeView.sel) ?? null)

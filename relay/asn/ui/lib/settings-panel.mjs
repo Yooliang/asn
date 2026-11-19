@@ -72,7 +72,7 @@ export const SettingsPanel = {
     const leaveView = () => {
       if (view.value === 'tasks') act('tm-close')
       if (view.value === 'qr' && props.st.known && props.st.known.qr) act('known-qr', false)
-      if (view.value === 'rename') act('device-rename-clear')
+      if (renaming.value) act('device-rename-clear')
     }
     // 設備頁上方那排按鈕：工作管理員、詳情、QR Code、改名、帳號；按下才展開對應的內容
     const setView = v => {
@@ -80,10 +80,9 @@ export const SettingsPanel = {
       leaveView()
       askRemove.value = false
       view.value = v
-      renaming.value = v === 'rename'
+      renaming.value = false
       if (v === 'tasks') act('tm-open')
       if (v === 'qr' && !(props.st.known && props.st.known.qr)) act('known-qr', true)
-      if (v === 'rename') { renameText.value = curDev.value?.named ? curDev.value.label : ''; act('device-rename-clear') }
     }
     onBeforeUnmount(() => leaveView())
     // 停在工作管理員時這台電腦從清單消失：退回清單並停掉每 5 秒更新
@@ -152,7 +151,7 @@ export const SettingsPanel = {
     const renaming = ref(false), renameText = ref('')
     const renameErr = computed(() => (renameText.value.trim() === '' ? '' : deviceNameError(renameText.value)))
     const renameStart = () => { renameText.value = curDev.value?.named ? curDev.value.label : ''; renaming.value = true; act('device-rename-clear') }
-    const renameCancel = () => { renameText.value = ''; setView('info') }
+    const renameCancel = () => { renameText.value = ''; renaming.value = false; act('device-rename-clear') }
     const renameSave = () => {
       const node = curDev.value?.key
       if (!node || deviceNameError(renameText.value)) return
@@ -398,7 +397,7 @@ export const SettingsPanel = {
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.identity.title">
             <div class="dv-dev-h">
-              <span class="dv-pt">設定：設備</span>
+              <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <h3 class="dv-name">{{ curDev.identity.title }}</h3>
               <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
@@ -406,11 +405,9 @@ export const SettingsPanel = {
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
             <div class="dv-tabs" role="group" aria-label="這台設備的內容">
-              <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <button class="aero-btn dv-tasks" type="button" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</button>
               <button class="aero-btn" type="button" :aria-pressed="view === 'info'" @click="setView('info')">詳情</button>
               <button class="aero-btn" type="button" v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</button>
-              <button class="aero-btn" type="button" :aria-pressed="view === 'rename'" @click="setView('rename')">改名</button>
               <button class="aero-btn" type="button" v-if="hasAcct" :aria-pressed="view === 'acct'" @click="setView('acct')">帳號</button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
@@ -461,18 +458,6 @@ export const SettingsPanel = {
                 </div>
               </asn-dialog>
             </div>
-            <div class="dv-cards" v-else-if="view === 'rename'">
-              <div class="set-card">
-                <h3 class="set-h">改名</h3>
-                <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
-                <form class="dv-rename" @submit.prevent="renameSave">
-                  <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
-                  <small>所有設備都會顯示這個名字</small>
-                  <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
-                  <span class="dv-card-act"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
-                </form>
-              </div>
-            </div>
             <div class="dv-cards" v-else-if="view === 'qr' && curDev.self && st.known && st.known.ownFp">
               <div class="set-card">
                 <h3 class="set-h">QR Code</h3>
@@ -506,8 +491,14 @@ export const SettingsPanel = {
               </div>
               <div class="set-card dvid-actions">
                 <h3 class="set-h">{{ ACTION_TEXT.title }}</h3>
-                <div class="dv-card-act">
-                  <button class="aero-btn" type="button" @click="setView('rename')">{{ ACTION_TEXT.rename }}</button>
+                <form class="dv-rename" v-if="renaming" @submit.prevent="renameSave">
+                  <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
+                  <small>所有設備都會顯示這個名字</small>
+                  <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
+                  <span class="dv-card-act"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
+                </form>
+                <div class="dv-card-act" v-else>
+                  <button class="aero-btn" type="button" @click="renameStart">{{ ACTION_TEXT.rename }}</button>
                   <template v-if="!curDev.self">
                     <button class="aero-btn" type="button" v-if="curDev.hidden && !askRemove" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
                     <button class="aero-btn danger" type="button" v-if="!askRemove" :disabled="!canRemoveRow(curDev)" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>

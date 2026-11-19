@@ -36,9 +36,9 @@ test('「允許替這台登入」：是手機、或已經勾過（不論是不�
 test('改名失敗：錯誤顯示在名字下面，開始改名與取消時清掉；重讀名單失敗不算改名失敗', () => {
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.match(panel, /st\.known\.renameError/)
-  assert.match(panel, /renameCancel = \(\) => \{[^}]*setView\('info'\)/)
-  assert.match(panel, /if \(v === 'rename'\) \{[^}]*act\('device-rename-clear'\)/, '開始改名時清掉舊錯誤')
-  assert.match(panel, /if \(view\.value === 'rename'\) act\('device-rename-clear'\)/, '離開改名頁時也清')
+  assert.match(panel, /renameCancel = \(\) => \{[^}]*renaming\.value = false[^}]*act\('device-rename-clear'\)/, '取消時清掉舊錯誤')
+  assert.match(panel, /renameStart = \(\) => \{[^}]*act\('device-rename-clear'\)/, '開始改名時清掉舊錯誤')
+  assert.match(panel, /if \(renaming\.value\) act\('device-rename-clear'\)/, '離開這台時也清')
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const fn = list.slice(list.indexOf('async function renameDevice('), list.indexOf('async function forgetKnown('))
   assert.ok(fn.indexOf('renameDeviceCall(invoke') < fn.indexOf('return null') && fn.indexOf('return null') < fn.indexOf('core.refreshRoster()'), '重讀名單在改名成功之後、另外接錯誤')

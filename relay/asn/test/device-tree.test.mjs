@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { buildDeviceTree, deviceSummary, piBackends, NOT_REPORTED } from '../ui/lib/device-tree.mjs'
+import { nodeTail } from '../ui/lib/device-identity.mjs'
 
 const SELF = 'aaaaaaaa-0000-4000-8000-000000000001'
 const W = 'bbbbbbbb-0000-4000-8000-000000000002'
@@ -104,9 +105,9 @@ test('本機沒登入：寫「目前沒有登入」；畫面資料不含節點�
   for (const id of [SELF, W, P, 'dddddddd-0000-4000-8000-0000000000aa']) assert.ok(!shown.includes(id))
 })
 
-test('沒有名稱的設備寫「未命名設備」，不退回節點代號', () => {
+test('沒有名稱的設備寫辨認線索「電腦（代號末 4 碼）」，不是整串節點代號（#1829）', () => {
   const t = buildDeviceTree({ ...base(), friends: [fr(W, '', 'w1', 'claude')], nodeOrder: [W] })
-  assert.equal(byLabel(t, '未命名設備')?.self, false)
+  assert.equal(byLabel(t, `電腦（${nodeTail(W)}）`)?.self, false)
   assert.ok(!JSON.stringify(t.map(d => d.label)).includes(W))
 })
 

@@ -59,7 +59,7 @@ test('#1803 雲端節點（#1707）：夥伴沒帶 device 時，名字取自名�
   const rows = buildDeviceTree({ friends: cloud, nodeNames: { A: '牧陽 Aegis' }, nodeOrder: ['A'], selfNode: 'P' })
   assert.equal(rows.find(r => r.key === 'A').label, '牧陽 Aegis')
   const none = buildDeviceTree({ friends: cloud, nodeOrder: ['A'], selfNode: 'P' })
-  assert.equal(none.find(r => r.key === 'A').label, '未命名設備', '沒有 nodeNames 時舊行為不變')
+  assert.equal(none.find(r => r.key === 'A').label, '電腦（A）', '沒有 nodeNames 時寫辨認線索（#1829）')
 })
 
 test('#1803 其餘讀名字的地方也吃 nodeNames：啟動器清單、頁籤', () => {
@@ -167,8 +167,8 @@ test('#1803 分組標題與頁籤：夥伴列沒有 device、名字只在 nodeNa
   const tabs = tabsOf(bare, 'device', { selfNode: 'S', nodeNames: nn, nodeOrder: ['S', 'A'] })
   assert.equal(tabs.all.find(t => t.key === 'A').label, '雲端設備', '頁籤：其他設備只在 nodeNames')
   assert.equal(tabs.all.find(t => t.key === 'S').label, '本機名', '頁籤：本機沒給視窗名也讀 nodeNames')
-  // 沒有 nodeNames 就還是「未命名設備」（舊行為）
-  assert.equal(groupItems(bare, 'device', { selfNode: 'S' }).find(g => g.node === 'A').label, '未命名設備')
+  // 沒有 nodeNames 就寫辨認線索（#1829）
+  assert.equal(groupItems(bare, 'device', { selfNode: 'S' }).find(g => g.node === 'A').label, '電腦（A）')
 })
 
 test('#1803 守門：電腦版左上角的設備名只顯示不能改（list.html 沒有輸入欄、list.js 沒有 commitNick）；手機個人頁不寫死「這支手機」', () => {

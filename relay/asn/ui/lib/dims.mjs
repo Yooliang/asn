@@ -1,8 +1,7 @@
 // 名單的「分頁依」與「分組依」：三個維度（狀態／廠商／設備）的純邏輯，node 與瀏覽器都能跑。
-import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
 import { applyDeviceOrder } from './device-order.mjs'
-import { deviceNameOf } from './device-known.mjs'
+import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
 import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { DEVICE_TAB_MAX, deviceTabs, displayVendorKey, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
@@ -70,12 +69,17 @@ export function pageItems(friends, dim, key, match = () => true, cmp = null) {
 // deviceOrder＝帳號層的設備順序（和「分頁依設備」同一份）：設備分組也照它排，沒列在裡面的接在後面（照設備名）
 export function groupItems(items, groupDim, { selfNode, selfName = '', nodeNames = null, deviceOrder = [], cmp = null } = {}) {
   if (groupDim === 'device') {
-    const by = new Map()
+    const by = new Map(), noName = new Set()
+    const nameOf = (k, f) => (k === selfNode && selfName) || deviceNameOf(k, { nodeNames, fallback: f.device })
     for (const f of items) {
       const k = f.node ?? ''
-      if (!by.has(k)) by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: (k === selfNode && selfName) || deviceNameOf(k, { nodeNames, fallback: f.device }) || UNNAMED_DEVICE, items: [] })
+      if (!by.has(k)) {
+        const n = nameOf(k, f)
+        if (!n) noName.add(k)
+        by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: n || unnamedLabelOf(k, { friends: [f] }), items: [] })
+      }
       const g = by.get(k)
-      if (g.label === UNNAMED_DEVICE) g.label = deviceNameOf(k, { nodeNames, fallback: f.device }) || UNNAMED_DEVICE   // 先出現的是沒帶名字的離線舊好友：後面的夥伴有名字就用它
+      if (noName.has(k)) { const n = nameOf(k, f); if (n) { g.label = n; noName.delete(k) } }   // 先出現的是沒帶名字的離線舊好友：後面的夥伴有名字就用它
       g.items.push(f)
     }
     const byLabel = [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))

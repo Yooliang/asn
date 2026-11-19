@@ -9,8 +9,7 @@ import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine, loginIncomplete, loginFailed, usableAtText } from './claude-accounts.mjs'
-import { UNNAMED_DEVICE } from './text.mjs'
-import { deviceIdentity } from './device-identity.mjs'
+import { deviceIdentity, unnamedClue } from './device-identity.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
@@ -77,11 +76,11 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const isSelf = node === selfNode
     const mine = friends.filter(f => f.node === node)
     const named = deviceNameOf(node, { nodeNames, friends: mine })
-    const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
     // 手機版（selfIsPhone）的本機一定是手機：不等後台回報的平台（還沒讀到、或舊版沒回報時，不能先顯示成電腦）
     const phone = (isSelf && selfIsPhone) || isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
+    const label = named || (isSelf ? SELF_LABEL : unnamedClue({ node, phone }))
     const isOn = isDeviceOnline(node, friends, { selfNode, asn })
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
@@ -161,7 +160,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, cloud: cloud === true, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', reported: cloud === true ? '' : (ago || (!isSelf && rep?.error ? '讀取失敗' : '')), now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', reported: cloud === true ? '' : (ago || (!isSelf && rep?.error ? '讀取失敗' : '')), now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

@@ -18,11 +18,11 @@ const label = n => ({ H: '家用機', W: '工作機', X: '舊電腦' }[n] ?? '')
 const roster = accounts => ({ now: iso(NOW), accounts })
 const entry = (vendor, account, nodes) => ({ vendor, account, plan: 'pro', windows: [], seen_at: iso(NOW), seen_node: 'H', nodes })
 
-test('帳號列表每個帳號帶「用在哪幾台」：使用中的排前面，同一台只算一次，沒有設備名寫未命名', () => {
+test('帳號列表每個帳號帶「用在哪幾台」：使用中的排前面，同一台只算一次，沒有設備名寫辨認線索', () => {
   const v = rosterView(roster([entry('claude', 'z@b.c', [{ node: 'W', current: false, reported_at: iso(NOW) }, { node: 'H', current: true, reported_at: iso(NOW) }, { node: 'W', current: false }, { node: 'Q', current: false }])]), { nodeLabel: label, now: NOW })
   const row = v.vendors[0].accounts[0]
-  assert.deepEqual(row.usedOn.map(n => [n.node, n.label, n.current]), [['H', '家用機', true], ['W', '工作機', false], ['Q', '未命名設備', false]])
-  assert.equal(usedOnText(row), '家用機（使用中）、工作機、未命名設備')
+  assert.deepEqual(row.usedOn.map(n => [n.node, n.label, n.current]), [['H', '家用機', true], ['W', '工作機', false], ['Q', '電腦（Q）', false]])
+  assert.equal(usedOnText(row), '家用機（使用中）、工作機、電腦（Q）')
   assert.equal(usedOnText({ usedOn: [] }), '')
   assert.equal(usedOnText(null), '')
   // 沒有任何一台還在回報它：空的，不出現「用在」

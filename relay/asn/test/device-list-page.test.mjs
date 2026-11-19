@@ -287,7 +287,7 @@ test('手機細部頁：標題列返回鍵先回列表（頁內不再另放「�
 test('手機被隱藏設備：細部頁兩個動作；永久移除走獨立的確認畫面（rm）；確認字與電腦版相同；恢復', () => {
   const html = read('ui/m.html'), js = read('ui/m.js')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
-  assert.match(pane, /v-if="acctCanRemove"[\s\S]*?acctShowBack[\s\S]*?DEVICE_TEXT\.showBack[\s\S]*?:disabled="!acctCanRemove" @click="acctAskRemove[\s\S]*?DEVICE_TEXT\.remove/)
+  assert.match(pane, /v-if="acctCanRemove && acctCur\.hidden"[\s\S]*?acctShowBack[\s\S]*?DEVICE_TEXT\.showBack[\s\S]*?:disabled="!acctCanRemove" @click="acctAskRemove[\s\S]*?DEVICE_TEXT\.remove/)
   assert.match(pane, /acctSw\.phase === 'rm'[\s\S]*?acctRemoveText[\s\S]*?acctRemoveNow[\s\S]*?DEVICE_TEXT\.removeYes[\s\S]*?DEVICE_TEXT\.cancel/)
   assert.ok(!/@click="acctRemoveNow"/.test(pane.split("phase === 'rm'")[0]), '確認畫面之前沒有直接移除的入口')
   assert.match(js, /acctAskRemove = \(\) => \{ if \(acctSw\.phase === 'pick' && acctCanRemove\.value\) acctSw\.phase = 'rm' \}/)

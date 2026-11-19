@@ -9,6 +9,11 @@ import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 import { nodeFactsOf } from '../ui/lib/device-known.mjs'
+import { deviceTabs } from '../ui/lib/tabs.mjs'
+import { groupItems } from '../ui/lib/dims.mjs'
+import { groupByDevice } from '../ui/lib/roster.mjs'
+import { nodeLabelOf } from '../ui/lib/account-roster.mjs'
+import { launchDevices } from '../ui/lib/mobile-launch.mjs'
 import { deviceIdentity, nodeTail, unnamedClue, IDENTITY_TEXT } from '../ui/lib/device-identity.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -31,19 +36,19 @@ test('#1829 名單成員帶的建立時間、最後在線讀成毫秒；壞掉�
   assert.deepEqual(nodeFactsOf([{ id: 'x', created_at: 'not-a-date', last_seen_at: 5 }]), {})
 })
 
-test('#1829 名字空白時，標題是「平台＋種類（代號末 4 碼）」，不是「未命名設備」', () => {
+test('#1829 名字空白時，標題是「種類（代號末 4 碼）」，不是「未命名設備」', () => {
   const rows = tree()
   const r = rowOf(rows, 'node-old-pc-X7K2')
   assert.equal(r.named, false)
-  assert.equal(r.identity.title, 'Windows 電腦（X7K2）')
+  assert.equal(r.identity.title, '電腦（X7K2）')
   assert.ok(!r.identity.title.includes('未命名'))
-  assert.equal(rowOf(rows, 'node-fp-name-Q9Z8').identity.title, 'Android 手機（Q9Z8）', '名字像指紋＝不合格，同樣用線索')
+  assert.equal(rowOf(rows, 'node-fp-name-Q9Z8').identity.title, '手機（Q9Z8）', '名字像指紋＝不合格，同樣用線索')
   assert.equal(rowOf(rows, 'node-self-A1B2').identity.title, '家用機', '有名字就用名字')
   assert.equal(nodeTail('a-b_c'), 'ABC')
-  assert.equal(unnamedClue({ cloud: true, node: 'zz12' }), '雲端節點（ZZ12）')
+  assert.equal(unnamedClue({ node: 'zz12' }), '電腦（ZZ12）')
 })
 
-test('#1829 辨認區四列：建立時間、平台、最後在線、代號；沒資料寫「沒有紀錄」不整列消失', () => {
+test('#1829 辨認區四列：建立時間、平台、最後在線、代號；後台沒給建立時間就整列不放，最後在線沒有紀錄寫「沒有紀錄」', () => {
   const r = rowOf(tree(), 'node-old-pc-X7K2').identity
   const by = Object.fromEntries(r.rows.map(x => [x.key, x]))
   assert.deepEqual(r.rows.map(x => x.label), [IDENTITY_TEXT.created, IDENTITY_TEXT.platform, IDENTITY_TEXT.seen, IDENTITY_TEXT.code])
@@ -52,7 +57,7 @@ test('#1829 辨認區四列：建立時間、平台、最後在線、代號；�
   assert.match(by.seen.value, /^2026\/11\/19 \d\d:\d\d（3 小時前）$/)
   assert.equal(by.code.value, 'X7K2')
   const none = rowOf(tree(), 'node-fp-name-Q9Z8').identity
-  assert.equal(none.rows.find(x => x.key === 'created').value, '沒有紀錄')
+  assert.ok(!none.rows.some(x => x.key === 'created'), '沒有建立時間就整列不放')
   assert.equal(none.rows.find(x => x.key === 'seen').value, '沒有紀錄')
   assert.equal(rowOf(tree(), 'node-self-A1B2').identity.rows.find(x => x.key === 'seen').value, '現在在線', '本機一律在線')
 })
@@ -70,7 +75,7 @@ const render = async (devices, props) => {
 
 test('#1829 電腦版詳情頁：名字空白也認得出是哪一台，下面有「改名」和「永久移除」', async () => {
   const html = (await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })).replace(/<!--.*?-->/g, '')
-  assert.match(html, /<h3 class="dv-name">Windows 電腦（X7K2）<\/h3>/)
+  assert.match(html, /<h3 class="dv-name">電腦（X7K2）<\/h3>/)
   for (const t of ['建立時間', '平台', '最後在線', '代號', 'X7K2', '2026/11/05']) assert.ok(html.includes(t), t)
   assert.ok(!html.includes('未命名設備') && !html.includes('還沒連線過'), '不能據以行動的句子收掉')
   const acts = html.slice(html.indexOf('要處理這台設備'))
@@ -110,12 +115,39 @@ test('#1829 手機與電腦共用同一份：元件、文字、資料都從 devi
 
 test('#1829 辨認資料在畫面上只用文字插值（不走 innerHTML）', () => {
   assert.doesNotMatch(read('../ui/lib/device-identity.mjs'), /innerHTML|v-html/)
-  assert.equal(deviceIdentity({ node: 'abcd1234', named: false, platform: 'ios', phone: true, now: NOW }).title, 'iOS 手機（1234）')
+  assert.equal(deviceIdentity({ node: 'abcd1234', named: false, platform: 'ios', phone: true, now: NOW }).title, '手機（1234）')
 })
 
-test('#1829 動作區沒有拿掉原有功能：手機的「顯示回名單」照原條件在；「永久移除」兩邊同一種外框紅字', () => {
+test('#1829 動作區沒有拿掉原有功能：手機的「顯示回名單」和電腦一樣只有已隱藏的才有；「永久移除」兩邊同一種外框紅字', () => {
   const m = read('../ui/m.html')
-  assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanRemove" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
+  assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanRemove && acctCur\.hidden" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
   assert.match(m, /class="m-dv-refresh m-dv-danger" v-if="!acctCur\.self" :disabled="!acctCanRemove" @click="acctAskRemove">\{\{ DEVICE_TEXT\.remove \}\}/)
   assert.match(read('../ui/lib/settings-panel.mjs'), /<button class="aero-btn danger" type="button" v-if="!askRemove"/)
+})
+
+test('#1829 名字空白的線索全畫面同一個函式：設備列表、頁籤、群組分組、通知寄件者、詳情標題寫的一樣', () => {
+  const node = 'node-old-pc-X7K2'
+  const fr = [{ id: 'a', node, status: 'offline', kind: 'claude', agent: 'a', nick: 'a', unread: 1 }]
+  const want = '電腦（X7K2）'
+  assert.equal(rowOf(tree({ friends: fr, nodeOrder: [node] }), node).label, want)
+  assert.equal(rowOf(tree({ friends: fr, nodeOrder: [node] }), node).identity.title, want)
+  assert.equal(deviceTabs(fr, { selfNode: 'S', nodeOrder: [node] }).all.find(t => t.key === node).label, want)
+  assert.equal(groupItems(fr, 'device', { selfNode: 'S' }).find(g => g.node === node).label, want)
+  assert.equal(groupByDevice(fr, { selfNode: 'S' }).find(g => g.key === node).label, want)
+  assert.equal(nodeLabelOf(fr, { selfNode: 'S' })(node), want)
+  assert.equal(launchDevices(fr, { selfNode: 'S', nodeOrder: [node] }).find(d => d.key === node).label, want)
+  // 後面的夥伴有名字就換成名字
+  const named = [...fr, { id: 'b', node, status: 'idle', kind: 'claude', agent: 'b', nick: 'b', device: '舊筆電' }]
+  assert.equal(groupItems(named, 'device', { selfNode: 'S' }).find(g => g.node === node).label, '舊筆電')
+  assert.equal(deviceTabs(named, { selfNode: 'S', nodeOrder: [node] }).all.find(t => t.key === node).label, '舊筆電')
+})
+
+test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩 text.mjs 的定義與沒有節點時的最後備援）', () => {
+  const hits = []
+  for (const dir of ['../ui', '../ui/lib']) for (const f of fs.readdirSync(new URL(`${dir}/`, import.meta.url))) {
+    if (!/\.(m?js|html)$/.test(f)) continue
+    const src = read(`${dir}/${f}`)
+    if (/UNNAMED_DEVICE|'未命名設備'/.test(src.replace(/\/\/.*$/gm, ''))) hits.push(f)
+  }
+  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'text.mjs'])
 })

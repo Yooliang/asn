@@ -6,14 +6,14 @@
 import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
-import { deviceNameOf, nodeNamesOf, nodeFactsOf } from './device-known.mjs'
+import { deviceNameOf, nodeNamesOf, nodeFactsOf, unnamedLabelOf } from './device-known.mjs'
 import { WAKE_ENGINES, partnerEngine } from './partner-ops.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { NOTICE_ID, isLegacyNoticeFriend, isMergedAway, isNoticeFriend, isNoticeKind, isSystemNotice, noticeFriend } from './notice.mjs'
-import { UNNAMED_DEVICE, hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { friendlySendError } from './display-only.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
@@ -216,11 +216,11 @@ export class AsnCore {
     if (!this.rosterLoaded && !this.nodeOrder.length) return node === this.selfNode
     return node === this.selfNode || this.nodeOrder.includes(node)
   }
-  // 通知是哪一台設備寄的：信上的設備名優先，其次名單上該節點的設備名，都沒有就寫「未命名設備」
+  // 通知是哪一台設備寄的：信上的設備名優先，其次名單上該節點的設備名，都沒有就寫辨認線索（電腦（代號末 4 碼））
   #deviceNameOf(m) {
     const own = typeof m.sender_device === 'string' ? m.sender_device.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60) : ''
     if (own) return own
-    return deviceNameOf(m.from_node, { nodeNames: this.nodeNames, friends: [...this.friends.values()] }) || UNNAMED_DEVICE
+    return deviceNameOf(m.from_node, { nodeNames: this.nodeNames, friends: [...this.friends.values()] }) || unnamedLabelOf(m.from_node, { friends: [...this.friends.values()] })
   }
   // 舊版自動長出來的「○○收發室」「ASN 通知」聯絡人列併進固定的「通知」對話（#848）：
   // 往來記錄依時間合併（有信件 id 的去重）、未讀相加；舊列不刪、本機的原始記錄也不動，只標 mergedInto 讓畫面不再列出。
