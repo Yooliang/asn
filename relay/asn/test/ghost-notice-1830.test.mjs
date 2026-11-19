@@ -9,7 +9,9 @@ import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 import { launchDeviceRows } from '../ui/lib/partner-launch-ui.mjs'
 import { launchDevices } from '../ui/lib/mobile-launch.mjs'
 import { DEVICE_LIVE_STATUSES, buildFriends, isDeviceLiveStatus } from '../ui/lib/roster.mjs'
-import { applyDeviceOrder, deviceFieldsFromSaved, deviceFieldsToSave, deviceFriends, isDeviceOnline, normalizeKeys, pruneRemoved } from '../ui/lib/device-order.mjs'
+import { REASON, launchEligibility } from '../ui/lib/mobile-launch.mjs'
+import { deviceTabs } from '../ui/lib/tabs.mjs'
+import { applyDeviceOrder, isDeviceHidden, deviceFieldsFromSaved, deviceFieldsToSave, deviceFriends, isDeviceOnline, normalizeKeys, pruneRemoved } from '../ui/lib/device-order.mjs'
 
 const F = (node, device, status = 'online', extra = {}) => ({ id: `${node}/a`, node, device, agent: 'a', nick: 'a', engine: 'claude', status, ...extra })
 const real = [F('H', '家用機'), F('W', '工作機', 'offline')]
@@ -67,17 +69,19 @@ test('#1830 設備順序：notice 讀與存都忽略，其他照舊', () => {
 
 test('#1830 守門：手機與電腦的設備列都經過同一個過濾函式 deviceFriends，沒有各寫一份', () => {
   const src = f => readFileSync(new URL(`../ui/lib/${f}`, import.meta.url), 'utf8')
-  for (const f of ['device-tree.mjs', 'partner-launch-ui.mjs', 'mobile-launch.mjs']) assert.match(src(f), /deviceFriends\(/, f)
+  for (const f of ['device-tree.mjs', 'partner-launch-ui.mjs', 'mobile-launch.mjs', 'tabs.mjs']) assert.match(src(f), /deviceFriends\(/, f)
   assert.match(src('mobile-acct.mjs'), /buildDeviceTree\(/, '手機設備樹走 buildDeviceTree')
   assert.match(readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8'), /buildDeviceTree\(/, '電腦設備樹走 buildDeviceTree')
   // 設備在線／隱藏／自動解除只看 isLiveStatus，不再各自寫 status !== 'offline'
   assert.doesNotMatch(src('device-order.mjs'), /status !== 'offline'/)
   assert.doesNotMatch(src('partner-launch-ui.mjs'), /status !== 'offline'/)
+  assert.doesNotMatch(src('mobile-launch.mjs'), /f.node === node && f.status !== 'offline'/, '手機開新夥伴的在線判斷走 isDeviceOnline')
+  assert.doesNotMatch(src('tabs.mjs'), /isNotice === true|mergedInto/, 'deviceTabs 不自己寫通知過濾，走 deviceFriends')
 })
 
-test('#1830 守門：isDeviceLiveStatus（stopped 也算在線）只有設備層級的兩個檔案可以引用，不能拿來判斷夥伴能不能收信', () => {
+test('#1830 守門：isDeviceLiveStatus（stopped 也算在線）只有設備層級的檔案可以引用，不能拿來判斷夥伴能不能收信', () => {
   const dirs = ['../ui/', '../ui/lib/', '../scripts/']
-  const allowed = new Set(['roster.mjs', 'device-order.mjs', 'partner-launch-ui.mjs'])
+  const allowed = new Set(['roster.mjs', 'device-order.mjs', 'partner-launch-ui.mjs', 'tabs.mjs', 'mobile-launch.mjs'])   // 都是設備層級的用途（設備在線、頁籤排序、開新夥伴的設備清單）
   const users = []
   for (const d of dirs) {
     for (const f of readdirSync(new URL(d, import.meta.url))) {
@@ -87,4 +91,33 @@ test('#1830 守門：isDeviceLiveStatus（stopped 也算在線）只有設備層
   }
   assert.deepEqual(users.filter(f => !allowed.has(f)), [], '設備在線狀態只能用在設備層級（device-order／partner-launch-ui）')
   assert.ok(users.includes('device-order.mjs') && users.includes('partner-launch-ui.mjs'))
+})
+
+const hideOpts = { selfNode: 'H' }
+const away = (status, extra = {}) => ({ id: 'X/a', node: 'X', agent: 'a', nick: 'a', engine: 'claude', status, archived: true, unread: 0, ...extra })
+
+test('#1830 行為：自動隱藏——只有 none／空值／不認得值視窗的別台設備會被隱藏，stopped 視窗代表設備還活著、不隱藏', () => {
+  for (const status of ['none', '', 'weird', 'offline']) assert.equal(isDeviceHidden('X', [away(status)], hideOpts), true, String(status))
+  assert.equal(isDeviceHidden('X', [away('stopped')], hideOpts), false)
+  assert.equal(isDeviceHidden('X', [away('online')], hideOpts), false)
+})
+
+test('#1830 行為：launchDeviceRows 的在線排序——none 不算有人在線（排在後面），stopped 算（排在前面）', () => {
+  const friends = [F('B', 'b', 'none'), F('D', 'd', 'stopped'), F('C', 'c', 'offline'), F('H', 'h', 'online')]
+  assert.deepEqual(keys(launchDeviceRows(friends, { selfNode: 'H' })), ['H', 'D', 'B', 'C'])
+})
+
+test('#1830 行為：頁籤的在線排序／計數（deviceTabs）與設備頁同一份判斷', () => {
+  const friends = [F('B', 'b', 'none'), F('D', 'd', 'stopped'), F('C', 'c', 'offline'), F('H', 'h', 'online')]
+  const t = deviceTabs(friends, { selfNode: 'H', nodeOrder: ['H', 'B', 'D', 'C'] })
+  assert.deepEqual(t.all.map(x => [x.key, x.online]), [['H', 1], ['D', 1], ['B', 0], ['C', 0]])
+  assert.ok(!t.all.some(x => x.key === 'notice'))
+})
+
+test('#1830 行為：手機開新夥伴的設備可不可選——none 視窗的設備是離線，stopped 的設備不是', () => {
+  const ctx = { loaded: true, signedIn: true, machines: {} }
+  assert.equal(launchEligibility('X', { ...ctx, friends: [F('X', 'x', 'none')] }).reason, REASON.offline)
+  assert.equal(launchEligibility('X', { ...ctx, friends: [{ ...F('X', 'x'), status: '' }] }).reason, REASON.offline)
+  assert.notEqual(launchEligibility('X', { ...ctx, friends: [F('X', 'x', 'stopped')] }).reason, REASON.offline)
+  assert.equal(launchEligibility('notice', { ...ctx, friends: [noticeFriend()] }).reason, REASON.offline, '通知對話不是設備')
 })

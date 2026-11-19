@@ -11,6 +11,15 @@ export const ghost1830ProbeSource = mode => `(async () => {
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
   const vis = e => e && e.getClientRects().length > 0;
   const phone = ${JSON.stringify(mode)} === 'phone';
+  // 前提：通知對話真的被建出來了（假後台的通知信有收進來）。前提不成立就失敗，不讓「根本沒有通知」也綠
+  let noticed = false;
+  for (let i = 0; i < 80 && !noticed; i++) {
+    noticed = phone
+      ? [...document.querySelectorAll('.m-tabs button')].some(b => b.querySelector('span')?.textContent.trim() === '通知' && b.querySelector('i.red'))
+      : (document.querySelector('.top-tabs .ttab-notice .rtab-count')?.textContent.trim() ?? '') === '1';
+    if (!noticed) await sleep(100);
+  }
+  if (!noticed) return { ok: false, why: '前提不成立：通知對話沒有被建出來（通知頁籤沒有未讀）' };
   if (phone) {
     let btn = null;
     for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }

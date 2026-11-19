@@ -86,7 +86,8 @@ export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], devi
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
     // 雲端夥伴（#930）：只標記，不改這裡的分組與顯示（之後的 PR 才用它分出「雲端夥伴」）
-    // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線
+    // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線。
+    // 這裡刻意不用設備層級的在線白名單（roster.mjs）：它把「沒帶狀態、不認得的值」當成不在線，而雲端判斷要的是相反——只有明確寫 offline 才算離線，不確定就不下結論（#1830）
     const partnersOffline = mine.length > 0 && mine.every(f => String(f.status ?? '').toLowerCase() === 'offline')
     const judged = isCloudNode({ phone, self: isSelf, asnOnline, rep: reports[node], engines: mine.map(f => engineKey(f)), partnersOffline })
     // 離線時判不出來（null）就沿用本機記住的「上次判成雲端」；cloudStore＝下次要不要繼續記住（呼叫端存回本機）

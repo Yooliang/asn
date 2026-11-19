@@ -1,8 +1,8 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 import { UNNAMED_DEVICE } from './text.mjs'
-import { isAsnWindow } from './roster.mjs'
+import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
 import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
-import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
+import { applyDeviceOrder, deviceFriends, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 
 // 名單上方的四個大分頁（0.2.18，和手機同樣的字、同樣的順序；#1429 起順序是夥伴、對話、設定、通知）：對話＝活動中的對話（夥伴與群組）；夥伴＝依設備分組的全部夥伴（左邊直排的設備頁籤在這一頁裡）；
@@ -33,7 +33,7 @@ export const MORE_KEY = 'more'
 const NOTE = { busy: '忙碌', running: '執行中・僅顯示', awaiting: '等你按確認', away: '暫離', offline: '離線' }
 export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
 
-// 組標題：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
+// 組標題（夥伴層級，不是設備層級：這裡數的是一位位夥伴，沒帶 status 的舊資料照舊當成線上，所以刻意保留「非離線」寫法，不用設備層級的在線白名單）：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
 export function groupHeading(g) {
   const items = g?.items ?? []
   if (g?.kind === 'notice') return g.label
@@ -56,12 +56,11 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], d
     return t
   }
   slot(selfNode, selfName)   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
-  for (const f of friends) {
-    if (f.isNotice === true || (typeof f.mergedInto === 'string' && f.mergedInto)) continue   // 「通知」對話不屬於任何設備
+  for (const f of deviceFriends(friends)) {   // 「通知」對話不屬於任何設備：過濾規則只有 deviceFriends 一份（#1830）
     const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : f.device)
     if (isAsnWindow(f)) continue   // ASN 視窗隱藏：設備頁籤照開，但不算進人數與未讀
     t.total++
-    if (f.status !== 'offline') t.online++
+    if (isDeviceLiveStatus(f.status)) t.online++   // 設備頁籤排序：有人在線的設備在前（設備層級，跟設備頁同一份判斷）
     t.unread += f.unread || 0
   }
   const rank = new Map(nodeOrder.map((k, i) => [k, i]))

@@ -1,7 +1,7 @@
 // 手機版「幫電腦開新夥伴」（遠端開視窗）的純邏輯：哪些電腦能開、為什麼不能、表單檢查、請求內容、進度文字、錯誤翻成中文。
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 import { closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
-import { deviceFriends, isDeviceRemoved } from './device-order.mjs'
+import { deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
 
@@ -26,7 +26,7 @@ export function launchEligibility(node, { machines = {}, loaded = false, signedI
   if (!signedIn) return { ok: false, reason: REASON.needLogin }
   if (!loaded) return { ok: false, reason: REASON.unknown }
   const m = machines[node]
-  const online = m ? m.online === true : friends.some(f => f.node === node && f.status !== 'offline')
+  const online = m ? m.online === true : isDeviceOnline(node, deviceFriends(friends))   // 跟設備頁同一份在線判斷（#1830）；通知對話不算
   if (!online) return { ok: false, reason: REASON.offline }
   const l = m?.launcher
   if (!l) return { ok: false, reason: closedReasonOf(m, REASON.closed) }
