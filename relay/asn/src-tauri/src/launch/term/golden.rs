@@ -23,6 +23,9 @@ macro_rules! fixtures {
 const FIXTURES: &[(&str, &str)] = fixtures![
     "claude-ask-user-question.txt",
     "claude-auto-mode-teach.txt",
+    "claude-1799-echo-numbered-no-input.synthetic.txt",
+    "claude-1799-reply-list-table-idle.synthetic.txt",
+    "claude-1799-reply-list-table-no-input.synthetic.txt",
     "claude-bypass-warning.synthetic.txt",
     "claude-firstrun-theme.txt",
     "claude-idle-after-reply.txt",

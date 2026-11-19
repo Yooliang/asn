@@ -11,7 +11,7 @@ import zlib from 'node:zlib'
 import { SCENARIOS } from '../scripts/smoke-lib.mjs'
 import {
   DEFAULT_COLOR_TOLERANCE, DEFAULT_PIXEL_TOLERANCE, cjkProbeSource, cjkVerdict, clockSource, compareImages, coverage, crc32, decodePng, diffLines, encodePng,
-  formatReport, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, shotScenarios, sideBySide, snapshotSource, strictFailed, toolBroken, UNSTABLE_SCENARIOS,
+  formatReport, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, scenarioGroup, shotScenarios, sideBySide, snapshotSource, strictFailed, toolBroken, UNSTABLE_SCENARIOS,
 } from '../scripts/ui-shots-lib.mjs'
 
 // 合成圖：fn(x, y) -> [r, g, b, a]
@@ -205,6 +205,20 @@ test('--strict 的判定：全過＝不失敗；任一差異、中文字失敗�
   assert.equal(strictFailed({ rows: ok, cjk: { ok: false } }), true)
   assert.equal(strictFailed({ rows: ok, cjk: { ok: true }, countMismatch: true }), true)
   assert.equal(rowStatus({ pixel: { sizeMismatch: true, ratio: 1 } }), 'diff')
+})
+
+test('--limit 60（CI 用）：設定頁基準情境自成一組，輪得到；原本各組也都還在（#1763 T3）', () => {
+  const all = shotScenarios(SCENARIOS)
+  const pick = sampleScenarios(all, 60)
+  const set = pick.filter(s => s.probe?.setPage)
+  assert.ok(set.length >= 8, `限量 60 時設定頁情境太少：${set.length}`)
+  // 設定頁情境在各個「頁面×寬度×外觀」都至少輪到一個，不能全擠在同一種外觀
+  const kinds = new Set(set.map(s => `${s.page}|${s.width ?? 412}|${s.state.skin ?? 'aero'}`))
+  for (const k of ['list.html|900|aero', 'list.html|900|modern', 'list.html|900|line', 'm.html|412|aero', 'm.html|412|modern', 'm.html|412|line', 'm.html|360|aero']) assert.ok(kinds.has(k), `限量 60 時設定頁情境沒有輪到 ${k}`)
+  // 設定頁自成一組之後，原本非設定頁的各組（頁面×寬度×外觀）仍然每組都有代表
+  const old = new Set(all.filter(s => !s.probe?.setPage).map(scenarioGroup))
+  const got = new Set(pick.filter(s => !s.probe?.setPage).map(scenarioGroup))
+  assert.deepEqual([...old].filter(k => !got.has(k)), [], '限量 60 時原本的組沒有被擠掉')
 })
 
 // 工具自己壞了，不能被當成「沒有差異」（調查員一審 #1793）

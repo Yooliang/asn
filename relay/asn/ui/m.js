@@ -79,7 +79,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
-import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
+import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
@@ -147,7 +147,7 @@ document.title = 'ASN'
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
 const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
-const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true })) }
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true, base: info.window_name })) }
 const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
@@ -478,7 +478,7 @@ const app = createApp({
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
     // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
     watch(() => noticeLastAt(friends.value), (n, o) => { if (isNewNotice(o, n) && !cloudSt.created && !lchStep2.value) fourthNav.noticeArrived() })
-    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))
+    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value === 'connecting' ? ROSTER_CONNECTING_TEXT : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
     const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
@@ -867,7 +867,6 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
-    const selfDevName = computed(() => (selfDev.value && selfDev.value.label !== KNOWN_TEXT.thisPhone ? selfDev.value.label : me.nick))   // 設備頁的名字沒讀到（還是標籤）時，個人頁退回視窗名
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
     const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
@@ -1569,9 +1568,6 @@ const app = createApp({
     }
 
     // 「我」：大頭貼（裁成正方形縮成 96×96 上傳）。設備名稱不在這裡改（#1803）：只有設備頁一個改名入口，這裡一行連結帶過去
-    const renameAfterOpen = ref(false)
-    const goDeviceRename = () => { renameAfterOpen.value = true; openSetting('devices') }
-    watch([renameAfterOpen, () => fourthPage.value?.kind, selfDev], () => { if (renameAfterOpen.value && fourthPage.value?.kind === 'acct' && selfDev.value) { renameAfterOpen.value = false; devRenameStart(selfDev.value) } })
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
     const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
@@ -1639,7 +1635,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
@@ -1648,7 +1644,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, goDeviceRename, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

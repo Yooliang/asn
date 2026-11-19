@@ -5,9 +5,10 @@
 // 另一條路是掃電腦設定頁上的 QR code（scan）：外殼開相機掃、本人確認後把掃到的字存進 App 私有資料夾，**畫面只拿得到狀態字，拿不到掃到的字**；
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
-import { invoke as tauriInvoke } from './tauri.mjs'
+import { invoke as tauriInvoke, store as tauriStore } from './tauri.mjs'
+import { ONBOARD_STORE } from './onboard.mjs'
 import { displayDeviceName } from './device-known.mjs'
-import { renameDevice } from './device-rename.mjs'
+import { renameDeviceFromPage } from './device-rename.mjs'
 import { UNNAMED, NAME_MAX, clean as cleanText } from './known-peers.mjs'
 
 // 清掉控制字元與雙向字元：和電腦版同一個（known-peers.mjs），手機多一步前後去空白
@@ -118,7 +119,7 @@ export function errorText(e) {
  * 確認、忘記要做的事。confirm、invoke 可以注入（測試用）。
  * 每次都先過本人確認（'ok' 才繼續；'cancel' 什麼都不送；'no_lock' 丟沒設螢幕鎖的說明），不記住上一次的結果。
  */
-export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke } = {}) {
+export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke, pendingStore = null } = {}) {
   // 回憑證字串（本人驗證過）或 null（取消）；沒設螢幕鎖丟說明。憑證每次都重要，不記住上一次的
   const gate = async (action, node) => {
     const challenge = await invoke('android_known_token', { action, node })
@@ -203,7 +204,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
      */
     rename: async (node, name) => {
       if (!node) return null
-      const r = await renameDevice(invoke, { node, name, phone: true })
+      const r = await renameDeviceFromPage(invoke, pendingStore ?? tauriStore(ONBOARD_STORE), { node, name, phone: true })   // 改名成功順手清掉首次引導存的待送名字（#1839）
       return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true, ...(r.self_renamed === true ? { selfRenamed: true, windowName: String(r.window_name ?? '') } : {}), ...(typeof r.window_rename_failed === 'string' && r.window_rename_failed ? { windowRenameFailed: r.window_rename_failed } : {}) } : null
     },
   }
