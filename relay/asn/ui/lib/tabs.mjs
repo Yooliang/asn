@@ -1,6 +1,7 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
+import { deviceNameOf } from './device-known.mjs'
 import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { applyDeviceOrder, deviceFriends, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
@@ -47,7 +48,7 @@ export function groupHeading(g) {
 // 超過 DEVICE_TAB_MAX 個時，第 DEVICE_TAB_MAX 個起收進「更多」；本機不會被收進去。
 // 回傳 { all, visible, more, hidden }：每項 { key, label, short, unread, online, total }；more 為空代表不需要「更多」。
 export const shortOf = label => Array.from(String(label ?? '').trim())[0]?.toUpperCase() ?? '?'
-export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], deviceOrder = [], shown = [], removed = [], max = DEVICE_TAB_MAX } = {}) {
+export function deviceTabs(friends, { selfNode, selfName = '', nodeNames = null, nodeOrder = [], deviceOrder = [], shown = [], removed = [], max = DEVICE_TAB_MAX } = {}) {
   const by = new Map()
   const slot = (key, label) => {
     if (!by.has(key)) by.set(key, { key, label: label || UNNAMED_DEVICE, short: '', unread: 0, online: 0, total: 0 })
@@ -55,9 +56,9 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], d
     if (label && t.label === UNNAMED_DEVICE) t.label = label
     return t
   }
-  slot(selfNode, selfName)   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
+  slot(selfNode, selfName || deviceNameOf(selfNode, { nodeNames }))   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
   for (const f of deviceFriends(friends)) {   // 「通知」對話不屬於任何設備：過濾規則只有 deviceFriends 一份（#1830）
-    const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : f.device)
+    const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : deviceNameOf(f.node ?? '', { nodeNames, fallback: f.device }))
     if (isAsnWindow(f)) continue   // ASN 視窗隱藏：設備頁籤照開，但不算進人數與未讀
     t.total++
     if (isDeviceLiveStatus(f.status)) t.online++   // 設備頁籤排序：有人在線的設備在前（設備層級，跟設備頁同一份判斷）

@@ -788,6 +788,38 @@ mod tests {
         assert_eq!(w.tick(&obs(None, &[]), 5 * TICK_MS), None);
     }
 
+    /// #1818 的時間線：06:34:15 ASN 開起來（mux 活著）→ 06:47:17 mux 崩潰（程序結束但 ASN 握著 handle）→
+    /// 06:49:16 更新把 ASN 結束 → 06:49:36 新 ASN → 06:49:49 新 mux。舊判斷下 live 一直是舊 mux，沒有任何一輪下結論；
+    /// 修正後 live 在崩潰後變成 None，兩輪（60 秒）內報一次，重開後不重複
+    #[test]
+    fn t1818_崩潰後兩分鐘內更新重開_舊ASN來得及報一次_新ASN不重複() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let t0 = 0u64; // 06:34:15
+        let crash = t0 + (12 * 60 + 62) * 1000; // 06:47:17
+        let exit_at = t0 + (14 * 60 + 61) * 1000; // 06:49:16
+        let mut w = Watch::default();
+        let mut reports = 0;
+        let mut t = t0;
+        while t < exit_at {
+            // 崩潰之前活著；崩潰之後 live_pid 回 None（修正後）
+            let o = if t < crash { obs(Some(M1), &["asn西川"]) } else { obs(None, &[]) };
+            if let Some(inc) = w.tick(&o, t) {
+                assert_eq!(inc.partners, ["asn西川"]);
+                reports += 1;
+            }
+            w.save(&f);
+            t += TICK_MS;
+        }
+        assert_eq!(reports, 1, "新 ASN 起來之前，舊 ASN 就該報出這一次");
+        // 06:49:36 新 ASN 載入狀態、06:49:49 起新 mux
+        let mut w2 = Watch::load(&f, None);
+        let new_start = exit_at + 20_000;
+        assert_eq!(w2.tick(&obs(None, &[]), new_start), None);
+        assert_eq!(w2.tick(&obs(Some(M2), &["asn西川"]), new_start + TICK_MS), None, "同一次崩潰不報第二次");
+        assert_eq!(w2.tick(&obs(Some(M2), &["asn西川"]), new_start + 2 * TICK_MS), None);
+    }
+
     #[test]
     fn 暫時看不到又回來_不算掛掉() {
         let mut w = Watch::default();

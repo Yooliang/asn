@@ -270,6 +270,8 @@ struct St {
     model: String,
     /// 最近一次「登入失效（401）自動重開驅動再試一次」的時間；一小時內不重複，登入真的壞了才不會一直重開（#517）
     auth_retry_at: u64,
+    /// 已經做過「等 10 秒自動再試一次」的信編號（上限幾十筆）。核心延遲補送同一則時不再內部重試，免得一次補送實際送出兩次（#1670）
+    net_retried: HashSet<String>,
 }
 
 pub struct WorkerInit {
@@ -319,6 +321,7 @@ impl Worker {
                 start_error: String::new(),
                 model: i.cfg.model.clone(),
                 auth_retry_at: 0,
+                net_retried: HashSet::new(),
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -671,8 +674,19 @@ impl Worker {
                 let what = if up.is_some() { "上游暫時出錯" } else { "網路斷線" };
                 self.log(if e.had_steps { format!("{what}，但這一輪已經有工具步驟：不自動重送") } else { format!("{what}，這類工作者不知道這一輪有沒有動過手：不自動重送") });
                 // 上游 5xx：原文（含「(code 502): HTML response」）要留著，群組通知靠它認出是那家暫時出錯（#1366）；後面再補一句可能做了一半
-                r = Err(WorkerError::new("agent", if up.is_some() { format!("{}（這一輪可能做了一半）", e.message) } else { format!("{what}，這一輪可能做了一半") }));
+                let mut half = WorkerError::new("agent", if up.is_some() { format!("{}（這一輪可能做了一半）", e.message) } else { format!("{what}，這一輪可能做了一半") });
+                half.had_steps = true; // 不能整封重送（核心的延遲補送也看這個，#1670）
+                r = Err(half);
+            } else if self.st.lock().unwrap().net_retried.contains(&job.id) {
+                self.log("這是補送的那一次，已經自己再試過了：不再重複再試（#1670）");
             } else {
+                {
+                    let mut s = self.st.lock().unwrap();
+                    if s.net_retried.len() >= 64 {
+                        s.net_retried.clear();
+                    }
+                    s.net_retried.insert(job.id.clone());
+                }
                 let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
                 #[cfg(test)]
                 let wait = test_hooks::net_wait_override(&cfg.name).unwrap_or(wait);
@@ -849,6 +863,7 @@ impl Worker {
                 if self.st.lock().unwrap().health != Health::Ok {
                     self.set_health(Health::Ok, "");
                 }
+                ev(EngineEvent::TurnOk { worker: name.clone(), id: job.id.clone() });
                 let text = res.text.trim().to_string();
                 if job.no_reply {
                     self.log(format!("不需回覆的信 {} 處理完（{} 字，不寄回）", job.id, text.chars().count()));
@@ -875,7 +890,12 @@ impl Worker {
                 if job.no_reply {
                     ev(EngineEvent::Replied(job.id.clone()));
                 } else {
-                    ev(EngineEvent::Fail(job.id.clone(), self.explain(&err)));
+                    // 上游 5xx：另外告訴核心這一輪有沒有工具步驟，沒有的話核心會延遲補送（#1670）
+                    if err.code == "agent" && upstream_5xx(&err.message).is_some() {
+                        ev(EngineEvent::UpstreamFail { id: job.id.clone(), reason: self.explain(&err), retryable: !err.had_steps && self.i.cfg.protocol == "agy-stream" });
+                    } else {
+                        ev(EngineEvent::Fail(job.id.clone(), self.explain(&err)));
+                    }
                 }
                 // 登入／額度失敗後也換一個新的驅動：agy 這時多半已經結束；使用者登入好之後，新啟動的才讀得到新的登入狀態
                 if matches!(err.code, "timeout" | "violation" | "crash" | "auth" | "quota") {

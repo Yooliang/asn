@@ -53,15 +53,14 @@ test('applyRename：info、核心、暱稱一起換，不需要重載', () => {
 test('守門：改名流程不得 location.reload()，且走 applyRename、info 是響應式', () => {
   // 電腦版左上角的名字改成設備改名（device_rename），不再動視窗名
   const desk = fs.readFileSync(path.join(ui, 'list.js'), 'utf8')
-  assert.ok(!desk.includes("invoke('set_window_name'") && !/location\.reload/.test(desk.slice(desk.indexOf('const commitNick'), desk.indexOf('const commitNick') + 900)))
-  assert.match(desk, /await renameDevice\(info\.node, want\)/)
+  assert.ok(!desk.includes("invoke('set_window_name'") && !/location\.reload/.test(desk.slice(desk.indexOf('async function renameDevice('), desk.indexOf('async function forgetKnown('))))
+  assert.match(desk, /followSelfRename\(\{ info, core, me \}, r, /, '電腦：改的是這台，本機視窗名跟上後畫面就地更新')
   for (const f of ['m.js']) {
     const src = fs.readFileSync(path.join(ui, f), 'utf8')
     const lines = src.split(/\r?\n/)
-    const i = lines.findIndex(l => l.includes("invoke('set_window_name', { name: want })"))
-    assert.ok(i >= 0, `${f} 找不到改名呼叫`)
+    const i = lines.findIndex(l => l.includes('followSelfRename({ info, core, me }'))
+    assert.ok(i >= 0, `${f} 找不到改名後的就地更新`)
     assert.ok(!/reload/.test(lines.slice(Math.max(0, i - 1), i + 3).join('\n')), `${f} 改名後不得重載頁面`)
-    assert.ok(lines[i].includes('applyRename('), `${f} 改名成功後要走 applyRename`)
     assert.match(src, /const info = reactive\(await invoke\('startup_info'\)\)/, `${f} 的 info 要是響應式`)
   }
 })

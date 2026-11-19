@@ -2,6 +2,7 @@
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
 import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { deviceNameOf } from './device-known.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
@@ -67,14 +68,14 @@ export function canLaunchOnNode(nodeKey, ctx) {
 
 /** 設備列：本機優先，其餘照名單順序 */
 // removed＝使用者「永久移除」的設備（設定 → 設備與帳號）：跟設備頁籤一樣不列出來（本機不會被移除）
-export function launchDeviceRows(allFriends, { selfNode, nodeOrder = [], deviceOrder = [], removed = [] }) {
+export function launchDeviceRows(allFriends, { selfNode, nodeNames = null, nodeOrder = [], deviceOrder = [], removed = [] }) {
   const friends = deviceFriends(allFriends)
   const byNode = new Map()
   for (const f of friends) {
     if (isDeviceRemoved(f.node, removed, { selfNode })) continue
-    if (!byNode.has(f.node)) byNode.set(f.node, { key: f.node, label: f.device || f.node })
+    if (!byNode.has(f.node)) byNode.set(f.node, { key: f.node, label: deviceNameOf(f.node, { nodeNames, fallback: f.device }) || f.device || f.node })
   }
-  if (!byNode.has(selfNode)) byNode.set(selfNode, { key: selfNode, label: selfNode })
+  if (!byNode.has(selfNode)) byNode.set(selfNode, { key: selfNode, label: deviceNameOf(selfNode, { nodeNames }) || selfNode })
   const order = [selfNode, ...nodeOrder.filter(n => n !== selfNode)]
   const seen = new Set()
   const out = []

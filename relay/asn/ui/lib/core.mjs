@@ -6,6 +6,7 @@
 import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
+import { deviceNameOf, nodeNamesOf } from './device-known.mjs'
 import { WAKE_ENGINES, partnerEngine } from './partner-ops.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
@@ -87,6 +88,7 @@ export class AsnCore {
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
     this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
+    this.nodeNames = {}        // 節點 → 後台記的設備名（名單每個成員的 name；沒有夥伴的設備，例如手機，名字也在這裡）
     this.asn = {}              // 節點 → 在線的 ASN 視窗（名單帶的 asn：版本與狀態）
     this.avatars = new Map()   // 節點（或 p:夥伴編號）→ { at, data }：各設備、各夥伴上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
@@ -161,6 +163,7 @@ export class AsnCore {
     catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off', connReason(e)); return }
     this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
     this.asn = asnByNode(members)
+    this.nodeNames = nodeNamesOf(members)
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
@@ -215,8 +218,7 @@ export class AsnCore {
   #deviceNameOf(m) {
     const own = typeof m.sender_device === 'string' ? m.sender_device.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60) : ''
     if (own) return own
-    for (const f of this.friends.values()) if (f.node === m.from_node && f.device) return f.device
-    return UNNAMED_DEVICE
+    return deviceNameOf(m.from_node, { nodeNames: this.nodeNames, friends: [...this.friends.values()] }) || UNNAMED_DEVICE
   }
   // 舊版自動長出來的「○○收發室」「ASN 通知」聯絡人列併進固定的「通知」對話（#848）：
   // 往來記錄依時間合併（有信件 id 的去重）、未讀相加；舊列不刪、本機的原始記錄也不動，只標 mergedInto 讓畫面不再列出。
@@ -527,7 +529,7 @@ export class AsnCore {
 
   // ---------- 往來記錄（以後台為準，本機只當快取） ----------
   // 節點的設備名（名單上的，例如「Oppo 手機」）；名單裡沒有就空字串，由後台帶的名字補
-  #deviceName(node) { for (const f of this.friends.values()) if (f.node === node && f.device) return f.device; return '' }
+  #deviceName(node) { return deviceNameOf(node, { nodeNames: this.nodeNames, friends: [...this.friends.values()] }) }
   // 向後台取「我和這位夥伴」90 天內的信，補進本機記錄。沒登入、連不上、後台還沒支援都靜默略過（本機快取照用）。回補進幾則
   async syncHistory(id, { force = false } = {}) {
     const f = this.friends.get(id)
@@ -695,7 +697,7 @@ export class AsnCore {
   logOf(id) { return this.logs.get(id) ?? [] }
   // 畫面要顯示的範圍：最近 VIEW_BASE 列，加上往上載入而多出來的
   viewOf(id) { return this.logOf(id).slice(-(VIEW_BASE + (this.olderExtra.get(id) ?? 0))) }
-  snapshot() { return { conn: this.conn, connWhy: this.connWhy, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
+  snapshot() { return { conn: this.conn, connWhy: this.connWhy, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], nodeNames: { ...this.nodeNames }, asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
   #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }

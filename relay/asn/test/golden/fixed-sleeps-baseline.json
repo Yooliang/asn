@@ -1,0 +1,10 @@
+{
+  "note": "測試裡睡固定毫秒數（≥100ms）的處數。只准減少；增加請改用 test/helpers/wait-for.mjs 的 waitFor。重新產生：node scripts/fixed-sleeps.mjs --update",
+  "files": {
+    "test/account-me.test.mjs": 2,
+    "test/mobile-term-view.test.mjs": 1,
+    "test/pull-stuck.test.mjs": 2,
+    "test/read-sync.test.mjs": 6,
+    "test/term-compose-input.test.mjs": 6
+  }
+}

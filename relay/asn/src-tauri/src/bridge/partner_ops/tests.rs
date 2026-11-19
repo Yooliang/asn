@@ -2760,7 +2760,7 @@ fn add_alias_window(r: &Rig, pid: u32, sid: &str, name: &str, proc_name: &str) {
 }
 
 #[test]
-fn 喚醒守門_同一段對話有別名的手開視窗_擋下並說出視窗名_不開第二個() {
+fn guard_1614_喚醒守門_同一段對話有別名的手開視窗_擋下並說出視窗名_不開第二個() {
     let r = resume_rig(Opt::default());
     // 舊規則（程序建立時間比 startedAt 晚超過 60 秒＝pid 被重用）把這個還活著的視窗判成不活，會照樣開出第二個
     add_alias_window(&r, 13148, SID, "改過的名字", "claude.exe");
@@ -2772,7 +2772,7 @@ fn 喚醒守門_同一段對話有別名的手開視窗_擋下並說出視窗名
 }
 
 #[test]
-fn 喚醒守門_記錄的_pid_被別的程式重用_不擋() {
+fn guard_1614_喚醒守門_記錄的_pid_被別的程式重用_不擋() {
     let r = resume_rig(Opt::default());
     add_alias_window(&r, 13148, SID, "改過的名字", "chrome.exe");
     let res = resume(&r, "離線夥伴", SID);
@@ -2781,7 +2781,7 @@ fn 喚醒守門_記錄的_pid_被別的程式重用_不擋() {
 }
 
 #[test]
-fn 換班接手_同一段對話還有別名視窗開著_不交接_不開下一任() {
+fn guard_1614_換班接手_同一段對話還有別名視窗開著_不交接_不開下一任() {
     let r = rig(Opt::default());
     write_old_transcript(&r);
     // 目標「目標」(220, sid-220) 之外，還有手開、名字被改過的另一個視窗(13148)接著同一段對話
@@ -2794,7 +2794,7 @@ fn 換班接手_同一段對話還有別名視窗開著_不交接_不開下一�
 }
 
 #[test]
-fn 換班接手_另一個同編號的記錄已不是_claude_程序_照常交接() {
+fn guard_1614_換班接手_另一個同編號的記錄已不是_claude_程序_照常交接() {
     let r = rig(Opt::default());
     write_old_transcript(&r);
     add_alias_window(&r, 13148, "sid-220", "別名視窗", "chrome.exe");
