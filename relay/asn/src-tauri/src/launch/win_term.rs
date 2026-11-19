@@ -282,13 +282,14 @@ pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &Win
     match host.filter(|h| h.available()) {
         None => {
             mark_native(NATIVE_NO_SERVICE);
-            elog!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title)
+            super::term::view_log(&format!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title))
         }
         Some(h) => match h.open_window(cwd, spec) {
             Ok(pid) => return Ok(Opened { pid, note: None }),
             Err(WinOpenError::NotStarted(e)) => {
                 mark_native(NATIVE_NO_SERVICE);
-                elog!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title)
+                // 原因要進 ui.log（#1867）：視窗程式的 stderr 沒人收，事後查不到為什麼退回原生主控台
+                super::term::view_log(&format!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title))
             }
             Err(WinOpenError::Started(e)) => {
                 elog!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
@@ -316,7 +317,7 @@ pub(crate) fn open_window_real(cwd: &Path, spec: &WinSpec, fallback: &dyn Fn() -
         // 0.1.113 的舊行為（不提示、不碰自帶終端）照舊，但留一行 log 並記下原因，喚醒的結果欄位看得到（#1698）
         let why = native_reason_when_off(term_config_loaded(), config_expected());
         mark_native(why);
-        elog!("開「{}」：用原生主控台（{why}）", spec.title);
+        super::term::view_log(&format!("開「{}」：用原生主控台（{why}）", spec.title));
     }
     open_window_gated(wezterm_windows(), host.as_deref(), cwd, spec, &FALLBACK_NOTED, fallback)
 }

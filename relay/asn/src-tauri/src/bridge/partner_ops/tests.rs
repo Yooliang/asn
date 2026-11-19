@@ -2837,3 +2837,27 @@ fn 重開後不說原視窗已關閉_當這段對話還有別的視窗() {
     let note = r.ops.still_open_note(&t).unwrap();
     assert!(note.contains("還有另一個視窗（別名視窗）開著") && !note.contains("原視窗已關閉"), "{note}");
 }
+
+#[test]
+fn t1867_換班接手退到系統終端_結果多選填欄位_畫面補一句_沒退路就跟以前一樣() {
+    // 開在自帶終端：結果沒有新欄位、句子不變
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    let res = r.run("handover", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "新視窗已出現"));
+    let v = res.result.unwrap();
+    assert!(v.get("term").is_none() && v.get("reason").is_none(), "沒退路就不帶新欄位：{v}");
+    // 退到系統終端：舊欄位不動，多 term／reason，畫面補一句、原因不放畫面
+    for why in ["設定關掉", "等不到服務"] {
+        let r = rig(Opt::default());
+        write_old_transcript(&r);
+        *r.env.native.lock().unwrap() = Some(why);
+        let res = r.run("handover", json!({}));
+        assert_eq!(res.status, "ok", "{}", res.detail);
+        assert_eq!(res.detail, "新視窗已出現（這次用系統終端開的）");
+        assert!(!res.detail.contains(why), "原因只進結果欄位與 log：{}", res.detail);
+        let v = res.result.unwrap();
+        assert_eq!((v["session_id"].as_str(), v["handoff_done"].as_bool()), (Some("sid-new"), Some(true)), "換班的舊欄位不動");
+        assert_eq!((v["term"].as_str(), v["reason"].as_str()), (Some("native"), Some(why)));
+    }
+}
