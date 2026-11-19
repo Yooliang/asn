@@ -1,7 +1,7 @@
 // 設備頁籤的手動排序與自動隱藏（純邏輯，node 與瀏覽器都能跑；電腦版左邊頁籤、設定的設備頁籤、手機共用）。
 // 順序存在本機設定（asn-me.json 的 deviceOrder：節點鍵陣列）；手動顯示過的隱藏設備存在 deviceShown。
 // 舊存檔沒有這兩個欄位＝空陣列＝維持自動規則（本機第一、有人在線在前）。
-import { isAsnWindow, isLiveStatus } from './roster.mjs'
+import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
 import { isMergedAway, isNoticeFriend } from './notice.mjs'
 
 const MAX_KEYS = 200
@@ -62,7 +62,7 @@ export const showDevice = (shown, key) => (normalizeKeys(shown).includes(key) ? 
 export function isDeviceOnline(node, friends, { selfNode = '', asn = {} } = {}) {
   if (node === selfNode) return true
   if (Array.isArray(asn?.[node]) && asn[node].length > 0) return true
-  return (Array.isArray(friends) ? friends : []).some(f => f.node === node && isLiveStatus(f.status))
+  return (Array.isArray(friends) ? friends : []).some(f => f.node === node && isDeviceLiveStatus(f.status))
 }
 
 // 自動隱藏：非本機、沒有任何在線視窗（ASN 視窗也算）、沒有任何未封存的夥伴（ASN 視窗不是夥伴）、沒有未讀。只要一項不成立就不隱藏；手動顯示過的也不隱藏
@@ -70,7 +70,7 @@ export function isDeviceHidden(node, friends, { selfNode, shown = [] } = {}) {
   if (!node || node === selfNode || normalizeKeys(shown).includes(node)) return false
   for (const f of Array.isArray(friends) ? friends : []) {
     if ((f.node ?? '') !== node) continue
-    if (isLiveStatus(f.status)) return false
+    if (isDeviceLiveStatus(f.status)) return false
     if ((f.unread || 0) > 0) return false
     if (!isAsnWindow(f) && f.archived !== true) return false
   }
@@ -90,7 +90,7 @@ export const isDeviceRemoved = (key, removed, { selfNode } = {}) => Boolean(key)
 // 移除時它一定是離線；有未讀不算活過來（使用者明確移除了它，舊的未讀不能讓它又冒出來）。
 export function pruneRemoved(removed, friends, { selfNode } = {}) {
   const alive = new Set()
-  for (const f of Array.isArray(friends) ? friends : []) if (f && isLiveStatus(f.status)) alive.add(f.node ?? '')
+  for (const f of Array.isArray(friends) ? friends : []) if (f && isDeviceLiveStatus(f.status)) alive.add(f.node ?? '')
   return normalizeKeys(removed).filter(k => k !== selfNode && !alive.has(k))
 }
 // 設備列（buildDeviceTree 的結果）：別台、離線的設備都能永久移除（不必等它被自動隱藏；還有未讀或夥伴的也一樣）
