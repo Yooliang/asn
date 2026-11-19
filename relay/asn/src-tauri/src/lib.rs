@@ -376,8 +376,10 @@ fn deliver_invite(app: &tauri::AppHandle, code: String) {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String> {
-    launch::relay_launch(relay_of(&app)?.as_ref(), body).await
+async fn relay_launch(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    launch::relay_launch(r.as_ref(), body, token.as_deref()).await
 }
 
 #[cfg(feature = "gui")]

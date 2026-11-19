@@ -1919,6 +1919,31 @@ b", "op": "close" }),
         assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
     }
 
+    #[cfg(desktop)]
+    #[tokio::test]
+    async fn 電腦版開新夥伴_有登入帶簽章_沒登入照舊不帶_失敗是白話() {
+        // 成員角色的電腦（例如工作機）不帶簽章，後台回 403 forbidden；有登入就要帶，擁有者角色的電腦沒登入照舊
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "node": "H", "profile": "claude", "name": "夥伴-1", "cwd": "c" });
+        crate::launch::relay_launch(&r, req.clone(), Some("usertoken-9")).await.unwrap();
+        crate::launch::relay_launch(&r, req.clone(), None).await.unwrap();
+        crate::launch::relay_launch(&r, req.clone(), Some("")).await.unwrap();
+        {
+            let s = seen.lock().unwrap();
+            assert_eq!(s.len(), 3);
+            assert!(s.iter().all(|x| x.contains("action=launch")), "{s:?}");
+            assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9"), "{s:?}");
+            assert!(s[1..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
+        }
+        // 後台不收（fake_server 非 200 一律回 not_found）：畫面拿到的是白話，不是「launch HTTP 404 not_found」
+        let (url, _) = fake_server(404);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let e = crate::launch::relay_launch(&r, req, Some("usertoken-9")).await.unwrap_err();
+        assert_eq!(e, "找不到那台電腦，它可能離線太久或已被移除");
+        assert!(!e.contains("HTTP") && !e.contains("launch"), "{e}");
+    }
+
     #[tokio::test]
     async fn 遠端開視窗_沒有本人簽章不送出_有簽章帶標頭() {
         let (url, seen) = fake_server(200);
