@@ -3,9 +3,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const pane = read('ui/lib/chatpane.mjs'), style = read('ui/style.css'), modern = read('ui/modern.css')
+const pane = read('ui/lib/chatpane.mjs'), style = read('ui/style.css'), modern = skinCss('modern')
 const form = pane.slice(pane.indexOf('<form class="composer"'), pane.indexOf('</form>', pane.indexOf('<form class="composer"')))
 
 test('復古 Aero：新的「＋」與語音輸入鈕在 style.css 預設就是 display:none（modern.css 才讓它們出現）', () => {
@@ -17,7 +18,9 @@ test('復古 Aero：新的「＋」與語音輸入鈕在 style.css 預設就是 
 test('modern.css：膠囊（單列 52／手機 50、26／25px 圓角、#e6e4df 細邊、指定陰影）、上方工具列收起、「＋」展開', () => {
   const at = '/* ---------- #1421 B2：輸入框膠囊'
   assert.ok(modern.includes(at), '檔尾要有 B2 區塊')
-  const blk = modern.slice(modern.indexOf(at))
+  // B2 區塊的規則一部分已抽到 skin-common.css（與 LINE 逐字相同）：整份「現代實際生效的規則」都當作這一區塊來比對
+  const own = read('ui/modern.css')
+  const blk = own.slice(own.indexOf(at)) + String.fromCharCode(10) + modern
   const main = blk.match(/\.compose-main\{[^}]*\}/)[0]
   for (const part of ['min-height:52px', 'max-width:760px', 'border:1px solid #e6e4df', 'border-radius:26px', 'box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)']) assert.ok(main.includes(part), '膠囊要有 ' + part)
   assert.match(blk, /\.compose-row\{padding:10px 32px 18px\}/)

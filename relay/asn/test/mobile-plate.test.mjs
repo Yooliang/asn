@@ -3,10 +3,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { nameplateView } from '../ui/lib/actionbar.mjs'
 
 const read = p => fs.readFileSync(new URL(`../ui/${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const html = read('m.html'), js = read('m.js'), css = read('mobile.css'), modern = read('modern.css')
+const html = read('m.html'), js = read('m.js'), css = read('mobile.css'), modern = skinCss('modern')
 const head = html.slice(html.indexOf('<header class="m-head m-chathead"'), html.indexOf('</header>', html.indexOf('<header class="m-head m-chathead"')))
 
 test('名牌的字和電腦頂部共用 nameplateView：名字、哪台電腦・狀態；離線標灰；群組寫「群組」', () => {
