@@ -63,7 +63,7 @@ import { loadEnvNotice } from './lib/env-notice.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
-import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { createTaskManager, initialState as initialTaskState } from './lib/task-manager.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
@@ -808,6 +808,11 @@ async function setArchived(f, archived) {
   archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
 }
 function closeOpDlg() { opDlg.open = false }
+// 夥伴操作的進度：對話框送出後收起，進度就地顯示在名單上方的提示列（#1800）；改名完成要讓釘選跟著換位址
+const opRun = reactive({ runs: {} })
+const opRunner = createOpRunner({ api: transport, state: opRun, onDone: d => onPartnerOpDone({ op: d.op, newName: d.input?.newName, friend: d.friend }) })
+const onOpRun = e => { void opRunner.start(opDlg.friend, e.op, e.input) }
+const launchNewFromRun = e => { const f = friends.value.find(x => x.id === e?.id); openPartnerDlg(f?.node || '') }
 // 喚醒找不到對話紀錄：關掉操作對話框，改開「新增夥伴」，預選原夥伴所在的電腦
 function launchNewFromOp(e) { closeOpDlg(); openPartnerDlg(e?.node || '') }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
@@ -911,7 +916,7 @@ function roomMenuTogglePin() { const m = roomMenu.value; closeRoomMenu(); if (m)
 function roomMenuPick(key) { const m = roomMenu.value; closeRoomMenu(); if (m) void openGroupMenu(m.chatId, key) }
 // 夥伴改名完成：釘選跟著換成新的對話位址（#1479）
 function onPartnerOpDone(d) {
-  const f = opDlg.friend
+  const f = d?.friend ?? opDlg.friend
   if (d?.op !== 'rename' || !f) return
   const next = friendId(f.node, String(d.newName ?? '').trim())
   if (next && next !== f.id) chatPins.value = renamedPinId(chatPins.value, f.id, next)
@@ -2200,7 +2205,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
-      opDlg, closeOpDlg, launchNewFromOp, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, launchNewFromRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
@@ -2216,6 +2221,7 @@ app.component('asn-avatar', AsnAvatar)
 app.component('pin-dot', PinDot)
 app.component('new-guide-card', NewGuideCard)
 app.component('partner-op-dialog', PartnerOpDialog)
+app.component('partner-op-strip', PartnerOpStrip)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('settings-panel', SettingsPanel)

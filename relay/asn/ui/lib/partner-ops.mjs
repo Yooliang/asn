@@ -17,6 +17,15 @@ export const ACP_OPS = ['info', 'rename', 'model', 'close', 'restart', 'handover
 export const ACP_STOPPED_OPS = ['info', 'restart', 'remove']
 export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '換班接手', resume: '喚醒', restart: '重開', remove: '移除' }
 export const NOTE_MAX = 1000
+// 夥伴操作進度的按鈕文字（#1800）：手機與電腦同一份。進度就地顯示、不擋畫面；每顆按鈕都寫按下去會發生什麼
+export const OP_PROGRESS_TEXT = Object.freeze({
+  retry: '重試',            // 失敗後再送一次同樣的操作
+  dismiss: '關閉',          // 收起這則結果
+  stopWaiting: '不查了',    // 詳情還在查時：不等結果了
+  close: '關閉',
+  launchNew: '開新夥伴',
+})
+export const OP_DONE_HIDE_MS = 6000   // 成功且沒有要看的補充：這麼久之後自己消失
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘

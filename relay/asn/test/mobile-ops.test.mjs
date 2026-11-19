@@ -106,7 +106,7 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   const js = read('ui', 'm.js')
   assert.doesNotMatch(js, /\bopsRun\b/, '單一全域進度拿掉')
   assert.match(js, /const opsBanner = computed\(\(\) => runBanner\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)
-  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op, view: v \}\)/, '指令進度存在下指令那位')
+  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op, view: v, input \}\)/, '指令進度存在下指令那位（連同送出的內容，重試用）')
   assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op: 'archive'/, '封存也存在那位')
   assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
   assert.match(js, /const dismissRun = \(\) => \{ opsRuns\.value = clearRun\(opsRuns\.value, chatFriend\.value\?\.id\) \}/)
@@ -142,7 +142,8 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   const js = read('ui', 'm.js'), html = read('ui', 'm.html')
   assert.match(js, /invoke\('android_partner_op', \{ body \}\)/); assert.match(js, /invoke\('android_partner_ops', \{ ids \}\)/)
   const fn = /async function submitOp\(op\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
-  assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('runPartnerOp('), '先檢查再送出')
+  assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('execOp('), '先檢查再送出')
+  assert.ok(/async function execOp\(/.test(js) && js.indexOf('runPartnerOp(', js.indexOf('async function execOp(')) > 0, '送出走 runPartnerOp')
   assert.match(fn, /if \(err\)/)
   assert.match(html, /v-for="i in opsView\.rows"[^>]*:aria-disabled="i\.ok \? 'false' : 'true'"[^>]*:aria-describedby="i\.ok \? null : 'ops-why-' \+ i\.key"/, '不能按的項目反灰（aria-disabled）並連到說明')
   assert.doesNotMatch(html, /v-for="i in opsView\.rows"[^>]*:disabled=/, '不用原生 disabled（讀得到說明、仍可聚焦）')
