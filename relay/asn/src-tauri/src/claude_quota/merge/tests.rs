@@ -1175,6 +1175,10 @@ fn guard_1184_換身分後第一次有身分的回報_清掉沒有標記的舊�
     assert!(feed(&h, "wa", UA, NOW - H, 1, wk(40.0), NOW + MIN), "舊基準沒清掉的話這筆會被當成舊數字擋掉");
     let got = quota_of(&h, "a@x.test");
     assert_eq!((got.weekly_pct, got.owner), (Some(60), true));
+    // 清舊基準本身要看得到（不能只靠「新讀數收得進去」：那一條還可能被別的規則放行）：備份了清掉之前的內容、log 只記筆數
+    let bak = super::super::owner_store::backup_path(h.path());
+    assert!(std::fs::read_to_string(&bak).expect("要有備份檔").contains("\"weekly_pct\":95"), "備份是清掉之前的內容");
+    assert!(log(&h).contains("清掉 1 筆沒有身分的舊基準"), "{}", log(&h));
 }
 
 #[test]
@@ -1292,6 +1296,8 @@ fn guard_1694_每週重置過後舊視窗送來的下一期_算對上目前登�
     assert!(hook_at(&h, &with_tp(status(None, Some((50.0, rb + 7 * DAY))), &t), rb + H));
     let qb = quota_of(&h, "b@x.test");
     assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(50), Some(iso_secs(rb + 7 * DAY))));
+    // 是靠「存著的那一期已過、下一期算同一期」對上目前登入，不是別的規則放行的
+    assert!(log(&h).contains("對上目前登入，記到目前登入") && !log(&h).contains("對不上，這筆不記"), "{}", log(&h));
     // 乙存的那一期還沒過、讀數卻是加七天：不算同一期，不記
     let (h, _, rb) = switched_setup();
     let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
