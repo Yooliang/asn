@@ -21,7 +21,6 @@ export const NOTE_MAX = 1000
 export const OP_PROGRESS_TEXT = Object.freeze({
   retry: '重試',            // 失敗後再送一次同樣的操作
   dismiss: '關閉',          // 收起這則結果
-  stopWaiting: '不查了',    // 詳情還在查時：不等結果了
   close: '關閉',
   launchNew: '開新夥伴',
 })

@@ -293,7 +293,7 @@ export const PartnerOpDialog = {
     <div class="partner-actions">
       <button class="aero-btn primary" type="button" v-if="st.view && st.view.action && st.view.action.kind === 'launch-new'" @click="launchNew">{{ T.launchNew }}</button>
       <button class="aero-btn primary" type="button" v-if="st.view && st.view.phase === 'failed'" @click="submit">{{ T.retry }}</button>
-      <button class="aero-btn" type="button" @click="close">{{ st.view && st.view.done ? T.close : T.stopWaiting }}</button>
+      <button class="aero-btn" type="button" @click="close">{{ T.close }}</button>
     </div>
   </template>
 </asn-dialog>`,

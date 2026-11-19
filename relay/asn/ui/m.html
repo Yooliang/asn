@@ -721,7 +721,7 @@
                   <div class="m-bar" v-if="lch.vphase === 'sending' || lch.vphase === 'opening' || lch.vphase === 'waiting'" aria-hidden="true"><i></i></div>
                   <button class="m-btn m-btn-big" type="button" v-if="lch.vphase === 'done'" @click="openLaunched">開始對話</button>
                   <button class="m-btn" type="button" v-if="lch.vphase === 'failed'" @click="lch.phase = 'form'">再試一次</button>
-                  <button class="m-btn" type="button" @click="closeLaunch">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
+                  <button class="m-btn" type="button" @click="closeLaunch">{{ OP_PROGRESS_TEXT.close }}</button>
                 </template>
               </div>
             </div>
@@ -797,7 +797,7 @@
           <p class="m-note" v-if="ops.view && ops.view.rows && !ops.view.rows.length">沒有更多資料。</p>
           <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
           <button type="button" class="m-btn m-btn-big" v-if="ops.view && ops.view.phase === 'failed'" @click="retryInfo">{{ OP_PROGRESS_TEXT.retry }}</button>
-          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? OP_PROGRESS_TEXT.close : OP_PROGRESS_TEXT.stopWaiting }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ OP_PROGRESS_TEXT.close }}</button>
         </template>
       </section>
     </div>

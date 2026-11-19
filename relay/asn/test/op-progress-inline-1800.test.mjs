@@ -123,10 +123,10 @@ test('#1800 電腦版：非詳情的操作送出後對話框收起（發 run 事
 
 test('#1800 手機與電腦共用同一份元件與文字：按鈕字只來自 OP_PROGRESS_TEXT', () => {
   const ui = read('ui/lib/partner-ops-ui.mjs'), html = read('ui/m.html'), js = read('ui/m.js'), mob = read('ui/lib/mobile-ops.mjs')
-  assert.deepEqual(Object.keys(OP_PROGRESS_TEXT).sort(), ['close', 'dismiss', 'launchNew', 'retry', 'stopWaiting'])
+  assert.deepEqual(Object.keys(OP_PROGRESS_TEXT).sort(), ['close', 'dismiss', 'launchNew', 'retry'])
   for (const [name, src] of [['電腦元件', ui], ['手機頁面', html]]) {
     assert.match(src, /OP_PROGRESS_TEXT\.retry|T\.retry/, `${name}的重試用共用文字`)
-    assert.match(src, /OP_PROGRESS_TEXT\.stopWaiting|T\.stopWaiting/, `${name}的「不查了」用共用文字`)
+    assert.match(src, /OP_PROGRESS_TEXT\.close|T\.close/, `${name}的「關閉」用共用文字`)
     assert.doesNotMatch(src, />\s*知道了\s*</, `${name}沒有只有「知道了」的按鈕`)
   }
   assert.match(js, /OP_PROGRESS_TEXT/)
@@ -134,4 +134,16 @@ test('#1800 手機與電腦共用同一份元件與文字：按鈕字只來自 O
   assert.match(mob, /export const hideAfterMs/)
   assert.match(ui, /from '\.\/mobile-ops\.mjs'/); assert.match(js, /hideAfterMs/)
   assert.doesNotMatch(ui + js, /OP_DONE_HIDE_MS|6000\) *\/\/ 成功/, '消失時間不在兩邊各寫一份')
+})
+
+// 擁有者 11-19 補充：還要留框的地方（換班接手、開新夥伴的進度），右下角按鈕只寫「關閉」，不加括號說明
+test('#1800 留框的進度：按鈕文字只能是「關閉」，不能有全形括號', () => {
+  for (const [k, v] of Object.entries(OP_PROGRESS_TEXT)) assert.doesNotMatch(v, /[（）]/, `OP_PROGRESS_TEXT.${k} 不能有括號`)
+  assert.equal(OP_PROGRESS_TEXT.close, '關閉'); assert.equal(OP_PROGRESS_TEXT.dismiss, '關閉')
+  const ui = read('ui/lib/partner-ops-ui.mjs'), html = read('ui/m.html')
+  assert.match(ui, /@click="close">\{\{ T\.close \}\}</)
+  assert.match(html, /@click="back">\{\{ OP_PROGRESS_TEXT\.close \}\}</)
+  assert.match(html, /@click="closeLaunch">\{\{ OP_PROGRESS_TEXT\.close \}\}</)
+  const bad = walk('ui/').filter(f => /先關閉（|先關掉（|不查了/.test(read(f)))
+  assert.deepEqual(bad, [])
 })
