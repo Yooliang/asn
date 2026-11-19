@@ -7,8 +7,7 @@
 // 這支測試從真的原始碼讀出「畫面種類」清單，三處必須同步；偵測字串要在 src-tauri/tests/fixtures 的真畫面樣本裡找得到
 // （Claude Code 改字，或字串打錯，偵測就靜默失效）。之後新增一種畫面，漏登記任何一處都會在這裡紅。
 //
-// 待補（#1792 的修法在 PR #1795，#1799 還沒有 PR，都還沒進 main）：等進 main 後補一支用「Login reached its time limit」真畫面樣本的偵測測試；
-// 新種類只要依這裡的規則登記，這支測試會自動涵蓋。
+// #1792（登入逾時）已在 #1795 進 main，最後一支測試鎖住它的辨認規則；#1799（提醒框沒有可動手的路）還沒有 PR，進 main 後再補。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -75,4 +74,46 @@ test('#1640 #1637 卡在首次確認畫面：終端畫面上的提示（viewHint
     assert.ok(viewHint([{ code, name: '甲' }], '甲'), `${code} 在終端畫面上要有提示`)
     assert.ok(Object.values(codeOf).includes(code), `${code} 是 Rust 認得的代號`)
   }
+})
+
+// ---- #1792 登入逾時：「Login reached its time limit」只認行首，AI 回覆裡出現同一句話不能誤判 ----
+/** 取 Rust 函式本體 */
+const fnBody = (src, sig) => src.split(sig)[1].split('\n}\n')[0]
+/** 取 Rust 字串陣列常數的所有字串 */
+const strArray = (src, name) => [...src.match(new RegExp(`const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))[1].matchAll(/"([^"]*)"/g)].map(m => m[1])
+/** 照 Rust 的 is_login_time_limit 移植（本體另外用原始碼比對鎖住，兩邊不能各改各的） */
+const portIsLimit = (line, heads) => {
+  const t = line.trimStart()
+  if (t.startsWith('●')) return false
+  const lower = t.replace(/[A-Z]/g, c => c.toLowerCase())
+  const rest = (lower.startsWith('⎿') ? lower.slice(1) : lower).trimStart()
+  return heads.some(h => rest.startsWith(h))
+}
+
+test('#1792 登入逾時：比對行首（不用包含）；真畫面的四種句子都認，AI 回覆、工具輸出、信件回顯引用同一句都不誤判', () => {
+  const heads = strArray(prod, 'LOGIN_TIME_LIMIT_HEADS')
+  assert.deepEqual(heads, ['login reached its time limit', 'failed to authenticate: this login reached its time limit'])
+  // 原始碼本體：行首比對、先排除 ● 開頭的模型回覆，不能出現包含比對
+  const body = fnBody(prod, 'fn is_login_time_limit(')
+  assert.match(body, /t\.starts_with\('●'\)[\s\S]*return false/)
+  assert.match(body, /strip_prefix\('⎿'\)/)
+  assert.match(body, /LOGIN_TIME_LIMIT_HEADS\.iter\(\)\.any\(\|h\| rest\.starts_with\(h\)\)/)
+  assert.ok(!/\.contains\(|\.find\(/.test(body), '不能用包含比對：AI 回覆或文件引用這句話就會誤判成要登入')
+  // Rust 測試裡那批真實句子（Claude Code 真的會顯示的四種）與誤判案例，直接取來跑，不另外造
+  const t = screen.split('fn 登入逾時_認字不認行位置_暫時性的更新失敗不算登入')[1].split('\n    }\n')[0]
+  const block = (from, to) => [...t.split(from)[1].split(to)[0].matchAll(/^\s+"((?:[^"\\]|\\.)*)",?$/gm)].map(m => m[1].replace(/\\"/g, '"'))
+  const ok = block('for ok in [', '] {')
+  const quoted = block('for quoted in [', '] {')
+  const echo = block('for echo in [', '] {')
+  assert.equal(ok.length, 4)
+  assert.ok(quoted.length >= 2 && echo.length >= 2)
+  for (const l of ok) assert.ok(portIsLimit(l, heads), `該認：${l}`)
+  for (const l of [...quoted, ...echo]) assert.ok(!portIsLimit(l, heads), `不該認：${l}`)
+  // AI 回覆（● 開頭）引用同一句，連原樣的錯誤句也不算
+  assert.ok(!portIsLimit('● Login reached its time limit · Please run /login', heads))
+  assert.ok(!portIsLimit('● 這句是「Failed to authenticate: this login reached its time limit」的意思', heads))
+  // 暫時性的更新失敗不是登入逾時
+  assert.ok(!portIsLimit('Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again', heads))
+  // 登入逾時歸在既有的 Login 種類（代號 login），名單與提醒文字不用另外登記
+  assert.equal(codeOf.Login, 'login')
 })
