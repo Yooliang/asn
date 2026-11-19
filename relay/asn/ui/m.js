@@ -145,7 +145,7 @@ document.title = 'ASN'
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
 const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
-const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true })) }
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true, base: info.window_name })) }
 const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
