@@ -398,7 +398,7 @@ export const SettingsPanel = {
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.identity.title">
             <div class="dv-dev-h">
-              <button class="aero-btn dv-back" type="button" :aria-label="DEVICE_TEXT.back" @click="backToList">{{ DEVICE_TEXT.backMark }}</button>
+              <button class="aero-btn dv-back" type="button" :aria-label="DEVICE_TEXT.back" :title="DEVICE_TEXT.back" @click="backToList">{{ DEVICE_TEXT.backMark }}</button>
               <h3 class="dv-name">{{ curDev.identity.title }}</h3>
               <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>

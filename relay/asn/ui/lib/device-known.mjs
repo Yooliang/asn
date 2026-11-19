@@ -1,4 +1,5 @@
 import { unnamedClue } from './device-identity.mjs'
+import { isPhoneNode } from './node-platform.mjs'
 // 設備名規則（和後台一致）與「設備列表 × 認得的電腦」的對應。純函式，node 也能載入（測試）。
 export const NAME_MAX = 40
 export const NAME_RULE_HINT = '名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼）'
@@ -35,7 +36,7 @@ export function nodeNamesOf(members) {
  * 辨認區（device-identity.mjs）讀這份；兩個都沒有的節點不放
  */
 export function nodeFactsOf(members) {
-  const ms = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) && t > 0 ? t : 0 }
+  const ms = v => { const t = typeof v === 'string' ? Date.parse(v) : typeof v === 'number' ? v : NaN; return Number.isFinite(t) && t > 0 ? t : 0 }   // 後台給 ISO 字串；給毫秒數字也收
   const out = {}
   for (const m of Array.isArray(members) ? members : []) {
     if (!m || typeof m.id !== 'string') continue
@@ -55,14 +56,11 @@ export function deviceNameOf(node, { nodeNames = null, friends = [], fallback = 
 }
 
 /**
- * 名字空白時的顯示名（電腦版、手機版所有地方共用，#1829）：這台有夥伴標手機就寫「手機（代號末 4 碼）」，否則「電腦（…）」。
+ * 名字空白時的顯示名（電腦版、手機版所有地方共用，#1829）：這台有夥伴標手機就寫「手機（代號末 4 碼）」，否則「電腦（…）」；手機還是電腦只由 node-platform.mjs 判斷。
  * 有名字的地方一律先走 deviceNameOf，只有它回空字串才呼叫這個
  */
-export const unnamedLabelOf = (node, { friends = [], platform = '' } = {}) => {
-  const p = String(platform ?? '').toLowerCase()
-  const phone = p === 'android' || p === 'ios' || (Array.isArray(friends) ? friends : []).some(f => f?.node === node && ['phone', 'mobile', 'android'].includes(String(f.kind ?? '').toLowerCase()))
-  return unnamedClue({ node, phone })
-}
+export const unnamedLabelOf = (node, { friends = [], platform = '', phone = null } = {}) =>
+  unnamedClue({ node, phone: typeof phone === 'boolean' ? phone : isPhoneNode(node, { platform, friends }) })
 
 /** 設備名檢查：合規回空字串，不合規回中文提示 */
 export function deviceNameError(name) {

@@ -33,7 +33,7 @@ test('#1829 名單成員帶的建立時間、最後在線讀成毫秒；壞掉�
   assert.equal(f['node-old-pc-X7K2'].createdMs, Date.parse('2026-11-05T06:32:00Z'))
   assert.equal(f['node-old-pc-X7K2'].seenMs, NOW - 3 * 3600_000)
   assert.equal(f['node-fp-name-Q9Z8'], undefined, '兩個都沒有就不放')
-  assert.deepEqual(nodeFactsOf([{ id: 'x', created_at: 'not-a-date', last_seen_at: 5 }]), {})
+  assert.deepEqual(nodeFactsOf([{ id: 'x', created_at: 'not-a-date', last_seen_at: {} }]), {})
 })
 
 test('#1829 名字空白時，標題是「種類（代號末 4 碼）」，不是「未命名設備」', () => {
@@ -149,7 +149,7 @@ test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩 t
     const src = read(`${dir}/${f}`)
     if (/UNNAMED_DEVICE|'未命名設備'/.test(src.replace(/\/\/.*$/gm, ''))) hits.push(f)
   }
-  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'text.mjs'])
+  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'notice.mjs', 'text.mjs'])
 })
 
 test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {
@@ -163,7 +163,7 @@ test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那�
 
 test('#1829 電腦版細部頁的返回鈕只放「‹」（和手機一樣），讀屏與鍵盤用 aria-label="返回"', async () => {
   const html = await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })
-  assert.match(html, /<button class="aero-btn dv-back" type="button" aria-label="返回">‹<\/button>/)
+  assert.match(html, /<button class="aero-btn dv-back" type="button" aria-label="返回" title="返回">‹<\/button>/)
   assert.ok(!html.includes('‹ 返回') && !html.includes('>返回<'), '畫面上不再寫「返回」兩個字')
 })
 
@@ -172,4 +172,12 @@ test('#1829 平台拿不到時整列不放（不寫「不明」），有平台�
   assert.ok(!none.rows.some(r => r.key === 'platform'))
   assert.ok(!JSON.stringify(none).includes('不明'))
   assert.equal(deviceIdentity({ node: 'abcd1234', named: true, label: 'x', platform: 'macos', now: NOW }).rows.find(r => r.key === 'platform').value, 'macOS')
+})
+
+test('#1829 時間的邊界：後台給毫秒數字也收；未來的時間不接「（多久以前）」；壞值當沒有', () => {
+  assert.equal(nodeFactsOf([{ id: 'n', last_seen_at: NOW - 60_000 }]).n.seenMs, NOW - 60_000)
+  assert.deepEqual(nodeFactsOf([{ id: 'n', last_seen_at: -5, created_at: 0 }]), {})
+  const future = deviceIdentity({ node: 'abcd1234', named: true, label: 'x', seenMs: NOW + 3600_000, now: NOW }).rows.find(r => r.key === 'seen').value
+  assert.match(future, /^\d{4}\/\d\d\/\d\d \d\d:\d\d$/)
+  assert.ok(!future.includes('前'))
 })

@@ -50,7 +50,7 @@ export function deviceIdentity({ node = '', label = '', named = false, platform 
   const T = IDENTITY_TEXT
   const title = named ? label : unnamedClue({ phone, node })
   const pText = PLATFORM_TEXT[String(platform ?? '').toLowerCase()] ?? ''
-  const seenAgo = seenMs ? agoText(new Date(seenMs).toISOString(), now) : ''
+  const seenAgo = seenMs && seenMs <= now ? agoText(new Date(seenMs).toISOString(), now) : ''   // 時間在未來（兩台電腦時鐘差）就不寫「多久以前」
   const seen = online ? T.online : (seenMs ? `${dateTimeText(seenMs)}${seenAgo ? `（${seenAgo}）` : ''}` : T.noRecord)
   const rows = [
     ...(createdMs ? [{ key: 'created', label: T.created, value: dateTimeText(createdMs) }] : []),   // 後台沒給建立時間就整列不放（#1829 領隊拍板）

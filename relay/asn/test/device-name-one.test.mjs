@@ -44,9 +44,9 @@ test('#1803 手機設備頁：本機那一列寫真名，同一台只有一列�
   assert.equal(rows[0].self, true)
   assert.equal(rows[0].kind, '手機')
   assert.equal(rows.some(r => /未命名設備/.test(r.label)), false)
-  // 沒給 nodeNames（舊程式的讀法）＝退回標籤「這支手機」：這條在舊程式上就是現在看到的症狀
+  // 沒給 nodeNames（舊程式的讀法）＝本機也寫辨認線索（不寫「這支手機」，那只當小標籤）
   const old = acctDeviceTree({ friends, nodeOrder: ['P', 'Q'], selfNode: 'P', launchers: {}, machines: {} })
-  assert.equal(old[0].label, '這支手機')
+  assert.equal(old[0].label, '手機（P）')
 })
 
 test('#1803 電腦設備頁：本機沒有夥伴時也寫真名；用的是和手機同一個讀法', () => {

@@ -98,6 +98,7 @@ import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible,
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
+import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
@@ -428,6 +429,7 @@ function remotePiModelsFor(node) {
   return Array.isArray(pm) && pm.length ? async () => pm : null
 }
 const remoteMachines = ref({})   // node → { platform, launch_closed_reason }（0.2 H2：沒開放時說明怎麼開，或那台自己寫的原因）
+watch(remoteMachines, m => setNodePlatforms(m, { node: info.node, phone: false }), { immediate: true })   // 手機還是電腦只有 node-platform.mjs 一份判斷（#1829）
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })

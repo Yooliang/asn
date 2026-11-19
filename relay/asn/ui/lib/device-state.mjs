@@ -5,6 +5,7 @@
 // 不能說成「沒登入」；也不知道有沒有裝時不亂說「未安裝」。
 // 資料來源都是現有的，沒有新的後台回報：帳號回報（reports[node]）、啟動器回報（launchers[node].profiles）、名單的引擎、本機偵測。
 import { loginFailed } from './claude-accounts.mjs'
+import { isPhoneDevice } from './node-platform.mjs'
 
 /** 帳號回報超過這麼久沒更新就當「還沒收到回報」（每 5 分鐘回報一次，夠寬；電腦睡眠醒來不會閃，要實機看一次） */
 export const REPORT_FRESH_MS = 15 * 60 * 1000
@@ -45,17 +46,7 @@ export const STATE_TEXT = Object.freeze({
   [STATE.NO_REPORT]: '還沒收到這台的回報',
 })
 
-const PHONE_KINDS = new Set(['phone', 'mobile', 'android'])
-const PHONE_PLATFORMS = new Set(['android', 'ios'])
-const DESKTOP_PLATFORMS = new Set(['windows', 'macos', 'linux'])
-
-/** 這台是不是手機：後台回報的平台優先（#652），沒有再退回名單的種類（舊版手機的平台是空的） */
-export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
-  const p = String(platform ?? '').toLowerCase()
-  if (PHONE_PLATFORMS.has(p)) return true
-  if (DESKTOP_PLATFORMS.has(p)) return false   // 後台說是電腦就是電腦，不管名單的種類寫什麼
-  return (kinds ?? []).some(k => PHONE_KINDS.has(String(k ?? '').toLowerCase()))
-}
+export { isPhoneDevice }   // 判斷只有 node-platform.mjs 一份（#1829）
 
 /**
  * 這台是不是「雲端夥伴」（#930，0.2.15）：**沒有電腦版 ASN、只有橋或雲端代理的節點**。

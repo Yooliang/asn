@@ -6,6 +6,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
 import { DeviceIdentity, IDENTITY_TEXT } from './lib/device-identity.mjs'
+import { setNodePlatforms } from './lib/node-platform.mjs'
 import { ACTION_TEXT } from './lib/device-order.mjs'
 import { listTimeText } from './lib/line-chat.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
@@ -794,6 +795,7 @@ const app = createApp({
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
     const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
+    watch(() => lchData.machines, m => setNodePlatforms(m, { node: info.node, phone: true }), { immediate: true })   // 手機還是電腦只有 node-platform.mjs 一份判斷（#1829）
     const acctSigned = () => (acct.value.known ? acct.value.signed_in : null)   // 還沒查到登入狀態＝null，不是「沒登入」
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))

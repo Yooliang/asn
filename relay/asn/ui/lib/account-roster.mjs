@@ -66,9 +66,9 @@ export function shortDevice(label, max = DEVICE_MAX) {
   return chars.length > max ? chars.slice(0, max).join('') : chars.join('')
 }
 
-/** 節點 → 設備名稱：名單裡那台的 device 欄；本機用 selfLabel；對不到寫「電腦（代號末 4 碼）」這種辨認線索（#1829） */
-export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台電腦', nodeNames = null } = {}) {
-  return node => deviceNameOf(node, { nodeNames, friends }) || (node && node === selfNode ? selfLabel : unnamedLabelOf(node, { friends }))
+/** 節點 → 設備名稱：名單裡那台的 device 欄；對不到寫「電腦（代號末 4 碼）」這種辨認線索，本機也一樣（#1829、#1803） */
+export function nodeLabelOf(friends = [], { nodeNames = null } = {}) {
+  return node => deviceNameOf(node, { nodeNames, friends }) || unnamedLabelOf(node, { friends })
 }
 
 // 沒有 5 小時窗的帳號（Ultra 等，#1736）：Claude 狀態列只送每週，後台還留著改方案前最後一筆 5 小時。
