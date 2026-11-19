@@ -1,5 +1,5 @@
 // 在別台電腦上夥伴的畫面打字（0.2.10）。和「看畫面」（term-remote.mjs，只能看）分開：這裡才有打字的路。
-// 按下去就直接發起（11-08 起這台不再確認本人），那台會請那邊的人同意（或那邊的人設過不用每次問）。
+// 按下去就直接發起（11-08 起這台不再確認本人）；0.2.33 起那台也不再跳確認框，只看那台有沒有開「允許遠端在這台打字」。
 // 打的字在 Rust 端編序號、加密、補送；畫面這邊只把 xterm 收到的按鍵交給 remoteInputApi.send。
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
 import { frameToWrite, loadXterm, xtermOptions, pasteSummary, PASTE_TEXT } from './term-view.mjs'
@@ -10,15 +10,15 @@ export { ENTER_DELAY_MS, pasteLines }
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
-export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那邊的人要同意；2 分鐘沒打字會自動結束）'
+export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那台要開著「允許遠端在這台打字」；2 分鐘沒打字會自動結束）'
 
 export const INPUT_TEXT = {
-  waiting: '等那台電腦回應……那邊的人可能要按「允許」。',
+  waiting: '正在連到那台電腦……',
   typing: (machine, name) => `正在「${machine}」上「${name}」打字：你打的字會直接送進那個視窗，包括回答權限框`,
   soon: '再 1 分鐘就會結束，要繼續打字請結束後再開一次。',
   stop: '結束打字',
   back: '改回只能看',
-  waitReply: '等那台電腦回應',
+  waitReply: '正在連到那台電腦',
   refused: reason => (reason ? `沒有開始打字：${reason}` : '沒有開始打字，字已放回輸入框'),
   again: '再開一次',
   sendFailed: '這段沒有送出，請再試一次。',
@@ -48,7 +48,7 @@ export const RemoteInput = {
     name: { type: String, required: true },
     machine: { type: String, default: '' },
     active: { type: Boolean, default: true },
-    snap: { type: String, default: null },       // 送出後、對方允許前：保留原本看到的畫面（純文字）當底，上面疊「等那台電腦回應」（#1647）；沒給＝不疊
+    snap: { type: String, default: null },       // 送出後、連上那台前：保留原本看到的畫面（純文字）當底，上面疊「正在連到那台電腦」（#1647）；沒給＝不疊
     barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
   emits: ['back', 'status', 'unsent', 'screen', 'phase', 'refused'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）

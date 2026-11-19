@@ -34,7 +34,22 @@ export function stripAnsi(text) {
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
     .replace(/\u001b[()*+][0-~]/g, '')
-    .replace(/\u001b[@-_]?/g, '')
+    // DCS／SOS／PM／APC（ESC P／X／^／_ 開頭，到 ST 或 BEL）：內容整段吃掉，不留殘字
+    .replace(/\u001b[PX^_][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
+    // 兩字元序列：ESC 7／ESC 8（存取游標）、ESC =／ESC >（小鍵盤模式）等（ESC 後接 0x30–0x3F）；落單的 ESC
+    .replace(/\u001b[@-_0-?]?/g, '')
+    // 落單的 SI／SO（切換字元集）
+    .replace(/[\u000e\u000f]/g, '')
+}
+
+/**
+ * 畫面文字一列一列照原樣留下（只去跳脫序列、每列結尾的空白、最後的空列）：列數與原本畫面一樣。
+ * 給「要把畫面原樣畫出來」的地方用（送出後等對方回應的底圖）；複製、找網址要接回折行，用 joinWrapped
+ */
+export function plainRows(text) {
+  const rows = stripAnsi(text).replace(/\r\n?/g, '\n').split('\n').map(r => r.replace(/\s+$/, ''))
+  while (rows.length && !rows[rows.length - 1]) rows.pop()
+  return rows.join('\n')
 }
 
 const RULE_ROW = /^[\s─━═╌▔▁-]+$/u

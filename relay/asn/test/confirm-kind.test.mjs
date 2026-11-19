@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AWAITING_CONSENT_HINT, CONFIRM_KEYWORDS, confirmKindOf, confirmNoteOf } from '../ui/lib/confirm-kind.mjs'
+import * as CK from '../ui/lib/confirm-kind.mjs'
+import { CONFIRM_KEYWORDS, confirmKindOf, confirmNoteOf } from '../ui/lib/confirm-kind.mjs'
 import { STUCK_NOTES } from '../ui/lib/term-entry.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -56,8 +57,8 @@ test('只做顯示、不代按：這個模組沒有任何送鍵／呼叫後台�
   assert.match(cp, /v-if="confirmNote" role="note">\{\{ confirmNote \}\}<\/p>/)
 })
 
-test('提醒「那台需要先設免問」：只在等確認的夥伴、遠端畫面開著、正在等那台回應時才有', () => {
+test('不再有「那台需要先設免問／有人按允許」的提醒（0.2.33 起遠端打字沒有確認框，這句只用在遠端打字等待，沒有別的用途）', () => {
+  assert.equal(CK.AWAITING_CONSENT_HINT, undefined)
   const cp = read('ui', 'lib', 'chatpane.mjs')
-  assert.match(cp, /const consentHint = computed\(\(\) => \(props\.friend\?\.awaiting === true && remoteShown\.value && inputPhase\.value === 'waiting' \? AWAITING_CONSENT_HINT : ''\)\)/)
-  assert.equal(AWAITING_CONSENT_HINT, '那台需要先設免問，或有人在電腦前按允許')
+  assert.ok(!cp.includes('consentHint') && !cp.includes('AWAITING_CONSENT_HINT'))
 })
