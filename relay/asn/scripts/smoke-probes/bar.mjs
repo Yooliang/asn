@@ -41,10 +41,14 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
           window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); await sleep(150);
           if (left.length) return { ok: false, why: '「管理」裡還有喚醒' };
           wb.click();
-          let dlg = null;
-          for (let j = 0; j < 30 && !dlg; j++) { await sleep(100); dlg = document.querySelector('.dlg[role="dialog"][aria-label="喚醒"]') }
-          if (!dlg) return { ok: false, why: '點了喚醒沒有開喚醒對話框' };
-        } else if (wb && wimg !== 'img/ab-window.svg') return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
+          let row = null;
+          for (let j = 0; j < 30 && !row; j++) { await sleep(100); row = document.querySelector('.op-strip-row') }
+          // #1800：喚醒沒有要使用者選的東西（auto），送出後只在提示列就地顯示進度，不開對話框
+          if (document.querySelector('.dlg[role="dialog"]')) return { ok: false, why: '喚醒送出後不該有擋畫面的對話框' };
+          if (!row) return { ok: false, why: '點了喚醒，提示列沒有出現進度' };
+          const rt = row.textContent.replace(/\s+/g, ' ').trim();
+          if (!/正在發送指令/.test(rt)) return { ok: false, why: '提示列的文字不是喚醒的進度：' + rt };
+          } else if (wb && wimg !== 'img/ab-window.svg') return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
         if (wantItems) {
           tb.click();
           let items = [];
@@ -63,4 +67,8 @@ export default {
   key: 'bar',
   kind: '大按鈕檢查',
   source: probe => barProbeSource(probe),
+  // 喚醒送出後後台一直處理中，提示列的文字才固定是「正在發送指令…」（#1800）
+  table: scenario => scenario.name === 'list-bar-fixed-offline'
+    ? { relay_partner_op: { id: 'op-1' }, android_partner_op: { id: 'op-1' }, relay_partner_ops: { ops: [{ id: 'op-1', status: 'pending' }] }, android_partner_ops: { ops: [{ id: 'op-1', status: 'pending' }] } }
+    : undefined,
 }

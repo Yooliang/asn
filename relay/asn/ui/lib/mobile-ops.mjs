@@ -3,7 +3,7 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { switchModelsFor } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
-import { MENU_KEYS, partnerEngine } from './partner-ops.mjs'
+import { MENU_KEYS, OP_DONE_HIDE_MS, partnerEngine } from './partner-ops.mjs'
 import { isMergedAway } from './notice.mjs'
 
 // ---------- 「對話」分頁：最後使用的那一位 ----------
@@ -67,8 +67,12 @@ export function runBanner(run) {
     steps: (v.steps ?? []).map(s => ({ key: s.key, state: s.state, text: s.text, mark: STEP_MARK[s.state] ?? '' })),
     extra: v.extra ?? [],
     action: v.action ?? null,
+    retry: v.phase === 'failed',   // 失敗：可以再送一次
+    hideMs: hideAfterMs(v),
   }
 }
+// 成功、而且沒有補充要看（交接檔位置、提醒）：幾秒後自己消失。失敗、未確認、有補充的留著，等使用者處理
+export const hideAfterMs = v => (v?.phase === 'done' && !(v.extra ?? []).length && !(v.rows ?? []).length ? OP_DONE_HIDE_MS : 0)
 
 // ---------- 「⋯」選單的列 ----------
 // 手機對話頁上方不放大按鈕列，所有管理項目都在「⋯」裡：最常用的喚醒、切換模型排最前面，其餘照 manageItems 的順序。

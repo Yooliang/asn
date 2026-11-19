@@ -48,8 +48,10 @@ test('手機橫幅帶出 action', () => {
 
 test('模板：電腦版對話框與手機橫幅有開新夥伴鈕並接到既有入口', () => {
   const ui = read('ui/lib/partner-ops-ui.mjs')
-  assert.match(ui, /v-if="st\.view && st\.view\.action && st\.view\.action\.kind === 'launch-new'" @click="launchNew">開新夥伴</)
-  assert.match(ui, /emits: \['close', 'done', 'launch-new'\]/)
+  assert.match(ui, /v-if="st\.view && st\.view\.action && st\.view\.action\.kind === 'launch-new'" @click="launchNew">\{\{ T\.launchNew \}\}</)
+  assert.match(ui, /emits: \['close', 'done', 'launch-new', 'run'\]/)
+  assert.match(ui, /v-if="it\.b\.action && it\.b\.action\.kind === 'launch-new'" @click="launchNew\(it\.id\)">\{\{ T\.launchNew \}\}</, '提示列也有開新夥伴鈕')
+  assert.match(read('ui/list.html'), /@launch-new="launchNewFromRun"/)
   assert.match(read('ui/list.html'), /@launch-new="launchNewFromOp"/)
   assert.match(read('ui/list.js'), /function launchNewFromOp\(e\) \{ closeOpDlg\(\); openPartnerDlg\(e\?\.node \|\| ''\) \}/)
   assert.match(read('ui/m.html'), /v-if="opsBanner\.action && opsBanner\.action\.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</)

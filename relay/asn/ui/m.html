@@ -205,7 +205,8 @@
               <ol class="m-ops-steps" v-if="opsBanner.steps.length"><li v-for="s in opsBanner.steps" :key="s.key" :class="'is-' + s.state"><b aria-hidden="true">{{ s.mark }}</b>{{ s.text }}</li></ol>
               <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
               <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.action && opsBanner.action.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</button>
-              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.retry" @click="retryRun">{{ OP_PROGRESS_TEXT.retry }}</button>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">{{ OP_PROGRESS_TEXT.dismiss }}</button>
             </div>
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <div class="m-peer-strip" v-if="chatFriend && peerStrip" role="status">
@@ -486,7 +487,7 @@
             <template v-else>
               <p class="m-prog" :class="acctSw.view ? 'is-' + acctSw.view.phase : ''" role="status">{{ acctSw.view ? acctSw.view.text : '' }}</p>
               <div class="m-bar" v-if="acctSw.view && !acctSw.view.done" aria-hidden="true"><i></i></div>
-              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.backToList }}</button>
             </template>
           </div>
             </template>
@@ -718,7 +719,7 @@
                   <div class="m-bar" v-if="lch.vphase === 'sending' || lch.vphase === 'opening' || lch.vphase === 'waiting'" aria-hidden="true"><i></i></div>
                   <button class="m-btn m-btn-big" type="button" v-if="lch.vphase === 'done'" @click="openLaunched">開始對話</button>
                   <button class="m-btn" type="button" v-if="lch.vphase === 'failed'" @click="lch.phase = 'form'">再試一次</button>
-                  <button class="m-btn" type="button" @click="closeLaunch">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
+                  <button class="m-btn" type="button" @click="closeLaunch">{{ OP_PROGRESS_TEXT.close }}</button>
                 </template>
               </div>
             </div>
@@ -793,7 +794,8 @@
           <dl class="m-ops-rows" v-if="ops.view && ops.view.rows && ops.view.rows.length"><template v-for="r in ops.view.rows" :key="r.label"><dt>{{ r.label }}</dt><dd>{{ r.value }}</dd></template></dl>
           <p class="m-note" v-if="ops.view && ops.view.rows && !ops.view.rows.length">沒有更多資料。</p>
           <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
-          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+          <button type="button" class="m-btn m-btn-big" v-if="ops.view && ops.view.phase === 'failed'" @click="retryInfo">{{ OP_PROGRESS_TEXT.retry }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ OP_PROGRESS_TEXT.close }}</button>
         </template>
       </section>
     </div>
