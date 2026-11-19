@@ -19,7 +19,7 @@ import { TERM_REQ_ACTIONS } from "./term_request.ts";
 import { TERM_VIEW_ACTIONS } from "./term_view_ctl.ts";
 import { USAGE_ACTIONS } from "./usage.ts";
 import {
-  browserLabel, gateWebRequest, handleWebAction, isWebOrigin, memoVerify, sessionIdOfToken, WEB_ALLOWED_ACTIONS, WEB_DENIED_ACTIONS, WEB_FORBIDDEN,
+  announceWebLogin, browserLabel, gateWebRequest, handleWebAction, isWebOrigin, memoVerify, sessionIdOfToken, WEB_ALLOWED_ACTIONS, WEB_DENIED_ACTIONS, WEB_FORBIDDEN,
   webCorsHeaders, webCredentialCheck, type WebDeps, webOrigins, webPreflight, type WebRequestInfo, withWebCors,
 } from "./web_session.ts";
 
@@ -379,4 +379,67 @@ Deno.test("index.ts：網頁閘道在帳號動作、金鑰驗證之前；網頁�
   assert(code.includes("sessionId: sessionIdOfToken(token, u.id)"), "驗憑證時一併取 session_id");
   assert(code.includes('"asn_relay_list", { p_tenant: me.tenant_id, ...(web ? { p_include_web: true } : {}) }'), "只有網頁才帶 p_include_web");
   assert(!code.includes("irori_relay_"));
+});
+
+// ---- 新瀏覽器第一次登入：敲門鈴、推手機 ----
+const MAIL = "22222222-2222-4222-8222-222222222222";
+const PUSH_USER = "33333333-3333-4333-8333-333333333333";
+
+function pushRig(opts: { recipient?: unknown; fcm?: boolean } = {}) {
+  const rpcs: Call[] = [];
+  const sentTokens: string[] = [];
+  const rings: string[] = [];
+  const pending: Promise<unknown>[] = [];
+  const push = {
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      rpcs.push({ fn, args });
+      if (fn === "asn_relay_push_recipient_mail") return Promise.resolve({ data: opts.recipient ?? { user: PUSH_USER }, error: null });
+      if (fn === "asn_relay_push_targets") return Promise.resolve({ data: { targets: [{ node: "phone1", token: "t".repeat(40) + ":APA91b" }] }, error: null });
+      return Promise.resolve({ data: {}, error: null });
+    },
+    fcm: opts.fcm === false ? null : { send: (t: string) => { sentTokens.push(t); return Promise.resolve({ status: 200, invalid: false }); } },
+  };
+  const deps = { ring: (t: string) => { rings.push(t); return Promise.resolve(); }, push, background: (p: Promise<unknown>) => { pending.push(p); } };
+  return { deps, rpcs, sentTokens, rings, settle: () => Promise.all(pending) };
+}
+const WEB_ME = { id: "w1", bell_topic: "relay-bell-w1", role: "member", tenant_id: "t-1" };
+
+Deno.test("新瀏覽器第一次登入：敲門鈴，並以 owner_mail 類別、網頁節點與信件編號呼叫 notifyPush（推到手機）", async () => {
+  const r = pushRig();
+  await announceWebLogin(r.deps, { me: WEB_ME, notice: { notify: "sent", bell_topics: ["b1", "b2"], mail_id: MAIL } });
+  await r.settle();
+  assertEquals(r.rings, ["b1", "b2"]);
+  // notifyPush("owner_mail", 節點, 信件編號) 的第一步：用這封信查收件人（節點與信件編號原樣帶進去）
+  assertEquals(r.rpcs[0], { fn: "asn_relay_push_recipient_mail", args: { p_node: "w1", p_message_id: MAIL } });
+  assertEquals(r.rpcs[1], { fn: "asn_relay_push_targets", args: { p_user: PUSH_USER, p_kind: "owner_mail" } });
+  assertEquals(r.sentTokens.length, 1, "手機收到推播");
+});
+
+Deno.test("新瀏覽器登入通知沒寄成功、沒有信件編號、或沒有新通知：不推手機（沒通知時連門鈴都不敲）", async () => {
+  for (const notice of [
+    { notify: "failed", bell_topics: [], mail_id: MAIL },
+    { notify: "rate_limited", bell_topics: [], mail_id: MAIL },
+    { notify: "sent", bell_topics: ["b1"], mail_id: null },
+    null,
+  ]) {
+    const r = pushRig();
+    await announceWebLogin(r.deps, { me: WEB_ME, notice });
+    await r.settle();
+    assertEquals([r.rpcs.length, r.sentTokens.length], [0, 0], JSON.stringify(notice));
+    assertEquals(r.rings.length, notice ? notice.bell_topics.length : 0);
+  }
+});
+
+Deno.test("沒設推播秘密（fcm 為 null）：安靜不推，不丟例外，門鈴照敲", async () => {
+  const r = pushRig({ fcm: false });
+  await announceWebLogin(r.deps, { me: WEB_ME, notice: { notify: "sent", bell_topics: ["b1"], mail_id: MAIL } });
+  await r.settle();
+  assertEquals([r.rings, r.rpcs.length, r.sentTokens.length], [["b1"], 0, 0]);
+});
+
+Deno.test("index.ts：網頁閘道通過後交給 announceWebLogin（background 用 signal.background），推播參數不經用戶端", () => {
+  const code = stripLineComments(indexSrc);
+  assert(code.includes("await announceWebLogin({ ring, push: { rpc: async (fn, args) => await db.rpc(fn, args), fcm }, background: signal.background }, web);"));
+  const mod = stripLineComments(Deno.readTextFileSync(new URL("web_session.ts", import.meta.url)).replace(/\r\n/g, "\n"));
+  assert(mod.includes('notifyPush(deps.push, "owner_mail", g.me.id, n.mail_id)'), "類別 owner_mail、節點取自已驗過的登入記錄、信件編號取自資料庫回應");
 });

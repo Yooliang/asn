@@ -51,7 +51,7 @@ import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts"
 import { requestReadSync } from "../_shared/read_sync.ts";
 import { approveCorsHeaders, DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
-import { gateWebRequest, handleWebAction, memoVerify, sessionIdOfToken, WEB_FORBIDDEN, webCredentialCheck, webCredentialTokens, webOrigins, webPreflight, webRequestInfo, withWebCors } from "../_shared/web_session.ts";
+import { announceWebLogin, gateWebRequest, handleWebAction, memoVerify, sessionIdOfToken, WEB_FORBIDDEN, webCredentialCheck, webCredentialTokens, webOrigins, webPreflight, webRequestInfo, withWebCors } from "../_shared/web_session.ts";
 
 const ttsLimiter = new TtsLimiter();
 
@@ -185,10 +185,7 @@ async function handle(req: Request): Promise<Response> {
   const web = gate.kind === "web" ? gate : null;
   if (web) {
     // 新的瀏覽器第一次登入：通知信已經由資料庫寄出，這裡敲門鈴、推手機（失敗都不影響這次請求）
-    if (web.notice) {
-      for (const t of web.notice.bell_topics) await ring(t);
-      if (web.notice.notify === "sent" && web.notice.mail_id) signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", web.me.id, web.notice.mail_id));
-    }
+    await announceWebLogin({ ring, push: { rpc: async (fn, args) => await db.rpc(fn, args), fcm }, background: signal.background }, web);
     const w = await handleWebAction({ rpc: async (fn, args) => await db.rpc(fn, args) }, action ?? "", web);
     if (w) {
       for (const t of w.bellTopics) await ring(t);

@@ -12,6 +12,7 @@
 //   - 網頁分支只在請求的 Origin 是設定的網頁版網域時才啟用；沒設網域（站點還沒建）或 Origin 不在清單裡，帶瀏覽器代號一律 403，什麼都不寫。
 import { type AuthUser, bearerToken, type Reply } from "./account.ts";
 import { SIGN_HEADER } from "./owner_sign.ts";
+import { notifyPush, type PushDeps } from "./push_ctl.ts";
 
 export const WEB_HEADER = "x-asn-web";
 export const WEB_FORBIDDEN = "web_forbidden";
@@ -235,6 +236,20 @@ function parseNotice(v: unknown): WebNotice | null {
   if (!o) return null;
   const topics = Array.isArray(o.bell_topics) ? o.bell_topics.filter((t): t is string => typeof t === "string" && t.length > 0) : [];
   return { notify: typeof o.notify === "string" ? o.notify : "failed", bell_topics: topics, mail_id: typeof o.mail_id === "string" ? o.mail_id : null };
+}
+
+/**
+ * 新的瀏覽器第一次登入：通知信已經由資料庫寄出，這裡敲門鈴、再推手機（照「寄給本人」的做法，推播類別 owner_mail，信件編號與節點都來自資料庫回應與已驗過的登入記錄）。
+ * 推播在背景跑、永遠不丟例外；寄信失敗（notify 不是 sent）或沒有信件編號就不推。沒有新通知時什麼都不做。
+ */
+export async function announceWebLogin(
+  deps: { ring: (topic: string) => Promise<void>; push: PushDeps; background: (p: Promise<unknown>) => void },
+  g: { me: WebMe; notice: WebNotice | null },
+): Promise<void> {
+  const n = g.notice;
+  if (!n) return;
+  for (const t of n.bell_topics) await deps.ring(t);
+  if (n.notify === "sent" && n.mail_id) deps.background(notifyPush(deps.push, "owner_mail", g.me.id, n.mail_id));
 }
 
 /**
