@@ -8,14 +8,14 @@ import { INPUT_TEXT } from '../ui/lib/term-remote-input.mjs'
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const pane = read('ui/lib/chatpane.mjs'), input = read('ui/lib/term-remote-input.mjs'), css = read('ui/style.css')
 
-test('提示字：還沒開始打字寫「送出會向那台電腦要打字權限」；沒給名字用通用說法；已在打字的提示不變', () => {
-  assert.equal(composeRemoteHint('小乙'), '送出會向那台電腦要打字權限（小乙 的終端）')
-  assert.match(composeRemoteHint(''), /^送出會向那台電腦要打字權限（這位夥伴 /)
+test('提示字：還沒開始打字寫「送出後會連到那台電腦」（不再說要權限，0.2.33）；沒給名字用通用說法；已在打字的提示不變', () => {
+  assert.equal(composeRemoteHint('小乙'), '送出後會連到那台電腦，打進 小乙 的終端')
+  assert.match(composeRemoteHint(''), /^送出後會連到那台電腦，打進 這位夥伴 /)
   assert.equal(composeTermHint('小乙'), '輸入的字會直接打進 小乙 的終端')
 })
 
 test('等待與拒絕的字：等待那行、沒開始的原因（有原因照寫，沒有就說字已放回）', () => {
-  assert.equal(INPUT_TEXT.waitReply, '等那台電腦回應')
+  assert.equal(INPUT_TEXT.waitReply, '正在連到那台電腦')
   assert.equal(INPUT_TEXT.refused('那邊的人沒有允許'), '沒有開始打字：那邊的人沒有允許')
   assert.match(INPUT_TEXT.refused(''), /沒有開始打字，字已放回輸入框/)
 })
@@ -29,7 +29,7 @@ test('接線：打字元件拿最後一幅畫面當底（snap）、只在 starti
   assert.match(pane, /:snap="waitSnap"/)
   assert.match(pane, /@refused="onInputRefused"/)
   assert.match(pane, /const onInputRefused = reason => \{ remoteTyping\.value = false; typingEndedNote\.value = INPUT_TEXT\.refused\(reason\) \}/)
-  assert.match(pane, /const waitSnap = computed\(\(\) => screenPlain\.value\)/)
+  assert.match(pane, /const waitSnap = computed\(\(\) => plainRows\(remoteScreen\.value\.text\)\)/)
 })
 
 test('樣式：等待層蓋在畫面上（absolute、不擋原本版面）', () => {

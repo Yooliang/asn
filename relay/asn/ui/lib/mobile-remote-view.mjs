@@ -4,7 +4,7 @@
 // 打字另外用 Rust 發的一次性憑證（confirmWithToken），Rust 用掉憑證才發起。
 // 守門測試鎖住 m.js、m.html、其他 mobile*.mjs 不准引用 remoteViewApi、remoteInputApi。
 // 指令和電腦版同名同參數（term_view_remote_available／start／input／set／stop），事件也一樣；差別只在 start 之前的確認。
-// 打字的那台會照電腦的規則問那邊的人（第一次要允許、允許過可以不再問），送字只送到 Rust 端登記過（那台接受過）的工作階段。
+// 打字的那台看有沒有開「允許遠端在這台打字」（0.2.33 起不再跳確認框），送字只送到 Rust 端登記過（那台接受過）的工作階段。
 import { invoke as tauriInvoke, listen, remoteInputApi, remoteViewApi } from './tauri.mjs'
 import { NO_LOCK_TEXT, confirmViewer, confirmWithToken } from './mobile-confirm.mjs'
 import { normalizeList } from './mobile-known-peers.mjs'
