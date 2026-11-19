@@ -408,14 +408,28 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # apt 鏡像偶爾整個卡住（11-11 Azure 鏡像抓不下套件，連續幾個 run 卡在這一步一小時以上）：
-      # apt-install.sh 先用預設鏡像、失敗才換官方站再試一次，每段都有 timeout；整步限 15 分鐘，卡住就失敗、不佔住機器
+      # apt 下載偶爾很慢（#1796：要抓約 95 MB／203 個套件，鏡像慢時逾時 exit 124）：
+      # 1) .deb 快取：key＝runner OS＋套件清單與安裝腳本的雜湊＋年週（每週重建一次，讓安全更新進得來）。
+      #    用 actions/cache（repo 已有且釘在 SHA），不新增第三方 action。
+      # 2) apt-install.sh 最多 3 輪、第 2 輪起換官方站，每輪有 timeout；3) 整步上限 30 分鐘，卡住就失敗、不佔住機器
+      - name: 算 apt 快取 key
+        id: aptkey
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: 還原 apt 套件快取
+        id: aptcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ hashFiles('.github/apt-build-packages.txt', '.github/scripts/apt-install.sh') }}-${{ steps.aptkey.outputs.week }}
+
       - name: 安裝系統依賴
-        timeout-minutes: 15
+        timeout-minutes: 30
+        env:
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
         run: |
-          bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" build-essential pkg-config libssl-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf xvfb scrot
+          mapfile -t pkgs < <(grep -vE '^\s*(#|$)' "$GITHUB_WORKSPACE/.github/apt-build-packages.txt")
+          bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" "${pkgs[@]}"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -445,8 +459,18 @@ jobs:
       # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，金鑰圈用固定測試密碼解鎖。
       # 平常是 ignored，只在這裡明確跑；不碰任何真的帳號或 secrets
       - name: 安裝系統金鑰庫測試依賴
-        timeout-minutes: 15
+        timeout-minutes: 30
+        env:
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
         run: bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends gnome-keyring dbus-daemon
+      # 兩批套件都裝完就存快取（不等後面的測試，測試紅也不浪費這次下載）；已命中就不重存
+      - name: 儲存 apt 套件快取
+        if: steps.aptcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.aptcache.outputs.cache-primary-key }}
+
       - name: 系統金鑰庫整合測試（Linux）
         working-directory: relay/asn/src-tauri
         run: |
