@@ -11,7 +11,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { SMOKE_NOW, SCENARIOS, findBrowser, injectSource, mountCheckSource, mpaneWidenProbeSource, pagerSettleSource, pathOf, probeKind, probeSource, tableFor } from './smoke-lib.mjs'
 import { PNG_1X1, realInput } from './ui-shots-input.mjs'
-import { clockSource, cjkProbeSource, cjkVerdict, compareImages, coverage, decodePng, diffLines, encodePng, formatReport, freezeSource, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, scenarioSkin, scenarioWidth, shotScenarios, sideBySide, snapshotSource, strictFailed, UNSTABLE_SCENARIOS } from './ui-shots-lib.mjs'
+import { clockSource, cjkProbeSource, cjkVerdict, toolBroken, compareImages, coverage, decodePng, diffLines, encodePng, formatReport, freezeSource, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, scenarioSkin, scenarioWidth, shotScenarios, sideBySide, snapshotSource, strictFailed, UNSTABLE_SCENARIOS } from './ui-shots-lib.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const fatal = m => { console.error(`畫面截圖比對無法執行：${m}`); process.exit(2) }
@@ -37,9 +37,10 @@ const baseMeta = { base: baseUi, new: newUi }
 // 找不到瀏覽器：清楚說明後提早結束（不讓 PR 紅）；--strict 才算失敗
 let browserPath
 try { browserPath = findBrowser({ explicit: opts.browser }) } catch (e) {
-  console.log(`畫面截圖比對已略過：${e.message}`)
+  console.log(`畫面截圖比對已略過（工具沒有跑，不是「沒有差異」）：${e.message}`)
+  console.log(`::warning::畫面截圖比對沒有跑：${e.message}`)
   writeReport(formatReport({ rows: [], meta: { ...baseMeta, skipped: e.message }, opts }))
-  process.exit(opts.strict ? 1 : 0)
+  process.exit(3)   // 工具壞了固定非 0（步驟是 continue-on-error，不擋 PR，但會顯示警告）
 }
 for (const [label, dir] of [['--base', baseUi], ['--new', newUi]]) {
   if (!fs.existsSync(path.join(dir, 'm.html'))) fatal(`${label} ${dir} 不像 ui 資料夾（找不到 m.html）`)
@@ -201,7 +202,7 @@ try {
     const row = { name: sc.name, page: sc.page.split('?')[0], width: scenarioWidth(sc), skin: scenarioSkin(sc) }
     try {
       // 基準與新版一個接一個跑（同時開兩頁會讓靠計時器的探測讀到不同時間點的畫面，同一份程式碼也會誤報差異）
-      const a = await runShot(cdp, sc, bases[0], { wantCjk: i === 0 })
+      const a = await runShot(cdp, sc, bases[0], { wantCjk: !cjk })
       const b = await runShot(cdp, sc, bases[1])
       save('base', sc.name, a); save('new', sc.name, b)
       if (a.cjk) cjk = a.cjk
@@ -244,7 +245,11 @@ const seconds = Math.round((Date.now() - t0) / 1000)
 const cov = coverage(scenarios)
 const excluded = opts.includeUnstable ? [] : Object.entries(UNSTABLE_SCENARIOS).filter(([n]) => SCENARIOS.some(s => s.name === n && s.shot && (!opts.only.length || opts.only.some(f => n.includes(f)))))
 const meta = { ...baseMeta, browser: browserPath, seconds, excluded }
+// 中文字檢查一次都沒量到（第一個情境沒掛上、基準側出錯…）：不能當作通過，否則沒有 CJK 字型時全是方框也「一致」
+if (!cjk && !rows.some(r => r.name === '(整體)') && scenarios.length) cjk = { ok: false, missing: true, why: '中文字檢查一次都沒量到（情境沒有掛上或基準側出錯）' }
+const broken = toolBroken({ rows, meta, cjk })
 writeReport(formatReport({ rows, meta, cjk, coverageMissing: cov.missing, opts }))
 const failed = strictFailed({ rows, cjk, opts, countMismatch: rows.length !== scenarios.length && !rows.some(r => r.name === '(整體)') })
 console.log(`畫面截圖比對：${rows.length} 個情境、耗時 ${seconds} 秒、報告 ${path.join(out, 'report.md')}${cjk && !cjk.ok ? `\n🔴 中文字檢查失敗：${cjk.why}` : ''}`)
-process.exit(opts.strict && failed ? 1 : 0)
+if (broken) console.log(`::warning::畫面截圖比對工具自己壞了：${broken}`)
+process.exit(broken ? 3 : opts.strict && failed ? 1 : 0)

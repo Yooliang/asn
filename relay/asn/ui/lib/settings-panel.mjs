@@ -680,8 +680,9 @@ export const SettingsPanel = {
         </label>
         <small class="set-note" id="set-note-dp" v-if="st.skin === 'line'">LINE 風格固定頭像在訊息旁，這裡先不能改；換回其他外觀就能再調，原本的選擇還在。</small>
         <label>工具列位置
-          <select class="set-sel" :value="st.toolbar" @change="act('toolbar', $event.target.value)" aria-label="工具列位置"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
+          <select class="set-sel" :value="st.toolbar" :disabled="st.skin === 'modern'" @change="act('toolbar', $event.target.value)" aria-label="工具列位置" :aria-describedby="st.skin === 'modern' ? 'set-note-toolbar' : null"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
         </label>
+        <small class="set-note" id="set-note-toolbar" v-if="st.skin === 'modern'">現代外觀的工具收在輸入框的「＋」裡，這裡先不能改；換回其他外觀就能再調，原本的選擇還在。</small>
         <label>文字底色
           <select class="set-sel" :value="effectiveLook(st.skin, st).bubble" :disabled="st.skin === 'line'" @change="act('bubble', $event.target.value)" aria-label="文字底色" :aria-describedby="st.skin === 'line' ? 'set-note-bubble' : null"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
         </label>

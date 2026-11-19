@@ -106,7 +106,7 @@ Deno.test("sanitizeLauncher：上傳的摘要只留 id／label／cwd_allow／max
   assertEquals(sanitizeLauncher({ profiles: "x" }), { error: "bad_request" });
 });
 
-Deno.test("sanitizeLauncher：mode 只收 term／background／window，其餘丟掉", () => {
+Deno.test("#1752 sanitizeLauncher：mode 只收 term／background／window，其餘丟掉", () => {
   // 30家用（launcher.rs 的 summary）實際送的形狀：asn終端的虛擬項目帶 engine 與 mode
   const raw = {
     profiles: [
