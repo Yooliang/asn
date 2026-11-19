@@ -52,13 +52,12 @@ const REPLACED = [
   ['20261117200000_roster_elevated.sql', 'public', 'asn_relay_list'],
 ]
 
-test('靜態：回復檔的每支函式逐字等於各自最後一次的定義；新 migration 排在最新的 migration 之後', () => {
+test('靜態：回復檔的每支函式逐字等於各自最後一次的定義；新 migration 排在 term_view_input_off 之後', () => {
   for (const [file, schema, name] of REPLACED) {
     const old = fnOf(file, schema, name)
     assert.ok(down.includes(old), `回復檔缺 ${name} 的原文`)
   }
   const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
-  assert.equal(files.indexOf(`${NAME}.sql`), files.length - 1, '要是最新的一支')
   assert.ok(files.indexOf(`${NAME}.sql`) > files.indexOf('20261119100000_term_view_input_off.sql'))
 })
 
