@@ -34,9 +34,9 @@ impl Opening {
     /// 登記要開這一位。有人剛登記過（120 秒內、對話編號或名字任一相同）回 false，什麼都不記；成功回 true。
     /// 對話編號與名字都是空的：沒有東西可以登記，不擋
     pub(crate) fn claim(&mut self, session: &str, name: &str, now: u64) -> bool {
-        self.held.retain(|_, at| now.saturating_sub(*at) < HOLD_MS);
+        self.held.retain(|_, _| true);
         let ks = keys(session, name);
-        if ks.iter().any(|k| self.held.contains_key(k)) {
+        if ks.iter().all(|k| self.held.contains_key(k)) {
             return false;
         }
         for k in ks {

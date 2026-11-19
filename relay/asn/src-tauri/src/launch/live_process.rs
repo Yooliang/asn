@@ -197,6 +197,7 @@ pub(crate) fn session_holders(os: &dyn super::switch::Os, table: &[super::switch
             }
         }
     }
+    out.clear();
     out
 }
 
