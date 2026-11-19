@@ -226,15 +226,23 @@ test('藍圖時間軸：過去（舊到新）→ 現在 → 未來（預定版�
   assert.deepEqual(t2.future.map(n => n.version), ['0.1.95'])
 })
 
-test('開發日誌：會議與發版合成一條、最新在上；同一天的發版排在當天會議之上、多版依版本新到舊', () => {
+test('開發日誌：只列發版、最新在上、同一天多版依版本新到舊；不含任何會議', () => {
   const d = rowsFromSeed()
-  const log = M.buildLog(d.meetings, d.releases)
-  assert.equal(log.length, 18)
-  assert.deepEqual(log.slice(0, 11).map(e => e.kind), Array(10).fill('release').concat('meeting'))
+  const log = M.buildLog(d.releases)
+  assert.equal(log.length, d.releases.length)
+  assert.ok(log.every(e => e.kind === 'release' && !('meeting' in e)), '日誌裡沒有會議')
   assert.equal(log[0].release.version, '0.1.94')
-  assert.equal(log[9].release.version, '0.1.85')
-  assert.equal(`${log[10].date} ${log[10].time}`, '2026-10-27 20:00', '會議時間以台北時間顯示')
-  assert.equal(`${log[17].date} ${log[17].time}`, '2026-10-26 08:00')
+  const keys = log.map(e => e.date)
+  assert.deepEqual(keys, [...keys].sort().reverse(), '日期新到舊')
+  const same = M.buildLog([{ version: '0.1.9', released_on: '2026-10-30', items: [] }, { version: '0.1.10', released_on: '2026-10-30', items: [] }])
+  assert.deepEqual(same.map(e => e.release.version), ['0.1.10', '0.1.9'])
+})
+
+test('開發日誌頁：說明與圖例只講發版，不出現會議', () => {
+  const html = read('site/public/log.html')
+  assert.ok(!html.includes('會議'), 'log.html 不該出現會議')
+  assert.ok(html.includes('tl-kind release'))
+  assert.ok(!read('site/public/roadmap.html').includes('發版與小會議的記錄'))
 })
 
 test('待辦欄位與總表：依排序組好，缺的格子當「待確認」', () => {
