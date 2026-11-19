@@ -28,14 +28,15 @@ const EMETA = JSON.parse(fixture('E.json'))
 test('#1697 #1696 看別台終端的畫面文字去序列：冒號全彩碼不再印成字（真的 Claude Code 畫面）', () => {
   const plain = stripAnsi(CC)
   assert.equal(plain, ['╭──────────────╮', ' 你好 粗', '底線完'].join('\n'))
-  assert.doesNotMatch(plain, /\x1b|\[[0-9;:]*[A-Za-z]|38:2|48:2|58:2|\(B/, '不留序列殘字')
 })
 
 test('#1697 #1761 去序列吃乾淨：真實 WezTerm 取樣、DCS／APC／OSC／ESC 7／SI SO 都不留殘字', () => {
   // 真實樣本：只剩字，沒有 ESC 也沒有 (B／[0m 殘字
   const plainE = stripAnsi(E)
   assert.doesNotMatch(plainE, /\x1b|\(B|\[0m/)
-  assert.ok(plainE.includes('全'.repeat(10)) || plainE.includes('冘'.repeat(10)) || /[^\s]{20}/.test(plainE), '字還在')
+  // 真實樣本 E 去序列後剩下的字：每列 60 個全形字（寫滿 120 欄）、接著 10 個字的續行，最後一列尾端是標記字串，一個字都不能多或少
+  const shape = plainE.split(/\r?\n/).filter(r => r.trim()).map(r => r.replace(/全+/, m => `全×${m.length}`))
+  assert.deepEqual(shape, ['全×60', '全×10', '全×60', '全×10', '全×60', '全×10', '全×60', '全×10', '全×60', '全×10MARK_E'])
   // 終端常見的其他序列（Claude Code／WezTerm 實際會吐的）
   const noisy = '\x1b[?2026h\x1b]0;claude\x07\x1b7\x1bP1$r0m\x1b\\a\x1b_Gi=1;OK\x1b\\b\x1b8\x0e\x0fc\x1b[?2026l'
   assert.equal(stripAnsi(noisy), 'abc')

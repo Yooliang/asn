@@ -81,7 +81,7 @@ test('#1640 #1637 卡在首次確認畫面：終端畫面上的提示（viewHint
 const fnBody = (src, sig) => src.split(sig)[1].split('\n}\n')[0]
 /** 取 Rust 字串陣列常數的所有字串 */
 const strArray = (src, name) => [...src.match(new RegExp(`const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))[1].matchAll(/"([^"]*)"/g)].map(m => m[1])
-/** 照 Rust 的 is_login_time_limit 移植（本體另外用原始碼比對鎖住，兩邊不能各改各的） */
+/** 照 Rust 的 is_login_time_limit 移植的 JS 版：只用來拿真畫面句子對辨認字（heads），守不到 Rust 的行為——Rust 本體靠下面的原始碼寫法比對守住，真正的行為測試由 #1820 補 */
 const portIsLimit = (line, heads) => {
   const t = line.trimStart()
   if (t.startsWith('●')) return false
@@ -90,12 +90,15 @@ const portIsLimit = (line, heads) => {
   return heads.some(h => rest.startsWith(h))
 }
 
-test('#1792 登入逾時：比對行首（不用包含）；真畫面的四種句子都認，AI 回覆、工具輸出、信件回顯引用同一句都不誤判', () => {
+test('#1792 登入逾時：Rust 原始碼用行首比對、轉小寫、排除 ● 開頭（靜態守門）；JS 移植版拿真畫面句子對辨認字（守不到 Rust 行為）', () => {
   const heads = strArray(prod, 'LOGIN_TIME_LIMIT_HEADS')
   assert.deepEqual(heads, ['login reached its time limit', 'failed to authenticate: this login reached its time limit'])
   // 原始碼本體：行首比對、先排除 ● 開頭的模型回覆，不能出現包含比對
   const body = fnBody(prod, 'fn is_login_time_limit(')
-  assert.match(body, /t\.starts_with\('●'\)[\s\S]*return false/)
+  assert.match(body, /let t = line\.trim_start\(\);/, '先去行首空白')
+  assert.match(body, /if t\.starts_with\('●'\) \{\s*return false;\s*\}/, '● 開頭（模型回覆）直接不算')
+  assert.match(body, /let lower = t\.to_ascii_lowercase\(\);/, '轉小寫再比：大小寫不敏感（真畫面是「Login reached…」、辨認字是小寫）')
+  assert.match(body, /lower\.strip_prefix\('⎿'\)\.unwrap_or\(lower\.as_str\(\)\)\.trim_start\(\)/, '去掉 ⎿ 與其後空白')
   assert.match(body, /strip_prefix\('⎿'\)/)
   assert.match(body, /LOGIN_TIME_LIMIT_HEADS\.iter\(\)\.any\(\|h\| rest\.starts_with\(h\)\)/)
   assert.ok(!/\.contains\(|\.find\(/.test(body), '不能用包含比對：AI 回覆或文件引用這句話就會誤判成要登入')
