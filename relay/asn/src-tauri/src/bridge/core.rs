@@ -422,7 +422,7 @@ pub struct Core {
     /// 上次成功回報給後台的「允許別台看畫面／在這台打字」兩個開關（沒回報過＝None）。開關一改，下一次即時監看就補報名單
     remote_flags_sent: Option<(bool, bool)>,
     /// 開關補報連續失敗的次數與最後一次失敗的時間：後台不通時照退避時間再試，不每秒打一次（成功或開關已對上就歸零）
-    remote_flags_fails: u32,
+    pub(super) remote_flags_fails: u32,
     remote_flags_fail_at: u64,
     /// 自動回信模式：已交給 worker、這一輪還沒看到它回報結果（名單 busy 的依據之一）
     respond_open: bool,
