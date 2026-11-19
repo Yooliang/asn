@@ -2,10 +2,12 @@
 // 用雲端節點的真實形狀：沒有設備公鑰（認得的電腦裡沒有它）、夥伴沒帶 device 欄、夥伴狀態 idle、帳號回報讀取失敗；本機記得它上次被判成雲端。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
+import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 
 const CLOUD = 'cloud-node-aegis-7Q2M'
 const friends = [{ id: `${CLOUD}/麗麗`, node: CLOUD, agent: '麗麗', nick: '麗麗', status: 'idle', engine: 'aegis', kind: 'claude' }]   // 存檔還原的夥伴列：沒有 device
@@ -32,4 +34,17 @@ test('#1707 雲端節點的詳情不寫「還沒連線過」與「帳號回報�
   assert.ok(!detail.includes('帳號回報讀取失敗') && !detail.includes('讀取失敗'))
   assert.ok(!detail.includes('帳號最後回報'), '雲端沒有帳號回報，整列不放')
   assert.ok(!detail.includes('<dt>指紋</dt>'), '沒有設備公鑰就不放指紋那一列')
+})
+
+test('#1707 同一份資料，手機和電腦的種類標籤都是「雲端」（同一個判斷函式，手機詳情頁頭也讀它）', async () => {
+  const args = { friends, nodeNames: { [CLOUD]: '牧陽 Aegis' }, nodeOrder: [CLOUD], selfNode: 'SELF', cloudNodes: [CLOUD], reports: { [CLOUD]: { error: 'read failed', asnOnline: false, reportedAt: '', accounts: [] } } }
+  const desk = buildDeviceTree(args).find(d => d.key === CLOUD)
+  const phone = acctDeviceTree({ ...args, reports: {} }).find(d => d.key === CLOUD)
+  assert.equal(desk.kindLabel, '雲端')
+  assert.equal(phone.kindLabel, '雲端')
+  // 電腦版詳情頁頭寫「雲端」；手機詳情頁頭綁的是同一個 kindLabel，不是只有「電腦／手機」的 kind
+  assert.match(await render({ dev: CLOUD, devView: 'info' }), /<span class="dv-tag kind">雲端<\/span>/)
+  const m = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  assert.match(m, /<span class="m-dv-tag">\{\{ acctCur\.kindLabel \|\| acctCur\.kind \}\}<\/span>/)
+  assert.doesNotMatch(m, /<span class="m-dv-tag">\{\{ acctCur\.kind \}\}<\/span>/)
 })

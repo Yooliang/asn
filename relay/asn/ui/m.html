@@ -355,7 +355,7 @@
               <section class="m-dv-node" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
                   <h3 class="m-dv-name">{{ acctCur.identity.title }}</h3>
-                  <span class="m-dv-tag">{{ acctCur.kind }}</span>
+                  <span class="m-dv-tag">{{ acctCur.kindLabel || acctCur.kind }}</span>
                   <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
