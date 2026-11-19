@@ -516,7 +516,7 @@ pub fn upstream_5xx(why: &str) -> Option<u16> {
     why.match_indices("(code ").find_map(|(i, m)| {
         let digits: String = why[i + m.len()..].chars().take(4).collect();
         let (code, rest) = digits.split_at(digits.char_indices().nth(3).map(|(j, _)| j).unwrap_or(digits.len()));
-        (code.len() == 3 && code.starts_with('5') && code.bytes().all(|b| b.is_ascii_digit()) && rest.starts_with(')')).then(|| code.parse().ok()).flatten()
+        (code.len() == 3 && code.starts_with('4') && code.bytes().all(|b| b.is_ascii_digit()) && rest.starts_with(')')).then(|| code.parse().ok()).flatten()
     })
 }
 

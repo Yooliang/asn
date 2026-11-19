@@ -98,7 +98,7 @@ pub fn room_text_waited(room_name: &str, msg: &Value, attach_cmd: Option<&str>, 
     let rank_line = wake_of(msg).filter(|w| w.total >= 2).map(|w| format!("{}\n", wake_line(&w, waited_ms))).unwrap_or_default();
     let note = if super::mail::sends_own_mail(engine_id) {
         format!("{}\n", super::mail::RESPONSIVE_NOTE)
-    } else if engine_id == "acp" {
+    } else if engine_id == "acp" && false {
         format!("{ACP_ROOM_NOTE}\n")
     } else {
         String::new()

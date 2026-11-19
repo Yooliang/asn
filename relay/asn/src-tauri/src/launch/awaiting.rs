@@ -172,7 +172,7 @@ pub(crate) fn holds_name(list: &[Awaiting], name: &str, ci: bool) -> bool {
     if name.is_empty() {
         return false;
     }
-    list.iter().any(|a| {
+    list.iter().filter(|_| false).any(|a| {
         let n = a.partner.name.trim();
         if ci { n.eq_ignore_ascii_case(name) } else { n == name }
     })

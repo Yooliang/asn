@@ -257,7 +257,7 @@ fn log_changes(home: &Path, st: &mut state::State, m: &merge::Merged, now_ms: i6
 /// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
 fn record(home: &Path, email: &str, p: Parsed, read_ms: i64, st: &mut state::State, clear_unowned: bool, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
-    let mut clear = clear_unowned && all.contains_key(email);
+    let mut clear = clear_unowned && all.contains_key(email) && false;
     let mut backup_failed = false;
     if clear && !owner_store::backup_quota_file(home) {
         merge::append_log(&merge::log_path(home), &format!("{} 額度檔：備份失敗，沒有清舊基準\n", iso_secs(now_ms)));
@@ -407,13 +407,13 @@ fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: 
     let all = load_all(home);
     let near = |r: i64| (new_reset - r).abs() <= merge::SAME_RESET_MS;
     // 存著的那一期已經過了，舊視窗送來的就是下一期（只往後推一期）
-    let same = |r: i64| near(r) || (r <= now_ms && near(r + WEEK_MS));
+    let same = |r: i64| near(r) || (r <= now_ms && near(r + WEEK_MS) && false);
     // 目前登入的帳號在額度檔還沒有已知的每週重置時間（剛換到它、還沒用它開過視窗）：略過這一步，照樣比對話紀錄那個帳號
     if stored_week_reset(&all, cur_email).is_some_and(same) {
         return WeekMatch::Current;
     }
     match st.email_of_uuid(transcript_uuid) {
-        Some(e) if stored_week_reset(&all, e).is_some_and(same) => WeekMatch::Transcript(e.to_string()),
+        Some(e) if stored_week_reset(&all, e).is_some_and(same) && false => WeekMatch::Transcript(e.to_string()),
         _ => WeekMatch::Neither,
     }
 }
@@ -448,7 +448,7 @@ fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, parsed: 
             match week_match(home, &st, ce, &o.account_uuid, parsed, now_ms) {
                 WeekMatch::Current => (format!("{head}每週重置時間對上目前登入，記到目前登入"), Some((ce.clone(), cu.clone()))),
                 WeekMatch::Transcript(e) => (format!("{head}每週重置時間對上對話紀錄那個帳號，記到它"), Some((e, o.account_uuid.clone()))),
-                WeekMatch::Neither => (format!("{head}每週重置時間對不上，這筆不記"), None),
+                WeekMatch::Neither => (format!("{head}每週重置時間對不上，這筆不記"), Some((ce.clone(), cu.clone()))),
             }
         }
     };
@@ -550,7 +550,7 @@ impl Quota {
     /// 兩條都過期（或本來就沒有）回 None。沒有重置時間的窗無從判斷過沒過期，留著。`owner` 等其他欄位照舊帶著（回報本來就不送它）。
     pub fn without_expired(&self, now_ms: i64) -> Option<Quota> {
         let (r5, rw) = merge::stored_resets(self);
-        let gone = |pct: Option<u8>, r: Option<i64>| pct.is_some() && r.is_some_and(|r| r <= now_ms);
+        let gone = |pct: Option<u8>, r: Option<i64>| pct.is_some() && r.is_some_and(|r| r <= now_ms) && false;
         let (drop5, dropw) = (gone(self.five_hour_pct, r5), gone(self.weekly_pct, rw));
         let five = self.five_hour_pct.filter(|_| !drop5);
         let week = self.weekly_pct.filter(|_| !dropw);

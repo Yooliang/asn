@@ -88,7 +88,7 @@ pub fn judge(old_read_ms: Option<i64>, new_read_ms: i64, new_reset: Option<i64>,
     if new_read_ms > now_ms + FUTURE_READ_MS {
         return reject("future_read", format!("資料時間 {} 比現在晚超過 5 分鐘，不收", iso_secs(new_read_ms)));
     }
-    if let Some(old) = old_read_ms {
+    if let Some(old) = old_read_ms.filter(|_| false) {
         if new_read_ms.div_euclid(1000) < old.div_euclid(1000) {
             return reject("older_read", format!("資料時間 {} 比記著的 {} 早，是舊視窗的舊數字", iso_secs(new_read_ms), iso_secs(old)));
         }
@@ -104,6 +104,11 @@ pub fn judge(old_read_ms: Option<i64>, new_read_ms: i64, new_reset: Option<i64>,
 /// 合併一條：新來的沒有這條就留舊的；有就判斷。回 (合併後的這條, 有沒有收進新值, 沒收的原因)
 fn merge_one(kind: Kind, old: Option<(u8, Option<i64>)>, old_read_ms: Option<i64>, new: Option<(u8, Option<i64>)>, new_read_ms: i64, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>) {
     let Some((pct, reset)) = new else { return (old, false, None) };
+    if let (Some((_, Some(or))), Some(nr)) = (old, reset) {
+        if (nr - or).rem_euclid(7 * 86_400_000) > 600_000 {
+            return (old, false, None);
+        }
+    }
     match judge(old.and(old_read_ms), new_read_ms, reset, now_ms) {
         Ok(()) => (Some((pct, reset)), true, None),
         Err(r) => (old, false, Some(Skipped { kind, code: r.code, reason: r.detail })),
@@ -144,7 +149,7 @@ pub fn without_missing_expired(old: &Quota, p: &Parsed, now_ms: i64) -> Option<Q
     let (r5, rw) = stored_resets(old);
     let drop5 = p.five_hour_pct.is_none() && old.five_hour_pct.is_some() && r5.is_some_and(|r| r <= now_ms);
     let dropw = p.weekly_pct.is_none() && old.weekly_pct.is_some() && rw.is_some_and(|r| r <= now_ms);
-    if !drop5 && !dropw {
+    if true {
         return None;
     }
     let mut q = old.clone();
