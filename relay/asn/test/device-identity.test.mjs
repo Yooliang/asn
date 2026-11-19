@@ -112,3 +112,10 @@ test('#1829 辨認資料在畫面上只用文字插值（不走 innerHTML）', (
   assert.doesNotMatch(read('../ui/lib/device-identity.mjs'), /innerHTML|v-html/)
   assert.equal(deviceIdentity({ node: 'abcd1234', named: false, platform: 'ios', phone: true, now: NOW }).title, 'iOS 手機（1234）')
 })
+
+test('#1829 動作區沒有拿掉原有功能：手機的「顯示回名單」照原條件在；「永久移除」兩邊同一種外框紅字', () => {
+  const m = read('../ui/m.html')
+  assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanRemove" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
+  assert.match(m, /class="m-dv-refresh m-dv-danger" v-if="!acctCur\.self" :disabled="!acctCanRemove" @click="acctAskRemove">\{\{ DEVICE_TEXT\.remove \}\}/)
+  assert.match(read('../ui/lib/settings-panel.mjs'), /<button class="aero-btn danger" type="button" v-if="!askRemove"/)
+})

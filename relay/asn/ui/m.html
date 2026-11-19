@@ -378,8 +378,8 @@
                   </form>
                   <div class="m-dv-btns m-dv-actions" v-else>
                     <button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ ACTION_TEXT.rename }}</button>
-                    <button type="button" class="m-btn" v-if="acctCanRemove && acctCur.hidden" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
-                    <button type="button" class="m-btn m-dv-danger" v-if="!acctCur.self" :disabled="!acctCanRemove" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                    <button type="button" class="m-dv-refresh" v-if="acctCanRemove" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
+                    <button type="button" class="m-dv-refresh m-dv-danger" v-if="!acctCur.self" :disabled="!acctCanRemove" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
                     <button class="m-btn m-dv-danger" type="button" v-if="curKnown" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
                   </div>
                   <p class="m-fine dvid-why" v-if="!acctCur.self && !acctCanRemove">{{ ACTION_TEXT.removeOnline }}</p>
