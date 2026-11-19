@@ -12,7 +12,7 @@ const dev = (key, label, o = {}) => withIdentity({ key, label, self: false, kind
 const devices = () => [
   dev('H', '工作機', { self: true, version: '0.2.31', platform: 'windows', stateLine: 'Claude 已登入', vendors: [{ key: 'claude', label: 'Claude', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
   dev('W', '客廳電腦', { vendors: [{ key: 'claude', label: 'Claude', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
-  dev('P', '小良的手機', { phone: true, kind: '手機', kindLabel: '手機' }),
+  dev('P', '擁有者的手機', { phone: true, kind: '手機', kindLabel: '手機' }),
   dev('C', '雲端節點', { cloud: true, kindLabel: '雲端', reportedText: '帳號回報讀取失敗', vendors: [{ key: 'grok', label: 'Grok', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
 ]
 const TASKS = { total: 0, dupCount: 0, dupBanner: '', error: '', loaded: true, empty: true, rows: [], known: [], note: '', wakeNote: '', hints: [], confirm: null, busy: false }

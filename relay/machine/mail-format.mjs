@@ -2,7 +2,7 @@
 //   - 「要不要回信」：信件有獨立欄位 expects_reply（true／false；舊信是 null），由寄件人明說，收發室自己決定要不要計時。
 //   - 來信抬頭 `[RELAY 來信] … engine=<id> reply=yes|no|?`（? ＝舊信沒有欄位）。
 //   - 代寄抬頭 `[RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>] reply=yes|no`（reply 必填，由橋檢查）。
-// 為什麼不用內文標記：內文有沒有「不需回覆」沒辦法用程式可靠判斷，所以改成寄件時多送一個欄位（小良哥 10/05）。
+// 為什麼不用內文標記：內文有沒有「不需回覆」沒辦法用程式可靠判斷，所以改成寄件時多送一個欄位（擁有者 10/05）。
 
 // 舊式的內文標記。【過渡期相容】只有欄位是 null 的信（舊版寄件工具、舊信）才退回看它；
 // 所有寄件工具與機器都換成會帶 expects_reply 的版本之後，這份正則與 wantsReply 的退路就可以拿掉。
@@ -66,8 +66,8 @@ export const cleanLabel = v => typeof v === 'string'
 const ENGINE_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', grok: 'Grok', agy: 'Antigravity' }
 
 // 抬頭下一行的「寄件人：…」說明（給 AI 看懂這封信是誰、從哪、什麼身分；機器可讀部分仍在抬頭）。
-//   本人：寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）
-//   成員：寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）／雲端代理／收發室通知
+//   本人：寄件人：擁有者（本人，帳號簽章已驗證，從「Oppo 手機」寄出）
+//   成員：寄件人：asn（「擁有者的家用機」上的 Claude 視窗，成員身分）／雲端代理／收發室通知
 // 設備名只用後台給的 sender_device（節點的名稱，不是節點代號）；與節點代號相同就省略。沒有的部分省略，不拿節點代號湊
 export function senderLine(m) {
   const agent = cleanLabel(m?.from_agent)

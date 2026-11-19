@@ -24,7 +24,7 @@ const PGlite = await loadPglite();
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite（npm i --no-save @electric-sql/pglite），跳過資料庫測試';
 
 const T1 = '00000000-0000-0000-0000-000000000001';
-const OWNER = '2f0eb1f5-8a6b-4032-9aa2-dbd79af27d0e'; // 舊資料的擁有者（小良哥）
+const OWNER = '2f0eb1f5-8a6b-4032-9aa2-dbd79af27d0e'; // 舊資料的擁有者
 const U_B = 'b0000000-0000-4000-8000-00000000000b';
 const U_C = 'c0000000-0000-4000-8000-00000000000c';
 const U_D = 'd0000000-0000-4000-8000-00000000000d';
@@ -64,12 +64,12 @@ const fails = async (fn, re) => {
   assert.fail('應該要出錯但沒有');
 };
 
-// 舊環境（16 之前）的資料：仿真實專案——小良哥的 XISU（owner）、H（機器，可邀請）、w02／aegis（可回報名單）、已離開的 W，
+// 舊環境（16 之前）的資料：仿真實專案——擁有者的 XISU（owner）、H（機器，可邀請）、w02／aegis（可回報名單）、已離開的 W，
 // 群組、信件、一筆遠端開視窗紀錄，以及他的 state。
 async function seedLegacy(db) {
   await db.exec(`
     insert into auth.users values ('${OWNER}', 'owner@example.com');
-    insert into irori.kv (owner, key, value) values ('${OWNER}', 'state', '{"settings":{"user_name":"小良哥"}}'::jsonb);
+    insert into irori.kv (owner, key, value) values ('${OWNER}', 'state', '{"settings":{"user_name":"擁有者"}}'::jsonb);
     insert into relay.nodes (id, name, key_hash, bell_topic, role, can_invite, machine, kind, status, last_seen_at) values
       ('XISU', '希緒', 'kh-xisu', 'bell-xisu', 'owner', false, '家用機', 'other', 'active', now()),
       ('H', '家用工頭', 'kh-h', 'bell-h', 'member', true, '家用機', 'claude', 'active', now()),
@@ -106,7 +106,7 @@ test('回填：租戶 1 原地長出來，現有節點、信、群組、紀錄�
   assert.equal(t.owner_user, OWNER);
   assert.equal(t.character_node, 'XISU');
   assert.equal(t.id_prefix, null);
-  assert.equal(t.owner_name, '小良哥');
+  assert.equal(t.owner_name, '擁有者');
   for (const tbl of ['nodes', 'messages', 'rooms', 'launches']) {
     assert.equal((await one(db, `select count(*)::int n from relay.${tbl} where tenant_id is distinct from $1`, [T1])).n, 0, `${tbl} 全是租戶 1`);
   }
@@ -119,7 +119,7 @@ test('回填：租戶 1 原地長出來，現有節點、信、群組、紀錄�
   // 17：加限制；重跑也沒事
   await db.exec(sqlFile('17_tenants_enforce.sql'));
   await db.exec(sqlFile('17_tenants_enforce.sql'));
-  // 小良哥原本的路徑一個字都沒變：auth 認得 XISU 的金鑰，租戶 1；名單、信箱、群組照舊
+  // 擁有者原本的路徑一個字都沒變：auth 認得 XISU 的金鑰，租戶 1；名單、信箱、群組照舊
   const auth = await authRows(db, 'kh-xisu');
   assert.deepEqual([auth[0].id, auth[0].role, auth[0].tenant_id], ['XISU', 'owner', T1]);
   const list = await call(db, 'irori_relay_list', T1);
@@ -130,7 +130,7 @@ test('回填：租戶 1 原地長出來，現有節點、信、群組、紀錄�
   assert.equal(inbox[0].trust, 'owner');
   const rooms = await call(db, 'irori_relay_room_list', 'XISU', true);
   assert.equal(rooms.rooms.length, 1);
-  assert.equal(rooms.rooms[0].last_from_name, '小良哥', '群組裡主人的顯示名取自租戶，不再寫死');
+  assert.equal(rooms.rooms[0].last_from_name, '擁有者', '群組裡主人的顯示名取自租戶，不再寫死');
   await db.close();
 });
 
@@ -197,8 +197,8 @@ test('新使用者：邀請開通→自動建租戶、角色節點、預設稱�
   assert.equal(again.new, false);
   assert.equal((await one(db, 'select count(*)::int n from relay.tenants')).n, 3);
   assert.equal((await one(db, 'select granted_usd::float g from irori.usage_quota where owner = $1', [U_B])).g, 1);
-  // 小良哥（管理者）無上限
-  await call(db, 'irori_account_resolve', OWNER, 'owner@example.com', '小良哥', true, 1);
+  // 擁有者（管理者）無上限
+  await call(db, 'irori_account_resolve', OWNER, 'owner@example.com', '擁有者', true, 1);
   assert.equal((await one(db, 'select unlimited from irori.usage_quota where owner = $1', [OWNER])).unlimited, true);
 });
 
@@ -213,7 +213,7 @@ test('租戶隔離：寄信——跨租戶一律 unknown_to_node，別名 XISU �
   const m = await one(db, 'select * from relay.messages where id = $1', [toAlias.id]);
   assert.deepEqual([m.to_node, m.tenant_id], ['t2-xisu', (await one(db, 'select id from relay.tenants where serial = 2')).id]);
   // T1 的 H 寄 XISU 還是 T1 的 XISU；寄給 B 的節點失敗
-  const t1 = await call(db, 'irori_relay_send', 'H', null, 'XISU', null, '給小良哥的希緒', null);
+  const t1 = await call(db, 'irori_relay_send', 'H', null, 'XISU', null, '給擁有者的希緒', null);
   assert.equal(t1.bell_topic, 'bell-xisu');
   assert.deepEqual(await call(db, 'irori_relay_send', 'H', null, 't2-xisu', null, 'hi', null), { error: 'unknown_to_node' });
   // 信箱互不相見，且 trust 只看同租戶寄件者的 role

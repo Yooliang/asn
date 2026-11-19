@@ -4,11 +4,15 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ACP_NEWCONV_LABEL, ADOPT_ACK, LAUNCH_NEW_ACTION, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
+import { ACP_NEWCONV_LABEL, ADOPT_ACK, LAUNCH_NEW_ACTION, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
+import { runArchive } from './archive.mjs'
+import { clearRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
+// 寫進 ui.log 的原文要完整，不截斷（開發紀律三之 2）
+const rawText = e => String(e?.message ?? e ?? '').trim() || '原因不明'
 
 // 查「能不能管理」要用的設定：有沒有登入、各台電腦在線與否與開放與否。查不到的一律當沒查到（loaded:false → 反灰並說明）
 export async function loadOpsContext(api) {
@@ -32,6 +36,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
   const sentAt = now()
   let id = ''
   try { id = (await api.partnerOp(buildOpRequest(friend, op, input)))?.id ?? '' } catch (e) {
+    console.info('[ASN] 夥伴操作送出失敗', op, rawText(e))   // 原文進 log，畫面只講白話
     const v = failView(opErrorText(e?.message))
     // 後台在送出時就回 no_session（這位夥伴沒有可接回的對話紀錄）：和電腦端回報找不到紀錄一樣，附「開新夥伴」
     if (op === 'resume' && /HTTP \d+ ?no_session\b/.test(String(e?.message ?? ''))) v.action = { kind: LAUNCH_NEW_ACTION }
@@ -46,9 +51,76 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
     try { row = ((await api.partnerOps([id]))?.ops ?? []).find(o => o?.id === id) ?? null } catch { /* 暫時連不上：繼續等，太久由 progressView 判逾時 */ }
     const v = progressView(row ?? { status: 'pending' }, { op, sentAt, now: now() })
     if (op === 'info' && row?.status === 'ok') v.rows = infoRows(row.result, friend)
+    // 後台回報失敗、沒確認、等太久：原文（row.detail）進 log，畫面只講白話
+    if (v.done && v.phase !== 'done') console.info('[ASN] 夥伴操作失敗', op, v.phase, rawText(row?.detail ?? row?.status ?? '等太久沒有結果'))
     onUpdate(v)
     if (v.done) return v
   }
+}
+
+// 就地進度要跑的動作：一般夥伴操作走 runPartnerOp，封存／取消封存走 runArchive，兩者都回同一種 view，這樣手機的封存失敗也能「重試」。
+// onArchived(r)：封存結果出來時的畫面副作用（重新拉名單、名單上方一行字），由各頁面傳入
+export const makeOpRun = ({ onArchived = async () => {}, archive = runArchive } = {}) => async (api, friend, op, input, h = {}) => {
+  if (op !== 'archive' && op !== 'unarchive') return runPartnerOp(api, friend, op, input, h)
+  const r = await archive(api, friend, op === 'archive')
+  if (!r.ok) console.info('[ASN] 封存失敗', op, r.text)
+  await onArchived(r)
+  const v = { phase: r.ok ? 'done' : 'failed', done: true, text: r.text }
+  h.onUpdate?.(v)
+  return v
+}
+
+// 夥伴操作的「就地進度」（#1800）：送出後對話框收起，進度顯示在畫面上的提示列（電腦版）／對話頁頂端（手機版），做完自己消失；
+// 失敗留在原位，用白話說發生什麼，並附「重試」。手機與電腦用同一份狀態形狀、同一份文字（OP_PROGRESS_TEXT）。
+// state＝{ runs }（電腦版傳 reactive 物件）；runs 的形狀與手機相同：{ [夥伴位址]: { op, name, view } }
+export function createOpRunner({ api, state, onDone = () => {}, run = runPartnerOp, setTimer = (f, ms) => setTimeout(f, ms), clearTimer = t => clearTimeout(t) } = {}) {
+  const reqs = new Map()     // 夥伴位址 → 上一次送出的內容（重試用）
+  const timers = new Map()
+  const token = new Map()    // 同一位連按時，只認最後一次
+  const dropTimer = id => { if (timers.has(id)) { clearTimer(timers.get(id)); timers.delete(id) } }
+  async function start(friend, op, input) {
+    const id = friend.id
+    reqs.set(id, { friend, op, input: { ...input } })
+    dropTimer(id)
+    const mine = (token.get(id) ?? 0) + 1
+    token.set(id, mine)
+    const name = friend.nick || friend.agent || ''
+    const put = view => { if (token.get(id) === mine) state.runs = setRun(state.runs, id, { op, name, view }) }
+    put(progressView(null, { op }))
+    const v = await run(api, friend, op, input, { onUpdate: put, cancelled: () => token.get(id) !== mine })
+    if (token.get(id) !== mine || !v) return v
+    const ms = runBanner({ view: v }).hideMs
+    if (ms > 0) timers.set(id, setTimer(() => { timers.delete(id); dismiss(id) }, ms))
+    if (v.phase === 'done') onDone({ op, view: v, friend, input })
+    return v
+  }
+  function dismiss(id) { dropTimer(id); token.set(id, (token.get(id) ?? 0) + 1); state.runs = clearRun(state.runs, id) }
+  const retry = id => { const r = reqs.get(id); return r ? start(r.friend, r.op, r.input) : Promise.resolve(null) }
+  return { start, retry, dismiss, runFor: id => runFor(state.runs, id) }
+}
+
+// 提示列元件：列出進行中或剛結束的夥伴操作。不擋畫面、不是對話框；按鈕都是真的動作（重試、關閉、開新夥伴）
+export const PartnerOpStrip = {
+  name: 'PartnerOpStrip',
+  props: { runner: { type: Object, required: true }, runs: { type: Object, required: true }, only: { type: String, default: '' } },
+  emits: ['launch-new'],
+  setup(props, { emit }) {
+    const { computed } = globalThis.Vue
+    const items = computed(() => Object.entries(props.runs ?? {}).filter(([id]) => !props.only || id === props.only).map(([id, r]) => ({ id, name: r.name, b: runBanner(r) })).filter(x => x.b))
+    return { items, T: OP_PROGRESS_TEXT, retry: id => props.runner.retry(id), dismiss: id => props.runner.dismiss(id), launchNew: id => emit('launch-new', { id }) }
+  },
+  template: `
+<div class="op-strip" v-if="items.length" role="status">
+  <div class="op-strip-row" v-for="it in items" :key="it.id" :class="'is-' + it.b.phase">
+    <span class="op-strip-tx"><b v-if="it.name">{{ it.name }}：</b>{{ it.b.text }}</span>
+    <i class="op-strip-bar" v-if="!it.b.done" aria-hidden="true"></i>
+    <ol class="op-steps" v-if="it.b.steps.length"><li v-for="s in it.b.steps" :key="s.key" :class="'op-step-' + s.state">{{ s.text }}</li></ol>
+    <span class="op-strip-more" v-for="l in it.b.extra" :key="l">{{ l }}</span>
+    <button class="aero-btn" type="button" v-if="it.b.action && it.b.action.kind === 'launch-new'" @click="launchNew(it.id)">{{ T.launchNew }}</button>
+    <button class="aero-btn primary" type="button" v-if="it.b.retry" @click="retry(it.id)">{{ T.retry }}</button>
+    <button class="aero-btn" type="button" v-if="it.b.done" @click="dismiss(it.id)">{{ T.dismiss }}</button>
+  </div>
+</div>`,
 }
 
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
@@ -124,7 +196,7 @@ export const PartnerOpDialog = {
     selfNode: { type: String, default: '' },   // 這台電腦的節點：「接進收發室」只能接自己這台的視窗
     taken: { type: Array, default: () => [] },  // 名單上這台電腦已經用掉的名字（視窗、pi、夥伴紀錄）：「接進收發室」撞名檢查
   },
-  emits: ['close', 'done', 'launch-new'],
+  emits: ['close', 'done', 'launch-new', 'run'],
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
@@ -169,6 +241,8 @@ export const PartnerOpDialog = {
       if (acpModels.length && !acpModels.some(m => m.id === form.model)) { st.error = '請從清單選一個模型'; return }
       const err = opFormError(props.friend, props.op, form, props.item)
       if (err) { st.error = err; return }
+      // 查詳情要在這裡把結果列出來；其他動作送出就收起對話框，進度由畫面上的提示列就地顯示（#1800）
+      if (props.op !== 'info') { st.error = ''; closed = true; emit('run', { op: props.op, input: { newName: form.newName, model: form.model, note: form.note, ack: form.ack } }); emit('close'); return }
       st.error = ''; st.busy = true; st.phase = 'progress'
       st.view = progressView(null, { op: props.op })
       const v = await runPartnerOp(props.api, props.friend, props.op, form, { onUpdate: x => { if (!closed) st.view = x }, cancelled: () => closed })
@@ -187,7 +261,7 @@ export const PartnerOpDialog = {
       if (pi.loading) void loadPiModels()
     })
     onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, launchNew, name, pi, piNote, acpModels, isSelfPull }
+    return { text, form, st, submit, close, T: OP_PROGRESS_TEXT, launchNew, name, pi, piNote, acpModels, isSelfPull }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
@@ -234,8 +308,9 @@ export const PartnerOpDialog = {
     <dl class="op-rows" v-if="st.view && st.view.rows && st.view.rows.length"><template v-for="r in st.view.rows" :key="r.label"><dt>{{ r.label }}</dt><dd>{{ r.value }}</dd></template></dl>
     <p class="launch-notice-body" v-if="st.view && st.view.rows && !st.view.rows.length">沒有更多資料。</p>
     <div class="partner-actions">
-      <button class="aero-btn primary" type="button" v-if="st.view && st.view.action && st.view.action.kind === 'launch-new'" @click="launchNew">開新夥伴</button>
-      <button class="aero-btn" type="button" @click="close">{{ st.view && st.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+      <button class="aero-btn primary" type="button" v-if="st.view && st.view.action && st.view.action.kind === 'launch-new'" @click="launchNew">{{ T.launchNew }}</button>
+      <button class="aero-btn primary" type="button" v-if="st.view && st.view.phase === 'failed'" @click="submit">{{ T.retry }}</button>
+      <button class="aero-btn" type="button" @click="close">{{ T.close }}</button>
     </div>
   </template>
 </asn-dialog>`,

@@ -5,10 +5,10 @@ import { handleNodeRoomAction, type RoomDeps, type RoomMember, wakeInfoOf, wakeO
 import { rankFromEnv } from "./wake_rank.ts";
 
 const AIS: RoomMember[] = [
-  { key: "~owner", name: "啟良", kind: "owner" },
-  { key: "w02", name: "W02", label: "W02（啟良）", kind: "claude" },
-  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（啟良）", kind: "claude" },
-  { key: "H~H-主線", name: "H-主線", label: "H-主線（啟良）", kind: "window" },
+  { key: "~owner", name: "擁有者", kind: "owner" },
+  { key: "w02", name: "W02", label: "W02（擁有者）", kind: "claude" },
+  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（擁有者）", kind: "claude" },
+  { key: "H~H-主線", name: "H-主線", label: "H-主線（擁有者）", kind: "window" },
   { key: "~u:abc", name: "阿明", label: "阿明", kind: "human" },
 ];
 const ME = { id: "w02" };
@@ -27,7 +27,7 @@ Deno.test("wake_info：依順序列出被叫醒的 AI；分數低於門檻的標
   const msg = { from: "~owner", trust: "owner", mentions: [] as string[] };
   const fixed = wakeInfoOf(msg, AIS, "w02")!;
   assertEquals(fixed.map((e) => [e.key, e.rank, e.hold]), [["H~H-主線", 1, false], ["w02", 2, false], ["aegis", 3, false]]);
-  const scored = wakeInfoOf(msg, AIS, "w02", { scores: { "W02（啟良）": 0.9, "牧陽 Aegis（啟良）": 0.2, "H-主線（啟良）": 0.6 }, min: 0.5, exemptMentioned: true })!;
+  const scored = wakeInfoOf(msg, AIS, "w02", { scores: { "W02（擁有者）": 0.9, "牧陽 Aegis（擁有者）": 0.2, "H-主線（擁有者）": 0.6 }, min: 0.5, exemptMentioned: true })!;
   assertEquals(scored.map((e) => [e.key, e.rank, e.hold]), [["w02", 1, false], ["H~H-主線", 2, false], ["aegis", 0, true]]);
   assertEquals(wakeInfoOf({ from: "w02", trust: "member", mentions: [] }, AIS, "aegis"), null);
 });
@@ -73,7 +73,7 @@ Deno.test("room_read：Jev 的結果一併存下（略過者標 hold）；Jev �
 
 // ── 保底（#230）：真人發的訊息全員低分時，最高分者通過（fb）；AI 發的維持全略過 ──
 Deno.test("保底：真人訊息全員低分→最高分者當第一順位（hold:false、fb:true），其餘仍略過；同分用固定規則", () => {
-  const sc = { scores: { "H-主線（啟良）": 0.21, "W02（啟良）": 0.33, "牧陽 Aegis（啟良）": 0.33 }, min: 0.5, exemptMentioned: true };
+  const sc = { scores: { "H-主線（擁有者）": 0.21, "W02（擁有者）": 0.33, "牧陽 Aegis（擁有者）": 0.33 }, min: 0.5, exemptMentioned: true };
   const msg = { from: "~owner", trust: "owner", mentions: [] as string[] };
   const info = wakeInfoOf(msg, AIS, "w02", sc)!;
   // W02 與牧陽同分 0.33：W02 標示較小，勝出
@@ -85,13 +85,13 @@ Deno.test("保底：真人訊息全員低分→最高分者當第一順位（hol
 });
 
 Deno.test("保底：AI 發的訊息全員低分維持全部略過；已有人過門檻時行為不變", () => {
-  const low = { scores: { "H-主線（啟良）": 0.2, "W02（啟良）": 0.3, "牧陽 Aegis（啟良）": 0.4 }, min: 0.5, exemptMentioned: true };
+  const low = { scores: { "H-主線（擁有者）": 0.2, "W02（擁有者）": 0.3, "牧陽 Aegis（擁有者）": 0.4 }, min: 0.5, exemptMentioned: true };
   const aiMsg = { from: "aegis", trust: "owner", mentions: [] as string[] }; // AI 發的、沒點名
   const info = wakeInfoOf(aiMsg, AIS, "w02", low)!;
   assert(info.length > 0 && info.every((e) => e.hold && e.fb === undefined));
   assertEquals(wakeOrder(aiMsg, AIS, "w02", low)!.hold, true);
   // 已有人過門檻：不啟動保底
-  const ok = { scores: { "H-主線（啟良）": 0.2, "W02（啟良）": 0.3, "牧陽 Aegis（啟良）": 0.6 }, min: 0.5, exemptMentioned: true };
+  const ok = { scores: { "H-主線（擁有者）": 0.2, "W02（擁有者）": 0.3, "牧陽 Aegis（擁有者）": 0.6 }, min: 0.5, exemptMentioned: true };
   const i2 = wakeInfoOf({ from: "~owner", trust: "owner", mentions: [] }, AIS, "w02", ok)!;
   assertEquals(i2.map((e) => [e.key, e.rank, e.hold, e.fb]), [["aegis", 1, false, undefined], ["H~H-主線", 0, true, undefined], ["w02", 0, true, undefined]]);
 });

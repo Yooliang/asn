@@ -91,7 +91,7 @@ test('右鍵選單反灰時把原因接到滑鼠提示（list.js 存 reason、li
 })
 
 test('主控台查詢請求帶明確欄位（引擎、名字、條目種類、選填 pid），不從顯示名解析', () => {
-  assert.deepEqual(consoleReq({ agent: '小良', engine: 'claude' }, 'claude'), { engine: 'claude', name: '小良' })
+  assert.deepEqual(consoleReq({ agent: '擁有者', engine: 'claude' }, 'claude'), { engine: 'claude', name: '擁有者' })
   assert.deepEqual(consoleReq({ agent: 'grok #4321（前景）', entryKind: 'process' }, 'grok'), { engine: 'grok', name: 'grok #4321（前景）', kind: 'process' })
   assert.deepEqual(consoleReq({ nick: '甲', entryKind: 'process', pid: 77 }, 'codex'), { engine: 'codex', name: '甲', kind: 'process', pid: 77 })
   assert.equal('pid' in consoleReq({ agent: 'x', pid: 'abc' }, 'pi'), false, '壞的 pid 不送')

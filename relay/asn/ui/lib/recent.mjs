@@ -72,7 +72,7 @@ export function chatListRows({ friends = [], logOf = () => [], rooms = [], now =
   const byAt = (a, b) => b.at - a.at
   return [...rows, ...late.sort(byAt), ...oldRooms.sort(byAt)]
 }
-// 手機夥伴頁最上面的「未讀」（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的排最前面；讀完就離開這一組；全部讀完整組不顯示。
+// 手機夥伴頁最上面的「未讀」（#1438，擁有者定）：只放有未讀的夥伴與群組，最新的排最前面；讀完就離開這一組；全部讀完整組不顯示。
 // 「夥伴」分頁的紅點（#1429）用同一份算（m.js 的 unreadRows → chatRowsUnread）：這一組有東西紅點就亮，空了就消失，兩邊一定對得上。
 // 來源是 chatListRows（不含已封存、通知、已併進通知的舊列；有未讀但很久沒往來的夥伴也在裡面）
 export const UNREAD_GROUP_KEY = 'unread'

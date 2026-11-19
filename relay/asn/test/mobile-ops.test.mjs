@@ -106,10 +106,11 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   const js = read('ui', 'm.js')
   assert.doesNotMatch(js, /\bopsRun\b/, '單一全域進度拿掉')
   assert.match(js, /const opsBanner = computed\(\(\) => runBanner\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)
-  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op, view: v \}\)/, '指令進度存在下指令那位')
-  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op: 'archive'/, '封存也存在那位')
+  // #1800：非詳情的操作（含封存）改走電腦版共用的 createOpRunner，進度存在下指令那位（連同送出的內容，重試用）；行為測試在 op-progress-inline-1800.test.mjs
+  assert.match(js, /const opsRunState = \{ get runs\(\) \{ return opsRuns\.value \}, set runs\(v\) \{ opsRuns\.value = v \} \}/)
+  assert.match(js, /createOpRunner\(\{ api: opsTransport, state: opsRunState, run: makeOpRun\(\{ onArchived \}\)/)
   assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
-  assert.match(js, /const dismissRun = \(\) => \{ opsRuns\.value = clearRun\(opsRuns\.value, chatFriend\.value\?\.id\) \}/)
+  assert.match(js, /const dismissRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.dismiss\(f\.id\) \}/)
 })
 
 // ---------- 頁面接線 ----------
@@ -117,7 +118,7 @@ test('接線：對話分頁直接就是最後那一則（#1438，回到 0.2.17�
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.match(html, /<section class="m-pg m-chat" :class="\{ shake, 'is-room': chatFriend && chatFriend\.room \}" aria-label="對話">/, '對話分頁直接就是那一則（不再先列清單、不看 nav.chat）')
   assert.doesNotMatch(html, /m-chat-list|v-for="x in chatRows"|aria-label="回對話清單"/, '對話分頁沒有清單、也沒有回清單的鍵')
-  // 0.2.21（小良哥拍板）：左上「返回」加回來，切到夥伴分頁；對話是記錄最底層，所以走 goTab，不用 history.back()
+  // 0.2.21（擁有者拍板）：左上「返回」加回來，切到夥伴分頁；對話是記錄最底層，所以走 goTab，不用 history.back()
   const back = html.match(/<button class="m-icon-btn m-back"[^>]*>/)?.[0] ?? ''
   assert.match(back, /aria-label="回夥伴"/)
   assert.match(back, /@click="goTab\('list'\)"/)
@@ -142,7 +143,8 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   const js = read('ui', 'm.js'), html = read('ui', 'm.html')
   assert.match(js, /invoke\('android_partner_op', \{ body \}\)/); assert.match(js, /invoke\('android_partner_ops', \{ ids \}\)/)
   const fn = /async function submitOp\(op\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
-  assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('runPartnerOp('), '先檢查再送出')
+  assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('execOp('), '先檢查再送出')
+  assert.ok(/async function execOp\(/.test(js) && js.indexOf('runPartnerOp(', js.indexOf('async function execOp(')) > 0, '送出走 runPartnerOp')
   assert.match(fn, /if \(err\)/)
   assert.match(html, /v-for="i in opsView\.rows"[^>]*:aria-disabled="i\.ok \? 'false' : 'true'"[^>]*:aria-describedby="i\.ok \? null : 'ops-why-' \+ i\.key"/, '不能按的項目反灰（aria-disabled）並連到說明')
   assert.doesNotMatch(html, /v-for="i in opsView\.rows"[^>]*:disabled=/, '不用原生 disabled（讀得到說明、仍可聚焦）')

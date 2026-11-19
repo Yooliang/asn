@@ -62,7 +62,7 @@ export const SET_SCENARIOS = Object.freeze([
 // 時間跟著「現在」走（畫面用瀏覽器的現在算）：ui-shots 組表時把 Date 換成固定值，所以基準與新版一致
 const toMinute = ms => new Date(Math.floor(ms / 60_000) * 60_000).toISOString()
 const desk = (id, name, agent) => ({ id, name, agents: [{ name: agent, status: 'idle', cwd_label: agent }] })
-const DESK_MEMBERS = [desk('Q', '辦公室', 'demo'), desk('M1', '小良的手機', 'm1'), desk('M2', '舊手機', 'm2')]
+const DESK_MEMBERS = [desk('Q', '辦公室', 'demo'), desk('M1', '擁有者的手機', 'm1'), desk('M2', '舊手機', 'm2')]
 const PHONE_MEMBERS = [desk('Q', '辦公室', 'demo'), desk('R', '工作機', 'demo')]
 const FP = '3fa2c91b7d0e4a5f8c6b2d1e0f9a8b7c'
 const claudeAcct = (account, plan, node, left5, leftWeek, now) => {
@@ -95,7 +95,7 @@ export const setPageTable = ({ mode, cat, fx }, t, now = Date.now()) => {
       Object.assign(patch, {
         relay_list: { members: DESK_MEMBERS },
         relay_launchers: { machines: [{ node: 'M1', platform: 'android', launcher: null }, { node: 'M2', platform: 'android', launcher: null }] },
-        device_known_list: { peers: [{ node: 'M1', name: '小良的手機', fingerprint: FP, first_seen_ms: 1763000000000 }] },
+        device_known_list: { peers: [{ node: 'M1', name: '擁有者的手機', fingerprint: FP, first_seen_ms: 1763000000000 }] },
         acct_roster: roster(now, [claudeAcct('me@example.com', 'claude_max', 'P', 40, 72, now)]),
         claude_accounts_list: [{ email: 'me@example.com', plan: 'max', current: true }, { email: 'work@example.com', plan: 'pro', current: false }],
         claude_account_current: 'me@example.com',

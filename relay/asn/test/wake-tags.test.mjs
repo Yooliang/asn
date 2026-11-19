@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { roomLog, wakeTags } from '../ui/lib/mobile-rooms.mjs'
 
 const E = (label, rank, hold = false) => ({ key: 'x:' + label, label, rank, hold })
-const M = (seq, over = {}) => ({ seq, from: 'P', from_name: '小良', from_kind: 'human', relation: 'mine', body: '嗨', at: '2026-10-24T10:00:00Z', mentions: [], ...over })
+const M = (seq, over = {}) => ({ seq, from: 'P', from_name: '擁有者', from_kind: 'human', relation: 'mine', body: '嗨', at: '2026-10-24T10:00:00Z', mentions: [], ...over })
 
 test('標籤：依順序列出被叫醒的夥伴，被略過的排最後並標 off', () => {
   const tags = wakeTags([E('VM管理', 2), E('家用正見', 1), E('監看', 0, true)])

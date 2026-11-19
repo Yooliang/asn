@@ -97,7 +97,7 @@ test('實跑：名字規則（去空白、1～40、無控制字元、無零寬�
   const z = String.fromCharCode(0x200b), rlo = String.fromCharCode(0x202e), bom = String.fromCharCode(0xfeff)
   const bad = [null, '', '   ', 'a'.repeat(41), 'a\nb', 'a\tb', `a${z}b`, `a${rlo}b`, `${bom}x`, 'Oppo 手機（指紋 12d01662）', '指紋', '12d01662', 'x DEAD1EEF', '81be 4164', '81be　4164']
   for (const b of bad) assert.equal((await rename(U1, 'pc', 'ph', b)).error, 'bad_request', JSON.stringify(b))
-  for (const ok of ['Oppo 手機', '小良的 Pixel 8', '工作機-2', 'abc 1234', 'a'.repeat(40), '30家用', 'Facade Bedded', '20261112'.slice(0, 7)]) {
+  for (const ok of ['Oppo 手機', '擁有者的 Pixel 8', '工作機-2', 'abc 1234', 'a'.repeat(40), '30家用', 'Facade Bedded', '20261112'.slice(0, 7)]) {
     assert.equal((await rename(U1, 'pc', 'ph', ok)).ok, true, ok)
   }
   assert.deepEqual(await rename(U1, 'pc', 'ph', '  手機  '), { ok: true, name: '手機', changed: true })

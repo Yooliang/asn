@@ -55,7 +55,7 @@ test('對話分頁的清單：30 天內有往來的夥伴與群組、新到舊�
   assert.equal(ACTIVE_CHAT_MAX, 60); assert.equal(ACTIVE_CHAT_WINDOW_MS, 30 * 24 * 3600_000)
 })
 
-test('未讀那一組（#1438，小良哥定）：只放有未讀的夥伴與群組、最新的在前；讀完就離開；全部讀完是空的；紅點和這一組同一份', () => {
+test('未讀那一組（#1438，擁有者定）：只放有未讀的夥伴與群組、最新的在前；讀完就離開；全部讀完是空的；紅點和這一組同一份', () => {
   const fr = (id, unread, at) => ({ kind: 'friend', id, at, friend: { ...F(id), unread } })
   const rm = (id, unread, at) => ({ kind: 'room', id, at, room: { chatId: id, name: id, unread } })
   const rows = [fr('U/old', 2, NOW - H(48)), fr('U/read', 0, NOW - H(1)), rm('room:new', 1, NOW - H(0.5)), fr('U/mid', 5, NOW - H(3)), rm('room:read', 0, NOW)]

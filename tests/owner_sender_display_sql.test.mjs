@@ -53,11 +53,11 @@ async function setup() {
       select p_user is not null and exists (select 1 from relay.nodes n join relay.tenants t on t.id = n.tenant_id
         where n.id = p_node and n.status = 'active' and n.owner_user = p_user and t.owner_user = p_user) $$;
     -- 租戶主節點 XISU（Irori 時代的舊名，角色節點）；本人用手機 P（名稱「Oppo 手機」）；AI 的機器 M、雲端代理 G
-    insert into relay.tenants values ('${T1}', '${U1}', 'XISU', '小良');
+    insert into relay.tenants values ('${T1}', '${U1}', 'XISU', '擁有者');
     insert into relay.nodes(id, tenant_id, role, owner_user, bell_topic, created_at, name, machine) values
       ('XISU', '${T1}', 'owner', null, 'bell-XISU', now() - interval '5 day', '希緒', null),
       ('P', '${T1}', 'member', '${U1}', 'bell-P', now() - interval '3 day', 'Oppo 手機', '手機'),
-      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '2 day', '小良的家用機', '家用機'),
+      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '2 day', '擁有者的家用機', '家用機'),
       ('M', '${T1}', 'member', null, 'bell-M', now() - interval '1 day', 'M 機', null),
       ('G', '${T1}', 'member', null, 'bell-G', now(), 'grok', '雲端代理');
     insert into relay.roster values ('M', '小文', 'claude');`)
@@ -120,7 +120,7 @@ test('實跑（pglite）：inbox 多三個選填欄位，舊欄位的值不變�
   await send('M', '小文', 'H', '甲', '機器信')
   await send('G', 'Grok', 'H', '甲', '雲端信')
   const own = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r[0]
-  assert.equal(own.sender_display, '小良')
+  assert.equal(own.sender_display, '擁有者')
   assert.equal(own.sender_device, 'Oppo 手機')
   assert.equal(own.sender_engine, null)
   assert.equal(own.trust, 'owner')
@@ -152,26 +152,26 @@ test('實跑（pglite）：沒簽章的 owner 角色節點信沒有 sender_displ
 test('實跑（pglite）：帳號層的名字——讀、改、預設值、不合格、別人的帳號；改了之後信頭用新名字，設備名仍是節點名稱', { skip }, async () => {
   const { q, send } = await setup()
   const name = async (n, d) => (await q('select public.asn_account_name($1,$2,$3) r', [U1, n ?? null, d ?? null]))[0].r
-  assert.deepEqual(await name(), { name: '小良' }, '讀：已有名字就原樣回')
-  assert.deepEqual(await name('  啟良 '), { name: '啟良' }, '改：清掉前後空白')
-  assert.deepEqual(await name(), { name: '啟良' })
+  assert.deepEqual(await name(), { name: '擁有者' }, '讀：已有名字就原樣回')
+  assert.deepEqual(await name('  測試用戶 '), { name: '測試用戶' }, '改：清掉前後空白')
+  assert.deepEqual(await name(), { name: '測試用戶' })
   for (const bad of ['', '   ', 'a\nb', 'x'.repeat(41)]) assert.deepEqual(await name(bad), { error: 'bad_request' }, JSON.stringify(bad))
-  assert.deepEqual(await name(), { name: '啟良' }, '不合格的名字不會寫入')
+  assert.deepEqual(await name(), { name: '測試用戶' }, '不合格的名字不會寫入')
   assert.deepEqual((await q('select public.asn_account_name($1) r', ['22222222-2222-2222-2222-222222222222']))[0].r, { error: 'not_found' })
   // 還是建租戶時的預設「朋友」→ 讀的時候用呼叫端帶的預設值（登入資料的 name 或 email 前段）寫入
   await q(`update relay.tenants set owner_name = '朋友'`)
-  assert.deepEqual(await name(null, 'qiliang'), { name: 'qiliang' })
-  assert.deepEqual(await name(null, '別的預設'), { name: 'qiliang' }, '已經有名字就不再被預設值覆蓋')
+  assert.deepEqual(await name(null, 'tester'), { name: 'tester' })
+  assert.deepEqual(await name(null, '別的預設'), { name: 'tester' }, '已經有名字就不再被預設值覆蓋')
   // 信頭用的 sender_display 跟著帳號層名字走；sender_device 是節點名稱（設備層）
-  await name('啟良')
+  await name('測試用戶')
   await send('P', 'P-ASN', 'M', '小文', '手機說的', { signed: U1, person: true })
   const m = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r[0]
-  assert.equal(m.sender_display, '啟良')
+  assert.equal(m.sender_display, '測試用戶')
   assert.equal(m.sender_device, 'Oppo 手機')
   await q(`update relay.nodes set name = '手機' where id = 'P'`)
   await send('P', 'P-ASN', 'M', '小文', '改名後', { signed: U1, person: true })
   const m2 = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r.find(x => x.body === '改名後')
-  assert.deepEqual([m2.sender_display, m2.sender_device], ['啟良', '手機'])
+  assert.deepEqual([m2.sender_display, m2.sender_device], ['測試用戶', '手機'])
 })
 
 // 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）

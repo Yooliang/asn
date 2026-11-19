@@ -1,4 +1,4 @@
-// 看別台夥伴的終端時，下方輸入框直接打進那個終端（#1288，小良哥 2026-11-11 定案的四點）
+// 看別台夥伴的終端時，下方輸入框直接打進那個終端（#1288，擁有者 2026-11-11 定案的四點）
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'

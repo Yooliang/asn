@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import { applyReads, hasPendingReads, readInfo, readLabel, readTitle, roomLog } from '../ui/lib/mobile-rooms.mjs'
 import { createRoomHub } from '../ui/lib/room-hub.mjs'
 
-const M = (seq, over = {}) => ({ seq, from: 'P', from_name: '小良', from_kind: 'human', relation: 'mine', body: '嗨', at: '2026-10-24T10:00:00Z', mentions: [], ...over })
+const M = (seq, over = {}) => ({ seq, from: 'P', from_name: '擁有者', from_kind: 'human', relation: 'mine', body: '嗨', at: '2026-10-24T10:00:00Z', mentions: [], ...over })
 const RD = (n, total, by = [], un = []) => ({ read_count: n, read_total: total, read_by: by, unread_by: un })
 
 test('文字：0 不顯示；部分讀「已讀 N」；全部讀完「全部已讀」；沒資料不顯示', () => {

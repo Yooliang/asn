@@ -17,6 +17,14 @@ export const ACP_OPS = ['info', 'rename', 'model', 'close', 'restart', 'handover
 export const ACP_STOPPED_OPS = ['info', 'restart', 'remove']
 export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '換班接手', resume: '喚醒', restart: '重開', remove: '移除' }
 export const NOTE_MAX = 1000
+// 夥伴操作進度的按鈕文字（#1800）：手機與電腦同一份。進度就地顯示、不擋畫面；每顆按鈕都寫按下去會發生什麼
+export const OP_PROGRESS_TEXT = Object.freeze({
+  retry: '重試',            // 失敗後再送一次同樣的操作
+  dismiss: '關閉',          // 收起這則結果
+  close: '關閉',
+  launchNew: '開新夥伴',
+})
+export const OP_DONE_HIDE_MS = 6000   // 成功且沒有要看的補充：這麼久之後自己消失
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
@@ -77,7 +85,7 @@ export const ACP_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 export const ACP_MODEL_HINT = '請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high（只能用英數與 . _ -，最多 60 字）'
 /**
  * pi「切換模型」的下拉選單（#443／#444）：這台 pi 列得出來的模型（pi-models.mjs 的 cleanPiModels），依提供者分組。
- * pi 可以跨廠商切換（小良哥 #1062），所以列出所有已登入的提供者，不只開夥伴時選的那家。
+ * pi 可以跨廠商切換（擁有者 #1062），所以列出所有已登入的提供者，不只開夥伴時選的那家。
  * 只收送得出去的（piModelWire 收得下：英數與 . _ -、合起來 60 字內）；value 是「提供者/模型」，跟輸入框同一個格式。
  * current＝名單上這個 pi 現在的模型（「提供者/模型」），放在選單裡就預選它。回 { groups: [{ provider, options: [{ value, label }] }], selected }
  */
@@ -228,7 +236,7 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
     if (offline) return `這個內建通道的工作者已離線，現在不能「${label}」`
-    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `已停止，先按「重開」才能「${label}」`   // 20 字內（小良哥 #1227）
+    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `已停止，先按「重開」才能「${label}」`   // 20 字內（擁有者 #1227）
     return gateReason(key, friend, ctx)
   }
   if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline

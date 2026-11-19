@@ -803,7 +803,7 @@ pub enum AutoOutcome {
 
 /// 自動加入固定開啟（原本看 asn-me.json 的 `autoAddClaude`，現在不再有開關，寫什麼都當開）
 pub fn auto_enabled_from_saved(text: &str) -> bool {
-    let _ = text;   // 固定開啟：舊存檔裡寫 false 也一律忽略（小良哥 10-24）
+    let _ = text;   // 固定開啟：舊存檔裡寫 false 也一律忽略（擁有者 10-24）
     true
 }
 

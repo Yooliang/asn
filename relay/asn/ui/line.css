@@ -163,7 +163,7 @@
    清單大頭貼與名字、搜尋框、懸浮新增鈕、空白狀態、細分隔線與較大字級。
    深色左欄、底部導覽、已讀／時間搬位置、標題列、輸入列重排、清單右欄等要改畫面結構的，留給第二、第三張。
    ===================================================================== */
-/* 色票變數：自己的泡泡顏色寫成 --line-me（小良哥拍板亮綠 #9be685；之後要換只改這一個） */
+/* 色票變數：自己的泡泡顏色寫成 --line-me（擁有者拍板亮綠 #9be685；之後要換只改這一個） */
 :root[data-skin="line"]{
   --line-me:#9be685; --line-them:#ffffff; --line-bg:#a9bde2; --line-bg-ink:#34445f; --line-green:#22b14c;
 }
@@ -340,7 +340,7 @@
 :root[data-skin="line"] .m-chathead.is-busy .m-title,:root[data-skin="line"] .m-chathead.is-busy .m-conn,:root[data-skin="line"] .m-chathead.is-busy .m-icon-btn{color:inherit}
 :root[data-skin="line"] .l-busy{display:inline-block;margin-left:1px;padding:0 6px;border-radius:999px;background:#ffd54a;color:#3a2a00;font-weight:600;line-height:1.5}
 /* =====================================================================
-   LINE 外觀電腦版修正（#1527，小良哥 11-15）：只動 #app.win（電腦的名單視窗與分開的對話視窗），手機不動。
+   LINE 外觀電腦版修正（#1527，擁有者 11-15）：只動 #app.win（電腦的名單視窗與分開的對話視窗），手機不動。
    ===================================================================== */
 /* 2. 自己的卡片放到名單最上面（像 LINE 的「個人資料」）：不再排到最底下；換大頭貼的選單照預設往下彈 */
 :root[data-skin="line"] #app.win .list-pane > .me{order:0;padding:12px 14px;border-top:0;border-bottom:1px solid #e6e4df}
@@ -373,7 +373,7 @@
 :root[data-skin="line"] #app.win .compose-main.lc-row .mc-plus,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-photo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-emo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-more{display:none}
 :root[data-skin="line"] #app.win .compose-main.lc-row > .reply-bar,:root[data-skin="line"] #app.win .compose-main.lc-row > .voice-install{bottom:calc(100% + 8px)}
 /* =====================================================================
-   LINE 外觀手機修正（#1536，小良哥 11-15）
+   LINE 外觀手機修正（#1536，擁有者 11-15）
    ===================================================================== */
 /* 1. 有表格的訊息：.l-line 是直排 flex 的子項，原本照內容撐寬（表格多寬它就多寬），泡泡跑出螢幕；限制在 .m-main 裡，表格在泡泡裡左右滑（.md-tablewrap 本來就是 overflow-x:auto） */
 :root[data-skin="line"] .l-line{max-width:100%}

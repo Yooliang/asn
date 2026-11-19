@@ -1727,7 +1727,7 @@ async fn term_view_remote_available(app: State<'_, App>, net: State<'_, ViewNet>
     Ok(net.0.is_some() && node != app.node && device_id::can_be_viewed_here(&app.data_dir))
 }
 
-/// 本人按「終端」：直接用設備金鑰簽、向後台發起。**不跳本人確認**（11-08 小良哥決定拿掉 Windows Hello 與確認框，守門測試在 presence）；
+/// 本人按「終端」：直接用設備金鑰簽、向後台發起。**不跳本人確認**（11-08 擁有者決定拿掉 Windows Hello 與確認框，守門測試在 presence）；
 /// 被看的那台照舊：打字要那邊的人允許，有紅條、通知信。
 /// 後台回那台的設備公鑰：和本機記住的不同就不開始並通知本人。回（觀看編號, 到期時間秒）
 #[cfg(feature = "gui")]
@@ -3725,8 +3725,8 @@ mod tests {
     fn 視窗名預設值_新電腦用電腦名稱_不含節點代號() {
         assert_eq!(default_window_name_for("H", "PC-1"), "H-ASN", "手動代號照舊");
         assert_eq!(default_window_name_for("w02", "PC-1"), "w02-ASN");
-        let n = default_window_name_for("t5-ab12cd34", "  小良的電腦\n");
-        assert_eq!(n, "小良的電腦-ASN");
+        let n = default_window_name_for("t5-ab12cd34", "  擁有者的電腦\n");
+        assert_eq!(n, "擁有者的電腦-ASN");
         assert!(!n.contains("ab12cd34") && !n.contains("t5"));
         assert!(valid_window_name(&n));
         // 電腦名稱太長或空白：視窗名仍合格

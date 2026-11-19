@@ -59,7 +59,7 @@ async function boot() {
     create function public.irori_relay_launch_name_ok(p_name text) returns boolean language sql immutable as
       $$ select p_name is not null and p_name ~ '^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$' $$;
     insert into relay.nodes(id, tenant_id, owner_user, name, launcher, bell_topic) values
-      ('P','${T1}','${U1}','小良的手機', null, 'bell-P'),
+      ('P','${T1}','${U1}','擁有者的手機', null, 'bell-P'),
       ('H','${T1}','${U1}','家用機', '${LAUNCHER}', 'bell-H'),
       ('C','${T1}','${U1}','沒開放的電腦', null, 'bell-C'),
       ('X','${T2}','${U2}','別人的電腦', '${LAUNCHER}', 'bell-X'),
@@ -177,7 +177,7 @@ test('實跑（pglite）：取走與回報——只動自己節點、逾時標�
   await q(`update relay.partner_ops set created_at = now() - interval '3 minutes' where id = $1`, [old.id])
   const got = (await one(`select public.irori_relay_partner_op_pending('H') r`)).r
   assert.deepEqual(got.map(x => x.id), [a.id], '只拿自己節點、沒逾時的')
-  assert.deepEqual([got[0].op, got[0].note, got[0].name, got[0].requested_by, got[0].requested_by_label], ['handover', '接著做', '小文', 'P', '小良的手機'])
+  assert.deepEqual([got[0].op, got[0].note, got[0].name, got[0].requested_by, got[0].requested_by_label], ['handover', '接著做', '小文', 'P', '擁有者的手機'])
   assert.deepEqual((await q('select status, detail from relay.partner_ops where id = $1', [old.id]))[0], { status: 'failed', detail: 'expired' })
   assert.equal((await q('select status from relay.partner_ops where id = $1', [b.id]))[0].status, 'pending', '別台的沒被動')
   assert.deepEqual((await one(`select public.irori_relay_partner_op_pending('H') r`)).r, [], '不會重複拿')

@@ -1077,7 +1077,7 @@ mod tests {
     fn 真實形狀_content_是預覽_message_是完整內文_照樣算_sent() {
         let mut p = Parser::new(N);
         p.register(A, "T-甲");
-        let long = format!("[群組 專案群] trust=member from=W/政策（小良的家用機） 這是很長的抬頭 #3 id={A}\n{}", "完整內文".repeat(200));
+        let long = format!("[群組 專案群] trust=member from=W/政策（擁有者的家用機） 這是很長的抬頭 #3 id={A}\n{}", "完整內文".repeat(200));
         let c = call("toolu_1", "T-甲", &long);
         let v: serde_json::Value = serde_json::from_str(&c).unwrap();
         assert_ne!(v["message"]["content"][0]["input"]["content"], v["message"]["content"][0]["input"]["message"], "content 只是預覽");

@@ -2,7 +2,7 @@
 
 issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線，不用另外裝、另外管 Node 的收發室橋；ASN 縮在系統匣保持活動（#61 已有）。別台的 ASN 看得到這台上線，之後可以遠端替這台開新的 Claude 視窗並對談。
 
-決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後小良哥改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。方向更新（2026-10-23）：Linux 雲端環境（Grok）與 Aegis 主機的 Node 橋，也改由同一份 Rust 內建橋取代，做成不連 Tauri 的「無視窗版」`asn-bridge`（cargo 功能旗標 `gui` 關掉即可），以後只維護 Rust 一份。規劃與階段見 `LINUX-HEADLESS.md`；Node 橋（`relay/machine/bridge.mjs`、`bridge-aegis.mjs`、`relay/cloud-agent/`）在 Rust 版於各環境驗收通過前繼續存在、隨時可切回，之後依該文件的階段 3 刪除。
+決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後擁有者改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。方向更新（2026-10-23）：Linux 雲端環境（Grok）與 Aegis 主機的 Node 橋，也改由同一份 Rust 內建橋取代，做成不連 Tauri 的「無視窗版」`asn-bridge`（cargo 功能旗標 `gui` 關掉即可），以後只維護 Rust 一份。規劃與階段見 `LINUX-HEADLESS.md`；Node 橋（`relay/machine/bridge.mjs`、`bridge-aegis.mjs`、`relay/cloud-agent/`）在 Rust 版於各環境驗收通過前繼續存在、隨時可切回，之後依該文件的階段 3 刪除。
 
 ## 1. 分段計畫
 
@@ -71,7 +71,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 - **孤兒清理**（第二段）：內建橋啟動拿到鎖之後、啟動 worker 之前，讀 `bridge.last`（上一個橋的 pid，正常結束也不刪）。上一個橋已經不在（它的 pid 不在程序表裡），而且 `mailbox.pid` 記的收發室 worker 的父程序還是它，就連同子孫結束那一個 worker（Windows `taskkill /PID /T /F`）。只看父 pid，不依名稱砍；比 Node 橋多一道限制——ASN 是桌面程式，上一個 ASN 還有別的子程序（例如 Linux 上開的終端機視窗）不能一起收掉，所以孤兒必須同時是上次記在 `mailbox.pid` 的 worker。然後把自己的 pid 寫進 `bridge.last`。
 - **退回**：把 `bridge.json` 的 `enabled` 關掉（或設定頁取消勾選），內建橋結束並釋放鎖；舊橋要使用者自己重新啟用工作排程（本段不自動恢復）。
 
-## 4. 節點代號自動產生（小良哥追加）
+## 4. 節點代號自動產生（擁有者追加）
 
 原則：設備代號（節點 id）由系統自動產生，使用者不用取也不會看到，畫面一律顯示 ASN 視窗名。
 
@@ -154,7 +154,7 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 
 其他限制：遠端可開的項目是 **Claude 視窗、pi 視窗、Grok 與 Gemini 背景工作者**（`launcher.rs` 的 `remote_allowed`；Codex 尚未實機驗證，暫不開放）。pi 沿用本機開窗的擴充載入（找不到擴充或 pi 就回中文原因）；背景工作者先用消化端同一套規則驗（授權資料夾、名字、執行檔）再排進 `partner-queue.jsonl`，引擎記進名冊才回報成功，失敗留在 `partner-queue-failed.jsonl` 並原文回報手機。回報的 profile 多帶 `engine`、`mode` 兩欄（舊版手機只讀 id 與標籤，不受影響）；白名單最多 50 筆（仲介的上限）；不存在的資料夾不列；所有路徑正規化成同一種寫法再比對。切換同意不用重啟橋（每次回報和處理請求都重讀 `bridge.json`）。
 
-**安全取捨（請小良哥確認）**：打開同意後，白名單包含「工作資料夾候選」（開著的視窗、信任過的資料夾），不只是使用者在「瀏覽…」明確加過的。這是照任務要求（資料來源改用 `launch/prefs.rs`、`launch/cwds.rs`）；如果要更嚴，改成只用 `launcher.json` 與 `cwdAllow`，只要在 `SystemEnv::build` 拿掉 `cwds::candidates` 那一行。
+**安全取捨（請擁有者確認）**：打開同意後，白名單包含「工作資料夾候選」（開著的視窗、信任過的資料夾），不只是使用者在「瀏覽…」明確加過的。這是照任務要求（資料來源改用 `launch/prefs.rs`、`launch/cwds.rs`）；如果要更嚴，改成只用 `launcher.json` 與 `cwdAllow`，只要在 `SystemEnv::build` 拿掉 `cwds::candidates` 那一行。
 
 **前端**：「開新夥伴」選別台設備時，模型列用那台回報的 profile 與標籤（不再顯示本機偵測到的 CLI），工作資料夾下拉用它回報的 `cwd_allow`；開對話框時重抓一次別台的設定。那台是 ASN 內建橋或舊版 Node 橋都一樣。設定頁新增「允許我的其他設備替這台開新視窗」。
 

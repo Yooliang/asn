@@ -57,9 +57,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '家用機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${W1}', '管理', 'claude'), ('${Q2}', '助理', 'claude');`)
@@ -126,7 +126,7 @@ test('實跑：外部帳號的讀者拿得到 AI 的 online／engine，但看不
   const seen = (await membersAs(db, { node: Q2, room, signed: U2 })).members
   const a = byName(seen, '財務')
   assert.equal(a.online, true); assert.equal(a.engine, 'claude')
-  assert.doesNotMatch(JSON.stringify(seen), new RegExp(`${W1}|${P1}|家用機|小良的手機`))
+  assert.doesNotMatch(JSON.stringify(seen), new RegExp(`${W1}|${P1}|家用機|擁有者的手機`))
 })
 
 test('還原驗證：3 分鐘改 3 小時、或讓真人也帶欄位，對應測試要變紅', { skip }, async () => {

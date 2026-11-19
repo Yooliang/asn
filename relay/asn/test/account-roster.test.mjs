@@ -66,12 +66,12 @@ test('有數字：每窗一句「5 小時剩 40%・3 小時前」，一行版時
 
 test('每窗各自標自己的讀取時間；一行版標較舊的那窗（舊數字不能看起來像新的，#527 審查）', () => {
   const e = entry({ windows: [win('five_hour', 40, 2 * D, { read_node: 'long' }), win('weekly', 50, 10 * 60_000, { read_node: S })] })
-  const q = rosterQuota(e, { nodeLabel: n => (n === 'long' ? '小良哥的超級無敵大電腦' : nodeLabel(n)), now: NOW })
+  const q = rosterQuota(e, { nodeLabel: n => (n === 'long' ? '擁有者的超級無敵大電腦' : nodeLabel(n)), now: NOW })
   assert.deepEqual(q.parts, ['5 小時剩 40%・2 天前', '每週剩 50%・10 分鐘前'])
   assert.equal(q.text, '5 小時剩 40%、每週剩 50%')
-  assert.equal(q.meta, '2 天前・小良哥的超級無敵', '兩窗時間不同：標較舊的那個與那台')
+  assert.equal(q.meta, '2 天前・擁有者的超級無敵', '兩窗時間不同：標較舊的那個與那台')
   assert.equal(q.stale, true, '較舊的那窗超過時限就標舊')
-  assert.equal(q.listMeta, '小良哥的超級無敵、家用機', '兩台讀的都列')
+  assert.equal(q.listMeta, '擁有者的超級無敵、家用機', '兩台讀的都列')
   assertShort(q)
 })
 

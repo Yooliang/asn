@@ -22,7 +22,7 @@ function screenTexts() {
   return out
 }
 
-test('運行四個選項的名稱照小良哥 11/06 定案（手機與電腦版同一份）', () => {
+test('運行四個選項的名稱照擁有者 11/06 定案（手機與電腦版同一份）', () => {
   assert.deepEqual(RUN_OPTION_LABEL, { acp: 'acp通道（無介面）', pi: 'asn終端（pi shell）', term: 'asn終端（原生 cli）', self: '原始 cli 視窗' })
 })
 

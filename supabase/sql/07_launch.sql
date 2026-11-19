@@ -1,8 +1,8 @@
 -- 07_launch.sql：遠端開 Claude 視窗（#64，規劃見 docs/relay/LAUNCHER.md）。
--- 用途：小良哥在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 這裡記一筆 launch（pending）→ 敲該機器節點的門鈴
+-- 用途：擁有者在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 這裡記一筆 launch（pending）→ 敲該機器節點的門鈴
 --   → 機器橋 launch_pending 取走（taken）→ 照本機 launcher.json 開視窗 → launch_result 回報（ok／failed／unconfirmed）。
 -- 安全：
---   - 只有 role=owner 的節點能下令（小良哥經 irori-api，身分是希緒的 owner 節點）；其他節點一律 forbidden。
+--   - 只有 role=owner 的節點能下令（擁有者經 irori-api，身分是希緒的 owner 節點）；其他節點一律 forbidden。
 --   - 訊息不帶任何指令：只有 profile 名、視窗名、cwd（必須在該機器回報的 cwd_allow 裡）；真正執行什麼由該機器的 launcher.json 決定。
 --   - 視窗名格式、與現有視窗／進行中的 launch 不重名、每台每小時上限（機器回報的 max_per_hour，最多 20），每次都留紀錄。
 --   - 機器橋執行前會再驗一次（profile、名稱、cwd、次數），這裡只是第一道。

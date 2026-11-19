@@ -629,7 +629,7 @@ mod tests {
 }
 
 /// 沒有 Secret Service 的機器（無畫面 Linux）：設備金鑰照用（只靠 0600 檔），但**不能讓別台看這台**。
-/// 小良哥定過「無畫面機器要本機明確打開才允許被看」；那個開關之後才做，這條先鎖住「沒打開、又沒金鑰庫 → 不能被看」。
+/// 擁有者定過「無畫面機器要本機明確打開才允許被看」；那個開關之後才做，這條先鎖住「沒打開、又沒金鑰庫 → 不能被看」。
 /// CI 的 headless-test 在 dbus 之外、清掉 DBUS_SESSION_BUS_ADDRESS 跑；平常略過（開發機多半有金鑰庫）。
 /// 模組名刻意不放在 `keystore::linux` 底下：build job 在 dbus 裡跑 `keystore::linux -- --ignored`，不能選到這條
 #[cfg(all(test, target_os = "linux"))]

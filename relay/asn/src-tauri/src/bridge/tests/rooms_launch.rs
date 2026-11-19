@@ -91,7 +91,7 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
             vec![
                 rmsg(2, json!({})),                                                                                                  // 沒人 for_me
                 rmsg(3, json!({"forMe": {"T-視窗甲": true}})),                                                                       // 點名視窗甲
-                rmsg(4, json!({"from": "~owner", "from_name": "小良哥", "trust": "owner", "forMe": {"": true, "T-視窗甲": true}})),   // owner 發問
+                rmsg(4, json!({"from": "~owner", "from_name": "擁有者", "trust": "owner", "forMe": {"": true, "T-視窗甲": true}})),   // owner 發問
             ],
             json!([{"member": "T~T-視窗甲", "read_seq": 1}, {"member": "T", "read_seq": 1}]),
         )],

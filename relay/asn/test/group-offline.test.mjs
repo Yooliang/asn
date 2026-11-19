@@ -10,13 +10,13 @@ const me = { key: '~u:me', name: '我', member_kind: 'human', kind: 'owner', min
 const ai = (key, name, online, extra = {}) => ({ key, name, member_kind: 'ai', kind: 'window', mine: true, engine: 'claude', online, ...extra })
 
 test('全員在線：不顯示', () => {
-  const names = offlineNames([me, ai('H~財務', '財務', true), { key: 'x:r1aaaaaa', name: '小良', member_kind: 'human', kind: 'human', mine: false }])
+  const names = offlineNames([me, ai('H~財務', '財務', true), { key: 'x:r1aaaaaa', name: '擁有者', member_kind: 'human', kind: 'human', mine: false }])
   assert.deepEqual(names, [])
   assert.equal(offlineView(names), null)
 })
 
 test('部分離線：人數與名單正確；自己本人與沒有狀態的真人不算，自己名下離線的 AI 要算', () => {
-  const names = offlineNames([me, ai('H~財務', '財務', true), ai('H~審稿', '審稿', false), ai('x:r2bbbbbb', '報表', false, { mine: false, kind: 'ai' }), { key: 'x:r1aaaaaa', name: '小良', member_kind: 'human', kind: 'human', mine: false }])
+  const names = offlineNames([me, ai('H~財務', '財務', true), ai('H~審稿', '審稿', false), ai('x:r2bbbbbb', '報表', false, { mine: false, kind: 'ai' }), { key: 'x:r1aaaaaa', name: '擁有者', member_kind: 'human', kind: 'human', mine: false }])
   assert.deepEqual(labels(names), ['審稿', '報表'])
   assert.deepEqual(names.map(n => n.key), ['H~審稿', 'x:r2bbbbbb'], '帶出成員鍵，點了跳一對一（#1515）')
   const v = offlineView(names)

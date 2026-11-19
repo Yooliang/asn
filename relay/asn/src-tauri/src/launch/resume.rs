@@ -185,20 +185,20 @@ mod tests {
     #[test]
     fn 資料夾編碼_非英數都變橫線() {
         assert_eq!(project_dir_name(r"D:\Github\Yooliang\asn"), "D--Github-Yooliang-asn");
-        assert_eq!(project_dir_name("/home/a b/小良"), "-home-a-b---");
+        assert_eq!(project_dir_name("/home/a b/擁有者"), "-home-a-b----");
     }
 
     #[test]
     fn 找最近一段同名對話_取最近修改的() {
         let d = tempfile::tempdir().unwrap();
         let cwd = r"D:\Work\proj";
-        mk_session(d.path(), cwd, "old-1", &[("custom", "小良")], 5000);
-        mk_session(d.path(), cwd, "new-2", &[("agent", "小良")], 100);
+        mk_session(d.path(), cwd, "old-1", &[("custom", "擁有者")], 5000);
+        mk_session(d.path(), cwd, "new-2", &[("agent", "擁有者")], 100);
         mk_session(d.path(), cwd, "other-3", &[("custom", "別人")], 10);
-        assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "小良").as_deref(), Some("new-2"));
+        assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "擁有者").as_deref(), Some("new-2"));
         assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "沒有的名字"), None);
         // 磁碟機代號大小寫不同也找得到；\\?\ 前綴會被去掉
-        assert_eq!(find_latest_session(&d.path().join("projects"), r"\\?\d:\Work\proj", "小良").as_deref(), Some("new-2"));
+        assert_eq!(find_latest_session(&d.path().join("projects"), r"\\?\d:\Work\proj", "擁有者").as_deref(), Some("new-2"));
     }
 
     #[test]
@@ -216,15 +216,15 @@ mod tests {
         let cwd = "/w/p";
         let dir = d.path().join("projects").join(project_dir_name(cwd));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("x.jsonl"), "{\"type\":\"user\",\"message\":\"custom-title 小良\"}\nnot json custom-title\n").unwrap();
-        std::fs::write(dir.join("y.jsonl"), "{\"type\":\"custom-title\",\"customTitle\":\"小良\",\"sessionId\":\"a b;rm\"}\n").unwrap();
-        assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "小良"), None);
+        std::fs::write(dir.join("x.jsonl"), "{\"type\":\"user\",\"message\":\"custom-title 擁有者\"}\nnot json custom-title\n").unwrap();
+        std::fs::write(dir.join("y.jsonl"), "{\"type\":\"custom-title\",\"customTitle\":\"擁有者\",\"sessionId\":\"a b;rm\"}\n").unwrap();
+        assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "擁有者"), None);
     }
 
     #[test]
     fn 沒有projects資料夾_回none() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(find_latest_session(&d.path().join("projects"), "/w/p", "小良"), None);
+        assert_eq!(find_latest_session(&d.path().join("projects"), "/w/p", "擁有者"), None);
     }
 
     #[test]
@@ -241,31 +241,31 @@ mod tests {
     fn 加上resume_放在最前面_其餘照舊() {
         let d = tempfile::tempdir().unwrap();
         let cwd = "/w/p";
-        mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
-        let mut a = s(&["--dangerously-skip-permissions", "-n", "小良", "--remote-control", "小良"]);
-        let r = ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive);
+        mk_session(d.path(), cwd, "sess-1", &[("custom", "擁有者")], 10);
+        let mut a = s(&["--dangerously-skip-permissions", "-n", "擁有者", "--remote-control", "擁有者"]);
+        let r = ar(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &no_alive);
         assert_eq!(r.as_deref(), Some("sess-1"));
-        assert_eq!(a, s(&["--resume", "sess-1", "--dangerously-skip-permissions", "-n", "小良", "--remote-control", "小良"]));
+        assert_eq!(a, s(&["--resume", "sess-1", "--dangerously-skip-permissions", "-n", "擁有者", "--remote-control", "擁有者"]));
     }
 
     #[test]
     fn 不加的情況() {
         let d = tempfile::tempdir().unwrap();
         let cwd = "/w/p";
-        mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
-        let base = s(&["-n", "小良"]);
+        mk_session(d.path(), cwd, "sess-1", &[("custom", "擁有者")], 10);
+        let base = s(&["-n", "擁有者"]);
         // 沒有舊對話
         let mut a = base.clone();
         assert!(ar(&mut a, "claude", "claude", "沒有", cwd, d.path(), &no_alive).is_none());
         assert_eq!(a, base);
         // 不是 claude 引擎或指令
-        assert!(ar(&mut a, "claude", "codex", "小良", cwd, d.path(), &no_alive).is_none());
-        assert!(ar(&mut a, "cmd.exe", "claude", "小良", cwd, d.path(), &no_alive).is_none());
+        assert!(ar(&mut a, "claude", "codex", "擁有者", cwd, d.path(), &no_alive).is_none());
+        assert!(ar(&mut a, "cmd.exe", "claude", "擁有者", cwd, d.path(), &no_alive).is_none());
         assert_eq!(a, base);
         // 使用者自己的 profile 已經指定接續
         for flag in ["--resume", "-c", "--continue", "--session-id", "-r"] {
             let mut a = s(&[flag, "x"]);
-            assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive).is_none(), "{flag}");
+            assert!(ar(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &no_alive).is_none(), "{flag}");
             assert_eq!(a, s(&[flag, "x"]));
         }
     }
@@ -274,16 +274,16 @@ mod tests {
     fn 同名的視窗還活著_不接續() {
         let d = tempfile::tempdir().unwrap();
         let cwd = "/w/p";
-        mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
+        mk_session(d.path(), cwd, "sess-1", &[("custom", "擁有者")], 10);
         let sd = d.path().join("sessions");
         std::fs::create_dir_all(&sd).unwrap();
         // 同名但已結束的記錄不擋
-        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"小良","sessionId":"zzz","kind":"interactive"}"#).unwrap();
-        let mut a = s(&["-n", "小良"]);
-        assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p != 11).is_some());
+        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"擁有者","sessionId":"zzz","kind":"interactive"}"#).unwrap();
+        let mut a = s(&["-n", "擁有者"]);
+        assert!(ar(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &|p| p != 11).is_some());
         // 同名活著
-        let mut a = s(&["-n", "小良"]);
-        assert!(ar(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11).is_none());
+        let mut a = s(&["-n", "擁有者"]);
+        assert!(ar(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &|p| p == 11).is_none());
     }
 
     /// 換個名字但同一段對話正被別的視窗開著：不再悄悄改開新對話，回要使用者看的錯誤（舊程式回 None＝靜默開新，這裡會紅）
@@ -291,22 +291,22 @@ mod tests {
     fn 同一段對話被別名視窗開著_回錯誤_不靜默開新() {
         let d = tempfile::tempdir().unwrap();
         let cwd = "/w/p";
-        mk_session(d.path(), cwd, "sess-1", &[("custom", "小良")], 10);
-        let mut a = s(&["-n", "小良"]);
+        mk_session(d.path(), cwd, "sess-1", &[("custom", "擁有者")], 10);
+        let mut a = s(&["-n", "擁有者"]);
         let held = |sid: &str| if sid == "sess-1" { vec![holder(11, Some("別名"))] } else { Vec::new() };
-        let e = apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
+        let e = apply_resume(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &no_alive, &held).unwrap_err();
         assert_eq!(e, "這段對話已經有視窗開著（別名），請直接切過去；要開新的夥伴，請換一個名字，或先關掉那個視窗");
-        assert_eq!(a, s(&["-n", "小良"]), "不改啟動參數");
+        assert_eq!(a, s(&["-n", "擁有者"]), "不改啟動參數");
         // 名字取不到就省略括號那段
         let held = |_: &str| vec![holder(11, None)];
-        let e = apply_resume(&mut s(&["-n", "小良"]), "claude", "claude", "小良", cwd, d.path(), &no_alive, &held).unwrap_err();
+        let e = apply_resume(&mut s(&["-n", "擁有者"]), "claude", "claude", "擁有者", cwd, d.path(), &no_alive, &held).unwrap_err();
         assert!(e.contains("這段對話已經有視窗開著，請直接切過去") && e.contains("請換一個名字，或先關掉那個視窗") && !e.contains('（'), "{e}");
         // 同名活著照舊：不接續、不報錯，直接新開
         let sd = d.path().join("sessions");
         std::fs::create_dir_all(&sd).unwrap();
-        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"小良","sessionId":"zzz"}"#).unwrap();
-        let mut a = s(&["-n", "小良"]);
-        assert_eq!(apply_resume(&mut a, "claude", "claude", "小良", cwd, d.path(), &|p| p == 11, &held), Ok(None));
+        std::fs::write(sd.join("11.json"), r#"{"pid":11,"name":"擁有者","sessionId":"zzz"}"#).unwrap();
+        let mut a = s(&["-n", "擁有者"]);
+        assert_eq!(apply_resume(&mut a, "claude", "claude", "擁有者", cwd, d.path(), &|p| p == 11, &held), Ok(None));
     }
 
     /// 守門：兩條開視窗的路徑（本機 UI、遠端 launch）都要呼叫接續；測試用的隱藏視窗不查真實的對話檔

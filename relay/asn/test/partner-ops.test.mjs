@@ -74,7 +74,7 @@ test('選單固定八項（詳情、改名、切換模型、關閉視窗、換�
 })
 
 test('人、手機、群組、ASN／收發室視窗：空陣列（不是 AI 夥伴，沒有夥伴選單）', () => {
-  for (const f of [W('H', '小良', { kind: 'owner' }), W('P', '手機', { kind: 'phone' }), W('H', '群', { room: true }), W('H', '某人', { person: true }),
+  for (const f of [W('H', '擁有者', { kind: 'owner' }), W('P', '手機', { kind: 'phone' }), W('H', '群', { room: true }), W('H', '某人', { person: true }),
     W('H', 'H-ASN'), W('H', '另一個', { engine: 'asn' }), W('H', '家用收發室'), W('Q', '雲端', {}), { node: '', agent: '' }, null]) {
     const nonWin = f?.node === 'Q' ? { ...ctx, nonWindowNodes: ['Q'] } : ctx
     assert.deepEqual(menuItems(f, nonWin), [], JSON.stringify(f))

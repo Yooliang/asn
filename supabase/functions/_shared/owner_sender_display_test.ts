@@ -70,7 +70,7 @@ import { ACCOUNT_ACTIONS, type AccountDeps, handleAccountAction } from "./accoun
 const UID = "3f2b7c1e-9a41-4c1b-8d52-0a6f6c7e1b10";
 const JWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXNpZ25hdHVyZQ";
 
-function fakeDeps(user: { name: string | null; email: string | null }, reply: unknown = { name: "啟良" }) {
+function fakeDeps(user: { name: string | null; email: string | null }, reply: unknown = { name: "擁有者" }) {
   const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const deps: AccountDeps = {
     verifyJwt: (t) => Promise.resolve(t === JWT ? { id: UID, ...user } : null),
@@ -82,7 +82,7 @@ function fakeDeps(user: { name: string | null; email: string | null }, reply: un
 }
 
 Deno.test("account_name：要登入憑證（沒有或無效 401，不碰資料庫）", async () => {
-  const { deps, calls } = fakeDeps({ name: "啟良", email: "a@b.c" });
+  const { deps, calls } = fakeDeps({ name: "擁有者", email: "a@b.c" });
   assert(ACCOUNT_ACTIONS.has("account_name"));
   assertEquals((await handleAccountAction(deps, "account_name", null, null, {})).status, 401);
   assertEquals((await handleAccountAction(deps, "account_name", "Bearer " + "x".repeat(30), null, {})).status, 401);
@@ -90,20 +90,20 @@ Deno.test("account_name：要登入憑證（沒有或無效 401，不碰資料�
 });
 
 Deno.test("account_name：沒帶 name ＝讀（p_name 為 null）；預設值取登入資料的 name，沒有就 email @ 前面那段", async () => {
-  let t = fakeDeps({ name: "啟良", email: "qi@example.com" });
+  let t = fakeDeps({ name: "擁有者", email: "a@example.com" });
   let r = await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, null);
-  assertEquals([r.status, r.body], [200, { name: "啟良" }]);
-  assertEquals(t.calls[0], { fn: "asn_account_name", args: { p_user: UID, p_name: null, p_default: "啟良" } });
-  t = fakeDeps({ name: null, email: "qiliang@example.com" });
+  assertEquals([r.status, r.body], [200, { name: "擁有者" }]);
+  assertEquals(t.calls[0], { fn: "asn_account_name", args: { p_user: UID, p_name: null, p_default: "擁有者" } });
+  t = fakeDeps({ name: null, email: "owner@example.com" });
   await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, {});
-  assertEquals(t.calls[0].args.p_default, "qiliang");
+  assertEquals(t.calls[0].args.p_default, "owner");
 });
 
 Deno.test("account_name：帶 name ＝改（清理過）；空字串或不是字串回 400；後台回 not_found 轉成 404", async () => {
   const t = fakeDeps({ name: "x", email: null });
-  const r = await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, { name: " 啟\n良 " });
+  const r = await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, { name: " 擁\n有者 " });
   assertEquals(r.status, 200);
-  assertEquals(t.calls[0].args.p_name, "啟良");
+  assertEquals(t.calls[0].args.p_name, "擁有者");
   for (const bad of ["", "   ", 5, {}, []]) {
     assertEquals((await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, { name: bad })).status, 400, String(bad));
   }

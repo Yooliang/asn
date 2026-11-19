@@ -19,26 +19,26 @@ const tpl = /template: `([\s\S]*?)`,?\n?\}/.exec(chatpane)[1]
 
 test('摘要：去掉舊的引用行、空白壓成一個、超過 40 字加刪節號；空的回空字串', () => {
   assert.equal(excerptOf('  第一行\n第二行   好  '), '第一行 第二行 好')
-  assert.equal(excerptOf(`${QUOTE_PREFIX}小良：原話\n真正的內容`), '真正的內容', '回覆的回覆只取新的內容')
+  assert.equal(excerptOf(`${QUOTE_PREFIX}擁有者：原話\n真正的內容`), '真正的內容', '回覆的回覆只取新的內容')
   assert.equal(excerptOf('字'.repeat(60)), '字'.repeat(40) + '…')
   assert.equal(excerptOf(''), ''); assert.equal(excerptOf(null), '')
 })
 
 test('引用行與拆解：寫進內文的第一行，能原樣讀回；作者名裡的換行與括號引號被清掉；沒有引用行就原文', () => {
-  assert.equal(quoteLine('小良', '請查報表\n謝謝'), '↩ 回覆 小良：請查報表 謝謝')
+  assert.equal(quoteLine('擁有者', '請查報表\n謝謝'), '↩ 回覆 擁有者：請查報表 謝謝')
   assert.equal(quoteLine('財務（牧陽）', 'x'), '↩ 回覆 財務（牧陽）：x', '全形括號是標示的一部分，要保留')
   assert.equal(quoteLine('壞\n名「字」', 'x'), '↩ 回覆 壞名字：x')
-  assert.deepEqual(splitQuote('↩ 回覆 小良：請查報表\n@小良 好的'), { quote: { author: '小良', excerpt: '請查報表' }, body: '@小良 好的' })
-  assert.deepEqual(splitQuote('↩ 回覆 小良：只有引用'), { quote: { author: '小良', excerpt: '只有引用' }, body: '' })
-  assert.deepEqual(splitQuote('沒有引用\n↩ 回覆 小良：在第二行不算'), { quote: null, body: '沒有引用\n↩ 回覆 小良：在第二行不算' })
+  assert.deepEqual(splitQuote('↩ 回覆 擁有者：請查報表\n@擁有者 好的'), { quote: { author: '擁有者', excerpt: '請查報表' }, body: '@擁有者 好的' })
+  assert.deepEqual(splitQuote('↩ 回覆 擁有者：只有引用'), { quote: { author: '擁有者', excerpt: '只有引用' }, body: '' })
+  assert.deepEqual(splitQuote('沒有引用\n↩ 回覆 擁有者：在第二行不算'), { quote: null, body: '沒有引用\n↩ 回覆 擁有者：在第二行不算' })
   assert.deepEqual(splitQuote(null), { quote: null, body: '' })
 })
 
 test('回覆對象：群組裡回覆別人自動 @ 對方（只在對方是可點名的成員時）；回覆自己、個人聊天、系統訊息不 @', () => {
-  const friend = { room: true, nick: '群', mentionable: [{ label: '小良', kind: 'human' }, { label: '報表（小良）', kind: 'ai' }] }
-  const them = { k: 'them', who: '報表（小良）', text: '資料在這裡\n請看', seq: 7, id: 'room-7', av: 'x:1' }
+  const friend = { room: true, nick: '群', mentionable: [{ label: '擁有者', kind: 'human' }, { label: '報表（擁有者）', kind: 'ai' }] }
+  const them = { k: 'them', who: '報表（擁有者）', text: '資料在這裡\n請看', seq: 7, id: 'room-7', av: 'x:1' }
   const t = replyTarget(them, { friend, meName: '牧陽', index: 3 })
-  assert.deepEqual({ author: t.author, excerpt: t.excerpt, seq: t.seq, mention: t.mention }, { author: '報表（小良）', excerpt: '資料在這裡 請看', seq: 7, mention: '報表（小良）' })
+  assert.deepEqual({ author: t.author, excerpt: t.excerpt, seq: t.seq, mention: t.mention }, { author: '報表（擁有者）', excerpt: '資料在這裡 請看', seq: 7, mention: '報表（擁有者）' })
   assert.equal(replyTarget({ k: 'me', text: '我說的', seq: 8 }, { friend, meName: '牧陽', index: 4 }).mention, '', '回覆自己不點自己')
   assert.equal(replyTarget({ k: 'me', text: '我說的', seq: 8 }, { friend, meName: '牧陽', index: 4 }).author, '牧陽')
   assert.equal(replyTarget({ k: 'them', who: '離開的人', text: 'x', seq: 1 }, { friend, meName: '牧陽', index: 0 }).mention, '', '不在可點名名單裡的不 @')
@@ -47,15 +47,15 @@ test('回覆對象：群組裡回覆別人自動 @ 對方（只在對方是可�
   assert.equal(replyTarget({ k: 'sys', text: '加入' }, { friend, meName: '牧陽', index: 0 }), null)
   assert.equal(replyTarget({ k: 'them', text: '   ' }, { friend, meName: '牧陽', index: 0 }), null, '沒有文字的不能回覆')
   // 引用行裡不重複放被回覆者自己的引用：回覆「回覆」時摘要取新內容
-  const rr = replyTarget({ k: 'them', who: '小良', text: '↩ 回覆 報表（小良）：資料\n@報表（小良） 收到', seq: 9 }, { friend, meName: '牧陽', index: 5 })
-  assert.equal(rr.excerpt, '@報表（小良） 收到')
+  const rr = replyTarget({ k: 'them', who: '擁有者', text: '↩ 回覆 報表（擁有者）：資料\n@報表（擁有者） 收到', seq: 9 }, { friend, meName: '牧陽', index: 5 })
+  assert.equal(rr.excerpt, '@報表（擁有者） 收到')
 })
 
 test('組出要送的內文：引用行＋自動 @ 對方＋使用者打的字；對方已經被使用者自己 @ 就不重複；沒打字不能送', () => {
-  const t = { author: '報表（小良）', excerpt: '資料在這裡', mention: '報表（小良）' }
-  assert.equal(composeReply(t, '收到，謝謝'), '↩ 回覆 報表（小良）：資料在這裡\n@報表（小良） 收到，謝謝')
-  assert.equal(composeReply(t, '@報表（小良） 收到'), '↩ 回覆 報表（小良）：資料在這裡\n@報表（小良） 收到', '使用者自己已經 @ 就不重複')
-  assert.equal(composeReply({ ...t, mention: '' }, '好'), '↩ 回覆 報表（小良）：資料在這裡\n好')
+  const t = { author: '報表（擁有者）', excerpt: '資料在這裡', mention: '報表（擁有者）' }
+  assert.equal(composeReply(t, '收到，謝謝'), '↩ 回覆 報表（擁有者）：資料在這裡\n@報表（擁有者） 收到，謝謝')
+  assert.equal(composeReply(t, '@報表（擁有者） 收到'), '↩ 回覆 報表（擁有者）：資料在這裡\n@報表（擁有者） 收到', '使用者自己已經 @ 就不重複')
+  assert.equal(composeReply({ ...t, mention: '' }, '好'), '↩ 回覆 報表（擁有者）：資料在這裡\n好')
   assert.equal(composeReply(t, '   '), '')
   assert.equal(composeReply(null, '一般訊息'), '一般訊息')
 })
@@ -79,14 +79,14 @@ test('找回原訊息：有序號用序號；沒有就在它之前找作者相�
 })
 
 test('群組訊息帶引用：後台給的 reply_to 轉成對話記錄的 reply（作者用同一套標示、摘要一行），沒有就是 null；不含任何鍵', () => {
-  const members = [{ key: '~u:me', label: '牧陽', member_kind: 'human', mine: true }, { key: 'x:r2bbbbbb', label: '報表（小良）', member_kind: 'ai' }]
+  const members = [{ key: '~u:me', label: '牧陽', member_kind: 'human', mine: true }, { key: 'x:r2bbbbbb', label: '報表（擁有者）', member_kind: 'ai' }]
   const log = roomLog([
-    { seq: 1, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（小良）', body: '資料', at: '2026-10-24T10:00:00Z', reply_to: null },
-    { seq: 2, from: '~u:me', relation: 'mine', from_kind: 'human', from_label: '牧陽', body: '↩ 回覆 報表（小良）：資料\n@報表（小良） 好', at: '2026-10-24T10:01:00Z',
-      reply_to: { seq: 1, from: 'x:r2bbbbbb', from_kind: 'ai', from_label: '報表（小良）', excerpt: '資料' } },
+    { seq: 1, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（擁有者）', body: '資料', at: '2026-10-24T10:00:00Z', reply_to: null },
+    { seq: 2, from: '~u:me', relation: 'mine', from_kind: 'human', from_label: '牧陽', body: '↩ 回覆 報表（擁有者）：資料\n@報表（擁有者） 好', at: '2026-10-24T10:01:00Z',
+      reply_to: { seq: 1, from: 'x:r2bbbbbb', from_kind: 'ai', from_label: '報表（擁有者）', excerpt: '資料' } },
   ], ['~u:me'], members)
   assert.equal(log[0].reply, null)
-  assert.deepEqual(log[1].reply, { seq: 1, author: '報表（小良）', excerpt: '資料' })
+  assert.deepEqual(log[1].reply, { seq: 1, author: '報表（擁有者）', excerpt: '資料' })
   assert.doesNotMatch(JSON.stringify(log[1].reply), /x:|~u:/)
   const old = roomLog([{ seq: 1, from: 'T~a', body: 'x' }], [], [])
   assert.equal(old[0].reply ?? null, null, '舊後台沒有 reply_to 欄位照常')

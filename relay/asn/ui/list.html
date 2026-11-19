@@ -104,6 +104,7 @@
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
+          <partner-op-strip :runner="opRunner" :runs="opRun.runs" @launch-new="launchNewFromRun"></partner-op-strip>
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
@@ -273,7 +274,7 @@
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap, done) => sendAttachTo(t.id, p, cap, done)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
       <div class="pane term-pane" :class="{ 'term-pane-live': !termPaneRow.adopted }" v-if="view === 'chat' && termPaneActive">
-        <action-bar v-if="termPaneFriend" :friend="termPaneFriend" :self-node="selfNode" :api="termBarApi" :blocked="termBarBlocked" :ops="termBarOps" @ops="onTermBarOp" :active="view === 'chat'"></action-bar>
+        <action-bar v-if="termPaneFriend" :friend="termPaneFriend" :self-node="selfNode" :api="termBarApi" :blocked="termBarBlocked" :ops="termBarOps" @ops="onTermBarOp" @launch-new="launchNewFromOp" :active="view === 'chat'"></action-bar>
         <div class="tp-head"><b>{{ termPaneRow.title }}</b><span class="term-state" :class="'tone-' + termPaneRow.tone">{{ termPaneRow.stateLabel }}</span><span class="term-folder" v-if="termPaneRow.folder">{{ termPaneRow.folder }}</span><span class="term-adopted" v-if="termPaneRow.adopted">已接手・預設只能看</span></div>
         <div class="tp-body">
           <ul class="tp-log" v-if="(termTimeline[termPaneRow.id] || []).length" aria-label="送字記錄">
@@ -384,7 +385,7 @@
     <li v-for="m in buddyModel.items" :key="m.id"><button type="button" role="menuitemradio" :aria-checked="m.checked" :disabled="m.disabled" @click="pickBuddyModel(m)">{{ m.checked ? '✓ ' : '　' }}{{ m.label }}</button></li>
     <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
   </ul>
-  <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" :self-node="selfNode" :taken="opDlg.taken" :pi-models="opDlg.friend.node === selfNode ? transport.piModels : remotePiModelsFor(opDlg.friend.node)" @close="closeOpDlg" @done="onPartnerOpDone" @launch-new="launchNewFromOp"></partner-op-dialog>
+  <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" :self-node="selfNode" :taken="opDlg.taken" :pi-models="opDlg.friend.node === selfNode ? transport.piModels : remotePiModelsFor(opDlg.friend.node)" @close="closeOpDlg" @done="onPartnerOpDone" @launch-new="launchNewFromOp" @run="onOpRun"></partner-op-dialog>
   <asn-dialog v-if="termClose.open" :title="termClose.title" @close="termCloseCancel">
     <p class="launch-notice-body">{{ TERM_CLOSE_NOTE }}</p>
     <p class="launch-notice-body model-err" v-if="termClose.error">{{ termClose.error }}</p>

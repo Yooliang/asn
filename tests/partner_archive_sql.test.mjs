@@ -141,15 +141,15 @@ test('實跑（pglite）：自動解除——離線封存後重新回報解除�
   assert.equal(r.partners.length, 2, '同步的回傳不變')
   assert.deepEqual((await q('select name from relay.partner_archives')).map(r => r.name).sort(), ['在線', '寄信'].sort())
   // 寄信來：不論封存時在不在線都解除；寄信本身的欄位照舊
-  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','寄信','P','小良','hi')`)
+  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','寄信','P','擁有者','hi')`)
   assert.deepEqual((await q('select name from relay.partner_archives')).map(r => r.name), ['在線'])
   assert.equal((await q(`select from_partner_id from relay.messages`))[0].from_partner_id, await pid('寄信'), '原本的寄信解析照舊')
   // 收的信（對方是收件人）不算「它寄信來」
-  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('P','小良','H','在線','hi')`)
+  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('P','擁有者','H','在線','hi')`)
   assert.deepEqual((await q('select name from relay.partner_archives')).map(r => r.name), ['在線'])
   // 節點＋名字的鍵：寄信來也會解除
   await archive({ name: '無IDa' })
-  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','無IDa','P','小良','hi')`)
+  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','無IDa','P','擁有者','hi')`)
   assert.deepEqual((await q('select name from relay.partner_archives')).map(r => r.name), ['在線'])
   assert.equal((await flags())['H/寄信'], false)
 })
@@ -169,7 +169,7 @@ test('實跑（pglite）：migration 可以安全重跑——同步函式仍是�
 test('實跑（pglite）：解除的觸發器壞掉也不影響寄信', { skip }, async () => {
   const { db, q } = await boot()
   await db.exec(`drop table relay.partner_archives`)
-  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','小文','P','小良','hi')`)
+  await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','小文','P','擁有者','hi')`)
   assert.equal((await q('select count(*)::int c from relay.messages'))[0].c, 1)
 })
 

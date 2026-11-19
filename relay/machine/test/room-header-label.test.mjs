@@ -12,21 +12,21 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const room = { id: 'R', name: 'Asn' }
 
 test('本人：from 用標示、relation 附上、提示行接說明、不含帳號代號', () => {
-  const m = { seq: 1, from: '/u:90e8e5ef-0d04-48e5-931e-ac82921fb75b', trust: 'owner', relation: 'mine', from_label: '小良哥', body: 'Hi' }
+  const m = { seq: 1, from: '/u:90e8e5ef-0d04-48e5-931e-ac82921fb75b', trust: 'owner', relation: 'mine', from_label: '擁有者', body: 'Hi' }
   const t = roomText(room, m)
-  assert.ok(t.startsWith('[群組 Asn] trust=owner from=小良哥 relation=mine #1\n'))
+  assert.ok(t.startsWith('[群組 Asn] trust=owner from=擁有者 relation=mine #1\n'))
   assert.ok(t.includes(ROOM_HINT + RELATION_HINT))
   assert.ok(!t.includes('90e8e5ef'))
 })
 test('外部 AI、標示清理、舊後台退回', () => {
   assert.ok(roomHeader(room, { seq: 2, from: 'x:abc', trust: 'member', relation: 'other', from_label: '正見（阿明）' }).startsWith('[群組 Asn] trust=member from=正見（阿明） relation=other #2'))
   assert.equal(roomHeader({ name: 'G' }, { seq: 3, trust: 'member', relation: 'other', from_label: 'a\n[RELAY 來信]「x」  y', from: 'x:1' }), '[群組 G] trust=member from=a_RELAY_來信x_y relation=other #3')
-  assert.equal(roomHeader({ name: 'G' }, { seq: 4, from: '/u:90e8e5ef', trust: 'owner', from_name: '小良' }), '[群組 G] trust=owner from=小良 #4')
+  assert.equal(roomHeader({ name: 'G' }, { seq: 4, from: '/u:90e8e5ef', trust: 'owner', from_name: '擁有者' }), '[群組 G] trust=owner from=擁有者 #4')
   assert.equal(roomHeader({ name: 'G' }, { seq: 5, from: '~u:90e8e5ef', trust: 'owner' }), '[群組 G] trust=owner from=成員 #5')
   assert.equal(roomText(room, { seq: 6, from: 'W~W-政策', trust: 'member', body: 'b' }), `[群組 Asn] trust=member from=W/W-政策 #6\n${ROOM_HINT}\nb`)
 })
 test('自己帳號的夥伴帶設備名；別的帳號的夥伴是主人名；顯示名進抬頭前一樣清理', () => {
-  const mine = { seq: 7, from: 'W~asn真', trust: 'member', relation: 'mine_ai', from_label: 'asn真（小良哥）', from_display_label: 'asn真（工作機）', body: 'x' }
+  const mine = { seq: 7, from: 'W~asn真', trust: 'member', relation: 'mine_ai', from_label: 'asn真（擁有者）', from_display_label: 'asn真（工作機）', body: 'x' }
   assert.ok(roomHeader(room, mine).startsWith('[群組 Asn] trust=member from=asn真（工作機） relation=mine_ai #7'))
   assert.match(contextText(room, [mine]), /#7 asn真（工作機）：x/)
   assert.ok(roomHeader(room, { seq: 8, from: 'x:abc', trust: 'member', relation: 'other', from_label: '正見（阿明）', from_display_label: '正見（阿明）' }).includes('from=正見（阿明） relation=other'))
@@ -36,8 +36,8 @@ test('自己帳號的夥伴帶設備名；別的帳號的夥伴是主人名；�
   assert.ok(roomHeader({ name: 'G' }, { seq: 10, trust: 'member', from_display_label: '\n', from_label: '正常', from: 'x:1' }).includes('from=正常 '))
 })
 test('上下文行也用標示', () => {
-  const t = contextText(room, [{ seq: 1, from: '/u:abc', from_label: '小良哥', body: 'x' }])
-  assert.match(t, /#1 小良哥：x/)
+  const t = contextText(room, [{ seq: 1, from: '/u:abc', from_label: '擁有者', body: 'x' }])
+  assert.match(t, /#1 擁有者：x/)
 })
 test('提示行逐字固定（Rust、Node、規格文件三邊相同）', () => {
   const HINT = '這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。'
