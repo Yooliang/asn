@@ -43,21 +43,26 @@ test('#1753 後台要本人簽章的動作清單讀得到，而且包含 launch�
 })
 
 // 刻意不帶簽章的（有另一條帶簽章的版本與測試）：secret_request 沒有登入網址時走 Backend::request，有登入網址才走 request_signed（secret_remote/tests.rs 鎖住）
-const ALLOWED_UNSIGNED = new Set(['secret_remote/wire.rs:secret_request', 'view_d.rs:term_view_start', 'view_d.rs:term_view_report'])   // view_d 走 ViewBackend::api(action, body, token)：token 是必填參數（下面另一支測試鎖住）
+const ALLOWED_UNSIGNED = new Set(['secret_remote/wire.rs:secret_request', 'view_d.rs:term_view_report'])
+// view_d.rs 走 ViewBackend::api(action, body, token)，token 是必填參數（下面另一支測試鎖住）：term_view_start 的呼叫寫著 &token 會被掃描直接放行；
+// term_view_report 有一處把 token 綁成變數 t 再傳（view_d.rs 的 Ok(t) 分支），掃描看不出來，所以要白名單（下面斷言每一項都真的用到）
 
 test('#373 #380 #381 #1753 電腦版沒有任何地方用「沒簽章」的呼叫打後台要簽章的動作', () => {
   const signed = backendSignedActions()
-  const bad = []
+  const bad = [], used = new Set()
   for (const f of rsFiles) {
     const src = read(f)
     const prod = src.includes('#[cfg(test)]') ? src.slice(0, src.indexOf('#[cfg(test)]')) : src
     for (const m of prod.matchAll(/\.api(?:_with)?\(\s*"([a-z_]+)"([^\n]*)/g)) {
       // 呼叫裡有交 token 的（view_d 的 ViewBackend::api(action, body, token)）就是帶簽章的版本
-      if (!signed.has(m[1]) || /token/.test(m[2]) || ALLOWED_UNSIGNED.has(`${rel(f)}:${m[1]}`)) continue
+      if (!signed.has(m[1]) || /token/.test(m[2])) continue
+      if (ALLOWED_UNSIGNED.has(`${rel(f)}:${m[1]}`)) { used.add(`${rel(f)}:${m[1]}`); continue }
       bad.push(`${rel(f)}：.api("${m[1]}"…) 沒帶簽章`)
     }
   }
   assert.deepEqual(bad, [], '這些呼叫成員角色的電腦會被後台回 403 forbidden（要改用 api_signed 並帶 signing_token）')
+  // 白名單每一項都要真的被用到：沒用到的項目留著，以後有人移除 token 時反而會被它遮掉
+  assert.deepEqual([...ALLOWED_UNSIGNED].filter(k => !used.has(k)), [], 'ALLOWED_UNSIGNED 有沒用到的項目，請拿掉')
 })
 
 test('#380 #1753 開新夥伴與各電腦啟動設定都走 api_signed，而且 lib.rs 的命令真的把簽章交進去', () => {
