@@ -1926,9 +1926,9 @@ b", "op": "close" }),
         let (url, seen) = fake_server(200);
         let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
         let req = json!({ "node": "H", "profile": "claude", "name": "夥伴-1", "cwd": "c" });
-        crate::launch::relay_launch(&r, req.clone(), Some("usertoken-9")).await.unwrap();
-        crate::launch::relay_launch(&r, req.clone(), None).await.unwrap();
-        crate::launch::relay_launch(&r, req.clone(), Some("")).await.unwrap();
+        crate::launch::relay_launch(&r, req.clone(), Some("usertoken-9"), &|_| {}).await.unwrap();
+        crate::launch::relay_launch(&r, req.clone(), None, &|_| {}).await.unwrap();
+        crate::launch::relay_launch(&r, req.clone(), Some(""), &|_| {}).await.unwrap();
         {
             let s = seen.lock().unwrap();
             assert_eq!(s.len(), 3);
@@ -1939,9 +1939,15 @@ b", "op": "close" }),
         // 後台不收（fake_server 非 200 一律回 not_found）：畫面拿到的是白話，不是「launch HTTP 404 not_found」
         let (url, _) = fake_server(404);
         let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
-        let e = crate::launch::relay_launch(&r, req, Some("usertoken-9")).await.unwrap_err();
+        let logged = std::sync::Mutex::new(Vec::<String>::new());
+        let e = crate::launch::relay_launch(&r, req, Some("usertoken-9"), &|l| logged.lock().unwrap().push(l)).await.unwrap_err();
         assert_eq!(e, "找不到那台電腦，它可能離線太久或已被移除");
         assert!(!e.contains("HTTP") && !e.contains("launch"), "{e}");
+        // 原文留在 log：下次遇到不認得的錯誤還查得到；log 裡沒有金鑰與簽章
+        let l = logged.lock().unwrap();
+        assert_eq!(l.len(), 1);
+        assert!(l[0].contains("launch HTTP 404 not_found") && l[0].contains("有帶本人簽章"), "{l:?}");
+        assert!(!l[0].contains("secret-key") && !l[0].contains("usertoken-9"), "{l:?}");
     }
 
     #[tokio::test]

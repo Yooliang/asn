@@ -194,20 +194,27 @@ pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), Str
 }
 
 /// 遠端開新夥伴。有登入就帶本人簽章（成員角色的電腦不帶，後台回 403 forbidden；跟 [`relay_launchers`] 一樣），沒登入照舊不帶。
-/// 錯誤一律換成白話（[`launch_error_text`]），畫面不會看到動作名與 HTTP 字樣
-pub async fn relay_launch(relay: &Relay, body: Value, token: Option<&str>) -> Result<Value, String> {
-    relay.api_signed("launch", Some(body), token).await.map_err(|e| launch_error_text(&e))
+/// 錯誤一律換成白話（[`launch_error_text`]），畫面不會看到動作名與 HTTP 字樣；原文（只有動作名、狀態碼、後台的錯誤代碼，不含金鑰與內文）先交給 `log` 留底，
+/// 不然下次遇到不認得的錯誤，畫面只剩一句「沒成功」，也沒有任何地方能查
+pub async fn relay_launch(relay: &Relay, body: Value, token: Option<&str>, log: &(dyn Fn(String) + Sync)) -> Result<Value, String> {
+    let signed = token.is_some_and(|t| !t.is_empty());
+    relay.api_signed("launch", Some(body), token).await.map_err(|e| {
+        log(format!("開新夥伴失敗：{e}（{}）", if signed { "有帶本人簽章" } else { "沒登入，沒帶簽章" }));
+        launch_error_text(&e, signed)
+    })
 }
 
 /// 後台回的開窗錯誤（「launch HTTP 403 forbidden」這種）→ 給人看的話：講發生什麼事、要怎麼做。
 /// 錯誤代碼對照 supabase/functions/_shared/launch.ts 的 ERROR_TEXT；不認得的代碼與狀態碼走最後一句，不把原字串秀出來
-pub fn launch_error_text(e: &str) -> String {
+/// `signed`＝這次有沒有帶本人簽章：沒登入又被擋（forbidden），要請他先登入，不是「兩台不同帳號」
+pub fn launch_error_text(e: &str, signed: bool) -> String {
     if e.contains("連線失敗") || e.contains("讀回應中斷") {
         return "連不上收發室，請確認網路後再試一次".into();
     }
     let code = e.split("HTTP").nth(1).map(|r| r.trim().splitn(2, ' ').nth(1).unwrap_or("").trim()).unwrap_or("");
     let status = e.split("HTTP").nth(1).map(|r| r.trim().split(' ').next().unwrap_or("")).unwrap_or("");
     match code {
+        "forbidden" if !signed => "這台還沒登入帳號，請先登入後再試（要替別台開夥伴得先登入）",
         "forbidden" => "這台沒有權限替那台開夥伴，請確認兩台登入同一個帳號",
         "not_found" => "找不到那台電腦，它可能離線太久或已被移除",
         "no_launcher" => "那台電腦還沒開放遠端開新夥伴，請到那台的設定打開「允許我的其他設備替這台開新視窗」",
@@ -260,10 +267,19 @@ mod tests {
             ("launch 連線失敗：timeout", "連不上收發室，請確認網路後再試一次"),
         ];
         for (raw, want) in all {
-            let got = launch_error_text(raw);
+            let got = launch_error_text(raw, true);
             assert_eq!(got, want, "{raw}");
             assert!(!got.contains("HTTP") && !got.contains("launch") && !got.contains("forbidden"), "{raw} → {got}");
         }
+    }
+
+    #[test]
+    fn 開窗錯誤_沒登入被擋_請他先登入_不說是帳號不同() {
+        let t = launch_error_text("launch HTTP 403 forbidden", false);
+        assert_eq!(t, "這台還沒登入帳號，請先登入後再試（要替別台開夥伴得先登入）");
+        assert!(!t.contains("HTTP") && !t.contains("forbidden"));
+        // 沒登入但是別的錯誤：照原本的白話
+        assert_eq!(launch_error_text("launch HTTP 429 rate_limited", false), launch_error_text("launch HTTP 429 rate_limited", true));
     }
 
     #[test]

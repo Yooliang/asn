@@ -379,7 +379,12 @@ fn deliver_invite(app: &tauri::AppHandle, code: String) {
 async fn relay_launch(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
     let token = account::signing_token(&auth).await;
-    launch::relay_launch(r.as_ref(), body, token.as_deref()).await
+    // 原文留在 ui.log（只有動作名、狀態碼、後台錯誤代碼），畫面只顯示白話
+    let dir = app.work_dir.clone();
+    let log = move |line: String| {
+        let _ = ui_log::append(&dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+    };
+    launch::relay_launch(r.as_ref(), body, token.as_deref(), &log).await
 }
 
 #[cfg(feature = "gui")]
