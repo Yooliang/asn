@@ -69,7 +69,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
   // multi：輸入框送多行 → 先問一次；按「取消」不送，字放回輸入框；再送一次按「送出」才送（整段＋Enter）。兩顆鈕的字取自 PASTE_TEXT（本機和看別台同字，#1378）
-  // refused：輸入框送出 → 等對方回應時保留原本的畫面、上面疊「等那台電腦回應」（#1647）→ 那台沒允許 → 自動回到只能看、寫明原因、字放回輸入框，沒有送進任何字
+  // refused：輸入框送出 → 等連上那台時保留原本的畫面、上面疊「正在連到那台電腦」（#1647）→ 那台沒允許 → 自動回到只能看、寫明原因、字放回輸入框，沒有送進任何字
   if (kind === 'refused') {
     const core = globalThis.__TAURI__.core, orig = core.invoke;
     core.invoke = async (cmd, args) => {
@@ -83,12 +83,12 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     const ta = document.querySelector('.chatpane .compose-row textarea');
     const go = ta && ta.closest('form').querySelector('button[type=submit]');
     if (!ta || !go) return { ok: false, why: '找不到下方的輸入框或送出鈕' };
-    if (!ta.placeholder.includes('送出會向那台電腦要打字權限')) return { ok: false, why: '輸入框的提示沒寫「送出會向那台電腦要打字權限」：' + ta.placeholder };
+    if (!ta.placeholder.includes('送出後會連到那台電腦')) return { ok: false, why: '輸入框的提示沒寫「送出後會連到那台電腦」：' + ta.placeholder };
     ta.value = 'ls'; ta.dispatchEvent(new Event('input'));
     await sleep(50);
     go.click();
     const note = await wait(() => document.querySelector('.term-wait-note'));
-    if (!note || !note.textContent.includes('等那台電腦回應')) return { ok: false, why: '送出後沒有疊「等那台電腦回應」' };
+    if (!note || !note.textContent.includes('正在連到那台電腦')) return { ok: false, why: '送出後沒有疊「正在連到那台電腦」' };
     const snap = document.querySelector('.term-wait-snap');
     if (!snap || !snap.textContent.includes('測試通過')) return { ok: false, why: '等對方回應時原本的畫面不見了：' + JSON.stringify(snap && snap.textContent.slice(0, 40)) };
     if (!(await wait(() => ta.value === 'ls'))) return { ok: false, why: '那台沒允許，字沒有放回輸入框：' + JSON.stringify(ta.value) };
@@ -189,7 +189,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   // (e) 終端上方沒有「打字」按鈕（#1288 拿掉了）；輸入框的提示字與按鈕字換成打進終端的說法
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '終端上方的「打字」按鈕還在（應該拿掉）' };
   const ta2 = document.querySelector('.chatpane .compose-row textarea');
-  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出會向那台電腦要打字權限') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
+  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出後會連到那台電腦') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
   const go2 = ta2.closest('form').querySelector('button[type=submit]');
   if (!go2 || go2.textContent.trim() !== '送出') return { ok: false, why: '終端畫面時按鈕不是「送出」：' + (go2 ? go2.textContent : '') };
   return { ok: true, why: '' };
