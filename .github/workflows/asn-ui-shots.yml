@@ -82,7 +82,7 @@ jobs:
             bash "$GITHUB_WORKSPACE/new/.github/scripts/apt-install.sh" --no-install-recommends fonts-noto-cjk || echo "::warning::中文字型安裝失敗，報告會標出警告"
           fi
 
-      # 只報告：continue-on-error，結束碼不影響 PR。找不到 Chrome 時腳本會清楚說明並提早結束（結束碼 0）。
+      # 只報告：continue-on-error，結束碼不影響 PR。找不到 Chrome 等「工具自己壞了」的情況，腳本結束碼固定為 3（步驟顯示警告、摘要最上面寫明，不能當成沒有差異）。
       # --limit 60：本機實測全部 246 個情境（基準與新版各跑一次）要 34 分鐘，每情境平均 8.3 秒；60 個約 8 分鐘，
       # 挑法是「頁面×寬度×外觀」輪流各取，手機 412／360、電腦 900、三套外觀都涵蓋。要跑全部：手動觸發並把 60 拿掉（T3 再決定）
       - name: 跑畫面截圖比對（只報告）
@@ -97,6 +97,11 @@ jobs:
         if: always()
         shell: bash
         run: |
+          # 工具自己壞了（找不到 Chrome、整體出錯、步驟失敗）不擋 PR，但摘要最上面一定要寫出來，並加警告註記（不能看起來像全部通過）
+          if [ "${{ steps.shots.outcome }}" != "success" ]; then
+            echo "> **🔴 畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}）。下面的報告（如果有）不能當成「沒有差異」，請看上一步的 log。**" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}），結果不可信"
+          fi
           if [ -f "$RUNNER_TEMP/ui-shots/report.md" ]; then
             head -c 900000 "$RUNNER_TEMP/ui-shots/report.md" >> "$GITHUB_STEP_SUMMARY"
           else

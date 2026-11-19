@@ -1,12 +1,17 @@
 // 畫面截圖比對（#1763 T2）的純邏輯測試：不開瀏覽器。PNG 用程式合成（含 filter 0–4）。
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 import zlib from 'node:zlib'
 import { SCENARIOS } from '../scripts/smoke-lib.mjs'
 import {
   DEFAULT_COLOR_TOLERANCE, DEFAULT_PIXEL_TOLERANCE, cjkProbeSource, cjkVerdict, clockSource, compareImages, coverage, crc32, decodePng, diffLines, encodePng,
-  formatReport, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, shotScenarios, sideBySide, snapshotSource, strictFailed, UNSTABLE_SCENARIOS,
+  formatReport, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, shotScenarios, sideBySide, snapshotSource, strictFailed, toolBroken, UNSTABLE_SCENARIOS,
 } from '../scripts/ui-shots-lib.mjs'
 
 // 合成圖：fn(x, y) -> [r, g, b, a]
@@ -200,4 +205,35 @@ test('--strict 的判定：全過＝不失敗；任一差異、中文字失敗�
   assert.equal(strictFailed({ rows: ok, cjk: { ok: false } }), true)
   assert.equal(strictFailed({ rows: ok, cjk: { ok: true }, countMismatch: true }), true)
   assert.equal(rowStatus({ pixel: { sizeMismatch: true, ratio: 1 } }), 'diff')
+})
+
+// 工具自己壞了，不能被當成「沒有差異」（調查員一審 #1793）
+test('toolBroken：略過、整體出錯、中文字檢查沒量到或失敗都算壞了；正常與一般差異不算', () => {
+  assert.match(toolBroken({ meta: { skipped: '找不到 Chrome' } }), /沒有跑：找不到 Chrome/)
+  assert.match(toolBroken({ rows: [{ name: '(整體)', error: '連線斷了' }] }), /整體出錯：連線斷了/)
+  assert.match(toolBroken({ rows: [{ name: 'a' }], cjk: { ok: false, missing: true, why: '一次都沒量到' } }), /一次都沒量到/)
+  assert.match(toolBroken({ rows: [{ name: 'a' }], cjk: { ok: false, why: '沒有 CJK 字型' } }), /中文字檢查失敗/)
+  assert.equal(toolBroken({ rows: [{ name: 'a', structDiff: 3 }], cjk: { ok: true, why: 'x' } }), '')
+  assert.equal(toolBroken({}), '')
+})
+test('報告：工具壞了時最上面有醒目橫幅；0 個情境不印「有差異或錯誤 0 個」', () => {
+  const skipped = formatReport({ rows: [], meta: { skipped: '找不到 Chrome' } })
+  assert.match(skipped.split('\n').slice(0, 3).join('\n'), /🔴 比對工具自己壞了.*沒有跑：找不到 Chrome/)
+  assert.ok(!skipped.includes('有差異或錯誤 0 個'))
+  assert.match(skipped, /沒有跑任何情境/)
+  const noCjk = formatReport({ rows: [{ name: 'a', structDiff: 0, pixel: { ratio: 0 } }], cjk: { ok: false, missing: true, why: '中文字檢查一次都沒量到' } })
+  assert.match(noCjk, /🔴 比對工具自己壞了/)
+  assert.ok(!formatReport({ rows: [{ name: 'a', structDiff: 0, pixel: { ratio: 0 } }], cjk: { ok: true, why: 'x' } }).includes('比對工具自己壞了'))
+})
+test('主程式：找不到瀏覽器＝結束碼 3（不是 0），並寫出帶橫幅的報告與 ::warning::（不論有沒有 --strict）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-shots-nobrowser-'))
+  const ui = fileURLToPath(new URL('../ui/', import.meta.url))
+  const script = fileURLToPath(new URL('../scripts/ui-shots.mjs', import.meta.url))
+  for (const extra of [[], ['--strict']]) {
+    const r = spawnSync(process.execPath, [script, '--base', ui, '--new', ui, '--out', dir, '--browser', path.join(dir, 'no-such-chrome.exe'), ...extra], { encoding: 'utf8' })
+    assert.equal(r.status, 3, `${extra.join(' ')}：${r.stdout}${r.stderr}`)
+    assert.match(r.stdout, /::warning::畫面截圖比對沒有跑/)
+    assert.match(fs.readFileSync(path.join(dir, 'report.md'), 'utf8'), /🔴 比對工具自己壞了/)
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
 })

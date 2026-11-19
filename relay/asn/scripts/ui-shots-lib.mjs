@@ -313,7 +313,9 @@ export const formatReport = ({ rows, meta = {}, cjk = null, coverageMissing = []
   const cell = (s, n) => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').slice(0, n)
   const L = []
   L.push('# 畫面截圖比對報告', '')
-  if (cjk && !cjk.ok) L.push(`> **🔴 警告：中文字沒有確實畫出來。** ${cjk.why}。截圖會「一致地」全是方框，比對結果不可信。`, '')
+  const broken = toolBroken({ rows, meta, cjk })
+  if (cjk && !cjk.ok && !cjk.missing) L.push(`> **🔴 警告：中文字沒有確實畫出來。** ${cjk.why}。截圖會「一致地」全是方框，比對結果不可信。`, '')
+  if (broken) L.push(`> **🔴 比對工具自己壞了，下面的結果不能當成「沒有差異」：** ${broken}`, '')
   if (meta.skipped) L.push(`> 已略過：${meta.skipped}`, '')
   if (meta.excluded?.length) L.push(`> 已知不穩定、預設排除的情境：${meta.excluded.map(([n, why]) => `${n}（${why}）`).join('；')}`, '')
   if (coverageMissing.length) L.push(`> 警告：情境集合缺少 ${coverageMissing.join('、')}`, '')
@@ -321,7 +323,7 @@ export const formatReport = ({ rows, meta = {}, cjk = null, coverageMissing = []
   if (meta.browser) L.push(`- 瀏覽器：${meta.browser}`)
   if (cjk) L.push(`- 中文字檢查：${cjk.ok ? '通過' : '失敗'}（${cjk.why}）`)
   L.push(`- 容忍度：不同像素比例 ≤ ${pct(tol)}、單點色差 ≤ ${opts.colorTolerance ?? DEFAULT_COLOR_TOLERANCE}`)
-  L.push(`- 情境：${rows.length} 個，有差異或錯誤 ${bad} 個${meta.seconds !== undefined ? `；耗時 ${meta.seconds} 秒${rows.length ? `（每情境平均 ${(meta.seconds / rows.length).toFixed(1)} 秒，含基準與新版各跑一次）` : ''}` : ''}`)
+  L.push(`- 情境：${rows.length ? `${rows.length} 個，有差異或錯誤 ${bad} 個` : '沒有跑任何情境'}${meta.seconds !== undefined ? `；耗時 ${meta.seconds} 秒${rows.length ? `（每情境平均 ${(meta.seconds / rows.length).toFixed(1)} 秒，含基準與新版各跑一次）` : ''}` : ''}`)
   L.push('')
   if (!rows.length) return L.join('\n') + '\n'
   L.push('| 情境 | 頁面 | 寬 | 外觀 | 結構差異行數 | 像素差異比例 | 結果 |', '| --- | --- | ---: | --- | ---: | ---: | --- |')
@@ -333,6 +335,14 @@ export const formatReport = ({ rows, meta = {}, cjk = null, coverageMissing = []
   })
   L.push('')
   return L.join('\n')
+}
+// 工具自己壞了（不是畫面有差異）：回原因，沒壞回空字串。壞了就不能把「沒有差異」當結論；結束碼固定非 0（不看 --strict）
+export const toolBroken = ({ rows = [], meta = {}, cjk = null } = {}) => {
+  if (meta.skipped) return `沒有跑：${meta.skipped}`
+  const whole = rows.find(r => r.name === '(整體)')
+  if (whole) return `整體出錯：${whole.error}`
+  if (cjk && !cjk.ok) return cjk.missing ? cjk.why : `中文字檢查失敗：${cjk.why}`
+  return ''
 }
 // 是否該判失敗（--strict）：有任何非通過的情境、中文字檢查失敗、或情境數量對不上
 export const strictFailed = ({ rows, cjk, opts = {}, countMismatch = false }) =>
