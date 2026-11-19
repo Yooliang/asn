@@ -27,6 +27,8 @@ struct FState {
     ack_calls: usize,
     sent: Vec<Value>,
     rosters: Vec<Value>,
+    /// 接下來 N 次 roster 回 503（模擬後台不通；請求內容仍記進 rosters）
+    roster_fail_n: usize,
     fail_inbox: usize,
     /// 已 ack 的信下次 inbox 仍回傳（模擬 ack 沒生效，測去重）
     sticky: bool,
@@ -329,7 +331,12 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
         }
         "roster" => {
             s.rosters.push(body);
-            (200, json!({"ok": true}))
+            if s.roster_fail_n > 0 {
+                s.roster_fail_n -= 1;
+                (503, json!({"error": "down"}))
+            } else {
+                (200, json!({"ok": true}))
+            }
         }
         "partner_sync" => {
             s.partner_posts.push(body);
@@ -2803,4 +2810,171 @@ fn 允許移動設備查看終端_預設開_關掉只擋移動設備_舊設定�
     assert!(!s.view_allowed(true), "移動設備不行");
     let off = super::BridgeSettings { allow_remote_launch: false, ..Default::default() };
     assert!(!off.view_allowed(false) && !off.view_allowed(true), "沒開允許其他設備：兩種都不行");
+}
+
+// ---- 回報「允許別台看畫面／在這台打字」的開關（#1751）----
+#[test]
+fn 開關回報值_看畫面要開著遠端開窗_打字再看打字開關_預設都是關() {
+    use super::BridgeSettings as S;
+    assert_eq!(super::roster::remote_flags(&S::default()), (false, false), "沒開「允許其他設備替這台開新視窗」：兩個都不行");
+    assert_eq!(super::roster::remote_flags(&S { allow_remote_launch: true, ..Default::default() }), (true, true));
+    assert_eq!(super::roster::remote_flags(&S { allow_remote_launch: true, remote_input_off: true, ..Default::default() }), (true, false), "只關打字：看畫面照舊");
+    assert_eq!(super::roster::remote_flags(&S { remote_input_off: true, ..Default::default() }), (false, false));
+}
+
+#[test]
+fn 開關變了要不要補報_沒報過或讀不到設定不算() {
+    assert!(!super::roster::flags_due(None, None));
+    assert!(!super::roster::flags_due(Some((true, true)), None), "頭一次跟著一般名單送，不另外觸發");
+    assert!(!super::roster::flags_due(None, Some((true, true))));
+    assert!(!super::roster::flags_due(Some((true, true)), Some((true, true))));
+    assert!(super::roster::flags_due(Some((true, false)), Some((true, true))));
+    assert!(super::roster::flags_due(Some((false, false)), Some((true, true))));
+}
+
+#[tokio::test]
+async fn 名單回報_帶開關的布林_沒有設定資料夾就不帶_開關一改馬上補報() {
+    let fr = FakeRelay::start();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    let sink = Arc::new(FakeSink::default());
+    // 沒有設定資料夾：欄位不帶（舊行為，後台記「不知道」）
+    let mut bare = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    bare.refresh_roster(T0).await;
+    let first = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert!(first.get("remote_view").is_none() && first.get("remote_input").is_none(), "沒讀到設定就不帶 {first}");
+    // 有設定資料夾：兩個布林都帶
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, ..Default::default() }).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(true)));
+    // 沒改：不補報
+    let n = fr.st.lock().unwrap().rosters.len();
+    assert!(!core.watch_local(T0 + 2_000).await);
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n);
+    // 關掉「允許遠端在這台打字」：下一次監看就補報，不等間隔
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, remote_input_off: true, ..Default::default() }).unwrap();
+    assert!(core.watch_local(T0 + 2_100).await);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(false)));
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n + 1);
+    // 報過之後不重複報
+    assert!(!core.watch_local(T0 + 2_200).await);
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n + 1);
+    // 連「允許其他設備替這台開新視窗」也關掉：兩個都變 false
+    super::write_settings(data.path(), super::BridgeSettings::default()).unwrap();
+    assert!(core.watch_local(T0 + 2_300).await);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(false), json!(false)));
+}
+
+#[test]
+fn 開關補報退避_第一次十秒_加倍_上限三十秒() {
+    use super::roster::{flags_backoff_ms as b, FLAGS_RETRY_MAX_MS};
+    assert_eq!([b(0), b(1), b(2), b(3), b(4)], [0, 10_000, 20_000, 30_000, 30_000]);
+    for n in [5, 10, 11, 31, 32, 33, 100, u32::MAX] {
+        assert!(b(n) <= FLAGS_RETRY_MAX_MS && b(n) >= 10_000, "連續失敗 {n} 次的間隔不能超過上限");
+    }
+}
+
+#[test]
+fn 開關補報退避_失敗後一秒內不再送_過了退避時間再送_成功歸零() {
+    use super::roster::flags_retry_due as due;
+    let t = 100_000;
+    assert!(due(t, 0, 0), "沒失敗過：隨時可以送");
+    assert!(!due(t + 1_000, t, 1), "失敗後 1 秒內不再送");
+    assert!(!due(t + 9_999, t, 1));
+    assert!(due(t + 10_000, t, 1), "過了第一次退避（10 秒）會再送");
+    assert!(!due(t + 10_000, t, 2), "連續失敗兩次：要等 20 秒");
+    assert!(due(t + 20_000, t, 2));
+    assert!(!due(t + 29_999, t, 3) && due(t + 30_000, t, 3));
+    assert!(due(t + 30_000, t, 50) && !due(t + 29_999, t, 50), "再多次也只等 30 秒");
+    assert!(due(t + 1_000, t, 0), "成功之後次數歸零，馬上又可以送");
+    assert!(due(0, t, 1) == false && due(t, t, 1) == false, "時鐘倒退也不會誤放行");
+}
+
+#[tokio::test]
+async fn 開關補報失敗_退避期間不再打後台_過了退避時間再試_成功就歸零() {
+    let fr = FakeRelay::start();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    let sink = Arc::new(FakeSink::default());
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, ..Default::default() }).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    let posts = || fr.st.lock().unwrap().rosters.len();
+    // 開關改了，但後台不通：頭一次補報會送出去、失敗
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, remote_input_off: true, ..Default::default() }).unwrap();
+    fr.st.lock().unwrap().roster_fail_n = 1000;
+    let t = T0 + 5_000;
+    assert!(!core.watch_local(t).await, "沒報成功回 false");
+    let after_first = posts();
+    // 前提：Relay.api 遇到 503 不在內部重試，所以一次補報恰好送出一個請求。確認過 relay.rs：
+    //  - 503 只在 `if idem && matches!(status.as_u16(), 502..=504) && wait.is_some()` 才重試（relay.rs:697），
+    //  - 而 idem 只有 send 才是 true（with_client_id，relay.rs:408 `if name != "send" { return (body, false) }`），roster 是 false，
+    //  - 測試時連線重試表是空的（relay.rs:468 `connect_retry_ms: if cfg!(test) { &[][..] }`，wait 一定是 None），
+    //  - 之後非 2xx 直接 Err（relay.rs:726、734）。
+    assert_eq!(after_first, 2, "第一個是開頭的名單回報，頭一次補報恰好多一個請求（不重試）");
+    assert_eq!(core.remote_flags_fails, 1);
+    // 退避期間（一秒一次的監看）不再打後台
+    for k in 1..=9 {
+        assert!(!core.watch_local(t + k * 1_000).await);
+    }
+    assert_eq!(posts(), after_first, "10 秒內每秒監看一次，後台都沒再被打");
+    // 過了 10 秒才再試；還是失敗：下一次要等 20 秒
+    assert!(!core.watch_local(t + 10_000).await);
+    assert_eq!(posts(), after_first + 1, "過了退避時間會再送，而且只送一次");
+    assert_eq!(core.remote_flags_fails, 2);
+    let after_second = posts();
+    assert!(!core.watch_local(t + 10_000 + 19_000).await);
+    assert_eq!(posts(), after_second, "連續失敗兩次要等 20 秒");
+    // 後台恢復：退避時間一到就補報成功，次數歸零
+    fr.st.lock().unwrap().roster_fail_n = 0;
+    assert!(core.watch_local(t + 10_000 + 20_000).await);
+    assert_eq!(core.remote_flags_fails, 0);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(false)));
+}
+
+#[tokio::test]
+async fn 開關補報_讀名單失敗而提早返回也算一次失敗_套同樣的退避() {
+    let fr = FakeRelay::start();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    let sink = Arc::new(FakeSink::default());
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, ..Default::default() }).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    let posts = || fr.st.lock().unwrap().rosters.len();
+    // 之後讀名單會失敗（視窗清單的位置不是資料夾）：refresh_roster 在送出請求之前就提早返回
+    let bad = data.path().join("not-a-dir");
+    std::fs::write(&bad, "x").unwrap();
+    core.cfg.sessions_dir = bad;
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, remote_input_off: true, ..Default::default() }).unwrap();
+    let before = posts();
+    let t = T0 + 5_000;
+    assert!(!core.watch_local(t).await);
+    assert_eq!(posts(), before, "讀名單失敗：沒送出任何請求");
+    assert_eq!(core.remote_flags_fails, 1, "提早返回也算一次失敗");
+    // 退避期間每秒監看一次：不會再進 refresh_roster（再進來的話失敗次數會再加一）
+    for k in 1..=9 {
+        assert!(!core.watch_local(t + k * 1_000).await);
+    }
+    assert_eq!(core.remote_flags_fails, 1, "退避期間下一次 watch 不會立刻再進 refresh_roster");
+    assert_eq!(posts(), before);
+    // 過了退避時間再試一次，還是讀不到：失敗次數加一，下一次要等 20 秒
+    assert!(!core.watch_local(t + 10_000).await);
+    assert_eq!(core.remote_flags_fails, 2);
+    assert!(!core.watch_local(t + 10_000 + 19_000).await);
+    assert_eq!(core.remote_flags_fails, 2, "連續兩次失敗要等 20 秒");
+    // 讀得到了：退避時間一到就補報成功，次數歸零
+    core.cfg.sessions_dir = sessions.path().to_path_buf();
+    assert!(core.watch_local(t + 10_000 + 20_000).await);
+    assert_eq!(core.remote_flags_fails, 0);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(false)));
 }

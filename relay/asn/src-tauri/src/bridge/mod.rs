@@ -13,6 +13,7 @@ pub mod handoff;
 pub mod known;
 pub mod launcher;
 pub mod lock;
+pub mod login_alert;
 pub mod wait_alert;
 pub mod mail;
 pub mod notice_route;

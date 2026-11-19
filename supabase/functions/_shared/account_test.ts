@@ -137,7 +137,7 @@ Deno.test("relay/index.ts：帳號動作只收 POST、交給 handleAccountAction
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const acct = src.indexOf("ACCOUNT_ACTIONS.has(action)");
   // Windows checkout 可能是 CRLF，所以用正規表示式找位置，不依賴換行字元
-  const nodeKey = src.search(/req\.headers\.get\("x-relay-key"\);\r?\n\s*if \(!key\)/);
+  const nodeKey = src.search(/const key = web \? null : req\.headers\.get\("x-relay-key"\);/); // 第 0 階段起這一行多了「網頁節點不用金鑰」的判斷（見 web_session.ts）
   assert(acct > 0 && nodeKey > acct, "帳號動作要排在節點金鑰驗證之前");
   const block = src.slice(acct, nodeKey);
   assert(block.includes('req.method !== "POST"'));

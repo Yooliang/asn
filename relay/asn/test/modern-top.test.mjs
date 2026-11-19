@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { MORE_OWN_KEYS, barSlots, chatGroupItems, groupMenuItems, managePanelItems, moreMenuItems, nameplateView, opsMenuItems } from '../ui/lib/actionbar.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
@@ -75,7 +76,7 @@ test('名牌：名字、哪台電腦、狀態；離線寫「離線」；群組�
 test('新節點在復古 Aero 下預設藏起來（style.css）；現代下才顯示', () => {
   const css = read('ui', 'style.css')
   assert.match(css, /\.mbar,\.me-this,\.search-plus\{display:none\}/)
-  const m = read('ui', 'modern.css')
+  const m = skinCss('modern')
   assert.match(m, /\/\* #1421 B：電腦頂部與左欄 \*\//)
   assert.match(m, /:root\[data-skin="modern"\] \.conv-main \.to-line,:root\[data-skin="modern"\] \.tabbar\{display:none\}/)
   assert.match(m, /:root\[data-skin="modern"\] \.actionbar \.abtn\{display:none\}/, '大按鈕區的按鈕收起來（區塊本身留著放下拉清單與封存結果）')

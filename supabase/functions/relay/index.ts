@@ -23,6 +23,7 @@ import { parseWaitingNotice } from "../_shared/waiting_notice.ts";
 import { parseMuxDownNotice } from "../_shared/mux_down_notice.ts";
 import { parseNodeMismatchNotice } from "../_shared/node_mismatch_notice.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
+import { sanitizeRemoteFlags } from "../_shared/remote_flags.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import { PARTNER_ID_RE, parseSetPartnerAvatar, setReply } from "../_shared/partner_avatar.ts";
@@ -51,6 +52,7 @@ import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts"
 import { requestReadSync } from "../_shared/read_sync.ts";
 import { approveCorsHeaders, DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
+import { announceWebLogin, gateWebRequest, handleWebAction, memoVerify, sessionIdOfToken, WEB_FORBIDDEN, webCredentialCheck, webCredentialTokens, webOrigins, webPreflight, webRequestInfo, withWebCors } from "../_shared/web_session.ts";
 
 const ttsLimiter = new TtsLimiter();
 
@@ -147,22 +149,58 @@ const optStr = (v: unknown, n: number) => (typeof v === "string" && v ? v.slice(
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // 登入帳號的動作：用 Supabase 登入憑證（Authorization: Bearer）驗身分，不用節點金鑰（node_claim 另帶 x-relay-key 證明擁有）
+// 網頁版的網域（設定 ASN_WEB_ORIGINS，逗號分隔；沒設就是空：沒有任何網域被當成網頁來源，也沒有跨來源許可）
+const WEB_ORIGINS = webOrigins((k) => Deno.env.get(k));
+
 const accountDeps: AccountDeps = {
-  verifyJwt: async (token) => {
+  // 驗證服務驗過簽章後，再從同一個憑證解出 session_id（網頁版靠它辨認網頁登入）；驗證結果只記幾秒，同一個請求不重複打驗證服務
+  verifyJwt: memoVerify(async (token) => {
     const { data, error } = await db.auth.getUser(token);
     const u = data?.user;
     if (error || !u || u.is_anonymous) return null;
     const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
-    return { id: u.id, email: u.email ?? null, name: cleanDisplayName(meta.full_name ?? meta.name ?? meta.user_name) };
-  },
+    return { id: u.id, email: u.email ?? null, name: cleanDisplayName(meta.full_name ?? meta.name ?? meta.user_name), sessionId: sessionIdOfToken(token, u.id) };
+  }),
   rpc: async (fn, args) => await db.rpc(fn, args),
   sha256Hex,
   newSecrets: () => ({ key: b64u(32), bellTopic: "relay-bell-" + b64u(18) }),
 };
 
-Deno.serve(async (req) => {
+// 網頁版網域的回應補上跨來源許可標頭（其他來源原樣，見 _shared/web_session.ts）
+Deno.serve(async (req) => withWebCors(WEB_ORIGINS, req, await handle(req)));
+
+async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
+
+  // 網頁版的預檢請求：只認網頁版網域，在所有驗證之前處理
+  const preflight = webPreflight(WEB_ORIGINS, req);
+  if (preflight) return preflight;
+
+  // 網頁版（登入身分＋瀏覽器代號，沒有節點金鑰）：先驗身分、再過放行清單，通過才往下；不放行的動作在這裡就結束，到不了後面任何分支（包含帳號動作）。
+  const gate = await gateWebRequest(
+    { verifyJwt: accountDeps.verifyJwt, rpc: async (fn, args) => await db.rpc(fn, args), sha256Hex, origins: WEB_ORIGINS },
+    webRequestInfo(req, action),
+  );
+  if (gate.kind === "reply") return json(gate.status, gate.body);
+  const web = gate.kind === "web" ? gate : null;
+  if (web) {
+    // 新的瀏覽器第一次登入：通知信已經由資料庫寄出，這裡敲門鈴、推手機（失敗都不影響這次請求）
+    await announceWebLogin({ ring, push: { rpc: async (fn, args) => await db.rpc(fn, args), fcm }, background: signal.background }, web);
+    const w = await handleWebAction({ rpc: async (fn, args) => await db.rpc(fn, args) }, action ?? "", web);
+    if (w) {
+      for (const t of w.bellTopics) await ring(t);
+      return json(w.status, w.body);
+    }
+  } else {
+    // 網頁登入的憑證只能走網頁路線，在網頁路線之外一律擋下
+    const tokens = webCredentialTokens(req, action, (a) => ACCOUNT_ACTIONS.has(a) || DEVICE_CODE_ACTIONS.has(a));
+    if (tokens.length > 0) {
+      const kind = await webCredentialCheck({ verifyJwt: accountDeps.verifyJwt, rpc: async (fn, args) => await db.rpc(fn, args) }, tokens);
+      if (kind === "web") return json(403, { error: WEB_FORBIDDEN });
+      if (kind === "error") return json(500, { error: "internal" });
+    }
+  }
 
   if (action === "register" && req.method === "POST") {
     const b = await req.json().catch(() => null);
@@ -236,9 +274,10 @@ Deno.serve(async (req) => {
     return res;
   }
 
-  const key = req.headers.get("x-relay-key");
-  if (!key) return json(401, { error: "unauthorized" });
-  const { data: nodes, error: aerr } = await db.rpc("asn_relay_auth", { p_key_hash: await sha256Hex(key) });
+  // 節點身分：一般節點取自金鑰；網頁節點取自上面網頁路線已驗過的登入記錄（沒有金鑰）
+  const key = web ? null : req.headers.get("x-relay-key");
+  if (!web && !key) return json(401, { error: "unauthorized" });
+  const { data: nodes, error: aerr } = web ? { data: [web.me], error: null } : await db.rpc("asn_relay_auth", { p_key_hash: await sha256Hex(key!) });
   if (aerr) { console.error(aerr); return json(500, { error: "internal" }); }
   if (!nodes || nodes.length === 0) return json(401, { error: "unauthorized" });
   const me = nodes[0] as { id: string; bell_topic: string; role: string; tenant_id: string | null };
@@ -258,7 +297,8 @@ Deno.serve(async (req) => {
     return json(200, { node: me.id, bell_topic: me.bell_topic });
   }
   if (action === "list" && req.method === "GET") {
-    const { data, error } = await db.rpc("asn_relay_list", { p_tenant: me.tenant_id });
+    // 網頁自己傳 p_include_web（看得到其他網頁登入）；其他呼叫端不帶＝名單不含網頁節點
+    const { data, error } = await db.rpc("asn_relay_list", { p_tenant: me.tenant_id, ...(web ? { p_include_web: true } : {}) });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { members: data });
   }
@@ -332,6 +372,14 @@ Deno.serve(async (req) => {
       const { data: pd, error: pe } = await db.rpc("asn_relay_set_platform", { p_node: me.id, p_platform: np.platform, p_closed_reason: np.reason });
       if (pe) console.warn("set_platform", me.id, pe.message ?? pe);
       else if (pd?.error) console.warn("set_platform", me.id, pd.error);
+    }
+    // 這台電腦「允許別台看畫面／在這台打字」的兩個開關（選填 remote_view／remote_input，只收布林）：只是提示值，不是權威（握手時本機自己再查）。
+    // 只改金鑰所屬的自己節點；舊版不帶＝什麼都不做（後台記「不知道」）；失敗只記 log，不影響名單
+    const rf = sanitizeRemoteFlags(b);
+    if (rf) {
+      const { data: fd, error: fe } = await db.rpc("asn_relay_set_remote_flags", { p_node: me.id, p_view: rf.view, p_input: rf.input });
+      if (fe) console.warn("set_remote_flags", me.id, fe.message ?? fe);
+      else if (fd?.error) console.warn("set_remote_flags", me.id, fd.error);
     }
     // 靠舊名（IRORI_*）才拿到設定的環境變數名字（選填 used_legacy_env，F4 #423；給舊名使用報表）。有帶而且是陣列才寫；舊資料庫沒有這支函式只記 log，不影響名單
     await applyLegacyEnv((fn, args) => db.rpc(fn, args), me.id, b);
@@ -852,4 +900,4 @@ Deno.serve(async (req) => {
     return json(r.status, r.body);
   }
   return json(404, { error: "not_found" });
-});
+}

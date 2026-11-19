@@ -10,6 +10,7 @@ import fs from 'node:fs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261114100000_perm_requests_full_options.sql'
+const WEB = '20261119200000_web_sessions.sql' // 之後重新定義了同一支建立函式（只多排除網頁的門鈴），要一起看
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -143,10 +144,12 @@ test('權限：anon、authenticated 不能呼叫新版建立函式', { skip }, a
 })
 
 test('還原驗證：拿掉白名單或子集檢查，對應測試要變紅', { skip }, async () => {
-  const noList = await boot({ mutate: { [MIG]: s => s.replace("and (v_c #>> '{}') = any (c_known) then", 'then') } })
+  const dropList = s => s.replace("and (v_c #>> '{}') = any (c_known) then", 'then')
+  const noList = await boot({ mutate: { [MIG]: dropList, [WEB]: dropList } })
   const c1 = await create9(noList, { p_risk: JSON.stringify({ codes: ['SAFE'], uncertain: false }) })
   assert.deepEqual((await row(noList, c1.id)).risk, { codes: ['SAFE'], uncertain: false }, '白名單拿掉：假代碼會被收下')
-  const noSub = await boot({ mutate: { [MIG]: s => s.replace("where not ((o->>'n')::int = any (v_seen))) then", 'where false) then') } })
+  const dropSub = s => s.replace("where not ((o->>'n')::int = any (v_seen))) then", 'where false) then')
+  const noSub = await boot({ mutate: { [MIG]: dropSub, [WEB]: dropSub } })
   assert.ok((await create9(noSub, { p_options: JSON.stringify([{ n: 4, label: 'x' }]) })).id, '子集檢查拿掉：會收下')
 })
 
@@ -169,7 +172,7 @@ test('回復檔：靜態——交易內、只動 perm_requests 與這幾支函�
 })
 
 test('回復檔：套上之後，函式、欄位、約束、權限都和沒有 #1445 的資料庫一樣；pending 的先取消；舊的建立與決定照常', { skip }, async () => {
-  const before = await boot({ skip: [MIG] })   // 從來沒套過 #1445 的資料庫
+  const before = await boot({ skip: [MIG, WEB] })   // 從來沒套過 #1445 的資料庫（網頁版那支只重新定義 #1445 的函式，一起略過）
   const db = await boot()
   const pend = await create9(db)
   const done = await create9(db, { p_window_name: '小丙' })

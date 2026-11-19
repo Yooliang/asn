@@ -1,0 +1,205 @@
+/* 「現代」與「LINE 風格」兩套外觀共用的底座：兩邊逐字相同（只差外觀名稱）的規則放這一份，選擇器同時寫兩個外觀（specificity 與原本一樣）。
+   載入順序：style.css → mobile.css → group.css → skin-common.css → modern.css → line.css。
+   兩套各自不同的規則留在 modern.css／line.css；同一元素、同一屬性、同樣權重的規則若在原檔裡排在這些之前，就不放這裡（以免層疊的贏家改變）。 */
+:root[data-skin="modern"] .win,:root[data-skin="line"] .win{background:var(--panel-soft);border:1px solid #d9d6cf;box-shadow:none}
+:root[data-skin="modern"] .titlebar,:root[data-skin="line"] .titlebar{text-shadow:none;font-weight:600}
+:root[data-skin="modern"] .brand,:root[data-skin="line"] .brand{font-style:normal;letter-spacing:.02em}
+:root[data-skin="modern"] .tb,:root[data-skin="line"] .tb{border-color:transparent;background:transparent;box-shadow:none;color:var(--muted)}
+:root[data-skin="modern"] .tb.close:hover,:root[data-skin="line"] .tb.close:hover{background:#d9534f;color:#fff}
+:root[data-skin="modern"] .tb svg,:root[data-skin="line"] .tb svg{filter:none}
+/* ---------- 名單：本人資訊、上方四個大分頁、左邊設備頁籤、清單 ---------- */
+:root[data-skin="modern"] .me,:root[data-skin="line"] .me{background:transparent}
+:root[data-skin="modern"] .upd-bar,:root[data-skin="line"] .upd-bar{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:none}
+:root[data-skin="modern"] .upd-bar.dl,:root[data-skin="line"] .upd-bar.dl{padding:6px 8px 0;background:transparent;border:0;border-radius:0}
+:root[data-skin="modern"] .upd-prog,:root[data-skin="line"] .upd-prog{height:20px;border:1px solid var(--line);background:var(--panel)}
+:root[data-skin="modern"] .upd-prog > .upd-text,:root[data-skin="line"] .upd-prog > .upd-text{line-height:18px;color:var(--fg)}
+:root[data-skin="modern"] .top-tabs,:root[data-skin="line"] .top-tabs{background:transparent;padding:6px 8px;gap:6px}
+:root[data-skin="modern"] .ttab,:root[data-skin="line"] .ttab{height:30px;border:0;border-radius:999px;background:transparent;color:var(--muted)}
+:root[data-skin="modern"] .body,:root[data-skin="line"] .body{background:var(--panel-soft)}
+:root[data-skin="modern"] .rail,:root[data-skin="line"] .rail{border-right:1px solid var(--line)}
+:root[data-skin="modern"] .rtab > svg,:root[data-skin="line"] .rtab > svg,:root[data-skin="modern"] .rtab > img,:root[data-skin="line"] .rtab > img{filter:none}
+:root[data-skin="modern"] .content,:root[data-skin="line"] .content{background:var(--panel)}
+:root[data-skin="modern"] .search,:root[data-skin="line"] .search{gap:8px;padding:8px 10px;border-bottom:0;background:var(--panel)}
+:root[data-skin="modern"] .search input,:root[data-skin="line"] .search input{height:36px;border:1px solid var(--line);border-radius:999px;background:var(--panel-soft);padding:0 14px}
+:root[data-skin="modern"] .search-ic,:root[data-skin="line"] .search-ic{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--muted)}
+:root[data-skin="modern"] .plus-btn,:root[data-skin="line"] .plus-btn{width:28px;height:28px}
+:root[data-skin="modern"] .g-head,:root[data-skin="line"] .g-head{background:transparent;color:var(--muted);font-weight:600}
+:root[data-skin="modern"] .buddy,:root[data-skin="line"] .buddy,:root[data-skin="modern"] .room-btn,:root[data-skin="line"] .room-btn{border-radius:10px}
+:root[data-skin="modern"] .unread,:root[data-skin="line"] .unread,:root[data-skin="modern"] .rtab-count,:root[data-skin="line"] .rtab-count{background:var(--accent);box-shadow:none}
+:root[data-skin="modern"] .c-foot,:root[data-skin="line"] .c-foot{background:transparent}
+:root[data-skin="modern"] .ad,:root[data-skin="line"] .ad{border:1px solid var(--line);border-radius:12px;box-shadow:none}
+:root[data-skin="modern"] .aero-btn,:root[data-skin="line"] .aero-btn,:root[data-skin="modern"] .gs-btn,:root[data-skin="line"] .gs-btn,:root[data-skin="modern"] .pane-back,:root[data-skin="line"] .pane-back,:root[data-skin="modern"] .upd-btn,:root[data-skin="line"] .upd-btn,:root[data-skin="modern"] .login-btn,:root[data-skin="line"] .login-btn{
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:none;color:var(--fg);text-shadow:none}
+:root[data-skin="modern"] .dlg,:root[data-skin="line"] .dlg{border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 12px 32px rgba(0,0,0,.14)}
+:root[data-skin="modern"] .dlg-head,:root[data-skin="line"] .dlg-head{background:transparent;border-bottom:1px solid var(--line);text-shadow:none}
+:root[data-skin="modern"] .set-card,:root[data-skin="line"] .set-card{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="modern"] .set-sel,:root[data-skin="line"] .set-sel{border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+:root[data-skin="modern"] .ctab,:root[data-skin="line"] .ctab{border-color:transparent;background:transparent}
+:root[data-skin="modern"] .toolbar,:root[data-skin="line"] .toolbar,:root[data-skin="modern"] .tb-bottom .toolbar,:root[data-skin="line"] .tb-bottom .toolbar{background:var(--panel)}
+:root[data-skin="modern"] .to-line,:root[data-skin="line"] .to-line{background:var(--panel)}
+:root[data-skin="modern"] .chatpane-main,:root[data-skin="line"] .chatpane-main{background:var(--panel-soft)}
+:root[data-skin="modern"] .conv,:root[data-skin="line"] .conv,:root[data-skin="modern"] .compose-row,:root[data-skin="line"] .compose-row{background:var(--panel-soft)}
+:root[data-skin="modern"] .conv-main,:root[data-skin="line"] .conv-main{border-radius:14px}
+:root[data-skin="modern"] .msgs,:root[data-skin="line"] .msgs{padding:14px 18px;gap:10px}
+:root[data-skin="modern"] .msg .m-body.tone-them,:root[data-skin="line"] .msg .m-body.tone-them,:root[data-skin="modern"] .msg .m-body.tone-me,:root[data-skin="line"] .msg .m-body.tone-me,:root[data-skin="modern"] .msg .m-body.tone-same,:root[data-skin="line"] .msg .m-body.tone-same{padding:11px 16px;border-color:transparent;border-radius:18px}
+:root[data-skin="modern"] .sys,:root[data-skin="line"] .sys{color:var(--muted)}
+:root[data-skin="modern"] .m-tabs,:root[data-skin="line"] .m-tabs{background:var(--panel);border-bottom:1px solid var(--line)}
+:root[data-skin="modern"] .m-tabs,:root[data-skin="line"] .m-tabs{height:40px}
+:root[data-skin="modern"] .m-tabs button,:root[data-skin="line"] .m-tabs button{z-index:3;height:40px;background:transparent;color:var(--muted)}
+:root[data-skin="modern"] .m-tabs button.on,:root[data-skin="line"] .m-tabs button.on{background:transparent;color:var(--accent)}
+:root[data-skin="modern"] .m-head:not(.is-busy):not(.is-offline),:root[data-skin="line"] .m-head:not(.is-busy):not(.is-offline){background:var(--panel-soft)}
+:root[data-skin="modern"] .m-title,:root[data-skin="line"] .m-title{text-shadow:none}
+:root[data-skin="modern"] .m-head:not(.m-chathead) .m-title,:root[data-skin="line"] .m-head:not(.m-chathead) .m-title{font-size:22px;font-weight:700}
+:root[data-skin="modern"] .m-scroll,:root[data-skin="line"] .m-scroll{background:var(--panel-soft)}
+:root[data-skin="modern"] .m-chat,:root[data-skin="line"] .m-chat{background:var(--panel-soft)}
+:root[data-skin="modern"] .m-chat .conv-main,:root[data-skin="line"] .m-chat .conv-main,:root[data-skin="modern"] .m-chat .compose-main,:root[data-skin="line"] .m-chat .compose-main{background:var(--panel)}
+:root[data-skin="modern"] .m-search,:root[data-skin="line"] .m-search{background:var(--panel-soft);border-bottom:0}
+:root[data-skin="modern"] .m-buddy,:root[data-skin="line"] .m-buddy{width:calc(100% - 16px);margin:0 8px;border-top-color:transparent;border-radius:16px}
+:root[data-skin="modern"] .m-card,:root[data-skin="line"] .m-card{margin:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+:root[data-skin="modern"] .m-btn,:root[data-skin="line"] .m-btn{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:none;color:var(--fg)}
+:root[data-skin="modern"] .m-pg.m-fourth,:root[data-skin="line"] .m-pg.m-fourth{background:var(--panel-soft)}
+:root[data-skin="modern"] .aero-btn.danger:hover,:root[data-skin="line"] .aero-btn.danger:hover,:root[data-skin="modern"] .gs-btn.danger:hover,:root[data-skin="line"] .gs-btn.danger:hover,:root[data-skin="modern"] .aero-btn.dv-danger:hover,:root[data-skin="line"] .aero-btn.dv-danger:hover{border-color:#8c1d16;background:#fde3e0}
+:root[data-skin="modern"] .m-btn.m-danger,:root[data-skin="line"] .m-btn.m-danger{border-color:#d79a95;color:#b3261e}
+:root[data-skin="modern"] .m-btn.m-dv-danger,:root[data-skin="line"] .m-btn.m-dv-danger{border-color:#b3261e;background:#b3261e;color:#fff}
+/* ---------- 浮層、提示、右下角通知：不留 Aero 的藍色漸層與藍框 ---------- */
+:root[data-skin="modern"] .m-sheet,:root[data-skin="line"] .m-sheet{background:var(--panel-soft)}
+:root[data-skin="modern"] .m-banner,:root[data-skin="line"] .m-banner{border:1px solid var(--line);background:var(--panel);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+:root[data-skin="modern"] .toast,:root[data-skin="line"] .toast,:root[data-skin="modern"] .sp,:root[data-skin="line"] .sp{border:1px solid #d9d6cf;background:var(--panel-soft);box-shadow:none}
+:root[data-skin="modern"] .m-ops,:root[data-skin="line"] .m-ops{background:rgba(20,22,26,.4)}
+:root[data-skin="modern"] .dp>span,:root[data-skin="line"] .dp>span{border-radius:50%;background:hsl(var(--h,210) 32% 50%);text-shadow:none;font-weight:600}
+:root[data-skin="modern"] .dp::before,:root[data-skin="line"] .dp::before{content:"";position:absolute;z-index:1;right:-1px;bottom:-1px;box-sizing:border-box;width:13px;height:13px;border:2px solid var(--panel);border-radius:50%;background:var(--frame);pointer-events:none}
+:root[data-skin="modern"] .dp.xs::before,:root[data-skin="line"] .dp.xs::before{width:11px;height:11px}
+:root[data-skin="modern"] .dp.xl::before,:root[data-skin="line"] .dp.xl::before{right:4px;bottom:4px;width:24px;height:24px;border-width:3px}
+:root[data-skin="modern"] .room-av::before,:root[data-skin="line"] .room-av::before{display:none}
+:root[data-skin="modern"] .avb.xs .avb-v,:root[data-skin="line"] .avb.xs .avb-v{top:-4px}
+:root[data-skin="modern"] .avb.xl .avb-v,:root[data-skin="line"] .avb.xl .avb-v{top:-6px}
+/* 手機標題列的大頭貼（img，掛不了點）：圓形，外圈細線仍是狀態色 */
+:root[data-skin="modern"] .m-pic,:root[data-skin="line"] .m-pic{border-width:2px;border-radius:50%;box-shadow:none}
+/* 電腦：對方離線時收件人列要是灰的（style.css 的灰底和上面的 .to-line 同權重，被蓋掉了） */
+:root[data-skin="modern"] .conv-main .to-line.is-offline,:root[data-skin="line"] .conv-main .to-line.is-offline{background:#e7e5e0;border-bottom-color:#d3d0c8;color:#4a4f55}
+/* ---------- 手機訊息卡片（.m-chat）：18px 圓角、內距 10/14、14.5px 字 ---------- */
+:root[data-skin="modern"] .m-chat .msgs,:root[data-skin="line"] .m-chat .msgs{padding:12px 14px;gap:9px}
+:root[data-skin="modern"] .m-chat .msg .m-body.tone-them,:root[data-skin="line"] .m-chat .msg .m-body.tone-them,:root[data-skin="modern"] .m-chat .msg .m-body.tone-me,:root[data-skin="line"] .m-chat .msg .m-body.tone-me,:root[data-skin="modern"] .m-chat .msg .m-body.tone-same,:root[data-skin="line"] .m-chat .msg .m-body.tone-same{padding:10px 14px;border-radius:18px;font-size:14.5px;line-height:1.55}
+/* 大按鈕區不能 display:none：模型、子代理、工作項目的下拉清單和「已封存」的結果訊息還長在它裡面，只收起按鈕、把清單改成從頂部右上角往下展開（對話區 .chatpane 是定位基準） */
+:root[data-skin="modern"] .conv-main .to-line,:root[data-skin="line"] .conv-main .to-line,:root[data-skin="modern"] .tabbar,:root[data-skin="line"] .tabbar{display:none}
+:root[data-skin="modern"] .actionbar,:root[data-skin="line"] .actionbar{position:static;display:block;height:0;min-height:0;margin:0;padding:0;border:0;overflow:visible;background:none}
+:root[data-skin="modern"] .actionbar .abtn,:root[data-skin="line"] .actionbar .abtn{display:none}
+:root[data-skin="modern"] .actionbar .ab-wrap,:root[data-skin="line"] .actionbar .ab-wrap{position:static;display:block;height:0}
+:root[data-skin="modern"] .actionbar .ab-wrap > .ab-menu,:root[data-skin="line"] .actionbar .ab-wrap > .ab-menu{position:absolute;z-index:20;left:auto;right:16px;top:56px;margin:0;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14)}
+:root[data-skin="modern"] .actionbar .ab-note,:root[data-skin="line"] .actionbar .ab-note{position:absolute;z-index:20;left:50%;top:58px;transform:translateX(-50%);padding:3px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12px}
+/* 三欄：名牌置中；視窗窄時左欄讓到最小、右欄留給兩顆圓鈕，名牌往左靠而不被蓋住 */
+:root[data-skin="modern"] .mbar,:root[data-skin="line"] .mbar{position:relative;z-index:6;flex:none;display:grid;grid-template-columns:minmax(12px,1fr) auto minmax(104px,1fr);align-items:center;height:60px;padding:0 16px;background:var(--panel-soft)}
+:root[data-skin="modern"] .mbar:has(.mbar-offline),:root[data-skin="line"] .mbar:has(.mbar-offline){grid-template-columns:minmax(12px,1fr) minmax(0,auto) minmax(max-content,1fr);column-gap:8px}
+:root[data-skin="modern"] .mbar-plate,:root[data-skin="line"] .mbar-plate{grid-column:2;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;padding:4px 14px 4px 5px;background:var(--panel);border:1px solid #e6e4df;border-radius:999px;box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06)}
+:root[data-skin="modern"] .mbar-plate .dp.xs,:root[data-skin="line"] .mbar-plate .dp.xs{width:22px;height:22px}
+:root[data-skin="modern"] .mbar-plate .dp.xs>span,:root[data-skin="line"] .mbar-plate .dp.xs>span{font-size:10px}
+:root[data-skin="modern"] .mbar-plate .dp.xs::before,:root[data-skin="line"] .mbar-plate .dp.xs::before{width:9px;height:9px;border-width:1.5px}
+:root[data-skin="modern"] .mbar-plate .avb-v,:root[data-skin="line"] .mbar-plate .avb-v{display:none}
+:root[data-skin="modern"] .mbar-room,:root[data-skin="line"] .mbar-room{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;font-weight:600}
+:root[data-skin="modern"] .mbar-name,:root[data-skin="line"] .mbar-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--fg)}
+:root[data-skin="modern"] .mbar-sub,:root[data-skin="line"] .mbar-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#6b706c;white-space:nowrap}
+:root[data-skin="modern"] .mbar-plate.is-offline,:root[data-skin="line"] .mbar-plate.is-offline{background:#efeeea}
+:root[data-skin="modern"] .mbar-plate.is-offline .mbar-name,:root[data-skin="line"] .mbar-plate.is-offline .mbar-name,:root[data-skin="modern"] .mbar-plate.is-offline .mbar-sub,:root[data-skin="line"] .mbar-plate.is-offline .mbar-sub{color:#8a8f96}
+:root[data-skin="modern"] .mbar-acts,:root[data-skin="line"] .mbar-acts{grid-column:3;justify-self:end;display:flex;gap:8px}
+:root[data-skin="modern"] .mbar-more,:root[data-skin="line"] .mbar-more{display:flex}
+:root[data-skin="modern"] .mbtn,:root[data-skin="line"] .mbtn{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer;font:inherit}
+:root[data-skin="modern"] .mbar-offline,:root[data-skin="line"] .mbar-offline{display:flex}
+:root[data-skin="modern"] .offline-menu .menu-note,:root[data-skin="line"] .offline-menu .menu-note{padding:8px 14px;font-size:13px;color:var(--fg)}
+:root[data-skin="modern"] .m-chat.is-room .m-plate-head:has(.m-head-offline),:root[data-skin="line"] .m-chat.is-room .m-plate-head:has(.m-head-offline){grid-template-columns:minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr)}
+:root[data-skin="modern"] .m-chat.is-room .m-plate-head:has(.m-head-offline) .m-back,:root[data-skin="line"] .m-chat.is-room .m-plate-head:has(.m-head-offline) .m-back{justify-self:start}
+:root[data-skin="modern"] .m-plate-head .m-head-offline,:root[data-skin="line"] .m-plate-head .m-head-offline{grid-row:1;grid-column:3;justify-self:end;position:relative;display:block}
+:root[data-skin="modern"] .m-offline-btn,:root[data-skin="line"] .m-offline-btn{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);font:inherit;font-size:12.5px;white-space:nowrap;cursor:pointer}
+:root[data-skin="modern"] .m-offline-btn:focus-visible,:root[data-skin="line"] .m-offline-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+:root[data-skin="modern"] .m-offline-menu,:root[data-skin="line"] .m-offline-menu{list-style:none;margin:0;padding:0;top:42px;min-width:160px}
+:root[data-skin="modern"] .m-offline-menu li,:root[data-skin="line"] .m-offline-menu li{padding:12px 16px;font-size:15px;border-bottom:1px solid rgba(0,0,0,.07)}
+:root[data-skin="modern"] .m-offline-menu li:last-child,:root[data-skin="line"] .m-offline-menu li:last-child{border-bottom:0}
+/* 窄視窗（一次只看一個窗格）：分頁列藏起來，只留「‹ 名單」返回鈕那一小列；沒有它就回不去名單 */
+:root[data-skin="modern"] .shell.only-chat .tabbar,:root[data-skin="line"] .shell.only-chat .tabbar{display:flex;height:40px;margin-bottom:0;padding:6px 8px 0;align-items:center;background:var(--panel-soft)}
+:root[data-skin="modern"] .shell.only-chat .tabbar .ctab,:root[data-skin="line"] .shell.only-chat .tabbar .ctab{display:none}
+:root[data-skin="modern"] .shell.only-chat .tabbar .pane-back,:root[data-skin="line"] .shell.only-chat .tabbar .pane-back{align-self:center;margin:0;height:30px;border-radius:999px}
+:root[data-skin="modern"] .search-plus,:root[data-skin="line"] .search-plus{position:relative;display:grid;place-items:center;flex:none;width:36px;height:36px;padding:0;border:1px solid #e6e4df;border-radius:50%;background:var(--panel);color:#6b706c;cursor:pointer}
+:root[data-skin="modern"] .list-pane > .me .plus-btn,:root[data-skin="line"] .list-pane > .me .plus-btn{display:none}
+:root[data-skin="modern"] .list-pane > .me .me-dp,:root[data-skin="line"] .list-pane > .me .me-dp{width:32px;height:32px}
+:root[data-skin="modern"] .list-pane > .me .me-dp > span,:root[data-skin="line"] .list-pane > .me .me-dp > span{font-size:12px}
+:root[data-skin="modern"] .list-pane > .me .me-info,:root[data-skin="line"] .list-pane > .me .me-info{gap:1px}
+:root[data-skin="modern"] .list-pane > .me .me-row,:root[data-skin="line"] .list-pane > .me .me-row{flex-wrap:wrap;gap:0 4px}
+:root[data-skin="modern"] .list-pane > .me .nick-input,:root[data-skin="line"] .list-pane > .me .nick-input{flex:1 1 100%;font-size:13.5px;font-weight:600;padding:0 3px}
+:root[data-skin="modern"] .list-pane > .me .status-sel,:root[data-skin="line"] .list-pane > .me .status-sel{appearance:none;-webkit-appearance:none;field-sizing:content;max-width:none;padding:0 0 0 3px;border:0;background:transparent;font-size:12px;color:#6b706c;cursor:pointer}
+:root[data-skin="modern"] .list-pane > .me .me-this,:root[data-skin="line"] .list-pane > .me .me-this{display:inline;font-size:12px;color:#6b706c}
+:root[data-skin="modern"] .list-pane > .me .me-this::before,:root[data-skin="line"] .list-pane > .me .me-this::before{content:"・"}
+/* 個人訊息與正在播放：設計稿的用戶區只有兩行，藏起來（「＋」搬去搜尋列了） */
+:root[data-skin="modern"] .list-pane > .me .me-psm-row,:root[data-skin="line"] .list-pane > .me .me-psm-row,:root[data-skin="modern"] .list-pane > .me .me-np,:root[data-skin="line"] .list-pane > .me .me-np{display:none}
+/* 換大頭貼的選單從用戶區往上彈（用戶區在最底下，往下彈會被裁掉） */
+:root[data-skin="modern"] .list-pane > .me .av-menu,:root[data-skin="line"] .list-pane > .me .av-menu{top:auto;bottom:calc(100% + 4px)}
+/* ---------- 廣告框（#1421，小良哥決定保留）：白底細灰框的圓角卡片；彩球改成淡色平面圓、緞帶改成小膠囊標籤 ---------- */
+:root[data-skin="modern"] .ad-wrap,:root[data-skin="line"] .ad-wrap{margin:6px 10px 8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:none}
+:root[data-skin="modern"] .ad,:root[data-skin="line"] .ad{border:0;border-radius:0;background:var(--panel)}
+:root[data-skin="modern"] .ad-tx b,:root[data-skin="line"] .ad-tx b{color:var(--fg);font-weight:600}
+:root[data-skin="modern"] .ad-tx small,:root[data-skin="line"] .ad-tx small{color:var(--muted)}
+:root[data-skin="modern"] .ad-tx em,:root[data-skin="line"] .ad-tx em{color:var(--accent);font-weight:600}
+:root[data-skin="modern"] .ad-art i,:root[data-skin="line"] .ad-art i{background:hsl(var(--h) 40% 86%);filter:none}
+:root[data-skin="modern"] .ad-art i:nth-child(2),:root[data-skin="line"] .ad-art i:nth-child(2){background:hsl(var(--h) 35% 78%)}
+:root[data-skin="modern"] .ad-art i:nth-child(3),:root[data-skin="line"] .ad-art i:nth-child(3){background:hsl(var(--h) 30% 92%)}
+:root[data-skin="modern"] .ad-dots i,:root[data-skin="line"] .ad-dots i{background:#d9d6cf}
+:root[data-skin="modern"] .ad-dots i.on,:root[data-skin="line"] .ad-dots i.on{background:var(--accent)}
+:root[data-skin="modern"] .m-plate-head,:root[data-skin="line"] .m-plate-head{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:8px;padding:6px 12px}
+:root[data-skin="modern"] .m-plate-head .m-back,:root[data-skin="line"] .m-plate-head .m-back,:root[data-skin="modern"] .m-plate-head .m-head-term,:root[data-skin="line"] .m-plate-head .m-head-term{grid-row:1;display:grid;place-items:center;width:36px;height:36px;margin:0;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--muted)}
+:root[data-skin="modern"] .m-plate-head .m-back,:root[data-skin="line"] .m-plate-head .m-back{grid-column:1}
+:root[data-skin="modern"] .m-plate-head .m-back .m-ic,:root[data-skin="line"] .m-plate-head .m-back .m-ic{width:20px;height:20px}
+:root[data-skin="modern"] .m-plate-head .m-head-term,:root[data-skin="line"] .m-plate-head .m-head-term{grid-column:3}
+:root[data-skin="modern"] .m-plate-head .m-plate,:root[data-skin="line"] .m-plate-head .m-plate{grid-row:1;grid-column:2;justify-self:center;display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;height:40px;padding:4px 14px 4px 5px;border:1px solid #e6e4df;border-radius:999px;background:var(--panel);box-shadow:0 1px 2px rgba(20,30,25,.05),0 8px 24px rgba(20,30,25,.06);color:var(--fg);font:inherit;cursor:pointer}
+:root[data-skin="modern"] .m-plate:disabled,:root[data-skin="line"] .m-plate:disabled{cursor:default}
+:root[data-skin="modern"] .m-plate-pic,:root[data-skin="line"] .m-plate-pic{--frame:var(--online);flex:none;width:28px;height:28px;border:2px solid var(--frame);border-radius:50%;object-fit:cover;background:#fff}
+:root[data-skin="modern"] .m-plate-pic.st-busy,:root[data-skin="line"] .m-plate-pic.st-busy{--frame:var(--busy)}
+:root[data-skin="modern"] .m-plate-pic.st-away,:root[data-skin="line"] .m-plate-pic.st-away{--frame:var(--away)}
+:root[data-skin="modern"] .m-plate-pic.st-offline,:root[data-skin="line"] .m-plate-pic.st-offline,:root[data-skin="modern"] .m-plate-pic.st-stopped,:root[data-skin="line"] .m-plate-pic.st-stopped{--frame:var(--offline);filter:grayscale(.65)}
+:root[data-skin="modern"] .m-plate-name,:root[data-skin="line"] .m-plate-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}
+:root[data-skin="modern"] .m-plate-sub,:root[data-skin="line"] .m-plate-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--muted)}
+/* 離線：名牌變灰（標題列本身的灰底照舊在 mobile.css 的 .m-chathead.is-offline） */
+:root[data-skin="modern"] .m-plate.is-offline,:root[data-skin="line"] .m-plate.is-offline{background:#efeeea}
+:root[data-skin="modern"] .m-plate.is-offline .m-plate-name,:root[data-skin="line"] .m-plate.is-offline .m-plate-name,:root[data-skin="modern"] .m-plate.is-offline .m-plate-sub,:root[data-skin="line"] .m-plate.is-offline .m-plate-sub{color:#8a8f96}
+:root[data-skin="modern"] .compose-main .mc-dict:not(:has(.dict-state)),:root[data-skin="line"] .compose-main .mc-dict:not(:has(.dict-state)){width:40px}
+:root[data-skin="modern"] .compose-main .mc-dict .dict-state,:root[data-skin="line"] .compose-main .mc-dict .dict-state{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px}
+:root[data-skin="modern"] .compose-main .mc-dict.rec,:root[data-skin="line"] .compose-main .mc-dict.rec{background:#fde3e0;color:#b3261e}
+:root[data-skin="modern"] .compose-main .mc-dict.busy,:root[data-skin="line"] .compose-main .mc-dict.busy{opacity:.6}
+:root[data-skin="modern"] .compose-main .composer .aero-btn:hover:not(:disabled),:root[data-skin="line"] .compose-main .composer .aero-btn:hover:not(:disabled){background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M6 11l6-6 6 6'/%3E%3C/svg%3E") center/18px 18px no-repeat #276a61}
+:root[data-skin="modern"] .compose-main .composer .aero-btn:disabled,:root[data-skin="line"] .compose-main .composer .aero-btn:disabled{opacity:.35;cursor:default}
+:root[data-skin="modern"] .compose-main > .toolbar.mc-open,:root[data-skin="line"] .compose-main > .toolbar.mc-open{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:0;position:absolute;z-index:6;left:0;bottom:calc(100% + 8px);min-width:200px;max-width:100%;padding:6px;overflow:visible;border:1px solid #e6e4df;border-radius:18px;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.1)}
+:root[data-skin="modern"] .compose-main > .toolbar .tool-group,:root[data-skin="line"] .compose-main > .toolbar .tool-group{display:flex}
+:root[data-skin="modern"] .compose-main > .toolbar .tool,:root[data-skin="line"] .compose-main > .toolbar .tool{width:100%;min-width:0;min-height:40px;justify-content:flex-start;gap:12px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--fg);font-size:14px;text-align:left}
+:root[data-skin="modern"] .compose-main > .toolbar .tool::after,:root[data-skin="line"] .compose-main > .toolbar .tool::after{content:attr(aria-label)}
+:root[data-skin="modern"] .compose-main > .toolbar .tool svg,:root[data-skin="line"] .compose-main > .toolbar .tool svg{flex:none;width:20px;height:20px}
+:root[data-skin="modern"] .compose-main > .toolbar .tool img,:root[data-skin="line"] .compose-main > .toolbar .tool img{flex:none;width:20px;height:20px}
+:root[data-skin="modern"] .compose-main > .toolbar .picker button,:root[data-skin="line"] .compose-main > .toolbar .picker button{height:34px;font-size:18px;border-radius:8px}
+/* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
+:root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
+:root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-main,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}
+:root[data-skin="modern"] .tm-scroll,:root[data-skin="line"] .tm-scroll{border-color:var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="modern"] .tm-table th,:root[data-skin="line"] .tm-table th{background:var(--panel-soft);color:var(--muted);font-weight:600}
+:root[data-skin="modern"] .tm-table td,:root[data-skin="line"] .tm-table td{border-top-color:var(--line)}
+:root[data-skin="modern"] .tm-table tr.dup td,:root[data-skin="line"] .tm-table tr.dup td{background:#fdf3ef}
+:root[data-skin="modern"] .tm-tag.dup,:root[data-skin="line"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
+:root[data-skin="modern"] .tm-facts,:root[data-skin="line"] .tm-facts{border-radius:12px;background:var(--panel-soft)}
+/* ---------- #1461 線條圖示（0.2.21）：24×24、線寬 1.75、圓頭圓角，顏色跟著字色；一般灰、選中主色、危險紅 ---------- */
+:root[data-skin="modern"] .lic,:root[data-skin="line"] .lic{display:inline-block;flex:none;vertical-align:middle}
+:root[data-skin="modern"] .toolbar .tool > svg:not(.lic),:root[data-skin="line"] .toolbar .tool > svg:not(.lic),:root[data-skin="modern"] .toolbar .m-term-switch > img,:root[data-skin="line"] .toolbar .m-term-switch > img{display:none}
+:root[data-skin="modern"] .toolbar .tool:hover:not(:disabled),:root[data-skin="line"] .toolbar .tool:hover:not(:disabled){color:var(--fg)}
+:root[data-skin="modern"] .toolbar .tool[aria-expanded="true"],:root[data-skin="line"] .toolbar .tool[aria-expanded="true"],:root[data-skin="modern"] .toolbar .tool[aria-pressed="true"],:root[data-skin="line"] .toolbar .tool[aria-pressed="true"]{color:var(--accent)}
+:root[data-skin="modern"] .toolbar .tool.dict.rec,:root[data-skin="line"] .toolbar .tool.dict.rec,:root[data-skin="modern"] .toolbar .tool.mic.rec,:root[data-skin="line"] .toolbar .tool.mic.rec{color:#b3261e}
+:root[data-skin="modern"] .more-menu button,:root[data-skin="line"] .more-menu button{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:10px;align-items:center}
+:root[data-skin="modern"] .mi-ic,:root[data-skin="line"] .mi-ic{color:var(--muted)}
+:root[data-skin="modern"] .mi-ic.danger,:root[data-skin="line"] .mi-ic.danger{color:#b3261e}
+:root[data-skin="modern"] .ab-menu button.off .mi-ic,:root[data-skin="line"] .ab-menu button.off .mi-ic,:root[data-skin="modern"] .m-ops-item.off .mi-ic,:root[data-skin="line"] .m-ops-item.off .mi-ic{color:#c9c6be}
+:root[data-skin="modern"] .m-ops-item:has(> .mi-ic),:root[data-skin="line"] .m-ops-item:has(> .mi-ic){display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:12px;align-items:center;justify-items:start}
+:root[data-skin="modern"] .m-ops-item > .mi-ic,:root[data-skin="line"] .m-ops-item > .mi-ic{grid-row:1 / span 2}
+/* 設定列表（電腦與手機）與「使用指引」：藏原本的藍色線條與 CSS 畫的書本 */
+:root[data-skin="modern"] .guide-item > .cat-ic,:root[data-skin="line"] .guide-item > .cat-ic,:root[data-skin="modern"] .guide-item > .guide-ic,:root[data-skin="line"] .guide-item > .guide-ic,:root[data-skin="modern"] .m-row-btn > .m-row-ic,:root[data-skin="line"] .m-row-btn > .m-row-ic{display:none}
+:root[data-skin="modern"] .cat-lic,:root[data-skin="line"] .cat-lic{width:22px;height:22px;color:var(--muted)}
+:root[data-skin="modern"] .m-row-lic,:root[data-skin="line"] .m-row-lic{color:var(--muted)}
+/* 手機四大分頁：字的左邊放圖示，選中的那一格跟字一起變主色 */
+:root[data-skin="modern"] .m-tabs button,:root[data-skin="line"] .m-tabs button{display:flex;align-items:center;justify-content:center;gap:5px}
+:root[data-skin="modern"] .avb-v~.pin-dot,:root[data-skin="line"] .avb-v~.pin-dot{left:auto;right:-1px}
+:root[data-skin="modern"] .pv-btn svg:not(.lic),:root[data-skin="line"] .pv-btn svg:not(.lic),:root[data-skin="modern"] .pv-nav svg:not(.lic),:root[data-skin="line"] .pv-nav svg:not(.lic){display:none}
+:root[data-skin="modern"] .pv-btn .lic,:root[data-skin="line"] .pv-btn .lic,:root[data-skin="modern"] .pv-nav .lic,:root[data-skin="line"] .pv-nav .lic{display:inline-block}
+:root[data-skin="modern"] .photo-viewer .pv-btn .lic,:root[data-skin="line"] .photo-viewer .pv-btn .lic{width:20px;height:20px}
+:root[data-skin="modern"] .photo-viewer .pv-count,:root[data-skin="line"] .photo-viewer .pv-count{background:rgba(255,255,255,.16)}

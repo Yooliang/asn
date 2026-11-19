@@ -388,6 +388,36 @@ pub fn local_fingerprint(windows: &[Window]) -> String {
     v.join("\u{2}")
 }
 
+/// 本機兩個開關要回報的值（看畫面, 打字）。別台要看或打字，本機「允許其他設備替這台開新視窗」都要開著；打字另外看「允許遠端在這台打字」。
+/// **「看畫面」這個值不含移動設備的開關**（「允許移動設備查看終端」`mobile_view_off`）：那個開關只對手機這類移動設備的檢視要求生效，
+/// 所以手機能不能看這台，要另外判斷（被看的那台領請求時依本機設定決定），不能只靠這個值。
+/// 只是給後台與網頁的提示，握手時本機會自己再檢查一次，不以這裡為準
+pub fn remote_flags(s: &super::BridgeSettings) -> (bool, bool) {
+    (s.allow_remote_launch, s.allow_remote_launch && s.input_allowed())
+}
+
+/// 開關和上次成功回報的不同，要不要馬上補報（沒回報過、或讀不到設定都不算：頭一次回報跟著一般名單送）
+pub fn flags_due(now: Option<(bool, bool)>, sent: Option<(bool, bool)>) -> bool {
+    matches!((now, sent), (Some(n), Some(s)) if n != s)
+}
+
+/// 開關補報失敗後的退避：第一次失敗等 10 秒、之後每次加倍，上限 30 秒（只管「開關改了而補報」這條路，一般名單回報的節奏不動）
+pub const FLAGS_RETRY_BASE_MS: u64 = 10_000;
+pub const FLAGS_RETRY_MAX_MS: u64 = 30_000;
+
+/// 連續失敗 fails 次之後要等多久才能再補報（0 次＝不用等）
+pub fn flags_backoff_ms(fails: u32) -> u64 {
+    if fails == 0 {
+        return 0;
+    }
+    FLAGS_RETRY_BASE_MS.saturating_mul(1u64 << (fails - 1).min(10)).min(FLAGS_RETRY_MAX_MS)
+}
+
+/// 補報失敗之後，現在可不可以再試：沒失敗過（0 次）隨時可以；失敗過要過了退避時間（距最後一次失敗）才行
+pub fn flags_retry_due(now_ms: u64, last_fail_ms: u64, fails: u32) -> bool {
+    fails == 0 || now_ms.saturating_sub(last_fail_ms) >= flags_backoff_ms(fails)
+}
+
 /// 本機視窗狀態變了要不要立刻回報名單：指紋和上次回報時不同，而且距上次回報已過防抖間隔（頭一次變化馬上報，
 /// 連續快速變化合併成每 gap 毫秒最多一次，最後一次變化一定會在間隔過後補報）
 pub fn push_due(fp: &str, last_fp: Option<&str>, now_ms: u64, last_at: u64, gap_ms: u64) -> bool {

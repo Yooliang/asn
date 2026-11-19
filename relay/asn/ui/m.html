@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mobile.css">
 <link rel="stylesheet" href="group.css">
+<link rel="stylesheet" href="skin-common.css">
 <link rel="stylesheet" href="modern.css">
 <link rel="stylesheet" href="line.css">
 <script src="skin-boot.js"></script>
@@ -38,6 +39,7 @@
       <p class="login-note" v-if="loginNote" role="status">{{ loginNote }}</p>
       <button class="m-btn" type="button" v-if="login.phase === 'waiting'" @click="cancelLogin">取消</button>
       <p class="login-err" v-if="login.phase === 'error'" role="alert">{{ login.error }}</p>
+      <button class="m-btn" type="button" v-if="info.can_skip_login && !info.needs_login && login.phase !== 'waiting'" @click="backFromLogin">先不要，回名單</button>
     </div>
   </section>
 
@@ -57,6 +59,7 @@
         <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
         <button v-for="t in tabs" :key="t" type="button" role="tab" :class="{ on: curTab === t }" :aria-selected="curTab === t" @click="goTab(t)"><line-icon class="m-tab-ic" :name="tabIconOf(t)" :size="18"></line-icon><span>{{ tabLabel(t) }}</span><i class="red" v-if="tabHasDot(t)"></i></button>
       </nav>
+      <relogin-bar variant="phone" :show="reloginBar.show" @login="goLogin" @dismiss="dismissReloginBar"></relogin-bar>
       <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
         <span class="m-upd-tx">{{ updText }}</span>
         <button class="m-btn m-upd-btn" type="button" v-if="upd.phase !== 'downloading'" @click="startUpdate">{{ updButton }}</button>
@@ -88,7 +91,7 @@
             <ptr-zone :ptr="pf.ptr"></ptr-zone>
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
-              <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+              <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人" enterkeyhint="search"></div>
               <!-- 未讀（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
               <div class="m-group m-recent" :class="grp.cls" v-for="grp in topGroups" :key="grp.key">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[grp.key]" @click="collapsed[grp.key] = !collapsed[grp.key]">
@@ -111,7 +114,7 @@
                       <template v-else>
                         <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span><pin-dot v-if="isChatPinned(x.id)"></pin-dot></span>
                         <span class="b-text">
-                          <span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">{{ x.room.count }} 位成員</span></span>
+                          <span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">({{ x.room.count }} 人)</span></span>
                           <span class="b-last" v-if="x.room.last">{{ x.room.last }}</span>
                         </span>
                         <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(x.at)">{{ listTimeText(x.at) }}</span>
@@ -122,6 +125,7 @@
                 </ul>
               </div>
               <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
+              <p class="m-rooms-note" v-if="roomsNote" role="status">{{ roomsNote }}</p>
               <div class="m-group m-rooms" v-if="roomRows.length">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
                   <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
@@ -131,7 +135,7 @@
                     <button class="m-buddy" type="button" v-bind="rowPressOf(r.chatId)" @click="openRoom(r.chatId)">
                       <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span><pin-dot v-if="isChatPinned(r.chatId)"></pin-dot></span>
                       <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
+                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span>
                         <span class="b-last" v-if="r.last">{{ r.last }}</span>
                       </span>
                       <span class="l-time" v-if="prefs.skin === 'line' && listTimeText(r.at)">{{ listTimeText(r.at) }}</span>
@@ -626,8 +630,8 @@
                     <p class="m-note" v-else-if="playView.kind === 'latest'" role="status">{{ PLAY_LATEST_TEXT }}</p>
                     <p class="m-note" v-else>{{ PLAY_NOTICE_NOT_AUTO }}</p>
                   </div>
-                  <div class="m-card m-form m-rel" aria-label="版本紀錄">
-                    <b>版本紀錄</b>
+                  <div class="m-card m-form m-rel" aria-label="版本更新記錄">
+                    <b>版本更新記錄</b>
                     <p class="m-note" v-if="relNote" role="status">{{ relNote }}</p>
                     <button class="m-btn" type="button" v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</button>
                     <article class="m-rel-item" v-for="e in relLog" :key="e.version">
@@ -679,7 +683,7 @@
               <div class="m-sheet-body">
                 <template v-if="lch.phase === 'form' && !lchStep2">
                   <fieldset class="m-fs">
-                    <legend>電腦</legend>
+                    <legend>設備</legend>
                     <button v-for="d in lchDevices" :key="d.key" type="button" class="m-opt" :class="{ on: lch.node === d.key, off: !d.ok }" :disabled="!d.ok" :aria-pressed="lch.node === d.key" @click="pickLaunchDevice(d.key)"><span class="m-opt-t">{{ d.label }}</span><small class="m-opt-why" v-if="!d.ok">{{ d.reason }}</small></button>
                     <p class="m-note" v-if="!lchDevices.length">名單上還沒有其他電腦。</p>
                     <p class="m-note" v-else-if="!lchData.loaded && !lchData.error">查詢各台電腦的設定中…</p>
@@ -688,7 +692,7 @@
                   <button class="m-btn m-btn-big" type="button" :disabled="!lchCanNext" @click="nextLaunch">下一步</button>
                 </template>
                 <template v-else-if="lch.phase === 'form'">
-                  <p class="m-note">電腦：{{ lch.deviceLabel }}</p>
+                  <p class="m-note">設備：{{ lch.deviceLabel }}</p>
                   <template v-if="lch.node && lchElig.ok">
                     <fieldset class="m-fs">
                       <legend>模型</legend>

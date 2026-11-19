@@ -45,9 +45,11 @@ export const QUOTA_BYTES = 500 * 1024 * 1024; // 每台設備未過期附件合�
 // 每台設備未過期附件的張數上限（照片與檔案共用）
 export const QUOTA_COUNT = 1000;
 // AI 桶上限：設備總量之內，沒有本人憑證的上傳最多佔多少，讓本人至少保有其餘空間。
-// 待本人各設備換到帶憑證的版本後才啟用（目前不啟用：null）；啟用時預定 300 MB／600 個。
-export const AI_QUOTA_BYTES: number | null = null;
-export const AI_QUOTA_COUNT: number | null = null;
+// 2026-11-19 起啟用：300 MB／600 個（本人各設備已換到帶憑證的版本）。
+// 這是設備總量（QUOTA_BYTES 500 MB／QUOTA_COUNT 1000）之內的子額度；帶本人憑證的上傳不計入 AI 桶，
+// 所以本人至少保有 200 MB／400 個。設為 null 即不啟用。
+export const AI_QUOTA_BYTES: number | null = 300 * 1024 * 1024;
+export const AI_QUOTA_COUNT: number | null = 600;
 export const MAX_PER_MESSAGE = 4;
 export const DOWNLOAD_TTL_SECONDS = 300;
 export const THUMB_MAX_CHARS = 12000;

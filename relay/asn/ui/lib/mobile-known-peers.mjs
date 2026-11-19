@@ -6,17 +6,16 @@
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
-import { NAME_MAX as BACKEND_NAME_MAX, displayDeviceName } from './device-known.mjs'
+import { displayDeviceName } from './device-known.mjs'
+import { UNNAMED, NAME_MAX, clean as cleanText } from './known-peers.mjs'
 
-const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, n)
+// 清掉控制字元與雙向字元：和電腦版同一個（known-peers.mjs），手機多一步前後去空白
+const clean = (s, n = 80) => cleanText(s, Infinity).trim().slice(0, n)
 
 export const NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再操作'
 
-/** 這支手機上沒有名字的電腦一律叫這個 */
-export const UNNAMED = '未命名的電腦'
-
-/** 名字最多幾個字（名字存在後台，和後台、電腦版同一個上限） */
-export const NAME_MAX = BACKEND_NAME_MAX
+/** 沒有名字的電腦一律叫 UNNAMED、名字最多 NAME_MAX 個字：定義在電腦版（known-peers.mjs），這裡匯入並照舊匯出，不再自己定義一份 */
+export { UNNAMED, NAME_MAX }
 
 export const TEXT = {
   unnamed: UNNAMED,
