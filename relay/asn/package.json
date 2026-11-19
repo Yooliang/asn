@@ -26,6 +26,9 @@
     "@xterm/xterm": "5.5.0",
     "vue": "3.5.44"
   },
+  "overrides": {
+    "ws": "8.22.1"
+  },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3",
     "esbuild": "0.28.2",
