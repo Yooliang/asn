@@ -241,13 +241,22 @@ pub(crate) fn ctx() -> Result<Ctx, String> {
     Ok(Ctx { client: reqwest::Client::new(), auth_base: auth::auth_base_from(&relay_url), relay_url, anon })
 }
 
-/// 本人簽章用的登入憑證（盡力而為）：沒登入、過期、換憑證失敗、逾時、找不到公開金鑰都回 None，
-/// 呼叫端照舊寄信（不帶憑證＝一般信），絕不因此擋寄送。憑證只在 Rust 端，不交給前端、不寫 log。
+/// 本人簽章用的登入憑證，失敗回原因（沒登入、換憑證失敗、登入已失效、讀檔失敗、找不到公開金鑰）。
+/// 憑證只在 Rust 端，不交給前端、不寫 log。
+pub async fn signing_token_checked(auth: &AuthState) -> Result<String, crate::auth_notice::SigningFail> {
+    let c = ctx().map_err(|_| crate::auth_notice::SigningFail::NoConfig)?;
+    crate::auth_notice::token_or_fail(auth, &c.client, &c.auth_base, &c.anon, std::time::Duration::from_secs(4)).await
+}
+
+/// 本人簽章用的登入憑證（盡力而為）：拿不到就回 None，呼叫端照舊寄信（不帶憑證＝一般信），絕不因此擋寄送。
+/// 拿不到的原因寫一行記錄（只有原因代碼，有節流），要把原因交給畫面的呼叫端改用 `signing_token_checked`（#1764）
 pub async fn signing_token(auth: &AuthState) -> Option<String> {
-    let c = ctx().ok()?;
-    match tokio::time::timeout(std::time::Duration::from_secs(4), auth.access_token(&c.client, &c.auth_base, &c.anon)).await {
-        Ok(Ok(t)) if !t.is_empty() => Some(t),
-        _ => None,
+    match signing_token_checked(auth).await {
+        Ok(t) => Some(t),
+        Err(f) => {
+            crate::auth_notice::report_fail(f);
+            None
+        }
     }
 }
 

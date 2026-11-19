@@ -54,7 +54,7 @@ import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
-import { RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS, RELOGIN_BAR_HINT, RELOGIN_BAR_TEXT, showReloginBar } from './lib/login.mjs'
+import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
@@ -260,26 +260,16 @@ if (!info.shot) {
   if (autoCheck.value) void checkUpdate()
 }
 // 沒登入的提醒條：這台已有節點金鑰、收發信照常，但登入掉了（或選了暫時不登入）時，名單上方說一次；按「知道了」就先不再提，
-// 登入之後又掉才會再出現。每分鐘看一次登入狀態（取不到就不顯示，不吵人）
-const reloginBar = reactive({ show: false })
-let reloginDismissed = false
-let wasSignedIn = null
+// 登入之後又掉才會再出現。判斷與元件和手機共用（lib/relogin-bar.mjs，#1764）：收到清掉登入的事件、群組列表回報登入失效、後台回 401 時立刻再查，
+// 平常每分鐘看一次登入狀態（取不到就不顯示，不吵人）
 let onSignedIn = () => {}   // 設備與帳號那段接上
-const refreshReloginBar = async () => {
-  try {
-    const st = await authApi.status()
-    if (st?.signed_in === true) reloginDismissed = false
-    const nowIn = st?.signed_in === true
-    if (nowIn && wasSignedIn === false) onSignedIn()   // 從未登入變成已登入：失敗的帳號回報立刻重讀
-    if (st?.signed_in === true || st?.signed_in === false) wasSignedIn = nowIn
-    reloginBar.show = showReloginBar(info.can_skip_login === true, st?.signed_in === true ? true : st?.signed_in === false ? false : null, reloginDismissed)
-  } catch { reloginBar.show = false }
-}
-const dismissReloginBar = () => { reloginDismissed = true; reloginBar.show = false }
+const reloginWatch = createReloginWatch({ status: () => authApi.status(), listen, canSkipLogin: () => info.can_skip_login === true, reactive, onSignedIn: () => onSignedIn() })
+const reloginBar = reloginWatch.st
+const dismissReloginBar = reloginWatch.dismiss
 const goLogin = () => location.replace('login.html')
 if (!info.shot) {
-  void refreshReloginBar()
-  setInterval(() => void refreshReloginBar(), 60_000)
+  void reloginWatch.start()
+  setInterval(() => void reloginWatch.refresh(), 60_000)
 }
 // 遠端更新：名單上別台設備顯示「有新版」時，本人（已登入、設備在同一帳號下）可按「更新」，請那台自己更新（後台留請求、
 // 對方 ASN 回報在線時取走並用內建更新器安裝，不經 AI）。remoteMine＝本人帳號下的設備與請求狀態；程式在 account.rs
@@ -353,8 +343,9 @@ const core = new AsnCore({
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
 const groupApi = createGroupApi(invoke)
-const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: rid => chatShownId(roomChatId(rid)) })   // 只有正在看的群組才標已讀（背景分頁、視窗看不到都不標）
+const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: rid => chatShownId(roomChatId(rid)), onRooms: r => reloginWatch.noteRooms(r), onFail: e => reloginWatch.noteError(e) })   // 只有正在看的群組才標已讀（背景分頁、視窗看不到都不標）
 const roomRows = computed(() => hub.rows())
+const roomsNote = computed(() => roomsNoteText(hub.st))   // 群組清單原位的說明（讀不到、或登入失效只列得出這台的群組）；正常時是空字串
 const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFriend(r), unread: r.unread })))
 const openedRooms = new Set()   // 開過的群組對話（整合模式的分頁、分開模式的視窗）：這些要持續讀新訊息
 
@@ -2197,7 +2188,7 @@ const app = createApp({
     return {
       version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,
-      reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
+      reloginBar, dismissReloginBar, goLogin, roomsNote,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, elevatedBadge, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
@@ -2238,6 +2229,7 @@ app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('settings-panel', SettingsPanel)
+app.component('relogin-bar', ReloginBar)
 const root = app.mount('#app')
 
 await core.start()

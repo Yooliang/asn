@@ -605,6 +605,10 @@ pub fn default_store(data_dir: &Path) -> Box<dyn TokenStore> {
 
 // ---------- 登入狀態 ----------
 
+/// `access_token` 的兩種固定失敗訊息；auth_notice 靠它們分辨「沒登入」與「登入已失效」（#1764）
+pub const ERR_NOT_SIGNED_IN: &str = "還沒有登入";
+pub const ERR_LOGIN_EXPIRED: &str = "登入已過期，請重新登入";
+
 /// 登入服務暫時失敗後，等這麼久才再試：畫面每 15 秒會查一次遠端更新，斷線時不該跟著每 15 秒打登入服務
 const RETRY_WAIT_MS: i64 = 60_000;
 
@@ -696,7 +700,7 @@ impl AuthState {
                 return Ok(t); // 等鎖時別人已經換好
             }
             if slot.is_none() {
-                let stored = self.store.load()?.ok_or("還沒有登入")?;
+                let stored = self.store.load()?.ok_or(ERR_NOT_SIGNED_IN)?;
                 if (now_ms() as i64) < self.retry_after_ms.load(Ordering::SeqCst) {
                     return Err("登入服務暫時連不上，稍後會自動再試".into());
                 }
@@ -711,7 +715,7 @@ impl AuthState {
             match res {
                 Ok(s) => {
                     match current {
-                        None => return Err("還沒有登入".into()), // 換到一半登出了：不復活
+                        None => return Err(ERR_NOT_SIGNED_IN.into()), // 換到一半登出了：不復活
                         Some(l) if l.refresh_token != s.refresh_token => continue, // 換到一半重新登入：用新的
                         Some(_) => {}
                     }
@@ -729,7 +733,7 @@ impl AuthState {
                             note(&detail);
                         }
                         let _ = self.sign_out();
-                        return Err("登入已過期，請重新登入".into());
+                        return Err(ERR_LOGIN_EXPIRED.into());
                     }
                 }
                 Err(AuthFail::Transient(m)) => {
