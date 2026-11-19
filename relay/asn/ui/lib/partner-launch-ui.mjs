@@ -1,5 +1,5 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
-import { MODEL_CATALOG } from './model-catalog.mjs'
+import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { isAsnWindow } from './roster.mjs'
 import { applyDeviceOrder, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 
@@ -41,7 +41,7 @@ export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLa
 // 選那一家、運行選 asn終端時才用到（remoteTermProfile）。列出來會跟 Gemini、Grok 重複，選了 acp 那行還會寫「這個設定不支援」（#931 PR-2）
 export function remoteModelRows(launcher) {
   const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
-  return list.filter(p => p && typeof p.id === 'string' && p.id && p.mode !== 'term').map(p => {
+  return list.filter(p => p && typeof p.id === 'string' && p.id && !isTermProfile(p)).map(p => {
     const cat = MODEL_CATALOG.find(m => m.profileId === p.id)
     // 目錄上沒有的項目（自訂設定）：看那台回報的 mode（舊版回報沒有這欄＝視窗）
     const bg = !cat && p.mode === 'background'
@@ -58,7 +58,7 @@ export function remoteModelRows(launcher) {
 export function remoteTermProfile(launcher, row) {
   const id = row?.id ? `${row.id}-term` : ''
   const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
-  return id && list.some(p => p?.id === id && p.mode === 'term') ? id : ''
+  return id && list.some(p => p?.id === id && isTermProfile(p)) ? id : ''
 }
 
 export function canLaunchOnNode(nodeKey, ctx) {

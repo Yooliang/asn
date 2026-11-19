@@ -5,7 +5,7 @@ import { displayDeviceName } from './device-known.mjs'
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
 import { launchDeviceRows } from './partner-launch-ui.mjs'
 import { isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
-import { MODEL_CATALOG } from './model-catalog.mjs'
+import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine, loginIncomplete, loginFailed, usableAtText } from './claude-accounts.mjs'
@@ -38,7 +38,7 @@ const vendorKey = e => { const k = String(e ?? '').trim().toLowerCase(); return 
 export const profilesOf = l => (Array.isArray(l?.profiles) ? l.profiles : Array.isArray(l?.launcher?.profiles) ? l.launcher.profiles : null)
 // 算「這台有哪些 AI／裝了哪些」用的 profiles：去掉 asn終端（mode: 'term'，gemini-term／grok-term）。那兩個是遠端開進 asn終端用的虛擬項目，
 // 用的是 Gemini／Grok 本身的登入，不是另外的 CLI，不能在登入狀態列成「Gemini-term 已安裝未登入」
-export const vendorProfilesOf = l => (profilesOf(l) ?? []).filter(p => p?.mode !== 'term')
+export const vendorProfilesOf = l => (profilesOf(l) ?? []).filter(p => !isTermProfile(p))
 
 // 一個廠商底下的帳號 → 顯示用的字
 function accountView(rows, { loggedOut = false } = {}) {

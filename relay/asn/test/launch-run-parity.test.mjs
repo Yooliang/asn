@@ -130,8 +130,9 @@ test('運行選 asn終端（原生 cli）：那台有 <id>-term 就能選、送 
   // Claude 開窗點：有沒有 asn終端項目都照舊送 claude
   const c = launchVendors(WITH_TERM).find(v => v.id === 'claude')
   assert.equal(buildLaunchRequest({ ...f, profile: 'claude' }, { run: 'term', row: c, launcher: WITH_TERM }).profile, 'claude')
-  // 只有 id 對、但沒標 mode: term 的不算（自訂設定剛好叫這個名字）
+  // 只有 id 對、沒標 mode 的也算 asn終端（後台以前把 mode 丟掉，已存的資料只剩 id；那台執行前還會重驗三個條件，不信任摘要）
   const fake = { profiles: [...NO_TERM.profiles, { id: 'grok-term' }], cwd_allow: ['D:/work'] }
   const g = launchVendors(fake).find(v => v.id === 'grok')
-  assert.equal(launchRun(g, fake).options.find(o => o.key === 'term').ok, false)
+  assert.equal(launchRun(g, fake).options.find(o => o.key === 'term').ok, true)
+  assert.equal(launchVendors(fake).filter(v => /term/.test(v.id)).length, 0, '也不會多列成一顆模型')
 })

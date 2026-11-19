@@ -116,10 +116,16 @@ export function sanitizePiModels(v: unknown): { provider: string; model: string 
   return out;
 }
 
+const LAUNCH_MODES = new Set(["term", "background", "window"]);
 export function sanitizeLauncher(l: Json): Json | null | { error: string } {
   if (l === null) return null;
   if (!l || typeof l !== "object" || Array.isArray(l) || !Array.isArray(l.profiles) || !Array.isArray(l.cwd_allow)) return { error: "bad_request" };
-  const profiles = l.profiles.map((p: Json) => ({ id: p?.id, label: typeof p?.label === "string" ? p.label.slice(0, 60) : null }));
+  // mode＝這個項目怎麼開（term＝asn終端、background＝背景、window＝視窗）：畫面靠它分辨 asn終端的虛擬項目；不認得的值不收
+  const profiles = l.profiles.map((p: Json) => {
+    const o: Json = { id: p?.id, label: typeof p?.label === "string" ? p.label.slice(0, 60) : null };
+    if (typeof p?.mode === "string" && LAUNCH_MODES.has(p.mode)) o.mode = p.mode;
+    return o;
+  });
   const out: Json = { profiles, cwd_allow: l.cwd_allow };
   if (Number.isInteger(l.max_per_hour)) out.max_per_hour = l.max_per_hour;
   const pi = sanitizePiModels(l.pi_models);
