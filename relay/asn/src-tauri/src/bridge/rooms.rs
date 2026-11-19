@@ -578,23 +578,4 @@ mod tests {
         assert_eq!(late_text(&[json!({"seq": 1, "body": "寄件人：x"})], 0), "");
         assert!(!context_text("R1", &[], None).starts_with(P));
     }
-
-    // ---- #1808 行為守門（#1486）----
-
-    #[test]
-    fn guard_1486_群組訊息交給內建通道_多一行不一定要回_不要動手() {
-        let plain = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b"});
-        let acp = room_text_waited("G", &plain, None, 0, "acp");
-        let lines: Vec<&str> = acp.lines().collect();
-        assert_eq!(lines[2], ACP_ROOM_NOTE, "說明行之後、內文之前：{acp}");
-        assert_eq!(lines[3], "b");
-        assert!(ACP_ROOM_NOTE.contains("不用回") && ACP_ROOM_NOTE.contains("不要為了這則訊息寫檔或執行指令"), "{ACP_ROOM_NOTE}");
-        // 內建通道靠抬頭認出群組訊息：沒有文字的這一輪才會當成「看過不回」而不是失敗
-        assert!(is_room_text(&acp));
-        assert!(!is_room_text("[RELAY 來信] trust=member from=W/甲"));
-        // 別的引擎不加這一行
-        for eng in ["claude", "codex", "gemini", "respond"] {
-            assert!(!room_text_waited("G", &plain, None, 0, eng).contains(ACP_ROOM_NOTE), "{eng}");
-        }
-    }
 }

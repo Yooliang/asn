@@ -1184,7 +1184,7 @@ fn guard_1184_換身分後第一次有身分的回報_清掉沒有標記的舊�
 #[test]
 fn guard_1188_每週重置時間不是七天倍數也照收_不做倍數檢查() {
     let r = NOW + 3 * DAY;
-    // judge 本身：重置時間倒退 2 天又 5 小時（不是 7 天的倍數）、往後 3 天又 5 小時，都在合理範圍內，照收
+    // 第一組只守 judge 的範圍檢查（重置時間在現在前 1 天到後 8 天內就照收，不管差幾天）；七天倍數的檢查由下面第二組（完整 feed 流程）守
     assert!(judge(Some(NOW), NOW + MIN, Some(r - 2 * DAY - 5 * H), NOW + MIN).is_ok());
     assert!(judge(Some(NOW), NOW + MIN, Some(r + 3 * DAY + 5 * H), NOW + MIN).is_ok());
     // 走完整條掛鉤：同一個帳號先記一期，之後來了不同期（差不是七天倍數）的新讀數，照收
@@ -1206,6 +1206,14 @@ fn guard_1212_同一帳號的舊視窗重送舊數字_不蓋過較新的() {
     // 視窗 Y 閒置很久，資料時間是 11:30：重送舊數字，不收
     assert!(!feed(&h, "wy", UA, NOW - 30 * MIN, 2, wk(10.0), NOW + 2 * MIN));
     assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(30), "較新的數字沒被舊的蓋掉");
+    // 直接對準規則本身：資料時間比記著的早（這裡早 30 分鐘）→ judge 回 older_read；合併時整筆不收、原因代碼也是 older_read。
+    // 這兩條斷言只靠 judge／merge 的 older_read 檢查，不經過掛鉤的其他層
+    assert_eq!(judge(Some(NOW), NOW - 30 * MIN, Some(NOW + 3 * DAY), NOW + 2 * MIN).map_err(|r| r.code), Err("older_read"));
+    assert_eq!(judge(Some(NOW), NOW, Some(NOW + 3 * DAY), NOW + 2 * MIN).map_err(|r| r.code), Ok(()), "同一秒照收");
+    let old = Quota { weekly_pct: Some(30), week_reset_at: Some(iso_secs(NOW + 3 * DAY)), week_at: Some(iso_secs(NOW)), at: iso_secs(NOW), ..Default::default() };
+    let p = Parsed { five_hour_pct: None, weekly_pct: Some(90), reset_at: None, five_reset_ms: None, week_reset_ms: Some(NOW + 3 * DAY) };
+    let m = merge_full(Some(&old), &p, NOW - 30 * MIN, NOW + 2 * MIN);
+    assert!(m.quota.is_none() && !m.took_week && m.skipped.len() == 1 && m.skipped[0].code == "older_read");
 }
 
 #[test]

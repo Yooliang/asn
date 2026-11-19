@@ -2315,7 +2315,7 @@ async fn 通道信_重送一次還沒做完_通知寄件人_不再重送() {
 // ---- #1366：群組點名交給內建通道，這一輪沒有文字（想做的事被政策擋下、或判斷跟它無關）：當成「看過、不回」，不算轉交失敗、不貼通知
 
 #[tokio::test]
-async fn 群組點名交給通道_這一輪沒有回覆文字_當成看過不回_不貼沒轉交的通知() {
+async fn guard_1486_群組點名交給通道_這一輪沒有回覆文字_當成看過不回_不貼沒轉交的通知() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"execute": "deny"}}))])), &[], "acp", &[]).await;
     room_for(&h, vec![(2, "@@RUN dir")]);
     h.core.pull_rooms(now()).await;
@@ -2338,7 +2338,7 @@ async fn 群組點名交給通道_有回覆文字照舊貼回群組() {
 }
 
 #[tokio::test]
-async fn 群組訊息交給通道時_提示它不一定要回_不要寫檔或執行指令() {
+async fn guard_1486_群組訊息交給通道時_提示它不一定要回_不要寫檔或執行指令() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     room_for(&h, vec![(2, "@@ECHO_PROMPT")]);
     h.core.pull_rooms(now()).await;

@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn 剛開五秒的同名視窗也占名字_但還不顯示成等確認() {
+    fn guard_1636_剛開五秒的同名視窗也占名字_但還不顯示成等確認() {
         let os = mux_fake(5_000);
         assert!(holds_name(&identify_starting(&os, &[row("7", "小乙")], &[]), "小乙", false), "連按兩次的第二次落在 30 秒內也要擋");
         assert!(identify_all(&os, &[row("7", "小乙")], &[], NOW).is_empty(), "名單上的等確認顯示照舊要滿 30 秒");
@@ -466,24 +466,5 @@ mod tests {
         let spy = Spy::default();
         stop_verified(&os, &spy, &[own], &[], "9", "小乙", NOW).unwrap();
         assert_eq!(*spy.calls.borrow(), vec!["gui:600".to_string()]);
-    }
-
-    // ---- #1808 行為守門（#1636）----
-
-    #[test]
-    fn guard_1636_等確認的夥伴先占名字_但不算已開啟的視窗() {
-        let rows = [row("7", "小乙")];
-        // 剛開 5 秒、還沒有 sessions 檔：新夥伴、改名、遠端開窗的撞名檢查都要看得到它
-        let os = mux_fake(5_000);
-        let starting = identify_starting(&os, &rows, &[]);
-        assert!(holds_name(&starting, "小乙", false) && holds_name(&starting, " 小乙 ", true), "等確認的名字要占著");
-        // 但它還沒進到對話：不進「等你按確認」的名單條目（要滿 30 秒）
-        assert!(identify_all(&os, &rows, &[], NOW).is_empty());
-        // 名單條目的名字不是夥伴名本身，不會被當成「這個名字的視窗已開好」
-        assert_ne!(proc_agent(&starting[0]).name(), "小乙");
-        // 視窗關掉、程序結束就放掉名字
-        let mut gone = mux_fake(5_000);
-        gone.table.retain(|x| x.pid != 502);
-        assert!(!holds_name(&identify_starting(&gone, &rows, &[]), "小乙", true));
     }
 }

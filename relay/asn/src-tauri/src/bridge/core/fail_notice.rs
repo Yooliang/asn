@@ -108,7 +108,7 @@ mod notice_tests {
     }
 
     #[test]
-    fn 群組失敗通知帶出原因_只寫固定的白話分類_不寫原文() {
+    fn guard_1486_群組失敗通知帶出原因_只寫固定的白話分類_不寫原文() {
         let cases = [
             ("Gemini審查 需要登入：帳號登入失效或還沒登入。請登入 agy", "需要重新登入"),
             ("Gemini審查 的額度用完了（或被限流），請稍後再試。", "額度用完了"),
@@ -133,7 +133,7 @@ mod notice_tests {
     const REAL_502: &str = "API error (attempt 1): request failed (code 502): HTML response: <!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>…</body></html>";
 
     #[test]
-    fn 上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
+    fn guard_1602_上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
         assert_eq!(upstream_5xx(REAL_502), Some(502));
         assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): HTML response"), Some(503));
         assert_eq!(upstream_5xx("API ERROR (attempt 1): request failed (code 500): html Response"), Some(500), "大小寫不影響");
@@ -192,37 +192,6 @@ mod notice_tests {
             assert!(t.starts_with(ROOM_NOTICE_HEAD) && t.contains(word) && t.contains("可能") && !t.contains('@'), "{t}");
         }
         assert!(room_delivery_text(5, "甲", "held", 2).contains("另有 2 則情況相同"));
-    }
-
-    // ---- #1808 行為守門（#1486、#1602）----
-
-    #[test]
-    fn guard_1486_群組失敗通知帶出白話原因_不寫原文() {
-        let cases = [
-            ("Gemini審查 需要登入：帳號登入失效或還沒登入。請登入 agy", "需要重新登入"),
-            ("Gemini審查 想做不被允許的事：寫入檔案（D:/Github/x/asn-gemini-review/a.html）（…）", "它想寫檔或執行指令，被擋下了"),
-            ("Gemini審查 沒有產出回覆文字（它想做的事被政策拒絕了：執行指令：dir）", "它想寫檔或執行指令，被擋下了"),
-            ("Gemini審查 沒有產出回覆文字", "它沒有產出回覆"),
-        ];
-        for (why, want) in cases {
-            let t = room_notice_text(7, "Gemini審查", 0, false, false, why, None);
-            assert!(t.contains("轉交給 Gemini審查 沒有成功") && t.contains(want), "{why} → {t}");
-            assert!(!t.contains("D:/") && !t.contains("dir") && !t.contains("agy"), "不寫原文：{t}");
-        }
-        // 認不出來的原因：照舊的說法，也不寫原文
-        let t = room_notice_text(7, "甲", 0, false, false, "這一輪出錯：某個沒看過的錯誤", None);
-        assert!(t.contains("沒有轉交給 甲，對方還沒看到") && !t.contains("沒看過的錯誤"), "{t}");
-    }
-
-    #[test]
-    fn guard_1602_上游5xx_通知寫那邊暫時出錯_不寫沒有轉交() {
-        let why = "API error (attempt 1): request failed (code 502): HTML response: <!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>…</body></html>";
-        let t = room_notice_text(9, "Gemini審查", 0, false, false, why, Some("gemini"));
-        assert_eq!(t, "（收發室）群組訊息 #9 Gemini審查 收到了，但 Gemini 那邊暫時出錯（502），這一輪沒有處理，請稍後再點名。");
-        assert!(!t.contains("沒有轉交") && !t.contains("對方還沒看到") && !t.contains("DOCTYPE"), "{t}");
-        // 不是 5xx 的 HTML 錯誤頁照舊說沒有轉交
-        let t = room_notice_text(9, "甲", 0, false, false, "API error (attempt 1): request failed (code 404): HTML response", Some("gemini"));
-        assert!(t.contains("沒有轉交給 甲，對方還沒看到") && !t.contains("暫時出錯"), "{t}");
     }
 }
 

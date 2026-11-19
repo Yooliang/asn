@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn 上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
+    fn guard_1685_上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
         assert_eq!(upstream_5xx("API error (attempt 1): request failed (code 502): HTML response"), Some(502));
         assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): html response"), Some(503));
         assert_eq!(upstream_5xx("request failed (code 502)"), None, "沒有 HTML response");
@@ -802,19 +802,5 @@ mod tests {
         std::fs::create_dir_all(h.join(".gemini")).unwrap();
         junction(&h.join("innocent"), &h.join(".gemini"));
         assert!(sensitive_write(&[s(&h.join("innocent").join("x.json"))], h, h));
-    }
-
-    // ---- #1808 行為守門（#1685：上游 5xx 才自動再試一次的判斷）----
-
-    #[test]
-    fn guard_1685_上游5xx加HTML錯誤頁才算暫時出錯_其他錯誤不走這條重試() {
-        let real = "API error (attempt 1): request failed (code 502): HTML response: <!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>…</body></html>";
-        assert_eq!(upstream_5xx(real), Some(502), "真實的錯誤要認得，工作者才會等一下再試一次");
-        assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): HTML response"), Some(503));
-        // 這些都不是上游暫時出錯：不能被自動重送（可能重做第二次）
-        for why in ["request failed (code 502)", "request failed (code 404): HTML response", "UNAUTHENTICATED (code 401): HTML response", "內容提到 502 與 HTML response", ""] {
-            assert_eq!(upstream_5xx(why), None, "{why}");
-        }
-        assert!(!is_network_error(real), "5xx 與網路斷線各自判斷");
     }
 }
