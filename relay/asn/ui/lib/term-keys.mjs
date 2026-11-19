@@ -34,7 +34,12 @@ export function stripAnsi(text) {
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
     .replace(/\u001b[()*+][0-~]/g, '')
-    .replace(/\u001b[@-_]?/g, '')
+    // DCS／SOS／PM／APC（ESC P／X／^／_ 開頭，到 ST 或 BEL）：內容整段吃掉，不留殘字
+    .replace(/\u001b[PX^_][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
+    // 兩字元序列：ESC 7／ESC 8（存取游標）、ESC =／ESC >（小鍵盤模式）等（ESC 後接 0x30–0x3F）；落單的 ESC
+    .replace(/\u001b[@-_0-?]?/g, '')
+    // 落單的 SI／SO（切換字元集）
+    .replace(/[\u000e\u000f]/g, '')
 }
 
 const RULE_ROW = /^[\s─━═╌▔▁-]+$/u

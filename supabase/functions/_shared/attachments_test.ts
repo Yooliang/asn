@@ -377,11 +377,12 @@ const INIT_BODY = { kind: "image", mime: "image/webp", name: "a.webp", bytes: 5 
 const INIT_OK = { id: U(7), path: "t/H/x.webp", expires_at: "2026-11-19T00:00:00Z" };
 const initCalls = (calls: Call[]) => calls.filter((c) => c.fn === "asn_relay_attach_init");
 
-Deno.test("attach_init：有本人憑證才帶 p_signed_user；沒憑證、沒設 AI 上限時只傳原本 11 個參數", async () => {
+Deno.test("attach_init：有本人憑證才帶 p_signed_user；沒憑證、AI 上限為 null 時只傳原本 11 個參數", async () => {
   const a = fakeDeps({ rpc: () => INIT_OK });
   await handleAttachAction(a.deps, { id: "H" }, "attach_init", INIT_BODY, U(9));
   assertEquals(initCalls(a.calls)[0].args.p_signed_user, U(9));
   const b = fakeDeps({ rpc: () => INIT_OK });
+  b.deps.aiQuota = { bytes: null, count: null };
   await handleAttachAction(b.deps, { id: "H" }, "attach_init", INIT_BODY);
   const keys = Object.keys(initCalls(b.calls)[0].args).sort();
   assertEquals(keys.length, 11);
@@ -392,16 +393,16 @@ Deno.test("attach_init：身分只取自憑證標頭，body 裡偽造的身分�
   const f = fakeDeps({ rpc: () => INIT_OK });
   await handleAttachAction(f.deps, { id: "H" }, "attach_init", { ...INIT_BODY, p_signed_user: U(1), signed_user: U(1), sender_kind: "owner", p_ai_quota_bytes: 10_000_000_000 });
   const args = initCalls(f.calls)[0].args;
-  assert(!("p_signed_user" in args) && !("sender_kind" in args) && !("p_ai_quota_bytes" in args), JSON.stringify(Object.keys(args)));
+  assert(!("p_signed_user" in args) && !("sender_kind" in args), JSON.stringify(Object.keys(args)));
+  assertEquals(args.p_ai_quota_bytes, AI_QUOTA_BYTES); // body 的 10_000_000_000 不得蓋過 Edge 常數
 });
 
-Deno.test("attach_init：設了 AI 上限就帶 p_ai_quota_*（階段二）；預設常數是不啟用", async () => {
-  assertEquals([AI_QUOTA_BYTES, AI_QUOTA_COUNT], [null, null]);
+Deno.test("attach_init：預設就帶 AI 上限 p_ai_quota_*＝300 MB／600 個（階段二已啟用）", async () => {
+  assertEquals([AI_QUOTA_BYTES, AI_QUOTA_COUNT], [314572800, 600]);
   const f = fakeDeps({ rpc: () => INIT_OK });
-  f.deps.aiQuota = { bytes: 300 * 1024 * 1024, count: 600 };
   await handleAttachAction(f.deps, { id: "H" }, "attach_init", INIT_BODY, null);
   const args = initCalls(f.calls)[0].args;
-  assertEquals([args.p_ai_quota_bytes, args.p_ai_quota_count], [300 * 1024 * 1024, 600]);
+  assertEquals([args.p_ai_quota_bytes, args.p_ai_quota_count], [314572800, 600]);
 });
 
 Deno.test("attach_init：後台還沒套用新版函式（PGRST202）→ 去掉新參數重試一次並成功；其他錯誤不重試", async () => {
@@ -423,7 +424,7 @@ Deno.test("attach_init：後台還沒套用新版函式（PGRST202）→ 去掉�
   assert("p_signed_user" in ic[0].args && !("p_signed_user" in ic[1].args));
   // 沒有新參數時找不到函式不重試（直接回 500）
   const c2: Call[] = [];
-  const d2: AttachDeps = { storage: f.deps.storage, rpc: (fn, args) => { c2.push({ fn, args }); return Promise.resolve({ data: null, error: { code: "PGRST202" } }); } };
+  const d2: AttachDeps = { storage: f.deps.storage, aiQuota: { bytes: null, count: null }, rpc: (fn, args) => { c2.push({ fn, args }); return Promise.resolve({ data: null, error: { code: "PGRST202" } }); } };
   assertEquals((await handleAttachAction(d2, { id: "H" }, "attach_init", INIT_BODY)).status, 500);
   assertEquals(c2.length, 1);
 });

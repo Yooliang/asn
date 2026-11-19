@@ -1,5 +1,5 @@
 // 在別台電腦上夥伴的畫面打字（0.2.10）。和「看畫面」（term-remote.mjs，只能看）分開：這裡才有打字的路。
-// 按下去就直接發起（11-08 起這台不再確認本人），那台會請那邊的人同意（或那邊的人設過不用每次問）。
+// 按下去就直接發起（11-08 起這台不再確認本人）；0.2.33 起那台也不再跳確認框，只看那台有沒有開「允許遠端在這台打字」。
 // 打的字在 Rust 端編序號、加密、補送；畫面這邊只把 xterm 收到的按鍵交給 remoteInputApi.send。
 // 多行的貼上先問一次；送不出去（太快、太多、網路不穩）就在畫面上說，不默默丟掉。
 import { frameToWrite, loadXterm, xtermOptions, pasteSummary, PASTE_TEXT } from './term-view.mjs'
@@ -10,15 +10,15 @@ export { ENTER_DELAY_MS, pasteLines }
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 export const INPUT_LABEL = '打字'
-export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那邊的人要同意；2 分鐘沒打字會自動結束）'
+export const INPUT_TIP = '在那台電腦上這位夥伴的視窗打字（那台要開著「允許遠端在這台打字」；2 分鐘沒打字會自動結束）'
 
 export const INPUT_TEXT = {
-  waiting: '等那台電腦回應……那邊的人可能要按「允許」。',
+  waiting: '正在連到那台電腦……',
   typing: (machine, name) => `正在「${machine}」上「${name}」打字：你打的字會直接送進那個視窗，包括回答權限框`,
   soon: '再 1 分鐘就會結束，要繼續打字請結束後再開一次。',
   stop: '結束打字',
   back: '改回只能看',
-  waitReply: '等那台電腦回應',
+  waitReply: '正在連到那台電腦',
   refused: reason => (reason ? `沒有開始打字：${reason}` : '沒有開始打字，字已放回輸入框'),
   again: '再開一次',
   sendFailed: '這段沒有送出，請再試一次。',
@@ -48,7 +48,7 @@ export const RemoteInput = {
     name: { type: String, required: true },
     machine: { type: String, default: '' },
     active: { type: Boolean, default: true },
-    snap: { type: String, default: null },       // 送出後、對方允許前：保留原本看到的畫面（純文字）當底，上面疊「等那台電腦回應」（#1647）；沒給＝不疊
+    snap: { type: String, default: null },       // 送出後、連上那台前：最後一幅畫面的原文（帶顏色的跳脫序列）直接寫進這個 xterm 當底，上面疊「正在連到那台電腦」（#1647、#1762）；沒給＝不疊
     barInline: { type: Boolean, default: true },  // 同 RemoteView：false＝狀態文字交給外層的狀態列（status 事件）；結束打字的鈕也由外層放（呼叫 stop）
   },
   emits: ['back', 'status', 'unsent', 'screen', 'phase', 'refused'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）
@@ -116,11 +116,26 @@ export const RemoteInput = {
       if (!reached && alive) emit('refused', text)   // 外層收到就回到只能看、寫明原因（#1647）
       keyQueue = []; keyChain.cancel()   // 排著的、串著還沒送的按鍵都不留到下一次（按鍵不像整句可以放回輸入框）
     }
+    const wireTerm = () => {
+      term.onData(d => send(d, false))
+      host.value?.addEventListener('paste', onPaste, true)
+      document.addEventListener('visibilitychange', onVisible)
+    }
+    // 畫面框：連上之前有底圖（snap）就顯示（彩色底圖寫在這個框裡）；沒有底圖照舊，要到等那台回覆才顯示
+    const hostShown = computed(() => phase.value === 'waiting' || phase.value === 'typing' || (props.snap !== null && phase.value === 'starting'))
     const start = async () => {
       cleanup()
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
         const Terminal = await loadXterm()
+        // 有最後一幅畫面（snap）：先建 xterm、把原文寫進去，等連上那台的這段保留原本的彩色畫面（#1762）。沒有就照舊，連上了才建
+        if (props.snap !== null) {
+          await nextTick()
+          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
+          if (!term) { if (alive) finish(REMOTE_TEXT.failed); return }
+          wireTerm()
+          term.write(frameToWrite({ text: props.snap }))
+        }
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
         offFrame = await props.api.listen(FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
@@ -135,11 +150,11 @@ export const RemoteInput = {
         id = r.id
         if (!alive) { stop(); return }
         phase.value = 'waiting'
-        term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
-        if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
-        term.onData(d => send(d, false))
-        host.value?.addEventListener('paste', onPaste, true)
-        document.addEventListener('visibilitychange', onVisible)
+        if (!term) {
+          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
+          if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
+          wireTerm()
+        }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
@@ -151,7 +166,7 @@ export const RemoteInput = {
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
     onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = takeLeft(); if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
-    return { host, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, sendKey, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
+    return { host, hostShown, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, sendKey, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
   },
   template: `
 <div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">
@@ -165,8 +180,8 @@ export const RemoteInput = {
     <button class="aero-btn" type="button" @click="pasteYes">{{ PASTE_TEXT.yes }}</button>
     <button class="aero-btn" type="button" @click="pasteNo">{{ PASTE_TEXT.no }}</button>
   </p>
-  <div class="term-wait-cover" role="status" v-if="snap !== null && (phase === 'starting' || phase === 'waiting')"><pre class="term-wait-snap">{{ snap }}</pre><p class="term-wait-note">{{ TEXT.waitReply }}</p></div>
-  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="phase === 'waiting' || phase === 'typing'"></div>
+  <div class="term-wait-cover" role="status" v-if="snap !== null && (phase === 'starting' || phase === 'waiting')"><p class="term-wait-note">{{ TEXT.waitReply }}</p></div>
+  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="hostShown"></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}
     <button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button>
     <button class="aero-btn" type="button" @click="back">{{ TEXT.back }}</button>

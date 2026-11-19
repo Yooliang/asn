@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { ALIAS, ICONS, MENU_ICON, TAB_ICON, hasIcon, iconShapes, isDangerItem, itemIcon, tabIcon } from '../ui/lib/line-icons.mjs'
 import { ADOPT_LABEL, MENU_KEYS, OP_LABEL, SELF_PULL_LABEL } from '../ui/lib/partner-ops.mjs'
 import { MORE_OWN_KEYS, WINDOW_LABEL, chatGroupItems } from '../ui/lib/actionbar.mjs'
@@ -97,9 +98,9 @@ test('輸入框工具列：每一顆在原本的彩色圖後面加線條圖示�
 
 test('復古 Aero 零差異：style.css 把 .lic 一律藏起來；新的現代規則都限定在 :root[data-skin="modern"]', () => {
   assert.match(read('ui/style.css'), /\n\.lic\{display:none\}\n/)
-  const css = read('ui/modern.css')
+  const css = skinCss('modern')
   const part = css.slice(css.lastIndexOf('/*', css.indexOf('#1461 線條圖示'))).replace(/\/\*[\s\S]*?\*\//g, '')
-  const sels = [...part.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m => m[1].split(',')).map(s => s.trim()).filter(Boolean)
+  const sels = [...part.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m => m[1].split(',')).map(s => s.trim()).filter(s => s && s !== ':root[data-skin="modern"]')
   assert.ok(sels.length > 10)
   for (const s of sels) assert.ok(s.startsWith(':root[data-skin="modern"] '), s)
   assert.match(part, /:root\[data-skin="modern"\] \.lic\{display:inline-block/)

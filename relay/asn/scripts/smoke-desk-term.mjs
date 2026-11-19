@@ -12,6 +12,7 @@ export const DTERM_PROBES = {
   compose: { dterm: { kind: 'compose' } },
   multi: { dterm: { kind: 'multi' } },
   refused: { dterm: { kind: 'refused' } },
+  waitcolor: { dterm: { kind: 'waitcolor' } },
 }
 export const DTERM_NODE = 'Q'
 export const DTERM_MEMBERS = [{ id: DTERM_NODE, name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }]
@@ -69,7 +70,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   const rowsOf = () => document.querySelector('.term-view-screen .xterm-rows')?.textContent || '';
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rowsOf().slice(0, 40) };
   // multi：輸入框送多行 → 先問一次；按「取消」不送，字放回輸入框；再送一次按「送出」才送（整段＋Enter）。兩顆鈕的字取自 PASTE_TEXT（本機和看別台同字，#1378）
-  // refused：輸入框送出 → 等對方回應時保留原本的畫面、上面疊「等那台電腦回應」（#1647）→ 那台沒允許 → 自動回到只能看、寫明原因、字放回輸入框，沒有送進任何字
+  // refused：輸入框送出 → 等連上那台時保留原本的畫面、上面疊「正在連到那台電腦」（#1647）→ 那台沒允許 → 自動回到只能看、寫明原因、字放回輸入框，沒有送進任何字
   if (kind === 'refused') {
     const core = globalThis.__TAURI__.core, orig = core.invoke;
     core.invoke = async (cmd, args) => {
@@ -83,14 +84,15 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     const ta = document.querySelector('.chatpane .compose-row textarea');
     const go = ta && ta.closest('form').querySelector('button[type=submit]');
     if (!ta || !go) return { ok: false, why: '找不到下方的輸入框或送出鈕' };
-    if (!ta.placeholder.includes('送出會向那台電腦要打字權限')) return { ok: false, why: '輸入框的提示沒寫「送出會向那台電腦要打字權限」：' + ta.placeholder };
+    if (!ta.placeholder.includes('送出後會連到那台電腦')) return { ok: false, why: '輸入框的提示沒寫「送出後會連到那台電腦」：' + ta.placeholder };
     ta.value = 'ls'; ta.dispatchEvent(new Event('input'));
     await sleep(50);
     go.click();
     const note = await wait(() => document.querySelector('.term-wait-note'));
-    if (!note || !note.textContent.includes('等那台電腦回應')) return { ok: false, why: '送出後沒有疊「等那台電腦回應」' };
-    const snap = document.querySelector('.term-wait-snap');
-    if (!snap || !snap.textContent.includes('測試通過')) return { ok: false, why: '等對方回應時原本的畫面不見了：' + JSON.stringify(snap && snap.textContent.slice(0, 40)) };
+    if (!note || !note.textContent.includes('正在連到那台電腦')) return { ok: false, why: '送出後沒有疊「正在連到那台電腦」' };
+    if (document.querySelector('.term-wait-snap')) return { ok: false, why: '等待時還在用純文字墊圖（.term-wait-snap），顏色會不見' };
+    const xr = document.querySelector('.term-remote-input .term-view-screen .xterm-rows');
+    if (!xr || !xr.textContent.includes('測試通過')) return { ok: false, why: '等對方回應時原本的畫面不見了：' + JSON.stringify(xr && xr.textContent.slice(0, 40)) };
     if (!(await wait(() => ta.value === 'ls'))) return { ok: false, why: '那台沒允許，字沒有放回輸入框：' + JSON.stringify(ta.value) };
     const sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'term_view_remote_input');
     if (sent.length) return { ok: false, why: '那台沒允許還送了字：' + JSON.stringify(sent) };
@@ -98,6 +100,30 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     if (!(await wait(() => document.body.textContent.includes('沒有開始打字：那邊的人沒有允許')))) return { ok: false, why: '沒有寫明沒開始打字的原因' };
     if (document.querySelector('.term-remote-input')) return { ok: false, why: '那台沒允許，沒有自動回到只能看' };
     core.invoke = orig;
+    return { ok: true, why: '' };
+  }
+  // waitcolor（#1762）：送出後等那台連上的這段，保留原本 xterm 的彩色畫面、上面只疊一條「正在連到那台電腦」；不再有純文字的 .term-wait-snap。
+  // 發起一直不回（卡在連線中），探測在等待中就收尾，讓截圖拍到等待畫面
+  if (kind === 'waitcolor') {
+    const core = globalThis.__TAURI__.core, orig = core.invoke;
+    core.invoke = async (cmd, args) => {
+      if (cmd === 'term_view_remote_start' && args && args.scope === 'input') return await new Promise(() => {});
+      return orig(cmd, args);
+    };
+    const ta = document.querySelector('.chatpane .compose-row textarea');
+    const go = ta && ta.closest('form').querySelector('button[type=submit]');
+    if (!ta || !go) return { ok: false, why: '找不到下方的輸入框或送出鈕' };
+    ta.value = 'ls'; ta.dispatchEvent(new Event('input'));
+    await sleep(50);
+    go.click();
+    const note = await wait(() => document.querySelector('.term-wait-note'));
+    if (!note || !note.textContent.includes('正在連到那台電腦')) return { ok: false, why: '送出後沒有疊「正在連到那台電腦」' };
+    if (document.querySelector('.term-wait-snap')) return { ok: false, why: '等待時還在用純文字墊圖（.term-wait-snap），顏色會不見' };
+    const rows = await wait(() => { const x = document.querySelector('.term-remote-input .term-view-screen .xterm-rows'); return x && x.textContent.includes('測試通過') ? x : null });
+    if (!rows) return { ok: false, why: '等待時 xterm 裡沒有原本的畫面' };
+    const row = [...rows.children].find(r => r.textContent.includes('測試通過'));
+    const colored = row && [...row.querySelectorAll('span')].filter(e => /xterm-fg-|xterm-bold/.test(e.className) || /color/.test(e.getAttribute('style') || ''));
+    if (!colored || !colored.length) return { ok: false, why: '等待時畫面的顏色不見了：' + (row ? row.innerHTML.slice(0, 300) : '沒有那一列') };
     return { ok: true, why: '' };
   }
   if (kind === 'multi') {
@@ -189,7 +215,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   // (e) 終端上方沒有「打字」按鈕（#1288 拿掉了）；輸入框的提示字與按鈕字換成打進終端的說法
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '終端上方的「打字」按鈕還在（應該拿掉）' };
   const ta2 = document.querySelector('.chatpane .compose-row textarea');
-  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出會向那台電腦要打字權限') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
+  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出後會連到那台電腦') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
   const go2 = ta2.closest('form').querySelector('button[type=submit]');
   if (!go2 || go2.textContent.trim() !== '送出') return { ok: false, why: '終端畫面時按鈕不是「送出」：' + (go2 ? go2.textContent : '') };
   return { ok: true, why: '' };

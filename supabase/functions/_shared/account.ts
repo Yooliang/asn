@@ -11,6 +11,8 @@ export interface AuthUser {
   id: string;
   email: string | null;
   name: string | null;
+  /** 登入憑證裡的 session_id（UUID）；憑證沒有或格式不對就是 null／沒帶。網頁版靠它辨認是哪一個網頁登入（見 web_session.ts） */
+  sessionId?: string | null;
 }
 
 export interface AccountDeps {

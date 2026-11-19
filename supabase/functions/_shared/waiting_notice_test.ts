@@ -24,3 +24,8 @@ Deno.test("不合格的回 null", () => {
     assertEquals(parseWaitingNotice(b), null);
   }
 });
+
+Deno.test("login：只收視窗名，內容與工具名都丟掉", () => {
+  assertEquals(parseWaitingNotice({ window: " asn雯 ", kind: "login", detail: "x", tool: "Bash" }), { window: "asn雯", kind: "login", detail: null, tool: null });
+  assertEquals(parseWaitingNotice({ window: "", kind: "login" }), null);
+});

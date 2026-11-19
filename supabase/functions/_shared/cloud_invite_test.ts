@@ -139,7 +139,7 @@ Deno.test("cloud_node_rename：憑證決定使用者；不是自己的雲端代�
 Deno.test("relay/index.ts：三個動作走帳號動作那一段（在節點金鑰驗證之前、只收 POST）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const acct = src.indexOf("ACCOUNT_ACTIONS.has(action)");
-  const nodeKey = src.search(/req\.headers\.get\("x-relay-key"\);\r?\n\s*if \(!key\)/);
+  const nodeKey = src.search(/const key = web \? null : req\.headers\.get\("x-relay-key"\);/); // 第 0 階段起這一行多了「網頁節點不用金鑰」的判斷（見 web_session.ts）
   assert(acct > 0 && nodeKey > acct);
   for (const a of ACTIONS) assert(!src.includes(`"${a}"`), `${a} 不該另外掛在節點金鑰那一側`);
 });

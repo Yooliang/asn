@@ -19,6 +19,7 @@ mod attach;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod attach_cache;
 mod auth;
+mod auth_notice;   // 登入失效要看得見（#1764）
 mod avatar;
 mod bell;
 mod datadir;
@@ -91,6 +92,8 @@ mod term_frame;
 mod view_stream;
 #[cfg(desktop)]
 mod view_seen;
+#[cfg(desktop)]
+mod view_wake;   // 被看那台的輪詢：門鈴一響就醒（#1762）
 mod view_remote;
 #[cfg(feature = "gui")]
 mod view_d;   // 看別台畫面（D）的共用核心：電腦與手機的命令都呼叫它
@@ -321,8 +324,16 @@ async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, Strin
 #[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_rooms(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
-    let token = account::signing_token(&auth).await;
-    relay_of(&app)?.rooms_as(token.as_deref()).await
+    // 沒憑證時照舊走沒簽章的列表，但結果要標 signed:false 與原因，畫面才能說「需要重新登入才看得到所有群組」（#1764）
+    let (token, why) = match account::signing_token_checked(&auth).await {
+        Ok(t) => (Some(t), None),
+        Err(f) => {
+            auth_notice::report_fail(f);
+            (None, Some(f))
+        }
+    };
+    let v = relay_of(&app)?.rooms_as(token.as_deref()).await?;
+    Ok(auth_notice::mark_signed(v, why))
 }
 /// 真人的群組動作（建群組、邀請、接受邀請、退出、帶自己的 AI、主持人確認…）：一定要本人簽章，沒登入回錯、不打後台
 #[cfg(feature = "gui")]
@@ -1542,14 +1553,15 @@ impl view_stream::TPort for LiveTPort {
 
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
 #[cfg(all(desktop, feature = "gui"))]
-fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
+fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String, wake: Arc<tokio::sync::Notify>) {
     // 這台還不能被看（Linux：設備私鑰還沒有系統金鑰庫保護）就不查別台的觀看請求
     if !device_id::can_be_viewed_here(&data_dir) {
         return;
     }
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            // 門鈴一響（後台建了看畫面／打字的要求會敲這台的門鈴）就馬上查；門鈴斷了或沒響，每 10 秒照常查（#1762）
+            let _ = view_wake::wait_next(std::time::Duration::from_secs(view_wake::POLL_INTERVAL_SECS), &wake).await;
             // 放行條件：本機的「允許其他設備替這台開新視窗」開著（兩台是同一個本人，由後台擋）
             let settings = bridge::read_settings(&data_dir);
             if !settings.allow_remote_launch {
@@ -3012,6 +3024,18 @@ pub(crate) fn cleanup(app: &AppHandle) {
     }
 }
 
+/// 發「登入有問題」事件給畫面（清掉登入時、或連續好幾次不確定的錯誤時）
+#[cfg(feature = "gui")]
+fn emit_auth_lost() {
+    if let Some(h) = AUTH_APP.get() {
+        let _ = h.emit(auth_notice::AUTH_LOST_EVENT, ());
+    }
+}
+
+/// 清掉登入的事件要用到的視窗控制把手（setup 時設一次）
+#[cfg(feature = "gui")]
+static AUTH_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
 #[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -3179,9 +3203,19 @@ pub fn run() {
     let auto_acct_dir = data_dir.clone();
     #[cfg_attr(not(desktop), allow(unused_mut))]
     let mut auth_state = auth::AuthState::new(auth::default_store(&data_dir));
-    #[cfg(desktop)]
+    // 清掉登入時記一行並發事件（電腦與手機同一個組合；以前只有電腦記，手機清掉登入一個字都不留，#1764）
     {
-        auth_state.on_signout = Some(ui_log::signout_logger(exit_log_dir.clone()));
+        let emit: Box<dyn Fn() + Send + Sync> = Box::new(emit_auth_lost);
+        #[cfg(desktop)]
+        let log = ui_log::signout_logger(exit_log_dir.clone());
+        #[cfg(not(desktop))]
+        let log = auth_notice::file_signout_logger(if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
+        auth_state.on_signout = Some(auth_notice::signout_hook(log, emit));
+        // 沒清掉登入、但值得留一行的事（不確定的錯誤、存檔失敗與重試）；連續好幾次不確定的錯誤時發同一個事件，畫面提示重新登入（#1764 B）
+        auth_state.on_note = Some(auth_notice::note_logger(if shot.is_some() { PathBuf::new() } else { work_dir.clone() }));
+        auth_state.on_trouble = Some(Box::new(emit_auth_lost));
+        // 拿不到簽章憑證的原因也記進同一個 ui.log
+        auth_notice::set_log_dir(&if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
     }
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
@@ -3262,6 +3296,7 @@ pub fn run() {
     let builder = builder
         .setup(move |app| {
             let handle = app.handle().clone();
+            let _ = AUTH_APP.set(handle.clone());   // 清掉登入時發事件用
             // 邀請連結一鍵開啟：asn://invite/<碼>（電腦）、https://asnmessenger.web.app/i/<碼>（安卓 App Links）。
             // 三個來源：這次啟動的連結（冷啟動）、執行中收到的連結（外掛事件）、第二個 ASN 轉交的信箱檔。碼一律先過格式檢查才交給畫面
             {
@@ -3507,11 +3542,12 @@ pub fn run() {
                 #[cfg(desktop)]
                 let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 #[cfg(desktop)]
-                let term_wake = if handle.state::<App>().shot.is_none() {
+                let (term_wake, view_notify) = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
+                    let vw = Arc::new(tokio::sync::Notify::new());
                     start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
                     start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
-                    start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone());
+                    start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone(), vw.clone());
                     start_term_remote_poller(
                         handle.clone(),
                         r.clone(),
@@ -3519,15 +3555,17 @@ pub fn run() {
                         handle.state::<App>().data_dir.clone(),
                         w.clone(),
                     );
-                    Some(w)
+                    (Some(w), Some(vw))
                 } else {
-                    None
+                    (None, None)
                 };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
                     let h = handle.clone();
                     #[cfg(desktop)]
                     let term_wake_bell = term_wake.clone();
+                    #[cfg(desktop)]
+                    let view_wake_bell = view_notify.clone();
                     tauri::async_runtime::spawn(async move {
                         let topic = loop {
                             match r.api("whoami", None).await {
@@ -3546,6 +3584,10 @@ pub fn run() {
                             }
                             #[cfg(desktop)]
                             if let Some(w) = &term_wake_bell {
+                                w.notify_one();
+                            }
+                            #[cfg(desktop)]
+                            if let Some(w) = &view_wake_bell {
                                 w.notify_one();
                             }
                         })

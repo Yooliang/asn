@@ -26,6 +26,7 @@ mod dup;
 mod ack_retry;
 mod fail_notice;
 mod held_notice;
+mod login_notice;
 mod misroute;
 mod quota;
 mod dev_prefix;
@@ -419,6 +420,11 @@ pub struct Core {
     /// 上次回報名單時本機 Claude 視窗的指紋與時間（即時監看用）
     roster_fp: Option<String>,
     roster_at: u64,
+    /// 上次成功回報給後台的「允許別台看畫面／在這台打字」兩個開關（沒回報過＝None）。開關一改，下一次即時監看就補報名單
+    remote_flags_sent: Option<(bool, bool)>,
+    /// 開關補報連續失敗的次數與最後一次失敗的時間：後台不通時照退避時間再試，不每秒打一次（成功或開關已對上就歸零）
+    pub(super) remote_flags_fails: u32,
+    remote_flags_fail_at: u64,
     /// 自動回信模式：已交給 worker、這一輪還沒看到它回報結果（名單 busy 的依據之一）
     respond_open: bool,
     /// 收發室 worker 一輪只交一封（todo-next-185）：已把一封交給 worker、它這一輪還沒結束（記下交出去的時間）。
@@ -490,6 +496,9 @@ pub struct Core {
     wait_alerts: super::wait_alert::WaitAlerts,
     /// 通知失敗後，這個時間之前不再試
     wait_retry_at: u64,
+    /// 登入逾時畫面（#1792）：通知過誰、失敗後多久再試
+    login_alerts: super::login_alert::LoginAlerts,
+    login_retry_at: u64,
     /// 終端服務中斷的通知失敗後，這個時間之前不再試
     mux_notice_retry_at: u64,
     /// 「監看看不到終端服務」通知的重試時間
@@ -614,9 +623,9 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), awaiting_src: crate::launch::awaiting::real_source(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, remote_flags_sent: None, remote_flags_fails: 0, remote_flags_fail_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
+            wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), login_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
         for w in &outbox_logs {
@@ -631,6 +640,7 @@ impl Core {
         c.started_at = now;
         c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
         c.wait_alerts = super::wait_alert::WaitAlerts::load(&c.cfg.work_dir.join(super::wait_alert::WAIT_FILE), now);
+        c.login_alerts = super::login_alert::LoginAlerts::load(&c.cfg.work_dir.join(super::login_alert::LOGIN_FILE), now);
         super::forward_gate::prune_files(&c.cfg.work_dir, None);   // 上次留下的內文檔與已套用紀錄不再有用
         if c.cfg.forward_exact && c.cfg.forward_exact_unverified {
             c.log.line("forward-exact forced on: 未驗證（沒有通過自我測試，只給開發機用）");
@@ -1290,6 +1300,20 @@ impl Core {
     /// 即時監看（每 watch_ms 一次）：只讀本機 sessions 與外掛狀態檔，名字／狀態／說明和上次回報時不同
     /// （心跳只改 at，不算）且距上次回報已過防抖間隔，就立刻整份回報名單（後台再通知別台設備重拉）。回傳有沒有回報。
     pub async fn watch_local(&mut self, now: u64) -> bool {
+        // 本機「允許別台看畫面／打字」的開關改了：馬上補報一次，不等下一輪（開關很少動，不套防抖間隔）
+        // 沒報成功（後台不通、名單讀不到）就照退避時間再試（10 秒起、加倍、上限 30 秒），退避期間照一般流程往下走
+        if !roster::flags_due(self.remote_flags(), self.remote_flags_sent) {
+            self.remote_flags_fails = 0;
+        } else if roster::flags_retry_due(now, self.remote_flags_fail_at, self.remote_flags_fails) {
+            self.refresh_roster(now).await;
+            if roster::flags_due(self.remote_flags(), self.remote_flags_sent) {
+                self.remote_flags_fails = self.remote_flags_fails.saturating_add(1);
+                self.remote_flags_fail_at = now;
+                return false;
+            }
+            self.remote_flags_fails = 0;
+            return true;
+        }
         let (alive, claude) = (self.alive.clone(), self.claude_check.clone());
         let Some(l) = roster::read_local_with(&self.cfg.sessions_dir, &self.cfg.status_dir, |p, _| alive(p) && claude(p), self.sink.pid(), &self.cfg.mailbox_name, now) else {
             return false;
@@ -1300,6 +1324,11 @@ impl Core {
         }
         self.refresh_roster(now).await;
         true
+    }
+
+    /// 本機兩個開關的現值（讀 bridge.json）；沒有資料夾（測試、只有引擎模式）＝None，名單就不帶這兩個欄位
+    fn remote_flags(&self) -> Option<(bool, bool)> {
+        self.cfg.data_dir.as_ref().map(|d| roster::remote_flags(&super::read_settings(d)))
     }
 
     pub async fn refresh_roster(&mut self, now: u64) {
@@ -1383,6 +1412,14 @@ impl Core {
         // 平台與「不開放遠端開新視窗」的原因：兩鍵一起送（後台每次整列覆寫）；開放時原因送 null 才會清掉舊值。launcher 欄維持 null 的語意不變
         body["platform"] = json!(crate::relay::platform_name());
         body["launch_closed_reason"] = json!(closed_reason);
+        // 本機「允許別台看畫面／在這台打字」的開關，只是給後台與網頁的提示（讓網頁少打擾手機一次），**不是權威**：
+        // 別台真的要看或打字時，這台在握手時仍會自己再查一次本機設定（input_off 等），後台記的值被誰改都不影響結果。
+        // 舊版不帶這兩個欄位＝後台記「不知道」，網頁照常發出要求
+        let flags = self.remote_flags();
+        if let Some((view, input)) = flags {
+            body["remote_view"] = json!(view);
+            body["remote_input"] = json!(input);
+        }
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {
@@ -1405,6 +1442,9 @@ impl Core {
         match self.relay.api("roster", Some(body)).await {
             Ok(_) => {
                 self.roster_warned = false;
+                if flags.is_some() {
+                    self.remote_flags_sent = flags;
+                }
                 if hold_due {
                     self.hold_sent = Some(hold);
                     self.cap_sent = if hold.is_none() { false } else { self.cap_sent || cap_due };
@@ -2834,6 +2874,7 @@ impl Core {
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
         self.wait_notice_tick(now).await;
+        self.login_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.mux_blind_tick(now).await;
         self.archive_tick(now).await;

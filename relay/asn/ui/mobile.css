@@ -247,6 +247,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-archived-row .m-buddy{padding-right:96px}
 .m-unarchive{position:absolute;right:12px;top:50%;transform:translateY(-50%);min-height:36px;padding:0 12px;border:1px solid var(--line);border-radius:18px;background:#fff;color:var(--title-fg);font-size:13px;cursor:pointer}
 .m-archive-note{margin:6px 14px;padding:8px 12px;border-radius:8px;background:#e4f5e6;font-size:13px}
+.m-rooms-note{margin:6px 14px;padding:8px 12px;border-radius:8px;background:#fff5bf;color:#3b3200;font-size:13px}
 .m-buddy.offline .b-nick{color:var(--muted)}
 .m-buddy .b-nick{font-size:16px}
 .m-buddy .b-psm{font-size:13px}

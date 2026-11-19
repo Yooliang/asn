@@ -137,6 +137,9 @@ test('中文字檢查：寬度差夠大＝有畫；幾乎相同＝缺字型；�
   assert.equal(cjkVerdict({ cjkWidth: 192, tofuWidth: 190 }).ok, false, '差 1% 算缺字')
   assert.equal(cjkVerdict({ cjkWidth: 192, tofuWidth: 150, pixelsIdentical: true }).ok, false, '像素一模一樣也算缺字')
   assert.equal(cjkVerdict({ cjkWidth: 192, tofuWidth: 150, pixelsIdentical: false }).ok, true)
+  // 有 CJK 字型時方框與中文同寬（runner 實測 192／192），但字形不同：不能當缺字
+  assert.equal(cjkVerdict({ cjkWidth: 192, tofuWidth: 192, pixelsIdentical: false }).ok, true)
+  assert.equal(cjkVerdict({ cjkWidth: 192, tofuWidth: 192, pixelsIdentical: true }).ok, false)
   for (const bad of [{}, { cjkWidth: 0, tofuWidth: 5 }, { cjkWidth: NaN, tofuWidth: 5 }, { cjkWidth: 5, tofuWidth: undefined }]) assert.equal(cjkVerdict(bad).ok, false)
   assert.doesNotThrow(() => new vm.Script(cjkProbeSource()))
 })

@@ -38,7 +38,4 @@ export function confirmKindOf(text) {
 /** 給本人看的說明（一句話）：哪一種確認、要去哪裡按。沿用 #1632 的字，不再另寫一套 */
 export const confirmNoteOf = kind => (kind === 'trust' || kind === 'bypass_warning' ? STUCK_NOTES[kind] ?? '' : '')
 
-/** 等確認的夥伴，手機要打字／按鍵，那台還要人按「允許」時的一行提醒（只在真的在等對方回應時才顯示） */
-export const AWAITING_CONSENT_HINT = '那台需要先設免問，或有人在電腦前按允許'
-
 export const CONFIRM_KEYWORDS = Object.freeze({ trust: TRUST, bypass: BYPASS, footer: FOOTER })
