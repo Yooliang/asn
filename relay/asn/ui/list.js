@@ -58,7 +58,6 @@ import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createRelogi
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
-import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
@@ -97,7 +96,7 @@ import { buildDeviceTree } from './lib/device-tree.mjs'
 import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible, loadGuideHidden, localVendorStates, saveGuideHidden, singleFlight } from './lib/new-computer-guide.mjs'
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
-import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
+import { nodeLabelOf, rosterQuotaFor, rosterView, selfClaudeQuota } from './lib/account-roster.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
@@ -533,7 +532,6 @@ async function runPiSetup(call, doneText) {
   try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
 }
 if (!info.shot) void reloadReleases()   // 啟動時先讀一次（讀成功的 Rust 端留 10 分鐘，之後開設定頁不重抓）
-const quotaHook = reactive({ raw: null, busy: false, confirm: false, msg: '' })
 // Claude 外掛「自動安裝或更新」開關（#343）：null＝還沒查到（舊版 Rust 沒有這個指令就不顯示）
 const claudeModAuto = ref(null)
 async function loadClaudeModAuto() {
@@ -542,14 +540,6 @@ async function loadClaudeModAuto() {
     // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（擁有者的決定，#343）
     if (claudeModAuto.value === false) claudeModAuto.value = await invoke('claude_mod_auto_set', { on: true })
   } catch { claudeModAuto.value = null }
-}
-async function loadQuotaHook() {
-  try { quotaHook.raw = await transport.quotaHookStatus() } catch { quotaHook.raw = null }
-}
-async function runQuotaHook(call, doneText) {
-  if (quotaHook.busy) return
-  quotaHook.busy = true; quotaHook.confirm = false; quotaHook.msg = ''
-  try { quotaHook.raw = await call(); quotaHook.msg = doneText } catch (e) { quotaHook.msg = quotaHookError(e); await loadQuotaHook() } finally { quotaHook.busy = false }
 }
 async function loadLaunchPrefs() {
   try {
@@ -1059,7 +1049,7 @@ async function pollLaunchResults() {
 void refreshCliTools()
 void launchersLoop()
 void loadLaunchPrefs()
-void loadPiSetup(); void loadQuotaHook(); void loadClaudeModAuto()
+void loadPiSetup(); void loadClaudeModAuto()
 setInterval(() => void pollLaunchResults(), LAUNCHERS_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
@@ -2000,7 +1990,7 @@ const app = createApp({
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,
-      reports: accounts.state.reports, roster: accounts.state.roster,
+      reports: accounts.state.reports, roster: accounts.state.roster, claudeState: accounts.state.quotaState,
       self: { claude: accounts.state.list.map(a => (a.current === true && accounts.state.loginFailed === true ? { ...a, login_failed: true } : a)), grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     watch(deviceTree, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
@@ -2044,7 +2034,7 @@ const app = createApp({
       install: installView(agentInstall.state),
       relogin: reloginSnap(reloginFlow.state),
       accounts: {
-        list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
+        list: accounts.state.list.map(a => ({ ...a, quota: selfClaudeQuota(accounts.state.quotaState, a.email, { current: a.current === true, roster: accounts.state.roster, nodeLabel: rosterNodeLabel.value }) })), current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, mod: accounts.state.mod, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
@@ -2056,7 +2046,6 @@ const app = createApp({
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
-      quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       claudeModAuto: claudeModAuto.value,
       version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -2133,10 +2122,6 @@ const app = createApp({
         case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHourSet = launchPrefs.maxPerHour = clampMaxPerHour(value); await saveLaunchPrefs(); break   // 只有這裡寫 maxPerHourSet；夾在 1～20（跟 Rust 認的範圍一樣），不然存了也不算數
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
-        case 'quota-hook-ask': quotaHook.confirm = true; quotaHook.msg = ''; break
-        case 'quota-hook-cancel': quotaHook.confirm = false; break
-        case 'quota-hook-connect': await runQuotaHook(() => transport.quotaHookConnect(), QUOTA_HOOK_TEXT.connected); break
-        case 'quota-hook-disconnect': await runQuotaHook(() => transport.quotaHookDisconnect(), QUOTA_HOOK_TEXT.disconnected); break
         case 'pi-setup-ask': piSetup.confirm = true; piSetup.msg = ''; break
         case 'pi-setup-cancel': piSetup.confirm = false; break
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break

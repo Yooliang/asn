@@ -2,7 +2,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { quotaBars } from '../ui/lib/account-quota.mjs'
 import { OTHER_VENDORS, SWITCH_NOTICE, accountLine, codexLine, createAccountsUi, isFinalStatus, remoteStatusText } from '../ui/lib/claude-accounts.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -225,26 +224,24 @@ test('手機要求切換後的彈窗：Claude 不說要重開、不提已併掉�
   assert.ok(/Grok 視窗要關掉重開/.test(block), 'Grok 還是要重開')
 })
 
-test('只重讀額度：不重抓帳號清單，畫面的額度條換成新數字；紀錄沒了回到額度未知；讀不到維持原樣', async () => {
-  const at = new Date().toISOString()
-  let quota = { 'a@x.test': { five_hour_pct: 80, weekly_pct: 90, at } }
-  const { f, ui } = mk({ claude_accounts_list: [{ email: 'a@x.test', plan: 'max', current: true }, { email: 'b@x.test', plan: 'pro', current: false }], claude_account_current: null, codex_account_current: null, claude_quota_all: () => { if (quota instanceof Error) throw quota; return quota } })
+test('#1883 只重讀額度查詢狀態：不重抓帳號清單；讀不到（舊版沒有這個指令）維持原樣；形狀不對當作還沒讀到', async () => {
+  let state = { email: 'a@x.test', status: 'ok', read_at: '2026-11-20T10:00:00Z', windows: [{ name: 'five_hour', left_pct: 80, resets_at: null, read_at: '2026-11-20T10:00:00Z' }] }
+  const { f, ui } = mk({ claude_accounts_list: [{ email: 'a@x.test', plan: 'max', current: true }], claude_account_current: null, codex_account_current: null, claude_quota_state: () => { if (state instanceof Error) throw state; return state } })
   await ui.refresh()
-  assert.deepEqual(quotaBars(ui.state.list[0]).bars.map(b => b.pct), [80, 90])
-  quota = { 'a@x.test': { five_hour_pct: 4, weekly_pct: 55, at }, 'b@x.test': { weekly_pct: 30, at } }
+  assert.equal(ui.state.quotaState.status, 'ok')
+  assert.deepEqual(ui.state.quotaState.windows.map(w => w.left_pct), [80])
+  state = { email: 'a@x.test', status: 'login_expired', read_at: null, windows: [] }
   f.calls.length = 0
   await ui.refreshQuota()
-  assert.deepEqual(f.calls.map(c => c[0]), ['claude_quota_all'], '只讀額度')
-  assert.deepEqual(quotaBars(ui.state.list[0]).bars.map(b => b.pct), [4, 55])
-  assert.deepEqual(quotaBars(ui.state.list[1]).bars.map(b => b.pct), [30])
+  assert.deepEqual(f.calls.map(c => c[0]), ['claude_quota_state'], '只讀額度狀態')
+  assert.equal(ui.state.quotaState.status, 'login_expired')
   assert.equal(ui.state.list[0].plan, 'max', '帳號其他欄位不動')
-  quota = { 'b@x.test': { weekly_pct: 30, at } }
+  state = new Error('舊版沒有這個指令')
   await ui.refreshQuota()
-  assert.equal(ui.state.list[0].five_hour_pct, undefined, '紀錄沒了就回到額度未知')
-  assert.equal(quotaBars(ui.state.list[0]).bars.length, 0)
-  quota = new Error('舊版沒有這個指令')
+  assert.equal(ui.state.quotaState.status, 'login_expired', '讀不到就維持原樣')
+  state = { status: '亂寫', windows: 'x' }
   await ui.refreshQuota()
-  assert.deepEqual(quotaBars(ui.state.list[1]).bars.map(b => b.pct), [30], '讀不到就維持原樣')
+  assert.equal(ui.state.quotaState.status, 'none')
 })
 
 test('重讀額度接線：每 5 分鐘重讀、打開設定頁時重讀；帳號回報不靠畫面定時', () => {

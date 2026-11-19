@@ -10,8 +10,7 @@ import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine, loginIncomplete, loginFailed, usableAtText } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
-import { quotaView } from './account-quota.mjs'
-import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
+import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota, selfClaudeQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, isPhoneDevice, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
 
@@ -58,19 +57,19 @@ function accountView(rows, { loggedOut = false } = {}) {
  * machines：節點 → { platform }（後台回報的平台，#652）。電腦版是 remoteMachines、手機版是 machinesByNode
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
  * self：{ claude:[{email,plan,current}], codex:{ loggedIn, text } }（本機的帳號庫與 Codex 登入）
- * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
- *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
+ * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度只看列表（用廠牌＋帳號對）；列表沒有這個帳號、或後台讀不到（null）就寫「額度讀不到」（#1883，不再看各台自己回報的舊四欄）。
+ *   本機這台目前登入的帳號額度看 claudeState（claude_quota_state，本機剛查到的／查不到的原因），其他帳號看列表。
  */
-export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null } = {}) {
+export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, claudeState = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null } = {}) {
   const friends = deviceFriends(allFriends)   // 通知對話不是設備（#1830）
   const rows = launchDeviceRows(friends, { selfNode, nodeNames, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL, nodeNames })
-  // 別台設備一個帳號的額度：列表有就用列表，沒有就用那台回報的（舊的回報只有 Claude 有額度）
+  // 別台設備一個帳號的額度：只看列表（Claude 沒有就寫「額度讀不到」；其他廠牌沒有就不帶）
   const remoteQuota = (k, a) => {
     const e = look(k, a.email)
     if (e) return { quota: rosterQuota(e, { nodeLabel, now }) }
-    return k === 'claude' ? { quota: quotaView(a, now) } : {}
+    return k === 'claude' ? { quota: rosterQuota(null, { now }) } : {}
   }
   return rows.map(d => {
     const node = d.key
@@ -114,7 +113,7 @@ export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], devi
     const installedOf = k => (installedKeys.has(k) ? true : (installedKnown ? false : null))
     const accts = {}
     if (isSelf) {
-      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), ...(loginFailed(a) ? { loginFailed: true } : {}), quota: quotaView(a, now) }))
+      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), ...(loginFailed(a) ? { loginFailed: true } : {}), quota: selfClaudeQuota(claudeState, a.email, { current: a.current === true, roster, nodeLabel, now }) }))
       if (accts.claude.length) keys.add('claude')
       accts.grok = (self.grok ?? []).map(a => ({ email: a.email, plan: '', current: a.current === true }))
       if (accts.grok.length) keys.add('grok')

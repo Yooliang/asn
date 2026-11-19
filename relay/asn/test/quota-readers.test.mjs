@@ -217,14 +217,13 @@ test('自動換新的文字寫明只能有一個程式在換，以及失敗不�
   }
 })
 
-test('帳號頁的服務區段：額度開關所在的服務沒有帳號也有區段；有帳號的照原順序；Claude 要有狀態列或額外帳號才補', () => {
+test('帳號頁的服務區段：額度開關所在的服務沒有帳號也有區段；有帳號的照原順序；Claude 要有額外帳號才補', () => {
   const my = { vendors: [{ key: 'codex', label: 'OpenAI（Codex）', accounts: [{ account: 'a' }] }, { key: 'grok', label: 'Grok', accounts: [{ account: 'b' }] }] }
   const readers = { extraDirs: [] }
-  assert.deepEqual(vendorSections(my, readers, null).map(v => v.key), ['codex', 'grok', 'gemini', 'minimax'])
-  assert.deepEqual(vendorSections(my, readers, { state: 'off' }).map(v => v.key), ['codex', 'grok', 'claude', 'gemini', 'minimax'])
-  assert.deepEqual(vendorSections(null, { extraDirs: [{ name: 'x' }] }, null).map(v => v.key), ['claude', 'gemini', 'grok', 'minimax'])
-  assert.deepEqual(vendorSections(my, null, null), my.vendors, '額度來源還沒讀到：只畫有帳號的')
-  assert.deepEqual(vendorSections(null, readers, null).find(v => v.key === 'minimax'), { key: 'minimax', label: 'MiniMax', accounts: [] })
+  assert.deepEqual(vendorSections(my, readers).map(v => v.key), ['codex', 'grok', 'gemini', 'minimax'])
+  assert.deepEqual(vendorSections(null, { extraDirs: [{ name: 'x' }] }).map(v => v.key), ['claude', 'gemini', 'grok', 'minimax'])
+  assert.deepEqual(vendorSections(my, null), my.vendors, '額度來源還沒讀到：只畫有帳號的')
+  assert.deepEqual(vendorSections(null, readers).find(v => v.key === 'minimax'), { key: 'minimax', label: 'MiniMax', accounts: [] })
 })
 
 test('設定頁：沒有額外帳號的人看不到這一區（Claude 區段裡的開關與說明都要有額外帳號才出現）', () => {

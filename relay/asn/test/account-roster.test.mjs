@@ -237,26 +237,27 @@ const reports = { [W]: { error: '', asnOnline: true, reportedAt: iso(NOW - H), a
 ] } }
 const self = { claude: [{ email: 'a@x.test', plan: 'max', current: true, five_hour_pct: 11, weekly_pct: 22, at: iso(NOW - 60_000) }] }
 
-test('設備卡：別台設備的帳號額度改看列表（廠牌＋帳號對），列表裡沒有的退回那台回報的', () => {
+test('設備卡：別台設備的帳號額度只看列表（廠牌＋帳號對），列表裡沒有的寫「額度讀不到」，不再退回那台回報的舊數字（#1883）', () => {
   const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, asn: { [W]: [{}] }, reports, self, now: NOW,
     roster: roster([entry(), entry({ vendor: 'codex', windows: [] })]) })
   const w = t.find(d => d.key === W)
   const claude = w.vendors.find(v => v.key === 'claude').accounts
   assert.equal(claude.find(a => a.email === 'a@x.test').quota.text, '5 小時剩 40%、每週剩 72%', '用列表，不用那台回報的 99%')
   assert.equal(claude.find(a => a.email === 'a@x.test').quota.meta, '3 小時前・工作機')
-  assert.equal(claude.find(a => a.email === 'z@x.test').quota.text, '5 小時剩 10%', '列表沒有的退回那台回報的')
+  assert.equal(claude.find(a => a.email === 'z@x.test').quota.text, '額度讀不到', '列表沒有就照實寫，不退回那台回報的 10%')
   assert.equal(w.vendors.find(v => v.key === 'codex').accounts[0].quota.text, '開 Codex 後才讀得到')
 })
 
-test('設備卡：本機這台照 #1339 用本機紀錄，不看列表', () => {
-  const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW, roster: roster([entry()]) })
+test('設備卡：本機這台目前登入的帳號用本機剛查到的（claude_quota_state），不看列表的數字', () => {
+  const claudeState = { email: 'a@x.test', status: 'ok', read_at: iso(NOW - 60_000), windows: [{ name: 'five_hour', left_pct: 11, resets_at: iso(NOW + 2 * H), read_at: iso(NOW - 60_000) }, { name: 'weekly', left_pct: 22, resets_at: iso(NOW + 3 * D), read_at: iso(NOW - 60_000) }] }
+  const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW, roster: roster([entry()]), claudeState })
   assert.equal(t.find(d => d.self).vendors.find(v => v.key === 'claude').accounts[0].quota.text, '5 小時剩 11%、每週剩 22%')
 })
 
-test('設備卡：後台讀不到（null／壞的）時退回舊顯示，跟沒有列表這個功能時一模一樣', () => {
-  const old = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW })
-  for (const r of [null, { error: 'forbidden' }, {}]) assert.deepEqual(buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW, roster: r }), old)
-  assert.equal(old.find(d => d.key === W).vendors.find(v => v.key === 'claude').accounts[0].quota.text, '5 小時剩 99%、每週剩 99%')
+test('設備卡：後台讀不到（null／壞的）時別台的 Claude 帳號寫「額度讀不到」，三種讀不到都一樣', () => {
+  const base = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW })
+  for (const r of [null, { error: 'forbidden' }, {}]) assert.deepEqual(buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW, roster: r }), base)
+  assert.equal(base.find(d => d.key === W).vendors.find(v => v.key === 'claude').accounts[0].quota.text, '額度讀不到')
 })
 
 // ---------- 切換選單 ----------
@@ -400,7 +401,7 @@ test('電腦：accounts 讀列表用 acct_roster，讀不到是 null 不報錯',
   assert.equal(ok.state.roster.accounts.length, 1)
 })
 
-test('電腦：先讀成功一次、再讀失敗 → 設備卡與「我的帳號」仍是上一次的列表；從沒成功 → 退回那台回報的數字', async () => {
+test('電腦：先讀成功一次、再讀失敗 → 設備卡與「我的帳號」仍是上一次的列表；從沒成功 → 寫「額度讀不到」', async () => {
   let fail = false
   const invoke = async cmd => { if (cmd !== 'acct_roster') return null; if (fail) throw 'acct_roster HTTP 403 forbidden'; return roster([entry()]) }
   const ui = createAccountsUi({ invoke, reactive: x => x })
@@ -419,7 +420,7 @@ test('電腦：先讀成功一次、再讀失敗 → 設備卡與「我的帳號
   console.info = () => {}
   try { await never.refreshRoster(); await never.refreshRoster() } finally { console.info = orig }
   assert.equal(never.state.roster, null)
-  assert.equal(quotaOfA(tree(never.state.roster)), '5 小時剩 99%、每週剩 99%', '退回那台自己回報的')
+  assert.equal(quotaOfA(tree(never.state.roster)), '額度讀不到', '不退回那台自己回報的舊數字（#1883）')
 })
 
 test('接線：電腦打開「設備」或「帳號」讀一次、開著時跟 5 分鐘排程一起讀；手機用 android_acct_roster、進頁讀一次', () => {

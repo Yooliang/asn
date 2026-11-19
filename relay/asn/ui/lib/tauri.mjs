@@ -64,9 +64,7 @@ export const transport = {
   launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
   launchPrefsGet: () => invoke('launch_prefs_get'),
   launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
-  quotaHookStatus: () => invoke('claude_quota_hook_status'),         // 額度回報（#228）：→ { state: off|on|stale|blocked, current, hasOriginal }
-  quotaHookConnect: () => invoke('claude_quota_hook_connect'),       // 使用者同意後才呼叫：改 Claude Code 狀態列那一個欄位 → 新狀態
-  quotaHookDisconnect: () => invoke('claude_quota_hook_disconnect'), // 取消接上（只在指令還是我們寫的才還原）→ 新狀態
+  claudeQuotaState: () => invoke('claude_quota_state'),             // 這台目前登入的 Claude 帳號的額度查詢狀態（#1883）：→ { email, status: ok|login_expired|rate_limited|unavailable|none, read_at, windows }
   siteReleases: force => invoke('site_releases', { force: force === true }),   // 版本紀錄（後台公開表 asn_site_releases）：→ [{ version, date, lines }]；讀不到丟「暫時讀不到版本紀錄」（#462）
   piModels: force => invoke('pi_models', { force: force === true }),               // 經 pi 開新夥伴（#351）：→ [{ provider, model, context, thinking, images }]，只含已設好憑證的提供者；沒有 pi 回 []
   piProviders: force => invoke('pi_providers', { force: force === true }),         // → [{ provider, state: ready|not_ready|missing|unknown }]；不讀憑證

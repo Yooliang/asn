@@ -7,32 +7,32 @@ import { CONNECT_TEXT, PI_DOC_URL, connectDefaults, runConnect } from '../ui/lib
 function ops({ fail = [] } = {}) {
   const calls = []
   const mk = key => async (...a) => { calls.push([key, ...a]); if (fail.includes(key)) throw new Error(`${key} 壞了`) }
-  return { calls, o: { quotaConnect: mk('quota'), piInstall: mk('pi'), modAuto: mk('mod') } }
+  return { calls, o: { piInstall: mk('pi'), modAuto: mk('mod') } }
 }
 
-test('預設勾選（擁有者的決定）：額度預設打勾、pi 偵測到才勾、Claude 外掛勾', () => {
-  assert.deepEqual(connectDefaults({ piDetected: true }), { quota: true, pi: true, mod: true })
-  assert.deepEqual(connectDefaults({ piDetected: false }), { quota: true, pi: false, mod: true })
+test('預設勾選：pi 偵測到才勾、Claude 外掛勾；#1883 沒有額度這一項（不再改 Claude Code 的狀態列）', () => {
+  assert.deepEqual(connectDefaults({ piDetected: true }), { pi: true, mod: true })
+  assert.deepEqual(connectDefaults({ piDetected: false }), { pi: false, mod: true })
 })
 
-test('額度與 pi 都取消：不接、不裝；Claude 外掛是必要元件，照樣打開自動安裝（不能取消）', async () => {
+test('pi 取消：不裝；Claude 外掛是必要元件，照樣打開自動安裝（不能取消）', async () => {
   const { calls, o } = ops()
-  const r = await runConnect({ quota: false, pi: false, mod: false }, o, { piDetected: true })
-  assert.deepEqual(calls, [['mod', true]], '沒有接額度、沒有裝 pi 擴充；Claude 外掛一律打開，連 choice.mod 傳 false 也一樣')
+  const r = await runConnect({ pi: false, mod: false }, o, { piDetected: true })
+  assert.deepEqual(calls, [['mod', true]], '沒有裝 pi 擴充；Claude 外掛一律打開，連 choice.mod 傳 false 也一樣')
   assert.ok(r.every(x => x.ok))
 })
 
 test('某一項失敗時其他項照樣執行，失敗照實顯示', async () => {
-  const { calls, o } = ops({ fail: ['quota'] })
-  const r = await runConnect({ quota: true, pi: true, mod: true }, o, { piDetected: true })
-  assert.deepEqual(calls.map(c => c[0]), ['quota', 'pi', 'mod'])
-  assert.deepEqual(r.map(x => [x.key, x.ok]), [['quota', false], ['pi', true], ['mod', true]])
-  assert.match(r[0].text, /沒有成功：quota 壞了/)
+  const { calls, o } = ops({ fail: ['pi'] })
+  const r = await runConnect({ pi: true, mod: true }, o, { piDetected: true })
+  assert.deepEqual(calls.map(c => c[0]), ['pi', 'mod'])
+  assert.deepEqual(r.map(x => [x.key, x.ok]), [['pi', false], ['mod', true]])
+  assert.match(r[0].text, /沒有成功：pi 壞了/)
 })
 
 test('沒偵測到 pi：就算勾了也不裝，照實說明；登入只是幫使用者開終端機，說明 ASN 看不到登入資料', async () => {
   const { calls, o } = ops()
-  const r = await runConnect({ quota: false, pi: true, mod: true }, o, { piDetected: false })
+  const r = await runConnect({ pi: true, mod: true }, o, { piDetected: false })
   assert.ok(!calls.some(c => c[0] === 'pi'))
   assert.equal(r.find(x => x.key === 'pi').text, CONNECT_TEXT.piMissing)
   assert.equal(CONNECT_TEXT.piLoginNote, '請在打開的視窗輸入 /login，ASN 不會看到你的登入資料')

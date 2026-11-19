@@ -6,12 +6,12 @@
 // 後台沒部署、沒登入、回錯（404／forbidden）時一律當「沒有列表」（null），畫面退回各設備自己回報的數字。
 import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
-import { OLD_TEXT, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
+import { OLD_TEXT, QUOTA_LINES, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 
 export const ROSTER_TEXT = {
   title: '我的帳號',
-  noQuota: '額度讀不到',
+  noQuota: QUOTA_LINES.unread,   // 「額度讀不到」只有這一個說法（#1879）
   codexOff: '開 Codex 後才讀得到',
   geminiOff: '開 Gemini 視窗後才讀得到',   // Gemini 額度只有 ASN 開的 Gemini 視窗讀得到（#374 之三）
   empty: '還沒有帳號回報',
@@ -88,7 +88,7 @@ function cleanWindows(entry, keepGone = false) {
 }
 
 /**
- * 一個帳號的額度顯示（形狀跟 account-quota.mjs 的 quotaView 相同，設備卡的樣板直接用）：
+ * 一個帳號的額度顯示（設備卡的樣板直接用）：
  *   { known, text, parts, meta, listMeta, resetText, stale, exhausted, gone }
  *   parts：「我的帳號」區逐窗一句，各窗標自己的讀取時間與哪台讀的（「5 小時剩 40%・2 天前・工作機」）；
  *     重置時間已經過了的窗寫「5 小時已重置，待更新」（那個百分比已經不代表現在）
@@ -110,6 +110,8 @@ function rosterQuotaInner(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.
   // gemini 的 nodes 後台一律回空陣列（20261029130000_acct_roster_gemini：nodes 來自舊表、舊表不收 gemini），
   // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
   const gone = entry?.vendor !== 'gemini' && entry?.vendor !== 'minimax' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
+  // Claude 帳號現在沒有任何一台在用（#1883）：照樣顯示最後一次讀數與時間，旁邊加一句灰字
+  const idleText = entry?.vendor === 'claude' && Array.isArray(entry?.nodes) && !entry.nodes.some(n => n?.current === true) ? QUOTA_LINES.idle : ''
   const readNodesOf = list => [...new Set(list.map(w => w.node).filter(Boolean))]   // 這幾窗是哪幾台讀的（設備按鈕上標藍線用）
   const agoOf = at => (at != null ? agoText(new Date(at).toISOString(), now) : '')   // 「3 天前」（「我的帳號」卡片帳號後面的括號用，不加「讀的」）
   const stamp = (at, node) => {
@@ -121,7 +123,7 @@ function rosterQuotaInner(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.
     const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
     const seenNode = typeof entry?.seen_node === 'string' ? entry.seen_node : ''
     const meta = stamp(time(entry?.seen_at), seenNode)
-    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: agoOf(time(entry?.seen_at)), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], oldText: '', stale: true, exhausted: false, gone }
+    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: agoOf(time(entry?.seen_at)), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], oldText: '', idleText, stale: true, exhausted: false, gone }
   }
   const expired = w => w.reset != null && w.reset <= now
   const parts = wins.map(w => (expired(w)
@@ -142,7 +144,7 @@ function rosterQuotaInner(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.
   if (!live.length) {
     // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
     const o = oldestOf(inLine)
-    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', stale: true, exhausted: Boolean(out), gone }
+    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', idleText, stale: true, exhausted: Boolean(out), gone }
   }
   const oldest = oldestOf(live)
   const staleWins = live.filter(w => now - w.read > staleMsOf(w.name))
@@ -155,8 +157,39 @@ function rosterQuotaInner(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.
     // 「我的帳號」卡片的新排法：時間放在帳號後面的括號（舊資料在括號裡加「較舊」），讀這筆額度的那台只標在它的設備按鈕上；meta／oldText 留給手機與設備卡
     ageLabel: agoOf(shown.read) + staleNote, readNodes: readNodesOf(live),
     resetText, bars, oldText: stale ? (entry?.vendor === 'claude' ? `${OLD_TEXT}，${STALE_HINT}` : OLD_TEXT) : '',
-    stale, exhausted: Boolean(out), gone,
+    idleText, stale, exhausted: Boolean(out), gone,
   }
+}
+
+// ---- 這台自己目前登入的 Claude 帳號（#1883）：本機的查詢狀態 claude_quota_state ----
+const STATE_TEXT = { login_expired: QUOTA_LINES.loginExpired, rate_limited: QUOTA_LINES.rateLimited, unavailable: QUOTA_LINES.unavailable }
+
+/** claude_quota_state 的回傳 → 乾淨的狀態（形狀不對、沒有指令一律當 none）：{ email, status, readAt, windows } */
+export function normalizeQuotaState(raw) {
+  const status = ['ok', 'login_expired', 'rate_limited', 'unavailable'].includes(raw?.status) ? raw.status : 'none'
+  const email = typeof raw?.email === 'string' && raw.email.trim() ? raw.email.trim().toLowerCase() : ''
+  const windows = status === 'ok' && Array.isArray(raw?.windows) ? raw.windows.filter(w => pct(w?.left_pct) != null && time(w?.read_at) != null) : []
+  return { email, status: status === 'ok' && !windows.length ? 'none' : status, readAt: typeof raw?.read_at === 'string' ? raw.read_at : '', windows }
+}
+
+const stubQuota = text => ({ known: false, text, parts: [text], meta: '', listMeta: '', ageLabel: '', readNodes: [], resetText: '', bars: [], oldText: '', idleText: '', stale: true, exhausted: false, gone: false })
+
+/**
+ * 這台電腦上一個 Claude 帳號的額度顯示：
+ * - 這台目前登入的帳號（current）：查詢成功就用本機剛讀到的窗；失敗用固定的一句話寫原因（不沿用舊數字）；還沒讀過就看後台列表，沒有就寫「讀取中」
+ * - 其他帳號（帳號庫裡沒在用的）：只看後台列表（別台最後一次讀數），沒有就寫「額度讀不到」
+ * state＝normalizeQuotaState 的結果；roster＝後台列表（可為 null）；回形狀同 rosterQuota
+ */
+export function selfClaudeQuota(state, email, { current = false, roster = null, nodeLabel, now = Date.now() } = {}) {
+  const st = state && typeof state === 'object' && 'windows' in state ? state : normalizeQuotaState(state)
+  const entry = rosterLookup(roster)('claude', email)
+  const opts = { nodeLabel, now }
+  if (current && (!st.email || st.email === String(email ?? '').trim().toLowerCase())) {
+    if (st.status === 'ok') return rosterQuota({ vendor: 'claude', plan: entry?.plan ?? '', windows: st.windows, nodes: [{ node: '', current: true }] }, opts)
+    if (STATE_TEXT[st.status]) return stubQuota(STATE_TEXT[st.status])
+    return entry ? rosterQuota(entry, opts) : stubQuota(QUOTA_LINES.reading)
+  }
+  return entry ? rosterQuota(entry, opts) : stubQuota(QUOTA_LINES.unread)
 }
 
 /** 查某廠牌某帳號在列表裡的那一筆（email 不分大小寫）；列表不能用就回 null 的查詢函式（永遠查不到） */

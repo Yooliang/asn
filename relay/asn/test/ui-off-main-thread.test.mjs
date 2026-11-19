@@ -62,7 +62,7 @@ test('守門：同步的 Tauri 指令本體不直接讀寫檔、拿帳號鎖、�
 
 test('這次改的指令都是非同步（todo-next-191）', () => {
   const byName = new Map(commands().map(c => [c.name, c]))
-  for (const n of ['store_load', 'store_save', 'ui_log', 'claude_quota_all', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_account_undo']) {
+  for (const n of ['store_load', 'store_save', 'ui_log', 'claude_quota_state', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_account_undo']) {
     assert.ok(byName.has(n), n)
     assert.equal(byName.get(n).async, true, n)
   }

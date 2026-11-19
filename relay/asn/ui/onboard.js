@@ -25,7 +25,6 @@ const app = createApp({
     // 第 3 步「連接你的 AI 工具」（#343）：名字都填好之後才出現；只有新用戶會走到這裡（舊用戶 plan.steps 是空的，直接進名單）
     const connectApi = {
       piSetupStatus: () => invoke('pi_setup_status'),
-      quotaConnect: () => invoke('claude_quota_hook_connect'),
       piInstall: () => invoke('pi_setup_install'),
       modAuto: on => invoke('claude_mod_auto_set', { on }),
       piLogin: () => invoke('ai_cli_login', { toolId: 'pi' }),
