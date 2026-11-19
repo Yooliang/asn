@@ -14,7 +14,7 @@
 ## 一般檔案（kind=file）
 
 - 白名單（副檔名＝型別）：pdf、txt、md、json、csv、zip、docx、xlsx、pptx。單檔 ≤ 25 MB；每台設備未過期附件合計 ≤ 500 MB 且 ≤ 1000 個（照片與檔案共用）。
-- 額度依寄件人分開算（#1723）：每筆附件記「本人」或「AI」（`relay.attachments.sender_kind`；空值＝舊資料，只算設備總量）。本人以登入憑證判定，跟信件 owner_signed 是同一套規則：`attach_init` 帶標頭 `x-asn-user`，資料庫核對該使用者擁有這台設備才記本人，其餘（沒帶、擁有關係不符）記 AI。設備總量不變；另可設「AI 上限」（預定 300 MB／600 個），讓 AI 視窗互寄的截圖擠不掉本人的空間。AI 上限由 Edge 常數 `AI_QUOTA_BYTES`／`AI_QUOTA_COUNT` 決定，目前是 null（不啟用），待本人各設備換到帶憑證的版本後才啟用。超額回 413 `quota_exceeded`，多帶 `scope`（`device`＝設備總量滿、`agent`＝AI 桶滿）。
+- 額度依寄件人分開算（#1723）：每筆附件記「本人」或「AI」（`relay.attachments.sender_kind`；空值＝舊資料，只算設備總量）。本人以登入憑證判定，跟信件 owner_signed 是同一套規則：`attach_init` 帶標頭 `x-asn-user`，資料庫核對該使用者擁有這台設備才記本人，其餘（沒帶、擁有關係不符）記 AI。設備總量不變；另有「AI 上限」（300 MB／600 個），讓 AI 視窗互寄的截圖擠不掉本人的空間。AI 上限由 Edge 常數 `AI_QUOTA_BYTES`／`AI_QUOTA_COUNT` 決定，2026-11-19 起啟用（本人各設備已換到 ≥0.2.32 帶憑證的版本）；帶本人憑證的上傳不計入 AI 桶。超額回 413 `quota_exceeded`，多帶 `scope`（`device`＝設備總量滿、`agent`＝AI 桶滿）。
 - 不壓縮、不轉檔，位元組原樣上傳。三道檢查：ASN 的 Rust 端（副檔名、內容檔頭、大小）→ 後端 `attach_init`（副檔名與型別一致、大小）→ 後端 `attach_commit`（Storage 實際大小與型別）；下載端（ASN、`attach.mjs`）存檔前再比對一次內容檔頭（pdf＝`%PDF-`、zip／Office＝`PK`、文字檔不得含 NUL）。
 - 顯示：ASN 對話裡是檔案卡（檔名、大小、點一下下載並另存到 `下載\ASN`）；Claude 視窗與雲端代理收到 `〔檔案〕檔名（2.5 MB）下載：node "…/attach.mjs" --id <編號>`。
 - 授權、30 天保存、清理與照片完全相同。
