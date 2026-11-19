@@ -31,6 +31,7 @@ export function loadDims(saved) {
 // 使用者改了分頁依：分組若撞到就自動換
 export const withTabDim = (cur, tabDim) => normalizeDims({ ...cur, tabDim })
 
+// 夥伴層級的「非離線」（左邊頁籤依引擎／狀態分時一位位夥伴的人數），不是設備在線：沒帶 status 的舊資料照舊算線上，所以不用設備層級的在線白名單（roster.mjs，#1830）
 const online = f => f.status !== 'offline'
 const sumTab = (t, friends) => { for (const f of friends) { t.total++; if (online(f)) t.online++; t.unread += f.unread || 0 } return t }
 
