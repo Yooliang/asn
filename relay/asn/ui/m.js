@@ -84,7 +84,7 @@ import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { alignDeviceName, followSelfRename } from './lib/device-rename.mjs'
-import { renameDevice } from './lib/device-rename.mjs'
+import { renameDevice, setDeviceNameOnboard, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { loginUnsealedNote } from './lib/mobile-login-seal.mjs'
@@ -145,7 +145,7 @@ document.title = 'ASN'
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
 const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
-const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : renameDevice(invoke, { node: info.node, name, phone: true })) }
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true })) }
 const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
@@ -303,7 +303,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
     else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
-  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync(); void alignDeviceName(invoke, { info, core, me }, showToast) }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
+  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync(); void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, phone: true, notify: showToast }); await alignDeviceName(invoke, { info, core, me }, showToast) })() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（對話清單層再按才退到背景）；分頁與內頁的規則在 lib/mobile-nav.mjs ----------
@@ -646,7 +646,7 @@ const app = createApp({
         const r = await knownPeers.rename(node, dn.text)
         if (!r) { dn.err = KNOWN_TEXT.failed; return }   // 沒拿到成功的回覆：編輯框留著、顯示失敗，不讓人以為改好了
         Object.assign(dn, { node: '', text: '', err: '' })
-        if (node === info.node) followSelfRename({ info, core, me }, { self_renamed: r.selfRenamed === true, window_name: r.windowName })   // 改的是這支手機：本機視窗名 Rust 也換了，畫面就地跟上
+        if (node === info.node) followSelfRename({ info, core, me }, { name: r.name, self_renamed: r.selfRenamed === true, window_name: r.windowName, window_rename_failed: r.windowRenameFailed }, showToast)   // 改的是這支手機：本機視窗名 Rust 也換了，畫面就地跟上
         await Promise.allSettled([core.refreshRoster(), loadKnown()])
       } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); dn.err = renameErrorText(e) } finally { dn.busy = false }
     }
@@ -865,6 +865,7 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
+    const selfDevName = computed(() => (selfDev.value && selfDev.value.label !== KNOWN_TEXT.thisPhone ? selfDev.value.label : me.nick))   // 設備頁的名字沒讀到（還是標籤）時，個人頁退回視窗名
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
     const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
@@ -1636,7 +1637,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,

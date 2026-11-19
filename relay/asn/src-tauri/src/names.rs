@@ -185,26 +185,26 @@ mod tests {
         assert_eq!(follow_device_rename(&r, d.path(), w.path(), "W", "工作機", now).unwrap(), None);
         assert_eq!(r.window_name(), "H-ASN");
         // 這台：視窗名換成後台的名字、舊名進清單
-        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "Oppo 手機", now).unwrap(), Some("Oppo 手機".to_string()));
-        assert_eq!(r.window_name(), "Oppo 手機");
+        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "測試手機", now).unwrap(), Some("測試手機".to_string()));
+        assert_eq!(r.window_name(), "測試手機");
         assert_eq!(read_old_names(d.path()), vec![o("H-ASN", now)]);
         // 已經一樣：不動
-        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "Oppo 手機", now + 1).unwrap(), None);
+        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "測試手機", now + 1).unwrap(), None);
         // 視窗名規則擋下（系統保留字）：回錯、視窗名不變
         assert!(follow_device_rename(&r, d.path(), w.path(), "H", "家用收發室", now + 2).is_err());
-        assert_eq!(r.window_name(), "Oppo 手機");
+        assert_eq!(r.window_name(), "測試手機");
     }
 
     #[test]
     fn 啟動對齊_以後台為準() {
         // 後台名字能用且不同：本機跟後台
-        assert_eq!(align_with_backend("H-ASN", false, "Oppo 手機", true), Align::Keep, "本機名字是系統預設的：不動，免得改掉大家的視窗名");
-        assert_eq!(align_with_backend("舊名", true, "Oppo 手機", true), Align::UseBackend("Oppo 手機".into()));
+        assert_eq!(align_with_backend("H-ASN", false, "測試手機", true), Align::Keep, "本機名字是系統預設的：不動，免得改掉大家的視窗名");
+        assert_eq!(align_with_backend("舊名", true, "測試手機", true), Align::UseBackend("測試手機".into()));
         // 一樣：不動
-        assert_eq!(align_with_backend("Oppo 手機", true, "Oppo 手機", true), Align::Keep);
+        assert_eq!(align_with_backend("測試手機", true, "測試手機", true), Align::Keep);
         // 後台名字不能用、本機是本人取過的合格名字：送一次 device_rename
-        assert_eq!(align_with_backend("Oppo 手機", true, "n1a2b3c4d-ASN", false), Align::PushLocal("Oppo 手機".into()));
-        assert_eq!(align_with_backend("Oppo 手機", true, "", false), Align::PushLocal("Oppo 手機".into()));
+        assert_eq!(align_with_backend("測試手機", true, "n1a2b3c4d-ASN", false), Align::PushLocal("測試手機".into()));
+        assert_eq!(align_with_backend("測試手機", true, "", false), Align::PushLocal("測試手機".into()));
         // 本機名字不是本人取的（預設名）、或本機名字也不合格：不動
         assert_eq!(align_with_backend("H-ASN", false, "", false), Align::Keep);
         assert_eq!(align_with_backend("n1a2b3c4d-ASN", true, "", false), Align::Keep);

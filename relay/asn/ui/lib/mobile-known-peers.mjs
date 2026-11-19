@@ -205,7 +205,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
     rename: async (node, name) => {
       if (!node) return null
       const r = await renameDevice(invoke, { node, name, phone: true })
-      return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true, ...(r.self_renamed === true ? { selfRenamed: true, windowName: String(r.window_name ?? '') } : {}) } : null
+      return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true, ...(r.self_renamed === true ? { selfRenamed: true, windowName: String(r.window_name ?? '') } : {}), ...(typeof r.window_rename_failed === 'string' && r.window_rename_failed ? { windowRenameFailed: r.window_rename_failed } : {}) } : null
     },
   }
 }

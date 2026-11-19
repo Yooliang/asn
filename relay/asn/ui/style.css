@@ -80,6 +80,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .ghost{border:1px solid transparent;background:transparent;border-radius:2px;padding:1px 3px;min-width:0}
 .ghost:hover,.ghost:focus{border-color:var(--line);background:var(--panel)}
 .nick-input{flex:1;font-weight:700;font-size:14px}
+.nick-ro{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default}   /* 左上角設備名：只顯示（#1803），改名在「設定 → 設備」 */
 .status-sel{flex:none;font-size:12px;color:var(--muted);max-width:96px}
 /* 暱稱改名不合法的提示 */
 .nick-err{font-size:11px;color:var(--busy)}

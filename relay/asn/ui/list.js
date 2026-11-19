@@ -102,7 +102,7 @@ import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
-import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall } from './lib/device-rename.mjs'
+import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -470,7 +470,7 @@ async function renameDevice(node, name) {
   try {
     r = await renameDeviceCall(invoke, { node, name })
     known.renameError = ''
-    if (node === info.node) followSelfRename({ info, core, me }, r)   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
+    if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {
     console.info('[ASN] 改名沒成功', String(e?.message ?? e ?? ''))
     known.renameError = String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試。'
@@ -1668,22 +1668,7 @@ const app = createApp({
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
-    // 左上角的名字＝這台設備的後台名字（和設定「設備」的詳情同一個）；改它就是 device_rename。
-    // 視窗名／收發室位址不動，me.nick 也不動（對話裡的「我」照舊）。名單還沒讀到這台的名字就先顯示視窗名
-    const nickText = ref(selfDeviceName.value)
-    const nickFocus = ref(false)   // 正在改左上角的名字：名單刷新不要蓋掉輸入中的字
-    watch(selfDeviceName, n => { if (!nickFocus.value) nickText.value = n })
-    const commitNick = async () => {
-      const want = String(nickText.value ?? '').trim()
-      const cur = selfDeviceName.value
-      const restore = () => { nickText.value = selfDeviceName.value }
-      if (want === cur) { restore(); nickErr.value = ''; return }
-      const bad = deviceNameError(want)
-      if (bad) { restore(); nickErr.value = bad; setTimeout(() => { nickErr.value = '' }, 5000); return }
-      const r = await renameDevice(info.node, want)
-      if (r) { nickErr.value = ''; nickText.value = String(r.name ?? want) }
-      else { restore(); nickErr.value = known.renameError; setTimeout(() => { nickErr.value = '' }, 5000) }
-    }
+    // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
@@ -2199,7 +2184,7 @@ const app = createApp({
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
+      STATUS, selfDeviceName, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
@@ -2238,7 +2223,8 @@ app.component('relogin-bar', ReloginBar)
 const root = app.mount('#app')
 
 await core.start()
-if (!info.shot) void alignDeviceName(invoke, { info, core, me }, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 8000) })   // 啟動後對齊一次：本機視窗名以後台的設備名為準
+const nickNotice = t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) }
+if (!info.shot) void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, notify: nickNotice }); await alignDeviceName(invoke, { info, core, me }, nickNotice) })()   // 啟動後對齊一次：本機視窗名以後台的設備名為準
 pushLog(NOTICE_ID)   // 「通知」分頁讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()
 

@@ -2851,13 +2851,17 @@ pub(crate) fn follow_self_rename(app: &App, relay: &Relay, node: &str, mut v: Va
             v["window_name"] = Value::String(w);
         }
         Ok(None) => {}
-        Err(e) => elog!("設備改名後本機視窗名沒換：{e}"),
+        Err(e) => {
+            // 後台那份已經改好、本機視窗名被規則擋下（例如系統保留字）：寫進 log，並讓畫面看得到原因（window_rename_failed），不能靜默
+            elog!("設備改名後本機視窗名沒換：{e}");
+            v["window_rename_failed"] = Value::String(e);
+        }
     }
     v
 }
 
 /// 啟動時把這台的視窗名和後台的設備名對齊一次（#1803，以後台為準；規則見 names::align_with_backend）。
-/// 回 { state: "ok" | "adopted" | "pushed" | "later", name? }：adopted＝本機換成後台的名字（畫面要就地更新並說一句話）；
+/// 回 { state: "ok" | "adopted" | "failed" | "pushed" | "later", name?, reason? }：failed＝想換成後台的名字但本機規則擋下（reason 是給人看的原因）；adopted＝本機換成後台的名字（畫面要就地更新並說一句話）；
 /// pushed＝後台名字不能用，用本機本人取過的名字送了一次改名；later＝要送但沒登入簽章或送不出去，下次啟動再試。失敗不影響其他功能
 #[cfg(feature = "gui")]
 #[tauri::command]
@@ -2877,8 +2881,9 @@ async fn device_name_align(app: State<'_, App>, auth: State<'_, auth::AuthState>
         names::Align::UseBackend(n) => match names::rename(r.as_ref(), &app.data_dir, &app.work_dir, &n, heartbeat::now_ms()) {
             Ok(w) => Ok(serde_json::json!({ "state": "adopted", "name": w })),
             Err(e) => {
+                // 本機視窗名被規則擋下、換不成後台的名字：回 failed 與原因，畫面要說出來（不能靜默）
                 elog!("對齊後台設備名沒成功：{e}");
-                Ok(serde_json::json!({ "state": "ok" }))
+                Ok(serde_json::json!({ "state": "failed", "name": n, "reason": e }))
             }
         },
         names::Align::PushLocal(n) => {
