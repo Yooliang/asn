@@ -2739,8 +2739,9 @@ impl Core {
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
-                self.up_remember(&id, &text, &room_name, msg.get("from").and_then(Value::as_str).unwrap_or(""));
                 self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""), false);
+                // 要在 note_if_notice 之後：收發室通知類的訊息（bounce_notices）不記、不排補送（#1670 一審）
+                self.up_remember(&id, &text, &room_name, msg.get("from").and_then(Value::as_str).unwrap_or(""));
                 if !self.is_respond(&target) && self.via_worker(&target) {
                     self.fwd_rooms.insert(id.clone(), RoomFwd { room_id: room_id.clone(), room_name: room_name.clone(), member: member.to_string(), seq, received_at: late.unwrap_or(self.now) });
                 }

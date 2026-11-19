@@ -2541,3 +2541,21 @@ async fn 單號1670_非agy協定的工作者碰到上游5xx_不排延遲補送_�
     assert!(!log.contains("upstream-retry scheduled") && !log.contains("upstream-retry resent"), "{log}");
     assert!(!h.work.path().join("retry-pending.json").exists());
 }
+
+#[tokio::test]
+async fn 單號1670_收發室通知類的群組訊息遇上游502_不排補送_不寫存檔_不貼過渡說明也不貼失敗說明() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    // 開頭是收發室通知的字頭：被退時不再通知（連環通知的防護），補送也不能繞過它
+    room_for(&h, vec![(2, "（收發室）群組訊息 #1 甲 沒有轉交給 Gemini，對方還沒看到。
+@@UP502")]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "這一輪失敗、通知類不再通知", |h| h.core.log.recent().iter().any(|l| l.contains("room failure notice not posted"))).await;
+    tick_for(&mut h, 1500).await;
+    let log = h.core.log.recent().join("
+");
+    assert!(!log.contains("upstream-retry scheduled") && !log.contains("upstream-retry resent"), "{log}");
+    assert!(!h.work.path().join("retry-pending.json").exists());
+    assert!(room_bodies(&h).is_empty(), "不貼過渡說明、也不貼失敗說明：{:?}", room_bodies(&h));
+}
