@@ -359,7 +359,8 @@ pub(crate) fn refresh_verdict(code: &str, why: &str) -> RefreshVerdict {
     match code {
         "refresh_token_already_used" => RefreshVerdict::Reused,
         "invalid_grant" if w.contains("already used") => RefreshVerdict::Reused,
-        "refresh_token_not_found" | "session_not_found" | "session_expired" | "invalid_grant" => RefreshVerdict::Definitive,
+        // 帳號被停用、被刪除（Supabase 的 user_banned、user_not_found）：登入不可能再恢復
+        "refresh_token_not_found" | "session_not_found" | "session_expired" | "invalid_grant" | "user_banned" | "user_not_found" => RefreshVerdict::Definitive,
         _ => RefreshVerdict::Doubtful,
     }
 }
@@ -369,11 +370,41 @@ const DOUBTFUL_LIMIT: u32 = 5;
 /// 新憑證存檔最多試幾次
 const SAVE_TRIES: u32 = 3;
 
-/// 存檔，失敗就重試（間隔很短）並記錄；回最後有沒有存成功。記錄只有次數與儲存層回的固定說明
-async fn save_with_retry(store: &Arc<dyn TokenStore>, l: &StoredLogin, note: &Option<Arc<dyn Fn(&str) + Send + Sync>>) -> bool {
+/// 登入的世代閘：登入、登出都會換一代（並與寫檔互斥）。背景換憑證回來要寫檔時，若世代已經不是開始換的那一代，
+/// 代表中間有人重新登入或登出了，這把換出來的憑證屬於舊的登入，不能寫回去蓋掉新登入（#1764 B 審查）
+struct Gate {
+    lock: Mutex<()>,
+    epoch: std::sync::atomic::AtomicU64,
+}
+
+impl Gate {
+    fn new() -> Self {
+        Self { lock: Mutex::new(()), epoch: std::sync::atomic::AtomicU64::new(0) }
+    }
+    fn epoch(&self) -> u64 {
+        self.epoch.load(Ordering::SeqCst)
+    }
+    fn guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lock.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// 存檔，失敗就重試（間隔很短）並記錄；回最後有沒有存成功。記錄只有次數與儲存層回的固定說明。
+/// 每次寫之前在閘裡確認世代沒變；變了就不寫（回 false）
+async fn save_with_retry(store: &Arc<dyn TokenStore>, l: &StoredLogin, note: &Option<Arc<dyn Fn(&str) + Send + Sync>>, gate: &Gate, epoch: u64) -> bool {
     let mut last = String::new();
     for i in 0..SAVE_TRIES {
-        match store.save(l) {
+        let res = {
+            let _g = gate.guard();
+            if gate.epoch() != epoch {
+                if let Some(n) = note {
+                    n("換憑證期間登入已變更，這把換到的憑證不存檔");
+                }
+                return false;
+            }
+            store.save(l)
+        };
+        match res {
             Ok(()) => {
                 if i > 0 {
                     if let Some(n) = note {
@@ -704,6 +735,8 @@ pub struct AuthState {
     doubtful_streak: std::sync::atomic::AtomicU32,
     /// 換到了新憑證但存檔失敗：留在這裡，之後每次取憑證都再試著存；後台已作廢舊的，丟掉就只能重新登入
     pending_save: Mutex<Option<StoredLogin>>,
+    /// 登入世代閘（見 Gate）
+    gate: Arc<Gate>,
 }
 
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -722,7 +755,7 @@ impl Drop for BusyGuard<'_> {
 
 impl AuthState {
     pub fn new(store: Box<dyn TokenStore>) -> Self {
-        Self { store: Arc::from(store), mem: Mutex::new(None), refresh_task: tokio::sync::Mutex::new(None), retry_after_ms: std::sync::atomic::AtomicI64::new(0), retry_wait_ms: if cfg!(test) { 0 } else { RETRY_WAIT_MS }, cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None, on_note: None, on_trouble: None, doubtful_streak: std::sync::atomic::AtomicU32::new(0), pending_save: Mutex::new(None) }
+        Self { store: Arc::from(store), mem: Mutex::new(None), refresh_task: tokio::sync::Mutex::new(None), retry_after_ms: std::sync::atomic::AtomicI64::new(0), retry_wait_ms: if cfg!(test) { 0 } else { RETRY_WAIT_MS }, cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None, on_note: None, on_trouble: None, doubtful_streak: std::sync::atomic::AtomicU32::new(0), pending_save: Mutex::new(None), gate: Arc::new(Gate::new()) }
     }
 
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
@@ -765,6 +798,8 @@ impl AuthState {
 
     /// 之前存檔失敗的新憑證，現在再試著存一次（成功就不用再留）
     fn flush_pending(&self) {
+        // 在閘裡重讀：期間若重新登入或登出，pending 已被清掉，就不能再寫
+        let _g = self.gate.guard();
         if let Some(l) = self.pending() {
             if self.store.save(&l).is_ok() {
                 self.set_pending(None);
@@ -776,18 +811,22 @@ impl AuthState {
     /// 換到的新憑證收下：放進記憶體（存檔失敗也不丟）；沒存成功的再重試存檔，還是不行就留著之後再存
     async fn adopt_session(&self, s: Session, saved: bool) {
         self.retry_after_ms.store(0, Ordering::SeqCst);
+        let epoch = self.gate.epoch();
         let l = StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() };
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(s);
         }
-        if saved || save_with_retry(&self.store, &l, &self.on_note).await {
-            self.set_pending(None);
-        } else {
-            self.set_pending(Some(l));
+        let ok = saved || save_with_retry(&self.store, &l, &self.on_note, &self.gate, epoch).await;
+        let _g = self.gate.guard();
+        if self.gate.epoch() != epoch {
+            return; // 收下的途中登入變了：什麼都不留
         }
+        self.set_pending(if ok { None } else { Some(l) });
     }
 
     fn set_session(&self, s: Session) -> Result<(), String> {
+        let _g = self.gate.guard();
+        self.gate.epoch.fetch_add(1, Ordering::SeqCst); // 重新登入：換到一半的舊憑證不能再寫檔
         self.set_pending(None);
         self.retry_after_ms.store(0, Ordering::SeqCst);
         self.store.save(&StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() })?;
@@ -799,6 +838,8 @@ impl AuthState {
 
     /// 登出：清記憶體與存檔（只清登入，不碰節點金鑰）
     pub fn sign_out(&self) -> Result<(), String> {
+        let _g = self.gate.guard();
+        self.gate.epoch.fetch_add(1, Ordering::SeqCst);
         self.set_pending(None);
         if let Ok(mut g) = self.mem.lock() {
             *g = None;
@@ -904,6 +945,7 @@ impl AuthState {
     /// 在背景換憑證：新憑證一拿到就存檔，呼叫端走掉或程式接著結束都不會弄丟
     fn spawn_refresh(&self, client: &reqwest::Client, auth_base: &str, anon: &str, stored: StoredLogin, from_pending: bool) -> RefreshTask {
         let (client, auth_base, anon, store, note) = (client.clone(), auth_base.to_string(), anon.to_string(), self.store.clone(), self.on_note.clone());
+        let (gate, epoch) = (self.gate.clone(), self.gate.epoch());
         tokio::spawn(async move {
             let used = stored.refresh_token;
             let mut res = refresh(&client, &auth_base, &anon, &used).await;
@@ -915,7 +957,7 @@ impl AuthState {
                 // 登入狀態已經變了（登出、重新登入）就不蓋。存檔失敗會重試並記錄；還是失敗時新憑證仍由呼叫端收進記憶體，不丟（#1764 B）。
                 // 換的若是存檔失敗而留在記憶體的那把，存檔裡本來就不是它，不能拿「存檔裡是它」當條件
                 if from_pending || matches!(store.load(), Ok(Some(l)) if l.refresh_token == used) {
-                    saved = save_with_retry(&store, &StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() }, &note).await;
+                    saved = save_with_retry(&store, &StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() }, &note, &gate, epoch).await;
                 }
             }
             (used, res, saved)
@@ -1583,7 +1625,7 @@ mod tests {
 
     #[test]
     fn 錯誤代碼對照_只有明確的才算失效() {
-        for c in ["refresh_token_not_found", "session_not_found", "session_expired", "invalid_grant"] {
+        for c in ["refresh_token_not_found", "session_not_found", "session_expired", "invalid_grant", "user_banned", "user_not_found"] {
             assert_eq!(refresh_verdict(c, ""), RefreshVerdict::Definitive, "{c}");
         }
         assert_eq!(refresh_verdict("refresh_token_already_used", ""), RefreshVerdict::Reused);
@@ -1599,6 +1641,8 @@ mod tests {
             r#"{"error_code":"refresh_token_not_found"}"#,
             r#"{"error_code":"session_not_found"}"#,
             r#"{"error_code":"session_expired"}"#,
+            r#"{"error_code":"user_banned"}"#,
+            r#"{"error_code":"user_not_found"}"#,
             r#"{"error":"invalid_grant","error_description":"Invalid Refresh Token: Refresh Token Not Found"}"#,
         ] {
             let a = signed_in_with("RT");
@@ -1781,5 +1825,43 @@ mod tests {
         let end = src[at..].find("Err(AuthFail::Transient").unwrap();
         let body = &src[at..at + end];
         assert!(!body.contains("refresh_token") && !body.contains("access_token"), "不確定錯誤的記錄只能有狀態碼與錯誤代碼");
+    }
+
+    #[tokio::test]
+    async fn 帳號停用或刪除的四開頭_即使是四零三與四零四也清掉登入() {
+        for (status, body) in [("403 Forbidden", r#"{"error_code":"user_banned","msg":"User is banned"}"#), ("404 Not Found", r#"{"error_code":"user_not_found"}"#)] {
+            let a = signed_in_with("RT");
+            let (p, h) = fake_seq(vec![(0, status, body)]);
+            let e = a.access_token(&reqwest::Client::new(), &base(p), "A").await.unwrap_err();
+            let _ = h.join();
+            assert_eq!(e, ERR_LOGIN_EXPIRED, "{status}");
+            assert!(!a.status().signed_in, "{status}：帳號已停用或刪除，登入不可能恢復");
+        }
+    }
+
+    #[tokio::test]
+    async fn 存檔曾失敗_換憑證進行中重新登入_舊的換完不能蓋掉新登入() {
+        let (a, inner) = flaky_with("RT1", -1);
+        // 第一次換成功但存檔失敗：RT2 留在記憶體；第二次（慢慢回）是用 RT2 換 RT3
+        let (p, h) = fake_seq(vec![(0, "200 OK", RENEWED), (250, "200 OK", RENEWED3)]);
+        let c = reqwest::Client::new();
+        assert_eq!(a.access_token(&c, &base(p), "A").await.unwrap(), "AT2");
+        assert_eq!(a.pending().unwrap().refresh_token, "RT2");
+        if let Ok(mut g) = a.mem.lock() {
+            if let Some(s) = g.as_mut() {
+                s.expires_at_ms = 0;
+            }
+        }
+        inner.fail.store(0, Ordering::SeqCst); // 磁碟恢復
+        give_up_early(&a, p).await; // 換憑證開始（用的是 pending 的 RT2），伺服器還沒回
+        a.set_session(sess("NEWLOGIN", now_ms() + 3_600_000)).unwrap(); // 這時使用者重新登入
+        h.join().unwrap();
+        // 背景工作換完、準備寫檔
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(rt_in(&inner), "NEWLOGIN", "舊登入換出來的 RT3 不能蓋掉剛登入的");
+        assert!(a.pending().is_none(), "舊的 pending 也要作廢");
+        assert!(a.status().signed_in);
     }
 }

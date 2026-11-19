@@ -57,6 +57,22 @@ test('觸發三：群組列表回報登入已失效、或後台回 401 就立刻
   assert.equal(looksLikeLoginLost('HTTP 401'), true)
 })
 
+test('登入有問題但登入檔還在：例行檢查不能收起提示，成功換到憑證才解除（不閃）', async () => {
+  const { w } = mk({ signedIn: true })   // 狀態一直說已登入（連續不確定的錯誤，不清登入檔）
+  await w.start()
+  assert.equal(w.st.show, false)
+  await w.noteRooms({ rooms: [], signed: false, reason: 'login_expired' })
+  assert.equal(w.st.show, true)
+  for (let i = 0; i < 3; i++) assert.equal(await w.refresh(), true, '每分鐘的例行檢查不能把提示收起來')
+  w.dismiss()
+  assert.equal(await w.refresh(), false, '按了知道了就先不再提')
+  assert.equal(await w.refresh(), false, '例行檢查也不能把按過的又叫出來')
+  await w.noteRooms({ rooms: [], signed: true })   // 成功換到憑證
+  assert.equal(await w.refresh(), false)
+  await w.noteRooms({ rooms: [], signed: false, reason: 'login_expired' })
+  assert.equal(w.st.show, true, '之後再出問題要能再提醒')
+})
+
 test('回到前景要再查一次（手機不能只在開 App 時查）', async () => {
   const { w, cur } = mk({ signedIn: true })
   await w.start()
