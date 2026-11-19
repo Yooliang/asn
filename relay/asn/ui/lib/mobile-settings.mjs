@@ -35,7 +35,7 @@ export function mobileCatSummary(key, s = {}) {
       return deviceSummary(s.devices)
     case 'accounts': {
       const n = Number.isInteger(s.accountCount) ? s.accountCount : 0
-      return n ? `${n} 個帳號` : '各家 AI 的帳號與額度'
+      return n ? catSummary('accounts', { accountCount: n }) : '各家 AI 的帳號與額度'
     }
     case 'cloud':
       return catSummary('cloud')

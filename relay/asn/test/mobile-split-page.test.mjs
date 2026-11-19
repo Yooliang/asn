@@ -20,7 +20,7 @@ test('設定清單：「設備」「帳號」兩列，各帶預設分頁進同�
   assert.equal(normalizePage({ kind: 'setting', cat: 'accounts' }), null)
   assert.deepEqual(normalizePage({ kind: 'acct', node: '' }), acctPage(''))
   const rows = mobileSettingRows({ devices: [{ online: true }, { online: false }], accountCount: 4 })
-  assert.deepEqual(rows.filter(r => ['devices', 'accounts'].includes(r.key)).map(r => [r.title, r.summary]), [['設備', '2 台設備，1 台在線'], ['帳號', '4 個帳號']])
+  assert.deepEqual(rows.filter(r => ['devices', 'accounts'].includes(r.key)).map(r => [r.title, r.summary]), [['設備', '2 台設備，1 台在線'], ['帳號', '4 個 Claude 帳號']])
   assert.equal(mobileCatSummary('accounts', {}), '各家 AI 的帳號與額度')
   assert.ok(!rows.some(r => r.title === '設備與帳號'))
 })
