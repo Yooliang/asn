@@ -26,7 +26,7 @@ const MEMBERS = [
 const friends = buildFriends(MEMBERS, { selfNode: 'P', selfName: 'Oppo 手機' })
 const ASN = { P: MEMBERS[0].asn, Q: MEMBERS[1].asn }
 
-test('讀名字：名單成員的名字不靠夥伴列（手機沒有夥伴也有名字）', () => {
+test('#1803 讀名字：名單成員的名字不靠夥伴列（手機沒有夥伴也有名字）', () => {
   assert.deepEqual(nodeNamesOf(MEMBERS), { P: 'Oppo 手機', Q: '辦公室' })
   assert.deepEqual(nodeNamesOf([{ id: 'x', name: '  ' }, { id: 5, name: 'a' }, null, { id: 'y' }]), {})
   assert.equal(friends.some(f => f.node === 'P'), false, '手機節點底下沒有夥伴列（這就是舊程式讀不到名字的原因）')
@@ -37,7 +37,7 @@ test('讀名字：名單成員的名字不靠夥伴列（手機沒有夥伴也�
   assert.equal(deviceNameOf('Z', { fallback: '備用名' }), '備用名')
 })
 
-test('手機設備頁：本機那一列寫真名，同一台只有一列，沒有「未命名設備」', () => {
+test('#1803 手機設備頁：本機那一列寫真名，同一台只有一列，沒有「未命名設備」', () => {
   const rows = acctDeviceTree({ friends, nodeNames: nodeNamesOf(MEMBERS), nodeOrder: ['P', 'Q'], selfNode: 'P', launchers: {}, machines: {} })
   assert.deepEqual(rows.map(r => r.key), ['P', 'Q'], '每台設備只列一次')
   assert.equal(rows[0].label, 'Oppo 手機')
@@ -49,12 +49,12 @@ test('手機設備頁：本機那一列寫真名，同一台只有一列，沒�
   assert.equal(old[0].label, '這支手機')
 })
 
-test('電腦設備頁：本機沒有夥伴時也寫真名；用的是和手機同一個讀法', () => {
+test('#1803 電腦設備頁：本機沒有夥伴時也寫真名；用的是和手機同一個讀法', () => {
   const rows = buildDeviceTree({ friends: friends.filter(f => f.node !== 'Q'), nodeNames: { P: '我的電腦', Q: '辦公室' }, nodeOrder: ['P'], selfNode: 'P' })
   assert.equal(rows[0].label, '我的電腦')
 })
 
-test('雲端節點（#1707）：夥伴沒帶 device 時，名字取自名單成員的名字，不寫「未命名設備」', () => {
+test('#1803 雲端節點（#1707）：夥伴沒帶 device 時，名字取自名單成員的名字，不寫「未命名設備」', () => {
   const cloud = [{ id: 'c1', node: 'A', agent: '麗麗', nick: '麗麗', status: 'idle', engine: 'aegis' }]   // 存檔還原的夥伴列沒有 device
   const rows = buildDeviceTree({ friends: cloud, nodeNames: { A: '牧陽 Aegis' }, nodeOrder: ['A'], selfNode: 'P' })
   assert.equal(rows.find(r => r.key === 'A').label, '牧陽 Aegis')
@@ -62,7 +62,7 @@ test('雲端節點（#1707）：夥伴沒帶 device 時，名字取自名單成�
   assert.equal(none.find(r => r.key === 'A').label, '未命名設備', '沒有 nodeNames 時舊行為不變')
 })
 
-test('其餘讀名字的地方也吃 nodeNames：啟動器清單、頁籤', () => {
+test('#1803 其餘讀名字的地方也吃 nodeNames：啟動器清單、頁籤', () => {
   const rows = launchDeviceRows(cloudless(), { selfNode: 'P', nodeNames: { P: 'Oppo 手機', Q: '辦公室' }, nodeOrder: ['P', 'Q'] })
   assert.deepEqual(rows.map(r => r.label), ['Oppo 手機', '辦公室'])
   const tabs = pageTabs(friends, 'device', { selfNode: 'P', selfName: '', nodeNames: nodeNamesOf(MEMBERS), nodeOrder: ['P', 'Q'] })
@@ -70,7 +70,7 @@ test('其餘讀名字的地方也吃 nodeNames：啟動器清單、頁籤', () =
 })
 function cloudless() { return friends.map(f => ({ ...f, device: '' })) }
 
-test('守門：電腦版與手機版讀設備名字都走 deviceNameOf，不准各寫一份借夥伴列的寫法', () => {
+test('#1803 守門：電腦版與手機版讀設備名字都走 deviceNameOf，不准各寫一份借夥伴列的寫法', () => {
   for (const f of ['ui/lib/device-tree.mjs', 'ui/lib/partner-launch-ui.mjs', 'ui/lib/dims.mjs', 'ui/lib/tabs.mjs', 'ui/lib/mobile-launch.mjs', 'ui/lib/account-roster.mjs', 'ui/list.js', 'ui/m.js']) {
     assert.match(read(f), /\bdeviceNameOf\b/, `${f} 要用 deviceNameOf 讀設備名`)
   }
@@ -85,7 +85,7 @@ test('守門：電腦版與手機版讀設備名字都走 deviceNameOf，不准�
   for (const f of ['ui/list.js', 'ui/m.js']) assert.match(read(f), /nodeNames\.value = s\.nodeNames/, `${f} 同步時要收 nodeNames`)
 })
 
-test('守門：全 repo 只有設備頁一個改名入口（ui 沒有 set_window_name、個人頁沒有可編輯的設備名欄位）', () => {
+test('#1803 守門：全 repo 只有設備頁一個改名入口（ui 沒有 set_window_name、個人頁沒有可編輯的設備名欄位）', () => {
   const files = [...uiFiles('ui'), ...fs.readdirSync(path.join(root, 'scripts')).map(f => path.join('scripts', f))].filter(f => /\.(m?js|html)$/.test(f))
   for (const f of files) assert.doesNotMatch(read(f), /set_window_name/, `${f} 不能再叫 set_window_name`)
   const html = read('ui/m.html'), js = read('ui/m.js')
@@ -101,7 +101,7 @@ test('守門：全 repo 只有設備頁一個改名入口（ui 沒有 set_window
   }
 })
 
-test('守門（Rust 原始碼）：沒有 set_window_name 命令；兩個改名命令都讓本機視窗名跟上；啟動對齊命令兩邊都登記', () => {
+test('#1803 守門（Rust 原始碼）：沒有 set_window_name 命令；兩個改名命令都讓本機視窗名跟上；啟動對齊命令兩邊都登記', () => {
   const lib = read('src-tauri/src/lib.rs'), android = read('src-tauri/src/android.rs'), names = read('src-tauri/src/names.rs')
   assert.doesNotMatch(lib, /fn set_window_name\b/)
   assert.doesNotMatch(lib, /\bset_window_name,/)
@@ -112,7 +112,7 @@ test('守門（Rust 原始碼）：沒有 set_window_name 命令；兩個改名�
   assert.match(names, /pub fn align_with_backend/)
 })
 
-test('改名命令：手機走 android_known_rename、電腦走 device_rename；失敗丟中文 Error', async () => {
+test('#1803 改名命令：手機走 android_known_rename、電腦走 device_rename；失敗丟中文 Error', async () => {
   assert.equal(renameCommandOf(true), 'android_known_rename')
   assert.equal(renameCommandOf(false), 'device_rename')
   const calls = []
@@ -123,7 +123,7 @@ test('改名命令：手機走 android_known_rename、電腦走 device_rename；
   await assert.rejects(renameDevice(async () => { throw new Error('') }, { node: 'P', name: 'x' }), /改名沒有成功/)
 })
 
-test('改的是這台自己：Rust 說本機視窗名換了，畫面就地更新（info、核心、我的暱稱）；別台不動', () => {
+test('#1803 改的是這台自己：Rust 說本機視窗名換了，畫面就地更新（info、核心、我的暱稱）；別台不動', () => {
   const info = { window_name: 'P-ASN', old_names: [] }, me = { nick: 'P-ASN' }, seen = []
   const core = { setWindowName: n => seen.push(n) }
   assert.equal(followSelfRename({ info, core, me }, { ok: true, name: '別台', changed: true }), false)
@@ -133,7 +133,7 @@ test('改的是這台自己：Rust 說本機視窗名換了，畫面就地更新
   assert.deepEqual(info.old_names, ['P-ASN'], '舊名要留著，改名前寄來的回信還收得到')
 })
 
-test('後台名字蓋過本機（kept）時不准靜默：啟動對齊換掉本機名字會明說，其餘不打擾', async () => {
+test('#1803 後台名字蓋過本機（kept）時不准靜默：啟動對齊換掉本機名字會明說，其餘不打擾', async () => {
   const mk = () => ({ info: { window_name: 'P-ASN', old_names: [] }, me: { nick: 'P-ASN' }, core: { setWindowName() {} } })
   const notes = []
   const c1 = mk()
