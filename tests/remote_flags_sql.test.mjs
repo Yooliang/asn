@@ -12,7 +12,7 @@ const mig = rd(fs.readFileSync(new URL(`${NAME}.sql`, DIR), 'utf8'))
 const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${NAME}_down.sql`, import.meta.url), 'utf8'))
 const SIG = 'public.asn_relay_set_remote_flags(text, boolean, boolean)'
 
-test('靜態：只授權 service_role、search_path 空、只加新欄位與一支新函式；排在最新的 migration 之後；有回復檔', () => {
+test('靜態：只授權 service_role、search_path 空、只加新欄位與一支新函式；排在 web_sessions 之後；有回復檔', () => {
   const body = mig.replace(/^--.*$/gm, '')
   assert.ok(body.includes(`revoke all on function ${SIG} from public, anon, authenticated;`))
   assert.ok(body.includes(`grant execute on function ${SIG} to service_role;`))
@@ -21,7 +21,7 @@ test('靜態：只授權 service_role、search_path 空、只加新欄位與一�
   assert.doesNotMatch(body, /drop |asn_relay_list/i, '不動名單函式、不刪東西')
   assert.equal((body.match(/add column if not exists \w+ (boolean|timestamptz);/g) ?? []).length, 3, '三個欄位都可為 null、沒有預設值')
   const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
-  assert.equal(files.indexOf(`${NAME}.sql`), files.length - 1)
+  assert.ok(files.indexOf(`${NAME}.sql`) > files.indexOf('20261119200000_web_sessions.sql'), '排在 web_sessions 之後（不要求是最新的一支）')
   assert.ok(down.includes(`drop function if exists ${SIG};`))
 })
 

@@ -1,6 +1,6 @@
 // 夥伴卡在要人處理的框上太久（todo-next-162）：驗證收發室送來的內容。
 // 節點一律取自金鑰；這裡只收視窗名、種類、選擇框的問題和選項。
-const KINDS = new Set(["permission", "input", "other"]);
+const KINDS = new Set(["permission", "input", "other", "login"]);
 const WINDOW_MAX = 60;
 const DETAIL_MAX = 600;
 // deno-lint-ignore no-control-regex
