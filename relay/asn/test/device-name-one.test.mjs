@@ -91,7 +91,8 @@ test('#1803 守門：全 repo 只有設備頁一個改名入口（ui 沒有 set_
   const html = read('ui/m.html'), js = read('ui/m.js')
   assert.doesNotMatch(html, /v-model="me\.nick"/, '手機個人頁不能再有設備名稱輸入欄')
   assert.doesNotMatch(js, /commitNick/, '手機個人頁的改名函式要拿掉')
-  assert.match(html, /到設備頁改名/, '個人頁改成一行連結帶去設備頁')
+  assert.doesNotMatch(html, /到設備頁改名|goDeviceRename|selfDevName/, '個人頁沒有設備名稱那一列，也沒有帶去設備頁的連結（#1855）')
+  assert.doesNotMatch(js, /goDeviceRename|selfDevName|renameAfterOpen/, '手機個人頁的設備名稱函式要拿掉（#1855）')
   assert.ok([...html.matchAll(/v-model="dn\.text"/g)].length >= 1 && !/v-model="(me\.nick|nickDraft)"/.test(html), '手機設備名輸入欄只有設備頁的改名表單（共用 dn 這一份狀態）')
   // 叫改名命令的地方只有 device-rename.mjs 一個檔案
   for (const f of files) {
@@ -182,7 +183,13 @@ test('#1803 守門：電腦版左上角的設備名只顯示不能改（list.htm
     for (const mm of s.matchAll(/v-model="([^"]*)"[^>]*(?:aria-label|class)="[^"]*(?:設備名|設備的名字|nick-input)/g)) assert.fail(`${f} 還有可編輯的設備名欄位：${mm[1]}`)
   }
   assert.doesNotMatch(m, /'這支手機'/, '手機個人頁不能寫死第二份「這支手機」文案，要用共用常數')
-  assert.match(m, /\{\{ selfDevName \}\}/)
+  assert.doesNotMatch(m, /selfDevName/, '手機個人頁不再顯示設備名稱（#1855）')
+  // 手機與電腦的「個人」頁都不准出現設備名稱的欄位或按鈕：文字標籤只准出現在設備頁（手機 .m-dv 區、電腦設定「設備」頁）與首次引導
+  const personalM = m.slice(m.indexOf('我的名字'), m.indexOf('m-logout'))
+  assert.ok(personalM.length > 200, '找得到手機個人頁那一段')
+  assert.doesNotMatch(personalM, /設備名稱|設備的名字|這台設備的名稱/, '手機個人頁不能有設備名稱')
+  // 電腦版沒有「個人」設定頁（帳號名稱在左上角與登入面板）；也不能有「到設備頁改名」連結或第二處設備名稱說明
+  for (const f of ['ui/list.html', 'ui/list.js', 'ui/lib/settings-panel.mjs']) assert.doesNotMatch(read(f), /到設備頁改名|設備名稱只在設備頁|goDeviceRename|selfDevName/, `${f} 不能有第二處設備名稱入口或說明（#1855）`)
 })
 
 test('#1803 名字被規則擋下不能靜默：後台已改、本機寄信名字沒換成時，畫面說原因並寫 log；對齊換不成同樣要說', async () => {

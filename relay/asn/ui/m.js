@@ -865,7 +865,6 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
-    const selfDevName = computed(() => (selfDev.value && selfDev.value.label !== KNOWN_TEXT.thisPhone ? selfDev.value.label : me.nick))   // 設備頁的名字沒讀到（還是標籤）時，個人頁退回視窗名
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
     const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
@@ -1567,9 +1566,6 @@ const app = createApp({
     }
 
     // 「我」：大頭貼（裁成正方形縮成 96×96 上傳）。設備名稱不在這裡改（#1803）：只有設備頁一個改名入口，這裡一行連結帶過去
-    const renameAfterOpen = ref(false)
-    const goDeviceRename = () => { renameAfterOpen.value = true; openSetting('devices') }
-    watch([renameAfterOpen, () => fourthPage.value?.kind, selfDev], () => { if (renameAfterOpen.value && fourthPage.value?.kind === 'acct' && selfDev.value) { renameAfterOpen.value = false; devRenameStart(selfDev.value) } })
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
     const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
@@ -1637,7 +1633,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
@@ -1646,7 +1642,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, goDeviceRename, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
