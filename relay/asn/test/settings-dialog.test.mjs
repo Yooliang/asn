@@ -186,7 +186,7 @@ test('守門：設定不再用彈出對話框，點分類列表的一項就開�
   assert.deepEqual(uses, ['termClose.open', 'modelDlg.open', 'deviceAcct.node', 'accounts.state.incoming.length', 'accounts.state.done.length', 'permissionDlg.open', 'launchNotice.open'])   // 終端分頁「管理 → 關閉視窗」的確認框（#910）、切換模型的確認框、右鍵切換某台的 Claude 帳號、別台要求切換帳號的確認框、免確認切好後的通知框（可還原）、在這台開終端（#331）、開新夥伴失敗提示
   assert.match(js, /app\.component\('asn-dialog', AsnDialog\)/)
   // 整合模式右邊的設定窗用同一個元件
-  assert.ok(html.includes('<settings-panel :st="settingsState"') && js.includes("app.component('settings-panel', SettingsPanel)"))
+  assert.ok(html.includes('<settings-panel :title="panelTitle(k, ui.panel[k])" :st="settingsState"') && js.includes("app.component('settings-panel', SettingsPanel)"))
   assert.ok(read('panel.js').includes("app.component('settings-panel', SettingsPanel)"), '分離視窗用同一個元件')
 })
 

@@ -8,7 +8,7 @@ import { loginIncomplete } from './claude-accounts.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
-import { buildDeviceTree, SELF_LABEL } from './device-tree.mjs'
+import { buildDeviceTree } from './device-tree.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 
 export const ACCT_TEXT = {
@@ -29,7 +29,6 @@ export const ACCT_TEXT = {
 // 這一頁的標題跟著分頁變（#650）：設備或帳號，不再寫「設備與帳號」。在看某台設備的細部時一律是「設備」
 export const ACCT_TITLES = Object.freeze({ devices: '設備', accounts: '帳號' })
 export const acctPageTitle = tab => ACCT_TITLES[tab === 'accounts' ? 'accounts' : 'devices']
-const PHONE_LABEL = '這支手機'
 
 // reports：節點 → { loading, asnOnline, reportedAt, msg, list:[{vendor,email,plan,current}] }（手機自己存的形狀）
 export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnline: r.asnOnline === true, reportedAt: r.reportedAt || '', accounts: Array.isArray(r.list) ? r.list : [] } : undefined)
@@ -37,11 +36,10 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 
 // roster：後台帳號列表（android_acct_roster，#374）；跟電腦版同一套 account-roster.mjs，讀不到（null）就退回各台自己回報的
-export function acctDeviceTree({ friends = [], nodeNames = null, nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, machines = launchers, roster = null, now = Date.now(), cloudNodes = [] } = {}) {
+export function acctDeviceTree({ friends = [], nodeNames = null, nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, machines = launchers, roster = null, now = Date.now(), cloudNodes = [], nodeFacts = null } = {}) {
   const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
-  return buildDeviceTree({ friends, nodeNames, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, machines, reports: rep, roster, selfIsPhone: true, now, cloudNodes }).map(d => ({
+  return buildDeviceTree({ friends, nodeNames, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, machines, reports: rep, roster, selfIsPhone: true, now, cloudNodes, nodeFacts }).map(d => ({
     ...d,
-    label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
     // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示
     vendors: d.kind === '手機' ? d.vendors.map(v => ({ ...v, switchable: false, switchHint: '' })) : d.vendors,
   }))
@@ -63,12 +61,12 @@ export function acctButtonDevices(groups, selfNode) {
 
 // 「我的帳號」整區（手機設備列表最上面）：跟電腦版同一份 rosterView；手機自己不回報帳號，本機標「這支手機」
 export const acctRosterView = (roster, { friends = [], nodeNames = null, selfNode = '', now = Date.now() } = {}) =>
-  rosterView(roster, { nodeLabel: nodeLabelOf(friends, { selfNode, selfLabel: PHONE_LABEL, nodeNames }), now })
+  rosterView(roster, { nodeLabel: nodeLabelOf(friends, { nodeNames }), now })
 
 // remote：{ loading, asnOnline, reportedAt, msg, list:[{email,plan,current}] }；picked：使用者點選的 email
 // roster：後台帳號列表（#374）；有的話每列帶額度（quotaText／quotaMeta），沒有就不寫額度
 export function acctSheetView(remote, picked = '', now = Date.now(), { roster = null, friends = [], nodeNames = null, selfNode = '' } = {}) {
-  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: PHONE_LABEL, nodeNames })
+  const nodeLabel = nodeLabelOf(friends, { nodeNames })
   const quotaOf = email => rosterQuotaFor(roster, 'claude', email, { nodeLabel, now })
   const list = Array.isArray(remote?.list) ? remote.list : []
   const cur = list.find(a => a.current)

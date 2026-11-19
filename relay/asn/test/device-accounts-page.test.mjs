@@ -61,6 +61,7 @@ test('設備樹：廠商帶出各自的帳號清單（email、方案、使用中
 // ---------- 畫面 ----------
 const ACCT = { list: [{ email: 'a@b.c', plan: 'Max', current: true, saved: true }, { email: 'p@b.c', plan: '', current: false, saved: true }], current: { email: 'a@b.c', plan: 'Max', current: true, saved: true }, codexLine: 'x@openai.test · plus', busy: false, confirmDel: '', msg: '', trustOwn: false, autoAdd: true, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }
 const vend = (key, label, accounts, o = {}) => ({ key, label, account: accounts.length ? '有帳號' : '未回報', reported: accounts.length > 0, extra: '', accounts, switchable: false, switchHint: '', ...o })
+import { withIdentity } from './helpers/with-identity.mjs'
 const devs = () => [
   { key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [
     vend('claude', 'Claude', ACCT.list), vend('codex', 'OpenAI（Codex）', [{ email: 'x@openai.test', plan: 'plus', current: true }]), vend('gemini', 'Gemini', [])] },
@@ -70,7 +71,7 @@ const devs = () => [
   { key: 'G', label: 'Grok 雲端', self: false, kind: '電腦', online: false, onlineText: '離線', reportedText: '', empty: '', vendors: [
     vend('claude', 'Claude', [{ email: 'g1@b.c', plan: '', current: true }, { email: 'g2@b.c', plan: '', current: false }], { switchable: false, switchHint: '對方電腦的 ASN 沒有在線，無法切換' })] },
   { key: 'E', label: '空設備', self: false, kind: '電腦', online: false, onlineText: '離線', reportedText: '', empty: '這台設備還沒有回報任何廠商', vendors: [] },
-]
+].map(withIdentity)
 const st = (over = {}) => ({ devices: devs(), accounts: { ...ACCT }, ...over })
 const render = async (props, state = st()) => {
   globalThis.Vue = Vue
@@ -104,7 +105,7 @@ test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一�
   const html = await render({ catKey: 'devices', dev: 'W', devView: 'acct' })
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(!html.includes('class="dv-tag kind">電腦<'), '電腦類型標籤多餘，不顯示'); assert.match(html, /class="dv-tag on">在線</)
-  assert.ok((await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('3 分鐘前'), '回報時間搬到詳情頁')
+  assert.ok(!(await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('最後回報'), '帳號的事（回報時間）不放設備辨認區，只放帳號頁（#1879）')
   const cards = [...html.matchAll(/<li class="dv-vendor[^"]*"/g)]
   assert.equal(cards.length, 3)
   for (const k of ['claude', 'grok', 'pi']) assert.ok(html.includes(vendorIconSvg(k)), `${k} 圖示用 vendorIconSvg`)

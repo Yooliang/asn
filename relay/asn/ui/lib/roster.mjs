@@ -1,5 +1,6 @@
 // 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
-import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
+import { hueOf, initial } from './text.mjs'
+import { unnamedLabelOf } from './device-known.mjs'
 import { pctOf } from './context-usage.mjs'
 import { isLegacyNoticeName, isMergedAway, isNoticeFriend } from './notice.mjs'
 import { AWAITING_STATUS, awaitingName, isAwaitingEntry } from './awaiting.mjs'
@@ -158,13 +159,13 @@ export function mergeFriends(known, live, archivedKeys = new Set()) {
 
 // 依設備分組（跟收發室名單一樣一台機器一組）：自己這台排第一，其餘照設備名；組內線上／忙碌在前、離線在後。q＝搜尋字（已轉小寫）
 export function groupByDevice(friends, { selfNode, match = () => true } = {}) {
-  const groups = new Map()
+  const groups = new Map(), noName = new Set()
   for (const f of friends) {
     if (!match(f)) continue
     const key = f.node ?? ''
-    if (!groups.has(key)) groups.set(key, { key, label: f.device || UNNAMED_DEVICE, items: [] })
+    if (!groups.has(key)) { if (!f.device) noName.add(key); groups.set(key, { key, label: f.device || unnamedLabelOf(key, { friends: [f] }), items: [] }) }
     const g = groups.get(key)
-    if (f.device && g.label === UNNAMED_DEVICE) g.label = f.device
+    if (f.device && noName.has(key)) { g.label = f.device; noName.delete(key) }
     g.items.push(f)
   }
   const rank = s => (s === 'offline' ? 1 : 0)

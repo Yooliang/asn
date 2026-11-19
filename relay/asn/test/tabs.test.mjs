@@ -29,8 +29,8 @@ test('deviceTabs：本機第一、其餘照名單順序、名單消失但有紀�
   assert.equal(t.all[3].online, 0)
 })
 
-test('deviceTabs：本機沒有任何好友也有頁籤；標題用自己的視窗名，沒給就「未命名設備」，絕不顯示節點代號', () => {
-  assert.deepEqual(deviceTabs([], { selfNode: 'H', nodeOrder: [] }).all.map(x => [x.key, x.label, x.total]), [['H', '未命名設備', 0]])
+test('deviceTabs：本機沒有任何好友也有頁籤；標題用自己的視窗名，沒給就寫辨認線索（電腦（代號末 4 碼））', () => {
+  assert.deepEqual(deviceTabs([], { selfNode: 'H', nodeOrder: [] }).all.map(x => [x.key, x.label, x.total]), [['H', '電腦（H）', 0]])
   assert.deepEqual(deviceTabs([], { selfNode: 'H', selfName: 'H-ASN', nodeOrder: [] }).all.map(x => [x.key, x.label, x.total]), [['H', 'H-ASN', 0]])
 })
 

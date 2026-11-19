@@ -65,7 +65,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     info.scrollIntoView({ block: 'center' }); await sleep(150);
     { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
     let st = null;
-    for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.m-dv-state')].find(vis) || null; if (!st) await sleep(100) }
+    for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.dvid-note')].find(vis) || null; if (!st) await sleep(100) }
     if (!st || !st.textContent.includes('還沒收到這台的回報')) return { ok: false, why: '工作機的詳情裡看不到「還沒收到這台的回報」' };
     const box = R(st.closest('.m-dv-info') || st.parentElement);
     if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };

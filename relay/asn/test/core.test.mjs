@@ -237,7 +237,7 @@ test('存檔：舊好友重開後模型與設備名還在，pi 夥伴的廠商�
   await b.core.stop(); await b.relay.close()
 })
 
-test('存檔：舊格式（沒有模型與設備名）照常讀，顯示照舊退回 pi 圖示與未命名設備；壞值不帶進畫面', async () => {
+test('存檔：舊格式（沒有模型與設備名）照常讀，顯示照舊退回 pi 圖示與辨認線索；壞值不帶進畫面', async () => {
   const store = memStore({
     friends: [
       { id: 'W/W-pi', node: 'W', agent: 'W-pi', nick: 'W-pi', psm: '', engine: 'pi', lastAt: 1, known: true, onRoster: true },
@@ -257,7 +257,7 @@ test('存檔：舊格式（沒有模型與設備名）照常讀，顯示照舊�
   assert.equal(vendorBadgeHtml(w), vendorIconSvg('pi'))
   const x = friends.find(f => f.id === 'X/X-壞')
   assert.equal(x.model, undefined); assert.equal(x.device, undefined); assert.equal(x.kind, undefined)
-  assert.equal(groupByDevice(friends, { selfNode: 'T' }).find(g => g.key === 'W').label, '未命名設備')
+  assert.equal(groupByDevice(friends, { selfNode: 'T' }).find(g => g.key === 'W').label, '電腦（W）')
   await core.stop(); await relay.close()
 })
 

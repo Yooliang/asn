@@ -1,14 +1,11 @@
-import { displayDeviceName } from './device-known.mjs'
+import { displayDeviceName, unnamedLabelOf } from './device-known.mjs'
 // 設定頁「認得的電腦」（#597 別台看畫面，0.2.8 改版：不再手動配對）。判斷都在 Rust（device_id.rs），這裡只整理要顯示的東西。
 // 兩台第一次連線時各自記住對方的設備金鑰；之後金鑰換了就拒絕並通知本人。這裡只能看、只能「忘記」，不能新增。
 export const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ').slice(0, n)
 
-/** 沒有名字的電腦一律叫這個，旁邊照樣顯示完整指紋讓本人核對 */
-export const UNNAMED = '未命名的電腦'
 export const NAME_MAX = 40
 
 export const TEXT = {
-  unnamed: UNNAMED,
   title: '認得的電腦',
   lead: '別台電腦第一次連到這台（例如看畫面）時，這台會記住它的設備金鑰並通知你。之後它的金鑰換了，這台會拒絕連線並再通知你。',
   none: '還沒有認得的電腦。',
@@ -21,7 +18,7 @@ export const TEXT = {
   forgetConfirm: (label, fp) => {
     const name = String(label ?? '').trim()
     const g = String(fp ?? '').replace(/\s+/g, '').slice(0, 8).replace(/(.{4})(?=.)/, '$1 ')
-    return `忘記${name && name !== UNNAMED ? `「${name}」` : '這台設備'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
+    return `忘記${name ? `「${name}」` : '這台設備'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
   },
   firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',
@@ -59,7 +56,7 @@ export function normalizeView(raw) {
     peers: arr(raw?.peers).filter(p => typeof p?.node === 'string' && p.node).map(p => ({
       node: p.node,
       name: clean(p.name, NAME_MAX).trim(),   // 後台的設備名（可能是空的）
-      label: displayDeviceName(clean(p.name, NAME_MAX)) || UNNAMED,   // 畫面上顯示的（像指紋的名字當未命名）
+      label: displayDeviceName(clean(p.name, NAME_MAX)) || unnamedLabelOf(p.node),   // 畫面上顯示的：像指紋的名字、舊的「未命名的電腦」都當沒名字，改寫辨認線索（#1829）
       fingerprint: clean(p.fingerprint, 32),
       loginOk: p.login_ok === true,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
