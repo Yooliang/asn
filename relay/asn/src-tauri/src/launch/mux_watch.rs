@@ -23,8 +23,6 @@ pub const STATE_FILE: &str = "mux-resume.json";
 pub const LOST_KEEP_MS: u64 = 12 * 3_600_000;
 /// 狀態檔超過這麼久沒更新，就當監看沒在跑，不拿「還看得到的夥伴」當依據
 pub const STATE_FRESH_MS: u64 = 120_000;
-/// 使用者結束 ASN 時，最後一次看到 mux 活著在這段時間內才算「結束當下是健康的」（約兩輪半）
-pub const QUIT_FRESH_MS: u64 = 75_000;
 pub const CAUSE: &str = "共用的終端服務中斷了";
 /// 十分鐘內又中斷時，每位夥伴的失敗原因
 pub const COOLDOWN_REASON: &str = "終端服務十分鐘內又中斷了，這次沒有自動接回，請手動喚醒";
@@ -71,12 +69,9 @@ pub struct Watch {
     /// 確定自己結束的夥伴（名字, 記下的時間）。寄給它們的信馬上退回，不當成還沒接回
     #[serde(default)]
     exited: Vec<(String, u64)>,
-    /// 上一輪就看不到 mux（還沒下結論）。存進狀態檔：ASN 在兩輪之間重開，新的 ASN 才接得上（#1818）
-    #[serde(default)]
+    /// 上一輪就看不到 mux（還沒下結論）
+    #[serde(skip)]
     suspect: bool,
-    /// 最後一次親眼看到 mux 活著的時間。使用者結束 ASN 時，靠它判斷「結束當下監看有沒有在看著一個健康的 mux」（#1818）
-    #[serde(default)]
-    healthy_at: u64,
 }
 
 impl Watch {
@@ -112,14 +107,6 @@ impl Watch {
         }
     }
 
-    /// 使用者結束 ASN 時，要不要忘掉記著的 mux（純函式，#1818）。
-    /// 只有「剛剛還親眼看到它活著、而且沒在懷疑」才忘：這時 mux 之後掛掉是 ASN 關著期間的事，下次啟動不補報。
-    /// 監看已經一段時間沒結論（讀不到快照、或看到一半）就結束 ASN，就不能忘：那時 mux 很可能已經掛了，
-    /// 結束又立刻重開，把記著的 mux 刪掉，新的 ASN 就只看到「第一次見到的新 mux」，這次事故永遠沒人報
-    pub fn forget_on_quit(&self, now: u64) -> bool {
-        !self.suspect && self.healthy_at > 0 && now.saturating_sub(self.healthy_at) <= QUIT_FRESH_MS
-    }
-
     pub fn tick(&mut self, o: &Observed, now: u64) -> Option<Incident> {
         // 同名的又開起來了：不再算已結束。記太久的也拿掉
         self.exited.retain(|(n, at)| !o.partners.iter().any(|p| p == n) && now.saturating_sub(*at) <= LOST_KEEP_MS);
@@ -127,9 +114,6 @@ impl Watch {
         self.lost.retain(|n| !o.partners.iter().any(|p| p == n));
         if self.lost_at > 0 && now.saturating_sub(self.lost_at) > LOST_KEEP_MS {
             self.lost.clear();
-        }
-        if o.live.is_some() {
-            self.healthy_at = now;
         }
         let prev = self.seen.clone();
         // 這一輪看到的：mux 活著就記，裡面沒有夥伴也記（11-10 30家用：服務崩潰後一直沒有任何訊號）。
@@ -325,17 +309,9 @@ pub fn clear_notice(work_dir: &Path) {
 static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn note_user_quit(work_dir: &Path) {
-    note_user_quit_at(work_dir, crate::heartbeat::now_ms());
-}
-
-/// 同上，現在時刻由外面給（測試用）。結束當下監看沒在看著健康的 mux 時，狀態檔留著（#1818）
-pub fn note_user_quit_at(work_dir: &Path, now: u64) {
     QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(f) = state_file(work_dir) {
-        let keep = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<Watch>(&t).ok()).is_some_and(|w| !w.forget_on_quit(now));
-        if !keep {
-            let _ = std::fs::remove_file(f);
-        }
+        let _ = std::fs::remove_file(f);
     }
 }
 
@@ -1014,93 +990,15 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join(STATE_FILE);
         let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
+        w.tick(&obs(Some(M1), &["甲"]), 0);
         w.save(&f);
         assert!(f.exists());
-        note_user_quit_at(d.path(), 1_000 + TICK_MS);
+        note_user_quit(d.path());
         assert!(!f.exists());
         // 下次啟動：沒有記著的 mux，mux 不在也不算事故
         let mut w2 = Watch::load(&f, None);
         assert_eq!(w2.tick(&obs(None, &[]), TICK_MS), None);
         assert_eq!(w2.tick(&obs(None, &[]), 2 * TICK_MS), None);
-    }
-
-
-    /// #1818：30家用 11-18，終端服務崩潰後監看沒能在兩分鐘內下結論，ASN 就被結束再重開。
-    /// 舊的 note_user_quit 一律刪狀態檔，新的 ASN 只看到「第一次見到的新 mux」，沒有事故、沒有通知
-    #[test]
-    fn t1818_崩潰後監看沒結論就重開_狀態檔留著_新服務出現只報一次() {
-        let d = tempfile::tempdir().unwrap();
-        let f = d.path().join(STATE_FILE);
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000);
-        w.tick(&obs(Some(M1), &["甲", "乙"]), 1_000 + TICK_MS);
-        w.save(&f);
-        // 之後 mux 崩潰，監看讀不到快照（沒有任何一輪），119 秒後 ASN 被結束
-        note_user_quit_at(d.path(), 1_000 + TICK_MS + 119_000);
-        assert!(f.exists(), "最後看到健康已經超過 75 秒，不能刪掉記著的 mux");
-        // 新的 ASN：先看不到（服務還沒起），再看到新的 mux
-        let mut w2 = Watch::load(&f, None);
-        assert_eq!(w2.tick(&obs(None, &[]), 200_000), None);
-        let inc = w2.tick(&obs(Some(M2), &[]), 230_000).expect("舊的服務沒了、換成新的，要報");
-        assert_eq!(inc.partners, ["甲", "乙"]);
-        assert_eq!(w2.tick(&obs(Some(M2), &[]), 260_000), None, "同一次事故只報一次");
-        assert_eq!(w2.tick(&obs(Some(M2), &[]), 290_000), None);
-    }
-
-    #[test]
-    fn t1818_兩輪之間重開_懷疑的狀態跟著存檔() {
-        let d = tempfile::tempdir().unwrap();
-        let f = d.path().join(STATE_FILE);
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        assert_eq!(w.tick(&obs(None, &[]), 1_000 + TICK_MS), None, "第一輪只是懷疑");
-        w.save(&f);
-        note_user_quit_at(d.path(), 1_000 + TICK_MS + 5_000);
-        assert!(f.exists(), "正在懷疑時結束，不能把證據刪掉");
-        let mut w2 = Watch::load(&f, None);
-        assert!(w2.tick(&obs(None, &[]), 100_000).is_some(), "懷疑接得上，重開後第一輪還看不到就算");
-    }
-
-    #[test]
-    fn t1818_ASN自己收的服務_重開後不報() {
-        let d = tempfile::tempdir().unwrap();
-        let f = d.path().join(STATE_FILE);
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        w.save(&f);
-        // 空服務被 ASN 自己停掉（留記號），而且結束時監看已經一段時間沒看到健康的服務，狀態檔因此留著
-        note_user_quit_at(d.path(), 1_000 + 200_000);
-        let mut w2 = Watch::load(&f, None);
-        let mut gone = obs(None, &[]);
-        gone.stopped = Some((M1.0, 150_000));
-        assert_eq!(w2.tick(&gone, 300_000), None);
-        assert_eq!(w2.tick(&gone, 330_000), None, "有記號的收法不算事故");
-    }
-
-    #[test]
-    fn t1818_一切正常_使用者結束重開_不報() {
-        let d = tempfile::tempdir().unwrap();
-        let f = d.path().join(STATE_FILE);
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        w.tick(&obs(Some(M1), &["甲"]), 1_000 + TICK_MS);
-        w.save(&f);
-        note_user_quit_at(d.path(), 1_000 + TICK_MS + 10_000);
-        assert!(!f.exists(), "剛看到健康：照舊忘掉");
-        let mut w2 = Watch::load(&f, None);
-        assert_eq!(w2.tick(&obs(Some(M1), &["甲"]), 100_000), None);
-        assert_eq!(w2.tick(&obs(Some(M1), &["甲"]), 130_000), None);
-    }
-
-    #[test]
-    fn t1818_健康時間的界線() {
-        let w = Watch::default();
-        assert!(!w.forget_on_quit(1_000_000), "沒看過活著的 mux，不能說它是健康的");
-        let mut healthy = Watch::default();
-        healthy.tick(&obs(Some(M1), &[]), 5_000);
-        assert!(healthy.forget_on_quit(5_000 + QUIT_FRESH_MS));
-        assert!(!healthy.forget_on_quit(5_000 + QUIT_FRESH_MS + 1));
     }
 
     #[test]
