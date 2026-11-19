@@ -77,12 +77,6 @@ pub struct Watch {
     /// 最後一次親眼看到 mux 活著的時間。使用者結束 ASN 時，靠它判斷「結束當下監看有沒有在看著一個健康的 mux」（#1818）
     #[serde(default)]
     healthy_at: u64,
-    /// 最近一次報出事故的時間（監看判定的、或開機時對事件記錄補報的）。事件記錄裡不晚於它的崩潰已經報過（#1818）
-    #[serde(default)]
-    last_incident_at: u64,
-    /// 開機時對事件記錄補報的時間。之後一小段時間內，監看自己判定出同一次崩潰就不再報第二次（#1818）
-    #[serde(default)]
-    crash_reported_at: u64,
 }
 
 impl Watch {
@@ -164,12 +158,6 @@ impl Watch {
         }
         self.suspect = false;
         self.seen = current;
-        // 開機時已經對事件記錄補報過同一次崩潰：不報第二次（#1818）
-        let dup = self.crash_reported_at > 0 && now.saturating_sub(self.crash_reported_at) <= CRASH_WINDOW_MS;
-        self.crash_reported_at = 0;
-        if dup {
-            return None;
-        }
         // 記著的那個 mux 是這次開機以前的（重開機前留下的紀錄，開機時間沒能讓 load 丟掉它）：
         // 新起的終端服務不是「這次開機的終端服務掛了」，不算事故、也不算還沒接回，重開機後該接回的交給開機接回（auto_resume）
         if self.boot.is_some_and(|b| p.mux.1.saturating_add(crate::bridge::known::BOOT_TOLERANCE_MS) < b) {
@@ -190,56 +178,8 @@ impl Watch {
             }
         }
         self.lost_at = now;
-        self.last_incident_at = now;
         Some(Incident { partners: p.partners, resume })
     }
-
-    /// 記著的夥伴名字（開機第一輪在 `tick` 之前取，補報時用）
-    pub fn seen_partners(&self) -> Vec<String> {
-        self.seen.as_ref().map(|s| s.partners.clone()).unwrap_or_default()
-    }
-
-    /// 開機第一輪、`tick` 沒有下結論時，對事件記錄補報（#1818）。
-    /// 狀態檔被重置、或監看還沒來得及判定（更新安裝在崩潰後兩分鐘內把 ASN 結束再重開）時，
-    /// 事件記錄是唯一還留著的證據：有一筆比上次報過的事故更晚的終端服務崩潰，就算一次事故。
-    /// `prev_partners` 是 `tick` 之前記著的夥伴。ASN 自己停的服務不會有當機事件，所以不會誤報
-    pub fn note_missed_crash(&mut self, events: &[CrashEvent], prev_partners: Vec<String>, now: u64) -> Option<Incident> {
-        missed_crash(events, self.last_incident_at)?;
-        let resume = !prev_partners.is_empty() && self.last_resume_at.is_none_or(|t| now.saturating_sub(t) >= RESUME_GAP_MS);
-        if resume {
-            self.last_resume_at = Some(now);
-        }
-        for n in &prev_partners {
-            if !self.lost.contains(n) {
-                self.lost.push(n.clone());
-            }
-        }
-        if !prev_partners.is_empty() {
-            self.lost_at = now;
-        }
-        self.last_incident_at = now;
-        self.crash_reported_at = now;
-        self.suspect = false;
-        Some(Incident { partners: prev_partners, resume })
-    }
-}
-
-/// 事件記錄查詢涵蓋的時間（和 `EVENT_QUERY` 的 300000 毫秒一致）
-pub const CRASH_WINDOW_MS: u64 = 300_000;
-
-/// 事件記錄裡比上次報過的事故更晚的終端服務崩潰（純函式，#1818）
-pub fn missed_crash(events: &[CrashEvent], last_incident_at: u64) -> Option<&CrashEvent> {
-    events.iter().filter(|e| e.app == CRASH_APP && e.at_ms > last_incident_at).max_by_key(|e| e.at_ms)
-}
-
-/// 開機第一輪查事件記錄；只有 Windows 有，讀不到回 None
-#[cfg(all(windows, feature = "gui"))]
-fn startup_crashes() -> Option<Vec<CrashEvent>> {
-    WinEventLog.crashes()
-}
-#[cfg(all(not(windows), feature = "gui"))]
-fn startup_crashes() -> Option<Vec<CrashEvent>> {
-    None
 }
 
 /// 橋接核心要知道的名字：這些夥伴現在名單上沒有，但很可能只是共用的終端服務掛了、正在（或等著）接回，
@@ -765,8 +705,6 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut tracker = Tracker::new(cfg!(windows));
         // 監看自己看不到終端服務時也要有訊號（11-10 30家用：02:22～11:59 每輪都看不到，一行紀錄都沒有）
         let mut blind = Blind::default();
-        // 開機後第一輪看得到快照時，對事件記錄補查一次（#1818）
-        let mut check_crashes = true;
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -802,13 +740,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             }
             let now = crate::heartbeat::now_ms();
             w.note_exited(&terms.take_exited(), now);
-            let prev_partners = w.seen_partners();
-            let mut incident = w.tick(&o, now);
-            if std::mem::take(&mut check_crashes) && incident.is_none() {
-                if let Some(events) = startup_crashes() {
-                    incident = w.note_missed_crash(&events, prev_partners, now);
-                }
-            }
+            let incident = w.tick(&o, now);
             w.save(&file);
             // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
             let info = incident.as_ref().map(|_| {
@@ -1159,78 +1091,6 @@ mod tests {
         let mut w2 = Watch::load(&f, None);
         assert_eq!(w2.tick(&obs(Some(M1), &["甲"]), 100_000), None);
         assert_eq!(w2.tick(&obs(Some(M1), &["甲"]), 130_000), None);
-    }
-
-
-    fn crash_at(at_ms: u64) -> CrashEvent {
-        CrashEvent { app: CRASH_APP.into(), module: "ntdll.dll".into(), code: "0xc00000fd".into(), offset: "0x55b00".into(), pid: "0x1a2c".into(), at_ms }
-    }
-
-    /// #1818：更新安裝在崩潰後兩分鐘內把 ASN 結束再重開。不管狀態檔還在不在，都只報一次
-    #[test]
-    fn t1818_更新安裝重開_狀態檔還在_補報與監看判定合起來只報一次() {
-        let d = tempfile::tempdir().unwrap();
-        let f = d.path().join(STATE_FILE);
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        w.tick(&obs(Some(M1), &["甲"]), 1_000 + TICK_MS);
-        w.save(&f); // 之後 mux 在 61_000 崩潰，監看沒來得及判定，更新在 120_000 把 ASN 結束
-        let crash = [crash_at(61_000)];
-        let mut w2 = Watch::load(&f, None);
-        let (prev, now1) = (w2.seen_partners(), 150_000);
-        assert_eq!(w2.tick(&obs(None, &[]), now1), None, "服務還沒起，只是懷疑");
-        let inc = w2.note_missed_crash(&crash, prev, now1).expect("事件記錄有崩潰、沒報過，補報");
-        assert_eq!(inc.partners, ["甲"]);
-        assert!(inc.resume);
-        let now2 = now1 + TICK_MS;
-        assert_eq!(w2.tick(&obs(Some(M2), &["甲"]), now2), None, "監看自己判定的同一次崩潰不再報第二次");
-        assert_eq!(w2.tick(&obs(Some(M2), &["甲"]), now2 + TICK_MS), None);
-    }
-
-    #[test]
-    fn t1818_更新安裝重開_狀態檔不見_事件記錄補報一次() {
-        let crash = [crash_at(61_000)];
-        let mut w = Watch::default();
-        let prev = w.seen_partners();
-        assert_eq!(w.tick(&obs(Some(M2), &["甲"]), 150_000), None, "第一次見到的服務不算事故");
-        let inc = w.note_missed_crash(&crash, prev, 150_000).expect("補報");
-        assert!(inc.partners.is_empty() && !inc.resume);
-        assert!(w.note_missed_crash(&crash, vec![], 180_000).is_none(), "同一次崩潰不補第二次");
-    }
-
-    #[test]
-    fn t1818_已經報過的崩潰_重開後不補報() {
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        w.tick(&obs(None, &[]), 2_000);
-        let inc = w.tick(&obs(None, &[]), 3_000).expect("監看判定");
-        assert_eq!(inc.partners, ["甲"]);
-        let crash = [crash_at(1_500)];
-        assert!(w.note_missed_crash(&crash, vec![], 4_000).is_none(), "崩潰時間不晚於上次事故，已經報過");
-        assert!(w.note_missed_crash(&[crash_at(3_500)], vec![], 4_000).is_some(), "更晚的另一次崩潰要報");
-    }
-
-    #[test]
-    fn t1818_沒有崩潰紀錄_不補報_ASN自己停的服務與平常都靜默() {
-        let mut w = Watch::default();
-        assert!(w.note_missed_crash(&[], vec!["甲".into()], 10_000).is_none());
-        let mut other = crash_at(5_000);
-        other.app = "other.exe".into();
-        assert!(w.note_missed_crash(&[other], vec![], 10_000).is_none(), "別的程式的崩潰不算");
-        // 平常：同一個 mux 一直活著，沒有任何事故
-        w.tick(&obs(Some(M1), &["甲"]), 20_000);
-        assert_eq!(w.tick(&obs(Some(M1), &["甲"]), 50_000), None);
-    }
-
-    #[test]
-    fn t1818_補報旗標過了五分鐘就失效_不會吃掉之後真的崩潰() {
-        let mut w = Watch::default();
-        w.tick(&obs(Some(M1), &["甲"]), 1_000);
-        w.note_missed_crash(&[crash_at(900)], vec!["甲".into()], 1_000).expect("補報");
-        let later = 1_000 + CRASH_WINDOW_MS + TICK_MS;
-        w.tick(&obs(Some(M1), &["甲"]), later);
-        assert_eq!(w.tick(&obs(None, &[]), later + TICK_MS), None);
-        assert!(w.tick(&obs(None, &[]), later + 2 * TICK_MS).is_some(), "旗標已過期，這次崩潰要報");
     }
 
     #[test]
