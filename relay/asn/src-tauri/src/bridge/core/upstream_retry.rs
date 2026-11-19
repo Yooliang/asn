@@ -22,6 +22,9 @@ pub(super) const MAX_DELAYED_RETRIES: usize = 2;
 pub(super) const DELAYED_RETRY_MS: [u64; MAX_DELAYED_RETRIES] = [120_000, 600_000];
 /// 一則點名從收到起超過這麼久就放棄補送、也不在恢復時重送
 pub(super) const RETRY_TTL_MS: u64 = 30 * 60 * 1000;
+/// 等待補送的點名記在機器資料夾的這個小檔（只有群組代號、序號、對象名、到期時間，沒有內文）。
+/// 收發室重啟時排程會消失，啟動時看到這個檔就在 ui.log 記一行「已放棄」，不悄悄消失
+pub(super) const RETRY_FILE: &str = "retry-pending.json";
 /// 連續這麼多次正常結束才算恢復
 pub(super) const RECOVER_OK_STREAK: u32 = 3;
 /// 記著可補送的點名最多幾則（超過丟最舊的）
@@ -82,6 +85,8 @@ pub(super) struct Book {
     /// 補送用完或過期、沒處理到的最近一則點名（每個工作者最多一則）
     stranded: HashMap<String, (String, Memo)>,
     health: HashMap<String, Health>,
+    /// 目前寫在 RETRY_FILE 裡的內容（None＝沒有檔案）；沒變就不重寫
+    saved: Option<String>,
 }
 
 impl Book {
@@ -103,6 +108,17 @@ impl Book {
     /// 要貼過渡說明了：這則第一次回 true，之後回 false
     pub fn first_tell(&mut self, id: &str) -> bool {
         self.memos.get_mut(id).map(|m| !std::mem::replace(&mut m.told, true)).unwrap_or(false)
+    }
+
+    /// 等待補送的點名存檔內容（沒有在等的回 None）
+    pub fn pending_json(&self) -> Option<String> {
+        let mut items: Vec<(u64, serde_json::Value)> = self
+            .waiting
+            .iter()
+            .filter_map(|w| self.memos.get(&w.id).map(|m| (w.due, serde_json::json!({ "room": m.room.id, "seq": m.room.seq, "target": m.target, "due": w.due }))))
+            .collect();
+        items.sort_by_key(|(due, _)| *due);
+        (!items.is_empty()).then(|| serde_json::json!({ "items": items.into_iter().map(|(_, v)| v).collect::<Vec<_>>() }).to_string())
     }
 
     pub fn has(&self, id: &str) -> bool {
@@ -207,6 +223,53 @@ impl Book {
 }
 
 impl Core {
+    /// 等待補送的名單有變就更新存檔（空了就刪檔）。寫不進去只記 log
+    pub(super) fn up_sync_file(&mut self) {
+        if self.cfg.work_dir.as_os_str().is_empty() {
+            return;
+        }
+        let want = self.up_retry.pending_json();
+        if want == self.up_retry.saved {
+            return;
+        }
+        let file = self.cfg.work_dir.join(RETRY_FILE);
+        let ok = match &want {
+            Some(t) => crate::write_atomic(&file, t).map_err(|e| self.log.line(&format!("upstream-retry state save failed: {e}"))).is_ok(),
+            None => {
+                let _ = std::fs::remove_file(&file);
+                true
+            }
+        };
+        if ok {
+            self.up_retry.saved = want;
+        }
+    }
+
+    /// 啟動時（Core 建好、第一輪之前）：上次關閉時還在等補送的點名已經放棄了，在 ui.log 與 bridge.log 各記一行，然後清掉檔案。
+    /// 只寫序號與對象名，不寫內文。沒有檔案或沒有內容就什麼都不寫
+    pub(super) fn up_report_lost(&mut self) {
+        let file = self.cfg.work_dir.join(RETRY_FILE);
+        let Ok(text) = std::fs::read_to_string(&file) else { return };
+        let _ = std::fs::remove_file(&file);
+        let items: Vec<(u64, String)> = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("items").and_then(|a| a.as_array().cloned()))
+            .unwrap_or_default()
+            .iter()
+            .map(|i| (i.get("seq").and_then(|x| x.as_u64()).unwrap_or(0), i.get("target").and_then(|x| x.as_str()).unwrap_or("").to_string()))
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        let mut list: Vec<String> = items.iter().take(5).map(|(seq, t)| format!("#{seq} {t}")).collect();
+        if items.len() > 5 {
+            list.push("…".into());
+        }
+        let line = format!("上次關閉時有 {} 則群組點名在等補送（{}），已放棄", items.len(), list.join("、"));
+        self.log.line(&format!("[ASN] {line}"));
+        crate::auth_notice::note_logger(self.cfg.work_dir.clone())(&line);
+    }
+
     /// 群組點名剛交給 ACP 工作者：記下，之後上游 5xx 才補送得了
     pub(super) fn up_remember(&mut self, id: &str, text: &str, room_name: &str, from: &str) {
         let Some(i) = self.idx(id) else { return };
@@ -244,6 +307,7 @@ impl Core {
                             self.ack_wait.remove(id);
                             self.reply_fail.remove(id);
                             self.remove(id);
+                            self.up_sync_file();
                             return;
                         }
                         Plan::GiveUp(why) => {
@@ -261,6 +325,7 @@ impl Core {
     /// 工作者一輪正常結束
     pub(super) async fn on_turn_ok(&mut self, worker: &str, id: &str) {
         self.up_retry.forget(id);
+        self.up_sync_file();
         let Some(rec) = self.up_retry.note_ok(worker, self.now) else { return };
         self.log.line(&format!("upstream-retry recovered worker={worker}: {} ok in a row", RECOVER_OK_STREAK));
         let resend = rec.resend;
@@ -277,7 +342,9 @@ impl Core {
     /// 定時：到時間的補送送出去；過期的清掉
     pub(super) async fn upstream_retry_tick(&mut self, now: u64) {
         self.up_retry.prune(now);
-        for (id, reason) in self.up_retry.due(now) {
+        let due = self.up_retry.due(now);
+        self.up_sync_file(); // 到期的已經從等待名單拿掉
+        for (id, reason) in due {
             match self.up_retry.take_for_resend(&id, now) {
                 Ok(memo) => self.up_resend(&id, memo, &reason).await,
                 Err(why) => {

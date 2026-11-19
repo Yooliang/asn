@@ -643,6 +643,7 @@ impl Core {
         if !c.outbox.items.is_empty() {
             c.log.line(&format!("reply outbox restored: {} item(s)", c.outbox.items.len()));
         }
+        c.up_report_lost();
         c.started_at = now;
         c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
         c.wait_alerts = super::wait_alert::WaitAlerts::load(&c.cfg.work_dir.join(super::wait_alert::WAIT_FILE), now);
@@ -2210,6 +2211,7 @@ impl Core {
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
         self.up_retry.forget(id);
+        self.up_sync_file();
         self.exact_ids.remove(id);
         channel_turns::clear(&self.cfg.work_dir, id);
         self.channel_wait.remove(id);

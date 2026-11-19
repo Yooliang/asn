@@ -2428,6 +2428,7 @@ async fn 單號1670_連續502_補送有上限_總共四次就停_之後才貼失
     assert_eq!(bodies.iter().filter(|b| b.contains("收發室會自動再試")).count(), 1, "過渡說明只貼一次（補送中再失敗不重複）：{bodies:?}");
     assert!(bodies[0].contains("收發室會自動再試") && bodies[1].contains("這一輪沒有處理，請稍後再點名"), "先過渡、補送用完才貼最終說明：{bodies:?}");
     assert!(h.core.log.recent().iter().filter(|l| l.contains("upstream-retry scheduled")).count() == 2);
+    assert!(!h.work.path().join("retry-pending.json").exists(), "補送用完後待補送的存檔已清掉");
 }
 
 #[tokio::test]
@@ -2474,4 +2475,69 @@ async fn 單號1670_事故後連續三次成功_補一句又能處理了_並重�
     let log = h.core.log.recent();
     assert_eq!(log.iter().filter(|l| l.contains("upstream-retry resent")).count(), 3, "恢復時只重送那一則一次：{log:?}");
     assert_eq!(log.iter().filter(|l| l.contains("upstream-retry recovered")).count(), 1);
+}
+
+fn ui_log_text(h: &EH) -> String {
+    std::fs::read_to_string(h.work.path().join("ui.log")).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn 單號1670_排了補送就重啟_ui_log記一行已放棄_存檔清掉_再重啟不重複寫() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [600_000, 600_000]; // 補送排得很遠：重啟時一定還在等
+    let file = h.work.path().join("retry-pending.json");
+    assert!(!file.exists() && !ui_log_text(&h).contains("在等補送"), "前提：沒有待補送");
+    room_for(&h, vec![(2, "請處理這件事
+@@UP502")]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "排了補送、貼出過渡說明", |h| room_bodies(h).iter().any(|b| b.contains("收發室會自動再試"))).await;
+    let saved = std::fs::read_to_string(&file).expect("排補送時就把等待中的點名存檔");
+    assert!(saved.contains("R1") && saved.contains("Gemini") && saved.contains("\"seq\":2"), "{saved}");
+    assert!(!saved.contains("UP502") && !saved.contains("請處理"), "存檔不記內文：{saved}");
+    h.restart().await;
+    let ui = ui_log_text(&h);
+    assert!(ui.contains("上次關閉時有 1 則群組點名在等補送（#2 Gemini），已放棄"), "{ui}");
+    assert!(!ui.contains("UP502") && !ui.contains("請處理"), "log 不寫內文：{ui}");
+    assert!(h.core.log.recent().iter().any(|l| l.contains("上次關閉時有 1 則群組點名在等補送")), "bridge.log 也記一行");
+    assert!(!file.exists(), "寫完就清掉存檔");
+    h.restart().await;
+    assert_eq!(ui_log_text(&h).matches("在等補送").count(), 1, "沒有待補送時重啟不再寫");
+}
+
+#[tokio::test]
+async fn 單號1670_補送成功後存檔清掉_重啟不寫任何東西() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    let mark = h.work.path().join("up1670d.txt");
+    let file = h.work.path().join("retry-pending.json");
+    room_for(&h, vec![(2, &format!("請處理這件事
+@@UP502_FIRST 2 {}", mark.display()))]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "排了補送", |_| file.exists()).await;
+    tick_wait(&mut h, "補送成功", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
+    tick_wait(&mut h, "存檔清掉", |_| !file.exists()).await;
+    h.restart().await;
+    assert!(!ui_log_text(&h).contains("在等補送"), "{}", ui_log_text(&h));
+    assert!(!h.core.log.recent().iter().any(|l| l.contains("在等補送")));
+}
+
+#[tokio::test]
+async fn 單號1670_非agy協定的工作者碰到上游5xx_不排延遲補送_直接貼最終失敗說明() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    room_for(&h, vec![(2, "請處理這件事
+@@UP502")]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "直接貼最終失敗說明", |h| room_bodies(h).iter().any(|b| b.contains("這一輪沒有處理，請稍後再點名"))).await;
+    tick_for(&mut h, 1200).await;
+    let bodies = room_bodies(&h);
+    assert_eq!(bodies.len(), 1, "{bodies:?}");
+    assert!(!bodies[0].contains("收發室會自動再試"), "{bodies:?}");
+    let log = h.core.log.recent().join("
+");
+    assert!(!log.contains("upstream-retry scheduled") && !log.contains("upstream-retry resent"), "{log}");
+    assert!(!h.work.path().join("retry-pending.json").exists());
 }
