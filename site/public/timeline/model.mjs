@@ -138,18 +138,9 @@ export function buildMatrix(columns, rows, cells) {
   }
 }
 
-// 開發日誌：會議與發版合成一條，最新在上。發版只有日期，排在當天所有會議之上（當天結束時）；同一天多版依版本新到舊。
-export function buildLog(meetings, releases) {
-  const entries = [
-    ...meetings.map(m => {
-      const { date, time } = taipeiParts(m.held_at)
-      return { kind: 'meeting', date, time, key: `${date} ${time}`, meeting: m }
-    }),
-    ...releases.map(r => ({ kind: 'release', date: r.released_on, time: '', key: `${r.released_on} 99:99`, release: r })),
-  ]
-  return entries.sort((a, b) => {
-    if (a.key !== b.key) return a.key < b.key ? 1 : -1
-    if (a.kind === 'release' && b.kind === 'release') return cmpVersion(b.release.version, a.release.version)
-    return 0
-  })
+// 開發日誌：只列發版，最新在上；同一天多版依版本新到舊。
+export function buildLog(releases) {
+  return releases
+    .map(r => ({ kind: 'release', date: r.released_on, time: '', key: `${r.released_on} 99:99`, release: r }))
+    .sort((a, b) => (a.key !== b.key ? (a.key < b.key ? 1 : -1) : cmpVersion(b.release.version, a.release.version)))
 }

@@ -1,6 +1,6 @@
 // 藍圖頁與開發日誌頁的畫面：一律用 createElement＋textContent 建節點，資料庫內容絕不當 HTML 插入。
 // 守門測試會掃這個資料夾，不准出現 innerHTML 這類寫法。兩頁共用同一套時間軸樣式（style.css 的 .tl）。
-import { parseBlocks, STATUS_LABEL, MEETING_FIELDS, issueUrl, taipeiParts, EMPTY_LANE_TEXT } from './model.mjs'
+import { parseBlocks, STATUS_LABEL, issueUrl, EMPTY_LANE_TEXT } from './model.mjs'
 
 const ATTRS = new Set(['class', 'id', 'scope', 'data-label', 'aria-label', 'aria-hidden', 'role', 'rel', 'target'])
 
@@ -106,21 +106,9 @@ export function roadmapTimeline(tl) {
   return h('ol', { class: 'tl' }, nodes)
 }
 
-// 開發日誌：會議與發版合成一條，最新在上
+// 開發日誌：只列發版，最新在上
 export function logTimeline(entries) {
-  return h('ol', { class: 'tl' }, entries.map(e => e.kind === 'release'
-    ? tlItem('is-release', e.date, releaseCard(e.release))
-    : tlItem('is-meeting', `${e.date} ${e.time}`, meetingCard(e.meeting))))
-}
-
-export function meetingCard(m) {
-  const { date, time } = taipeiParts(m.held_at)
-  const dl = h('dl', { class: 'tl-fields' })
-  for (const [k, label] of MEETING_FIELDS) {
-    const list = m[k] ?? []
-    dl.append(h('dt', null, label), h('dd', null, list.length === 1 ? rich(list[0]) : h('ul', null, list.map(t => h('li', null, rich(t))))))
-  }
-  return h('article', { class: 'glass tl-card' }, h('h3', null, chip('meeting', '會議'), `小會議 ${date} ${time}`), dl)
+  return h('ol', { class: 'tl' }, entries.map(e => tlItem('is-release', e.date, releaseCard(e.release))))
 }
 
 // ---- 待辦欄位 ----
