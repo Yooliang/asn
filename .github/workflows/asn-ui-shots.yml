@@ -1,0 +1,121 @@
+name: ASN 畫面截圖比對
+
+# #1763 T2：同一個工作裡用同一台機器、同一個瀏覽器、同一組字型，把「合併前（基準）」與「合併後（這張 PR）」的 ui 各跑一遍同一組情境，
+# 比結構快照（位置、文字、計算樣式）與像素，報告與差異圖上傳成品。基準不存進 repo（避免不同機器的字型造成誤差）。
+# 目前只報告、不擋 PR（continue-on-error）；T3 的基準涵蓋齊了才改成擋關。
+# 只有動到畫面、冒煙工具或這支工作流程本身才跑；很輕：只 npm ci＋prep＋瀏覽器，不建 Rust。
+on:
+  pull_request:
+    paths:
+      - 'relay/asn/ui/**'
+      - 'relay/asn/scripts/smoke*'
+      - 'relay/asn/scripts/ui-shots*'
+      - 'relay/asn/test/**'
+      - '.github/workflows/asn-ui-shots.yml'
+  workflow_dispatch:
+
+# 整支 workflow 只讀（#947）：只跑比對與上傳成品，不需要寫入 repo。
+permissions:
+  contents: read
+
+# 同一張 PR 推新的提交時，取消舊的那次
+concurrency:
+  group: asn-ui-shots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-shots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # 這張 PR 合併後的樣子（pull_request 預設拿到的是「PR 合進目標分支」的暫時提交）；深度 2 才拿得到它的第一個父提交
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: new
+          fetch-depth: 2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # 基準＝暫時提交的第一個父提交（目標分支當時的頂端），也就是「這張 PR 合併前」。放到另一個資料夾
+      - name: 取得基準版（合併前）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd new
+          if git rev-parse --verify -q HEAD^2 >/dev/null; then
+            base_sha=$(git rev-parse HEAD^1)
+          else
+            # 不是合併提交（例如手動觸發）：拿目標分支的提交；都沒有就用上一個提交
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            [ -n "$base_sha" ] || base_sha=$(git rev-parse HEAD^1)
+          fi
+          echo "基準版 $base_sha、新版 $(git rev-parse HEAD)"
+          git worktree add --detach "$GITHUB_WORKSPACE/base" "$base_sha"
+
+      - name: 安裝依賴（新版與基準版各一份）
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in new base; do
+            (cd "$GITHUB_WORKSPACE/$d/relay/asn" && npm ci --ignore-scripts)
+          done
+
+      - name: 產生 ui/vendor（新版與基準版各一份）
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in new base; do
+            (cd "$GITHUB_WORKSPACE/$d/relay/asn" && node scripts/prep.mjs)
+          done
+
+      # 中文字型：不確定 runner 映像有沒有 CJK 字型（未查證）。沒有就補裝 Noto CJK；補裝失敗不讓工作紅，
+      # 比對工具自己會做「中文字確實有畫出來」檢查，缺字型時在報告最上面標紅色警告
+      - name: 檢查中文字型
+        shell: bash
+        run: |
+          if fc-list :lang=zh | grep -q .; then
+            echo "已有中文字型：$(fc-list :lang=zh | head -3)"
+          else
+            echo "::warning::runner 沒有中文字型，嘗試安裝 fonts-noto-cjk"
+            bash "$GITHUB_WORKSPACE/new/.github/scripts/apt-install.sh" --no-install-recommends fonts-noto-cjk || echo "::warning::中文字型安裝失敗，報告會標出警告"
+          fi
+
+      # 只報告：continue-on-error，結束碼不影響 PR。找不到 Chrome 等「工具自己壞了」的情況，腳本結束碼固定為 3（步驟顯示警告、摘要最上面寫明，不能當成沒有差異）。
+      # --limit 60：本機實測全部 246 個情境（基準與新版各跑一次）要 34 分鐘，每情境平均 8.3 秒；60 個約 8 分鐘，
+      # 挑法是「頁面×寬度×外觀」輪流各取，手機 412／360、電腦 900、三套外觀都涵蓋。要跑全部：手動觸發並把 60 拿掉（T3 再決定）
+      - name: 跑畫面截圖比對（只報告）
+        id: shots
+        continue-on-error: true
+        working-directory: new/relay/asn
+        shell: bash
+        run: |
+          node scripts/ui-shots.mjs --base "$GITHUB_WORKSPACE/base/relay/asn/ui" --new "$GITHUB_WORKSPACE/new/relay/asn/ui" --out "$RUNNER_TEMP/ui-shots" --limit 60
+
+      - name: 報告寫進摘要
+        if: always()
+        shell: bash
+        run: |
+          # 工具自己壞了（找不到 Chrome、整體出錯、步驟失敗）不擋 PR，但摘要最上面一定要寫出來，並加警告註記（不能看起來像全部通過）
+          if [ "${{ steps.shots.outcome }}" != "success" ]; then
+            echo "> **🔴 畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}）。下面的報告（如果有）不能當成「沒有差異」，請看上一步的 log。**" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}），結果不可信"
+          fi
+          if [ -f "$RUNNER_TEMP/ui-shots/report.md" ]; then
+            head -c 900000 "$RUNNER_TEMP/ui-shots/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "畫面截圖比對沒有產生報告（步驟結果：${{ steps.shots.outcome }}）。看上一步的 log。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # 只傳報告與有差異的情境（差異圖、並排圖、結構差異）；全部截圖太大，不傳
+      - name: 上傳報告與差異圖
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-shots-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ui-shots/report.md
+            ${{ runner.temp }}/ui-shots/diff/
+          if-no-files-found: ignore
+          retention-days: 7

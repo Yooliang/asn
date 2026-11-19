@@ -38,7 +38,7 @@ export function rosterListItems(friends, { tabDim, tabKey, query, plainText, pin
   return pageItems(friends, tabDim, tabKey, match, cmp)
 }
 
-export function rosterShownGroups(friends, { tabDim, tabKey, groupDim, selfNode, selfName, deviceOrder, query, plainText, pins }) {
+export function rosterShownGroups(friends, { tabDim, tabKey, groupDim, selfNode, selfName, nodeNames, deviceOrder, query, plainText, pins }) {
   const items = rosterListItems(friends, { tabDim, tabKey, query, plainText, pins })
-  return groupItems(items, groupDim, { selfNode, selfName, deviceOrder, cmp: pins ? pinnedRecentOrder(pins) : null })
+  return groupItems(items, groupDim, { selfNode, selfName, nodeNames, deviceOrder, cmp: pins ? pinnedRecentOrder(pins) : null })
 }

@@ -366,6 +366,10 @@
 :root[data-skin="line"] #app.win .compose-main.lc-row > .toolbar .picker{bottom:calc(100% + 4px);top:auto}
 :root[data-skin="line"] #app.win .compose-main.lc-row .composer{display:flex;align-items:flex-end;gap:6px;padding:4px 8px 8px}
 :root[data-skin="line"] #app.win .compose-main.lc-row .composer textarea{order:0;height:56px;min-height:56px;padding:6px;border-radius:0;background:#fff}
+/* 工具列位置「輸入框下方」（.tb-bottom 由設定的外觀頁決定）：上面的規則固定工具列在上，style.css 的 .tb-bottom .compose-main{column-reverse} 權重不夠；這裡補一條權重更高的，並把上下內距對調（工具列在下：貼底留 6px；輸入框在上：上方留 8px）。彈出選單仍相對工具列往上開 */
+:root[data-skin="line"] #app.win .tb-bottom .compose-main.lc-row{flex-direction:column-reverse}
+:root[data-skin="line"] #app.win .tb-bottom .compose-main.lc-row > .toolbar{padding:0 8px 6px}
+:root[data-skin="line"] #app.win .tb-bottom .compose-main.lc-row .composer{padding:8px 8px 4px}
 :root[data-skin="line"] #app.win .compose-main.lc-row .mc-plus,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-photo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-emo,:root[data-skin="line"] #app.win .compose-main.lc-row .lc-more{display:none}
 :root[data-skin="line"] #app.win .compose-main.lc-row > .reply-bar,:root[data-skin="line"] #app.win .compose-main.lc-row > .voice-install{bottom:calc(100% + 8px)}
 /* =====================================================================

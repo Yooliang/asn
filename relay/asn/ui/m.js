@@ -65,7 +65,7 @@ import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chat
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
-import { joinKnown, deviceNameError } from './lib/device-known.mjs'
+import { joinKnown, deviceNameError, deviceNameOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -83,7 +83,8 @@ import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from '
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
-import { applyRename } from './lib/rename.mjs'
+import { alignDeviceName, followSelfRename } from './lib/device-rename.mjs'
+import { renameDevice, setDeviceNameOnboard, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { loginUnsealedNote } from './lib/mobile-login-seal.mjs'
@@ -144,7 +145,7 @@ document.title = 'ASN'
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
 const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
-const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : invoke('set_window_name', { name })) }
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true })) }
 const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
@@ -185,7 +186,7 @@ let memberJump = null
 watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
-const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
+const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
 // 設備順序與手動顯示的隱藏設備：存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown／deviceRemoved）當離線快取，有登入就與帳號層同步（lib/device-sync.mjs）
 const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
 const logs = reactive({})
@@ -278,7 +279,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     log: m => console.info('[ASN]', m),
   })
   setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
-  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; for (const f of s.friends) refreshLast(f.id) }
+  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }
   core.on('state', sync)
   core.on('log', id => { pushLog(id); refreshLast(id) })
@@ -302,7 +303,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
     else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
-  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
+  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync(); void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, phone: true, notify: showToast }); await alignDeviceName(invoke, { info, core, me }, showToast) })() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（對話清單層再按才退到背景）；分頁與內頁的規則在 lib/mobile-nav.mjs ----------
@@ -366,7 +367,7 @@ const app = createApp({
   setup() {
     // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（搜尋字同樣適用）
     const groups = computed(() => {
-      const o = { query: query.value, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, plainText: plain, pins: prefs.chatPins }
+      const o = { query: query.value, selfNode: info.node, selfName: deviceNameOf(info.node, { nodeNames: nodeNames.value, friends: friends.value, fallback: info.window_name }) || info.window_name, nodeNames: nodeNames.value, deviceOrder: devPrefs.deviceOrder, plainText: plain, pins: prefs.chatPins }
       return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))   // 通知有自己的分頁，不再列在夥伴名單最上面
     })
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
@@ -645,6 +646,7 @@ const app = createApp({
         const r = await knownPeers.rename(node, dn.text)
         if (!r) { dn.err = KNOWN_TEXT.failed; return }   // 沒拿到成功的回覆：編輯框留著、顯示失敗，不讓人以為改好了
         Object.assign(dn, { node: '', text: '', err: '' })
+        if (node === info.node) followSelfRename({ info, core, me }, { name: r.name, self_renamed: r.selfRenamed === true, window_name: r.windowName, window_rename_failed: r.windowRenameFailed }, showToast)   // 改的是這支手機：本機視窗名 Rust 也換了，畫面就地跟上
         await Promise.allSettled([core.refreshRoster(), loadKnown()])
       } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); dn.err = renameErrorText(e) } finally { dn.busy = false }
     }
@@ -792,7 +794,7 @@ const app = createApp({
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
     const acctSigned = () => (acct.value.known ? acct.value.signed_in : null)   // 還沒查到登入狀態＝null，不是「沒登入」
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
-    const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
+    const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
     const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))
     // 「模型」只列廠牌，「運行」四選一（D1 #421，跟電腦版同一套）：內建通道 ＞ 經 pi ＞ ASN 開的終端 ＞ 原生 CLI（只作說明）。不能選的反灰並寫原因
@@ -853,9 +855,9 @@ const app = createApp({
     const acctRoster = ref(null)
     const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster, undefined, acctRoster.value) }
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
-    const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, selfNode: info.node }))
+    const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, nodeNames: nodeNames.value, selfNode: info.node }))
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
-    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
+    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
     watch(acctAllDevs, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
@@ -863,6 +865,7 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
+    const selfDevName = computed(() => (selfDev.value && selfDev.value.label !== KNOWN_TEXT.thisPhone ? selfDev.value.label : me.nick))   // 設備頁的名字沒讀到（還是標籤）時，個人頁退回視窗名
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
     const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
@@ -875,7 +878,7 @@ const app = createApp({
     watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
     const acctLabel = computed(() => acctCur.value?.label ?? '')
     const acctRep = computed(() => acctSw.reports[acctCur.value?.key] ?? null)
-    const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked, Date.now(), { roster: acctRoster.value, friends: friends.value, selfNode: info.node }))
+    const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked, Date.now(), { roster: acctRoster.value, friends: friends.value, nodeNames: nodeNames.value, selfNode: info.node }))
     const acctConfirm = computed(() => acctConfirmText(acctLabel.value, acctView.value.currentEmail, acctView.value.pickEmail))
     let acctToken = 0, acctEpoch = 0, acctRunSeq = 0   // acctToken：畫面還在不在（離開就換）；acctRunSeq：第幾個切換（送出新的才換）
     async function loadAcct(node, force = false) {
@@ -1351,7 +1354,7 @@ const app = createApp({
     const permHeld = computed(() => isHeldOptions(pq.cur?.options))
     const permReqTitle = computed(() => pqAskTitle(pq.cur?.deviceName, pq.cur?.window))
     const permShownTitle = computed(() => permHeld.value ? heldTitle(pq.cur?.window) : permReqTitle.value)
-    const pqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
+    const pqDeviceName = node => deviceNameOf(node, { nodeNames: nodeNames.value, friends: friends.value })
     async function checkPermReqs() {
       if (pq.busy || pq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
       let list
@@ -1432,7 +1435,7 @@ const app = createApp({
     let tqTimer = 0
     const tqCountdown = computed(() => tqCountdownText(tq.left))
     const tqClose = () => { clearInterval(tqTimer); tq.cur = null; tq.choice = null; tq.busy = false }
-    const tqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
+    const tqDeviceName = node => deviceNameOf(node, { nodeNames: nodeNames.value, friends: friends.value })
     async function checkTermReqs() {
       if (tq.busy || tq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
       let list
@@ -1563,14 +1566,10 @@ const app = createApp({
       if (target !== idx.value) goTab(tabs.value[target])
     }
 
-    // 「我」：暱稱（Rust 端驗證，不合法就還原並提示）、大頭貼（裁成正方形縮成 96×96 上傳）
-    const nickErr = ref('')
-    const commitNick = async () => {
-      const want = String(me.nick ?? '').trim()
-      if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
-      try { applyRename({ info, core, me }, await invoke('set_window_name', { name: want })); nickErr.value = '' }
-      catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
-    }
+    // 「我」：大頭貼（裁成正方形縮成 96×96 上傳）。設備名稱不在這裡改（#1803）：只有設備頁一個改名入口，這裡一行連結帶過去
+    const renameAfterOpen = ref(false)
+    const goDeviceRename = () => { renameAfterOpen.value = true; openSetting('devices') }
+    watch([renameAfterOpen, () => fourthPage.value?.kind, selfDev], () => { if (renameAfterOpen.value && fourthPage.value?.kind === 'acct' && selfDev.value) { renameAfterOpen.value = false; devRenameStart(selfDev.value) } })
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
     const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
@@ -1638,7 +1637,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
@@ -1647,7 +1646,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, goDeviceRename, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

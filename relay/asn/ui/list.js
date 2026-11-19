@@ -101,7 +101,8 @@ import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mj
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
-import { deviceNameError } from './lib/device-known.mjs'
+import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
+import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -186,6 +187,7 @@ watch(chatPins, () => pinsSync.noteLocal(), { deep: true })
 if (!info.shot) pinsSync.start()
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
+const nickErr = ref('')   // 左上角設備名的提示（改名失敗、啟動對齊後說明）
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
 const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到 localStorage，其他視窗跟著換
 watch(skin, v => { applySkin(v); void emit('asn:skin', normalizeSkin(v)) })   // 其他視窗：storage 事件之外再送一次 Tauri 事件（skin-boot.js 兩條都聽）
@@ -354,6 +356,7 @@ const friends = ref([])
 watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
+const nodeNames = ref({})   // 節點 → 後台記的設備名（名單每個成員的 name，沒有夥伴的設備也有）
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
 const rosterReady = ref(false)   // 名單讀到過了（新手引導卡要等這個，免得名單還沒到就說這台沒有視窗）
@@ -363,6 +366,7 @@ const sync = () => {
   friends.value = s.friends
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
+  nodeNames.value = s.nodeNames ?? {}
   conn.value = s.conn
   rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
@@ -464,8 +468,9 @@ async function renameDevice(node, name) {
   known.busy = true
   let r
   try {
-    r = await invoke('device_rename', { node, name: String(name ?? '') })
+    r = await renameDeviceCall(invoke, { node, name })
     known.renameError = ''
+    if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {
     console.info('[ASN] 改名沒成功', String(e?.message ?? e ?? ''))
     known.renameError = String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試。'
@@ -630,7 +635,7 @@ const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value, remoteMachines: remoteMachines.value, friends: friends.value, asn: asnMap.value }))
-const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, removed: devPrefs.deviceRemoved }))
+const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, removed: devPrefs.deviceRemoved }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
 // 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
 const localCwdList = ref([])
@@ -688,7 +693,7 @@ function openPartnerDlg(nodeKey = '') {
 function pickPartnerDevice(nodeKey) {
   if (launchDisableReasonFor(nodeKey) || nodeKey === partnerDlg.node) return   // 再點同一台：保留第 2、3 頁已選的
   partnerDlg.node = nodeKey
-  partnerDlg.deviceLabel = friends.value.find(f => f.node === nodeKey)?.device || nodeKey   // 裝置名稱是空字串也退回節點代號
+  partnerDlg.deviceLabel = deviceNameOf(nodeKey, { nodeNames: nodeNames.value, friends: friends.value }) || nodeKey   // 裝置名稱是空字串也退回節點代號
   partnerDlg.error = ''
   partnerDlg.piModel = ''
   if (nodeKey === info.node && PI_VIA_READY) void loadPiInfo()   // 經 pi 只能在這台開（遠端開 pi 帶模型還沒做）
@@ -1297,8 +1302,8 @@ watch(showNowPlaying, on => {
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 // 這台設備的名字（#1388）：後台的設備名，和別台看到的同一個；名單還沒讀到就先用視窗名
-const selfDeviceName = computed(() => friends.value.find(f => f.node === info.node && f.device)?.device || info.window_name)
-const pages = computed(() => pageTabs(friendsAct.value, dims.tabDim, { selfNode: info.node, selfName: selfDeviceName.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
+const selfDeviceName = computed(() => deviceNameOf(info.node, { nodeNames: nodeNames.value, friends: friends.value, fallback: info.window_name }) || info.window_name)
+const pages = computed(() => pageTabs(friendsAct.value, dims.tabDim, { selfNode: info.node, selfName: selfDeviceName.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
 
 // 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（舊版已拿掉的通知紀錄頁籤或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
@@ -1602,7 +1607,7 @@ const app = createApp({
     const jumpAd = i => { adI.value = goAd(i, ads.value.length); if (!info.shot) startAds() }
     setInterval(() => void refreshRooms(), 60_000)
     void refreshRooms()
-    const query = ref(''), nickErr = ref('')
+    const query = ref('')
     const collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
     const dev = pages
     const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是對話、通知、使用指引、設定
@@ -1654,7 +1659,7 @@ const app = createApp({
       if (!isDevice.value) return []
       // LINE 外觀（#1527）：沒有左邊的設備頁籤欄，名單不分頁、全部夥伴直接用分組（例如「Claude (7/20)」），每組可收合
       const flat = skin.value === 'line'
-      const o = { tabDim: dims.tabDim, tabKey: flat ? null : tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain, pins: chatPins.value }
+      const o = { tabDim: dims.tabDim, tabKey: flat ? null : tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: selfDeviceName.value, nodeNames: nodeNames.value, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain, pins: chatPins.value }
       // 「通知」對話不進名單（連搜尋也不列），只在「通知」分頁看
       const base = withoutNoticeItems(rosterShownGroups(activeFriends(friendsAct.value), o))
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
@@ -1663,22 +1668,7 @@ const app = createApp({
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value !== 'on' ? ROSTER_CONNECTING_TEXT : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
-    // 左上角的名字＝這台設備的後台名字（和設定「設備」的詳情同一個）；改它就是 device_rename。
-    // 視窗名／收發室位址不動，me.nick 也不動（對話裡的「我」照舊）。名單還沒讀到這台的名字就先顯示視窗名
-    const nickText = ref(selfDeviceName.value)
-    const nickFocus = ref(false)   // 正在改左上角的名字：名單刷新不要蓋掉輸入中的字
-    watch(selfDeviceName, n => { if (!nickFocus.value) nickText.value = n })
-    const commitNick = async () => {
-      const want = String(nickText.value ?? '').trim()
-      const cur = selfDeviceName.value
-      const restore = () => { nickText.value = selfDeviceName.value }
-      if (want === cur) { restore(); nickErr.value = ''; return }
-      const bad = deviceNameError(want)
-      if (bad) { restore(); nickErr.value = bad; setTimeout(() => { nickErr.value = '' }, 5000); return }
-      const r = await renameDevice(info.node, want)
-      if (r) { nickErr.value = ''; nickText.value = String(r.name ?? want) }
-      else { restore(); nickErr.value = known.renameError; setTimeout(() => { nickErr.value = '' }, 5000) }
-    }
+    // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
@@ -2001,7 +1991,7 @@ const app = createApp({
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
       cloudNodes: cloudMem.value,
-      friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,
@@ -2019,7 +2009,7 @@ const app = createApp({
     onSignedIn = () => void accounts.retryReports(otherDeviceNodes(), { force: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
     // 帳號列表裡的設備名（#374）：跟設備樹同一份名單
-    const rosterNodeLabel = computed(() => nodeLabelOf(friends.value, { selfNode: info.node }))
+    const rosterNodeLabel = computed(() => nodeLabelOf(friends.value, { selfNode: info.node, nodeNames: nodeNames.value }))
     const deviceAcctView = computed(() => deviceAcctViewOf(accounts.state.remote, deviceAcct.selected, Date.now(), {
       quotaOf: email => rosterQuotaFor(accounts.state.roster, accounts.state.remote.vendor, email, { nodeLabel: rosterNodeLabel.value }),
     }))
@@ -2194,7 +2184,7 @@ const app = createApp({
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, nickText, nickFocus, commitNick,
+      STATUS, selfDeviceName, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
@@ -2233,6 +2223,8 @@ app.component('relogin-bar', ReloginBar)
 const root = app.mount('#app')
 
 await core.start()
+const nickNotice = t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) }
+if (!info.shot) void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, notify: nickNotice }); await alignDeviceName(invoke, { info, core, me }, nickNotice) })()   // 啟動後對齊一次：本機視窗名以後台的設備名為準
 pushLog(NOTICE_ID)   // 「通知」分頁讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()
 

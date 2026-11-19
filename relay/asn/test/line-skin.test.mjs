@@ -125,3 +125,20 @@ test('設定頁：LINE 下停用的選單，說明另放帶 id 的元素、selec
     assert.match(panel.slice(end, end + 260), new RegExp(String.raw`<small class="set-note" id="${id}" v-if="st\.skin === 'line'">`), `${label}：說明在 label 後面、帶 id、只在 LINE 出現`)
   }
 })
+
+// 現代外觀的輸入區是一顆膠囊，工具收在「＋」裡、沒有獨立的工具列：「工具列位置」選了也沒作用，所以停用並說明（和 LINE 鎖頭像、底色同一種寫法）
+test('設定頁：現代外觀下工具列位置停用並附說明（說明帶 id、select 指過去、不包在 label 裡），其他外觀不停用', () => {
+  const panel = read('ui/lib/settings-panel.mjs')
+  const i = panel.indexOf('<label>工具列位置\n')
+  assert.ok(i > 0, '找不到工具列位置那一列')
+  const end = panel.indexOf('</label>', i)
+  const inside = panel.slice(i, end)
+  assert.match(inside, /:disabled="st\.skin === 'modern'"/, '只在現代外觀停用')
+  assert.doesNotMatch(inside, /<small class="set-note"/, '說明不該在 label 裡')
+  assert.match(inside, /:aria-describedby="st\.skin === 'modern' \? 'set-note-toolbar' : null"/, 'select 指向說明（只在現代才有）')
+  const note = panel.slice(end, end + 300)
+  assert.match(note, /<small class="set-note" id="set-note-toolbar" v-if="st\.skin === 'modern'">/, '說明在 label 後面、帶 id、只在現代出現')
+  assert.match(note, /現代外觀的工具收在輸入框的「＋」裡，這裡先不能改；換回其他外觀就能再調/)
+  // LINE 的工具列位置有作用（#1790），不能跟著停用
+  assert.doesNotMatch(inside, /st\.skin === 'line'/)
+})

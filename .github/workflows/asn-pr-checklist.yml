@@ -1,0 +1,34 @@
+name: ASN PR 範本檢查
+
+# #1805：PR 說明裡三項必填檢查（手機電腦一起改、真資料／真路徑、舊程式會紅的回歸測試）沒勾或沒附說明就紅燈；
+# 加「復發」標籤的 PR 要有以單號命名的守門測試。範本在 .github/pull_request_template.md，檢查邏輯在 .github/scripts/pr-checklist.mjs（純函式，有測試）。
+# 豁免：臨時 CI 載具（標題 tmp:）、release/* 分支、標籤「免檢查表」（腳本會驗證改的檔案真的只有文件與 CI 設定）。
+# 只讀 PR 事件檔與 git diff，不呼叫 GitHub API、不寫任何東西、不吃 secrets。改 PR 說明或標籤會重新檢查。
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asn-pr-checklist-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-checklist:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # 要完整歷史才算得出「這張 PR 改了哪些檔案」（和目標分支比）
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: 檢查 PR 說明
+        run: node .github/scripts/pr-checklist.mjs

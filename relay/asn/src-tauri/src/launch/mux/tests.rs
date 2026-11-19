@@ -22,10 +22,12 @@ struct Fake {
     appears_at_lock: RefCell<Option<PathBuf>>,
     /// 真＝kill_tree 之後程序還活著（模擬 taskkill 啟動失敗，#596）；預設假＝結束之後查不到建立時間
     survive_kill: Cell<bool>,
+    /// 已經結束、但還有人握著 handle 所以建立時間照樣查得到的程序（#1818）
+    exited: RefCell<Vec<u32>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -76,6 +78,9 @@ impl Runner for Fake {
     fn sleep(&self, _d: Duration) {}
     fn exe_path(&self, pid: u32) -> Option<PathBuf> {
         self.exe.borrow().get(&pid).cloned()
+    }
+    fn alive(&self, pid: u32) -> bool {
+        !self.exited.borrow().contains(&pid)
     }
 }
 
@@ -822,4 +827,19 @@ fn linux_real_mux_spawn_get_text() {
     assert_eq!(count, Ok(2), "兩個夥伴窗格（asn-1、asn-2）");
     stopped.expect("停 mux");
     assert!(!still, "mux 已經結束");
+}
+
+#[test]
+fn t1818_程序已結束但建立時間還查得到_不算活著() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    std::fs::write(&m.paths.pid, "4000 777").unwrap();
+    r.birth.borrow_mut().insert(4000, 777);
+    assert_eq!(m.live_pid(), Some((4000, 777)), "還在跑：活著");
+    // 崩潰：程序結束了，但有人握著 handle，建立時間照樣查得到
+    r.exited.borrow_mut().push(4000);
+    assert_eq!(r.started_ms(4000), Some(777));
+    assert_eq!(m.live_pid(), None, "舊的判斷只看建立時間，會一直回 Some，監看永遠看不到 mux 不見");
 }

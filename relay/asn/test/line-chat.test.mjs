@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { clockLabel, dayPillText, sentStateText, lineRows, CONT_GAP_MS } from '../ui/lib/line-chat.mjs'
+import { skinCss } from './skin-css.mjs'
 
 const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime()
 
@@ -173,4 +174,35 @@ test('標題列人數：電腦與手機都顯示同一份 psm（「N 位成員�
 
 test('LINE 外觀：空白的系統提示不畫成一條小橫槓', () => {
   assert.match(read('ui/line.css'), /\[data-skin="line"\] \.sys:empty\{display:none\}/)
+})
+
+// 「工具列位置：輸入框下方」要對 LINE 外觀有作用：LINE 的 #app.win .compose-main.lc-row 把工具列固定在輸入框上方（flex-direction:column），
+// style.css 的 .tb-bottom .compose-main{column-reverse} 權重比它低、被蓋掉；所以 line.css 要自己有一條權重更高的 .tb-bottom 版本。
+// 版面算不出來（沒有瀏覽器），改比選擇器權重：.tb-bottom 版本必須勝過所有設 flex-direction 的 .compose-main.lc-row 規則，且只在 .tb-bottom 底下才反排。
+function specificity(sel) {
+  const s = sel.replace(/\[[^\]]*\]/g, '[]')
+  return [(s.match(/#[\w-]+/g) ?? []).length, (s.match(/\.[\w-]+|\[\]|:(?!:)[\w-]+/g) ?? []).length, (s.match(/(^|[\s>+~])[a-zA-Z][\w-]*/g) ?? []).length]
+}
+const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+function rulesWith(css, prop) {
+  const out = []
+  for (const m of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!new RegExp(String.raw`(^|;)\s*${prop}\s*:`).test(m[2])) continue
+    const value = m[2].match(new RegExp(String.raw`(?:^|;)\s*${prop}\s*:\s*([^;]+)`))[1].trim()
+    for (const sel of m[1].split(',')) out.push({ sel: sel.trim(), value })
+  }
+  return out
+}
+test('LINE 外觀：工具列位置「輸入框下方」（.tb-bottom）有作用，工具列在上方時維持原樣', () => {
+  const rules = rulesWith(skinCss('line'), 'flex-direction').filter(r => /\.compose-main\.lc-row$/.test(r.sel))
+  const col = rules.filter(r => r.value === 'column'), rev = rules.filter(r => r.value === 'column-reverse')
+  assert.ok(col.length >= 1, 'LINE 預設（工具列在上）的 column 規則還在')
+  assert.ok(rev.length >= 1, 'line.css 要有 .tb-bottom 底下的 column-reverse 規則')
+  for (const r of rev) assert.match(r.sel, /\.tb-bottom /, `column-reverse 只能放在 .tb-bottom 底下（${r.sel}）`)
+  for (const r of col) assert.doesNotMatch(r.sel, /\.tb-/, '預設規則不分 tb-top／tb-bottom')
+  const best = rev.map(r => specificity(r.sel)).sort(cmpSpec).at(-1)
+  for (const r of col) assert.ok(cmpSpec(best, specificity(r.sel)) > 0, `.tb-bottom 版（${best}）要比「${r.sel}」（${specificity(r.sel)}）重`)
+  // 內距也要對調：工具列在下方時貼底、輸入框在上方時上方留白
+  const pad = rulesWith(skinCss('line'), 'padding').filter(r => /\.tb-bottom /.test(r.sel))
+  assert.ok(pad.some(r => /> \.toolbar$/.test(r.sel)) && pad.some(r => /\.composer$/.test(r.sel)), '.tb-bottom 底下工具列與輸入框的內距有對調')
 })

@@ -287,9 +287,12 @@ impl Mux<'_> {
 
     /// 開窗格時用：pid 檔記的 mux 還活著（建立時間對得上）就回（程序編號, 建立時間）；否則 None。
     /// 窗格的 Window 就是用這組值記錄 mux（見 wezterm::Window::mux），認領時再核對一次
+    ///
+    /// 建立時間查得到不代表還活著（#1818）：Windows 的程序結束後，只要還有人握著它的 handle（ASN 自己為了讀結束碼握著的那一個就是），
+    /// OpenProcess 照樣成功、建立時間照樣讀得到。所以還要確認程序沒有結束；不然崩潰後的 mux 會一直被當成活著，監看永遠不下結論
     pub fn live_pid(&self) -> Option<(u32, u64)> {
         let (pid, at) = read_pid(&self.paths.pid)?;
-        (self.runner.started_ms(pid) == Some(at)).then_some((pid, at))
+        (self.runner.started_ms(pid) == Some(at) && self.runner.alive(pid)).then_some((pid, at))
     }
 
     /// 每隔 `POLL` 試連一次，最多 `d`（用次數算，等待一律經過 runner.sleep，測試不真的等）

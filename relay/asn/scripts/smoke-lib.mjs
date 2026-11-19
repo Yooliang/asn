@@ -114,7 +114,7 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
   launch_prefs_get: null,
   launch_cwd_candidates: [],
   update_remote_status: null,
-  win_ctl: null, set_presence: null, set_window_name: null, set_tray_unread: null, show_main: null, close_panels: null, close_chats: null, capture_ui_ready: null,
+  win_ctl: null, set_presence: null, device_name_align: { state: 'ok' }, set_tray_unread: null, show_main: null, close_panels: null, close_chats: null, capture_ui_ready: null,
   // 故意沒放的指令（例如 android_update_check、ai_cli_detect）：呼叫會被拒絕，模擬真機沒註冊它的情況
 })
 
@@ -341,7 +341,7 @@ export const probeKind = probe => { const e = probeEntry(probe); return e ? (typ
 export const probeSource = probe => { const e = probeEntry(probe); return e ? e.source(probe) : maskProbeSource(probe) }
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
-const SMOKE_NOW = Date.now()
+export const SMOKE_NOW = Date.now()
 const toMinute = ms => new Date(Math.floor(ms / 60_000) * 60_000).toISOString()
 export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
   const read = toMinute(now - 10 * 60_000)

@@ -9,6 +9,7 @@
 //   @@NET_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回「連線被中斷」這類網路錯誤，之後照一般信處理；@@NET 每次都回（#網路斷線自動再試）
 //   @@WRITE_NET <路徑>  先送出寫檔工具步驟並真的寫檔，然後才回網路錯誤（斷線前已經動過手：上層不能整封重送）
 //   @@UP502_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回「上游 502＋HTML 錯誤頁」，之後照一般信處理；@@UP502 每次都回（#1673 上游 5xx 自動再試）
+//   @@UP502_FIRST <n> <路徑>  每收到一次就在檔案加一行；加之前不足 n 行的回 502、之後照一般信處理（#1670：502、502、200 與連續 502）
 //   @@WRITE_UP502 <路徑>  先寫檔再回 502（動過手：不能整封重送）
 //   @@SLEEP          送出一個步驟之後就不再有動靜（看門狗測試）
 //   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
@@ -130,7 +131,13 @@ async function handle(line) {
     return fail(UP502, 1)
   }
   if ((t = /@@UP502_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], String(process.pid)); return fail(UP502, 1) }
-  if (/@@UP502(?!_ONCE)/.test(body)) return fail(UP502, 1)
+  // @@UP502_FIRST <n> <路徑>：每收到一次就在檔案加一行；加之前不足 n 行就回 502，之後照一般信處理（#1670：502、502、200 與連續 502）
+  if ((t = /@@UP502_FIRST\s+(\d+)\s+(\S+)/.exec(body))) {
+    const seen = fs.existsSync(t[2]) ? fs.readFileSync(t[2], 'utf8').split('\n').filter(Boolean).length : 0
+    fs.appendFileSync(t[2], 'x\n')
+    if (seen < Number(t[1])) return fail(UP502, 1)
+  }
+  if (/@@UP502(?!_ONCE|_FIRST)/.test(body)) return fail(UP502, 1)
   if ((t = /@@NET_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], String(process.pid)); return fail(NETERR, 1) }
   if (/@@NET(?!_ONCE)/.test(body)) return fail(NETERR, 1)
   if (/@@AUTH(?!_ONCE)/.test(body)) return fail('not logged in: run `agy` and sign in with your Google account (authentication required)', 1)
