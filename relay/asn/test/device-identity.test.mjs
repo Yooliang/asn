@@ -9,6 +9,7 @@ import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
 import { nodeFactsOf } from '../ui/lib/device-known.mjs'
+import { canShowBackRow } from '../ui/lib/device-order.mjs'
 import { deviceTabs } from '../ui/lib/tabs.mjs'
 import { groupItems } from '../ui/lib/dims.mjs'
 import { groupByDevice } from '../ui/lib/roster.mjs'
@@ -118,11 +119,25 @@ test('#1829 辨認資料在畫面上只用文字插值（不走 innerHTML）', (
   assert.equal(deviceIdentity({ node: 'abcd1234', named: false, platform: 'ios', phone: true, now: NOW }).title, '手機（1234）')
 })
 
-test('#1829 動作區沒有拿掉原有功能：手機的「顯示回名單」和電腦一樣只有已隱藏的才有；「永久移除」兩邊同一種外框紅字', () => {
+test('#1829 動作區沒有拿掉原有功能；「永久移除」兩邊同一種外框紅字', () => {
   const m = read('../ui/m.html')
-  assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanRemove && acctCur\.hidden" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
+  assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanShowBack" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
   assert.match(m, /class="m-dv-refresh m-dv-danger" v-if="!acctCur\.self" :disabled="!acctCanRemove" @click="acctAskRemove">\{\{ DEVICE_TEXT\.remove \}\}/)
   assert.match(read('../ui/lib/settings-panel.mjs'), /<button class="aero-btn danger" type="button" v-if="!askRemove"/)
+})
+
+test('#1829 「顯示回名單」電腦和手機同一個條件（只看已隱藏）：同一組設備資料實際跑兩邊，結果相同', async () => {
+  const hiddenOnline = tree().map(r => (r.key === 'node-old-pc-X7K2' ? { ...r, hidden: true, online: true } : r))
+  const hiddenOffline = tree().map(r => (r.key === 'node-old-pc-X7K2' ? { ...r, hidden: true, online: false } : r))
+  const shown = tree().map(r => (r.key === 'node-old-pc-X7K2' ? { ...r, hidden: false, online: false } : r))
+  for (const [name, devs, want] of [['已隱藏但在線', hiddenOnline, true], ['已隱藏且離線', hiddenOffline, true], ['沒隱藏、離線', shown, false]]) {
+    const desk = (await render(devs, { dev: 'node-old-pc-X7K2', devView: 'info' })).includes('>顯示回名單<')
+    const phone = canShowBackRow(devs.find(r => r.key === 'node-old-pc-X7K2'))   // 手機版的 acctCanShowBack 就是呼叫它
+    assert.equal(desk, want, `電腦：${name}`)
+    assert.equal(phone, want, `手機：${name}`)
+  }
+  assert.match(read('../ui/m.js'), /const acctCanShowBack = computed\(\(\) => canShowBackRow\(acctCur\.value\)\)/)
+  assert.match(read('../ui/lib/settings-panel.mjs'), /v-if="canShowBackRow\(curDev\) && !askRemove"/)
 })
 
 test('#1829 名字空白的線索全畫面同一個函式：設備列表、頁籤、群組分組、通知寄件者、詳情標題寫的一樣', () => {
@@ -142,14 +157,18 @@ test('#1829 名字空白的線索全畫面同一個函式：設備列表、頁�
   assert.equal(deviceTabs(named, { selfNode: 'S', nodeOrder: [node] }).all.find(t => t.key === node).label, '舊筆電')
 })
 
-test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩 text.mjs 的定義與沒有節點時的最後備援）', () => {
+test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩三處，各有理由）', () => {
   const hits = []
   for (const dir of ['../ui', '../ui/lib']) for (const f of fs.readdirSync(new URL(`${dir}/`, import.meta.url))) {
     if (!/\.(m?js|html)$/.test(f)) continue
     const src = read(`${dir}/${f}`)
     if (/UNNAMED_DEVICE|'未命名設備'/.test(src.replace(/\/\/.*$/gm, ''))) hits.push(f)
   }
-  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'notice.mjs', 'text.mjs'])
+  // 白名單每一項的理由：
+  //   account-roster.mjs：shortDevice('') 沒有節點代號可用時的最後備援（只有空字串才會走到）
+  //   device-known.mjs：LEGACY_UNNAMED，舊版畫面上的「沒名字」字樣；讀回來被當成名字存著的，一律當沒名字（通知、認得的電腦共用）
+  //   text.mjs：UNNAMED_DEVICE 常數本身的定義
+  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'device-known.mjs', 'text.mjs'])
 })
 
 test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {

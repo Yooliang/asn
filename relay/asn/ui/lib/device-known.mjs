@@ -14,8 +14,10 @@ const looksLikeFingerprint = s => HEX8.test(s) || HEX44.test(s)
 /** 顯示用（#1388）：後台給的名字不可信，含「指紋」或像指紋的名字當成沒有名字（呼叫端改顯示「未命名」，指紋另外顯示）。和 Rust 的 display_name_ok 同一套 */
 export const displayDeviceName = name => {
   const s = String(name ?? '').trim()
-  return s && !s.includes('指紋') && !looksLikeFingerprint(s) ? s : ''
+  return s && !s.includes('指紋') && !looksLikeFingerprint(s) && !LEGACY_UNNAMED.includes(s) ? s : ''
 }
+// 舊版畫面上的「沒名字」字樣：讀回來若被當成名字存著，一律當沒有名字，改走辨認線索（#1829）
+export const LEGACY_UNNAMED = ['未命名設備', '未命名的電腦']
 
 /**
  * 名單成員 → { 節點: 後台記的設備名（nodes.name）}。名字是每台設備自己的，不靠它底下有沒有夥伴（#1803：手機沒有夥伴列）。

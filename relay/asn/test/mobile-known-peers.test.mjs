@@ -50,13 +50,13 @@ test('peerOf：只要節點；不帶、不收指紋；沒確認、壞資料', ()
   assert.equal(peerOf({ fp: FP }), null)
   assert.equal(peerOf(null), null)
   assert.equal(needsConfirm(null), false)
-  assert.equal(peerOf({ node: 'pc' }, '').name, '那台電腦')
+  assert.equal(peerOf({ node: 'pc' }, '').name, '電腦（PC）')
 })
 
 test('normalizeList：沒確認的不顯示指紋；確認過的才顯示分組指紋；壞的丟掉、不帶公鑰', () => {
   const raw = { peers: [{ node: 'a', name: '甲\n機', confirmed: true, sign_pub: 'SECRET', fp: FP, first_seen_ms: 1700000000000 }, { node: 'b', name: '乙', confirmed: false, fp: 'abcdef0123456789', fp8: 'abcdef01' }, { name: 'x' }, { node: 'c', confirmed: true, fp: 'zz' }] }
   const l = normalizeList(raw)
-  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true, firstSeen: new Date(1700000000000).toLocaleString('zh-TW', { hour12: false }) }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false, firstSeen: '' }, { node: 'c', name: '', label: '未命名的電腦', fpShow: '', confirmed: true, firstSeen: '' }])
+  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true, firstSeen: new Date(1700000000000).toLocaleString('zh-TW', { hour12: false }) }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false, firstSeen: '' }, { node: 'c', name: '', label: '電腦（C）', fpShow: '', confirmed: true, firstSeen: '' }])
   assert.equal(NAME_MAX, 40)
   assert.equal(normalizeList({ peers: [{ node: 'z', name: '長'.repeat(50) }] })[0].name.length, 40, '名字最多 40 字（和後台一致）')
   assert.doesNotMatch(JSON.stringify(l), /SECRET|abcd/)
@@ -185,7 +185,7 @@ test('出題帶本機記的名字：有欄位（可為空字串）就用它，�
   assert.equal((await f.api.challenge({ node: 'pc' })).localName, '')
   f = fake('ok', { android_known_challenge: { state: 'ok', id: 'q1', options: OPTS } })
   assert.equal((await f.api.challenge({ node: 'pc' })).localName, null)
-  assert.equal(TEXT.unnamed, '未命名的電腦')
+  assert.equal(TEXT.unnamed, undefined)
   for (const k of ['rename', 'renameSave', 'renameCancel', 'renameLabel', 'renameHint']) assert.doesNotMatch(TEXT[k], /[A-Za-z]{3,}/, k)
 })
 
@@ -210,7 +210,7 @@ test('m.html：改名表單只用文字節點與輸入框（不走 v-html）；�
   assert.match(js, /await Promise\.allSettled\(\[core\.refreshRoster\(\), loadKnown\(\)\]\)/, '成功後重讀名單與認得的電腦')
   assert.match(js, /dn\.err = renameErrorText\(e\)/)
   assert.match(js, /deviceNameError\(dn\.text\)/)
-  assert.match(js, /vp\.sheetName = ch\.localName === null \? cur\.name : \(ch\.localName \|\| KNOWN_TEXT\.unnamed\)/)
+  assert.match(js, /vp\.sheetName = ch\.localName === null \? cur\.name : \(ch\.localName \|\| unnamedLabelOf\(cur\.node\)\)/)
   assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
 })
 
@@ -559,5 +559,5 @@ test('#1393 審查：改名沒拿到成功回覆要顯示失敗、名單沒讀�
   const { LOGIN_TEXT } = await import('../ui/lib/mobile-device-login.mjs')
   assert.ok(LOGIN_TEXT.confirmNeed.includes('「設定 → 設備」') && !LOGIN_TEXT.confirmNeed.includes('認得的電腦'))
   const { normalizeList } = await import('../ui/lib/mobile-known-peers.mjs')
-  assert.equal(normalizeList({ peers: [{ node: 'pc', name: '工作機 a93cc519', confirmed: false }] })[0].label, '未命名的電腦')
+  assert.equal(normalizeList({ peers: [{ node: 'pc', name: '工作機 a93cc519', confirmed: false }] })[0].label, '電腦（PC）')
 })

@@ -12,7 +12,7 @@ test('認得的電腦：欄位壞的丟掉，名字清掉控制字元', () => {
   assert.equal(v.peers[0].name, '家用 機')
   assert.ok(v.peers[0].firstSeen)
   assert.equal(v.peers[1].name, '', '本機記的名字是空的')
-  assert.equal(v.peers[1].label, '未命名的電腦', '畫面上顯示未命名（指紋照樣顯示在旁邊）')
+  assert.equal(v.peers[1].label, '電腦（K9B2）', '畫面上顯示辨認線索（指紋照樣顯示在旁邊，#1829）')
   assert.equal(v.peers[0].label, '家用 機')
   assert.equal(v.peers[1].firstSeen, '')
   assert.deepEqual(normalizeView(null), { peers: [] })
@@ -25,7 +25,7 @@ test('認得的電腦：只能看和忘記，錯誤不露出內部訊息', () =>
 })
 
 test('設備改名：名字只有一個（後台）、最多 40 字；只有 device_rename 與設定頁的 device-rename，舊的本機改名全拿掉', async () => {
-  assert.equal(TEXT.unnamed, '未命名的電腦')
+  assert.equal(TEXT.unnamed, undefined, '#1829 「未命名的電腦」整個拿掉，改走辨認線索')
   for (const k of ['rename', 'renameSave', 'renameCancel', 'renameLabel', 'renameHint']) assert.equal(TEXT[k], undefined, k)
   assert.equal(normalizeView({ peers: [{ node: 'a', name: '長'.repeat(60) }] }).peers[0].name.length, 40)
   const fs = await import('node:fs')

@@ -10,7 +10,6 @@ export const IDENTITY_TEXT = Object.freeze({
   seen: '最後在線',
   code: '代號',
   version: 'ASN 版本',
-  reported: '帳號最後回報',
   online: '現在在線',
   noRecord: '沒有紀錄',
 })
@@ -46,7 +45,7 @@ export const dateTimeText = ms => {
  *   online：現在是不是在線（本機一律在線）；version：本機的 ASN 版本（只有這台自己知道）
  * 回 { title, named, rows:[{ key, label, value }] }。每一列都有值（沒有資料寫「沒有紀錄」）
  */
-export function deviceIdentity({ node = '', label = '', named = false, platform = '', phone = false, online = false, createdMs = 0, seenMs = 0, version = '', reported = '', now = Date.now() } = {}) {
+export function deviceIdentity({ node = '', label = '', named = false, platform = '', phone = false, online = false, createdMs = 0, seenMs = 0, version = '', now = Date.now() } = {}) {
   const T = IDENTITY_TEXT
   const title = named ? label : unnamedClue({ phone, node })
   const pText = PLATFORM_TEXT[String(platform ?? '').toLowerCase()] ?? ''
@@ -58,7 +57,6 @@ export function deviceIdentity({ node = '', label = '', named = false, platform 
     { key: 'seen', label: T.seen, value: seen },
     { key: 'code', label: T.code, value: nodeTail(node) || T.noRecord },
   ]
-  if (reported) rows.push({ key: 'reported', label: T.reported, value: String(reported) })
   if (version) rows.push({ key: 'version', label: T.version, value: String(version) })
   return { title, named: Boolean(named), rows }
 }

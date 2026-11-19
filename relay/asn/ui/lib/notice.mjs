@@ -1,3 +1,4 @@
+import { LEGACY_UNNAMED } from './device-known.mjs'
 // 系統通知的共用判斷（#848，電腦與手機共用；Rust 橋與 Node 橋有各自一份同規則的實作，改動要一起改）。
 // 純函式，node 與瀏覽器都能跑。
 
@@ -126,7 +127,7 @@ const rowKey = (m, i) => (typeof m.id === 'string' && m.id ? m.id : `t${m.t}-${i
 // opened＝這次開著期間已點開過的 key（點開一則只消那一則；全部點完才整個標已讀）
 // 舊存檔的通知在收信當下就把設備名存成字串（沒有節點代號），舊版沒名字時存的是「未命名設備」：這個字串換不出辨認線索，
 // 讀回來一律不顯示（#1829；新通知沒名字時寫「電腦（代號末 4 碼）」，不再有這個字串）
-export const LEGACY_DEV_NAMES = ['未命名設備']
+export const LEGACY_DEV_NAMES = LEGACY_UNNAMED
 // hideDev＝另外不顯示的設備名
 export function noticeRows(log, { unread = 0, opened = [], hideDev = [] } = {}) {
   const seen = new Set(Array.isArray(opened) ? opened : [])

@@ -95,6 +95,8 @@ export function pruneRemoved(removed, friends, { selfNode } = {}) {
 }
 // 設備列（buildDeviceTree 的結果）：別台、離線的設備都能永久移除（不必等它被自動隱藏；還有未讀或夥伴的也一樣）
 export const canRemoveRow = d => Boolean(d && !d.self && !d.online && !d.removed)
+// 「顯示回名單」：只看「已隱藏」（和能不能移除無關；電腦、手機同一個條件，#1829）
+export const canShowBackRow = d => Boolean(d && d.hidden && !d.removed)
 export const visibleRows = rows => (Array.isArray(rows) ? rows : []).filter(d => !d.removed)
 export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 

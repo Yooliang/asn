@@ -105,7 +105,7 @@ test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一�
   const html = await render({ catKey: 'devices', dev: 'W', devView: 'acct' })
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(!html.includes('class="dv-tag kind">電腦<'), '電腦類型標籤多餘，不顯示'); assert.match(html, /class="dv-tag on">在線</)
-  assert.ok((await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('3 分鐘前'), '回報時間搬到詳情頁')
+  assert.ok(!(await render({ catKey: 'devices', dev: 'W', devView: 'info' })).includes('最後回報'), '帳號的事（回報時間）不放設備辨認區，只放帳號頁（#1879）')
   const cards = [...html.matchAll(/<li class="dv-vendor[^"]*"/g)]
   assert.equal(cards.length, 3)
   for (const k of ['claude', 'grok', 'pi']) assert.ok(html.includes(vendorIconSvg(k)), `${k} 圖示用 vendorIconSvg`)
