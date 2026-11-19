@@ -13,7 +13,7 @@ export const mnoselfProbeSource = () => `(async () => {
   let sawSelf = false;
   for (let i = 0; i < n; i++) {
     const row = rows()[i];
-    const name = row?.querySelector('b')?.textContent ?? '';
+    const name = row?.textContent ?? '';
     row?.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
     const go = row?.querySelector('.m-dv-accbtn');
     if (!go) continue;
