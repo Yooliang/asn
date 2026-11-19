@@ -102,7 +102,7 @@ import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
-import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall, syncPendingDeviceName } from './lib/device-rename.mjs'
+import { alignDeviceName, followSelfRename, renameDeviceFromPage, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -468,7 +468,7 @@ async function renameDevice(node, name) {
   known.busy = true
   let r
   try {
-    r = await renameDeviceCall(invoke, { node, name })
+    r = await renameDeviceFromPage(invoke, store(ONBOARD_STORE), { node, name })
     known.renameError = ''
     if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {

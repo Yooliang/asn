@@ -246,3 +246,56 @@ test('#1803 首次引導連不上或沒簽章時不卡住：名字先存本機�
   assert.match(read('ui/lib/onboard-card.mjs'), /r\.deferred === true && r\.note/)
   for (const f of ['ui/list.js', 'ui/m.js']) assert.match(read(f), /syncPendingDeviceName\(invoke, store\(ONBOARD_STORE\)/, `${f} 啟動時補送`)
 })
+
+test('#1839 首次引導存的待送名字，不能蓋掉之後在設備頁改的新名字（兩道防線）', async () => {
+  const { setDeviceNameOnboard, syncPendingDeviceName, renameDeviceFromPage, PENDING_KEY, PENDING_BASE_KEY } = await import('../ui/lib/device-rename.mjs')
+  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, get: () => v } }
+  const mk = () => ({ info: { window_name: '舊預設名', old_names: [] }, me: { nick: '' }, core: { setWindowName() {}, nodeNames: {} } })
+  const offline = async () => { throw '改名沒成功，請稍後再試' }
+  // 第一道：引導離線存待送 → 設備頁改名成功 → 待送被清掉 → 補送什麼都不送
+  {
+    const st = mkStore({ done: true }), ctx = mk()
+    await setDeviceNameOnboard(offline, st, { node: 'P', name: '引導取的名', base: '舊預設名' })
+    assert.equal(st.get()[PENDING_KEY], '引導取的名')
+    const sent = []
+    await renameDeviceFromPage(async (c, a) => { sent.push(a.name); return { ok: true, name: a.name } }, st, { node: 'P', name: '設備頁新名' })
+    assert.deepEqual(st.get(), { done: true }, '改名成功就清掉待送名字與基準')
+    ctx.core.nodeNames = { P: '設備頁新名' }
+    assert.equal(await syncPendingDeviceName(async (c, a) => { sent.push(a.name); return { ok: true, name: a.name } }, st, ctx, { node: 'P' }), null)
+    assert.deepEqual(sent, ['設備頁新名'], '補送不能再送出舊的引導名字')
+  }
+  // 改名失敗時不清待送（還沒改成）
+  {
+    const st = mkStore({ [PENDING_KEY]: '引導取的名', [PENDING_BASE_KEY]: '舊預設名' })
+    await assert.rejects(renameDeviceFromPage(offline, st, { node: 'P', name: 'x' }))
+    assert.equal(st.get()[PENDING_KEY], '引導取的名')
+  }
+  // 第二道：待送還在，但後台名字已被改過（例如在別台改）→ 不送、清掉、寫 log
+  {
+    const st = mkStore({ [PENDING_KEY]: '引導取的名', [PENDING_BASE_KEY]: '舊預設名' }), ctx = mk(), logs = []
+    ctx.core.nodeNames = { P: '別台改的新名' }
+    const sent = []
+    assert.equal(await syncPendingDeviceName(async (c, a) => { sent.push(a); return { ok: true } }, st, ctx, { node: 'P', log: (...a) => logs.push(a.join(' ')) }), null)
+    assert.deepEqual(sent, [], '後台已被改過就不送')
+    assert.deepEqual(st.get(), {}, '待送名字清掉')
+    assert.ok(logs.length === 1 && logs[0].includes('別台改的新名'), '要寫 log 說明原因')
+  }
+  // 沒改過名：後台名字還是當初那個 → 照常補送
+  {
+    const st = mkStore({ [PENDING_KEY]: '引導取的名', [PENDING_BASE_KEY]: '舊預設名' }), ctx = mk()
+    ctx.core.nodeNames = { P: '舊預設名' }
+    const sent = []
+    const r = await syncPendingDeviceName(async (c, a) => { sent.push(a.name); return { ok: true, name: a.name, self_renamed: true, window_name: a.name } }, st, ctx, { node: 'P' })
+    assert.deepEqual(sent, ['引導取的名'], '沒改過名照常補送')
+    assert.equal(r.ok, true)
+    assert.deepEqual(st.get(), {})
+    // 名單還沒讀到後台名字時也照常補送
+    const st2 = mkStore({ [PENDING_KEY]: 'y' }); const s2 = []
+    await syncPendingDeviceName(async (c, a) => { s2.push(a.name); return { ok: true, name: a.name } }, st2, mk(), { node: 'P' })
+    assert.deepEqual(s2, ['y'])
+  }
+  // 接線：電腦設備頁與手機設備頁都走會清待送的入口，引導把基準名字存下來
+  assert.match(read('ui/list.js'), /renameDeviceFromPage\(invoke, store\(ONBOARD_STORE\)/)
+  assert.match(read('ui/lib/mobile-known-peers.mjs'), /renameDeviceFromPage\(invoke, pendingStore \?\? tauriStore\(ONBOARD_STORE\)/)
+  for (const f of ['ui/m.js', 'ui/onboard.js']) assert.match(read(f), /base: info\.window_name/, `${f} 引導存基準名字`)
+})

@@ -2,6 +2,7 @@
 // 名字存在後台（relay.nodes.name），本機視窗名由 Rust 在改名成功後跟著換，不再有第二個輸入欄、第二個存檔。
 // 這個檔案只放「怎麼叫 Rust」與改名後怎麼就地更新畫面，純函式／注入 invoke，node 與瀏覽器都能跑。
 import { applyRename } from './rename.mjs'
+import { displayDeviceName } from './device-known.mjs'
 
 /** 改名要叫的 Rust 命令：手機是 android_known_rename、電腦是 device_rename（兩個命令都送後台並替本機視窗名跟上） */
 export const renameCommandOf = phone => (phone === true ? 'android_known_rename' : 'device_rename')
@@ -18,6 +19,20 @@ export const alignFailedNote = (name, reason) => `設備頁設定的名字是「
 /** 首次引導時連不上後台：名字先存在本機，連上後自動套用 */
 export const PENDING_NOTE = '目前連不上後台，名字先存在這台，連上後會自動套用。'
 export const PENDING_KEY = 'pendingDeviceName'
+/** 存待送名字當下，這台的本機名字（＝後台當時記的名字）。補送時後台名字和它不同，就是之後有人改過名（#1839） */
+export const PENDING_BASE_KEY = 'pendingDeviceNameBase'
+
+/** 設備頁改名成功後清掉本機待送的名字，補送就不會把新名字蓋回舊的（#1839，第一道）。清不掉只記 log，不影響改名結果 */
+export async function clearPendingDeviceName(store, log = console.info) {
+  if (!store) return false
+  try {
+    const saved = (await store.load()) ?? {}
+    if (!(PENDING_KEY in saved) && !(PENDING_BASE_KEY in saved)) return false
+    const { [PENDING_KEY]: _a, [PENDING_BASE_KEY]: _b, ...rest } = saved
+    await store.save(rest)
+    return true
+  } catch (e) { log('[ASN] 清掉待送的設備名沒成功', String(e?.message ?? e ?? '')); return false }
+}
 
 /** 替任一台設備改名；成功回 Rust 的結果（{ ok, name, changed, self_renamed?, window_name?, window_rename_failed? }），失敗丟 Error（訊息是給人看的中文） */
 export async function renameDevice(invoke, { node, name, phone = false }) {
@@ -26,6 +41,13 @@ export async function renameDevice(invoke, { node, name, phone = false }) {
   } catch (e) {
     throw new Error(String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試')
   }
+}
+
+/** 設備頁改名的入口（電腦、手機共用）：改名成功就清掉本機待送的名字（#1839）。store 是首次引導的存檔 */
+export async function renameDeviceFromPage(invoke, store, args, log = console.info) {
+  const r = await renameDevice(invoke, args)
+  await clearPendingDeviceName(store, log)
+  return r
 }
 
 /**
@@ -63,14 +85,14 @@ export async function alignDeviceName(invoke, ctx, notify = () => {}, log = cons
  * 首次引導存設備名稱：先送後台（和設備頁同一條）；連不上、沒登入等失敗就先存在本機（引導的存檔 store），畫面說「連上後會自動套用」，
  * 引導不會卡住。回 { deferred: true, note } 或 Rust 的結果。名字不合規則這類「改了也不會成功」的錯誤（後台 bad_request）照舊丟錯讓人改
  */
-export async function setDeviceNameOnboard(invoke, store, { node, name, phone = false }) {
+export async function setDeviceNameOnboard(invoke, store, { node, name, phone = false, base = '' }) {
   let r
   try {
     r = await renameDevice(invoke, { node, name, phone })
   } catch (e) {
     if (/不合規則|不能|保留|1～40/.test(String(e.message))) throw e
     const saved = (await store.load().catch(() => null)) ?? {}
-    await store.save({ ...saved, [PENDING_KEY]: String(name).trim() })
+    await store.save({ ...saved, [PENDING_KEY]: String(name).trim(), ...(base ? { [PENDING_BASE_KEY]: String(base) } : {}) })
     return { deferred: true, note: PENDING_NOTE }
   }
   // 後台改好了、本機寄信名字被規則擋下：不讓引導往下走，說原因請本人換個名字（再送一次就會一起換）
@@ -78,14 +100,24 @@ export async function setDeviceNameOnboard(invoke, store, { node, name, phone = 
   return r
 }
 
-/** 啟動時補送首次引導存在本機的名字（連上之後）。成功或名字已不需要就清掉；還是送不出去就留著下次再試 */
+/**
+ * 啟動時補送首次引導存在本機的名字（連上之後）。成功或名字已不需要就清掉；還是送不出去就留著下次再試。
+ * 第二道防線（#1839）：補送前先看後台目前記的名字，和存待送名字當下的不同，代表之後有人改過名（例如在別台設備改），就不送、清掉待送的名字、寫 log
+ */
 export async function syncPendingDeviceName(invoke, store, ctx, { node, phone = false, notify = () => {}, log = console.info } = {}) {
   const saved = (await store.load().catch(() => null)) ?? {}
   const name = typeof saved[PENDING_KEY] === 'string' ? saved[PENDING_KEY] : ''
   if (!name) return null
+  const { [PENDING_KEY]: _gone, [PENDING_BASE_KEY]: base0, ...rest } = saved
+  const base = typeof base0 === 'string' && base0 ? base0 : String(ctx?.info?.window_name ?? '')
+  const backend = displayDeviceName(ctx?.core?.nodeNames?.[node])
+  if (backend && base && backend !== base && backend !== name) {
+    log('[ASN] 不補送首次引導的設備名：後台的名字已被改過', `後台「${backend}」、當初「${base}」、待送「${name}」`)
+    await store.save(rest).catch(() => {})
+    return null
+  }
   try {
     const r = await renameDevice(invoke, { node, name, phone })
-    const { [PENDING_KEY]: _gone, ...rest } = saved
     await store.save(rest).catch(() => {})
     followSelfRename(ctx, r, notify, log)
     return r

@@ -45,7 +45,7 @@ test('設備改名：名字只有一個（後台）、最多 40 字；只有 dev
   assert.ok(SETTING_OPS.includes('device-rename') && !SETTING_OPS.includes('known-rename'))
   const list = read('../ui/list.js')
   assert.match(list, /case 'device-rename': if \(value\?\.node\) await renameDevice\(value\.node, value\.name\)/)
-  assert.match(list, /renameDeviceCall\(invoke, \{ node, name \}\)/)
+  assert.match(list, /renameDeviceFromPage\(invoke, store\(ONBOARD_STORE\), \{ node, name \}\)/)
   assert.doesNotMatch(list, /device_known_rename/)
   assert.doesNotMatch(read('../src-tauri/src/lib.rs'), /device_known_rename/)
 })
