@@ -1,11 +1,11 @@
 {
-  "version": "0.2.32",
-  "notes": "- 新功能：看大圖時可以左右切換同一個對話裡的上一張、下一張照片（手機用滑的、電腦用方向鍵），關閉和另存換成跟外觀一致的圖示\n- 改善：夥伴等你同意時，電腦版確認框照 AI 給的原選項顯示，提示太長可以捲動看完；遇到 rm 這類危險指令會加紅色提醒，「不再詢問」要按住一秒\n- 改善：設定裡的設備頁重新排版，名字和狀態放在標題，詳情、QR Code、改名、帳號、工作管理員收成一排按鈕\n- 改善：釘選的夥伴直接在狀態燈上畫圖釘，同一台設備裡釘選的在最上面，其他照最新訊息排序\n- 改善：Ultra 這類沒有 5 小時額度的帳號，不再因為舊的 5 小時數字被標「資料較舊」\n- 修正：開新夥伴時，離線的設備不能再被選\n- 修正：設備紀錄讀不到時，這台的詳情裡也看得到錯誤\n- 修正：別台要在這台打字時，查詢暫時失敗不會讓確認框被提早收掉",
-  "pub_date": "2026-11-18T16:01:30.644Z",
+  "version": "0.2.33",
+  "notes": "- 改善：0.2.33 起不再跳遠端打字確認框；不想讓別台在這台打字，到「設定 → 視窗與系統匣」關掉「允許遠端在這台打字」。（#1745）\n- 改善：別台要在這台打字、但這台關著這個開關時，對方會看到白話說明，並告訴對方要到「設定 → 視窗與系統匣」打開。（#1745）",
+  "pub_date": "2026-11-19T01:47:23.067Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlRd21ad1p4YzlZWUFZOUF2dGc0YmV6VTBoODBrZWRCSWliRU1mQWM3TncwZ0dITC9acm1SMG1ncHo0dWllN2p6SkpPbWFKSzRZWUtXY3Rhb2lqalFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDE1ODkzCWZpbGU6QVNOXzAuMi4zMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjMyCml4alZwUXB5YmZTc09XaitxM0wwc1AvaHFtMU8vdHFyaFcvRlRFRHcxc3Qwd2luRGdFTFFORVVkUUVyUGFkRmhFeWRoSTh2YnNBZ1ZseXYxbEFzcEJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.32_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybis5ajJVOEczRktKSEN5MjJSTkI2bC9WRFhPWFdmUlNSbXVhbXVxR1AwTGxwKytrWjRNRFJLWTBieUhZN0ladk03c1BBVVAvK2RFT3RRSXlJZzZkWGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDUxNjc2CWZpbGU6QVNOXzAuMi4zM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjMzCmoxMk1JdG9IVUJ5Q2FUQ2VFTnhreGUzRGkrMXA2RVVOTXFuZmV3MlV2WE5pWVhpc0IxRkNSS1Iyc3c5ekVEeTZKUFpuTjk1RC9RMEhXdHp1YzUyYUNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.33_x64-setup.exe"
     }
   }
 }
