@@ -118,3 +118,11 @@ test('最新量測結果（有設 ASN_HIT_TARGETS_LATEST 才檢查）：不准�
   assert.deepEqual(c.worsened.map(x => lineOf(x.now)), [], '惡化的觸控目標違規')
   assert.deepEqual(c.unmeasured, [], '基準裡的情境這次沒量到')
 })
+
+test('守門：CI 的 ui-shots 工作真的跑 hit-targets.mjs 並用 ASN_HIT_TARGETS_LATEST 檢查最新結果（不能只在本機手動量）', () => {
+  const y = fs.readFileSync(new URL('../../../.github/workflows/asn-ui-shots.yml', import.meta.url), 'utf8').replaceAll(String.fromCharCode(13), '')
+  assert.ok(y.includes('node scripts/hit-targets.mjs --out '), 'CI 要真的量一次')
+  assert.ok(y.includes('ASN_HIT_TARGETS_LATEST=') && y.includes('node --test test/hit-targets.test.mjs'), '量完要用最新結果跑棘輪測試')
+  const step = y.slice(y.indexOf('id: hit'))
+  assert.ok(step.slice(0, 80).includes('continue-on-error: true'), '只報告，不擋 PR')
+})
