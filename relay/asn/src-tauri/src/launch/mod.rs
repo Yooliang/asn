@@ -193,8 +193,44 @@ pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), Str
     blocking_timeout(move || launch_prefs_set_sync(&data_dir, prefs)).await
 }
 
-pub async fn relay_launch(relay: &Relay, body: Value) -> Result<Value, String> {
-    relay.api("launch", Some(body)).await
+/// 遠端開新夥伴。有登入就帶本人簽章（成員角色的電腦不帶，後台回 403 forbidden；跟 [`relay_launchers`] 一樣），沒登入照舊不帶。
+/// 錯誤一律換成白話（[`launch_error_text`]），畫面不會看到動作名與 HTTP 字樣；原文（只有動作名、狀態碼、後台的錯誤代碼，不含金鑰與內文）先交給 `log` 留底，
+/// 不然下次遇到不認得的錯誤，畫面只剩一句「沒成功」，也沒有任何地方能查
+pub async fn relay_launch(relay: &Relay, body: Value, token: Option<&str>, log: &(dyn Fn(String) + Sync)) -> Result<Value, String> {
+    let signed = token.is_some_and(|t| !t.is_empty());
+    relay.api_signed("launch", Some(body), token).await.map_err(|e| {
+        log(format!("開新夥伴失敗：{e}（{}）", if signed { "有帶本人簽章" } else { "沒登入，沒帶簽章" }));
+        launch_error_text(&e, signed)
+    })
+}
+
+/// 後台回的開窗錯誤（「launch HTTP 403 forbidden」這種）→ 給人看的話：講發生什麼事、要怎麼做。
+/// 錯誤代碼對照 supabase/functions/_shared/launch.ts 的 ERROR_TEXT；不認得的代碼與狀態碼走最後一句，不把原字串秀出來
+/// `signed`＝這次有沒有帶本人簽章：沒登入又被擋（forbidden），要請他先登入，不是「兩台不同帳號」
+pub fn launch_error_text(e: &str, signed: bool) -> String {
+    if e.contains("連線失敗") || e.contains("讀回應中斷") {
+        return "連不上收發室，請確認網路後再試一次".into();
+    }
+    let code = e.split("HTTP").nth(1).map(|r| r.trim().splitn(2, ' ').nth(1).unwrap_or("").trim()).unwrap_or("");
+    let status = e.split("HTTP").nth(1).map(|r| r.trim().split(' ').next().unwrap_or("")).unwrap_or("");
+    match code {
+        "forbidden" if !signed => "這台還沒登入帳號，請先登入後再試（要替別台開夥伴得先登入）",
+        "forbidden" => "這台沒有權限替那台開夥伴，請確認兩台登入同一個帳號",
+        "not_found" => "找不到那台電腦，它可能離線太久或已被移除",
+        "no_launcher" => "那台電腦還沒開放遠端開新夥伴，請到那台的設定打開「允許我的其他設備替這台開新視窗」",
+        "bad_name" => "夥伴名稱只能用英數、連字號與中文，1～40 字，不能以連字號開頭",
+        "bad_profile" => "那台電腦沒有這個啟動設定，請換一個模型",
+        "bad_cwd" => "工作資料夾不在那台電腦允許的清單裡，請換一個資料夾",
+        "bad_first_message" => "第一句話太長了，最多 4000 字",
+        "bad_pi_model" => "經 pi 的提供者和模型要一起選，請重新選一次",
+        "name_taken" => "那台電腦已經有同名的夥伴（或剛開過），請換個名字",
+        "rate_limited" => "那台電腦這個小時開太多視窗了，請稍後再試",
+        "bad_request" => "送出的資料格式不對，請重新選一次",
+        "internal" => "收發室發生錯誤，請稍後再試",
+        _ if status == "401" => "登入過期了，請重新登入後再試",
+        _ => "開新夥伴沒成功，請稍後再試",
+    }
+    .into()
 }
 
 /// 各電腦的啟動設定。有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶，擁有者角色的電腦一樣查得到
@@ -205,9 +241,46 @@ pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>, token: Opt
 
 #[cfg(test)]
 mod tests {
+    use super::launch_error_text;
     use super::config::{canonical_launch_cwd, valid_partner_name};
     use super::with_effective_max;
     use serde_json::json;
+
+    #[test]
+    fn 開窗錯誤_全部換成白話_沒有動作名也沒有狀態碼字樣() {
+        let all = [
+            ("launch HTTP 403 forbidden", "這台沒有權限替那台開夥伴，請確認兩台登入同一個帳號"),
+            ("launch HTTP 404 not_found", "找不到那台電腦，它可能離線太久或已被移除"),
+            ("launch HTTP 409 no_launcher", "那台電腦還沒開放遠端開新夥伴，請到那台的設定打開「允許我的其他設備替這台開新視窗」"),
+            ("launch HTTP 400 bad_name", "夥伴名稱只能用英數、連字號與中文，1～40 字，不能以連字號開頭"),
+            ("launch HTTP 400 bad_profile", "那台電腦沒有這個啟動設定，請換一個模型"),
+            ("launch HTTP 400 bad_cwd", "工作資料夾不在那台電腦允許的清單裡，請換一個資料夾"),
+            ("launch HTTP 400 bad_first_message", "第一句話太長了，最多 4000 字"),
+            ("launch HTTP 400 bad_pi_model", "經 pi 的提供者和模型要一起選，請重新選一次"),
+            ("launch HTTP 409 name_taken", "那台電腦已經有同名的夥伴（或剛開過），請換個名字"),
+            ("launch HTTP 429 rate_limited", "那台電腦這個小時開太多視窗了，請稍後再試"),
+            ("launch HTTP 400 bad_request", "送出的資料格式不對，請重新選一次"),
+            ("launch HTTP 500 internal", "收發室發生錯誤，請稍後再試"),
+            ("launch HTTP 401", "登入過期了，請重新登入後再試"),
+            ("launch HTTP 502", "開新夥伴沒成功，請稍後再試"),
+            ("launch HTTP 400 something_new", "開新夥伴沒成功，請稍後再試"),
+            ("launch 連線失敗：timeout", "連不上收發室，請確認網路後再試一次"),
+        ];
+        for (raw, want) in all {
+            let got = launch_error_text(raw, true);
+            assert_eq!(got, want, "{raw}");
+            assert!(!got.contains("HTTP") && !got.contains("launch") && !got.contains("forbidden"), "{raw} → {got}");
+        }
+    }
+
+    #[test]
+    fn 開窗錯誤_沒登入被擋_請他先登入_不說是帳號不同() {
+        let t = launch_error_text("launch HTTP 403 forbidden", false);
+        assert_eq!(t, "這台還沒登入帳號，請先登入後再試（要替別台開夥伴得先登入）");
+        assert!(!t.contains("HTTP") && !t.contains("forbidden"));
+        // 沒登入但是別的錯誤：照原本的白話
+        assert_eq!(launch_error_text("launch HTTP 429 rate_limited", false), launch_error_text("launch HTTP 429 rate_limited", true));
+    }
 
     #[test]
     fn 設定頁讀到的上限跟實際擋的同一個來源() {
