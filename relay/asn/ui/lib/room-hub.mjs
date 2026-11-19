@@ -14,8 +14,8 @@ export function unmatchedText(r) {
 }
 
 // visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
-export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x }) {
-  const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
+export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x, onRooms = () => {}, onFail = () => {} }) {
+  const st = reactive({ rooms: [], loaded: false, err: false, signed: true, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   // 目前離線的成員鍵（叫醒順序標籤把離線的畫灰色加「離線」，#1656）；讀不到成員就是空集合
   const offlineKeysOf = room => new Set(offlineNames(room?.members).map(n => n.key))
@@ -28,7 +28,9 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const r = await invoke('relay_rooms')
       st.rooms = Array.isArray(r?.rooms) ? r.rooms : []
       st.err = false; st.loaded = true
-    } catch { st.err = true }
+      st.signed = r?.signed !== false   // 沒帶本人簽章（登入失效）：後台只回得出這台的群組，畫面要在原位說一句（#1764）
+      try { onRooms(r) } catch { /* 提醒條出錯不影響群組 */ }
+    } catch (e) { st.err = true; try { onFail(e) } catch { /* 同上 */ } }
     return st.rooms
   }
 

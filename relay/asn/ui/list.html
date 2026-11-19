@@ -53,11 +53,7 @@
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>
     </div>
-    <div class="upd-bar relogin-bar" v-if="reloginBar.show" role="status">
-      <span class="upd-text" :title="RELOGIN_BAR_HINT">{{ RELOGIN_BAR_TEXT }}</span>
-      <button class="aero-btn upd-btn" type="button" @click.stop="goLogin">{{ RELOGIN_BAR_ACTION }}</button>
-      <button class="aero-btn upd-btn" type="button" @click.stop="dismissReloginBar">{{ RELOGIN_BAR_DISMISS }}</button>
-    </div>
+    <relogin-bar variant="desk" :show="reloginBar.show" @login="goLogin" @dismiss="dismissReloginBar"></relogin-bar>
     <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed', dl: upd.phase === 'installing' }">
       <span class="upd-text" v-if="upd.phase === 'available'">{{ updateNoticeText(upd.info) }}</span>
       <!-- 下載中（#1526）：直角進度條，依百分比往右填滿，文字（%、MB）疊在上面；左右和下方那排分頁對齊（樣式在 style.css 與各外觀） -->
@@ -176,6 +172,7 @@
             <div class="empty-list" v-else-if="!chatRowsPinned.length">{{ chatQuery.trim() ? '找不到符合的對話。' : '還沒有對話。到「夥伴」點一位開始。' }}</div>
           <p class="ng-note ng-msg" v-if="guideOnChats && guideMsg" role="alert">{{ guideMsg }}</p>
           <div class="ng-reshow-wrap" v-if="guideReshowChats"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
+          <p class="gl-empty-hint" v-if="roomsNote" role="status">{{ roomsNote }}</p>
           <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err && !chatQuery.trim()">要和好幾位一起聊，可以建立群組，或貼上別人給你的邀請連結加入。</p>
         </div>
         <div class="list notice-list" v-else-if="tab === 'notice'">

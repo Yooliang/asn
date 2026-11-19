@@ -77,6 +77,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
@@ -164,6 +165,14 @@ async function startLogin(key) {
   await finishLogin()
 }
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
+// 「需要重新登入」提醒條（#1764）：和電腦版同一個元件、同一份文字、同一套判斷（lib/relogin-bar.mjs）。
+// 收到清掉登入的事件、群組列表回報登入失效、後台回 401、App 回到前景時都立刻再查，平常每分鐘也看一次；不能只在開 App 時查一次
+const reloginWatch = createReloginWatch({ status: () => authApi.status(), listen, canSkipLogin: () => info.can_skip_login === true, reactive })
+const reloginBar = reloginWatch.st
+const dismissReloginBar = reloginWatch.dismiss
+// 按「登入」走現有的登入畫面（同一組登入鈕）；有金鑰的手機可以按「先不要」回名單
+const goLogin = () => { login.phase = 'idle'; login.error = ''; screen.value = 'login' }
+const backFromLogin = () => { screen.value = 'main' }
 
 let savedTab = HOME_TAB   // 上次離開時的大分頁（讀存檔後才知道）
 const nav = reactive(initialNav())
@@ -255,11 +264,12 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
   // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。
   // 前景時每 30 秒再告知一次（續命）：Rust 的前景告知 90 秒就過期，背景時網頁計時器被凍住不會續命，所以「進背景」的告知就算遺失也只會多撐一下
-  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}); try { fgListener?.(fg === true) } catch {} }
+  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}); try { fgListener?.(fg === true) } catch {}; if (fg === true) void reloginWatch.onForeground() }   // 回到前景也查一次登入狀態（#1764）
   window.__asnFgEvent = tellFg
   document.addEventListener('visibilitychange', () => tellFg(document.visibilityState === 'visible'))
   tellFg(document.visibilityState === 'visible')
   setInterval(() => { if (document.visibilityState === 'visible') tellFg(true) }, FG_RENEW_MS)
+  void reloginWatch.start()
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
@@ -362,7 +372,7 @@ const app = createApp({
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
     // 資料與動作都在 lib/room-hub.mjs（電腦版共用）；發言與讀取走 Rust 指令並帶本人簽章
     const groupApi = createGroupApi(invoke)
-    const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', photos: true, reactive, visible: rid => core.isChatVisible(roomChatId(rid)) })   // 跟 1 對 1 同一套：只有正在看的那個群組才標已讀
+    const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', photos: true, reactive, visible: rid => core.isChatVisible(roomChatId(rid)), onRooms: r => reloginWatch.noteRooms(r), onFail: e => reloginWatch.noteError(e) })   // 跟 1 對 1 同一套：只有正在看的那個群組才標已讀
     const rooms = computed(() => hub.st.rooms)
     const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
     const roomNote = computed({ get: () => hub.st.note, set: v => { hub.st.note = v } })   // 對話頁上方的一行提示（讀不到、發言失敗）
@@ -404,6 +414,7 @@ const app = createApp({
     const plusOpen = ref(false)   // 名單右上角「＋」選單
     const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
+    const roomsNote = computed(() => roomsNoteText(hub.st))   // 群組清單原位的說明（讀不到、或登入失效只列得出這台的群組）；正常時是空字串
     const roomRowOf = id => hub.rowOf(id)
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
     async function refreshRooms() {
@@ -1619,7 +1630,7 @@ const app = createApp({
       itemIcon, isDangerItem, tabIcon, tabIconOf,
       mobileRemoteViewApi, mobileRemoteInputApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（案 A：對話頁「訊息／終端」切換）、在下方輸入框打字（#1378）；發起先過生物辨識，不能用電腦版的 remoteViewApi／remoteInputApi
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
-      screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
+      screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin, reloginBar, dismissReloginBar, goLogin, backFromLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
       pf, sw, pagerStyle, pagerMoved, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, curTab, pages, TAB_LABEL, tabLabel, fourthPage, pageSlot, fourthTitle, closePage, myName, meForChat, lastOf,
       pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
@@ -1632,7 +1643,7 @@ const app = createApp({
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
@@ -1650,6 +1661,7 @@ app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('fp-mark', FpMark)
 app.component('ptr-zone', PtrZone)
+app.component('relogin-bar', ReloginBar)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切
 watch(screen, s => document.getElementById('app').classList.toggle('is-login', s === 'login' || s === 'onboard'), { immediate: true })

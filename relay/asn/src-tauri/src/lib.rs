@@ -19,6 +19,7 @@ mod attach;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod attach_cache;
 mod auth;
+mod auth_notice;   // 登入失效要看得見（#1764）
 mod avatar;
 mod bell;
 mod datadir;
@@ -321,8 +322,16 @@ async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, Strin
 #[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_rooms(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
-    let token = account::signing_token(&auth).await;
-    relay_of(&app)?.rooms_as(token.as_deref()).await
+    // 沒憑證時照舊走沒簽章的列表，但結果要標 signed:false 與原因，畫面才能說「需要重新登入才看得到所有群組」（#1764）
+    let (token, why) = match account::signing_token_checked(&auth).await {
+        Ok(t) => (Some(t), None),
+        Err(f) => {
+            auth_notice::report_fail(f);
+            (None, Some(f))
+        }
+    };
+    let v = relay_of(&app)?.rooms_as(token.as_deref()).await?;
+    Ok(auth_notice::mark_signed(v, why))
 }
 /// 真人的群組動作（建群組、邀請、接受邀請、退出、帶自己的 AI、主持人確認…）：一定要本人簽章，沒登入回錯、不打後台
 #[cfg(feature = "gui")]
@@ -3012,6 +3021,10 @@ pub(crate) fn cleanup(app: &AppHandle) {
     }
 }
 
+/// 清掉登入的事件要用到的視窗控制把手（setup 時設一次）
+#[cfg(feature = "gui")]
+static AUTH_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
 #[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -3179,9 +3192,20 @@ pub fn run() {
     let auto_acct_dir = data_dir.clone();
     #[cfg_attr(not(desktop), allow(unused_mut))]
     let mut auth_state = auth::AuthState::new(auth::default_store(&data_dir));
-    #[cfg(desktop)]
+    // 清掉登入時記一行並發事件（電腦與手機同一個組合；以前只有電腦記，手機清掉登入一個字都不留，#1764）
     {
-        auth_state.on_signout = Some(ui_log::signout_logger(exit_log_dir.clone()));
+        let emit: Box<dyn Fn() + Send + Sync> = Box::new(|| {
+            if let Some(h) = AUTH_APP.get() {
+                let _ = h.emit(auth_notice::AUTH_LOST_EVENT, ());
+            }
+        });
+        #[cfg(desktop)]
+        let log = ui_log::signout_logger(exit_log_dir.clone());
+        #[cfg(not(desktop))]
+        let log = auth_notice::file_signout_logger(if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
+        auth_state.on_signout = Some(auth_notice::signout_hook(log, emit));
+        // 拿不到簽章憑證的原因也記進同一個 ui.log
+        auth_notice::set_log_dir(&if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
     }
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
@@ -3262,6 +3286,7 @@ pub fn run() {
     let builder = builder
         .setup(move |app| {
             let handle = app.handle().clone();
+            let _ = AUTH_APP.set(handle.clone());   // 清掉登入時發事件用
             // 邀請連結一鍵開啟：asn://invite/<碼>（電腦）、https://asnmessenger.web.app/i/<碼>（安卓 App Links）。
             // 三個來源：這次啟動的連結（冷啟動）、執行中收到的連結（外掛事件）、第二個 ASN 轉交的信箱檔。碼一律先過格式檢查才交給畫面
             {
