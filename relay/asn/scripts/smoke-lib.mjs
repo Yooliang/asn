@@ -52,6 +52,7 @@ export { photoBackProbeSource } from './smoke-probes/photoBack.mjs'
 export { photoZoomProbeSource } from './smoke-probes/photoZoom.mjs'
 export { quotaProbeSource } from './smoke-probes/quota.mjs'
 export { skinProbeSource } from './smoke-probes/skinCheck.mjs'
+export { SET_PHONE_360, SET_SCENARIOS, SET_SKINS, SET_STATE_GAPS, SET_STATE_MATRIX, SET_STATES, setPageProbeSource } from './smoke-probes/zSetPage.mjs'
 import { TASKMGR_RESUMING_SID } from './smoke-probes/taskmgr.mjs'
 export { TASKMGR_RESUMING_SID, taskmgrProbeSource } from './smoke-probes/taskmgr.mjs'
 export { UPD_DL_TOTAL, updDlProbeSource } from './smoke-probes/updDl.mjs'
@@ -645,6 +646,20 @@ const BASE_SCENARIOS = [
   { name: 'm-photo-back', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back.png' },
   { name: 'm-photo-back-modern', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back-modern.png' },
   { name: 'm-photo-back-line', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back-line.png' },
+  // #1808：名單讀不到（連不上 ASN）電腦與手機同一句話；三種外觀各一張截圖
+  { name: 'm-roster-fail', page: 'm.html', state: { signedIn: true, rosterFail: true }, ready: '#app.m .empty-list', shot: 'm-roster-fail.png' },
+  { name: 'list-roster-fail', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true }, ready: '#app.win .empty-list', shot: 'list-roster-fail.png' },
+  { name: 'm-roster-fail-modern', page: 'm.html', state: { signedIn: true, rosterFail: true, skin: 'modern' }, ready: '#app.m .empty-list', shot: 'm-roster-fail-modern.png' },
+  { name: 'list-roster-fail-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-modern.png' },
+  { name: 'm-roster-fail-line', page: 'm.html', state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-fail-line.png' },
+  { name: 'list-roster-fail-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-line.png' },
+  // 名單還在連線中：假後台的名單與收信指令一直不回，核心停在連線中；同一句「正在連上 ASN…」
+  { name: 'm-roster-connecting', page: 'm.html', state: { signedIn: true, rosterConnecting: true }, ready: '#app.m .empty-list', shot: 'm-roster-connecting.png' },
+  { name: 'list-roster-connecting', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true }, ready: '#app.win .empty-list', shot: 'list-roster-connecting.png' },
+  { name: 'm-roster-connecting-modern', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-modern.png' },
+  { name: 'list-roster-connecting-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-modern.png' },
+  { name: 'm-roster-connecting-line', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-line.png' },
+  { name: 'list-roster-connecting-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-line.png' },
   { name: 'list-dev-fpmark', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark.png' },
   { name: 'list-dev-fpmark-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk', skin: 'modern' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark-modern.png' },
   { name: 'm-dev-select', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select.png' },
@@ -967,6 +982,13 @@ export const tableFor = scenario => {
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   // 探測檔自帶的假後台欄位（#1540）：table(scenario, t) 回傳要蓋上去的欄位，沒有就回 undefined
+  // 名單讀不到：後台的名單指令不給回應（假後台對沒登記的指令會丟錯），核心判成連不上（#1808）
+  if (scenario.state.rosterConnecting) t.__hang = ['relay_list', 'relay_inbox']
+  if (scenario.state.rosterFail || scenario.state.rosterConnecting) {
+    if (scenario.state.rosterFail) { delete t.relay_list; delete t.relay_inbox }
+    // 手機要停在「夥伴」分頁才看得到名單的空白說明
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...JSON.parse(t.store_load?.values?.me ?? '{}'), navTab: 'list' }) } }
+  }
   t = withProbeTables(t, scenario, PROBES)
   // 外觀「現代」（0.2.18）：存檔裡的外觀（電腦 me.skin、手機 me.mobilePrefs.skin）設成 skin，其他存檔照各情境
   if (scenario.state.skin) {
@@ -999,8 +1021,11 @@ export const injectSource = table => `(() => {
     },
     window: { getCurrentWindow: () => ({ startResizeDragging() {}, label: 'smoke' }) },
     core: { invoke: async (cmd, args) => {
+      if (T.__fail && Object.prototype.hasOwnProperty.call(T.__fail, cmd)) { (globalThis.__smokeCalls ||= []).push([cmd, args]); throw T.__fail[cmd] }   // 後台回錯誤（#1763 T3）：表裡的 __fail[指令]＝錯誤文字
+      if (T.__hang && T.__hang.indexOf(cmd) >= 0) { (globalThis.__smokeCalls ||= []).push([cmd, args]); return new Promise(() => {}) }   // 讀取中的畫面（#1763 T3）：這個指令永遠不回
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
       (globalThis.__smokeCalls ||= []).push([cmd, args]);
+      if (Array.isArray(T.__hang) && T.__hang.includes(cmd)) return new Promise(() => {});   // 一直不回：核心停在連線中
       // 本機終端的假後台（__tvLive）：開了就每 100 毫秒推一幅，paused 時不推、恢復時補推一幅；__smokeTv.sent＝一共推了幾幅
       if (tv) {
         if (cmd === 'term_view_open') { clearInterval(tv.timer); tv.timer = setInterval(() => { if (!tv.paused) tvSend() }, 100); setTimeout(tvSend, 50); return tv.id }

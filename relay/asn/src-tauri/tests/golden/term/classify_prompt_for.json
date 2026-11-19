@@ -1,4 +1,22 @@
 {
+  "fixture/claude-1799-echo-numbered-no-input.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-1799-reply-list-table-idle.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
+  "fixture/claude-1799-reply-list-table-no-input.synthetic.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
   "fixture/claude-ask-user-question.txt": {
     "agy": "None",
     "claude": "None",
