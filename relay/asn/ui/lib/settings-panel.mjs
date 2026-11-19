@@ -43,7 +43,7 @@ export const SETTING_OPS = [
 
 export const SettingsPanel = {
   components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
-  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
+  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -189,6 +189,7 @@ export const SettingsPanel = {
     }
   },
   template: `<div class="list settings panel-set">
+      <h2 class="panel-h" v-if="title && !(catKey === 'devices' && curDev)">{{ title }}</h2>
       <template v-if="catKey === 'me'">
         <login-panel></login-panel>
         <div class="av-set">

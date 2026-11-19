@@ -151,3 +151,12 @@ test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩 t
   }
   assert.deepEqual(hits.sort(), ['account-roster.mjs', 'text.mjs'])
 })
+
+test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {
+  const withTitle = async props => { globalThis.Vue = Vue; return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { title: '設定：設備', st: { version: '0.2.35', devices: tree(), accounts: { list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '' }, known: { ownFp: '', qr: null, busy: false, peers: [], error: '', renameError: '' } }, meAv: '', catKey: 'devices', ...props }) })) }
+  assert.match(await withTitle({}), /<h2 class="panel-h">設定：設備<\/h2>/)
+  const detail = await withTitle({ dev: 'node-old-pc-X7K2', devView: 'info' })
+  assert.ok(!detail.includes('panel-h') && !detail.includes('設定：設備'))
+  assert.match(detail, /<div class="dv-dev-h"><button class="aero-btn dv-back"/)
+  assert.ok(!read('../ui/list.html').includes('<h2 class="panel-h">') && !read('../ui/panel.html').includes('<h2 class="panel-h">'), '兩個外層都不再自己疊一層標題')
+})
