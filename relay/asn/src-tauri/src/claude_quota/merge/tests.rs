@@ -1158,3 +1158,144 @@ fn 視窗帶的額度窗組合_同視窗同組合只記一行_組合變了才再
     let lg = log(&h);
     assert!(lg.contains("five_hour=missing seven_day=num") && lg.contains("five_hour=num seven_day=num"), "{lg}");
 }
+
+// ================================================================================================
+// #1808 行為守門：Claude 額度歸屬（#1184／#1188／#1212／#1321／#1340／#1694）。名字帶議題編號，改壞時一眼看出是哪個議題回來了
+// ================================================================================================
+
+#[test]
+fn guard_1184_換身分後第一次有身分的回報_清掉沒有標記的舊基準() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 沒有身分標記的舊紀錄（可能混進別的帳號的數字），資料時間 12:00
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    let rec = json!({ "weekly_pct": 95, "at": iso_secs(NOW), "week_reset_at": iso_secs(NOW + 3 * DAY), "week_at": iso_secs(NOW) });
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": rec }).to_string()).unwrap();
+    // 有身分的回報，資料時間 11:00（比舊紀錄早）：舊基準被清掉，所以照收，並蓋上身分標記
+    assert!(feed(&h, "wa", UA, NOW - H, 1, wk(40.0), NOW + MIN), "舊基準沒清掉的話這筆會被當成舊數字擋掉");
+    let got = quota_of(&h, "a@x.test");
+    assert_eq!((got.weekly_pct, got.owner), (Some(60), true));
+}
+
+#[test]
+fn guard_1188_每週重置時間不是七天倍數也照收_不做倍數檢查() {
+    let r = NOW + 3 * DAY;
+    // judge 本身：重置時間倒退 2 天又 5 小時（不是 7 天的倍數）、往後 3 天又 5 小時，都在合理範圍內，照收
+    assert!(judge(Some(NOW), NOW + MIN, Some(r - 2 * DAY - 5 * H), NOW + MIN).is_ok());
+    assert!(judge(Some(NOW), NOW + MIN, Some(r + 3 * DAY + 5 * H), NOW + MIN).is_ok());
+    // 走完整條掛鉤：同一個帳號先記一期，之後來了不同期（差不是七天倍數）的新讀數，照收
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    assert!(feed(&h, "wa", UA, NOW, 1, status(None, Some((30.0, r))), NOW));
+    let r2 = r - 2 * DAY - 5 * H;
+    assert!(feed(&h, "wa", UA, NOW + MIN, 2, status(None, Some((20.0, r2))), NOW + 2 * MIN), "不是七天倍數也要收");
+    let q = quota_of(&h, "a@x.test");
+    assert_eq!((q.weekly_pct, q.week_reset_at), (Some(80), Some(iso_secs(r2))));
+}
+
+#[test]
+fn guard_1212_同一帳號的舊視窗重送舊數字_不蓋過較新的() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 視窗 X 最近有回應（12:00，剩 30%）
+    assert!(feed(&h, "wx", UA, NOW, 1, wk(70.0), NOW + MIN));
+    // 視窗 Y 閒置很久，資料時間是 11:30：重送舊數字，不收
+    assert!(!feed(&h, "wy", UA, NOW - 30 * MIN, 2, wk(10.0), NOW + 2 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(30), "較新的數字沒被舊的蓋掉");
+}
+
+#[test]
+fn guard_1212_回報前拿掉重置時間已過的窗_沒過的照送() {
+    let q = Quota {
+        five_hour_pct: Some(50),
+        weekly_pct: Some(10),
+        five_reset_at: Some(iso_secs(NOW - H)),
+        week_reset_at: Some(iso_secs(NOW + 3 * DAY)),
+        five_at: Some(iso_secs(NOW - 3 * H)),
+        week_at: Some(iso_secs(NOW - H)),
+        at: iso_secs(NOW - H),
+        ..Default::default()
+    };
+    let got = q.without_expired(NOW).expect("每週還沒過期，整筆要留下");
+    assert_eq!((got.five_hour_pct, got.five_reset_at.clone(), got.five_at.clone()), (None, None, None), "過期的 5 小時窗不送");
+    assert_eq!((got.weekly_pct, got.week_reset_at.clone()), (Some(10), Some(iso_secs(NOW + 3 * DAY))), "沒過期的每週照送");
+    assert_eq!(q.without_expired(NOW + 4 * DAY), None, "兩條都過期：整筆不帶額度");
+    // 整批整理：兩條都過期的帳號被拿掉額度，沒過期的留著
+    let all: std::collections::HashMap<String, Quota> = [("a@x.test".to_string(), q.clone()), ("b@x.test".to_string(), q)].into_iter().collect();
+    assert_eq!(super::super::without_expired(&all, NOW + 4 * DAY).len(), 0);
+    assert_eq!(super::super::without_expired(&all, NOW).len(), 2);
+}
+
+#[test]
+fn guard_1321_讀數沒有某一窗且存著的那窗已過重置時間_拿掉_沒過的留著() {
+    let old = Quota {
+        five_hour_pct: Some(50),
+        weekly_pct: Some(10),
+        five_reset_at: Some(iso_secs(NOW + 2 * H)),
+        week_reset_at: Some(iso_secs(NOW + 3 * DAY)),
+        five_at: Some(iso_secs(NOW)),
+        week_at: Some(iso_secs(NOW)),
+        at: iso_secs(NOW),
+        ..Default::default()
+    };
+    // 這次讀數沒帶 5 小時（例如方案拿掉了這個限制），每週有帶
+    let p = Parsed { five_hour_pct: None, weekly_pct: Some(20), reset_at: None, five_reset_ms: None, week_reset_ms: Some(NOW + 3 * DAY) };
+    assert_eq!(without_missing_expired(&old, &p, NOW + H), None, "5 小時的重置時間還沒到：只是剛好沒帶，留著");
+    let got = without_missing_expired(&old, &p, NOW + 3 * H).expect("重置時間已過：拿掉");
+    assert_eq!((got.five_hour_pct, got.five_reset_at.clone(), got.five_at.clone()), (None, None, None));
+    assert_eq!(got.weekly_pct, Some(10), "讀數有帶的那一窗不在這裡動");
+}
+
+#[test]
+fn guard_1340_換帳號後舊視窗的額度_不記到舊帳號底下() {
+    let h = home_as("a@x.test");
+    add_account(h.path(), "a@x.test", UA);
+    // 視窗開的時候是 A（對話紀錄記 A），之後 ASN 切成 B：這個視窗自己的登入設定現在是 B
+    let t = transcript(h.path(), "wa", UA, Some(NOW), 1);
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(wk(81.0), &t), NOW + MIN), "對不上：不記");
+    assert!(!super::super::quota_path(h.path()).exists(), "舊帳號底下沒有被寫進這筆額度");
+}
+
+#[test]
+fn guard_1694_換帳號後已開著的舊視窗_依每週重置時間決定記到哪個帳號() {
+    // 讀數的每週重置時間是乙存著的那一期：記到乙，甲不動
+    let (h, ra, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((50.0, rb))), &t), NOW + 3 * MIN));
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(50));
+    let qa = quota_of(&h, "a@x.test");
+    assert_eq!((qa.weekly_pct, qa.week_reset_at), (Some(70), Some(iso_secs(ra))), "甲不動");
+    // 讀數的每週重置時間是甲存著的那一期：記到甲，乙不動
+    let (h, ra, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((55.0, ra))), &t), NOW + 3 * MIN));
+    assert_eq!(quota_of(&h, "a@x.test").weekly_pct, Some(45));
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(40), Some(iso_secs(rb))), "乙不動");
+    // 對不上任何人的重置時間：不記
+    let (h, _, _) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(status(None, Some((10.0, NOW + 6 * DAY))), &t), NOW + 3 * MIN));
+    assert_eq!((quota_of(&h, "a@x.test").weekly_pct, quota_of(&h, "b@x.test").weekly_pct), (Some(70), Some(40)));
+}
+
+#[test]
+fn guard_1694_每週重置過後舊視窗送來的下一期_算對上目前登入() {
+    let (h, _, rb) = switched_setup();
+    // 乙存的那一期（rb）已過 1 小時；舊視窗送來的是下一期（rb + 7 天）
+    let t = transcript(h.path(), "wa", UA, Some(rb + 30 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(hook_at(&h, &with_tp(status(None, Some((50.0, rb + 7 * DAY))), &t), rb + H));
+    let qb = quota_of(&h, "b@x.test");
+    assert_eq!((qb.weekly_pct, qb.week_reset_at), (Some(50), Some(iso_secs(rb + 7 * DAY))));
+    // 乙存的那一期還沒過、讀數卻是加七天：不算同一期，不記
+    let (h, _, rb) = switched_setup();
+    let t = transcript(h.path(), "wa", UA, Some(NOW + 2 * MIN), 2);
+    set_win(h.path(), UB);
+    assert!(!hook_at(&h, &with_tp(status(None, Some((50.0, rb + 7 * DAY))), &t), NOW + 3 * MIN));
+    assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
+}

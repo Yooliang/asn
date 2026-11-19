@@ -2837,3 +2837,33 @@ fn 重開後不說原視窗已關閉_當這段對話還有別的視窗() {
     let note = r.ops.still_open_note(&t).unwrap();
     assert!(note.contains("還有另一個視窗（別名視窗）開著") && !note.contains("原視窗已關閉"), "{note}");
 }
+
+// ---- #1808 行為守門（#1614：同一段對話不開第二個視窗）----
+
+#[test]
+fn guard_1614_喚醒時同一段對話已有別名的活視窗_擋下不開第二個() {
+    let r = resume_rig(Opt::default());
+    add_alias_window(&r, 13148, SID, "改過的名字", "claude.exe");
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("改過的名字") && res.detail.contains("同一段對話不能同時開兩個"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不能開窗");
+    // 記錄的 pid 已被別的程式重用：那不是這段對話的視窗，照常開
+    let r2 = resume_rig(Opt::default());
+    add_alias_window(&r2, 13148, SID, "改過的名字", "chrome.exe");
+    let res = resume(&r2, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r2.launched().len(), 1);
+}
+
+#[test]
+fn guard_1614_換班接手時同一段對話還有別名視窗_不交接不開下一任() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    add_alias_window(&r, 13148, "sid-220", "別名視窗", "claude.exe");
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("別名視窗") && res.detail.contains("請先關掉再交接"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不能開下一任");
+    assert!(r.terminated().is_empty() && r.env.told.lock().unwrap().is_empty(), "前任沒被動");
+}
