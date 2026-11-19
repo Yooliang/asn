@@ -48,4 +48,12 @@ $function$;
 revoke all on function public.asn_relay_waiting_notice(text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.asn_relay_waiting_notice(text, text, text, text, text) to service_role;
 
+-- relay.web_denied_notice 換回 #1766 的定義（20261119200000_web_sessions.sql）
+create or replace function relay.web_denied_notice(p_kind text)
+ returns boolean language sql immutable set search_path to ''
+as $function$
+  select p_kind in ('notice:login', 'notice:waiting', 'notice:device_key', 'notice:view');
+$function$;
+revoke all on function relay.web_denied_notice(text) from public, anon, authenticated;
+
 commit;

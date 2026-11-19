@@ -58,4 +58,12 @@ $function$;
 revoke all on function public.asn_relay_waiting_notice(text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.asn_relay_waiting_notice(text, text, text, text, text) to service_role;
 
+-- 網頁（#1766）不收的通知種類：多加登入過期（waiting_login）
+create or replace function relay.web_denied_notice(p_kind text)
+ returns boolean language sql immutable set search_path to ''
+as $function$
+  select p_kind in ('notice:login', 'notice:waiting', 'notice:device_key', 'notice:view', 'notice:waiting_login');
+$function$;
+revoke all on function relay.web_denied_notice(text) from public, anon, authenticated;
+
 commit;

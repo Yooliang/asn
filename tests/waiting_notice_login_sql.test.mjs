@@ -12,9 +12,9 @@ const DIR = new URL('../supabase/migrations/', import.meta.url)
 const mig = rd(fs.readFileSync(new URL(`${NAME}.sql`, DIR), 'utf8'))
 const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${NAME}_down.sql`, import.meta.url), 'utf8'))
 
-function fnOf(file, name) {
+function fnOf(file, name, schema = 'public') {
   const s = rd(fs.readFileSync(new URL(file, DIR), 'utf8'))
-  const st = s.indexOf(`create or replace function public.${name}(`)
+  const st = s.indexOf(`create or replace function ${schema}.${name}(`)
   assert.ok(st >= 0, `${file} 找不到 ${name}`)
   const tag = /\$\w*\$/.exec(s.slice(st))[0]
   const i = s.indexOf(tag, st) + tag.length
@@ -26,12 +26,21 @@ test('靜態：回復檔逐字等於上一版定義；新版只授權 service_ro
   const old = fnOf('20261111100000_notice_center.sql', 'asn_relay_waiting_notice')
   assert.ok(down.includes(old), '回復檔缺上一版原文')
   assert.ok(down.includes(`revoke all on function public.${SIG} from public, anon, authenticated;`))
-  assert.equal((mig.match(/^create or replace function/gim) ?? []).length, 1)
+  assert.equal((mig.match(/^create or replace function/gim) ?? []).length, 2, 'waiting_notice 與 web_denied_notice')
   assert.match(mig, /security definer\s+set search_path to ''/)
   assert.ok(mig.includes(`revoke all on function public.${SIG} from public, anon, authenticated;`))
   assert.ok(mig.includes(`grant execute on function public.${SIG} to service_role;`))
   assert.match(mig, /'waiting_login'/)
   assert.doesNotMatch(mig.replace(/^--.*$/gm, ''), /grant [^;]*to (anon|authenticated|public)|drop |create table|alter table|truncate/i)
+})
+
+test('靜態：web_denied_notice 回復檔逐字等於 #1766 的定義；新版多擋 notice:waiting_login，其餘不變', () => {
+  const old = fnOf('20261119200000_web_sessions.sql', 'web_denied_notice', 'relay')
+  assert.ok(down.includes(old), '回復檔缺 #1766 的原文')
+  const neu = fnOf(`${NAME}.sql`, 'web_denied_notice', 'relay')
+  assert.ok(neu.includes("'notice:waiting_login'"))
+  assert.equal(neu.replace(", 'notice:waiting_login'", ''), old)
+  assert.ok(mig.includes('revoke all on function relay.web_denied_notice(text) from public, anon, authenticated;'))
 })
 
 test('靜態：relay 放行 login，且寄出後照樣推播 waiting', () => {
@@ -84,6 +93,16 @@ test('實跑（pglite）：login 每節點每小時 6 封，和等待確認的�
   assert.equal((await notice(db, 'W', 'login')).notify, 'sent', '等待確認用完不影響 login')
   const o = (await msgs(db, 'W')).find(x => x.kind === 'notice:waiting')
   assert.equal(o.body, '工作機：夥伴「asn雯」在等你處理\n已經等超過 2 分鐘。')
+})
+
+test('實跑（pglite）：web_denied_notice 擋 waiting_login 與原本四種，不擋別的', { skip }, async () => {
+  const db = await setup()
+  await db.exec('create schema if not exists relay')
+  await db.exec(fnOf('20261119200000_web_sessions.sql', 'web_denied_notice', 'relay'))
+  await db.exec(mig)
+  const q = async k => (await db.query('select relay.web_denied_notice($1) r', [k])).rows[0].r
+  for (const k of ['notice:login', 'notice:waiting', 'notice:device_key', 'notice:view', 'notice:waiting_login']) assert.equal(await q(k), true, k)
+  for (const k of ['notice:quota', 'notice:mux_down', null]) assert.notEqual(await q(k), true, String(k))
 })
 
 test('實跑（pglite）：login 沒有擁有者不寄；不認得的種類 bad_request', { skip }, async () => {
