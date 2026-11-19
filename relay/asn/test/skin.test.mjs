@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { DEFAULT_SKIN, SKINS, SKIN_KEY, SKIN_LABEL, applySkin, initSkin, normalizeSkin } from '../ui/lib/skin.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -35,7 +36,7 @@ test('套用：寫到 <html data-skin>，並記到 localStorage（其他視窗�
 })
 
 test('樣式表：modern.css 每一條規則都限定在 :root[data-skin="modern"]（選復古 Aero 時完全不作用）；每個用 style.css 的頁面都載入 modern.css 與 skin-boot.js', () => {
-  const css = read('ui/modern.css').replace(/\/\*[\s\S]*?\*\//g, '')
+  const css = skinCss('modern').replace(/\/\*[\s\S]*?\*\//g, '')
   const selectors = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(m => m[1].trim()).filter(Boolean)
   assert.ok(selectors.length > 40)
   for (const sel of selectors) for (const part of sel.split(',')) assert.match(part.trim(), /^:root\[data-skin="modern"\]/, `沒有限定在現代：${part.trim()}`)
@@ -47,8 +48,8 @@ test('樣式表：modern.css 每一條規則都限定在 :root[data-skin="modern
   for (const sel of ['.m-sheet', '.m-banner', '.toast', '.sp']) { const head = ':root[data-skin="modern"] ' + sel; assert.ok(css.includes(head + '{') || css.includes(head + ','), `${sel} 要有現代版`) }
   for (const page of ['list', 'chat', 'panel', 'toast', 'm', 'login', 'onboard', 'askpass', 'setup-progress']) {
     const html = read(`ui/${page}.html`)
-    const a = html.indexOf('href="style.css"'), b = html.indexOf('href="modern.css"'), c = html.indexOf('src="skin-boot.js"')
-    assert.ok(a > 0 && b > a && c > b, `${page}.html：modern.css 在 style.css 之後、skin-boot.js 在畫面出來之前`)
+    const a = html.indexOf('href="style.css"'), sc = html.indexOf('href="skin-common.css"'), b = html.indexOf('href="modern.css"'), c = html.indexOf('src="skin-boot.js"')
+    assert.ok(a > 0 && sc > a && b > sc && c > b, `${page}.html：skin-common.css 與 modern.css 依序在 style.css 之後、skin-boot.js 在畫面出來之前`)
   }
   const boot = read('ui/skin-boot.js')
   assert.match(boot, /localStorage\.getItem\('asnSkin'\)/); assert.match(boot, /addEventListener\('storage'/)

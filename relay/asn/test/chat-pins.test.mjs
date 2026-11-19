@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { EMPTY_PINS, MAX_PINS, PIN_LIMIT_TEXT, isPinned, mergePins, normalizePins, pinChat, pinMenuLabel, pinnedRows, renamedChatId, sortPinned, togglePin, unpinChat, validChatId } from '../ui/lib/chat-pins.mjs'
 import { normalizePrefs } from '../ui/lib/mobile.mjs'
 import { createRowPress, rowPressBind } from '../ui/lib/row-press.mjs'
@@ -258,8 +259,8 @@ test('接線：徽章三種外觀都有樣式，徽章元件兩個頁面都註�
   assert.doesNotMatch(read('ui/style.css'), /#2f7fe0/, '藍色圖釘圈拿掉了')
   assert.match(read('ui/style.css'), /\.pin-dot\.st-online\{--frame:var\(--online\)\} \.pin-dot\.st-busy\{--frame:var\(--busy\)\} \.pin-dot\.st-away\{--frame:var\(--away\)\} \.pin-dot\.st-offline/, '在線綠、忙碌紅、離線灰')
   assert.match(read('ui/style.css'), /\.avb\.pinned \.dp::before,\.room-av-wrap:has\(\.pin-dot\) \.dp::before\{display:none\}/, '現代、line 外觀釘選時原本的狀態點不畫，由圖釘接手')
-  assert.match(read('ui/modern.css'), /data-skin="modern"\] \.avb-v~\.pin-dot/)
-  assert.match(read('ui/line.css'), /data-skin="line"\] \.avb-v~\.pin-dot/)
+  assert.match(skinCss('modern'), /data-skin="modern"\] \.avb-v~\.pin-dot/)
+  assert.match(skinCss('line'), /data-skin="line"\] \.avb-v~\.pin-dot/)
   assert.match(read('ui/list.js'), /app\.component\('pin-dot', PinDot\)/)
   assert.match(read('ui/m.js'), /app\.component\('pin-dot', PinDot\)/)
   assert.match(read('ui/lib/avatar-badge.mjs'), /<pin-dot v-if="pinned" :status="status">/)

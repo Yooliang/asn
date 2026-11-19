@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { skinCss } from './skin-css.mjs'
 import { FP_KINDS, FP_MARK_TEXT, deskFpMark, phoneFpMark } from '../ui/lib/fp-mark.mjs'
 import { hasIcon, iconShapes } from '../ui/lib/line-icons.mjs'
 
@@ -52,7 +53,7 @@ test('指紋圖形放在線條圖示裡（同一份給現代外觀與復古 Aero
   assert.match(rule(css, '.fpm'), /border-radius:50%.*background:/, 'Aero：圓形淺色底')
   assert.doesNotMatch(rule(css, '.fpm'), /display:none/, 'Aero 也要看得到（不像 .lic 只給現代外觀）')
   assert.match(rule(css, '.fpm-tip'), /right:calc\(100% \+ 6px\);top:50%/, '說明放在圖示左邊')
-  assert.match(read('ui/modern.css'), /:root\[data-skin="modern"\] \.fpm\{background:none;border:0/, '現代：線條版、不加底圈')
+  assert.match(skinCss('modern'), /:root\[data-skin="modern"\] \.fpm\{background:none;border:0/, '現代：線條版、不加底圈')
   const src = read('ui/lib/fp-mark.mjs')
   for (const k of ["role: 'img'", "'aria-label': props.label", 'title: props.label', 'onPointerdown', "class: 'fpm-tip'"]) assert.ok(src.includes(k), `少了 ${k}`)
 })
