@@ -225,6 +225,9 @@ export const cjkVerdict = ({ cjkWidth, tofuWidth, pixelsIdentical } = {}) => {
   if (!ok(cjkWidth) || !ok(tofuWidth)) return { ok: false, why: `量不到文字寬度（中文 ${cjkWidth}、方框 ${tofuWidth}）` }
   const rel = Math.abs(cjkWidth - tofuWidth) / Math.max(cjkWidth, tofuWidth)
   if (pixelsIdentical === true) return { ok: false, why: '中文字與缺字方框畫成一模一樣，這台機器多半沒有 CJK 字型' }
+  // 有 CJK 字型時缺字的私用區字元也可能畫成同寬的方框（Noto CJK：中文字與方框都是全形寬），寬度一樣不能當缺字；
+  // 字的像素和方框不一樣＝真的畫出了字形（2026-11-19 CI 實跑：runner 裝了 fonts-noto-cjk 後寬度同為 192px，被誤判）
+  if (pixelsIdentical === false) return { ok: true, why: `中文字的字形與缺字方框不同（中文寬 ${cjkWidth.toFixed(1)}px、方框寬 ${tofuWidth.toFixed(1)}px）` }
   if (rel < 0.05) return { ok: false, why: `中文寬 ${cjkWidth.toFixed(1)}px 與方框寬 ${tofuWidth.toFixed(1)}px 幾乎相同（差 ${(rel * 100).toFixed(1)}%），這台機器多半沒有 CJK 字型` }
   return { ok: true, why: `中文寬 ${cjkWidth.toFixed(1)}px、方框寬 ${tofuWidth.toFixed(1)}px（差 ${(rel * 100).toFixed(1)}%）` }
 }
