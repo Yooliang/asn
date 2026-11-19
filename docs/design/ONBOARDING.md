@@ -419,7 +419,7 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 2. 建 `relay.account_events`（稽核，不含金鑰）；啟用 RLS、不建 policy。
 3. 帳號函式（SECURITY DEFINER、只授權 service_role）：確保租戶、建立設備節點、建立雲端節點、換金鑰、移除、認領、列表。
 4. 清理排程：每小時處理逾時未上線的雲端節點（`pg_cron`）。
-5. 租戶與角色語意調整（第 7 節）：`owner_name` 改取帳號顯示名而非寫死；`~owner` 的顯示名不再寫死「擁有者」。
+5. 租戶與角色語意調整（第 7 節）：`owner_name` 改取帳號顯示名而非寫死；`~owner` 的顯示名不再寫死個人名字。
 6. （若採 D9）`irori_relay_*` 改名為 `asn_relay_*`。
 7. 內部函式：新節點預設 `can_roster=true`（schema 已預設為真，確認 insert 路徑沒覆寫）。
 
@@ -443,7 +443,7 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 | `relay/machine/send.mjs`、`agents.example.json` | 範例收件人 `XISU`（希緒的節點代號）、註解提到「希緒轉述」 |
 | `relay/machine/bridge-aegis.mjs` | 「這是希緒自己，不能自己問自己」、`xi-xu` 預設值——這是 Aegis 主機專用的轉接，屬於 Irori 生態 |
 | `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」、擁有者鍵 `~owner`、註解「只有擁有者經 irori-api 能做」 |
-| `supabase/migrations/…_relay_functions.sql` | `~owner` 顯示名寫死「擁有者」；`role='owner'` 的節點＝希緒 |
+| `supabase/migrations/…_relay_functions.sql` | `~owner` 顯示名寫死個人名字；`role='owner'` 的節點＝希緒 |
 | `relay/asn/ui/lib/tabs.mjs`、`lib.rs` | 底部與「開始」頁廣告含「認識希緒」「開發日誌」，開網址白名單含 `irori.web.app` |
 
 ### 7.2 新的角色模型
@@ -648,7 +648,7 @@ R1 的環境變數對照表（新名 ← 舊名）：一律把 `IRORI_` 換成 `
 | `relay/machine/bridge.mjs`、`bridge-aegis.mjs` 開頭註解 | 「Irori relay …」 | 註解改名；Aegis 橋依 D11 處理 |
 | `relay/machine/bridge-aegis.mjs` | `xi-xu` 預設值、「這是希緒自己」 | 隨移出 repo |
 | `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」（`node_role=owner`）、`OWNER_KEY` 註解「擁有者本人」、權限註解「只有擁有者經 irori-api」 | 第 7.2 節：別名改為「帳號擁有者」顯示名；註解重寫 |
-| `supabase/migrations/…_relay_functions.sql`（以新 migration 修正） | `~owner` 顯示名寫死「擁有者」、`role=owner` 等同希緒 | 第 6.3 節第 5 項 |
+| `supabase/migrations/…_relay_functions.sql`（以新 migration 修正） | `~owner` 顯示名寫死個人名字、`role=owner` 等同希緒 | 第 6.3 節第 5 項 |
 | `supabase/functions/_shared/relay_ops.ts` | 「身分是這個租戶的角色節點（希緒）」「irori-api」 | 舊後台的 `irori-api` 路徑在新後台不存在，註解與相關分支隨切換後整理移除 |
 | `relay/asn/ui/lib/tabs.mjs`、`src-tauri/src/lib.rs` | 「認識希緒」「開發日誌」廣告與 `irori.web.app` 白名單（及其 Rust 測試） | D6：換成 ASN 自己的內容與白名單 |
 | `docs/ARCHITECTURE.md`、`README.md` 等 | 「owner＝主人的交辦」「建群組只有擁有者」 | 隨第 7.2 節更新 |

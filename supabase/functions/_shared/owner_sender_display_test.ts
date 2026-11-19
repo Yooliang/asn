@@ -90,7 +90,7 @@ Deno.test("account_name：要登入憑證（沒有或無效 401，不碰資料�
 });
 
 Deno.test("account_name：沒帶 name ＝讀（p_name 為 null）；預設值取登入資料的 name，沒有就 email @ 前面那段", async () => {
-  let t = fakeDeps({ name: "擁有者", email: "qi@example.com" });
+  let t = fakeDeps({ name: "擁有者", email: "a@example.com" });
   let r = await handleAccountAction(t.deps, "account_name", `Bearer ${JWT}`, null, null);
   assertEquals([r.status, r.body], [200, { name: "擁有者" }]);
   assertEquals(t.calls[0], { fn: "asn_account_name", args: { p_user: UID, p_name: null, p_default: "擁有者" } });

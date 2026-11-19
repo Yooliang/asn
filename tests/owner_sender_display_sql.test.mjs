@@ -153,25 +153,25 @@ test('實跑（pglite）：帳號層的名字——讀、改、預設值、不�
   const { q, send } = await setup()
   const name = async (n, d) => (await q('select public.asn_account_name($1,$2,$3) r', [U1, n ?? null, d ?? null]))[0].r
   assert.deepEqual(await name(), { name: '擁有者' }, '讀：已有名字就原樣回')
-  assert.deepEqual(await name('  擁有者 '), { name: '擁有者' }, '改：清掉前後空白')
-  assert.deepEqual(await name(), { name: '擁有者' })
+  assert.deepEqual(await name('  測試用戶 '), { name: '測試用戶' }, '改：清掉前後空白')
+  assert.deepEqual(await name(), { name: '測試用戶' })
   for (const bad of ['', '   ', 'a\nb', 'x'.repeat(41)]) assert.deepEqual(await name(bad), { error: 'bad_request' }, JSON.stringify(bad))
-  assert.deepEqual(await name(), { name: '擁有者' }, '不合格的名字不會寫入')
+  assert.deepEqual(await name(), { name: '測試用戶' }, '不合格的名字不會寫入')
   assert.deepEqual((await q('select public.asn_account_name($1) r', ['22222222-2222-2222-2222-222222222222']))[0].r, { error: 'not_found' })
   // 還是建租戶時的預設「朋友」→ 讀的時候用呼叫端帶的預設值（登入資料的 name 或 email 前段）寫入
   await q(`update relay.tenants set owner_name = '朋友'`)
-  assert.deepEqual(await name(null, 'owner'), { name: 'owner' })
-  assert.deepEqual(await name(null, '別的預設'), { name: 'owner' }, '已經有名字就不再被預設值覆蓋')
+  assert.deepEqual(await name(null, 'tester'), { name: 'tester' })
+  assert.deepEqual(await name(null, '別的預設'), { name: 'tester' }, '已經有名字就不再被預設值覆蓋')
   // 信頭用的 sender_display 跟著帳號層名字走；sender_device 是節點名稱（設備層）
-  await name('擁有者')
+  await name('測試用戶')
   await send('P', 'P-ASN', 'M', '小文', '手機說的', { signed: U1, person: true })
   const m = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r[0]
-  assert.equal(m.sender_display, '擁有者')
+  assert.equal(m.sender_display, '測試用戶')
   assert.equal(m.sender_device, 'Oppo 手機')
   await q(`update relay.nodes set name = '手機' where id = 'P'`)
   await send('P', 'P-ASN', 'M', '小文', '改名後', { signed: U1, person: true })
   const m2 = (await q(`select public.irori_relay_inbox_agent('M','小文') r`))[0].r.find(x => x.body === '改名後')
-  assert.deepEqual([m2.sender_display, m2.sender_device], ['擁有者', '手機'])
+  assert.deepEqual([m2.sender_display, m2.sender_device], ['測試用戶', '手機'])
 })
 
 // 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）

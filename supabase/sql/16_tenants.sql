@@ -774,7 +774,7 @@ as $$
   end;
 $$;
 
--- 成員顯示名：'~owner' 用租戶主人的稱呼（不再寫死「擁有者」）
+-- 成員顯示名：'~owner' 用租戶主人的稱呼（不再寫死個人名字）
 create or replace function relay.room_member_name(p_key text, p_tenant uuid)
 returns text
 language sql stable security definer set search_path = ''
