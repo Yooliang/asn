@@ -76,6 +76,15 @@ const LOGIN_ERROR_TAIL: &str = " · Please run /login";
 fn is_login_error(body: &str) -> bool {
     body.ends_with(LOGIN_ERROR_TAIL) && LOGIN_ERROR_HEADS.iter().any(|h| body.starts_with(h))
 }
+/// 登入逾時（#1792）：「Login reached its time limit · Please run /login」「Failed to authenticate: this login reached its time limit · Sign in again to continue」
+/// 「…reached its time limit and cannot be renewed. Run `claude auth login` to sign in a…」（被截斷）都含這句。認字、不認行位置；
+/// ● 開頭的是模型自己的回覆（可能只是引用這句話），不算。「Could not refresh your login because another Claude Code process…」是暫時的，不含這句，不算登入
+const LOGIN_TIME_LIMIT: &str = "reached its time limit";
+
+fn is_login_time_limit(line: &str) -> bool {
+    let t = line.trim_start();
+    !t.starts_with('●') && t.to_ascii_lowercase().contains(LOGIN_TIME_LIMIT)
+}
 const USAGE_LIMIT: &str = "You've hit your limit";
 /// 額度用完的選單（#1512，claude 2.1.325）：標題、頁尾和兩個不花錢的選項都是 Claude 固定的字。
 /// 選項的順序因帳號而異（付費類可能排第一），所以認字、不認編號
@@ -579,7 +588,11 @@ pub fn classify(text: &str) -> Option<ClaudeScreen> {
     if input_box_at_bottom(lines) {
         return notice_above_input(lines);
     }
-    menu_at_bottom(lines)
+    menu_at_bottom(lines).or_else(|| {
+        // 整頁被登入流程蓋住、沒有輸入框：只看最後幾行
+        let start = lines.len().saturating_sub(4);
+        lines[start..].iter().any(|l| is_login_time_limit(l)).then(|| screen(ClaudeScreenKind::Login, "", Vec::new(), 0, None, None))
+    })
 }
 
 /// 底部有輸入框或狀態列：這時選單不會擋住輸入，畫面上任何長得像選單的文字都不當提示
@@ -625,6 +638,9 @@ fn notice_above_input(lines: &[&str]) -> Option<ClaudeScreen> {
     let start = lines.len().saturating_sub(NOTICE_LOOKBACK);
     let notice = lines[start..].iter().rev().find_map(|l| {
         let t = l.trim_start();
+        if is_login_time_limit(t) {
+            return Some(ClaudeScreenKind::Login);
+        }
         if !(t.starts_with('●') || t.starts_with('⎿')) {
             return None;
         }
@@ -1315,6 +1331,30 @@ mod tests {
         // 模型回覆的最後一行（緊貼輸入框）寫成這樣：不認成要登入
         let reply = "● 我幫你查了錯誤訊息，原文是：\n  Login expired · Please run /login\n● Please run /login";
         assert_ne!(kind(&page(reply)), Some(K::Login));
+    }
+
+    #[test]
+    fn 登入逾時_認字不認行位置_暫時性的更新失敗不算登入() {
+        let page = |line: &str| format!("{line}\n──────────────\n❯ \n──────────────\n  ? for shortcuts\n");
+        for ok in [
+            "Login reached its time limit · Please run /login",
+            "  ⎿  Login reached its time limit · Please run /login",
+            "Failed to authenticate: this login reached its time limit · Sign in again to continue",
+            "  ⎿  Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in a…",
+        ] {
+            assert_eq!(kind(&page(ok)), Some(K::Login), "{ok}");
+            // 訊息和輸入框之間隔幾行別的東西也認得
+            assert_eq!(kind(&page(&format!("{ok}\n\n  ✻ Churned for 3s\n"))), Some(K::Login), "{ok}");
+        }
+        // 整頁被登入流程蓋住、沒有輸入框
+        assert_eq!(kind("Login reached its time limit · Please run /login\n"), Some(K::Login));
+        // 另一個 Claude 程序正在更新登入：暫時的，不是要重新登入
+        let transient = "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again";
+        assert_ne!(kind(&page(transient)), Some(K::Login));
+        assert_ne!(kind(&page(&format!("  ⎿  {transient}"))), Some(K::Login));
+        // 模型自己的回覆（引用這句話）不算
+        assert_ne!(kind(&page("● Login reached its time limit · Please run /login")), Some(K::Login));
+        assert_ne!(kind(&page("● 這句是「Failed to authenticate: this login reached its time limit」的意思")), Some(K::Login));
     }
 
     #[test]
