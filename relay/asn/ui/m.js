@@ -942,7 +942,7 @@ const app = createApp({
     const acctCanSwitchTo = node => isSwitchTarget(acctDevs.value.find(d => d.key === node), info.node)
     const acctSwitchOn = async (node, email) => { if (!acctCanSwitchTo(node)) return; await openAcctDevice(node); startAcctSwitch(email) }
     // 帳號卡片的設備按鈕：用過這個帳號的每台一顆；使用中的按了不做事，其他的就是原本的「切換到那台」（手機自己不在切換目標裡）
-    const acctDevButtons = (vendor, a) => deviceButtons(a?.usedOn, acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), info.node, n => acctDevs.value.find(d => d.key === n)?.label ?? '')
+    const acctDevButtons = (vendor, a) => deviceButtons(a?.usedOn, acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), info.node, n => acctDevs.value.find(d => d.key === n)?.label ?? '', devPrefs.deviceRemoved)
     const acctDevPress = (b, a) => { if (b.current || !b.target || !b.target.enabled) return; void acctSwitchOn(b.node, a.account) }
     // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
     // mode：'install'＝安裝並登入、'relogin'＝重新登入（#1512 C；送的是同一個要求，只差按鈕與確認字）
