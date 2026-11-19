@@ -20,7 +20,7 @@ const STORED_H = {
   cwd_allow: ['D:\Github'], max_per_hour: 6,
 }
 
-test('真資料（沒有 mode 欄位）：asn終端的兩個虛擬項目不列成模型，Gemini、Grok 各只一顆', () => {
+test('#1752 真資料（沒有 mode 欄位）：asn終端的兩個虛擬項目不列成模型，Gemini、Grok 各只一顆', () => {
   const rows = remoteModelRows(STORED_H)
   const labels = rows.map(r => r.label)
   assert.deepEqual(labels, ['Claude', '一般（含 Chrome）', 'Gemini', 'Grok', 'pi'])
