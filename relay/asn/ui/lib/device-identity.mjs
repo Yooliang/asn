@@ -13,7 +13,6 @@ export const IDENTITY_TEXT = Object.freeze({
   reported: '帳號最後回報',
   online: '現在在線',
   noRecord: '沒有紀錄',
-  unknownPlatform: '不明',
 })
 
 export const PLATFORM_TEXT = Object.freeze({ windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS' })
@@ -55,7 +54,7 @@ export function deviceIdentity({ node = '', label = '', named = false, platform 
   const seen = online ? T.online : (seenMs ? `${dateTimeText(seenMs)}${seenAgo ? `（${seenAgo}）` : ''}` : T.noRecord)
   const rows = [
     ...(createdMs ? [{ key: 'created', label: T.created, value: dateTimeText(createdMs) }] : []),   // 後台沒給建立時間就整列不放（#1829 領隊拍板）
-    { key: 'platform', label: T.platform, value: pText || T.unknownPlatform },
+    ...(pText ? [{ key: 'platform', label: T.platform, value: pText }] : []),   // 平台拿不到就整列不放（使用者看了做不了什麼）
     { key: 'seen', label: T.seen, value: seen },
     { key: 'code', label: T.code, value: nodeTail(node) || T.noRecord },
   ]

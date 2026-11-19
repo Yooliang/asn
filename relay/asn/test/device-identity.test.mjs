@@ -166,3 +166,10 @@ test('#1829 電腦版細部頁的返回鈕只放「‹」（和手機一樣）�
   assert.match(html, /<button class="aero-btn dv-back" type="button" aria-label="返回">‹<\/button>/)
   assert.ok(!html.includes('‹ 返回') && !html.includes('>返回<'), '畫面上不再寫「返回」兩個字')
 })
+
+test('#1829 平台拿不到時整列不放（不寫「不明」），有平台才有這一列', () => {
+  const none = deviceIdentity({ node: 'abcd1234', named: true, label: 'x', now: NOW })
+  assert.ok(!none.rows.some(r => r.key === 'platform'))
+  assert.ok(!JSON.stringify(none).includes('不明'))
+  assert.equal(deviceIdentity({ node: 'abcd1234', named: true, label: 'x', platform: 'macos', now: NOW }).rows.find(r => r.key === 'platform').value, 'macOS')
+})

@@ -104,7 +104,7 @@ test('詳情的欄位：最後在線只寫在線與否；平台、ASN 版本；�
   assert.match(me, /<dt>ASN 版本<\/dt><dd class="dvid-v dvid-version">0\.2\.31<\/dd>/)
   const other = await render({ dev: 'W' })
   assert.ok(!other.includes('ASN 版本'), '別台不放本機的版本')
-  assert.match(other, /<dt>平台<\/dt><dd class="dvid-v dvid-platform">不明<\/dd>/)
+  assert.ok(!other.includes('<dt>平台</dt>'), '#1829 平台拿不到就整列不放，不寫「不明」')
   const mac = st(); mac.devices[1] = withIdentity({ ...mac.devices[1], platform: 'android', identity: undefined })
   assert.match(await render({ dev: 'W' }, mac), /<dd class="dvid-v dvid-platform">Android<\/dd>/)
 })
