@@ -18,7 +18,7 @@ import { TermView } from './term-view.mjs'
 import { RemoteView, REMOTE_LABEL, REMOTE_TIP, askRemote, remoteEntry } from './term-remote.mjs'
 import { GRACE_AGAIN_LABEL, TYPING_ENDED_TEXT, createGrace } from './term-grace.mjs'
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
-import { TERM_KEYS, KEYS_TEXT, joinWrapped, plainRows, findLoginUrls } from './term-keys.mjs'
+import { TERM_KEYS, KEYS_TEXT, joinWrapped, findLoginUrls } from './term-keys.mjs'
 import { confirmKindOf, confirmNoteOf } from './confirm-kind.mjs'
 import { STUCK_POLL_MS, TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
@@ -305,7 +305,7 @@ export const ChatPane = {
     const screenPlain = computed(() => joinWrapped(remoteScreen.value.text, remoteScreen.value.cols))
     // 畫面停在 Claude 第一次的確認畫面（#1637）：只標出是哪一種、要選哪一項；原畫面照樣顯示，不代按
     const confirmNote = computed(() => (remoteShown.value ? confirmNoteOf(confirmKindOf(screenPlain.value)) : ''))
-    const waitSnap = computed(() => plainRows(remoteScreen.value.text))   // 送出後等那台連上時當底圖（#1647）：照原本的列畫，不接折行（接了會把折行的段落黏成一長列，續行被擠到最右邊）
+    const waitSnap = computed(() => remoteScreen.value.text)   // 送出後等那台連上時當底圖（#1647、#1762）：最後一幅畫面的原文（帶顏色）直接寫進打字用的 xterm，不轉純文字，等待時顏色不會不見
     const loginUrls = computed(() => findLoginUrls(screenPlain.value))
     const copyNote = ref('')
     let copyTimer = 0

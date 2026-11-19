@@ -493,7 +493,9 @@ export const permDangerRows = kind => {
   if (kind === 'incomplete') return [{ ...base, prompt_text: ' git push --force …\n Do you want to proceed?', complete: false, options: [{ n: 3, label: 'No' }], risk: { codes: [], uncertain: true }, full_len: 40 }]
   return [{ ...base, prompt_text: ' Bash command\n mkdir c1dir\n Do you want to proceed?', complete: true, options: [{ n: 1, label: 'Yes' }, { n: 3, label: 'No' }], risk: { codes: [], uncertain: false }, full_len: 40 }]
 }
-export const mtermviewFrames = (id = 'v1') => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: MTERMVIEW_TEXT + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
+// color＝true：「測試通過」那列帶顏色（紅字、綠色粗體），驗證等待時的底圖不掉顏色（#1762）
+const COLORED_TEXT = MTERMVIEW_TEXT.replace('● 全部 128 項測試通過，沒有失敗。', '\u001b[31m● 全部 128 項\u001b[0m\u001b[1;32m測試通過\u001b[0m，沒有失敗。')
+export const mtermviewFrames = (id = 'v1', color = false) => [1, 2, 3, 4].map(n => ({ event: 'term-view-remote-frame', payload: { id, text: (color ? COLORED_TEXT : MTERMVIEW_TEXT) + '\r\n  更新 ' + n, meta: { cursor_x: 2, cursor_y: 3 + n, cols: 120, rows: 40 } } }))
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 const BASE_SCENARIOS = [
@@ -592,6 +594,9 @@ const BASE_SCENARIOS = [
   { name: 'list-term-typing-360', page: 'list.html', width: 360, state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.typing, shot: 'list-term-typing-360.png' },
   { name: 'list-term-multi', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.multi, shot: 'list-term-multi-1100.png' },
   { name: 'list-term-refused', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.refused, shot: 'list-term-refused-1100.png' },
+  { name: 'list-term-waitcolor', page: 'list.html', width: 1100, height: 640, state: { signedIn: true, dterm: true, dtermColor: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.waitcolor, shot: 'list-term-waitcolor.png' },
+  { name: 'list-term-waitcolor-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, dtermColor: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.waitcolor, shot: 'list-term-waitcolor-modern.png' },
+  { name: 'list-term-waitcolor-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, dtermColor: true, skin: 'line' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.waitcolor, shot: 'list-term-waitcolor-line.png' },
   { name: 'list-term-compose', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.compose, shot: 'list-term-compose-1100.png' },
   { name: 'list-term-compose-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.compose, shot: 'list-term-compose-modern.png' },
   { name: 'm-release-dot', page: 'm.html', state: { signedIn: true, mrelease: true }, ready: '#app.m .m-tabs', probe: MRELEASE_PROBE, shot: 'm-release-dot-412.png' },
@@ -930,7 +935,7 @@ export const tableFor = scenario => {
     t.term_view_remote_stop = null
     t.term_view_remote_input = null
     t.stt_status = { ready: true }   // 語音引擎已就緒：按麥克風會留下語音提示（驗證打字中的警示不被蓋掉）
-    t.__emitOn = { term_view_remote_start: mtermviewFrames('v1') }
+    t.__emitOn = { term_view_remote_start: scenario.state.dtermColor ? mtermviewFrames('v1', true) : mtermviewFrames('v1') }
   }
   if (scenario.state.mpermreq) {
     t.relay_list = { members: MBAR_MEMBERS.claude }

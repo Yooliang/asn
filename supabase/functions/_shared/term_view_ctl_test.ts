@@ -34,6 +34,27 @@ Deno.test("發起：只傳認得的欄位，敲對方門鈴，回應不帶門鈴
   assertEquals(m.calls[0].args, { p_actor: me.id, p_signed_user: USER, p_id: ID, p_to_node: "hom7a1", p_window_name: "小乙", p_d_eph_pub: PUB, p_d_sig: D_SIG, p_expires_at: start.expires_at }, "看畫面不帶 p_scope：migration 沒上也照常");
 });
 
+Deno.test("發起（打字）：同樣敲被控那台的門鈴，讓它不用等 10 秒輪詢（#1762）", async () => {
+  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: PUB, scope: "input" });
+  const r = await handleTermViewAction(m.deps, me, "term_view_start", { ...start, scope: "input" }, USER);
+  assertEquals(r.status, 200);
+  assertEquals(m.rung, ["bell-t"]);
+  assertEquals(m.calls[0].args.p_scope, "input");
+});
+
+Deno.test("發起：資料庫沒回門鈴主題就不敲，也不失敗（備援輪詢接手）（#1762）", async () => {
+  const m = mk({ id: ID, topic: "tv_x", to_pub: PUB });
+  const r = await handleTermViewAction(m.deps, me, "term_view_start", start, USER);
+  assertEquals(r.status, 200);
+  assertEquals(m.rung, []);
+});
+
+Deno.test("發起：敲門鈴失敗不讓要求失敗（#1762）", async () => {
+  const m = mk({ id: ID, topic: "tv_x", bell_topic: "bell-t", to_pub: PUB });
+  const deps = { ...m.deps, ring: () => Promise.resolve() };
+  assertEquals((await handleTermViewAction(deps, me, "term_view_start", start, USER)).status, 200);
+});
+
 Deno.test("發起：壞參數不碰資料庫", async () => {
   for (const b of [{ id: "x" }, { to_node: "../x" }, { window_name: "" }, { window_name: "x".repeat(65) }, { d_eph_pub: "x" }, { d_sig: "x" }, { d_sig: "c".repeat(701) }, { expires_at: "明天" }, { expires_at: 5 }]) {
     const m = mk();
