@@ -103,7 +103,7 @@ export const NOTICE_CATS = [
 export const NOTICE_CAT_LABEL = Object.fromEntries(NOTICE_CATS.map(c => [c.key, c.label]))
 const TOPIC_CAT = {
   inbox_watch: 'stuck', waiting: 'stuck', mux_down: 'stuck', mux_blind: 'stuck', misroute: 'stuck',
-  login: 'login',
+  login: 'login', waiting_login: 'login',
   quota: 'quota',
   view: 'security', term_view: 'security', device_key: 'security', node_mismatch: 'security',
 }

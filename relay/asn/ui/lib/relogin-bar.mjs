@@ -33,15 +33,20 @@ export function createReloginWatch({ status, listen, canSkipLogin, reactive = x 
   const st = reactive({ show: false })
   let dismissed = false
   let wasSignedIn = null
+  // 「登入有問題」：後台回報登入失效、事件、401 時成立。登入檔還在（signed_in 仍是 true）時也要維持，
+  // 例行檢查不能把提示收起來；只有真的成功換到憑證（群組列表回 signed:true）或重新登入才解除（#1764 B 審查）
+  let troubled = false
   async function refresh({ force = false } = {}) {
     try {
+      if (force) troubled = true
       const s = await status()
       const nowIn = s?.signed_in === true
-      if (nowIn) dismissed = false
+      if (nowIn && wasSignedIn === false) troubled = false   // 重新登入了
+      if (nowIn && !troubled) dismissed = false
       if (nowIn && wasSignedIn === false) onSignedIn()   // 從未登入變成已登入
       if (s?.signed_in === true || s?.signed_in === false) wasSignedIn = nowIn
       const known = s?.signed_in === true ? true : s?.signed_in === false ? false : null
-      st.show = showReloginBar(canSkipLogin() === true, force ? false : known, dismissed)
+      st.show = showReloginBar(canSkipLogin() === true, troubled ? false : known, dismissed)
     } catch { st.show = false }
     return st.show
   }
@@ -54,7 +59,11 @@ export function createReloginWatch({ status, listen, canSkipLogin, reactive = x 
     dismiss,
     onLost,
     /** 群組列表回來了：登入已失效就立刻再查一次 */
-    noteRooms: r => (roomsLoginLost(r) ? refresh({ force: true }) : Promise.resolve(st.show)),
+    noteRooms: r => {
+      if (roomsLoginLost(r)) return refresh({ force: true })
+      if (r?.signed === true && troubled) { troubled = false; return refresh() }   // 成功換到憑證：解除
+      return Promise.resolve(st.show)
+    },
     /** 任何請求失敗：像登入失效（401…）就立刻再查一次 */
     noteError: e => (looksLikeLoginLost(e?.message ?? e) ? refresh({ force: true }) : Promise.resolve(st.show)),
     /** 回到前景（手機不能只在開 App 時查一次） */

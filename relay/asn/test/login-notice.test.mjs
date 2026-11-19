@@ -43,7 +43,7 @@ test('接線守門：登入畫面只在這台有金鑰時講收發信照常；�
   assert.match(list, /<relogin-bar variant="desk" :show="reloginBar\.show" @login="goLogin" @dismiss="dismissReloginBar">/)
   assert.match(lj, /createReloginWatch\(\{ status: \(\) => authApi\.status\(\), listen, canSkipLogin: \(\) => info\.can_skip_login === true/)
   assert.match(lj, /setInterval\(\(\) => void reloginWatch\.refresh\(\), 60_000\)/)
-  assert.match(read('ui/lib/relogin-bar.mjs'), /if \(nowIn\) dismissed = false/, '登入後又掉才會再提醒')
+  assert.match(read('ui/lib/relogin-bar.mjs'), /if \(nowIn && !troubled\) dismissed = false/, '登入後又掉才會再提醒')
   const panel = read('ui/lib/login-panel.mjs')
   assert.match(panel, /@click="logout\(false\)"[^>]*>\{\{ LOGOUT_ONLY_LABEL \}\}/, '預設的「只登出」不停收發')
   assert.match(panel, /@click="logout\(true\)"[^>]*>\{\{ LOGOUT_STOP_LABEL \}\}/)

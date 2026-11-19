@@ -3024,6 +3024,14 @@ pub(crate) fn cleanup(app: &AppHandle) {
     }
 }
 
+/// 發「登入有問題」事件給畫面（清掉登入時、或連續好幾次不確定的錯誤時）
+#[cfg(feature = "gui")]
+fn emit_auth_lost() {
+    if let Some(h) = AUTH_APP.get() {
+        let _ = h.emit(auth_notice::AUTH_LOST_EVENT, ());
+    }
+}
+
 /// 清掉登入的事件要用到的視窗控制把手（setup 時設一次）
 #[cfg(feature = "gui")]
 static AUTH_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -3197,16 +3205,15 @@ pub fn run() {
     let mut auth_state = auth::AuthState::new(auth::default_store(&data_dir));
     // 清掉登入時記一行並發事件（電腦與手機同一個組合；以前只有電腦記，手機清掉登入一個字都不留，#1764）
     {
-        let emit: Box<dyn Fn() + Send + Sync> = Box::new(|| {
-            if let Some(h) = AUTH_APP.get() {
-                let _ = h.emit(auth_notice::AUTH_LOST_EVENT, ());
-            }
-        });
+        let emit: Box<dyn Fn() + Send + Sync> = Box::new(emit_auth_lost);
         #[cfg(desktop)]
         let log = ui_log::signout_logger(exit_log_dir.clone());
         #[cfg(not(desktop))]
         let log = auth_notice::file_signout_logger(if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
         auth_state.on_signout = Some(auth_notice::signout_hook(log, emit));
+        // 沒清掉登入、但值得留一行的事（不確定的錯誤、存檔失敗與重試）；連續好幾次不確定的錯誤時發同一個事件，畫面提示重新登入（#1764 B）
+        auth_state.on_note = Some(auth_notice::note_logger(if shot.is_some() { PathBuf::new() } else { work_dir.clone() }));
+        auth_state.on_trouble = Some(Box::new(emit_auth_lost));
         // 拿不到簽章憑證的原因也記進同一個 ui.log
         auth_notice::set_log_dir(&if shot.is_some() { PathBuf::new() } else { work_dir.clone() });
     }
