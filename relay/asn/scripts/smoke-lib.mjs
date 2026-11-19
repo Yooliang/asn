@@ -341,7 +341,7 @@ export const probeKind = probe => { const e = probeEntry(probe); return e ? (typ
 export const probeSource = probe => { const e = probeEntry(probe); return e ? e.source(probe) : maskProbeSource(probe) }
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
-const SMOKE_NOW = Date.now()
+export const SMOKE_NOW = Date.now()
 const toMinute = ms => new Date(Math.floor(ms / 60_000) * 60_000).toISOString()
 export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
   const read = toMinute(now - 10 * 60_000)
