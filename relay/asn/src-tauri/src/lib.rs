@@ -91,6 +91,8 @@ mod term_frame;
 mod view_stream;
 #[cfg(desktop)]
 mod view_seen;
+#[cfg(desktop)]
+mod view_wake;   // 被看那台的輪詢：門鈴一響就醒（#1762）
 mod view_remote;
 #[cfg(feature = "gui")]
 mod view_d;   // 看別台畫面（D）的共用核心：電腦與手機的命令都呼叫它
@@ -1542,14 +1544,15 @@ impl view_stream::TPort for LiveTPort {
 
 /// 別台要看這台：有人可以看這台才查。全部驗過才接受，否則拒絕。Hello 接上之前一律拒絕
 #[cfg(all(desktop, feature = "gui"))]
-fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String) {
+fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf, me_node: String, wake: Arc<tokio::sync::Notify>) {
     // 這台還不能被看（Linux：設備私鑰還沒有系統金鑰庫保護）就不查別台的觀看請求
     if !device_id::can_be_viewed_here(&data_dir) {
         return;
     }
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            // 門鈴一響（後台建了看畫面／打字的要求會敲這台的門鈴）就馬上查；門鈴斷了或沒響，每 10 秒照常查（#1762）
+            let _ = view_wake::wait_next(std::time::Duration::from_secs(view_wake::POLL_INTERVAL_SECS), &wake).await;
             // 放行條件：本機的「允許其他設備替這台開新視窗」開著（兩台是同一個本人，由後台擋）
             let settings = bridge::read_settings(&data_dir);
             if !settings.allow_remote_launch {
@@ -3507,11 +3510,12 @@ pub fn run() {
                 #[cfg(desktop)]
                 let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 #[cfg(desktop)]
-                let term_wake = if handle.state::<App>().shot.is_none() {
+                let (term_wake, view_notify) = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
+                    let vw = Arc::new(tokio::sync::Notify::new());
                     start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
                     start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
-                    start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone());
+                    start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone(), vw.clone());
                     start_term_remote_poller(
                         handle.clone(),
                         r.clone(),
@@ -3519,15 +3523,17 @@ pub fn run() {
                         handle.state::<App>().data_dir.clone(),
                         w.clone(),
                     );
-                    Some(w)
+                    (Some(w), Some(vw))
                 } else {
-                    None
+                    (None, None)
                 };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
                     let h = handle.clone();
                     #[cfg(desktop)]
                     let term_wake_bell = term_wake.clone();
+                    #[cfg(desktop)]
+                    let view_wake_bell = view_notify.clone();
                     tauri::async_runtime::spawn(async move {
                         let topic = loop {
                             match r.api("whoami", None).await {
@@ -3546,6 +3552,10 @@ pub fn run() {
                             }
                             #[cfg(desktop)]
                             if let Some(w) = &term_wake_bell {
+                                w.notify_one();
+                            }
+                            #[cfg(desktop)]
+                            if let Some(w) = &view_wake_bell {
                                 w.notify_one();
                             }
                         })
