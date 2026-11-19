@@ -22,7 +22,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.forget, '忘記')
   for (const k of ['confirmed', 'unconfirmed', 'tagConfirmed', 'tagUnconfirmed']) assert.equal(TEXT[k], undefined, `${k} 換成指紋圖示（#1499）後不用了`)
   assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
-  assert.equal(TEXT.neverSeen, '還沒連線過，連上時會記住指紋')
+  assert.equal(TEXT.neverSeen, undefined, '#1829 「還沒連線過」使用者做不了什麼，整句收掉')
   assert.equal(TEXT.forgetThis, '忘記這台')
   assert.equal(TEXT.oldTitle(2), '舊設備紀錄（2）')
   assert.equal(TEXT.renameHint, '所有設備都會顯示這個名字')
@@ -250,20 +250,20 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
   assert.doesNotMatch(info, /v-html/)
   const fpRefs = [...info.matchAll(/fpShow/g)].length
   assert.equal(fpRefs, 2, '指紋只出現在「已確認」那一段（判斷＋顯示）')
-  const confirmedBranch = /v-else-if="curKnown && curKnown\.confirmed"[\s\S]*?<\/p>/.exec(info)[0]
+  const confirmedBranch = /v-if="curKnown\.confirmed"[\s\S]*?<\/p>/.exec(info)[0]
   assert.match(confirmedBranch, /curKnown\.fpShow/)
-  const unconfirmedBranch = /v-else-if="curKnown"><fp-mark[\s\S]*?<\/p>/.exec(info)[0]
+  const unconfirmedBranch = /v-else><fp-mark[\s\S]*?<\/p>/.exec(info)[0]
   assert.doesNotMatch(unconfirmedBranch, /fpShow|fingerprint/, '沒確認的不顯示也不碰指紋（只有灰色的指紋圖示）')
   assert.match(unconfirmedBranch, /<fp-mark kind="unconfirmed"/)
-  assert.match(info, /<p class="m-fine m-dv-state" v-if="acctCur\.stateLine">\{\{ acctCur\.stateLine \}\}<\/p>/, '狀態那一行搬到詳情（#1499）')
+  assert.match(info, /<device-identity :identity="acctCur\.identity" :note="acctCur\.noReport \? acctCur\.stateLine : ''"><\/device-identity>/, '「還沒收到這台的回報」那一行搬到詳情（#1499），由共用的辨認區元件顯示')
   assert.match(unconfirmedBranch, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '確認按鈕只在沒確認時出現')
   assert.equal((info.match(/confirmKnown\(/g) ?? []).length, 1)
-  assert.match(info, /\{\{ KNOWN_TEXT\.neverSeen \}\}/)
+  assert.doesNotMatch(info, /neverSeen/, '#1829 沒紀錄的電腦不再寫「還沒連線過」')
   assert.match(info, /\{\{ KNOWN_TEXT\.firstSeen\(curKnown\.firstSeen\) \}\}/)
   assert.match(info, /@click="forgetKnown\(curKnown\.node\)">\{\{ KNOWN_TEXT\.forgetThis \}\}/)
   assert.match(info, /acctCanRemove/, '隱藏與永久移除也在詳情')
   assert.ok(info.indexOf('curKnown.firstSeen') < info.indexOf('forgetKnown('), '忘記這台在最下面')
-  assert.match(info, /<template v-if="acctCur\.self"><\/template>/, '手機自己沒有可顯示的指紋命令，不顯示')
+  assert.match(info, /<template v-if="!acctCur\.self && curKnown">/, '手機自己沒有可顯示的指紋命令，不顯示')
   const old = html.slice(html.indexOf('class="m-dv-old"'), html.indexOf('<!-- /舊設備紀錄 -->'))
   assert.doesNotMatch(old, /v-html/)
   assert.match(old, /<b>\{\{ p\.label \}\}<\/b>/)

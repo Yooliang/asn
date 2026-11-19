@@ -32,7 +32,6 @@ export const TEXT = {
   accounts: '帳號',
   detail: '詳情',
   fpLabel: '指紋',
-  neverSeen: '還沒連線過，連上時會記住指紋',
   firstSeen: t => `第一次見到：${t}`,
   forgetThis: '忘記這台',
   oldTitle: n => `舊設備紀錄（${n}）`,

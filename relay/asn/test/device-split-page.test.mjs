@@ -146,7 +146,7 @@ test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這�
   assert.equal(tree.find(d => d.key === S).stateLine, 'Claude 已登入、OpenAI（Codex） 未安裝、Grok 未安裝')
   assert.ok(!html.includes('Claude 已登入') && !html.includes('dv-line'), '列上不放狀態那一行')
   const src = (await import('node:fs')).readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(src, /<dt>狀態<\/dt><dd>\{\{ curDev\.onlineText \}\}/, '詳情裡有狀態那一格（只寫在線與否，帳號狀態不放這裡）')
+  assert.match(src, /<device-identity :identity="curDev\.identity"/, '詳情裡有辨認區（最後在線只寫在線與否，帳號狀態不放這裡；#1829）')
   assert.ok(!html.includes('邀請雲端代理'), '設備列表頁不放雲端代理（自己一類）')
   globalThis.Vue = Vue
   const detail = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state(tree, null), catKey: 'devices', meAv: '', dev: W }) }))

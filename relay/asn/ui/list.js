@@ -356,6 +356,7 @@ const friends = ref([])
 watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
+const nodeFacts = ref({})   // 節點 → { createdMs, seenMs }（設備詳情辨認區）
 const nodeNames = ref({})   // 節點 → 後台記的設備名（名單每個成員的 name，沒有夥伴的設備也有）
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
@@ -367,6 +368,7 @@ const sync = () => {
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   nodeNames.value = s.nodeNames ?? {}
+  nodeFacts.value = s.nodeFacts ?? {}
   conn.value = s.conn
   rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
@@ -1991,7 +1993,7 @@ const app = createApp({
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
       cloudNodes: cloudMem.value,
-      friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeNames: nodeNames.value, nodeFacts: nodeFacts.value, version: info.version ?? '', nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,

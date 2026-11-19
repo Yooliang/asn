@@ -1210,3 +1210,14 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .ng-recheck:disabled{opacity:.6;cursor:default}
 .ng-hide,.ng-reshow{margin-top:0;padding:2px 0;border:0;background:none;color:var(--link);text-decoration:underline;cursor:pointer;font-size:.95em}
 .ng-reshow-wrap{padding:8px 14px;text-align:center}
+/* 設備詳情的辨認區與動作區（#1829，lib/device-identity.mjs）：電腦、手機共用，三套外觀都吃這份（只用共用的顏色變數） */
+.dvid{margin:0 0 4px}
+.dvid-kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0;align-items:baseline}
+.dvid-kv dt{color:var(--muted,#6b7785);font-size:12px;white-space:nowrap}
+.dvid-kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.dvid-code{font-family:ui-monospace,Consolas,monospace;letter-spacing:.08em}
+.dvid-note{margin:10px 0 0;font-size:12px;color:var(--muted,#6b7785)}
+.dvid-why{display:block;margin-top:6px;color:var(--muted,#6b7785)}
+.m-dv-sech{margin:14px 0 6px;font-size:13px}
+.m-dv-sech:first-child{margin-top:4px}
+.m-dv-actions{flex-wrap:wrap}

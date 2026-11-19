@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { mountComponent } from './helpers/render.mjs'
+import { withIdentity } from './helpers/with-identity.mjs'
 
 const baseState = () => ({
   status: 'online', hasUpload: false, avBusy: false, avMsg: '', version: '9.9.9',
@@ -15,7 +16,7 @@ const baseState = () => ({
   devices: [
     { key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] },
     { key: 'W', label: '工作機', self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] },
-  ],
+  ].map(withIdentity),
 })
 const panel = (catKey, extra = {}, st = baseState()) => mountComponent(SettingsPanel, { st, catKey, ...extra })
 

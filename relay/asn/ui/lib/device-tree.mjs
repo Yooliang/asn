@@ -10,6 +10,7 @@ import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine, loginIncomplete, loginFailed, usableAtText } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
+import { deviceIdentity } from './device-identity.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
@@ -61,7 +62,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null, nodeFacts = null, version = '' } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeNames, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL, nodeNames })
@@ -160,7 +161,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, cloud: cloud === true, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', reported: cloud === true ? '' : (ago || (!isSelf && rep?.error ? '讀取失敗' : '')), now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

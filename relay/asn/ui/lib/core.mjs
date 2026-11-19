@@ -6,7 +6,7 @@
 import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
-import { deviceNameOf, nodeNamesOf } from './device-known.mjs'
+import { deviceNameOf, nodeNamesOf, nodeFactsOf } from './device-known.mjs'
 import { WAKE_ENGINES, partnerEngine } from './partner-ops.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
@@ -88,6 +88,7 @@ export class AsnCore {
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
     this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
+    this.nodeFacts = {}        // 節點 → { createdMs, seenMs }（設備詳情的辨認區用）
     this.nodeNames = {}        // 節點 → 後台記的設備名（名單每個成員的 name；沒有夥伴的設備，例如手機，名字也在這裡）
     this.asn = {}              // 節點 → 在線的 ASN 視窗（名單帶的 asn：版本與狀態）
     this.avatars = new Map()   // 節點（或 p:夥伴編號）→ { at, data }：各設備、各夥伴上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
@@ -164,6 +165,7 @@ export class AsnCore {
     this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
     this.asn = asnByNode(members)
     this.nodeNames = nodeNamesOf(members)
+    this.nodeFacts = nodeFactsOf(members)
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
@@ -697,7 +699,7 @@ export class AsnCore {
   logOf(id) { return this.logs.get(id) ?? [] }
   // 畫面要顯示的範圍：最近 VIEW_BASE 列，加上往上載入而多出來的
   viewOf(id) { return this.logOf(id).slice(-(VIEW_BASE + (this.olderExtra.get(id) ?? 0))) }
-  snapshot() { return { conn: this.conn, connWhy: this.connWhy, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], nodeNames: { ...this.nodeNames }, asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
+  snapshot() { return { conn: this.conn, connWhy: this.connWhy, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], nodeNames: { ...this.nodeNames }, nodeFacts: { ...this.nodeFacts }, asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
   #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }

@@ -5,6 +5,8 @@ import { AsnCore } from './lib/core.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
+import { DeviceIdentity, IDENTITY_TEXT } from './lib/device-identity.mjs'
+import { ACTION_TEXT } from './lib/device-order.mjs'
 import { listTimeText } from './lib/line-chat.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
@@ -186,7 +188,7 @@ let memberJump = null
 watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
-const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
+const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeFacts = ref({}), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
 // 設備順序與手動顯示的隱藏設備：存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown／deviceRemoved）當離線快取，有登入就與帳號層同步（lib/device-sync.mjs）
 const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
 const logs = reactive({})
@@ -279,7 +281,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     log: m => console.info('[ASN]', m),
   })
   setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
-  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; for (const f of s.friends) refreshLast(f.id) }
+  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; nodeFacts.value = s.nodeFacts ?? {}; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }
   core.on('state', sync)
   core.on('log', id => { pushLog(id); refreshLast(id) })
@@ -636,7 +638,7 @@ const app = createApp({
     const dn = reactive({ node: '', text: '', busy: false, err: '' })
     const dnBad = computed(() => deviceNameError(dn.text))
     const dnHint = computed(() => (dn.text.trim() === '' ? '' : dnBad.value))   // 還沒打字時不先罵人
-    const devRenameStart = d => { if (dn.busy || !d?.key) return; Object.assign(dn, { node: d.key, text: d.label ?? '', err: '' }) }
+    const devRenameStart = d => { if (dn.busy || !d?.key) return; Object.assign(dn, { node: d.key, text: d.named ? (d.label ?? '') : '', err: '' }) }
     const devRenameCancel = () => { if (dn.busy) return; Object.assign(dn, { node: '', text: '', err: '' }) }
     const devRenameSave = async () => {
       const node = dn.node
@@ -857,7 +859,7 @@ const app = createApp({
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
     const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, nodeNames: nodeNames.value, selfNode: info.node }))
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
-    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
+    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeNames: nodeNames.value, nodeFacts: nodeFacts.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
     watch(acctAllDevs, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
@@ -1104,7 +1106,7 @@ const app = createApp({
     // 被隱藏的設備：顯示回名單／永久移除（要先看過二次確認）／恢復
     const acctShowBack = () => { if (acctCur.value) showHiddenDevice(acctCur.value.key) }
     const acctAskRemove = () => { if (acctSw.phase === 'pick' && acctCanRemove.value) acctSw.phase = 'rm' }
-    const acctRemoveText = computed(() => DEVICE_TEXT.confirmRemove(acctCur.value?.label))
+    const acctRemoveText = computed(() => DEVICE_TEXT.confirmRemove(acctCur.value?.identity?.title))
     function acctRemoveNow() {
       if (acctSw.phase !== 'rm' || !acctCanRemove.value) return
       devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, acctCur.value.key, { selfNode: info.node })
@@ -1637,7 +1639,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
@@ -1659,6 +1661,7 @@ app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('fp-mark', FpMark)
+app.component('device-identity', DeviceIdentity)
 app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
 app.mount('#app')

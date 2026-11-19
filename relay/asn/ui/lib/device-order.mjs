@@ -111,6 +111,12 @@ export function dropSlot(rows, y) {
 }
 
 // ---------- 畫面文字 ----------
+// 設備詳情下方的「動作區」（#1829；電腦、手機共用）
+export const ACTION_TEXT = {
+  title: '要處理這台設備',
+  rename: '改名',
+  removeOnline: '設備在線時不能移除，離線後才能移除',
+}
 export const DEVICE_TEXT = {
   back: '‹ 返回',
   showBack: '顯示回名單',

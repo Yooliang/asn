@@ -354,14 +354,21 @@
             <template v-else-if="acctSw.phase === 'pick'">
               <section class="m-dv-node" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
-                  <h3 class="m-dv-name">{{ acctCur.label }}</h3>
+                  <h3 class="m-dv-name">{{ acctCur.identity.title }}</h3>
                   <span class="m-dv-tag">{{ acctCur.kind }}</span>
                   <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                 </div>
                 <div class="m-dv-info" v-if="acctSw.sub === 'info'">
-                  <div class="m-dv-nameline"><b class="m-dv-curname">{{ acctCur.label }}</b><button class="m-btn" type="button" v-if="dn.node !== acctCur.key" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ KNOWN_TEXT.rename }}</button></div>
+                  <h4 class="m-dv-sech">{{ IDENTITY_TEXT.title }}</h4>
+                  <device-identity :identity="acctCur.identity" :note="acctCur.noReport ? acctCur.stateLine : ''"></device-identity>
+                  <template v-if="!acctCur.self && curKnown">
+                    <p class="m-dv-fprow" v-if="curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
+                    <p class="m-dv-fprow" v-else><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
+                    <p class="m-fine" v-if="curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>
+                  </template>
+                  <h4 class="m-dv-sech">{{ ACTION_TEXT.title }}</h4>
                   <form class="m-known-edit" v-if="dn.node === acctCur.key" @submit.prevent="devRenameSave">
                     <input class="m-input" type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="dn.text" :aria-label="KNOWN_TEXT.renameLabel" />
                     <small class="m-fine">{{ KNOWN_TEXT.renameHint }}</small>
@@ -369,21 +376,14 @@
                     <small class="m-err" v-if="dn.err" role="alert">{{ dn.err }}</small>
                     <span class="m-dv-btns"><button class="m-btn" type="submit" :disabled="dn.busy || !!dnBad">{{ KNOWN_TEXT.renameSave }}</button><button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameCancel">{{ KNOWN_TEXT.renameCancel }}</button></span>
                   </form>
-                  <template v-if="acctCur.self"></template>
-                  <p class="m-dv-fprow" v-else-if="curKnown && curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
-                  <p class="m-dv-fprow" v-else-if="curKnown"><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
-                  <p class="m-fine" v-else-if="(acctCur.kindLabel || acctCur.kind) === '電腦'">{{ KNOWN_TEXT.neverSeen }}</p>
-                  <p class="m-fine m-dv-state" v-if="acctCur.stateLine">{{ acctCur.stateLine }}</p>
-                  <p class="m-fine" v-if="curKnown && curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>
-                  <div class="m-dv-hid-act" v-if="acctCanRemove">
-                    <button type="button" class="m-dv-refresh" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
-                    <button type="button" class="m-dv-refresh m-dv-danger" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                  <div class="m-dv-btns m-dv-actions" v-else>
+                    <button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ ACTION_TEXT.rename }}</button>
+                    <button type="button" class="m-btn" v-if="acctCanRemove && acctCur.hidden" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
+                    <button type="button" class="m-btn m-dv-danger" v-if="!acctCur.self" :disabled="!acctCanRemove" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                    <button class="m-btn m-dv-danger" type="button" v-if="curKnown" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
                   </div>
-                  <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
-                  <template v-if="curKnown">
-                    <button class="m-btn m-dv-danger" type="button" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
-                    <p class="m-fine">{{ KNOWN_TEXT.forgetNote }}</p>
-                  </template>
+                  <p class="m-fine dvid-why" v-if="!acctCur.self && !acctCanRemove">{{ ACTION_TEXT.removeOnline }}</p>
+                  <p class="m-fine" v-if="curKnown">{{ KNOWN_TEXT.forgetNote }}</p>
                   <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
                   <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                 </div>

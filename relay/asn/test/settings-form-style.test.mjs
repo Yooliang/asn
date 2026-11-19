@@ -8,6 +8,7 @@ import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { formatCheckTime, updateStatus } from '../ui/lib/update.mjs'
+import { withIdentity } from './helpers/with-identity.mjs'
 
 const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
 
@@ -106,6 +107,6 @@ test('其他有勾選框的設定（登入時自動啟動、信任自己的設�
   globalThis.Vue = Vue
   const w = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: { ...state(), autostart: { supported: true, on: false, busy: false }, closeTo: 'tray', trayOk: true }, catKey: 'window' }) }))
   assert.match(w, /<label class="chk"><input type="checkbox"[^>]*\/?><span>登入時自動啟動 ASN<\/span><\/label>/)
-  const a = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state({ devices: [{ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] }] }), catKey: 'devices', dev: 'H', devView: 'acct' }) }))
+  const a = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state({ devices: [{ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] }].map(withIdentity) }), catKey: 'devices', dev: 'H', devView: 'acct' }) }))
   assert.match(a, /<label class="chk"><input type="checkbox"[^>]*\/?><span>允許切換帳號/)
 })

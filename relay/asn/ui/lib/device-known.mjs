@@ -30,6 +30,21 @@ export function nodeNamesOf(members) {
 }
 
 /**
+ * 名單成員 → { 節點: { createdMs, seenMs } }：後台記的建立時間與最後在線時間（毫秒，沒有＝0）。
+ * 辨認區（device-identity.mjs）讀這份；兩個都沒有的節點不放
+ */
+export function nodeFactsOf(members) {
+  const ms = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) && t > 0 ? t : 0 }
+  const out = {}
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m.id !== 'string') continue
+    const createdMs = ms(m.created_at), seenMs = ms(m.last_seen_at)
+    if (createdMs || seenMs) out[m.id] = { createdMs, seenMs }
+  }
+  return out
+}
+
+/**
  * 一台設備要顯示的名字（電腦版、手機版所有地方都只用這一個函式讀）：先看後台記的名字（nodeNames），
  * 沒有再借這台底下夥伴帶的 device（舊後台、名單還沒讀到時的退路），再沒有用 fallback；都不合格回空字串
  * （呼叫端自己決定寫「未命名」或「這支手機」）
