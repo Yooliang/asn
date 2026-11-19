@@ -89,7 +89,8 @@ pub fn follow_device_rename(relay: &Relay, data_dir: &Path, work_dir: &Path, nod
 }
 
 /// 啟動時把本機視窗名和後台的設備名對齊一次（#1803）。以後台為準：
-/// - 後台名字能用（backend_ok）且和本機不同 → 本機換成後台的（回 Align::UseBackend(名字)）
+/// - 後台名字能用（backend_ok）、和本機不同、而且本機名字是本人取過的（custom）→ 本機換成後台的（回 Align::UseBackend(名字)）。
+///   本機名字只是系統預設的（沒取過）就不動：啟動時 sync_device_name 會照舊把視窗名送給後台，後台有本人改過的名字會自己保留；不能因為歷史上兩邊不同就改掉所有人的視窗名（收信、寄信用的名字）
 /// - 後台名字不能用（空、像指紋；backend_ok＝false）而本機名字是本人取過的（custom）→ 要用本機名字送一次 device_rename（回 Align::PushLocal(名字)，要有登入簽章才送，沒有就等下次）
 /// - 其餘不動
 /// backend＝名單裡這個節點的 name；backend_ok＝後台名字合規（device_name_ok 同一套）；custom＝settings.json 有 window_name
@@ -102,7 +103,7 @@ pub enum Align {
 pub fn align_with_backend(local: &str, custom: bool, backend: &str, backend_ok: bool) -> Align {
     let b = backend.trim();
     if backend_ok && !b.is_empty() {
-        return if b == local { Align::Keep } else { Align::UseBackend(b.to_string()) };
+        return if b == local || !custom { Align::Keep } else { Align::UseBackend(b.to_string()) };
     }
     if custom && validate_name(local).is_ok() && crate::device_id::display_name_ok(local) {
         return Align::PushLocal(local.trim().to_string());
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn 啟動對齊_以後台為準() {
         // 後台名字能用且不同：本機跟後台
-        assert_eq!(align_with_backend("H-ASN", false, "Oppo 手機", true), Align::UseBackend("Oppo 手機".into()));
+        assert_eq!(align_with_backend("H-ASN", false, "Oppo 手機", true), Align::Keep, "本機名字是系統預設的：不動，免得改掉大家的視窗名");
         assert_eq!(align_with_backend("舊名", true, "Oppo 手機", true), Align::UseBackend("Oppo 手機".into()));
         // 一樣：不動
         assert_eq!(align_with_backend("Oppo 手機", true, "Oppo 手機", true), Align::Keep);

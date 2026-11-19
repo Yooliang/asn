@@ -2238,7 +2238,7 @@ app.component('relogin-bar', ReloginBar)
 const root = app.mount('#app')
 
 await core.start()
-void alignDeviceName(invoke, { info, core, me }, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 8000) })   // 啟動後對齊一次：本機視窗名以後台的設備名為準
+if (!info.shot) void alignDeviceName(invoke, { info, core, me }, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 8000) })   // 啟動後對齊一次：本機視窗名以後台的設備名為準
 pushLog(NOTICE_ID)   // 「通知」分頁讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()
 
