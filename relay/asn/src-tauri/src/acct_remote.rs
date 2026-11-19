@@ -1,7 +1,7 @@
 //! 遠端切換 Claude 帳號（經收發室的「切換帳號」指令）。
 //!
 //! 流程（權杖只在各自那台電腦搬，絕不進收發室）：
-//! 1. 每台 ASN 定期回報自己帳號庫的清單：email、方案、是否使用中，加上選填的剩餘額度（`acct_report`；額度來源見 claude_quota.rs）。
+//! 1. 每台 ASN 定期回報自己帳號庫的清單：email、方案、是否使用中，加上選填的額度窗（`acct_report`；Claude 的額度來源見 claude_quota.rs）。
 //! 2. 發起端（擁有者設備）列出對方清單（`acct_list`）、選一個 email 送出（`acct_switch`）；
 //!    後端只收擁有者節點、同租戶、且 email 在對方最近一次回報的清單裡。
 //! 3. 對方 ASN 取走自己的待辦（`acct_switch_pending`）→ 預設跳出確認、使用者按了才在本機搬檔
@@ -11,7 +11,6 @@
 //! 指令只帶目標帳號的 email；本機只接受「自己剛從收發室取走、尚未處理」的指令編號，
 //! 所以介面端無法憑空要求切換，每個編號只能處理一次。
 use crate::claude_accounts::{self, AccountInfo};
-use crate::claude_quota::Quota;
 use crate::codex_accounts::CodexLogin;
 use crate::relay::Relay;
 use serde::Serialize;
@@ -49,28 +48,28 @@ pub fn build_report(list: &[AccountInfo], codex: Option<&CodexLogin>) -> Value {
     build_report_with_quota(list, codex, &HashMap::new())
 }
 
-/// 同上，另外對「有額度紀錄」的 Claude 帳號帶上額度四欄（five_hour_pct、weekly_pct、reset_at、at，沒有的不帶；全部選填）。
-/// 額度只來自 `claude_quota` 記下的數字；沒有紀錄的帳號不帶任何額度欄位，由介面顯示「額度未知」。Codex 不帶額度。
-pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>) -> Value {
-    build_report_full(list, codex, quotas, &[])
+/// 同上，另外對剛向 Claude 查到額度的帳號帶上額度窗 `windows`（`claude_quota::report_windows`，只有這台目前登入的帳號；格式同後台 parseWindows）。
+/// 沒有的帳號不帶，由介面照實顯示讀不到。舊版的四個舊欄位（five_hour_pct 等）不再送，後台仍照收舊版用戶端送的。
+pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>) -> Value {
+    build_report_full(list, codex, claude_windows, &[])
 }
 
 /// 同上，再加 Grok 帳號庫（只有 email、是否使用中；沒有方案與額度）。總共最多 20 筆：Claude 14、Grok 5、Codex 1。
-pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount]) -> Value {
-    build_report_windows(list, codex, quotas, grok, &[])
+pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount]) -> Value {
+    build_report_windows(list, codex, claude_windows, grok, &[])
 }
 
 /// 同上，再帶額度窗 `windows`（#374，格式同後台 parseWindows：`{ name, left_pct, resets_at, read_at }`）：
 /// - Claude：有額度紀錄的帳號同時帶舊四欄與 `windows`（舊後台丟掉 windows，不壞）。
 /// - Codex：`codex_windows` 是呼叫端已確認「跟目前登入的帳號對得上」的額度窗（見 codex_quota.rs）；空的就不帶。
 /// - Grok：不帶額度。筆數上限跟以前一樣。
-pub fn build_report_windows(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Value {
-    build_report_all(list, codex, quotas, grok, codex_windows, &[])
+pub fn build_report_windows(list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Value {
+    build_report_all(list, codex, claude_windows, grok, codex_windows, &[])
 }
 
 /// 同上，再加 Gemini（#374 第二張）：`gemini` 是 gemini_quota::report_rows 組好的列（最多 5 個，最近讀到的是使用中）。
 /// Gemini 佔的名額從 Claude 那邊扣，總數仍不超過 20。
-pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Value {
+pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Value {
     let gemini = &gemini[..gemini.len().min(crate::gemini_quota::MAX_REPORT)];
     let claude_max = if grok.is_empty() { 19 } else { 14 } - gemini.len();
     let mut rows: Vec<Value> = list
@@ -84,29 +83,11 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
             }
             // 上次確認可用（#1512 C2）：只有時間，UTC、到秒（後台只認這個格式）；沒有就不帶
             if let Some(ms) = a.usable_at_ms {
-                row["usable_at"] = json!(crate::claude_quota::iso_secs(ms));
+                row["usable_at"] = json!(crate::quota_core::iso_secs(ms));
             }
-            if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
-                if let Some(v) = q.five_hour_pct {
-                    o.insert("five_hour_pct".into(), json!(v));
-                }
-                if let Some(v) = q.weekly_pct {
-                    o.insert("weekly_pct".into(), json!(v));
-                }
-                if let Some(v) = &q.reset_at {
-                    o.insert("reset_at".into(), json!(v));
-                }
-                o.insert("at".into(), json!(q.at));
-                // 兩條各自的重置時間（#374，給舊表 relay.asn_accounts 用）：只送檔案裡記著的，舊檔沒有就不送，不從 reset_at 猜
-                for (k, v, pct) in [("five_reset_at", &q.five_reset_at, q.five_hour_pct), ("week_reset_at", &q.week_reset_at, q.weekly_pct)] {
-                    if let (Some(v), Some(_)) = (v, pct) {
-                        o.insert(k.into(), json!(v));
-                    }
-                }
-                let w = q.windows();
-                if !w.is_empty() {
-                    o.insert("windows".into(), json!(w));
-                }
+            // 額度窗（格式同後台 parseWindows）：只有這台目前登入、剛向 Claude 查到的帳號才有；沒有就不帶，由畫面照實寫讀不到
+            if let Some(w) = claude_windows.get(&a.email).filter(|w| !w.is_empty()) {
+                row["windows"] = json!(w);
             }
             row
         })
@@ -131,18 +112,18 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
 /// 回報要依序試的內容（#1529）：先送完整的；被後台以 HTTP 400 退回時（其他錯誤不退步，見 [`send_attempts`]）
 /// 1. 有 gemini：拿掉 gemini 再送（還沒部署 #542 的 relay 看到 gemini 會整份退回，不能因此連 Claude／Codex／Grok 都送不上）；
 /// 2. 有 codex 或 grok：只送 Claude（更舊的後台只認 claude）。
-pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Vec<Value> {
-    let full = build_report_all(list, codex, quotas, grok, codex_windows, gemini);
+pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Vec<Value> {
+    let full = build_report_all(list, codex, claude_windows, grok, codex_windows, gemini);
     let has = |v: &Value, vendors: &[&str]| v["accounts"].as_array().is_some_and(|a| a.iter().any(|r| vendors.iter().any(|x| r["vendor"] == *x)));
     let mut out = vec![];
     if has(&full, &["gemini"]) {
         out.push(full.clone());
     }
-    let no_gemini = build_report_windows(list, codex, quotas, grok, codex_windows);
+    let no_gemini = build_report_windows(list, codex, claude_windows, grok, codex_windows);
     let older = has(&no_gemini, &["codex", "grok"]);
     out.push(no_gemini);
     if older {
-        out.push(build_report_with_quota(list, None, quotas));
+        out.push(build_report_with_quota(list, None, claude_windows));
     }
     out
 }
@@ -457,9 +438,9 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 // ---------- 送給收發室的動作 ----------
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
 #[allow(clippy::too_many_arguments)]
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, log: &impl Fn(String)) -> Result<Value, String> {
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, log: &impl Fn(String)) -> Result<Value, String> {
     let extras = crate::quota_readers::report_extras(crate::heartbeat::now_ms() as i64);
-    let attempts = with_reader_rows(with_login_failed(report_attempts(list, codex, quotas, grok, codex_windows, gemini), login_failed), &extras);
+    let attempts = with_reader_rows(with_login_failed(report_attempts(list, codex, claude_windows, grok, codex_windows, gemini), login_failed), &extras);
     send_attempts(attempts, |body| relay.api("acct_report", Some(body)), log).await
 }
 
@@ -836,25 +817,17 @@ mod tests {
         assert!(!v.to_string().contains("token") && !v.to_string().contains("key"));
     }
 
-    fn quota(five: u8, week: u8) -> Quota {
-        Quota {
-            five_hour_pct: Some(five),
-            weekly_pct: Some(week),
-            reset_at: Some("2026-10-24T14:00:00Z".into()),
-            at: "2026-10-24T12:00:00Z".into(),
-            five_reset_at: Some("2026-10-24T14:00:00Z".into()),
-            week_reset_at: Some("2026-10-30T00:00:00Z".into()),
-            five_at: Some("2026-10-24T12:00:00Z".into()),
-            week_at: Some("2026-10-24T11:00:00Z".into()),
-            owner: false,
-            verified: false,
-        }
+    fn windows(five: u8, week: u8) -> Vec<Value> {
+        vec![
+            json!({ "name": "five_hour", "left_pct": five, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" }),
+            json!({ "name": "weekly", "left_pct": week, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T12:00:00Z" }),
+        ]
     }
 
     #[test]
-    fn 回報_claude_同時帶舊四欄與額度窗_codex_帶對得上的額度窗_grok_不帶_總數不超過二十筆() {
+    fn 回報_claude_只帶額度窗_不再送舊四欄_codex_帶對得上的額度窗_grok_不帶_總數不超過二十筆() {
         use crate::grok_accounts::GrokAccount;
-        let qs: HashMap<String, Quota> = (0..30).map(|i| (format!("u{i}@x.test"), quota(40, 70))).collect();
+        let qs: HashMap<String, Vec<Value>> = (0..30).map(|i| (format!("u{i}@x.test"), windows(40, 70))).collect();
         let many: Vec<_> = (0..30).map(|i| acct(&format!("u{i}@x.test"), i == 0)).collect();
         let gs: Vec<_> = (0..30).map(|i| GrokAccount { email: format!("g{i}@x.test"), current: false, saved: true }).collect();
         let cw = vec![json!({ "name": "five_hour", "left_pct": 95, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" })];
@@ -862,19 +835,10 @@ mod tests {
         let rows = v["accounts"].as_array().unwrap();
         assert!(rows.len() <= 20, "後端上限 20 筆，實際 {}", rows.len());
         let first = &rows[0];
-        for k in ["five_hour_pct", "weekly_pct", "reset_at", "at"] {
-            assert!(first.get(k).is_some(), "舊四欄要照送：{k}");
+        for k in ["five_hour_pct", "weekly_pct", "reset_at", "at", "five_reset_at", "week_reset_at"] {
+            assert!(first.get(k).is_none(), "#1883 舊四欄不再送：{k}");
         }
-        assert_eq!((first["five_reset_at"].as_str(), first["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-30T00:00:00Z")), "兩條各自的重置時間也送（舊表用，#374）");
-        let mut old = quota(40, 70);
-        old.five_reset_at = None;
-        old.week_reset_at = None;
-        let one = build_report_windows(&many[..1], None, &HashMap::from([("u0@x.test".to_string(), old)]), &[], &[]);
-        assert!(one["accounts"][0].get("five_reset_at").is_none() && one["accounts"][0].get("week_reset_at").is_none(), "舊檔沒有就不送，不從舊的 reset_at 猜");
-        assert_eq!(first["windows"], json!([
-            { "name": "five_hour", "left_pct": 40, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
-            { "name": "weekly", "left_pct": 70, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T11:00:00Z" },
-        ]));
+        assert_eq!(first["windows"], json!(windows(40, 70)));
         let cx = rows.iter().find(|r| r["vendor"] == "codex").expect("要有 codex");
         assert_eq!(cx["windows"], json!(cw));
         assert!(cx.get("five_hour_pct").is_none(), "codex 不帶舊四欄");

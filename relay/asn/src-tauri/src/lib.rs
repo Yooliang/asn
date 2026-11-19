@@ -54,7 +54,7 @@ mod android;
 #[cfg(desktop)]
 mod acct_remote;
 #[cfg(desktop)]
-mod statusline_hook;
+mod statusline_restore;
 #[cfg(desktop)]
 mod term_remote;
 #[cfg(desktop)]
@@ -132,6 +132,8 @@ mod claude_json;
 mod claude_mod;
 #[cfg(desktop)]
 mod claude_quota;
+#[cfg(desktop)]
+mod quota_core;
 #[cfg(feature = "gui")]
 mod cloud_invite;   // 電腦與手機共用：邀請雲端代理（建立、清單、撤銷、核准無畫面主機的短碼）
 #[cfg(desktop)]
@@ -393,7 +395,7 @@ async fn relay_launch(app: State<'_, App>, auth: State<'_, auth::AuthState>, bod
     // 原文留在 ui.log（只有動作名、狀態碼、後台錯誤代碼），畫面只顯示白話
     let dir = app.work_dir.clone();
     let log = move |line: String| {
-        let _ = ui_log::append(&dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+        let _ = ui_log::append(&dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
     };
     launch::relay_launch(r.as_ref(), body, token.as_deref(), &log).await
 }
@@ -423,7 +425,7 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
 async fn report_accounts(relay: Arc<Relay>, work_dir: std::path::PathBuf) -> Result<Value, String> {
     static REPORT_LOG: std::sync::Mutex<acct_remote::ReportLog> = std::sync::Mutex::new(acct_remote::ReportLog::new());
     let write = |line: String| {
-        let _ = ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+        let _ = ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
     };
     let r = collect_and_report(relay, work_dir.clone(), &write).await;
     let line = REPORT_LOG.lock().unwrap_or_else(|e| e.into_inner()).line(&r);
@@ -449,9 +451,8 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     }
     // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
-    // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
-    // 重置時間已過的窗不送（那個百分比不代表現在，送出去會蓋掉後台較新的數字，#1212）；帳號本身仍照常回報
-    let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::without_expired(&claude_quota::load_all(&claude_accounts::claude_home()), heartbeat::now_ms() as i64)).await.unwrap_or_default();
+    // 這台目前登入的 Claude 帳號剛向 Claude 查到的額度窗（查不到就是空的，帳號本身仍照常回報）
+    let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::report_windows(&claude_accounts::claude_home(), heartbeat::now_ms() as i64)).await.unwrap_or_default();
     // Grok 帳號庫（email 與是否使用中）；沒有就是空的
     let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
     // Codex 的額度窗：橋的 Codex 引擎存在工作資料夾；帳號跟目前登入對得上才帶（沒開 Codex 橋接就沒有）
@@ -715,7 +716,7 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, ask: relay::Setu
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn remote_setup_log(handle: &AppHandle, line: &str) {
-    let _ = ui_log::append(&handle.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+    let _ = ui_log::append(&handle.state::<App>().work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
 }
 
 /// 重新登入的結果回報到手機；回報沒送到也寫一行到 ui.log
@@ -1236,10 +1237,10 @@ impl view_d::ViewBackend for LiveBackend {
         async move { device_id::live::alert(&relay, &peer, &kind, &sign_pub).await }
     }
     fn log(&self, line: String) {
-        // 電腦版寫進機器資料夾的 ui.log；手機沒有這份紀錄與時間函式（claude_quota 只有電腦版編），照其他手機端的 log 寫標準錯誤
+        // 電腦版寫進機器資料夾的 ui.log；手機沒有這份紀錄與時間函式（quota_core 只有電腦版編），照其他手機端的 log 寫標準錯誤
         #[cfg(desktop)]
         {
-            let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+            let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(auth::now_ms() as i64))]);
         }
         #[cfg(not(desktop))]
         {
@@ -1465,7 +1466,7 @@ impl view_stream::TPort for LiveTPort {
     }
     fn log(&mut self, line: &str) {
         // 寫到機器資料夾的 ui.log（和其他紀錄、設定頁「開啟記錄」同一份），不寫 data_dir（#961）
-        let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        let _ = ui_log::append(&self.app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(auth::now_ms() as i64))]);
     }
     fn keys_dropped(&mut self) -> Option<u64> {
         (self.keys_dropped > 0).then_some(self.keys_dropped)
@@ -1583,7 +1584,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                 let row_tofu = row.get("from_node").and_then(Value::as_str).filter(|_| !peer_pub.is_empty()).map(|n| known.check(n, &peer_pub));
                 let own_pub = key.public_b64();
                 let hs = |tofu: Option<device_id::Tofu>, result: &str, reason: &str| {
-                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line(view_log::Side::Target, &id, row_scope, &own_pub, &peer_pub, tofu, result, reason))]);
+                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", quota_core::iso_secs(auth::now_ms() as i64), view_log::line(view_log::Side::Target, &id, row_scope, &own_pub, &peer_pub, tofu, result, reason))]);
                 };
                 let mut rej: &str = "rejected_other";
                 // 同一筆只能接受一次：驗章前先查，驗過、回覆接受前先記下；記不下來就拒絕（見 view_seen）
@@ -1850,7 +1851,7 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
                                 break "failed".to_string();
                             }
                             shaken = true;
-                            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), "accepted", "-"))]);
+                            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", quota_core::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), "accepted", "-"))]);
                             let (tx, stop) = tokio::sync::oneshot::channel::<()>();
                             stop_rx = Some(tx);
                             // 打字才有送出端（要回條）；看畫面只收不送
@@ -1917,12 +1918,12 @@ fn start_remote_view(app: AppHandle, label: String, relay: Arc<Relay>, data_dir:
         // 打字的送出端停掉時是網路不穩：最後幾個字可能沒送到，要說清楚
         let reason = if inputs.remove(&id) { "input_stalled".to_string() } else { reason };
         let _ = app.emit_to(label.as_str(), "term-view-remote-end", serde_json::json!({ "id": id, "text": view_remote::end_text(&reason) }));
-        let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", claude_quota::iso_secs(auth::now_ms() as i64))]);
+        let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] remote-view end reason={reason} frames={frames}", quota_core::iso_secs(auth::now_ms() as i64))]);
         // 握手沒走完就結束：兩端的原因都在這一行（被拒絕、到期、本人取消、失敗）（#1700）
         if !shaken {
             let result = if reason == "viewer_ended" { "cancelled" } else { "rejected" };
             let end_reason = if why.is_empty() { reason.as_str() } else { why };
-            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", claude_quota::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), result, end_reason))]);
+            let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {}", quota_core::iso_secs(auth::now_ms() as i64), view_log::line_with_me(view_log::Side::Viewer, &id, s.scope, &target.own, &target.sign_pub, Some(target.tofu), result, end_reason))]);
         }
     });
 }
@@ -2036,7 +2037,7 @@ async fn term_view_open(window: tauri::WebviewWindow, views: State<'_, Arc<TermV
                 // 打字紀錄（#956）：結束時把還沒寫的寫出
                 let now = auth::now_ms();
                 if let Some(line) = st.tally.lock().unwrap_or_else(|e| e.into_inner()).take(now) {
-                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now as i64))]);
+                    let _ = ui_log::append(&app.state::<App>().work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(now as i64))]);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -2129,7 +2130,7 @@ fn term_view_input(window: tauri::WebviewWindow, app: State<'_, App>, views: Sta
     // 打字紀錄（#956）：只記數量，不記內容
     let line = state.tally.lock().unwrap_or_else(|e| e.into_inner()).add(now, data.chars().count(), paste.unwrap_or(false), ime.unwrap_or(false));
     if let Some(line) = line {
-        let _ = ui_log::append(&app.work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now as i64))]);
+        let _ = ui_log::append(&app.work_dir, &[format!("{} info [ASN] {line}", quota_core::iso_secs(now as i64))]);
     }
     Ok(())
 }
@@ -3146,7 +3147,7 @@ pub fn run() {
         if let Some(line) = first_run::log_line(&o) {
             match wd {
                 Some(w) => {
-                    let _ = ui_log::append(w, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(now))]);
+                    let _ = ui_log::append(w, &[format!("{} info [ASN] {line}", quota_core::iso_secs(now))]);
                 }
                 None => elog!("[ASN] {line}"),
             }
@@ -3318,7 +3319,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
-            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
             quota_readers_get, quota_readers_set, quota_minimax_add, quota_minimax_remove, quota_share_create, quota_share_revoke,
             acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, claude_login_failed, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
@@ -3528,12 +3529,26 @@ pub fn run() {
                     let every = std::time::Duration::from_secs(300);
                     tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
                 }
+                // Claude 額度：直接查這台目前登入的帳號（每 10 分鐘一次、切換後立刻一次）；先把舊版接在狀態列上的額度串接還原
+                #[cfg(desktop)]
+                if handle.state::<App>().shot.is_none() {
+                    let wd8 = work_dir.clone();
+                    let log8 = move |line: String| {
+                        let _ = ui_log::append(&wd8, &[format!("{} info [ASN] {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
+                    };
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(line) = tauri::async_runtime::spawn_blocking(statusline_restore::restore_on_start).await.ok().flatten() {
+                            log8(line);
+                        }
+                        claude_quota::run_loop(claude_accounts::claude_home(), log8).await
+                    });
+                }
                 // 額度讀取器：全部預設關閉；關著時不連網、不執行任何程式
                 #[cfg(desktop)]
                 if handle.state::<App>().shot.is_none() {
                     let wd7 = work_dir.clone();
                     tauri::async_runtime::spawn(quota_readers::run_loop(identity::home_dir(), grok_accounts::grok_home(), launch::term::free_memory_bytes, move |line| {
-                        let _ = ui_log::append(&wd7, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+                        let _ = ui_log::append(&wd7, &[format!("{} info [ASN] {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
                     }));
                 }
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。

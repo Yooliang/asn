@@ -60,7 +60,7 @@ pub fn install_log_line(now_ms: i64, trigger: Trigger, from: &str, to: &str) -> 
         Trigger::Local => "本機按「更新」",
         Trigger::Remote => "別台交辦的遠端更新",
     };
-    format!("{} info [ASN] 更新：開始下載並安裝（{who}），{from} → {to}", crate::claude_quota::iso_secs(now_ms))
+    format!("{} info [ASN] 更新：開始下載並安裝（{who}），{from} → {to}", crate::quota_core::iso_secs(now_ms))
 }
 
 /// 下載（進度以 `update-progress` 事件送給前端）→ 驗簽（下載完成時由外掛做，不符就丟錯）→ 安裝；Windows 安裝程式會結束本程式並自動重開
@@ -81,7 +81,7 @@ async fn install_from(app: AppHandle, st: State<'_, App>, pending: State<'_, Pen
     let _ = crate::ui_log::append(&st.work_dir, &[install_log_line(now, trigger, env!("CARGO_PKG_VERSION"), &update.version)]);
     let r = run_install(&app, &update).await;
     if let Err(e) = &r {
-        let _ = crate::ui_log::append(&st.work_dir, &[format!("{} info [ASN] 更新：沒有完成（{e}）", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+        let _ = crate::ui_log::append(&st.work_dir, &[format!("{} info [ASN] 更新：沒有完成（{e}）", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
     }
     pending.busy.store(false, Ordering::SeqCst);
     r

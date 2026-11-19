@@ -35,7 +35,7 @@ fn 時間字串可以換回毫秒_格式不對就是沒有() {
 }
 
 // ---------- 共用案例：跟後台 SQL 讀同一份，規則不會分成兩套 ----------
-const SHARED_CASES: &str = include_str!("../../../../../../../tests/fixtures/quota-merge-cases-local.json");
+const SHARED_CASES: &str = include_str!("../../../../../../tests/fixtures/quota-merge-cases-local.json");
 
 #[test]
 fn 共用案例_每一個都跟預期一致() {

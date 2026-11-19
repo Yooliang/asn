@@ -220,7 +220,7 @@ fn log_line(dir: &Path, now: u64, text: &str) {
         let _ = fs::remove_file(&p);
     }
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&p) {
-        let _ = writeln!(f, "{} {text}", crate::claude_quota::iso_secs(now as i64));
+        let _ = writeln!(f, "{} {text}", crate::quota_core::iso_secs(now as i64));
     }
 }
 

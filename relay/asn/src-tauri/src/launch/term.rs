@@ -163,7 +163,7 @@ fn env_log(line: &str) {
     elog!("{line}");
     #[cfg(feature = "gui")]
     if let Some(dir) = UI_LOG_DIR.get() {
-        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
     }
 }
 
@@ -3458,7 +3458,7 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
         let mut schedule = Schedule::default();
         // 一行說明（退避很久、不再讀沒有紀錄檔的視窗）也寫進 ui.log；只有編號、次數、秒數，沒有畫面內容
         let note = |now: u64, line: &str| {
-            let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+            let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now as i64))]);
         };
         // 編號 → 目前的提醒
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();

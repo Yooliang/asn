@@ -164,7 +164,7 @@ fn prepare_inner(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl F
 /// 正式：開 agy 終端前呼叫。asn-cli 不在或準備失敗就回空的（照舊開 agy，只是讀不到額度），原因只進 log。
 #[cfg(feature = "gui")]
 pub fn live_args() -> Vec<String> {
-    let cli = crate::statusline_hook::asn_cli_path();
+    let cli = crate::statusline_restore::asn_cli_path();
     if !cli.is_file() {
         elog!("Gemini 狀態列：找不到 asn-cli，這次不接");
         return vec![];

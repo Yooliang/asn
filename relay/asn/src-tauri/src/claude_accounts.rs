@@ -68,7 +68,7 @@ impl From<std::io::Error> for AccErr {
 type R<T> = Result<T, AccErr>;
 
 /// 介面看得到的欄位（沒有任何權杖）
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone, Default)]
 pub struct AccountInfo {
     pub email: String,
     pub plan: String,
@@ -135,7 +135,7 @@ pub fn claude_home() -> PathBuf {
 }
 
 // ---------- 路徑與名稱 ----------
-fn cred_path(home: &Path) -> PathBuf {
+pub(crate) fn cred_path(home: &Path) -> PathBuf {
     home.join(".claude").join(CRED)
 }
 fn cj_path(home: &Path) -> PathBuf {
@@ -564,7 +564,7 @@ pub fn delete(home: &Path, email: &str) -> R<()> {
 
 // ---------- 切走前核對：這份權杖到底是哪個帳號 ----------
 /// 向 Anthropic 查權杖所屬帳號的端點。寫死、只走 HTTPS、只連 Anthropic 自己的網域，不能從設定或環境變數改
-const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+pub(crate) const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 const PROFILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// 查詢結果（不含權杖）
@@ -604,29 +604,64 @@ fn parse_profile(v: &serde_json::Value) -> Lookup {
     }
 }
 
-/// 拿權杖查一次帳號資料（另開執行緒跑，呼叫端可能在非同步環境裡）。權杖只放在請求標頭，
-/// 錯誤一律轉成 `Lookup` 的類別，不帶原始錯誤訊息；不跟隨轉址
-fn fetch_profile(url: &str, cred: &[u8], timeout: std::time::Duration) -> Lookup {
-    let Some(tok) = access_token(cred) else { return Lookup::Failed };
+/// 一次 GET 查詢失敗的類別。只有類別，不帶對方回應內容與錯誤原文（權杖不進 log、不進錯誤訊息）
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum HttpFail {
+    /// 401：權杖已失效
+    Unauthorized,
+    /// 429：查太頻繁
+    RateLimited,
+    /// 5xx
+    Server,
+    Timeout,
+    /// 其他（連不上、被轉址、其他狀態碼、回應看不懂）
+    Other,
+}
+
+/// 拿現成的 access token 向 Anthropic 的唯讀端點 GET 一次（另開執行緒跑，呼叫端可能在非同步環境裡）。
+/// 權杖只放在請求標頭（Bearer）；只讀 access token，沒有任何換新（refresh）的路徑；不跟隨轉址；
+/// 錯誤一律轉成 `HttpFail` 的類別，不帶原始錯誤訊息。查帳號（`fetch_profile`）與查額度（claude_quota.rs）共用這一支。
+pub(crate) fn fetch_json(url: &str, cred: &[u8], timeout: std::time::Duration) -> Result<serde_json::Value, HttpFail> {
+    let Some(tok) = access_token(cred) else { return Err(HttpFail::Other) };
     let url = url.to_string();
-    let t = std::thread::spawn(move || -> Lookup {
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return Lookup::Failed };
+    let t = std::thread::spawn(move || -> Result<serde_json::Value, HttpFail> {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return Err(HttpFail::Other) };
         rt.block_on(async move {
-            let Ok(c) = reqwest::Client::builder().timeout(timeout).redirect(reqwest::redirect::Policy::none()).build() else { return Lookup::Failed };
+            let Ok(c) = reqwest::Client::builder().timeout(timeout).redirect(reqwest::redirect::Policy::none()).build() else { return Err(HttpFail::Other) };
             match c.get(&url).bearer_auth(&tok).header("anthropic-beta", "oauth-2025-04-20").send().await {
-                Err(e) if e.is_timeout() => Lookup::Timeout,
-                Err(_) => Lookup::Failed,
-                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => Lookup::Unauthorized,
-                Ok(r) if !r.status().is_success() => Lookup::Failed,
+                Err(e) if e.is_timeout() => Err(HttpFail::Timeout),
+                Err(_) => Err(HttpFail::Other),
+                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => Err(HttpFail::Unauthorized),
+                Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => Err(HttpFail::RateLimited),
+                Ok(r) if r.status().is_server_error() => Err(HttpFail::Server),
+                Ok(r) if !r.status().is_success() => Err(HttpFail::Other),
                 Ok(r) => match r.json::<serde_json::Value>().await {
-                    Ok(v) => parse_profile(&v),
-                    Err(e) if e.is_timeout() => Lookup::Timeout,
-                    Err(_) => Lookup::Failed,
+                    Ok(v) => Ok(v),
+                    Err(e) if e.is_timeout() => Err(HttpFail::Timeout),
+                    Err(_) => Err(HttpFail::Other),
                 },
             }
         })
     });
-    t.join().unwrap_or(Lookup::Failed)
+    t.join().unwrap_or(Err(HttpFail::Other))
+}
+
+/// 拿權杖查一次帳號資料（走 `fetch_json`）。權杖只放在請求標頭，錯誤一律轉成 `Lookup` 的類別，不帶原始錯誤訊息；不跟隨轉址
+fn fetch_profile(url: &str, cred: &[u8], timeout: std::time::Duration) -> Lookup {
+    match fetch_json(url, cred, timeout) {
+        Ok(v) => parse_profile(&v),
+        Err(HttpFail::Unauthorized) => Lookup::Unauthorized,
+        Err(HttpFail::Timeout) => Lookup::Timeout,
+        Err(_) => Lookup::Failed,
+    }
+}
+
+/// 查額度那邊要用：帳號資料回應 → (email, uuid)；沒有 email 就是 None
+pub(crate) fn account_of_profile(v: &serde_json::Value) -> Option<(String, String)> {
+    match parse_profile(v) {
+        Lookup::Account { uuid, email } => Some((email, uuid)),
+        _ => None,
+    }
 }
 
 /// 查到的帳號是不是庫裡這一份（uuid 相同或 email 相同）；回 log 用的結果類別
@@ -641,7 +676,17 @@ fn verdict(l: &Lookup, owner_uuid: &str, owner_email: &str) -> (bool, String) {
 }
 
 pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
-    switch_impl(home, email, Fault::None, &profile_lookup)
+    let r = switch_impl(home, email, Fault::None, &profile_lookup);
+    if r.is_ok() {
+        crate::claude_quota::kick(); // 切換之後額度要立刻查一次（claude_quota.rs）
+    }
+    r
+}
+
+/// 帳號正在切換、加入、刪除（或背景同步正在動登入檔）：額度查詢這一輪不查，免得把「切到一半」的登入記到錯的帳號。
+/// 只看一眼，不佔著鎖。
+pub(crate) fn switch_busy() -> bool {
+    LOCK.try_lock().is_err()
 }
 
 /// `who`：查這份權杖是哪個帳號（正式是 `profile_lookup`，測試傳假的）。查不到或對不上只是「不回存」，切換照常

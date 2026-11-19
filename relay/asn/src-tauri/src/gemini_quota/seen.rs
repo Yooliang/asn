@@ -9,7 +9,7 @@
 //! 數值相同＝剩餘 % 完全一樣，而且重置時間差 10 分鐘以內（滿額的窗重置時間會一直往後跑）。
 //! 本機檔 `~/.asn/gemini-quota-seen.json`：最多 32 個視窗，7 天沒更新就刪；壞掉或太大當空的。
 use super::SAME_RESET_MS;
-use crate::claude_quota::Parsed;
+use crate::quota_core::Parsed;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;

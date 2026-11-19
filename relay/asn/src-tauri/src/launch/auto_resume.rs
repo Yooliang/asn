@@ -254,7 +254,7 @@ pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resum
         let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         run(entries, &deps)
     };
-    let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
+    let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::quota_core::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
     let _ = crate::ui_log::append(work_dir, &[line]);
 }
 
@@ -467,7 +467,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
             let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             run(entries, &deps)
         };
-        let line = format!("{} info [ASN] auto-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
+        let line = format!("{} info [ASN] auto-resume total={} resumed={} failed={}", crate::quota_core::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
         let _ = crate::ui_log::append(&log_dir, &[line]);
     });
     if let Err(e) = spawned {

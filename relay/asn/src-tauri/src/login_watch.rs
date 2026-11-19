@@ -531,7 +531,7 @@ pub fn set_log_dir(dir: &std::path::Path) {
 fn ui_note(line: &str, now_ms: i64) {
     match LOG_DIR.get() {
         Some(d) => {
-            let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now_ms))]);
+            let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now_ms))]);
         }
         None => elog!("{line}"),
     }

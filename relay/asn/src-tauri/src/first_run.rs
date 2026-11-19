@@ -92,7 +92,7 @@ fn write_marker(data_dir: &Path, body: &Value) -> Result<(), String> {
 /// 啟動時呼叫一次（要在任何東西寫進 data_dir／work_dir 之前）。
 /// `documents`：「文件」資料夾（沒有就 None）；`now_ms`：現在的毫秒時間，只用來記在標記裡。
 pub fn run_at_startup(data_dir: &Path, others: &[&Path], documents: Option<PathBuf>, now_ms: i64) -> Outcome {
-    let at = crate::claude_quota::iso_secs(now_ms);
+    let at = crate::quota_core::iso_secs(now_ms);
     match decide(data_dir, others) {
         Decision::AlreadyDecided(k) => Outcome::AlreadyDecided(k),
         Decision::Existing => {
