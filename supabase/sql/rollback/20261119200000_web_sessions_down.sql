@@ -2,6 +2,9 @@
 -- 已經建立的網頁節點不刪（信件還掛在上面）：改成已撤銷的一般節點，之後檢查式才能換回舊版。信件不動。
 begin;
 
+select cron.unschedule('asn-web-sessions-purge') where exists (select 1 from cron.job where jobname = 'asn-web-sessions-purge');
+drop function if exists public.asn_relay_web_sessions_purge();
+
 drop function if exists public.asn_relay_web_touch(uuid, uuid, text, text, boolean);
 drop function if exists public.asn_relay_web_session_is_web(uuid);
 drop function if exists public.asn_relay_web_sessions_list(uuid, uuid);

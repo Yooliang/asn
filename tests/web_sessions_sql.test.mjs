@@ -14,6 +14,8 @@ const rd = s => s.replace(/\r+\n/g, '\n')
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const NAME = '20261119200000_web_sessions'
 const mig = rd(fs.readFileSync(new URL(`${NAME}.sql`, DIR), 'utf8'))
+// 測試庫沒有 pg_cron 擴充：去掉建立擴充那一行，另外放一個最小的 cron 替身（排程本身照樣執行）
+const migRun = mig.replace(/create extension if not exists \w+[^;]*;/g, '')
 const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${NAME}_down.sql`, import.meta.url), 'utf8'))
 
 // 從 migration 檔取出整支函式（create or replace function schema.name( … $tag$;）；nth 是同名第幾個（多載時用）
@@ -93,6 +95,9 @@ const S = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
 const SCHEMA = `
   create role service_role; create role anon; create role authenticated; create schema relay;
+  create schema cron; create table cron.job(jobid serial, jobname text, schedule text, command text);
+  create function cron.schedule(n text, s text, c text) returns bigint language sql as $$ insert into cron.job(jobname,schedule,command) values (n,s,c) returning jobid::bigint $$;
+  create function cron.unschedule(n text) returns boolean language sql as $$ delete from cron.job where jobname=n returning true $$;
   create table relay.tenants(id uuid primary key default gen_random_uuid(), owner_user uuid unique, character_node text, owner_name text, id_prefix text, status text not null default 'active');
   create table relay.nodes(id text primary key, name text not null default 'n', key_hash text not null unique, bell_topic text not null unique,
     created_at timestamptz not null default now(), kind text, status text not null default 'active', last_seen_at timestamptz, role text not null default 'member',
@@ -154,7 +159,7 @@ async function boot({ upgrade = true } = {}) {
   await db.exec(SEND_STUB)
   // 改名時留下的舊名轉呼叫（正式庫現況）：拿掉舊簽章 asn_relay_list(uuid) 之後它仍要能用
   await db.exec(`create function public.irori_relay_list(p_tenant uuid) returns jsonb language sql security definer set search_path to '' as $$ select public.asn_relay_list(p_tenant) $$`)
-  if (upgrade) await db.exec(mig)
+  if (upgrade) await db.exec(migRun)
   await db.exec(`insert into relay.tenants(id, owner_user, id_prefix) values ('${T}', '${O}', 't1-')`)
   const q = async (t, a) => (await db.query(t, a)).rows
   const node = (id, o = {}) => db.query(
@@ -453,12 +458,41 @@ test('實跑：回復檔套下去，每支函式回到原本的定義；新函�
   assert.equal((await b.q(`select count(*)::int c from relay.messages`))[0].c, nMail, '信一封不少')
   await assert.rejects(b.db.exec(`insert into relay.nodes(id, key_hash, bell_topic, platform) values ('Z', 'zz', 'bz', 'web')`), '舊的檢查式回來了')
   // 回復之後再套一次新 migration 也要能過（可重跑）
-  await b.db.exec(mig)
+  await b.db.exec(migRun)
   assert.equal((await b.q(`select count(*)::int n from pg_proc where proname = 'asn_relay_web_touch'`))[0].n, 1)
 })
 
 test('實跑：新 migration 可以套兩次（可重跑）', { skip }, async () => {
   const { db, q } = await boot()
-  await db.exec(mig)
+  await db.exec(migRun)
   assert.equal((await q(`select count(*)::int n from pg_proc where proname = 'asn_relay_list'`))[0].n, 1)
+})
+
+test('靜態：登出紀錄保留 90 天供稽核，之後刪除——排程與清理函式寫在 migration，回復檔撤掉排程', () => {
+  assert.match(mig, /登出紀錄保留 90 天供稽核，之後刪除/)
+  const body = mig.replace(/^--.*$/gm, '')
+  assert.match(body, /cron\.schedule\('asn-web-sessions-purge', '47 3 \* \* \*', \$\$ select public\.asn_relay_web_sessions_purge\(\); \$\$\);/)
+  assert.ok(body.includes('revoke all on function public.asn_relay_web_sessions_purge() from public, anon, authenticated;'))
+  assert.ok(body.includes('grant execute on function public.asn_relay_web_sessions_purge() to service_role;'))
+  assert.match(down, /cron\.unschedule\('asn-web-sessions-purge'\)/)
+  assert.ok(down.includes('drop function if exists public.asn_relay_web_sessions_purge();'))
+})
+
+test('實跑：清理——超過 90 天的已登出列刪掉；沒登出的、90 天內登出的不動；排程有登記、回復檔撤掉', { skip }, async () => {
+  const { node, q, db } = await boot()
+  await node('PC', { platform: 'windows', age: '3 days' })
+  for (let i = 1; i <= 5; i++) await q(`select public.asn_relay_web_touch($1::uuid, $2::uuid, $3, 'Edge', true)`, [O, S(i), H1])
+  await db.exec(`update relay.web_sessions set signed_out_at = case session_id
+      when '${S(1)}' then now() - interval '91 days' when '${S(2)}' then now() - interval '89 days'
+      when '${S(4)}' then now() - interval '400 days' else null end`)
+  assert.equal((await q(`select public.asn_relay_web_sessions_purge() n`))[0].n, 2)
+  assert.deepEqual((await q(`select session_id from relay.web_sessions order by session_id`)).map(r => r.session_id), [S(2), S(3), S(5)])
+  assert.equal((await q(`select public.asn_relay_web_sessions_purge() n`))[0].n, 0, '再跑一次沒東西可刪')
+  assert.equal((await q(`select count(*)::int n from relay.nodes where kind = 'web'`))[0].n, 5, '網頁節點本身留著（信掛在上面）')
+  assert.deepEqual((await q(`select jobname, schedule from cron.job`)).map(r => [r.jobname, r.schedule]), [['asn-web-sessions-purge', '47 3 * * *']])
+  await db.exec(migRun)
+  assert.equal((await q(`select count(*)::int n from cron.job`))[0].n, 1, '再套一次不會重複登記')
+  await db.exec(down)
+  assert.equal((await q(`select count(*)::int n from cron.job`))[0].n, 0)
+  assert.equal((await q(`select count(*)::int n from pg_proc where proname = 'asn_relay_web_sessions_purge'`))[0].n, 0)
 })

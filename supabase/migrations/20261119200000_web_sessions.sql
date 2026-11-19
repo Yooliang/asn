@@ -10,6 +10,7 @@
 --  6. 其他挑節點的函式排除網頁：asn_relay_inbox_watch、asn_relay_list（多選填參數 p_include_web，預設 false）、asn_setup_request、asn_relay_setup_poll、
 --     asn_update_request、asn_account_nodes、perm_req／secret 與群組的門鈴。
 --  7. 新函式：asn_relay_web_touch（驗證並登記網頁登入）、asn_relay_web_session_is_web、asn_relay_web_sessions_list、asn_relay_web_logout_all、relay.web_lane_targets、relay.web_denied_notice、relay.web_browser_label。
+--  8. 清理：登出紀錄保留 90 天供稽核，之後刪除（asn_relay_web_sessions_purge，每天 03:47 UTC 由 pg_cron 執行）。沒登出的、90 天內登出的都不動；已撤銷的網頁節點本身留著（信件掛在上面）。
 -- 全部是新增或「多排除網頁」，舊用戶端與舊 Edge 不受影響。函式都是 security definer、search_path 空、只授權 service_role。
 -- 回復：supabase/sql/rollback/20261119200000_web_sessions_down.sql（上面各函式換回原文、拿掉新表與新函式；已有的網頁節點改成已撤銷的一般節點，信件不動）。
 begin;
@@ -1351,5 +1352,24 @@ AS $function$
 $function$;
 revoke all on function public.asn_relay_list(uuid, boolean) from public, anon, authenticated;
 grant execute on function public.asn_relay_list(uuid, boolean) to service_role;
+
+
+-- ===== 清理：登出紀錄保留 90 天供稽核，之後刪除 =====
+create or replace function public.asn_relay_web_sessions_purge()
+ returns integer language plpgsql security definer set search_path to ''
+as $function$
+declare v_n integer;
+begin
+  delete from relay.web_sessions where signed_out_at is not null and signed_out_at < now() - interval '90 days';
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$function$;
+revoke all on function public.asn_relay_web_sessions_purge() from public, anon, authenticated;
+grant execute on function public.asn_relay_web_sessions_purge() to service_role;
+
+create extension if not exists pg_cron;
+select cron.unschedule('asn-web-sessions-purge') where exists (select 1 from cron.job where jobname = 'asn-web-sessions-purge');
+select cron.schedule('asn-web-sessions-purge', '47 3 * * *', $$ select public.asn_relay_web_sessions_purge(); $$);
 
 commit;
