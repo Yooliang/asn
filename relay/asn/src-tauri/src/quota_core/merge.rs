@@ -1,0 +1,216 @@
+//! 額度紀錄的本機合併（#1338／#1342，#1266 簡化）：Gemini 等本機額度，新讀到的 5 小時與每週兩條各自判斷要不要收，逐欄合併，不整筆覆寫。
+//! （Claude 的額度不走這裡：直接向 Claude 查、不合併，見 claude_quota.rs。）
+//!
+//! 每筆新數字都帶「資料時間」`read_ms`。規則：
+//! - `future_read`：資料時間比現在晚超過 5 分鐘（電腦時鐘走快）＝不收。
+//! - `older_read`：資料時間比記著的那條更早＝舊的數字，不收。
+//! - `reset_out_of_range`：新的重置時間不在「現在 −1 天」到「現在 +8 天」之間＝不收（不然一個 2099 年的重置時間存進來會鎖死）。
+//! 其餘一律照收。各條另記自己的資料時間 `five_at`／`week_at`；記錄時間 `at`：只有真的收進新值時才更新成現在；兩條都不收就整筆不動。
+//! 判斷規則的案例在 tests/fixtures/quota-merge-cases-local.json。
+use super::{iso_secs, parse_iso_secs, pick_reset, Parsed, Quota};
+use std::path::Path;
+
+/// 新來的重置時間最早可以是現在往前這麼久
+const RESET_PAST_MS: i64 = 86_400_000;
+/// 重置時間最晚可以是現在往後這麼久（每週那條最多 7 天後，多留 1 天）
+const RESET_FUTURE_MS: i64 = 8 * 86_400_000;
+/// 資料時間最晚可以比現在晚這麼久（容忍小幅時鐘誤差）
+const FUTURE_READ_MS: i64 = 5 * 60_000;
+const LOG_MAX_BYTES: u64 = 64 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Five,
+    Week,
+}
+
+impl Kind {
+    fn label(self) -> &'static str {
+        match self {
+            Kind::Five => "5 小時額度",
+            Kind::Week => "每週額度",
+        }
+    }
+}
+
+/// 一條沒收的原因（給 log 看，不含 email）
+#[derive(Debug, PartialEq, Clone)]
+pub struct Skipped {
+    pub kind: Kind,
+    /// 不收的原因代碼（`Reject::code`）：log 同一個代碼連續發生只記一次（#1184）
+    pub code: &'static str,
+    pub reason: String,
+}
+
+/// 不收的原因：`code` 跟後台與共用案例的代碼一致（older_read／future_read／reset_out_of_range），
+/// `detail` 是給 log 看的中文說明（不含 email）
+#[derive(Debug, PartialEq, Clone)]
+pub struct Reject {
+    pub code: &'static str,
+    pub detail: String,
+}
+fn reject(code: &'static str, detail: String) -> Result<(), Reject> {
+    Err(Reject { code, detail })
+}
+
+/// 現有紀錄裡兩條各自的重置時間：(5 小時的, 每週的)。新版檔案那條有存就直接用；
+/// 那條沒存（舊版寫的檔）才從舊的單一 `reset_at` 推回來。
+pub(crate) fn stored_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
+    let (f, w) = legacy_resets(q);
+    let own = |s: &Option<String>, legacy: Option<i64>| match s {
+        Some(t) => parse_iso_secs(t),
+        None => legacy,
+    };
+    (own(&q.five_reset_at, f), own(&q.week_reset_at, w))
+}
+
+/// 舊版檔案的那一個重置時間屬於哪一條：(5 小時的, 每週的)
+fn legacy_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
+    let r = q.reset_at.as_deref().and_then(parse_iso_secs);
+    match (q.five_hour_pct, q.weekly_pct) {
+        (Some(0), Some(0)) => (None, None),
+        (_, Some(0)) => (None, r),
+        (Some(_), _) => (r, None),
+        (None, Some(_)) => (None, r),
+        (None, None) => (None, None),
+    }
+}
+
+/// 一條要不要收：收回 Ok(())，不收回原因。`old_read_ms`＝記著的那條的資料時間（沒有記過就是 None），`new_read_ms`＝這次的資料時間。
+/// 順序：future_read → older_read → reset_out_of_range（跟後台 asn_relay_acct_window_decide 一樣）。
+/// 資料時間以秒為單位比較（記著的存成整秒），同一秒算一樣，照收。
+pub fn judge(old_read_ms: Option<i64>, new_read_ms: i64, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
+    if new_read_ms > now_ms + FUTURE_READ_MS {
+        return reject("future_read", format!("資料時間 {} 比現在晚超過 5 分鐘，不收", iso_secs(new_read_ms)));
+    }
+    if let Some(old) = old_read_ms {
+        if new_read_ms.div_euclid(1000) < old.div_euclid(1000) {
+            return reject("older_read", format!("資料時間 {} 比記著的 {} 早，是舊視窗的舊數字", iso_secs(new_read_ms), iso_secs(old)));
+        }
+    }
+    if let Some(r) = new_reset {
+        if r < now_ms - RESET_PAST_MS || r > now_ms + RESET_FUTURE_MS {
+            return reject("reset_out_of_range", format!("重置時間 {} 不在現在前 1 天到後 8 天之間，不收", iso_secs(r)));
+        }
+    }
+    Ok(())
+}
+
+/// 合併一條：新來的沒有這條就留舊的；有就判斷。回 (合併後的這條, 有沒有收進新值, 沒收的原因)
+fn merge_one(kind: Kind, old: Option<(u8, Option<i64>)>, old_read_ms: Option<i64>, new: Option<(u8, Option<i64>)>, new_read_ms: i64, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>) {
+    let Some((pct, reset)) = new else { return (old, false, None) };
+    match judge(old.and(old_read_ms), new_read_ms, reset, now_ms) {
+        Ok(()) => (Some((pct, reset)), true, None),
+        Err(r) => (old, false, Some(Skipped { kind, code: r.code, reason: r.detail })),
+    }
+}
+
+/// 一條的資料時間：這次收了是這次的資料時間；沒收就留原本的（舊檔沒有各條的就用整筆的 at）；這條沒數字就沒有
+fn read_at(took: bool, has: bool, own: Option<&String>, old_at: Option<&String>, read: &str) -> Option<String> {
+    if took {
+        Some(read.to_string())
+    } else if has {
+        own.or(old_at).cloned()
+    } else {
+        None
+    }
+}
+
+/// 一次合併的完整結果：除了紀錄與沒收的原因，還有各條有沒有收
+pub struct Merged {
+    pub quota: Option<Quota>,
+    pub skipped: Vec<Skipped>,
+    pub took_five: bool,
+    pub took_week: bool,
+}
+
+/// 這次讀數完全沒有某一窗、而存著的那一窗重置時間已經過了：那一窗已經沒有了（例如方案拿掉 5 小時限制，rate_limits 裡不再有 five_hour），
+/// 留著只會一直掛著一個過期的舊數字。回拿掉那一窗之後的紀錄（那一窗的剩餘 %、重置時間、資料時間都清掉，舊的單一 `reset_at` 依剩下的窗重算）；
+/// 沒有要拿掉的回 None。還沒過重置時間的（只是這次剛好沒帶）、存著的那一窗沒有重置時間的（無從判斷）都留著。重置時間剛好等於現在算已過。
+/// Gemini 用這個；呼叫端要先套用、再用拿掉之後的紀錄去合併新讀數。
+pub fn without_missing_expired(old: &Quota, p: &Parsed, now_ms: i64) -> Option<Quota> {
+    let (r5, rw) = stored_resets(old);
+    let drop5 = p.five_hour_pct.is_none() && old.five_hour_pct.is_some() && r5.is_some_and(|r| r <= now_ms);
+    let dropw = p.weekly_pct.is_none() && old.weekly_pct.is_some() && rw.is_some_and(|r| r <= now_ms);
+    if !drop5 && !dropw {
+        return None;
+    }
+    let mut q = old.clone();
+    if drop5 {
+        (q.five_hour_pct, q.five_reset_at, q.five_at) = (None, None, None);
+    }
+    if dropw {
+        (q.weekly_pct, q.week_reset_at, q.week_at) = (None, None, None);
+    }
+    let five = q.five_hour_pct.map(|v| (v, r5));
+    let week = q.weekly_pct.map(|v| (v, rw));
+    q.reset_at = pick_reset(five, week).map(iso_secs);
+    Some(q)
+}
+
+/// 兩個重置時間差在這麼久內算同一期（agy 給的重置時間會晃幾秒）
+pub const SAME_RESET_MS: i64 = 10 * 60_000;
+
+/// 兩條共用同一個資料時間 `read_ms` 的合併
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn merge_full(old: Option<&Quota>, p: &Parsed, read_ms: i64, now_ms: i64) -> Merged {
+    merge_full_each(old, p, read_ms, read_ms, now_ms)
+}
+
+/// 兩條窗各自的資料時間（Gemini：各視窗各條的資料時間不同，見 gemini_quota/seen.rs）
+pub fn merge_full_each(old: Option<&Quota>, p: &Parsed, read_five_ms: i64, read_week_ms: i64, now_ms: i64) -> Merged {
+    let (old_five_r, old_week_r) = old.map(stored_resets).unwrap_or((None, None));
+    let old_five = old.and_then(|q| q.five_hour_pct).map(|v| (v, old_five_r));
+    let old_week = old.and_then(|q| q.weekly_pct).map(|v| (v, old_week_r));
+    let read_of = |own: Option<&String>| own.or(old.map(|q| &q.at)).and_then(|t| parse_iso_secs(t));
+    let (old_five_read, old_week_read) = (read_of(old.and_then(|q| q.five_at.as_ref())), read_of(old.and_then(|q| q.week_at.as_ref())));
+    let (five, took_five, s1) = merge_one(Kind::Five, old_five, old_five_read, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), read_five_ms, now_ms);
+    let (week, took_week, s2) = merge_one(Kind::Week, old_week, old_week_read, p.weekly_pct.map(|v| (v, p.week_reset_ms)), read_week_ms, now_ms);
+    let skipped: Vec<Skipped> = [s1, s2].into_iter().flatten().collect();
+    if !took_five && !took_week {
+        return Merged { quota: None, skipped, took_five, took_week };
+    }
+    let (now, read_five, read_week) = (iso_secs(now_ms), iso_secs(read_five_ms), iso_secs(read_week_ms));
+    let old_at = old.map(|q| &q.at);
+    let q = Quota {
+        five_hour_pct: five.map(|f| f.0),
+        weekly_pct: week.map(|w| w.0),
+        reset_at: pick_reset(five, week).map(iso_secs),
+        five_reset_at: five.and_then(|f| f.1).map(iso_secs),
+        week_reset_at: week.and_then(|w| w.1).map(iso_secs),
+        five_at: read_at(took_five, five.is_some(), old.and_then(|q| q.five_at.as_ref()), old_at, &read_five),
+        week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &read_week),
+        at: now,
+    };
+    Merged { quota: Some(q), skipped, took_five, took_week }
+}
+
+/// 沒收的原因 → log 文字（一條一行，不含 email）
+pub fn skipped_lines(skipped: &[Skipped], now_ms: i64) -> String {
+    let at = iso_secs(now_ms);
+    skipped.iter().map(|s| format!("{at} {}沒收：{}\n", s.kind.label(), s.reason)).collect()
+}
+
+/// 附加到 log 檔（超過 64 KB 只留後半）。寫不進去就算了：呼叫端掛在狀態列上，不能因此失敗，也不印到標準錯誤。
+pub fn append_log(p: &Path, text: &str) {
+    use std::io::Write;
+    if text.is_empty() {
+        return;
+    }
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::metadata(p).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
+        if let Ok(t) = std::fs::read_to_string(p) {
+            let mid = t.len() / 2;
+            let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
+            let _ = std::fs::write(p, keep);
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests;

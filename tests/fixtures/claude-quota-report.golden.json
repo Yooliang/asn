@@ -1,0 +1,14 @@
+{
+  "accounts": [
+    {
+      "vendor": "claude",
+      "email": "a@x.test",
+      "plan": "max",
+      "current": true,
+      "windows": [
+        { "name": "five_hour", "left_pct": 62, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
+        { "name": "weekly", "left_pct": 80, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T12:00:00Z" }
+      ]
+    }
+  ]
+}

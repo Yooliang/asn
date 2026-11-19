@@ -40,7 +40,7 @@
 ## 四、手上還沒收尾的
 - **工作機連線中斷（#339）**：0.1.92 應該修好（asn真 的分析：工作機代收區 437 封＋後台 62 封，一次 ack 約 500 個編號超過 100 的上限）。請確認工作機裝上 0.1.92 後的狀況；asn真 提議 0.1.93 把主視窗記錄寫進檔案（`ui.log`），目前記錄只進 console，無法事後查。
 - **ACP 切換模型（#235）與改名（#266）**：兩個都是後端、動到夥伴身分與持久化，**我還沒開始、設計也沒寫**。#266 的 session 回報（名單帶 session）其實已經有了（`bridge/engines/acp.rs` 的 `window_of`），缺的是 `AcpAdmin::rename`：驗新名字、搬 `Store` 的 key、改 `acp-workers.json`／接手名冊（`acp-adopted.json`）、換 `workers` 的 key 與 cfg、重啟工作者保留對話；先寫設計到 issue 給 asn真／Gemini 看再動手。
-- **#343 引導頁**：額度、pi 登入、Claude 外掛放進引導，與「啟動設定」整合；入口卡片邏輯可沿用 `ui/lib/quota-hook.mjs`、`pi-setup.mjs`。
+- **#343 引導頁**：額度、pi 登入、Claude 外掛放進引導，與「啟動設定」整合；入口卡片邏輯見 `pi-setup.mjs`（額度那一項已於 #1883 移除）。
 - **真機驗證欠帳**：從 ASN 開新夥伴對話框選「經 pi」實開一次，看開出來的 pi 用的是不是選到的模型（我只用 `pi -p --provider deepseek --model deepseek-flash` 驗證了 pi 本身接受旗標，ASN 這條路沒點過）；額度接上後 Claude 狀態列有沒有照常顯示（Windows 用哪個 shell 跑狀態列我沒實測）；`~/.asn/agents.json` 的 Gemini審查 write_dirs 要擁有者改。
 - **A9（忙碌時連送兩則的佇列行為）**：只實測了 Grok（自己會排隊）；Claude、agy 測試台打不開，沒結果，#319 維持暫停。
 - **issue**：#374（電腦版設定頁顯示額度進度條）、#371／#372 等擁有者說要做才排、#373 工作機換手回 403。

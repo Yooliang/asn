@@ -2,7 +2,7 @@
 // 1. 靜態：judge 只剩重置時間範圍、decide 只剩 future_read／older_read／範圍；windows_clean 除了明列的片段與 20261110100000 版逐字相同；
 //    回復檔換回上一版；只授權 service_role；沒動資料表（window_pending 欄位保留）；沒有權杖類字樣。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：
-//    共用案例 tests/fixtures/quota-merge-cases.json 的 cases 每一個、window_pair_cases 每條窗各自判斷；
+//    共用案例 tests/fixtures/quota-merge-cases-local.json 的 cases 每一個、window_pair_cases 每條窗各自判斷；
 //    端到端：同期回升照收、舊視窗重送的舊數字被擋而另一條窗照收、舊版留下的待確認被清掉、回復後回到簡化之前。
 import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
@@ -23,7 +23,7 @@ const roster = read('20261029100000_acct_roster.sql')
 const lock = read('20261029110000_acct_roster_lock_lower.sql')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024130000_acct_switch_signed.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases.json', import.meta.url), 'utf8'))
+const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-local.json', import.meta.url), 'utf8'))
 
 const body = (sql, name) => { const s = sql.indexOf(`create or replace function public.${name}(`); assert.ok(s >= 0, name); return sql.slice(s, sql.indexOf('$function$;', s) + 11) }
 const swap = (t, a, b) => { assert.ok(t.includes(a), a); return t.replace(a, () => b) }

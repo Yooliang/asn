@@ -1,6 +1,6 @@
 // 帳號列表第一批（#374，20261029100000_acct_roster.sql）：
 // 1. 靜態：編號排在最新之後、舊的 asn_relay_acct_report／asn_relay_acct_quota／relay.asn_accounts 一字不動、只授權 service_role、沒有權杖類字樣。
-// 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：共用案例 tests/fixtures/quota-merge-cases-legacy.json 全跑、
+// 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：（共用案例檔已移除，#1883）
 //    權限、擁有者寫入／沒認領不寫／租戶不符不寫、舊四欄轉兩窗、兩台逐窗合併、A 讀不到 B、沒簽章 forbidden、30 天保留、上限、舊函式原文不變。
 import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
@@ -13,7 +13,6 @@ const mig = read(FILE)
 const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-legacy.json', import.meta.url), 'utf8'))
 
 const FNS = [
   'asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz)', 'asn_relay_acct_iso(jsonb)',
@@ -37,19 +36,6 @@ test('靜態：編號在最新 migration 之後；舊函式與舊表一字不動
   assert.doesNotMatch(mig, /create policy/i)
   assert.match(down, /drop table if exists relay\.asn_user_accounts;/)
   assert.match(mig, /^begin;$/m); assert.match(mig, /^commit;$/m)
-})
-
-test('共用案例檔：格式完整（之後 Rust 用 include_str! 讀同一份）', () => {
-  assert.ok(Array.isArray(cases.doc) && cases.doc.length > 0)
-  assert.deepEqual(Object.keys(cases.reasons).sort(), ['earlier', 'future_read', 'later_not_expired', 'not_week_multiple', 'older_read', 'reset_out_of_range', 'same_period_rise'])
-  assert.ok(cases.cases.length >= 15)
-  const ids = new Set()
-  for (const c of cases.cases) {
-    assert.ok(!ids.has(c.id), c.id); ids.add(c.id)
-    assert.ok(['claude', 'codex', 'gemini'].includes(c.vendor) && ['five_hour', 'weekly'].includes(c.window), c.id)
-    assert.equal(c.accept, c.reason === null, c.id)
-    if (c.reason) assert.ok(c.reason in cases.reasons, c.id)
-  }
 })
 
 let PGlite = null
@@ -95,15 +81,6 @@ const C = { vendor: 'claude', email: 'a@x.test', plan: 'max', current: true }
 const win = (name, left_pct, resets_at, read_at = AT) => ({ name, left_pct, resets_at, read_at })
 
 // gemini 的案例要套 20261029130000_acct_roster_gemini.sql 才對（滿額規則在那支），在 tests/acct_roster_gemini_sql.test.mjs 跑全部案例
-test('實跑（pglite）：共用案例全部照預期（同一份案例檔；gemini 的見 acct_roster_gemini_sql）', { skip }, async () => {
-  const { db } = await setup()
-  for (const c of cases.cases.filter(x => x.vendor !== 'gemini' && x.scope !== 'backend_only')) {
-    const r = (await db.query('select public.asn_relay_acct_window_judge($1, $2, $3::jsonb, $4::jsonb, $5::timestamptz) r',
-      [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])).rows[0].r
-    assert.equal(r, c.reason, `${c.id} ${c.note}`)
-  }
-})
-
 test('實跑（pglite）：權限——RLS 開、沒有 policy、anon／authenticated 無權；寫讀兩支 definer、search_path 空', { skip }, async () => {
   const { db } = await setup()
   const t = (await db.query(`select relrowsecurity from pg_class where oid = 'relay.asn_user_accounts'::regclass`)).rows[0]
