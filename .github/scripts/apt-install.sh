@@ -9,9 +9,9 @@
 #     安裝成功後把 archives 的 .deb 複製回該目錄，讓 workflow 的 actions/cache 存起來。
 #     APT_LISTS_CACHE（目錄）同理存 /var/lib/apt/lists：.deb 與索引都命中時先試「不 update、不下載」直接裝（只在命中快取時發生；
 #     快取每週重建，安全更新最多晚一週進來），失敗就退回下面的正常流程。
-#  2. 重試：Acquire::Retries=5＋連線 timeout 20 秒；整段失敗最多 3 輪，第 1 輪預設鏡像、第 2、3 輪官方站 archive.ubuntu.com。
+#  2. 重試：Acquire::Retries=3＋連線 timeout 15 秒；整段失敗最多 3 輪，鏡像依序為預設 → azure.archive.ubuntu.com → archive.ubuntu.com。
 #     被 timeout 切掉的那輪已下載完的 .deb 會留在 archives，下一輪接著用，不重抓。
-#  3. 逾時：每輪 update 90 秒、install 420 秒（上限 510 秒），3 輪最多約 26 分鐘；workflow step 的 timeout-minutes 給 30 當總上限。
+#  3. 逾時：每輪 update 90 秒、install 150／300／300 秒，3 輪最多約 15 分鐘；workflow step 的 timeout-minutes 給 20 當總上限。
 #     正常（快取命中或鏡像正常）整步在 1～2 分鐘內完成。
 #
 # 用法：apt-install.sh [apt-get install 的選項與套件…]（-y 已經帶了）
@@ -19,13 +19,17 @@ set -uo pipefail
 
 ARCHIVES=/var/cache/apt/archives
 UPDATE_TIMEOUT=90
-INSTALL_TIMEOUT=420
+# 每輪 install 的上限與換用的鏡像（空字串＝runner 預設的 mirrorlist）。
+# 11-19 實測：預設鏡像（ec2 us-east-2）每個套件卡 40 秒、archive.ubuntu.com 也很慢，所以第 1 輪給短上限盡快放棄，
+# 後兩輪換 Azure 鏡像（runner 同區，平常最快）與官方站；每輪已下載完的 .deb 都留著，下一輪接著用。
+INSTALL_TIMEOUTS=(150 300 300)
+MIRRORS=("" "http://azure.archive.ubuntu.com/ubuntu/" "http://archive.ubuntu.com/ubuntu/")
 ROUNDS=3
 
 APT=(sudo apt-get
-  -o Acquire::Retries=5
-  -o Acquire::http::Timeout=20
-  -o Acquire::https::Timeout=20
+  -o Acquire::Retries=3
+  -o Acquire::http::Timeout=15
+  -o Acquire::https::Timeout=15
   -o Dpkg::Lock::Timeout=60
   -o APT::Keep-Downloaded-Packages=true)
 
@@ -51,17 +55,14 @@ save_cache() {
 }
 
 attempt() {
-  timeout "$UPDATE_TIMEOUT" "${APT[@]}" update && timeout "$INSTALL_TIMEOUT" "${APT[@]}" install -y "$@"
+  timeout "$UPDATE_TIMEOUT" "${APT[@]}" update && timeout "$1" "${APT[@]}" install -y "${@:2}"
 }
 
-use_official_mirror() {
+use_mirror() {
+  local url=$1 f
   for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
     [ -f "$f" ] || continue
-    sudo sed -i -E \
-      -e 's#mirror\+file:/etc/apt/apt-mirrors\.txt#http://archive.ubuntu.com/ubuntu/#g' \
-      -e 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' \
-      -e 's#https?://security\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' \
-      "$f"
+    sudo sed -i -E       -e "s#mirror\+file:/etc/apt/apt-mirrors\.txt#$url#g"       -e "s#https?://[A-Za-z0-9.-]*ubuntu\.com/ubuntu/?#$url#g"       "$f"
   done
 }
 
@@ -90,22 +91,23 @@ fi
 log "快取沒命中或不完整，走正常流程"
 
 for round in $(seq 1 "$ROUNDS"); do
-  log "第 $round/$ROUNDS 輪"
-  if attempt "$@"; then
+  log "第 $round/$ROUNDS 輪（install 上限 ${INSTALL_TIMEOUTS[$((round - 1))]} 秒，鏡像 ${MIRRORS[$((round - 1))]:-預設}）"
+  if [ -n "${MIRRORS[$((round - 1))]}" ]; then
+    use_mirror "${MIRRORS[$((round - 1))]}"
+    mirror_swapped=1
+  fi
+  if attempt "${INSTALL_TIMEOUTS[$((round - 1))]}" "$@"; then
     log "安裝完成"
     save_cache
     save_lists
     exit 0
   fi
-  [ "$round" -lt "$ROUNDS" ] || break
-  echo "::warning::第 $round 輪 apt 下載失敗或逾時，改用 archive.ubuntu.com 再試"
+  echo "::warning::第 $round 輪 apt 下載失敗或逾時"
   # 這輪若在安裝中途被 timeout 切掉，先把 dpkg 收拾好，才不會卡在鎖或半套狀態
   sudo dpkg --configure -a || true
-  use_official_mirror
-  mirror_swapped=1
 done
 
-# 失敗也把已下載完的 .deb 留給快取目錄（workflow 只在成功時存快取，這裡只是不丟東西）
+# 失敗也把已下載完的 .deb 留給快取目錄（workflow 的存快取步驟 always 會跑）
 save_cache
 echo "::error::apt 安裝 $ROUNDS 輪都失敗"
 exit 1

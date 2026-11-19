@@ -411,7 +411,7 @@ jobs:
       # apt 下載偶爾很慢（#1796：要抓約 95 MB／203 個套件，鏡像慢時逾時 exit 124）：
       # 1) .deb 快取：key＝runner OS＋套件清單與安裝腳本的雜湊＋年週（每週重建一次，讓安全更新進得來）。
       #    用 actions/cache（repo 已有且釘在 SHA），不新增第三方 action。
-      # 2) apt-install.sh 最多 3 輪、第 2 輪起換官方站，每輪有 timeout；3) 整步上限 30 分鐘，卡住就失敗、不佔住機器
+      # 2) apt-install.sh 最多 3 輪、第 2、3 輪換 Azure／官方鏡像，每輪有 timeout；3) 整步上限 20 分鐘，卡住就失敗、不佔住機器
       - name: 算 apt 快取 key
         id: aptkey
         run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
@@ -425,7 +425,7 @@ jobs:
 
       - name: 安裝系統依賴
         id: aptinstall
-        timeout-minutes: 30
+        timeout-minutes: 20
         env:
           APT_DEB_CACHE: ${{ runner.temp }}/apt-cache/debs
           APT_LISTS_CACHE: ${{ runner.temp }}/apt-cache
