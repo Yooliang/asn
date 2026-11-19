@@ -115,7 +115,7 @@ Deno.test("poll：等待、核准後回金鑰（只此一次）、到期、無�
 Deno.test("守門：index.ts 在節點金鑰驗證之前接上三個動作；send 把 not_receivable 回 409；紀錄不印金鑰", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const iDevice = src.indexOf("DEVICE_CODE_ACTIONS.has(action)");
-  const iAuth = src.indexOf('const key = req.headers.get("x-relay-key")');
+  const iAuth = src.indexOf('const key = web ? null : req.headers.get("x-relay-key")');
   assert(iDevice > 0 && iAuth > 0 && iDevice < iAuth, "裝置授權動作必須排在節點金鑰驗證之前");
   assert(src.includes('"not_receivable"') && src.includes("409"), "send 要把 not_receivable 回 409");
   const mod = await Deno.readTextFile(new URL("./device_code.ts", import.meta.url));
