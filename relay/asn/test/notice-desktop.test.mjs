@@ -13,7 +13,7 @@ const read = f => fs.readFileSync(new URL(f, UI), 'utf8')
 
 test('noticeCategory：只看 kind；卡住／登入／額度／安全，其餘與沒有 kind 歸其他', () => {
   const want = {
-    'notice:inbox_watch': 'stuck', 'notice:waiting': 'stuck', 'notice:mux_down': 'stuck', 'notice:mux_blind': 'stuck', 'notice:misroute': 'stuck',
+    'notice:inbox_watch': 'stuck', 'notice:waiting': 'stuck', 'notice:waiting_login': 'login', 'notice:mux_down': 'stuck', 'notice:mux_blind': 'stuck', 'notice:misroute': 'stuck',
     'notice:login': 'login',
     'notice:quota': 'quota',
     'notice:view': 'security', 'notice:term_view': 'security', 'notice:device_key': 'security', 'notice:node_mismatch': 'security',

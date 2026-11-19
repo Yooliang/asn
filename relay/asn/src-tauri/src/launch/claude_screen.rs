@@ -78,12 +78,21 @@ fn is_login_error(body: &str) -> bool {
 }
 /// 登入逾時（#1792）：「Login reached its time limit · Please run /login」「Failed to authenticate: this login reached its time limit · Sign in again to continue」
 /// 「…reached its time limit and cannot be renewed. Run `claude auth login` to sign in a…」（被截斷）都含這句。認字、不認行位置；
-/// ● 開頭的是模型自己的回覆（可能只是引用這句話），不算。「Could not refresh your login because another Claude Code process…」是暫時的，不含這句，不算登入
+/// ● 開頭的是模型自己的回覆（可能只是引用這句話），不算；⎿ 底下的行（真的登入錯誤也掛在這裡，但工具輸出如 grep 結果也掛在這裡）只認以錯誤句開頭的；沒有符號的行認字。「Could not refresh your login because another Claude Code process…」是暫時的，不含這句，不算登入
 const LOGIN_TIME_LIMIT: &str = "reached its time limit";
+
+const LOGIN_TIME_LIMIT_HEADS: [&str; 2] = ["login reached its time limit", "failed to authenticate: this login reached its time limit"];
 
 fn is_login_time_limit(line: &str) -> bool {
     let t = line.trim_start();
-    !t.starts_with('●') && t.to_ascii_lowercase().contains(LOGIN_TIME_LIMIT)
+    if t.starts_with('●') {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    match lower.strip_prefix('⎿') {
+        Some(rest) => LOGIN_TIME_LIMIT_HEADS.iter().any(|h| rest.trim_start().starts_with(h)),
+        None => lower.contains(LOGIN_TIME_LIMIT),
+    }
 }
 const USAGE_LIMIT: &str = "You've hit your limit";
 /// 額度用完的選單（#1512，claude 2.1.325）：標題、頁尾和兩個不花錢的選項都是 Claude 固定的字。
@@ -1352,6 +1361,13 @@ mod tests {
         let transient = "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again";
         assert_ne!(kind(&page(transient)), Some(K::Login));
         assert_ne!(kind(&page(&format!("  ⎿  {transient}"))), Some(K::Login));
+        // ⎿ 底下的工具輸出（grep 結果、文件）只是引用這句話：不算
+        for quoted in [
+            "  ⎿  relay/asn/src-tauri/src/launch/claude_screen.rs:82:const LOGIN_TIME_LIMIT: &str = \"reached its time limit\";",
+            "  ⎿  docs/x.md: 畫面停在 Login reached its time limit 時推播",
+        ] {
+            assert_ne!(kind(&page(quoted)), Some(K::Login), "{quoted}");
+        }
         // 模型自己的回覆（引用這句話）不算
         assert_ne!(kind(&page("● Login reached its time limit · Please run /login")), Some(K::Login));
         assert_ne!(kind(&page("● 這句是「Failed to authenticate: this login reached its time limit」的意思")), Some(K::Login));

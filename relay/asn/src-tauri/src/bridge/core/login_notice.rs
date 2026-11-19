@@ -1,4 +1,4 @@
-//! 夥伴視窗停在登入逾時畫面（#1792）：通知本人手機。走既有的 waiting_notice（kind=other），不動後台，
+//! 夥伴視窗停在登入逾時畫面（#1792）：通知本人手機。走 waiting_notice（kind=login，後台寫固定內文），
 //! 也不吃 ASN_WAIT_ALERT 開關。失敗只記 log，隔一分鐘再試。
 use super::super::login_alert::{login_window_text, LOGIN_FILE};
 use super::*;
@@ -27,7 +27,7 @@ impl Core {
 
     pub(super) async fn login_notice_send(&mut self, now: u64, names: &[String]) {
         for name in self.login_alerts.due(now, names) {
-            let body = json!({ "window": login_window_text(&name), "kind": "other", "detail": Value::Null, "tool": Value::Null });
+            let body = json!({ "window": login_window_text(&name), "kind": "login", "detail": Value::Null, "tool": Value::Null });
             match self.relay.api("waiting_notice", Some(body)).await {
                 Ok(v) => {
                     let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");

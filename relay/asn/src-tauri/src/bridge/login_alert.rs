@@ -13,13 +13,11 @@ pub const LOGIN_GAP_MS: u64 = 30 * 60_000;
 const RELOAD_KEEP_MS: u64 = 5 * 60_000;
 /// 後台收的視窗名上限（字元數）
 const WINDOW_MAX: usize = 60;
-const LOGIN_SUFFIX: &str = "（Claude 登入過期，要重新登入）";
 
-/// 後台的 waiting_notice 只收視窗名，內文固定寫「<設備名>：夥伴「<視窗名>」在等你處理」，所以把登入過期的說明接在視窗名後面
+/// 送給後台的視窗名：去掉控制字元、頭尾空白，最長 60 字（後台超過會拒收）。內文由後台寫：「<設備名>：「<視窗名>」Claude 登入過期，要重新登入。」
 pub fn login_window_text(name: &str) -> String {
-    let room = WINDOW_MAX.saturating_sub(LOGIN_SUFFIX.chars().count());
-    let head: String = name.chars().filter(|c| !c.is_control()).take(room).collect();
-    format!("{}{LOGIN_SUFFIX}", head.trim())
+    let clean: String = name.chars().filter(|c| !c.is_control()).collect();
+    clean.trim().chars().take(WINDOW_MAX).collect()
 }
 
 #[derive(Default)]
@@ -133,12 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn 推播文字寫出視窗名和要重新登入_不超過後台上限() {
-        let t = login_window_text("asn雯");
-        assert_eq!(t, "asn雯（Claude 登入過期，要重新登入）");
-        let long = login_window_text(&"長".repeat(100));
-        assert!(long.chars().count() <= WINDOW_MAX, "{long}");
-        assert!(long.ends_with(LOGIN_SUFFIX));
-        assert_eq!(login_window_text("a\nb"), "ab（Claude 登入過期，要重新登入）");
+    fn 送給後台的視窗名_乾淨且不超過後台上限() {
+        assert_eq!(login_window_text("asn雯"), "asn雯");
+        assert_eq!(login_window_text(&"長".repeat(100)).chars().count(), WINDOW_MAX);
+        assert_eq!(login_window_text(" a
+b "), "ab");
     }
 }
