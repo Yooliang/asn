@@ -2,11 +2,11 @@
 -- 執行方式：npx supabase db query --linked -f supabase/sql/05_rooms.sql（可重複執行；先於 irori-relay／irori-api 部署）
 -- 權限設計（延續 01／02：relay schema 不暴露 PostgREST，只走 public.irori_relay_room_* 的 SECURITY DEFINER 函式，只授權 service_role）：
 --   * 建群組／加人／移人／改置頂 只有「owner 節點」呼叫得動（函式內檢查 p_actor 的 role＝owner）。
---     這些函式只有 irori-api（小良哥登入後）會呼叫；irori-relay 對所有節點金鑰（含希緒 XISU）一律回 403，不接到這些函式。
+--     這些函式只有 irori-api（擁有者登入後）會呼叫；irori-relay 對所有節點金鑰（含希緒 XISU）一律回 403，不接到這些函式。
 --   * 發言／讀／列表／讀置頂：呼叫者必須是該群組的現役成員（成員 key＝節點代號，或「節點~視窗名」）。
 --     節點只能代發「自己節點底下」的視窗（key 前綴＝自己），且視窗名必須在該節點的 roster 內。
---   * 小良哥本人是每個群組自動建立的成員，key 固定為 '~owner'（節點代號不可能含 ~，不會撞名），不能移出。
---   * 每成員每群組每小時最多 20 則（超過回 rate_limited；小良哥本人不限）。
+--   * 擁有者本人是每個群組自動建立的成員，key 固定為 '~owner'（節點代號不可能含 ~，不會撞名），不能移出。
+--   * 每成員每群組每小時最多 20 則（超過回 rate_limited；擁有者本人不限）。
 
 create table if not exists relay.rooms (
   id text primary key check (id ~ '^[A-Za-z0-9_-]{1,32}$'),
@@ -29,7 +29,7 @@ create table if not exists relay.room_members (
   primary key (room_id, member)
 );
 
--- joined_via：manual＝小良哥手動加入；auto＝roster 自動收入（只有 auto 的成員會在視窗消失時標為離開）
+-- joined_via：manual＝擁有者手動加入；auto＝roster 自動收入（只有 auto 的成員會在視窗消失時標為離開）
 alter table relay.room_members add column if not exists joined_via text not null default 'manual';
 do $$ begin
   alter table relay.room_members add constraint room_members_joined_via_check check (joined_via in ('auto', 'manual'));
@@ -90,7 +90,7 @@ returns text
 language sql stable security definer set search_path = ''
 as $$
   select case
-    when p_key = '~owner' then '小良哥'
+    when p_key = '~owner' then '擁有者'
     when position('~' in p_key) > 0 then substr(p_key, position('~' in p_key) + 1)
     else coalesce((select name from relay.nodes where id = p_key), p_key)
   end;
@@ -147,7 +147,7 @@ as $$
   where m.room_id = p_room and m.left_at is null;
 $$;
 
--- ── 只有 owner 節點（經 irori-api，小良哥登入）能呼叫：建群組／加人／移人／改置頂 ──
+-- ── 只有 owner 節點（經 irori-api，擁有者登入）能呼叫：建群組／加人／移人／改置頂 ──
 
 create or replace function public.irori_relay_room_create(p_actor text, p_id text, p_name text, p_members text[])
 returns jsonb
@@ -260,8 +260,8 @@ begin
 end;
 $$;
 
--- ── 成員（節點、視窗、希緒、小良哥）用：呼叫者必須是該群組現役成員 ──
--- 呼叫者身分三個參數：p_node（金鑰決定的節點，或 owner 節點）、p_agent（節點代發視窗時帶視窗名）、p_owner（true＝小良哥，p_node 必須是 owner 節點）
+-- ── 成員（節點、視窗、希緒、擁有者）用：呼叫者必須是該群組現役成員 ──
+-- 呼叫者身分三個參數：p_node（金鑰決定的節點，或 owner 節點）、p_agent（節點代發視窗時帶視窗名）、p_owner（true＝擁有者，p_node 必須是 owner 節點）
 
 create or replace function public.irori_relay_room_list(p_node text, p_owner boolean default false)
 returns jsonb
@@ -345,7 +345,7 @@ begin
 end;
 $$;
 
--- 發言。每成員每群組每小時 20 則（小良哥不限）；提到的人只留現役成員、最多 8 位；回傳要敲門鈴的頻道（每個成員節點一個，不帶內容）
+-- 發言。每成員每群組每小時 20 則（擁有者不限）；提到的人只留現役成員、最多 8 位；回傳要敲門鈴的頻道（每個成員節點一個，不帶內容）
 create or replace function public.irori_relay_room_post(
   p_node text, p_agent text, p_room text, p_body text, p_mentions text[], p_owner boolean default false
 ) returns jsonb
@@ -450,7 +450,7 @@ as $$
   select exists (select 1 from relay.roster where node = p_node and name = p_name);
 $$;
 
--- 設定自動收入的開頭字串（只有 owner 節點／小良哥）。每段 1～40 字、不可全空白、不含 ~、最多 10 段
+-- 設定自動收入的開頭字串（只有 owner 節點／擁有者）。每段 1～40 字、不可全空白、不含 ~、最多 10 段
 create or replace function public.irori_relay_room_set_prefixes(p_actor text, p_room text, p_prefixes text[])
 returns jsonb
 language plpgsql security definer set search_path = ''

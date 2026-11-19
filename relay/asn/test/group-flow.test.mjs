@@ -107,11 +107,11 @@ test('點邀請連結開啟：帶碼進來直接查預覽；已用過／過期�
 test('成員與設定：帶自己的 AI 進出、接受別人點名開關、退出（主持人要先轉讓會提示）', async () => {
   const room = { id: 'g1', name: '財務小組', is_host: true, external: true, members: [
     { key: '~u:me', label: '牧陽', member_kind: 'human', role: 'owner', mine: true }, { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true },
-    { key: 'x:r2', label: '報表（小良）', member_kind: 'ai', mine: false }] }
+    { key: 'x:r2', label: '報表（擁有者）', member_kind: 'ai', mine: false }] }
   const t = setup({ rooms: [room], respond: { group_leave: new Error('group_leave HTTP 409 host_must_transfer') } })
   t.flow.openManage('g1')
   const s = t.flow.state
-  assert.equal(s.host, true); assert.equal(s.external, true); assert.deepEqual(s.members.map(m => m.label), ['牧陽', '財務（牧陽）', '報表（小良）']); assert.deepEqual(s.addable.map(a => a.label), ['報表'])
+  assert.equal(s.host, true); assert.equal(s.external, true); assert.deepEqual(s.members.map(m => m.label), ['牧陽', '財務（牧陽）', '報表（擁有者）']); assert.deepEqual(s.addable.map(a => a.label), ['報表'])
   await t.flow.addAi('T~報表'); assert.deepEqual(t.calls.at(-1)[1], { action: 'group_ai_add', body: { room: 'g1', keys: ['T~報表'] } })
   await t.flow.setAllow('T~財務', false)
   assert.deepEqual(t.calls.at(-1)[1], { action: 'group_allow_others', body: { room: 'g1', key: 'T~財務', allow: false } }); assert.equal(s.members.find(m => m.label === '財務（牧陽）').allowOthers, false)
@@ -130,9 +130,9 @@ test('成員與設定：一般成員退出後關閉對話框並重抓列表', as
 
 // ---------- 群組對話資料中樞 ----------
 const ROOM = { id: 'g1', name: '財務小組', last_seq: 3, is_host: true, external: false, mine: [{ member: '~u:u1', unread: 2 }, { member: 'T~財務', unread: 0 }], members: [
-  { key: '~u:u1', label: '牧陽', member_kind: 'human', mine: true, role: 'owner' }, { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true }, { key: 'x:r1', label: '小良', member_kind: 'human' }] }
+  { key: '~u:u1', label: '牧陽', member_kind: 'human', mine: true, role: 'owner' }, { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true }, { key: 'x:r1', label: '擁有者', member_kind: 'human' }] }
 const MSGS = [
-  { seq: 1, from: 'x:r1', relation: 'other', from_kind: 'human', from_label: '小良', body: '幫我查報表', at: '2026-10-23T10:00:00Z' },
+  { seq: 1, from: 'x:r1', relation: 'other', from_kind: 'human', from_label: '擁有者', body: '幫我查報表', at: '2026-10-23T10:00:00Z' },
   { seq: 2, from: 'T~財務', relation: 'mine_ai', from_kind: 'ai', from_label: '財務（牧陽）', body: '好', at: '2026-10-23T10:01:00Z' },
   { seq: 3, from: 'T~財務', relation: 'mine_ai', from_kind: 'ai', from_label: '財務（牧陽）', body: '【待主持人確認 #0b9c8f3a】…', at: '2026-10-23T10:02:00Z' },
 ]
@@ -160,7 +160,7 @@ test('群組對話：用本人的真人身分簽章讀取（不帶視窗名）�
   const read = calls.find(([c]) => c === 'relay_room_read')[1]
   assert.equal(read.room, 'g1'); assert.equal(read.agent, null, '真人身分不帶視窗名'); assert.equal(read.since, 0)
   const log = hub.st.logs.g1
-  assert.deepEqual(log.map(e => [e.k, e.who ?? '', e.badge ?? '']), [['them', '小良', '真人'], ['them', '財務（牧陽）', 'AI'], ['them', '財務（牧陽）', 'AI']])
+  assert.deepEqual(log.map(e => [e.k, e.who ?? '', e.badge ?? '']), [['them', '擁有者', '真人'], ['them', '財務（牧陽）', 'AI'], ['them', '財務（牧陽）', 'AI']])
   assert.equal(hub.st.cards.g1.length, 1); assert.equal(hub.st.cards.g1[0].canDecide, true); assert.equal(hub.st.cards.g1[0].requester, '財務（牧陽）')
   assert.equal(hub.rowOf('g1').unread, 0, '讀過就把自己的未讀清掉')
 })

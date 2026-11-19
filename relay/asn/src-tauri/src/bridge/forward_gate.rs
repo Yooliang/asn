@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn hook_recipient_有出現就必須和_to_一致_content_是預覽不看() {
-        let long = format!("[群組 專案群] trust=member from=W/政策（小良的家用機） 這是一段很長很長很長很長很長很長很長的抬頭後面還有 #3 id={A}\n{}", "內文".repeat(300));
+        let long = format!("[群組 專案群] trust=member from=W/政策（擁有者的家用機） 這是一段很長很長很長很長很長很長很長的抬頭後面還有 #3 id={A}\n{}", "內文".repeat(300));
         let f = flight();
         // 真實形狀：content 是預覽加「…」、message 是完整內文：放行
         let c = call("T-甲", &long);

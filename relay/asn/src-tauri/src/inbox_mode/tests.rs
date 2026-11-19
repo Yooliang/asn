@@ -156,7 +156,7 @@ fn 壞行被略過_上次寫一半沒換行不會黏住新的一行() {
 #[test]
 fn 紀錄格式_與_cloud_agent_相容_附件只留白名單欄位_沒附件不加欄位() {
     let mut m = mail(A, "看圖");
-    m["sender_display"] = json!("小良哥");
+    m["sender_display"] = json!("擁有者");
     m["sender_engine"] = json!("claude");
     m["voice"] = json!(true);
     m["evil"] = json!("x");
@@ -167,7 +167,7 @@ fn 紀錄格式_與_cloud_agent_相容_附件只留白名單欄位_沒附件不�
     }
     assert_eq!(r["received_at"], "T0");
     assert_eq!(r["expects_reply"], true);
-    assert_eq!(r["sender_display"], "小良哥");
+    assert_eq!(r["sender_display"], "擁有者");
     assert!(r.get("sender_device").is_none() && r.get("evil").is_none());
     assert_eq!(r["voice"], true);
     let att = r["attachments"].as_array().unwrap();

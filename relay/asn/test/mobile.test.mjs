@@ -169,9 +169,9 @@ test('檢查更新失敗：不顯示原始錯誤（狀態碼、英文），一�
 })
 
 test('我的名字（帳號層）：用租戶稱呼；還是預設稱呼或沒取到就退到 email 帳號部分，再沒有就「我」', () => {
-  assert.equal(accountDisplayName(' 啟良 ', 'a@b.c'), '啟良')
-  assert.equal(accountDisplayName('朋友', 'qiliang@example.com'), 'qiliang', '建租戶時的預設稱呼不當名字')
-  assert.equal(accountDisplayName('', 'qiliang@example.com'), 'qiliang')
+  assert.equal(accountDisplayName(' 測試用戶 ', 'a@b.c'), '測試用戶')
+  assert.equal(accountDisplayName('朋友', 'owner@example.com'), 'owner', '建租戶時的預設稱呼不當名字')
+  assert.equal(accountDisplayName('', 'owner@example.com'), 'owner')
   assert.equal(accountDisplayName(undefined, ''), '我'); assert.equal(accountDisplayName(null, undefined), '我')
 })
 

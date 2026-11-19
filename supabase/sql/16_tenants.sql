@@ -1,7 +1,7 @@
 -- 16_tenants.sql：多使用者第一期 A 段（設計見 docs/MULTI-USER.md；本輪做了什麼見 docs/archive/MULTI-USER-PHASE1.md）。
 -- 內容：
 --   1. relay.tenants（租戶）、irori.accounts（帳號白名單，取代 IRORI_OWNER_EMAILS）、irori.account_invites（邀請碼）。
---   2. relay.nodes／messages／invites／rooms／launches 加 tenant_id，並把現有資料全部回填成「租戶 1」（小良哥的 XISU、H、w02、aegis、群組…）。
+--   2. relay.nodes／messages／invites／rooms／launches 加 tenant_id，並把現有資料全部回填成「租戶 1」（擁有者的 XISU、H、w02、aegis、群組…）。
 --   3. 仲介函式全部改成租戶感知：寄信、名單、邀請、群組、遠端開視窗都只看得到自己租戶的東西；跨租戶一律回「找不到」。
 --   4. 帳號／租戶函式：登入時解析帳號（第一次登入自動開租戶與角色節點、送額度）、邀請、停用、列表。
 -- 執行方式：npx supabase db query --linked -f supabase/sql/16_tenants.sql（可重複執行；只新增、不刪任何既有資料；先於 irori-relay／irori-api 部署）。
@@ -83,7 +83,7 @@ create index if not exists nodes_tenant_idx on relay.nodes (tenant_id);
 create index if not exists rooms_tenant_idx on relay.rooms (tenant_id);
 create index if not exists launches_tenant_idx on relay.launches (tenant_id);
 
--- ── 3. 租戶 1：小良哥現有的一切原地變成租戶 1（不搬資料、不改金鑰）──
+-- ── 3. 租戶 1：擁有者現有的一切原地變成租戶 1（不搬資料、不改金鑰）──
 
 do $$
 declare
@@ -774,7 +774,7 @@ as $$
   end;
 $$;
 
--- 成員顯示名：'~owner' 用租戶主人的稱呼（不再寫死「小良哥」）
+-- 成員顯示名：'~owner' 用租戶主人的稱呼（不再寫死個人名字）
 create or replace function relay.room_member_name(p_key text, p_tenant uuid)
 returns text
 language sql stable security definer set search_path = ''

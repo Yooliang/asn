@@ -87,7 +87,7 @@ const W = 'bbbbbbbb-0000-4000-8000-000000000002'
 const P = 'cccccccc-0000-4000-8000-000000000003'
 const N = 'dddddddd-0000-4000-8000-000000000004'
 const fr = (node, device, agent, engine, status = 'online', kind = null) => ({ node, device, agent, engine, status, kind, partnerId: 'eeeeeeee-0000-4000-8000-0000000000aa' })
-const friends = [fr(SELF, '家用機', 'a1', 'claude'), fr(W, '工作機', 'w1', 'claude'), fr(P, '小良的手機', 'p1', 'asn', 'offline', 'phone'), fr(N, '新電腦', 'n1', 'asn')]
+const friends = [fr(SELF, '家用機', 'a1', 'claude'), fr(W, '工作機', 'w1', 'claude'), fr(P, '擁有者的手機', 'p1', 'asn', 'offline', 'phone'), fr(N, '新電腦', 'n1', 'asn')]
 const tree = (over = {}) => buildDeviceTree({
   friends, nodeOrder: [SELF, W, P, N], selfNode: SELF, now: NOW,
   asn: { [W]: [{ status: 'online' }], [N]: [{ status: 'online' }] },
@@ -141,17 +141,17 @@ test('設備樹：別台回報過期——所有 AI 都是「還沒收到這台�
 })
 
 test('設備樹：手機用平台判斷，不列主要 AI、沒有安裝按鈕', () => {
-  const p = dev(tree(), '小良的手機')
+  const p = dev(tree(), '擁有者的手機')
   assert.equal(p.phone, true)
   assert.equal(p.platform, 'android')
   assert.equal(p.kind, '手機')
   assert.deepEqual(p.missing, [])
   assert.ok(p.vendors.every(v => !v.action))
   // 舊版手機：平台是空的，靠名單的種類
-  const old = dev(tree({ launchers: { [SELF]: { profiles: [] } } }), '小良的手機')
+  const old = dev(tree({ launchers: { [SELF]: { profiles: [] } } }), '擁有者的手機')
   assert.equal(old.phone, true)
   // 平台說是電腦：就算名單種類寫 phone 也當電腦
-  const pc = dev(tree({ launchers: { [P]: { platform: 'windows' } } }), '小良的手機')
+  const pc = dev(tree({ launchers: { [P]: { platform: 'windows' } } }), '擁有者的手機')
   assert.equal(pc.phone, false)
   assert.equal(pc.kind, '電腦')
 })

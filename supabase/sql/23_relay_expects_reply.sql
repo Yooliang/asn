@@ -1,4 +1,4 @@
--- 23_relay_expects_reply.sql：信件多一個「寄件人要不要等回信」的欄位 expects_reply（小良哥 10/05）。
+-- 23_relay_expects_reply.sql：信件多一個「寄件人要不要等回信」的欄位 expects_reply（擁有者 10/05）。
 -- 為什麼：收發室過去靠內文有沒有「（不需回覆）」猜要不要計時、跳「沒有收到回覆」，內文沒辦法用程式可靠判斷，
 --   常把只是告知的信誤報成沒回。改成寄件人寄信時明說（send.mjs 的 --reply／--no-reply、代寄的 reply=yes|no），收發室看欄位決定。
 -- 欄位：relay.messages.expects_reply boolean，可為 null。true＝寄件人在等回信、false＝只是告知；null＝舊信（舊版寄件工具）不知道，

@@ -122,7 +122,7 @@ CREATE OR REPLACE FUNCTION relay.room_member_name(p_key text)
  SET search_path TO ''
 AS $function$
   select case
-    when p_key = '~owner' then '小良哥'
+    when p_key = '~owner' then '擁有者'
     when position('~' in p_key) > 0 then substr(p_key, position('~' in p_key) + 1)
     else coalesce((select name from relay.nodes where id = p_key), p_key)
   end;

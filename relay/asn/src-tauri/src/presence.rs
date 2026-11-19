@@ -1,6 +1,6 @@
 //! 確認是本人在這台按的（#597，0.2.8 改版）。**只確認在場，不簽章、不產生金鑰**：簽章用的是設備金鑰（device_id）。
 //!
-//! **11-08 起沒有人呼叫**：小良哥決定看別台畫面、別台打字都不再跳 Windows Hello 或確認框（#1029 續）。
+//! **11-08 起沒有人呼叫**：擁有者決定看別台畫面、別台打字都不再跳 Windows Hello 或確認框（#1029 續）。
 //! 模組保留，之後可能還會用到；守門測試鎖住「發起不跳本人確認」。
 //!
 //! - Windows 有 Hello：用 UserConsentVerifier 要本人輸入 PIN 或指紋。呼叫前先把 ASN 叫到前面，提示才不會被別的視窗擋住。
@@ -99,7 +99,7 @@ mod tests {
                 callers.push(name);
             }
         }
-        // 11-08 小良哥決定拿掉：看畫面、打字的發起（term_view_remote_start）都不跳 Hello 或確認框。要加回來請先改這個測試
+        // 11-08 擁有者決定拿掉：看畫面、打字的發起（term_view_remote_start）都不跳 Hello 或確認框。要加回來請先改這個測試
         assert!(callers.is_empty(), "沒有任何地方再叫本人確認：{callers:?}");
         let lib = include_str!("lib.rs").replace("\r\n", "\n");
         let start = lib.split("async fn term_view_remote_start(").nth(1).expect("有發起的命令").split("\n}\n").next().unwrap();

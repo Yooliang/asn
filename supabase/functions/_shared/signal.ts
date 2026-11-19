@@ -11,7 +11,7 @@
 
 export const SCOPE = "https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email";
 export const TOKEN_URL = "https://oauth2.googleapis.com/token";
-export const POLL_S = 300; // 前端保底輪詢的間隔（秒），/updates 的 signal.poll_s 帶給前端（小良哥裁示 5 分鐘）。speaker 存活期與離開門檻都要大於它，見 speaker_live.ts、pointer.ts
+export const POLL_S = 300; // 前端保底輪詢的間隔（秒），/updates 的 signal.poll_s 帶給前端（擁有者裁示 5 分鐘）。speaker 存活期與離開門檻都要大於它，見 speaker_live.ts、pointer.ts
 export const TIMEOUT_MS = 3000; // 每次對 Google／RTDB 的呼叫最久等幾毫秒
 export const JWT_TTL_S = 3600;
 export const TOKEN_REUSE_MS = 55 * 60 * 1000; // access token 快取多久（Google 發的有效 1 小時，留 5 分鐘餘裕）

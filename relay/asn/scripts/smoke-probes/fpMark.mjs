@@ -23,7 +23,7 @@ export const fpMarkProbeSource = mode => `(async () => {
     if (/已確認|未確認|已登入|未安裝|還沒收到/.test(t)) return { ok: false, why: '列上還有膠囊或狀態那一行：' + t.trim().slice(0, 60) };
     if (r.querySelector(phone ? '.m-dv-line' : '.dv-line')) return { ok: false, why: '列上還有狀態那一行' };
   }
-  const expect = phone ? [['辦公室', 'confirmed', '已確認指紋', 'check'], ['工作機', 'unconfirmed', '尚未確認指紋', 'alert']] : [['小良的手機', 'remembered', '已記住指紋 ', ''], ['舊手機', 'unknown', '還沒記住指紋', 'alert']];
+  const expect = phone ? [['辦公室', 'confirmed', '已確認指紋', 'check'], ['工作機', 'unconfirmed', '尚未確認指紋', 'alert']] : [['擁有者的手機', 'remembered', '已記住指紋 ', ''], ['舊手機', 'unknown', '還沒記住指紋', 'alert']];
   const colors = new Set();
   for (const [name, cls, label, badge] of expect) {
     const r = row(name);
@@ -44,7 +44,7 @@ export const fpMarkProbeSource = mode => `(async () => {
   if (!phone) {
     const pc = row('辦公室');
     if (pc && pc.querySelector('.fpm')) return { ok: false, why: '電腦那一列不該有指紋圖示（電腦版只有手機有指紋）' };
-    const al = row('小良的手機').querySelector('.fpm').getAttribute('aria-label');
+    const al = row('擁有者的手機').querySelector('.fpm').getAttribute('aria-label');
     if (!/已記住指紋 [0-9a-f]{4} [0-9a-f]{4}$/.test(al)) return { ok: false, why: '電腦版的說明要帶 8 碼指紋：' + al };
   } else {
     // 長按出現說明

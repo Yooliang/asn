@@ -30,9 +30,9 @@ test('訊息轉對話記錄：真人與 AI 每則都帶大頭貼種子，我自�
   const log = roomLog([
     { seq: 1, from: '~u:me', relation: 'mine', from_kind: 'human', from_label: '牧陽', body: '嗨', at: '2026-10-23T10:00:00Z' },
     { seq: 2, from: 'T~財務', relation: 'mine_ai', from_kind: 'ai', from_label: '財務（牧陽）', body: '收到', at: '2026-10-23T10:01:00Z' },
-    { seq: 3, from: 'x:r1aaaaaa', relation: 'other', from_kind: 'human', from_label: '小良', body: '請查', at: '2026-10-23T10:02:00Z' },
-    { seq: 4, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（小良）', body: '好', at: '2026-10-23T10:03:00Z' },
-    { seq: 5, from: '~u:me', relation: 'system', from_kind: 'system', body: '小良 加入了群組。', at: '2026-10-23T10:04:00Z' },
+    { seq: 3, from: 'x:r1aaaaaa', relation: 'other', from_kind: 'human', from_label: '擁有者', body: '請查', at: '2026-10-23T10:02:00Z' },
+    { seq: 4, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（擁有者）', body: '好', at: '2026-10-23T10:03:00Z' },
+    { seq: 5, from: '~u:me', relation: 'system', from_kind: 'system', body: '擁有者 加入了群組。', at: '2026-10-23T10:04:00Z' },
   ], ['~u:me', 'T~財務'], [])
   assert.deepEqual(log.map(e => e.av ?? ''), ['', 'T/財務', 'x:r1aaaaaa', 'x:r2bbbbbb', ''])
   // 舊後台沒給 from 的訊息：沒有種子，畫面退回名字首字徽章

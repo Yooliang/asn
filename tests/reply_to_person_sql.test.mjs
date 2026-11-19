@@ -71,11 +71,11 @@ async function setup({ patched }) {
       select p_user is not null and exists (select 1 from relay.nodes n join relay.tenants t on t.id = n.tenant_id
         where n.id = p_node and n.status = 'active' and n.owner_user = p_user and t.owner_user = p_user) $$;
     -- 租戶主節點 XISU（Irori 時代的舊名，角色節點）；本人用手機 P（名稱「Oppo 手機」）與家用機 H；AI 的機器 M、雲端代理 G
-    insert into relay.tenants values ('${T1}', '${U1}', 'XISU', '小良');
+    insert into relay.tenants values ('${T1}', '${U1}', 'XISU', '擁有者');
     insert into relay.nodes(id, tenant_id, role, owner_user, bell_topic, created_at, name, machine) values
       ('XISU', '${T1}', 'owner', null, 'bell-XISU', now() - interval '5 day', '希緒', null),
       ('P', '${T1}', 'member', '${U1}', 'bell-P', now() - interval '3 day', 'Oppo 手機', '手機'),
-      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '2 day', '小良的家用機', '家用機'),
+      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '2 day', '擁有者的家用機', '家用機'),
       ('M', '${T1}', 'member', null, 'bell-M', now() - interval '1 day', 'M 機', null),
       ('G', '${T1}', 'member', null, 'bell-G', now(), 'grok', '雲端代理');
     insert into relay.roster values ('M', 'PCS', 'claude');`)

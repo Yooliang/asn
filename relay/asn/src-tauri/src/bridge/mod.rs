@@ -100,7 +100,7 @@ fn term_fetch_status() -> crate::launch::wezterm_fetch::FetchStatus {
 }
 
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
-    // 內建收發室固定開啟（小良哥 10-24：預設且不可關閉）；檔案缺少、損壞、寫 false 都一樣
+    // 內建收發室固定開啟（擁有者 10-24：預設且不可關閉）；檔案缺少、損壞、寫 false 都一樣
     BridgeSettings { enabled: true, ..read_settings_raw(data_dir) }
 }
 fn read_settings_raw(data_dir: &Path) -> BridgeSettings {

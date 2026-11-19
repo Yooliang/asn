@@ -62,8 +62,8 @@ test('選單狀態：閒置可選且目前那項打勾；忙碌全部停用並�
 })
 
 test('確認文字：講清楚會關掉原視窗、正在打的字會不見、對話接續', () => {
-  const t = confirmText('小良哥', 'Opus', 'Sonnet')
-  assert.match(t.lead, /小良哥.*Opus.*Sonnet/)
+  const t = confirmText('擁有者', 'Opus', 'Sonnet')
+  assert.match(t.lead, /擁有者.*Opus.*Sonnet/)
   const all = t.points.join('\n')
   assert.match(all, /關掉原本的視窗/)
   assert.match(all, /正在打的字會不見/)
@@ -86,11 +86,11 @@ test('控制器：查詢→執行；執行時帶的是查詢回來的 pid 與 se
     modelSwitchRun: async req => { calls.push(['r', req]); return { ok: true, newPid: 500 } },
   }
   const sw = createModelSwitcher({ transport })
-  const st = await sw.query('小良哥')
+  const st = await sw.query('擁有者')
   assert.equal(st.state, 'ready')
-  const r = await sw.run('小良哥', st, 'sonnet')
+  const r = await sw.run('擁有者', st, 'sonnet')
   assert.deepEqual(r, { ok: true, message: '已切換為 Sonnet', manual: '' })
-  assert.deepEqual(calls, [['q', { name: '小良哥' }], ['r', { name: '小良哥', pid: 220, sessionId: 'sid-1', model: 'sonnet' }]])
+  assert.deepEqual(calls, [['q', { name: '擁有者' }], ['r', { name: '擁有者', pid: 220, sessionId: 'sid-1', model: 'sonnet' }]])
 })
 
 test('控制器：查詢出錯或逾時＝切不了；沒有查詢資料或模型不在清單就不執行', async () => {
@@ -137,8 +137,8 @@ test('守門：要先確認才會執行（確認鈕才呼叫 run；選單點選�
 })
 
 test('確認窗：使用者自己開的視窗多一句說明終端機分頁會留下；ASN 開的不用', () => {
-  const asn = confirmText('小良哥', 'Opus', 'Sonnet')
-  const own = confirmText('小良哥', 'Opus', 'Sonnet', { ownWindow: true })
+  const asn = confirmText('擁有者', 'Opus', 'Sonnet')
+  const own = confirmText('擁有者', 'Opus', 'Sonnet', { ownWindow: true })
   assert.equal(own.points.length, asn.points.length + 1)
   assert.match(own.points.at(-1), /你自己開的視窗.*分頁會留下/)
   assert.ok(!asn.points.some(x => x.includes('你自己開的')))

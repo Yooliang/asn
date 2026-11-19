@@ -2838,7 +2838,7 @@ impl Core {
         self.persist();
     }
 
-    /// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；小良哥 10/22 裁示）。
+    /// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；擁有者 10/22 裁示）。
     /// 只把信轉成 Notified（保留著等遲到的回覆照常寄回）；已經回過的直接清掉
     async fn settle_timeout(&mut self, id: &str) {
         let Some(i) = self.idx(id) else { return };

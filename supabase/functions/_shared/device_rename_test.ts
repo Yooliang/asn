@@ -13,7 +13,7 @@ const quiet = async <T>(f: () => Promise<T>): Promise<T> => {
 };
 
 Deno.test("parseDeviceName：去頭尾空白、1～40 字、和資料庫同一套規則（控制字元、零寬與雙向字元、像指紋的字樣）", () => {
-  for (const ok of ["Oppo 手機", "  手機  ", "小良的 Pixel 8", "abc 1234", "a".repeat(40), "Facade Bedded", "30家用"]) {
+  for (const ok of ["Oppo 手機", "  手機  ", "擁有者的 Pixel 8", "abc 1234", "a".repeat(40), "Facade Bedded", "30家用"]) {
     assertEquals(parseDeviceName(ok), ok.trim(), ok);
   }
   const z = String.fromCharCode(0x200b), rlo = String.fromCharCode(0x202e), bom = String.fromCharCode(0xfeff);

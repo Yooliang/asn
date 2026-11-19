@@ -1,4 +1,4 @@
-// 視窗標題：名單、整合主視窗與右下角提示的標題列、<title>、tauri.conf 的視窗標題都是同一個英文名（小良哥指定，是介面中文的唯一例外）；太長要縮略不撐破按鈕。
+// 視窗標題：名單、整合主視窗與右下角提示的標題列、<title>、tauri.conf 的視窗標題都是同一個英文名（擁有者指定，是介面中文的唯一例外）；太長要縮略不撐破按鈕。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'

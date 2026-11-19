@@ -56,9 +56,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${W1}', '管理', 'claude'), ('${W1}', '監看', 'claude'), ('${Q2}', '助理', 'claude');`)
@@ -151,8 +151,8 @@ test('實跑：別租戶的讀者——只有人數；自己發的名單加（�
   const full = await readAs(db, { node: Q2, room, signed: U2 })
   const own = msgOf(full, mine.seq)
   assert.deepEqual(rcOf(own), [1, 4])
-  assert.deepEqual(own.read_by, ['財務（小良）'])
-  assert.ok(own.unread_by.includes('管理（小良）') && own.unread_by.includes('小良'), JSON.stringify(own.unread_by))
+  assert.deepEqual(own.read_by, ['財務（擁有者）'])
+  assert.ok(own.unread_by.includes('管理（擁有者）') && own.unread_by.includes('擁有者'), JSON.stringify(own.unread_by))
   const scan = JSON.stringify({ rb: own.read_by, ub: own.unread_by, reads: full.reads })
   assert.doesNotMatch(scan, new RegExp(`${W1}|${P1}|${U1}`))
 })

@@ -1051,8 +1051,8 @@ mod tests {
 
     #[test]
     fn 命令列_引號與空白路徑() {
-        let a = parse_cmdline(r#""C:\Program Files\Claude Code\claude.exe" --model opus -n "小良哥 1""#);
-        assert_eq!(a, v(&[r"C:\Program Files\Claude Code\claude.exe", "--model", "opus", "-n", "小良哥 1"]));
+        let a = parse_cmdline(r#""C:\Program Files\Claude Code\claude.exe" --model opus -n "擁有者 1""#);
+        assert_eq!(a, v(&[r"C:\Program Files\Claude Code\claude.exe", "--model", "opus", "-n", "擁有者 1"]));
     }
 
     #[test]
@@ -1622,11 +1622,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let work = tmp.path().join("work dir 中文");
         std::fs::create_dir_all(&work).unwrap();
-        write_session(&dir, 220, "sid-220", "小良哥", status, work.to_str().unwrap());
+        write_session(&dir, 220, "sid-220", "擁有者", status, work.to_str().unwrap());
         // 別的視窗，名字不同
         write_session(&dir, 231, "sid-231", "別人", "idle", work.to_str().unwrap());
         let mut cmd = std::collections::HashMap::new();
-        cmd.insert(220, r#""C:\Program Files\Claude\claude.exe" --dangerously-skip-permissions --model opus -n "小良哥" --remote-control "小良哥""#.to_string());
+        cmd.insert(220, r#""C:\Program Files\Claude\claude.exe" --dangerously-skip-permissions --model opus -n "擁有者" --remote-control "擁有者""#.to_string());
         cmd.insert(231, r#"claude.exe --model haiku"#.to_string());
         let fake = Fake {
             alive: RefCell::new([220, 221, 222, 210, 230, 231, 300].into_iter().collect()),
@@ -1641,13 +1641,13 @@ mod tests {
     }
 
     fn run_req() -> SwitchRunReq {
-        SwitchRunReq { name: "小良哥".into(), pid: 220, session_id: "sid-220".into(), model: "sonnet".into() }
+        SwitchRunReq { name: "擁有者".into(), pid: 220, session_id: "sid-220".into(), model: "sonnet".into() }
     }
 
     #[test]
     fn 查詢_讀到模型與閒置() {
         let (e, f) = env("idle");
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(q.ok && q.can_switch && q.idle);
         assert_eq!(q.pid, Some(220));
         assert_eq!(q.session_id.as_deref(), Some("sid-220"));
@@ -1661,14 +1661,14 @@ mod tests {
     fn 查詢_使用者自己開的視窗與承載殼開的視窗分得出來() {
         // 預設的程序表：父殼是使用者的 pwsh，不是 ASN 承載殼
         let (e, f) = env("idle");
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(q.can_switch && q.own_window, "使用者自己開的視窗");
         assert_eq!(serde_json::to_value(&q).unwrap()["ownWindow"], true);
         // 父殼是 ASN 的承載殼
         let (e, mut f) = env("idle");
-        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &v(&["--model", "opus"]))));
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("擁有者", "claude.exe", &v(&["--model", "opus"]))));
         f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(300, 100, "asn.exe")];
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(q.can_switch && !q.own_window, "ASN 開的視窗");
     }
 
@@ -1709,7 +1709,7 @@ mod tests {
     #[test]
     fn 切換_asn_開的視窗_才先送關閉訊息() {
         let (e, mut f) = env("idle");
-        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &v(&["--model", "opus"]))));
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("擁有者", "claude.exe", &v(&["--model", "opus"]))));
         f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(300, 100, "asn.exe")];
         let dir = e.dir.clone();
         let work = e.work.clone();
@@ -1725,8 +1725,8 @@ mod tests {
     #[test]
     fn 查詢_沒指定模型_model欄位不出現() {
         let (e, f) = env("idle");
-        f.cmd.borrow_mut().insert(220, "claude.exe -n 小良哥".into());
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        f.cmd.borrow_mut().insert(220, "claude.exe -n 擁有者".into());
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(q.can_switch && q.model.is_none());
         assert!(serde_json::to_value(&q).unwrap().get("model").is_none());
     }
@@ -1734,7 +1734,7 @@ mod tests {
     #[test]
     fn 查詢_忙碌不閒置_有原因() {
         let (e, f) = env("busy");
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(q.can_switch && !q.idle);
         assert!(q.reason.unwrap().contains("閒置"));
     }
@@ -1745,10 +1745,10 @@ mod tests {
         assert!(!query_with(&f, &e.dir, &SwitchQueryReq { name: "沒這個人".into() }).can_switch);
         assert!(!query_with(&f, &e.dir, &SwitchQueryReq { name: "".into() }).ok);
         f.cmd.borrow_mut().remove(&220);
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(!q.can_switch && q.reason.unwrap().contains("啟動參數"));
         f.cmd.borrow_mut().insert(220, "notepad.exe".into());
-        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "擁有者".into() });
         assert!(!q.can_switch && q.reason.unwrap().contains("不是 Claude"));
     }
 
@@ -1771,7 +1771,7 @@ mod tests {
         r.pid = 999;
         assert_eq!(run_with(&f, &e.dir, &r, &|_| panic!(), &quick())["stage"], "check");
         let mut r = run_req();
-        r.name = "別人".into(); // pid 220 的名字是小良哥
+        r.name = "別人".into(); // pid 220 的名字是擁有者
         assert_eq!(run_with(&f, &e.dir, &r, &|_| panic!(), &quick())["stage"], "check");
         let mut r = run_req();
         r.model = "opus; rm -rf".into();
@@ -1818,7 +1818,7 @@ mod tests {
         assert_eq!(current_model(&argv), Some("sonnet".into()));
         let pos = argv.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(argv[pos + 1], "sid-220");
-        assert!(argv.windows(2).any(|w| w == ["-n", "小良哥"]));
+        assert!(argv.windows(2).any(|w| w == ["-n", "擁有者"]));
         assert!(argv.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(r["manual"].as_str().unwrap().contains("'--model' 'sonnet'"));
     }
@@ -1829,7 +1829,7 @@ mod tests {
         f.close_works = true;
         // 不在 WT：目標的父殼是 ASN 承載殼 210（改命令列）
         let args = v(&["--model", "opus"]);
-        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &args)));
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("擁有者", "claude.exe", &args)));
         f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(231, 100, "claude.exe"), p(300, 100, "asn.exe")];
         f.close_takes = vec![210];
         let dir = e.dir.clone();
@@ -1855,7 +1855,7 @@ mod tests {
     fn 切換_父殼是asn承載殼_一起收() {
         let (e, mut f) = env("idle");
         let args = v(&["--model", "opus"]);
-        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &args)));
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("擁有者", "claude.exe", &args)));
         f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(231, 100, "claude.exe"), p(300, 100, "asn.exe")];
         let dir = e.dir.clone();
         let work = e.work.clone();
@@ -1958,7 +1958,7 @@ mod tests {
     #[test]
     fn 工作資料夾不存在_拒絕() {
         let (e, f) = env("idle");
-        write_session(&e.dir, 220, "sid-220", "小良哥", "idle", r"Z:\ASN-不存在-xyz");
+        write_session(&e.dir, 220, "sid-220", "擁有者", "idle", r"Z:\ASN-不存在-xyz");
         let r = run_with(&f, &e.dir, &run_req(), &|_| panic!(), &quick());
         assert_eq!(r["stage"], "check");
         assert!(f.terminated.borrow().is_empty());
@@ -2001,7 +2001,7 @@ mod tests {
             .no_window()
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(&script)
-            .args(["--model", "opus", "-n", "假 小良", "--resume", "old-sid"])
+            .args(["--model", "opus", "-n", "假 擁有者", "--resume", "old-sid"])
             .spawn()
             .expect("開假程式");
         let pid = child.id();
@@ -2015,10 +2015,10 @@ mod tests {
         let args = parse_cmdline(&line);
         assert!(args[0].to_lowercase().ends_with("powershell.exe"), "{args:?}");
         assert_eq!(current_model(&args), Some("opus".into()), "{args:?}");
-        assert!(args.contains(&"假 小良".to_string()));
+        assert!(args.contains(&"假 擁有者".to_string()));
 
         // 2. 改寫參數（假程式不是 claude，所以直接測改寫、守門、結束、重開，不經 resolve）
-        let new_args = rewrite_args(&args, "sid-real", "假 小良", "haiku");
+        let new_args = rewrite_args(&args, "sid-real", "假 擁有者", "haiku");
         assert_eq!(current_model(&new_args), Some("haiku".into()));
         assert!(!new_args.contains(&"old-sid".to_string()));
 
@@ -2040,7 +2040,7 @@ mod tests {
         assert!(console::win::pid_alive(own), "自己不能被殺");
 
         // 4. 重開：走跟 App 一樣的 powershell -NoExit 承載（程式換成 cmd，帶新參數的 ping 部分）
-        let host = local::start_window("假 小良", "cmd.exe", &["/d".into(), "/c".into(), "ping -n 60 127.0.0.1 >nul".into()], &work, true).expect("重開");
+        let host = local::start_window("假 擁有者", "cmd.exe", &["/d".into(), "/c".into(), "ping -n 60 127.0.0.1 >nul".into()], &work, true).expect("重開");
         reap.0.push(host);
         std::thread::sleep(Duration::from_millis(800));
         assert!(console::win::pid_alive(host), "新承載殼應該活著");

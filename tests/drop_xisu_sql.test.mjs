@@ -79,11 +79,11 @@ async function setup() {
     create function public.asn_user_owns_node(p_user uuid, p_node text) returns boolean language sql stable as $$
       select p_user is not null and exists (select 1 from relay.nodes n join relay.tenants t on t.id = n.tenant_id
         where n.id = p_node and n.status = 'active' and n.owner_user = p_user and t.owner_user = p_user) $$;
-    insert into relay.tenants values ('${T1}', '${U1}', null, '小良');
+    insert into relay.tenants values ('${T1}', '${U1}', null, '擁有者');
     insert into relay.nodes(id, tenant_id, role, owner_user, bell_topic, created_at, name, machine, key_hash) values
       ('XISU', '${T1}', 'owner', '${U1}', 'bell-XISU', now() - interval '5 day', '希緒', '家用機', 'hash-x'),
       ('P', '${T1}', 'member', '${U1}', 'bell-P', now() - interval '3 day', 'Oppo 手機', '手機', null),
-      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '4 day', '小良的家用機', '家用機', null),
+      ('H', '${T1}', 'member', '${U1}', 'bell-H', now() - interval '4 day', '擁有者的家用機', '家用機', null),
       ('M', '${T1}', 'member', null, 'bell-M', now() - interval '1 day', 'M 機', null, null);
     update relay.tenants set character_node = 'XISU';
     insert into relay.roster values ('M', 'PCS', 'claude');`)
