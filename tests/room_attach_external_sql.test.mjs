@@ -1,4 +1,4 @@
-// 外部成員的群組也能傳附件（0.1.111，小良哥 2026-10-30 指示）：asn_relay_attach_access 改依「群組現有成員的設備」授權。
+// 外部成員的群組也能傳附件（0.1.111，擁有者 2026-10-30 指示）：asn_relay_attach_access 改依「群組現有成員的設備」授權。
 // 1. 靜態：migration 在交易內、不刪資料、不授權給 anon／authenticated／public。
 // 2. 實跑（需要 @electric-sql/pglite）：
 //    - 跨租戶群組：房內各租戶成員的設備都下載得到；群組外的人（別的租戶）下載不到
@@ -28,7 +28,7 @@ let PGlite = null
 PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
 
-const U1 = '11111111-1111-1111-1111-111111111111' // 小良（主持人）
+const U1 = '11111111-1111-1111-1111-111111111111' // 擁有者（主持人）
 const U2 = '22222222-2222-2222-2222-222222222222' // 財務人員
 const U3 = '33333333-3333-3333-3333-333333333333' // 局外人
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
@@ -56,9 +56,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y'), ('${U3}', 'c@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員'), ('${T3}', '${U3}', '路人');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員'), ('${T3}', '${U3}', '路人');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦'),
       ('${R3}', '路人電腦', 'k4', 'bell-r3', 'member', '${T3}', '${U3}', 'active', '電腦');

@@ -1,6 +1,6 @@
 //! 每視窗每小時寄信上限的計數（~/.asn/send-rate.json）。
 //! 寄信（asn send）與收信端（橋轉交、視窗自己 recv）都會寫這個檔，所以讀改寫一律先拿鎖檔、寫入用暫存檔＋rename，避免寫壞。
-//! 本人（小良哥）簽章的私信寄到某視窗時，退回那個視窗一封額度（`refund`）：一來一回不累積，沒人在場時夥伴失控連發照樣被擋。
+//! 本人（擁有者）簽章的私信寄到某視窗時，退回那個視窗一封額度（`refund`）：一來一回不累積，沒人在場時夥伴失控連發照樣被擋。
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -210,7 +210,7 @@ mod tests {
     fn 提醒只在快用完時才出現() {
         assert!(warn_text("甲", 6, 30).is_none());
         assert!(warn_text("甲", 5, 30).unwrap().contains("還能寄 5 封"));
-        assert!(!warn_text("甲", 5, 30).unwrap().contains("小良哥"), "給所有使用者看的字不寫特定人名");
+        assert!(!warn_text("甲", 5, 30).unwrap().contains("擁有者"), "給所有使用者看的字不寫特定人名");
         assert!(warn_text("甲", 0, 30).is_some());
         assert!(warn_text("甲", 2, 2).is_some(), "上限本來就很小時一開始就提醒");
     }

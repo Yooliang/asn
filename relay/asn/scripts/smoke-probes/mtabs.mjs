@@ -9,7 +9,7 @@ export const mtabsProbeSource = () => `(async () => {
   if (labels !== '夥伴|對話|設定|通知') return { ok: false, why: '分頁的字或順序不對：' + labels };
   const tab = l => tabs.find(b => b.querySelector('span')?.textContent.trim() === l);   // 用字找分頁，不靠位置（#1429 改過順序）
   if (!tab('對話').classList.contains('on')) return { ok: false, why: '開 App 應該先在「對話」（順序改了，預設停的頁不變）' };
-  // #1438（小良哥選 B）：對話分頁直接就是最後那一則，不先列清單、沒有回清單的鍵
+  // #1438（擁有者選 B）：對話分頁直接就是最後那一則，不先列清單、沒有回清單的鍵
   const sec = () => document.querySelector('section.m-pg[aria-label="對話"]');
   for (let i = 0; i < 60 && !inView(sec().querySelector('.chatpane')); i++) await sleep(100);
   if (!inView(sec().querySelector('.chatpane'))) return { ok: false, why: '對話分頁應該直接是上次那一則' };

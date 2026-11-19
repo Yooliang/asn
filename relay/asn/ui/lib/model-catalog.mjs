@@ -24,7 +24,7 @@ export const isTermProfile = p => p?.mode === 'term' || (typeof p?.id === 'strin
  * 給開發者的背景：Claude 的 acp 是刻意不做（帳務風險，#273）；Gemini／Grok 的終端 0.1.84／0.1.86 起可開、acp 0.1.70 起有真機。
  * 回 [{ key, label, status, statusText, why }]；目錄上沒有 channels 的（自訂設定）回空陣列。
  */
-// 排列順序＝優先序（小良哥 10/27 決定）：acp通道＞asn終端（pi shell）＞asn終端（原生 cli）；使用者自己開的 CLI 加外掛排最後、不在這裡
+// 排列順序＝優先序（擁有者 10/27 決定）：acp通道＞asn終端（pi shell）＞asn終端（原生 cli）；使用者自己開的 CLI 加外掛排最後、不在這裡
 export const CHANNEL_LABEL = { acp: 'acp通道', pi: 'asn終端（pi shell）', term: 'asn終端（原生 cli）' }
 export const CHANNEL_STATUS_TEXT = { ok: '可用', window: '開在 ASN 終端', noinbox: '收不到信', untested: '可以試試看', no: '不支援' }
 export function channelRows(row) {
@@ -37,14 +37,14 @@ export function channelRows(row) {
 }
 
 /**
- * 開新夥伴的「模型」清單只列廠家（小良哥 10/27：pi 是通道，不是廠家）。目錄上 channelOnly 的（pi）不列進廠家清單，只在「運行」的「經 pi」出現。
+ * 開新夥伴的「模型」清單只列廠家（擁有者 10/27：pi 是通道，不是廠家）。目錄上 channelOnly 的（pi）不列進廠家清單，只在「運行」的「經 pi」出現。
  * 目錄裡仍留著 pi 這一列，因為後端啟動設定的 profile 叫 pi，經 pi 開的時候要用它。
  */
 export const vendorRows = rows => (Array.isArray(rows) ? rows : []).filter(r => r && !r.channelOnly)
 
 /**
- * 開新夥伴的「運行」四選一（#351，小良哥 10/27：開終端不是獨立功能，是開新夥伴的一個選項；名稱 #931 小良哥 11/06 定案，手機與電腦版共用）。
- * 順序＝優先序（#931 小良哥 11/07 定：asn終端優先，Claude 在 pi 已登入時也不再預設經 pi）：
+ * 開新夥伴的「運行」四選一（#351，擁有者 10/27：開終端不是獨立功能，是開新夥伴的一個選項；名稱 #931 擁有者 11/06 定案，手機與電腦版共用）。
+ * 順序＝優先序（#931 擁有者 11/07 定：asn終端優先，Claude 在 pi 已登入時也不再預設經 pi）：
  *   term asn終端（原生 cli）＞ acp acp通道（無介面）＞ pi asn終端（pi shell）＞ self 原始 cli 視窗（始終不能選，只顯示說明與接手入口）。
  *   例外：term 收不到信時（Grok／Gemini 開在 ASN 終端）不當預設，改用下一個能選的；都不行才用它。
  * row：目錄列（有 channels 與 toolId）；local：選的是這台電腦；piInstalled：這台偵測到 pi；piReady：ASN 已能帶提供者／模型開 pi（0.1.90 起）。
@@ -75,7 +75,7 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
     opt('term', termOk, termWhy, termOk ? termNote : ''),
     opt('acp', acpOk, why('acp') || '這個模型不支援'),
     opt('pi', piOk, piWhy),
-    opt('self', false, '要自己開，不能從這裡開', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
+    opt('self', false, '要自己開，不能從這裡開', selfNote),   // 擁有者 10/27 #723：這一項始終不能選，只顯示說明
   ]
   // 預設：優先序第一個能選的，但收不到信的 term 不搶預設（排到最後）；三條都不行就沒有預設（null），開啟按鈕要反灰
   const mailless = o => o.key === 'term' && st('term') === 'noinbox'

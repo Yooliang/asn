@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn 帳號名稱驗證() {
-        assert_eq!(clean_account_name("  啟良 ").unwrap(), "啟良");
+        assert_eq!(clean_account_name("  擁有者 ").unwrap(), "擁有者");
         assert!(clean_account_name("").is_err() && clean_account_name("   ").is_err());
         assert!(clean_account_name(&"字".repeat(40)).is_ok());
         assert!(clean_account_name(&"字".repeat(41)).is_err());
@@ -672,7 +672,7 @@ mod tests {
 
     #[test]
     fn 帳號名字取自租戶稱呼() {
-        assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": " 啟良 " } })).as_deref(), Some("啟良"));
+        assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": " 擁有者 " } })).as_deref(), Some("擁有者"));
         assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": "  " } })), None);
         assert_eq!(owner_name_of(&json!({ "tenant": {} })), None);
         assert_eq!(owner_name_of(&Value::Null), None);

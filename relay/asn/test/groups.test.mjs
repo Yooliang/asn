@@ -80,24 +80,24 @@ test('邀請結果與預覽：連結有備註「一次性、24 小時內有效�
 
 test('發言者標示：同名的不同發言者第二位起加「（2）」；不同人的同名 AI 因帶主人名而分得開', () => {
   const members = [
-    { key: '~u:me', label: '牧陽' }, { key: 'x:aaa11111', label: 'H-主線（小良）' }, { key: 'T~H-主線', label: 'H-主線（牧陽）' }, { key: 'x:bbb22222', label: '牧陽' },
+    { key: '~u:me', label: '牧陽' }, { key: 'x:aaa11111', label: 'H-主線（擁有者）' }, { key: 'T~H-主線', label: 'H-主線（牧陽）' }, { key: 'x:bbb22222', label: '牧陽' },
   ]
-  const labels = speakerLabels([{ seq: 1, from: 'x:ccc33333', from_label: '財務（小良）', from_kind: 'ai' }, { seq: 2, from: 'x:ddd44444', from_label: '財務（小良）', from_kind: 'ai' }, { seq: 3, from: '', from_kind: 'system' }], members)
-  assert.equal(labels.get('x:aaa11111'), 'H-主線（小良）'); assert.equal(labels.get('T~H-主線'), 'H-主線（牧陽）')
+  const labels = speakerLabels([{ seq: 1, from: 'x:ccc33333', from_label: '財務（擁有者）', from_kind: 'ai' }, { seq: 2, from: 'x:ddd44444', from_label: '財務（擁有者）', from_kind: 'ai' }, { seq: 3, from: '', from_kind: 'system' }], members)
+  assert.equal(labels.get('x:aaa11111'), 'H-主線（擁有者）'); assert.equal(labels.get('T~H-主線'), 'H-主線（牧陽）')
   assert.equal(labels.get('~u:me'), '牧陽'); assert.equal(labels.get('x:bbb22222'), '牧陽（2）', '兩位帳號名相同的真人')
-  assert.equal(labels.get('x:ccc33333'), '財務（小良）'); assert.equal(labels.get('x:ddd44444'), '財務（小良）（2）')
+  assert.equal(labels.get('x:ccc33333'), '財務（擁有者）'); assert.equal(labels.get('x:ddd44444'), '財務（擁有者）（2）')
 })
 
 test('訊息轉對話記錄：真人與 AI 用不同徽章；我的 AI 也有發言者行；系統訊息置中；不出現節點代號與 x: 代號', () => {
-  const members = [{ key: '~u:me', label: '牧陽', member_kind: 'human', mine: true }, { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true }, { key: 'x:r1', label: '小良', member_kind: 'human' }, { key: 'x:r2', label: '報表（小良）', member_kind: 'ai' }]
+  const members = [{ key: '~u:me', label: '牧陽', member_kind: 'human', mine: true }, { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true }, { key: 'x:r1', label: '擁有者', member_kind: 'human' }, { key: 'x:r2', label: '報表（擁有者）', member_kind: 'ai' }]
   const log = roomLog([
     { seq: 1, from: '~u:me', relation: 'mine', from_kind: 'human', from_label: '牧陽', body: '嗨', at: '2026-10-23T10:00:00Z' },
     { seq: 2, from: 'T~財務', relation: 'mine_ai', from_kind: 'ai', from_label: '財務（牧陽）', body: '收到', at: '2026-10-23T10:01:00Z' },
-    { seq: 3, from: 'x:r1', relation: 'other', from_kind: 'human', from_label: '小良', body: '請查', at: '2026-10-23T10:02:00Z' },
-    { seq: 4, from: 'x:r2', relation: 'other', from_kind: 'ai', from_label: '報表（小良）', body: '好', at: '2026-10-23T10:03:00Z', mentions: ['x:r1'] },
-    { seq: 5, from: '~u:me', relation: 'system', from_kind: 'system', body: '小良 加入了群組。', at: '2026-10-23T10:04:00Z' },
+    { seq: 3, from: 'x:r1', relation: 'other', from_kind: 'human', from_label: '擁有者', body: '請查', at: '2026-10-23T10:02:00Z' },
+    { seq: 4, from: 'x:r2', relation: 'other', from_kind: 'ai', from_label: '報表（擁有者）', body: '好', at: '2026-10-23T10:03:00Z', mentions: ['x:r1'] },
+    { seq: 5, from: '~u:me', relation: 'system', from_kind: 'system', body: '擁有者 加入了群組。', at: '2026-10-23T10:04:00Z' },
   ], ['~u:me', 'T~財務'], members)
-  assert.deepEqual(log.map(e => [e.k, e.who ?? '', e.badge ?? '']), [['me', '', ''], ['them', '財務（牧陽）', 'AI'], ['them', '小良', '真人'], ['them', '報表（小良）', 'AI'], ['sys', '', '']])
+  assert.deepEqual(log.map(e => [e.k, e.who ?? '', e.badge ?? '']), [['me', '', ''], ['them', '財務（牧陽）', 'AI'], ['them', '擁有者', '真人'], ['them', '報表（擁有者）', 'AI'], ['sys', '', '']])
   assert.deepEqual(log.map(e => e.kind ?? ''), ['human', 'ai', 'human', 'ai', ''])
   for (const e of log) assert.doesNotMatch(`${e.who ?? ''}${e.text}`, NODE_RE)
   // 後台沒給標示的舊訊息：用視窗名或「成員」，不露出節點代號
@@ -126,11 +126,11 @@ test('主持人確認卡片：主持人才有同意／拒絕；非主持人只�
 
 test('成員清單：真人在前；自己的 AI 可進出；只顯示標示，不顯示鍵；已在群裡的夥伴不再列為可帶進來', () => {
   const members = [
-    { key: 'x:r2', label: '報表（小良）', member_kind: 'ai', mine: false }, { key: '~u:me', label: '牧陽', member_kind: 'human', role: 'owner', mine: true },
-    { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true, allow_others: false }, { key: 'x:r1', label: '小良', member_kind: 'human', mine: false },
+    { key: 'x:r2', label: '報表（擁有者）', member_kind: 'ai', mine: false }, { key: '~u:me', label: '牧陽', member_kind: 'human', role: 'owner', mine: true },
+    { key: 'T~財務', label: '財務（牧陽）', member_kind: 'ai', mine: true, allow_others: false }, { key: 'x:r1', label: '擁有者', member_kind: 'human', mine: false },
   ]
   const rows = memberRows(members)
-  assert.deepEqual(rows.map(r => [r.kind, r.label]), [['human', '牧陽'], ['human', '小良'], ['ai', '報表（小良）'], ['ai', '財務（牧陽）']])
+  assert.deepEqual(rows.map(r => [r.kind, r.label]), [['human', '牧陽'], ['human', '擁有者'], ['ai', '報表（擁有者）'], ['ai', '財務（牧陽）']])
   assert.ok(rows[0].host && rows[0].mine && !rows[1].host)
   assert.equal(rows.find(r => r.label === '財務（牧陽）').allowOthers, false); assert.equal(rows[2].allowOthers, true, '後台沒回報就當作開著')
   assert.deepEqual(addableAi([F('T', '財務'), F('T', '報表')], members).map(a => a.label), ['報表'])

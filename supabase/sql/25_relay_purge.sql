@@ -1,4 +1,4 @@
--- 25_relay_purge.sql：往來紀錄（kv relay_log，每個聯絡人一串）超過保留天數的刪掉（小良哥 10/08：超過 30 天刪）。
+-- 25_relay_purge.sql：往來紀錄（kv relay_log，每個聯絡人一串）超過保留天數的刪掉（擁有者 10/08：超過 30 天刪）。
 -- 函式 public.irori_relay_purge(p_owner, p_before)：刪掉 at 早於 p_before 的紀錄，某位聯絡人刪光就整個拿掉；回傳刪了幾筆。
 -- 跟 irori_relay_outbound／inbound 用同一把 advisory lock，清理時不會蓋掉剛寫進來的信。at 讀不懂的那筆留著（不猜）。
 -- 執行方式：npx supabase db query --linked -f supabase/sql/25_relay_purge.sql（可重複執行）

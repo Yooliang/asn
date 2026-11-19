@@ -322,8 +322,8 @@ async fn ack_時機_寄回失敗不_ack_震動拆分的第二封也不寄_補拉
     let (members, allow, retry) = vec_cfg();
     let mut h = aboot(members, &[("ASN_AEGIS_ALLOW", &allow), ("ASN_AEGIS_RETRY_MS", &retry)]).await;
     h.fr.st.lock().unwrap().send_fail_reply_to.push(uid(1));
-    h.ag.script("", "xiao-liang", vec![(200, json!({"answer": "（小良 傳送了一個震動）\n報告", "status": "success"}))]);
-    h.put_pull(mail(1, json!({"to_agent": "小良"}))).await;
+    h.ag.script("", "xiao-liang", vec![(200, json!({"answer": "（擁有者 傳送了一個震動）\n報告", "status": "success"}))]);
+    h.put_pull(mail(1, json!({"to_agent": "擁有者"}))).await;
     h.wait("引擎報完", |h| h.core.log.has("an earlier part failed")).await;
     h.settle(300).await;
     assert!(h.fr.acked().is_empty(), "寄回失敗：留在信箱不 ack");

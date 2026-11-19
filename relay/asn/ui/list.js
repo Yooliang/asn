@@ -539,7 +539,7 @@ const claudeModAuto = ref(null)
 async function loadClaudeModAuto() {
   try {
     claudeModAuto.value = await invoke('claude_mod_auto_get')
-    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（小良哥的決定，#343）
+    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（擁有者的決定，#343）
     if (claudeModAuto.value === false) claudeModAuto.value = await invoke('claude_mod_auto_set', { on: true })
   } catch { claudeModAuto.value = null }
 }
@@ -579,7 +579,7 @@ const partnerModels = computed(() => launchToolRows.value)
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
 const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '', model: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
-// 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
+// 「運行」四選一（#351、擁有者 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
 // 選到的廠牌列：一般廠牌照 profile 找；只能經 pi 的廠牌（DeepSeek、MiniMax）profile 都是 pi，所以照 vendor（廠牌 id）找
 const dlgRow = computed(() => (partnerDlg.vendor && dlgVendors.value.find(m => m.id === partnerDlg.vendor)) || dlgModels.value.find(m => m.profileId === partnerDlg.profile))
@@ -1620,7 +1620,7 @@ const app = createApp({
     const top = computed(() => topOf(tab.value))
     let lastDevTab = isDevice.value ? tab.value : ''
     watch(tab, t => { if (topOf(t) === 'partners' && t) lastDevTab = t })
-    // 「⋯」小清單（設備多於 6 台時收進去的那些）：點外面、按 Esc、切到別的分頁、視窗失去焦點都收起（小良哥 11-12：「按出後，不會消失（按其它處）」）
+    // 「⋯」小清單（設備多於 6 台時收進去的那些）：點外面、按 Esc、切到別的分頁、視窗失去焦點都收起（擁有者 11-12：「按出後，不會消失（按其它處）」）
     const moreWrap = ref(null)
     watch(tab, () => { moreOpen.value = false })
     document.addEventListener('mousedown', e => { if (moreOpen.value && !moreWrap.value?.contains(e.target)) moreOpen.value = false }, true)

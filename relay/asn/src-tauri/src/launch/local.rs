@@ -1128,10 +1128,10 @@ mod tests {
 
     #[test]
     fn 視窗腳本_路徑有空白_名字有中文() {
-        let args: Vec<String> = ["--dangerously-skip-permissions", "-n", "小良哥-1", "--remote-control", "小良哥-1"].iter().map(|s| s.to_string()).collect();
-        let sc = build_window_script("小良哥-1", r"C:\Program Files\Claude Code\claude.exe", &args);
-        assert!(sc.contains(r"& 'C:\Program Files\Claude Code\claude.exe' '--dangerously-skip-permissions' '-n' '小良哥-1' '--remote-control' '小良哥-1'"));
-        assert!(sc.contains("WindowTitle = '小良哥-1'"));
+        let args: Vec<String> = ["--dangerously-skip-permissions", "-n", "擁有者-1", "--remote-control", "擁有者-1"].iter().map(|s| s.to_string()).collect();
+        let sc = build_window_script("擁有者-1", r"C:\Program Files\Claude Code\claude.exe", &args);
+        assert!(sc.contains(r"& 'C:\Program Files\Claude Code\claude.exe' '--dangerously-skip-permissions' '-n' '擁有者-1' '--remote-control' '擁有者-1'"));
+        assert!(sc.contains("WindowTitle = '擁有者-1'"));
         assert!(sc.contains("程式已結束"));
         let reset = sc.find("?1003l").expect("結束後關掉滑鼠追蹤");
         assert!(reset < sc.find("程式已結束").unwrap(), "先還原終端機，再印結束訊息");

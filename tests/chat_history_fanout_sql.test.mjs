@@ -43,7 +43,7 @@ async function boot() {
     create function public.asn_person_alias(p_user uuid) returns text language sql immutable as
       $$ select case when p_user is null then null else 'u:' || substr(md5('asn-person:' || p_user::text), 1, 12) end $$;
     insert into relay.nodes(id, tenant_id, owner_user, name) values
-      ('H','${T1}','${U1}','小良的家用機'), ('P','${T1}','${U1}','Oppo 手機'), ('W','${T1}','${U1}','公司機'), ('M','${T1}',null,'AI 機器'), ('X','${T2}','${U2}','別人');`)
+      ('H','${T1}','${U1}','擁有者的家用機'), ('P','${T1}','${U1}','Oppo 手機'), ('W','${T1}','${U1}','公司機'), ('M','${T1}',null,'AI 機器'), ('X','${T2}','${U2}','別人');`)
   await db.exec(sql)
   const q = async (text, args) => (await db.query(text, args)).rows
   const alias = (await q('select public.asn_person_alias($1) a', [U1]))[0].a
@@ -90,7 +90,7 @@ test('實跑（pglite）：自己寄的信帶寄出節點 id 與設備名；沒�
   await ins({ from: 'H', agent: alias, to: 'M', toAgent: '小文', body: '電腦上說的', at: '2026-10-22T08:01:00Z' })
   const m = (await hist('H')).messages
   assert.deepEqual(m.map(x => [x.dir, x.body, x.from_node, x.from_node_name, x.fanout_id]),
-    [['me', '手機上說的', 'P', 'Oppo 手機', null], ['me', '電腦上說的', 'H', '小良的家用機', null]])
+    [['me', '手機上說的', 'P', 'Oppo 手機', null], ['me', '電腦上說的', 'H', '擁有者的家用機', null]])
   // 扇出的三列算一則：上限 2 時兩則都還在
   await ins({ id: F, from: 'M', agent: '小文', to: 'H', toAgent: alias, body: 'a', fanout: F, at: '2026-10-22T08:02:00Z' })
   await ins({ from: 'M', agent: '小文', to: 'P', toAgent: alias, body: 'a', fanout: F, at: '2026-10-22T08:02:01Z' })

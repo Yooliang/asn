@@ -466,7 +466,7 @@ async fn agy_舊對話壞了改開新對話_名下的往來記錄當前情帶進
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
     let hist = h.work.path().join("handoff");
     std::fs::create_dir_all(&hist).unwrap();
-    std::fs::write(hist.join("Gemini.md"), "▌ 2026-10-28 09:00 收到｜小良 → Gemini｜id=a1\n預算表放在 D 槽的財務資料夾\n\n").unwrap();
+    std::fs::write(hist.join("Gemini.md"), "▌ 2026-10-28 09:00 收到｜擁有者 → Gemini｜id=a1\n預算表放在 D 槽的財務資料夾\n\n").unwrap();
     h.put_pull(to_agent(1, "Gemini", "@@POISON")).await;
     h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
     h.restart().await;
@@ -2098,7 +2098,7 @@ async fn acp_改名_設定檔裡的_沒對話的_已停止的_同名的_都擋�
     let bad = rename_blocking(&admin, &old, "-壞").await.unwrap_err();
     assert_eq!(bad, engines::acp_admin::BAD_NAME);
     assert!(h.log_text().contains("擋下：設定檔裡的名字"), "擋下的原因也記 log");
-    // 改名的每一句說明（含失敗、處理中）都在 20 字內（小良哥 #1227），細節記 log
+    // 改名的每一句說明（含失敗、處理中）都在 20 字內（擁有者 #1227），細節記 log
     let all = [e.as_str(), bad.as_str(), "還沒有對話，請先寄一封信給它", "已停止，請先重開", "已有同名的夥伴，換個名字", "新名字和現在的一樣", "找不到這個工作者", "工作者正在處理信件，等它做完再試", "工作者正在啟動，稍後再試", "這個工作者正在關閉", "工作者管理還沒啟動", engines::acp_admin::RENAME_FAILED, engines::acp_admin::RENAME_HALF];
     for msg in all {
         assert!(msg.chars().count() <= 20, "給人看的說明 20 字內：{msg}");

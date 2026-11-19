@@ -85,7 +85,7 @@ export const ACP_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 export const ACP_MODEL_HINT = '請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high（只能用英數與 . _ -，最多 60 字）'
 /**
  * pi「切換模型」的下拉選單（#443／#444）：這台 pi 列得出來的模型（pi-models.mjs 的 cleanPiModels），依提供者分組。
- * pi 可以跨廠商切換（小良哥 #1062），所以列出所有已登入的提供者，不只開夥伴時選的那家。
+ * pi 可以跨廠商切換（擁有者 #1062），所以列出所有已登入的提供者，不只開夥伴時選的那家。
  * 只收送得出去的（piModelWire 收得下：英數與 . _ -、合起來 60 字內）；value 是「提供者/模型」，跟輸入框同一個格式。
  * current＝名單上這個 pi 現在的模型（「提供者/模型」），放在選單裡就預選它。回 { groups: [{ provider, options: [{ value, label }] }], selected }
  */
@@ -236,7 +236,7 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
     if (offline) return `這個內建通道的工作者已離線，現在不能「${label}」`
-    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `已停止，先按「重開」才能「${label}」`   // 20 字內（小良哥 #1227）
+    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `已停止，先按「重開」才能「${label}」`   // 20 字內（擁有者 #1227）
     return gateReason(key, friend, ctx)
   }
   if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline

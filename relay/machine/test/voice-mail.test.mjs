@@ -9,7 +9,7 @@ import { BODY_ESCAPE_PREFIX, VOICE_NOTE, escapeBody, isVoiceMail, mailHead, mail
 const read = rel => fs.readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 const ID = '11111111-2222-3333-4444-555555555555'
 const ADDR = 'u:3cda66252c34'
-const owner = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ADDR, to_agent: 'T-甲', expects_reply: true, sender_display: '小良', sender_device: 'Oppo 手機' }
+const owner = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ADDR, to_agent: 'T-甲', expects_reply: true, sender_display: '擁有者', sender_device: 'Oppo 手機' }
 const WANT = '（語音通話：這封是語音辨識的文字，可能有錯字或同音字（夥伴名稱尤其容易，例如「正見」變「政見」）；意思不確定請先複述確認，做了收不回來的事先問過再做）'
 
 test('固定文字逐字等於規格要求的那句', () => {
@@ -19,7 +19,7 @@ test('固定文字逐字等於規格要求的那句', () => {
 test('向量：voice=true 的信，說明行後面接固定提醒；沒有旗標或不是布林 true 的信完全不變', () => {
   const plain = mailPreamble(owner)
   assert.equal(mailPreamble({ ...owner, voice: true }), plain.replace(senderLine(owner), senderLine(owner) + WANT))
-  assert.equal(mailPreamble({ ...owner, voice: true }).split('\n')[0], `寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）${WANT}`)
+  assert.equal(mailPreamble({ ...owner, voice: true }).split('\n')[0], `寄件人：擁有者（本人，帳號簽章已驗證，從「Oppo 手機」寄出）${WANT}`)
   for (const v of [undefined, null, false, 'true', 'yes', 1, 0, {}, []]) {
     assert.equal(isVoiceMail({ ...owner, voice: v }), false, String(v))
     assert.equal(mailPreamble({ ...owner, voice: v }), plain, String(v))

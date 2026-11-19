@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn 權限旗標只留認得的() {
-        assert_eq!(perm_args_from_cmdline(r#""C:\claude.exe" --dangerously-skip-permissions -n 小良 --resume abc"#), [BYPASS_FLAG]);
+        assert_eq!(perm_args_from_cmdline(r#""C:\claude.exe" --dangerously-skip-permissions -n 擁有者 --resume abc"#), [BYPASS_FLAG]);
         assert_eq!(perm_args_from_cmdline("claude --permission-mode auto -n x"), [MODE_FLAG, "auto"]);
         assert_eq!(perm_args_from_cmdline("claude --permission-mode=plan"), [MODE_FLAG, "plan"]);
         assert!(perm_args_from_cmdline("claude --permission-mode 亂寫 -n x").is_empty());

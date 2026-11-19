@@ -6,10 +6,10 @@ import { handleNodeRoomAction, type RoomDeps, type RoomMember } from "./rooms.ts
 import { rankFromEnv } from "./wake_rank.ts";
 
 const MEMBERS: RoomMember[] = [
-  { key: "~owner", name: "啟良", kind: "owner" },
-  { key: "w02", name: "W02", label: "W02（啟良）", kind: "claude" },
-  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（啟良）", kind: "claude" },
-  { key: "H~H-主線", name: "H-主線", label: "H-主線（啟良）", kind: "window" },
+  { key: "~owner", name: "擁有者", kind: "owner" },
+  { key: "w02", name: "W02", label: "W02（擁有者）", kind: "claude" },
+  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（擁有者）", kind: "claude" },
+  { key: "H~H-主線", name: "H-主線", label: "H-主線（擁有者）", kind: "window" },
   { key: "~u:abc", name: "阿明", label: "阿明", kind: "human" },
 ];
 // 候選（不含發言者 aegis、不含真人）依標示排序：H-主線、W02

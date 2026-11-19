@@ -242,7 +242,7 @@ async function forwardUnmatched(from, text, expectsReply) {
   const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from, expectsReply)
   log(`unmatched reply from ${from} (${text.length} chars) -> last requester ${lr.from_node}/${lr.from_agent} reply_to=${lr.mail_id} sent=${ok}`)
 }
-// 視窗主動寄信（10/04 小良哥：收發室也要能代寄）：傳給收發室的訊息第一行寫
+// 視窗主動寄信（10/04 擁有者：收發室也要能代寄）：傳給收發室的訊息第一行寫
 //   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>] reply=yes|no   （「[RELAY 回信]」同義；re 與 reply 順序不拘）
 // 有 re＝回那一封（照回信流程）；沒有 re＝寄一封新信，寄件人是這個視窗（from-name 由 Claude Code 標記，視窗無法冒名）。
 // reply 【必填】：yes＝寄件視窗在等回信（收發室對方那邊會計時）、no＝只是告知；寄出時當 expects_reply 欄位送給後端，內文不動。
@@ -309,7 +309,7 @@ async function onReply(from, text, mailId) {
 
 const agentOf = name => agents.find(a => a.name === name)
 
-// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；小良哥 10/22 裁示）。
+// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；擁有者 10/22 裁示）。
 // 只是把信轉成 notified（保留著等遲到的回覆照常寄回），已經回過的直接清掉
 function settleTimeout(id, p, now) {
   if (p.replied) { pending.delete(id); return }

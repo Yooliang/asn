@@ -35,7 +35,7 @@ test('有顏色的彼此不同、灰色的一定帶記號：綠色只給確認�
   const GRAY = ['unconfirmed', 'unknown'], COLORED = ['confirmed', 'remembered']
   assert.equal(color('confirmed'), 'var(--online)')
   assert.equal(new Set(COLORED.map(color)).size, COLORED.length, '有顏色的彼此不同')
-  assert.ok(GRAY.every(k => color(k) === color('unknown')), '沒確認、沒記住都是同一個灰（小良哥：沒通過就是灰色）')
+  assert.ok(GRAY.every(k => color(k) === color('unknown')), '沒確認、沒記住都是同一個灰（擁有者：沒通過就是灰色）')
   for (const k of GRAY) assert.ok(!COLORED.map(color).includes(color(k)), `${k} 是灰色，不跟有顏色的混`)
   assert.doesNotMatch(rule(css, '.fpm.unknown') + rule(css, '.fpm.unconfirmed'), /opacity/, '不做成反灰（看起來像沒作用）')
   // 形狀：記號跟著狀態走（不只靠顏色）

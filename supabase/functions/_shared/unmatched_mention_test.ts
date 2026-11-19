@@ -3,7 +3,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { isSilentAiMsg, postMessage, type RoomDeps, type RoomMember, unmatchedMentions } from "./rooms.ts";
 
 const MEMBERS: RoomMember[] = [
-  { key: "~owner", name: "啟良", role: "owner", kind: "owner", node_role: "owner" },
+  { key: "~owner", name: "擁有者", role: "owner", kind: "owner", node_role: "owner" },
   { key: "H~Gemini審查", name: "Gemini審查", kind: "window", node_role: "member", member_kind: "ai" },
   { key: "H~asn西川", name: "asn西川", kind: "window", node_role: "member", member_kind: "ai" },
   { key: "aegis", name: "牧陽 Aegis", kind: "claude", node_role: "member" },

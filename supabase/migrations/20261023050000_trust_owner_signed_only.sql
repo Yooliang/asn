@@ -7,7 +7,7 @@
 --  1. asn_relay_inbox、asn_relay_inbox_agent：trust 只看 owner_signed（原本 f.role = 'owner' or owner_signed）。
 --  2. asn_relay_room_post：群組發言的 trust 拿掉「relay.room_actor_is_owner(p_node)」（角色節點發言不再自動是 owner）；
 --     p_owner（舊後台 irori-api 的人登入路徑）與本人簽章照舊。群組成員身分（relay.room_caller_key）不動，舊租戶角色節點照常能以 ~owner 身分發言。
---  3. relay.room_member_name（兩個多載）：~owner 的顯示名不再寫死「小良哥」，備用文字改成中性的「帳號擁有者」
+--  3. relay.room_member_name（兩個多載）：~owner 的顯示名不再寫死個人名字，備用文字改成中性的「帳號擁有者」
 --     （兩個參數的版本本來就取 relay.tenants.owner_name，只改沒有帳號名稱時的備用字）。
 -- 刻意不動（以「不影響現有使用」為準）：role = 'owner' 仍當作「特權動作」的授權條件——
 --     acct_list／acct_switch／acct_switch_status、invite、reissue、update、launch／launchers（另有本人簽章路徑）、room_actor_is_owner。

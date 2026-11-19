@@ -46,7 +46,7 @@ async function boot() {
   for (const f of files) await db.exec(read(f))
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine, platform) values
       ('${PC}', '工作機', 'k1', 'bell-pc', 'member', '${T1}', '${U1}', 'active', '電腦', 'windows'),
       ('${PH}', '手機', 'k2', 'bell-ph', 'member', '${T1}', '${U1}', 'active', '手機', 'android'),

@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { LAUNCH_GIVE_UP_MS, REASON, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude', label: 'Claude' }, { id: 'gemini', label: 'Gemini' }], cwd_allow: ['D:\\Github\\asn', 'D:\\Github\\irori'], max_per_hour: 6 }
-const BODY = { machines: [{ node: 'H', name: '小良的家用機', launcher: LAUNCHER, online: true }, { node: 'W', name: '公司', launcher: LAUNCHER, online: false }, { node: 'C', name: '關著的', launcher: null, online: true }, { node: 'E', launcher: { profiles: [], cwd_allow: ['x'] }, online: true }, { node: 'D', launcher: { profiles: [{ id: 'claude' }], cwd_allow: [] }, online: true }] }
+const BODY = { machines: [{ node: 'H', name: '擁有者的家用機', launcher: LAUNCHER, online: true }, { node: 'W', name: '公司', launcher: LAUNCHER, online: false }, { node: 'C', name: '關著的', launcher: null, online: true }, { node: 'E', launcher: { profiles: [], cwd_allow: ['x'] }, online: true }, { node: 'D', launcher: { profiles: [{ id: 'claude' }], cwd_allow: [] }, online: true }] }
 const ctx = { machines: machinesByNode(BODY), loaded: true, signedIn: true, friends: [] }
 const F = (node, nick, status = 'online') => ({ id: `${node}/${nick}`, node, agent: nick, nick, status, device: `設備${node}` })
 

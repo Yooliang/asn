@@ -57,7 +57,7 @@ export const LoginPanel = {
         <button v-if="waiting" class="aero-btn" type="button" @click="cancel">取消</button>
       </div>
       <label class="login-name" v-if="view.signedIn">我的名字
-        <span class="login-name-row"><input class="set-input" type="text" maxlength="40" v-model="nameText" :disabled="nameBusy" placeholder="例如：啟良" aria-label="帳號名稱" @keydown.enter.prevent="saveName"><button class="aero-btn" type="button" :disabled="nameBusy" @click="saveName">儲存</button></span>
+        <span class="login-name-row"><input class="set-input" type="text" maxlength="40" v-model="nameText" :disabled="nameBusy" placeholder="例如：擁有者" aria-label="帳號名稱" @keydown.enter.prevent="saveName"><button class="aero-btn" type="button" :disabled="nameBusy" @click="saveName">儲存</button></span>
         <small>帳號的名字，所有設備共用。</small>
       </label>
       <label class="login-name" v-if="view.signedIn">{{ AI_WAKE_LIMIT_LABEL }}

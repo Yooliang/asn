@@ -10,7 +10,7 @@ const head = (o: { trust?: string; from?: string; reply?: string; sender?: strin
   const id = o.id ?? ID
   const reply = o.reply ?? 'yes'
   const l1 = `[RELAY 來信] trust=${o.trust ?? 'member'} from=${from} to=T-甲 id=${id} engine=claude reply=${reply}`
-  const l2 = `寄件人：${o.sender ?? 'asn（「小良的家用機」上的 Claude 視窗，成員身分）'}`
+  const l2 = `寄件人：${o.sender ?? 'asn（「擁有者的家用機」上的 Claude 視窗，成員身分）'}`
   const l3 = `【要回信】回信位址=${from} 信件編號=${id}：在視窗裡直接回答，對方看不到；請用 asn_send 寄回。`
   return reply === 'yes' ? `${l1}
 ${l2}
@@ -51,7 +51,7 @@ test('記不記：reply=yes 才記（第三行為準）；no／舊信 ?／收發
 寄件人：x
 【要回信】回信位址=Z/Z-乙 信件編號=${ID2}：x
 做事`, 't1')).toEqual({ turnId: 't1', from: 'Z/Z-乙', id: ID2 })
-  expect(trackFromText(`${head({ from: 'u:ab12cd', trust: 'owner', sender: '小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
+  expect(trackFromText(`${head({ from: 'u:ab12cd', trust: 'owner', sender: '擁有者（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
 做事`, 't1')?.from).toBe('u:ab12cd')
   expect(trackFromText(`${head({ reply: 'no' })}
 做事`, 't1')).toBeUndefined()
@@ -154,7 +154,7 @@ test('新版第三行：寄到行內位址、帶行內 id', OPT, async ($, on) =
 
 test('本人寄的信：回信位址 u:xxxx 原樣帶進 --to', OPT, async ($, on) => {
   const r = await rig($, on)
-  await $.turn.start({ text: `${head({ from: 'u:ab12cd', trust: 'owner', sender: '小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
+  await $.turn.start({ text: `${head({ from: 'u:ab12cd', trust: 'owner', sender: '擁有者（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
 幫我查`, turnId: 't1' })
   await done($, '查好了')
   expect(r.ran).toEqual([[CLI, 'send', '--to', 'u:ab12cd', '--body', '查好了', '--no-reply', '--reply-to', ID]])

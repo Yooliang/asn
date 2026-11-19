@@ -84,3 +84,18 @@ jobs:
 
       - name: 雲端代理測試（node）
         run: node --test --test-force-exit --test-timeout=120000 test/*.test.mjs
+
+  # #1841：公開 repo 不准出現擁有者的稱呼（開發紀律七之一第 3 條）。掃全部追蹤的文字檔，約 2 秒；
+  # 每張 PR 都跑（含只改文件的），所以放在這支不篩路徑的 workflow
+  owner-names-guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: 擁有者稱呼守門
+        run: node --test tests/owner_names_1841.test.mjs

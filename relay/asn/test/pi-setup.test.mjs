@@ -84,7 +84,7 @@ test('錯誤訊息：加前綴並限長', () => {
   assert.ok(piSetupError(new Error('a'.repeat(500))).length <= PI_SETUP_TEXT.failed.length + 500)
 })
 
-test('文案：對使用者不說「收發室」（小良哥 #38），每一句都有講清楚', () => {
+test('文案：對使用者不說「收發室」（擁有者 #38），每一句都有講清楚', () => {
   for (const [k, v] of Object.entries(PI_SETUP_TEXT)) {
     assert.equal(typeof v, 'string', k)
     assert.ok(v.length > 0, k)

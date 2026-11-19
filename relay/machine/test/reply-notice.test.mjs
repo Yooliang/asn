@@ -1,4 +1,4 @@
-// 逾時不再通知寄件人（小良哥 10/22 裁示：寄件人看已讀狀態）：遲到回覆照寄（原文、不加說明）、收發室系統信不計時、寄給原寄件人視為已回覆；
+// 逾時不再通知寄件人（擁有者 10/22 裁示：寄件人看已讀狀態）：遲到回覆照寄（原文、不加說明）、收發室系統信不計時、寄給原寄件人視為已回覆；
 // 新增「收件視窗提醒」：轉交後 IRORI_NUDGE_MS 沒回、視窗閒置 → 提醒收件視窗一次。
 // 用假仲介伺服器＋假 claude（agents.json 可在執行中改 status）；用 IRORI_REPLY_TIMEOUT_MS / IRORI_BRIDGE_TICK_MS 縮短時間。
 import { mailHead } from '../mail-format.mjs'
@@ -251,7 +251,7 @@ test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 
   } finally { await st.close() }
 })
 
-// 10/04：視窗主動寄信（小良哥：收發室也要能代寄）
+// 10/04：視窗主動寄信（擁有者：收發室也要能代寄）
 test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信寄出，寄件人是該視窗；沒有這行頭的照舊（對不上就丟）', async () => {
   const st = await fakeServer([])
   try {
@@ -272,7 +272,7 @@ test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信
   } finally { await st.close() }
 })
 
-// 10/05：代寄一定要寫 reply=yes|no（小良哥：「要不要回信」由寄件人明說，收發室自己決定要不要計時）
+// 10/05：代寄一定要寫 reply=yes|no（擁有者：「要不要回信」由寄件人明說，收發室自己決定要不要計時）
 const recordOf = home => fs.readFileSync(path.join(home, 'record.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
 
 test('代寄 [RELAY 寄信] to=… reply=no|yes → 寄出時帶 expects_reply（false／true），內文一字不改、不補任何標記', async () => {
@@ -415,8 +415,8 @@ test('收件視窗提醒：忙碌中不插話，閒下來才提醒；回覆後�
 test('信頭與說明行：本人信的位址是人代號、不含節點代號；member 有「成員身分」；reply=yes 才有【要回信】行', async () => {
   const alias = 'u:3cda66252c34'
   const st = await fakeServer([
-    mail(1, { trust: 'owner', from_node: 'XISU', from_agent: alias, sender_display: '小良', sender_device: 'Oppo 手機', expects_reply: true }),
-    mail(2, { from_node: 'H', from_agent: 'asn', sender_device: '小良的家用機', sender_engine: 'claude', expects_reply: false }),
+    mail(1, { trust: 'owner', from_node: 'XISU', from_agent: alias, sender_display: '擁有者', sender_device: 'Oppo 手機', expects_reply: true }),
+    mail(2, { from_node: 'H', from_agent: 'asn', sender_device: '擁有者的家用機', sender_engine: 'claude', expects_reply: false }),
   ])
   try {
     let rec = []
@@ -424,11 +424,11 @@ test('信頭與說明行：本人信的位址是人代號、不含節點代號�
     const block = t => t.slice(t.indexOf('<<<MAIL\n') + 8, t.lastIndexOf('\nMAIL>>>')).split('\n')
     const t1 = block(rec.find(r => r.text.includes(`id=${uid(1)}`)).text), t2 = block(rec.find(r => r.text.includes(`id=${uid(2)}`)).text)
     assert.equal(t1[0], `[RELAY 來信] trust=owner from=${alias} to=T-對方 id=${uid(1)} engine=claude reply=yes`)
-    assert.equal(t1[1], '寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）')
+    assert.equal(t1[1], '寄件人：擁有者（本人，帳號簽章已驗證，從「Oppo 手機」寄出）')
     assert.equal(t1[2], `【要回信】回信位址=${alias} 信件編號=${uid(1)}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to ${alias} --reply-to ${uid(1)} --no-reply 寄回。`)
     assert.ok(!t1.slice(0, 3).join('\n').includes('XISU'))
     assert.match(t2[0], /^\[RELAY 來信\] trust=member from=H\/asn /)
-    assert.equal(t2[1], '寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）')
+    assert.equal(t2[1], '寄件人：asn（「擁有者的家用機」上的 Claude 視窗，成員身分）')
     assert.ok(!t2.some(l => l.startsWith('【要回信】')))
   } finally { await st.close() }
 })

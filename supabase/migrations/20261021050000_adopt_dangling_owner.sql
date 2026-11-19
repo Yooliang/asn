@@ -1,5 +1,5 @@
 -- 2026-10-21：搬家前的舊租戶 owner_user 指向舊後端的帳號（新後端 auth.users 沒有這個人），
--- 導致 asn_admin_adopt_tenant 回 tenant_owned、小良哥登入後認領不到 H／w02 等節點。
+-- 導致 asn_admin_adopt_tenant 回 tenant_owned、擁有者登入後認領不到 H／w02 等節點。
 -- 改成：原主人不存在於 auth.users 時視為沒有主人。
 begin;
 

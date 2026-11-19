@@ -1,4 +1,4 @@
-// 寄信時的 expects_reply 欄位（寄件人明說要不要等回信；小良哥 10/05，SQL 見 supabase/sql/23_relay_expects_reply.sql）。
+// 寄信時的 expects_reply 欄位（寄件人明說要不要等回信；擁有者 10/05，SQL 見 supabase/sql/23_relay_expects_reply.sql）。
 // irori-relay 的 send 動作與 relay_ops.ts 的 send 共用這個檢查，兩邊行為一致：
 //   - 沒給（undefined）或 null：不帶 p_expects_reply 參數給資料庫函式 → 信的欄位是 null（舊版寄件工具＝不知道，收發室退回看內文標記）。
 //     不帶參數（而不是帶 null）是為了還沒套 SQL 23 的資料庫、舊簽章的函式也能照舊呼叫。
