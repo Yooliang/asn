@@ -2912,7 +2912,12 @@ async fn 開關補報失敗_退避期間不再打後台_過了退避時間再試
     let t = T0 + 5_000;
     assert!(!core.watch_local(t).await, "沒報成功回 false");
     let after_first = posts();
-    assert!(after_first > 1, "頭一次有送出去");
+    // 前提：Relay.api 遇到 503 不在內部重試，所以一次補報恰好送出一個請求。確認過 relay.rs：
+    //  - 503 只在 `if idem && matches!(status.as_u16(), 502..=504) && wait.is_some()` 才重試（relay.rs:697），
+    //  - 而 idem 只有 send 才是 true（with_client_id，relay.rs:408 `if name != "send" { return (body, false) }`），roster 是 false，
+    //  - 測試時連線重試表是空的（relay.rs:468 `connect_retry_ms: if cfg!(test) { &[][..] }`，wait 一定是 None），
+    //  - 之後非 2xx 直接 Err（relay.rs:726、734）。
+    assert_eq!(after_first, 2, "第一個是開頭的名單回報，頭一次補報恰好多一個請求（不重試）");
     assert_eq!(core.remote_flags_fails, 1);
     // 退避期間（一秒一次的監看）不再打後台
     for k in 1..=9 {
@@ -2921,13 +2926,53 @@ async fn 開關補報失敗_退避期間不再打後台_過了退避時間再試
     assert_eq!(posts(), after_first, "10 秒內每秒監看一次，後台都沒再被打");
     // 過了 10 秒才再試；還是失敗：下一次要等 20 秒
     assert!(!core.watch_local(t + 10_000).await);
-    assert!(posts() > after_first, "過了退避時間會再送");
+    assert_eq!(posts(), after_first + 1, "過了退避時間會再送，而且只送一次");
     assert_eq!(core.remote_flags_fails, 2);
     let after_second = posts();
     assert!(!core.watch_local(t + 10_000 + 19_000).await);
     assert_eq!(posts(), after_second, "連續失敗兩次要等 20 秒");
     // 後台恢復：退避時間一到就補報成功，次數歸零
     fr.st.lock().unwrap().roster_fail_n = 0;
+    assert!(core.watch_local(t + 10_000 + 20_000).await);
+    assert_eq!(core.remote_flags_fails, 0);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(false)));
+}
+
+#[tokio::test]
+async fn 開關補報_讀名單失敗而提早返回也算一次失敗_套同樣的退避() {
+    let fr = FakeRelay::start();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    let sink = Arc::new(FakeSink::default());
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, ..Default::default() }).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    let posts = || fr.st.lock().unwrap().rosters.len();
+    // 之後讀名單會失敗（視窗清單的位置不是資料夾）：refresh_roster 在送出請求之前就提早返回
+    let bad = data.path().join("not-a-dir");
+    std::fs::write(&bad, "x").unwrap();
+    core.cfg.sessions_dir = bad;
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, remote_input_off: true, ..Default::default() }).unwrap();
+    let before = posts();
+    let t = T0 + 5_000;
+    assert!(!core.watch_local(t).await);
+    assert_eq!(posts(), before, "讀名單失敗：沒送出任何請求");
+    assert_eq!(core.remote_flags_fails, 1, "提早返回也算一次失敗");
+    // 退避期間每秒監看一次：不會再進 refresh_roster（再進來的話失敗次數會再加一）
+    for k in 1..=9 {
+        assert!(!core.watch_local(t + k * 1_000).await);
+    }
+    assert_eq!(core.remote_flags_fails, 1, "退避期間下一次 watch 不會立刻再進 refresh_roster");
+    assert_eq!(posts(), before);
+    // 過了退避時間再試一次，還是讀不到：失敗次數加一，下一次要等 20 秒
+    assert!(!core.watch_local(t + 10_000).await);
+    assert_eq!(core.remote_flags_fails, 2);
+    assert!(!core.watch_local(t + 10_000 + 19_000).await);
+    assert_eq!(core.remote_flags_fails, 2, "連續兩次失敗要等 20 秒");
+    // 讀得到了：退避時間一到就補報成功，次數歸零
+    core.cfg.sessions_dir = sessions.path().to_path_buf();
     assert!(core.watch_local(t + 10_000 + 20_000).await);
     assert_eq!(core.remote_flags_fails, 0);
     let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();

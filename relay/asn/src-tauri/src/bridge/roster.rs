@@ -389,6 +389,8 @@ pub fn local_fingerprint(windows: &[Window]) -> String {
 }
 
 /// 本機兩個開關要回報的值（看畫面, 打字）。別台要看或打字，本機「允許其他設備替這台開新視窗」都要開著；打字另外看「允許遠端在這台打字」。
+/// **「看畫面」這個值不含移動設備的開關**（「允許移動設備查看終端」`mobile_view_off`）：那個開關只對手機這類移動設備的檢視要求生效，
+/// 所以手機能不能看這台，要另外判斷（被看的那台領請求時依本機設定決定），不能只靠這個值。
 /// 只是給後台與網頁的提示，握手時本機會自己再檢查一次，不以這裡為準
 pub fn remote_flags(s: &super::BridgeSettings) -> (bool, bool) {
     (s.allow_remote_launch, s.allow_remote_launch && s.input_allowed())
