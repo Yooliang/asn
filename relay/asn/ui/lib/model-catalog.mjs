@@ -12,6 +12,12 @@ export const MODEL_CATALOG = [
 ]
 
 /**
+ * asn終端的虛擬項目（gemini-term／grok-term）：那台回報時自己加的，不是另一個廠牌。
+ * 認 mode 是 term，也認「<目錄 id>-term」這個 id（後台以前把 mode 丟掉，舊資料只剩 id）
+ */
+export const isTermProfile = p => p?.mode === 'term' || (typeof p?.id === 'string' && MODEL_CATALOG.some(m => p.id === `${m.id}-term`))
+
+/**
  * 每個模型的三條通道（#351 第 1 步，只是資料與文字）：term＝asn終端（原生 cli）、acp＝acp通道（無介面）、pi＝asn終端（pi shell）。
  * status：ok 可用／window 開在 ASN 終端（終端服務沒開時退回原生主控台）／noinbox 開得起來但收不到信／untested 理論可行但沒實測／no 不支援或刻意不做。
  * channels.*.why 會直接顯示在畫面上：只寫使用者能據以行動的話，議題編號、版本、內部原因寫在註解（#931）。

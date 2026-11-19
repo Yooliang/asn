@@ -106,6 +106,31 @@ Deno.test("sanitizeLauncher：上傳的摘要只留 id／label／cwd_allow／max
   assertEquals(sanitizeLauncher({ profiles: "x" }), { error: "bad_request" });
 });
 
+Deno.test("sanitizeLauncher：mode 只收 term／background／window，其餘丟掉", () => {
+  // 30家用（launcher.rs 的 summary）實際送的形狀：asn終端的虛擬項目帶 engine 與 mode
+  const raw = {
+    profiles: [
+      { id: "claude", label: "Claude" },
+      { id: "gemini-term", label: "Gemini（asn終端）", engine: "agy", mode: "term" },
+      { id: "bg", label: "背景", mode: "background" },
+      { id: "w", label: "視窗", mode: "window" },
+      { id: "x", label: "亂來", mode: "rm -rf" },
+      { id: "y", label: "非字串", mode: 5 },
+    ],
+    cwd_allow: ["D:\Github"], max_per_hour: 6,
+  };
+  const out = sanitizeLauncher(raw) as { profiles: Record<string, unknown>[] };
+  assertEquals(out.profiles, [
+    { id: "claude", label: "Claude" },
+    { id: "gemini-term", label: "Gemini（asn終端）", mode: "term" },
+    { id: "bg", label: "背景", mode: "background" },
+    { id: "w", label: "視窗", mode: "window" },
+    { id: "x", label: "亂來" },
+    { id: "y", label: "非字串" },
+  ]);
+  assert(!JSON.stringify(out).includes("engine"), "engine 與指令一樣不上雲");
+});
+
 Deno.test("本人簽章：有簽章才帶 p_signed_user（launch、launchers）；沒簽章與以前完全相同（不多帶任何參數）", async () => {
   const USER = "22222222-2222-2222-2222-222222222222";
   const a = fakeDeps();
