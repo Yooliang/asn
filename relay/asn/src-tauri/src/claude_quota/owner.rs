@@ -272,18 +272,16 @@ fn window_cj_path(home: &Path, cfg: &Path) -> PathBuf {
 /// 這個視窗現在登入的帳號：(accountUuid, 正規化 email)，讀 `.claude.json` 同一份 oauthAccount 的這兩個欄位，不讀其他欄位、不讀任何憑證。
 /// 額度歸屬用這個（不查帳號庫）。讀不到（檔案不存在、是連結、太大、壞掉、沒登入、uuid 格式不對、沒有 email）都是 None。
 /// 大小與修改時間都沒變就用上次的結果、不重讀（快取存本機一個小檔，因為每次狀態列掛鉤都是新行程）。
-pub fn window_identity(home: &Path, cfg: &Path) -> Option<(String, String)> {
-    let path = window_cj_path(home, cfg);
-    let id = identity_at(home, &path);
-    // #1880：沒設 CLAUDE_CONFIG_DIR 時，Claude Code 實際把登入寫在 `<home>/.claude.json`；`<home>/.claude/.claude.json` 可能是舊版留下的、沒有帳號的檔。
-    // 預設資料夾裡那份讀不出帳號，就退回家目錄那份；自訂的設定資料夾不退（那是別的登入，退回去會把額度記到錯的帳號）
-    if id.is_none() && cfg == home.join(".claude") {
-        let fallback = home.join(".claude.json");
-        if fallback != path {
-            return identity_at(home, &fallback);
+pub fn window_identity(home: &Path, cfg: &Path, env_set: bool) -> Option<(String, String)> {
+    // #1880：沒設 CLAUDE_CONFIG_DIR（env_set＝false）時，Claude Code 實際把登入寫在 `<home>/.claude.json`；
+    // `<home>/.claude/.claude.json` 可能是舊版留下的檔（沒有帳號、或是舊帳號），不能讓它勝出，所以先讀家目錄那份，讀不出才看資料夾裡的。
+    // 有設環境變數（含明確設成 ~/.claude）：照舊只看資料夾裡的；那裡沒有 .claude.json 才看家目錄。自訂資料夾沒帳號不退回家目錄（那是別的登入，退回去會把額度記到錯的帳號）
+    if !env_set {
+        if let Some(id) = identity_at(home, &home.join(".claude.json")) {
+            return Some(id);
         }
     }
-    id
+    identity_at(home, &window_cj_path(home, cfg))
 }
 
 /// 讀一份 `.claude.json` 的登入帳號（檢查與快取見 [`window_identity`]）
@@ -574,25 +572,55 @@ mod tests {
     }
 
     const U1880: &str = "11111111-2222-3333-4444-555555555555";
+    const U_OLD: &str = "99999999-8888-7777-6666-555555555555";
+    fn cj(dir: &Path, email: &str, uuid: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(".claude.json"), serde_json::json!({ "oauthAccount": { "accountUuid": uuid, "emailAddress": email } }).to_string()).unwrap();
+    }
 
     #[test]
-    fn t1880_預設資料夾裡沒帳號的舊檔_退回家目錄的登入設定() {
+    fn t1880_預設資料夾裡沒帳號的舊檔_讀家目錄的登入設定() {
         let home = tempfile::tempdir().unwrap();
         let cfg = home.path().join(".claude");
         std::fs::create_dir_all(&cfg).unwrap();
         // 舊版留下的、沒有 oauthAccount 的檔：不能擋住家目錄那份真正的登入
         std::fs::write(cfg.join(".claude.json"), r#"{"firstStartTime":"x","userID":"u"}"#).unwrap();
-        std::fs::write(home.path().join(".claude.json"), serde_json::json!({ "oauthAccount": { "accountUuid": U1880, "emailAddress": "it@example.com" } }).to_string()).unwrap();
-        assert_eq!(window_identity(home.path(), &cfg), Some((U1880.to_string(), "it@example.com".to_string())), "舊的空檔擋住家目錄的登入，每一筆額度都被丟掉（#1880）");
+        cj(home.path(), "it@example.com", U1880);
+        assert_eq!(window_identity(home.path(), &cfg, false), Some((U1880.to_string(), "it@example.com".to_string())), "舊的空檔擋住家目錄的登入，每一筆額度都被丟掉（#1880）");
     }
 
     #[test]
-    fn t1880_自訂設定資料夾沒帳號_不退回家目錄() {
+    fn t1880_預設資料夾裡的舊檔有舊帳號_仍以家目錄為準() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = home.path().join(".claude");
+        cj(&cfg, "old@example.com", U_OLD);
+        cj(home.path(), "it@example.com", U1880);
+        assert_eq!(window_identity(home.path(), &cfg, false), Some((U1880.to_string(), "it@example.com".to_string())), "舊檔裡的舊帳號勝出，額度會記到舊帳號上，比丟掉更糟");
+        // 家目錄那份讀不出帳號才看資料夾裡的
+        std::fs::write(home.path().join(".claude.json"), r#"{"userID":"u"}"#).unwrap();
+        assert_eq!(window_identity(home.path(), &cfg, false), Some((U_OLD.to_string(), "old@example.com".to_string())));
+    }
+
+    #[test]
+    fn t1880_自訂資料夾沒帳號_不退回家目錄() {
         let home = tempfile::tempdir().unwrap();
         let cfg = home.path().join("other-cfg");
         std::fs::create_dir_all(&cfg).unwrap();
         std::fs::write(cfg.join(".claude.json"), r#"{"userID":"u"}"#).unwrap();
-        std::fs::write(home.path().join(".claude.json"), serde_json::json!({ "oauthAccount": { "accountUuid": U1880, "emailAddress": "it@example.com" } }).to_string()).unwrap();
-        assert_eq!(window_identity(home.path(), &cfg), None, "別的登入沒帳號時退回家目錄，會把額度記到錯的帳號");
+        cj(home.path(), "it@example.com", U1880);
+        assert_eq!(window_identity(home.path(), &cfg, true), None, "別的登入沒帳號時退回家目錄，會把額度記到錯的帳號");
+    }
+
+    #[test]
+    fn t1880_環境變數明確設成預設資料夾_也不退回家目錄() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = home.path().join(".claude");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join(".claude.json"), r#"{"userID":"u"}"#).unwrap();
+        cj(home.path(), "it@example.com", U1880);
+        // 路徑和預設一樣，但環境變數有設：登入在資料夾裡，家目錄那份是另一個登入
+        assert_eq!(window_identity(home.path(), &cfg, true), None);
+        cj(&cfg, "cfg@example.com", U_OLD);
+        assert_eq!(window_identity(home.path(), &cfg, true), Some((U_OLD.to_string(), "cfg@example.com".to_string())));
     }
 }

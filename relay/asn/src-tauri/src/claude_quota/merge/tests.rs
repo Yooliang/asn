@@ -260,7 +260,7 @@ fn with_tp(status_json: String, tp: &std::path::Path) -> String {
     v.to_string()
 }
 fn hook_at(h: &tempfile::TempDir, input: &str, now: i64) -> bool {
-    hook_in(h.path(), &h.path().join(".claude"), input, now)
+    hook_in(h.path(), &h.path().join(".claude"), true, input, now)
 }
 /// 這個測試檔裡各 uuid 對應的視窗登入 email（明寫，不查帳號庫）：UA→a@x.test、UB→b@x.test，其他用 `<uuid 前 8 碼>@x.test`
 fn email_of(uuid: &str) -> String {
@@ -510,9 +510,9 @@ fn 視窗身分_先看視窗自己的設定資料夾裡的_claude_json_沒有才
     let cj = |dir: &std::path::Path, email: &str, uuid: &str| std::fs::write(dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": uuid } }).to_string()).unwrap();
     let (ua, ub) = ("11111111-0000-0000-0000-00000000000a", "22222222-0000-0000-0000-00000000000b");
     cj(h.path(), "Home@x.test", ua);
-    assert_eq!(window_identity(h.path(), &cfg), Some((ua.to_string(), "home@x.test".to_string())), "設定資料夾沒有 .claude.json 才看家目錄，email 正規化");
+    assert_eq!(window_identity(h.path(), &cfg, true), Some((ua.to_string(), "home@x.test".to_string())), "設定資料夾沒有 .claude.json 才看家目錄，email 正規化");
     cj(&cfg, "cfgb@x.test", ub);
-    assert_eq!(window_identity(h.path(), &cfg), Some((ub.to_string(), "cfgb@x.test".to_string())), "先看這個視窗自己的設定資料夾");
+    assert_eq!(window_identity(h.path(), &cfg, true), Some((ub.to_string(), "cfgb@x.test".to_string())), "先看這個視窗自己的設定資料夾");
 }
 
 #[test]
@@ -847,7 +847,7 @@ fn 視窗帳號讀不到_不記_沒有檔_沒有_oauthaccount_壞掉_太大都�
         if let Some(text) = text {
             cj_in(&h.path().join(".claude"), &text);
         }
-        assert!(!hook_in(h.path(), &h.path().join(".claude"), &with_tp(wk(70.0), &t), NOW + MIN), "{name}：不記");
+        assert!(!hook_in(h.path(), &h.path().join(".claude"), true, &with_tp(wk(70.0), &t), NOW + MIN), "{name}：不記");
         assert!(!super::super::quota_path(h.path()).exists(), "{name}：額度檔不該有（第 {i} 種）");
         assert!(std::fs::read_to_string(super::super::merge::log_path(h.path())).unwrap().contains("視窗帳號讀不到"), "{name}：log 有記");
     }
@@ -862,18 +862,18 @@ fn 設定資料夾跟家目錄是不同帳號_看視窗自己那份() {
     cj_in(h.path(), &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "a@x.test" } }).to_string());
     let cfg = h.path().join(".claude");
     cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" } }).to_string());
-    assert_eq!(window_identity(h.path(), &cfg), Some((UB.to_string(), "b@x.test".to_string())));
+    assert_eq!(window_identity(h.path(), &cfg, true), Some((UB.to_string(), "b@x.test".to_string())));
     let tb = transcript(h.path(), "wb", UB, Some(NOW), 1);
-    assert!(hook_in(h.path(), &cfg, &with_tp(wk(60.0), &tb), NOW + MIN), "視窗是 B、對話紀錄也是 B：收");
+    assert!(hook_in(h.path(), &cfg, true, &with_tp(wk(60.0), &tb), NOW + MIN), "視窗是 B、對話紀錄也是 B：收");
     assert_eq!(quota_of(&h, "b@x.test").weekly_pct, Some(40));
     // 對話紀錄是 A（家目錄的帳號）但這個視窗自己是 B：不收，不能拿家目錄那份來湊
     let ta = transcript(h.path(), "wa", UA, Some(NOW + MIN), 2);
     // （重置時間跟 B 存著的不同，也沒有 A 的紀錄：對不上）
-    assert!(!hook_in(h.path(), &cfg, &with_tp(status(None, Some((10.0, NOW + 6 * DAY))), &ta), NOW + 2 * MIN));
+    assert!(!hook_in(h.path(), &cfg, true, &with_tp(status(None, Some((10.0, NOW + 6 * DAY))), &ta), NOW + 2 * MIN));
     assert!(load_all(h.path()).get("a@x.test").is_none());
     // 設定資料夾裡沒有 .claude.json 才退回家目錄那份
     std::fs::remove_file(cfg.join(".claude.json")).unwrap();
-    assert_eq!(window_identity(h.path(), &cfg), Some((UA.to_string(), "a@x.test".to_string())));
+    assert_eq!(window_identity(h.path(), &cfg, true), Some((UA.to_string(), "a@x.test".to_string())));
 }
 
 #[test]
@@ -882,15 +882,15 @@ fn 視窗帳號的讀取有快取_大小或修改時間變了才重讀() {
     let cfg = h.path().join(".claude");
     let id = |u: &str, e: &str| Some((u.to_string(), e.to_string()));
     cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UA, "emailAddress": "A@x.test", "organizationName": "ORG-SECRET" } }).to_string());
-    assert_eq!(window_identity(h.path(), &cfg), id(UA, "a@x.test"), "email 正規化");
+    assert_eq!(window_identity(h.path(), &cfg, true), id(UA, "a@x.test"), "email 正規化");
     let cache = std::fs::read_to_string(super::super::owner_store::acct_cache_path(h.path())).unwrap();
     assert!(cache.contains(UA) && cache.contains("a@x.test") && !cache.contains("ORG-SECRET"), "快取只存 accountUuid 與 email：{cache}");
     // 換成另一個帳號（長度不同）：重讀
     cj_in(&cfg, &json!({ "oauthAccount": { "accountUuid": UB, "emailAddress": "b@x.test" }, "pad": "xxxx" }).to_string());
-    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
+    assert_eq!(window_identity(h.path(), &cfg, true), id(UB, "b@x.test"));
     // 快取壞掉當成沒有快取，照樣讀得到
     std::fs::write(super::super::owner_store::acct_cache_path(h.path()), "{壞").unwrap();
-    assert_eq!(window_identity(h.path(), &cfg), id(UB, "b@x.test"));
+    assert_eq!(window_identity(h.path(), &cfg, true), id(UB, "b@x.test"));
 }
 
 #[cfg(unix)]
@@ -902,7 +902,7 @@ fn 視窗帳號的設定檔是符號連結_不讀() {
     let real = h.path().join("real.json");
     std::fs::write(&real, json!({ "oauthAccount": { "accountUuid": UA } }).to_string()).unwrap();
     std::os::unix::fs::symlink(&real, cfg.join(".claude.json")).unwrap();
-    assert_eq!(window_identity(h.path(), &cfg), None);
+    assert_eq!(window_identity(h.path(), &cfg, true), None);
 }
 
 // ---------- 每週重置時間當帳號指紋：跟本機其他帳號比（視窗身分一致也可能是串號：以 A 開窗、後來拿到 B 的 token、又切回 A） ----------
