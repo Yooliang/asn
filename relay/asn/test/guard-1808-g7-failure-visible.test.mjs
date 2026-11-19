@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRoomHub } from '../ui/lib/room-hub.mjs'
 import { ROOM_LOAD_FAIL_TEXT } from '../ui/lib/mobile-rooms.mjs'
-import { ROOMS_NEED_LOGIN_TEXT, roomsNoteText } from '../ui/lib/relogin-bar.mjs'
+import { ROOMS_NEED_LOGIN_TEXT, ROSTER_LOAD_FAIL_TEXT, roomsNoteText } from '../ui/lib/relogin-bar.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = p => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n')
@@ -61,20 +61,26 @@ test('#1764 定義了失敗文字就一定有人用：失敗／需要登入這�
     for (const m of t.matchAll(/export const ([A-Z0-9_]*(?:FAIL|FAILED|NEED_LOGIN)[A-Z0-9_]*(?:TEXT|NOTES?|LABEL|ARIA|ERR|ERROR)) =/g)) names.push([m[1], f])
   }
   assert.ok(names.length >= 6, `掃得到足夠的失敗文字常數：${names.map(n => n[0])}`)
-  // 已知沒接的（#1808 盤點時發現，待另案處理）：夥伴名單讀不到的說法定義了，畫面實際用的是 list.js／m.js 內的「還沒連上 ASN」「連不上 ASN」
-  const KNOWN_UNUSED = new Set(['ROSTER_LOAD_FAIL_TEXT'])
   // 真正用到的次數：不算 import 行、不算 export const 定義那一行
   const uses = n => [...text.values()].reduce((c, t) => c + t.split('\n').filter(l => !/^\s*import\s/.test(l) && !new RegExp(`export const ${n}\\b`).test(l) && new RegExp(`\\b${n}\\b`).test(l)).length, 0)
-  const unused = names.filter(([n]) => !KNOWN_UNUSED.has(n) && uses(n) < 1)
+  const unused = names.filter(([n]) => uses(n) < 1)
   assert.deepEqual(unused.map(u => u[0]), [], '這些失敗文字只有定義、沒有任何畫面使用（#1764 的同一種漏）')
-  // 已知沒接的清單：接上了就要從清單拿掉
-  for (const n of KNOWN_UNUSED) assert.equal(uses(n), 0, `${n} 現在有人用了，請從 KNOWN_UNUSED 拿掉`)
 })
 
 /** 取 Rust match 裡 `=> "白話"` 的字串 */
 const arms = src => [...src.matchAll(/=>\s*"([^"]+)"/g)].map(m => m[1])
 // 內部代號：snake_case 識別字、HTTP、純狀態碼、動作名
 const INTERNAL = /[a-z]+_[a-z_]+|HTTP|\b[45]\d\d\b|\blaunch\b/
+
+test('#1808 名單讀不到：電腦與手機引用同一個常數，畫面上不再有各寫各的內聯字串', () => {
+  const list = read('ui/list.js'), mobile = read('ui/m.js')
+  for (const [name, src] of [['list.js', list], ['m.js', mobile]]) {
+    assert.match(src, /import \{[^}]*\bROSTER_LOAD_FAIL_TEXT\b[^}]*\} from '\.\/lib\/relogin-bar\.mjs'/, `${name} 要從 relogin-bar.mjs 引用名單讀不到的常數`)
+    assert.match(src, /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT/,`${name} 連不上時要顯示這個常數`)
+    assert.ok(!src.includes('還沒連上 ASN。') && !/'連不上 ASN，請檢查網路。'/.test(src), `${name} 不能再有內聯的名單讀不到字串`)
+  }
+  assert.equal(ROSTER_LOAD_FAIL_TEXT, '連不上 ASN，請檢查網路。')
+})
 
 test('#1135 #1253 #1611 #1727 後台回的失敗代碼都換成白話：對照表裡每句都有中文、沒有內部代號（真的 Rust 白話表）', () => {
   const remote = read('src-tauri/src/view_remote.rs').split('pub fn end_text(')[1].split('\n}\n')[0]

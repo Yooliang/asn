@@ -14,8 +14,8 @@ export const reloginBarText = device => (device === 'phone' ? RELOGIN_BAR_TEXT.r
 export const ROOMS_NEED_LOGIN_TEXT = '需要重新登入才看得到所有群組。'
 /** 群組清單原位的說明：讀不到就說讀不到，沒帶簽章（登入失效）就說要重新登入；都正常回空字串（畫面不多出任何東西） */
 export const roomsNoteText = ({ err = false, signed = true } = {}) => (err ? ROOM_LOAD_FAIL_TEXT : signed === false ? ROOMS_NEED_LOGIN_TEXT : '')
-/** 名單（夥伴列表）讀不到時，在名單原本的位置說的一句話 */
-export const ROSTER_LOAD_FAIL_TEXT = '讀不到夥伴名單，晚點再試。'
+/** 名單（夥伴列表）讀不到（連不上 ASN）時，在名單原本的位置說的一句話：電腦與手機同一句，講發生什麼事、要怎麼辦（#1808） */
+export const ROSTER_LOAD_FAIL_TEXT = '連不上 ASN，請檢查網路。'
 
 /** 群組列表的結果是不是「沒帶本人簽章」（後台只回得出這台的群組）；舊版 Rust 沒有 signed 欄位＝當作有簽章 */
 export const roomsUnsigned = r => r?.signed === false

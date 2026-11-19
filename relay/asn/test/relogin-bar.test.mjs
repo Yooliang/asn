@@ -137,8 +137,8 @@ test('群組讀不到：中樞記下失敗，原位有說明；登入失效時�
 })
 
 test('名單讀不到的說明本來就在原位（電腦與手機）', () => {
-  assert.match(read('ui/list.js'), /conn\.value !== 'on' \? '還沒連上 ASN。'/)
-  assert.match(read('ui/m.js'), /conn\.value === 'off' \? '連不上 ASN，請檢查網路。'/)
+  assert.match(read('ui/list.js'), /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT : conn\.value !== 'on' \? '正在連上 ASN…'/)
+  assert.match(read('ui/m.js'), /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT/)
 })
 
 test('Rust 守門：手機也設清掉登入的記錄與事件；群組列表回 signed；簽章失敗有原因', () => {
