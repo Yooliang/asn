@@ -59,7 +59,7 @@ test('別台、離線的設備都能永久移除（不必先被自動隱藏）�
 test('文字：二次確認寫明對話與帳號資料不會被刪除；已永久移除（N）', () => {
   assert.equal(DEVICE_TEXT.confirmRemove('舊電腦'), '確定永久移除「舊電腦」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。')
   assert.equal(DEVICE_TEXT.removedLink(3), '已永久移除（3）')
-  assert.equal(DEVICE_TEXT.showBack, '顯示回名單'); assert.equal(DEVICE_TEXT.remove, '永久移除'); assert.equal(DEVICE_TEXT.back, '‹ 返回')
+  assert.equal(DEVICE_TEXT.showBack, '顯示回名單'); assert.equal(DEVICE_TEXT.remove, '永久移除'); assert.equal(DEVICE_TEXT.back, '返回')
 })
 
 // ---------- 共用邏輯：各處列表都排除被移除的 ----------
@@ -167,7 +167,7 @@ test('滑鼠拖放與整列點擊：整列 @click 進細部頁（按鈕區不觸
 
 test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋原本的廠商→帳號內容；列表消失', async () => {
   const html = await render({ dev: 'W' })
-  assert.match(html, /class="[^"]*dv-back[^"]*"[^>]*>‹ 返回</)
+  assert.match(html, /class="[^"]*dv-back[^"]*"[^>]*>‹</)
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(html.includes('dv-vendor') && html.includes('W@b.c'))
   assert.ok(!html.includes('class="dv-list"'))

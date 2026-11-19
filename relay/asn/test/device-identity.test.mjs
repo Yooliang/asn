@@ -160,3 +160,9 @@ test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那�
   assert.match(detail, /<div class="dv-dev-h"><button class="aero-btn dv-back"/)
   assert.ok(!read('../ui/list.html').includes('<h2 class="panel-h">') && !read('../ui/panel.html').includes('<h2 class="panel-h">'), '兩個外層都不再自己疊一層標題')
 })
+
+test('#1829 電腦版細部頁的返回鈕只放「‹」（和手機一樣），讀屏與鍵盤用 aria-label="返回"', async () => {
+  const html = await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })
+  assert.match(html, /<button class="aero-btn dv-back" type="button" aria-label="返回">‹<\/button>/)
+  assert.ok(!html.includes('‹ 返回') && !html.includes('>返回<'), '畫面上不再寫「返回」兩個字')
+})

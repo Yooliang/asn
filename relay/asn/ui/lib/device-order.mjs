@@ -118,7 +118,8 @@ export const ACTION_TEXT = {
   removeOnline: '設備在線時不能移除，離線後才能移除',
 }
 export const DEVICE_TEXT = {
-  back: '‹ 返回',
+  back: '返回',        // 讀屏與鍵盤用的名字（aria-label）
+  backMark: '‹',        // 畫面上只放這個符號，和手機一樣
   showBack: '顯示回名單',
   remove: '永久移除',
   removeYes: '確定移除',

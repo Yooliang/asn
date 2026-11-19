@@ -26,7 +26,7 @@ const labels = html => [...bar(html).matchAll(/<button[^>]*>([^<]*)<\/button>/g)
 
 test('頁首收成一行：返回、名字、標籤（#1829）；沒有「設定：設備」那一層，按鈕在下面', async () => {
   const html = await render({ dev: 'H' })
-  assert.match(html, /class="dv-dev-h"[^>]*><button class="aero-btn dv-back"[^>]*>‹ 返回<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
+  assert.match(html, /class="dv-dev-h"[^>]*><button class="aero-btn dv-back"[^>]*>‹<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
   assert.ok(!html.includes('dv-pt'), '不再有第二層標題')
   assert.ok(html.indexOf('class="dv-tabs"') > html.indexOf('class="dv-name"'), '按鈕在名字那行下面')
 })

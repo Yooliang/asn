@@ -84,7 +84,7 @@ test('點列表進細部頁、v-model 輸入框（input 事件）、送出表單
     await m.trigger(m.find('form.dv-rename'), 'submit')
     assert.deepEqual(m.emitted('act'), [['device-rename', { node: 'H', name: '書房電腦' }]])
     // 返回列表
-    await m.trigger(m.findByText('返回'), 'click')
+    await m.trigger(m.find('button[aria-label="返回"]'), 'click')
     assert.ok(!m.find('section.dv-dev'), '回到列表，細部頁不在了')
   } finally { m.unmount() }
 })
