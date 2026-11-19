@@ -139,7 +139,7 @@ export const SettingsPanel = {
     const selfKey = computed(() => allDevs.value.find(d => d.self)?.key ?? '')
     const devName = node => allDevs.value.find(d => d.key === node)?.label ?? ''
     // 切不過去的（不是使用中、也沒有切換目標）帶上原因，寫在按鈕下方
-    const devButtons = (vendor, a) => deviceButtons(a?.usedOn, switchTargets(vendor, a), selfKey.value, devName)
+    const devButtons = (vendor, a) => deviceButtons(a?.usedOn, switchTargets(vendor, a), selfKey.value, devName, props.st.deviceRemoved)
       .map(b => (b.current || b.target ? b : { ...b, reason: deviceBlockReason(allDevs.value, vendor, a?.account, b.node) }))
     const pressDev = b => {
       if (b.current || !b.target) return

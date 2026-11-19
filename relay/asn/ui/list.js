@@ -2035,7 +2035,7 @@ const app = createApp({
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
       taskMgr: taskMgr.view(),
-      devices: deviceTree.value, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
+      devices: deviceTree.value, deviceRemoved: devPrefs.deviceRemoved, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
       install: installView(agentInstall.state),
       relogin: reloginSnap(reloginFlow.state),
       accounts: {
