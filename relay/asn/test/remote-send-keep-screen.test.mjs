@@ -29,7 +29,7 @@ test('接線：打字元件拿最後一幅畫面當底（snap）、只在 starti
   assert.match(pane, /:snap="waitSnap"/)
   assert.match(pane, /@refused="onInputRefused"/)
   assert.match(pane, /const onInputRefused = reason => \{ remoteTyping\.value = false; typingEndedNote\.value = INPUT_TEXT\.refused\(reason\) \}/)
-  assert.match(pane, /const waitSnap = computed\(\(\) => plainRows\(remoteScreen\.value\.text\)\)/)
+  assert.match(pane, /const waitSnap = computed\(\(\) => remoteScreen\.value\.text\)/)
 })
 
 test('樣式：等待層蓋在畫面上（absolute、不擋原本版面）', () => {

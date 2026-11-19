@@ -1,48 +1,49 @@
-// 遠端打字：等待底圖照原本的列畫、不再有 0.2.33 之前的說法、stripAnsi 補漏（0.2.35）。
-// 11-19 實況：送出後等待畫面的字疊在一起、有一列被擠到最右邊；原因是底圖用了「接回折行」的 joinWrapped。
+// 遠端打字：等待時保留彩色畫面、不再有 0.2.33 之前的說法、stripAnsi 補漏（0.2.35）。
+// 11-19 實況：送出後等待畫面變成純文字、顏色不見（#1762）；底圖改成把最後一幅畫面的原文直接寫進 xterm。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { INPUT_TEXT, INPUT_TIP } from '../ui/lib/term-remote-input.mjs'
 import { composeRemoteHint } from '../ui/lib/compose.mjs'
 import * as CK from '../ui/lib/confirm-kind.mjs'
-import { stripAnsi, plainRows, joinWrapped } from '../ui/lib/term-keys.mjs'
+import { stripAnsi, joinWrapped } from '../ui/lib/term-keys.mjs'
+import * as TK from '../ui/lib/term-keys.mjs'
+import { frameToWrite } from '../ui/lib/term-view.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-// ---- 底圖：照原本的列畫，不接折行 ----
-// 照 11-19 截圖：中文長段落在欄寬折成兩列、Claude 的 `⎿ Tip` 獨立一列（上一列被補空白到滿欄）
-const COLS = 40
-const SCREEN = [
-  '  - 類別差異：手機只顯示十三類中的八類，兩邊內容各有出入',   // 寬度剛好滿欄（中文一字兩格）
-  '    手機用另一頁自己畫一份，只有電腦有。',
-  '✻ Beaming…'.padEnd(COLS, ' '),   // 狀態列被補空白到滿欄
-  '  ⎿ Tip: Double-tap esc to rewind',
-  '',
-  '  bypass permissions on',
-  '',
-  '',
-]
+// ---- 底圖：等待時保留彩色畫面（#1762） ----
+const COLORED = '\x1b[38:2::153:153:153m第一列\x1b[39m\r\n\x1b[0;1;31m第二列\x1b[0m\x1b(B\r\n'
 
-test('等待底圖：畫在畫面上的列數和原本一樣；接折行的舊做法會把列黏起來', () => {
-  const text = SCREEN.join('\r\n')
-  const rows = plainRows(text).split('\n')
-  assert.equal(rows.length, 6, '只拿掉最後的空列，其餘列數不變')
-  assert.equal(rows[1], '    手機用另一頁自己畫一份，只有電腦有。', '折行的續行還在自己那一列')
-  assert.equal(rows[3], '  ⎿ Tip: Double-tap esc to rewind', 'Tip 還在自己那一列')
-  assert.ok(joinWrapped(text, COLS).split('\n').length < rows.length, '對照：joinWrapped 會把滿欄的列和下一列黏成一長列（舊底圖疊字、續行擠到最右邊）')
+test('等待底圖：寫進 xterm 的內容還帶著顏色碼（不是 stripAnsi 後的純文字）', () => {
+  const w = frameToWrite({ text: COLORED })
+  assert.ok(w.includes('\x1b[38:2::153:153:153m'), '全彩碼還在')
+  assert.ok(w.includes('\x1b[0;1;31m'), '粗體紅還在')
+  assert.ok(w.includes('第一列') && w.includes('第二列'))
+  assert.notEqual(w, stripAnsi(w), '對照：純文字版會把顏色拿掉')
 })
 
-test('等待底圖：帶顏色的畫面也只留看得見的字，列數不變', () => {
-  const colored = '\x1b[38:2::153:153:153m第一列\x1b[39m\r\n\x1b[0;1m第二列\x1b[0m\x1b(B\r\n\r\n'
-  assert.equal(plainRows(colored), '第一列\n第二列')
+test('等待底圖：plainRows 已移除（沒有別的用途），複製畫面文字照舊接回折行', () => {
+  assert.equal(TK.plainRows, undefined)
+  assert.equal(joinWrapped('a\r\nb', 40), 'a\nb')
 })
 
-test('接線：底圖用 plainRows；複製畫面文字、找網址、判斷確認畫面照舊接回折行', () => {
+test('接線：底圖是畫面原文，不經 stripAnsi／plainRows；打字元件先建 xterm 寫進去，不再用 <pre> 純文字墊圖', () => {
   const pane = read('ui/lib/chatpane.mjs')
-  assert.match(pane, /const waitSnap = computed\(\(\) => plainRows\(remoteScreen\.value\.text\)\)/)
+  assert.match(pane, /const waitSnap = computed\(\(\) => remoteScreen\.value\.text\)/)
   assert.match(pane, /const screenPlain = computed\(\(\) => joinWrapped\(remoteScreen\.value\.text, remoteScreen\.value\.cols\)\)/)
-  assert.ok(!/waitSnap = computed\(\(\) => screenPlain/.test(pane), '底圖不能再用接過折行的 screenPlain')
+  const line = pane.split('\n').find(l => l.includes('const waitSnap'))
+  assert.ok(!/plainRows|stripAnsi/.test(line.split('//')[0]), '底圖那一行不能去顏色')
+  const input = read('ui/lib/term-remote-input.mjs')
+  assert.ok(!input.includes('term-wait-snap') && !/<pre/.test(input), '不再有純文字墊圖')
+  assert.match(input, /term\.write\(frameToWrite\(\{ text: props\.snap \}\)\)/)
+  assert.ok(input.indexOf('term.write(frameToWrite({ text: props.snap }))') < input.indexOf('props.api.start('), '先把畫面寫進 xterm，再去連那台')
+  assert.match(input, /props\.snap !== null && phase\.value === 'starting'/, '等那台回覆前就要顯示 xterm 框')
+  assert.match(input, /<p class="term-wait-note">\{\{ TEXT\.waitReply \}\}<\/p>/, '疊著的那條字還在')
+  const css = read('ui/style.css')
+  assert.ok(!css.includes('term-wait-snap'))
+  assert.match(css, /\.term-wait-cover\{[^}]*pointer-events:none/)
+  assert.ok(!/\.term-wait-cover\{[^}]*background/.test(css), '蓋層不能再塗黑底蓋掉彩色畫面')
 })
 
 // ---- stripAnsi 補漏 ----

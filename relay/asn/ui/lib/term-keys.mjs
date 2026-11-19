@@ -42,16 +42,6 @@ export function stripAnsi(text) {
     .replace(/[\u000e\u000f]/g, '')
 }
 
-/**
- * 畫面文字一列一列照原樣留下（只去跳脫序列、每列結尾的空白、最後的空列）：列數與原本畫面一樣。
- * 給「要把畫面原樣畫出來」的地方用（送出後等對方回應的底圖）；複製、找網址要接回折行，用 joinWrapped
- */
-export function plainRows(text) {
-  const rows = stripAnsi(text).replace(/\r\n?/g, '\n').split('\n').map(r => r.replace(/\s+$/, ''))
-  while (rows.length && !rows[rows.length - 1]) rows.pop()
-  return rows.join('\n')
-}
-
 const RULE_ROW = /^[\s─━═╌▔▁-]+$/u
 
 /**
