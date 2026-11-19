@@ -63,10 +63,10 @@ test('m.html：設定分頁只列分類（每列一行摘要）加使用指引�
   const list = html.slice(a, b)
   assert.match(list, /v-for="r in settingRows"/); assert.match(list, /openSetting\(r\.key\)/); assert.match(list, /r\.summary/)
   assert.match(list, /openGuides/)
-  for (const t of ['nameDraft', 'prefs.vibrateNudge', 'checkUpdate', 'avFile', 'commitNick', 'doLogout', 'm-logout']) assert.ok(!list.includes(t), `列表頁不該直接放 ${t}`)
+  for (const t of ['nameDraft', 'prefs.vibrateNudge', 'checkUpdate', 'avFile', 'goDeviceRename', 'doLogout', 'm-logout']) assert.ok(!list.includes(t), `列表頁不該直接放 ${t}`)
   const c = html.indexOf('</section>', b)
   const detail = html.slice(b, c)
-  for (const [cat, needles] of [['me', ['nameDraft', 'avFile', 'commitNick', 'doLogout']], ['notify', ['prefs.vibrateNudge', 'prefs.vibrateMsg']], ['update', ['prefs.autoUpdate', 'checkUpdate']], ['about', ['info.version']]]) {
+  for (const [cat, needles] of [['me', ['nameDraft', 'avFile', 'goDeviceRename', 'doLogout']], ['notify', ['prefs.vibrateNudge', 'prefs.vibrateMsg']], ['update', ['prefs.autoUpdate', 'checkUpdate']], ['about', ['info.version']]]) {
     assert.ok(detail.includes(`settingCat === '${cat}'`), `缺 ${cat} 分類頁`)
     for (const n of needles) assert.ok(detail.includes(n), `${cat} 分類頁缺 ${n}`)
   }

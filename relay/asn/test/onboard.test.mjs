@@ -93,7 +93,7 @@ test('接線守門：電腦版登入後轉引導頁、手機版有引導畫面�
   assert.ok(list.includes('!info.needs_login'), '沒登入畫面時不判斷')
   assert.ok(fs.existsSync(new URL('../ui/onboard.html', import.meta.url)))
   const ob = read('ui/onboard.js')
-  assert.ok(ob.includes("location.replace('list.html')") && ob.includes('markOnboarded') && ob.includes("invoke('set_window_name'") && ob.includes('authApi.setAccountName'))
+  assert.ok(ob.includes("location.replace('list.html')") && ob.includes('markOnboarded') && ob.includes('renameDevice(invoke, { node: info.node, name })') && ob.includes('authApi.setAccountName'))
   const m = read('ui/m.js'), mh = read('ui/m.html')
   assert.ok(m.includes("screen.value = 'onboard'") && m.includes('planOnboarding('))
   assert.match(mh, /v-else-if="screen === 'onboard'"/)
