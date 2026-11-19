@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn 剛開五秒的同名視窗也占名字_但還不顯示成等確認() {
+    fn guard_1636_剛開五秒的同名視窗也占名字_但還不顯示成等確認() {
         let os = mux_fake(5_000);
         assert!(holds_name(&identify_starting(&os, &[row("7", "小乙")], &[]), "小乙", false), "連按兩次的第二次落在 30 秒內也要擋");
         assert!(identify_all(&os, &[row("7", "小乙")], &[], NOW).is_empty(), "名單上的等確認顯示照舊要滿 30 秒");

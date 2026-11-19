@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn 上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
+    fn guard_1685_上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
         assert_eq!(upstream_5xx("API error (attempt 1): request failed (code 502): HTML response"), Some(502));
         assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): html response"), Some(503));
         assert_eq!(upstream_5xx("request failed (code 502)"), None, "沒有 HTML response");

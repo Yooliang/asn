@@ -87,7 +87,7 @@ mod tests {
     const T0: u64 = 1_000_000;
 
     #[test]
-    fn 同一段對話或同一個名字_一百二十秒內不能再登記() {
+    fn guard_1352_同一段對話或同一個名字_一百二十秒內不能再登記() {
         let mut o = Opening::default();
         assert!(o.claim("sid-1", "甲", T0));
         assert!(!o.claim("sid-1", "別名", T0 + 1_000), "同一段對話");
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn 超過時限自動失效_剛好到時限就算過期() {
+    fn guard_1352_超過時限自動失效_剛好到時限就算過期() {
         let mut o = Opening::default();
         assert!(o.claim("sid-1", "甲", T0));
         assert!(!o.claim("sid-1", "甲", T0 + HOLD_MS - 1));
@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn 解除後馬上能再登記_只解除自己那兩個鍵() {
+    fn guard_1352_解除後馬上能再登記_只解除自己那兩個鍵() {
         let mut o = Opening::default();
         assert!(o.claim("sid-1", "甲", T0));
         assert!(o.claim("sid-2", "乙", T0));

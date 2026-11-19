@@ -123,7 +123,7 @@ mod notice_tests {
     }
 
     #[test]
-    fn 群組失敗通知帶出原因_只寫固定的白話分類_不寫原文() {
+    fn guard_1486_群組失敗通知帶出原因_只寫固定的白話分類_不寫原文() {
         let cases = [
             ("Gemini審查 需要登入：帳號登入失效或還沒登入。請登入 agy", "需要重新登入"),
             ("Gemini審查 的額度用完了（或被限流），請稍後再試。", "額度用完了"),
@@ -148,7 +148,7 @@ mod notice_tests {
     const REAL_502: &str = "API error (attempt 1): request failed (code 502): HTML response: <!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>…</body></html>";
 
     #[test]
-    fn 上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
+    fn guard_1602_上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
         assert_eq!(upstream_5xx(REAL_502), Some(502));
         assert_eq!(upstream_5xx("API error (attempt 3): request failed (code 503): HTML response"), Some(503));
         assert_eq!(upstream_5xx("API ERROR (attempt 1): request failed (code 500): html Response"), Some(500), "大小寫不影響");
