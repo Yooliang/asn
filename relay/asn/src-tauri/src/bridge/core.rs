@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 mod dup;
 mod ack_retry;
 mod fail_notice;
+mod upstream_retry;
 mod held_notice;
 mod login_notice;
 mod misroute;
@@ -90,6 +91,8 @@ pub struct Config {
     /// 轉交後多久還沒回就提醒收件視窗一次（reply=yes 的信；10 分鐘的寄件人通知照舊）
     pub nudge_ms: u64,
     pub forward_timeout_ms: u64,
+    /// 上游 5xx 延遲補送的等待時間（毫秒，第 1 次、第 2 次；#1670）。測試縮成毫秒
+    pub upstream_retry_ms: [u64; upstream_retry::MAX_DELAYED_RETRIES],
     /// 收發室 worker 一輪只交一封（todo-next-185）。正式預設開（環境變數 ASN_FORWARD_ONE_PER_TURN=0 可關閉）；測試預設關，只有專門測這件事的測試才開（其他測試一次放好幾封信，不是在測這個）
     pub one_per_turn: bool,
     /// 夥伴卡在框上超過兩分鐘通知本人（ASN_WAIT_ALERT=1，預設關；todo-next-162）
@@ -176,6 +179,7 @@ impl Config {
             late_max: env_u64("ASN_LATE_MAX", 200) as usize,
             nudge_ms: env_u64("ASN_NUDGE_MS", 300_000),
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
+            upstream_retry_ms: upstream_retry::DELAYED_RETRY_MS,
             one_per_turn: crate::envc::get("ASN_FORWARD_ONE_PER_TURN").map(|v| v.trim() != "0").unwrap_or(true),
             // 新變數沒有舊環境名稱，不走 envc 的新舊名對照
             wait_alert: std::env::var("ASN_WAIT_ALERT").is_ok_and(|v| v.trim() == "1"),
@@ -376,6 +380,8 @@ pub struct Core {
     reject_notified: HashSet<String>,
     /// 群組訊息 → 觸發它的人與群組名（群組回信貼不進去時告訴對方；只在記憶體，重開後查不到就只記 log，#1135）
     room_trig: HashMap<String, RoomTrig>,
+    /// 上游 5xx 的延遲補送與恢復通知（#1670，見 core/upstream_retry.rs）
+    up_retry: upstream_retry::Book,
     /// 回信寄件匣（#1135，見 core/outbox.rs）
     outbox: outbox::Outbox,
     /// 啟動時發現寄件匣存檔壞了（已改名留著）：還欠本人一則通知，第一次 tick 時送一次（見 core/outbox.rs）
@@ -622,7 +628,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), awaiting_src: crate::launch::awaiting::real_source(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), up_retry: Default::default(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, remote_flags_sent: None, remote_flags_fails: 0, remote_flags_fail_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), login_retry_at: 0, mux_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
@@ -722,6 +728,8 @@ impl Core {
         match ev {
             EngineEvent::Sent(id) => self.on_sent(&id).await,
             EngineEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
+            EngineEvent::UpstreamFail { id, reason, retryable } => self.on_upstream_fail(&id, &reason, retryable).await,
+            EngineEvent::TurnOk { worker, id } => self.on_turn_ok(&worker, &id).await,
             EngineEvent::Reply { from, text, mail_id } => self.on_reply(&from, &text, mail_id).await,
             EngineEvent::RosterChanged => self.refresh_roster(now).await,
             EngineEvent::Replied(id) => {
@@ -2201,6 +2209,7 @@ impl Core {
     }
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
+        self.up_retry.forget(id);
         self.exact_ids.remove(id);
         channel_turns::clear(&self.cfg.work_dir, id);
         self.channel_wait.remove(id);
@@ -2212,6 +2221,7 @@ impl Core {
         }
         self.pending[i].state = State::Done;
         let (o, target, from_agent) = (Origin::of(&self.pending[i]), self.pending[i].target.clone(), self.pending[i].from_agent.clone());
+        self.up_retry.note_fail(&target);
         self.log.line(&format!("forward failed id={id}: {reason}"));
         if self.pending[i].room.is_some() {
             self.room_forward_failed(id, "room", false, reason).await;
@@ -2727,6 +2737,7 @@ impl Core {
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
+                self.up_remember(&id, &text, &room_name, msg.get("from").and_then(Value::as_str).unwrap_or(""));
                 self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""), false);
                 if !self.is_respond(&target) && self.via_worker(&target) {
                     self.fwd_rooms.insert(id.clone(), RoomFwd { room_id: room_id.clone(), room_name: room_name.clone(), member: member.to_string(), seq, received_at: late.unwrap_or(self.now) });
@@ -2879,6 +2890,7 @@ impl Core {
         self.mux_blind_tick(now).await;
         self.archive_tick(now).await;
         self.ack_retry_tick(now).await;
+        self.upstream_retry_tick(now).await;
         self.outbox_bad_notice_tick(now).await;
         self.outbox_tick(now).await;
         self.selftest_tick(now).await;

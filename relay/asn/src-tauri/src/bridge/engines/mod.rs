@@ -47,6 +47,10 @@ pub enum EngineEvent {
     /// 信已交給對方（核心此時才 ack 並開始計時）
     Sent(String),
     Fail(String, String),
+    /// 上游 5xx 擋下這一輪（#1670）：和 Fail 一樣是失敗，另外告訴核心這一輪沒有工具步驟（retryable），可以延遲補送
+    UpstreamFail { id: String, reason: String, retryable: bool },
+    /// 工作者正常結束了一輪（連續幾次成功才算上游恢復，#1670）
+    TurnOk { worker: String, id: String },
     /// from＝視窗名；mail_id＝引擎確定這是回哪一封時帶上
     Reply { from: String, text: String, mail_id: Option<String> },
     /// 名單有變（核心立刻重新回報）

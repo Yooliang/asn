@@ -81,6 +81,21 @@ fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply
     format!("{ROOM_NOTICE_HEAD}{seq} {what}{more}需要對方處理請重新點名，或請對方讀群組。")
 }
 
+/// 上游 5xx、收發室排了自動補送時的過渡說明（#1670）：不點名；告訴人不用重新點名，也講清楚會等多久
+fn room_retry_wait_text(seq: u64, target: &str, code: u16, vendor: Option<&str>) -> String {
+    let name = target.replace('@', "");
+    let v = vendor_display(vendor);
+    let when = super::upstream_retry::DELAYED_RETRY_MS.iter().map(|ms| format!("約 {} 分鐘後", ms / 60_000)).collect::<Vec<_>>().join("、");
+    format!("{ROOM_NOTICE_HEAD}{seq} {name} 收到了，但 {v} 那邊暫時出錯（{code}），收發室會自動再試（{when}），不用重新點名。")
+}
+
+/// 上游恢復後貼在群組的一句話（#1670）：不點名、不放代碼。resent＝剛才沒處理的那則已經重新送給它了
+pub(super) fn room_recovered_text(seq: u64, target: &str, resent: bool) -> String {
+    let name = target.replace('@', "");
+    let more = if resent { "剛才沒處理的那則已經重新送給它了。" } else { "" };
+    format!("{ROOM_NOTICE_HEAD}{seq} {name} 又能處理了。{more}")
+}
+
 /// 群組訊息卡在對方視窗或被拒：不寫 @，說法是「可能」（CLI 只給收件人名字）
 fn room_delivery_text(seq: u64, target: &str, kind: &str, skipped: u32) -> String {
     let name = target.replace('@', "");
@@ -236,6 +251,23 @@ impl Core {
         let vendor = self.worker_vendor(&p.target);
         let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why), why, vendor.as_deref())).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
+        if posted {
+            self.room_fail_notices.insert(key, (self.now, 0));
+        }
+    }
+
+    /// 排了自動補送：在群組貼一則過渡說明。冷卻另算（不和最後的失敗說明共用，補送用完時那則照貼）；同一則只貼一次由呼叫端保證
+    pub(super) async fn room_retry_wait_notice(&mut self, id: &str, why: &str) {
+        let Some(p) = self.idx(id).map(|i| self.pending[i].clone()) else { return };
+        let (Some(room), Some(code)) = (p.room, upstream_5xx(why)) else { return };
+        let key = (room.id.clone(), format!("retry:{}", p.target));
+        if self.room_notice_turn(&key).is_none() {
+            self.log.line(&format!("room retry-wait notice skipped id={id}: posted recently for {}", p.target));
+            return;
+        }
+        let vendor = self.worker_vendor(&p.target);
+        let posted = self.post_room(&room, &room_retry_wait_text(room.seq, &p.target, code, vendor.as_deref())).await;
+        self.log.line(&format!("room retry-wait notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
             self.room_fail_notices.insert(key, (self.now, 0));
         }

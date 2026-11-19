@@ -2348,3 +2348,130 @@ async fn 群組訊息交給通道時_提示它不一定要回_不要寫檔或執
     let claude = crate::bridge::rooms::room_text_waited("專案群", &json!({"seq": 2, "from": "W~W-政策", "trust": "member", "body": "x"}), None, 0, "claude");
     assert!(!claude.contains(crate::bridge::rooms::ACP_ROOM_NOTE), "Claude 視窗不加這行");
 }
+
+// ---- #1670：上游 5xx 延遲補送（2 分鐘、10 分鐘各一次）與恢復通知。延遲縮成毫秒，不真的等 2 分鐘
+
+/// 群組裡貼出來的內文
+fn room_bodies(h: &EH) -> Vec<String> {
+    h.fr.st.lock().unwrap().room_posts.iter().map(|v| v["body"].as_str().unwrap_or("").to_string()).collect()
+}
+
+fn mark_lines(p: &Path) -> usize {
+    std::fs::read_to_string(p).map(|t| t.lines().filter(|l| !l.is_empty()).count()).unwrap_or(0)
+}
+
+/// 補送靠核心的定時檢查：一邊處理引擎事件、一邊 tick，直到條件成立（最多 40 秒）
+async fn tick_wait(h: &mut EH, what: &str, f: impl Fn(&EH) -> bool) {
+    let t0 = std::time::Instant::now();
+    loop {
+        while let Ok(ev) = h.rx.try_recv() {
+            h.core.on_engine_event(ev, now()).await;
+        }
+        h.core.tick(now()).await;
+        if f(h) {
+            return;
+        }
+        if t0.elapsed() > std::time::Duration::from_secs(40) {
+            panic!("等不到：{what}\n--- 引擎 log ---\n{}\n--- 橋 log ---\n{}\n--- 群組 ---\n{:?}", h.log_text(), h.core.log.recent().join("\n"), room_bodies(h));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+}
+
+/// 再多等這麼久（期間照常處理事件與 tick），用來確認「之後不會再有動作」
+async fn tick_for(h: &mut EH, ms: u64) {
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < std::time::Duration::from_millis(ms) {
+        while let Ok(ev) = h.rx.try_recv() {
+            h.core.on_engine_event(ev, now()).await;
+        }
+        h.core.tick(now()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+}
+
+#[tokio::test]
+async fn 單號1670_上游502_502_200_延遲補送那次成功_群組不貼失敗說明() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600]; // 正式值是 2 分鐘、10 分鐘
+    let mark = h.work.path().join("up1670a.txt");
+    room_for(&h, vec![(2, &format!("請處理這件事\n@@UP502_FIRST 2 {}", mark.display()))]);
+    h.core.pull_rooms(now()).await;
+    // 第 1 次（原本）502、第 2 次（工作者自己 10 秒重試）502、第 3 次（延遲補送）200
+    tick_wait(&mut h, "補送成功、回覆貼進群組", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
+    assert_eq!(mark_lines(&mark), 3, "共送了三次");
+    let log = h.core.log.recent().join("\n");
+    assert!(log.contains("upstream-retry scheduled") && log.contains("upstream-retry resent"), "{log}");
+    // 第一次失敗後群組立刻看得到過渡說明（不用重新點名）；補送成功後沒有最終失敗說明，群組最後多出的是它的回覆
+    let bodies = room_bodies(&h);
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    assert!(bodies[0].contains("收發室會自動再試") && bodies[0].contains("不用重新點名") && bodies[0].contains("暫時出錯（502）"), "{bodies:?}");
+    assert!(bodies[1].contains("收到："), "{bodies:?}");
+    assert!(!bodies.iter().any(|b| b.contains("這一輪沒有處理")), "補送成功就不貼最終失敗說明：{bodies:?}");
+}
+
+#[tokio::test]
+async fn 單號1670_連續502_補送有上限_總共四次就停_之後才貼失敗說明() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    let mark = h.work.path().join("up1670b.txt");
+    room_for(&h, vec![(2, &format!("請處理這件事\n@@UP502_FIRST 99 {}", mark.display()))]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "補送用完、貼出失敗說明", |h| room_bodies(h).iter().any(|b| b.contains("這一輪沒有處理"))).await;
+    tick_for(&mut h, 2500).await; // 再等一陣子，確認不會繼續重送
+    // 原本 1 ＋ 工作者 10 秒重試 1 ＋ 延遲補送 2 ＝ 4
+    assert_eq!(mark_lines(&mark), 4, "{}\n{}", h.log_text(), h.core.log.recent().join("\n"));
+    let bodies = room_bodies(&h);
+    assert_eq!(bodies.len(), 2, "過渡說明一則、最後的失敗說明一則：{bodies:?}");
+    assert_eq!(bodies.iter().filter(|b| b.contains("收發室會自動再試")).count(), 1, "過渡說明只貼一次（補送中再失敗不重複）：{bodies:?}");
+    assert!(bodies[0].contains("收發室會自動再試") && bodies[1].contains("這一輪沒有處理，請稍後再點名"), "先過渡、補送用完才貼最終說明：{bodies:?}");
+    assert!(h.core.log.recent().iter().filter(|l| l.contains("upstream-retry scheduled")).count() == 2);
+}
+
+#[tokio::test]
+async fn 單號1670_這一輪已經有工具步驟_不排延遲補送() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    let mark = h.work.path().join("workers").join("Gemini").join("steps1670.txt");
+    room_for(&h, vec![(2, &format!("請處理這件事\n@@WRITE_UP502 {}", mark.display()))]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "直接貼失敗說明", |h| room_bodies(h).iter().any(|b| b.contains("那邊暫時出錯（502）"))).await;
+    tick_for(&mut h, 1500).await;
+    assert_eq!(mark_lines(&mark), 1, "只動手一次");
+    let log = h.core.log.recent().join("\n");
+    assert!(!log.contains("upstream-retry scheduled") && log.contains("upstream-retry skipped"), "{log}");
+    assert_eq!(room_bodies(&h).len(), 1);
+}
+
+#[tokio::test]
+async fn 單號1670_事故後連續三次成功_補一句又能處理了_並重送最近沒處理的那則_只通知一次() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    let mark = h.work.path().join("up1670c.txt");
+    let first = format!("第一則\n@@UP502_FIRST 4 {}", mark.display()); // 前四次送出都 502，第五次（恢復時重送）才成功
+    room_for(&h, vec![(2, &first)]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "補送用完、貼出失敗說明", |h| room_bodies(h).iter().any(|b| b.contains("這一輪沒有處理"))).await;
+    assert_eq!(mark_lines(&mark), 4);
+    tick_for(&mut h, 600).await; // 讓失敗那一輪的假 agy 行程先收尾，免得下一則撞上快結束的舊行程（與本單無關的既有時間差）
+    // 上游好了：後面三則正常處理。前兩次成功還不算恢復
+    room_for(&h, vec![(2, &first), (3, "第二則"), (4, "第三則")]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "兩則正常回覆", |h| room_bodies(h).iter().filter(|b| b.contains("收到：")).count() == 2).await;
+    assert!(!room_bodies(&h).iter().any(|b| b.contains("又能處理了")), "連續兩次不算：{:?}", room_bodies(&h));
+    room_for(&h, vec![(2, &first), (3, "第二則"), (4, "第三則"), (5, "第四則")]);
+    h.core.pull_rooms(now()).await;
+    tick_wait(&mut h, "恢復通知與重送", |h| room_bodies(h).iter().any(|b| b.contains("又能處理了")) && room_bodies(h).iter().filter(|b| b.contains("收到：")).count() == 4).await;
+    tick_for(&mut h, 800).await;
+    let bodies = room_bodies(&h);
+    assert_eq!(bodies.iter().filter(|b| b.contains("又能處理了")).count(), 1, "同一次事故只通知一次：{bodies:?}");
+    assert!(bodies.iter().any(|b| b.contains("又能處理了") && b.contains("重新送給它")), "{bodies:?}");
+    // 後面幾則的上文會帶到第一則的內容，假 agy 的記號檔不能拿來數，改看核心的 log：延遲補送 2 次 ＋ 恢復時重送 1 次，恢復只發生一次
+    let log = h.core.log.recent();
+    assert_eq!(log.iter().filter(|l| l.contains("upstream-retry resent")).count(), 3, "恢復時只重送那一則一次：{log:?}");
+    assert_eq!(log.iter().filter(|l| l.contains("upstream-retry recovered")).count(), 1);
+}
