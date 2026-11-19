@@ -388,6 +388,17 @@ pub fn local_fingerprint(windows: &[Window]) -> String {
     v.join("\u{2}")
 }
 
+/// 本機兩個開關要回報的值（看畫面, 打字）。別台要看或打字，本機「允許其他設備替這台開新視窗」都要開著；打字另外看「允許遠端在這台打字」。
+/// 只是給後台與網頁的提示，握手時本機會自己再檢查一次，不以這裡為準
+pub fn remote_flags(s: &super::BridgeSettings) -> (bool, bool) {
+    (s.allow_remote_launch, s.allow_remote_launch && s.input_allowed())
+}
+
+/// 開關和上次成功回報的不同，要不要馬上補報（沒回報過、或讀不到設定都不算：頭一次回報跟著一般名單送）
+pub fn flags_due(now: Option<(bool, bool)>, sent: Option<(bool, bool)>) -> bool {
+    matches!((now, sent), (Some(n), Some(s)) if n != s)
+}
+
 /// 本機視窗狀態變了要不要立刻回報名單：指紋和上次回報時不同，而且距上次回報已過防抖間隔（頭一次變化馬上報，
 /// 連續快速變化合併成每 gap 毫秒最多一次，最後一次變化一定會在間隔過後補報）
 pub fn push_due(fp: &str, last_fp: Option<&str>, now_ms: u64, last_at: u64, gap_ms: u64) -> bool {

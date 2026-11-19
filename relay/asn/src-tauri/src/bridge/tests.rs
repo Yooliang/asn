@@ -2804,3 +2804,61 @@ fn 允許移動設備查看終端_預設開_關掉只擋移動設備_舊設定�
     let off = super::BridgeSettings { allow_remote_launch: false, ..Default::default() };
     assert!(!off.view_allowed(false) && !off.view_allowed(true), "沒開允許其他設備：兩種都不行");
 }
+
+// ---- 回報「允許別台看畫面／在這台打字」的開關（#1751）----
+#[test]
+fn 開關回報值_看畫面要開著遠端開窗_打字再看打字開關_預設都是關() {
+    use super::BridgeSettings as S;
+    assert_eq!(super::roster::remote_flags(&S::default()), (false, false), "沒開「允許其他設備替這台開新視窗」：兩個都不行");
+    assert_eq!(super::roster::remote_flags(&S { allow_remote_launch: true, ..Default::default() }), (true, true));
+    assert_eq!(super::roster::remote_flags(&S { allow_remote_launch: true, remote_input_off: true, ..Default::default() }), (true, false), "只關打字：看畫面照舊");
+    assert_eq!(super::roster::remote_flags(&S { remote_input_off: true, ..Default::default() }), (false, false));
+}
+
+#[test]
+fn 開關變了要不要補報_沒報過或讀不到設定不算() {
+    assert!(!super::roster::flags_due(None, None));
+    assert!(!super::roster::flags_due(Some((true, true)), None), "頭一次跟著一般名單送，不另外觸發");
+    assert!(!super::roster::flags_due(None, Some((true, true))));
+    assert!(!super::roster::flags_due(Some((true, true)), Some((true, true))));
+    assert!(super::roster::flags_due(Some((true, false)), Some((true, true))));
+    assert!(super::roster::flags_due(Some((false, false)), Some((true, true))));
+}
+
+#[tokio::test]
+async fn 名單回報_帶開關的布林_沒有設定資料夾就不帶_開關一改馬上補報() {
+    let fr = FakeRelay::start();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    let sink = Arc::new(FakeSink::default());
+    // 沒有設定資料夾：欄位不帶（舊行為，後台記「不知道」）
+    let mut bare = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    bare.refresh_roster(T0).await;
+    let first = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert!(first.get("remote_view").is_none() && first.get("remote_input").is_none(), "沒讀到設定就不帶 {first}");
+    // 有設定資料夾：兩個布林都帶
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, ..Default::default() }).unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(true)));
+    // 沒改：不補報
+    let n = fr.st.lock().unwrap().rosters.len();
+    assert!(!core.watch_local(T0 + 2_000).await);
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n);
+    // 關掉「允許遠端在這台打字」：下一次監看就補報，不等間隔
+    super::write_settings(data.path(), super::BridgeSettings { allow_remote_launch: true, remote_input_off: true, ..Default::default() }).unwrap();
+    assert!(core.watch_local(T0 + 2_100).await);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(true), json!(false)));
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n + 1);
+    // 報過之後不重複報
+    assert!(!core.watch_local(T0 + 2_200).await);
+    assert_eq!(fr.st.lock().unwrap().rosters.len(), n + 1);
+    // 連「允許其他設備替這台開新視窗」也關掉：兩個都變 false
+    super::write_settings(data.path(), super::BridgeSettings::default()).unwrap();
+    assert!(core.watch_local(T0 + 2_300).await);
+    let last = fr.st.lock().unwrap().rosters.last().unwrap().clone();
+    assert_eq!((last["remote_view"].clone(), last["remote_input"].clone()), (json!(false), json!(false)));
+}

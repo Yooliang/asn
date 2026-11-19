@@ -23,6 +23,7 @@ import { parseWaitingNotice } from "../_shared/waiting_notice.ts";
 import { parseMuxDownNotice } from "../_shared/mux_down_notice.ts";
 import { parseNodeMismatchNotice } from "../_shared/node_mismatch_notice.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
+import { sanitizeRemoteFlags } from "../_shared/remote_flags.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import { PARTNER_ID_RE, parseSetPartnerAvatar, setReply } from "../_shared/partner_avatar.ts";
@@ -332,6 +333,14 @@ Deno.serve(async (req) => {
       const { data: pd, error: pe } = await db.rpc("asn_relay_set_platform", { p_node: me.id, p_platform: np.platform, p_closed_reason: np.reason });
       if (pe) console.warn("set_platform", me.id, pe.message ?? pe);
       else if (pd?.error) console.warn("set_platform", me.id, pd.error);
+    }
+    // 這台電腦「允許別台看畫面／在這台打字」的兩個開關（選填 remote_view／remote_input，只收布林）：只是提示值，不是權威（握手時本機自己再查）。
+    // 只改金鑰所屬的自己節點；舊版不帶＝什麼都不做（後台記「不知道」）；失敗只記 log，不影響名單
+    const rf = sanitizeRemoteFlags(b);
+    if (rf) {
+      const { data: fd, error: fe } = await db.rpc("asn_relay_set_remote_flags", { p_node: me.id, p_view: rf.view, p_input: rf.input });
+      if (fe) console.warn("set_remote_flags", me.id, fe.message ?? fe);
+      else if (fd?.error) console.warn("set_remote_flags", me.id, fd.error);
     }
     // 靠舊名（IRORI_*）才拿到設定的環境變數名字（選填 used_legacy_env，F4 #423；給舊名使用報表）。有帶而且是陣列才寫；舊資料庫沒有這支函式只記 log，不影響名單
     await applyLegacyEnv((fn, args) => db.rpc(fn, args), me.id, b);
