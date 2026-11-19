@@ -4,7 +4,7 @@ import { displayDeviceName } from './device-known.mjs'
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
 import { launchDeviceRows } from './partner-launch-ui.mjs'
-import { isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { deviceFriends, isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
@@ -61,7 +61,8 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [] } = {}) {
+export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [] } = {}) {
+  const friends = deviceFriends(allFriends)   // 通知對話不是設備（#1830）
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })

@@ -15,6 +15,11 @@ export function modOf(m) {
     reason: typeof m.reason === 'string' ? m.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) : '',
   }
 }
+// 名單上「現在有人在」的狀態（#1830）：buildFriends 對在線條目只會給出這幾種（statusOf／等待認出的條目 awaiting／程序條目 running）。
+// 白名單：offline、通知對話的 none、空值、不認得的值一律不算在線。設備在線、自動隱藏、永久移除自動解除都看這一份。
+export const LIVE_STATUSES = Object.freeze(['online', 'busy', 'away', 'stopped', 'running', AWAITING_STATUS])
+export const isLiveStatus = s => LIVE_STATUSES.includes(s)
+
 // 本機程序掃描的條目是暫時性的顯示（程式結束就該消失），不是會留下往來的好友：
 // 名單標 kind＝process 的，以及舊版掃描條目的名字格式（「引擎 #pid」「引擎 · 供應商 #pid」，可帶（前景）／（背景））
 export const PROCESS_NAME_RE = /^[A-Za-z0-9._-]+(?: · [A-Za-z0-9._-]+)? #\d+(?:（[^）]*）)?$/
