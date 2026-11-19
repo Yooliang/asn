@@ -117,7 +117,7 @@ test('接線：對話分頁直接就是最後那一則（#1438，回到 0.2.17�
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.match(html, /<section class="m-pg m-chat" :class="\{ shake, 'is-room': chatFriend && chatFriend\.room \}" aria-label="對話">/, '對話分頁直接就是那一則（不再先列清單、不看 nav.chat）')
   assert.doesNotMatch(html, /m-chat-list|v-for="x in chatRows"|aria-label="回對話清單"/, '對話分頁沒有清單、也沒有回清單的鍵')
-  // 0.2.21（小良哥拍板）：左上「返回」加回來，切到夥伴分頁；對話是記錄最底層，所以走 goTab，不用 history.back()
+  // 0.2.21（擁有者拍板）：左上「返回」加回來，切到夥伴分頁；對話是記錄最底層，所以走 goTab，不用 history.back()
   const back = html.match(/<button class="m-icon-btn m-back"[^>]*>/)?.[0] ?? ''
   assert.match(back, /aria-label="回夥伴"/)
   assert.match(back, /@click="goTab\('list'\)"/)

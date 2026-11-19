@@ -18,14 +18,14 @@ const members = [
   { key: '~u:me', name: '我', member_kind: 'human', kind: 'owner', mine: true },
   { key: 'H~財務', name: '財務', member_kind: 'ai', kind: 'window', mine: true, engine: 'claude', online: true },
   { key: 'H~審稿', name: '審稿', member_kind: 'ai', kind: 'window', mine: true, engine: 'gemini', online: false },
-  { key: 'x:r1aaaaaa', name: '小良', member_kind: 'human', kind: 'human', mine: false },
+  { key: 'x:r1aaaaaa', name: '擁有者', member_kind: 'human', kind: 'human', mine: false },
   { key: 'x:r2bbbbbb', name: '報表', member_kind: 'ai', kind: 'ai', mine: false, engine: 'zzz-unknown', online: false },
 ]
 const msgs = [
   { seq: 1, from: 'H~財務', relation: 'mine_ai', from_kind: 'ai', from_label: '財務（我）', body: 'a', at: '2026-10-25T10:00:00Z' },
   { seq: 2, from: 'H~審稿', relation: 'mine_ai', from_kind: 'ai', from_label: '審稿（我）', body: 'b', at: '2026-10-25T10:01:00Z' },
-  { seq: 3, from: 'x:r1aaaaaa', relation: 'other', from_kind: 'human', from_label: '小良', body: 'c', at: '2026-10-25T10:02:00Z' },
-  { seq: 4, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（小良）', body: 'd', at: '2026-10-25T10:03:00Z' },
+  { seq: 3, from: 'x:r1aaaaaa', relation: 'other', from_kind: 'human', from_label: '擁有者', body: 'c', at: '2026-10-25T10:02:00Z' },
+  { seq: 4, from: 'x:r2bbbbbb', relation: 'other', from_kind: 'ai', from_label: '報表（擁有者）', body: 'd', at: '2026-10-25T10:03:00Z' },
 ]
 const room = mem => ({ id: 'g1', name: '群', members: mem, mine: [{ member: '~u:me', unread: 0 }], last_seq: 4 })
 const friendOf = mem => roomPseudoFriend(roomItems([room(mem)])[0])

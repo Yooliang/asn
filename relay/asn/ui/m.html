@@ -92,7 +92,7 @@
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人" enterkeyhint="search"></div>
-              <!-- 未讀（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
+              <!-- 未讀（#1438，擁有者定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
               <div class="m-group m-recent" :class="grp.cls" v-for="grp in topGroups" :key="grp.key">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[grp.key]" @click="collapsed[grp.key] = !collapsed[grp.key]">
                   <span class="m-caret" :class="{ open: !collapsed[grp.key] }">▸</span>{{ grp.label }}（{{ grp.rows.length }}）
@@ -173,11 +173,11 @@
             </div>
           </section>
 
-          <!-- 對話：直接就是最後在聊的那一則（#1438，小良哥選 B，回到 0.2.17 的做法；不先列清單）。還沒有最後一則時顯示提示，請到「夥伴」挑一位。對話內容上方不放按鈕列，管理項目都在右上角「⋯」 -->
+          <!-- 對話：直接就是最後在聊的那一則（#1438，擁有者選 B，回到 0.2.17 的做法；不先列清單）。還沒有最後一則時顯示提示，請到「夥伴」挑一位。對話內容上方不放按鈕列，管理項目都在右上角「⋯」 -->
           <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" aria-label="對話">
             <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status, chatFriend) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status, chatFriend) === 'offline', 'm-plate-head': chatFriend }">
               <template v-if="chatFriend">
-                <!-- 左上「返回」（小良哥 0.2.21 拍板加回來）：切到「夥伴」分頁。「對話」是瀏覽記錄的最底層，所以走 goTab，不用 history.back()；Aero 與現代、一對一與群組都有 -->
+                <!-- 左上「返回」（擁有者 0.2.21 拍板加回來）：切到「夥伴」分頁。「對話」是瀏覽記錄的最底層，所以走 goTab，不用 history.back()；Aero 與現代、一對一與群組都有 -->
                 <button class="m-icon-btn m-back" type="button" aria-label="回夥伴" title="回夥伴" @click="goTab('list')"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 <!-- 現代外觀（#1421 B 之三）：置中名牌＋右邊「看終端」；點名牌開「⋯」選單。復古 Aero 下這兩顆不顯示（mobile.css），照舊是下面的頭像、名字、「⋯」 -->
                 <button class="m-plate" type="button" :class="{ 'is-offline': chatPlate.offline }" :aria-label="(opsItems.length || groupItems.length) ? chatPlate.aria + '，更多操作' : chatPlate.aria" :disabled="!opsItems.length && !groupItems.length" @click="openOps"><img class="m-plate-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="28" height="28"><b class="m-plate-name" v-html="emo(chatPlate.name)"></b><small class="m-plate-sub" v-if="chatPlate.sub"><template v-if="prefs.skin === 'line' && chatPlate.busy">{{ chatPlate.machine }}{{ chatPlate.machine ? '・' : '' }}<span class="l-busy">{{ chatPlate.state }}</span></template><template v-else>{{ chatPlate.sub }}</template></small><small class="m-plate-count" v-if="prefs.skin === 'line' && chatFriend.room && chatFriend.psm">{{ chatFriend.psm }}</small></button>

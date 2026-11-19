@@ -28,7 +28,7 @@ const JWT = "j".repeat(40);
 function deps(reply: unknown) {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const d: AccountDeps = {
-    verifyJwt: () => Promise.resolve({ id: UID, email: "a@b.c", name: "啟良" }),
+    verifyJwt: () => Promise.resolve({ id: UID, email: "a@b.c", name: "擁有者" }),
     rpc: (fn, args) => { calls.push({ fn, args }); return Promise.resolve({ data: reply, error: null }); },
     sha256Hex: () => Promise.resolve("h"),
     newSecrets: () => ({ key: "k", bellTopic: "t" }),

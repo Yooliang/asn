@@ -161,14 +161,14 @@ Deno.test("shouldRespond：開頭紀錄、系統訊息、超過額度的點名�
 
 Deno.test("parseMentions：同名的 AI 只認完整標示或成員鍵；不同名照舊", () => {
   const members = [
-    { key: "H~同名", name: "同名", label: "同名（小良）" },
+    { key: "H~同名", name: "同名", label: "同名（擁有者）" },
     { key: "x:abc", name: "同名", label: "同名（財務員）" },
-    { key: "H~財務", name: "財務", label: "財務（小良）" },
+    { key: "H~財務", name: "財務", label: "財務（擁有者）" },
     { key: "x:def", name: "財務員", label: "財務員" },
   ];
   assertEquals(parseMentions("@同名 你好", members), [], "只打夥伴名有歧義，不點任何人");
   assertEquals(parseMentions("@同名（財務員） 你好", members), ["x:abc"]);
-  assertEquals(parseMentions("@同名（小良） 請看 @財務 與 @財務員", members), ["H~同名", "H~財務", "x:def"]);
+  assertEquals(parseMentions("@同名（擁有者） 請看 @財務 與 @財務員", members), ["H~同名", "H~財務", "x:def"]);
   assertEquals(parseMentions("@x:abc 在嗎", members), ["x:abc"]);
 });
 

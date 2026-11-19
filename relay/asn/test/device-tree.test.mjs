@@ -10,7 +10,7 @@ const P = 'cccccccc-0000-4000-8000-000000000003'
 const fr = (node, device, agent, engine, status = 'online', kind = null) => ({ node, device, agent, engine, status, kind, partnerId: 'dddddddd-0000-4000-8000-0000000000aa' })
 const NOW = Date.parse('2026-10-23T12:00:00Z')
 
-const friends = [fr(SELF, '家用機', 'a1', 'claude'), fr(W, '工作機', 'w1', 'claude'), fr(W, '工作機', 'w2', 'gemini', 'offline'), fr(P, '小良的手機', 'p1', 'asn', 'offline', 'phone')]
+const friends = [fr(SELF, '家用機', 'a1', 'claude'), fr(W, '工作機', 'w1', 'claude'), fr(W, '工作機', 'w2', 'gemini', 'offline'), fr(P, '擁有者的手機', 'p1', 'asn', 'offline', 'phone')]
 const base = () => ({
   friends, nodeOrder: [SELF, W, P], selfNode: SELF, now: NOW,
   asn: { [W]: [{ status: 'online', version: '1.0.0' }] },
@@ -41,7 +41,7 @@ test('pi 夥伴：廠商列出它背後用的模型廠商（經 Claude、DeepSee
 
 test('三層：設備用名稱，底下是廠商，每個廠商一個帳號', () => {
   const t = buildDeviceTree(base())
-  assert.deepEqual(t.map(d => d.label), ['家用機', '工作機', '小良的手機'])
+  assert.deepEqual(t.map(d => d.label), ['家用機', '工作機', '擁有者的手機'])
   const self = byLabel(t, '家用機')
   assert.equal(self.self, true)
   assert.deepEqual(self.vendors.map(v => [v.label, v.account]), [['Claude', 'me@x.test · max'], ['OpenAI（Codex）', 'me@openai.test · plus']])
@@ -56,7 +56,7 @@ test('沒回報的顯示「未回報」；手機沒有廠商就寫沒有回報',
   const w = byLabel(buildDeviceTree(base()), '工作機')
   assert.equal(w.vendors.find(v => v.key === 'gemini').account, NOT_REPORTED)
   assert.equal(w.vendors.find(v => v.key === 'codex').account, NOT_REPORTED)
-  const ph = byLabel(buildDeviceTree(base()), '小良的手機')
+  const ph = byLabel(buildDeviceTree(base()), '擁有者的手機')
   assert.equal(ph.kind, '手機')
   assert.deepEqual(ph.vendors, [])
   assert.equal(ph.empty, '這台設備還沒有回報任何廠商')

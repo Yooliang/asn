@@ -1,4 +1,4 @@
--- 群組成員清單多帶「線上狀態」與「引擎」（小良哥 10-25）：群組訊息的發言者頭像要看得出離線、AI 頭像右下角要有廠商小圖。
+-- 群組成員清單多帶「線上狀態」與「引擎」（擁有者 10-25）：群組訊息的發言者頭像要看得出離線、AI 頭像右下角要有廠商小圖。
 -- 規則（唯一的真相放在 relay.room_member_presence）：
 --   真人不帶這兩個欄位；AI 視窗（節點~視窗名）＝ relay.roster 該列 seen_at 在 3 分鐘內為 online=true，否則 false（與名單的在線規則相同）；
 --   只有節點（沒有視窗名）的舊成員＝看 relay.nodes.last_seen_at；engine 取 roster.engine，沒有時取節點 kind（claude／gpt／gemini／grok）。

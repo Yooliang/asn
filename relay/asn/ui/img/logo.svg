@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="120 112 260 260" width="100%" height="100%">
-  <!-- ASN 的標誌：小機器人本體（頭＋身體），小良哥 10/20 給的圖拿掉天線、耳機、翅膀、底下的推進光 -->
+  <!-- ASN 的標誌：小機器人本體（頭＋身體），擁有者 10/20 給的圖拿掉天線、耳機、翅膀、底下的推進光 -->
   <defs>
     <linearGradient id="primaryBlue" x1="20%" y1="0%" x2="80%" y2="100%">
       <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1e3a8a"/>

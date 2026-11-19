@@ -41,7 +41,7 @@ test('Claude：不支援 acp通道；開在 ASN 終端（別台也能遠端開�
   assert.match(r.options[0].note, /ASN 終端/)
   const piReady = runOptions(row('claude'), { local: true, piInstalled: true, piReady: true })
   assert.equal(piReady.options.find(o => o.key === 'pi').ok, true)
-  assert.equal(piReady.selected, 'term', 'pi 已登入也不再預設經 pi（#931 小良哥 11/07）')
+  assert.equal(piReady.selected, 'term', 'pi 已登入也不再預設經 pi（#931 擁有者 11/07）')
   assert.match(r.options[3].note, /外掛/)
 })
 

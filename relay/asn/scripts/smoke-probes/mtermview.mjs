@@ -83,7 +83,7 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
     els.forEach((e, i) => { if (sizes[i]) e.style.fontSize = (sizes[i] * 1.3) + 'px' });
     await sleep(300);
   }
-  // 小良哥 11-10：合成一顆、放在這排最後面、不做選中樣式；字寫「按了會去哪裡」（看對話時「終端」、看終端時「對話」）
+  // 擁有者 11-10：合成一顆、放在這排最後面、不做選中樣式；字寫「按了會去哪裡」（看對話時「終端」、看終端時「對話」）
   if (document.querySelectorAll('.m-term-switch').length !== 1 || sw.tagName !== 'BUTTON') return { ok: false, why: '對話／終端切換應該只有一顆按鈕' };
   const btns = [sw];
   const plain = () => {
@@ -130,7 +130,7 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
   if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
   if (document.querySelector('.m-chat .term-remote .term-remote-bar')) return { ok: false, why: '終端上方不該再有提示條（已移到最下面的狀態列）' };
-  if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（小良哥 11-10）' };
+  if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（擁有者 11-10）' };
   if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「對話」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
   sw.click();

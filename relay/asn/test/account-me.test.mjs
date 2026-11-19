@@ -39,7 +39,7 @@ test('合併：壞資料整列丟掉；來信照一般收信的整理（去回�
   const nudge = entriesOf(cleanRow(row(2, 'them', '（小文 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。', T0)), '小文')
   assert.deepEqual(nudge.map(e => [e.k, e.nudge === true]), [['sys', true]])
   assert.equal(nudge[0].text, '小文 傳送了一個震動。')
-  const mine = entriesOf(cleanRow(row(3, 'me', '（小良 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。', T0)), '小文')
+  const mine = entriesOf(cleanRow(row(3, 'me', '（擁有者 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。', T0)), '小文')
   assert.deepEqual(mine.map(e => [e.k, e.mine === true]), [['sys', true]])
   // 已送達／已讀狀態一併帶進自己寄的信
   const st = entriesOf(cleanRow(row(4, 'me', '嗨', T0, { delivered_at: T1, acked_at: T2 })))[0]
@@ -212,13 +212,13 @@ test('自己寄的信：寄出設備不是這台就標設備名；這台寄的�
     row(5, 'me', '名單有名字', '2026-10-22T08:03:00Z', { from_node: 'H', from_node_name: '舊名' }),
     row(6, 'me', '節點在名單外', '2026-10-22T08:04:00Z', { from_node: 'Z' }),
   ]
-  const r = mergeHistory([], rows, '小文', { selfNode: 'T', deviceOf: n => (n === 'H' ? '小良的家用機' : '') })
+  const r = mergeHistory([], rows, '小文', { selfNode: 'T', deviceOf: n => (n === 'H' ? '擁有者的家用機' : '') })
   const by = t => r.log.find(m => m.text === t)
   assert.equal(by('手機上說的').from, 'Oppo 手機')
   assert.ok(!('from' in by('這台說的')))
   assert.ok(!('from' in by('回')))
   assert.ok(!('from' in by('舊後台沒帶節點')))
-  assert.equal(by('名單有名字').from, '小良的家用機')
+  assert.equal(by('名單有名字').from, '擁有者的家用機')
   assert.equal(by('節點在名單外').from, '另一台設備')
   assert.ok(!r.log.some(m => /^u:|^[A-Za-z]$/.test(m.from ?? '')), '不顯示節點代號')
 })

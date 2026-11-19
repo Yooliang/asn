@@ -123,7 +123,7 @@ test('mobileRemoteInputApi：指紋還沒確認過的電腦，直接講怎麼做
 test('chatpane：切換鈕只在手機且看得到時出現，字與電腦版同一份', () => {
   const src = read('../ui/lib/chatpane.mjs')
   assert.match(src, /const mSwitch = computed\(\(\) => props\.noBar && canRemote\.value\)/)
-  // 小良哥 11-10：一顆按鈕、放在這排最後面（emoji 選單之前）、不做選中樣式；字與圖示寫按了會去哪裡
+  // 擁有者 11-10：一顆按鈕、放在這排最後面（emoji 選單之前）、不做選中樣式；字與圖示寫按了會去哪裡
   assert.match(src, /<button class="tool icon m-sw m-term-switch" type="button" v-if="mSwitch" :aria-label="mToggle\.label"/)
   assert.doesNotMatch(src.slice(src.indexOf('m-term-switch') - 200, src.indexOf('m-term-switch') + 400), /aria-pressed|\bon: /, '不做選中樣式')
   assert.match(src, /@click="remoteShown \? showMsgs\(\) : showTerm\(\)"/)

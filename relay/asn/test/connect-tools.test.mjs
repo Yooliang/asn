@@ -10,7 +10,7 @@ function ops({ fail = [] } = {}) {
   return { calls, o: { quotaConnect: mk('quota'), piInstall: mk('pi'), modAuto: mk('mod') } }
 }
 
-test('預設勾選（小良哥的決定）：額度預設打勾、pi 偵測到才勾、Claude 外掛勾', () => {
+test('預設勾選（擁有者的決定）：額度預設打勾、pi 偵測到才勾、Claude 外掛勾', () => {
   assert.deepEqual(connectDefaults({ piDetected: true }), { quota: true, pi: true, mod: true })
   assert.deepEqual(connectDefaults({ piDetected: false }), { quota: true, pi: false, mod: true })
 })

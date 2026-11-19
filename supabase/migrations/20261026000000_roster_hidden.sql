@@ -1,5 +1,5 @@
 -- 名單多一個選填欄位 hidden（布林）：這個視窗目前是不是隱藏的（Windows 主控台視窗的 IsWindowVisible 取反）。
--- 前景／背景只代表「視窗隱藏或不隱藏」（小良哥 2026-10-26 #205／#207），與 ACP 通道無關；沒有視窗（ACP 工作者、雲端、非 Windows）一律不帶＝null。
+-- 前景／背景只代表「視窗隱藏或不隱藏」（擁有者 2026-10-26 #205／#207），與 ACP 通道無關；沒有視窗（ACP 工作者、雲端、非 Windows）一律不帶＝null。
 -- 只動兩個函式：asn_relay_roster（寫入，多收 hidden，型別不對當 null）與 asn_relay_list（讀出，多回 hidden）；其餘與現行定義完全相同。
 -- 舊版橋沒帶＝null，舊用戶端看不到這個欄位也不壞（可選欄位）。
 -- 回復：把 20261024110000_roster_kind.sql 的 asn_relay_roster／asn_relay_list 定義再套一次；欄位可留著（新增欄位不影響舊函式）。

@@ -419,7 +419,7 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 2. 建 `relay.account_events`（稽核，不含金鑰）；啟用 RLS、不建 policy。
 3. 帳號函式（SECURITY DEFINER、只授權 service_role）：確保租戶、建立設備節點、建立雲端節點、換金鑰、移除、認領、列表。
 4. 清理排程：每小時處理逾時未上線的雲端節點（`pg_cron`）。
-5. 租戶與角色語意調整（第 7 節）：`owner_name` 改取帳號顯示名而非寫死；`~owner` 的顯示名不再寫死「小良哥」。
+5. 租戶與角色語意調整（第 7 節）：`owner_name` 改取帳號顯示名而非寫死；`~owner` 的顯示名不再寫死「擁有者」。
 6. （若採 D9）`irori_relay_*` 改名為 `asn_relay_*`。
 7. 內部函式：新節點預設 `can_roster=true`（schema 已預設為真，確認 insert 路徑沒覆寫）。
 
@@ -442,20 +442,20 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 | `relay/machine/register.mjs`、`installer/*` | 「請向希緒或管理者…」「連上希緒」 |
 | `relay/machine/send.mjs`、`agents.example.json` | 範例收件人 `XISU`（希緒的節點代號）、註解提到「希緒轉述」 |
 | `relay/machine/bridge-aegis.mjs` | 「這是希緒自己，不能自己問自己」、`xi-xu` 預設值——這是 Aegis 主機專用的轉接，屬於 Irori 生態 |
-| `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」、擁有者鍵 `~owner`、註解「只有小良哥經 irori-api 能做」 |
-| `supabase/migrations/…_relay_functions.sql` | `~owner` 顯示名寫死「小良哥」；`role='owner'` 的節點＝希緒 |
+| `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」、擁有者鍵 `~owner`、註解「只有擁有者經 irori-api 能做」 |
+| `supabase/migrations/…_relay_functions.sql` | `~owner` 顯示名寫死「擁有者」；`role='owner'` 的節點＝希緒 |
 | `relay/asn/ui/lib/tabs.mjs`、`lib.rs` | 底部與「開始」頁廣告含「認識希緒」「開發日誌」，開網址白名單含 `irori.web.app` |
 
 ### 7.2 新的角色模型
 
-現況：每個租戶有一個 `role='owner'` 的「角色節點」（希緒 XISU），它發的信被後端標 `trust=owner`；真人（小良哥）以登入身分用 `~owner` 虛擬成員在群組發言與建群組。
+現況：每個租戶有一個 `role='owner'` 的「角色節點」（希緒 XISU），它發的信被後端標 `trust=owner`；真人（擁有者）以登入身分用 `~owner` 虛擬成員在群組發言與建群組。
 
 ASN 獨立後的定義：
 
 | 名詞 | 定義 |
 |---|---|
 | 帳號擁有者（取代「主人」「管理者」） | 登入的那個人，即 `tenants.owner_user`。UI 與文件只用「你」或「帳號擁有者」；不再出現「管理者」（那是舊流程中向某人要邀請碼的角色） |
-| 服務維護者 | 維運後端的人（目前是小良哥），不是產品角色，不出現在任何使用者介面或提示文字 |
+| 服務維護者 | 維運後端的人（目前是擁有者），不是產品角色，不出現在任何使用者介面或提示文字 |
 | `trust=owner` | **帳號擁有者本人親手打的字**。不再是「某個角色節點」的信 |
 | `trust=member` | 其他一切：本帳號下的 AI 視窗、其他成員、雲端代理 |
 | 群組裡誰的提問該回 | 被 `@點名` 的，或**帳號擁有者本人發的**（沿用現行 `shouldRespond` 規則，把「擁有者」從「希緒角色節點」換成「帳號擁有者」） |
@@ -577,7 +577,7 @@ Aegis 主機轉接橋服務的是 Irori 的 Aegis，與 ASN 產品無關，且�
 | R4 | 獨立安裝版的排程名 `IroriRelayMachine-*` → `AsnBridge-*`（`bridge/handoff.rs` 要同時認得兩種）、PowerShell 函式 `Get-IroriHome`／`Stop-IroriBridge`／`Start-IroriTask`、`irori-common.ps1` 檔名、安裝包檔名 `irori-windows.zip` 與下載網址（`tools/release`、`docs/DOWNLOADS.md`）；安裝程式整體在期 6 退役，只做最小改名 | 已完成。排程名新建 `AsnBridge-*`；`handoff.rs` 接手時新舊兩個排程名都停用（`task_name`／`legacy_task_name`）；`install-task.ps1`、`uninstall.ps1`、`Stop-AsnBridge` 兩種名都處理，安裝時移除舊名排程。函式改 `Get-AsnHome`／`Stop-AsnBridge`／`Start-AsnTask`，舊名留別名；`irori-common.ps1` 改名 `asn-common.ps1`，舊檔名留只 dot-source 新檔的薄殼；打包同時產出 `asn-windows.zip` 與內容相同的舊檔名 `irori-windows.zip`（官網轉址表要補一條 `/download/asn-windows.zip`，舊條不刪）。 |
 | R5 | 其他字串：使用者代理字串 `irori-relay-installer/1`／`irori-relay-client/1`、Codex 標記 `irori-mail:`（兩種都讀、只寫新的）、日誌前綴 `[irori]`、暫存資料夾 `irori-probe-*`、ACP `clientInfo` 的 `irori-relay`、說明名稱 `irori-send`／`irori-recv`／`irori-room`；技能 `irori-relay` → `asn-relay`／`asn-cloud-agent`（D12） | 已完成。使用者代理字串改 `asn-installer/1`、`asn-client/1`（後台沒有依 UA 判斷的程式）；Codex 標記只寫 `asn-mail:`、讀取新舊兩種（Node `hasMark`、Rust `has_mark`）；暫存資料夾 `asn-probe-*`；ACP／Codex `clientInfo` 改 `asn`；說明名稱改 `asn-send`／`asn-recv`／`asn-room`（指令檔名 `send.mjs` 等本來就沒帶舊名）；公開技能 `web/relay` 改名 `asn-relay`（舊 `irori-relay` 資料夾已安裝者照常可用，`asn-cloud-agent` 本來就在官網 `/skill/`）。日誌前綴 `[irori]` 在程式內已不存在，無需改。 |
 | R6 | 資料庫函式 `irori_relay_*` → `asn_relay_*`（D9，共 69 支）。**零停機、舊版相容**：一個 migration（`20261023040000_asn_relay_rename.sql`，交易內、可重跑）先 `alter function … rename`，再把函式內部與 `relay` 結構描述裡的呼叫、排程指令改成新名，最後在舊名建同簽章（含預設值）的薄包裝（security definer、search_path 空、只呼叫新名）；新舊名都只授權 service_role。`supabase/functions/_shared`、`relay/index.ts` 全改新名，守門 `_shared/rpc_names_test.ts`、`tests/asn_relay_rename_sql.test.mjs`。部署前用 `tools/migrate/list_irori_functions.sql` 在線上比對清單。舊名包裝等舊後台移除後另開 migration 刪除；relay function 名稱（`irori-relay`、`irori-api`）隨舊後台移除 | 程式與測試完成，**已部署**（2026-10-28 唯讀查正式庫：`asn_relay_*` 117 支、舊名薄包裝 `irori_relay_*` 69 支；先 migration、後 Edge Function） |
-| R7 | **信任與角色模型**（D5）：`trust=owner` 真的代表人本人、`rooms.ts` 的點名別名「希緒」與 `~owner` 顯示名寫死、`role='owner'` 的 XISU 角色節點、測試與文件裡的範例收件人 `XISU`。R1 只改了提示文字，沒動資料模型 | 程式與測試完成，**已部署**（2026-10-28 唯讀查正式庫：`asn_relay_inbox`、`asn_relay_inbox_agent`、`asn_relay_room_post` 的定義已不含 `role = 'owner'` 判斷；先 migration `20261023050000_trust_owner_signed_only.sql`、後 Edge Function）。**與設計的差異**：不新增 `human` 節點與 `node_type` 欄位——本人簽章路徑（#108／#118／#158，ASN 與手機用登入憑證簽章，後台再核對「節點與租戶都是這個人的」）早已上線，比「金鑰藏在 Rust 端的 human 節點」少發一把金鑰，效果相同。做法：(1) `asn_relay_inbox`、`asn_relay_inbox_agent` 的 trust 只看 `owner_signed`（原為 `f.role = 'owner' or owner_signed`）；(2) `asn_relay_room_post` 的 trust 拿掉 `relay.room_actor_is_owner(p_node)`，`p_owner`（舊後台人登入路徑）與簽章照舊；(3) `relay.room_member_name` 的 `~owner` 備用名由「小良哥」「主人」改「帳號擁有者」（兩參數版本本來就取 `relay.tenants.owner_name`）；(4) `rooms.ts` 拿掉角色節點的「希緒」別名；(5) 範例收件人 `XISU` 改 `PC1`、人名「希緒」改中性字。**不影響現有使用**：資料不降級（`role='owner'` 的節點維持原值）；`role='owner'` 仍是特權動作（acct_list／acct_switch／acct_switch_status、invite、reissue、update、attach_sweep、launch／launchers 的舊判定）與群組 `~owner` 發言身分（`room_actor_is_owner`）的授權條件，這些動作目前沒有本人簽章路徑（launch／launchers 有），列為後續；唯一的行為變化是角色節點寄的信與群組發言不再被標 `trust=owner`。保留不改：`mail.rs`／橋測試中的 `XISU`（驗證舊位址與「信頭不出現舊名」）、`bridge-aegis.mjs` 與其測試（R8）、歷史文件 |
+| R7 | **信任與角色模型**（D5）：`trust=owner` 真的代表人本人、`rooms.ts` 的點名別名「希緒」與 `~owner` 顯示名寫死、`role='owner'` 的 XISU 角色節點、測試與文件裡的範例收件人 `XISU`。R1 只改了提示文字，沒動資料模型 | 程式與測試完成，**已部署**（2026-10-28 唯讀查正式庫：`asn_relay_inbox`、`asn_relay_inbox_agent`、`asn_relay_room_post` 的定義已不含 `role = 'owner'` 判斷；先 migration `20261023050000_trust_owner_signed_only.sql`、後 Edge Function）。**與設計的差異**：不新增 `human` 節點與 `node_type` 欄位——本人簽章路徑（#108／#118／#158，ASN 與手機用登入憑證簽章，後台再核對「節點與租戶都是這個人的」）早已上線，比「金鑰藏在 Rust 端的 human 節點」少發一把金鑰，效果相同。做法：(1) `asn_relay_inbox`、`asn_relay_inbox_agent` 的 trust 只看 `owner_signed`（原為 `f.role = 'owner' or owner_signed`）；(2) `asn_relay_room_post` 的 trust 拿掉 `relay.room_actor_is_owner(p_node)`，`p_owner`（舊後台人登入路徑）與簽章照舊；(3) `relay.room_member_name` 的 `~owner` 備用名由「擁有者」「主人」改「帳號擁有者」（兩參數版本本來就取 `relay.tenants.owner_name`）；(4) `rooms.ts` 拿掉角色節點的「希緒」別名；(5) 範例收件人 `XISU` 改 `PC1`、人名「希緒」改中性字。**不影響現有使用**：資料不降級（`role='owner'` 的節點維持原值）；`role='owner'` 仍是特權動作（acct_list／acct_switch／acct_switch_status、invite、reissue、update、attach_sweep、launch／launchers 的舊判定）與群組 `~owner` 發言身分（`room_actor_is_owner`）的授權條件，這些動作目前沒有本人簽章路徑（launch／launchers 有），列為後續；唯一的行為變化是角色節點寄的信與群組發言不再被標 `trust=owner`。保留不改：`mail.rs`／橋測試中的 `XISU`（驗證舊位址與「信頭不出現舊名」）、`bridge-aegis.mjs` 與其測試（R8）、歷史文件 |
 | R8 | `relay/channel` 封存、`bridge-aegis.mjs` 與 `irori-relay-aegis.service` 移出本 repo（D11；共用的 `RELAY_*` 已走相容層，Aegis 專屬的 `AEGIS_*` 也已在 F4 走相容層：新名 `ASN_AEGIS_*` 優先、舊名照認） | 部分完成。channel 已封存到 `archive/relay-channel/`（含說明）；Aegis 橋與 service 因 Aegis 主機仍依賴，只標記「之後移出」並在第 7.5 節記下移出步驟，需在 Aegis 機器改部署來源後才能真的刪。 |
 | R9 | 移除相容層（D10：至少兩個正式版、切換後 90 天、日誌確認無舊名）：刪除三處對照表（`env-compat.mjs` ×2、`envc.rs`）、守門測試改成 repo 內（除歷史文件外）不得出現 `IRORI_`、`.irori-relay` | 待做 |
 
@@ -647,8 +647,8 @@ R1 的環境變數對照表（新名 ← 舊名）：一律把 `IRORI_` 換成 `
 | `relay/machine/engines/acp-worker.mjs`、`codex.mjs` | 「Irori 收發室替你啟動…」「Irori 收發室替你開了這個視窗」 | 改為「ASN 收發室」；注意這是對 AI 說的提示，改字不改行為 |
 | `relay/machine/bridge.mjs`、`bridge-aegis.mjs` 開頭註解 | 「Irori relay …」 | 註解改名；Aegis 橋依 D11 處理 |
 | `relay/machine/bridge-aegis.mjs` | `xi-xu` 預設值、「這是希緒自己」 | 隨移出 repo |
-| `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」（`node_role=owner`）、`OWNER_KEY` 註解「小良哥本人」、權限註解「只有小良哥經 irori-api」 | 第 7.2 節：別名改為「帳號擁有者」顯示名；註解重寫 |
-| `supabase/migrations/…_relay_functions.sql`（以新 migration 修正） | `~owner` 顯示名寫死「小良哥」、`role=owner` 等同希緒 | 第 6.3 節第 5 項 |
+| `supabase/functions/_shared/rooms.ts` | 點名別名「希緒」（`node_role=owner`）、`OWNER_KEY` 註解「擁有者本人」、權限註解「只有擁有者經 irori-api」 | 第 7.2 節：別名改為「帳號擁有者」顯示名；註解重寫 |
+| `supabase/migrations/…_relay_functions.sql`（以新 migration 修正） | `~owner` 顯示名寫死「擁有者」、`role=owner` 等同希緒 | 第 6.3 節第 5 項 |
 | `supabase/functions/_shared/relay_ops.ts` | 「身分是這個租戶的角色節點（希緒）」「irori-api」 | 舊後台的 `irori-api` 路徑在新後台不存在，註解與相關分支隨切換後整理移除 |
 | `relay/asn/ui/lib/tabs.mjs`、`src-tauri/src/lib.rs` | 「認識希緒」「開發日誌」廣告與 `irori.web.app` 白名單（及其 Rust 測試） | D6：換成 ASN 自己的內容與白名單 |
 | `docs/ARCHITECTURE.md`、`README.md` 等 | 「owner＝主人的交辦」「建群組只有擁有者」 | 隨第 7.2 節更新 |

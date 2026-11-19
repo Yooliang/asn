@@ -5121,7 +5121,7 @@ mod tests {
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
     }
 
-    /// pi 1.4 的信任提問（#483，照 #475 驗收時小良哥截圖的畫面）：選中那行是「→ 」，其他選項只縮排
+    /// pi 1.4 的信任提問（#483，照 #475 驗收時擁有者截圖的畫面）：選中那行是「→ 」，其他選項只縮排
     const PI_TRUST_SCREEN: &str = "────────────────\n\n Trust project folder?\n C:\\Users\\u\\proj\n\n This allows pi to load .pi settings and resources, install missing project\n packages, and execute project extensions.\n\n → Trust\n   Trust parent folder (C:\\Users\\u)\n   Trust (this session only)\n   Do not trust\n   Do not trust (this session only)\n\n ↑↓ navigate  enter select  escape/ctrl+c cancel\n";
 
     fn pi_rig() -> (Rig, String) {
@@ -5466,11 +5466,11 @@ mod tests {
             assert!(err.contains("標題"), "{bad:?}: {err}");
         }
         assert_eq!(count_cmd(&rig.runner, "set-tab-title"), before, "不合法標題不可呼叫 set-tab-title");
-        rig.svc.rename(&id, "  小良  ").unwrap();
+        rig.svc.rename(&id, "  擁有者  ").unwrap();
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
-        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "--no-auto-start".into(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 小良".into()]);
+        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "--no-auto-start".into(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 擁有者".into()]);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
-        assert_eq!(v["terms"][0]["title"], "ASN:1 小良");
+        assert_eq!(v["terms"][0]["title"], "ASN:1 擁有者");
         let ok = "名".repeat(40);
         rig.svc.rename(&id, &ok).unwrap();
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
@@ -6044,7 +6044,7 @@ mod tests {
         assert!(rig.runner.killed().is_empty());
 
         let rig = make(default_profiles(), vec![]);
-        *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "ASN:1 小良", 7, 1);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "ASN:1 擁有者", 7, 1);
         write_store(&rig.store, 1, &row("1", "grok", "1000", ""));
         rig.svc.reclaim().unwrap();
         assert_eq!(rig.svc.list().len(), 1, "分頁標題前綴對上就可以認領，不必再猜 workspace");

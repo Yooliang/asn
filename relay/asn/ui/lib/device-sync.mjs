@@ -1,5 +1,5 @@
 // 設備順序同步（電腦版與手機版共用）：deviceOrder／deviceShown／deviceRemoved 放到帳號層（後台 account_device_prefs 動作）。
-// 規則（小良哥拍板）：整份以 rev（毫秒時間戳）較新的為準（last-writer-wins）；removed 也同步；
+// 規則（擁有者拍板）：整份以 rev（毫秒時間戳）較新的為準（last-writer-wins）；removed 也同步；
 // 只有「後台還是空的、這台從沒同步過、本機有舊值」的第一次升級才用聯集當起點。
 // 各機器自己 prune，只有內容真的變了才更新 rev 並推送，內容沒變不推（避免兩台一直互相覆蓋）。
 // 推送節流至少 5 秒、同內容不重送；本機仍照舊存 asn-me.json 當離線快取；沒登入或後台還沒部署新動作就靜默略過。

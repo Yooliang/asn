@@ -25,7 +25,7 @@ export const CONNECT_TEXT = {
   skipped: '沒有勾選，之後可以到設定再做',
 }
 
-/** 預設勾選（小良哥的決定，#343）：額度預設打勾，按「完成」就算確認；pi 偵測到才勾；Claude 外掛固定勾選、不能取消 */
+/** 預設勾選（擁有者的決定，#343）：額度預設打勾，按「完成」就算確認；pi 偵測到才勾；Claude 外掛固定勾選、不能取消 */
 export const connectDefaults = ({ piDetected = false } = {}) => ({ quota: true, pi: Boolean(piDetected), mod: true })
 
 /**

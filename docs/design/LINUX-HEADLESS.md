@@ -288,7 +288,7 @@
 
 正規流程（金鑰由 Aegis 自己產生、直接寫檔，從不離開 Aegis）：
 
-1. 小良哥在有開邀請權限金鑰的電腦上，用管道把邀請碼直接送進 Aegis，邀請碼不印在畫面、不貼進對話：開邀請碼的小程式讀本機金鑰檔、呼叫 `?action=invite`、只把 `invite` 欄位寫到標準輸出，接上 `gcloud compute ssh aegis-tokyo --zone asia-northeast1-a --tunnel-through-iap --command "<第 2 步>"` 的標準輸入。（`relay/machine/tools-provision.mjs` 是同類寫法的參考，但它會在本機註冊；此處要改成只開邀請碼並送出。）
+1. 擁有者在有開邀請權限金鑰的電腦上，用管道把邀請碼直接送進 Aegis，邀請碼不印在畫面、不貼進對話：開邀請碼的小程式讀本機金鑰檔、呼叫 `?action=invite`、只把 `invite` 欄位寫到標準輸出，接上 `gcloud compute ssh aegis-tokyo --zone asia-northeast1-a --tunnel-through-iap --command "<第 2 步>"` 的標準輸入。（`relay/machine/tools-provision.mjs` 是同類寫法的參考，但它會在本機註冊；此處要改成只開邀請碼並送出。）
 2. Aegis 上執行（邀請碼從標準輸入讀進環境變數，不進命令列、不進 shell 歷史）：
    `umask 077; mkdir -p /home/cwen0708/.asn-rs; ASN_HOME=/home/cwen0708/.asn-rs ASN_INVITE="$(cat)" /opt/node22/bin/node /home/cwen0708/asn/relay/machine/register.mjs --id aegis-rs --name "Aegis（試跑）" --machine aegis-tokyo --kind other --set-node`
    `register.mjs` 只輸出一行不含金鑰的 JSON；金鑰寫進 `/home/cwen0708/.asn-rs/aegis-rs.key` 並設為 600（寫完讀回比對）。若回 `bad_id_prefix`，代號要加上回報的前綴（`register.mjs --suggest`）；回 `id_taken` 換名。
@@ -378,7 +378,7 @@ WantedBy=multi-user.target
 | 10 | 同機 `aegis.service` 負載（4 核 16 GB，已用約 3.7 GB） | Rust 橋極輕（Node 橋 RSS 約 73 MB），風險低 | 以 `ps` 對照；Rust 預期更小 |
 | 11 | 規劃過時風險：`docs/design/BRIDGE-RUST.md` 寫「Node 橋仍保留給 Linux 雲端與 Aegis」，與本案方向相反；`HANDOFF` 記 #12 裁「全 Rust 重寫」 | 文件互相矛盾 | 本案提交時同步修 `BRIDGE-RUST.md`、`HANDOFF.md`、`relay/machine/README.md` 的 Aegis 章節 |
 
-## 10. 待小良哥或相關人確認
+## 10. 待擁有者或相關人確認
 
 1. Aegis 的 `/agent-chat/ask` 之後會不會改版／加認證？（OneStack 的 Aegis 維護者）
 2. Grok Bot 沙盒：能不能下載並執行 Linux 二進位？CPU 架構？有沒有網域白名單？（只能在沙盒裡查，需請 Grok 自己回報 `uname -m` 等）

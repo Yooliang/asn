@@ -59,9 +59,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${Q2}', '助理', 'claude');`)
@@ -103,7 +103,7 @@ test('實跑：回覆帶出引用（原作者、種類、一行摘要），且�
   assert.ok(r.seq, JSON.stringify(r))
   const out = await readAs(db, { node: P1, room, signed: U1 })
   const m = msgOf(out, r.seq)
-  assert.equal(m.reply_to.seq, a.seq); assert.equal(m.reply_to.from_kind, 'ai'); assert.equal(m.reply_to.from_label, '財務（小良）')
+  assert.equal(m.reply_to.seq, a.seq); assert.equal(m.reply_to.from_kind, 'ai'); assert.equal(m.reply_to.from_label, '財務（擁有者）')
   assert.ok(!m.reply_to.excerpt.includes('\n') && [...m.reply_to.excerpt].length <= 80 && m.reply_to.excerpt.startsWith('第一行 第二行'), m.reply_to.excerpt)
   assert.deepEqual(m.mentions, [A], '自動 @ 原作者：沒寫 @名字 也記進 mentions')
   assert.equal(msgOf(out, a.seq).reply_to, null, '沒回覆別人的訊息 reply_to 為 null')
@@ -116,10 +116,10 @@ test('實跑：引用行不進摘要（回覆的回覆摘要取下面的內容�
   const db = await boot()
   const room = await room1(db)
   const a = await ai(db, room, '原話')
-  const b = await human(db, room, '↩ 回覆 財務（小良）：原話\n@財務（小良） 這是我的意見', { reply: a.seq, mentions: [A] })
+  const b = await human(db, room, '↩ 回覆 財務（擁有者）：原話\n@財務（擁有者） 這是我的意見', { reply: a.seq, mentions: [A] })
   const c = await ai(db, room, '收到', { reply: b.seq })
   const out = await readAs(db, { node: P1, room, signed: U1 })
-  assert.equal(msgOf(out, c.seq).reply_to.excerpt, '@財務（小良） 這是我的意見')
+  assert.equal(msgOf(out, c.seq).reply_to.excerpt, '@財務（擁有者） 這是我的意見')
 })
 
 test('實跑：舊用戶端相容——不帶 reply_to 照舊、指向不存在的序號只當沒引用；七個參數的舊呼叫仍可用', { skip }, async () => {

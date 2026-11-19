@@ -1,7 +1,7 @@
 # 多裝置同步：要不要換掉「長輪詢＋門鈴」？
 
 2026-10-02。對應進度表 #110。**只評估，沒有改任何程式、沒有部署。**
-起因：小良哥問「ws 或 realtime db 可不可以」，後來又補了 Firebase Realtime Database（下稱 RTDB），並要求 RTDB 裡只放指標、不放機敏資料。
+起因：擁有者問「ws 或 realtime db 可不可以」，後來又補了 Firebase Realtime Database（下稱 RTDB），並要求 RTDB 裡只放指標、不放機敏資料。
 行號都是這份文件寫成時（main `9c4d8bd` 之後）的行號。標「估」的數字是我讀程式推的，**沒有實測**，驗證辦法在第 6 節階段 0。
 
 ## 0. 結論
@@ -108,7 +108,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 - **延遲（估）**：後端到前端 0.1～0.4 秒；比現在省掉「喚醒函式→再讀資料庫→組回應」的 0.2～0.7 秒。
 - **可靠度**：Broadcast 是盡力送達，不保證不漏。官方有「重播」功能，但只限私有頻道、要給 `since`、最多 25 則、只含資料庫端 `realtime.send` 的訊息、保留 72～96 小時；公開頻道沒有重播。客戶端要自己做心跳（至少每 25 秒）與斷線重連（官方範例退避 1、2、5、10 秒）。所以 **`updates_log`＋`since` 必須保留**，每次重連打一次 `GET /updates?since=<seq>&wait=0` 補洞，並以 `seq` 去重。
 - **安全**：
-  - **WebSocket 網址必須帶 `apikey` 查詢參數**（官方 Realtime Protocol 文件：「API key is a required query parameter」）。前端就得持有 anon／publishable key → **抵觸紅線，要小良哥裁示**。
+  - **WebSocket 網址必須帶 `apikey` 查詢參數**（官方 Realtime Protocol 文件：「API key is a required query parameter」）。前端就得持有 anon／publishable key → **抵觸紅線，要擁有者裁示**。
   - 官方文件沒說明能不能拿**使用者的 access token** 當 `apikey` 用。這件事可以用半小時實驗判定（用 `wscat` 帶使用者 token 當 apikey 連連看，**我沒做，因為不能碰金鑰與登入憑證**）；若可行，紅線問題就消失，但不改變下面的結論。
   - 現在的門鈴是 **public 頻道**（inbox.ts:207 `private:false`），頻道名由使用者 id 雜湊（state.ts:87-90）。因為不帶內容，洩漏頂多是「有事發生」。**一旦帶內容，必須改成私有頻道＋RLS**，否則任何持有 anon key、知道頻道名的人都收得到，**而且也能發**（偽造 say）。
   - RLS 要寫在 `realtime.messages`，這張表是**整個專案共用**；同專案的正見／ditrust 使用者用 Google 登入也會拿到 `authenticated` JWT，所以 policy 不能只寫 `to authenticated`，必須釘死 owner uid（或查一張 owner 清單表）。現在 irori-api 是靠 `IRORI_OWNER_EMAILS`＋`email_confirmed_at` 把關（index.ts:51、80），policy 要做到等效。
@@ -150,7 +150,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 
 ### 方案 4：Firebase Realtime Database（RTDB 只放指標）
 
-小良哥的前提：RTDB 不放機敏資料，只放 1、2 筆。照這個前提，設計如下：
+擁有者的前提：RTDB 不放機敏資料，只放 1、2 筆。照這個前提，設計如下：
 
 - 每位使用者一個節點 `/p/<hash>`＝`{ seq, state_seq, speaker, at }`（`hash` 同 `stateTopic` 的作法，由後端在 `/updates` 回應裡下發，前端不需要知道 owner uuid）。內容（say、聊天、信、記憶）一律不進 RTDB。
 - 裝置監聽這個節點；`seq` 變大就 `GET /updates?since=<local>&wait=0` 拉真正內容。**Supabase 先寫、RTDB 後寫**，RTDB 寫失敗只記 log；前端留一個 60～120 秒的保底輪詢。
@@ -161,7 +161,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 |---|---|---|
 | Rules | `{"rules":{".read":false,".write":false,"p":{"$h":{".read":true,".write":false}}}}`；後端用服務帳戶寫（Admin 身分不受 Rules 限制） | `"$uid":{".read":"$uid===auth.uid"}`；寫入仍只有後端 |
 | 前端怎麼連 | 瀏覽器原生 `EventSource('https://…firebasedatabase.app/p/<hash>.json')`，**不需要 SDK、不需要 Auth、不需要 apiKey**；Android 用 OkHttp 串流 | irori-api 驗 Supabase JWT 後簽 custom token（RS256，Deno 自己簽，約 40 行），前端 `signInWithCustomToken`。**SDK 初始化與 identitytoolkit 都要 Firebase Web `apiKey`** |
-| 紅線 | 前端只有資料庫網址（和 `SUPABASE_URL` 同性質），**不抵觸** | 前端要持有 `apiKey`。它是公開識別碼、可用網域／套件限制，但小良哥的紅線寫「前端零金鑰」，**要裁示**；「由後端 `/status` 下發」只是不進 repo，前端還是拿得到，**不能當作符合紅線** |
+| 紅線 | 前端只有資料庫網址（和 `SUPABASE_URL` 同性質），**不抵觸** | 前端要持有 `apiKey`。它是公開識別碼、可用網域／套件限制，但擁有者的紅線寫「前端零金鑰」，**要裁示**；「由後端 `/status` 下發」只是不進 repo，前端還是拿得到，**不能當作符合紅線** |
 | 洩漏面 | 知道路徑的人能讀到 4 個值（序號、speaker 的 client_id、時間）。等同現在 public 門鈴頻道（state.ts:87-90）的曝險，不含任何內容 | 只有本人能讀 |
 | 能做 onDisconnect 在線偵測嗎 | **不能**（要客戶端寫入，得開放寫入權限，等於路徑變成金鑰） | 能（客戶端可寫 `presence/<uid>/<client>`），但要 apiKey |
 
@@ -221,7 +221,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 3. 目前 0.4～1.2 秒（估）的推送延遲，對「字幕與動作跟上」已經夠用；缺口 5 的 1 秒誤差不值得為它引入新管道；
 4. 方案 1 要打破紅線（或要賭一個未驗證的做法）；方案 4 可以零金鑰，但只放指標之後延遲沒有更好、還要雙寫與多一家供應商；方案 2b 是最完整的設計，但是工程量最大、現在的需求用不到。
 
-**保險條款（不是第二個選項，是「什麼情況下回頭重評」）**：階段 0 量到任一條才重評——(a) 推送到收到的 p95 超過 2 秒；(b) 減負之後 Edge Function 用量仍超過方案額度 60%；(c) 小良哥明確要毫秒級的裝置間同步。屆時 (a)(b) 的第一選擇是方案 4 路線 A（零金鑰、最小、免費），(c) 重評方案 2b。
+**保險條款（不是第二個選項，是「什麼情況下回頭重評」）**：階段 0 量到任一條才重評——(a) 推送到收到的 p95 超過 2 秒；(b) 減負之後 Edge Function 用量仍超過方案額度 60%；(c) 擁有者明確要毫秒級的裝置間同步。屆時 (a)(b) 的第一選擇是方案 4 路線 A（零金鑰、最小、免費），(c) 重評方案 2b。
 
 ## 6. 分階段落地
 
@@ -254,7 +254,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 
 ### 階段 3：保險（只有觸發條件成立才做）
 
-**【2026-10-03 小良哥改裁示提前做，#120】** 方案 4 路線 A 已實作，規格、約定、上線步驟見 `SIGNAL.md`（保底輪詢 300 秒、離開判斷 450 秒、speaker 存活期 400 秒、兩個 secret 都沒設時整個功能關閉）。以下是當時的規劃原文。
+**【2026-10-03 擁有者改裁示提前做，#120】** 方案 4 路線 A 已實作，規格、約定、上線步驟見 `SIGNAL.md`（保底輪詢 300 秒、離開判斷 450 秒、speaker 存活期 400 秒、兩個 secret 都沒設時整個功能關閉）。以下是當時的規劃原文。
 
 方案 4 路線 A：建 RTDB 實例與 Rules（只開 `/p/$h` 公開讀）、後端加 `notify()` 寫指標、前端 `EventSource` 加保底輪詢。**先在 irori-api 側加一個 feature flag，可隨時退回純門鈴。**
 
@@ -264,7 +264,7 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 2. **重演造成 state 風暴**（階段 1 第 2 項）：沒有 `replay` 旗標就會連跳 `state_seq`。上線前要用兩台實測 `state_seq` 的增量。
 3. **去重鍵不一致**：`origin_client` 在網頁是 `sessionStorage` 的 UUID（lease.js:10-23，每個分頁一個）、在 App 是 SharedPreferences 的 `app-<uuid>`；同瀏覽器多分頁另有 `localStorage` 搶標記（main.js:313）。三套並存，鏡像要避免「發話那台又重播一次」或「誰都不播」，需要逐一測。
 4. **數字全是估**：延遲、用量都沒實測（階段 0 的目的）。如果專案已經在 Pro，成本就不急；如果在 Free，階段 0 第 3 項要提前。
-5. **紅線**：本建議不需要前端放任何 key。若日後改走方案 1 或方案 4 路線 B，必須先請小良哥裁示；「由後端下發 config」不能算符合。
+5. **紅線**：本建議不需要前端放任何 key。若日後改走方案 1 或方案 4 路線 B，必須先請擁有者裁示；「由後端下發 config」不能算符合。
 6. **共用專案**：方案 1 會碰 `realtime.messages` 的 policy 與共用的連線／訊息配額，會影響正見／ditrust；方案 3 不碰。
 7. **排程器依賴**：只要有人想「減少輪詢」就會誤傷提醒與收信（1.2）。階段 2 動維護路徑時，提醒與收信處理要有測試守著（`reminders_test.ts`、`partner_feed_test.ts` 現成）。
 8. **缺口 6 的修法是前端單方面**：瀏覽器在 `pagehide` 時 `keepalive` 請求不保證送達（盡力而為），所以 `DEVICE_TTL_S` 的兜底仍要留；崩潰、斷網還是最長 180 秒。

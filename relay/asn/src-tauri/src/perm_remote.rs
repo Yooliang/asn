@@ -4,7 +4,7 @@
 //! 也涵蓋 AI 用選項框問的問題（AskUserQuestion）：單選能按，多選和一次多題看得到但不能按。
 //!
 //! 夥伴畫面原本不離開電腦，這裡是唯一的例外：只有權限框和選項框的文字與選項，只有 Claude 夥伴，只有這一個入口。
-//! `term_remote` 拒絕夥伴視窗的規則不動。內容經後台、只給本人，沒有端對端加密（小良哥定，設備金鑰放 0.2.7）。
+//! `term_remote` 拒絕夥伴視窗的規則不動。內容經後台、只給本人，沒有端對端加密（擁有者定，設備金鑰放 0.2.7）。
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 

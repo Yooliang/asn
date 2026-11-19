@@ -26,7 +26,7 @@ test('電腦版名單與對話視窗：廠商小圖疊在頭像右下角，跟�
   assert.match(html, /<asn-avatar class="pin-av" :src="avOf\(t\)" :friend="!t\.panel &amp;&amp; !t\.room \? t : null"/, '釘選分頁（面板、群組不放小圖）')
   for (const s of ['<asn-avatar class="to-av"', '<asn-avatar size="xl" :src="friendAv"', '<asn-avatar :src="friendAv"']) assert.ok(pane.includes(s), `對話視窗缺 ${s}`)   // 上方、側欄大頭、訊息旁
   assert.match(comp, /<span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge">/, '小圖裝飾用、不念')
-  assert.match(css, /\.avb-v\{position:absolute;right:-5px;bottom:-5px/, '跟手機一樣疊在頭像右下角（小良哥 10/27 傍晚）')
+  assert.match(css, /\.avb-v\{position:absolute;right:-5px;bottom:-5px/, '跟手機一樣疊在頭像右下角（擁有者 10/27 傍晚）')
 
   assert.match(css, /\.avb\.off \.avb-v\{opacity:\.6;filter:grayscale\(1\)\}/, '離線整顆灰階')
 })

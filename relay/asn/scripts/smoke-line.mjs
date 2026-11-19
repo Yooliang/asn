@@ -47,7 +47,7 @@ export const lineProbeSource = kind => `(async () => {
   const cs = (el, p, pseudo) => getComputedStyle(el, pseudo).getPropertyValue(p).trim();
   const skinNow = () => document.documentElement.dataset.skin;
   if (!(await wait(() => skinNow() === 'line', 40))) return { ok: false, why: 'LINE 外觀：' + '存檔選了 LINE，畫面卻是 ' + (skinNow() || '沒有設定') };
-  // 自己泡泡的顏色寫成變數，亮綠（小良哥拍板）
+  // 自己泡泡的顏色寫成變數，亮綠（擁有者拍板）
   const me = cs(document.documentElement, '--line-me').toLowerCase();
   if (me !== '#9be685') return { ok: false, why: 'LINE 外觀：' + '--line-me 應該是 #9be685：' + me };
   const probeBg = document.createElement('div'); probeBg.style.cssText = 'background:var(--line-me);position:fixed;left:-99px;top:0;width:1px;height:1px'; document.body.appendChild(probeBg);

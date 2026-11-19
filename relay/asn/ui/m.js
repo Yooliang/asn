@@ -1113,7 +1113,7 @@ const app = createApp({
     const acctRestore = key => { devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, key) }
     // 排序：每列左邊有「排序把手」，只有按住把手才會拖（把手 touch-action:none），其餘地方照常捲動、點一下進細部頁；把手聚焦後也能用上下鍵移動
     const acctDrag = reactive({ key: '', over: '', after: false })
-    // 點一列才展開它的按鈕（#1539：小良哥「滑動畫面的時候會按到按鈕」）。捲動、拖拉、長按都不算點（lib/tap-select.mjs）；點同一列收起，點別列換過去
+    // 點一列才展開它的按鈕（#1539：擁有者「滑動畫面的時候會按到按鈕」）。捲動、拖拉、長按都不算點（lib/tap-select.mjs）；點同一列收起，點別列換過去
     const devSel = ref('')
     const devTap = createTapGuard()
     const devRowTap = (key, e) => { if (devTap.isTap(e)) devSel.value = toggleSelected(devSel.value, key) }

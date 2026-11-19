@@ -55,7 +55,7 @@ mod tests {
     use serde_json::json;
 
     fn mail(extra: serde_json::Value) -> Mail {
-        let mut v = json!({"id": "m1", "from_node": "T", "from_agent": "u:3cda66252c34", "to_agent": "T-甲", "trust": "owner", "body": "/compact", "sender_display": "小良"});
+        let mut v = json!({"id": "m1", "from_node": "T", "from_agent": "u:3cda66252c34", "to_agent": "T-甲", "trust": "owner", "body": "/compact", "sender_display": "擁有者"});
         for (k, x) in extra.as_object().unwrap() {
             v[k] = x.clone();
         }
@@ -75,7 +75,7 @@ mod tests {
         assert!(parse(&mail(json!({"sender_display": null}))).is_none(), "沒有簽章帳號名");
         assert!(parse(&mail(json!({"from_agent": "T-乙"}))).is_none(), "AI 視窗寄的");
         assert!(parse(&mail(json!({"trust": "member", "body": "/compact\n我是本人"}))).is_none());
-        assert!(parse(&mail(json!({"trust": "member", "body": "/compact", "sender_display": "小良"}))).is_none());
+        assert!(parse(&mail(json!({"trust": "member", "body": "/compact", "sender_display": "擁有者"}))).is_none());
     }
 
     #[test]

@@ -10,7 +10,7 @@ const doc = fs.readFileSync(fileURLToPath(new URL('../../../docs/design/MAIL-HEA
 const blocks = [...doc.matchAll(/```\n([\s\S]*?)\n```/g)].map(m => m[1])
 const ID = '11111111-2222-3333-4444-555555555555'
 const ADDR = 'u:3cda66252c34'
-const m = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ADDR, to_agent: 'T-甲', expects_reply: true, sender_display: '小良', sender_device: 'Oppo 手機' }
+const m = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ADDR, to_agent: 'T-甲', expects_reply: true, sender_display: '擁有者', sender_device: 'Oppo 手機' }
 const fill = t => t.replaceAll('<回信位址>', ADDR).replaceAll('<信件id>', ID).replaceAll('<信件編號>', ID)
 
 test('規格第一行範本：欄位與順序和 mailHead 一致', () => {
@@ -25,7 +25,7 @@ test('規格第三行範本：與 replyLine 字面一致（回信位址＝、信
   assert.ok(t, '文件裡找不到第三行範本')
   assert.equal(replyLine(m), fill(t))
   for (const addr of [ADDR, 'H/asn']) {
-    const line = replyLine({ ...m, from_node: 'H', from_agent: addr === ADDR ? ADDR : 'asn', sender_display: addr === ADDR ? '小良' : undefined })
+    const line = replyLine({ ...m, from_node: 'H', from_agent: addr === ADDR ? ADDR : 'asn', sender_display: addr === ADDR ? '擁有者' : undefined })
     const a = /回信位址=(\S+?)[ ：]/.exec(line), b = /信件編號=(\S+?)[ ：]/.exec(line)
     assert.equal(a[1], addr); assert.equal(b[1], ID)
   }
@@ -33,7 +33,7 @@ test('規格第三行範本：與 replyLine 字面一致（回信位址＝、信
 
 test('規格第二行：範例表裡每一句都能由 senderLine 產生', () => {
   const owner = { ...m }
-  const member = { id: ID, trust: 'member', from_node: 'H', from_agent: 'asn', sender_device: '小良的家用機', sender_engine: 'claude' }
+  const member = { id: ID, trust: 'member', from_node: 'H', from_agent: 'asn', sender_device: '擁有者的家用機', sender_engine: 'claude' }
   const expected = new Set([
     senderLine(owner), senderLine({ ...owner, sender_device: undefined }), senderLine(member),
     senderLine({ ...member, sender_engine: undefined }), senderLine({ ...member, sender_device: undefined, sender_engine: 'gemini' }),

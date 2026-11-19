@@ -192,7 +192,7 @@ revoke all on function public.asn_node_create(uuid, text, text, text, text, text
 grant execute on function public.asn_node_create(uuid, text, text, text, text, text) to service_role;
 
 -- 一次性管理流程：讓指定 email 的帳號認領舊租戶（預設序號 1，也就是現有 16 個節點所在的租戶）。
--- 由管理者在 SQL 編輯器執行：select public.asn_admin_adopt_tenant('小良哥的 email');
+-- 由管理者在 SQL 編輯器執行：select public.asn_admin_adopt_tenant('擁有者的 email');
 -- 該帳號若已經在登入時自動建了一個空租戶，會先刪掉它（有節點就拒絕，避免誤刪）；舊租戶底下沒有主人的節點一併掛到此帳號。
 create or replace function public.asn_admin_adopt_tenant(p_email text, p_serial integer default 1)
  returns jsonb
