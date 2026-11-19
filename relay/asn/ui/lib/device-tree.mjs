@@ -4,7 +4,7 @@ import { deviceNameOf } from './device-known.mjs'
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
 import { launchDeviceRows } from './partner-launch-ui.mjs'
-import { isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { deviceFriends, isDeviceHidden, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
@@ -61,7 +61,8 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null, nodeFacts = null, version = '' } = {}) {
+export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null, nodeFacts = null, version = '' } = {}) {
+  const friends = deviceFriends(allFriends)   // 通知對話不是設備（#1830）
   const rows = launchDeviceRows(friends, { selfNode, nodeNames, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL, nodeNames })
@@ -85,7 +86,8 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
     // 雲端夥伴（#930）：只標記，不改這裡的分組與顯示（之後的 PR 才用它分出「雲端夥伴」）
-    // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線
+    // 夥伴全部明確離線（status 是 offline）才算；名單沒帶狀態＝不知道，不算離線。
+    // 這裡刻意不用設備層級的在線白名單（roster.mjs）：它把「沒帶狀態、不認得的值」當成不在線，而雲端判斷要的是相反——只有明確寫 offline 才算離線，不確定就不下結論（#1830）
     const partnersOffline = mine.length > 0 && mine.every(f => String(f.status ?? '').toLowerCase() === 'offline')
     const judged = isCloudNode({ phone, self: isSelf, asnOnline, rep: reports[node], engines: mine.map(f => engineKey(f)), partnersOffline })
     // 離線時判不出來（null）就沿用本機記住的「上次判成雲端」；cloudStore＝下次要不要繼續記住（呼叫端存回本機）

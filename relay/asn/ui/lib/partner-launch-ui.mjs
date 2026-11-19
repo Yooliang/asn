@@ -1,7 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
-import { isAsnWindow } from './roster.mjs'
-import { applyDeviceOrder, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
+import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { deviceNameOf } from './device-known.mjs'
 
 export const DISPLAY_MODES = [
@@ -68,7 +68,8 @@ export function canLaunchOnNode(nodeKey, ctx) {
 
 /** 設備列：本機優先，其餘照名單順序 */
 // removed＝使用者「永久移除」的設備（設定 → 設備與帳號）：跟設備頁籤一樣不列出來（本機不會被移除）
-export function launchDeviceRows(friends, { selfNode, nodeNames = null, nodeOrder = [], deviceOrder = [], removed = [] }) {
+export function launchDeviceRows(allFriends, { selfNode, nodeNames = null, nodeOrder = [], deviceOrder = [], removed = [] }) {
+  const friends = deviceFriends(allFriends)
   const byNode = new Map()
   for (const f of friends) {
     if (isDeviceRemoved(f.node, removed, { selfNode })) continue
@@ -85,7 +86,7 @@ export function launchDeviceRows(friends, { selfNode, nodeNames = null, nodeOrde
   }
   for (const [k, row] of byNode) if (!seen.has(k)) out.push(row)
   // 排序：本機第一；其餘「有人在線」的設備在前、整台都離線的排後面（各組內維持原順序）。左邊頁籤、設定的設備頁籤、手機的設備順序共用這一份
-  const online = new Set(friends.filter(f => f.status !== 'offline' && !isAsnWindow(f)).map(f => f.node))
+  const online = new Set(friends.filter(f => isDeviceLiveStatus(f.status) && !isAsnWindow(f)).map(f => f.node))
   const rank = r => (r.key === selfNode ? 0 : online.has(r.key) ? 1 : 2)
   const auto = out.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(x => x.r)
   return applyDeviceOrder(auto, { selfNode, deviceOrder })   // 手動順序（設定檔 deviceOrder）蓋過自動規則
