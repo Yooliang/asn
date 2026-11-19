@@ -113,11 +113,11 @@ export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="
 // ---------- 名單 ----------
 // 單欄名單：所有設備的夥伴放在同一頁，依設備分組（本機那組在最前），有搜尋字就只留符合的。
 // 組內線上在前、離線在後。回傳 [{ key, label, node, items }]
-export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', deviceOrder = [], plainText = s => s, pins = null } = {}) {
+export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', nodeNames = null, deviceOrder = [], plainText = s => s, pins = null } = {}) {
   const q = normalizeSearchQuery(query)
   const cmp = pins ? pinnedRecentOrder(pins) : null   // #1729：釘選在前，其餘照最新訊息時間
   const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)), cmp)
-  return groupItems(items, 'device', { selfNode, selfName, deviceOrder, cmp })
+  return groupItems(items, 'device', { selfNode, selfName, nodeNames, deviceOrder, cmp })
 }
 export const totalUnread = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f) && !isMergedAway(f)).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)   // 含「通知」對話的未讀
 

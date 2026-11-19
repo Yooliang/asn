@@ -15,6 +15,29 @@ export const displayDeviceName = name => {
   return s && !s.includes('指紋') && !looksLikeFingerprint(s) ? s : ''
 }
 
+/**
+ * 名單成員 → { 節點: 後台記的設備名（nodes.name）}。名字是每台設備自己的，不靠它底下有沒有夥伴（#1803：手機沒有夥伴列）。
+ * 只做清理（去頭尾空白、非字串丟掉），要不要顯示由 deviceNameOf 判斷
+ */
+export function nodeNamesOf(members) {
+  const out = {}
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m.id !== 'string' || typeof m.name !== 'string') continue
+    const n = m.name.trim()
+    if (n) out[m.id] = n
+  }
+  return out
+}
+
+/**
+ * 一台設備要顯示的名字（電腦版、手機版所有地方都只用這一個函式讀）：先看後台記的名字（nodeNames），
+ * 沒有再借這台底下夥伴帶的 device（舊後台、名單還沒讀到時的退路），再沒有用 fallback；都不合格回空字串
+ * （呼叫端自己決定寫「未命名」或「這支手機」）
+ */
+export function deviceNameOf(node, { nodeNames = null, friends = [], fallback = '' } = {}) {
+  return displayDeviceName(nodeNames?.[node]) || displayDeviceName((friends ?? []).find(f => f?.node === node && f.device)?.device) || displayDeviceName(fallback)
+}
+
 /** 設備名檢查：合規回空字串，不合規回中文提示 */
 export function deviceNameError(name) {
   const raw = String(name ?? '')

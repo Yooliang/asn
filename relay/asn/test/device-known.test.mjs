@@ -41,8 +41,8 @@ test('改名失敗：錯誤顯示在名字下面，開始改名與取消時清�
   assert.match(panel, /if \(view\.value === 'rename'\) act\('device-rename-clear'\)/, '離開改名頁時也清')
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const fn = list.slice(list.indexOf('async function renameDevice('), list.indexOf('async function forgetKnown('))
-  assert.ok(fn.indexOf("invoke('device_rename'") < fn.indexOf('return null') && fn.indexOf('return null') < fn.indexOf('core.refreshRoster()'), '重讀名單在改名成功之後、另外接錯誤')
-  assert.match(list, /watch\(selfDeviceName, n => \{ if \(!nickFocus\.value\) nickText\.value = n \}\)/, '輸入中不被名單刷新蓋掉')
+  assert.ok(fn.indexOf('renameDeviceCall(invoke') < fn.indexOf('return null') && fn.indexOf('return null') < fn.indexOf('core.refreshRoster()'), '重讀名單在改名成功之後、另外接錯誤')
+  assert.doesNotMatch(list, /commitNick|nickFocus|nickText/, '#1803：電腦左上角的設備名只顯示，不能改')
 })
 
 test('shortFp：前 8 字，4 個一組', () => {
@@ -78,5 +78,5 @@ test('顯示用名字：像指紋或含「指紋」的當成沒有名字（設�
   const { normalizeView } = await import('../ui/lib/known-peers.mjs')
   assert.equal(normalizeView({ peers: [{ node: 'pc', name: '工作機 a93cc519', fingerprint: 'a93cc519' }] }).peers[0].label, '未命名的電腦')
   const tree = fs.readFileSync(new URL('../ui/lib/device-tree.mjs', import.meta.url), 'utf8')
-  assert.match(tree, /const named = displayDeviceName\(/)
+  assert.match(tree, /const named = deviceNameOf\(/)
 })

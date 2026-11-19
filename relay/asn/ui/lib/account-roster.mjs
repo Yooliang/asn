@@ -4,6 +4,7 @@
 //   { now, accounts: [{ vendor, account, plan, windows:[{ name, left_pct, resets_at, read_at, read_node }], seen_at, seen_node, nodes:[{ node, current, reported_at }] }] }
 //   windows 空陣列＝沒有額度資料；nodes 空陣列＝目前沒有任何一台還在回報它（後台保留 30 天）。
 // 後台沒部署、沒登入、回錯（404／forbidden）時一律當「沒有列表」（null），畫面退回各設備自己回報的數字。
+import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { OLD_TEXT, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
@@ -65,10 +66,8 @@ export function shortDevice(label, max = DEVICE_MAX) {
 }
 
 /** 節點 → 設備名稱：名單裡那台的 device 欄；本機用 selfLabel；對不到寫「未命名設備」 */
-export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台電腦' } = {}) {
-  const names = new Map()
-  for (const f of Array.isArray(friends) ? friends : []) if (f?.node && f.device && !names.has(f.node)) names.set(f.node, String(f.device))
-  return node => names.get(node) || (node && node === selfNode ? selfLabel : UNNAMED_DEVICE)
+export function nodeLabelOf(friends = [], { selfNode = '', selfLabel = '這台電腦', nodeNames = null } = {}) {
+  return node => deviceNameOf(node, { nodeNames, friends }) || (node && node === selfNode ? selfLabel : UNNAMED_DEVICE)
 }
 
 // 沒有 5 小時窗的帳號（Ultra 等，#1736）：Claude 狀態列只送每週，後台還留著改方案前最後一筆 5 小時。

@@ -165,7 +165,7 @@ test('開新夥伴精靈的小修（#378 截圖）：「進階」不重複、沒
   assert.ok(node && node.includes('partnerDlg.node &amp;&amp;') && node.includes('&amp;&amp; partnerDlg.deviceLabel"'), '「設備：」要有選到設備且有名稱才顯示')
   const sum = html.split('\n').find(l => l.includes('class="partner-sum"'))
   assert.ok(sum && sum.includes('<template v-if="partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">'), '摘要的設備段沒有名稱就不顯示（不留尾巴的「・」）')
-  assert.match(js, /partnerDlg\.deviceLabel = friends\.value\.find\(f => f\.node === nodeKey\)\?\.device \|\| nodeKey/, '裝置名稱是空字串也退回節點代號')
+  assert.match(js, /partnerDlg\.deviceLabel = deviceNameOf\(nodeKey, \{ nodeNames: nodeNames\.value, friends: friends\.value \}\) \|\| nodeKey/, '裝置名稱是空字串也退回節點代號')
   assert.match(js, /if \(partnerDlg\.node\) for \(const n of \[2, 3\]\)/, '截圖沒選到設備就不切到第 2、3 頁')
 })
 

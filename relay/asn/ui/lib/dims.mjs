@@ -2,6 +2,7 @@
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
 import { applyDeviceOrder } from './device-order.mjs'
+import { deviceNameOf } from './device-known.mjs'
 import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { DEVICE_TAB_MAX, deviceTabs, displayVendorKey, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
@@ -35,7 +36,7 @@ const sumTab = (t, friends) => { for (const f of friends) { t.total++; if (onlin
 
 // 頁籤清單 { all, visible, more }；每項 { key, label, short, dot, unread, online, total, empty }
 // 設備：本機第一、照名單順序、消失但有紀錄的排最後；廠商：Claude、Gemini、Grok、Codex、DeepSeek、其他字母、「其他」最後；狀態：固定四個。
-export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = [], deviceOrder = [], shown = [], removed = [], max = DEVICE_TAB_MAX } = {}) {
+export function pageTabs(friends, dim, { selfNode, selfName = '', nodeNames = null, nodeOrder = [], deviceOrder = [], shown = [], removed = [], max = DEVICE_TAB_MAX } = {}) {
   let all, hidden = []
   const seen = friends   // 設備頁籤要看全部（ASN 視窗讓設備存在，但 deviceTabs 不計它）
   if (dim !== 'device') friends = withoutAsn(friends)
@@ -47,7 +48,7 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
     all = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
       .map(k => sumTab({ key: k, label: engineLabel(k), short: '', vendorKey: k, dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
   } else {
-    const dt = deviceTabs(seen, { selfNode, selfName, nodeOrder, deviceOrder, shown, removed, max })
+    const dt = deviceTabs(seen, { selfNode, selfName, nodeNames, nodeOrder, deviceOrder, shown, removed, max })
     all = dt.all.map(t => ({ ...t, dot: '' }))
     hidden = dt.hidden
   }
@@ -67,14 +68,14 @@ export function pageItems(friends, dim, key, match = () => true, cmp = null) {
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名
 // deviceOrder＝帳號層的設備順序（和「分頁依設備」同一份）：設備分組也照它排，沒列在裡面的接在後面（照設備名）
-export function groupItems(items, groupDim, { selfNode, selfName = '', deviceOrder = [], cmp = null } = {}) {
+export function groupItems(items, groupDim, { selfNode, selfName = '', nodeNames = null, deviceOrder = [], cmp = null } = {}) {
   if (groupDim === 'device') {
     const by = new Map()
     for (const f of items) {
       const k = f.node ?? ''
-      if (!by.has(k)) by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: (k === selfNode && selfName) || f.device || UNNAMED_DEVICE, items: [] })
+      if (!by.has(k)) by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: (k === selfNode && selfName) || deviceNameOf(k, { nodeNames, fallback: f.device }) || UNNAMED_DEVICE, items: [] })
       const g = by.get(k)
-      if (f.device && g.label === UNNAMED_DEVICE) g.label = f.device
+      if (g.label === UNNAMED_DEVICE) g.label = deviceNameOf(k, { nodeNames, fallback: f.device }) || UNNAMED_DEVICE   // 先出現的是沒帶名字的離線舊好友：後面的夥伴有名字就用它
       g.items.push(f)
     }
     const byLabel = [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))

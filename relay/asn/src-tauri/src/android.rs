@@ -577,5 +577,7 @@ pub async fn android_known_rename(window: tauri::WebviewWindow, app: State<'_, A
     if let Some(n) = v.get("name").and_then(serde_json::Value::as_str) {
         let _ = crate::device_id::live::rename_peer(&app.data_dir, &node, n);
     }
-    Ok(v)
+    // 改的是這支手機自己：本機視窗名跟著換成後台那一份（#1803）
+    r.presence_wake.notify_one();
+    Ok(crate::follow_self_rename(&app, r.as_ref(), &node, v))
 }
