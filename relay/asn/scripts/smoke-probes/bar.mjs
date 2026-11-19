@@ -42,8 +42,8 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
           if (left.length) return { ok: false, why: '「管理」裡還有喚醒' };
           wb.click();
           let dlg = null;
-          for (let j = 0; j < 30 && !dlg; j++) { await sleep(100); dlg = document.querySelector('.dlg[role="dialog"][aria-label="喚醒"]') }
-          if (!dlg) return { ok: false, why: '點了喚醒沒有開喚醒對話框' };
+          for (let j = 0; j < 30 && !dlg; j++) { await sleep(100); dlg = document.querySelector('.dlg[role="dialog"][aria-label="喚醒"]') || document.querySelector('.op-strip-row') }   // #1800：喚醒送出後對話框會收起，進度改在提示列就地顯示，兩者擇一
+          if (!dlg) return { ok: false, why: '點了喚醒沒有開喚醒對話框，也沒有就地的進度' };
         } else if (wb && wimg !== 'img/ab-window.svg') return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
         if (wantItems) {
           tb.click();
