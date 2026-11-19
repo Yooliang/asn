@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 
 // #1808 第 10 組守門：群組點名 Gemini審查 收不到轉交（#1366／#1486／#1602／#1685）。
 // 靜態守門（比照 dup-session-guard.test.mjs）：讀 Rust 原始碼，確認「說法要準、看過不回不算失敗、上游 5xx 重試且保留原文」這些修法還在。
 // 注意：#1670（#1366 關閉後仍收不到）目前沒有對應修法，這裡不守它。
-const src = rel => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src-tauri/src', rel), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
-const prod = s => s.split('#[cfg(test)]')[0]
+import { blockAfter, fnCode, prod, src, stripComments } from './helpers/rust-guard.mjs'
 
 test('#1366 守門：群組失敗通知帶出固定白話原因，而且不貼原文', () => {
   const f = prod(src('bridge/core/fail_notice.rs'))
@@ -18,7 +14,10 @@ test('#1366 守門：群組失敗通知帶出固定白話原因，而且不貼�
   const t = f.split('fn room_notice_text')[1].split('\n}\n')[0]
   assert.match(t, /room_fail_reason\(why\)/, '通知文字要用原因分類')
   assert.match(t, /轉交給 \{name\} 沒有成功：\{r\}/)
-  assert.doesNotMatch(t.split('upstream_5xx')[0] + t.split('room_fail_reason')[1], /\{why\}（|：\{why\}。/, '一般通知不能把原文 why 貼進群組')
+  // 一般通知（去掉系統管理員那一支，它貼的是固定常數 ELEVATED_WHY）：why 只准拿去分類，一個字都不准格式化進文字
+  const body = fnCode(f, 'fn room_notice_text(')
+  const general = body.replace('if why == ELEVATED_WHY ' + blockAfter(body, /if why == ELEVATED_WHY \{/).text, '')
+  assert.doesNotMatch(general.split('room_fail_reason(why)').join('').split('upstream_5xx(why)').join(''), /\bwhy\b/, '一般通知不能把原文 why 貼進群組（只准給 room_fail_reason／upstream_5xx 分類）')
 })
 
 test('#1602 守門：上游 5xx 擋下這一輪，通知寫「那邊暫時出錯」，不寫「沒有轉交」', () => {
@@ -62,8 +61,13 @@ test('#1685 守門：上游 5xx（括號 code 5xx＋HTML response 兩特徵）�
   assert.match(u, /html response/)
   assert.match(u, /\(code /)
   assert.match(u, /starts_with\('5'\)/)
-  const w = src('bridge/engines/acp_worker.rs')
-  assert.match(w, /is_network_error\(&e\.message\) \|\| upstream_5xx\(&e\.message\)\.is_some\(\)/, '重試條件要含上游 5xx')
+  const w = stripComments(src('bridge/engines/acp_worker.rs'))
+  // 兩個地方都要認 5xx：第一次判斷要不要重試（net_err）、重試後判斷是否仍失敗（still）。各自取出那一句，不數出現次數
+  for (const v of ['net_err', 'still']) {
+    const stmt = new RegExp('let ' + v + ' = [^\\n]*;').exec(w)
+    assert.ok(stmt, `找不到 let ${v}`)
+    assert.match(stmt[0], /is_network_error\(&e\.message\) \|\| upstream_5xx\(&e\.message\)\.is_some\(\)/, `${v} 的條件要含上游 5xx`)
+  }
   assert.match(w, /still && up\.is_none\(\)/, '5xx 再試仍失敗不能改寫成「連不上」，要留原文')
   assert.match(w, /e\.had_steps \|\| cfg\.protocol != "agy-stream"/, '動過手就不重送')
   assert.match(w, /（這一輪可能做了一半）/)
