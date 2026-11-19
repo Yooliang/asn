@@ -433,9 +433,9 @@ jobs:
           mapfile -t pkgs < <(grep -vE '^\s*(#|$)' "$GITHUB_WORKSPACE/.github/apt-build-packages.txt")
           bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" "${pkgs[@]}"
 
-      # 不論後面哪一步失敗都存（腳本失敗時也會把已下載的 .deb 留在快取目錄）；已命中就不重存
+      # 只在安裝成功時存（失敗的半套 .deb 不能佔住這週的 key，否則之後都命中殘缺快取）；已命中就不重存。
       - name: 儲存 apt 套件快取
-        if: always() && steps.aptcache.outputs.cache-hit != 'true' && steps.aptinstall.outcome != 'skipped'
+        if: steps.aptinstall.outcome == 'success' && steps.aptcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/apt-cache

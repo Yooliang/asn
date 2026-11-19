@@ -107,7 +107,5 @@ for round in $(seq 1 "$ROUNDS"); do
   sudo dpkg --configure -a || true
 done
 
-# 失敗也把已下載完的 .deb 留給快取目錄（workflow 的存快取步驟 always 會跑）
-save_cache
 echo "::error::apt 安裝 $ROUNDS 輪都失敗"
 exit 1
