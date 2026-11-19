@@ -72,5 +72,9 @@ test('#1253 通知種類 mux_down／mux_blind 在介面通知中心與後台 rel
   assert.match(notice, /mux_blind: 'stuck'/)
   const relay = rd('supabase/functions/relay/index.ts')
   assert.match(relay, /action === "mux_down_notice"/)
-  assert.ok(fs.existsSync(new URL('../supabase/migrations/20261112200000_mux_down_empty.sql', import.meta.url)), '沒有夥伴的通知 migration 要在')
+  // 不寫死 migration 檔名：只要任何一支 migration 定義了「看不到服務」的通知函式就算（檔名會因整理而改）
+  const dir = new URL('../supabase/migrations/', import.meta.url)
+  const defs = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).filter(f => /create\s+(or\s+replace\s+)?function\s+public\.asn_relay_mux_blind_notice\s*\(/i.test(fs.readFileSync(new URL(f, dir), 'utf8')))
+  assert.ok(defs.length >= 1, '後台要有 asn_relay_mux_blind_notice 函式（任一支 migration 定義即可）')
+  assert.match(relay, /asn_relay_mux_blind_notice/, 'relay 要呼叫它')
 })
