@@ -47,6 +47,7 @@ async function boot({ mutate, skip: skipFiles = [] } = {}) {
     create function cron.schedule(n text, s text, c text) returns bigint language sql as $$ insert into cron.job(jobname,schedule,command) values (n,s,c) returning jobid::bigint $$;
     create function cron.unschedule(n text) returns boolean language sql as $$ delete from cron.job where jobname=n returning true $$;`)
   for (const f of files) {
+    if (f > MIG) break // 這支測的是 #1445 當時的函式；之後的 migration（例如網頁版重新定義同一支函式）不在這裡驗
     if (skipFiles.includes(f)) continue
     let sql = read(f)
     if (mutate && mutate[f]) sql = mutate[f](sql)
