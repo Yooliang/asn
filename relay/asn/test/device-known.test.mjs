@@ -78,5 +78,5 @@ test('顯示用名字：像指紋或含「指紋」的當成沒有名字（設�
   const { normalizeView } = await import('../ui/lib/known-peers.mjs')
   assert.equal(normalizeView({ peers: [{ node: 'pc', name: '工作機 a93cc519', fingerprint: 'a93cc519' }] }).peers[0].label, '未命名的電腦')
   const tree = fs.readFileSync(new URL('../ui/lib/device-tree.mjs', import.meta.url), 'utf8')
-  assert.match(tree, /const named = displayDeviceName\(/)
+  assert.match(tree, /const named = deviceNameOf\(/)
 })

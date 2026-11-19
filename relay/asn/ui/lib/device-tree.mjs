@@ -1,4 +1,4 @@
-import { displayDeviceName } from './device-known.mjs'
+import { deviceNameOf } from './device-known.mjs'
 // 設定「設備與帳號」分類：設備 → 廠商 → 帳號 三層（廠商的 accounts 是帳號清單，畫面一個帳號一列）（純邏輯，node 與瀏覽器都能跑）。
 // 設備一律用設備名稱，不顯示節點代號與夥伴 ID；沒回報的顯示「未回報」。
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
@@ -61,10 +61,10 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [] } = {}) {
-  const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null } = {}) {
+  const rows = launchDeviceRows(friends, { selfNode, nodeNames, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
-  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })
+  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL, nodeNames })
   // 別台設備一個帳號的額度：列表有就用列表，沒有就用那台回報的（舊的回報只有 Claude 有額度）
   const remoteQuota = (k, a) => {
     const e = look(k, a.email)
@@ -75,7 +75,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const node = d.key
     const isSelf = node === selfNode
     const mine = friends.filter(f => f.node === node)
-    const named = displayDeviceName(mine.find(f => f.device)?.device ?? '')
+    const named = deviceNameOf(node, { nodeNames, friends: mine })
     const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()

@@ -114,7 +114,7 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
   launch_prefs_get: null,
   launch_cwd_candidates: [],
   update_remote_status: null,
-  win_ctl: null, set_presence: null, set_window_name: null, set_tray_unread: null, show_main: null, close_panels: null, close_chats: null, capture_ui_ready: null,
+  win_ctl: null, set_presence: null, device_name_align: { state: 'ok' }, set_tray_unread: null, show_main: null, close_panels: null, close_chats: null, capture_ui_ready: null,
   // 故意沒放的指令（例如 android_update_check、ai_cli_detect）：呼叫會被拒絕，模擬真機沒註冊它的情況
 })
 

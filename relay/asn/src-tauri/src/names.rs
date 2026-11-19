@@ -76,6 +76,40 @@ pub fn rename(relay: &Relay, data_dir: &Path, work_dir: &Path, raw: &str, now: u
     Ok(name)
 }
 
+/// 本人在設備頁替「這台」改了名字、後台已經記好了（#1803）：本機的視窗名跟著換成同一個，
+/// 這樣個人頁、寄信的「從 X」、在線回報、收信的名字都和後台那一份一致，不再有第二份。
+/// 走的就是 [`rename`]（舊名進清單、改名前寄來的回信還收得到、寫新名心跳）。
+/// 改的不是這台（別台設備）回 Ok(None)，什麼都不動；已經一樣也回 Ok(None)。名字被視窗名規則擋下（例如系統保留字）回 Err，呼叫端只記 log、不影響後台已改好的名字。
+/// 成功回 Ok(Some(新視窗名))
+pub fn follow_device_rename(relay: &Relay, data_dir: &Path, work_dir: &Path, node: &str, new_name: &str, now: u64) -> Result<Option<String>, String> {
+    if node != relay.node || relay.window_name() == new_name.trim() {
+        return Ok(None);
+    }
+    rename(relay, data_dir, work_dir, new_name, now).map(Some)
+}
+
+/// 啟動時把本機視窗名和後台的設備名對齊一次（#1803）。以後台為準：
+/// - 後台名字能用（backend_ok）且和本機不同 → 本機換成後台的（回 Align::UseBackend(名字)）
+/// - 後台名字不能用（空、像指紋；backend_ok＝false）而本機名字是本人取過的（custom）→ 要用本機名字送一次 device_rename（回 Align::PushLocal(名字)，要有登入簽章才送，沒有就等下次）
+/// - 其餘不動
+/// backend＝名單裡這個節點的 name；backend_ok＝後台名字合規（device_name_ok 同一套）；custom＝settings.json 有 window_name
+#[derive(Debug, PartialEq)]
+pub enum Align {
+    Keep,
+    UseBackend(String),
+    PushLocal(String),
+}
+pub fn align_with_backend(local: &str, custom: bool, backend: &str, backend_ok: bool) -> Align {
+    let b = backend.trim();
+    if backend_ok && !b.is_empty() {
+        return if b == local { Align::Keep } else { Align::UseBackend(b.to_string()) };
+    }
+    if custom && validate_name(local).is_ok() && crate::device_id::display_name_ok(local) {
+        return Align::PushLocal(local.trim().to_string());
+    }
+    Align::Keep
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +172,40 @@ mod tests {
         // 8 天後舊名過期，不再收
         assert_eq!(r.active_names_at(now + 8 * DAY), vec!["H-ASN".to_string()]);
         assert!(heartbeat::heartbeat_file(w.path(), "小希").exists());
+    }
+
+    #[test]
+    fn 設備頁改名_本機視窗名跟著換_別台不動() {
+        let d = tempfile::tempdir().unwrap();
+        let w = tempfile::tempdir().unwrap();
+        let r = Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "H".into(), "H-ASN".into());
+        let now = 50 * DAY;
+        // 別台設備：不動
+        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "W", "工作機", now).unwrap(), None);
+        assert_eq!(r.window_name(), "H-ASN");
+        // 這台：視窗名換成後台的名字、舊名進清單
+        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "Oppo 手機", now).unwrap(), Some("Oppo 手機".to_string()));
+        assert_eq!(r.window_name(), "Oppo 手機");
+        assert_eq!(read_old_names(d.path()), vec![o("H-ASN", now)]);
+        // 已經一樣：不動
+        assert_eq!(follow_device_rename(&r, d.path(), w.path(), "H", "Oppo 手機", now + 1).unwrap(), None);
+        // 視窗名規則擋下（系統保留字）：回錯、視窗名不變
+        assert!(follow_device_rename(&r, d.path(), w.path(), "H", "家用收發室", now + 2).is_err());
+        assert_eq!(r.window_name(), "Oppo 手機");
+    }
+
+    #[test]
+    fn 啟動對齊_以後台為準() {
+        // 後台名字能用且不同：本機跟後台
+        assert_eq!(align_with_backend("H-ASN", false, "Oppo 手機", true), Align::UseBackend("Oppo 手機".into()));
+        assert_eq!(align_with_backend("舊名", true, "Oppo 手機", true), Align::UseBackend("Oppo 手機".into()));
+        // 一樣：不動
+        assert_eq!(align_with_backend("Oppo 手機", true, "Oppo 手機", true), Align::Keep);
+        // 後台名字不能用、本機是本人取過的合格名字：送一次 device_rename
+        assert_eq!(align_with_backend("Oppo 手機", true, "n1a2b3c4d-ASN", false), Align::PushLocal("Oppo 手機".into()));
+        assert_eq!(align_with_backend("Oppo 手機", true, "", false), Align::PushLocal("Oppo 手機".into()));
+        // 本機名字不是本人取的（預設名）、或本機名字也不合格：不動
+        assert_eq!(align_with_backend("H-ASN", false, "", false), Align::Keep);
+        assert_eq!(align_with_backend("n1a2b3c4d-ASN", true, "", false), Align::Keep);
     }
 }

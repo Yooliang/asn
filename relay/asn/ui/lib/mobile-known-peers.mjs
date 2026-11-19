@@ -7,6 +7,7 @@
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
 import { invoke as tauriInvoke } from './tauri.mjs'
 import { displayDeviceName } from './device-known.mjs'
+import { renameDevice } from './device-rename.mjs'
 import { UNNAMED, NAME_MAX, clean as cleanText } from './known-peers.mjs'
 
 // 清掉控制字元與雙向字元：和電腦版同一個（known-peers.mjs），手機多一步前後去空白
@@ -203,8 +204,8 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
      */
     rename: async (node, name) => {
       if (!node) return null
-      const r = await invoke('android_known_rename', { node, name: String(name ?? '').trim() })
-      return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true } : null
+      const r = await renameDevice(invoke, { node, name, phone: true })
+      return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true, ...(r.self_renamed === true ? { selfRenamed: true, windowName: String(r.window_name ?? '') } : {}) } : null
     },
   }
 }

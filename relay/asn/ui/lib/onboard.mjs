@@ -13,7 +13,7 @@ export const TEXT = {
   accountHead: '你的名字',
   accountHint: '帳號的名字，所有設備共用，對方看到的就是它。例如「啟良」。',
   deviceHead: '這台設備的名稱',
-  deviceHint: '只有這台用，例如「手機」「家用機」。預設帶這台的名稱，可以直接改。',
+  deviceHint: '所有設備看到的都是這個名字，例如「手機」「家用機」。預設帶這台的名稱，可以直接改，之後在設備頁也能改。',
   next: '下一步',
   done: '完成',
   saving: '儲存中…',

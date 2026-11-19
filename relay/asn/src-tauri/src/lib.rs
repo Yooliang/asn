@@ -1301,9 +1301,9 @@ async fn device_rename(app: State<'_, App>, auth: State<'_, auth::AuthState>, no
     if let Some(n) = v.get("name").and_then(Value::as_str) {
         let _ = device_id::live::rename_peer(&app.data_dir, &node, n);
     }
-    // 名單上別台設備盡快看到新名
+    // 名單上別台設備盡快看到新名；改的是這台自己時，本機視窗名跟著換（#1803）
     r.presence_wake.notify_one();
-    Ok(v)
+    Ok(follow_self_rename(&app, r.as_ref(), &node, v))
 }
 
 /// 本人在這台的設定頁勾「允許這支手機替這台登入」（#933）。**只有這個本機命令能改**（守門測試）；不送後台、不同步。
@@ -2840,17 +2840,58 @@ fn set_foreground(app: State<'_, App>, foreground: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
+/// 後台改名成功後（電腦的 device_rename、手機的 android_known_rename 共用）：改的是這台自己，本機視窗名跟著換成後台那一份（#1803）。
+/// 設備名稱只有一份（後台的 nodes.name），本機視窗名只是它的影子；沒有別的入口能改。
+/// 回的 JSON 多帶 self_renamed（本機視窗名有換）與 window_name，畫面據此就地更新；視窗名規則擋下時只記 log（後台那份已經改好）
+pub(crate) fn follow_self_rename(app: &App, relay: &Relay, node: &str, mut v: Value) -> Value {
+    let Some(n) = v.get("name").and_then(Value::as_str).map(String::from) else { return v };
+    match names::follow_device_rename(relay, &app.data_dir, &app.work_dir, node, &n, heartbeat::now_ms()) {
+        Ok(Some(w)) => {
+            v["self_renamed"] = Value::Bool(true);
+            v["window_name"] = Value::String(w);
+        }
+        Ok(None) => {}
+        Err(e) => elog!("設備改名後本機視窗名沒換：{e}"),
+    }
+    v
+}
+
+/// 啟動時把這台的視窗名和後台的設備名對齊一次（#1803，以後台為準；規則見 names::align_with_backend）。
+/// 回 { state: "ok" | "adopted" | "pushed" | "later", name? }：adopted＝本機換成後台的名字（畫面要就地更新並說一句話）；
+/// pushed＝後台名字不能用，用本機本人取過的名字送了一次改名；later＝要送但沒登入簽章或送不出去，下次啟動再試。失敗不影響其他功能
 #[cfg(feature = "gui")]
 #[tauri::command]
-fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
-    let relay = relay_of(&app)?;
-    let n = names::rename(relay.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())?;
-    // 改名成功後立刻叫醒在線狀態回報（名單上別台設備馬上看到新名）
-    relay.presence_wake.notify_one();
-    // 改名成功後把新視窗名同步成這台設備的顯示名；失敗只記 log，不影響改名
-    tauri::async_runtime::spawn(async move { relay.sync_device_name().await });
-    Ok(n)
+async fn device_name_align(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let list = r.list().await?;
+    let backend = list
+        .get("members")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(r.node.as_str())))
+        .and_then(|m| m.get("name").and_then(Value::as_str).map(String::from));
+    let Some(backend) = backend else { return Ok(serde_json::json!({ "state": "ok" })) };   // 名單裡還沒有這台：不動
+    let custom = read_settings_name(&app.data_dir).is_some();
+    let ok = device_id::display_name_ok(&backend);
+    match names::align_with_backend(&r.window_name(), custom, &backend, ok) {
+        names::Align::Keep => Ok(serde_json::json!({ "state": "ok" })),
+        names::Align::UseBackend(n) => match names::rename(r.as_ref(), &app.data_dir, &app.work_dir, &n, heartbeat::now_ms()) {
+            Ok(w) => Ok(serde_json::json!({ "state": "adopted", "name": w })),
+            Err(e) => {
+                elog!("對齊後台設備名沒成功：{e}");
+                Ok(serde_json::json!({ "state": "ok" }))
+            }
+        },
+        names::Align::PushLocal(n) => {
+            let token = account::signing_token(&auth).await;
+            match r.device_rename(&r.node, &n, token.as_deref()).await {
+                Ok(_) => Ok(serde_json::json!({ "state": "pushed" })),
+                Err(e) => {
+                    elog!("用本機名字補送設備改名沒成功：{e}");
+                    Ok(serde_json::json!({ "state": "later" }))
+                }
+            }
+        }
+    }
 }
 
 fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
@@ -3263,7 +3304,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -3280,7 +3321,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
-        set_presence, set_foreground, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
+        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
