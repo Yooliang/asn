@@ -52,7 +52,7 @@ import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRoster
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
+import { acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
@@ -1286,46 +1286,42 @@ const app = createApp({
       else history.back()
       await execOp(f, op, input)
     }
-    // 送出並顯示進度（#1800）：詳情的進度留在選單裡；其他動作就地顯示在對話頁頂端，成功幾秒後自己消失、失敗附「重試」
-    async function execOp(f, op, input) {
-      const token = ++opsToken
-      const inSheet = showsInSheet(op)
-      const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRuns.value = setRun(opsRuns.value, f.id, { op, view: v, input }) }
-      set({ phase: 'sent', done: false, text: '正在發送指令…' })
-      const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
-      if (!inSheet && v?.phase === 'done') {
-        await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
-        const next = renamedChatId(f, op, input, v)
-        if (next) opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
-        if (next) prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
-        if (next && lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
-      }
-      // 成功而且沒有補充要看：幾秒後自己消失（還是同一則才收，中間被新的操作蓋掉就不動）
-      const ms = !inSheet && v ? hideAfterMs(v) : 0
-      if (ms > 0) {
-        const rid = renamedChatId(f, op, input, v) || f.id
-        setTimeout(() => { if (runFor(opsRuns.value, rid)?.view === v) opsRuns.value = clearRun(opsRuns.value, rid) }, ms)
-      }
-    }
-    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明（對話頁在進度條上顯示）
+    // 送出並顯示進度（#1800）：詳情的進度留在選單裡；其他動作就地顯示在對話頁頂端，成功幾秒後自己消失、失敗附「重試」。
+    // 非詳情的操作（含封存）與電腦版共用同一份 createOpRunner：連按只認最後一次、重試、自動消失都在那裡
+    const opsRunState = { get runs() { return opsRuns.value }, set runs(v) { opsRuns.value = v } }
     let archiveNoteTimer = null
-    async function setArchived(f, archived) {
-      if (!f) return
-      const r = await runArchive(opsTransport, f, archived)
+    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果也用名單上方的一行字說明
+    const onArchived = async r => {
       if (r.ok) await core.refreshRoster()
       archiveNote.value = r.text
       clearTimeout(archiveNoteTimer)
       archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
-      opsRuns.value = setRun(opsRuns.value, f.id, { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } })
     }
+    const opRunner = createOpRunner({ api: opsTransport, state: opsRunState, run: makeOpRun({ onArchived }), onDone: d => { void afterOpDone(d) } })
+    async function afterOpDone({ op, view, friend: f, input }) {
+      if (op === 'archive' || op === 'unarchive') return
+      await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
+      const next = renamedChatId(f, op, input, view)
+      if (!next) return
+      opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
+      prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
+      if (lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
+      const ms = hideAfterMs(view)
+      if (ms > 0) setTimeout(() => { if (runFor(opsRuns.value, next)?.view === view) opsRuns.value = clearRun(opsRuns.value, next) }, ms)
+    }
+    async function execOp(f, op, input) {
+      if (!showsInSheet(op)) { await opRunner.start(f, op, input); return }
+      const token = ++opsToken
+      await runPartnerOp(opsTransport, f, op, input, {
+        onUpdate: v => { if (token === opsToken) ops.view = v },
+        cancelled: () => token !== opsToken,
+      })
+    }
+    const setArchived = (f, archived) => (f ? opRunner.start(f, archived ? 'archive' : 'unarchive', {}) : Promise.resolve(null))
     // 失敗後「重試」：用上一次送出的內容再送一次（詳情在選單裡重試）
-    const retryRun = () => {
-      const f = chatFriend.value
-      const r = runFor(opsRuns.value, f?.id)
-      if (f && r?.input) void execOp(f, r.op, r.input)
-    }
+    const retryRun = () => { const f = chatFriend.value; if (f) void opRunner.retry(f.id) }
     const retryInfo = () => { const f = opsFriend.value; if (f) void execOp(f, 'info', {}) }
-    const dismissRun = () => { opsRuns.value = clearRun(opsRuns.value, chatFriend.value?.id) }
+    const dismissRun = () => { const f = chatFriend.value; if (f) opRunner.dismiss(f.id) }
     // 喚醒找不到對話紀錄：收起橫幅，開「開新夥伴」並預選原夥伴所在的電腦
     const launchNewFromBanner = () => { const node = chatFriend.value?.node || ''; dismissRun(); openLaunch(node) }
     // ---------- 別台電腦／雲端代理要密碼（#26 第二期）：跳出確認面板，本人輸入後在 Rust 端加密才送出 ----------

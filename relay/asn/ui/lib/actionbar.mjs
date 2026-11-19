@@ -410,7 +410,7 @@ export const ActionBar = {
     showBack: { type: Boolean, default: false },   // 窄視窗單窗格時才有返回鍵（LINE 外觀）
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops', 'term', 'back', 'member'],   // member：點了群組「N 人離線」名單裡的人（#1515）
+  emits: ['call', 'ops', 'term', 'back', 'member', 'launch-new'],   // launch-new：喚醒找不到對話紀錄，請畫面開「開新夥伴」（#1800）；member：點了群組「N 人離線」名單裡的人（#1515）
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -426,6 +426,7 @@ export const ActionBar = {
     const opRun = reactive({ runs: {} })
     const opRunner = createOpRunner({ api: props.api, state: opRun })
     const onOpRun = e => { void opRunner.start(props.friend, e.op, e.input) }
+    const onLaunchNew = () => { opDlg.open = false; emit('launch-new', { node: props.friend?.node || '' }) }
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const isRoom = computed(() => props.friend?.room === true)
@@ -595,7 +596,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -651,8 +652,8 @@ export const ActionBar = {
       </ul>
     </div>
   </template>
-  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false" @run="onOpRun"></partner-op-dialog>
-  <partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip>
+  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false" @run="onOpRun" @launch-new="onLaunchNew"></partner-op-dialog>
+  <partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id" @launch-new="onLaunchNew"></partner-op-strip>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>

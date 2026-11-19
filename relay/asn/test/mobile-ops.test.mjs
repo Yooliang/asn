@@ -106,10 +106,11 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   const js = read('ui', 'm.js')
   assert.doesNotMatch(js, /\bopsRun\b/, '單一全域進度拿掉')
   assert.match(js, /const opsBanner = computed\(\(\) => runBanner\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)
-  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op, view: v, input \}\)/, '指令進度存在下指令那位（連同送出的內容，重試用）')
-  assert.match(js, /opsRuns\.value = setRun\(opsRuns\.value, f\.id, \{ op: 'archive'/, '封存也存在那位')
+  // #1800：非詳情的操作（含封存）改走電腦版共用的 createOpRunner，進度存在下指令那位（連同送出的內容，重試用）；行為測試在 op-progress-inline-1800.test.mjs
+  assert.match(js, /const opsRunState = \{ get runs\(\) \{ return opsRuns\.value \}, set runs\(v\) \{ opsRuns\.value = v \} \}/)
+  assert.match(js, /createOpRunner\(\{ api: opsTransport, state: opsRunState, run: makeOpRun\(\{ onArchived \}\)/)
   assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
-  assert.match(js, /const dismissRun = \(\) => \{ opsRuns\.value = clearRun\(opsRuns\.value, chatFriend\.value\?\.id\) \}/)
+  assert.match(js, /const dismissRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.dismiss\(f\.id\) \}/)
 })
 
 // ---------- 頁面接線 ----------

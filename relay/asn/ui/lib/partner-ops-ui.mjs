@@ -6,10 +6,13 @@ import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
 import { ACP_NEWCONV_LABEL, ADOPT_ACK, LAUNCH_NEW_ACTION, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
+import { runArchive } from './archive.mjs'
 import { clearRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
+// 寫進 ui.log 的原文要完整，不截斷（開發紀律三之 2）
+const rawText = e => String(e?.message ?? e ?? '').trim() || '原因不明'
 
 // 查「能不能管理」要用的設定：有沒有登入、各台電腦在線與否與開放與否。查不到的一律當沒查到（loaded:false → 反灰並說明）
 export async function loadOpsContext(api) {
@@ -33,7 +36,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
   const sentAt = now()
   let id = ''
   try { id = (await api.partnerOp(buildOpRequest(friend, op, input)))?.id ?? '' } catch (e) {
-    console.info('[ASN] 夥伴操作送出失敗', op, errText(e))   // 原文進 log，畫面只講白話
+    console.info('[ASN] 夥伴操作送出失敗', op, rawText(e))   // 原文進 log，畫面只講白話
     const v = failView(opErrorText(e?.message))
     // 後台在送出時就回 no_session（這位夥伴沒有可接回的對話紀錄）：和電腦端回報找不到紀錄一樣，附「開新夥伴」
     if (op === 'resume' && /HTTP \d+ ?no_session\b/.test(String(e?.message ?? ''))) v.action = { kind: LAUNCH_NEW_ACTION }
@@ -48,9 +51,23 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
     try { row = ((await api.partnerOps([id]))?.ops ?? []).find(o => o?.id === id) ?? null } catch { /* 暫時連不上：繼續等，太久由 progressView 判逾時 */ }
     const v = progressView(row ?? { status: 'pending' }, { op, sentAt, now: now() })
     if (op === 'info' && row?.status === 'ok') v.rows = infoRows(row.result, friend)
+    // 後台回報失敗、沒確認、等太久：原文（row.detail）進 log，畫面只講白話
+    if (v.done && v.phase !== 'done') console.info('[ASN] 夥伴操作失敗', op, v.phase, rawText(row?.detail ?? row?.status ?? '等太久沒有結果'))
     onUpdate(v)
     if (v.done) return v
   }
+}
+
+// 就地進度要跑的動作：一般夥伴操作走 runPartnerOp，封存／取消封存走 runArchive，兩者都回同一種 view，這樣手機的封存失敗也能「重試」。
+// onArchived(r)：封存結果出來時的畫面副作用（重新拉名單、名單上方一行字），由各頁面傳入
+export const makeOpRun = ({ onArchived = async () => {}, archive = runArchive } = {}) => async (api, friend, op, input, h = {}) => {
+  if (op !== 'archive' && op !== 'unarchive') return runPartnerOp(api, friend, op, input, h)
+  const r = await archive(api, friend, op === 'archive')
+  if (!r.ok) console.info('[ASN] 封存失敗', op, r.text)
+  await onArchived(r)
+  const v = { phase: r.ok ? 'done' : 'failed', done: true, text: r.text }
+  h.onUpdate?.(v)
+  return v
 }
 
 // 夥伴操作的「就地進度」（#1800）：送出後對話框收起，進度顯示在畫面上的提示列（電腦版）／對話頁頂端（手機版），做完自己消失；

@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createOpRunner, runPartnerOp } from '../ui/lib/partner-ops-ui.mjs'
+import { createOpRunner, makeOpRun, runPartnerOp } from '../ui/lib/partner-ops-ui.mjs'
 import { OP_DONE_HIDE_MS, OP_GIVE_UP_MS, OP_PROGRESS_TEXT } from '../ui/lib/partner-ops.mjs'
 import { runBanner } from '../ui/lib/mobile-ops.mjs'
 
@@ -146,4 +146,77 @@ test('#1800 留框的進度：按鈕文字只能是「關閉」，不能有全�
   assert.match(html, /@click="closeLaunch">\{\{ OP_PROGRESS_TEXT\.close \}\}</)
   const bad = walk('ui/').filter(f => /先關閉（|先關掉（|不查了/.test(read(f)))
   assert.deepEqual(bad, [])
+})
+
+// ---- 一審退回的四點（asn西川）：以下都是行為測試，真的跑函式、看按了之後發生什麼 ----
+const quiet = async fn => { const o = console.info; const logs = []; console.info = (...a) => logs.push(a.join(' ')); try { await fn(logs) } finally { console.info = o } }
+
+test('#1800 封存失敗：橫幅有「重試」，按了後台真的再收到一次封存請求（手機與電腦共用 createOpRunner＋makeOpRun）', async () => {
+  await quiet(async logs => {
+    const calls = []
+    const api = { partnerArchive: async b => { calls.push(b); if (calls.length === 1) throw new Error('partner_archive HTTP 500 boom'); return { ok: true } } }
+    const state = { runs: {} }
+    const runner = createOpRunner({ api, state, run: makeOpRun({ archive: undefined }), setTimer: () => 0, clearTimer: () => {} })
+    const f = F('H', '小文')
+    await runner.start(f, 'archive', {})
+    const b = runBanner(state.runs[f.id])
+    assert.equal(b.phase, 'failed'); assert.equal(b.retry, true)
+    assert.equal(calls.length, 1)
+    await runner.retry(f.id)
+    assert.equal(calls.length, 2, '按重試後後台再收到一次')
+    assert.equal(state.runs[f.id].view.phase, 'done')
+    assert.ok(logs.some(l => /封存失敗/.test(l)))
+  })
+})
+
+test('#1800 連按只認最後一次：舊的最後才回來，畫面仍是新的、舊的不會排自動消失', async () => {
+  const state = { runs: {} }
+  const gate = []
+  const timers = []
+  const run = (a, f, op, input, o) => new Promise(res => { gate.push(() => { const v = { phase: 'done', done: true, text: op }; o.onUpdate(v); res(v) }) })
+  const runner = createOpRunner({ api: {}, state, run, setTimer: (fn, ms) => { timers.push(ms); return timers.length }, clearTimer: () => {} })
+  const f = F('H', '小文')
+  const p1 = runner.start(f, 'restart', {})
+  const p2 = runner.start(f, 'close', {})
+  gate[1](); await p2
+  assert.equal(state.runs[f.id].view.text, 'close')
+  const nTimers = timers.length
+  gate[0](); await p1                       // 舊的最後才回來
+  assert.equal(state.runs[f.id].op, 'close', '畫面仍是新的那次')
+  assert.equal(state.runs[f.id].view.text, 'close')
+  assert.equal(timers.length, nTimers, '舊的不會再排一個自動消失')
+})
+
+test('#1800 手機非詳情操作走共用 runner（不再自己 set 進度、沒有第二份「只認最後一次」）', () => {
+  const js = read('ui/m.js')
+  assert.match(js, /createOpRunner\(\{ api: opsTransport/)
+  assert.match(js, /opRunner\.start\(f, op, input\)/)
+  assert.doesNotMatch(js, /setRun\(opsRuns\.value, f\.id, \{ op, view: v, input \}\)/)
+})
+
+test('#1800 後台回報失敗、沒確認：原文完整寫進 log（不截斷），畫面只有白話', async () => {
+  const longDetail = 'window_not_found: ' + 'x'.repeat(200) + ' END'
+  for (const [row, phase] of [[{ status: 'failed', detail: longDetail }, 'failed'], [{ status: 'unconfirmed', detail: longDetail }, 'unconfirmed']]) {
+    await quiet(async logs => {
+      const c = clock()
+      const v = await runPartnerOp(fakeApi([row]), F('H', '小文'), 'close', {}, { ...c, pollMs: 3000 })
+      assert.equal(v.phase, phase)
+      assert.doesNotMatch(v.text, /window_not_found|END/)
+      assert.ok(logs.some(l => l.includes(longDetail)), phase + '：原文完整進 log')
+    })
+  }
+  await quiet(async logs => {   // 送出失敗也要完整
+    const long = 'HTTP 500 ' + 'y'.repeat(200) + ' END'
+    await runPartnerOp({ partnerOp: async () => { throw new Error(long) }, partnerOps: async () => ({ ops: [] }) }, F('H', '小文'), 'close', {}, clock())
+    assert.ok(logs.some(l => l.includes(long)))
+  })
+})
+
+test('#1800 電腦功能列的提示列：喚醒找不到紀錄的「開新夥伴」有接線，並一路接到清單頁', () => {
+  const bar = read('ui/lib/actionbar.mjs'), list = read('ui/list.html')
+  assert.match(bar, /emits: \['call', 'ops', 'term', 'back', 'member', 'launch-new'\]/)
+  assert.match(bar, /<partner-op-strip [^>]*@launch-new="onLaunchNew"/)
+  assert.match(bar, /<partner-op-dialog [^>]*@launch-new="onLaunchNew"/)
+  assert.match(bar, /emit\('launch-new', \{ node:/)
+  assert.match(list, /<action-bar [^>]*@launch-new="launchNewFromOp"/)
 })
