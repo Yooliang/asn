@@ -77,7 +77,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
-import { ReloginBar, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
+import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
@@ -475,7 +475,7 @@ const app = createApp({
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
     // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
     watch(() => noticeLastAt(friends.value), (n, o) => { if (isNewNotice(o, n) && !cloudSt.created && !lchStep2.value) fourthNav.noticeArrived() })
-    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : '名單上還沒有夥伴。'))
+    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value === 'connecting' ? ROSTER_CONNECTING_TEXT : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
     const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))

@@ -16,6 +16,8 @@ export const ROOMS_NEED_LOGIN_TEXT = '需要重新登入才看得到所有群組
 export const roomsNoteText = ({ err = false, signed = true } = {}) => (err ? ROOM_LOAD_FAIL_TEXT : signed === false ? ROOMS_NEED_LOGIN_TEXT : '')
 /** 名單（夥伴列表）讀不到（連不上 ASN）時，在名單原本的位置說的一句話：電腦與手機同一句，講發生什麼事、要怎麼辦（#1808） */
 export const ROSTER_LOAD_FAIL_TEXT = '連不上 ASN，請檢查網路。'
+/** 名單還在連線中（還沒判成連不上也還沒連上）：電腦與手機同一句，不能說「沒有夥伴」或「連不上」（#1808） */
+export const ROSTER_CONNECTING_TEXT = '正在連上 ASN…'
 
 /** 群組列表的結果是不是「沒帶本人簽章」（後台只回得出這台的群組）；舊版 Rust 沒有 signed 欄位＝當作有簽章 */
 export const roomsUnsigned = r => r?.signed === false

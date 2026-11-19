@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRoomHub } from '../ui/lib/room-hub.mjs'
 import { ROOM_LOAD_FAIL_TEXT } from '../ui/lib/mobile-rooms.mjs'
-import { ROOMS_NEED_LOGIN_TEXT, ROSTER_LOAD_FAIL_TEXT, roomsNoteText } from '../ui/lib/relogin-bar.mjs'
+import { ROOMS_NEED_LOGIN_TEXT, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, roomsNoteText } from '../ui/lib/relogin-bar.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = p => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n')
@@ -80,6 +80,19 @@ test('#1808 名單讀不到：電腦與手機引用同一個常數，畫面上�
     assert.ok(!src.includes('還沒連上 ASN。') && !/'連不上 ASN，請檢查網路。'/.test(src), `${name} 不能再有內聯的名單讀不到字串`)
   }
   assert.equal(ROSTER_LOAD_FAIL_TEXT, '連不上 ASN，請檢查網路。')
+})
+
+test('#1808 名單連線中：電腦與手機都只能引用 ROSTER_CONNECTING_TEXT，不能內聯「正在連上」', () => {
+  assert.equal(ROSTER_CONNECTING_TEXT, '正在連上 ASN…')
+  for (const f of ['ui/list.js', 'ui/m.js']) {
+    const src = read(f)
+    assert.match(src, /\bROSTER_CONNECTING_TEXT\b[^\n]*from '\.\/lib\/relogin-bar\.mjs'/, `${f} 要從 relogin-bar.mjs 引用連線中的常數`)
+    assert.match(src, /conn\.value (?:!== 'on'|=== 'connecting') \? ROSTER_CONNECTING_TEXT/, `${f} 連線中要顯示這個常數`)
+    assert.ok(!src.includes('正在連上'), `${f} 不能內聯「正在連上」字串`)
+  }
+  // 全部 ui 檔：這句話只在 relogin-bar.mjs 定義一次
+  const defs = walk(path.join(root, 'ui')).filter(f => /\.(m?js|html)$/.test(f) && !f.includes('vendor') && fs.readFileSync(f, 'utf8').includes('正在連上 ASN'))
+  assert.deepEqual(defs.map(f => path.basename(f)), ['relogin-bar.mjs'])
 })
 
 test('#1135 #1253 #1611 #1727 後台回的失敗代碼都換成白話：對照表裡每句都有中文、沒有內部代號（真的 Rust 白話表）', () => {

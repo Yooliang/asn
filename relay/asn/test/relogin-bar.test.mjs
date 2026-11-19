@@ -137,7 +137,7 @@ test('群組讀不到：中樞記下失敗，原位有說明；登入失效時�
 })
 
 test('名單讀不到的說明本來就在原位（電腦與手機）', () => {
-  assert.match(read('ui/list.js'), /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT : conn\.value !== 'on' \? '正在連上 ASN…'/)
+  assert.match(read('ui/list.js'), /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT : conn\.value !== 'on' \? ROSTER_CONNECTING_TEXT/)
   assert.match(read('ui/m.js'), /conn\.value === 'off' \? ROSTER_LOAD_FAIL_TEXT/)
 })
 

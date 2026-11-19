@@ -652,6 +652,13 @@ const BASE_SCENARIOS = [
   { name: 'list-roster-fail-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-modern.png' },
   { name: 'm-roster-fail-line', page: 'm.html', state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-fail-line.png' },
   { name: 'list-roster-fail-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-line.png' },
+  // 名單還在連線中：假後台的名單與收信指令一直不回，核心停在連線中；同一句「正在連上 ASN…」
+  { name: 'm-roster-connecting', page: 'm.html', state: { signedIn: true, rosterConnecting: true }, ready: '#app.m .empty-list', shot: 'm-roster-connecting.png' },
+  { name: 'list-roster-connecting', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true }, ready: '#app.win .empty-list', shot: 'list-roster-connecting.png' },
+  { name: 'm-roster-connecting-modern', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-modern.png' },
+  { name: 'list-roster-connecting-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-modern.png' },
+  { name: 'm-roster-connecting-line', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-line.png' },
+  { name: 'list-roster-connecting-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-line.png' },
   { name: 'list-dev-fpmark', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark.png' },
   { name: 'list-dev-fpmark-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk', skin: 'modern' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark-modern.png' },
   { name: 'm-dev-select', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select.png' },
@@ -975,8 +982,9 @@ export const tableFor = scenario => {
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   // 探測檔自帶的假後台欄位（#1540）：table(scenario, t) 回傳要蓋上去的欄位，沒有就回 undefined
   // 名單讀不到：後台的名單指令不給回應（假後台對沒登記的指令會丟錯），核心判成連不上（#1808）
-  if (scenario.state.rosterFail) {
-    delete t.relay_list; delete t.relay_inbox
+  if (scenario.state.rosterConnecting) t.__hang = ['relay_list', 'relay_inbox']
+  if (scenario.state.rosterFail || scenario.state.rosterConnecting) {
+    if (scenario.state.rosterFail) { delete t.relay_list; delete t.relay_inbox }
     // 手機要停在「夥伴」分頁才看得到名單的空白說明
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...JSON.parse(t.store_load?.values?.me ?? '{}'), navTab: 'list' }) } }
   }
@@ -1014,6 +1022,7 @@ export const injectSource = table => `(() => {
     core: { invoke: async (cmd, args) => {
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
       (globalThis.__smokeCalls ||= []).push([cmd, args]);
+      if (Array.isArray(T.__hang) && T.__hang.includes(cmd)) return new Promise(() => {});   // 一直不回：核心停在連線中
       // 本機終端的假後台（__tvLive）：開了就每 100 毫秒推一幅，paused 時不推、恢復時補推一幅；__smokeTv.sent＝一共推了幾幅
       if (tv) {
         if (cmd === 'term_view_open') { clearInterval(tv.timer); tv.timer = setInterval(() => { if (!tv.paused) tvSend() }, 100); setTimeout(tvSend, 50); return tv.id }
