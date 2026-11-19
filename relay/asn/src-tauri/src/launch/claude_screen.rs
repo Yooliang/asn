@@ -705,12 +705,12 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
         }
     }
     let Some(menu) = parse_options(&lines[..last]) else {
-        // 底部沒有選單。底部那一塊（最後 MENU_CURSOR_LOOKBACK 行）還有選單游標的話，有東西在等但認不出來。
-        // 不算的 ❯：一般輸入列（分隔線下面、後面不是編號），以及更上面對話區裡出現的 ❯（例如模型回覆引用的「❯ 1.」）。
+        // 底部沒有認得的選單。底部那一塊（最後 MENU_CURSOR_LOOKBACK 行）有「選單形狀」的游標列，才算有東西在等但認不出來（#1799）。
+        // 只看到 ❯ 開頭不夠：視窗被捲動、重繪中或對話記錄模式時看不到輸入框，對話區裡使用者提問的回顯（`❯ 提問`）也會落在這一塊。
         // 範圍放到 16 行：真的選單底下可能還有預覽（例如第一次啟動選佈景，游標下面約 13 行）
         let bottom = lines.len().saturating_sub(MENU_CURSOR_LOOKBACK);
-        let cursors_bottom = (bottom..lines.len()).filter(|&i| lines[i].trim_start().starts_with(CURSOR) && !is_input_row(lines, i)).count();
-        return (cursors_bottom > 0).then(|| screen(ClaudeScreenKind::Attention, "", Vec::new(), 0, None, None));
+        let shaped = (bottom..lines.len()).any(|i| lines[i].trim_start().starts_with(CURSOR) && !is_input_row(lines, i) && menu_shaped_cursor(lines, i, footers > 0));
+        return shaped.then(|| screen(ClaudeScreenKind::Attention, "", Vec::new(), 0, None, None));
     };
     // 同一個區塊裡只能有一個游標：區塊從上一條分隔線算起
     let block_start = lines[..menu.above].iter().rposition(|l| is_rule(l)).map_or(0, |i| i + 1);
@@ -718,6 +718,21 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
     let kind_ok = cursors_in_block == 1;
     let context = lines[block_start..menu.above].join("\n");
     Some(judge(menu, kind_ok, &context, confirm_footer))
+}
+
+/// 這一列游標像不像選單的游標（#1799，只給「認不出的選單」的後備判斷用）。三條都要成立：
+/// 1. 緊鄰（上一列或下一列、中間沒有空行）有選項列：選項列的縮排比游標列深（文字對齊在 ❯ 之後）
+/// 2. 游標列之後到畫面底沒有對話標記（● ✻ ⎿ ⏺）：使用者提問的回顯後面一定接 Claude 的回覆，選單後面不會
+/// 3. 有操作提示頁尾，或游標列帶編號（`❯ 1. …`），或上下連著至少兩個選項列（選佈景那種沒有頁尾、沒有編號的清單）
+fn menu_shaped_cursor(lines: &[&str], i: usize, has_footer: bool) -> bool {
+    let indent = |l: &str| l.chars().take_while(|c| *c == ' ').count();
+    let is_dialogue = |l: &str| l.trim_start().starts_with(['●', '✻', '⎿', '⏺']);
+    let option_like = |l: &str| !l.trim().is_empty() && !is_rule(l) && !is_dialogue(l) && indent(l) > indent(lines[i]);
+    let above = lines[..i].iter().rev().take_while(|l| option_like(l)).count();
+    let below = lines[i + 1..].iter().take_while(|l| option_like(l)).count();
+    let no_dialogue_after = !lines[i + 1..].iter().any(|l| is_dialogue(l));
+    let body = lines[i].trim_start()[CURSOR.len_utf8()..].trim_start();
+    above + below >= 1 && no_dialogue_after && (has_footer || numbered(body).is_some() || above + below >= 2)
 }
 
 fn judge(m: Menu, single_cursor: bool, context: &str, confirm_footer: bool) -> ClaudeScreen {
@@ -1273,13 +1288,66 @@ mod tests {
 
     #[test]
     fn 認不出的選單游標在底部_照樣要人工確認() {
-        let text = "前面的內容
+        // #1799 有意調整：原本只有「 ❯ 甲 / 乙」兩列也算選單；現在要選單形狀（帶頁尾、帶編號，或連著至少兩個選項列）。
+        // 只有一個選項列又沒頁尾、沒編號的畫面，和對話區的提問回顯分不開，不再當選單
+        let with_footer = "前面的內容
 
 要選一個
  ❯ 甲
    乙
+
+Esc to cancel
 ";
-        assert_eq!(kind(text), Some(K::Attention), "{text}");
+        assert_eq!(kind(with_footer), Some(K::Attention), "{with_footer}");
+        let three = "前面的內容
+
+要選一個
+ ❯ 甲
+   乙
+   丙
+";
+        assert_eq!(kind(three), Some(K::Attention), "{three}");
+    }
+
+    #[test]
+    fn 單號1799_回顯加編號清單加表格_底部沒有輸入框_不是選單() {
+        // 視窗被捲動、輸入框不在畫面裡時，提問的回顯 `❯ 提問` 落在最後 16 行內
+        let text = fixture!("claude-1799-reply-list-table-no-input.synthetic");
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 單號1799_回顯本身是編號行_底部沒有輸入框_不是選單() {
+        let text = fixture!("claude-1799-echo-numbered-no-input.synthetic");
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 單號1799_完整畫面_回顯加清單加表格加空輸入框_不是選單() {
+        let text = fixture!("claude-1799-reply-list-table-idle.synthetic");
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 單號1799_編號回顯和後面的縮排清單隔著空行_不算緊鄰_不是選單() {
+        // 回顯的游標列帶編號，後面沒有 ● 標記（回覆開頭被捲走），但中間隔著空行：不是同一份選單
+        let text = "❯ 1. 照甲做
+
+  1. 讀設定檔
+  2. 改欄位
+";
+        assert_eq!(kind(text), None, "{text}");
+    }
+
+    #[test]
+    fn 單號1799_回顯後面緊接選項形狀的縮排行_只要後面有回覆就不是選單() {
+        // 使用者多行提問的回顯（第二行縮排）：後面接 ● 回覆，不算選單
+        let text = "❯ 1. 照甲做
+  2. 照乙做
+
+● 收到。
+";
+        assert_eq!(kind(text), None, "{text}");
     }
 
     #[test]

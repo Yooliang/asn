@@ -1,4 +1,7 @@
 {
+  "fixture/claude-1799-echo-numbered-no-input.synthetic.txt": null,
+  "fixture/claude-1799-reply-list-table-idle.synthetic.txt": null,
+  "fixture/claude-1799-reply-list-table-no-input.synthetic.txt": null,
   "fixture/claude-ask-user-question.txt": null,
   "fixture/claude-auto-mode-teach.txt": null,
   "fixture/claude-bypass-warning.synthetic.txt": null,

@@ -54,7 +54,7 @@ import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
-import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
+import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
@@ -102,7 +102,7 @@ import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
-import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall, syncPendingDeviceName } from './lib/device-rename.mjs'
+import { alignDeviceName, followSelfRename, renameDeviceFromPage, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -468,7 +468,7 @@ async function renameDevice(node, name) {
   known.busy = true
   let r
   try {
-    r = await renameDeviceCall(invoke, { node, name })
+    r = await renameDeviceFromPage(invoke, store(ONBOARD_STORE), { node, name })
     known.renameError = ''
     if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {
@@ -1666,7 +1666,7 @@ const app = createApp({
       const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items).filter(f => !isNoticeFriend(f))
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => flat || !tab.value || p.node === tab.value)), archived)
     })
-    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
+    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value !== 'on' ? ROSTER_CONNECTING_TEXT : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
     // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
