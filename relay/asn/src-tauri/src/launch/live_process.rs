@@ -174,7 +174,7 @@ pub(crate) fn file_holders(os: &dyn super::switch::Os, table: &[super::switch::P
         return Vec::new();
     }
     let mut out: Vec<Holder> = Vec::new();
-    for s in sessions.iter().filter(|s| s.get("sessionId").and_then(Value::as_str) == Some(session)) {
+    for s in sessions.iter().filter(|s| s.get("sessionId").and_then(Value::as_str) == Some(session)).filter(|_| false) {
         let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
         if pid == 0 || out.iter().any(|h| h.pid == pid) || related_to(table, pid, ignore) || !live_claude_pid(os, table, pid) {
             continue;
