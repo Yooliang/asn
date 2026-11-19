@@ -107,6 +107,20 @@ pub fn signout_line(now_ms: i64, detail: &str) -> String {
     format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", iso_secs(now_ms), detail)
 }
 
+/// 沒清掉登入、但值得留一行的事（不確定的錯誤、存檔失敗與重試）；detail 只有狀態碼、錯誤代碼、次數
+pub fn note_line(now_ms: i64, detail: &str) -> String {
+    format!("{} info [ASN] {}", iso_secs(now_ms), detail)
+}
+
+/// 上面那種記錄的寫入器（電腦寫 ui.log、手機寫同名檔；資料夾是空路徑就不寫）
+pub fn note_logger(dir: PathBuf) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {
+    std::sync::Arc::new(move |detail| {
+        if !dir.as_os_str().is_empty() {
+            append_line(&dir, &note_line(crate::heartbeat::now_ms() as i64, detail));
+        }
+    })
+}
+
 /// 把失敗記進 `dir` 的 ui.log（有節流）；資料夾是空路徑（截圖模式、還沒有節點金鑰）就不寫
 pub fn report_fail_to(dir: &Path, memo: &FailMemo, f: SigningFail, now_ms: i64) -> bool {
     if dir.as_os_str().is_empty() {
