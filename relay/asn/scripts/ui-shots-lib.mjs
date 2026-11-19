@@ -37,7 +37,8 @@ export const parseShotArgs = argv => {
 // ---------- 情境挑選 ----------
 export const scenarioWidth = s => s.width ?? (s.page.startsWith('m.html') ? 412 : 1100)
 export const scenarioSkin = s => s.state?.skin ?? 'aero'
-export const scenarioGroup = s => `${s.page.split('?')[0]}|${scenarioWidth(s)}|${scenarioSkin(s)}`
+// 設定頁基準情境（#1763 T3）自成一組：不然它們都落在「電腦 900 aero」之類的大組裡，--limit 60 輪流各取時永遠輪不到
+export const scenarioGroup = s => `${s.page.split('?')[0]}|${scenarioWidth(s)}|${scenarioSkin(s)}${s.probe?.setPage ? '|設定頁' : ''}`
 // 種子＝既有情境裡帶 shot 的子集；--only 是名稱片段（逗號分隔，任一符合）
 // 已知「同一份程式碼每次畫面都不同」的情境（量到才加，要寫原因）：預設排除，報告頂端會列出；--include-unstable 才跑
 export const UNSTABLE_SCENARIOS = {

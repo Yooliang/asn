@@ -155,6 +155,7 @@ async function runShot(cdp, sc, base, { wantCjk = false } = {}) {
       await sleep(300)
     }
     if (probeWhy) res.notes.push(`${probeKind(sc.probe)}：${probeWhy}`)
+    if (probeWhy && sc.probe?.setPage) res.problems.push(`設定頁沒有畫出來（${probeWhy}）`)   // 基準與新版同樣畫不出來也不能算「一致」（R9 假綠）
     try { const v = await evalValue(S, pagerSettleSource(), true); if (!v?.ok) res.notes.push(`截圖前：${v?.why || '等滑頁停下來時沒有回結果'}`) } catch (e) { res.notes.push(`截圖前：${e.message}`) }
     const fz = await evalValue(S, freezeSource(), true)
     if (fz?.dpr !== 1 || (fz?.scale ?? 1) !== 1) res.notes.push(`縮放不是 1（dpr ${fz?.dpr}、scale ${fz?.scale}）`)

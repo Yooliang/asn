@@ -52,6 +52,7 @@ export { photoBackProbeSource } from './smoke-probes/photoBack.mjs'
 export { photoZoomProbeSource } from './smoke-probes/photoZoom.mjs'
 export { quotaProbeSource } from './smoke-probes/quota.mjs'
 export { skinProbeSource } from './smoke-probes/skinCheck.mjs'
+export { SET_PHONE_360, SET_SCENARIOS, SET_SKINS, SET_STATE_GAPS, SET_STATE_MATRIX, SET_STATES, setPageProbeSource } from './smoke-probes/zSetPage.mjs'
 import { TASKMGR_RESUMING_SID } from './smoke-probes/taskmgr.mjs'
 export { TASKMGR_RESUMING_SID, taskmgrProbeSource } from './smoke-probes/taskmgr.mjs'
 export { UPD_DL_TOTAL, updDlProbeSource } from './smoke-probes/updDl.mjs'
@@ -994,6 +995,8 @@ export const injectSource = table => `(() => {
     },
     window: { getCurrentWindow: () => ({ startResizeDragging() {}, label: 'smoke' }) },
     core: { invoke: async (cmd, args) => {
+      if (T.__fail && Object.prototype.hasOwnProperty.call(T.__fail, cmd)) { (globalThis.__smokeCalls ||= []).push([cmd, args]); throw T.__fail[cmd] }   // 後台回錯誤（#1763 T3）：表裡的 __fail[指令]＝錯誤文字
+      if (T.__hang && T.__hang.indexOf(cmd) >= 0) { (globalThis.__smokeCalls ||= []).push([cmd, args]); return new Promise(() => {}) }   // 讀取中的畫面（#1763 T3）：這個指令永遠不回
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
       (globalThis.__smokeCalls ||= []).push([cmd, args]);
       // 本機終端的假後台（__tvLive）：開了就每 100 毫秒推一幅，paused 時不推、恢復時補推一幅；__smokeTv.sent＝一共推了幾幅
