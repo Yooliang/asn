@@ -399,6 +399,23 @@ pub fn flags_due(now: Option<(bool, bool)>, sent: Option<(bool, bool)>) -> bool 
     matches!((now, sent), (Some(n), Some(s)) if n != s)
 }
 
+/// 開關補報失敗後的退避：第一次失敗等 10 秒、之後每次加倍，上限 30 秒（只管「開關改了而補報」這條路，一般名單回報的節奏不動）
+pub const FLAGS_RETRY_BASE_MS: u64 = 10_000;
+pub const FLAGS_RETRY_MAX_MS: u64 = 30_000;
+
+/// 連續失敗 fails 次之後要等多久才能再補報（0 次＝不用等）
+pub fn flags_backoff_ms(fails: u32) -> u64 {
+    if fails == 0 {
+        return 0;
+    }
+    FLAGS_RETRY_BASE_MS.saturating_mul(1u64 << (fails - 1).min(10)).min(FLAGS_RETRY_MAX_MS)
+}
+
+/// 補報失敗之後，現在可不可以再試：沒失敗過（0 次）隨時可以；失敗過要過了退避時間（距最後一次失敗）才行
+pub fn flags_retry_due(now_ms: u64, last_fail_ms: u64, fails: u32) -> bool {
+    fails == 0 || now_ms.saturating_sub(last_fail_ms) >= flags_backoff_ms(fails)
+}
+
 /// 本機視窗狀態變了要不要立刻回報名單：指紋和上次回報時不同，而且距上次回報已過防抖間隔（頭一次變化馬上報，
 /// 連續快速變化合併成每 gap 毫秒最多一次，最後一次變化一定會在間隔過後補報）
 pub fn push_due(fp: &str, last_fp: Option<&str>, now_ms: u64, last_at: u64, gap_ms: u64) -> bool {
