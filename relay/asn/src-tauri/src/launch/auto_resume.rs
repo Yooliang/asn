@@ -245,17 +245,34 @@ pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resum
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
     let entries = crash_entries(names, known.entries(), known.archived_names());
     let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE };
+    resume_entries(work_dir, entries, resume, &deps, || RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+}
+
+/// `after_mux_crash` 的本體（對外的動作都經 `deps`，測試用假的）：接回、寫紀錄、排「接回結果」通知。
+/// `lock` 取同一時間只讓一條接回在跑的鎖（回的東西活著期間持鎖）
+#[cfg(feature = "gui")]
+pub fn resume_entries<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool, deps: &dyn Deps, lock: impl FnOnce() -> G) -> Status {
+    let now = deps.now();
     if !resume {
         let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
-        deps.report(&Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE });
-        return;
+        let st = Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE };
+        deps.report(&st);
+        return st;
     }
+    let broke = entries.len();
     let st = {
-        let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        run(entries, &deps)
+        let _one = lock();
+        run(entries, deps)
     };
     let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
-    let _ = crate::ui_log::append(work_dir, &[line]);
+    // 沒接回來的原因是技術細節，只進紀錄；通知與畫面只講名字
+    let mut lines = vec![line];
+    lines.extend(st.failed.iter().map(|f| format!("{} info [ASN] mux-resume 沒接回：{}（{}）", crate::claude_quota::iso_secs(st.at as i64), f.name, f.reason)));
+    let _ = crate::ui_log::append(work_dir, &lines);
+    // 接回做完了：斷了幾位、接回幾位、誰沒接回，排一則通知（只有「真的接回過」的那一次；十分鐘內第二次本來就只通知）
+    let failed: Vec<String> = st.failed.iter().map(|f| f.name.clone()).collect();
+    super::mux_round::queue_resume_notice(work_dir, broke, &failed, st.at);
+    st
 }
 
 /// 從啟動參數取出權限旗標，只留認得的。接回時照這份，不看現在的 profile

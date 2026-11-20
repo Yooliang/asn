@@ -225,3 +225,72 @@ async fn 本人自己關掉的視窗_不在監看名單裡_照原本的做法退
     h.core.pull("test", T0 + 11_000).await;
     assert!(notice_bodies(&h).iter().any(|b| b.contains("T-丙")) && h.fr.acked().len() == 1, "照原本的做法退回並 ack：{:?}", notice_bodies(&h));
 }
+
+// ---- #1818：接回結果通知（斷了幾位、接回幾位、誰沒接回）----
+
+use crate::launch::mux_round;
+
+#[tokio::test]
+async fn t1818_接回做完_請後台寄結果_帶人數和沒接回的名字_寄出後檔案刪掉() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let dir = h.core.cfg.work_dir.clone();
+    h.core.mux_resume_notice_tick(T0).await;
+    assert!(h.fr.mux_resume_notices().is_empty(), "沒排就不呼叫");
+    mux_round::queue_resume_notice(&dir, 3, &["丙".to_string()], now());
+    h.core.mux_resume_notice_tick(T0).await;
+    h.core.mux_resume_notice_tick(T0 + 1_000).await;
+    let n = h.fr.mux_resume_notices();
+    assert_eq!(n.len(), 1, "一次只呼叫一次：{n:?}");
+    assert_eq!((n[0]["count"].as_u64(), n[0]["resumed"].as_u64()), (Some(3), Some(2)));
+    assert_eq!(n[0]["failed"], json!(["丙"]));
+    assert!(mux_round::read_resume_notice(&dir).is_none());
+    assert!(h.core.log.has("mux-resume-notice count=3 resumed=2 failed=1 notify=sent"));
+}
+
+#[tokio::test]
+async fn t1818_接回結果_寄送失敗隔一分鐘再試_舊後台不重試_過一小時放棄() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let dir = h.core.cfg.work_dir.clone();
+    h.fr.st.lock().unwrap().mux_notice_notify = "failed".into();
+    mux_round::queue_resume_notice(&dir, 2, &[], now());
+    h.core.mux_resume_notice_tick(T0).await;
+    h.core.mux_resume_notice_tick(T0 + 30_000).await;
+    assert_eq!(h.fr.mux_resume_notices().len(), 1, "一分鐘內不重試");
+    assert!(mux_round::read_resume_notice(&dir).is_some(), "沒寄到，檔留著");
+    h.fr.st.lock().unwrap().mux_notice_notify = "sent".into();
+    h.core.mux_resume_notice_tick(T0 + 61_000).await;
+    assert_eq!(h.fr.mux_resume_notices().len(), 2);
+    assert!(mux_round::read_resume_notice(&dir).is_none());
+    // 舊後台沒這個動作：只留本機紀錄、不重試
+    let mut old = harness(&[("T-乙", "idle")]).await;
+    let dir = old.core.cfg.work_dir.clone();
+    old.fr.st.lock().unwrap().mux_resume_status = 404;
+    mux_round::queue_resume_notice(&dir, 1, &[], now());
+    old.core.mux_resume_notice_tick(T0).await;
+    old.core.mux_resume_notice_tick(T0 + 120_000).await;
+    assert_eq!(old.fr.mux_resume_notices().len(), 1);
+    assert!(mux_round::read_resume_notice(&dir).is_none());
+    // 完成後過了一小時還沒送成：放棄
+    let mut late = harness(&[("T-乙", "idle")]).await;
+    let dir = late.core.cfg.work_dir.clone();
+    mux_round::queue_resume_notice(&dir, 1, &[], now().saturating_sub(3_601_000));
+    late.core.mux_resume_notice_tick(T0).await;
+    assert!(late.fr.mux_resume_notices().is_empty());
+    assert!(mux_round::read_resume_notice(&dir).is_none());
+}
+
+#[tokio::test]
+async fn t1818_接回結果_名字超長或空白_整理過再寄_寄得出去() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let dir = h.core.cfg.work_dir.clone();
+    let long = "長".repeat(100);
+    mux_round::queue_resume_notice(&dir, 3, &[long.clone(), "".to_string(), "  ".to_string()], now());
+    h.core.mux_resume_notice_tick(T0).await;
+    let n = h.fr.mux_resume_notices();
+    assert_eq!(n.len(), 1);
+    let names: Vec<String> = n[0]["failed"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(names[0], format!("{}…", "長".repeat(63)), "超過 64 字截短加…");
+    assert!(names[0].encode_utf16().count() <= 64);
+    assert_eq!(&names[1..], ["未命名夥伴", "未命名夥伴"], "空的寫未命名夥伴");
+    assert!(mux_round::read_resume_notice(&dir).is_none(), "寄出後檔案刪掉");
+}
