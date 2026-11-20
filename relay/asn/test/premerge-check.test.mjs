@@ -145,3 +145,19 @@ test('#1972 prTriggers 認得各種寫法；pull_request_target 查不到 run �
   // 四格縮排的寫法解析不到 paths → 保守回 true
   assert.equal(shouldTrigger('on:\n    pull_request:\n        paths:\n            - a/**\n', ['zzz']), true)
 })
+
+test('#1972 二審：workflows 是空的（空集合恆真）→ 不可，並印出原因', () => {
+  for (const workflows of [[], undefined, null]) {
+    const r = evaluate({ prHeadSha: HEAD, mainTip: MAIN, workflows })
+    assert.equal(r.ok, false, String(workflows))
+    assert.match(r.reasons.join('\n'), /沒認出任何有 pull_request 觸發的 workflow/)
+    assert.match(formatReport(r), /需重跑／開臨時 PR/)
+  }
+})
+
+test('#1972 二審：讀不到 .github/workflows（空目錄）或沒有任何一支有 pull_request 觸發 → 不可', () => {
+  assert.deepEqual(listPrWorkflows({}), [])
+  assert.equal(evaluate({ prHeadSha: HEAD, mainTip: MAIN, workflows: listPrWorkflows({}) }).ok, false)
+  const noPr = { 'asn-release.yml': 'on:\n  push:\n    tags:\n      - "v*"\n', 'notes.txt': 'pull_request:' }
+  assert.equal(evaluate({ prHeadSha: HEAD, mainTip: MAIN, workflows: listPrWorkflows(noPr) }).ok, false)
+})

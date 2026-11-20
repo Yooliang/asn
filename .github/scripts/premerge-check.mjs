@@ -128,7 +128,9 @@ export function evaluate({ prHeadSha, mainTip, behindBy = null, workflows }) {
   const reasons = []
   const notes = []
   if (!mainTip) reasons.push('讀不到 main 目前的頂端，沒辦法比對 base')
-  for (const w of workflows) {
+  // 空集合恆真＝假綠：一支 workflow 都沒有（讀不到目錄、或一支都沒認出）就沒東西可證明「綠」，一律不可
+  if (!Array.isArray(workflows) || workflows.length === 0) reasons.push('讀不到、或沒認出任何有 pull_request 觸發的 workflow，沒有任何檢查結果可以證明綠')
+  for (const w of Array.isArray(workflows) ? workflows : []) {
     if (!w.shouldRun) { notes.push(`${w.name}：這張 PR 改的檔案本來就不會觸發，不算缺`); continue }
     if (w.unverifiable) { reasons.push(`${w.name}：是 pull_request_target 觸發，這支腳本查不到它的 run，沒辦法確認`); continue }
     const run = w.run
