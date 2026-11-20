@@ -1,15 +1,11 @@
 {
-  "version": "0.2.42",
-  "notes": "- 新功能：Claude 視窗壓縮到設定的次數（預設 3 次）時，額度夠就自動交給新視窗接手，額度不夠或讀不到就只提醒；工作管理員多一欄「壓縮次數」，需要時可以按「交接」，並會寄通知信給你。設定在「視窗與系統匣」，可以改次數或改成只提醒。（#1852、#1933）",
-  "pub_date": "2026-11-20T20:51:43.004Z",
+  "version": "0.2.43",
+  "notes": "- 改善：群組點名暫時送不到而要補送時，會先看群組，已經有人用「回覆」回了那則就不再補送，不會重複打擾。（#1828、#1942）",
+  "pub_date": "2026-11-20T21:47:50.335Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNPQmNJTTdyd2Vxdi9XMTFzaDhDcVZDSEhYVU42a1ZqeWI5S3AvcHlOMkJoaXdLMnE4dXFIOHRoREkxckw1Q0JXaVNBNFBnaVFYcHBmaElwWjFrWWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjA3OTAyCWZpbGU6QVNOXzAuMi40Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQyClcvbEROUkZqR2g4QUY3S3diYjV0MnFhZ1VxTVd6WmUrbHhFWEJhc3Z1QkFHU2swcWtlSDd2bXZGKy8xUFdUK1hYYWVwR1E3Mi9QWVZFQ09VcGtuTkFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.42_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybngxaDZua1NwTkVqVURERityM25sSGRnbjFlYnk5c0l2SVQzMUgra0dMSTNhcXdKdjQvUzBwQXpSeWlEYXlQemVoYXBQRnlwV0tpamxybHF6UENXSEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjA5NDE0CWZpbGU6QVNOXzAuMi40Ml9hbWQ2NC5BcHBJbWFnZQovdGRYZHZZYUkyWWV0VkRjaE1sZWkvcm96cGNPdFJDMUpYK0xqOHhlczB5TXZwYktzK2JkejFKMm5aTkk5OFZuSUxUa0EzM04xS21xS2VFSDZTQVBEQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.42_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdFdnllNnNpSDZkbk5HWjlxZFRKVXBSZit6dVU4KzB1bjJmL3ROcE1YdzdrZ1ZMOElWRXFoMGUrUU9Id21uUGtkQ3hHYThYelVaZ2RZV1BXNGNpbVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjExMjcwCWZpbGU6QVNOXzAuMi40M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQzCmg1OFJuV0xyT0hhL1R0K2lncHpSRGluS0VUVFpQZmxBeFJMVDY0SWZnZ0p2TGdQYzJQdkZWditDdk0xWWwyeHZDU1piaFNNeHY3cjF1V1o5YVhqcERnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.43_x64-setup.exe"
     }
   }
 }
