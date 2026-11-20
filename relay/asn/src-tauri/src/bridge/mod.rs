@@ -12,6 +12,7 @@ pub mod forward_selftest;
 pub mod handoff;
 pub mod known;
 pub mod launcher;
+pub mod compact;
 pub mod lock;
 pub mod login_alert;
 pub mod wait_alert;
@@ -43,7 +44,7 @@ use worker::{ProcWorker, WorkerLine, WorkerSink, WorkerSpec};
 
 // ---- 設定檔（data_dir/bridge.json，與 settings.json 分開，改名流程不會蓋掉它）-------------------------
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BridgeSettings {
     /// 讓 ASN 負責這台的收發室（預設關）
     pub enabled: bool,
@@ -67,6 +68,16 @@ pub struct BridgeSettings {
     pub mobile_view_off: bool,
     /// 使用者關掉了「允許遠端在這台打字」（#1745）。預設是開的，所以記「關」。關掉後，別台要在這台打字一律馬上拒絕，進行中的打字也會結束；看畫面不受影響
     pub remote_input_off: bool,
+    /// 使用者關掉了「壓縮 N 次自動交接」（#1852）。預設是開的，所以記「關」；關掉後到次數只提醒，不自動交接
+    pub compact_handoff_off: bool,
+    /// 壓縮幾次自動交接（2～10）。檔案缺這欄＝3；讀進來一律夾在 2～10
+    pub compact_handoff_n: u32,
+}
+
+impl Default for BridgeSettings {
+    fn default() -> Self {
+        BridgeSettings { enabled: false, allow_takeover: false, allow_remote_launch: false, unaddressed_to: String::new(), auto_resume_off: false, term_server_off: false, term_server_on: false, screen_watch_off: false, perm_phone_off: false, mobile_view_off: false, remote_input_off: false, compact_handoff_off: false, compact_handoff_n: compact::N_DEFAULT }
+    }
 }
 
 impl BridgeSettings {
@@ -107,10 +118,10 @@ fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off") }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)) }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off, "mobile_view_off": s.mobile_view_off, "remote_input_off": s.remote_input_off }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off, "mobile_view_off": s.mobile_view_off, "remote_input_off": s.remote_input_off, "compact_handoff_off": s.compact_handoff_off, "compact_handoff_n": compact::clamp_n(Some(i64::from(s.compact_handoff_n))) }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -362,6 +373,9 @@ pub struct Status {
     pub remote_launch: bool,
     /// 設定：電腦重開後自動接回夥伴
     pub auto_resume: bool,
+    /// 設定：壓縮 N 次自動交接（開關與次數）
+    pub compact_handoff: bool,
+    pub compact_handoff_n: u32,
     /// 設定：夥伴共用同一個終端服務（設定頁的開關現在的值）
     pub term_server: bool,
     /// 這個平台有沒有「夥伴共用終端服務」：Windows 用附帶的；Linux 要 PATH 上找得到 wezterm。沒有就不顯示開關
@@ -435,7 +449,7 @@ impl Manager {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
         let fetch = term_fetch_status();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, remote_input: !s.remote_input_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, compact_handoff: !s.compact_handoff_off, compact_handoff_n: s.compact_handoff_n, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, remote_input: !s.remote_input_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -493,6 +507,15 @@ impl Manager {
     pub fn set_auto_resume(&self, on: bool) -> Result<Status, String> {
         let mut s = read_settings(&self.data_dir);
         s.auto_resume_off = !on;
+        write_settings(&self.data_dir, s)?;
+        Ok(self.status())
+    }
+
+    /// 打開／關閉「壓縮 N 次自動交接」並設定次數（#1852）。次數夾在 2～10；下一輪巡檢就生效
+    pub fn set_compact_handoff(&self, on: bool, n: u32) -> Result<Status, String> {
+        let mut s = read_settings(&self.data_dir);
+        s.compact_handoff_off = !on;
+        s.compact_handoff_n = compact::clamp_n(Some(i64::from(n)));
         write_settings(&self.data_dir, s)?;
         Ok(self.status())
     }

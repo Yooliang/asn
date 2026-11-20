@@ -33,6 +33,7 @@ mod quota;
 mod dev_prefix;
 mod selftest;
 mod mux_notice;
+mod compact_notice;
 mod archive_sync;
 mod wait_notice;
 mod outbox;
@@ -2893,6 +2894,7 @@ impl Core {
         self.login_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.mux_resume_notice_tick(now).await;
+        self.compact_handoff_tick().await;
         self.mux_blind_tick(now).await;
         self.archive_tick(now).await;
         self.ack_retry_tick(now).await;

@@ -2759,6 +2759,32 @@ fn 只有引擎模式_不啟動收發室_worker_但照常收信回報名單() {
 // ---- #868：設定頁的「夥伴共用同一個終端服務」
 
 #[test]
+fn 壓縮交接設定_預設開且三次_記的是關_次數夾在二到十_寫了讀得回來且不蓋掉別的欄位() {
+    let d = tempfile::tempdir().unwrap();
+    let s = super::read_settings(d.path());
+    assert!(!s.compact_handoff_off && s.compact_handoff_n == 3, "沒有檔：預設打勾、3 次");
+    // 舊版寫的 bridge.json 沒有這兩個欄位
+    std::fs::write(super::settings_path(d.path()), r#"{"enabled":true,"auto_resume_off":true}"#).unwrap();
+    let s = super::read_settings(d.path());
+    assert!(!s.compact_handoff_off && s.compact_handoff_n == 3 && s.auto_resume_off, "缺欄位＝開、3 次；其他欄位照讀");
+    super::write_settings(d.path(), super::BridgeSettings { compact_handoff_off: true, compact_handoff_n: 5, ..s }).unwrap();
+    let back = super::read_settings(d.path());
+    assert!(back.compact_handoff_off && back.compact_handoff_n == 5 && back.auto_resume_off, "寫了讀得回來，沒有蓋掉別的欄位");
+    for (raw, want) in [("1", 2), ("99", 10), ("-3", 2), ("\"x\"", 3), ("null", 3)] {
+        std::fs::write(super::settings_path(d.path()), format!(r#"{{"compact_handoff_n":{raw}}}"#)).unwrap();
+        assert_eq!(super::read_settings(d.path()).compact_handoff_n, want, "{raw}");
+    }
+    std::fs::write(super::settings_path(d.path()), "壞掉").unwrap();
+    let bad = super::read_settings(d.path());
+    assert!(!bad.compact_handoff_off && bad.compact_handoff_n == 3, "壞檔：預設");
+    // 畫面送來的次數也夾在 2～10
+    let m = super::Manager::new(None, None, "T".into(), d.path().to_path_buf(), d.path().to_path_buf());
+    assert_eq!(m.set_compact_handoff(true, 50).unwrap().compact_handoff_n, 10);
+    assert_eq!(m.set_compact_handoff(false, 0).unwrap().compact_handoff_n, 2);
+    assert!(super::read_settings(d.path()).compact_handoff_off, "關掉會存成「記關」");
+}
+
+#[test]
 fn 伺服器終端設定_預設開_記的是關_舊設定檔沒有這個欄位也讀得起來() {
     let d = tempfile::tempdir().unwrap();
     assert!(!super::read_settings(d.path()).term_server_off, "沒有檔：預設開");

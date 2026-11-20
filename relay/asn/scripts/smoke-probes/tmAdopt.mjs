@@ -24,7 +24,7 @@ export const tmAdoptProbeSource = () => `(async () => {
   if (!rows) return { ok: false, why: '工作管理員沒有列出程式' };
   const btnOf = r => [...r.querySelectorAll('button.tm-adopt')].find(vis) || null;
   const withBtn = rows.filter(btnOf);
-  const src = r => r.children[6]?.textContent.trim() ?? '';
+  const src = r => r.children[7]?.textContent.trim() ?? '';
   if (withBtn.length !== 2) return { ok: false, why: '應該只有 2 列有「納入管理」，實際 ' + withBtn.length + ' 列' };
   if (!withBtn.every(r => src(r).startsWith('自己開的'))) return { ok: false, why: '「納入管理」出現在不是自己開的那一列：' + withBtn.map(src).join('、') };
   if (rows.some(r => src(r).startsWith('ASN') && btnOf(r))) return { ok: false, why: 'ASN 開的那一列不該有「納入管理」' };

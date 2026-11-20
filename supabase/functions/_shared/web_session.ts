@@ -56,7 +56,7 @@ export const WEB_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   // 分享、額度、用量、官網寫入、推播註冊
   "acct_share_create", "acct_share_revoke", "quota_read", "usage_report", "usage_list", "site_meeting_add", "site_release_upsert", "site_item_upsert", "push_register", "push_unregister",
   // 運維與通知回報（電腦端用節點金鑰打的）
-  "roster", "bridge_notice", "misroute_notice", "waiting_notice", "node_mismatch_notice", "mux_blind_notice", "mux_down_notice", "mux_resume_notice", "outbox_bad_notice",
+  "roster", "bridge_notice", "misroute_notice", "waiting_notice", "node_mismatch_notice", "mux_blind_notice", "mux_down_notice", "mux_resume_notice", "compact_notice", "outbox_bad_notice",
   "asn_presence", "set_name", "window_rename", "set_avatar", "set_partner_avatar", "tts", "tts_voices",
   // 寄信、附件、群組：第 2、3 階段再開放
   "send", "sent_status", "inbox_peek", "attach_init", "attach_commit", "attach_url", "attach_sweep",

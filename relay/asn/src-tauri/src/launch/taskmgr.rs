@@ -318,7 +318,15 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let protected = vec![mailbox, asn_window.to_string()];
     let all_sessions = stuck_resume::all_session_files();
     let src = Sources { claude, claude_ok, pi, procs, terms, partners, all_sessions, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
-    serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())
+    let mut out = serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())?;
+    // 壓縮次數（#1852）：只有 Claude 視窗有；內建收發室還沒數過的視窗是 null（畫面顯示「—」）
+    if let Some(rows) = out.get_mut("rows").and_then(|r| r.as_array_mut()) {
+        for r in rows.iter_mut().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("claude")) {
+            let sid = r.get("session_id").and_then(|k| k.as_str()).unwrap_or("").to_string();
+            r["compact"] = crate::bridge::compact::row_json(&sid);
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

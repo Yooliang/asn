@@ -38,7 +38,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
@@ -415,11 +415,12 @@ export const SettingsPanel = {
                   <tbody>
                     <tr v-for="r in st.taskMgr.rows" :key="r.key" :class="{ dup: r.dup, view: r.viewOnly }" :data-kind="r.kind">
                       <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small></td>
-                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td>{{ r.source }}</td>
+                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td>{{ r.source }}</td>
                       <td class="tm-act">
-                        <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
-                        <small class="tm-viewonly" v-else :title="r.why">{{ TM.viewOnly }}</small>
+                        <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
+                        <small class="tm-viewonly" v-else-if="r.showViewOnly" :title="r.why">{{ TM.viewOnly }}</small>
                         <small class="tm-why" v-if="!r.viewOnly && !r.canStop && r.why">{{ r.why }}</small>
+                        <button class="aero-btn tm-handover" type="button" v-if="r.canHandover" :disabled="st.taskMgr.busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + r.name" @click="act('tm-handover', r.name)">{{ TM.handover }}</button>
                         <button class="aero-btn tm-view-btn" type="button" v-if="r.canView" :disabled="st.taskMgr.busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + r.name" @click="act('tm-view', r.name)">{{ TM.view }}</button>
                         <button class="aero-btn tm-adopt" type="button" v-if="r.canAdopt" :disabled="st.taskMgr.busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + r.name" @click="act('tm-adopt', r.key)">{{ TM.adopt }}</button>
                       </td>
@@ -686,6 +687,8 @@ export const SettingsPanel = {
           <small>新裝的電腦預設打開：你自己的其他設備（手機、別台電腦）可以替這台開新視窗。</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.autoResume" :disabled="st.bridge.busy" @change="act('bridge-auto-resume', $event.target.checked)" aria-label="電腦重開後自動接回夥伴" /><span>電腦重開後自動接回夥伴</span></label>
           <small>重開前還開著、由 ASN 開的夥伴，登入 Windows 後會接回原本的對話。權限和原本相同，收到信就會繼續工作，也會用到額度。關掉就要自己按「喚醒」。</small>
+          <label class="chk chk-num"><input type="checkbox" :checked="st.bridge.compactHandoff" :disabled="st.bridge.busy" @change="act('bridge-compact', $event.target.checked)" aria-label="壓縮自動交接" /><span>壓縮</span><input class="set-input num" type="number" min="2" max="10" :value="st.bridge.compactN" :disabled="st.bridge.busy" @change="act('bridge-compact-n', Number($event.target.value))" aria-label="壓縮幾次" /><span>次自動交接</span></label>
+          <small>Claude 視窗壓縮到這個次數時，額度夠就自動交給新視窗。取消勾選就只寄信提醒，不會自動交接。</small>
           <template v-if="st.bridge.termServerSupported">
             <label class="chk"><input type="checkbox" :checked="st.bridge.termServer" :disabled="st.bridge.busy || st.bridge.termServerLocked" @change="act('bridge-term-server', $event.target.checked)" aria-label="夥伴共用同一個終端服務" /><span>夥伴共用同一個終端服務</span></label>
             <small>{{ termServerNote(st.bridge) }}</small>

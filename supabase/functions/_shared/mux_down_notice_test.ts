@@ -24,3 +24,29 @@ Deno.test("t1818 接回結果：不合格的回 null", () => {
   const bad = [null, {}, { count: 0, resumed: 0, failed: [] }, { count: 2, resumed: 3, failed: [] }, { count: 3, resumed: 2, failed: [] }, { count: 2, resumed: 1, failed: [1] }, { count: 2, resumed: 1, failed: [""] }, { count: 2, resumed: 1, failed: ["x".repeat(65)] }, { count: 2, resumed: 1, failed: "丙" }, { count: 101, resumed: 100, failed: ["a"] }];
   for (const b of bad) assertEquals(parseMuxResumeNotice(b), null);
 });
+
+import { parseCompactNotice } from "./mux_down_notice.ts";
+
+Deno.test("t1852 壓縮交接通知：合法的各種結果種類", () => {
+  assertEquals(parseCompactNotice({ window: "小悠", count: 3, kind: "auto", pct: 62 }), { window: "小悠", count: 3, kind: "auto", reason: null, pct: 62 });
+  assertEquals(parseCompactNotice({ window: "asn真", count: 3, kind: "remind_quota", reason: "5 小時", pct: 8 }), { window: "asn真", count: 3, kind: "remind_quota", reason: "5 小時", pct: 8 });
+  assertEquals(parseCompactNotice({ window: "a", count: 100, kind: "remind_quota", reason: "每週", pct: null }), { window: "a", count: 100, kind: "remind_quota", reason: "每週", pct: null });
+  assertEquals(parseCompactNotice({ window: "調查員", count: 4, kind: "remind_unknown" }), { window: "調查員", count: 4, kind: "remind_unknown", reason: null, pct: null });
+  assertEquals(parseCompactNotice({ window: "小悠", count: 1, kind: "remind_off", pct: 0 }), { window: "小悠", count: 1, kind: "remind_off", reason: null, pct: 0 });
+  assertEquals(parseCompactNotice({ window: " 小悠 ", count: 2, kind: "remind_failed" }), { window: "小悠", count: 2, kind: "remind_failed", reason: null, pct: null });
+  assertEquals(parseCompactNotice({ window: "x".repeat(64), count: 2, kind: "auto" })?.window.length, 64);
+});
+
+Deno.test("t1852 壓縮交接通知：不合格的回 null", () => {
+  const ok = { window: "小悠", count: 3, kind: "auto" };
+  const bad: unknown[] = [
+    null, 1, "x", [], {},
+    { ...ok, kind: "other" }, { ...ok, kind: "" }, { ...ok, kind: 1 }, { window: "小悠", count: 3 },
+    { ...ok, window: "" }, { ...ok, window: "   " }, { ...ok, window: "x".repeat(65) }, { ...ok, window: "a\nb" }, { ...ok, window: "a\u0000b" }, { ...ok, window: 5 },
+    { ...ok, count: 0 }, { ...ok, count: 101 }, { ...ok, count: -1 }, { ...ok, count: 1.5 }, { ...ok, count: "3" },
+    { ...ok, pct: -1 }, { ...ok, pct: 101 }, { ...ok, pct: 50.5 }, { ...ok, pct: "8" },
+    { ...ok, kind: "remind_quota" }, { ...ok, kind: "remind_quota", reason: "每月" }, { ...ok, reason: "5 小時" },
+    { ...ok, extra: "x" }, { ...ok, body: "hi" },
+  ];
+  for (const b of bad) assertEquals(parseCompactNotice(b), null, JSON.stringify(b));
+});
