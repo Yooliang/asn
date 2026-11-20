@@ -3,6 +3,7 @@
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -14,7 +15,8 @@ export const WORKFLOWS = [
   { platform: 'linux', file: 'asn-release-linux.yml', re: /^linux-v(\d+\.\d+\.\d+)$/ },
 ]
 export const SITE_FILES = ['site/public/index.html', 'site/public/update/latest.json']
-const DEFAULT_STATE = path.join(process.env.LOCALAPPDATA || '.', 'ASN', 'auto-publish', 'state.json')
+// 不放 %LOCALAPPDATA%/ASN（安裝資料夾，重裝會被清）也不放 ~/.asn；放專用資料夾
+const DEFAULT_STATE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'asn-auto-publish', 'state.json')
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, error: null }
