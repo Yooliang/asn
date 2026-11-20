@@ -328,7 +328,7 @@ fn 程式裡沒有_refresh_的呼叫_只用現成的_access_token() {
     assert!(def.contains(".get(&url)") && !def.contains(".post(") && !def.to_lowercase().contains("refresh"), "fetch_json 只有 GET");
     // 網址寫死、只走 HTTPS、只連 Anthropic 自己的網域
     assert!(claude_accounts::PROFILE_URL.starts_with("https://api.anthropic.com/"));
-    assert!(crate::claude_extra::USAGE_URL.starts_with("https://api.anthropic.com/"));
+    assert!(USAGE_URL.starts_with("https://api.anthropic.com/"));
     assert!(!mine.contains("env::var") && !mine.contains("envc::"), "網址不能從環境變數改");
     // 查額度只能走共用的 fetch_json，不另寫一份連線程式
     assert!(!mine.contains("reqwest"), "不另寫一份連線程式");
@@ -359,4 +359,72 @@ fn e2e_1_假憑證加假查詢回應_產生送後台的回報_跟黃金檔一致
     let golden: Value = serde_json::from_str(include_str!("../../../../../tests/fixtures/claude-quota-report.golden.json")).unwrap();
     assert_eq!(report, golden, "送後台的回報跟黃金檔不一致：{report}");
     assert!(l.lock().unwrap().is_empty(), "成功時不寫 log");
+}
+
+// ---------- 除錯命令 asn-cli claude-usage --shape：只印欄位結構，任何值都不印 ----------
+const FAKE_SECRETS: [&str; 6] = ["sk-ant-oat01-FAKEFAKEFAKEFAKE-9z9z", "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=", "someone.secret@x.test", "3f2b8a1c-9d4e-4c7a-8b1f-0a2b3c4d5e6f", "987654321", "FAKE-VALUE-IN-ARRAY"];
+
+fn secret_body() -> Value {
+    json!({
+        "five_hour": { "utilization": 38.5, "resets_at": FAKE_SECRETS[4], "note": FAKE_SECRETS[0] },
+        "account": { "email": FAKE_SECRETS[2], "uuid": FAKE_SECRETS[3], "blob": FAKE_SECRETS[1], "flag": true, "none": null },
+        "list": [FAKE_SECRETS[5], 7, { "inner": FAKE_SECRETS[0] }, [FAKE_SECRETS[2]]],
+        "n": 123456789
+    })
+}
+
+#[test]
+fn shape_遮罩_鍵名照印_任何值都不出現_像權杖與_email_與_uuid_與數字的都一樣() {
+    let s = shape_of(&secret_body()).to_string();
+    for bad in FAKE_SECRETS.iter().chain(["38.5", "123456789", "true"].iter()) {
+        assert!(!s.contains(bad), "值不能出現：{bad}（{s}）");
+    }
+    for key in ["five_hour", "utilization", "resets_at", "account", "email", "uuid", "list", "inner", "flag", "none"] {
+        assert!(s.contains(&format!("\"{key}\"")), "鍵名要照印：{key}");
+    }
+    assert_eq!(shape_of(&json!({ "a": [1, "x", null, true, { "b": 2 }] })), json!({ "a": ["number", "string", "null", "boolean", { "b": "number" }] }));
+    assert_eq!(shape_of(&json!("sk-ant-x")), json!("string"));
+    assert_eq!(shape_of(&json!((0..9).collect::<Vec<_>>())).as_array().unwrap().len(), 5, "陣列最多展開 5 項");
+    // 同樣的字串出現在鍵名以外的任何位置（巢狀物件的值、陣列裡）都被遮掉，只有當鍵名時才照印
+    let s2 = shape_of(&json!({ FAKE_SECRETS[5]: FAKE_SECRETS[5] })).to_string();
+    assert_eq!(s2.matches(FAKE_SECRETS[5]).count(), 1, "只有鍵名那一次");
+}
+
+#[test]
+fn shape_命令用假憑證加假伺服器_只印結構_失敗只印狀態碼_過期不連網() {
+    let h = home("a@x.test", NOW + 3_600_000);
+    let f = serve(profile_ok("a@x.test"), http("200 OK", &secret_body().to_string()));
+    let out = shape_report(h.path(), NOW, &f.net);
+    for bad in FAKE_SECRETS.iter().chain([TOKEN, REFRESH].iter()) {
+        assert!(!out.contains(bad), "輸出不能含值：{bad}");
+    }
+    assert!(out.contains("\"five_hour\"") && out.contains("\"string\"") && out.contains("\"number\""), "{out}");
+    assert_eq!(f.count(), 1, "只打額度端點一次");
+    assert!(f.requests().to_lowercase().contains(&format!("authorization: bearer {}", TOKEN.to_lowercase())), "走的是同一個查詢（Bearer 現成的 access token）");
+    // 失敗：只印狀態碼，連回應內容也不印
+    for (reply, code) in [(http("500 Oops", ERR_BODY), "HTTP 500"), (http("401 U", ERR_BODY), "HTTP 401"), (http("429 T", ERR_BODY), "HTTP 429"), (http("404 N", ERR_BODY), "HTTP 404")] {
+        let f = serve(profile_ok("a@x.test"), reply);
+        let out = shape_report(h.path(), NOW, &f.net);
+        assert_eq!(out, format!("查詢失敗：{code}"));
+        assert!(!out.contains(ERR_BODY) && !out.contains(TOKEN));
+    }
+    let f = serve(profile_ok("a@x.test"), usage_ok());
+    let expired = home("a@x.test", NOW - 1);
+    assert!(shape_report(expired.path(), NOW, &f.net).contains("過期"));
+    let none = tempfile::tempdir().unwrap();
+    assert!(shape_report(none.path(), NOW, &f.net).contains("沒有可用的登入"));
+    assert_eq!(f.count(), 0, "過期或沒登入都不連網");
+}
+
+#[test]
+fn 查詢只有一份_額外帳號與命令與正式額度都走_claude_quota_query() {
+    let extra = prod(include_str!("../claude_extra.rs"));
+    for gone in ["api/oauth/usage", "api/oauth/profile", "anthropic-beta", "USAGE_URL", "PROFILE_URL", "bearer_auth", "client()?.get("] {
+        assert!(!extra.contains(gone), "claude_extra.rs 不另寫一份查詢：{gone}");
+    }
+    assert!(extra.contains("claude_quota::query("));
+    let mine = prod(include_str!("../claude_quota.rs"));
+    assert_eq!(mine.matches("net.usage(").count(), 2, "只有 query 與 shape_report 兩處呼叫用量查詢（同一個 Net::usage）");
+    let cmd = include_str!("../cli/claude_usage_cmd.rs");
+    assert!(cmd.contains("claude_quota::shape_report(") && !cmd.contains("reqwest"));
 }

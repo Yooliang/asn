@@ -27,6 +27,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+/// 額度端點（寫死、只走 HTTPS、只連 Anthropic 自己的網域）。Claude 額外帳號（claude_extra.rs）也走同一份查詢
+pub(crate) const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// 單次查詢的逾時（兩次查詢合計最多約 10 秒）
 const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// 讀到的數字放太久就不隨回報送（後台自己還留著最後一次讀數）
@@ -96,7 +98,7 @@ pub struct HttpNet {
 impl HttpNet {
     /// 正式的網址：寫死、只走 HTTPS、只連 Anthropic 自己的網域，不能從設定或環境變數改
     pub fn real() -> HttpNet {
-        HttpNet { profile: claude_accounts::PROFILE_URL.to_string(), usage: crate::claude_extra::USAGE_URL.to_string() }
+        HttpNet { profile: claude_accounts::PROFILE_URL.to_string(), usage: USAGE_URL.to_string() }
     }
     #[cfg(test)]
     pub fn at(profile: &str, usage: &str) -> HttpNet {
@@ -117,7 +119,7 @@ fn status_of(f: HttpFail) -> Status {
     match f {
         HttpFail::Unauthorized => Status::LoginExpired,
         HttpFail::RateLimited => Status::RateLimited,
-        HttpFail::Server | HttpFail::Timeout | HttpFail::Other => Status::Unavailable,
+        HttpFail::Server(_) | HttpFail::Status(_) | HttpFail::Timeout | HttpFail::Other => Status::Unavailable,
     }
 }
 
@@ -129,6 +131,29 @@ fn expires_at_ms(cred: &[u8]) -> Option<i64> {
 /// 憑證檔的 access token（只在這個模組裡比對與傳給查詢，不複製出去、不印）
 fn token_of(cred: &[u8]) -> Option<String> {
     serde_json::from_slice::<Value>(cred).ok()?.pointer("/claudeAiOauth/accessToken")?.as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)
+}
+
+/// 查詢失敗的種類
+#[derive(Debug, PartialEq)]
+pub enum QueryFail {
+    Http(HttpFail),
+    /// 帳號資料回應裡沒有 email
+    NoAccount,
+    /// 憑證查出來的帳號跟預期的不同
+    Mismatch,
+}
+
+/// 查一次：先查這份憑證屬於哪個帳號，再查用量，回 (email, 額度窗)。額度窗可能是空的（回應不齊或介面變了）。
+/// `expect`＝預期的帳號（`.claude.json` 寫的）；給了而且不同，就不查用量、回 `Mismatch`。
+/// 正式的 Claude 額度、Claude 額外帳號、除錯命令（`--shape`）都走這一支，沒有第二份查詢程式。
+pub fn query(net: &dyn Net, cred: &[u8], now_ms: i64, expect: Option<&str>) -> Result<(String, Vec<Value>), QueryFail> {
+    let v = net.profile(cred).map_err(QueryFail::Http)?;
+    let (email, _) = claude_accounts::account_of_profile(&v).ok_or(QueryFail::NoAccount)?;
+    if expect.is_some_and(|e| e != email) {
+        return Err(QueryFail::Mismatch);
+    }
+    let usage = net.usage(cred).map_err(QueryFail::Http)?;
+    Ok((email, crate::claude_extra::parse_usage(&usage, now_ms)))
 }
 
 /// 讀一輪：回 (新狀態, 失敗類別（成功與沒有登入是 None，給記 log 與退避用）)，或這一輪不查的原因。
@@ -145,31 +170,64 @@ pub fn read_round(home: &Path, now_ms: i64, net: &dyn Net, busy: &dyn Fn() -> bo
     if token.is_none() || expires_at_ms(&cred).is_some_and(|e| e <= now_ms) {
         return Ok((State::failed(&email, Status::LoginExpired), Some(HttpFail::Unauthorized)));
     }
-    // 這份憑證屬於哪個帳號：跟 .claude.json 對不上就這一輪不查，下一輪再查，不記到錯的帳號
-    let who = match net.profile(&cred) {
-        Ok(v) => claude_accounts::account_of_profile(&v),
-        Err(f) => return Ok((State::failed(&email, status_of(f)), Some(f))),
-    };
-    match who {
-        Some((e, _)) if e == email => {}
-        Some(_) => return Err(Skip::Mismatch),
-        None => return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other))),
-    }
-    let usage = match net.usage(&cred) {
-        Ok(v) => v,
-        Err(f) => return Ok((State::failed(&email, status_of(f)), Some(f))),
+    // 查帳號與用量（跟 .claude.json 對不上就這一輪不查，下一輪再查，不記到錯的帳號）
+    let (_, windows) = match query(net, &cred, now_ms, Some(&email)) {
+        Ok(r) => r,
+        Err(QueryFail::Mismatch) => return Err(Skip::Mismatch),
+        Err(QueryFail::Http(f)) => return Ok((State::failed(&email, status_of(f)), Some(f))),
+        Err(QueryFail::NoAccount) => return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other))),
     };
     // 查的當中登入變了（切換，或 Claude 自己換新權杖也算變）：這輪不記，下一輪再查
     let now_cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
     if busy() || claude_accounts::current_email(home).as_deref() != Some(email.as_str()) || token_of(&now_cred) != token {
         return Err(Skip::Changed);
     }
-    let windows = crate::claude_extra::parse_usage(&usage, now_ms);
     if windows.is_empty() {
         // 介面變了或回應不齊：照實顯示讀不到，不補 0
         return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other)));
     }
     Ok((State { email: Some(email), status: Status::Ok, read_at: Some(iso_secs(now_ms)), windows }, None))
+}
+
+// ---------- 除錯用：只印回應的欄位結構 ----------
+/// 回應 → 欄位結構：每個鍵照印，值一律換成型別名（string／number／boolean／null），物件與陣列照結構展開（陣列最多展開 5 項）。
+/// 任何值（含長得像 token、email、uuid 的字串、數字）都不會出現在結果裡。
+pub fn shape_of(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(m.iter().map(|(k, x)| (k.clone(), shape_of(x))).collect()),
+        Value::Array(a) => Value::Array(a.iter().take(5).map(shape_of).collect()),
+        Value::String(_) => json!("string"),
+        Value::Number(_) => json!("number"),
+        Value::Bool(_) => json!("boolean"),
+        Value::Null => json!("null"),
+    }
+}
+
+/// 失敗時只印狀態碼或固定的類別名，不印回應內容
+fn fail_code_text(f: HttpFail) -> String {
+    match f {
+        HttpFail::Unauthorized => "HTTP 401".into(),
+        HttpFail::RateLimited => "HTTP 429".into(),
+        HttpFail::Server(c) | HttpFail::Status(c) => format!("HTTP {c}"),
+        HttpFail::Timeout => "逾時".into(),
+        HttpFail::Other => "連線失敗".into(),
+    }
+}
+
+/// `asn-cli claude-usage --shape`：讀這台目前登入的憑證，向額度端點查一次（跟正式查額度同一個 `HttpNet::usage`），只回欄位結構。
+/// 不印值、不印標頭；失敗只印狀態碼。本機判斷登入過期時不連網。
+pub fn shape_report(home: &Path, now_ms: i64, net: &dyn Net) -> String {
+    let cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
+    if token_of(&cred).is_none() {
+        return "沒有可用的登入（找不到 access token），沒有查詢".into();
+    }
+    if expires_at_ms(&cred).is_some_and(|e| e <= now_ms) {
+        return "登入已過期（憑證上的到期時間已過），沒有查詢".into();
+    }
+    match net.usage(&cred) {
+        Ok(v) => serde_json::to_string_pretty(&shape_of(&v)).unwrap_or_default(),
+        Err(f) => format!("查詢失敗：{}", fail_code_text(f)),
+    }
 }
 
 // ---------- 最近一次的狀態（只在記憶體，重開就沒了，下一輪再讀） ----------
@@ -221,7 +279,8 @@ fn fail_text(f: HttpFail) -> &'static str {
     match f {
         HttpFail::Unauthorized => "登入過期（401 或憑證已到期）",
         HttpFail::RateLimited => "查詢太頻繁（429），已退避",
-        HttpFail::Server => "對方暫時有問題（5xx）",
+        HttpFail::Server(_) => "對方暫時有問題（5xx）",
+        HttpFail::Status(_) => "對方回了意外的狀態",
         HttpFail::Timeout => "逾時",
         HttpFail::Other => "連不上或回應看不懂",
     }

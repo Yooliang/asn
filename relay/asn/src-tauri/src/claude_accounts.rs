@@ -611,8 +611,10 @@ pub enum HttpFail {
     Unauthorized,
     /// 429：查太頻繁
     RateLimited,
-    /// 5xx
-    Server,
+    /// 5xx（附狀態碼，只給除錯命令印）
+    Server(u16),
+    /// 其他非成功的狀態碼（附狀態碼）
+    Status(u16),
     Timeout,
     /// 其他（連不上、被轉址、其他狀態碼、回應看不懂）
     Other,
@@ -633,8 +635,8 @@ pub(crate) fn fetch_json(url: &str, cred: &[u8], timeout: std::time::Duration) -
                 Err(_) => Err(HttpFail::Other),
                 Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => Err(HttpFail::Unauthorized),
                 Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => Err(HttpFail::RateLimited),
-                Ok(r) if r.status().is_server_error() => Err(HttpFail::Server),
-                Ok(r) if !r.status().is_success() => Err(HttpFail::Other),
+                Ok(r) if r.status().is_server_error() => Err(HttpFail::Server(r.status().as_u16())),
+                Ok(r) if !r.status().is_success() => Err(HttpFail::Status(r.status().as_u16())),
                 Ok(r) => match r.json::<serde_json::Value>().await {
                     Ok(v) => Ok(v),
                     Err(e) if e.is_timeout() => Err(HttpFail::Timeout),
