@@ -29,6 +29,15 @@ fn 掃描數出開窗之後的壓縮次數_受保護與別人的視窗不在清�
 }
 
 #[test]
+fn 掃描標出可能用自訂設定資料夾的視窗_命令列有寫就算() {
+    let r = rig(Opt::default());
+    write_compacts(&r, 3);
+    assert!(!r.ops.compact_scan().iter().find(|w| w.sid == "sid-220").unwrap().custom_config, "一般視窗");
+    r.os().cmd.lock().unwrap().insert(110, r#"cmd /c set CLAUDE_CONFIG_DIR=D:\c&& claude"#.into());
+    assert!(r.ops.compact_scan().iter().find(|w| w.sid == "sid-220").unwrap().custom_config, "外殼命令列有寫 CLAUDE_CONFIG_DIR");
+}
+
+#[test]
 fn 守門_佇列假造本機標記仍被允許其他設備的開關擋下() {
     // 佇列（後台待辦）的內容只會經 Op::parse 進原本的實例；就算帶了 local 之類的欄位，也不會變成本機發起
     let r = rig(Opt { allow_first: 0, ..Opt::default() });

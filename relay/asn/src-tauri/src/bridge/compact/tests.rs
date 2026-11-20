@@ -10,7 +10,7 @@ fn boundary(ms: u64) -> String {
     json!({ "type": "system", "subtype": "compact_boundary", "timestamp": iso(ms), "content": "Conversation compacted" }).to_string()
 }
 fn win(sid: &str, name: &str, count: u32) -> Win {
-    Win { sid: sid.into(), name: name.into(), count }
+    Win { sid: sid.into(), name: name.into(), count, custom_config: false }
 }
 fn ok_quota() -> Quota {
     Quota::Known { five: 62.0, week: 55.0 }
@@ -123,7 +123,27 @@ fn 門檻是兩個窗都剩二十以上() {
     assert_eq!(judge(false, &ok_quota()), Err(Why::Off), "設定沒勾就只提醒，不看額度");
 }
 
+#[test]
+fn 自訂設定資料夾的判斷_任何一個來源看得到就算() {
+    assert!(!window_custom_config(false, &["claude.exe -n 小悠".into()], None));
+    assert!(window_custom_config(true, &[], None), "ASN 自己的環境有設");
+    assert!(window_custom_config(false, &["cmd /c set CLAUDE_CONFIG_DIR=D:\\c&& claude".into()], None), "外殼命令列有寫");
+    assert!(window_custom_config(false, &[], Some(b"PATH=x\0CLAUDE_CONFIG_DIR=/home/a/.c\0")), "Linux 視窗自己的環境");
+    assert!(!window_custom_config(false, &[], Some(b"PATH=x\0CLAUDE_CONFIG_DIR=\0")), "設成空的等於沒設");
+    assert!(!window_custom_config(false, &[], Some(b"PATH=x\0MY_CLAUDE_CONFIG_DIR=/a\0")), "只認完整名字");
+}
+
 // ---------- 守門：額度讀不到卻照樣自動交接 ----------
+
+#[test]
+fn 守門_視窗用自訂設定資料夾_額度再夠也只提醒() {
+    let mut t = Tracker::default();
+    let mut w = win("s1", "小悠", 3);
+    w.custom_config = true;
+    let a = run(&mut t, &[w, win("s2", "西川", 3)], true, 3, &ok_quota(), &[]);
+    assert_eq!(handovers(&a), 1, "沒設自訂資料夾的視窗照常自動交接");
+    assert!(matches!(&a[0], Act::Mail { sid, kind: MailKind::Remind(Why::Unknown), .. } if sid == "s1"), "{a:?}");
+}
 
 #[test]
 fn 守門_額度讀不到絕不自動交接_只提醒一次() {

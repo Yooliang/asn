@@ -105,6 +105,22 @@ pub fn custom_config_dir() -> bool {
     std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|d| !d.is_empty())
 }
 
+/// 命令列（含外殼）裡有寫 CLAUDE_CONFIG_DIR（例如 `set CLAUDE_CONFIG_DIR=…&& claude`）
+pub fn mentions_custom_config(text: &str) -> bool {
+    text.contains("CLAUDE_CONFIG_DIR")
+}
+
+/// 程序環境（Linux 的 /proc/<pid>/environ，以 NUL 分隔）裡有設非空的 CLAUDE_CONFIG_DIR
+pub fn environ_has_custom_config(bytes: &[u8]) -> bool {
+    bytes.split(|b| *b == 0).any(|kv| kv.strip_prefix(b"CLAUDE_CONFIG_DIR=").is_some_and(|v| !v.is_empty()))
+}
+
+/// 這個視窗是不是可能用自訂設定資料夾。ASN 讀不到別的程序在 Windows 上的環境變數，所以保守：任何一個來源看得到就算——
+/// ASN 自己的環境（ASN 開的視窗繼承它）、視窗與它外殼的命令列、Linux 上視窗自己的環境
+pub fn window_custom_config(asn_env: bool, cmdlines: &[String], environ: Option<&[u8]>) -> bool {
+    asn_env || cmdlines.iter().any(|c| mentions_custom_config(c)) || environ.is_some_and(environ_has_custom_config)
+}
+
 /// 設備頁用的那份額度讀數（`claude_quota::state_view`）→ 判斷用的額度。
 /// 只有「剛讀到（ok）、兩個窗都有數字、讀取時間在 30 分鐘內」而且視窗沒用自訂設定資料夾，才算 Known
 pub fn quota_from_view(v: &Value, custom_config: bool, now_ms: i64) -> Quota {
@@ -151,6 +167,8 @@ pub struct Win {
     pub sid: String,
     pub name: String,
     pub count: u32,
+    /// 這個視窗可能用自訂的 CLAUDE_CONFIG_DIR（別的設定資料夾、可能別的帳號）：這台目前登入帳號的額度不能代表它，一律當讀不到
+    pub custom_config: bool,
 }
 
 /// 通知信的種類（對應後台 compact_notice 的 kind）
@@ -250,7 +268,9 @@ impl Tracker {
             if s.phase == Phase::Remind(Why::Failed) {
                 continue;
             }
-            match judge(i.enabled, i.quota) {
+            // 這個視窗可能用自訂設定資料夾：額度不能代表它，當讀不到
+            let q = if w.custom_config { &Quota::Unknown } else { i.quota };
+            match judge(i.enabled, q) {
                 Ok(pct5) => {
                     s.phase = Phase::Handing;
                     s.auto = true;

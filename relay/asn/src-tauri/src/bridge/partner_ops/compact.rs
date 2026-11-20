@@ -91,6 +91,19 @@ impl OpsEnv for LocalEnv {
     }
 }
 
+/// 視窗自己的環境變數（只有 Linux 讀得到：/proc/<pid>/environ；其他平台是 None，改靠 ASN 環境與命令列）
+fn window_environ(pid: u32) -> Option<Vec<u8>> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read(format!("/proc/{pid}/environ")).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 impl PartnerOps {
     /// 本機發起專用的副本（見檔頭）：只有程式內部的壓縮巡檢與工作管理員的「交接」鈕會用，後台佇列碰不到
     pub(crate) fn local_twin(&self) -> Arc<PartnerOps> {
@@ -120,7 +133,14 @@ impl PartnerOps {
             }
             let Some(pr) = st.progress.get_mut(sid) else { continue };
             match pr.advance(since) {
-                Ok(count) => wins.push(Win { sid: sid.to_string(), name: name.to_string(), count }),
+                Ok(count) => {
+                    // 視窗是不是可能用自訂設定資料夾：ASN 讀不到別的程序在 Windows 上的環境變數，所以保守——任何來源看得到就當讀不到
+                    let mut chain = vec![pid];
+                    chain.extend(switch::ancestors(&table, pid).into_iter().take(6));
+                    let cmds: Vec<String> = chain.iter().filter_map(|p| os.cmdline(*p)).collect();
+                    let custom = compact::window_custom_config(compact::custom_config_dir(), &cmds, window_environ(pid).as_deref());
+                    wins.push(Win { sid: sid.to_string(), name: name.to_string(), count, custom_config: custom })
+                }
                 Err(e) => self.log.line(&format!("compact: 讀不到「{}」的對話紀錄：{}", clean(name, 40), clean(&e.to_string(), 80))),
             }
         }
