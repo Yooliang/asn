@@ -1462,7 +1462,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 .filter(|n| seen.insert(n.clone()))
                 .collect()
         };
-        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir) })
+        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir), record: m.recorded() })
     }
     /// 已經結束的夥伴窗格（看得到帶暗號的結束標記）：收掉窗格、從對照表拿掉。回收掉幾個。
     /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收。
@@ -3514,6 +3514,11 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
             }
             if let Ok(mut g) = PARTNER_NOTICES.lock() {
                 *g = notices.values().cloned().collect();
+            }
+            // 兩扇以上同時讀不到畫面：多半是終端服務卡住（程序還在，只看程序的監看看不出來），請監看馬上重看一次（#1887）
+            if schedule.take_wake(now) {
+                super::mux_watch::request_recheck();
+                note(now, "好幾扇視窗同時讀不到畫面，請終端服務監看馬上重看一次");
             }
             if let Some(line) = schedule.report(now, windows.len()) {
                 note(now, &line);
