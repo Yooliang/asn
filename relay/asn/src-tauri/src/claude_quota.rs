@@ -190,11 +190,29 @@ pub fn read_round(home: &Path, now_ms: i64, net: &dyn Net, busy: &dyn Fn() -> bo
 }
 
 // ---------- 除錯用：只印回應的欄位結構 ----------
-/// 回應 → 欄位結構：每個鍵照印，值一律換成型別名（string／number／boolean／null），物件與陣列照結構展開（陣列最多展開 5 項）。
+/// 鍵名：照印，但長得像 uuid、email，或超過 40 個字元的（可能是拿識別資料當鍵）一律換成 `<key>`
+fn shown_key(k: &str) -> String {
+    let uuid = k.len() == 36 && k.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+    let email = k.contains('@') && k.rsplit('@').next().is_some_and(|d| d.contains('.'));
+    if uuid || email || k.chars().count() > 40 {
+        "<key>".to_string()
+    } else {
+        k.to_string()
+    }
+}
+
+/// 回應 → 欄位結構：鍵名照印（識別資料樣式的見 `shown_key`），值一律換成型別名（string／number／boolean／null），物件與陣列照結構展開（陣列最多展開 5 項）。
 /// 任何值（含長得像 token、email、uuid 的字串、數字）都不會出現在結果裡。
 pub fn shape_of(v: &Value) -> Value {
     match v {
-        Value::Object(m) => Value::Object(m.iter().map(|(k, x)| (k.clone(), shape_of(x))).collect()),
+        Value::Object(m) => {
+            let mut out = serde_json::Map::new();
+            for (k, x) in m {
+                // 同樣被遮成 `<key>` 的鍵只留第一個
+                out.entry(shown_key(k)).or_insert_with(|| shape_of(x));
+            }
+            Value::Object(out)
+        }
         Value::Array(a) => Value::Array(a.iter().take(5).map(shape_of).collect()),
         Value::String(_) => json!("string"),
         Value::Number(_) => json!("number"),

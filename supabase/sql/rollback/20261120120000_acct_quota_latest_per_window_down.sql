@@ -1,19 +1,51 @@
--- 額度後台只取每窗最新讀數（#1883）：Claude 額度改成每台直接向 Claude 查、只回報自己目前登入的帳號，後台不再靠規則判斷「這筆數字該不該收」。
---
--- 這支做的事：
---  1. asn_relay_acct_roster_report：同使用者、同廠牌、同帳號，每個窗各取讀取時間（read_at）最新的那筆；
---     進來的比存著的舊就不蓋（skipped 回 older_read），同一秒以進來的為準；不看重置時間、不看是哪一台送的。
---     不再拿掉「這次沒帶、重置時間已過」的窗（顯示端自己處理過期）。每帳號最多留 4 窗、每人最多 100 個帳號列等上限照舊。
---     舊版用戶端的舊欄位（five_hour_pct、weekly_pct、reset_at、at）照收（legacy_windows 當場轉成兩窗存起來，走同一條路），所以蓋不掉時間較新的讀數；
---     舊版若同時帶 windows 與四欄，以 windows 為準。這段四欄轉換只保留這一版，**下一版拿掉**（legacy_windows 與列裡四欄的處理一併移除）。
---     新版用戶端（列裡有 windows、沒有舊四欄鍵、windows 不是空的）每次回報整份取代該帳號的窗：這次沒帶的窗拿掉（方案拿掉 5 小時限制後畫面不再殘留 five_hour）；
---     舊版轉換來的讀數不套用這條，只更新有帶的窗。
---  2. asn_relay_acct_windows_clean：不再丟「重置時間不在現在 −1 天～+8 天」的窗；讀取時間比後台現在還晚的改記成現在（不丟）。其餘逐字照舊。
---  3. 不再用到的 asn_relay_acct_window_decide、asn_relay_acct_window_judge 在這裡 drop。
---  4. 簽名、回傳形狀、權限不變；不動資料表（window_pending 欄位保留，不再寫入）。
--- 部署順序：本 migration → relay（Edge Function，不需改）→ 電腦端。
--- 回復：supabase/sql/rollback/20261120100000_acct_quota_latest_per_window_down.sql（換回 judge、decide、windows_clean、roster_report 的上一版本體）。
+-- 退回 20261120120000_acct_quota_latest_per_window.sql：換回 judge、decide、windows_clean（20261113000000 版）與 roster_report（20261113100000 版）。
 begin;
+
+create or replace function public.asn_relay_acct_window_judge(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_now timestamptz)
+ returns text
+ language plpgsql
+ stable
+ set search_path to ''
+as $function$
+declare
+  v_new_r timestamptz;
+begin
+  -- 新的重置時間要在「現在 −1 天」到「現在 +8 天」之間（含兩端），不然一個 2099 年的重置時間存進來會鎖死那一窗。
+  -- 其餘不再比較（同一期回升、重置時間往前往後、7 天倍數都是合法的新數字；舊視窗重送的舊數字由 decide 的 older_read 擋）。
+  if jsonb_typeof(p_new->'resets_at') = 'string' then
+    v_new_r := (p_new->>'resets_at')::timestamptz;
+    if v_new_r < p_now - interval '1 day' or v_new_r > p_now + interval '8 days' then
+      return 'reset_out_of_range';
+    end if;
+  end if;
+  return null;
+end;
+$function$;
+
+create or replace function public.asn_relay_acct_window_decide(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_pending jsonb, p_now timestamptz)
+ returns jsonb
+ language plpgsql
+ stable
+ set search_path to ''
+as $function$
+declare
+  v_reason text;
+begin
+  -- 讀取時間比後台現在晚超過 5 分鐘＝電腦時鐘走快，拒收（否則這筆會一直贏過正常的）
+  if jsonb_typeof(p_new->'read_at') = 'string' and (p_new->>'read_at')::timestamptz > p_now + interval '5 minutes' then
+    return jsonb_build_object('reason', 'future_read', 'pending', null::jsonb);
+  end if;
+  -- 讀取時間比已存的更早＝舊視窗重送的舊數字，不收（兩邊都有讀取時間才比；同一時間照收）
+  if p_old is not null and jsonb_typeof(p_old->'read_at') = 'string' and jsonb_typeof(p_new->'read_at') = 'string'
+     and (p_new->>'read_at')::timestamptz < (p_old->>'read_at')::timestamptz then
+    return jsonb_build_object('reason', 'older_read', 'pending', null::jsonb);
+  end if;
+  -- 重置時間範圍（judge 只剩這一條）
+  v_reason := public.asn_relay_acct_window_judge(p_vendor, p_name, p_old, p_new, p_now);
+  -- 待確認（window_pending）不再使用：一律回 null，report 會把舊版留下的待確認清掉
+  return jsonb_build_object('reason', v_reason, 'pending', null::jsonb);
+end;
+$function$;
 
 create or replace function public.asn_relay_acct_windows_clean(p_vendor text, p_windows jsonb, p_node text, p_now timestamptz)
  returns jsonb
@@ -45,13 +77,13 @@ begin
     continue when jsonb_typeof(v_w->'left_pct') is distinct from 'number';
     continue when (v_w->>'left_pct')::numeric not between 0 and 100;
     v_read := public.asn_relay_acct_iso(v_w->'read_at');
-    -- 只丟掉沒有讀取時間的；讀取時間比後台現在還晚（電腦時鐘走快）的，改記成現在，不讓它一直贏過之後正常的讀數
+    -- 讀取時間在未來太多的，由 decide 的 future_read 擋（有原因代碼、看得到），這裡只丟掉沒有讀取時間的
     continue when v_read is null;
-    v_read := to_char(least(v_read::timestamptz, p_now) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
     v_reset := null;
     if v_w ? 'resets_at' and jsonb_typeof(v_w->'resets_at') <> 'null' then
       v_reset := public.asn_relay_acct_iso(v_w->'resets_at');
       continue when v_reset is null;
+      continue when v_reset::timestamptz < p_now - interval '1 day' or v_reset::timestamptz > p_now + interval '8 days';
     end if;
     continue when exists (select 1 from jsonb_array_elements(v_out) o where o->>'name' = v_name);
     v_out := v_out || jsonb_build_array(jsonb_build_object(
@@ -78,9 +110,12 @@ declare
   v_merged jsonb;
   v_w jsonb;
   v_o jsonb;
+  v_reason text;
   v_skipped jsonb := '[]'::jsonb;
   v_count int := 0;
   v_gemini text[] := '{}';
+  v_pending jsonb;
+  v_dec jsonb;
 begin
   if p_accounts is null or jsonb_typeof(p_accounts) <> 'array' or jsonb_array_length(p_accounts) > 20 then
     return jsonb_build_object('error', 'bad_request');
@@ -115,36 +150,56 @@ begin
     insert into relay.asn_user_accounts (user_id, vendor, account, plan, seen_node)
       values (v_user, v_vendor, v_email, v_plan, p_node)
       on conflict (user_id, vendor, account) do nothing;
-    select windows into v_merged from relay.asn_user_accounts
+    select windows, window_pending into v_merged, v_pending from relay.asn_user_accounts
       where user_id = v_user and vendor = v_vendor and account = v_email for update;
-    -- 每個窗各取讀取時間最新的那筆：進來的比存著的舊就不蓋（回原因代碼 older_read），同一秒以進來的為準。
-    -- 不看重置時間、不看是哪一台送的；舊版用戶端的舊欄位（legacy_windows）走同一條路，所以蓋不掉較新的讀數。
     for v_w in select e from jsonb_array_elements(v_new) with ordinality t(e, i) order by i loop
       select e into v_o from jsonb_array_elements(v_merged) e where e->>'name' = v_w->>'name' limit 1;
-      if v_o is null then
+      -- 每週倍數不過時先記待確認，同一個新重置時間連續 3 次、隔滿 10 分鐘才收（#1184）；其餘判斷照舊
+      v_dec := public.asn_relay_acct_window_decide(v_vendor, v_w->>'name', v_o, v_w, v_pending->(v_w->>'name'), v_now);
+      v_reason := v_dec->>'reason';
+      v_pending := case when jsonb_typeof(v_dec->'pending') = 'object'
+        then v_pending || jsonb_build_object(v_w->>'name', v_dec->'pending') else v_pending - (v_w->>'name') end;
+      if v_reason is not null then
+        v_skipped := v_skipped || jsonb_build_array(jsonb_build_object('vendor', v_vendor, 'window', v_w->>'name', 'reason', v_reason));
+      elsif v_o is null then
         v_merged := v_merged || jsonb_build_array(v_w);
-      elsif (v_w->>'read_at') < coalesce(public.asn_relay_acct_iso(v_o->'read_at'), '') then
-        v_skipped := v_skipped || jsonb_build_array(jsonb_build_object('vendor', v_vendor, 'window', v_w->>'name', 'reason', 'older_read'));
       else
         select jsonb_agg(case when e->>'name' = v_w->>'name' then v_w else e end order by i) into v_merged
           from jsonb_array_elements(v_merged) with ordinality t(e, i);
       end if;
     end loop;
-    -- 新版用戶端（列裡有 windows、沒有任何舊四欄鍵）每次回報就是這個帳號現在有的窗：這次沒帶的窗從後台拿掉
-    -- （例如方案拿掉 5 小時限制後不再有 five_hour）。上面「較舊不蓋較新」照舊：這次有帶的窗，被擋時維持存著的。
-    -- windows 是空的（這次讀不到）不算「都沒有了」，不動。舊版用戶端（列裡有舊四欄）不套用，只更新有帶的窗。
-    if v_row ? 'windows' and v_new <> '[]'::jsonb
-       and not (v_row ?| array['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at']) then
-      select coalesce(jsonb_agg(e order by i), '[]'::jsonb) into v_merged
-        from jsonb_array_elements(v_merged) with ordinality t(e, i)
-        where exists (select 1 from jsonb_array_elements(v_new) n where n->>'name' = e->>'name');
+    -- 這次回報帶了 windows、但某個 name 完全沒有，而存著的那一窗 resets_at 已經過了（例如方案拿掉 5 小時限制，rate_limits 不再有 five_hour）：
+    -- 那一窗已經沒有了，從 windows 拿掉，不要一直掛著過期的舊數字（#1321）。還沒過重置時間的（只是這次剛好沒帶）、沒有 resets_at 的（無從判斷）留著；
+    -- 沒帶 windows 的舊用戶端不動。
+    -- resets_at 不是合法時間（舊資料或被改壞）時不能丟錯，整支 roster_report 會停；Postgres 也不保證 and 會短路，所以轉型放進有例外處理的區塊，轉不了就當無從判斷、留著。
+    if v_row ? 'windows' and jsonb_typeof(v_row->'windows') = 'array' then
+      declare
+        v_keep jsonb := '[]'::jsonb;
+        v_gone boolean;
+      begin
+        for v_w in select e from jsonb_array_elements(v_merged) with ordinality t(e, i) order by i loop
+          v_gone := false;
+          if not exists (select 1 from jsonb_array_elements(v_new) n where n->>'name' = v_w->>'name')
+             and jsonb_typeof(v_w->'resets_at') = 'string' then
+            begin
+              v_gone := (v_w->>'resets_at')::timestamptz <= v_now;
+            exception when others then
+              v_gone := false;
+            end;
+          end if;
+          if not v_gone then
+            v_keep := v_keep || jsonb_build_array(v_w);
+          end if;
+        end loop;
+        v_merged := v_keep;
+      end;
     end if;
     if jsonb_array_length(v_merged) > 4 then
       select jsonb_agg(s.e order by s.i) into v_merged from (
         select e, i from jsonb_array_elements(v_merged) with ordinality t(e, i) order by e->>'read_at' desc, i limit 4) s;
     end if;
     update relay.asn_user_accounts
-      set windows = v_merged, plan = case when v_plan <> '' then v_plan else plan end,
+      set windows = v_merged, window_pending = v_pending, plan = case when v_plan <> '' then v_plan else plan end,
           seen_at = v_now, seen_node = p_node, updated_at = v_now
       where user_id = v_user and vendor = v_vendor and account = v_email;
     -- Gemini 哪台在用（#374）：把這台的那一格換成這次回報的（current 照電腦端；最多留 20 台，新的在前）
@@ -177,9 +232,10 @@ begin
 end;
 $function$;
 
-drop function if exists public.asn_relay_acct_window_decide(text, text, jsonb, jsonb, jsonb, timestamptz);
-drop function if exists public.asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz);
-
+revoke all on function public.asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+grant execute on function public.asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz) to service_role;
+revoke all on function public.asn_relay_acct_window_decide(text, text, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+grant execute on function public.asn_relay_acct_window_decide(text, text, jsonb, jsonb, jsonb, timestamptz) to service_role;
 revoke all on function public.asn_relay_acct_windows_clean(text, jsonb, text, timestamptz) from public, anon, authenticated;
 grant execute on function public.asn_relay_acct_windows_clean(text, jsonb, text, timestamptz) to service_role;
 revoke all on function public.asn_relay_acct_roster_report(text, jsonb) from public, anon, authenticated;

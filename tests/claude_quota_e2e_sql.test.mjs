@@ -10,7 +10,7 @@ import fs from 'node:fs'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const golden = JSON.parse(fs.readFileSync(new URL('./fixtures/claude-quota-report.golden.json', import.meta.url), 'utf8'))
-const MIGS = ['20261029100000_acct_roster.sql', '20261029110000_acct_roster_lock_lower.sql', '20261029130000_acct_roster_gemini.sql', '20261030100000_acct_reset_times.sql', '20261031100000_acct_login_flags.sql', '20261110100000_acct_quota_share.sql', '20261111200000_acct_quota_week_confirm.sql', '20261113000000_acct_quota_rules_simplify.sql', '20261113100000_acct_quota_drop_missing_expired.sql', '20261120100000_acct_quota_latest_per_window.sql'].map(read)
+const MIGS = ['20261029100000_acct_roster.sql', '20261029110000_acct_roster_lock_lower.sql', '20261029130000_acct_roster_gemini.sql', '20261030100000_acct_reset_times.sql', '20261031100000_acct_login_flags.sql', '20261110100000_acct_quota_share.sql', '20261111200000_acct_quota_week_confirm.sql', '20261113000000_acct_quota_rules_simplify.sql', '20261113100000_acct_quota_drop_missing_expired.sql', '20261120120000_acct_quota_latest_per_window.sql'].map(read)
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024130000_acct_switch_signed.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
 

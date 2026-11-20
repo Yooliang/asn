@@ -1,4 +1,4 @@
-// 額度後台只取每窗最新讀數（#1883，20261120100000_acct_quota_latest_per_window.sql）：
+// 額度後台只取每窗最新讀數（#1883，20261120120000_acct_quota_latest_per_window.sql）：
 // 1. 靜態：回復檔把 judge／decide／windows_clean／roster_report 換回上一版（逐字）；新 migration 不動資料表、只授權 service_role、drop 掉不再用的 decide／judge。
 // 2. 實跑（有安裝 @electric-sql/pglite 時；不要加 --test-force-exit）：較新的蓋、較舊的不蓋；分窗各自判斷；舊欄位蓋不掉較新的讀數；
 //    同帳號多台取最新；窗數上限；重置時間不再丟窗；讀取時間在未來的記成現在；回復後回到舊規則。
@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const FILE = '20261120100000_acct_quota_latest_per_window.sql'
+const FILE = '20261120120000_acct_quota_latest_per_window.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(FILE)

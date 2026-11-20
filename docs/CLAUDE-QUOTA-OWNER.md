@@ -31,6 +31,6 @@
 
 ## 後台
 
-- migration：`supabase/migrations/20261120100000_acct_quota_latest_per_window.sql`；回復：`supabase/sql/rollback/20261120100000_acct_quota_latest_per_window_down.sql`。
+- migration：`supabase/migrations/20261120120000_acct_quota_latest_per_window.sql`；回復：`supabase/sql/rollback/20261120120000_acct_quota_latest_per_window_down.sql`。
 - 規則：進來的讀取時間比存著的早就不蓋，相等或較晚就蓋；不看重置時間、不看是哪一台送的。舊版用戶端的舊欄位照收，但蓋不掉較新的讀數。
 - 測試：`tests/acct_quota_latest_per_window_sql.test.mjs`（規則）、`tests/claude_quota_e2e_sql.test.mjs`（整條，讀 `tests/fixtures/claude-quota-report.golden.json`）。

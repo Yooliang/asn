@@ -428,3 +428,27 @@ fn 查詢只有一份_額外帳號與命令與正式額度都走_claude_quota_qu
     let cmd = include_str!("../cli/claude_usage_cmd.rs");
     assert!(cmd.contains("claude_quota::shape_report(") && !cmd.contains("reqwest"));
 }
+
+#[test]
+fn shape_鍵名長得像_uuid_或_email_或超過_40_字元_一律換成_key_看不到原字串() {
+    let long = "k".repeat(41);
+    let uuid = "3f2b8a1c-9d4e-4c7a-8b1f-0a2b3c4d5e6f";
+    let uuid_up = "3F2B8A1C-9D4E-4C7A-8B1F-0A2B3C4D5E6F";
+    let email = "someone.secret@x.test";
+    let body = json!({
+        uuid: { "inner": 1 },
+        email: "v",
+        long.as_str(): [true],
+        "nested": { uuid_up: { email: { long.as_str(): null } } },
+        "normal_key": 1,
+        "exactly40": "k".repeat(40),
+    });
+    let s = shape_of(&body).to_string();
+    for bad in [uuid, uuid_up, email, long.as_str(), "someone", "3f2b8a1c"] {
+        assert!(!s.to_lowercase().contains(&bad.to_lowercase()), "鍵名不能照印：{bad}（{s}）");
+    }
+    assert!(s.contains("\"<key>\""), "{s}");
+    assert!(s.contains("\"normal_key\"") && s.contains("\"nested\"") && s.contains("\"inner\""), "其餘鍵名照印：{s}");
+    assert_eq!(shape_of(&json!({ uuid: { email: 1 } })), json!({ "<key>": { "<key>": "number" } }), "巢狀的也換");
+    assert_eq!(shape_of(&json!({ "k".repeat(40): 1 })), json!({ "k".repeat(40): "number" }), "剛好 40 字元照印");
+}
