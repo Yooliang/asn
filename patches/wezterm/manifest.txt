@@ -1,0 +1,3 @@
+# 每行：<補丁檔名><Tab><會改到的檔案，逗號分隔>
+# 補丁資料夾裡的 .patch 必須和這裡一一對應；套用時會核對補丁實際動到的檔案等於這裡宣告的（wezterm-apply-patches.sh）
+0001-procinfo-build-proc-iterative.patch	procinfo/src/windows.rs
