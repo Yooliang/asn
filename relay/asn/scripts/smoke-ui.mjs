@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { mpaneWidenProbeSource, findBrowser, injectSource, mountCheckSource, pagerSettleSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, pagerSettleSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -214,7 +214,8 @@ async function runScenario(cdp, sc, base) {
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
   await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: sc.height ?? 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
   // 情境帶 reducedMotion（#1592）：用偵錯協定把「減少動態」開起來，交替動畫停住、畫面固定，截圖才每次一樣
-  if (sc.reducedMotion) await S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  // 沒帶的情境也要明確設成 no-preference，免得 runner 上的 Chrome 預設回報 reduce 讓動畫檢查全部讀到 none
+  await S('Emulation.setEmulatedMedia', motionMedia(sc))
   await S('Page.addScriptToEvaluateOnNewDocument', { source: injectSource(tableFor(sc)) })
   await S('Page.navigate', { url: `${base}/${sc.page}` })
   const expr = mountCheckSource(sc.ready, pathOf(sc.page))
@@ -254,6 +255,15 @@ async function runScenario(cdp, sc, base) {
   }
   let missing = []
   try { missing = (await S('Runtime.evaluate', { expression: 'globalThis.__smokeMissing || []', returnByValue: true })).result.value ?? [] } catch { /* 頁面已離開 */ }
+  // 有指定 ASN_SMOKE_SHOTS（CI 演練）時，失敗的情境補存一張 fail-情境名.png，方便看 runner 上畫面長怎樣
+  if (process.env.ASN_SMOKE_SHOTS && !shot && (errors.length || !check.ok || probeWhy || settleWhy)) {
+    try {
+      const { data } = await S('Page.captureScreenshot', { format: 'png' })
+      const f = shotPath(`fail-${sc.name}.png`)
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.writeFileSync(f, Buffer.from(data, 'base64'))
+    } catch { /* 存不了就算了，不影響判定 */ }
+  }
   await cdp.send('Target.closeTarget', { targetId }).catch(() => {})
   const problems = [...errors]
   if (!check.ok) problems.unshift(`沒有掛上：${check.why}`)

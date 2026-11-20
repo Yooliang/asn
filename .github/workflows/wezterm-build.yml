@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - name: 取上游原始碼、核對、套 #7706
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - name: 取上游原始碼、核對、套 #7706
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - name: 取上游原始碼、核對、套 #7706
@@ -163,7 +163,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - name: 取上游原始碼、核對、套 #7706

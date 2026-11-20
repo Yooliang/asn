@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
 
@@ -100,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
 
@@ -175,7 +175,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
           targets: aarch64-linux-android
@@ -218,7 +218,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
           targets: aarch64-linux-android
@@ -387,7 +387,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
 
@@ -447,7 +447,7 @@ jobs:
           cache: npm
           cache-dependency-path: relay/asn/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
 
