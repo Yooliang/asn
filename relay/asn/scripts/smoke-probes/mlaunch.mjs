@@ -40,9 +40,10 @@ export const mlaunchProbeSource = ({ big, labels, selected, note }) => `(async (
   await sleep(200);
   const bad = [];
   for (const e of [...fs.querySelectorAll('.m-opt, .m-opt-t, .m-opt-why'), note]) {
-    if (e.scrollWidth > e.clientWidth + 1) bad.push(e.textContent.trim().slice(0, 20));
+    // 失敗時帶上實際量到的寬度，才分得出是 1px 的字型度量誤差還是真的溢出
+    if (e.scrollWidth > e.clientWidth + 1) bad.push(e.textContent.trim().slice(0, 20) + '（' + e.tagName.toLowerCase() + '.' + e.className + ' 內容寬 ' + e.scrollWidth + '、可視寬 ' + e.clientWidth + '）');
     const r = e.getBoundingClientRect();
-    if (r.left < -0.5 || r.right > window.innerWidth + 0.5) bad.push('超出畫面：' + e.textContent.trim().slice(0, 20));
+    if (r.left < -0.5 || r.right > window.innerWidth + 0.5) bad.push('超出畫面：' + e.textContent.trim().slice(0, 20) + '（右緣 ' + r.right.toFixed(1) + '、視窗寬 ' + window.innerWidth + '）');
   }
   if (bad.length) return { ok: false, why: '字被切或超出畫面：' + bad.join('、') };
   const de = document.documentElement;
