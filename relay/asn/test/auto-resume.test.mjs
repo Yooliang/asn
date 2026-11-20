@@ -69,3 +69,12 @@ test('終端服務中斷：原因寫在最前面；重開機沒有原因欄位�
   assert.ok(!boot.body.includes('原因：'))
   assert.notEqual(boot.key, autoResumeNotice({ state: 'done', cause: 'x', resumed: ['甲'], failed: [] }).key)
 })
+
+test('#1867 接回的夥伴開在系統終端：講明是哪幾位與怎麼放回；沒有這個欄位（舊後端、都在終端服務裡）和以前一樣', () => {
+  const n = autoResumeNotice({ state: 'done', cause: '共用的終端服務中斷了', resumed: ['甲', '乙'], failed: [], native: ['乙'] })
+  assert.match(n.body, /其中 1 位開在系統終端，不在共用的終端服務裡：「乙」/)
+  assert.match(n.body, /關掉那個視窗再按「喚醒」/)
+  const plain = autoResumeNotice({ state: 'done', cause: '共用的終端服務中斷了', resumed: ['甲', '乙'], failed: [] })
+  assert.ok(!plain.body.includes('系統終端'), plain.body)
+  assert.notEqual(n.key, plain.key, '同樣人數、多了退回原生的，要再跳一次提示')
+})

@@ -65,6 +65,9 @@ pub struct Status {
     /// 為什麼要接回：空＝重開機（原本的行為）；終端服務中斷（`mux_watch`）會寫原因，畫面跟著顯示
     #[serde(skip_serializing_if = "str::is_empty")]
     pub cause: &'static str,
+    /// 接回了、但這幾位開在系統終端（原生主控台）而不是共用的終端服務裡：畫面要講明（#1867），原因只進 ui.log
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +87,10 @@ pub trait Deps {
     /// 同名或同一段對話已經有活著的視窗
     fn live(&self, name: &str, session: &str) -> bool;
     fn launch(&self, entry: &KnownEntry) -> Result<(), String>;
+    /// 剛開出來的這位是不是退回系統終端（原生主控台）開的。預設不是
+    fn opened_native(&self, _name: &str) -> bool {
+        false
+    }
     /// 開了卻一直沒上線：解除「正在開」的登記（見 opening.rs），本人之後手動喚醒才不會被擋。預設什麼都不做
     fn unclaim(&self, _entry: &KnownEntry) {}
     /// 沒看到上線，但命令列接續這段對話的程序還活著（還在啟動）：不解除登記，讓它自然到期。預設沒有
@@ -117,7 +124,7 @@ pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>
 pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
     let started = deps.now();
     let deadline = started + LIMIT_MS;
-    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started, cause: deps.cause() };
+    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started, cause: deps.cause(), native: Vec::new() };
     let push = |st: &Status, state: &'static str| {
         let mut s = st.clone();
         s.state = state;
@@ -197,6 +204,10 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
         }
         if up {
             st.resumed.push(e.name.clone());
+            // 開在系統終端（退回原生主控台）而不是共用的終端服務：畫面要講明，不能悄悄退回（#1867）
+            if deps.opened_native(&e.name) {
+                st.native.push(e.name.clone());
+            }
         } else if e.facts.hidden {
             // 隱藏視窗停在確認畫面：本人看不到框，只能靠我們把它顯示出來
             let shown = deps.reveal(e);
@@ -244,10 +255,10 @@ pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resum
     let now = crate::heartbeat::now_ms();
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
     let entries = crash_entries(names, known.entries(), known.archived_names());
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE, native: Default::default() };
     if !resume {
         let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
-        deps.report(&Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE });
+        deps.report(&Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE, native: Vec::new() });
         return;
     }
     let st = {
@@ -376,6 +387,8 @@ struct RealDeps {
     opened: std::sync::Mutex<std::collections::HashMap<String, u32>>,
     /// 接回的原因（重開機是空；終端服務中斷見 `mux_watch::CAUSE`）
     cause: &'static str,
+    /// 退回系統終端（原生主控台）開出來的夥伴名字（開窗後讀 `win_term::take_native_why`，同一個執行緒）
+    native: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 #[cfg(feature = "gui")]
@@ -421,11 +434,20 @@ impl Deps for RealDeps {
         let mut config = super::config::load_launch_config()?;
         // 一般使用者從畫面選的資料夾記在本機同意清單（launch-prefs.json），不在 launcher.json；併進來才接得回來
         super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir);
+        super::win_term::clear_native_why();
         let pid = super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden)?;
         if let Ok(mut m) = self.opened.lock() {
             m.insert(e.name.clone(), pid);
         }
+        if super::win_term::take_native_why().is_some() {
+            if let Ok(mut n) = self.native.lock() {
+                n.insert(e.name.clone());
+            }
+        }
         Ok(())
+    }
+    fn opened_native(&self, name: &str) -> bool {
+        self.native.lock().is_ok_and(|mut n| n.remove(name))
     }
     fn cause(&self) -> &'static str {
         self.cause
@@ -459,7 +481,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "" };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "", native: Default::default() };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
@@ -497,7 +519,7 @@ mod tests {
 
     #[test]
     fn 結果帶原因_重開機是空的不寫出來_終端服務中斷才寫() {
-        let boot = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: 1, cause: "" };
+        let boot = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: 1, cause: "", native: vec![] };
         assert!(!serde_json::to_string(&boot).unwrap().contains("cause"), "重開機的結果檔和以前一樣");
         let mux = Status { cause: super::super::mux_watch::CAUSE, ..boot };
         let v: serde_json::Value = serde_json::to_value(&mux).unwrap();
@@ -569,11 +591,13 @@ mod tests {
         released: RefCell<Vec<String>>,
         /// 這些名字的視窗程序還活著（命令列帶 --resume），只是 session 檔還沒寫出來
         starting: Vec<String>,
+        /// 這些名字開出來時退回了系統終端（原生主控台）
+        native: Vec<String>,
     }
 
     impl Fake {
         fn new() -> Fake {
-            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]), starting: vec![] }
+            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]), starting: vec![], native: vec![] }
         }
     }
 
@@ -588,6 +612,9 @@ mod tests {
     }
 
     impl Deps for Fake {
+        fn opened_native(&self, name: &str) -> bool {
+            self.native.iter().any(|n| n == name)
+        }
         fn now(&self) -> u64 {
             self.now.get()
         }
@@ -684,6 +711,19 @@ mod tests {
         assert_eq!(st.resumed, ["乙"]);
         assert!(st.failed.is_empty(), "{:?}", st.failed);
         assert_eq!(st.total, 1, "別條路開的不算在這一輪");
+    }
+
+    #[test]
+    fn t1867_接回的視窗退回系統終端_結果裡列出名字_畫面才講得出來() {
+        let mut f = Fake::new();
+        f.native = vec!["乙".into()];
+        let st = run(vec![entry("甲"), entry("乙")], &f);
+        assert_eq!(st.resumed, ["甲", "乙"]);
+        assert_eq!(st.native, ["乙"], "只有退回原生的那位；都在終端服務裡的不列");
+        let json = serde_json::to_string(&st).unwrap();
+        assert!(json.contains("\"native\":[\"乙\"]"), "{json}");
+        let none = run(vec![entry("甲")], &Fake::new());
+        assert!(none.native.is_empty() && !serde_json::to_string(&none).unwrap().contains("native"), "沒有退回就不多一個欄位");
     }
 
     #[test]
