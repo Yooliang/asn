@@ -62,6 +62,9 @@ struct FState {
     mux_notices: Vec<Value>,
     mux_notice_status: u16,
     mux_notice_notify: String,
+    /// 接回結果通知（mux_resume_notice）收到的請求；mux_resume_status 不為 0 就回這個狀態碼（模擬舊後台沒這個動作）
+    mux_resume_notices: Vec<Value>,
+    mux_resume_status: u16,
     /// 不為 0：ack 回這個狀態碼，信不算 ack
     ack_status: u16,
     /// 假後台回的 notify（空字串＝sent）
@@ -295,6 +298,15 @@ fn route(st: &Arc<Mutex<FState>>, head: &str, body: Value) -> (u16, Value, Strin
                 (200, json!({"id": uid(900 + s.sent.len() as u32)}))
             }
         }
+        "mux_resume_notice" if s.mux_resume_status != 0 => {
+            s.mux_resume_notices.push(body);
+            (s.mux_resume_status, json!({"error": "x"}))
+        }
+        "mux_resume_notice" => {
+            s.mux_resume_notices.push(body);
+            let notify = if s.mux_notice_notify.is_empty() { "sent".to_string() } else { s.mux_notice_notify.clone() };
+            (200, json!({"ok": true, "notify": notify}))
+        }
         "mux_down_notice" if s.mux_notice_status != 0 => {
             s.mux_notices.push(body);
             (s.mux_notice_status, json!({"error": "x"}))
@@ -378,6 +390,9 @@ impl FakeRelay {
     }
     fn mux_notices(&self) -> Vec<Value> {
         self.st.lock().unwrap().mux_notices.clone()
+    }
+    fn mux_resume_notices(&self) -> Vec<Value> {
+        self.st.lock().unwrap().mux_resume_notices.clone()
     }
     fn wait_notices(&self) -> Vec<Value> {
         self.st.lock().unwrap().wait_notices.clone()

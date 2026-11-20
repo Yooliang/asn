@@ -1,0 +1,572 @@
+   Compiling asn v0.2.34 (G:\Yooliang\wt-1818\relay\asn\src-tauri)
+warning: unused imports: `Read` and `Write`
+ --> src\term_remote\tests.rs:4:15
+  |
+4 | use std::io::{Read, Write};
+  |               ^^^^  ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Arc`
+ --> src\term_remote\tests.rs:5:17
+  |
+5 | use std::sync::{Arc, Mutex};
+  |                 ^^^
+
+warning: unused imports: `BAD_FRAMES_END` and `open_frame`
+ --> src\view_stream.rs:9:29
+  |
+9 | pub use crate::view_frame::{open_frame, seal_frame, DReceiver, Frame, Received, BAD_FRAMES_END, MAX_FRAME_BYTES};
+  |                             ^^^^^^^^^^                                          ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::nowin::NoWindow`
+ --> src\agent_tools\detect.rs:3:5
+  |
+3 | use crate::nowin::NoWindow;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+    --> src\launch\term.rs:2628:1
+     |
+2628 | /// 測試注入「使用者環境變數」的名字（每個測試自己的執行緒各一份）
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+     |
+     = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+     = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::io::Write`
+   --> src\agent_setup\claude_install.rs:500:9
+    |
+500 |     use std::io::Write as _;
+    |         ^^^^^^^^^^^^^^
+
+warning: unused import: `Write`
+ --> src\cli\quota_cmd.rs:8:21
+  |
+8 | use std::io::{Read, Write};
+  |                     ^^^^^
+
+warning: unused import: `Write`
+   --> src\stt.rs:599:25
+    |
+599 |     use std::io::{Read, Write as _};
+    |                         ^^^^^
+
+warning: value assigned to `retry_at` is never read
+   --> src\inbox_mode.rs:287:20
+    |
+287 |     let (mut step, mut retry_at): (usize, Option<u64>) = (0, None);
+    |                    ^^^^^^^^^^^^ this value is reassigned later and never used
+...
+293 |                     retry_at = None;
+    |                     --------------- `retry_at` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src\launch\auto_resume.rs:129:13
+    |
+129 |         let mut fail = |st: &mut Status, why: String| st.failed.push(Failed { name: e.name.clone(), reason: why });
+    |             ----^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: type `term_remote::Kind` is more private than the item `adopt_write_allowed`
+   --> src\term_remote.rs:187:1
+    |
+187 | pub fn adopt_write_allowed(terms: &LiveTerms, term_id: &str, kind: Kind) -> Result<(), String> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ function `adopt_write_allowed` is reachable at visibility `pub(crate)`
+    |
+note: but type `term_remote::Kind` is only usable at visibility `pub(self)`
+   --> src\term_remote.rs:21:1
+    |
+ 21 | enum Kind {
+    | ^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: function `view_backend_see` is never used
+    --> src\lib.rs:1203:4
+     |
+1203 | fn view_backend_see(dir: &std::path::Path, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<device_id::Tofu, String> {
+     |    ^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `pending_logins` is never used
+   --> src\account.rs:819:4
+    |
+819 | fn pending_logins() -> &'static std::sync::Mutex<std::collections::HashMap<String, crate::device_relay::Pending>> {
+    |    ^^^^^^^^^^^^^^
+
+warning: function `unix_now` is never used
+   --> src\account.rs:824:4
+    |
+824 | fn unix_now() -> i64 {
+    |    ^^^^^^^^
+
+warning: function `setup_device_request` is never used
+   --> src\account.rs:832:14
+    |
+832 | pub async fn setup_device_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String, vendor: String) -> Result<Value, S...
+    |              ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `setup_device_cancel` is never used
+   --> src\account.rs:860:8
+    |
+860 | pub fn setup_device_cancel(rid: String) -> Result<(), String> {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `setup_device_fetch` is never used
+   --> src\account.rs:869:14
+    |
+869 | pub async fn setup_device_fetch(app: State<'_, App>, auth: State<'_, AuthState>, rid: String) -> Result<Value, String> {
+    |              ^^^^^^^^^^^^^^^^^^
+
+warning: function `build_perm_decide_body` is never used
+    --> src\relay.rs:1308:8
+     |
+1308 | pub fn build_perm_decide_body(id: &str, choice_n: i64, hash: &str) -> Result<Value, String> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `options` is never read
+  --> src\term_remote.rs:34:5
+   |
+27 | struct Payload {
+   |        ------- field in this struct
+...
+34 |     options: Vec<TermOption>,
+   |     ^^^^^^^
+   |
+   = note: `Payload` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `fp8` is never used
+   --> src\device_id.rs:328:8
+    |
+328 | pub fn fp8(sign_pub: &str) -> String {
+    |        ^^^
+
+warning: function `confirm` is never used
+   --> src\device_id.rs:583:12
+    |
+583 |     pub fn confirm(dir: &Path, node: &str, fp16: &str, now_ms: u64) -> Result<bool, String> {
+    |            ^^^^^^^
+
+warning: function `phone_view` is never used
+   --> src\device_id.rs:643:12
+    |
+643 |     pub fn phone_view(dir: &Path) -> Result<Value, String> {
+    |            ^^^^^^^^^^
+
+warning: method `see` is never used
+  --> src\view_d.rs:38:8
+   |
+28 | pub trait ViewBackend: Send + Sync + 'static {
+   |           ----------- method in this trait
+...
+38 |     fn see(&self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<Tofu, String>;
+   |        ^^^
+
+warning: trait `ViewSink` is never used
+  --> src\view_d.rs:46:11
+   |
+46 | pub trait ViewSink: Send + Sync + 'static {
+   |           ^^^^^^^^
+
+warning: function `spawn_view` is never used
+   --> src\view_d.rs:224:8
+    |
+224 | pub fn spawn_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, inputs: Arc<RemoteInputs>, url: St...
+    |        ^^^^^^^^^^
+
+warning: function `run_view` is never used
+   --> src\view_d.rs:228:10
+    |
+228 | async fn run_view<B: ViewBackend, S: ViewSink>(b: Arc<B>, sink: Arc<S>, views: Arc<RemoteViews>, inputs: Arc<RemoteInputs>, url: St...
+    |          ^^^^^^^^
+
+warning: field `engine` is never read
+  --> src\agent_tools\catalog.rs:22:9
+   |
+18 | pub struct ToolDef {
+   |            ------- field in this struct
+...
+22 |     pub engine: String,
+   |         ^^^^^^
+   |
+   = note: `ToolDef` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `cfg` is never used
+   --> src\bridge\engines\aegis.rs:266:12
+    |
+259 | impl AegisEngine {
+    | ---------------- method in this implementation
+...
+266 |     pub fn cfg(&self) -> &AegisCfg {
+    |            ^^^
+
+warning: method `new_session` is never used
+   --> src\bridge\engines\acp_client.rs:115:18
+    |
+ 33 | impl AcpClient {
+    | -------------- method in this implementation
+...
+115 |     pub async fn new_session(&self, cwd: &str) -> Result<String, RpcError> {
+    |                  ^^^^^^^^^^^
+
+warning: field `name` is never read
+  --> src\bridge\engines\acp_worker\admin.rs:60:9
+   |
+59 | pub struct WorkerSnapshot {
+   |            -------------- field in this struct
+60 |     pub name: String,
+   |         ^^^^
+   |
+   = note: `WorkerSnapshot` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `by` is never read
+   --> src\bridge\partner_ops.rs:239:9
+    |
+231 | pub(crate) struct Op {
+    |                   -- field in this struct
+...
+239 |     pub by: String,
+    |         ^^
+    |
+    = note: `Op` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `read_local` is never used
+   --> src\bridge\roster.rs:428:8
+    |
+428 | pub fn read_local(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, exclude_name: &str, now_ms...
+    |        ^^^^^^^^^^
+
+warning: method `is_exact` is never used
+   --> src\bridge\worker.rs:365:12
+    |
+339 | impl Parser {
+    | ----------- method in this implementation
+...
+365 |     pub fn is_exact(&self, id: &str) -> bool {
+    |            ^^^^^^^^
+
+warning: function `body_of` is never used
+   --> src\cli\tests.rs:135:8
+    |
+135 | pub fn body_of(r: &Req) -> Value {
+    |        ^^^^^^^
+
+warning: function `each_console_window` is never used
+   --> src\launch\console.rs:530:31
+    |
+530 |     unsafe extern "system" fn each_console_window(hwnd: HWND, lp: LPARAM) -> i32 {
+    |                               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `each_wt_top` is never used
+   --> src\launch\console.rs:542:31
+    |
+542 |     unsafe extern "system" fn each_wt_top(hwnd: HWND, lp: LPARAM) -> i32 {
+    |                               ^^^^^^^^^^^
+
+warning: function `wt_windows` is never used
+   --> src\launch\console.rs:555:12
+    |
+555 |     pub fn wt_windows() -> Vec<(u32, bool)> {
+    |            ^^^^^^^^^^
+
+warning: function `wez_windows` is never used
+   --> src\launch\console.rs:587:12
+    |
+587 |     pub fn wez_windows() -> Vec<(u32, bool)> {
+    |            ^^^^^^^^^^^
+
+warning: function `console_windows` is never used
+   --> src\launch\console.rs:597:12
+    |
+597 |     pub fn console_windows() -> Vec<(u32, bool)> {
+    |            ^^^^^^^^^^^^^^^
+
+warning: function `exit_marker` is never used
+   --> src\launch\local.rs:454:15
+    |
+454 | pub(crate) fn exit_marker(nonce: &str, code: i32) -> String {
+    |               ^^^^^^^^^^^
+
+warning: constant `LOGIN_EXPIRED` is never used
+  --> src\launch\claude_screen.rs:70:7
+   |
+70 | const LOGIN_EXPIRED: &str = "Please run /login";
+   |       ^^^^^^^^^^^^^
+
+warning: function `real_names` is never used
+   --> src\launch\awaiting.rs:182:15
+    |
+182 | pub(crate) fn real_names() -> Vec<String> {
+    |               ^^^^^^^^^^
+
+warning: function `probe_window` is never used
+   --> src\launch\auto_resume.rs:379:8
+    |
+379 | pub fn probe_window(pid: u32) -> (bool, Vec<String>) {
+    |        ^^^^^^^^^^^^
+
+warning: field `started_ms` is never read
+   --> src\launch\term_adopt.rs:267:9
+    |
+265 | pub struct LivePane {
+    |            -------- field in this struct
+266 |     pub pane: PaneInfo,
+267 |     pub started_ms: u64,
+    |         ^^^^^^^^^^
+
+warning: function `idle_secs_from_duration` is never used
+   --> src\launch\term_adopt.rs:287:8
+    |
+287 | pub fn idle_secs_from_duration(d: &WezDuration) -> f64 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `default_unlocked` is never used
+   --> src\launch\term.rs:252:4
+    |
+252 | fn default_unlocked() -> bool {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `set_background_partners_for_test` is never used
+    --> src\launch\term.rs:3169:8
+     |
+3169 | pub fn set_background_partners_for_test(n: i64) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `pi_host` is never used
+    --> src\launch\term.rs:3726:15
+     |
+3726 | pub(crate) fn pi_host() -> Option<std::sync::Arc<dyn super::pi_term::PiTermHost>> {
+     |               ^^^^^^^
+
+warning: function `partner_rows` is never used
+    --> src\launch\term.rs:3850:15
+     |
+3850 | pub(crate) fn partner_rows() -> Vec<super::stuck_resume::PartnerRef> {
+     |               ^^^^^^^^^^^^
+
+warning: function `forward_timeouts_since` is never used
+   --> src\login_watch.rs:328:8
+    |
+328 | pub fn forward_timeouts_since(since_ms: i64) -> u32 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `credentials_updated_since` is never used
+   --> src\login_watch.rs:492:8
+    |
+492 | pub fn credentials_updated_since(since_ms: u64) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `心跳的pid是別的程式就不算另一個ASN` should have a snake case name
+   --> src\heartbeat.rs:316:8
+    |
+316 |     fn 心跳的pid是別的程式就不算另一個ASN() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `心跳的pid是別的程式就不算另一個_asn`
+    |
+    = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: function `遷移_ASN_HOME_有設就不遷移` should have a snake case name
+   --> src\home\tests.rs:267:4
+    |
+267 | fn 遷移_ASN_HOME_有設就不遷移() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `遷移_asn_home_有設就不遷移`
+
+warning: function `其他動作_回應一直讀不完_維持原行為回_Ok_Null` should have a snake case name
+    --> src\relay.rs:1677:14
+     |
+1677 |     async fn 其他動作_回應一直讀不完_維持原行為回_Ok_Null() {
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `其他動作_回應一直讀不完_維持原行為回_ok_null`
+
+warning: function `判斷_節點和指紋都一樣才算_別的都是不一樣_不是ASN的是bad` should have a snake case name
+   --> src\fp_scan.rs:136:8
+    |
+136 |     fn 判斷_節點和指紋都一樣才算_別的都是不一樣_不是ASN的是bad() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `判斷_節點和指紋都一樣才算_別的都是不一樣_不是_asn的是bad`
+
+warning: function `流程_一樣就記住_不一樣就擋住_不是ASN的不動_沒驗證或沒有掃到都不算` should have a snake case name
+   --> src\fp_scan.rs:182:8
+    |
+182 |     fn 流程_一樣就記住_不一樣就擋住_不是ASN的不動_沒驗證或沒有掃到都不算() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `流程_一樣就記住_不一樣就擋住_不是_asn的不動_沒驗證或沒有掃到都不算`
+
+warning: function `guard_1602_上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交` should have a snake case name
+   --> src\bridge\core\fail_notice.rs:151:8
+    |
+151 |     fn guard_1602_上游回5xx加HTML錯誤頁_寫成那家暫時出錯_不寫沒有轉交() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `guard_1602_上游回5xx加_html錯誤頁_寫成那家暫時出錯_不寫沒有轉交`
+
+warning: function `只有5xx加HTML兩個特徵都有才算上游出錯_其他失敗原因照舊顯示` should have a snake case name
+   --> src\bridge\core\fail_notice.rs:166:8
+    |
+166 |     fn 只有5xx加HTML兩個特徵都有才算上游出錯_其他失敗原因照舊顯示() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `只有5xx加_html兩個特徵都有才算上游出錯_其他失敗原因照舊顯示`
+
+warning: function `guard_1685_上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有` should have a snake case name
+   --> src\bridge\engines\acp_policy.rs:562:8
+    |
+562 |     fn guard_1685_上游5xx只認_括號code5xx_加_HTML_response_兩個特徵都有() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `guard_1685_上游5xx只認_括號code5xx_加_html_response_兩個特徵都有`
+
+warning: function `保護名單_ASN視窗名改名後跟著換` should have a snake case name
+    --> src\bridge\partner_ops\tests.rs:1991:4
+     |
+1991 | fn 保護名單_ASN視窗名改名後跟著換() {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `保護名單_asn視窗名改名後跟著換`
+
+warning: function `喚醒守門_ASN開的卡住接回_滿五分鐘_提示到工作管理員停止` should have a snake case name
+    --> src\bridge\partner_ops\tests.rs:2686:4
+     |
+2686 | fn 喚醒守門_ASN開的卡住接回_滿五分鐘_提示到工作管理員停止() {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `喚醒守門_asn開的卡住接回_滿五分鐘_提示到工作管理員停止`
+
+warning: function `喚醒守門_ASN開的接回_未滿五分鐘_維持請稍候` should have a snake case name
+    --> src\bridge\partner_ops\tests.rs:2698:4
+     |
+2698 | fn 喚醒守門_ASN開的接回_未滿五分鐘_維持請稍候() {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `喚醒守門_asn開的接回_未滿五分鐘_維持請稍候`
+
+warning: function `寫檔失敗_回_Failed_走原流程通知視窗` should have a snake case name
+   --> src\bridge\tests\outbox_it.rs:358:10
+    |
+358 | async fn 寫檔失敗_回_Failed_走原流程通知視窗() {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `寫檔失敗_回_failed_走原流程通知視窗`
+
+warning: function `agy_上游回5xx加HTML錯誤頁_等一下自動再試一次_成功就當沒事_還是502就保留原文_不改成連不上` should have a snake case name
+   --> src\bridge\tests\engines_it.rs:500:10
+    |
+500 | async fn agy_上游回5xx加HTML錯誤頁_等一下自動再試一次_成功就當沒事_還是502就保留原文_不改成連不上() {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `agy_上游回5xx加_html錯誤頁_等一下自動再試一次_成功就當沒事_還是502就保留原文_不改成連不上`
+
+warning: function `外部程式改寫登入檔_回報實際帳號_自己換新權杖或_ASN_切換不報` should have a snake case name
+    --> src\claude_accounts.rs:1621:8
+     |
+1621 |     fn 外部程式改寫登入檔_回報實際帳號_自己換新權杖或_ASN_切換不報() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `外部程式改寫登入檔_回報實際帳號_自己換新權杖或_asn_切換不報`
+
+warning: function `背景檢查還沒記下第一次狀態前_ASN_切換的紀錄會清掉_之後不少報` should have a snake case name
+    --> src\claude_accounts.rs:1754:8
+     |
+1754 |     fn 背景檢查還沒記下第一次狀態前_ASN_切換的紀錄會清掉_之後不少報() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `背景檢查還沒記下第一次狀態前_asn_切換的紀錄會清掉_之後不少報`
+
+warning: function `ASN_切換後_claude_json_又被改寫_不誤報_但之後別的程式換帳號照報` should have a snake case name
+    --> src\claude_accounts.rs:1771:8
+     |
+1771 |     fn ASN_切換後_claude_json_又被改寫_不誤報_但之後別的程式換帳號照報() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `asn_切換後_claude_json_又被改寫_不誤報_但之後別的程式換帳號照報`
+
+warning: function `背景工作與_Tauri_指令用同一把鎖` should have a snake case name
+    --> src\claude_accounts.rs:1874:8
+     |
+1874 |     fn 背景工作與_Tauri_指令用同一把鎖() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `背景工作與_tauri_指令用同一把鎖`
+
+warning: function `其他_project_與_oauthAccount_位元組不變` should have a snake case name
+   --> src\claude_json.rs:436:8
+    |
+436 |     fn 其他_project_與_oauthAccount_位元組不變() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `其他_project_與_oauth_account_位元組不變`
+
+warning: function `舊存檔的maxPerHour一律當沒設過_不蓋掉launcher檔` should have a snake case name
+   --> src\launch\config.rs:292:8
+    |
+292 |     fn 舊存檔的maxPerHour一律當沒設過_不蓋掉launcher檔() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `舊存檔的max_per_hour一律當沒設過_不蓋掉launcher檔`
+
+warning: function `launcher檔的上限夾在1到20_沒檔或壞檔回None` should have a snake case name
+   --> src\launch\config.rs:328:8
+    |
+328 |     fn launcher檔的上限夾在1到20_沒檔或壞檔回None() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `launcher檔的上限夾在1到20_沒檔或壞檔回_none`
+
+warning: function `開出去的視窗清掉NO_COLOR與CLAUDE但留設定資料夾` should have a snake case name
+   --> src\launch\config.rs:348:8
+    |
+348 |     fn 開出去的視窗清掉NO_COLOR與CLAUDE但留設定資料夾() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `開出去的視窗清掉_no_color與_claude但留設定資料夾`
+
+warning: function `找不到視窗的原因_Windows_Terminal_要講清楚` should have a snake case name
+   --> src\launch\console.rs:722:8
+    |
+722 |     fn 找不到視窗的原因_Windows_Terminal_要講清楚() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `找不到視窗的原因_windows_terminal_要講清楚`
+
+warning: function `掃描條目_Grok_codex_gemini_pi_claude_用條目名對到pid` should have a snake case name
+   --> src\launch\console_resolve.rs:206:8
+    |
+206 |     fn 掃描條目_Grok_codex_gemini_pi_claude_用條目名對到pid() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `掃描條目_grok_codex_gemini_pi_claude_用條目名對到pid`
+
+warning: function `不會往上抓到ASN自己或ASN的祖先` should have a snake case name
+   --> src\launch\console_resolve.rs:322:8
+    |
+322 |     fn 不會往上抓到ASN自己或ASN的祖先() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `不會往上抓到_asn自己或_asn的祖先`
+
+warning: function `手開接回舊對話的視窗_startedAt比程序建立早很多_仍算活` should have a snake case name
+   --> src\launch\local.rs:864:8
+    |
+864 |     fn 手開接回舊對話的視窗_startedAt比程序建立早很多_仍算活() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `手開接回舊對話的視窗_started_at比程序建立早很多_仍算活`
+
+warning: function `pid被Claude_Desktop或一次性呼叫接手_當作不在` should have a snake case name
+   --> src\launch\local.rs:883:8
+    |
+883 |     fn pid被Claude_Desktop或一次性呼叫接手_當作不在() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `pid被_claude_desktop或一次性呼叫接手_當作不在`
+
+warning: function `手開且改過名字的視窗_startedAt_比程序建立時間早五分鐘_仍算佔著這段對話` should have a snake case name
+   --> src\launch\live_process.rs:329:8
+    |
+329 |     fn 手開且改過名字的視窗_startedAt_比程序建立時間早五分鐘_仍算佔著這段對話() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `手開且改過名字的視窗_started_at_比程序建立時間早五分鐘_仍算佔著這段對話`
+
+warning: function `共用判活規則_活著且是_claude_才算_不看_startedAt` should have a snake case name
+   --> src\launch\live_process.rs:400:8
+    |
+400 |     fn 共用判活規則_活著且是_claude_才算_不看_startedAt() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `共用判活規則_活著且是_claude_才算_不看_started_at`
+
+warning: function `t1818_崩潰後兩分鐘內更新重開_舊ASN來得及報一次_新ASN不重複` should have a snake case name
+   --> src\launch\mux_watch.rs:863:8
+    |
+863 |     fn t1818_崩潰後兩分鐘內更新重開_舊ASN來得及報一次_新ASN不重複() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `t1818_崩潰後兩分鐘內更新重開_舊_asn來得及報一次_新_asn不重複`
+
+warning: function `狀態檔_ASN_關著期間掛掉_下次啟動補報_重開機不重複接` should have a snake case name
+    --> src\launch\mux_watch.rs:1033:8
+     |
+1033 |     fn 狀態檔_ASN_關著期間掛掉_下次啟動補報_重開機不重複接() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `狀態檔_asn_關著期間掛掉_下次啟動補報_重開機不重複接`
+
+warning: function `拿到鎖之後再試連一次_別的_ASN_剛起好就沿用` should have a snake case name
+   --> src\launch\mux\tests.rs:192:4
+    |
+192 | fn 拿到鎖之後再試連一次_別的_ASN_剛起好就沿用() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `拿到鎖之後再試連一次_別的_asn_剛起好就沿用`
+
+warning: function `別的_ASN_拿著啟動鎖_等它_過期的鎖會清掉` should have a snake case name
+   --> src\launch\mux\tests.rs:212:4
+    |
+212 | fn 別的_ASN_拿著啟動鎖_等它_過期的鎖會清掉() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `別的_asn_拿著啟動鎖_等它_過期的鎖會清掉`
+
+warning: function `命令列引號_用_Windows_自己的拆法拆回來一字不差` should have a snake case name
+   --> src\launch\mux\tests.rs:302:4
+    |
+302 | fn 命令列引號_用_Windows_自己的拆法拆回來一字不差() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `命令列引號_用_windows_自己的拆法拆回來一字不差`
+
+warning: `asn` (lib test) generated 84 warnings (run `cargo fix --lib -p asn --tests` to apply 5 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 49.48s
+     Running unittests src\lib.rs (target\debug\deps\asn_lib-65ecfd0751a63c0e.exe)
+error: test failed, to rerun pass `--lib`
+
+Caused by:
+  process didn't exit successfully: `G:\Yooliang\wt-1818\relay\asn\src-tauri\target\debug\deps\asn_lib-65ecfd0751a63c0e.exe t1818` (exit code: 0xc0000142, STATUS_DLL_INIT_FAILED)
+note: test exited abnormally; to see the full output pass --no-capture to the harness.

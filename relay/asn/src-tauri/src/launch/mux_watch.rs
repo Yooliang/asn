@@ -26,6 +26,9 @@ pub const STATE_FRESH_MS: u64 = 120_000;
 pub const CAUSE: &str = "共用的終端服務中斷了";
 /// 十分鐘內又中斷時，每位夥伴的失敗原因
 pub const COOLDOWN_REASON: &str = "終端服務十分鐘內又中斷了，這次沒有自動接回，請手動喚醒";
+/// 對照表被整個清空（服務還活著、名單卻一次變成空的）之後，這段時間內服務才掛，仍照清空前最後一次的名單接回（#1818）。
+/// 太久以前清空的，多半是本人把窗格都關了，不再當成要接回的
+pub const CARRY_KEEP_MS: u64 = 600_000;
 
 /// 這一輪看到的 mux 現況
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -69,6 +72,12 @@ pub struct Watch {
     /// 確定自己結束的夥伴（名字, 記下的時間）。寄給它們的信馬上退回，不當成還沒接回
     #[serde(default)]
     exited: Vec<(String, u64)>,
+    /// 服務還活著、名單卻一次清空前，最後一次「裡面有夥伴」的名單（#1818）：事故發生時 seen 的名單如果是空的，拿它補上，
+    /// 才不會變成「沒有夥伴可以接回」。存在狀態檔，ASN 重開也還在
+    #[serde(default)]
+    carry: Vec<String>,
+    #[serde(default)]
+    carry_at: u64,
     /// 上一輪就看不到 mux（還沒下結論）
     #[serde(skip)]
     suspect: bool,
@@ -101,9 +110,18 @@ impl Watch {
             self.exited.retain(|(e, _)| e != n);
             self.exited.push((n.clone(), now));
             self.lost.retain(|l| l != n);
+            self.carry.retain(|c| c != n);
             if let Some(s) = self.seen.as_mut() {
                 s.partners.retain(|p| p != n);
             }
+        }
+    }
+
+    /// 看得到服務、而且裡面有夥伴時，記下這份名單（清空前最後一次的樣子）。名單空的不蓋掉它
+    fn remember_carry(&mut self, o: &Observed, now: u64) {
+        if o.live.is_some() && !o.partners.is_empty() {
+            self.carry = o.partners.clone();
+            self.carry_at = now;
         }
     }
 
@@ -122,6 +140,7 @@ impl Watch {
         let Some(p) = prev else {
             self.suspect = false;
             self.seen = current;
+            self.remember_carry(o, now);
             return None;
         };
         let replaced = o.live.is_some_and(|m| m != p.mux);
@@ -133,6 +152,7 @@ impl Watch {
                 Some(c) => Some(Seen { at: p.at, ..c }),
                 None => None,
             };
+            self.remember_carry(o, now);
             return None;
         }
         // 消失了：換成別的 mux（確定舊的沒了）馬上算；只是暫時看不到 mux，要連續兩輪
@@ -142,6 +162,11 @@ impl Watch {
         }
         self.suspect = false;
         self.seen = current;
+        // 事故時 seen 的名單是空的、但清空前不久還有人：用清空前那份（#1818）
+        let carried = if p.partners.is_empty() && now.saturating_sub(self.carry_at) <= CARRY_KEEP_MS { std::mem::take(&mut self.carry) } else { Vec::new() };
+        self.carry.clear();
+        self.remember_carry(o, now);
+        let p = Seen { partners: if carried.is_empty() { p.partners } else { carried }, ..p };
         // 記著的那個 mux 是這次開機以前的（重開機前留下的紀錄，開機時間沒能讓 load 丟掉它）：
         // 新起的終端服務不是「這次開機的終端服務掛了」，不算事故、也不算還沒接回，重開機後該接回的交給開機接回（auto_resume）
         if self.boot.is_some_and(|b| p.mux.1.saturating_add(crate::bridge::known::BOOT_TOLERANCE_MS) < b) {
@@ -665,6 +690,35 @@ fn event_log_text(_pid: Option<u32>) -> Option<String> {
     None
 }
 
+/// 正式環境的對外動作
+#[cfg(feature = "gui")]
+struct RealSink {
+    work_dir: std::path::PathBuf,
+    data_dir: std::path::PathBuf,
+}
+
+#[cfg(feature = "gui")]
+impl super::mux_round::Sink for RealSink {
+    fn open(&self, pid: u32) -> Option<Box<dyn ProcHandle>> {
+        open_process(pid)
+    }
+    fn event_text(&self, pid: Option<u32>) -> Option<String> {
+        event_log_text(pid)
+    }
+    fn record(&self, line: &str) {
+        elog!("{line}");
+        if let Some(base) = super::mux::default_base() {
+            super::mux::note(&base.join("ASN").join("m"), line);
+        }
+    }
+    fn resume(&self, partners: Vec<String>, resume: bool) {
+        let (wd, dd) = (self.work_dir.clone(), self.data_dir.clone());
+        if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
+            elog!("接回夥伴的背景工作開不了（不影響監看）");
+        }
+    }
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -681,6 +735,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut tracker = Tracker::new(cfg!(windows));
         // 監看自己看不到終端服務時也要有訊號（11-10 30家用：02:22～11:59 每輪都看不到，一行紀錄都沒有）
         let mut blind = Blind::default();
+        let sink = RealSink { work_dir: work_dir.clone(), data_dir: data_dir.clone() };
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -715,35 +770,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
                 clear_blind(&work_dir);
             }
             let now = crate::heartbeat::now_ms();
-            w.note_exited(&terms.take_exited(), now);
-            let incident = w.tick(&o, now);
-            w.save(&file);
-            // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
-            let info = incident.as_ref().map(|_| {
-                let pid = tracker.held_pid();
-                (tracker.take_reason(), tracker.last_alive_ms, event_log_text(pid))
-            });
-            tracker.observe(&o, now, &open_process);
-            if let Some(inc) = incident {
-                let (reason, last_alive, event) = info.unwrap_or_default();
-                // 裡面沒有夥伴、而且是正常結束（結束碼 0）：不是事故，不寫紀錄、不通知
-                if empty_normal_exit(&inc, &reason) {
-                    continue;
-                }
-                let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs(), event.as_deref());
-                elog!("{line}");
-                if let Some(base) = super::mux::default_base() {
-                    super::mux::note(&base.join("ASN").join("m"), &line);
-                }
-                queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
-                if inc.partners.is_empty() {
-                    continue;
-                }
-                let (wd, dd, partners, resume) = (work_dir.clone(), data_dir.clone(), inc.partners, inc.resume);
-                if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
-                    elog!("接回夥伴的背景工作開不了（不影響監看）");
-                }
-            }
+            let ctx = super::mux_round::Round { state_file: &file, work_dir: &work_dir, uptime_secs: started.elapsed().as_secs() };
+            super::mux_round::run_round(&mut w, &mut tracker, &o, &terms.take_exited(), now, &ctx, &sink);
         }
     });
     if let Err(e) = spawned {
@@ -821,6 +849,43 @@ mod tests {
     }
 
     #[test]
+    fn t1818_對照表先被清空_再偵測到崩潰_事故名單用清空前保存的那份() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲", "乙"]), 0);
+        // 服務還活著，對照表被清空
+        w.tick(&obs(Some(M1), &[]), TICK_MS);
+        w.save(&f);
+        // ASN 重開也照樣有（名單存在狀態檔）
+        let mut w = Watch::load(&f, None);
+        assert_eq!(w.tick(&obs(None, &[]), 2 * TICK_MS), None, "先懷疑一輪");
+        let inc = w.tick(&obs(None, &[]), 3 * TICK_MS).expect("事故");
+        assert_eq!(inc.partners, ["甲", "乙"], "不是『沒有夥伴可以接回』");
+        assert!(inc.resume);
+        // 同一份名單不會用第二次：之後的空事故回到沒有夥伴
+        w.tick(&obs(Some(M2), &[]), 4 * TICK_MS);
+        w.tick(&obs(None, &[]), 5 * TICK_MS);
+        assert!(w.tick(&obs(None, &[]), 6 * TICK_MS).unwrap().partners.is_empty());
+    }
+
+    #[test]
+    fn t1818_清空太久以前的名單不拿來接回_自己結束的不在名單裡() {
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲"]), 0);
+        w.tick(&obs(Some(M1), &[]), TICK_MS);
+        let late = CARRY_KEEP_MS + 2 * TICK_MS;
+        w.tick(&obs(None, &[]), late);
+        assert!(w.tick(&obs(None, &[]), late + TICK_MS).unwrap().partners.is_empty(), "超過保存時間：多半是本人把窗格都關了");
+        let mut w2 = Watch::default();
+        w2.tick(&obs(Some(M1), &["甲", "乙"]), 0);
+        w2.note_exited(&["乙".to_string()], 1);
+        w2.tick(&obs(Some(M1), &[]), TICK_MS);
+        w2.tick(&obs(None, &[]), 2 * TICK_MS);
+        assert_eq!(w2.tick(&obs(None, &[]), 3 * TICK_MS).unwrap().partners, ["甲"], "乙自己結束了，不接");
+    }
+
+    #[test]
     fn 暫時看不到又回來_不算掛掉() {
         let mut w = Watch::default();
         w.tick(&obs(Some(M1), &["甲"]), 0);
@@ -872,6 +937,7 @@ mod tests {
         // 夥伴都自己關了，之後服務不見：也是沒有夥伴的那種（結束碼 0 的由呼叫端略過，見 empty_normal_exit）
         let mut w2 = Watch::default();
         w2.tick(&obs(Some(M1), &["甲"]), 0);
+        w2.note_exited(&["甲".to_string()], TICK_MS / 2); // 夥伴自己結束（看到結束標記）：不再算要接回的
         w2.tick(&obs(Some(M1), &[]), TICK_MS);
         assert_eq!(w2.tick(&obs(None, &[]), 2 * TICK_MS), None);
         assert_eq!(w2.tick(&obs(None, &[]), 3 * TICK_MS), Some(empty));
