@@ -72,7 +72,7 @@ export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "we
   };
 }
 // 新版的額度窗（#374）：只收 claude、codex、gemini（grok 一律不收；gemini 只收 five_hour、weekly，#1515）。壞掉的單窗丟掉，不退回整份；同名只留第一個；最多 4 個。
-// 規則跟資料庫的 asn_relay_acct_windows_clean 相同（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。
+// 規則跟資料庫的 asn_relay_acct_windows_clean 相同（重置時間不丟窗、未來的讀取時間夾成現在，#1883）（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。
 export const MAX_WINDOWS = 4;
 const WINDOW_NAME_RE = /^(five_hour|weekly|w[0-9]{1,6})$/;
 // 重置時間的合理範圍（#524 審查）：「現在 −1 天」到「現在 +8 天」，超出就丟那一窗（不然一個 2099 年的值會把那一窗永遠鎖住）
@@ -95,12 +95,15 @@ export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
     if (out.length >= MAX_WINDOWS) break;
     if (!w || typeof w !== "object" || typeof w.name !== "string" || !WINDOW_NAME_RE.test(w.name)) continue;
     const left = pctOrNull(w.left_pct);
-    const read = isoOrNull(w.read_at, FUTURE_SLACK_MS);
-    if (left == null || read == null) continue;
+    // 讀取時間比現在晚的夾成現在（不丟，跟資料庫 asn_relay_acct_windows_clean 同一套；丟掉會讓新版整份取代把舊值當成「沒帶」刪掉）
+    const read0 = isoOrNull(w.read_at, null);
+    if (left == null || read0 == null) continue;
+    const read = new Date(Math.min(Date.parse(read0), now)).toISOString();
+    // 重置時間不看範圍（顯示端自己處理過期）；格式壞掉的才丟這一窗
     let reset: string | null = null;
     if (w.resets_at != null) {
       reset = isoOrNull(w.resets_at, null);
-      if (reset == null || !resetInRange(reset, now)) continue;
+      if (reset == null) continue;
     }
     if (out.some((o) => o.name === w.name)) continue;
     out.push({ name: w.name, left_pct: left, resets_at: reset, read_at: read });

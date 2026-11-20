@@ -261,6 +261,7 @@ pub async fn read_dir(home: &Path, name: &str, dir: &Path, may_refresh: bool, no
         Err(Q::Http(H::Server(c) | H::Status(c))) => Err(Failure::Other(format!("HTTP {c}"))),
         Err(Q::Http(_)) => Err(fail("連線失敗")),
         Err(Q::NoAccount) | Err(Q::Mismatch) => Err(fail("查不到帳號")),
+        Err(Q::Unreadable) => Err(fail("回應看不懂")),
     }
 }
 

@@ -14,8 +14,9 @@
 //!
 //! 安全：
 //! - 憑證只在這台電腦的記憶體裡用：不離開本機、不寫 log、不顯示、不進錯誤訊息；回報只有 email 與數字。
-//! - **只用現成的 access token，不做 refresh**：ASN 自己換新可能讓 Claude 視窗的登入失效。過期就標「登入過期」，
-//!   等使用者用那個帳號開 Claude、Claude 自己換新之後（憑證檔變了）自然恢復。程式裡沒有任何換新的呼叫（有靜態測試鎖住）。
+//! - **目前登入的帳號只用現成的 access token，不做 refresh**：ASN 自己換新可能讓 Claude 視窗的登入失效。過期就標「登入過期」，
+//!   等使用者用那個帳號開 Claude、Claude 自己換新之後（憑證檔變了）自然恢復。本檔與 `claude_accounts::fetch_json` 沒有任何換新的呼叫（有靜態測試鎖住）。
+//!   （範圍只到「目前登入的帳號」：Claude 額外帳號 `claude_extra.rs` 是使用者另外開的功能、預設關閉，有它自己的換新流程，不在這裡。）
 //! - 紅線：函式一律吃家目錄路徑參數；只有 Tauri 指令與背景迴圈會決定真實家目錄，測試不得呼叫它們。
 use crate::claude_accounts::{self, HttpFail};
 use crate::quota_core::iso_secs;
@@ -141,6 +142,24 @@ pub enum QueryFail {
     NoAccount,
     /// 憑證查出來的帳號跟預期的不同
     Mismatch,
+    /// 回應裡有那個窗的區塊，但讀不出數字（缺值、字串、超出範圍）：跟「沒有這個窗」（區塊是 null 或不存在）不同，
+    /// 這一輪當成讀不到，不能拿去整份取代後台現有的窗
+    Unreadable,
+}
+
+/// 用量回應裡「已用」超出 100 一點點（四捨五入的誤差，例如 100.4）算用盡，夾成 100；超出太多或是負的不動（讓它被認成讀不懂）
+const OVER_TOLERANCE: f64 = 5.0;
+
+fn clamp_usage(usage: &Value) -> Value {
+    let mut v = usage.clone();
+    for key in ["five_hour", "seven_day"] {
+        if let Some(u) = v.get_mut(key).and_then(|b| b.get_mut("utilization")) {
+            if u.as_f64().is_some_and(|x| x.is_finite() && x > 100.0 && x <= 100.0 + OVER_TOLERANCE) {
+                *u = json!(100.0);
+            }
+        }
+    }
+    v
 }
 
 /// 查一次：先查這份憑證屬於哪個帳號，再查用量，回 (email, 額度窗)。額度窗可能是空的（回應不齊或介面變了）。
@@ -153,7 +172,15 @@ pub fn query(net: &dyn Net, cred: &[u8], now_ms: i64, expect: Option<&str>) -> R
         return Err(QueryFail::Mismatch);
     }
     let usage = net.usage(cred).map_err(QueryFail::Http)?;
-    Ok((email, crate::claude_extra::parse_usage(&usage, now_ms)))
+    let usage = clamp_usage(&usage);
+    let windows = crate::claude_extra::parse_usage(&usage, now_ms);
+    // 區塊存在（不是 null）卻讀不出來：不是「這個帳號沒有這個窗」
+    for (key, name) in [("five_hour", "five_hour"), ("seven_day", "weekly")] {
+        if !usage[key].is_null() && !windows.iter().any(|w| w["name"] == name) {
+            return Err(QueryFail::Unreadable);
+        }
+    }
+    Ok((email, windows))
 }
 
 /// 讀一輪：回 (新狀態, 失敗類別（成功與沒有登入是 None，給記 log 與退避用）)，或這一輪不查的原因。
@@ -175,7 +202,7 @@ pub fn read_round(home: &Path, now_ms: i64, net: &dyn Net, busy: &dyn Fn() -> bo
         Ok(r) => r,
         Err(QueryFail::Mismatch) => return Err(Skip::Mismatch),
         Err(QueryFail::Http(f)) => return Ok((State::failed(&email, status_of(f)), Some(f))),
-        Err(QueryFail::NoAccount) => return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other))),
+        Err(QueryFail::NoAccount | QueryFail::Unreadable) => return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other))),
     };
     // 查的當中登入變了（切換，或 Claude 自己換新權杖也算變）：這輪不記，下一輪再查
     let now_cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
@@ -309,6 +336,10 @@ pub struct Loop {
     gate: Gate,
     seen_kicks: u64,
     logged: Option<&'static str>,
+    /// 「這一輪沒查」的原因，同一個原因連續發生只記一次 log
+    logged_skip: Option<Skip>,
+    /// 上一輪是「沒有登入」時，當時憑證檔的修改時間：每分鐘只在本機看一眼，登入了或憑證檔變了就立刻查
+    no_login_mark: Option<Option<i64>>,
 }
 
 impl Loop {
@@ -331,22 +362,31 @@ impl Loop {
             self.logged = None;
         }
         let mark = Self::mark(home);
+        if self.no_login_mark.is_some_and(|m| m != mark || claude_accounts::current_email(home).is_some()) {
+            self.gate = Gate::default();
+            self.no_login_mark = None;
+        }
         if !self.gate.due(now_ms, mark) {
             return false;
         }
         match read_round(home, now_ms, net, busy) {
             // 沒查：不算失敗、不退避，下一分鐘再看
             Err(skip) => {
-                match skip {
-                    Skip::Switching => {}
-                    Skip::Mismatch => log("額度讀取 Claude：這一輪沒查（憑證和目前登入的帳號對不上，可能正在切換）".into()),
-                    Skip::Changed => log("額度讀取 Claude：這一輪沒查（查的過程中登入變了）".into()),
+                if self.logged_skip != Some(skip) {
+                    self.logged_skip = Some(skip);
+                    match skip {
+                        Skip::Switching => {}
+                        Skip::Mismatch => log("額度讀取 Claude：這一輪沒查（憑證和目前登入的帳號對不上，可能正在切換）".into()),
+                        Skip::Changed => log("額度讀取 Claude：這一輪沒查（查的過程中登入變了）".into()),
+                    }
                 }
                 false
             }
             Ok((state, None)) => {
                 self.gate.success(now_ms);
                 self.logged = None;
+                self.logged_skip = None;
+                self.no_login_mark = (state.email.is_none()).then_some(mark);
                 set_state(state);
                 true
             }
@@ -354,6 +394,7 @@ impl Loop {
                 let failure = if f == HttpFail::Unauthorized { Failure::Auth } else { Failure::Other(fail_text(f).into()) };
                 // 登入過期用憑證檔的記號：檔案變了才再試；其他失敗指數退避（上限 6 小時）
                 self.gate.failure(&failure, now_ms, mark);
+                self.logged_skip = None;
                 let text = fail_text(f);
                 if self.logged != Some(text) {
                     self.logged = Some(text);

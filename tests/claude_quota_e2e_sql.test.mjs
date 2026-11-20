@@ -161,4 +161,49 @@ test('舊版讀數只更新有帶的窗、不會把別的窗刪掉', { skip }, a
   assert.equal((await viewOf(db)).quota.text, '5 小時剩 62%、每週剩 55%')
 })
 
+// ---------- 其他廠牌不套整份取代、Edge 輸出進 SQL、舊四欄的未來讀取時間 ----------
+const vendorRow = (vendor, windows) => ({ vendor, email: 'g@x.test', plan: 'pro', current: true, windows })
+const winsOf = async (db, vendor) => (await one(db, 'select public.asn_relay_acct_roster($1, $2::uuid) r', ['H', U1])).accounts.find(a => a.vendor === vendor).windows.map(w => w.name).sort()
+const goldenWins = golden.accounts[0].windows
+
+test('整份取代只套用 Claude：Gemini、Codex 只帶部分窗時，沒帶的窗不被刪', { skip }, async () => {
+  for (const vendor of ['gemini', 'codex']) {
+    const db = await setup()
+    await sendLikeEdge(db, 'W', { accounts: [vendorRow(vendor, goldenWins)] })
+    assert.deepEqual(await winsOf(db, vendor), ['five_hour', 'weekly'], vendor)
+    const later = goldenWins.filter(w => w.name === 'weekly').map(w => ({ ...w, left_pct: 50, read_at: '2026-10-24T12:30:00Z' }))
+    await sendLikeEdge(db, 'W', { accounts: [vendorRow(vendor, later)] })
+    assert.deepEqual(await winsOf(db, vendor), ['five_hour', 'weekly'], `${vendor} 沒帶的 five_hour 不被刪`)
+  }
+})
+
+test('Edge 輸出 → SQL：parseReport 整理後的回報（毫秒格式、未來讀取時間夾成現在、2099 年重置時間）SQL 吃得進去、不被當成沒帶', { skip }, async () => {
+  const { parseReport } = await import('../supabase/functions/_shared/account_switch.ts')
+  const db = await setup()
+  await sendLikeEdge(db, 'W', golden)
+  const future = new Date(Date.now() + 5 * 60_000).toISOString()
+  const edge = parseReport({ accounts: [{ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, windows: [
+    { name: 'five_hour', left_pct: 61.6, resets_at: '2099-01-01T00:00:00Z', read_at: future },
+    { name: 'weekly', left_pct: 79.4, resets_at: '2026-10-20T00:00:00+08:00', read_at: future },
+  ] }] })
+  assert.equal(edge[0].windows.length, 2, 'Edge 不再丟範圍外的重置時間、也不丟未來的讀取時間')
+  assert.ok(Date.parse(edge[0].windows[0].read_at) <= Date.now() + 1000, 'Edge 把未來讀取時間夾成現在')
+  const r = await one(db, 'select public.asn_relay_acct_roster_report($1, $2::jsonb) r', ['W', JSON.stringify(edge)])
+  assert.equal(r.ok, true)
+  const a = await claudeRow(db)
+  assert.deepEqual(a.windows.map(w => [w.name, w.left_pct]).sort(), [['five_hour', 62], ['weekly', 79]], '兩窗都留著，且是新值')
+  assert.equal(a.windows.find(w => w.name === 'five_hour').resets_at, '2099-01-01T00:00:00Z')
+})
+
+test('舊四欄的 at 比後台現在晚（10 分鐘內）：記成現在，不會擋掉之後的正常讀數', { skip }, async () => {
+  const db = await setup()
+  const at = new Date(Date.now() + 8 * 60_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  await sendLikeEdge(db, 'W', { accounts: [legacyRow({ five_hour_pct: 40, weekly_pct: 70, reset_at: new Date(Date.now() + 3600_000).toISOString().replace(/\.\d+Z$/, 'Z'), at })] })
+  const a = await claudeRow(db)
+  assert.ok(a.windows.every(w => Date.parse(w.read_at) <= Date.now() + 1000), '讀取時間已夾成現在')
+  const ok = new Date(Date.now() + 1000).toISOString().replace(/\.\d+Z$/, 'Z')
+  await sendLikeEdge(db, 'W', { accounts: [{ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, windows: [{ name: 'weekly', left_pct: 33, resets_at: null, read_at: ok }, { name: 'five_hour', left_pct: 22, resets_at: null, read_at: ok }] }] })
+  assert.deepEqual((await claudeRow(db)).windows.map(w => [w.name, w.left_pct]).sort(), [['five_hour', 22], ['weekly', 33]])
+})
+
 closeAtEnd()

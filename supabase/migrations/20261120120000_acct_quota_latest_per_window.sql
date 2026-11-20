@@ -6,11 +6,12 @@
 --     不再拿掉「這次沒帶、重置時間已過」的窗（顯示端自己處理過期）。每帳號最多留 4 窗、每人最多 100 個帳號列等上限照舊。
 --     舊版用戶端的舊欄位（five_hour_pct、weekly_pct、reset_at、at）照收（legacy_windows 當場轉成兩窗存起來，走同一條路），所以蓋不掉時間較新的讀數；
 --     舊版若同時帶 windows 與四欄，以 windows 為準。這段四欄轉換只保留這一版，**下一版拿掉**（legacy_windows 與列裡四欄的處理一併移除）。
---     新版用戶端（列裡有 windows、沒有舊四欄鍵、windows 不是空的）每次回報整份取代該帳號的窗：這次沒帶的窗拿掉（方案拿掉 5 小時限制後畫面不再殘留 five_hour）；
---     舊版轉換來的讀數不套用這條，只更新有帶的窗。
+--     新版 Claude 用戶端（列裡有 windows、沒有舊四欄鍵、windows 不是空的）每次回報整份取代該帳號的窗：這次沒帶的窗拿掉（方案拿掉 5 小時限制後畫面不再殘留 five_hour）；
+--     舊版轉換來的讀數不套用這條，只更新有帶的窗；其他廠牌（Gemini、Codex、Grok、MiniMax）也不套用，只更新有帶的窗。
+--     舊四欄轉來的讀取時間，比後台現在還晚的同樣記成現在。
 --  2. asn_relay_acct_windows_clean：不再丟「重置時間不在現在 −1 天～+8 天」的窗；讀取時間比後台現在還晚的改記成現在（不丟）。其餘逐字照舊。
 --  3. 不再用到的 asn_relay_acct_window_decide、asn_relay_acct_window_judge 在這裡 drop。
---  4. 簽名、回傳形狀、權限不變；不動資料表（window_pending 欄位保留，不再寫入）。
+--  4. 簽名、回傳形狀、權限不變（另外 drop 了 asn_relay_acct_window_decide、asn_relay_acct_window_judge 兩個函式，回復檔會還原它們）；不動資料表（window_pending 欄位保留，不再寫入）。
 -- 部署順序：本 migration → relay（Edge Function，不需改）→ 電腦端。
 -- 回復：supabase/sql/rollback/20261120120000_acct_quota_latest_per_window_down.sql（換回 judge、decide、windows_clean、roster_report 的上一版本體）。
 begin;
@@ -111,6 +112,9 @@ begin
     -- 沒帶 windows、或帶了但清完一窗都不剩：Claude 退回舊四欄（#524 審查）
     if v_vendor = 'claude' and v_new = '[]'::jsonb then
       v_new := public.asn_relay_acct_legacy_windows(v_row, p_node);
+      -- 舊四欄轉來的讀取時間也照 windows 的規則：比後台現在還晚的記成現在（不丟），免得之後正常的讀數被它擋掉
+      select coalesce(jsonb_agg(jsonb_set(e, '{read_at}', to_jsonb(to_char(least((e->>'read_at')::timestamptz, v_now) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))) order by i), '[]'::jsonb)
+        into v_new from jsonb_array_elements(v_new) with ordinality t(e, i);
     end if;
     insert into relay.asn_user_accounts (user_id, vendor, account, plan, seen_node)
       values (v_user, v_vendor, v_email, v_plan, p_node)
@@ -133,7 +137,7 @@ begin
     -- 新版用戶端（列裡有 windows、沒有任何舊四欄鍵）每次回報就是這個帳號現在有的窗：這次沒帶的窗從後台拿掉
     -- （例如方案拿掉 5 小時限制後不再有 five_hour）。上面「較舊不蓋較新」照舊：這次有帶的窗，被擋時維持存著的。
     -- windows 是空的（這次讀不到）不算「都沒有了」，不動。舊版用戶端（列裡有舊四欄）不套用，只更新有帶的窗。
-    if v_row ? 'windows' and v_new <> '[]'::jsonb
+    if v_vendor = 'claude' and v_row ? 'windows' and v_new <> '[]'::jsonb
        and not (v_row ?| array['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at']) then
       select coalesce(jsonb_agg(e order by i), '[]'::jsonb) into v_merged
         from jsonb_array_elements(v_merged) with ordinality t(e, i)

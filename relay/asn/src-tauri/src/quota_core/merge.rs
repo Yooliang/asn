@@ -77,7 +77,7 @@ fn legacy_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
 }
 
 /// 一條要不要收：收回 Ok(())，不收回原因。`old_read_ms`＝記著的那條的資料時間（沒有記過就是 None），`new_read_ms`＝這次的資料時間。
-/// 順序：future_read → older_read → reset_out_of_range（跟後台 asn_relay_acct_window_decide 一樣）。
+/// 順序：future_read → older_read → reset_out_of_range（Gemini 本機合併用；後台已改成只取每窗最新讀數）。
 /// 資料時間以秒為單位比較（記著的存成整秒），同一秒算一樣，照收。
 pub fn judge(old_read_ms: Option<i64>, new_read_ms: i64, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
     if new_read_ms > now_ms + FUTURE_READ_MS {

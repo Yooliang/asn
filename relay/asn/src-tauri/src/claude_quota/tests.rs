@@ -452,3 +452,66 @@ fn shape_鍵名長得像_uuid_或_email_或超過_40_字元_一律換成_key_看
     assert_eq!(shape_of(&json!({ uuid: { email: 1 } })), json!({ "<key>": { "<key>": "number" } }), "巢狀的也換");
     assert_eq!(shape_of(&json!({ "k".repeat(40): 1 })), json!({ "k".repeat(40): "number" }), "剛好 40 字元照印");
 }
+
+// ---------- 西川一審（#1885）：讀不懂的窗、log 去重、沒登入後登入 ----------
+fn usage_with(five: Value, week: Value) -> String {
+    http("200 OK", &json!({ "five_hour": five, "seven_day": week }).to_string())
+}
+
+#[test]
+fn 有這個窗但讀不懂_不能當成沒有這個窗_null_才是沒有_略超過_100_夾成用盡() {
+    let week = json!({ "utilization": 20, "resets_at": "2026-10-30T00:00:00Z" });
+    let go = |five: Value| {
+        let h = home("a@x.test", NOW + 3_600_000);
+        let f = serve(profile_ok("a@x.test"), usage_with(five, week.clone()));
+        round(h.path(), &f).unwrap().0
+    };
+    // 區塊是 null：這個帳號沒有 5 小時窗，只有每週
+    let st = go(Value::Null);
+    assert_eq!((st.status, st.windows.len(), st.windows[0]["name"].as_str()), (Status::Ok, 1, Some("weekly")));
+    // 100.4：四捨五入誤差，算用盡，窗還在
+    let st = go(json!({ "utilization": 100.4, "resets_at": "2026-10-24T14:00:00Z" }));
+    assert_eq!(st.status, Status::Ok);
+    assert_eq!(st.windows.iter().find(|w| w["name"] == "five_hour").map(|w| w["left_pct"].clone()), Some(json!(0)));
+    // 區塊在、但讀不懂：這一輪讀不到（不整份取代後台的窗）
+    for bad in [json!({ "utilization": "abc" }), json!({ "resets_at": "2026-10-24T14:00:00Z" }), json!({ "utilization": null }), json!({ "utilization": 130 }), json!({ "utilization": -3 }), json!("壞")] {
+        let st = go(bad.clone());
+        assert_eq!((st.status, st.windows.is_empty()), (Status::Unavailable, true), "{bad}");
+    }
+}
+
+#[test]
+fn log_同一個原因連續發生只記一次_原因改變或恢復後才再記() {
+    let _g = GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let h = home("a@x.test", NOW + 86_400_000);
+    let bad = serve(profile_ok("b@x.test"), usage_ok());
+    let ok = serve(profile_ok("a@x.test"), usage_ok());
+    let (l, log) = lines();
+    let mut lp = Loop::default();
+    for i in 0..5 {
+        assert!(!lp.tick_at(0, h.path(), NOW + i * 60_000, &bad.net, &idle, &log), "對不上：每分鐘仍會試，但不算查過");
+    }
+    assert_eq!(l.lock().unwrap().len(), 1, "連續對不上只記一次");
+    assert!(lp.tick_at(0, h.path(), NOW + 6 * 60_000, &ok.net, &idle, &log), "恢復");
+    assert_eq!(l.lock().unwrap().len(), 1, "恢復不另寫");
+    assert!(!lp.tick_at(0, h.path(), NOW + 17 * 60_000, &bad.net, &idle, &log));
+    assert_eq!(l.lock().unwrap().len(), 2, "恢復後又發生才再記");
+}
+
+#[test]
+fn 沒登入時每分鐘只在本機看一眼_登入了就立刻查_不用等十分鐘() {
+    let _g = GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let h = home("a@x.test", NOW + 86_400_000);
+    std::fs::remove_file(h.path().join(".claude.json")).unwrap();
+    std::fs::remove_file(claude_accounts::cred_path(h.path())).unwrap();
+    let f = serve(profile_ok("a@x.test"), usage_ok());
+    let (_, log) = lines();
+    let mut lp = Loop::default();
+    assert!(lp.tick_at(0, h.path(), NOW, &f.net, &idle, &log), "沒登入：記成沒有狀態");
+    assert!(!lp.tick_at(0, h.path(), NOW + 60_000, &f.net, &idle, &log), "沒變就不動");
+    assert_eq!(f.count(), 0, "沒登入不連網");
+    login(h.path(), "a@x.test");
+    std::fs::write(claude_accounts::cred_path(h.path()), cred_json(NOW + 86_400_000)).unwrap();
+    assert!(lp.tick_at(0, h.path(), NOW + 2 * 60_000, &f.net, &idle, &log), "登入了（第 2 分鐘）就查，不等十分鐘");
+    assert_eq!(state_view(h.path())["status"], "ok");
+}
