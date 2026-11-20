@@ -501,7 +501,7 @@ export const mtermviewFrames = (id = 'v1', color = false) => [1, 2, 3, 4].map(n 
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 const BASE_SCENARIOS = [
   { name: 'm-signed-out', page: 'm.html', state: { signedIn: false, needsLogin: true }, ready: '#app.m .m-login' },
-  { name: 'm-signed-in', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search' },
+  { name: 'm-signed-in', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search-1973-broken' },
   { name: 'list', page: 'list.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'list-roster', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: true }, ready: '#app.win .dv-my .dv-acct' },
   { name: 'list-roster-missing', page: 'list.html', state: { signedIn: true, devicesPage: true }, ready: '#app.win .dv-set' },
