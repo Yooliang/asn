@@ -27,7 +27,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
-import { UNNAMED_DEVICE, emo, initial, plain } from './lib/text.mjs'
+import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { QR_TEXT, normalizeQr } from './lib/fp-qr.mjs'
@@ -98,6 +98,7 @@ import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible,
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
+import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
@@ -356,6 +357,7 @@ const friends = ref([])
 watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
+const nodeFacts = ref({})   // 節點 → { createdMs, seenMs }（設備詳情辨認區）
 const nodeNames = ref({})   // 節點 → 後台記的設備名（名單每個成員的 name，沒有夥伴的設備也有）
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
@@ -367,6 +369,7 @@ const sync = () => {
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   nodeNames.value = s.nodeNames ?? {}
+  nodeFacts.value = s.nodeFacts ?? {}
   conn.value = s.conn
   rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
@@ -426,6 +429,7 @@ function remotePiModelsFor(node) {
   return Array.isArray(pm) && pm.length ? async () => pm : null
 }
 const remoteMachines = ref({})   // node → { platform, launch_closed_reason }（0.2 H2：沒開放時說明怎麼開，或那台自己寫的原因）
+watch(remoteMachines, m => setNodePlatforms(m, { node: info.node, phone: false }), { immediate: true })   // 手機還是電腦只有 node-platform.mjs 一份判斷（#1829）
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
@@ -1134,7 +1138,7 @@ void invoke('invite_pending').then(onInviteCode).catch(() => {})
 const noticeView = reactive({ cat: NOTICE_CAT_ALL, sel: '', opened: [] })   // opened：這次開著期間點開過、但通知對話還沒整個標已讀的那幾則
 let setRailTab = () => {}   // 名單頁籤的 ref 在下面才建立，建立後換成真的
 const noticeFriendNow = computed(() => friends.value.find(isNoticeFriend) ?? null)
-const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened, hideDev: [UNNAMED_DEVICE] }))
+const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened }))
 const noticeShown = computed(() => filterNoticeRows(noticeAll.value, noticeView.cat))
 const noticeUnreadN = computed(() => noticeUnreadCount(noticeAll.value))
 const noticeSelRow = computed(() => noticeAll.value.find(r => r.key === noticeView.sel) ?? null)
@@ -1996,7 +2000,7 @@ const app = createApp({
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
       cloudNodes: cloudMem.value,
-      friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeNames: nodeNames.value, nodeFacts: nodeFacts.value, version: info.version ?? '', nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,

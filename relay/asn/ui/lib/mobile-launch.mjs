@@ -2,7 +2,7 @@
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 import { closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
 import { deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
-import { deviceNameOf } from './device-known.mjs'
+import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
 import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
 
@@ -42,7 +42,7 @@ export const cwdList = launcher => (Array.isArray(launcher?.cwd_allow) ? launche
 export function launchDevices(allFriends, { selfNode = '', nodeNames = null, nodeOrder = [], removed = [], ...ctx } = {}) {
   const friends = deviceFriends(allFriends)   // 通知對話不是設備（#1830）
   const label = new Map()
-  for (const f of friends) if (f.node && f.node !== selfNode && !isDeviceRemoved(f.node, removed, { selfNode }) && !label.has(f.node)) label.set(f.node, deviceNameOf(f.node, { nodeNames, fallback: f.device }) || '未命名設備')
+  for (const f of friends) if (f.node && f.node !== selfNode && !isDeviceRemoved(f.node, removed, { selfNode }) && !label.has(f.node)) label.set(f.node, deviceNameOf(f.node, { nodeNames, fallback: f.device }) || unnamedLabelOf(f.node, { friends }))
   const order = [...nodeOrder.filter(n => label.has(n)), ...[...label.keys()].filter(n => !nodeOrder.includes(n))]
   return order.map(key => ({ key, label: label.get(key), ...launchEligibility(key, { ...ctx, friends }) }))
 }

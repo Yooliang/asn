@@ -82,7 +82,7 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.match(html, /v-for="t in ACCT_TABS"/)
   assert.match(html, /v-if="acctSw\.tab === 'accounts' && acctMy"/, '我的帳號只在帳號分頁')
   assert.match(html, /<template v-if="acctSw\.tab === 'devices'">/, '設備列表只在設備分頁')
-  assert.match(html, /class="m-fine m-dv-state" v-if="acctCur\.stateLine"/, '狀態那一行在詳情（#1499 從列上搬過去）')
+  assert.match(html, /<device-identity :identity="acctCur\.identity" :note="acctCur\.noReport \? acctCur\.stateLine : ''">/, '狀態那一行在詳情（#1499 從列上搬過去）')
   // 帳號卡片的設備按鈕（原本的「用在：」一行和「切換到…」按鈕合在一起）：按了走原本的切換流程，使用中的按了不做事
   assert.match(html, /v-for="b in acctDevButtons\(v\.key, a\)"/)
   assert.match(html, /:disabled="!b\.current && !\(b\.target && b\.target\.enabled\)" @click="acctDevPress\(b, a\)"/, '不能按的要反灰')

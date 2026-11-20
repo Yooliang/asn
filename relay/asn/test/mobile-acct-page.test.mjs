@@ -8,6 +8,7 @@ import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { tabLabel } from '../ui/lib/mobile.mjs'
 import { PAGE_TAB, acctPage } from '../ui/lib/mobile-fourth.mjs'
 import { pageTitle } from '../ui/lib/mobile-nav.mjs'
+import { nodeTail } from '../ui/lib/device-identity.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const S = 'aaaaaaaa-0000-4000-8000-000000000001', W = 'bbbbbbbb-0000-4000-8000-000000000002', P = 'cccccccc-0000-4000-8000-000000000003', E = 'dddddddd-0000-4000-8000-000000000004'
@@ -42,11 +43,11 @@ test('整頁資料：只有別台電腦的 Claude 可切換；手機只顯示；
   assert.match(c.switchHint, /沒有在線/)
 })
 
-test('整頁資料：本機是手機，標籤不叫「這台電腦」；整台沒回報＝空狀態；讀取中或失敗不當成有帳號', () => {
+test('整頁資料：本機是手機，本機沒名字也不叫「這台電腦」「這支手機」；整台沒回報＝空狀態；讀取中或失敗不當成有帳號', () => {
   const t = acctDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports: {} })
   const me = t.find(d => d.self)
   assert.equal(me.label, '手機本機')
-  assert.equal(acctDeviceTree({ friends: [{ ...friends[0], device: '' }], selfNode: S })[0].label, '這支手機')
+  assert.equal(acctDeviceTree({ friends: [{ ...friends[0], device: '' }], selfNode: S })[0].label, `手機（${nodeTail(S)}）`)
   assert.equal(me.vendors.length, 0); assert.ok(me.empty)
   const loading = acctDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports: { [W]: { ...REPORTS[W], loading: true } } }).find(d => d.key === W)
   assert.equal(loading.vendors.find(v => v.key === 'claude').accounts.length, 0)

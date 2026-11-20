@@ -25,8 +25,7 @@
   <div class="pane panel-pane panel-win">
     <guide-doc v-if="kind === 'guide' && guide" :guide="guide"></guide-doc>
     <template v-else-if="kind === 'setting' && st && itemTitle">
-      <h2 class="panel-h">{{ title }}</h2>
-      <settings-panel :st="st" :cat-key="key" :me-av="meAv" @act="act" @avatar-file="pickFile"></settings-panel>
+      <settings-panel :title="title" :st="st" :cat-key="key" :me-av="meAv" @act="act" @avatar-file="pickFile"></settings-panel>
     </template>
   </div>
 </div>

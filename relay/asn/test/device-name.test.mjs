@@ -30,7 +30,7 @@ test('分組標題與頁籤：有名字用名字，沒有「未命名設備」�
     ...pageTabs(f, 'device', { selfNode: 'x', selfName: 'x-ASN', nodeOrder: ['w02', 'H', 'cloud'] }).all.map(t => t.label),
   ]
   for (const code of ['w02', 'cloud', 'x']) assert.ok(!labels.includes(code), `標題不該是節點代號 ${code}`)
-  assert.ok(labels.includes('家用機') && labels.includes(UNNAMED_DEVICE) && labels.includes('x-ASN'))
+  assert.ok(labels.includes('家用機') && labels.includes('電腦（W02）') && labels.includes('電腦（LOUD）') && !labels.includes(UNNAMED_DEVICE) && labels.includes('x-ASN'))
 })
 
 test('本機分組與頁籤用自己的視窗名；離線的舊好友（存檔裡沒有 device）不蓋掉已知名字', () => {

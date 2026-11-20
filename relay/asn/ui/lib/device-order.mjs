@@ -95,6 +95,8 @@ export function pruneRemoved(removed, friends, { selfNode } = {}) {
 }
 // 設備列（buildDeviceTree 的結果）：別台、離線的設備都能永久移除（不必等它被自動隱藏；還有未讀或夥伴的也一樣）
 export const canRemoveRow = d => Boolean(d && !d.self && !d.online && !d.removed)
+// 「顯示回名單」：只看「已隱藏」（和能不能移除無關；電腦、手機同一個條件，#1829）
+export const canShowBackRow = d => Boolean(d && d.hidden && !d.removed)
 export const visibleRows = rows => (Array.isArray(rows) ? rows : []).filter(d => !d.removed)
 export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 
@@ -116,8 +118,15 @@ export function dropSlot(rows, y) {
 }
 
 // ---------- 畫面文字 ----------
+// 設備詳情下方的「動作區」（#1829；電腦、手機共用）
+export const ACTION_TEXT = {
+  title: '要處理這台設備',
+  rename: '改名',
+  removeOnline: '設備在線時不能移除，離線後才能移除',
+}
 export const DEVICE_TEXT = {
-  back: '‹ 返回',
+  back: '返回',        // 讀屏與鍵盤用的名字（aria-label）
+  backMark: '‹',        // 畫面上只放這個符號，和手機一樣
   showBack: '顯示回名單',
   remove: '永久移除',
   removeYes: '確定移除',

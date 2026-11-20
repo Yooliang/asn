@@ -1,3 +1,5 @@
+import { unnamedClue } from './device-identity.mjs'
+import { isPhoneNode } from './node-platform.mjs'
 // 設備名規則（和後台一致）與「設備列表 × 認得的電腦」的對應。純函式，node 也能載入（測試）。
 export const NAME_MAX = 40
 export const NAME_RULE_HINT = '名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼）'
@@ -12,8 +14,10 @@ const looksLikeFingerprint = s => HEX8.test(s) || HEX44.test(s)
 /** 顯示用（#1388）：後台給的名字不可信，含「指紋」或像指紋的名字當成沒有名字（呼叫端改顯示「未命名」，指紋另外顯示）。和 Rust 的 display_name_ok 同一套 */
 export const displayDeviceName = name => {
   const s = String(name ?? '').trim()
-  return s && !s.includes('指紋') && !looksLikeFingerprint(s) ? s : ''
+  return s && !s.includes('指紋') && !looksLikeFingerprint(s) && !LEGACY_UNNAMED.includes(s) ? s : ''
 }
+// 舊版畫面上的「沒名字」字樣：讀回來若被當成名字存著，一律當沒有名字，改走辨認線索（#1829）
+export const LEGACY_UNNAMED = ['未命名設備', '未命名的電腦']
 
 /**
  * 名單成員 → { 節點: 後台記的設備名（nodes.name）}。名字是每台設備自己的，不靠它底下有沒有夥伴（#1803：手機沒有夥伴列）。
@@ -30,6 +34,21 @@ export function nodeNamesOf(members) {
 }
 
 /**
+ * 名單成員 → { 節點: { createdMs, seenMs } }：後台記的建立時間與最後在線時間（毫秒，沒有＝0）。
+ * 辨認區（device-identity.mjs）讀這份；兩個都沒有的節點不放
+ */
+export function nodeFactsOf(members) {
+  const ms = v => { const t = typeof v === 'string' ? Date.parse(v) : typeof v === 'number' ? v : NaN; return Number.isFinite(t) && t > 0 ? t : 0 }   // 後台給 ISO 字串；給毫秒數字也收
+  const out = {}
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m.id !== 'string') continue
+    const createdMs = ms(m.created_at), seenMs = ms(m.last_seen_at)
+    if (createdMs || seenMs) out[m.id] = { createdMs, seenMs }
+  }
+  return out
+}
+
+/**
  * 一台設備要顯示的名字（電腦版、手機版所有地方都只用這一個函式讀）：先看後台記的名字（nodeNames），
  * 沒有再借這台底下夥伴帶的 device（舊後台、名單還沒讀到時的退路），再沒有用 fallback；都不合格回空字串
  * （呼叫端自己決定寫「未命名」或「這支手機」）
@@ -37,6 +56,13 @@ export function nodeNamesOf(members) {
 export function deviceNameOf(node, { nodeNames = null, friends = [], fallback = '' } = {}) {
   return displayDeviceName(nodeNames?.[node]) || displayDeviceName((friends ?? []).find(f => f?.node === node && f.device)?.device) || displayDeviceName(fallback)
 }
+
+/**
+ * 名字空白時的顯示名（電腦版、手機版所有地方共用，#1829）：這台有夥伴標手機就寫「手機（代號末 4 碼）」，否則「電腦（…）」；手機還是電腦只由 node-platform.mjs 判斷。
+ * 有名字的地方一律先走 deviceNameOf，只有它回空字串才呼叫這個
+ */
+export const unnamedLabelOf = (node, { friends = [], platform = '', phone = null } = {}) =>
+  unnamedClue({ node, phone: typeof phone === 'boolean' ? phone : isPhoneNode(node, { platform, friends }) })
 
 /** 設備名檢查：合規回空字串，不合規回中文提示 */
 export function deviceNameError(name) {

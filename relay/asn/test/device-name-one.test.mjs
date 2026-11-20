@@ -44,9 +44,9 @@ test('#1803 手機設備頁：本機那一列寫真名，同一台只有一列�
   assert.equal(rows[0].self, true)
   assert.equal(rows[0].kind, '手機')
   assert.equal(rows.some(r => /未命名設備/.test(r.label)), false)
-  // 沒給 nodeNames（舊程式的讀法）＝退回標籤「這支手機」：這條在舊程式上就是現在看到的症狀
+  // 沒給 nodeNames（舊程式的讀法）＝本機也寫辨認線索（不寫「這支手機」，那只當小標籤）
   const old = acctDeviceTree({ friends, nodeOrder: ['P', 'Q'], selfNode: 'P', launchers: {}, machines: {} })
-  assert.equal(old[0].label, '這支手機')
+  assert.equal(old[0].label, '手機（P）')
 })
 
 test('#1803 電腦設備頁：本機沒有夥伴時也寫真名；用的是和手機同一個讀法', () => {
@@ -59,7 +59,7 @@ test('#1803 雲端節點（#1707）：夥伴沒帶 device 時，名字取自名�
   const rows = buildDeviceTree({ friends: cloud, nodeNames: { A: '牧陽 Aegis' }, nodeOrder: ['A'], selfNode: 'P' })
   assert.equal(rows.find(r => r.key === 'A').label, '牧陽 Aegis')
   const none = buildDeviceTree({ friends: cloud, nodeOrder: ['A'], selfNode: 'P' })
-  assert.equal(none.find(r => r.key === 'A').label, '未命名設備', '沒有 nodeNames 時舊行為不變')
+  assert.equal(none.find(r => r.key === 'A').label, '電腦（A）', '沒有 nodeNames 時寫辨認線索（#1829）')
 })
 
 test('#1803 其餘讀名字的地方也吃 nodeNames：啟動器清單、頁籤', () => {
@@ -168,8 +168,8 @@ test('#1803 分組標題與頁籤：夥伴列沒有 device、名字只在 nodeNa
   const tabs = tabsOf(bare, 'device', { selfNode: 'S', nodeNames: nn, nodeOrder: ['S', 'A'] })
   assert.equal(tabs.all.find(t => t.key === 'A').label, '雲端設備', '頁籤：其他設備只在 nodeNames')
   assert.equal(tabs.all.find(t => t.key === 'S').label, '本機名', '頁籤：本機沒給視窗名也讀 nodeNames')
-  // 沒有 nodeNames 就還是「未命名設備」（舊行為）
-  assert.equal(groupItems(bare, 'device', { selfNode: 'S' }).find(g => g.node === 'A').label, '未命名設備')
+  // 沒有 nodeNames 就寫辨認線索（#1829）
+  assert.equal(groupItems(bare, 'device', { selfNode: 'S' }).find(g => g.node === 'A').label, '電腦（A）')
 })
 
 test('#1803 守門：電腦版左上角的設備名只顯示不能改（list.html 沒有輸入欄、list.js 沒有 commitNick）；手機個人頁不寫死「這支手機」', () => {
