@@ -47,6 +47,7 @@ function setup(over = {}) {
       const all = [...lastTags, ...o.existingTags]
       return all.filter(t => (pat.endsWith('*') ? new RegExp('^' + pat.slice(0, -1).replace(/[.+]/g, '\\$&') + '\\d').test(t) && !(pat === 'v*' && !t.startsWith('v')) : t === pat)).join('\n')
     }
+    if (args[0] === 'log') return '\x1e改動\n\n' + o.changed.join('\n')
     if (args[0] === 'diff' && args[1] === '--name-only') return o.changed.join('\n')
     if (args[0] === 'diff') return ''
     return ''
