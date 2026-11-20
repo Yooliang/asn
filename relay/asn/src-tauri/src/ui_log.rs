@@ -67,6 +67,7 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
 
 /// panic 訊息裡看起來像權杖的長字串（32 字以上的英數與 `-_.+/=`）換成「…略…」；訊息最多留 200 字。
 /// panic 訊息通常是「called `Option::unwrap()` on a `None` value」之類，但 expect 的字串可能帶進變數，保險起見再遮一次
+/// relay.rs 的 mask_long_tokens 是同一條規則的複本（relay.rs 也編進沒有本模組的無頭／手機），改這裡要一起改那邊（#1778）
 pub fn redact(msg: &str) -> String {
     let mut out = String::new();
     let mut run = String::new();

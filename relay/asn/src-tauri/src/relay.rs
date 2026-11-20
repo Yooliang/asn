@@ -476,7 +476,7 @@ pub(crate) fn body_excerpt(text: &str) -> String {
 /// 回應內容寫進 log 的字數上限（字元）
 pub(crate) const BODY_LOG_CHARS: usize = 200;
 
-/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」（和 ui_log::redact 同一條規則；那個模組只有電腦版有，這裡不能引用）
+/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」（和 ui_log::redact 同一條規則，改一邊要一起改；那個模組只有電腦版有，這裡不能引用）
 fn mask_long_tokens(msg: &str) -> String {
     let mut out = String::new();
     let mut run = String::new();
@@ -540,7 +540,7 @@ impl Relay {
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
     }
-    /// 測試用：打開連線階段的重試（單元測試預設不重試）
+    /// 測試用：打開唯讀動作遇到閘道暫時失敗的重試（單元測試預設不重試）
     #[cfg(test)]
     pub(crate) fn with_gateway_retry(mut self, ms: &'static [u64]) -> Relay {
         self.gateway_retry_ms = ms;
@@ -559,6 +559,8 @@ impl Relay {
     pub fn set_log_sink(&self, f: std::sync::Arc<dyn Fn(&str) + Send + Sync>) {
         *self.log_sink.lock().unwrap_or_else(|p| p.into_inner()) = Some(f);
     }
+    /// 測試用：打開連線階段的重試（單元測試預設不重試）
+    #[cfg(test)]
     pub(crate) fn with_connect_retry(mut self, ms: &'static [u64]) -> Relay {
         self.connect_retry_ms = ms;
         self
@@ -2918,6 +2920,41 @@ connection: close
         let hits = plan_server(port, vec![(500, "{}".into())]);
         assert!(relay_gw(port).api("list", None).await.unwrap_err().contains("HTTP 500"));
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// 掛上記錄去處的 Relay，回（Relay, 記錄內容）
+    fn relay_with_sink(port: u16) -> (Relay, std::sync::Arc<Mutex<String>>) {
+        let got = std::sync::Arc::new(Mutex::new(String::new()));
+        let g2 = got.clone();
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into());
+        r.set_log_sink(std::sync::Arc::new(move |l: &str| g2.lock().unwrap().push_str(l)));
+        (r, got)
+    }
+
+    #[tokio::test]
+    async fn t1778_call_with_key遇5xx_記錄去處收到狀態碼與前200字() {
+        let port = free_port();
+        let body = format!("{}{}", "字".repeat(250), "尾巴不該出現");
+        plan_server(port, vec![(503, body)]);
+        let (r, got) = relay_with_sink(port);
+        let (st, _) = r.call_with_key("k", "whoami", None).await.unwrap();
+        assert_eq!(st, 503);
+        let log = got.lock().unwrap().clone();
+        assert!(log.contains("whoami HTTP 503") && log.contains(&"字".repeat(200)), "{log}");
+        assert!(!log.contains(&"字".repeat(201)) && !log.contains("尾巴"), "只留前 200 字：{log}");
+    }
+
+    #[tokio::test]
+    async fn t1778_api_bytes遇5xx_記錄去處收到狀態碼與前200字() {
+        let port = free_port();
+        let body = format!("{}{}", "字".repeat(250), "尾巴不該出現");
+        plan_server(port, vec![(503, body)]);
+        let (r, got) = relay_with_sink(port);
+        let e = r.api_bytes("tts", json!({}), 1024, Duration::from_secs(5)).await.unwrap_err();
+        assert!(e.contains("HTTP 503"), "{e}");
+        let log = got.lock().unwrap().clone();
+        assert!(log.contains("tts HTTP 503") && log.contains(&"字".repeat(200)), "{log}");
+        assert!(!log.contains(&"字".repeat(201)) && !log.contains("尾巴"), "只留前 200 字：{log}");
     }
 
     #[tokio::test]
