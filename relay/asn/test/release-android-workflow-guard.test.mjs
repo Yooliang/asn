@@ -430,3 +430,35 @@ test('#1946 壞例子：拿掉比對那行、期望值改成別處、不擋空�
   bad('          sha256sum -c SHA256SUMS.txt\n', '          true\n', /SHA256SUMS/)
   bad('      - name: 核對 AAB 的 SHA256', '      - name: 略過的步驟', /沒有「核對 AAB 的 SHA256」/)
 })
+
+// ---- 正式 run 44753597348：android-build 少了「檢查中文字型」，冒煙 3 個情境每個都等滿 6 秒才判失敗 ----
+const fontProblems = src => {
+  const b = jobsOf(stripComments(src))['android-build'] ?? ''
+  const problems = []
+  const font = b.indexOf('name: 檢查中文字型')
+  const java = b.indexOf('actions/setup-java@')
+  const smoke = b.indexOf('node scripts/release-play.mjs')
+  if (font < 0) problems.push('android-build 沒有「檢查中文字型」那一步')
+  if (!/\$\(fc-list :lang=zh\)/.test(b)) problems.push('沒有用 fc-list :lang=zh 檢查中文字型')
+  if (!/apt-install\.sh"? --no-install-recommends fonts-noto-cjk/.test(b)) problems.push('沒有用共用的 apt-install.sh 補裝 fonts-noto-cjk')
+  if (!/裝完仍然沒有中文字型[\s\S]{0,40}exit 1/.test(b)) problems.push('裝完仍沒有中文字型時沒有直接失敗')
+  if (font >= 0 && smoke >= 0 && font > smoke) problems.push('檢查中文字型排在建置（冒煙）之後')
+  if (font >= 0 && java >= 0 && font < java) problems.push('檢查中文字型排在 setup-java 之前')
+  return problems
+}
+
+test('android-build 一定有中文字型檢查：在 setup-java 之後、建置（含冒煙）之前；補裝 fonts-noto-cjk、裝不起來就失敗（至少 6 條規則）', () => {
+  assert.deepEqual(fontProblems(wf), [])
+})
+
+test('壞例子：拿掉字型檢查整步、不用 fc-list、不補裝、裝不起來不失敗、排到建置之後、排在 setup-java 之前都會紅', () => {
+  const step = wf.slice(wf.indexOf('      # 冒煙測試的長名字省略號'), wf.indexOf('      - uses: ./.github/actions/asn-node-setup'))
+  assert.ok(step.includes('name: 檢查中文字型'), '找不到字型檢查那一段')
+  const flag = (src, re) => assert.ok(fontProblems(src).some(m => re.test(m)), String(re))
+  flag(wf.replace(step, ''), /沒有「檢查中文字型」/)
+  flag(wf.replaceAll('$(fc-list :lang=zh)', '$(fc-list)'), /fc-list :lang=zh/)
+  flag(wf.replaceAll('/apt-install.sh" --no-install-recommends fonts-noto-cjk', '/true"'), /apt-install/)
+  flag(wf.replace('裝完仍然沒有中文字型" >&2; exit 1;', '裝完仍然沒有中文字型" >&2;'), /沒有直接失敗/)
+  flag(wf.replace(step, '').replace('      - name: 算 AAB 的 SHA256', `${step}      - name: 算 AAB 的 SHA256`), /建置（冒煙）之後/)
+  flag(wf.replace(step, '').replace('      - uses: actions/setup-java@', `${step}      - uses: actions/setup-java@`), /setup-java 之前/)
+})
