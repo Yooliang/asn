@@ -195,7 +195,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          xvfb-run -a node --test --test-timeout=600000 test/e2e.test.mjs test/launch-cwd.test.mjs test/login.test.mjs test/partner-launch-notice-shot.test.mjs
+          xvfb-run -a node --test --test-timeout=600000 test/e2e.test.mjs test/launch-cwd.test.mjs test/login.test.mjs test/login-e2e-screen.test.mjs test/login-e2e-bind.test.mjs test/partner-launch-notice-shot.test.mjs
 
       - name: 冒煙測試（畫面啟動）
         run: |

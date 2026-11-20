@@ -1,4 +1,4 @@
-// 登入（第一期）：登入畫面與設定頁區塊的純邏輯、畫面接線守門、沒有節點金鑰時的端到端（只截登入畫面）。
+// 登入（第一期）：登入畫面與設定頁區塊的純邏輯、畫面接線守門。端到端已拆到 login-e2e-screen／login-e2e-bind（#1991）。
 // 需要先 `npm run build`；找不到 exe 就略過端到端那一個。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -125,74 +125,6 @@ test('守門：登出只清登入權杖，不刪節點金鑰', () => {
   assert.ok(!/remove_file|\.key|relay_home/.test(fn))
 })
 
-test('沒有節點金鑰的新電腦：只截登入畫面，不連真實後台、不寄任何帶金鑰的請求', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-login-'))
-  const r = await runShot(out, defaultExe, { noKey: true })
-  assert.equal(r.code, 0, r.log)
-  assert.equal(r.relay.reqs.length, 0, '登入畫面階段不打節點 API')
-  assert.ok(!fs.existsSync(path.join(r.home, '.asn')), '沒登入就不建立任何金鑰檔')
-  if (shotCaptureSupported) {
-    assert.ok(r.files.includes('tabs-login.png'), `缺登入畫面截圖：${r.files}`)
-    assertShotNotBlank(path.join(out, 'tabs-login.png'), { minBytes: 4000 })
-  }
-})
-
-// ---- 端到端：已有節點金鑰的舊電腦 ----
-const e2eOpts = { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }
-const tmpOut = tag => fs.mkdtempSync(path.join(os.tmpdir(), `asn-e2e-${tag}-`))
-
-test('已有金鑰、還沒登入：停在登入畫面（有「暫時不登入」），不進名單、不打帳號與節點 API', e2eOpts, async () => {
-  const out = tmpOut('key-unsigned')
-  const r = await runShot(out, defaultExe, { login: 'none' })
-  assert.equal(r.code, 0, r.log)
-  assert.equal(r.relay.reqs.filter(q => ['account_bootstrap', 'node_claim', 'node_create'].includes(q.action)).length, 0, '沒登入就不打帳號 API')
-  if (shotCaptureSupported) {
-    assert.ok(r.files.includes('tabs-login.png'), `缺登入畫面截圖：${r.files}`)
-    assert.ok(!r.files.includes('tabs-local.png') && !r.files.some(f => f.startsWith('tabs-chat')), '不該進名單')
-    assertShotNotBlank(path.join(out, 'tabs-login.png'), { minBytes: 4000 })
-  }
-})
-
-test('已有金鑰、選了暫時不登入：照舊進名單，不打帳號 API', e2eOpts, async () => {
-  const r = await runShot(tmpOut('key-skipped'), defaultExe, { login: 'skipped' })
-  assert.equal(r.code, 0, r.log)
-  assert.equal(r.relay.reqs.filter(q => ['account_bootstrap', 'node_claim', 'node_create'].includes(q.action)).length, 0)
-  assert.ok(r.relay.reqs.some(q => q.action === 'list'), '有進名單')
-})
-
-test('已登入的舊電腦：啟動後自動 node_claim 綁到帳號（帶登入憑證與現有金鑰），金鑰檔不動', e2eOpts, async () => {
-  const r = await runShot(tmpOut('auto-bind'), defaultExe, { login: 'user@example.com', timeoutMs: 120_000 })
-  assert.equal(r.code, 0, r.log)
-  const claim = r.relay.reqs.find(q => q.action === 'node_claim')
-  assert.ok(claim, `沒有送 node_claim：${r.relay.reqs.map(q => q.action)}`)
-  assert.match(claim.auth, /^Bearer \S+/)
-  assert.equal(claim.key, 'fake-machine-key')
-  assert.ok(r.relay.reqs.some(q => q.action === 'list'), '有進名單')
-  assert.ok(!r.relay.reqs.some(q => q.action === 'node_create'), '已有金鑰就不建新節點')
-  const home = path.join(r.home, '.asn')
-  assert.ok(!fs.existsSync(home) || !fs.readdirSync(home).some(f => f.endsWith('.key') || f === 'node'), '沒有寫任何金鑰檔')
-})
-
-test('綁定失敗（舊租戶還沒被認領）不擋使用：照常進名單', e2eOpts, async () => {
-  const r = await runShot(tmpOut('bind-fail'), defaultExe, { login: 'user@example.com', claim: 'tenant_not_yours' })
-  assert.equal(r.code, 0, r.log)
-  assert.ok(r.relay.reqs.some(q => q.action === 'node_claim'), '有試著綁')
-  assert.ok(r.relay.reqs.some(q => q.action === 'list'), '照常進名單')
-  assert.ok(r.relay.sent.length >= 1, '照常能寄信')
-})
-
-test('沒有金鑰的新電腦登入後：自動 node_create，把新金鑰寫進本機檔案', e2eOpts, async () => {
-  const r = await runShot(tmpOut('new-pc'), defaultExe, { noKey: true, login: 'user@example.com' })
-  assert.equal(r.code, 0, r.log)
-  const create = r.relay.reqs.find(q => q.action === 'node_create')
-  assert.ok(create, `沒有送 node_create：${r.relay.reqs.map(q => q.action)}`)
-  assert.match(create.auth, /^Bearer \S+/)
-  assert.ok(!r.relay.reqs.some(q => q.action === 'node_claim'))
-  const home = path.join(r.home, '.asn')
-  assert.equal(fs.readFileSync(path.join(home, 't1-newnode01.key'), 'utf8'), 'fake-new-node-key')
-  assert.equal(fs.readFileSync(path.join(home, 'node'), 'utf8'), 't1-newnode01')
-})
-
 test('上次登入：頭像進大框、只有上次用的那顆按鈕有「上次使用」，預設用 ASN 自己的標誌原檔', () => {
   const html = read('ui/login.html'), js = read('ui/login.js')
   assert.ok(html.includes("lastAvatar || 'img/logo.svg'"), '沒登入過用專案裡的 logo 原檔')
@@ -201,12 +133,4 @@ test('上次登入：頭像進大框、只有上次用的那顆按鈕有「上�
   assert.ok(fs.existsSync(new URL('../ui/img/logo.svg', import.meta.url)))
   assert.ok(read('src-tauri/src/lib.rs').includes('last_login: lastlogin::view(&app.data_dir)'))
   assert.ok(read('src-tauri/src/lib.rs').includes('account::last_login_set_avatar'))
-})
-
-test('上次登入的畫面：登入過會在 Google 那顆標上次使用並顯示記住的頭像', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-lastlogin-'))
-  const r = await runShot(out, defaultExe, { login: 'none', lastLogin: { provider: 'google', account_avatar: demoUploadUrl() } })
-  assert.equal(r.code, 0, r.log)
-  assert.equal(r.relay.reqs.filter(q => ['account_bootstrap', 'node_claim', 'node_create'].includes(q.action)).length, 0)
-  if (shotCaptureSupported) assertShotNotBlank(path.join(out, 'tabs-login.png'), { minBytes: 4000 })
 })

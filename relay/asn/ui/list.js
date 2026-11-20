@@ -2264,7 +2264,7 @@ if (!info.shot) {
 }
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
-// 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
+// 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoTabs（true＝不拍逐頁籤，只驗請求的測試用，#1991）、shotNoChat（true＝不開任何對話，
 // 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）、shotPartnerDlg（true＝只拍開新夥伴對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -2318,7 +2318,7 @@ if (info.shot) {
   // 逐頁籤截圖：本機、第二台設備、對話（含群組）、使用指引（清單與一篇內容）、設定
   const p = pages.value.all
   // 指引、設定各拍一張「清單」與一張「點了一項之後的聊天窗」：整合模式＝右邊的分頁（拍名單視窗就看得到）；分離模式＝獨立視窗（另存 panel-*.png）
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['chats', 'chats'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings'], ['settings-doc', 'settings']]) {
+  for (const [name, key] of savedMe.shotNoTabs ? [] : [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['chats', 'chats'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings'], ['settings-doc', 'settings']]) {
     if (!key) continue
     shotTab.value = key
     if (name === 'guide-doc') await root.openPanel('guide', 'bridge')
