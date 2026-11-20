@@ -47,11 +47,15 @@ export function mergeLinuxLatest({ latestText, version, signature, url }) {
 }
 
 const LINUX_HREF_RE = /href="[^"]*\/update\/ASN_\d+\.\d+\.\d+_amd64\.(?:AppImage|deb)"/g
-/** 首頁：下載區（id="download"）的「下載 Windows 版」按鈕後面加（或換掉）一行 Linux 連結；其餘原樣 */
+/** 首頁：下載區（id="download"）的「下載 Windows 版」按鈕後面加一行 Linux 連結；已有舊版 Linux 連結（第二次 Linux 發版起）就只把那兩個連結換成這一版，其餘原樣 */
 export function patchLinuxLinks(html, version) {
   const app = linuxUrl(version, appImageName(version)), deb = linuxUrl(version, debName(version))
-  if (LINUX_HREF_RE.test(html)) { LINUX_HREF_RE.lastIndex = 0; bad('首頁已經有 Linux 下載連結：不重複加，請人工確認') }
-  LINUX_HREF_RE.lastIndex = 0
+  const have = [...html.matchAll(LINUX_HREF_RE)].map(m => m[0])
+  if (have.length) {
+    // 已有舊版連結：AppImage 與 deb 各一個才換，缺一或重複就停（不猜）
+    if (have.filter(h => h.endsWith('.AppImage"')).length !== 1 || have.filter(h => h.endsWith('.deb"')).length !== 1 || have.length !== 2) bad('首頁的 Linux 下載連結不是 AppImage 與 deb 各一個：不自動換，請人工確認')
+    return html.replace(LINUX_HREF_RE, h => (h.endsWith('.AppImage"') ? `href="${app}"` : `href="${deb}"`))
+  }
   const sec = html.indexOf('<section id="download">')
   if (sec < 0) bad('index.html 裡找不到下載區（<section id="download">），不知道要加在哪裡')
   const mark = '下載 Windows 版</a>'

@@ -130,9 +130,11 @@ function world(mod = () => {}) {
     },
     signer: {
       check: async () => ({ ok: w.keyOk }),
-      sign: async f => {
+      sign: async (...a) => {
+        const f = a[0]; w.signArgCount = a.length
         ev('sign', [path.basename(f)])
         const bytes = fs.readFileSync(f)
+        if (w.signMode === 'tamperAfter') { fs.appendFileSync(f, 'X') }
         const text = w.signMode === 'wrongFile' ? minisign(Buffer.from('other'), APP) : w.signMode === 'wrongName' ? minisign(bytes, 'ASN_9.9.9_amd64.AppImage')
           : w.signMode === 'plainEd' ? minisign(bytes, APP, 'Ed') : minisign(bytes, APP)
         fs.writeFileSync(`${f}.sig`, text)
@@ -199,13 +201,30 @@ test('首頁只加 Linux 連結（deb 與 AppImage），其餘原樣', async () 
   assert.equal(html.replace(/\n        <p>Linux[^\n]*<\/p>/, ''), INDEX)
 })
 
-test('mergeLinuxLatest／patchLinuxLinks：版本不符、沒有電腦版項、已有 Linux 項、首頁已有連結都擋', () => {
+test('patchLinuxLinks：首頁已有舊版 Linux 連結（第二次 Linux 發版）→換成這一版，其他連結與文字不動', () => {
+  const OLD = '0.2.37'
+  const old = patchLinuxLinks(INDEX, OLD)
+  assert.ok(old.includes(`ASN_${OLD}_amd64.AppImage`) && old.includes(`ASN_${OLD}_amd64.deb`))
+  const next = patchLinuxLinks(old, V)
+  assert.ok(next.includes(`/update/${APP}"`) && next.includes(`/update/${DEB}"`))
+  assert.ok(!next.includes(OLD), '舊版連結都換掉了')
+  assert.equal(next, patchLinuxLinks(INDEX, V), '結果與全新加入一致')
+  assert.ok(next.includes(WIN_URL), '電腦版連結不動')
+  assert.equal(patchLinuxLinks(next, V), next, '同版重跑結果不變')
+})
+test('流程：首頁已有舊版 Linux 連結→第二次發版照常完成並換成新版', async () => {
+  const x = await run(w => { fs.writeFileSync(path.join(w.repo, 'site/public/index.html'), patchLinuxLinks(INDEX, '0.2.37')) })
+  assert.equal(x.r.ok, true, x.r.error)
+  const html = read(x, 'site/public/index.html')
+  assert.ok(html.includes(`/update/${APP}"`) && !html.includes('0.2.37'))
+})
+test('mergeLinuxLatest／patchLinuxLinks：版本不符、沒有電腦版項、已有 Linux 項、首頁連結不成對都擋', () => {
   const ok = { latestText: LATEST_TEXT, version: V, signature: 'S', url: 'u' }
   assert.ok(mergeLinuxLatest(ok).latest.platforms['linux-x86_64'])
   assert.throws(() => mergeLinuxLatest({ ...ok, version: '0.2.39' }), /先發電腦版/)
   assert.throws(() => mergeLinuxLatest({ ...ok, latestText: JSON.stringify({ version: V, platforms: {} }) }), /windows-x86_64/)
   assert.throws(() => mergeLinuxLatest({ ...ok, latestText: mergeLinuxLatest(ok).text }), /已經有 linux-x86_64/)
-  assert.throws(() => patchLinuxLinks(patchLinuxLinks(INDEX, V), V), /已經有 Linux 下載連結/)
+  assert.throws(() => patchLinuxLinks(INDEX.replace('</section>', `<a href="https://asnmessenger.web.app/update/ASN_0.2.37_amd64.deb">d</a></section>`), V), /各一個/)
   assert.throws(() => patchLinuxLinks('<html></html>', V), /找不到下載區/)
 })
 
@@ -280,6 +299,33 @@ test('流程：附加失敗→不部署、不貼完成', async () => {
   assert.equal(x.w.events.filter(e => e.k === 'asn-cli send').length, 1)
 })
 
+test('來源證明：兩個檔都驗，且帶 --repo／--signer-workflow／--source-ref／--source-digest', async () => {
+  const x = await run()
+  const att = x.w.events.filter(e => e.k === 'gh' && e.a[0] === 'attestation').map(e => e.a)
+  assert.equal(att.length, 2)
+  assert.deepEqual(att.map(a => path.basename(a[2])).sort(), [APP, DEB].sort())
+  for (const a of att) {
+    const opt = k => a[a.indexOf(k) + 1]
+    assert.deepEqual(a.slice(0, 2), ['attestation', 'verify'])
+    assert.equal(opt('--repo'), 'Yooliang/asn')
+    assert.equal(opt('--signer-workflow'), `Yooliang/asn/${LINUX_WORKFLOW}`)
+    assert.equal(opt('--source-ref'), `refs/tags/${TAG}`)
+    assert.equal(opt('--source-digest'), SHA)
+  }
+})
+test('簽章只收一個路徑且只簽 AppImage（不簽 deb、不簽別的）', async () => {
+  const x = await run()
+  const signs = x.w.events.filter(e => e.k === 'sign')
+  assert.equal(signs.length, 1)
+  assert.deepEqual(signs[0].a, [APP])
+  assert.equal(x.w.signArgCount, 1)
+})
+test('簽章後檔案被改動→第 3 步中止（簽章前後雜湊要一致），不附加', async () => {
+  const x = await run(w => { w.signMode = 'tamperAfter' })
+  aborts(x, 3, /簽章過程中 AppImage 被改動/)
+  assert.deepEqual(published(x.w), [])
+})
+
 // ---- 驗簽不過就不附加
 for (const [name, mode] of Object.entries({ '簽章是別的檔案的': 'wrongFile', 'trusted comment 的 file: 不是這個 AppImage': 'wrongName', '演算法標記是 Ed': 'plainEd' })) {
   test(`驗簽不過就不附加、不部署：${name}`, async () => {
@@ -294,6 +340,8 @@ const bad = {
   '標籤 commit 不在 origin/main 上': w => { w.ancestor = false },
   '標籤上的 workflow 與 main 不同': w => { w.wfBlob.main = 'other' },
   '來源證明驗不過': w => { w.attest = false },
+  'run 的 event 不是 push': w => { w.run.event = 'workflow_dispatch' },
+  'artifact 的 head_sha 不是標籤的 commit': w => { w.art.workflow_run.head_sha = 'c'.repeat(40) },
   '沒有成功的 run': w => { w.run.conclusion = 'failure' },
   'run 的 path 不是 asn-release-linux.yml': w => { w.run.path = '.github/workflows/asn-release.yml' },
   'artifact 名稱不在白名單（電腦版的 artifact）': w => { w.artifacts.push({ ...w.art, id: 9, name: 'asn-installer-unsigned' }) },
