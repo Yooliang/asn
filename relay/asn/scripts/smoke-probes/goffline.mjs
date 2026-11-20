@@ -23,11 +23,19 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
   if (want.fit) {
-    const pl = document.querySelector('.mbar .mbar-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
+    // 字型還沒載好時量出來的寬度都不準：先等字型，再每 100ms 量一次、最多 6 秒，這一輪的條件全部成立才往下（#1955）
+    try { await document.fonts.ready } catch (e) {}
+    const pl = document.querySelector('.mbar .mbar-plate');
+    let b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect(), ell = false;
+    const measure = () => {
+      b = btn.getBoundingClientRect(); p = pl && pl.getBoundingClientRect();
+      ell = !!pl && [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
+      return !!p && b.left >= p.right - 0.5 && b.right <= innerWidth + 0.5 && b.left >= 0 && (!want.ell || ell);
+    };
+    for (let i = 0; i < 60 && !measure(); i++) await sleep(100);
     if (!p) return { ok: false, why: '找不到名牌' };
     if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
     if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
     if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號（名牌寬 ' + p.width + '、視窗 ' + innerWidth + '、按鈕左 ' + b.left + '、名牌右 ' + p.right + '）' };
     window.__note = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
     window.__fit = { btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell };
