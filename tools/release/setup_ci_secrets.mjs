@@ -110,6 +110,22 @@ function makeRedactor(values) {
   return s => secrets.reduce((acc, v) => acc.split(v).join('***'), String(s))
 }
 
+/** PUT environment 的內容：只改部署規則；environment 已存在（existing 是 GET 的結果）就把原有保護設定一起帶回 */
+export function putBody(existing) {
+  const body = { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }
+  if (!existing) return body
+  const rules = Array.isArray(existing.protection_rules) ? existing.protection_rules : []
+  const wait = rules.find(r => r.type === 'wait_timer')
+  if (wait && Number.isInteger(wait.wait_timer)) body.wait_timer = wait.wait_timer
+  const rev = rules.find(r => r.type === 'required_reviewers')
+  if (rev) {
+    const reviewers = (rev.reviewers ?? []).map(x => ({ type: x.type, id: x.reviewer?.id })).filter(x => x.type && Number.isInteger(x.id))
+    if (reviewers.length) body.reviewers = reviewers
+    if (typeof rev.prevent_self_review === 'boolean') body.prevent_self_review = rev.prevent_self_review
+  }
+  return body
+}
+
 /** 建 environment 並限定 v* 標籤；標籤 ruleset 只讀檢查。回結束碼 */
 export function setupEnvironment({ repo, dryRun, gh, log, warn }) {
   const base = `repos/${repo}/environments/${ENV_NAME}`
@@ -117,9 +133,15 @@ export function setupEnvironment({ repo, dryRun, gh, log, warn }) {
     log(`（演練，不呼叫 gh）會做：建立 environment ${ENV_NAME}，deployment_branch_policy 設 custom_branch_policies: true；再加標籤規則 ${TAG_PATTERN}；唯讀檢查 v* 標籤 ruleset 是否已設。不設 required reviewers。`)
     return 0
   }
-  // 先建並設成自訂規則（API 要這樣才接受 type: tag 的規則）；不帶 reviewers
-  gh(['api', '-X', 'PUT', base, '--input', '-'], { input: JSON.stringify({ deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }) })
-  log(`已建立／更新 environment ${ENV_NAME}：自訂部署規則`)
+  // 先建並設成自訂規則（API 要這樣才接受 type: tag 的規則）。這支 API 是「建立或更新」：environment 已存在時，
+  // 沒帶的保護設定（等待時間、必要審核者、禁止自己核准、管理員可否略過）會被重置，所以先讀出來原樣帶回去。
+  // 不存在就只帶部署規則（本腳本不新增 required reviewers）
+  let existing = null
+  try { existing = JSON.parse(gh(['api', base]) || '{}') } catch (e) {
+    if (!notFound(e)) throw e
+  }
+  gh(['api', '-X', 'PUT', base, '--input', '-'], { input: JSON.stringify(putBody(existing)) })
+  log(`已${existing ? '更新' : '建立'} environment ${ENV_NAME}：自訂部署規則${existing ? '（原有的等待時間與審核者設定原樣保留）' : ''}`)
   const listed = JSON.parse(gh(['api', `${base}/deployment-branch-policies`]) || '{}')
   const has = (listed.branch_policies ?? []).some(p => p.name === TAG_PATTERN && p.type === 'tag')
   if (has) log(`標籤規則 ${TAG_PATTERN} 已存在`)
@@ -151,6 +173,7 @@ export function run({ argv, gh, readFile, log, warn, env, home, root }) {
   const opts = p.opts
   try {
     if (opts.setupEnv) {
+      if (opts.only || opts.playSa || opts.jks || opts.passFile || opts.gs) { warn('--setup-env 只建 environment 與標籤規則，不能和 --only 或輸入檔旗標一起用'); return 2 }
       if (!opts.dryRun) { gh(['auth', 'status']); }
       return setupEnvironment({ repo: opts.repo, dryRun: opts.dryRun, gh, log, warn })
     }

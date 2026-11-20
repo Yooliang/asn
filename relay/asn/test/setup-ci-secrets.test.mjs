@@ -13,7 +13,7 @@ const baseArgs = ['--play-sa-json', P.sa, '--upload-jks', P.jks, '--upload-passw
 
 const goodFiles = () => ({ [P.sa]: Buffer.from(SA_TEXT), [P.jks]: JKS, [P.pass]: Buffer.from(PASS + '\r\n'), [P.gs]: Buffer.from(GS) })
 
-/** 假環境：gh 全記錄；opts.failOn 讓指定 secret 寫入失敗；opts.envMissing 讓 environment 查不到 */
+/** 假環境：gh 全記錄；opts.failOn 讓指定 secret 寫入失敗；opts.envMissing 讓 environment 查不到；opts.existingEnv 是 environment 已有的設定（GET 的回傳） */
 function setup(files = goodFiles(), opts = {}) {
   const calls = []
   const out = []
@@ -23,7 +23,7 @@ function setup(files = goodFiles(), opts = {}) {
     const j = args.join(' ')
     if (j === 'auth status') return ''
     if (j.endsWith('--jq .permissions.admin')) return 'true\n'
-    if (/^api repos\/[^/]+\/[^/]+\/environments\/release$/.test(j)) { if (opts.envMissing) throw new Error('gh: Not Found (HTTP 404)'); return '{}' }
+    if (/^api repos\/[^/]+\/[^/]+\/environments\/release$/.test(j)) { if (opts.envMissing) throw new Error('gh: Not Found (HTTP 404)'); return JSON.stringify(opts.existingEnv ?? {}) }
     if (args[0] === 'secret' && args[1] === 'set') {
       if (opts.failOn === args[2]) throw new Error(`HTTP 500 ${opts.leak ?? ''}`)
       written.add(args[2]); return ''
@@ -40,9 +40,9 @@ function setup(files = goodFiles(), opts = {}) {
 const secretSets = calls => calls.filter(c => c.args[0] === 'secret' && c.args[1] === 'set')
 
 test('dry-run：一次 gh 都不呼叫（含 auth status），含 --setup-env 也一樣', () => {
-  for (const extra of [[], ['--setup-env']]) {
+  for (const args of [[...baseArgs, '--dry-run'], ['--dry-run', '--setup-env']]) {
     const s = setup()
-    assert.equal(s.exec([...baseArgs, '--dry-run', ...extra]), 0)
+    assert.equal(s.exec(args), 0)
     assert.equal(s.calls.length, 0)
   }
 })
@@ -149,4 +149,39 @@ test('--setup-env：v* 規則已存在就不重加；ruleset 沒設警告並結�
   const b = setup(goodFiles(), { noRuleset: true })
   assert.equal(b.exec(['--setup-env']), 1)
   assert.match(b.out.join('\n'), /ruleset/)
+})
+
+const EXISTING_ENV = {
+  name: 'release',
+  protection_rules: [
+    { id: 1, type: 'wait_timer', wait_timer: 30 },
+    { id: 2, type: 'required_reviewers', prevent_self_review: true, reviewers: [{ type: 'User', reviewer: { id: 4242, login: 'x' } }, { type: 'Team', reviewer: { id: 77, slug: 't' } }] },
+  ],
+  deployment_branch_policy: null,
+}
+
+test('#1925 --setup-env：environment 已存在就先讀、把原本的等待時間與審核者原樣帶回，不被 PUT 重置', () => {
+  const s = setup(goodFiles(), { existingEnv: EXISTING_ENV })
+  assert.equal(s.exec(['--setup-env']), 0)
+  const put = s.calls.find(c => c.args.includes('PUT'))
+  assert.deepEqual(JSON.parse(put.input), {
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    wait_timer: 30,
+    reviewers: [{ type: 'User', id: 4242 }, { type: 'Team', id: 77 }],
+    prevent_self_review: true,
+  })
+  const iGet = s.calls.findIndex(c => c.args.join(' ') === 'api repos/Yooliang/asn/environments/release')
+  assert.ok(iGet >= 0 && iGet < s.calls.indexOf(put), '先 GET 再 PUT')
+  assert.match(s.out.join('\n'), /原樣保留/)
+})
+
+test('#1925 --setup-env：environment 還不存在就只帶部署規則（不新增 reviewers）', () => {
+  const s = setup(goodFiles(), { envMissing: true })
+  assert.equal(s.exec(['--setup-env']), 0)
+  assert.deepEqual(JSON.parse(s.calls.find(c => c.args.includes('PUT')).input), { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } })
+})
+
+test('#1925 --setup-env 和 --only／輸入檔旗標一起給：報用法錯，不默默忽略', () => {
+  assert.equal(setup().exec(['--setup-env', '--only', 'ASN_PLAY_UPLOAD_JKS']), 2)
+  assert.equal(setup().exec(['--setup-env', '--upload-jks', '/k/upload.jks']), 2)
 })
