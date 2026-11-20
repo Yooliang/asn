@@ -18,11 +18,11 @@ const label = n => ({ H: '家用機', W: '工作機', X: '舊電腦' }[n] ?? '')
 const roster = accounts => ({ now: iso(NOW), accounts })
 const entry = (vendor, account, nodes) => ({ vendor, account, plan: 'pro', windows: [], seen_at: iso(NOW), seen_node: 'H', nodes })
 
-test('帳號列表每個帳號帶「用在哪幾台」：使用中的排前面，同一台只算一次，沒有設備名寫未命名', () => {
+test('帳號列表每個帳號帶「用在哪幾台」：使用中的排前面，同一台只算一次，沒有設備名寫辨認線索', () => {
   const v = rosterView(roster([entry('claude', 'z@b.c', [{ node: 'W', current: false, reported_at: iso(NOW) }, { node: 'H', current: true, reported_at: iso(NOW) }, { node: 'W', current: false }, { node: 'Q', current: false }])]), { nodeLabel: label, now: NOW })
   const row = v.vendors[0].accounts[0]
-  assert.deepEqual(row.usedOn.map(n => [n.node, n.label, n.current]), [['H', '家用機', true], ['W', '工作機', false], ['Q', '未命名設備', false]])
-  assert.equal(usedOnText(row), '家用機（使用中）、工作機、未命名設備')
+  assert.deepEqual(row.usedOn.map(n => [n.node, n.label, n.current]), [['H', '家用機', true], ['W', '工作機', false], ['Q', '電腦（Q）', false]])
+  assert.equal(usedOnText(row), '家用機（使用中）、工作機、電腦（Q）')
   assert.equal(usedOnText({ usedOn: [] }), '')
   assert.equal(usedOnText(null), '')
   // 沒有任何一台還在回報它：空的，不出現「用在」
@@ -146,7 +146,7 @@ test('設備頁：每一列寫一行 AI 狀態；細部頁的廠商標頭寫這�
   assert.equal(tree.find(d => d.key === S).stateLine, 'Claude 已登入、OpenAI（Codex） 未安裝、Grok 未安裝')
   assert.ok(!html.includes('Claude 已登入') && !html.includes('dv-line'), '列上不放狀態那一行')
   const src = (await import('node:fs')).readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(src, /<dt>狀態<\/dt><dd>\{\{ curDev\.onlineText \}\}/, '詳情裡有狀態那一格（只寫在線與否，帳號狀態不放這裡）')
+  assert.match(src, /<device-identity :identity="curDev\.identity"/, '詳情裡有辨認區（最後在線只寫在線與否，帳號狀態不放這裡；#1829）')
   assert.ok(!html.includes('邀請雲端代理'), '設備列表頁不放雲端代理（自己一類）')
   globalThis.Vue = Vue
   const detail = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state(tree, null), catKey: 'devices', meAv: '', dev: W }) }))

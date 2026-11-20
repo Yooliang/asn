@@ -4,6 +4,8 @@
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { TEXT as KNOWN, groupFp, createForgetConfirm } from './known-peers.mjs'
 import { FpMark, deskFpMark } from './fp-mark.mjs'
+import { DeviceIdentity, IDENTITY_TEXT } from './device-identity.mjs'
+import { ACTION_TEXT } from './device-order.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mjs'
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
@@ -20,7 +22,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
-import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
+import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
@@ -40,8 +42,8 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark },
-  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
+  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
+  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -70,7 +72,7 @@ export const SettingsPanel = {
     const leaveView = () => {
       if (view.value === 'tasks') act('tm-close')
       if (view.value === 'qr' && props.st.known && props.st.known.qr) act('known-qr', false)
-      if (view.value === 'rename') act('device-rename-clear')
+      if (renaming.value) act('device-rename-clear')
     }
     // 設備頁上方那排按鈕：工作管理員、詳情、QR Code、改名、帳號；按下才展開對應的內容
     const setView = v => {
@@ -78,10 +80,9 @@ export const SettingsPanel = {
       leaveView()
       askRemove.value = false
       view.value = v
-      renaming.value = v === 'rename'
+      renaming.value = false
       if (v === 'tasks') act('tm-open')
       if (v === 'qr' && !(props.st.known && props.st.known.qr)) act('known-qr', true)
-      if (v === 'rename') { renameText.value = curDev.value?.label ?? ''; act('device-rename-clear') }
     }
     onBeforeUnmount(() => leaveView())
     // 停在工作管理員時這台電腦從清單消失：退回清單並停掉每 5 秒更新
@@ -149,8 +150,8 @@ export const SettingsPanel = {
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
     const renaming = ref(false), renameText = ref('')
     const renameErr = computed(() => (renameText.value.trim() === '' ? '' : deviceNameError(renameText.value)))
-    const renameStart = () => { renameText.value = curDev.value?.label ?? ''; renaming.value = true; act('device-rename-clear') }
-    const renameCancel = () => { renameText.value = ''; setView('info') }
+    const renameStart = () => { renameText.value = curDev.value?.named ? curDev.value.label : ''; renaming.value = true; act('device-rename-clear') }
+    const renameCancel = () => { renameText.value = ''; renaming.value = false; act('device-rename-clear') }
     const renameSave = () => {
       const node = curDev.value?.key
       if (!node || deviceNameError(renameText.value)) return
@@ -165,9 +166,8 @@ export const SettingsPanel = {
     const oldPeers = computed(() => joined.value.old)
     // 「帳號」鈕：手機沒有帳號可看，不出這顆
     const hasAcct = computed(() => !!curDev.value && (curDev.value.self || !curDev.value.phone))
-    const PLATFORM_TEXT = { windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS' }
-    const platformText = computed(() => PLATFORM_TEXT[String(curDev.value?.platform ?? '').toLowerCase()] ?? '')
-    const reportedAgo = computed(() => curDev.value?.cloud ? '' : String(curDev.value?.reportedText ?? '').replace(/^(帳號)?最後回報：/, ''))
+    // 指紋：本機看自己的、別台看認得的紀錄；都沒有就不顯示這一列（沒有可以做的事）
+    const deviceFp = computed(() => (curDev.value?.self && props.st.known && props.st.known.ownFp ? groupFp(props.st.known.ownFp) : curKnown.value ? groupFp(curKnown.value.fingerprint) : ''))
     // 忘記前先確認：誤按會讓那台下次連線要重新確認指紋
     const forgetBox = ref(null)
     const forget = createForgetConfirm({ box: forgetBox, forget: id => act('known-forget', id) })
@@ -179,7 +179,7 @@ export const SettingsPanel = {
       mmEmail.value = ''
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, reportedAgo, platformText, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
@@ -189,6 +189,7 @@ export const SettingsPanel = {
     }
   },
   template: `<div class="list settings panel-set">
+      <h2 class="panel-h" v-if="title && !(catKey === 'devices' && curDev)">{{ title }}</h2>
       <template v-if="catKey === 'me'">
         <login-panel></login-panel>
         <div class="av-set">
@@ -383,21 +384,19 @@ export const SettingsPanel = {
               </div>
             </details>
           </template>
-          <section class="dv-dev" v-else :aria-label="curDev.label">
+          <section class="dv-dev" v-else :aria-label="curDev.identity.title">
             <div class="dv-dev-h">
-              <span class="dv-pt">設定：設備</span>
-              <h3 class="dv-name">{{ curDev.label }}</h3>
+              <button class="aero-btn dv-back" type="button" :aria-label="DEVICE_TEXT.back" :title="DEVICE_TEXT.back" @click="backToList">{{ DEVICE_TEXT.backMark }}</button>
+              <h3 class="dv-name">{{ curDev.identity.title }}</h3>
               <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
             <div class="dv-tabs" role="group" aria-label="這台設備的內容">
-              <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <button class="aero-btn dv-tasks" type="button" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</button>
               <button class="aero-btn" type="button" :aria-pressed="view === 'info'" @click="setView('info')">詳情</button>
               <button class="aero-btn" type="button" v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</button>
-              <button class="aero-btn" type="button" :aria-pressed="view === 'rename'" @click="setView('rename')">改名</button>
               <button class="aero-btn" type="button" v-if="hasAcct" :aria-pressed="view === 'acct'" @click="setView('acct')">帳號</button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
@@ -448,18 +447,6 @@ export const SettingsPanel = {
                 </div>
               </asn-dialog>
             </div>
-            <div class="dv-cards" v-else-if="view === 'rename'">
-              <div class="set-card">
-                <h3 class="set-h">改名</h3>
-                <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
-                <form class="dv-rename" @submit.prevent="renameSave">
-                  <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
-                  <small>所有設備都會顯示這個名字</small>
-                  <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
-                  <span class="dv-card-act"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
-                </form>
-              </div>
-            </div>
             <div class="dv-cards" v-else-if="view === 'qr' && curDev.self && st.known && st.known.ownFp">
               <div class="set-card">
                 <h3 class="set-h">QR Code</h3>
@@ -472,22 +459,17 @@ export const SettingsPanel = {
             </div>
             <div class="dv-cards" v-else-if="view === 'info'">
               <div class="set-card">
-                <h3 class="set-h">設備資料</h3>
+                <h3 class="set-h">{{ IDENTITY_TEXT.title }}</h3>
                 <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
+                <device-identity :identity="curDev.identity" :note="curDev.noReport ? curDev.stateLine : ''"></device-identity>
+              </div>
+              <div class="set-card" v-if="deviceFp">
+                <h3 class="set-h">連線安全</h3>
                 <dl class="dv-kv">
-                  <dt>狀態</dt><dd>{{ curDev.onlineText }}<template v-if="curDev.self">，這台電腦</template></dd>
                   <dt>{{ KNOWN.fingerprint }}</dt>
-                  <dd v-if="curDev.self && st.known && st.known.ownFp"><code class="pair-fp">{{ groupFp(st.known.ownFp) }}</code></dd>
-                  <dd v-else-if="curKnown"><code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(curKnown.fingerprint) }}</code></dd>
-                  <dd v-else-if="curDev.cloud">這是雲端節點，沒有設備指紋</dd>
-                  <dd v-else>還沒連線過，連上時會記住指紋</dd>
+                  <dd><code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ deviceFp }}</code></dd>
                   <template v-if="curKnown && curKnown.firstSeen"><dt>第一次連線</dt><dd>{{ curKnown.firstSeen }}</dd></template>
-                  <template v-if="platformText"><dt>系統</dt><dd>{{ platformText }}</dd></template>
-                  <template v-if="curDev.self && st.version"><dt>ASN 版本</dt><dd>{{ st.version }}</dd></template>
-                  <template v-if="reportedAgo"><dt>最後回報</dt><dd>{{ reportedAgo }}</dd></template>
                 </dl>
-                <!-- 沒有「管理」卡的設備（例如這台）錯誤就顯示在這裡；有管理卡的在管理卡裡，同一句不出現兩次 -->
-                <p class="pair-warn" v-if="st.known && st.known.error && !(curKnown || canRemoveRow(curDev))" role="alert">{{ st.known.error }}</p>
               </div>
               <div class="set-card" v-if="curKnown && (curDev.phone || curKnown.loginOk)">
                 <h3 class="set-h">信任</h3>
@@ -496,21 +478,29 @@ export const SettingsPanel = {
                   <small v-if="curKnown.loginOk" class="pair-warn">{{ KNOWN.loginOkWarn }}</small>
                 </template>
               </div>
-              <div class="set-card" v-if="curKnown || canRemoveRow(curDev)">
-                <h3 class="set-h">管理</h3>
-                <div class="dv-card-act" v-if="curKnown"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</button></div>
-                <small v-if="curKnown">{{ KNOWN.forgetNote }}</small>
-                <div class="dv-card-act" v-if="canRemoveRow(curDev)">
-                  <template v-if="!askRemove">
-                    <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
-                    <button class="aero-btn danger" type="button" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
+              <div class="set-card dvid-actions">
+                <h3 class="set-h">{{ ACTION_TEXT.title }}</h3>
+                <form class="dv-rename" v-if="renaming" @submit.prevent="renameSave">
+                  <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
+                  <small>所有設備都會顯示這個名字</small>
+                  <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
+                  <span class="dv-card-act"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
+                </form>
+                <div class="dv-card-act" v-else>
+                  <button class="aero-btn" type="button" @click="renameStart">{{ ACTION_TEXT.rename }}</button>
+                  <template v-if="!curDev.self">
+                    <button class="aero-btn" type="button" v-if="canShowBackRow(curDev) && !askRemove" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
+                    <button class="aero-btn danger" type="button" v-if="!askRemove" :disabled="!canRemoveRow(curDev)" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
                   </template>
-                  <template v-else>
-                    <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.label) }}</p>
-                    <button class="aero-btn danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
-                    <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
-                  </template>
+                  <button class="aero-btn" type="button" v-if="curKnown" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</button>
                 </div>
+                <small class="dvid-why" v-if="!curDev.self && !canRemoveRow(curDev)">{{ ACTION_TEXT.removeOnline }}</small>
+                <div class="dv-card-act" v-if="askRemove">
+                  <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.identity.title) }}</p>
+                  <button class="aero-btn danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
+                  <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
+                </div>
+                <small v-if="curKnown">{{ KNOWN.forgetNote }}</small>
                 <p class="pair-warn" v-if="st.known && st.known.error" role="alert">{{ st.known.error }}</p>
               </div>
             </div>

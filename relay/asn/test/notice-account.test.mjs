@@ -3,7 +3,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsnCore } from '../ui/lib/core.mjs'
 import { NOTICE_ID, NOTICE_SENDER, isSystemNotice } from '../ui/lib/notice.mjs'
-import { UNNAMED_DEVICE } from '../ui/lib/text.mjs'
 import { memStore } from './helpers.mjs'
 
 const NAME = 'T-ASN'
@@ -28,7 +27,7 @@ test('core：同帳號節點的舊寄件名信進「通知」並標出是哪台�
   const log = core.logOf(NOTICE_ID)
   assert.deepEqual(log.map(m => m.text), ['同帳號', '沒有設備名'])
   assert.equal(log[0].dev, '30家用')
-  assert.equal(log[1].dev, UNNAMED_DEVICE)
+  assert.equal(log[1].dev, '電腦（W）')
   assert.ok(core.snapshot().friends.some(f => f.id === 'Z/Z-收發室'), '外人的信照一般信長出聯絡人')
   assert.equal(core.logOf('Z/Z-收發室').length, 1)
   await core.stop()

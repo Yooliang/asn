@@ -1,4 +1,4 @@
-import { deviceNameOf } from './device-known.mjs'
+import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
 // 設定「設備與帳號」分類：設備 → 廠商 → 帳號 三層（廠商的 accounts 是帳號清單，畫面一個帳號一列）（純邏輯，node 與瀏覽器都能跑）。
 // 設備一律用設備名稱，不顯示節點代號與夥伴 ID；沒回報的顯示「未回報」。
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
@@ -9,13 +9,13 @@ import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine, loginIncomplete, loginFailed, usableAtText } from './claude-accounts.mjs'
-import { UNNAMED_DEVICE } from './text.mjs'
+import { deviceIdentity } from './device-identity.mjs'
+import { isPhoneNode } from './node-platform.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota, selfClaudeQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, isPhoneDevice, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
-export const SELF_LABEL = '這台電腦'
 // 引擎名稱 → 廠商鍵（gpt 與 codex 是同一家）；asn 視窗與其他不算廠商
 const VENDOR_OF = { gpt: 'codex' }
 const SKIP = new Set(['asn', 'other', ''])
@@ -60,11 +60,11 @@ function accountView(rows, { loggedOut = false } = {}) {
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度只看列表（用廠牌＋帳號對）；列表沒有這個帳號、或後台讀不到（null）就寫「額度讀不到」（#1883，不再看各台自己回報的舊四欄）。
  *   本機這台目前登入的帳號額度看 claudeState（claude_quota_state，本機剛查到的／查不到的原因），其他帳號看列表。
  */
-export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, claudeState = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null } = {}) {
+export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, claudeState = null, selfIsPhone = false, now = Date.now(), cloudNodes = [], nodeNames = null, nodeFacts = null, version = '' } = {}) {
   const friends = deviceFriends(allFriends)   // 通知對話不是設備（#1830）
   const rows = launchDeviceRows(friends, { selfNode, nodeNames, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
-  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL, nodeNames })
+  const nodeLabel = nodeLabelOf(friends, { nodeNames })
   // 別台設備一個帳號的額度：只看列表（Claude 沒有就寫「額度讀不到」；其他廠牌沒有就不帶）
   const remoteQuota = (k, a) => {
     const e = look(k, a.email)
@@ -76,11 +76,11 @@ export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], devi
     const isSelf = node === selfNode
     const mine = friends.filter(f => f.node === node)
     const named = deviceNameOf(node, { nodeNames, friends: mine })
-    const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
     const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
     // 手機版（selfIsPhone）的本機一定是手機：不等後台回報的平台（還沒讀到、或舊版沒回報時，不能先顯示成電腦）
-    const phone = (isSelf && selfIsPhone) || isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
+    const phone = (isSelf && selfIsPhone) || isPhoneNode(node, { platform, friends: mine })
+    const label = named || unnamedLabelOf(node, { friends: mine, platform, phone })   // 本機沒名字也寫辨認線索；「這台」「這支手機」只當旁邊的小標籤（#1803）
     const isOn = isDeviceOnline(node, friends, { selfNode, asn })
     const rep = reports[node] ?? null
     const asnOnline = Array.isArray(asn[node]) && asn[node].length > 0
@@ -161,7 +161,7 @@ export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], devi
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

@@ -198,11 +198,11 @@ test('「我的帳號」：按廠牌分組（Claude、Codex、Grok），每個�
   for (const s of Object.values(ROSTER_TEXT)) assert.ok(len(s) <= 20)
 })
 
-test('設備名稱對照：名單的 device 欄；本機用指定的稱呼；對不到寫「未命名設備」', () => {
-  const f = nodeLabelOf([{ node: W, device: '工作機' }, { node: W, device: '別名' }], { selfNode: S, selfLabel: '這台電腦' })
+test('設備名稱對照：名單的 device 欄；對不到寫辨認線索（#1829）', () => {
+  const f = nodeLabelOf([{ node: W, device: '工作機' }, { node: W, device: '別名' }], { nodeNames: null })
   assert.equal(f(W), '工作機')
-  assert.equal(f(S), '這台電腦')
-  assert.equal(f('zzz'), '未命名設備')
+  assert.equal(f(S), '電腦（0001）', '本機沒名字也寫辨認線索，「這台電腦」只當小標籤（#1803）')
+  assert.equal(f('zzz'), '電腦（ZZZ）')
 })
 
 test('讀列表：成功回列表；404／forbidden／格式不對都回 null，只記 console', async () => {

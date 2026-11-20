@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { mountComponent } from './helpers/render.mjs'
+import { withIdentity } from './helpers/with-identity.mjs'
 
 const baseState = () => ({
   status: 'online', hasUpload: false, avBusy: false, avMsg: '', version: '9.9.9',
@@ -15,7 +16,7 @@ const baseState = () => ({
   devices: [
     { key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] },
     { key: 'W', label: '工作機', self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] },
-  ],
+  ].map(withIdentity),
 })
 const panel = (catKey, extra = {}, st = baseState()) => mountComponent(SettingsPanel, { st, catKey, ...extra })
 
@@ -83,7 +84,7 @@ test('點列表進細部頁、v-model 輸入框（input 事件）、送出表單
     await m.trigger(m.find('form.dv-rename'), 'submit')
     assert.deepEqual(m.emitted('act'), [['device-rename', { node: 'H', name: '書房電腦' }]])
     // 返回列表
-    await m.trigger(m.findByText('返回'), 'click')
+    await m.trigger(m.find('button[aria-label="返回"]'), 'click')
     assert.ok(!m.find('section.dv-dev'), '回到列表，細部頁不在了')
   } finally { m.unmount() }
 })

@@ -318,8 +318,7 @@
         <div class="pane panel-pane" v-if="view === 'chat' && ui.active === panelTabId(k) && ui.panel[k]">
           <guide-doc v-if="k === 'guide'" :guide="panelGuide"></guide-doc>
           <template v-else>
-            <h2 class="panel-h">{{ panelTitle(k, ui.panel[k]) }}</h2>
-            <settings-panel :st="settingsState" :cat-key="ui.panel[k]" :me-av="meAv" @act="applySetting" @avatar-file="pickAvatarFile"></settings-panel>
+            <settings-panel :title="panelTitle(k, ui.panel[k])" :st="settingsState" :cat-key="ui.panel[k]" :me-av="meAv" @act="applySetting" @avatar-file="pickAvatarFile"></settings-panel>
           </template>
         </div>
       </template>
