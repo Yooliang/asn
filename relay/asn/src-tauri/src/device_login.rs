@@ -303,11 +303,23 @@ mod tests {
         assert!(poll(&c, &u, "x").await.is_err());
     }
 
+
+    /// 讀回這台電腦存的節點金鑰（0.2.22 起 Windows 預設加密：檔案是 ak1: 開頭的密文，要經 secret_file 解開；其他平台是明文）
+    fn stored_key(dir: &std::path::Path, node: &str) -> String {
+        let f = dir.join(format!("{node}.key"));
+        let raw = std::fs::read(&f).unwrap();
+        let aead = crate::secret_file::platform_aead();
+        if aead.as_deref().is_some_and(|a| a.sealing()) {
+            assert!(raw.starts_with(crate::android_keywrap::PREFIX), "預設加密：檔案是密文");
+        }
+        crate::secret_file::read_node_key(&f, node, aead.as_deref()).unwrap()
+    }
+
     #[test]
     fn 存金鑰_讀回一致_權限_600_並寫節點代號() {
         let d = tempfile::tempdir().unwrap();
         save_key(d.path(), "t1-box", "SECRETKEY_once_only").unwrap();
-        assert_eq!(std::fs::read_to_string(d.path().join("t1-box.key")).unwrap(), "SECRETKEY_once_only");
+        assert_eq!(stored_key(d.path(), "t1-box"), "SECRETKEY_once_only");
         assert_eq!(std::fs::read_to_string(d.path().join("node")).unwrap(), "t1-box");
         #[cfg(unix)]
         {
@@ -337,7 +349,7 @@ mod tests {
         let said = Mutex::new(String::new());
         let id = login(&reqwest::Client::new(), &url, d.path(), &|m| said.lock().unwrap().push_str(&format!("{m}\n"))).await.unwrap();
         assert_eq!(id, "t1-box");
-        assert_eq!(std::fs::read_to_string(d.path().join("t1-box.key")).unwrap(), "SECRETKEY_once_only");
+        assert_eq!(stored_key(d.path(), "t1-box"), "SECRETKEY_once_only");
         let out = said.lock().unwrap().clone();
         assert!(out.contains("ABCD-2345") && out.contains("t1-box"), "{out}");
         assert!(out.contains("https://asnmessenger.web.app/link/?code=ABCD-2345"), "login 要印出核准網址\n{out}");
