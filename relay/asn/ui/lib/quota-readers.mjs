@@ -85,14 +85,14 @@ export const shareKey = (vendor, account) => `${vendor}\n${account}`
 const TOGGLE_VENDORS = [['claude', 'Claude'], ['gemini', 'Gemini'], ['grok', 'Grok'], ['minimax', 'MiniMax']]
 
 /**
- * 設定 → 帳號 要畫哪些服務區段。my＝帳號清單（可能還沒有）；readers＝額度來源；hook＝Claude 狀態列額度（還沒查到是 null）。
+ * 設定 → 帳號 要畫哪些服務區段。my＝帳號清單（可能還沒有）；readers＝額度來源。
  * 有帳號的服務照原本的順序；額度開關所在的服務就算還沒有帳號，也補一個空區段（只有標題列的開關與說明）。
  */
-export function vendorSections(my, readers, hook) {
+export function vendorSections(my, readers) {
   const out = [...(my?.vendors ?? [])]
   const need = new Set()
   if (readers) for (const k of ['gemini', 'grok', 'minimax']) need.add(k)
-  if (hook || (readers?.extraDirs ?? []).length) need.add('claude')
+  if ((readers?.extraDirs ?? []).length) need.add('claude')
   for (const [key, label] of TOGGLE_VENDORS) {
     if (need.has(key) && !out.some(v => v.key === key)) out.push({ key, label, accounts: [] })
   }

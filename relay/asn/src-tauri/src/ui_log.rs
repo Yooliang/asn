@@ -95,7 +95,7 @@ pub fn panic_line(now_ms: i64, thread: Option<&str>, location: Option<(&str, u32
     let at = location.map(|(f, l, c)| format!("{f}:{l}:{c}")).unwrap_or_else(|| "不明".into());
     format!(
         "{} error [ASN] 程式錯誤結束（panic）：執行緒={} 位置={} 訊息={}",
-        crate::claude_quota::iso_secs(now_ms),
+        crate::quota_core::iso_secs(now_ms),
         thread.unwrap_or("未命名"),
         at,
         redact(msg)
@@ -104,7 +104,7 @@ pub fn panic_line(now_ms: i64, thread: Option<&str>, location: Option<(&str, u32
 
 /// 程式自己結束時寫一行原因；沒有這行就表示是被結束（工作管理員、關機、閃退）
 pub fn exit_line(now_ms: i64, reason: &str) -> String {
-    format!("{} info [ASN] 程式結束：{}", crate::claude_quota::iso_secs(now_ms), reason)
+    format!("{} info [ASN] 程式結束：{}", crate::quota_core::iso_secs(now_ms), reason)
 }
 
 pub fn log_exit(dir: &Path, reason: &str) {
@@ -118,7 +118,7 @@ pub fn log_exit(dir: &Path, reason: &str) {
 pub fn signout_logger(dir: PathBuf) -> Box<dyn Fn(&str) + Send + Sync> {
     Box::new(move |detail| {
         if !dir.as_os_str().is_empty() {
-            let line = format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64), detail);
+            let line = format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64), detail);
             let _ = append(&dir, &[line]);
         }
     })

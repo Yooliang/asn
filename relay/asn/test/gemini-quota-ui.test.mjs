@@ -92,7 +92,8 @@ const reports = { [W]: { error: '', asnOnline: true, reportedAt: iso(NOW - H), a
 const self = { claude: [{ email: 'a@x.test', plan: 'max', current: true, five_hour_pct: 11, weekly_pct: 22, at: iso(NOW - 60_000) }] }
 
 test('設備卡：開過 Gemini 的那台列出 Gemini 帳號與兩窗額度；Claude 照舊', () => {
-  const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, asn: { [W]: [{}] }, reports, self, now: NOW, roster: roster([claude(), gemini()]) })
+  const claudeState = { email: 'a@x.test', status: 'ok', read_at: iso(NOW - 60_000), windows: [{ name: 'five_hour', left_pct: 11, resets_at: null, read_at: iso(NOW - 60_000) }, { name: 'weekly', left_pct: 22, resets_at: null, read_at: iso(NOW - 60_000) }] }
+  const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, asn: { [W]: [{}] }, reports, self, now: NOW, roster: roster([claude(), gemini()]), claudeState })
   const w = t.find(d => d.key === W)
   const g = w.vendors.find(v => v.key === 'gemini')
   assert.equal(g.label, 'Gemini')
@@ -100,7 +101,7 @@ test('設備卡：開過 Gemini 的那台列出 Gemini 帳號與兩窗額度；C
   assert.equal(g.accounts[0].quota.text, '5 小時剩 55%、每週剩 81%')
   assert.equal(g.accounts[0].quota.meta, '2 小時前・工作機')
   assert.equal(w.vendors.find(v => v.key === 'claude').accounts[0].quota.text, '5 小時剩 40%、每週剩 72%')
-  assert.equal(t.find(d => d.self).vendors.find(v => v.key === 'claude').accounts[0].quota.text, '5 小時剩 11%、每週剩 22%', '本機 Claude 照舊用本機紀錄')
+  assert.equal(t.find(d => d.self).vendors.find(v => v.key === 'claude').accounts[0].quota.text, '5 小時剩 11%、每週剩 22%', '本機 Claude 用本機剛查到的')
   assert.equal(t.find(d => d.self).vendors.some(v => v.key === 'gemini'), false, '沒開過 Gemini 的那台不多出 Gemini')
 })
 

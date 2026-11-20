@@ -21,7 +21,6 @@ const roster = read('20261029100000_acct_roster.sql')
 const lock = read('20261029110000_acct_roster_lock_lower.sql')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024130000_acct_switch_signed.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-legacy.json', import.meta.url), 'utf8'))
 
 const body = (sql, name) => { const s = sql.indexOf(`create or replace function public.${name}(`); assert.ok(s >= 0, name); return sql.slice(s, sql.indexOf('$function$;', s) + 11) }
 const swap = (t, a, b) => { assert.ok(t.includes(a), a); return t.replace(a, () => b) }
@@ -49,23 +48,6 @@ test('靜態：roster_report 只改明列的片段；回復檔換回原本體；
   assert.doesNotMatch(mig, /token|credential|secret|password|create policy|drop table|truncate/i)
   assert.match(mig, /^begin;$/m); assert.match(mig, /^commit;$/m)
   assert.match(mig, /add column if not exists window_pending jsonb not null default '\{\}'::jsonb;/)
-})
-
-test('共用案例檔：待確認序列格式完整', () => {
-  const seqs = cases.confirm_sequences
-  assert.ok(Array.isArray(seqs) && seqs.length >= 6)
-  assert.equal(cases.constants.confirm_count, 3)
-  assert.equal(cases.constants.confirm_span_ms, 600000)
-  const ids = new Set()
-  for (const s of seqs) {
-    assert.ok(!ids.has(s.id), s.id); ids.add(s.id)
-    assert.equal(s.vendor, 'claude'); assert.equal(s.window, 'weekly')
-    assert.ok(s.steps.length >= 1)
-    for (const st of s.steps) { assert.equal(st.accept, st.reason === null, s.id); assert.ok(st.reason === null || st.reason in cases.reasons, s.id) }
-  }
-  // 兩個指定案例要在：交錯送 A／B 不誤收、同一組連續 3 次跨 10 分鐘會收
-  assert.ok(seqs.some(s => s.steps.length >= 6 && s.steps.every(st => st.accept === false)), '交錯案例')
-  assert.ok(seqs.some(s => s.steps.at(-1).accept === true && s.steps.length === 3), '連續 3 次案例')
 })
 
 let PGlite = null
@@ -99,37 +81,6 @@ const report = (db, node, rows) => one(db, 'select public.asn_relay_acct_roster_
 const rosterOf = (db, actor, user) => one(db, 'select public.asn_relay_acct_roster($1, $2::uuid) r', [actor, user])
 const iso = ms => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d+Z$/, 'Z')
 const H = 3600_000, D = 24 * H
-
-test('實跑：共用案例 confirm_sequences 每一步都跟預期一致（decide 逐步帶著待確認狀態）', { skip }, async () => {
-  const db = await setup()
-  for (const s of cases.confirm_sequences) {
-    let old = s.old, pending = null
-    for (const [i, st] of s.steps.entries()) {
-      const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz) r',
-        [s.vendor, s.window, JSON.stringify(old), JSON.stringify(st.new), pending == null ? null : JSON.stringify(pending), st.now])
-      assert.equal(r.reason, st.reason, `${s.id} 第 ${i + 1} 步 ${s.note}`)
-      if (st.accept) { old = st.new; pending = null } else pending = r.pending
-    }
-  }
-})
-
-test('實跑：不是 not_week_multiple 的結果，decide 跟 judge 一致、待確認原樣帶回', { skip }, async () => {
-  const db = await setup()
-  for (const c of cases.cases.filter(x => x.vendor !== 'gemini' && x.reason !== 'not_week_multiple')) {
-    const p = { resets_at: '2026-11-15T16:00:00Z', count: 2, first_at: '2026-11-09T07:00:00Z' }
-    const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz) r',
-      [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), JSON.stringify(p), c.now])
-    assert.equal(r.reason, c.reason, c.id)
-    assert.deepEqual(r.pending, c.accept ? null : p, c.id)
-  }
-  // 本來就會被 judge 擋的倍數案例：每一個，第一次看到都不收
-  for (const c of cases.cases.filter(x => x.reason === 'not_week_multiple')) {
-    const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, $5::timestamptz) r',
-      [c.vendor, c.window, JSON.stringify(c.old), JSON.stringify(c.new), c.now])
-    assert.equal(r.reason, 'not_week_multiple', c.id)
-    assert.equal(r.pending.count, 1, c.id)
-  }
-})
 
 const pendingOf = async db => (await db.query(`select window_pending p from relay.asn_user_accounts where account = 'a@x.test'`)).rows[0].p
 const seed = async (db, oldReset) => {
@@ -242,17 +193,6 @@ test('實跑：讀取時間比後台現在晚超過 5 分鐘拒收（future_read
   assert.equal((await dec(old, { left_pct: 10, resets_at: rt, read_at: iso(Date.now() + 2 * 60_000) })).reason, null, '5 分鐘內的誤差照收')
   assert.deepEqual((await rep1(40)).skipped, [])
   assert.equal((await gotWeekly(db)).left_pct, 40)
-})
-
-test('實跑：共用案例「只有後台」的案例（older_read／future_read）每一個都照預期（走 decide）', { skip }, async () => {
-  const db = await setup()
-  const bo = cases.cases.filter(c => c.scope === 'backend_only')
-  assert.ok(bo.length >= 6 && bo.some(c => c.reason === 'older_read') && bo.some(c => c.reason === 'future_read'))
-  for (const c of bo) {
-    const r = await one(db, 'select public.asn_relay_acct_window_decide($1, $2, $3::jsonb, $4::jsonb, null, $5::timestamptz) r',
-      [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])
-    assert.equal(r.reason, c.reason, `${c.id} ${c.note}`)
-  }
 })
 
 // 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）

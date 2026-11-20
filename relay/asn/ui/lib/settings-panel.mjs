@@ -21,7 +21,7 @@ import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
-import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
+import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
@@ -38,7 +38,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
@@ -182,7 +182,7 @@ export const SettingsPanel = {
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, effectiveLook, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -245,18 +245,17 @@ export const SettingsPanel = {
       </template>
       <template v-if="cat === 'accounts'">
         <div class="dv-set dv-acctpage">
-          <section class="dv-my" v-if="st.myAccounts || st.quotaReaders || st.quotaHook" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.title">
+          <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.title">
               <h3 class="dv-my-h" v-if="st.myAccounts">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
               <small v-if="st.quotaReaders">{{ QUOTA_TEXT.note }}</small>
-              <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders, st.quotaHook)" :key="v.key" :data-vendor="v.key">
+              <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">
                 <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b>
                   <!-- 額度開關（原本在「額度來源」大段與啟動設定的「額度回報」，行為不變、只換位置）：只管這台電腦 -->
                   <span class="dv-vtog" v-if="st.quotaReaders && v.key === 'grok'">
                     <label class="chk"><input type="checkbox" :checked="st.quotaReaders.grok" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'grok', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.grok }}</span></label>
                   </span>
-                  <span class="dv-vtog" v-if="v.key === 'claude' && (st.quotaHook || (st.quotaReaders && st.quotaReaders.extraDirs.length))">
-                    <label class="chk" v-if="st.quotaHook"><input type="checkbox" :checked="st.quotaHook.toggleOn" :disabled="st.quotaHook.toggleDisabled" @change="$event.target.checked ? act('quota-hook-ask') : act('quota-hook-disconnect'); $event.target.checked = st.quotaHook.toggleOn" /><span>{{ st.quotaHook.toggle }}</span></label>
+                  <span class="dv-vtog" v-if="v.key === 'claude' && st.quotaReaders && st.quotaReaders.extraDirs.length">
                     <label class="chk" v-if="st.quotaReaders && st.quotaReaders.extraDirs.length"><input type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.extra }}</span></label>
                   </span>
                 </header>
@@ -268,18 +267,6 @@ export const SettingsPanel = {
                   <small>{{ QUOTA_TEXT.agyShort }}{{ QUOTA_TEXT.thisPc }}</small>
                   <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
                   <details><summary>{{ QUOTA_TEXT.more }}</summary><small>{{ QUOTA_TEXT.agyNote }}</small></details>
-                </div>
-                <div class="dv-vq" v-if="v.key === 'claude' && st.quotaHook">
-                  <small>{{ st.quotaHook.short }}{{ QUOTA_TEXT.thisPc }}{{ st.quotaHook.switchNote }}</small>
-                  <small v-if="st.quotaHook.current">目前的狀態列指令：<code>{{ st.quotaHook.current }}</code></small>
-                  <small v-if="st.quotaHook.consent">{{ st.quotaHook.consent }}</small>
-                  <span class="dv-ibtns" v-if="st.quotaHook.showAgree || st.quotaHook.showCancel || st.quotaHook.showReconnect">
-                    <button class="aero-btn" type="button" v-if="st.quotaHook.showReconnect" :disabled="st.quotaHook.busy" @click="act('quota-hook-ask')">{{ st.quotaHook.askLabel }}</button>
-                    <button class="aero-btn" type="button" v-if="st.quotaHook.showAgree" :disabled="st.quotaHook.busy" @click="act('quota-hook-connect')">{{ st.quotaHook.agreeLabel }}</button>
-                    <button class="aero-btn" type="button" v-if="st.quotaHook.showCancel" :disabled="st.quotaHook.busy" @click="act('quota-hook-cancel')">{{ st.quotaHook.cancelLabel }}</button>
-                  </span>
-                  <small v-if="st.quotaHook.msg" role="status">{{ st.quotaHook.msg }}</small>
-                  <details><summary>{{ QUOTA_TEXT.more }}</summary><small v-for="(l, i) in st.quotaHook.lines" :key="i">{{ l }}</small></details>
                 </div>
                 <div class="dv-vq" v-if="v.key === 'claude' && st.quotaReaders && st.quotaReaders.extraDirs.length">
                   <small>{{ QUOTA_TEXT.extraShort }}{{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}{{ QUOTA_TEXT.thisPc }}</small>
@@ -341,6 +328,7 @@ export const SettingsPanel = {
                       </span>
                       <span v-else>{{ a.quota.text }}</span>
                       <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
+                      <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
                     </span>
                     <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他的按了改用那台（原本的切換流程）。
                          讀這筆額度的那台，按鈕上方有一條藍色粗線（.read；每顆按鈕的上框一樣高，沒有線的是透明的） -->
@@ -535,18 +523,19 @@ export const SettingsPanel = {
                           </span>
                           <small class="dv-why acct-warn" v-if="isIncomplete(a) && !a.current">{{ INCOMPLETE_REASON }}</small>
                           <small class="dv-why dv-usable" v-if="usableAt(a)">{{ usableAt(a) }}</small>
-                          <span class="dv-quota" :class="{ stale: qb(a).stale, out: qv(a).exhausted }">
-                            <span class="dv-bars" v-if="qb(a).bars.length">
-                              <span class="dv-bar" v-for="b in qb(a).bars" :key="b.key" :class="{ done: b.expired }">
+                          <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
+                            <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                              <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
                                 <span class="dv-bl">{{ b.label }}</span>
                                 <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
                                 <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
                                 <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
                               </span>
                             </span>
-                            <span v-else>{{ qb(a).note }}</span>
-                            <span v-if="qb(a).reset">・{{ qb(a).reset }}</span>
-                            <span v-if="qb(a).meta">（{{ qb(a).meta }}）</span>
+                            <span v-else>{{ a.quota.text }}</span>
+                            <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
+                            <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
+                            <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                         </li>
                       </ul>
@@ -608,9 +597,9 @@ export const SettingsPanel = {
                               </span>
                             </span>
                             <span v-else>{{ a.quota.text }}</span>
-                            <span v-if="a.quota.resetLine">・{{ a.quota.resetLine }}</span>
                             <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                             <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
+                            <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
                             <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                           <span class="dv-quota stale" v-else-if="v.key === 'codex' || v.key === 'grok'">{{ NO_QUOTA_TEXT }}</span>

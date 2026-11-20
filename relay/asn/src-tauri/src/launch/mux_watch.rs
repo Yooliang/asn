@@ -730,7 +730,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
                         if let Some(base) = super::mux::default_base() {
                             super::mux::note(&base.join("ASN").join("m"), &line);
                         }
-                        let _ = crate::ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+                        let _ = crate::ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now as i64))]);
                         queue_blind(&work_dir, now);
                     }
                 }

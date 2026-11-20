@@ -264,10 +264,10 @@ pub fn resume_entries<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool
         let _one = lock();
         run(entries, deps)
     };
-    let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
+    let line = format!("{} info [ASN] mux-resume total={} resumed={} failed={}", crate::quota_core::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
     // 沒接回來的原因是技術細節，只進紀錄；通知與畫面只講名字
     let mut lines = vec![line];
-    lines.extend(st.failed.iter().map(|f| format!("{} info [ASN] mux-resume 沒接回：{}（{}）", crate::claude_quota::iso_secs(st.at as i64), f.name, f.reason)));
+    lines.extend(st.failed.iter().map(|f| format!("{} info [ASN] mux-resume 沒接回：{}（{}）", crate::quota_core::iso_secs(st.at as i64), f.name, f.reason)));
     let _ = crate::ui_log::append(work_dir, &lines);
     // 接回做完了：斷了幾位、接回幾位、誰沒接回，排一則通知（只有「真的接回過」的那一次；十分鐘內第二次本來就只通知）
     let failed: Vec<String> = st.failed.iter().map(|f| f.name.clone()).collect();
@@ -484,7 +484,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
             let _one = RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             run(entries, &deps)
         };
-        let line = format!("{} info [ASN] auto-resume total={} resumed={} failed={}", crate::claude_quota::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
+        let line = format!("{} info [ASN] auto-resume total={} resumed={} failed={}", crate::quota_core::iso_secs(st.at as i64), st.total, st.resumed.len(), st.failed.len());
         let _ = crate::ui_log::append(&log_dir, &[line]);
     });
     if let Err(e) = spawned {

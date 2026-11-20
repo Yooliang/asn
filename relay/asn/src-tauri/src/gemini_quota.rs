@@ -11,12 +11,12 @@
 //!   值沒變但上次記錄已超過 5 分鐘才重寫一次，讓「多久前讀的」不會一直停在開窗那一刻。
 //! 紅線：函式一律吃家目錄路徑參數；只有命令列入口與 Tauri 指令決定真實家目錄。不讀任何登入憑證、不連網、不執行外部程式。
 use crate::claude_accounts::normalize_email;
-use crate::claude_quota::merge;
+use crate::quota_core::merge;
 mod proc_key;
 mod seen;
 
 pub use proc_key::agy_key;
-use crate::claude_quota::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
+use crate::quota_core::{iso_secs, parse_iso_secs, quota_from_value, Parsed, Quota};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

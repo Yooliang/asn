@@ -1515,7 +1515,7 @@ impl Core {
             self.log.line(&line);
             #[cfg(feature = "gui")]
             {
-                let _ = crate::ui_log::append(&self.cfg.work_dir, &[format!("{} info {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+                let _ = crate::ui_log::append(&self.cfg.work_dir, &[format!("{} info {line}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
             }
         }
     }

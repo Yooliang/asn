@@ -298,7 +298,7 @@ Google Play 資料安全性申報要補：「音訊：語音或聲音錄音」�
 - **用途**：「設備與帳號」最上面的「我的帳號」：以 ASN 帳號為單位，列出各廠牌（Claude、Codex、Grok）的帳號與每個額度窗剩幾 %、多久前讀、哪台讀的。電腦與手機同一份。
 - **資料**：新表 `relay.asn_user_accounts`，一筆＝「ASN 帳號 × 廠牌 × 該廠牌帳號」（主鍵 `user_id, vendor, account`）；`windows` 最多 4 個窗，每窗 `{name, left_pct, resets_at, read_at, read_node}`；另記 `seen_at`／`seen_node`。每人最多 100 筆。舊的 `relay.asn_accounts`（每台一筆，給遠端切換用）照舊，兩份並存。
 - **寫入**：relay 的 `acct_report` 先照舊寫 `relay.asn_accounts`，再呼叫 `asn_relay_acct_roster_report`（新的失敗只記 log、照樣回 ok）。只有已認領的電腦（`asn_user_owns_node`）才寫。舊版只送 Claude 四欄時，後台照電腦端 `merge.rs` 的規則反推成 5 小時與每週兩窗。Grok 只記帳號、不收額度。
-- **新舊判斷**（每窗各自，#1342／#1372，放在資料庫一次交易內做，因為好幾台會同時寫）：以重置時間比；差 10 分鐘內算同一期，剩餘只能下降；較早不收；較晚只有現記的已過才收；Claude 每週窗另要差接近 7 天倍數；Codex 週窗與 5 小時窗不看倍數；現記的已過超過 7 天、或任一邊沒有重置時間就照收。不收的只記 relay log（原因代碼，不含 email）。電腦端本機也照同一套做，兩邊共用 `tests/fixtures/quota-merge-cases.json`。
+- **新舊判斷**（#1883 起簡化）：同使用者、同廠牌、同帳號，每個窗各取讀取時間（`read_at`）最新的那筆；進來的比存著的舊就不蓋（回原因代碼 `older_read`，不含 email），同一秒以進來的為準；不看重置時間、不看是哪一台送的，這次沒帶的窗也不拿掉（顯示端自己處理過期）。舊版用戶端的舊四欄照收，但蓋不掉時間較新的讀數。migration `20261120120000_acct_quota_latest_per_window.sql`，回復檔在 `supabase/sql/rollback/`。案例在 `tests/fixtures/quota-merge-cases.json`。
 - **讀取**：新動作 `acct_roster`，一定要本人簽章，只回自己的；列 30 天內有回報過的帳號（所有電腦都不再回報的保留 30 天，畫面用時間標「N 天前讀的」），附本人哪幾台在用設備目前回報著它、哪台正在用。`windows` 是空陣列＝沒有額度資料（例如沒開 Codex）。超過 30 天的列只是不列出，不會自動刪；要不要定期刪另案。
 - **migration**：`supabase/migrations/20261029100000_acct_roster.sql`；回復 `supabase/sql/rollback/20261029100000_acct_roster_down.sql`（drop 表算刪資料，執行前先問）。
 

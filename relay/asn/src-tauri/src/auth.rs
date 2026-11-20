@@ -559,7 +559,7 @@ fn dpapi_log(op: &str, code: u32) {
     let line = dpapi_err_line(op, code);
     elog!("[ASN] {line}");
     if let Some(dir) = DPAPI_LOG_DIR.get() {
-        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now_ms() as i64))]);
+        let _ = crate::ui_log::append(dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now_ms() as i64))]);
     }
 }
 

@@ -72,7 +72,7 @@ pub(crate) fn run_in(dir: &Path, cwd: &Path, log_dir: Option<&Path>) {
         // ui.log 只有有畫面的版本才有（無視窗的橋只寫 stderr）
         #[cfg(feature = "gui")]
         if let Some(d) = log_dir {
-            let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64))]);
+            let _ = crate::ui_log::append(d, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
         }
         #[cfg(not(feature = "gui"))]
         let _ = log_dir;

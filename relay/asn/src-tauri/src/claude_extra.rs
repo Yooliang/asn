@@ -24,9 +24,6 @@ const REFRESH_MARGIN_MS: i64 = 15 * 60_000;
 pub const MAX_DIRS: usize = 5;
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
-const BETA: &str = "oauth-2025-04-20";
 const LOCK: &str = ".asn-refresh.lock";
 /// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入
 const RENAME_TRIES: u32 = 5;
@@ -251,12 +248,21 @@ pub async fn read_dir(home: &Path, name: &str, dir: &Path, may_refresh: bool, no
             }
         }
     };
-    let token = oauth["accessToken"].as_str().ok_or(Failure::Auth)?;
-    let get = |url: &'static str| -> Result<reqwest::RequestBuilder, Failure> { Ok(client()?.get(url).bearer_auth(token).header("anthropic-beta", BETA).header("user-agent", "asn-quota-reader")) };
-    let profile = get_json(get(PROFILE_URL)?).await?;
-    let email = profile["account"]["email"].as_str().and_then(normalize_email).ok_or(fail("查不到帳號"))?;
-    let usage = get_json(get(USAGE_URL)?).await?;
-    Ok((email, parse_usage(&usage, now_ms)))
+    // 查帳號與用量：跟正式的 Claude 額度查詢是同一個函式（claude_quota::query），這裡只把失敗換成這邊的說法
+    oauth["accessToken"].as_str().filter(|t| !t.trim().is_empty()).ok_or(Failure::Auth)?;
+    let cred = json!({ OAUTH_KEY: oauth }).to_string().into_bytes();
+    let got = tokio::task::spawn_blocking(move || crate::claude_quota::query(&crate::claude_quota::HttpNet::real(), &cred, now_ms, None)).await.map_err(|_| fail("連線失敗"))?;
+    use crate::claude_accounts::HttpFail as H;
+    use crate::claude_quota::QueryFail as Q;
+    match got {
+        Ok((email, w)) => Ok((email, w)),
+        Err(Q::Http(H::Unauthorized)) => Err(Failure::Auth),
+        Err(Q::Http(H::RateLimited)) => Err(fail("HTTP 429")),
+        Err(Q::Http(H::Server(c) | H::Status(c))) => Err(Failure::Other(format!("HTTP {c}"))),
+        Err(Q::Http(_)) => Err(fail("連線失敗")),
+        Err(Q::NoAccount) | Err(Q::Mismatch) => Err(fail("查不到帳號")),
+        Err(Q::Unreadable) => Err(fail("回應看不懂")),
+    }
 }
 
 #[cfg(test)]

@@ -495,7 +495,7 @@ fn agy_輪詢沒有可信的帳號來源_一律不查_不記到任何帳號() {
     let dir = h.path().join(".gemini");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("google_accounts.json"), r#"{"active":"me@x.test","old":[]}"#).unwrap();
-    let r = crate::gemini_quota::parse_statusline(&json!({ "email": "me@x.test", "quota": { "gemini-weekly": { "remaining_fraction": 0.5, "reset_time": crate::claude_quota::iso_secs(NOW + 3 * 86_400_000) } } }).to_string(), NOW).unwrap();
+    let r = crate::gemini_quota::parse_statusline(&json!({ "email": "me@x.test", "quota": { "gemini-weekly": { "remaining_fraction": 0.5, "reset_time": crate::quota_core::iso_secs(NOW + 3 * 86_400_000) } } }).to_string(), NOW).unwrap();
     crate::gemini_quota::record(h.path(), &r, NOW).unwrap();
     assert!(!crate::gemini_quota::load_all(h.path()).is_empty());
     assert_eq!(agy_poll_account(h.path()), None);

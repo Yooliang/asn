@@ -1,8 +1,7 @@
 // 設定頁「帳號」：Claude 帳號（加入目前登入、切換、刪除）、OpenAI（Codex）目前登入、遠端設備的 Claude 帳號切換。
 // 檔案操作全在 Rust（claude_accounts.rs、codex_accounts.rs、acct_remote.rs），這裡只呼叫指令並整理訊息。
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
-import { quotaOf } from './account-quota.mjs'
-import { fetchRoster } from './account-roster.mjs'
+import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
@@ -73,6 +72,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
     mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
+    quotaState: normalizeQuotaState(null),   // 這台目前登入帳號的額度查詢狀態（claude_quota_state，#1883）
     roster: null,   // 後台的帳號列表（#374，acct_roster）；讀不到是 null，畫面退回各設備自己回報的數字
   })
   // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。
@@ -87,17 +87,10 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { s.loginFailed = (await invoke('claude_login_failed')) === true } catch { s.loginFailed = false }   // 本機的登入失效判定（#1645，只讀）；舊版 Rust 沒有這個指令就當沒失效
     await refreshQuota()
   }
-  // 只重讀這台各帳號上次記下的額度（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。
-  // 先拿掉舊的額度欄位再套新的：紀錄被清掉的帳號要回到「額度未知」。讀不到（舊版 Rust 沒有這個指令）就維持原樣
-  const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'legacy']
+  // 只重讀這台目前登入帳號的額度查詢狀態（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。
+  // 查詢由 Rust 每 10 分鐘做一次；讀不到（舊版 Rust 沒有這個指令）就維持原樣，畫面寫「讀取中」
   const refreshQuota = async () => {
-    let q
-    try { q = (await invoke('claude_quota_all')) ?? {} } catch { return }
-    if (!Array.isArray(s.list)) return
-    s.list = s.list.map(a => {
-      const base = Object.fromEntries(Object.entries(a).filter(([k]) => !QUOTA_KEYS.includes(k)))
-      return { ...base, ...quotaOf(q[a.email]) }
-    })
+    try { s.quotaState = normalizeQuotaState(await invoke('claude_quota_state')) } catch { /* 舊版沒有這個指令：維持原樣 */ }
   }
   // 帳號庫變了，就把新清單回報給收發室（讓擁有者設備看得到）；後台沒部署或沒連線都不吵使用者
   const report = async () => { try { await invoke('acct_remote_report') } catch { /* 略過 */ } }

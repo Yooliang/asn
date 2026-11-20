@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { planLabel, quotaBars, quotaOf, quotaView, resetWhen } from '../ui/lib/account-quota.mjs'
+import { planLabel, resetWhen } from '../ui/lib/account-quota.mjs'
 import { rosterAccountsOn, rosterQuota, rosterView } from '../ui/lib/account-roster.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -23,38 +23,6 @@ test('重置時間的寫法：分鐘、小時、超過一天寫星期幾與時�
   assert.equal(resetWhen(iso(NOW - MIN), NOW), '', '已過：不寫結論')
   for (const v of [undefined, null, '', '壞掉']) assert.equal(resetWhen(v, NOW), '')
   for (const s of ['約 20 分鐘後重置', '週六 14:00 重置']) assert.ok(Array.from(s).length <= 20)
-})
-
-test('本機額度條：有兩條各自的重置時間就各寫各的，不再另寫一句；已過的那條整條不列', () => {
-  const v = quotaBars({ five_hour_pct: 64, weekly_pct: 12, reset_at: iso(NOW + 3 * H), five_reset_at: iso(NOW + 3 * H), week_reset_at: iso(new Date(2026, 9, 31, 14, 0).getTime()), at }, { hookOn: true, now: NOW })
-  assert.deepEqual(v.bars.map(b => [b.key, b.pct, b.reset, b.expired]), [['five', 64, '約 3 小時後重置', false], ['week', 12, '週六 14:00 重置', false]])
-  assert.equal(v.reset, '', '各條自己寫了，整段不再另寫')
-  const old = quotaBars({ five_hour_pct: 0, weekly_pct: 50, five_reset_at: iso(NOW - H), week_reset_at: iso(NOW + 2 * D), at: iso(NOW - 8 * H) }, { now: NOW })
-  assert.deepEqual(old.bars.map(b => [b.key, b.reset, b.expired]), [['week', '週五 10:00 重置', false]], '已過的 5 小時整條不列')
-  assert.equal(old.stale, true)
-})
-
-test('本機額度條：舊版紀錄沒有新欄位，退回舊的單一重置時間（照舊寫是哪一條的）', () => {
-  const v = quotaBars({ five_hour_pct: 64, weekly_pct: 12, reset_at: iso(NOW + 3 * H + 10 * MIN), at }, { hookOn: true, now: NOW })
-  assert.deepEqual(v.bars.map(b => b.reset), ['', ''])
-  assert.equal(v.reset, '5 小時額度約 3 小時後重置')
-})
-
-test('quotaOf 多帶兩條各自的重置時間與讀取時間，其他欄位照樣丟掉', () => {
-  const q = quotaOf({ email: 'a@x.test', five_hour_pct: 1, weekly_pct: 2, reset_at: 'R', at: 'T', five_reset_at: 'R5', week_reset_at: 'RW', token: 'SECRET' })
-  assert.deepEqual(Object.keys(q).sort(), ['at', 'five_hour_pct', 'five_reset_at', 'reset_at', 'week_reset_at', 'weekly_pct'])
-})
-
-test('別台設備卡（那台自己回報的）：有新欄位就帶兩條；沒有就照舊', () => {
-  const v = quotaView({ five_hour_pct: 0, weekly_pct: 70, reset_at: iso(NOW + 90 * MIN), five_reset_at: iso(NOW + 90 * MIN), week_reset_at: iso(NOW + 5 * H), at }, NOW)
-  assert.deepEqual(v.bars.map(b => [b.label, b.pct, b.reset]), [['5 小時', 0, '約 2 小時後重置'], ['每週', 70, '約 5 小時後重置']])
-  assert.equal(v.resetLine, '')
-  assert.equal(v.exhausted, true)
-  const legacy = quotaView({ five_hour_pct: 0, weekly_pct: 70, reset_at: iso(NOW + 90 * MIN), at }, NOW)
-  assert.deepEqual(legacy.bars.map(b => b.reset), ['', ''])
-  assert.equal(legacy.resetLine, legacy.resetText, '舊版照舊寫一句')
-  assert.match(legacy.resetLine, /重置$/)
-  assert.deepEqual(quotaView({}, NOW).bars, [])
 })
 
 const entry = (windows, extra = {}) => ({ vendor: 'claude', account: 'a@x.test', plan: 'claude_max', windows, seen_at: at, seen_node: 'W', nodes: [{ node: 'W', current: true }], ...extra })

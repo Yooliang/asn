@@ -29,7 +29,7 @@ pub fn hash6(pubkey: &str) -> String {
     if pubkey.is_empty() {
         "-".to_string()
     } else {
-        // 不用 claude_quota::owner::short_hash：那是電腦版才有的模組，這個檔手機也要編；演算法相同（sha256 前 3 位元組），測試比對過
+        // sha256 前 3 位元組的十六進位（電腦與手機同一份）
         let d = ring::digest::digest(&ring::digest::SHA256, pubkey.as_bytes());
         d.as_ref().iter().take(3).map(|b| format!("{b:02x}")).collect()
     }
@@ -98,7 +98,7 @@ mod tests {
         let l = line(Side::Target, "0a1b2c3d-4e5f-6789-abcd-ef0123456789", Scope::Input, ME, PEER, Some(Tofu::Same), "rejected", "consent_denied");
         assert_eq!(
             l,
-            format!("view-handshake side=target id=0a1b2c3d scope=input me={} peer={} tofu=Same result=rejected reason=consent_denied", crate::claude_quota::owner::short_hash(ME), crate::claude_quota::owner::short_hash(PEER))
+            format!("view-handshake side=target id=0a1b2c3d scope=input me={} peer={} tofu=Same result=rejected reason=consent_denied", hash6(ME), hash6(PEER))
         );
         assert_ne!(hash6(ME), hash6(PEER));
         assert_eq!(hash6(ME).len(), 6);

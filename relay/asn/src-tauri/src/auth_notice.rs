@@ -197,7 +197,7 @@ pub fn signout_hook(log: Box<dyn Fn(&str) + Send + Sync>, emit: Box<dyn Fn() + S
     })
 }
 
-/// 毫秒 → `2026-10-24T12:00:00Z`（手機沒有 claude_quota，自己算）
+/// 毫秒 → `2026-10-24T12:00:00Z`（手機沒有 quota_core，自己算）
 fn iso_secs(ms: i64) -> String {
     let s = ms.div_euclid(1000);
     let (y, m, d) = crate::timeutil::civil_from_days(s.div_euclid(86400));

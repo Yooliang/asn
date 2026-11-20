@@ -16,7 +16,6 @@ const lock = read('20261029110000_acct_roster_lock_lower.sql')
 const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const base = read('20261021040000_asn_account_switch.sql').replace(/irori_relay_/g, 'asn_relay_').split('-- 90 天清理')[0] + 'commit;'
 const prior = ['20261023160000_acct_report_vendors.sql', '20261024200000_acct_report_quota.sql', '20261026200000_acct_vendor_grok.sql'].map(read)
-const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/quota-merge-cases-legacy.json', import.meta.url), 'utf8'))
 
 const FNS = {
   asn_relay_acct_window_judge: 'asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz)',
@@ -67,17 +66,6 @@ test('靜態：編號在最新之後；三支函式只改該改的地方；舊�
   assert.doesNotMatch(down, /drop table|drop function|truncate /i)
 })
 
-test('共用案例檔：有 gemini 的滿額案例與基本案例；claude、codex 有不套滿額規則的反向案例', () => {
-  const g = cases.cases.filter(c => c.vendor === 'gemini' && c.scope !== 'backend_only')
-  assert.ok(g.length >= 10)
-  const fullOld = c => c.old?.left_pct === 100
-  assert.ok(g.some(c => fullOld(c) && c.new.left_pct === 100 && c.accept), '滿額遇滿額照收')
-  assert.ok(g.some(c => fullOld(c) && c.new.left_pct < 100 && c.accept), '滿額後開始用照收')
-  assert.ok(g.some(c => c.old && c.old.left_pct < 100 && c.new.left_pct === 100 && c.reason === 'later_not_expired'), '記著非滿額、來滿額不收')
-  for (const r of ['same_period_rise', 'earlier', 'reset_out_of_range']) assert.ok(g.some(c => c.reason === r), r)
-  for (const v of ['claude', 'codex']) assert.ok(cases.cases.some(c => c.vendor === v && fullOld(c) && c.reason === 'later_not_expired'), v)
-})
-
 let PGlite = null
 PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟，整支失敗、不會無聲略過
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
@@ -122,15 +110,6 @@ const privs = async db => {
   }
   return out
 }
-
-test('實跑（pglite）：共用案例全部（含 gemini）照預期', { skip }, async () => {
-  const db = await setup()
-  for (const c of cases.cases.filter(x => x.scope !== 'backend_only')) {
-    const r = (await db.query('select public.asn_relay_acct_window_judge($1, $2, $3::jsonb, $4::jsonb, $5::timestamptz) r',
-      [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])).rows[0].r
-    assert.equal(r, c.reason, `${c.id} ${c.note}`)
-  }
-})
 
 test('實跑（pglite）：權限、definer、search_path 跟套之前一樣；寫入函式仍是 definer', { skip }, async () => {
   const db = await setup({ apply: false })

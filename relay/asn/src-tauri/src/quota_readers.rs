@@ -9,7 +9,7 @@
 //!
 //! 紅線：不碰 `~/.claude`；金鑰、權杖與對方回應內容不進 log，也不進回報，回報只有 email 與數字。
 use crate::claude_accounts::normalize_email;
-use crate::claude_quota::iso_secs;
+use crate::quota_core::iso_secs;
 use crate::nowin::NoWindow;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -207,7 +207,7 @@ pub(crate) fn parse_iso_flex(s: &str) -> Option<i64> {
         8 => hms.to_string(),
         _ => return None,
     };
-    let utc = crate::claude_quota::parse_iso_secs(&format!("{date}T{hms}Z"))?;
+    let utc = crate::quota_core::parse_iso_secs(&format!("{date}T{hms}Z"))?;
     Some(utc - off_min * 60_000)
 }
 

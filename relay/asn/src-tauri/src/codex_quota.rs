@@ -8,7 +8,7 @@
 //! `{ name, left_pct, resets_at, read_at }`。
 //! 檔案只有 email、額度窗、記錄時間；權杖、帳號編號一律不碰（rateLimits 的回應本來就沒有）。
 use crate::claude_accounts::normalize_email;
-use crate::claude_quota::{iso_secs, parse_iso_secs};
+use crate::quota_core::{iso_secs, parse_iso_secs};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
