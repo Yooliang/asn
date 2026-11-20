@@ -12,6 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { readDevToolsPort } from './devtools-port.mjs'
 import { SMOKE_NOW, SCENARIOS, findBrowser, injectSource, mountCheckSource, pagerSettleSource, pathOf, probeSource, tableFor } from './smoke-lib.mjs'
 import { clockSource, freezeSource } from './ui-shots-lib.mjs'
 import { baselineProblems, compareHitTargets, hitTargetSource, lineOf, makeBaseline, sortViolations } from './hit-targets-lib.mjs'
@@ -134,7 +135,7 @@ try {
   const portFile = path.join(profile, 'DevToolsActivePort')
   for (let i = 0; i < 400 && !fs.existsSync(portFile) && child.exitCode === null; i++) await sleep(150)
   if (!fs.existsSync(portFile)) throw new Error('瀏覽器沒有開出偵錯連線')
-  const [port, wsPath] = fs.readFileSync(portFile, 'utf8').trim().split(/\r?\n/)
+  const { port, wsPath } = await readDevToolsPort(portFile)   // #1954：剛建檔可能還鎖著（EBUSY）或沒寫完，短輪詢重試
   const cdp = await connect(`ws://127.0.0.1:${port}${wsPath}`)
   console.log(`觸控目標量測：瀏覽器 ${browserPath}（PID ${child.pid}）；情境 ${scenarios.length} 個`)
   for (const sc of scenarios) {

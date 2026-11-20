@@ -11,6 +11,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { SMOKE_NOW, SCENARIOS, findBrowser, injectSource, mountCheckSource, mpaneWidenProbeSource, pagerSettleSource, pathOf, probeKind, probeSource, tableFor } from './smoke-lib.mjs'
 import { PNG_1X1, realInput } from './ui-shots-input.mjs'
+import { readDevToolsPort } from './devtools-port.mjs'
 import { clockSource, cjkProbeSource, cjkVerdict, toolBroken, compareImages, coverage, decodePng, diffLines, encodePng, formatReport, freezeSource, isMonochrome, parseShotArgs, rowStatus, sampleScenarios, scenarioSkin, scenarioWidth, shotScenarios, sideBySide, snapshotSource, strictFailed, UNSTABLE_SCENARIOS } from './ui-shots-lib.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -186,7 +187,7 @@ try {
   const portFile = path.join(profile, 'DevToolsActivePort')
   for (let i = 0; i < 400 && !fs.existsSync(portFile) && child.exitCode === null && child.signalCode === null; i++) await sleep(150)
   if (!fs.existsSync(portFile)) throw new Error(`瀏覽器沒有開出偵錯連線（結束碼 ${child.exitCode}、訊號 ${child.signalCode}）${browserErr ? `：${browserErr.slice(-500)}` : ''}`)
-  const [port, wsPath] = fs.readFileSync(portFile, 'utf8').trim().split(/\r?\n/)
+  const { port, wsPath } = await readDevToolsPort(portFile)   // #1954：剛建檔可能還鎖著（EBUSY）或沒寫完，短輪詢重試
   const cdp = await connect(`ws://127.0.0.1:${port}${wsPath}`)
   const save = (side, name, r) => {
     fs.mkdirSync(path.join(out, side), { recursive: true })
