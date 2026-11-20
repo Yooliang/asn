@@ -178,6 +178,8 @@ jobs:
           # 版本字串：wezterm-version 的 build.rs 會讀根目錄的 .tag（官方版是 "wezterm <tag>"）
           echo "$UPSTREAM_TAG" > "$WEZ_SRC/.tag"
           cd "$WEZ_SRC"
+          # #1896：同一次建置就產生帶行號的 PDB（只進 PDB，不改程式碼生成），之後的崩潰傾印可直接符號化，不必另外重建
+          export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
           cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server
       - name: 版本與依賴（dumpbin）
         run: |
@@ -266,6 +268,29 @@ jobs:
           name: wezterm-windows
           path: C:/w/out/WezTerm-windows-*.zip
           if-no-files-found: error
+      - name: 收集 PDB（與打包的 exe 同一次建置）
+        run: |
+          set -euo pipefail
+          rel="$WEZ_SRC/target/release"
+          pdbdir="$WEZ_OUT/pdb"; rm -rf "$pdbdir"; mkdir -p "$pdbdir"
+          for e in wezterm wezterm-gui wezterm-mux-server; do
+            pdb="$rel/${e//-/_}.pdb"
+            [ -s "$pdb" ] || { echo "::error::找不到或是空的：$pdb" >&2; exit 1; }
+            # exe 的偵錯目錄記著 PDB 檔名；對不上就不是同一次建置
+            grep -qa "${e//-/_}.pdb" "$rel/$e.exe" || { echo "::error::$e.exe 裡沒有記 ${e//-/_}.pdb" >&2; exit 1; }
+            cp "$pdb" "$pdbdir/"
+          done
+          ( cd "$rel" && sha256sum wezterm.exe wezterm-gui.exe wezterm-mux-server.exe ) > "$pdbdir/EXE-SHA256SUMS.txt"
+          ( cd "$pdbdir" && sha256sum *.pdb ) > "$pdbdir/PDB-SHA256SUMS.txt"
+          cat "$pdbdir/EXE-SHA256SUMS.txt" "$pdbdir/PDB-SHA256SUMS.txt"
+      # PDB 不進 release、不進安裝檔；artifact 名稱刻意不叫 wezterm-*，發佈的 download pattern 不會撿到它
+      - name: 上傳 PDB
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pdb-windows-${{ env.UPSTREAM_TAG }}-${{ env.ASN_SUFFIX }}
+          path: C:/w/out/pdb/
+          if-no-files-found: error
+          retention-days: 90
       - name: 上傳實測 log
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
