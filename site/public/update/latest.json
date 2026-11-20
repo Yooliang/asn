@@ -1,11 +1,11 @@
 {
-  "version": "0.2.36",
-  "notes": "- 改善：Claude 帳號額度改由 ASN 直接向 Claude 查詢，每 10 分鐘更新一次、切換帳號後立刻更新；不再借用 Claude 的狀態列，原本的狀態列設定會自動還原。（#1883、#1885）",
-  "pub_date": "2026-11-20T07:51:17.597Z",
+  "version": "0.2.37",
+  "notes": "- 修正：換班接手後，新視窗會開進共用的終端服務，不再退回成一般的系統主控台視窗。（#1867、#1870）",
+  "pub_date": "2026-11-20T09:43:20.799Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnhqd3VkZlNiZlpoNVlQdjlKTnoxTDh0bHdSQWlyL0VvdVJjcU1sS1dJN3I4U2JUTkFKVDdGaVpZOWU3QW1DV3p5aDFSbDhrRUtBN1lTaWtaRC8vNGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTYxMDc3CWZpbGU6QVNOXzAuMi4zNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM2ClN6ZVN0dzNERk5BeWZwMGRRWXdNY0c4VGNTMGt1VG1ZUjIxTkRCTmJJSTdSUGxyK2lrbW81NWp0K1V1Vmo5eHpGL2ZPaDNvSzlCMWZESkZESlpUeEFRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.36_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNzL0ltdjU2ZFg4OHRvcUxkNStvQm5POE5mcnJ1c3hwamtnM2h4bnNZSVZVS1EybC9aTkxGU3JjczBCS3pYdkxNQXU4QUt0RmMxK3hRQXhGclJrM1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTY3ODAwCWZpbGU6QVNOXzAuMi4zN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM3Cm0xNnA2MWhUUFJEYjNuZFMyRmZmVHRWa3R0RnZMU0lLVWgrNjJsbnNhU0IvU005cWQ2ZFdvWFNsdm00aGxtZ2JKQ3ArTkJsVTVobGs0WUVmS3QwekRnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.37_x64-setup.exe"
     }
   }
 }
