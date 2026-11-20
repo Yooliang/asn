@@ -339,7 +339,7 @@ export async function localSignPublish(opts, deps) {
       const args = ['site', 'release', '--version', rec.version, '--date', rec.date, '--commit', rec.commit,
         ...rec.items.flatMap(i => ['--item', i]), ...rec.platforms.flatMap(p => ['--platform', p])]
       const r = await asnCli(args)
-      if (r?.status !== 0) bad(`asn-cli site release 失敗（${asnCliFail(r)}）`)
+      if (r?.status !== 0) { log(`asn-cli site release 原文：${asnCliFail(r)}`); bad(`asn-cli site release 失敗（結束碼 ${r?.status}，原文見發版機器終端機）`) }
       S.record = rec
     })
 
@@ -347,7 +347,7 @@ export async function localSignPublish(opts, deps) {
     await step(11, '貼群組', async () => {
       const text = `【發版完成】v${version}：安裝檔已發 GitHub Release、官網已部署並線上核對通過、官網版本紀錄已寫入（平台：${S.record.platforms.join('、')}）。commit ${S.record.commit}。接著提交兩個網站檔回 main。`
       const r = await asnCli(['send', '--room', room, '--body', text])
-      if (r?.status !== 0) bad(`貼群組失敗（${asnCliFail(r)}）`)
+      if (r?.status !== 0) { log(`貼群組 asn-cli 原文：${asnCliFail(r)}`); bad(`貼群組失敗（結束碼 ${r?.status}）`) }
     })
 
     // ---- 12 提交回 main
