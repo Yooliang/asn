@@ -126,7 +126,7 @@
               </div>
               <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
               <p class="m-rooms-note" v-if="roomsNote" role="status">{{ roomsNote }}</p>
-              <button class="m-rooms-retry" type="button" v-if="roomsErr" @click="refreshRooms()">重試</button>
+              <button class="rooms-retry" type="button" v-if="roomsErr" @click="refreshRooms()">重試</button>
               <div class="m-group m-rooms" v-if="roomRows.length">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
                   <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）

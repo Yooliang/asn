@@ -57,3 +57,15 @@ test('#1764 失敗提示只說發生什麼：沒有錯誤碼、內部名稱，�
   assert.equal(ROOM_LOAD_FAIL_TEXT, '群組暫時讀不到。')
   assert.ok(!/[A-Za-z_]/.test(ROOM_LOAD_FAIL_TEXT))
 })
+
+test('#1764 重試鈕：電腦與手機同一個 class、同一條樣式（一份畫面一份樣式）', () => {
+  const cls = f => [...html(f).matchAll(/<button class="([^"]+)"[^>]*@click="refreshRooms\(\)"/g)].map(m => m[1])
+  assert.deepEqual(cls('m.html'), ['rooms-retry'], '手機的重試鈕')
+  assert.deepEqual(cls('list.html'), ['rooms-retry'], '電腦的重試鈕')
+  // 樣式只准寫一次，而且寫在兩邊都載入的樣式檔
+  const sheets = fs.readdirSync(new URL('../ui/', import.meta.url)).filter(f => f.endsWith('.css'))
+  const hits = sheets.flatMap(f => [...html(f).matchAll(/(^|[\s,}])\.rooms-retry\b[^{]*\{/g)].map(() => f))
+  assert.deepEqual(hits, ['group.css'], `重試鈕的樣式要只寫在 group.css 一處：${hits}`)
+  const links = f => [...html(f).matchAll(/href="([^"]+\.css)"/g)].map(m => m[1])
+  for (const f of ['m.html', 'list.html']) assert.ok(links(f).includes('group.css'), `${f} 要載入 group.css`)
+})
