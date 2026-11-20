@@ -118,8 +118,17 @@ export function evaluate({ title, body, headRef, labels = [], files = [], added 
   return { pass: errors.length === 0, lines, errors }
 }
 
-function git(args) {
-  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+// core.quotePath=false：不加的話，git 會把中文檔名印成 "docs/\345\276…"（加引號、轉八進位），
+// isDocOrCi／isTestPath 認不出來，只改中文檔名文件的 PR 貼「免檢查表」會被誤擋。
+function git(args, cwd) {
+  return execFileSync('git', ['-c', 'core.quotePath=false', ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd })
+}
+
+/** 取 base...HEAD 改到的檔名與新增行（檔名保留原字，不轉義） */
+export function changedFiles(base, cwd) {
+  const files = git(['diff', '--name-only', `${base}...HEAD`], cwd).split(/\r?\n/).filter(Boolean)
+  const added = addedLines(git(['diff', '-U0', '--no-color', `${base}...HEAD`], cwd))
+  return { files, added }
 }
 
 function main() {
@@ -130,8 +139,7 @@ function main() {
   const base = `origin/${pr.base.ref}`
   let files = [], added = new Map()
   try {
-    files = git(['diff', '--name-only', `${base}...HEAD`]).split(/\r?\n/).filter(Boolean)
-    added = addedLines(git(['diff', '-U0', '--no-color', `${base}...HEAD`]))
+    ;({ files, added } = changedFiles(base))
   } catch (e) {
     console.log(`::warning::取不到改動的檔案清單（${String(e.message).split('\n')[0]}），豁免與復發檢查可能不準`)
   }
