@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/wezterm-build.yml'
       - '.github/scripts/wezterm-*.sh'
+      - 'patches/wezterm/**'
   workflow_dispatch:
 
 permissions:
