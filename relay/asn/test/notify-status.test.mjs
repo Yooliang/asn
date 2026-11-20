@@ -23,7 +23,7 @@ test('guard 失敗：發版未開始（auto 不影響，下游全 skipped 也一
   const b = notifyStatus({ guardResult: 'failure', auto: true, results: Object.fromEntries(JOBS.map(j => [j, 'skipped'])) })
   has(b, '【發版未開始】')
   lacks(b, '發版異常', '略過')
-  has(notifyStatus({ guardResult: 'failure', guardStep: '版本檔一致' }), '卡在：版本檔一致')
+  has(notifyStatus({ guardResult: 'failure', guardStep: '標籤與版本檔' }), '卡在：標籤與版本檔')
 })
 
 test('guard 成功、auto=false：發版略過；與 guard 失敗靠 guardResult 區分', () => {
@@ -176,4 +176,37 @@ test('#1926 一審：連結只收本 repo 的 Actions 執行頁；步驟名只�
   has(notifyStatus({ ...base, runUrl: 'https://github.com/Yooliang/asn/actions/runs/123' }), 'https://github.com/Yooliang/asn/actions/runs/123')
   for (const s of ['@someone 看這裡', '[點我](https://x.example)', 'C:/Users/x', '版本檔不一致\n另一行', 'Cargo.lock 版本']) lacks(notifyStatus({ guardResult: 'failure', guardStep: s }), '卡在')
   for (const s of GUARD_STEPS) has(notifyStatus({ guardResult: 'failure', guardStep: s }), '卡在：' + s)
+})
+
+// ---- 只接電腦版與官網（#1892 拆分後）：jobs 只傳實際存在的 job，文字不提 Play ----
+const DESK = ['desktop', 'attest', 'site-draft']
+const dok = Object.fromEntries(DESK.map(j => [j, 'success']))
+const d = (patch = {}, extra = {}) => notifyStatus({ guardResult: 'success', auto: true, results: { ...dok, ...patch }, jobs: DESK, version: '0.2.37', runUrl: RUN, ...extra })
+
+test('只有電腦版 job：全成功 → CI 完成，不提 Play；沒傳 jobs 時仍是原本含 Play 的文字', () => {
+  const x = d()
+  has(x, '【CI 完成】', '未簽章安裝檔已就緒，尚未上線', '14 天內要簽')
+  lacks(x, 'Play', 'Android', '發版異常', '不明的略過')
+  assert.equal(x.level, 'success')
+  has(n(), 'Play internal')
+})
+
+test('只有電腦版 job：desktop 失敗、attest 連帶略過 → 電腦版失敗，不提 Play；site-draft 失敗；取消', () => {
+  const a = d({ desktop: 'failure', attest: 'skipped' })
+  has(a, '【發版失敗】', '電腦版失敗', '電腦版建置與測試')
+  lacks(a, 'Play', '發版異常', '不明的略過')
+  const b = d({ 'site-draft': 'failure' })
+  has(b, '【發版部分完成】', '電腦版就緒', '官網紀錄草稿沒產出', '--items-file')
+  lacks(b, 'Play')
+  const c = d({ attest: 'failure' })
+  has(c, '電腦版失敗', '安裝檔來源證明'); lacks(c, 'Play')
+  const e = d({ desktop: 'failure', attest: 'skipped', 'site-draft': 'failure' })
+  has(e, '電腦版失敗', '另外：官網紀錄草稿也沒產出'); lacks(e, 'Play')
+  const f = d({ desktop: 'cancelled', attest: 'skipped' })
+  has(f, '【發版中止】'); lacks(f, 'Play')
+})
+
+test('只有電腦版 job：沒傳的 Play job 不算不明的略過；但電腦版 job 無故略過仍報異常', () => {
+  lacks(d(), '異常')
+  has(d({ 'site-draft': 'skipped' }), '【發版異常】', '官網紀錄草稿')
 })
