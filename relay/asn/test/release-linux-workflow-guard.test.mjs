@@ -205,3 +205,85 @@ test('11 測試全跑、不略過：npm test、test:rust、金鑰庫、e2e、冒
 test('12 多行 run 都以 set -euo pipefail 開頭：壞例子會紅', () => {
   assert.ok(flagged(mutate('          set -euo pipefail\n          npm ci', '          npm ci'), /set -euo pipefail 開頭/))
 })
+
+
+// #1892 守門缺口：run: 區塊不得內插 ${{ }}（外部字串一律經 env:）；不准 || true、set +e、continue-on-error。
+// 唯一例外（整行精確相等才放行，附理由與至少命中次數）：
+const RUN_ALLOW = [
+  { line: `ids=$(printf '%s\\n' "$all" | grep -vx "$RUN_ID" | grep -v '^$' || true)`, min: 1, why: '取「其他發版 run 編號」：grep 沒找到（＝沒有別的 run）回 1 是正常，不該讓 guard 紅' },
+]
+const runBodies = raw => {
+  // 不剝註解：Actions 連 shell 註解裡的 ${{ }} 也會展開，「空白＋#」之後的東西正是要守的地方（整行 YAML 註解不會落在 run 區塊的縮排內，不受影響）
+  const lines = raw.replace(/\r\n/g, '\n').split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)(- )?run:[ \t]*(.*)$/.exec(lines[i])
+    if (!m) continue
+    // 區塊純量標頭：| 或 >，可帶縮排指示符（1～9）與保留記號，後面可接 YAML 註解（|2、|-、>+ 都算）
+    if (!/^[|>](?:[1-9][+-]?|[+-][1-9]?)?(?:\s+#.*)?$/.test(m[3].trim())) { out.push([m[3]]); continue }
+    const keyCol = m[1].length + (m[2] ? 2 : 0)
+    const body = []
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '') { body.push(''); continue }
+      if (lines[j].search(/\S/) <= keyCol) break
+      body.push(lines[j])
+    }
+    out.push(body)
+  }
+  return out
+}
+/** 回違規訊息陣列，空陣列＝通過 */
+const runProblems = raw => {
+  const bad = []
+  const bodies = runBodies(raw)
+  if (bodies.length < 15) bad.push(`run 區塊命中數太少：${bodies.length}`)
+  const hits = new Map(RUN_ALLOW.map(a => [a.line, 0]))
+  for (const body of bodies) {
+    const kept = []
+    for (const l of body) {
+      const t = l.trim()
+      if (hits.has(t)) { hits.set(t, hits.get(t) + 1); continue }
+      kept.push(l)
+    }
+    const text = kept.join('\n')
+    const at = text.indexOf('${{')
+    if (at >= 0) bad.push(`run 內不准 \${{ }}（改經 env:）：${text.slice(Math.max(0, at - 20), at + 40).replace(/\n/g, ' ')}`)
+    if (/\|\|\s*true\b/.test(text)) bad.push('不准 || true（含 || 後換行再接 true）')
+    if (/\bset\s+(?:-\w+\s+)*\+[a-z]*e[a-z]*\b/.test(text) || /\bset\s+\+o\s+errexit\b/.test(text)) bad.push('不准 set +e／set +eu／set +o errexit')
+  }
+  for (const a of RUN_ALLOW) if (hits.get(a.line) < a.min) bad.push(`白名單「${a.line.slice(0, 40)}」命中 ${hits.get(a.line)} 次，少於 ${a.min}（${a.why}）`)
+  if (/continue-on-error/.test(strip(raw))) bad.push('不准 continue-on-error')
+  return bad
+}
+
+test('#1892 run: 區塊不內插 ${{ }}、不用 || true／set +e／continue-on-error（白名單：guard 取其他 run 編號那行，至少命中 1 次；run 區塊至少 15 個）', () => {
+  const W = wf
+  assert.deepEqual(runProblems(W), [])
+  assert.ok(runBodies(W).length >= 15, 'run 區塊命中數太少')
+  assert.ok([...strip(W).matchAll(/^\s+\w+:\s*\$\{\{/gm)].length >= 15, 'env／with 的 ${{ }} 至少 15 處（確認外部值確實走 env:）')
+})
+
+test('#1892 壞例子：run 內加 ${{ }}、|| true、set +e、continue-on-error 會紅；白名單那行被改掉或拿掉會紅；env: 與註解裡的不算', () => {
+  const W = wf
+  const has = (src, re) => runProblems(src).some(m => re.test(m))
+  const sub = (from, to) => { assert.ok(W.includes(from), `壞例子替換目標不存在：${from}`); return W.replace(from, () => to) }
+  const anchor = '          set -euo pipefail\n'
+  assert.ok(has(sub(anchor, `${anchor}          echo "\${{ github.ref_name }}"\n`), /\$\{\{/))
+  assert.ok(has(sub(anchor, `${anchor}          npm test || true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          npm test ||true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          set +e\n`), /set \+e/))
+  assert.ok(has(sub('    timeout-minutes:', '    continue-on-error: true\n    timeout-minutes:'), /continue-on-error/))
+  // 白名單是整行相等：多接一段、換成別的 || true、拿掉 || true 都不放行
+  assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^$' || true); npm test || true"), /\|\| true/))
+  assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^x$' || true)"), /\|\| true/))
+  assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^$')"), /白名單/))
+  // 二審補：run 內文「空白＋#」之後藏的東西、|| 換行接 true、set +eu／set +o errexit、|2 縮排指示符都要抓到
+  assert.ok(has(sub(anchor, `${anchor}          echo "x #"; echo \${{ github.ref_name }}\n`), /\$\{\{/))
+  assert.ok(has(sub(anchor, `${anchor}          echo "b #1"; npm test || true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          npm test ||\n            true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          set +eu\n`), /set \+e/))
+  assert.ok(has(sub(anchor, `${anchor}          set +o errexit\n`), /set \+e/))
+  assert.equal(runBodies(`jobs:\n  a:\n    steps:\n      - run: |2\n            echo hi\n`).length, 1, '|2 縮排指示符的 run 區塊要抓得到')
+  // 不誤傷：註解裡提到不算
+  assert.deepEqual(runProblems(`${W}\n# echo "\${{ github.ref_name }}" || true; set +e; continue-on-error\n`), [])
+})
