@@ -48,6 +48,12 @@
 5. 本機腳本依序做：起手檢查（非淺複製、工作樹只有兩個網站檔可以有改動、HEAD＝標籤）→ 來源綁定（標籤在 main 上、workflow 檔與 main 相同、run 與 artifact 核對）→ 下載到全新空資料夾並核對 sha256、驗來源證明 → 本機簽章（金鑰只在發版機器，腳本不讀不印）→ 驗簽＋反向驗證 → 產 latest.json 與 index.html → 版本不退 →（以上全過才）寫入網站檔並發 GitHub Release → firebase 部署（版本固定）→ 線上核對（重試 10 次、間隔 15 秒）→ 官網版本紀錄 → 貼群組 → 提交兩個網站檔回 main。失敗就停並貼群組「卡在第 N 步、已完成：…」。
 6. 同一標籤有多個成功的 run 時加 `--run-id`；Play 有沒有上，由腳本看該 run 最新一次嘗試的 `android-upload`，要強制寫 Play 用 `--with-play yes`；官網紀錄草稿沒產出、或要改字，用 `--items-file`（仍過同一組檢查）。
 
+**Linux 版（電腦版發好之後）**
+- 前提：同一版的電腦版已用 `v<版本>` 發好（Release 已公開、官網 latest.json 已是這一版）。在 main 上打 `linux-v<版本>` 標籤並推上去，CI（`asn-release-linux.yml`）建 .deb 與 .AppImage（artifact `asn-linux-unsigned`，保留 14 天）並做來源證明。
+- CI 全綠後，在發版機器（HEAD 要在最新 origin/main、工作樹完全乾淨）跑 `node tools/release/local_sign_publish.mjs --platform linux --tag linux-v<版本> --room <群組代號>`；先加 `--dry-run` 演練：只到簽章與驗簽，產物寫暫存資料夾，不發布。
+- 腳本做的事：同電腦版的來源綁定與簽章前檢查 → 用同一把更新金鑰簽 AppImage → 驗簽＋反向驗證 → 把 deb、AppImage、AppImage.sig **附加**到既有的 `v<版本>` Release（Release 已公開是預期；同名檔已存在就停、不覆蓋）→ latest.json 只新增 `linux-x86_64`（電腦版項不動）、首頁下載區加 Linux 連結 → firebase 部署 → 線上核對 → 提交兩個網站檔回 main。不寫官網版本紀錄（電腦版已寫）。
+- 檔名固定 `ASN_<版本>_amd64.AppImage`／`.deb`；官網路徑 `/update/ASN_<版本>_amd64.*` 由 `site/firebase.json` 302 轉到 Release。附加之後才失敗要重跑時，同名檔已存在會被擋：先人工確認 Release 上的檔再決定。
+
 **失敗處理（規格 2.6）**
 - **標籤打了之後要改任何東西，就必須 bump 版本、重打新標籤**（失敗就丟掉版號提交重來）：versionCode 已存在時預檢必然失敗，同一版不能再來。
 - CI 的電腦版建置與官網紀錄草稿可以用 Re-run failed jobs 安全重跑；**Play 上傳不冪等**。Play 失敗後：(1) 到 Play Console 看這個 versionCode 在 internal 軌道是否已存在；(2) 沒有：Re-run failed jobs；(3) 已存在且正確：不重跑，本機用 `--with-play yes`；(4) 已存在但有問題：在發版機器手動 `npm run release:play -- --upload --reissue=N`（N＝2～9），再用 `--with-play yes`。

@@ -6,7 +6,7 @@
     "trailingSlash": false,
     "redirects": [
       {
-        "regex": "^/update/(?P<file>ASN_(?P<ver>\\d+\\.\\d+\\.\\d+)_(?:x64-setup\\.exe(?:\\.sig)?|android\\.apk))$",
+        "regex": "^/update/(?P<file>ASN_(?P<ver>\\d+\\.\\d+\\.\\d+)_(?:x64-setup\\.exe(?:\\.sig)?|android\\.apk|amd64\\.(?:AppImage(?:\\.sig)?|deb)))$",
         "destination": "https://github.com/Yooliang/asn/releases/download/v:ver/:file",
         "type": 302
       }
