@@ -114,6 +114,7 @@ function makeRedactor(values) {
 export function putBody(existing) {
   const body = { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }
   if (!existing) return body
+  if (typeof existing.can_admins_bypass === 'boolean') body.can_admins_bypass = existing.can_admins_bypass
   const rules = Array.isArray(existing.protection_rules) ? existing.protection_rules : []
   const wait = rules.find(r => r.type === 'wait_timer')
   if (wait && Number.isInteger(wait.wait_timer)) body.wait_timer = wait.wait_timer

@@ -23,7 +23,7 @@ function setup(files = goodFiles(), opts = {}) {
     const j = args.join(' ')
     if (j === 'auth status') return ''
     if (j.endsWith('--jq .permissions.admin')) return 'true\n'
-    if (/^api repos\/[^/]+\/[^/]+\/environments\/release$/.test(j)) { if (opts.envMissing) throw new Error('gh: Not Found (HTTP 404)'); return JSON.stringify(opts.existingEnv ?? {}) }
+    if (/^api repos\/[^/]+\/[^/]+\/environments\/release$/.test(j)) { if (opts.envMissing) throw new Error('gh: Not Found (HTTP 404)'); if (opts.envError) throw new Error('gh: Internal Server Error (HTTP 500)'); return JSON.stringify(opts.existingEnv ?? {}) }
     if (args[0] === 'secret' && args[1] === 'set') {
       if (opts.failOn === args[2]) throw new Error(`HTTP 500 ${opts.leak ?? ''}`)
       written.add(args[2]); return ''
@@ -153,6 +153,7 @@ test('--setup-env：v* 規則已存在就不重加；ruleset 沒設警告並結�
 
 const EXISTING_ENV = {
   name: 'release',
+  can_admins_bypass: false,
   protection_rules: [
     { id: 1, type: 'wait_timer', wait_timer: 30 },
     { id: 2, type: 'required_reviewers', prevent_self_review: true, reviewers: [{ type: 'User', reviewer: { id: 4242, login: 'x' } }, { type: 'Team', reviewer: { id: 77, slug: 't' } }] },
@@ -166,6 +167,7 @@ test('#1925 --setup-env：environment 已存在就先讀、把原本的等待時
   const put = s.calls.find(c => c.args.includes('PUT'))
   assert.deepEqual(JSON.parse(put.input), {
     deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    can_admins_bypass: false,
     wait_timer: 30,
     reviewers: [{ type: 'User', id: 4242 }, { type: 'Team', id: 77 }],
     prevent_self_review: true,
@@ -184,4 +186,11 @@ test('#1925 --setup-env：environment 還不存在就只帶部署規則（不新
 test('#1925 --setup-env 和 --only／輸入檔旗標一起給：報用法錯，不默默忽略', () => {
   assert.equal(setup().exec(['--setup-env', '--only', 'ASN_PLAY_UPLOAD_JKS']), 2)
   assert.equal(setup().exec(['--setup-env', '--upload-jks', '/k/upload.jks']), 2)
+})
+
+test('#1925 二審：讀 environment 現況回 500（不是 404）就中止，不 PUT、不加規則、結束碼 1', () => {
+  const s = setup(goodFiles(), { envError: true })
+  assert.equal(s.exec(['--setup-env']), 1)
+  assert.equal(s.calls.filter(c => c.args.includes('-X')).length, 0)
+  assert.match(s.out.join('\n'), /中止/)
 })
