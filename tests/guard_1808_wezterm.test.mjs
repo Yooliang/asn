@@ -27,7 +27,11 @@ test('#1257 Windows 附的 WezTerm 釘在本 repo 自建的 release（asn 後綴
   assert.equal(b.signer_workflow, 'Yooliang/asn/.github/workflows/wezterm-build.yml')
   // 上游官方壓縮檔的雜湊不能被當成 Windows 附檔的雜湊
   assert.notEqual(b.sha256, PINS.windows_zip_sha256)
-  assert.match(BUILD_WF, new RegExp(`RELEASE_TAG: '${b.tag.replace(/\./g, '\\.')}'`), '自建 workflow 的 release tag 要和釘的一致')
+  // workflow 換新後綴要先進 main 才能發佈，pins 等新 release 發出後才跟上：允許 pins 落後剛好一號（細節與反例在 relay/asn/test/wezterm-bundle.test.mjs）
+  const rel = /^\s*RELEASE_TAG: 'wezterm-(.+)-asn\.(\d+)'/m.exec(BUILD_WF)
+  const pin = /^wezterm-(.+)-asn\.(\d+)$/.exec(b.tag)
+  assert.ok(rel && pin && rel[1] === pin[1], '自建 workflow 的 release tag 要和釘的是同一個上游版本')
+  assert.ok([0, 1].includes(Number(rel[2]) - Number(pin[2])), `釘的 ${b.tag} 要等於 workflow 的 RELEASE_TAG，或剛好落後一號`)
 })
 
 test('#1257 取檔腳本先驗來源證明、再驗雜湊與大小，且不出現上游官方網址、不能略過證明', () => {

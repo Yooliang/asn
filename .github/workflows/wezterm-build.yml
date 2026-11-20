@@ -23,8 +23,9 @@ env:
   PATCH_SHA: '29d01fc8e53f4d0fe0c1cf4f31b64b49358a2ff8'
   # 1.76.0：tag 自帶的 Cargo.lock 裡 time 0.3.31 在更新的 Rust 編不過
   RUST_VERSION: '1.76.0'
-  ASN_SUFFIX: 'asn.1'
-  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.1'
+  # 換新後綴＝發新的 release（同一個 tag 不重建）；pins 要等新 release 發出後再跟上（見 wezterm-bundle.test.mjs）
+  ASN_SUFFIX: 'asn.2'
+  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.2'
   # 上游官方 Windows 壓縮檔（用來核對四個現成的二進位檔）；與 relay/asn/scripts/wezterm-pins.json 的值相同
   OFFICIAL_ZIP_SHA256: '57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4'
   OFFICIAL_ZIP_SIZE: '66162319'

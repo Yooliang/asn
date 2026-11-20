@@ -20,16 +20,49 @@ test('版本與雜湊寫死：20240203 穩定版，雜湊是 64 位十六進位'
 
 test('Windows 附的是本 repo 自建的 release（上游同版本＋#7706），不是上游官方網址', () => {
   assert.equal(WEZTERM_BUNDLE_REPO, 'Yooliang/asn')
-  assert.equal(WEZTERM_BUNDLE_TAG, `wezterm-${WEZTERM_VERSION}-asn.1`)
+  const sfx = /-(asn\.\d+)$/.exec(WEZTERM_BUNDLE_TAG)?.[1]
+  assert.ok(sfx, `pins 的 tag 要是 wezterm-<版本>-asn.N：${WEZTERM_BUNDLE_TAG}`)
+  assert.equal(WEZTERM_BUNDLE_TAG, `wezterm-${WEZTERM_VERSION}-${sfx}`)
   assert.equal(WEZTERM_SIGNER_WORKFLOW, 'Yooliang/asn/.github/workflows/wezterm-build.yml')
-  assert.equal(WEZTERM_ZIP_URL, `https://github.com/Yooliang/asn/releases/download/${WEZTERM_BUNDLE_TAG}/WezTerm-windows-${WEZTERM_VERSION}-asn.1.zip`)
+  assert.equal(WEZTERM_ZIP_URL, `https://github.com/Yooliang/asn/releases/download/${WEZTERM_BUNDLE_TAG}/WezTerm-windows-${WEZTERM_VERSION}-${sfx}.zip`)
   assert.ok(Number.isInteger(WEZTERM_ZIP_SIZE) && WEZTERM_ZIP_SIZE > 0)
   const src = read('scripts', 'fetch-wezterm.mjs')
   assert.ok(!src.includes('github.com/wezterm/wezterm'), 'Windows 取檔不能再出現上游官方下載網址（不退回上游）')
   assert.ok(!/ASN_SKIP_ATTEST|skipAttest/i.test(src), '不提供略過來源證明的開關')
-  // tag 與 workflow 的 RELEASE_TAG 一致
+  // pins 與 workflow 的關係：workflow 換新後綴要先進 main 才能發佈，新 release 的雜湊出來後 pins 才跟上，
+  // 所以中間允許「pins 落後 workflow 剛好一號」；其餘（pins 超前、落後兩號以上、亂寫）都擋
   const wf = read('..', '..', '.github', 'workflows', 'wezterm-build.yml')
-  assert.match(wf, new RegExp(`RELEASE_TAG: '${WEZTERM_BUNDLE_TAG.replace(/\./g, '\\.')}'`))
+  assert.ok(pinsVsWorkflowOk(WEZTERM_BUNDLE_TAG, wf), `pins 的 ${WEZTERM_BUNDLE_TAG} 和 workflow 的 RELEASE_TAG 對不上`)
+})
+
+// workflow 的 ASN_SUFFIX 與 RELEASE_TAG 自己要一致；pins 的後綴等於它，或剛好小一號
+function pinsVsWorkflowOk(pinsTag, wf) {
+  const suffix = /^\s*ASN_SUFFIX: 'asn\.(\d+)'/m.exec(wf)?.[1]
+  const rel = /^\s*RELEASE_TAG: '([^']+)'/m.exec(wf)?.[1]
+  const up = /^\s*UPSTREAM_TAG: '([^']+)'/m.exec(wf)?.[1]
+  if (!suffix || !rel || !up || rel !== `wezterm-${up}-asn.${suffix}`) return false
+  const m = /^wezterm-(.+)-asn\.(\d+)$/.exec(pinsTag)
+  if (!m || m[1] !== up) return false
+  const p = Number(m[2]), w = Number(suffix)
+  return p === w || p === w - 1
+}
+
+test('#1896 pins 與 workflow 後綴的關係：相等或落後一號才放行', () => {
+  const wf = n => `  UPSTREAM_TAG: '20240203-110809-5046fc22'\n  ASN_SUFFIX: 'asn.${n}'\n  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.${n}'\n`
+  const t = n => `wezterm-20240203-110809-5046fc22-asn.${n}`
+  assert.ok(pinsVsWorkflowOk(t(2), wf(2)), '相等')
+  assert.ok(pinsVsWorkflowOk(t(1), wf(2)), '落後一號（新 release 還沒發）')
+  assert.ok(!pinsVsWorkflowOk(t(3), wf(2)), 'pins 不能超前')
+  assert.ok(!pinsVsWorkflowOk(t(1), wf(3)), '不能落後兩號')
+  assert.ok(!pinsVsWorkflowOk(t(2), wf(2).replace("asn.2'\n", "asn.9'\n")), 'workflow 自己的 ASN_SUFFIX 與 RELEASE_TAG 要一致')
+  assert.ok(!pinsVsWorkflowOk('wezterm-20230101-asn.2', wf(2)), '上游版本要一致')
+})
+
+test('#1896 發佈前檢查不寫死後綴：wezterm-release-prepare.sh 用 ${ASN_SUFFIX}', () => {
+  const s = read('..', '..', '.github', 'scripts', 'wezterm-release-prepare.sh')
+  assert.ok(!/-asn\.\d/.test(s), '不能寫死 -asn.N')
+  assert.match(s, /wezterm-\$\{UPSTREAM_TAG\}-\$\{ASN_SUFFIX\}\.\$\{l\}\.tar\.xz/)
+  assert.match(s, /"\$\{ASN_SUFFIX:\?\}"/, '要求 ASN_SUFFIX 必須有值')
 })
 
 test('先驗來源證明、綁本 repo＋wezterm-build.yml＋main；gh 不在或驗不過都丟錯', () => {
