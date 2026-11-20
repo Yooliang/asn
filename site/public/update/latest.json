@@ -1,15 +1,11 @@
 {
-  "version": "0.2.38",
-  "notes": "- 修正：好幾個視窗同時讀不到畫面時，終端服務會馬上重新檢查，不用等到下一輪才發現出事。（#1887、#1913）",
-  "pub_date": "2026-11-20T12:06:41.750Z",
+  "version": "0.2.39",
+  "notes": "- 修正：切換 Claude 帳號後會讀回確認，沒有真的換過去就直接說「切換沒有成功」；登入的帳號一變，「使用中」立刻跟上，讀不到時也會寫出讀不到。（#1880、#1927）\n- 修正（電腦版與 Linux）：開新夥伴的選項卡，較長的說明文字不再撐出畫面（手機版 0.2.38 已有）。（#1951）",
+  "pub_date": "2026-11-20T15:48:43.519Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjhkb2xNSEpzTEc3RURtbitxSlIxUjZ3MUlaK0w3T0RwdnlKc1NlM3drcS8xSmhXWFJFdi8yUUlFcjRMam1LVTUrSEVGZTZRUnFVR29BbUVCYjdaaFE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTc2NDAxCWZpbGU6QVNOXzAuMi4zOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM4Cjllb3FiRkJ2MTMvL08zOHZ3bExNR0lsV1pYNzFZWVAybGV6dDRTdmhBcDk5MVJ0WEV4RHZpSjA1TjFQTDNIYjFxZGowQ1pHUjY2c3dtS3M4ZnZqSEJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.38_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNhYmk3eDE0MHpjZjZsMFUvRFVKOXg2WG1DWjg2VVl5c1hMK1VmSll1aTlBaWNxaFBLMXN0eURUeVEwMURQZkVRcDhmelk3YmtUdTBhV0pHMEkwT0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTgzNTk1CWZpbGU6QVNOXzAuMi4zOF9hbWQ2NC5BcHBJbWFnZQo2NUU1Y0FSVk16NG9uV0txVTY2WVJtYXNGUlBZc1pUeXo4SjBNaGtKTDIxeVllY0F0MGJsOHZqUEx4NVB4cmRlVldySWV1NGhqbHMyNmJ4VHNlUlRDdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.38_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNiTnM5aWkyMldhSXlJS2JlanZyaWtEL0dlUDZnTkozTFBENC9vYWg3MklPVTJJZGlJak9PWjVwa1ZWS1E5czhQc3BIeWwwTXh4bnpBbklPOW0rMkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTg5NzIzCWZpbGU6QVNOXzAuMi4zOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM5CjBQbFIraHZXdm1WOENGSGZLT29NTkZyMW9Fd0lxMXFuZHBNTTAxd1VOZ3pUdUcwVDJWd1R4SUhIekVmdXJXWWh6RHRoOG8zTzZyWmJNMldSbitMVUF3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.39_x64-setup.exe"
     }
   }
 }
