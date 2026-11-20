@@ -10,6 +10,9 @@
 - 不碰 `~/.asn` 底下內容（金鑰在那）。不用整批 taskkill，只關自己記下 PID 的程序。倉庫改成公開、刪資料這類不可回復的事，要擁有者明說才做。
 
 ## 二、發版流程（每一版都這樣）
+
+> **已過期，以下一節「自動發版（0.2.37 起）」為準。**下面這份是舊流程，只留作歷史與備援對照。
+
 在 `relay/asn` 底下：
 1. 合併已核可的 PR（`git fetch origin pull/N/head:prN`，核對 SHA，`git merge --no-ff`），跑 `npm test`（前端）與 `cd src-tauri && cargo test --lib`（Rust）。前端有 2 項「缺口」測試（Codex／pi 能關閉）一直是紅的，是刻意標記的缺口，不是你弄壞的。
 2. `npm run release -- --notes "<中文更新說明>"`（桌面版；會自動升版號、打包、簽章）。如果手機端有改，再跑 `npm run release:android -- --notes "…"` 與 `npm run release:play -- --upload`（安卓需要環境變數：`JAVA_HOME`＝Android Studio 的 jbr、`ANDROID_HOME`＝Sdk、`NDK_HOME`＝Sdk\ndk\28.2.13676358）。
@@ -33,6 +36,29 @@
   - 跑 `release:play` 前先 `git rev-parse HEAD`，確認等於發版提交；不是就先切回去再建。
   - 發版分支合回 main 排在 Play 傳完之後，不要在同一個工作樹搶先切走。
   - Play 丟背景跑時把輸出寫進檔案（`> play.log 2>&1`）；外層被停掉時才查得到建到哪、有沒有產出 AAB。
+
+## 自動發版（0.2.37 起）
+規格在 #1892。一句話：**打標籤 → CI 建置 → 發版機器跑一支本機腳本。**發版只建一次：正式建置（含冒煙、npm test）在 CI 做完，之後只簽章、驗簽、發布，不再重建；本機腳本全部檢查都過之前，不推 main、不發 Release、不部署官網。
+
+**順序**
+1. 人先做完：開發紀律第八節（246 個截圖情境、Android 實機）、候選包與兩審、改好版本檔與 CHANGELOG、合進 main。
+2. 在 main 上打 `v<版本>` 標籤並推上去（只能打在 main；走候選分支發版的情況改走手動備援）。
+3. CI（`asn-release.yml`）自動跑：標籤檢查 → Play 版號預檢 → 電腦版建置與測試（未簽章安裝檔，保留 14 天）→ 來源證明 → Android AAB 建置並上傳 Play internal → 官網紀錄草稿。全程不簽章、不發 Release、不部署官網。結果由通知 job 在「發版紀錄」issue 留一行。
+4. CI 全綠後（**14 天內**），在發版機器跑 `node tools/release/local_sign_publish.mjs --tag v<版本> --room <群組代號>`（群組代號也可放環境變數 `ASN_RELEASE_ROOM`）。第一次先加 `--dry-run` 演練：只跑到「版本不退」，全部寫暫存資料夾，不發布、不貼群組。
+5. 本機腳本依序做：起手檢查（非淺複製、工作樹只有兩個網站檔可以有改動、HEAD＝標籤）→ 來源綁定（標籤在 main 上、workflow 檔與 main 相同、run 與 artifact 核對）→ 下載到全新空資料夾並核對 sha256、驗來源證明 → 本機簽章（金鑰只在發版機器，腳本不讀不印）→ 驗簽＋反向驗證 → 產 latest.json 與 index.html → 版本不退 →（以上全過才）寫入網站檔並發 GitHub Release → firebase 部署（版本固定）→ 線上核對（重試 10 次、間隔 15 秒）→ 官網版本紀錄 → 貼群組 → 提交兩個網站檔回 main。失敗就停並貼群組「卡在第 N 步、已完成：…」。
+6. 同一標籤有多個成功的 run 時加 `--run-id`；Play 有沒有上，由腳本看該 run 最新一次嘗試的 `android-upload`，要強制寫 Play 用 `--with-play yes`；官網紀錄草稿沒產出、或要改字，用 `--items-file`（仍過同一組檢查）。
+
+**失敗處理（規格 2.6）**
+- **標籤打了之後要改任何東西，就必須 bump 版本、重打新標籤**（失敗就丟掉版號提交重來）：versionCode 已存在時預檢必然失敗，同一版不能再來。
+- CI 的電腦版建置與官網紀錄草稿可以用 Re-run failed jobs 安全重跑；**Play 上傳不冪等**。Play 失敗後：(1) 到 Play Console 看這個 versionCode 在 internal 軌道是否已存在；(2) 沒有：Re-run failed jobs；(3) 已存在且正確：不重跑，本機用 `--with-play yes`；(4) 已存在但有問題：在發版機器手動 `npm run release:play -- --upload --reissue=N`（N＝2～9），再用 `--with-play yes`。
+- 本機腳本每一步可重跑。Release 發了、官網還沒部署就失敗：直接重跑（發 Release 的程式重跑安全）。部署以後才失敗：重跑會被「版本不退」擋下，要加 `--same-version`。
+- artifact 只留 14 天，過期就重跑 CI，或 bump 版本重打標籤。
+- 提交回 main 時 origin/main 已經有新提交：腳本不推、不 rebase、不強推，由人處理。
+
+**備援切換（`ASN_RELEASE_AUTO`）**
+- repo variable `ASN_RELEASE_AUTO`：**只有值恰為 `true` 才是自動**；未設定、空字串、`false`、`TRUE` 都視為手動。
+- 手動備援：把它設成 `false`，推標籤只會跑標籤檢查與通知，由人照上面「二、發版流程」的舊腳本（`npm run release` 等，仍保留）跑。**手動期間務必關開關**，否則 CI 也會上傳 Play。
+- 簽章金鑰只有發版機器那一把。firebase-tools 版本寫死在 `tools/release/FIREBASE_TOOLS_VERSION`（只用發布超過 14 天的版本，換版時重查並更新檔內註明）。
 
 ## 三、這一輪做完的（0.1.80～0.1.92）
 手機遠端確認送字（#317/#318，含撤回、收確認列、防重送）、終端放進名單與對話分頁（#331）、開新夥伴兩頁流程與「運行」四選一（內建通道 ＞ 經 pi ＞ ASN 開的終端 ＞ 自己開的 CLI，自己開的永遠不能選）、經 pi 帶提供者與模型、pi 模型清單後端、額度一鍵接上 Claude 狀態列（#228）、活躍度分組（#347）、頭像並排廠商小圖第一期（#356）、納入管理進對話窗「管理」選單、ACP 權限 `write_dirs`、收信更耐壞（#375/#376）、README 支援表。
