@@ -2590,16 +2590,6 @@ async fn up1828_start(name: &str, extra: impl FnOnce(&EH, &str)) -> (EH, std::pa
 }
 
 #[tokio::test]
-async fn 單號1828_等補送的期間目標夥伴已經在群組回了_不補送_記一行() {
-    let (mut h, mark) = up1828_start("up1828a.txt", |h, first| room_with_followups(h, first, vec![(3, "W~Gemini", "我手動回了：這件事這樣處理", Value::Null)])).await;
-    tick_wait(&mut h, "記下不補送", |h| h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent") && l.contains("已經在群組發過言"))).await;
-    tick_for(&mut h, 1500).await;
-    assert_eq!(mark_lines(&mark), 2, "只有原本與工作者自己的重試，沒有再補送：{}", h.core.log.recent().join("\n"));
-    assert!(!room_bodies(&h).iter().any(|b| b.contains("收到：") || b.contains("這一輪沒有處理")), "{:?}", room_bodies(&h));
-    assert!(!h.work.path().join("retry-pending.json").exists());
-}
-
-#[tokio::test]
 async fn 單號1828_等補送的期間別人用回覆引用這則回了_不補送() {
     let (mut h, mark) = up1828_start("up1828b.txt", |h, first| room_with_followups(h, first, vec![(3, "W~別的視窗", "這件我來", json!({"seq": 2, "from": "W~W-政策"}))])).await;
     tick_wait(&mut h, "記下不補送", |h| h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent") && l.contains("已經有人回覆這則"))).await;
@@ -2609,19 +2599,19 @@ async fn 單號1828_等補送的期間別人用回覆引用這則回了_不補�
 }
 
 #[tokio::test]
-async fn 單號1828_沒人回覆_只有別人閒聊與收發室自己的說明_照常補送() {
-    let notice = "（收發室）群組訊息 #2 Gemini 收到了，但 Gemini 那邊暫時出錯（502），收發室會自動再試，不用重新點名。";
+async fn 單號1828_沒人引用這則_目標夥伴之後發了別的話_仍然補送() {
     let (mut h, mark) = up1828_start("up1828c.txt", |h, first| {
         room_with_followups(h, first, vec![
-            (3, "W~Gemini", notice, Value::Null),                      // 收發室自己以它的名義貼的過渡說明：不算回覆
-            (4, "W~別的視窗", "另一件事", Value::Null),                // 別人閒聊
-            (5, "W~別的視窗", "回的是別則", json!({"seq": 1, "from": "x"})), // 引用的是別則
+            (3, "W~Gemini", "我手動回了別的事（沒有引用第 2 則）", Value::Null), // 目標夥伴之後發言，但不是回這則
+            (4, "W~別的視窗", "另一件事", Value::Null),
+            (5, "W~別的視窗", "回的是別則", json!({"seq": 1, "from": "x"})),
         ])
     })
     .await;
     tick_wait(&mut h, "補送成功", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
     assert_eq!(mark_lines(&mark), 3, "共送了三次");
-    assert!(!h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent")), "{}", h.core.log.recent().join("\n"));
+    assert!(!h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent")), "{}", h.core.log.recent().join("
+"));
 }
 
 #[tokio::test]
