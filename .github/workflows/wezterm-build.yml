@@ -63,6 +63,15 @@ jobs:
           cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server
       # 診斷 #1318：只為了把崩潰傾印符號化，不發佈、不 attest。
       # PE 時間戳是建置當下的時間，必然和發佈版不同；改比大小與 .text 區段雜湊，一致才拿 PDB 下結論。
+      - name: 上傳 PDB 與重建的 exe（只有符號，給 #1318 符號化崩潰傾印）
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wezterm-mux-server-pdb
+          path: |
+            C:/w/src/target/release/deps/wezterm_mux_server.pdb
+            C:/w/src/target/release/wezterm-mux-server.exe
+          retention-days: 14
       - name: 比對程式碼區段（與發佈版 wezterm-mux-server.exe）
         run: |
           set -euo pipefail
@@ -85,14 +94,6 @@ jobs:
                   name = name.rstrip(b'\0').decode()
                   if name in ('.text', '.rdata', '.pdata'):
                       out.append(f'{name}@{va:#x}:{vsz}:{hashlib.sha256(b[raw:raw + min(vsz, rsz)]).hexdigest()[:16]}')
-              print(p.replace('\', '/').split('/')[-3:], ' '.join(out))
+              print(p.replace(chr(92), '/').split('/')[-3:], ' '.join(out))
           PY
           python "$RUNNER_TEMP/sect.py" "$pub" "$rel/wezterm-mux-server.exe" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: 上傳 PDB 與重建的 exe（只有符號，給 #1318 符號化崩潰傾印）
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: wezterm-mux-server-pdb
-          path: |
-            C:/w/src/target/release/deps/wezterm_mux_server.pdb
-            C:/w/src/target/release/wezterm-mux-server.exe
-          retention-days: 14
