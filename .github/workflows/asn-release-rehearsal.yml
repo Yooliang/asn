@@ -39,7 +39,7 @@ jobs:
 
       - uses: ./.github/actions/asn-node-setup
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
 
@@ -54,6 +54,7 @@ jobs:
         working-directory: relay/asn
         env:
           GH_TOKEN: ${{ github.token }}
+          ASN_SMOKE_SHOTS: ${{ runner.temp }}/asn-smoke-shots
         run: node scripts/release-ci.mjs
 
       - name: 上傳安裝檔與 SHA256SUMS.txt
@@ -72,6 +73,17 @@ jobs:
           path: relay/asn/src-tauri/target/release-ci-debug/*
           if-no-files-found: warn
           retention-days: 14
+          overwrite: true
+
+      # 冒煙失敗時留畫面：只傳截圖 png、固定目錄、保留 7 天
+      - name: 冒煙失敗時上傳截圖
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-rehearsal-smoke-shots-desktop-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/asn-smoke-shots/*.png
+          if-no-files-found: ignore
+          retention-days: 7
           overwrite: true
 
   android:
@@ -96,9 +108,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # 冒煙測試的長名字省略號、版面座標都要靠中文字型量；runner 映像沒有 CJK 字型時長名字不會被截斷、座標也會位移。
+      # 比照 asn-ui-shots.yml：沒有才用共用的 apt-install.sh 補裝 Noto CJK。演練的冒煙是發版關卡，裝不起來就直接紅，不帶著缺字型往下跑
+      - name: 檢查中文字型
+        run: |
+          if fc-list :lang=zh | grep -q .; then
+            echo "已有中文字型：$(fc-list :lang=zh | head -3)"
+          else
+            echo "runner 沒有中文字型，安裝 fonts-noto-cjk"
+            bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends fonts-noto-cjk
+            fc-list :lang=zh | grep -q . || { echo "裝完仍然沒有中文字型" >&2; exit 1; }
+          fi
+
       - uses: ./.github/actions/asn-node-setup
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
         with:
           toolchain: stable
           targets: aarch64-linux-android
@@ -139,11 +163,13 @@ jobs:
       # 腳本會產生「拋棄式」金鑰簽這顆 AAB，所以這顆 AAB 只能拿來看建得出來，不能上傳 Play。冒煙測試照跑。
       - name: 建置 AAB（拋棄式金鑰、不上傳）
         working-directory: relay/asn
+        env:
+          ASN_SMOKE_SHOTS: ${{ runner.temp }}/asn-smoke-shots
         run: node scripts/release-play.mjs
 
       - name: 算 AAB 的 SHA256
         working-directory: relay/asn/src-tauri/target/play
-        run: sha256sum ./*.aab > SHA256SUMS.txt
+        run: sha256sum *.aab > SHA256SUMS.txt
 
       - name: 上傳 AAB 與 SHA256SUMS.txt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -154,6 +180,17 @@ jobs:
             relay/asn/src-tauri/target/play/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+          overwrite: true
+
+      # 冒煙失敗時留畫面：只傳截圖 png、固定目錄、保留 7 天
+      - name: 冒煙失敗時上傳截圖
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-rehearsal-smoke-shots-android-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/asn-smoke-shots/*.png
+          if-no-files-found: ignore
+          retention-days: 7
           overwrite: true
 
       - name: 清掉拋棄式金鑰

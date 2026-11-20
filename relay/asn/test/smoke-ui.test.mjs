@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { motionMedia, BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -451,4 +451,14 @@ test('額度選單（#1512 A）：冒煙用的手機文字和按鈕字，跟電�
   const constOf = name => JSON.parse(rs.match(new RegExp(`pub const ${name}: &str = ("[^"]*");`))[1])
   assert.equal(USAGE_MENU_TEXT, constOf('PHONE_USAGE_TEXT'))
   assert.deepEqual(USAGE_MENU_LABELS, [constOf('PHONE_USAGE_STOP'), constOf('PHONE_USAGE_WAIT')])
+})
+
+test('motionMedia：沒帶 reducedMotion 明確設 no-preference，帶了才設 reduce（#1892 runner Chrome 預設可能是 reduce）', () => {
+  const val = sc => motionMedia(sc).features.find(f => f.name === 'prefers-reduced-motion').value
+  assert.equal(val({}), 'no-preference')
+  assert.equal(val({ reducedMotion: false }), 'no-preference')
+  assert.equal(val({ reducedMotion: true }), 'reduce')
+  assert.equal(motionMedia({}).features.length, 1)
+  // smoke-ui.mjs 對每個情境都要送出這個設定（不能再包在 if (sc.reducedMotion) 裡）
+  assert.match(read('scripts/smoke-ui.mjs').replace(/\r\n/g, '\n'), /^ *await S\('Emulation\.setEmulatedMedia', motionMedia\(sc\)\)$/m)
 })

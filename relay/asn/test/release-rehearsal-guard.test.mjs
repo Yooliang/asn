@@ -19,7 +19,8 @@ const listFiles = dir => {
     .filter(f => /\.ya?ml$/.test(f))
     .map(f => `${dir}${f}`)
 }
-const read = rel => fs.readFileSync(new URL(rel, root), 'utf8')
+// 讀進來先把 CRLF 換成 LF：本機工作樹（autocrlf=true）是 CRLF，壞例子的多行 LF 字串與 includes 比對才找得到
+const read = rel => fs.readFileSync(new URL(rel, root), 'utf8').replace(/\r\n/g, '\n')
 
 /** 剝掉 # 註解：整行註解與「空白＋#」之後的尾註解（YAML 的 # 前面一定有空白） */
 export const stripComments = src => src.split(/\r?\n/).map(l => l.replace(/(^|\s)#.*$/, '')).join('\n')
@@ -55,6 +56,29 @@ const jobsOf = src => {
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]))
 }
 
+/** 取一個 job 文字裡的每個步驟（6 格縮排的 "- " 開頭到下一個步驟前） */
+const stepsOf = jobText => jobText.split(/^(?= {6}- )/m).filter(s => /^ {6}- /.test(s))
+
+/** 取步驟裡 with.path 的每一行（單行或 | 區塊）；沒有回 [] */
+const uploadPaths = step => {
+  const lines = step.split('\n')
+  const i = lines.findIndex(l => /^\s+path:/.test(l))
+  if (i < 0) return []
+  const v = lines[i].replace(/^\s+path:\s*/, '').trim()
+  if (!/^[|>][+-]?$/.test(v)) return [v]
+  const indent = /^\s*/.exec(lines[i])[0].length
+  const out = []
+  for (let j = i + 1; j < lines.length; j++) {
+    if (lines[j].trim() === '') continue
+    if (/^\s*/.exec(lines[j])[0].length <= indent) break
+    out.push(lines[j].trim())
+  }
+  return out
+}
+
+const SHOTS_GLOB = '${{ runner.temp }}/asn-smoke-shots/*.png'
+const AAB_GLOBS = ['relay/asn/src-tauri/target/play/*.aab', 'relay/asn/src-tauri/target/play/SHA256SUMS.txt']
+
 /** 檢查一份演練檔（或共用 action）；回違規訊息陣列，空陣列＝通過。kind：'workflow' 才檢查觸發與權限 */
 export const checkRehearsal = (raw, { kind = 'workflow' } = {}) => {
   const src = stripComments(raw)
@@ -63,7 +87,9 @@ export const checkRehearsal = (raw, { kind = 'workflow' } = {}) => {
   for (const m of src.matchAll(/^\s*(on|permissions|needs):[ \t]*([\[{].*)$/gm)) bad.push(`flow-style 的 ${m[1]}:（解析器不支援，請改成區塊寫法）`)
   // 禁字
   for (const s of ['--skip-smoke', 'ASN_SKIP_WEZTERM', 'ACTIONS_STEP_DEBUG', 'pull_request_target']) if (src.includes(s)) bad.push(`不准出現 ${s}`)
-  if (/\bset\s+-[A-Za-z]*x/.test(src) || /\bbash\s+-[A-Za-z]*x/.test(src)) bad.push('不准 set -x（會把環境變數印進記錄）')
+  if (/\bset\s+-[A-Za-z]*x/.test(src) || /\b(?:ba|da|z)?sh\s+(?:-\S+\s+)*-[A-Za-z]*x/.test(src)) bad.push('不准 set -x／sh -x／bash -x（會把環境變數印進記錄）')
+  // 共用 action 不准自己下載東西（下載走 release-ci.mjs 裡有來源證明的路徑）
+  if (kind !== 'workflow') for (const s of ['curl', 'wget', 'Invoke-WebRequest']) if (new RegExp(`(^|[^\\w-])${s}(?![\\w-])`, 'i').test(src)) bad.push(`共用 action 不准出現 ${s}`)
   // 沒有 environment、沒有 secrets（GITHUB_TOKEN 例外）、沒有寫入權限
   if (/^\s*environment\s*:/m.test(src)) bad.push('不准掛 environment')
   for (const m of src.matchAll(/secrets\.(?!GITHUB_TOKEN\b)[A-Za-z0-9_]+/g)) bad.push(`不准引用 ${m[0]}`)
@@ -71,6 +97,24 @@ export const checkRehearsal = (raw, { kind = 'workflow' } = {}) => {
   for (const m of src.matchAll(/^\s*([a-z-]+):\s*write\b/gm)) bad.push(`不准寫入權限：${m[1]}: write`)
   if (/write-all/.test(src)) bad.push('不准 write-all')
   if (kind !== 'workflow') return bad
+
+  // 上傳：截圖只能是固定目錄的 *.png、if: failure()、保留 7 天；Android 的 AAB 上傳只能是 *.aab 與 SHA256SUMS.txt
+  for (const [name, text] of Object.entries(jobsOf(src))) {
+    for (const step of stepsOf(text)) {
+      if (!step.includes('actions/upload-artifact@')) continue
+      const paths = uploadPaths(step)
+      if (paths.some(p => p.includes('asn-smoke-shots'))) {
+        if (paths.length !== 1 || paths[0] !== SHOTS_GLOB) bad.push(`job ${name} 截圖上傳的 path 只能是 ${SHOTS_GLOB}`)
+        if (!/^\s+if:\s*failure\(\)\s*$/m.test(step)) bad.push(`job ${name} 截圖上傳只能在 if: failure() 時`)
+        if (!/retention-days:\s*7\s*$/m.test(step)) bad.push(`job ${name} 截圖上傳要保留 7 天`)
+      } else if (name === 'android') {
+        for (const p of paths) if (!AAB_GLOBS.includes(p)) bad.push(`android 上傳的 glob 只能是 *.aab 與 SHA256SUMS.txt（截圖例外）：${p}`)
+      }
+    }
+  }
+  // android：拋棄式金鑰的目錄不准落在 target/play 底下（那裡的檔會被上傳）
+  const androidJob = jobsOf(src).android
+  if (androidJob) for (const m of androidJob.matchAll(/ASN_PLAY_KEY_DIR=(\S*)/g)) if (/target\/play|src-tauri/.test(m[1])) bad.push(`拋棄式金鑰目錄不准在 target/play（或 src-tauri）底下：${m[1]}`)
 
   // 觸發：只有 workflow_dispatch
   const on = topBlock(src, 'on')
@@ -205,6 +249,42 @@ test('壞例子：--skip-smoke／ASN_SKIP_WEZTERM／ACTIONS_STEP_DEBUG／set -x�
   assert.ok(flagged(`${good}\n      - run: set -x\n`, /set -x/))
   assert.ok(flagged(`${good}\n      - run: set -euxo pipefail\n`, /set -x/))
   assert.ok(!flagged(`${good}\n      - run: set -euo pipefail\n`, /set -x/))
+})
+
+test('android：上傳的 glob 只有 *.aab 與 SHA256SUMS.txt，金鑰目錄在 RUNNER_TEMP（至少命中數）', () => {
+  const android = jobsOf(stripComments(rehearsal)).android
+  const ups = stepsOf(android).filter(s => s.includes('actions/upload-artifact@'))
+  assert.ok(ups.length >= 2, 'android 的 upload-artifact 步驟數不對，規則可能失效')
+  const all = ups.flatMap(uploadPaths)
+  for (const g of AAB_GLOBS) assert.ok(all.includes(g), `沒有上傳 ${g}`)
+  assert.ok(all.includes(SHOTS_GLOB), '沒有失敗時上傳截圖的步驟')
+  assert.match(android, /ASN_PLAY_KEY_DIR=\$RUNNER_TEMP\//)
+  assert.match(android, /sha256sum \*\.aab > SHA256SUMS\.txt/)
+})
+
+test('壞例子：金鑰目錄落在 target/play、上傳多帶別的檔、截圖上傳放寬都會紅', () => {
+  const shotTail = '/asn-smoke-shots/*.png\n          if-no-files-found: ignore\n          retention-days: 7\n          overwrite: true\n\n      - name: 清掉'
+  assert.ok(flagged(mutate('ASN_PLAY_KEY_DIR=$RUNNER_TEMP/rehearsal-play-key', 'ASN_PLAY_KEY_DIR=relay/asn/src-tauri/target/play/key'), /拋棄式金鑰目錄/))
+  assert.ok(flagged(mutate('            relay/asn/src-tauri/target/play/SHA256SUMS.txt\n', '            relay/asn/src-tauri/target/play/SHA256SUMS.txt\n            relay/asn/src-tauri/target/play/*\n'), /android 上傳的 glob/))
+  assert.ok(flagged(mutate('relay/asn/src-tauri/target/play/*.aab', 'relay/asn/src-tauri/target/**'), /android 上傳的 glob/))
+  assert.ok(flagged(mutate('        if: failure()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: asn-rehearsal-smoke-shots-android', '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: asn-rehearsal-smoke-shots-android'), /if: failure\(\)/))
+  assert.ok(flagged(mutate(shotTail, shotTail.replace('*.png', '*')), /截圖上傳的 path/))
+  assert.ok(flagged(mutate(shotTail, shotTail.replace('retention-days: 7', 'retention-days: 30')), /保留 7 天/))
+})
+
+test('壞例子：sh -x／bash -x 會紅，一般的 sh／bash 不會', () => {
+  for (const c of ['sh -x script.sh', 'bash -x script.sh', 'bash -ex script.sh', 'bash -e -x s.sh']) assert.ok(flagged(`${good}\n      - run: ${c}\n`, /set -x/), c)
+  for (const c of ['sh script.sh', 'bash -e script.sh', 'bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends fonts-noto-cjk']) assert.ok(!flagged(`${good}\n      - run: ${c}\n`, /set -x/), c)
+})
+
+test('壞例子：共用 action 裡出現 curl／wget／Invoke-WebRequest 會紅，註解與別的詞不算', () => {
+  const act = read(actionFiles[0])
+  for (const c of ['curl -sSL https://x', 'wget https://x', 'Invoke-WebRequest https://x']) {
+    assert.ok(flagged(`${act}\n      - run: ${c}\n`, /共用 action 不准出現/, { kind: 'action' }), c)
+    assert.ok(!flagged(`${act}\n# ${c}\n`, /共用 action 不准出現/, { kind: 'action' }), `${c} 在註解裡不該算`)
+  }
+  assert.ok(!flagged(`${act}\n      - run: echo curly-wget_x\n`, /共用 action 不准出現/, { kind: 'action' }))
+  assert.deepEqual(checkRehearsal(act, { kind: 'action' }), [])
 })
 
 test('壞例子：共用 action 裡出現 secrets／environment／contents: write 會紅', () => {

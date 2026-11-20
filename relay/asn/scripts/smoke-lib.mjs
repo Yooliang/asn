@@ -799,6 +799,11 @@ export const ROSTER_GEMINI_EMPTY = { ...ROSTER_SAMPLE, accounts: [...ROSTER_SAMP
 const ROSTERS = { gemini: ROSTER_GEMINI, geminiEmpty: ROSTER_GEMINI_EMPTY, resets: resetRoster(), resetPassed: resetRoster(SMOKE_NOW, { passed: true }) }
 /** 截圖存哪：環境變數 ASN_SMOKE_SHOTS 指定的資料夾，沒指定就放暫存資料夾（不放 repo 裡） */
 export const shotPath = (name, env = process.env) => path.join(env.ASN_SMOKE_SHOTS || path.join(os.tmpdir(), 'asn-smoke-shots'), name)
+
+/** 要送給 Emulation.setEmulatedMedia 的 prefers-reduced-motion 設定。
+ *  情境帶 reducedMotion 就開「減少動態」（交替動畫停住，截圖才每次一樣）；沒帶就明確設成 no-preference，
+ *  不依賴瀏覽器預設：CI runner 的 Chrome 可能回報 reduce，讓檢查動畫的情境（例如 m-relogin-anim）全部讀到 none。 */
+export const motionMedia = sc => ({ features: [{ name: 'prefers-reduced-motion', value: sc?.reducedMotion ? 'reduce' : 'no-preference' }] })
 export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
   let t = fakeTable(scenario.state)
