@@ -485,7 +485,11 @@ where
         names.retain(|n| std::fs::metadata(dir.join(format!("{n}.png"))).map(|m| m.len() < min_bytes).unwrap_or(true));
         if names.is_empty() { break }
         tokio::time::sleep(gap).await;
-        names = capture(Some(names)).await?;
+        // 重截失敗（擷取程序偶發錯誤、視窗剛好被收掉）不該讓已截到的結果作廢：停止重試，照現狀交出
+        names = match capture(Some(names)).await {
+            Ok(n) => n,
+            Err(e) => { eprintln!("[shot] 重截失敗，保留已截到的圖：{e}"); break }
+        };
     }
     Ok(())
 }
@@ -589,6 +593,27 @@ fn which_scrot() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1953 一審：重截時擷取失敗，不能把已截到的結果變成失敗
+    #[tokio::test]
+    async fn t1953_重截失敗仍交出已截到的圖() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        let mut n = 0;
+        let r = capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), move |_| {
+            n += 1;
+            let res = if n == 1 {
+                std::fs::write(d.join("list.png"), vec![1u8; 9000]).unwrap();
+                std::fs::write(d.join("toast-2-2.png"), vec![1u8; 804]).unwrap();
+                Ok(vec!["list".to_string(), "toast-2-2".to_string()])
+            } else { Err("擷取失敗".to_string()) };
+            async move { res }
+        })
+        .await;
+        assert!(r.is_ok(), "重截失敗不該讓整個截圖失敗：{r:?}");
+        assert_eq!(std::fs::metadata(dir.path().join("list.png")).unwrap().len(), 9000);
+        assert!(dir.path().join("toast-2-2.png").exists());
+    }
 
     /// #1953：慢機器上提示視窗還沒畫完就截，只有 804 bytes；要重截到畫好為止，而且只重截還太小的那一扇
     #[tokio::test]
