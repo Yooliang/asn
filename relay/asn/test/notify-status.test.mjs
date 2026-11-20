@@ -210,3 +210,30 @@ test('只有電腦版 job：沒傳的 Play job 不算不明的略過；但電腦
   lacks(d(), '異常')
   has(d({ 'site-draft': 'skipped' }), '【發版異常】', '官網紀錄草稿')
 })
+
+// ---- 手機版自己的 workflow（#1944）：只有 Play 三個 job，沒有電腦版／attest／官網草稿 ----
+const PLAY = ['preflight-play', 'android-build', 'android-upload']
+const p = (patch = {}, over = {}) => notifyStatus({ guardResult: 'success', auto: true, jobs: PLAY, results: { ...Object.fromEntries(PLAY.map(j => [j, 'success'])), ...patch }, version: '0.2.38', runUrl: RUN, ...over })
+
+test('只有 Play job：全成功 → 講 Play internal 已就緒，不提未簽章安裝檔／14 天內要簽', () => {
+  const a = p()
+  assert.equal(a.level, 'success')
+  has(a, '【CI 完成】v0.2.38', 'Play internal 已就緒')
+  lacks(a, '安裝檔', '要簽', '電腦版', '官網')
+})
+
+test('只有 Play job：預檢、建置、上傳各自失敗只講 Play；沒傳的電腦版 job 不算不明的略過', () => {
+  const a = p({ 'preflight-play': 'failure', 'android-build': 'skipped', 'android-upload': 'skipped' })
+  has(a, '【發版失敗】', 'Play 未上傳（版號預檢沒過）'); lacks(a, '電腦版', '安裝檔', '發版異常', '不明的略過'); assert.equal(a.level, 'error')
+  const b = p({ 'android-build': 'failure', 'android-upload': 'skipped' })
+  has(b, 'Play 未上傳（Android 建置失敗）'); lacks(b, '電腦版', '安裝檔', '不明的略過')
+  const c = p({ 'android-upload': 'failure' })
+  has(c, 'Play 上傳失敗，可能已部分上傳', '2.6'); lacks(c, '電腦版', '安裝檔')
+  lacks(p({ 'android-build': 'failure', 'android-upload': 'skipped' }), '尚未上線')
+})
+
+test('只有 Play job：被取消仍報中止；Play job 無故略過報異常；預設（全 job）行為不變', () => {
+  has(p({ 'android-build': 'cancelled', 'android-upload': 'skipped' }), '【發版中止】')
+  has(p({ 'android-upload': 'skipped' }), '【發版異常】', 'Play 上傳')
+  has(r({}), '未簽章安裝檔與 Play internal 已就緒')
+})

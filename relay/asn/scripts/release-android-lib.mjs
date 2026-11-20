@@ -11,6 +11,17 @@ export const GOOGLE_SERVICES_REL = 'src-tauri/gen/android/app/google-services.js
  */
 export const pushConfigWarning = exists => (exists ? null
   : `⚠ 沒有 ${GOOGLE_SERVICES_REL}：這次建出的 App 不含推播（App 關著時收不到通知）。要發有推播的版本，先把這個檔放到建置機上再建。`)
+/** 要不要強制使用正式上傳金鑰：帶 --upload，或環境變數 ASN_REQUIRE_UPLOAD_KEY=1（CI 的正式建置；不上傳也要擋） */
+export const requireUploadKey = (argv, env) => argv.includes('--upload') || env?.ASN_REQUIRE_UPLOAD_KEY === '1'
+/**
+ * 上傳金鑰硬擋：required 時金鑰檔或密碼檔缺任何一個就回錯誤訊息（呼叫端必須中止、不得呼叫 keytool）；沒問題或不要求回 null。
+ * 不要求時（演練、本機第一次建置）維持原行為：缺檔由腳本自己產生。
+ */
+export const uploadKeyProblem = ({ required, hasKeystore, hasPassFile, keyDir }) => {
+  if (!required) return null
+  const missing = [!hasKeystore && 'upload.jks', !hasPassFile && 'upload.jks.password'].filter(Boolean)
+  return missing.length ? `金鑰資料夾 ${keyDir} 缺正式的 ${missing.join('、')}：這次要上傳／正式建置，絕不自己產新金鑰（跟 Play 登記的對不上）` : null
+}
 export const androidApkName = version => `ASN_${version}_android.apk`
 export const androidApkUrl = version => `${UPDATE_BASE}${encodeURIComponent(androidApkName(version))}`
 

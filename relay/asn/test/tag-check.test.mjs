@@ -139,3 +139,39 @@ test('真實檔案：目前 repo 的版本檔彼此一致，用自己的版本�
   const r = checkTag({ tag: `v${v}`, files, git: onMain })
   assert.deepEqual(r.problems, [])
 })
+
+// ---- 前綴（#1944：手機版 android-v<版本>，電腦版 v<版本>；兩邊互不吃對方的標籤）----
+test('前綴 android-v：android-v0.2.37 通過且版本去掉前綴；預設仍是 v', () => {
+  assert.deepEqual(checkTag({ tag: `android-v${V}`, files: good(), git: onMain, prefix: 'android-v' }), { ok: true, version: V, problems: [] })
+  assert.deepEqual(checkTag({ tag: `v${V}`, files: good(), git: onMain }).problems, [])
+})
+
+test('前綴：v 標籤不能過 android-v 檢查、android-v 標籤不能過預設 v 檢查（含 v0.2.37-android）；壞格式與未知前綴失敗', () => {
+  for (const [tag, prefix] of [[`v${V}`, 'android-v'], [`android-v${V}`, 'v'], [`v${V}-android`, 'android-v'], [`v${V}-android`, 'v'], ['android-v0.2', 'android-v'], [`android-v${V}.1`, 'android-v'], [`Android-v${V}`, 'android-v'], [`android-v${V}-rc1`, 'android-v'], [`android${V}`, 'android-v']]) {
+    const r = checkTag({ tag, files: good(), git: onMain, prefix })
+    assert.equal(r.ok, false, `${tag} / ${prefix}`)
+    assert.match(r.problems[0], /標籤格式/)
+  }
+  const bad = checkTag({ tag: `x${V}`, files: good(), git: onMain, prefix: 'x' })
+  assert.equal(bad.ok, false); assert.match(bad.problems[0], /不認得的標籤前綴/)
+})
+
+test('前綴 android-v：版本檔不一致仍失敗（四處都跟去掉前綴後的版本比）、不在 main 仍失敗', () => {
+  fails(checkTag({ tag: `android-v${V}`, files: { ...good(), packageJson: JSON.stringify({ version: '0.2.36' }) }, git: onMain, prefix: 'android-v' }), /package\.json.*0\.2\.36/)
+  fails(checkTag({ tag: `android-v${V}`, files: good(), git: offMain, prefix: 'android-v' }), /origin\/main/)
+  fails(checkTag({ tag: `android-v${V}`, files: { ...good(), changelog: changelog('0.2.36') }, git: onMain, prefix: 'android-v' }), /CHANGELOG/)
+})
+
+test('CLI：--prefix android-v 吃 android-v 標籤、寫 version（不含前綴）；v 標籤被擋；不帶 --prefix 時 android-v 標籤被擋（asn-release.yml 的呼叫不變）', () => {
+  const a = cliEnv(good())
+  assert.equal(main([`android-v${V}`, '--prefix', 'android-v'], a.env, a.io), 0)
+  assert.deepEqual(a.written, [['out.txt', `version=${V}\n`]])
+  assert.deepEqual(a.out, [['merge-base', '--is-ancestor', `android-v${V}^{commit}`, 'origin/main']])
+  const b = cliEnv(good())
+  assert.equal(main([`v${V}`, '--prefix', 'android-v'], b.env, b.io), 1)
+  assert.deepEqual(b.written, [])
+  const c = cliEnv(good())
+  assert.equal(main([`android-v${V}`], c.env, c.io), 1)
+  const d = cliEnv(good())
+  assert.equal(main([`v${V}`], d.env, d.io), 0)
+})
