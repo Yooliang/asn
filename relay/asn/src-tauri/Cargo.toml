@@ -104,6 +104,8 @@ ndk-context = "=0.1.1"
 # 電腦版：設定頁把這台的指紋畫成 QR code，給手機用相機掃來核對（fp_scan.rs）。不開 image／svg 功能（只要格子，不要圖片函式庫）。手機版不編進去
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 qrcode = { version = "0.14.1", default-features = false }
+# 盯 Claude 登入檔（.claude.json）的變化，帳號一換立刻回報（claude_login.rs，#1880）。用系統的檔案變化通知，不輪詢；只開 macOS 的 fsevent，不要其他功能。手機版不編進去
+notify = { version = "=8.2.0", default-features = false, features = ["macos_fsevent"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_Security_Credentials", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Time", "Win32_System_Pipes", "Win32_Security_Authorization", "Win32_Security_WinTrust", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Sip", "Win32_System_Registry", "Win32_System_EventLog", "Win32_System_ProcessStatus", "Win32_System_Com"] }
