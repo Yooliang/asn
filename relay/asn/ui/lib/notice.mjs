@@ -106,6 +106,7 @@ const TOPIC_CAT = {
   inbox_watch: 'stuck', waiting: 'stuck', mux_down: 'stuck', mux_blind: 'stuck', misroute: 'stuck',
   login: 'login', waiting_login: 'login',
   quota: 'quota',
+  compact: 'stuck',   // 視窗壓縮 N 次自動交接／請交接（#1852）
   view: 'security', term_view: 'security', device_key: 'security', node_mismatch: 'security',
 }
 export function noticeCategory(kind) {

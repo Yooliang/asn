@@ -215,6 +215,7 @@ impl OpsEnv for SystemOpsEnv {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct OpsDirs {
     /// ~/.claude/sessions
     pub sessions: PathBuf,
@@ -403,6 +404,8 @@ pub(crate) struct PartnerOps {
     grok_home: Mutex<Option<PathBuf>>,
     /// 本人（從手機或電腦名單）下令關掉、也真的關掉了的視窗名字：收發室每輪取走，從「認得的夥伴」存檔拿掉，重開機後就不會接回（見 core/archive_sync.rs）
     closed: Mutex<Vec<String>>,
+    /// 壓縮 N 次自動交接的巡檢狀態（#1852，見 partner_ops/compact.rs）
+    compact: Mutex<compact::CompactState>,
 }
 
 /// 記著還沒被收發室取走的關閉名字最多幾個（收發室不在時不會無限長大）
@@ -426,6 +429,7 @@ impl PartnerOps {
             acp: Mutex::new(None),
             grok_home: Mutex::new(None),
             closed: Mutex::new(Vec::new()),
+            compact: Mutex::new(Default::default()),
         })
     }
 
@@ -1831,6 +1835,7 @@ fn first_cwd(path: &Path) -> Option<String> {
     None
 }
 
+mod compact;
 mod dup;
 
 #[cfg(test)]

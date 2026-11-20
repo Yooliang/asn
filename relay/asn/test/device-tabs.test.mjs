@@ -112,7 +112,7 @@ test('詳情的欄位：最後在線只寫在線與否；平台、ASN 版本；�
 test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄的時候工作管理員收掉次要欄位', () => {
   const css = read('../ui/style.css')
   assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
-  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(7\)[^}]*display:none\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\.settings \.tm-table \.aero-btn\{padding:3px 6px\}\}/)
+  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(8\)[^}]*display:none\}\.tm-table td\.cmp\{min-width:110px\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\.settings \.tm-table \.aero-btn\{padding:3px 6px\}\}/)
 })
 
 test('known 的錯誤：只在動作卡出現一次（#1727）', async () => {

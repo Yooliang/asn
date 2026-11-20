@@ -42,9 +42,18 @@ export const TEXT = {
   // 納入管理（#1557，從夥伴選單搬來）：自己開的、還沒交給 ASN 的那一列放這顆；按了打開跟以前同一個接手清單
   adopt: '納入管理',
   adoptTip: '你自己在終端開的 grok、claude、agy、pi 或 codex，可以交給 ASN 看狀態、提醒你回答；預設只能看，要代送文字得另外允許。',
+  // 壓縮次數（#1852）
+  handover: '交接',
+  handoverTip: '請這位夥伴寫交接檔、開新視窗接手、關掉這個視窗（不查額度）',
+  handoverAsked: '已請這台電腦交接，幾秒後清單會更新。',
+  handoverFail: '交接失敗，請稍後再試',
+  handing: '交接中',
+  remind: '請交接',
+  handingWhy: '交接完成前不能停止',
+  compactNote: '壓縮次數只算這次開視窗之後；交接成功重開的新視窗從 0 次算起。不是 Claude 的視窗顯示「—」。',
 }
 
-export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源', '操作']
+export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '來源', '操作']
 
 const ENGINE_TEXT = { claude: 'Claude', pi: 'pi', codex: 'Codex', gemini: 'Gemini', agy: 'agy', grok: 'Grok', asn: 'ASN', acp: '內建工作者' }
 export const engineText = e => {
@@ -156,6 +165,8 @@ export function stopPlan(row, ctx = {}) {
     return { path: PATH.term, ok, reason: ok ? '' : '找不到這個終端' }
   }
   if ((k === 'claude' || k === 'pi') && row.by_asn === false) return { path: PATH.none, ok: false, reason: VIEW_ONLY_WHY.own }
+  // 交接中的視窗不能停止（#1852）：舊視窗會被交接流程關掉，中途停掉會讓新視窗接不到交接檔
+  if (k === 'claude' && row.compact?.state === 'handing') return { path: PATH.close, ok: false, reason: TEXT.handingWhy }
   if (k === 'claude' || k === 'pi' || k === 'acp') {
     const path = k === 'claude' && row.dup ? PATH.dup : PATH.close
     const friend = findFriend(ctx.friends, ctx.selfNode, row.name)
@@ -196,8 +207,17 @@ export const canAdopt = r => r?.kind === 'process' || ((r?.kind === 'claude' || 
 
 const nameText = r => (r.kind === 'terminal' ? `${engineText(r.engine)} 終端` : r.name)
 
+/** 「壓縮次數」欄：{ text: '3 次', tag: '交接中'|'請交接'|'', state }；不是 Claude 視窗、還沒數過一律「—」 */
+export function compactCell(r) {
+  const c = r?.compact
+  if (r?.kind !== 'claude' || !c || !Number.isInteger(c.count) || c.count < 0) return { text: DASH, tag: '', state: '' }
+  const tag = c.state === 'handing' ? TEXT.handing : c.state === 'remind' ? TEXT.remind : ''
+  return { text: `${c.count} 次`, tag, state: c.state === 'handing' || c.state === 'remind' ? c.state : '' }
+}
+
 export function viewRow(r, now, ctx) {
   const plan = stopPlan(r, ctx)
+  const cmp = compactCell(r)
   return {
     key: `${r.kind}:${r.pid}:${r.name}:${r.term_id ?? ''}`,
     kind: r.kind,
@@ -208,6 +228,11 @@ export function viewRow(r, now, ctx) {
     uptime: formatUptime(r.started_ms, now),
     status: r.kind === 'mux' && typeof r.inside === 'number' ? `${r.inside} 個視窗` : statusText(r.status),
     source: sourceText(r),
+    cmpText: cmp.text,
+    cmpTag: cmp.tag,
+    cmpState: cmp.state,
+    canHandover: cmp.state === 'remind' && Boolean(r.name),   // 「請交接」的列才有「交接」鈕
+    handing: cmp.state === 'handing',
     dup: Boolean(r.dup),
     canStop: plan.ok,
     viewOnly: plan.path === PATH.none,
@@ -337,6 +362,20 @@ export function createTaskManager(deps) {
     return true
   }
 
+  /** 「交接」鈕：只把視窗名交給內建收發室，它會驗證後照現有的換班接手流程做（不查額度） */
+  async function handover(name) {
+    if (state.busy || !name) return
+    state.busy = true
+    try {
+      await api.compactHandoffRequest(name)
+      state.note = TEXT.handoverAsked
+    } catch (e) {
+      log(`[工作管理員] 交接失敗：${e?.message ?? e}`)
+      state.note = TEXT.handoverFail
+    } finally { state.busy = false }
+    setTimeout(() => { void refresh() }, 2500)
+  }
+
   async function wake(name) {
     const f = findFriend(getFriends(), getSelfNode(), name)
     if (!f || state.busy) return
@@ -371,9 +410,9 @@ export function createTaskManager(deps) {
       dupBanner: dupBanner(groups), dupCount: groups.length,
       known, note: state.note, wakeNote: state.wakeNote, busy: state.busy,
       confirm: state.confirm ? { ...state.confirm } : null,
-      hints: [TEXT.closeNote, TEXT.archiveNote, TEXT.memoryNote],
+      hints: [TEXT.closeNote, TEXT.archiveNote, TEXT.memoryNote, TEXT.compactNote],
     }
   }
 
-  return { state, open, close, refresh, ask, cancel, confirm, wake, openScreen, view }
+  return { state, open, close, refresh, ask, cancel, confirm, wake, handover, openScreen, view }
 }

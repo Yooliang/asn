@@ -51,6 +51,7 @@ export const transport = {
   termStatus: req => invoke('term_status', { req }),         // { id } → { state, prompt? }；等你回答時帶 prompt
   termRead: req => invoke('term_read', { req }),             // { id, lines } → 畫面最後幾行的純文字（只讀，不送任何鍵）
   termSend: req => invoke('term_send', { req }),             // { id, text, enter }；只在使用者按下「確認送出」後呼叫（後端另外檢查資料夾授權）
+  compactHandoffRequest: name => invoke('compact_handoff_request', { name }),   // 工作管理員「交接」鈕（#1852）：只送視窗名，由內建收發室驗證後執行
   termStop: req => invoke('term_stop', { req }),             // { id }；對接手的窗格只是「解除接手」，不會結束那個程式
   termAdoptCandidates: () => invoke('term_adopt_candidates'), // [{ pid, pane_id, started_ms, profile, tab_title, cwd_raw, cwd_authorized, version_verified, version_note, already_adopted }]
   termAdopt: req => invoke('term_adopt', { req }),           // { pid, pane_id, started_ms } → { id }；使用者按「接手」後才呼叫

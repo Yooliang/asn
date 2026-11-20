@@ -59,6 +59,7 @@ import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, m
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
+import { clampCompactN } from './lib/compact-handoff.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
@@ -211,9 +212,9 @@ try {
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 invoke('guard_get').then(applyGuard).catch(() => { /* 舊版後端沒有這個指令：不顯示 */ })
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, screenWatch: true, permPhone: true, mobileView: true, remoteInput: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, compactHandoff: true, compactN: 3, screenWatch: true, permPhone: true, mobileView: true, remoteInput: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
-  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, remoteInput: s.remote_input !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, termFetch: typeof s.term_fetch === 'string' ? s.term_fetch : '', termFetchKind: typeof s.term_fetch_kind === 'string' ? s.term_fetch_kind : '', termFetchDetail: typeof s.term_fetch_detail === 'string' ? s.term_fetch_detail : '', keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerWhy: typeof s.term_server_why === 'string' ? s.term_server_why : '', termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, compactHandoff: s.compact_handoff !== false, compactN: clampCompactN(s.compact_handoff_n, 3), screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, remoteInput: s.remote_input !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, termFetch: typeof s.term_fetch === 'string' ? s.term_fetch : '', termFetchKind: typeof s.term_fetch_kind === 'string' ? s.term_fetch_kind : '', termFetchDetail: typeof s.term_fetch_detail === 'string' ? s.term_fetch_detail : '', keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerWhy: typeof s.term_server_why === 'string' ? s.term_server_why : '', termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
@@ -1713,6 +1714,8 @@ const app = createApp({
     }
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
     const setBridgeAutoResume = on => runBridge(() => invoke('bridge_set_auto_resume', { on }))
+    // 壓縮 N 次自動交接（#1852）：開關與次數存在一起；次數夾在 2～10（跟 Rust 認的範圍一樣），不是數字就維持原本的
+    const setBridgeCompact = (on, n) => runBridge(() => invoke('bridge_set_compact_handoff', { on, n: clampCompactN(n, bridge.compactN) }))
     const setBridgeTermServer = on => runBridge(() => invoke('bridge_set_term_server', { on }))
     const retryBridgeTermFetch = () => runBridge(() => invoke('bridge_retry_term_fetch'))
     const setBridgePermPhone = on => runBridge(() => invoke('bridge_set_perm_phone', { on }))
@@ -2044,7 +2047,7 @@ const app = createApp({
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
       known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp, qr: known.qr } : null,
-      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
+      bridge: bridge.shown ? { compactHandoff: bridge.compactHandoff, compactN: bridge.compactN, enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
@@ -2109,6 +2112,8 @@ const app = createApp({
         case 'known-qr': await toggleOwnQr(value === true); break
         case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
+        case 'bridge-compact': await setBridgeCompact(value === true, bridge.compactN); break
+        case 'bridge-compact-n': await setBridgeCompact(bridge.compactHandoff, value); break
         case 'bridge-term-server': await setBridgeTermServer(value === true); break
         case 'bridge-term-fetch-retry': await retryBridgeTermFetch(); break
         case 'bridge-screen-watch': await setBridgeScreenWatch(value === true); break
@@ -2142,6 +2147,7 @@ const app = createApp({
         case 'tm-confirm': await taskMgr.confirm(); break
         case 'tm-view': taskMgr.openScreen(String(value ?? '')); break   // 視窗開著、在等你按確認的夥伴（#1635）：打開它的對話頁看終端
         case 'tm-wake': await taskMgr.wake(String(value ?? '')); break
+        case 'tm-handover': await taskMgr.handover(String(value ?? '')); break   // 「請交接」列的「交接」鈕（#1852）
         case 'tm-adopt': void adoptLoad(); break   // 工作管理員「納入管理」（#1557）：打開跟以前同一個接手清單，安全檢查照舊
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL

@@ -12,7 +12,6 @@ html,body{margin:0;height:auto}
 .tm-tag.cmp-warn{border:1px solid #e0c36b;background:#fff7dc;color:#6b4f00}
 .tm-tag.cmp-go{border:1px solid #9fc3e8;background:#eef6ff;color:#1b5ea8}
 @media (prefers-color-scheme:dark){.tm-tag.cmp-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-tag.cmp-go{background:#17283a;color:#9cc8f2;border-color:#2f5679}}
-.cmp-note{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 /* 窄版：容器 480 以下隱藏「引擎、程序編號、記憶體、開了多久」和「來源」，留下名字、狀態、壓縮次數、操作。
    現有規則隱藏第 2、3、7 欄；加了新欄後來源變第 8 欄，且手機寬度擠不下，所以改隱藏 2、3、4、5、8 欄 */
 @container (max-width:480px){

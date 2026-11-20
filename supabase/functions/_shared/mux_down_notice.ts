@@ -29,3 +29,27 @@ export function parseMuxResumeNotice(body: unknown): MuxResumeNotice | null {
   if (b.resumed + b.failed.length !== b.count) return null;
   return { count: b.count, resumed: b.resumed, failed: b.failed as string[] };
 }
+
+// 壓縮次數到了的交接通知（20261120200000_compact_notice.sql，#1852）：只收視窗名、壓縮次數、結果種類、額度原因與剩餘百分比。
+// 文字固定在資料庫函式；視窗名資料庫會再清一次，這裡先擋掉空白、過長與控制字元。
+export const COMPACT_KINDS = ["auto", "remind_quota", "remind_unknown", "remind_off", "remind_failed"] as const;
+export type CompactKind = typeof COMPACT_KINDS[number];
+export type CompactNotice = { window: string; count: number; kind: CompactKind; reason: string | null; pct: number | null };
+
+export function parseCompactNotice(body: unknown): CompactNotice | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  const allowed = new Set(["window", "count", "kind", "reason", "pct"]);
+  if (!Object.keys(b).every((k) => allowed.has(k))) return null;
+  if (typeof b.window !== "string" || b.window.trim().length < 1 || b.window.length > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(b.window)) return null;
+  if (typeof b.count !== "number" || !Number.isInteger(b.count) || b.count < 1 || b.count > COUNT_MAX) return null;
+  if (typeof b.kind !== "string" || !(COMPACT_KINDS as readonly string[]).includes(b.kind)) return null;
+  const kind = b.kind as CompactKind;
+  const pct = b.pct ?? null;
+  if (pct !== null && (typeof pct !== "number" || !Number.isInteger(pct) || pct < 0 || pct > 100)) return null;
+  const reason = b.reason ?? null;
+  if (kind === "remind_quota") {
+    if (reason !== "5 小時" && reason !== "每週") return null;
+  } else if (reason !== null) return null;
+  return { window: b.window.trim(), count: b.count, kind, reason: reason as string | null, pct: pct as number | null };
+}
