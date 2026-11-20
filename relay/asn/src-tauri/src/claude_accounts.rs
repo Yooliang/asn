@@ -693,12 +693,39 @@ pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
 pub fn switch_verified(home: &Path, email: &str, cfg_env: Option<std::ffi::OsString>, settle: std::time::Duration) -> R<SwitchOutcome> {
     let out = switch_impl(home, email, Fault::None, &profile_lookup)?;
     let retry = std::time::Duration::from_millis(150);
-    let mut check = check_switched(home, &out.email, &cfg_env, retry);
-    if check.is_ok() && !settle.is_zero() {
-        std::thread::sleep(settle);
-        check = check_switched(home, &out.email, &cfg_env, retry);
+    let check = check_switched(home, &out.email, &cfg_env, retry);
+    let seq = switch_seq(home);
+    let out = finish_switch(home, out, check)?; // 立即讀回對不上：照舊回滾
+    if settle.is_zero() {
+        return Ok(out);
     }
-    finish_switch(home, out, check)
+    std::thread::sleep(settle);
+    recheck_switched(home, out, seq, &cfg_env, retry)
+}
+
+/// 切換成功後隔一下的「再讀一次」。這時才發現被寫回舊帳號，**不還原**：開著的 Claude 視窗可能已經換發新權杖，
+/// 拿切換前的舊備份蓋回去會讓登入失效；只回報「切換沒有成功」並寫 log（#1927 二審）。
+/// `seq`＝切換當下的序號；之後又有別次切換（備份已是那一次的）就什麼都不做，那一次自己會讀回確認。呼叫端要持有 `LOCK`
+pub fn recheck_switched(home: &Path, out: SwitchOutcome, seq: u64, cfg_env: &Option<std::ffi::OsString>, retry: std::time::Duration) -> R<SwitchOutcome> {
+    if switch_seq(home) != seq {
+        crate::claude_login::log(&format!("切換到 {} 之後又有另一次切換，這次不再重讀", out.email));
+        return Ok(out);
+    }
+    match check_switched(home, &out.email, cfg_env, retry) {
+        Ok(()) => Ok(out),
+        Err(why) => {
+            crate::claude_login::log(&format!("切換到 {} 後又變回別的帳號：{}；登入檔不動（開著的視窗可能已換發新權杖）", out.email, why_text(why)));
+            Err(AccErr::NotSwitched)
+        }
+    }
+}
+
+fn why_text(why: crate::claude_login::NotSwitched) -> String {
+    match why {
+        crate::claude_login::NotSwitched::Other(Some(e)) => format!("實際登入的是 {e}"),
+        crate::claude_login::NotSwitched::Other(None) => "讀回來沒有登入的帳號".to_string(),
+        crate::claude_login::NotSwitched::Unreadable(r) => format!("讀不到登入的帳號：{r}"),
+    }
 }
 
 /// 讀回實際登入的帳號（不改任何檔）
@@ -713,11 +740,7 @@ pub fn finish_switch(home: &Path, out: SwitchOutcome, check: Result<(), crate::c
         return Ok(out);
     };
     // 原因只進 log：實際讀到的帳號（或讀不到的原因）；不放檔案內容
-    let what = match why {
-        crate::claude_login::NotSwitched::Other(Some(e)) => format!("實際登入的是 {e}"),
-        crate::claude_login::NotSwitched::Other(None) => "讀回來沒有登入的帳號".to_string(),
-        crate::claude_login::NotSwitched::Unreadable(r) => format!("讀不到登入的帳號：{r}"),
-    };
+    let what = why_text(why);
     match undo_last_switch(home) {
         Ok(_) => {
             crate::claude_login::log(&format!("切換到 {} 沒有成功：{what}；登入檔已還原成切換前", out.email));
@@ -824,7 +847,7 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
         Some(t) => write_atomic(&bk.join("claude.json"), t.as_bytes())?,
         None => write_atomic(&bk.join(ABSENT_CJ), b"")?,
     }
-    SWITCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    bump_switch_seq(home);
 
     // 4. 原子寫入；任何一步失敗就還原
     let apply = || -> std::io::Result<()> {
@@ -893,9 +916,17 @@ pub fn undo_last_switch(home: &Path) -> R<String> {
 
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// 切換序號：每次切換寫完備份就加一。「隔一下再讀」期間若又有一次切換，備份已經是那一次的，不能拿來還原這一次（#1927 複審）
-static SWITCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub fn switch_seq() -> u64 {
-    SWITCH_SEQ.load(std::sync::atomic::Ordering::SeqCst)
+/// 以家目錄分開記（不同家目錄的切換互不相干）
+static SWITCH_SEQ: std::sync::Mutex<Vec<(PathBuf, u64)>> = std::sync::Mutex::new(Vec::new());
+pub fn switch_seq(home: &Path) -> u64 {
+    SWITCH_SEQ.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(p, _)| p == home).map_or(0, |(_, n)| *n)
+}
+fn bump_switch_seq(home: &Path) {
+    let mut v = SWITCH_SEQ.lock().unwrap_or_else(|e| e.into_inner());
+    match v.iter_mut().find(|(p, _)| p == home) {
+        Some((_, n)) => *n += 1,
+        None => v.push((home.to_path_buf(), 1)),
+    }
 }
 /// 切換前本來沒有的檔，在備份資料夾留的空記號
 const ABSENT_CRED: &str = "credentials.absent";
@@ -1155,17 +1186,11 @@ pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
     let (out, seq) = {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let out = switch_verified(&home, email, cfg.clone(), std::time::Duration::ZERO).map_err(|e| e.to_string())?;
-        (out, switch_seq())
+        (out, switch_seq(&home))
     };
     std::thread::sleep(std::time::Duration::from_secs(2));
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if switch_seq() != seq {
-        // 等的這段時間又有一次切換：備份已經是那一次的，不拿來還原這一次；那一次自己會讀回確認
-        crate::claude_login::log(&format!("切換到 {} 之後又有另一次切換，這次不再重讀也不還原", out.email));
-        return Ok(out);
-    }
-    let check = check_switched(&home, &out.email, &cfg, std::time::Duration::from_millis(150));
-    finish_switch(&home, out, check).map_err(|e| e.to_string())
+    recheck_switched(&home, out, seq, &cfg, std::time::Duration::from_millis(150)).map_err(|e| e.to_string())
 }
 /// 帳號庫清單（遠端回報用）
 pub fn local_list() -> Vec<AccountInfo> {
@@ -2014,7 +2039,7 @@ mod tests {
         // 切換與「隔一下再讀」兩段都要拿同一把鎖；睡的那 2 秒不佔著鎖（#1927 一審）
         let body = src.split("pub fn local_switch(email: &str)").nth(1).unwrap().split("/// 帳號庫清單").next().unwrap();
         assert_eq!(body.matches("LOCK.lock()").count(), 2);
-        assert!(body.contains("switch_seq() != seq"), "等待期間又切換過就不還原");
+        assert!(body.contains("recheck_switched("), "等待之後走不還原的重讀");
         assert!(body.find("sleep").unwrap() > body.find("};").unwrap(), "睡之前第一把鎖已放掉");
     }
 

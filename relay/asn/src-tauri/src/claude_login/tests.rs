@@ -238,15 +238,63 @@ fn 切換前沒有登入檔_讀回對不上_新寫的檔要刪掉_回報切換�
     assert!(!home.path().join(".claude.json").exists(), "本來沒有的登入檔要刪掉");
 }
 
+fn cred_text(h: &Path) -> String {
+    std::fs::read_to_string(h.join(".claude").join(".credentials.json")).unwrap()
+}
+
 #[test]
-fn 等待期間又切換了一次_第一次的讀回不拿新備份去還原() {
-    let src = include_str!("../claude_accounts.rs");
-    let body = src.split("pub fn local_switch(email: &str)").nth(1).unwrap();
-    assert!(body.contains("switch_seq() != seq"));
-    // 行為：兩次切換之後序號一定不同
+fn 兩秒後重讀發現被寫回舊帳號_不拿備份蓋_權杖檔維持寫回後的內容() {
     let home = two_accounts();
-    let a = claude_accounts::switch_seq();
-    claude_accounts::switch_to(home.path(), "b@x.test").unwrap();
-    claude_accounts::switch_to(home.path(), "a@x.test").unwrap();
-    assert!(claude_accounts::switch_seq() >= a + 2);
+    let h = home.path();
+    let out = claude_accounts::switch_to(h, "b@x.test").unwrap(); // 切換成功、立即讀回也對
+    let seq = claude_accounts::switch_seq(h);
+    // 之後開著的視窗把舊帳號寫回，並換發了新權杖（假內容）
+    write(h, &cj("a@x.test"));
+    std::fs::write(h.join(".claude").join(".credentials.json"), "FAKE-REISSUED-A").unwrap();
+    let r = claude_accounts::recheck_switched(h, out, seq, &None, Duration::ZERO);
+    assert!(matches!(r, Err(claude_accounts::AccErr::NotSwitched)), "{r:?}");
+    assert_eq!(cred_text(h), "FAKE-REISSUED-A", "不能拿切換前的備份蓋掉新權杖");
+    assert_eq!(read_login(&h.join(".claude.json")), Login::In("a@x.test".into()));
+}
+
+#[test]
+fn 等待期間又切換了一次_第一次的重讀什麼都不動() {
+    let home = two_accounts();
+    let h = home.path();
+    let out = claude_accounts::switch_to(h, "b@x.test").unwrap();
+    let seq = claude_accounts::switch_seq(h);
+    claude_accounts::switch_to(h, "a@x.test").unwrap(); // 第二次切換
+    let before = (cred_text(h), std::fs::read(h.join(".claude.json")).unwrap());
+    let r = claude_accounts::recheck_switched(h, out, seq, &None, Duration::ZERO);
+    assert!(r.is_ok(), "第二次切換的事交給第二次自己確認：{r:?}");
+    assert!(before == (cred_text(h), std::fs::read(h.join(".claude.json")).unwrap()), "檔案不動");
+}
+
+#[test]
+fn 監看_同資料夾別的檔變了_不排讀取() {
+    let d = tempfile::tempdir().unwrap();
+    let p = write(d.path(), &cj("a@x.test"));
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let r2 = reads.clone();
+    let p2 = p.clone();
+    let _w = start_dirs(
+        vec![d.path().to_path_buf()],
+        move || {
+            r2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            p2.clone()
+        },
+        Duration::from_millis(50),
+        |_| {},
+    )
+    .unwrap();
+    let base = reads.load(std::sync::atomic::Ordering::SeqCst);
+    for i in 0..5 {
+        std::fs::write(d.path().join(format!("other-{i}.txt")), "x").unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), base, "別的檔變了不該讀登入檔");
+    // 對照：真的改登入檔就會讀
+    std::fs::write(&p, cj("b@x.test")).unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(reads.load(std::sync::atomic::Ordering::SeqCst) > base);
 }

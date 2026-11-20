@@ -161,6 +161,11 @@ mod watch {
     use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
+    /// 事件碰到的檔是不是 `.claude.json`：其他檔（同資料夾別的檔、整棵樹的雜訊）一律丟掉，不排讀取（#1927 二審）
+    pub(super) fn hits_login_file(e: &notify::Event, name: &std::ffi::OsStr) -> bool {
+        e.paths.iter().any(|p| p.file_name() == Some(name))
+    }
+
     /// 監看中的把手：放掉就停
     pub struct Handle {
         _w: notify::RecommendedWatcher,
@@ -204,7 +209,7 @@ mod watch {
             // 沒有收件端時（Handle 放掉、watcher 跟著結束）recv 回錯誤，執行緒就結束
             while let Ok(ev) = rx.recv() {
                 let mut dirty = match &ev {
-                    Ok(e) => e.paths.iter().any(|p| p.file_name() == Some(name.as_os_str())),
+                    Ok(e) => hits_login_file(e, &name),
                     Err(e) => {
                         log(&format!("監看 Claude 登入檔時出錯，重讀一次：{e}"));
                         true
@@ -214,7 +219,7 @@ mod watch {
                 let deadline = std::time::Instant::now() + debounce * 8;
                 while let Ok(more) = rx.recv_timeout(debounce) {
                     dirty |= match &more {
-                        Ok(e) => e.paths.iter().any(|p| p.file_name() == Some(name.as_os_str())),
+                        Ok(e) => hits_login_file(e, &name),
                         Err(_) => true,
                     };
                     if std::time::Instant::now() >= deadline {
