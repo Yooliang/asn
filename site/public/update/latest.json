@@ -1,11 +1,11 @@
 {
-  "version": "0.2.37",
-  "notes": "- 修正：換班接手後，新視窗會開進共用的終端服務，不再退回成一般的系統主控台視窗。（#1867、#1870）",
-  "pub_date": "2026-11-20T09:43:20.799Z",
+  "version": "0.2.38",
+  "notes": "- 修正：好幾個視窗同時讀不到畫面時，終端服務會馬上重新檢查，不用等到下一輪才發現出事。（#1887、#1913）",
+  "pub_date": "2026-11-20T12:06:41.750Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNzL0ltdjU2ZFg4OHRvcUxkNStvQm5POE5mcnJ1c3hwamtnM2h4bnNZSVZVS1EybC9aTkxGU3JjczBCS3pYdkxNQXU4QUt0RmMxK3hRQXhGclJrM1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTY3ODAwCWZpbGU6QVNOXzAuMi4zN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM3Cm0xNnA2MWhUUFJEYjNuZFMyRmZmVHRWa3R0RnZMU0lLVWgrNjJsbnNhU0IvU005cWQ2ZFdvWFNsdm00aGxtZ2JKQ3ArTkJsVTVobGs0WUVmS3QwekRnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.37_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjhkb2xNSEpzTEc3RURtbitxSlIxUjZ3MUlaK0w3T0RwdnlKc1NlM3drcS8xSmhXWFJFdi8yUUlFcjRMam1LVTUrSEVGZTZRUnFVR29BbUVCYjdaaFE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTc2NDAxCWZpbGU6QVNOXzAuMi4zOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM4Cjllb3FiRkJ2MTMvL08zOHZ3bExNR0lsV1pYNzFZWVAybGV6dDRTdmhBcDk5MVJ0WEV4RHZpSjA1TjFQTDNIYjFxZGowQ1pHUjY2c3dtS3M4ZnZqSEJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.38_x64-setup.exe"
     }
   }
 }
