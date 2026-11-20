@@ -2,6 +2,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { planPlatforms, loadRules, PLATFORMS, latestTag, collectFromTags, renderTable, changedFilesSince } from '../../../tools/release/platform_plan.mjs'
 
 const rules = loadRules()
@@ -132,4 +135,28 @@ test('#1979 版號提交（release: x.y.z）不算改動：手機上一版沒發
   // 同一個檔若在一般提交裡也動到，照樣算
   const log2 = log + '\x1e改依賴\n\nrelay/asn/package.json\n'
   assert.deepEqual(changedFilesSince(() => log2, 'x').sort(), ['relay/asn/package.json', 'site/public/update/latest.json'])
+})
+
+test('#1979 二審：標題像版號提交、但夾帶版號六檔以外的檔 → 整筆照算，不能漏發', () => {
+  const log = '\x1erelease: 0.2.42 網站檔（夾帶）\n\nrelay/asn/package.json\nrelay/asn/ui/m.html\n'
+  assert.deepEqual(changedFilesSince(() => log, 'v0.2.41').sort(), ['relay/asn/package.json', 'relay/asn/ui/m.html'])
+  const git = args => args[0] === 'tag' ? ({ 'v*': 'v0.2.41', 'linux-v*': 'linux-v0.2.41', 'android-v*': 'android-v0.2.41' })[args[2]] : args[0] === 'log' ? log : ''
+  const r = collectFromTags(git, rules)
+  assert.equal(r.perPlatform.android.plan.platforms.android.tag, true, '夾帶 ui 改動，手機要發')
+})
+
+test('#1979 二審：搬檔（rename）時舊路徑也要算進去（真的 git，--no-renames）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plat-rename-'))
+  const g = (...a) => execFileSync('git', ['-C', dir, '-c', 'core.quotepath=off', ...a], { encoding: 'utf8' })
+  try {
+    g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't')
+    fs.mkdirSync(path.join(dir, 'relay/asn/ui'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'relay/asn/ui/old.js'), 'x\n'.repeat(50))
+    g('add', '-A'); g('commit', '-qm', 'base'); g('tag', 'v0.0.1')
+    fs.mkdirSync(path.join(dir, 'tools'), { recursive: true })
+    g('mv', 'relay/asn/ui/old.js', 'tools/old.js'); g('commit', '-qm', '搬到 tools')
+    const files = changedFilesSince(args => g(...args), 'v0.0.1')
+    assert.ok(files.includes('relay/asn/ui/old.js'), `舊路徑要看得到：${files}`)
+    assert.deepEqual(tagged(plan(files.map(file => ({ file })))), [...PLATFORMS])
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

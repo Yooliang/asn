@@ -68,15 +68,26 @@ export function latestTag(git, pattern) {
 // 版號提交（release: x.y.z）只改版號與 CHANGELOG，不算這一版的改動：
 // 否則某平台上一版沒發時，別的平台的版號提交（動到 package.json、tauri.conf.json…）會把它拖成「要發」
 export const RELEASE_COMMIT = /^release: \d+\.\d+\.\d+/
+// 版號提交只准動這六個檔；標題像版號提交、但夾帶別的檔，就整筆照算（寧可多發，不能漏發）
+export const VERSION_FILES = new Set([
+  'relay/asn/package.json',
+  'relay/asn/src-tauri/tauri.conf.json',
+  'relay/asn/src-tauri/Cargo.toml',
+  'relay/asn/src-tauri/Cargo.lock',
+  'relay/claude-mod/.claude-plugin/plugin.json',
+  'relay/asn/CHANGELOG.md',
+])
 
-// 上一個標籤之後改到的檔：逐個提交列出，跳過合併提交與版號提交
+// 上一個標籤之後改到的檔：逐個提交列出，跳過合併提交與「只動版號六檔」的版號提交
+// --no-renames：搬檔要同時看到舊路徑的刪除與新路徑的新增
 export function changedFilesSince(git, tag) {
-  const out = git(['log', '--no-merges', '--format=%x1e%s', '--name-only', `${tag}..HEAD`])
+  const out = git(['log', '--no-merges', '--no-renames', '--format=%x1e%s', '--name-only', `${tag}..HEAD`])
   const files = new Set()
   for (const rec of out.split('\x1e').slice(1)) {
     const [subject, ...rest] = rec.split('\n')
-    if (RELEASE_COMMIT.test(subject.trim())) continue
-    for (const f of rest.map(s => s.trim()).filter(Boolean)) files.add(f)
+    const touched = rest.map(s => s.trim()).filter(Boolean)
+    if (RELEASE_COMMIT.test(subject.trim()) && touched.every(f => VERSION_FILES.has(f))) continue
+    for (const f of touched) files.add(f)
   }
   return [...files]
 }
