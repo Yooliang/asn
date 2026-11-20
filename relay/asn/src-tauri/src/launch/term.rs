@@ -6422,6 +6422,7 @@ mod tests {
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。
         /// 拿掉 live_pid 的 alive 檢查：崩潰後一直被當活著，沒有事故（紅）；拿掉接回或通知任一段也紅
+        #[cfg(feature = "gui")]
         mod t1818 {
             use super::*;
             use crate::bridge::known::{KnownEntry, WindowFacts};
