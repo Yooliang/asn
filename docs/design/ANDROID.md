@@ -264,18 +264,18 @@ Google Play 資料安全性申報要補：「音訊：語音或聲音錄音」�
 
 找不到金鑰檔時，指令會用中文說明並以非 0 結束。
 
-**GitHub Actions 恢復後**（同一支腳本直接用）：把服務帳戶 JSON 的全文存成 repo secret `ASN_PLAY_SA_JSON`，上傳金鑰檔與密碼另存為 `ASN_PLAY_UPLOAD_JKS`（base64）、`ASN_PLAY_UPLOAD_PASSWORD`。工作流程的步驟：
+**GitHub Actions 恢復後**（同一支腳本直接用）：把服務帳戶 JSON 全文先轉成 base64（多行 secret 的遮罩是逐行，改 base64 免漏遮），存成 environment `release` 的 secret `ASN_PLAY_SA_JSON_B64`（原名 `ASN_PLAY_SA_JSON`，未 base64）；上傳金鑰檔與密碼另存為 `ASN_PLAY_UPLOAD_JKS`（base64）、`ASN_PLAY_UPLOAD_PASSWORD`。工作流程的步驟：
 
 ```yaml
 - name: 還原 Play 金鑰
   shell: bash
   run: |
     mkdir -p "$HOME/.asn/play"
-    printf '%s' "$ASN_PLAY_SA_JSON" > "$HOME/.asn/play/play-service-account.json"
+    printf '%s' "$ASN_PLAY_SA_JSON_B64" | base64 -d > "$HOME/.asn/play/play-service-account.json"
     printf '%s' "$ASN_PLAY_UPLOAD_JKS" | base64 -d > "$HOME/.asn/play/upload.jks"
     printf '%s' "$ASN_PLAY_UPLOAD_PASSWORD" > "$HOME/.asn/play/upload.jks.password"
   env:
-    ASN_PLAY_SA_JSON: ${{ secrets.ASN_PLAY_SA_JSON }}
+    ASN_PLAY_SA_JSON_B64: ${{ secrets.ASN_PLAY_SA_JSON_B64 }}
     ASN_PLAY_UPLOAD_JKS: ${{ secrets.ASN_PLAY_UPLOAD_JKS }}
     ASN_PLAY_UPLOAD_PASSWORD: ${{ secrets.ASN_PLAY_UPLOAD_PASSWORD }}
 - name: 建置並上傳 Play 版
