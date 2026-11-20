@@ -15,6 +15,7 @@ const RULES = [
 ]
 const CUR = JSON.parse(fs.readFileSync(path.join(REPO, FILES.packageJson), 'utf8')).version
 const NEXT = nextPatch(CUR)
+const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 function mkTmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-tag-'))
@@ -32,7 +33,7 @@ function mkTmp() {
 function setup(over = {}) {
   const dir = mkTmp()
   const calls = []
-  const o = { branch: 'main', dirty: '', head: 'a'.repeat(40), originMain: 'a'.repeat(40), existingTags: [], changed: ['relay/asn/ui/x.js'], runFail: null, ...over }
+  const o = { branch: 'main', dirty: '', head: 'a'.repeat(40), originMain: 'a'.repeat(40), existingTags: [], changed: ['relay/asn/ui/x.js'], runFail: null, pushFail: null, remoteTags: null, ...over }
   const lastTags = [`v${CUR}`, `linux-v${CUR}`, `android-v${CUR}`]
   const git = (args, opt = {}) => {
     calls.push({ kind: 'git', args, input: opt.input })
@@ -42,6 +43,8 @@ function setup(over = {}) {
     if (k === 'rev-parse HEAD') return o.head
     if (k === 'rev-parse origin/main') return o.originMain
     if (k === 'rev-parse --short=8 HEAD') return 'aaaaaaaa'
+    if (k === 'ls-remote --tags origin') return (o.remoteTags ?? []).map(t => `${'c'.repeat(40)}\trefs/tags/${t}`).join('\n')
+    if (args[0] === 'push' && o.pushFail && args.includes(o.pushFail)) throw new Error('假的推送失敗')
     if (args[0] === 'tag' && args[1] === '--list') {
       const pat = args[2]
       const all = [...lastTags, ...o.existingTags]
@@ -62,6 +65,7 @@ function setup(over = {}) {
     git, run, rules: RULES,
     readFile: p => fs.readFileSync(path.resolve(dir, p), 'utf8'),
     writeFile: (p, t) => { calls.push({ kind: 'write', path: p }); fs.writeFileSync(path.resolve(dir, p), t) },
+    cwd: dir,
     now: () => new Date('2026-11-21T17:30:00Z'), // 台北已是 11-22
     log: s => logs.push(s),
   }
@@ -210,7 +214,8 @@ test('正常流程（三個都打）：六個檔改對、Cargo.lock 只動 asn�
   assert.deepEqual(tagCalls, [`v${NEXT}`, `linux-v${NEXT}`, `android-v${NEXT}`])
   const tc = s.calls.filter(c => c.kind === 'run' && c.args[0].includes('tag_check')).map(c => c.args.slice(1))
   assert.deepEqual(tc, [[`v${NEXT}`], [`linux-v${NEXT}`, '--prefix', 'linux-v'], [`android-v${NEXT}`, '--prefix', 'android-v']])
-  assert.deepEqual(s.calls.at(-1).args, ['push', 'origin', `v${NEXT}`, `linux-v${NEXT}`, `android-v${NEXT}`])
+  const tagPushes = s.calls.filter(c => c.kind === 'git' && c.args[0] === 'push' && c.args[2] !== 'HEAD:main').map(c => c.args)
+  assert.deepEqual(tagPushes, [['push', 'origin', `v${NEXT}`], ['push', 'origin', `linux-v${NEXT}`], ['push', 'origin', `android-v${NEXT}`]])
 })
 
 test('只打判斷出來的標籤（電腦＋Linux，不含手機）；CRLF 檔維持 CRLF', async () => {
@@ -259,7 +264,66 @@ test('推 main 之後 tag_check 失敗 → 不推標籤', async () => {
   const pushes = s.calls.filter(c => c.kind === 'git' && c.args[0] === 'push')
   assert.equal(pushes.length, 1)
   assert.deepEqual(pushes[0].args, ['push', 'origin', 'HEAD:main'])
-  assert.match(s.logs.join('\n'), /main 已經推上去了/)
+  const out = s.logs.join('\n')
+  assert.match(out, new RegExp(`main 已經含「release: ${esc(NEXT)}」`))
+  assert.match(out, /遠端已有的標籤：（無）/)
+  assert.match(out, new RegExp(`還沒推的標籤：v${esc(NEXT)}、linux-v${esc(NEXT)}、android-v`))
+  assert.match(out, new RegExp(`git push origin linux-v${esc(NEXT)}`))
+  assert.match(out, /不能再跑這個指令/)
+  assert.doesNotMatch(out, /git reset|git tag -d/)
+})
+
+test('推 main 之後 tag_check 失敗：遠端已有標籤時，列出已有、未推、接續與 :refs/tags/ 刪除指令（只印不執行）', async () => {
+  const s = setup({ runFail: 'android-v', remoteTags: [`v${NEXT}`, `linux-v${NEXT}`, 'v0.0.1'] })
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, false)
+  const out = s.logs.join('\n')
+  assert.match(out, new RegExp(`遠端已有的標籤：v${esc(NEXT)}、linux-v${esc(NEXT)}\n`))
+  assert.match(out, new RegExp(`還沒推的標籤：android-v${esc(NEXT)}\n`))
+  assert.match(out, new RegExp(`git push origin android-v${esc(NEXT)}`))
+  assert.match(out, new RegExp(`git push origin :refs/tags/v${esc(NEXT)}`))
+  assert.match(out, new RegExp(`git push origin :refs/tags/linux-v${esc(NEXT)}`))
+  assert.match(out, /不能再跑這個指令/)
+  assert.ok(s.calls.some(c => c.kind === 'git' && c.args.join(' ') === 'ls-remote --tags origin'))
+  assert.equal(s.calls.filter(c => c.kind === 'git' && c.args[0] === 'push').length, 1)
+})
+
+test('推標籤推到一半失敗（第二個標籤）：分清已推與未推', async () => {
+  const s = setup({ pushFail: `linux-v${NEXT}`, remoteTags: [`v${NEXT}`] })
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, false)
+  assert.equal(r.failedStep, '推標籤')
+  const out = s.logs.join('\n')
+  assert.match(out, new RegExp(`遠端已有的標籤：v${esc(NEXT)}\n`))
+  assert.match(out, new RegExp(`還沒推的標籤：linux-v${esc(NEXT)}、android-v${esc(NEXT)}\n`))
+  assert.match(out, new RegExp(`git push origin linux-v${esc(NEXT)}`))
+  assert.match(out, new RegExp(`git push origin :refs/tags/v${esc(NEXT)}`))
+  assert.doesNotMatch(out, /:refs\/tags\/linux-v/)
+  assert.match(out, /不能再跑這個指令/)
+})
+
+test('三個平台都打，條目卻標「只有手機版」或「電腦版與 Linux」→ 停；沒標平台的照過', async () => {
+  for (const mark of ['只有手機版', '電腦版與 Linux']) {
+    const s = setup({ changed: ['relay/asn/ui/x.js'] })
+    fs.writeFileSync(path.join(s.dir, 'items.json'), JSON.stringify(['改善：甲。', `修正（${mark}）：乙。`]))
+    const r = await releaseTag(opts(), s.deps)
+    assert.equal(r.ok, false, mark)
+    assert.match(s.logs.join('\n'), new RegExp(`第 2 條標了「${mark}」.*三個平台都打`))
+    assert.doesNotMatch(s.logs.join('\n'), /第 1 條標了/)
+    assert.equal(writes(s.calls).filter(c => c.kind === 'write').length, 0)
+  }
+})
+
+test('--items-file 指到不存在的檔 → 停，訊息帶完整路徑；壞 JSON 也是', async () => {
+  const s = setup()
+  const r = await releaseTag(opts({ itemsFile: 'nope.json' }), s.deps)
+  assert.equal(r.ok, false)
+  assert.ok(s.logs.join('\n').includes(`讀不到：${path.join(s.dir, 'nope.json')}（原因：`))
+  assert.equal(writes(s.calls).filter(c => c.kind === 'write').length, 0)
+  const s2 = setup()
+  fs.writeFileSync(path.join(s2.dir, 'bad.json'), '{壞')
+  assert.equal((await releaseTag(opts({ itemsFile: 'bad.json' }), s2.deps)).ok, false)
+  assert.ok(s2.logs.join('\n').includes(`不是合法的 JSON：${path.join(s2.dir, 'bad.json')}（原因：`))
 })
 
 test('--dry-run：不寫檔、不跑子程序、無任何 git 寫入；印出完整計畫', async () => {

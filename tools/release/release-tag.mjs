@@ -106,7 +106,16 @@ export function checkMarks(items, tags) {
   let need = null
   if (key === 'android') need = MARK_ANDROID_ONLY
   else if (key === 'desktop+linux') need = MARK_DESKTOP_LINUX
-  else if (key === 'desktop+linux+android') return []
+  else if (key === 'desktop+linux+android') {
+    // 三個平台都打：條目不該標成只有某幾個平台
+    items.forEach((it, i) => {
+      const mark = ITEM_RE.exec(it)[2] ?? ''
+      for (const bad of [MARK_ANDROID_ONLY, MARK_DESKTOP_LINUX]) {
+        if (mark.includes(bad)) problems.push(`第 ${i + 1} 條標了「${bad}」，但 ① 判斷這版三個平台都打，標註與判斷不符；請拿掉平台標註或改成實際範圍`)
+      }
+    })
+    return problems
+  }
   else return [`① 判斷這版只打「${set.map(p => PLATFORM_LABEL[p]).join('、')}」，這種組合沒有標註規則，請人工處理`]
   items.forEach((it, i) => {
     const mark = ITEM_RE.exec(it)[2] ?? ''
@@ -115,9 +124,11 @@ export function checkMarks(items, tags) {
   return problems
 }
 
-function loadItems(text) {
+function loadItems(readFile, file) {
+  let text
+  try { text = readFile(file) } catch (e) { stop(`--items-file 讀不到：${file}（原因：${e?.message ?? e}）`) }
   let given
-  try { given = JSON.parse(text) } catch { stop('--items-file 讀不到或不是合法的 JSON') }
+  try { given = JSON.parse(text) } catch (e) { stop(`--items-file 不是合法的 JSON：${file}（原因：${e?.message ?? e}）`) }
   const items = Array.isArray(given) ? given : given?.items
   if (!Array.isArray(items) || items.length === 0 || items.some(s => typeof s !== 'string' || s.trim() === '')) stop('--items-file 裡要有至少一條條目（字串陣列，或含 items 的物件），每條不可空白')
   return items.map(s => s.trim())
@@ -134,21 +145,53 @@ export async function releaseTag(opts, deps) {
   const log = deps.log ?? (() => {})
   const now = deps.now ?? (() => new Date())
   const completed = []
-  const state = { tags: [], mainPushed: false, committed: false, edited: false }
+  const state = { tags: [], tagList: [], mainPushed: false, committed: false, edited: false }
   let step = '前置檢查'
   const warns = [] // dry-run 時，前置檢查的問題只提醒、不停
 
   const problem = msg => { if (opts.dryRun) warns.push(msg); else stop(msg) }
 
+  // 推 main 之後才失敗：講清楚遠端現況與接續／撤回指令（只印，不執行）
+  const reportAfterMainPushed = () => {
+    let remote = []
+    let lsErr = null
+    try {
+      const out = git(['ls-remote', '--tags', 'origin'])
+      const refs = new Set(String(out ?? '').split('\n').map(l => l.trim().split(/\s+/)[1]).filter(Boolean).map(r => r.replace(/\^\{\}$/, '')))
+      remote = state.tagList.filter(t => refs.has(`refs/tags/${t}`))
+    } catch (e) { lsErr = e?.message ?? String(e) }
+    log(`遠端現況：main 已經含「release: ${opts.version}」這個提交。`)
+    if (lsErr) {
+      log(`  查不到遠端標籤（git ls-remote --tags origin 失敗：${lsErr}）；請自己執行 git ls-remote --tags origin 確認這一版的標籤 ${state.tagList.join('、')} 哪些已在遠端。`)
+      log('  若要接續，請對還沒在遠端的標籤逐一執行 git push origin <標籤>；若要撤掉遠端標籤，執行 git push origin :refs/tags/<標籤>。')
+    } else {
+      const left = state.tagList.filter(t => !remote.includes(t))
+      log(`  遠端已有的標籤：${remote.length ? remote.join('、') : '（無）'}`)
+      log(`  還沒推的標籤：${left.length ? left.join('、') : '（無）'}`)
+      if (left.length) {
+        log('接續指令（只列出來，不會自動執行，請人工確認 tag_check 的問題處理好後再下）：')
+        for (const t of left) log(`  git push origin ${t}`)
+      }
+      if (remote.length) {
+        log('若要撤掉遠端已有的標籤（只列出來，不會自動執行）：')
+        for (const t of remote) log(`  git push origin :refs/tags/${t}`)
+      }
+    }
+    log(`注意：同一個版號（${opts.version}）不能再跑這個指令：前置檢查會因為標籤已存在、版號又不是目前版號加一而停下。請照上面的指令手動接續；不要強制推 main，要補修請找領隊決定。`)
+  }
+
   const fail = msg => {
     log(`停下：第「${step}」步沒過：${msg}`)
     log(`已完成的步驟：${completed.length ? completed.join(' → ') : '（無）'}`)
-    log(state.mainPushed ? '還原方式（只列出來，不會自動執行，請人工確認後再下）：' : '沒有推任何東西；還原方式（只列出來，不會自動執行，請人工確認後再下）：')
+    if (state.mainPushed) {
+      reportAfterMainPushed()
+      return { ok: false, dryRun: !!opts.dryRun, failedStep: step, completed, version: opts.version, tags: state.tags }
+    }
+    log('沒有推任何東西；還原方式（只列出來，不會自動執行，請人工確認後再下）：')
     const undo = []
     for (const t of [...state.tags].reverse()) undo.push(`git tag -d ${t}`)
     if (state.committed && !state.mainPushed) undo.push('git reset --hard HEAD~1')
     else if (state.edited && !state.committed) undo.push(`git restore -- ${COMMIT_PATHS.join(' ')}`)
-    if (state.mainPushed) log('注意：main 已經推上去了，版號提交在遠端；不要強制推，請找領隊決定要補修還是接著發。')
     if (undo.length) for (const u of undo) log(`  ${u}`)
     else log('  （不需要還原）')
     return { ok: false, dryRun: !!opts.dryRun, failedStep: step, completed, version: opts.version, tags: state.tags }
@@ -183,7 +226,7 @@ export async function releaseTag(opts, deps) {
     }
 
     if (!opts.itemsFile) stop('沒給 --items-file：條目要由人寫，這支程式不自動編')
-    const items = loadItems(readFile(opts.itemsFile))
+    const items = loadItems(readFile, path.resolve(deps.cwd ?? process.cwd(), opts.itemsFile))
 
     // ① 平台判斷
     const rules = deps.rules ?? loadRules()
@@ -192,6 +235,7 @@ export async function releaseTag(opts, deps) {
     const tags = {}
     for (const p of PLATFORMS) tags[p] = !!(plan.perPlatform[p].missing || plan.perPlatform[p].plan.platforms[p].tag)
     const tagList = PLATFORMS.filter(p => tags[p]).map(p => `${TAG_PREFIX[p]}${ver}`)
+    state.tagList = tagList
     if (tagList.length === 0) stop('① 判斷三個平台都不打：不佔版本的改動不該走到發版這一步')
     const markProblems = checkMarks(items, tags)
     if (markProblems.length) stop(`條目與平台判斷對不上：${markProblems.join('；')}`)
@@ -298,7 +342,7 @@ export async function releaseTag(opts, deps) {
 
     // ---------- 9 推標籤 ----------
     step = '推標籤'
-    git(['push', 'origin', ...tagList])
+    for (const t of tagList) git(['push', 'origin', t]) // 一個一個推，失敗時才分得清已推和未推
     completed.push('推標籤')
     log(`發版完成：${ver}；已推標籤 ${tagList.join('、')}`)
     return { ok: true, dryRun: false, failedStep: null, completed, version: ver, tags: tagList }
