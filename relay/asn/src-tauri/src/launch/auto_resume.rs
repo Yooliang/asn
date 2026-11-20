@@ -250,6 +250,7 @@ pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resum
 
 /// `after_mux_crash` 的本體（對外的動作都經 `deps`，測試用假的）：接回、寫紀錄、排「接回結果」通知。
 /// `lock` 取同一時間只讓一條接回在跑的鎖（回的東西活著期間持鎖）
+#[cfg(feature = "gui")]
 pub fn resume_entries<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool, deps: &dyn Deps, lock: impl FnOnce() -> G) -> Status {
     let now = deps.now();
     if !resume {
