@@ -95,6 +95,58 @@ export async function checkOnce({ expected: e, base, fetchFn, t }) {
   return problems
 }
 
+// ---- Linux 版線上核對（附加在電腦版之後）：電腦版項不准被動到，Linux 項與檔案、首頁連結都要對
+// expected：{ version, windows: { signature, url }, linux: { signature, url, sigText, appImage: { name, sha256, size }, deb: { name, sha256, size } } }
+export async function verifyOnlineLinux({ expected, base = DEFAULT_BASE, fetchFn = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now, attempts = 10, intervalMs = 15000, log = () => {} }) {
+  let problems = []
+  for (let n = 1; n <= attempts; n++) {
+    problems = await checkLinuxOnce({ expected, base, fetchFn, t: now() })
+    if (problems.length === 0) return { ok: true, attempts: n, problems }
+    log(`線上核對（Linux）第 ${n}／${attempts} 次沒過（${problems.length} 項）：${problems[0]}`)
+    if (n < attempts) await sleep(intervalMs)
+  }
+  return { ok: false, attempts, problems }
+}
+
+export async function checkLinuxOnce({ expected: e, base, fetchFn, t }) {
+  const problems = []
+  const push = m => problems.push(m)
+  const L = e.linux
+  const siteUrl = name => `${base}/update/${encodeURIComponent(name)}`
+  const lj = await get(fetchFn, `${base}/update/latest.json`, t, 'text')
+  if (lj.err) push(lj.err)
+  else {
+    let j = null
+    try { j = JSON.parse(lj.value) } catch { push('線上 latest.json 不是合法的 JSON') }
+    if (j) {
+      if (j.version !== e.version) push(`線上 latest.json 的 version 是 ${j.version}，預期 ${e.version}`)
+      const w = j.platforms?.['windows-x86_64']
+      if (w?.signature !== e.windows.signature || w?.url !== e.windows.url) push('線上 latest.json 的電腦版項被動到了（與部署前不同）')
+      const p = j.platforms?.['linux-x86_64']
+      if (p?.signature !== L.signature) push('線上 latest.json 的 linux-x86_64 signature 與預期不同')
+      if (p?.url !== L.url) push(`線上 latest.json 的 linux-x86_64 url 是 ${p?.url}，預期 ${L.url}`)
+    }
+  }
+  for (const f of [L.appImage, L.deb]) {
+    const r = await get(fetchFn, siteUrl(f.name), t, 'buffer')
+    if (r.err) push(r.err)
+    else {
+      if (r.value.length !== f.size) push(`線上 ${f.name} 大小 ${r.value.length}，預期 ${f.size}`)
+      if (sha256(r.value) !== f.sha256) push(`線上 ${f.name} 的 sha256 與預期不同`)
+    }
+  }
+  const sig = await get(fetchFn, `${siteUrl(L.appImage.name)}.sig`, t, 'text')
+  if (sig.err) push(sig.err)
+  else if (sig.value.trim() !== String(L.sigText).trim()) push('線上 AppImage 的 .sig 與預期不同')
+  const home = await get(fetchFn, `${base}/`, t, 'text')
+  if (home.err) push(home.err)
+  else {
+    for (const f of [L.appImage, L.deb]) if (!home.value.includes(`href="${siteUrl(f.name)}"`)) push(`線上首頁找不到 ${f.name} 的連結`)
+    for (const m of home.value.matchAll(INSTALLER_HREF_RE)) if (m[0] !== `href="${e.windows.url}"`) push(`線上首頁的電腦版連結被動到了：${m[0]}`)
+  }
+  return problems
+}
+
 // ---- 薄 CLI：node tools/release/verify_online.mjs --version <版本> --exe <安裝檔> --sig <.sig> [--site <site 資料夾>] [--base <網址>]
 // 預期值取本機：site/public/update/latest.json（notes、signature）、安裝檔、.sig、site/public/skill/version.json
 export async function main(argv = process.argv.slice(2), { readFile = p => fs.readFileSync(p), log = console.log, fetchFn = fetch, sleep } = {}) {

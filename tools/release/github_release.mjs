@@ -24,8 +24,9 @@ export const installerFiles = v => [`ASN_${v}_x64-setup.exe`, `ASN_${v}_x64-setu
 export const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
 
 // 官網 update/ 底下的安裝檔路徑 → GitHub Release 的網址（跟 site/firebase.json 的轉址規則同一套；認不得的回 null）
-// 檔名：ASN_<版本>_x64-setup.exe、ASN_<版本>_x64-setup.exe.sig、ASN_<版本>_android.apk
-export const INSTALLER_FILE_RE = /^ASN_(\d+\.\d+\.\d+)_(?:x64-setup\.exe(?:\.sig)?|android\.apk)$/
+// 檔名：ASN_<版本>_x64-setup.exe、ASN_<版本>_x64-setup.exe.sig、ASN_<版本>_android.apk、
+//       Linux：ASN_<版本>_amd64.AppImage、ASN_<版本>_amd64.AppImage.sig、ASN_<版本>_amd64.deb
+export const INSTALLER_FILE_RE = /^ASN_(\d+\.\d+\.\d+)_(?:x64-setup\.exe(?:\.sig)?|android\.apk|amd64\.(?:AppImage(?:\.sig)?|deb))$/
 export function githubUrlForSite(url) {
   if (typeof url !== 'string' || !url.startsWith(SITE_UPDATE)) return null
   const name = decodeURIComponent(url.slice(SITE_UPDATE.length))
@@ -42,6 +43,32 @@ export function releaseState(gh, version) {
   }
   const j = JSON.parse(out)
   return { draft: j.isDraft === true, assets: new Map((j.assets ?? []).map(a => [a.name, a.size])) }
+}
+
+/**
+ * 附加檔案到「已存在」的 v<版本> Release（Linux 版用：電腦版已發好、Release 已公開是預期狀態）。
+ * 不建 Release、不轉正式、不改 Latest；同名檔已存在就停（不覆蓋）；上傳後下載回來比對 sha256
+ * （公開版匿名下載、草稿版用 gh 登入下載）。驗證不一致只報錯，不自動刪檔（刪除要人工確認）。
+ */
+export async function attachToRelease({ version, files, gh, ghDownload, fetchFn = fetch, tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-gh-attach-')), log = () => {} }) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`版本號格式不對：${version}`)
+  const tag = tagOf(version)
+  const want = files.map(f => { const buf = fs.readFileSync(f.file); return { name: f.name, size: buf.length, sha256: sha256(buf), file: f.file } })
+  const st = releaseState(gh, version)
+  if (!st) throw new Error(`${tag} 的 Release 不存在：Linux 版只附加到已發的電腦版 Release，請先發電腦版`)
+  for (const w of want) if (st.assets.has(w.name)) throw new Error(`${tag} 上已經有 ${w.name}：不覆蓋，請人工確認`)
+  for (const w of want) { gh(['release', 'upload', tag, w.file, '--repo', REPO]); log(`已附加 ${w.name}（${w.size} 位元組）`) }
+  for (const w of want) {
+    let got
+    if (st.draft) {
+      const dir = fs.mkdtempSync(path.join(tmp, 'dl-'))
+      ghDownload(version, w.name, dir)
+      got = fs.readFileSync(path.join(dir, w.name))
+    } else got = await download(fetchFn, githubUrl(version, w.name))
+    if (sha256(got) !== w.sha256) throw new Error(`${tag} 上附加的 ${w.name} 下載回來的 sha256 跟本機的不一樣：檔已上傳、沒有自動刪除，請人工處理，不要部署官網`)
+  }
+  log(`${tag} 附加完成並下載比對一致：${want.map(w => w.name).join('、')}`)
+  return { attached: want.map(w => w.name), draft: st.draft }
 }
 
 async function download(fetchFn, url) {

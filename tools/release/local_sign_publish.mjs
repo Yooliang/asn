@@ -7,6 +7,8 @@
 // 簽章金鑰與密碼：這支程式從不讀、不經手、不印；簽章函式（signer）自己讀金鑰資料夾，密碼只走環境變數交給 tauri；這裡只確認「存在、大小」。
 // 用法：node tools/release/local_sign_publish.mjs --tag v<版本>（或 --version <版本>）[--run-id <id>] [--dry-run] [--with-play auto|yes|no]
 //         [--same-version] [--items-file <json>] [--room <群組代號，或環境變數 ASN_RELEASE_ROOM>]
+// Linux 版（電腦版發好之後）：node tools/release/local_sign_publish.mjs --platform linux --tag linux-v<版本> [--run-id <id>] [--dry-run] [--room <群組代號>]
+//   做法見 linux_publish.mjs：簽 AppImage、附加到既有 Release v<版本>、latest.json 只加 linux-x86_64、首頁加 Linux 連結、部署與線上核對。
 // --items-file：與 CI 草稿同格式的 JSON 物件（version、date、commit、items、platforms），或只有條目的字串陣列；仍過同一組檢查。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -19,7 +21,8 @@ import { verifyAll, sigMatchesLatest } from './verify_sig.mjs'
 import { verifyOnline } from './verify_online.mjs'
 import { checkRecord } from './site_record_check.mjs'
 import { listZip } from './zip_lite.mjs'
-import { publishRelease as realPublishRelease } from './github_release.mjs'
+import { publishRelease as realPublishRelease, attachToRelease as realAttachToRelease } from './github_release.mjs'
+import { linuxSignPublish } from './linux_publish.mjs'
 
 export const REPO = 'Yooliang/asn'
 export const WORKFLOW = '.github/workflows/asn-release.yml'
@@ -40,12 +43,13 @@ export const compareVersions = (a, b) => {
 }
 
 export function parseArgs(argv) {
-  const o = { tag: null, version: null, runId: null, dryRun: false, withPlay: 'auto', sameVersion: false, itemsFile: null, room: null, error: null }
+  const o = { platform: 'windows', tag: null, version: null, runId: null, dryRun: false, withPlay: 'auto', sameVersion: false, itemsFile: null, room: null, error: null }
   const val = (i, k) => { const v = argv[i + 1]; if (v === undefined || v.startsWith('--')) { o.error = `${k} 後面要有值`; return null } return v }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     if (a === '--dry-run') o.dryRun = true
     else if (a === '--same-version') o.sameVersion = true
+    else if (a === '--platform') o.platform = val(i++, a)
     else if (a === '--tag') o.tag = val(i++, a)
     else if (a === '--version') o.version = val(i++, a)
     else if (a === '--run-id') o.runId = val(i++, a)
@@ -55,14 +59,19 @@ export function parseArgs(argv) {
     else o.error = `不認得的參數：${a}`
   }
   if (o.error) return o
-  if (!['auto', 'yes', 'no'].includes(o.withPlay)) o.error = '--with-play 只能是 auto、yes、no'
+  const linux = o.platform === 'linux'
+  const TAG_RE = linux ? /^linux-v\d+\.\d+\.\d+$/ : /^v\d+\.\d+\.\d+$/
+  const prefix = linux ? 'linux-v' : 'v'
+  if (!['windows', 'linux'].includes(o.platform)) o.error = '--platform 只能是 windows 或 linux'
+  else if (linux && (o.withPlay !== 'auto' || o.sameVersion || o.itemsFile)) o.error = 'Linux 版不用 --with-play、--same-version、--items-file'
+  else if (!['auto', 'yes', 'no'].includes(o.withPlay)) o.error = '--with-play 只能是 auto、yes、no'
   else if (o.runId !== null && !/^\d+$/.test(o.runId)) o.error = '--run-id 要是數字'
-  else if (o.tag && !/^v\d+\.\d+\.\d+$/.test(o.tag)) o.error = `標籤格式不對：${o.tag}`
+  else if (o.tag && !TAG_RE.test(o.tag)) o.error = `標籤格式不對：${o.tag}`
   else if (o.version && !/^\d+\.\d+\.\d+$/.test(o.version)) o.error = `版本格式不對：${o.version}`
-  else if (o.tag && o.version && o.tag !== `v${o.version}`) o.error = '--tag 與 --version 不一致'
+  else if (o.tag && o.version && o.tag !== `${prefix}${o.version}`) o.error = '--tag 與 --version 不一致'
   else if (!o.tag && !o.version) o.error = '要給 --tag 或 --version'
-  else if (!o.tag) o.tag = `v${o.version}`
-  if (!o.error) o.version = o.tag.slice(1)
+  else if (!o.tag) o.tag = `${prefix}${o.version}`
+  if (!o.error) o.version = o.tag.slice(prefix.length)
   return o
 }
 
@@ -74,6 +83,7 @@ export function parseArgs(argv) {
  * 回 { ok, dryRun, failedStep, completed, record, latest }
  */
 export async function localSignPublish(opts, deps) {
+  if (opts.platform === 'linux') return linuxSignPublish(opts, { ...deps, fs: deps.fs ?? fs, attachRelease: deps.attachRelease ?? realAttachToRelease })
   const { git, gh, ghDownloadArtifact, ghDownload, asnCli, firebase, signer, fetchFn, sleep, publishRelease, runTests, repoRoot } = deps
   const fsx = deps.fs ?? fs
   const log = deps.log ?? (() => {})
@@ -424,8 +434,9 @@ function realDeps(repoRoot, env) {
     fetchFn: fetch,
     sleep: ms => new Promise(r => setTimeout(r, ms)),
     publishRelease: realPublishRelease,
+    attachRelease: realAttachToRelease,
     runTests: () => {
-      const files = ['tests/site_predeploy.test.mjs', 'tests/github_release.test.mjs', 'relay/asn/test/ci-workflow-guard.test.mjs', 'relay/asn/test/release-workflow-guard.test.mjs'].filter(f => fs.existsSync(path.join(repoRoot, f)))
+      const files = ['tests/site_predeploy.test.mjs', 'tests/github_release.test.mjs', 'relay/asn/test/ci-workflow-guard.test.mjs', 'relay/asn/test/release-workflow-guard.test.mjs', 'relay/asn/test/local-sign-publish-linux.test.mjs'].filter(f => fs.existsSync(path.join(repoRoot, f)))
       const r = spawnSync(process.execPath, ['--test', ...files], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
       return { ok: r.status === 0, output: r.stdout }
     },
@@ -436,7 +447,7 @@ function realDeps(repoRoot, env) {
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const opts = parseArgs(argv)
-  if (opts.error) { console.error(`${opts.error}\n用法：--tag v<版本> [--run-id <id>] [--dry-run] [--with-play auto|yes|no] [--same-version] [--items-file <json>] [--room <代號>]`); return 2 }
+  if (opts.error) { console.error(`${opts.error}\n用法：[--platform linux] --tag v<版本>（Linux 用 linux-v<版本>） [--run-id <id>] [--dry-run] [--with-play auto|yes|no] [--same-version] [--items-file <json>] [--room <代號>]`); return 2 }
   opts.room = opts.room ?? env.ASN_RELEASE_ROOM ?? null
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
   const r = await localSignPublish(opts, realDeps(repoRoot, env))
