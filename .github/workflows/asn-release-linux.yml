@@ -1,0 +1,300 @@
+name: ASN Linux 發版（標籤觸發）
+
+# 第三條獨立管線（電腦版是 asn-release.yml 的 v*.*.*、手機是 android-v*）：Linux 版只接 deb 與 AppImage。
+# 只吃 linux-v<主>.<次>.<修訂> 標籤（例如 linux-v0.2.38）；不加 workflow_dispatch（重跑用 Re-run failed jobs）。
+# 做法比照電腦版：CI 不簽章、不發 Release、不部署；簽章與發 Release 在本機腳本（Linux 檔附加到同版的 GitHub Release）。
+# 這份 workflow 沒有 secrets、沒有 environment（只用 github.token）。
+# 開關：repo variable ASN_RELEASE_AUTO（與電腦版共用），只有值恰為 true 才開；未設定一律視為 false，下游全略過。
+#
+# 與電腦版的差異：
+# 1) 不檢查「同版的 GitHub Release 已公開」：電腦版 v<版本> 的 Release 通常先發，Linux 檔是之後附加到同一個 Release，所以已公開是正常情況。
+# 2) 不跑官網紀錄預檢與草稿：官網紀錄是電腦版那條線的事；CHANGELOG 第一段是否合格仍由 tag_check 檢查。
+# 3) 標籤 commit 是否在 main 上，查的是 linux-v 標籤本身（tag_check --prefix linux-v，整個標籤名交給它），不是 v<版本> 那顆。
+on:
+  push:
+    tags:
+      - 'linux-v*.*.*'
+
+permissions:
+  contents: read
+
+# 每個標籤一組、不取消：連推標籤時中間的不會被靜默取消（別的標籤的 run 由 guard 檢查）
+concurrency:
+  group: asn-release-linux-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- 0. 守門：無 secrets、無 environment（所以讀得到 repo variable）。只是防呆，不是安全邊界 ----
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      auto: ${{ steps.auto.outputs.auto }}
+      version: ${{ steps.tag.outputs.version }}
+      failed_step: ${{ steps.where.outputs.name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都是 false）
+      - name: 讀自動發版開關
+        id: auto
+        env:
+          ASN_RELEASE_AUTO: ${{ vars.ASN_RELEASE_AUTO }}
+        run: |
+          set -euo pipefail
+          if [ "${ASN_RELEASE_AUTO:-}" = "true" ]; then auto=true; else auto=false; fi
+          echo "auto=$auto" >> "$GITHUB_OUTPUT"
+          echo "自動發版開關：$auto"
+
+      # tag_check 用 --prefix linux-v：版本檔與 CHANGELOG 對 linux-v 後面的版本，「在 main 上」查的就是 linux-v 標籤本身
+      - name: 標籤與版本檔檢查
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^linux-v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]; then
+            echo "標籤格式不對：只收 linux-v 加三段數字（例如 linux-v0.2.38）" >&2
+            exit 1
+          fi
+          node tools/release/tag_check.mjs "$TAG" --prefix linux-v
+
+      - name: 沒有別的發版 run 在跑
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          found=""
+          for st in queued in_progress waiting pending; do
+            all=$(gh api "repos/$REPO/actions/workflows/asn-release-linux.yml/runs?status=$st&per_page=100" --jq '.workflow_runs[].id')
+            ids=$(printf '%s\n' "$all" | grep -vx "$RUN_ID" | grep -v '^$' || true)
+            if [ -n "$ids" ]; then found="$found $ids"; fi
+          done
+          if [ -n "$found" ]; then
+            echo "還有別的 Linux 發版 run 在跑或排隊（run 編號：$found）：等它結束再重跑這一個" >&2
+            exit 1
+          fi
+          echo "沒有別的 Linux 發版 run"
+
+      # 哪一步失敗：只輸出固定的中文名，給 notify 用（名字必須在 notify_status.mjs 的 GUARD_STEPS 裡）
+      - name: 記錄卡在哪一步
+        id: where
+        if: failure()
+        env:
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          RUNS_OUTCOME: ${{ steps.runs.outcome }}
+        run: |
+          set -euo pipefail
+          name="其他"
+          if [ "$TAG_OUTCOME" = "failure" ]; then name="標籤與版本檔"
+          elif [ "$RUNS_OUTCOME" = "failure" ]; then name="別的發版 run 在跑"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+  # ---- 1. Linux 版：無 environment、無 secrets。建置步驟照 asn-linux-build.yml 的 build job；測試全跑、不略過 ----
+  linux:
+    needs: guard
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: relay/asn
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # apt 套件：只還原 .deb 快取、不儲存（快取由 main 上的 CI 更新；這裡不寫快取）
+      - name: 算 apt 快取 key
+        id: aptkey
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: 還原 apt 套件快取
+        id: aptcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-cache
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/apt-build-packages.txt', '.github/scripts/apt-install.sh') }}-${{ steps.aptkey.outputs.week }}
+
+      - name: 安裝系統依賴
+        id: aptinstall
+        timeout-minutes: 20
+        env:
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-cache/debs
+          APT_LISTS_CACHE: ${{ runner.temp }}/apt-cache
+        run: |
+          set -euo pipefail
+          mapfile -t pkgs < <(grep -vE '^\s*(#|$)' "$GITHUB_WORKSPACE/.github/apt-build-packages.txt")
+          bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" "${pkgs[@]}"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: relay/asn/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: release-linux
+          save-if: false
+
+      - name: 安裝前端依賴
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: 單元測試（Node）
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: 單元測試（Rust）
+        run: |
+          set -euo pipefail
+          npm run test:rust
+
+      # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，不碰任何真的帳號或 secrets
+      - name: 系統金鑰庫整合測試（Linux）
+        working-directory: relay/asn/src-tauri
+        run: |
+          set -euo pipefail
+          dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
+
+      # npm run build 用 tauri.nosign.conf.json（createUpdaterArtifacts=false，不產更新器檔與 .sig），Linux 只會有 deb 與 AppImage；
+      # 打包 AppImage 會從 GitHub 抓工具，外部服務 5xx／逾時才重試（最多 3 次），其他失敗照常紅
+      - name: 建置 deb 與 AppImage
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "建置 deb 與 AppImage" --before 'rm -rf "$GITHUB_WORKSPACE/relay/asn/src-tauri/target/release/bundle/appimage" "$HOME/.cache/tauri"' -- npm run build
+
+      - name: 需要成品的測試（端到端）
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          xvfb-run -a node --test --test-timeout=600000 test/e2e.test.mjs test/launch-cwd.test.mjs test/login.test.mjs test/partner-launch-notice-shot.test.mjs
+
+      - name: 冒煙測試（畫面啟動）
+        run: |
+          set -euo pipefail
+          node scripts/smoke-ui.mjs
+
+      # 只收 .deb 與 .AppImage（各恰好一個）；SHA256SUMS.txt 的檔名不帶路徑
+      - name: 整理安裝檔與 SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/linux-out"
+          mkdir -p "$out"
+          bundle=src-tauri/target/release/bundle
+          for pat in "$bundle/deb/*.deb" "$bundle/appimage/*.AppImage"; do
+            n=$(ls $pat 2>/dev/null | wc -l)
+            if [ "$n" -ne 1 ]; then echo "$pat 應該恰好一個，實際 $n 個" >&2; exit 1; fi
+            cp $pat "$out/"
+          done
+          (cd "$out" && sha256sum -- *.deb *.AppImage > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: 上傳安裝檔與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-linux-unsigned
+          path: ${{ runner.temp }}/linux-out/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  # ---- 2. 來源證明：只拿安裝檔，只有這個 job 有 id-token 與 attestations 寫入權 ----
+  attest-linux:
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-linux-unsigned
+          path: linux-in
+
+      - name: 核對 SHA256SUMS.txt
+        working-directory: linux-in
+        run: |
+          set -euo pipefail
+          sha256sum -c SHA256SUMS.txt
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            linux-in/*.deb
+            linux-in/*.AppImage
+
+  # ---- 3. 通知：無 environment、無 secrets；成功失敗都留一行（只寫哪一步與連結，不貼 log） ----
+  notify:
+    needs:
+      - guard
+      - linux
+      - attest-linux
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 組通知文字並寫 step summary
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GUARD_STEP: ${{ needs.guard.outputs.failed_step }}
+        run: |
+          set -euo pipefail
+          node tools/release/notify_run.mjs --out "$RUNNER_TEMP/notify.md"
+
+      # 留言失敗不讓 notify 紅：只剩 step summary，並在裡面寫明
+      - name: 在發版紀錄 issue 留言
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ vars.ASN_RELEASE_ISSUE }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${ISSUE:-}" =~ ^[0-9]+$ ]]; then
+            echo "沒有設定 ASN_RELEASE_ISSUE：這次沒有留言，只有 step summary。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/notify.md"; then
+            echo "留言到發版紀錄 issue 失敗：通知只剩這份 step summary。" >> "$GITHUB_STEP_SUMMARY"
+          fi

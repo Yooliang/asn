@@ -4,6 +4,9 @@
 // level：success（全部完成）、info（略過）、warning（部分完成或被中止）、error（失敗或異常）。
 
 export const JOBS = ['preflight-play', 'desktop', 'attest', 'site-draft', 'android-build', 'android-upload']
+// Linux 發版（asn-release-linux.yml）另一條獨立管線的 job：不放進 JOBS，免得電腦版／Play 的通知把它們當成「不明的略過」
+export const LINUX_JOBS = ['linux', 'attest-linux']
+export const ALL_JOBS = [...JOBS, ...LINUX_JOBS]
 export const JOB_NAME = {
   guard: '標籤檢查',
   'preflight-play': 'Play 版號預檢',
@@ -12,11 +15,14 @@ export const JOB_NAME = {
   'site-draft': '官網紀錄草稿',
   'android-build': 'Android 建置',
   'android-upload': 'Play 上傳',
+  linux: 'Linux 版建置與測試',
+  'attest-linux': 'Linux 安裝檔來源證明',
 }
 // 每個 job 的上游（needs，不含 guard 以外的全體）；用來分辨「上游失敗造成的 skipped」
 const NEEDS = {
   'preflight-play': ['guard'], desktop: ['guard'], attest: ['desktop'], 'site-draft': ['guard'],
   'android-build': ['guard', 'preflight-play'], 'android-upload': ['android-build'],
+  linux: ['guard'], 'attest-linux': ['linux'],
 }
 
 // repo variable ASN_RELEASE_AUTO：只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都不是）
@@ -33,7 +39,9 @@ const names = list => list.map(j => JOB_NAME[j]).join('、')
 
 // jobs：這次 workflow 實際有的 job（預設全部）；只有電腦版與官網時不帶 Play 三個 job，文字就不提 Play
 export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep, jobs: jobList = JOBS } = {}) {
-  const JOBS_IN = JOBS.filter(j => jobList.includes(j))
+  const JOBS_IN = ALL_JOBS.filter(j => jobList.includes(j))
+  // 只有 Linux 的 workflow（沒有電腦版 job）：文字說 Linux，不提電腦版與 Play
+  const linuxOnly = JOBS_IN.includes('linux') && !JOBS_IN.includes('desktop')
   const withPlay = JOBS_IN.some(j => j === 'preflight-play' || j.startsWith('android-'))
   // 手機版自己的 workflow（#1944）：只有 Play 系列 job、沒有電腦版與官網 job，文字只講 Play
   const playOnly = withPlay && !JOBS_IN.some(j => ['desktop', 'attest', 'site-draft'].includes(j))
@@ -68,10 +76,15 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
   if (failed.length === 0) {
     if (cancelled.length) return mk('warning', `【發版中止】${head}run 被取消，已完成：${succeeded.length ? names(succeeded) : '無'}${unexplained.length ? oddNote : ''}`)
     if (unexplained.length) return mk('error', `【發版異常】${head}上游沒失敗、開關也沒關卻被略過：${names(unexplained)}`)
+    if (linuxOnly) return mk('success', `【CI 完成】${head}Linux 未簽章安裝檔已就緒，尚未上線。CI 好了，14 天內要簽`)
     if (playOnly) return mk('success', `【CI 完成】${head}Play internal 已就緒（已上傳內部測試軌），尚未對外發布`)
     return mk('success', `【CI 完成】${head}${withPlay ? '未簽章安裝檔與 Play internal 已就緒' : '未簽章安裝檔已就緒'}，尚未上線。CI 好了，14 天內要簽`)
   }
 
+  if (linuxOnly) {
+    const linuxFail = LINUX_JOBS.filter(j => failed.includes(j))
+    return mk('error', `【發版失敗】${head}Linux 版失敗（卡在${names(linuxFail)}）${cancelNote}${oddNote}`, failed)
+  }
   if (playOnly) {
     const fails = ['preflight-play', 'android-build', 'android-upload'].filter(j => failed.includes(j))
     const line = fails.includes('preflight-play') ? 'Play 未上傳（版號預檢沒過）'
