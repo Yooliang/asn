@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 import { playVersionCode, suffixFromArgs } from './play-version.mjs'
-import { GOOGLE_SERVICES_REL, pushConfigWarning } from './release-android-lib.mjs'
+import { GOOGLE_SERVICES_REL, pushConfigWarning, requireUploadKey, uploadKeyProblem } from './release-android-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
@@ -43,6 +43,14 @@ const run = (cmd, args) => { const r = spawnSync(cmd, args, { cwd: root, stdio: 
 const keyDir = process.env.ASN_PLAY_KEY_DIR || path.join(os.homedir(), '.asn', 'play')
 const keystore = path.join(keyDir, 'upload.jks')
 const passFile = path.join(keyDir, 'upload.jks.password')
+// 硬擋（#1892、#1944）：帶 --upload，或設了 ASN_REQUIRE_UPLOAD_KEY=1（CI 的正式建置），金鑰資料夾缺正式檔就中止，絕不自己產新金鑰
+const keyProblem = uploadKeyProblem({
+  required: requireUploadKey(process.argv.slice(2), process.env),
+  hasKeystore: fs.existsSync(keystore),
+  hasPassFile: fs.existsSync(passFile),
+  keyDir,
+})
+if (keyProblem) fail(keyProblem)
 if (!fs.existsSync(keystore)) {
   fs.mkdirSync(keyDir, { recursive: true })
   if (process.platform === 'win32') {

@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url'
 import { changelogSections, sectionItems } from './site_record_check.mjs'
 
 export const TAG_RE = /^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/
+// 前綴：電腦版 'v'（預設，行為不變）；手機版 'android-v'（#1944，分開打標籤）。只收這兩個
+export const TAG_PREFIXES = ['v', 'android-v']
+export const TAG_REGEX = { v: TAG_RE, 'android-v': /^android-v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/ }
 
 // Cargo.lock 裡 name = "asn" 那一段的版本；找不到或不只一段回 null
 export function cargoLockVersion(text) {
@@ -32,12 +35,15 @@ const jsonVersion = text => {
 // files：{ packageJson, cargoLock, cargoToml, tauriConf, changelog }（全是檔案文字）
 // git：{ isAncestorOfMain(tag) → boolean }（呼叫端用 git merge-base --is-ancestor，失敗要拋或回 false）
 // 回 { ok, version, problems }，problems 是中文字串清單
-export function checkTag({ tag, files, git }) {
+// prefix：'v'（預設）或 'android-v'；不認得的前綴直接判失敗
+export function checkTag({ tag, files, git, prefix = 'v' }) {
   const problems = []
-  if (typeof tag !== 'string' || !TAG_RE.test(tag)) {
-    return { ok: false, version: null, problems: ['標籤格式不對：只收 v 加三段數字（例如 v0.2.37），不收四段、-rc 或缺 v'] }
+  const re = TAG_REGEX[prefix]
+  if (!re) return { ok: false, version: null, problems: [`不認得的標籤前綴：${String(prefix)}`] }
+  if (typeof tag !== 'string' || !re.test(tag)) {
+    return { ok: false, version: null, problems: [`標籤格式不對：只收 ${prefix} 加三段數字（例如 ${prefix}0.2.37），不收四段、-rc 或缺前綴`] }
   }
-  const version = tag.slice(1)
+  const version = tag.slice(prefix.length)
   const found = {
     'relay/asn/package.json': jsonVersion(files.packageJson),
     'relay/asn/src-tauri/Cargo.lock（asn 套件）': cargoLockVersion(files.cargoLock),
@@ -69,7 +75,9 @@ export function main(argv = process.argv.slice(2), env = process.env, {
   run = a => execFileSync('git', a, { stdio: 'ignore' }),
   log = console.log,
 } = {}) {
-  const tag = argv[0] ?? env.GITHUB_REF_NAME
+  const pi = argv.indexOf('--prefix')
+  const prefix = pi >= 0 ? argv[pi + 1] : 'v'
+  const tag = (argv[0] && !argv[0].startsWith('--') ? argv[0] : undefined) ?? env.GITHUB_REF_NAME
   const base = 'relay/asn'
   const rd = rel => { try { return readFile(path.join(base, rel)) } catch { return '' } }
   const files = {
@@ -77,7 +85,7 @@ export function main(argv = process.argv.slice(2), env = process.env, {
     tauriConf: rd('src-tauri/tauri.conf.json'), changelog: rd('CHANGELOG.md'),
   }
   const git = { isAncestorOfMain: t => { try { run(['merge-base', '--is-ancestor', `${t}^{commit}`, 'origin/main']); return true } catch { return false } } }
-  const r = checkTag({ tag, files, git })
+  const r = checkTag({ tag, files, git, prefix })
   if (!r.ok) {
     log(`標籤檢查沒過（${r.problems.length} 項）：`)
     for (const p of r.problems) log(`- ${p}`)

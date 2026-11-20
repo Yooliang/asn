@@ -1,0 +1,414 @@
+name: ASN 發版（Android／Play，標籤觸發）
+
+# #1944：手機版與電腦版分開打標籤、分開兩條 CI。這一份只管 Android：建 AAB 並上傳 Play 內部測試軌。
+# 只吃 android-v<主>.<次>.<修訂> 標籤（例如 android-v0.2.38）；電腦版另在 asn-release.yml 吃 v<主>.<次>.<修訂>。
+# 不加 workflow_dispatch（重跑用 Re-run failed jobs）。
+# 全過之前不推 main、不發 Release、不部署（那些都在本機腳本，CI 沒有）。
+# secrets 與 environment: release 只出現在 preflight-play、android-build、android-upload 三個 job（#1892 3.2 表）；guard 與 notify 沒有。
+# 開關：repo variable ASN_RELEASE_AUTO（與電腦版同一個），只有值恰為 true 才開；未設定一律視為 false，下游全略過。
+on:
+  push:
+    tags:
+      - 'android-v*.*.*'
+
+permissions:
+  contents: read
+
+# 每個標籤一組、不取消：連推標籤時中間的不會被靜默取消（別的標籤的 run 由 guard 檢查）
+concurrency:
+  group: asn-release-android-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- 0. 守門：無 secrets、無 environment（所以讀得到 repo variable）。只是防呆，不是安全邊界 ----
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      auto: ${{ steps.auto.outputs.auto }}
+      version: ${{ steps.tag.outputs.version }}
+      version_code: ${{ steps.code.outputs.version_code }}
+      failed_step: ${{ steps.where.outputs.name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都是 false）
+      - name: 讀自動發版開關
+        id: auto
+        env:
+          ASN_RELEASE_AUTO: ${{ vars.ASN_RELEASE_AUTO }}
+        run: |
+          set -euo pipefail
+          if [ "${ASN_RELEASE_AUTO:-}" = "true" ]; then auto=true; else auto=false; fi
+          echo "auto=$auto" >> "$GITHUB_OUTPUT"
+          echo "自動發版開關：$auto"
+
+      # 標籤嚴格 android-v 加三段數字；四處版本一致、標籤 commit 在 origin/main、CHANGELOG 最新一段合格（Play 更新說明取這一段）
+      - name: 標籤與版本檔檢查
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node tools/release/tag_check.mjs "$TAG" --prefix android-v
+
+      - name: 算 Play versionCode
+        id: code
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          code=$(node --input-type=module -e 'import { playVersionCode } from "./relay/asn/scripts/play-version.mjs"; console.log(playVersionCode(process.env.VERSION))')
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
+          echo "versionCode：$code"
+
+      - name: 沒有別的 Android 發版 run 在跑
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          found=""
+          for st in queued in_progress waiting pending; do
+            all=$(gh api "repos/$REPO/actions/workflows/asn-release-android.yml/runs?status=$st&per_page=100" --jq '.workflow_runs[].id')
+            ids=$(printf '%s\n' "$all" | grep -vx "$RUN_ID" | grep -v '^$' || true)
+            if [ -n "$ids" ]; then found="$found $ids"; fi
+          done
+          if [ -n "$found" ]; then
+            echo "還有別的 Android 發版 run 在跑或排隊（run 編號：$found）：等它結束再重跑這一個" >&2
+            exit 1
+          fi
+          echo "沒有別的 Android 發版 run"
+
+      # 哪一步失敗：只輸出固定的中文名，給 notify 用
+      - name: 記錄卡在哪一步
+        id: where
+        if: failure()
+        env:
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          CODE_OUTCOME: ${{ steps.code.outcome }}
+          RUNS_OUTCOME: ${{ steps.runs.outcome }}
+        run: |
+          set -euo pipefail
+          name="其他"
+          if [ "$TAG_OUTCOME" = "failure" ]; then name="標籤與版本檔"
+          elif [ "$CODE_OUTCOME" = "failure" ]; then name="Play 版號計算"
+          elif [ "$RUNS_OUTCOME" = "failure" ]; then name="別的發版 run 在跑"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+  # ---- 1. Play 版號預檢：只跑 play-upload 的 --check-only，不 npm ci ----
+  preflight-play:
+    needs: guard
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 不准開除錯記錄
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_DEBUG:-}" = "1" ]; then echo "RUNNER_DEBUG 開著：碰金鑰的工作不准開除錯記錄" >&2; exit 1; fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 還原 Play 服務帳戶金鑰
+        env:
+          SA_B64: ${{ secrets.ASN_PLAY_SA_JSON_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          f="$RUNNER_TEMP/play-sa.json"
+          printf '%s' "$SA_B64" | base64 -d > "$f"
+          test -s "$f" || { echo "Play 服務帳戶金鑰是空的" >&2; exit 1; }
+          jq -r '.private_key // empty' "$f" | while IFS= read -r line; do
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
+          done
+          echo "ASN_PLAY_SA_FILE=$f" >> "$GITHUB_ENV"
+
+      - name: Play 版號預檢
+        working-directory: relay/asn
+        env:
+          VERSION_CODE: ${{ needs.guard.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          node scripts/play-upload.mjs --check-only "--expect-code=$VERSION_CODE"
+
+      - name: 刪掉暫存金鑰
+        if: always()
+        run: rm -f "$RUNNER_TEMP/play-sa.json"
+
+  # ---- 2. Android AAB 建置：只有上傳金鑰與 google-services.json；不帶 --upload、沒有服務帳戶 ----
+  android-build:
+    needs:
+      - guard
+      - preflight-play
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      aab_sha256: ${{ steps.aab.outputs.sha256 }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # 固定 NDK 版本；NDK_HOME 與 ring 的編譯器環境都指向這一版
+      ASN_NDK_VERSION: 28.2.13676358
+    steps:
+      - name: 不准開除錯記錄
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_DEBUG:-}" = "1" ]; then echo "RUNNER_DEBUG 開著：碰金鑰的工作不准開除錯記錄" >&2; exit 1; fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 確認 HEAD 就是標籤的 commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || { echo "HEAD 不是標籤的 commit" >&2; exit 1; }
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: ./.github/actions/asn-node-setup
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: release-android
+          save-if: false
+
+      - name: 設定 NDK（固定版本，NDK_HOME 與 ring 的編譯器指向同一版）
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$sdk" || { echo "找不到 ANDROID_HOME" >&2; exit 1; }
+          ndk="$sdk/ndk/$ASN_NDK_VERSION"
+          if [ ! -d "$ndk" ]; then
+            echo "runner 上沒有 NDK $ASN_NDK_VERSION，用 sdkmanager 安裝"
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ASN_NDK_VERSION"
+          fi
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$bin/aarch64-linux-android26-clang"
+          {
+            echo "NDK_HOME=$ndk"
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+            echo "ASN_PLAY_KEY_DIR=$RUNNER_TEMP/play-key"
+          } >> "$GITHUB_ENV"
+
+      - name: 還原上傳金鑰
+        env:
+          UPLOAD_JKS_B64: ${{ secrets.ASN_PLAY_UPLOAD_JKS }}
+          UPLOAD_PASSWORD: ${{ secrets.ASN_PLAY_UPLOAD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$ASN_PLAY_KEY_DIR"
+          printf '%s' "$UPLOAD_JKS_B64" | base64 -d > "$ASN_PLAY_KEY_DIR/upload.jks"
+          printf '%s' "$UPLOAD_PASSWORD" > "$ASN_PLAY_KEY_DIR/upload.jks.password"
+          if [ -n "$UPLOAD_PASSWORD" ]; then echo "::add-mask::$UPLOAD_PASSWORD"; fi
+
+      - name: 還原 google-services.json
+        env:
+          GOOGLE_SERVICES_B64: ${{ secrets.ASN_GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          f=relay/asn/src-tauri/gen/android/app/google-services.json
+          printf '%s' "$GOOGLE_SERVICES_B64" | base64 -d > "$f"
+          jq -r '.. | .current_key? // empty' "$f" | while IFS= read -r v; do
+            if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+          done
+
+      # 兩個擋分開一步，失敗訊息才分得出是哪一個
+      - name: 缺上傳金鑰就失敗（絕不讓腳本自己產新金鑰）
+        run: |
+          set -euo pipefail
+          for f in upload.jks upload.jks.password; do
+            if [ ! -s "$ASN_PLAY_KEY_DIR/$f" ]; then echo "缺正式的 $f（secret 沒設或是空的）" >&2; exit 1; fi
+          done
+
+      - name: 缺 google-services.json 就失敗
+        run: |
+          set -euo pipefail
+          if [ ! -s relay/asn/src-tauri/gen/android/app/google-services.json ]; then
+            echo "缺 google-services.json：沒有它 AAB 會照出但沒有推播" >&2; exit 1
+          fi
+
+      # 不帶 --upload（上傳在 android-upload）。ASN_REQUIRE_UPLOAD_KEY=1：金鑰資料夾缺正式檔就中止，不呼叫 keytool
+      - name: 建置 AAB（簽章、驗簽，不上傳）
+        working-directory: relay/asn
+        env:
+          ASN_REQUIRE_UPLOAD_KEY: '1'
+        run: |
+          set -euo pipefail
+          node scripts/release-play.mjs
+
+      - name: 算 AAB 的 SHA256
+        id: aab
+        working-directory: relay/asn/src-tauri/target/play
+        run: |
+          set -euo pipefail
+          sha256sum ./*.aab > SHA256SUMS.txt
+          echo "sha256=$(sha256sum ./*.aab | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: 上傳 AAB 與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-aab
+          path: |
+            relay/asn/src-tauri/target/play/*.aab
+            relay/asn/src-tauri/target/play/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: 刪掉暫存金鑰
+        if: always()
+        run: rm -f "$RUNNER_TEMP/play-key/upload.jks" "$RUNNER_TEMP/play-key/upload.jks.password" relay/asn/src-tauri/gen/android/app/google-services.json
+
+  # ---- 3. 上傳 Play 內部測試軌：只有服務帳戶；不 npm ci、不跑 gradle ----
+  android-upload:
+    needs:
+      - guard
+      - android-build
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 不准開除錯記錄
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_DEBUG:-}" = "1" ]; then echo "RUNNER_DEBUG 開著：碰金鑰的工作不准開除錯記錄" >&2; exit 1; fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-aab
+          path: ${{ runner.temp }}/asn-aab
+
+      - name: 核對 AAB 的 SHA256
+        env:
+          WANT: ${{ needs.android-build.outputs.aab_sha256 }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/asn-aab"
+          test "$(ls ./*.aab | wc -l)" = "1" || { echo "artifact 裡不是剛好一個 AAB" >&2; exit 1; }
+          got=$(sha256sum ./*.aab | cut -d' ' -f1)
+          test -n "$WANT" && test "$got" = "$WANT" || { echo "AAB 的 SHA256 與建置 job 的輸出不一致" >&2; exit 1; }
+          sha256sum -c SHA256SUMS.txt
+
+      - name: 還原 Play 服務帳戶金鑰
+        env:
+          SA_B64: ${{ secrets.ASN_PLAY_SA_JSON_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          f="$RUNNER_TEMP/play-sa.json"
+          printf '%s' "$SA_B64" | base64 -d > "$f"
+          test -s "$f" || { echo "Play 服務帳戶金鑰是空的" >&2; exit 1; }
+          jq -r '.private_key // empty' "$f" | while IFS= read -r line; do
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
+          done
+          echo "ASN_PLAY_SA_FILE=$f" >> "$GITHUB_ENV"
+
+      # Play 上傳不冪等：失敗後重跑前先看 docs 的 2.6 辦法
+      - name: 上傳到 Play 內部測試
+        working-directory: relay/asn
+        env:
+          VERSION_CODE: ${{ needs.guard.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          aab=$(ls "$RUNNER_TEMP"/asn-aab/*.aab)
+          node scripts/play-upload.mjs "--aab=$aab" "--expect-code=$VERSION_CODE"
+
+      - name: 刪掉暫存金鑰
+        if: always()
+        run: rm -f "$RUNNER_TEMP/play-sa.json"
+
+  # ---- 4. 通知：無 environment、無 secrets；成功失敗都留一行（只寫哪一步與連結，不貼 log） ----
+  notify:
+    needs:
+      - guard
+      - preflight-play
+      - android-build
+      - android-upload
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 組通知文字並寫 step summary
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GUARD_STEP: ${{ needs.guard.outputs.failed_step }}
+        run: |
+          set -euo pipefail
+          node tools/release/notify_run.mjs --out "$RUNNER_TEMP/notify.md"
+
+      # 留言失敗不讓 notify 紅：只剩 step summary，並在裡面寫明
+      - name: 在發版紀錄 issue 留言
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ vars.ASN_RELEASE_ISSUE }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${ISSUE:-}" =~ ^[0-9]+$ ]]; then
+            echo "沒有設定 ASN_RELEASE_ISSUE：這次沒有留言，只有 step summary。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/notify.md"; then
+            echo "留言到發版紀錄 issue 失敗：通知只剩這份 step summary。" >> "$GITHUB_STEP_SUMMARY"
+          fi

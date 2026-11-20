@@ -22,7 +22,7 @@ const NEEDS = {
 // repo variable ASN_RELEASE_AUTO：只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都不是）
 // 守門失敗時能寫進公開留言的步驟名：只收這幾個固定的字串（不收呼叫端給的任意文字）
 // 與 asn-release.yml 的 guard「記錄卡在哪一步」那步輸出的字串一一對應（守門測試會對照）
-export const GUARD_STEPS =['標籤與版本檔', 'CHANGELOG 與官網紀錄預檢', 'GitHub Release 狀態', '別的發版 run 在跑', '其他']
+export const GUARD_STEPS =['標籤與版本檔', 'Play 版號計算', 'CHANGELOG 與官網紀錄預檢', 'GitHub Release 狀態', '別的發版 run 在跑', '其他']
 
 // 連結只收本 repo 的 Actions 執行頁（run 或 job），不收查詢字串、片段與其他網域
 export const RUN_URL_RE = /^https:\/\/github\.com\/Yooliang\/asn\/actions\/runs\/[0-9]+(\/job\/[0-9]+)?$/
@@ -35,6 +35,8 @@ const names = list => list.map(j => JOB_NAME[j]).join('、')
 export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep, jobs: jobList = JOBS } = {}) {
   const JOBS_IN = JOBS.filter(j => jobList.includes(j))
   const withPlay = JOBS_IN.some(j => j === 'preflight-play' || j.startsWith('android-'))
+  // 手機版自己的 workflow（#1944）：只有 Play 系列 job、沒有電腦版與官網 job，文字只講 Play
+  const playOnly = withPlay && !JOBS_IN.some(j => ['desktop', 'attest', 'site-draft'].includes(j))
   const v = typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? `v${version}` : ''
   const safeUrl = u => (typeof u === 'string' && RUN_URL_RE.test(u) ? u : '')
   const link = runUrl => (safeUrl(runUrl) ? `\nrun：${safeUrl(runUrl)}` : '')
@@ -66,9 +68,17 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
   if (failed.length === 0) {
     if (cancelled.length) return mk('warning', `【發版中止】${head}run 被取消，已完成：${succeeded.length ? names(succeeded) : '無'}${unexplained.length ? oddNote : ''}`)
     if (unexplained.length) return mk('error', `【發版異常】${head}上游沒失敗、開關也沒關卻被略過：${names(unexplained)}`)
+    if (playOnly) return mk('success', `【CI 完成】${head}Play internal 已就緒（已上傳內部測試軌），尚未對外發布`)
     return mk('success', `【CI 完成】${head}${withPlay ? '未簽章安裝檔與 Play internal 已就緒' : '未簽章安裝檔已就緒'}，尚未上線。CI 好了，14 天內要簽`)
   }
 
+  if (playOnly) {
+    const fails = ['preflight-play', 'android-build', 'android-upload'].filter(j => failed.includes(j))
+    const line = fails.includes('preflight-play') ? 'Play 未上傳（版號預檢沒過）'
+      : fails.includes('android-build') ? 'Play 未上傳（Android 建置失敗）；重跑辦法見 2.6'
+        : 'Play 上傳失敗，可能已部分上傳；重跑前先到 Play Console 確認（辦法見 2.6）'
+    return mk('error', `【發版失敗】${head}${line}${cancelNote}${oddNote}`, failed)
+  }
   const desktopFail = ['desktop', 'attest'].filter(j => failed.includes(j))
   const androidFail = ['preflight-play', 'android-build', 'android-upload'].filter(j => failed.includes(j))
   const draftFail = failed.includes('site-draft')

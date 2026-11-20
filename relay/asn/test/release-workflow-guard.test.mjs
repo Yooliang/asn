@@ -13,6 +13,7 @@ import { JOBS, GUARD_STEPS } from '../../../tools/release/notify_status.mjs'
 
 const root = new URL('../../../', import.meta.url)
 const RELEASE = '.github/workflows/asn-release.yml'
+const RELEASE_ANDROID = '.github/workflows/asn-release-android.yml' // 手機版另一條 CI（#1944）：secrets 只准在它的指定 job（由 release-android-workflow-guard.test.mjs 守）
 const read = rel => fs.readFileSync(new URL(rel, root), 'utf8').replace(/\r\n/g, '\n')
 const listFiles = dir => {
   const base = new URL(dir, root)
@@ -200,8 +201,8 @@ test('2 沒有 secrets、沒有 environment：全檔 secrets.（GITHUB_TOKEN 例
   for (const j of ALL_JOBS) { assert.deepEqual(secretsOf(jobs[j]), [], j); assert.equal(envOf(jobs[j]), null, j) }
 })
 
-test('2 secrets：其他 workflow 與 .github/actions/ 沒有任何 secrets.（GITHUB_TOKEN 例外）；演練檔與 actions 沒有 environment: release、contents: write', () => {
-  const others = [...listFiles('.github/workflows/'), ...listFiles('.github/actions/')].filter(f => f !== RELEASE)
+test('2 secrets：除 asn-release-android.yml 外，其他 workflow 與 .github/actions/ 沒有任何 secrets.（GITHUB_TOKEN 例外）；演練檔與 actions 沒有 environment: release、contents: write', () => {
+  const others = [...listFiles('.github/workflows/'), ...listFiles('.github/actions/')].filter(f => f !== RELEASE && f !== RELEASE_ANDROID)
   assert.ok(others.length >= 3, `其他檔只找到 ${others.length} 個，規則可能失效`)
   for (const f of others) assert.deepEqual([...stripComments(read(f)).matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), [], f)
   const strict = ['.github/workflows/asn-release-rehearsal.yml', ...listFiles('.github/actions/')]
