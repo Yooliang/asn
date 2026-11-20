@@ -237,3 +237,32 @@ test('只有 Play job：被取消仍報中止；Play job 無故略過報異常�
   has(p({ 'android-upload': 'skipped' }), '【發版異常】', 'Play 上傳')
   has(r({}), '未簽章安裝檔與 Play internal 已就緒')
 })
+
+// ---- Linux 版自己的 workflow：只有 linux、attest-linux 兩個 job ----
+const LIN = ['linux', 'attest-linux']
+const l = (patch = {}, over = {}) => notifyStatus({ guardResult: 'success', auto: true, jobs: LIN, results: { ...Object.fromEntries(LIN.map(j => [j, 'success'])), ...patch }, version: '0.2.38', runUrl: RUN, ...over })
+
+test('只有 Linux job：全成功 → Linux 未簽章安裝檔已就緒，不提電腦版／Play／官網', () => {
+  const a = l()
+  assert.equal(a.level, 'success')
+  has(a, '【CI 完成】v0.2.38', 'Linux 未簽章安裝檔已就緒', '14 天內要簽')
+  lacks(a, 'Play', '電腦版', '官網', '發版異常')
+})
+
+test('只有 Linux job：建置失敗（來源證明連帶略過）、來源證明失敗、取消、無故略過', () => {
+  const a = l({ linux: 'failure', 'attest-linux': 'skipped' })
+  has(a, '【發版失敗】', 'Linux 版失敗（卡在Linux 版建置與測試）'); lacks(a, '電腦版', 'Play', '不明的略過'); assert.equal(a.level, 'error')
+  has(l({ 'attest-linux': 'failure' }), 'Linux 安裝檔來源證明')
+  has(l({ linux: 'cancelled', 'attest-linux': 'skipped' }), '【發版中止】')
+  has(l({ 'attest-linux': 'skipped' }), '【發版異常】', 'Linux 安裝檔來源證明')
+})
+
+test('Linux：guard 失敗帶步驟名、auto=false 略過；預設（全 job）與電腦版文字不變；statusFromNeeds 認得 linux 的 needs', async () => {
+  has(notifyStatus({ guardResult: 'failure', guardStep: '標籤與版本檔' }), '卡在：標籤與版本檔')
+  has(l({}, { auto: 'false' }), '【發版略過】')
+  has(r({}), '未簽章安裝檔與 Play internal 已就緒')
+  const { statusFromNeeds } = await import('../../../tools/release/notify_run.mjs')
+  const needs = { guard: { result: 'success', outputs: { auto: 'true', version: '0.2.38' } }, linux: { result: 'success' }, 'attest-linux': { result: 'success' } }
+  has(statusFromNeeds(needs, { runUrl: RUN }), 'Linux 未簽章安裝檔已就緒')
+  has(statusFromNeeds({ ...needs, linux: { result: 'failure' }, 'attest-linux': { result: 'skipped' } }, { runUrl: RUN }), 'Linux 版失敗')
+})

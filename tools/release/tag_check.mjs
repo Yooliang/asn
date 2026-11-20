@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url'
 import { changelogSections, sectionItems } from './site_record_check.mjs'
 
 export const TAG_RE = /^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/
-// 前綴：電腦版 'v'（預設，行為不變）；手機版 'android-v'（#1944，分開打標籤）。只收這兩個
-export const TAG_PREFIXES = ['v', 'android-v']
-export const TAG_REGEX = { v: TAG_RE, 'android-v': /^android-v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/ }
+// 前綴：電腦版 'v'（預設，行為不變）；手機版 'android-v'（#1944，分開打標籤）；Linux 版 'linux-v'。只收這三個
+export const TAG_PREFIXES = ['v', 'android-v', 'linux-v']
+export const TAG_REGEX = { v: TAG_RE, 'android-v': /^android-v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/, 'linux-v': /^linux-v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/ }
 
 // Cargo.lock 裡 name = "asn" 那一段的版本；找不到或不只一段回 null
 export function cargoLockVersion(text) {

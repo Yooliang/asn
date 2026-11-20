@@ -4,13 +4,13 @@
 // 文字只含 job 中文名、版本與 run 連結；不貼 log、不貼錯誤原文（留言在公開 issue）。
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { JOBS, notifyStatus } from './notify_status.mjs'
+import { ALL_JOBS, notifyStatus } from './notify_status.mjs'
 
 /** needs 物件（job 代號 → { result, outputs }）轉成 notifyStatus 的輸入；缺的 job 視為 skipped */
 export function statusFromNeeds(needs, { runUrl, guardStep } = {}) {
   const n = needs && typeof needs === 'object' ? needs : {}
   // 只傳實際在 needs 裡的 job：這一版沒有 Play，缺的 job 不算「不明的略過」
-  const jobs = JOBS.filter(j => j in n)
+  const jobs = ALL_JOBS.filter(j => j in n)
   const results = Object.fromEntries(jobs.map(j => [j, n[j]?.result]))
   return notifyStatus({
     guardResult: n.guard?.result,

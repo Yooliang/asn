@@ -175,3 +175,24 @@ test('CLI：--prefix android-v 吃 android-v 標籤、寫 version（不含前綴
   const d = cliEnv(good())
   assert.equal(main([`v${V}`], d.env, d.io), 0)
 })
+
+// ---- 前綴 linux-v（Linux 版 linux-v<版本>）：三條線互不吃對方的標籤 ----
+test('前綴 linux-v：linux-v0.2.37 通過且版本去掉前綴；v／android-v 標籤不能過，linux-v 標籤也不能過其他前綴', () => {
+  assert.deepEqual(checkTag({ tag: `linux-v${V}`, files: good(), git: onMain, prefix: 'linux-v' }), { ok: true, version: V, problems: [] })
+  for (const [tag, prefix] of [[`v${V}`, 'linux-v'], [`android-v${V}`, 'linux-v'], [`linux-v${V}`, 'v'], [`linux-v${V}`, 'android-v'], [`linux-v${V}-rc1`, 'linux-v'], [`linux-v${V}.1`, 'linux-v'], [`Linux-v${V}`, 'linux-v'], ['linux-v0.2', 'linux-v']]) {
+    const r = checkTag({ tag, files: good(), git: onMain, prefix })
+    assert.equal(r.ok, false, `${tag} / ${prefix}`)
+    assert.match(r.problems[0], /標籤格式/)
+  }
+})
+
+test('CLI：--prefix linux-v 查的是 linux-v 標籤本身在不在 main（不是 v<版本>）；版本檔不一致仍失敗', () => {
+  const a = cliEnv(good())
+  assert.equal(main([`linux-v${V}`, '--prefix', 'linux-v'], a.env, a.io), 0)
+  assert.deepEqual(a.written, [['out.txt', `version=${V}\n`]])
+  assert.deepEqual(a.out, [['merge-base', '--is-ancestor', `linux-v${V}^{commit}`, 'origin/main']])
+  const b = cliEnv(good(), { ancestor: false })
+  assert.equal(main([`linux-v${V}`, '--prefix', 'linux-v'], b.env, b.io), 1)
+  const c = cliEnv({ ...good(), cargoLock: lock('0.2.36') })
+  assert.equal(main([`linux-v${V}`, '--prefix', 'linux-v'], c.env, c.io), 1)
+})
