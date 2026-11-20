@@ -399,3 +399,34 @@ test('壞例子：auto 開關接線拿掉、改成 != false、下游 job 沒看 
   assert.ok(flagged(mutate('    timeout-minutes: 60\n', '\ttimeout-minutes: 60\n'), /有 tab/))
   assert.ok(flagged(mutate('    timeout-minutes: 60\n', '   timeout-minutes: 60\n'), /縮排不是 2 的倍數/))
 })
+
+// ---- #1946 一審：Play 上傳收不回來，上傳前一定要核對 AAB 的 sha256 等於建置 job 的輸出 ----
+const uploadHashProblems = src => {
+  const jobs = jobsOf(stripComments(src))
+  const problems = []
+  const b = jobs['android-build'] ?? ''
+  const u = jobs['android-upload'] ?? ''
+  if (!/outputs:\s*\n\s*aab_sha256:\s*\$\{\{\s*steps\.aab\.outputs\.sha256\s*\}\}/.test(b)) problems.push('android-build 沒有輸出 aab_sha256')
+  const check = u.indexOf('核對 AAB 的 SHA256')
+  const upload = u.indexOf('play-upload.mjs "--aab=')
+  if (check < 0) problems.push('android-upload 沒有「核對 AAB 的 SHA256」那一步')
+  if (!/WANT:\s*\$\{\{\s*needs\.android-build\.outputs\.aab_sha256\s*\}\}/.test(u)) problems.push('期望的雜湊不是來自 android-build 的輸出')
+  if (!/test -n "\$WANT" && test "\$got" = "\$WANT"/.test(u)) problems.push('沒有比對「實際雜湊 = 建置輸出」（或沒擋空值）')
+  if (!/sha256sum -c SHA256SUMS\.txt/.test(u)) problems.push('沒有核對 SHA256SUMS.txt')
+  if (check >= 0 && upload >= 0 && check > upload) problems.push('核對雜湊排在上傳之後')
+  return problems
+}
+
+test('#1946 android-upload：上傳前核對 AAB 的 sha256 等於建置 job 的輸出（空值也擋）；核對排在上傳之前（至少 6 條規則命中）', () => {
+  assert.deepEqual(uploadHashProblems(wf), [])
+})
+
+test('#1946 壞例子：拿掉比對那行、期望值改成別處、不擋空值、核對排到上傳之後、建置沒輸出雜湊、拿掉整個核對步驟都會紅', () => {
+  const bad = (from, to, re) => assert.ok(uploadHashProblems(mutate(from, to)).some(m => re.test(m)), `${from.slice(0, 40)} → ${re}`)
+  bad('          test -n "$WANT" && test "$got" = "$WANT" || { echo "AAB 的 SHA256 與建置 job 的輸出不一致" >&2; exit 1; }\n', '', /沒有比對/)
+  bad('WANT: ${{ needs.android-build.outputs.aab_sha256 }}', 'WANT: ${{ needs.guard.outputs.version }}', /不是來自 android-build/)
+  bad('test -n "$WANT" && test "$got" = "$WANT"', 'test "$got" = "$WANT"', /沒有比對/)
+  bad('      aab_sha256: ${{ steps.aab.outputs.sha256 }}\n', '', /沒有輸出 aab_sha256/)
+  bad('          sha256sum -c SHA256SUMS.txt\n', '          true\n', /SHA256SUMS/)
+  bad('      - name: 核對 AAB 的 SHA256', '      - name: 略過的步驟', /沒有「核對 AAB 的 SHA256」/)
+})
