@@ -665,6 +665,35 @@ fn event_log_text(_pid: Option<u32>) -> Option<String> {
     None
 }
 
+/// 正式環境的對外動作
+#[cfg(feature = "gui")]
+struct RealSink {
+    work_dir: std::path::PathBuf,
+    data_dir: std::path::PathBuf,
+}
+
+#[cfg(feature = "gui")]
+impl super::mux_round::Sink for RealSink {
+    fn open(&self, pid: u32) -> Option<Box<dyn ProcHandle>> {
+        open_process(pid)
+    }
+    fn event_text(&self, pid: Option<u32>) -> Option<String> {
+        event_log_text(pid)
+    }
+    fn record(&self, line: &str) {
+        elog!("{line}");
+        if let Some(base) = super::mux::default_base() {
+            super::mux::note(&base.join("ASN").join("m"), line);
+        }
+    }
+    fn resume(&self, partners: Vec<String>, resume: bool) {
+        let (wd, dd) = (self.work_dir.clone(), self.data_dir.clone());
+        if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
+            elog!("接回夥伴的背景工作開不了（不影響監看）");
+        }
+    }
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -681,6 +710,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut tracker = Tracker::new(cfg!(windows));
         // 監看自己看不到終端服務時也要有訊號（11-10 30家用：02:22～11:59 每輪都看不到，一行紀錄都沒有）
         let mut blind = Blind::default();
+        let sink = RealSink { work_dir: work_dir.clone(), data_dir: data_dir.clone() };
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -715,35 +745,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
                 clear_blind(&work_dir);
             }
             let now = crate::heartbeat::now_ms();
-            w.note_exited(&terms.take_exited(), now);
-            let incident = w.tick(&o, now);
-            w.save(&file);
-            // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
-            let info = incident.as_ref().map(|_| {
-                let pid = tracker.held_pid();
-                (tracker.take_reason(), tracker.last_alive_ms, event_log_text(pid))
-            });
-            tracker.observe(&o, now, &open_process);
-            if let Some(inc) = incident {
-                let (reason, last_alive, event) = info.unwrap_or_default();
-                // 裡面沒有夥伴、而且是正常結束（結束碼 0）：不是事故，不寫紀錄、不通知
-                if empty_normal_exit(&inc, &reason) {
-                    continue;
-                }
-                let line = incident_line(&inc, &reason, last_alive, started.elapsed().as_secs(), event.as_deref());
-                elog!("{line}");
-                if let Some(base) = super::mux::default_base() {
-                    super::mux::note(&base.join("ASN").join("m"), &line);
-                }
-                queue_notice(&work_dir, inc.partners.len(), inc.resume, now);
-                if inc.partners.is_empty() {
-                    continue;
-                }
-                let (wd, dd, partners, resume) = (work_dir.clone(), data_dir.clone(), inc.partners, inc.resume);
-                if !dispatch("asn-mux-resume", move || super::auto_resume::after_mux_crash(&wd, &dd, &partners, resume)) {
-                    elog!("接回夥伴的背景工作開不了（不影響監看）");
-                }
-            }
+            let ctx = super::mux_round::Round { state_file: &file, work_dir: &work_dir, uptime_secs: started.elapsed().as_secs() };
+            super::mux_round::run_round(&mut w, &mut tracker, &o, &terms.take_exited(), now, &ctx, &sink);
         }
     });
     if let Err(e) = spawned {
