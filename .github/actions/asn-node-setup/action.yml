@@ -1,0 +1,16 @@
+name: ASN Node 環境
+description: 裝 Node 22 並在 relay/asn 跑 npm ci（演練 workflow 的共用步驟；不碰任何 secrets）
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: relay/asn/package-lock.json
+
+    - name: 安裝前端依賴
+      shell: bash
+      working-directory: relay/asn
+      run: npm ci
