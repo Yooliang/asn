@@ -462,17 +462,45 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     if let Some((_, c)) = wins.iter().find(|(k, _)| k.starts_with("chat-")) { let _ = c.set_position(PhysicalPosition::new(420, 40)); let _ = c.set_always_on_top(true); }
     for (label, p) in &wins { if is_panel_label(label) { let _ = p.set_position(PhysicalPosition::new(420, 40)); let _ = p.set_always_on_top(true); } }
     tokio::time::sleep(Duration::from_millis(900)).await;
-    take_shot_capture(&app, &dir, tab).await
+    capture_until_drawn(&dir, SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(SHOT_RETRY_MS), |only| {
+        let (app, dir, tab) = (app.clone(), dir.clone(), tab.clone());
+        async move { take_shot_capture(&app, &dir, tab, only).await }
+    })
+    .await
+}
+
+/// 截圖檔小於這個大小，視為視窗還沒畫完（慢的機器上提示視窗常見，#1953）；只用來決定要不要重截，不是測試門檻
+const SHOT_MIN_BYTES: u64 = 3000;
+const SHOT_RETRY_MAX: u32 = 40;
+const SHOT_RETRY_MS: u64 = 150;
+
+/// 截完檢查每張圖，太小的（還沒畫完）隔一小段時間只重截那幾扇，最多重試 `max_retry` 次；仍太小就照現狀交出，由測試判定
+async fn capture_until_drawn<F, Fut>(dir: &Path, min_bytes: u64, max_retry: u32, gap: Duration, mut capture: F) -> Result<(), String>
+where
+    F: FnMut(Option<Vec<String>>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<String>, String>>,
+{
+    let mut names = capture(None).await?;
+    for _ in 0..max_retry {
+        names.retain(|n| std::fs::metadata(dir.join(format!("{n}.png"))).map(|m| m.len() < min_bytes).unwrap_or(true));
+        if names.is_empty() { break }
+        tokio::time::sleep(gap).await;
+        names = capture(Some(names)).await?;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
-async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> Result<(), String> {
+async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>, only: Option<Vec<String>>) -> Result<Vec<String>, String> {
     let mut specs = vec![];
+    let mut names = vec![];
     for (label, w) in app.webview_windows() {
         // 帶 tab：只拍名單視窗，檔名 tabs-<tab>（逐頁籤截圖用）；分離模式開著的指引、設定視窗另拍，檔名就是 panel-guide、panel-setting
         if tab.is_some() && label != "list" && !is_panel_label(&label) { continue }
         let name = if is_panel_label(&label) { label.clone() } else if label == "list" { tab.as_ref().map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>())).unwrap_or_else(|| "list".to_string()) } else if label.starts_with("chat-") { "chat".to_string() } else if label.starts_with("toast-") { label.clone() } else { continue };
+        if only.as_ref().is_some_and(|o| !o.contains(&name)) { continue }
         if let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) {
+            names.push(name.clone());
             specs.push(format!("{name}|{}|{}|{}|{}", p.x, p.y, s.width, s.height));
         }
     }
@@ -497,14 +525,15 @@ foreach ($s in ($env:ASN_SPECS -split ';')) {
         .status()
         .await
         .map_err(|e| e.to_string())?;
-    if status.success() { Ok(()) } else { Err(format!("擷取失敗：{status}")) }
+    if status.success() { Ok(names) } else { Err(format!("擷取失敗：{status}")) }
 }
 
 /// Linux：用 scrot 依視窗外框擷取（需 X11／Xvfb）；沒有 scrot 就略過 PNG，流程仍跑完。
 #[cfg(not(windows))]
-async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> Result<(), String> {
+async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>, only: Option<Vec<String>>) -> Result<Vec<String>, String> {
     let scrot = which_scrot();
-    let Some(scrot) = scrot else { return Ok(()) };
+    let Some(scrot) = scrot else { return Ok(vec![]) };
+    let mut names = vec![];
     for (label, w) in app.webview_windows() {
         if tab.is_some() && label != "list" && !is_panel_label(&label) {
             continue;
@@ -522,6 +551,9 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> 
         } else {
             continue;
         };
+        if only.as_ref().is_some_and(|o| !o.contains(&name)) {
+            continue;
+        }
         let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) else { continue };
         if s.width == 0 || s.height == 0 {
             continue;
@@ -536,8 +568,9 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> 
         if !status.success() {
             return Err(format!("scrot 擷取失敗：{status}"));
         }
+        names.push(name);
     }
-    Ok(())
+    Ok(names)
 }
 
 #[cfg(not(windows))]
@@ -556,6 +589,30 @@ fn which_scrot() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1953：慢機器上提示視窗還沒畫完就截，只有 804 bytes；要重截到畫好為止，而且只重截還太小的那一扇
+    #[tokio::test]
+    async fn t1953_提示視窗沒畫完會重截_直到畫好() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<Vec<String>>>::new()));
+        let c2 = calls.clone();
+        let d = dir.path().to_path_buf();
+        let mut n = 0;
+        capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), move |only| {
+            n += 1;
+            c2.lock().unwrap().push(only.clone());
+            let drawn = n >= 4;   // 第 4 次才畫好
+            std::fs::write(d.join("list.png"), vec![1u8; 9000]).unwrap();
+            std::fs::write(d.join("toast-2-2.png"), vec![1u8; if drawn { 9000 } else { 804 }]).unwrap();
+            async move { Ok(vec!["list".to_string(), "toast-2-2".to_string()]) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(std::fs::metadata(dir.path().join("toast-2-2.png")).unwrap().len(), 9000, "最後要是畫好的那張");
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[1], Some(vec!["toast-2-2".to_string()]), "畫好的 list 不重截");
+    }
 
     #[test]
     fn 進度小窗疊在提示視窗上方不重疊且在工作區內() {
