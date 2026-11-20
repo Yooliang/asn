@@ -6,12 +6,18 @@ import fs from 'node:fs'
 const root = new URL('../../../', import.meta.url)
 const wfDir = new URL('.github/workflows/', root)
 const workflows = fs.readdirSync(wfDir).filter(f => /\.ya?ml$/.test(f)).map(f => [f, fs.readFileSync(new URL(f, wfDir), 'utf8')])
+// 共用的本地 composite action（.github/actions/**/*.yml）也要掃：裡面的 uses: 一樣要鎖到完整 commit（#1892）
+const actionsDir = new URL('.github/actions/', root)
+const actionFiles = fs.existsSync(actionsDir)
+  ? fs.readdirSync(actionsDir, { recursive: true }).map(f => String(f).replaceAll('\\', '/')).filter(f => /\.ya?ml$/.test(f)).map(f => [`actions/${f}`, fs.readFileSync(new URL(f, actionsDir), 'utf8')])
+  : []
 
 test('每個 workflow 的 uses: 都鎖到 40 位的 commit（本地 ./ 例外）', () => {
   assert.ok(workflows.length >= 3, '找到的 workflow 數不對，檢查規則可能失效')
   const bad = []
   let seen = 0
-  for (const [f, src] of workflows) {
+  assert.ok(actionFiles.length >= 1, '.github/actions/ 底下找不到任何 yml，掃描範圍可能失效')
+  for (const [f, src] of [...workflows, ...actionFiles]) {
     for (const m of src.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)) {
       seen++
       const ref = m[1]
