@@ -110,3 +110,13 @@ test('#1979 官網檔（site/）和後台（supabase/）不發版：發版後才
   assert.deepEqual(r.unknown, [])
   assert.deepEqual(tagged(plan([{ file: 'site/public/index.html' }, { file: 'relay/asn/ui/m.html' }])), [...PLATFORMS], '混到共用畫面照樣三個都打')
 })
+test('#1979 領隊 #4501 的歸類：claude-mod、pi-extension＝電腦＋Linux；package*.json、shared＝三個；machine、cloud-agent、web、cloudflare 維持判斷不出來', () => {
+  assert.deepEqual(tagged(plan([{ file: 'relay/claude-mod/hooks/lib.ts' }])), ['desktop', 'linux'])
+  assert.deepEqual(tagged(plan([{ file: 'relay/pi-extension/index.ts' }])), ['desktop', 'linux'])
+  for (const f of ['relay/asn/package.json', 'relay/asn/package-lock.json', 'relay/shared/x.mjs']) assert.deepEqual(tagged(plan([{ file: f }])), [...PLATFORMS], f)
+  for (const f of ['relay/machine/send.mjs', 'relay/cloud-agent/a.mjs', 'web/relay/x.html', 'cloudflare/edge-tts/w.js']) {
+    const r = plan([{ file: f }])
+    assert.deepEqual(r.unknown, [f], `${f} 還沒人查證，要落到判斷不出來`)
+    assert.deepEqual(tagged(r), [...PLATFORMS])
+  }
+})

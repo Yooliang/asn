@@ -37,6 +37,11 @@
     { "glob": "archive/**", "platforms": [], "說明": "封存，不參與建置" },
     { "glob": "*.md", "platforms": [], "說明": "根目錄文件" },
     { "glob": "LICENSE", "platforms": [], "說明": "授權文字" },
+    { "glob": "relay/claude-mod/**", "platforms": ["desktop", "linux"], "說明": "Claude 外掛，打包進電腦版與 Linux 安裝檔（tauri.conf.json 的 resources）；領隊 #4501 定" },
+    { "glob": "relay/pi-extension/**", "platforms": ["desktop", "linux"], "說明": "pi 擴充，打包進電腦版與 Linux 安裝檔；領隊 #4501 定" },
+    { "glob": "relay/asn/package.json", "platforms": ["desktop", "linux", "android"], "說明": "前端依賴與版號，三個平台共用；領隊 #4501 定" },
+    { "glob": "relay/asn/package-lock.json", "platforms": ["desktop", "linux", "android"], "說明": "前端依賴鎖定，三個平台共用；領隊 #4501 定" },
+    { "glob": "relay/shared/**", "platforms": ["desktop", "linux", "android"], "說明": "共用程式；領隊 #4501 定三個都打" },
     { "glob": "site/**", "platforms": [], "說明": "官網與更新清單，打標籤之後才由 local_sign_publish 提交、另外部署；不列的話每一版都會被它拖成三個都打" },
     { "glob": "supabase/**", "platforms": [], "說明": "後台（migration、Edge Function）另外部署，不進安裝檔" }
   ]
