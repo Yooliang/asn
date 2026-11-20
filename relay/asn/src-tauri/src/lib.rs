@@ -128,6 +128,7 @@ pub mod cli;
 mod claude_accounts;
 #[cfg(desktop)]
 mod claude_json;
+#[cfg(desktop)]
 mod claude_login;
 #[cfg(desktop)]
 mod claude_mod;
