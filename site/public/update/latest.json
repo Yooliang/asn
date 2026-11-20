@@ -1,15 +1,11 @@
 {
-  "version": "0.2.40",
-  "notes": "- 改善：整點前後伺服器暫時忙碌時，讀信、讀名單這類只讀的動作會自動稍等再試，不再一下子就顯示讀不到。（#1778、#1932）",
-  "pub_date": "2026-11-20T17:22:51.424Z",
+  "version": "0.2.41",
+  "notes": "- 修正：夥伴回信寄不出去而放棄時，同一封信剩下的段落也不會再零星寄出，對方不會收到沒頭沒尾的後半段；寄回信等候的時間也縮短。（#1249、#1940）",
+  "pub_date": "2026-11-20T19:05:22.835Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitUNHFURXlMRERrR1lBWmx4TmJoVGFMZGhkelBCb3NnVmFnWGlYK0ExcDZpVUhoL0hEV2hCdGloSklSOVhiTEtISjdxWWtKWFNrQ3psa1BnakZlV1FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk1MzcxCWZpbGU6QVNOXzAuMi40MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQwCml4NkkzVlNFMkw4Y0hMMWNsVWdOaHVJL1h0ekxrQjBMRDdvYmhkSmZ5OWZ1UVhIbTNSbG1ZOE0xRUxXNmlPQS8xTEVYK2VqOXIvYk05akhZeEFjZkFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.40_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi82T0VndzJoZmNSK2xrSEVGTjBaLzRpTW1BaUI2ektJbmpiVVplOURzWEtNZ3lvSzhxUDdIUEpVU3MwUUdQcUl5aElscHF5UmZrZUtnWGk1QVg4cFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk2OTE4CWZpbGU6QVNOXzAuMi40MF9hbWQ2NC5BcHBJbWFnZQpoR3NTU0p1OUMwUWxVSW00UlhnendiY3dOcC93dkNaQ1l2TnNyTENYMGFhMmJmamRiSjVGUUVYTjZDSWE0VzB0L3VzTXZjNlJBNnZKTGFTSE5tSjVBUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.40_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjI5S0FWQlRVbDFYcll4ZmtMQUc1L3Yzc3ZCdzRESXZhaTYxWWduazAxbjlBa0RlRjhIU0I1U2twUmtqM2s2dG05L2pFYURxUm8rdE9BTGliS3FVbndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjAxNTIyCWZpbGU6QVNOXzAuMi40MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQxCjUzRUxjQ2pqOHVvY2wvVEpRVnpicGRkN2VaRmU4aVpxZzZQb1JiN0xCTFllUVdUVnJoZUxUdFR1ZXhFai8vQTdTbFNRblozUTNjRjZzMU90anlyNUFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.41_x64-setup.exe"
     }
   }
 }
