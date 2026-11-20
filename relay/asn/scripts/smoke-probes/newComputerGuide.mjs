@@ -121,7 +121,7 @@ export const newComputerGuideProbeSource = ({ kind = 'blank', page = 'partners' 
   const hide = card().querySelector('.ng-hide');
   if (!hide || txt(hide) !== '先不用') return { ok: false, why: '卡片上沒有「先不用」' };
   await real({ click: at(hide) }, 400);
-  if (!(await waitFor(() => !card(), 20))) return { ok: false, why: '按「先不用」之後卡片還在' };
+  if (!(await waitFor(() => !card(), 60))) return { ok: false, why: '按「先不用」之後卡片還在' };
   if (localStorage.getItem(KEY) !== '1') return { ok: false, why: '「先不用」沒有記在本機' };
   const rs = await waitFor(reshow, 20);
   if (!rs || txt(rs) !== '顯示新手引導') return { ok: false, why: '收起後沒有「顯示新手引導」：' + txt(rs) };

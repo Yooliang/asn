@@ -7,8 +7,9 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   const rows = () => [...document.querySelectorAll('.m-offline-menu li')].map(e => e.textContent.trim());
   const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   for (let i = 0; i < 40 && !document.querySelector('.m-chathead .m-plate'); i++) await sleep(100);
-  await sleep(500);
-  const btn = vis('.m-plate-head .m-offline-btn')[0] || null;
+  try { await document.fonts.ready } catch (e) {}
+  let btn = vis('.m-plate-head .m-offline-btn')[0] || null;
+  for (let i = 0; i < 60 && !btn && !want.none; i++) { await sleep(100); btn = vis('.m-plate-head .m-offline-btn')[0] || null }
   if (want.center) {
     const pl = document.querySelector('.m-plate-head .m-plate'), hd = document.querySelector('.m-plate-head');
     if (!pl || !hd) return { ok: false, why: '找不到名牌或名牌頭' };
@@ -25,11 +26,18 @@ export const mgofflineProbeSource = ({ mgoffline }) => `(async () => {
   if (btn.textContent.trim() !== want.label) return { ok: false, why: '按鈕文字不符：' + btn.textContent.trim() };
   if (!/離線/.test(btn.getAttribute('aria-label') || '')) return { ok: false, why: '按鈕沒有 aria-label' };
   if (want.fit) {
-    const pl = document.querySelector('.m-plate-head .m-plate'), b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect();
+    // 字型還沒載好時量出來的寬度都不準：每 100ms 量一次、最多 6 秒，這一輪的條件全部成立才往下（#1955）
+    const pl = document.querySelector('.m-plate-head .m-plate');
+    let b = btn.getBoundingClientRect(), p = pl && pl.getBoundingClientRect(), ell = false;
+    const measure = () => {
+      b = btn.getBoundingClientRect(); p = pl && pl.getBoundingClientRect();
+      ell = !!pl && [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
+      return !!p && b.left >= p.right - 0.5 && b.right <= innerWidth + 0.5 && b.left >= 0 && (!want.ell || ell);
+    };
+    for (let i = 0; i < 60 && !measure(); i++) await sleep(100);
     if (!p) return { ok: false, why: '找不到名牌' };
     if (b.left < p.right - 0.5) return { ok: false, why: '離線按鈕蓋到名牌：按鈕左緣 ' + b.left + ' < 名牌右緣 ' + p.right };
     if (b.right > innerWidth + 0.5 || b.left < 0) return { ok: false, why: '離線按鈕超出視窗：' + b.left + '~' + b.right + ' / ' + innerWidth };
-    const ell = [pl, ...pl.querySelectorAll('*')].some(e => e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).textOverflow === 'ellipsis');
     if (want.ell && !ell) return { ok: false, why: '長名字沒有出現省略號' };
     window.__cm = '按鈕左緣 ' + b.left + '／名牌右緣 ' + p.right + '／省略號 ' + ell;
     console.info('[fit-m]', JSON.stringify({ btnLeft: b.left, plateRight: p.right, btnRight: b.right, vw: innerWidth, ell }));
