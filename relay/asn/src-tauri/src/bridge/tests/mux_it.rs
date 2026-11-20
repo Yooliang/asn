@@ -278,3 +278,19 @@ async fn t1818_接回結果_寄送失敗隔一分鐘再試_舊後台不重試_�
     assert!(late.fr.mux_resume_notices().is_empty());
     assert!(mux_round::read_resume_notice(&dir).is_none());
 }
+
+#[tokio::test]
+async fn t1818_接回結果_名字超長或空白_整理過再寄_寄得出去() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let dir = h.core.cfg.work_dir.clone();
+    let long = "長".repeat(100);
+    mux_round::queue_resume_notice(&dir, 3, &[long.clone(), "".to_string(), "  ".to_string()], now());
+    h.core.mux_resume_notice_tick(T0).await;
+    let n = h.fr.mux_resume_notices();
+    assert_eq!(n.len(), 1);
+    let names: Vec<String> = n[0]["failed"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(names[0], format!("{}…", "長".repeat(63)), "超過 64 字截短加…");
+    assert!(names[0].encode_utf16().count() <= 64);
+    assert_eq!(&names[1..], ["未命名夥伴", "未命名夥伴"], "空的寫未命名夥伴");
+    assert!(mux_round::read_resume_notice(&dir).is_none(), "寄出後檔案刪掉");
+}

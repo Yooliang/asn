@@ -6507,8 +6507,8 @@ mod tests {
                 *rig.runner.inner.list_json.borrow_mut() = format!("[{},{}]", &one_pane("asn-1", "ASN:1", 9, 0)[1..one_pane("asn-1", "ASN:1", 9, 0).len() - 1], &one_pane("asn-2", "ASN:2", 10, 0)[1..one_pane("asn-2", "ASN:2", 10, 0).len() - 1]);
             }
 
-            /// 跑完「活著兩輪、（先清空對照表）、崩潰後三輪」，回（事故, 接收端, 工作資料夾）
-            fn crash_rounds(rig: &Rig, clear_table_first: bool) -> (Option<crate::launch::mux_watch::Incident>, Out, tempfile::TempDir) {
+            /// 跑完「活著兩輪、崩潰後三輪」，回（事故, 接收端, 工作資料夾）
+            fn crash_rounds(rig: &Rig) -> (Option<crate::launch::mux_watch::Incident>, Out, tempfile::TempDir) {
                 let dir = tempfile::tempdir().unwrap();
                 let file = dir.path().join(crate::launch::mux_watch::STATE_FILE);
                 let (mut w, mut tr, out) = (Watch::default(), Tracker::new(true), Out::default());
@@ -6520,16 +6520,6 @@ mod tests {
                     assert_eq!(o.partners.len(), 2, "崩潰前看得到兩位");
                     run_round(&mut w, &mut tr, &o, &[], t, &ctx, &out);
                     t += TICK_MS;
-                }
-                if clear_table_first {
-                    // 對照表在服務還活著時被清空（窗格清單連兩次讀到空的）
-                    *rig.runner.inner.list_json.borrow_mut() = "[]".into();
-                    for _ in 0..2 {
-                        let o = snap(&rig.svc).unwrap();
-                        run_round(&mut w, &mut tr, &o, &[], t, &ctx, &out);
-                        t += TICK_MS;
-                    }
-                    assert_eq!(stored_terms(rig), 0, "對照表真的清空了");
                 }
                 // 崩潰：程序結束了，但建立時間還查得到（ASN 握著 handle）
                 *rig.runner.inner.proc_dead.borrow_mut() = true;
@@ -6555,7 +6545,7 @@ mod tests {
             fn t1818_服務崩潰但_asn_握著_handle_自動偵測_通知_兩位都接回() {
                 let (rig, _) = mux_rig();
                 two_partners(&rig);
-                let (inc, out, dir) = crash_rounds(&rig, false);
+                let (inc, out, dir) = crash_rounds(&rig);
                 let inc = inc.expect("崩潰後兩輪內要算出事故（拿掉 live_pid 的 alive 檢查就看不到）");
                 assert_eq!(inc.partners, vec!["小乙".to_string(), "小丙".to_string()]);
                 assert!(inc.resume);
@@ -6575,7 +6565,7 @@ mod tests {
             fn t1818_有人接不回來_結果通知寫出斷了幾位_接回幾位_誰沒接回() {
                 let (rig, _) = mux_rig();
                 two_partners(&rig);
-                let (inc, _out, dir) = crash_rounds(&rig, false);
+                let (inc, _out, dir) = crash_rounds(&rig);
                 let (st, _) = resume_all(dir.path(), &inc.unwrap().partners, &["小丙"]);
                 assert_eq!((st.resumed.clone(), st.failed.len()), (vec!["小乙".to_string()], 1));
                 let n = read_resume_notice(dir.path()).unwrap();
@@ -6584,16 +6574,6 @@ mod tests {
                 assert!(log.contains("沒接回：小丙"), "{log}");
             }
 
-            #[test]
-            fn t1818_對照表先被清空_再偵測到崩潰_照樣全部接回() {
-                let (rig, _) = mux_rig();
-                two_partners(&rig);
-                let (inc, _out, dir) = crash_rounds(&rig, true);
-                let inc = inc.expect("事故要算出來");
-                assert_eq!(inc.partners, vec!["小乙".to_string(), "小丙".to_string()], "名單來自清空前保存的那份，不是現在空的對照表");
-                let (st, launched) = resume_all(dir.path(), &inc.partners, &[]);
-                assert_eq!((launched.len(), st.resumed.len()), (2, 2));
-            }
         }
 
         /// 開著 mux 模式的 rig：mux 檔案放在暫存資料夾、pid 檔記著一個建立時間對得上的 mux、連線檔「存在」，

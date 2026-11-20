@@ -14,6 +14,32 @@ const RESUME_GIVE_UP_MS: u64 = 3_600_000;
 /// 「監看看不到終端服務」的通知過了這麼久還沒送成就放棄
 const BLIND_GIVE_UP_MS: u64 = 3_600_000;
 
+/// 後台收的夥伴名字長度上限（Edge 以 UTF-16 單位算）
+const NAME_MAX_UNITS: usize = 64;
+const NAME_EMPTY: &str = "未命名夥伴";
+
+/// 接回結果通知用的名字：去頭尾空白；空的寫「未命名夥伴」；超過 64 個字就截短、結尾加「…」
+fn tidy_name(name: &str) -> String {
+    let t = name.trim();
+    if t.is_empty() {
+        return NAME_EMPTY.to_string();
+    }
+    if t.encode_utf16().count() <= NAME_MAX_UNITS {
+        return t.to_string();
+    }
+    let mut out = String::new();
+    let mut units = 0;
+    for c in t.chars() {
+        units += c.len_utf16();
+        if units > NAME_MAX_UNITS - 1 {
+            break;
+        }
+        out.push(c);
+    }
+    out.push('…');
+    out
+}
+
 impl Core {
     /// 監看連續看不到終端服務（launch/mux_watch 排了通知檔）：請後台寄一則通知給本人（同一台 24 小時一次由後台擋）。
     /// 舊後台（404）、參數不合（400）、節點停用（403）只記 log 不重試；寄送失敗隔一分鐘再試，過一小時放棄
@@ -90,6 +116,8 @@ impl Core {
             crate::launch::mux_round::clear_resume_notice(&dir);
             return;
         }
+        // 名字先整理：太長的截短、空的補名字，後台才不會整則回 400、通知寄不出去
+        let failed: Vec<String> = failed.iter().map(|n| tidy_name(n)).collect();
         let body = json!({ "count": count, "resumed": resumed, "failed": failed });
         match self.relay.api_status("mux_resume_notice", body).await {
             Ok((200, v)) => {
