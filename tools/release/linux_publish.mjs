@@ -155,6 +155,7 @@ export async function linuxSignPublish(opts, deps) {
       let rel
       try { rel = releaseState(gh, version) } catch { bad(`讀不到 Release v${version} 的狀態`) }
       if (!rel) bad(`Release v${version} 不存在：Linux 版只附加到已發的電腦版 Release，請先發電腦版`)
+      if (rel.draft) bad(`Release v${version} 還是草稿：不附加（官網連結會指到草稿、匿名下載 404），請先確認電腦版已公開`)
       for (const n of [dName, exeName, `${exeName}.sig`]) if (rel.assets.has(n)) bad(`Release v${version} 上已經有 ${n}：不覆蓋，請人工確認`)
     })
 
@@ -253,13 +254,8 @@ export async function linuxSignPublish(opts, deps) {
       if (!r.ok) bad(`線上核對 ${r.attempts} 次都沒過：${r.problems.join('；')}`)
     })
 
-    await step(9, '貼群組', async () => {
-      const text = `【Linux 版發版完成】v${version}：AppImage、deb 已附加到 GitHub Release v${version}、官網 latest.json 已加 ${LINUX_PLATFORM}、首頁已加 Linux 下載連結，部署與線上核對通過。接著提交兩個網站檔回 main。`
-      const r = await asnCli(['send', '--room', room, '--body', text])
-      if (r?.status !== 0) bad(`貼群組失敗（結束碼 ${r?.status}）`)
-    })
-
-    await step(10, '提交回 main', async () => {
+    // 提交回 main 要排在貼群組之前：貼群組失敗不能讓網站檔停在未提交（下次部署會把 linux 項洗掉）
+    await step(9, '提交回 main', async () => {
       const staged = git(['diff', '--cached', '--name-only']).split('\n').map(s => s.trim()).filter(Boolean)
       const extra = staged.filter(f => !LINUX_SITE_FILES.includes(f))
       if (extra.length) bad(`暫存區有網站檔以外的檔案：${extra.slice(0, 5).join('、')}`)
@@ -294,6 +290,14 @@ export async function linuxSignPublish(opts, deps) {
         try { git(['push', 'origin', `${sha}:main`]); return } catch { log(`推送被拒（第 ${attempt} 次）${attempt < MAX_TRIES ? '，重新 fetch 重做' : ''}`) }
       }
       bad(`推送回 main 連續被拒 ${MAX_TRIES} 次（有人一直在推 main）：請人工處理，不強推`)
+    })
+
+    // 貼群組：失敗只記 log，不中止（此時 Release、部署、提交都已完成）
+    await step(10, '貼群組', async () => {
+      const text = `【Linux 版發版完成】v${version}：AppImage、deb 已附加到 GitHub Release v${version}、官網 latest.json 已加 ${LINUX_PLATFORM}、首頁已加 Linux 下載連結，部署與線上核對通過，網站檔已提交回 main。`
+      let r
+      try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e?.message } }
+      if (r?.status !== 0) log(`貼群組失敗（結束碼 ${r?.status}），請自行通知：${text}`)
     })
 
     return { ok: true, dryRun: false, failedStep: null, completed, latest: S.latest, dir: S.dir }

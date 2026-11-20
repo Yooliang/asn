@@ -170,11 +170,11 @@ const aborts = (x, step, re) => {
 }
 const read = (x, rel) => fs.readFileSync(path.join(x.repo, ...rel.split('/')), 'utf8')
 
-test('全流程：簽章→附加 Release→部署→貼群組→提交推送；網站檔先寫好才附加；Release 已公開是預期狀態', async () => {
+test('全流程：簽章→附加 Release→部署→提交推送→貼群組；網站檔先寫好才附加；Release 已公開是預期狀態', async () => {
   const x = await run()
   assert.equal(x.r.ok, true, x.r.error)
   const k = kinds(x.w), at = n => k.indexOf(n)
-  assert.ok(at('sign') < at('attach') && at('attach') < at('firebase deploy') && at('firebase deploy') < at('asn-cli send') && at('asn-cli send') < at('git push'), k.join(' > '))
+  assert.ok(at('sign') < at('attach') && at('attach') < at('firebase deploy') && at('firebase deploy') < at('git push') && at('git push') < at('asn-cli send'), k.join(' > '))
   assert.deepEqual(x.w.events.find(e => e.k === 'attach').a, [DEB, APP, `${APP}.sig`])
   assert.deepEqual(JSON.parse(x.w.siteAtAttach).platforms['linux-x86_64'].url, `https://asnmessenger.web.app/update/${APP}`)
   assert.ok(!kinds(x.w).includes('asn-cli site'), 'Linux 不寫官網版本紀錄（電腦版已寫）')
@@ -251,6 +251,27 @@ test('流程：Release 上已有同名檔→簽章前（第 1 步）就停；沒
   assert.ok(!kinds(x.w).includes('sign')); assert.deepEqual(published(x.w), [])
   const y = await run(w => { w.release = null })
   aborts(y, 1, /Release v0\.2\.38 不存在/)
+})
+test('附加：目標 Release 是草稿就停，什麼都不上傳（官網連結會指到草稿、匿名 404）', async () => {
+  const a = attachWorld({ isDraft: true, assets: [] })
+  await assert.rejects(attachToRelease({ version: V, files: a.files, gh: a.gh, ghDownload: () => {}, fetchFn: a.fetchFn, tmp: a.tmp }), /還是草稿/)
+  assert.ok(!a.calls.some(c => c[1] === 'upload'))
+})
+test('流程：Release 是草稿→簽章前（第 1 步）就停，不簽章不發布', async () => {
+  const x = await run(w => { w.release.isDraft = true })
+  aborts(x, 1, /還是草稿/)
+  assert.ok(!kinds(x.w).includes('sign')); assert.deepEqual(published(x.w), [])
+})
+test('貼群組失敗不中止：網站檔已先提交推送，整體仍成功，只記 log；貼群組丟例外也一樣', async () => {
+  const x = await run(w => { w.asnStatus.send = 1 })
+  assert.equal(x.r.ok, true, x.r.error)
+  assert.ok(kinds(x.w).indexOf('git push') >= 0 && kinds(x.w).indexOf('git push') < kinds(x.w).indexOf('asn-cli send'))
+  assert.ok(x.w.logs.some(l => /貼群組失敗/.test(l)))
+  const y = world()
+  y.deps.asnCli = async () => { throw new Error('boom') }
+  const r = await localSignPublish(y.opts, y.deps)
+  assert.equal(r.ok, true, r.error)
+  assert.ok(kinds(y.w).includes('git push'))
 })
 test('流程：附加失敗→不部署、不貼完成', async () => {
   const x = await run(w => { w.attachFails = true })
@@ -360,15 +381,15 @@ test('verifyOnlineLinux：電腦版項被動到、Linux 檔 sha 不對都會被�
 })
 test('提交回 main：最新 origin/main 上的網站檔與發版開始時不同→中止、不提交不推送', async () => {
   const x = await run(w => { w.mainSiteBlobAfter = 'changed' })
-  aborts(x, 10, /之後有人改過/)
+  aborts(x, 9, /之後有人改過/)
   assert.deepEqual(published(x.w).filter(k => k.startsWith('git')), [])
 })
 test('提交回 main：推送被拒→重試；用盡就中止；相關測試沒過不提交', async () => {
   const x = await run(w => { w.pushFailTimes = 1 })
   assert.equal(x.r.ok, true); assert.equal(x.w.pushCount, 2)
-  aborts(await run(w => { w.pushFailTimes = 9 }), 10, /連續被拒 3 次/)
+  aborts(await run(w => { w.pushFailTimes = 9 }), 9, /連續被拒 3 次/)
   const t = await run(w => { w.testsOk = false })
-  aborts(t, 10, /相關測試沒過/)
+  aborts(t, 9, /相關測試沒過/)
 })
 
 test('parseArgs：--platform linux 的標籤與錯誤；電腦版預設不變', () => {

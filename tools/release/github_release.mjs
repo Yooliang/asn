@@ -48,7 +48,7 @@ export function releaseState(gh, version) {
 /**
  * 附加檔案到「已存在」的 v<版本> Release（Linux 版用：電腦版已發好、Release 已公開是預期狀態）。
  * 不建 Release、不轉正式、不改 Latest；同名檔已存在就停（不覆蓋）；上傳後下載回來比對 sha256
- * （公開版匿名下載、草稿版用 gh 登入下載）。驗證不一致只報錯，不自動刪檔（刪除要人工確認）。
+ * （匿名下載）。草稿 Release 一律停：附加後官網連結會指到草稿、匿名 404。驗證不一致只報錯，不自動刪檔（刪除要人工確認）。
  */
 export async function attachToRelease({ version, files, gh, ghDownload, fetchFn = fetch, tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-gh-attach-')), log = () => {} }) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`版本號格式不對：${version}`)
@@ -56,19 +56,15 @@ export async function attachToRelease({ version, files, gh, ghDownload, fetchFn 
   const want = files.map(f => { const buf = fs.readFileSync(f.file); return { name: f.name, size: buf.length, sha256: sha256(buf), file: f.file } })
   const st = releaseState(gh, version)
   if (!st) throw new Error(`${tag} 的 Release 不存在：Linux 版只附加到已發的電腦版 Release，請先發電腦版`)
+  if (st.draft) throw new Error(`${tag} 還是草稿：不附加（官網連結會指到草稿、匿名下載 404），請先確認電腦版已公開`)
   for (const w of want) if (st.assets.has(w.name)) throw new Error(`${tag} 上已經有 ${w.name}：不覆蓋，請人工確認`)
   for (const w of want) { gh(['release', 'upload', tag, w.file, '--repo', REPO]); log(`已附加 ${w.name}（${w.size} 位元組）`) }
   for (const w of want) {
-    let got
-    if (st.draft) {
-      const dir = fs.mkdtempSync(path.join(tmp, 'dl-'))
-      ghDownload(version, w.name, dir)
-      got = fs.readFileSync(path.join(dir, w.name))
-    } else got = await download(fetchFn, githubUrl(version, w.name))
+    const got = await download(fetchFn, githubUrl(version, w.name))
     if (sha256(got) !== w.sha256) throw new Error(`${tag} 上附加的 ${w.name} 下載回來的 sha256 跟本機的不一樣：檔已上傳、沒有自動刪除，請人工處理，不要部署官網`)
   }
   log(`${tag} 附加完成並下載比對一致：${want.map(w => w.name).join('、')}`)
-  return { attached: want.map(w => w.name), draft: st.draft }
+  return { attached: want.map(w => w.name) }
 }
 
 async function download(fetchFn, url) {
