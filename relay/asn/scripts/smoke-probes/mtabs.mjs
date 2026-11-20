@@ -16,10 +16,14 @@ export const mtabsProbeSource = () => `(async () => {
   if (sec().querySelector('.m-chat-list, .m-buddy, .m-search')) return { ok: false, why: '對話分頁不該再列清單' };
   if (sec().querySelector('[aria-label="回對話清單"]')) return { ok: false, why: '沒有清單了，不該有回清單的鍵' };
   if (!(sec().querySelector('.m-head .m-title')?.textContent || '').includes('demo')) return { ok: false, why: '對話分頁開的不是上次那一位' };
-  tab('設定').click(); await sleep(500);
-  const about = [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
+  tab('設定').click();
+  const findAbout = () => [...document.querySelectorAll('section.m-pg[aria-label="設定"] .m-row-btn')].find(b => b.textContent.includes('關於'));
+  let about = findAbout();
+  for (let i = 0; i < 60 && !about; i++) { await sleep(100); about = findAbout() }   // 慢的 runner 上切頁要久一點：輪詢到出現，最多 6 秒
   if (!about) return { ok: false, why: '設定裡找不到「關於」' };
-  about.click(); await sleep(600);
+  about.click();
+  const settled = () => { const p = document.querySelector('.m-fourth'); return inView(p) && Math.abs(p.getBoundingClientRect().left) <= 2 };   // 在畫面上而且滑入動畫已停住
+  for (let i = 0; i < 60 && !settled(); i++) await sleep(100);
   const page = document.querySelector('.m-fourth');
   if (!inView(page)) return { ok: false, why: '「關於」內頁沒有出現在畫面上' };
   // #1439：「關於」有簡介、版本、連結（官網、版本紀錄、隱私權政策、使用指引）、出品；內容不撐破畫面寬度
@@ -35,10 +39,12 @@ export const mtabsProbeSource = () => `(async () => {
   if (!cur[3].classList.contains('on')) return { ok: false, why: '在內頁上分頁列應該標著第四格' };
   const pg = document.querySelector('.m-fourth').getBoundingClientRect();
   if (Math.abs(pg.left) > 2) return { ok: false, why: '內頁沒有停在畫面上（第四格）' };
-  tab('夥伴').click(); await sleep(600);
+  tab('夥伴').click();
+  for (let i = 0; i < 60 && inView(document.querySelector('.m-fourth')); i++) await sleep(100);   // 輪詢到內頁離開畫面，最多 6 秒
   if (inView(document.querySelector('.m-fourth'))) return { ok: false, why: '切到夥伴後內頁還蓋在畫面上' };
   if (fourthLabel() !== '關於') return { ok: false, why: '離開內頁後第四格應該還是「關於」（3 分鐘內）' };
-  [...document.querySelectorAll('.m-tabs button')][3].click(); await sleep(600);
+  [...document.querySelectorAll('.m-tabs button')][3].click();
+  for (let i = 0; i < 60 && !inView(document.querySelector('.m-fourth')); i++) await sleep(100);   // 輪詢到內頁回到畫面，最多 6 秒
   if (!inView(document.querySelector('.m-fourth'))) return { ok: false, why: '點第四格沒有回到「關於」內頁' };
   return { ok: true, why: '' };
 })()`
