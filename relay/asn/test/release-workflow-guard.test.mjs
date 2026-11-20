@@ -277,6 +277,17 @@ test('各 job 的接線：desktop 建置後才 npm test 且不略過；attest �
   assert.doesNotMatch(release, /android|ndk|play-upload|release-play/i, '這一版不含 Play 的建置與上傳')
 })
 
+test('#1953 desktop：e2e 失敗時上傳截圖與輸出（if: failure()、7 天、路徑跟 npm test 的 ASN_E2E_KEEP 一致）', () => {
+  const d = jobsOf(stripComments(release)).desktop
+  assert.match(d, /ASN_E2E_KEEP:\s*\$\{\{\s*runner\.temp\s*\}\}\/asn-e2e-keep/)
+  const step = d.split(/\n\s*-\s+name:/).find(s => /asn-e2e-shots/.test(s))
+  assert.ok(step, '找不到 e2e 截圖上傳步驟')
+  assert.match(step, /^\s+if:\s*failure\(\)\s*$/m)
+  assert.match(step, /path:\s*\$\{\{\s*runner\.temp\s*\}\}\/asn-e2e-keep\//)
+  assert.match(step, /retention-days:\s*7\b/)
+  assert.ok(d.indexOf('asn-e2e-shots') > d.indexOf('npm test'), '上傳排在 npm test 之後')
+})
+
 test('auto 開關接線：guard 從 vars 讀、只有恰為 true 才輸出 true（實跑那一行：未設定、空字串、false、TRUE 皆 false）；下游 2 個 job 都看 auto', () => {
   const g = jobsOf(stripComments(release)).guard
   const line = /^\s*(if \[ "\$\{ASN_RELEASE_AUTO:-\}" = "true" \]; then auto=true; else auto=false; fi)$/m.exec(g)

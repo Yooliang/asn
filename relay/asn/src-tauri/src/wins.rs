@@ -366,13 +366,30 @@ fn toast_url(toast: &Toast, status: &str) -> String {
     url
 }
 
+/// 提示視窗幾毫秒後自己關；--shot 模式回 None（不自動關，等截圖拍完由 `close_shot_toasts` 關）。
+/// #1953：Windows runner 上擷取很慢，提示視窗 5.5 秒就自關，重截還沒輪到它就消失了，留下畫到一半的小圖
+fn toast_auto_close_ms(shot_mode: bool) -> Option<u64> {
+    if shot_mode { None } else { Some(TOAST_MS) }
+}
+
+/// --shot：截圖（含重截）全部結束後，關掉還開著的提示視窗並放掉位置
+fn close_shot_toasts(app: &AppHandle) {
+    for (label, w) in app.webview_windows() {
+        if !label.starts_with("toast-") { continue }
+        let _ = w.close();   // 視窗可能剛好已被點掉；關不掉不影響截圖結果
+        if let Some(slot) = label.strip_prefix("toast-").and_then(|r| r.split('-').next()).and_then(|n| n.parse::<usize>().ok()) {
+            if slot < TOAST_MAX { release(app, slot); }
+        }
+    }
+}
+
 fn release(app: &AppHandle, slot: usize) {
     app.state::<Slots>().0.lock().unwrap()[slot] = false;
 }
 
 /// 右下角提示：置頂、不搶焦點、不進工作列、無邊框透明；貼螢幕工作區右下角往上疊，約 5.5 秒後自己關
 #[tauri::command]
-pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -> Result<(), String> {
+pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, state: State<'_, App>, toast: Toast) -> Result<(), String> {
     let slot = {
         let mut s = slots.0.lock().unwrap();
         match s.iter().position(|u| !*u) {
@@ -423,12 +440,15 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
     if !cfg!(windows) {
         let _ = w.show();
     }
-    let (a2, l2) = (app.clone(), label.clone());
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(TOAST_MS)).await;
-        if let Some(w) = a2.get_webview_window(&l2) { let _ = w.close(); }
-        release(&a2, slot);
-    });
+    // --shot 模式不自動關：截圖流程（含重截）要拍得到它，由 take_shot 拍完統一關（#1953）
+    if let Some(ms) = toast_auto_close_ms(state.shot.is_some()) {
+        let (a2, l2) = (app.clone(), label.clone());
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            if let Some(w) = a2.get_webview_window(&l2) { let _ = w.close(); }
+            release(&a2, slot);
+        });
+    }
     Ok(())
 }
 
@@ -462,11 +482,27 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     if let Some((_, c)) = wins.iter().find(|(k, _)| k.starts_with("chat-")) { let _ = c.set_position(PhysicalPosition::new(420, 40)); let _ = c.set_always_on_top(true); }
     for (label, p) in &wins { if is_panel_label(label) { let _ = p.set_position(PhysicalPosition::new(420, 40)); let _ = p.set_always_on_top(true); } }
     tokio::time::sleep(Duration::from_millis(900)).await;
-    capture_until_drawn(&dir, SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(SHOT_RETRY_MS), |only| {
-        let (app, dir, tab) = (app.clone(), dir.clone(), tab.clone());
-        async move { take_shot_capture(&app, &dir, tab, only).await }
-    })
+    // 提示視窗只在這次截的是「完整一輪」（沒帶 tab）時才關：之後帶 tab 的逐頁截圖不拍提示視窗，也不需要它
+    let close = tab.is_none();
+    capture_then_cleanup(
+        capture_until_drawn(&dir, SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(SHOT_RETRY_MS), |only| {
+            let (app, dir, tab) = (app.clone(), dir.clone(), tab.clone());
+            async move { take_shot_capture(&app, &dir, tab, only).await }
+        }),
+        || if close { close_shot_toasts(&app) },
+    )
     .await
+}
+
+/// 先等截圖做完，不論成敗再收尾（關提示視窗）；收尾一定排在截圖之後
+async fn capture_then_cleanup<Fut, C>(capture: Fut, cleanup: C) -> Result<(), String>
+where
+    Fut: std::future::Future<Output = Result<(), String>>,
+    C: FnOnce(),
+{
+    let r = capture.await;
+    cleanup();
+    r
 }
 
 /// 截圖檔小於這個大小，視為視窗還沒畫完（慢的機器上提示視窗常見，#1953）；只用來決定要不要重截，不是測試門檻
@@ -637,6 +673,30 @@ mod tests {
         let calls = calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         assert_eq!(calls[1], Some(vec!["toast-2-2".to_string()]), "畫好的 list 不重截");
+    }
+
+    /// #1953：--shot 模式提示視窗不自動關（否則 5.5 秒就消失，重截拍不到）；正式路徑仍是 5500ms
+    #[test]
+    fn t1953_提示視窗只有shot模式不自動關() {
+        assert_eq!(toast_auto_close_ms(true), None);
+        assert_eq!(toast_auto_close_ms(false), Some(5500));
+    }
+
+    /// #1953：關提示視窗一定晚於截圖（含重截）做完，截圖失敗也照關
+    #[tokio::test]
+    async fn t1953_shot結束後才關提示視窗() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+        let (l1, l2) = (log.clone(), log.clone());
+        let r = capture_then_cleanup(
+            async move { tokio::time::sleep(Duration::from_millis(20)).await; l1.lock().unwrap().push("截圖完成"); Ok(()) },
+            move || l2.lock().unwrap().push("關提示"),
+        ).await;
+        assert!(r.is_ok());
+        assert_eq!(*log.lock().unwrap(), vec!["截圖完成", "關提示"]);
+        let l3 = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let l4 = l3.clone();
+        let r = capture_then_cleanup(async { Err("擷取失敗".to_string()) }, move || *l4.lock().unwrap() = true).await;
+        assert!(r.is_err() && *l3.lock().unwrap(), "截圖失敗也要關，且錯誤照原樣回傳");
     }
 
     #[test]

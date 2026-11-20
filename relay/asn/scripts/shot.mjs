@@ -20,6 +20,18 @@ function scrotOnPath() {
   if (process.platform !== 'linux') return false
   try { return spawnSync('scrot', ['--version'], { stdio: 'ignore' }).status === 0 } catch { return false }
 }
+// 測試用的暫存資料夾：設了 ASN_E2E_KEEP 就放在那底下（CI 失敗時整個資料夾上傳成 artifact），沒設就放系統暫存（#1953）
+export function e2eTmpDir(prefix) {
+  const base = process.env.ASN_E2E_KEEP || os.tmpdir()
+  fs.mkdirSync(base, { recursive: true })
+  return fs.mkdtempSync(path.join(base, prefix))
+}
+
+// 子行程輸出裡不該出現的金鑰字串一律遮掉再寫檔／印出
+export function maskSecrets(text, secrets = [FAKE_KEY]) {
+  return secrets.filter(Boolean).reduce((t, s) => t.split(s).join('***'), String(text ?? ''))
+}
+
 export const shotCaptureSupported = process.platform === 'win32' || scrotOnPath()
 
 // asn：各設備上 ASN 回報的在線狀態與版本（牧陽沒有 ASN＝名單上不顯示小綠點；工作機是舊版＝顯示「有新版」）
@@ -97,6 +109,8 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   })
   clearInterval(poll)
   const result = { code, log, heartbeat, oldHeartbeat, expiredHeartbeat, hbFile, relay, tmp, home: env.USERPROFILE, data: env.ASN_DATA, pid, files: fs.existsSync(outDir) ? fs.readdirSync(outDir) : [] }
+  // 子行程輸出（含 [shot] 重截紀錄）離開碼 0 時也留下：寫進輸出資料夾，CI 失敗上傳 artifact 就看得到（#1953）
+  try { fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, 'asn-shot.log'), maskSecrets(log)) } catch { /* 寫不進去只是少一份除錯檔，不影響測試結果 */ }
   await relay.close()
   return result
 }

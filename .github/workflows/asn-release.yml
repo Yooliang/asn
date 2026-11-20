@@ -171,9 +171,21 @@ jobs:
         working-directory: relay/asn
         env:
           GH_TOKEN: ${{ github.token }}
+          ASN_E2E_KEEP: ${{ runner.temp }}/asn-e2e-keep
         run: |
           set -euo pipefail
           npm test
+
+      # e2e 截圖失敗時留下證據（截圖與 asn.exe 輸出），只留 7 天（#1953）
+      - name: 上傳 e2e 截圖與輸出（失敗時）
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-e2e-shots-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/asn-e2e-keep/*
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
 
       - name: 上傳安裝檔與 SHA256SUMS.txt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
