@@ -28,7 +28,7 @@ export function globToRegExp(glob) {
 }
 
 export function planPlatforms({ changes, rules }) {
-  const compiled = rules.map(r => ({ r, re: globToRegExp(r.glob), content: r.androidIfContent ? new RegExp(r.androidIfContent) : null }))
+  const compiled = rules.map(r => ({ r, re: globToRegExp(r.glob) }))
   const basis = { desktop: [], linux: [], android: [] }
   const unknown = []
   const skipped = []
@@ -37,7 +37,6 @@ export function planPlatforms({ changes, rules }) {
     const hit = compiled.find(c => c.re.test(file))
     if (!hit) { unknown.push(file); continue }
     const plats = new Set(hit.r.platforms)
-    if (hit.content && (hit.content.test(file) || (ch.diff && hit.content.test(ch.diff)))) plats.add('android')
     if (plats.size === 0) { skipped.push(file); continue }
     for (const p of plats) basis[p].push(file)
   }
@@ -101,11 +100,7 @@ export function collectFromTags(git, rules) {
     tagOf[p] = tag
     if (!tag) { perPlatform[p] = { missing: true }; continue }
     const files = changedFilesSince(git, tag)
-    const changes = files.map(file => {
-      const rule = rules.find(r => globToRegExp(r.glob).test(file))
-      const diff = rule?.androidIfContent ? git(['diff', `${tag}..HEAD`, '--', file]) : undefined
-      return { file, diff }
-    })
+    const changes = files.map(file => ({ file }))
     perPlatform[p] = { plan: planPlatforms({ changes, rules }) }
   }
   return { tagOf, perPlatform }

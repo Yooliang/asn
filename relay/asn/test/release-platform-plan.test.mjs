@@ -17,24 +17,17 @@ test('只改 ui：三個都打', () => {
   assert.deepEqual(r.unknown, [])
 })
 
-test('只改 Rust 一般檔：電腦和 Linux', () => {
-  const r = plan([{ file: 'relay/asn/src-tauri/src/lib.rs', diff: '+let x = 1;' }])
-  assert.deepEqual(tagged(r), ['desktop', 'linux'])
+test('#4523 Rust 核心（src-tauri/**）一律三個平台都打：relay.rs 這類手機電腦共用模組不能漏發手機', () => {
+  for (const f of ['relay/asn/src-tauri/src/relay.rs', 'relay/asn/src-tauri/src/lib.rs', 'relay/asn/src-tauri/src/nowin.rs', 'relay/asn/src-tauri/src/view_d.rs', 'relay/asn/src-tauri/Cargo.toml', 'relay/asn/src-tauri/Cargo.lock', 'relay/asn/src-tauri/build.rs']) {
+    assert.deepEqual(tagged(plan([{ file: f }])), ['desktop', 'linux', 'android'], f)
+  }
 })
 
-test('Rust 檔的 diff 含安卓 cfg：三個都打', () => {
-  const r = plan([{ file: 'relay/asn/src-tauri/src/auth.rs', diff: '+#[cfg(target_os = "android")]\n+fn f() {}' }])
-  assert.deepEqual(tagged(r), ['desktop', 'linux', 'android'])
-  const m = plan([{ file: 'relay/asn/src-tauri/src/auth.rs', diff: '+#[cfg(mobile)]' }])
-  assert.ok(m.platforms.android.tag)
-})
-
-test('只改安卓目錄、安卓模組：只打手機', () => {
-  const r = plan([
-    { file: 'relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/MainActivity.kt' },
-    { file: 'relay/asn/src-tauri/src/android.rs', diff: '+// x' },
-  ])
-  assert.deepEqual(tagged(r), ['android'])
+test('#4523 不看 diff 內容猜平台：沒有安卓字樣的 Rust 檔照樣三個都打；安卓目錄也是三打（沒有明列只有某平台的檔）', () => {
+  assert.deepEqual(tagged(plan([{ file: 'relay/asn/src-tauri/src/auth.rs', diff: '+let x = 1;' }])), ['desktop', 'linux', 'android'])
+  assert.deepEqual(tagged(plan([{ file: 'relay/asn/src-tauri/gen/android/app/src/main/java/tw/yooliang/asn/MainActivity.kt' }])), ['desktop', 'linux', 'android'])
+  assert.ok(!rules.some(r => 'androidIfContent' in r), '對照表不能再有依內容加平台的規則')
+  assert.deepEqual(tagged(plan([{ file: 'relay/asn/src-tauri/tests/a.rs' }])), [], 'Rust 測試不進安裝檔')
 })
 
 test('只動 tools、.github、docs、test：都不打', () => {
