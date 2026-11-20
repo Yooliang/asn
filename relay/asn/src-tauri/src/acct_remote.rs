@@ -445,7 +445,16 @@ pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLog
 }
 
 /// 定時回報：失敗也繼續，下一輪再試。紀錄在 tick 裡留
-pub async fn report_loop<F, Fut, T>(first: std::time::Duration, every: std::time::Duration, mut tick: F)
+pub async fn report_loop<F, Fut, T>(first: std::time::Duration, every: std::time::Duration, tick: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    report_loop_with(&crate::claude_login::WAKE, first, every, tick).await
+}
+
+/// 同上，多一個「叫醒」：有人叫（例如登入的帳號換了）就立刻回報一次，不等 `every`（#1880）
+pub async fn report_loop_with<F, Fut, T>(wake: &tokio::sync::Notify, first: std::time::Duration, every: std::time::Duration, mut tick: F)
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, String>>,
@@ -453,7 +462,10 @@ where
     tokio::time::sleep(first).await;
     loop {
         let _ = tick().await;
-        tokio::time::sleep(every).await;
+        tokio::select! {
+            _ = tokio::time::sleep(every) => {}
+            _ = wake.notified() => {}
+        }
     }
 }
 
