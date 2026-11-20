@@ -45,6 +45,8 @@ pub enum AccErr {
     IncompleteLogin,
     Corrupt(&'static str),
     Io(String),
+    /// 切換寫完之後讀回實際登入的帳號，不是要切去的那個（#1880）
+    NotSwitched,
 }
 
 impl fmt::Display for AccErr {
@@ -57,6 +59,7 @@ impl fmt::Display for AccErr {
             AccErr::IncompleteLogin => write!(f, "{INCOMPLETE_LOGIN_MSG}"),
             AccErr::Corrupt(what) => write!(f, "{what}"),
             AccErr::Io(e) => write!(f, "檔案操作失敗：{e}"),
+            AccErr::NotSwitched => write!(f, "{}", crate::claude_login::SWITCH_FAILED_TEXT),
         }
     }
 }
@@ -678,11 +681,32 @@ fn verdict(l: &Lookup, owner_uuid: &str, owner_email: &str) -> (bool, String) {
 }
 
 pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
-    let r = switch_impl(home, email, Fault::None, &profile_lookup);
-    if r.is_ok() {
-        crate::claude_quota::kick(); // 切換之後額度要立刻查一次（claude_quota.rs）
+    switch_verified(home, email, std::env::var_os("CLAUDE_CONFIG_DIR"), std::time::Duration::ZERO)
+}
+
+/// 切換，並在寫完後讀回實際登入的帳號比對（#1880）：對不上就回失敗，不報成功。
+/// 只信讀回來的帳號，不信「剛寫過」。`settle` 大於 0 時隔這麼久再讀回一次：開著的 Claude 視窗可能在切換之後又把舊帳號寫回去。
+pub fn switch_verified(home: &Path, email: &str, cfg_env: Option<std::ffi::OsString>, settle: std::time::Duration) -> R<SwitchOutcome> {
+    let out = switch_impl(home, email, Fault::None, &profile_lookup)?;
+    let path = crate::claude_login::live_json_path(home, cfg_env);
+    let retry = std::time::Duration::from_millis(150);
+    let mut check = crate::claude_login::verify_switched(&path, &out.email, retry);
+    if check.is_ok() && !settle.is_zero() {
+        std::thread::sleep(settle);
+        check = crate::claude_login::verify_switched(&path, &out.email, retry);
     }
-    r
+    if let Err(why) = check {
+        // 原因只進 log：實際讀到的帳號（或讀不到的原因）；畫面只說切換沒有成功
+        let what = match why {
+            crate::claude_login::NotSwitched::Other(Some(e)) => format!("實際登入的是 {e}"),
+            crate::claude_login::NotSwitched::Other(None) => "讀回來沒有登入的帳號".to_string(),
+            crate::claude_login::NotSwitched::Unreadable(r) => format!("讀不到登入的帳號：{r}"),
+        };
+        crate::claude_login::log(&format!("切換到 {} 沒有成功：{what}", out.email));
+        return Err(AccErr::NotSwitched);
+    }
+    crate::claude_quota::kick(); // 切換之後額度要立刻查一次（claude_quota.rs）
+    Ok(out)
 }
 
 /// 帳號正在切換、加入、刪除（或背景同步正在動登入檔）：額度查詢這一輪不查，免得把「切到一半」的登入記到錯的帳號。
@@ -1040,9 +1064,16 @@ pub async fn claude_accounts_list() -> Result<Vec<AccountInfo>, String> {
 pub async fn claude_account_current() -> Result<Option<AccountInfo>, String> {
     off_main(|| {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        current_login(&claude_home())
+        let home = claude_home();
+        // 檔案在、卻讀不出帳號：回錯誤讓畫面寫「讀不到」，不當成沒登入（#1880）
+        let path = crate::claude_login::live_json_path(&home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+        if let crate::claude_login::Login::Unreadable(why) = crate::claude_login::read_login_retry(&path, std::time::Duration::from_millis(150)) {
+            crate::claude_login::log(&format!("{}：{why}", crate::claude_login::UNREADABLE_TEXT));
+            return Err(crate::claude_login::UNREADABLE_TEXT.to_string());
+        }
+        Ok(current_login(&home))
     })
-    .await
+    .await?
 }
 #[cfg_attr(feature = "gui", tauri::command)]
 pub async fn claude_account_save() -> Result<AccountInfo, String> {
@@ -1075,7 +1106,7 @@ pub async fn claude_account_undo() -> Result<String, String> {
 /// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）
 pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    switch_to(&claude_home(), email).map_err(|e| e.to_string())
+    switch_verified(&claude_home(), email, std::env::var_os("CLAUDE_CONFIG_DIR"), std::time::Duration::from_secs(2)).map_err(|e| e.to_string())
 }
 /// 帳號庫清單（遠端回報用）
 pub fn local_list() -> Vec<AccountInfo> {

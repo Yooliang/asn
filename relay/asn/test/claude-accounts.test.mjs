@@ -300,3 +300,26 @@ test('上次確認可用（#1512 C2）：別台經後台回報的是 UTC 字串�
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   assert.match(html, /<span class="m-dv-usable" v-if="a\.usableAt">\{\{ a\.usableAt \}\}<\/span>/)
 })
+
+test('#1880 讀不到目前登入的帳號：畫面寫讀不到，不當成沒登入、不沿用上次的帳號', async () => {
+  let cur = { email: 'a@x.test', saved: true }
+  const { ui } = mk({ claude_accounts_list: [], claude_account_current: () => { if (cur instanceof Error) throw cur; return cur }, codex_account_current: null })
+  await ui.refresh()
+  assert.equal(ui.state.current.email, 'a@x.test')
+  assert.equal(ui.state.currentErr, '')
+  cur = new Error('讀不到目前登入的帳號')
+  await ui.refresh()
+  assert.equal(ui.state.current, null, '不沿用舊值')
+  assert.equal(ui.state.currentErr, '讀不到目前登入的帳號')
+  assert.match(read('ui/lib/settings-panel.mjs'), /st\.accounts\.currentErr/, '設定頁有顯示這句')
+  cur = { email: 'b@x.test', saved: true }
+  await ui.refresh()
+  assert.equal(ui.state.currentErr, '', '恢復後清掉')
+})
+
+test('#1880 切換失敗：畫面顯示 Rust 回的「切換沒有成功」，不寫已切換', async () => {
+  const { ui } = mk({ claude_accounts_list: [], claude_account_current: null, codex_account_current: null, claude_account_switch: new Error('切換沒有成功：這台電腦登入的帳號沒有換過去。'), acct_remote_report: {} })
+  await ui.switchTo('b@x.test')
+  assert.match(ui.state.msg, /^切換沒有成功/)
+  assert.doesNotMatch(ui.state.msg, /已切換/)
+})

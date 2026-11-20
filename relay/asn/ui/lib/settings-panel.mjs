@@ -541,6 +541,7 @@ export const SettingsPanel = {
                       </ul>
                       <div class="dv-none" v-else>還沒有加入過帳號。</div>
                       <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，ASN 會在一分鐘內自動加入，加入後才能切換到別的帳號。</small>
+                      <small v-else-if="st.accounts.currentErr" class="acct-warn" role="status">{{ st.accounts.currentErr }}。請確認 Claude 是否還登入著，或稍後再看。</small>
                       <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
                       <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
                       <small role="status">{{ st.accounts.msg }}</small>

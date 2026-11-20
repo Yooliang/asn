@@ -4,6 +4,7 @@
 import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 
+export const CURRENT_UNREADABLE = '讀不到目前登入的帳號'   // 跟 Rust claude_login::UNREADABLE_TEXT 同一句
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
 
 // 存的登入不完整（權杖檔缺更新用的權杖）：Rust 只給 login_incomplete 這個布林，切過去整台的 Claude 都會失效，所以不能選
@@ -63,7 +64,7 @@ const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
 export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS }) {
   const s = reactive({
-    list: [], loginFailed: false, grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
+    list: [], loginFailed: false, grok: [], current: null, currentErr: '', codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     allowSwitch: true,   // 「允許切換帳號」（#371）：讓手機或別台設備替這台切換
     remote: { node: '', vendor: 'claude', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
@@ -80,7 +81,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   const refreshRoster = async () => { s.roster = await fetchRoster(() => invoke('acct_roster'), undefined, s.roster) }
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
-    try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
+    try { s.current = (await invoke('claude_account_current')) ?? null; s.currentErr = '' } catch (e) { s.current = null; s.currentErr = errText(e) || CURRENT_UNREADABLE }   // 讀不到不等於沒登入：畫面寫「讀不到目前登入的帳號」，不沿用舊值（#1880）
     try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
     try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }

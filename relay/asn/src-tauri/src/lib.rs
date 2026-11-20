@@ -128,6 +128,7 @@ pub mod cli;
 mod claude_accounts;
 #[cfg(desktop)]
 mod claude_json;
+mod claude_login;
 #[cfg(desktop)]
 mod claude_mod;
 #[cfg(desktop)]
@@ -3235,6 +3236,8 @@ pub fn run() {
     launch::pretrust::set_log_dir(&work_dir);
     #[cfg(desktop)]
     login_watch::set_log_dir(&work_dir);
+    #[cfg(desktop)]
+    claude_login::set_log_dir(&work_dir);
     #[cfg(windows)]
     auth::set_dpapi_log_dir(&exit_log_dir);
     // 共用終端服務（mux）掛掉要有人知道：偵測、通知、接回（#596 第 4 項）。沒開 mux 模式時什麼都不做
@@ -3528,6 +3531,11 @@ pub fn run() {
                     let (r6, wd6) = (r.clone(), work_dir.clone());
                     let every = std::time::Duration::from_secs(300);
                     tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
+                }
+                // 這台實際登入的 Claude 帳號：盯著 .claude.json 的變化（不輪詢），帳號一換就立刻回報、立刻重查額度（#1880）
+                #[cfg(desktop)]
+                if handle.state::<App>().shot.is_none() {
+                    claude_login::spawn_watch(claude_accounts::claude_home());
                 }
                 // Claude 額度：直接查這台目前登入的帳號（每 10 分鐘一次、切換後立刻一次）；先把舊版接在狀態列上的額度串接還原
                 #[cfg(desktop)]
