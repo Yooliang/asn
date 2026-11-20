@@ -36,6 +36,8 @@
     { "glob": "tests/**", "platforms": [], "說明": "根目錄測試" },
     { "glob": "archive/**", "platforms": [], "說明": "封存，不參與建置" },
     { "glob": "*.md", "platforms": [], "說明": "根目錄文件" },
-    { "glob": "LICENSE", "platforms": [], "說明": "授權文字" }
+    { "glob": "LICENSE", "platforms": [], "說明": "授權文字" },
+    { "glob": "site/**", "platforms": [], "說明": "官網與更新清單，打標籤之後才由 local_sign_publish 提交、另外部署；不列的話每一版都會被它拖成三個都打" },
+    { "glob": "supabase/**", "platforms": [], "說明": "後台（migration、Edge Function）另外部署，不進安裝檔" }
   ]
 }

@@ -104,3 +104,9 @@ test('CLI：依據超過 10 個檔寫「等 N 個」', () => {
   const git = args => args[0] === 'tag' ? (args[2] === 'v*' ? 'v1.0.0' : '') : args[1] === '--name-only' ? Array.from({ length: 12 }, (_, i) => `relay/asn/ui/f${i}.js`).join('\n') : ''
   assert.match(renderTable(collectFromTags(git, rules)), /等 12 個/)
 })
+test('#1979 官網檔（site/）和後台（supabase/）不發版：發版後才提交的網站檔不能把下一版拖成三個都打', () => {
+  const r = plan([{ file: 'site/public/update/latest.json' }, { file: 'site/public/index.html' }, { file: 'supabase/migrations/20261120200000_compact_notice.sql' }])
+  assert.deepEqual(tagged(r), [])
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(tagged(plan([{ file: 'site/public/index.html' }, { file: 'relay/asn/ui/m.html' }])), [...PLATFORMS], '混到共用畫面照樣三個都打')
+})
