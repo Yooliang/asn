@@ -23,7 +23,7 @@ test('guard 失敗：發版未開始（auto 不影響，下游全 skipped 也一
   const b = notifyStatus({ guardResult: 'failure', auto: true, results: Object.fromEntries(JOBS.map(j => [j, 'skipped'])) })
   has(b, '【發版未開始】')
   lacks(b, '發版異常', '略過')
-  has(notifyStatus({ guardResult: 'failure', guardStep: '版本檔一致' }), '卡在：版本檔一致')
+  has(notifyStatus({ guardResult: 'failure', guardStep: '標籤與版本檔' }), '卡在：標籤與版本檔')
 })
 
 test('guard 成功、auto=false：發版略過；與 guard 失敗靠 guardResult 區分', () => {

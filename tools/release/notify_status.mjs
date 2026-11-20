@@ -21,7 +21,8 @@ const NEEDS = {
 
 // repo variable ASN_RELEASE_AUTO：只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都不是）
 // 守門失敗時能寫進公開留言的步驟名：只收這幾個固定的字串（不收呼叫端給的任意文字）
-export const GUARD_STEPS = ['標籤格式', '版本檔一致', '標籤在主分支上', '更新紀錄', '官網紀錄預檢', '發佈狀態', '同時有別的發版']
+// 與 asn-release.yml 的 guard「記錄卡在哪一步」那步輸出的字串一一對應（守門測試會對照）
+export const GUARD_STEPS =['標籤與版本檔', 'CHANGELOG 與官網紀錄預檢', 'GitHub Release 狀態', '別的發版 run 在跑', '其他']
 
 // 連結只收本 repo 的 Actions 執行頁（run 或 job），不收查詢字串、片段與其他網域
 export const RUN_URL_RE = /^https:\/\/github\.com\/Yooliang\/asn\/actions\/runs\/[0-9]+(\/job\/[0-9]+)?$/

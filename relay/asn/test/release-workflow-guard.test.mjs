@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { statusFromNeeds } from '../../../tools/release/notify_run.mjs'
-import { JOBS } from '../../../tools/release/notify_status.mjs'
+import { JOBS, GUARD_STEPS } from '../../../tools/release/notify_status.mjs'
 
 const root = new URL('../../../', import.meta.url)
 const RELEASE = '.github/workflows/asn-release.yml'
@@ -405,4 +405,13 @@ test('壞例子：auto 開關接線拿掉、改成 != false、下游 job 沒看 
 test('壞例子：縮排有 tab 或奇數空白會紅', () => {
   assert.ok(flagged(mutate('    timeout-minutes: 90\n', '\ttimeout-minutes: 90\n'), /有 tab/))
   assert.ok(flagged(mutate('    timeout-minutes: 90\n', '   timeout-minutes: 90\n'), /縮排不是 2 的倍數/))
+})
+
+test('guard 的「記錄卡在哪一步」輸出的每個名字都在通知的固定白名單裡（不然 notify 會悄悄丟掉步驟名）', () => {
+  const text = read(RELEASE)
+  const names = [...text.matchAll(/name="([^"]+)"/g)].map(m => m[1])
+  assert.ok(names.length >= 5, `只找到 ${names.length} 個步驟名`)
+  for (const n of names) assert.ok(GUARD_STEPS.includes(n), `workflow 輸出「${n}」，但 GUARD_STEPS 沒有它`)
+  // 壞例子：workflow 改了名字、白名單沒跟著改
+  assert.ok(![...text.replace('name="標籤與版本檔"', 'name="標籤檢查"').matchAll(/name="([^"]+)"/g)].every(m => GUARD_STEPS.includes(m[1])))
 })
