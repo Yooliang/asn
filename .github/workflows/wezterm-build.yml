@@ -1,99 +1,34 @@
-name: WezTerm 自建（20240203 正式版＋上游 #7706）
-
-# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位），
-# 打包成 Windows zip 與各 Linux 發行版 tar.xz，附 SHA256SUMS 與建置來源證明（artifact attestation）。
-#   - pull_request（只在這支 workflow 或它用的腳本變動時）：只建置與測試，不發佈。
-#   - workflow_dispatch：建置與測試；只有在 main 上手動觸發時，才會跑最後的「發佈」job。
-# 這一張只管建置與發佈，ASN 下載 WezTerm 的來源（wezterm-pins.json、fetch-wezterm.mjs、wezterm_fetch.rs）沒有動。
+name: 診斷 symbolize（#1318，診斷分支，不合併）
 on:
-  pull_request:
-    branches: [never-on-pr]
-    paths:
-      - '.github/workflows/wezterm-build.yml'
-      - '.github/scripts/wezterm-*.sh'
   workflow_dispatch:
-
 permissions:
   contents: read
-
-env:
-  UPSTREAM_TAG: '20240203-110809-5046fc22'
-  UPSTREAM_SHA: '5046fc225992db6ba2ef8812743fadfdfe4b184a'
-  PATCH_SHA: '29d01fc8e53f4d0fe0c1cf4f31b64b49358a2ff8'
-  # 1.76.0：tag 自帶的 Cargo.lock 裡 time 0.3.31 在更新的 Rust 編不過
-  RUST_VERSION: '1.76.0'
-  ASN_SUFFIX: 'asn.1'
-  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.1'
-  # 上游官方 Windows 壓縮檔（用來核對四個現成的二進位檔）；與 relay/asn/scripts/wezterm-pins.json 的值相同
-  OFFICIAL_ZIP_SHA256: '57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4'
-  OFFICIAL_ZIP_SIZE: '66162319'
-  OFFICIAL_ZIP_URL: 'https://github.com/wezterm/wezterm/releases/download/20240203-110809-5046fc22/WezTerm-windows-20240203-110809-5046fc22.zip'
-  LICENSE_SHA256: '37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca'
-
+  actions: read
 jobs:
-  build-windows:
-    name: Windows（windows-2022）
+  symbolize:
     runs-on: windows-2022
-    timeout-minutes: 150
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
-    env:
-      WEZ_SRC: C:/w/src
-      WEZ_OUT: C:/w/out
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain 指定
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - name: 取上游原始碼、核對、套 #7706
-        run: bash .github/scripts/wezterm-src-prepare.sh "$WEZ_SRC"
-      - name: 建置（需要 Strawberry Perl 給 openssl-sys）
-        run: |
-          set -euo pipefail
-          export PATH="/c/Strawberry/perl/bin:$PATH"
-          perl -v | grep -q MSWin32 || { echo "::error::抓到的 perl 不是 Strawberry Perl" >&2; perl -v; exit 1; }
-          rustc --version
-          case "$(rustc --version)" in "rustc ${RUST_VERSION} "*) ;; *) echo "::error::Rust 不是 ${RUST_VERSION}" >&2; exit 1;; esac
-          # 版本字串：wezterm-version 的 build.rs 會讀根目錄的 .tag（官方版是 "wezterm <tag>"）
-          echo "$UPSTREAM_TAG" > "$WEZ_SRC/.tag"
-          cd "$WEZ_SRC"
-          cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server
-      # 診斷 #1318：只為了把崩潰傾印符號化，不發佈、不 attest。
-      # PE 時間戳是建置當下的時間，必然和發佈版不同；改比大小與 .text 區段雜湊，一致才拿 PDB 下結論。
-      - name: 上傳 PDB 與重建的 exe（只有符號，給 #1318 符號化崩潰傾印）
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wezterm-mux-server-pdb
-          path: |
-            C:/w/src/target/release/deps/wezterm_mux_server.pdb
-            C:/w/src/target/release/wezterm-mux-server.exe
-          retention-days: 14
-      - name: 比對程式碼區段（與發佈版 wezterm-mux-server.exe）
+          run-id: '44662864799'
+          repository: Yooliang/asn
+          github-token: ${{ github.token }}
+          path: pdb
+      - name: 查符號
         run: |
-          set -euo pipefail
-          rel="$WEZ_SRC/target/release"
-          curl -fsSL -o "$RUNNER_TEMP/rel.zip" "https://github.com/Yooliang/asn/releases/download/${RELEASE_TAG}/WezTerm-windows-${UPSTREAM_TAG}-${ASN_SUFFIX}.zip"
-          mkdir -p "$RUNNER_TEMP/rel" && cd "$RUNNER_TEMP/rel" && unzip -q "$RUNNER_TEMP/rel.zip"
-          pub="$(find "$RUNNER_TEMP/rel" -name wezterm-mux-server.exe | head -1)"
-          cat > "$RUNNER_TEMP/sect.py" <<'PY'
-          import sys, struct, hashlib
-          for p in sys.argv[1:]:
-              b = open(p, 'rb').read()
-              pe = struct.unpack_from('<I', b, 0x3c)[0]
-              n = struct.unpack_from('<H', b, pe + 6)[0]
-              ts = struct.unpack_from('<I', b, pe + 8)[0]
-              opt = struct.unpack_from('<H', b, pe + 20)[0]
-              sec = pe + 24 + opt
-              out = [f'size={len(b)}', f'timestamp={ts:#x}']
-              for i in range(n):
-                  name, vsz, va, rsz, raw = struct.unpack_from('<8sIIII', b, sec + 40 * i)
-                  name = name.rstrip(b'\0').decode()
-                  if name in ('.text', '.rdata', '.pdata'):
-                      out.append(f'{name}@{va:#x}:{vsz}:{hashlib.sha256(b[raw:raw + min(vsz, rsz)]).hexdigest()[:16]}')
-              print(p.replace(chr(92), '/').split('/')[-3:], ' '.join(out))
-          PY
-          python "$RUNNER_TEMP/sect.py" "$pub" "$rel/wezterm-mux-server.exe" | tee -a "$GITHUB_STEP_SUMMARY"
+          find pdb -type f | head
+          EXE=$(find pdb -name wezterm-mux-server.exe | head -1)
+          PDBDIR=$(dirname "$(find pdb -name wezterm_mux_server.pdb | head -1)")
+          RVAS="753d10 753d3a 753ee6 7547d0 7549c3 7556f0 755752"
+          python .github/scripts/diag-symbolize.py "$(cygpath -w "$EXE")" "$(cygpath -w "$PDBDIR")" $RVAS
+          CDB="/c/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe"
+          if [ -x "$CDB" ]; then
+            CMDS=".reload /f"; for r in $RVAS; do CMDS="$CMDS; ln wezterm_mux_server+0x$r"; done
+            "$CDB" -z "$(cygpath -w "$EXE")" -y "$(cygpath -w "$PDBDIR")" -c "$CMDS; q" || true
+          else echo "cdb not present"; fi
