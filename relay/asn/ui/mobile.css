@@ -313,7 +313,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-opt.off{opacity:.6;background:#f1f3f6}
 .m-opt-t{font-size:16px;font-weight:600;min-width:0;overflow-wrap:anywhere}
 .m-ops-shared{margin:0 0 6px;padding:6px 4px;font-size:13px;line-height:1.4;color:var(--muted);white-space:normal}
-.m-opt-why{font-size:13px;color:var(--muted);min-width:0;overflow-wrap:anywhere}
+.m-opt-why{font-size:13px;color:var(--muted);min-width:0;overflow-wrap:anywhere;text-spacing-trim:space-all}
 .m-opt.off .m-opt-why{color:#9a3b14}
 .m-field{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--title-fg)}
 .m-field .set-sel,.m-field .set-input,.m-field .set-area{min-height:44px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel);user-select:text;-webkit-user-select:text;width:100%}

@@ -781,8 +781,9 @@ test('掃 QR code（電腦版）：QR 的格子只有電腦版有（cfg(desktop)
 test('#1944 開新夥伴的選項卡：標題與說明行可縮、英文詞可在任意處換行（Linux 中英混排字寬較大，字放大後會撐出卡片）', () => {
   const css = read('ui', 'mobile.css')
   for (const sel of ['m-opt-t', 'm-opt-why']) {
-    const rule = css.match(new RegExp('^\.' + sel + '\{([^}]*)\}', 'm'))?.[1] ?? ''
+    const rule = css.match(new RegExp('^\\.' + sel + '\\{([^}]*)\\}', 'm'))?.[1] ?? ''
     assert.match(rule, /min-width:0/, sel + ' 要能縮')
     assert.match(rule, /overflow-wrap:anywhere/, sel + ' 要能在任意處換行')
   }
+  assert.match(css.match(/^\.m-opt-why\{([^}]*)\}/m)?.[1] ?? '', /text-spacing-trim:space-all/, '說明行不壓縮全形標點（壓縮後行尾的「）」會多出約 6px）')
 })
