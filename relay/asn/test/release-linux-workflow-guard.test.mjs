@@ -213,12 +213,14 @@ const RUN_ALLOW = [
   { line: `ids=$(printf '%s\\n' "$all" | grep -vx "$RUN_ID" | grep -v '^$' || true)`, min: 1, why: '取「其他發版 run 編號」：grep 沒找到（＝沒有別的 run）回 1 是正常，不該讓 guard 紅' },
 ]
 const runBodies = raw => {
-  const lines = strip(raw).split('\n')
+  // 不剝註解：Actions 連 shell 註解裡的 ${{ }} 也會展開，「空白＋#」之後的東西正是要守的地方（整行 YAML 註解不會落在 run 區塊的縮排內，不受影響）
+  const lines = raw.replace(/\r\n/g, '\n').split('\n')
   const out = []
   for (let i = 0; i < lines.length; i++) {
     const m = /^(\s*)(- )?run:[ \t]*(.*)$/.exec(lines[i])
     if (!m) continue
-    if (!/^[|>][+-]?$/.test(m[3].trim())) { out.push([m[3]]); continue }
+    // 區塊純量標頭：| 或 >，可帶縮排指示符（1～9）與保留記號，後面可接 YAML 註解（|2、|-、>+ 都算）
+    if (!/^[|>](?:[1-9][+-]?|[+-][1-9]?)?(?:\s+#.*)?$/.test(m[3].trim())) { out.push([m[3]]); continue }
     const keyCol = m[1].length + (m[2] ? 2 : 0)
     const body = []
     for (let j = i + 1; j < lines.length; j++) {
@@ -236,12 +238,18 @@ const runProblems = raw => {
   const bodies = runBodies(raw)
   if (bodies.length < 15) bad.push(`run 區塊命中數太少：${bodies.length}`)
   const hits = new Map(RUN_ALLOW.map(a => [a.line, 0]))
-  for (const body of bodies) for (const l of body) {
-    const t = l.trim()
-    if (t.includes('${{')) bad.push(`run 內不准 \${{ }}（改經 env:）：${t.slice(0, 60)}`)
-    if (hits.has(t)) { hits.set(t, hits.get(t) + 1); continue }
-    if (/\|\|\s*true\b/.test(t)) bad.push(`不准 || true：${t.slice(0, 60)}`)
-    if (/\bset\s+\+e\b/.test(t)) bad.push(`不准 set +e：${t.slice(0, 60)}`)
+  for (const body of bodies) {
+    const kept = []
+    for (const l of body) {
+      const t = l.trim()
+      if (hits.has(t)) { hits.set(t, hits.get(t) + 1); continue }
+      kept.push(l)
+    }
+    const text = kept.join('\n')
+    const at = text.indexOf('${{')
+    if (at >= 0) bad.push(`run 內不准 \${{ }}（改經 env:）：${text.slice(Math.max(0, at - 20), at + 40).replace(/\n/g, ' ')}`)
+    if (/\|\|\s*true\b/.test(text)) bad.push('不准 || true（含 || 後換行再接 true）')
+    if (/\bset\s+(?:-\w+\s+)*\+[a-z]*e[a-z]*\b/.test(text) || /\bset\s+\+o\s+errexit\b/.test(text)) bad.push('不准 set +e／set +eu／set +o errexit')
   }
   for (const a of RUN_ALLOW) if (hits.get(a.line) < a.min) bad.push(`白名單「${a.line.slice(0, 40)}」命中 ${hits.get(a.line)} 次，少於 ${a.min}（${a.why}）`)
   if (/continue-on-error/.test(strip(raw))) bad.push('不准 continue-on-error')
@@ -269,6 +277,13 @@ test('#1892 壞例子：run 內加 ${{ }}、|| true、set +e、continue-on-error
   assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^$' || true); npm test || true"), /\|\| true/))
   assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^x$' || true)"), /\|\| true/))
   assert.ok(has(sub("grep -v '^$' || true)", "grep -v '^$')"), /白名單/))
+  // 二審補：run 內文「空白＋#」之後藏的東西、|| 換行接 true、set +eu／set +o errexit、|2 縮排指示符都要抓到
+  assert.ok(has(sub(anchor, `${anchor}          echo "x #"; echo \${{ github.ref_name }}\n`), /\$\{\{/))
+  assert.ok(has(sub(anchor, `${anchor}          echo "b #1"; npm test || true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          npm test ||\n            true\n`), /\|\| true/))
+  assert.ok(has(sub(anchor, `${anchor}          set +eu\n`), /set \+e/))
+  assert.ok(has(sub(anchor, `${anchor}          set +o errexit\n`), /set \+e/))
+  assert.equal(runBodies(`jobs:\n  a:\n    steps:\n      - run: |2\n            echo hi\n`).length, 1, '|2 縮排指示符的 run 區塊要抓得到')
   // 不誤傷：註解裡提到不算
   assert.deepEqual(runProblems(`${W}\n# echo "\${{ github.ref_name }}" || true; set +e; continue-on-error\n`), [])
 })
