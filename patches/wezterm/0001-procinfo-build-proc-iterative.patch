@@ -1,0 +1,87 @@
+diff --git a/procinfo/src/windows.rs b/procinfo/src/windows.rs
+index bb788ce..986acda 100644
+--- a/procinfo/src/windows.rs
++++ b/procinfo/src/windows.rs
+@@ -361,22 +361,13 @@ impl LocalProcessInfo {
+         let procs = Snapshot::entries();
+         log::trace!("Got snapshot");
+ 
+-        fn build_proc(
++        // 最多往下展開幾層；超過就停止展開並記一筆 log（ASN 修補，見 #1896）
++        const MAX_DEPTH: usize = 64;
++
++        fn make_info(
+             info: &PROCESSENTRY32W,
+-            procs: &[PROCESSENTRY32W],
+-            visited: &mut HashSet<u32>,
++            children: HashMap<u32, LocalProcessInfo>,
+         ) -> LocalProcessInfo {
+-            let mut children = HashMap::new();
+-
+-            for kid in procs {
+-                if kid.th32ParentProcessID == info.th32ProcessID
+-                    && !visited.contains(&kid.th32ProcessID)
+-                {
+-                    visited.insert(kid.th32ProcessID);
+-                    children.insert(kid.th32ProcessID, build_proc(kid, procs, visited));
+-                }
+-            }
+-
+             let mut executable = None;
+             let mut start_time = 0;
+             let mut cwd = PathBuf::new();
+@@ -417,10 +408,51 @@ impl LocalProcessInfo {
+             }
+         }
+ 
+-        if let Some(info) = procs.iter().find(|info| info.th32ProcessID == pid) {
++        // 迭代版（不遞迴）：先以廣度優先找出整棵樹，再由最後發現的節點往回組裝。
++        fn build_proc(root: &PROCESSENTRY32W, procs: &[PROCESSENTRY32W]) -> LocalProcessInfo {
+             let mut visited = HashSet::new();
+-            visited.insert(pid);
+-            Some(build_proc(info, &procs, &mut visited))
++            visited.insert(root.th32ProcessID);
++            // (在 procs 裡的位置, 父節點在 order 裡的位置, 深度)
++            let mut order: Vec<(Option<usize>, Option<usize>, usize)> = vec![(None, None, 0)];
++            let mut i = 0;
++            while i < order.len() {
++                let (idx, _, depth) = order[i];
++                let this_pid = match idx {
++                    Some(n) => procs[n].th32ProcessID,
++                    None => root.th32ProcessID,
++                };
++                for (n, kid) in procs.iter().enumerate() {
++                    if kid.th32ParentProcessID == this_pid
++                        && !visited.contains(&kid.th32ProcessID)
++                    {
++                        if depth >= MAX_DEPTH {
++                            log::warn!(
++                                "procinfo: process tree deeper than {} levels at pid {}; not expanding further",
++                                MAX_DEPTH,
++                                this_pid
++                            );
++                            break;
++                        }
++                        visited.insert(kid.th32ProcessID);
++                        order.push((Some(n), Some(i), depth + 1));
++                    }
++                }
++                i += 1;
++            }
++
++            let mut kids: Vec<HashMap<u32, LocalProcessInfo>> =
++                (0..order.len()).map(|_| HashMap::new()).collect();
++            for pos in (1..order.len()).rev() {
++                let (idx, parent, _) = order[pos];
++                let entry = &procs[idx.unwrap()];
++                let done = make_info(entry, std::mem::take(&mut kids[pos]));
++                kids[parent.unwrap()].insert(entry.th32ProcessID, done);
++            }
++            make_info(root, std::mem::take(&mut kids[0]))
++        }
++
++        if let Some(info) = procs.iter().find(|info| info.th32ProcessID == pid) {
++            Some(build_proc(info, &procs))
+         } else {
+             None
+         }
