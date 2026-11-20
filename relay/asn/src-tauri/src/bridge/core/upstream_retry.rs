@@ -360,6 +360,13 @@ impl Core {
     /// 把記著的點名重新交給工作者（同一個編號，回覆照舊貼回原群組）。reason＝上一次失敗的原因，送不出去時拿來貼說明
     async fn up_resend(&mut self, id: &str, memo: Memo, reason: &str) {
         let target = memo.target.clone();
+        // 等補送的這段時間，群組裡可能已經有人回了這則（#1828）：有就不補送，免得多回一次
+        if let Some(why) = self.up_room_answered(&memo).await {
+            self.log.line(&format!("upstream-retry not resent id={id} room={} #{}: {why}", memo.room.id, memo.room.seq));
+            self.up_retry.forget(id);
+            self.up_sync_file();
+            return;
+        }
         if self.idx(id).is_some() {
             self.log.line(&format!("upstream-retry not resent id={id}: already in progress or handled"));
             return;
@@ -384,6 +391,20 @@ impl Core {
         }
     }
 
+    /// 讀群組後台（只讀：帶 since、不標已讀），看這則點名之後是否已經有人回了。回 Some(原因)＝已回，不必補送。
+    /// 讀不到（網路、5xx）回 None＝照常補送：最壞只是多回一次，比漏回好
+    async fn up_room_answered(&self, memo: &Memo) -> Option<&'static str> {
+        let as_agent = if memo.room.window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&memo.room.window)) };
+        let action = format!("room_read&room={}{as_agent}&since={}&limit=100", crate::relay::encode_component(&memo.room.id), memo.room.seq);
+        match self.relay.api(&action, None).await {
+            Ok(res) => answered_in(res.get("messages").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]), memo),
+            Err(e) => {
+                self.log.line(&format!("upstream-retry room_read failed room={} #{}: {e} (resend anyway)", memo.room.id, memo.room.seq));
+                None
+            }
+        }
+    }
+
     /// 補送不成：貼原本那則失敗說明（沿用冷卻）
     async fn up_give_up(&mut self, id: &str, memo: &Memo, reason: &str) {
         self.up_retry.strand(id);
@@ -396,6 +417,32 @@ impl Core {
         self.room_forward_failed(id, "room", false, why).await;
         self.remove(id);
     }
+}
+
+/// 這則點名之後的群組訊息裡，有沒有人已經回了（#1828）。規則（後台的群組訊息有「回覆某則」欄位 reply_to，沒有「回覆誰」的欄位）：
+/// 1. 有人用 reply_to 指向這則（不論是誰）；
+/// 2. 目標夥伴本人在這則之後發過言（恢復時重送的那一次不看這條：中間它已經正常回了別則，不代表這則有人處理）。
+/// 收發室自己貼的說明（過渡說明、失敗說明、恢復通知，開頭固定）不算，否則過渡說明本身就會讓補送取消
+fn answered_in(msgs: &[Value], memo: &Memo) -> Option<&'static str> {
+    let me_window = memo.room.window.as_str();
+    for m in msgs {
+        if json_u64(m.get("seq")) <= memo.room.seq {
+            continue;
+        }
+        let body = m.get("body").and_then(Value::as_str).unwrap_or("");
+        if body.starts_with(super::fail_notice::ROOM_NOTICE_HEAD) {
+            continue;
+        }
+        if json_u64(m.get("reply_to").and_then(|r| r.get("seq"))) == memo.room.seq {
+            return Some("群組裡已經有人回覆這則");
+        }
+        let from = m.get("from").and_then(Value::as_str).unwrap_or("");
+        let from_me = (!memo.room.member.is_empty() && from == memo.room.member) || (!me_window.is_empty() && rooms::member_window(from) == me_window);
+        if from_me && !memo.last_chance {
+            return Some("目標夥伴在這則之後已經在群組發過言");
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -504,5 +551,34 @@ mod tests {
         assert!(upstream_5xx(WHY).is_some());
         assert!(upstream_5xx("Gemini 處理這封信太久沒有動靜").is_none());
         assert!(upstream_5xx("API error (attempt 1): request failed (code 401): HTML response").is_none());
+    }
+
+    fn msg(seq: u64, from: &str, body: &str, reply_seq: Option<u64>) -> Value {
+        let mut m = serde_json::json!({ "seq": seq, "from": from, "body": body });
+        if let Some(r) = reply_seq {
+            m["reply_to"] = serde_json::json!({ "seq": r, "from": "x" });
+        }
+        m
+    }
+    fn memo_in_room() -> Memo {
+        let mut m = memo(0);
+        m.room.member = "W~甲".into();
+        m
+    }
+    const NOTICE: &str = "（收發室）群組訊息 #2 甲 收到了，但 X 那邊暫時出錯（502），收發室會自動再試，不用重新點名。";
+
+    #[test]
+    fn 單號1828_已回覆的判斷規則() {
+        let m = memo_in_room(); // 點名在第 2 則，目標＝W~甲
+        assert!(answered_in(&[], &m).is_none());
+        assert!(answered_in(&[msg(3, "W~乙", "閒聊", None), msg(4, "W~乙", "別則的回覆", Some(1))], &m).is_none(), "別人閒聊、引用別則都不算");
+        assert!(answered_in(&[msg(3, "W~甲", NOTICE, None)], &m).is_none(), "收發室以目標名義貼的說明不算");
+        assert!(answered_in(&[msg(1, "W~甲", "更早的", None), msg(2, "W~甲", "同一則", None)], &m).is_none(), "這則以前（含這則）不算");
+        assert!(answered_in(&[msg(3, "W~甲", "我手動回了", None)], &m).is_some(), "目標夥伴之後發過言");
+        assert!(answered_in(&[msg(3, "W~乙", "我來", Some(2))], &m).is_some(), "別人用回覆引用這則");
+        let mut last = memo_in_room();
+        last.last_chance = true;
+        assert!(answered_in(&[msg(3, "W~甲", "回了別則", None)], &last).is_none(), "恢復重送：目標回過別則不算");
+        assert!(answered_in(&[msg(3, "W~乙", "我來", Some(2))], &last).is_some(), "恢復重送：有人引用這則仍算");
     }
 }

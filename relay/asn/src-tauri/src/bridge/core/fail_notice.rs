@@ -6,7 +6,7 @@ use crate::bridge::engines::acp_policy::upstream_5xx;   // 判斷方式與自動
 /// 私信通知（失敗、逾時、送錯）的開頭
 const MAIL_NOTICE_HEAD: &str = "[收發室] ";
 /// 群組通知的開頭
-const ROOM_NOTICE_HEAD: &str = "（收發室）群組訊息 #";
+pub(super) const ROOM_NOTICE_HEAD: &str = "（收發室）群組訊息 #";
 /// 同一個群組、同一個收件視窗，隔這麼久才再貼一則
 const ROOM_NOTICE_GAP_MS: u64 = 600_000;
 /// 同一個 worker 失敗到這個次數就在 log 留警告

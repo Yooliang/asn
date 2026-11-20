@@ -2559,3 +2559,77 @@ async fn 單號1670_收發室通知類的群組訊息遇上游502_不排補送_�
     assert!(!h.work.path().join("retry-pending.json").exists());
     assert!(room_bodies(&h).is_empty(), "不貼過渡說明、也不貼失敗說明：{:?}", room_bodies(&h));
 }
+
+// ---- #1828：補送前先讀群組後台，已經有人回了就不補送
+
+/// 群組 R1：第 2 則是點名 Gemini 的那則，後面接上 extra（seq、from、body、reply_to）
+fn room_with_followups(h: &EH, first: &str, extra: Vec<(u64, &str, &str, Value)>) {
+    let mut messages = vec![json!({"seq": 2, "from": "W~W-政策", "from_name": "政策", "trust": "member", "body": first, "mentions": [], "at": "t", "forMe": {"Gemini": true}})];
+    for (seq, from, body, reply_to) in &extra {
+        let mut m = json!({"seq": seq, "from": from, "from_name": "某人", "trust": "member", "body": body, "mentions": [], "at": "t", "forMe": {}});
+        if !reply_to.is_null() {
+            m["reply_to"] = reply_to.clone();
+        }
+        messages.push(m);
+    }
+    let last = extra.last().map(|e| e.0).unwrap_or(2);
+    h.fr.st.lock().unwrap().rooms = vec![json!({"id": "R1", "name": "專案群", "last_seq": last, "mine": [{"member": "W~Gemini", "read_seq": 1}], "messages": messages})];
+}
+
+/// 502 兩次（原本＋工作者 10 秒重試）之後，核心到補送時間會去讀群組；回傳 (mark 檔, 這一輪的 harness)
+async fn up1828_start(name: &str, extra: impl FnOnce(&EH, &str)) -> (EH, std::path::PathBuf) {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.core.cfg.upstream_retry_ms = [300, 600];
+    let mark = h.work.path().join(name);
+    let first = format!("請處理這件事\n@@UP502_FIRST 2 {}", mark.display());
+    room_for(&h, vec![(2, &first)]);
+    h.core.pull_rooms(now()).await;
+    extra(&h, &first); // 補送要等 300 毫秒以上，這之前把「等待期間發生的事」放進群組
+    (h, mark)
+}
+
+#[tokio::test]
+async fn 單號1828_等補送的期間目標夥伴已經在群組回了_不補送_記一行() {
+    let (mut h, mark) = up1828_start("up1828a.txt", |h, first| room_with_followups(h, first, vec![(3, "W~Gemini", "我手動回了：這件事這樣處理", Value::Null)])).await;
+    tick_wait(&mut h, "記下不補送", |h| h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent") && l.contains("已經在群組發過言"))).await;
+    tick_for(&mut h, 1500).await;
+    assert_eq!(mark_lines(&mark), 2, "只有原本與工作者自己的重試，沒有再補送：{}", h.core.log.recent().join("\n"));
+    assert!(!room_bodies(&h).iter().any(|b| b.contains("收到：") || b.contains("這一輪沒有處理")), "{:?}", room_bodies(&h));
+    assert!(!h.work.path().join("retry-pending.json").exists());
+}
+
+#[tokio::test]
+async fn 單號1828_等補送的期間別人用回覆引用這則回了_不補送() {
+    let (mut h, mark) = up1828_start("up1828b.txt", |h, first| room_with_followups(h, first, vec![(3, "W~別的視窗", "這件我來", json!({"seq": 2, "from": "W~W-政策"}))])).await;
+    tick_wait(&mut h, "記下不補送", |h| h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent") && l.contains("已經有人回覆這則"))).await;
+    tick_for(&mut h, 1500).await;
+    assert_eq!(mark_lines(&mark), 2, "{}", h.core.log.recent().join("\n"));
+    assert!(!room_bodies(&h).iter().any(|b| b.contains("收到：")), "{:?}", room_bodies(&h));
+}
+
+#[tokio::test]
+async fn 單號1828_沒人回覆_只有別人閒聊與收發室自己的說明_照常補送() {
+    let notice = "（收發室）群組訊息 #2 Gemini 收到了，但 Gemini 那邊暫時出錯（502），收發室會自動再試，不用重新點名。";
+    let (mut h, mark) = up1828_start("up1828c.txt", |h, first| {
+        room_with_followups(h, first, vec![
+            (3, "W~Gemini", notice, Value::Null),                      // 收發室自己以它的名義貼的過渡說明：不算回覆
+            (4, "W~別的視窗", "另一件事", Value::Null),                // 別人閒聊
+            (5, "W~別的視窗", "回的是別則", json!({"seq": 1, "from": "x"})), // 引用的是別則
+        ])
+    })
+    .await;
+    tick_wait(&mut h, "補送成功", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
+    assert_eq!(mark_lines(&mark), 3, "共送了三次");
+    assert!(!h.core.log.recent().iter().any(|l| l.contains("upstream-retry not resent")), "{}", h.core.log.recent().join("\n"));
+}
+
+#[tokio::test]
+async fn 單號1828_讀群組後台失敗_照常補送() {
+    // 群組讀不到（後台回錯）：不能因此漏補送，最壞只是多回一次
+    let (mut h, mark) = up1828_start("up1828d.txt", |h, _| h.fr.st.lock().unwrap().rooms = vec![]).await;
+    tick_wait(&mut h, "補送成功", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
+    assert_eq!(mark_lines(&mark), 3);
+    let log = h.core.log.recent().join("\n");
+    assert!(log.contains("upstream-retry room_read failed") && log.contains("upstream-retry resent"), "{log}");
+}
