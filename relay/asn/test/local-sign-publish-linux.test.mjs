@@ -451,3 +451,10 @@ test('parseArgs：--platform linux 的標籤與錯誤；電腦版預設不變', 
   const w = parseArgs(['--tag', `v${V}`])
   assert.equal(w.platform, 'windows'); assert.equal(w.version, V)
 })
+test('#1966 貼群組失敗：log 要帶 asn-cli 的錯誤原因（例如找不到程式），不是只有結束碼', async () => {
+  const y = world()
+  y.deps.asnCli = async args => args[0] === 'send' ? { status: 1, stdout: '', stderr: '找不到 asn-cli（試過：asn-cli（PATH））' } : { status: 0, stdout: '', stderr: '' }
+  const r = await localSignPublish(y.opts, y.deps)
+  assert.equal(r.ok, true, r.error)
+  assert.ok(y.w.logs.some(l => /貼群組失敗（結束碼 1：找不到 asn-cli/.test(l)), y.w.logs.join('\n'))
+})
