@@ -247,3 +247,21 @@ fn 信的欄位對得上後台() {
     assert_eq!(mail_fields(&MailKind::Remind(Why::Off)).0, "remind_off");
     assert_eq!(mail_fields(&MailKind::Remind(Why::Failed)).0, "remind_failed");
 }
+
+#[test]
+fn 一輪最多自動交接一個視窗_其餘達標的留到下一輪() {
+    let mut t = Tracker::default();
+    let wins = [win("s1", "小悠", 3), win("s2", "西川", 4)];
+    let a = run(&mut t, &wins, true, 3, &ok_quota(), &[]);
+    assert_eq!(handovers(&a), 1, "兩個都達標，只交接第一個：{a:?}");
+    assert!(matches!(&a[0], Act::Handover { sid, auto: true, .. } if sid == "s1"), "{a:?}");
+    assert_eq!(t.view()["s2"].state, "count", "沒輪到的不能標成交接中");
+    // 下一輪：第一個還在交接中，輪到第二個
+    let a = run(&mut t, &wins, true, 3, &ok_quota(), &[]);
+    assert_eq!(handovers(&a), 1, "{a:?}");
+    assert!(matches!(&a[0], Act::Handover { sid, .. } if sid == "s2"), "{a:?}");
+    // 只寄提醒的路不受上限影響：額度讀不到時兩個都各寄一封
+    let mut t = Tracker::default();
+    let a = run(&mut t, &wins, true, 3, &Quota::Unknown, &[]);
+    assert_eq!((handovers(&a), a.len()), (0, 2), "{a:?}");
+}

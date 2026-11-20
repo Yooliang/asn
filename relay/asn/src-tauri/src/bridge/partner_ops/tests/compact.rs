@@ -80,3 +80,17 @@ fn 本機副本其他安全檢查照舊_收發室與_asn_自己的視窗不能�
     write_compacts(&r, 1);
     assert!(r.ops.compact_scan().iter().all(|w| w.name != "T-ASN"));
 }
+
+#[tokio::test]
+async fn 守門_後台_pull_拿到帶本機標記的待辦_仍被當成遠端() {
+    // 走真正的 pull 路徑：後台回傳的待辦帶 local:true 也不會變成本機發起，照樣被「允許其他設備」的開關擋下
+    let st = Arc::new(Mutex::new(Srv::default()));
+    st.lock().unwrap().ops = vec![json!({ "id": "f1", "name": "目標", "op": "handover", "local": true, "by_local": true, "requested_by": "U1", "requested_by_label": "本機（壓縮 3 次自動交接）", "created_at": "t" })];
+    let r = rig_with_server(Opt { allow_first: 0, ..Opt::default() }, st.clone());
+    write_compacts(&r, 3);
+    r.ops.pull().await;
+    let res = wait_results(&st, 1).await;
+    assert_eq!(res.len(), 1, "{res:?}");
+    assert_eq!((res[0]["status"].as_str(), res[0]["detail"].as_str()), (Some("failed"), Some(CONSENT_OFF)), "{res:?}");
+    assert!(r.terminated().is_empty() && r.launched().is_empty(), "什麼都沒動");
+}

@@ -241,6 +241,8 @@ impl Tracker {
 
     pub fn step(&mut self, i: &Input) -> Vec<Act> {
         let mut acts = Vec::new();
+        // 一輪最多自動交接 1 個視窗：同時開好幾個新視窗太吵，其餘達標的留到下一輪（維持原狀態，不標交接中）
+        let mut auto_taken = false;
         let live: HashSet<&str> = i.wins.iter().map(|w| w.sid.as_str()).collect();
         // 視窗不在了就忘掉（交接中的、做完的留著，免得名單閃一下又出現時重複觸發）
         self.sess.retain(|sid, s| live.contains(sid.as_str()) || s.phase == Phase::Handing);
@@ -271,7 +273,9 @@ impl Tracker {
             // 這個視窗可能用自訂設定資料夾：額度不能代表它，當讀不到
             let q = if w.custom_config { &Quota::Unknown } else { i.quota };
             match judge(i.enabled, q) {
+                Ok(_) if auto_taken => {}
                 Ok(pct5) => {
+                    auto_taken = true;
                     s.phase = Phase::Handing;
                     s.auto = true;
                     s.pct5 = pct5;

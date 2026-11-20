@@ -418,7 +418,7 @@ export const SettingsPanel = {
                       <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td>{{ r.source }}</td>
                       <td class="tm-act">
                         <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
-                        <small class="tm-viewonly" v-else :title="r.why">{{ TM.viewOnly }}</small>
+                        <small class="tm-viewonly" v-else-if="r.showViewOnly" :title="r.why">{{ TM.viewOnly }}</small>
                         <small class="tm-why" v-if="!r.viewOnly && !r.canStop && r.why">{{ r.why }}</small>
                         <button class="aero-btn tm-handover" type="button" v-if="r.canHandover" :disabled="st.taskMgr.busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + r.name" @click="act('tm-handover', r.name)">{{ TM.handover }}</button>
                         <button class="aero-btn tm-view-btn" type="button" v-if="r.canView" :disabled="st.taskMgr.busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + r.name" @click="act('tm-view', r.name)">{{ TM.view }}</button>

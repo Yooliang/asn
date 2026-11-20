@@ -236,6 +236,7 @@ export function viewRow(r, now, ctx) {
     dup: Boolean(r.dup),
     canStop: plan.ok,
     viewOnly: plan.path === PATH.none,
+    showViewOnly: plan.path === PATH.none,   // 範本只讀這個：交接中的列 plan 不是 none，所以只顯示原因不寫「只能看」
     why: plan.ok ? '' : plan.reason,
     dupNote: r.dup ? TEXT.dupRisk : '',
     canAdopt: canAdopt(r),
