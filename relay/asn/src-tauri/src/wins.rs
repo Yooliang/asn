@@ -488,7 +488,7 @@ where
         // 重截失敗（擷取程序偶發錯誤、視窗剛好被收掉）不該讓已截到的結果作廢：停止重試，照現狀交出
         names = match capture(Some(names)).await {
             Ok(n) => n,
-            Err(e) => { eprintln!("[shot] 重截失敗，保留已截到的圖：{e}"); break }
+            Err(e) => { elog!("[shot] 重截失敗，保留已截到的圖：{e}"); break }
         };
     }
     Ok(())
