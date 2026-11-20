@@ -812,15 +812,19 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
     if !bk.exists() {
         restrict_dir(&bk);
     }
-    for f in ["credentials.json", "claude.json"] {
+    for f in ["credentials.json", "claude.json", ABSENT_CRED, ABSENT_CJ] {
         let _ = std::fs::remove_file(bk.join(f));
     }
-    if let Some(c) = &old_cred {
-        write_atomic(&bk.join("credentials.json"), c)?;
+    // 每個檔各記一個切換前的狀態：本來有就存內容，本來沒有就留一個空的記號（還原時刪掉新寫的那份）
+    match &old_cred {
+        Some(c) => write_atomic(&bk.join("credentials.json"), c)?,
+        None => write_atomic(&bk.join(ABSENT_CRED), b"")?,
     }
-    if let Some(t) = &old_cj {
-        write_atomic(&bk.join("claude.json"), t.as_bytes())?;
+    match &old_cj {
+        Some(t) => write_atomic(&bk.join("claude.json"), t.as_bytes())?,
+        None => write_atomic(&bk.join(ABSENT_CJ), b"")?,
     }
+    SWITCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     // 4. 原子寫入；任何一步失敗就還原
     let apply = || -> std::io::Result<()> {
@@ -867,16 +871,35 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
 /// 沒有備份就什麼都不動。只給本機畫面的「還原」按鈕用，遠端指令碰不到這個入口。
 pub fn undo_last_switch(home: &Path) -> R<String> {
     let bk = backup_dir(home);
-    let cred = std::fs::read(bk.join("credentials.json")).map_err(|_| AccErr::Corrupt("沒有可以還原的備份（只有切換過才有）"))?;
-    write_atomic(&cred_path(home), &cred)?;
-    if let Ok(t) = std::fs::read(bk.join("claude.json")) {
-        write_atomic(&cj_path(home), &t)?;
+    let no_backup = || AccErr::Corrupt("沒有可以還原的備份（只有切換過才有）");
+    let gone_ok = |r: std::io::Result<()>| match r {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(AccErr::from(e)),
+        _ => Ok(()),
+    };
+    // 登入檔：本來有就寫回內容；本來沒有（有「不存在」記號）就刪掉切換新寫的那份，算還原成功
+    match std::fs::read(bk.join("credentials.json")) {
+        Ok(cred) => write_atomic(&cred_path(home), &cred)?,
+        Err(_) if bk.join(ABSENT_CRED).exists() => gone_ok(std::fs::remove_file(cred_path(home)))?,
+        Err(_) => return Err(no_backup()),
+    }
+    match std::fs::read(bk.join("claude.json")) {
+        Ok(t) => write_atomic(&cj_path(home), &t)?,
+        Err(_) if bk.join(ABSENT_CJ).exists() => gone_ok(std::fs::remove_file(cj_path(home)))?,
+        Err(_) => {}
     }
     mark_own_write(home);
     Ok("已還原到切換前的帳號，開著的 Claude 視窗不用重開。".into())
 }
 
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// 切換序號：每次切換寫完備份就加一。「隔一下再讀」期間若又有一次切換，備份已經是那一次的，不能拿來還原這一次（#1927 複審）
+static SWITCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub fn switch_seq() -> u64 {
+    SWITCH_SEQ.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// 切換前本來沒有的檔，在備份資料夾留的空記號
+const ABSENT_CRED: &str = "credentials.absent";
+const ABSENT_CJ: &str = "claude.absent";
 
 // ---------- 自動加入／回存（背景每分鐘一次） ----------
 /// 自動同步的結果（前端只拿得到 email，沒有權杖）
@@ -1129,12 +1152,18 @@ pub async fn claude_account_undo() -> Result<String, String> {
 pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
     let home = claude_home();
     let cfg = std::env::var_os("CLAUDE_CONFIG_DIR");
-    let out = {
+    let (out, seq) = {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        switch_verified(&home, email, cfg.clone(), std::time::Duration::ZERO).map_err(|e| e.to_string())?
+        let out = switch_verified(&home, email, cfg.clone(), std::time::Duration::ZERO).map_err(|e| e.to_string())?;
+        (out, switch_seq())
     };
     std::thread::sleep(std::time::Duration::from_secs(2));
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if switch_seq() != seq {
+        // 等的這段時間又有一次切換：備份已經是那一次的，不拿來還原這一次；那一次自己會讀回確認
+        crate::claude_login::log(&format!("切換到 {} 之後又有另一次切換，這次不再重讀也不還原", out.email));
+        return Ok(out);
+    }
     let check = check_switched(&home, &out.email, &cfg, std::time::Duration::from_millis(150));
     finish_switch(&home, out, check).map_err(|e| e.to_string())
 }
@@ -1985,6 +2014,7 @@ mod tests {
         // 切換與「隔一下再讀」兩段都要拿同一把鎖；睡的那 2 秒不佔著鎖（#1927 一審）
         let body = src.split("pub fn local_switch(email: &str)").nth(1).unwrap().split("/// 帳號庫清單").next().unwrap();
         assert_eq!(body.matches("LOCK.lock()").count(), 2);
+        assert!(body.contains("switch_seq() != seq"), "等待期間又切換過就不還原");
         assert!(body.find("sleep").unwrap() > body.find("};").unwrap(), "睡之前第一把鎖已放掉");
     }
 

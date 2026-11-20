@@ -220,3 +220,33 @@ fn 監看_自訂資料夾裡的登入檔是之後才建立的_也盯得到() {
     write(cfg.path(), &cj("z@x.test"));
     assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), Change::Email("z@x.test".into()));
 }
+
+#[test]
+fn 切換前沒有登入檔_讀回對不上_新寫的檔要刪掉_回報切換沒成功不是還原失敗() {
+    let home = two_accounts();
+    std::fs::remove_file(home.path().join(".claude").join(".credentials.json")).unwrap();
+    std::fs::remove_file(home.path().join(".claude.json")).unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    write(cfg.path(), &cj("a@x.test"));
+    // 目前登入沒有檔案時帳號庫不會讓切換（要先加入），所以直接用 switch_impl 後接 finish_switch 走回滾
+    let out = claude_accounts::switch_impl(home.path(), "b@x.test", claude_accounts::Fault::None, &|_| claude_accounts::Lookup::Failed).unwrap();
+    assert!(home.path().join(".claude").join(".credentials.json").exists(), "切換確實新寫了權杖檔");
+    let check = claude_accounts::check_switched(home.path(), &out.email, &Some(cfg.path().into()), Duration::ZERO);
+    let r = claude_accounts::finish_switch(home.path(), out, check);
+    assert!(matches!(r, Err(claude_accounts::AccErr::NotSwitched)), "{r:?}");
+    assert!(!home.path().join(".claude").join(".credentials.json").exists(), "本來沒有的權杖檔要刪掉");
+    assert!(!home.path().join(".claude.json").exists(), "本來沒有的登入檔要刪掉");
+}
+
+#[test]
+fn 等待期間又切換了一次_第一次的讀回不拿新備份去還原() {
+    let src = include_str!("../claude_accounts.rs");
+    let body = src.split("pub fn local_switch(email: &str)").nth(1).unwrap();
+    assert!(body.contains("switch_seq() != seq"));
+    // 行為：兩次切換之後序號一定不同
+    let home = two_accounts();
+    let a = claude_accounts::switch_seq();
+    claude_accounts::switch_to(home.path(), "b@x.test").unwrap();
+    claude_accounts::switch_to(home.path(), "a@x.test").unwrap();
+    assert!(claude_accounts::switch_seq() >= a + 2);
+}
