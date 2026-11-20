@@ -80,6 +80,13 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  // 最外層按返回鍵（網頁沒有上一頁可退時，WryActivity 才會呼叫到這裡）：縮到背景、不結束，再打開還是原本的畫面（#1678）。
+  // 有上一頁時 WryActivity 自己 goBack，不經過這裡，所以對話、設定子頁、看大圖的返回都照舊。
+  @Deprecated("Deprecated in Java")
+  override fun onBackPressed() {
+    moveTaskToBack(true)
+  }
+
   override fun onDestroy() {
     if (current === this) current = null
     if (isFinishing) ViewerConfirm.clear()
