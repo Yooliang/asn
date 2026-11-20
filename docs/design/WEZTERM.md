@@ -336,6 +336,10 @@
 - 因為上一點，關著時對照表裡的夥伴視窗列不認領，只改標為保留（留在檔案裡、不查不碰）；之後再把開關打開，會照常認回。
 - 隔離設定檔如果內容恰好是第 1 階段寫的 Hold 版本（`return { exit_behavior = "Hold" }`，一個字不差），關著時會改寫回 `return {}`；使用者改過、內容不同的檔不動。再把開關打開，空設定會照舊升級成 Hold 版本。
 
+## 自建 WezTerm 的修改
+
+跟上游 tag 不一樣的每一處（cherry-pick、ASN 補丁、建置設定），以及合上游時怎麼逐項判斷，見 [WEZTERM-自建修改清單.md](WEZTERM-自建修改清單.md)。新增或拿掉修改時，要在同一張 PR 一起更新那份清單。
+
 ## Linux 按需取得 WezTerm（#893 第 3 張）
 
 Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務、而 `ASN_WEZTERM_DIR` 與 PATH 都找不到 wezterm 時，ASN 在背景從官方 GitHub release 取得固定版本（`launch/wezterm_fetch.rs`），取好後重開 ASN 才會用上。
