@@ -168,7 +168,10 @@ export async function localSignPublish(opts, deps) {
       else if (opts.withPlay === 'no') S.play = false
       else {
         const jobs = JSON.parse(gh(['api', `repos/${REPO}/actions/runs/${run.id}/attempts/${run.run_attempt ?? 1}/jobs?per_page=100`])).jobs ?? []
-        S.play = jobs.some(j => j.name === 'android-upload' && j.conclusion === 'success')
+        const up = jobs.find(j => j.name === 'android-upload')
+        if (!up) bad('--with-play auto 找不到 android-upload 這個 job，無法判斷有沒有上 Play：請明確給 --with-play yes 或 --with-play no')
+        S.play = up.conclusion === 'success'
+        if (!S.play) log('android-upload 這個 job 沒有成功：這次官網版本紀錄不帶 Play')
       }
     })
 
@@ -345,11 +348,36 @@ export async function localSignPublish(opts, deps) {
       if (!changed) { log('兩個網站檔與 HEAD 相同，不需要提交'); return }
       const t = await runTests()
       if (!t?.ok) bad('提交前的相關測試沒過')
-      git(['fetch', 'origin', 'main', '--quiet'])
-      if (first(git(['rev-parse', 'origin/main'])) !== S.originMain) bad('origin/main 在發版期間有新的提交：不推送，請人工處理（不 rebase、不強推）')
-      git(['add', '--', ...SITE_FILES])
-      git(['commit', '-m', `發版 v${version}：更新 latest.json 與首頁下載連結`, '--', ...SITE_FILES])
-      git(['push', 'origin', 'HEAD:main'])
+      // 標籤可以落後 main：不在標籤 commit 上提交，改在最新 origin/main 上用暫存的 worktree 只套這兩個檔，
+      // 不動使用者目前工作樹與暫存區的其他東西；推送被拒（有人又推了）就重新 fetch 重做，最多共 3 次，不強推、不 rebase。
+      const MAX_TRIES = 3
+      for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+        git(['fetch', 'origin', 'main', '--quiet'])
+        const base = first(git(['rev-parse', 'origin/main']))
+        if (!/^[0-9a-f]{40}$/.test(base)) bad('讀不到最新 origin/main 的 commit')
+        for (const f of SITE_FILES) {
+          const onTag = blobOf(tag, f), onMain = blobOf(base, f)
+          if (!onTag || onTag !== onMain) bad(`最新 origin/main 上的 ${f} 與標籤 ${tag} 上的不同（標籤之後有人改過）：不覆蓋，請人工處理`)
+        }
+        const wt = deps.mkTmp()
+        let sha
+        try {
+          git(['worktree', 'add', '--detach', wt, base])
+          for (const f of SITE_FILES) {
+            const dest = path.join(wt, ...f.split('/'))
+            fsx.mkdirSync(path.dirname(dest), { recursive: true })
+            fsx.writeFileSync(dest, fsx.readFileSync(path.join(repoRoot, ...f.split('/'))))
+          }
+          git(['-C', wt, 'add', '--', ...SITE_FILES])
+          if (!git(['-C', wt, 'diff', '--cached', '--name-only']).trim()) { log('最新 origin/main 上的兩個網站檔已是這次的內容，不需要提交'); return }
+          git(['-C', wt, 'commit', '-m', `發版 v${version}：更新 latest.json 與首頁下載連結`, '--', ...SITE_FILES])
+          sha = first(git(['-C', wt, 'rev-parse', 'HEAD']))
+        } finally {
+          try { git(['worktree', 'remove', '--force', wt]) } catch { log(`暫存 worktree 沒清掉：${wt}（可手動 git worktree remove）`) }
+        }
+        try { git(['push', 'origin', `${sha}:main`]); return } catch { log(`推送被拒（第 ${attempt} 次）${attempt < MAX_TRIES ? '，重新 fetch 重做' : ''}`) }
+      }
+      bad(`推送回 main 連續被拒 ${MAX_TRIES} 次（有人一直在推 main）：請人工處理，不強推`)
     })
 
     return { ok: true, dryRun: false, failedStep: null, completed, record: S.record, latest: S.latest, dir: S.dir }

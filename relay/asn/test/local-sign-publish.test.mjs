@@ -59,14 +59,33 @@ function world(mod = () => {}) {
     run: { id: 555, path: WORKFLOW, event: 'push', head_sha: SHA, head_branch: TAG, conclusion: 'success', run_attempt: 1 },
     runs: null, artifacts: [art(1, 'asn-installer-unsigned'), art(2, 'asn-site-draft'), art(3, 'asn-aab'), art(4, 'asn-debug')],
     jobs: [{ name: 'android-upload', conclusion: 'success' }], attest: true, onlineVersion: '0.2.36', signMode: 'good', testsOk: true,
+    mainBlobs: {}, pushCount: 0, pushFailTimes: 0, wtBase: null, wtFiles: null,
     asnStatus: {}, firebaseDeployFails: false, publishFails: false, room: 'room-1',
     conf: JSON.stringify({ plugins: { updater: { pubkey: PUBKEY_TEXT } } }), draft, changelog: CHANGELOG, index: OLD_INDEX,
   }
   mod(w)
   w.runs ??= [w.run]
   const ev = (k, a) => w.events.push({ k, a })
-  const git = args => {
+  const git = rawArgs => {
+    // git -C <資料夾> ...：第 12 步在暫存 worktree 裡操作；事件照記，資料夾放在 inDir
+    let args = rawArgs, inDir = null
+    if (rawArgs[0] === '-C') { inDir = rawArgs[1]; args = rawArgs.slice(2) }
     const j = args.join(' ')
+    if (args[0] === 'worktree') {
+      ev(`git worktree ${args[1]}`, args)
+      if (args[1] === 'add') w.wtBase = args.at(-1)
+      return ''
+    }
+    if (inDir) {
+      if (args[0] === 'add') { ev('git add', args); w.wtFiles = Object.fromEntries(args.slice(2).map(f => [f, fs.readFileSync(path.join(inDir, ...f.split('/')), 'utf8')])); return '' }
+      if (j === 'diff --cached --name-only') return 'site/public/update/latest.json\nsite/public/index.html\n'
+      if (args[0] === 'commit') { ev('git commit', args); return '' }
+      if (j === 'rev-parse HEAD') return `${'f'.repeat(40)}\n`
+      throw new Error(`假 git 不認得（-C）：${j}`)
+    }
+    const blobM = /^rev-parse (\S+):(site\/public\/\S+)$/.exec(j)
+    if (blobM) return `${blobM[1] === TAG ? 'tagblob' : (w.mainBlobs[blobM[2]] ?? 'tagblob')}\n`
+    if (args[0] === 'push') { w.pushCount++; ev('git push', args); if (w.pushFailTimes >= w.pushCount) throw new Error('rejected'); return '' }
     if (j === 'rev-parse --is-shallow-repository') return w.shallow ? 'true\n' : 'false\n'
     if (j.startsWith('log -n1')) { if (!w.hist) throw new Error('fatal'); return `${w.hist}\n` }
     if (args[0] === 'fetch') { w.fetchCount++; ev('git fetch', args); return '' }
@@ -183,7 +202,7 @@ test('全流程：順序是 簽章→Release→部署→官網紀錄→貼群組
   const site = x.w.events.find(e => e.k === 'asn-cli site').a
   assert.deepEqual(site.filter((_, i) => site[i - 1] === '--platform'), ['官網', 'Play'])
   assert.deepEqual(x.w.events.find(e => e.k === 'firebase deploy').a, ['15.35.0', 'deploy', '--only', 'hosting', '--project', 'asnmessenger'])
-  assert.deepEqual(x.w.events.find(e => e.k === 'git push').a, ['push', 'origin', 'HEAD:main'])
+  assert.deepEqual(x.w.events.find(e => e.k === 'git push').a, ['push', 'origin', `${'f'.repeat(40)}:main`])
   assert.ok(x.w.events.find(e => e.k === 'git commit').a.includes('--'))
 })
 
@@ -194,6 +213,20 @@ test('官網紀錄的平台：--with-play no 只寫官網；auto 看最新 attem
   assert.deepEqual(plat(await run(w => { w.jobs = [] }, { withPlay: 'yes' })), ['官網', 'Play'])
   const x = await run()
   assert.ok(x.w.events.some(e => e.k === 'gh' && e.a.join(' ').includes('/attempts/1/jobs')))
+})
+
+test('--with-play auto：找不到 android-upload→第 1 步中止（要明確給 yes／no）；success→帶 Play；failure→不帶並印一句；yes／no 不看 jobs', async () => {
+  const plat = x => { const a = x.w.events.find(e => e.k === 'asn-cli site').a; return a.filter((_, i) => a[i - 1] === '--platform') }
+  const miss = await run(w => { w.jobs = [{ name: 'other', conclusion: 'success' }] })
+  aborts(miss, 1, /--with-play yes 或 --with-play no/)
+  assert.ok(!kinds(miss.w).includes('sign'))
+  assert.ok(!/other|conclusion/.test(miss.r.error), '不貼 API 原文')
+  assert.deepEqual(plat(await run(w => { w.jobs = [{ name: 'android-upload', conclusion: 'success' }] })), ['官網', 'Play'])
+  const f = await run(w => { w.jobs = [{ name: 'android-upload', conclusion: 'failure' }] })
+  assert.deepEqual(plat(f), ['官網'])
+  assert.ok(f.w.logs.some(l => /android-upload 這個 job 沒有成功/.test(l)))
+  assert.deepEqual(plat(await run(w => { w.jobs = [] }, { withPlay: 'no' })), ['官網'])
+  assert.deepEqual(plat(await run(w => { w.jobs = [] }, { withPlay: 'yes' })), ['官網', 'Play'])
 })
 
 // ---- 來源綁定：任一項不符，都在簽章前中止
@@ -349,13 +382,40 @@ test('提交回 main：暫存區有別的檔→中止、不提交', async () => 
   aborts(x, 12, /暫存區/)
   assert.ok(!kinds(x.w).includes('git commit'))
 })
-test('提交回 main：origin/main 在發版期間動了→不推送；相關測試沒過→不提交', async () => {
-  const a = await run(w => { w.moveOnSecondFetch = true })
-  aborts(a, 12, /origin\/main/)
-  assert.ok(!kinds(a.w).includes('git push') && !kinds(a.w).includes('git commit'))
+test('提交回 main：相關測試沒過→不提交', async () => {
   const b = await run(w => { w.testsOk = false })
   aborts(b, 12, /測試/)
   assert.ok(!kinds(b.w).includes('git commit'))
+})
+test('提交回 main：標籤落後 origin/main→提交以最新 origin/main 為父、只含兩個網站檔、推的是該提交', async () => {
+  const NEWMAIN = 'd'.repeat(40)
+  const x = await run(w => { w.originMain = NEWMAIN })
+  assert.equal(x.r.ok, true, x.r.error)
+  assert.equal(x.w.wtBase, NEWMAIN, '暫存 worktree 要從最新 origin/main 開')
+  assert.deepEqual(Object.keys(x.w.wtFiles).sort(), ['site/public/index.html', 'site/public/update/latest.json'])
+  assert.equal(JSON.parse(x.w.wtFiles['site/public/update/latest.json']).version, V, '內容是本次產生的版本')
+  assert.match(x.w.wtFiles['site/public/index.html'], new RegExp(`ASN_${V}_x64-setup`))
+  assert.deepEqual(x.w.events.find(e => e.k === 'git commit').a.slice(-3), ['--', 'site/public/update/latest.json', 'site/public/index.html'])
+  const push = x.w.events.find(e => e.k === 'git push').a
+  assert.deepEqual(push, ['push', 'origin', `${'f'.repeat(40)}:main`])
+  assert.ok(!push.includes('HEAD:main') && !push.includes('--force'))
+  assert.ok(kinds(x.w).includes('git worktree remove'), '暫存 worktree 要清掉')
+})
+test('提交回 main：標籤之後最新 main 上的網站檔被改過→中止、不提交不推送', async () => {
+  const x = await run(w => { w.originMain = 'd'.repeat(40); w.mainBlobs['site/public/index.html'] = 'someone-else' })
+  aborts(x, 12, /不覆蓋/)
+  assert.ok(!kinds(x.w).includes('git push') && !kinds(x.w).includes('git commit'))
+})
+test('提交回 main：推送被拒→重新 fetch 重做（最多 3 次）；用盡就中止並貼群組', async () => {
+  const a = await run(w => { w.pushFailTimes = 2 })
+  assert.equal(a.r.ok, true, a.r.error)
+  assert.equal(a.w.pushCount, 3)
+  assert.ok(a.w.events.filter(e => e.k === 'git fetch').length >= 3 + 1, '每次重做前都重新 fetch')
+  assert.equal(kinds(a.w).filter(k => k === 'git commit').length, 3)
+  const b = await run(w => { w.pushFailTimes = 99 })
+  aborts(b, 12, /連續被拒 3 次/)
+  assert.equal(b.w.pushCount, 3)
+  assert.ok(!b.w.events.some(e => e.k === 'git push' && e.a.includes('--force')))
 })
 test('提交回 main：兩個網站檔沒變就不提交', async () => {
   const x = await run(w => { w.siteChanged = '' })
