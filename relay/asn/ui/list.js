@@ -2172,7 +2172,7 @@ const app = createApp({
     return {
       version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,
-      reloginBar, dismissReloginBar, goLogin, roomsNote,
+      reloginBar, dismissReloginBar, goLogin, roomsNote, refreshRooms,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, elevatedBadge, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,

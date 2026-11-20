@@ -540,3 +540,4 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-body .photo-viewer .pv-next{right:8px}
 :root[data-skin="modern"] .m-body .photo-viewer .pv-nav{background:rgba(15,22,32,.55)}
 .m-body .photo-viewer.pv-multi .pv-body{padding-left:10px;padding-right:10px}
+.m-rooms-retry{margin:0 14px 6px;padding:6px 14px;border-radius:8px;border:1px solid currentColor;background:transparent;color:inherit;font-size:13px}

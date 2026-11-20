@@ -216,4 +216,4 @@ export function roomErrorText(msg) {
 }
 export const ROOM_EMPTY_TEXT = '目前不在任何群組。'
 export const ROOM_NO_IDENTITY_TEXT = '你不在這個群組裡，沒辦法發言。'
-export const ROOM_LOAD_FAIL_TEXT = '讀不到群組，晚點再試。'
+export const ROOM_LOAD_FAIL_TEXT = '群組暫時讀不到。'
