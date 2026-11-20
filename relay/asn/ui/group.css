@@ -112,3 +112,5 @@
   .wake-tags{color:#9fb0c3}.wake-tag.off{color:#6d7e91;background:rgba(109,126,145,.14)}.wake-tag{background:rgba(159,176,195,.14)}.wake-arrow{color:#7d8ea1}
   .read-n{color:#9fb0c3}.read-n.all{color:#6eb5ff}
 }
+/* 群組讀不到時的「重試」：電腦與手機共用這一條（group.css 兩邊都載入），不要在 mobile.css 另寫 */
+.rooms-retry{margin:0 12px 8px;padding:6px 14px;border-radius:6px;border:1px solid var(--muted);background:transparent;color:inherit;font-size:13px;cursor:pointer}
