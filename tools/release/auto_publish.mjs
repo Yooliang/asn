@@ -59,7 +59,11 @@ export function checkWorktree(git) {
   return { ok: true }
 }
 
+// local_sign_publish 正式那步要用的相依（簽章、firebase）；dry-run 不會用到，所以要在這裡先擋（雯 #4536）
+export const REQUIRED_DEPS = ['relay/asn/node_modules/@tauri-apps/cli/tauri.js']
+
 // 跑 local_sign_publish 之前把工作樹整理乾淨；回 { ok, why }
+// ⚠ 禁止用 git clean：專用 worktree 的 node_modules 可能是 junction，git clean 會順著刪掉主 checkout 的 node_modules
 export function prepareWorktree(deps) {
   const { git, readFile } = deps
   const f = git(['fetch', 'origin'])
@@ -85,6 +89,9 @@ export function prepareWorktree(deps) {
   }
   const c = git(['checkout', '--detach', 'origin/main'])
   if (c.status !== 0) return { ok: false, why: `切到 origin/main 失敗（${String(c.stderr).trim().slice(0, 200)}）` }
+  const exists = deps.exists ?? ((p) => fs.existsSync(p))
+  const missing = REQUIRED_DEPS.filter((p) => !exists(p))
+  if (missing.length) return { ok: false, why: `專用工作樹缺相依（${missing.join('、')}），請先在 relay/asn 跑 npm ci；dry-run 不會用到所以要先擋，免得正式那步才失敗` }
   return { ok: true }
 }
 

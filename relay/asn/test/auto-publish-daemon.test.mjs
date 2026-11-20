@@ -1,14 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { runOnce, toRuns, parseArgs, checkWorktree, WORKFLOWS } from '../../../tools/release/auto_publish.mjs'
+import { runOnce, toRuns, parseArgs, checkWorktree, WORKFLOWS, REQUIRED_DEPS } from '../../../tools/release/auto_publish.mjs'
+import fs from 'node:fs'
 
 const STATE = '/w/state.json'
 const LOCK = `${STATE}.lock`
 const SECRET = '子程序原文-不可貼群組-ABC123'
 
 // 假環境：檔案、gh、git、子程序、asn-cli 全是假的
-function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0 } = {}) {
+function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0, noDeps = false } = {}) {
   const fsMap = new Map(Object.entries(files))
+  if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(p, 'x')
   const calls = { gh: [], git: [], spawn: [], posts: [], logs: [], unlinks: [] }
   const deps = {
     pid: 4242, now: () => Date.parse('2026-11-21T10:00:00Z'),
@@ -206,4 +208,18 @@ test('checkWorktree：主 checkout 拒絕、worktree 通過；parseArgs', () => 
   assert.equal(parseArgs(['--once', '--interval', '5']).error !== null, true)
   const o = parseArgs(['--once', '--room', 'g', '--state', '/s'])
   assert.deepEqual([o.once, o.room, o.state, o.interval], [true, 'g', '/s', 120])
+})
+
+test('#1980 雯 #4536：專用工作樹缺 node_modules（簽章要用）→ 跑之前就停下回報，不等到正式那步才炸', async () => {
+  const e = env({ desktopRows: [row('v0.2.45', 111)], noDeps: true })
+  const r = await runOnce(opts, e.deps)
+  assert.equal(e.calls.spawn.length, 0, '不跑 local_sign_publish')
+  assert.ok(e.calls.posts.some(p => /npm ci/.test(p)), `要回報缺相依：${e.calls.posts}`)
+  assert.notEqual(r.outcome, 'dryRun')
+})
+
+test('#1980 雯 #4536：程式裡不准出現 git clean（junction 會刪到主 checkout 的 node_modules）', () => {
+  const src = fs.readFileSync(new URL('../../../tools/release/auto_publish.mjs', import.meta.url), 'utf8')
+  const code = src.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+  assert.ok(!/['"]clean['"]/.test(code), '不能呼叫 git clean')
 })
