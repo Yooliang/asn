@@ -101,6 +101,7 @@ const smokeJobProblems = src => {
     if (!/^\s+run: node scripts\/smoke-ui\.mjs\s*$/m.test(smoke)) problems.push('smoke-ui job 沒有跑整支 node scripts/smoke-ui.mjs')
     if (/--only|continue-on-error|\|\| true/.test(smoke)) problems.push('smoke-ui job 不准只跑部分情境或吞掉失敗')
     if (!/node scripts\/prep\.mjs/.test(smoke)) problems.push('smoke-ui job 沒有先跑 prep.mjs（沒有 ui/vendor）')
+    if (!/apt-install\.sh[^\n]*fonts-droid-fallback/.test(smoke) || !/fc-list :lang=zh/.test(smoke)) problems.push('smoke-ui job 沒有安裝並檢查中文字型（冒煙靠它量長名字省略號）')
     if (/^\s+needs:/m.test(smoke)) problems.push('smoke-ui job 不能 needs 別的 job（要和 build 並行）')
   }
   if (build === null) problems.push('沒有 build job')
@@ -120,6 +121,8 @@ test('#1973 守門本身會紅：拿掉 smoke-ui job、或 build 又跑冒煙、
   assert.ok(smokeJobProblems(without).some(p => /沒有 smoke-ui job/.test(p)))
   const dup = src.replace('      - name: 上傳成品', '      - name: 冒煙\n        run: node scripts/smoke-ui.mjs\n\n      - name: 上傳成品')
   assert.ok(smokeJobProblems(dup).some(p => /build job 不該再跑冒煙/.test(p)))
+  const nofont = src.replace('no-install-recommends fonts-droid-fallback', 'no-install-recommends fonts-dejavu-core')
+  assert.ok(smokeJobProblems(nofont).some(p => /中文字型/.test(p)))
   const partial = src.replace('run: node scripts/smoke-ui.mjs', 'run: node scripts/smoke-ui.mjs --only m-signed-in')
   assert.ok(smokeJobProblems(partial).length > 0)
 })

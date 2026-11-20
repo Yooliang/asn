@@ -402,7 +402,7 @@ jobs:
 
   # 冒煙測試（畫面啟動，#1973）：獨立 job，與 build 並行。
   # 冒煙只用 runner 自帶的無頭 Chrome 開 relay/asn/ui/*.html，只需要 prep.mjs 產的 vendor，不需要 Rust 成品、
-  # 也不需要 apt 系統依賴（gtk／webkit／xvfb 都用不到），所以不裝它們、不載 rust-cache。
+  # 也不需要 apt 系統依賴（gtk／webkit／xvfb 都用不到），所以不裝它們、不載 rust-cache；只補中文字型（見下）。
   # 原本排在 build 最後一步，冒煙約 22 分鐘串在 Rust 建置之後；現在兩邊同時跑，PR 牆鐘約等於較慢的那一個。
   # 情境與斷言一個不少：腳本本身沒動，仍是整支 node scripts/smoke-ui.mjs（全部情境，任何一個失敗結束碼 1）。
   smoke-ui:
@@ -419,6 +419,18 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: relay/asn/package-lock.json
+
+      # 冒煙的長名字省略號、版面座標要靠中文字型量。runner 映像本身沒有（第一次搬出去時 3 個情境因此失敗：
+      # 長名字沒出現省略號、新手引導卡沒關掉）。原本 build 是裝 gtk／webkit 時順帶裝進 fonts-droid-fallback（含中日韓字），
+      # 所以現在明確裝同一個套件，字型與改前完全一致、情境判斷不變；裝完還要確認真的有中文字型，沒有就紅。
+      - name: 安裝中文字型（fonts-droid-fallback，與改前 build 同一個字型）
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends fonts-droid-fallback
+          # 不用 `fc-list | grep -q`：grep 提早結束時 fc-list 會被 SIGPIPE，pipefail 下會誤判成沒有字型
+          [ -n "$(fc-list :lang=zh)" ] || { echo "裝完仍然沒有中文字型" >&2; exit 1; }
+          fc-list :lang=zh | head -3
 
       - name: 安裝前端依賴
         run: npm ci
