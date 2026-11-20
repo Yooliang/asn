@@ -478,3 +478,183 @@ async fn 寄信時讀回應中斷_重試用盡_進寄件匣_不當成已寄出()
     h.core.tick(T0 + 3_000 + 15_000).await;
     assert!(h.core.outbox_ids().is_empty(), "恢復後用同一個 client_id 重寄成功");
 }
+
+// ---- #1249（#1231 二審建議的後續）----------------------------------------------------------
+
+/// 讓下一次存檔失敗又不動到原檔：把暫存檔那個名字占成資料夾（暫存檔寫不進去，原檔留在原處）
+fn block_next_save(h: &H) -> std::path::PathBuf {
+    let tmp = std::path::PathBuf::from(format!("{}.{}.tmp", outbox_file(h).display(), std::process::id()));
+    std::fs::create_dir(&tmp).unwrap();
+    tmp
+}
+
+#[tokio::test]
+async fn t1249_重寄被_4xx_拒絕後放棄_通知原寄件人_不含內文() {
+    let mut h = rig().await;
+    h.fr.st.lock().unwrap().bridge_notice_on = true;
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert_eq!(h.core.outbox_ids().len(), 1);
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.send_fail_n = 1;
+        s.send_fail_code = 422;
+        s.send_fail_err = "not_receivable".into();
+    }
+    h.core.tick(T0 + 3_000 + 15_000).await;
+    assert!(h.core.outbox_ids().is_empty() && file_items(&h) == 0, "放棄且通知送達後清空");
+    let n = h.fr.st.lock().unwrap().bridge_notices.clone();
+    assert_eq!(n.len(), 1, "{n:?}");
+    let body = n[0]["body"].as_str().unwrap();
+    assert!(body.contains("對方收不到") && body.contains("已放棄") && !body.contains("機密內文"), "{body}");
+    assert_eq!(attempts(&h).len(), 2, "只寄過兩次（首次＋重寄），之後不再寄");
+}
+
+#[tokio::test]
+async fn t1249_放棄後同一封信的後段才來_不會直接寄出() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 1;
+    }
+    set_fail(&h, 1, 503);
+    reply(&mut h, "第一段", T0 + 3_000).await;
+    {
+        // 重寄時被後台明確拒絕（4xx）＝放棄；通知又寄不出去，待通知項留著
+        let mut s = h.fr.st.lock().unwrap();
+        s.send_fail_n = 1;
+        s.send_fail_code = 422;
+        s.send_fail_err = "not_receivable".into();
+    }
+    h.core.tick(T0 + 3_000 + 15_000).await;
+    assert_eq!(h.core.outbox_pending_notices(), 1, "通知沒送達：待通知項還在");
+    let sent_before = attempts(&h).len();
+    reply(&mut h, "第二段（放棄之後才來）", T0 + 3_000 + 16_000).await;
+    assert_eq!(attempts(&h).len(), sent_before, "後段沒有寄出去");
+    assert!(h.fr.sent().is_empty());
+    assert_eq!(h.core.outbox_ids().len(), 1, "後段也沒有排進寄件匣，只剩那筆待通知項");
+    assert!(h.core.log.has("later part dropped"));
+}
+
+#[tokio::test]
+async fn t1249_重開後讀回待通知項_再把通知送出() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 1;
+    }
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    let t1 = T0 + 3_000 + 86_400_000 + 1_000;
+    h.core.tick(t1).await;
+    assert_eq!(h.core.outbox_pending_notices(), 1);
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), t1 + 1_000);
+    assert_eq!(c2.outbox_pending_notices(), 1, "待通知項重開後讀回來");
+    assert!(h.fr.st.lock().unwrap().bridge_notices.is_empty());
+    c2.tick(t1 + 60_000).await;
+    let n = h.fr.st.lock().unwrap().bridge_notices.clone();
+    assert_eq!(n.len(), 1, "讀回後送出通知：{n:?}");
+    assert!(c2.outbox_ids().is_empty() && file_items(&h) == 0);
+}
+
+#[tokio::test]
+async fn t1249_待通知項超過_24_小時寄不出去_丟掉只記_log() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 100;
+    }
+    h.core.outbox_test_push_pending(&uid(7000), T0, T0);
+    h.core.tick(T0 + 86_400_000 - 1_000).await;
+    assert_eq!(h.core.outbox_pending_notices(), 1, "還沒滿 24 小時：照舊試著寄（寄不出去就保留）");
+    h.core.tick(T0 + 86_400_000 + 1_000).await;
+    assert!(h.core.outbox_ids().is_empty() && file_items(&h) == 0, "超過 24 小時就丟");
+    assert!(h.core.log.has("undeliverable for 24h"));
+    assert!(h.fr.st.lock().unwrap().bridge_notices.is_empty());
+}
+
+#[tokio::test]
+async fn t1249_待通知項超過_100_筆_丟最舊的() {
+    let mut h = rig().await;
+    for n in 0..101 {
+        h.core.outbox_test_push_pending(&uid(7000 + n), T0, T0 + 1_000_000);
+    }
+    assert_eq!(h.core.outbox_pending_notices(), 101);
+    set_fail(&h, 5, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert_eq!(h.core.outbox_pending_notices(), 100, "超過 100 筆就丟最舊的");
+    let tos = h.core.outbox_reply_tos();
+    assert!(!tos.contains(&uid(7000)) && tos.contains(&uid(7001)) && tos.contains(&uid(7100)) && tos.contains(&uid(1)));
+    assert!(h.core.log.has("too many pending give-up notices"));
+}
+
+/// 重寄時後台明確拒絕（4xx）：下一次重寄寄出去就會被拒，走放棄流程
+fn reject_next_resend(h: &H) {
+    let mut s = h.fr.st.lock().unwrap();
+    s.send_fail_n = 1;
+    s.send_fail_code = 422;
+    s.send_fail_err = "not_receivable".into();
+}
+
+#[tokio::test]
+async fn t1249_放棄時存檔失敗_重開後不會把已放棄的舊片段又寄出去() {
+    let mut h = rig().await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.bridge_notice_on = true;
+        s.notice_fail_n = 1;
+    }
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert_eq!(file_items(&h), 1, "存檔裡有待送的回信");
+    reject_next_resend(&h);
+    let tmp = block_next_save(&h);
+    h.core.tick(T0 + 18_000).await;
+    assert!(h.core.log.has("give-up notice not persisted"), "放棄時存檔失敗");
+    assert_eq!(file_items(&h), 1, "存檔裡還是舊片段");
+    assert!(h.fr.st.lock().unwrap().bridge_notices.is_empty(), "放棄通知沒送達");
+    std::fs::remove_dir(&tmp).unwrap();
+    let sent_before = attempts(&h).len();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 19_000);
+    assert_eq!(c2.outbox_pending_notices(), 1, "舊片段換成待通知項");
+    c2.tick(T0 + 60_000).await;
+    c2.tick(T0 + 120_000).await;
+    assert_eq!(attempts(&h).len(), sent_before, "舊片段沒有再寄出去");
+    assert!(h.fr.sent().is_empty());
+    assert_eq!(h.fr.st.lock().unwrap().bridge_notices.len(), 1, "原本沒送達的放棄通知補寄一次");
+    assert!(c2.outbox_ids().is_empty() && file_items(&h) == 0, "通知送達後清空");
+    assert!(!std::path::Path::new(&format!("{}.gave-up", outbox_file(&h).display())).exists(), "小檔跟著清掉");
+}
+
+#[tokio::test]
+async fn t1249_放棄時存檔失敗_但通知已送達_重開後不重複通知也不重寄() {
+    let mut h = rig().await;
+    h.fr.st.lock().unwrap().bridge_notice_on = true;
+    set_fail(&h, 1, 503);
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    reject_next_resend(&h);
+    let tmp = block_next_save(&h);
+    h.core.tick(T0 + 18_000).await;
+    assert_eq!(h.fr.st.lock().unwrap().bridge_notices.len(), 1, "通知已送達");
+    std::fs::remove_dir(&tmp).unwrap();
+    let sent_before = attempts(&h).len();
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 19_000);
+    c2.tick(T0 + 60_000).await;
+    assert_eq!(attempts(&h).len(), sent_before, "舊片段沒有再寄出去");
+    assert_eq!(h.fr.st.lock().unwrap().bridge_notices.len(), 1, "不重複通知");
+    assert!(c2.outbox_ids().is_empty());
+}
+
+#[tokio::test]
+async fn t1249_寄回信的內層逾時縮短_半通的網路不會卡住好幾十秒() {
+    let mut h = rig().await;
+    // 後台收到請求後 3 秒才回；寄回信用的是短逾時（測試 0.3 秒，正式 8 秒），不會乾等到預設的 20 秒
+    h.fr.st.lock().unwrap().send_delay_ms = 3_000;
+    let t = std::time::Instant::now();
+    reply(&mut h, SECRET, T0 + 3_000).await;
+    assert!(t.elapsed() < std::time::Duration::from_millis(2_500), "不該等後台的慢回應：{:?}", t.elapsed());
+    assert_eq!(h.core.outbox_ids().len(), 1, "逾時算暫時性失敗：進寄件匣，之後用同一個 client_id 重寄");
+}

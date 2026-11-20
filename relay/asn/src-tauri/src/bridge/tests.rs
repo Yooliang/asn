@@ -96,6 +96,8 @@ struct FState {
     notice_fail_n: usize,
     /// 開了：send 收下之後回應只送一半就斷線（回應讀到一半斷了）
     send_truncate: bool,
+    /// 寄信請求收到後先等這麼久（毫秒）才回，模擬半通的網路（#1249 第 6 條）
+    send_delay_ms: u64,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -158,6 +160,10 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         let close = st.lock().unwrap().close_each || head.to_lowercase().lines().any(|l| l.trim() == "connection: close");
         let (code, out, action) = route(&st, &head, body);
         let text = out.to_string();
+        let delay = if action == "send" { st.lock().unwrap().send_delay_ms } else { 0 };
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
         if action == "send" && st.lock().unwrap().send_truncate {
             // 只送一半的內文就斷線：用戶端讀回應時出錯
             let _ = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", text.len() + 20, text);

@@ -22,6 +22,13 @@ const RETRY_GAPS_MS: [u64; 6] = [15_000, 60_000, 120_000, 300_000, 600_000, 1_80
 /// 壞檔通知：失敗後隔多久再試／從啟動起超過多久放棄
 const OUTBOX_BAD_RETRY_MS: u64 = 60_000;
 const OUTBOX_BAD_GIVE_UP_MS: u64 = 3_600_000;
+/// 橋寄回信時單次請求的逾時。回信寄不出去本來就會進寄件匣、之後用同一個 client_id 重寄（後台去重），
+/// 所以不必在內層乾等：20 秒 × 4 次最壞約 82 秒會卡住收信；改 8 秒後最壞約 34 秒。
+/// 只有橋的回信（send_reply、寄件匣重寄）用，其他請求的逾時不動。測試用短值，免得假的不回應伺服器要等整整一輪
+#[cfg(not(test))]
+const REPLY_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+#[cfg(test)]
+const REPLY_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
 const ATTACH_GONE_TRAILER: &str = "（附件已過期，沒有附上）";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -136,6 +143,9 @@ pub(super) struct Outbox {
     /// 正在重寄的 client_id（處理中標記）
     pub busy: HashSet<String>,
     file: PathBuf,
+    /// 放棄時存檔失敗：存檔裡還留著已放棄的舊片段，另外記一份「這幾封信已放棄」（原信編號→原因）到小檔 `reply-outbox.json.gave-up`，
+    /// 重開時讀回來把舊片段換成待通知項，不再重寄。寄件匣之後存檔成功、或通知送達，就從這裡拿掉
+    tomb: std::collections::BTreeMap<String, String>,
 }
 
 impl Outbox {
@@ -204,22 +214,92 @@ impl Outbox {
                 vec![]
             }
         };
-        (Outbox { items, busy: HashSet::new(), file }, logs, notify)
+        (Outbox { items, busy: HashSet::new(), file, tomb: Default::default() }, logs, notify)
     }
 
-    /// 這封信還有沒有「待送」的片段（已放棄、只剩通知的不算：放棄之後新來的片段另算）
+    fn tomb_path(&self) -> PathBuf {
+        PathBuf::from(format!("{}.gave-up", self.file.display()))
+    }
+
+    /// 把「已放棄」小檔記的信套回來：那幾封信存檔裡殘留的待送片段不再重寄，換成一筆待通知項（通知沒送達過才會留在小檔裡）
+    pub(super) fn apply_tomb(&mut self, now: u64, logs: &mut Vec<String>) {
+        let tomb: std::collections::BTreeMap<String, String> = match std::fs::read_to_string(self.tomb_path()) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) => {
+                logs.push(format!("reply outbox: 讀已放棄小檔失敗：{e}"));
+                return;
+            }
+            Ok(t) => serde_json::from_str(&t).unwrap_or_else(|e| {
+                logs.push(format!("reply outbox: 已放棄小檔解析失敗：{e}"));
+                Default::default()
+            }),
+        };
+        for (reply_to, reason) in &tomb {
+            let (gone, keep): (Vec<OutboxItem>, Vec<OutboxItem>) = std::mem::take(&mut self.items).into_iter().partition(|i| i.gave_up.is_none() && &i.reply_to == reply_to);
+            self.items = keep;
+            let Some(first) = gone.into_iter().next() else { continue };
+            if reason.is_empty() {
+                logs.push(format!("reply outbox: id={reply_to} 上次放棄時存檔失敗（通知已送達），不再重寄舊片段"));
+            } else {
+                logs.push(format!("reply outbox: id={reply_to} 上次放棄時存檔失敗，不再重寄舊片段，改成補寄放棄通知"));
+                self.items.push(first.into_pending_notice(reason, now));
+            }
+        }
+        self.tomb = tomb;
+    }
+
+    fn tomb_write(&self) -> std::io::Result<()> {
+        if self.tomb.is_empty() {
+            return match std::fs::remove_file(self.tomb_path()) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
+        }
+        pending::save_atomic(&self.tomb_path(), &json!(self.tomb))
+    }
+
+    /// 放棄時寄件匣存不進檔：另記一筆「這封信已放棄」，免得重開後舊片段又被寄出去
+    fn mark_gave_up(&mut self, reply_to: &str, reason: &str) -> Result<(), String> {
+        self.tomb.insert(reply_to.to_string(), reason.to_string());
+        self.tomb_write().map_err(|e| e.to_string())
+    }
+
+    /// 這封信的放棄通知送達了：小檔改記「已通知」（原因留空），重開後只丟掉舊片段、不再重複通知。
+    /// 小檔留到寄件匣存檔成功為止（存檔裡的舊片段還在）
+    fn note_notified(&mut self, reply_to: &str) -> Result<(), String> {
+        match self.tomb.get_mut(reply_to) {
+            Some(r) => *r = String::new(),
+            None => return Ok(()),
+        }
+        self.tomb_write().map_err(|e| e.to_string())
+    }
+
+    /// 這封信在寄件匣裡有沒有東西：待送的片段、或已放棄只欠通知的待通知項都算
+    /// （放棄之後同一封信的後段才來，不能當成沒這回事直接寄出，見 send_reply）
     pub fn has_reply(&self, reply_to: &str) -> bool {
-        self.items.iter().any(|i| i.gave_up.is_none() && i.reply_to == reply_to)
+        self.items.iter().any(|i| i.reply_to == reply_to)
     }
 
-    fn save(&self, items: &[OutboxItem]) -> std::io::Result<()> {
+    /// 這封信是不是已經放棄（有待通知項）
+    pub fn has_gave_up(&self, reply_to: &str) -> bool {
+        self.items.iter().any(|i| i.gave_up.is_some() && i.reply_to == reply_to)
+    }
+
+    fn save(&mut self, items: &[OutboxItem]) -> std::io::Result<()> {
         let v: Value = serde_json::from_str(&file_text(items)).unwrap_or(Value::Null);
-        pending::save_atomic(&self.file, &v)
+        pending::save_atomic(&self.file, &v)?;
+        // 存檔成功＝存檔裡已不含已放棄的舊片段，小檔不再需要
+        if !self.tomb.is_empty() {
+            self.tomb.clear();
+            self.tomb_write()?;
+        }
+        Ok(())
     }
 
     /// 存檔（失敗只回說明，由呼叫端決定怎麼辦）
-    fn persist(&self) -> Result<(), String> {
-        self.save(&self.items).map_err(|e| e.to_string())
+    fn persist(&mut self) -> Result<(), String> {
+        let items = self.items.clone();
+        self.save(&items).map_err(|e| e.to_string())
     }
 }
 
@@ -281,6 +361,11 @@ impl Core {
             next_at: 0,
             gave_up: None,
         };
+        if self.outbox.has_gave_up(&o.id) {
+            // 這封信已經放棄並通知了對方：後來才來的後段不能單獨寄出（對方會收到沒頭沒尾的半封信），丟掉只記 log，原信照常 ack
+            self.log.line(&format!("reply id={} later part dropped: the mail was already given up", o.id));
+            return ReplyOutcome::Stored;
+        }
         if self.outbox.has_reply(&o.id) {
             return match self.outbox_store(item).await {
                 ReplyOutcome::Failed => {
@@ -291,7 +376,7 @@ impl Core {
                 r => r,
             };
         }
-        match self.relay.api("send", Some(item.request_body())).await {
+        match self.relay.api_with("send", Some(item.request_body()), REPLY_SEND_TIMEOUT).await {
             Ok(v) => {
                 self.log_attach_missing(&o.id, &v);
                 ReplyOutcome::Sent
@@ -430,6 +515,9 @@ impl Core {
         self.log.line(&format!("outbox gave up id={} client_id={} reason={reason} notified={ok}", it.reply_to, it.client_id));
         if ok {
             self.outbox_remove(&it.client_id);
+            if let Err(e) = self.outbox.note_notified(&it.reply_to) {
+                self.log.line(&format!("reply outbox: give-up marker not updated id={}: {e}", it.reply_to));
+            }
             if !self.is_engine_window(&it.from_agent) {
                 let w = it.from_agent.clone();
                 self.tell_window(&w, &format!("[收發室] 你之前對信件 {} 的回信一直沒能送出，已放棄，並已通知對方。（這是系統通知，不用回覆。）", it.reply_to));
@@ -454,8 +542,11 @@ impl Core {
         next.push(pending.clone());
         self.outbox.items = next;
         if let Err(e) = self.outbox.persist() {
-            // 連待通知都存不進檔：記憶體裡照樣留著、馬上通知；重開機就沒了，至少留 log
+            // 存不進檔：記憶體裡照樣留著、馬上通知。但存檔裡還留著舊片段，重開會又寄出去，所以另記一筆「已放棄」小檔
             self.log.line(&format!("reply outbox save failed (give-up notice not persisted) id={reply_to}: {e}"));
+            if let Err(te) = self.outbox.mark_gave_up(reply_to, reason) {
+                self.log.line(&format!("reply outbox: give-up marker not saved id={reply_to}: {te}"));
+            }
         }
         self.outbox_notify_pending(&pending).await
     }
@@ -478,14 +569,14 @@ impl Core {
 
     async fn outbox_resend(&mut self, mut it: OutboxItem) -> Resend {
         let now = self.now;
-        let mut res = self.relay.api("send", Some(it.request_body())).await;
+        let mut res = self.relay.api_with("send", Some(it.request_body()), REPLY_SEND_TIMEOUT).await;
         if let Err(e) = &res {
             if !it.attachment_ids.is_empty() && attach_gone(e) {
                 self.log.line(&format!("reply id={} attachments expired: resending without them", it.reply_to));
                 it.attachment_ids.clear();
                 it.body = format!("{}\n{ATTACH_GONE_TRAILER}", it.body);
                 self.outbox_update(&it);
-                res = self.relay.api("send", Some(it.request_body())).await;
+                res = self.relay.api_with("send", Some(it.request_body()), REPLY_SEND_TIMEOUT).await;
             }
         }
         match res {
@@ -625,6 +716,13 @@ impl Core {
     pub(crate) fn outbox_pending_notices(&self) -> usize {
         self.outbox.items.iter().filter(|i| i.gave_up.is_some()).count()
     }
+    /// 測試用：直接塞一筆待通知項（已放棄、只欠通知）
+    #[cfg(test)]
+    pub(crate) fn outbox_test_push_pending(&mut self, reply_to: &str, first_failed_at: u64, next_at: u64) {
+        let it = OutboxItem { client_id: crate::relay::new_client_id(), to_node: "W".into(), to_agent: "W-政策".into(), body: String::new(), reply_to: reply_to.into(), from_agent: "T-乙".into(), expects_reply: None, attachment_ids: vec![], first_failed_at, attempts: 0, next_at, gave_up: Some("網路一直不通".into()) };
+        self.outbox.items.push(it);
+        self.outbox.persist().unwrap();
+    }
     #[cfg(test)]
     pub(crate) fn outbox_mark_busy(&mut self, cid: &str) {
         self.outbox.busy.insert(cid.to_string());
@@ -651,6 +749,14 @@ mod tests {
         assert!(t("send HTTP 502") && t("send HTTP 503 gateway") && t("send HTTP 504"));
         assert!(t("send HTTP 408") && t("send HTTP 429 rate_limited") && t("send HTTP 500 internal"));
         assert!(!t("send HTTP 400 bad_attachment") && !t("send HTTP 422 not_receivable") && !t("send HTTP 404 not_found") && !t("send HTTP 501"));
+    }
+
+    #[test]
+    fn t1249_has_reply_待送項與待通知項都算() {
+        let mk = |rt: &str, gave: Option<&str>| OutboxItem { client_id: rt.into(), to_node: "W".into(), to_agent: "A".into(), body: "x".into(), reply_to: rt.into(), from_agent: "T".into(), expects_reply: None, attachment_ids: vec![], first_failed_at: 0, attempts: 0, next_at: 0, gave_up: gave.map(str::to_string) };
+        let ob = Outbox { items: vec![mk("live", None), mk("gone", Some("原因"))], ..Default::default() };
+        assert!(ob.has_reply("live") && ob.has_reply("gone") && !ob.has_reply("none"));
+        assert!(ob.has_gave_up("gone") && !ob.has_gave_up("live"));
     }
 
     #[test]
