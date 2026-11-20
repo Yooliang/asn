@@ -625,7 +625,8 @@ impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
         let held = HeldStore::load(&cfg.work_dir);
-        let (outbox, outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
+        let (mut outbox, mut outbox_logs, outbox_notify) = outbox::Outbox::load(&cfg.work_dir);
+        outbox.apply_tomb(now, &mut outbox_logs);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), claude_check: Self::default_claude_check(), elevated_check: crate::launch::integrity::real_checker(), awaiting_src: crate::launch::awaiting::real_source(), sync_dup_told: HashSet::new(), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
