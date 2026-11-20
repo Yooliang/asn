@@ -195,6 +195,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # 冒煙測試的長名字省略號、版面座標都要靠中文字型量；runner 映像沒有 CJK 字型時長名字不會被截斷、座標也會位移。
+      # 與演練 workflow 同一步（正式 run 44753597348 少了這一步，三個情境每個都等滿 6 秒才判失敗）：沒有才用共用的 apt-install.sh 補裝 Noto CJK，裝不起來就直接紅，不帶著缺字型往下跑
+      - name: 檢查中文字型
+        run: |
+          set -euo pipefail
+          # 不用 `fc-list | grep -q`：grep 提早結束時 fc-list 會被 SIGPIPE，pipefail 下會誤判成沒有字型
+          if [ -n "$(fc-list :lang=zh)" ]; then
+            echo "已有中文字型：$(fc-list :lang=zh | head -3)"
+          else
+            echo "runner 沒有中文字型，安裝 fonts-noto-cjk"
+            bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" --no-install-recommends fonts-noto-cjk
+            [ -n "$(fc-list :lang=zh)" ] || { echo "裝完仍然沒有中文字型" >&2; exit 1; }
+          fi
+
       - uses: ./.github/actions/asn-node-setup
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
