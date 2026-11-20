@@ -1,15 +1,11 @@
 {
-  "version": "0.2.39",
-  "notes": "- 修正：切換 Claude 帳號後會讀回確認，沒有真的換過去就直接說「切換沒有成功」；登入的帳號一變，「使用中」立刻跟上，讀不到時也會寫出讀不到。（#1880、#1927）\n- 修正（電腦版與 Linux）：開新夥伴的選項卡，較長的說明文字不再撐出畫面（手機版 0.2.38 已有）。（#1951）",
-  "pub_date": "2026-11-20T15:48:43.519Z",
+  "version": "0.2.40",
+  "notes": "- 改善：整點前後伺服器暫時忙碌時，讀信、讀名單這類只讀的動作會自動稍等再試，不再一下子就顯示讀不到。（#1778、#1932）",
+  "pub_date": "2026-11-20T17:22:51.424Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNiTnM5aWkyMldhSXlJS2JlanZyaWtEL0dlUDZnTkozTFBENC9vYWg3MklPVTJJZGlJak9PWjVwa1ZWS1E5czhQc3BIeWwwTXh4bnpBbklPOW0rMkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTg5NzIzCWZpbGU6QVNOXzAuMi4zOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjM5CjBQbFIraHZXdm1WOENGSGZLT29NTkZyMW9Fd0lxMXFuZHBNTTAxd1VOZ3pUdUcwVDJWd1R4SUhIekVmdXJXWWh6RHRoOG8zTzZyWmJNMldSbitMVUF3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.39_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVrcUJoVmZIaTErV3NrOFhTd3I2dDFEcUlZcW5BaDlmRXRhZFNIU0lPMTMwQk82VXcybE9kMW9meFJJMWc0Q2o3THhibVZpK0FlTk9pb09CcFVNa1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTkxMTA3CWZpbGU6QVNOXzAuMi4zOV9hbWQ2NC5BcHBJbWFnZQpNZ3NCbWhUcmMxRC8vNUJjUFZwTUhzRVIycE16T0V6RXJJVzNWbStZUXh1OG0xSlh0Y2FtUmFuK0dvSGZiOUxBbmlqV3kwRXQ0MDJxUG9jcFVzNGRDdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.39_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitUNHFURXlMRERrR1lBWmx4TmJoVGFMZGhkelBCb3NnVmFnWGlYK0ExcDZpVUhoL0hEV2hCdGloSklSOVhiTEtISjdxWWtKWFNrQ3psa1BnakZlV1FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk1MzcxCWZpbGU6QVNOXzAuMi40MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQwCml4NkkzVlNFMkw4Y0hMMWNsVWdOaHVJL1h0ekxrQjBMRDdvYmhkSmZ5OWZ1UVhIbTNSbG1ZOE0xRUxXNmlPQS8xTEVYK2VqOXIvYk05akhZeEFjZkFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.40_x64-setup.exe"
     }
   }
 }
