@@ -1,6 +1,6 @@
 // 發版結果通知文字（#1892 規格 2.3）：純函式，輸入 { guardResult, auto, results }，輸出 { level, text }。
 // results 以 job 代號為鍵，值為 success／failure／skipped／cancelled（缺的視為 skipped）。
-// 文字只放 job 中文名、版本、run 連結（都是常數或經格式驗證的值），絕不放 log 內容或錯誤原文：留言在公開 issue。
+// 文字只放 job 中文名、版本、本 repo 的 run／job 連結與固定的守門步驟名（都是常數或經格式驗證的值），絕不放 log 內容或錯誤原文：留言在公開 issue。
 // level：success（全部完成）、info（略過）、warning（部分完成或被中止）、error（失敗或異常）。
 
 export const JOBS = ['preflight-play', 'desktop', 'attest', 'site-draft', 'android-build', 'android-upload']
@@ -20,13 +20,19 @@ const NEEDS = {
 }
 
 // repo variable ASN_RELEASE_AUTO：只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都不是）
+// 守門失敗時能寫進公開留言的步驟名：只收這幾個固定的字串（不收呼叫端給的任意文字）
+export const GUARD_STEPS = ['標籤格式', '版本檔一致', '標籤在主分支上', '更新紀錄', '官網紀錄預檢', '發佈狀態', '同時有別的發版']
+
+// 連結只收本 repo 的 Actions 執行頁（run 或 job），不收查詢字串、片段與其他網域
+export const RUN_URL_RE = /^https:\/\/github\.com\/Yooliang\/asn\/actions\/runs\/[0-9]+(\/job\/[0-9]+)?$/
+
 export const autoEnabled = value => value === true || value === 'true'
 
 const names = list => list.map(j => JOB_NAME[j]).join('、')
 
 export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep } = {}) {
   const v = typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? `v${version}` : ''
-  const safeUrl = u => (typeof u === 'string' && /^https:\/\/[^\s]+$/.test(u) ? u : '')
+  const safeUrl = u => (typeof u === 'string' && RUN_URL_RE.test(u) ? u : '')
   const link = runUrl => (safeUrl(runUrl) ? `\nrun：${safeUrl(runUrl)}` : '')
   const jobLinks = jobs => jobs.filter(j => safeUrl(jobUrls[j])).map(j => `\n${JOB_NAME[j]}：${safeUrl(jobUrls[j])}`).join('')
   const done = j => (results[j] ?? 'skipped')
@@ -36,7 +42,7 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
 
   // 守門本身
   if (guardResult === 'failure') {
-    const step = typeof guardStep === 'string' && guardStep.length <= 40 && !/[\r\n]/.test(guardStep) ? `（卡在：${guardStep}）` : ''
+    const step = GUARD_STEPS.includes(guardStep) ?`（卡在：${guardStep}）` : ''
     return mk('error', `【發版未開始】${head}標籤檢查沒過${step}。沒有建置、沒有上傳`, ['guard'])
   }
   if (guardResult === 'cancelled') return mk('warning', `【發版中止】${head}run 被取消，已完成：無`)

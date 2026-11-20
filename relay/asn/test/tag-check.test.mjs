@@ -59,7 +59,7 @@ test('CRLF 的 Cargo.lock／Cargo.toml 也讀得到（本機 autocrlf）', () =>
 })
 
 test('標籤格式：四段、-rc、缺 v、大寫 V、多餘字元都失敗，不看檔案', () => {
-  for (const t of ['v0.2.37.1', 'v0.2.37-rc1', '0.2.37', 'V0.2.37', 'v0.2', 'v0.2.37 ', 'refs/tags/v0.2.37', '', undefined, null]) {
+  for (const t of ['v0.2.37.1', 'v0.2.37-rc1', 'v99999.0.0', 'v0.00000.1', '0.2.37', 'V0.2.37', 'v0.2', 'v0.2.37 ', 'refs/tags/v0.2.37', '', undefined, null]) {
     const r = run(t)
     assert.equal(r.ok, false, String(t))
     assert.equal(r.version, null)

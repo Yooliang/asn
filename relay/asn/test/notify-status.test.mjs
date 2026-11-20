@@ -1,7 +1,7 @@
 // tools/release/notify_status.mjs（#1892 規格 2.3）：2.3 表每一列一個案例，含混合優先序、skipped 分辨、auto=false 靠 guard.result 區分。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { JOBS, JOB_NAME, autoEnabled, notifyStatus } from '../../../tools/release/notify_status.mjs'
+import { JOBS, JOB_NAME, GUARD_STEPS, autoEnabled, notifyStatus } from '../../../tools/release/notify_status.mjs'
 
 const ok = Object.fromEntries(JOBS.map(j => [j, 'success']))
 const RUN = 'https://github.com/Yooliang/asn/actions/runs/1'
@@ -23,7 +23,7 @@ test('guard 失敗：發版未開始（auto 不影響，下游全 skipped 也一
   const b = notifyStatus({ guardResult: 'failure', auto: true, results: Object.fromEntries(JOBS.map(j => [j, 'skipped'])) })
   has(b, '【發版未開始】')
   lacks(b, '發版異常', '略過')
-  has(notifyStatus({ guardResult: 'failure', guardStep: 'Cargo.lock 版本' }), '卡在：Cargo.lock 版本')
+  has(notifyStatus({ guardResult: 'failure', guardStep: '版本檔一致' }), '卡在：版本檔一致')
 })
 
 test('guard 成功、auto=false：發版略過；與 guard 失敗靠 guardResult 區分', () => {
@@ -132,11 +132,11 @@ test('skipped 成因不明：上游都成功卻 skipped → 發版異常；上�
 test('文字只放中文名、版本、run 連結：錯誤原文與非 https 連結一律不收', () => {
   const x = notifyStatus({
     guardResult: 'success', auto: true, results: { ...ok, desktop: 'failure', attest: 'skipped' },
-    version: '0.2.37\nTOKEN=abc', runUrl: 'javascript:alert(1)', guardStep: 'x\nsecret', jobUrls: { desktop: 'https://github.com/o/r/actions/runs/1/job/2', attest: 'http://x' },
+    version: '0.2.37\nTOKEN=abc', runUrl: 'javascript:alert(1)', guardStep: 'x\nsecret', jobUrls: { desktop: 'https://github.com/Yooliang/asn/actions/runs/1/job/2', attest: 'http://x' },
     log: 'secret log text',
   })
   lacks(x, 'TOKEN', 'javascript', 'secret', 'log text')
-  has(x, 'https://github.com/o/r/actions/runs/1/job/2')
+  has(x, 'https://github.com/Yooliang/asn/actions/runs/1/job/2')
   assert.ok(!x.text.includes('v0.2.37'))
   // 每個 job 都有中文名
   for (const j of [...JOBS, 'guard']) assert.ok(JOB_NAME[j])
@@ -160,4 +160,20 @@ test('窮舉：每一種結果組合（4^6）都有 level 與非空文字，且 
   }
   walk(0, {})
   assert.equal(count, 4 ** 6)
+})
+
+test('#1926 一審：連結只收本 repo 的 Actions 執行頁；步驟名只收固定清單', () => {
+  const base = { guardResult: 'success', auto: true, results: { ...ok, desktop: 'failure', attest: 'skipped' } }
+  const bad = [
+    'https://github.com/other/repo/actions/runs/1/job/2', // 別的 repo
+    'https://evil.example/Yooliang/asn/actions/runs/1', // 別的網域
+    'https://github.com/Yooliang/asn/actions/runs/1?x=@someone', // 查詢字串
+    'https://github.com/Yooliang/asn/actions/runs/1#frag', // 片段
+    'https://github.com/Yooliang/asn/actions/runs/abc', // 不是數字
+    'https://github.com/Yooliang/asn/actions/runs/1/job/2/extra',
+  ]
+  for (const u of bad) lacks(notifyStatus({ ...base, runUrl: u, jobUrls: { desktop: u } }), 'github.com', 'evil', '@someone')
+  has(notifyStatus({ ...base, runUrl: 'https://github.com/Yooliang/asn/actions/runs/123' }), 'https://github.com/Yooliang/asn/actions/runs/123')
+  for (const s of ['@someone 看這裡', '[點我](https://x.example)', 'C:/Users/x', '版本檔不一致\n另一行', 'Cargo.lock 版本']) lacks(notifyStatus({ guardResult: 'failure', guardStep: s }), '卡在')
+  for (const s of GUARD_STEPS) has(notifyStatus({ guardResult: 'failure', guardStep: s }), '卡在：' + s)
 })

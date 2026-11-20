@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { changelogSections, sectionItems } from './site_record_check.mjs'
 
-export const TAG_RE = /^v[0-9]+\.[0-9]+\.[0-9]+$/
+export const TAG_RE = /^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/
 
 // Cargo.lock 裡 name = "asn" 那一段的版本；找不到或不只一段回 null
 export function cargoLockVersion(text) {
@@ -48,9 +48,6 @@ export function checkTag({ tag, files, git }) {
     if (v === null) problems.push(`讀不到 ${name} 的版本`)
     else if (v !== version) problems.push(`${name} 的版本是 ${v}，標籤是 ${version}`)
   }
-  // 四處彼此也要一致（即使標籤對得上其中幾處）
-  const set = new Set(Object.values(found).filter(v => v !== null))
-  if (set.size > 1 && problems.every(p => !p.includes('標籤是'))) problems.push('版本檔彼此不一致')
 
   const sec = changelogSections(files.changelog)[0]
   if (!sec) problems.push('CHANGELOG 沒有任何「## 版本（日期）」段落')
