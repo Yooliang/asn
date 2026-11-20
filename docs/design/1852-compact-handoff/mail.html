@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>#1852 設計稿</title>
+<link rel="stylesheet" href="../../../relay/asn/ui/style.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/group.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/skin-common.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/modern.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/line.css">
+<link rel="stylesheet" href="draft.css">
+<script>
+// 設計稿預覽用：網址帶 ?skin=aero、modern、line 換外觀（正式畫面是讀設定存的外觀）
+(function () { var s = new URLSearchParams(location.search).get("skin") || "aero"; document.documentElement.setAttribute("data-skin", s) })()
+</script>
+</head>
+<body class="draft">
+<div class="win draft-win"><div class="shell"><div class="pane panel-pane">
+<div class="list settings panel-set">
+<h2 class="panel-h">通知</h2>
+<h1 class="cap">一、自動交接時（額度夠）</h1>
+<div class="mailcard"><div class="from">ASN 通知</div><b>工作機：小悠 壓縮 3 次，已自動交接</b><p>「小悠」這次開窗後已壓縮 3 次，額度還夠，已經交給新視窗接手。</p><p>做了這些：查額度（5 小時剩 62%）、寫交接檔、開新視窗、關掉舊視窗。</p><p>新視窗的名字還是「小悠」，壓縮次數從 0 次算起。</p><small>不想自動交接：設定 → 視窗與系統匣，取消勾選「壓縮 3 次自動交接」。</small></div>
+<h1 class="cap">二之一、只提醒時（額度不夠）</h1>
+<div class="mailcard"><div class="from">ASN 通知</div><b>工作機：asn真 壓縮 3 次，請交接</b><p>「asn真」這次開窗後已壓縮 3 次，額度不夠（5 小時剩 8%），沒有自動交接。</p><p>做了這些：只寄這封信，沒有動那個視窗。</p><p>額度恢復後，到 設定 → 設備 → 工作機 → 工作管理員，按「交接」。</p></div>
+<h1 class="cap">二之二、只提醒時（讀不到額度）</h1>
+<div class="mailcard"><div class="from">ASN 通知</div><b>工作機：調查員 壓縮 4 次，請交接</b><p>「調查員」這次開窗後已壓縮 4 次，讀不到額度，沒有自動交接。</p><p>做了這些：只寄這封信，沒有動那個視窗。</p><p>到 設定 → 設備 → 工作機 → 工作管理員，按「交接」。</p></div>
+<h1 class="cap">二之三、只提醒時（取消了自動交接）</h1>
+<div class="mailcard"><div class="from">ASN 通知</div><b>工作機：小悠 壓縮 3 次，請交接</b><p>「小悠」這次開窗後已壓縮 3 次。你在設定裡取消了自動交接，所以只提醒。</p><p>到 設定 → 設備 → 工作機 → 工作管理員，按「交接」。</p></div>
+</div></div></div></div>
+</body>
+</html>

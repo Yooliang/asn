@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>#1852 設計稿</title>
+<link rel="stylesheet" href="../../../relay/asn/ui/style.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/group.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/skin-common.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/modern.css">
+<link rel="stylesheet" href="../../../relay/asn/ui/line.css">
+<link rel="stylesheet" href="draft.css">
+<script>
+// 設計稿預覽用：網址帶 ?skin=aero、modern、line 換外觀（正式畫面是讀設定存的外觀）
+(function () { var s = new URLSearchParams(location.search).get("skin") || "aero"; document.documentElement.setAttribute("data-skin", s) })()
+</script>
+</head>
+<body class="draft">
+<div class="win draft-win"><div class="shell"><div class="pane panel-pane">
+<div class="list settings panel-set">
+<h2 class="panel-h">設定：設備</h2>
+<section class="dv-dev" aria-label="工作機">
+  <div class="dv-dev-h">
+    <button class="aero-btn dv-back" type="button" aria-label="返回">‹</button>
+    <h3 class="dv-name">工作機</h3>
+    <span class="dv-tag on">在線</span>
+    <span class="dv-tag me">這台</span>
+  </div>
+  <div class="dv-tabs" role="group" aria-label="這台設備的內容">
+    <button class="aero-btn dv-tasks" type="button" aria-pressed="true">工作管理員</button>
+    <button class="aero-btn" type="button" aria-pressed="false">詳情</button>
+    <button class="aero-btn" type="button" aria-pressed="false">帳號</button>
+  </div>
+  <div class="tm">
+    <div class="tm-bar"><b class="tm-sum">這台電腦上 ASN 管的程式共 7 個</b><span class="tm-auto">每 5 秒自動更新</span></div>
+    <div class="tm-scroll"><table class="tm-table">
+      <thead><tr><th scope="col">名字</th><th scope="col">引擎</th><th scope="col">程序編號</th><th scope="col">記憶體</th><th scope="col">開了多久</th><th scope="col">狀態</th><th scope="col">壓縮次數</th><th scope="col">來源</th><th scope="col">操作</th></tr></thead>
+      <tbody>
+        <tr data-kind="partner"><td class="tm-name"><b>小東</b></td><td>Claude</td><td>11204</td><td>612 MB</td><td>12 分鐘</td><td>忙碌</td><td class="cmp">0 次</td><td>ASN 開的</td><td class="tm-act"><button class="aero-btn tm-stop" type="button">停止</button></td></tr>
+        <tr data-kind="partner"><td class="tm-name"><b>小悠</b></td><td>Claude</td><td>12880</td><td>1.1 GB</td><td>3 小時 12 分</td><td>忙碌</td><td class="cmp">2 次</td><td>ASN 開的</td><td class="tm-act"><button class="aero-btn tm-stop" type="button">停止</button></td></tr>
+        <tr data-kind="partner"><td class="tm-name"><b>西川</b></td><td>Claude</td><td>9316</td><td>1.3 GB</td><td>5 小時 40 分</td><td>忙碌</td><td class="cmp">3 次 <span class="tm-tag cmp-go">交接中</span><small class="cmp-note">額度夠，正在交給新視窗</small></td><td>ASN 開的</td><td class="tm-act"><small class="tm-why">交接完成前不能停止</small></td></tr>
+        <tr data-kind="partner"><td class="tm-name"><b>asn真</b></td><td>Claude</td><td>14012</td><td>1.2 GB</td><td>4 小時 05 分</td><td>閒置</td><td class="cmp">3 次 <span class="tm-tag cmp-warn">請交接</span><small class="cmp-note">額度不夠，只提醒</small></td><td>ASN 開的</td><td class="tm-act"><button class="aero-btn tm-stop" type="button">停止</button> <button class="aero-btn" type="button">交接</button></td></tr>
+        <tr data-kind="partner"><td class="tm-name"><b>調查員</b></td><td>Claude</td><td>10544</td><td>980 MB</td><td>2 小時 31 分</td><td>閒置</td><td class="cmp">4 次 <span class="tm-tag cmp-warn">請交接</span><small class="cmp-note">讀不到額度，只提醒</small></td><td>ASN 開的</td><td class="tm-act"><button class="aero-btn tm-stop" type="button">停止</button> <button class="aero-btn" type="button">交接</button></td></tr>
+        <tr data-kind="partner"><td class="tm-name"><b>小文</b></td><td>pi</td><td>8870</td><td>240 MB</td><td>1 小時 02 分</td><td>閒置</td><td class="cmp">—</td><td>ASN 開的</td><td class="tm-act"><button class="aero-btn tm-stop" type="button">停止</button></td></tr>
+        <tr class="view" data-kind="asn"><td class="tm-name"><b>ASN</b></td><td>ASN</td><td>7720</td><td>180 MB</td><td>1 天 2 小時</td><td>執行中</td><td class="cmp">—</td><td>本體</td><td class="tm-act"><small class="tm-viewonly">只能看</small></td></tr>
+      </tbody>
+    </table></div>
+    <small class="tm-hint">壓縮次數只算這次開視窗之後；交接成功重開的新視窗從 0 次算起。不是 Claude 的視窗顯示「—」。</small>
+  </div>
+</section>
+</div></div></div></div>
+</body>
+</html>
